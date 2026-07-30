@@ -1411,7 +1411,7 @@ fn _spawn_with_env_impl(argv: string[], env_flat: string[], cwd: *u8) -> i64 ![i
 }
 
 // Plain `process.spawn_with_env`: the 2-arg form `compiler/src` (the
-// parallel test pool in `cli/commands/test.sfn`) and other callers use.
+// parallel test pool in `cli/commands/test/pool.sfn`) and other callers use.
 // Its arity must stay stable for self-hosting — the pinned seed emits
 // 2-arg calls to this symbol — so the per-child cwd lives in the `_cwd`
 // variant below, never by widening this signature. Inherits the parent

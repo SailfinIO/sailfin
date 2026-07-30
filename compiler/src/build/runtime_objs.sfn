@@ -469,7 +469,7 @@ fn _runtime_stamp_value(objdir: string, entry: string) -> string ![io] {
     return value;
 }
 
-// Exported for `_test_bin_runtime_identity` (cli/commands/test.sfn):
+// Exported for `_test_bin_runtime_identity` (cli/commands/test/cache_scratch.sfn):
 // the stamped invocation-wide runtime identity, or "" when the stamp
 // does not validate for this child.
 fn runtime_stamp_identity(objdir: string) -> string ![io] {
@@ -620,7 +620,7 @@ fn _runtime_emit_child_env() -> string[] ![io] {
 }
 
 // True when `entry` ("KEY=VALUE" or a bare "KEY") names exactly `key`.
-// Mirrors `cli/commands/test.sfn::_env_entry_has_key`; a private copy
+// Mirrors `cli/commands/test/exec.sfn::_env_entry_has_key`; a private copy
 // keeps this build-driver module self-contained (the two share no
 // env-utility module).
 fn _runtime_env_entry_has_key(entry: string, key: string) -> boolean {
@@ -638,7 +638,7 @@ fn _runtime_env_entry_has_key(entry: string, key: string) -> boolean {
 // re-printed to preserve that visibility. `print` / `print.err` append
 // a newline, so one trailing newline is stripped for a byte-faithful
 // round-trip; an empty capture prints nothing. Mirrors
-// `cli/commands/test.sfn::_emit_captured_stream`.
+// `cli/commands/test/exec.sfn::_emit_captured_stream`.
 fn _runtime_emit_captured_stream(text: string, to_stderr: boolean) -> void ![io] {
     if text.length == 0 { return; }
     let mut out = text;

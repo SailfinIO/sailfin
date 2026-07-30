@@ -8,7 +8,7 @@
 // `SFTR` record channel as an `assert`-kind record on the compiled test
 // binary's stderr — the runner reconstructs an `AssertFailure` from the
 // first such record (`_assert_failure_from_record` in
-// `compiler/src/cli/commands/test.sfn`), the exact analog of the retired
+// `compiler/src/cli/commands/test/exec.sfn`), the exact analog of the retired
 // `fail.bin` `SFAF` first record. The former newline-delimited `SFAF`
 // file parser (`_parse_assert_failure_record` + its `_af_*` helpers) is
 // retired with that file side-channel; the struct stays as the shared

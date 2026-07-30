@@ -367,7 +367,7 @@ fn _cr_emit_captured_stream(text: string, to_stderr: boolean) -> void ![io] {
 // POSIX demuxes with `io.poll_any` over the two fds; Windows has no fd
 // projection for a HANDLE and no `poll(2)` over pipes, so it drives the
 // framed reads, each of which pumps BOTH pipes so neither stream can wedge
-// the other. Same split `cli/commands/test.sfn::_reap_test_child` carries.
+// the other. Same split `cli/commands/test/pool.sfn::_reap_test_child` carries.
 fn _cr_reap_emit_child(handle: int) -> int ![io] {
     // `spawn_with_env` reports failure as handle 0 — nothing to drain or
     // reap. 127 is the same "could not execute" code the serial branch's
@@ -407,7 +407,7 @@ fn _cr_reap_emit_child(handle: int) -> int ![io] {
                 // still-live child here would instead have it die of
                 // SIGPIPE and report 141 for what may have been a healthy
                 // emit, or block `waitpid` behind output nothing will
-                // drain. `cli/commands/test.sfn`'s pool escapes its own
+                // drain. `cli/commands/test/pool.sfn`'s pool escapes its own
                 // deadline the same way.
                 poll_failures += 1;
                 if poll_failures > 64 {
@@ -446,7 +446,7 @@ fn _cr_reap_emit_child(handle: int) -> int ![io] {
 // host. It is deadlock-free by construction: the head child is always
 // drained to EOF, so it always terminates and the window always advances,
 // even when peers are parked on a full pipe buffer. Same shape
-// `cli/commands/test.sfn` runs its job pool with.
+// `cli/commands/test/pool.sfn` runs its job pool with.
 fn _cr_emit_pool_round(tasks: ParallelEmitTask[], mode: string, sailfin_exe: string, jobs: int, import_context_root: string, child_env: string[]) -> ParallelEmitTask[] ![io] {
     // `native` staging emits `.sfn-asm`, which does not round-trip through
     // `llvm-as`; only `llvm` output is validated. Same split the retired
