@@ -20,7 +20,7 @@ import {
     _sha256_of_file_cmd,
     _strip_trailing_slashes_cmd
 } from "../../src/build/fs";
-import { _collect_test_files_cmd, _suite_name_from_path } from "../../src/cli/commands/test";
+import { _collect_test_files_cmd, _suite_name_from_path } from "../../src/cli/commands/test/mod";
 
 test "path-norm: bare directory unchanged" {
     assert _strip_trailing_slashes_cmd("compiler/src") == "compiler/src";

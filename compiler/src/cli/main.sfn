@@ -64,7 +64,7 @@ import { command_def as package_command_def, run as package_run } from "./comman
 import { command_def as publish_command_def, run as publish_run } from "./commands/publish";
 import { command_def as run_command_def, run as run_run } from "./commands/run";
 import { command_def as symbols_command_def, run as symbols_run } from "./commands/symbols";
-import { command_def as test_command_def, run as test_run } from "./commands/test";
+import { command_def as test_command_def, run as test_run } from "./commands/test/mod";
 import { command_def as toolchain_command_def, run as toolchain_run } from "./commands/toolchain";
 import { command_def as version_command_def, run as version_run } from "./commands/version";
 import { CliContext, driver_prefix_length, parse_driver_prefix } from "./context";

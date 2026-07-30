@@ -44,7 +44,7 @@ import {
     _shard_keeps_index,
     command_def as test_command_def,
     run as test_run
-} from "./test";
+} from "./test/mod";
 
 // A named CI shard: the test roots it discovers and the file-count-balanced
 // stride it keeps. `total == 0` means "no stride — run every file under
