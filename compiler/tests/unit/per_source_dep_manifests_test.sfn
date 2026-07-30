@@ -6,42 +6,10 @@
 // capsule changing busts only the modules that transitively import
 // it — a 10-100× cache-hit-rate improvement on incremental builds.
 //
-// Helpers are inline-duplicated (mirroring
-// `relative_import_resolver_test.sfn`) because importing from
-// `capsule_resolver.sfn` pulls in the whole compiler via `./main`,
-// which trips the seed's per-module timeout. If either copy
-// drifts, this test catches the divergence.
-// -- Inline copies of the pure helpers from
-//    `compiler/src/capsule_resolver.sfn` (must stay in sync).
-fn _cr_string_in_array(arr: string[], needle: string) -> boolean {
-    let mut i: int = 0;
-    loop {
-        if i >= arr.length { break; }
-        if strings_equal(arr[i], needle) { return true; }
-        i += 1;
-    }
-    return false;
-}
-
-fn _cr_scope_name_prefix(spec: string) -> string {
-    let mut slash_count: int = 0;
-    let mut second_slash: int = -1;
-    let mut i: int = 0;
-    loop {
-        if i >= spec.length { break; }
-        if substring(spec, i, i + 1) == "/" {
-            slash_count += 1;
-            if slash_count == 2 {
-                second_slash = i;
-                break;
-            }
-        }
-        i += 1;
-    }
-    if slash_count == 0 { return ""; }
-    if second_slash < 0 { return spec; }
-    return substring(spec, 0, second_slash);
-}
+// The resolver decomposition keeps both defining modules within the standalone
+// unit-test timeout, so these tests exercise the production helpers directly.
+import { _cr_string_in_array } from "../../src/capsule_resolver/paths";
+import { _cr_scope_name_prefix } from "../../src/capsule_resolver/staging";
 
 // -- Tests --
 test "scope_name_prefix: simple scope/name returns full spec" {

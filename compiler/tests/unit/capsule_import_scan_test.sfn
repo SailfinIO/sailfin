@@ -3,9 +3,9 @@
 // capsule_resolver.sfn to cut that module's LLVM-lowering peak RSS. This test
 // imports the *real* public functions from their new home and asserts they
 // still resolve and behave — so a future move (or a dropped re-export) can't
-// silently break the scanner contract. Behavior parity with the in-resolver
-// versions is otherwise covered by relative_import_resolver_test.sfn (which
-// keeps its own local copy) and the resolver e2e tests.
+// silently break the scanner contract. Behavior parity with resolver consumers
+// is covered by relative_import_resolver_test.sfn, which imports the production
+// scanners, and the resolver e2e tests.
 import { collect_relative_import_specs, collect_scoped_import_specs } from "../../src/capsule_import_scan";
 import { strings_equal } from "../../src/string_utils";
 
