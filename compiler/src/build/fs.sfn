@@ -412,7 +412,21 @@ fn _strip_trailing_slashes_cmd(path: string) -> string {
 
 fn _collect_sfn_files_cmd(root: string, max_depth: int) -> string[] ![io] {
     let mut results: string[] = [];
-    if _ends_with_cmd(root, ".sfn") { return [root]; }
+    // Single-file fast path — but only for a file that is actually there.
+    // Returning a non-existent `.sfn` argument as a collected file made
+    // `sfn fmt --write absent.sfn` mint a 0-byte stub and exit 0; because
+    // module resolution probes `foo.sfn` before falling back to a `foo/`
+    // directory, that stub silently shadows the folder that replaced a
+    // split-up flat module (SFN-643). The directory walk below already
+    // tolerates a missing path; this makes the two legs agree.
+    //
+    // The helper only filters — reporting the missing path is the
+    // caller's job, so that dropping it never reads as "your typo was
+    // quietly ignored". See `cli/commands/fmt.sfn` and `check/engine.sfn`.
+    if _ends_with_cmd(root, ".sfn") {
+        if !fs.exists(root) { return results; }
+        return [root];
+    }
     let root_norm: string = _strip_trailing_slashes_cmd(root);
     let mut queue: string[] = [root_norm];
     let mut depth: int = 0;

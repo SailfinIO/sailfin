@@ -15,8 +15,12 @@
 // collection (`_collect_sfn_files_cmd`, depth 10), the same three modes
 // (check / write / stdout), and every message and exit code:
 //   - 0 — formatted (write/stdout), or check found nothing to change.
-//   - 1 — `--check`/`--write` together, no paths given, no `.sfn` files
-//         found, or `--check` found files that would change.
+//   - 1 — `--check`/`--write` together, no paths given, a path that does
+//         not exist, no `.sfn` files found, or `--check` found files that
+//         would change.
+// The missing-path leg is the one deliberate divergence from the legacy
+// handler, which formatted a non-existent `.sfn` argument as if it were
+// empty and let `--write` create it (SFN-643).
 // The no-path usage message returns 1 (not the parser's exit-2): the
 // variadic positional accepts zero tokens, so a bare `sfn fmt` parses ok
 // and reaches `run`, which prints the usage line and returns 1 — matching
@@ -54,9 +58,9 @@ fn command_def() -> Command {
     return with_arg(with_flag(with_flag(command("fmt", "Format Sailfin source files"), flag("check", "Exit non-zero if any file would change; print the paths")), flag("write", "Rewrite files in place")), arg_variadic("path", "Files or directories to format"));
 }
 
-// Format the `.sfn` files collected from `[path...]`. Byte-identical to
-// the legacy `fmt` command-handler body. `ctx` is part of the per-command
-// contract but unused here.
+// Format the `.sfn` files collected from `[path...]`. Mirrors the legacy
+// `fmt` command-handler body apart from the missing-path guard noted
+// above. `ctx` is part of the per-command contract but unused here.
 fn run(matches: Matches, ctx: CliContext) -> int ![io] {
     let check_mode: boolean = has_flag(matches, "check");
     let write_mode: boolean = has_flag(matches, "write");
@@ -73,6 +77,28 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io] {
         print("usage: sfn fmt [--check] [--write] <path...>");
         return 1;
     }
+
+    // Every path must exist before anything is formatted. `--write` is
+    // destructive and this command is all-or-nothing: a typo'd or deleted
+    // path fails the whole invocation rather than half-formatting the
+    // rest, so `sfn fmt --write real.sfn absent.sfn` leaves the tree
+    // untouched. Reporting every missing path (not just the first) keeps
+    // the common `sfn fmt --write $(git diff --name-only HEAD | grep
+    // '\.sfn$')` case — which includes deleted paths — diagnosable in one
+    // run. `_collect_sfn_files_cmd` drops a non-existent `.sfn` path
+    // silently, so without this the only symptom would be a misleading
+    // `no .sfn files found` (SFN-643).
+    let mut missing = 0;
+    let mut mi = 0;
+    loop {
+        if mi >= paths.length { break; }
+        if !fs.exists(paths[mi]) {
+            print("error: path not found: " + paths[mi]);
+            missing += 1;
+        }
+        mi += 1;
+    }
+    if missing > 0 { return 1; }
 
     // Collect .sfn files from all paths
     let mut files: string[] = [];

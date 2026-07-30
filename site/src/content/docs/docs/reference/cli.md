@@ -131,6 +131,8 @@ sfn fmt --check <path...>      # exit 1 if any file would change (CI mode)
 
 Paths can be individual `.sfn` files or directories. When given a directory, `sfn fmt` recursively discovers all `.sfn` files (up to 10 levels deep).
 
+Every path must exist. If any does not, `sfn fmt` prints `error: path not found: <path>` for each missing one and exits 1 **without formatting anything** — including the paths that do exist, so a mixed invocation is all-or-nothing and never leaves the tree half-formatted. `sfn fmt` never creates a file that was not already there.
+
 **Examples:**
 
 ```bash

@@ -1,0 +1,55 @@
+// Unit test for the `_collect_sfn_files_cmd` single-file fast-path
+// existence check (SFN-643). Before the fix, a non-existent `.sfn`
+// argument still collected as a 1-element array containing the literal
+// path — `sfn fmt --write absent.sfn` then read it as empty source and
+// minted a 0-byte stub, silently shadowing a `foo/` directory that had
+// replaced a split-up flat module `foo.sfn`. The fix adds an
+// `fs.exists` gate on that fast path alone; the directory-walk leg
+// already tolerated a missing entry, so these tests pin both legs
+// agreeing and confirm the gate does not over-fire on real, including
+// empty, files.
+import { _collect_sfn_files_cmd } from "../../src/build/fs";
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    dir = dir + "/sfn-fmt-missing-unit";
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+test "fmt-missing-path: absent .sfn file collects nothing" ![io] {
+    let dir = _scratch_dir();
+    let absent = dir + "/does-not-exist.sfn";
+    if fs.exists(absent) { fs.deleteFile(absent); }
+    let collected = _collect_sfn_files_cmd(absent, 10);
+    assert collected.length == 0;
+}
+
+test "fmt-missing-path: real .sfn file is still collected" ![io] {
+    let dir = _scratch_dir();
+    let path = dir + "/real.sfn";
+    fs.writeFile(path, "fn main() ![io] { print(\"hi\"); }\n");
+    let collected = _collect_sfn_files_cmd(path, 10);
+    assert collected.length == 1;
+    assert collected[0] == path;
+}
+
+test "fmt-missing-path: empty existing .sfn file is still collected" ![io] {
+    let dir = _scratch_dir();
+    let path = dir + "/empty.sfn";
+    fs.writeFile(path, "");
+    let collected = _collect_sfn_files_cmd(path, 10);
+    assert collected.length == 1;
+    assert collected[0] == path;
+}
+
+test "fmt-missing-path: directory containing one file still collects it" ![io] {
+    let dir = _scratch_dir() + "/subdir";
+    fs.createDirectory(dir, true);
+    let path = dir + "/only.sfn";
+    fs.writeFile(path, "fn main() ![io] { print(\"hi\"); }\n");
+    let collected = _collect_sfn_files_cmd(dir, 10);
+    assert collected.length == 1;
+    assert collected[0] == path;
+}
