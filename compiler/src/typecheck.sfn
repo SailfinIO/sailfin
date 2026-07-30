@@ -62,7 +62,6 @@ import {
     find_symbol,
     future_element_kind,
     has_symbol,
-    is_builtin_call_name,
     is_function_kind,
     make_array_arithmetic_diagnostic,
     make_await_non_future_diagnostic,
@@ -104,6 +103,7 @@ import {
     type_is_result,
     type_parameter_names
 } from "./typecheck_types";
+import { is_builtin_call_name } from "./typecheck_types/extern_abi";
 import { is_identifier_char, token_from_name } from "./typecheck_types/text_utils";
 
 fn typecheck_diagnostics(program: Program) -> Diagnostic[] {

@@ -18,7 +18,7 @@
 // library helper flagged by the #616 audit as missing from the
 // pre-existing inline list, deliberately kept out of the envelope so
 // user code can shadow it).
-import { is_builtin_call_name } from "../../src/typecheck_types";
+import { is_builtin_call_name } from "../../src/typecheck_types/extern_abi";
 
 test "builtin allowlist: print is in envelope" {
     assert is_builtin_call_name("print") == true;
