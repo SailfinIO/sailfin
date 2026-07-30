@@ -1,0 +1,407 @@
+// compiler/src/parser/expressions/lambdas.sfn
+//
+// Block-bodied and expression-bodied lambda parsing.
+import {
+    Block,
+    Capture,
+    Expression,
+    Parameter,
+    TypeAnnotation
+} from "../../ast";
+import { strings_equal } from "../../string_utils";
+import { Token, TokenKind } from "../../token";
+import { parse_block } from "../statements";
+import {
+    append_token,
+    collect_type_annotation_until,
+    identifier_matches,
+    identifier_text,
+    source_span_from_tokens,
+    symbol_matches,
+    token_slice,
+    tokens_to_text
+} from "../token_utils";
+import {
+    ExpressionParseResult,
+    ExpressionTokens,
+    LambdaParameterListParseResult,
+    LambdaParameterParseResult,
+    Parser
+} from "../types";
+import { trim_text } from "../utils";
+import {
+    collect_expression_block,
+    expression_from_tokens,
+    expression_parse_failure,
+    expression_tokens_advance,
+    expression_tokens_collect_until,
+    expression_tokens_consume_type_separator,
+    expression_tokens_is_at_end,
+    expression_tokens_peek,
+    parse_expression_bp
+} from "./mod";
+import { append_parameter } from "./normalize";
+
+// ============================================================================
+// Lambda Expressions
+// ============================================================================
+// Desugar an expression-bodied lambda (`fn(...) => expr`, SFEP-0029) into
+// the same structured `{ return <expr>; }` block the block form produces.
+// Synthesizing the block tokens and running them through `parse_block` (the
+// exact path the block form uses) gives the resulting `Block` real
+// `statements`, `tokens`, and `text`, so every downstream pass sees a normal
+// single-`return` block. The synthetic `{`, `return`, `;`, `}` tokens borrow
+// the `=>` arrow's line/column: capture inference (`typecheck_captures`) and
+// closure lowering (`lambda_lowering._find_capture_record`) both key a
+// lambda's captures off `body.tokens[0]`'s (line, column), so an all-zero
+// position would collide across multiple short-form lambdas in one file.
+fn desugar_expr_lambda_body(body_tokens: Token[], arrow: Token) -> Block {
+    let line = arrow.line;
+    let column = arrow.column;
+    let mut block_tokens: Token[] = [];
+    block_tokens = append_token(block_tokens, Token {
+        kind: TokenKind.Symbol(), lexeme: "{", line: line, column: column
+    });
+    block_tokens = append_token(block_tokens, Token {
+        kind: TokenKind.Identifier(), lexeme: "return", line: line, column: column
+    });
+    let mut index: int = 0;
+    loop {
+        if index >= body_tokens.length { break; }
+        block_tokens = append_token(block_tokens, body_tokens[index]);
+        index += 1;
+    }
+    block_tokens = append_token(block_tokens, Token {
+        kind: TokenKind.Symbol(), lexeme: ";", line: line, column: column
+    });
+    block_tokens = append_token(block_tokens, Token {
+        kind: TokenKind.Symbol(), lexeme: "}", line: line, column: column
+    });
+    block_tokens = append_token(block_tokens, Token {
+        kind: TokenKind.EndOfFile(), lexeme: "", line: line, column: column
+    });
+    let block_parser = Parser { tokens: block_tokens, index: 0 };
+    let parsed = parse_block(block_parser);
+    return parsed.block;
+}
+
+fn parse_lambda_expression(state: ExpressionTokens) -> ExpressionParseResult {
+    let mut current = state;
+    if expression_tokens_is_at_end(current) {
+        return expression_parse_failure(state);
+    }
+    let token = expression_tokens_peek(current);
+    let mut _if404: boolean = false;
+    if token.kind.variant != "Identifier" { _if404 = true; }
+    if !identifier_matches(token, "fn") { _if404 = true; }
+    if _if404 { return expression_parse_failure(state); }
+
+    current = expression_tokens_advance(current);
+    if expression_tokens_is_at_end(current) {
+        return expression_parse_failure(state);
+    }
+    let open_paren = expression_tokens_peek(current);
+    if !symbol_matches(open_paren, "(") {
+        return expression_parse_failure(state);
+    }
+
+    current = expression_tokens_advance(current);
+    let params_result = parse_lambda_parameter_list(current);
+    if !params_result.success { return expression_parse_failure(state); }
+    current = params_result.state;
+    let parameters = params_result.parameters;
+
+    let mut return_type: TypeAnnotation? = null;
+    if !expression_tokens_is_at_end(current) {
+        let sep_result = expression_tokens_consume_type_separator(current, false, true);
+        if sep_result.found {
+            current = sep_result.state;
+            // Capture the return type with the real type parser
+            // (`collect_type_annotation_until`) instead of a flat
+            // collect-until. It balances nested generics — including the
+            // glued `>>` shift token in `Map<K, Result<T, E>>` — and stops
+            // only at a top-level effect marker `!`, block body `{`, or
+            // expr body `=>`. The earlier flat capture stopping at `!`/`{`
+            // was a point fix for #1546 (a trailing `![io]` folded into the
+            // return-type text as `int ![io]`, defeating the future-kind
+            // classifier); routing through the canonical type capture
+            // retires that whole bug class (SFEP-0029 §2.1, §5).
+            let type_parser = Parser {
+                tokens: current.tokens,
+                index: current.index
+            };
+            let capture = collect_type_annotation_until(type_parser, ["!", "{", "=>"]);
+            let type_text = trim_text(tokens_to_text(capture.tokens));
+            if type_text.length > 0 {
+                return_type = TypeAnnotation { text: type_text };
+            }
+            current = ExpressionTokens {
+                tokens: current.tokens,
+                index: capture.parser.index
+            };
+        }
+    }
+
+    // Consume an optional effect annotation `![...]` sitting between the
+    // (optional) return type and the body so the body dispatch below starts
+    // at `{` or `=>`. This runs whether or not a return-type separator was
+    // consumed: `fn() ![io] { ... }` (no return type) is as valid a lambda as
+    // `fn() -> T ![io] { ... }`. Keeping the skip nested inside the
+    // return-type branch left `current` parked on `!` for the no-return-type
+    // form, degrading it to `Expression.Raw` and tripping `E0818` (#2430).
+    // The lambda effect set is not yet tracked on the AST node, so the tokens
+    // are discarded (status quo) — only the return-type text is corrected
+    // above.
+    if !expression_tokens_is_at_end(current) {
+        let after_type = expression_tokens_peek(current);
+        if after_type.kind.variant == "Symbol" {
+            if strings_equal(after_type.lexeme, "!") {
+                let effect_capture = expression_tokens_collect_until(current, ["{", "=>"]);
+                if !effect_capture.success {
+                    return expression_parse_failure(state);
+                }
+                current = effect_capture.state;
+            }
+        }
+    }
+
+    if expression_tokens_is_at_end(current) {
+        return expression_parse_failure(state);
+    }
+
+    // Dispatch on the body lead-in. SFEP-0029 adds the additive
+    // expression-bodied short form `fn(...) => expr` alongside the block
+    // form `fn(...) { ... }`. Both yield an `Expression.Lambda` whose
+    // `body` is a structured `Block`; the expr form desugars to a single-
+    // `return` block *here*, before any downstream pass (typecheck,
+    // effects, emit, lowering) sees it, so those passes are unchanged.
+    let mut body: Block = Block { tokens: [], text: "", statements: [] };
+    let lead = expression_tokens_peek(current);
+    if symbol_matches(lead, "=>") {
+        let arrow = lead;
+        current = expression_tokens_advance(current);
+        if expression_tokens_is_at_end(current) {
+            return expression_parse_failure(state);
+        }
+        let body_start = current.index;
+        let body_result = parse_expression_bp(current, 0);
+        if !body_result.success { return expression_parse_failure(state); }
+        current = body_result.state;
+        let body_tokens = token_slice(state.tokens, body_start, current.index);
+        body = desugar_expr_lambda_body(body_tokens, arrow);
+    } else {
+        let block_result = collect_expression_block(current);
+        if !block_result.success { return expression_parse_failure(state); }
+        current = block_result.state;
+
+        let mut block_tokens = block_result.tokens;
+        block_tokens = append_token(block_tokens, Token {
+            kind: TokenKind.EndOfFile(), lexeme: "", line: 0, column: 0
+        });
+        let block_parser = Parser { tokens: block_tokens, index: 0 };
+        let parsed_block = parse_block(block_parser);
+        body = parsed_block.block;
+    }
+
+    let empty_captures: Capture[] = [];
+    return ExpressionParseResult {
+        state: current,
+        expression: Expression.Lambda {
+            parameters: parameters,
+            body: body,
+            return_type: return_type,
+            captures: empty_captures
+        },
+        success: true
+    };
+}
+
+fn parse_lambda_parameter(state: ExpressionTokens) -> LambdaParameterParseResult {
+    let mut current = state;
+    if expression_tokens_is_at_end(current) {
+        return LambdaParameterParseResult {
+            state: current,
+            parameter: Parameter {
+                name: "",
+                type_annotation: null,
+                default_value: null,
+                mutable: false,
+                span: null
+            },
+            success: false
+        };
+    }
+
+    let start_index = current.index;
+    let mut is_mutable = false;
+    let token = expression_tokens_peek(current);
+    if token.kind.variant == "Identifier" {
+        if identifier_matches(token, "mut") {
+            is_mutable = true;
+            current = expression_tokens_advance(current);
+            if expression_tokens_is_at_end(current) {
+                return LambdaParameterParseResult {
+                    state: current,
+                    parameter: Parameter {
+                        name: "",
+                        type_annotation: null,
+                        default_value: null,
+                        mutable: false,
+                        span: null
+                    },
+                    success: false
+                };
+            }
+        }
+    }
+
+    let name_token = expression_tokens_peek(current);
+    if name_token.kind.variant != "Identifier" {
+        return LambdaParameterParseResult {
+            state: current,
+            parameter: Parameter {
+                name: "",
+                type_annotation: null,
+                default_value: null,
+                mutable: false,
+                span: null
+            },
+            success: false
+        };
+    }
+    let name = identifier_text(name_token);
+    current = expression_tokens_advance(current);
+
+    let mut type_annotation: TypeAnnotation? = null;
+    if !expression_tokens_is_at_end(current) {
+        let sep_result = expression_tokens_consume_type_separator(current, true, false);
+        if sep_result.found {
+            current = sep_result.state;
+            let capture = expression_tokens_collect_until(current, ["=", ",", ")"]);
+            if !capture.success {
+                return LambdaParameterParseResult {
+                    state: current,
+                    parameter: Parameter {
+                        name: name,
+                        type_annotation: null,
+                        default_value: null,
+                        mutable: is_mutable,
+                        span: null
+                    },
+                    success: false
+                };
+            }
+            let type_text = trim_text(tokens_to_text(capture.tokens));
+            if type_text.length > 0 {
+                type_annotation = TypeAnnotation { text: type_text };
+            }
+            current = capture.state;
+        }
+    }
+
+    let mut default_value: Expression? = null;
+    if !expression_tokens_is_at_end(current) {
+        let assign = expression_tokens_peek(current);
+        if symbol_matches(assign, "=") {
+            current = expression_tokens_advance(current);
+            let capture = expression_tokens_collect_until(current, [",", ")"]);
+            if !capture.success {
+                return LambdaParameterParseResult {
+                    state: current,
+                    parameter: Parameter {
+                        name: name,
+                        type_annotation: type_annotation,
+                        default_value: null,
+                        mutable: is_mutable,
+                        span: null
+                    },
+                    success: false
+                };
+            }
+            default_value = expression_from_tokens(capture.tokens);
+            current = capture.state;
+        }
+    }
+
+    let parameter_tokens = token_slice(state.tokens, start_index, current.index);
+    let span = source_span_from_tokens(parameter_tokens);
+
+    let parameter = Parameter {
+        name: name,
+        type_annotation: type_annotation,
+        default_value: default_value,
+        mutable: is_mutable,
+        span: span
+    };
+
+    return LambdaParameterParseResult {
+        state: current,
+        parameter: parameter,
+        success: true
+    };
+}
+
+fn parse_lambda_parameter_list(state: ExpressionTokens) -> LambdaParameterListParseResult {
+    let mut current = state;
+    let mut parameters: Parameter[] = [];
+
+    if expression_tokens_is_at_end(current) {
+        return LambdaParameterListParseResult {
+            state: current,
+            parameters: parameters,
+            success: false
+        };
+    }
+
+    let closing = expression_tokens_peek(current);
+    if symbol_matches(closing, ")") {
+        current = expression_tokens_advance(current);
+        return LambdaParameterListParseResult {
+            state: current,
+            parameters: parameters,
+            success: true
+        };
+    }
+
+    loop {
+        let param_result = parse_lambda_parameter(current);
+        if !param_result.success {
+            return LambdaParameterListParseResult {
+                state: current,
+                parameters: parameters,
+                success: false
+            };
+        }
+        parameters = append_parameter(parameters, param_result.parameter);
+        current = param_result.state;
+        if expression_tokens_is_at_end(current) {
+            return LambdaParameterListParseResult {
+                state: current,
+                parameters: parameters,
+                success: false
+            };
+        }
+        let separator = expression_tokens_peek(current);
+        if separator.kind.variant == "Symbol" {
+            if symbol_matches(separator, ",") {
+                current = expression_tokens_advance(current);
+                continue;
+            }
+            if symbol_matches(separator, ")") {
+                current = expression_tokens_advance(current);
+                break;
+            }
+        }
+        return LambdaParameterListParseResult {
+            state: current,
+            parameters: parameters,
+            success: false
+        };
+    }
+
+    return LambdaParameterListParseResult {
+        state: current,
+        parameters: parameters,
+        success: true
+    };
+}

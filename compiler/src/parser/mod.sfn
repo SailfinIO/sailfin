@@ -6,7 +6,7 @@
 //   - types.sfn:        Result structs (Parser, ParseResult types, etc.)
 //   - utils.sfn:        String utilities (trim_text, string_array_contains, etc.)
 //   - token_utils.sfn:  Token manipulation (skip_trivia, collect_until, etc.)
-//   - expressions.sfn:  Expression parsing (Pratt parser, literals, lambdas)
+//   - expressions/:     Expression parsing (Pratt parser, literals, lambdas)
 //   - statements.sfn:   Block statement parsing (control flow, return, match)
 //   - declarations.sfn: Top-level declarations (fn, struct, enum, import, etc.)
 import {
@@ -475,7 +475,7 @@ export {
     append_token_array
 } from "./token_utils";
 
-// Re-export expression parsing functions
+// Re-export expression state and entry functions defined by the folder entry.
 export {
     // Expression state operations
     expression_tokens_is_at_end,
@@ -494,36 +494,33 @@ export {
     expression_from_tokens,
     expression_from_single_token,
 
-    // Pratt parser
+    // Pratt parser entry
     parse_expression_bp,
-    parse_prefix_expression,
-    parse_primary_expression,
-
-    // Postfix operators
-    parse_postfix_chain,
-
-    // Call arguments
-    parse_call_arguments,
-
-    // Literals
-    parse_array_literal,
-    parse_object_literal,
-    parse_struct_literal,
-    expression_is_struct_target,
-    collect_struct_type_name,
-
-    // Lambda expressions
-    parse_lambda_expression,
-    parse_lambda_parameter,
-    parse_lambda_parameter_list,
-
-    // Operator precedence
-    binary_precedence,
-    unary_precedence,
 
     // Expression normalization
     normalize_expression
 } from "./expressions";
+
+export { parse_prefix_expression, parse_primary_expression } from "./expressions/prefix";
+
+export { parse_postfix_chain } from "./expressions/postfix";
+
+export {
+    parse_call_arguments,
+    parse_array_literal,
+    parse_object_literal,
+    parse_struct_literal,
+    expression_is_struct_target,
+    collect_struct_type_name
+} from "./expressions/literals";
+
+export {
+    parse_lambda_expression,
+    parse_lambda_parameter,
+    parse_lambda_parameter_list
+} from "./expressions/lambdas";
+
+export { binary_precedence, unary_precedence } from "./expressions/normalize";
 
 // Re-export statement parsing functions
 export {
