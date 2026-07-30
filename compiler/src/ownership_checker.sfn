@@ -95,13 +95,9 @@ import { render_diagnostic } from "./diagnostics_render";
 import { number_to_string } from "./num_format";
 import { Token, TokenKind } from "./token";
 import { LocalBinding, analyze_lambda } from "./typecheck_captures";
-import {
-    Diagnostic,
-    diagnostic_to_diag,
-    is_identifier_char,
-    is_linear_type,
-    is_owned_type
-} from "./typecheck_types";
+import { Diagnostic, diagnostic_to_diag } from "./typecheck_types";
+import { is_linear_type, is_owned_type } from "./typecheck_types/expr_type_rules";
+import { is_identifier_char } from "./typecheck_types/text_utils";
 
 // One tracked binding. `state` is the lattice: "owned" on entry,
 // "moved" once a move site consumes it, "freed" once a disposer consumes
@@ -166,7 +162,7 @@ struct OwnershipSummary {
 // -------------------------------------------------------------------
 // Owned/affine-type classification (`OwnedBuf`, `Affine<T>`, `Linear<T>`)
 // is shared with the typecheck side via `is_owned_type` in
-// `typecheck_types.sfn` so the two passes can't drift as new owned
+// `typecheck_types/expr_type_rules.sfn` so the two passes can't drift as new owned
 // wrappers are added. Integer formatting reuses `number_to_string` from
 // `num_format.sfn`.
 // Synthesize an identifier token from an AST span so the finding can

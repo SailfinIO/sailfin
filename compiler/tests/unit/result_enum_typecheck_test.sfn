@@ -8,11 +8,11 @@
 // in the prelude).
 import { Statement, TypeAnnotation } from "../../src/ast";
 import { parse_program } from "../../src/parser/mod";
+import { Diagnostic } from "../../src/typecheck_types";
 import {
-    Diagnostic,
     resolve_enum_variant_field_type_from_annotation,
     validate_enum_annotation
-} from "../../src/typecheck_types";
+} from "../../src/typecheck_types/interface_and_generics";
 
 fn _enum_decl(source: string, name: string) -> Statement? ![io] {
     let program = parse_program(source);

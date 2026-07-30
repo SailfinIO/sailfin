@@ -13,7 +13,8 @@
 import { Expression, SourceSpan, Statement } from "../../src/ast";
 import { empty_import_symbols } from "../../src/effect_imports";
 import { TypeckCtx, make_typeck_ctx, walk_expression } from "../../src/typecheck";
-import { Diagnostic, SymbolEntry } from "../../src/typecheck_types";
+import { Diagnostic } from "../../src/typecheck_types";
+import { SymbolEntry } from "../../src/typecheck_types/symbol_table_and_raw_exprs";
 
 fn _no_bindings() -> SymbolEntry[] {
     let empty: SymbolEntry[] = [];

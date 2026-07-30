@@ -18,7 +18,7 @@ import {
     substring
 } from "../string_utils";
 import { Token, TokenKind } from "../token";
-import { spawn_future_kind } from "../typecheck_types";
+import { spawn_future_kind } from "../typecheck_types/expr_type_rules";
 import { parse_block } from "./statements";
 import {
     append_token,

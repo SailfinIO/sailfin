@@ -1,0 +1,344 @@
+// compiler/src/typecheck_types/text_utils.sfn
+//
+// String/token scanning primitives shared across the typecheck-types submodules.
+// Extracted from typecheck_types.sfn (SFN-625).
+import { SourceSpan } from "../ast";
+import { Token, TokenKind } from "../token";
+
+// Split a type annotation on top-level `&`, respecting `(`/`)` and
+// `<`/`>` nesting so an intersection nested inside generic arguments
+// (`Map<A & B, C>`) is not mistaken for a top-level intersection.
+// Mirrors `split_top_level_plus`; empty segments are dropped.
+fn split_top_level_ampersand(text: string) -> string[] {
+    let mut out: string[] = [];
+    let mut current: string = "";
+    let mut depth: int = 0;
+    let mut index: int = 0;
+    loop {
+        if index >= text.length { break; }
+        let ch = text[index];
+        if ch == "(" {
+            depth += 1;
+            current = current + ch;
+        } else if ch == ")" {
+            if depth > 0 { depth -= 1; }
+            current = current + ch;
+        } else if ch == "<" {
+            depth += 1;
+            current = current + ch;
+        } else if ch == ">" {
+            if depth > 0 { depth -= 1; }
+            current = current + ch;
+        } else if ch == "&" {
+            if depth == 0 {
+                let trimmed = trim_text(current);
+                if trimmed.length > 0 { out.push(trimmed); }
+                current = "";
+                index += 1;
+                continue;
+            }
+            current = current + ch;
+        } else { current = current + ch; }
+        index += 1;
+    }
+    let trimmed_last = trim_text(current);
+    if trimmed_last.length > 0 { out.push(trimmed_last); }
+    return out;
+}
+
+fn join_with_separator(items: string[], separator: string) -> string {
+    if items.length == 0 { return ""; }
+    let mut result = items[0];
+    let mut index: int = 1;
+    loop {
+        if index >= items.length { break; }
+        result = result + separator + items[index];
+        index += 1;
+    }
+    return result;
+}
+
+fn extract_generic_argument_block(annotation_text: string) -> string? {
+    let trimmed = trim_text(annotation_text);
+    let mut index: int = 0;
+    let mut depth: int = 0;
+    let mut start_index: int = -1;
+    loop {
+        if index >= trimmed.length { break; }
+        let ch = trimmed[index];
+        if ch == "<" {
+            if depth == 0 { start_index = index + 1; }
+            depth += 1;
+        } else if ch == ">" {
+            if depth == 0 { return null; }
+            depth -= 1;
+            if depth == 0 {
+                return slice_text(trimmed, start_index, index);
+            }
+        }
+        index += 1;
+    }
+    return null;
+}
+
+fn split_generic_argument_list(block: string) -> string[] {
+    let mut arguments: string[] = [];
+    let mut current: string = "";
+    let mut depth: int = 0;
+    let mut index: int = 0;
+    loop {
+        if index >= block.length { break; }
+        let ch = block[index];
+        if ch == "<" {
+            depth += 1;
+            current = current + ch;
+        } else if ch == ">" {
+            if depth > 0 { depth -= 1; }
+            current = current + ch;
+        } else if ch == "," {
+            if depth == 0 {
+                let trimmed = trim_text(current);
+                if trimmed.length > 0 { arguments.push(trimmed); }
+                current = "";
+                index += 1;
+                continue;
+            }
+            current = current + ch;
+        } else { current = current + ch; }
+        index += 1;
+    }
+    let tail = trim_text(current);
+    if tail.length > 0 { arguments.push(tail); }
+    return arguments;
+}
+
+fn trim_text(value: string) -> string {
+    let mut start: int = 0;
+    let mut end: int = value.length;
+    loop {
+        if start >= end { break; }
+        if is_whitespace(value[start]) {
+            start += 1;
+            continue;
+        }
+        break;
+    }
+    loop {
+        if end <= start { break; }
+        if is_whitespace(value[end - 1]) {
+            end -= 1;
+            continue;
+        }
+        break;
+    }
+    return slice_text(value, start, end);
+}
+
+fn slice_text(value: string, start: int, end: int) -> string {
+    let mut normalized_start: int = start;
+    let mut normalized_end: int = end;
+
+    if normalized_start < 0 { normalized_start = 0; }
+    if normalized_end > value.length { normalized_end = value.length; }
+    if normalized_end <= normalized_start { return ""; }
+    let mut result: string = "";
+    let mut index = normalized_start;
+    loop {
+        if index >= normalized_end { break; }
+        result = result + value[index];
+        index += 1;
+    }
+    return result;
+}
+
+fn is_whitespace(ch: string) -> boolean {
+    let mut _ret438: boolean = false;
+    if ch == " " { _ret438 = true; }
+    if ch == "\n" { _ret438 = true; }
+    if ch == "\t" { _ret438 = true; }
+    if ch == "\r" { _ret438 = true; }
+    return _ret438;
+}
+
+fn is_ascii_upper(ch: string) -> boolean {
+    let mut _ret: boolean = false;
+    if ch == "A" { _ret = true; }
+    if ch == "B" { _ret = true; }
+    if ch == "C" { _ret = true; }
+    if ch == "D" { _ret = true; }
+    if ch == "E" { _ret = true; }
+    if ch == "F" { _ret = true; }
+    if ch == "G" { _ret = true; }
+    if ch == "H" { _ret = true; }
+    if ch == "I" { _ret = true; }
+    if ch == "J" { _ret = true; }
+    if ch == "K" { _ret = true; }
+    if ch == "L" { _ret = true; }
+    if ch == "M" { _ret = true; }
+    if ch == "N" { _ret = true; }
+    if ch == "O" { _ret = true; }
+    if ch == "P" { _ret = true; }
+    if ch == "Q" { _ret = true; }
+    if ch == "R" { _ret = true; }
+    if ch == "S" { _ret = true; }
+    if ch == "T" { _ret = true; }
+    if ch == "U" { _ret = true; }
+    if ch == "V" { _ret = true; }
+    if ch == "W" { _ret = true; }
+    if ch == "X" { _ret = true; }
+    if ch == "Y" { _ret = true; }
+    if ch == "Z" { _ret = true; }
+    return _ret;
+}
+
+fn is_identifier_char(ch: string) -> boolean {
+    if is_ascii_upper(ch) { return true; }
+    let mut _ret: boolean = false;
+    if ch == "a" { _ret = true; }
+    if ch == "b" { _ret = true; }
+    if ch == "c" { _ret = true; }
+    if ch == "d" { _ret = true; }
+    if ch == "e" { _ret = true; }
+    if ch == "f" { _ret = true; }
+    if ch == "g" { _ret = true; }
+    if ch == "h" { _ret = true; }
+    if ch == "i" { _ret = true; }
+    if ch == "j" { _ret = true; }
+    if ch == "k" { _ret = true; }
+    if ch == "l" { _ret = true; }
+    if ch == "m" { _ret = true; }
+    if ch == "n" { _ret = true; }
+    if ch == "o" { _ret = true; }
+    if ch == "p" { _ret = true; }
+    if ch == "q" { _ret = true; }
+    if ch == "r" { _ret = true; }
+    if ch == "s" { _ret = true; }
+    if ch == "t" { _ret = true; }
+    if ch == "u" { _ret = true; }
+    if ch == "v" { _ret = true; }
+    if ch == "w" { _ret = true; }
+    if ch == "x" { _ret = true; }
+    if ch == "y" { _ret = true; }
+    if ch == "z" { _ret = true; }
+    if ch == "0" { _ret = true; }
+    if ch == "1" { _ret = true; }
+    if ch == "2" { _ret = true; }
+    if ch == "3" { _ret = true; }
+    if ch == "4" { _ret = true; }
+    if ch == "5" { _ret = true; }
+    if ch == "6" { _ret = true; }
+    if ch == "7" { _ret = true; }
+    if ch == "8" { _ret = true; }
+    if ch == "9" { _ret = true; }
+    if ch == "_" { _ret = true; }
+    return _ret;
+}
+
+fn find_matching_paren(text: string) -> int {
+    let mut depth: int = 1;
+    let mut index: int = 0;
+    loop {
+        if index >= text.length { break; }
+        let ch = text[index];
+        if ch == "(" { depth += 1; }
+        if ch == ")" {
+            depth -= 1;
+            if depth == 0 { return index; }
+        }
+        index += 1;
+    }
+    return -1;
+}
+
+fn split_top_level_commas(text: string) -> string[] {
+    let mut out: string[] = [];
+    let mut current: string = "";
+    let mut depth: int = 0;
+    let mut index: int = 0;
+    loop {
+        if index >= text.length { break; }
+        let ch = text[index];
+        if ch == "(" {
+            depth += 1;
+            current = current + ch;
+        } else if ch == ")" {
+            if depth > 0 { depth -= 1; }
+            current = current + ch;
+        } else if ch == "<" {
+            depth += 1;
+            current = current + ch;
+        } else if ch == ">" {
+            if depth > 0 { depth -= 1; }
+            current = current + ch;
+        } else if ch == "," {
+            if depth == 0 {
+                out.push(current);
+                current = "";
+                index += 1;
+                continue;
+            }
+            current = current + ch;
+        } else { current = current + ch; }
+        index += 1;
+    }
+    if current.length > 0 { out.push(current); }
+    return out;
+}
+
+fn token_from_name(name: string, span: SourceSpan?) -> Token? {
+    if span == null { return null; }
+    return Token {
+        kind: TokenKind.Identifier(),
+        lexeme: name,
+        line: span.start_line,
+        column: span.start_column
+    };
+}
+
+// Render a non-negative `int` value as a decimal string. The
+// repeated-subtraction divmod shape is kept (rather than `/ 10`)
+// because this helper mirrors the canonical `number_to_string`
+// implementations in `compiler/src/main.sfn` and
+// `compiler/src/build_report.sfn:_br_number_to_string`, both of which
+// still accept a floating-point `number` parameter where `/ 10` would
+// leave fractional residues that never compare equal to zero and hang the
+// loop. Keeping the shape identical across the four shadows makes the
+// final lockstep flip — when `main.sfn` flips in Slice E.3a-bulk-1b
+// child 7 — a one-line signature change rather than an algorithm
+// rewrite.
+fn number_to_string(value: int) -> string {
+    if value == 0 { return "0"; }
+    let mut working: int = value;
+    let mut negative: boolean = false;
+    if working < 0 {
+        negative = true;
+        working = 0 - working;
+    }
+    let mut output: string = "";
+    let mut remaining: int = working;
+    loop {
+        if remaining <= 0 { break; }
+        let mut temp: int = remaining;
+        let mut quotient: int = 0;
+        loop {
+            if temp < 10 { break; }
+            temp -= 10;
+            quotient += 1;
+        }
+        let mut ch: string = "";
+        if temp == 0 { ch = "0"; }
+        if temp == 1 { ch = "1"; }
+        if temp == 2 { ch = "2"; }
+        if temp == 3 { ch = "3"; }
+        if temp == 4 { ch = "4"; }
+        if temp == 5 { ch = "5"; }
+        if temp == 6 { ch = "6"; }
+        if temp == 7 { ch = "7"; }
+        if temp == 8 { ch = "8"; }
+        if temp == 9 { ch = "9"; }
+        output = ch + output;
+        remaining = quotient;
+    }
+    if negative { output = "-" + output; }
+    return output;
+}

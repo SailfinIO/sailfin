@@ -7,7 +7,7 @@
 // rationale (type discipline, `unsafe` policy, formatter pointer
 // spelling, opaque-pointee rule). All declarations here obey the
 // same v0 C-ABI accept-list enforced by `check_extern_signature`
-// in `compiler/src/typecheck_types.sfn` (E0801–E0805).
+// in `compiler/src/typecheck_types/declaration_and_statement_checks.sfn` (E0801–E0805).
 //
 // Status: typecheck smoke test. Not imported anywhere yet; the
 // scheduler/channel implementation that consumes these lands at
@@ -20,7 +20,7 @@
 // The architect's design target spells `pthread_create`'s `start`
 // as `fn(* u8) -> * u8` (architecture doc §2.9), and the v0
 // extern accept-list admits that shape via
-// `is_c_abi_function_pointer` (`compiler/src/typecheck_types.sfn`).
+// `is_c_abi_function_pointer` (`compiler/src/typecheck_types/extern_abi.sfn`).
 // However, `sfn fmt` rewrites `fn(...)` to `fn (...)` (space
 // inserted), and the typechecker requires the literal `fn(`
 // prefix — so the canonical-formatted form is rejected. Until

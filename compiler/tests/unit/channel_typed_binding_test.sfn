@@ -12,7 +12,7 @@
 // conservative to avoid false positives.
 import { parse_program } from "../../src/parser/mod";
 import { typecheck_diagnostics } from "../../src/typecheck";
-import { channel_element_kind } from "../../src/typecheck_types";
+import { channel_element_kind } from "../../src/typecheck_types/expr_type_rules";
 
 // Collapse the not-a-channel case so the assert sites stay free of optional
 // narrowing.

@@ -25,7 +25,8 @@ import {
     walk_expression,
     walk_match_pattern
 } from "../../src/typecheck";
-import { Diagnostic, SymbolEntry } from "../../src/typecheck_types";
+import { Diagnostic } from "../../src/typecheck_types";
+import { SymbolEntry } from "../../src/typecheck_types/symbol_table_and_raw_exprs";
 
 fn _no_bindings() -> SymbolEntry[] {
     let empty: SymbolEntry[] = [];

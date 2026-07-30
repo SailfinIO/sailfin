@@ -24,88 +24,95 @@ import {
 } from "./effect_imports";
 import { index_of } from "./string_utils";
 import { Token, TokenKind } from "./token";
+import { Diagnostic } from "./typecheck_types";
 import {
-    Diagnostic,
-    ScopeResult,
-    SymbolCollectionResult,
-    SymbolEntry,
-    append_symbol,
-    bound_base_name,
-    channel_element_kind,
     check_bare_fn_type_annotation,
-    check_char_literal_raw,
+    check_malformed_array_annotation,
+    check_unknown_type_annotation,
+    classify_declared_primitive,
+    declared_array_marker,
+    element_kind_marks_array,
+    type_parameter_names
+} from "./typecheck_types/annotation_shape_checks";
+import {
     check_enum_variants,
     check_extern_signature,
     check_extern_var,
-    check_fn_reference_raw,
     check_function_signature,
-    check_generic_instantiation,
-    check_interface_field_members,
     check_interface_members,
-    check_intersection_value_type_annotation,
-    check_malformed_array_annotation,
-    check_object_literal_target,
     check_struct_fields,
-    check_struct_implements_interfaces,
     check_struct_methods,
-    check_type_parameters,
-    check_unanalyzable_raw,
-    check_uninferable_generic_constructor,
-    check_unknown_type_annotation,
-    check_value_if_raw,
-    classify_declared_primitive,
-    classify_fn_cast,
-    clone_bindings,
-    declared_array_marker,
     detect_removed_ai_keyword,
-    element_kind_marks_array,
-    find_symbol,
+    make_main_signature_param_count_diagnostic,
+    make_main_signature_param_type_diagnostic,
+    make_nested_fn_capture_diagnostic,
+    make_removed_keyword_diagnostic,
+    make_syscall_builtin_diagnostic,
+    make_thread_local_requires_mut_diagnostic,
+    make_undefined_function_diagnostic,
+    make_unparseable_statement_diagnostic
+} from "./typecheck_types/declaration_and_statement_checks";
+import {
+    channel_element_kind,
+    check_uninferable_generic_constructor,
     future_element_kind,
-    has_symbol,
-    is_builtin_call_name,
-    is_function_kind,
-    is_identifier_char,
-    make_array_arithmetic_diagnostic,
     make_await_non_future_diagnostic,
     make_channel_send_mismatch_diagnostic,
     make_conditional_branch_mismatch_diagnostic,
     make_conditional_non_boolean_condition_diagnostic,
-    make_fn_value_position_diagnostic,
-    make_main_signature_param_count_diagnostic,
-    make_main_signature_param_type_diagnostic,
-    make_mixed_arithmetic_diagnostic,
-    make_nested_fn_capture_diagnostic,
     make_parse_error_diagnostic,
-    make_removed_keyword_diagnostic,
     make_spawn_handle_into_empty_array_diagnostic,
     make_spawn_handle_kind_mismatch_diagnostic,
     make_spawn_unresolvable_kind_diagnostic,
-    make_struct_arithmetic_diagnostic,
-    make_syscall_builtin_diagnostic,
     make_task_array_element_marker,
-    make_thread_local_requires_mut_diagnostic,
     make_try_error_type_mismatch_diagnostic,
     make_try_non_result_fn_diagnostic,
     make_try_non_result_operand_diagnostic,
-    make_undefined_function_diagnostic,
-    make_unknown_primitive_method_diagnostic,
-    make_unparseable_statement_diagnostic,
-    parse_type_arguments,
-    primitive_has_method,
-    register_local_symbol,
-    register_symbol,
-    resolve_interface_annotation,
     result_type_arguments,
-    signature_is_c_abi,
-    signature_is_generic,
     spawn_future_kind,
     task_array_element_kind,
     task_array_marker_kind,
-    token_from_name,
     type_is_future,
-    type_is_result,
-    type_parameter_names
-} from "./typecheck_types";
+    type_is_result
+} from "./typecheck_types/expr_type_rules";
+import { is_builtin_call_name } from "./typecheck_types/extern_abi";
+import { bound_base_name, check_generic_instantiation, check_type_parameters } from "./typecheck_types/generic_bounds";
+import {
+    check_struct_implements_interfaces,
+    parse_type_arguments,
+    resolve_interface_annotation
+} from "./typecheck_types/interface_and_generics";
+import {
+    ScopeResult,
+    SymbolCollectionResult,
+    SymbolEntry,
+    append_symbol,
+    check_char_literal_raw,
+    check_fn_reference_raw,
+    check_unanalyzable_raw,
+    check_value_if_raw,
+    classify_fn_cast,
+    clone_bindings,
+    find_symbol,
+    has_symbol,
+    is_function_kind,
+    make_fn_value_position_diagnostic,
+    register_local_symbol,
+    register_symbol,
+    signature_is_c_abi,
+    signature_is_generic
+} from "./typecheck_types/symbol_table_and_raw_exprs";
+import { is_identifier_char, token_from_name } from "./typecheck_types/text_utils";
+import {
+    check_interface_field_members,
+    check_intersection_value_type_annotation,
+    check_object_literal_target,
+    make_array_arithmetic_diagnostic,
+    make_mixed_arithmetic_diagnostic,
+    make_struct_arithmetic_diagnostic,
+    make_unknown_primitive_method_diagnostic,
+    primitive_has_method
+} from "./typecheck_types/value_and_object_checks";
 
 fn typecheck_diagnostics(program: Program) -> Diagnostic[] {
     let empty_imports: Statement[] = [];
@@ -2088,7 +2095,7 @@ fn walk_match_pattern(pattern: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
 }
 
 // `?` operator (TryOperator) type rules — issue #833, epic #371 (R.3).
-// See `typecheck_types.sfn` for `type_is_result` / `result_type_arguments`
+// See `typecheck_types/expr_type_rules.sfn` for `type_is_result` / `result_type_arguments`
 // and the E0810–E0812 factories. `operand_type` is the type of the `?`
 // operand; `enclosing_return_type` is the declared return type of the
 // function the `?` appears in (null when the function declares no return

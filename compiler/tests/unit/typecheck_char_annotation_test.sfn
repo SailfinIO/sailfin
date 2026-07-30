@@ -1,7 +1,7 @@
 // Regression coverage for `char` as a type annotation (SFN-550).
 //
 // `char` is not a Sailfin type. It has no literal syntax, no entry in the
-// primitive table (`classify_declared_primitive`, typecheck_types.sfn), and no
+// primitive table (`classify_declared_primitive`, typecheck_types/annotation_shape_checks.sfn), and no
 // lowering of its own — yet it used to be *accepted* wherever a type annotation
 // was legal, because `map_type_annotation` (llvm/type_mapping.sfn) defaulted an
 // unrecognized name to `i8*`. `99 as char` therefore lowered to

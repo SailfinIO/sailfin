@@ -20,15 +20,14 @@ import {
     check_spawn_kind
 } from "../../src/typecheck";
 import {
-    SymbolEntry,
     future_element_kind,
     make_task_array_element_marker,
-    register_local_symbol,
     spawn_future_kind,
     task_array_element_kind,
     task_array_marker_kind,
     type_is_future
-} from "../../src/typecheck_types";
+} from "../../src/typecheck_types/expr_type_rules";
+import { SymbolEntry, register_local_symbol } from "../../src/typecheck_types/symbol_table_and_raw_exprs";
 
 // Initializer of the first top-level `let` in `source` — the same
 // navigation `parser_concurrency_test.sfn::first_let_initializer` uses.
