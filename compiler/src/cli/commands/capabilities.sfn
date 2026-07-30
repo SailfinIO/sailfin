@@ -22,7 +22,7 @@ import {
     workspace_capability_envelope_active,
     workspace_capability_mode,
     workspace_effective_envelope
-} from "../../capsule_resolver";
+} from "../../capsule_resolver/capability";
 import { discover_workspace_root } from "../../capsule_resolver/workspace";
 import { render_diagnostic } from "../../diagnostics_render";
 import {

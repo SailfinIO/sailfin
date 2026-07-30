@@ -32,7 +32,7 @@ import {
 } from "sfn/cli";
 
 import { _get_env_cmd } from "../../build_flags";
-import { resolve_workspace_lock_entries } from "../../capsule_resolver";
+import { resolve_workspace_lock_entries } from "../../capsule_resolver/capability";
 import { discover_workspace_root } from "../../capsule_resolver/workspace";
 import { workspace_lock_write } from "../../lock";
 import { number_to_string } from "../../num_format";
