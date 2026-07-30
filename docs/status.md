@@ -1,6 +1,6 @@
 # Status
 
-Updated: 2026-07-29. Seed pinned to `0.8.4` (`bootstrap.toml`
+Updated: 2026-07-30. Seed pinned to `0.8.4` (`bootstrap.toml`
 `[seed].version` — SFEP-0047); the compiler version source of truth is
 `compiler/capsule.toml`.
 
@@ -21,7 +21,11 @@ here.
 - **Build driver.** `<seed> build -p compiler` is the sole self-build driver
   (`compiler/src/cli_main.sfn` + `capsule_resolver.sfn` — pure orchestration,
   no fixups). The `scripts/build.sh` orchestrator (Stage E PR7, #383) and the
-  Python fixup script `selfhost_native.py` are retired.
+  Python fixup script `selfhost_native.py` are retired. Per-module emit,
+  `.ll`-to-`.o` assembly, and runtime object compilation share one bounded
+  native subprocess pool; `_cr_resolve_jobs` applies the same CPU/RAM ceiling
+  and `SAILFIN_BUILD_JOBS=1` serial escape hatch across all three phases
+  (SFN-612).
 - **Toolchain version pinning — Phase 1** (SFEP-0046, SFN-167). `capsule.toml`
   / `workspace.toml` accept an additive `[toolchain]` section (`sfn =
   "<floor>"`, optional `channel = "stable"|"rc"|"beta"|"alpha"`), parsed by
