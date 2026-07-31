@@ -4,7 +4,25 @@
 // vector, and a 112-byte input whose padding forces a second 128-byte
 // block (all authoritative FIPS 180-4 / NIST vectors; the 112-byte value
 // is cross-checked against `shasum -a 384`).
-import { sha384_hex } from "../src/sha384";
+//
+// `sha384_bytes` is the capsule-internal byte-oriented form the TLS 1.3 key
+// schedule consumes (SFN-662); its 200-byte vector was generated with
+// `sha384sum` and spans two 128-byte blocks.
+import { sha384_bytes, sha384_hex } from "../src/sha384";
+
+// Render a byte array as lowercase hex, so a `sha384_bytes` result can be
+// compared against the same digest string the hex entry point returns.
+fn _hexs(bytes: int[]) -> string {
+    let digits: string[] = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "a", "b", "c", "d", "e", "f",];
+    let mut out: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= bytes.length { break; }
+        out = out + digits[(bytes[i] >> 4) & 15] + digits[bytes[i] & 15];
+        i += 1;
+    }
+    return out;
+}
 
 test "sha384_hex: empty string" {
     assert sha384_hex("") == "38b060a751ac96384cd9327eb1b1e36a21fdb71114be07434c0cc7bf63f6e1da274edebfe76f65fbd51ad2f14898b95b";
@@ -16,4 +34,33 @@ test "sha384_hex: abc" {
 
 test "sha384_hex: 112-byte two-block vector" {
     assert sha384_hex("abcdefghbcdefghicdefghijdefghijkefghijklfghijklmghijklmnhijklmnoijklmnopjklmnopqklmnopqrlmnopqrsmnopqrstnopqrstu") == "09330c33f71147e83d192fc782cd1b4753111b173b3b05d22fa08086e3b0f712fcc7c71a557e2db966c3e9fa91746039";
+}
+
+test "sha384_bytes: empty input digest as 48 raw bytes" {
+    let digest: int[] = sha384_bytes([]);
+    assert digest.length == 48;
+    assert _hexs(digest) == "38b060a751ac96384cd9327eb1b1e36a21fdb71114be07434c0cc7bf63f6e1da274edebfe76f65fbd51ad2f14898b95b";
+}
+
+test "sha384_bytes: abc digest as 48 raw bytes" {
+    // Comparing the full hex rendering catches a transposed hi/lo limb store,
+    // which a length or endpoint check would miss.
+    let digest: int[] = sha384_bytes([97, 98, 99]);
+    assert digest.length == 48;
+    assert _hexs(digest) == "cb00753f45a35e8bb5a03d699ac65007272c32ab0eded1631a8b605a43ff5bed8086072ba1e7cc2358baeca134c825a7";
+}
+
+test "sha384_bytes: 200-byte binary input spanning two blocks" {
+    // Bytes 0..199 as i mod 256 — includes 0x00 and high bytes no Sailfin
+    // `string` can carry, which is why the byte-oriented form exists.
+    let mut msg: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= 200 { break; }
+        msg.push(i % 256);
+        i += 1;
+    }
+    let digest: int[] = sha384_bytes(msg);
+    assert digest.length == 48;
+    assert _hexs(digest) == "7ea4bb2534c67036f49de7beb5fe8a2478df04ff3fef40a9cd4923999a590e9912df1297217ce1a021aa2fb1013498b8";
 }
