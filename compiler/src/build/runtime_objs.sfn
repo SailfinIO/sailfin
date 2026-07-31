@@ -55,7 +55,6 @@ import {
     build_host_os,
     build_target_os,
     target_artifact_tag,
-    target_clang_flags,
     target_condition_runtime_sfn_sources,
     target_os_is_windows
 } from "./target";
@@ -668,26 +667,29 @@ fn _runtime_obj_key_with_sibling_deps(base_key: string, ctx_root: string, slug: 
 // source-content hash `runtime_object_cache_key`/`_with_identity` folds
 // cannot see the target any more than they could see the compile flags
 // (`secsplit1`), the codegen ABI (`strabi1`), or the compiler identity
-// (#1197) — this is the same defect class, fourth instance: an object
-// compiled for one target (e.g. Windows COFF) was served to a link for a
-// different target (e.g. Linux ELF) because nothing in its identity
-// recorded which target produced it. Folding `target_clang_flags` as well
-// as the raw OS string matches the existing precedent at
-// `clang_argv.sfn:117-128`, so a future arch/triple flag lands in the key
-// automatically. `tgt1:` is a bumpable scheme tag in the spirit of
+// (#1197) — this is the same defect class: an object compiled for one
+// target (e.g. Windows COFF) was served to a link for a different target
+// (e.g. Linux ELF) because nothing in its identity recorded which target
+// produced it. `tgt1:` is a bumpable scheme tag in the spirit of
 // `secsplit1-strabi1`. Empty base propagates empty, mirroring
 // `_runtime_obj_key_with_sibling_deps`'s always-recompile fallback.
+//
+// SFN-677: `target_os` goes LAST and nothing follows it. It is an
+// unvalidated `SAILFIN_TARGET_OS` env string, so anything appended after
+// it can be spelled by a crafted value instead. This originally also
+// folded `target_clang_flags(target_os)` space-joined behind it, which
+// made `"Windows"` and the literal `"Windows -target
+// x86_64-pc-windows-msvc"` produce the same key while compiling to
+// different objects — the very cross-target reuse this exists to stop.
+// Those flags never added anything: `target_clang_flags` is a total
+// function of `target_os`, so appending `f(x)` after `x` cannot separate
+// tuples that `x` does not. Every caller composes this fold OUTERMOST,
+// which is what keeps `target_os` last; keep it that way. Should
+// `target_clang_flags` ever take an input not derived from `target_os`,
+// that input must be folded in on its own.
 fn _runtime_obj_key_with_target(base_key: string, target_os: string) -> string {
     if base_key.length == 0 { return ""; }
-    let mut key = base_key + "\ntgt1:" + target_os;
-    let flags = target_clang_flags(target_os);
-    let mut i: int = 0;
-    loop {
-        if i >= flags.length { break; }
-        key = key + " " + flags[i];
-        i += 1;
-    }
-    return key;
+    return base_key + "\ntgt1:" + target_os;
 }
 
 // SFN-50: the child compiler's environment for a runtime sfn-source

@@ -23,6 +23,8 @@
 // because Sailfin's runtime has no `setenv` primitive — the env
 // var contract is intentionally read-only. Each test cleans up
 // its tmp tree on exit.
+import { expect_eq_bool, expect_eq_str } from "sfn/test";
+
 import {
     BuildCacheConfig,
     CacheKey,
@@ -179,8 +181,8 @@ test "build_cache: cache_key_for same inputs -> same digest" ![io] {
     _write_file(src, "fn hello() -> string { return \"world\"; }");
     let no_deps: string[] = [];
     let no_dep_slugs: string[] = [];
-    let key1 = cache_key_for(src, no_dep_slugs, no_deps, "0.5.10-alpha.2", "[]", "key_determinism");
-    let key2 = cache_key_for(src, no_dep_slugs, no_deps, "0.5.10-alpha.2", "[]", "key_determinism");
+    let key1 = cache_key_for(src, no_dep_slugs, no_deps, "0.5.10-alpha.2", "[]", "key_determinism", "Linux");
+    let key2 = cache_key_for(src, no_dep_slugs, no_deps, "0.5.10-alpha.2", "[]", "key_determinism", "Linux");
     assert key1.digest == key2.digest;
     assert key1.digest.length == 64;
     _cleanup(scratch);
@@ -204,9 +206,9 @@ test "build_cache: cache_key_for invariant under dep order" ![io] {
     // `dep_slugs` is permuted in lock-step with the manifest array so
     // the test asserts order-invariance of the (slug, manifest) PAIR,
     // not accidental insensitivity to slug (SFN-661).
-    let key_abc = cache_key_for(src, ["alpha", "beta", "gamma"], [dep_a, dep_b, dep_c], "0.5.10-alpha.2", "[]", "dep_order");
-    let key_cba = cache_key_for(src, ["gamma", "beta", "alpha"], [dep_c, dep_b, dep_a], "0.5.10-alpha.2", "[]", "dep_order");
-    let key_bac = cache_key_for(src, ["beta", "alpha", "gamma"], [dep_b, dep_a, dep_c], "0.5.10-alpha.2", "[]", "dep_order");
+    let key_abc = cache_key_for(src, ["alpha", "beta", "gamma"], [dep_a, dep_b, dep_c], "0.5.10-alpha.2", "[]", "dep_order", "Linux");
+    let key_cba = cache_key_for(src, ["gamma", "beta", "alpha"], [dep_c, dep_b, dep_a], "0.5.10-alpha.2", "[]", "dep_order", "Linux");
+    let key_bac = cache_key_for(src, ["beta", "alpha", "gamma"], [dep_b, dep_a, dep_c], "0.5.10-alpha.2", "[]", "dep_order", "Linux");
     assert key_abc.digest == key_cba.digest;
     assert key_abc.digest == key_bac.digest;
     _cleanup(scratch);
@@ -221,9 +223,9 @@ test "build_cache: cache_key_for changes when source changes" ![io] {
     _write_file(src, "fn hello() -> string { return \"world\"; }");
     let no_deps: string[] = [];
     let no_dep_slugs: string[] = [];
-    let key1 = cache_key_for(src, no_dep_slugs, no_deps, "0.5.10-alpha.2", "[]", "source_sens_1");
+    let key1 = cache_key_for(src, no_dep_slugs, no_deps, "0.5.10-alpha.2", "[]", "source_sens_1", "Linux");
     _write_file(src, "fn hello() -> string { return \"WORLD\"; }");
-    let key2 = cache_key_for(src, no_dep_slugs, no_deps, "0.5.10-alpha.2", "[]", "source_sens_2");
+    let key2 = cache_key_for(src, no_dep_slugs, no_deps, "0.5.10-alpha.2", "[]", "source_sens_2", "Linux");
     assert key1.digest != key2.digest;
     _cleanup(scratch);
 }
@@ -234,9 +236,9 @@ test "build_cache: cache_key_for changes when dep manifest changes" ![io] {
     let dep = scratch + "/dep.layout-manifest";
     _write_file(src, "fn hello() -> string { return \"world\"; }");
     _write_file(dep, "module: alpha; layout: original");
-    let key1 = cache_key_for(src, ["alpha"], [dep], "0.5.10-alpha.2", "[]", "dep_sens_1");
+    let key1 = cache_key_for(src, ["alpha"], [dep], "0.5.10-alpha.2", "[]", "dep_sens_1", "Linux");
     _write_file(dep, "module: alpha; layout: changed");
-    let key2 = cache_key_for(src, ["alpha"], [dep], "0.5.10-alpha.2", "[]", "dep_sens_2");
+    let key2 = cache_key_for(src, ["alpha"], [dep], "0.5.10-alpha.2", "[]", "dep_sens_2", "Linux");
     assert key1.digest != key2.digest;
     _cleanup(scratch);
 }
@@ -263,8 +265,8 @@ test "build_cache: cache_key_for changes when a dep slug changes" ![io] {
     // Empty manifest content — the real-world case for a module
     // declaring no structs.
     _write_file(dep, "");
-    let key1 = cache_key_for(src, ["parser/declarations"], [dep], "0.5.10-alpha.2", "[]", "dep_slug_sens");
-    let key2 = cache_key_for(src, ["parser/declarations/mod"], [dep], "0.5.10-alpha.2", "[]", "dep_slug_sens");
+    let key1 = cache_key_for(src, ["parser/declarations"], [dep], "0.5.10-alpha.2", "[]", "dep_slug_sens", "Linux");
+    let key2 = cache_key_for(src, ["parser/declarations/mod"], [dep], "0.5.10-alpha.2", "[]", "dep_slug_sens", "Linux");
     assert key1.digest != key2.digest;
     _cleanup(scratch);
 }
@@ -275,8 +277,8 @@ test "build_cache: cache_key_for is stable when dep slug and content are unchang
     let dep = scratch + "/dep.layout-manifest";
     _write_file(src, "fn hello() -> string { return \"world\"; }");
     _write_file(dep, "");
-    let key1 = cache_key_for(src, ["parser/declarations"], [dep], "0.5.10-alpha.2", "[]", "dep_slug_stable");
-    let key2 = cache_key_for(src, ["parser/declarations"], [dep], "0.5.10-alpha.2", "[]", "dep_slug_stable");
+    let key1 = cache_key_for(src, ["parser/declarations"], [dep], "0.5.10-alpha.2", "[]", "dep_slug_stable", "Linux");
+    let key2 = cache_key_for(src, ["parser/declarations"], [dep], "0.5.10-alpha.2", "[]", "dep_slug_stable", "Linux");
     assert key1.digest == key2.digest;
     _cleanup(scratch);
 }
@@ -297,12 +299,12 @@ test "build_cache: cache_key_for yields an empty digest on a dep-slug/manifest l
     _write_file(dep_b, "module: beta; layout: ...");
 
     // dep_slugs shorter than the manifest array.
-    let short_key = cache_key_for(src, ["alpha"], [dep_a, dep_b], "0.5.10-alpha.2", "[]", "dep_len_short");
+    let short_key = cache_key_for(src, ["alpha"], [dep_a, dep_b], "0.5.10-alpha.2", "[]", "dep_len_short", "Linux");
     assert short_key.digest.length == 0;
     assert short_key.digest.length != 64;
 
     // dep_slugs longer than the manifest array.
-    let long_key = cache_key_for(src, ["alpha", "beta", "gamma"], [dep_a, dep_b], "0.5.10-alpha.2", "[]", "dep_len_long");
+    let long_key = cache_key_for(src, ["alpha", "beta", "gamma"], [dep_a, dep_b], "0.5.10-alpha.2", "[]", "dep_len_long", "Linux");
     assert long_key.digest.length == 0;
     assert long_key.digest.length != 64;
 
@@ -318,7 +320,7 @@ test "build_cache: cache_key_for matching lengths still yield a valid digest" ![
     _write_file(src, "fn hello() -> string { return \"world\"; }");
     _write_file(dep_a, "module: alpha; layout: ...");
     _write_file(dep_b, "module: beta; layout: ...");
-    let key = cache_key_for(src, ["alpha", "beta"], [dep_a, dep_b], "0.5.10-alpha.2", "[]", "dep_len_match");
+    let key = cache_key_for(src, ["alpha", "beta"], [dep_a, dep_b], "0.5.10-alpha.2", "[]", "dep_len_match", "Linux");
     assert key.digest.length == 64;
     _cleanup(scratch);
 }
@@ -509,8 +511,8 @@ test "build_cache: cache_key_for changes when compiler version changes" ![io] {
     _write_file(src, "fn hello() -> string { return \"world\"; }");
     let no_deps: string[] = [];
     let no_dep_slugs: string[] = [];
-    let key1 = cache_key_for(src, no_dep_slugs, no_deps, "0.5.10-alpha.1", "[]", "ver_sens_1");
-    let key2 = cache_key_for(src, no_dep_slugs, no_deps, "0.5.10-alpha.2", "[]", "ver_sens_2");
+    let key1 = cache_key_for(src, no_dep_slugs, no_deps, "0.5.10-alpha.1", "[]", "ver_sens_1", "Linux");
+    let key2 = cache_key_for(src, no_dep_slugs, no_deps, "0.5.10-alpha.2", "[]", "ver_sens_2", "Linux");
     assert key1.digest != key2.digest;
     _cleanup(scratch);
 }
@@ -521,8 +523,8 @@ test "build_cache: cache_key_for changes when flags change" ![io] {
     _write_file(src, "fn hello() -> string { return \"world\"; }");
     let no_deps: string[] = [];
     let no_dep_slugs: string[] = [];
-    let key1 = cache_key_for(src, no_dep_slugs, no_deps, "0.5.10-alpha.2", "[]", "flag_sens_1");
-    let key2 = cache_key_for(src, no_dep_slugs, no_deps, "0.5.10-alpha.2", "[\"--release\"]", "flag_sens_2");
+    let key1 = cache_key_for(src, no_dep_slugs, no_deps, "0.5.10-alpha.2", "[]", "flag_sens_1", "Linux");
+    let key2 = cache_key_for(src, no_dep_slugs, no_deps, "0.5.10-alpha.2", "[\"--release\"]", "flag_sens_2", "Linux");
     assert key1.digest != key2.digest;
     _cleanup(scratch);
 }
@@ -538,8 +540,8 @@ test "build_cache: cache_key_for changes when slug changes" ![io] {
     // capsule walker and `../src/foo` via the relative-import walker)
     // keys two distinct cache entries instead of racing on one (#527).
     // All inputs identical except the trailing slug.
-    let key_a = cache_key_for(src, no_dep_slugs, no_deps, "0.5.10-alpha.2", "[]", "slug_a");
-    let key_b = cache_key_for(src, no_dep_slugs, no_deps, "0.5.10-alpha.2", "[]", "slug_b");
+    let key_a = cache_key_for(src, no_dep_slugs, no_deps, "0.5.10-alpha.2", "[]", "slug_a", "Linux");
+    let key_b = cache_key_for(src, no_dep_slugs, no_deps, "0.5.10-alpha.2", "[]", "slug_b", "Linux");
     assert key_a.digest != key_b.digest;
     _cleanup(scratch);
 }
@@ -1104,4 +1106,93 @@ test "runtime_object_entry_key_from_str: content-addressed and deterministic" ![
     let b = runtime_object_entry_key_from_str(key_b, "det_b");
     assert a1.digest == a2.digest;
     assert a1.digest != b.digest;
+}
+
+// --------------------------------------------------------------
+// Target fold (SFN-677)
+// --------------------------------------------------------------
+test "build_cache: cache_key_for changes when the build target changes" ![io] {
+    let scratch = _test_tmp_root("target_sensitive");
+    let src = scratch + "/source.sfn";
+    _write_file(src, "fn hello() -> string { return \"world\"; }");
+    let no_deps: string[] = [];
+    let no_dep_slugs: string[] = [];
+    // SFN-677 contract: `llvm/lowering_debug_state.sfn` reads the
+    // resolved target at emit time, so identical inputs at different
+    // targets are genuinely different IR and must not share a cache
+    // entry.
+    let key_linux = cache_key_for(src, no_dep_slugs, no_deps, "0.5.10-alpha.2", "[]", "target_sensitive", "Linux");
+    let key_windows = cache_key_for(src, no_dep_slugs, no_deps, "0.5.10-alpha.2", "[]", "target_sensitive", "Windows");
+    let key_darwin = cache_key_for(src, no_dep_slugs, no_deps, "0.5.10-alpha.2", "[]", "target_sensitive", "Darwin");
+    assert expect_eq_bool(key_linux.digest == key_windows.digest, false).ok;
+    assert expect_eq_bool(key_linux.digest == key_darwin.digest, false).ok;
+    assert expect_eq_bool(key_windows.digest == key_darwin.digest, false).ok;
+    _cleanup(scratch);
+}
+
+test "build_cache: cache_key_for is stable across calls at one target" ![io] {
+    let scratch = _test_tmp_root("target_stable");
+    let src = scratch + "/source.sfn";
+    _write_file(src, "fn hello() -> string { return \"world\"; }");
+    let no_deps: string[] = [];
+    let no_dep_slugs: string[] = [];
+    // A key that varied per call would miss on every build, silently
+    // disabling the cache rather than failing loudly.
+    let key1 = cache_key_for(src, no_dep_slugs, no_deps, "0.5.10-alpha.2", "[]", "target_stable", "Windows");
+    let key2 = cache_key_for(src, no_dep_slugs, no_deps, "0.5.10-alpha.2", "[]", "target_stable", "Windows");
+    assert expect_eq_str(key1.digest, key2.digest).ok;
+    _cleanup(scratch);
+}
+
+test "build_cache: cache_key_for distinguishes two unrecognized targets" ![io] {
+    let scratch = _test_tmp_root("target_unrecognized");
+    let src = scratch + "/source.sfn";
+    _write_file(src, "fn hello() -> string { return \"world\"; }");
+    let no_deps: string[] = [];
+    let no_dep_slugs: string[] = [];
+    // Neither is a recognized target, so the raw target string is the
+    // only thing separating them; this pins that the fold carries the
+    // raw target and not merely a normalized tag.
+    let key_plan9 = cache_key_for(src, no_dep_slugs, no_deps, "0.5.10-alpha.2", "[]", "target_unrecognized", "Plan9");
+    let key_haiku = cache_key_for(src, no_dep_slugs, no_deps, "0.5.10-alpha.2", "[]", "target_unrecognized", "Haiku");
+    assert expect_eq_bool(key_plan9.digest == key_haiku.digest, false).ok;
+    _cleanup(scratch);
+}
+
+test "build_cache: cache_key_for does not let a crafted target absorb a following component" ![io] {
+    let scratch = _test_tmp_root("target_absorb");
+    let src = scratch + "/source.sfn";
+    _write_file(src, "fn hello() -> string { return \"world\"; }");
+    let no_deps: string[] = [];
+    let no_dep_slugs: string[] = [];
+    // `target_os` is an unvalidated env string, so it is folded LAST
+    // with nothing after it. An earlier draft appended
+    // `target_clang_flags(target_os)` space-joined behind it, which
+    // collapsed these two distinct targets onto one digest: "Windows"
+    // contributes `-target x86_64-pc-windows-msvc`, while the literal
+    // below contributes none (`target_os_is_windows` is an exact
+    // match) and spells the identical tail itself. The emitter treats
+    // them differently — one gets the Windows legs, the other the
+    // Linux ones — so a shared digest is SFN-677 all over again.
+    let plain = cache_key_for(src, no_dep_slugs, no_deps, "0.5.10-alpha.2", "[]", "target_absorb", "Windows");
+    let crafted = cache_key_for(src, no_dep_slugs, no_deps, "0.5.10-alpha.2", "[]", "target_absorb", "Windows -target x86_64-pc-windows-msvc");
+    assert expect_eq_bool(plain.digest == crafted.digest, false).ok;
+    _cleanup(scratch);
+}
+
+test "build_cache: cache_key_for still yields an empty digest on a length mismatch regardless of target" ![io] {
+    let scratch = _test_tmp_root("target_len_mismatch");
+    let src = scratch + "/source.sfn";
+    let dep_a = scratch + "/dep_a.layout-manifest";
+    let dep_b = scratch + "/dep_b.layout-manifest";
+    _write_file(src, "fn hello() -> string { return \"world\"; }");
+    _write_file(dep_a, "module: alpha; layout: ...");
+    _write_file(dep_b, "module: beta; layout: ...");
+    // The fail-safe empty digest (SFN-661) must not be rescued into a
+    // valid-looking key by the target fold.
+    let key_linux = cache_key_for(src, ["alpha"], [dep_a, dep_b], "0.5.10-alpha.2", "[]", "target_len_mismatch_linux", "Linux");
+    let key_windows = cache_key_for(src, ["alpha"], [dep_a, dep_b], "0.5.10-alpha.2", "[]", "target_len_mismatch_windows", "Windows");
+    assert expect_eq_str(key_linux.digest, "").ok;
+    assert expect_eq_str(key_windows.digest, "").ok;
+    _cleanup(scratch);
 }
