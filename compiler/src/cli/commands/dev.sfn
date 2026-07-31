@@ -64,6 +64,7 @@ import { starts_with, strings_equal, substring } from "../../string_utils";
 import { _strip_build_metadata, resolve_compiler_version } from "../../version";
 import { CliContext } from "../context";
 import { arena_command_def, arena_run } from "./dev_arena";
+import { clean_command_def, clean_run } from "./dev_clean";
 import { det_sweep_command_def, det_sweep_run } from "./dev_det_sweep";
 import { shard_command_def, shard_run } from "./dev_shard";
 import { toolchain_install_to_base } from "./toolchain";
@@ -592,6 +593,7 @@ fn command_def() -> Command {
     dev = with_subcommand(dev, shard_command_def());
     dev = with_subcommand(dev, arena_command_def());
     dev = with_subcommand(dev, det_sweep_command_def());
+    dev = with_subcommand(dev, clean_command_def());
     return dev;
 }
 
@@ -618,6 +620,13 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     // distinguishes it from the `bootstrap` leaves dispatched below.
     if path.length >= 2 && strings_equal(path[1], "determinism-sweep") {
         return det_sweep_run(matches, ctx);
+    }
+    // `sfn dev clean <build|dist|all>` routes to the repo-local artifact
+    // cleaner (SFN-680); the descent path's second element
+    // (`["dev", "clean", ...]`) is what keeps its `build` leaf from being
+    // taken for the `bootstrap` leaf of the same name dispatched below.
+    if path.length >= 2 && strings_equal(path[1], "clean") {
+        return clean_run(matches, ctx);
     }
     let sub: string = subcommand(matches);
     if strings_equal(sub, "fetch") { return _dev_bootstrap_fetch(); }

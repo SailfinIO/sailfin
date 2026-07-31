@@ -542,7 +542,34 @@ test-arena:
 	fi
 	@$(NATIVE_BIN) dev arena $(ARENA_ARGS)
 
+# The historical `make clean-build KEEP_SEED=0` opt-out. `sfn dev clean` reads
+# it from the environment itself, so the recipes below pass it through rather
+# than branching on it — that is what keeps the preserve-the-seed policy in
+# one place (SFN-680).
+KEEP_SEED ?= 1
+
+# Pick the first `sfn` that actually implements `dev clean` (SFN-680). A binary
+# predating it exits 2 with `unknown subcommand 'clean'`, so probing with
+# `--dry-run` — which enumerates but removes nothing — is both the capability
+# test and a rehearsal of the real call. $(NATIVE_BIN) comes first: it is the
+# freshly self-hosted compiler, so it carries the command well before any
+# pinned seed does.
+#
+# The probe (and the transitional shell paths it guards) is removable once
+# bootstrap.toml's pinned seed carries `sfn dev clean`; the Makefile's own
+# retirement is SFN-60.
+CLEAN_PROBE = for b in "$(NATIVE_BIN)" "$(SEED)"; do \
+		if [ -x "$$b" ] && KEEP_SEED="$(KEEP_SEED)" "$$b" dev clean $(1) --dry-run >/dev/null 2>&1; then \
+			bin="$$b"; break; \
+		fi; \
+	done
+
+# Remove the packaged-release output directory. Thin delegation: `sfn dev
+# clean dist` owns the behaviour. `dist/` has no preserve policy of its own,
+# so the pre-SFN-680 fallback is a plain `rm -rf` and re-owns nothing.
 clean:
+	@bin=""; $(call CLEAN_PROBE,dist); \
+	if [ -n "$$bin" ]; then exec "$$bin" dev clean dist; fi; \
 	rm -rf dist
 
 # Build the Sailfin MCP server so agentic clients (Claude Code, Claude Desktop,
@@ -551,16 +578,25 @@ clean:
 mcp-server:
 	cd tools/mcp-server && npm ci --no-audit --no-fund && npm run build
 
-# Remove local build artifacts (keeps the downloaded seed toolchain by default).
-# The pinned seed lives under build/toolchains/seed (SFN-174); preserve the
-# whole build/toolchains store so KEEP_SEED keeps it intact.
-# Use KEEP_SEED=0 to also delete build/toolchains.
+# Remove local build artifacts. Thin delegation: `sfn dev clean build` owns
+# the keep-the-seed-toolchain-store policy (SFN-680) and reads KEEP_SEED
+# itself, so this recipe passes no flag and decides nothing.
+#
+# The shell path below is transitional and runs only when no available `sfn`
+# implements `dev clean` — a fresh clone whose seed predates SFN-680, where a
+# hard failure would break `make clean-build` for the validation ladder that
+# depends on it (.claude/rules/selfhost-invariant.md). It is deliberately a
+# copy of the retired recipe, not a second implementation to maintain: delete
+# it when the pinned seed carries the command.
 .PHONY: clean-build clean-all
 clean-build:
-	@mkdir -p build
-	@for d in build/*; do \
+	@bin=""; $(call CLEAN_PROBE,build); \
+	if [ -n "$$bin" ]; then exec env KEEP_SEED="$(KEEP_SEED)" "$$bin" dev clean build; fi; \
+	echo "[clean-build] this sfn predates 'sfn dev clean' (SFN-680); using the transitional shell path"; \
+	mkdir -p build; \
+	for d in build/*; do \
 		base="$$(basename "$$d")"; \
-		if [ "$$base" = "toolchains" ] && [ "${KEEP_SEED:-1}" != "0" ]; then \
+		if [ "$$base" = "toolchains" ] && [ "$(KEEP_SEED)" != "0" ]; then \
 			continue; \
 		fi; \
 		rm -rf "$$d"; \

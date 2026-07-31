@@ -1,0 +1,195 @@
+// End-to-end coverage for SFN-680: `sfn dev clean build|dist|all` as the
+// native replacement for `make clean-build` / `make clean` / `make
+// clean-all`. Native (no-bash) `*_test.sfn` per `.claude/rules/no-bash-e2e.md`:
+// it builds a fully synthetic repo in a scratch dir and drives the
+// compiler-under-test against it as cwd — no real build tree is ever
+// touched.
+import { find, split } from "sfn/strings";
+import { clean_runner_env, nested_runner_scratch } from "sfn/test";
+
+// The compiler-under-test: `$SAILFIN_BIN` if set, else the self-hosted
+// binary relative to the repo root the runner starts from.
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+// The child's cwd is a scratch repo, which differs from this test's own
+// cwd — a relative `_sfn_bin()` would not resolve there, so absolutize it.
+fn _sfn_bin_abs() -> string ![io] {
+    let bin = _sfn_bin();
+    if bin.length > 0 && bin[0] == "/" { return bin; }
+    let exit = process.run_capture(["pwd"], []);
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    if exit != 0 { return bin; }
+    return _first_line(out) + "/" + bin;
+}
+
+fn _first_line(text: string) -> string {
+    let lines = split(text, "\n");
+    if lines.length == 0 { return text; }
+    return lines[0];
+}
+
+// A per-invocation scratch root for a synthetic repo. `SAILFIN_TEST_SCRATCH`
+// keeps it unique under the parallel pool; `/tmp` is the standalone fallback.
+fn _scratch_repo(name: string) -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    return dir + "/" + name;
+}
+
+fn _write_bootstrap_toml(repo: string) -> void ![io] {
+    fs.writeFile(repo + "/bootstrap.toml", "[seed]\n" + "version = \"0.0.0\"\n"
+        + "source = \"github-release\"\n"
+        + "repo = \"SailfinIO/sailfin\"\n"
+        + "asset_prefix = \"sailfin\"\n"
+        + "policy = \"exact\"\n\n"
+        + "[store]\n"
+        + "install_base = \"build/toolchains/seed/versions\"\n"
+        + "bin_dir = \"build/toolchains/seed/bin\"\n");
+}
+
+// Populate a fresh synthetic repo at `repo` with the bootstrap manifest plus
+// the marker files each test asserts on: `build/native`, `build/sailfin`,
+// the seed store stand-in `build/toolchains/seed/bin`, and `dist`.
+fn _seed_repo(repo: string) -> void ![io] {
+    process.run(["rm", "-rf", repo]);
+    fs.createDirectory(repo, true);
+    _write_bootstrap_toml(repo);
+    fs.createDirectory(repo + "/build/native", true);
+    fs.writeFile(repo + "/build/native/marker.txt", "native\n");
+    fs.createDirectory(repo + "/build/sailfin", true);
+    fs.writeFile(repo + "/build/sailfin/marker.txt", "sailfin\n");
+    fs.createDirectory(repo + "/build/toolchains/seed/bin", true);
+    fs.writeFile(repo + "/build/toolchains/seed/bin/marker.txt", "seed\n");
+    fs.createDirectory(repo + "/dist", true);
+    fs.writeFile(repo + "/dist/marker.txt", "dist\n");
+}
+
+test "dev clean: dry-run removes nothing" ![io] {
+    let repo = _scratch_repo("dev-clean-dry-run");
+    _seed_repo(repo);
+    let sfn = _sfn_bin_abs();
+    let child_env = clean_runner_env(nested_runner_scratch("dev_clean_dry_run"));
+
+    let exit = process.run_capture_cwd([sfn, "dev", "clean", "build", "--dry-run"], child_env, repo);
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    assert exit == 0;
+    assert find(out, "would remove: build/native", 0) >= 0;
+    assert find(out, "would remove: build/sailfin", 0) >= 0;
+    // The seed store must not be on the removal list. It IS named on the
+    // "preserved" line, so this pins the verb, not the mere mention.
+    assert find(out, "would remove: build/toolchains", 0) < 0;
+    assert find(out, "preserved: build/toolchains", 0) >= 0;
+    assert fs.exists(repo + "/build/native/marker.txt");
+    assert fs.exists(repo + "/build/sailfin/marker.txt");
+    assert fs.exists(repo + "/build/toolchains/seed/bin/marker.txt");
+    assert fs.exists(repo + "/dist/marker.txt");
+
+    process.run(["rm", "-rf", repo]);
+}
+
+test "dev clean: preserves the seed store" ![io] {
+    let repo = _scratch_repo("dev-clean-preserve-seed");
+    _seed_repo(repo);
+    let sfn = _sfn_bin_abs();
+    let child_env = clean_runner_env(nested_runner_scratch("dev_clean_preserve_seed"));
+
+    let exit = process.run_capture_cwd([sfn, "dev", "clean", "build"], child_env, repo);
+    let _out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    assert exit == 0;
+    assert ! fs.exists(repo + "/build/native/marker.txt");
+    assert ! fs.exists(repo + "/build/sailfin/marker.txt");
+    assert fs.exists(repo + "/build/toolchains/seed/bin/marker.txt");
+    assert fs.exists(repo + "/dist/marker.txt");
+
+    process.run(["rm", "-rf", repo]);
+}
+
+test "dev clean: --include-seed removes the seed store" ![io] {
+    let repo = _scratch_repo("dev-clean-include-seed");
+    _seed_repo(repo);
+    let sfn = _sfn_bin_abs();
+    let child_env = clean_runner_env(nested_runner_scratch("dev_clean_include_seed"));
+
+    let exit = process.run_capture_cwd([sfn, "dev", "clean", "build", "--include-seed"], child_env, repo);
+    let _out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    assert exit == 0;
+    assert ! fs.exists(repo + "/build/toolchains");
+
+    process.run(["rm", "-rf", repo]);
+}
+
+test "dev clean: KEEP_SEED=0 env opt-out removes the seed store" ![io] {
+    let repo = _scratch_repo("dev-clean-keep-seed-env");
+    _seed_repo(repo);
+    let sfn = _sfn_bin_abs();
+    let mut child_env = clean_runner_env(nested_runner_scratch("dev_clean_keep_seed_env"));
+    child_env.push("KEEP_SEED=0");
+
+    let exit = process.run_capture_cwd([sfn, "dev", "clean", "build"], child_env, repo);
+    let _out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    assert exit == 0;
+    assert ! fs.exists(repo + "/build/toolchains");
+
+    process.run(["rm", "-rf", repo]);
+}
+
+test "dev clean: dist clean removes dist" ![io] {
+    let repo = _scratch_repo("dev-clean-dist");
+    _seed_repo(repo);
+    let sfn = _sfn_bin_abs();
+    let child_env = clean_runner_env(nested_runner_scratch("dev_clean_dist"));
+
+    let exit = process.run_capture_cwd([sfn, "dev", "clean", "dist"], child_env, repo);
+    let _out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    assert exit == 0;
+    assert ! fs.exists(repo + "/dist");
+    assert fs.exists(repo + "/build/native/marker.txt");
+
+    process.run(["rm", "-rf", repo]);
+}
+
+test "dev clean: absent build tree is a no-op" ![io] {
+    let repo = _scratch_repo("dev-clean-absent-tree");
+    _seed_repo(repo);
+    process.run(["rm", "-rf", repo + "/build"]);
+    let sfn = _sfn_bin_abs();
+    let child_env = clean_runner_env(nested_runner_scratch("dev_clean_absent_tree"));
+
+    let exit = process.run_capture_cwd([sfn, "dev", "clean", "build"], child_env, repo);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit == 0;
+    assert find(out + err, "error", 0) < 0;
+    assert ! fs.exists(repo + "/build");
+
+    process.run(["rm", "-rf", repo]);
+}
+
+test "dev clean: refuses to run outside a compiler checkout" ![io] {
+    let repo = _scratch_repo("dev-clean-outside-checkout");
+    process.run(["rm", "-rf", repo]);
+    fs.createDirectory(repo, true);
+    fs.createDirectory(repo + "/build", true);
+    fs.writeFile(repo + "/build/marker.txt", "marker\n");
+    let sfn = _sfn_bin_abs();
+    let child_env = clean_runner_env(nested_runner_scratch("dev_clean_outside_checkout"));
+
+    let exit = process.run_capture_cwd([sfn, "dev", "clean", "build"], child_env, repo);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit != 0;
+    assert find(out + err, "bootstrap.toml", 0) >= 0;
+    assert fs.exists(repo + "/build/marker.txt");
+
+    process.run(["rm", "-rf", repo]);
+}

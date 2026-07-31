@@ -47,6 +47,7 @@ make test-unit        # Run Sailfin-native unit tests
 make test-integration # Run Sailfin-native integration tests
 make clean            # Remove dist/ artifacts
 make clean-build      # Remove build/* artifacts (keeps build/toolchains/seed by default)
+sfn dev clean dist|build|all  # Native equivalent (--include-seed, --dry-run)
 ```
 
 For debugging, place scripts in `/scratch`.

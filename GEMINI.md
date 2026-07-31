@@ -38,7 +38,7 @@ The following commands are available for development:
 - `make test`: Run the full suite.
 - `make check`: Compile (if needed) then run the full test suite.
 - `make rebuild`: Force rebuild the compiler from a released seed.
-- `make clean`: Remove packaged artifacts (`dist/`).
+- `make clean`: Remove packaged artifacts (`dist/`). Native equivalent: `sfn dev clean dist` (also `build`/`all`).
 
 ## Documentation
 
