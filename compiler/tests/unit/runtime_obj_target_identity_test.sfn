@@ -1,0 +1,126 @@
+// compiler/tests/unit/runtime_obj_target_identity_test.sfn
+//
+// Regression guard for SFN-617: a cached runtime object must carry the
+// build TARGET in its identity, so an object compiled for one target is
+// never served to a link for another.
+//
+// The defect was reproduced as a Windows-target build in a brand-new
+// work-dir receiving ELF objects and dying with `lld-link: unknown file
+// type`. Codegen was correct throughout — the objects were fetched from
+// the shared content-addressed cache, whose entry key is a hash of the
+// runtime-object key string. Because neither that key nor the on-disk
+// filename recorded a target, one target's artifacts satisfied another's
+// lookup.
+//
+// Both halves are pinned here:
+//
+//   * `_runtime_obj_key_with_target` is the CORRECTNESS half. It gates
+//     the shared cache and the work-dir `.o.key` sidecar compare, both of
+//     which are content-key driven, so a target fold here is what
+//     actually stops a cross-target reuse.
+//   * `_runtime_obj_stem` is the ISOLATION half. Distinct filenames keep
+//     two targets' objects from overwriting each other in one work-dir
+//     (and make a mismatched artifact visible in a directory listing
+//     rather than silently mislabelled).
+//
+// Pure assertions over the two composers — no build, no link, no target
+// probe — so both legs are exercised on any host.
+import { contains } from "sfn/strings";
+import { expect_eq_bool, expect_eq_str } from "sfn/test";
+
+import { _runtime_obj_key_with_target, _runtime_obj_stem } from "../../src/build/runtime_objs";
+
+// ---- The stem: filename isolation ----
+test "runtime-obj identity: stem places the target tag between basename and opt flag" ![pure] {
+    // `opt_flag` already carries its own leading `-`, so the composed stem
+    // reads `<prefix><basename>-<tag><opt_flag>`.
+    let stem = _runtime_obj_stem("sfn__runtime-native__", "/rt/sfn/clock.sfn", "-O2", "linux");
+    assert expect_eq_str(stem, "sfn__runtime-native__clock.sfn-linux-O2").ok;
+}
+
+test "runtime-obj identity: stem drops the source directory, keeping only the basename" ![pure] {
+    // Two capsules' sources collide on basename by design; the capsule
+    // prefix is what separates them, not the path.
+    let deep = _runtime_obj_stem("p__", "/a/very/deep/path/io.sfn", "-O0", "darwin");
+    assert expect_eq_str(deep, "p__io.sfn-darwin-O0").ok;
+}
+
+test "runtime-obj identity: stems differ across targets for one source" ![pure] {
+    // The SFN-617 contract on the filename half: same capsule, same
+    // source, same opt flag, different target -> different path, so the
+    // two objects coexist instead of overwriting each other.
+    let linux = _runtime_obj_stem("sfn__runtime-native__", "/rt/sfn/prelude.sfn", "-O2", "linux");
+    let windows = _runtime_obj_stem("sfn__runtime-native__", "/rt/sfn/prelude.sfn", "-O2", "windows");
+    assert expect_eq_bool(linux == windows, false).ok;
+    assert expect_eq_bool(contains(linux, "-linux-"), true).ok;
+    assert expect_eq_bool(contains(windows, "-windows-"), true).ok;
+}
+
+// ---- The key: cross-target reuse gate ----
+test "runtime-obj identity: key folds the raw target under a scheme tag" ![pure] {
+    // A host target contributes no clang flags, so the fold is exactly the
+    // scheme tag plus the raw target string. Pinning the literal keeps the
+    // scheme greppable and makes an accidental format change loud.
+    assert expect_eq_str(_runtime_obj_key_with_target("BASE", "Linux"), "BASE\ntgt1:Linux").ok;
+}
+
+test "runtime-obj identity: key folds the target clang flags alongside the target" ![pure] {
+    // Windows contributes `-target x86_64-pc-windows-msvc`. Folding the
+    // flags — not just the OS string — means a future arch or triple
+    // split lands in the key without a second edit here, matching the
+    // precedent in `clang_argv.sfn`'s toolchain key.
+    let key = _runtime_obj_key_with_target("BASE", "Windows");
+    assert expect_eq_str(key, "BASE\ntgt1:Windows -target x86_64-pc-windows-msvc").ok;
+}
+
+test "runtime-obj identity: keys differ across targets for one base key" ![pure] {
+    // The SFN-617 contract on the correctness half. Identical source
+    // content, opt flag, compiler identity and sibling deps all collapse
+    // into one base key; only the target distinguishes them.
+    let linux = _runtime_obj_key_with_target("SAME-BASE", "Linux");
+    let windows = _runtime_obj_key_with_target("SAME-BASE", "Windows");
+    let darwin = _runtime_obj_key_with_target("SAME-BASE", "Darwin");
+    assert expect_eq_bool(linux == windows, false).ok;
+    assert expect_eq_bool(linux == darwin, false).ok;
+    assert expect_eq_bool(windows == darwin, false).ok;
+}
+
+test "runtime-obj identity: key distinguishes two unrecognized targets" ![pure] {
+    // `target_artifact_tag` collapses unknown targets to a shared `other`
+    // filename bucket. That is only safe because the key keeps the RAW
+    // target, so the two still miss and recompile rather than cross-link.
+    let a = _runtime_obj_key_with_target("BASE", "Plan9");
+    let b = _runtime_obj_key_with_target("BASE", "Haiku");
+    assert expect_eq_bool(a == b, false).ok;
+}
+
+test "runtime-obj identity: an unhashable base key stays empty" ![pure] {
+    // "" is the always-recompile fallback the callers propagate when a
+    // source cannot be hashed. Folding a target onto it must not
+    // manufacture a usable key, which would cache an object under an
+    // identity that never saw its own source content.
+    assert expect_eq_str(_runtime_obj_key_with_target("", "Linux"), "").ok;
+    assert expect_eq_str(_runtime_obj_key_with_target("", "Windows"), "").ok;
+}
+
+test "runtime-obj identity: key composition is stable across calls" ![pure] {
+    // A key that varied per call would miss on every build, silently
+    // turning the cache off rather than failing loudly.
+    let first = _runtime_obj_key_with_target("BASE", "Windows");
+    let second = _runtime_obj_key_with_target("BASE", "Windows");
+    assert expect_eq_str(first, second).ok;
+}
+
+// ---- Both halves together ----
+test "runtime-obj identity: one source yields a distinct stem and key per target" ![pure] {
+    // The end-to-end SFN-617 contract: nothing about a Linux-targeted
+    // object — neither where it is written nor what it is keyed by —
+    // can satisfy a Windows-targeted lookup.
+    let src = "/rt/sfn/prelude.sfn";
+    let linux_stem = _runtime_obj_stem("sfn__runtime-native__", src, "-O2", "linux");
+    let windows_stem = _runtime_obj_stem("sfn__runtime-native__", src, "-O2", "windows");
+    let linux_key = _runtime_obj_key_with_target("BASE", "Linux");
+    let windows_key = _runtime_obj_key_with_target("BASE", "Windows");
+    assert expect_eq_bool(linux_stem == windows_stem, false).ok;
+    assert expect_eq_bool(linux_key == windows_key, false).ok;
+}

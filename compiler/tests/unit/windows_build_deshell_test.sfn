@@ -10,7 +10,11 @@
 // There is no runtime `setenv`, so a `.sfn` process cannot flip
 // `SAILFIN_HOST_OS` for an in-process call mid-test. The seam is exercised
 // by RUNNING this file with `SAILFIN_HOST_OS=Windows` in the environment
-// (the AC-2 command: `SAILFIN_HOST_OS=Windows build/bin/sfn test <file>`);
+// (the AC-2 command: `SAILFIN_HOST_OS=Windows SAILFIN_TARGET_OS=Linux
+// build/bin/sfn test <file>` — SFN-617: `build_target_os()` falls back to
+// the host OS when `SAILFIN_TARGET_OS` is unset, so without the explicit
+// override this nested `sfn test`'s own runtime-object link would target
+// Windows too and fail to actually link on a non-Windows runner);
 // the plain suite run takes the POSIX branch and asserts the guards fall
 // through to real behaviour. Both branches keep the normal suite green.
 import { _macos_sdk_link_flags } from "../../src/backend";

@@ -54,6 +54,8 @@ import {
 import {
     build_host_os,
     build_target_os,
+    target_artifact_tag,
+    target_clang_flags,
     target_condition_runtime_sfn_sources,
     target_os_is_windows
 } from "./target";
@@ -120,6 +122,20 @@ fn _runtime_obj_prefix(capsule_name: string) -> string {
         i += 1;
     }
     return out + "__";
+}
+
+// SFN-617: the single stem composer for a cached runtime object's
+// filename. Before this, the stem (`cap_prefix + basename + opt_flag`) was
+// recomposed inline at four call sites, and `clean_runtime_object_cache`'s
+// own header already warned the derivation there "MIRRORS the compile
+// paths ... keep the two in sync" — a drift hazard that is exactly how the
+// target identity got dropped for so long. Centralizing here means a
+// filename addition (this `target_tag`, or a future one) touches one
+// function. `target_tag` sits between the basename and `opt_flag` so a
+// path listing still visually clusters same-source objects, e.g.
+// `sfn__runtime-native__clock.sfn-linux-O2`.
+fn _runtime_obj_stem(cap_prefix: string, src: string, opt_flag: string, target_tag: string) -> string {
+    return cap_prefix + _path_basename(src) + "-" + target_tag + opt_flag;
 }
 
 // SFN-146: derive a STABLE runtime-relative module slug (`runtime/<rel>`)
@@ -264,7 +280,8 @@ struct PendingRuntimeObjectAssembly {
 // without a runtime dep, the caller falls through to the legacy
 // `_clang_compile_runtime_objects` helper that uses the
 // hardcoded `runtime_root/native/...` layout.
-fn _clang_compile_runtime_capsule_objects(runtime_capsules: RuntimeCapsuleArtifacts[], out_dir: string, opt_flag: string, shared_cache_root: string, jobs: int) -> RuntimeLinkInputs ![io] {
+fn _clang_compile_runtime_capsule_objects(runtime_capsules: RuntimeCapsuleArtifacts[], out_dir: string, opt_flag: string, shared_cache_root: string, jobs: int, target_os: string) -> RuntimeLinkInputs ![io] {
+    let target_tag = target_artifact_tag(target_os);
     let mut objects: string[] = [];
     let mut link_libs: string[] = [];
     let mut pending: PendingRuntimeObjectAssembly[] = [];
@@ -307,9 +324,9 @@ fn _clang_compile_runtime_capsule_objects(runtime_capsules: RuntimeCapsuleArtifa
         loop {
             if ci >= cap.c_sources.length { break; }
             let src = cap.c_sources[ci];
-            let base = cap_prefix + _path_basename(src) + opt_flag;
+            let base = _runtime_obj_stem(cap_prefix, src, opt_flag, target_tag);
             let obj = _path_join(out_dir, base + ".o");
-            let key = runtime_object_cache_key(src, opt_flag);
+            let key = _runtime_obj_key_with_target(runtime_object_cache_key(src, opt_flag), target_os);
             if key.length == 0 {
                 stats.invalid_keys = stats.invalid_keys + 1;
             }
@@ -354,9 +371,9 @@ fn _clang_compile_runtime_capsule_objects(runtime_capsules: RuntimeCapsuleArtifa
         loop {
             if li >= cap.ll_sources.length { break; }
             let src = cap.ll_sources[li];
-            let base = cap_prefix + _path_basename(src) + opt_flag;
+            let base = _runtime_obj_stem(cap_prefix, src, opt_flag, target_tag);
             let obj = _path_join(out_dir, base + ".o");
-            let key = runtime_object_cache_key(src, opt_flag);
+            let key = _runtime_obj_key_with_target(runtime_object_cache_key(src, opt_flag), target_os);
             if key.length == 0 {
                 stats.invalid_keys = stats.invalid_keys + 1;
             }
@@ -543,12 +560,13 @@ fn runtime_stamp_identity(objdir: string) -> string ![io] {
 // invocation in the parent (page-cache-hot, in-process) — the point is
 // that the ~34-source derivation stops running once per CHILD.
 // An entry with an unhashable ("") key is simply omitted.
-fn write_runtime_identity_stamp(runtime_capsules: RuntimeCapsuleArtifacts[], out_dir: string, opt_flag: string, binary_dir: string, nonce: string, runtime_identity: string) -> boolean ![io] {
+fn write_runtime_identity_stamp(runtime_capsules: RuntimeCapsuleArtifacts[], out_dir: string, opt_flag: string, binary_dir: string, nonce: string, runtime_identity: string, target_os: string) -> boolean ![io] {
     if nonce.length == 0 { return false; }
     let self_path = _resolve_self_path(binary_dir);
     if self_path.length == 0 { return false; }
     let compiler_identity = cache_compiler_identity(resolve_compiler_version(""), self_path);
     let ctx_root = _runtime_sfn_ctx_root(out_dir);
+    let target_tag = target_artifact_tag(target_os);
     let mut text: string = "v1\ninvocation=" + nonce + "\n";
     if runtime_identity.length > 0 {
         text = text + "identity=" + runtime_identity + "\n";
@@ -571,8 +589,9 @@ fn write_runtime_identity_stamp(runtime_capsules: RuntimeCapsuleArtifacts[], out
             if sj >= srcs.length { break; }
             let src = srcs[sj];
             let slug = _runtime_module_slug(cap.manifest_dir, src);
-            let obj_base = cap_prefix + _path_basename(src) + opt_flag + ".o";
-            let obj_key = _runtime_obj_key_with_sibling_deps(runtime_object_cache_key_with_identity(src, opt_flag, compiler_identity), ctx_root, slug);
+            let obj_base = _runtime_obj_stem(cap_prefix, src, opt_flag, target_tag)
+                + ".o";
+            let obj_key = _runtime_obj_key_with_target(_runtime_obj_key_with_sibling_deps(runtime_object_cache_key_with_identity(src, opt_flag, compiler_identity), ctx_root, slug), target_os);
             if obj_key.length > 0 {
                 text = text + "obj/" + obj_base + "=" + sha256_hex_of_string(obj_key)
                     + "\n";
@@ -645,6 +664,32 @@ fn _runtime_obj_key_with_sibling_deps(base_key: string, ctx_root: string, slug: 
     return key;
 }
 
+// SFN-617: fold the build TARGET into the runtime object cache key. The
+// source-content hash `runtime_object_cache_key`/`_with_identity` folds
+// cannot see the target any more than they could see the compile flags
+// (`secsplit1`), the codegen ABI (`strabi1`), or the compiler identity
+// (#1197) — this is the same defect class, fourth instance: an object
+// compiled for one target (e.g. Windows COFF) was served to a link for a
+// different target (e.g. Linux ELF) because nothing in its identity
+// recorded which target produced it. Folding `target_clang_flags` as well
+// as the raw OS string matches the existing precedent at
+// `clang_argv.sfn:117-128`, so a future arch/triple flag lands in the key
+// automatically. `tgt1:` is a bumpable scheme tag in the spirit of
+// `secsplit1-strabi1`. Empty base propagates empty, mirroring
+// `_runtime_obj_key_with_sibling_deps`'s always-recompile fallback.
+fn _runtime_obj_key_with_target(base_key: string, target_os: string) -> string {
+    if base_key.length == 0 { return ""; }
+    let mut key = base_key + "\ntgt1:" + target_os;
+    let flags = target_clang_flags(target_os);
+    let mut i: int = 0;
+    loop {
+        if i >= flags.length { break; }
+        key = key + " " + flags[i];
+        i += 1;
+    }
+    return key;
+}
+
 // SFN-50: the child compiler's environment for a runtime sfn-source
 // emit — the parent's full environment (PATH, HOME, the macOS
 // SDK/toolchain vars the child's clang/ld need, …) with the four
@@ -709,15 +754,13 @@ fn _runtime_emit_captured_stream(text: string, to_stderr: boolean) -> void ![io]
     if to_stderr { print.err(out); } else { print(out); }
 }
 
-fn _prepare_runtime_sfn_object(self_path: string, cap_prefix: string, src: string, out_dir: string, opt_flag: string, shared_cache_root: string, ctx_root: string, compiler_identity: string, manifest_dir: string) -> RuntimeSfnObjectPlan ![io] {
+fn _prepare_runtime_sfn_object(self_path: string, cap_prefix: string, src: string, out_dir: string, opt_flag: string, shared_cache_root: string, ctx_root: string, compiler_identity: string, manifest_dir: string, target_os: string) -> RuntimeSfnObjectPlan ![io] {
     let mut stats = empty_cache_stats();
     let slug = _runtime_module_slug(manifest_dir, src);
-    let ll_path = _path_join(out_dir, cap_prefix + _path_basename(src)
-        + opt_flag
-        + ".ll");
-    let obj_path = _path_join(out_dir, cap_prefix + _path_basename(src)
-        + opt_flag
-        + ".o");
+    let target_tag = target_artifact_tag(target_os);
+    let stem = _runtime_obj_stem(cap_prefix, src, opt_flag, target_tag);
+    let ll_path = _path_join(out_dir, stem + ".ll");
+    let obj_path = _path_join(out_dir, stem + ".o");
     // Content-addressed cache (#632 / #969): a previously-emitted
     // `.o` may only be reused when its sidecar `.key` matches the
     // current source content. The prior bare `fs.exists(ll_path)` /
@@ -735,9 +778,7 @@ fn _prepare_runtime_sfn_object(self_path: string, cap_prefix: string, src: strin
     // source + sibling-dep key derivation. Any mismatch falls through
     // to the full derivation below (fail-safe: the sidecar compare in
     // `_runtime_obj_cache_hit` remains the freshness authority).
-    if _runtime_stamp_cache_hit(out_dir, "obj/" + cap_prefix + _path_basename(src)
-        + opt_flag
-        + ".o", obj_path) {
+    if _runtime_stamp_cache_hit(out_dir, "obj/" + stem + ".o", obj_path) {
         stats.hits = stats.hits + 1;
         return _ready_runtime_sfn_object(obj_path, stats);
     }
@@ -745,9 +786,11 @@ fn _prepare_runtime_sfn_object(self_path: string, cap_prefix: string, src: strin
     // codegen change in `compiler/src` busts the cached runtime object
     // even when the runtime source bytes are unchanged. See
     // `runtime_object_cache_key_with_identity`.
-    let key = _runtime_obj_key_with_sibling_deps(runtime_object_cache_key_with_identity(src, opt_flag, compiler_identity), ctx_root, slug);
+    // SFN-617: the target fold wraps OUTSIDE the sibling-deps fold, same
+    // ordering `write_runtime_identity_stamp` uses for its stamped entry.
+    let key = _runtime_obj_key_with_target(_runtime_obj_key_with_sibling_deps(runtime_object_cache_key_with_identity(src, opt_flag, compiler_identity), ctx_root, slug), target_os);
     if key.length == 0 { stats.invalid_keys = stats.invalid_keys + 1; }
-    let shared_suffix = cap_prefix + _path_basename(src) + opt_flag;
+    let shared_suffix = stem;
     if _runtime_obj_cache_hit(obj_path, key) {
         stats.hits = stats.hits + 1;
         return _ready_runtime_sfn_object(obj_path, stats);
@@ -1228,7 +1271,7 @@ fn _has_prefix(s: string, prefix: string) -> boolean {
     return substring(s, 0, prefix.length) == prefix;
 }
 
-fn _compile_runtime_sfn_sources(runtime_capsules: RuntimeCapsuleArtifacts[], out_dir: string, opt_flag: string, binary_dir: string, shared_cache_root: string, jobs: int) -> RuntimeLinkInputs ![io] {
+fn _compile_runtime_sfn_sources(runtime_capsules: RuntimeCapsuleArtifacts[], out_dir: string, opt_flag: string, binary_dir: string, shared_cache_root: string, jobs: int, target_os: string) -> RuntimeLinkInputs ![io] {
     let mut objects: string[] = [];
     let empty_libs: string[] = [];
     let mut stats = empty_cache_stats();
@@ -1294,7 +1337,7 @@ fn _compile_runtime_sfn_sources(runtime_capsules: RuntimeCapsuleArtifacts[], out
         loop {
             if si >= cap.sfn_sources.length { break; }
             let src = cap.sfn_sources[si];
-            let plan = _prepare_runtime_sfn_object(self_path, cap_prefix, src, out_dir, opt_flag, shared_cache_root, ctx_root, compiler_identity, cap.manifest_dir);
+            let plan = _prepare_runtime_sfn_object(self_path, cap_prefix, src, out_dir, opt_flag, shared_cache_root, ctx_root, compiler_identity, cap.manifest_dir, target_os);
             if plan.obj_path.length == 0 {
                 _delete_runtime_sfn_object_staging(plans);
                 return _failed_runtime_link_inputs();
@@ -1404,7 +1447,7 @@ fn assemble_runtime_capsule_link_inputs(runtime_capsules: RuntimeCapsuleArtifact
     // One resolution feeds every clang phase, preserving the emit pool's
     // CPU/RAM ceiling and the SAILFIN_BUILD_JOBS=1 bisect path (SFN-612).
     let jobs = _cr_resolve_jobs();
-    let inputs = _clang_compile_runtime_capsule_objects(capsules, out_dir, opt_flag, shared_cache_root, jobs);
+    let inputs = _clang_compile_runtime_capsule_objects(capsules, out_dir, opt_flag, shared_cache_root, jobs, target_os);
     if !inputs.success { return _failed_runtime_link_inputs(); }
     let mut objects: string[] = inputs.object_paths;
     // Prepend the Darwin OpenSSL keg `-L` (if any) so `-lssl`/`-lcrypto`
@@ -1421,7 +1464,7 @@ fn assemble_runtime_capsule_link_inputs(runtime_capsules: RuntimeCapsuleArtifact
     let mut stats = inputs.stats;
     // `sfn-sources` + `prelude-entry` are materialized here (the
     // prelude rides the same emit path as of #940).
-    let sfn_inputs = _compile_runtime_sfn_sources(capsules, out_dir, opt_flag, binary_dir, shared_cache_root, jobs);
+    let sfn_inputs = _compile_runtime_sfn_sources(capsules, out_dir, opt_flag, binary_dir, shared_cache_root, jobs, target_os);
     if !sfn_inputs.success { return _failed_runtime_link_inputs(); }
     stats = merge_cache_stats(stats, sfn_inputs.stats);
     let mut soi: int = 0;
@@ -1474,7 +1517,7 @@ fn assemble_runtime_capsule_link_inputs(runtime_capsules: RuntimeCapsuleArtifact
                 // `.import-deps` sidecar — the threaded context root
                 // is inert here and the prelude keeps its legacy
                 // descriptor-based emit byte-for-byte (#940 Risk R2).
-                let prelude_plan = _prepare_runtime_sfn_object(self_path, cap_prefix, cap.prelude_entry, out_dir, opt_flag, shared_cache_root, _runtime_sfn_ctx_root(out_dir), compiler_identity, cap.manifest_dir);
+                let prelude_plan = _prepare_runtime_sfn_object(self_path, cap_prefix, cap.prelude_entry, out_dir, opt_flag, shared_cache_root, _runtime_sfn_ctx_root(out_dir), compiler_identity, cap.manifest_dir, target_os);
                 if prelude_plan.obj_path.length == 0 {
                     _delete_runtime_sfn_object_staging(prelude_plans);
                     return _failed_runtime_link_inputs();
@@ -1501,6 +1544,23 @@ fn assemble_runtime_capsule_link_inputs(runtime_capsules: RuntimeCapsuleArtifact
     };
 }
 
+// SFN-617/SFN-641: append `path` to the removal argv only when it exists.
+// Sweeping the closed target tag set multiplies the candidate list by the
+// number of targets, and measured against the real 29-source runtime
+// manifest that is 9,202 bytes of argv per tag — 36,808 across four, past
+// the 32,767-byte Windows `CreateProcess` lpCommandLine cap SFN-641
+// tracks. `rm -f` tolerates a missing path, so the unfiltered form was
+// correct but oversized; a tree only ever holds artifacts for the targets
+// it actually built, so filtering restores the single-target argv to its
+// pre-sweep size instead of 4x while still sweeping every target really
+// present. Arrays are reference-semantic here (same in-place growth idiom
+// as `_stage_imported_platform_externs`), so this mutates the caller's
+// argv directly rather than returning a copy.
+fn _push_if_present(argv: string[], path: string) ![io] {
+    if !fs.exists(path) { return; }
+    argv.push(path);
+}
+
 // SFN-14: force a from-scratch runtime-object rebuild for `sfn build
 // --clean`. `cache_clean` (`build_cache.sfn`) wipes only the
 // content-addressed cache root (`cache_root()` → `build/cache/<schema>`);
@@ -1511,59 +1571,74 @@ fn assemble_runtime_capsule_link_inputs(runtime_capsules: RuntimeCapsuleArtifact
 // the `.o`, its content-key `.key` sidecar, and (for the sfn-source /
 // prelude-entry emit path) the `.ll` intermediate — leaving `out_dir`'s
 // unrelated, shared artifacts (`program.ll`/`.o`, the rt-import-context
-// tree) untouched. The filename derivation MIRRORS the compile paths in
-// `_clang_compile_runtime_capsule_objects` and `_prepare_runtime_sfn_object`
-// (`cap_prefix + basename + opt_flag`); keep the two in sync. Scope is the
-// current runtime source set — a source removed since the last build
-// leaves an orphaned `.o`, which is inert (never linked, never reused: the
-// link consumes the freshly-computed object paths and every reuse is
-// content-key gated). `rm -f` is idempotent, so an unpopulated cache is a
-// clean no-op.
+// tree) untouched. The filename derivation MIRRORS `_runtime_obj_stem`,
+// the single stem composer every compile path now shares; keep the two in
+// sync. SFN-617: the stem is now target-tagged, so cleaning only the
+// active target's stem would leave a stale other-target object behind;
+// the sweep therefore covers the closed tag set (`target_artifact_tag`'s
+// range) rather than just the resolved build target.
+//
+// The sweep is complete on the TARGET axis only. It resolves stems from
+// the capsule set as handed in, which the `--clean` call site
+// (`cli/commands/build.sfn`) passes unconditioned, so a Windows target's
+// swapped-in and appended `platform/*_windows` modules are not named here
+// and survive `--clean`; it is likewise `-O2`-only, so the `sfn test`
+// link path's `-O0` objects are missed. Both gaps predate the tag sweep
+// and are tracked in SFN-678 — do not read this function as a total
+// clean until that lands. Scope is otherwise the current runtime source
+// set: a source removed since the last build leaves an orphaned `.o`,
+// which is inert (never linked, never reused — the link consumes the
+// freshly-computed object paths and every reuse is content-key gated).
+// `rm -f` is idempotent, so an unpopulated cache is a clean no-op.
 fn clean_runtime_object_cache(runtime_capsules: RuntimeCapsuleArtifacts[], out_dir: string, opt_flag: string) ![io] {
+    let tags: string[] = ["linux", "darwin", "windows", "other"];
     let mut argv: string[] = ["rm", "-f"];
     let mut i: int = 0;
     loop {
         if i >= runtime_capsules.length { break; }
         let cap = runtime_capsules[i];
         let cap_prefix = _runtime_obj_prefix(cap.capsule_name);
-        // c-sources / ll-sources: `.o` + `.key` (no `.ll` intermediate).
-        let mut ci: int = 0;
+        let mut ti: int = 0;
         loop {
-            if ci >= cap.c_sources.length { break; }
-            let obj = _path_join(out_dir, cap_prefix + _path_basename(cap.c_sources[ci])
-                + opt_flag
-                + ".o");
-            argv.push(obj);
-            argv.push(obj + ".key");
-            ci += 1;
-        }
-        let mut li: int = 0;
-        loop {
-            if li >= cap.ll_sources.length { break; }
-            let obj = _path_join(out_dir, cap_prefix + _path_basename(cap.ll_sources[li])
-                + opt_flag
-                + ".o");
-            argv.push(obj);
-            argv.push(obj + ".key");
-            li += 1;
-        }
-        // sfn-sources: `.o` + `.key` + the emitted `.ll` intermediate.
-        let mut si: int = 0;
-        loop {
-            if si >= cap.sfn_sources.length { break; }
-            let base = cap_prefix + _path_basename(cap.sfn_sources[si])
-                + opt_flag;
-            argv.push(_path_join(out_dir, base + ".o"));
-            argv.push(_path_join(out_dir, base + ".o.key"));
-            argv.push(_path_join(out_dir, base + ".ll"));
-            si += 1;
-        }
-        // prelude-entry rides the same sfn emit path (`.o`/`.key`/`.ll`).
-        if cap.prelude_entry.length > 0 {
-            let base = cap_prefix + _path_basename(cap.prelude_entry) + opt_flag;
-            argv.push(_path_join(out_dir, base + ".o"));
-            argv.push(_path_join(out_dir, base + ".o.key"));
-            argv.push(_path_join(out_dir, base + ".ll"));
+            if ti >= tags.length { break; }
+            let tag = tags[ti];
+            // c-sources / ll-sources: `.o` + `.key` (no `.ll` intermediate).
+            let mut ci: int = 0;
+            loop {
+                if ci >= cap.c_sources.length { break; }
+                let obj = _path_join(out_dir, _runtime_obj_stem(cap_prefix, cap.c_sources[ci], opt_flag, tag)
+                    + ".o");
+                _push_if_present(argv, obj);
+                _push_if_present(argv, obj + ".key");
+                ci += 1;
+            }
+            let mut li: int = 0;
+            loop {
+                if li >= cap.ll_sources.length { break; }
+                let obj = _path_join(out_dir, _runtime_obj_stem(cap_prefix, cap.ll_sources[li], opt_flag, tag)
+                    + ".o");
+                _push_if_present(argv, obj);
+                _push_if_present(argv, obj + ".key");
+                li += 1;
+            }
+            // sfn-sources: `.o` + `.key` + the emitted `.ll` intermediate.
+            let mut si: int = 0;
+            loop {
+                if si >= cap.sfn_sources.length { break; }
+                let base = _runtime_obj_stem(cap_prefix, cap.sfn_sources[si], opt_flag, tag);
+                _push_if_present(argv, _path_join(out_dir, base + ".o"));
+                _push_if_present(argv, _path_join(out_dir, base + ".o.key"));
+                _push_if_present(argv, _path_join(out_dir, base + ".ll"));
+                si += 1;
+            }
+            // prelude-entry rides the same sfn emit path (`.o`/`.key`/`.ll`).
+            if cap.prelude_entry.length > 0 {
+                let base = _runtime_obj_stem(cap_prefix, cap.prelude_entry, opt_flag, tag);
+                _push_if_present(argv, _path_join(out_dir, base + ".o"));
+                _push_if_present(argv, _path_join(out_dir, base + ".o.key"));
+                _push_if_present(argv, _path_join(out_dir, base + ".ll"));
+            }
+            ti += 1;
         }
         i += 1;
     }
@@ -1579,5 +1654,7 @@ export {
     runtime_stamp_identity,
     write_runtime_identity_stamp,
     _runtime_bundle_exists,
-    _openssl_link_search_flags
+    _openssl_link_search_flags,
+    _runtime_obj_stem,
+    _runtime_obj_key_with_target
 };
