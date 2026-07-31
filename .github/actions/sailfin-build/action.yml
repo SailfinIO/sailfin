@@ -103,26 +103,73 @@ runs:
         echo "[ci] seed binary: build/toolchains/seed/bin/sfn"
         build/toolchains/seed/bin/sfn version
 
+    # Module-layout fingerprint: the sorted set of `.sfn` PATHS, without
+    # their contents. It segments the build-cache key space below so a
+    # restore can never span a module split/add/remove/rename. See
+    # `scripts/module_layout_fingerprint.sh` for the full rationale
+    # (SFN-661).
+    - name: Compute module layout fingerprint
+      id: layout
+      if: ${{ inputs.mode != 'skip-build' }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        # Assign first, THEN echo. `echo "fp=$(cmd)"` returns echo's status,
+        # so a failing script (missing sha256sum, missing root) would yield
+        # an empty `fp` on a GREEN step — silently disabling the guard, and
+        # worse, diverging this key from the save key in build-quality.yml,
+        # which strands PR CI on a permanently cold cache.
+        fp="$(bash scripts/module_layout_fingerprint.sh)"
+        [ -n "$fp" ] || { echo "[ci] module layout fingerprint is empty" >&2; exit 1; }
+        echo "fp=$fp" >> "$GITHUB_OUTPUT"
+
     # Restore the content-addressed module IR cache (`build/cache/`,
     # written by `<seed> build -p compiler`). Keys are content-safe:
     # `cache_key_for` (compiler/src/build_cache.sfn) hashes source
-    # content + sorted dep-manifest hashes + compiler version + flags —
-    # no absolute paths or mtimes — so a restored cache is reusable
-    # across runners and runs. Changed modules simply miss and re-emit;
-    # stale entries are never looked up (and LRU-evicted by GitHub).
-    # restore-keys fall back to the most recent cache for this
-    # target+seed (then any cache for this target), so a PR warms from
-    # main's cache (primed by build-quality.yml) and from its own
-    # earlier pushes.
+    # content + sorted (dep slug, dep-manifest hash) pairs + compiler
+    # version + flags — no absolute paths or mtimes — so a restored
+    # cache is reusable across runners and runs.
+    #
+    # A restored cache may have been built from a DIFFERENT source tree;
+    # safety has to come from the key, because the restore itself is a
+    # prefix match. A module whose inputs changed derives a different
+    # key, so its stale entry is not addressable and it re-emits.
+    #
+    # The hole SFN-661 closed: a module's emitted symbols depend on the
+    # SLUG of each import's provider (call sites mangle to
+    # `<symbol>__<provider_slug>`), and a slug is derived from a path.
+    # Splitting `parser/declarations.sfn` into `parser/declarations/mod.sfn`
+    # therefore re-mangled the call sites of an UNCHANGED
+    # `parser/statements.sfn`. Both modules' layout manifests were empty
+    # (neither declares a struct), so the dep component of the key was
+    # byte-identical and `statements` hit its pre-split entry — its IR
+    # still calling `parse_function__parser__declarations`, which no
+    # longer existed. The link failed on undefined references.
+    #
+    # `cache_key_for` now mixes the dep slug in, which fixes this at the
+    # source. But CI's `make compile` is driven by the PINNED SEED, so
+    # that fix is inert here until a seed carrying it is pinned — which
+    # is why the layout fingerprint above is part of the key AND the
+    # restore-keys prefix. That segmentation is seed-independent: a
+    # layout change lands in a fresh key space with nothing to restore
+    # from, so the seed cannot be handed a cache that predates the split.
+    #
+    # restore-keys therefore falls back to the most recent cache for this
+    # target+seed+layout, so a PR still warms from main's cache (primed
+    # by build-quality.yml) and from its own earlier pushes — content-only
+    # changes, the overwhelmingly common case, are unaffected. The looser
+    # target-only fallback is deliberately gone: it spans a seed version
+    # change, and entries emitted by a different seed are keyed on a
+    # compiler identity this build cannot reproduce, so they were dead
+    # weight in the restore rather than useful warmth.
     - name: Restore build cache (content-addressed module IR)
       if: ${{ inputs.mode != 'skip-build' }}
       uses: actions/cache@v4
       with:
         path: build/cache
-        key: sailfin-buildcache-${{ inputs.target }}-${{ inputs.seed_version }}-${{ hashFiles('compiler/src/**/*.sfn', 'runtime/**/*.sfn', 'compiler/capsule.toml', 'bootstrap.toml') }}
+        key: sailfin-buildcache-${{ inputs.target }}-${{ inputs.seed_version }}-${{ steps.layout.outputs.fp }}-${{ hashFiles('compiler/src/**/*.sfn', 'runtime/**/*.sfn', 'compiler/capsule.toml', 'bootstrap.toml') }}
         restore-keys: |
-          sailfin-buildcache-${{ inputs.target }}-${{ inputs.seed_version }}-
-          sailfin-buildcache-${{ inputs.target }}-
+          sailfin-buildcache-${{ inputs.target }}-${{ inputs.seed_version }}-${{ steps.layout.outputs.fp }}-
 
     # Restore the per-test linked-binary cache (`build/cache/test-bin`,
     # #1230/#1233) under its OWN key prefix, separate from the module-IR

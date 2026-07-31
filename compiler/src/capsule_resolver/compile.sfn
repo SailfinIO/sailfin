@@ -42,7 +42,8 @@ import {
     _cr_scratch_root
 } from "./paths";
 import {
-    _cr_collect_per_source_dep_manifests,
+    _cr_collect_per_source_dep_slugs,
+    _cr_dep_manifest_paths_for_slugs,
     _cr_manifests_to_asm_paths,
     _cr_stage_import_deps,
     _cr_stage_one
@@ -76,7 +77,7 @@ import {
 // don't yet have `binary_dir` plumbed) keep their existing path;
 // their typical capsule dep counts are well under the in-process
 // budget.
-fn _cr_compile_one(src: CapsuleSource, dep_manifests: string[], cache_root_path: string, config: BuildCacheConfig, compiler_version: string, flags_canonical: string, sailfin_exe: string, work_dir: string) -> ModuleCacheEvent ![io] {
+fn _cr_compile_one(src: CapsuleSource, dep_slugs: string[], dep_manifests: string[], cache_root_path: string, config: BuildCacheConfig, compiler_version: string, flags_canonical: string, sailfin_exe: string, work_dir: string) -> ModuleCacheEvent ![io] {
     if !fs.exists(src.source_path) {
         print.err("capsule-resolver: missing source file: " + src.source_path);
         return _cr_module_cache_event_failure(src.slug);
@@ -95,7 +96,7 @@ fn _cr_compile_one(src: CapsuleSource, dep_manifests: string[], cache_root_path:
     let mut lookup_attempted: boolean = false;
     if config.enabled {
         lookup_attempted = true;
-        cache_key = cache_key_for(src.source_path, dep_manifests, compiler_version, flags_canonical, src.slug);
+        cache_key = cache_key_for(src.source_path, dep_slugs, dep_manifests, compiler_version, flags_canonical, src.slug);
         if cache_lookup_artifact(cache_root_path, cache_key, "ll") {
             if cache_copy_artifact_to(cache_root_path, cache_key, "ll", src.ll_path) {
                 if config.trace { print.err("[cache hit] " + src.slug); }
@@ -248,7 +249,12 @@ fn compile_capsule_modules(sources: CapsuleSource[], slug_universe_extra: Capsul
     // (`_cr_manifests_to_asm_paths` → `compile_to_llvm_file_with_module_imports`)
     // loads the entry's effect surface — matching the subprocess sidecar
     // path below.
-    let per_source_dep_manifests = _cr_collect_per_source_dep_manifests(sources, slug_universe, work_dir);
+    // SFN-661: the one import scan yields the dep SLUGS; the manifest
+    // paths are derived from them. Both feed `cache_key_for` — the
+    // slugs pin the provider identity that determines call-site name
+    // mangling, the manifests pin the provider's layout bytes.
+    let per_source_dep_slugs = _cr_collect_per_source_dep_slugs(sources, slug_universe);
+    let per_source_dep_manifests = _cr_dep_manifest_paths_for_slugs(per_source_dep_slugs, work_dir);
     // #957: stage the per-module `.import-deps` sidecars the
     // `emit --import-context` subprocess reads to enforce cross-module
     // effect transitivity on the build path. Written before any
@@ -360,7 +366,7 @@ fn compile_capsule_modules(sources: CapsuleSource[], slug_universe_extra: Capsul
             let mut lookup_attempted: boolean = false;
             if config.enabled {
                 lookup_attempted = true;
-                cache_key = cache_key_for(src.source_path, per_source_dep_manifests[pi], compiler_version, flags_canonical, src.slug);
+                cache_key = cache_key_for(src.source_path, per_source_dep_slugs[pi], per_source_dep_manifests[pi], compiler_version, flags_canonical, src.slug);
                 if cache_lookup_artifact(cache_root_path, cache_key, "ll") {
                     if cache_copy_artifact_to(cache_root_path, cache_key, "ll", src.ll_path) {
                         if config.trace {
@@ -478,7 +484,7 @@ fn compile_capsule_modules(sources: CapsuleSource[], slug_universe_extra: Capsul
     let mut i: int = 0;
     loop {
         if i >= sources.length { break; }
-        let evt = _cr_compile_one(sources[i], per_source_dep_manifests[i], cache_root_path, config, compiler_version, flags_canonical, sailfin_exe, work_dir);
+        let evt = _cr_compile_one(sources[i], per_source_dep_slugs[i], per_source_dep_manifests[i], cache_root_path, config, compiler_version, flags_canonical, sailfin_exe, work_dir);
         if !evt.success {
             // Stage C2c: even on the bail path we surface the
             // events accumulated so far. Sidecar emission is

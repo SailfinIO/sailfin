@@ -18,7 +18,13 @@
 // Each test uses its own `/tmp` namespace so parallel runs don't collide,
 // and cleans up on exit.
 import { sha256_of_file } from "../../src/build_cache";
-import { _cr_srchash_path, _cr_stage_cache_hit, _cr_write_srchash } from "../../src/capsule_resolver/staging";
+import {
+    _cr_collect_per_source_dep_slugs,
+    _cr_srchash_path,
+    _cr_stage_cache_hit,
+    _cr_write_srchash
+} from "../../src/capsule_resolver/staging";
+import { CapsuleSource } from "../../src/capsule_resolver/types";
 
 // --------------------------------------------------------------
 // Fixture helpers
@@ -145,5 +151,76 @@ test "stage cache: sha256_of_file is content-addressed, not mtime-addressed" ![i
     // Different bytes -> different hash.
     fs.writeFile(a, "fn y() { }\n");
     assert sha256_of_file(a) != h1;
+    _sct_cleanup(root);
+}
+
+// --------------------------------------------------------------
+// Per-source dep slugs (SFN-661)
+// --------------------------------------------------------------
+// `_cr_collect_per_source_dep_slugs` is the resolution half of the
+// module-split cache fix: `cache_key_for` now mixes a dependency's
+// slug into the digest, so the resolver must be able to report, per
+// source, the slugs of its direct imports through the real import
+// scan (including the directory-import fallback `./dep` -> `dep/mod.sfn`
+// when `dep.sfn` does not exist). This test proves that splitting a
+// dependency module changes its dependents' reported dep slugs even
+// when the dependent's own source bytes are untouched — exactly the
+// input that busts the dependent's cache key.
+test "capsule resolver: splitting a dependency module changes its dependents' dep slugs" ![io] {
+    let root = _sct_tmp_root("split_dep_slugs");
+    let a_path = root + "/a.sfn";
+    let a_body = "import { helper } from \"./dep\";\nfn use_helper() -> int { return helper(); }\n";
+    fs.writeFile(a_path, a_body);
+
+    // Before the split: a single `dep.sfn` provides `helper`.
+    let dep_path = root + "/dep.sfn";
+    fs.writeFile(dep_path, "export fn helper() -> int { return 1; }\n");
+
+    let a_src = CapsuleSource {
+        spec: "",
+        source_path: a_path,
+        slug: "a",
+        ll_path: ""
+    };
+    let dep_src = CapsuleSource {
+        spec: "",
+        source_path: dep_path,
+        slug: "dep",
+        ll_path: ""
+    };
+    let before = _cr_collect_per_source_dep_slugs([a_src, dep_src], [a_src, dep_src]);
+    assert before[0].length == 1;
+    assert before[0][0] == "dep";
+
+    // Perform the split: delete `dep.sfn`, replace with `dep/mod.sfn`
+    // (re-exporting) + `dep/impl.sfn` (the real definition). `a.sfn`
+    // is left byte-identical.
+    process.run(["rm", "-f", dep_path]);
+    process.run(["mkdir", "-p", root + "/dep"]);
+    let dep_mod_path = root + "/dep/mod.sfn";
+    let dep_impl_path = root + "/dep/impl.sfn";
+    fs.writeFile(dep_impl_path, "export fn helper() -> int { return 1; }\n");
+    fs.writeFile(dep_mod_path, "export { helper } from \"./impl\";\n");
+    assert fs.readFile(a_path) == a_body;
+
+    let dep_mod_src = CapsuleSource {
+        spec: "",
+        source_path: dep_mod_path,
+        slug: "dep/mod",
+        ll_path: ""
+    };
+    let dep_impl_src = CapsuleSource {
+        spec: "",
+        source_path: dep_impl_path,
+        slug: "dep/impl",
+        ll_path: ""
+    };
+    let after = _cr_collect_per_source_dep_slugs([a_src, dep_mod_src], [a_src, dep_mod_src, dep_impl_src]);
+    // `a.sfn` did not change, but its resolved dep slug did — this is
+    // the input `cache_key_for` now hashes to bust `a`'s stale cache
+    // entry after the split (SFN-661).
+    assert after[0].length == 1;
+    assert after[0][0] == "dep/mod";
+
     _sct_cleanup(root);
 }

@@ -1,0 +1,157 @@
+// Regression coverage for SFN-661. `scripts/module_layout_fingerprint.sh`
+// hashes the sorted set of `.sfn` PATHS (not their bytes) so the build-cache
+// key space can be segmented by module layout: a split/rename/add/remove
+// lands in a fresh key space with nothing to restore from, closing the
+// window where a stale cache entry keyed before the dep slug entered
+// `cache_key_for` could serve IR mangled against a symbol that no longer
+// exists.
+//
+// This guard is seed-independent, which is why it exists at all: CI's
+// `make compile` is driven by the PINNED SEED, so the `cache_key_for`
+// fix is inert there until a seed carrying it is pinned.
+//
+// The wiring tests below guard the companion hazard: the save key (in
+// `.github/actions/sailfin-build/action.yml` and the `build-quality`
+// job) and the restore prefix (the same action, plus the warmer job) must
+// never drift apart, or PR CI is stranded on a permanently cold cache.
+import { contains } from "sfn/strings";
+
+fn _repo_root() -> string ![io] {
+    let mut repo = env.get("SAILFIN_REPO_ROOT");
+    if repo.length == 0 { repo = "."; }
+    return repo;
+}
+
+// `run_capture`'s env is empty, not inherited — the script needs
+// `sha256sum`/`shasum`, `find`, and `sort` on `PATH`.
+fn _script_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    return e;
+}
+
+fn _fingerprint(root: string) -> string ![io] {
+    let script = _repo_root() + "/scripts/module_layout_fingerprint.sh";
+    let _exit = process.run_capture(["bash", script, root], _script_env());
+    let output = process.capture_take_stdout();
+    let _error = process.capture_take_stderr();
+    return output;
+}
+
+// --------------------------------------------------------------
+// Script behaviour
+// --------------------------------------------------------------
+test "module layout fingerprint: deterministic across repeated runs" ![io] {
+    let scratch = env.get("SAILFIN_TEST_SCRATCH")
+        + "/module-layout-fingerprint-determinism";
+    process.run(["rm", "-rf", scratch]);
+    fs.createDirectory(scratch, true);
+    fs.writeFile(scratch + "/main.sfn", "fn value() -> int { return 1; }\n");
+
+    let first = _fingerprint(scratch);
+    let second = _fingerprint(scratch);
+
+    assert first.length > 0;
+    assert first == second;
+    process.run(["rm", "-rf", scratch]);
+}
+
+test "module layout fingerprint: content edits do not change it" ![io] {
+    let scratch = env.get("SAILFIN_TEST_SCRATCH")
+        + "/module-layout-fingerprint-content";
+    process.run(["rm", "-rf", scratch]);
+    fs.createDirectory(scratch, true);
+    let source = scratch + "/main.sfn";
+    fs.writeFile(source, "fn value() -> int { return 1; }\n");
+    let before = _fingerprint(scratch);
+
+    // The set of `.sfn` paths is unchanged, so appending a comment must
+    // not move the fingerprint — it hashes paths only, deliberately
+    // WITHOUT contents (SFN-661).
+    fs.writeFile(source, "fn value() -> int { return 1; }\n// a comment\n");
+    let after = _fingerprint(scratch);
+
+    assert before.length > 0;
+    assert before == after;
+    process.run(["rm", "-rf", scratch]);
+}
+
+test "module layout fingerprint: adding a module changes it" ![io] {
+    let scratch = env.get("SAILFIN_TEST_SCRATCH")
+        + "/module-layout-fingerprint-add";
+    process.run(["rm", "-rf", scratch]);
+    fs.createDirectory(scratch, true);
+    fs.writeFile(scratch + "/main.sfn", "fn value() -> int { return 1; }\n");
+    let before = _fingerprint(scratch);
+
+    fs.writeFile(scratch + "/extra.sfn", "fn other() -> int { return 2; }\n");
+    let after = _fingerprint(scratch);
+
+    assert before != after;
+    process.run(["rm", "-rf", scratch]);
+}
+
+// --------------------------------------------------------------
+// CI wiring agreement
+// --------------------------------------------------------------
+// The save key and the restore-keys prefix must carry the same
+// `steps.layout.outputs.fp` value at every `sailfin-buildcache-` site, or
+// a PR restore can silently fall back to the target-only cache and never
+// warm (SFN-661). Three sites: the composite action's key + restore-keys,
+// the `build-quality` job's save key, and the warmer job's key +
+// restore-keys.
+fn _read_repo_file(path: string) -> string ![io] {
+    return fs.readFile(_repo_root() + "/" + path);
+}
+
+// Count occurrences of `needle` in `text`. Asserting on COUNTS rather
+// than on whole key lines is deliberate: an exact-line assertion breaks
+// on any incidental whitespace or component reordering, while the
+// invariant that matters is simply "every `sailfin-buildcache-` site
+// carries the fingerprint". A count mismatch is exactly the drift that
+// would strand PR CI on a cold cache (SFN-661).
+fn _count(text: string, needle: string) -> int {
+    if needle.length == 0 { return 0; }
+    let mut n: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i + needle.length > text.length { break; }
+        if substring(text, i, i + needle.length) == needle {
+            n += 1;
+            i += needle.length;
+        } else { i += 1; }
+    }
+    return n;
+}
+
+test "module layout fingerprint: every build-cache key site carries the fp" ![io] {
+    let action = _read_repo_file(".github/actions/sailfin-build/action.yml");
+    let workflow = _read_repo_file(".github/workflows/build-quality.yml");
+
+    // Count `steps.layout.outputs.fp`, NOT `sailfin-buildcache-`: the
+    // latter also appears in explanatory prose, so it is not a usable
+    // invariant. Every real key site interpolates the fp exactly once,
+    // which makes the fp count the honest measure of coverage.
+    // The action: one key + one restore-keys prefix, one fp step.
+    assert contains(action, "id: layout");
+    assert _count(action, "steps.layout.outputs.fp") == 2;
+    assert _count(action, "id: layout") == 1;
+
+    // build-quality.yml: the build-quality job's save key, plus the
+    // warmer job's key and restore-keys prefix — three sites across two
+    // jobs, each job defining its own fp step.
+    assert _count(workflow, "steps.layout.outputs.fp") == 3;
+    assert _count(workflow, "id: layout") == 2;
+}
+
+test "module layout fingerprint: no site uses the failure-swallowing echo form" ![io] {
+    // `echo "fp=$(bash ...)"` returns echo's exit status, not the
+    // script's — a failing script would still exit the step green with
+    // an empty fp, silently diverging the save key from the restore
+    // prefix (SFN-661).
+    let action = _read_repo_file(".github/actions/sailfin-build/action.yml");
+    let workflow = _read_repo_file(".github/workflows/build-quality.yml");
+    assert ! contains(action, "echo \"fp=$(bash");
+    assert ! contains(workflow, "echo \"fp=$(bash");
+}
