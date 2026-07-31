@@ -102,7 +102,7 @@ test "target: host runtime module set is unchanged" ![pure] {
     assert expect_eq_str_array(target_condition_runtime_sfn_sources(sources, "Darwin"), sources).ok;
 }
 
-test "target: Windows swaps process.sfn, rlimit.sfn, rand.sfn, and tls.sfn to their Win32 siblings, and appends the six anchor-less siblings" ![pure] {
+test "target: Windows swaps process.sfn, rlimit.sfn, rand.sfn, tls.sfn, and fs_exec_mode.sfn to their Win32 siblings, and appends the six anchor-less siblings" ![pure] {
     // SFN-549: rlimit.sfn used to be DROPPED here (a no-op stub in
     // windows_stubs.ll resolved apply_default_mem_limit for the mingw
     // bridge only); the native MSVC path no longer links that stub, so
@@ -112,15 +112,20 @@ test "target: Windows swaps process.sfn, rlimit.sfn, rand.sfn, and tls.sfn to th
     // openssl_absent_windows.sfn — Windows has no OpenSSL to link, so the
     // fail-closed native module replaces the OpenSSL surface outright
     // rather than leaving `-lssl -lcrypto`'s externs unresolved.
-    // process.sfn → its existing Win32 sibling. The six anchor-less
-    // siblings (realpath_windows.sfn, clock_windows.sfn,
-    // pthread_windows.sfn, popen_windows.sfn, mkstemp_windows.sfn,
-    // strcasestr_windows.sfn) have no POSIX .sfn counterpart to swap FROM
-    // (each backs a bare libc/pthreads symbol, not a Sailfin module), so
-    // they are APPENDED at the end rather than replacing a matched
-    // basename. Every other module is preserved in order.
-    let sources: string[] = ["/rt/sfn/runtime_globals.sfn", "/rt/sfn/process.sfn", "/rt/sfn/platform/rlimit.sfn", "/rt/sfn/platform/rand.sfn", "/rt/sfn/platform/tls.sfn", "/rt/sfn/io.sfn",];
-    let expected: string[] = ["/rt/sfn/runtime_globals.sfn", "/rt/sfn/platform/process_windows.sfn", "/rt/sfn/platform/rlimit_windows.sfn", "/rt/sfn/platform/rand_windows.sfn", "/rt/sfn/platform/openssl_absent_windows.sfn", "/rt/sfn/io.sfn", "/rt/sfn/platform/realpath_windows.sfn", "/rt/sfn/platform/clock_windows.sfn", "/rt/sfn/platform/pthread_windows.sfn", "/rt/sfn/platform/popen_windows.sfn", "/rt/sfn/platform/mkstemp_windows.sfn", "/rt/sfn/platform/strcasestr_windows.sfn",];
+    // process.sfn → its existing Win32 sibling. fs_exec_mode.sfn swaps to
+    // fs_exec_mode_windows.sfn: POSIX X_OK (1) is not a legal UCRT
+    // `_access` mode, and passing it terminates the process via
+    // `_invalid_parameter_noinfo` -> `__fastfail` (0xC0000409) rather
+    // than returning an error, so the sibling supplies F_OK (SFN-649).
+    // The six anchor-less siblings (realpath_windows.sfn,
+    // clock_windows.sfn, pthread_windows.sfn, popen_windows.sfn,
+    // mkstemp_windows.sfn, strcasestr_windows.sfn) have no POSIX .sfn
+    // counterpart to swap FROM (each backs a bare libc/pthreads symbol,
+    // not a Sailfin module), so they are APPENDED at the end rather than
+    // replacing a matched basename. Every other module is preserved in
+    // order.
+    let sources: string[] = ["/rt/sfn/runtime_globals.sfn", "/rt/sfn/process.sfn", "/rt/sfn/platform/rlimit.sfn", "/rt/sfn/platform/rand.sfn", "/rt/sfn/platform/tls.sfn", "/rt/sfn/platform/fs_exec_mode.sfn", "/rt/sfn/io.sfn",];
+    let expected: string[] = ["/rt/sfn/runtime_globals.sfn", "/rt/sfn/platform/process_windows.sfn", "/rt/sfn/platform/rlimit_windows.sfn", "/rt/sfn/platform/rand_windows.sfn", "/rt/sfn/platform/openssl_absent_windows.sfn", "/rt/sfn/platform/fs_exec_mode_windows.sfn", "/rt/sfn/io.sfn", "/rt/sfn/platform/realpath_windows.sfn", "/rt/sfn/platform/clock_windows.sfn", "/rt/sfn/platform/pthread_windows.sfn", "/rt/sfn/platform/popen_windows.sfn", "/rt/sfn/platform/mkstemp_windows.sfn", "/rt/sfn/platform/strcasestr_windows.sfn",];
     assert expect_eq_str_array(target_condition_runtime_sfn_sources(sources, "Windows"), expected).ok;
 }
 
@@ -158,15 +163,43 @@ test "target: Windows skips the anchor-less appends with no platform/ anchor pre
     assert expect_eq_str_array(target_condition_runtime_sfn_sources(sources, "Windows"), sources).ok;
 }
 
-test "target: extra link libs — Windows needs bcrypt, host targets need none" ![pure] {
+test "target: extra link libs — Windows needs bcrypt and ws2_32, host targets need none" ![pure] {
     // `-lbcrypt` backs BCryptGenRandom in platform/rand_windows.sfn
-    // (SFN-549); every other target keeps the identity/empty result
-    // (#1112).
-    let expected: string[] = ["-lbcrypt"];
+    // (SFN-549). `-lws2_32` backs the 11 socket symbols the net and
+    // websocket adapters declare as bare externs — free from libc on
+    // POSIX, exported from ws2_32.dll on Windows (SFN-649). Both are
+    // required even for a program that opens no socket: COFF resolves
+    // every external reference before dead-stripping, and those runtime
+    // modules are always linked.
+    // Every other target keeps the identity/empty result (#1112).
+    let expected: string[] = ["-lbcrypt", "-lws2_32"];
     assert expect_eq_str_array(target_extra_link_libs("Windows"), expected).ok;
     let none: string[] = [];
     assert expect_eq_str_array(target_extra_link_libs("Linux"), none).ok;
     assert expect_eq_str_array(target_extra_link_libs("Darwin"), none).ok;
+}
+
+test "target: Windows fs_exec_mode swap survives without the other platform anchors" ![pure] {
+    // fs_exec_mode.sfn is itself a platform/ anchor, so the swap must
+    // work (and the anchor-less appends must still fire) even when
+    // rlimit/rand/tls/exec are all absent. Guards against the swap being
+    // reachable only via another module's anchor discovery — the same
+    // class of coupling the exec.sfn anchor test above pins.
+    let sources: string[] = ["/rt/sfn/platform/fs_exec_mode.sfn"];
+    let out = target_condition_runtime_sfn_sources(sources, "Windows");
+    assert expect_eq_str(out[0], "/rt/sfn/platform/fs_exec_mode_windows.sfn").ok;
+    assert expect_eq_bool(out.length > 1, true).ok;
+}
+
+test "target: host targets keep the POSIX X_OK fs_exec_mode module" ![pure] {
+    // The identity contract (#1112): Linux and macOS DO have an execute
+    // permission bit, so they must keep platform/fs_exec_mode.sfn and its
+    // X_OK. Swapping in F_OK for every target would "fix" Windows by
+    // silently downgrading the executable check to a mere existence
+    // check on the two platforms where it is meaningful (SFN-649).
+    let sources: string[] = ["/rt/sfn/platform/fs_exec_mode.sfn", "/rt/sfn/io.sfn"];
+    assert expect_eq_str_array(target_condition_runtime_sfn_sources(sources, "Linux"), sources).ok;
+    assert expect_eq_str_array(target_condition_runtime_sfn_sources(sources, "Darwin"), sources).ok;
 }
 
 // ---- Assemble argv splicing ----

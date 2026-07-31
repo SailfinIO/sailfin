@@ -1,0 +1,29 @@
+// runtime/sfn/platform/fs_exec_mode_windows.sfn
+//
+// Windows sibling of `fs_exec_mode.sfn`, swapped in for a Windows
+// target by `target_condition_runtime_sfn_sources`
+// (`compiler/src/build/target.sfn`). See that module's header for the
+// full rationale; the short version is that POSIX `X_OK` (1) is not a
+// legal UCRT `_access` mode and passing it terminates the process.
+//
+// `F_OK` (0) — existence — is the correct Windows semantic, not a
+// workaround. Windows has no execute permission bit on regular files:
+// executability is a property of the image format and the file's
+// extension, not of a mode bit the filesystem can be asked about. So
+// "does this path exist" is the strongest question `_access` can
+// answer here, and it is exactly what the four `fs.is_executable`
+// callers want — each is locating the compiler's own binary next to
+// itself (`check/engine.sfn:151`, `build/paths.sfn:119`,
+// `cli/commands/test/pool.sfn:82`, `cli/commands/dev_det_sweep.sfn:312`).
+//
+// Note this makes `fs.is_executable` equivalent to `fs.exists` on
+// Windows. That is a deliberate semantic narrowing, and it is why the
+// mode lives here rather than being flattened to `0` for every target.
+//
+// Verified against MSVC 14.51.36231 / SDK 10.0.26100.0: a C program
+// calling `_access(path, 0)` returns 0, and the same program calling
+// `_access(path, 1)` exits `-1073740791` (`0xC0000409`) without
+// returning (SFN-649).
+fn _sfn_fs_access_exec_mode() -> i32 { return 0; }
+
+export { _sfn_fs_access_exec_mode };

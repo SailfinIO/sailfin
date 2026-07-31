@@ -162,11 +162,18 @@ extern fn fwrite(buf: *u8, size: usize, nmemb: usize, f: *File) -> usize;
 // portable libc symbols are bound directly (no C trampoline):
 // `chmod` backs `set_perms` and `access` backs `is_executable`
 // (`fwrite`, above, backs write_file / append_file / write_lines).
-// Both have a MinGW symbol and identical behaviour across Linux /
-// macOS / Windows, so the single `filesystem.ll` links and behaves
-// on every target. Declared in `runtime/sfn/platform/libc.sfn`
-// (inlined here per the SFN-635 cross-module-extern workaround in the
-// file header).
+// Both resolve on Linux / macOS / Windows, so the single
+// `filesystem.ll` links on every target. Declared in
+// `runtime/sfn/platform/libc.sfn` (inlined here per the SFN-635
+// cross-module-extern workaround in the file header).
+//
+// The symbols resolve everywhere; their ARGUMENTS do not. This block
+// previously claimed "identical behaviour across Linux / macOS /
+// Windows" on the strength of a MinGW symbol match — true only for
+// the legacy `msvcrt.dll` the mingw cross path links. UCRT validates
+// `access`'s mode and terminates the process on a bad one, so the
+// mode is target-conditioned via `_sfn_fs_access_exec_mode` below
+// (SFN-649).
 extern fn chmod(path: *u8, mode: i32) -> i32;
 
 extern fn access(path: *u8, mode: i32) -> i32;
@@ -915,9 +922,18 @@ fn sfn_fs_mkdtemp(prefix: *u8) -> *u8 ![io] {
 // null-guard contract: missing files and permission errors both
 // collapse to `false`. `access` is portable libc (Linux / macOS /
 // Windows), so this stays pure Sailfin. POSIX-only (#366); #1311.
+// The `access` mode is target-conditioned (`platform/fs_exec_mode.sfn`,
+// swapped for `platform/fs_exec_mode_windows.sfn` on a Windows target).
+// POSIX passes `X_OK` (1); Windows passes `F_OK` (0), because Windows
+// has no execute permission bit and UCRT's `_access` rejects any mode
+// outside {0, 2, 4, 6} — mode 1 fails its `(mode & ~6) == 0` check and
+// routes to `_invalid_parameter_noinfo` -> `__fastfail`, killing the
+// process with 0xC0000409 rather than returning an error (SFN-649).
+extern fn _sfn_fs_access_exec_mode() -> i32;
+
 fn sfn_fs_is_executable(path: *u8) -> bool ![io] {
     if path as i64 == 0 { return false; }
-    return access(path, 1) == 0;
+    return access(path, _sfn_fs_access_exec_mode()) == 0;
 }
 
 // `sfn_fs_symlink(target, link)` — create `link` pointing at

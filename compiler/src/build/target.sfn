@@ -125,17 +125,33 @@ fn target_filter_link_libs(libs: string[], target_os: string) -> string[] {
 
 // Extra link libraries a target REQUIRES beyond `libs` — the reverse of
 // `target_filter_link_libs` above, which only ever drops. Windows needs
-// `-lbcrypt` (bcrypt.dll's import lib) for
-// `platform/rand_windows.sfn`'s `BCryptGenRandom` (SFN-549); no other
-// target links it, so every non-Windows target returns `[]` (identity →
-// byte-identical link, #1112).
+// two:
+//
+//   `-lbcrypt`  — bcrypt.dll's import lib, for
+//                 `platform/rand_windows.sfn`'s `BCryptGenRandom`
+//                 (SFN-549).
+//   `-lws2_32`  — Winsock2's import lib. On POSIX the socket surface is
+//                 in libc, so `runtime/sfn/adapters/net.sfn` and
+//                 `websocket.sfn` declare `socket`/`bind`/`listen`/
+//                 `accept`/`connect`/`send`/`recv`/`setsockopt`/
+//                 `getsockname`/`getaddrinfo`/`freeaddrinfo` as bare
+//                 externs and link them for free. Windows exports the
+//                 same 11 names from ws2_32.dll instead, so without this
+//                 every native Windows link fails on all 11 — even for a
+//                 program that opens no socket, because COFF resolves
+//                 all external references before dead-stripping and the
+//                 net/websocket runtime modules are always linked in
+//                 (SFN-649).
+//
+// No other target links either, so every non-Windows target returns `[]`
+// (identity → byte-identical link, #1112).
 fn target_extra_link_libs(target_os: string) -> string[] {
-    if target_os_is_windows(target_os) { return ["-lbcrypt"]; }
+    if target_os_is_windows(target_os) { return ["-lbcrypt", "-lws2_32"]; }
     return [];
 }
 
 // Rewrite the runtime capsule's `sfn-sources` list for `target_os`. On
-// Windows, four POSIX-only modules are swapped for their Win32 siblings:
+// Windows, five POSIX-only modules are swapped for their Win32 siblings:
 // `process.sfn` (posix_spawnp/waitpid) for `platform/process_windows.sfn`,
 // `rlimit.sfn` (getrlimit/setrlimit) for `platform/rlimit_windows.sfn`
 // (SFN-549 — previously dropped outright, leaving
@@ -146,7 +162,13 @@ fn target_extra_link_libs(target_os: string) -> string[] {
 // `platform/openssl_absent_windows.sfn` (SFN-549 — the Windows target has
 // no OpenSSL to link, so the fail-closed native module replaces it
 // rather than the link merely dropping `-lssl -lcrypto` and leaving the
-// externs unresolved). Five further modules —
+// externs unresolved), and `fs_exec_mode.sfn` (POSIX `X_OK`) for
+// `platform/fs_exec_mode_windows.sfn` (SFN-649 — `X_OK` is not a legal
+// UCRT `_access` mode and terminates the process via
+// `_invalid_parameter_noinfo` -> `__fastfail` instead of returning an
+// error; the sibling supplies `F_OK`, the strongest question Windows
+// can answer where no execute permission bit exists). Five further
+// modules —
 // `platform/realpath_windows.sfn`, `platform/clock_windows.sfn`,
 // `platform/pthread_windows.sfn`, `platform/popen_windows.sfn`, and
 // `platform/mkstemp_windows.sfn` (all SFN-549) — are APPENDED rather than
@@ -161,16 +183,18 @@ fn target_extra_link_libs(target_os: string) -> string[] {
 // basename so the manifest-root prefix is irrelevant, and rebuild the
 // swapped path from the source's own directory so it stays correctly
 // rooted (`<root>/sfn/process.sfn` → `<root>/sfn/platform/process_windows.sfn`).
-// `rlimit.sfn`/`rand.sfn`/`tls.sfn` already live in `platform/`, so their
+// `rlimit.sfn`/`rand.sfn`/`tls.sfn`/`fs_exec_mode.sfn` already live in
+// `platform/`, so their
 // siblings are joined directly onto that same directory rather than
 // appending another `platform/` segment.
 fn target_condition_runtime_sfn_sources(sources: string[], target_os: string) -> string[] {
     if !target_os_is_windows(target_os) { return sources; }
     let mut out: string[] = [];
     // Anchor for the append block below — the `platform/` directory,
-    // discovered from whichever of rlimit.sfn/rand.sfn/tls.sfn/exec.sfn
-    // happens to be present in `sources`, since none of the four is
-    // guaranteed by this function's own contract.
+    // discovered from whichever of
+    // rlimit.sfn/rand.sfn/tls.sfn/fs_exec_mode.sfn/exec.sfn happens to
+    // be present in `sources`, since none of the five is guaranteed by
+    // this function's own contract.
     let mut platform_dir: string = "";
     let mut i: int = 0;
     loop {
@@ -192,6 +216,13 @@ fn target_condition_runtime_sfn_sources(sources: string[], target_os: string) ->
             // Already in platform/ — same as rlimit.sfn/rand.sfn above.
             platform_dir = _dirname(src);
             out.push(_path_join(platform_dir, "openssl_absent_windows.sfn"));
+        } else if base == "fs_exec_mode.sfn" {
+            // Already in platform/ — same as rlimit.sfn/rand.sfn/tls.sfn.
+            // POSIX `X_OK` (1) is not a legal UCRT `_access` mode and
+            // fastfails the process rather than returning an error, so
+            // the Windows sibling supplies `F_OK` (0) instead (SFN-649).
+            platform_dir = _dirname(src);
+            out.push(_path_join(platform_dir, "fs_exec_mode_windows.sfn"));
         } else if base == "exec.sfn" {
             // exec.sfn itself is unchanged (its `realpath` extern is
             // satisfied by the appended sibling below, not by swapping

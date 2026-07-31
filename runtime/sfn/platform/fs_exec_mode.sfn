@@ -1,0 +1,33 @@
+// runtime/sfn/platform/fs_exec_mode.sfn
+//
+// The POSIX `access(2)` mode `sfn_fs_is_executable`
+// (`adapters/filesystem.sfn`) tests with. Swapped for
+// `fs_exec_mode_windows.sfn` on a Windows target by
+// `target_condition_runtime_sfn_sources` (`compiler/src/build/target.sfn`),
+// the same mechanism that swaps `tls.sfn` for
+// `openssl_absent_windows.sfn`.
+//
+// Why this is a module and not a literal at the call site (SFN-649):
+// `access` resolves on every target, so the call site looked portable
+// and carried a comment asserting it was. It is not. POSIX defines
+// `X_OK = 1` and returns `-1`/`EACCES` when the caller may not execute
+// the file. UCRT's `_access` validates `(mode & ~6) == 0` — only
+// `F_OK`(0), `W_OK`(2), `R_OK`(4) and `6` are legal, because Windows
+// has no execute permission bit at all — and an illegal mode does not
+// return an error: it invokes the invalid-parameter handler, which
+// with no handler installed is `__fastfail(FAST_FAIL_INVALID_ARG)` and
+// terminates the process with `0xC0000409`.
+//
+// That difference is invisible on the mingw cross path, which links
+// legacy `msvcrt.dll` and never added the validation, which is why
+// `sfn check` passed on a Windows runner under mingw while the native
+// MSVC build died on the same source.
+//
+// A single mode valid on both targets would mean passing `F_OK`
+// everywhere, silently downgrading the Linux and macOS check from
+// "executable" to "exists" — a real regression on the platforms that
+// do have an execute bit. Hence a per-target mode rather than a
+// lowest-common-denominator one.
+fn _sfn_fs_access_exec_mode() -> i32 { return 1; }
+
+export { _sfn_fs_access_exec_mode };
