@@ -51,8 +51,13 @@ fn _constant_true_conditions(lines: string[]) -> string[] {
     return values;
 }
 
-fn _append_branch_targets(values: string[], line: string, constant_true: string[]) -> string[] {
-    let mut out = values;
+// Branch targets contributed by a single lowered line.
+//
+// A `br i1` whose condition the lowerer proved constant-true takes only its
+// first target; every other line contributes each `label %<name>` operand it
+// carries.
+fn _line_branch_targets(line: string, constant_true: string[]) -> string[] {
+    let mut out: string[] = [];
     let marker = "label %";
     let mut rest = line;
     let mut target_count: int = 0;
@@ -79,8 +84,7 @@ fn _append_branch_targets(values: string[], line: string, constant_true: string[
             target_end += 1;
         }
         if target_end > target_start {
-            let target = substring(rest, target_start, target_end);
-            if !string_array_contains(out, target) { out.push(target); }
+            out.push(substring(rest, target_start, target_end));
             target_count += 1;
         }
         if target_end >= rest.length { break; }
@@ -90,45 +94,84 @@ fn _append_branch_targets(values: string[], line: string, constant_true: string[
 }
 
 fn fallthrough_block_is_reachable(lines: string[]) -> boolean {
-    let mut candidate: string = "";
-    let mut label_count: int = 0;
+    let constant_true = _constant_true_conditions(lines);
+
+    // One walk records every block in line order together with the successor
+    // edges its instructions contribute. Edges group by block without needing a
+    // map: `active_label` only changes at a label line, so block `i` owns
+    // `edge_targets[block_edge_start[i] .. block_edge_start[i + 1])`, and the
+    // final block runs to the end of `edge_targets`.
+    //
+    // SFN-613: the previous fixed-point form visited every line once per block
+    // — O(blocks x lines) line visits, each re-running `trim_text`/`_block_label`
+    // and allocating fresh substrings, with a further `string_array_contains`
+    // scan per visit. On bodies like `llvm__lowering__lowering_core` (13k IR
+    // lines) that measured +32% to +96% on the `lower_llvm` phase between seed
+    // 0.8.2 (before this check existed) and seed 0.8.4. The reachable set this
+    // computes is unchanged; only the traversal that computes it is.
+    let mut block_names: string[] = [];
+    let mut block_edge_start: int[] = [];
+    let mut edge_targets: string[] = [];
     let mut index: int = 0;
     loop {
         if index >= lines.length { break; }
-        let label = _block_label(lines[index]);
+        let line = lines[index];
+        let label = _block_label(line);
         if label.length > 0 {
-            candidate = label;
-            label_count += 1;
+            block_names.push(label);
+            block_edge_start.push(edge_targets.length);
+        } else {
+            // Lines ahead of the first label belong to no block, matching the
+            // original walk, which only followed edges once a label was seen.
+            if block_names.length > 0 {
+                let targets = _line_branch_targets(trim_text(line), constant_true);
+                let mut target_index: int = 0;
+                loop {
+                    if target_index >= targets.length { break; }
+                    edge_targets.push(targets[target_index]);
+                    target_index += 1;
+                }
+            }
         }
         index += 1;
     }
-    if candidate.length == 0 { return false; }
+    if block_names.length == 0 { return false; }
+    let candidate = block_names[block_names.length - 1];
 
+    // Breadth-first from the entry block over the prebuilt adjacency. Appending
+    // to `reachable` while walking it is the queue.
+    //
+    // The block scan deliberately does not stop at the first name match: if a
+    // label ever repeats, every block carrying that name contributes its edges,
+    // which is what the previous walk did. Stopping early here would narrow the
+    // reachable set and silently drop an `E1002`.
     let mut reachable: string[] = ["block.entry"];
-    let constant_true = _constant_true_conditions(lines);
-    let mut changed: boolean = true;
-    let mut passes: int = 0;
+    let mut cursor: int = 0;
     loop {
-        if !changed { break; }
-        if passes > label_count { break; }
-        changed = false;
-        let before = reachable.length;
-        let mut active_label: string = "";
-        index = 0;
+        if cursor >= reachable.length { break; }
+        let current = reachable[cursor];
+        let mut block_index: int = 0;
         loop {
-            if index >= lines.length { break; }
-            let line = lines[index];
-            let label = _block_label(line);
-            if label.length > 0 { active_label = label; }
-            if active_label.length > 0 {
-                if string_array_contains(reachable, active_label) {
-                    reachable = _append_branch_targets(reachable, trim_text(line), constant_true);
+            if block_index >= block_names.length { break; }
+            if block_names[block_index] == current {
+                let start = block_edge_start[block_index];
+                let mut end = edge_targets.length;
+                if block_index + 1 < block_edge_start.length {
+                    end = block_edge_start[block_index + 1];
+                }
+                let mut edge_index = start;
+                loop {
+                    if edge_index >= end { break; }
+                    let target = edge_targets[edge_index];
+                    if !string_array_contains(reachable, target) {
+                        reachable.push(target);
+                    }
+                    edge_index += 1;
                 }
             }
-            index += 1;
+            block_index += 1;
         }
-        if reachable.length > before { changed = true; }
-        passes += 1;
+        cursor += 1;
     }
     return string_array_contains(reachable, candidate);
 }
