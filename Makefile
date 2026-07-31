@@ -116,7 +116,7 @@ NATIVE_BIN ?= build/bin/sfn$(EXE_EXT)
 # timestamps, and coarse filesystems can give an edit and the output the same
 # timestamp. The fingerprint includes sorted paths and bytes (SFN-564).
 COMPILER_SOURCE_FINGERPRINT := build/.compiler-source-fingerprint
-COMPILER_SOURCE_FINGERPRINT_CMD := bash scripts/compiler_source_fingerprint.sh compiler/src runtime
+COMPILER_SOURCE_FINGERPRINT_CMD := $(NATIVE_BIN) dev bootstrap fingerprint
 
 # Which compiler binary to use for running Sailfin-native tests.
 # Default: the native compiler alias produced by `make compile`.
@@ -577,9 +577,25 @@ bootstrap-aarch64-linux:
 	@SEED_X86_64="$(SEED_X86_64)" scripts/bootstrap-aarch64-linux.sh
 
 compile-impl:
-	@current_fingerprint="$$($(COMPILER_SOURCE_FINGERPRINT_CMD))"; \
+	@# SFN-679: a $(NATIVE_BIN) predating `dev bootstrap fingerprint` (the
+	@# native replacement for scripts/compiler_source_fingerprint.sh) falls
+	@# through its subcommand dispatch to a usage line on STDOUT, so
+	@# `2>/dev/null` does not suppress it and `current_fingerprint` reads
+	@# that usage text, not empty. The shape check below blanks anything
+	@# that is not a 64-char lowercase-hex digest, which is what actually
+	@# makes the `-n` guard fire on that usage text (it can never equal the
+	@# stored digest either, but validating the shape here is what forces
+	@# exactly one rebuild instead of relying on that coincidence); every
+	@# later `make compile` self-heals from the fresh fingerprint.
+	@current_fingerprint="$$($(COMPILER_SOURCE_FINGERPRINT_CMD) 2>/dev/null || true)"; \
+	case "$$current_fingerprint" in \
+		*[!0-9a-f]*|"") current_fingerprint="" ;; \
+		????????????????????????????????????????????????????????????????) ;; \
+		*) current_fingerprint="" ;; \
+	esac; \
 	stored_fingerprint="$$(cat "$(COMPILER_SOURCE_FINGERPRINT)" 2>/dev/null || true)"; \
 	if [ "$${FORCE:-0}" = "0" ] && [ -x "$(NATIVE_BIN)" ] && \
+		[ -n "$$current_fingerprint" ] && \
 		[ -n "$$stored_fingerprint" ] && [ "$$current_fingerprint" = "$$stored_fingerprint" ]; then \
 		echo "[compile] $(NATIVE_BIN) up-to-date"; \
 	else \
@@ -825,7 +841,27 @@ rebuild:
 
 rebuild-impl:
 	@mkdir -p build
-	@$(COMPILER_SOURCE_FINGERPRINT_CMD) > "$(COMPILER_SOURCE_FINGERPRINT).pending"
+	@# SFN-679: the pre-build snapshot is best-effort. On a clean checkout
+	@# $(NATIVE_BIN) does not exist yet, and a binary predating
+	@# `dev bootstrap fingerprint` cannot produce one — it falls through its
+	@# subcommand dispatch to a usage line on STDOUT instead (exit 0, so the
+	@# redirect below still needs the same shape check `compile-impl` uses).
+	@# Neither case is an error; both are exactly the cold/transitional
+	@# builds this recipe has to complete. Write nothing rather than a
+	@# malformed snapshot; `dev bootstrap install` below treats an absent
+	@# `.pending` as "no race guard available" the same as a malformed one,
+	@# but a real digest here still lets it detect a genuine mid-build edit.
+	@current_fingerprint="$$($(COMPILER_SOURCE_FINGERPRINT_CMD) 2>/dev/null || true)"; \
+	case "$$current_fingerprint" in \
+		*[!0-9a-f]*|"") current_fingerprint="" ;; \
+		????????????????????????????????????????????????????????????????) ;; \
+		*) current_fingerprint="" ;; \
+	esac; \
+	if [ -n "$$current_fingerprint" ]; then \
+		printf '%s\n' "$$current_fingerprint" > "$(COMPILER_SOURCE_FINGERPRINT).pending"; \
+	else \
+		rm -f "$(COMPILER_SOURCE_FINGERPRINT).pending"; \
+	fi
 	@seed="$${SEED_NATIVE:-$(SEED)}"; \
 	resolved_seed="$$seed"; \
 	if command -v "$$seed" >/dev/null 2>&1; then \
@@ -899,17 +935,13 @@ rebuild-impl:
 		exit 1; \
 	fi
 	@mkdir -p build/native $(dir $(NATIVE_OUT))
-	@post_fingerprint="$$($(COMPILER_SOURCE_FINGERPRINT_CMD))"; \
-	pre_fingerprint="$$(cat "$(COMPILER_SOURCE_FINGERPRINT).pending")"; \
-	if [ "$$pre_fingerprint" != "$$post_fingerprint" ]; then \
-		rm -f "$(COMPILER_SOURCE_FINGERPRINT).pending"; \
-		echo "[rebuild][error] compiler sources changed during the build; refusing to publish a stale binary" >&2; \
-		exit 1; \
-	fi; \
-	cp -f build/sailfin/program "$(NATIVE_OUT).tmp"; \
-	chmod +x "$(NATIVE_OUT).tmp"; \
-	mv -f "$(NATIVE_OUT).tmp" "$(NATIVE_OUT)"; \
-	mv -f "$(COMPILER_SOURCE_FINGERPRINT).pending" "$(COMPILER_SOURCE_FINGERPRINT)"
+	@# SFN-679: delegate the race re-check, atomic install, and fingerprint
+	@# promotion to the FRESHLY BUILT compiler's own `dev bootstrap install`.
+	@# The freshly built program carries the new install/fingerprint logic
+	@# even though the pinned seed that built it does not — that is exactly
+	@# why this targets build/sailfin/program and not $(SEED).
+	@chmod +x build/sailfin/program 2>/dev/null || true
+	@build/sailfin/program dev bootstrap install
 	@# Save .ll files to a location `make test` won't clobber. Each
 	@# integration / e2e test's own `sfn build` overwrites
 	@# `build/sailfin/capsules/*.ll` and `build/sailfin/program.ll`

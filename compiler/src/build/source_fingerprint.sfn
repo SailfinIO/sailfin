@@ -1,0 +1,233 @@
+// compiler/src/build/source_fingerprint.sfn
+//
+// A single content digest over the compiler's Sailfin sources, used to
+// gate `sfn dev bootstrap build` so a rebuild only runs — and only
+// republishes `build/bin/sfn` — when the sources actually changed
+// (SFN-679).
+//
+// DIGEST DEFINITION (must stay stable across runs and machines):
+//   1. For each root in the caller-supplied root list, in the order
+//      given, collect every `*.sfn` file under it recursively. A
+//      missing root fails the whole computation (returns "").
+//   2. Concatenate all roots' file lists, normalize any backslashes a
+//      caller-supplied root may have introduced to forward slashes, then
+//      sort the combined list ascending by byte order on the path
+//      string — the filesystem walk order is not stable across
+//      platforms, so this sort is what makes the digest reproducible.
+//   3. Drop exact duplicate paths once sorted (roots may overlap).
+//   4. For each path in that order, hash its NUL-free text content and
+//      append `<sha256>\t<path>\n` to a manifest string. Any file whose
+//      hash comes back empty (unreadable) fails the whole computation.
+//   5. The digest is the SHA-256 of that manifest string.
+//
+// Both the file hashes and the manifest hash go through the in-process
+// hasher (`sha256_hex_of_string` / `_sha256_of_text_file`), so the
+// result depends only on file contents and paths — never on mtimes,
+// permissions, or the order the filesystem happens to enumerate.
+import {
+    _atomic_rename_into_place,
+    _collect_sfn_files_cmd,
+    _copy_file,
+    _mktemp_sibling_cmd,
+    _sha256_of_text_file,
+    _toml_trim_cmd
+} from "./fs";
+import { sha256_hex_of_string } from "./hash";
+import { _dirname, _ensure_dir } from "./paths";
+import { host_is_windows } from "./target";
+
+// The default fingerprint scope: the compiler's own `.sfn` source tree plus
+// the Sailfin-native runtime it links against — the same scope the retired
+// `scripts/compiler_source_fingerprint.sh` used, kept as-is (SFN-679). This
+// is NOT the complete set of inputs the built binary depends on: it omits
+// the capsule dependencies under `capsules/*/src/` (`sfn/runtime-native`,
+// `sfn/cli`, `sfn/strings`, `sfn/crypto` — see `compiler/capsule.toml`
+// deps), the C sources under `runtime/native/src/*.c`, and the version pin
+// in `compiler/capsule.toml`. A change confined to one of those will not
+// invalidate this fingerprint. `scripts/module_layout_fingerprint.sh`
+// documents the fuller root set.
+fn default_fingerprint_roots() -> string[] {
+    return ["compiler/src", "runtime"];
+}
+
+fn source_fingerprint_path() -> string {
+    return "build/.compiler-source-fingerprint";
+}
+
+fn pending_fingerprint_path() -> string {
+    return "build/.compiler-source-fingerprint.pending";
+}
+
+// The canonical install location for a freshly built compiler. Windows
+// binaries carry the `.exe` suffix; every other host uses the bare name.
+fn native_install_path() -> string ![io] {
+    if host_is_windows() { return "build/bin/sfn.exe"; }
+    return "build/bin/sfn";
+}
+
+// Where `<seed> build -p compiler` writes the freshly built binary before
+// it is installed.
+fn built_program_path() -> string { return "build/sailfin/program"; }
+
+// Replace any `\` with `/` so a caller-supplied root (e.g. `sfn dev
+// bootstrap fingerprint C:\foo`) normalizes to the same manifest entries as
+// a POSIX-style root — `_collect_sfn_files_cmd` always joins with `/`, so
+// the walk itself never emits a backslash.
+fn _normalize_slashes(path: string) -> string {
+    let mut out: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= path.length { break; }
+        let ch = path[i];
+        if ch == "\\" { out = out + "/"; } else { out = out + ch; }
+        i += 1;
+    }
+    return out;
+}
+
+// Byte-wise "less than" over two strings — a shorter string that is a
+// prefix of a longer one sorts first. There is no `<` operator on
+// `string`, so this is the explicit comparison the manifest sort needs.
+fn _path_less(a: string, b: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= a.length { return b.length > a.length; }
+        if i >= b.length { return false; }
+        let ac = char_code(a[i]);
+        let bc = char_code(b[i]);
+        if ac < bc { return true; }
+        if ac > bc { return false; }
+        i += 1;
+    }
+    return false;
+}
+
+// Insertion sort `paths` ascending by byte order, dropping exact
+// duplicates. Insertion sort is fine at this scale (the compiler's
+// source tree is on the order of a few hundred files); it also gives an
+// easy place to fold in the dedup check without a second pass.
+fn _sort_and_dedupe_paths(paths: string[]) -> string[] {
+    let mut sorted: string[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= paths.length { break; }
+        let value = paths[index];
+        let mut insert_at: int = sorted.length;
+        let mut scan: int = 0;
+        loop {
+            if scan >= sorted.length { break; }
+            if sorted[scan] == value {
+                insert_at = -1;
+                break;
+            }
+            if _path_less(value, sorted[scan]) {
+                insert_at = scan;
+                break;
+            }
+            scan += 1;
+        }
+        if insert_at >= 0 {
+            sorted.push("");
+            let mut move_at: int = sorted.length - 1;
+            loop {
+                if move_at <= insert_at { break; }
+                sorted[move_at] = sorted[move_at - 1];
+                move_at -= 1;
+            }
+            sorted[insert_at] = value;
+        }
+        index += 1;
+    }
+    return sorted;
+}
+
+// Compute the content digest over every `*.sfn` file under `roots`. See
+// the module header for the exact digest definition. Returns "" when a
+// root is missing or any file's hash cannot be computed — the caller
+// reports the error.
+fn compute_source_fingerprint(roots: string[]) -> string ![io] {
+    let mut collected: string[] = [];
+    let mut ri: int = 0;
+    loop {
+        if ri >= roots.length { break; }
+        let root = roots[ri];
+        if !fs.exists(root) { return ""; }
+        let files = _collect_sfn_files_cmd(root, 32);
+        let mut fi: int = 0;
+        loop {
+            if fi >= files.length { break; }
+            collected.push(_normalize_slashes(files[fi]));
+            fi += 1;
+        }
+        ri += 1;
+    }
+
+    let ordered = _sort_and_dedupe_paths(collected);
+
+    let mut manifest: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= ordered.length { break; }
+        let path = ordered[i];
+        let digest = _sha256_of_text_file(path);
+        if digest.length == 0 { return ""; }
+        manifest = manifest + digest + "\t" + path + "\n";
+        i += 1;
+    }
+    return sha256_hex_of_string(manifest);
+}
+
+// Read a previously stored fingerprint, trimmed of surrounding
+// whitespace/newlines. Returns "" when `path` does not exist.
+fn read_stored_fingerprint(path: string) -> string ![io] {
+    if !fs.exists(path) { return ""; }
+    return _toml_trim_cmd(fs.readFile(path));
+}
+
+// Write `digest` (plus a trailing newline) to `path`, creating the parent
+// directory first. Returns false on an empty digest — never publish an
+// empty fingerprint as if it were a real one.
+fn write_fingerprint(path: string, digest: string) -> boolean ![io] {
+    if digest.length == 0 { return false; }
+    _ensure_dir(_dirname(path));
+    fs.writeFile(path, digest + "\n");
+    return true;
+}
+
+// Install a freshly built compiler at `src` as `dst`, atomically. Modeled
+// on `cli_selfhost.sfn::_selfhost_promote_binary`: stage a copy beside
+// `dst`, force it executable (0o755 — the installed binary must run
+// regardless of the built artifact's source mode), then `rename(2)` it
+// into place. `dst` may be the currently executing binary, so it is
+// never opened for write directly (`ETXTBSY`) — only ever replaced via
+// rename. Returns false, leaving no partial file at `dst`, when `src` is
+// missing or any staging step fails.
+fn install_built_compiler(src: string, dst: string) -> boolean ![io] {
+    if !fs.exists(src) { return false; }
+    _ensure_dir(_dirname(dst));
+
+    let mut staged = _mktemp_sibling_cmd(dst);
+    if staged.length == 0 { staged = dst + ".sfn-fingerprint-install-tmp"; }
+    if !_copy_file(src, staged) {
+        fs.deleteFile(staged);
+        return false;
+    }
+    let executable_mode = 493;
+    if !fs.set_perms(staged, executable_mode) {
+        fs.deleteFile(staged);
+        return false;
+    }
+    return _atomic_rename_into_place(staged, dst);
+}
+
+export {
+    default_fingerprint_roots,
+    source_fingerprint_path,
+    pending_fingerprint_path,
+    native_install_path,
+    built_program_path,
+    compute_source_fingerprint,
+    read_stored_fingerprint,
+    write_fingerprint,
+    install_built_compiler
+};

@@ -1537,6 +1537,17 @@ bootstrap works with `install.sh && sfn build -p compiler`.
 `compile_to_llvm_file_with_module`'s fallback paths are gone — the
 structured pipeline either succeeds or fails.
 
+**Install + fingerprint policy is now native (SFN-679).** `sfn dev
+bootstrap build` owns the install-to-`build/bin/sfn` and
+whole-tree-source-fingerprint gate that `compile-impl`/`rebuild-impl`
+in the Makefile used to own via `scripts/compiler_source_fingerprint.sh`
+(now retired). `make compile`/`make rebuild` and the two CI sites
+delegate to the native command. This lands the install/fingerprint
+half of the Makefile's `compile`/`rebuild` targets natively, ahead of
+the rest of Stage D's Makefile sweep; the Makefile itself still exists,
+and the new gate is only exercisable through `sfn dev bootstrap build`
+once a seed carrying it is pinned (see `docs/status.md`).
+
 ### Stage E — Long-lived process, arena, incremental builds
 
 **Goal:** Hit the <5 min build target (see build performance baseline in this document).

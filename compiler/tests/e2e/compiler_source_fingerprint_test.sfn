@@ -2,13 +2,23 @@
 // mtime as its freshness predicate, which can miss an edit when timestamps are
 // preserved or have coarse resolution. The Makefile now delegates freshness to
 // this content fingerprint.
+//
+// SFN-679 retired the shell implementation
+// (`scripts/compiler_source_fingerprint.sh`) in favour of the native
+// `sfn dev bootstrap fingerprint` subcommand; this file now drives that
+// subcommand directly instead of shelling out to the script.
 import { contains } from "sfn/strings";
 
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+// `sfn dev bootstrap fingerprint <root>` prints ONLY the hex digest on
+// stdout.
 fn _fingerprint(root: string) -> string ![io] {
-    let mut repo = env.get("SAILFIN_REPO_ROOT");
-    if repo.length == 0 { repo = "."; }
-    let script = repo + "/scripts/compiler_source_fingerprint.sh";
-    let _exit = process.run_capture(["bash", script, root], []);
+    let _exit = process.run_capture([_sfn_bin(), "dev", "bootstrap", "fingerprint", root], []);
     let output = process.capture_take_stdout();
     let _error = process.capture_take_stderr();
     return output;
@@ -36,6 +46,19 @@ test "compiler source fingerprint changes with bytes despite restored mtime" ![i
     process.run(["rm", "-rf", scratch]);
 }
 
+test "compiler source fingerprint is stable across repeated runs" ![io] {
+    let scratch = env.get("SAILFIN_TEST_SCRATCH") + "/source-fingerprint-stable";
+    process.run(["rm", "-rf", scratch]);
+    fs.createDirectory(scratch, true);
+    fs.writeFile(scratch + "/main.sfn", "fn value() -> int { return 1; }\n");
+    let first = _fingerprint(scratch);
+    let second = _fingerprint(scratch);
+
+    assert first.length > 0;
+    assert first == second;
+    process.run(["rm", "-rf", scratch]);
+}
+
 test "compiler source fingerprint includes source paths" ![io] {
     let scratch = env.get("SAILFIN_TEST_SCRATCH") + "/source-fingerprint-path";
     process.run(["rm", "-rf", scratch]);
@@ -50,12 +73,48 @@ test "compiler source fingerprint includes source paths" ![io] {
     process.run(["rm", "-rf", scratch]);
 }
 
+test "compiler source fingerprint changes when a source file is added or removed" ![io] {
+    let scratch = env.get("SAILFIN_TEST_SCRATCH")
+        + "/source-fingerprint-add-remove";
+    process.run(["rm", "-rf", scratch]);
+    fs.createDirectory(scratch, true);
+    fs.writeFile(scratch + "/first.sfn", "fn value() -> int { return 1; }\n");
+    let before_add = _fingerprint(scratch);
+
+    fs.writeFile(scratch + "/second.sfn", "fn other() -> int { return 2; }\n");
+    let after_add = _fingerprint(scratch);
+    assert after_add != before_add;
+
+    process.run(["rm", scratch + "/second.sfn"]);
+    let after_remove = _fingerprint(scratch);
+    assert after_remove == before_add;
+
+    process.run(["rm", "-rf", scratch]);
+}
+
+test "compiler source fingerprint ignores non-sfn files under the root" ![io] {
+    let scratch = env.get("SAILFIN_TEST_SCRATCH")
+        + "/source-fingerprint-non-sfn";
+    process.run(["rm", "-rf", scratch]);
+    fs.createDirectory(scratch, true);
+    fs.writeFile(scratch + "/first.sfn", "fn value() -> int { return 1; }\n");
+    let before = _fingerprint(scratch);
+
+    fs.writeFile(scratch + "/README.md", "unrelated notes\n");
+    let after = _fingerprint(scratch);
+
+    assert before.length > 0;
+    assert after == before;
+    process.run(["rm", "-rf", scratch]);
+}
+
 test "make compile delegates freshness to the content fingerprint" ![io] {
     let mut repo = env.get("SAILFIN_REPO_ROOT");
     if repo.length == 0 { repo = "."; }
     let makefile = fs.readFile(repo + "/Makefile");
 
-    assert contains(makefile, "COMPILER_SOURCE_FINGERPRINT_CMD := bash scripts/compiler_source_fingerprint.sh");
-    assert contains(makefile, "current_fingerprint=\"$$($(COMPILER_SOURCE_FINGERPRINT_CMD))\"");
+    assert contains(makefile, "COMPILER_SOURCE_FINGERPRINT_CMD := $(NATIVE_BIN) dev bootstrap fingerprint");
+    assert contains(makefile, "current_fingerprint=\"$$($(COMPILER_SOURCE_FINGERPRINT_CMD)");
     assert ! contains(makefile, "-newer \"$(NATIVE_BIN)\"");
+    assert ! contains(makefile, "bash scripts/compiler_source_fingerprint.sh");
 }

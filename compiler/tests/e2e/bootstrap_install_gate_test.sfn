@@ -1,0 +1,367 @@
+// End-to-end coverage for SFN-679: `sfn dev bootstrap build`/`install` as
+// the native replacement for the retired `scripts/compiler_source_fingerprint.sh`
+// + the Makefile's shell-driven install/fingerprint dance. Native (no-bash)
+// `*_test.sfn` per `.claude/rules/no-bash-e2e.md`: it builds a fully
+// synthetic repo in a scratch dir and drives the compiler-under-test against
+// it as cwd, with a stub seed executable standing in for a real self-host
+// build (a real build takes ~10 minutes — far too slow for the suite).
+//
+// Pins, in order, against the shared child env/scratch of a single test
+// body:
+//   1. `build` installs a working binary from a pre-seeded stub seed.
+//   2. an unchanged tree short-circuits to "up to date" and does not
+//      re-invoke the seed.
+//   3. editing a source file under a fingerprinted root invalidates the
+//      short-circuit and re-invokes the seed.
+//   4. `--force` re-invokes the seed even on an unchanged tree.
+//   5. `install --from <path>` publishes an arbitrary file directly.
+//   6. a `.pending` fingerprint that does not match the current tree
+//      (a well-formed but wrong digest) makes `install` refuse to publish,
+//      leaving the previously installed binary untouched.
+//
+// Two further, independent scenarios (each in its own synthetic repo):
+//   7. a malformed `.pending` (pre-SFN-679 usage text, not a digest) is
+//      treated as "no snapshot" — `install` still succeeds, but does not
+//      record a freshness claim nobody checked.
+//   8. a build whose seed fails outright, or whose seed "succeeds" but
+//      produces a binary that does not run, leaves any previously
+//      installed binary and stored fingerprint untouched.
+import { find, split } from "sfn/strings";
+import { clean_runner_env, nested_runner_scratch } from "sfn/test";
+
+// The compiler-under-test: `$SAILFIN_BIN` if set, else the self-hosted
+// binary relative to the repo root the runner starts from (mirrors
+// `sfn/test`'s own `_resolve_sfn_bin`).
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+// The child's cwd is the scratch repo, which differs from this test's own
+// cwd — a relative `_sfn_bin()` would not resolve there, so absolutize it.
+fn _sfn_bin_abs() -> string ![io] {
+    let bin = _sfn_bin();
+    if bin.length > 0 && bin[0] == "/" { return bin; }
+    let exit = process.run_capture(["pwd"], []);
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    if exit != 0 { return bin; }
+    return _first_line(out) + "/" + bin;
+}
+
+fn _first_line(text: string) -> string {
+    let lines = split(text, "\n");
+    if lines.length == 0 { return text; }
+    return lines[0];
+}
+
+// A per-invocation scratch root for the synthetic repo. `SAILFIN_TEST_SCRATCH`
+// keeps it unique under the parallel pool; `/tmp` is the standalone fallback.
+fn _repo_root() -> string ![io] {
+    return _scratch_repo("bootstrap-install-gate-repo");
+}
+
+// As `_repo_root`, for a test that needs its own synthetic repo. Always go
+// through this rather than concatenating `SAILFIN_TEST_SCRATCH` directly:
+// unset (a standalone, non-pool invocation) would otherwise resolve to a
+// path at the filesystem root.
+fn _scratch_repo(name: string) -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    return dir + "/" + name;
+}
+
+// Count non-empty lines in the marker file — the number of times the stub
+// seed was invoked. Missing file reads as zero invocations.
+fn _marker_count(path: string) -> int ![io] {
+    if !fs.exists(path) { return 0; }
+    let lines = split(fs.readFile(path), "\n");
+    let mut n: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= lines.length { break; }
+        if lines[i].length > 0 { n += 1; }
+        i += 1;
+    }
+    return n;
+}
+
+// Seed `bootstrap.toml`, mirroring the real one's `[seed]` shape but with
+// the store pointed at a scratch install base (relative to the repo cwd) so
+// the test never touches the real toolchain store.
+fn _write_bootstrap_toml(repo: string) -> void ![io] {
+    fs.writeFile(repo + "/bootstrap.toml", "[seed]\n"
+        + "version = \"999.0.0\"\n"
+        + "source = \"github-release\"\n"
+        + "repo = \"SailfinIO/sailfin\"\n"
+        + "asset_prefix = \"sailfin\"\n"
+        + "policy = \"exact\"\n\n"
+        + "[store]\n"
+        + "install_base = \"seed-store\"\n"
+        + "bin_dir = \"seed-store-bin\"\n\n"
+        + "[verify]\n"
+        + "mode = \"signed-sha256sums\"\n"
+        + "manifest = \"SHA256SUMS\"\n"
+        + "signature = \"SHA256SUMS.sig\"\n"
+        + "required = true\n");
+}
+
+// Seed a ready store entry `<repo>/seed-store/999.0.0/sailfin`: a stub that
+// appends a line to `marker` (so the test can count invocations), then
+// fabricates `build/sailfin/program` in whatever directory it is run from
+// (the repo root, via the child's cwd), regardless of the argv it is
+// invoked with. The `.sha256` completeness marker is written last so the
+// entry reads as ready without a real fetch/verify pass.
+//
+// `build/sailfin/program` must itself be a genuinely runnable script (not
+// opaque bytes): SFN-679 fix 3 smoke-verifies the installed binary with
+// `<binary> version` before recording a freshness claim, so a
+// non-executable stub would fail every build in this file.
+fn _seed_stub(repo: string, marker: string) -> void ![io] {
+    let dir = repo + "/seed-store/999.0.0";
+    fs.createDirectory(dir, true);
+    let bin = dir + "/sailfin";
+    fs.writeFile(bin, "#!/bin/sh\n" + "echo invoked >> \"" + marker + "\"\n"
+        + "mkdir -p build/sailfin\n"
+        + "printf '#!/bin/sh\\necho stub-version\\nexit 0\\n' > build/sailfin/program\n"
+        + "chmod +x build/sailfin/program\n"
+        + "exit 0\n");
+    process.run(["chmod", "+x", bin]);
+    fs.writeFile(dir + "/.sha256", "0000000000000000000000000000000000000000000000000000000000000000\n");
+}
+
+// A seed stub that always fails the build outright: it records an
+// invocation, but never produces `build/sailfin/program` and exits
+// non-zero.
+fn _seed_stub_failing_build(repo: string, marker: string) -> void ![io] {
+    let dir = repo + "/seed-store/999.0.0";
+    fs.createDirectory(dir, true);
+    let bin = dir + "/sailfin";
+    fs.writeFile(bin, "#!/bin/sh\n" + "echo invoked >> \"" + marker + "\"\n"
+        + "rm -f build/sailfin/program\n"
+        + "exit 1\n");
+    process.run(["chmod", "+x", bin]);
+    fs.writeFile(dir + "/.sha256", "0000000000000000000000000000000000000000000000000000000000000000\n");
+}
+
+// A seed stub that "succeeds" (exit 0) and produces
+// `build/sailfin/program`, but that program is not actually runnable (no
+// shebang, not a real executable) — the case fix 3's smoke-verify exists
+// to catch.
+fn _seed_stub_unrunnable_program(repo: string, marker: string) -> void ![io] {
+    let dir = repo + "/seed-store/999.0.0";
+    fs.createDirectory(dir, true);
+    let bin = dir + "/sailfin";
+    fs.writeFile(bin, "#!/bin/sh\n" + "echo invoked >> \"" + marker + "\"\n"
+        + "mkdir -p build/sailfin\n"
+        + "printf 'not-a-real-executable' > build/sailfin/program\n"
+        + "chmod +x build/sailfin/program\n"
+        + "exit 0\n");
+    process.run(["chmod", "+x", bin]);
+    fs.writeFile(dir + "/.sha256", "0000000000000000000000000000000000000000000000000000000000000000\n");
+}
+
+test "bootstrap install gate: build installs, short-circuits, and refuses a stale publish" ![io] {
+    let repo = _repo_root();
+    process.run(["rm", "-rf", repo]);
+    fs.createDirectory(repo, true);
+    fs.createDirectory(repo + "/compiler/src", true);
+    fs.createDirectory(repo + "/runtime", true);
+
+    let marker = repo + "/seed-invocations.marker";
+    _write_bootstrap_toml(repo);
+    _seed_stub(repo, marker);
+    fs.writeFile(repo + "/compiler/src/a.sfn", "fn a_value() -> int { return 1; }\n");
+    fs.writeFile(repo + "/runtime/b.sfn", "fn b_value() -> int { return 2; }\n");
+
+    let sfn = _sfn_bin_abs();
+    let child_env = clean_runner_env(nested_runner_scratch("bootstrap_install_gate"));
+
+    // 1. First build: installs a working binary from the stub seed.
+    let first_exit = process.run_capture_cwd([sfn, "dev", "bootstrap", "build"], child_env, repo);
+    let first_out = process.capture_take_stdout();
+    let first_err = process.capture_take_stderr();
+    assert first_exit == 0;
+    assert fs.exists(repo + "/build/bin/sfn");
+    assert fs.is_executable(repo + "/build/bin/sfn");
+    assert fs.exists(repo + "/build/.compiler-source-fingerprint");
+    assert fs.readFile(repo + "/build/.compiler-source-fingerprint").length > 0;
+    assert _marker_count(marker) == 1;
+    assert find(first_out + first_err, "installed", 0) >= 0;
+
+    // 2. Second build on an unchanged tree: short-circuits, no re-invocation.
+    let second_exit = process.run_capture_cwd([sfn, "dev", "bootstrap", "build"], child_env, repo);
+    let second_out = process.capture_take_stdout();
+    let second_err = process.capture_take_stderr();
+    assert second_exit == 0;
+    assert find(second_out + second_err, "is up to date", 0) >= 0;
+    assert _marker_count(marker) == 1;
+
+    // 3. Edit a fingerprinted source file: invalidates the short-circuit.
+    fs.writeFile(repo + "/compiler/src/a.sfn", "fn a_value() -> int { return 999; }\n");
+    let third_exit = process.run_capture_cwd([sfn, "dev", "bootstrap", "build"], child_env, repo);
+    let third_out = process.capture_take_stdout();
+    let third_err = process.capture_take_stderr();
+    assert third_exit == 0;
+    assert _marker_count(marker) == 2;
+    assert find(third_out + third_err, "is up to date", 0) < 0;
+
+    // 4. --force re-invokes the seed even on an unchanged tree.
+    let fourth_exit = process.run_capture_cwd([sfn, "dev", "bootstrap", "build", "--force"], child_env, repo);
+    let _fourth_out = process.capture_take_stdout();
+    let _fourth_err = process.capture_take_stderr();
+    assert fourth_exit == 0;
+    assert _marker_count(marker) == 3;
+
+    // 5. install --from publishes an arbitrary file directly. It must be a
+    // genuinely runnable script — fix 3's smoke-verify runs `<binary>
+    // version` against it before recording a freshness claim.
+    let fresh = repo + "/fresh-binary.bin";
+    fs.writeFile(fresh, "#!/bin/sh\necho fresh-stub-version\nexit 0\n");
+    process.run(["chmod", "+x", fresh]);
+    let fifth_exit = process.run_capture_cwd([sfn, "dev", "bootstrap", "install", "--from", fresh], child_env, repo);
+    let _fifth_out = process.capture_take_stdout();
+    let _fifth_err = process.capture_take_stderr();
+    assert fifth_exit == 0;
+    let installed_after_fifth = fs.readFile(repo + "/build/bin/sfn");
+    assert installed_after_fifth == fs.readFile(fresh);
+    assert fs.is_executable(repo + "/build/bin/sfn");
+
+    // 6. A well-formed but stale `.pending` digest makes `install` refuse to
+    // publish, leaving the previously installed binary untouched. Contents
+    // must be a well-formed 64-char lowercase hex digest (a malformed
+    // pending file is treated as "no pre-build snapshot," not a race).
+    let stale_digest = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    fs.writeFile(repo + "/build/.compiler-source-fingerprint.pending", stale_digest);
+    let sixth_exit = process.run_capture_cwd([sfn, "dev", "bootstrap", "install"], child_env, repo);
+    let _sixth_out = process.capture_take_stdout();
+    let sixth_err = process.capture_take_stderr();
+    assert sixth_exit != 0;
+    assert find(sixth_err, "refusing to publish a stale binary", 0) >= 0;
+    assert fs.readFile(repo + "/build/bin/sfn") == installed_after_fifth;
+
+    process.run(["rm", "-rf", repo]);
+}
+
+test "bootstrap install gate: a malformed .pending is treated as no snapshot, not a race" ![io] {
+    let repo = _scratch_repo("bootstrap-install-gate-repo-malformed-pending");
+    process.run(["rm", "-rf", repo]);
+    fs.createDirectory(repo, true);
+    fs.createDirectory(repo + "/compiler/src", true);
+    fs.createDirectory(repo + "/runtime", true);
+    fs.writeFile(repo + "/compiler/src/a.sfn", "fn a_value() -> int { return 1; }\n");
+    fs.writeFile(repo + "/runtime/b.sfn", "fn b_value() -> int { return 2; }\n");
+
+    // Fabricate a build output directly (bypassing `dev bootstrap build`) so
+    // `install` runs with only the malformed `.pending` a pre-SFN-679
+    // binary would have left there — a usage line, not a digest.
+    fs.createDirectory(repo + "/build/sailfin", true);
+    fs.writeFile(repo + "/build/sailfin/program", "#!/bin/sh\necho stub-version\nexit 0\n");
+    process.run(["chmod", "+x", repo + "/build/sailfin/program"]);
+    fs.writeFile(repo + "/build/.compiler-source-fingerprint.pending", "usage: sfn dev bootstrap <fetch|build|check|pin>");
+
+    let sfn = _sfn_bin_abs();
+    let child_env = clean_runner_env(nested_runner_scratch("bootstrap_install_gate_malformed_pending"));
+
+    let install_exit = process.run_capture_cwd([sfn, "dev", "bootstrap", "install"], child_env, repo);
+    let _install_out = process.capture_take_stdout();
+    let _install_err = process.capture_take_stderr();
+    assert install_exit == 0;
+    assert fs.exists(repo + "/build/bin/sfn");
+    assert fs.is_executable(repo + "/build/bin/sfn");
+    assert ! fs.exists(repo + "/build/.compiler-source-fingerprint");
+    assert ! fs.exists(repo + "/build/.compiler-source-fingerprint.pending");
+
+    process.run(["rm", "-rf", repo]);
+}
+
+test "bootstrap install gate: a failed build leaves the installed binary and fingerprint untouched" ![io] {
+    let repo = _scratch_repo("bootstrap-install-gate-repo-failed-build");
+    process.run(["rm", "-rf", repo]);
+    fs.createDirectory(repo, true);
+    fs.createDirectory(repo + "/compiler/src", true);
+    fs.createDirectory(repo + "/runtime", true);
+
+    let marker = repo + "/seed-invocations.marker";
+    _write_bootstrap_toml(repo);
+    _seed_stub(repo, marker);
+    fs.writeFile(repo + "/compiler/src/a.sfn", "fn a_value() -> int { return 1; }\n");
+    fs.writeFile(repo + "/runtime/b.sfn", "fn b_value() -> int { return 2; }\n");
+
+    let sfn = _sfn_bin_abs();
+    let child_env = clean_runner_env(nested_runner_scratch("bootstrap_install_gate_failed_build"));
+
+    // Establish a real installed binary and recorded fingerprint first, so
+    // there is something to check for corruption.
+    let setup_exit = process.run_capture_cwd([sfn, "dev", "bootstrap", "build"], child_env, repo);
+    let _setup_out = process.capture_take_stdout();
+    let _setup_err = process.capture_take_stderr();
+    assert setup_exit == 0;
+    let installed_before = fs.readFile(repo + "/build/bin/sfn");
+    let fingerprint_before = fs.readFile(repo
+        + "/build/.compiler-source-fingerprint");
+
+    // Edit a source file (so the fingerprint gate cannot short-circuit),
+    // then swap in a seed that fails the build outright.
+    fs.writeFile(repo + "/compiler/src/a.sfn", "fn a_value() -> int { return 2; }\n");
+    _seed_stub_failing_build(repo, marker);
+
+    let fail_exit = process.run_capture_cwd([sfn, "dev", "bootstrap", "build"], child_env, repo);
+    let _fail_out = process.capture_take_stdout();
+    let _fail_err = process.capture_take_stderr();
+    assert fail_exit != 0;
+    assert fs.readFile(repo + "/build/bin/sfn") == installed_before;
+    assert fs.readFile(repo + "/build/.compiler-source-fingerprint") == fingerprint_before;
+    assert ! fs.exists(repo + "/build/.compiler-source-fingerprint.pending");
+
+    process.run(["rm", "-rf", repo]);
+}
+
+test "bootstrap install gate: a seed that produces an unrunnable binary leaves the installed binary and fingerprint untouched" ![io] {
+    let repo = _scratch_repo("bootstrap-install-gate-repo-unrunnable");
+    process.run(["rm", "-rf", repo]);
+    fs.createDirectory(repo, true);
+    fs.createDirectory(repo + "/compiler/src", true);
+    fs.createDirectory(repo + "/runtime", true);
+
+    let marker = repo + "/seed-invocations.marker";
+    _write_bootstrap_toml(repo);
+    _seed_stub(repo, marker);
+    fs.writeFile(repo + "/compiler/src/a.sfn", "fn a_value() -> int { return 1; }\n");
+    fs.writeFile(repo + "/runtime/b.sfn", "fn b_value() -> int { return 2; }\n");
+
+    let sfn = _sfn_bin_abs();
+    let child_env = clean_runner_env(nested_runner_scratch("bootstrap_install_gate_unrunnable"));
+
+    // Establish a real installed binary and recorded fingerprint first, so
+    // there is something to check for corruption.
+    let setup_exit = process.run_capture_cwd([sfn, "dev", "bootstrap", "build"], child_env, repo);
+    let _setup_out = process.capture_take_stdout();
+    let _setup_err = process.capture_take_stderr();
+    assert setup_exit == 0;
+    let installed_before = fs.readFile(repo + "/build/bin/sfn");
+    let fingerprint_before = fs.readFile(repo
+        + "/build/.compiler-source-fingerprint");
+
+    // Edit a source file (so the fingerprint gate cannot short-circuit),
+    // then swap in a seed that "succeeds" but whose produced
+    // build/sailfin/program does not actually run.
+    fs.writeFile(repo + "/compiler/src/a.sfn", "fn a_value() -> int { return 2; }\n");
+    _seed_stub_unrunnable_program(repo, marker);
+
+    let fail_exit = process.run_capture_cwd([sfn, "dev", "bootstrap", "build"], child_env, repo);
+    let _fail_out = process.capture_take_stdout();
+    let fail_err = process.capture_take_stderr();
+    assert fail_exit != 0;
+    assert find(fail_err, "smoke check", 0) >= 0;
+    // The smoke check runs against `build/sailfin/program` BEFORE it is
+    // published, so an unrunnable build never reaches `build/bin/sfn`: the
+    // previously installed compiler survives intact, and the unchanged
+    // freshness record forces the next build to retry (SFN-679).
+    assert fs.readFile(repo + "/build/bin/sfn") == installed_before;
+    assert fs.readFile(repo + "/build/.compiler-source-fingerprint") == fingerprint_before;
+    assert ! fs.exists(repo + "/build/.compiler-source-fingerprint.pending");
+
+    process.run(["rm", "-rf", repo]);
+}

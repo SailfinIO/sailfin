@@ -2,10 +2,12 @@
 # Fingerprint the *module layout* of the Sailfin source tree: the sorted set
 # of `.sfn` paths, deliberately WITHOUT their contents.
 #
-# This is the CI build-cache counterpart to `compiler_source_fingerprint.sh`,
-# which hashes paths AND bytes. The two answer different questions:
+# This is the CI build-cache counterpart to `sfn dev bootstrap fingerprint`
+# (SFN-679 retired the former `compiler_source_fingerprint.sh` shell
+# implementation), which hashes paths AND bytes. The two answer different
+# questions:
 #
-#   compiler_source_fingerprint.sh  "did anything that feeds the build change?"
+#   sfn dev bootstrap fingerprint   "did anything that feeds the build change?"
 #   module_layout_fingerprint.sh    "did the set of modules change?"
 #
 # Why the second one exists (SFN-661). A module's emitted symbols are mangled

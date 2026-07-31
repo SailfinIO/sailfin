@@ -6,11 +6,16 @@
 // and are deliberately kept out of the primary `sfn --help` list so ordinary
 // Sailfin application authors never see them.
 //
-//   sfn dev bootstrap fetch          acquire + verify the pinned seed only
-//   sfn dev bootstrap build          fetch if needed, then build the compiler
-//                                    with the exact seed
-//   sfn dev bootstrap check          build + smoke-verify the built compiler
-//   sfn dev bootstrap pin <version>  update bootstrap.toml [seed].version
+//   sfn dev bootstrap fetch              acquire + verify the pinned seed only
+//   sfn dev bootstrap build              fetch if needed, then build the
+//                                        compiler with the exact seed
+//   sfn dev bootstrap check              build + smoke-verify the built
+//                                        compiler
+//   sfn dev bootstrap pin <version>      update bootstrap.toml [seed].version
+//   sfn dev bootstrap fingerprint [root] print the compiler source
+//                                        fingerprint
+//   sfn dev bootstrap install [--from]   publish an already-built compiler as
+//                                        build/bin/sfn
 //
 // The steady-state contributor path is still `sfn build -p compiler`, which
 // enters bootstrap mode via `bootstrap_gate_or_dispatch` (exported here and
@@ -21,11 +26,17 @@ import {
     Command,
     Matches,
     arg,
+    arg_variadic,
     command,
+    flag,
+    flag_value,
     get,
+    has_flag,
+    positionals,
     subcommand,
     subcommand_path,
     with_arg,
+    with_flag,
     with_subcommand
 } from "sfn/cli";
 
@@ -36,7 +47,18 @@ import {
     read_bootstrap_manifest,
     rewrite_seed_version
 } from "../../bootstrap_manifest";
-import { _shell_read_cmd, _toml_trim_cmd } from "../../build/fs";
+import { _atomic_rename_into_place, _shell_read_cmd, _toml_trim_cmd } from "../../build/fs";
+import {
+    built_program_path,
+    compute_source_fingerprint,
+    default_fingerprint_roots,
+    install_built_compiler,
+    native_install_path,
+    pending_fingerprint_path,
+    read_stored_fingerprint,
+    source_fingerprint_path,
+    write_fingerprint
+} from "../../build/source_fingerprint";
 import { number_to_string } from "../../num_format";
 import { starts_with, strings_equal, substring } from "../../string_utils";
 import { _strip_build_metadata, resolve_compiler_version } from "../../version";
@@ -268,8 +290,24 @@ fn _bootstrap_local_path_reject(m: BootstrapManifest) -> string {
     return "";
 }
 
-// build: fetch if needed, then build the compiler with the exact seed.
-fn _dev_bootstrap_build() -> int ![io, net] {
+// Whether `SAILFIN_BOOTSTRAP_FORCE` is set to a truthy value. Mirrors the
+// `flag OR env` pattern other bootstrap knobs use so an agent driving the
+// build from a shell (no CLI flag control) still gets the override.
+fn _bootstrap_force_env() -> boolean ![io] {
+    let v = env.get("SAILFIN_BOOTSTRAP_FORCE");
+    return strings_equal(v, "1") || strings_equal(v, "true") || strings_equal(v, "yes");
+}
+
+// build: fetch if needed, then build the compiler with the exact seed —
+// but only when the source fingerprint changed (or `force` is set). The
+// fingerprint is snapshotted BEFORE the seed build runs (`pre`) and
+// re-checked AFTER it completes (`post`): a mismatch means the sources
+// changed mid-build, so the freshly built binary is refused rather than
+// published as if it matched `pre`. The stored fingerprint is only ever
+// promoted after the binary is installed — never before — so an
+// interrupted run cannot leave a stored fingerprint claiming a binary
+// that was never installed.
+fn _dev_bootstrap_build(force: boolean) -> int ![io, net] {
     let m = _bootstrap_resolve_manifest();
     if !m.ok {
         print.err("error: " + m.error);
@@ -280,17 +318,193 @@ fn _dev_bootstrap_build() -> int ![io, net] {
         print.err("error: " + lp);
         return 1;
     }
+
+    let roots = default_fingerprint_roots();
+    let pre = compute_source_fingerprint(roots);
+    if pre.length == 0 {
+        print.err("error: could not compute the compiler source fingerprint");
+        return 1;
+    }
+
+    let out = native_install_path();
+    if !force {
+        let stored = read_stored_fingerprint(source_fingerprint_path());
+        if fs.is_executable(out) && stored.length > 0 && stored == pre {
+            print("sfn dev bootstrap: " + out
+                + " is up to date (source fingerprint "
+                + substring(pre, 0, 12)
+                + "); skipping build");
+            return 0;
+        }
+    }
+
+    write_fingerprint(pending_fingerprint_path(), pre);
+
     let ensured = _bootstrap_ensure_seed(m);
-    if ensured != 0 { return ensured; }
+    if ensured != 0 {
+        fs.deleteFile(pending_fingerprint_path());
+        return ensured;
+    }
     print("sfn dev bootstrap: building compiler with seed " + m.version);
     let rc = _bootstrap_run_compiler_build(m);
     if rc != 0 {
+        fs.deleteFile(pending_fingerprint_path());
         print.err("error: compiler build failed (seed " + m.version + ", exit "
             + number_to_string(rc)
             + ")");
         return rc;
     }
-    print("sfn dev bootstrap: built build/sailfin/program with seed " + m.version);
+
+    let post = compute_source_fingerprint(roots);
+    if post.length == 0 || post != pre {
+        fs.deleteFile(pending_fingerprint_path());
+        print.err("error: compiler sources changed during the build; refusing to publish a stale binary");
+        return 1;
+    }
+
+    // Smoke-verify the built artifact BEFORE it replaces anything (SFN-679).
+    // Publishing first and checking after would swap a working `build/bin/sfn`
+    // for a broken one on every bad build, leaving the developer with no
+    // usable compiler; and recording freshness for a binary that does not run
+    // would wedge every later build into "up to date" against it, escapable
+    // only via --force. Verifying the source artifact keeps a failed build
+    // purely additive: the previously installed compiler is untouched.
+    let smoke_rc = process.run([built_program_path(), "version"]);
+    if smoke_rc != 0 {
+        fs.deleteFile(pending_fingerprint_path());
+        print.err("error: the compiler built at " + built_program_path()
+            + " failed its smoke check (exit "
+            + number_to_string(smoke_rc)
+            + "); "
+            + out
+            + " was left unchanged");
+        return 1;
+    }
+
+    if !install_built_compiler(built_program_path(), out) {
+        fs.deleteFile(pending_fingerprint_path());
+        print.err("error: could not install the built compiler to " + out);
+        return 1;
+    }
+
+    if !_atomic_rename_into_place(pending_fingerprint_path(), source_fingerprint_path()) {
+        write_fingerprint(source_fingerprint_path(), pre);
+        fs.deleteFile(pending_fingerprint_path());
+    }
+
+    print("sfn dev bootstrap: installed " + out + " (seed " + m.version + ")");
+    return 0;
+}
+
+// fingerprint: print the source digest alone on stdout (no roots given
+// uses the default scope). A Makefile/CI captures this with `$(...)`, so
+// nothing else may reach stdout here.
+fn _dev_bootstrap_fingerprint(roots: string[]) -> int ![io] {
+    let mut scope = roots;
+    if scope.length == 0 { scope = default_fingerprint_roots(); }
+    let digest = compute_source_fingerprint(scope);
+    if digest.length == 0 {
+        print.err("error: could not compute the compiler source fingerprint");
+        return 1;
+    }
+    print(digest);
+    return 0;
+}
+
+// Whether `s` has the shape of a fingerprint this compiler produced: 64
+// lowercase hex characters. Anything else is treated as absent rather
+// than as a conflicting snapshot (SFN-679).
+fn _looks_like_digest(s: string) -> boolean {
+    if s.length != 64 { return false; }
+    let mut i: int = 0;
+    loop {
+        if i >= s.length { break; }
+        let c = char_code(s[i]);
+        let is_digit = c >= 48 && c <= 57;
+        let is_lower_hex = c >= 97 && c <= 102;
+        if !is_digit && !is_lower_hex { return false; }
+        i += 1;
+    }
+    return true;
+}
+
+// install: publish an already-built compiler binary (from `from_path`, or
+// `build/sailfin/program` by default) as the canonical `build/bin/sfn`.
+// The post-build publish half of `_dev_bootstrap_build`, invoked by the
+// Makefile from the freshly built binary. Applies the same
+// pending-fingerprint race guard: if the sources changed since the build
+// that produced `src` was snapshotted, refuse to publish it.
+//
+// Unlike `_dev_bootstrap_build`, `install` may run with no trustworthy
+// pre-build snapshot at all — a clean checkout has no prior `build/bin/sfn`
+// to have taken one from, and a binary predating SFN-679 cannot produce one.
+// Both degrade to "install, but do not record a freshness claim nobody
+// checked" rather than failing the completed build outright (SFN-679).
+fn _dev_bootstrap_install(from_path: string) -> int ![io] {
+    let mut src = from_path;
+    if src.length == 0 { src = built_program_path(); }
+    if !fs.exists(src) {
+        print.err("error: no built compiler at " + src);
+        return 1;
+    }
+
+    let cur = compute_source_fingerprint(default_fingerprint_roots());
+    if cur.length == 0 {
+        // Not fatal: an unhashable tree (zero-byte .sfn file, or no
+        // sha256sum/shasum on the host for a file over 64 KiB) must not
+        // abort an otherwise-completed ~10-minute build at the final step
+        // (SFN-679).
+        print.err("warning: could not compute the compiler source fingerprint; installing without a freshness record");
+    }
+
+    let pending_path = pending_fingerprint_path();
+    let pending = read_stored_fingerprint(pending_path);
+    // Only a well-formed digest counts as a pre-build snapshot. A
+    // `build/bin/sfn` predating SFN-679 has no `dev bootstrap
+    // fingerprint` leaf, so the Makefile's pre-build capture can leave
+    // usage text here during the one transitional build; treating that
+    // as a mid-build source change would fail the build outright
+    // instead of self-healing.
+    let have_snapshot = _looks_like_digest(pending);
+
+    if have_snapshot && cur.length > 0 && pending != cur {
+        fs.deleteFile(pending_path);
+        print.err("error: compiler sources changed during the build; refusing to publish a stale binary");
+        return 1;
+    }
+
+    let out = native_install_path();
+
+    // Smoke-verify the candidate BEFORE it replaces anything (SFN-679), so a
+    // build that produced an unrunnable binary leaves the previously
+    // installed compiler intact rather than swapping a working toolchain for
+    // a broken one. See `_dev_bootstrap_build` for the full rationale.
+    let smoke_rc = process.run([src, "version"]);
+    if smoke_rc != 0 {
+        fs.deleteFile(pending_path);
+        print.err("error: the compiler at " + src
+            + " failed its smoke check (exit "
+            + number_to_string(smoke_rc)
+            + "); "
+            + out
+            + " was left unchanged");
+        return 1;
+    }
+
+    if !install_built_compiler(src, out) {
+        print.err("error: could not install the built compiler to " + out);
+        return 1;
+    }
+
+    if have_snapshot && cur.length > 0 && pending == cur {
+        write_fingerprint(source_fingerprint_path(), cur);
+        fs.deleteFile(pending_path);
+    } else {
+        fs.deleteFile(pending_path);
+        print("sfn dev bootstrap: no trustworthy pre-build source snapshot; freshness record not written — the next build will re-run (SFN-679)");
+    }
+
+    print("sfn dev bootstrap: installed " + out);
     return 0;
 }
 
@@ -316,7 +530,7 @@ fn _dev_bootstrap_check() -> int ![io, net] {
             + ")");
         return build_rc;
     }
-    let built = "build/sailfin/program";
+    let built = built_program_path();
     if !fs.exists(built) {
         print.err("error: build did not produce " + built);
         return 1;
@@ -363,15 +577,17 @@ fn _dev_bootstrap_pin(new_version: string) -> int ![io] {
 }
 
 // The `sfn/cli` definition for `dev`, registered on the v2 root. Three nested
-// groups: `bootstrap` (fetch/build/check/pin leaves), `shard` (the CI
-// test-shard surface, SFN-200), and `arena` (the arena IR equivalence gate,
-// SFN-201).
+// groups: `bootstrap` (fetch/build/check/pin/fingerprint/install leaves),
+// `shard` (the CI test-shard surface, SFN-200), and `arena` (the arena IR
+// equivalence gate, SFN-201).
 fn command_def() -> Command {
     let mut bootstrap: Command = command("bootstrap", "Compiler seed bootstrap (reads bootstrap.toml)");
     bootstrap = with_subcommand(bootstrap, command("fetch", "Acquire and verify the pinned seed"));
-    bootstrap = with_subcommand(bootstrap, command("build", "Build the compiler with the exact seed"));
+    bootstrap = with_subcommand(bootstrap, with_flag(command("build", "Build the compiler with the exact seed"), flag("force", "Rebuild even when the source fingerprint is unchanged")));
     bootstrap = with_subcommand(bootstrap, command("check", "Build then smoke-verify the compiler"));
     bootstrap = with_subcommand(bootstrap, with_arg(command("pin", "Update the pinned seed version"), arg("version", "Seed version to pin (e.g. 0.8.0-alpha.4)")));
+    bootstrap = with_subcommand(bootstrap, with_arg(command("fingerprint", "Print the compiler source fingerprint"), arg_variadic("root", "Source roots to hash (default: compiler/src runtime)")));
+    bootstrap = with_subcommand(bootstrap, with_flag(command("install", "Publish an already-built compiler as build/bin/sfn"), flag_value("from", "Path to the built compiler binary (default: build/sailfin/program)")));
     let mut dev: Command = with_subcommand(command("dev", "Compiler/toolchain maintainer commands"), bootstrap);
     dev = with_subcommand(dev, shard_command_def());
     dev = with_subcommand(dev, arena_command_def());
@@ -405,12 +621,21 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     }
     let sub: string = subcommand(matches);
     if strings_equal(sub, "fetch") { return _dev_bootstrap_fetch(); }
-    if strings_equal(sub, "build") { return _dev_bootstrap_build(); }
+    if strings_equal(sub, "build") {
+        let force = has_flag(matches, "force") || _bootstrap_force_env();
+        return _dev_bootstrap_build(force);
+    }
     if strings_equal(sub, "check") { return _dev_bootstrap_check(); }
     if strings_equal(sub, "pin") {
         return _dev_bootstrap_pin(get(matches, "version"));
     }
-    print("usage: sfn dev bootstrap <fetch|build|check|pin>");
+    if strings_equal(sub, "fingerprint") {
+        return _dev_bootstrap_fingerprint(positionals(matches, "root"));
+    }
+    if strings_equal(sub, "install") {
+        return _dev_bootstrap_install(get(matches, "from"));
+    }
+    print("usage: sfn dev bootstrap <fetch|build|check|pin|fingerprint|install>");
     return 2;
 }
 
