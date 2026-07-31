@@ -15,6 +15,9 @@
       "Bash(touch *)",
       "Bash(chmod *)",
       "Bash(build/bin/sfn *)",
+      "Bash(build/toolchains/seed/bin/sfn *)",
+      "Bash(timeout * build/toolchains/seed/bin/sfn *)",
+      "Bash(./install.sh*)",
       "Bash(timeout * build/bin/sfn *)",
       "Bash(build/bin/sfn-seedcheck *)",
       "Bash(timeout * build/bin/sfn-seedcheck *)",
@@ -131,7 +134,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": ".claude/hooks/session-start.sh"
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/session-start.sh",
+            "timeout": 600
           }
         ]
       }
