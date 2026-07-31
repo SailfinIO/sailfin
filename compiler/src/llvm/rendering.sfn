@@ -14,7 +14,7 @@ import {
     effective_helper_declare_return_type,
     is_async_runtime_target,
     runtime_helper_descriptors
-} from "./runtime_helpers";
+} from "./runtime_helpers/mod";
 import { map_parameter_type, map_return_type } from "./type_mapping";
 import { TraitMetadata, TypeContext } from "./types";
 import {

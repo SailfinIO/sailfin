@@ -118,7 +118,7 @@ export {
     find_runtime_helper,
     append_runtime_helper,
     async_runtime_declare_lines
-} from "./runtime_helpers";
+} from "./runtime_helpers/mod";
 
 // Re-export type mapping functions
 export {

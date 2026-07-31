@@ -4,7 +4,7 @@
 // (`sfn_process_handle_read_line_stdout`,
 // `sfn_process_handle_read_bytes_stdout`,
 // `sfn_process_handle_write_bytes`); the `process.*` descriptor rows in
-// `compiler/src/llvm/runtime_helpers.sfn` flip the builtin surface onto
+// `compiler/src/llvm/runtime_helpers/registry_process.sfn` flip the builtin surface onto
 // them. These pin the raw builtins independently of any `sfn/os`
 // wrapper, mirroring `process_spawn_with_env_test.sfn`. All assume a
 // POSIX `sh`/`cat`/`printf` (the same platform assumption the sibling

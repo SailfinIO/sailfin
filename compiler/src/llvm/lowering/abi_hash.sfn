@@ -49,7 +49,7 @@ struct _AbiBitSplit {
 // derived hash. The format is `Name{f<i>:<llvm_type>@<align>;...}`,
 // joined with `;`. SfnArray's element type is rendered as `i8**` —
 // the canonical erased form used by every runtime helper signature
-// in `compiler/src/llvm/runtime_helpers.sfn` (M1.B).
+// under `compiler/src/llvm/runtime_helpers/` (M1.B).
 fn sfn_abi_locked_layout_string() -> string {
     return "SfnString{f0:i8*@8;f1:i64@8};SfnArray{f0:i8**@8;f1:i64@8;f2:i64@8}";
 }

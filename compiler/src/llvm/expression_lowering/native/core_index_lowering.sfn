@@ -117,7 +117,7 @@ fn lower_index_expression(parse: IndexExpressionParse, bindings: ParameterBindin
     } else if array_type == "{i8*, i64}" {
         // Pass the aggregate through unchanged: field 1 already holds the
         // length, and `grapheme_at` declares `{i8*, i64}` parameters
-        // (`llvm/runtime_helpers.sfn`), so `emit_runtime_call`'s argument
+        // (`llvm/runtime_helpers/registry_values.sfn`), so `emit_runtime_call`'s argument
         // coercion is a no-op. Demoting to `i8*` here instead discarded a
         // length that was already in hand and made that coercion recover
         // it with a full `sfn_str_len` NUL-scan of the whole string — once

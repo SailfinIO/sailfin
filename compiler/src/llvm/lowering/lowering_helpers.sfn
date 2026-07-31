@@ -36,7 +36,7 @@ import { append_unique_effect } from "../effects";
 import { resolve_import_artifact_slug, resolve_import_module_slug_for_module } from "../imports";
 import { is_prelude_mirror_symbol } from "../prelude_mirror_signatures";
 import { find_function_by_name, should_internalize_function } from "../rendering";
-import { runtime_helper_descriptors } from "../runtime_helpers";
+import { runtime_helper_descriptors } from "../runtime_helpers/mod";
 import {
     CapabilityManifest,
     EnumTypeInfo,

@@ -173,7 +173,7 @@ fn _write_lines_or_empty(target: string, lines: string[]) -> void ![io] {
 // Returns the real publish status, which both IR emit callers thread to
 // their own `boolean` return in place of the `fs.exists` check they used
 // to consume. `fs.writeLines` is `-> void` (a frozen runtime-helper
-// descriptor signature at `compiler/src/llvm/runtime_helpers.sfn`), so the
+// descriptor signature under `compiler/src/llvm/runtime_helpers/`), so the
 // staged write's outcome is read as `fs.exists(tmp)` — which is only a
 // sound signal because the mint's pre-created temp is dropped first. See
 // the `fs.deleteFile(tmp)` below.

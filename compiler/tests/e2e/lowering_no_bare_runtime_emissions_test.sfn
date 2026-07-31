@@ -7,7 +7,7 @@
 // epic #842; `.claude/rules/no-bash-e2e.md`).
 //
 // Why this exists: the runtime helper descriptor registry in
-// `compiler/src/llvm/runtime_helpers.sfn` is the single source of truth
+// `compiler/src/llvm/runtime_helpers/` is the single source of truth
 // for runtime call symbols. A descriptor flip migrates every call site
 // in lockstep. Hardcoded `@sailfin_runtime_*` strings pushed straight
 // into the emitted IR (via `lines.push(...)`) bypass that resolution and

@@ -5,7 +5,7 @@
 import { NativeFunction, NativeInstruction } from "../native_ir";
 import { char_at, substring } from "../string_utils";
 import { test_runner_trace } from "../test_runner_state";
-import { find_runtime_helper } from "./runtime_helpers";
+import { find_runtime_helper } from "./runtime_helpers/mod";
 import {
     CapabilityManifest,
     CapabilityManifestEntry,

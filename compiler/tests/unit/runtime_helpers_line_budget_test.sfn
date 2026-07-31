@@ -1,0 +1,51 @@
+// Line-budget sentinel for `compiler/src/llvm/runtime_helpers/`.
+//
+// The former flat `runtime_helpers.sfn` reached 1,942 lines and was one of the
+// compiler's largest per-module peak-RSS offenders. The registry is now split
+// by concern, with its stable lookup and declaration API kept in `mod.sfn`.
+// This guard prevents either the facade or a registry partition from quietly
+// regrowing past the 750-line ceiling.
+import { expect_eq_bool } from "sfn/test";
+
+import { find_char_local } from "../../src/string_utils";
+
+let RUNTIME_HELPERS_MODULE_LINE_BUDGET: int = 750;
+let RUNTIME_HELPERS_ROOT: string = "compiler/src/llvm/runtime_helpers";
+
+fn _count_newlines(source: string) -> int {
+    let mut count: int = 0;
+    let mut pos: int = 0;
+    loop {
+        let idx = find_char_local(source, "\n", pos);
+        if idx < 0 { break; }
+        count += 1;
+        pos = idx + 1;
+    }
+    return count;
+}
+
+fn _module_lines(name: string) -> int ![io] {
+    let source = fs.readFile(RUNTIME_HELPERS_ROOT + "/" + name + ".sfn");
+    assert source.length > 0;
+    return _count_newlines(source);
+}
+
+test "runtime helpers: each submodule stays under 750 lines" ![io] {
+    let modules: string[] = ["mod", "registry_concurrency", "registry_platform", "registry_process", "registry_services", "registry_support", "registry_values"];
+    let mut i: int = 0;
+    loop {
+        if i >= modules.length { break; }
+        let lines = _module_lines(modules[i]);
+        assert expect_eq_bool(lines > 0, true).ok;
+        assert expect_eq_bool(lines < RUNTIME_HELPERS_MODULE_LINE_BUDGET, true).ok;
+        i += 1;
+    }
+}
+
+// Module resolution probes `runtime_helpers.sfn` before
+// `runtime_helpers/mod.sfn`; restoring the flat file would shadow the folder
+// and silently undo the decomposition.
+test "runtime helpers: the flat module does not shadow the folder" ![io] {
+    assert expect_eq_bool(fs.exists("compiler/src/llvm/runtime_helpers.sfn"), false).ok;
+    assert expect_eq_bool(fs.exists(RUNTIME_HELPERS_ROOT + "/mod.sfn"), true).ok;
+}
