@@ -14,7 +14,7 @@
 //
 //   key = sha256(
 //       sha256(source_bytes)
-//       || sha256(sorted(sha256(dep.layout-manifest_bytes), …))
+//       || sha256(sorted(dep_slug || sha256(dep.layout-manifest_bytes), …))
 //       || compiler_version
 //       || canonical(flags)
 //       || slug
@@ -23,9 +23,49 @@
 // Each input separator is `\n` so that two distinct tuples cannot
 // collide via concatenation (e.g. `("ab","c")` vs `("a","bc")`).
 //
-// Sorting the dep-manifest hashes makes the key invariant under
-// dep enumeration order — important for parallel builds and for
+// Sorting the dep components makes the key invariant under dep
+// enumeration order — important for parallel builds and for
 // resolver implementations that walk graphs in different orders.
+//
+// ----------------------------------------------------------------
+// Why the dep component carries the dep's SLUG, not just its bytes
+// ----------------------------------------------------------------
+//
+// A module's emitted symbols are a function of two things: its own
+// source, and the *resolved provider slug* of each of its imports.
+// Lowering mangles every cross-module call site as
+// `<symbol>__<sanitize_module_suffix(provider_slug)>`
+// (`llvm/lowering/lowering_helpers_mangling.sfn`), and the provider
+// slug is resolved from the import path against the staged artifacts
+// — `./declarations` resolves to `parser/declarations` when
+// `parser/declarations.layout-manifest` exists, and falls back to
+// `parser/declarations/mod` when it does not
+// (`llvm/imports.sfn:resolve_import_artifact_slug`).
+//
+// Hashing only the dep manifest's *content* therefore under-determines
+// the key: two different provider modules whose layout manifests
+// happen to be byte-identical are indistinguishable to a dependent.
+// That is not a corner case — a module declaring no structs emits an
+// EMPTY `.layout-manifest`, so every layout-free provider collides
+// with every other one.
+//
+// SFN-661 is exactly that collision. Splitting
+// `parser/declarations.sfn` into `parser/declarations/{mod,functions,…}.sfn`
+// moved the provider slug for an unchanged `parser/statements.sfn`
+// from `parser/declarations` to `parser/declarations/mod`, re-mangling
+// its call sites from `parse_function__parser__declarations` to
+// `parse_function__parser__declarations__mod`. Both manifests were
+// empty, `statements.sfn`'s own bytes were unchanged, and the version
+// / flags / slug inputs were unchanged — so the key was identical, the
+// pre-split `.ll` was served, and the link failed on undefined
+// references to symbols that no longer existed.
+//
+// Mixing the dep slug in makes the key capture the mangling contract
+// exactly: a dependent's key changes if and only if an input to its
+// emitted symbols changed. It is not an over-approximation — a barrel
+// module that keeps its slug while re-pointing a re-export still emits
+// the same forwarding shim under the same name, so its dependents
+// legitimately keep hitting.
 //
 // `canonical(flags)` is `canonicalize_flags(flags)` — a sorted JSON
 // array of strings.
@@ -1095,6 +1135,18 @@ fn runtime_object_entry_key_from_str(key_str: string, hash_suffix: string) -> Ca
 //   - `source_path` exists and is readable.
 //   - Every entry in `dep_layout_manifest_paths` exists and is
 //     readable.
+//   - `dep_slugs` is parallel to `dep_layout_manifest_paths`:
+//     `dep_slugs[i]` is the slug of the module that produced
+//     `dep_layout_manifest_paths[i]`. A short `dep_slugs` degrades
+//     to the empty slug for the trailing entries rather than
+//     trapping — the key stays stable, it just loses the
+//     provider-identity component for those deps (SFN-661).
+//
+// The dep slug — not the manifest path — is what enters the digest.
+// Manifest paths are absolute and contain the per-invocation import
+// context root, so hashing them would make keys unshareable across
+// runners and work-dirs, breaking the CI cache restore the whole
+// content-addressing scheme exists to serve.
 //
 // Failures in `_sha256_of_file_cmd` (missing file, sha256sum not
 // on PATH) collapse to empty digests; the resulting key is still
@@ -1112,14 +1164,21 @@ fn runtime_object_entry_key_from_str(key_str: string, hash_suffix: string) -> Ca
 // different key each run and defeat cache hits. Distinct enumerations
 // carry distinct slugs, which incidentally keeps the `sha256sum` temp
 // filenames below from colliding across concurrent workers.
-fn cache_key_for(source_path: string, dep_layout_manifest_paths: string[], compiler_version: string, flags_canonical: string, slug: string) -> CacheKey ![io] {
+fn cache_key_for(source_path: string, dep_slugs: string[], dep_layout_manifest_paths: string[], compiler_version: string, flags_canonical: string, slug: string) -> CacheKey ![io] {
     let s_hash = _sha256_of_text_file(source_path);
 
     let mut dep_hashes: string[] = [];
     let mut i: int = 0;
     loop {
         if i >= dep_layout_manifest_paths.length { break; }
-        dep_hashes.push(_sha256_of_text_file(dep_layout_manifest_paths[i]));
+        // `<dep slug>\n<manifest content hash>` — the provider's
+        // identity and its interface bytes, so a dependent's key moves
+        // when either changes (SFN-661). `\n` separates the two so a
+        // slug ending in hex cannot collide with a shorter slug plus a
+        // longer hash.
+        let mut dep_slug: string = "";
+        if i < dep_slugs.length { dep_slug = dep_slugs[i]; }
+        dep_hashes.push(dep_slug + "\n" + _sha256_of_text_file(dep_layout_manifest_paths[i]));
         i += 1;
     }
     let sorted_dep_hashes = _sort_strings(dep_hashes);

@@ -497,22 +497,41 @@ fn _cr_direct_import_slugs_for(src: CapsuleSource, sources: CapsuleSource[]) -> 
     return out;
 }
 
-// For each source, compute the manifest paths of its direct imports.
-// Result is a parallel array — index i is the dep manifest list for
-// `sources[i]`.
+// For each source, compute the slugs of its direct imports. Result is
+// a parallel array — index i is the dep slug list for `sources[i]`.
+//
+// These slugs are the provider identities the cache key mixes in
+// (SFN-661) and the basis for the `.layout-manifest` paths derived by
+// `_cr_dep_manifest_paths_for_slugs`.
 //
 // #984: slug resolution runs against `universe` (= `sources ++`
 // the staged `-p` entry), not `sources`, so a sibling's direct import
 // of the walk-excluded entry contributes the entry's `.layout-manifest`
 // to its dep list — feeding both the cache key and the in-process
 // enforcement fallback. Manifests are still emitted only for `sources`.
-fn _cr_collect_per_source_dep_manifests(sources: CapsuleSource[], universe: CapsuleSource[], work_dir: string) -> string[][] ![io] {
-    let context_root = _cr_import_context_root(work_dir);
+fn _cr_collect_per_source_dep_slugs(sources: CapsuleSource[], universe: CapsuleSource[]) -> string[][] ![io] {
     let mut out: string[][] = [];
     let mut i: int = 0;
     loop {
         if i >= sources.length { break; }
-        let dep_slugs = _cr_direct_import_slugs_for(sources[i], universe);
+        out.push(_cr_direct_import_slugs_for(sources[i], universe));
+        i += 1;
+    }
+    return out;
+}
+
+// Map the per-source dep slugs to the `.layout-manifest` paths that
+// staging publishes for them. Pure string derivation over the result
+// of `_cr_collect_per_source_dep_slugs` — kept separate so the one
+// import scan feeds both the cache key's dep-slug component (SFN-661)
+// and the manifest paths, rather than reading every source twice.
+fn _cr_dep_manifest_paths_for_slugs(per_source_dep_slugs: string[][], work_dir: string) -> string[][] {
+    let context_root = _cr_import_context_root(work_dir);
+    let mut out: string[][] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= per_source_dep_slugs.length { break; }
+        let dep_slugs = per_source_dep_slugs[i];
         let mut paths: string[] = [];
         let mut j: int = 0;
         loop {

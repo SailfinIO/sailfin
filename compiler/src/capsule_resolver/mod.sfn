@@ -161,7 +161,8 @@ import {
     resolve_relative_import
 } from "./relative";
 import {
-    _cr_collect_per_source_dep_manifests,
+    _cr_collect_per_source_dep_slugs,
+    _cr_dep_manifest_paths_for_slugs,
     _cr_manifests_to_asm_paths,
     _cr_stage_import_deps,
     _cr_stage_one,
