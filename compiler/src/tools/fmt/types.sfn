@@ -1,0 +1,23 @@
+// compiler/src/tools/fmt/types.sfn
+//
+// Shared formatter token and emission-state records.
+import { Token } from "../../token";
+
+struct FmtToken {
+    token: Token;
+    leading_comments: Token[];
+    trailing_comment: Token[];
+    blank_lines_before: int;
+    role: string;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Formatting context (state carried through the emit phase)
+// ═══════════════════════════════════════════════════════════════════
+struct FmtContext {
+    indent: int;
+    line_pos: int;
+    last_emitted: string;
+    in_import: boolean;
+    in_effect_list: boolean;
+}

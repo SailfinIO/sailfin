@@ -1,0 +1,56 @@
+// Line-budget sentinel for the `compiler/src/tools/fmt/` modules.
+//
+// The canonical formatter reached 1,802 lines in one compilation unit. The
+// pipeline has distinct token, role-analysis, emission, and import-sorting
+// responsibilities, so keeping them in one file made routine changes harder
+// to isolate and forced every formatter consumer to compile the full module.
+//
+// This is a maintainability ceiling, not an RSS assertion: line count does not
+// reliably predict compiler memory across unrelated modules. Future formatter
+// work should preserve the phase boundaries and use measurements to choose any
+// further decomposition targets.
+import { expect_eq_bool } from "sfn/test";
+
+import { find_char_local } from "../../src/string_utils";
+
+let FMT_MODULE_LINE_BUDGET: int = 750;
+let FMT_MODULE_ROOT: string = "compiler/src/tools/fmt";
+
+// Count newlines, matching `wc -l` semantics (a trailing newline is not
+// double-counted).
+fn _count_newlines(source: string) -> int {
+    let mut count: int = 0;
+    let mut pos: int = 0;
+    loop {
+        let idx = find_char_local(source, "\n", pos);
+        if idx < 0 { break; }
+        count += 1;
+        pos = idx + 1;
+    }
+    return count;
+}
+
+fn _module_lines(name: string) -> int ![io] {
+    let source = fs.readFile(FMT_MODULE_ROOT + "/" + name + ".sfn");
+    assert source.length > 0;
+    return _count_newlines(source);
+}
+
+test "fmt: every submodule stays under the line budget" ![io] {
+    let modules: string[] = ["emitter", "generics", "imports", "mod", "tokens", "types", "unary"];
+    let mut i: int = 0;
+    loop {
+        if i >= modules.length { break; }
+        let lines = _module_lines(modules[i]);
+        assert expect_eq_bool(lines > 0, true).ok;
+        assert expect_eq_bool(lines < FMT_MODULE_LINE_BUDGET, true).ok;
+        i += 1;
+    }
+}
+
+// A flat file shadows the folder module because resolution probes `fmt.sfn`
+// before `fmt/mod.sfn`.
+test "fmt: the flat module does not shadow the folder" ![io] {
+    assert expect_eq_bool(fs.exists("compiler/src/tools/fmt.sfn"), false).ok;
+    assert expect_eq_bool(fs.exists(FMT_MODULE_ROOT + "/mod.sfn"), true).ok;
+}

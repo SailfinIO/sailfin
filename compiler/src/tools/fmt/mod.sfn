@@ -1,0 +1,37 @@
+// compiler/src/tools/fmt/mod.sfn
+//
+// Canonical formatter facade. The implementation is split by pipeline phase
+// so each compiler module stays within the source-file line budget.
+import { lex } from "../../lexer";
+import { strings_equal } from "../../string_utils";
+import { emit_formatted } from "./emitter";
+import { _reclassify_generics } from "./generics";
+import { sort_imports } from "./imports";
+import { strip_and_classify } from "./tokens";
+import { _reclassify_unary_ops } from "./unary";
+
+fn format_source(source: string) -> string ![io] {
+    if source.length == 0 { return ""; }
+    let tokens = lex(source);
+    let fmt_tokens = strip_and_classify(tokens);
+    if fmt_tokens.length == 0 {
+        // Comment-only file — emit comments directly
+        let mut out = "";
+        let mut ti = 0;
+        loop {
+            if ti >= tokens.length { break; }
+            let tk = tokens[ti];
+            if strings_equal(tk.kind.variant, "Comment") {
+                out = out + tk.lexeme + "\n";
+            }
+            ti += 1;
+        }
+        return out;
+    }
+    let classified = _reclassify_unary_ops(fmt_tokens);
+    let with_generics = _reclassify_generics(classified);
+    let sorted = sort_imports(with_generics);
+    return emit_formatted(sorted);
+}
+
+export { format_source };

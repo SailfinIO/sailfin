@@ -1,0 +1,260 @@
+// compiler/src/tools/fmt/unary.sfn
+//
+// Prefix-operator role analysis.
+import { strings_equal } from "../../string_utils";
+import { FmtToken } from "./types";
+
+fn _is_prefix_context(prev_role: string) -> boolean {
+    if strings_equal(prev_role, "") { return true; }
+    if strings_equal(prev_role, "assign") { return true; }
+    if strings_equal(prev_role, "operator") { return true; }
+    if strings_equal(prev_role, "paren_open") { return true; }
+    if strings_equal(prev_role, "bracket_open") { return true; }
+    if strings_equal(prev_role, "block_open") { return true; }
+    if strings_equal(prev_role, "separator") { return true; }
+    if strings_equal(prev_role, "keyword") { return true; }
+    if strings_equal(prev_role, "colon") { return true; }
+    if strings_equal(prev_role, "arrow") { return true; }
+    if strings_equal(prev_role, "semicolon") { return true; }
+    if strings_equal(prev_role, "unary_op") { return true; }
+    return false;
+}
+
+fn _reclassify_unary_ops(fmt_tokens: FmtToken[]) -> FmtToken[] {
+    let mut i = 0;
+    loop {
+        if i >= fmt_tokens.length { break; }
+        let ft = fmt_tokens[i];
+        if strings_equal(ft.role, "operator") {
+            let lex = ft.token.lexeme;
+            if strings_equal(lex, "!") {
+                let prev_role = "";
+                if i > 0 { prev_role = fmt_tokens[i - 1].role; }
+                if strings_equal(prev_role, "") {
+                    fmt_tokens[i] = FmtToken {
+                        token: ft.token,
+                        leading_comments: ft.leading_comments,
+                        trailing_comment: ft.trailing_comment,
+                        blank_lines_before: ft.blank_lines_before,
+                        role: "unary_op"
+                    };
+                }
+                if strings_equal(prev_role, "assign") {
+                    fmt_tokens[i] = FmtToken {
+                        token: ft.token,
+                        leading_comments: ft.leading_comments,
+                        trailing_comment: ft.trailing_comment,
+                        blank_lines_before: ft.blank_lines_before,
+                        role: "unary_op"
+                    };
+                }
+                if strings_equal(prev_role, "operator") {
+                    fmt_tokens[i] = FmtToken {
+                        token: ft.token,
+                        leading_comments: ft.leading_comments,
+                        trailing_comment: ft.trailing_comment,
+                        blank_lines_before: ft.blank_lines_before,
+                        role: "unary_op"
+                    };
+                }
+                if strings_equal(prev_role, "paren_open") {
+                    fmt_tokens[i] = FmtToken {
+                        token: ft.token,
+                        leading_comments: ft.leading_comments,
+                        trailing_comment: ft.trailing_comment,
+                        blank_lines_before: ft.blank_lines_before,
+                        role: "unary_op"
+                    };
+                }
+                if strings_equal(prev_role, "bracket_open") {
+                    fmt_tokens[i] = FmtToken {
+                        token: ft.token,
+                        leading_comments: ft.leading_comments,
+                        trailing_comment: ft.trailing_comment,
+                        blank_lines_before: ft.blank_lines_before,
+                        role: "unary_op"
+                    };
+                }
+                if strings_equal(prev_role, "separator") {
+                    fmt_tokens[i] = FmtToken {
+                        token: ft.token,
+                        leading_comments: ft.leading_comments,
+                        trailing_comment: ft.trailing_comment,
+                        blank_lines_before: ft.blank_lines_before,
+                        role: "unary_op"
+                    };
+                }
+                if strings_equal(prev_role, "keyword") {
+                    fmt_tokens[i] = FmtToken {
+                        token: ft.token,
+                        leading_comments: ft.leading_comments,
+                        trailing_comment: ft.trailing_comment,
+                        blank_lines_before: ft.blank_lines_before,
+                        role: "unary_op"
+                    };
+                }
+                if strings_equal(prev_role, "colon") {
+                    fmt_tokens[i] = FmtToken {
+                        token: ft.token,
+                        leading_comments: ft.leading_comments,
+                        trailing_comment: ft.trailing_comment,
+                        blank_lines_before: ft.blank_lines_before,
+                        role: "unary_op"
+                    };
+                }
+                if strings_equal(prev_role, "arrow") {
+                    fmt_tokens[i] = FmtToken {
+                        token: ft.token,
+                        leading_comments: ft.leading_comments,
+                        trailing_comment: ft.trailing_comment,
+                        blank_lines_before: ft.blank_lines_before,
+                        role: "unary_op"
+                    };
+                }
+                if strings_equal(prev_role, "semicolon") {
+                    fmt_tokens[i] = FmtToken {
+                        token: ft.token,
+                        leading_comments: ft.leading_comments,
+                        trailing_comment: ft.trailing_comment,
+                        blank_lines_before: ft.blank_lines_before,
+                        role: "unary_op"
+                    };
+                }
+                if strings_equal(prev_role, "unary_op") {
+                    fmt_tokens[i] = FmtToken {
+                        token: ft.token,
+                        leading_comments: ft.leading_comments,
+                        trailing_comment: ft.trailing_comment,
+                        blank_lines_before: ft.blank_lines_before,
+                        role: "unary_op"
+                    };
+                }
+            }
+            if strings_equal(lex, "-") {
+                let prev_role = "";
+                if i > 0 { prev_role = fmt_tokens[i - 1].role; }
+                if strings_equal(prev_role, "") {
+                    fmt_tokens[i] = FmtToken {
+                        token: ft.token,
+                        leading_comments: ft.leading_comments,
+                        trailing_comment: ft.trailing_comment,
+                        blank_lines_before: ft.blank_lines_before,
+                        role: "unary_op"
+                    };
+                }
+                if strings_equal(prev_role, "assign") {
+                    fmt_tokens[i] = FmtToken {
+                        token: ft.token,
+                        leading_comments: ft.leading_comments,
+                        trailing_comment: ft.trailing_comment,
+                        blank_lines_before: ft.blank_lines_before,
+                        role: "unary_op"
+                    };
+                }
+                if strings_equal(prev_role, "operator") {
+                    fmt_tokens[i] = FmtToken {
+                        token: ft.token,
+                        leading_comments: ft.leading_comments,
+                        trailing_comment: ft.trailing_comment,
+                        blank_lines_before: ft.blank_lines_before,
+                        role: "unary_op"
+                    };
+                }
+                if strings_equal(prev_role, "paren_open") {
+                    fmt_tokens[i] = FmtToken {
+                        token: ft.token,
+                        leading_comments: ft.leading_comments,
+                        trailing_comment: ft.trailing_comment,
+                        blank_lines_before: ft.blank_lines_before,
+                        role: "unary_op"
+                    };
+                }
+                if strings_equal(prev_role, "bracket_open") {
+                    fmt_tokens[i] = FmtToken {
+                        token: ft.token,
+                        leading_comments: ft.leading_comments,
+                        trailing_comment: ft.trailing_comment,
+                        blank_lines_before: ft.blank_lines_before,
+                        role: "unary_op"
+                    };
+                }
+                if strings_equal(prev_role, "separator") {
+                    fmt_tokens[i] = FmtToken {
+                        token: ft.token,
+                        leading_comments: ft.leading_comments,
+                        trailing_comment: ft.trailing_comment,
+                        blank_lines_before: ft.blank_lines_before,
+                        role: "unary_op"
+                    };
+                }
+                if strings_equal(prev_role, "keyword") {
+                    fmt_tokens[i] = FmtToken {
+                        token: ft.token,
+                        leading_comments: ft.leading_comments,
+                        trailing_comment: ft.trailing_comment,
+                        blank_lines_before: ft.blank_lines_before,
+                        role: "unary_op"
+                    };
+                }
+                if strings_equal(prev_role, "colon") {
+                    fmt_tokens[i] = FmtToken {
+                        token: ft.token,
+                        leading_comments: ft.leading_comments,
+                        trailing_comment: ft.trailing_comment,
+                        blank_lines_before: ft.blank_lines_before,
+                        role: "unary_op"
+                    };
+                }
+                if strings_equal(prev_role, "arrow") {
+                    fmt_tokens[i] = FmtToken {
+                        token: ft.token,
+                        leading_comments: ft.leading_comments,
+                        trailing_comment: ft.trailing_comment,
+                        blank_lines_before: ft.blank_lines_before,
+                        role: "unary_op"
+                    };
+                }
+                if strings_equal(prev_role, "semicolon") {
+                    fmt_tokens[i] = FmtToken {
+                        token: ft.token,
+                        leading_comments: ft.leading_comments,
+                        trailing_comment: ft.trailing_comment,
+                        blank_lines_before: ft.blank_lines_before,
+                        role: "unary_op"
+                    };
+                }
+                if strings_equal(prev_role, "unary_op") {
+                    fmt_tokens[i] = FmtToken {
+                        token: ft.token,
+                        leading_comments: ft.leading_comments,
+                        trailing_comment: ft.trailing_comment,
+                        blank_lines_before: ft.blank_lines_before,
+                        role: "unary_op"
+                    };
+                }
+            }
+            // Prefix `*` (pointer type `*u8`, dereference `*ptr`) is the same
+            // token as binary multiply, disambiguated here by the previous
+            // token's role: in a prefix context it carries no trailing space,
+            // matching the parser's verbatim intent
+            // (parser/expressions/prefix.sfn).
+            // Binary multiply (prev_role "value"/"paren_close"/…) falls through
+            // unchanged, so `a * b` keeps its spaces.
+            if strings_equal(lex, "*") {
+                let prev_role = "";
+                if i > 0 { prev_role = fmt_tokens[i - 1].role; }
+                if _is_prefix_context(prev_role) {
+                    fmt_tokens[i] = FmtToken {
+                        token: ft.token,
+                        leading_comments: ft.leading_comments,
+                        trailing_comment: ft.trailing_comment,
+                        blank_lines_before: ft.blank_lines_before,
+                        role: "unary_op"
+                    };
+                }
+            }
+        }
+        i += 1;
+    }
+    return fmt_tokens;
+}  // ═══════════════════════════════════════════════════════════════════  // Phase 2.5: Recognize generic angle brackets in type positions  // ═══════════════════════════════════════════════════════════════════  // `<` / `>` are lexed as comparison operators. In type-annotation  // positions they are generic delimiters: `let x: Box<int>`,  // `fn f(p: Foo<int>)`, `-> Result<int, E>`, `struct Box<T>`,  // `enum Foo<T, E>`. Misformatting them inserts intra-bracket spaces  // and — fatally — collapses a generic close followed by `=` into a  // single `>=` token (`let x: Box<int> = …` → `Box<int>=`), which  // re-lexes as a comparison and miscompiles. This pass reclassifies the  // `<` / `>` of a balanced, type-context generic into `generic_open` /  // `generic_close` roles so the emit phase keeps them tight and never  // fuses `>` with a following `=`.  // Is the token after a candidate generic close a plausible post-type  // token? A generic type is followed by `=`, `;`, `,`, `)`, `]`, `{`,  // `(`, `->`, `.`, `?`, `}`, or end-of-stream — never by a bare value,  // keyword, colon, or operator (those signal a comparison instead).

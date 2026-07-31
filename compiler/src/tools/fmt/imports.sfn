@@ -1,0 +1,437 @@
+// compiler/src/tools/fmt/imports.sfn
+//
+// Import-block and import-specifier sorting.
+import { char_at, strings_equal } from "../../string_utils";
+import { Token } from "../../token";
+import { import_group } from "../fmt_rules";
+import { FmtToken } from "./types";
+
+struct ImportSpan {
+    start: int;
+    end: int;
+    path: string;
+    group: int;
+}
+
+fn _extract_import_path(fmt_tokens: FmtToken[], start: int, end: int) -> string {
+    // Find the "from" keyword, then the next token is the path string
+    let mut j = start;
+    loop {
+        if j > end { break; }
+        if strings_equal(fmt_tokens[j].token.lexeme, "from") {
+            if j + 1 <= end { return fmt_tokens[j + 1].token.lexeme; }
+        }
+        j += 1;
+    }
+    return "";
+}
+
+fn _find_import_spans(fmt_tokens: FmtToken[]) -> ImportSpan[] {
+    let mut spans: ImportSpan[] = [];
+    let mut i = 0;
+    loop {
+        if i >= fmt_tokens.length { break; }
+        if strings_equal(fmt_tokens[i].token.lexeme, "import") {
+            let start = i;
+            // Scan to the semicolon
+            let mut j = i;
+            loop {
+                if j >= fmt_tokens.length { break; }
+                if strings_equal(fmt_tokens[j].role, "semicolon") {
+                    let path = _extract_import_path(fmt_tokens, start, j);
+                    let grp = import_group(path);
+                    spans.push(ImportSpan {
+                        start: start, end: j, path: path, group: grp
+                    });
+                    i = j + 1;
+                    break;
+                }
+                j += 1;
+            }
+            if j >= fmt_tokens.length { break; }
+            continue;
+        }
+        i += 1;
+    }
+    return spans;
+}
+
+fn _are_consecutive_imports(fmt_tokens: FmtToken[], spans: ImportSpan[]) -> boolean {
+    if spans.length <= 1 { return true; }
+    let mut k = 0;
+    loop {
+        if k >= spans.length - 1 { break; }
+        let cur_end = spans[k].end;
+        let next_start = spans[k + 1].start;
+        // Between end of one import (;) and start of next (import keyword),
+        // there should be nothing except blank lines and comments
+        let mut j = cur_end + 1;
+        loop {
+            if j >= next_start { break; }
+            let ft = fmt_tokens[j];
+            // If we hit a non-import structural token, imports are not consecutive
+            if !strings_equal(ft.role, "comment") { return false; }
+            j += 1;
+        }
+        k += 1;
+    }
+    return true;
+}
+
+// Simple insertion sort on import spans by (group, path)
+fn _sort_import_spans(spans: ImportSpan[]) -> ImportSpan[] {
+    let mut sorted: ImportSpan[] = [];
+    let mut si = 0;
+    loop {
+        if si >= spans.length { break; }
+        sorted.push(spans[si]);
+        si += 1;
+    }
+    let mut i = 1;
+    loop {
+        if i >= sorted.length { break; }
+        let key = sorted[i];
+        let mut j = i;
+        loop {
+            if j <= 0 { break; }
+            let prev = sorted[j - 1];
+            let mut should_swap = false;
+            if prev.group > key.group { should_swap = true; } else if prev.group == key.group {
+                // Compare paths lexicographically
+                let mut ci = 0;
+                let a = prev.path;
+                let b = key.path;
+                let min_len = a.length;
+                if b.length < min_len { min_len = b.length; }
+                let mut cmp = 0;
+                loop {
+                    if ci >= min_len { break; }
+                    let ca = char_at(a, ci);
+                    let cb = char_at(b, ci);
+                    if ca < cb {
+                        cmp = -1;
+                        break;
+                    }
+                    if ca > cb {
+                        cmp = 1;
+                        break;
+                    }
+                    ci += 1;
+                }
+                if cmp == 0 {
+                    if a.length > b.length { cmp = 1; }
+                    if a.length < b.length { cmp = -1; }
+                }
+                if cmp > 0 { should_swap = true; }
+            }
+            if !should_swap { break; }
+            sorted[j] = sorted[j - 1];
+            sorted[j - 1] = key;
+            j -= 1;
+        }
+        i += 1;
+    }
+    return sorted;
+}
+
+// Sort the specifiers inside a single import { A, C, B } alphabetically.
+// A specifier may be an alias (`A as B`); it is treated as ONE unit keyed
+// on the imported name `A`, with the `as B` alias riding along, so sorting
+// never breaks the `imported as local` pairing (the value tokens are
+// re-slotted positionally by `_push_span_sorted`, so a flat name list that
+// straddles `as` would otherwise swap the two sides).
+//
+// Implemented with flat `string[]` / `int[]` arrays and an index-order sort
+// rather than an array of `{ key, names: string[] }` structs: copying a
+// struct that carries an array field during the insertion sort tripped an
+// arm64 codegen/aliasing hazard (the path is unique to multi-specifier
+// aliased imports, which the self-host never exercises). All values live in
+// one flat array; units are tracked by (start, len) offsets and reordered
+// by sorting an index array, so nothing copies an array-bearing struct.
+fn _sort_import_specifiers(fmt_tokens: FmtToken[], start: int, end: int) -> string[] {
+    // Find the { and } within this import span
+    let mut brace_open = -1;
+    let mut brace_close = -1;
+    let mut j = start;
+    loop {
+        if j > end { break; }
+        if strings_equal(fmt_tokens[j].role, "block_open") { brace_open = j; }
+        if strings_equal(fmt_tokens[j].role, "block_close") {
+            brace_close = j;
+            break;
+        }
+        j += 1;
+    }
+    if brace_open < 0 { return []; }
+    if brace_close < 0 { return []; }
+
+    // Collect every value lexeme in source order into `all_values`, and
+    // record each comma-separated unit as (start, len) into that flat array.
+    // A unit is the run of value tokens up to the next comma; for `A as B`
+    // that run is [A, B] keyed on A (its first value). The `as` keyword and
+    // commas are non-`value` roles, so they stay in place structurally when
+    // `_push_span_sorted` copies the span.
+    let mut all_values: string[] = [];
+    let mut unit_key: string[] = [];
+    let mut unit_start: int[] = [];
+    let mut unit_len: int[] = [];
+    let mut cur_start: int = 0;
+    let mut cur_len: int = 0;
+    let mut k = brace_open + 1;
+    loop {
+        if k >= brace_close { break; }
+        let ft = fmt_tokens[k];
+        if strings_equal(ft.role, "value") {
+            if cur_len == 0 { cur_start = all_values.length; }
+            all_values.push(ft.token.lexeme);
+            cur_len += 1;
+        } else if strings_equal(ft.token.lexeme, ",") {
+            if cur_len > 0 {
+                unit_key.push(all_values[cur_start]);
+                unit_start.push(cur_start);
+                unit_len.push(cur_len);
+                cur_len = 0;
+            }
+        }
+        k += 1;
+    }
+    if cur_len > 0 {
+        unit_key.push(all_values[cur_start]);
+        unit_start.push(cur_start);
+        unit_len.push(cur_len);
+    }
+
+    // Insertion sort an index array `order` by each unit's imported name.
+    let mut order: int[] = [];
+    let mut oi = 0;
+    loop {
+        if oi >= unit_key.length { break; }
+        order.push(oi);
+        oi += 1;
+    }
+    let mut a = 1;
+    loop {
+        if a >= order.length { break; }
+        let key_idx = order[a];
+        let key_name = unit_key[key_idx];
+        let mut b = a;
+        loop {
+            if b <= 0 { break; }
+            let prev_name = unit_key[order[b - 1]];
+            // Compare lexicographically
+            let mut ci = 0;
+            let min_len = prev_name.length;
+            if key_name.length < min_len { min_len = key_name.length; }
+            let mut cmp = 0;
+            loop {
+                if ci >= min_len { break; }
+                let ca = char_at(prev_name, ci);
+                let cb = char_at(key_name, ci);
+                if ca < cb {
+                    cmp = -1;
+                    break;
+                }
+                if ca > cb {
+                    cmp = 1;
+                    break;
+                }
+                ci += 1;
+            }
+            if cmp == 0 {
+                if prev_name.length > key_name.length { cmp = 1; }
+                if prev_name.length < key_name.length { cmp = -1; }
+            }
+            if cmp <= 0 { break; }
+            order[b] = order[b - 1];
+            order[b - 1] = key_idx;
+            b -= 1;
+        }
+        a += 1;
+    }
+
+    // Flatten in sorted unit order, preserving each unit's internal order
+    // (imported first, then alias) so `_push_span_sorted` re-slots the value
+    // positions without breaking `A as B`.
+    let mut names: string[] = [];
+    let mut x = 0;
+    loop {
+        if x >= order.length { break; }
+        let u = order[x];
+        let s = unit_start[u];
+        let n = unit_len[u];
+        let mut y = 0;
+        loop {
+            if y >= n { break; }
+            names.push(all_values[s + y]);
+            y += 1;
+        }
+        x += 1;
+    }
+
+    return names;
+}
+
+// Push tokens from span.start+1 to span.end into result, sorting specifier
+// names inside { ... } alphabetically.
+fn _push_span_sorted(result: FmtToken[], fmt_tokens: FmtToken[], span_start: int, span_end: int) -> FmtToken[] {
+    let sorted_names = _sort_import_specifiers(fmt_tokens, span_start, span_end);
+    if sorted_names.length == 0 {
+        // No braces or no specifiers — copy as-is
+        let mut j = span_start + 1;
+        loop {
+            if j > span_end { break; }
+            result.push(fmt_tokens[j]);
+            j += 1;
+        }
+        return result;
+    }
+
+    // Find the brace region
+    let mut brace_open = -1;
+    let mut brace_close = -1;
+    let mut j = span_start;
+    loop {
+        if j > span_end { break; }
+        if strings_equal(fmt_tokens[j].role, "block_open") { brace_open = j; }
+        if strings_equal(fmt_tokens[j].role, "block_close") {
+            brace_close = j;
+            break;
+        }
+        j += 1;
+    }
+
+    // Collect positions of value tokens inside braces
+    let mut value_positions: int[] = [];
+    let mut k = brace_open + 1;
+    loop {
+        if k >= brace_close { break; }
+        if strings_equal(fmt_tokens[k].role, "value") {
+            value_positions.push(k);
+        }
+        k += 1;
+    }
+
+    // Copy tokens, replacing value tokens with sorted names
+    let mut name_idx = 0;
+    let mut ti = span_start + 1;
+    loop {
+        if ti > span_end { break; }
+        // Check if this is a value token inside the braces that needs reordering
+        let mut is_specifier = false;
+        if ti > brace_open {
+            if ti < brace_close {
+                if strings_equal(fmt_tokens[ti].role, "value") {
+                    is_specifier = true;
+                }
+            }
+        }
+        if is_specifier {
+            if name_idx < sorted_names.length {
+                let orig = fmt_tokens[ti];
+                let new_token = Token {
+                    kind: orig.token.kind,
+                    lexeme: sorted_names[name_idx],
+                    line: orig.token.line,
+                    column: orig.token.column
+                };
+                result.push(FmtToken {
+                    token: new_token, leading_comments: orig.leading_comments, trailing_comment: orig.trailing_comment, blank_lines_before: orig.blank_lines_before, role: orig.role
+                });
+                name_idx += 1;
+            }
+        } else { result.push(fmt_tokens[ti]); }
+        ti += 1;
+    }
+    return result;
+}
+
+fn sort_imports(fmt_tokens: FmtToken[]) -> FmtToken[] {
+    let spans = _find_import_spans(fmt_tokens);
+    if spans.length <= 1 { return fmt_tokens; }
+
+    // Check that all imports are in a consecutive block at the top
+    if !_are_consecutive_imports(fmt_tokens, spans) { return fmt_tokens; }
+
+    let sorted_spans = _sort_import_spans(spans);
+
+    // Preserve leading_comments and blank_lines_before from the original first
+    // import — these may be file-header or section comments that should stay at
+    // the top of the import block regardless of sort order.
+    let orig_first = fmt_tokens[spans[0].start];
+    let header_comments = orig_first.leading_comments;
+    let header_blanks = orig_first.blank_lines_before;
+    let orig_first_start = spans[0].start;
+
+    // Rebuild the token array: tokens before imports, sorted imports, tokens after
+    let first_start = spans[0].start;
+    let last_end = spans[spans.length - 1].end;
+
+    let mut result: FmtToken[] = [];
+
+    // Copy tokens before the import block
+    let mut i = 0;
+    loop {
+        if i >= first_start { break; }
+        result.push(fmt_tokens[i]);
+        i += 1;
+    }
+
+    // Emit sorted imports
+    let mut prev_group = -1;
+    let mut si = 0;
+    loop {
+        if si >= sorted_spans.length { break; }
+        let span = sorted_spans[si];
+
+        // Determine leading_comments for this import's first token:
+        // - If this is the first emitted import (si == 0), use the saved header
+        //   comments so they stay at the top.
+        // - If this import was originally first but got sorted elsewhere, strip
+        //   its leading_comments (they were transferred above).
+        // - Otherwise, preserve the import's own leading_comments.
+        let first_ft = fmt_tokens[span.start];
+        let mut use_comments = first_ft.leading_comments;
+        let mut use_blanks = first_ft.blank_lines_before;
+
+        if si == 0 {
+            use_comments = header_comments;
+            use_blanks = header_blanks;
+        } else if span.start == orig_first_start { use_comments = []; }
+
+        // Insert blank line between import groups
+        if prev_group >= 0 {
+            if span.group != prev_group {
+                // Add blank_lines_before to the first token of this import
+                result.push(FmtToken {
+                    token: first_ft.token, leading_comments: use_comments, trailing_comment: first_ft.trailing_comment, blank_lines_before: 1, role: first_ft.role
+                });
+                result = _push_span_sorted(result, fmt_tokens, span.start, span.end);
+            } else {
+                // Same group: clear any blank lines between
+                result.push(FmtToken {
+                    token: first_ft.token, leading_comments: use_comments, trailing_comment: first_ft.trailing_comment, blank_lines_before: 0, role: first_ft.role
+                });
+                result = _push_span_sorted(result, fmt_tokens, span.start, span.end);
+            }
+        } else {
+            // First emitted import: use header comments/blanks
+            result.push(FmtToken {
+                token: first_ft.token, leading_comments: use_comments, trailing_comment: first_ft.trailing_comment, blank_lines_before: use_blanks, role: first_ft.role
+            });
+            result = _push_span_sorted(result, fmt_tokens, span.start, span.end);
+        }
+
+        prev_group = span.group;
+        si += 1;
+    }
+
+    // Copy tokens after the import block
+    let mut k = last_end + 1;
+    loop {
+        if k >= fmt_tokens.length { break; }
+        result.push(fmt_tokens[k]);
+        k += 1;
+    }
+
+    return result;
+}  // ═══════════════════════════════════════════════════════════════════  // Public entry point  // ═══════════════════════════════════════════════════════════════════
