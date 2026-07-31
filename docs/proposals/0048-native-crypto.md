@@ -4,7 +4,7 @@ title: Native crypto + TLS stack — removing the OpenSSL dependency
 status: Accepted
 type: runtime
 created: 2026-07-12
-updated: 2026-07-12
+updated: 2026-07-31
 author: "agent:compiler-architect; human review"
 tracking:
 supersedes:
@@ -87,7 +87,7 @@ gates Phase B.
 
 ## 3. Design
 
-### 3.1 The four phases
+### 3.1 The phases
 
 | Phase | Deliverable | External-dep effect | Ships when |
 |---|---|---|---|
@@ -95,6 +95,7 @@ gates Phase B.
 | **B** | TLS 1.3 record layer (AEAD via ChaCha20-Poly1305) + client handshake, then server handshake | still linked (fallback); native path selectable | X25519 unblocked (§6.4 amendment, SFN-335) |
 | **C** | X.509 cert parse + chain verification + system trust-store loading + RFC 6125 hostname check | still linked | after Phase B |
 | **D** | Swap `tls_*` wrapper **bodies** to the native stack; replace `websocket.sfn`'s `SHA1`/`EVP_EncodeBlock`/`RAND_bytes` with the native primitives; replace the `sfn/crypto` HMAC/Ed25519 externs with pure-Sailfin ports; delete all OpenSSL externs; drop `-lssl`/`-lcrypto`; remove `_openssl_link_search_flags()` | **`-lssl`/`-lcrypto` gone from every binary** | after Phase C |
+| **E** | Retire the `sha256sum`/`shasum` shell-out (`_sha256_of_file_cmd`) for binary-artifact hashing; replace with an in-process binary-safe hasher (§3.5) | drops a second, previously unphased external-dependency class — subprocess hashers, not OpenSSL | a binary-safe `fs` read primitive exists and the `-O0` in-process performance regression is resolved; independent of Phases A–D |
 
 Because the three TLS consumers forward-declare only the **`tls_*` wrapper
 names** (not raw OpenSSL symbols), Phase D changes only `tls.sfn`'s function
@@ -212,6 +213,49 @@ fn ct_eq_bytes(a: int[], b: int[]) -> bool {
 }
 ```
 
+### 3.5 Phase E — retire the shelled-out hashers
+
+**Added 2026-07-31.** Phases A–D retire the OpenSSL/libcrypto external
+dependency. There is a **second, previously unphased external-dependency
+class** in the same toolchain, unrelated to TLS: binary-artifact SHA-256 is
+computed by shelling out to `sha256sum`/`shasum` via `_sha256_of_file_cmd`
+(`compiler/src/build/fs.sfn:507-519`) rather than by any Sailfin-owned code.
+
+**Consumers.** Build-cache keys (`compiler/src/build_cache.sfn:1178,1198`),
+compiler self-identity (`compiler/src/cli_selfhost.sfn:392`), seed/toolchain
+tarball verification (`compiler/src/cli/commands/toolchain.sfn:383`), `sfn
+package`/`add`/`publish` (`compiler/src/cli/commands/package.sfn:239,428,599`,
+`compiler/src/cli/commands/add.sfn:425`), and the determinism triple-pass
+(`compiler/src/build/determinism.sfn:231,296`).
+
+**The blocker is not crypto.** Pure SHA-256 already exists and self-hosts
+(`compiler/src/build/hash.sfn`). It cannot be used on binaries because
+`fs.readFile` coerces its `i8*` return to a Sailfin string via `strlen`
+(`compiler/src/llvm/core_operands.sfn:1013-1043`), truncating at the first
+NUL. This constraint is recorded verbatim at `hash.sfn:11-19` and
+`fs.sfn:521-534`. The unblock is a binary-safe read primitive, not a crypto
+port.
+
+**The performance constraint any fix must clear.** The in-process path
+already exists for text files but bails above 64 KiB because the vendored
+hasher's byte loop collapses under `-O0` CI shard builds — hashing in-process
+drove one CI shard from ~6 min to ~23 min (`fs.sfn:541-548`). A naive
+in-process swap for binaries would regress CI the same way; the `-O0`
+question must be answered as part of the work, not discovered after landing
+it.
+
+**Fail-closed behaviour is currently correct, but platform-incomplete.**
+`toolchain.sfn:384-388` treats an empty digest as a hard error, which is the
+right failure mode — but `_sha256_of_file_cmd` returns `""` unconditionally on
+Windows (no `sha256sum`/`shasum` there), so `sfn toolchain install` is
+non-functional on Windows by construction, not by bug.
+
+**Recorded follow-on, not scoped here.** The release-signing *producer* path
+(`scripts/sign-release-manifest.sh:28,34-35,78,86`) shells to the `openssl`
+CLI and would additionally need Ed25519 *signing* — which the verify-only
+port (§7) does not provide — before it could be retired. That is separate
+work, not part of Phase E.
+
 ## 4. Effect & capability impact
 
 **Deterministic crypto primitives are pure — zero effects.** Every Phase A hash/
@@ -288,18 +332,44 @@ calls libc directly and would bypass the gate unless we interpose every libc
 symbol libssl uses — a fragile, incomplete interposition surface. Owning the
 TLS stack is the clean cut.
 
-### 6.3 rustls-style scope cuts (TLS 1.3 only, no TLS 1.2, no RSA)
+### 6.3 rustls-style scope cuts (TLS 1.3 only, no TLS 1.2)
 **Adopted for Phases B–D**, and it is what makes the native TLS effort
 tractable. TLS 1.3 only (no 1.2 downgrade), ChaCha20-Poly1305 AEAD only
 (deferring AES-GCM, which needs constant-time AES — hard without hardware AES
 intrinsics the backend does not yet expose), X25519 key exchange only, Ed25519 +
-ECDSA-P256 cert signatures. No session resumption/tickets, no ALPN beyond
-`http/1.1`, no OCSP, no client-cert/mTLS (already out of scope in SFEP-0036).
+ECDSA-P256 + RSA cert signatures (§6.3 amendment below). No session
+resumption/tickets, no ALPN beyond `http/1.1`, no OCSP, no client-cert/mTLS
+(already out of scope in SFEP-0036).
 This mirrors the deliberately-minimal surface `tls_features_required` documents
 the runtime actually exercises. Phase A ships exactly the *missing* primitives
 this cut needs: ChaCha20 + Poly1305 (AEAD), SHA-384 (SHA-256 already ships;
 transcript hash + HKDF), HKDF (key schedule), SHA-1 (WebSocket handshake accept
 value, the libcrypto removal).
+
+**Amendment (2026-07-31) — RSA certificate-signature verification is now IN
+scope; RSA signing/keygen remain out.** The original cut excluded RSA on
+tractability grounds, but that judgement was inherited from the same
+pre-2026-07-25 analysis that wrongly declared X25519 blocked (§6.4 amendment)
+— it never re-ran the width search that overturned that call. The decisive
+point: RSA *verify* operates entirely on public data (public key, public
+signature, public message), so it carries **no constant-time requirement** —
+the constraint that makes the private-key side hard does not apply. It is
+bignum modular exponentiation with a small public exponent (typically 65537).
+
+The motivating reason to add it: the overwhelming majority of public-web
+certificate chains are RSA-rooted. Ed25519 + ECDSA-P256 alone verifies only
+known peers, not the general web, which makes the native stack a non-replacement
+for libssl rather than a drop-in.
+
+Two verify modes are required, not one — a correctness point worth stating
+plainly, since conflating them is a real interop bug: **RSASSA-PKCS1-v1_5**
+(RFC 8017 §8.2.2) for X.509 certificate signatures, and **RSASSA-PSS**
+(RFC 8017 §8.1.2) for TLS 1.3 CertificateVerify — RFC 8446 §4.2.3 forbids
+PKCS#1 v1.5 in CertificateVerify and mandates the `rsa_pss_rsae_*` schemes.
+Both share one modexp core.
+
+Still deferred/out of scope: RSA signing, RSA key generation, and AES-GCM
+(unchanged — the original AES reasoning above stands).
 
 ### 6.4 Pure-Sailfin X25519 in Phase A
 **Rejected for Phase A — recorded as a blocker (§7).** Curve25519 field
@@ -375,6 +445,26 @@ already uses — not by relocating the tested source of truth out of the capsule
   helper. Ed25519-verify needs the same Curve25519 field arithmetic X25519 needs
   and is therefore blocked on the same missing capability. Both are Phase D
   concerns, not Phase A.
+
+  **Amendment (2026-07-31) — HMAC-SHA-256 half RESOLVED; Ed25519-verify
+  blocker description refreshed.** HMAC-SHA-256 is now pure Sailfin:
+  `capsules/sfn/crypto/src/hkdf.sfn:142-197` provides `hmac_sha256_bytes` over
+  the existing pure SHA-256, and `capsules/sfn/crypto/src/mod.sfn:75-109`
+  delegates `hmac_sha256` to it — the former libcrypto `HMAC`/`EVP_sha256`
+  externs are retired (see the note at `mod.sfn:73`).
+
+  Ed25519-verify remains the open half, but it is no longer gated on a missing
+  compiler capability. Per the limb-strategy note §8
+  (`docs/proposals/design-notes/sfn-335-x25519-limb-strategy.md`), the
+  Curve25519 field layer it needed now exists
+  (`capsules/sfn/crypto/src/x25519.sfn`, SFN-335), and what remains is the
+  twisted-Edwards group law, a `pow(z, (p−5)/8)` square root, and SHA-512 —
+  where `sha384.sfn:1-68` already carries the SHA-512 compression machinery
+  (same compression function, different IV, untruncated output).
+  `capsules/sfn/crypto/src/ed25519.sfn:10-26` is now the **only** remaining
+  OpenSSL extern in the crypto capsule, and because `compiler/capsule.toml:59`
+  makes the compiler itself depend on `sfn/crypto`, this single module is what
+  keeps `-lcrypto` on the compiler's own link line.
 
 ## 8. Stage1 readiness mapping
 
