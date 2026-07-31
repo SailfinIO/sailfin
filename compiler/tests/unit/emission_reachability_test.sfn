@@ -26,3 +26,24 @@ test "constant true unsafe wrapper leaves its merge unreachable" {
     let lines = ["define i8* @f() {", "block.entry:", "  %t0 = icmp sgt i64 1, 0", "  br i1 %t0, label %unsafe.body, label %unsafe.merge", "unsafe.body:", "  ret i8* null", "unsafe.merge:"];
     assert expect_eq_bool(fallthrough_block_is_reachable(lines), false).ok;
 }
+
+// A repeated label must contribute the edges of every block carrying it. Only
+// the second `dup` reaches `final`, so resolving the name to its first block
+// alone would drop the edge and lose the E1002 this gate exists to raise.
+test "repeated block label contributes every occurrence's edges" {
+    let lines = ["define i32 @f() {", "block.entry:", "  br label %dup", "dup:", "  ret i32 1", "dup:", "  br label %final", "final:"];
+    assert expect_eq_bool(fallthrough_block_is_reachable(lines), true).ok;
+}
+
+// An orphan block branching to the final label must not make it reachable --
+// the walk starts at the entry block, it does not union every branch target.
+test "unreachable block branching to the final label leaves it unreachable" {
+    let lines = ["define i32 @f() {", "block.entry:", "  ret i32 0", "orphan:", "  br label %final", "final:"];
+    assert expect_eq_bool(fallthrough_block_is_reachable(lines), false).ok;
+}
+
+// Operands ahead of the first label belong to no block and contribute no edges.
+test "branch operand before the first label contributes no edge" {
+    let lines = ["define i32 @f() {", "  br label %final", "block.entry:", "  ret i32 0", "final:"];
+    assert expect_eq_bool(fallthrough_block_is_reachable(lines), false).ok;
+}

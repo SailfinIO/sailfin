@@ -133,4 +133,52 @@ into a **scratch copy** (the pushed series stays honest) and files exactly one
 issue. Use `dry_run=true` to run the benches + compare without pushing to
 `bench-data` or filing issues (a safe green trial).
 
+## Attributing a regression to a pass, and to a commit
+
+`build.csv` can tell you a seed step got slower. It cannot tell you *which pass*
+or *which commit* — the µs-per-IR-line ratio localises to a seed generation and
+stops there. SFN-613 (per-unit cost +20.7% at seed `0.8.4`) was closed with two
+techniques worth reusing, neither of which needs new instrumentation.
+
+**Attribute to a pass with `sfn emit --timing`.** `sfn emit --timing llvm <file>`
+prints `[timing] module=<name> phase=<parse|typecheck|emit_native|lower_llvm|total> ms=<n>`
+to stderr (`compiler/src/main.sfn:78-90, 470-558`). Running it under two seeds on
+an **identical** source tree isolates the pass. For SFN-613 that showed
+`lower_llvm` up +32% to +96% while every other phase stayed flat, and — decisively
+— the emitted `.ll` was **byte-identical** between the seeds. Identical output at
+higher cost means the regression is analysis that emits nothing, which rules out
+whole categories of suspect at once. It is not wired into the build fan-out
+(`capsule_emit_parallel.sfn`); SFN-614 tracks that.
+
+**Attribute to a commit by holding the seed constant.** `make rebuild
+SEED_NATIVE=<abs path>` overrides the tree's own `bootstrap.toml` pin, so
+building each candidate commit with the *same* seed varies only source logic.
+Run it once on the older tag first as a control: v0.8.2's source built by seed
+`0.8.4` matched seed `0.8.2`'s own timing, proving the regression was in source
+logic rather than in the quality of the `0.8.4` binary — which is what the
+one-generation lag above would otherwise suggest.
+
+Two traps this cost time on, both worth checking first:
+
+- **The session clone may be shallow.** A grafted history makes `git log
+  <tag>..<tag>` and `git merge-base --is-ancestor` silently wrong — the SFN-613
+  delta looked like 3 commits when it is 32. Run `git rev-parse
+  --is-shallow-repository` before drawing any conclusion from history, and
+  prefer **content checks** (`git cat-file -e <tag>:<path>`), which are immune.
+- **Expensive code is not the same as hot code.** A quadratic walk added in the
+  same window (`emission_reachability.sfn`) looked like an obvious culprit and
+  measured as a no-op, because it only runs for functions lacking a terminator.
+  Confirm a candidate by measuring it, not by reading its complexity.
+
+### Recorded outcome — SFN-613
+
+Attributed to `07f8d64ea` (saturating float-to-integer casts):
+`ensure_intrinsic_declarations` (`llvm/lowering/lowering_io.sfn`) scanned the
+whole emitted line array once per (operation, int type, float type) combination
+— 24 unconditional scans per module, emitting nothing for source that uses no
+saturating intrinsic. Fixed in place (single prefiltered pass, detection
+unchanged), returning `lower_llvm` to the `0.8.2` baseline with byte-identical
+IR. Not an accept-with-rationale: the fail-closed guarantee was never the cost,
+its implementation was.
+
 [perf.rust-lang.org]: https://perf.rust-lang.org

@@ -1,0 +1,62 @@
+// Coverage for the saturating float-to-integer intrinsic declarations that
+// `ensure_intrinsic_declarations` injects.
+//
+// `intrinsic_declarations_test.sfn` reimplements the function locally and only
+// exercises the `@round` case, so the saturating table had no unit coverage
+// against the real implementation. Nothing in `compiler/src` emits a
+// saturating intrinsic, so a break here is invisible to the self-host gate --
+// these import the real function on purpose (SFN-613).
+import { expect_eq_bool, expect_eq_int } from "sfn/test";
+
+import { ensure_intrinsic_declarations } from "../../src/llvm/lowering/lowering_io";
+
+fn _count_matching(values: string[], target: string) -> int {
+    let mut count: int = 0;
+    let mut index: int = 0;
+    loop {
+        if index >= values.length { break; }
+        if values[index] == target { count += 1; }
+        index += 1;
+    }
+    return count;
+}
+
+fn _contains_line(values: string[], target: string) -> boolean {
+    return _count_matching(values, target) > 0;
+}
+
+test "llvm: declares a used saturating fptosi intrinsic" {
+    let lines = ["define i32 @f(double %x) {", "block.entry:", "  %t0 = call i32 @llvm.fptosi.sat.i32.f64(double %x)", "  ret i32 %t0", "}"];
+    let out = ensure_intrinsic_declarations(lines);
+    assert expect_eq_bool(_contains_line(out, "declare i32 @llvm.fptosi.sat.i32.f64(double)"), true).ok;
+}
+
+test "llvm: does not redeclare a saturating intrinsic already declared" {
+    let lines = ["define i32 @f(double %x) {", "block.entry:", "  %t0 = call i32 @llvm.fptosi.sat.i32.f64(double %x)", "  ret i32 %t0", "}", "", "declare i32 @llvm.fptosi.sat.i32.f64(double)"];
+    let out = ensure_intrinsic_declarations(lines);
+    assert expect_eq_int(_count_matching(out, "declare i32 @llvm.fptosi.sat.i32.f64(double)"), 1).ok;
+}
+
+test "llvm: leaves a module using no saturating intrinsic untouched" {
+    let lines = ["define i32 @f(i32 %x) {", "block.entry:", "  ret i32 %x", "}"];
+    let out = ensure_intrinsic_declarations(lines);
+    assert expect_eq_int(out.length, lines.length).ok;
+}
+
+// Each distinct intrinsic gets its own declaration, and an unsigned use must
+// not be satisfied by the signed declaration.
+test "llvm: declares each used saturating intrinsic separately" {
+    let lines = ["define void @f(double %x, half %y) {", "block.entry:", "  %t0 = call i32 @llvm.fptosi.sat.i32.f64(double %x)", "  %t1 = call i64 @llvm.fptoui.sat.i64.f16(half %y)", "  ret void", "}"];
+    let out = ensure_intrinsic_declarations(lines);
+    assert expect_eq_bool(_contains_line(out, "declare i32 @llvm.fptosi.sat.i32.f64(double)"), true).ok;
+    assert expect_eq_bool(_contains_line(out, "declare i64 @llvm.fptoui.sat.i64.f16(half)"), true).ok;
+    assert expect_eq_bool(_contains_line(out, "declare i64 @llvm.fptosi.sat.i64.f16(half)"), false).ok;
+}
+
+// The `@round` path shares the function and must survive alongside the table.
+test "llvm: injects the round declaration next to a saturating one" {
+    let lines = ["define i32 @f(double %x) {", "block.entry:", "  %r = call double @round(double %x)", "  %t0 = call i32 @llvm.fptosi.sat.i32.f64(double %r)", "  ret i32 %t0", "}"];
+    let out = ensure_intrinsic_declarations(lines);
+    assert expect_eq_bool(_contains_line(out, "declare double @round(double)"), true).ok;
+    assert expect_eq_bool(_contains_line(out, "declare i32 @llvm.fptosi.sat.i32.f64(double)"), true).ok;
+}
