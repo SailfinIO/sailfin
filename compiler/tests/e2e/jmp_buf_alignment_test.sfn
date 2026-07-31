@@ -18,8 +18,9 @@
 //
 // SFN-644 additionally pins the alloca *width* at `[64 x i64]` = 512
 // bytes. The three sites were 256 bytes, short of glibc aarch64's
-// ~312-byte `jmp_buf` (`__jmpbuf[22]` longs + saved sigset), so every
-// executed `try` wrote ~56 bytes into adjacent frame slots. 512 matches
+// ~312-byte `jmp_buf` (`__jmpbuf[22]` longs + saved sigset), leaving
+// ~56 bytes of each `setjmp` save area outside the buffer on that
+// target — derived from the two sizes, not observed. 512 matches
 // the `malloc(512)` reserve in `sfn_exception_alloc_frame`; the heap
 // reserve alone did not cover this, because compiler-emitted `try` never
 // takes the heap path (`try_catch_frames_test.sfn` asserts
@@ -139,6 +140,13 @@ fn _emit_harness_ir(label: string) -> string ![io] {
 // exception frame is presumed to be a jmp_buf alloca (SFN-549's two
 // covered sites: `%jmpbuf` in the `@main` wrapper, `%lN` in a user try
 // block).
+//
+// That presumption holds only because the fixtures below are fixed and
+// contain no `parallel` block: `expression_lowering/native/
+// core_concurrency_lowering.sfn` emits a `[<par_count> x i64]` task
+// array with no `align 16`, which this filter would collect and then
+// misattribute to a jmp_buf. Keep the fixtures free of `parallel`, or
+// narrow the filter, if that ever changes.
 fn _jmpbuf_alloca_lines(ir: string) -> string[] ![pure] {
     let lines = split(ir, "\n");
     let mut out: string[] = [];
@@ -197,6 +205,11 @@ test "jmp_buf layout: every jmp_buf alloca is 512 bytes and 16-aligned for a Win
 test "jmp_buf layout: the sfn test harness @main jmp_buf is 512 bytes and 16-aligned" ![io] {
     let ir = _emit_harness_ir("jmpbuf-harness");
     assert ir.length > 0;
+    // Confirm this really is harness IR before reading the `%jmpbuf`
+    // line as `lowering_core.sfn`'s. `emission.sfn` emits a
+    // byte-identical line, and is excluded here only because a
+    // `*_test.sfn` has no user `fn main`, so its wrapper never emits.
+    assert contains(ir, "@sfn_test_report_pass");
     assert contains(ir, "%jmpbuf = alloca [64 x i64], align 16");
     _assert_jmpbuf_allocas_well_formed(ir, 1);
 }
