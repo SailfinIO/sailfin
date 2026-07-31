@@ -30,15 +30,17 @@ test "job sizing: an unprobed RAM figure fails open to the core count" {
 
 // AC4 (SFN-498): a multi-core Windows host fans out rather than running
 // serial. Windows has no Win32-free RAM probe, so `_cr_host_memsize_bytes`
-// reports a conservative assumed 16 GiB — enough to budget 3 concurrent
-// emits on 4 cores, which is `> 1` as AC4 requires while still bounding
-// fan-out on the one host with no `RLIMIT_AS` backstop.
+// reports a conservative assumed 16 GiB — which at the SFN-626 reserve
+// budgets 4 concurrent emits, exactly the 4-core count, so neither limb
+// binds. Under the previous 3 GiB reserve RAM was the tighter of the two
+// and held this to 3. Still `> 1` as AC4 requires, and still bounded on
+// the one host with no `RLIMIT_AS` backstop.
 test "job sizing: a 4-core Windows host budgets a fanned-out job count" {
-    assert _cr_jobs_from_probe(4, 17179869184) == 3;
+    assert _cr_jobs_from_probe(4, 17179869184) == 4;
 }
 
 // The #1532 Darwin RAM clamp composes with the CPU-count ladder: 7 GiB
-// usable at 66% (~4.96 GiB) fits only one ~3 GiB worker.
+// usable at 66% (~4.62 GiB) fits only one 2.5 GiB worker.
 test "job sizing: the RAM clamp still composes with the CPU ceiling" {
     assert _cr_jobs_from_probe(8, 7516192768) == 1;
 }

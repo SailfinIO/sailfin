@@ -100,9 +100,10 @@ fn _cr_host_cpu_count(host: string) -> int ![io] {
 // (`GlobalMemoryStatusEx` needs a runtime extern), and Windows is the
 // one host with no other backpressure at all: `RLIMIT_AS` is a Linux-only
 // no-op elsewhere (`runtime/sfn/platform/rlimit.sfn`), so an unclamped
-// fan-out there would be ~3.23 GiB per emit child against nothing. A
-// fail-open 0 would hand an 8-core box 8 concurrent children (~26 GiB).
-// 16 GiB matches the `windows-latest` runner and yields 3 jobs on a
+// fan-out there would be ~1.55 GiB per emit child against nothing (the
+// measured worst worker; SFN-626). A fail-open 0 would hand an 8-core
+// box 8 concurrent children (~12 GiB).
+// 16 GiB matches the `windows-latest` runner and yields 4 jobs on a
 // 4-core host — the same count a comparably-sized Linux box resolves to.
 // It under-fans a large Windows workstation; `SAILFIN_BUILD_JOBS` is the
 // lever, and a real probe retires the assumption.
@@ -242,10 +243,24 @@ fn _cr_parse_meminfo_bytes(text: string) -> int {
 // count, never raises it.
 fn _cr_ram_budget_jobs(memsize_bytes: int, nproc: int) -> int {
     if memsize_bytes <= 0 { return nproc; }
-    // 3 GiB — the measured peak RSS of the heaviest compiler-module
-    // emit (`capsule_resolver.sfn` ~3.23 GiB); see
-    // `docs/proposals/0022-darwin-memory-governor.md` §2.4.
-    let per_job_reserve: int = 3221225472;
+    // 2.5 GiB — sized from the heaviest emit worker in the tree,
+    // `llvm/runtime_helpers.sfn` at 1.55 GiB (SFN-626 re-measured all
+    // 302 compiler modules plus the heaviest runtime sources; see
+    // `docs/baselines/compile-0.8.4-linux-x86_64.csv` and
+    // `docs/proposals/0022-darwin-memory-governor.md` §2.4). The
+    // previous 3 GiB came from `capsule_resolver.sfn` at ~3.23 GiB,
+    // a module since decomposed along with every other module that
+    // once exceeded 2 GiB.
+    //
+    // The 61% margin over the measured worst worker is deliberate and
+    // is NOT slack to reclaim: the measurement is Linux x86_64, while
+    // the constant's binding constraint is Darwin, where `RLIMIT_AS`
+    // is a no-op and this arithmetic is the only backpressure. The
+    // margin covers that unmeasured platform delta. Its floor is
+    // fixed: at or below 2.31 GiB a 7 GiB Darwin runner budgets 2
+    // workers instead of 1 and reopens the #1532 OOM. Do not lower
+    // this without a Darwin arm64 measurement.
+    let per_job_reserve: int = 2684354560;
     let usable: int = memsize_bytes * 66 / 100;
     let mut budget: int = usable / per_job_reserve;
     if budget < 1 { budget = 1; }

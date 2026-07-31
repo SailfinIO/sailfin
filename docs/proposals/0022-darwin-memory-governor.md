@@ -4,9 +4,9 @@ title: Darwin (macOS arm64) Memory Governor
 status: Accepted
 type: runtime
 created: 2026-06-20
-updated: 2026-07-24
+updated: 2026-07-31
 author: "agent:compiler-architect"
-tracking:
+tracking: SFN-626
 supersedes:
 superseded-by:
 graduates-to:
@@ -78,7 +78,10 @@ is the simpler call and the recommended observe primitive.
 
 ### 2.4 Per-module-emit peak footprint (the number that sizes fan-out)
 
-`SAILFIN_MEM_LIMIT=unlimited /usr/bin/time -l <seed> emit ... llvm <module>`:
+#### 2026-06 baseline (historical) — Darwin arm64, seed `0.7.0-alpha.47`
+
+`SAILFIN_MEM_LIMIT=unlimited /usr/bin/time -l <seed> emit ... llvm <module>`, run
+on the 12-core/64 GiB Apple Silicon spike machine named in the introduction:
 
 | Module | Lines | max RSS | peak footprint |
 |---|---|---|---|
@@ -103,6 +106,53 @@ steady-state fan-out on a 7 GiB runner is effectively **1–2**, not 8.
 > module) and the >RAM-on-7GiB conclusion are robust. The exact runner peak
 > needs one CI confirmation run (see §7).
 
+This baseline is the figure the original `per_job_reserve_bytes = 3 GiB`
+constant (§3) was sized against; it is kept here as the historical record and
+superseded below.
+
+#### 2026-07-31 recalibration (SFN-626) — Linux x86_64, seed `0.8.4`
+
+`sfn bench --compiler --csv` over **all 302** `compiler/src` modules (isolated
+`emit` per module via `process.run_capture_metered`). Host: Linux x86_64, 4
+cores, 16,856,244,224 B (15.7 GiB) RAM, idle. Total bench wall time 446.61 s.
+Compiler-module data in `docs/baselines/compile-0.8.4-linux-x86_64.csv` (schema
+`module,time_s,peak_kb,ir_lines,status,seed_version`; all 302 rows `status=ok`;
+the CSV covers `compiler/src` only, no `runtime/sfn` rows).
+
+Worst workers (peak RSS):
+
+| Module | peak_kb | GiB |
+|---|---|---|
+| `llvm/runtime_helpers.sfn` | 1,623,420 | 1.55 |
+| `llvm/lowering/lowering_core.sfn` | 1,441,140 | 1.37 |
+| `llvm/expression_lowering/native/core_call_emission.sfn` | 1,402,088 | 1.34 |
+| `llvm/expression_lowering/native/core_operands/union_fallback.sfn` | 1,118,456 | 1.07 |
+
+A separate, smaller measurement checked `runtime/sfn` did not hide a heavier
+worker: `/usr/bin/time` on the five largest `runtime/sfn` sources by line
+count, same host.
+
+| Module | peak_kb | GiB |
+|---|---|---|
+| `runtime/sfn/adapters/websocket.sfn` | 621,204 | 0.59 |
+| `runtime/sfn/adapters/http.sfn` | 587,600 | 0.56 |
+| `runtime/sfn/process.sfn` | 522,232 | 0.50 |
+| `runtime/sfn/platform/process_windows.sfn` | 484,484 | 0.46 |
+| `runtime/sfn/string.sfn` | 340,860 | 0.33 |
+
+The heaviest `runtime/sfn` source (0.59 GiB) sits well under the compiler's
+worst worker — the runtime is not the constraint. Distribution across
+the 302 compiler modules: 26 above 1 GiB, 136 in 512 MiB–1 GiB, 78 in
+256–512 MiB, 62 under 256 MiB. **No module now exceeds 1.55 GiB**, versus the
+3.23 GiB `capsule_resolver.sfn` figure the 2026-06 baseline recorded — that
+module and every other former >2 GiB module has since been decomposed
+(SFN-625, SFN-634, SFN-637, SFN-638, and the #2707 resolver split).
+
+**The reserve constant (§3) is now sized against this measurement**: 2.5 GiB is
+a 61% margin over the 1.55 GiB measured worst worker. That margin is
+deliberate, not reclaimable slack — see §7 for the Darwin-platform-delta and
+hard-floor reasoning it exists to cover.
+
 ## 3. Recommended mechanism: two layers
 
 Because no hard cap exists, the design is **defense-in-depth**, with the cheap
@@ -117,12 +167,21 @@ clamp with `min(nproc, 8, ram_budget_jobs)` where:
 ```
 ram_budget_jobs = max(1, floor(usable_ram_bytes / per_job_reserve_bytes))
 usable_ram_bytes = hw.memsize * SAFETY_FRACTION   (e.g. 0.66)
-per_job_reserve_bytes = 3 GiB                       (the measured heavy-emit RSS)
+per_job_reserve_bytes = 2.5 GiB   (SFN-626 recalibration, §2.4; see the hard
+                                    floor below before lowering further)
 ```
 
-On a 7 GiB runner: `floor(7*0.66 / 3) = floor(1.54) = 1` → **serial emit**.
-On a 64 GiB dev box: `floor(64*0.66 / 3) = 14` → still clamped to 8 (unchanged
-local behavior). On a 16 GiB laptop: `floor(16*0.66/3)=3`.
+On a 7 GiB runner: `floor(7*0.66 / 2.5) = floor(1.85) = 1` → **serial emit**
+(unchanged). On a 64 GiB dev box: `floor(64*0.66 / 2.5) = 16` → still clamped
+to 8 (unchanged local behavior). On a 16 GiB laptop:
+`floor(16*0.66/2.5) = 4` (was 3 under the 3 GiB reserve).
+
+The SFN-626 recalibration (§2.4, §7) moved the reserve from 3 GiB to 2.5 GiB,
+raising job counts across the fleet: a 16 GiB host goes 3 → 4 emit workers; the
+`_test_jobs_budget` pool sees a 32 GiB host go 7 → 8 and an 8 GiB host go 1 → 2.
+A 7 GiB host is unchanged at 1, and RAM-rich hosts stay clamped to `nproc`/8.
+**Do not lower the constant further without a Darwin arm64 measurement** — see
+the 2.31 GiB hard floor in §7.
 
 `hw.memsize` is read via `sysctlbyname` (confirmed reachable). This is **the
 fix for the concurrent-clang multiplier** and it is cheap, deterministic, and
@@ -279,11 +338,21 @@ path is established — reuse `_cr_shell_read`, no new extern in that file).
   it as an env on the job and **remove it once Layer 1 lands and a CI run
   confirms the governor self-selects ≤2**. Document the stopgap inline so it is
   not mistaken for a permanent setting.
-- **One CI confirmation run** is needed to validate the per-job reserve constant
-  (3 GiB) against the runner's real peak RSS, since the spike was on a 64 GiB
-  box. If the runner peaks higher under memory pressure, bump `per_job_reserve`
-  or `SAFETY_FRACTION`. This is the one number that needs CI validation rather
-  than local proof.
+- **The per-job reserve constant was recalibrated in SFN-626** (2026-07-31):
+  `sfn bench --compiler --csv` over all 302 `compiler/src` modules on Linux
+  x86_64 (`docs/baselines/compile-0.8.4-linux-x86_64.csv`, §2.4) found the
+  worst worker at 1.55 GiB RSS, down from the 3.23 GiB `capsule_resolver.sfn`
+  figure the 2026-06 baseline recorded — that module and every other former
+  >2 GiB module has since been decomposed (SFN-625, SFN-634, SFN-637, SFN-638,
+  #2707). The reserve dropped from 3 GiB to **2.5 GiB**, a 61% margin over the
+  1.55 GiB measured worst worker. That margin is deliberate, not slack to
+  reclaim: the measurement is Linux, but the constant's binding constraint is
+  **Darwin**, where `RLIMIT_AS` is a no-op and this arithmetic is the only
+  backpressure, so the margin absorbs the unmeasured platform delta. There is
+  also a **hard floor at 2.31 GiB**: at or below it, a 7 GiB Darwin runner's
+  66% slice (4.62 GiB) budgets 2 workers instead of 1, reopening the #1532 OOM
+  this governor exists to prevent. A future CI/Darwin-arm64 confirmation run
+  remains the only sound basis for lowering the reserve past that floor.
 
 ## 8. Staged implementation plan (smallest blast radius first)
 
@@ -364,10 +433,14 @@ Mirror `mem_limit_selfcap_test.sfn` and the sanitizer-skip discipline. All
 
 ## 10. Risks
 
-- **Per-job reserve (3 GiB) wrong on the constrained runner.** Spike was on
-  64 GiB; allocator behavior under real pressure may lower or raise peak RSS.
-  Mitigate: the one CI confirmation run (§7); the constant is a single named
-  value easy to tune; `SAFETY_FRACTION` gives headroom.
+- **Per-job reserve constant drift.** Recalibrated once, in SFN-626 (3 GiB →
+  2.5 GiB, §2.4/§7), against a Linux x86_64 measurement — not Darwin, so the
+  original spike's 64 GiB/allocator-under-no-pressure caveat (§2.4) still
+  applies to the Darwin number this constant is load-bearing for. Mitigate:
+  the constant is a single named value easy to tune; do not lower it below the
+  **2.31 GiB hard floor** (§7) without a fresh Darwin arm64 measurement, since
+  below that floor a 7 GiB runner's 66% slice budgets 2 workers instead of 1
+  and reopens #1532.
 - **`floor(...) = 0` starving the build.** Formula uses `max(1, ...)` — a tiny
   runner still gets serial emit, never zero. Verified in §3.
 - **Layer 2 checkpoint coverage gaps** (option 3): a pathological single
@@ -379,9 +452,9 @@ Mirror `mem_limit_selfcap_test.sfn` and the sanitizer-skip discipline. All
   test. Highest-blast-radius risk; isolated to Step 2 and gated by `make check`
   + the cross-windows test.
 - **Local dev behavior change.** Layer 1 could reduce parallelism on small dev
-  machines. Mitigate: `SAFETY_FRACTION=0.66` + 3 GiB reserve keeps a 16 GiB
-  laptop at 3 jobs and a 64 GiB box at the existing 8; `SAILFIN_BUILD_JOBS`
-  always overrides.
+  machines. Mitigate: `SAFETY_FRACTION=0.66` + the 2.5 GiB reserve (SFN-626,
+  §3) keeps a 16 GiB laptop at 4 jobs and a 64 GiB box at the existing 8;
+  `SAILFIN_BUILD_JOBS` always overrides.
 
 ## 11. Verification commands
 
@@ -406,4 +479,9 @@ Mirror `mem_limit_selfcap_test.sfn` and the sanitizer-skip discipline. All
   ones — they are complementary, not opposed.
 - A future per-host `per_job_reserve` calibration (measure the actual heaviest
   module's peak once at first build, cache it) would make the formula
-  self-tuning; out of scope for the CI unblock.
+  self-tuning; out of scope for the CI unblock. SFN-626 (2026-07-31) performed
+  a one-time manual recalibration (3 GiB → 2.5 GiB, §2.4) via a full-suite
+  `sfn bench` run on Linux, not a per-host measurement — the self-tuning
+  version described here is still unimplemented. Any further lowering of the
+  reserve needs a Darwin arm64 measurement first; do not go below the
+  2.31 GiB floor (§7) on the strength of a Linux number alone.

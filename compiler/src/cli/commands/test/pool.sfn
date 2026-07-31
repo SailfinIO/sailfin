@@ -182,7 +182,7 @@ fn _pool_child_env(base_env: string[], child_scratch: string, runtime_objdir: st
     // a build would otherwise fan its own per-module emit out to
     // `_cr_resolve_jobs`' RAM budget, which reads the host's total RAM and
     // cannot see its `jobs - 1` siblings doing the same — so the real peak is
-    // `jobs * emit_jobs * 3 GiB`, not the `jobs * 3 GiB` that
+    // `jobs * emit_jobs * 2.5 GiB`, not the `jobs * 2.5 GiB` that
     // `_test_jobs_budget` sizes against. Pinning each child to serial emit
     // makes that budget honest. Only the pooled path is affected: the serial
     // (`--jobs 1`) path inherits the parent env via `process.run` and keeps

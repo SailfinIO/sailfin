@@ -53,9 +53,13 @@ test "windows-deshell: leaf helpers degrade without a POSIX subprocess" ![io] {
         // so it is asserted against the pure clamp rather than the live
         // probe. A Windows host reports the assumed 16 GiB
         // `_cr_host_memsize_bytes` returns (no Win32-free RAM probe
-        // exists), which on 4 cores budgets 3 concurrent emits — fanned
-        // out, not serial, and clamped rather than unbounded.
-        assert _cr_jobs_from_probe(4, 17179869184) == 3;
+        // exists), which at the SFN-626 reserve budgets 4 concurrent
+        // emits on 4 cores — fanned out, not serial, and clamped rather
+        // than unbounded. This branch only runs under
+        // `SAILFIN_HOST_OS=Windows`, so a stale expectation here stays
+        // green on a Linux suite run; recompute it whenever the reserve
+        // moves.
+        assert _cr_jobs_from_probe(4, 17179869184) == 4;
         // OpenSSL keg search is Darwin-only; a Windows host yields no `-L`.
         assert _openssl_link_search_flags().length == 0;
     } else {

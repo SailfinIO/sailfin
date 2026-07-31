@@ -569,10 +569,10 @@ driver owns compiler module scheduling. The driver reads
 bisects or memory-constrained hosts.
 
 `sfn test` and `sfn dev shard run` auto-detect parallelism from CPU and memory
-(`min(cores, (RAM * 66%) / 3 GiB)`, floor 1, cap 16, with a macOS cap of 2) —
-the 3 GiB per-job reserve matches the peak RSS of the build-and-run e2e class,
+(`min(cores, (RAM * 66%) / 2.5 GiB)`, floor 1, cap 16, with a macOS cap of 2) —
+the 2.5 GiB per-job reserve matches the peak RSS of the build-and-run e2e class,
 where a test child's nested `sfn build`/`sfn run`/`sfn emit` reaches the same
-weight as a compiler-module emit (SFN-547). An explicit
+weight as a compiler-module emit (SFN-547, re-sized SFN-626). An explicit
 `--jobs N` wins over `SAILFIN_TEST_JOBS=N`; use `--jobs 1` for the serial path.
 The Makefile compatibility layer forwards its `TEST_JOBS` budget, while
 `make check` uses `CHECK_TEST_JOBS` for its cold seedcheck suite and
