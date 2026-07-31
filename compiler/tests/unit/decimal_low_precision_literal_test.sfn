@@ -1,0 +1,108 @@
+// Unit tests pinning the single-rounding decimal -> `f16`/`bf16` literal
+// conversion (SFEP-0054 §3.3, SFN-611).
+//
+// §3.3 requires an expected-type literal binding to round the decimal
+// mathematical value *once*, directly to the destination format, and rules
+// out an `f64` intermediate because double rounding can change a boundary
+// result. `decimal_literal_to_llvm_hex` is the conversion that discharges
+// that requirement; it returns the LLVM hex-float spelling (`0xH` for
+// `half`, `0xR` for `bfloat`) that the lowering path emits as a constant.
+//
+// The witnesses below are the load-bearing cases: each is a decimal whose
+// `f64` image collapses onto an exact destination midpoint, so rounding
+// through `f64` reaches the tie and then breaks it to even, while rounding
+// once from the decimal keeps the neighbour the true value is nearer to.
+// Every expected bit pattern here was cross-checked against an
+// arbitrary-precision oracle.
+import { decimal_literal_to_llvm_hex } from "../../src/llvm/expression_lowering/native/core_decimal_float";
+
+test "decimal-literal: exactly representable f16 values convert exactly" {
+    assert decimal_literal_to_llvm_hex("0.5", "half") == "0xH3800";
+    assert decimal_literal_to_llvm_hex("1", "half") == "0xH3C00";
+    assert decimal_literal_to_llvm_hex("0.125", "half") == "0xH3000";
+    assert decimal_literal_to_llvm_hex("0.0", "half") == "0xH0000";
+}
+
+test "decimal-literal: exactly representable bf16 values convert exactly" {
+    assert decimal_literal_to_llvm_hex("0.5", "bfloat") == "0xR3F00";
+    assert decimal_literal_to_llvm_hex("1", "bfloat") == "0xR3F80";
+    assert decimal_literal_to_llvm_hex("0.125", "bfloat") == "0xR3E00";
+    assert decimal_literal_to_llvm_hex("0.0", "bfloat") == "0xR0000";
+}
+
+// The issue's motivating literal. It is not exactly representable in either
+// format, which is precisely why it cannot be emitted as a plain decimal.
+test "decimal-literal: inexact values round to nearest in both formats" {
+    assert decimal_literal_to_llvm_hex("0.001", "half") == "0xH1419";
+    assert decimal_literal_to_llvm_hex("0.001", "bfloat") == "0xR3A83";
+    assert decimal_literal_to_llvm_hex("0.1", "half") == "0xH2E66";
+}
+
+test "decimal-literal: exponent notation parses in either case" {
+    assert decimal_literal_to_llvm_hex("1E2", "half") == "0xH5640";
+    assert decimal_literal_to_llvm_hex("7e-3", "half") == "0xH1F2B";
+    assert decimal_literal_to_llvm_hex("1e30", "bfloat") == "0xR714A";
+    assert decimal_literal_to_llvm_hex("1e-30", "bfloat") == "0xR0DA2";
+}
+
+test "decimal-literal: a leading sign sets the sign bit" {
+    assert decimal_literal_to_llvm_hex("-0.5", "half") == "0xHB800";
+    assert decimal_literal_to_llvm_hex("-0.001", "bfloat") == "0xRBA83";
+}
+
+// An exact midpoint breaks to the even neighbour in both directions: 2049
+// sits between 2048 and 2050 and rounds down, 2051 sits between 2050 and
+// 2052 and rounds up. Same for bf16 one binade above 1.0.
+test "decimal-literal: exact midpoints break ties to even" {
+    assert decimal_literal_to_llvm_hex("2049.0", "half") == "0xH6800";
+    assert decimal_literal_to_llvm_hex("2051.0", "half") == "0xH6802";
+    assert decimal_literal_to_llvm_hex("1.00390625", "bfloat") == "0xR3F80";
+    assert decimal_literal_to_llvm_hex("1.01171875", "bfloat") == "0xR3F82";
+}
+
+// The regression this issue exists for. Each literal is strictly below an
+// exact midpoint by less than half an `f64` ulp, so `f64` rounds it *up* to
+// the midpoint and ties-to-even then picks the even neighbour. Rounding once
+// from the decimal keeps the odd neighbour the value is actually nearer to.
+test "decimal-literal: bf16 rounds once, not through f64" {
+    // The exact midpoint, for contrast: this one really is a tie.
+    assert decimal_literal_to_llvm_hex("0.000000031082890927791595458984375", "bfloat") == "0xR3306";
+    // Just below it. Double rounding would answer 0xR3306.
+    assert decimal_literal_to_llvm_hex("0.000000031082890927791595458984374999999999999999999999999", "bfloat") == "0xR3305";
+}
+
+test "decimal-literal: f16 rounds once, not through f64" {
+    // Just below the midpoint between 0xH0001 and 0xH0002. Double rounding
+    // would answer 0xH0002.
+    assert decimal_literal_to_llvm_hex("0.0000000894069671630859374999999999999999999999999", "half") == "0xH0001";
+    // Just above half of the smallest subnormal, which must round up to it
+    // rather than flush. Double rounding would answer 0xH0000.
+    assert decimal_literal_to_llvm_hex("0.0000000298023223876953125000001", "half") == "0xH0001";
+}
+
+// §3.3: underflow and overflow produce values, never diagnostics.
+test "decimal-literal: underflow yields a subnormal or a signed zero" {
+    assert decimal_literal_to_llvm_hex("0.00000005960464477539062500", "half") == "0xH0001";
+    assert decimal_literal_to_llvm_hex("0.000000029802322387695312500", "half") == "0xH0000";
+    assert decimal_literal_to_llvm_hex("1e-30", "half") == "0xH0000";
+}
+
+test "decimal-literal: overflow yields infinity at the correct threshold" {
+    // 65504 is the largest finite f16; 65520 is the overflow midpoint and
+    // ties to the even candidate, which is out of range.
+    assert decimal_literal_to_llvm_hex("65504.0", "half") == "0xH7BFF";
+    assert decimal_literal_to_llvm_hex("65519.99999999", "half") == "0xH7BFF";
+    assert decimal_literal_to_llvm_hex("65520.0", "half") == "0xH7C00";
+    assert decimal_literal_to_llvm_hex("1e40", "bfloat") == "0xR7F80";
+}
+
+// A rejection falls back to the ordinary `double` operand, so it must be
+// unambiguous rather than a wrong constant.
+test "decimal-literal: non-low-precision carriers and malformed text are rejected" {
+    assert decimal_literal_to_llvm_hex("0.5", "double").length == 0;
+    assert decimal_literal_to_llvm_hex("0.5", "float").length == 0;
+    assert decimal_literal_to_llvm_hex("garbage", "half").length == 0;
+    assert decimal_literal_to_llvm_hex("", "half").length == 0;
+    assert decimal_literal_to_llvm_hex("1.2.3", "half").length == 0;
+    assert decimal_literal_to_llvm_hex("1e", "half").length == 0;
+}

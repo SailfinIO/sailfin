@@ -1,0 +1,662 @@
+// compiler/src/llvm/expression_lowering/native/core_decimal_float.sfn
+//
+// Correctly-rounded decimal -> low-precision float literal conversion.
+//
+// SFEP-0054 §3.3 requires an expected-type literal binding to parse "the
+// decimal mathematical value and round it directly to the destination
+// format using round-to-nearest-ties-to-even", and rules out the obvious
+// shortcut explicitly: it "must not first round through `f64`, because
+// double rounding can change a boundary result." Emitting the literal as a
+// `double` constant and narrowing it — what every other float literal path
+// does — is exactly that forbidden two-step (SFN-611).
+//
+// Two facts force the shape of this module. A plain decimal beside a
+// low-precision type is a hard LLVM parse error unless it happens to be
+// exactly representable (`bfloat 1.5` parses, `bfloat 0.001` does not), so
+// the constant has to be emitted in LLVM's hex-float form — `0xH` for
+// `half`, `0xR` for `bfloat`. And computing that bit pattern needs the
+// decimal's mathematical value, which no existing compiler helper produces:
+// `normalise_number_literal` (./core_text.sfn) is a text formatter, and
+// `parse_number_local` (../../lowering/lowering_text_utils.sfn) is
+// integer-only.
+//
+// The conversion below therefore works in exact integer arithmetic and
+// never forms a floating-point intermediate at all. A literal is an exact
+// rational `digits x 10^exponent`, held as a numerator/denominator pair of
+// big integers; the destination significand is produced by exact division
+// and rounded once from the exact remainder. Because there is no
+// approximate intermediate, there is nothing for a second rounding to
+// happen to — §3.3 is satisfied by construction rather than by an error
+// bound.
+//
+// `f16` and `bf16` differ only in the parameters threaded through
+// `_LowPrecisionFormat`, so both are served by one implementation as
+// SFN-611 requires; a divergence between them is not expressible here.
+//
+// Big integers are little-endian `int[]` limbs in base 2^16. Sixteen bits
+// keeps every intermediate (`limb * 10 + carry`, `limb << 15`) far inside a
+// signed 64-bit `int`, and — as in compiler/src/build/hash.sfn — keeping
+// every value non-negative means `>>` (which lowers to `ashr`) behaves as
+// the logical shift this arithmetic needs. The canonical zero is the empty
+// array, so a trimmed value's limb count is its magnitude.
+//
+// Style note: arithmetic here is deliberately written one operation per
+// annotated `let`. A parenthesized group used as an operand of another
+// binary operator (`(1 << n) - 1`) does not lower, and an unannotated
+// arithmetic binding infers `double` — both are seed-compiler limits, not
+// preferences, so the decomposition is load-bearing.
+// Bits per limb, and the derived base/mask. Changing these three together
+// is the only supported way to retune the representation.
+fn _limb_bits() -> int { return 16; }
+
+fn _limb_base() -> int { return 65536; }
+
+fn _limb_mask() -> int { return 65535; }
+
+// Drop high zero limbs so a magnitude has exactly one representation and
+// `_big_cmp` can compare limb counts first.
+fn _big_trim(value: int[]) -> int[] {
+    let mut used: int = value.length;
+    loop {
+        if used == 0 { break; }
+        let top_index: int = used - 1;
+        if value[top_index] != 0 { break; }
+        used -= 1;
+    }
+    let mut out: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= used { break; }
+        out.push(value[i]);
+        i += 1;
+    }
+    return out;
+}
+
+fn _big_from_int(value: int) -> int[] {
+    let mut out: int[] = [];
+    let mut remaining: int = value;
+    let mask: int = _limb_mask();
+    let width: int = _limb_bits();
+    loop {
+        if remaining == 0 { break; }
+        let limb: int = remaining & mask;
+        out.push(limb);
+        remaining = remaining >> width;
+    }
+    return out;
+}
+
+// Multiply by a factor small enough that `limb * factor` cannot overflow —
+// every caller passes 10.
+fn _big_mul_small(value: int[], factor: int) -> int[] {
+    let mask: int = _limb_mask();
+    let width: int = _limb_bits();
+    let mut out: int[] = [];
+    let mut carry: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= value.length { break; }
+        let scaled: int = value[i] * factor;
+        let product: int = scaled + carry;
+        let limb: int = product & mask;
+        out.push(limb);
+        carry = product >> width;
+        i += 1;
+    }
+    loop {
+        if carry == 0 { break; }
+        let limb: int = carry & mask;
+        out.push(limb);
+        carry = carry >> width;
+    }
+    return _big_trim(out);
+}
+
+fn _big_add_small(value: int[], addend: int) -> int[] {
+    let mask: int = _limb_mask();
+    let width: int = _limb_bits();
+    let mut out: int[] = [];
+    let mut carry: int = addend;
+    let mut i: int = 0;
+    loop {
+        if i >= value.length { break; }
+        let sum: int = value[i] + carry;
+        let limb: int = sum & mask;
+        out.push(limb);
+        carry = sum >> width;
+        i += 1;
+    }
+    loop {
+        if carry == 0 { break; }
+        let limb: int = carry & mask;
+        out.push(limb);
+        carry = carry >> width;
+    }
+    return _big_trim(out);
+}
+
+fn _big_shl(value: int[], bits: int) -> int[] {
+    if value.length == 0 { return []; }
+    if bits <= 0 { return _big_trim(value); }
+    let mask: int = _limb_mask();
+    let width: int = _limb_bits();
+    let limb_shift: int = bits / width;
+    let bit_shift: int = bits % width;
+    let mut out: int[] = [];
+    let mut pad: int = 0;
+    loop {
+        if pad >= limb_shift { break; }
+        out.push(0);
+        pad += 1;
+    }
+    let mut carry: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= value.length { break; }
+        let raised: int = value[i] << bit_shift;
+        let shifted: int = raised | carry;
+        let limb: int = shifted & mask;
+        out.push(limb);
+        carry = shifted >> width;
+        i += 1;
+    }
+    loop {
+        if carry == 0 { break; }
+        let limb: int = carry & mask;
+        out.push(limb);
+        carry = carry >> width;
+    }
+    return _big_trim(out);
+}
+
+// -1, 0, or 1. Both operands must be trimmed.
+fn _big_cmp(left: int[], right: int[]) -> int {
+    if left.length != right.length {
+        if left.length > right.length { return 1; }
+        return 0 - 1;
+    }
+    let mut i: int = left.length - 1;
+    loop {
+        if i < 0 { break; }
+        if left[i] != right[i] {
+            if left[i] > right[i] { return 1; }
+            return 0 - 1;
+        }
+        i -= 1;
+    }
+    return 0;
+}
+
+// `left - right`, valid only when `left >= right` — the single caller checks
+// with `_big_cmp` first.
+fn _big_sub(left: int[], right: int[]) -> int[] {
+    let base: int = _limb_base();
+    let mut out: int[] = [];
+    let mut borrow: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= left.length { break; }
+        let mut subtrahend: int = borrow;
+        if i < right.length { subtrahend = subtrahend + right[i]; }
+        let mut difference: int = left[i] - subtrahend;
+        if difference < 0 {
+            difference = difference + base;
+            borrow = 1;
+        } else { borrow = 0; }
+        out.push(difference);
+        i += 1;
+    }
+    return _big_trim(out);
+}
+
+fn _big_bit_length(value: int[]) -> int {
+    if value.length == 0 { return 0; }
+    let top_index: int = value.length - 1;
+    let mut bits: int = 0;
+    let mut top: int = value[top_index];
+    loop {
+        if top == 0 { break; }
+        bits += 1;
+        top = top >> 1;
+    }
+    let whole: int = top_index * _limb_bits();
+    let total: int = whole + bits;
+    return total;
+}
+
+fn _big_mul_pow10(value: int[], power: int) -> int[] {
+    let mut out: int[] = _big_trim(value);
+    let mut i: int = 0;
+    loop {
+        if i >= power { break; }
+        out = _big_mul_small(out, 10);
+        i += 1;
+    }
+    return out;
+}
+
+fn _big_pow10(power: int) -> int[] {
+    let one: int[] = _big_from_int(1);
+    return _big_mul_pow10(one, power);
+}
+
+fn _big_from_digits(digits: string) -> int[] {
+    let mut out: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= digits.length { break; }
+        let scaled: int[] = _big_mul_small(out, 10);
+        let digit: int = _digit_value(digits[i]);
+        out = _big_add_small(scaled, digit);
+        i += 1;
+    }
+    return out;
+}
+
+// A literal decomposed into its exact value `digits x 10^exponent`, with
+// `digits` carrying no leading or trailing zeros. An all-zero literal yields
+// an empty `digits` and is a signed zero.
+struct _DecimalLiteral {
+    ok: boolean;
+    negative: boolean;
+    digits: string;
+    exponent: int;
+}
+
+// Destination format parameters. `precision` counts the implicit leading
+// bit, so the stored mantissa is `precision - 1` bits wide and the exponent
+// bias is `emax`.
+struct _LowPrecisionFormat {
+    ok: boolean;
+    precision: int;
+    emax: int;
+    emin: int;
+    exp_bits: int;
+    prefix: string;
+    dexp_guard: int;
+}
+
+fn _digit_value(ch: string) -> int {
+    if ch.length == 0 { return 0 - 1; }
+    let code: int = char_code(ch);
+    let zero: int = char_code("0");
+    let value: int = code - zero;
+    if value < 0 { return 0 - 1; }
+    if value > 9 { return 0 - 1; }
+    return value;
+}
+
+fn _is_ascii_space(ch: string) -> boolean {
+    if ch == " " { return true; }
+    if ch == "\t" { return true; }
+    if ch == "\n" { return true; }
+    if ch == "\r" { return true; }
+    return false;
+}
+
+fn _trim_ascii(value: string) -> string {
+    let mut start: int = 0;
+    loop {
+        if start >= value.length { break; }
+        if !_is_ascii_space(value[start]) { break; }
+        start += 1;
+    }
+    let mut stop: int = value.length;
+    loop {
+        if stop <= start { break; }
+        let last: int = stop - 1;
+        if !_is_ascii_space(value[last]) { break; }
+        stop -= 1;
+    }
+    let mut out: string = "";
+    let mut i: int = start;
+    loop {
+        if i >= stop { break; }
+        out = out + value[i];
+        i += 1;
+    }
+    return out;
+}
+
+fn _failed_literal() -> _DecimalLiteral {
+    return _DecimalLiteral {
+        ok: false,
+        negative: false,
+        digits: "",
+        exponent: 0
+    };
+}
+
+// Accepts exactly the grammar `is_number_literal` (./core_text.sfn) admits:
+// an optional sign, decimal digits with at most one point, and an optional
+// signed exponent. Anything else returns `ok: false` so the caller falls
+// back to the ordinary `double` path rather than emit a wrong constant.
+fn _parse_decimal_literal(text: string) -> _DecimalLiteral {
+    let trimmed: string = _trim_ascii(text);
+    if trimmed.length == 0 { return _failed_literal(); }
+
+    let mut index: int = 0;
+    let mut negative: boolean = false;
+    if trimmed[0] == "-" {
+        negative = true;
+        index = 1;
+    }
+    if trimmed[0] == "+" { index = 1; }
+
+    let mut raw_digits: string = "";
+    let mut fraction_length: int = 0;
+    let mut saw_digit: boolean = false;
+
+    loop {
+        if index >= trimmed.length { break; }
+        let digit: int = _digit_value(trimmed[index]);
+        if digit < 0 { break; }
+        raw_digits = raw_digits + trimmed[index];
+        saw_digit = true;
+        index += 1;
+    }
+
+    if index < trimmed.length {
+        if trimmed[index] == "." {
+            index += 1;
+            loop {
+                if index >= trimmed.length { break; }
+                let digit: int = _digit_value(trimmed[index]);
+                if digit < 0 { break; }
+                raw_digits = raw_digits + trimmed[index];
+                fraction_length += 1;
+                saw_digit = true;
+                index += 1;
+            }
+        }
+    }
+
+    if !saw_digit { return _failed_literal(); }
+
+    let mut exponent: int = 0;
+    if index < trimmed.length {
+        let mut is_exponent_marker: boolean = false;
+        if trimmed[index] == "e" { is_exponent_marker = true; }
+        if trimmed[index] == "E" { is_exponent_marker = true; }
+        if !is_exponent_marker { return _failed_literal(); }
+        index += 1;
+        let mut exponent_negative: boolean = false;
+        if index < trimmed.length {
+            if trimmed[index] == "-" {
+                exponent_negative = true;
+                index += 1;
+            } else {
+                if trimmed[index] == "+" { index += 1; }
+            }
+        }
+        let mut saw_exponent_digit: boolean = false;
+        loop {
+            if index >= trimmed.length { break; }
+            let digit: int = _digit_value(trimmed[index]);
+            if digit < 0 { return _failed_literal(); }
+            saw_exponent_digit = true;
+            // Saturate rather than overflow. Any magnitude this large is far
+            // outside `dexp_guard`, so the clamped value reaches the same
+            // infinity-or-zero answer the exact one would.
+            if exponent < 1000000000 { exponent = exponent * 10 + digit; }
+            index += 1;
+        }
+        if !saw_exponent_digit { return _failed_literal(); }
+        if exponent_negative { exponent = 0 - exponent; }
+    }
+
+    if index != trimmed.length { return _failed_literal(); }
+
+    exponent = exponent - fraction_length;
+
+    // Strip leading zeros, then trailing zeros — the latter pays for itself
+    // by shrinking the big integers below.
+    let mut first: int = 0;
+    loop {
+        if first >= raw_digits.length { break; }
+        if raw_digits[first] != "0" { break; }
+        first += 1;
+    }
+    let mut last: int = raw_digits.length;
+    loop {
+        if last <= first { break; }
+        let previous: int = last - 1;
+        if raw_digits[previous] != "0" { break; }
+        last -= 1;
+        exponent += 1;
+    }
+
+    let mut digits: string = "";
+    let mut i: int = first;
+    loop {
+        if i >= last { break; }
+        digits = digits + raw_digits[i];
+        i += 1;
+    }
+
+    // Guard the input-driven big-integer work below. No real literal carries
+    // a thousand significant digits; one that does falls back to the `double`
+    // path — today's behaviour — rather than costing unbounded compile time.
+    if digits.length > 1024 { return _failed_literal(); }
+
+    return _DecimalLiteral {
+        ok: true,
+        negative: negative,
+        digits: digits,
+        exponent: exponent
+    };
+}
+
+// `dexp_guard` bounds `floor(log10(value)) + 1` outside which the answer is
+// unambiguous, capping the big-integer width. Both guards sit far outside
+// the format's real range — bf16 overflows above ~3.4e38 and rounds to zero
+// below ~4.6e-41, f16 above 65520 and below ~3.0e-8 — because a guard that
+// is too wide only costs a few limbs, while one that is too tight would
+// answer infinity or zero for a value that has a finite representation.
+fn _format_for_llvm_type(llvm_type: string) -> _LowPrecisionFormat {
+    if llvm_type == "half" {
+        let half_emin: int = 0 - 14;
+        return _LowPrecisionFormat {
+            ok: true,
+            precision: 11,
+            emax: 15,
+            emin: half_emin,
+            exp_bits: 5,
+            prefix: "0xH",
+            dexp_guard: 20
+        };
+    }
+    if llvm_type == "bfloat" {
+        let bfloat_emin: int = 0 - 126;
+        return _LowPrecisionFormat {
+            ok: true,
+            precision: 8,
+            emax: 127,
+            emin: bfloat_emin,
+            exp_bits: 8,
+            prefix: "0xR",
+            dexp_guard: 60
+        };
+    }
+    return _LowPrecisionFormat {
+        ok: false,
+        precision: 0,
+        emax: 0,
+        emin: 0,
+        exp_bits: 0,
+        prefix: "",
+        dexp_guard: 0
+    };
+}
+
+// Exactly four uppercase hex digits, matching how LLVM itself prints a
+// 16-bit hex float constant.
+fn _hex16(value: int) -> string {
+    let digits: string[] = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "A", "B", "C", "D", "E", "F",];
+    let mut out: string = "";
+    let mut shift: int = 12;
+    loop {
+        if shift < 0 { break; }
+        let nibble: int = value >> shift;
+        let index: int = nibble & 15;
+        out = out + digits[index];
+        shift -= 4;
+    }
+    return out;
+}
+
+fn _encode(format: _LowPrecisionFormat, sign: int, exponent_field: int, mantissa: int) -> string {
+    let mantissa_bits: int = format.precision - 1;
+    let sign_shift: int = format.exp_bits + mantissa_bits;
+    let sign_part: int = sign << sign_shift;
+    let exponent_part: int = exponent_field << mantissa_bits;
+    let high: int = sign_part | exponent_part;
+    let bits: int = high | mantissa;
+    let rendered: string = _hex16(bits);
+    return format.prefix + rendered;
+}
+
+fn _encode_zero(format: _LowPrecisionFormat, sign: int) -> string {
+    return _encode(format, sign, 0, 0);
+}
+
+fn _encode_infinity(format: _LowPrecisionFormat, sign: int) -> string {
+    let span: int = 1 << format.exp_bits;
+    let exponent_field: int = span - 1;
+    return _encode(format, sign, exponent_field, 0);
+}
+
+// decimal_literal_to_llvm_hex — render `text` as an LLVM hex-float constant
+// for `llvm_type` (`"half"` or `"bfloat"`), rounded once from the decimal
+// mathematical value with round-to-nearest-ties-to-even.
+//
+// Returns `""` when `llvm_type` is not a low-precision carrier or `text` is
+// not a decimal literal this converter accepts; the caller then falls back
+// to the ordinary `double` operand, so a rejection is never worse than the
+// pre-SFN-611 behaviour.
+//
+// Overflow yields a signed infinity and underflow a correctly rounded
+// subnormal or signed zero, per SFEP-0054 §3.3 — these are values, not
+// diagnostics.
+fn decimal_literal_to_llvm_hex(text: string, llvm_type: string) -> string {
+    let format: _LowPrecisionFormat = _format_for_llvm_type(llvm_type);
+    if !format.ok { return ""; }
+
+    let parsed: _DecimalLiteral = _parse_decimal_literal(text);
+    if !parsed.ok { return ""; }
+
+    let mut sign: int = 0;
+    if parsed.negative { sign = 1; }
+
+    if parsed.digits.length == 0 { return _encode_zero(format, sign); }
+
+    // `digits` has no leading zero, so the value lies in
+    // [10^(decimal_exponent - 1), 10^decimal_exponent).
+    let decimal_exponent: int = parsed.exponent + parsed.digits.length;
+    let lower_guard: int = 0 - format.dexp_guard;
+    if decimal_exponent > format.dexp_guard {
+        return _encode_infinity(format, sign);
+    }
+    if decimal_exponent < lower_guard { return _encode_zero(format, sign); }
+
+    // The exact value as `numerator / denominator`.
+    let mut numerator: int[] = _big_from_digits(parsed.digits);
+    let mut denominator: int[] = _big_from_int(1);
+    if parsed.exponent > 0 {
+        numerator = _big_mul_pow10(numerator, parsed.exponent);
+    }
+    if parsed.exponent < 0 {
+        let scale: int = 0 - parsed.exponent;
+        denominator = _big_pow10(scale);
+    }
+
+    // binary_exponent = floor(log2(value)). Bit lengths bracket it to two
+    // candidates; one comparison picks between them.
+    let numerator_bits: int = _big_bit_length(numerator);
+    let denominator_bits: int = _big_bit_length(denominator);
+    let length_delta: int = numerator_bits - denominator_bits;
+    let mut left_shift: int = 0;
+    let mut right_shift: int = 0;
+    if length_delta >= 0 { right_shift = length_delta; } else {
+        left_shift = 0 - length_delta;
+    }
+    let aligned_numerator: int[] = _big_shl(numerator, left_shift);
+    let aligned_denominator: int[] = _big_shl(denominator, right_shift);
+    let alignment: int = _big_cmp(aligned_numerator, aligned_denominator);
+    let mut binary_exponent: int = length_delta;
+    if alignment < 0 { binary_exponent = length_delta - 1; }
+
+    // The quantum is the value of the significand's least significant bit.
+    // Clamping it at the subnormal floor is what makes underflow round
+    // correctly instead of flushing to zero.
+    let mantissa_bits: int = format.precision - 1;
+    let quantum_floor: int = format.emin - mantissa_bits;
+    let mut quantum: int = binary_exponent - mantissa_bits;
+    if quantum < quantum_floor { quantum = quantum_floor; }
+
+    let mut scaled_numerator: int[] = numerator;
+    let mut scaled_denominator: int[] = denominator;
+    if quantum >= 0 { scaled_denominator = _big_shl(denominator, quantum); } else {
+        let widen: int = 0 - quantum;
+        scaled_numerator = _big_shl(numerator, widen);
+    }
+
+    // Restoring division for `floor(value / 2^quantum)`. The quotient is
+    // below 2^precision by the choice of quantum above, so it always fits a
+    // native `int` and only the remainder needs big-integer width. The loop
+    // starts one bit above that bound as a standing guard.
+    let mut quotient: int = 0;
+    let mut remainder: int[] = scaled_numerator;
+    let mut bit: int = format.precision;
+    loop {
+        if bit < 0 { break; }
+        let candidate: int[] = _big_shl(scaled_denominator, bit);
+        let order: int = _big_cmp(remainder, candidate);
+        if order >= 0 {
+            remainder = _big_sub(remainder, candidate);
+            let step: int = 1 << bit;
+            quotient = quotient + step;
+        }
+        bit -= 1;
+    }
+
+    // Round to nearest, ties to even, against the exact remainder. This is
+    // the only rounding the value undergoes.
+    let doubled_remainder: int[] = _big_shl(remainder, 1);
+    let comparison: int = _big_cmp(doubled_remainder, scaled_denominator);
+    let mut round_up: boolean = false;
+    if comparison > 0 { round_up = true; }
+    if comparison == 0 {
+        let low_bit: int = quotient & 1;
+        if low_bit == 1 { round_up = true; }
+    }
+    if round_up { quotient = quotient + 1; }
+
+    // A rounding carry lands on exactly 2^precision, whose low bits are all
+    // zero, so renormalising loses nothing.
+    let carry_limit: int = 1 << format.precision;
+    if quotient == carry_limit {
+        quotient = quotient >> 1;
+        quantum += 1;
+    }
+
+    if quotient == 0 { return _encode_zero(format, sign); }
+
+    let implicit_bit: int = 1 << mantissa_bits;
+    if quantum == quantum_floor {
+        if quotient < implicit_bit {
+            return _encode(format, sign, 0, quotient);
+        }
+    }
+
+    let unbiased_exponent: int = quantum + mantissa_bits;
+    if unbiased_exponent > format.emax {
+        return _encode_infinity(format, sign);
+    }
+    let exponent_field: int = unbiased_exponent + format.emax;
+    let mantissa: int = quotient - implicit_bit;
+    return _encode(format, sign, exponent_field, mantissa);
+}
+
+export { decimal_literal_to_llvm_hex };
