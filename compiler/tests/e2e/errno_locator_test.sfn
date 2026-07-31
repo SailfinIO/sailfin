@@ -207,6 +207,38 @@ test "errno-locator: unset SAILFIN_TARGET_OS selects a POSIX leg on a POSIX host
     assert contains(ir, "@__errno_location(") || contains(ir, "@__error(");
 }
 
+test "errno-locator: SAILFIN_HOST_OS alone steers the emitted leg (@__error)" ![io] {
+    // SFN-682 regression: before the fix, `_host_os()` ignored
+    // SAILFIN_HOST_OS and probed the real host, so the emitter baked the
+    // Linux leg (@__errno_location) while the build-cache key recorded
+    // Darwin -- storing Linux IR under a Darwin cache key.
+    let src = _fixture_path();
+    let mut e = _base_env();
+    e.push("SAILFIN_HOST_OS=Darwin");
+    let ir = _emit(src, e, "hostos-darwin");
+    fs.deleteFile(src);
+    assert ir.length > 0;
+    assert contains(ir, "call i32* @__error()");
+    assert ! contains(ir, "@__errno_location(");
+}
+
+test "errno-locator: SAILFIN_TARGET_OS still outranks SAILFIN_HOST_OS" ![io] {
+    // Precedence guard for SFN-682: the target override must win on both
+    // the cache-key side (build_target_os) and the emit side. A fix that
+    // wired the host override in at the wrong level would let
+    // SAILFIN_HOST_OS beat an explicit SAILFIN_TARGET_OS, which this test
+    // catches.
+    let src = _fixture_path();
+    let mut e = _base_env();
+    e.push("SAILFIN_HOST_OS=Darwin");
+    e.push("SAILFIN_TARGET_OS=Linux");
+    let ir = _emit(src, e, "hostos-vs-targetos");
+    fs.deleteFile(src);
+    assert ir.length > 0;
+    assert contains(ir, "@__errno_location(");
+    assert ! contains(ir, "@__error(");
+}
+
 test "errno-locator: sentinel symbol never emitted as call/declare" ![io] {
     let src = _fixture_path();
     let targets = ["Linux", "Darwin", "Windows"];

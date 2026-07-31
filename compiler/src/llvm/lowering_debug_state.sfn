@@ -54,6 +54,7 @@
 // **Back-compat.** `_legacy_flag_file` keeps `touch
 // build/sailfin/.trace_lowering` working for one release. Drop the
 // shim in the release after #312 ships.
+import { build_host_os } from "../build/target";
 import { _env_flag, _get_env_cmd, _legacy_flag_file } from "../build_flags";
 
 export {
@@ -83,7 +84,7 @@ let mut _skip_module_globals_value: boolean = false;
 // Cache for the resolved `errno`-location C symbol (#877, epic #763).
 // `_errno_locator_initialized` flips to true after the one-time
 // resolution (the `SAILFIN_TARGET_OS` override or the `_host_os`
-// filesystem-marker probe); `_errno_locator_value` holds the resolved symbol name
+// host resolver); `_errno_locator_value` holds the resolved symbol name
 // (`__errno_location` on Linux/glibc, `__error` on Darwin, `_errno`
 // on Windows/mingw-w64). See `errno_locator_symbol` below.
 let mut _errno_locator_initialized: boolean = false;
@@ -91,7 +92,7 @@ let mut _errno_locator_value: string = "";
 // Cache for the resolved `CLOCK_MONOTONIC` `clk_id` (#908, epic #763).
 // `_clock_monotonic_id_initialized` flips to true after the one-time
 // resolution (the `SAILFIN_TARGET_OS` override or the `_host_os`
-// filesystem-marker probe); `_clock_monotonic_id_value` holds the resolved immediate
+// host resolver); `_clock_monotonic_id_value` holds the resolved immediate
 // (`1` on Linux/glibc, `6` on Darwin/macOS). See
 // `clock_monotonic_id_value` below.
 let mut _clock_monotonic_id_initialized: boolean = false;
@@ -99,7 +100,7 @@ let mut _clock_monotonic_id_value: int = 0;
 // Cache for the resolved `_SC_NPROCESSORS_ONLN` `sysconf` request number
 // (#1480, epic #763). `_sc_nprocessors_onln_initialized` flips to true
 // after the one-time resolution (the `SAILFIN_TARGET_OS` override or the
-// `_host_os` filesystem-marker probe); `_sc_nprocessors_onln_value` holds the resolved
+// `_host_os` host resolver); `_sc_nprocessors_onln_value` holds the resolved
 // immediate (`84` on Linux/glibc, `58` on Darwin/macOS). See
 // `sc_nprocessors_onln_value` below.
 let mut _sc_nprocessors_onln_initialized: boolean = false;
@@ -107,7 +108,7 @@ let mut _sc_nprocessors_onln_value: int = 0;
 // Cache for the resolved executable-path leg tag (#967, epic #390).
 // `_exe_path_locator_initialized` flips to true after the one-time
 // resolution (the `SAILFIN_TARGET_OS` override or the `_host_os`
-// filesystem-marker probe); `_exe_path_locator_value` holds the short leg tag
+// host resolver); `_exe_path_locator_value` holds the short leg tag
 // (`linux`, `darwin`, or `mingw`). See `exe_path_locator` below.
 let mut _exe_path_locator_initialized: boolean = false;
 let mut _exe_path_locator_value: string = "";
@@ -136,32 +137,30 @@ let mut _stat_buf_size_value: int = 0;
 let mut _comdat_target_initialized: boolean = false;
 let mut _comdat_target_value: boolean = false;
 
-// Non-shelling host-OS probe (SFN-49, epic #1485; M1 in
-// `docs/proposals/0021-windows-native-selfhost.md` §4.2(E)). Retires the
-// `_shell_read_cmd("uname -s")` fallback the emit-time leg locators below used
-// to resolve the build host: `sh`/`uname` are unavailable on native Windows, so
-// the compiler can no longer shell out to detect its own platform. Instead each
-// host is identified by a marker it exposes without a subprocess:
-//   - `/proc/self/status` (present on Linux, never on Darwin) — the same gate
-//     `runtime/sfn/platform/rlimit.sfn` / `sizes_linux.sfn` already use.
-//   - `/System/Library/CoreServices` (present on macOS, never on Linux).
-//   - `%SystemRoot%` (set on every native Windows install; `getenv` works on
-//     Windows even where the fs sentinels do not yet — proposal §4.2), a
-//     *positive* Windows signal so an unknown host is never mistaken for one.
-// Any other host falls back to the dominant Linux leg — which the locators' own
-// comments note "is never wrong" — so a `/proc`-less Linux box (a minimal
-// chroot/container) keeps the leg `uname -s` gave it rather than baking mingw's
-// `_errno` and failing to link. Returns the `uname -s`-compatible OS name the
-// locators compare against, so a single binary bakes the correct legs on every
-// host and Linux/macOS select the same legs as before. The `SAILFIN_TARGET_OS`
-// override is checked first by every caller and still wins for the cross-compile
-// path.
-fn _host_os() -> string ![io] {
-    if fs.exists("/proc/self/status") { return "Linux"; }
-    if fs.exists("/System/Library/CoreServices") { return "Darwin"; }
-    if _get_env_cmd("SystemRoot").length > 0 { return "Windows"; }
-    return "Linux";
-}
+// The host OS the emit-time leg locators below resolve against, as the
+// `uname -s`-compatible name they compare with. Non-shelling (SFN-49, epic
+// #1485; M1 in `docs/proposals/0021-windows-native-selfhost.md` §4.2(E)):
+// `sh`/`uname` do not exist on native Windows, so the compiler identifies its
+// platform from markers instead of a subprocess. The probe ladder and the
+// reasoning for each marker live with the implementation in
+// `build/target.sfn::build_host_os` — deliberately not restated here, since a
+// second copy is what drifted last time (see SFN-682 below). The
+// `SAILFIN_TARGET_OS` override is checked first by every caller and still wins
+// for the cross-compile path.
+//
+// SFN-682: this delegates to `build_host_os` rather than repeating the probe.
+// The two bodies were identical except that `build_host_os` honours the
+// `SAILFIN_HOST_OS` override and this one did not, so `SAILFIN_HOST_OS` alone
+// keyed a module's cached IR (`build_target_os` -> the SFN-677 cache-key fold)
+// under a target whose platform legs the emitter never baked. Delegating makes
+// the agreement `build/target.sfn` asserts structural — there is one resolver,
+// so the key side and the emit side cannot drift apart.
+//
+// The override is deliberately returned VERBATIM, not validated against the
+// three known names: an unrecognized value has to reach both sides unchanged so
+// both classify it the same way. Validating here (or there) would restore the
+// divergence at a different input rather than close it.
+fn _host_os() -> string ![io] { return build_host_os(); }
 
 // Non-shelling host-architecture probe (SFN-471, SFEP-0056 §3.2). The target
 // override is the cross-emit and e2e seam; native builds otherwise identify
@@ -238,7 +237,7 @@ fn skip_module_globals() -> boolean ![io] {
 //      undefined reference). The cross-compile Makefile target sets
 //      `SAILFIN_TARGET_OS=Windows` when it re-emits errno-bearing
 //      runtime modules so they get `_errno` instead.
-//   2. `_host_os` filesystem-marker probe — the native-build path (the host *is*
+//   2. `_host_os` host resolver — the native-build path (the host *is*
 //      the target). `Darwin` → `__error`, anything else → the glibc
 //      spelling, so the dominant Linux leg is never wrong.
 //
@@ -268,7 +267,7 @@ fn errno_locator_symbol() -> string ![io] {
 // Resolution order matches `errno_locator_symbol` above:
 //   1. `SAILFIN_TARGET_OS` env override — the *target* OS, for the
 //      cross-compile path where a bare host probe reports the host.
-//   2. `_host_os` filesystem-marker probe — the native-build path. `Darwin` → 6,
+//   2. `_host_os` host resolver — the native-build path. `Darwin` → 6,
 //      anything else → 1, so the dominant Linux leg is the default and
 //      Windows (no POSIX `CLOCK_MONOTONIC`) harmlessly falls through to
 //      the Linux value.
@@ -302,7 +301,7 @@ fn clock_monotonic_id_value() -> int ![io] {
 // Resolution order matches `clock_monotonic_id_value` above:
 //   1. `SAILFIN_TARGET_OS` env override — the *target* OS, for the
 //      cross-compile path where a bare host probe reports the host.
-//   2. `_host_os` filesystem-marker probe — the native-build path. `Darwin` → 58,
+//   2. `_host_os` host resolver — the native-build path. `Darwin` → 58,
 //      anything else → 84, so the dominant Linux leg is the default and
 //      Windows (no POSIX `sysconf`) harmlessly falls through to the Linux
 //      value.
@@ -327,7 +326,7 @@ fn sc_nprocessors_onln_value() -> int ![io] {
 // `errno_locator_symbol` above:
 //   1. `SAILFIN_TARGET_OS` env override — the *target* OS, for the Windows
 //      cross-compile from a Linux host (`make ci-cross-windows`).
-//   2. `_host_os` filesystem-marker probe — the native-build path.
+//   2. `_host_os` host resolver — the native-build path.
 // Returns a short leg tag so the dispatcher switches on the *leg* while the
 // concrete symbol names live in the registry rows:
 //   "Darwin"  -> "darwin"   (`_NSGetExecutablePath`)
@@ -377,7 +376,7 @@ fn comdat_leg_for_os(os: string) -> boolean { return os == "Windows"; }
 // `fs_platform_leg` above:
 //   1. `SAILFIN_TARGET_OS` env override — the *target* OS, for the Windows
 //      cross-compile from a Linux host.
-//   2. `_host_os` filesystem-marker probe — the native-build path.
+//   2. `_host_os` host resolver — the native-build path.
 // Delegates the leg decision to `comdat_leg_for_os` so an unknown host
 // falls through the dominant Linux default and never selects the comdat
 // leg.
