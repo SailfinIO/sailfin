@@ -1,0 +1,67 @@
+// Line-budget sentinel for the `compiler/src/cli/commands/test/` modules.
+//
+// `cli/commands/test.sfn` reached 3,380 lines — the longest module in the
+// tree and more than twice the ~1,500-line soft budget in
+// `.claude/rules/code-style.md`. It was split into ten modules, the
+// largest of which is `single_process_run.sfn`.
+//
+// This guard exists because the file is itself a *product* of an earlier
+// decomposition: SFEP-0027 Phase B moved the CLI commands out of
+// `cli_main.sfn` into `cli/commands/*.sfn`, and this one then grew back to
+// roughly the size of the module that migration existed to break up. A
+// split without a sentinel invites the next one.
+//
+// Two things this budget is NOT. It does not bound the compiler's
+// worst-case per-module emit — line count does not predict cross-module
+// RSS, and this file was the *longest* in the tree while only the third
+// *heaviest* (see `typecheck_types_line_budget_test.sfn` for the measured
+// counter-examples). And it is not a target: 750 is a ceiling that leaves
+// room for routine maintenance while flagging any module drifting back
+// toward the soft budget.
+import { find_char_local } from "../../src/string_utils";
+
+let TEST_CMD_MODULE_LINE_BUDGET: int = 750;
+
+// Count newlines, matching `wc -l` semantics (a trailing newline is not
+// double-counted). Cheap single linear scan via `find_char_local`.
+fn _count_newlines(source: string) -> int {
+    let mut count: int = 0;
+    let mut pos: int = 0;
+    loop {
+        let idx = find_char_local(source, "\n", pos);
+        if idx < 0 { break; }
+        count += 1;
+        pos = idx + 1;
+    }
+    return count;
+}
+
+fn _module_lines(name: string) -> int ![io] {
+    let source = fs.readFile("compiler/src/cli/commands/test/" + name + ".sfn");
+    // A non-empty read is a precondition — guards against a path typo
+    // silently passing the budget check on an empty string.
+    assert source.length > 0;
+    return _count_newlines(source);
+}
+
+test "test command: every submodule stays under the line budget" ![io] {
+    let modules: string[] = ["arg_and_jobs", "cache_scratch", "discovery", "exec", "link", "mod", "multi_file_run", "pool", "reporting", "single_process_run"];
+    let mut i: int = 0;
+    loop {
+        if i >= modules.length { break; }
+        let lines = _module_lines(modules[i]);
+        assert lines > 0;
+        assert lines < TEST_CMD_MODULE_LINE_BUDGET;
+        i += 1;
+    }
+}
+
+// The flat `test.sfn` must stay deleted. Module resolution probes
+// `foo.sfn` before falling back to `foo/mod.sfn`, so re-adding the flat
+// file beside the folder would shadow it for every `./commands/test`
+// import and silently revert this decomposition while still compiling
+// green — the exact failure this split had to avoid.
+test "test command: the flat module does not shadow the folder" ![io] {
+    assert ! fs.exists("compiler/src/cli/commands/test.sfn");
+    assert fs.exists("compiler/src/cli/commands/test/mod.sfn");
+}

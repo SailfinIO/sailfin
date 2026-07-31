@@ -346,7 +346,7 @@ fn _clang_link_multi_with_opt(ll_paths: string[], out_path: string, runtime_root
 // uncalled/vtable-only method sub-case was fixed by #1739/#1740
 // (`find_vtable_method_signature`); the *called*-method sub-case (the
 // cross-dir invalid-`declare` failure this `backend.link` call hit) was fixed
-// by #1701's `find_declare_signature_t` correction. `cli/commands/test.sfn`
+// by #1701's `find_declare_signature_t` correction. `cli/commands/test/link.sfn`
 // now constructs the test-layout `LinkPlan` and dispatches through the
 // `Backend` seam directly via a `../../backend` import.
 fn _clang_link(ll_path: string, out_path: string, runtime_root: string, runtime_capsules: RuntimeCapsuleArtifacts[], binary_dir: string, cache_dir: string) -> LinkResult ![io] {

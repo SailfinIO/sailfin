@@ -19,8 +19,8 @@
 //
 // These tests pin (2) and the freshness of the returned array. They touch
 // (1) only incidentally — `sfn test` itself marks and rewinds the arena
-// around test execution (`cli/commands/test.sfn:1163` and its rewind
-// sites), so the later tests here do read the memo across a rewind
+// around test execution (`cli/commands/test/single_process_run.sfn` and its
+// rewind sites), so the later tests here do read the memo across a rewind
 // boundary — but a UAF read succeeds silently until something allocates
 // over the reclaimed region, so treat that as a smoke signal rather than
 // a guarantee. The load-bearing guard for (1) is the comment at the

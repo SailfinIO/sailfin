@@ -1,0 +1,513 @@
+// compiler/src/cli/commands/test/mod.sfn
+//
+// `test` subcommand (CLI modularization epic #351, Issue 3.8 — proposal
+// §5 Phase 3 item 8, §7). Migrates `sfn test` off the legacy
+// `cli_commands` handler onto the per-command `command_def()`/`run()`
+// pattern established by Issue 2.4 (`version`) and exercised by the other
+// Phase 3 commands (`init`, `login`, `guillermo`, `add`, `publish`, `fmt`).
+//
+// `test` carries a real flag surface plus a variadic positional:
+//   sfn test [--json] [-k NAME] [--tag TAG] [--update-snapshots]
+//            [--no-test-cache] [--jobs N] [--shard I/N] <suite...>
+// `--json` / `--update-snapshots` / `--no-test-cache` are boolean flags;
+// `-k` (name substring), `--tag` (tag filter), and `--shard` (I/N
+// partition, issue #1237) are value flags; `--jobs`
+// is a `flag_int` (Issue 1.5, #794) so `parse()` rejects a non-integer
+// value as a `type_error` before `run` is reached; `suite` is a variadic
+// positional (Issue 1.11, #800) collecting one or more suite paths (zero
+// defaults to "."). `runtime_root` / `binary_dir` are threaded from the
+// driver-parsed `CliContext` (Issue 2.2), replacing the legacy handler's
+// extra params.
+//
+// The `run` body and its `_test_*` / `_clang_link_test_cmd_with_deps`
+// private helpers (and the `TestSuite` / `TestGroup` / `TestFileOutcome` /
+// `RetryPolicy` types) move verbatim from `cli_commands.sfn` — only the
+// flag-parsing preamble changes (the hand-rolled argv walk becomes typed
+// `sfn/cli` match accessors). Test discovery, snapshot, caching, and jobs
+// semantics are unchanged. Exit codes stay integer literals (the
+// `sfn/cli` `EXIT_*` constants lower to 0 in an importing module — see the
+// `fmt.sfn` note).
+import {
+    Command,
+    Matches,
+    arg_variadic,
+    command,
+    flag,
+    flag_int,
+    flag_value,
+    flag_value_short,
+    get_int,
+    get_or,
+    has,
+    has_flag,
+    positionals,
+    with_arg,
+    with_flag
+} from "sfn/cli";
+
+import { AssertFailure, _empty_assert_failure } from "../../../assert_failure";
+import { Program, Statement } from "../../../ast";
+import { LinkPlan, LlvmTextBackend } from "../../../backend";
+import { assemble_link_inputs } from "../../../build/clang_argv";
+import {
+    _dirname_cmd,
+    _ends_with_cmd,
+    _ensure_dir_cmd,
+    _path_join_cmd,
+    _sanitize_filename_cmd,
+    _shell_read_cmd,
+    _strip_trailing_slashes_cmd,
+    _write_text_cmd
+} from "../../../build/fs";
+import {
+    assemble_runtime_capsule_link_inputs,
+    runtime_stamp_identity,
+    write_runtime_identity_stamp
+} from "../../../build/runtime_objs";
+import {
+    CacheKey,
+    cache_copy_artifact_to,
+    cache_lookup_artifact,
+    cache_store_artifact,
+    canonicalize_flags,
+    runtime_link_inputs_identity,
+    test_bin_cache_key,
+    test_bin_cache_root,
+    test_bin_compiler_identity
+} from "../../../build_cache";
+import { _env_flag, _get_env_cmd, _legacy_flag_file } from "../../../build_flags";
+import { is_safe_scope_name, parse_scope_name } from "../../../capsule_artifact";
+import { prepare_project_capsules_for_test } from "../../../capsule_resolver";
+import { discover_project_root } from "../../../capsule_resolver/paths";
+import { ResolverConsumer, TestCapsuleResolution } from "../../../capsule_resolver/types";
+import { discover_workspace_root, load_workspace_default_members } from "../../../capsule_resolver/workspace";
+import { ImportSymbolTable, empty_import_symbols } from "../../../effect_imports";
+import { format_backend_failure_banner } from "../../../ice";
+import { compile_tests_to_llvm_file_with_module_imports, module_name_from_path } from "../../../main";
+import { LayoutManifest } from "../../../native_ir";
+import { number_to_string } from "../../../num_format";
+import { parse_program } from "../../../parser/mod";
+import { runtime_capsule_from_root } from "../../../runtime_capsule_resolver";
+import { _has_prefix_cmd, _sort_strings_cmd } from "../../../string_cmd_utils";
+import {
+    char_code_at_text,
+    find_char_local,
+    index_of,
+    substring
+} from "../../../string_utils";
+import { TestResultRecord, parse_test_record_line } from "../../../test_results";
+import {
+    TestEntry,
+    collect_test_entries,
+    locate_failing_test,
+    render_hook_event,
+    render_start_event,
+    render_summary_event,
+    render_test_event
+} from "../../../test_runner_json";
+import {
+    enter_test_runner_mode,
+    exit_test_runner_mode,
+    set_test_filters,
+    set_test_scratch_root,
+    test_decl_is_matching_test,
+    test_decl_matches_filters,
+    test_filters_active
+} from "../../../test_runner_state";
+import { toml_get_name } from "../../../toml_parser";
+import { load_imported_interfaces_from_paths } from "../../../typecheck_import_loader";
+import { resolve_test_bin_identity_for_cache } from "../../../version";
+import { CliContext } from "../../context";
+import { _package_basename } from "../cmd_shared";
+import { toolchain_gate_or_dispatch } from "../toolchain";
+import {
+    _parse_jobs_value,
+    _parse_positive_decimal_cmd,
+    _parse_shard_field,
+    _parse_shard_field_at,
+    _parse_shard_index,
+    _parse_shard_total,
+    _resolve_auto_test_jobs,
+    _resolve_test_jobs,
+    _shard_keeps_index,
+    _test_jobs_budget
+} from "./arg_and_jobs";
+import {
+    TestScratchRoot,
+    _clean_lowering_state,
+    _cleanup_test_scratch,
+    _collect_header_files_cmd,
+    _resolve_test_scratch_root,
+    _test_bin_runtime_identity,
+    _test_scratch_root
+} from "./cache_scratch";
+import {
+    TestGroup,
+    _collect_test_files_cmd,
+    _file_has_matching_test,
+    _filter_program_tests_cmd,
+    _find_test_group,
+    _looks_like_test_file_cmd,
+    _suite_name_from_path,
+    _test_group_key,
+    _test_resolver_consumer_for_group
+} from "./discovery";
+import {
+    RetryPolicy,
+    TestBinResult,
+    _STREAM_ASSERT_KIND,
+    _assert_failure_from_record,
+    _classify_test_retry,
+    _emit_captured_stream,
+    _emit_crash_diagnostic,
+    _emit_crash_diagnostic_neutral,
+    _env_snapshot_has_key,
+    _first_assert_failure,
+    _ingest_child_stderr_line,
+    _is_signal_exit,
+    _run_test_binary,
+    _should_retry_test,
+    _test_deadline_ms,
+    _test_exec_env,
+    _test_hook_records,
+    _test_retries_disabled,
+    _test_timeout_secs
+} from "./exec";
+import { TestLinkResult, _clang_link_test_cmd_with_deps } from "./link";
+import { _run_multi_file } from "./multi_file_run";
+import {
+    ReapResult,
+    _append_test_filter_args,
+    _env_entry_has_key,
+    _extract_json_uint_after,
+    _is_subframe_summary_line,
+    _pool_child_argv,
+    _pool_child_env,
+    _pool_env_snapshot,
+    _prewarm_test_dep_closures,
+    _reap_test_child,
+    _resolve_test_self_path
+} from "./pool";
+import {
+    TestSuite,
+    _emit_file_test_events,
+    _emit_results_events,
+    _emit_suite_banners,
+    _format_assert_failure,
+    _outcome_all_pass,
+    _outcome_failed_at,
+    _outcome_setup_failure,
+    _records_have_failure,
+    _synthetic_assert_failure,
+    _trj_decode_failed,
+    _trj_decode_passed,
+    _trj_decode_skipped
+} from "./reporting";
+import { _run_single_process } from "./single_process_run";
+
+// The `sfn/cli` definition for `test`, registered on the v2 root via
+// `with_subcommand`. Three boolean flags, three value flags (`-k`,
+// `--tag`, `--shard`), one int flag (`--jobs`), and a variadic `suite`
+// positional.
+fn command_def() -> Command {
+    return with_arg(with_flag(with_flag(with_flag(with_flag(with_flag(with_flag(with_flag(with_flag(command("test", "Run tests or workspace default members"), flag("json", "Emit a JSONL event stream")), flag("update-snapshots", "Re-baseline snapshot golden files this run")), flag("no-test-cache", "Bypass the per-test linked-binary cache")), flag_value_short("k", "k", "Only run tests whose name contains this substring")), flag_value("tag", "Only run tests carrying @tag(\"<value>\")")), flag_int("jobs", "Run up to N per-file children concurrently")), flag_value("shard", "Run only the I-th of N file-count-balanced shards (e.g. 1/3)")), flag("skip-toolchain-check", "Bypass the [toolchain] pin check for this invocation")), arg_variadic("suite", "Suite paths (omit at a workspace root to test default members)"));
+}
+
+fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
+    // Flag surface migrated to `sfn/cli` (epic #351, Issue 3.8). The
+    // legacy hand-rolled argv walk is replaced by typed builders:
+    // `--json` / `--update-snapshots` / `--no-test-cache` (booleans),
+    // `-k` / `--tag` (value flags), and `--jobs N` (`flag_int`, so a
+    // non-integer value is rejected by `parse()` as a `type_error`
+    // before `run` is reached). `runtime_root` / `binary_dir` come from
+    // the driver-parsed `CliContext` instead of the old extra params.
+    let runtime_root: string = ctx.runtime_root;
+    let binary_dir: string = ctx.binary_dir;
+    let _tc_suites: string[] = positionals(matches, "suite");
+    let mut _tc_hint: string = ".";
+    if _tc_suites.length > 0 { _tc_hint = _tc_suites[0]; }
+    let _tc = toolchain_gate_or_dispatch(_tc_hint, ctx, has_flag(matches, "skip-toolchain-check"));
+    if _tc != 0 { return _tc; }
+    let json_output: boolean = has_flag(matches, "json");
+    let no_test_cache: boolean = has_flag(matches, "no-test-cache");
+    let update_snapshots: boolean = has_flag(matches, "update-snapshots");
+    // Discovery filters (issue #849): `-k <substr>` keeps tests whose
+    // name contains <substr>; `--tag <value>` keeps tests carrying
+    // `@tag("<value>")`. Absent → "" (no filter), composing exactly as
+    // the legacy two-`else if` branches did.
+    let name_filter: string = get_or(matches, "k", "");
+    let tag_filter: string = get_or(matches, "tag", "");
+    // `--jobs` is a `flag_int`: `parse()` already rejected non-integer
+    // input. Preserve the [1, 256] range guard (exit 2) here; absent flags
+    // resolve through SAILFIN_TEST_JOBS and then the native host budget.
+    let jobs: int = _resolve_test_jobs(matches);
+    if jobs < 1 || jobs > 256 {
+        print("sfn test: --jobs requires a positive integer in [1, 256] (got '"
+            + number_to_string(jobs)
+            + "')");
+        return 2;
+    }
+    // `--shard I/N` (issue #1237): run only the I-th of N file-count-
+    // balanced shards of the discovered surface. Absent → no sharding
+    // (the whole surface). A malformed spec (not `I/N` with both sides
+    // positive integers and `1 <= I <= N`) exits 2, mirroring the
+    // `--jobs` range-guard convention. The stable stride partition is
+    // applied to `test_files` after discovery/filtering, below.
+    let mut shard_active: boolean = false;
+    let mut shard_index: int = 1;
+    let mut shard_total: int = 1;
+    let shard_spec_raw: string = get_or(matches, "shard", "");
+    if shard_spec_raw.length > 0 {
+        let s_index: int = _parse_shard_index(shard_spec_raw);
+        let s_total: int = _parse_shard_total(shard_spec_raw);
+        if s_index < 0 || s_total < 0 {
+            print("sfn test: --shard requires I/N with 1 <= I <= N (got '"
+                + shard_spec_raw
+                + "')");
+            return 2;
+        }
+        shard_active = true;
+        shard_index = s_index;
+        shard_total = s_total;
+    }
+
+    // Variadic suite positionals: zero or more. Zero defaults to a single
+    // "." suite below (the legacy `positional.length == 0` branch).
+    let positional: string[] = positionals(matches, "suite");
+    set_test_filters(name_filter, tag_filter);
+
+    // Build the suite list. At a workspace root, zero positional args select
+    // `[workspace].default-members` (or every member when undeclared). Outside
+    // a workspace the historical single "." suite remains the fallback.
+    // One or more positionals are unchanged.
+    let mut suites: TestSuite[] = [];
+    if positional.length == 0 {
+        let workspace_root = discover_workspace_root(".");
+        if workspace_root.length > 0 {
+            let members = load_workspace_default_members(workspace_root);
+            let mut wmi: int = 0;
+            loop {
+                if wmi >= members.length { break; }
+                let member = members[wmi];
+                let empty_failed: string[] = [];
+                suites.push(TestSuite {
+                    name: member.name, path: workspace_root + "/" + member.member_path, pass_count: 0, fail_count: 0, failed_files: empty_failed
+                });
+                wmi += 1;
+            }
+        } else {
+            let empty_failed: string[] = [];
+            suites.push(TestSuite {
+                name: ".", path: ".", pass_count: 0, fail_count: 0, failed_files: empty_failed
+            });
+        }
+    } else {
+        let mut spi: int = 0;
+        loop {
+            if spi >= positional.length { break; }
+            let sp = positional[spi];
+            let sn = _suite_name_from_path(sp);
+            let empty_failed: string[] = [];
+            suites.push(TestSuite {
+                name: sn, path: sp, pass_count: 0, fail_count: 0, failed_files: empty_failed
+            });
+            spi += 1;
+        }
+    }
+
+    // Per-suite banner suppression rule: a single positional `.sfn`
+    // file path runs in legacy single-file mode (no banner). Every
+    // other shape — zero positionals, one directory, multiple
+    // paths — emits banners. Keeps `sfn test path/to/x_test.sfn`
+    // (the shape the multi-file path's own `<self> test <file>`
+    // children use) byte-compatible with pre-#848 output so the
+    // parent's banner aggregation isn't polluted by per-child
+    // decoration.
+    let mut emit_banners: boolean = true;
+    if positional.length == 1 && _ends_with_cmd(positional[0], ".sfn") {
+        emit_banners = false;
+    }
+
+    _ensure_dir_cmd("build");
+    _ensure_dir_cmd("build/sailfin");
+    // Capture whether the caller pinned the scratch root before
+    // resolving it. Unpinned test invocations get an ephemeral root so
+    // separate `sfn test <file>` processes cannot race on
+    // `build/sailfin/test.ll` or resolver capsule `.ll` paths.
+    let scratch_env = _get_env_cmd("SAILFIN_TEST_SCRATCH");
+    let scratch_choice = _resolve_test_scratch_root(scratch_env);
+    let scratch_root = scratch_choice.root;
+    let scratch_owned = scratch_choice.owned;
+    _ensure_dir_cmd(scratch_root);
+    _ensure_dir_cmd(scratch_root + "/test-o0");
+    // Sub-frame mode (#1121 / SFEP-0050): set by the multi-file parent on
+    // each child via SAILFIN_TEST_JSON_SUBFRAME=1. In this mode a `--json`
+    // child suppresses its own start on stdout (it still emits per-test
+    // events, which the parent forwards from the child's stdout) and
+    // routes its `summary` line to its own STDERR — the parent skims the
+    // counts off the reap demux and does not forward it, aggregating them
+    // into one run-level summary. The result is a single coherent jsonl
+    // document per `sfn test` invocation. (The pre-SFEP-0050 transport
+    // wrote the counts to `<scratch>/_subframe_summary.json`; the stream
+    // replaces that side-channel file.)
+    let json_subframe = json_output && _env_flag("SAILFIN_TEST_JSON_SUBFRAME");
+
+    // Resolve the trace toggle once (popen-cost is fine on the
+    // cold orchestrator path) and stash both bits in the
+    // process-local `test_runner_state` module so the LLVM
+    // lowering pipeline reads them via direct boolean loads
+    // instead of re-probing the filesystem on every statement.
+    // See `compiler/src/test_runner_state.sfn` for the contract.
+    let trace_runner = _env_flag("SAILFIN_TRACE_TEST_RUNNER")
+        || _legacy_flag_file("build/sailfin/.trace_test_runner");
+    enter_test_runner_mode(trace_runner);
+    set_test_scratch_root(scratch_root);
+
+    // Walk each suite's path for `_test.sfn` files. `file_suite_index`
+    // tracks the originating suite per file so the loop can attribute
+    // pass/fail counts back to the right banner. The flat `test_files`
+    // list keeps the existing resolver-group partition + arena-mark
+    // loop shape downstream — only the upstream collection step
+    // fans out to multiple roots.
+    let mut test_files: string[] = [];
+    let mut file_suite_index: int[] = [];
+    let mut csi: int = 0;
+    loop {
+        if csi >= suites.length { break; }
+        // Sort within each suite so the run order is deterministic
+        // across platforms (`fs.listDirectory` returns entries in
+        // filesystem order). Matches the pre-#848 `find ... | sort`.
+        let suite_files = _sort_strings_cmd(_collect_test_files_cmd(suites[csi].path, 25));
+        let mut sfi: int = 0;
+        loop {
+            if sfi >= suite_files.length { break; }
+            test_files.push(suite_files[sfi]);
+            file_suite_index.push(csi);
+            sfi += 1;
+        }
+        csi += 1;
+    }
+
+    // File-level discovery pre-filter (issue #849). When `-k`/`--tag`
+    // are active, drop any test file that contains no matching test so
+    // it never reaches the compile path — a file compiled with every
+    // test filtered out would synthesize an empty harness (no `@main`)
+    // and fail to link. The per-test cut in
+    // `compile_tests_to_llvm_file_with_module_imports` then trims the
+    // surviving files down to only their matching tests. Both passes
+    // share `test_decl_matches_filters`, so a file kept here always has
+    // at least one test that survives the cut.
+    if test_filters_active() {
+        let mut kept_files: string[] = [];
+        let mut kept_suite_index: int[] = [];
+        let mut fpi: int = 0;
+        loop {
+            if fpi >= test_files.length { break; }
+            if _file_has_matching_test(test_files[fpi]) {
+                kept_files.push(test_files[fpi]);
+                kept_suite_index.push(file_suite_index[fpi]);
+            }
+            fpi += 1;
+        }
+        test_files = kept_files;
+        file_suite_index = kept_suite_index;
+    }
+
+    // `--shard I/N` partition (issue #1237). Keep only the I-th of N
+    // file-count-balanced shards using the stable stride
+    // `i % total == index - 1` over the deterministic (sorted within each
+    // suite) discovery order — mirroring `scripts/test_shards.sh`'s awk
+    // stride so the runner and the legacy bash shard map agree over the
+    // same file list. Applied after the `-k`/`--tag` cut so a shard
+    // partitions exactly the surface that would otherwise run. The
+    // `file_suite_index` parallel array is partitioned in lockstep so
+    // per-suite banner attribution stays aligned. An empty shard (more
+    // shards than files) falls through to the benign 0/0/0 path below.
+    if shard_active {
+        let mut sharded_files: string[] = [];
+        let mut sharded_suite_index: int[] = [];
+        let mut shi: int = 0;
+        loop {
+            if shi >= test_files.length { break; }
+            if _shard_keeps_index(shi, shard_index, shard_total) {
+                sharded_files.push(test_files[shi]);
+                sharded_suite_index.push(file_suite_index[shi]);
+            }
+            shi += 1;
+        }
+        test_files = sharded_files;
+        file_suite_index = sharded_suite_index;
+    }
+
+    if test_files.length == 0 {
+        // Empty discovery exits 0 in BOTH modes (issue #848). The
+        // pre-#848 split — JSON returned 1, the human path printed
+        // "no Sailfin test files found" and also returned 1, while
+        // the Makefile's `test-capsules` loop special-cased an empty
+        // `capsules/` to exit 0 — left the runner and the Makefile
+        // disagreeing. The unified runner standardises on the
+        // `test-capsules` shape: an empty suite is a benign 0/0/0,
+        // not a failure. The all-zeros JSON summary / `0/0 passed`
+        // banner is the "no tests" signal consumers read; the exit
+        // code stays 0 so a legitimately-empty suite (e.g. a capsule
+        // with no `tests/` dir) doesn't fail the build.
+        if json_output {
+            if json_subframe {
+                print.err(render_summary_event(0, 0, 0, 0, 0, 0));
+            } else {
+                print(render_start_event(0));
+                print(render_summary_event(0, 0, 0, 0, 0, 0));
+            }
+            exit_test_runner_mode();
+            _cleanup_test_scratch(scratch_owned, scratch_root, true);
+            return 0;
+        }
+        let mut hi: int = 0;
+        loop {
+            if hi >= suites.length { break; }
+            print("[test-" + suites[hi].name
+                + "] no *_test.sfn files found under "
+                + suites[hi].path);
+            hi += 1;
+        }
+        if emit_banners { _emit_suite_banners(suites); }
+        exit_test_runner_mode();
+        _cleanup_test_scratch(scratch_owned, scratch_root, true);
+        return 0;
+    }
+
+    // Multi-file isolation (issue #848). When more than one test file
+    // runs in this invocation, compile + link + run each in a fresh
+    // `<self> test <file>` subprocess and aggregate the exit codes
+    // into the per-suite banners. The single-shared in-process path
+    // below groups every test under one resolver pass whose
+    // `native_texts` is the UNION of every test's imports — and tests
+    // with conflicting expectations for the same symbol cannot
+    // coexist in that union. The canonical case: `number_to_string`
+    // resolves to the `![pure]` int-signature import for
+    // `cross_module_int_signature_test` (pinning the #633 fix) but to
+    // the `double` runtime-helper descriptor for `pure_assert_smoke_test`
+    // — one resolver group can only pick one, so the loser fails with
+    // an ABI mismatch. Per-file subprocesses give each test its own
+    // resolver pass (its own imports only), which is exactly what the
+    // retired `scripts/run_native_test.sh` per-file loop did. JSON
+    // mode (#1121) also uses this per-file subprocess path — a multi-file
+    // `sfn test <dir> --json` no longer forces every file through one
+    // resolver pass (that single-process path OOM/segfaulted on the real
+    // suite — 132 unit files — under the 8 GB cap and hit the
+    // resolver-union conflicts per-file isolation exists to avoid).
+    // Output stays a SINGLE coherent jsonl document per invocation: the
+    // parent emits one aggregate `start`, runs each child in sub-frame
+    // mode (children forward only per-test events on the shared stdout
+    // and route their counts back over their own stderr `summary` line,
+    // which the parent skims — SFEP-0050), then emits one aggregate
+    // `summary`. Human banners and the RETRY line are suppressed in JSON
+    // mode so the stream stays pure jsonl.
+    if test_files.length > 1 {
+        return _run_multi_file(test_files, file_suite_index, suites, jobs, json_output, name_filter, tag_filter, no_test_cache, update_snapshots, emit_banners, scratch_root, scratch_owned, runtime_root, binary_dir);
+    }
+
+    return _run_single_process(test_files, file_suite_index, suites, json_output, json_subframe, trace_runner, no_test_cache, update_snapshots, emit_banners, scratch_root, scratch_owned, runtime_root, binary_dir, ctx);
+}
+
+export { command_def, run };

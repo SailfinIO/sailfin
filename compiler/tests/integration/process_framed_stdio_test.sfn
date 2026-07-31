@@ -78,7 +78,7 @@ test "handle_read_bytes_stdout: returns at most n bytes preserving the remainder
 }
 
 test "framed drain: an fd-free loop over both streams terminates at EOF" ![io] {
-    // The runner fallback in `compiler/src/cli/commands/test.sfn` drains a
+    // The runner fallback in `compiler/src/cli/commands/test/exec.sfn` drains a
     // child with no fd and no `io.poll_any` — the only path available on
     // Windows — and terminates on both-streams-at-EOF rather than on an fd
     // list. Pin that loop shape here on POSIX, where the same framed

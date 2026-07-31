@@ -77,9 +77,10 @@ the emitting-binary path is empty — the **in-process serial fallback**
 
 Note the separation of layers here: the per-test **binary** cache is a distinct
 layer keyed on the *commit-stable* `resolve_test_bin_identity_for_cache`, and
-`--no-test-cache` disables **only** that binary layer (`cli/commands/test.sfn`).
-It does **not** force cold recompilation of cached `.ll` **modules** — so it is
-not a workaround for the module-IR staleness above. For that, see §4.
+`--no-test-cache` disables **only** that binary layer
+(`cli/commands/test/single_process_run.sfn`). It does **not** force cold
+recompilation of cached `.ll` **modules** — so it is not a workaround for
+the module-IR staleness above. For that, see §4.
 
 Closing this residual in code would mean folding a self-binary (or
 compiler-source) hash into the identity when `effective_exe == ""` in

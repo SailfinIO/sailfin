@@ -1,0 +1,391 @@
+import { _path_join_cmd } from "../../../build/fs";
+import { prepare_project_capsules_for_test } from "../../../capsule_resolver";
+import { char_code_at_text, index_of, substring } from "../../../string_utils";
+import { _test_group_key, _test_resolver_consumer_for_group } from "./discovery";
+import { _emit_captured_stream, _env_entry_has_key, _env_snapshot_has_key } from "./exec";
+
+// SFN-148: pre-warm the shared module `.ll` cache once per invocation.
+// The parallel worker pool otherwise cold-starts a cache stampede —
+// every child in the first wave re-emits the same dep closure before any
+// cache write lands. Resolving + compiling the union closure here (per
+// resolver group) makes every child cache-hit. Best-effort: a warm
+// failure logs and returns; children then compile per file as before.
+fn _prewarm_test_dep_closures(test_files: string[], binary_dir: string) -> void ![io] {
+    // Partition into resolver groups exactly as the leaf path does
+    // (group key = capsule/project the file resolves under), so a
+    // multi-project invocation warms each project's closure separately.
+    let mut group_keys: string[] = [];
+    let mut group_files: string[][] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= test_files.length { break; }
+        let key = _test_group_key(test_files[i]);
+        // find-or-create the group bucket
+        let mut gi: int = 0;
+        let mut found: int = -1;
+        loop {
+            if gi >= group_keys.length { break; }
+            if strings_equal(group_keys[gi], key) {
+                found = gi;
+                break;
+            }
+            gi += 1;
+        }
+        if found < 0 {
+            group_keys.push(key);
+            let empty: string[] = [];
+            group_files.push(empty);
+            found = group_keys.length - 1;
+        }
+        group_files[found].push(test_files[i]);
+        i += 1;
+    }
+    let mut g: int = 0;
+    loop {
+        if g >= group_files.length { break; }
+        let files = group_files[g];
+        if files.length > 0 {
+            let consumer = _test_resolver_consumer_for_group(files[0]);
+            // Trailing args MUST be exactly ("", "", binary_dir) —
+            // byte-identical to the child call site (currently
+            // test.sfn line ~1028). The module cache key folds
+            // `effective_exe`, which is derived from these args; any
+            // deviation derives a different key and children miss the
+            // warm entries.
+            let res = prepare_project_capsules_for_test(files, consumer, "", "", binary_dir);
+            if res.staging_failed {
+                print.err("[test] warning: dep-closure pre-warm failed for a group (children will compile per file)");
+            }
+        }
+        g += 1;
+    }
+}
+
+// Resolve the path to this compiler binary so the multi-file runner
+// can re-invoke itself (`<self> test <file>`) once per test for
+// process isolation. Mirrors `_resolve_self_path` in `cli_main.sfn`:
+// `<binary_dir>/sailfin` (computed by `fn main` from `exe_path()` /
+// `realpath(argv[0])` on every platform) is the real resolution path.
+// The doubly-Linux-only `readlink -f /proc/self/exe` shell fallback
+// was removed in #970 — it never worked on macOS and is dead code now
+// that `exe_path()` (#968) threads `binary_dir` portably.
+fn _resolve_test_self_path(binary_dir: string) -> string ![io] {
+    if binary_dir.length > 0 {
+        // Probe the canonical `sfn` name first, then the legacy
+        // `sailfin` name (a binary that predates the build/bin/sfn
+        // rename), mirroring `_resolve_self_path`'s host-neutral list.
+        let names: string[] = ["sfn", "sailfin"];
+        let mut i: int = 0;
+        loop {
+            if i >= names.length { break; }
+            let candidate = _path_join_cmd(binary_dir, names[i]);
+            if fs.is_executable(candidate) { return candidate; }
+            i += 1;
+        }
+    }
+    return "";
+}
+
+// Append the active discovery filters to a child `<self> test <file>`
+// argv so each per-file subprocess re-establishes the same filter
+// state and applies the per-test cut to its own leaf compile.
+fn _append_test_filter_args(argv: string[], name_filter: string, tag_filter: string) -> string[] {
+    let mut out = argv;
+    if name_filter.length > 0 {
+        out.push("-k");
+        out.push(name_filter);
+    }
+    if tag_filter.length > 0 {
+        out.push("--tag");
+        out.push(tag_filter);
+    }
+    return out;
+}
+
+// #1236 / SFEP-0050: argv for a `<self> test <file>` sub-frame child.
+// A child receives its per-child variables through
+// `process.spawn_with_env`'s explicit environment (see `_pool_child_env`)
+// instead of an `env(1)` wrapper, so the executed command line is
+// `<self> test <file> [--json] [--no-test-cache] [filters]`. The per-file
+// deadline is enforced by the parent via `handle_kill` (SFEP-0050), so
+// there is no `timeout(1)` wrapper prefix.
+fn _pool_child_argv(self_exe: string, path: string, name_filter: string, tag_filter: string, json_output: boolean, no_test_cache: boolean) -> string[] {
+    let mut base: string[] = [];
+    base.push(self_exe);
+    base.push("test");
+    base.push(path);
+    if json_output { base.push("--json"); }
+    if no_test_cache { base.push("--no-test-cache"); }
+    return _append_test_filter_args(base, name_filter, tag_filter);
+}
+
+// #1236 / #1410: invocation-stable environment snapshot for pooled
+// children. `process.spawn_with_env` treats its env argument as the
+// child's ENTIRE environment ("empty means empty, never inherit" —
+// `runtime/sfn/process.sfn`), so the pool must reproduce what the
+// serial path's `process.run` children inherit implicitly. The
+// historical version hand-curated a passthrough name list and read
+// each via `_get_env_cmd` (one popen per name) because no
+// environ-iteration primitive existed yet. `process.environ()`
+// (`sfn_process_environ`, #1313) now returns the parent's full
+// environment as a `string[]` of `KEY=VALUE` entries — byte-for-byte
+// the env the serial `process.run` path inherits — so the pool snapshots
+// that directly. This both fixes the #1410 macOS link failure (the
+// curated list omitted the SDK/toolchain vars — `SDKROOT`,
+// `DEVELOPER_DIR`, `MACOSX_DEPLOYMENT_TARGET`, … — that the child's
+// `clang`/`ld` need, so pooled builds failed with `ld: library 'm' not
+// found` while the serial path linked fine) and drops ~40 popen calls
+// per `sfn test` invocation. Resolved ONCE per invocation and reused
+// for every spawn; only the per-child variables vary (see
+// `_pool_child_env`).
+fn _pool_env_snapshot() -> string[] ![io] { return process.environ(); }
+
+// #1236 / #1410: per-child environment = the invocation-stable snapshot
+// (now the parent's full `process.environ()`) plus the per-child
+// test-runner variables (`SAILFIN_TEST_SCRATCH`,
+// `SAILFIN_TEST_RUNTIME_OBJDIR`, and the conditional
+// `SAILFIN_UPDATE_SNAPSHOTS` / `SAILFIN_TEST_JSON_SUBFRAME` flags),
+// exactly mirroring the serial path's `env` argv prefix. The base
+// snapshot is copied entry-by-entry into a fresh array so per-child
+// pushes can never accumulate into the shared snapshot across spawns.
+// Any inherited copy of a per-child-managed key is dropped first: the
+// snapshot is now the full parent env, which may already carry e.g.
+// `SAILFIN_TEST_SCRATCH` (nested runner) or `SAILFIN_UPDATE_SNAPSHOTS`,
+// and POSIX `getenv` returns the FIRST match — so the inherited value
+// would shadow the per-child one without this filter.
+fn _pool_child_env(base_env: string[], child_scratch: string, runtime_objdir: string, stamp_nonce: string, update_snapshots: boolean, json_output: boolean) -> string[] {
+    let mut env_flat: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= base_env.length { break; }
+        let entry = base_env[i];
+        if !_env_entry_has_key(entry, "SAILFIN_TEST_SCRATCH") && !_env_entry_has_key(entry, "SAILFIN_TEST_RUNTIME_OBJDIR")
+            && !_env_entry_has_key(entry, "SAILFIN_TEST_RUNTIME_STAMP")
+            && !_env_entry_has_key(entry, "SAILFIN_UPDATE_SNAPSHOTS")
+            && !_env_entry_has_key(entry, "SAILFIN_TEST_JSON_SUBFRAME") {
+            env_flat.push(entry);
+        }
+        i += 1;
+    }
+    env_flat.push("SAILFIN_TEST_SCRATCH=" + child_scratch);
+    env_flat.push("SAILFIN_TEST_RUNTIME_OBJDIR=" + runtime_objdir);
+    // #1996: the invocation nonce for the runtime-identity stamp. An
+    // inherited copy is always dropped above (a nested runner's nonce
+    // must never validate this invocation's stamp); the fresh value is
+    // pushed only when the parent actually wrote a stamp.
+    if stamp_nonce.length > 0 {
+        env_flat.push("SAILFIN_TEST_RUNTIME_STAMP=" + stamp_nonce);
+    }
+    if update_snapshots { env_flat.push("SAILFIN_UPDATE_SNAPSHOTS=1"); }
+    if json_output { env_flat.push("SAILFIN_TEST_JSON_SUBFRAME=1"); }
+    // SFN-547: the pool IS the parallelism layer. A pooled child that spawns
+    // a build would otherwise fan its own per-module emit out to
+    // `_cr_resolve_jobs`' RAM budget, which reads the host's total RAM and
+    // cannot see its `jobs - 1` siblings doing the same — so the real peak is
+    // `jobs * emit_jobs * 3 GiB`, not the `jobs * 3 GiB` that
+    // `_test_jobs_budget` sizes against. Pinning each child to serial emit
+    // makes that budget honest. Only the pooled path is affected: the serial
+    // (`--jobs 1`) path inherits the parent env via `process.run` and keeps
+    // its nested fan-out, which is correct because nothing runs beside it.
+    // An inherited `SAILFIN_BUILD_JOBS` always wins: unlike the per-child
+    // keys filtered above it is kept in the snapshot, and the pin is skipped
+    // entirely rather than appended beside it.
+    if !_env_snapshot_has_key(base_env, "SAILFIN_BUILD_JOBS") {
+        env_flat.push("SAILFIN_BUILD_JOBS=1");
+    }
+    return env_flat;
+}
+
+// The aggregate of reaping one `<self> test <file>` sub-frame child:
+// its exit code plus the counts skimmed from the `summary` line it routes
+// to its own stderr (SFEP-0050). `summary_seen` is false when the child
+// died before emitting a summary — the caller then counts the whole file
+// as failed, as the missing-`_subframe_summary.json` fallback did.
+struct ReapResult {
+    rc: int;
+    passed: int;
+    failed: int;
+    skipped: int;
+    tb_hits: int;
+    tb_misses: int;
+    summary_seen: boolean;
+    deadline_killed: boolean;
+}
+
+// True when `line` is a sub-frame child's `summary` jsonl line — the
+// parent consumes it (for counts) instead of forwarding it, so exactly
+// one aggregate `summary` closes the run-level document.
+fn _is_subframe_summary_line(line: string) -> boolean {
+    return index_of(line, "{\"event\":\"summary\"") == 0;
+}
+
+// Demux + reap one `<self> test <file>` sub-frame child (SFEP-0050),
+// replacing the blocking `handle_read_stdout`/`handle_read_stderr` drain.
+// Poll the child's stdout+stderr concurrently over the raw fds (reading
+// ONLY the fd `poll_any` reports ready — a not-ready blocking read would
+// deadlock; the fds go to -1 at EOF, so re-fetch each iteration). The
+// child forwards per-test `--json` events (and human output) on stdout,
+// which the parent re-emits grouped per file; it routes its `summary` line
+// and any diagnostics to stderr — the parent skims the summary for counts
+// and forwards the rest. Both streams are buffered and re-emitted once at
+// the end, so pooled output is never interleaved mid-file (stdout before
+// stderr, matching the pre-SFEP-0050 order). The per-file deadline is
+// enforced by `handle_kill`, remapped 137→124 so a timeout is never
+// confused with an OOM/crash 137. `handle_wait` is the sole reaper/free
+// path. A `0` handle (spawn failure) reports 127.
+fn _reap_test_child(handle: int, deadline_ms: int, json_output: boolean) -> ReapResult ![io] {
+    if handle == 0 {
+        return ReapResult {
+            rc: 127,
+            passed: 0,
+            failed: 0,
+            skipped: 0,
+            tb_hits: 0,
+            tb_misses: 0,
+            summary_seen: false,
+            deadline_killed: false
+        };
+    }
+    let mut out_buf: string = "";
+    let mut err_fwd: string = "";
+    let mut err_buf: string = "";
+    let mut passed: int = 0;
+    let mut failed: int = 0;
+    let mut skipped: int = 0;
+    let mut tb_hits: int = 0;
+    let mut tb_misses: int = 0;
+    let mut summary_seen: boolean = false;
+    let mut deadline_killed: boolean = false;
+    let start_ms = monotonic_millis();
+    loop {
+        if process.handle_stdout_at_eof(handle) && process.handle_stderr_at_eof(handle) {
+            break;
+        }
+        let mut poll_to: int = -1;
+        if deadline_ms > 0 {
+            let remaining: int = deadline_ms - ((monotonic_millis() - start_ms) as int);
+            if remaining <= 0 {
+                process.handle_kill(handle);
+                deadline_killed = true;
+                break;
+            }
+            poll_to = remaining;
+        }
+        let out_fd = process.handle_stdout_fd(handle);
+        let err_fd = process.handle_stderr_fd(handle);
+        let mut fds: int[] = [];
+        if out_fd >= 0 { fds.push(out_fd); }
+        if err_fd >= 0 { fds.push(err_fd); }
+        let mut read_out: boolean = false;
+        let mut read_err: boolean = false;
+        if fds.length == 0 {
+            // No fd to select on. That is Windows: the accessors are `-1`
+            // by design there and `io.poll_any` is a `-1` stub (#1540).
+            // POSIX cannot reach this branch — a read only clears an fd to
+            // `-1` when it drained nothing, so both fds are `-1` only once
+            // both stashes are empty, which the check above already broke
+            // on. Drive the Windows framed reads directly, as
+            // `process_windows.sfn` prescribes: each pumps both pipes, so
+            // neither stream can wedge the other, and each blocks until a
+            // byte or EOF, which is what keeps this from spinning.
+            // Termination stays the both-at-EOF check above. The deadline
+            // is therefore only observed between reads — an untimed framed
+            // read cannot be interrupted, so a wholly silent hung child is
+            // not killed here, as it was not before.
+            read_out = !process.handle_stdout_at_eof(handle);
+            read_err = !process.handle_stderr_at_eof(handle);
+        } else {
+            let ready = io.poll_any(fds, poll_to);
+            if ready < 0 {
+                if deadline_ms > 0 && ((monotonic_millis() - start_ms) as int) >= deadline_ms {
+                    process.handle_kill(handle);
+                    deadline_killed = true;
+                    break;
+                }
+                continue;
+            }
+            read_out = ready == out_fd;
+            read_err = ready == err_fd;
+        }
+        if read_out {
+            let chunk = process.handle_read_bytes_stdout(handle, 65536);
+            if chunk.length > 0 { out_buf = out_buf + chunk; }
+        }
+        if read_err {
+            let chunk = process.handle_read_bytes_stderr(handle, 65536);
+            if chunk.length > 0 {
+                err_buf = err_buf + chunk;
+                loop {
+                    let nl = index_of(err_buf, "\n");
+                    if nl < 0 { break; }
+                    let line = substring(err_buf, 0, nl);
+                    err_buf = substring(err_buf, nl + 1, err_buf.length);
+                    if json_output && _is_subframe_summary_line(line) {
+                        passed += _extract_json_uint_after(line, "\"passed\":");
+                        failed += _extract_json_uint_after(line, "\"failed\":");
+                        skipped += _extract_json_uint_after(line, "\"skipped\":");
+                        tb_hits += _extract_json_uint_after(line, "\"test_bin_hits\":");
+                        tb_misses += _extract_json_uint_after(line, "\"test_bin_misses\":");
+                        summary_seen = true;
+                    } else { err_fwd = err_fwd + line + "\n"; }
+                }
+            }
+        }
+    }
+    // Trailing partial stderr line (mid-crash): never a complete summary
+    // (a summary line ends with \n); forward it as a diagnostic.
+    if err_buf.length > 0 { err_fwd = err_fwd + err_buf; }
+    let rc0 = process.handle_wait(handle);
+    let mut rc = rc0;
+    if deadline_killed { rc = 124; }
+    // Emit grouped per file, stdout then stderr (never interleaved mid-file).
+    _emit_captured_stream(out_buf, false);
+    _emit_captured_stream(err_fwd, true);
+    return ReapResult {
+        rc: rc,
+        passed: passed,
+        failed: failed,
+        skipped: skipped,
+        tb_hits: tb_hits,
+        tb_misses: tb_misses,
+        summary_seen: summary_seen,
+        deadline_killed: deadline_killed
+    };
+}
+
+// Extract the unsigned integer that follows `key` in `text` (a small,
+// allocation-free reader over a known-shape jsonl line). Used by the
+// multi-file `--json` parent to aggregate each sub-frame child's counts
+// from the `summary` line it routes to its stderr (`"passed":N` /
+// `"failed":N` / `"skipped":N` / `"test_bin_hits":N` — SFEP-0050).
+// Returns 0 when the key is absent or not followed by a digit.
+// Deliberately tiny rather than a full JSON parse: the input is the
+// runner's own `render_summary_event` output, whose shape is pinned.
+fn _extract_json_uint_after(text: string, key: string) -> int {
+    let idx = index_of(text, key);
+    if idx < 0 { return 0; }
+    let mut i: int = idx + key.length;
+    let mut n: int = 0;
+    loop {
+        if i >= text.length { break; }
+        let c = char_code_at_text(text, i);
+        if c < 48 { break; }
+        if c > 57 { break; }
+        n = n * 10 + (c - 48);
+        i += 1;
+    }
+    return n;
+}
+
+export {
+    _prewarm_test_dep_closures,
+    _resolve_test_self_path,
+    _append_test_filter_args,
+    _pool_child_argv,
+    _pool_env_snapshot,
+    _pool_child_env,
+    ReapResult,
+    _is_subframe_summary_line,
+    _reap_test_child,
+    _extract_json_uint_after
+};

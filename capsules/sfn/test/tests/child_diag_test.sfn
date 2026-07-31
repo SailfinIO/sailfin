@@ -18,10 +18,10 @@ fn _sfn_bin() -> string ![io] {
 }
 
 // Falls back to the test runner's own default scratch root
-// (`_test_scratch_root` in `cli/commands/test.sfn`) rather than `/tmp`: a
-// single-file `sfn test <file>` invocation never dispatches a per-file
-// child (that only happens when the target expands to >1 file), so
-// `SAILFIN_TEST_SCRATCH` is unset and a fixture written under `/tmp` sits
+// (`_test_scratch_root` in `cli/commands/test/cache_scratch.sfn`) rather
+// than `/tmp`: a single-file `sfn test <file>` invocation never dispatches
+// a per-file child (that only happens when the target expands to >1 file),
+// so `SAILFIN_TEST_SCRATCH` is unset and a fixture written under `/tmp` sits
 // outside the repo tree — `discover_project_root` then finds no
 // `capsule.toml`/`workspace.toml` walking up from it, and the fixture's own
 // `import { report_child_failure } from "sfn/test"` cannot resolve.

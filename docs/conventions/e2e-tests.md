@@ -153,7 +153,7 @@ temp dir), and `clean_runner_env(nested_scratch)` returns
 `process.environ()` with the pool-managed keys stripped and
 `SAILFIN_TEST_SCRATCH` re-pointed at `nested_scratch`. The stripped key set
 in `fixtures.sfn::_pool_managed_keys()` **must mirror** `_pool_child_env` in
-`compiler/src/cli/commands/test.sfn` — a capsule cannot import
+`compiler/src/cli/commands/test/pool.sfn` — a capsule cannot import
 compiler-internal modules, so it is a deliberate paired copy; if a new pool
 key is ever added there, add it to `_pool_managed_keys()` too. A caller that
 needs one otherwise-managed key back (e.g. a nested build binding its own

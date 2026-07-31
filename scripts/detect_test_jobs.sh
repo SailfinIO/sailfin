@@ -23,8 +23,8 @@
 # emit fan-out reserves — `_cr_ram_budget_jobs` in
 # compiler/src/capsule_emit_parallel.sfn — because a test child can spawn
 # exactly that emit. `_test_jobs_budget` in
-# compiler/src/cli/commands/test.sfn is the native twin of this script and
-# carries the identical constants; keep the two in lockstep.
+# compiler/src/cli/commands/test/arg_and_jobs.sfn is the native twin of this
+# script and carries the identical constants; keep the two in lockstep.
 #
 # macOS additionally caps at 2 jobs, mirroring detect_build_jobs.sh. On the
 # memory-constrained macOS runner (~7 GB) the memory budget alone let enough

@@ -80,8 +80,8 @@ struct SelfhostConfig {
     // only ever vehicle was interpolation into a shell `timeout N …`
     // prefix, and the runtime offers no shell-free equivalent — a deadline
     // today means the spawn/poll/kill handle API
-    // (`cli/commands/test.sfn::_reap_test_child`). Kept in the flag surface
-    // so no existing caller breaks.
+    // (`cli/commands/test/pool.sfn::_reap_test_child`). Kept in the flag
+    // surface so no existing caller breaks.
     smoke_timeout: string;
     json: boolean;
     no_promote: boolean;

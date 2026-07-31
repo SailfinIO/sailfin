@@ -277,7 +277,7 @@ test "with_cwd: body return value threads back out" ![io] {
 // parallel pool's per-child orchestration keys stripped and
 // `SAILFIN_TEST_SCRATCH` re-pointed at `nested_scratch`. The stripped key set
 // (`fixtures.sfn::_pool_managed_keys`) MUST mirror `_pool_child_env`
-// (`compiler/src/cli/commands/test.sfn`) — a capsule cannot import that
+// (`compiler/src/cli/commands/test/pool.sfn`) — a capsule cannot import that
 // compiler-internal module, so the list is a deliberate paired copy. These
 // tests guard the "add a pool key, forget to mirror it" regression by
 // asserting the four non-scratch pool keys never survive and scratch is

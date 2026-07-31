@@ -1,0 +1,375 @@
+import { Program } from "../../../ast";
+import { _ensure_dir_cmd, _sanitize_filename_cmd } from "../../../build/fs";
+import { assemble_runtime_capsule_link_inputs, write_runtime_identity_stamp } from "../../../build/runtime_objs";
+import { number_to_string } from "../../../num_format";
+import { parse_program } from "../../../parser/mod";
+import { runtime_capsule_from_root } from "../../../runtime_capsule_resolver";
+import { collect_test_entries, render_start_event, render_summary_event } from "../../../test_runner_json";
+import { exit_test_runner_mode, test_filters_active } from "../../../test_runner_state";
+import { _package_basename } from "../cmd_shared";
+import { _cleanup_test_scratch, _test_bin_runtime_identity } from "./cache_scratch";
+import { _filter_program_tests_cmd } from "./discovery";
+import {
+    _emit_crash_diagnostic,
+    _emit_crash_diagnostic_neutral,
+    _is_signal_exit,
+    _should_retry_test,
+    _test_deadline_ms,
+    _test_retries_disabled
+} from "./exec";
+import {
+    _pool_child_argv,
+    _pool_child_env,
+    _pool_env_snapshot,
+    _prewarm_test_dep_closures,
+    _reap_test_child,
+    _resolve_test_self_path
+} from "./pool";
+import { TestSuite, _emit_suite_banners } from "./reporting";
+
+// Multi-file isolation path (issue #848). Owns the whole lifecycle for an
+// invocation that discovered more than one test file: it spawns a
+// `<self> test <file>` child per file (pooled when `jobs > 1`), aggregates
+// the results into the per-suite banners, emits the run-level `--json`
+// summary or the human banners, and tears the scratch root down. It
+// returns the process exit code, so `run` delegates and returns directly.
+fn _run_multi_file(test_files: string[], file_suite_index: int[], suites_in: TestSuite[], jobs: int, json_output: boolean, name_filter: string, tag_filter: string, no_test_cache: boolean, update_snapshots: boolean, emit_banners: boolean, scratch_root: string, scratch_owned: boolean, runtime_root: string, binary_dir: string) -> int ![clock, io, net] {
+    let mut suites = suites_in;
+    let self_exe = _resolve_test_self_path(binary_dir);
+    // Ephemeral scratch root + cleanup, ported from the retired
+    // `scripts/run_native_test.sh` (issue #850). The script ran
+    // each test under a fresh `mktemp -d` and removed it on
+    // success (preserving on failure for post-mortem); the runner
+    // owns that lifecycle now. Command entry resolves the root once:
+    // caller-pinned `SAILFIN_TEST_SCRATCH` roots are preserved, and
+    // unpinned roots are cleaned after success.
+    let sub_root = scratch_root;
+    // Per-file wall-clock cap (SFEP-0050). Each `<self> test <file>`
+    // sub-frame child is bounded by a handle-owned deadline enforced
+    // via `handle_kill` inside `_reap_test_child`, retiring the outer
+    // `timeout(1)` wrapper. A deadline kill is remapped to 124 and
+    // falls through the signal-kill retry gate (which only retries
+    // 137/139), matching the old wrapper's exit code.
+    let deadline_ms = _test_deadline_ms();
+    // Snapshot the passthrough environment ONCE for every spawned
+    // child. Both the pool and the serial multi-file path now spawn
+    // via `spawn_with_env` (the child routes its summary to its own
+    // captured stderr, so it must be reaped, not inherited). Each
+    // `_get_env_cmd` read shells out via popen, so resolving it per
+    // spawn would add dozens of subprocesses per test file.
+    let pool_base_env = _pool_env_snapshot();
+    // Same signal-kill retry gate the in-process path uses: a
+    // child killed by SIGKILL/SIGSEGV (137/139) under transient
+    // CI memory pressure is retried once before being counted as
+    // a failure. Without this the per-child subprocess path would
+    // be flakier than the in-process path (which retries the test
+    // exec internally) — a child OOM-killed mid-compile dies
+    // before its in-process retry can fire, so the parent must
+    // re-run the whole child. `SAILFIN_TEST_RETRY=0` opts out.
+    let sub_retries_disabled = _test_retries_disabled();
+    // #940 PERF: warm the runtime-capsule objects ONCE into the
+    // shared `sub_root` before forking per-file children. Each
+    // child links against this shared dir via
+    // `SAILFIN_TEST_RUNTIME_OBJDIR` and cache-hits, so the runtime
+    // is compiled once per `sfn test` invocation instead of once
+    // per test file (the regression #940 must not introduce — the
+    // retired probe path used pre-staged `.o`). Done here, outside
+    // the per-test `timeout` wrapper, so the first child isn't
+    // charged the full runtime compile and tripped by the cap. A
+    // warm failure is non-fatal: children re-attempt and surface a
+    // precise per-file link error.
+    let warm_caps = runtime_capsule_from_root(runtime_root);
+    // #1996 / SFEP-0044 §3-A: after a successful warm, write the
+    // invocation stamp so children skip the per-file runtime
+    // cache-key derivation. The nonce ties the stamp to THIS
+    // invocation: children only trust a stamp whose `invocation=`
+    // matches the `SAILFIN_TEST_RUNTIME_STAMP` env they were
+    // handed, so a stale stamp in a reused pinned objdir (e.g.
+    // seedcheck runs pin SAILFIN_TEST_SCRATCH) can never validate.
+    // A failed warm or failed stamp write leaves the nonce empty
+    // and children fall back to full hashing — the pre-stamp path.
+    let mut stamp_nonce: string = "";
+    if warm_caps.length > 0 {
+        _ensure_dir_cmd(sub_root);
+        let warm = assemble_runtime_capsule_link_inputs(warm_caps, sub_root, "-O0", binary_dir, "");
+        if !warm.success {
+            print.err("[test] warning: failed to pre-warm runtime objects under "
+                + sub_root
+                + " (children will retry per file)");
+        } else {
+            let candidate_nonce = _sanitize_filename_cmd(sub_root) + "-"
+                + number_to_string(monotonic_millis());
+            let warm_identity = _test_bin_runtime_identity(runtime_root, _sanitize_filename_cmd(sub_root));
+            if write_runtime_identity_stamp(warm_caps, sub_root, "-O0", binary_dir, candidate_nonce, warm_identity) {
+                stamp_nonce = candidate_nonce;
+            }
+        }
+    }
+    // Single-frame `--json` aggregation (#1121). The parent owns the
+    // run's `start`/`summary`; children run in sub-frame mode
+    // (`SAILFIN_TEST_JSON_SUBFRAME`) and forward only per-test events.
+    // Pre-parse
+    // each file to compute the aggregate `total` (parse-only, no
+    // codegen) and keep per-file test counts so a child that dies
+    // before writing its summary file can still be attributed.
+    let mut sf_total: int = 0;
+    let mut sf_counts: int[] = [];
+    if json_output {
+        let mut sfp: int = 0;
+        loop {
+            if sfp >= test_files.length { break; }
+            let sf_src = fs.readFile(test_files[sfp]);
+            let mut sf_prog: Program = parse_program(sf_src);
+            if test_filters_active() {
+                sf_prog = _filter_program_tests_cmd(sf_prog);
+            }
+            let sf_entries = collect_test_entries(sf_prog, test_files[sfp]);
+            sf_counts.push(sf_entries.length);
+            sf_total += sf_entries.length;
+            sfp += 1;
+        }
+        print(render_start_event(sf_total));
+    }
+    let sf_start_ms = monotonic_millis();
+    let mut sf_passed: int = 0;
+    let mut sf_failed: int = 0;
+    let mut sf_skipped: int = 0;
+    // #1230: aggregate each child's per-test-binary cache counters
+    // from its sub-frame summary so the parent's single run-level
+    // `summary` reports the run-wide `cache.test_bin_hit_rate`.
+    let mut sf_tb_hits: int = 0;
+    let mut sf_tb_misses: int = 0;
+    let mut overall_rc: int = 0;
+    if jobs > 1 {
+        // SFN-148: warm the dep-closure module cache once before the
+        // pool fans out, so the cold-start wave cache-hits instead of
+        // each child re-emitting the shared closure.
+        _prewarm_test_dep_closures(test_files, binary_dir);
+        // #1236: bounded worker pool. A sliding window keeps at
+        // most `jobs` children live: the launch loop tops the
+        // window up via `process.spawn_with_env`, then the parent
+        // reaps the OLDEST child (`_reap_test_child`: poll-demux
+        // stdout+stderr, skim the summary, `handle_wait`). In-order
+        // reaping keeps every downstream consumer identical to the
+        // serial loop — suite attribution, the signal-kill retry
+        // gate, and the `--json` sub-frame aggregation all index by
+        // `ti` exactly as before — and re-emits each child's
+        // captured output grouped per file, so pooled output is
+        // never interleaved mid-file. The loop has no early
+        // return: every spawned handle is reaped (and its fds
+        // closed + struct freed by `handle_wait`) before the
+        // multi-file path returns, so no zombie children or
+        // leaked handles survive an error — a child's failure is
+        // an exit code here, never an abort. A retried child
+        // (137/139) is re-spawned and reaped synchronously at
+        // reap time; the window stays ≤ `jobs` live children
+        // throughout.
+        let mut handles: int[] = [];
+        // #1303: indices (and their original exit codes) of children
+        // that hit a signal-kill (137/139) retry. Their retry is
+        // deferred to a serial tail after the pool drains so it runs
+        // in isolation rather than under the same memory pressure
+        // that crashed the first attempt — see the deferral comment
+        // in the reap block below.
+        let mut retry_pending: int[] = [];
+        let mut retry_rc: int[] = [];
+        let mut launched: int = 0;
+        let mut ti: int = 0;
+        loop {
+            if ti >= test_files.length { break; }
+            // Top up the window. Per-test scratch (`sub-<i>`,
+            // unique per file) gives each live child its own
+            // `.ll` / `test` / `fail.bin` tree; runtime objects
+            // come from the shared pre-warmed `sub_root` via
+            // `SAILFIN_TEST_RUNTIME_OBJDIR`, which is read-only
+            // cache-hit territory after the warm above.
+            loop {
+                if launched >= test_files.length { break; }
+                if launched - ti >= jobs { break; }
+                let spawn_scratch = sub_root + "/sub-" + number_to_string(launched);
+                _ensure_dir_cmd(spawn_scratch);
+                handles.push(process.spawn_with_env(_pool_child_argv(self_exe, test_files[launched], name_filter, tag_filter, json_output, no_test_cache), _pool_child_env(pool_base_env, spawn_scratch, sub_root, stamp_nonce, update_snapshots, json_output)));
+                launched += 1;
+            }
+            let path = test_files[ti];
+            let suite_idx = file_suite_index[ti];
+            let reap = _reap_test_child(handles[ti], deadline_ms, json_output);
+            let rc = reap.rc;
+            if _should_retry_test(rc, sub_retries_disabled) {
+                // #1303: defer signal-kill (137/139) retries to the
+                // isolated serial tail after the pool drains.
+                // Re-spawning the retry inline here runs it while up
+                // to `jobs-1` other children are still live — the
+                // same sustained memory pressure that produced the
+                // transient crash — so it tends to crash again (the
+                // flaky 148/150 signature for the two adjacent
+                // heavy-lowering atomic tests). Replaying it once the
+                // window has emptied matches the isolation that
+                // passes 3/3 deterministically, so a transient
+                // 137/139 self-heals. Accounting + JSON aggregation
+                // for this file are deferred to the drain loop below.
+                retry_pending.push(ti);
+                retry_rc.push(rc);
+                ti += 1;
+                continue;
+            }
+            if rc == 0 { suites[suite_idx].pass_count += 1; } else {
+                // #1303: a signal-kill that reaches here (rather than
+                // the deferred tail) means retries are disabled
+                // (`SAILFIN_TEST_RETRY=0`); surface the lost crash
+                // explicitly so the failure is attributed, not a gap.
+                if !json_output && _is_signal_exit(rc) {
+                    _emit_crash_diagnostic(_package_basename(path), rc);
+                } else if !json_output && rc == 134 {
+                    _emit_crash_diagnostic_neutral(_package_basename(path), rc);
+                }
+                suites[suite_idx].fail_count += 1;
+                suites[suite_idx].failed_files.push(_package_basename(path));
+                if overall_rc == 0 { overall_rc = rc; }
+            }
+            if json_output {
+                // Aggregate the child's counts skimmed from the
+                // `summary` line it routed to its stderr during the
+                // reap demux (SFEP-0050). A child that died before
+                // emitting a summary counts its whole file as failed,
+                // matching the old missing-summary-file fallback.
+                if reap.summary_seen {
+                    sf_passed += reap.passed;
+                    sf_failed += reap.failed;
+                    sf_skipped += reap.skipped;
+                    sf_tb_hits += reap.tb_hits;
+                    sf_tb_misses += reap.tb_misses;
+                } else { sf_failed += sf_counts[ti]; }
+            }
+            ti += 1;
+        }
+        // #1303 serial retry tail. The pool has fully drained, so
+        // each replay runs alone — the same isolation an in-process
+        // `sailfin test <file>` enjoys, where these tests pass 3/3.
+        // Mirrors exactly what the inline retry used to do (banner
+        // gate, spawn/reap, pass/fail accounting, JSON sub-frame
+        // aggregation) — only the timing changed. `SAILFIN_TEST_RETRY=0`
+        // is already honoured upstream: `_should_retry_test` returns
+        // false under `sub_retries_disabled`, so nothing is ever
+        // pushed onto `retry_pending` and this loop is a no-op.
+        let mut ri: int = 0;
+        loop {
+            if ri >= retry_pending.length { break; }
+            let rti = retry_pending[ri];
+            let rpath = test_files[rti];
+            let rsuite_idx = file_suite_index[rti];
+            let rchild_scratch = sub_root + "/sub-" + number_to_string(rti);
+            if !json_output {
+                print("[test] RETRY: " + _package_basename(rpath)
+                    + " (exit code "
+                    + number_to_string(retry_rc[ri])
+                    + ", retrying once)");
+            }
+            // The retry's records live on its own fresh pipe — no
+            // stale side-channel file to unlink; a double crash that
+            // never emits a summary falls back to `sf_counts[rti]` via
+            // `reap.summary_seen` below.
+            let retry_handle = process.spawn_with_env(_pool_child_argv(self_exe, rpath, name_filter, tag_filter, json_output, no_test_cache), _pool_child_env(pool_base_env, rchild_scratch, sub_root, stamp_nonce, update_snapshots, json_output));
+            let reap = _reap_test_child(retry_handle, deadline_ms, json_output);
+            let rc = reap.rc;
+            if rc == 0 { suites[rsuite_idx].pass_count += 1; } else {
+                // #1303: the isolated retry also died. The RETRY
+                // banner above already named the file; add the
+                // attributed crash line so the final FAIL isn't a
+                // bare unexplained gap (its own output was lost to
+                // the unflushed crash buffer).
+                if !json_output && _is_signal_exit(rc) {
+                    _emit_crash_diagnostic(_package_basename(rpath), rc);
+                } else if !json_output && rc == 134 {
+                    _emit_crash_diagnostic_neutral(_package_basename(rpath), rc);
+                }
+                suites[rsuite_idx].fail_count += 1;
+                suites[rsuite_idx].failed_files.push(_package_basename(rpath));
+                if overall_rc == 0 { overall_rc = rc; }
+            }
+            if json_output {
+                if reap.summary_seen {
+                    sf_passed += reap.passed;
+                    sf_failed += reap.failed;
+                    sf_skipped += reap.skipped;
+                    sf_tb_hits += reap.tb_hits;
+                    sf_tb_misses += reap.tb_misses;
+                } else { sf_failed += sf_counts[rti]; }
+            }
+            ri += 1;
+        }
+    } else {
+        let mut ti: int = 0;
+        loop {
+            if ti >= test_files.length { break; }
+            let path = test_files[ti];
+            let suite_idx = file_suite_index[ti];
+            // Per-test scratch (build cache + `sfn/test` fixture temp
+            // dirs) so sequential children never clobber each other's
+            // `.ll` / `test` tree. Runtime objects live in the shared
+            // `sub_root` (warmed above) — see `SAILFIN_TEST_RUNTIME_OBJDIR`.
+            // SFEP-0050: spawn via `spawn_with_env` + reap so the child's
+            // `summary` (now on its captured stderr) is skimmed, not lost
+            // to inherited stdio, exactly like the pool path.
+            let child_scratch = sub_root + "/sub-" + number_to_string(ti);
+            _ensure_dir_cmd(child_scratch);
+            let child_env = _pool_child_env(pool_base_env, child_scratch, sub_root, stamp_nonce, update_snapshots, json_output);
+            let child_argv = _pool_child_argv(self_exe, path, name_filter, tag_filter, json_output, no_test_cache);
+            let mut reap = _reap_test_child(process.spawn_with_env(child_argv, child_env), deadline_ms, json_output);
+            if _should_retry_test(reap.rc, sub_retries_disabled) {
+                // RETRY banner is a human-mode artifact; suppress it in
+                // JSON mode so the jsonl stream stays pure (mirrors the
+                // in-process path's `if !json_output` retry-print gate).
+                if !json_output {
+                    print("[test] RETRY: " + _package_basename(path)
+                        + " (exit code "
+                        + number_to_string(reap.rc)
+                        + ", retrying once)");
+                }
+                reap = _reap_test_child(process.spawn_with_env(child_argv, child_env), deadline_ms, json_output);
+            }
+            let rc = reap.rc;
+            if rc == 0 { suites[suite_idx].pass_count += 1; } else {
+                // #1303: serial path — a signal-kill (after the
+                // inline retry, if any) lost its own output to the
+                // unflushed crash buffer; surface an attributed FAIL.
+                if !json_output && _is_signal_exit(rc) {
+                    _emit_crash_diagnostic(_package_basename(path), rc);
+                } else if !json_output && rc == 134 {
+                    _emit_crash_diagnostic_neutral(_package_basename(path), rc);
+                }
+                suites[suite_idx].fail_count += 1;
+                suites[suite_idx].failed_files.push(_package_basename(path));
+                if overall_rc == 0 { overall_rc = rc; }
+            }
+            if json_output {
+                // Aggregate the child's per-test counts skimmed from
+                // the `summary` line it routed to its stderr (SFEP-0050).
+                // No summary means the child died before emitting one
+                // (segfault/timeout); count that file's tests as failed
+                // so the aggregate stays consistent with the non-zero
+                // run exit code.
+                if reap.summary_seen {
+                    sf_passed += reap.passed;
+                    sf_failed += reap.failed;
+                    sf_skipped += reap.skipped;
+                    sf_tb_hits += reap.tb_hits;
+                    sf_tb_misses += reap.tb_misses;
+                } else { sf_failed += sf_counts[ti]; }
+            }
+            ti += 1;
+        }
+    }
+    if json_output {
+        // One aggregate `summary` closes the single jsonl document:
+        // one `start`, every per-test event the children forwarded,
+        // one `summary` with run-level counts and wall-clock duration.
+        let sf_dur = monotonic_millis() - sf_start_ms;
+        print(render_summary_event(sf_passed, sf_failed, sf_skipped, sf_dur, sf_tb_hits, sf_tb_misses));
+    } else if emit_banners { _emit_suite_banners(suites); }
+    exit_test_runner_mode();
+    _cleanup_test_scratch(scratch_owned, sub_root, overall_rc == 0);
+    return overall_rc;
+}
+
+export { _run_multi_file };

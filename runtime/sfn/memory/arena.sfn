@@ -610,7 +610,7 @@ fn sfn_arena_realloc(arena: *u8, ptr: *u8, old_size: usize, new_size: usize, ali
 // encoded mark's `page_index` is meaningful only against the chain it was
 // taken from, so this per-thread binding is what makes the encoding safe
 // under concurrency rather than merely unobserved. Every production
-// caller (`check/engine.sfn:426`, `cli/commands/test.sfn:1166`,
+// caller (`check/engine.sfn:426`, `cli/commands/test/single_process_run.sfn`,
 // `cli/commands/fmt.sfn:112`, `main.sfn:790`) is single-threaded driver
 // code and is unaffected. Port of the double-encoding wrappers
 // `sailfin_intrinsic_runtime_arena_mark` /

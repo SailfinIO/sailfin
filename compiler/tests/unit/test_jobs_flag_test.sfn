@@ -1,7 +1,8 @@
 // #1236 / SFN-91: unit coverage for the explicit jobs parser and the pure
 // RAM+CPU budget behind the native default. SFN-547 adds the reconciled
 // 3 GiB/job reserve and the nested-fan-out pin in `_pool_child_env`.
-import { _parse_jobs_value, _pool_child_env, _test_jobs_budget } from "../../src/cli/commands/test";
+import { _parse_jobs_value, _test_jobs_budget } from "../../src/cli/commands/test/arg_and_jobs";
+import { _pool_child_env } from "../../src/cli/commands/test/pool";
 
 test "jobs: plain positive integer parses" {
     assert _parse_jobs_value("4") == 4;

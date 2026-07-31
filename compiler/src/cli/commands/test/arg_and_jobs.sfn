@@ -1,0 +1,231 @@
+import { Matches, get_int, has } from "sfn/cli";
+
+import { _shell_read_cmd } from "../../../build/fs";
+import { _get_env_cmd } from "../../../build_flags";
+import { _has_prefix_cmd } from "../../../string_cmd_utils";
+import { char_code_at_text, find_char_local, substring } from "../../../string_utils";
+
+// #1236: parse the `--jobs N` value for `sfn test`. Returns the
+// parsed worker count, or `-1` for anything that is not a plain
+// positive decimal integer in [1, 256]. The 256 ceiling is a sanity
+// cap, not a tuning hint: every pooled child is a full compiler
+// invocation whose leaf compile can peak at multiple GB. Explicit
+// `--jobs 1` keeps the byte-identical serial path; absent an override,
+// `_resolve_test_jobs` chooses a RAM+CPU-aware native default.
+fn _parse_jobs_value(text: string) -> int {
+    if text.length == 0 { return -1; }
+    let mut i: int = 0;
+    let mut n: int = 0;
+    loop {
+        if i >= text.length { break; }
+        let c = char_code_at_text(text, i);
+        if c < 48 { return -1; }
+        if c > 57 { return -1; }
+        n = n * 10 + (c - 48);
+        if n > 256 { return -1; }
+        i += 1;
+    }
+    if n < 1 { return -1; }
+    return n;
+}
+
+// SFN-91: pure half of the native test-worker budget —
+// `min(cores, usable_RAM / per_job_reserve)` with a floor of 1, a global
+// cap of 16, and a Darwin cap of 2 for nested cold-build tests. Unknown RAM
+// is deliberately fail-closed to serial: the test pool has no shared
+// RLIMIT_AS backstop, so CPU-only fan-out can OOM a small host. That is the
+// one place this policy still diverges from the emit fan-out's fail-open
+// `_cr_ram_budget_jobs`, which would rather over-fan than starve a build on
+// a host it cannot measure.
+//
+// SFN-547: the reserve and the 66% usable slice are now the same figures the
+// emit fan-out reserves (`_cr_ram_budget_jobs`,
+// `compiler/src/capsule_emit_parallel.sfn`), because a pooled test child can
+// spawn exactly that emit — the previous 384 MiB reserve was sized for the
+// light unit-test majority and under-counted the build-and-run class by ~8x,
+// handing a 14 GiB host 16 jobs and OOMing it outright. `RLIMIT_AS` bounds
+// each process, not the fleet: N children multiply the 8 GiB cap, so this
+// arithmetic is the only thing standing between the pool and the host's RAM.
+// `_pool_child_env` pins each child's own emit fan-out to serial, which is
+// what makes `jobs * per_job_reserve` an honest bound rather than a floor.
+//
+// `scripts/detect_test_jobs.sh` reimplements this policy in bash for the
+// Makefile's `TEST_JOBS ?=` default (which passes an explicit `--jobs N`, so
+// it reaches the pool ahead of this function). The two must stay in lockstep.
+fn _test_jobs_budget(memsize_bytes: int, nproc: int, is_darwin: boolean) -> int {
+    if memsize_bytes <= 0 { return 1; }
+    let mut cores = nproc;
+    if cores < 1 { cores = 1; }
+    // 3 GiB — the measured peak RSS of the heaviest compiler-module emit
+    // (`capsule_resolver.sfn` ~3.23 GiB); see
+    // `docs/proposals/0022-darwin-memory-governor.md` §2.4.
+    let per_job_bytes: int = 3221225472;
+    // 66% slice of physical RAM: headroom for the parent runner, the
+    // `clang`/`llvm-link` grandchildren, and the OS.
+    let usable: int = memsize_bytes * 66 / 100;
+    let mut by_mem = usable / per_job_bytes;
+    if by_mem < 1 { by_mem = 1; }
+    let mut jobs = cores;
+    if by_mem < jobs { jobs = by_mem; }
+    if is_darwin && jobs > 2 { jobs = 2; }
+    if jobs > 16 { jobs = 16; }
+    if jobs < 1 { jobs = 1; }
+    return jobs;
+}
+
+// Native host probe for test-runner parallelism. This reuses the compiler's
+// popen-backed `_shell_read_cmd` primitive (also used by the emit fan-out
+// clamp) rather than depending on the Makefile or a helper script. Linux and
+// Darwin have reliable probes; unknown/Windows shells stay serial.
+fn _resolve_auto_test_jobs() -> int ![io] {
+    let host = _shell_read_cmd("uname -s 2>/dev/null");
+    let mut is_darwin: boolean = false;
+    let mut cores_text: string = "";
+    let mut mem_text: string = "";
+    if _has_prefix_cmd(host, "Linux") {
+        cores_text = _shell_read_cmd("{ nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1; }");
+        mem_text = _shell_read_cmd("awk '/^MemTotal:/{printf \"%d\", $2*1024; exit}' /proc/meminfo 2>/dev/null");
+    } else {
+        if _has_prefix_cmd(host, "Darwin") {
+            is_darwin = true;
+            cores_text = _shell_read_cmd("sysctl -n hw.ncpu 2>/dev/null");
+            mem_text = _shell_read_cmd("sysctl -n hw.memsize 2>/dev/null");
+        } else { return 1; }
+    }
+    let cores = _parse_positive_decimal_cmd(cores_text);
+    let memory = _parse_positive_decimal_cmd(mem_text);
+    return _test_jobs_budget(memory, cores, is_darwin);
+}
+
+// Parse an unbounded positive decimal host measurement. `_parse_jobs_value`
+// intentionally caps at 256, which is correct for worker counts but not RAM
+// byte totals.
+fn _parse_positive_decimal_cmd(text: string) -> int {
+    if text.length == 0 { return -1; }
+    let mut value: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= text.length { break; }
+        let c = char_code_at_text(text, i);
+        if c < 48 { return -1; }
+        if c > 57 { return -1; }
+        value = value * 10 + (c - 48);
+        i += 1;
+    }
+    if value < 1 { return -1; }
+    return value;
+}
+
+// Resolve test jobs with one precedence contract shared by direct tests and
+// `sfn dev shard run`: explicit flag > SAILFIN_TEST_JOBS > host auto-budget.
+// A malformed environment override fails closed to serial; explicit range
+// errors are returned to the caller so the normal usage error remains intact.
+fn _resolve_test_jobs(matches: Matches) -> int ![io] {
+    if has(matches, "jobs") { return get_int(matches, "jobs"); }
+    let env_jobs = _get_env_cmd("SAILFIN_TEST_JOBS");
+    if env_jobs.length > 0 {
+        let parsed = _parse_jobs_value(env_jobs);
+        if parsed < 1 { return 1; }
+        return parsed;
+    }
+    return _resolve_auto_test_jobs();
+}
+
+// `sailfin test --shard I/N` partitioning (issue #1237, test-infra
+// Phase 4 Track A). Moves shard partitioning out of `scripts/test_shards.sh`'s
+// awk stride into the runner: one tested home for the shard map, reusable
+// by the Makefile / CI / nightly. The partition mirrors that script's
+// `(NR - 1) % n == (i - 1)` stride over the sorted file list, so the
+// runner's `--shard` and the legacy bash shard map agree byte-for-byte
+// over the same discovery surface.
+//
+// API shape note: these helpers return only `int` / `boolean` so their
+// signatures resolve across modules in the pinned seed. A struct-valued
+// `_parse_shard_value(...) -> ShardSpec` and an array-valued
+// `_shard_select_indices(...) -> int[]` were the natural first cut, but a
+// *cross-module* call to a function returning a freshly-declared struct or
+// an `int[]` cannot resolve its return type in the seed
+// (`llvm lowering [fatal]: ... callee signature is not known`) — `int[]`
+// was, in fact, the only such return type in the whole compiler. Tracked
+// as a separate compiler-robustness follow-up; the `int`/`boolean` surface
+// below is exactly as testable.
+// Parse one positive decimal field (the `I` or `N` of `I/N`). Returns -1
+// on an empty string or any non-digit byte, matching `_parse_jobs_value`.
+// No 256 ceiling: a shard total is bounded by the discovered file surface,
+// not by per-child memory like `--jobs`.
+fn _parse_shard_field(text: string) -> int {
+    if text.length == 0 { return -1; }
+    let mut i: int = 0;
+    let mut n: int = 0;
+    loop {
+        if i >= text.length { break; }
+        let c = char_code_at_text(text, i);
+        if c < 48 { return -1; }
+        if c > 57 { return -1; }
+        n = n * 10 + (c - 48);
+        i += 1;
+    }
+    if n < 1 { return -1; }
+    return n;
+}
+
+// Parse and fully validate a `--shard I/N` value, returning the field
+// selected by `which` (0 = I, 1 = N), or -1 when the spec is malformed.
+// A valid spec is exactly one '/', both sides positive integers, and
+// `1 <= I <= N`; any deviation ("", "2", "0/3", "4/3", "a/3", "1/2/3")
+// yields -1. The two public wrappers below expose the I and N fields.
+fn _parse_shard_field_at(text: string, which: int) -> int {
+    let slash = find_char_local(text, "/", 0);
+    if slash < 0 { return -1; }
+    let lhs = substring(text, 0, slash);
+    let rhs = substring(text, slash + 1, text.length);
+    // A second '/' (e.g. "1/2/3") is malformed: the right field must
+    // contain no further slash.
+    if find_char_local(rhs, "/", 0) >= 0 { return -1; }
+    let index = _parse_shard_field(lhs);
+    let total = _parse_shard_field(rhs);
+    if index < 1 { return -1; }
+    if total < 1 { return -1; }
+    if index > total { return -1; }
+    if which == 0 { return index; }
+    return total;
+}
+
+// The shard index I of a valid `--shard I/N`, or -1 if the spec is
+// malformed. The caller treats either field returning -1 as a usage error.
+fn _parse_shard_index(text: string) -> int {
+    return _parse_shard_field_at(text, 0);
+}
+
+// The shard total N of a valid `--shard I/N`, or -1 if the spec is
+// malformed.
+fn _parse_shard_total(text: string) -> int {
+    return _parse_shard_field_at(text, 1);
+}
+
+// Does the 0-based `item_index` belong to shard `shard_index`/`shard_total`?
+// The stable stride `item_index % shard_total == shard_index - 1`
+// (`shard_index` is 1-based) mirrors `scripts/test_shards.sh`'s
+// `(NR - 1) % n == (i - 1)`. `1/1` keeps every index. Over
+// `shard_index = 1..shard_total` each item lands in exactly one residue
+// class mod `shard_total`, so the shards are disjoint, their union is the
+// whole surface, and their sizes differ by at most one (file-count
+// balanced). Deterministic: depends only on its three integer arguments,
+// so it is stable across runs and platforms for a fixed sorted file list.
+fn _shard_keeps_index(item_index: int, shard_index: int, shard_total: int) -> boolean {
+    if shard_total < 1 { return false; }
+    return (item_index % shard_total) == (shard_index - 1);
+}
+
+export {
+    _parse_jobs_value,
+    _test_jobs_budget,
+    _resolve_auto_test_jobs,
+    _parse_positive_decimal_cmd,
+    _resolve_test_jobs,
+    _parse_shard_field,
+    _parse_shard_field_at,
+    _parse_shard_index,
+    _parse_shard_total,
+    _shard_keeps_index
+};

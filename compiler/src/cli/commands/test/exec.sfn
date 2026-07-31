@@ -1,0 +1,426 @@
+import { AssertFailure, _empty_assert_failure } from "../../../assert_failure";
+import { _get_env_cmd } from "../../../build_flags";
+import { number_to_string } from "../../../num_format";
+import { char_code_at_text, index_of, substring } from "../../../string_utils";
+import { TestResultRecord, parse_test_record_line } from "../../../test_results";
+
+// Retry policy for the test-exec phase (per-test child process).
+//
+// History: `scripts/run_native_test.sh` previously implemented two
+// retry classes — a regex-classified I/O-pressure retry that
+// matched on stdout substrings ("no such file or directory", "link
+// failed", ...) and a signal-kill retry for exit codes 137/139.
+// Issue #364 deleted the regex retry (the structured assert-fail
+// record gave the runner an exit-code-driven failure path with
+// typed attribution, and the substring match was masking real
+// compile failures as flakes). The signal-kill retry survives —
+// transient 137 (OOM-SIGKILL) and 139 (SIGSEGV) surface under
+// sustained CI memory pressure during the seedcheck phase of
+// `make check`.
+//
+// Ported into the compiler so `sfn test` returns the correct
+// exit code with no bash post-processing (issue #845, parent
+// epic #840 phase 1.1). `SAILFIN_TEST_RETRY=0` disables retries
+// entirely for flake-vs-real-failure investigations during perf
+// work.
+enum RetryPolicy {
+    None,
+    SignalKill
+}
+
+fn _classify_test_retry(exit_code: int) -> RetryPolicy {
+    if exit_code == 137 { return RetryPolicy.SignalKill(); }
+    if exit_code == 139 { return RetryPolicy.SignalKill(); }
+    return RetryPolicy.None();
+}
+
+// Mirrors the bash `[ "${SAILFIN_TEST_RETRY:-1}" != "0" ]` gate:
+// retries are enabled by default, disabled only when the env var
+// is explicitly set to "0". Any other value (unset, "1", "true",
+// "false", arbitrary strings) leaves retries enabled — the bash
+// gate was a string-equality test against "0", not a boolean
+// parse, so this matches the prior wrapper's semantics exactly.
+fn _test_retries_disabled() -> boolean ![io] {
+    return _get_env_cmd("SAILFIN_TEST_RETRY") == "0";
+}
+
+fn _should_retry_test(exit_code: int, retries_disabled: boolean) -> boolean {
+    if retries_disabled { return false; }
+    let policy = _classify_test_retry(exit_code);
+    match policy {
+        RetryPolicy.None => return false,
+        RetryPolicy.SignalKill => return true
+    }
+    return false;
+}
+
+// #1303: a test child that dies by signal (SIGSEGV/SIGABRT/SIGBUS/
+// SIGKILL) usually can't flush its stdio buffer, so the parent re-emits
+// a truncated-or-empty captured stream — the crash often leaves no
+// `test:` banner, no assertion, no phase trace. The failing file is
+// still named in the suite banner and the run still exits non-zero (the
+// signal exit code is caught by `handle_wait`), but a reader can be left
+// with an unexplained gap rather than an attributed failure.
+//
+// `handle_wait` reports a signaled child as `128 + signal`. POSIX
+// signals run 1..64 (SIGRTMAX on Linux), so the signal range is exactly
+// (128, 192]. We bound to that window rather than `> 128` so a normal
+// process that legitimately exits 193..255 (e.g. 255 on an internal
+// error) is NOT misattributed as a crash. `timeout`'s own 124/125/126/
+// 127 codes sit below the window, so a wall-clock kill (which prints its
+// own message) never trips this path either.
+//
+// 134 (128 + SIGABRT) is excluded from the crash wording even though it
+// falls in this window: `assert` -> `sailfin_assert_fail` ->
+// `sfn_raise_value_error` -> `abort()` (runtime/sfn/assert.sfn,
+// runtime/sfn/exception.sfn) makes 134 the ordinary exit code of a failed
+// assertion, not evidence of an OOM/SIGABRT crash — conflating the two
+// caused a multi-week misdiagnosis (SFN-87, #1726).
+fn _is_signal_exit(exit_code: int) -> boolean {
+    return exit_code > 128 && exit_code <= 192 && exit_code != 134;
+}
+
+// Emit a synthetic, attributed FAIL line for a signal-killed child whose
+// own output didn't make it out before the crash. Gated by the caller on
+// `!json_output` (the jsonl stream stays pure; the `--json` summary
+// already counts the file via the `sf_counts` missing-summary fallback).
+// The wording stops short of asserting total output loss — a child may
+// have flushed some lines before the signal — so it points at the likely
+// cause (crash before stdio flush) without overclaiming.
+//
+// 134 never reaches this path (`_is_signal_exit` excludes it, SFN-87,
+// #1726): it is the exit code of a failed `assert` calling `abort()`, not
+// a distinct crash signal, and `_emit_crash_diagnostic_neutral` covers it
+// with wording that doesn't assert a cause.
+fn _emit_crash_diagnostic(basename: string, exit_code: int) -> void ![io] {
+    print("[test] FAIL: " + basename + " (exit code " + number_to_string(exit_code)
+        + " — child terminated by signal; output may be truncated "
+        + "(crash before stdio flush))");
+}
+
+// 134 is the exit code of any failed `assert` (which raises through
+// `abort()`), not a distinct crash — see `_is_signal_exit`. Emit a
+// neutral note pointing at the test's own `assertion failed` line (the
+// authoritative signal) rather than implying a truncated/corrupted
+// crash the way `_emit_crash_diagnostic` does for real signal kills.
+fn _emit_crash_diagnostic_neutral(basename: string, exit_code: int) -> void ![io] {
+    print("[test] FAIL: " + basename + " (exit code " + number_to_string(exit_code)
+        + " — this is the ordinary exit code of a failed assertion or "
+        + "abort(); see the test's own reported assertion line above)");
+}
+
+// Per-file wall-clock budget for the handle-owned deadline (SFEP-0050),
+// originally ported from the retired `scripts/run_native_test.sh` (issue
+// #850, parent epic #840 phase 1.7). `SAILFIN_TEST_TIMEOUT` overrides the
+// default. The historical 300s value was the `timeout(1)` budget — but
+// that wrapper was Linux-only (macOS has no `timeout(1)`, only the rarely
+// installed `gtimeout`), so the streamed runner's unconditional
+// `handle_kill` deadline is the FIRST time the budget is enforced on
+// macOS. 300s is too tight there for a build-orchestrating test whose
+// body legitimately spawns nested full compiler builds — `work_dir_parity`
+// runs `sfn build -p compiler` twice (~300s+ of run on a slow macOS
+// runner), which the per-phase compile cap in `compiler/src/main.sfn`
+// does NOT bound because the time is in the nested RUN, not a single
+// compile phase. 900s gives that headroom while still tripping a genuine
+// infinite loop well within the CI job budget. An empty value falls back
+// to the default.
+fn _test_timeout_secs() -> string ![io] {
+    let v = _get_env_cmd("SAILFIN_TEST_TIMEOUT");
+    if v.length > 0 { return v; }
+    return "900";
+}
+
+// #1236: re-emit one pooled child's captured stream on the parent's
+// matching fd. `print` / `print.err` append a trailing newline
+// (`sailfin_runtime_print_raw`), so one trailing newline is stripped
+// before re-emission to keep the round-trip byte-faithful for the
+// line-oriented output the children produce; an empty capture emits
+// nothing at all.
+fn _emit_captured_stream(text: string, to_stderr: boolean) -> void ![io] {
+    if text.length == 0 { return; }
+    let mut out = text;
+    if substring(out, out.length - 1, out.length) == "\n" {
+        out = substring(out, 0, out.length - 1);
+    }
+    if to_stderr { print.err(out); } else { print(out); }
+}
+
+// SFEP-0050 (SFN-393): the parser's normalized kind tag for an
+// assert-location record. MUST equal the tag `test_results.sfn` emits for
+// an `assert` SFTR record (the runner splits on it to reconstruct the
+// `AssertFailure` the classifier consumes).
+let _STREAM_ASSERT_KIND: string = "A";
+
+// Result of running one compiled test binary under the streamed-record
+// transport (SFEP-0050). `records` holds only the `test`/`hook`
+// classification records (the assert-location records are split out into
+// `failure`); `rc` is the child's exit code, remapped to 124 when the
+// runner SIGKILLed it on the per-file deadline (so a deadline timeout is
+// never confused with an OOM/crash 137 — see `_run_test_binary`).
+struct TestBinResult {
+    rc: int;
+    records: TestResultRecord[];
+    failure: AssertFailure;
+    deadline_killed: boolean;
+}
+
+// Build the compiled test binary's ENTIRE environment for
+// `spawn_with_env` (empty means empty, never inherit). Snapshot the
+// parent env and override the two keys the binary reads at runtime:
+// `SAILFIN_TEST_SCRATCH` (the streamed-record enable gate + the `sfn/test`
+// fixtures' temp-dir root — `with_tmp_dir`/`nested_runner_scratch`) and
+// `SAILFIN_UPDATE_SNAPSHOTS` (snapshot rebaseline). Inherited copies are
+// dropped first so POSIX `getenv` (first match wins) returns the override.
+fn _test_exec_env(scratch_root: string, update_snapshots: boolean) -> string[] ![io] {
+    let base = process.environ();
+    let mut env_flat: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= base.length { break; }
+        let e = base[i];
+        if !_env_entry_has_key(e, "SAILFIN_TEST_SCRATCH") && !_env_entry_has_key(e, "SAILFIN_UPDATE_SNAPSHOTS") {
+            env_flat.push(e);
+        }
+        i += 1;
+    }
+    env_flat.push("SAILFIN_TEST_SCRATCH=" + scratch_root);
+    if update_snapshots { env_flat.push("SAILFIN_UPDATE_SNAPSHOTS=1"); }
+    return env_flat;
+}
+
+fn _assert_failure_from_record(r: TestResultRecord) -> AssertFailure {
+    return AssertFailure {
+        present: true,
+        file: r.file,
+        line: r.line,
+        col: r.col,
+        message: r.message
+    };
+}
+
+// The first `assert`-kind record in stream order → the `AssertFailure`
+// the classifier consumes (the exact analog of "first SFAF record from
+// `fail.bin`"), or an empty failure when the child emitted none.
+fn _first_assert_failure(all: TestResultRecord[]) -> AssertFailure {
+    let mut i: int = 0;
+    loop {
+        if i >= all.length { break; }
+        if strings_equal(all[i].kind, _STREAM_ASSERT_KIND) {
+            return _assert_failure_from_record(all[i]);
+        }
+        i += 1;
+    }
+    return _empty_assert_failure();
+}
+
+// The `test`/`hook` classification records, assert-location records split
+// out — the analog of `results.log`'s `T`/`H` records.
+fn _test_hook_records(all: TestResultRecord[]) -> TestResultRecord[] {
+    let mut out: TestResultRecord[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= all.length { break; }
+        if !strings_equal(all[i].kind, _STREAM_ASSERT_KIND) {
+            out.push(all[i]);
+        }
+        i += 1;
+    }
+    return out;
+}
+
+// One complete line off the child's stderr → a parsed SFTR record pushed
+// onto `all`, or a non-record diagnostic forwarded to the runner's stderr
+// (compiler errors, crash spew, harness breadcrumbs — exactly what
+// inherited stdio surfaced before).
+fn _ingest_child_stderr_line(line: string, all: TestResultRecord[]) -> void ![io] {
+    let rec = parse_test_record_line(line);
+    if rec != null {
+        let r: TestResultRecord = rec;
+        all.push(r);
+    } else { print.err(line); }
+}
+
+// Per-file wall-clock budget in milliseconds, from `_test_timeout_secs()`
+// (default 300s). `<= 0` means no deadline — `poll_any` blocks. The
+// streamed transport enforces this handle-owned deadline via
+// `handle_kill`, retiring the outer `timeout(1)` wrapper.
+fn _test_deadline_ms() -> int ![io] {
+    let secs_text = _test_timeout_secs();
+    let mut secs: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= secs_text.length { break; }
+        let c = char_code_at_text(secs_text, i);
+        if c < 48 { break; }
+        if c > 57 { break; }
+        secs = secs * 10 + (c - 48);
+        i += 1;
+    }
+    if secs <= 0 { return 0; }
+    return secs * 1000;
+}
+
+// Run one compiled test binary under the streamed-record transport
+// (SFEP-0050), replacing the `process.run` exec + `results.log`/`fail.bin`
+// read-back. Spawn with a captured stdout+stderr pair; the harness frames
+// `SFTR` records onto the child's stderr, so demux the two pipes with
+// `io.poll_any` over the raw fds (reading ONLY the fd poll reports ready —
+// the chunk reads are blocking `read(2)` mirrors, so reading a not-ready
+// fd would deadlock; the fds go to -1 at EOF, so re-fetch each iteration).
+// stderr is chunk-accumulated and split into complete lines, each framed
+// into a record or forwarded as a diagnostic. stdout is user output:
+// dropped in `--json` mode (retiring the `sh -c 'exec "$0" >/dev/null'`
+// swallow), buffered and re-emitted once at end in human mode (byte-
+// faithful, mirroring the old per-child single re-emit). The per-file
+// deadline is enforced by `handle_kill`; a deadline kill is remapped from
+// 137 to 124 so it is never confused with an OOM/crash 137 (see §f of the
+// SFN-393 runner-transport design note). `handle_wait` is the sole
+// reaper/free path and is always called.
+fn _run_test_binary(exe_path: string, scratch_root: string, update_snapshots: boolean, json_output: boolean, deadline_ms: int) -> TestBinResult ![io] {
+    let env = _test_exec_env(scratch_root, update_snapshots);
+    let h = process.spawn_with_env([exe_path], env);
+    if h == 0 {
+        // Spawn failure — mirror `process.run`'s 127 missing-command code.
+        return TestBinResult {
+            rc: 127,
+            records: [],
+            failure: _empty_assert_failure(),
+            deadline_killed: false
+        };
+    }
+    let mut all: TestResultRecord[] = [];
+    let mut out_buf: string = "";
+    let mut err_buf: string = "";
+    let mut deadline_killed: boolean = false;
+    let start_ms = monotonic_millis();
+    loop {
+        if process.handle_stdout_at_eof(h) && process.handle_stderr_at_eof(h) {
+            break;
+        }
+        let mut poll_to: int = -1;
+        if deadline_ms > 0 {
+            let remaining: int = deadline_ms - ((monotonic_millis() - start_ms) as int);
+            if remaining <= 0 {
+                process.handle_kill(h);
+                deadline_killed = true;
+                break;
+            }
+            poll_to = remaining;
+        }
+        let out_fd = process.handle_stdout_fd(h);
+        let err_fd = process.handle_stderr_fd(h);
+        let mut fds: int[] = [];
+        if out_fd >= 0 { fds.push(out_fd); }
+        if err_fd >= 0 { fds.push(err_fd); }
+        let mut read_out: boolean = false;
+        let mut read_err: boolean = false;
+        if fds.length == 0 {
+            // No fd to select on. That is Windows: the accessors are `-1`
+            // by design there and `io.poll_any` is a `-1` stub (#1540).
+            // POSIX cannot reach this branch — a read only clears an fd to
+            // `-1` when it drained nothing, so both fds are `-1` only once
+            // both stashes are empty, which the check above already broke
+            // on. Drive the Windows framed reads directly, as
+            // `process_windows.sfn` prescribes: each pumps both pipes, so
+            // neither stream can wedge the other, and each blocks until a
+            // byte or EOF, which is what keeps this from spinning.
+            // Termination stays the both-at-EOF check above. The deadline
+            // is therefore only observed between reads — an untimed framed
+            // read cannot be interrupted, so a wholly silent hung child is
+            // not killed here, as it was not before.
+            read_out = !process.handle_stdout_at_eof(h);
+            read_err = !process.handle_stderr_at_eof(h);
+        } else {
+            let ready = io.poll_any(fds, poll_to);
+            if ready < 0 {
+                if deadline_ms > 0 && ((monotonic_millis() - start_ms) as int) >= deadline_ms {
+                    process.handle_kill(h);
+                    deadline_killed = true;
+                    break;
+                }
+                continue;
+            }
+            read_out = ready == out_fd;
+            read_err = ready == err_fd;
+        }
+        if read_out {
+            let chunk = process.handle_read_bytes_stdout(h, 65536);
+            if chunk.length > 0 && !json_output { out_buf = out_buf + chunk; }
+        }
+        if read_err {
+            let chunk = process.handle_read_bytes_stderr(h, 65536);
+            if chunk.length > 0 {
+                err_buf = err_buf + chunk;
+                loop {
+                    let nl = index_of(err_buf, "\n");
+                    if nl < 0 { break; }
+                    let line = substring(err_buf, 0, nl);
+                    err_buf = substring(err_buf, nl + 1, err_buf.length);
+                    _ingest_child_stderr_line(line, all);
+                }
+            }
+        }
+    }
+    // Trailing partial line (mid-crash): try to frame it, else forward.
+    if err_buf.length > 0 { _ingest_child_stderr_line(err_buf, all); }
+    // Human-mode user output, emitted once (byte-faithful single re-emit).
+    if out_buf.length > 0 { _emit_captured_stream(out_buf, false); }
+    let rc0 = process.handle_wait(h);
+    let mut rc = rc0;
+    if deadline_killed { rc = 124; }
+    return TestBinResult {
+        rc: rc,
+        records: _test_hook_records(all),
+        failure: _first_assert_failure(all),
+        deadline_killed: deadline_killed
+    };
+}
+
+// True when `entry` ("KEY=VALUE" or "KEY") has key exactly `key` — used
+// to drop the per-child-managed keys from the inherited snapshot before
+// `_pool_child_env` re-appends their canonical per-child values, so the
+// child never sees a duplicate `KEY=` pair (POSIX `getenv` returns the
+// first match, which would otherwise be the inherited — wrong — value).
+fn _env_entry_has_key(entry: string, key: string) -> boolean {
+    let klen: int = key.length;
+    if entry.length < klen { return false; }
+    if !strings_equal(substring(entry, 0, klen), key) { return false; }
+    // Exact key match: either the whole entry (no '=') or "KEY=...".
+    if entry.length == klen { return true; }
+    return strings_equal(substring(entry, klen, klen + 1), "=");
+}
+
+// True when the snapshot already carries `key` — used to leave a caller's
+// explicit override in place instead of appending a competing default.
+fn _env_snapshot_has_key(base_env: string[], key: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= base_env.length { break; }
+        if _env_entry_has_key(base_env[i], key) { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+export {
+    _env_entry_has_key,
+    _env_snapshot_has_key,
+    RetryPolicy,
+    _classify_test_retry,
+    _test_retries_disabled,
+    _should_retry_test,
+    _is_signal_exit,
+    _emit_crash_diagnostic,
+    _emit_crash_diagnostic_neutral,
+    _test_timeout_secs,
+    _emit_captured_stream,
+    _STREAM_ASSERT_KIND,
+    TestBinResult,
+    _test_exec_env,
+    _assert_failure_from_record,
+    _first_assert_failure,
+    _test_hook_records,
+    _ingest_child_stderr_line,
+    _test_deadline_ms,
+    _run_test_binary
+};

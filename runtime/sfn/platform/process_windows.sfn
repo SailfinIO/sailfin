@@ -37,8 +37,9 @@
 // CONSUMERS ARE NOT YET PORTED. A real spawn family is necessary but not
 // sufficient: the existing in-tree consumers select on raw fds, which do
 // not exist here (see the `handle_stdout_fd` note below). Concretely,
-// `cli/commands/test.sfn`'s runner loop builds an fd list, finds it empty
-// on Windows, and breaks before reading a byte. Porting each consumer to
+// the reap loops in `cli/commands/test/pool.sfn` and
+// `cli/commands/test/exec.sfn` each build an fd list, find it empty on
+// Windows, and break before reading a byte. Porting each consumer to
 // the fd-free framed-read path is deliberately separate work (SFN-499) —
 // so do NOT read "the family is real" as "`sfn test` / parallel emit work
 // on Windows". They do not yet.

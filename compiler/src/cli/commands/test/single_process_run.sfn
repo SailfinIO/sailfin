@@ -1,0 +1,516 @@
+import { Program, Statement } from "../../../ast";
+import { _sanitize_filename_cmd, _write_text_cmd } from "../../../build/fs";
+import {
+    CacheKey,
+    cache_copy_artifact_to,
+    cache_lookup_artifact,
+    cache_store_artifact,
+    canonicalize_flags,
+    test_bin_cache_key,
+    test_bin_cache_root,
+    test_bin_compiler_identity
+} from "../../../build_cache";
+import { _env_flag, _legacy_flag_file } from "../../../build_flags";
+import { prepare_project_capsules_for_test } from "../../../capsule_resolver";
+import { empty_import_symbols } from "../../../effect_imports";
+import { format_backend_failure_banner } from "../../../ice";
+import { compile_tests_to_llvm_file_with_module_imports, module_name_from_path } from "../../../main";
+import { LayoutManifest } from "../../../native_ir";
+import { number_to_string } from "../../../num_format";
+import { parse_program } from "../../../parser/mod";
+import {
+    TestEntry,
+    collect_test_entries,
+    locate_failing_test,
+    render_start_event,
+    render_summary_event
+} from "../../../test_runner_json";
+import { exit_test_runner_mode, test_filters_active } from "../../../test_runner_state";
+import { load_imported_interfaces_from_paths } from "../../../typecheck_import_loader";
+import { resolve_test_bin_identity_for_cache } from "../../../version";
+import { CliContext } from "../../context";
+import { _package_basename } from "../cmd_shared";
+import {
+    _clean_lowering_state,
+    _cleanup_test_scratch,
+    _test_bin_runtime_identity
+} from "./cache_scratch";
+import { _filter_program_tests_cmd, _resolve_test_groups } from "./discovery";
+import {
+    _run_test_binary,
+    _should_retry_test,
+    _test_deadline_ms,
+    _test_retries_disabled
+} from "./exec";
+import { _clang_link_test_cmd_with_deps } from "./link";
+import {
+    TestSuite,
+    _emit_file_test_events,
+    _emit_results_events,
+    _emit_suite_banners,
+    _format_assert_failure,
+    _outcome_all_pass,
+    _outcome_failed_at,
+    _outcome_setup_failure,
+    _records_have_failure,
+    _synthetic_assert_failure,
+    _trj_decode_failed,
+    _trj_decode_passed,
+    _trj_decode_skipped
+} from "./reporting";
+
+// Single-process path. Used when the invocation resolved to exactly one
+// test file: the tests are compiled, linked and run in this process under
+// one resolver pass per group. Like `_run_multi_file` it owns its own
+// reporting and scratch teardown and returns the process exit code.
+fn _run_single_process(test_files: string[], file_suite_index: int[], suites_in: TestSuite[], json_output: boolean, json_subframe: boolean, trace_runner: boolean, no_test_cache: boolean, update_snapshots: boolean, emit_banners: boolean, scratch_root: string, scratch_owned: boolean, runtime_root: string, binary_dir: string, ctx: CliContext) -> int ![clock, io, net] {
+    let mut suites = suites_in;
+    let ll_path = scratch_root + "/test.ll";
+    let exe_path = scratch_root + "/test";
+    let dump_sources = _env_flag("SAILFIN_DUMP_TEST_SOURCES")
+        || _legacy_flag_file("build/sailfin/.dump_test_sources");
+    let grouping = _resolve_test_groups(test_files, binary_dir, trace_runner);
+    if grouping.staging_failed {
+        exit_test_runner_mode();
+        _cleanup_test_scratch(scratch_owned, scratch_root, false);
+        return 2;
+    }
+    let groups = grouping.groups;
+    let file_group_index = grouping.file_group_index;
+
+    // Per-test compile + link + run. The test source is compiled
+    // fresh each iteration; dependency `.ll` files were compiled once
+    // by the resolver pass above and reused across every test in the
+    // group.
+    //
+    // Phase 5a (`docs/proposals/archive/phase-5a-arena-reset.md`): mark the
+    // arena before the loop and rewind at the bottom of each
+    // iteration. Cross-iteration state — `test_files`, `groups[]`,
+    // `file_group_index`, `runtime_root` — is allocated above this
+    // point. The test source / module-name string / compile output
+    // path / clang output are per-iteration and reclaimed each
+    // rewind. No-op when the arena is disabled
+    // (`SAILFIN_USE_ARENA` unset). Test discovery for the full
+    // compiler tree compiles ~75 tests in one process, hitting the
+    // same accumulating-allocation wall `sfn check` did pre-Phase-5a.
+    let test_scratch_mark = sailfin_intrinsic_runtime_arena_mark();
+
+    // Pre-parse pass: only run in `--json` mode. Walks every test
+    // file once, parses it, and pulls out the
+    // `test "name" { ... }` declarations. Three reasons the runner
+    // needs this: (1) the `start` event's `total` must be exact
+    // before the first per-test event is emitted; (2) per-test
+    // names and source spans must be known even when the test
+    // binary aborts mid-suite (the harness calls every `test:`
+    // symbol in sequence and a single `assert false;` brings the
+    // whole process down via `abort()`); (3) compile failures
+    // still need attribution to the affected tests so consumers
+    // see a `skip` event per declaration. The non-`--json` path
+    // skips the extra read+parse and matches the previous
+    // behaviour exactly — a measurable saving for the ~75-file
+    // self-host suite where every read+parse cycle adds up.
+    let mut per_file_entries: TestEntry[][] = [];
+    let mut total_tests: int = 0;
+    if json_output {
+        let mut pi: int = 0;
+        loop {
+            if pi >= test_files.length { break; }
+            let pre_path = test_files[pi];
+            let pre_source = fs.readFile(pre_path);
+            let mut pre_program: Program = parse_program(pre_source);
+            // Mirror the per-test cut the harness compile applies
+            // (issue #849) so the `start` total and per-test events
+            // describe exactly the tests that will run.
+            if test_filters_active() {
+                pre_program = _filter_program_tests_cmd(pre_program);
+            }
+            let entries = collect_test_entries(pre_program, pre_path);
+            per_file_entries.push(entries);
+            total_tests += entries.length;
+            pi += 1;
+        }
+        // Sub-frame children suppress their own `start`; the multi-file
+        // parent emits one aggregate `start` for the whole run.
+        if !json_subframe { print(render_start_event(total_tests)); }
+    }
+
+    let runner_start_ms = monotonic_millis();
+
+    // Read the retry gate once before the loop — env var lookups
+    // shell out via popen, and the gate is invariant for the
+    // duration of the invocation.
+    let retries_disabled = _test_retries_disabled();
+
+    let mut total_passed: int = 0;
+    let mut total_failed: int = 0;
+    let mut total_skipped: int = 0;
+    let mut overall_rc: int = 0;
+
+    // #1230/#1233: per-test linked-binary cache. Resolve the
+    // invocation-stable key inputs once: the compiler identity (bare
+    // capsule version plus the running binary's SHA-256, so identical
+    // binaries can share across commits but different binaries always
+    // miss), the runtime link-input content identity (so a
+    // runtime/header/include-root change busts every entry), and the
+    // canonical clang flag set (`-O0`, matching
+    // `_clang_link_test_cmd_with_deps`). Per-test the key additionally
+    // folds the test source hash + the resolver's dep closure
+    // (`dep_ll_paths` + `native_texts`). `--no-test-cache` disables both
+    // the read and the write so `make check` always cold-builds — so the
+    // runtime identity (the one expensive input: it hashes the runtime
+    // sources + headers) is only computed when the cache is enabled.
+    let mut test_cache_enabled = !no_test_cache;
+    let tb_cache_root = test_bin_cache_root();
+    let mut tb_compiler_identity: string = "";
+    let mut tb_runtime_identity: string = "";
+    if test_cache_enabled {
+        let tb_compiler_version = resolve_test_bin_identity_for_cache(binary_dir);
+        // `compiler_path` is the exact canonical executable resolved at
+        // the native entrypoint. Do not reconstruct it from `binary_dir`:
+        // a preferred sibling such as `sfn` may contain different bytes
+        // when the running compiler is named `sailfin` or `sfn-selfhost2`.
+        let tb_compiler_path = ctx.compiler_path;
+        tb_compiler_identity = test_bin_compiler_identity(tb_compiler_version, tb_compiler_path);
+        // Identity failure must fail cold. Falling back to the bare
+        // capsule version would let a different compiler binary address
+        // this invocation's restored test-bin entries (SFN-545).
+        if tb_compiler_identity.length == 0 { test_cache_enabled = false; } else {
+            tb_runtime_identity = _test_bin_runtime_identity(runtime_root, _sanitize_filename_cmd(scratch_root));
+        }
+    }
+    let mut tb_flags: string[] = ["-O0"];
+    let tb_flags_canonical = canonicalize_flags(tb_flags);
+    let mut test_bin_hits: int = 0;
+    let mut test_bin_misses: int = 0;
+
+    let mut index: int = 0;
+    loop {
+        if index >= test_files.length { break; }
+        let path = test_files[index];
+        let group_idx = file_group_index[index];
+        // `per_file_entries` is only populated in `--json` mode;
+        // the human path doesn't read it.
+        let mut entries: TestEntry[] = [];
+        if json_output { entries = per_file_entries[index]; }
+        if !json_output { print("test: " + path); }
+        let source = fs.readFile(path);
+        let module_name = module_name_from_path(path);
+
+        if dump_sources {
+            let safe = _sanitize_filename_cmd(path);
+            _write_text_cmd(scratch_root + "/test-source-" + safe + ".sfn", source);
+        }
+
+        let file_start_ms = monotonic_millis();
+
+        // #1230/#1233: derive the per-test binary cache key from the test
+        // source + the resolver's dep closure (the test-source-specific
+        // link inputs) plus the invocation-stable `tb_runtime_identity`
+        // (the runtime link inputs — sources, headers, include roots, link
+        // libs — folded by content above) and the compiler-binary content
+        // identity, see `test_bin_cache_key`. Then try to serve the linked
+        // binary from cache. On a hit we copy it into `exe_path` and skip
+        // both LLVM
+        // lowering and the clang link (the dominant per-test cost); we
+        // still RUN the binary below (variant 2a — never trust a cached
+        // result).
+        //
+        // The `_sha256_of_string` temp path is disambiguated by
+        // `scratch_root` (per-invocation / per-child unique — the
+        // multi-file parent mints a `mktemp -d` and hands each child its
+        // own `sub-N`; seedcheck pins `SAILFIN_TEST_SCRATCH`) so
+        // concurrent `sfn test` invocations and CI shards never collide
+        // on the deterministic `/tmp/.sfn_build_cache_hash_*` tmp file.
+        let mut tb_key: CacheKey = CacheKey { digest: "" };
+        let mut cache_hit: boolean = false;
+        if test_cache_enabled {
+            tb_key = test_bin_cache_key(path, groups[group_idx].dep_ll_paths, groups[group_idx].native_texts, tb_compiler_identity, tb_runtime_identity, tb_flags_canonical, _sanitize_filename_cmd(scratch_root
+                + "/"
+                + path));
+            if cache_lookup_artifact(tb_cache_root, tb_key, "test-bin") {
+                if cache_copy_artifact_to(tb_cache_root, tb_key, "test-bin", exe_path) {
+                    // The shared atomic-copy helper publishes through an
+                    // `mktemp` temp (mode 0600), so the restored binary
+                    // loses the executable bit clang gave the original —
+                    // harmless for the `.ll`/`.o` artifacts the module
+                    // cache restores, fatal for a binary we then `exec`
+                    // (`Permission denied`, rc 126). Re-assert +x; only
+                    // count the hit when chmod succeeds, otherwise leave
+                    // `cache_hit` false so the run falls through to a cold
+                    // lower+link (counted as a miss) rather than exec'ing a
+                    // non-executable file.
+                    if process.run(["chmod", "+x", exe_path]) == 0 {
+                        cache_hit = true;
+                        test_bin_hits += 1;
+                        if trace_runner {
+                            print.err("test runner: test-bin cache hit (" + path
+                                + ")");
+                        }
+                    }
+                }
+            }
+        }
+
+        if !cache_hit {
+            if trace_runner { print.err("test runner: compile start"); }
+            _clean_lowering_state(scratch_root);
+            let empty_manifests: LayoutManifest[] = [];
+            let _compiled = compile_tests_to_llvm_file_with_module_imports(source, module_name, ll_path, groups[group_idx].interfaces, empty_manifests, groups[group_idx].native_texts, groups[group_idx].function_effects, groups[group_idx].capabilities_required);
+            if !_compiled {
+                // Stderr stays usable for compiler-internal diagnostics
+                // even in `--json` mode; the affected tests show up as
+                // `skip` events with a synthetic assertion message so
+                // consumers can correlate the stderr noise with the
+                // tests that didn't run.
+                print.err("test runner: compile failed for " + path);
+                if json_output {
+                    let outcome = _outcome_setup_failure(_synthetic_assert_failure(path, "compile failed"));
+                    let packed = _emit_file_test_events(entries, outcome);
+                    total_passed += _trj_decode_passed(packed);
+                    total_failed += _trj_decode_failed(packed);
+                    total_skipped += _trj_decode_skipped(packed);
+                    overall_rc = 1;
+                    sailfin_intrinsic_runtime_arena_rewind(test_scratch_mark);
+                    index += 1;
+                    continue;
+                }
+                // FAIL banner on compile failure: the bash wrapper
+                // surfaced this as `[test] FAIL: <basename> (exit code 1,
+                // ...)`. Emit the same shape so callers parsing test
+                // output (CI log scrubbers, human readers) see consistent
+                // attribution regardless of which stage failed.
+                let cf_basename = _package_basename(path);
+                print("[test] FAIL: " + cf_basename + " (exit code 1)");
+                suites[file_suite_index[index]].fail_count += 1;
+                suites[file_suite_index[index]].failed_files.push(cf_basename);
+                if overall_rc == 0 { overall_rc = 1; }
+                sailfin_intrinsic_runtime_arena_rewind(test_scratch_mark);
+                index += 1;
+                continue;
+            }
+
+            if trace_runner { print.err("test runner: link start"); }
+            let link_res = _clang_link_test_cmd_with_deps(ll_path, exe_path, runtime_root, groups[group_idx].dep_ll_paths, scratch_root, binary_dir);
+            let link_rc = link_res.rc;
+            if link_rc != 0 {
+                // Only a genuine backend failure earns the SFN-34 ICE banner;
+                // a preflight bailout already printed its own diagnostic
+                // (SFN-212). The `[test] FAIL` line and overall_rc below are
+                // unconditional, preserving exit-code fidelity either way.
+                if link_res.ran_backend {
+                    print.err(format_backend_failure_banner(binary_dir, "clang link", ll_path, link_rc));
+                }
+                if json_output {
+                    let outcome = _outcome_setup_failure(_synthetic_assert_failure(path, "link failed (clang exit="
+                        + number_to_string(link_rc)
+                        + ")"));
+                    let packed = _emit_file_test_events(entries, outcome);
+                    total_passed += _trj_decode_passed(packed);
+                    total_failed += _trj_decode_failed(packed);
+                    total_skipped += _trj_decode_skipped(packed);
+                    if overall_rc == 0 { overall_rc = link_rc; }
+                    sailfin_intrinsic_runtime_arena_rewind(test_scratch_mark);
+                    index += 1;
+                    continue;
+                }
+                // FAIL banner on link failure (issue #845). Same rationale
+                // as the compile-failure banner above — keep `[test] FAIL`
+                // attribution consistent across every failure stage so
+                // tooling (CI scrubbers, human readers, future grep-based
+                // log audits) sees one shape.
+                let lf_basename = _package_basename(path);
+                print("[test] FAIL: " + lf_basename + " (exit code "
+                    + number_to_string(link_rc)
+                    + ")");
+                suites[file_suite_index[index]].fail_count += 1;
+                suites[file_suite_index[index]].failed_files.push(lf_basename);
+                if overall_rc == 0 { overall_rc = link_rc; }
+                sailfin_intrinsic_runtime_arena_rewind(test_scratch_mark);
+                index += 1;
+                continue;
+            }
+            // #1230: a fresh lower+link produced `exe_path`; record the miss
+            // and populate the cache so the next unchanged run hits. The
+            // store is atomic (temp+rename) and non-fatal — a write failure
+            // just means the next run misses again, never a broken binary.
+            if test_cache_enabled {
+                test_bin_misses += 1;
+                cache_store_artifact(tb_cache_root, tb_key, "test-bin", exe_path);
+            }
+        }
+        // SFEP-0050 (SFN-393): run the compiled binary under the streamed
+        // record transport — spawn with captured stdout+stderr, frame the
+        // harness's `SFTR` records off the child's stderr, and classify
+        // inline. No pre-exec unlink (no `results.log`/`fail.bin` files
+        // exist), no scratch-keyed side channel — the pipe is owned by
+        // this parent, so no nesting/concurrency collision is possible.
+        if trace_runner { print.err("test runner: exec start"); }
+        let deadline_ms = _test_deadline_ms();
+        let mut br = _run_test_binary(exe_path, scratch_root, update_snapshots, json_output, deadline_ms);
+        // Signal-kill retry (ported from `scripts/run_native_test.sh`
+        // by issue #845). 137 (OOM-SIGKILL) / 139 (SIGSEGV) are
+        // transient under sustained CI memory pressure on the
+        // seedcheck phase of `make check`; retry once before
+        // declaring failure. A deadline kill is remapped to 124 in
+        // `_run_test_binary`, so `_should_retry_test` never retries a
+        // timeout; normal asserts (1) and unrelated signals also fall
+        // through. `SAILFIN_TEST_RETRY=0` opts out.
+        if _should_retry_test(br.rc, retries_disabled) {
+            // Banner is a human-mode artifact — the `--json` stream
+            // must stay pure jsonl so consumers don't have to filter
+            // out interleaved decoration. The retry itself still
+            // runs in JSON mode; we just don't announce it.
+            if !json_output {
+                let test_basename = _package_basename(path);
+                print("[test] RETRY: " + test_basename + " (exit code "
+                    + number_to_string(br.rc)
+                    + ", retrying once)");
+            }
+            // The streamed records live on the child's own pipe, so a
+            // retry starts from a clean channel with no stale-record
+            // carryover to unlink — the collision the file side-channel
+            // needed guarding against is structurally gone.
+            br = _run_test_binary(exe_path, scratch_root, update_snapshots, json_output, deadline_ms);
+        }
+        let run_rc = br.rc;
+        if trace_runner {
+            print.err("test runner: exec done (exit=" + number_to_string(run_rc)
+                + ")");
+        }
+        // Split the streamed records: `failure` is the first assert-location
+        // record (the `fail.bin` SFAF analog), `results` the `test`/`hook`
+        // classification records (the `results.log` analog). `_emit_results_events`
+        // and the crash fall-through consume these exactly as before.
+        let failure = br.failure;
+        let results = br.records;
+        let file_elapsed_ms = monotonic_millis() - file_start_ms;
+        // SFN-17: classify from the harness's per-test records (source of
+        // truth) instead of the fail.bin index-inference — but only when
+        // the records *explain* the exit code. `@main` exits non-zero iff
+        // `sfn_test_failures() != 0`, and every failure increment writes a
+        // record, so `run_rc == 0` (clean) or a failing record present
+        // means the records are authoritative. A non-zero exit with only
+        // passing records is a hard crash (SIGSEGV / non-throw `abort()`)
+        // that bypassed `@main` after an earlier test passed — it must
+        // fall through to the file-level crash path below, not be masked
+        // as pass (#1206 / `crash_attribution_test.sfn`).
+        let results_explain = run_rc == 0 || _records_have_failure(results);
+        if results.length > 0 && results_explain {
+            let packed = _emit_results_events(entries, results, failure, json_output, file_elapsed_ms as int, path);
+            let res_failed = _trj_decode_failed(packed);
+            if json_output {
+                total_passed += _trj_decode_passed(packed);
+                total_failed += res_failed;
+                total_skipped += _trj_decode_skipped(packed);
+            } else {
+                let rf_basename = _package_basename(path);
+                if res_failed > 0 {
+                    print("[test] FAIL: " + rf_basename + " (exit code "
+                        + number_to_string(run_rc)
+                        + ")");
+                    suites[file_suite_index[index]].fail_count += 1;
+                    suites[file_suite_index[index]].failed_files.push(rf_basename);
+                } else {
+                    print("[test] PASS: " + _package_basename(path));
+                    suites[file_suite_index[index]].pass_count += 1;
+                }
+            }
+            // Propagate the child's real exit code (1 for a recovered
+            // assert; a signal code if a later test crashed after an
+            // earlier one already failed) rather than a synthetic 1.
+            if res_failed > 0 && overall_rc == 0 {
+                if run_rc != 0 { overall_rc = run_rc; } else { overall_rc = 1; }
+            }
+            sailfin_intrinsic_runtime_arena_rewind(test_scratch_mark);
+            index += 1;
+            continue;
+        }
+        if run_rc != 0 {
+            if json_output {
+                let mut effective = failure;
+                if !effective.present {
+                    effective = _synthetic_assert_failure(path, "test process exited with code "
+                        + number_to_string(run_rc));
+                }
+                let failed_index = locate_failing_test(entries, effective);
+                let outcome = _outcome_failed_at(failed_index as int, effective, file_elapsed_ms as int);
+                let packed = _emit_file_test_events(entries, outcome);
+                total_passed += _trj_decode_passed(packed);
+                total_failed += _trj_decode_failed(packed);
+                total_skipped += _trj_decode_skipped(packed);
+                if overall_rc == 0 { overall_rc = run_rc; }
+                sailfin_intrinsic_runtime_arena_rewind(test_scratch_mark);
+                index += 1;
+                continue;
+            }
+            // FAIL banner (issue #845): the bash wrapper used to emit
+            // this line; the compiler emits it now so `sfn test` is
+            // self-contained. The compiler's structured `test failed:`
+            // detail line follows for editor-hyperlinkable assertion
+            // attribution. The bash `grep -nE ... <<< "$output"`
+            // diagnostic excerpt has no in-process analog (we don't
+            // buffer the child's stdout/stderr), but the structured
+            // `test runner: compile failed`, `link failed`, and
+            // `test failed:` lines already carry the per-step
+            // attribution the grep heuristic was reconstructing
+            // post-hoc.
+            let rf_basename = _package_basename(path);
+            print("[test] FAIL: " + rf_basename + " (exit code "
+                + number_to_string(run_rc)
+                + ")");
+            if failure.present {
+                print("test failed: " + _format_assert_failure(path, failure));
+            } else { print("test failed: " + path); }
+            suites[file_suite_index[index]].fail_count += 1;
+            suites[file_suite_index[index]].failed_files.push(rf_basename);
+            if overall_rc == 0 { overall_rc = run_rc; }
+            sailfin_intrinsic_runtime_arena_rewind(test_scratch_mark);
+            index += 1;
+            continue;
+        }
+        if json_output {
+            let outcome = _outcome_all_pass(file_elapsed_ms as int);
+            let packed = _emit_file_test_events(entries, outcome);
+            total_passed += _trj_decode_passed(packed);
+            total_failed += _trj_decode_failed(packed);
+            total_skipped += _trj_decode_skipped(packed);
+        } else {
+            // PASS banner (issue #845): matches the bash wrapper's
+            // `[test] PASS: <basename>` output exactly. Emitted only
+            // on the human path; the JSON path emits structured
+            // per-test events instead.
+            print("[test] PASS: " + _package_basename(path));
+            suites[file_suite_index[index]].pass_count += 1;
+        }
+        // Phase 5a: rewind arena scratch back to the per-test
+        // mark. Per-iteration allocations (parsed test AST,
+        // typecheck/effect tables, emitted .ll bytes, clang
+        // output buffers) live above this point and get reclaimed.
+        // Cross-iteration state (test_files, groups, paths) is
+        // below the mark and unaffected.
+        sailfin_intrinsic_runtime_arena_rewind(test_scratch_mark);
+        index += 1;
+    }
+    if json_output {
+        let runner_elapsed_ms = monotonic_millis() - runner_start_ms;
+        let summary_line = render_summary_event(total_passed, total_failed, total_skipped, runner_elapsed_ms, test_bin_hits, test_bin_misses);
+        // Sub-frame children route their summary to their own stderr
+        // (skimmed by the parent's reap demux) instead of printing a
+        // per-file summary onto the shared stdout stream (SFEP-0050).
+        if json_subframe { print.err(summary_line); } else {
+            print(summary_line);
+        }
+    } else if emit_banners {
+        // Per-suite banners. Suppressed in `--json` mode (the
+        // structured summary event is the source of truth there)
+        // and suppressed in legacy single-`.sfn`-file mode (direct
+        // single-file callers and the multi-file path's own children
+        // — `emit_banners` gates the call site).
+        _emit_suite_banners(suites);
+    }
+    exit_test_runner_mode();
+    _cleanup_test_scratch(scratch_owned, scratch_root, overall_rc == 0);
+    return overall_rc;
+}
+
+export { _run_single_process };

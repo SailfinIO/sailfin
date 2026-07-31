@@ -152,10 +152,10 @@ fn with_cwd(args: string[], env: Env, cwd: string, body: fn (ProcessOutput) -> i
 // `SAILFIN_TEST_RUNTIME_STAMP`.
 // The per-child environment keys the parallel test pool injects on every
 // spawned test process. This list MUST mirror the set stripped and re-added by
-// `_pool_child_env` in `compiler/src/cli/commands/test.sfn` — a capsule cannot
-// import compiler-internal modules, so this is a deliberate paired copy. When
-// a new pool key is added to `_pool_child_env`, add it here too so a nested
-// runner keeps inheriting a clean environment.
+// `_pool_child_env` in `compiler/src/cli/commands/test/pool.sfn` — a capsule
+// cannot import compiler-internal modules, so this is a deliberate paired
+// copy. When a new pool key is added to `_pool_child_env`, add it here too
+// so a nested runner keeps inheriting a clean environment.
 fn _pool_managed_keys() -> string[] {
     return ["SAILFIN_TEST_SCRATCH", "SAILFIN_TEST_RUNTIME_OBJDIR", "SAILFIN_TEST_RUNTIME_STAMP", "SAILFIN_UPDATE_SNAPSHOTS", "SAILFIN_TEST_JSON_SUBFRAME",];
 }

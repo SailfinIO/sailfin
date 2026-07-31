@@ -44,7 +44,7 @@ import {
     substring
 } from "../../string_utils";
 import { CliContext } from "../context";
-import { _resolve_test_self_path } from "./test";
+import { _resolve_test_self_path } from "./test/pool";
 
 // Module slug: strip a leading `compiler/src/` prefix, then a leading
 // `runtime/` prefix, then a trailing `.sfn`, then — if the ORIGINAL path

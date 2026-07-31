@@ -1,0 +1,409 @@
+import { Program, Statement } from "../../../ast";
+import {
+    _dirname_cmd,
+    _ends_with_cmd,
+    _path_join_cmd,
+    _strip_trailing_slashes_cmd
+} from "../../../build/fs";
+import { is_safe_scope_name, parse_scope_name } from "../../../capsule_artifact";
+import { prepare_project_capsules_for_test } from "../../../capsule_resolver";
+import { discover_project_root } from "../../../capsule_resolver/paths";
+import { ResolverConsumer } from "../../../capsule_resolver/types";
+import { discover_workspace_root } from "../../../capsule_resolver/workspace";
+import { ImportSymbolTable, empty_import_symbols } from "../../../effect_imports";
+import { number_to_string } from "../../../num_format";
+import { parse_program } from "../../../parser/mod";
+import { substring } from "../../../string_utils";
+import { test_decl_is_matching_test, test_decl_matches_filters } from "../../../test_runner_state";
+import { toml_get_name } from "../../../toml_parser";
+import { load_imported_interfaces_from_paths } from "../../../typecheck_import_loader";
+
+fn _looks_like_test_file_cmd(name: string) -> boolean {
+    return _ends_with_cmd(name, "_test.sfn");
+}
+
+fn _collect_test_files_cmd(root: string, max_depth: int) -> string[] ![io] {
+    let mut results: string[] = [];
+    if _ends_with_cmd(root, ".sfn") { return [root]; }
+    // Mirror `_collect_sfn_files_cmd`'s normalization: a trailing
+    // slash on `root` would propagate through `dir + "/" + entry`
+    // into double-slashed paths like `compiler/tests/unit//foo_test.sfn`,
+    // which `_cr_resolve_and_dedupe` cannot navigate out of —
+    // `enumerate_relative_sources` returns zero hits, the resolver
+    // emits `deps=0`, and every test that imports anything fails
+    // with `undefined reference` at link time. The historical
+    // backstop for that surface was `llvm-objcopy --weaken` against
+    // the self-hosted compiler binary; with this normalization in
+    // place the backstop is dead code.
+    let root_norm: string = _strip_trailing_slashes_cmd(root);
+    let mut queue: string[] = [root_norm];
+    let mut depth: int = 0;
+    loop {
+        if depth >= max_depth { break; }
+        if queue.length == 0 { break; }
+        let mut next_queue: string[] = [];
+        let mut qi: int = 0;
+        loop {
+            if qi >= queue.length { break; }
+            let dir = queue[qi];
+            let entries = fs.listDirectory(dir);
+            let mut ei: int = 0;
+            loop {
+                if ei >= entries.length { break; }
+                let entry = entries[ei];
+                let full_path = dir + "/" + entry;
+                if _looks_like_test_file_cmd(entry) {
+                    results.push(full_path);
+                } else {
+                    let child_entries = fs.listDirectory(full_path);
+                    if child_entries.length > 0 {
+                        next_queue.push(full_path);
+                    }
+                }
+                ei += 1;
+            }
+            qi += 1;
+        }
+        queue = next_queue;
+        depth += 1;
+    }
+    return results;
+}
+
+// Derive a per-suite banner label from a positional path passed to
+// `sfn test`. Trims trailing slashes (so `compiler/tests/unit/`
+// yields the same label as `compiler/tests/unit`) and returns the
+// path's basename. Empty input degenerates to `.` so the banner
+// always carries a non-empty label. Pure (no I/O) so it's covered
+// by a fast unit test in
+// `compiler/tests/unit/cli_path_normalization_test.sfn`.
+fn _suite_name_from_path(path: string) -> string {
+    let trimmed = _strip_trailing_slashes_cmd(path);
+    if trimmed.length == 0 { return "."; }
+    let mut last_slash: int = -1;
+    let mut i: int = 0;
+    loop {
+        if i >= trimmed.length { break; }
+        if substring(trimmed, i, i + 1) == "/" { last_slash = i; }
+        i += 1;
+    }
+    if last_slash < 0 { return trimmed; }
+    if last_slash == trimmed.length - 1 { return trimmed; }
+    return substring(trimmed, last_slash + 1, trimmed.length);
+}
+
+// One distinct `(project_root, workspace_root)` resolution group for
+// the test runner. Every file in `entry_paths` shares those roots, so
+// `prepare_project_capsules_for_test` runs once per group with the
+// group's full file list as anchors. Mirrors `check/engine.sfn`'s
+// `CheckGroup`: per-group resolution avoids the multi-path workspace
+// bug where files past `files[0]` would otherwise inherit a
+// resolution computed from the wrong root, and amortises capsule
+// staging + compilation across every test file in the group.
+struct TestGroup {
+    key: string;
+    entry_paths: string[];
+    interfaces: Statement[];
+    native_texts: string[];
+    dep_ll_paths: string[];
+    // Phase E: cross-module effect-propagation table, populated from
+    // the same `.sfn-asm` artifacts the resolver stages for
+    // `interfaces` / `native_texts`. Threaded into
+    // `compile_tests_to_llvm_file_with_module_imports` so a test
+    // that calls an imported effectful helper without declaring the
+    // effect produces an `E0402` diagnostic.
+    function_effects: ImportSymbolTable;
+    // Phase F: capsule manifest's `[capabilities] required = [...]`
+    // surface, populated from the same per-group resolver pass. A
+    // test body declaring an effect outside this surface produces
+    // an `E0403` diagnostic.
+    capabilities_required: string[];
+}
+
+// Compute the resolution-group key for a test file path. Two files
+// share a group iff `discover_project_root` and
+// `discover_workspace_root` return the same value when walked from
+// each file's directory. Mirrors `check/engine.sfn:_check_group_key` —
+// kept in this module rather than lifted into a shared helper to keep
+// commit 4's blast radius bounded; consolidation is a follow-up.
+fn _test_group_key(file_path: string) -> string ![io] {
+    let dir = _dirname_cmd(file_path);
+    let project_root = discover_project_root(dir);
+    let workspace_root = discover_workspace_root(dir);
+    return project_root + "::" + workspace_root;
+}
+
+// P1 (#363): build a `ResolverConsumer` for a test group. The
+// consumer is keyed off the host capsule's manifest so:
+//
+//   - intra-capsule `.ll` outputs route under
+//     `build/capsules/<scope>/<name>/ir/` when the manifest's
+//     `[capsule].name` is in `scope/name` form (matches what
+//     `sfn build -p <capsule>` does for production builds);
+//   - the resolver enumerates `<project_root>/src/` as if it were a
+//     manifest-declared dep (`include_host_as_dep = true`), so a
+//     test file in `<project>/tests/` can `import { fn } from
+//     "<capsule_name>"` and resolve to the host capsule's source.
+//
+// Standalone test files outside any capsule.toml (or any test where
+// the manifest has no `[capsule].name`) get an empty consumer with
+// `include_host_as_dep = true`. The host enumeration is a no-op
+// without a name, so the resolver falls back to the legacy
+// relative-import / workspace-implicit walks the test runner has
+// always relied on.
+fn _test_resolver_consumer_for_group(file_path: string) -> ResolverConsumer ![io] {
+    let dir = _dirname_cmd(file_path);
+    let project_root = discover_project_root(dir);
+    if project_root.length == 0 {
+        return ResolverConsumer {
+            scope: "",
+            name: "",
+            walk_project_src: false,
+            include_host_as_dep: true
+        };
+    }
+    let manifest_path = _path_join_cmd(project_root, "capsule.toml");
+    if !fs.exists(manifest_path) {
+        return ResolverConsumer {
+            scope: "",
+            name: "",
+            walk_project_src: false,
+            include_host_as_dep: true
+        };
+    }
+    let manifest_text = fs.readFile(manifest_path);
+    let capsule_name = toml_get_name(manifest_text);
+    if capsule_name.length == 0 {
+        return ResolverConsumer {
+            scope: "",
+            name: "",
+            walk_project_src: false,
+            include_host_as_dep: true
+        };
+    }
+    let parts = parse_scope_name(capsule_name);
+    if !is_safe_scope_name(parts.scope, parts.name) {
+        // Single-segment / unsafe names route through the legacy
+        // flat layout but still get host enumeration so a manifest
+        // with `[capsule].name = "my-app"` can self-host its tests.
+        return ResolverConsumer {
+            scope: "",
+            name: "",
+            walk_project_src: false,
+            include_host_as_dep: true
+        };
+    }
+    return ResolverConsumer {
+        scope: parts.scope,
+        name: parts.name,
+        walk_project_src: false,
+        include_host_as_dep: true
+    };
+}
+
+fn _find_test_group(groups: TestGroup[], key: string) -> int {
+    let mut i: int = 0;
+    loop {
+        if i >= groups.length { break; }
+        if strings_equal(groups[i].key, key) { return i; }
+        i += 1;
+    }
+    return -1;
+}
+
+// Spawn one `<self> test <file>` child under its own scratch dir,
+// wrapped in the resolved timeout command when one is available.
+// In-runner port of the script's
+// `"$TIMEOUT_CMD" "$TIMEOUT" "$COMPILER" test "$TEST_FILE"`.
+// Retain non-test statements plus only the `TestDeclaration`s that
+// satisfy the active `-k`/`--tag` filters. Mirrors `main.sfn`'s
+// `_filter_program_tests` so the `--json` pre-pass enumerates exactly
+// the tests the harness will run.
+fn _filter_program_tests_cmd(program: Program) -> Program {
+    let mut kept: Statement[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= program.statements.length { break; }
+        let statement = program.statements[i];
+        if statement.variant == "TestDeclaration" {
+            if test_decl_matches_filters(statement) {
+                kept.push(statement);
+            }
+        } else { kept.push(statement); }
+        i += 1;
+    }
+    return Program { statements: kept };
+}
+
+// True when `path` parses to a program with at least one test matching
+// the active `-k`/`--tag` filters. Drives the file-level pre-filter.
+fn _file_has_matching_test(path: string) -> boolean ![io] {
+    let source = fs.readFile(path);
+    let program = parse_program(source);
+    let mut i: int = 0;
+    loop {
+        if i >= program.statements.length { break; }
+        // Hooks are not runnable tests — a file whose only matches are hooks
+        // has nothing to run and must not reach the (empty-harness) compile
+        // path (#975).
+        if test_decl_is_matching_test(program.statements[i]) { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+// Outcome of partitioning the discovered test files into resolver
+// groups and running one resolver pass per group. `staging_failed`
+// reports a setup error (slug collision, stage-write or capsule
+// compile failure) that the resolver has already reported to
+// stderr; the caller maps it to exit 2 after its own teardown.
+struct TestGroupResolution {
+    groups: TestGroup[],
+    file_group_index: int[],
+    staging_failed: boolean
+}
+
+// Partition test files into resolution groups. Within a group,
+// every file shares `(project_root, workspace_root)`, so a single
+// resolver pass anchored on the group's full file list covers
+// every relative-import + capsule-dep + workspace-implicit graph
+// the test compile + link needs. Between groups (e.g. running
+// tests from two different capsules in one invocation), each
+fn _resolve_test_groups(test_files: string[], binary_dir: string, trace_runner: boolean) -> TestGroupResolution ![io] {
+    // project resolves independently.
+    let mut groups: TestGroup[] = [];
+    let mut file_group_index: int[] = [];
+    let mut gpi: int = 0;
+    loop {
+        if gpi >= test_files.length { break; }
+        let path = test_files[gpi];
+        let key = _test_group_key(path);
+        let mut idx = _find_test_group(groups, key);
+        if idx < 0 {
+            let empty_entries: string[] = [];
+            let empty_interfaces: Statement[] = [];
+            let empty_texts: string[] = [];
+            let empty_lls: string[] = [];
+            let empty_caps: string[] = [];
+            groups.push(TestGroup {
+                key: key, entry_paths: empty_entries, interfaces: empty_interfaces, native_texts: empty_texts, dep_ll_paths: empty_lls, function_effects: empty_import_symbols(), capabilities_required: empty_caps
+            });
+            idx = groups.length - 1;
+        }
+        groups[idx].entry_paths.push(path);
+        file_group_index.push(idx);
+        gpi += 1;
+    }
+
+    // Per-group resolver pass: stage `.sfn-asm` import-context, load
+    // it for typecheck-with-imports, and compile each capsule
+    // dependency to its own `.ll` so the link step can resolve
+    // imported helper definitions strongly. Setup errors (slug
+    // collision, stage-write failure, capsule-compile failure) all
+    // collapse to `staging_failed = true` and exit 2 to distinguish
+    // setup from test failure (exit 1).
+    let mut gi: int = 0;
+    loop {
+        if gi >= groups.length { break; }
+        if trace_runner {
+            print.err("test runner: resolver pass start (group="
+                + number_to_string(gi)
+                + ", files="
+                + number_to_string(groups[gi].entry_paths.length)
+                + ")");
+        }
+        // P1 (#363): derive the resolver consumer from the host
+        // capsule's manifest so a test file in `<project>/tests/`
+        // can import the host capsule by its `[capsule].name` (e.g.
+        // `import { fn } from "my-app"`) — not just by relative
+        // path (`../src/mod`). `include_host_as_dep = true` opts
+        // the resolver into enumerating `<project_root>/src/` with
+        // `<capsule_name>/<stem>` slugs, which matches what the
+        // test source's import-path normalizer resolves the bare
+        // capsule name to. Tests that don't import the host by
+        // name — the compiler's own `compiler/tests/` suite is the
+        // canonical case, since those tests reach `compiler/src/`
+        // exclusively via `../../src/X` relative imports — fail
+        // the in-resolver `_cr_any_entry_imports_host` gate, so
+        // host-enum stays a no-op and the resolver behaves the
+        // same as the prior `empty_resolver_consumer()` path. That
+        // gate is load-bearing: host-enum pulls in every host `src/`
+        // module including `main.sfn`, so firing it for those tests
+        // would link a second `@main` into each test binary. (#527
+        // mixed the slug into `cache_key_for`'s digest, closing the
+        // separate cache-entry race that co-firing the two walkers
+        // would cause; the gate still guards the link-layer
+        // duplicate-`@main` hazard.) Standalone test files outside
+        // any `capsule.toml` (project_root empty) get a fully empty
+        // consumer for the same reason — there's no manifest, no
+        // `[capsule].name`, and so nothing for
+        // host-enum to walk.
+        // Stage D PR3 / #1405 Bug 2: `sfn test` keeps the in-process
+        // compile path for ordinary fixtures (which stay well below the
+        // per-module count where arena pressure bites). But a few
+        // compiler unit tests import the whole compiler (e.g. via
+        // `lower_to_llvm_ir_from_text`), and compiling that ~120-module
+        // closure in-process OOMs past the 8 GiB self-cap on a cold
+        // test-bin cache. Thread the same-generation `binary_dir` so the
+        // resolver upgrades *only* those large-closure tests to
+        // subprocess-per-module isolation (fresh arena per child); small
+        // fixtures still take the in-process fast path.
+        let consumer = _test_resolver_consumer_for_group(groups[gi].entry_paths[0]);
+        let resolution = prepare_project_capsules_for_test(groups[gi].entry_paths, consumer, "", "", binary_dir);
+        if resolution.staging_failed {
+            // Resolver already emitted a structured error to stderr
+            // (slug collision, stage-write, or compile failure). The
+            // caller owns runner-mode exit and scratch teardown.
+            return TestGroupResolution {
+                groups: groups,
+                file_group_index: file_group_index,
+                staging_failed: true
+            };
+        }
+        // Single-pass loader: returns both the parsed interface set
+        // (for typecheck-with-imports) and the raw `.sfn-asm` text set
+        // (for `apply_module_symbol_mangling`'s provider-name lookup),
+        // reading each artifact off disk exactly once.
+        let load = load_imported_interfaces_from_paths(resolution.asm_paths);
+        groups[gi].interfaces = load.interfaces;
+        groups[gi].native_texts = load.native_texts;
+        groups[gi].dep_ll_paths = resolution.ll_paths;
+        // Phase E: stash the cross-module function-effect table so
+        // the per-test compile below can hand it to
+        // `compile_tests_to_llvm_file_with_module_imports` alongside
+        // the interface list.
+        groups[gi].function_effects = load.function_effects;
+        // Phase F: stash the capsule manifest's
+        // `[capabilities] required` surface from the resolver pass
+        // so the per-test compile produces `E0403` for any test
+        // body declaring an effect outside the surface.
+        groups[gi].capabilities_required = resolution.capabilities_required;
+        if trace_runner {
+            print.err("test runner: resolver pass done (group="
+                + number_to_string(gi)
+                + ", deps="
+                + number_to_string(resolution.ll_paths.length)
+                + ")");
+        }
+        gi += 1;
+    }
+    return TestGroupResolution {
+        groups: groups,
+        file_group_index: file_group_index,
+        staging_failed: false
+    };
+}
+
+export {
+    TestGroupResolution,
+    _resolve_test_groups,
+    _looks_like_test_file_cmd,
+    _collect_test_files_cmd,
+    _suite_name_from_path,
+    TestGroup,
+    _test_group_key,
+    _test_resolver_consumer_for_group,
+    _find_test_group,
+    _filter_program_tests_cmd,
+    _file_has_matching_test
+};

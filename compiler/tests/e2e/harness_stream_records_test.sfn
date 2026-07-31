@@ -4,7 +4,7 @@
 // The harness reports every test/hook/assert-location record over a
 // per-process pipe framed onto the child's stderr (`SFTR` records,
 // `runtime/sfn/assert.sfn`), demuxed inline by the parent
-// (`_run_test_binary`, `compiler/src/cli/commands/test.sfn`). This
+// (`_run_test_binary`, `compiler/src/cli/commands/test/exec.sfn`). This
 // retires the file-based IPC the streamed transport replaced:
 // `results.log` (per-test/hook classification), `fail.bin` (the first
 // assertion failure), and the multi-file sub-frame `_subframe_summary.json`
