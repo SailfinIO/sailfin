@@ -106,16 +106,11 @@ fn emit_native(program: Program) -> EmitNativeResult {
     return emit_native_with_module_name(program, "main");
 }
 
-fn emit_native_with_module_name(program: Program, module_name: string) -> EmitNativeResult {
-    // Lambda lifting pre-pass (issue #686): every non-capturing
-    // `Expression.Lambda` becomes a synthesised top-level
-    // `FunctionDeclaration` named `sfn_lambda_<N>`, and the lambda
-    // expression site is rewritten to a `<closure_pair @sfn_lambda_<N> null>`
-    // marker. Capturing lambdas are left untouched until #687.
-    let lifted = lift_non_capturing_lambdas(program);
-    let lifted_program = lifted.program;
-
-    let layout_context = build_layout_context(lifted_program);
+// Shared emit core for both entry points. Private, so the `NativeState`
+// return is an intra-module direct call and never crosses a module
+// boundary — see the size rule documented above
+// `emit_native_lines_with_module_name`.
+fn _emit_native_state(lifted_program: Program, layout_context: LayoutContext, module_name: string) -> NativeState {
     let mut state: NativeState = state_new(layout_context);
     state = state_emit_line(state, "; Sailfin Native Prototype");
     let mut module_line = ".module ";
@@ -137,6 +132,20 @@ fn emit_native_with_module_name(program: Program, module_name: string) -> EmitNa
         }
         index += 1;
     }
+    return state;
+}
+
+fn emit_native_with_module_name(program: Program, module_name: string) -> EmitNativeResult {
+    // Lambda lifting pre-pass (issue #686): every non-capturing
+    // `Expression.Lambda` becomes a synthesised top-level
+    // `FunctionDeclaration` named `sfn_lambda_<N>`, and the lambda
+    // expression site is rewritten to a `<closure_pair @sfn_lambda_<N> null>`
+    // marker. Capturing lambdas are left untouched until #687.
+    let lifted = lift_non_capturing_lambdas(program);
+    let lifted_program = lifted.program;
+
+    let layout_context = build_layout_context(lifted_program);
+    let state = _emit_native_state(lifted_program, layout_context, module_name);
 
     let artifact = NativeArtifact {
         name: "module.sfn-asm",
@@ -172,27 +181,7 @@ fn emit_native_lines_with_module_name(program: Program, module_name: string) -> 
     let lifted_program = lifted.program;
 
     let layout_context = build_layout_context(lifted_program);
-    let mut state: NativeState = state_new(layout_context);
-    state = state_emit_line(state, "; Sailfin Native Prototype");
-    let mut module_line = ".module ";
-    if module_name.length == 0 { module_line = module_line + "main"; } else {
-        module_line = module_line + module_name;
-    }
-    state = state_emit_line(state, module_line);
-    if lifted_program.statements.length > 0 {
-        state = state_emit_blank(state);
-    }
-
-    let mut index: int = 0;
-    loop {
-        if index >= lifted_program.statements.length { break; }
-        state = emit_statement(state, lifted_program.statements[index]);
-        let _next_stmt2 = index + 1;
-        if _next_stmt2 < lifted_program.statements.length {
-            state = state_emit_blank(state);
-        }
-        index += 1;
-    }
+    let state = _emit_native_state(lifted_program, layout_context, module_name);
     if state.builder.lines == null { return []; }
     return state.builder.lines;
 }
