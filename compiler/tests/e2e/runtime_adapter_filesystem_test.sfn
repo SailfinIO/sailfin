@@ -278,14 +278,17 @@ test "compiler binary exports the defined sfn_fs_* family" ![io] {
 test "runtime/capsule.toml sfn-sources lists the filesystem adapter" ![io] {
     let manifest = fs.readFile("runtime/capsule.toml");
     let lines = split(manifest, "\n");
+    let mut in_sources = false;
     let mut found = false;
     let mut i = 0;
     loop {
         if i >= lines.length { break; }
         let line = lines[i];
-        if starts_with(line, "sfn-sources = [") && contains(line, "\"sfn/adapters/filesystem.sfn\"") {
+        if starts_with(line, "sfn-sources = [") { in_sources = true; }
+        if in_sources && contains(line, "\"sfn/adapters/filesystem.sfn\"") {
             found = true;
         }
+        if in_sources && contains(line, "]") { in_sources = false; }
         i = i + 1;
     }
     assert found;

@@ -24,13 +24,12 @@ kind = "runtime"
 # deleted (#823 tail), this manifest moved up from `runtime/native/` to
 # the runtime root, so the entries are now plain `sfn/*` / `prelude.sfn`
 # rather than the old `../sfn/*` / `../prelude.sfn`.
-# All array values below are SINGLE-LINE intentionally — the
-# current TOML parser (`compiler/src/toml_parser.sfn`) only
-# recognises arrays whose `[...]` is on one line. Multi-line
-# array support is a future parser extension; until that lands,
-# reformatting here would silently make every getter return `[]`
-# and the resolver would surface zero artifacts. A regression test
-# against this exact manifest text guards the format.
+# The arrays below are read by the *pinned seed*'s baked-in TOML
+# parser during `make compile`, so their form must be one that seed
+# understands. `toml_get_string_array`
+# (`compiler/src/toml_parser.sfn`) folds continuation lines, so both
+# the single-line and multi-line forms parse identically; the
+# historical single-line-only constraint is lifted.
 c-sources = []
 ll-sources = []
 # `sfn-sources` lists the Sailfin runtime modules compiled and linked
@@ -39,14 +38,41 @@ ll-sources = []
 # type-meta surface, the platform shims, and the concurrency runtime).
 #
 # One consumer honors this list:
-#   `_compile_runtime_sfn_sources` in `compiler/src/cli_main.sfn` —
-#   the Stage D PR2 link path used by `sfn build` against a project
-#   that declares `[dependencies] "sfn/runtime-native"`. The
-#   regression test lives at
-#   `compiler/tests/e2e/test_runtime_sfn_sources_link_consumer.sh`.
-#
-# Single-line array per the parser limitation noted above.
-sfn-sources = ["sfn/runtime_globals.sfn", "sfn/memory/arena.sfn", "sfn/memory/rc.sfn", "sfn/memory/mem.sfn", "sfn/memory/ownedbuf.sfn", "sfn/string.sfn", "sfn/array.sfn", "sfn/clock.sfn", "sfn/process.sfn", "sfn/io.sfn", "sfn/exception.sfn", "sfn/assert.sfn", "sfn/type_meta.sfn", "sfn/platform/exec.sfn", "sfn/platform/rlimit.sfn", "sfn/platform/tls.sfn", "sfn/platform/pthread_layout.sfn", "sfn/platform/rand.sfn", "sfn/adapters/filesystem.sfn", "sfn/adapters/http.sfn", "sfn/adapters/websocket.sfn", "sfn/adapters/net.sfn", "sfn/concurrency/scheduler.sfn", "sfn/concurrency/nursery.sfn", "sfn/concurrency/future.sfn", "sfn/concurrency/channel.sfn", "sfn/concurrency/parallel.sfn", "sfn/concurrency/serve.sfn"]
+#   `_compile_runtime_sfn_sources` in
+#   `compiler/src/build/runtime_objs.sfn` — the Stage D PR2 link path
+#   used by `sfn build` against a project that declares
+#   `[dependencies] "sfn/runtime-native"`. The regression test lives at
+#   `compiler/tests/e2e/runtime_sfn_sources_link_consumer_test.sfn`.
+sfn-sources = [
+    "sfn/runtime_globals.sfn",
+    "sfn/memory/arena.sfn",
+    "sfn/memory/rc.sfn",
+    "sfn/memory/mem.sfn",
+    "sfn/memory/ownedbuf.sfn",
+    "sfn/string.sfn",
+    "sfn/array.sfn",
+    "sfn/clock.sfn",
+    "sfn/process.sfn",
+    "sfn/io.sfn",
+    "sfn/exception.sfn",
+    "sfn/assert.sfn",
+    "sfn/type_meta.sfn",
+    "sfn/platform/exec.sfn",
+    "sfn/platform/rlimit.sfn",
+    "sfn/platform/tls.sfn",
+    "sfn/platform/pthread_layout.sfn",
+    "sfn/platform/rand.sfn",
+    "sfn/adapters/filesystem.sfn",
+    "sfn/adapters/http.sfn",
+    "sfn/adapters/websocket.sfn",
+    "sfn/adapters/net.sfn",
+    "sfn/concurrency/scheduler.sfn",
+    "sfn/concurrency/nursery.sfn",
+    "sfn/concurrency/future.sfn",
+    "sfn/concurrency/channel.sfn",
+    "sfn/concurrency/parallel.sfn",
+    "sfn/concurrency/serve.sfn",
+]
 include-dirs = []
 # `-lssl -lcrypto`: OpenSSL, linked into every Sailfin binary for the
 # native runtime's TLS surface (`sfn/platform/tls.sfn`, SFEP-0036). The
