@@ -113,7 +113,15 @@ runs:
       if: ${{ inputs.mode != 'skip-build' }}
       shell: bash
       run: |
-        echo "fp=$(bash scripts/module_layout_fingerprint.sh compiler/src runtime)" >> "$GITHUB_OUTPUT"
+        set -euo pipefail
+        # Assign first, THEN echo. `echo "fp=$(cmd)"` returns echo's status,
+        # so a failing script (missing sha256sum, missing root) would yield
+        # an empty `fp` on a GREEN step — silently disabling the guard, and
+        # worse, diverging this key from the save key in build-quality.yml,
+        # which strands PR CI on a permanently cold cache.
+        fp="$(bash scripts/module_layout_fingerprint.sh)"
+        [ -n "$fp" ] || { echo "[ci] module layout fingerprint is empty" >&2; exit 1; }
+        echo "fp=$fp" >> "$GITHUB_OUTPUT"
 
     # Restore the content-addressed module IR cache (`build/cache/`,
     # written by `<seed> build -p compiler`). Keys are content-safe:

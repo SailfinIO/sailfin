@@ -38,8 +38,25 @@ else
     exit 2
 fi
 
+# Default roots = every tree whose module layout `sfn build -p compiler`
+# compiles. That is NOT just `compiler/src` + `runtime`: the compiler capsule
+# declares `sfn/cli`, `sfn/strings`, and `sfn/crypto` dependencies
+# (`compiler/capsule.toml`) whose sources live under `capsules/<scope>/<name>/src`.
+# A split there re-mangles its dependents' call sites exactly as the
+# `parser/declarations` split did, so it has to roll this fingerprint too.
+#
+# Discovery lives here rather than at the call sites so the three CI key
+# sites (the composite action plus both build-quality jobs) cannot drift
+# apart — they all invoke this with no arguments. Drift between the save
+# key and the restore prefix would strand PR CI on a permanently cold
+# cache, which is worse than the bug this guards.
 if [ "$#" -eq 0 ]; then
     set -- compiler/src runtime
+    for capsule_src in capsules/*/*/src; do
+        if [ -d "$capsule_src" ]; then
+            set -- "$@" "$capsule_src"
+        fi
+    done
 fi
 
 for root in "$@"; do

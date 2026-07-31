@@ -247,10 +247,14 @@ test "build_cache: cache_key_for changes when dep manifest changes" ![io] {
 // structs emits an empty manifest) while its provider slug changes —
 // and the provider slug is what determines call-site name mangling
 // (`parse_function__parser__declarations` vs
-// `parse_function__parser__declarations__mod`). Before schema v2 mixed
-// the slug into the key, this left a dependent's cache key unchanged
+// `parse_function__parser__declarations__mod`). Until SFN-661 mixed the
+// DEP slug into the key, this left a dependent's cache key unchanged
 // across the split, serving stale IR that referenced the old mangled
 // symbol and failing the link with undefined references.
+//
+// Distinct from #527, which mixed the module's OWN slug in and bumped
+// the schema to v2. SFN-661 adds the dep slug and bumps nothing — it
+// only makes keys more distinguishing, so old entries age out unread.
 test "build_cache: cache_key_for changes when a dep slug changes" ![io] {
     let scratch = _test_tmp_root("dep_slug_sensitive");
     let src = scratch + "/source.sfn";
@@ -274,6 +278,48 @@ test "build_cache: cache_key_for is stable when dep slug and content are unchang
     let key1 = cache_key_for(src, ["parser/declarations"], [dep], "0.5.10-alpha.2", "[]", "dep_slug_stable");
     let key2 = cache_key_for(src, ["parser/declarations"], [dep], "0.5.10-alpha.2", "[]", "dep_slug_stable");
     assert key1.digest == key2.digest;
+    _cleanup(scratch);
+}
+
+// `dep_slugs` and `dep_layout_manifest_paths` must be parallel arrays.
+// On a length mismatch `cache_key_for` returns an empty digest rather
+// than pairing them up best-effort: an empty digest is rejected by
+// `_is_valid_digest`, so every cache helper treats it as a hard miss
+// (recompile) instead of serving a key derived from a bogus pairing —
+// which would reconstruct the exact collision SFN-661 fixes.
+test "build_cache: cache_key_for yields an empty digest on a dep-slug/manifest length mismatch" ![io] {
+    let scratch = _test_tmp_root("dep_len_mismatch");
+    let src = scratch + "/source.sfn";
+    let dep_a = scratch + "/dep_a.layout-manifest";
+    let dep_b = scratch + "/dep_b.layout-manifest";
+    _write_file(src, "fn hello() -> string { return \"world\"; }");
+    _write_file(dep_a, "module: alpha; layout: ...");
+    _write_file(dep_b, "module: beta; layout: ...");
+
+    // dep_slugs shorter than the manifest array.
+    let short_key = cache_key_for(src, ["alpha"], [dep_a, dep_b], "0.5.10-alpha.2", "[]", "dep_len_short");
+    assert short_key.digest.length == 0;
+    assert short_key.digest.length != 64;
+
+    // dep_slugs longer than the manifest array.
+    let long_key = cache_key_for(src, ["alpha", "beta", "gamma"], [dep_a, dep_b], "0.5.10-alpha.2", "[]", "dep_len_long");
+    assert long_key.digest.length == 0;
+    assert long_key.digest.length != 64;
+
+    _cleanup(scratch);
+}
+
+// Control: the guard must not swallow the normal equal-length path.
+test "build_cache: cache_key_for matching lengths still yield a valid digest" ![io] {
+    let scratch = _test_tmp_root("dep_len_match");
+    let src = scratch + "/source.sfn";
+    let dep_a = scratch + "/dep_a.layout-manifest";
+    let dep_b = scratch + "/dep_b.layout-manifest";
+    _write_file(src, "fn hello() -> string { return \"world\"; }");
+    _write_file(dep_a, "module: alpha; layout: ...");
+    _write_file(dep_b, "module: beta; layout: ...");
+    let key = cache_key_for(src, ["alpha", "beta"], [dep_a, dep_b], "0.5.10-alpha.2", "[]", "dep_len_match");
+    assert key.digest.length == 64;
     _cleanup(scratch);
 }
 

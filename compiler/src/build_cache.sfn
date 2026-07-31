@@ -22,6 +22,11 @@
 //
 // Each input separator is `\n` so that two distinct tuples cannot
 // collide via concatenation (e.g. `("ab","c")` vs `("a","bc")`).
+// Within the dep component a `\n` separates each dep's slug from its
+// manifest hash and `|` joins the sorted pairs, so the guarantee is
+// unconditional only for slugs free of those two bytes. Every slug
+// the resolver produces is a `/`-joined path stem, so this holds in
+// practice; it is not enforced.
 //
 // Sorting the dep components makes the key invariant under dep
 // enumeration order — important for parallel builds and for
@@ -92,9 +97,16 @@
 // is unresolvable, and is pinned in-tree for the compiler self-host
 // build so `make compile` / `make check` stay hermetic. See
 // `cache_root_from`. The trailing suffix is
-// `build_cache_schema_version()` (currently `v2`) — when the key
-// shape or layout changes, bump it and let the old `v<N>` tree age
-// out so stale entries can never poison new compilers.
+// `build_cache_schema_version()` (currently `v2`) — bump it when a
+// key-shape or layout change could make an old entry ALIAS a new one,
+// and let the old `v<N>` tree age out so stale entries can never
+// poison new compilers.
+//
+// A change that only makes keys *more* distinguishing does not need a
+// bump: every old entry simply becomes unaddressable and ages out on
+// its own. SFN-661 (folding the dep slug into the dep component) is
+// that case — bumping would have discarded every warm CI cache to no
+// benefit, since no v2 entry can be reached by a post-SFN-661 key.
 //
 // The 2-character prefix shard caps the directory fan-out at 256
 // children, preventing the one-directory-with-millions-of-entries
@@ -1137,10 +1149,17 @@ fn runtime_object_entry_key_from_str(key_str: string, hash_suffix: string) -> Ca
 //     readable.
 //   - `dep_slugs` is parallel to `dep_layout_manifest_paths`:
 //     `dep_slugs[i]` is the slug of the module that produced
-//     `dep_layout_manifest_paths[i]`. A short `dep_slugs` degrades
-//     to the empty slug for the trailing entries rather than
-//     trapping — the key stays stable, it just loses the
-//     provider-identity component for those deps (SFN-661).
+//     `dep_layout_manifest_paths[i]`. A length mismatch is a caller
+//     bug and yields an EMPTY digest, which every cache helper
+//     rejects as a hard miss so the module recompiles.
+//
+// The mismatch path fails safe deliberately. Substituting an empty
+// slug for the missing entries would reconstruct the exact SFN-661
+// collision — two layout-free providers would both contribute
+// `"" + "\n" + <empty-manifest-hash>` and become indistinguishable
+// again. A caller bug must degrade to "recompile everything", never
+// to "a weaker key", because the weaker key is the failure this
+// function exists to prevent.
 //
 // The dep slug — not the manifest path — is what enters the digest.
 // Manifest paths are absolute and contain the per-invocation import
@@ -1165,6 +1184,14 @@ fn runtime_object_entry_key_from_str(key_str: string, hash_suffix: string) -> Ca
 // carry distinct slugs, which incidentally keeps the `sha256sum` temp
 // filenames below from colliding across concurrent workers.
 fn cache_key_for(source_path: string, dep_slugs: string[], dep_layout_manifest_paths: string[], compiler_version: string, flags_canonical: string, slug: string) -> CacheKey ![io] {
+    // A length mismatch means the caller built the two arrays
+    // independently and they drifted. Fail safe: an empty digest is
+    // rejected by `_is_valid_digest`, so every lookup and store treats
+    // it as a miss and the module recompiles (SFN-661).
+    if dep_slugs.length != dep_layout_manifest_paths.length {
+        return CacheKey { digest: "" };
+    }
+
     let s_hash = _sha256_of_text_file(source_path);
 
     let mut dep_hashes: string[] = [];
@@ -1176,9 +1203,7 @@ fn cache_key_for(source_path: string, dep_slugs: string[], dep_layout_manifest_p
         // when either changes (SFN-661). `\n` separates the two so a
         // slug ending in hex cannot collide with a shorter slug plus a
         // longer hash.
-        let mut dep_slug: string = "";
-        if i < dep_slugs.length { dep_slug = dep_slugs[i]; }
-        dep_hashes.push(dep_slug + "\n" + _sha256_of_text_file(dep_layout_manifest_paths[i]));
+        dep_hashes.push(dep_slugs[i] + "\n" + _sha256_of_text_file(dep_layout_manifest_paths[i]));
         i += 1;
     }
     let sorted_dep_hashes = _sort_strings(dep_hashes);

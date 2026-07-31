@@ -165,7 +165,13 @@ jobs:
         id: layout
         shell: bash
         run: |
-          echo "fp=$(bash scripts/module_layout_fingerprint.sh compiler/src runtime)" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          # Assign first, THEN echo — `echo "fp=$(cmd)"` masks the script's
+          # exit status and would emit an empty fp on a green step. See the
+          # same step in `.github/actions/sailfin-build/action.yml`.
+          fp="$(bash scripts/module_layout_fingerprint.sh)"
+          [ -n "$fp" ] || { echo "[ci] module layout fingerprint is empty" >&2; exit 1; }
+          echo "fp=$fp" >> "$GITHUB_OUTPUT"
 
       - name: Self-host the compiler (make compile)
         shell: bash
@@ -433,7 +439,13 @@ jobs:
         id: layout
         shell: bash
         run: |
-          echo "fp=$(bash scripts/module_layout_fingerprint.sh compiler/src runtime)" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          # Assign first, THEN echo — `echo "fp=$(cmd)"` masks the script's
+          # exit status and would emit an empty fp on a green step. See the
+          # same step in `.github/actions/sailfin-build/action.yml`.
+          fp="$(bash scripts/module_layout_fingerprint.sh)"
+          [ -n "$fp" ] || { echo "[ci] module layout fingerprint is empty" >&2; exit 1; }
+          echo "fp=$fp" >> "$GITHUB_OUTPUT"
 
       # Warm module-IR cache for a fast compile. Unlike the determinism
       # gate, this job has no cold-build requirement, so restoring is safe
