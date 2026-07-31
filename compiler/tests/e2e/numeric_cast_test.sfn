@@ -413,21 +413,64 @@ test "numeric-cast: f16 round-trips through f32 (fptrunc back to half)" ![io] {
     assert contains(body, "fptrunc float");
 }
 
-test "numeric-cast: f16 local from double literal narrows via fptrunc" ![io] {
-    let body = _emit_body("fn mk() -> f16 { let x: f16 = 0.5; return x; }", "define half @mk", "f16_local_fptrunc");
+// ---- SFN-611: expected-type literals are constants, rounded once ----
+// SFEP-0054 §3.3 forbids rounding a low-precision literal through `f64`, so
+// these bindings must not reach the backend as a `double` constant plus a
+// narrowing conversion. They emit an LLVM hex-float constant instead — the
+// only spelling available, since a plain decimal beside `half`/`bfloat` is a
+// parse error unless it is exactly representable. Exact bit patterns are
+// pinned in `compiler/tests/unit/decimal_low_precision_literal_test.sfn`.
+test "numeric-cast: f16 local from a decimal literal emits a constant" ![io] {
+    let body = _emit_body("fn mk() -> f16 { let x: f16 = 0.5; return x; }", "define half @mk", "f16_local_const");
     assert body.length > 0;
-    assert contains(body, "fptrunc double");
+    assert contains(body, "0xH3800");
+    assert ! contains(body, "fptrunc double");
     assert ! contains(body, "store half zeroinitializer");
 }
 
-test "numeric-cast: bf16 local from double literal narrows via a correctly-rounded bit sequence" ![io] {
-    let body = _emit_body("fn mk() -> bf16 { let x: bf16 = 0.5; return x; }", "define bfloat @mk", "bf16_local_fptrunc");
+test "numeric-cast: bf16 local from a decimal literal emits a constant" ![io] {
+    let body = _emit_body("fn mk() -> bf16 { let x: bf16 = 0.5; return x; }", "define bfloat @mk", "bf16_local_const");
     assert body.length > 0;
-    assert contains(body, "fptrunc double");
-    assert contains(body, "fcmp une double");
-    assert contains(body, "to bfloat");
-    assert contains(body, "select i1");
-    assert ! contains(body, "fptrunc double 5.000000e-01 to bfloat");
+    assert contains(body, "0xR3F00");
+    // No `double` intermediate, so neither the `fptrunc` nor the SFN-609
+    // round-to-odd bit sequence that used to narrow it should appear.
+    assert ! contains(body, "fptrunc double");
+    assert ! contains(body, "fcmp une double");
+}
+
+// A literal that is not exactly representable must still compile. Emitting
+// the source decimal beside the carrier (`bfloat 0.001`) would be a hard
+// LLVM parse error, so this pins that the hex form is what gets emitted.
+test "numeric-cast: an inexact low-precision literal still builds" ![io] {
+    let half_body = _emit_body("fn mk() -> f16 { let x: f16 = 0.001; return x; }", "define half @mk", "f16_inexact_const");
+    assert half_body.length > 0;
+    assert contains(half_body, "0xH1419");
+    assert ! contains(half_body, "half 0.001");
+
+    let bf16_body = _emit_body("fn mk() -> bf16 { let x: bf16 = 0.001; return x; }", "define bfloat @mk", "bf16_inexact_const");
+    assert bf16_body.length > 0;
+    assert contains(bf16_body, "0xR3A83");
+    assert ! contains(bf16_body, "bfloat 0.001");
+}
+
+// The end-to-end statement of the defect: a decimal whose `f64` image lands
+// on an exact bf16 midpoint. Rounding once keeps `0xR3305`; rounding through
+// `f64` would reach the tie and break it to even, giving `0xR3306`.
+test "numeric-cast: a bf16 literal rounds once, not through f64" ![io] {
+    let body = _emit_body("fn mk() -> bf16 { let x: bf16 = 0.000000031082890927791595458984374999999999999999999999999; return x; }", "define bfloat @mk", "bf16_single_round_literal");
+    assert body.length > 0;
+    assert contains(body, "0xR3305");
+    assert ! contains(body, "0xR3306");
+}
+
+// The emit-level tests above only inspect `.ll` text. This one links, so it
+// is the check that the hex-float spelling is actually accepted by LLVM's IR
+// parser rather than merely plausible — the failure mode it guards is
+// `floating point constant invalid for type`, which a plain `bfloat 0.001`
+// would produce.
+test "numeric-cast: inexact low-precision literals survive the LLVM parser" ![io] {
+    let code = _build_and_run_source("fn mk() -> bf16 { let x: bf16 = 0.001; return x; }\nfn mk2() -> f16 { let y: f16 = 0.001; return y; }\nfn main() -> int { let a: bf16 = mk(); let b: f16 = mk2(); return 7; }", "low_precision_literal_link");
+    assert code == 7;
 }
 
 // ---- SFN-609: no unselectable `bfloat` conversion survives lowering ----

@@ -63,7 +63,7 @@ fn _count_newlines(source: string) -> int {
 fn _grandfathered_ceiling(name: string) -> int {
     if name == "core_call_resolution.sfn" { return 1877; }
     if name == "core_call_emission.sfn" { return 1856; }
-    if name == "core.sfn" { return 1626; }
+    if name == "core.sfn" { return 1600; }
     if name == "core_concurrency_lowering.sfn" { return 1608; }
     if name == "core_ops_lowering.sfn" { return 1581; }
     if name == "core_literals_lowering.sfn" { return 1447; }
@@ -109,9 +109,7 @@ test "native lowering: every module stays within its line budget" ![io] {
                 if ceiling > 0 {
                     // Grandfathered: may only shrink.
                     assert lines <= ceiling;
-                } else {
-                    assert lines < NATIVE_LOWERING_MODULE_LINE_BUDGET;
-                }
+                } else { assert lines < NATIVE_LOWERING_MODULE_LINE_BUDGET; }
                 checked += 1;
             } else {
                 // Anything without a `.sfn` suffix is a potential
