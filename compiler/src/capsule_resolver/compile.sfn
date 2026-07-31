@@ -313,14 +313,11 @@ fn compile_capsule_modules(sources: CapsuleSource[], slug_universe_extra: Capsul
     // identical value. Resolving it independently per path would let
     // the two disagree if the environment shifted mid-build.
     //
-    // One residual skew this does NOT close, tracked in SFN-682: with
-    // `SAILFIN_TARGET_OS` unset, `build_target_os` falls back to
-    // `build_host_os`, which honours a `SAILFIN_HOST_OS` override,
-    // while the emitter's fallback (`llvm/lowering_debug_state.sfn`
-    // `_host_os`) probes the real host and ignores it. Setting
-    // `SAILFIN_HOST_OS` alone therefore keys IR under a target the
-    // emitter did not build for. Every caller today pairs it with an
-    // explicit `SAILFIN_TARGET_OS`, which wins on both sides.
+    // This value also matches what the emitter resolves for the same
+    // module: the emit-time fallback (`llvm/lowering_debug_state.sfn`
+    // `_host_os`) delegates to `build_host_os`, so both sides read one
+    // resolver and a `SAILFIN_HOST_OS` override steers the key and the
+    // emitted platform legs together (SFN-682).
     let target_os = build_target_os();
     let mut out: string[] = [];
     let mut stats = empty_cache_stats();

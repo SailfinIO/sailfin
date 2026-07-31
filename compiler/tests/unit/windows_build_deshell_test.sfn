@@ -87,7 +87,12 @@ test "windows-deshell: leaf helpers degrade without a POSIX subprocess" ![io] {
 // unobservable there. There is no runtime `setenv`, so this is exercised by
 // running the file with the var set:
 //   SAILFIN_BUILD_JOBS=1 build/bin/sfn test <file>
-//   SAILFIN_HOST_OS=Windows SAILFIN_BUILD_JOBS=1 build/bin/sfn test <file>
+//   SAILFIN_HOST_OS=Windows SAILFIN_TARGET_OS=Linux SAILFIN_BUILD_JOBS=1 \
+//       build/bin/sfn test <file>
+// The `SAILFIN_TARGET_OS=Linux` pairing this file's header requires is not
+// optional in that second form: without it the nested build both links for a
+// Windows target and (since SFN-682) emits Windows platform legs, so it fails
+// on a Linux runner for reasons unrelated to what the test asserts.
 // Unset (the plain suite run) the assertion degrades to the range check.
 test "windows-deshell: SAILFIN_BUILD_JOBS=1 forces serial on every host" ![io] {
     let override_value = env.get("SAILFIN_BUILD_JOBS");
