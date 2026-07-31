@@ -4,11 +4,16 @@
 // `EmitNativeResult.diags` sidecar added alongside it carries a code, a
 // stage, a severity, and a real span.
 //
-// Scope: emission only, via `emit_native_with_module_name` directly. The
-// primary text/lines path does not thread `diags` out at all (SFN-608), so a
-// CLI-level e2e assertion is not yet possible.
+// Scope: emission only, via the two in-process entry points. SFN-608 gave the
+// primary lines path its own `EmitNativeLines` carrier, so both are covered
+// here; the CLI-level assertion lives in
+// `compiler/tests/e2e/emit_native_structured_diagnostic_test.sfn`.
 import { diag_is_error } from "../../src/diagnostic";
-import { emit_native_diag_lines, emit_native_with_module_name } from "../../src/emit_native";
+import {
+    emit_native_diag_lines,
+    emit_native_lines_with_module_name,
+    emit_native_with_module_name
+} from "../../src/emit_native";
 import { parse_program } from "../../src/parser/mod";
 import { index_of } from "../../src/string_utils";
 
@@ -83,6 +88,33 @@ test "emit_native: the renderer emits the code and a location line" ![io] {
         index += 1;
     }
     assert found;
+}
+
+// SFN-608 parity guard. `emit_native_lines_with_module_name` is the path every
+// normal compile takes; `emit_native_with_module_name` is the fallback one the
+// tests above cover. Both project the same `_emit_native_state` core, so their
+// sidecars must agree entry-for-entry — if they ever diverge, the primary path
+// is silently dropping (or inventing) diagnostics that no other test would see.
+//
+// Both calls run against the SAME `Program`, so this also guards the
+// lifting-idempotence assumption the deleted fallback reports rest on: if
+// `lift_non_capturing_lambdas` ever mutated its input, the second emit would
+// diverge and this test would catch it.
+test "emit_native: the lines path carries the same diags as the module path" ![io] {
+    let program = parse_program(_unresolved_field_source());
+    let module_result = emit_native_with_module_name(program, "test_emit_native_diag");
+    let lines_result = emit_native_lines_with_module_name(program, "test_emit_native_diag");
+    assert lines_result.diags.length > 0;
+    assert lines_result.diags.length == module_result.diags.length;
+    let mut index: int = 0;
+    loop {
+        if index >= module_result.diags.length { break; }
+        assert lines_result.diags[index].code == module_result.diags[index].code;
+        assert lines_result.diags[index].message == module_result.diags[index].message;
+        assert lines_result.diags[index].severity == module_result.diags[index].severity;
+        assert lines_result.diags[index].stage == module_result.diags[index].stage;
+        index += 1;
+    }
 }
 
 // SFEP-0061 §4 and D2: every previously-untagged site migrates to `note`,

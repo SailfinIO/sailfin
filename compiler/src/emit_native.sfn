@@ -101,21 +101,25 @@ struct EmitNativeResult {
     diags: Diag[];
 }
 
+// The lines-path carrier: the emitted `.sfn-asm` as its line array plus the
+// typed diagnostic sidecar the same emit pass produced. Deliberately NOT a
+// `{ text, diags }` shape — see the size rule above
+// `emit_native_lines_with_module_name`.
+struct EmitNativeLines {
+    lines: string[];
+    diags: Diag[];
+}
+
 // ── Entry points ─────────────────────────────────────────────────────
 fn emit_native(program: Program) -> EmitNativeResult {
     return emit_native_with_module_name(program, "main");
 }
 
-fn emit_native_with_module_name(program: Program, module_name: string) -> EmitNativeResult {
-    // Lambda lifting pre-pass (issue #686): every non-capturing
-    // `Expression.Lambda` becomes a synthesised top-level
-    // `FunctionDeclaration` named `sfn_lambda_<N>`, and the lambda
-    // expression site is rewritten to a `<closure_pair @sfn_lambda_<N> null>`
-    // marker. Capturing lambdas are left untouched until #687.
-    let lifted = lift_non_capturing_lambdas(program);
-    let lifted_program = lifted.program;
-
-    let layout_context = build_layout_context(lifted_program);
+// Shared emit core for both entry points. Private, so the `NativeState`
+// return is an intra-module direct call and never crosses a module
+// boundary — see the size rule documented above
+// `emit_native_lines_with_module_name`.
+fn _emit_native_state(lifted_program: Program, layout_context: LayoutContext, module_name: string) -> NativeState {
     let mut state: NativeState = state_new(layout_context);
     state = state_emit_line(state, "; Sailfin Native Prototype");
     let mut module_line = ".module ";
@@ -137,6 +141,20 @@ fn emit_native_with_module_name(program: Program, module_name: string) -> EmitNa
         }
         index += 1;
     }
+    return state;
+}
+
+fn emit_native_with_module_name(program: Program, module_name: string) -> EmitNativeResult {
+    // Lambda lifting pre-pass (issue #686): every non-capturing
+    // `Expression.Lambda` becomes a synthesised top-level
+    // `FunctionDeclaration` named `sfn_lambda_<N>`, and the lambda
+    // expression site is rewritten to a `<closure_pair @sfn_lambda_<N> null>`
+    // marker. Capturing lambdas are left untouched until #687.
+    let lifted = lift_non_capturing_lambdas(program);
+    let lifted_program = lifted.program;
+
+    let layout_context = build_layout_context(lifted_program);
+    let state = _emit_native_state(lifted_program, layout_context, module_name);
 
     let artifact = NativeArtifact {
         name: "module.sfn-asm",
@@ -161,54 +179,59 @@ fn emit_native_with_module_name(program: Program, module_name: string) -> EmitNa
 }
 
 // Emit native text as its line array, without joining into one string
-// (avoids the join→split round-trip on the emit→lower/write handoff, #1817)
-// and without returning the NativeModule struct (avoids ABI issues in
-// stage2). Callers that need one string wrap this with
-// `lines_to_native_text`; the streaming write/parse paths consume the
-// array directly.
-fn emit_native_lines_with_module_name(program: Program, module_name: string) -> string[] {
+// (avoids the join→split round-trip on the emit→lower/write handoff, #1817).
+//
+// The constraint this shape honours is a SIZE rule, not a struct-return one:
+// no joined `.sfn-asm` text may travel inside a returned struct. Returning
+// the whole joined IR string across a module boundary is what segfaulted on
+// large modules like `compiler/src/native_ir_api.sfn` (`main.sfn`,
+// `compile_to_llvm_with_module`). Struct-by-value returns themselves are
+// routine and on the hot path — `lift_non_capturing_lambdas -> LiftResult`
+// runs first thing in both emit entry points, and `EmitNativeResult` already
+// crosses into `main.sfn`. So the line array and its diagnostics travel
+// together here, while callers that need one string join it in their own
+// frame via `lines_to_native_text`.
+//
+// The rule describes this path, not the whole module: `EmitNativeResult` is
+// the known exception, since its `artifacts[0].contents` is the joined text
+// (`builder_to_string` above). That is the fallback carrier and predates the
+// rule — it is not a licence to add a second one.
+fn emit_native_lines_with_module_name(program: Program, module_name: string) -> EmitNativeLines {
     // Issue #686 — match the lifting in `emit_native_with_module_name`.
     let lifted = lift_non_capturing_lambdas(program);
     let lifted_program = lifted.program;
 
     let layout_context = build_layout_context(lifted_program);
-    let mut state: NativeState = state_new(layout_context);
-    state = state_emit_line(state, "; Sailfin Native Prototype");
-    let mut module_line = ".module ";
-    if module_name.length == 0 { module_line = module_line + "main"; } else {
-        module_line = module_line + module_name;
+    let state = _emit_native_state(lifted_program, layout_context, module_name);
+    if state.builder.lines == null {
+        let empty: string[] = [];
+        return EmitNativeLines { lines: empty, diags: state.diags };
     }
-    state = state_emit_line(state, module_line);
-    if lifted_program.statements.length > 0 {
-        state = state_emit_blank(state);
-    }
-
-    let mut index: int = 0;
-    loop {
-        if index >= lifted_program.statements.length { break; }
-        state = emit_statement(state, lifted_program.statements[index]);
-        let _next_stmt2 = index + 1;
-        if _next_stmt2 < lifted_program.statements.length {
-            state = state_emit_blank(state);
-        }
-        index += 1;
-    }
-    if state.builder.lines == null { return []; }
-    return state.builder.lines;
+    return EmitNativeLines {
+        lines: state.builder.lines,
+        diags: state.diags
+    };
 }
 
-// Emit native text without returning the NativeModule struct (avoids ABI issues in stage2).
+// Convenience projection for callers that only want the joined text. The
+// join happens here, in the caller's frame, so the size rule above still
+// holds. DISCARDS the diagnostic sidecar — a caller that needs to report
+// emit-native diagnostics must use `emit_native_lines_with_module_name` and
+// join with `lines_to_native_text` itself (SFN-608).
 fn emit_native_text_with_module_name(program: Program, module_name: string) -> string {
-    return lines_to_native_text(emit_native_lines_with_module_name(program, module_name));
+    return lines_to_native_text(emit_native_lines_with_module_name(program, module_name).lines);
 }
 
-// Emit native text directly to a file to avoid returning large strings across ABI boundaries.
-// Streams the emitter's line array straight to disk rather than joining
+// Stream an already-emitted line array straight to disk rather than joining
 // to one string first — byte-identical output, one fewer full-text copy
-// (#1817) — and publishes atomically via a sibling temp + rename
-// (SFN-578) so no reader observes a partially-written `.sfn-asm`.
-fn emit_native_text_to_file_with_module_name(program: Program, module_name: string, out_path: string) -> boolean ![io] {
-    let lines = emit_native_lines_with_module_name(program, module_name);
+// (#1817) — publishing atomically via a sibling temp + rename (SFN-578) so
+// no reader observes a partially-written `.sfn-asm`.
+//
+// Takes the lines rather than the `Program` so the caller keeps the emit
+// result in hand and can report its diagnostics before writing (SFN-608);
+// the previous emit-and-write helper returned `boolean` and so could not
+// surface them at all.
+fn write_native_lines_to_file(lines: string[], out_path: string) -> boolean ![io] {
     if !native_lines_have_text(lines) { return false; }
     return _publish_lines_atomic(out_path, lines);
 }
@@ -927,13 +950,7 @@ fn _span_from_source(source_span: SourceSpan?) -> Span? {
 }
 
 // Render each `NativeState.diags` entry as a human-readable line, modelled
-// on `render_lowering_error_diag` (`llvm/utils.sfn`). Note the primary-path
-// gap: `emit_native_lines_with_module_name` /
-// `emit_native_text_with_module_name` do not thread `diags` out at all
-// (only `emit_native_with_module_name`'s `EmitNativeResult` does), so this
-// renderer only sees diagnostics from callers reaching that entry point —
-// the fallback branches in `main.sfn`. Closing that gap needs a carrier on
-// the struct-free lines path and is tracked as SFN-608.
+// on `render_lowering_error_diag` (`llvm/utils.sfn`).
 fn emit_native_diag_lines(diags: Diag[]) -> string[] {
     let mut lines: string[] = [];
     let mut index: int = 0;

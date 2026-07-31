@@ -1,0 +1,117 @@
+// compiler/tests/e2e/emit_native_structured_diagnostic_test.sfn
+//
+// Regression for the emit-native structured-diagnostic sidecar reaching
+// stderr on the PRIMARY `sfn emit llvm` path (SFN-608). Before that fix the
+// sidecar was reported only on the FALLBACK branches of the `main.sfn`
+// compile entry points (native-text emission empty, or text-based LLVM
+// lowering failing); the happy path — native text non-empty and lowering
+// succeeding — never called `_report_emit_native_diags`, so a `note`
+// diagnostic like `E1017` (a `?` operator surviving try-desugaring in an
+// unsupported position — see `emit_native.sfn::emit_function`) was dropped
+// even under `SAILFIN_DEBUG_LOWERING=1`. The input below deliberately takes
+// that happy path, so this test fails if the primary-path carrier regresses.
+//
+// The trigger below is a `match <expr>?` subject: `statement_has_hoistable_try`
+// (`emit_native_desugar_try.sfn`) does not list `MatchStatement`, and
+// `dt_nested`'s `MatchStatement` arm only recurses into case bodies, leaving
+// the subject expression's `?` untouched — so it survives desugaring and
+// hits the `E1017` note. Verified against the pinned seed
+// (`build/toolchains/seed/bin/sfn`, which predates the SFN-608 fix): the
+// residual `.match g()?` line still lowers to valid LLVM IR (`sfn emit llvm`
+// exits 0 with empty stderr under `SAILFIN_DEBUG_LOWERING=1`), confirming
+// this input takes the primary/happy path where diags are currently
+// dropped rather than the already-working fallback path. `sfn emit native`
+// confirms the note is generated at all: the emitted `.sfn-asm` carries the
+// `; native backend: `?` operator is only supported ...` comment
+// (`state_add_diag` always emits a matching `; <message>` line).
+//
+// Native e2e per `.claude/rules/no-bash-e2e.md`: drives the compiler via
+// `process.run_capture` with an EXPLICIT env array (never raw
+// `process.environ()`) and asserts on captured stderr with `sfn/strings`.
+import { find } from "sfn/strings";
+import { with_tmp_dir } from "sfn/test";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+// `match g()?` — the `?` sits in a match subject, a position
+// `emit_native_desugar_try.sfn` does not hoist or recurse into, so it
+// survives desugaring and reaches `emit_function`'s residual-`?` check
+// (`E1017`). `g()` and the enclosing `f()` both return `Result<int, string>`
+// so the `?` type rules (`typecheck/try_and_conditional.sfn`) are satisfied
+// and the program clears typecheck/effects/ownership to reach emit.
+fn _trigger_src() -> string {
+    return "fn g() -> Result<int, string> {\n"
+        + "    return Result.Ok { value: 1 };\n"
+        + "}\n"
+        + "\n"
+        + "fn f() -> Result<int, string> {\n"
+        + "    match g()? {\n"
+        + "        0 => {\n"
+        + "            return Result.Ok { value: 0 };\n"
+        + "        }\n"
+        + "        other => {\n"
+        + "            return Result.Ok { value: other };\n"
+        + "        }\n"
+        + "    }\n"
+        + "    return Result.Err { error: \"unreachable\" };\n"
+        + "}\n";
+}
+
+// A minimal explicit child env (never raw `process.environ()`, per
+// `.claude/rules/no-bash-e2e.md`). `sfn emit llvm` with no `-o` routes to
+// `print_llvm_with_module` and never shells out to `clang`, so `PATH` is
+// defence-in-depth rather than a hard requirement here; `SAILFIN_TEST_SCRATCH`
+// is load-bearing, keeping a parallel run off the fixed `build/sailfin` cache
+// dir. `debug_lowering` gates the one variable under test.
+fn _child_env(debug_lowering: boolean) -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    if debug_lowering { e.push("SAILFIN_DEBUG_LOWERING=1"); }
+    return e;
+}
+
+test "emit-native: structured diagnostic reaches stderr under SAILFIN_DEBUG_LOWERING" ![io] {
+    let code = with_tmp_dir(fn (dir: string) -> int {
+        let src = dir + "/e1017_probe.sfn";
+        fs.writeFile(src, _trigger_src());
+        let exit = process.run_capture([_sfn_bin(), "emit", "llvm", src], _child_env(true));
+        let _out = process.capture_take_stdout();
+        let err = process.capture_take_stderr();
+        // Exit status first: if the probe ever stops compiling, this reports
+        // as a non-zero exit rather than as a confusing "substring not found".
+        assert exit == 0;
+        assert find(err, "[emit-native] emit-native [E1017]:", 0) >= 0;
+        // The `-->` line carries the module slug, not the raw path:
+        // `sfn emit llvm` derives `module_name_from_path(path)`
+        // (`cli/commands/emit.sfn`), which strips the `.sfn` extension, and
+        // that slug is what gets stamped as `Diag.file_path`. Assert the
+        // extension-less basename plus the `:` the renderer appends before
+        // line:col, so this still pins a real location rather than a bare
+        // `-->` that any future diagnostic could satisfy.
+        assert find(err, "-->", 0) >= 0;
+        assert find(err, "e1017_probe:", 0) >= 0;
+        return 0;
+    });
+    assert code == 0;
+}
+
+test "emit-native: structured diagnostic is silent without SAILFIN_DEBUG_LOWERING" ![io] {
+    let code = with_tmp_dir(fn (dir: string) -> int {
+        let src = dir + "/e1017_probe.sfn";
+        fs.writeFile(src, _trigger_src());
+        let exit = process.run_capture([_sfn_bin(), "emit", "llvm", src], _child_env(false));
+        let _out = process.capture_take_stdout();
+        let err = process.capture_take_stderr();
+        assert exit == 0;
+        assert find(err, "[emit-native] emit-native [E1017]", 0) < 0;
+        return 0;
+    });
+    assert code == 0;
+}
