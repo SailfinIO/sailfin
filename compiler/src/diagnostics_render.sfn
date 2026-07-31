@@ -42,7 +42,7 @@ import {
     EffectRequirement,
     EffectViolation,
     UnrecognizedEffectViolation
-} from "./effect_checker";
+} from "./effect_checker/types";
 import { canonical_effects } from "./effect_taxonomy";
 import { substring } from "./string_utils";
 import { Token } from "./token";

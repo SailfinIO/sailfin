@@ -41,13 +41,11 @@ import {
     unrecognized_effect_violation_to_diagnostic
 } from "./diagnostics_render";
 import {
-    CapabilityViolation,
-    EffectViolation,
-    UnrecognizedEffectViolation,
     validate_capsule_capabilities,
     validate_effects_with_imports,
     validate_recognized_effects
 } from "./effect_checker";
+import { CapabilityViolation, EffectViolation, UnrecognizedEffectViolation } from "./effect_checker/types";
 import { ImportSymbolTable } from "./effect_imports";
 import { Diagnostic, diagnostic_to_diag } from "./typecheck_types";
 

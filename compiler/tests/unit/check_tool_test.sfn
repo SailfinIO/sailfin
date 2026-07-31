@@ -31,7 +31,7 @@
 // Imports — real exported symbols (light closure via diagnostics_render)
 // -------------------------------------------------------------------
 import { code_for_missing_effect, join_effects } from "../../src/diagnostics_render";
-import { EffectRequirement } from "../../src/effect_checker";
+import { EffectRequirement } from "../../src/effect_checker/types";
 import { number_to_string } from "../../src/num_format";
 import { CheckSummary, render_summary } from "../../src/tools/check";
 

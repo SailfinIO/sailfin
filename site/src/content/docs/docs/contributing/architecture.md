@@ -15,7 +15,7 @@ Source (.sfn)
   → Lexer (lexer.sfn) → Tokens
   → Parser (parser.sfn) → AST (ast.sfn)
   → Type Checker (typecheck/) → Validated AST
-  → Effect Checker (effect_checker.sfn) → Effect-safe AST
+  → Effect Checker (effect_checker/) → Effect-safe AST
   → Native Emitter (emit_native.sfn) → .sfn-asm IR (native_ir.sfn)
   → LLVM Lowering (llvm/lowering/) → LLVM IR
   → clang + platform linker → Native Binary
@@ -30,7 +30,7 @@ Source (.sfn)
 | `compiler/src/parser.sfn` | Parser → AST |
 | `compiler/src/ast.sfn` | AST node definitions |
 | `compiler/src/typecheck/` | Type checking, interface conformance |
-| `compiler/src/effect_checker.sfn` | Effect validation |
+| `compiler/src/effect_checker/` | Effect validation, scope tracking, and capability checks |
 | `compiler/src/emit_native.sfn` | Emit `.sfn-asm` IR |
 | `compiler/src/native_ir.sfn` | IR representation |
 | `compiler/src/llvm/lowering/entrypoints.sfn` | LLVM IR generation |
