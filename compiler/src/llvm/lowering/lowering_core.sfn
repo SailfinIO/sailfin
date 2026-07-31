@@ -494,7 +494,12 @@ fn lower_to_llvm_lines_with_parsed_context_for_tests(native_module: NativeModule
     }
 
     // ---- @main body ----
-    let mut harness: string[] = ["define i32 @main(i32 %argc, i8** %argv) {", "entry:", "  %frame = alloca [3 x i64]", "  %jmpbuf = alloca [32 x i64], align 16", "  %frame.i8 = bitcast [3 x i64]* %frame to i8*", "  %jmpbuf.i8 = bitcast [32 x i64]* %jmpbuf to i8*", "  br label %region0"];
+    // The `[64 x i64]` jmpbuf width and its `align 16` must stay in step
+    // with the other two emission sites (`emission.sfn`'s `@main` wrapper
+    // and `instructions_try.sfn`'s per-`try` alloca); 512 bytes covers
+    // glibc aarch64's ~312-byte `jmp_buf` (SFN-644) and 16-alignment is
+    // load-bearing for MSVC's `_JUMP_BUFFER` (SFN-549).
+    let mut harness: string[] = ["define i32 @main(i32 %argc, i8** %argv) {", "entry:", "  %frame = alloca [3 x i64]", "  %jmpbuf = alloca [64 x i64], align 16", "  %frame.i8 = bitcast [3 x i64]* %frame to i8*", "  %jmpbuf.i8 = bitcast [64 x i64]* %jmpbuf to i8*", "  br label %region0"];
 
     // before_all region: on success continue to region 1 (first test); on
     // failure report the hook, cascade a `fail` for every test, and skip

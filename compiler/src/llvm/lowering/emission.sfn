@@ -703,16 +703,19 @@ fn emit_llvm_function(function: NativeFunction, functions: NativeFunction[], eff
         // (SFN-549). MSVC's `_JUMP_BUFFER` is `__declspec(align(16))`
         // because `__intrinsic_setjmp` saves xmm6-xmm15 with `movdqa`,
         // which #GPs on an 8-mod-16 address and surfaces as 0xC0000005.
-        // Without this clause LLVM uses the `[32 x i64]` ABI alignment of
+        // Without this clause LLVM uses the `[64 x i64]` ABI alignment of
         // 8, and the synthesized `@main` wrapper landed the buffer at
         // `rsp+0x58` — misaligned — faulting on the very first `setjmp`
         // before argument dispatch. glibc's `_setjmp` uses no aligned SSE
         // stores, which is why 8 sufficed on Linux for so long.
         // Unconditional rather than target-conditioned: valid and free on
         // ELF/Mach-O, mandatory on COFF.
-        wrapper_lines.push("  %jmpbuf = alloca [32 x i64], align 16");
+        // The width is `[64 x i64]` = 512 bytes, the same reserve
+        // `sfn_exception_alloc_frame` mallocs. It covers glibc aarch64's
+        // ~312-byte `jmp_buf`, which the previous 256 did not (SFN-644).
+        wrapper_lines.push("  %jmpbuf = alloca [64 x i64], align 16");
         wrapper_lines.push("  %frame_i8 = bitcast [3 x i64]* %frame to i8*");
-        wrapper_lines.push("  %jmpbuf_i8 = bitcast [32 x i64]* %jmpbuf to i8*");
+        wrapper_lines.push("  %jmpbuf_i8 = bitcast [64 x i64]* %jmpbuf to i8*");
         // Convert argv to SfnArray<string>* only when the user body
         // actually declares an argv parameter — `fn main()` (no params)
         // doesn't need it and skipping the call avoids a startup heap
@@ -736,7 +739,7 @@ fn emit_llvm_function(function: NativeFunction, functions: NativeFunction[], eff
                 + argv_llvm_type);
         }
         // Exception frame setup mirrors `instructions_try.sfn` (the
-        // canonical `[3 x i64]` frame + `[32 x i64]` jmpbuf layout
+        // canonical `[3 x i64]` frame + `[64 x i64]` jmpbuf layout
         // documented in `runtime/sfn/exception.sfn` §2.4.2).
         wrapper_lines.push("  %jmpbuf_slot = getelementptr [3 x i64], [3 x i64]* %frame, i64 0, i64 1");
         wrapper_lines.push("  %jmpbuf_addr = ptrtoint i8* %jmpbuf_i8 to i64");

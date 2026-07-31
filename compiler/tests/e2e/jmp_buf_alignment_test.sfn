@@ -5,26 +5,43 @@
 // 8-mod-16 address and surfaces as `0xC0000005`. Every jmp_buf alloca in
 // the emitted LLVM IR must therefore carry `align 16` — the native
 // Windows compiler faulted on every invocation before argument dispatch
-// without it. This pins two of the three emission sites from live `sfn
+// without it. Two of the three emission sites are pinned from live `sfn
 // emit llvm` output: the `@main` exception-frame wrapper
 // (`compiler/src/llvm/lowering/emission.sfn`) and a user `try` block
-// (`compiler/src/llvm/lowering/instructions_try.sfn`). The third site
+// (`compiler/src/llvm/lowering/instructions_try.sfn`). The third
 // (`compiler/src/llvm/lowering/lowering_core.sfn`, the `sfn test` harness
-// `@main`) is a harness-generator string template, not reachable from a
-// plain `sfn emit` on a fixture, so it is not covered here.
+// `@main`) is a harness-generator string template that no `sfn emit` on a
+// fixture reaches, so SFN-644 pins it from the other direction: `sfn
+// test` writes the synthesized harness IR to `<scratch>/test.ll`
+// (`cli/commands/test/single_process_run.sfn`), which
+// `SAILFIN_TEST_KEEP_SCRATCH=1` preserves for reading.
 //
-// Width-agnostic by design: a pending separate change widens the jmp_buf
-// array from `[32 x i64]` to `[64 x i64]`, so this matches any
-// `alloca [N x i64]` line rather than hardcoding 32 — except the
-// unrelated 3-word exception-frame alloca (`[3 x i64]`, a different,
-// fixed-width struct that carries no alignment requirement), which is
-// excluded by its own distinct width rather than by name (the try-block
-// jmp_buf is a generic `%lN` local pointer, not literally named
-// `%jmpbuf` — only the two `@main`-wrapper sites use that literal name).
+// SFN-644 additionally pins the alloca *width* at `[64 x i64]` = 512
+// bytes. The three sites were 256 bytes, short of glibc aarch64's
+// ~312-byte `jmp_buf` (`__jmpbuf[22]` longs + saved sigset), so every
+// executed `try` wrote ~56 bytes into adjacent frame slots. 512 matches
+// the `malloc(512)` reserve in `sfn_exception_alloc_frame`; the heap
+// reserve alone did not cover this, because compiler-emitted `try` never
+// takes the heap path (`try_catch_frames_test.sfn` asserts
+// `@sfn_try_enter` is never called from emitted code). Asserting on
+// *every* jmp_buf alloca in live IR is what makes this a divergence
+// guard: widening one emission site without the others fails here.
 //
-// No-bash e2e (`.claude/rules/no-bash-e2e.md`): drives `sfn emit llvm` on
-// a scratch fixture as a subprocess and asserts on the captured `.ll`
-// text.
+// The line filter matches any `alloca [N x i64]` except the unrelated
+// 3-word exception-frame alloca (`[3 x i64]`, a different, fixed-width
+// struct that carries no alignment requirement), which is excluded by
+// its own distinct width rather than by name (the try-block jmp_buf is a
+// generic `%lN` local pointer, not literally named `%jmpbuf` — only the
+// two `@main`-wrapper sites use that literal name). Matching broadly and
+// then asserting the exact width is deliberate: a site regressed back to
+// `[32 x i64]` is still collected, and then fails the width assertion,
+// rather than silently dropping out of the match set.
+//
+// No-bash e2e (`.claude/rules/no-bash-e2e.md`): drives `sfn emit llvm`
+// and `sfn test` on scratch fixtures as subprocesses and asserts on the
+// captured `.ll` text. Both nested runners take
+// `clean_runner_env(nested_runner_scratch(...))` so the child cannot bind
+// to the parent pool's state (SFN-401).
 import { contains, split } from "sfn/strings";
 import { clean_runner_env, nested_runner_scratch } from "sfn/test";
 
@@ -71,11 +88,57 @@ fn _emit_try_fixture(target_os: string, label: string) -> string ![io] {
     return fs.readFile(ll);
 }
 
+// A fixture with no `try` of its own, so the generated `test.ll` carries
+// exactly one jmp_buf alloca: `lowering_core.sfn`'s harness `@main`.
+// The test additionally pins that site by its literal `%jmpbuf` name
+// rather than relying on it being the only match, so a fixture or
+// `sfn/test` change that later drags in a second jmp_buf (`expect.sfn`
+// uses `try`) narrows the assertion instead of silently voiding it — a
+// try-block jmp_buf is a generic `%lN` local, never `%jmpbuf`, and the
+// harness replaces the `emission.sfn` wrapper that would share the name.
+fn _harness_fixture_source() -> string {
+    return "test \"jmp_buf harness fixture: trivially passes\" ![pure] {\n"
+        + "    assert 1 == 1;\n"
+        + "}\n";
+}
+
+// Run `sfn test` on a fixture in a fresh scratch dir and return the
+// synthesized harness IR that the run wrote to `<scratch>/test.ll`, or ""
+// on any failure.
+//
+// The child leaves `test.ll` behind because `clean_runner_env` pins its
+// `SAILFIN_TEST_SCRATCH`: a caller-pinned root resolves `owned: false`,
+// and `_cleanup_test_scratch` early-returns on `!owned` rather than
+// removing a tree it did not create
+// (`cli/commands/test/cache_scratch.sfn`). `SAILFIN_TEST_KEEP_SCRATCH=1`
+// is pushed as a second, independent guard on the same teardown so this
+// test does not silently depend on that ownership rule alone.
+//
+// `--no-test-cache` is load-bearing, not belt-and-braces: on a cache hit
+// the child reuses the previously linked test binary and never runs
+// lowering, so no `test.ll` is written and the read below finds nothing.
+// That made this a pool-only failure — green on a solo run that missed
+// the cache, red on the very next run once the fixture was cached.
+fn _emit_harness_ir(label: string) -> string ![io] {
+    let scratch = nested_runner_scratch(label);
+    fs.createDirectory(scratch, true);
+    let src = scratch + "/harness_fixture_test.sfn";
+    fs.writeFile(src, _harness_fixture_source());
+    let mut child_env = clean_runner_env(scratch);
+    child_env.push("SAILFIN_TEST_KEEP_SCRATCH=1");
+    let exit = process.run_capture([_sfn_bin(), "test", "--no-test-cache", src], child_env);
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return ""; }
+    let ll = scratch + "/test.ll";
+    if !fs.exists(ll) { return ""; }
+    return fs.readFile(ll);
+}
+
 // Every line allocating an `[N x i64]` array that is NOT the 3-word
 // exception frame is presumed to be a jmp_buf alloca (SFN-549's two
 // covered sites: `%jmpbuf` in the `@main` wrapper, `%lN` in a user try
-// block) — width-agnostic so the pending 32->64 widening does not
-// require touching this test.
+// block).
 fn _jmpbuf_alloca_lines(ir: string) -> string[] ![pure] {
     let lines = split(ir, "\n");
     let mut out: string[] = [];
@@ -91,12 +154,14 @@ fn _jmpbuf_alloca_lines(ir: string) -> string[] ![pure] {
     return out;
 }
 
-// Assert every jmp_buf alloca in `ir` carries `align 16`, and that at
-// least two were found (the `@main` wrapper and the try block) — a
-// vacuous zero-match pass would silently stop pinning anything.
-fn _assert_all_jmpbuf_allocas_aligned(ir: string) ![pure] {
+// Assert every jmp_buf alloca in `ir` is 512 bytes and carries
+// `align 16`, and that at least `min_count` were found — a vacuous
+// zero-match pass would silently stop pinning anything. `min_count` is 2
+// for the `sfn emit` fixture (the `@main` wrapper and the try block) and
+// 1 for the `sfn test` harness IR (the harness `@main` only).
+fn _assert_jmpbuf_allocas_well_formed(ir: string, min_count: int) ![pure] {
     let lines = _jmpbuf_alloca_lines(ir);
-    assert lines.length >= 2;
+    assert lines.length >= min_count;
     let mut i: int = 0;
     loop {
         if i >= lines.length { break; }
@@ -105,18 +170,33 @@ fn _assert_all_jmpbuf_allocas_aligned(ir: string) ![pure] {
         // save of xmm6-xmm15 #GPs on an 8-mod-16 address (0xC0000005)
         // before argument dispatch.
         assert contains(lines[i], "align 16");
+        // Critical assertion (SFN-644): anything narrower than
+        // `[64 x i64]` overruns glibc aarch64's ~312-byte `jmp_buf`.
+        assert contains(lines[i], "alloca [64 x i64]");
         i += 1;
     }
 }
 
-test "jmp_buf alignment: every jmp_buf alloca carries align 16 for a Linux target" ![io] {
+test "jmp_buf layout: every jmp_buf alloca is 512 bytes and 16-aligned for a Linux target" ![io] {
     let ir = _emit_try_fixture("Linux", "jmpbuf-align-linux");
     assert ir.length > 0;
-    _assert_all_jmpbuf_allocas_aligned(ir);
+    _assert_jmpbuf_allocas_well_formed(ir, 2);
 }
 
-test "jmp_buf alignment: every jmp_buf alloca carries align 16 for a Windows target" ![io] {
+test "jmp_buf layout: every jmp_buf alloca is 512 bytes and 16-aligned for a Windows target" ![io] {
     let ir = _emit_try_fixture("Windows", "jmpbuf-align-windows");
     assert ir.length > 0;
-    _assert_all_jmpbuf_allocas_aligned(ir);
+    _assert_jmpbuf_allocas_well_formed(ir, 2);
+}
+
+// The third emission site, which no `sfn emit` on a fixture reaches. The
+// named-`%jmpbuf` assertion is the one that cannot pass on the strength
+// of the other two sites being correct: it pins `lowering_core.sfn`'s
+// harness `@main` alloca specifically, so widening that site out of step
+// with the other two fails here (SFN-644).
+test "jmp_buf layout: the sfn test harness @main jmp_buf is 512 bytes and 16-aligned" ![io] {
+    let ir = _emit_harness_ir("jmpbuf-harness");
+    assert ir.length > 0;
+    assert contains(ir, "%jmpbuf = alloca [64 x i64], align 16");
+    _assert_jmpbuf_allocas_well_formed(ir, 1);
 }
