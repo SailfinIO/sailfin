@@ -62,11 +62,11 @@ fn _trigger_src() -> string {
 }
 
 // A minimal explicit child env (never raw `process.environ()`, per
-// `.claude/rules/no-bash-e2e.md`): `PATH` because the emit path needs
-// `clang`/its linker downstream of LLVM IR generation, and
-// `SAILFIN_TEST_SCRATCH` so a parallel run does not collide on the fixed
-// `build/sailfin` cache dir. `debug_lowering` gates the one variable under
-// test.
+// `.claude/rules/no-bash-e2e.md`). `sfn emit llvm` with no `-o` routes to
+// `print_llvm_with_module` and never shells out to `clang`, so `PATH` is
+// defence-in-depth rather than a hard requirement here; `SAILFIN_TEST_SCRATCH`
+// is load-bearing, keeping a parallel run off the fixed `build/sailfin` cache
+// dir. `debug_lowering` gates the one variable under test.
 fn _child_env(debug_lowering: boolean) -> string[] ![io] {
     let mut e: string[] = [];
     let path = env.get("PATH");
@@ -84,6 +84,9 @@ test "emit-native: structured diagnostic reaches stderr under SAILFIN_DEBUG_LOWE
         let exit = process.run_capture([_sfn_bin(), "emit", "llvm", src], _child_env(true));
         let _out = process.capture_take_stdout();
         let err = process.capture_take_stderr();
+        // Exit status first: if the probe ever stops compiling, this reports
+        // as a non-zero exit rather than as a confusing "substring not found".
+        assert exit == 0;
         assert find(err, "[emit-native] emit-native [E1017]:", 0) >= 0;
         // The `-->` line carries the module slug, not the raw path:
         // `sfn emit llvm` derives `module_name_from_path(path)`
@@ -94,7 +97,6 @@ test "emit-native: structured diagnostic reaches stderr under SAILFIN_DEBUG_LOWE
         // `-->` that any future diagnostic could satisfy.
         assert find(err, "-->", 0) >= 0;
         assert find(err, "e1017_probe:", 0) >= 0;
-        assert exit == 0;
         return 0;
     });
     assert code == 0;
@@ -107,8 +109,8 @@ test "emit-native: structured diagnostic is silent without SAILFIN_DEBUG_LOWERIN
         let exit = process.run_capture([_sfn_bin(), "emit", "llvm", src], _child_env(false));
         let _out = process.capture_take_stdout();
         let err = process.capture_take_stderr();
-        assert find(err, "[emit-native] emit-native [E1017]", 0) < 0;
         assert exit == 0;
+        assert find(err, "[emit-native] emit-native [E1017]", 0) < 0;
         return 0;
     });
     assert code == 0;

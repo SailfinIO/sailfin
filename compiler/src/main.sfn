@@ -16,7 +16,6 @@ import {
     emit_native,
     emit_native_diag_lines,
     emit_native_lines_with_module_name,
-    emit_native_text_with_module_name,
     emit_native_with_module_name,
     report_reexport_violations,
     write_native_lines_to_file
@@ -380,6 +379,12 @@ fn compile_to_llvm(source: string) -> string ![io] {
     // No report here: the primary emit above already reported this program's
     // diagnostics, and re-emitting the same `Program` is deterministic — so a
     // second report would print a verbatim duplicate (SFN-608).
+    //
+    // The no-duplicate property is per entry point, not per build: a full
+    // `sfn build` stages a `native` emit and then an `llvm` emit for the same
+    // module (`capsule_resolver/staging.sfn`, `capsule_resolver/compile.sfn`),
+    // and `emit_llvm_with_retry` re-runs on each attempt — so the same note
+    // legitimately appears once per compile pass under the debug gate.
     let native_result = emit_native_with_module_name(program, "main");
     let ir = lower_to_llvm_ir(native_result.module);
     if trace_emit {

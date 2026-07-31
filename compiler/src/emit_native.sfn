@@ -191,6 +191,11 @@ fn emit_native_with_module_name(program: Program, module_name: string) -> EmitNa
 // crosses into `main.sfn`. So the line array and its diagnostics travel
 // together here, while callers that need one string join it in their own
 // frame via `lines_to_native_text`.
+//
+// The rule describes this path, not the whole module: `EmitNativeResult` is
+// the known exception, since its `artifacts[0].contents` is the joined text
+// (`builder_to_string` above). That is the fallback carrier and predates the
+// rule — it is not a licence to add a second one.
 fn emit_native_lines_with_module_name(program: Program, module_name: string) -> EmitNativeLines {
     // Issue #686 — match the lifting in `emit_native_with_module_name`.
     let lifted = lift_non_capturing_lambdas(program);

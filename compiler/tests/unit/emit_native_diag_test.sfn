@@ -95,6 +95,11 @@ test "emit_native: the renderer emits the code and a location line" ![io] {
 // tests above cover. Both project the same `_emit_native_state` core, so their
 // sidecars must agree entry-for-entry — if they ever diverge, the primary path
 // is silently dropping (or inventing) diagnostics that no other test would see.
+//
+// Both calls run against the SAME `Program`, so this also guards the
+// lifting-idempotence assumption the deleted fallback reports rest on: if
+// `lift_non_capturing_lambdas` ever mutated its input, the second emit would
+// diverge and this test would catch it.
 test "emit_native: the lines path carries the same diags as the module path" ![io] {
     let program = parse_program(_unresolved_field_source());
     let module_result = emit_native_with_module_name(program, "test_emit_native_diag");
