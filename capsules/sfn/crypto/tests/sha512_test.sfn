@@ -1,0 +1,29 @@
+// Tests for sfn/crypto SHA-512 (pure-Sailfin, FIPS 180-4).
+//
+// The first three vectors are authoritative FIPS 180-4 / RFC 6234 known-answer
+// vectors covering the empty string, the canonical "abc" vector, and a
+// 112-byte input whose padding forces a second 128-byte block. The last two
+// are `sha512sum`-generated boundary cases: 128 bytes lands exactly on the
+// block boundary and 200 bytes crosses it, both forcing a second padding
+// block.
+import { sha512_hex } from "../src/sha512";
+
+test "sha512_hex: empty string" {
+    assert sha512_hex("") == "cf83e1357eefb8bdf1542850d66d8007d620e4050b5715dc83f4a921d36ce9ce47d0d13c5d85f2b0ff8318d2877eec2f63b931bd47417a81a538327af927da3e";
+}
+
+test "sha512_hex: abc" {
+    assert sha512_hex("abc") == "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f";
+}
+
+test "sha512_hex: 896-bit two-block vector" {
+    assert sha512_hex("abcdefghbcdefghicdefghijdefghijkefghijklfghijklmghijklmnhijklmnoijklmnopjklmnopqklmnopqrlmnopqrsmnopqrstnopqrstu") == "8e959b75dae313da8cf4f72814fc143f8f7779c6eb9f7fa17299aeadb6889018501d289e4900f7e4331b99dec4b5433ac7d329eeb6dd26545e96e55b874be909";
+}
+
+test "sha512_hex: 128-byte input on the block boundary" {
+    assert sha512_hex("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa") == "b73d1929aa615934e61a871596b3f3b33359f42b8175602e89f7e06e5f658a243667807ed300314b95cacdd579f3e33abdfbe351909519a846d465c59582f321";
+}
+
+test "sha512_hex: 200-byte input crossing the block boundary" {
+    assert sha512_hex("sailfin-sha512-boundary-sailfin-sha512-boundary-sailfin-sha512-boundary-sailfin-sha512-boundary-sailfin-sha512-boundary-sailfin-sha512-boundary-sailfin-sha512-boundary-sailfin-sha512-boundary-sailfin-") == "e5854be449bdd51df2043c7a594f81e640061b86654dee9dd322efddc08d285b5483bb47b7445391fb684da1fb9272fa57c992e1e0eb18385281b78da80dffb0";
+}
