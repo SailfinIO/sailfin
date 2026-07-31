@@ -43,8 +43,10 @@
 // Style note: arithmetic here is deliberately written one operation per
 // annotated `let`. A parenthesized group used as an operand of another
 // binary operator (`(1 << n) - 1`) does not lower, and an unannotated
-// arithmetic binding infers `double` — both are seed-compiler limits, not
-// preferences, so the decomposition is load-bearing.
+// arithmetic binding infers `double`. Both are compiler limits rather than
+// preferences, so the decomposition is load-bearing — collapsing it back
+// breaks the build. SFN-670 tracks fixing them; this file can be condensed
+// once it lands.
 // Bits per limb, and the derived base/mask. Changing these three together
 // is the only supported way to retune the representation.
 fn _limb_bits() -> int { return 16; }
@@ -435,9 +437,12 @@ fn _parse_decimal_literal(text: string) -> _DecimalLiteral {
         i += 1;
     }
 
-    // Guard the input-driven big-integer work below. No real literal carries
-    // a thousand significant digits; one that does falls back to the `double`
-    // path — today's behaviour — rather than costing unbounded compile time.
+    // Guard the input-driven big-integer work below. Rejecting here falls
+    // back to the `double` operand, which means this literal is rounded
+    // twice — the very thing SFEP-0054 §3.3 forbids — so the bound is set
+    // far above any literal a human or generator would write rather than at
+    // a value that trades correctness for time. A thousand *significant*
+    // digits is roughly forty times what an `f64` can distinguish.
     if digits.length > 1024 { return _failed_literal(); }
 
     return _DecimalLiteral {

@@ -132,10 +132,13 @@ fn _coerce_numeric_to_float_target(operand: LLVMOperand, operand_type: string, t
     }
     if target == "half" {
         if operand_type == "double" {
-            // Expected-type literal binding: a fractional literal lowers as a
-            // `double` constant (core.sfn number-literal path), so
-            // `let x: f16 = 0.001` narrows into the `half` slot here. Mirrors
-            // the `double -> float` arm above (SFEP-0054 §3.3).
+            // A `double` value narrowing into a `half` slot. Since SFN-611 an
+            // expected-type literal binding (`let x: f16 = 0.001`) no longer
+            // arrives here — it is emitted as a `half` constant directly, so
+            // it rounds once from the decimal rather than through this
+            // `fptrunc`, per SFEP-0054 §3.3. What still reaches this arm is a
+            // genuine `double` operand: an `as f16` cast, including one whose
+            // source is a literal. Mirrors the `double -> float` arm above.
             let temp_name = format_temp_name(temp_index);
             current_lines.push("  " + temp_name + " = fptrunc double " + operand.value
                 + " to half");

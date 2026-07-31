@@ -106,3 +106,28 @@ test "decimal-literal: non-low-precision carriers and malformed text are rejecte
     assert decimal_literal_to_llvm_hex("1.2.3", "half").length == 0;
     assert decimal_literal_to_llvm_hex("1e", "half").length == 0;
 }
+
+// A negative literal that rounds to zero must keep its sign bit rather than
+// collapse to +0.
+test "decimal-literal: negative zero keeps its sign" {
+    assert decimal_literal_to_llvm_hex("-0.0", "half") == "0xH8000";
+    assert decimal_literal_to_llvm_hex("-0", "half") == "0xH8000";
+    assert decimal_literal_to_llvm_hex("-0.0", "bfloat") == "0xR8000";
+    assert decimal_literal_to_llvm_hex("-1e-30", "half") == "0xH8000";
+}
+
+// `dexp_guard` short-circuits magnitudes far outside the format's range so
+// the big integers stay bounded. These straddle the guard in both directions
+// for both formats: the inner pair runs the full division path, the outer
+// pair takes the short-circuit, and both must reach the same answer. A guard
+// set too tight would show up here as a finite value turning into infinity.
+test "decimal-literal: values either side of the range guard agree" {
+    assert decimal_literal_to_llvm_hex("1e20", "half") == "0xH7C00";
+    assert decimal_literal_to_llvm_hex("1e21", "half") == "0xH7C00";
+    assert decimal_literal_to_llvm_hex("1e-20", "half") == "0xH0000";
+    assert decimal_literal_to_llvm_hex("1e-21", "half") == "0xH0000";
+    assert decimal_literal_to_llvm_hex("1e60", "bfloat") == "0xR7F80";
+    assert decimal_literal_to_llvm_hex("1e61", "bfloat") == "0xR7F80";
+    assert decimal_literal_to_llvm_hex("1e-60", "bfloat") == "0xR0000";
+    assert decimal_literal_to_llvm_hex("1e-61", "bfloat") == "0xR0000";
+}
