@@ -64,13 +64,27 @@ test "runtime-obj identity: key folds the raw target under a scheme tag" ![pure]
     assert expect_eq_str(_runtime_obj_key_with_target("BASE", "Linux"), "BASE\ntgt1:Linux").ok;
 }
 
-test "runtime-obj identity: key folds the target clang flags alongside the target" ![pure] {
-    // Windows contributes `-target x86_64-pc-windows-msvc`. Folding the
-    // flags — not just the OS string — means a future arch or triple
-    // split lands in the key without a second edit here, matching the
-    // precedent in `clang_argv.sfn`'s toolchain key.
-    let key = _runtime_obj_key_with_target("BASE", "Windows");
-    assert expect_eq_str(key, "BASE\ntgt1:Windows -target x86_64-pc-windows-msvc").ok;
+test "runtime-obj identity: key folds the raw target and nothing after it" ![pure] {
+    // The fold is exactly the scheme tag plus the raw target string,
+    // for every target including Windows. It deliberately does NOT
+    // append `target_clang_flags`: those are a total function of
+    // `target_os`, so they add no distinguishing power, and appending
+    // them let a crafted target spell the same key (see the absorption
+    // test below). Pinning the literal keeps the scheme greppable and
+    // makes an accidental format change loud.
+    assert expect_eq_str(_runtime_obj_key_with_target("BASE", "Windows"), "BASE\ntgt1:Windows").ok;
+}
+
+test "runtime-obj identity: a crafted target cannot absorb a following component" ![pure] {
+    // SFN-677. `target_os` is an unvalidated env string, so the fold
+    // puts it last with nothing after it. While the flags were
+    // appended, these two targets — which compile to different objects,
+    // one with the MSVC triple and one without, since
+    // `target_os_is_windows` is an exact match — collapsed onto one
+    // key, resurrecting the cross-target reuse SFN-617 closed.
+    let plain = _runtime_obj_key_with_target("BASE", "Windows");
+    let crafted = _runtime_obj_key_with_target("BASE", "Windows -target x86_64-pc-windows-msvc");
+    assert expect_eq_bool(plain == crafted, false).ok;
 }
 
 test "runtime-obj identity: keys differ across targets for one base key" ![pure] {

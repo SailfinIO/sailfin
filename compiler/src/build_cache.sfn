@@ -18,7 +18,17 @@
 //       || compiler_version
 //       || canonical(flags)
 //       || slug
+//       || "\ntgt1:" || target_os
 //   )
+//
+// The target component is SFN-677. The emitted `.ll` is genuinely
+// target-dependent — `llvm/lowering_debug_state.sfn` reads the
+// resolved target at emit time to select the errno locator, the
+// sysconf values and the Windows legs — so without it, one source at
+// one compiler version produced different IR under a single key, and
+// a warm shared cache could hand a build IR emitted for another OS.
+// `canonical(flags)` cannot stand in: both driver call sites pass the
+// empty canonical form (`capsule_resolver/compile.sfn`).
 //
 // Each input separator is `\n` so that two distinct tuples cannot
 // collide via concatenation (e.g. `("ab","c")` vs `("a","bc")`).
@@ -27,6 +37,20 @@
 // unconditional only for slugs free of those two bytes. Every slug
 // the resolver produces is a `/`-joined path stem, so this holds in
 // practice; it is not enforced.
+//
+// `target_os` is the one component with NO such structural guarantee —
+// it is an unvalidated env string that may contain any byte. It is
+// therefore placed last, with nothing following it: the first
+// `\ntgt1:` splits the tail unambiguously (no slug can contain that
+// sequence), so whatever `target_os` holds, it cannot absorb a
+// following component and alias another tuple. Appending anything
+// after it would forfeit that. See `cache_key_for`.
+//
+// No schema bump accompanied SFN-677, matching the SFN-661 precedent
+// below: a key only ever gained a component, so no pre-SFN-677 entry
+// is reachable by a post-SFN-677 key — stale entries are orphaned,
+// never mismatched. The first build after it lands re-emits every
+// module once. That is expected, not a regression.
 //
 // Sorting the dep components makes the key invariant under dep
 // enumeration order — important for parallel builds and for
@@ -1183,7 +1207,7 @@ fn runtime_object_entry_key_from_str(key_str: string, hash_suffix: string) -> Ca
 // different key each run and defeat cache hits. Distinct enumerations
 // carry distinct slugs, which incidentally keeps the `sha256sum` temp
 // filenames below from colliding across concurrent workers.
-fn cache_key_for(source_path: string, dep_slugs: string[], dep_layout_manifest_paths: string[], compiler_version: string, flags_canonical: string, slug: string) -> CacheKey ![io] {
+fn cache_key_for(source_path: string, dep_slugs: string[], dep_layout_manifest_paths: string[], compiler_version: string, flags_canonical: string, slug: string, target_os: string) -> CacheKey ![io] {
     // A length mismatch means the caller built the two arrays
     // independently and they drifted. Fail safe: an empty digest is
     // rejected by `_is_valid_digest`, so every lookup and store treats
@@ -1217,10 +1241,36 @@ fn cache_key_for(source_path: string, dep_slugs: string[], dep_layout_manifest_p
     }
     let deps_hash = _sha256_of_string(deps_concat, slug + "_deps");
 
+    // SFN-677: fold the build TARGET in, under a bumpable scheme tag,
+    // matching `_runtime_obj_key_with_target` (`build/runtime_objs.sfn`,
+    // SFN-617) and the `toolchain_key` fold in `build/clang_argv.sfn`.
+    //
+    // `target_os` goes LAST and nothing derived from it follows. That
+    // ordering is load-bearing, not cosmetic. `target_os` is an
+    // unvalidated `SAILFIN_TARGET_OS` env string, so it may contain any
+    // byte, including the separators used here; appending anything after
+    // it lets a crafted value absorb its own successor and alias a
+    // different tuple. Concretely, an earlier draft also folded
+    // `target_clang_flags(target_os)` space-joined after it, which made
+    // `"Windows"` (flags `-target x86_64-pc-windows-msvc`) and the literal
+    // `"Windows -target x86_64-pc-windows-msvc"` (no flags, since
+    // `target_os_is_windows` is an exact match) hash identically while
+    // `llvm/lowering_debug_state.sfn` emitted different IR for each —
+    // reintroducing this very bug for one input pair.
+    //
+    // Those flags were also pure redundancy: `target_clang_flags` is a
+    // total function of `target_os` alone, so appending `f(x)` after `x`
+    // cannot separate two tuples that `x` does not already separate. If
+    // it ever gains an input NOT derived from `target_os` (an arch env
+    // var, say), that input must enter this key in its own right — a
+    // derived value can never stand in for its input, which is the
+    // SFN-661 lesson recorded above.
     let final_input = s_hash + "\n" + deps_hash + "\n" + compiler_version + "\n"
         + flags_canonical
         + "\n"
-        + slug;
+        + slug
+        + "\ntgt1:"
+        + target_os;
     let final_digest = _sha256_of_string(final_input, slug + "_final");
     return CacheKey { digest: final_digest };
 }
