@@ -104,7 +104,7 @@ fn _format_binary_operand_into(operand: Expression, out: string[]) -> string[] {
 // a wrapping paren had pushed off paren depth 0, so parenthesizing a range
 // broke `(0..n).map(...)` outright. The probe now strips a fully-enclosing pair
 // before that scan (SFN-563,
-// `llvm/expression_lowering/native/core_call_resolution.sfn`), so ranges are
+// `llvm/expression_lowering/native/core_call_resolution/method_target.sfn`), so ranges are
 // governed by the same deny-by-default rule as every other receiver and
 // `(a..b).x` / `(a..b)[i]` keep their group.
 fn _is_postfix_tight(variant: string) -> boolean {

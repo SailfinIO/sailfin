@@ -27,7 +27,7 @@ import { slice_text, token_from_name, trim_text } from "./text_utils";
 // free for a future grouping/tuple meaning.
 //
 // Mirrors the balanced-paren scan of `_parse_fn_pointer_annotation`
-// (llvm/expression_lowering/native/core_call_resolution.sfn): open with `(`
+// (llvm/expression_lowering/native/core_call_resolution/closure_callee.sfn): open with `(`
 // (not the canonical `fn(` / `fn (`), find the matching close-paren by depth,
 // and require `->` immediately after it. This recognizes the annotation whose
 // outermost spelling is the bare arrow; a bare fn-type nested inside another

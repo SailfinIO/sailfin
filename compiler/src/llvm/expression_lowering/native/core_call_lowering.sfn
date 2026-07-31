@@ -37,14 +37,13 @@ import { array_pointer_element_type } from "../arrays";
 import { lower_expression } from "./core";
 import { coerce_and_emit_call } from "./core_call_emission";
 import {
-    _ClosureSignatureParse,
-    _parse_fn_pointer_annotation,
-    resolve_call_method_target,
-    resolve_call_signature,
     try_dispatch_atomic_builtin,
     try_dispatch_byte_load_builtin,
     try_dispatch_syscall_builtin
-} from "./core_call_resolution";
+} from "./core_call_resolution/builtin_dispatch";
+import { _ClosureSignatureParse, _parse_fn_pointer_annotation } from "./core_call_resolution/closure_callee";
+import { resolve_call_method_target } from "./core_call_resolution/method_target";
+import { resolve_call_signature } from "./core_call_resolution/signature";
 import { lower_enum_literal } from "./core_literals_lowering";
 import { load_local_operand } from "./core_operands/comparisons";
 import { coerce_operand_to_type, coerce_operand_to_type_with_source } from "./core_operands/dispatch";
@@ -352,7 +351,7 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
     let closure_return_type = resolution.closure_return_type;
     let closure_parameter_types = resolution.closure_parameter_types;
 
-    // Phase 2: Resolve function signature (delegated to core_call_resolution)
+    // Phase 2: Resolve function signature (delegated to core_call_resolution/signature)
     let sig = resolve_call_signature(trimmed_target, helper_descriptor, method_operand, is_array_concat, array_concat_element_type, is_closure_dispatch, closure_return_type, closure_parameter_types, functions, context);
     trimmed_target = sig.trimmed_target;
     let mut function_entry = sig.function_entry;

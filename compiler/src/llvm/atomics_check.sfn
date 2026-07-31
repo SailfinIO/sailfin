@@ -6,7 +6,7 @@
 // unit-test surface can import it without pulling in the full
 // expression-lowering stack that `atomics.sfn` transitively requires
 // for `lower_atomic_builtin` (which mutually recurses with
-// `lower_expression`). `core_call_resolution.sfn` still imports from
+// `lower_expression`). `core_call_resolution/builtin_dispatch.sfn` still imports from
 // `atomics.sfn` directly because it also needs `lower_atomic_builtin`.
 //
 // Before the split, the atomic unit tests took ~90s locally on Linux

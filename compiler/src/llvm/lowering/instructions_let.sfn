@@ -133,7 +133,7 @@ fn _extract_leading_call_target(expression: string) -> string {
 // so an inferred `let sq = arr.map(...)` records no resolvable array
 // annotation and a follow-on `sq.reduce(...)` / `sq.map(...)` cannot
 // recover the `i64` element type the routing needs
-// (core_call_resolution.sfn:563-676). #1836.
+// (core_call_resolution/method_target.sfn). #1836.
 fn _array_hof_result_base(expression: string) -> string {
     let trimmed = trim_text(expression);
     if trimmed.length == 0 { return ""; }
@@ -176,7 +176,7 @@ fn _array_hof_map_returns_int_array(expression: string) -> boolean {
 
 // Recover the source array element type for a base identifier binding,
 // mirroring the receiver-element resolution in
-// core_call_resolution.sfn:563-588 (the binding's llvm_type first, then
+// core_call_resolution/method_target.sfn (the binding's llvm_type first, then
 // the source annotation via `map_array_pointer_type`). Returns "" when the
 // base is not a resolvable array. #1836.
 fn _base_array_element_type(base: string, locals: LocalBinding[], bindings: ParameterBinding[], context: TypeContext) -> string {
@@ -343,7 +343,7 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
     // the LLVM type is computed. An inferred `let sq = arr.map(...)` /
     // `arr.filter(...)` otherwise binds the runtime-helper result as an
     // opaque `i8*`, losing the array element type that BOTH the array-HOF
-    // routing (core_call_resolution.sfn:563-676) and the closure-parameter
+    // routing (core_call_resolution/method_target.sfn) and the closure-parameter
     // inference need from the receiver — a follow-on `sq.reduce(...)` /
     // `sq.map(...)` then fatals at lowering or miscompiles its untyped
     // closure params to `i8*`. The shipped scalar lane records `int[]` when

@@ -18,7 +18,7 @@
 //   (A) a user function / struct-method parameter declared `fn(A0, ...) -> R`;
 //   (B) a builtin `int[]` array method (`.map`/`.filter`/`.reduce`), whose
 //       mapper signature is fixed by the element type (mirrors the runtime
-//       gate in `core_call_resolution.sfn`; non-`int` stays out of scope on
+//       gate in `core_call_resolution/method_target.sfn`; non-`int` stays out of scope on
 //       generics, #766).
 //
 // Safety: the backfill only ever writes annotations that are currently `null`,
@@ -397,7 +397,7 @@ fn _lookup_sig_param_types(table: FnSigEntry[], key: string) -> string[] {
 
 // ── Case B: int[] array-method mapper signatures ─────────────────────
 //
-// Mirrors the runtime gate in `core_call_resolution.sfn`: only `int[]`
+// Mirrors the runtime gate in `core_call_resolution/method_target.sfn`: only `int[]`
 // (`i64`) element arrays have runtime mapper bodies today. The callback's
 // expected signature is fixed by the method.
 fn array_builtin_expected_fn_type(method: string, element_type: string, arg_index: int) -> string {
