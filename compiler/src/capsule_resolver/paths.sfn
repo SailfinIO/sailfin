@@ -5,6 +5,7 @@
 // mangling and `.ll` path routing, project-root discovery, and the
 // array/string leaf predicates shared by the workspace and capability
 // clusters (moved here to avoid a two-way dependency between them).
+import { host_is_windows } from "../build/target";
 import { CapsuleArtifactLayout, ir_path_for_slug } from "../capsule_artifact";
 import { char_code_at_text, substring } from "../string_utils";
 import { test_runner_scratch_root } from "../test_runner_state";
@@ -62,6 +63,13 @@ fn _cr_ends_with(text: string, suffix: string) -> boolean {
 extern fn sailfin_runtime_shell_capture(cmd: *u8) -> *u8;
 
 fn _cr_shell_read(cmd: string) -> string ![io] {
+    // `cmd` is POSIX shell syntax; a Windows host has no POSIX shell and
+    // would otherwise hand it to `popen`'s `cmd.exe /c`, which parses
+    // none of it (see `emit_helpers.sfn::_eh_shell_read` and
+    // `build/fs.sfn::_shell_read_cmd` for the same guard on the other two
+    // `sailfin_runtime_shell_capture` call sites). Return "" — the
+    // established "probe unavailable" contract callers already handle.
+    if host_is_windows() { return ""; }
     let captured = sailfin_runtime_shell_capture(cmd);
     // Match the trimming semantics of `build/fs.sfn:_shell_read_cmd`
     // (which routes through `_toml_trim_cmd` for symmetric whitespace

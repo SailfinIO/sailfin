@@ -1,0 +1,50 @@
+// runtime/sfn/platform/mkstemp_windows.sfn
+//
+// Windows sibling providing `mkstemp` (SFN-549), APPENDED by
+// `target_condition_runtime_sfn_sources` (`compiler/src/build/target.sfn`)
+// for a Windows target — `mkstemp(3)` is a bare libc symbol on POSIX, not
+// a Sailfin-authored module, so — like `realpath_windows.sfn` — there is
+// no POSIX `.sfn` module to swap FROM. `compiler/src/build/fs.sfn:32`
+// declares `extern fn mkstemp(template: *u8) -> i32;` for the staging
+// path's temp-mint (`_mktemp_from_template_cmd`, `fs.sfn:92-116`); this
+// module satisfies that symbol at the Windows link.
+//
+// MSVC UCRT has no single `mkstemp` call — it composes from two: `_mktemp_s`
+// rewrites the trailing `XXXXXX` of `template` into a unique name in
+// place (mirroring POSIX `mkstemp`'s in-place rewrite contract), then
+// `_open` creates the file `_O_CREAT|_O_EXCL|_O_RDWR` so a racing process
+// cannot win the same name — the same exclusivity guarantee
+// `_mktemp_from_template_cmd` relies on the real `mkstemp` for.
+//
+// Decimal-only constants: hex integer literals silently fold to 0 on the
+// pinned seed (`runtime/sfn/process.sfn:38`), so the UCRT `fcntl.h`/
+// `sys/stat.h` flag values below are ORed as decimal rather than spelled
+// `0x0100` etc: `_O_CREAT` = 256, `_O_EXCL` = 1024, `_O_RDWR` = 2,
+// `_S_IREAD` = 256, `_S_IWRITE` = 128.
+extern fn strlen(s: *u8) -> usize;
+
+// `errno_t _mktemp_s(char *template, size_t sizeInChars)` — `sizeInChars`
+// is the FULL buffer size including the trailing NUL (MSDN), unlike
+// POSIX `mkstemp`'s implicit NUL-terminated-string contract.
+extern fn _mktemp_s(template: *u8, size_in_chars: usize) -> i32;
+
+// `int _open(const char *filename, int oflag, int pmode)` — the UCRT
+// declares `_open` variadic (`pmode` only applies when `_O_CREAT` is
+// set), but every call site here passes all three arguments, so the
+// fixed-arity extern is ABI-compatible.
+extern fn _open(filename: *u8, oflag: i32, pmode: i32) -> i32;
+
+fn mkstemp(template: *u8) -> i32 ![io] {
+    if template as i64 == 0 { return 0 - 1; }
+    let len: usize = strlen(template);
+    let size_in_chars: usize = len + (1 as usize);
+    if _mktemp_s(template, size_in_chars) != 0 { return 0 - 1; }
+    let o_creat: i32 = 256;
+    let o_excl: i32 = 1024;
+    let o_rdwr: i32 = 2;
+    let oflag: i32 = o_creat | o_excl | o_rdwr;
+    let s_iread: i32 = 256;
+    let s_iwrite: i32 = 128;
+    let pmode: i32 = s_iread | s_iwrite;
+    return _open(template, oflag, pmode);
+}

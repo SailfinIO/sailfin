@@ -145,18 +145,6 @@ define i32 @EVP_DigestVerify(i8* %ctx, i8* %sig, i64 %siglen, i8* %tbs, i64 %tbs
   ret i32 0
 }
 
-; `EVP_sha256` / `HMAC`: additional libcrypto symbols the whole-compiler
-; mingw link resolves from `-lcrypto` on Linux/macOS but which have no OpenSSL
-; provider in the static Windows link. No-op stubs keep the Windows link
-; closed; they are never reached on Windows (the crypto surface degrades to
-; fail-closed via the EVP stubs above).
-define i8* @EVP_sha256() {
-  ret i8* null
-}
-define i8* @HMAC(i8* %evp_md, i8* %key, i32 %key_len, i8* %d, i64 %n, i8* %md, i8* %md_len) {
-  ret i8* null
-}
-
 ; Native OS entropy primitive (SFN-123, SFEP-0048 Phase D).
 ; `runtime/sfn/platform/rand.sfn` is excluded from RUNTIME_MODS — its
 ; `getentropy(2)` / `/dev/urandom` (`open`/`read`/`close`) externs have no

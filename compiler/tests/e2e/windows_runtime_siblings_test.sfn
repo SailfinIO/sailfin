@@ -1,0 +1,107 @@
+// compiler/tests/e2e/windows_runtime_siblings_test.sfn
+//
+// SFN-549: `runtime/sfn/platform/rlimit_windows.sfn`,
+// `runtime/sfn/platform/rand_windows.sfn`,
+// `runtime/sfn/platform/openssl_absent_windows.sfn`, and the six
+// anchor-less appends (`realpath_windows.sfn`, `clock_windows.sfn`,
+// `pthread_windows.sfn`, `popen_windows.sfn`, `mkstemp_windows.sfn`,
+// `strcasestr_windows.sfn`) are the Windows siblings that replace the
+// retired native-MSVC link of `runtime/ir/windows_stubs.ll`
+// (`compiler/src/build/runtime_objs.sfn`, formerly :1332-1362). Pins that
+// each module still emits clean LLVM IR for a Windows target and defines
+// the symbol it provides — via a basename swap for rlimit/rand/tls, and via
+// a pure append for the six anchor-less siblings (no POSIX `.sfn`
+// counterpart to swap from) — in `target_condition_runtime_sfn_sources`
+// (`compiler/src/build/target.sfn`).
+//
+// No-bash e2e (`.claude/rules/no-bash-e2e.md`): drives `sfn emit llvm`
+// under `SAILFIN_TARGET_OS=Windows` as a subprocess and asserts on the
+// captured `.ll` text with `sfn/strings::contains`.
+import { contains } from "sfn/strings";
+import { clean_runner_env, nested_runner_scratch } from "sfn/test";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+// Emit `src` for a Windows target into a fresh scratch dir, returning the
+// emitted IR text, or "" on any failure (non-zero exit, missing output).
+// `label` distinguishes the nested scratch dir per test.
+fn _emit_windows(src: string, label: string) -> string ![io] {
+    let scratch = nested_runner_scratch(label);
+    fs.createDirectory(scratch, true);
+    let mut child_env = clean_runner_env(scratch);
+    child_env.push("SAILFIN_TARGET_OS=Windows");
+    let ll = scratch + "/out.ll";
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", src], child_env);
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return ""; }
+    if !fs.exists(ll) { return ""; }
+    return fs.readFile(ll);
+}
+
+test "windows siblings: rlimit_windows.sfn emits and defines apply_default_mem_limit" ![io] {
+    let ir = _emit_windows("runtime/sfn/platform/rlimit_windows.sfn", "rlimit-windows-emit");
+    assert ir.length > 0;
+    assert contains(ir, "define i32 @apply_default_mem_limit()");
+}
+
+test "windows siblings: rand_windows.sfn emits and defines sfn_rand_fill" ![io] {
+    let ir = _emit_windows("runtime/sfn/platform/rand_windows.sfn", "rand-windows-emit");
+    assert ir.length > 0;
+    assert contains(ir, "define i32 @sfn_rand_fill(");
+    assert contains(ir, "declare i32 @BCryptGenRandom(");
+}
+
+test "windows siblings: realpath_windows.sfn emits and defines realpath" ![io] {
+    let ir = _emit_windows("runtime/sfn/platform/realpath_windows.sfn", "realpath-windows-emit");
+    assert ir.length > 0;
+    assert contains(ir, "define i8* @realpath(");
+    assert contains(ir, "declare i8* @_fullpath(");
+}
+
+test "windows siblings: clock_windows.sfn emits and defines clock_gettime" ![io] {
+    let ir = _emit_windows("runtime/sfn/platform/clock_windows.sfn", "clock-windows-emit");
+    assert ir.length > 0;
+    assert contains(ir, "define i32 @clock_gettime(");
+    assert contains(ir, "declare void @GetSystemTimePreciseAsFileTime(");
+}
+
+test "windows siblings: pthread_windows.sfn emits and defines pthread_mutex_init" ![io] {
+    let ir = _emit_windows("runtime/sfn/platform/pthread_windows.sfn", "pthread-windows-emit");
+    assert ir.length > 0;
+    assert contains(ir, "define i32 @pthread_mutex_init(");
+    assert contains(ir, "declare void @InitializeSRWLock(");
+}
+
+test "windows siblings: openssl_absent_windows.sfn emits and defines a fail-closed tls_client_ctx" ![io] {
+    let ir = _emit_windows("runtime/sfn/platform/openssl_absent_windows.sfn", "openssl-absent-windows-emit");
+    assert ir.length > 0;
+    assert contains(ir, "define i8* @tls_client_ctx(");
+    // Fail-closed (SFN-549): the module never links a real OpenSSL symbol,
+    // only warns and returns null — unlike tls.sfn, which it replaces.
+    assert ! contains(ir, "@SSL_new");
+}
+
+test "windows siblings: popen_windows.sfn emits and defines popen" ![io] {
+    let ir = _emit_windows("runtime/sfn/platform/popen_windows.sfn", "popen-windows-emit");
+    assert ir.length > 0;
+    assert contains(ir, "define i8* @popen(");
+    assert contains(ir, "declare i8* @_popen(");
+}
+
+test "windows siblings: mkstemp_windows.sfn emits and defines mkstemp" ![io] {
+    let ir = _emit_windows("runtime/sfn/platform/mkstemp_windows.sfn", "mkstemp-windows-emit");
+    assert ir.length > 0;
+    assert contains(ir, "define i32 @mkstemp(");
+    assert contains(ir, "declare i32 @_mktemp_s(");
+}
+
+test "windows siblings: strcasestr_windows.sfn emits and defines strcasestr" ![io] {
+    let ir = _emit_windows("runtime/sfn/platform/strcasestr_windows.sfn", "strcasestr-windows-emit");
+    assert ir.length > 0;
+    assert contains(ir, "define i8* @strcasestr(");
+}

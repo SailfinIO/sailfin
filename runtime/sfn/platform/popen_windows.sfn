@@ -1,0 +1,28 @@
+// runtime/sfn/platform/popen_windows.sfn
+//
+// Windows sibling providing `popen`/`pclose` (SFN-549), APPENDED by
+// `target_condition_runtime_sfn_sources` (`compiler/src/build/target.sfn`)
+// for a Windows target — `popen(3)`/`pclose(3)` are bare libc symbols on
+// POSIX, not Sailfin-authored modules, so — like `realpath_windows.sfn` —
+// there is no POSIX `.sfn` module to swap FROM. `runtime/sfn/io.sfn:121-123`
+// declares `extern fn popen(cmd: *u8, mode: *u8) -> *u8;` /
+// `extern fn pclose(fp: *u8) -> i32;` for `sailfin_runtime_shell_capture`
+// (`io.sfn:446-477`); this module satisfies both symbols at the Windows
+// link.
+//
+// MSVC UCRT spells the pair with a leading underscore (`_popen`/
+// `_pclose`) but keeps the identical signature, so these are thin
+// pass-throughs rather than a behavioral port. Every caller of
+// `sailfin_runtime_shell_capture` already runs its `cmd` through a
+// POSIX-shell-syntax command string (`build/fs.sfn:344-357`'s
+// `_shell_read_cmd` note): `_popen` on Windows shells through `cmd.exe`,
+// which does not understand that syntax, so callers must keep guarding
+// on `host_is_windows()` — this module only satisfies the link, it does
+// not make POSIX shell syntax portable.
+extern fn _popen(cmd: *u8, mode: *u8) -> *u8;
+
+extern fn _pclose(fp: *u8) -> i32;
+
+fn popen(cmd: *u8, mode: *u8) -> *u8 ![io] { return _popen(cmd, mode); }
+
+fn pclose(fp: *u8) -> i32 ![io] { return _pclose(fp); }

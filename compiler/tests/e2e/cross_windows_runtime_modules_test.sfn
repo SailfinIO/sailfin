@@ -127,8 +127,13 @@ test "cross-windows windows_stubs.ll defines the required Windows stubs" ![io] {
     assert contains(stubs, "define i8* @EVP_PKEY_new_raw_public_key");
     assert contains(stubs, "define i32 @EVP_DigestVerify");
     assert contains(stubs, "define i8* @EVP_MD_CTX_new");
-    assert contains(stubs, "define i8* @EVP_sha256");
-    assert contains(stubs, "define i8* @HMAC");
+
+    // `EVP_sha256` / `HMAC` (SFN-549): retired from windows_stubs.ll — the
+    // pure-Sailfin `hmac_sha256` (`capsules/sfn/crypto/src/mod.sfn`) replaced
+    // the last consumer per SFEP-0048 Phase D, so these two libcrypto stubs
+    // have zero callers anywhere in `capsules/` or `runtime/`.
+    assert ! contains(stubs, "@EVP_sha256");
+    assert ! contains(stubs, "@HMAC");
 
     // Native entropy primitive (SFN-123): rand.sfn is excluded from
     // RUNTIME_MODS, so the compiler's @sfn_rand_fill reference (pulled in by

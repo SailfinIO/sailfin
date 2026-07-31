@@ -1,0 +1,113 @@
+// compiler/tests/e2e/type_descriptor_comdat_emit_test.sfn
+//
+// E2E regression for target-conditioned COMDAT emission on the
+// type-descriptor and ABI-version globals (SFN-549). COFF is the only
+// object format that both tolerates and requires an explicit `comdat`
+// group to fold the `linkonce_odr` duplicates every referencing module
+// emits — ELF auto-groups them, Mach-O rejects `comdat` outright. So the
+// clause must appear only when `SAILFIN_TARGET_OS=Windows` is resolved at
+// emit time (`target_uses_comdat()` in `lowering_debug_state.sfn`), and
+// every other target's `.ll` must be byte-identical to today (no `comdat`
+// token at all).
+//
+// Drives the compiler-under-test as a subprocess per
+// `.claude/rules/no-bash-e2e.md`; `sfn emit` is cache-free so this cannot
+// poison the shared build tree the way a nested `sfn build` would.
+import { contains, split } from "sfn/strings";
+import { clean_runner_env, nested_runner_scratch } from "sfn/test";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    dir = dir + "/sfn-comdat-emit";
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// Two named structs so the descriptor emission loop runs more than once.
+fn _fixture_source() -> string {
+    return "struct Point {\n" + "    x: int;\n" + "    y: int;\n" + "}\n" + "\n"
+        + "struct Line {\n"
+        + "    a: Point;\n"
+        + "    b: Point;\n"
+        + "}\n"
+        + "\n"
+        + "fn main() -> void {\n"
+        + "    let p = Point { x: 1, y: 2 };\n"
+        + "    let l = Line { a: p, b: p };\n"
+        + "}\n";
+}
+
+fn _fixture_path() -> string ![io] {
+    let dir = _scratch_dir();
+    let src = dir + "/sfn549_fixture.sfn";
+    fs.writeFile(src, _fixture_source());
+    return src;
+}
+
+fn _emit(src: string, target_os: string, tag: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let ll = dir + "/sfn549_" + tag + ".ll";
+    if fs.exists(ll) { fs.deleteFile(ll); }
+    let mut e = clean_runner_env(nested_runner_scratch("comdat-" + tag));
+    e.push("SAILFIN_TARGET_OS=" + target_os);
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", src], e);
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return ""; }
+    if !fs.exists(ll) { return ""; }
+    return fs.readFile(ll);
+}
+
+fn _any_line_with(text: string, a: string, b: string) -> boolean {
+    let lines = split(text, "\n");
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        if contains(lines[i], a) && contains(lines[i], b) { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+test "comdat emit: Linux target carries no comdat directive" ![io] {
+    let src = _fixture_path();
+    let ir = _emit(src, "Linux", "linux");
+    fs.deleteFile(src);
+    assert ir.length > 0;
+    // Assert on the two literal comdat syntaxes rather than a bare
+    // "comdat" substring. The scratch directory name is interpolated into
+    // sanitized symbol names (`@sailfin_user_main__tmp...sfncomdatemit...`),
+    // so a substring test matches the *path* and fails on a correct Linux
+    // emit. Neither `= comdat any` nor `, comdat` can survive symbol
+    // sanitization, which strips spaces, `=` and `,` (SFN-549).
+    assert ! contains(ir, "= comdat any");
+    assert ! contains(ir, ", comdat");
+}
+
+test "comdat emit: Windows target adds a comdat group per descriptor global" ![io] {
+    let src = _fixture_path();
+    let ir = _emit(src, "Windows", "windows");
+    fs.deleteFile(src);
+    assert ir.length > 0;
+    // One comdat-group declaration per descriptor global (name string +
+    // descriptor struct) for each of the two fixture structs.
+    assert _any_line_with(ir, "$__sfn_type_desc_name.Point", "= comdat any");
+    assert _any_line_with(ir, "$__sfn_type_desc.Point", "= comdat any");
+    assert _any_line_with(ir, "$__sfn_type_desc_name.Line", "= comdat any");
+    assert _any_line_with(ir, "$__sfn_type_desc.Line", "= comdat any");
+    // The globals themselves carry the `, comdat` clause.
+    assert _any_line_with(ir, "@__sfn_type_desc_name.Point", ", comdat");
+    assert _any_line_with(ir, "@__sfn_type_desc.Point", ", comdat");
+    // The ABI-version pair emitted unconditionally by every module.
+    assert _any_line_with(ir, "$sfn_abi_version", "= comdat any");
+    assert _any_line_with(ir, "$sfn_abi_hash", "= comdat any");
+    assert _any_line_with(ir, "@sfn_abi_version", ", comdat");
+    assert _any_line_with(ir, "@sfn_abi_hash", ", comdat");
+}

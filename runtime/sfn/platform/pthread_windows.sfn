@@ -1,0 +1,183 @@
+// runtime/sfn/platform/pthread_windows.sfn
+//
+// Windows sibling providing the 11 `pthread_*` symbols plus `sysconf`
+// (SFN-549), APPENDED by `target_condition_runtime_sfn_sources`
+// (`compiler/src/build/target.sfn`) for a Windows target. There is no
+// POSIX `.sfn` module to swap FROM: `pthread.sfn` (the orphaned typecheck
+// skeleton) and `sysconf`'s declaration in `concurrency/scheduler.sfn`
+// are `extern fn` surfaces, not compiled runtime modules, so — like
+// `realpath_windows.sfn`/`clock_windows.sfn` — this is a pure addition.
+// Signatures below are copied verbatim from `platform/pthread.sfn` and
+// cross-checked against `concurrency/scheduler.sfn:167-201`, the actual
+// scheduler consumer.
+//
+// SRWLOCK/CONDITION_VARIABLE ARE the mutex/cond storage: both Win32
+// primitives are 8-byte pointer-sized handles that live in place at the
+// address they're initialized at (exactly like `pthread_mutex_t`/
+// `pthread_cond_t` do on POSIX), so `*PthreadMutex`/`*PthreadCond` —
+// `pthread_layout.sfn`'s 64-byte / 48-byte opaque storage, sized to
+// cover the larger POSIX platform — are passed straight through as the
+// `PSRWLOCK`/`PCONDITION_VARIABLE` out-pointer. No separate allocation,
+// no layout change to `pthread_layout.sfn`.
+//
+// Decimal-only constants: hex integer literals silently fold to 0 on the
+// pinned seed (`runtime/sfn/process.sfn:38`); `INFINITE` (0xFFFFFFFF) is
+// therefore written as the bit-identical `0 - 1` rather than a hex
+// literal.
+import { PthreadCond, PthreadMutex } from "./pthread_layout";
+
+extern fn memcpy(dst: *u8, src: *u8, n: usize) -> *u8;
+
+// ── Mutex (SRWLOCK) ───────────────────────────────────────────
+extern fn InitializeSRWLock(lock: *u8) -> void;
+
+extern fn AcquireSRWLockExclusive(lock: *u8) -> void;
+
+extern fn ReleaseSRWLockExclusive(lock: *u8) -> void;
+
+fn pthread_mutex_init(m: *PthreadMutex, attr: *PthreadMutexAttr) -> i32 {
+    InitializeSRWLock(m as *u8);
+    return 0;
+}
+
+fn pthread_mutex_lock(m: *PthreadMutex) -> i32 {
+    AcquireSRWLockExclusive(m as *u8);
+    return 0;
+}
+
+fn pthread_mutex_unlock(m: *PthreadMutex) -> i32 {
+    ReleaseSRWLockExclusive(m as *u8);
+    return 0;
+}
+
+// `SRWLOCK` has no destroy call — it is reclaimed with its containing
+// memory, matching the real `pthread_mutex_destroy`'s POSIX contract on
+// a lock nobody holds. No-op success, mirroring `rlimit_windows.sfn`'s
+// `apply_default_mem_limit` no-op pattern.
+fn pthread_mutex_destroy(m: *PthreadMutex) -> i32 { return 0; }
+
+// ── Condition variable ────────────────────────────────────────
+extern fn InitializeConditionVariable(cv: *u8) -> void;
+
+// `BOOL SleepConditionVariableSRW(PCONDITION_VARIABLE, PSRWLOCK,
+// DWORD dwMilliseconds, ULONG Flags)` — `INFINITE` timeout (`0 - 1`),
+// flags `0` (an exclusive-mode SRWLOCK, matching `AcquireSRWLockExclusive`
+// above; the `CONDITION_VARIABLE_LOCKMODE_SHARED` flag does not apply).
+extern fn SleepConditionVariableSRW(cv: *u8, lock: *u8, ms: i32, flags: i32) -> i32;
+
+extern fn WakeConditionVariable(cv: *u8) -> void;
+
+extern fn WakeAllConditionVariable(cv: *u8) -> void;
+
+fn pthread_cond_init(c: *PthreadCond, attr: *PthreadCondAttr) -> i32 {
+    InitializeConditionVariable(c as *u8);
+    return 0;
+}
+
+fn pthread_cond_wait(c: *PthreadCond, m: *PthreadMutex) -> i32 {
+    let ok: i32 = SleepConditionVariableSRW(c as *u8, m as *u8, 0 - 1, 0);
+    if ok == 0 { return 0 - 1; }
+    return 0;
+}
+
+fn pthread_cond_signal(c: *PthreadCond) -> i32 {
+    WakeConditionVariable(c as *u8);
+    return 0;
+}
+
+fn pthread_cond_broadcast(c: *PthreadCond) -> i32 {
+    WakeAllConditionVariable(c as *u8);
+    return 0;
+}
+
+// No destroy call for `CONDITION_VARIABLE` either — same no-op contract
+// as `pthread_mutex_destroy` above.
+fn pthread_cond_destroy(c: *PthreadCond) -> i32 { return 0; }
+
+// ── Threads ────────────────────────────────────────────────────
+// `HANDLE CreateThread(LPSECURITY_ATTRIBUTES, SIZE_T dwStackSize,
+// LPTHREAD_START_ROUTINE lpStartAddress, LPVOID lpParameter,
+// DWORD dwCreationFlags, LPDWORD lpThreadId)` — `HANDLE` is spelled `i64`
+// throughout the existing Win32 process surface
+// (`platform/process_windows.sfn`'s `GetCurrentProcess`/`CreatePipe`).
+extern fn CreateThread(sec_attrs: *u8, stack_size: usize, start: *u8, arg: *u8, flags: i32, thread_id: *i32) -> i64;
+
+extern fn WaitForSingleObject(handle: i64, ms: i32) -> i32;
+
+extern fn CloseHandle(handle: i64) -> i32;
+
+// `start` arrives as a raw `*u8` (the function-reference -> address
+// lowering shipped in #1146, see `scheduler.sfn:186-188`) — forwarded
+// directly as `lpStartAddress`, the same `* u8` worker-entry shape
+// `pthread_create` uses on POSIX. `thread` is our own out-param (not
+// written by the Win32 call itself), so the `HANDLE` is copied into it
+// via `memcpy` from a local — the same out-param idiom
+// `clock.sfn:161-163`'s `sfn_clock_unix_millis` uses.
+fn pthread_create(thread: *usize, attr: *PthreadAttr, start: *u8, arg: *u8) -> i32 {
+    let mut thread_id: i32 = 0;
+    let thread_id_ptr: *i32 = & thread_id;
+    let handle: i64 = CreateThread(null, 0 as usize, start, arg, 0, thread_id_ptr);
+    if handle == 0 { return 0 - 1; }
+    if thread as i64 != 0 {
+        let handle_ptr: *i64 = & handle;
+        memcpy(thread as *u8, handle_ptr as *u8, 8 as usize);
+    }
+    return 0;
+}
+
+// `thread` is the `HANDLE` (by value, matching the POSIX `pthread_t`
+// by-value convention `pthread.sfn`'s header documents). `result` is
+// always passed `null` by the scheduler (`scheduler.sfn:195`'s call
+// site), so the worker return value is not read back — nothing to write
+// even when a caller does pass a non-null slot, since `CreateThread`'s
+// worker has no analogous out-value channel here.
+fn pthread_join(thread: usize, result: **u8) -> i32 {
+    let handle: i64 = thread as i64;
+    let wait_result: i32 = WaitForSingleObject(handle, 0 - 1);
+    CloseHandle(handle);
+    // WAIT_FAILED == 0xFFFFFFFF == -1 in the DWORD's signed bit pattern.
+    if wait_result == 0 - 1 { return 0 - 1; }
+    return 0;
+}
+
+// ── CPU count ──────────────────────────────────────────────────
+// `void GetSystemInfo(LPSYSTEM_INFO)` — `dwNumberOfProcessors` sits at
+// byte offset 32 of the x86_64 `SYSTEM_INFO` layout (4-byte `dwOemId` +
+// 4-byte `dwPageSize` + two 8-byte pointers + an 8-byte
+// `dwActiveProcessorMask` = 32 bytes of header, then the 4-byte
+// `dwNumberOfProcessors` field). `SfnWinSystemInfo` is local stack
+// storage sized to the struct's 48-byte total (six `i64` slots, mirroring
+// the `PthreadMutex`/`PthreadCond` opaque-storage idiom in
+// `pthread_layout.sfn` — Sailfin has no fixed-size array type), read back
+// through the pointer-read intrinsic rather than a field access since the
+// struct is never given real Sailfin field names.
+extern fn GetSystemInfo(info: *u8) -> void;
+
+struct SfnWinSystemInfo {
+    _opaque0: i64;
+    _opaque1: i64;
+    _opaque2: i64;
+    _opaque3: i64;
+    _opaque4: i64;
+    _opaque5: i64;
+}
+
+// `name` (the `_SC_NPROCESSORS_ONLN`-style request code) is unused: the
+// only caller (`scheduler.sfn`'s pool-sizing path) asks for the online
+// CPU count, and Windows has one answer to that regardless of which
+// POSIX `_SC_*` id was requested.
+fn sysconf(name: i32) -> i64 {
+    let mut info: SfnWinSystemInfo = SfnWinSystemInfo {
+        _opaque0: 0,
+        _opaque1: 0,
+        _opaque2: 0,
+        _opaque3: 0,
+        _opaque4: 0,
+        _opaque5: 0
+    };
+    let info_ptr: *SfnWinSystemInfo = & info;
+    GetSystemInfo(info_ptr as *u8);
+    let count_ptr: *i32 = ((info_ptr as i64) + 32) as *i32;
+    let count: i32 = sailfin_intrinsic_pointer_read_i32(count_ptr);
+    return count as i64;
+}

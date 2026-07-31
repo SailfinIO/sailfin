@@ -699,7 +699,18 @@ fn emit_llvm_function(function: NativeFunction, functions: NativeFunction[], eff
         // Allocas live in the entry block so LLVM treats them as static
         // frame slots (the conventional idiom).
         wrapper_lines.push("  %frame = alloca [3 x i64]");
-        wrapper_lines.push("  %jmpbuf = alloca [32 x i64]");
+        // `align 16` is load-bearing on Windows x64 and free elsewhere
+        // (SFN-549). MSVC's `_JUMP_BUFFER` is `__declspec(align(16))`
+        // because `__intrinsic_setjmp` saves xmm6-xmm15 with `movdqa`,
+        // which #GPs on an 8-mod-16 address and surfaces as 0xC0000005.
+        // Without this clause LLVM uses the `[32 x i64]` ABI alignment of
+        // 8, and the synthesized `@main` wrapper landed the buffer at
+        // `rsp+0x58` — misaligned — faulting on the very first `setjmp`
+        // before argument dispatch. glibc's `_setjmp` uses no aligned SSE
+        // stores, which is why 8 sufficed on Linux for so long.
+        // Unconditional rather than target-conditioned: valid and free on
+        // ELF/Mach-O, mandatory on COFF.
+        wrapper_lines.push("  %jmpbuf = alloca [32 x i64], align 16");
         wrapper_lines.push("  %frame_i8 = bitcast [3 x i64]* %frame to i8*");
         wrapper_lines.push("  %jmpbuf_i8 = bitcast [32 x i64]* %jmpbuf to i8*");
         // Convert argv to SfnArray<string>* only when the user body
