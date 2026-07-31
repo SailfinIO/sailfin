@@ -6,11 +6,16 @@
 // and are deliberately kept out of the primary `sfn --help` list so ordinary
 // Sailfin application authors never see them.
 //
-//   sfn dev bootstrap fetch          acquire + verify the pinned seed only
-//   sfn dev bootstrap build          fetch if needed, then build the compiler
-//                                    with the exact seed
-//   sfn dev bootstrap check          build + smoke-verify the built compiler
-//   sfn dev bootstrap pin <version>  update bootstrap.toml [seed].version
+//   sfn dev bootstrap fetch              acquire + verify the pinned seed only
+//   sfn dev bootstrap build              fetch if needed, then build the
+//                                        compiler with the exact seed
+//   sfn dev bootstrap check              build + smoke-verify the built
+//                                        compiler
+//   sfn dev bootstrap pin <version>      update bootstrap.toml [seed].version
+//   sfn dev bootstrap fingerprint [root] print the compiler source
+//                                        fingerprint
+//   sfn dev bootstrap install [--from]   publish an already-built compiler as
+//                                        build/bin/sfn
 //
 // The steady-state contributor path is still `sfn build -p compiler`, which
 // enters bootstrap mode via `bootstrap_gate_or_dispatch` (exported here and
@@ -357,6 +362,25 @@ fn _dev_bootstrap_build(force: boolean) -> int ![io, net] {
         return 1;
     }
 
+    // Smoke-verify the built artifact BEFORE it replaces anything (SFN-679).
+    // Publishing first and checking after would swap a working `build/bin/sfn`
+    // for a broken one on every bad build, leaving the developer with no
+    // usable compiler; and recording freshness for a binary that does not run
+    // would wedge every later build into "up to date" against it, escapable
+    // only via --force. Verifying the source artifact keeps a failed build
+    // purely additive: the previously installed compiler is untouched.
+    let smoke_rc = process.run([built_program_path(), "version"]);
+    if smoke_rc != 0 {
+        fs.deleteFile(pending_fingerprint_path());
+        print.err("error: the compiler built at " + built_program_path()
+            + " failed its smoke check (exit "
+            + number_to_string(smoke_rc)
+            + "); "
+            + out
+            + " was left unchanged");
+        return 1;
+    }
+
     if !install_built_compiler(built_program_path(), out) {
         fs.deleteFile(pending_fingerprint_path());
         print.err("error: could not install the built compiler to " + out);
@@ -410,6 +434,12 @@ fn _looks_like_digest(s: string) -> boolean {
 // Makefile from the freshly built binary. Applies the same
 // pending-fingerprint race guard: if the sources changed since the build
 // that produced `src` was snapshotted, refuse to publish it.
+//
+// Unlike `_dev_bootstrap_build`, `install` may run with no trustworthy
+// pre-build snapshot at all — a clean checkout has no prior `build/bin/sfn`
+// to have taken one from, and a binary predating SFN-679 cannot produce one.
+// Both degrade to "install, but do not record a freshness claim nobody
+// checked" rather than failing the completed build outright (SFN-679).
 fn _dev_bootstrap_install(from_path: string) -> int ![io] {
     let mut src = from_path;
     if src.length == 0 { src = built_program_path(); }
@@ -420,34 +450,59 @@ fn _dev_bootstrap_install(from_path: string) -> int ![io] {
 
     let cur = compute_source_fingerprint(default_fingerprint_roots());
     if cur.length == 0 {
-        print.err("error: could not compute the compiler source fingerprint");
-        return 1;
+        // Not fatal: an unhashable tree (zero-byte .sfn file, or no
+        // sha256sum/shasum on the host for a file over 64 KiB) must not
+        // abort an otherwise-completed ~10-minute build at the final step
+        // (SFN-679).
+        print.err("warning: could not compute the compiler source fingerprint; installing without a freshness record");
     }
 
     let pending_path = pending_fingerprint_path();
-    if fs.exists(pending_path) {
-        let pending = read_stored_fingerprint(pending_path);
-        // Only a well-formed digest counts as a pre-build snapshot. A
-        // `build/bin/sfn` predating SFN-679 has no `dev bootstrap
-        // fingerprint` leaf, so the Makefile's pre-build capture can leave
-        // usage text here during the one transitional build; treating that
-        // as a mid-build source change would fail the build outright
-        // instead of self-healing.
-        if _looks_like_digest(pending) && pending != cur {
-            fs.deleteFile(pending_path);
-            print.err("error: compiler sources changed during the build; refusing to publish a stale binary");
-            return 1;
-        }
+    let pending = read_stored_fingerprint(pending_path);
+    // Only a well-formed digest counts as a pre-build snapshot. A
+    // `build/bin/sfn` predating SFN-679 has no `dev bootstrap
+    // fingerprint` leaf, so the Makefile's pre-build capture can leave
+    // usage text here during the one transitional build; treating that
+    // as a mid-build source change would fail the build outright
+    // instead of self-healing.
+    let have_snapshot = _looks_like_digest(pending);
+
+    if have_snapshot && cur.length > 0 && pending != cur {
+        fs.deleteFile(pending_path);
+        print.err("error: compiler sources changed during the build; refusing to publish a stale binary");
+        return 1;
     }
 
     let out = native_install_path();
+
+    // Smoke-verify the candidate BEFORE it replaces anything (SFN-679), so a
+    // build that produced an unrunnable binary leaves the previously
+    // installed compiler intact rather than swapping a working toolchain for
+    // a broken one. See `_dev_bootstrap_build` for the full rationale.
+    let smoke_rc = process.run([src, "version"]);
+    if smoke_rc != 0 {
+        fs.deleteFile(pending_path);
+        print.err("error: the compiler at " + src
+            + " failed its smoke check (exit "
+            + number_to_string(smoke_rc)
+            + "); "
+            + out
+            + " was left unchanged");
+        return 1;
+    }
+
     if !install_built_compiler(src, out) {
         print.err("error: could not install the built compiler to " + out);
         return 1;
     }
 
-    write_fingerprint(source_fingerprint_path(), cur);
-    fs.deleteFile(pending_path);
+    if have_snapshot && cur.length > 0 && pending == cur {
+        write_fingerprint(source_fingerprint_path(), cur);
+        fs.deleteFile(pending_path);
+    } else {
+        fs.deleteFile(pending_path);
+        print("sfn dev bootstrap: no trustworthy pre-build source snapshot; freshness record not written — the next build will re-run (SFN-679)");
+    }
 
     print("sfn dev bootstrap: installed " + out);
     return 0;

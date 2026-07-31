@@ -9,9 +9,9 @@
 //   1. For each root in the caller-supplied root list, in the order
 //      given, collect every `*.sfn` file under it recursively. A
 //      missing root fails the whole computation (returns "").
-//   2. Concatenate all roots' file lists, normalize any backslashes to
-//      forward slashes (a Windows walk and a POSIX walk must agree),
-//      then sort the combined list ascending by byte order on the path
+//   2. Concatenate all roots' file lists, normalize any backslashes a
+//      caller-supplied root may have introduced to forward slashes, then
+//      sort the combined list ascending by byte order on the path
 //      string — the filesystem walk order is not stable across
 //      platforms, so this sort is what makes the digest reproducible.
 //   3. Drop exact duplicate paths once sorted (roots may overlap).
@@ -36,9 +36,16 @@ import { sha256_hex_of_string } from "./hash";
 import { _dirname, _ensure_dir } from "./paths";
 import { host_is_windows } from "./target";
 
-// The default fingerprint scope: the compiler's own source tree plus the
-// Sailfin-native runtime it links against. Both feed the built binary, so
-// both must be covered for the gate to be sound.
+// The default fingerprint scope: the compiler's own `.sfn` source tree plus
+// the Sailfin-native runtime it links against — the same scope the retired
+// `scripts/compiler_source_fingerprint.sh` used, kept as-is (SFN-679). This
+// is NOT the complete set of inputs the built binary depends on: it omits
+// the capsule dependencies under `capsules/*/src/` (`sfn/runtime-native`,
+// `sfn/cli`, `sfn/strings`, `sfn/crypto` — see `compiler/capsule.toml`
+// deps), the C sources under `runtime/native/src/*.c`, and the version pin
+// in `compiler/capsule.toml`. A change confined to one of those will not
+// invalidate this fingerprint. `scripts/module_layout_fingerprint.sh`
+// documents the fuller root set.
 fn default_fingerprint_roots() -> string[] {
     return ["compiler/src", "runtime"];
 }
@@ -62,8 +69,10 @@ fn native_install_path() -> string ![io] {
 // it is installed.
 fn built_program_path() -> string { return "build/sailfin/program"; }
 
-// Replace any `\` with `/` so a Windows walk and a POSIX walk produce the
-// same manifest entries for the same logical path.
+// Replace any `\` with `/` so a caller-supplied root (e.g. `sfn dev
+// bootstrap fingerprint C:\foo`) normalizes to the same manifest entries as
+// a POSIX-style root — `_collect_sfn_files_cmd` always joins with `/`, so
+// the walk itself never emits a backslash.
 fn _normalize_slashes(path: string) -> string {
     let mut out: string = "";
     let mut i: int = 0;

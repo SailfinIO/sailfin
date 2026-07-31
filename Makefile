@@ -578,12 +578,21 @@ bootstrap-aarch64-linux:
 
 compile-impl:
 	@# SFN-679: a $(NATIVE_BIN) predating `dev bootstrap fingerprint` (the
-	@# native replacement for scripts/compiler_source_fingerprint.sh) prints
-	@# nothing, so `current_fingerprint` reads empty here. Requiring it
-	@# non-empty before taking the up-to-date branch forces exactly one
-	@# rebuild in that case (which installs the fingerprint-aware binary);
-	@# every later `make compile` self-heals from the fresh fingerprint.
+	@# native replacement for scripts/compiler_source_fingerprint.sh) falls
+	@# through its subcommand dispatch to a usage line on STDOUT, so
+	@# `2>/dev/null` does not suppress it and `current_fingerprint` reads
+	@# that usage text, not empty. The shape check below blanks anything
+	@# that is not a 64-char lowercase-hex digest, which is what actually
+	@# makes the `-n` guard fire on that usage text (it can never equal the
+	@# stored digest either, but validating the shape here is what forces
+	@# exactly one rebuild instead of relying on that coincidence); every
+	@# later `make compile` self-heals from the fresh fingerprint.
 	@current_fingerprint="$$($(COMPILER_SOURCE_FINGERPRINT_CMD) 2>/dev/null || true)"; \
+	case "$$current_fingerprint" in \
+		*[!0-9a-f]*|"") current_fingerprint="" ;; \
+		????????????????????????????????????????????????????????????????) ;; \
+		*) current_fingerprint="" ;; \
+	esac; \
 	stored_fingerprint="$$(cat "$(COMPILER_SOURCE_FINGERPRINT)" 2>/dev/null || true)"; \
 	if [ "$${FORCE:-0}" = "0" ] && [ -x "$(NATIVE_BIN)" ] && \
 		[ -n "$$current_fingerprint" ] && \
@@ -834,13 +843,25 @@ rebuild-impl:
 	@mkdir -p build
 	@# SFN-679: the pre-build snapshot is best-effort. On a clean checkout
 	@# $(NATIVE_BIN) does not exist yet, and a binary predating
-	@# `dev bootstrap fingerprint` cannot produce one — neither is an error,
-	@# both are exactly the cold/transitional builds this recipe has to
-	@# complete. Drop the file instead of failing; `dev bootstrap install`
-	@# below treats an absent snapshot as "no race guard available" and a
-	@# malformed one as absent.
-	@$(COMPILER_SOURCE_FINGERPRINT_CMD) > "$(COMPILER_SOURCE_FINGERPRINT).pending" 2>/dev/null \
-		|| rm -f "$(COMPILER_SOURCE_FINGERPRINT).pending"
+	@# `dev bootstrap fingerprint` cannot produce one — it falls through its
+	@# subcommand dispatch to a usage line on STDOUT instead (exit 0, so the
+	@# redirect below still needs the same shape check `compile-impl` uses).
+	@# Neither case is an error; both are exactly the cold/transitional
+	@# builds this recipe has to complete. Write nothing rather than a
+	@# malformed snapshot; `dev bootstrap install` below treats an absent
+	@# `.pending` as "no race guard available" the same as a malformed one,
+	@# but a real digest here still lets it detect a genuine mid-build edit.
+	@current_fingerprint="$$($(COMPILER_SOURCE_FINGERPRINT_CMD) 2>/dev/null || true)"; \
+	case "$$current_fingerprint" in \
+		*[!0-9a-f]*|"") current_fingerprint="" ;; \
+		????????????????????????????????????????????????????????????????) ;; \
+		*) current_fingerprint="" ;; \
+	esac; \
+	if [ -n "$$current_fingerprint" ]; then \
+		printf '%s\n' "$$current_fingerprint" > "$(COMPILER_SOURCE_FINGERPRINT).pending"; \
+	else \
+		rm -f "$(COMPILER_SOURCE_FINGERPRINT).pending"; \
+	fi
 	@seed="$${SEED_NATIVE:-$(SEED)}"; \
 	resolved_seed="$$seed"; \
 	if command -v "$$seed" >/dev/null 2>&1; then \

@@ -103,6 +103,7 @@ test "compiler source fingerprint ignores non-sfn files under the root" ![io] {
     fs.writeFile(scratch + "/README.md", "unrelated notes\n");
     let after = _fingerprint(scratch);
 
+    assert before.length > 0;
     assert after == before;
     process.run(["rm", "-rf", scratch]);
 }
