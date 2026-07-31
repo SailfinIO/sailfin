@@ -23,8 +23,9 @@ budget host RAM itself: `_test_jobs_budget`
 (`compiler/src/cli/commands/test/arg_and_jobs.sfn`) and its bash twin
 `scripts/detect_test_jobs.sh` for the test pool, `_cr_ram_budget_jobs`
 (`compiler/src/capsule_emit_parallel.sfn`) for per-module emit. All three
-reserve **3 GiB/job out of 66% of RAM** — the measured peak of the heaviest
-module emit — and pooled test children are pinned to `SAILFIN_BUILD_JOBS=1` so
+reserve **2.5 GiB/job out of 66% of RAM** — sized from the re-measured worst
+emit worker at 1.55 GiB (SFN-626) — and pooled test children are pinned to
+`SAILFIN_BUILD_JOBS=1` so
 the two fan-outs cannot nest and multiply (SFN-547). Never raise a job count
 past those budgets on the theory that the self-cap will catch it; it will not,
 and the failure mode is a hard host kill, not an `sfn` error.

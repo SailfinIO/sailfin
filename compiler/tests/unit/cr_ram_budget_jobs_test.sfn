@@ -1,25 +1,40 @@
 // #1532: unit coverage for `_cr_ram_budget_jobs`, the memory-aware
 // fan-out ceiling used by `_cr_resolve_jobs`. The clamp caps the
-// CPU-derived emit-worker count by how many ~3 GiB workers fit in a
+// CPU-derived emit-worker count by how many ~2.5 GiB workers fit in a
 // 66% slice of physical RAM. On macOS this is the ONLY emit memory
 // backpressure (`RLIMIT_AS` is a no-op on Darwin), so the arithmetic
 // is regression-tested directly, apart from the host RAM probe.
 //
-// Reserve = 3 GiB = 3221225472 B; usable = memsize * 66 / 100.
+// Reserve = 2.5 GiB = 2684354560 B; usable = memsize * 66 / 100.
+// SFN-626 recalibrated the reserve down from 3 GiB against a re-measured
+// tree whose heaviest emit worker is now 1.55 GiB.
 import { _cr_ram_budget_jobs } from "../../src/capsule_emit_parallel";
 
 // 7 GiB runner (the ~7 GiB macOS CI box that OOMed in #1532):
-// usable = 7516192768*0.66 = 4.96 GiB; 4.96/3 = 1 -> serial emit.
+// usable = 7516192768*0.66 = 4,960,687,226 B = 4.62 GiB; 4.62/2.5 = 1
+// -> serial emit. This case is what fixes the reserve's lower bound: at
+// or below 2.31 GiB (half the usable slice) it budgets 2 workers here
+// and reopens #1532 (SFN-626).
 test "ram budget: 7 GiB runner clamps to 1 (the #1532 fix)" {
     assert _cr_ram_budget_jobs(7516192768, 8) == 1;
 }
 
-// 16 GiB laptop: usable = 10.56 GiB; 10.56/3 = 3.
-test "ram budget: 16 GiB host yields 3" {
-    assert _cr_ram_budget_jobs(17179869184, 8) == 3;
+// 8 GiB host: usable = 5.28 GiB; 5.28/2.5 = 2. SFN-626 newly crossed
+// this boundary — under the 3 GiB reserve an 8 GiB host emitted
+// serially. Pinned because it is the closest RAM class above the
+// #1532 box, and `_cr_ram_budget_jobs` has no Darwin cap of its own:
+// two workers reserve 5.0 GiB of the 5.28 GiB slice, which is the
+// guarantee the reserve exists to make.
+test "ram budget: 8 GiB host yields 2 (SFN-626 boundary)" {
+    assert _cr_ram_budget_jobs(8589934592, 8) == 2;
 }
 
-// 64 GiB dev box: usable = 42.24 GiB; 42.24/3 = 14, clamped to nproc.
+// 16 GiB laptop: usable = 10.56 GiB; 10.56/2.5 = 4.
+test "ram budget: 16 GiB host yields 4" {
+    assert _cr_ram_budget_jobs(17179869184, 8) == 4;
+}
+
+// 64 GiB dev box: usable = 42.24 GiB; 42.24/2.5 = 16, clamped to nproc.
 test "ram budget: 64 GiB host stays clamped to nproc (unchanged local)" {
     assert _cr_ram_budget_jobs(68719476736, 8) == 8;
 }

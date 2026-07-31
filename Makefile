@@ -163,7 +163,7 @@ TEST_BIN_CACHE_FLAGS ?=
 # `$(NATIVE_BIN) test ...` invocation below threads this knob.
 #
 # Default: auto-detected from CPU count and total RAM via
-# scripts/detect_test_jobs.sh, budgeting 3 GB per job out of a 66% slice of
+# scripts/detect_test_jobs.sh, budgeting 2.5 GB per job out of a 66% slice of
 # RAM — the same reserve the emit fan-out uses, because an e2e build-spawner
 # test forks exactly that compiler+clang tree (SFN-547; the old 384 MB budget
 # was sized for the light unit-test majority and OOMed a 14 GB host).

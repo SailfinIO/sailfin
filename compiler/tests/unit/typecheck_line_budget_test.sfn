@@ -14,13 +14,14 @@
 // next one.
 //
 // The split took the heaviest module to 671,088 KB (`statement_checks`),
-// down from 2,462,232 KB for the flat file (-72.6%). That drops
-// `typecheck` out of the top slot, but does NOT lower
-// `capsule_emit_parallel.sfn`'s `per_job_reserve`: that reserve is sized
-// from the heaviest module in the *tree*, and
-// `llvm/expression_lowering/native/core_operands.sfn` (1,989,504 KB) and
-// `cli/commands/test.sfn` (1,884,732 KB) both remain above it. The
-// reserve needs those handled too (SFN-637, SFN-638) before it can move.
+// down from 2,462,232 KB for the flat file (-72.6%), dropping `typecheck`
+// out of the top slot. That alone could not lower
+// `capsule_emit_parallel.sfn`'s `per_job_reserve`, which is sized from
+// the heaviest module in the *tree*: `core_operands.sfn` (1,989,504 KB)
+// and `cli/commands/test.sfn` (1,884,732 KB) still stood above it.
+// SFN-637 and SFN-638 decomposed both, and SFN-626 then re-measured the
+// tree and moved the reserve from 3 GiB to 2.5 GiB against a new worst
+// worker of 1.55 GiB (`docs/baselines/compile-0.8.4-linux-x86_64.csv`).
 //
 // What this budget is NOT. It does not bound the compiler's worst-case
 // per-module emit. Line count does not predict cross-module RSS: the
