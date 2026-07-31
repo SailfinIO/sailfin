@@ -4,9 +4,9 @@ title: aarch64-Linux Target Support (Raspberry Pi Install + On-Device Self-Host)
 status: Accepted
 type: runtime
 created: 2026-07-24
-updated: 2026-07-24
+updated: 2026-07-31
 author: "agent:compiler-architect"
-tracking: [SFN-471, SFN-472, SFN-473, SFN-474, SFN-475, SFN-476]
+tracking: [SFN-471, SFN-472, SFN-473, SFN-474, SFN-475, SFN-476, SFN-644]
 supersedes:
 superseded-by:
 graduates-to:
@@ -62,11 +62,17 @@ and `build-quality.yml`. No aarch64-Linux leg exists anywhere.
 Two concrete on-device correctness hazards make "it's Linux, it'll just work"
 false:
 
-1. **`jmp_buf` buffer overrun.** `runtime/sfn/exception.sfn` malloc's a **fixed
-   256-byte** buffer per exception frame, sized for x86_64 (200) / macOS-arm64
-   (192). glibc **aarch64** `jmp_buf` is larger (`__jmpbuf[22]` longs + saved
-   sigset ≈ 312 bytes) → `setjmp` overruns the buffer. Hard blocker for any
-   `try`/`throw` on a native aarch64 binary.
+1. **`jmp_buf` buffer overrun.** *(Resolved — both halves now reserve 512.)* As
+   written, `runtime/sfn/exception.sfn` malloc'd a **fixed 256-byte** buffer per
+   exception frame, sized for x86_64 (200) / macOS-arm64 (192). The compiler
+   also emits its own **stack** `jmp_buf` allocas — one per `try` and one in
+   each `@main` wrapper — in `llvm/lowering/`, and it is those stack allocas,
+   not the heap buffer, that compiler-emitted `try` actually executes. glibc
+   **aarch64** `jmp_buf` is larger (`__jmpbuf[22]` longs + saved sigset ≈ 312
+   bytes) → `setjmp` overruns the buffer. Hard blocker for any `try`/`throw` on
+   a native aarch64 binary. SFN-471 raised the heap buffer to 512; SFN-644
+   raised the three stack allocas, which that first fix left at 256 because the
+   heap path is dead for compiler-emitted `try`.
 2. **`struct stat` `st_mode` offset.** `lowering_debug_state.sfn`'s
    `stat_st_mode_offset_value()` keys the offset on **OS only** (Linux → 24).
    glibc aarch64 reorders `struct stat` so `st_mode` is at offset **16**, not
@@ -132,7 +138,7 @@ allocates:
 | Value | Source | x86_64-Linux | aarch64-Linux | Action |
 |---|---|---|---|---|
 | `st_mode` offset in `struct stat` | `lowering_debug_state.sfn` `stat_st_mode_offset_value` | 24 | **16** | Re-key on `(os, arch)` via `_host_arch()`. |
-| `jmp_buf` frame buffer size | `runtime/sfn/exception.sfn` (256) | 200 fits | **~312 overruns** | Over-allocate the fixed buffer to **512** (covers all three targets; heap-malloc'd, so oversizing is harmless and needs **no** arch seam). |
+| `jmp_buf` frame buffer size | `runtime/sfn/exception.sfn` (was 256, now 512); `llvm/lowering/{instructions_try,emission,lowering_core}.sfn` stack allocas (was 256, now 512) | 200 fits | **~312 overruns** | **Done.** Over-allocated to **512** on both the heap buffer (SFN-471) and the three stack allocas (SFN-644) — covers all three targets, needs **no** arch seam; the stack allocas also carry `align 16` for MSVC's `_JUMP_BUFFER` (SFN-549). |
 | `errno` locator symbol | `errno_locator_symbol` | `__errno_location` | `__errno_location` (glibc-common) | none |
 | `CLOCK_MONOTONIC` id | `clock_monotonic_id_value` | 1 | 1 (glibc-common) | none |
 | `_SC_NPROCESSORS_ONLN` | `sc_nprocessors_onln_value` | 84 | 84 (glibc-defined) | none |
@@ -237,9 +243,16 @@ self-host stay green at every step:
 - `llvm/lowering_debug_state.sfn` — adds `_host_arch()` + `SAILFIN_TARGET_ARCH`
   and re-keys `stat_st_mode_offset_value` on `(os, arch)`. The x86_64 branch
   returns 24 as before → **byte-identical** emitted IR on Tier 1.
-- `runtime/sfn/exception.sfn` — the `jmp_buf` buffer constant grows 256 → 512.
-  Plain Sailfin source; the old x86_64 seed compiling the new source produces a
-  larger, still-correct allocation. No compiler-baked immediate involved.
+- `runtime/sfn/exception.sfn` — the `jmp_buf` buffer constant grew 256 → 512
+  (shipped, SFN-471). Plain Sailfin source; the old x86_64 seed compiling the
+  new source produces a larger, still-correct allocation. No compiler-baked
+  immediate involved.
+- `llvm/lowering/{instructions_try,emission,lowering_core}.sfn` — the same
+  256 → 512 widening for the three compiler-emitted stack `jmp_buf` allocas
+  (shipped, SFN-644). This is compiler source, so widening it changes emitted IR — but
+  the change is a pure alloca widening with no compiler-baked immediate on the
+  consuming side either, so the old seed compiling this new compiler source is
+  fine and the self-host invariant still holds by construction.
 - `build/target.sfn`, `build/direct_link.sfn`, `build/clang_argv.sfn` — the
   native aarch64 build uses clang's **host-default** triple, so no `-target`
   work is needed for the native path (unlike Windows). Only the optional
@@ -263,9 +276,11 @@ before merge.
   and the syscall form does not survive emulation-vs-native reasoning as cleanly
   as a host-filesystem probe.
 - **Arch-aware `jmp_buf` sizing** (a per-arch constant) instead of a flat
-  over-allocation. Rejected: the buffer is heap-malloc'd per frame, so
-  over-allocating to 512 is harmless, needs no arch seam, and removes an entire
-  arch branch from a hot exception path.
+  over-allocation. Rejected: the heap buffer is malloc'd per frame, so
+  over-allocating it to 512 is harmless, but the compiler-emitted stack
+  allocas (SFN-644) put those same 512 bytes on every `try`'s frame — a
+  frame-size cost, not a free one. Still the right trade: it needs no arch
+  seam and removes an entire arch branch from a hot exception path.
 - **Cross-emit-from-x86_64 as the primary bootstrap.** Rejected as primary
   (kept as documented alternative): it needs an aarch64 cross sysroot + CRT on
   the x86_64 runner, whereas the qemu path reuses the arm runner's native clang

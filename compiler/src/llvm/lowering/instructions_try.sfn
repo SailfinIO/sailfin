@@ -270,10 +270,17 @@ fn lower_try_instruction(function: NativeFunction, start_index: int, llvm_return
     // so user modules don't need the named struct type — the call
     // into `sfn_exception_push_frame` accepts an `i8*` and link-time
     // opaque-pointer resolution lands on the `%SfnExceptionFrame*`
-    // define in exception.sfn. The jmp_buf is `[32 x i64]` = 256
-    // bytes, matching the literal in `sfn_exception_alloc_frame`
-    // (oversized for Linux x86_64 / macOS arm64 — see the JMPBUF_SIZE
-    // note in the M2.7a module header).
+    // define in exception.sfn. The jmp_buf is `[64 x i64]` = 512
+    // bytes, matching the `malloc(512)` literal in
+    // `sfn_exception_alloc_frame` and the JMPBUF_SIZE note in
+    // `runtime/sfn/exception.sfn`. 512 oversizes Linux x86_64 (200)
+    // and macOS arm64 (192) and, unlike the 256 this carried until
+    // SFN-644, covers glibc aarch64's ~312. At 256 a glibc aarch64
+    // `setjmp` had ~56 bytes of its save area landing outside the
+    // buffer. That is derived from the two sizes, not observed: the
+    // aarch64 leg stayed green throughout, since whether the overrun
+    // corrupts anything depends on what the frame happens to place
+    // after the buffer.
     let frame_pointer = format_local_pointer_name(current_next_local);
     current_next_local += 1;
     let jmpbuf_pointer = format_local_pointer_name(current_next_local);
@@ -283,7 +290,7 @@ fn lower_try_instruction(function: NativeFunction, start_index: int, llvm_return
     // `_JUMP_BUFFER` is 16-aligned because `__intrinsic_setjmp` saves
     // xmm6-xmm15 with `movdqa` (SFN-549).
     current_allocas.push("  " + jmpbuf_pointer
-        + " = alloca [32 x i64], align 16");
+        + " = alloca [64 x i64], align 16");
 
     // When the source includes a `finally` block, allocate a "pending
     // exception" slot that the exception landing pad uses to defer
@@ -330,7 +337,7 @@ fn lower_try_instruction(function: NativeFunction, start_index: int, llvm_return
         + " to i8*");
     let jmpbuf_i8 = format_temp_name(current_temp);
     current_temp += 1;
-    current_lines.push("  " + jmpbuf_i8 + " = bitcast [32 x i64]* "
+    current_lines.push("  " + jmpbuf_i8 + " = bitcast [64 x i64]* "
         + jmpbuf_pointer
         + " to i8*");
 
