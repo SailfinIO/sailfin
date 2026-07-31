@@ -49,7 +49,7 @@ import {
     lookup_imported_function
 } from "./effect_imports";
 import { effect_subsumes, is_recognized_effect, is_universally_allowed_effect } from "./effect_taxonomy";
-import { effects_for_callee_target } from "./llvm/runtime_helpers";
+import { effects_for_callee_target } from "./llvm/runtime_helpers/mod";
 import { Token, TokenKind } from "./token";
 
 struct EffectRequirement {
@@ -1356,7 +1356,7 @@ fn _propagate_imported_member_effects(member: string, imports: ImportSymbolTable
 // G1 (#1183): append one EffectRequirement per capability the builtin
 // callee `target` requires, sourced from the authoritative runtime
 // descriptor registry (`effects_for_callee_target` in
-// `llvm/runtime_helpers.sfn`). This keeps the effect checker free of
+// `llvm/runtime_helpers/`). This keeps the effect checker free of
 // hardcoded name->effect chains for registry-backed builtins: a
 // descriptor's `effects` change flows through here with zero edits.
 // `trigger` carets the diagnostic at the call/namespace token.
@@ -1500,7 +1500,7 @@ fn collect_effects_from_expression(expression: Expression?, imports: ImportSymbo
             let object_trigger = _token_from_span(expression.object.span, root);
             // Registry-driven builtin effect resolution (#1183): the
             // authoritative `target -> effects` registry in
-            // `llvm/runtime_helpers.sfn` is the single source of truth.
+            // `llvm/runtime_helpers/` is the single source of truth.
             // Exact descriptor first (`fs.exists`, `http.get`,
             // `http.download` -> `[net, io]`), namespace-union fallback
             // for members with no exact row (`fs.read` inherits `fs.*`

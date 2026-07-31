@@ -5,7 +5,7 @@
 // (`effect_root`, `is_recognized_effect`, `effect_subsumes`,
 // `compiler/src/effect_taxonomy.sfn`) and wired the effect checker to use
 // them. SFN-99 narrows the runtime helper descriptors themselves
-// (`compiler/src/llvm/runtime_helpers.sfn`) so `fs.*`/`print.*`/
+// (`compiler/src/llvm/runtime_helpers/`) so `fs.*`/`print.*`/
 // `console.*`/`http.*`/`websocket.*` calls are DETECTED as the narrow
 // sub-effect (`io.fs`, `io.console`, `net.http`, `net.ws`) rather than the
 // bare root. This test proves the end-to-end effect: a narrow function

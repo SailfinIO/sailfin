@@ -244,7 +244,7 @@ fn _cr_parse_meminfo_bytes(text: string) -> int {
 fn _cr_ram_budget_jobs(memsize_bytes: int, nproc: int) -> int {
     if memsize_bytes <= 0 { return nproc; }
     // 2.5 GiB — sized from the heaviest emit worker in the tree,
-    // `llvm/runtime_helpers.sfn` at 1.55 GiB (SFN-626 re-measured all
+    // the former `llvm/runtime_helpers.sfn` at 1.55 GiB (SFN-626 re-measured all
     // 302 compiler modules plus the heaviest runtime sources; see
     // `docs/baselines/compile-0.8.4-linux-x86_64.csv` and
     // `docs/proposals/0022-darwin-memory-governor.md` §2.4). The

@@ -6,7 +6,7 @@
 // Pins the Sailfin-native `monotonic_millis` backend. Before #819 the
 // prelude's `monotonic_millis()` routed through the legacy C
 // `sailfin_runtime_monotonic_millis`; #819 flips the helper-registry rows
-// in `compiler/src/llvm/runtime_helpers.sfn` to the Sailfin-native
+// in `compiler/src/llvm/runtime_helpers/registry_concurrency.sfn` to the Sailfin-native
 // `@sfn_clock_millis` (defined in `runtime/sfn/clock.sfn`), which reads
 // `CLOCK_MONOTONIC` through #878's `clock_gettime` field-reader and
 // divides nanoseconds down to whole milliseconds.

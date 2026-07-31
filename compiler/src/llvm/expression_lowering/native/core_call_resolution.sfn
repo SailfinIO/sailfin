@@ -9,7 +9,7 @@ import { is_byte_load_builtin, lower_byte_load } from "../../byte_load";
 import { is_simple_identifier } from "../../expressions_helpers";
 import { find_prelude_mirror_signature } from "../../prelude_mirror_signatures";
 import { find_function_by_name, find_function_by_name_or_import } from "../../rendering_helpers";
-import { find_runtime_helper, make_concat_descriptor, make_push_descriptor } from "../../runtime_helpers";
+import { find_runtime_helper, make_concat_descriptor, make_push_descriptor } from "../../runtime_helpers/mod";
 import { empty_string_constant_set, merge_string_constants } from "../../strings";
 import { is_syscall_builtin, lower_syscall_builtin } from "../../syscall";
 import {

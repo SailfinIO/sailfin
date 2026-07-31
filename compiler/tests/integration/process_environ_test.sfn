@@ -2,7 +2,7 @@
 // `runtime/sfn/process.sfn:sfn_process_environ` walks the libc
 // `environ` block (via `sailfin_runtime_get_environ`) and returns
 // every `"KEY=VALUE"` entry as an `SfnArray<string>`;
-// `compiler/src/llvm/runtime_helpers.sfn` routes the
+// `compiler/src/llvm/runtime_helpers/registry_process.sfn` routes the
 // `process.environ` target onto it. These tests pin the raw
 // `process.*` builtin surface independently of the higher-level
 // `sfn/os::env_from_current` wrapper exercised by

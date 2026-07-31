@@ -34,7 +34,7 @@
 // the gap keeps malformed IR from leaking into emission. See epic
 // #494 for the M1.7 architecture and migration sequencing.
 import { format_temp_name, format_typed_operand } from "../../expressions_helpers";
-import { find_runtime_helper } from "../../runtime_helpers";
+import { find_runtime_helper } from "../../runtime_helpers/mod";
 import {
     ExpressionResult,
     LLVMOperand,

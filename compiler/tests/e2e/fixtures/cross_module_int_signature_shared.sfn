@@ -12,7 +12,7 @@
 //
 // `shadow_number_to_string` is the headline #633 regression. Its
 // name collides with the `target == symbol` mirror row at
-// `compiler/src/llvm/runtime_helpers.sfn` for `number_to_string`
+// `compiler/src/llvm/runtime_helpers/registry_values.sfn` for `number_to_string`
 // (registry: `parameter_types: ["double"]`, `return_type: "i8*"`).
 // Pre-fix, `resolve_call_signature` preferred the registry row over
 // the imported function entry and `render_runtime_helper_declarations`

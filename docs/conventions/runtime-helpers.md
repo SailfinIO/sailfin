@@ -1,8 +1,10 @@
 # Runtime Helper Conventions
 
-This is the canonical reference for adding new entries to the runtime
-helper registry in `compiler/src/llvm/runtime_helpers.sfn` and routing
-their call sites through the LLVM lowering. It supersedes the
+This is the canonical reference for adding new entries to the partitioned
+runtime helper registry under `compiler/src/llvm/runtime_helpers/` and routing
+their call sites through the LLVM lowering. The stable lookup and declaration
+API lives in `runtime_helpers/mod.sfn`; descriptor rows live in the
+`registry_*.sfn` modules grouped by concern. It supersedes the
 per-target alias `declare` path that was retired in M1.7.5b (#502).
 
 ---
@@ -165,7 +167,8 @@ It is **not** the right place for:
 
 ## References
 
-- `compiler/src/llvm/runtime_helpers.sfn` — descriptor registry.
+- `compiler/src/llvm/runtime_helpers/mod.sfn` — registry facade, lookup, effect, and declaration APIs.
+- `compiler/src/llvm/runtime_helpers/registry_*.sfn` — descriptor partitions grouped by concern.
 - `compiler/src/llvm/rendering.sfn:render_runtime_helper_declarations` — preamble emission.
 - `compiler/src/llvm/lowering/lowering_helpers.sfn:collect_runtime_helper_targets_from_lines` — post-lowering scan that observes every emitted call site.
 - `compiler/src/llvm/lowering/lowering_helpers.sfn:seed_default_runtime_helpers` — last-resort top-up list for genuinely undiscoverable helpers (each entry carries a WHY comment).

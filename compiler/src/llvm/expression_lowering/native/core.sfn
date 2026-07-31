@@ -269,7 +269,7 @@ import {
 
 import { find_function_by_name, find_function_by_name_or_import } from "../../rendering_helpers";
 
-import { find_runtime_helper } from "../../runtime_helpers";
+import { find_runtime_helper } from "../../runtime_helpers/mod";
 
 import {
     format_temp_name,

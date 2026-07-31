@@ -58,7 +58,7 @@ fn _test_jobs_budget(memsize_bytes: int, nproc: int, is_darwin: boolean) -> int 
     if cores < 1 { cores = 1; }
     // 2.5 GiB — kept identical to the emit fan-out's `per_job_reserve`
     // (`_cr_ram_budget_jobs`), which SFN-626 sized from the heaviest emit
-    // worker in the tree, `llvm/runtime_helpers.sfn` at 1.55 GiB. See that
+    // worker in the tree, the former `llvm/runtime_helpers.sfn` at 1.55 GiB. See that
     // function for the margin rationale and its 2.31 GiB floor.
     let per_job_bytes: int = 2684354560;
     // 66% slice of physical RAM: headroom for the parent runner, the

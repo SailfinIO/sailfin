@@ -34,7 +34,7 @@ import {
     emit_runtime_call,
     empty_runtime_call_overrides
 } from "../../src/llvm/expression_lowering/native/runtime_call";
-import { effective_helper_declare_return_type } from "../../src/llvm/runtime_helpers";
+import { effective_helper_declare_return_type } from "../../src/llvm/runtime_helpers/mod";
 import { LLVMOperand, RuntimeHelperDescriptor } from "../../src/llvm/types";
 
 test "emit_runtime_call: c_abi_return_type=double, return_type=i64 emits call+coercion" ![io] {

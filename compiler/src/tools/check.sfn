@@ -38,7 +38,7 @@ import {
 import { read_effect_enforcement_env, resolve_effect_enforcement } from "../effect_gate";
 import { ImportSymbolTable, empty_import_symbols } from "../effect_imports";
 import { collect_import_resolution_findings } from "../import_resolution_check";
-import { runtime_helper_call_names } from "../llvm/runtime_helpers";
+import { runtime_helper_call_names } from "../llvm/runtime_helpers/mod";
 import { number_to_string } from "../num_format";
 import { parse_program } from "../parser/mod";
 import { load_prelude_global_names } from "../prelude_globals";

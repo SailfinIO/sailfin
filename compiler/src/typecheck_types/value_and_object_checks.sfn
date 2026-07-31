@@ -18,7 +18,7 @@ import { split_top_level_ampersand, token_from_name, trim_text } from "./text_ut
 // SFN-385: the closed set of genuine method-call forms per primitive receiver —
 // names the lowerer dispatches via a runtime *method descriptor* rather than by
 // fusing the receiver into a free function. Source of truth is the descriptor
-// table in `llvm/runtime_helpers.sfn` (string descriptors: `substring`,
+// table under `llvm/runtime_helpers/` (string descriptors: `substring`,
 // `substring_unchecked`, `grapheme_at`); ported by name only (no `llvm/` import)
 // so typecheck can consult it. Every other valid "method" resolves through
 // free-function fusion, handled by the caller's callable gate — so this table
