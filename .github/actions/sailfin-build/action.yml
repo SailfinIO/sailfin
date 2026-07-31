@@ -344,8 +344,7 @@ runs:
         install -m 755 build/aarch64-bootstrap/pass-2/sfn build/bin/sfn
         cp -R build/aarch64-bootstrap/pass-2/compiler/import-context \
           build/compiler/import-context
-        bash scripts/compiler_source_fingerprint.sh compiler/src runtime \
-          > build/.compiler-source-fingerprint
+        build/bin/sfn dev bootstrap fingerprint > build/.compiler-source-fingerprint
         build/bin/sfn version
 
     # skip-build mode: the compiler tree was downloaded from the shared

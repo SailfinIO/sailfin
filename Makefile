@@ -116,7 +116,7 @@ NATIVE_BIN ?= build/bin/sfn$(EXE_EXT)
 # timestamps, and coarse filesystems can give an edit and the output the same
 # timestamp. The fingerprint includes sorted paths and bytes (SFN-564).
 COMPILER_SOURCE_FINGERPRINT := build/.compiler-source-fingerprint
-COMPILER_SOURCE_FINGERPRINT_CMD := bash scripts/compiler_source_fingerprint.sh compiler/src runtime
+COMPILER_SOURCE_FINGERPRINT_CMD := $(NATIVE_BIN) dev bootstrap fingerprint
 
 # Which compiler binary to use for running Sailfin-native tests.
 # Default: the native compiler alias produced by `make compile`.
@@ -577,9 +577,16 @@ bootstrap-aarch64-linux:
 	@SEED_X86_64="$(SEED_X86_64)" scripts/bootstrap-aarch64-linux.sh
 
 compile-impl:
-	@current_fingerprint="$$($(COMPILER_SOURCE_FINGERPRINT_CMD))"; \
+	@# SFN-679: a $(NATIVE_BIN) predating `dev bootstrap fingerprint` (the
+	@# native replacement for scripts/compiler_source_fingerprint.sh) prints
+	@# nothing, so `current_fingerprint` reads empty here. Requiring it
+	@# non-empty before taking the up-to-date branch forces exactly one
+	@# rebuild in that case (which installs the fingerprint-aware binary);
+	@# every later `make compile` self-heals from the fresh fingerprint.
+	@current_fingerprint="$$($(COMPILER_SOURCE_FINGERPRINT_CMD) 2>/dev/null || true)"; \
 	stored_fingerprint="$$(cat "$(COMPILER_SOURCE_FINGERPRINT)" 2>/dev/null || true)"; \
 	if [ "$${FORCE:-0}" = "0" ] && [ -x "$(NATIVE_BIN)" ] && \
+		[ -n "$$current_fingerprint" ] && \
 		[ -n "$$stored_fingerprint" ] && [ "$$current_fingerprint" = "$$stored_fingerprint" ]; then \
 		echo "[compile] $(NATIVE_BIN) up-to-date"; \
 	else \
@@ -825,7 +832,15 @@ rebuild:
 
 rebuild-impl:
 	@mkdir -p build
-	@$(COMPILER_SOURCE_FINGERPRINT_CMD) > "$(COMPILER_SOURCE_FINGERPRINT).pending"
+	@# SFN-679: the pre-build snapshot is best-effort. On a clean checkout
+	@# $(NATIVE_BIN) does not exist yet, and a binary predating
+	@# `dev bootstrap fingerprint` cannot produce one — neither is an error,
+	@# both are exactly the cold/transitional builds this recipe has to
+	@# complete. Drop the file instead of failing; `dev bootstrap install`
+	@# below treats an absent snapshot as "no race guard available" and a
+	@# malformed one as absent.
+	@$(COMPILER_SOURCE_FINGERPRINT_CMD) > "$(COMPILER_SOURCE_FINGERPRINT).pending" 2>/dev/null \
+		|| rm -f "$(COMPILER_SOURCE_FINGERPRINT).pending"
 	@seed="$${SEED_NATIVE:-$(SEED)}"; \
 	resolved_seed="$$seed"; \
 	if command -v "$$seed" >/dev/null 2>&1; then \
@@ -899,17 +914,13 @@ rebuild-impl:
 		exit 1; \
 	fi
 	@mkdir -p build/native $(dir $(NATIVE_OUT))
-	@post_fingerprint="$$($(COMPILER_SOURCE_FINGERPRINT_CMD))"; \
-	pre_fingerprint="$$(cat "$(COMPILER_SOURCE_FINGERPRINT).pending")"; \
-	if [ "$$pre_fingerprint" != "$$post_fingerprint" ]; then \
-		rm -f "$(COMPILER_SOURCE_FINGERPRINT).pending"; \
-		echo "[rebuild][error] compiler sources changed during the build; refusing to publish a stale binary" >&2; \
-		exit 1; \
-	fi; \
-	cp -f build/sailfin/program "$(NATIVE_OUT).tmp"; \
-	chmod +x "$(NATIVE_OUT).tmp"; \
-	mv -f "$(NATIVE_OUT).tmp" "$(NATIVE_OUT)"; \
-	mv -f "$(COMPILER_SOURCE_FINGERPRINT).pending" "$(COMPILER_SOURCE_FINGERPRINT)"
+	@# SFN-679: delegate the race re-check, atomic install, and fingerprint
+	@# promotion to the FRESHLY BUILT compiler's own `dev bootstrap install`.
+	@# The freshly built program carries the new install/fingerprint logic
+	@# even though the pinned seed that built it does not — that is exactly
+	@# why this targets build/sailfin/program and not $(SEED).
+	@chmod +x build/sailfin/program 2>/dev/null || true
+	@build/sailfin/program dev bootstrap install
 	@# Save .ll files to a location `make test` won't clobber. Each
 	@# integration / e2e test's own `sfn build` overwrites
 	@# `build/sailfin/capsules/*.ll` and `build/sailfin/program.ll`
