@@ -61,7 +61,7 @@ Independently, `capsules/sfn/log/src/mod.sfn` is a real library capsule
 
 The AST already models decorators with arguments:
 `compiler/src/ast.sfn:209-217` (`Decorator { name, arguments: DecoratorArgument[] }`).
-Parsing lives in `compiler/src/parser/declarations.sfn:124-217` and is applied to
+Parsing lives in `compiler/src/parser/declarations/syntax.sfn` and is applied to
 functions, struct methods, structs, enums, interfaces.
 
 **Critical self-hosting fact (verified):** the compiler and runtime sources use
@@ -325,7 +325,8 @@ runtime symbols.
 **Parser / AST**
 - `compiler/src/ast.sfn` — no struct change to `Decorator`; possibly a helper to
   carry the `@decorator` marker recognition. (Verify no `Decorator` layout edit.)
-- `compiler/src/parser/declarations.sfn:863,950,1276` — stop calling
+- `compiler/src/parser/declarations/functions.sfn` and
+  `compiler/src/parser/declarations/structs.sfn` — stop calling
   `infer_effects` for decorator-implied effects at parse time (step B); the
   parser still records decorator names.
 - `compiler/src/decorator_semantics.sfn` — `infer_effects` drops the

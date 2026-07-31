@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # detect_build_jobs.sh — Pick a sensible BUILD_JOBS default for the current host.
 #
-# Heuristic: min(nproc, total_ram_gb / 2). The ~2 GB-per-job budget reflects
-# the post-split heaviest modules:
+# Heuristic: min(nproc, total_ram_gb / 2). The ~2 GB-per-job budget
+# conservatively covers recently observed heavy modules:
 #   * lowering_core.sfn        : 1594 MB peak RSS (was 4700 MB pre-arena,
 #                                2350 MB post-arena pre-split)
-#   * parser/declarations.sfn  : 1759 MB peak RSS (next-worst, unsplit)
+#   * parser/declarations/     : split from the former 1759 MB flat module;
+#                                every leaf remains below 750 lines
 #   * lowering_helpers.sfn     : 1292 MB peak RSS (post seed-default-runtime
 #                                helpers extraction)
 # At 2 GB-per-job, two concurrent worst-case modules peak at ~3.5 GB, which

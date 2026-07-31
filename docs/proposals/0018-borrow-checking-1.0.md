@@ -461,7 +461,7 @@ optional `unsafe` prefix"*). Extend that into a coherent boundary:
     carries **no ownership semantics yet**; this proposal gives it the
     aliasing-boundary meaning, or
   - inside a function marked `unsafe fn` (the `unsafe` prefix already parses on
-    `extern fn`; see `parser/declarations.sfn:896-902`).
+    `extern fn`; see `parser/declarations/functions.sfn`).
 - The ownership checker **does not analyze** the interior of an `unsafe` region
   for aliasing — it is the author's asserted responsibility, exactly as in Rust.
   What it *does* enforce is the **boundary**: a raw pointer may not silently

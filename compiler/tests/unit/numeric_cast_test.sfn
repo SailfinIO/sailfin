@@ -4,7 +4,8 @@
 // Slice D ships parser + AST + native-IR rendering and the numeric
 // LLVM lowering matrix for `as` casts:
 //   * `parse_postfix_chain` recognizes the soft keyword `as` (already
-//     used for import aliases at parser/declarations.sfn:625) and
+//     used for import aliases in
+//     parser/declarations/imports_exports.sfn) and
 //     builds an `Expression.Cast { operand, target_type }`.
 //   * The native `.sfn-asm` emitter (`emit_native_format`) renders
 //     the node as `(operand) as <type>` — the wrapping parens

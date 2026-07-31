@@ -60,7 +60,7 @@ struct Point {
 
 ### Parser enforces separator roles
 
-`consume_annotation_separator()` in `compiler/src/parser/declarations.sfn`
+`consume_annotation_separator()` in `compiler/src/parser/declarations/syntax.sfn`
 accepts only `:` for parameter, variable, and field annotations.
 `consume_return_type_separator()` in the same file accepts only `->` for
 function return types. `expression_tokens_consume_type_separator()` in
@@ -194,7 +194,7 @@ The shared `consume_type_separator()` was split into:
 - `consume_return_type_separator()` — accepts only `->` (function, pipeline,
   tool return types)
 
-All 14 call sites in `declarations.sfn` and 2 in `expressions.sfn` were
+All 14 call sites in `parser/declarations/` and 2 in `parser/expressions/` were
 updated. `->` is now a parse error in annotation position and `:` is a parse
 error in return-type position.
 

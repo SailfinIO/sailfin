@@ -60,7 +60,7 @@ struct TypeParameter {
 ```
 
 `parse_type_parameter_clause`
-([`compiler/src/parser/declarations.sfn:313-381`](../../compiler/src/parser/declarations.sfn#L313-L381))
+([`compiler/src/parser/declarations/syntax.sfn`](../../compiler/src/parser/declarations/syntax.sfn))
 splits each slice on a top-level `:`, keeps the left as `name` and the right as
 `bound`. It is shared verbatim by `fn`, `struct`, `interface`, and `type`
 declarations (nine call sites in that file), so `T: Comparable` attaches
@@ -524,7 +524,7 @@ generalized substitution engine must not change enum-payload behavior.
 - **Gap sites (this tree):** `compiler/src/ast.sfn:16-20` (inert `bound`);
   `compiler/src/typecheck_types.sfn:1556-1572` (`check_type_parameters`,
   duplicate-name only) and `:95-149` / `:169-188` (conformance + arity machinery
-  to reuse); `compiler/src/parser/declarations.sfn:313-381` (shared bound parse);
+  to reuse); `compiler/src/parser/declarations/syntax.sfn` (shared bound parse);
   `compiler/src/native_ir_parser_defs.sfn:503-528` and
   `compiler/src/llvm/type_mapping.sfn:139-203+` (the #830 substitution
   primitives to generalize).

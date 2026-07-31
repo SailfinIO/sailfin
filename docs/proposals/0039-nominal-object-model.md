@@ -73,7 +73,7 @@ fn main() ![io] {
 ```
 
 Every stage accepts this. The interface member loop
-(`parser/declarations.sfn`) requires `fn`; a field-shaped member makes
+(`parser/declarations/interfaces.sfn`) requires `fn`; a field-shaped member makes
 `parse_interface_member` return `success: false`, and the loop then
 **silently `skip_struct_member`s it** — the interface ends with zero members and
 no diagnostic. The alias RHS `Admin & User` is stored as
@@ -132,7 +132,8 @@ interface Named {
 }
 ```
 
-**Where it fires.** In the interface member loop in `parser/declarations.sfn`:
+**Where it fires.** In the interface member loop in
+`parser/declarations/interfaces.sfn`:
 when `parse_interface_member` returns `success: false` **and** the pending
 tokens have a field shape (an identifier followed by a type separator — `:`,
 or the legacy `->`), emit `E0827` at the member's span and then continue error recovery
@@ -426,7 +427,7 @@ the decomposition). Required-in-pinned-seed: none.
 - Spec / preview: `reference/spec/06-types.md` (interfaces, structs, type
   aliases), `docs/status.md` (Interfaces; Interface conformance validation;
   Generic type constraints rows).
-- Code anchors: `parser/declarations.sfn` (interface member loop,
+- Code anchors: `parser/declarations/interfaces.sfn` (interface member loop,
   `parse_interface_member`, `skip_struct_member`); `ast.sfn`
   (`InterfaceDeclaration.members: FunctionSignature[]`, `TypeAnnotation.text`);
   `typecheck.sfn` / `typecheck_types.sfn` (`resolve_struct_info_from_llvm_type`,

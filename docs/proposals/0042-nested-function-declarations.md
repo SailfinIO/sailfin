@@ -167,7 +167,7 @@ the arm with two-token lookahead: `identifier_matches(token, "fn")` **and** the
 next non-trivia token is an identifier (a *name*), which distinguishes a nested
 declaration from an anonymous lambda expression `fn(` (whose next token is `(`).
 When matched, delegate to the existing `parse_function` machinery
-(`compiler/src/parser/declarations.sfn:806`) so the parsed `FunctionSignature` +
+(`compiler/src/parser/declarations/functions.sfn`) so the parsed `FunctionSignature` +
 body is byte-for-byte the top-level shape, and wrap the result in
 `Statement.FunctionDeclaration` (`ast.sfn:351`) — the same node the top-level
 dispatch and the lambda-lift pass already produce. **No new AST node is

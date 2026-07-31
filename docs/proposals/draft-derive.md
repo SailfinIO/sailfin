@@ -70,7 +70,8 @@ macro door.
 
 `@derive(...)` is applied to a `struct` or `enum` declaration using the grammar the
 parser already accepts for decorators-with-arguments
-(`compiler/src/parser/declarations.sfn`, applied to structs and enums; the AST node
+(`compiler/src/parser/declarations/syntax.sfn`, applied by
+`declarations/structs.sfn` and `declarations/enums.sfn`; the AST node
 is `StructDeclaration.decorators` / `EnumDeclaration.decorators`,
 `compiler/src/ast.sfn:373,394`):
 
@@ -348,7 +349,7 @@ lexer, parser, effect checker, native emitter, and LLVM lowering are **unchanged
 they see synthesized methods as ordinary methods.
 
 - **Parser / AST:** `@derive(Eq, ...)` already parses today (decorators-with-args on
-  structs/enums, `parser/declarations.sfn`; `Decorator`/`DecoratorArgument`,
+  structs/enums, `parser/declarations/syntax.sfn`; `Decorator`/`DecoratorArgument`,
   `ast.sfn:284-292`). No parser change for structs. The only AST change is the
   additive `EnumDeclaration` extension (§3.4), which round-trips through an old seed
   because the new fields default empty and the old seed never populates them.
