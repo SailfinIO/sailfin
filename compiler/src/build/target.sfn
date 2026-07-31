@@ -257,6 +257,27 @@ fn target_condition_runtime_sfn_sources(sources: string[], target_os: string) ->
     return out;
 }
 
+// A path-safe token for `target_os`, for use in cache-artifact filenames
+// (SFN-617). `SAILFIN_TARGET_OS` is an unvalidated environment string, so
+// it must never be interpolated into a filesystem path directly; this maps
+// it to a closed set of path-safe tokens. Unknown targets collapse to
+// `"other"` deliberately — correctness comes from the cache key (the
+// runtime-object key fold in `build/runtime_objs.sfn`), which carries the
+// raw target, so two unknown targets sharing a filename still mismatch on
+// key and recompile rather than cross-link. Note what that means on disk:
+// unknown targets SHARE a path and overwrite each other, trading the
+// coexistence known targets get for a recompile on every switch. That is
+// only sound while `target_clang_triple` returns "" for every non-Windows
+// target, which makes their objects byte-identical anyway; the day an
+// unknown target contributes clang flags, this bucket needs splitting
+// rather than documenting.
+fn target_artifact_tag(target_os: string) -> string {
+    if target_os == "Windows" { return "windows"; }
+    if target_os == "Darwin" { return "darwin"; }
+    if target_os == "Linux" { return "linux"; }
+    return "other";
+}
+
 export {
     build_host_os,
     host_is_windows,
@@ -268,5 +289,6 @@ export {
     target_uses_gnu_link_gc,
     target_filter_link_libs,
     target_extra_link_libs,
-    target_condition_runtime_sfn_sources
+    target_condition_runtime_sfn_sources,
+    target_artifact_tag
 };

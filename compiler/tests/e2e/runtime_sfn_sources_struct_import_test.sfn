@@ -37,7 +37,9 @@
 // NOTE: assert on captured stdout+stderr / file contents with
 // `sfn/strings` predicates — the `sfn/test` `expect_*` matchers are
 // `![pure]` and cannot be called from an `![io]` test (#842).
-import { find, contains } from "sfn/strings";
+import { contains, find } from "sfn/strings";
+
+import { build_target_os, target_artifact_tag } from "../../src/build/target";
 
 fn _sfn_bin() -> string ![io] {
     let configured = env.get("SAILFIN_BIN");
@@ -227,7 +229,9 @@ test "runtime sfn-source struct import builds, stages context, and round-trips (
     // `.o` was produced (the consumer compiled) and then re-emit the
     // consumer's LLVM IR against the staged private import-context to inspect
     // the resolved call signature.
-    let use_obj = build_dir + "/sailfin/sfn__runtime-native__structuse.sfn-O2.o";
+    let use_obj = build_dir + "/sailfin/sfn__runtime-native__structuse.sfn-"
+        + target_artifact_tag(build_target_os())
+        + "-O2.o";
     assert fs.exists(use_obj);
     let ctx = build_dir + "/sailfin/rt-import-context";
     let use_ll = build_dir + "/sailfin/structuse-reemit.ll";

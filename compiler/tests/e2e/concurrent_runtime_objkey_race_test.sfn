@@ -4,8 +4,9 @@
 // failures): `_sha256_of_string` (compiler/src/build_cache.sfn) once
 // hashed the runtime object cache key by writing to a SINGLE fixed tmp
 // path `/tmp/.sfn_build_cache_hash_<suffix>` and then `rm -f`-ing it. The
-// `<suffix>` (`cap_prefix + basename + opt_flag`, e.g.
-// `sfn__runtime-native__prelude_sfn-O2`) was IDENTICAL across concurrent
+// `<suffix>` (`cap_prefix + basename + target_tag + opt_flag`, e.g.
+// `sfn__runtime-native__prelude.sfn-linux-O2` post-SFN-617) was
+// IDENTICAL across concurrent
 // builds of the same runtime source, so two parallel `sfn run`/`sfn
 // build` workers collided on that path — one `rm`-ed the file out from
 // under the other's `sha256sum` (`No such file or directory`), and the

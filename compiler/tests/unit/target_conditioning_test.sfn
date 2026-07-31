@@ -18,6 +18,7 @@ import { expect_eq_bool, expect_eq_str, expect_eq_str_array } from "sfn/test";
 import { LinkPlan, _llvm_text_link_program_argv, _llvm_text_link_test_argv } from "../../src/backend";
 import { _llvm_text_assemble_argv } from "../../src/build/clang_argv";
 import {
+    target_artifact_tag,
     target_clang_flags,
     target_clang_triple,
     target_condition_runtime_sfn_sources,
@@ -256,4 +257,32 @@ test "target: host link argv carries no -target flag" ![pure] {
     let test_argv = _llvm_text_link_test_argv(_driver_plan(true), no_driver);
     assert expect_eq_bool(_argv_contains(program_argv, "-target"), false).ok;
     assert expect_eq_bool(_argv_contains(test_argv, "-target"), false).ok;
+}
+
+// ---- SFN-617: the artifact tag that keys cached objects by target ----
+test "target: artifact tag maps each known target to a distinct token" ![pure] {
+    assert expect_eq_str(target_artifact_tag("Linux"), "linux").ok;
+    assert expect_eq_str(target_artifact_tag("Darwin"), "darwin").ok;
+    assert expect_eq_str(target_artifact_tag("Windows"), "windows").ok;
+}
+
+// An unrecognized target collapses to a single bucket on purpose. The
+// cache key carries the RAW target string, so two unknown targets that
+// share this tag still mismatch on key and recompile — the tag only has
+// to be path-safe and stable, never injective.
+test "target: artifact tag collapses an unrecognized target to other" ![pure] {
+    assert expect_eq_str(target_artifact_tag("Plan9"), "other").ok;
+    assert expect_eq_str(target_artifact_tag(""), "other").ok;
+}
+
+// The tag is interpolated into a filesystem path, and `SAILFIN_TARGET_OS`
+// is unvalidated environment input, so a hostile value must never reach
+// the path. The closed mapping is the guard: anything unrecognized —
+// including traversal and separator attempts — becomes `other`.
+test "target: artifact tag never yields a path separator or traversal" ![pure] {
+    assert expect_eq_str(target_artifact_tag("../../etc/passwd"), "other").ok;
+    assert expect_eq_str(target_artifact_tag("a/b"), "other").ok;
+    assert expect_eq_str(target_artifact_tag("a\\b"), "other").ok;
+    assert expect_eq_bool(contains(target_artifact_tag("Linux"), "/"), false).ok;
+    assert expect_eq_bool(contains(target_artifact_tag("Windows"), ".."), false).ok;
 }

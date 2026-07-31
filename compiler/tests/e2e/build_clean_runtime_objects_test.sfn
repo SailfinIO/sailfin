@@ -63,8 +63,9 @@ fn _write_hello(root: string) -> string ![io] {
 }
 
 // Count runtime-object key sidecars directly under `<work-dir>/sailfin/`.
-// The runtime compile paths write `<cap_prefix><basename>-O2.o.key` there
-// (opt_flag is `-O2`), so a `-O2.o.key` suffix uniquely names them.
+// The runtime compile paths write `<cap_prefix><basename>-<target_tag>-O2.o.key`
+// there (opt_flag is `-O2`; SFN-617 added the target tag between the
+// basename and opt_flag), so a `-O2.o.key` suffix still uniquely names them.
 fn _count_runtime_keys(objdir: string) -> int ![io] {
     if !fs.exists(objdir) { return 0; }
     let entries = fs.listDirectory(objdir);
