@@ -16,7 +16,8 @@ import {
     SourceSpan,
     Statement
 } from "../../src/ast";
-import { EffectViolation, is_program_entry_point, validate_effects } from "../../src/effect_checker";
+import { is_program_entry_point, validate_effects } from "../../src/effect_checker";
+import { EffectViolation } from "../../src/effect_checker/types";
 
 // -------------------------------------------------------------------
 // Builder helpers — local copies of the shape used in

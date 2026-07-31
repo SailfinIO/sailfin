@@ -27,7 +27,8 @@ import {
     TypeAnnotation,
     TypeParameter
 } from "../../src/ast";
-import { CapabilityViolation, validate_capsule_capabilities } from "../../src/effect_checker";
+import { validate_capsule_capabilities } from "../../src/effect_checker";
+import { CapabilityViolation } from "../../src/effect_checker/types";
 
 // -------------------------------------------------------------------
 // Builder helpers

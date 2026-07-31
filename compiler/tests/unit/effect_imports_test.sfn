@@ -23,7 +23,8 @@ import {
     SourceSpan,
     Statement
 } from "../../src/ast";
-import { EffectViolation, validate_effects_with_imports } from "../../src/effect_checker";
+import { validate_effects_with_imports } from "../../src/effect_checker";
+import { EffectViolation } from "../../src/effect_checker/types";
 import {
     ImportSymbolTable,
     ImportedFunctionSignature,

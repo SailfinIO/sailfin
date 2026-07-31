@@ -22,7 +22,8 @@ import {
     Statement,
     TypeAnnotation
 } from "../../src/ast";
-import { EffectViolation, validate_effects } from "../../src/effect_checker";
+import { validate_effects } from "../../src/effect_checker";
+import { EffectViolation } from "../../src/effect_checker/types";
 
 // -------------------------------------------------------------------
 // Builder helpers
