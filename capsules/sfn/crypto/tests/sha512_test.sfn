@@ -1,0 +1,77 @@
+// Tests for sfn/crypto SHA-512 (pure-Sailfin, FIPS 180-4).
+//
+// `sha512` and `sha512_hex` are imported through `../src/mod` so the capsule's
+// public re-export is exercised, matching sha256_test.sfn. `sha512_bytes` is
+// capsule-internal (it is the byte-oriented form Ed25519 verification needs,
+// SFN-655) and so is imported from its defining module.
+//
+// The "abc" and 896-bit vectors are the FIPS 180-4 appendix examples; the
+// empty-string digest is the NIST CAVP value. The 128- and 200-byte inputs
+// and the non-ASCII vectors were generated with `sha512sum`: 128 bytes lands
+// exactly on the block boundary and 200 bytes crosses it, both forcing a
+// second padding block.
+import { sha512, sha512_hex } from "../src/mod";
+import { sha512_bytes } from "../src/sha512";
+
+// Render a byte array as lowercase hex, so a `sha512_bytes` result can be
+// compared against the same digest string the hex entry points return.
+fn _hexs(bytes: int[]) -> string {
+    let digits: string[] = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "a", "b", "c", "d", "e", "f",];
+    let mut out: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= bytes.length { break; }
+        out = out + digits[(bytes[i] >> 4) & 15] + digits[bytes[i] & 15];
+        i += 1;
+    }
+    return out;
+}
+
+test "sha512_hex: empty string" {
+    assert sha512_hex("") == "cf83e1357eefb8bdf1542850d66d8007d620e4050b5715dc83f4a921d36ce9ce47d0d13c5d85f2b0ff8318d2877eec2f63b931bd47417a81a538327af927da3e";
+}
+
+test "sha512_hex: abc" {
+    assert sha512_hex("abc") == "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f";
+}
+
+test "sha512_hex: 896-bit two-block vector" {
+    assert sha512_hex("abcdefghbcdefghicdefghijdefghijkefghijklfghijklmghijklmnhijklmnoijklmnopjklmnopqklmnopqrlmnopqrsmnopqrstnopqrstu") == "8e959b75dae313da8cf4f72814fc143f8f7779c6eb9f7fa17299aeadb6889018501d289e4900f7e4331b99dec4b5433ac7d329eeb6dd26545e96e55b874be909";
+}
+
+test "sha512_hex: 128-byte input on the block boundary" {
+    assert sha512_hex("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa") == "b73d1929aa615934e61a871596b3f3b33359f42b8175602e89f7e06e5f658a243667807ed300314b95cacdd579f3e33abdfbe351909519a846d465c59582f321";
+}
+
+test "sha512_hex: 200-byte input crossing the block boundary" {
+    assert sha512_hex("sailfin-sha512-boundary-sailfin-sha512-boundary-sailfin-sha512-boundary-sailfin-sha512-boundary-sailfin-sha512-boundary-sailfin-sha512-boundary-sailfin-sha512-boundary-sailfin-sha512-boundary-sailfin-") == "e5854be449bdd51df2043c7a594f81e640061b86654dee9dd322efddc08d285b5483bb47b7445391fb684da1fb9272fa57c992e1e0eb18385281b78da80dffb0";
+}
+
+test "sha512_hex: non-ASCII UTF-8 (single multibyte char)" {
+    // "é" is the two UTF-8 bytes 0xc3 0xa9; byte-oriented indexing hashes
+    // them raw, matching `printf 'é' | sha512sum`.
+    assert sha512_hex("é") == "9e2ad28633f24451bd4f3c1cb20586a21a44c3aeedbdc01b9cc8fa72917ea7bd689c82b8bf1fef89b911cf8cc46fa2c1ccc10087b2094fd4d3350ecd88526a2c";
+}
+
+test "sha512_hex: non-ASCII UTF-8 (mixed ASCII + multibyte)" {
+    assert sha512_hex("héllo wörld") == "aacc881944f9ae7084649c91609b436444d66f289fca3bc4214e465e99f256efa8a8dc447e41660087c1081e4718419a94eee3d6b536b46bb764cdd7f747fe38";
+}
+
+test "sha512: prefixed digest" {
+    assert sha512("abc") == "sha512:ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f";
+}
+
+test "sha512_bytes: abc digest as 64 raw bytes" {
+    // The byte-oriented entry point Ed25519 verification consumes (SFN-655).
+    // Comparing the full hex rendering catches a transposed hi/lo limb store,
+    // which a length or endpoint check would miss.
+    let digest: int[] = sha512_bytes([97, 98, 99]);
+    assert digest.length == 64;
+    assert _hexs(digest) == "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f";
+}
+
+test "sha512_bytes: empty input digest as 64 raw bytes" {
+    let digest: int[] = sha512_bytes([]);
+    assert digest.length == 64;
+    assert _hexs(digest) == "cf83e1357eefb8bdf1542850d66d8007d620e4050b5715dc83f4a921d36ce9ce47d0d13c5d85f2b0ff8318d2877eec2f63b931bd47417a81a538327af927da3e";
+}
