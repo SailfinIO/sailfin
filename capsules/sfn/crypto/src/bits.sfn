@@ -4,7 +4,7 @@
 // (SFEP-0048 §3.3-3.4). Centralizes the mandated
 // safe-integer idioms — 32-bit masking, rotates, constant-time byte
 // comparison, and big/little-endian word (de)serialization — so the
-// other Phase A primitives (sha1, sha384, chacha20, poly1305) call a
+// other Phase A primitives (sha1, sha512, chacha20, poly1305) call a
 // single tested source instead of re-inlining these expressions.
 // The 0xffffffff 32-bit mask as a decimal constant.
 fn mask32() -> int { return 4294967295; }

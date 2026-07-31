@@ -7,7 +7,7 @@ import { sha512_state, sha512_word_hex } from "./sha512";
 
 // The FIPS 180-4 §5.3.4 SHA-384 initial state H[0..7], as [hi, lo] decimal
 // limb pairs (hex literals are unavailable in Sailfin source).
-fn sha384_iv() -> int[][] {
+fn _sha384_iv() -> int[][] {
     return [[3418070365, 3238371032], [1654270250, 914150663], [2438529370, 812702999], [355462360, 4144912697], [1731405415, 4290775857], [2394180231, 1750603025], [3675008525, 1694076839], [1203062813, 3204075428],];
 }
 
@@ -23,7 +23,7 @@ fn sha384_hex(data: string) -> string {
         bi += 1;
     }
 
-    let h: int[][] = sha512_state(bytes, sha384_iv());
+    let h: int[][] = sha512_state(bytes, _sha384_iv());
 
     // SHA-384 truncates to the first 6 of the 8 state words.
     return sha512_word_hex(h[0][0], h[0][1]) + sha512_word_hex(h[1][0], h[1][1])

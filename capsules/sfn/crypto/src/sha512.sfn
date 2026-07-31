@@ -69,8 +69,9 @@ fn _rotr64(a: int[], n: int) -> int[] {
 }
 
 // The 80 SHA-512 round constants (FIPS 180-4 §4.2.3), each as a `[hi, lo]`
-// decimal pair (hex literals unavailable). Verified against the SHA-384
-// known-answer vectors in sha384_test.sfn — a single wrong entry fails them.
+// decimal pair (hex literals unavailable). Verified against the known-answer
+// vectors in sha512_test.sfn and sha384_test.sfn — every round runs on every
+// block, so a single wrong entry fails all of them.
 fn _sha512_round_constants() -> int[][] {
     return [[1116352408, 3609767458], [1899447441, 602891725], [3049323471, 3964484399], [3921009573, 2173295548], [961987163, 4081628472], [1508970993, 3053834265], [2453635748, 2937671579], [2870763221, 3664609560], [3624381080, 2734883394], [310598401, 1164996542], [607225278, 1323610764], [1426881987, 3590304994], [1925078388, 4068182383], [2162078206, 991336113], [2614888103, 633803317], [3248222580, 3479774868], [3835390401, 2666613458], [4022224774, 944711139], [264347078, 2341262773], [604807628, 2007800933], [770255983, 1495990901], [1249150122, 1856431235], [1555081692, 3175218132], [1996064986, 2198950837], [2554220882, 3999719339], [2821834349, 766784016], [2952996808, 2566594879], [3210313671, 3203337956], [3336571891, 1034457026], [3584528711, 2466948901], [113926993, 3758326383], [338241895, 168717936], [666307205, 1188179964], [773529912, 1546045734], [1294757372, 1522805485], [1396182291, 2643833823], [1695183700, 2343527390], [1986661051, 1014477480], [2177026350, 1206759142], [2456956037, 344077627], [2730485921, 1290863460], [2820302411, 3158454273], [3259730800, 3505952657], [3345764771, 106217008], [3516065817, 3606008344], [3600352804, 1432725776], [4094571909, 1467031594], [275423344, 851169720], [430227734, 3100823752], [506948616, 1363258195], [659060556, 3750685593], [883997877, 3785050280], [958139571, 3318307427], [1322822218, 3812723403], [1537002063, 2003034995], [1747873779, 3602036899], [1955562222, 1575990012], [2024104815, 1125592928], [2227730452, 2716904306], [2361852424, 442776044], [2428436474, 593698344], [2756734187, 3733110249], [3204031479, 2999351573], [3329325298, 3815920427], [3391569614, 3928383900], [3515267271, 566280711], [3940187606, 3454069534], [4118630271, 4000239992], [116418474, 1914138554], [174292421, 2731055270], [289380356, 3203993006], [460393269, 320620315], [685471733, 587496836], [852142971, 1086792851], [1017036298, 365543100], [1126000580, 2618297676], [1288033470, 3409855158], [1501505948, 4234509866], [1607167915, 987167468], [1816402316, 1246189591],];
 }
@@ -88,9 +89,6 @@ fn _sha512_pad(msg: int[]) -> int[] {
     }
     let bit_len: int = bytes.length * 8;
 
-    // Pad: 0x80, zeros until length % 128 == 112, then the 128-bit
-    // big-endian message length in bits. `bit_len` fits in 64 bits, so the
-    // high 64 bits of the 128-bit length are all zero.
     bytes.push(128);
     loop {
         if (bytes.length % 128) == 112 { break; }
@@ -113,6 +111,8 @@ fn _sha512_pad(msg: int[]) -> int[] {
 // Run the SHA-512 compression function over `msg` starting from `iv`,
 // returning the final 8 state words as `[hi, lo]` limb pairs. SHA-384 and
 // SHA-512 differ only in `iv` and in how many words the caller keeps.
+// `iv` must be exactly 8 `[hi, lo]` pairs; it is copied, never written
+// through, so a caller may safely feed a previously returned state back in.
 fn sha512_state(msg: int[], iv: int[][]) -> int[][] {
     let bytes: int[] = _sha512_pad(msg);
 
@@ -217,7 +217,7 @@ fn sha512_word_hex(hi: int, lo: int) -> string {
 
 // The FIPS 180-4 §5.3.5 SHA-512 initial state H[0..7], as [hi, lo] decimal
 // limb pairs (hex literals are unavailable in Sailfin source).
-fn sha512_iv() -> int[][] {
+fn _sha512_iv() -> int[][] {
     return [[1779033703, 4089235720], [3144134277, 2227873595], [1013904242, 4271175723], [2773480762, 1595750129], [1359893119, 2917565137], [2600822924, 725511199], [528734635, 4215389547], [1541459225, 327033209],];
 }
 
@@ -228,7 +228,7 @@ fn sha512_iv() -> int[][] {
 // (SFN-655), since signatures and public keys are arbitrary binary that a
 // NUL-terminated Sailfin `string` cannot represent.
 fn sha512_bytes(msg: int[]) -> int[] {
-    let h: int[][] = sha512_state(msg, sha512_iv());
+    let h: int[][] = sha512_state(msg, _sha512_iv());
     let mut out: int[] = [];
     let mut oi: int = 0;
     loop {
@@ -251,7 +251,7 @@ fn sha512_hex(data: string) -> string {
         bytes.push(char_code(data[bi]) & 255);
         bi += 1;
     }
-    let h: int[][] = sha512_state(bytes, sha512_iv());
+    let h: int[][] = sha512_state(bytes, _sha512_iv());
 
     return sha512_word_hex(h[0][0], h[0][1]) + sha512_word_hex(h[1][0], h[1][1])
         + sha512_word_hex(h[2][0], h[2][1])
@@ -278,6 +278,5 @@ export {
     sha512_hex,
     sha512_bytes,
     sha512_state,
-    sha512_word_hex,
-    sha512_iv
+    sha512_word_hex
 };
