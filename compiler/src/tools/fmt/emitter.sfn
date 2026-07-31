@@ -1,0 +1,513 @@
+// compiler/src/tools/fmt/emitter.sfn
+//
+// Whitespace decisions and formatted source emission.
+import { char_at, strings_equal } from "../../string_utils";
+import { wraps_at_threshold } from "../fmt_rules";
+import { _emit_indent, _is_top_level_decl } from "./tokens";
+import { FmtToken } from "./types";
+
+fn _measure_inline_block(fmt_tokens: FmtToken[], start: int) -> int {
+    let mut depth = 0;
+    let mut length = 0;
+    let mut items = 1;
+    let mut has_content = false;
+    let mut semicolons = 0;
+    let mut has_colon = false;
+    let mut j = start;
+    loop {
+        if j >= fmt_tokens.length { return -1; }
+        let ft = fmt_tokens[j];
+        let role = ft.role;
+        let lex = ft.token.lexeme;
+
+        // Any leading comments on or inside the block → not inlineable
+        if ft.leading_comments.length > 0 { return -1; }
+        if ft.blank_lines_before > 0 { return -1; }
+        // Trailing comments → not inlineable
+        if ft.trailing_comment.length > 0 { return -1; }
+
+        if strings_equal(role, "block_open") {
+            if depth > 0 { return -1; }
+            depth = 1;
+            length = length + lex.length + 1;
+            j += 1;
+            continue;
+        }
+        if strings_equal(role, "block_close") {
+            if depth == 1 {
+                if !has_content { items = 0; }
+                // Multi-statement code blocks (2+ semicolons) should not inline
+                if semicolons > 1 { return -1; }
+                // Blocks with both colons and semicolons are field declarations
+                // (struct/enum), not code blocks — do not inline
+                if has_colon {
+                    if semicolons > 0 { return -1; }
+                }
+                length = length + 1 + lex.length;
+                let encoded = length * 1000 + items;
+                return encoded;
+            }
+            return -1;
+        }
+
+        has_content = true;
+        if strings_equal(role, "separator") {
+            // Don't count trailing comma (separator before block_close) as an item or length
+            let is_trailing = false;
+            if j + 1 < fmt_tokens.length {
+                if strings_equal(fmt_tokens[j + 1].role, "block_close") {
+                    is_trailing = true;
+                }
+            }
+            if !is_trailing {
+                items += 1;
+                length = length + lex.length + 1;
+            }
+        } else if strings_equal(role, "colon") {
+            has_colon = true;
+            length = length + lex.length + 1;
+        } else if strings_equal(role, "semicolon") {
+            semicolons += 1;
+            length = length + lex.length;
+        } else {
+            if j > start + 1 { length = length + 1; }
+            length = length + lex.length;
+        }
+        j += 1;
+    }
+    return -1;
+}
+
+fn _is_inline_block_context(fmt_tokens: FmtToken[], block_open_idx: int) -> boolean {
+    // A block is inlineable if it fits on one line. The measure function
+    // rejects nested blocks, comments, blank lines, and multi-statement
+    // blocks. Here we just check that the context is reasonable.
+    if block_open_idx == 0 { return false; }
+    let prev = fmt_tokens[block_open_idx - 1];
+    // import { ... }
+    if strings_equal(prev.token.lexeme, "import") { return true; }
+    // export { ... }
+    if strings_equal(prev.token.lexeme, "export") { return true; }
+    // StructName { ... }  — value followed by {
+    // BUT exclude struct/enum declarations: struct Foo { ... }
+    if strings_equal(prev.role, "value") {
+        if block_open_idx >= 2 {
+            let prev2 = fmt_tokens[block_open_idx - 2];
+            if strings_equal(prev2.token.lexeme, "struct") { return false; }
+            if strings_equal(prev2.token.lexeme, "enum") { return false; }
+            if strings_equal(prev2.token.lexeme, "interface") { return false; }
+        }
+        return true;
+    }
+    // Type parameter close: GenericStruct<T> { ... }
+    if strings_equal(prev.role, "bracket_close") { return true; }
+    // After closing paren: if cond() { ... }, fn foo() { ... }
+    if strings_equal(prev.role, "paren_close") { return true; }
+    // After keywords: else { ... }, loop { ... }, try { ... }, catch { ... }
+    // BUT exclude struct/enum/interface keyword followed by name followed by {
+    if strings_equal(prev.role, "keyword") {
+        if strings_equal(prev.token.lexeme, "struct") { return false; }
+        if strings_equal(prev.token.lexeme, "enum") { return false; }
+        if strings_equal(prev.token.lexeme, "interface") { return false; }
+        return true;
+    }
+    // Match arms: Pattern => { body; }
+    if strings_equal(prev.role, "arrow") { return true; }
+    return false;
+}
+
+fn _needs_newline_before(role: string, prev_role: string, lexeme: string, prev_lexeme: string) -> boolean {
+    // Close brace always on its own line (unless empty block)
+    if strings_equal(role, "block_close") {
+        if strings_equal(prev_role, "block_open") { return false; }
+        return true;
+    }
+    // After semicolon or open brace → new line
+    if strings_equal(prev_role, "semicolon") { return true; }
+    if strings_equal(prev_role, "block_open") {
+        if strings_equal(role, "block_close") { return false; }
+        return true;
+    }
+    if strings_equal(prev_role, "block_close") {
+        // Tokens that attach to the closing brace (stay on same line)
+        if strings_equal(role, "separator") { return false; }
+        if strings_equal(role, "semicolon") { return false; }
+        if strings_equal(role, "arrow") { return false; }
+        if strings_equal(role, "dot") { return false; }
+        if strings_equal(role, "paren_close") { return false; }
+        if strings_equal(role, "bracket_close") { return false; }
+        if strings_equal(lexeme, "else") { return false; }
+        if strings_equal(lexeme, "catch") { return false; }
+        if strings_equal(lexeme, "from") { return false; }
+        if strings_equal(lexeme, "as") { return false; }
+        // Everything else (new statement/declaration) → new line
+        return true;
+    }
+    return false;
+}
+
+fn _needs_space_before(role: string, prev_role: string, lexeme: string, prev_lexeme: string) -> boolean {
+    // No space at start of output
+    if strings_equal(prev_role, "") { return false; }
+
+    // No space after unary operator (!, -)
+    if strings_equal(prev_role, "unary_op") { return false; }
+
+    // Generic angle brackets: tight, no intra-bracket spacing.
+    // `Box<int>` not `Box < int >`. The close `>` is a distinct role so
+    // a following `=` is never fused into `>=`.
+    if strings_equal(role, "generic_open") { return false; }
+    if strings_equal(prev_role, "generic_open") { return false; }
+    if strings_equal(role, "generic_close") { return false; }
+
+    // Optional suffix ?: no space before
+    if strings_equal(role, "optional_suffix") { return false; }
+
+    // Compound assignment: operator followed by = (lexer splits += into + and =)
+    if strings_equal(role, "assign") {
+        if strings_equal(prev_role, "operator") { return false; }
+    }
+
+    // Dot: no space either side
+    if strings_equal(role, "dot") { return false; }
+    if strings_equal(prev_role, "dot") { return false; }
+
+    // No space after open parens/brackets, no space before close
+    if strings_equal(prev_role, "paren_open") { return false; }
+    if strings_equal(prev_role, "bracket_open") { return false; }
+    if strings_equal(role, "paren_close") { return false; }
+    if strings_equal(role, "bracket_close") { return false; }
+
+    // No space before separator/semicolon
+    if strings_equal(role, "separator") { return false; }
+    if strings_equal(role, "semicolon") { return false; }
+
+    // Colon: no space before, space after
+    if strings_equal(role, "colon") { return false; }
+
+    // Function call: no space before (
+    if strings_equal(role, "paren_open") {
+        if strings_equal(prev_role, "value") { return false; }
+        if strings_equal(prev_role, "paren_close") { return false; }
+        if strings_equal(prev_role, "bracket_close") { return false; }
+        if strings_equal(prev_role, "generic_close") { return false; }
+    }
+
+    // Index: no space before [
+    if strings_equal(role, "bracket_open") {
+        if strings_equal(prev_role, "value") { return false; }
+        if strings_equal(prev_role, "paren_close") { return false; }
+        if strings_equal(prev_role, "bracket_close") { return false; }
+        if strings_equal(prev_role, "generic_close") { return false; }
+    }
+
+    // bang_bracket: space before, no space after !
+    if strings_equal(role, "bang_bracket") { return true; }
+    if strings_equal(prev_role, "bang_bracket") { return false; }
+
+    // Decorator @: no space after
+    if strings_equal(prev_role, "decorator") { return false; }
+
+    // Range `..`: tight on both sides (`0..4`, not `0 .. 4`). Keyed on the
+    // literal lexeme, not the shared "operator" role, so binary `+`/`-`/`*`/…
+    // spacing is untouched.
+    if strings_equal(lexeme, "..") { return false; }
+    if strings_equal(prev_lexeme, "..") { return false; }
+
+    return true;
+}
+
+fn _line_pos_from_end(out: string) -> int {
+    let len = out.length;
+    let mut pos = 0;
+    let limit = 200;
+    let mut si = len;
+    loop {
+        if si <= 0 { break; }
+        if pos >= limit { break; }
+        si -= 1;
+        if strings_equal(char_at(out, si), "\n") { break; }
+        pos += 1;
+    }
+    return pos;
+}
+
+fn emit_formatted(fmt_tokens: FmtToken[]) -> string {
+    let mut out = "";
+    let mut indent = 0;
+    let mut prev_role = "";
+    let mut prev_lexeme = "";
+    let mut at_line_start = true;
+    let mut paren_depth = 0;
+    let mut inline_block_depth = 0;
+    let mut inline_block_end = -1;
+    let mut wrap_operators = false;
+
+    let mut i = 0;
+    loop {
+        if i >= fmt_tokens.length { break; }
+        let ft = fmt_tokens[i];
+        let role = ft.role;
+        let lexeme = ft.token.lexeme;
+        let in_inline = inline_block_depth > 0;
+
+        // ── Check if this block_open should be inlined ──
+        if strings_equal(role, "block_open") {
+            if !in_inline {
+                if _is_inline_block_context(fmt_tokens, i) {
+                    let measure = _measure_inline_block(fmt_tokens, i);
+                    if measure >= 0 {
+                        let line_len = measure / 1000;
+                        let item_count = measure % 1000;
+                        // Current line position (bounded scan, O(1))
+                        let cur_line_pos = _line_pos_from_end(out);
+                        if !wraps_at_threshold(item_count, cur_line_pos
+                            + line_len) { inline_block_depth = 1; }
+                    }
+                }
+            } else { inline_block_depth += 1; }
+        }
+
+        // ── Emit blank line ──
+        if i > 0 {
+            if !in_inline {
+                // Suppress blank lines at block start (after {)
+                let suppress_blank = false;
+                if strings_equal(prev_role, "block_open") {
+                    suppress_blank = true;
+                }
+                // Suppress blank lines at block end (before })
+                if strings_equal(role, "block_close") { suppress_blank = true; }
+
+                if ft.blank_lines_before > 0 {
+                    if !suppress_blank {
+                        if !at_line_start { out = out + "\n"; }
+                        out = out + "\n";
+                        at_line_start = true;
+                    }
+                } else {
+                    // Inject blank line between top-level declarations at indent 0
+                    if indent == 0 {
+                        if _is_top_level_decl(lexeme) {
+                            // Only if previous wasn't also at top level start or file start
+                            if !strings_equal(prev_role, "") {
+                                // Check if this is the first decl after imports
+                                let need_blank = false;
+                                if strings_equal(prev_role, "semicolon") {
+                                    need_blank = true;
+                                }
+                                if strings_equal(prev_role, "block_close") {
+                                    need_blank = true;
+                                }
+                                if need_blank {
+                                    if !at_line_start { out = out + "\n"; }
+                                    out = out + "\n";
+                                    at_line_start = true;
+                                }
+                            }
+                        }
+                        // Also inject blank line before top-level decorators
+                        if strings_equal(role, "decorator") {
+                            if !strings_equal(prev_role, "") {
+                                if strings_equal(prev_role, "semicolon") {
+                                    if !at_line_start { out = out + "\n"; }
+                                    out = out + "\n";
+                                    at_line_start = true;
+                                }
+                                if strings_equal(prev_role, "block_close") {
+                                    if !at_line_start { out = out + "\n"; }
+                                    out = out + "\n";
+                                    at_line_start = true;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── Emit leading comments ──
+        if !in_inline {
+            let mut ci = 0;
+            loop {
+                if ci >= ft.leading_comments.length { break; }
+                let comment = ft.leading_comments[ci];
+                if !at_line_start { out = out + "\n"; }
+                out = out + _emit_indent(indent) + comment.lexeme + "\n";
+                at_line_start = true;
+                ci += 1;
+            }
+        }
+
+        // ── Adjust indent before closing tokens (skip in inline mode) ──
+        if !in_inline {
+            if strings_equal(role, "block_close") {
+                indent -= 1;
+                if indent < 0 { indent = 0; }
+            }
+        }
+        if strings_equal(role, "paren_close") {
+            paren_depth -= 1;
+            if paren_depth < 0 { paren_depth = 0; }
+        }
+        if strings_equal(role, "bracket_close") {
+            paren_depth -= 1;
+            if paren_depth < 0 { paren_depth = 0; }
+        }
+        if strings_equal(role, "generic_close") {
+            // `>>` closes two nested generic levels in one token.
+            if strings_equal(lexeme, ">>") { paren_depth -= 2; } else {
+                paren_depth -= 1;
+            }
+            if paren_depth < 0 { paren_depth = 0; }
+        }
+
+        // ── Determine whitespace before token ──
+        if in_inline {
+            // In inline block: space-separated, no newlines
+            if strings_equal(role, "block_open") {
+                // Space before { in inline mode (e.g., "StructName {")
+                if !at_line_start {
+                    let needs_sp = _needs_space_before(role, prev_role, lexeme, prev_lexeme);
+                    if needs_sp { out = out + " "; }
+                }
+            } else if strings_equal(role, "block_close") { out = out + " "; } else if strings_equal(role, "separator") {
+                // No space before comma
+            } else if strings_equal(role, "semicolon") {
+                // No space before semicolon
+            } else if strings_equal(role, "colon") {
+                // No space before colon
+            } else if strings_equal(role, "dot") {
+                // No space around dot
+            } else if strings_equal(prev_role, "dot") {
+                // No space after dot
+            } else if strings_equal(prev_role, "block_open") { out = out + " "; } else if strings_equal(prev_role, "separator") {
+                out = out + " ";
+            } else if strings_equal(prev_role, "colon") { out = out + " "; } else if strings_equal(prev_role, "unary_op") {
+                // No space after unary operator
+            } else {
+                let needs_sp = _needs_space_before(role, prev_role, lexeme, prev_lexeme);
+                if needs_sp { out = out + " "; }
+            }
+            at_line_start = false;
+        } else {
+            let needs_nl = _needs_newline_before(role, prev_role, lexeme, prev_lexeme);
+            if needs_nl {
+                if !at_line_start { out = out + "\n"; }
+                out = out + _emit_indent(indent);
+                at_line_start = false;
+            } else {
+                if at_line_start {
+                    if i > 0 { out = out + _emit_indent(indent); }
+                    at_line_start = false;
+                } else {
+                    let needs_sp = _needs_space_before(role, prev_role, lexeme, prev_lexeme);
+                    if needs_sp {
+                        // Expression wrapping: break before binary operator when line gets long
+                        let mut should_wrap = false;
+                        if strings_equal(role, "operator") {
+                            // Only wrap at chain-style operators, not arithmetic
+                            let is_wrappable = false;
+                            if strings_equal(lexeme, "+") {
+                                is_wrappable = true;
+                            }
+                            if strings_equal(lexeme, "&&") {
+                                is_wrappable = true;
+                            }
+                            if strings_equal(lexeme, "||") {
+                                is_wrappable = true;
+                            }
+                            if is_wrappable {
+                                if wrap_operators { should_wrap = true; } else {
+                                    let cur_pos = _line_pos_from_end(out);
+                                    let mut next_len = 0;
+                                    if i + 1 < fmt_tokens.length {
+                                        next_len = fmt_tokens[i + 1].token.lexeme.length;
+                                    }
+                                    if cur_pos + 1 + lexeme.length + 1
+                                        + next_len > 80 { should_wrap = true; }
+                                }
+                            }
+                        }
+                        if should_wrap {
+                            out = out + "\n" + _emit_indent(indent + 1);
+                            wrap_operators = true;
+                        } else { out = out + " "; }
+                    }
+                }
+            }
+        }
+
+        // ── Skip trailing comma before closing delimiter ──
+        // Strips trailing commas in single-line imports: { a, b, } → { a, b }
+        if strings_equal(role, "separator") {
+            if i + 1 < fmt_tokens.length {
+                let next_role = fmt_tokens[i + 1].role;
+                if strings_equal(next_role, "block_close") {
+                    // Skip this comma — don't emit it
+                    prev_role = role;
+                    prev_lexeme = lexeme;
+                    i += 1;
+                    continue;
+                }
+            }
+        }
+
+        // ── Emit the token ──
+        out = out + lexeme;
+
+        // ── Adjust indent after opening tokens (skip in inline mode) ──
+        if inline_block_depth == 0 {
+            if strings_equal(role, "block_open") { indent += 1; }
+        }
+        if strings_equal(role, "paren_open") { paren_depth += 1; }
+        if strings_equal(role, "bracket_open") { paren_depth += 1; }
+        if strings_equal(role, "generic_open") { paren_depth += 1; }
+
+        // ── Track inline block exit ──
+        if strings_equal(role, "block_close") {
+            if inline_block_depth > 0 { inline_block_depth -= 1; }
+        }
+
+        // ── Emit trailing comments ──
+        let mut tci = 0;
+        loop {
+            if tci >= ft.trailing_comment.length { break; }
+            let tc = ft.trailing_comment[tci];
+            out = out + "  " + tc.lexeme;
+            tci += 1;
+        }
+
+        // ── Emit newline after statement-ending tokens (not in inline mode) ──
+        if !in_inline {
+            if strings_equal(role, "semicolon") {
+                out = out + "\n";
+                at_line_start = true;
+                wrap_operators = false;
+            }
+
+            // ── Newline after comma at statement level ──
+            if strings_equal(role, "separator") {
+                if paren_depth == 0 {
+                    out = out + "\n";
+                    at_line_start = true;
+                }
+            }
+        }
+
+        // Reset expression wrapping at block boundaries
+        if strings_equal(role, "block_open") { wrap_operators = false; }
+        if strings_equal(role, "block_close") { wrap_operators = false; }
+
+        prev_role = role;
+        prev_lexeme = lexeme;
+        i += 1;
+    }
+
+    // Ensure file ends with exactly one newline
+    if out.length > 0 {
+        if !at_line_start { out = out + "\n"; }
+    }
+
+    return out;
+}  // ═══════════════════════════════════════════════════════════════════  // Import sorting  // ═══════════════════════════════════════════════════════════════════  // An import statement is a contiguous range of FmtTokens from  // "import" to ";".  We collect these, extract the path, sort, and  // rebuild the token list.

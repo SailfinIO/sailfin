@@ -4,7 +4,7 @@ title: "sfn fmt — Canonical Formatter"
 status: Implemented
 type: tooling
 created: 2026-04-15
-updated: 2026-04-20
+updated: 2026-07-31
 author: "agent:compiler-architect"
 tracking:
 supersedes:
@@ -391,29 +391,36 @@ fn fetch(id: number) -> Order ![io, net] {
 compiler/
   src/
     tools/
-      fmt.sfn           # Core formatting logic (~800-1000 lines)
-      fmt_rules.sfn      # Spacing / blank-line rule tables (~200-300 lines)
-    cli_main.sfn         # Add `fmt` dispatch (minor edit)
-    cli_commands.sfn     # Add handle_fmt_command (minor edit)
+      fmt/
+        mod.sfn          # Stable `format_source` facade
+        tokens.sfn       # Token enrichment and role classification
+        unary.sfn        # Prefix-operator analysis
+        generics.sfn     # Generic-angle analysis
+        emitter.sfn      # Whitespace decisions and output emission
+        imports.sfn      # Import and specifier sorting
+        types.sfn        # Shared formatter records
+      fmt_rules.sfn      # Shared wrapping and import-group rules
+    cli/commands/fmt.sfn # `sfn fmt` command handler
 ```
 
 ### Module Breakdown
 
-**`compiler/src/tools/fmt.sfn`** — Core formatter module
+**`compiler/src/tools/fmt/`** — Formatter pipeline modules
 
-| Function | Responsibility | ~Lines |
-|---|---|---|
-| `format_source(source: string) -> string` | Public entry point: lex → classify → emit | 20 |
-| `strip_and_classify(tokens: Token[]) -> FmtToken[]` | Phase 2: discard whitespace, assign roles, attach comments | 200 |
-| `classify_token_role(token: Token, prev: Token?, next: Token?) -> string` | Determine a single token's structural role | 150 |
-| `attach_comments(tokens: Token[]) -> FmtToken[]` | Comment attachment subroutine of strip_and_classify | 100 |
-| `count_blank_lines(whitespace_lexeme: string) -> number` | Count newlines in a whitespace token to detect blank lines | 15 |
-| `emit_formatted(fmt_tokens: FmtToken[]) -> string` | Phase 3: walk enriched tokens, emit with canonical whitespace | 250 |
-| `emit_indent(depth: number) -> string` | Generate indent string (4 spaces × depth) | 8 |
-| `should_break_before(token: FmtToken, ctx: FmtContext) -> boolean` | Decide whether a newline+indent precedes this token | 60 |
-| `spacing_between(prev_role: string, next_role: string) -> string` | Look up inter-token spacing (space, none, newline) | 60 |
-| `sort_imports(fmt_tokens: FmtToken[]) -> FmtToken[]` | Reorder import statements by path; group stdlib/relative | 100 |
-| `is_keyword(lexeme: string) -> boolean` | Check if an identifier is a language keyword | 30 |
+| Module | Responsibility |
+|---|---|
+| `mod.sfn` | Public `format_source`: lex → classify → analyze roles → sort imports → emit |
+| `tokens.sfn` | Discard whitespace, assign initial roles, and attach comments |
+| `unary.sfn` | Reclassify context-sensitive prefix operators |
+| `generics.sfn` | Recognize generic angle brackets in declaration, type, and expression positions |
+| `emitter.sfn` | Apply canonical spacing, indentation, wrapping, and newline rules |
+| `imports.sfn` | Sort import blocks and aliased specifier units |
+| `types.sfn` | Own the records shared across formatter phases |
+
+Every formatter submodule is guarded by a 750-line ceiling in
+`compiler/tests/unit/fmt_line_budget_test.sfn`. The facade preserves the
+existing `tools/fmt` import path while keeping pipeline phases independently
+maintainable and compilable.
 
 **`compiler/src/tools/fmt_rules.sfn`** — Formatting rules as data
 
