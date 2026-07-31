@@ -1,0 +1,746 @@
+// compiler/src/llvm/expression_lowering/native/core_call_resolution/method_target.sfn
+import { NativeFunction } from "../../../../native_ir";
+import { index_of, substring } from "../../../../string_utils";
+import { is_simple_identifier } from "../../../expressions_helpers";
+import { find_runtime_helper, make_concat_descriptor } from "../../../runtime_helpers/mod";
+import { merge_string_constants } from "../../../strings";
+import { find_interface_info_by_name, find_struct_info_by_name } from "../../../type_context_queries";
+import { ends_with_pointer_suffix } from "../../../type_mapping";
+import {
+    CallTargetResolution,
+    LLVMOperand,
+    LocalBinding,
+    ParameterBinding,
+    RuntimeHelperDescriptor,
+    StringConstant,
+    TypeContext
+} from "../../../types";
+import { ends_with, starts_with, trim_text } from "../../../utils";
+import { array_pointer_element_type } from "../../arrays";
+import { lower_expression } from "../core";
+import { load_local_operand } from "../core_operands/comparisons";
+import { strip_enclosing_parentheses } from "../core_operators";
+import {
+    find_member_access_separator,
+    find_top_level_range_separator,
+    parse_range_iterable
+} from "../core_parse";
+import { find_local_binding, find_parameter_binding } from "../core_scopes";
+import { sanitize_symbol } from "../core_text";
+import { map_array_pointer_type } from "../core_type_mapping";
+import { emit_runtime_call, empty_runtime_call_overrides } from "../runtime_call";
+import { try_resolve_closure_callee } from "./closure_callee";
+import { resolve_parsed_method_dispatch } from "./parsed_method_dispatch";
+import { _is_primitive_receiver_type } from "./receiver_types";
+
+fn resolve_call_method_target(trimmed_target: string, arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], current_temp: int, current_lines: string[], functions: NativeFunction[], context: TypeContext, diagnostics: string[], collected_string_constants: StringConstant[]) -> CallTargetResolution ![io] {
+    let mut result_target = trimmed_target;
+    let mut result_lines = current_lines;
+    let mut result_temp: int = current_temp;
+    let mut result_diagnostics = diagnostics;
+    let mut result_string_constants = collected_string_constants;
+    let mut method_operand: LLVMOperand? = null;
+    let mut helper_descriptor: RuntimeHelperDescriptor? = null;
+    let mut injected_argument_count: int = 0;
+    let mut is_array_concat: boolean = false;
+    let mut array_concat_element_type: string = "";
+    let mut is_array_push: boolean = false;
+    let mut array_push_element_type: string = "";
+    let mut is_closure_dispatch: boolean = false;
+    let mut closure_return_type: string = "";
+    let mut closure_parameter_types: string[] = [];
+
+    // Issue #689: closure-callee dispatch. If the call target names a
+    // local with a `__closure__@sfn_lambda_<N>` type annotation
+    // (set by `lower_let_instruction` after lambda lifting) or a
+    // parameter with a `fn(...) -> R` annotation (parser support from
+    // #688), the call is a closure-aggregate dispatch — load the
+    // pair and short-circuit to `coerce_and_emit_call`'s new branch.
+    // This must run BEFORE any method-dispatch fan-out because a
+    // closure binding can shadow a member name.
+    if injected_argument_count == 0 {
+        let closure_info = try_resolve_closure_callee(result_target, bindings, locals, functions, context, result_temp, result_lines);
+        if closure_info != null {
+            method_operand = closure_info.operand;
+            result_lines = closure_info.lines;
+            result_temp = closure_info.temp_index;
+            injected_argument_count = 1;
+            is_closure_dispatch = true;
+            closure_return_type = closure_info.return_type;
+            closure_parameter_types = closure_info.parameter_types;
+        }
+    }
+
+    // SFN-114: range higher-order functions — `(start..end).map/filter/reduce(...)`.
+    // A `Range` receiver has no binding and no method surface (it is otherwise
+    // consumed only by `for`-loop lowering), so it never reaches the array-method
+    // fast path below (which requires a `is_simple_identifier` base). Materialize
+    // the range into an `int[]` SfnArray via `sfn_range_materialize(start, end)`
+    // and route the result through the existing array-HOF descriptors — the
+    // element is always pointer-width `i64`, so no new width machinery is needed.
+    // Eager sugar over array HOFs; the lazy iterator protocol is the post-1.0
+    // successor (SFEP-0028 (D)). Single-level only: the base must be a
+    // `start..end` range receiver — a chained `(a..b).map(f).filter(g)` is out
+    // of scope (its inner receiver lowers to a temp before this point).
+    //
+    // The base is paren-stripped before the range scan (SFN-563). The renderer
+    // parenthesizes every postfix receiver that is not an atom or a postfix
+    // chain (SFN-556), and `Range` was excluded from that solely because this
+    // probe read the rendered text literally: `find_top_level_range_separator`
+    // only accepts a `..` at paren depth 0, so a rendered `(0..n)` scanned to
+    // -1 and the whole HOF branch went dark. Stripping here is what lets the
+    // renderer emit the group, which is what stops `(a..b).x` and `(a..b)[i]`
+    // binding their trailing access to the end operand. Mirrors the strip
+    // `lower_expression` already does at entry (`core.sfn`); it only removes a
+    // fully-enclosing pair, so a non-range base is passed through untouched.
+    if method_operand == null {
+        if injected_argument_count == 0 {
+            let _rng_sep = find_member_access_separator(result_target);
+            if _rng_sep > 0 {
+                let _rng_base = strip_enclosing_parentheses(substring(result_target, 0, _rng_sep));
+                let _rng_field = trim_text(substring(result_target, _rng_sep + 1, result_target.length));
+                let mut _rng_is_hof: boolean = false;
+                if _rng_field == "map" { _rng_is_hof = true; }
+                if _rng_field == "filter" { _rng_is_hof = true; }
+                if _rng_field == "reduce" { _rng_is_hof = true; }
+                if _rng_is_hof {
+                    if find_top_level_range_separator(_rng_base) >= 0 {
+                        let _rng_parse = parse_range_iterable(_rng_base);
+                        // A malformed range base (`..3`, `5..`) surfaces the
+                        // parser's own diagnostic; without this the caller only
+                        // sees the generic fall-through "callee signature is not
+                        // known" error.
+                        if !_rng_parse.success {
+                            let mut _rcpd: int = 0;
+                            loop {
+                                if _rcpd >= _rng_parse.diagnostics.length {
+                                    break;
+                                }
+                                result_diagnostics.push(_rng_parse.diagnostics[_rcpd]);
+                                _rcpd += 1;
+                            }
+                        }
+                        if _rng_parse.success {
+                            let _rng_start = lower_expression(_rng_parse.start, bindings, locals, result_temp, result_lines, functions, context, "i64");
+                            let mut _rci0: int = 0;
+                            loop {
+                                if _rci0 >= _rng_start.diagnostics.length {
+                                    break;
+                                }
+                                result_diagnostics.push(_rng_start.diagnostics[_rci0]);
+                                _rci0 += 1;
+                            }
+                            result_string_constants = merge_string_constants(result_string_constants, _rng_start.string_constants);
+                            result_lines = _rng_start.lines;
+                            result_temp = _rng_start.temp_index;
+                            let _rng_end = lower_expression(_rng_parse.end, bindings, locals, result_temp, result_lines, functions, context, "i64");
+                            let mut _rci1: int = 0;
+                            loop {
+                                if _rci1 >= _rng_end.diagnostics.length {
+                                    break;
+                                }
+                                result_diagnostics.push(_rng_end.diagnostics[_rci1]);
+                                _rci1 += 1;
+                            }
+                            result_string_constants = merge_string_constants(result_string_constants, _rng_end.string_constants);
+                            result_lines = _rng_end.lines;
+                            result_temp = _rng_end.temp_index;
+                            if _rng_start.operand != null {
+                                if _rng_end.operand != null {
+                                    let _rng_ov = empty_runtime_call_overrides();
+                                    let _rng_ops: LLVMOperand[] = [_rng_start.operand, _rng_end.operand];
+                                    let _rng_call = emit_runtime_call("runtime_range_materialize_fn", _rng_ops, _rng_ov, result_temp, result_lines);
+                                    let mut _rci2: int = 0;
+                                    loop {
+                                        if _rci2 >= _rng_call.diagnostics.length {
+                                            break;
+                                        }
+                                        result_diagnostics.push(_rng_call.diagnostics[_rci2]);
+                                        _rci2 += 1;
+                                    }
+                                    result_string_constants = merge_string_constants(result_string_constants, _rng_call.string_constants);
+                                    result_lines = _rng_call.lines;
+                                    result_temp = _rng_call.temp_index;
+                                    if _rng_call.operand != null {
+                                        method_operand = _rng_call.operand;
+                                        injected_argument_count = 1;
+                                        if _rng_field == "map" {
+                                            let _rng_desc = find_runtime_helper("runtime_array_map_fn");
+                                            if _rng_desc != null {
+                                                result_target = "runtime_array_map_fn";
+                                                helper_descriptor = _rng_desc;
+                                            }
+                                        }
+                                        if _rng_field == "filter" {
+                                            let _rng_desc = find_runtime_helper("runtime_array_filter_fn");
+                                            if _rng_desc != null {
+                                                result_target = "runtime_array_filter_fn";
+                                                helper_descriptor = _rng_desc;
+                                            }
+                                        }
+                                        if _rng_field == "reduce" {
+                                            let _rng_desc = find_runtime_helper("runtime_array_reduce_fn");
+                                            if _rng_desc != null {
+                                                result_target = "runtime_array_reduce_fn";
+                                                helper_descriptor = _rng_desc;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Defensive: some front-end rewriting paths can fuse a receiver name into the call
+    // target (e.g. `values.concat(xs)` becomes `valuesconcat(xs)` or (rarely) `@valuesconcat(xs)`).
+    let mut fused_target = result_target;
+    if starts_with(fused_target, "@") {
+        if fused_target.length > 1 {
+            fused_target = substring(fused_target, 1, fused_target.length);
+        }
+    }
+    let canonical_fused = sanitize_symbol(fused_target);
+    if ends_with(canonical_fused, "concat") {
+        if canonical_fused.length > 6 {
+            let receiver_name = trim_text(substring(canonical_fused, 0, canonical_fused.length - 6));
+            if receiver_name.length > 0 {
+                if is_simple_identifier(receiver_name) {
+                    let local = find_local_binding(locals, receiver_name);
+                    let parameter = find_parameter_binding(bindings, receiver_name);
+                    let mut receiver_operand: LLVMOperand? = null;
+
+                    if local != null {
+                        let load_result = load_local_operand(local, result_temp, result_lines);
+                        let mut _ci0: int = 0;
+                        loop {
+                            if _ci0 >= load_result.diagnostics.length { break; }
+                            result_diagnostics.push(load_result.diagnostics[_ci0]);
+                            _ci0 += 1;
+                        }
+                        result_lines = load_result.lines;
+                        result_temp = load_result.temp_index;
+                        receiver_operand = load_result.operand;
+                    } else if parameter != null {
+                        receiver_operand = LLVMOperand {
+                            llvm_type: parameter.llvm_type,
+                            value: parameter.llvm_name
+                        };
+                    }
+
+                    if receiver_operand != null {
+                        method_operand = receiver_operand;
+                        injected_argument_count = 1;
+                        result_target = "concat";
+
+                        let receiver_type = trim_text(receiver_operand.llvm_type);
+                        let element_type = array_pointer_element_type(receiver_type);
+                        if element_type.length > 0 {
+                            is_array_concat = true;
+                            array_concat_element_type = element_type;
+
+                            if !ends_with_pointer_suffix(element_type) {
+                                helper_descriptor = make_concat_descriptor(receiver_operand.llvm_type, [receiver_operand.llvm_type, receiver_operand.llvm_type]);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Defuse fused push targets (e.g. `loaded_argspush(x)` → `push`)
+    // FLAT structure — NO nested ifs — to survive seed degenerate-if bug.
+    let mut _push_score: int = 0;
+    if ends_with(canonical_fused, "push") { _push_score += 1; }
+    if canonical_fused.length > 4 { _push_score += 1; }
+    let mut _push_receiver_name: string = "";
+    if _push_score >= 2 {
+        _push_receiver_name = trim_text(substring(canonical_fused, 0, canonical_fused.length - 4));
+    }
+    if _push_receiver_name.length > 0 { _push_score += 1; }
+    let mut _push_is_ident: boolean = false;
+    if _push_score >= 3 {
+        _push_is_ident = is_simple_identifier(_push_receiver_name);
+    }
+    if _push_is_ident { _push_score += 1; }
+    let mut _push_local: LocalBinding? = null;
+    let mut _push_param: ParameterBinding? = null;
+    if _push_score >= 4 {
+        _push_local = find_local_binding(locals, _push_receiver_name);
+        _push_param = find_parameter_binding(bindings, _push_receiver_name);
+    }
+    let mut _push_receiver_operand: LLVMOperand? = null;
+    if _push_local != null {
+        let push_load_result = load_local_operand(_push_local, result_temp, result_lines);
+        let mut _pci0: int = 0;
+        loop {
+            if _pci0 >= push_load_result.diagnostics.length { break; }
+            result_diagnostics.push(push_load_result.diagnostics[_pci0]);
+            _pci0 += 1;
+        }
+        result_lines = push_load_result.lines;
+        result_temp = push_load_result.temp_index;
+        _push_receiver_operand = push_load_result.operand;
+    }
+    if _push_param != null {
+        if _push_receiver_operand == null {
+            _push_receiver_operand = LLVMOperand {
+                llvm_type: _push_param.llvm_type,
+                value: _push_param.llvm_name
+            };
+        }
+    }
+    if _push_receiver_operand != null {
+        method_operand = _push_receiver_operand;
+        injected_argument_count = 1;
+        result_target = "push";
+        let push_receiver_type = trim_text(_push_receiver_operand.llvm_type);
+        let push_element_type = array_pointer_element_type(push_receiver_type);
+        if push_element_type.length > 0 {
+            is_array_push = true;
+            array_push_element_type = push_element_type;
+        }
+    }
+
+    // Inline member-access fallback: parse_member_access is cross-module
+    // and historically returned corrupted data with the v0.1.1 seed, so
+    // we re-derive the struct method target from `locals` directly.
+    let _pre_dot = index_of(result_target, ".");
+    if _pre_dot > 0 {
+        if method_operand == null {
+            if injected_argument_count == 0 {
+                let _pre_base = trim_text(substring(result_target, 0, _pre_dot));
+                let _pre_field = trim_text(substring(result_target, _pre_dot + 1, result_target.length));
+                if _pre_base.length > 0 {
+                    if _pre_field.length > 0 {
+                        // Array push/concat inline fallback: the parse_member_access
+                        // push/concat branch in resolve_parsed_method_dispatch is gated
+                        // by array_pointer_element_type(lower_expression(base).llvm_type),
+                        // which silently no-ops when lower_expression returns an operand
+                        // whose type annotation doesn't parse as {T*, iN}* (observed under
+                        // seed non-determinism). Recover directly from the local / param
+                        // binding — its llvm_type is populated at declaration time and is
+                        // not susceptible to the cross-module re-derive path. Mirrors the
+                        // defuse-fused block at lines 126-178.
+                        let mut _pre_is_array_method: boolean = false;
+                        if _pre_field == "push" { _pre_is_array_method = true; }
+                        if _pre_field == "concat" {
+                            _pre_is_array_method = true;
+                        }
+                        // #1507: `arr.map(closure)` is an array method too —
+                        // route it through the early fallback so it reaches
+                        // the `runtime_array_map_fn` helper below instead of
+                        // falling into the struct-method fusion (which would
+                        // form the bogus `<type>map` target).
+                        if _pre_field == "map" { _pre_is_array_method = true; }
+                        // #1508: `arr.filter(closure)` / `arr.reduce(init,
+                        // closure)` route identically to `map` — the same
+                        // early fallback reaches the `runtime_array_filter_fn`
+                        // / `runtime_array_reduce_fn` helpers below instead of
+                        // the bogus `<type>filter` / `<type>reduce` fusion.
+                        if _pre_field == "filter" {
+                            _pre_is_array_method = true;
+                        }
+                        if _pre_field == "reduce" {
+                            _pre_is_array_method = true;
+                        }
+                        if _pre_is_array_method {
+                            if is_simple_identifier(_pre_base) {
+                                let _pre_am_local = find_local_binding(locals, _pre_base);
+                                let _pre_am_param = find_parameter_binding(bindings, _pre_base);
+                                let mut _pre_am_operand: LLVMOperand? = null;
+                                let mut _pre_am_type: string = "";
+                                if _pre_am_local != null {
+                                    _pre_am_type = _pre_am_local.llvm_type;
+                                    let _pre_am_load = load_local_operand(_pre_am_local, result_temp, result_lines);
+                                    let mut _pci_am: int = 0;
+                                    loop {
+                                        if _pci_am >= _pre_am_load.diagnostics.length {
+                                            break;
+                                        }
+                                        result_diagnostics.push(_pre_am_load.diagnostics[_pci_am]);
+                                        _pci_am += 1;
+                                    }
+                                    result_lines = _pre_am_load.lines;
+                                    result_temp = _pre_am_load.temp_index;
+                                    _pre_am_operand = _pre_am_load.operand;
+                                }
+                                if _pre_am_param != null {
+                                    if _pre_am_operand == null {
+                                        _pre_am_type = _pre_am_param.llvm_type;
+                                        _pre_am_operand = LLVMOperand {
+                                            llvm_type: _pre_am_param.llvm_type,
+                                            value: _pre_am_param.llvm_name
+                                        };
+                                    }
+                                }
+                                if _pre_am_operand != null {
+                                    let mut _pre_am_ann: string = "";
+                                    if _pre_am_local != null {
+                                        if _pre_am_local.type_annotation != null {
+                                            _pre_am_ann = _pre_am_local.type_annotation;
+                                        }
+                                    }
+                                    if _pre_am_ann.length == 0 {
+                                        if _pre_am_param != null {
+                                            if _pre_am_param.type_annotation != null {
+                                                _pre_am_ann = _pre_am_param.type_annotation;
+                                            }
+                                        }
+                                    }
+                                    let mut _pre_am_elem = array_pointer_element_type(_pre_am_type);
+                                    // Fallback: when the binding's llvm_type is opaque
+                                    // (e.g. `i8*` from async/runtime helpers, or degraded
+                                    // across module boundaries), derive the element type
+                                    // from the source type_annotation instead.
+                                    if _pre_am_elem.length == 0 {
+                                        if _pre_am_ann.length > 0 {
+                                            let _pre_am_derived = map_array_pointer_type(context, _pre_am_ann);
+                                            if _pre_am_derived.length > 0 {
+                                                _pre_am_elem = array_pointer_element_type(_pre_am_derived);
+                                            }
+                                        }
+                                    }
+                                    if _pre_am_elem.length > 0 {
+                                        method_operand = _pre_am_operand;
+                                        injected_argument_count = 1;
+                                        if _pre_field == "push" {
+                                            result_target = "push";
+                                            is_array_push = true;
+                                            array_push_element_type = _pre_am_elem;
+                                        }
+                                        if _pre_field == "concat" {
+                                            result_target = "concat";
+                                            is_array_concat = true;
+                                            array_concat_element_type = _pre_am_elem;
+                                            if !ends_with_pointer_suffix(_pre_am_elem) {
+                                                helper_descriptor = make_concat_descriptor(_pre_am_type, [_pre_am_type, _pre_am_type]);
+                                            }
+                                        }
+                                        // #1507: route `arr.map(closure)` to the
+                                        // `runtime_array_map_fn` helper. The array
+                                        // is already injected as arg0 (method_operand
+                                        // / injected_argument_count above); the
+                                        // user's closure becomes arg1, passed by
+                                        // value as `{i8*, i8*}` (descriptor
+                                        // parameter_types[1]) to the real
+                                        // `sfn_array_sfn_map` body. The helper
+                                        // returns the mapped array as `i8*`, coerced
+                                        // to the binding's element-array type at use.
+                                        // Pointer-width element arrays only. Scalar
+                                        // `int[]` remains the original
+                                        // `i64(i8* env, i64)` lane; SFN-112 also
+                                        // permits `int[][]`, whose element is an
+                                        // `int[]` pointer carried over that same
+                                        // width seam. Other `i8*` element arrays
+                                        // (`string[]`, opaque/struct arrays) and
+                                        // non-pointer-width arrays still fall through
+                                        // to the honest "callee signature is not
+                                        // known" diagnostic until their widths land.
+                                        if _pre_field == "map" {
+                                            let mut _pre_map_supported: boolean = false;
+                                            if _pre_am_elem == "i64" {
+                                                _pre_map_supported = true;
+                                            }
+                                            if trim_text(_pre_am_ann) == "int[][]" {
+                                                if ends_with_pointer_suffix(_pre_am_elem) {
+                                                    _pre_map_supported = true;
+                                                }
+                                                if starts_with(trim_text(_pre_am_elem), "{") {
+                                                    _pre_map_supported = true;
+                                                }
+                                            }
+                                            if _pre_map_supported {
+                                                let _pre_map_desc = find_runtime_helper("runtime_array_map_fn");
+                                                if _pre_map_desc != null {
+                                                    result_target = "runtime_array_map_fn";
+                                                    helper_descriptor = _pre_map_desc;
+                                                }
+                                            }
+                                        }
+                                        // #1508: route `arr.filter(closure)` to
+                                        // the `runtime_array_filter_fn` helper.
+                                        // The array is arg0 (injected above); the
+                                        // user's predicate becomes arg1, passed by
+                                        // value as `{i8*, i8*}` (descriptor
+                                        // parameter_types[1]) to the real
+                                        // `sfn_array_sfn_filter` body. Same i64-only
+                                        // element restriction as `map` (the
+                                        // predicate ABI is `i1(i8* env, i64)`);
+                                        // non-i64 elements fall through to the
+                                        // honest "callee signature is not known"
+                                        // diagnostic (gated on generics — #766).
+                                        if _pre_field == "filter" {
+                                            if _pre_am_elem == "i64" {
+                                                let _pre_filter_desc = find_runtime_helper("runtime_array_filter_fn");
+                                                if _pre_filter_desc != null {
+                                                    result_target = "runtime_array_filter_fn";
+                                                    helper_descriptor = _pre_filter_desc;
+                                                }
+                                            }
+                                        }
+                                        // #1508: route `arr.reduce(init, closure)`
+                                        // to the `runtime_array_reduce_fn` helper.
+                                        // The array is arg0 (injected above); the
+                                        // user's `initial` becomes arg1 and the
+                                        // reducer arg2, passed by value as `{i8*,
+                                        // i8*}` (descriptor parameter_types[2]) to
+                                        // the real `sfn_array_sfn_reduce` body. Same
+                                        // i64-only element/accumulator restriction
+                                        // (the reducer ABI is `i64(i8* env, i64
+                                        // acc, i64 elem)`); non-i64 elements fall
+                                        // through to the honest "callee signature is
+                                        // not known" diagnostic (gated on generics —
+                                        // #766).
+                                        if _pre_field == "reduce" {
+                                            if _pre_am_elem == "i64" {
+                                                let _pre_reduce_desc = find_runtime_helper("runtime_array_reduce_fn");
+                                                if _pre_reduce_desc != null {
+                                                    result_target = "runtime_array_reduce_fn";
+                                                    helper_descriptor = _pre_reduce_desc;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if _pre_field != "concat" {
+                            if _pre_field != "push" {
+                                let _pre_local = find_local_binding(locals, _pre_base);
+                                let mut _pre_struct: string = "";
+                                if _pre_local != null {
+                                    if _pre_local.type_annotation != null {
+                                        _pre_struct = _pre_local.type_annotation;
+                                    }
+                                }
+                                // #1507: `map` was already routed to the
+                                // `runtime_array_map_fn` helper above; clear the
+                                // struct type so the fusion below skips it (it
+                                // would otherwise overwrite the helper target
+                                // with the bogus `<type>map`).
+                                if _pre_field == "map" { _pre_struct = ""; }
+                                // #1508: same for `filter` / `reduce` — already
+                                // routed to their helpers above; clear the struct
+                                // type so the fusion skips them (it would
+                                // otherwise form the bogus `<type>filter` /
+                                // `<type>reduce` target).
+                                if _pre_field == "filter" { _pre_struct = ""; }
+                                if _pre_field == "reduce" { _pre_struct = ""; }
+                                if _pre_struct.length > 0 {
+                                    // #1041: fail closed when the base local's
+                                    // declared type is a bare struct name that is
+                                    // absent from the lowering type context. The
+                                    // fusion below (`_pre_struct + _pre_field`)
+                                    // would otherwise dispatch `self` with a
+                                    // default/garbage shape (the #960 staging-gap
+                                    // signature), segfaulting at runtime. Mirrors
+                                    // the #1023/#1037 fail-closed pattern: a
+                                    // `[fatal]` diagnostic makes the emit/build
+                                    // gate refuse to write IR.
+                                    //
+                                    // Narrow to a *bare* identifier to stay
+                                    // self-host safe (#830): generic
+                                    // instantiations like `Result<int, Error>`
+                                    // are not simple identifiers (and key on a
+                                    // mangled name, not the `<...>` spelling), and
+                                    // opacified locals carry an empty annotation —
+                                    // both keep the existing path so `make compile`
+                                    // still lowers method calls on them.
+                                    let mut _pre_fail_closed: boolean = false;
+                                    // Channel builtin methods on a `channel`-typed local
+                                    // are runtime-helper calls, not struct methods. Only
+                                    // `close` routes through the descriptor here — its ABI
+                                    // is a plain (i8*) -> void call. `send` / `receive`
+                                    // must lower via `try_lower_channel_method` in
+                                    // core_concurrency_lowering.sfn (#1266), which implements the runtime's
+                                    // by-pointer element contract (send spills the value
+                                    // to a slot; receive loads the malloc'd copy). That
+                                    // bespoke path intercepts every current route before
+                                    // this resolver runs, so seeing send/receive here
+                                    // means a refactor bypassed it — fail loud instead of
+                                    // emitting a value-where-pointer-expected miscompile.
+                                    let mut _pre_is_channel_method: boolean = false;
+                                    let mut _pre_is_channel_base: boolean = false;
+                                    if _pre_struct == "channel" {
+                                        _pre_is_channel_base = true;
+                                    }
+                                    if starts_with(_pre_struct, "channel:") {
+                                        _pre_is_channel_base = true;
+                                    }
+                                    if _pre_is_channel_base {
+                                        if _pre_field == "send" {
+                                            _pre_is_channel_method = true;
+                                        }
+                                        if _pre_field == "receive" {
+                                            _pre_is_channel_method = true;
+                                        }
+                                        if _pre_field == "close" {
+                                            _pre_is_channel_method = true;
+                                        }
+                                    }
+                                    if _pre_is_channel_method {
+                                        if _pre_field != "close" {
+                                            result_diagnostics.push("llvm lowering [fatal]: channel `"
+                                                + _pre_field
+                                                + "` reached the descriptor call path — the bespoke channel lowering (#1266) was bypassed");
+                                        } else {
+                                            // Lower the base (the channel handle) and
+                                            // inject it as the first argument.
+                                            let _pre_ch_lowered = lower_expression(_pre_base, bindings, locals, result_temp, result_lines, functions, context, "");
+                                            let mut _cich: int = 0;
+                                            loop {
+                                                if _cich >= _pre_ch_lowered.diagnostics.length {
+                                                    break;
+                                                }
+                                                result_diagnostics.push(_pre_ch_lowered.diagnostics[_cich]);
+                                                _cich += 1;
+                                            }
+                                            result_string_constants = merge_string_constants(result_string_constants, _pre_ch_lowered.string_constants);
+                                            result_lines = _pre_ch_lowered.lines;
+                                            result_temp = _pre_ch_lowered.temp_index;
+                                            if _pre_ch_lowered.operand != null {
+                                                method_operand = _pre_ch_lowered.operand;
+                                                injected_argument_count = 1;
+                                                result_target = "channel_close";
+                                                helper_descriptor = find_runtime_helper("channel_close");
+                                            }
+                                        }
+                                    }
+                                    if !_pre_is_channel_method {
+                                        if is_simple_identifier(_pre_struct) {
+                                            if !_is_primitive_receiver_type(_pre_struct) {
+                                                if find_struct_info_by_name(context, _pre_struct) == null {
+                                                    // Interface-typed locals carry a bare
+                                                    // annotation too (e.g. `let m: Meter`);
+                                                    // their `m.total()` calls are valid trait
+                                                    // dispatch handled by the downstream
+                                                    // `trait_dispatch__` branch. Only fail
+                                                    // closed when the name is neither a
+                                                    // struct nor an interface in context.
+                                                    if find_interface_info_by_name(context, _pre_struct) == null {
+                                                        _pre_fail_closed = true;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    if _pre_fail_closed {
+                                        result_diagnostics.push("llvm lowering [fatal]: method call base `"
+                                            + _pre_base
+                                            + "` has declared type `"
+                                            + _pre_struct
+                                            + "` which is not in the lowering type context");
+                                        return CallTargetResolution {
+                                            trimmed_target: result_target,
+                                            method_operand: null,
+                                            helper_descriptor: null,
+                                            injected_argument_count: 0,
+                                            is_array_concat: false,
+                                            array_concat_element_type: "",
+                                            is_array_push: false,
+                                            array_push_element_type: "",
+                                            current_lines: result_lines,
+                                            current_temp: result_temp,
+                                            diagnostics: result_diagnostics,
+                                            string_constants: result_string_constants,
+                                            is_closure_dispatch: false,
+                                            closure_return_type: "",
+                                            closure_parameter_types: []
+                                        };
+                                    }
+                                    let _pre_lowered = lower_expression(_pre_base, bindings, locals, result_temp, result_lines, functions, context, "");
+                                    let mut _ci1: int = 0;
+                                    loop {
+                                        if _ci1 >= _pre_lowered.diagnostics.length {
+                                            break;
+                                        }
+                                        result_diagnostics.push(_pre_lowered.diagnostics[_ci1]);
+                                        _ci1 += 1;
+                                    }
+                                    result_string_constants = merge_string_constants(result_string_constants, _pre_lowered.string_constants);
+                                    result_lines = _pre_lowered.lines;
+                                    result_temp = _pre_lowered.temp_index;
+                                    if _pre_lowered.operand != null {
+                                        method_operand = _pre_lowered.operand;
+                                        // #1835: an interface-typed base is trait
+                                        // dispatch, not a struct method. Fusing
+                                        // `<Iface><field>` (e.g. `Greetergreet`)
+                                        // yields a dot-less callee that the
+                                        // downstream `parse_member_access` can't
+                                        // split, so the `trait_dispatch__` branch is
+                                        // never reached and lowering fatals with an
+                                        // unresolvable callee. Build the dispatch name
+                                        // here — the base is already lowered and
+                                        // injected as arg0 — matching the downstream
+                                        // interface path. Struct bases keep the fused
+                                        // `<Struct><field>` method name.
+                                        let _pre_iface = find_interface_info_by_name(context, _pre_struct);
+                                        if _pre_iface != null {
+                                            result_target = "trait_dispatch__"
+                                                + _pre_iface.name
+                                                + "__"
+                                                + _pre_field;
+                                        } else {
+                                            if _is_primitive_receiver_type(_pre_struct) {
+                                                // SFN-145: a primitive receiver
+                                                // (`string`, `int`, ...) has no
+                                                // fused `<Type><field>` method.
+                                                // Route to the bare field name so
+                                                // `s.substring(a, b)` resolves to
+                                                // the prelude `substring` / runtime
+                                                // helper with the receiver injected
+                                                // as arg0 — i.e. the method form
+                                                // desugars to `substring(s, a, b)`.
+                                                result_target = _pre_field;
+                                            } else {
+                                                result_target = _pre_struct
+                                                    + _pre_field;
+                                            }
+                                        }
+                                        injected_argument_count = 1;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Issue #689: closure-dispatch resolution is final. The method
+    // fan-out below would otherwise re-trigger `parse_member_access`
+    // on `result_target` and try to dispatch the closure binding as
+    // a struct method. Return now with the closure-pair operand
+    // populated.
+    if is_closure_dispatch {
+        return CallTargetResolution {
+            trimmed_target: result_target,
+            method_operand: method_operand,
+            helper_descriptor: null,
+            injected_argument_count: injected_argument_count,
+            is_array_concat: false,
+            array_concat_element_type: "",
+            is_array_push: false,
+            array_push_element_type: "",
+            current_lines: result_lines,
+            current_temp: result_temp,
+            diagnostics: result_diagnostics,
+            string_constants: result_string_constants,
+            is_closure_dispatch: true,
+            closure_return_type: closure_return_type,
+            closure_parameter_types: closure_parameter_types
+        };
+    }
+
+    // Delegate parse_member_access dispatch to a separate function to keep
+    // each function under ~500 .sfn-asm instructions.
+    return resolve_parsed_method_dispatch(result_target, arguments, bindings, locals, result_temp, result_lines, functions, context, result_diagnostics, result_string_constants, method_operand, helper_descriptor, injected_argument_count, is_array_concat, array_concat_element_type, is_array_push, array_push_element_type);
+}
+
+export { resolve_call_method_target };

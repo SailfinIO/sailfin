@@ -352,7 +352,7 @@ fn _rh_descriptors_01(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     // Per-symbol fallback signature for libc `nanosleep`, called from
     // `runtime/sfn/clock.sfn::sfn_sleep`. When `posix.sfn-asm` is staged,
     // the imported function entry wins at call resolution (issue #633 —
-    // `core_call_resolution.sfn` prefers the function entry over the
+    // `core_call_resolution/signature.sfn` prefers the function entry over the
     // descriptor and clears `result_helper`), and `declare` is emitted
     // with the `%Timespec*` source-level signature; meanwhile
     // `render_runtime_helper_declarations` skips the descriptor via the

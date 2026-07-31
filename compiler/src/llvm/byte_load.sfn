@@ -49,7 +49,7 @@ import { extend_string_array, number_to_string, trim_text } from "./utils";
 
 // Predicate over the reserved `load_byte` name. Used by the
 // pre-resolution dispatch hook in `lower_call_expression` (see
-// `core_call_resolution.sfn`) to short-circuit before consulting the
+// `core_call_resolution/builtin_dispatch.sfn`) to short-circuit before consulting the
 // runtime-helper registry.
 fn is_byte_load_builtin(name: string) -> boolean {
     let trimmed = trim_text(name);

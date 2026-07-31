@@ -2,7 +2,7 @@
 //
 // Exercises the string method-call form `s.substring(start, end)` on both
 // a `string`-typed *local* and a `string`-typed *parameter*. Before the
-// fix, the #1041 fail-closed guard in core_call_resolution.sfn treated the
+// fix, the #1041 fail-closed guard in core_call_resolution/method_target.sfn treated the
 // primitive annotation `string` like an unregistered user struct and
 // aborted LLVM lowering with "cannot resolve return type for call to
 // `stamp.substring`". The receiver must instead route as arg0 to the

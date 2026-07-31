@@ -133,7 +133,7 @@ test "paren receiver: self-delimiting objects still need the group" {
 // because it is postfix-tight but because the range-HOF probe matched
 // `<start>..<end>` in the rendered text and could not see past a wrapping
 // paren. SFN-563 moved that tolerance into the probe — it now strips a fully
-// enclosing pair before scanning (`core_call_resolution.sfn`) — so the group is
+// enclosing pair before scanning (`core_call_resolution/method_target.sfn`) — so the group is
 // rendered for every range receiver and these tests pin the widened contract.
 test "paren receiver: range receiver keeps its group" ![io] {
     let asm = _emit("fn squares(n: int) -> int[] { return (0..n).map(fn (i) -> int { return i * i; }); }");

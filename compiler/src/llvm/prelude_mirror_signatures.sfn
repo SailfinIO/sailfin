@@ -9,7 +9,7 @@
 // `runtime_helpers.sfn` with these source-level signatures. The declare-emitter
 // (`render_runtime_helper_declarations` in `rendering.sfn`) and the call-return
 // resolver (`resolve_call_signature` in
-// `expression_lowering/native/core_call_resolution.sfn`) lower them through the
+// `expression_lowering/native/core_call_resolution/signature.sfn`) lower them through the
 // same `map_return_type` / `collect_parameter_types` a real imported prelude
 // function goes through — so an ABI-lowering move (e.g. the SFEP-0033
 // `{i8*, i64}` length-aware string ABI) is absorbed automatically and never
