@@ -351,6 +351,40 @@ sfn cache clean --all-schemas            # also remove stale prior-schema trees
 
 ---
 
+### `sfn dev clean <build|dist|all>`
+
+Remove the **repo-local** build artifacts of a compiler checkout — the native
+replacement for the `make clean-build` / `make clean` / `make clean-all`
+recipes. This is a different tree from `sfn cache clean`, which owns the
+global content-addressed cache above: `sfn dev clean` never touches that root,
+and `sfn cache clean` never touches `build/`.
+
+**Subcommands:**
+
+| Form | Description |
+|---|---|
+| `sfn dev clean build [--include-seed] [--dry-run]` | Remove every top-level entry under `build/` except the fetched seed toolchain store, so a following build does not re-download a seed. |
+| `sfn dev clean dist [--dry-run]` | Remove the packaged-release output directory `dist/`. |
+| `sfn dev clean all [--include-seed] [--dry-run]` | Both of the above. |
+
+**Usage:**
+
+```bash
+sfn dev clean build --dry-run            # list what would go; remove nothing
+sfn dev clean build                      # keep the fetched seed toolchain store
+sfn dev clean build --include-seed       # also remove the seed store
+sfn dev clean all                        # build/ and dist/ together
+```
+
+**Behavior:**
+
+- The preserved store is **derived** from `bootstrap.toml [store].install_base` / `bin_dir` (default `build/toolchains`), not hard-coded, and is preserved unless `--include-seed` or `SAILFIN_CLEAN_KEEP_SEED=0` is set. `make clean-build KEEP_SEED=0` translates into that variable; the command does not read the bare `KEEP_SEED`.
+- It refuses to run unless the current directory is a compiler checkout — `bootstrap.toml` must be present *and* parse with a `[seed].version`.
+- It takes no path argument. Every target is a literal repo-relative `build/`/`dist/` path, checked against traversal and absolute-path escape before anything is unlinked, and symlinked entries are unlinked rather than followed.
+- An absent tree is a clean no-op (exit 0), not an error, and the tree is not recreated.
+
+---
+
 ### `sfn --version`
 
 Display the compiler version string and exit with code 0.

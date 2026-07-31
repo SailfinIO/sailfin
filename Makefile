@@ -542,10 +542,12 @@ test-arena:
 	fi
 	@$(NATIVE_BIN) dev arena $(ARENA_ARGS)
 
-# The historical `make clean-build KEEP_SEED=0` opt-out. `sfn dev clean` reads
-# it from the environment itself, so the recipes below pass it through rather
-# than branching on it — that is what keeps the preserve-the-seed policy in
-# one place (SFN-680).
+# The historical `make clean-build KEEP_SEED=0` opt-out. The recipes below
+# translate it into SAILFIN_CLEAN_KEEP_SEED, the namespaced name `sfn dev
+# clean` actually reads (SFN-680), rather than branching on it here — that is
+# what keeps the preserve-the-seed policy in one place. The command does not
+# read the bare `KEEP_SEED`: it is not a name Sailfin owns, and it escalates
+# to deleting the seed store.
 KEEP_SEED ?= 1
 
 # Pick the first `sfn` that actually implements `dev clean` (SFN-680). A binary
@@ -559,7 +561,7 @@ KEEP_SEED ?= 1
 # bootstrap.toml's pinned seed carries `sfn dev clean`; the Makefile's own
 # retirement is SFN-60.
 CLEAN_PROBE = for b in "$(NATIVE_BIN)" "$(SEED)"; do \
-		if [ -x "$$b" ] && KEEP_SEED="$(KEEP_SEED)" "$$b" dev clean $(1) --dry-run >/dev/null 2>&1; then \
+		if [ -x "$$b" ] && "$$b" dev clean $(1) --dry-run >/dev/null 2>&1; then \
 			bin="$$b"; break; \
 		fi; \
 	done
@@ -579,19 +581,21 @@ mcp-server:
 	cd tools/mcp-server && npm ci --no-audit --no-fund && npm run build
 
 # Remove local build artifacts. Thin delegation: `sfn dev clean build` owns
-# the keep-the-seed-toolchain-store policy (SFN-680) and reads KEEP_SEED
-# itself, so this recipe passes no flag and decides nothing.
+# the keep-the-seed-toolchain-store policy (SFN-680), so this recipe decides
+# nothing and only forwards the opt-out under its namespaced name.
 #
 # The shell path below is transitional and runs only when no available `sfn`
 # implements `dev clean` — a fresh clone whose seed predates SFN-680, where a
 # hard failure would break `make clean-build` for the validation ladder that
-# depends on it (.claude/rules/selfhost-invariant.md). It is deliberately a
-# copy of the retired recipe, not a second implementation to maintain: delete
-# it when the pinned seed carries the command.
+# depends on it (.claude/rules/selfhost-invariant.md). It reproduces the
+# retired recipe rather than being a second implementation to maintain, and is
+# deleted when the pinned seed carries the command. One known divergence: this
+# glob skips dotfiles, so it leaves `build/.seed-resolved` behind where the
+# native path removes it.
 .PHONY: clean-build clean-all
 clean-build:
 	@bin=""; $(call CLEAN_PROBE,build); \
-	if [ -n "$$bin" ]; then exec env KEEP_SEED="$(KEEP_SEED)" "$$bin" dev clean build; fi; \
+	if [ -n "$$bin" ]; then exec env SAILFIN_CLEAN_KEEP_SEED="$(KEEP_SEED)" "$$bin" dev clean build; fi; \
 	echo "[clean-build] this sfn predates 'sfn dev clean' (SFN-680); using the transitional shell path"; \
 	mkdir -p build; \
 	for d in build/*; do \

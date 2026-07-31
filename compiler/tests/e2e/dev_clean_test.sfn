@@ -126,12 +126,12 @@ test "dev clean: --include-seed removes the seed store" ![io] {
     process.run(["rm", "-rf", repo]);
 }
 
-test "dev clean: KEEP_SEED=0 env opt-out removes the seed store" ![io] {
+test "dev clean: env opt-out removes the seed store" ![io] {
     let repo = _scratch_repo("dev-clean-keep-seed-env");
     _seed_repo(repo);
     let sfn = _sfn_bin_abs();
     let mut child_env = clean_runner_env(nested_runner_scratch("dev_clean_keep_seed_env"));
-    child_env.push("KEEP_SEED=0");
+    child_env.push("SAILFIN_CLEAN_KEEP_SEED=0");
 
     let exit = process.run_capture_cwd([sfn, "dev", "clean", "build"], child_env, repo);
     let _out = process.capture_take_stdout();
@@ -170,7 +170,89 @@ test "dev clean: absent build tree is a no-op" ![io] {
     let err = process.capture_take_stderr();
     assert exit == 0;
     assert find(out + err, "error", 0) < 0;
+    assert find(out, "nothing to remove (build tree absent)", 0) >= 0;
     assert ! fs.exists(repo + "/build");
+
+    process.run(["rm", "-rf", repo]);
+}
+
+test "dev clean: preserved store name comes from the bootstrap manifest" ![io] {
+    let repo = _scratch_repo("dev-clean-custom-store");
+    process.run(["rm", "-rf", repo]);
+    fs.createDirectory(repo, true);
+    fs.writeFile(repo + "/bootstrap.toml", "[seed]\n" + "version = \"0.0.0\"\n"
+        + "source = \"github-release\"\n"
+        + "repo = \"SailfinIO/sailfin\"\n"
+        + "asset_prefix = \"sailfin\"\n"
+        + "policy = \"exact\"\n\n"
+        + "[store]\n"
+        + "install_base = \"build/seedstore/versions\"\n"
+        + "bin_dir = \"build/seedstore/bin\"\n");
+    fs.createDirectory(repo + "/build/seedstore/bin", true);
+    fs.writeFile(repo + "/build/seedstore/bin/marker.txt", "seed\n");
+    fs.createDirectory(repo + "/build/toolchains", true);
+    fs.writeFile(repo + "/build/toolchains/marker.txt", "toolchains\n");
+    fs.createDirectory(repo + "/build/native", true);
+    fs.writeFile(repo + "/build/native/marker.txt", "native\n");
+    let sfn = _sfn_bin_abs();
+    let child_env = clean_runner_env(nested_runner_scratch("dev_clean_custom_store"));
+
+    let exit = process.run_capture_cwd([sfn, "dev", "clean", "build"], child_env, repo);
+    let _out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    assert exit == 0;
+    // The derived store (build/seedstore) survives...
+    assert fs.exists(repo + "/build/seedstore/bin/marker.txt");
+    // ...but build/toolchains does not, proving the preserved child is read
+    // from the manifest rather than hardcoded to "toolchains".
+    assert ! fs.exists(repo + "/build/toolchains");
+    assert ! fs.exists(repo + "/build/native/marker.txt");
+
+    process.run(["rm", "-rf", repo]);
+}
+
+test "dev clean: a symlinked build child is unlinked, not followed" ![io] {
+    let repo = _scratch_repo("dev-clean-symlink-repo");
+    _seed_repo(repo);
+    let outside = _scratch_repo("dev-clean-symlink-outside");
+    process.run(["rm", "-rf", outside]);
+    fs.createDirectory(outside, true);
+    fs.writeFile(outside + "/treasure.txt", "treasure\n");
+    process.run(["ln", "-s", outside, repo + "/build/link"]);
+    let sfn = _sfn_bin_abs();
+    let child_env = clean_runner_env(nested_runner_scratch("dev_clean_symlink"));
+
+    let exit = process.run_capture_cwd([sfn, "dev", "clean", "build"], child_env, repo);
+    let _out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    assert exit == 0;
+    assert fs.exists(outside + "/treasure.txt");
+    // `fs.exists` follows symlinks, so it cannot tell us whether the link
+    // node itself is gone (it would report the same "absent" result whether
+    // the walk unlinked the symlink or dereferenced and deleted through it).
+    // Probe the link node directly instead.
+    let link_exit = process.run_capture(["test", "-L", repo + "/build/link"], []);
+    let _link_out = process.capture_take_stdout();
+    let _link_err = process.capture_take_stderr();
+    assert link_exit != 0;
+
+    process.run(["rm", "-rf", repo]);
+    process.run(["rm", "-rf", outside]);
+}
+
+test "dev clean: all removes both trees" ![io] {
+    let repo = _scratch_repo("dev-clean-all");
+    _seed_repo(repo);
+    let sfn = _sfn_bin_abs();
+    let child_env = clean_runner_env(nested_runner_scratch("dev_clean_all"));
+
+    let exit = process.run_capture_cwd([sfn, "dev", "clean", "all"], child_env, repo);
+    let _out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    assert exit == 0;
+    assert ! fs.exists(repo + "/build/native/marker.txt");
+    assert ! fs.exists(repo + "/dist");
+    assert fs.exists(repo + "/build/toolchains/seed/bin/marker.txt");
 
     process.run(["rm", "-rf", repo]);
 }

@@ -136,8 +136,9 @@ here.
   replaces the `make clean-build` / `make clean` / `make clean-all` shell
   recipes: `build` removes every top-level `build/` entry except the fetched
   seed toolchain store (derived from `bootstrap.toml [store]`), `--include-seed`
-  (or `KEEP_SEED=0` / `SAILFIN_CLEAN_KEEP_SEED=0`) additionally removes that
-  store, and `dist` removes the packaged-release output directory. It refuses
+  (or `SAILFIN_CLEAN_KEEP_SEED=0`; `make clean-build KEEP_SEED=0` translates
+  into it) additionally removes that store, and `dist` removes the
+  packaged-release output directory. It refuses
   to run outside a compiler checkout and never touches the global
   content-addressed cache root that `sfn cache clean` owns. Like SFN-679, this
   is a seed-run command, so it is only exercisable once a seed carrying it is
