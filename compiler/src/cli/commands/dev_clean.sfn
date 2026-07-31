@@ -1,0 +1,331 @@
+// compiler/src/cli/commands/dev_clean.sfn
+//
+// `sfn dev clean ...` — native replacement for the `make clean-build` /
+// `make clean` / `make clean-all` recipes (SFN-680). Owns removal of
+// repo-local build artifacts so the Makefile becomes a thin delegation with
+// no shell-side preserve-the-seed policy of its own.
+//
+//   sfn dev clean build [--include-seed] [--dry-run]   == make clean-build
+//   sfn dev clean dist  [--dry-run]                    == make clean
+//   sfn dev clean all   [--include-seed] [--dry-run]   == make clean-all
+import {
+    Command,
+    Matches,
+    command,
+    flag,
+    has_flag,
+    subcommand,
+    with_flag,
+    with_subcommand
+} from "sfn/cli";
+
+import {
+    BOOTSTRAP_MANIFEST_PATH,
+    BootstrapManifest,
+    bootstrap_manifest_exists,
+    read_bootstrap_manifest
+} from "../../bootstrap_manifest";
+import { _shell_read_cmd } from "../../build/fs";
+import { cache_root } from "../../build_cache";
+import { _selfhost_remove_tree } from "../../cli_selfhost";
+import { number_to_string } from "../../num_format";
+import {
+    ends_with,
+    index_of,
+    starts_with,
+    strings_equal,
+    substring
+} from "../../string_utils";
+import { CliContext } from "../context";
+
+// The environment form of `--include-seed`, so the Makefile recipe can pass
+// `make clean-build KEEP_SEED=0` through without branching on it.
+//
+// Deliberately namespaced: the recipe translates `KEEP_SEED` into this name
+// rather than the command reading `KEEP_SEED` directly. That bare name is not
+// one Sailfin owns, and here it escalates to deleting the seed toolchain
+// store — a verified network re-download to recover — so an unrelated
+// `KEEP_SEED=0` already in a developer's environment must not reach a direct
+// `sfn dev clean build`.
+fn _clean_keep_seed_env_optout() -> boolean ![io] {
+    return strings_equal(env.get("SAILFIN_CLEAN_KEEP_SEED"), "0");
+}
+
+// The top-level `build/` entries that hold the fetched seed toolchain store.
+// `bootstrap.toml [store]` names `install_base` / `bin_dir` (defaults
+// `build/toolchains/seed/versions` and `build/toolchains/seed/bin`); both sit
+// under one `build/` child, and preserving that whole child is what keeps a
+// following build from re-downloading a seed. Falls back to `toolchains` when
+// the manifest is unreadable — preserving too much is recoverable, deleting a
+// seed store is a network round-trip.
+fn _preserved_build_children() -> string[] ![io] {
+    let m: BootstrapManifest = read_bootstrap_manifest(BOOTSTRAP_MANIFEST_PATH);
+    if !m.ok { return ["toolchains"]; }
+    let mut out: string[] = [];
+    let candidates: string[] = [m.install_base, m.bin_dir];
+    let mut i: int = 0;
+    loop {
+        if i >= candidates.length { break; }
+        let p = candidates[i];
+        if starts_with(p, "build/") {
+            let rest = substring(p, 6, p.length);
+            let mut end = rest.length;
+            let mut j = 0;
+            loop {
+                if j >= rest.length { break; }
+                if strings_equal(rest[j], "/") {
+                    end = j;
+                    break;
+                }
+                j += 1;
+            }
+            let child = substring(rest, 0, end);
+            if child.length > 0 {
+                let mut already = false;
+                let mut k = 0;
+                loop {
+                    if k >= out.length { break; }
+                    if strings_equal(out[k], child) {
+                        already = true;
+                        break;
+                    }
+                    k += 1;
+                }
+                if !already { out.push(child); }
+            }
+        }
+        i += 1;
+    }
+    if out.length == 0 { return ["toolchains"]; }
+    return out;
+}
+
+// Every removal target is a literal, cwd-relative path this command
+// constructs itself — the command takes no path argument, so there is no
+// user-supplied path to traverse out of. These predicates are the belt to
+// that suspenders: a `build/` child name comes from `fs.listDirectory`, and
+// this pins it to the intended tree before anything is unlinked.
+fn _clean_target_ok(rel: string) -> boolean {
+    if rel.length == 0 { return false; }
+    if starts_with(rel, "/") { return false; }
+    if strings_equal(rel, "..") { return false; }
+    if starts_with(rel, "../") { return false; }
+    if index_of(rel, "/../") >= 0 { return false; }
+    if ends_with(rel, "/..") { return false; }
+    if starts_with(rel, "build/") { return true; }
+    if strings_equal(rel, "dist") { return true; }
+    if starts_with(rel, "dist/") { return true; }
+    return false;
+}
+
+// Absolute path of a cwd-relative target, against a cwd the caller resolved
+// once (mirrors dev.sfn::_bootstrap_abspath, minus the `pwd` fork — this runs
+// per target, and forking a shell for each one is pure waste).
+fn _clean_abs_with(cwd: string, path: string) -> string {
+    if starts_with(path, "/") { return path; }
+    if cwd.length == 0 { return path; }
+    return cwd + "/" + path;
+}
+
+// The global content-addressed build cache is a DIFFERENT tree with a
+// different lifecycle (SFN-680 scope: `sfn cache clean` owns it), so a
+// build-tree wipe must never reach it. `_clean_guard_cache_root` resolves the
+// root to guard, and returns "" when there is nothing to guard.
+//
+// Only an ABSOLUTE root is guarded. `cache_root("")` walks a ladder that ends
+// at the *relative* `build/cache/<schema>` when neither XDG_CACHE_HOME nor
+// HOME is set — containers, `env -i`, systemd units (build_cache.sfn:637-666).
+// That tree is repo-local and is exactly the build artifact this command
+// exists to remove; guarding it would silently leave `build/cache` behind on
+// those hosts while reporting success, which is the opposite of what
+// `make clean-build` is run for before a structural rebuild.
+fn _clean_guard_cache_root(cwd: string) -> string ![io] {
+    let raw = cache_root("");
+    if !starts_with(raw, "/") { return ""; }
+    return _clean_abs_with(cwd, raw);
+}
+
+fn _clean_would_hit_cache_root(abs_target: string, abs_cache_root: string) -> boolean {
+    if abs_cache_root.length == 0 { return false; }
+    if strings_equal(abs_target, abs_cache_root) { return true; }
+    if starts_with(abs_cache_root, abs_target + "/") { return true; }
+    return false;
+}
+
+// If `!fs.exists("build")` return `[]`; else enumerate the top-level entries
+// of `build/`, skipping those preserved by `_preserved_build_children()`
+// unless `include_seed`.
+fn _clean_build_targets(include_seed: boolean) -> string[] ![io] {
+    if !fs.exists("build") { return []; }
+    let entries = fs.listDirectory("build");
+    let preserved = _preserved_build_children();
+    let mut out: string[] = [];
+    let mut i = 0;
+    loop {
+        if i >= entries.length { break; }
+        let n = entries[i];
+        let mut skip = false;
+        if !include_seed {
+            let mut j = 0;
+            loop {
+                if j >= preserved.length { break; }
+                if strings_equal(preserved[j], n) {
+                    skip = true;
+                    break;
+                }
+                j += 1;
+            }
+        }
+        if !skip { out.push("build/" + n); }
+        i += 1;
+    }
+    return out;
+}
+
+fn _clean_dist_targets() -> string[] ![io] {
+    if !fs.exists("dist") { return []; }
+    return ["dist"];
+}
+
+// Remove `targets` (or, when `dry`, just report them), refusing anything
+// outside `build/`/`dist/` and anything that would reach the global build
+// cache root. `preserved` is the set of `build/` children that were skipped
+// by `_clean_build_targets` (used only to print the "preserved" notice).
+//
+// `tree_present` separates the two empty-`targets` cases, which report
+// differently and are not interchangeable: an absent tree is the no-op the
+// caller asked about, while a present tree holding nothing but the preserved
+// seed store is already clean. It also gates the "preserved" notice — naming
+// a store that is not on disk would be a claim about a directory that does
+// not exist.
+fn _clean_execute(label: string, targets: string[], dry: boolean, preserved: string[], tree_present: boolean) -> int ![io] {
+    let cwd = _shell_read_cmd("pwd");
+    let cr = _clean_guard_cache_root(cwd);
+    let mut removed = 0;
+    let mut skipped = 0;
+    let mut failures = 0;
+    let mut i = 0;
+    loop {
+        if i >= targets.length { break; }
+        let t = targets[i];
+        if !_clean_target_ok(t) {
+            print.err("[clean] refusing (outside build/ or dist/): " + t);
+            failures += 1;
+        } else {
+            let abs = _clean_abs_with(cwd, t);
+            if _clean_would_hit_cache_root(abs, cr) {
+                print("[clean] skipping (would reach the global cache root): "
+                    + t);
+                skipped += 1;
+            } else if dry { print("[clean] would remove: " + t); } else {
+                print("[clean] removing: " + t);
+                if !_selfhost_remove_tree(t) {
+                    print.err("[clean] failed to remove: " + t);
+                    failures += 1;
+                } else { removed += 1; }
+            }
+        }
+        i += 1;
+    }
+
+    if strings_equal(label, "build") && tree_present {
+        let mut i2 = 0;
+        loop {
+            if i2 >= preserved.length { break; }
+            if fs.exists("build/" + preserved[i2]) {
+                print("[clean] preserved: build/" + preserved[i2]
+                    + " (fetched seed toolchain store)");
+            }
+            i2 += 1;
+        }
+    }
+
+    if targets.length == 0 && !tree_present {
+        print("[clean] nothing to remove (" + label + " tree absent)");
+    } else if targets.length == 0 {
+        print("[clean] nothing to remove (" + label + " tree already clean)");
+    } else if dry {
+        print("[clean] dry-run: " + number_to_string(targets.length)
+            + " entries would be removed (nothing was removed)");
+    } else {
+        print("[clean] removed " + number_to_string(removed) + " entries");
+    }
+
+    if failures > 0 { return 1; }
+    return 0;
+}
+
+// `ctx` is unused: every target this command touches is resolved from the
+// current working directory, not from the CLI context. The parameter stays to
+// match the `<group>_run(matches, ctx)` shape `dev.sfn::run` dispatches to.
+fn clean_run(matches: Matches, ctx: CliContext) -> int ![io] {
+    let sub = subcommand(matches);
+    if !strings_equal(sub, "build") && !strings_equal(sub, "dist") && !strings_equal(sub, "all") {
+        print("usage: sfn dev clean <build|dist|all> [--include-seed] [--dry-run]");
+        return 2;
+    }
+
+    // The gate on "is this the compiler checkout" has to be the manifest's
+    // CONTENT, not its name. `bootstrap_manifest_exists()` is a bare
+    // `fs.exists` (bootstrap_manifest.sfn:172), and `bootstrap.toml` is not a
+    // name Sailfin owns — a rust-lang/rust checkout has one too, next to a
+    // `build/` output tree this command would then happily wipe. Parsing it
+    // and requiring `[seed].version` is what makes the gate mean what it says,
+    // and costs no extra IO that `_preserved_build_children` was not already
+    // paying.
+    if !bootstrap_manifest_exists() {
+        print.err("[clean] error: no bootstrap.toml in the current directory");
+        print.err("[clean] hint: run 'sfn dev clean ...' from the compiler checkout root");
+        return 1;
+    }
+    let manifest: BootstrapManifest = read_bootstrap_manifest(BOOTSTRAP_MANIFEST_PATH);
+    if !manifest.ok {
+        print.err("[clean] error: bootstrap.toml is not a Sailfin bootstrap manifest (no [seed].version)");
+        print.err("[clean] hint: run 'sfn dev clean ...' from the compiler checkout root");
+        return 1;
+    }
+
+    let dry = has_flag(matches, "dry-run");
+    let include_seed = has_flag(matches, "include-seed")
+        || _clean_keep_seed_env_optout();
+
+    // `--include-seed` removes the store, so there is nothing to report as
+    // preserved; an empty list is what keeps the notice off that path.
+    let mut preserved: string[] = [];
+    if !include_seed { preserved = _preserved_build_children(); }
+    let none: string[] = [];
+
+    if strings_equal(sub, "build") {
+        return _clean_execute("build", _clean_build_targets(include_seed), dry, preserved, fs.exists("build"));
+    }
+    if strings_equal(sub, "dist") {
+        return _clean_execute("dist", _clean_dist_targets(), dry, none, fs.exists("dist"));
+    }
+
+    let build_rc = _clean_execute("build", _clean_build_targets(include_seed), dry, preserved, fs.exists("build"));
+    let dist_rc = _clean_execute("dist", _clean_dist_targets(), dry, none, fs.exists("dist"));
+    if build_rc != 0 || dist_rc != 0 { return 1; }
+    return 0;
+}
+
+// The `sfn/cli` definition for the `clean` group nested under `dev`.
+fn clean_command_def() -> Command {
+    let mut clean: Command = command("clean", "Remove repo-local build artifacts (retires make clean-build / clean)");
+    let mut build_leaf: Command = command("build", "Remove build/* (keeps the fetched seed toolchain store)");
+    build_leaf = with_flag(build_leaf, flag("include-seed", "Also remove the fetched seed toolchain store"));
+    build_leaf = with_flag(build_leaf, flag("dry-run", "List what would be removed without removing anything"));
+    clean = with_subcommand(clean, build_leaf);
+
+    let mut dist_leaf: Command = command("dist", "Remove the packaged-release output directory (dist/)");
+    dist_leaf = with_flag(dist_leaf, flag("dry-run", "List what would be removed without removing anything"));
+    clean = with_subcommand(clean, dist_leaf);
+
+    let mut all_leaf: Command = command("all", "Remove both build/* and dist/");
+    all_leaf = with_flag(all_leaf, flag("include-seed", "Also remove the fetched seed toolchain store"));
+    all_leaf = with_flag(all_leaf, flag("dry-run", "List what would be removed without removing anything"));
+    clean = with_subcommand(clean, all_leaf);
+
+    return clean;
+}
+
+export { clean_command_def, clean_run };

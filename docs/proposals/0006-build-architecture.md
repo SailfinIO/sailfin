@@ -1548,6 +1548,17 @@ the rest of Stage D's Makefile sweep; the Makefile itself still exists,
 and the new gate is only exercisable through `sfn dev bootstrap build`
 once a seed carrying it is pinned (see `docs/status.md`).
 
+**Clean is now native too (SFN-680).** `sfn dev clean build|dist|all
+[--include-seed] [--dry-run]` (`compiler/src/cli/commands/dev_clean.sfn`)
+owns the artifact-removal policy that `clean-build`/`clean`/`clean-all`
+used to own in shell, preserving the fetched seed toolchain store by
+default. `make clean`/`make clean-build`/`make clean-all` now delegate to
+it. This lands the clean half of the Makefile sweep, alongside SFN-679's
+install/fingerprint half; like that command, it is seed-run, so it is
+only exercisable once a seed carrying it is pinned, and until then the
+Makefile recipes fall back to their transitional shell path (see
+`docs/status.md`).
+
 ### Stage E — Long-lived process, arena, incremental builds
 
 **Goal:** Hit the <5 min build target (see build performance baseline in this document).
