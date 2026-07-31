@@ -52,6 +52,10 @@ extern fn malloc(size: usize) -> *u8;
 
 extern fn free(ptr: *u8) -> void;
 
+extern fn realloc(ptr: *u8, size: usize) -> *u8;
+
+extern fn memset(ptr: *u8, value: i32, n: usize) -> *u8;
+
 extern fn calloc(n: usize, sz: usize) -> *u8;
 
 extern fn memcpy(dst: *u8, src: *u8, n: usize) -> *u8;
@@ -518,6 +522,129 @@ fn _sha256_of_file_cmd(file_path: string) -> string ![io] {
     return _shell_read_cmd(cmd);
 }
 
+// Binary-safe counterpart to `fs.readFile`, whose `i8*` return is
+// coerced to a Sailfin string via the `string.length` descriptor
+// (`sfn_str_len` -> bounded `strnlen`) in
+// `compiler/src/llvm/expression_lowering/native/core_operands/pointer_coercion.sfn:42-83`,
+// truncating at the first NUL. `addr`/`length` are used instead of an
+// `int[]` because an `int[]` materialises one i64 per byte, which is
+// the `-O0` blow-up SFEP-0048 §3.5 pre-forbids; consumers read bytes
+// back with the `load_byte(addr) -> int` intrinsic.
+//
+// `status` codes: `0` ok, `1` not found, `2` unreadable or I/O error,
+// `3` allocation failure, `4` exceeds the size cap, `5` the read made
+// too little progress per call to terminate. `4` and `5` are split
+// rather than folded: at a full chunk per read the size cap trips
+// first, so `5` is reachable only from a source dribbling far less
+// than a chunk per `fread` — reporting that as "too large" would
+// misdirect anyone reading the failure.
+//
+// A genuinely empty file returns `status == 0`, `length == 0`, and a
+// non-zero `addr`, so it stays distinguishable from every failure
+// (which all return `addr == 0`) — the distinction `fs.readFile`
+// collapses today by reporting both as `""` (SFN-659).
+struct FileBytes {
+    addr: int;
+    length: int;
+    status: int;
+}
+
+// Read the entire contents of `file_path` into a heap buffer without
+// going through a Sailfin `string`, so embedded NUL bytes survive.
+// Models the chunked-read loop in `_copy_file` above, growing the
+// buffer geometrically instead of streaming to a second file.
+fn _read_file_bytes(file_path: string) -> FileBytes ![io] {
+    if !fs.exists(file_path) {
+        return FileBytes { addr: 0, length: 0, status: 1 };
+    }
+    let mode: string = "rb";
+    let f: *File = fopen(file_path as *u8, mode as *u8);
+    if f as i64 == 0 {
+        return FileBytes { addr: 0, length: 0, status: 2 };
+    }
+
+    let chunk: i64 = 65536;
+    let mut capacity: i64 = 65536;
+    // The `+ 1` is slack, not load-bearing: the growth check below runs
+    // before every read, so `length < capacity` strictly holds at the
+    // terminator write. Moving that check after the read would make
+    // this `+ 1` the only thing preventing a one-byte heap overflow.
+    let mut buf: *u8 = malloc((capacity + 1) as usize);
+    if buf as i64 == 0 {
+        fclose(f);
+        return FileBytes { addr: 0, length: 0, status: 3 };
+    }
+
+    // 512 MiB. Geometric growth means the transient peak is ~2x the
+    // buffer (and ~3x briefly, while `realloc` holds both blocks), so
+    // this bounds one read near 1.5 GiB — deliberately under the
+    // 2.5 GiB/job the parallel fan-outs reserve
+    // (`.claude/rules/compiler-safety.md`). Anything larger keeps the
+    // subprocess hasher rather than risking a host kill.
+    let max_bytes: i64 = 536870912;
+    // Backstop only: at a full 64 KiB chunk per read `max_bytes` trips
+    // after ~8192 iterations, so this bounds a pathologically short-
+    // reading source rather than a large file.
+    let max_iters: i64 = 100000;
+    let mut length: i64 = 0;
+    let mut guard: i64 = 0;
+    let mut status: i64 = 0;
+    loop {
+        guard += 1;
+        if guard > max_iters {
+            status = 5;
+            break;
+        }
+        if length + chunk > capacity {
+            let new_cap: i64 = capacity * 2;
+            let nb: *u8 = realloc(buf, (new_cap + 1) as usize);
+            if nb as i64 == 0 {
+                free(buf);
+                fclose(f);
+                return FileBytes { addr: 0, length: 0, status: 3 };
+            }
+            buf = nb;
+            capacity = new_cap;
+        }
+        let dst: *u8 = ((buf as i64) + length) as *u8;
+        let got: i64 = fread(dst, 1 as usize, chunk as usize, f) as i64;
+        // A short read is EOF *or* a hard read error — see the
+        // `ferror` check below, mirroring `_copy_file`.
+        if got <= 0 { break; }
+        length += got;
+        if length > max_bytes {
+            status = 4;
+            break;
+        }
+    }
+
+    // Without this, a mid-read I/O error silently yields a truncated
+    // buffer and a confidently-wrong digest — and a directory, which
+    // opens cleanly and fails its first read, would be indistinguishable
+    // from an empty file. Running it unconditionally is deliberate: it
+    // may overwrite a cap status with `2`, which is correct, since a
+    // stream that errored is a truer account than the cap it also hit.
+    if ferror(f) != 0 { status = 2; }
+    fclose(f);
+    if status != 0 {
+        free(buf);
+        return FileBytes { addr: 0, length: 0, status: status };
+    }
+
+    // NUL-terminate past the data so the buffer doubles as a cstring
+    // for incidental text callers; `length` stays authoritative.
+    let term: *u8 = ((buf as i64) + length) as *u8;
+    memset(term, 0, 1 as usize);
+    return FileBytes { addr: buf as i64, length: length, status: 0 };
+}
+
+// Free the buffer behind a `FileBytes` result. Callers must call this
+// exactly once per `status == 0` result; a no-op on any other status
+// since those never allocate a surviving buffer.
+fn _free_file_bytes(b: FileBytes) -> void {
+    if b.addr != 0 { free(b.addr as *u8); }
+}
+
 // Compute the SHA-256 hex digest of a NUL-free text file in-process,
 // without spawning a subprocess. Returns `""` when the file does not
 // exist or cannot be read, preserving the `_sha256_of_file_cmd`
@@ -525,13 +652,12 @@ fn _sha256_of_file_cmd(file_path: string) -> string ![io] {
 //
 // SOUND ONLY for NUL-free text artifacts: .sfn source, .ll LLVM IR,
 // .toml manifests, .h/.c headers, layout manifests. `fs.readFile`
-// coerces the `i8*` return to a Sailfin string via `strlen`
-// (core_operands.sfn:1013–1043), which truncates at the first NUL byte.
-// Binary artifacts (compiled binaries, tarballs, archives) MUST use
-// `_sha256_of_file_cmd`. When #1999 lands a binary-safe `fs.readBinary`
-// builtin, this split can be collapsed: replace `_sha256_of_text_file`
-// with a single in-process path over `fs.readBinary` and retire
-// `_sha256_of_file_cmd` from all hashing callers (#1995, #1999).
+// coerces the `i8*` return to a Sailfin string via the `string.length`
+// descriptor (`core_operands/pointer_coercion.sfn:42-83`), which
+// truncates at the first NUL byte. Binary artifacts (compiled
+// binaries, tarballs, archives) MUST use `_sha256_of_file_cmd` or the
+// binary-safe `_read_file_bytes` above. This split can be collapsed
+// once SFN-660 repoints the hashing callers onto `_read_file_bytes`.
 //
 // Inputs larger than 64 KiB fall back to the subprocess pipeline: the
 // vendored hasher's byte loop collapses under -O0 compiler builds (the
@@ -540,8 +666,8 @@ fn _sha256_of_file_cmd(file_path: string) -> string ![io] {
 // drove selfhost_diff_test.sfn into its 300 s per-file kill (PR #2000
 // triage). One popen (~30 ms) beats seconds of -O0 hashing; the
 // in-process win is the many small .sfn/.toml sources, which stay under
-// the threshold. Retire the threshold together with the split (#1999),
-// or earlier if CI shard builds move off -O0.
+// the threshold. Retire the threshold together with the split
+// (SFN-660), or earlier if CI shard builds move off -O0.
 fn _sha256_of_text_file(file_path: string) -> string ![io] {
     if !fs.exists(file_path) { return ""; }
     let contents = fs.readFile(file_path);
@@ -585,5 +711,8 @@ export {
     _shell_read_cmd,
     _shell_single_quote_arg,
     _sha256_of_file_cmd,
-    _sha256_of_text_file
+    _sha256_of_text_file,
+    FileBytes,
+    _read_file_bytes,
+    _free_file_bytes
 };
