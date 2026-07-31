@@ -5,7 +5,7 @@
 // (test-infra Phase 3, epic #842; ratchet #1327).
 //
 // `sailfin_intrinsic_clock_monotonic_id` is a registry sentinel whose
-// lowering branch (`core_call_emission.sfn`) emits a bare `i32` immediate
+// lowering branch (`core_call_emission/dispatch.sfn`) emits a bare `i32` immediate
 // — `1` on Linux/glibc, `6` on Darwin/macOS — chosen at emit time from
 // `SAILFIN_TARGET_OS` (cross-compile target override) or the `uname -s`
 // host probe. Unlike the errno sentinel (a `call`) and the pointer-read

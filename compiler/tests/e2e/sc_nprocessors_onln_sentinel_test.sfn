@@ -2,7 +2,7 @@
 // sentinel (#1480, epic #763).
 //
 // `sailfin_intrinsic_sc_nprocessors_onln` is a registry sentinel whose
-// lowering branch (`core_call_emission.sfn`) emits a bare `i32` immediate
+// lowering branch (`core_call_emission/dispatch.sfn`) emits a bare `i32` immediate
 // — `84` on Linux/glibc, `58` on Darwin/macOS — chosen at emit time from
 // `SAILFIN_TARGET_OS` (cross-compile target override) or the `uname -s`
 // host probe. Unlike the errno sentinel (a `call`) and the pointer-read

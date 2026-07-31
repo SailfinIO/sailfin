@@ -5,7 +5,7 @@
 // `clock_monotonic_id_sentinel_test.sfn` (same epic #763 sentinel shape).
 //
 // `sailfin_intrinsic_errno_location` is a registry sentinel whose lowering
-// branch (`core_call_emission.sfn`) emits a `call` to the host's concrete
+// branch (`core_call_emission/dispatch.sfn`) emits a `call` to the host's concrete
 // `errno`-slot locator — `@__errno_location` on Linux/glibc, `@__error` on
 // Darwin/macOS, `@_errno` on Windows/mingw — chosen at emit time from
 // `SAILFIN_TARGET_OS` (cross-compile target override) or the non-shelling

@@ -228,7 +228,7 @@ fn _coerce_numeric_to_integer_target(operand: LLVMOperand, operand_type: string,
     }
     // SFN-571: `i16` had no arm in either direction, so once the call-site
     // mapper resolved an `i16`/`u16` parameter correctly the coercion still
-    // failed and `core_call_emission.sfn` fell back to pushing the original
+    // failed and `core_call_emission/dispatch.sfn` fell back to pushing the original
     // uncoerced operand. Mirror the `i8` arms above; widening uses `sext` to
     // match the existing narrow-int convention here (the unsigned widening
     // matrix is SFN-503's `as`-cast territory, not the call boundary).

@@ -4,7 +4,7 @@
 // point introduced in M1.7.1 (issue #495). Each test feeds a runtime
 // helper through `emit_runtime_call` and pins the rendered IR line(s)
 // against today's hand-spelled emission from `coerce_and_emit_call`
-// in `core_call_emission.sfn`. When follow-up migration issues
+// in `core_call_emission/dispatch.sfn`. When follow-up migration issues
 // (M1.7.2a/b/c, .3, .4) flip individual call sites onto this entry
 // point, these fixtures detect any drift in the canonical render —
 // symbol resolution, parameter-type coercion, void/non-void shape.

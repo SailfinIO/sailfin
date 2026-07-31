@@ -35,7 +35,7 @@ import {
 } from "../../utils";
 import { array_pointer_element_type } from "../arrays";
 import { lower_expression } from "./core";
-import { coerce_and_emit_call } from "./core_call_emission";
+import { coerce_and_emit_call } from "./core_call_emission/dispatch";
 import {
     try_dispatch_atomic_builtin,
     try_dispatch_byte_load_builtin,

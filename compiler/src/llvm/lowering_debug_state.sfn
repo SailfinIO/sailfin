@@ -224,7 +224,7 @@ fn skip_module_globals() -> boolean ![io] {
 // `int *__errno_location(void)`, Darwin/macOS `int *__error(void)`,
 // and Windows/mingw-w64 `int *_errno(void)`. The `sailfin_intrinsic_
 // errno_location` sentinel's lowering branch
-// (`core_call_emission.sfn`) reads this to emit the correct
+// (`core_call_emission/dispatch.sfn`) reads this to emit the correct
 // `call i32* @<sym>()` so the same compiler source links on every
 // platform (CI emits target-neutral IR resolved by the host clang).
 //
@@ -261,7 +261,7 @@ fn errno_locator_symbol() -> string ![io] {
 // epic #763). POSIX leaves the numeric `clk_id` implementation-defined
 // and it diverges by platform — Linux/glibc `1`, Darwin/macOS `6` — so
 // the `sailfin_intrinsic_clock_monotonic_id` sentinel's lowering branch
-// (`core_call_emission.sfn`) reads this to emit a bare `i32` immediate
+// (`core_call_emission/dispatch.sfn`) reads this to emit a bare `i32` immediate
 // (no `call`, no `declare`), letting the same compiler source bake the
 // correct constant on either platform when built natively.
 //
@@ -291,7 +291,7 @@ fn clock_monotonic_id_value() -> int ![io] {
 // (#1480, epic #763). POSIX leaves the numeric request implementation-
 // defined and it diverges by platform — Linux/glibc `84`, Darwin/macOS
 // `58` — so the `sailfin_intrinsic_sc_nprocessors_onln` sentinel's lowering
-// branch (`core_call_emission.sfn`) reads this to emit a bare `i32`
+// branch (`core_call_emission/dispatch.sfn`) reads this to emit a bare `i32`
 // immediate (no `call`, no `declare`), letting the same compiler source
 // bake the correct request number on either platform when built natively.
 // The scheduler currently hardcodes the Linux `84`, so `sysconf(84)` fails
@@ -322,7 +322,7 @@ fn sc_nprocessors_onln_value() -> int ![io] {
 }
 
 // Resolve which executable-path leg the call-emission dispatcher
-// (`core_call_emission.sfn`) should emit for the `sailfin_intrinsic_exe_path`
+// (`core_call_emission/dispatch.sfn`) should emit for the `sailfin_intrinsic_exe_path`
 // sentinel (#967, epic #390). Same resolution order and lazy-init cache as
 // `errno_locator_symbol` above:
 //   1. `SAILFIN_TARGET_OS` env override — the *target* OS, for the Windows
@@ -347,7 +347,7 @@ fn exe_path_locator() -> string ![io] {
 }
 
 // Resolve the filesystem-sentinel leg the call-emission dispatcher
-// (`core_call_emission.sfn`) should emit for the `sailfin_intrinsic_fs_*`
+// (`core_call_emission/dispatch.sfn`) should emit for the `sailfin_intrinsic_fs_*`
 // sentinels (#1308). Same resolution order + lazy cache as
 // `exe_path_locator` above:
 //   "Darwin"  -> "darwin"   (POSIX `stat`/`symlink`/`mkdtemp`)

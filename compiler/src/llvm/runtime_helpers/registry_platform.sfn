@@ -87,7 +87,7 @@ fn _rh_descriptors_00(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     // Pointer-read intrinsics (#875, epic #763). These lower directly to an
     // LLVM `load` of the given width — there is no C symbol behind them. The
     // call-emission dispatcher (`coerce_and_emit_call` in
-    // `core_call_emission.sfn`) special-cases these symbols before normal
+    // `core_call_emission/dispatch.sfn`) special-cases these symbols before normal
     // symbol resolution and emits `load i32`/`load i64`/`load double` (with a
     // leading `bitcast` when the operand isn't already the matching pointer
     // type).
@@ -110,7 +110,7 @@ fn _rh_descriptors_00(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     // platform-dependent — glibc exposes `int *__errno_location(void)`,
     // Darwin/macOS `int *__error(void)`, and Windows/mingw-w64
     // `int *_errno(void)` — so the call-emission dispatcher
-    // (`coerce_and_emit_call` in `core_call_emission.sfn`) special-cases
+    // (`coerce_and_emit_call` in `core_call_emission/dispatch.sfn`) special-cases
     // this symbol and emits the matching `call i32* @<sym>()` chosen by
     // `errno_locator_symbol` at emit time (the `SAILFIN_TARGET_OS`
     // target override, else the `uname -s` host probe), returning an
@@ -167,7 +167,7 @@ fn _rh_descriptors_01(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     // `6`. Unlike errno (a symbol swap emitting a `call`) and
     // pointer-read (a `load`), this sentinel lowers to a bare `i32`
     // immediate — no symbol, no runtime call. The call-emission
-    // dispatcher (`coerce_and_emit_call` in `core_call_emission.sfn`)
+    // dispatcher (`coerce_and_emit_call` in `core_call_emission/dispatch.sfn`)
     // special-cases this symbol and returns an inline `i32 1`/`i32 6`
     // operand chosen by `clock_monotonic_id_value` at emit time (the
     // `SAILFIN_TARGET_OS` target override, else the `uname -s` host
@@ -190,7 +190,7 @@ fn _rh_descriptors_01(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     // sentinel above (and unlike errno, which emits a `call`, or
     // pointer-read, which emits a `load`), this lowers to a bare `i32`
     // immediate — no symbol, no runtime call. The call-emission dispatcher
-    // (`coerce_and_emit_call` in `core_call_emission.sfn`) special-cases
+    // (`coerce_and_emit_call` in `core_call_emission/dispatch.sfn`) special-cases
     // this symbol and returns an inline `i32 84`/`i32 58` operand chosen by
     // `sc_nprocessors_onln_value` at emit time (the `SAILFIN_TARGET_OS`
     // target override, else the `uname -s` host probe). This is the
@@ -217,7 +217,7 @@ fn _rh_descriptors_01(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     // and semantics — Linux `readlink("/proc/self/exe", …)`, Darwin
     // `_NSGetExecutablePath(buf, *size)`, Windows
     // `GetModuleFileNameA(NULL, buf, size)` — so the call-emission
-    // dispatcher (`coerce_and_emit_call` in `core_call_emission.sfn`)
+    // dispatcher (`coerce_and_emit_call` in `core_call_emission/dispatch.sfn`)
     // lowers the sentinel to a per-target emission *sequence* (modeled on
     // `pointer_read`, not the errno symbol-swap), choosing the host leg via
     // `exe_path_locator` at emit time. The uniform Sailfin-visible signature
@@ -254,7 +254,7 @@ fn _rh_descriptors_01(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     // `strlen` backs the Darwin leg's success-path length recovery:
     // `_NSGetExecutablePath` fills a NUL-terminated path but reports no
     // length, so the leg calls `strlen` on the buffer (see the
-    // `exe_path_ok_` block in `core_call_emission.sfn`). Registered as a
+    // `exe_path_ok_` block in `core_call_emission/dispatch.sfn`). Registered as a
     // concrete row so the post-lowering call-target scan emits
     // `declare i64 @strlen(i8*)` whenever that leg's `call @strlen` is
     // present — without it an isolated `sfn emit llvm` of an exe-path

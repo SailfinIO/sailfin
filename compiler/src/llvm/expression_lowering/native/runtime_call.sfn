@@ -5,17 +5,17 @@
 // migrate to in follow-up issues (M1.7.2a/b/c, .3, .4). Until those
 // land, this file is dead code: no existing emitter calls
 // `emit_runtime_call`, the seed continues to compile through
-// `coerce_and_emit_call` in `core_call_emission.sfn`, and
+// `coerce_and_emit_call` in `core_call_emission/dispatch.sfn`, and
 // `seed_default_runtime_helpers` is left untouched (deferred to
 // M1.7.5a).
 //
-// The canonical render mirrors `core_call_emission.sfn`'s tail:
+// The canonical render mirrors `core_call_emission/dispatch.sfn`'s tail:
 //   - void:      `  call void @<symbol>(<args>)`
 //   - non-void:  `  %t<N> = call <ret> @<symbol>(<args>)`
 // Symbol resolution prefers `descriptor.native_signature` over
 // `descriptor.symbol` (consistent with `coerce_and_emit_call`'s
 // M2.4a / M2.6 hand-off rule). The per-arg coercion walk mirrors
-// `core_call_emission.sfn:55-92` (sans the trait-dispatch carve-out
+// `core_call_emission/arguments.sfn` (sans the trait-dispatch carve-out
 // — runtime helpers do not carry self-typed first args).
 //
 // `RuntimeCallOverrides` lets a migrating call site override the
@@ -188,7 +188,7 @@ fn emit_runtime_call(target: string, operands: LLVMOperand[], overrides: Runtime
         }
     }
 
-    // Per-arg coercion walk. Mirrors core_call_emission.sfn:55-92
+    // Per-arg coercion walk. Mirrors core_call_emission/arguments.sfn
     // sans the trait-dispatch carve-out (runtime helpers do not
     // carry self-typed first args).
     let mut coerced_operands: LLVMOperand[] = [];
@@ -218,7 +218,7 @@ fn emit_runtime_call(target: string, operands: LLVMOperand[], overrides: Runtime
     }
 
     // Argument-count sanity check (mirrors the same gate in
-    // core_call_emission.sfn:254-268). Only run when we have a
+    // core_call_emission/dispatch.sfn). Only run when we have a
     // known signature — either a descriptor, or caller-supplied
     // `overrides.parameter_types`. The diagnostic-and-fallback
     // path (no descriptor, only `overrides.return_type` set) has

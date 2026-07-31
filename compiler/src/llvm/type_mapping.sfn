@@ -756,7 +756,7 @@ fn map_return_type(context: TypeContext, return_type: string) -> string {
         // Interfaces stay by-value. Interface values are `{ i8*, i8* }` fat
         // pointers (16 bytes) — already register-passable on AArch64 without
         // aggregate-return ABI ambiguity. Boxing them would require rewriting
-        // the trait-dispatch extractvalue chain in core_call_emission.sfn.
+        // the trait-dispatch extractvalue chain in core_call_emission/dispatch.sfn.
         // Keep the existing by-value ABI for interfaces.
         i = 0;
         loop {

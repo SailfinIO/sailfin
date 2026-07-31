@@ -16,7 +16,7 @@
 #   1. Register the helper in `runtime_helpers.sfn` (add a descriptor).
 #   2. Either route the emission through `emit_runtime_call` (the M1.7
 #      dispatch path) or read `effective_symbol` off the descriptor
-#      (see `rendering.sfn` / `core_call_emission.sfn`).
+#      (see `rendering.sfn` / `core_call_emission/dispatch.sfn`).
 #   3. Delete the bypass comment AND the allowlist line in the same PR.
 
 compiler/src/llvm/lowering/emission.sfn:732:            wrapper_lines.push("  %argv_arr_i8 = call i8* @sailfin_runtime_argv_to_string_array(i32 %argc, i8** %argv)");

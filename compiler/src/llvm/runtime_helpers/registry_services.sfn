@@ -223,7 +223,7 @@ fn _rh_descriptors_08(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     // trampolines and renames the Sailfin exports to the bare
     // form. The migration mechanism
     // (`render_runtime_helper_declarations` in `rendering.sfn` and
-    // `coerce_and_emit_call` in `core_call_emission.sfn`) prefers
+    // `coerce_and_emit_call` in `core_call_emission/dispatch.sfn`) prefers
     // the `native_signature` over `symbol` whenever it is set, so
     // freshly-emitted IR reaches the new exports while seed-built
     // IR (which still carries the legacy `symbol` names) keeps

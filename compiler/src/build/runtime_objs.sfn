@@ -949,7 +949,7 @@ fn _runtime_sfn_ctx_root(out_dir: string) -> string {
 // Makefile's #812 loop provides on-disk artifacts for the four
 // `runtime/sfn/platform/*` extern modules only, which is why
 // `clock.sfn → ./platform/posix` worked while a struct-returning
-// sibling import died at `core_call_emission.sfn`'s "cannot resolve
+// sibling import died at `core_call_emission/dispatch.sfn`'s "cannot resolve
 // return type" fatal. A pointer/i64-returning callee can be worked
 // around with an inline `extern fn`; a struct-by-value return
 // cannot (E0805) — staging, not per-module duplication, is the fix.
