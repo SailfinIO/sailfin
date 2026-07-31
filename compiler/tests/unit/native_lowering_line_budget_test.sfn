@@ -15,15 +15,15 @@
 // ships without a guard is a split that gets undone (SFN-566 records the
 // same drift pattern elsewhere).
 //
-// Why per-file ceilings rather than one family-wide maximum. Fourteen
-// siblings are still over budget, the largest at 1,856 lines. A single
+// Why per-file ceilings rather than one family-wide maximum. Thirteen
+// siblings are still over budget, the largest at 1,608 lines. A single
 // budget set to that maximum would nominally "cover" the family while
-// licensing `core_text.sfn` (759) to grow to 1,877 in silence — the exact
+// licensing `core_text.sfn` (759) to grow to 1,608 in silence — the exact
 // failure this file exists to prevent. Instead every oversized sibling is
 // pinned at its current length and may only ever SHRINK, while everything
-// else — including the `core_operands/` and `core_call_resolution/`
-// modules, plus any file added to this folder later — must come in under
-// 750.
+// else — including the `core_operands/`, `core_call_resolution/`, and
+// `core_call_emission/` modules, plus any file added to this folder later
+// — must come in under 750.
 //
 // Updating this table. Lowering a ceiling as a module shrinks is expected
 // and needs no ceremony. RAISING one is the thing this guard exists to
@@ -62,7 +62,6 @@ fn _count_newlines(source: string) -> int {
 // ceiling that may only ever be lowered. Returns 0 for a file that is not
 // grandfathered, which then has to satisfy the full budget.
 fn _grandfathered_ceiling(name: string) -> int {
-    if name == "core_call_emission.sfn" { return 1856; }
     if name == "core.sfn" { return 1600; }
     if name == "core_concurrency_lowering.sfn" { return 1608; }
     if name == "core_ops_lowering.sfn" { return 1581; }
@@ -134,4 +133,11 @@ test "native lowering: every module stays within its line budget" ![io] {
 test "native lowering: the flat core_operands module does not shadow the folder" ![io] {
     assert ! fs.exists(NATIVE_LOWERING_ROOT + "/core_operands.sfn");
     assert fs.exists(NATIVE_LOWERING_ROOT + "/core_operands/dispatch.sfn");
+}
+
+// Keep the call-emission decomposition reachable. As with core_operands,
+// a flat sibling would take precedence over the folder during resolution.
+test "native lowering: the flat core_call_emission module does not shadow the folder" ![io] {
+    assert ! fs.exists(NATIVE_LOWERING_ROOT + "/core_call_emission.sfn");
+    assert fs.exists(NATIVE_LOWERING_ROOT + "/core_call_emission/dispatch.sfn");
 }

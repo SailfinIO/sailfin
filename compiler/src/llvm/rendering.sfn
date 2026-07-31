@@ -279,7 +279,7 @@ fn render_runtime_helper_declarations(used_targets: string[], local_functions: N
             }
             // #908: the clock-monotonic clk_id sentinel never appears as
             // a real `call @sailfin_intrinsic_clock_monotonic_id(` — the
-            // lowering branch (`core_call_emission.sfn`) inlines a bare
+            // lowering branch (`core_call_emission/dispatch.sfn`) inlines a bare
             // `i32 1`/`i32 6` immediate instead, so there is no symbol to
             // declare. The source-text walker still picks the sentinel
             // target up from the call expression, so skip it here to
@@ -290,7 +290,7 @@ fn render_runtime_helper_declarations(used_targets: string[], local_functions: N
             // #1480: the `_SC_NPROCESSORS_ONLN` request-number sentinel
             // never appears as a real
             // `call @sailfin_intrinsic_sc_nprocessors_onln(` — the lowering
-            // branch (`core_call_emission.sfn`) inlines a bare `i32 84`/
+            // branch (`core_call_emission/dispatch.sfn`) inlines a bare `i32 84`/
             // `i32 58` immediate instead, so there is no symbol to declare.
             // The source-text walker still picks the sentinel target up from
             // the call expression, so skip it here to avoid a bogus
@@ -307,7 +307,7 @@ fn render_runtime_helper_declarations(used_targets: string[], local_functions: N
             }
             // #967: the executable-path sentinel never appears as a real
             // `call @sailfin_intrinsic_exe_path(` — the lowering branch
-            // (`core_call_emission.sfn`) emits the host's concrete primitive
+            // (`core_call_emission/dispatch.sfn`) emits the host's concrete primitive
             // (`readlink` / `_NSGetExecutablePath` / `GetModuleFileNameA`)
             // instead. The source-text walker still picks the sentinel target
             // up from the call expression, so skip it here to avoid a bogus
@@ -366,7 +366,7 @@ fn render_runtime_helper_declarations(used_targets: string[], local_functions: N
             }
             // M1.C / M2.4a: when `native_signature` is populated the
             // call-emission path (`coerce_and_emit_call` in
-            // `core_call_emission.sfn`) routes the call to that symbol
+            // `core_call_emission/dispatch.sfn`) routes the call to that symbol
             // instead of `descriptor.symbol`. The declare we emit here
             // has to follow suit so the freshly-emitted call lands on
             // a declared name the linker can resolve. The C body

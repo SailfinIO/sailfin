@@ -5,7 +5,7 @@
 // shape.
 //
 // `sailfin_intrinsic_fs_list_dir(path: i8*) -> i8*` is a registry sentinel
-// whose lowering branch (`core_call_emission.sfn`) emits a per-target
+// whose lowering branch (`core_call_emission/dispatch.sfn`) emits a per-target
 // enumeration *loop* — not a plain symbol swap — chosen at emit time from
 // `fs_platform_leg()` (`SAILFIN_TARGET_OS` override, else the host probe):
 //

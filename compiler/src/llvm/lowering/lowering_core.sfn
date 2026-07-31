@@ -696,7 +696,7 @@ fn compile_native_lines_to_llvm_file(native_lines: string[], module_name: string
 // from this module's own embedded `import` directives, so a sibling
 // that imports a value-returning fn from the walk-excluded entry could
 // not resolve the callee's return type and hit the `[fatal]`
-// unresolved-callee gate (`core_call_emission.sfn:362`). This variant
+// unresolved-callee gate (`core_call_emission/dispatch.sfn`). This variant
 // UNIONS the staged `imported_native_texts` with the
 // embedded-import-derived `collect_imported_module_context_for_module`
 // texts (the module's own imports AND the staged bodies are both
@@ -754,7 +754,7 @@ fn _lower_parsed_native_to_llvm_file(parse: ParseNativeResult, native_text: stri
         return false;
     }
     // Refuse to write IR when any lowering pass surfaced a `[fatal]`
-    // diagnostic. Issued by `core_call_emission.sfn` for calls whose
+    // diagnostic. Issued by `core_call_emission/dispatch.sfn` for calls whose
     // return type cannot be resolved (issue #306) and by
     // `lower_expression`'s `<closure_pair_fatal_mutable ...>` handler
     // for capturing lambdas with mutable captures (issue #687). A

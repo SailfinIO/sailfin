@@ -4,7 +4,7 @@
 // same epic-#1308-class host-aware fs sentinel shape.
 //
 // `sailfin_intrinsic_fs_read_link(path: i8*, buf: i8*, size: i64) -> i64`
-// is a registry sentinel whose lowering branch (`core_call_emission.sfn`)
+// is a registry sentinel whose lowering branch (`core_call_emission/dispatch.sfn`)
 // emits a per-target sequence chosen at emit time from `fs_platform_leg()`
 // (`SAILFIN_TARGET_OS` override, else the host probe):
 //

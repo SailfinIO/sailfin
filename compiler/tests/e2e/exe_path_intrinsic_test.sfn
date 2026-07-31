@@ -6,7 +6,7 @@
 // epic-#763-class host-aware sentinel shape).
 //
 // `sailfin_intrinsic_exe_path(buf: i8*, size: i64) -> i64` is a registry
-// sentinel whose lowering branch (`core_call_emission.sfn`) emits a
+// sentinel whose lowering branch (`core_call_emission/dispatch.sfn`) emits a
 // per-target *sequence* — not a plain symbol swap — chosen at emit time
 // from `exe_path_locator` (`SAILFIN_TARGET_OS` override, else `uname -s`):
 //

@@ -124,7 +124,7 @@ fn _lower_atomic_load(arguments: string[], bindings: ParameterBinding[], locals:
         // entrypoints (`compile_native_text_to_llvm_file`, `write_llvm_ir`)
         // refuse to write IR — matching the issue #306 contract for
         // unresolvable callees. `print.err` mirrors the diagnostic to
-        // stderr the same way `core_call_emission.sfn` does, so the
+        // stderr the same way `core_call_emission/dispatch.sfn` does, so the
         // user sees the failure rather than a silently-empty IR file.
         let diag1 = "llvm lowering [fatal] [E0806]: atomic_load expects exactly 1 argument (`*int`), got "
             + number_to_string(arguments.length);

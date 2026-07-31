@@ -100,9 +100,9 @@ test "abi_version: `fs.exists` helper carries native_signature sfn_fs_exists" {
 }
 
 // =============================================================================
-// Field-flip predicate — mirrors core_call_emission.sfn's symbol pick
+// Field-flip predicate — mirrors core_call_emission/dispatch.sfn's symbol pick
 // =============================================================================
-// `core_call_emission.sfn` decides which symbol to emit via the
+// `core_call_emission/dispatch.sfn` decides which symbol to emit via the
 // equivalent of `helper.native_signature != null
 // && helper.native_signature.length > 0`. Replicating that predicate
 // shape here (rather than going through the full lowering stack the
@@ -135,7 +135,7 @@ test "abi_version: predicate picks native_signature when set" {
         c_abi_return_type: null
     };
     // Direct field reads first — these are how
-    // `core_call_emission.sfn` consumes the descriptor (it never
+    // `core_call_emission/dispatch.sfn` consumes the descriptor (it never
     // copies the field through a local). Routing through a local
     // would mask a bug where `string?` field reads succeed but
     // local-variable null comparisons under-narrow.
