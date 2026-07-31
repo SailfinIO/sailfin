@@ -7,8 +7,18 @@
 import { char_code } from "./string_utils";
 import { Token, TokenKind, eof_token } from "./token";
 
+// Deliberately holds no `source` field. String-typed struct fields lower to a
+// bare `i8*` with no carried length (`map_struct_field_annotation`,
+// llvm/type_mapping.sfn), so passing one into a scalar `string` parameter emits
+// an `i8* -> {i8*, i64}` widening whose length-recovery leg is a `strnlen` over
+// the whole buffer from offset 0. `byte_at` runs once per input character, so
+// that made lexing Theta(n^2) in source size (SFN-631; measurement in
+// docs/proposals/design-notes/sfn-628-strnlen-recovery-tax.md).
+//
+// `lex`'s own `source: string` parameter is a scalar and carries its length, so
+// every helper call below threads that parameter directly and the widening
+// never happens. Keep it that way: do not reintroduce a `source` field here.
 struct LexerState {
-    source: string;
     source_len: int;
     index: int;
     line: int;
@@ -18,7 +28,6 @@ struct LexerState {
 fn lex(source: string) -> Token[] ![io] {
     let length = source.length;
     let state: LexerState = LexerState {
-        source: source,
         source_len: length as int,
         index: 0,
         line: 1,
@@ -37,7 +46,7 @@ fn lex(source: string) -> Token[] ![io] {
         }
         if state.index >= state.source_len { break; }
 
-        let ch = byte_at(state.source, state.index);
+        let ch = byte_at(source, state.index);
 
         if is_whitespace(ch) {
             let start_index = state.index;
@@ -45,8 +54,8 @@ fn lex(source: string) -> Token[] ![io] {
             let start_column = state.column;
             loop {
                 if state.index >= state.source_len { break; }
-                if !is_whitespace(byte_at(state.source, state.index)) { break; }
-                if byte_at(state.source, state.index) == "\n" {
+                if !is_whitespace(byte_at(source, state.index)) { break; }
+                if byte_at(source, state.index) == "\n" {
                     state.index += 1;
                     state.line += 1;
                     state.column = 1;
@@ -55,7 +64,7 @@ fn lex(source: string) -> Token[] ![io] {
                     state.column += 1;
                 }
             }
-            let lexeme = slice(state.source, start_index, state.index);
+            let lexeme = slice(source, start_index, state.index);
             tokens = append(tokens, Token {
                 kind: TokenKind.Whitespace(), lexeme: lexeme, line: start_line, column: start_column
             });
@@ -65,7 +74,7 @@ fn lex(source: string) -> Token[] ![io] {
         if ch == "/" {
             let has_next = state.index + 1 < state.source_len;
             if has_next {
-                let next = byte_at(state.source, state.index + 1);
+                let next = byte_at(source, state.index + 1);
                 if next == "/" {
                     let start_index = state.index;
                     let start_line = state.line;
@@ -78,7 +87,7 @@ fn lex(source: string) -> Token[] ![io] {
                     let mut scan_index: int = state.index;
                     loop {
                         if scan_index >= state.source_len { break; }
-                        let scan_character = byte_at(state.source, scan_index);
+                        let scan_character = byte_at(source, scan_index);
                         let mut _if35: boolean = false;
                         if scan_character == "\n" { _if35 = true; }
                         if scan_character == "\r" { _if35 = true; }
@@ -89,7 +98,7 @@ fn lex(source: string) -> Token[] ![io] {
                         scan_index += 1;
                     }
 
-                    let lexeme = slice(state.source, start_index, comment_end);
+                    let lexeme = slice(source, start_index, comment_end);
                     let consumed_columns: int = comment_end - state.index;
                     state.index = comment_end;
                     state.column += consumed_columns;
@@ -109,16 +118,16 @@ fn lex(source: string) -> Token[] ![io] {
                     loop {
                         if state.index >= state.source_len { break; }
                         let _next_idx = state.index + 1;
-                        if byte_at(state.source, state.index) == "*" {
+                        if byte_at(source, state.index) == "*" {
                             if _next_idx < state.source_len {
-                                if byte_at(state.source, _next_idx) == "/" {
+                                if byte_at(source, _next_idx) == "/" {
                                     state.index += 2;
                                     state.column += 2;
                                     break;
                                 }
                             }
                         }
-                        if byte_at(state.source, state.index) == "\n" {
+                        if byte_at(source, state.index) == "\n" {
                             state.index += 1;
                             state.line += 1;
                             state.column = 1;
@@ -128,7 +137,7 @@ fn lex(source: string) -> Token[] ![io] {
                         }
                     }
 
-                    let lexeme = slice(state.source, start_index, state.index);
+                    let lexeme = slice(source, start_index, state.index);
                     tokens = append(tokens, Token {
                         kind: TokenKind.Comment(), lexeme: lexeme, line: start_line, column: start_column
                     });
@@ -152,7 +161,7 @@ fn lex(source: string) -> Token[] ![io] {
 
             loop {
                 if state.index >= state.source_len { break; }
-                let current = byte_at(state.source, state.index);
+                let current = byte_at(source, state.index);
                 if !escaped {
                     if is_double_quote(current) {
                         state.index += 1;
@@ -180,7 +189,7 @@ fn lex(source: string) -> Token[] ![io] {
                 }
             }
 
-            let lexeme = slice(state.source, start_index, state.index);
+            let lexeme = slice(source, start_index, state.index);
             tokens = append(tokens, Token {
                 kind: TokenKind.StringLiteral(), lexeme: lexeme, line: start_line, column: start_column
             });
@@ -197,7 +206,7 @@ fn lex(source: string) -> Token[] ![io] {
 
             // Integer run: digits with optional `_` separators between digits.
             loop {
-                if !_number_run_byte(state.source, state.source_len, state.index) {
+                if !_number_run_byte(source, state.source_len, state.index) {
                     break;
                 }
                 state.index += 1;
@@ -206,10 +215,10 @@ fn lex(source: string) -> Token[] ![io] {
 
             // Optional fraction: `.` immediately followed by a digit run.
             if state.index < state.source_len {
-                if byte_at(state.source, state.index) == "." {
+                if byte_at(source, state.index) == "." {
                     let mut _let43: boolean = false;
                     if state.index + 1 < state.source_len {
-                        if is_digit(byte_at(state.source, state.index + 1)) {
+                        if is_digit(byte_at(source, state.index + 1)) {
                             _let43 = true;
                         }
                     }
@@ -218,7 +227,7 @@ fn lex(source: string) -> Token[] ![io] {
                         state.index += 1;
                         state.column += 1;
                         loop {
-                            if !_number_run_byte(state.source, state.source_len, state.index) {
+                            if !_number_run_byte(source, state.source_len, state.index) {
                                 break;
                             }
                             state.index += 1;
@@ -232,14 +241,14 @@ fn lex(source: string) -> Token[] ![io] {
             // a digit run. Consumed only when a digit actually follows, so `1e`
             // (where `e` begins an identifier) keeps the literal as `1`.
             if state.index < state.source_len {
-                let exp_marker = byte_at(state.source, state.index);
+                let exp_marker = byte_at(source, state.index);
                 let mut _is_exp: boolean = false;
                 if exp_marker == "e" { _is_exp = true; }
                 if exp_marker == "E" { _is_exp = true; }
                 if _is_exp {
                     let mut probe = state.index + 1;
                     if probe < state.source_len {
-                        let sign = byte_at(state.source, probe);
+                        let sign = byte_at(source, probe);
                         let mut _is_sign: boolean = false;
                         if sign == "+" { _is_sign = true; }
                         if sign == "-" { _is_sign = true; }
@@ -247,14 +256,14 @@ fn lex(source: string) -> Token[] ![io] {
                     }
                     let mut _has_exp_digit: boolean = false;
                     if probe < state.source_len {
-                        if is_digit(byte_at(state.source, probe)) {
+                        if is_digit(byte_at(source, probe)) {
                             _has_exp_digit = true;
                         }
                     }
                     if _has_exp_digit {
                         state.index += 1;
                         state.column += 1;
-                        let sign2 = byte_at(state.source, state.index);
+                        let sign2 = byte_at(source, state.index);
                         let mut _is_sign2: boolean = false;
                         if sign2 == "+" { _is_sign2 = true; }
                         if sign2 == "-" { _is_sign2 = true; }
@@ -263,7 +272,7 @@ fn lex(source: string) -> Token[] ![io] {
                             state.column += 1;
                         }
                         loop {
-                            if !_number_run_byte(state.source, state.source_len, state.index) {
+                            if !_number_run_byte(source, state.source_len, state.index) {
                                 break;
                             }
                             state.index += 1;
@@ -273,7 +282,7 @@ fn lex(source: string) -> Token[] ![io] {
                 }
             }
 
-            let lexeme = slice(state.source, start_index, state.index);
+            let lexeme = slice(source, start_index, state.index);
             tokens = append(tokens, Token {
                 kind: TokenKind.NumberLiteral(), lexeme: lexeme, line: start_line, column: start_column
             });
@@ -288,13 +297,11 @@ fn lex(source: string) -> Token[] ![io] {
             state.column += 1;
             loop {
                 if state.index >= state.source_len { break; }
-                if !is_identifier_part(byte_at(state.source, state.index)) {
-                    break;
-                }
+                if !is_identifier_part(byte_at(source, state.index)) { break; }
                 state.index += 1;
                 state.column += 1;
             }
-            let value = slice(state.source, start, state.index);
+            let value = slice(source, start, state.index);
             let mut _if36: boolean = false;
             if value == "true" { _if36 = true; }
             if value == "false" { _if36 = true; }
@@ -314,9 +321,9 @@ fn lex(source: string) -> Token[] ![io] {
         let start_column = state.column;
         let _lex_next = state.index + 1;
         let _lex_next2 = state.index + 2;
-        let mut lexeme = slice(state.source, state.index, _lex_next);
+        let mut lexeme = slice(source, state.index, _lex_next);
         if _lex_next < state.source_len {
-            let pair = slice(state.source, state.index, _lex_next2);
+            let pair = slice(source, state.index, _lex_next2);
             // Fast-path: keep <= / >= stable.
             let mut _if37: boolean = false;
             if pair == "<=" { _if37 = true; }
