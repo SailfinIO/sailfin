@@ -8,7 +8,7 @@
 //   - token_utils.sfn:  Token manipulation (skip_trivia, collect_until, etc.)
 //   - expressions/:     Expression parsing (Pratt parser, literals, lambdas)
 //   - statements.sfn:   Block statement parsing (control flow, return, match)
-//   - declarations.sfn: Top-level declarations (fn, struct, enum, import, etc.)
+//   - declarations/:    Top-level declarations (fn, struct, enum, import, etc.)
 import {
     Decorator,
     ExportSpecifier,

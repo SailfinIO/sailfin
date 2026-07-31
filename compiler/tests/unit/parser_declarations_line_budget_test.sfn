@@ -1,0 +1,51 @@
+// Line-budget sentinel for `compiler/src/parser/declarations/`.
+//
+// The former flat `declarations.sfn` reached 2,122 lines. Besides making the
+// parser difficult to navigate, a module that large raises the per-worker
+// compiler working set and constrains safe build parallelism. The split keeps
+// each declaration-parsing concern below 750 lines; this guard prevents the
+// flat module or any listed leaf from quietly regrowing.
+import { expect_eq_bool } from "sfn/test";
+
+import { find_char_local } from "../../src/string_utils";
+
+let PARSER_DECLARATION_MODULE_LINE_BUDGET: int = 750;
+let PARSER_DECLARATION_ROOT: string = "compiler/src/parser/declarations";
+
+fn _count_newlines(source: string) -> int {
+    let mut count: int = 0;
+    let mut pos: int = 0;
+    loop {
+        let idx = find_char_local(source, "\n", pos);
+        if idx < 0 { break; }
+        count += 1;
+        pos = idx + 1;
+    }
+    return count;
+}
+
+fn _module_lines(name: string) -> int ![io] {
+    let source = fs.readFile(PARSER_DECLARATION_ROOT + "/" + name + ".sfn");
+    assert source.length > 0;
+    return _count_newlines(source);
+}
+
+test "parser declarations: each submodule stays under 750 lines" ![io] {
+    let modules: string[] = ["collections", "enums", "functions", "imports_exports", "interfaces", "mod", "recovery", "structs", "syntax", "tests", "variables"];
+    let mut i: int = 0;
+    loop {
+        if i >= modules.length { break; }
+        let lines = _module_lines(modules[i]);
+        assert expect_eq_bool(lines > 0, true).ok;
+        assert expect_eq_bool(lines < PARSER_DECLARATION_MODULE_LINE_BUDGET, true).ok;
+        i += 1;
+    }
+}
+
+// Module resolution probes `declarations.sfn` before
+// `declarations/mod.sfn`. Reintroducing the flat file would shadow the folder
+// and silently undo the decomposition while still allowing builds to pass.
+test "parser declarations: the flat module does not shadow the folder" ![io] {
+    assert expect_eq_bool(fs.exists("compiler/src/parser/declarations.sfn"), false).ok;
+    assert expect_eq_bool(fs.exists(PARSER_DECLARATION_ROOT + "/mod.sfn"), true).ok;
+}

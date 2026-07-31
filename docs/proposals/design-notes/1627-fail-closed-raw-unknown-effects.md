@@ -406,10 +406,10 @@ member/index assignments before vs after) + `effect_assignment_test.sfn`
 > reassigned to enum-field conflicts, #1746) in issue **#1755**. The nested
 > `Unknown` fail-closed diagnostic is live.
 
-`Statement.Unknown` is produced by `parse_unknown` (declarations.sfn ~:1793,
-call sites :1320/:1525/:1679/:1691/:1697/:1728) and `parse_unknown_statement`
-(statements.sfn ~:1511, called from `parse_block` :149-153). **No diagnostic is
-recorded at any site.** Zero in-source `Unknown` nodes exist (the tree
+`Statement.Unknown` is produced by `parse_unknown`
+(`parser/declarations/recovery.sfn`, called by declaration fallbacks) and
+`parse_unknown_statement` (`parser/statements.sfn`, called from `parse_block`).
+**No diagnostic is recorded at any site.** Zero in-source `Unknown` nodes exist (the tree
 self-hosts).
 
 **Approach (matches #1180-b):** record a parse diagnostic **at the production
@@ -834,7 +834,7 @@ Self-host gate: `make compile` + `make check`.
   A nested `Statement.Unknown` (unparseable statement inside a block) is silently
   dropped — no diagnostic, no effects; top-level gets `E0500`, nested gets
   nothing. Promote `parse_unknown`/`parse_unknown_statement` call sites
-  (`declarations.sfn:1793`, `statements.sfn:1511`) to record a parse diagnostic
+  (`parser/declarations/recovery.sfn`, `statements.sfn`) to record a parse diagnostic
   with a precise span (analog of `ParseError`, #1531), gated to avoid
   double-firing with `E0500`/`E0411`/removed-keyword. Cleaner than threading a
   top-level flag through the shared `check_statement` walker. Cite SFEP-0008.

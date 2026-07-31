@@ -279,7 +279,7 @@ capability surface changes.
 
 ## 5. Self-hosting impact
 
-**Passes changed:** parser only (`compiler/src/parser/declarations.sfn`,
+**Passes changed:** parser only (`compiler/src/parser/declarations/`,
 `compiler/src/parser/mod.sfn`). AST (`ast.sfn`) is **unchanged** under the
 recommended synthesized-pair design. Typecheck, effect checker, native emitter,
 and LLVM lowering are unchanged — they already consume `Statement.ExportDeclaration`
@@ -334,7 +334,7 @@ scope here.
 ## 7. Stage1 readiness mapping
 
 - [ ] **Parses** — inline-export dispatch + per-declaration parsing in
-  `parser/declarations.sfn` / `parser/mod.sfn`.
+  `parser/declarations/` / `parser/mod.sfn`.
 - [ ] **Type-checks / effect-checks** — no change required (declaration + synthesized
   `ExportDeclaration` are already handled); add tests proving effects survive.
 - [ ] **Emits valid `.sfn-asm`** — no change; the synthesized `ExportDeclaration`
@@ -394,7 +394,7 @@ after the change. Thread `PATH` + `SAILFIN_TEST_SCRATCH` into the nested build p
   struct/`int[]` API was flattened by the workaround).
 - Spec `site/src/content/docs/docs/reference/spec/02-modules.md` — current
   block-only export documentation (to be extended).
-- `compiler/src/parser/declarations.sfn:565-605` (`parse_export`),
+- `compiler/src/parser/declarations/imports_exports.sfn` (`parse_export`),
   `compiler/src/parser/mod.sfn:110-112` (dispatch),
   `compiler/src/llvm/rendering_helpers.sfn:393-451` (export manifest →
   internalization / visibility model evidence),
