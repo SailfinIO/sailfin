@@ -9,7 +9,7 @@
 // HKDF-Expand-Label derivations. RFC 8448 has no SHA-384 trace, so the SHA-384
 // path (TLS_AES_256_GCM_SHA384) is checked against reference vectors computed
 // with Python's `hmac`/`hashlib` per RFC 8446 §7.1 (a wrong byte anywhere in
-// the vendored SHA-384/HMAC/HKDF stack fails these). hkdf_expand_label's
+// the shared SHA-384 core or the local HMAC/HKDF layer fails these). hkdf_expand_label's
 // HkdfLabel byte encoding is validated implicitly: reproducing RFC 8448's
 // `expanded` outputs is only possible with the exact `"tls13 " ‖ label`
 // structure.
