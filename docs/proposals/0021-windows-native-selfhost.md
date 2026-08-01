@@ -437,12 +437,34 @@ Linux+macOS before merge.
      family, `@sfn_str_concat`, `@sfn_str_append`, `@sfn_getenv`,
      `@sfn_home_dir`, `@sfn_str_codepoint_lv`, `@sfn_str_grapheme_at_lv`,
      `@sfn_array_to_string`, and more.
-   - `{i8*, i8*}` — the closure pair: `@sfn_array_sfn_map`,
-     `@sfn_array_sfn_filter`, `@sfn_array_sfn_reduce`.
+   - `{i8*, i8*}` — the closure pair (`@sfn_array_sfn_map`,
+     `@sfn_array_sfn_filter`, `@sfn_array_sfn_reduce`) and, on the same
+     spelling, every **interface** value: interfaces deliberately stay by value
+     (`llvm/type_mapping.sfn:756-766`), a far wider surface than the three array
+     helpers.
 
-   These are safe not because they are absent but because **every one is
-   Sailfin-to-Sailfin**: one backend lowers caller and callee at one triple, so
-   they agree by construction whatever that lowering is. The property that makes
+   One further by-value shape is **not** 16 bytes and does not fit the
+   reasoning above: a **union** lowers to a tagged struct `{ i32, <A>, <B>, … }`
+   of arbitrary size (`llvm/type_mapping.sfn:817-830`). It is unboxed, so it is
+   the one construct where a large Sailfin-to-Sailfin by-value aggregate can
+   cross a boundary — exactly the case the AArch64 legalizer note below warns
+   about. Nothing observed today is wrong, but if a Windows-only or
+   AArch64-only aggregate corruption ever appears, unions are the first place
+   to look, not user structs.
+
+   These are safe not because they are absent, and **not** because they are
+   Sailfin-to-Sailfin. That reasoning is tempting and this SFEP must not record
+   it, because our own boxing rationale is its counterexample: per
+   `llvm/type_mapping.sfn:726-731`, LLVM's AArch64 aggregate-return legalizer
+   runs per translation unit, so cross-module calls *within pure Sailfin, one
+   backend, one triple* non-deterministically truncated returned aggregates.
+   Same backend does not imply agreement. Boxing exists precisely because it
+   did not.
+
+   They are safe because of their **shape**: each is two eightbytes of
+   unambiguous register class (`{i8*, i64}`, `{i8*, i8*}`), which every
+   in-scope ABI classifies identically and no legalizer has latitude over.
+   Size and class, not provenance, are what make them safe. The property that makes
    this hold is that no aggregate crosses a *C* boundary, which was verified
    directly — all 504 `extern fn` declarations in `runtime/**` and
    `compiler/src/**` take and return only scalars and pointers, struct-typed
@@ -454,7 +476,9 @@ Linux+macOS before merge.
    to vigilance: `_is_c_abi_type_inner`
    (`compiler/src/typecheck_types/extern_abi.sfn:49-95`) accepts only primitives, raw pointers and function
    pointers, so a bare struct name or an aggregate spelling on an `extern fn`
-   signature is rejected with **E0805** by `check_extern_signature`
+   signature is rejected with an **E0801-E0805** diagnostic (the code varies by
+   spelling: E0801 for `string`, E0802 for `T[]`, E0805 for a bare struct name)
+   by `check_extern_signature`
    (`compiler/src/typecheck_types/declaration_and_statement_checks.sfn:198-242`).
    There is no path today for an `extern fn` to declare `{i8*, i64}` at all.
 
@@ -462,7 +486,7 @@ Linux+macOS before merge.
    see: hand-written LLVM IR. `runtime/ir/windows_stubs.ll` is the only such
    artifact in the Windows link, and it is scalar/pointer-only today — but
    nothing enforces that, so it is the one place a future by-value aggregate
-   could enter without an E0805. That, not the emitter, is where to look first
+   could enter without any such diagnostic. That, not the emitter, is where to look first
    if a Windows-only struct corruption ever appears.
 
    **A correction to R3's own premise.** This row's framing attributes the risk
@@ -488,8 +512,19 @@ Linux+macOS before merge.
    every concat in the fixture, and `{i8*, i8*}` by a `map`/`filter`/`reduce`
    probe. Regression coverage: `compiler/tests/e2e/struct_abi_test.sfn`, whose
    structural test asserts the boxed-pointer signatures and the absence of
-   `byval`/`sret`, so reintroducing a by-value user aggregate fails there rather
-   than silently on a Windows runner.
+   the by-value parameter and return spellings for the user struct, so
+   reintroducing a classifiable by-value user aggregate fails there rather than
+   silently on a Windows runner.
+
+   That test deliberately does **not** assert the absence of `byval`/`sret`.
+   Those are clang *frontend* attributes that this emitter has never emitted, so
+   such an assertion is unconditionally true and would stay green through the
+   exact regression it appears to guard: a de-boxed struct parameter emits as a
+   bare `%P %p`, carrying no attribute at all. Nor is "no by-value aggregate
+   anywhere in the module" an invariant worth asserting — adding a single
+   `string` to the fixture introduces eight legitimate `{i8*, i64}` signatures.
+   The guard has to name the aggregate spelling for the specific type, and it
+   does.
 
 **Honorable mention (downgraded by §2.1):** the brief's headline risk — C
 runtime MSVC incompatibility — is **largely retired**: there is no C runtime.

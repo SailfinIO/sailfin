@@ -31,9 +31,14 @@
 //
 // The behavioural tests are deliberately plain `assert`s over ordinary
 // calls rather than an emit-and-grep: they must execute as compiled machine
-// code to be worth anything. On the native Windows leg (SFN-55) this file is
-// compiled with the MSVC ABI and run, which is what actually closes the gate
-// — the same source is the Linux control on every other runner.
+// code to be worth anything. Today every runner executing them is POSIX —
+// CI's only Windows job is `smoke-windows`, a cross-compiled smoke check
+// that runs no e2e suite — so on its own this file is a Linux/macOS
+// control. It becomes the actual R3 gate once a native Windows test leg
+// exists (SFN-55, blocked on SFN-690), at which point the same source
+// compiles under the MSVC ABI and runs unchanged. The native result is not
+// assumed in the meantime: it was obtained by hand and recorded in
+// SFEP-0021 Risk R3.
 import { find } from "sfn/strings";
 import { expect_eq_bool, expect_eq_int } from "sfn/test";
 
@@ -232,6 +237,13 @@ fn _child_env() -> string[] ![io] {
 }
 
 fn _emit_fixture_ir() -> string ![io] {
+    // Under the pool each file gets its own `SAILFIN_TEST_SCRATCH`, so the
+    // fixed `sfn-struct-abi` subdirectory is already per-file unique. The
+    // `/tmp` fallback is reachable only outside `sfn test` (which always
+    // sets the key), where it degrades to a fixed world-writable path.
+    // The fixture is kept import-free on purpose: `emit` without
+    // `--module-name`/`--import-context` runs capsule-import staging, which
+    // can spawn a child under this deliberately empty-PATH environment.
     let mut dir = env.get("SAILFIN_TEST_SCRATCH");
     if dir.length == 0 { dir = "/tmp"; }
     dir = dir + "/sfn-struct-abi";
@@ -255,22 +267,41 @@ test "struct-abi: the emitter boxes user structs instead of classifying them" ![
     let ir = _emit_fixture_ir();
     assert ir != "EMIT_FAILED";
 
-    // `emit` suffixes the module symbol with a path-derived
-    // `__<module>` tag (`@consume__tmp__sabi__fixture`), so the name is
-    // matched as a prefix and the signature shape is asserted separately
-    // rather than as one literal that would break on any scratch path.
+    // `emit` suffixes the module symbol with a path-derived `__<module>`
+    // tag built from the scratch directory, so the symbol is matched as a
+    // prefix and the parameter list asserted separately — one literal
+    // spelling both would break on any change of scratch path. The two are
+    // independent searches over the whole module; in a three-function
+    // fixture nothing else could supply either match.
     //
     // A struct parameter is a pointer, and its scalar neighbours keep their
     // own registers on either side of it.
     assert find(ir, "define i64 @consume", 0) >= 0;
     assert find(ir, "(i64 %head, %P* %p, i64 %tail)", 0) >= 0;
-    // A struct return is a pointer, never an aggregate or an sret out-param.
+    // A struct return is a pointer, never a first-class aggregate.
     assert find(ir, "define %P* @produce", 0) >= 0;
 
-    // No aggregate is passed or returned by value anywhere in the module, so
-    // the Microsoft x64 size rules have nothing to classify. `byval`/`sret`
-    // are how clang spells the C ABI's aggregate lowering; their absence is
-    // the invariant, not an accident of this fixture.
-    assert find(ir, "byval", 0) < 0;
-    assert find(ir, "sret", 0) < 0;
+    // The negative half, spelled as the by-value forms themselves.
+    //
+    // Asserting the absence of `byval`/`sret` would be worthless here: those
+    // are clang FRONTEND attributes, and this emitter has never emitted
+    // either (they appear nowhere in `compiler/src` outside two comments).
+    // A de-boxed struct parameter would carry no attribute at all, so an
+    // absence-of-attribute assertion stays green through exactly the
+    // regression it is meant to catch.
+    //
+    // The spelling matched below is not hypothetical. Interface values are
+    // the one user-facing type that legitimately stays by value
+    // (`llvm/type_mapping.sfn`), and an interface parameter emits as
+    // `define i64 @f(i64 %head, %trait.Shape %s, i64 %tail)` — bare `%T
+    // %name`, no `*`, no attribute. That is the exact form `%P` would take
+    // if boxing were dropped, which is what these two match against.
+    //
+    // Note this is deliberately scoped to `%P`, the user struct. A
+    // module-wide "no by-value aggregate" assertion would be a statement
+    // about the fixture, not an invariant: adding one `string` to it
+    // introduces eight by-value `{i8*, i64}` signatures, which are expected
+    // and correct (see `abi_value_return_test.sfn`).
+    assert find(ir, "%P %p", 0) < 0;
+    assert find(ir, "define %P @produce", 0) < 0;
 }
