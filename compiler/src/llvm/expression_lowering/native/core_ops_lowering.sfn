@@ -578,17 +578,14 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
             let concat_result = emit_runtime_call("string.concat", concat_operands, empty_runtime_call_overrides(), current_temp, current_lines);
             diagnostics = extend_string_array(diagnostics, concat_result.diagnostics);
             current_lines = concat_result.lines;
-            let agg_name = format_temp_name(current_temp);
-            current_temp += 1;
-            let data_name = format_temp_name(current_temp);
-            current_temp += 1;
-            current_lines.push("  " + data_name + " = extractvalue {i8*, i64} "
-                + agg_name
-                + ", 0");
-            let operand = LLVMOperand { llvm_type: "i8*", value: data_name };
+            // Preserve the aggregate result. Extracting only its data pointer
+            // loses the fact that this is a string: a following numeric `+`
+            // then sees a raw `i8*`, which must remain excluded from numeric
+            // concat so pointer arithmetic stays safe (SFN-689).
+            let operand = concat_result.operand;
             return ExpressionResult {
                 lines: current_lines,
-                temp_index: current_temp,
+                temp_index: concat_result.temp_index,
                 operand: operand,
                 diagnostics: diagnostics,
                 string_constants: string_constants
@@ -818,16 +815,12 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
             let concat_result = emit_runtime_call("string.concat", concat_operands, empty_runtime_call_overrides(), current_temp, current_lines);
             diagnostics = extend_string_array(diagnostics, concat_result.diagnostics);
             current_lines = concat_result.lines;
-            let agg_name = format_temp_name(current_temp);
-            let data_name = format_temp_name(current_temp + 1);
-            let extract_line = "  " + data_name + " = extractvalue {i8*, i64} "
-                + agg_name
-                + ", 0";
-            current_lines.push(extract_line);
-            let operand = LLVMOperand { llvm_type: "i8*", value: data_name };
+            // Keep concat results string-shaped for a later `+` in a
+            // left-associative chain; see the primary concat path above.
+            let operand = concat_result.operand;
             return ExpressionResult {
                 lines: current_lines,
-                temp_index: current_temp + 2,
+                temp_index: concat_result.temp_index,
                 operand: operand,
                 diagnostics: diagnostics,
                 string_constants: string_constants
