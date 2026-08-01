@@ -496,9 +496,10 @@ Linux+macOS before merge.
    does emit genuine first-class aggregate `alloca %T` / `store %T` / `load %T`
    for a struct channel element — but those are *intra-function* operations, and
    LLVM applies calling-convention legalization only to `call`/`ret` signatures.
-   The actual runtime crossing is `sfn_channel_send(ch: *u8, elem: *u8)` /
-   `sfn_channel_recv(ch: *u8) -> *u8`, with the aggregate bitcast to `i8*` and
-   copied bytewise. So channels carry no MSVC calling-convention exposure
+   The actual runtime crossing is `sfn_channel_send(ch: *u8, elem: *u8) -> i64`
+   / `sfn_channel_recv(ch: *u8) -> *u8`
+   (`runtime/sfn/concurrency/channel.sfn:179,225`), with the aggregate bitcast
+   to `i8*` and copied bytewise. So channels carry no MSVC calling-convention exposure
    whatsoever, and R3's real (small) surface was always the string/closure
    aggregates named above.
 
