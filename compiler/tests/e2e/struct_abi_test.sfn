@@ -1,0 +1,276 @@
+// Regression coverage for the R3 struct-by-value ABI gate (SFN-650,
+// SFEP-0021 §4.1 row "Name mangling / calling conv").
+//
+// The risk R3 names: the Microsoft x64 calling convention passes an
+// aggregate in a register ONLY at size 1/2/4/8, routing anything else
+// through a hidden pointer to a caller-allocated copy, and returns
+// aggregates over 8 bytes via a hidden first parameter that shifts every
+// later argument register. System V AMD64 instead classifies field-by-
+// field and can carry a 16-byte struct in two registers. A lowering that
+// baked System V assumptions would therefore produce silently wrong field
+// values on Windows — no link error, no crash, and every static check
+// still green.
+//
+// Why that failure is unreachable here, which is what the structural test
+// below pins: the emitter does not classify aggregates at all. Every user
+// struct crosses a function boundary as a POINTER (the boxed-struct ABI in
+// `llvm/type_mapping.sfn`, adopted to dodge an AArch64 aggregate-return
+// legalizer miscompile — see `abi_value_return_test.sfn`). A pointer is one
+// INTEGER-class eightbyte under both ABIs, so the size-dependent rule has
+// nothing to act on. R3 is discharged by construction, not by luck, and the
+// structural test fails the moment someone reintroduces a by-value
+// aggregate whose classification would diverge.
+//
+// A note on "by value", which this file's subject matter forces it to use:
+// throughout, the phrase describes the ABI TRANSPORT question R3 asks — how
+// the bits cross a call boundary — and never language-level value semantics.
+// Sailfin structs in fact alias (`let b = a` shares one heap object, and a
+// callee can mutate its caller's struct); that is SFN-692's subject, is
+// orthogonal to this file, and is called out here only so the two are not
+// conflated by a later reader.
+//
+// The behavioural tests are deliberately plain `assert`s over ordinary
+// calls rather than an emit-and-grep: they must execute as compiled machine
+// code to be worth anything. On the native Windows leg (SFN-55) this file is
+// compiled with the MSVC ABI and run, which is what actually closes the gate
+// — the same source is the Linux control on every other runner.
+import { find } from "sfn/strings";
+import { expect_eq_bool, expect_eq_int } from "sfn/test";
+
+// Sizes chosen to straddle the Microsoft x64 register/memory boundary:
+// 4 and 8 bytes are register-eligible there, 16 and 24 are not. Under
+// System V the 16-byte case is the one that rides in two registers, so it
+// is where a System V assumption would diverge most visibly.
+struct S4 {
+    a: i32;
+}
+
+struct S8 {
+    a: i32;
+    b: i32;
+}
+
+struct S16 {
+    a: i64;
+    b: i64;
+}
+
+struct S24 {
+    a: i64;
+    b: i64;
+    c: i64;
+}
+
+// All-SSE and mixed INTEGER/SSE 16-byte shapes: System V classifies these
+// two differently from each other and from S16, so they cover the
+// float-register half of the classification rules.
+struct SF {
+    x: f64;
+    y: f64;
+}
+
+struct SM {
+    a: i64;
+    x: f64;
+}
+
+struct SN {
+    inner: S16;
+    tag: i64;
+}
+
+fn _take4(s: S4) -> i64 { return s.a as i64; }
+
+fn _take8(s: S8) -> i64 { return (s.a as i64) * 1000 + (s.b as i64); }
+
+fn _take16(s: S16) -> i64 { return s.a * 1000 + s.b; }
+
+fn _take24(s: S24) -> i64 { return s.a * 1000000 + s.b * 1000 + s.c; }
+
+fn _takef(s: SF) -> boolean { return s.x == 1.5 && s.y == 2.25; }
+
+fn _takem(s: SM) -> boolean { return s.a == 77 && s.x == 3.5; }
+
+fn _taken(s: SN) -> i64 {
+    return s.inner.a * 1000000 + s.inner.b * 1000 + s.tag;
+}
+
+fn _make16() -> S16 {
+    return S16 { a: 111, b: 222 };
+}
+
+fn _make24() -> S24 {
+    return S24 { a: 1, b: 2, c: 3 };
+}
+
+fn _makef() -> SF {
+    return SF { x: 1.5, y: 2.25 };
+}
+
+fn _maken() -> SN {
+    return SN {
+        inner: S16 { a: 5, b: 6 },
+        tag: 7
+    };
+}
+
+// A struct argument sandwiched between scalars. Under Microsoft x64 an
+// oversized aggregate is replaced by a hidden pointer, so a lowering that
+// mis-modelled the substitution would shift `tail` into the wrong register
+// and corrupt it while leaving `head` intact.
+fn _sandwich(head: i64, s: S16, tail: i64) -> i64 {
+    return head * 1000000 + s.a * 10000 + s.b * 100 + tail;
+}
+
+fn _bump16(s: S16) -> S16 {
+    return S16 { a: s.a + 1, b: s.b + 1 };
+}
+
+test "struct-abi: struct arguments arrive intact at every size class" ![pure] {
+    assert expect_eq_int(_take4(S4 { a: 9 }), 9).ok;
+    assert expect_eq_int(_take8(S8 { a: 3, b: 4 }), 3004).ok;
+    assert expect_eq_int(_take16(S16 { a: 5, b: 6 }), 5006).ok;
+    assert expect_eq_int(_take24(S24 { a: 7, b: 8, c: 9 }), 7008009).ok;
+    assert expect_eq_int(_taken(SN {
+        inner: S16 { a: 1, b: 2 }, tag: 3
+    }), 1002003).ok;
+}
+
+test "struct-abi: float and mixed int/float structs survive the boundary" ![pure] {
+    // Exact equality is the point: these values are representable, so any
+    // difference is a transport bug rather than rounding.
+    assert expect_eq_bool(_takef(SF { x: 1.5, y: 2.25 }), true).ok;
+    assert expect_eq_bool(_takem(SM { a: 77, x: 3.5 }), true).ok;
+}
+
+test "struct-abi: struct returns arrive intact at every size class" ![pure] {
+    let r16 = _make16();
+    assert expect_eq_int(r16.a, 111).ok;
+    assert expect_eq_int(r16.b, 222).ok;
+
+    let r24 = _make24();
+    assert expect_eq_int(r24.a, 1).ok;
+    assert expect_eq_int(r24.b, 2).ok;
+    assert expect_eq_int(r24.c, 3).ok;
+
+    let rf = _makef();
+    assert expect_eq_bool(rf.x == 1.5, true).ok;
+    assert expect_eq_bool(rf.y == 2.25, true).ok;
+
+    let rn = _maken();
+    assert expect_eq_int(rn.inner.a, 5).ok;
+    assert expect_eq_int(rn.inner.b, 6).ok;
+    assert expect_eq_int(rn.tag, 7).ok;
+}
+
+test "struct-abi: a struct argument does not displace its scalar neighbours" ![pure] {
+    // head=1, s={2,3}, tail=4. A misplaced hidden pointer corrupts `tail`
+    // specifically, so the assertion is on the whole packed value rather
+    // than on the struct fields alone.
+    assert expect_eq_int(_sandwich(1, S16 { a: 2, b: 3 }, 4), 1020304).ok;
+}
+
+test "struct-abi: chained round-trips do not accumulate copy corruption" ![pure] {
+    // Each call consumes a returned struct and returns a fresh one, so a
+    // corrupted caller-allocated copy compounds across the chain instead of
+    // cancelling out — the shape a single call can mask.
+    let once = _bump16(S16 { a: 10, b: 20 });
+    assert expect_eq_int(once.a, 11).ok;
+    assert expect_eq_int(once.b, 21).ok;
+
+    let thrice = _bump16(_bump16(_bump16(S16 { a: 100, b: 200 })));
+    assert expect_eq_int(thrice.a, 103).ok;
+    assert expect_eq_int(thrice.b, 203).ok;
+}
+
+// Boxing removes USER structs from the by-value surface, but it does not
+// empty that surface: the runtime still passes two 16-byte aggregates by
+// value, and 16 bytes is exactly the size Microsoft x64 routes through
+// memory while System V splits it across two registers. One is
+// `{i8*, i64}` (the string ABI), exercised by every concat in this file.
+// The other is `{i8*, i8*}`, the closure pair handed to
+// `sfn_array_sfn_map` / `_filter` / `_reduce` as a by-value argument (see
+// `array_reduce_closure_test.sfn`). It is covered explicitly rather than
+// assumed to follow from the string case — they are separate shapes and a
+// classification bug could take one and not the other.
+test "struct-abi: by-value closure pairs cross the boundary intact" ![pure] {
+    let xs: int[] = [1, 2, 3, 4, 5];
+
+    let doubled = xs.map(fn (x: int) -> int { return x * 2; });
+    assert expect_eq_int(doubled.length, 5).ok;
+    assert expect_eq_int(doubled[0], 2).ok;
+    assert expect_eq_int(doubled[4], 10).ok;
+
+    let evens = xs.filter(fn (x: int) -> boolean { return x % 2 == 0; });
+    assert expect_eq_int(evens.length, 2).ok;
+    assert expect_eq_int(evens[1], 4).ok;
+
+    // `reduce` takes the initial value first and the closure second; the
+    // pair is its by-value third argument at the descriptor level.
+    let total = xs.reduce(0, fn (acc: int, x: int) -> int { return acc + x; });
+    assert expect_eq_int(total, 15).ok;
+}
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+// `emit` neither links nor spawns clang, so no PATH is needed; HOME/TMPDIR/
+// SAILFIN_TEST_SCRATCH give the toolchain a writable scratch under the
+// parallel pool (`run_capture`'s empty array is the *empty* environment).
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+fn _emit_fixture_ir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    dir = dir + "/sfn-struct-abi";
+    fs.createDirectory(dir, true);
+    let src = dir + "/fixture.sfn";
+    let out = dir + "/fixture.ll";
+    fs.writeFile(src, "struct P {\n    a: i64;\n    b: i64;\n}\n\nfn consume(head: i64, p: P, tail: i64) -> i64 {\n    return head + p.a + p.b + tail;\n}\n\nfn produce() -> P {\n    return P { a: 1, b: 2 };\n}\n\nfn main() -> void {\n    let q = produce();\n    let n = consume(1, q, 2);\n}\n");
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", out, "llvm", src], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return "EMIT_FAILED"; }
+    return fs.readFile(out);
+}
+
+test "struct-abi: the emitter boxes user structs instead of classifying them" ![io] {
+    // The structural half of the R3 gate. The behavioural tests above prove
+    // today's lowering is correct on today's host; this one pins WHY it is
+    // correct everywhere, so a change that starts passing aggregates by
+    // value fails here rather than silently on a Windows runner months
+    // later.
+    let ir = _emit_fixture_ir();
+    assert ir != "EMIT_FAILED";
+
+    // `emit` suffixes the module symbol with a path-derived
+    // `__<module>` tag (`@consume__tmp__sabi__fixture`), so the name is
+    // matched as a prefix and the signature shape is asserted separately
+    // rather than as one literal that would break on any scratch path.
+    //
+    // A struct parameter is a pointer, and its scalar neighbours keep their
+    // own registers on either side of it.
+    assert find(ir, "define i64 @consume", 0) >= 0;
+    assert find(ir, "(i64 %head, %P* %p, i64 %tail)", 0) >= 0;
+    // A struct return is a pointer, never an aggregate or an sret out-param.
+    assert find(ir, "define %P* @produce", 0) >= 0;
+
+    // No aggregate is passed or returned by value anywhere in the module, so
+    // the Microsoft x64 size rules have nothing to classify. `byval`/`sret`
+    // are how clang spells the C ABI's aggregate lowering; their absence is
+    // the invariant, not an accident of this fixture.
+    assert find(ir, "byval", 0) < 0;
+    assert find(ir, "sret", 0) < 0;
+}
