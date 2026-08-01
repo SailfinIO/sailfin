@@ -3,7 +3,7 @@
 // TLS 1.3 handshake-message wire codec (RFC 8446 §4) for the sfn/crypto
 // capsule (SFEP-0048, Phase B). Pure byte encode/parse for
 // ClientHello/ServerHello/EncryptedExtensions/Certificate/CertificateVerify/
-// Finished — zero crypto dependency, zero imports. The handshake state
+// Finished — zero crypto dependency. The handshake state
 // machine and key schedule wiring live in `tls13_handshake.sfn` (not this
 // file).
 //
@@ -13,6 +13,8 @@
 // here fails closed: malformed, truncated, or trailing-garbage input returns
 // `Result.Err` (or `[]` for the fail-closed encoders) rather than a
 // best-effort partial parse.
+import { string_to_bytes } from "./bits";
+
 // ── Handshake types (RFC 8446 §4) ────────────────────────────────
 fn hs_type_client_hello() -> int { return 1; }
 
@@ -267,13 +269,7 @@ fn _encode_server_name_extension(server_name: string) -> int[] {
     // too.
     if server_name.length > _max_u16() - 5 { return empty; }
 
-    let mut host: int[] = [];
-    let mut i: int = 0;
-    loop {
-        if i >= server_name.length { break; }
-        host.push(char_code(server_name[i]) & 255);
-        i += 1;
-    }
+    let host: int[] = string_to_bytes(server_name);
 
     let mut data: int[] = [];
     // server_name_list_length = 1 (name_type) + 2 (host_name length) + host.length

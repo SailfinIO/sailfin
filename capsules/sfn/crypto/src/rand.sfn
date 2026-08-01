@@ -18,6 +18,8 @@
 // needs `n` bytes must check `result.length == n`. Binary output is `int[]`,
 // not `string`, because a NUL byte is unrepresentable in a Sailfin string
 // (SFEP-0048 §3.3).
+import { ptr_off } from "./bits";
+
 // Runtime ABI. `sfn_rand_fill(buf, n)` is defined in
 // `runtime/sfn/platform/rand.sfn` and linked into every binary; it fills `buf`
 // with `n` secure random bytes and returns 1 on success, 0 on failure. Externs
@@ -27,13 +29,6 @@ extern fn sfn_rand_fill(buf: *u8, n: i64) -> i32;
 extern fn malloc(size: usize) -> *u8;
 
 extern fn free(ptr: *u8) -> void;
-
-// `_rand_ptr_off(p, off)` — byte-stride pointer arithmetic (copy of the
-// ed25519.sfn helper).
-fn _rand_ptr_off(p: *u8, off: i64) -> *u8 {
-    let addr: i64 = (p as i64) + off;
-    return addr as *u8;
-}
 
 // random_bytes(n) — return exactly `n` cryptographically secure random bytes,
 // or `[]` if `n <= 0` or the OS entropy source fails (fail-closed). `![rand]`.
@@ -53,7 +48,7 @@ fn random_bytes(n: int) -> int[] ![rand] {
     let mut i: int = 0;
     loop {
         if i >= n { break; }
-        let b: int = (sailfin_intrinsic_pointer_read_i32(_rand_ptr_off(buf, i as i64)) as int) & 255;
+        let b: int = (sailfin_intrinsic_pointer_read_i32(ptr_off(buf, i as i64)) as int) & 255;
         out.push(b);
         i = i + 1;
     }

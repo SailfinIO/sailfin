@@ -5,19 +5,18 @@
 // arithmetic is masked to 32 bits after every operation, rotates go through
 // `bits::rotl32`. Used to compute the RFC 6455 WebSocket
 // `Sec-WebSocket-Accept` value (Phase D consumer).
-import { rotl32, load_u32_be, store_u32_be } from "./bits";
+import {
+    hex_byte,
+    string_to_bytes,
+    rotl32,
+    load_u32_be,
+    store_u32_be
+} from "./bits";
 
 // Render a 32-bit word as 8 lowercase hex characters.
 fn sha1_word_hex(x: int) -> string {
-    let digits: string[] = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "a", "b", "c", "d", "e", "f",];
-    let mut out: string = "";
-    let mut shift: int = 28;
-    loop {
-        if shift < 0 { break; }
-        out = out + digits[(x >> shift) & 15];
-        shift -= 4;
-    }
-    return out;
+    return hex_byte((x >> 24) & 255) + hex_byte((x >> 16) & 255) + hex_byte((x >> 8) & 255)
+        + hex_byte(x & 255);
 }
 
 fn sha1_hex(data: string) -> string {
@@ -31,13 +30,7 @@ fn sha1_hex(data: string) -> string {
 
     // 1. Decode the input into a byte sequence (byte-oriented, matches
     //    `sha1sum` for arbitrary content, not just ASCII).
-    let mut bytes: int[] = [];
-    let mut bi: int = 0;
-    loop {
-        if bi >= data.length { break; }
-        bytes.push(char_code(data[bi]) & 255);
-        bi += 1;
-    }
+    let mut bytes: int[] = string_to_bytes(data);
     let bit_len: int = bytes.length * 8;
 
     // 2. Pad: append 0x80, then zeros until length ≡ 56 (mod 64), then the

@@ -40,7 +40,7 @@
 // old struct's scalar `state` never advanced — while appending to the same
 // shared transcript a second time. The handshake then fails several steps
 // later at the server Finished MAC, pointing at the wrong message entirely.
-import { ct_eq_bytes } from "./bits";
+import { ct_eq_bytes, string_to_bytes } from "./bits";
 import { ed25519_verify } from "./ed25519";
 import { hmac_sha256_bytes, sha256_bytes } from "./hkdf";
 import {
@@ -176,16 +176,7 @@ fn _to_hex(bytes: int[]) -> string {
 
 // Encode an ASCII string as bytes. Used only for the fixed RFC 8446 §4.4.3
 // context strings, which are ASCII by construction.
-fn _ascii_bytes(s: string) -> int[] {
-    let mut out: int[] = [];
-    let mut i: int = 0;
-    loop {
-        if i >= s.length { break; }
-        out.push(char_code(s[i]) & 255);
-        i += 1;
-    }
-    return out;
-}
+fn _ascii_bytes(s: string) -> int[] { return string_to_bytes(s); }
 
 // Build the state that results from `hs` plus the fields a step changed.
 // Sailfin has no struct update syntax, so each step spells the whole record

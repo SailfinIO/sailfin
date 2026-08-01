@@ -3,7 +3,7 @@
 // SHA-384 (FIPS 180-4) implemented in pure Sailfin as SHA-512 truncated to
 // 384 bits with a different initial state. The shared 64-bit limb core
 // (SFEP-0048 §3.3 item 4) lives in `sha512.sfn`.
-import { store_u32_be } from "./bits";
+import { store_u32_be, string_to_bytes } from "./bits";
 import { sha512_state, sha512_word_hex } from "./sha512";
 
 // The FIPS 180-4 §5.3.4 SHA-384 initial state H[0..7], as [hi, lo] decimal
@@ -37,13 +37,7 @@ fn sha384_hex(data: string) -> string {
     // Compute the SHA-384 digest of `data` (byte-oriented over raw UTF-8
     // bytes, matching `sha384sum`) and return the bare 96-character
     // lowercase hex string.
-    let mut bytes: int[] = [];
-    let mut bi: int = 0;
-    loop {
-        if bi >= data.length { break; }
-        bytes.push(char_code(data[bi]) & 255);
-        bi += 1;
-    }
+    let mut bytes: int[] = string_to_bytes(data);
 
     let h: int[][] = sha512_state(bytes, _sha384_iv());
 
