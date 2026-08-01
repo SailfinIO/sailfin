@@ -109,7 +109,7 @@ Phase D is where the seal blocker is actually cleared.
 `tls13_handshake_codec.sfn` implement the RFC 8446 §4 ClientHello/ServerHello/
 EncryptedExtensions/Certificate/CertificateVerify/Finished state machine and
 wire code, checked against the RFC 8448 §3 "Simple 1-RTT Handshake" trace
-(16 tests, `capsules/sfn/crypto/tests/tls13_handshake_test.sfn`). It is pure
+(16 tests, `capsules/sfn/crypto/tests/tls13_handshake_test.sfn`, plus 34 fail-closed codec tests in `tls13_handshake_codec_test.sfn`). It is pure
 computation with no socket I/O — `runtime/sfn/platform/tls.sfn` is untouched
 and still OpenSSL-backed (the swap is SFN-341); CertificateVerify checking is
 Ed25519-only pending RSA-PSS/ECDSA-P256 (SFN-653); and there is no certificate
