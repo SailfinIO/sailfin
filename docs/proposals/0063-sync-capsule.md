@@ -1,5 +1,5 @@
 ---
-sfep: 63
+sfep: 0063
 title: sfn/sync — scope and blocking predecessor for a synchronization capsule
 status: Draft
 type: language
@@ -22,14 +22,17 @@ bridges (`capsules/sfn/sync/src/mod.sfn:1-30`). Everything that actually ships
 today — `spawn`, `parallel`, `routine { }`, `channel(N)` — is language-level,
 not capsule surface. This proposal evaluates what a real `sfn/sync` library
 (`Mutex`, `RwLock`, `Semaphore`, `WaitGroup`, `select`) would need to export and
-concludes the library is **blocked on a single missing language primitive**: a
-user-facing shared-ownership carrier. Locks, semaphores, and similar objects
-are by construction shared by two or more concurrent workers, and Sailfin's
-ownership checker currently has no way to hand the same owned value to two
-`spawn`-family closures without moving it out from under the first. This
-proposal authorizes only a **Phase 0** correction — stop advertising a capsule
-wrapper and an `io` capability that do not exist — and defers the library
-itself to a follow-up SFEP that designs the shared-ownership carrier.
+concludes the library is **buildable today but not safely reclaimable**:
+ordinary struct-typed sync objects (a `Mutex` backed by a `pthread_mutex_t`, an
+atomic cell) are not owned/affine types, so the ownership checker's
+spawn-capture move rule never fires on them and they can already be shared
+across `spawn`-family closures. What is missing is the substrate to tear one
+down safely once shared: the reference-counting runtime never invokes a stored
+destructor at refcount zero, and nothing tracks who is responsible for
+releasing a shared handle. This proposal authorizes only a **Phase 0**
+correction — stop advertising a capsule wrapper that does not exist and stop
+declaring an `io` capability the capsule does not use — and defers the library
+itself to a follow-up SFEP that closes the reclamation gap.
 
 ## 2. Motivation
 
@@ -50,8 +53,8 @@ and `site/src/content/docs/docs/learn/concurrency.md:93` — tell readers a
 actually contain or why it hasn't shipped. None of this is merely stale prose:
 an over-broad manifest on an empty capsule undercuts the Reach pillar's claim
 that Sailfin's capability manifests are tight and trustworthy, and "wrapper
-coming later" reads as a scheduling gap when the real blocker is a missing
-ownership-system feature that has not yet been designed.
+coming later" reads as a scheduling gap when the real blocker is an
+undesigned reclamation story for shared concurrent objects (§3.1).
 
 Before correcting the record, this proposal first asks the substantive
 question the status quo begs: what would `sfn/sync` actually export, and what,
@@ -59,63 +62,91 @@ concretely, is stopping it? §3 answers both.
 
 ## 3. Design
 
-### 3.1 The central finding: no synchronization object can be shared today
+### 3.1 The central finding: sync objects are buildable today, but not safely reclaimable
 
 A synchronization primitive — a mutex, a semaphore, a wait group — exists to
-be held by more than one concurrent worker at once. Sailfin's ownership
-checker forecloses that today at the one place concurrency escapes a scope:
-`_consume_spawn_captures` (`compiler/src/ownership_checker.sfn:438-475`,
+be held by more than one concurrent worker at once. It is tempting to assume
+the ownership checker's spawn-capture rule forecloses that, but it does not:
+`_consume_spawn_captures` (`compiler/src/ownership_checker.sfn:438-473`,
 called from the `Spawn`, `parallel`-task, and `serve`-handler arms at lines
-960, 981, and 993). Its own header states the rule precisely: a
-`spawn`/`parallel`/`serve` worker outlives the spawning scope, so *every* free
-variable of its closure that resolves to an owned live binding is consumed as
-a move (`Owned -> Moved`), and any later use on the sender becomes
-use-after-move (`E0901`). That rule is correct and load-bearing for the single
-case it targets (one value escaping to one worker) — but it means two workers
-capturing the same `Mutex` cannot both compile: the first `spawn` moves it out
-of the parent scope, and the second capture is `E0901`.
+960, 981, and 993) routes each free variable of the closure through
+`_consume_identifier`, which gates immediately on `if !binding.is_owned {
+return scope; }` (`ownership_checker.sfn:373`). `is_owned` comes from
+`is_owned_type` (`compiler/src/typecheck_types/expr_type_rules.sfn:232-239`),
+which returns true for exactly four annotation spellings: `OwnedBuf`,
+`OwnedBuf<`, `Affine<`, `Linear<`. An ordinary `struct Mutex` or an `i64`/`*u8`
+handle has `is_owned == false`, so no rule fires and no move is recorded —
+`ownership_checker.sfn:104-105` states this directly. Two `spawn` closures
+capturing the same ordinary struct or handle compile today.
 
-The only sharing mechanism that exists today routes around this by never
-capturing at all. `compiler/tests/e2e/channel_producer_consumer_exec_test.sfn`
-adopts it explicitly and says so in its own header (lines 20-25): the shared
-channel is a **module global** (`let g_ch = channel(2)`), because a global
-handle is "the capture-free way to share one channel across two tasks — the
-lambda capture-env ABI is carved out to #1475/#1476." This is the existing
-precedent for sharing across `spawn`/`parallel`, and it is not an acceptable
-foundation for a synchronization library API: a module global permits no
-per-instance lock, no lock embedded inside a data structure, and no lock
-passed as a function argument. A `Mutex` field on a struct, or a `Semaphore`
-returned from a constructor and threaded through several call sites, is
-exactly the shape a real library needs and exactly the shape module-global
-sharing cannot express.
+An existence proof already ships in-tree:
+`runtime/sfn/concurrency/channel.sfn` is a heap-allocated object guarded by a
+`pthread_mutex_t` and two `pthread_cond_t`, shared across worker threads,
+written in Sailfin against `runtime/sfn/platform/pthread_layout.sfn:43-65`.
+Structurally that is a mutex plus condvars, and it works.
 
-The substrate for a shared object already exists — the gap is entirely at the
-type/ownership layer, not the runtime layer. `runtime/sfn/memory/rc.sfn`
-already implements atomic reference counting: a 16-byte header
-(`refcount: i64` at offset 0, `drop_fn: *u8` at offset 8,
-`runtime/sfn/memory/rc.sfn:8-20`) with `sfn_rc_sfn_retain` / `sfn_rc_sfn_release`
-lowering to `atomicrmw add` / `atomicrmw sub` with `seq_cst` ordering
-(`runtime/sfn/memory/rc.sfn:14-20`). What is missing is (a) a user-facing type
-that wraps that mechanism — working name `Shared<T>` — and (b) an ownership-
-checker rule that recognizes a capture of a `Shared<T>` inside a spawn-family
-closure as a **share** (retain the refcount, leave the sender's binding live)
-rather than a move. Both parts are a language/ownership-system feature in
-their own right, not capsule work, and belong in a dedicated follow-up SFEP —
-this proposal states the requirement and its two parts so that follow-up can
-start from a concrete brief; it does not design the carrier's syntax, generic
-instantiation, or drop-timing semantics here.
+That same file also demonstrates the gap, not just the capability. It defines
+a complete and correct teardown — `sfn_channel_destroy`
+(`runtime/sfn/concurrency/channel.sfn:286-327`) destroys both condvars and the
+mutex, drains abandoned owned elements, and frees the ring buffer and the
+handle — and **nothing ever calls it**.
+`compiler/src/llvm/runtime_helpers/registry_services.sfn` registers
+`channel_create` (line 184) and `channel_close` (line 193); there is no
+`channel_destroy` row, and every remaining mention in the tree is a comment.
+`channel_close` is not teardown: it flips the closed flag and broadcasts the
+condvars (`channel.sfn:275-279`) so blocked peers wake, leaving the resources
+alive. So every `channel(N)` in every Sailfin program leaks a `pthread_mutex_t`,
+two `pthread_cond_t`, the ring buffer, and the handle. The shipped
+synchronization object is constructible, correct in operation, and has no
+reachable reclamation point — which is precisely the claim of this section,
+demonstrated in production code rather than argued from first principles. This
+is filed as a separate runtime bug; §3.4 does not fix it.
+
+The real gap is reclamation, not construction. `sfn_rc_sfn_release`
+(`runtime/sfn/memory/rc.sfn:130-143`) decrements the refcount and, when
+`prev == 1`, calls libc `free` **directly** — it never invokes the stored
+`drop_fn`. `rc.sfn:34-39` says so explicitly: "M2.3 stores the address but
+never dereferences it; releases that hit zero call `free` directly and skip
+the destructor hook," with invocation deferred. A shared `Mutex` can
+therefore never run `pthread_mutex_destroy` at refcount zero — the runtime
+would either leak the pthread resources or `free` them without destroying,
+both unsound. Beyond that, nothing tracks who releases a shared handle:
+captures copy the handle by value, and no rule tracks ownership of the
+pointee across the spawn boundary, so a shared sync object leaks or races on
+teardown even once a destructor hook exists. Both gaps are runtime/RC
+substrate work, not an ownership-checker exemption, and belong in a dedicated
+follow-up SFEP.
+
+A soundness observation worth recording here: because `is_owned_type` matches
+on annotation *text*, a library author opts into or out of E11 (SFEP-0018's
+capture-move workstream label; see `docs/proposals/0018-borrow-checking-1.0.md:771`)
+move-tracking purely by how a type is spelled. `Affine<Mutex>` gets
+capture-move enforcement; `struct Mutex` gets none. The tracked-ness of a type
+is a naming convention, not a property of the type — worth knowing before
+anyone designs on top of the ownership pass.
+
+For context, the historical workaround for sharing a `Channel` across
+`spawn`/`parallel` was a **module global**
+(`compiler/tests/e2e/channel_producer_consumer_exec_test.sfn:20-25`), adopted
+because "the lambda capture-env ABI is carved out to #1475/#1476." Both
+carve-outs have since landed — see `compiler/tests/e2e/spawn_capture_env_free_test.sfn`
+(IR, runtime, and ASAN coverage) and the `sfn_spawn_*_owned_ctx` /
+`_owned_buf_ctx` descriptor families at
+`compiler/src/llvm/runtime_helpers/registry_concurrency.sfn:119-160` — so
+module-global sharing is no longer the only mechanism available; it is
+superseded history, not the current constraint.
 
 ### 3.2 Per-candidate verdicts
 
 | Candidate | Verdict | Reason |
 |---|---|---|
-| `Mutex` | Blocked | Needs the shared-ownership carrier (§3.1) — a lock is definitionally held by ≥2 workers. |
-| `RwLock` | Blocked | Same root cause as `Mutex`. |
-| `Semaphore` | Blocked | Same root cause as `Mutex`. |
-| `Once` | Blocked | Same root cause as `Mutex`. |
-| Atomics (`AtomicInt`, etc.) | Blocked | Same root cause as `Mutex` — a shared atomic cell has the identical capture problem even though the update itself is lock-free. |
+| `Mutex` | Buildable, unsafe to reclaim | No destructor hook fires at refcount zero, and nothing tracks who releases a shared handle (§3.1). The blocker is substrate completion, not an ownership-checker exemption. |
+| `RwLock` | Buildable, unsafe to reclaim | Same root cause as `Mutex`. |
+| `Semaphore` | Buildable, unsafe to reclaim | Same root cause as `Mutex`. |
+| `Once` | Buildable, unsafe to reclaim | Same root cause as `Mutex`. |
+| Atomics (`AtomicInt`, etc.) | Buildable, unsafe to reclaim | Same root cause as `Mutex` — a shared atomic cell has the identical reclamation problem even though the update itself is lock-free. |
 | `WaitGroup` | Rejected as redundant | `routine { }` already joins every spawned child at scope exit (`runtime/sfn/concurrency/nursery.sfn:1-13`); a `WaitGroup` would be that same barrier reimplemented with a manual, unsafe counter. |
-| `select` over channels | Blocked on separate plumbing | `sfn_io_poll_any` (`runtime/sfn/process.sfn:836`) is a real N-way `poll` with timeout, but it is strictly fd-based; `Channel<T>` signals readiness via `pthread_cond_t` (`runtime/sfn/concurrency/channel.sfn:85-93,155-278`), which has no fd, and no self-pipe/eventfd bridge between the two exists. This blocker is independent of §3.1's shared-carrier gap. |
+| `select` over channels | Blocked on separate plumbing | `sfn_io_poll_any` (`runtime/sfn/process.sfn:836`) is a real N-way `poll` with timeout, but it is strictly fd-based; `Channel<T>` signals readiness via `pthread_cond_t` (`runtime/sfn/concurrency/channel.sfn:85-93,155-278`), which has no fd, and no self-pipe/eventfd bridge between the two exists. This blocker is independent of §3.1's reclamation gap. |
 
 ### 3.3 A design-philosophy note: be conservative about scope
 
@@ -125,8 +156,9 @@ communicating over `channel`, structure lifetimes with `routine { }` nurseries
 grain of that model. This is not an argument that locks are never warranted
 (some algorithms genuinely need mutual exclusion over shared state that
 channels express awkwardly), but it is a reason to keep `sfn/sync`'s eventual
-scope narrow and to let the shared-carrier SFEP, not this one, decide how much
-lock-based surface is worth adding once sharing is possible at all.
+scope narrow and to let the reclamation-substrate follow-up SFEP, not this
+one, decide how much lock-based surface is worth adding once safe teardown is
+possible at all.
 
 ### 3.4 Phase 0 — the only phase this proposal authorizes
 
@@ -150,8 +182,12 @@ any new surface.
    `site/src/content/docs/docs/reference/standard-library.md:322-323,344-345`,
    and `site/src/content/docs/docs/learn/concurrency.md:93`. The corrected
    wording should say that concurrency is language-level today and that no
-   capsule wrapper is planned pending the shared-ownership-carrier predecessor
-   described in §3.1.
+   capsule wrapper is planned pending the reclamation-substrate predecessor
+   described in §3.1. `standard-library.md:344-345` and
+   `learn/concurrency.md:93` each bundle a second, still-true claim into the
+   same sentence — that the generic `channel<T>(...)` constructor is not yet
+   shipped — and the rewrite must preserve that claim unchanged; only the
+   `sfn/sync` wrapper half of the sentence is stale.
 
 ### 3.5 A defect to record, not fix here
 
@@ -191,16 +227,18 @@ resolve at all.
 Per SFEP-0049, the concurrency-primitive leaves (`spawn`, `parallel`, channel
 `send`/`receive`) are effect-transparent: the registry rows carry no effect of
 their own, and the caller inherits exactly the effects of the body passing
-through them. A future `Mutex.lock()` (once the shared-carrier predecessor
-lands) should follow the same model — effect-free in itself, with blocking not
-implying `![clock]` or any other effect. Phase 0's only capability change is
-the manifest edit in §3.4: `capsules/sfn/sync/capsule.toml`'s
+through them. If a future `Mutex.lock()` followed that same model, it would be
+effect-free in itself, with blocking not implying `![clock]` or any other
+effect — but that is an implication of SFEP-0049's existing model to note, not
+a decision this proposal makes; the follow-up design that closes §3.1's
+reclamation gap is the one that settles it. Phase 0's only capability change
+is the manifest edit in §3.4: `capsules/sfn/sync/capsule.toml`'s
 `required = ["io"]` becomes `required = []`. This proposal allocates **no**
 diagnostic code. For future reference: `E08xx` is nearly exhausted, `E09xx` is
-the ownership/affine range that a shared-carrier exemption rule would land in,
-and `E1100`-`E1114` already belongs to SFEP-0062 — a follow-up proposal is free
-to allocate from the next open number in `E09xx` or wherever the carrier's
-design lands.
+the ownership/affine range, and `E1100`-`E1114` already belongs to SFEP-0062 —
+a follow-up proposal is free to allocate from the next open number in `E09xx`
+or wherever the reclamation-substrate design lands, should it need a
+diagnostic at all.
 
 ## 5. Self-hosting impact
 
@@ -218,15 +256,19 @@ bundle or split.
 - **Delete the capsule outright.** Forfeits the `sfn/sync` name in the
   workspace, and the shell is harmless once its manifest and comment are
   honest about what it is (Phase 0 makes them so).
-- **Build the library now on module-global-only sharing.** Produces a
-  crippled API — no per-instance locks, no lock embedded in a struct, no lock
-  passed to a function (§3.1) — that would need a breaking redesign the
-  moment the shared-ownership carrier lands.
-- **Exempt sync types from the E11 spawn-capture rule via a special case in
-  the ownership checker.** This punches a targeted hole in a soundness pass
-  for one family of types; the general shared-ownership carrier is the
-  correct fix and benefits every future type that needs the same capability,
-  not just `sfn/sync`'s.
+- **Build the library now, on top of ordinary (non-owned) struct types.**
+  Compiles today (§3.1), but ships an API with no safe way to destroy a
+  shared instance — the destructor-hook and release-ownership gaps mean any
+  real teardown path either leaks pthread resources or races. Shipping that
+  as a library surface would need a breaking redesign the moment the
+  reclamation substrate lands.
+- **Wire `drop_fn` invocation in `sfn_rc_sfn_release` and stop there, with no
+  user-facing carrier type.** This closes fact 2 from §3.1 (the missing
+  destructor hook) without inventing new surface, and may be sufficient on
+  its own if release-ownership tracking (fact 3) turns out not to need a
+  dedicated carrier type either. This is the narrower, cheaper path and the
+  follow-up design should weigh it seriously before assuming a carrier is
+  needed.
 - **Ship `WaitGroup` alone**, since a manual counter needs no sharing
   primitive to implement. Rejected as redundant: `routine { }` already
   provides that exact join-all barrier (§3.2).
@@ -258,15 +300,28 @@ touch it.
 ## 9. References
 
 - `capsules/sfn/sync/capsule.toml`, `capsules/sfn/sync/src/mod.sfn`
-- `compiler/src/ownership_checker.sfn:438-475` (`_consume_spawn_captures`)
-- `compiler/tests/e2e/channel_producer_consumer_exec_test.sfn:20-25` (module-
-  global sharing precedent)
+- `compiler/src/ownership_checker.sfn:373` (`_consume_identifier`'s
+  `is_owned` gate), `:104-105` (copyable bindings never move-tracked),
+  `:438-473` (`_consume_spawn_captures`)
+- `compiler/src/typecheck_types/expr_type_rules.sfn:232-239` (`is_owned_type`
+  — the four owned/affine annotation spellings)
+- `compiler/tests/e2e/channel_producer_consumer_exec_test.sfn:20-25`
+  (superseded module-global sharing precedent — both capture-env carve-outs
+  it names have since landed)
+- `compiler/tests/e2e/spawn_capture_env_free_test.sfn` (capture-env move/free
+  discipline that supersedes the module-global-only precedent)
+- `compiler/src/llvm/runtime_helpers/registry_concurrency.sfn:119-160`
+  (`sfn_spawn_*_owned_ctx` / `_owned_buf_ctx` descriptor families)
 - `compiler/tests/e2e/sync_rejects_unimplemented_concurrency_test.sfn`
-- `runtime/sfn/memory/rc.sfn` (atomic refcount substrate)
+- `runtime/sfn/memory/rc.sfn:34-39` (drop_fn invocation deferred),
+  `:130-143` (`sfn_rc_sfn_release` frees directly, skips `drop_fn`)
 - `runtime/sfn/concurrency/nursery.sfn:1-13,32-38` (join-all-only nursery)
-- `runtime/sfn/concurrency/channel.sfn` (`pthread_cond_t`-based signaling)
+- `runtime/sfn/concurrency/channel.sfn` (`pthread_cond_t`-based signaling; the
+  in-tree existence proof of a shared mutex/condvar object)
 - `runtime/sfn/platform/pthread.sfn`, `runtime/sfn/platform/pthread_layout.sfn:43-65`
 - `runtime/sfn/process.sfn:836` (`sfn_io_poll_any`)
+- `docs/proposals/0018-borrow-checking-1.0.md:771` (E11 workstream label —
+  channel-send / spawn-capture as moves)
 - SFEP-0049 (`docs/proposals/0049-concurrency-effect-transparency.md`) —
   effect-transparency model this proposal's §4 extends
 - SFEP-0055 (`docs/proposals/0055-typed-task-handles.md`) — typed task
@@ -281,3 +336,9 @@ touch it.
 - `examples/concurrency/producer-consumer.sfn:2`,
   `examples/concurrency/dynamic-task-scheduling.sfn:2`,
   `site/src/content/docs/docs/reference/spec/02-modules.md:10` (§3.5 defect)
+
+Spotted, not fixed here: `compiler/src/llvm/lowering/module_globals.sfn:136`
+carries the same stale "carved out to #1475/#1476" wording as
+`channel_producer_consumer_exec_test.sfn`'s header (§3.1). It is a compiler
+source comment, out of scope for this docs-only proposal — noted here as a
+follow-up cleanup for whoever next touches that file.
