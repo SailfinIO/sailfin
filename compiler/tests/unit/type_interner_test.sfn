@@ -222,8 +222,10 @@ test "type interner: intrinsic wrappers and OwnedBuf compatibility carry ownersh
     assert affine.id.value != linear.id.value;
     let affine_descriptor = constructor_descriptor(interner, intrinsic_constructor_id(IntrinsicConstructorKind.Affine()));
     let linear_descriptor = constructor_descriptor(interner, intrinsic_constructor_id(IntrinsicConstructorKind.Linear()));
+    let task_descriptor = constructor_descriptor(interner, intrinsic_constructor_id(IntrinsicConstructorKind.Task()));
     assert affine_descriptor.ownership.variant == "Affine";
     assert linear_descriptor.ownership.variant == "Linear";
+    assert task_descriptor.ownership.variant == "Affine";
 
     let compatible_owner = _qualified("runtime", "memory/ownedbuf", 2);
     let unrelated_owner = _qualified("app", "buffers", 2);

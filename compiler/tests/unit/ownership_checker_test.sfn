@@ -16,11 +16,13 @@
 //   - E5: use-after-move (`E0901`) and second-live-binding (`E0904`)
 //     diagnostics with both spans, plus a clean move-and-consume
 //     negative case
+import { append_import_function_signature_from_module, empty_import_symbols } from "../../src/effect_imports";
 import {
     OwnershipBinding,
     analyze_program_ownership,
     binding_state,
     check_ownership,
+    check_ownership_with_imports,
     mark_binding_moved,
     run_ownership_checker
 } from "../../src/ownership_checker";
@@ -104,7 +106,7 @@ test "ownership: match destructure pattern bindings are tracked" ![io] {
 test "ownership: lattice helpers flip owned to moved" ![io] {
     let mut bindings: OwnershipBinding[] = [];
     bindings.push(OwnershipBinding {
-        name: "x", state: "owned", span: null, is_owned: true, is_linear: false, moved_span: null
+        name: "x", declared_type: "", state: "owned", span: null, is_owned: true, is_linear: false, is_task: false, nursery_bound: false, nursery_span: null, moved_span: null
     });
     assert binding_state(bindings, "x") == "owned";
     assert binding_state(bindings, "missing") == "";
@@ -516,4 +518,522 @@ test "ownership: serve handler capture of an owned value then reuse emits E0901"
     assert warnings.length == 1;
     assert warnings[0].code == "E0901";
     assert warnings[0].binding_name == "buf";
+}
+
+// -------------------------------------------------------------------
+// SFN-446: Task<T> affine consumption (E0837) and nursery escape (E0838)
+// -------------------------------------------------------------------
+test "ownership: a Task handle awaited exactly once is clean" ![io] {
+    let source = "fn f() -> int {\n    let h = spawn fn() -> int { return 7; };\n    return await h;\n}\n";
+    let warnings = check_ownership(parse_program(source));
+    assert warnings.length == 0;
+}
+
+test "ownership: a Task handle awaited twice emits E0837 with both spans" ![io] {
+    let source = "fn f() -> int {\n    let h = spawn fn() -> int { return 7; };\n    let first = await h;\n    let second = await h;\n    return first + second;\n}\n";
+    let warnings = check_ownership(parse_program(source));
+    assert warnings.length == 1;
+    assert warnings[0].code == "E0837";
+    assert warnings[0].binding_name == "h";
+    assert warnings[0].trigger != null;
+    assert warnings[0].moved_trigger != null;
+}
+
+test "ownership: moving a Task into an array consumes the scalar handle" ![io] {
+    let source = "fn f() -> int {\n    let h = spawn fn() -> int { return 7; };\n    let hs: Task<int>[] = [h];\n    return await h;\n}\n";
+    let warnings = check_ownership(parse_program(source));
+    assert warnings.length == 1;
+    assert warnings[0].code == "E0837";
+    assert warnings[0].binding_name == "h";
+}
+
+test "ownership: moving a Task into a struct field consumes the handle" ![io] {
+    let source = "struct Holder { task: Task<int> }\nfn f() -> int {\n    let h = spawn fn() -> int { return 7; };\n    let holder = Holder { task: h };\n    return await h;\n}\n";
+    let warnings = check_ownership(parse_program(source));
+    assert warnings.length == 1;
+    assert warnings[0].code == "E0837";
+    assert warnings[0].binding_name == "h";
+}
+
+test "ownership: extracting a Task field consumes its aggregate owner" ![io] {
+    let source = "struct Holder { task: Task<int> }\nfn f() -> int {\n    let holder = Holder { task: spawn fn() -> int { return 7; } };\n    let first = await holder.task;\n    return await holder.task;\n}\n";
+    let warnings = check_ownership(parse_program(source));
+    assert warnings.length == 1;
+    assert warnings[0].code == "E0837";
+    assert warnings[0].binding_name == "holder";
+}
+
+test "ownership: declared Task field stays affine after an empty initializer" ![io] {
+    let source = "struct Holder { tasks: Task<int>[] }\nfn f() -> int {\n    let mut holder = Holder { tasks: [] };\n    holder.tasks.push(spawn fn() -> int { return 7; });\n    let first = await holder.tasks[0];\n    return await holder.tasks[0];\n}\n";
+    let warnings = check_ownership(parse_program(source));
+    assert warnings.length == 1;
+    assert warnings[0].code == "E0837";
+    assert warnings[0].binding_name == "holder";
+}
+
+test "ownership: non-Task fields do not consume a Task-bearing aggregate" ![io] {
+    let source = "struct Holder { task: Task<int>; value: int }\nfn f() -> int {\n    let holder = Holder { task: spawn fn() -> int { return 7; }, value: 3 };\n    let first = holder.value;\n    let second = holder.value;\n    return first + second + await holder.task;\n}\n";
+    assert check_ownership(parse_program(source)).length == 0;
+}
+
+test "ownership: join_all consumes a Task array exactly once" ![io] {
+    let clean = "fn f() -> int[] {\n    let hs: Task<int>[] = [spawn fn() -> int { return 7; }];\n    return join_all(hs);\n}\n";
+    assert check_ownership(parse_program(clean)).length == 0;
+
+    let repeated = "fn f() -> int[] {\n    let hs: Task<int>[] = [spawn fn() -> int { return 7; }];\n    let first = join_all(hs);\n    return join_all(hs);\n}\n";
+    let warnings = check_ownership(parse_program(repeated));
+    assert warnings.length == 1;
+    assert warnings[0].code == "E0837";
+    assert warnings[0].binding_name == "hs";
+}
+
+test "ownership: nursery Task pushed into an outer array emits E0838" ![io] {
+    let source = "fn f() -> int {\n    let mut escaped: Task<int>[] = [];\n    routine {\n        escaped.push(spawn fn() -> int { return 7; });\n    }\n    return 0;\n}\n";
+    let warnings = check_ownership(parse_program(source));
+    assert warnings.length == 1;
+    assert warnings[0].code == "E0838";
+    assert warnings[0].binding_name == "escaped";
+}
+
+test "ownership: nursery Task assigned through an outer array index emits E0838" ![io] {
+    let source = "fn f() -> int {\n    let mut escaped: Task<int>[] = [spawn fn() -> int { return 1; }];\n    routine {\n        escaped[0] = spawn fn() -> int { return 7; };\n    }\n    return 0;\n}\n";
+    let warnings = check_ownership(parse_program(source));
+    assert warnings.length == 1;
+    assert warnings[0].code == "E0838";
+    assert warnings[0].binding_name == "escaped";
+}
+
+test "ownership: nursery Task pushed into a module-global array emits E0838" ![io] {
+    let source = "let mut escaped: Task<int>[] = [];\n\nfn f() -> int {\n    routine {\n        escaped.push(spawn fn() -> int { return 7; });\n    }\n    return 0;\n}\n";
+    let warnings = check_ownership(parse_program(source));
+    assert warnings.length == 1;
+    assert warnings[0].code == "E0838";
+    assert warnings[0].binding_name == "escaped";
+}
+
+test "ownership: nursery Task stored in an outer scalar emits E0838" ![io] {
+    let source = "fn f() -> int {\n    let mut escaped: Task<int> = spawn fn() -> int { return 1; };\n    routine {\n        escaped = spawn fn() -> int { return 7; };\n    }\n    return 0;\n}\n";
+    let warnings = check_ownership(parse_program(source));
+    assert warnings.length == 1;
+    assert warnings[0].code == "E0838";
+    assert warnings[0].binding_name == "escaped";
+}
+
+test "ownership: nursery Task stored in an outer struct field emits E0838" ![io] {
+    let source = "struct Holder { task: Task<int> }\nfn f() -> int {\n    let mut outer = Holder { task: spawn fn() -> int { return 1; } };\n    routine {\n        outer.task = spawn fn() -> int { return 7; };\n    }\n    return 0;\n}\n";
+    let warnings = check_ownership(parse_program(source));
+    assert warnings.length == 1;
+    assert warnings[0].code == "E0838";
+    assert warnings[0].binding_name == "outer";
+}
+
+test "ownership: nursery Task pushed through a nested outer field emits E0838" ![io] {
+    let source = "struct Bucket { tasks: Task<int>[] }\nstruct Outer { bucket: Bucket }\nfn f() -> int {\n    let mut outer = Outer { bucket: Bucket { tasks: [] } };\n    routine {\n        outer.bucket.tasks.push(spawn fn() -> int { return 7; });\n    }\n    return 0;\n}\n";
+    let warnings = check_ownership(parse_program(source));
+    assert warnings.length == 1;
+    assert warnings[0].code == "E0838";
+    assert warnings[0].binding_name == "outer";
+}
+
+test "ownership: nursery Task indexed through a nested outer field emits E0838" ![io] {
+    let source = "struct Bucket { tasks: Task<int>[] }\nstruct Outer { bucket: Bucket }\nfn f() -> int {\n    let mut outer = Outer { bucket: Bucket { tasks: [] } };\n    routine {\n        outer.bucket.tasks[0] = spawn fn() -> int { return 7; };\n    }\n    return 0;\n}\n";
+    let warnings = check_ownership(parse_program(source));
+    assert warnings.length == 1;
+    assert warnings[0].code == "E0838";
+    assert warnings[0].binding_name == "outer";
+}
+
+test "ownership: nursery Task pushed through a nested global field emits E0838" ![io] {
+    let source = "struct Bucket { tasks: Task<int>[] }\nstruct Outer { bucket: Bucket }\nlet mut escaped = Outer { bucket: Bucket { tasks: [] } };\nfn f() -> int {\n    routine {\n        escaped.bucket.tasks.push(spawn fn() -> int { return 7; });\n    }\n    return 0;\n}\n";
+    let warnings = check_ownership(parse_program(source));
+    assert warnings.length == 1;
+    assert warnings[0].code == "E0838";
+    assert warnings[0].binding_name == "escaped";
+}
+
+test "ownership: nursery Task in an outer array is clean when joined before exit" ![io] {
+    let source = "fn f() -> int {\n    let mut handles: Task<int>[] = [];\n    routine {\n        handles.push(spawn fn() -> int { return 7; });\n        let results = join_all(handles);\n    }\n    return 0;\n}\n";
+    let warnings = check_ownership(parse_program(source));
+    assert warnings.length == 0;
+}
+
+test "ownership: routine-local Task storage does not escape its nursery" ![io] {
+    let source = "fn f() -> int {\n    routine {\n        let mut handles: Task<int>[] = [];\n        handles.push(spawn fn() -> int { return 7; });\n    }\n    return 0;\n}\n";
+    let warnings = check_ownership(parse_program(source));
+    assert warnings.length == 0;
+}
+
+test "ownership: nested nursery cannot store a Task in its outer nursery binding" ![io] {
+    let source = "fn f() -> int {\n    routine {\n        let mut escaped: Task<int>[] = [];\n        routine {\n            escaped.push(spawn fn() -> int { return 7; });\n        }\n    }\n    return 0;\n}\n";
+    let warnings = check_ownership(parse_program(source));
+    assert warnings.length == 1;
+    assert warnings[0].code == "E0838";
+    assert warnings[0].binding_name == "escaped";
+}
+
+test "ownership: routine shadowing keeps a nursery Task local" ![io] {
+    let source = "fn f() -> int {\n    let mut handles: Task<int>[] = [];\n    routine {\n        let mut handles: Task<int>[] = [];\n        handles.push(spawn fn() -> int { return 7; });\n    }\n    return 0;\n}\n";
+    let warnings = check_ownership(parse_program(source));
+    assert warnings.length == 0;
+}
+
+test "ownership: awaiting an ambient Task inside routine propagates its move" ![io] {
+    let source = "fn f() -> int {\n    let h = spawn fn() -> int { return 7; };\n    routine { let first = await h; }\n    return await h;\n}\n";
+    let warnings = check_ownership(parse_program(source));
+    assert warnings.length == 1;
+    assert warnings[0].code == "E0837";
+    assert warnings[0].binding_name == "h";
+}
+
+test "ownership: indexed Task extraction consumes the affine array" ![io] {
+    let source = "fn f() -> int {\n    let hs: Task<int>[] = [spawn fn() -> int { return 7; }];\n    let first = await hs[0];\n    return await hs[0];\n}\n";
+    let warnings = check_ownership(parse_program(source));
+    assert warnings.length == 1;
+    assert warnings[0].code == "E0837";
+    assert warnings[0].binding_name == "hs";
+}
+
+test "ownership: Task moves propagate through branches and loops" ![io] {
+    let branch_source = "fn f(flag: boolean) -> int {\n    let h = spawn fn() -> int { return 7; };\n    if flag { let first = await h; }\n    return await h;\n}\n";
+    let branch_warnings = check_ownership(parse_program(branch_source));
+    assert branch_warnings.length == 1;
+    assert branch_warnings[0].code == "E0837";
+
+    let loop_source = "fn f() -> int {\n    let h = spawn fn() -> int { return 7; };\n    loop { let first = await h; break; }\n    return await h;\n}\n";
+    let loop_warnings = check_ownership(parse_program(loop_source));
+    assert loop_warnings.length == 1;
+    assert loop_warnings[0].code == "E0837";
+}
+
+test "ownership: unconditional nested block consumption reaches nursery exit" ![io] {
+    let source = "fn f() -> int {\n    let mut escaped: Task<int>[] = [];\n    routine {\n        escaped.push(spawn fn() -> int { return 7; });\n        { let results = join_all(escaped); }\n    }\n    return 0;\n}\n";
+    assert check_ownership(parse_program(source)).length == 0;
+}
+
+test "ownership: clearing an outer Task array clears nursery provenance" ![io] {
+    let source = "fn f() -> int {\n    let mut escaped: Task<int>[] = [];\n    routine {\n        escaped.push(spawn fn() -> int { return 7; });\n        escaped = [];\n    }\n    return 0;\n}\n";
+    assert check_ownership(parse_program(source)).length == 0;
+}
+
+test "ownership: inferred Task-returning call retains affine identity" ![io] {
+    let source = "fn make_task() -> Task<int> {\n    return spawn fn() -> int { return 7; };\n}\n\nfn f() -> int {\n    let h = make_task();\n    let first = await h;\n    return await h;\n}\n";
+    let warnings = check_ownership(parse_program(source));
+    assert warnings.length == 1;
+    assert warnings[0].code == "E0837";
+    assert warnings[0].binding_name == "h";
+}
+
+test "ownership: ordinary closure capture moves an affine Task" ![io] {
+    let source = "fn f() -> int {\n    let h = spawn fn() -> int { return 7; };\n    let use = fn() -> int { return await h; };\n    return await h;\n}\n";
+    let warnings = check_ownership(parse_program(source));
+    assert warnings.length == 1;
+    assert warnings[0].code == "E0837";
+    assert warnings[0].binding_name == "h";
+}
+
+test "ownership: a closure owning a Task capture is itself affine" ![io] {
+    let source = "fn f() -> int {\n    let h = spawn fn() -> int { return 7; };\n    let use = fn() -> int { return await h; };\n    let first = use();\n    return use();\n}\n";
+    let warnings = check_ownership(parse_program(source));
+    assert warnings.length == 1;
+    assert warnings[0].code == "E0837";
+    assert warnings[0].binding_name == "use";
+}
+
+test "ownership: conditional Task result preserves affine identity" ![io] {
+    let source = "fn f(flag: boolean) -> int {\n    let h = flag ? spawn fn() -> int { return 7; } : spawn fn() -> int { return 9; };\n    let first = await h;\n    return await h;\n}\n";
+    let warnings = check_ownership(parse_program(source));
+    assert warnings.length == 1;
+    assert warnings[0].code == "E0837";
+    assert warnings[0].binding_name == "h";
+}
+
+test "ownership: conditional Task move consumes every possible source" ![io] {
+    let source = "fn f(flag: boolean) -> int {\n    let left = spawn fn() -> int { return 7; };\n    let right = spawn fn() -> int { return 9; };\n    let selected = flag ? left : right;\n    let value = await selected;\n    return value + await left;\n}\n";
+    let warnings = check_ownership(parse_program(source));
+    assert warnings.length == 1;
+    assert warnings[0].code == "E0837";
+    assert warnings[0].binding_name == "left";
+}
+
+test "ownership: iterating a Task array consumes the collection" ![io] {
+    let source = "fn f() -> int {\n    let hs: Task<int>[] = [spawn fn() -> int { return 7; }];\n    for h in hs { let value = await h; }\n    return join_all(hs).length;\n}\n";
+    let warnings = check_ownership(parse_program(source));
+    assert warnings.length == 1;
+    assert warnings[0].code == "E0837";
+    assert warnings[0].binding_name == "hs";
+}
+
+test "ownership: Task-returning helper called in routine cannot escape" ![io] {
+    let source = "fn make_task() -> Task<int> {\n    return spawn fn() -> int { return 7; };\n}\n\nfn f() -> int {\n    let mut escaped: Task<int>[] = [];\n    routine { escaped.push(make_task()); }\n    return 0;\n}\n";
+    let warnings = check_ownership(parse_program(source));
+    assert warnings.length == 1;
+    assert warnings[0].code == "E0838";
+    assert warnings[0].binding_name == "escaped";
+}
+
+test "ownership: Task identity helper preserves ambient nursery provenance" ![io] {
+    let source = "fn identity(h: Task<int>) -> Task<int> { return h; }\n\nfn f() -> int {\n    let ambient = spawn fn() -> int { return 1; };\n    let mut escaped: Task<int> = spawn fn() -> int { return 2; };\n    routine { escaped = identity(ambient); }\n    return await escaped;\n}\n";
+    assert check_ownership(parse_program(source)).length == 0;
+}
+
+test "ownership: opaque helper cannot receive a nursery Task" ![io] {
+    let source = "let mut escaped: Task<int>[] = [];\nfn stash(h: Task<int>) { escaped.push(h); }\nfn f() -> int {\n    routine { stash(spawn fn() -> int { return 7; }); }\n    return 0;\n}\n";
+    let warnings = check_ownership(parse_program(source));
+    assert warnings.length == 1;
+    assert warnings[0].code == "E0838";
+}
+
+test "ownership: returning a spawned Task directly from routine emits E0838" ![io] {
+    let source = "fn f() -> Task<int> {\n    routine { return spawn fn() -> int { return 7; }; }\n}\n";
+    let warnings = check_ownership(parse_program(source));
+    assert warnings.length == 1;
+    assert warnings[0].code == "E0838";
+}
+
+test "ownership: returning a conditional spawned Task from routine emits E0838" ![io] {
+    let source = "fn f(flag: boolean) -> Task<int> {\n    routine {\n        return flag ? spawn fn() -> int { return 7; } : spawn fn() -> int { return 9; };\n    }\n}\n";
+    let warnings = check_ownership(parse_program(source));
+    assert warnings.length == 1;
+    assert warnings[0].code == "E0838";
+}
+
+test "ownership: Task-capturing closure cannot escape its nursery" ![io] {
+    let source = "fn f() -> int {\n    let mut escaped = fn() -> int { return 0; };\n    routine {\n        let h = spawn fn() -> int { return 7; };\n        escaped = fn() -> int { return await h; };\n    }\n    return 0;\n}\n";
+    let warnings = check_ownership(parse_program(source));
+    assert warnings.length == 1;
+    assert warnings[0].code == "E0838";
+    assert warnings[0].binding_name == "escaped";
+}
+
+test "ownership: Task-capturing closure consumed inside its nursery is clean" ![io] {
+    let source = "fn f() -> int {\n    let mut use = fn() -> int { return 0; };\n    routine {\n        let h = spawn fn() -> int { return 7; };\n        use = fn() -> int { return await h; };\n        let value = use();\n    }\n    return 0;\n}\n";
+    assert check_ownership(parse_program(source)).length == 0;
+}
+
+test "ownership: custom push and shadowed join_all are opaque nursery calls" ![io] {
+    let custom_push = "let mut escaped: Task<int>[] = [];\nstruct Sink {\n    fn push(self, h: Task<int>) { escaped.push(h); }\n}\nfn f(sink: Sink) -> int {\n    routine { sink.push(spawn fn() -> int { return 7; }); }\n    return 0;\n}\n";
+    let push_warnings = check_ownership(parse_program(custom_push));
+    assert push_warnings.length == 1;
+    assert push_warnings[0].code == "E0838";
+
+    let shadowed_join = "fn join_all(h: Task<int>) -> int { return await h; }\nfn f() -> int {\n    routine { let value = join_all(spawn fn() -> int { return 7; }); }\n    return 0;\n}\n";
+    let join_warnings = check_ownership(parse_program(shadowed_join));
+    assert join_warnings.length == 1;
+    assert join_warnings[0].code == "E0838";
+}
+
+test "ownership: loop re-entry rejects consuming the same Task twice" ![io] {
+    let loop_source = "fn f() {\n    let h = spawn fn() -> int { return 7; };\n    loop { let value = await h; }\n}\n";
+    let loop_warnings = check_ownership(parse_program(loop_source));
+    assert loop_warnings.length == 1;
+    assert loop_warnings[0].code == "E0837";
+
+    let for_source = "fn f() {\n    let h = spawn fn() -> int { return 7; };\n    for i in [1, 2] { let value = await h; }\n}\n";
+    let for_warnings = check_ownership(parse_program(for_source));
+    assert for_warnings.length == 1;
+    assert for_warnings[0].code == "E0837";
+}
+
+test "ownership: catch inherits Task consumption from try" ![io] {
+    let source = "fn f() {\n    let h = spawn fn() -> int { return 7; };\n    try {\n        let first = await h;\n        throw \"boom\";\n    } catch (error) {\n        let second = await h;\n    }\n}\n";
+    let warnings = check_ownership(parse_program(source));
+    assert warnings.length == 1;
+    assert warnings[0].code == "E0837";
+}
+
+test "ownership: conditional alternatives do not consume each other" ![io] {
+    let source = "fn f(flag: boolean) -> int {\n    let h = spawn fn() -> int { return 7; };\n    return flag ? await h : await h;\n}\n";
+    assert check_ownership(parse_program(source)).length == 0;
+}
+
+test "ownership: callable shadowing and method names avoid false Task identity" ![io] {
+    let shadow_source = "fn make_task() -> Task<int> { return spawn fn() -> int { return 7; }; }\nfn f() -> int {\n    let make_task = fn() -> int { return 1; };\n    let value = make_task();\n    return value;\n}\n";
+    assert check_ownership(parse_program(shadow_source)).length == 0;
+
+    let method_source = "struct TaskFactory {\n    fn value(self) -> Task<int> { return spawn fn() -> int { return 7; }; }\n}\nstruct NumberFactory {\n    fn value(self) -> int { return 7; }\n}\nfn f(factory: NumberFactory) -> int {\n    let value = factory.value();\n    let copy = value;\n    return value + copy;\n}\n";
+    assert check_ownership(parse_program(method_source)).length == 0;
+}
+
+test "ownership: inferred receiver and self preserve Task method identity" ![io] {
+    let inferred_source = "struct TaskFactory {\n    fn value(self) -> Task<int> { return spawn fn() -> int { return 7; }; }\n}\nfn f() -> int {\n    let factory = TaskFactory {};\n    let h = factory.value();\n    let first = await h;\n    return await h;\n}\n";
+    let inferred_warnings = check_ownership(parse_program(inferred_source));
+    assert inferred_warnings.length == 1;
+    assert inferred_warnings[0].code == "E0837";
+
+    let self_source = "struct TaskFactory {\n    fn value(self) -> Task<int> { return spawn fn() -> int { return 7; }; }\n    fn twice(self) -> int {\n        let h = self.value();\n        let first = await h;\n        return await h;\n    }\n}\n";
+    let self_warnings = check_ownership(parse_program(self_source));
+    assert self_warnings.length == 1;
+    assert self_warnings[0].code == "E0837";
+
+    let global_source = "struct TaskFactory {\n    fn value(self) -> Task<int> { return spawn fn() -> int { return 7; }; }\n}\nlet factory = TaskFactory {};\nfn f() -> int {\n    let h = factory.value();\n    let first = await h;\n    return await h;\n}\n";
+    let global_warnings = check_ownership(parse_program(global_source));
+    assert global_warnings.length == 1;
+    assert global_warnings[0].code == "E0837";
+}
+
+test "ownership: generic receiver spelling resolves Task method identity" ![io] {
+    let source = "struct TaskFactory<T> { value: T;\n    fn task(self) -> Task<int> { return spawn fn() -> int { return 7; }; }\n}\nfn f(factory: TaskFactory<int>) -> int {\n    let h = factory.task();\n    let first = await h;\n    return await h;\n}\n";
+    let warnings = check_ownership(parse_program(source));
+    assert warnings.length == 1;
+    assert warnings[0].code == "E0837";
+}
+
+test "ownership: nested and literal receivers resolve Task method identity" ![io] {
+    let nested_source = "struct TaskFactory {\n    fn task(self) -> Task<int> { return spawn fn() -> int { return 7; }; }\n}\nstruct Wrapper { factory: TaskFactory }\nfn f(wrapper: Wrapper) -> int {\n    let h = wrapper.factory.task();\n    let first = await h;\n    return await h;\n}\n";
+    let nested_warnings = check_ownership(parse_program(nested_source));
+    assert nested_warnings.length == 1;
+    assert nested_warnings[0].code == "E0837";
+
+    let literal_source = "struct TaskFactory {\n    fn task(self) -> Task<int> { return spawn fn() -> int { return 7; }; }\n}\nfn f() -> int {\n    let h = TaskFactory {}.task();\n    let first = await h;\n    return await h;\n}\n";
+    let literal_warnings = check_ownership(parse_program(literal_source));
+    assert literal_warnings.length == 1;
+    assert literal_warnings[0].code == "E0837";
+}
+
+test "ownership: nested fresh Task method cannot escape its nursery" ![io] {
+    let source = "struct TaskFactory {\n    fn task(self) -> Task<int> { return spawn fn() -> int { return 7; }; }\n}\nstruct Wrapper { factory: TaskFactory }\nfn f(wrapper: Wrapper) -> int {\n    let mut escaped: Task<int>[] = [];\n    routine { escaped.push(wrapper.factory.task()); }\n    return 0;\n}\n";
+    let warnings = check_ownership(parse_program(source));
+    assert warnings.length == 1;
+    assert warnings[0].code == "E0838";
+    assert warnings[0].binding_name == "escaped";
+}
+
+test "ownership: imported Task return metadata preserves affine identity" ![io] {
+    let source = "import { make_task } from \"worker\";\nfn f() -> int {\n    let h = make_task();\n    let first = await h;\n    return await h;\n}\n";
+    let effects: string[] = [];
+    let imports = append_import_function_signature_from_module(empty_import_symbols(), "make_task", effects, false, "worker", "Task<int>");
+    let warnings = check_ownership_with_imports(parse_program(source), imports);
+    assert warnings.length == 1;
+    assert warnings[0].code == "E0837";
+}
+
+test "ownership: Task-bearing aggregate parameters and self are affine" ![io] {
+    let parameter_source = "struct Holder { task: Task<int>; }\nfn f(holder: Holder) -> int {\n    let first = await holder.task;\n    return await holder.task;\n}\n";
+    let parameter_warnings = check_ownership(parse_program(parameter_source));
+    assert parameter_warnings.length == 1;
+    assert parameter_warnings[0].code == "E0837";
+    assert parameter_warnings[0].binding_name == "holder";
+
+    let self_source = "struct Holder { task: Task<int>;\n    fn twice(self) -> int {\n        let first = await self.task;\n        return await self.task;\n    }\n}\n";
+    let self_warnings = check_ownership(parse_program(self_source));
+    assert self_warnings.length == 1;
+    assert self_warnings[0].code == "E0837";
+    assert self_warnings[0].binding_name == "self";
+}
+
+test "ownership: repeated method calls consume a Task-bearing receiver" ![io] {
+    let source = "struct Holder { task: Task<int>;\n    fn take(self) -> int { return await self.task; }\n}\nfn f(holder: Holder) -> int {\n    let first = holder.take();\n    return holder.take();\n}\n";
+    let warnings = check_ownership(parse_program(source));
+    assert warnings.length == 1;
+    assert warnings[0].code == "E0837";
+    assert warnings[0].binding_name == "holder";
+}
+
+test "ownership: for targets retain nursery Task provenance" ![io] {
+    let source = "fn f() -> int {\n    let mut escaped: Task<int>[] = [];\n    routine {\n        let handles: Task<int>[] = [spawn fn() -> int { return 7; }];\n        for handle in handles { escaped.push(handle); }\n    }\n    return 0;\n}\n";
+    let warnings = check_ownership(parse_program(source));
+    assert warnings.length == 1;
+    assert warnings[0].code == "E0838";
+    assert warnings[0].binding_name == "escaped";
+}
+
+test "ownership: first-class Task-returning callables preserve identity" ![io] {
+    let lambda_source = "fn f() -> int {\n    let make = fn() -> Task<int> { return spawn fn() -> int { return 7; }; };\n    let h = make();\n    let first = await h;\n    return await h;\n}\n";
+    let lambda_warnings = check_ownership(parse_program(lambda_source));
+    assert lambda_warnings.length == 1;
+    assert lambda_warnings[0].code == "E0837";
+    assert lambda_warnings[0].binding_name == "h";
+
+    let moved_source = "fn make_task() -> Task<int> { return spawn fn() -> int { return 7; }; }\nfn f() -> int {\n    let make = make_task;\n    let h = make();\n    let first = await h;\n    return await h;\n}\n";
+    let moved_warnings = check_ownership(parse_program(moved_source));
+    assert moved_warnings.length == 1;
+    assert moved_warnings[0].code == "E0837";
+}
+
+test "ownership: generic aggregate Task fields specialize without false positives" ![io] {
+    let task_source = "struct Box<T> { value: T; }\nfn f(box: Box<Task<int>>) -> int {\n    let first = await box.value;\n    return await box.value;\n}\n";
+    let task_warnings = check_ownership(parse_program(task_source));
+    assert task_warnings.length == 1;
+    assert task_warnings[0].code == "E0837";
+    assert task_warnings[0].binding_name == "box";
+
+    let copy_source = "struct Box<T> { value: T; }\nfn f(box: Box<int>) -> int {\n    let first = box.value;\n    return box.value + first;\n}\n";
+    assert check_ownership(parse_program(copy_source)).length == 0;
+}
+
+test "ownership: callable parameters preserve Task return identity" ![io] {
+    let source = "fn use(make: fn() -> Task<int>) -> int {\n    let h = make();\n    let first = await h;\n    return await h;\n}\n";
+    let warnings = check_ownership(parse_program(source));
+    assert warnings.length == 1;
+    assert warnings[0].code == "E0837";
+    assert warnings[0].binding_name == "h";
+
+    let higher_order_source = "fn use(make: fn(fn() -> int) -> Task<int>, callback: fn() -> int) -> int {\n    let h = make(callback);\n    let first = await h;\n    return await h;\n}\n";
+    let higher_order_warnings = check_ownership(parse_program(higher_order_source));
+    assert higher_order_warnings.length == 1;
+    assert higher_order_warnings[0].code == "E0837";
+    assert higher_order_warnings[0].binding_name == "h";
+}
+
+test "ownership: nested Task-returning functions preserve identity in their block" ![io] {
+    let source = "fn f() -> int {\n    {\n        fn make() -> Task<int> { return spawn fn() -> int { return 7; }; }\n        let h = make();\n        let first = await h;\n        let second = await h;\n    }\n    return 0;\n}\n";
+    let warnings = check_ownership(parse_program(source));
+    assert warnings.length == 1;
+    assert warnings[0].code == "E0837";
+    assert warnings[0].binding_name == "h";
+
+    let routine_source = "fn f() -> int {\n    let mut escaped: Task<int>[] = [];\n    routine {\n        fn make() -> Task<int> { return spawn fn() -> int { return 7; }; }\n        escaped.push(make());\n    }\n    return 0;\n}\n";
+    let routine_warnings = check_ownership(parse_program(routine_source));
+    assert routine_warnings.length == 1;
+    assert routine_warnings[0].code == "E0838";
+    assert routine_warnings[0].binding_name == "escaped";
+
+    let for_source = "fn f() -> int {\n    for value in [1] {\n        fn make() -> Task<int> { return spawn fn() -> int { return value; }; }\n        let h = make();\n        let first = await h;\n        let second = await h;\n    }\n    return 0;\n}\n";
+    let for_warnings = check_ownership(parse_program(for_source));
+    assert for_warnings.length == 1;
+    assert for_warnings[0].code == "E0837";
+
+    let match_source = "fn f(value: int) -> int {\n    match value {\n        other => {\n            fn make() -> Task<int> { return spawn fn() -> int { return other; }; }\n            let h = make();\n            let first = await h;\n            let second = await h;\n        }\n    }\n    return 0;\n}\n";
+    let match_warnings = check_ownership(parse_program(match_source));
+    assert match_warnings.length == 1;
+    assert match_warnings[0].code == "E0837";
+}
+
+test "ownership: Task-returning identity lambda does not invent nursery provenance" ![io] {
+    let source = "fn f(ambient: Task<int>) -> int {\n    let identity = fn(h: Task<int>) -> Task<int> { return h; };\n    let mut escaped: Task<int> = spawn fn() -> int { return 1; };\n    routine { escaped = identity(ambient); }\n    return await escaped;\n}\n";
+    assert check_ownership(parse_program(source)).length == 0;
+
+    let fresh_source = "fn f() -> int {\n    let mut escaped: Task<int>[] = [];\n    routine {\n        let make = fn() -> Task<int> { return spawn fn() -> int { return 7; }; };\n        escaped.push(make());\n    }\n    return 0;\n}\n";
+    let fresh_warnings = check_ownership(parse_program(fresh_source));
+    assert fresh_warnings.length == 1;
+    assert fresh_warnings[0].code == "E0838";
+}
+
+test "ownership: Task-bearing aggregate methods cannot hide nursery arguments" ![io] {
+    let source = "let mut escaped: Task<int>[] = [];\nstruct Sink { held: Task<int>;\n    fn stash(self, h: Task<int>) { escaped.push(h); }\n}\nfn f(sink: Sink) -> int {\n    routine { sink.stash(spawn fn() -> int { return 7; }); }\n    return 0;\n}\n";
+    let warnings = check_ownership(parse_program(source));
+    assert warnings.length == 1;
+    assert warnings[0].code == "E0838";
+}
+
+test "ownership: deeply nested generic Task aggregates remain affine" ![io] {
+    let mut nested_type = "Task<int>";
+    let mut access = "box";
+    let mut depth: int = 0;
+    loop {
+        if depth >= 12 { break; }
+        nested_type = "Box<" + nested_type + ">";
+        access = access + ".value";
+        depth += 1;
+    }
+    let source = "struct Box<T> { value: T; }\nfn f(box: " + nested_type
+        + ") -> int {\n    let first = await "
+        + access
+        + ";\n    return await "
+        + access
+        + ";\n}\n";
+    let warnings = check_ownership(parse_program(source));
+    assert warnings.length == 1;
+    assert warnings[0].code == "E0837";
+    assert warnings[0].binding_name == "box";
 }

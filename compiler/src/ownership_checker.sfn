@@ -10,7 +10,7 @@
 // exactly once.
 //
 // What this pass enforces (scoped strictly to owned/affine-typed
-// bindings — `OwnedBuf`, `Affine<T>`, `Linear<T>`; every other value is
+// bindings — `OwnedBuf`, `Affine<T>`, `Linear<T>`, `Task<T>`; every other value is
 // copyable and untracked, so the compiler's own source — which uses no
 // owned types — is unaffected and keeps self-hosting):
 //
@@ -50,6 +50,12 @@
 //     and exempt. Consumption is recognized straight-line within the
 //     declaring scope (the narrow 1.0 subset; branch-local moves are not
 //     lifted, matching the use-after-move analysis).
+//   - **Task handle single-use** — direct `await`, movement into an array,
+//     and `join_all` consume `Task<T>` / `Task<T>[]`; a later use raises
+//     concurrency-specific `E0837` rather than generic `E0901`.
+//   - **Task nursery lifetime** — a task spawned in a `routine {}` may be
+//     stored locally and consumed before exit, but a still-live handle in a
+//     parent binding at nursery exit raises `E0838`.
 //
 //   Diagnostics carry two locations — the offending use plus the move /
 //   free that invalidated it — embedded in the message (the `Diagnostic`
@@ -62,14 +68,12 @@
 // move-and-consume program (`let y = x; consume(y);`, `x` never touched
 // again) compiles with zero findings — no false positives.
 //
-// Self-host invariant (load-bearing): branch-local moves must NOT leak
-// to the parent walk. `_nested_block_scope` restores `bindings:
-// scope.bindings` on child-scope exit, so a `return self;` inside an
-// `if` (e.g. `owned_buf_append`'s several early returns) does not mark
-// `self` moved for the sibling/body reads that follow. The only owned-
-// typed runtime module (`runtime/sfn/memory/ownedbuf.sfn`) relies on
-// this to self-host clean. A future flow-sensitive join that propagated
-// branch moves outward would have to keep that file green.
+// Self-host invariant (load-bearing): generic owned-value moves retain their
+// established lexical floor, so `OwnedBuf` early-return patterns keep
+// self-hosting. Task bindings are the deliberate exception: unconditional
+// blocks propagate their state, while alternatives and maybe-zero loops use a
+// conservative `owned`/`moved` join. This closes Task duplication without
+// changing the mature generic ownership behavior.
 //
 // The `unsafe` boundary (E2 / #1211) is unchanged: `unsafe { }`
 // interiors and `unsafe fn` bodies are skipped — the author-asserted
@@ -92,12 +96,23 @@ import {
     Statement
 } from "./ast";
 import { render_diagnostic } from "./diagnostics_render";
+import { ImportSymbolTable, empty_import_symbols } from "./effect_imports";
 import { number_to_string } from "./num_format";
+import {
+    block_proves_fresh_task_returns,
+    declared_callable_key,
+    fresh_task_key,
+    gather_block_task_returning_names,
+    gather_task_returning_names,
+    task_field_type,
+    task_method_key,
+    task_type_is_bearing
+} from "./ownership_task_provenance";
 import { Token, TokenKind } from "./token";
 import { LocalBinding, analyze_lambda } from "./typecheck_captures";
 import { Diagnostic, diagnostic_to_diag } from "./typecheck_types";
-import { is_linear_type, is_owned_type } from "./typecheck_types/expr_type_rules";
-import { is_identifier_char } from "./typecheck_types/text_utils";
+import { is_linear_type, is_owned_type, is_task_type } from "./typecheck_types/expr_type_rules";
+import { is_identifier_char, trim_text } from "./typecheck_types/text_utils";
 
 // One tracked binding. `state` is the lattice: "owned" on entry,
 // "moved" once a move site consumes it, "freed" once a disposer consumes
@@ -113,15 +128,19 @@ import { is_identifier_char } from "./typecheck_types/text_utils";
 // wins.
 struct OwnershipBinding {
     name: string;
+    declared_type: string;
     state: string;
     span: SourceSpan?;
     is_owned: boolean;
     is_linear: boolean;
+    is_task: boolean;
+    nursery_bound: boolean;
+    nursery_span: SourceSpan?;
     moved_span: SourceSpan?;
 }
 
 // An ownership finding. Findings mint `severity == "error"` with a
-// `code` (`E0901`–`E0907`), the offending-use token (`trigger`), and the
+// `code` (`E0837`/`E0838`, `E0901`–`E0907`), the offending-use token (`trigger`), and the
 // move/free-site token (`moved_trigger`) so callers and tests can
 // inspect both spans structurally; the rendered message embeds both
 // locations.
@@ -142,12 +161,16 @@ struct OwnershipWarning {
 // of every child scope even though child bindings are discarded.
 // `extern_names` is the program-level set of `extern fn` names, gathered
 // once and threaded read-only so the `E0906` escape check can recognize
-// an FFI callee without re-walking the program.
+// an FFI callee without re-walking the program. `routine_outer_count` is -1
+// outside a nursery and otherwise records the parent-binding prefix whose live
+// nursery-origin Task values must not cross the current routine boundary.
 struct OwnershipScope {
     bindings: OwnershipBinding[];
     tracked: int;
     findings: OwnershipWarning[];
     extern_names: string[];
+    task_returning_names: string[];
+    routine_outer_count: int;
 }
 
 // Program-level result: the binding-coverage summary plus the findings
@@ -250,7 +273,7 @@ fn _mark_binding_moved_at(bindings: OwnershipBinding[], name: string, move_span:
         if index >= bindings.length { break; }
         if index == last {
             result.push(OwnershipBinding {
-                name: bindings[index].name, state: "moved", span: bindings[index].span, is_owned: bindings[index].is_owned, is_linear: bindings[index].is_linear, moved_span: move_span
+                name: bindings[index].name, declared_type: bindings[index].declared_type, state: "moved", span: bindings[index].span, is_owned: bindings[index].is_owned, is_linear: bindings[index].is_linear, is_task: bindings[index].is_task, nursery_bound: bindings[index].nursery_bound, nursery_span: bindings[index].nursery_span, moved_span: move_span
             });
         } else { result.push(bindings[index]); }
         index += 1;
@@ -270,7 +293,7 @@ fn _mark_binding_freed_at(bindings: OwnershipBinding[], name: string, free_span:
         if index >= bindings.length { break; }
         if index == last {
             result.push(OwnershipBinding {
-                name: bindings[index].name, state: "freed", span: bindings[index].span, is_owned: bindings[index].is_owned, is_linear: bindings[index].is_linear, moved_span: free_span
+                name: bindings[index].name, declared_type: bindings[index].declared_type, state: "freed", span: bindings[index].span, is_owned: bindings[index].is_owned, is_linear: bindings[index].is_linear, is_task: bindings[index].is_task, nursery_bound: bindings[index].nursery_bound, nursery_span: bindings[index].nursery_span, moved_span: free_span
             });
         } else { result.push(bindings[index]); }
         index += 1;
@@ -288,12 +311,29 @@ fn mark_binding_moved(bindings: OwnershipBinding[], name: string) -> OwnershipBi
 // -------------------------------------------------------------------
 fn _push_finding(scope: OwnershipScope, finding: OwnershipWarning) -> OwnershipScope {
     let mut findings = scope.findings;
+    let mut existing_index: int = 0;
+    loop {
+        if existing_index >= findings.length { break; }
+        let existing = findings[existing_index];
+        if existing.code == finding.code && existing.binding_name == finding.binding_name {
+            let existing_trigger = existing.trigger;
+            let new_trigger = finding.trigger;
+            if existing_trigger != null && new_trigger != null {
+                if existing_trigger.line == new_trigger.line && existing_trigger.column == new_trigger.column {
+                    return scope;
+                }
+            }
+        }
+        existing_index += 1;
+    }
     findings.push(finding);
     return OwnershipScope {
         bindings: scope.bindings,
         tracked: scope.tracked,
         findings: findings,
-        extern_names: scope.extern_names
+        extern_names: scope.extern_names,
+        task_returning_names: scope.task_returning_names,
+        routine_outer_count: scope.routine_outer_count
     };
 }
 
@@ -301,7 +341,21 @@ fn _make_finding(name: string, use_span: SourceSpan?, moved_span: SourceSpan?, c
     let use_loc = _span_location(use_span);
     let moved_loc = _span_location(moved_span);
     let mut message: string = "";
-    if code == "E0904" {
+    if code == "E0837" {
+        message = "task handle `" + name + "` is consumed more than once"
+            + use_loc
+            + "\nnote: `"
+            + name
+            + "` was first consumed here"
+            + moved_loc
+            + "\nhelp: each `Task<T>` may be awaited exactly once, directly or through `join_all`";
+    } else if code == "E0838" {
+        message = "task handle `" + name + "` escapes its `routine` nursery"
+            + use_loc
+            + "\nnote: the destination binding outlives the nursery"
+            + moved_loc
+            + "\nhelp: await the handle or consume its handle array with `join_all` before the `routine` ends";
+    } else if code == "E0904" {
         message = "second live binding to uniquely-owned value `" + name + "`"
             + use_loc
             + "\nnote: `"
@@ -374,9 +428,11 @@ fn _consume_identifier(scope: OwnershipScope, name: string, use_span: SourceSpan
     if binding.state == "freed" {
         return _push_finding(scope, _make_finding(name, use_span, binding.moved_span, "E0903"));
     }
-    if binding.state == "moved" {
+    if binding.state == "moved" || binding.state == "maybe_moved" {
         let mut code: string = "E0901";
-        if is_let_init { code = "E0904"; }
+        if binding.is_task { code = "E0837"; } else if is_let_init {
+            code = "E0904";
+        }
         return _push_finding(scope, _make_finding(name, use_span, binding.moved_span, code));
     }
     let moved = _mark_binding_moved_at(scope.bindings, name, use_span);
@@ -384,7 +440,9 @@ fn _consume_identifier(scope: OwnershipScope, name: string, use_span: SourceSpan
         bindings: moved,
         tracked: scope.tracked,
         findings: scope.findings,
-        extern_names: scope.extern_names
+        extern_names: scope.extern_names,
+        task_returning_names: scope.task_returning_names,
+        routine_outer_count: scope.routine_outer_count
     };
 }
 
@@ -400,8 +458,10 @@ fn _check_read(scope: OwnershipScope, name: string, use_span: SourceSpan?) -> Ow
     if binding.state == "freed" {
         return _push_finding(scope, _make_finding(name, use_span, binding.moved_span, "E0903"));
     }
-    if binding.state == "moved" {
-        return _push_finding(scope, _make_finding(name, use_span, binding.moved_span, "E0901"));
+    if binding.state == "moved" || binding.state == "maybe_moved" {
+        let mut code: string = "E0901";
+        if binding.is_task { code = "E0837"; }
+        return _push_finding(scope, _make_finding(name, use_span, binding.moved_span, code));
     }
     return scope;
 }
@@ -428,8 +488,8 @@ fn _consume_call_args(arguments: Expression[], scope: OwnershipScope, extern_cal
                     }
                 }
             }
-            next = _consume_identifier(next, argument.name, argument.span, false);
-        } else { next = _scope_after_expression(argument, next); }
+            next = _consume_task_value(next, argument, false);
+        } else { next = _consume_task_value(next, argument, false); }
         index += 1;
     }
     return next;
@@ -472,6 +532,239 @@ fn _consume_spawn_captures(scope: OwnershipScope, lambda: Expression, span: Sour
     return next;
 }
 
+// Ordinary closures may remain synchronous, so established OwnedBuf captures
+// keep their read-only behavior. Task handles are affine regardless of where
+// the closure runs, however: creating a closure that captures a Task moves the
+// handle into the closure environment. Lift only Task captures into the parent
+// state so the closure and its creator cannot both consume the same handle.
+fn _consume_task_lambda_captures(scope: OwnershipScope, lambda: Expression, span: SourceSpan?) -> OwnershipScope {
+    let empty: LocalBinding[] = [];
+    let result = analyze_lambda(empty, lambda);
+    let mut next = scope;
+    let mut index: int = 0;
+    loop {
+        if index >= result.free.length { break; }
+        let name = result.free[index];
+        let binding_index = _find_binding_index(next.bindings, name);
+        if binding_index >= 0 {
+            if next.bindings[binding_index].is_task {
+                next = _consume_identifier(next, name, span, false);
+            }
+        }
+        index += 1;
+    }
+    return next;
+}
+
+fn _lambda_captures_task(lambda: Expression, bindings: OwnershipBinding[]) -> boolean {
+    let empty: LocalBinding[] = [];
+    let result = analyze_lambda(empty, lambda);
+    let mut index: int = 0;
+    loop {
+        if index >= result.free.length { break; }
+        let binding_index = _find_binding_index(bindings, result.free[index]);
+        if binding_index >= 0 {
+            if bindings[binding_index].is_task { return true; }
+        }
+        index += 1;
+    }
+    return false;
+}
+
+fn _lambda_captures_nursery_task(lambda: Expression, scope: OwnershipScope) -> boolean {
+    let empty: LocalBinding[] = [];
+    let result = analyze_lambda(empty, lambda);
+    let mut index: int = 0;
+    loop {
+        if index >= result.free.length { break; }
+        let binding_index = _find_binding_index(scope.bindings, result.free[index]);
+        if binding_index >= 0 {
+            if scope.bindings[binding_index].is_task && scope.bindings[binding_index].nursery_bound {
+                return true;
+            }
+        }
+        index += 1;
+    }
+    return false;
+}
+
+fn _lambda_nursery_origin_span(lambda: Expression, scope: OwnershipScope) -> SourceSpan? {
+    let empty: LocalBinding[] = [];
+    let result = analyze_lambda(empty, lambda);
+    let mut index: int = 0;
+    loop {
+        if index >= result.free.length { break; }
+        let binding_index = _find_binding_index(scope.bindings, result.free[index]);
+        if binding_index >= 0 {
+            let binding = scope.bindings[binding_index];
+            if binding.is_task && binding.nursery_bound {
+                return binding.nursery_span;
+            }
+        }
+        index += 1;
+    }
+    return lambda.span;
+}
+
+fn _member_root_name(expression: Expression?) -> string {
+    if expression == null { return ""; }
+    if expression.variant == "Identifier" { return expression.name; }
+    if expression.variant == "Member" {
+        return _member_root_name(expression.object);
+    }
+    if expression.variant == "Index" {
+        return _member_root_name(expression.sequence);
+    }
+    return "";
+}
+
+fn _expression_declared_type(expression: Expression?, bindings: OwnershipBinding[], task_names: string[]) -> string {
+    if expression == null { return ""; }
+    if expression.variant == "Identifier" {
+        let index = _find_binding_index(bindings, expression.name);
+        if index >= 0 { return bindings[index].declared_type; }
+        return "";
+    }
+    if expression.variant == "Struct" {
+        if expression.type_name.length > 0 {
+            return expression.type_name[expression.type_name.length - 1];
+        }
+        return "";
+    }
+    if expression.variant == "Member" {
+        let owner_type = _expression_declared_type(expression.object, bindings, task_names);
+        if owner_type.length == 0 { return ""; }
+        return task_field_type(task_names, owner_type, expression.member);
+    }
+    if expression.variant == "Index" {
+        let sequence_type = trim_text(_expression_declared_type(expression.sequence, bindings, task_names));
+        if sequence_type.length >= 2 {
+            if substring(sequence_type, sequence_type.length - 2, sequence_type.length) == "[]" {
+                return trim_text(substring(sequence_type, 0, sequence_type.length - 2));
+            }
+        }
+    }
+    return "";
+}
+
+fn _task_callable_type(return_type: string, is_fresh: boolean) -> string {
+    if is_fresh { return "fresh-task-callable:" + return_type; }
+    return "task-callable:" + return_type;
+}
+
+fn _task_callable_type_from_annotation(type_text: string) -> string {
+    let mut index: int = 0;
+    let mut paren_depth: int = 0;
+    let mut bracket_depth: int = 0;
+    let mut angle_depth: int = 0;
+    loop {
+        if index + 1 >= type_text.length { break; }
+        if type_text[index] == "(" { paren_depth += 1; } else if type_text[index] == ")" {
+            if paren_depth > 0 { paren_depth -= 1; }
+        } else if type_text[index] == "[" { bracket_depth += 1; } else if type_text[index] == "]" {
+            if bracket_depth > 0 { bracket_depth -= 1; }
+        } else if type_text[index] == "<" { angle_depth += 1; } else if type_text[index] == ">" {
+            if angle_depth > 0 { angle_depth -= 1; }
+        } else if type_text[index] == "-" && type_text[index + 1] == ">"
+            && paren_depth == 0
+            && bracket_depth == 0
+            && angle_depth == 0 {
+            let return_type = trim_text(substring(type_text, index + 2, type_text.length));
+            if is_task_type(return_type) {
+                return _task_callable_type(return_type, false);
+            }
+            return "";
+        }
+        index += 1;
+    }
+    return "";
+}
+
+fn _is_task_callable_type(type_text: string) -> boolean {
+    if type_text.length >= 14 && substring(type_text, 0, 14) == "task-callable:" {
+        return true;
+    }
+    if type_text.length >= 20 && substring(type_text, 0, 20) == "fresh-task-callable:" {
+        return true;
+    }
+    return false;
+}
+
+fn _is_fresh_task_callable_type(type_text: string) -> boolean {
+    return type_text.length >= 20 && substring(type_text, 0, 20) == "fresh-task-callable:";
+}
+
+fn _inferred_task_callable_type(expression: Expression?, bindings: OwnershipBinding[], task_names: string[]) -> string {
+    if expression == null { return ""; }
+    if expression.variant == "Lambda" {
+        let return_type = expression.return_type;
+        if return_type != null {
+            if is_task_type(return_type.text) {
+                let is_fresh = block_proves_fresh_task_returns(expression.body, task_names);
+                return _task_callable_type(return_type.text, is_fresh);
+            }
+        }
+        return "";
+    }
+    if expression.variant == "Identifier" {
+        let index = _find_binding_index(bindings, expression.name);
+        if index >= 0 {
+            let declared_type = bindings[index].declared_type;
+            if _is_task_callable_type(declared_type) { return declared_type; }
+            return "";
+        }
+        if _name_in_list(task_names, expression.name) {
+            return _task_callable_type("Task<inferred>", _name_in_list(task_names, _fresh_task_key(expression.name)));
+        }
+    }
+    return "";
+}
+
+// Preserve enough inferred Task shape for the ownership pass to distinguish a
+// seeded handle collection (`[spawn ...]`) from an arbitrary Task-bearing
+// aggregate or closure. These synthetic spellings never reach semantic type
+// checking or lowering; they only keep provenance precise when the source has
+// no annotation.
+fn _inferred_task_binding_type(expression: Expression?, bindings: OwnershipBinding[], task_names: string[]) -> string {
+    if expression == null { return ""; }
+    if expression.variant == "Spawn" { return "Task<inferred>"; }
+    if expression.variant == "Identifier" {
+        let index = _find_binding_index(bindings, expression.name);
+        if index >= 0 {
+            let declared_type = trim_text(bindings[index].declared_type);
+            if is_task_type(declared_type) { return declared_type; }
+        }
+        return "";
+    }
+    if expression.variant == "Index" || expression.variant == "Member" {
+        let declared_type = trim_text(_expression_declared_type(expression, bindings, task_names));
+        if is_task_type(declared_type) { return declared_type; }
+        return "";
+    }
+    if expression.variant == "Call" {
+        if _expression_is_task_value(expression, bindings, task_names) {
+            return "Task<inferred>";
+        }
+        return "";
+    }
+    if expression.variant == "Conditional" {
+        let then_type = _inferred_task_binding_type(expression.then_value, bindings, task_names);
+        let else_type = _inferred_task_binding_type(expression.else_value, bindings, task_names);
+        if then_type.length > 0 { return then_type; }
+        return else_type;
+    }
+    if expression.variant == "Array" {
+        let mut index: int = 0;
+        loop {
+            if index >= expression.elements.length { break; }
+            let element_type = _inferred_task_binding_type(expression.elements[index], bindings, task_names);
+            if element_type.length > 0 { return element_type + "[]"; }
+            index += 1;
+        }
+    }
+    return "";
+}
+
 // -------------------------------------------------------------------
 // Scope plumbing
 // -------------------------------------------------------------------
@@ -486,16 +779,18 @@ fn _copy_bindings(bindings: OwnershipBinding[]) -> OwnershipBinding[] {
     return result;
 }
 
-fn _enter_binding(scope: OwnershipScope, name: string, span: SourceSpan?, is_owned: boolean, is_linear: boolean) -> OwnershipScope {
+fn _enter_binding(scope: OwnershipScope, name: string, declared_type: string, span: SourceSpan?, is_owned: boolean, is_linear: boolean, is_task: boolean, nursery_bound: boolean, nursery_span: SourceSpan?) -> OwnershipScope {
     let mut bindings = scope.bindings;
     bindings.push(OwnershipBinding {
-        name: name, state: "owned", span: span, is_owned: is_owned, is_linear: is_linear, moved_span: null
+        name: name, declared_type: declared_type, state: "owned", span: span, is_owned: is_owned, is_linear: is_linear, is_task: is_task, nursery_bound: nursery_bound, nursery_span: nursery_span, moved_span: null
     });
     return OwnershipScope {
         bindings: bindings,
         tracked: scope.tracked + 1,
         findings: scope.findings,
-        extern_names: scope.extern_names
+        extern_names: scope.extern_names,
+        task_returning_names: scope.task_returning_names,
+        routine_outer_count: scope.routine_outer_count
     };
 }
 
@@ -509,13 +804,9 @@ fn _enter_binding(scope: OwnershipScope, name: string, span: SourceSpan?, is_own
 // (params + body-level lets), or the parent binding count for a nested
 // block (block-local lets only).
 //
-// Limitation (narrow 1.0 subset): consumption is recognized only when it
-// happens in the same lexical scope as the declaration. A linear value
-// consumed solely inside a nested block does not propagate its
-// "moved"/"freed" state back to the declaring scope (branch-local moves
-// are deliberately not lifted, mirroring the use-after-move analysis), so
-// it would still be flagged here. Consume linear values on a straight-line
-// path within their declaring scope.
+// Limitation (narrow 1.0 subset): generic Linear<T> consumption is recognized
+// only in its declaring lexical scope. Task<T> uses the separate flow-aware
+// propagation and join below.
 fn _sweep_unconsumed_linear(scope: OwnershipScope, bindings: OwnershipBinding[], start: int) -> OwnershipScope {
     let mut next = scope;
     let mut index = start;
@@ -532,30 +823,282 @@ fn _sweep_unconsumed_linear(scope: OwnershipScope, bindings: OwnershipBinding[],
     return next;
 }
 
-// Walk a nested block as a child scope: the child sees the parent's
-// bindings (copied so child declarations cannot leak back); the
-// monotone `tracked` count and the accumulated `findings` flow out.
+fn _task_state_after_paths(left: string, right: string) -> string {
+    if left == right { return left; }
+    return "maybe_moved";
+}
+
+fn _binding_has_live_nursery_task(binding: OwnershipBinding) -> boolean {
+    if !binding.nursery_bound { return false; }
+    if binding.state == "moved" { return false; }
+    if binding.state == "freed" { return false; }
+    return true;
+}
+
+// Join the Task state of two possible paths for the bindings that existed
+// before a child scope. Non-Task ownership keeps its established lexical
+// behavior; Task values require a conservative path join so a possible move
+// or nursery escape cannot disappear across `if`, `match`, or a loop.
+fn _merge_task_binding_paths(left: OwnershipBinding[], right: OwnershipBinding[], count: int) -> OwnershipBinding[] {
+    let mut result: OwnershipBinding[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= left.length { break; }
+        let lb = left[index];
+        if index < count && index < right.length && lb.is_task && right[index].is_task {
+            let rb = right[index];
+            let left_live = _binding_has_live_nursery_task(lb);
+            let right_live = _binding_has_live_nursery_task(rb);
+            let mut nursery_span = lb.nursery_span;
+            if !left_live && right_live { nursery_span = rb.nursery_span; }
+            let mut moved_span = lb.moved_span;
+            if moved_span == null { moved_span = rb.moved_span; }
+            let merged = OwnershipBinding {
+                name: lb.name,
+                declared_type: lb.declared_type,
+                state: _task_state_after_paths(lb.state, rb.state),
+                span: lb.span,
+                is_owned: lb.is_owned,
+                is_linear: lb.is_linear,
+                is_task: true,
+                nursery_bound: left_live || right_live,
+                nursery_span: nursery_span,
+                moved_span: moved_span
+            };
+            result.push(merged);
+        } else { result.push(lb); }
+        index += 1;
+    }
+    return result;
+}
+
+// Propagate Task state through an unconditional lexical block while keeping
+// child declarations scoped. Generic ownership retains its existing block
+// floor; only Task state is strengthened for SFN-446.
+fn _propagate_parent_task_bindings(parent: OwnershipBinding[], child: OwnershipBinding[], count: int) -> OwnershipBinding[] {
+    let mut result: OwnershipBinding[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= parent.length { break; }
+        if index < count && index < child.length && parent[index].is_task
+            && child[index].is_task { result.push(child[index]); } else {
+            result.push(parent[index]);
+        }
+        index += 1;
+    }
+    return result;
+}
+
+// Walk an unconditional nested block as a child scope: the child sees the
+// parent's bindings, child declarations do not leak back, and Task moves /
+// nursery provenance on parent bindings propagate through the block.
 fn _nested_block_scope(block: Block, scope: OwnershipScope) -> OwnershipScope {
     let child_in = OwnershipScope {
         bindings: _copy_bindings(scope.bindings),
         tracked: scope.tracked,
         findings: scope.findings,
-        extern_names: scope.extern_names
+        extern_names: scope.extern_names,
+        task_returning_names: scope.task_returning_names,
+        routine_outer_count: scope.routine_outer_count
     };
     let child_out = _scope_after_block(block, child_in);
     // Sweep the block's own declarations (positions >= the parent count)
     // for unconsumed linear bindings before they are discarded.
     let swept = _sweep_unconsumed_linear(child_out, child_out.bindings, scope.bindings.length);
     return OwnershipScope {
-        bindings: scope.bindings,
+        bindings: _propagate_parent_task_bindings(scope.bindings, swept.bindings, scope.bindings.length),
         tracked: swept.tracked,
         findings: swept.findings,
-        extern_names: scope.extern_names
+        extern_names: scope.extern_names,
+        task_returning_names: scope.task_returning_names,
+        routine_outer_count: scope.routine_outer_count
+    };
+}
+
+// A loop body may execute zero times or repeatedly. Analyze a second
+// iteration from the first iteration's Task state so a repeated await/move
+// fires E0837 at the source operation, then join that result with the
+// zero-iteration entry path. The Task lattice stabilizes by the second pass.
+fn _block_reaches_next_iteration(block: Block) -> boolean {
+    let mut index: int = 0;
+    loop {
+        if index >= block.statements.length { break; }
+        let statement = block.statements[index];
+        if statement.variant == "BreakStatement" || statement.variant == "ReturnStatement"
+            || statement.variant == "ThrowStatement" { return false; }
+        index += 1;
+    }
+    return true;
+}
+
+fn _optional_block_scope(block: Block, scope: OwnershipScope) -> OwnershipScope {
+    let first_out = _nested_block_scope(block, scope);
+    if !_block_reaches_next_iteration(block) {
+        return OwnershipScope {
+            bindings: _merge_task_binding_paths(scope.bindings, first_out.bindings, scope.bindings.length),
+            tracked: first_out.tracked,
+            findings: first_out.findings,
+            extern_names: scope.extern_names,
+            task_returning_names: scope.task_returning_names,
+            routine_outer_count: scope.routine_outer_count
+        };
+    }
+    let second_in = OwnershipScope {
+        bindings: _copy_bindings(first_out.bindings),
+        tracked: first_out.tracked,
+        findings: first_out.findings,
+        extern_names: scope.extern_names,
+        task_returning_names: scope.task_returning_names,
+        routine_outer_count: scope.routine_outer_count
+    };
+    let second_out = _nested_block_scope(block, second_in);
+    return OwnershipScope {
+        bindings: _merge_task_binding_paths(scope.bindings, second_out.bindings, scope.bindings.length),
+        // Re-analysis is a flow fixpoint probe, not a second set of lexical
+        // declarations for the coverage summary.
+        tracked: first_out.tracked,
+        findings: second_out.findings,
+        extern_names: scope.extern_names,
+        task_returning_names: scope.task_returning_names,
+        routine_outer_count: scope.routine_outer_count
+    };
+}
+
+// Replace the current binding for `name` with a live Task value. Assignment
+// reinitializes a previously consumed task binding; `nursery_bound` records
+// whether the new value originated in the active routine and therefore must
+// be consumed before that nursery closes.
+fn _mark_task_binding_owned(bindings: OwnershipBinding[], name: string, nursery_bound: boolean, nursery_span: SourceSpan?, inferred_type: string) -> OwnershipBinding[] {
+    let last = _find_binding_index(bindings, name);
+    if last < 0 { return bindings; }
+    let mut result: OwnershipBinding[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= bindings.length { break; }
+        if index == last {
+            let binding = bindings[index];
+            let mut declared_type = binding.declared_type;
+            if declared_type.length == 0 && inferred_type.length > 0 {
+                declared_type = inferred_type;
+            }
+            result.push(OwnershipBinding {
+                name: binding.name, declared_type: declared_type, state: "owned", span: binding.span, is_owned: true, is_linear: binding.is_linear, is_task: true, nursery_bound: nursery_bound, nursery_span: nursery_span, moved_span: null
+            });
+        } else { result.push(bindings[index]); }
+        index += 1;
+    }
+    return result;
+}
+
+// Mark a task collection as containing at least one handle spawned in the
+// active nursery. A non-nursery push does not clear an existing marker: the
+// collection may still contain an earlier live nursery-bound handle.
+fn _mark_task_collection_nursery_bound(bindings: OwnershipBinding[], name: string, nursery_span: SourceSpan?) -> OwnershipBinding[] {
+    let last = _find_binding_index(bindings, name);
+    if last < 0 { return bindings; }
+    let binding = bindings[last];
+    if !binding.is_task { return bindings; }
+    return _mark_task_binding_owned(bindings, name, true, nursery_span, "");
+}
+
+fn _binding_prefix(bindings: OwnershipBinding[], count: int) -> OwnershipBinding[] {
+    let mut result: OwnershipBinding[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= bindings.length { break; }
+        if index >= count { break; }
+        result.push(bindings[index]);
+        index += 1;
+    }
+    return result;
+}
+
+fn _clear_nursery_bound_at(bindings: OwnershipBinding[], target: int) -> OwnershipBinding[] {
+    let mut result: OwnershipBinding[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= bindings.length { break; }
+        if index == target {
+            let binding = bindings[index];
+            result.push(OwnershipBinding {
+                name: binding.name, declared_type: binding.declared_type, state: binding.state, span: binding.span, is_owned: binding.is_owned, is_linear: binding.is_linear, is_task: binding.is_task, nursery_bound: false, nursery_span: null, moved_span: binding.moved_span
+            });
+        } else { result.push(bindings[index]); }
+        index += 1;
+    }
+    return result;
+}
+
+// At a routine boundary, only parent bindings can carry a handle beyond the
+// nursery. Routine-local bindings die with the scope and are safe even when
+// unused because the runtime nursery joins all registered children. A parent
+// task binding/collection marked nursery-bound is legal when it was consumed
+// in the routine; a still-live one is the E0838 escape.
+fn _sweep_nursery_escapes(scope: OwnershipScope, outer_count: int) -> OwnershipScope {
+    let mut next = scope;
+    let mut bindings = scope.bindings;
+    let mut index: int = 0;
+    loop {
+        if index >= bindings.length { break; }
+        if index >= outer_count { break; }
+        let binding = bindings[index];
+        if binding.is_task && binding.nursery_bound && (binding.state == "owned"
+            || binding.state == "maybe_moved") {
+            next = _push_finding(next, _make_finding(binding.name, binding.nursery_span, binding.span, "E0838"));
+            // The inner boundary owns this finding. Clear its provenance before
+            // propagating the parent binding so nested routines report once.
+            bindings = _clear_nursery_bound_at(bindings, index);
+        }
+        index += 1;
+    }
+    return OwnershipScope {
+        bindings: bindings,
+        tracked: next.tracked,
+        findings: next.findings,
+        extern_names: next.extern_names,
+        task_returning_names: next.task_returning_names,
+        routine_outer_count: next.routine_outer_count
+    };
+}
+
+// A routine is unconditional straight-line scope, so moves of parent Task
+// bindings inside it propagate back out (unlike branch scopes). This is also
+// the nursery-lifetime boundary: inspect live parent destinations before local
+// declarations are discarded, then restore the enclosing routine marker.
+fn _routine_block_scope(block: Block, scope: OwnershipScope) -> OwnershipScope {
+    let outer_count = scope.bindings.length;
+    let child_in = OwnershipScope {
+        bindings: _copy_bindings(scope.bindings),
+        tracked: scope.tracked,
+        findings: scope.findings,
+        extern_names: scope.extern_names,
+        task_returning_names: scope.task_returning_names,
+        routine_outer_count: outer_count
+    };
+    let child_out = _scope_after_block(block, child_in);
+    let linear_swept = _sweep_unconsumed_linear(child_out, child_out.bindings, outer_count);
+    let nursery_swept = _sweep_nursery_escapes(linear_swept, outer_count);
+    return OwnershipScope {
+        bindings: _binding_prefix(nursery_swept.bindings, outer_count),
+        tracked: nursery_swept.tracked,
+        findings: nursery_swept.findings,
+        extern_names: scope.extern_names,
+        task_returning_names: scope.task_returning_names,
+        routine_outer_count: scope.routine_outer_count
     };
 }
 
 fn _scope_after_block(block: Block, scope: OwnershipScope) -> OwnershipScope {
-    let mut current = scope;
+    // Every block form, including routine/for/match/catch/lambda bodies,
+    // gets its complete local callable table before statements are walked.
+    let mut current = OwnershipScope {
+        bindings: scope.bindings,
+        tracked: scope.tracked,
+        findings: scope.findings,
+        extern_names: scope.extern_names,
+        task_returning_names: gather_block_task_returning_names(block, scope.task_returning_names),
+        routine_outer_count: scope.routine_outer_count
+    };
     let mut index: int = 0;
     loop {
         if index >= block.statements.length { break; }
@@ -606,6 +1149,352 @@ fn _binding_is_linear(type_text: string, has_type: boolean, initializer: Express
     return false;
 }
 
+fn _task_method_key(type_name: string, method_name: string) -> string {
+    return task_method_key(type_name, method_name);
+}
+
+// Nursery provenance is stricter than Task result identity. A declared
+// `Task<T>` return proves that a call is affine, but it does not prove that the
+// returned handle was freshly spawned (an identity helper may return an
+// ambient Task argument). Fresh producers therefore use a separate key in the
+// same read-only name table.
+fn _fresh_task_key(callable_key: string) -> string {
+    return fresh_task_key(callable_key);
+}
+
+// Task identity is kept separately from the generic owned bit so reuse can
+// surface the concurrency-specific E0837 while ordinary affine values retain
+// E0901/E0904. The structured `Spawn` node covers the common inferred binding
+// (`let h = spawn ...`); identifier and non-empty array propagation preserve
+// identity across legal moves into a fresh binding/collection.
+fn _expression_is_task_value(expression: Expression?, bindings: OwnershipBinding[], task_returning_names: string[]) -> boolean {
+    if expression == null { return false; }
+    if expression.variant == "Spawn" { return true; }
+    if expression.variant == "Identifier" {
+        let index = _find_binding_index(bindings, expression.name);
+        if index >= 0 { return bindings[index].is_task; }
+        return false;
+    }
+    if expression.variant == "Index" {
+        let sequence_type = _expression_declared_type(expression.sequence, bindings, task_returning_names);
+        if is_task_type(sequence_type) { return true; }
+        let element_type = _expression_declared_type(expression, bindings, task_returning_names);
+        return task_type_is_bearing(task_returning_names, element_type);
+    }
+    if expression.variant == "Member" {
+        let member_type = _expression_declared_type(expression, bindings, task_returning_names);
+        if is_task_type(member_type) { return true; }
+        return task_type_is_bearing(task_returning_names, member_type);
+    }
+    if expression.variant == "Lambda" {
+        return _lambda_captures_task(expression, bindings);
+    }
+    if expression.variant == "Call" {
+        let callee = expression.callee;
+        if callee.variant == "Identifier" {
+            // A local binding shadows a same-named top-level/imported
+            // function. Retain Task result identity when the binding itself
+            // carries first-class callable return metadata.
+            let binding_index = _find_binding_index(bindings, callee.name);
+            if binding_index >= 0 {
+                return _is_task_callable_type(bindings[binding_index].declared_type);
+            }
+            return _name_in_list(task_returning_names, callee.name);
+        }
+        if callee.variant == "Member" {
+            let receiver = callee.object;
+            let receiver_type = _expression_declared_type(receiver, bindings, task_returning_names);
+            if receiver_type.length > 0 {
+                return _name_in_list(task_returning_names, _task_method_key(receiver_type, callee.member));
+            }
+            return false;
+        }
+        return false;
+    }
+    if expression.variant == "Array" {
+        let mut index: int = 0;
+        loop {
+            if index >= expression.elements.length { break; }
+            if _expression_is_task_value(expression.elements[index], bindings, task_returning_names) {
+                return true;
+            }
+            index += 1;
+        }
+    }
+    if expression.variant == "Conditional" {
+        return _expression_is_task_value(expression.then_value, bindings, task_returning_names)
+            || _expression_is_task_value(expression.else_value, bindings, task_returning_names);
+    }
+    if expression.variant == "Struct" {
+        let declared_type = _expression_declared_type(expression, bindings, task_returning_names);
+        if task_type_is_bearing(task_returning_names, declared_type) {
+            return true;
+        }
+    }
+    if expression.variant == "Object" || expression.variant == "Struct" {
+        let mut index: int = 0;
+        loop {
+            if index >= expression.fields.length { break; }
+            if _expression_is_task_value(expression.fields[index].value, bindings, task_returning_names) {
+                return true;
+            }
+            index += 1;
+        }
+    }
+    return false;
+}
+
+// Return the affine Task binding consumed when `expression` is moved. An
+// indexed Task collection is affine as a whole: moving one element consumes
+// the collection binding, preventing a second indexed extraction from
+// manufacturing another live handle to the same task.
+fn _task_source_binding_name(expression: Expression?, bindings: OwnershipBinding[], task_returning_names: string[]) -> string {
+    if expression == null { return ""; }
+    if expression.variant == "Identifier" {
+        let index = _find_binding_index(bindings, expression.name);
+        if index >= 0 {
+            if bindings[index].is_task { return expression.name; }
+        }
+        return "";
+    }
+    if expression.variant == "Index" || expression.variant == "Member" {
+        if !_expression_is_task_value(expression, bindings, task_returning_names) {
+            return "";
+        }
+        let root = _member_root_name(expression);
+        let index = _find_binding_index(bindings, root);
+        if index >= 0 {
+            if bindings[index].is_task { return root; }
+        }
+    }
+    return "";
+}
+
+fn _consume_task_source(scope: OwnershipScope, expression: Expression, is_let_init: boolean) -> OwnershipScope {
+    let source = _task_source_binding_name(expression, scope.bindings, scope.task_returning_names);
+    if source.length == 0 { return scope; }
+    let mut next = scope;
+    if expression.variant == "Index" {
+        next = _scope_after_expression(expression.index, next);
+    }
+    return _consume_identifier(next, source, expression.span, is_let_init);
+}
+
+// Consume an affine value even when its runtime source is selected by a
+// conditional. Each alternative is analyzed from the same post-condition
+// state, then Task states are joined so neither possible source can be reused
+// as though it were definitely untouched.
+fn _consume_task_value(scope: OwnershipScope, expression: Expression, is_let_init: boolean) -> OwnershipScope {
+    if expression.variant == "Conditional" && _expression_is_task_value(expression, scope.bindings, scope.task_returning_names) {
+        let base = _scope_after_expression(expression.condition, scope);
+        let then_out = _consume_task_value(base, expression.then_value, is_let_init);
+        let else_in = OwnershipScope {
+            bindings: _copy_bindings(base.bindings),
+            tracked: then_out.tracked,
+            findings: then_out.findings,
+            extern_names: base.extern_names,
+            task_returning_names: base.task_returning_names,
+            routine_outer_count: base.routine_outer_count
+        };
+        let else_out = _consume_task_value(else_in, expression.else_value, is_let_init);
+        return OwnershipScope {
+            bindings: _merge_task_binding_paths(then_out.bindings, else_out.bindings, base.bindings.length),
+            tracked: else_out.tracked,
+            findings: else_out.findings,
+            extern_names: base.extern_names,
+            task_returning_names: base.task_returning_names,
+            routine_outer_count: base.routine_outer_count
+        };
+    }
+    let source = _task_source_binding_name(expression, scope.bindings, scope.task_returning_names);
+    if source.length > 0 {
+        return _consume_task_source(scope, expression, is_let_init);
+    }
+    if expression.variant == "Identifier" {
+        return _consume_identifier(scope, expression.name, expression.span, is_let_init);
+    }
+    return _scope_after_expression(expression, scope);
+}
+
+fn _binding_is_task(type_text: string, has_type: boolean, initializer: Expression?, bindings: OwnershipBinding[], task_returning_names: string[]) -> boolean {
+    if has_type || type_text.length > 0 {
+        if is_task_type(type_text) { return true; }
+        if task_type_is_bearing(task_returning_names, type_text) { return true; }
+    }
+    return _expression_is_task_value(initializer, bindings, task_returning_names);
+}
+
+// True when the expression carries a task spawned in the active nursery.
+// The marker follows identifiers and arrays so a local `let h = spawn ...`
+// moved into an outer task array is still recognized as a nursery escape.
+fn _expression_is_nursery_bound(expression: Expression?, scope: OwnershipScope) -> boolean {
+    if expression == null { return false; }
+    if scope.routine_outer_count < 0 { return false; }
+    if expression.variant == "Spawn" { return true; }
+    if expression.variant == "Identifier" {
+        let index = _find_binding_index(scope.bindings, expression.name);
+        if index >= 0 { return scope.bindings[index].nursery_bound; }
+        return false;
+    }
+    if expression.variant == "Index" {
+        if !_expression_is_task_value(expression, scope.bindings, scope.task_returning_names) {
+            return false;
+        }
+        let sequence = expression.sequence;
+        let root = _member_root_name(sequence);
+        let index = _find_binding_index(scope.bindings, root);
+        if index >= 0 { return scope.bindings[index].nursery_bound; }
+        return false;
+    }
+    if expression.variant == "Member" {
+        if !_expression_is_task_value(expression, scope.bindings, scope.task_returning_names) {
+            return false;
+        }
+        let root = _member_root_name(expression);
+        let index = _find_binding_index(scope.bindings, root);
+        if index >= 0 { return scope.bindings[index].nursery_bound; }
+        return false;
+    }
+    if expression.variant == "Array" {
+        let mut index: int = 0;
+        loop {
+            if index >= expression.elements.length { break; }
+            if _expression_is_nursery_bound(expression.elements[index], scope) {
+                return true;
+            }
+            index += 1;
+        }
+    }
+    if expression.variant == "Conditional" {
+        return _expression_is_nursery_bound(expression.then_value, scope)
+            || _expression_is_nursery_bound(expression.else_value, scope);
+    }
+    if expression.variant == "Lambda" {
+        return _lambda_captures_nursery_task(expression, scope);
+    }
+    if expression.variant == "Object" || expression.variant == "Struct" {
+        let mut index: int = 0;
+        loop {
+            if index >= expression.fields.length { break; }
+            if _expression_is_nursery_bound(expression.fields[index].value, scope) {
+                return true;
+            }
+            index += 1;
+        }
+    }
+    if expression.variant == "Call" {
+        let callee = expression.callee;
+        let mut callable_key: string = "";
+        if callee.variant == "Identifier" {
+            let binding_index = _find_binding_index(scope.bindings, callee.name);
+            if binding_index < 0 { callable_key = callee.name; } else {
+                let binding = scope.bindings[binding_index];
+                if _is_fresh_task_callable_type(binding.declared_type)
+                    || binding.nursery_bound { return true; }
+            }
+        } else if callee.variant == "Member" {
+            let receiver = callee.object;
+            let receiver_type = _expression_declared_type(receiver, scope.bindings, scope.task_returning_names);
+            if receiver_type.length > 0 {
+                callable_key = _task_method_key(receiver_type, callee.member);
+            }
+        }
+        if callable_key.length > 0 {
+            if _name_in_list(scope.task_returning_names, _fresh_task_key(callable_key)) {
+                return true;
+            }
+        }
+        // A Task-returning call may transparently move a nursery-origin Task
+        // argument into its result. Propagate only concrete argument
+        // provenance; return type alone is intentionally insufficient.
+        if _expression_is_task_value(expression, scope.bindings, scope.task_returning_names) {
+            let mut index: int = 0;
+            loop {
+                if index >= expression.arguments.length { break; }
+                if _expression_is_nursery_bound(expression.arguments[index], scope) {
+                    return true;
+                }
+                index += 1;
+            }
+        }
+    }
+    return false;
+}
+
+fn _nursery_origin_span(expression: Expression?, scope: OwnershipScope) -> SourceSpan? {
+    if expression == null { return null; }
+    if expression.variant == "Spawn" { return expression.span; }
+    if expression.variant == "Identifier" {
+        let index = _find_binding_index(scope.bindings, expression.name);
+        if index >= 0 { return scope.bindings[index].nursery_span; }
+        return expression.span;
+    }
+    if expression.variant == "Index" {
+        if !_expression_is_task_value(expression, scope.bindings, scope.task_returning_names) {
+            return expression.span;
+        }
+        let root = _member_root_name(expression.sequence);
+        let index = _find_binding_index(scope.bindings, root);
+        if index >= 0 { return scope.bindings[index].nursery_span; }
+        return expression.span;
+    }
+    if expression.variant == "Member" {
+        if !_expression_is_task_value(expression, scope.bindings, scope.task_returning_names) {
+            return expression.span;
+        }
+        let root = _member_root_name(expression);
+        let index = _find_binding_index(scope.bindings, root);
+        if index >= 0 { return scope.bindings[index].nursery_span; }
+        return expression.span;
+    }
+    if expression.variant == "Array" {
+        let mut index: int = 0;
+        loop {
+            if index >= expression.elements.length { break; }
+            if _expression_is_nursery_bound(expression.elements[index], scope) {
+                return _nursery_origin_span(expression.elements[index], scope);
+            }
+            index += 1;
+        }
+    }
+    if expression.variant == "Conditional" {
+        if _expression_is_nursery_bound(expression.then_value, scope) {
+            return _nursery_origin_span(expression.then_value, scope);
+        }
+        if _expression_is_nursery_bound(expression.else_value, scope) {
+            return _nursery_origin_span(expression.else_value, scope);
+        }
+        return expression.span;
+    }
+    if expression.variant == "Lambda" {
+        return _lambda_nursery_origin_span(expression, scope);
+    }
+    if expression.variant == "Object" || expression.variant == "Struct" {
+        let mut index: int = 0;
+        loop {
+            if index >= expression.fields.length { break; }
+            if _expression_is_nursery_bound(expression.fields[index].value, scope) {
+                return _nursery_origin_span(expression.fields[index].value, scope);
+            }
+            index += 1;
+        }
+    }
+    if expression.variant == "Call" {
+        if _expression_is_nursery_bound(expression, scope) {
+            let mut index: int = 0;
+            loop {
+                if index >= expression.arguments.length { break; }
+                if _expression_is_nursery_bound(expression.arguments[index], scope) {
+                    return _nursery_origin_span(expression.arguments[index], scope);
+                }
+                index += 1;
+            }
+            return expression.span;
+        }
+    }
+    return null;
+}
+
 fn _scope_after_statement(statement: Statement, scope: OwnershipScope) -> OwnershipScope {
     if statement.variant == "VariableDeclaration" {
         let initializer = statement.initializer;
@@ -617,18 +1506,42 @@ fn _scope_after_statement(statement: Statement, scope: OwnershipScope) -> Owners
         if annotation != null {
             has_type = true;
             type_text = annotation.text;
+        } else if initializer != null {
+            if initializer.variant == "Struct" {
+                if initializer.type_name.length > 0 {
+                    type_text = initializer.type_name[initializer.type_name.length - 1];
+                }
+            }
+        }
+        if type_text.length == 0 {
+            let callable_type = _inferred_task_callable_type(initializer, scope.bindings, scope.task_returning_names);
+            if callable_type.length > 0 { type_text = callable_type; }
+        } else {
+            let callable_type = _task_callable_type_from_annotation(type_text);
+            if callable_type.length > 0 { type_text = callable_type; }
         }
         let owned_new = _binding_is_owned(type_text, has_type, initializer, scope.bindings);
         let linear_new = _binding_is_linear(type_text, has_type, initializer, scope.bindings);
-        // A bare-identifier initializer is a move; anything else is an
-        // ordinary expression walk (reads, nested lambdas, calls).
+        let task_new = _binding_is_task(type_text, has_type, initializer, scope.bindings, scope.task_returning_names);
+        if type_text.length == 0 && task_new {
+            type_text = _inferred_task_binding_type(initializer, scope.bindings, scope.task_returning_names);
+        }
+        let nursery_new = _expression_is_nursery_bound(initializer, scope);
+        let mut nursery_span: SourceSpan? = null;
+        if nursery_new {
+            nursery_span = _nursery_origin_span(initializer, scope);
+            if nursery_span == null {
+                nursery_span = statement.initializer_span;
+            }
+        }
+        // A Task-index initializer consumes its affine collection as a whole;
+        // ordinary owned identifiers retain their established move behavior.
         let mut next = scope;
         if initializer != null {
-            if initializer.variant == "Identifier" {
-                next = _consume_identifier(scope, initializer.name, initializer.span, true);
-            } else { next = _scope_after_expression(initializer, scope); }
+            next = _consume_task_value(scope, initializer, true);
         }
-        return _enter_binding(next, statement.name, statement.span, owned_new, linear_new);
+        return _enter_binding(next, statement.name, type_text, statement.span, owned_new
+            || task_new, linear_new, task_new, nursery_new, nursery_span);
     }
     if statement.variant == "BlockStatement" {
         // E2 boundary (#1211): the interior of `unsafe { }` is the
@@ -637,45 +1550,106 @@ fn _scope_after_statement(statement: Statement, scope: OwnershipScope) -> Owners
         return _nested_block_scope(statement.body, scope);
     }
     if statement.variant == "IfStatement" {
-        let mut next = _scope_after_expression(statement.condition, scope);
-        next = _nested_block_scope(statement.then_block, next);
+        let base = _scope_after_expression(statement.condition, scope);
+        let then_out = _nested_block_scope(statement.then_block, base);
+        let mut else_out = OwnershipScope {
+            bindings: base.bindings,
+            tracked: then_out.tracked,
+            findings: then_out.findings,
+            extern_names: base.extern_names,
+            task_returning_names: base.task_returning_names,
+            routine_outer_count: base.routine_outer_count
+        };
         let else_branch = statement.else_branch;
         if else_branch != null {
             let else_body = else_branch.body;
             if else_body != null {
-                next = _nested_block_scope(else_body, next);
+                else_out = _nested_block_scope(else_body, else_out);
             }
             let else_statement = else_branch.statement;
             if else_statement != null {
-                next = _scope_after_statement(else_statement, next);
+                else_out = _scope_after_statement(else_statement, else_out);
             }
         }
-        return next;
+        return OwnershipScope {
+            bindings: _merge_task_binding_paths(then_out.bindings, else_out.bindings, base.bindings.length),
+            tracked: else_out.tracked,
+            findings: else_out.findings,
+            extern_names: base.extern_names,
+            task_returning_names: base.task_returning_names,
+            routine_outer_count: base.routine_outer_count
+        };
     }
     if statement.variant == "LoopStatement" {
-        return _nested_block_scope(statement.body, scope);
+        return _optional_block_scope(statement.body, scope);
     }
     if statement.variant == "RoutineStatement" {
-        return _nested_block_scope(statement.body, scope);
+        return _routine_block_scope(statement.body, scope);
     }
     if statement.variant == "ForStatement" {
-        let next = _scope_after_expression(statement.clause.iterable, scope);
+        let iterable = statement.clause.iterable;
+        let iterable_is_task = _expression_is_task_value(iterable, scope.bindings, scope.task_returning_names);
+        let iterable_is_nursery = _expression_is_nursery_bound(iterable, scope);
+        let iterable_nursery_span = _nursery_origin_span(iterable, scope);
+        let mut target_type = trim_text(_expression_declared_type(iterable, scope.bindings, scope.task_returning_names));
+        if target_type.length >= 2 {
+            if substring(target_type, target_type.length - 2, target_type.length) == "[]" {
+                target_type = trim_text(substring(target_type, 0, target_type.length - 2));
+            }
+        }
+        if target_type.length == 0 && iterable_is_task {
+            target_type = "Task<inferred>";
+        }
+        let mut next = _consume_task_value(scope, iterable, false);
         let mut child = OwnershipScope {
             bindings: _copy_bindings(next.bindings),
             tracked: next.tracked,
             findings: next.findings,
-            extern_names: next.extern_names
+            extern_names: next.extern_names,
+            task_returning_names: next.task_returning_names,
+            routine_outer_count: next.routine_outer_count
         };
         let target = statement.clause.target;
         if target.variant == "Identifier" {
-            child = _enter_binding(child, target.name, target.span, false, false);
+            child = _enter_binding(child, target.name, target_type, target.span, iterable_is_task, false, iterable_is_task, iterable_is_nursery, iterable_nursery_span);
         }
         let child_out = _scope_after_block(statement.body, child);
+        let swept = _sweep_unconsumed_linear(child_out, child_out.bindings, next.bindings.length);
+        let body_bindings = _propagate_parent_task_bindings(next.bindings, swept.bindings, next.bindings.length);
+        if !_block_reaches_next_iteration(statement.body) {
+            return OwnershipScope {
+                bindings: _merge_task_binding_paths(next.bindings, body_bindings, next.bindings.length),
+                tracked: swept.tracked,
+                findings: swept.findings,
+                extern_names: next.extern_names,
+                task_returning_names: next.task_returning_names,
+                routine_outer_count: next.routine_outer_count
+            };
+        }
+        // Probe a second iteration from the first iteration's parent Task
+        // state. The loop target is freshly bound each iteration, while
+        // outer handles retain their affine state.
+        let mut second_child = OwnershipScope {
+            bindings: _copy_bindings(body_bindings),
+            tracked: swept.tracked,
+            findings: swept.findings,
+            extern_names: next.extern_names,
+            task_returning_names: next.task_returning_names,
+            routine_outer_count: next.routine_outer_count
+        };
+        if target.variant == "Identifier" {
+            second_child = _enter_binding(second_child, target.name, target_type, target.span, iterable_is_task, false, iterable_is_task, iterable_is_nursery, iterable_nursery_span);
+        }
+        let second_child_out = _scope_after_block(statement.body, second_child);
+        let second_swept = _sweep_unconsumed_linear(second_child_out, second_child_out.bindings, next.bindings.length);
+        let repeated_bindings = _propagate_parent_task_bindings(body_bindings, second_swept.bindings, next.bindings.length);
         return OwnershipScope {
-            bindings: next.bindings,
-            tracked: child_out.tracked,
-            findings: child_out.findings,
-            extern_names: next.extern_names
+            bindings: _merge_task_binding_paths(next.bindings, repeated_bindings, next.bindings.length),
+            tracked: swept.tracked,
+            findings: second_swept.findings,
+            extern_names: next.extern_names,
+            task_returning_names: next.task_returning_names,
+            routine_outer_count: next.routine_outer_count
         };
     }
     if statement.variant == "WithStatement" {
@@ -689,7 +1663,10 @@ fn _scope_after_statement(statement: Statement, scope: OwnershipScope) -> Owners
         return _nested_block_scope(statement.body, next);
     }
     if statement.variant == "MatchStatement" {
-        let mut next = _scope_after_expression(statement.expression, scope);
+        let base = _scope_after_expression(statement.expression, scope);
+        let mut next = base;
+        let mut merged_bindings = base.bindings;
+        let mut saw_case: boolean = false;
         let mut case_index: int = 0;
         loop {
             if case_index >= statement.cases.length { break; }
@@ -698,44 +1675,76 @@ fn _scope_after_statement(statement: Statement, scope: OwnershipScope) -> Owners
             // is_owned == false) before the guard and body walk,
             // mirroring `register_match_pattern_bindings` in typecheck.
             let mut child = OwnershipScope {
-                bindings: _copy_bindings(next.bindings),
+                bindings: _copy_bindings(base.bindings),
                 tracked: next.tracked,
                 findings: next.findings,
-                extern_names: next.extern_names
+                extern_names: base.extern_names,
+                task_returning_names: base.task_returning_names,
+                routine_outer_count: base.routine_outer_count
             };
             child = _enter_pattern_bindings(case.pattern, child);
             child = _scope_after_expression(case.guard, child);
             let child_out = _scope_after_block(case.body, child);
+            let swept = _sweep_unconsumed_linear(child_out, child_out.bindings, base.bindings.length);
+            let case_bindings = _propagate_parent_task_bindings(base.bindings, swept.bindings, base.bindings.length);
+            if saw_case {
+                merged_bindings = _merge_task_binding_paths(merged_bindings, case_bindings, base.bindings.length);
+            } else {
+                merged_bindings = case_bindings;
+                saw_case = true;
+            }
             next = OwnershipScope {
-                bindings: next.bindings,
-                tracked: child_out.tracked,
-                findings: child_out.findings,
-                extern_names: next.extern_names
+                bindings: base.bindings,
+                tracked: swept.tracked,
+                findings: swept.findings,
+                extern_names: base.extern_names,
+                task_returning_names: base.task_returning_names,
+                routine_outer_count: base.routine_outer_count
             };
             case_index += 1;
         }
-        return next;
+        if !saw_case { return next; }
+        return OwnershipScope {
+            bindings: merged_bindings,
+            tracked: next.tracked,
+            findings: next.findings,
+            extern_names: base.extern_names,
+            task_returning_names: base.task_returning_names,
+            routine_outer_count: base.routine_outer_count
+        };
     }
     if statement.variant == "TryStatement" {
-        let mut next = _nested_block_scope(statement.try_block, scope);
+        let try_out = _nested_block_scope(statement.try_block, scope);
+        let mut next = try_out;
         let catch_block = statement.catch_block;
         if catch_block != null {
+            // A catch continues an exceptional prefix of the try body. The
+            // AST walk does not retain throw-edge snapshots, so the try's
+            // conservative Task state is the safe catch entry: a Task that
+            // may have been consumed before the throw cannot become live
+            // again merely because control transferred to `catch`.
             let mut child = OwnershipScope {
-                bindings: _copy_bindings(next.bindings),
-                tracked: next.tracked,
-                findings: next.findings,
-                extern_names: next.extern_names
+                bindings: _copy_bindings(try_out.bindings),
+                tracked: try_out.tracked,
+                findings: try_out.findings,
+                extern_names: scope.extern_names,
+                task_returning_names: scope.task_returning_names,
+                routine_outer_count: scope.routine_outer_count
             };
             let catch_name = statement.catch_name;
             if catch_name != null {
-                child = _enter_binding(child, catch_name, null, false, false);
+                child = _enter_binding(child, catch_name, "", null, false, false, false, false, null);
             }
             let child_out = _scope_after_block(catch_block, child);
+            let swept = _sweep_unconsumed_linear(child_out, child_out.bindings, scope.bindings.length);
+            let catch_bindings = _propagate_parent_task_bindings(try_out.bindings, swept.bindings, scope.bindings.length);
             next = OwnershipScope {
-                bindings: next.bindings,
-                tracked: child_out.tracked,
-                findings: child_out.findings,
-                extern_names: next.extern_names
+                bindings: _merge_task_binding_paths(try_out.bindings, catch_bindings, scope.bindings.length),
+                tracked: swept.tracked,
+                findings: swept.findings,
+                extern_names: scope.extern_names,
+                task_returning_names: scope.task_returning_names,
+                routine_outer_count: scope.routine_outer_count
             };
         }
         let finally_block = statement.finally_block;
@@ -747,12 +1756,15 @@ fn _scope_after_statement(statement: Statement, scope: OwnershipScope) -> Owners
     if statement.variant == "ReturnStatement" {
         let expression = statement.expression;
         if expression != null {
-            // `return x;` consumes a bare owned identifier (move /
-            // use-after-move); other return expressions walk as reads.
-            if expression.variant == "Identifier" {
-                return _consume_identifier(scope, expression.name, expression.span, false);
+            let nursery_return = _expression_is_nursery_bound(expression, scope);
+            let mut next = scope;
+            if nursery_return {
+                let source = _task_source_binding_name(expression, scope.bindings, scope.task_returning_names);
+                let mut name = source;
+                if name.length == 0 { name = "task result"; }
+                next = _push_finding(next, _make_finding(name, expression.span, _nursery_origin_span(expression, scope), "E0838"));
             }
-            return _scope_after_expression(expression, scope);
+            return _consume_task_value(next, expression, false);
         }
         return scope;
     }
@@ -766,13 +1778,15 @@ fn _scope_after_statement(statement: Statement, scope: OwnershipScope) -> Owners
         // Nested fns get a fresh routine scope; the binding count and
         // findings flow back. `unsafe fn` bodies are skipped (E2).
         if statement.is_unsafe { return scope; }
-        let summary = _analyze_routine_ownership(statement.signature.parameters, statement.body, scope.extern_names);
+        let summary = _analyze_routine_ownership(statement.signature.parameters, statement.body, scope.extern_names, scope.task_returning_names, scope.bindings, "");
         let merged = _append_warnings(scope.findings, summary.warnings);
         return OwnershipScope {
             bindings: scope.bindings,
             tracked: scope.tracked + summary.bindings_tracked,
             findings: merged,
-            extern_names: scope.extern_names
+            extern_names: scope.extern_names,
+            task_returning_names: scope.task_returning_names,
+            routine_outer_count: scope.routine_outer_count
         };
     }
     return scope;
@@ -789,7 +1803,7 @@ fn _enter_pattern_bindings(pattern: Expression?, scope: OwnershipScope) -> Owner
         let mut index: int = 0;
         loop {
             if index >= pattern.fields.length { break; }
-            next = _enter_binding(next, pattern.fields[index].name, null, false, false);
+            next = _enter_binding(next, pattern.fields[index].name, "", null, false, false, false, false, null);
             index += 1;
         }
         return next;
@@ -799,7 +1813,7 @@ fn _enter_pattern_bindings(pattern: Expression?, scope: OwnershipScope) -> Owner
     }
     if pattern.variant == "Identifier" {
         if pattern.name == "_" { return scope; }
-        return _enter_binding(scope, pattern.name, pattern.span, false, false);
+        return _enter_binding(scope, pattern.name, "", pattern.span, false, false, false, false, null);
     }
     return scope;
 }
@@ -819,14 +1833,14 @@ fn _enter_raw_pattern_bindings(text: string, scope: OwnershipScope) -> Ownership
         }
         if ch == "}" {
             if token.length > 0 {
-                next = _enter_binding(next, token, null, false, false);
+                next = _enter_binding(next, token, "", null, false, false, false, false, null);
                 token = "";
             }
             break;
         }
         if is_identifier_char(ch) { token = token + ch; } else {
             if token.length > 0 {
-                next = _enter_binding(next, token, null, false, false);
+                next = _enter_binding(next, token, "", null, false, false, false, false, null);
                 token = "";
             }
         }
@@ -866,7 +1880,8 @@ fn _scope_after_expression(expression: Expression?, scope: OwnershipScope) -> Ow
         let mut index: int = 0;
         loop {
             if index >= expression.elements.length { break; }
-            next = _scope_after_expression(expression.elements[index], next);
+            let element = expression.elements[index];
+            next = _consume_task_value(next, element, false);
             index += 1;
         }
         return next;
@@ -876,7 +1891,8 @@ fn _scope_after_expression(expression: Expression?, scope: OwnershipScope) -> Ow
         let mut index: int = 0;
         loop {
             if index >= expression.fields.length { break; }
-            next = _scope_after_expression(expression.fields[index].value, next);
+            let value = expression.fields[index].value;
+            next = _consume_task_value(next, value, false);
             index += 1;
         }
         return next;
@@ -886,7 +1902,8 @@ fn _scope_after_expression(expression: Expression?, scope: OwnershipScope) -> Ow
         let mut index: int = 0;
         loop {
             if index >= expression.fields.length { break; }
-            next = _scope_after_expression(expression.fields[index].value, next);
+            let value = expression.fields[index].value;
+            next = _consume_task_value(next, value, false);
             index += 1;
         }
         return next;
@@ -896,7 +1913,12 @@ fn _scope_after_expression(expression: Expression?, scope: OwnershipScope) -> Ow
             bindings: _copy_bindings(scope.bindings),
             tracked: scope.tracked,
             findings: scope.findings,
-            extern_names: scope.extern_names
+            extern_names: scope.extern_names,
+            task_returning_names: scope.task_returning_names,
+            // A lambda body owns its returns. Nursery provenance in its
+            // captured Task environment is handled when the closure value is
+            // created and consumed, not as a return from the enclosing block.
+            routine_outer_count: -1
         };
         let mut index: int = 0;
         loop {
@@ -904,21 +1926,34 @@ fn _scope_after_expression(expression: Expression?, scope: OwnershipScope) -> Ow
             let parameter = expression.parameters[index];
             let mut owned_param: boolean = false;
             let mut linear_param: boolean = false;
+            let mut task_param: boolean = false;
             let p_annotation = parameter.type_annotation;
             if p_annotation != null {
                 if is_owned_type(p_annotation.text) { owned_param = true; }
                 if is_linear_type(p_annotation.text) { linear_param = true; }
+                if is_task_type(p_annotation.text) { task_param = true; }
+                if task_type_is_bearing(scope.task_returning_names, p_annotation.text) {
+                    task_param = true;
+                    owned_param = true;
+                }
             }
-            child = _enter_binding(child, parameter.name, parameter.span, owned_param, linear_param);
+            let mut parameter_type: string = "";
+            if p_annotation != null { parameter_type = p_annotation.text; }
+            let callable_type = _task_callable_type_from_annotation(parameter_type);
+            if callable_type.length > 0 { parameter_type = callable_type; }
+            child = _enter_binding(child, parameter.name, parameter_type, parameter.span, owned_param, linear_param, task_param, false, null);
             index += 1;
         }
         let child_out = _scope_after_block(expression.body, child);
-        return OwnershipScope {
+        let parent_with_diagnostics = OwnershipScope {
             bindings: scope.bindings,
             tracked: child_out.tracked,
             findings: child_out.findings,
-            extern_names: scope.extern_names
+            extern_names: scope.extern_names,
+            task_returning_names: scope.task_returning_names,
+            routine_outer_count: scope.routine_outer_count
         };
+        return _consume_task_lambda_captures(parent_with_diagnostics, expression, expression.span);
     }
     if expression.variant == "Range" {
         let next = _scope_after_expression(expression.start, scope);
@@ -931,15 +1966,28 @@ fn _scope_after_expression(expression: Expression?, scope: OwnershipScope) -> Ow
         return _scope_after_expression(expression.operand, scope);
     }
     if expression.variant == "Conditional" {
-        // Ternary `cond ? then : else` (#1690). Thread the scope through all
-        // three children so a move inside any branch (`flag ? consume(buf) :
-        // x`) is recorded and a later use of the moved binding is still
-        // caught. Sequencing condition → then → else is a conservative
-        // over-approximation (the two branches are mutually exclusive at
-        // runtime, but treating both as taken never misses a real move).
+        // Ternary alternatives are mutually exclusive. Analyze both from the
+        // post-condition state, thread their diagnostics, then join Task
+        // state exactly like statement-level `if`.
         let after_condition = _scope_after_expression(expression.condition, scope);
         let after_then = _scope_after_expression(expression.then_value, after_condition);
-        return _scope_after_expression(expression.else_value, after_then);
+        let else_in = OwnershipScope {
+            bindings: _copy_bindings(after_condition.bindings),
+            tracked: after_then.tracked,
+            findings: after_then.findings,
+            extern_names: after_condition.extern_names,
+            task_returning_names: after_condition.task_returning_names,
+            routine_outer_count: after_condition.routine_outer_count
+        };
+        let after_else = _scope_after_expression(expression.else_value, else_in);
+        return OwnershipScope {
+            bindings: _merge_task_binding_paths(after_then.bindings, after_else.bindings, after_condition.bindings.length),
+            tracked: after_else.tracked,
+            findings: after_else.findings,
+            extern_names: after_condition.extern_names,
+            task_returning_names: after_condition.task_returning_names,
+            routine_outer_count: after_condition.routine_outer_count
+        };
     }
     if expression.variant == "Assignment" {
         // Assignment `target <op> rhs` (#1627 Part D). Thread the scope
@@ -947,8 +1995,64 @@ fn _scope_after_expression(expression: Expression?, scope: OwnershipScope) -> Ow
         // (`a = consume(buf)`) or an effectful/owning lvalue is recorded and a
         // later use of a moved binding is still caught. Rhs-before-target
         // matches evaluation order (the rvalue is computed before the store).
-        let after_rhs = _scope_after_expression(expression.rhs, scope);
-        return _scope_after_expression(expression.target, after_rhs);
+        let rhs_is_task = _expression_is_task_value(expression.rhs, scope.bindings, scope.task_returning_names);
+        let rhs_is_nursery = _expression_is_nursery_bound(expression.rhs, scope);
+        let rhs_nursery_span = _nursery_origin_span(expression.rhs, scope);
+        let mut after_rhs = _consume_task_value(scope, expression.rhs, false);
+        if expression.operator == "=" && expression.target.variant == "Identifier" {
+            let target_index = _find_binding_index(after_rhs.bindings, expression.target.name);
+            if target_index >= 0 {
+                // A Task-valued closure/aggregate may be assigned into a
+                // previously copyable binding. Upgrade the destination to an
+                // affine owner; an empty array retains an already-known Task
+                // collection while clearing its nursery provenance.
+                if rhs_is_task || (after_rhs.bindings[target_index].is_task
+                    && expression.rhs.variant == "Array") {
+                    let mut assigned_span = rhs_nursery_span;
+                    if rhs_is_nursery { assigned_span = expression.span; }
+                    let inferred_type = _inferred_task_binding_type(expression.rhs, scope.bindings, scope.task_returning_names);
+                    let assigned = _mark_task_binding_owned(after_rhs.bindings, expression.target.name, rhs_is_nursery, assigned_span, inferred_type);
+                    return OwnershipScope {
+                        bindings: assigned,
+                        tracked: after_rhs.tracked,
+                        findings: after_rhs.findings,
+                        extern_names: after_rhs.extern_names,
+                        task_returning_names: after_rhs.task_returning_names,
+                        routine_outer_count: after_rhs.routine_outer_count
+                    };
+                }
+            }
+        }
+        let after_target = _scope_after_expression(expression.target, after_rhs);
+        if expression.operator == "=" && rhs_is_nursery && expression.target.variant == "Member" {
+            let destination_name = _member_root_name(expression.target);
+            let destination_index = _find_binding_index(after_target.bindings, destination_name);
+            if destination_index >= 0 && destination_index < after_target.routine_outer_count {
+                return _push_finding(after_target, _make_finding(destination_name, expression.span, after_target.bindings[destination_index].span, "E0838"));
+            }
+        }
+        if expression.operator == "=" && expression.target.variant == "Index"
+            && rhs_is_task
+            && rhs_is_nursery {
+            let sequence = expression.target.sequence;
+            if sequence.variant == "Identifier" {
+                let marked = _mark_task_collection_nursery_bound(after_target.bindings, sequence.name, expression.span);
+                return OwnershipScope {
+                    bindings: marked,
+                    tracked: after_target.tracked,
+                    findings: after_target.findings,
+                    extern_names: after_target.extern_names,
+                    task_returning_names: after_target.task_returning_names,
+                    routine_outer_count: after_target.routine_outer_count
+                };
+            }
+            let destination_name = _member_root_name(expression.target);
+            let destination_index = _find_binding_index(after_target.bindings, destination_name);
+            if destination_index >= 0 && destination_index < after_target.routine_outer_count {
+                return _push_finding(after_target, _make_finding(destination_name, expression.span, after_target.bindings[destination_index].span, "E0838"));
+            }
+        }
+        return after_target;
     }
     if expression.variant == "Spawn" {
         // A spawned closure captures owned values as moves (#1220). A
@@ -963,7 +2067,8 @@ fn _scope_after_expression(expression: Expression?, scope: OwnershipScope) -> Ow
         return _scope_after_expression(operand, scope);
     }
     if expression.variant == "Await" {
-        return _scope_after_expression(expression.operand, scope);
+        let operand = expression.operand;
+        return _consume_task_value(scope, operand, false);
     }
     if expression.variant == "Channel" {
         return _scope_after_expression(expression.capacity, scope);
@@ -1010,8 +2115,50 @@ fn _scope_after_expression(expression: Expression?, scope: OwnershipScope) -> Ow
 //   - a bare owned identifier passed into an `extern fn` -> `E0906`.
 //
 // Anything else falls through to the generic walk (callee then args).
+fn _first_nursery_task_argument(arguments: Expression[], scope: OwnershipScope) -> int {
+    let mut index: int = 0;
+    loop {
+        if index >= arguments.length { break; }
+        if _expression_is_nursery_bound(arguments[index], scope) {
+            return index;
+        }
+        index += 1;
+    }
+    return -1;
+}
+
 fn _scope_after_call(expression: Expression, scope: OwnershipScope) -> OwnershipScope {
     let callee = expression.callee;
+    let nursery_argument_index = _first_nursery_task_argument(expression.arguments, scope);
+    if nursery_argument_index >= 0 && callee.variant == "Member" {
+        if _is_mutator_method(callee.member) {
+            let argument = expression.arguments[nursery_argument_index];
+            let mut name = _task_source_binding_name(argument, scope.bindings, scope.task_returning_names);
+            if name.length == 0 { name = "task argument"; }
+            return _push_finding(scope, _make_finding(name, argument.span, expression.span, "E0838"));
+        }
+    }
+    let mut pushes_nursery_task: boolean = false;
+    let mut pushed_nursery_span: SourceSpan? = null;
+    if callee.variant == "Member" {
+        if callee.member == "push" {
+            let receiver_type = _expression_declared_type(callee.object, scope.bindings, scope.task_returning_names);
+            if is_task_type(receiver_type) {
+                let mut push_index: int = 0;
+                loop {
+                    if push_index >= expression.arguments.length { break; }
+                    if _expression_is_nursery_bound(expression.arguments[push_index], scope) {
+                        pushes_nursery_task = true;
+                        // E0838 should point at the escaping store, while the
+                        // diagnostic note points at the destination binding.
+                        pushed_nursery_span = expression.span;
+                        break;
+                    }
+                    push_index += 1;
+                }
+            }
+        }
+    }
     // --- Disposer, free-function form: free(x) / drop(x) ---
     if callee.variant == "Identifier" {
         if _is_disposer_name(callee.name) {
@@ -1033,7 +2180,9 @@ fn _scope_after_call(expression: Expression, scope: OwnershipScope) -> Ownership
                                 bindings: freed,
                                 tracked: scope.tracked,
                                 findings: scope.findings,
-                                extern_names: scope.extern_names
+                                extern_names: scope.extern_names,
+                                task_returning_names: scope.task_returning_names,
+                                routine_outer_count: scope.routine_outer_count
                             };
                         }
                     }
@@ -1062,7 +2211,9 @@ fn _scope_after_call(expression: Expression, scope: OwnershipScope) -> Ownership
                             bindings: freed,
                             tracked: scope.tracked,
                             findings: scope.findings,
-                            extern_names: scope.extern_names
+                            extern_names: scope.extern_names,
+                            task_returning_names: scope.task_returning_names,
+                            routine_outer_count: scope.routine_outer_count
                         };
                         return _consume_call_args(expression.arguments, after, false);
                     }
@@ -1102,14 +2253,82 @@ fn _scope_after_call(expression: Expression, scope: OwnershipScope) -> Ownership
             }
         }
     }
+    // Calling a method on a Task-bearing aggregate transfers the affine
+    // receiver into that call. Otherwise two calls could each extract and
+    // consume the same contained handle even though the method body is
+    // individually valid. Direct Task collections retain their dedicated
+    // `push`/`join_all` handling above.
+    if callee.variant == "Member" {
+        let receiver_type = _expression_declared_type(callee.object, scope.bindings, scope.task_returning_names);
+        if !is_task_type(receiver_type) && task_type_is_bearing(scope.task_returning_names, receiver_type) {
+            let after_receiver = _consume_task_value(scope, callee.object, false);
+            let after_args = _consume_call_args(expression.arguments, after_receiver, false);
+            if nursery_argument_index >= 0 {
+                let argument = expression.arguments[nursery_argument_index];
+                let mut name = _task_source_binding_name(argument, scope.bindings, scope.task_returning_names);
+                if name.length == 0 { name = "task argument"; }
+                return _push_finding(after_args, _make_finding(name, argument.span, expression.span, "E0838"));
+            }
+            return after_args;
+        }
+    }
     // --- Generic walk: callee then arguments, with the E0906 FFI-escape
     //     check active when the callee is a known extern fn. ---
-    let next = _scope_after_expression(expression.callee, scope);
+    let mut next = scope;
+    if callee.variant == "Identifier" {
+        let callee_index = _find_binding_index(scope.bindings, callee.name);
+        if callee_index >= 0 {
+            if scope.bindings[callee_index].is_task {
+                next = _consume_identifier(scope, callee.name, callee.span, false);
+            } else {
+                next = _scope_after_expression(expression.callee, scope);
+            }
+        } else {
+            next = _scope_after_expression(expression.callee, scope);
+        }
+    } else { next = _scope_after_expression(expression.callee, scope); }
     let mut extern_call: boolean = false;
     if callee.variant == "Identifier" {
         if _name_in_list(scope.extern_names, callee.name) { extern_call = true; }
     }
-    return _consume_call_args(expression.arguments, next, extern_call);
+    let after_args = _consume_call_args(expression.arguments, next, extern_call);
+    if pushes_nursery_task && callee.variant == "Member" {
+        let receiver = callee.object;
+        if receiver.variant == "Identifier" {
+            let marked = _mark_task_collection_nursery_bound(after_args.bindings, receiver.name, pushed_nursery_span);
+            return OwnershipScope {
+                bindings: marked,
+                tracked: after_args.tracked,
+                findings: after_args.findings,
+                extern_names: after_args.extern_names,
+                task_returning_names: after_args.task_returning_names,
+                routine_outer_count: after_args.routine_outer_count
+            };
+        }
+        let destination_name = _member_root_name(receiver);
+        let destination_index = _find_binding_index(after_args.bindings, destination_name);
+        if destination_index >= 0 && destination_index < after_args.routine_outer_count {
+            return _push_finding(after_args, _make_finding(destination_name, expression.span, after_args.bindings[destination_index].span, "E0838"));
+        }
+    }
+    if nursery_argument_index >= 0 {
+        let mut tracked_call: boolean = false;
+        if callee.variant == "Identifier" {
+            if callee.name == "join_all" && _find_binding_index(scope.bindings, callee.name) < 0
+                && !_name_in_list(scope.task_returning_names, declared_callable_key(callee.name)) {
+                tracked_call = true;
+            }
+        } else if callee.variant == "Member" {
+            if pushes_nursery_task { tracked_call = true; }
+        }
+        if !tracked_call {
+            let argument = expression.arguments[nursery_argument_index];
+            let mut name = _task_source_binding_name(argument, scope.bindings, scope.task_returning_names);
+            if name.length == 0 { name = "task argument"; }
+            return _push_finding(after_args, _make_finding(name, argument.span, expression.span, "E0838"));
+        }
+    }
+    return after_args;
 }
 
 // -------------------------------------------------------------------
@@ -1159,47 +2378,109 @@ fn _gather_extern_names(program: Program) -> string[] {
     return names;
 }
 
-fn _analyze_routine_ownership(parameters: Parameter[], body: Block, extern_names: string[]) -> OwnershipSummary {
-    let no_bindings: OwnershipBinding[] = [];
+// Top-level bindings outlive every routine nursery. Seed them into each
+// routine's ownership environment so a nursery-origin handle cannot escape by
+// mutating a module-global scalar, collection, or aggregate field. Copyable
+// globals remain untracked for moves but provide a destination identity.
+fn _gather_global_task_bindings(program: Program, task_returning_names: string[]) -> OwnershipBinding[] {
+    let mut bindings: OwnershipBinding[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= program.statements.length { break; }
+        let statement = program.statements[index];
+        if statement.variant == "VariableDeclaration" {
+            let mut has_type: boolean = false;
+            let mut type_text: string = "";
+            let annotation = statement.type_annotation;
+            if annotation != null {
+                has_type = true;
+                type_text = annotation.text;
+            } else {
+                let initializer = statement.initializer;
+                if initializer != null {
+                    if initializer.variant == "Struct" {
+                        if initializer.type_name.length > 0 {
+                            type_text = initializer.type_name[initializer.type_name.length - 1];
+                        }
+                    }
+                }
+            }
+            if type_text.length == 0 {
+                let callable_type = _inferred_task_callable_type(statement.initializer, bindings, task_returning_names);
+                if callable_type.length > 0 { type_text = callable_type; }
+            } else {
+                let callable_type = _task_callable_type_from_annotation(type_text);
+                if callable_type.length > 0 { type_text = callable_type; }
+            }
+            let is_task = _binding_is_task(type_text, has_type, statement.initializer, bindings, task_returning_names);
+            if type_text.length == 0 && is_task {
+                type_text = _inferred_task_binding_type(statement.initializer, bindings, task_returning_names);
+            }
+            bindings.push(OwnershipBinding {
+                name: statement.name, declared_type: type_text, state: "owned", span: statement.span, is_owned: is_task, is_linear: false, is_task: is_task, nursery_bound: false, nursery_span: null, moved_span: null
+            });
+        }
+        index += 1;
+    }
+    return bindings;
+}
+
+fn _analyze_routine_ownership(parameters: Parameter[], body: Block, extern_names: string[], task_returning_names: string[], initial_bindings: OwnershipBinding[], receiver_type: string) -> OwnershipSummary {
     let no_findings: OwnershipWarning[] = [];
     let mut scope = OwnershipScope {
-        bindings: no_bindings,
+        bindings: _copy_bindings(initial_bindings),
         tracked: 0,
         findings: no_findings,
-        extern_names: extern_names
+        extern_names: extern_names,
+        task_returning_names: task_returning_names,
+        routine_outer_count: -1
     };
+    let initial_count = initial_bindings.length;
     let mut index: int = 0;
     loop {
         if index >= parameters.length { break; }
         let parameter = parameters[index];
         let mut owned_param: boolean = false;
         let mut linear_param: boolean = false;
+        let mut task_param: boolean = false;
         let annotation = parameter.type_annotation;
         if annotation != null {
             if is_owned_type(annotation.text) { owned_param = true; }
             if is_linear_type(annotation.text) { linear_param = true; }
+            if is_task_type(annotation.text) { task_param = true; }
         }
-        scope = _enter_binding(scope, parameter.name, parameter.span, owned_param, linear_param);
+        let mut parameter_type: string = "";
+        if annotation != null { parameter_type = annotation.text; }
+        if parameter_type.length == 0 && parameter.name == "self" {
+            parameter_type = receiver_type;
+        }
+        let callable_type = _task_callable_type_from_annotation(parameter_type);
+        if callable_type.length > 0 { parameter_type = callable_type; }
+        if task_type_is_bearing(task_returning_names, parameter_type) {
+            task_param = true;
+            owned_param = true;
+        }
+        scope = _enter_binding(scope, parameter.name, parameter_type, parameter.span, owned_param, linear_param, task_param, false, null);
         index += 1;
     }
     let out = _scope_after_block(body, scope);
     // Routine-boundary sweep: any linear parameter or body-level `let`
     // still in state "owned" was never consumed -> E0907.
-    let swept = _sweep_unconsumed_linear(out, out.bindings, 0);
+    let swept = _sweep_unconsumed_linear(out, out.bindings, initial_count);
     return OwnershipSummary {
         bindings_tracked: swept.tracked,
         warnings: swept.findings
     };
 }
 
-fn _statement_summary(statement: Statement, extern_names: string[]) -> OwnershipSummary {
+fn _statement_summary(statement: Statement, extern_names: string[], task_returning_names: string[], global_task_bindings: OwnershipBinding[]) -> OwnershipSummary {
     if statement.variant == "FunctionDeclaration" {
         if statement.is_unsafe { return _empty_summary(); }
-        return _analyze_routine_ownership(statement.signature.parameters, statement.body, extern_names);
+        return _analyze_routine_ownership(statement.signature.parameters, statement.body, extern_names, task_returning_names, global_task_bindings, "");
     }
     if statement.variant == "TestDeclaration" {
         let no_parameters: Parameter[] = [];
-        return _analyze_routine_ownership(no_parameters, statement.body, extern_names);
+        return _analyze_routine_ownership(no_parameters, statement.body, extern_names, task_returning_names, global_task_bindings, "");
     }
     if statement.variant == "StructDeclaration" {
         let mut warnings: OwnershipWarning[] = [];
@@ -1208,7 +2489,7 @@ fn _statement_summary(statement: Statement, extern_names: string[]) -> Ownership
         loop {
             if index >= statement.methods.length { break; }
             let method = statement.methods[index];
-            let summary = _analyze_routine_ownership(method.signature.parameters, method.body, extern_names);
+            let summary = _analyze_routine_ownership(method.signature.parameters, method.body, extern_names, task_returning_names, global_task_bindings, statement.name);
             tracked = tracked + summary.bindings_tracked;
             warnings = _append_warnings(warnings, summary.warnings);
             index += 1;
@@ -1223,14 +2504,16 @@ fn _statement_summary(statement: Statement, extern_names: string[]) -> Ownership
 
 // Full-program analysis. Exposed (alongside the lattice helpers) so unit
 // tests can pin both the walk's coverage and the rule findings.
-fn analyze_program_ownership(program: Program) -> OwnershipSummary {
+fn analyze_program_ownership_with_imports(program: Program, imports: ImportSymbolTable) -> OwnershipSummary {
     let extern_names = _gather_extern_names(program);
+    let task_returning_names = gather_task_returning_names(program, imports);
+    let global_task_bindings = _gather_global_task_bindings(program, task_returning_names);
     let mut warnings: OwnershipWarning[] = [];
     let mut tracked: int = 0;
     let mut index: int = 0;
     loop {
         if index >= program.statements.length { break; }
-        let summary = _statement_summary(program.statements[index], extern_names);
+        let summary = _statement_summary(program.statements[index], extern_names, task_returning_names, global_task_bindings);
         tracked = tracked + summary.bindings_tracked;
         warnings = _append_warnings(warnings, summary.warnings);
         index += 1;
@@ -1238,9 +2521,17 @@ fn analyze_program_ownership(program: Program) -> OwnershipSummary {
     return OwnershipSummary { bindings_tracked: tracked, warnings: warnings };
 }
 
+fn analyze_program_ownership(program: Program) -> OwnershipSummary {
+    return analyze_program_ownership_with_imports(program, empty_import_symbols());
+}
+
 // Findings-stream view, mirroring `validate_effects`' shape.
 fn check_ownership(program: Program) -> OwnershipWarning[] {
     return analyze_program_ownership(program).warnings;
+}
+
+fn check_ownership_with_imports(program: Program, imports: ImportSymbolTable) -> OwnershipWarning[] {
+    return analyze_program_ownership_with_imports(program, imports).warnings;
 }
 
 // Build-path gate wrapper for `main.sfn`, shaped like
@@ -1249,7 +2540,11 @@ fn check_ownership(program: Program) -> OwnershipWarning[] {
 // with no owned/affine bindings (the compiler's own source) produce zero
 // findings, so the gate stays transparent for self-hosting.
 fn run_ownership_checker(program: Program) -> int ![io] {
-    let summary = analyze_program_ownership(program);
+    return run_ownership_checker_with_imports(program, empty_import_symbols());
+}
+
+fn run_ownership_checker_with_imports(program: Program, imports: ImportSymbolTable) -> int ![io] {
+    let summary = analyze_program_ownership_with_imports(program, imports);
     let empty_lines: string[] = [];
     let mut errors: int = 0;
     let mut index: int = 0;

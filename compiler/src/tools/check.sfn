@@ -40,6 +40,7 @@ import { ImportSymbolTable, empty_import_symbols } from "../effect_imports";
 import { collect_import_resolution_findings } from "../import_resolution_check";
 import { runtime_helper_call_names } from "../llvm/runtime_helpers/mod";
 import { number_to_string } from "../num_format";
+import { check_ownership_with_imports } from "../ownership_checker";
 import { parse_program } from "../parser/mod";
 import { load_prelude_global_names } from "../prelude_globals";
 import { collect_reexport_violations } from "../reexport_check";
@@ -163,6 +164,7 @@ fn check_source_with_imports(source: string, file_path: string, imported_interfa
     let program = parse_program(source);
     let prelude_globals = load_prelude_global_names(runtime_helper_call_names());
     let type_diags = typecheck_diagnostics_with_import_symbols_prelude(program, imported_interfaces, function_effects, prelude_globals);
+    let ownership_warnings = check_ownership_with_imports(program, function_effects);
     let effect_violations = validate_effects_with_imports(program, function_effects);
     let capability_violations = validate_capsule_capabilities(program, capabilities_required);
     let unrecognized_violations = validate_recognized_effects(program);
@@ -343,6 +345,33 @@ fn check_source_with_imports(source: string, file_path: string, imported_interfa
         if strings_equal(diag.severity, "error") { errors += 1; }
         if strings_equal(diag.severity, "warning") { warnings += 1; }
         ti += 1;
+    }
+
+    // Ownership is a check-time correctness gate, not only a build-time one.
+    // Convert the shared ownership findings here so `sfn check` catches Task
+    // double-consumption (E0837) and nursery escape (E0838) in the fast inner
+    // loop with the same diagnostics the build path emits.
+    let mut oi: int = 0;
+    loop {
+        if oi >= ownership_warnings.length { break; }
+        let finding = ownership_warnings[oi];
+        let odiag = Diagnostic {
+            code: finding.code,
+            severity: finding.severity,
+            message: finding.message,
+            file_path: file_path,
+            primary: finding.trigger,
+            suggestion: null
+        };
+        combined.push(odiag);
+        // Ownership diagnostics are part of the frontend type-safety gate.
+        // Keep the published check-JSON producer enum stable rather than
+        // introducing a schema-breaking producer value for this sub-pass.
+        producers.push("typecheck");
+        rendered.push(render_diagnostic(diagnostic_to_diag(odiag, "typecheck"), source_lines, "typecheck"));
+        if strings_equal(odiag.severity, "error") { errors += 1; }
+        if strings_equal(odiag.severity, "warning") { warnings += 1; }
+        oi += 1;
     }
 
     // Route effect-violation severity through the same env-var

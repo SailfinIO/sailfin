@@ -78,6 +78,7 @@ fn _intrinsic_name(kind: IntrinsicConstructorKind) -> string {
 fn _intrinsic_ownership(kind: IntrinsicConstructorKind) -> OwnershipClass {
     if kind.variant == "Affine" { return OwnershipClass.Affine(); }
     if kind.variant == "Linear" { return OwnershipClass.Linear(); }
+    if kind.variant == "Task" { return OwnershipClass.Affine(); }
     return OwnershipClass.Copyable();
 }
 

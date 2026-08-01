@@ -1,0 +1,497 @@
+// Task call identity and fresh-spawn provenance summaries for the ownership
+// checker. Keeping this program-level analysis separate prevents the main
+// ownership walk from conflating a declared `Task<T>` result with proof that a
+// helper creates a nursery-bound task.
+import {
+    Block,
+    Expression,
+    Program,
+    Statement
+} from "./ast";
+import { ImportSymbolTable, localize_import_symbols_for_program } from "./effect_imports";
+import { index_of, starts_with } from "./string_utils";
+import { is_task_type } from "./typecheck_types/expr_type_rules";
+import {
+    extract_generic_argument_block,
+    is_identifier_char,
+    split_generic_argument_list,
+    trim_text
+} from "./typecheck_types/text_utils";
+
+struct TaskReturnProof {
+    total: int;
+    fresh: int;
+}
+
+fn _task_owner_base(type_name: string) -> string {
+    let mut base = trim_text(type_name);
+    loop {
+        if base.length < 2 { break; }
+        if substring(base, base.length - 2, base.length) != "[]" { break; }
+        base = trim_text(substring(base, 0, base.length - 2));
+    }
+    let generic_start = index_of(base, "<");
+    if generic_start >= 0 {
+        return trim_text(substring(base, 0, generic_start));
+    }
+    return base;
+}
+
+fn task_method_key(type_name: string, method_name: string) -> string {
+    return _task_owner_base(type_name) + "." + method_name;
+}
+
+fn task_aggregate_key(type_name: string) -> string {
+    return "task-aggregate:" + _task_owner_base(type_name);
+}
+
+fn declared_callable_key(name: string) -> string {
+    return "declared-callable:" + name;
+}
+
+fn _task_field_type_key(owner_type: string, field_name: string, field_type: string) -> string {
+    return "field-type:" + _task_owner_base(owner_type) + "." + field_name + "="
+        + field_type;
+}
+
+fn _task_type_parameters_key(owner_type: string, parameters: string) -> string {
+    return "type-parameters:" + _task_owner_base(owner_type) + "=" + parameters;
+}
+
+fn _task_type_parameters(names: string[], owner_type: string) -> string[] {
+    let prefix = "type-parameters:" + _task_owner_base(owner_type) + "=";
+    let mut index: int = 0;
+    loop {
+        if index >= names.length { break; }
+        if starts_with(names[index], prefix) {
+            let text = substring(names[index], prefix.length, names[index].length);
+            return split_generic_argument_list(text);
+        }
+        index += 1;
+    }
+    return [];
+}
+
+fn _task_type_arguments(owner_type: string) -> string[] {
+    let block = extract_generic_argument_block(owner_type);
+    if block == null { return []; }
+    return split_generic_argument_list(block);
+}
+
+fn _substitute_task_field_type(field_type: string, parameters: string[], arguments: string[]) -> string {
+    let mut result: string = "";
+    let mut token: string = "";
+    let mut index: int = 0;
+    loop {
+        if index >= field_type.length { break; }
+        let ch = field_type[index];
+        if is_identifier_char(ch) { token = token + ch; } else {
+            if token.length > 0 {
+                let mut replacement = token;
+                let mut parameter_index: int = 0;
+                loop {
+                    if parameter_index >= parameters.length || parameter_index >= arguments.length {
+                        break;
+                    }
+                    if parameters[parameter_index] == token {
+                        replacement = arguments[parameter_index];
+                        break;
+                    }
+                    parameter_index += 1;
+                }
+                result = result + replacement;
+                token = "";
+            }
+            result = result + ch;
+        }
+        index += 1;
+    }
+    if token.length > 0 {
+        let mut replacement = token;
+        let mut parameter_index: int = 0;
+        loop {
+            if parameter_index >= parameters.length || parameter_index >= arguments.length {
+                break;
+            }
+            if parameters[parameter_index] == token {
+                replacement = arguments[parameter_index];
+                break;
+            }
+            parameter_index += 1;
+        }
+        result = result + replacement;
+    }
+    return result;
+}
+
+fn task_field_type(names: string[], owner_type: string, field_name: string) -> string {
+    let prefix = "field-type:" + _task_owner_base(owner_type) + "." + field_name
+        + "=";
+    let mut index: int = 0;
+    loop {
+        if index >= names.length { break; }
+        if starts_with(names[index], prefix) {
+            let raw = substring(names[index], prefix.length, names[index].length);
+            return _substitute_task_field_type(raw, _task_type_parameters(names, owner_type), _task_type_arguments(owner_type));
+        }
+        index += 1;
+    }
+    return "";
+}
+
+fn _task_type_is_bearing_with_seen(names: string[], type_text: string, seen: string[]) -> boolean {
+    if is_task_type(type_text) { return true; }
+    if _name_in_list(names, task_aggregate_key(type_text)) { return true; }
+    let concrete_type = trim_text(type_text);
+    if _name_in_list(seen, concrete_type) { return false; }
+    let arguments = _task_type_arguments(type_text);
+    if arguments.length == 0 { return false; }
+    let mut next_seen = seen;
+    next_seen.push(concrete_type);
+    let owner = _task_owner_base(type_text);
+    let field_prefix = "field-type:" + owner + ".";
+    let parameters = _task_type_parameters(names, type_text);
+    let mut index: int = 0;
+    loop {
+        if index >= names.length { break; }
+        if starts_with(names[index], field_prefix) {
+            let equals = index_of(names[index], "=");
+            if equals >= 0 {
+                let raw = substring(names[index], equals + 1, names[index].length);
+                let concrete = _substitute_task_field_type(raw, parameters, arguments);
+                if _task_type_is_bearing_with_seen(names, concrete, next_seen) {
+                    return true;
+                }
+            }
+        }
+        index += 1;
+    }
+    return false;
+}
+
+fn task_type_is_bearing(names: string[], type_text: string) -> boolean {
+    let seen: string[] = [];
+    return _task_type_is_bearing_with_seen(names, trim_text(type_text), seen);
+}
+
+fn fresh_task_key(callable_key: string) -> string {
+    return "fresh:" + callable_key;
+}
+
+fn _name_in_list(names: string[], name: string) -> boolean {
+    let mut index: int = 0;
+    loop {
+        if index >= names.length { break; }
+        if names[index] == name { return true; }
+        index += 1;
+    }
+    return false;
+}
+
+fn _merge_task_return_proof(left: TaskReturnProof, right: TaskReturnProof) -> TaskReturnProof {
+    return TaskReturnProof {
+        total: left.total + right.total,
+        fresh: left.fresh + right.fresh
+    };
+}
+
+// Prove fresh nursery provenance only for expressions whose origin is
+// explicit: a spawn, a call to an already-proven local producer, or a
+// conditional whose alternatives are both proven fresh. A Task return type by
+// itself deliberately does not qualify.
+fn _expression_is_proven_fresh_task(expression: Expression?, names: string[]) -> boolean {
+    if expression == null { return false; }
+    if expression.variant == "Spawn" { return true; }
+    if expression.variant == "Call" {
+        let callee = expression.callee;
+        if callee.variant == "Identifier" {
+            return _name_in_list(names, fresh_task_key(callee.name));
+        }
+        return false;
+    }
+    if expression.variant == "Conditional" {
+        return _expression_is_proven_fresh_task(expression.then_value, names)
+            && _expression_is_proven_fresh_task(expression.else_value, names);
+    }
+    return false;
+}
+
+fn _block_task_return_proof(block: Block, names: string[]) -> TaskReturnProof {
+    let mut proof = TaskReturnProof { total: 0, fresh: 0 };
+    let mut index: int = 0;
+    loop {
+        if index >= block.statements.length { break; }
+        proof = _merge_task_return_proof(proof, _statement_task_return_proof(block.statements[index], names));
+        index += 1;
+    }
+    return proof;
+}
+
+fn block_proves_fresh_task_returns(block: Block, names: string[]) -> boolean {
+    let proof = _block_task_return_proof(block, names);
+    return proof.total > 0 && proof.total == proof.fresh;
+}
+
+fn _statement_task_return_proof(statement: Statement, names: string[]) -> TaskReturnProof {
+    if statement.variant == "ReturnStatement" {
+        let mut fresh: int = 0;
+        if _expression_is_proven_fresh_task(statement.expression, names) {
+            fresh = 1;
+        }
+        return TaskReturnProof { total: 1, fresh: fresh };
+    }
+    if statement.variant == "BlockStatement" {
+        return _block_task_return_proof(statement.body, names);
+    }
+    if statement.variant == "IfStatement" {
+        let mut proof = _block_task_return_proof(statement.then_block, names);
+        let else_branch = statement.else_branch;
+        if else_branch != null {
+            let else_body = else_branch.body;
+            if else_body != null {
+                proof = _merge_task_return_proof(proof, _block_task_return_proof(else_body, names));
+            }
+            let else_statement = else_branch.statement;
+            if else_statement != null {
+                proof = _merge_task_return_proof(proof, _statement_task_return_proof(else_statement, names));
+            }
+        }
+        return proof;
+    }
+    if statement.variant == "LoopStatement" || statement.variant == "RoutineStatement"
+        || statement.variant == "ForStatement"
+        || statement.variant == "WithStatement" {
+        return _block_task_return_proof(statement.body, names);
+    }
+    if statement.variant == "MatchStatement" {
+        let mut proof = TaskReturnProof { total: 0, fresh: 0 };
+        let mut index: int = 0;
+        loop {
+            if index >= statement.cases.length { break; }
+            proof = _merge_task_return_proof(proof, _block_task_return_proof(statement.cases[index].body, names));
+            index += 1;
+        }
+        return proof;
+    }
+    if statement.variant == "TryStatement" {
+        let mut proof = _block_task_return_proof(statement.try_block, names);
+        let catch_block = statement.catch_block;
+        if catch_block != null {
+            proof = _merge_task_return_proof(proof, _block_task_return_proof(catch_block, names));
+        }
+        let finally_block = statement.finally_block;
+        if finally_block != null {
+            proof = _merge_task_return_proof(proof, _block_task_return_proof(finally_block, names));
+        }
+        return proof;
+    }
+    // Nested functions and lambdas own their return statements; they do not
+    // contribute to the enclosing callable's producer summary.
+    return TaskReturnProof { total: 0, fresh: 0 };
+}
+
+fn _task_return_is_declared(statement: Statement) -> boolean {
+    if statement.variant != "FunctionDeclaration" { return false; }
+    let return_type = statement.signature.return_type;
+    if return_type == null { return false; }
+    return is_task_type(return_type.text);
+}
+
+fn _append_proven_program_task_producers(program: Program, initial_names: string[]) -> string[] {
+    let mut names = initial_names;
+    // A producer may call another producer declared later. Iterate to a fixed
+    // point bounded by the number of top-level declarations.
+    let mut pass: int = 0;
+    loop {
+        if pass > program.statements.length { break; }
+        let mut index: int = 0;
+        loop {
+            if index >= program.statements.length { break; }
+            let statement = program.statements[index];
+            if _task_return_is_declared(statement) {
+                let proof = _block_task_return_proof(statement.body, names);
+                let key = fresh_task_key(statement.signature.name);
+                if proof.total > 0 && proof.total == proof.fresh && !_name_in_list(names, key) {
+                    names.push(key);
+                }
+            }
+            if statement.variant == "StructDeclaration" {
+                let mut method_index: int = 0;
+                loop {
+                    if method_index >= statement.methods.length { break; }
+                    let method = statement.methods[method_index];
+                    let return_type = method.signature.return_type;
+                    if return_type != null {
+                        if is_task_type(return_type.text) {
+                            let proof = _block_task_return_proof(method.body, names);
+                            let callable_key = task_method_key(statement.name, method.signature.name);
+                            let key = fresh_task_key(callable_key);
+                            if proof.total > 0 && proof.total == proof.fresh
+                                && !_name_in_list(names, key) {
+                                names.push(key);
+                            }
+                        }
+                    }
+                    method_index += 1;
+                }
+            }
+            index += 1;
+        }
+        pass += 1;
+    }
+    return names;
+}
+
+fn _append_struct_task_metadata(program: Program, initial_names: string[]) -> string[] {
+    let mut names = initial_names;
+    let mut index: int = 0;
+    loop {
+        if index >= program.statements.length { break; }
+        let statement = program.statements[index];
+        if statement.variant == "StructDeclaration" {
+            let mut parameter_text: string = "";
+            let mut parameter_index: int = 0;
+            loop {
+                if parameter_index >= statement.type_parameters.length { break; }
+                if parameter_index > 0 { parameter_text = parameter_text + ","; }
+                parameter_text = parameter_text + statement.type_parameters[parameter_index].name;
+                parameter_index += 1;
+            }
+            if parameter_text.length > 0 {
+                names.push(_task_type_parameters_key(statement.name, parameter_text));
+            }
+            let mut field_index: int = 0;
+            loop {
+                if field_index >= statement.fields.length { break; }
+                let field = statement.fields[field_index];
+                names.push(_task_field_type_key(statement.name, field.name, field.type_annotation.text));
+                field_index += 1;
+            }
+        }
+        index += 1;
+    }
+    // Aggregate containment is transitive (`Outer` may contain a `Bucket`
+    // whose field is `Task<T>[]`). Close it to a fixed point so an empty
+    // initializer cannot erase the declared affine shape.
+    let mut pass: int = 0;
+    loop {
+        if pass > program.statements.length { break; }
+        index = 0;
+        loop {
+            if index >= program.statements.length { break; }
+            let statement = program.statements[index];
+            if statement.variant == "StructDeclaration" {
+                let key = task_aggregate_key(statement.name);
+                if !_name_in_list(names, key) {
+                    let mut field_index: int = 0;
+                    loop {
+                        if field_index >= statement.fields.length { break; }
+                        let field_type = statement.fields[field_index].type_annotation.text;
+                        if is_task_type(field_type) || _name_in_list(names, task_aggregate_key(field_type)) {
+                            names.push(key);
+                            break;
+                        }
+                        field_index += 1;
+                    }
+                }
+            }
+            index += 1;
+        }
+        pass += 1;
+    }
+    return names;
+}
+
+// Calls do not retain their inferred result type in the ownership AST. Gather
+// the declared Task-returning surface once so `let h = make_task()` preserves
+// Task identity even without a redundant local annotation. Methods use a
+// `Receiver.method` key so unrelated same-named methods cannot make an
+// ordinary return value spuriously affine.
+fn gather_task_returning_names(program: Program, imports: ImportSymbolTable) -> string[] {
+    let mut names: string[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= program.statements.length { break; }
+        let statement = program.statements[index];
+        if statement.variant == "FunctionDeclaration" || statement.variant == "ExternFunctionDeclaration" {
+            names.push(declared_callable_key(statement.signature.name));
+            let return_type = statement.signature.return_type;
+            if return_type != null {
+                if is_task_type(return_type.text) {
+                    names.push(statement.signature.name);
+                }
+            }
+        }
+        if statement.variant == "StructDeclaration" {
+            let mut method_index: int = 0;
+            loop {
+                if method_index >= statement.methods.length { break; }
+                let method = statement.methods[method_index];
+                let return_type = method.signature.return_type;
+                if return_type != null {
+                    if is_task_type(return_type.text) {
+                        names.push(task_method_key(statement.name, method.signature.name));
+                    }
+                }
+                method_index += 1;
+            }
+        }
+        index += 1;
+    }
+    names = _append_struct_task_metadata(program, names);
+    names = _append_proven_program_task_producers(program, names);
+    let localized = localize_import_symbols_for_program(program, imports);
+    index = 0;
+    loop {
+        if index >= localized.functions.length { break; }
+        let entry = localized.functions[index];
+        names.push(declared_callable_key(entry.name));
+        if entry.return_type.length > 0 {
+            if is_task_type(entry.return_type) {
+                if !_name_in_list(names, entry.name) {
+                    names.push(entry.name);
+                }
+            }
+        }
+        index += 1;
+    }
+    return names;
+}
+
+fn gather_block_task_returning_names(block: Block, initial_names: string[]) -> string[] {
+    let mut names = initial_names;
+    let mut index: int = 0;
+    loop {
+        if index >= block.statements.length { break; }
+        let statement = block.statements[index];
+        if statement.variant == "FunctionDeclaration" {
+            names.push(declared_callable_key(statement.signature.name));
+            let return_type = statement.signature.return_type;
+            if return_type != null {
+                if is_task_type(return_type.text) {
+                    names.push(statement.signature.name);
+                }
+            }
+        }
+        index += 1;
+    }
+    let mut pass: int = 0;
+    loop {
+        if pass > block.statements.length { break; }
+        index = 0;
+        loop {
+            if index >= block.statements.length { break; }
+            let statement = block.statements[index];
+            if _task_return_is_declared(statement) {
+                let proof = _block_task_return_proof(statement.body, names);
+                let key = fresh_task_key(statement.signature.name);
+                if proof.total > 0 && proof.total == proof.fresh && !_name_in_list(names, key) {
+                    names.push(key);
+                }
+            }
+            index += 1;
+        }
+        pass += 1;
+    }
+    return names;
+}
