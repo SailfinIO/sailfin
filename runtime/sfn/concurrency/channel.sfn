@@ -108,6 +108,15 @@ fn _sfn_channel_struct_size_full() -> i64 { return 224; }
 
 fn _sfn_channel_closed_offset() -> i64 { return 208; }
 
+// Nursery ownership surface (SFN-688). Re-declared rather than imported
+// (the scheduler.sfn / future.sfn discipline). `_sfn_g_current_nursery`
+// itself is unreachable from here — a module-level `thread_local let mut`
+// lowers to an `internal` LLVM global, invisible across the link
+// boundary — so the accessor is the only way in.
+extern fn sfn_nursery_current() -> i64;
+
+extern fn sfn_nursery_register_channel(n: i64, ch: i64) -> i64;
+
 // ── sfn_channel_create ────────────────────────────────────────────
 // Allocates a channel handle and its element buffer.  `capacity` is
 // clamped to at least 1; `elem_size` must be > 0 (clamped to 1 if
@@ -167,6 +176,14 @@ fn sfn_channel_create(capacity: i64, elem_size: i64, owned: i64) -> *u8 {
         free(ch_ptr);
         return null;
     }
+
+    // Hand ownership to the enclosing `routine` scope, if there is one
+    // (SFN-688). Registered last, so a channel that failed any init step
+    // above is never handed over. A zero current-nursery — a module
+    // global, or any `channel()` outside a routine — is a no-op and the
+    // handle lives until process exit; see `sfn_nursery_register_channel`
+    // for why that case is deliberately not reclaimed.
+    sfn_nursery_register_channel(sfn_nursery_current(), ch_ptr as i64);
 
     return ch_ptr;
 }
