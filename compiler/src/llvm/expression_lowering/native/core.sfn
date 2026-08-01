@@ -840,7 +840,7 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
     // this marker in place of a real closure pair when the lambda's
     // capture set contains a `mutable` binding. The `[fatal]` prefix
     // matches the sentinel scanned by
-    // `lowering_core.sfn:has_fatal_lowering_diagnostic` — IR writes
+    // `lowering_core/diagnostics.sfn:has_fatal_lowering_diagnostic` — IR writes
     // are skipped, the build exits non-zero.
     if starts_with(stripped, "<closure_pair_fatal_mutable ") {
         let cap_name = _parse_marker_string_field(stripped, "name=");
@@ -867,7 +867,7 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
     // trampoline reads env offset 0 as a by-value 32-byte OwnedBuf, but a
     // mutable capture lowers by reference (an 8-byte `%OwnedBuf*` slot
     // pointer) — the two ABIs collide. The `[fatal]` prefix matches the
-    // sentinel scanned by `lowering_core.sfn:has_fatal_lowering_diagnostic`,
+    // sentinel scanned by `lowering_core/diagnostics.sfn:has_fatal_lowering_diagnostic`,
     // so IR writes are skipped and the build exits non-zero.
     if starts_with(stripped, "<closure_pair_fatal_owned_buf_mut ") {
         let cap_name = _parse_marker_string_field(stripped, "name=");

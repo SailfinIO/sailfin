@@ -9,7 +9,7 @@
 // emit llvm` output: the `@main` exception-frame wrapper
 // (`compiler/src/llvm/lowering/emission.sfn`) and a user `try` block
 // (`compiler/src/llvm/lowering/instructions_try.sfn`). The third
-// (`compiler/src/llvm/lowering/lowering_core.sfn`, the `sfn test` harness
+// (`compiler/src/llvm/lowering/lowering_core/test_harness.sfn`, the `sfn test` harness
 // `@main`) is a harness-generator string template that no `sfn emit` on a
 // fixture reaches, so SFN-644 pins it from the other direction: `sfn
 // test` writes the synthesized harness IR to `<scratch>/test.ll`
@@ -90,7 +90,8 @@ fn _emit_try_fixture(target_os: string, label: string) -> string ![io] {
 }
 
 // A fixture with no `try` of its own, so the generated `test.ll` carries
-// exactly one jmp_buf alloca: `lowering_core.sfn`'s harness `@main`.
+// exactly one jmp_buf alloca: `lowering_core/test_harness.sfn`'s harness
+// `@main`.
 // The test additionally pins that site by its literal `%jmpbuf` name
 // rather than relying on it being the only match, so a fixture or
 // `sfn/test` change that later drags in a second jmp_buf (`expect.sfn`
@@ -199,14 +200,14 @@ test "jmp_buf layout: every jmp_buf alloca is 512 bytes and 16-aligned for a Win
 
 // The third emission site, which no `sfn emit` on a fixture reaches. The
 // named-`%jmpbuf` assertion is the one that cannot pass on the strength
-// of the other two sites being correct: it pins `lowering_core.sfn`'s
+// of the other two sites being correct: it pins `test_harness.sfn`'s
 // harness `@main` alloca specifically, so widening that site out of step
 // with the other two fails here (SFN-644).
 test "jmp_buf layout: the sfn test harness @main jmp_buf is 512 bytes and 16-aligned" ![io] {
     let ir = _emit_harness_ir("jmpbuf-harness");
     assert ir.length > 0;
     // Confirm this really is harness IR before reading the `%jmpbuf`
-    // line as `lowering_core.sfn`'s. `emission.sfn` emits a
+    // line as `test_harness.sfn`'s. `emission.sfn` emits a
     // byte-identical line, and is excluded here only because a
     // `*_test.sfn` has no user `fn main`, so its wrapper never emits.
     assert contains(ir, "@sfn_test_report_pass");

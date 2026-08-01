@@ -15,9 +15,10 @@ fn _sha256_k() -> int[] {
 }
 
 // Compute the SHA-256 digest of a byte array, returning the 32 digest bytes
-// as an int[]. Mechanical transcription of the shipped `sha256_hex`
-// (mod.sfn): input is already an int[] (no string decode), and the digest is
-// pushed as big-endian bytes (via `bits::store_u32_be`) instead of hex.
+// as an int[]. This core is derived from the former `sha256_hex`
+// implementation: input is already an int[] (no string decode), and the
+// digest is pushed as big-endian bytes (via `bits::store_u32_be`) instead of
+// hex.
 //
 // Capsule-internal, mirroring `sha384_bytes` (sha384.sfn): the SHA-256 core
 // exists exactly once here, and byte-oriented consumers inside the capsule

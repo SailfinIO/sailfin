@@ -20,6 +20,7 @@
 // the 64-bit limb core and the 80-entry round-constant table exist exactly once
 // in the capsule (SFN-662). Only the SHA-384 HMAC/HKDF layer (block size 128,
 // 48-byte output) is local, pending SFN-666.
+import { string_to_bytes } from "./bits";
 import { hkdf_sha256_expand, hmac_sha256_bytes } from "./hkdf";
 import { sha384_bytes } from "./sha384";
 
@@ -184,10 +185,11 @@ fn hkdf_expand_label(secret: int[], label: string, context: int[], length: int) 
 
     // "tls13 " ‖ label as bytes (the 6-byte prefix is fixed ASCII).
     let mut full_label: int[] = [116, 108, 115, 49, 51, 32,];  // "tls13 "
+    let label_bytes: int[] = string_to_bytes(label);
     let mut li: int = 0;
     loop {
-        if li >= label.length { break; }
-        full_label.push(char_code(label[li]) & 255);
+        if li >= label_bytes.length { break; }
+        full_label.push(label_bytes[li]);
         li += 1;
     }
     if full_label.length < 7 || full_label.length > 255 { return []; }

@@ -79,6 +79,14 @@ fn _check_output(tag: string, src: string) -> string ![io] {
     return out + err;
 }
 
+fn _check_json_output(tag: string, src: string) -> string ![io] {
+    let path = _write_fixture(tag, src);
+    let _exit = process.run_capture([_sfn_bin(), "check", "--json", path], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    return out + err;
+}
+
 // ---- crux: annotated empty handle array + push + ordered join builds & runs.
 test "join_all: annotated Task<int>[] init-empty, pushed, joined in input order" ![io] {
     // Task 0 busy-loops so it completes LAST; input-order results must still
@@ -202,6 +210,136 @@ test "join_all: a matching-kind push into Task<int>[] checks clean" ![io] {
         + "}\n";
     let output = _check_output("clean", src);
     assert find(output, "checked 1 files: ok", 0) >= 0;
+}
+
+// ---- SFN-446: Task<T> is affine. A direct second await is rejected during
+// `sfn check` with the concurrency-specific E0837, not generic E0901.
+test "task ownership: double-await fails checking with E0837" ![io] {
+    let src = "fn main() -> int {\n"
+        + "    let h = spawn fn() -> int { return 7; };\n"
+        + "    let first = await h;\n"
+        + "    let second = await h;\n"
+        + "    return first + second;\n"
+        + "}\n";
+    let output = _check_output("e0837-double-await", src);
+    assert find(output, "E0837", 0) >= 0;
+    assert find(output, "E0901", 0) < 0;
+}
+
+test "task ownership: check JSON keeps E0837 in the typecheck producer enum" ![io] {
+    let src = "fn main() -> int {\n"
+        + "    let h = spawn fn() -> int { return 7; };\n"
+        + "    let first = await h;\n"
+        + "    return first + await h;\n"
+        + "}\n";
+    let output = _check_json_output("e0837-json-producer", src);
+    assert find(output, "\"code\":\"E0837\"", 0) >= 0;
+    assert find(output, "\"producer\":\"typecheck\"", 0) >= 0;
+    assert find(output, "\"producer\":\"ownership\"", 0) < 0;
+}
+
+test "task ownership: await after moving into a joined array fails with E0837" ![io] {
+    let src = "fn main() -> int {\n"
+        + "    let h = spawn fn() -> int { return 7; };\n"
+        + "    let hs: Task<int>[] = [h];\n"
+        + "    let results = join_all(hs);\n"
+        + "    return await h;\n"
+        + "}\n";
+    let output = _check_output("e0837-after-join", src);
+    assert find(output, "E0837", 0) >= 0;
+    assert find(output, "E0901", 0) < 0;
+}
+
+test "task ownership: joining the same handle array twice fails with E0837" ![io] {
+    let src = "fn main() -> int[] {\n"
+        + "    let hs: Task<int>[] = [spawn fn() -> int { return 7; }];\n"
+        + "    let first = join_all(hs);\n"
+        + "    return join_all(hs);\n"
+        + "}\n";
+    let output = _check_output("e0837-double-join", src);
+    assert find(output, "E0837", 0) >= 0;
+    assert find(output, "E0901", 0) < 0;
+}
+
+test "task ownership: indexed await consumes the affine handle array" ![io] {
+    let src = "fn main() -> int {\n"
+        + "    let hs: Task<int>[] = [spawn fn() -> int { return 7; }];\n"
+        + "    let first = await hs[0];\n"
+        + "    return await hs[0];\n"
+        + "}\n";
+    let output = _check_output("e0837-indexed-await", src);
+    assert find(output, "E0837", 0) >= 0;
+    assert find(output, "E0901", 0) < 0;
+}
+
+test "task ownership: inferred Task-returning call remains affine" ![io] {
+    let src = "fn make_task() -> Task<int> {\n"
+        + "    return spawn fn() -> int { return 7; };\n"
+        + "}\n"
+        + "fn main() -> int {\n"
+        + "    let h = make_task();\n"
+        + "    let first = await h;\n"
+        + "    return await h;\n"
+        + "}\n";
+    let output = _check_output("e0837-inferred-call", src);
+    assert find(output, "E0837", 0) >= 0;
+}
+
+test "task lifetime: a live nursery handle in an outer binding fails with E0838" ![io] {
+    let src = "fn main() -> int {\n"
+        + "    let mut escaped: Task<int>[] = [];\n"
+        + "    routine {\n"
+        + "        escaped.push(spawn fn() -> int { return 7; });\n"
+        + "    }\n"
+        + "    return 0;\n"
+        + "}\n";
+    let output = _check_output("e0838-outer-array", src);
+    assert find(output, "E0838", 0) >= 0;
+}
+
+test "task lifetime: indexed and module-global nursery stores fail with E0838" ![io] {
+    let indexed = "fn main() -> int {\n"
+        + "    let mut escaped: Task<int>[] = [spawn fn() -> int { return 1; }];\n"
+        + "    routine { escaped[0] = spawn fn() -> int { return 7; }; }\n"
+        + "    return 0;\n"
+        + "}\n";
+    let indexed_output = _check_output("e0838-indexed-array", indexed);
+    assert find(indexed_output, "E0838", 0) >= 0;
+
+    let global = "let mut escaped: Task<int>[] = [];\n" + "fn main() -> int {\n"
+        + "    routine { escaped.push(spawn fn() -> int { return 7; }); }\n"
+        + "    return 0;\n"
+        + "}\n";
+    let global_output = _check_output("e0838-global-array", global);
+    assert find(global_output, "E0838", 0) >= 0;
+}
+
+test "task lifetime: an outer handle array joined inside its nursery checks clean" ![io] {
+    let src = "fn main() -> int {\n"
+        + "    let mut handles: Task<int>[] = [];\n"
+        + "    routine {\n"
+        + "        handles.push(spawn fn() -> int { return 7; });\n"
+        + "        let results: int[] = join_all(handles);\n"
+        + "    }\n"
+        + "    return 0;\n"
+        + "}\n";
+    let output = _check_output("nursery-consumed", src);
+    assert find(output, "checked 1 files: ok", 0) >= 0;
+    assert find(output, "E0838", 0) < 0;
+}
+
+test "task lifetime: clearing an outer handle array removes nursery provenance" ![io] {
+    let src = "fn main() -> int {\n"
+        + "    let mut handles: Task<int>[] = [];\n"
+        + "    routine {\n"
+        + "        handles.push(spawn fn() -> int { return 7; });\n"
+        + "        handles = [];\n"
+        + "    }\n"
+        + "    return 0;\n"
+        + "}\n";
+    let output = _check_output("nursery-cleared", src);
+    assert find(output, "checked 1 files: ok", 0) >= 0;
+    assert find(output, "E0838", 0) < 0;
 }
 
 // ---- fail closed: `join_all` over an ordinary (non-Task) array must not

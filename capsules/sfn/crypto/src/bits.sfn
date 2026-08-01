@@ -6,6 +6,31 @@
 // comparison, and big/little-endian word (de)serialization — so the
 // other Phase A primitives (sha1, sha512, chacha20, poly1305) call a
 // single tested source instead of re-inlining these expressions.
+// Decode a byte-oriented string into integer bytes. Sailfin string indexing is
+// byte-oriented; masking documents and preserves the raw 0-255 contract.
+fn string_to_bytes(s: string) -> int[] {
+    let mut bytes: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= s.length { break; }
+        bytes.push(char_code(s[i]) & 255);
+        i += 1;
+    }
+    return bytes;
+}
+
+// Render one byte as two lowercase hexadecimal characters.
+fn hex_byte(byte: int) -> string {
+    let digits: string[] = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "a", "b", "c", "d", "e", "f",];
+    return digits[(byte >> 4) & 15] + digits[byte & 15];
+}
+
+// Advance a byte pointer by `off` bytes.
+fn ptr_off(p: *u8, off: i64) -> *u8 {
+    let addr: i64 = (p as i64) + off;
+    return addr as *u8;
+}
+
 // The 0xffffffff 32-bit mask as a decimal constant.
 fn mask32() -> int { return 4294967295; }
 
@@ -72,6 +97,9 @@ fn store_u32_le(out: int[], x: int) -> void {
 }
 
 export {
+    string_to_bytes,
+    hex_byte,
+    ptr_off,
     mask32,
     rotl32,
     rotr32,

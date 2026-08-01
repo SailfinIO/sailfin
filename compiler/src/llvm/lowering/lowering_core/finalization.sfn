@@ -1,0 +1,224 @@
+// compiler/src/llvm/lowering/lowering_core/finalization.sfn
+//
+// Final LLVM text normalization after lowering and symbol mangling.
+import { substring } from "../../../string_utils";
+import {
+    index_of,
+    starts_with,
+    string_array_contains,
+    trim_text
+} from "../../utils";
+
+// Hoist `; closure_env_type_decl %T = type { ... }` hint comments
+// from inside function bodies up to the module preamble (issue #687).
+// Each lambda's hint is emitted twice — once at the lambda-site
+// alloc and once at the lifted-function load prologue — so the
+// dedup table tracks the LLVM type name (`%sfn_closure_env_<N>`)
+// and skips duplicates. The hoist inserts the unique decls
+// immediately after the `source_filename = "..."` line, which
+// guarantees they appear before any function body that references
+// the named type.
+fn hoist_closure_env_type_decls(lines: string[]) -> string[] {
+    let hint_prefix = "; closure_env_type_decl ";
+    let mut hoisted: string[] = [];
+    let mut seen_names: string[] = [];
+    let mut filtered: string[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= lines.length { break; }
+        let line = lines[index];
+        let trimmed = trim_text(line);
+        if starts_with(trimmed, hint_prefix) {
+            let decl_text = trim_text(substring(trimmed, hint_prefix.length, trimmed.length));
+            let type_name = _hoist_extract_type_name(decl_text);
+            if type_name.length > 0 {
+                let mut already: boolean = false;
+                let mut _si: int = 0;
+                loop {
+                    if _si >= seen_names.length { break; }
+                    if seen_names[_si] == type_name {
+                        already = true;
+                        break;
+                    }
+                    _si += 1;
+                }
+                if !already {
+                    seen_names.push(type_name);
+                    hoisted.push(decl_text);
+                }
+            }
+            // Drop the hint line — it has been hoisted (or was a duplicate).
+        } else { filtered.push(line); }
+        index += 1;
+    }
+    if hoisted.length == 0 { return lines; }
+
+    // Find the insertion point: the line right after `source_filename = `.
+    let mut insert_after: int = -1;
+    let mut fi: int = 0;
+    loop {
+        if fi >= filtered.length { break; }
+        if starts_with(trim_text(filtered[fi]), "source_filename = ") {
+            insert_after = fi;
+            break;
+        }
+        fi += 1;
+    }
+
+    let mut result: string[] = [];
+    let mut ri: int = 0;
+    loop {
+        if ri >= filtered.length { break; }
+        result.push(filtered[ri]);
+        if ri == insert_after {
+            result.push("");
+            let mut hi: int = 0;
+            loop {
+                if hi >= hoisted.length { break; }
+                result.push(hoisted[hi]);
+                hi += 1;
+            }
+        }
+        ri += 1;
+    }
+    // Fallback: if we never found a source_filename anchor, prepend.
+    if insert_after < 0 {
+        let mut prepended: string[] = [];
+        let mut hi2: int = 0;
+        loop {
+            if hi2 >= hoisted.length { break; }
+            prepended.push(hoisted[hi2]);
+            hi2 += 1;
+        }
+        prepended.push("");
+        let mut _fi2: int = 0;
+        loop {
+            if _fi2 >= filtered.length { break; }
+            prepended.push(filtered[_fi2]);
+            _fi2 += 1;
+        }
+        return prepended;
+    }
+    return result;
+}
+
+// Drop byte-identical module-scope `declare` lines, keeping the first
+// occurrence. Only column-0 `declare ` lines are considered — function
+// body lines are indented and never match, and `declare` never appears
+// inside a `define` body. Deterministic (order-preserving), so the
+// stage2==stage3 fixed point is unaffected. See the call site in
+// `lower_to_llvm_lines_with_parsed_context` for the clang-vs-LLVM
+// duplicate-declare rationale.
+fn dedup_module_declare_lines(lines: string[]) -> string[] {
+    let mut seen: string[] = [];
+    let mut result: string[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= lines.length { break; }
+        let line = lines[index];
+        if starts_with(line, "declare ") {
+            let mut already: boolean = false;
+            let mut _si: int = 0;
+            loop {
+                if _si >= seen.length { break; }
+                if seen[_si] == line {
+                    already = true;
+                    break;
+                }
+                _si += 1;
+            }
+            if !already {
+                seen.push(line);
+                result.push(line);
+            }
+        } else { result.push(line); }
+        index += 1;
+    }
+    return result;
+}
+
+// SFN-154: append `%Name = type opaque` for every named type referenced by a
+// `declare` line that lacks a `%Name = type ...` definition among `lines`.
+// A runtime-helper declare can name a struct type (e.g. `%OwnedBuf*` from
+// `io.read_fd`) in a module that neither defines nor forward-declares it, which
+// clang rejects as `use of undefined type`. LLVM resolves module-scope named
+// types independent of textual order, so appending the forward declaration
+// after its use is valid. Keys on emitted text only, so it never double-defines
+// a type the module already spells out in full (opaque or body).
+fn _append_missing_opaque_forward_decls(lines: string[]) -> string[] {
+    let mut defined: string[] = [];
+    let mut referenced: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        if starts_with(line, "%") {
+            let eq = index_of(line, " = type ");
+            if eq > 0 {
+                let name = substring(line, 0, eq);
+                if !string_array_contains(defined, name) {
+                    defined.push(name);
+                }
+            }
+        }
+        if starts_with(line, "declare ") {
+            let mut j: int = 0;
+            loop {
+                if j >= line.length { break; }
+                if substring(line, j, j + 1) == "%" {
+                    let mut k: int = j + 1;
+                    loop {
+                        if k >= line.length { break; }
+                        let ch = substring(line, k, k + 1);
+                        let mut stop: boolean = false;
+                        if ch == "*" { stop = true; }
+                        if ch == " " { stop = true; }
+                        if ch == "," { stop = true; }
+                        if ch == "(" { stop = true; }
+                        if ch == ")" { stop = true; }
+                        if ch == "}" { stop = true; }
+                        if ch == ">" { stop = true; }
+                        if stop { break; }
+                        k += 1;
+                    }
+                    if k > j + 1 {
+                        let name = substring(line, j, k);
+                        if !string_array_contains(referenced, name) {
+                            referenced.push(name);
+                        }
+                    }
+                    j = k;
+                } else { j += 1; }
+            }
+        }
+        i += 1;
+    }
+    let mut r: int = 0;
+    loop {
+        if r >= referenced.length { break; }
+        let name = referenced[r];
+        if !string_array_contains(defined, name) {
+            lines.push(name + " = type opaque");
+        }
+        r += 1;
+    }
+    return lines;
+}
+
+// Extract `%T` from `%T = type { ... }`. The name spans from the
+// leading `%` up to (but not including) the first space.
+fn _hoist_extract_type_name(decl: string) -> string {
+    let trimmed = trim_text(decl);
+    if trimmed.length == 0 { return ""; }
+    if trimmed[0] != "%" { return ""; }
+    let mut cursor: int = 0;
+    let mut name: string = "";
+    loop {
+        if cursor >= trimmed.length { break; }
+        let ch = trimmed[cursor];
+        if ch == " " { break; }
+        name = name + ch;
+        cursor += 1;
+    }
+    return name;
+}

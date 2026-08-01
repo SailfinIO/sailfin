@@ -49,7 +49,7 @@ cannot clear that bar:
 
 2. **The redundant-load fix is inert on the benched path.** A redundant-load
    elimination targeting the `-p` double read (`main.sfn` reload +
-   `lowering_core.sfn:446` re-read) measured **0% RSS change** across all 203
+   `lowering_core/mod.sfn` re-read) measured **0% RSS change** across all 203
    modules in the prototype (`capsule_resolver` +0.3%, `cli__commands__test`
    +0.2%, `native__core` +0.0%; zero modules moved ≥5% either way). It
    self-hosts and is byte-identical, but reducing a *transient* second read
@@ -130,7 +130,7 @@ SIGABRT); that is avoided by concatenating to one blob and re-splitting
 
 ### 3.3 Draining the second, in-lowering full-text load (the harder half)
 
-`collect_imported_module_context_for_module` (`lowering_core.sfn:446`) also
+`collect_imported_module_context_for_module` (`lowering_core/mod.sfn`) also
 loads full depth-0 texts, **inside** lowering (post-rewind, under the peak).
 Its outputs are layout manifests (from `.layout-manifest` sidecars — already
 compact, keep) and `native_texts` for the embedded-import union. Preferred
@@ -159,7 +159,7 @@ surface. The two new helpers are `![pure]` string transforms.
 
 Source-only, **no seed cut** — `relocate_string_to_heap` is already in the
 pinned seed. Passes touched: `main.sfn` (the rewind bracket),
-`lowering_core.sfn`, `imports.sfn`, plus two pure helpers. Every module's
+`lowering_core/mod.sfn`, `imports.sfn`, plus two pure helpers. Every module's
 `.ll` must be **byte-identical** — the same gate SFEP-0043 met — and
 `make compile` self-hosts the changed compiler in one pass.
 
@@ -221,7 +221,7 @@ readiness bar is byte-identity + self-host + bench, not new syntax.
   array-spine UAF forces the flat-blob shape.
 * Arena model: `runtime/sfn/memory/mem.sfn:185-187`,
   `runtime/sfn/memory/arena.sfn`; relocation: `arena_relocate.sfn`.
-* Load sites: `main.sfn` (~L680–L750); `lowering_core.sfn:446-460`.
+* Load sites: `main.sfn` (~L680–L750); `lowering_core/mod.sfn`.
 * Consumers: `lowering_phase_imports.sfn:119,133`,
   `lowering_helpers_mangling.sfn:60-126`, `lowering_helpers.sfn:331-359`.
 * SFEP-0027 (`docs/proposals/0027-cli-rss-modularization.md`) Phase A —

@@ -1,7 +1,7 @@
 // compiler/src/llvm/lowering/lowering_io.sfn
 //
 // String array operations, file I/O helpers, and miscellaneous lowering
-// utilities.  Extracted from lowering_core.sfn to reduce per-file
+// utilities.  Extracted from the former flat lowering_core.sfn to reduce per-file
 // memory footprint during self-hosting compilation.
 import { _publish_lines_atomic } from "../../build/fs";
 import { substring } from "../../string_utils";
@@ -58,7 +58,7 @@ fn max_retained_fatal_diagnostics() -> int { return 64; }
 // disarm the gate it is feeding (SFN-529; audited in
 // `docs/proposals/design-notes/sfn-526-lowering-fatal-gate-audit.md` §3
 // A3). The substring match mirrors `has_fatal_lowering_diagnostic`
-// (`lowering_core.sfn`), which is the gate this feeds.
+// (`lowering_core/diagnostics.sfn`), which is the gate this feeds.
 //
 // `scan_limit` is the caller's, not this function's: a guard that tripped
 // because the length is *invalid* rather than merely large must not have
@@ -315,4 +315,4 @@ fn ensure_intrinsic_declarations(lines: string[]) -> string[] {
         emit_index += 1;
     }
     return out;
-}  // make_native_module_for_emit lives in lowering_core.sfn (used by compile_native_text_to_llvm_file)
+}  // make_native_module_for_emit lives in lowering_core/file_emission.sfn

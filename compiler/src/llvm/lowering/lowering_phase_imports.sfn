@@ -2,7 +2,7 @@
 //
 // Phase 2 of LLVM lowering: imported-module context gathering.
 //
-// Extracted from lowering_core.sfn to reduce its per-module compile peak
+// Extracted from lowering_core/mod.sfn to reduce its per-module compile peak
 // RSS — moving the gather loop here removes ~6 sibling-module imports
 // (parse_native_*_for_import, apply_layout_manifest_to_module,
 // extend_native_functions) from the orchestrator's import set.
@@ -32,7 +32,7 @@ import { flatten_struct_methods } from "./lowering_helpers_mangling";
 
 // Flat-array bundle of everything the imported modules contribute to the
 // compile — structs, enums, interfaces, functions, and struct methods.
-// Consumed once by lowering_core.sfn's orchestrator, which immediately
+// Consumed once by lowering_core/mod.sfn's orchestrator, which immediately
 // destructures into local variables.  Distinct from the unrelated
 // `ImportedModuleContext` in llvm/types.sfn (manifests/native_texts/
 // diagnostics); the two types serve different phases of the pipeline.

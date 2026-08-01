@@ -114,7 +114,7 @@ fn _clean_lowering_state(dir: string) -> int ![io] {
         // Legacy: .phase_types_diagnostics / .phase_functions_diagnostics
         // were cross-phase file IPC channels used to ship accumulated
         // diagnostics from `build_type_context_with_recovery` /
-        // `lower_all_functions` to the orchestrator in `lowering_core.sfn`.
+        // `lower_all_functions` to the orchestrator in `lowering_core/mod.sfn`.
         // Both are now in-memory struct returns (TypeContextBuildResult,
         // FunctionLoweringResult). Prefix kept so stale files from older
         // seeds / build dirs don't contaminate new compiles.

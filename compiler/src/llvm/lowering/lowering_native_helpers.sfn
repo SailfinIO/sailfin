@@ -1,7 +1,7 @@
 // compiler/src/llvm/lowering/lowering_native_helpers.sfn
 //
 // NativeFunction / NativeInstruction / NativeStruct constructors,
-// updaters, and field accessors.  Extracted from lowering_core.sfn to
+// updaters, and field accessors.  Extracted from lowering_core/mod.sfn to
 // reduce per-file memory footprint during self-hosting compilation.
 import {
     NativeImport,

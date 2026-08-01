@@ -8,7 +8,7 @@ Date: 2026-07-17
 ## Problem
 
 The synthesized `@main` test harness
-(`compiler/src/llvm/lowering/lowering_core.sfn:153-374`) is a flat, branchless
+(`compiler/src/llvm/lowering/lowering_core/test_harness.sfn`) is a flat, branchless
 sequence of `call void @sym()`. A failing `assert` runs
 `runtime_assert_fail_fn` → `sailfin_assert_fail` (`runtime/sfn/assert.sfn:128`)
 → `sfn_raise_value_error` (`runtime/sfn/exception.sfn:472`) → libc `abort()`
@@ -103,7 +103,7 @@ SFAF `fail.bin` is retained (append) for file:line:col enrichment of the JSON
 `T fail` records (exactly one assert fires per failed test — the first throw
 unwinds).
 
-### Harness synthesis (`lowering_core.sfn`) — per-region setjmp template
+### Harness synthesis (`lowering_core/test_harness.sfn`) — per-region setjmp template
 
 The harness is **fully unrolled** (one static block group per test/hook), so no
 harness local is live across `setjmp` — the C11 "locals indeterminate after
@@ -200,7 +200,7 @@ None. New runtime report helpers are `![io]` (file append), consistent with
 
 ## Stage1 readiness mapping
 
-Parser/typecheck/effect: unchanged. Emit/lower: `lowering_core.sfn` harness. IR:
+Parser/typecheck/effect: unchanged. Emit/lower: `lowering_core/test_harness.sfn` harness. IR:
 setjmp/branch template above. Tests: e2e (below). Self-host: one-PR bundle.
 Docs: `docs/status.md` test-runner row + spec §11 (`sfn test --json` schema v2).
 
@@ -232,7 +232,7 @@ Extend `lifecycle_hook_ordering_test.sfn` / add peers; env-thread per
 
 ## References
 
-- `compiler/src/llvm/lowering/lowering_core.sfn:135-374` (harness)
+- `compiler/src/llvm/lowering/lowering_core/test_harness.sfn` (harness)
 - `compiler/src/llvm/lowering/instructions_try.sfn:214-631` (setjmp template)
 - `runtime/sfn/assert.sfn:128-172`, `runtime/sfn/exception.sfn:228,347,472`
 - `compiler/src/test_runner_json.sfn`, `compiler/src/assert_failure.sfn`

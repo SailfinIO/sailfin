@@ -1,12 +1,12 @@
 ---
 sfep: 0055
 title: Typed task handles (Task<T>) and ordered multi-await (join_all)
-status: Accepted
+status: Implemented
 type: language
 created: 2026-07-22
-updated: 2026-07-22
+updated: 2026-08-01
 author: "agent:compiler-architect; human review"
-tracking: "SFN-440, SFN-441"   # SFN-440 design (this SFEP); SFN-441 implementation
+tracking: "SFN-440, SFN-441, SFN-446"   # design, typed-handle core, ownership/lifetime hardening
 supersedes:
 superseded-by:
 graduates-to:
@@ -41,11 +41,11 @@ pointer-width `T` ceiling the rest of the concurrency surface already lives
 under; runtime fault propagation (cancel-on-fault) stays the property of the
 concurrency-maturity SFEP (SFN-124, `draft-concurrency-cancellation.md`).
 
-This proposal is the **design record for SFN-440** and **blocks SFN-441** (the
-implementation leaf). It is **SFEP-0055** (registry maximum was 0054; SFEP-0001
-§2 assigns `max + 1` at merge) and `Accepted` at the design gate (owner sign-off,
-2026-07-22). It graduates to `Implemented` when SFN-441 clears the Stage1 bar
-end-to-end and self-hosts.
+This proposal is the **design record for SFN-440**. SFN-441 delivered the typed
+handle and `join_all` core; SFN-446 completed the affine single-use and nursery
+lifetime diagnostics. It is **SFEP-0055** (registry maximum was 0054; SFEP-0001
+§2 assigns `max + 1` at merge) and reached `Implemented` after the combined
+surface cleared the Stage1 bar end-to-end and self-hosted on 2026-08-01.
 
 ## 2. Motivation
 
@@ -160,12 +160,25 @@ single-use** handle, reusing the ownership floor already in the compiler
 (`ownership_checker.sfn`, `Affine<T>` single-use `E0901`/`E0907`; epic #1209):
 
 - Awaiting a handle — directly (`await h`) or via `join_all` — **consumes** it.
-  A second await of the same handle is **use-after-move → E0834**
+  A second await of the same handle is **use-after-move → E0837**
   (double-await). This is the concurrency-specific surfacing of the existing
   affine single-use rule.
 - A handle is **movable** (into an array, as a `join_all` argument) but **not
   copyable**. Storing `spawn ...` into a `Task<T>[]` moves the handle into the
-  array; `join_all` consumes the whole array.
+  array; `join_all` consumes the whole array. Indexed extraction (`await
+  handles[i]`, or moving `handles[i]` into another consuming position) also
+  consumes the affine collection as a whole; it cannot manufacture a second
+  live alias to an element handle.
+- Task state follows unconditional lexical blocks and is conservatively joined
+  across mutually exclusive branches, repeated loop iterations, and try/catch
+  paths. A handle consumed on only one possible path is therefore unavailable
+  after the join (`E0837`). A local or imported call whose declared return type
+  is `Task<T>` retains this affine identity for an unannotated local;
+  receiver-qualified method lookup and callable shadowing prevent name-only
+  false positives.
+- Moving a handle into an aggregate field or an ordinary closure consumes it;
+  neither container construction nor closure capture can manufacture a second
+  live handle alias.
 
 ### 3.3 Nursery lifetime
 
@@ -173,13 +186,30 @@ A `Task<T>` is valid only within the **dynamic extent in which its task was
 spawned**. Storing handles in a `Task<T>[]` and awaiting/`join_all`-ing them
 **within that extent** is the supported shape; letting a live handle **escape**
 that extent (returning it, or storing it in a binding that outlives the
-enclosing `routine { }` nursery) is rejected — **E0835**. This *extends* the
+enclosing `routine { }` nursery) is rejected — **E0838**. This *extends* the
 existing fail-closed rejection of non-local exit out of a `routine` body
 (`instructions_routine.sfn:105-177`, `collect_routine_escape_diagnostics`): today
 control flow may not escape a nursery; this SFEP adds that a *task handle* may not
 outlive the scope that owns its task's lifetime. Handles spawned **outside** any
 `routine { }` follow the ambient function scope, exactly as bare `spawn`/`await`
 do today.
+
+Clearing an outer task collection with `handles = []` removes its live-handle
+provenance; unlike a push or indexed store, that assignment cannot carry a task
+past nursery exit.
+
+Nursery provenance follows explicit `spawn` and local helpers whose every Task
+return is statically proven fresh. Passing a nursery-origin Task to an opaque
+helper or method is rejected fail-closed unless the operation has a modeled
+consumption contract (the unshadowed builtin `join_all` or a receiver resolved
+as a Task collection); name spelling alone does not grant an exception. This
+prevents a helper from stashing the handle in a module global. A declared
+`Task<T>` return type alone establishes affine result identity, not fresh-spawn
+provenance: an identity helper returning an ambient Task remains ambient.
+Direct returns and nested aggregate/indexed stores into an outer or
+module-global destination are rejected because the destination outlives the
+nursery. Conditional Task values preserve their alternative provenance, and a
+Task-capturing closure carries the captured handle's nursery lifetime.
 
 ### 3.4 `join_all` — ordered multi-await
 
@@ -267,11 +297,11 @@ let c: int[] = join_all([                             // [1, 2, 3] in input orde
 // Ownership: a double-await is rejected.
 let h = spawn fn() -> int { 7 };
 let x = await h;
-let y = await h;                                      // E0834: use-after-move (double-await)
+let y = await h;                                      // E0837: use-after-move (double-await)
 
 // Lifetime: a handle may not escape its nursery.
 fn leak() -> Task<int> ![io] {
-    routine { return spawn fn() -> int { 1 }; }       // E0835: handle escapes nursery scope
+    routine { return spawn fn() -> int { 1 }; }       // E0838: handle escapes nursery scope
 }
 ```
 
@@ -323,13 +353,14 @@ ceiling here is what lets this land as one M leaf now.
   constructs already anticipate, `docs/status.md:520`).
 - **Typecheck (`typecheck.sfn`, `typecheck_types.sfn`).** `spawn` produces
   `Task<T>` (map the resolved future kind to `T`); `await` of a `Task<T>` yields
-  `T`; `join_all(Task<T>[]) -> T[]`; the new **E0834** (double-await), **E0835**
+  `T`; `join_all(Task<T>[]) -> T[]`; the new **E0837** (double-await), **E0838**
   (nursery escape), **E0836** (heterogeneous handle array); the E0831 refinement
-  (§3.5). E-codes E0834–E0836 are free (verified: no existing use;
-  `docs/style-guide.md` E08xx table stops at E0833).
+  (§3.5). E-codes E0836–E0838 are allocated to the task-handle surface in
+  `docs/style-guide.md`.
 - **Ownership (`ownership_checker.sfn`).** `Task<T>` classified affine/single-use,
-  reusing the `E0901`/`E0907` single-use floor (#1209); the E0835 escape check
-  extends `collect_routine_escape_diagnostics` (`instructions_routine.sfn`).
+  reusing the `E0901`/`E0907` single-use floor (#1209); the E0838 value-lifetime
+  check complements `collect_routine_escape_diagnostics`'s existing control-flow
+  escape rejection (`instructions_routine.sfn`).
 - **Emit / LLVM lowering.** A `join_all` lowering arm mirroring the `parallel`
   result-array collection (`instructions_routine.sfn` / expression lowering),
   targeting a new runtime combinator `sfn_join_all` in
@@ -407,25 +438,25 @@ confirmed runtime defect."*
 
 ## 8. Stage1 readiness mapping
 
-Tracked for the **implementation** (SFN-441); this SFEP is the design that
-precedes it. All boxes are unchecked here and become SFN-441's exit gate.
+Tracked across the **implementation** (SFN-441) and ownership/lifetime
+hardening (SFN-446). The combined surface clears the Stage1 exit gate.
 
-- [ ] **Parses** — no new syntax; `Task<T>` annotation and `join_all(...)` call
+- [x] **Parses** — no new syntax; `Task<T>` annotation and `join_all(...)` call
       already parse.
-- [ ] **Type-checks / effect-checks** — `spawn: Task<T>`, `await Task<T> -> T`,
-      `join_all(Task<T>[]) -> T[]`, E0834/E0835/E0836, E0831 refinement;
+- [x] **Type-checks / effect-checks** — `spawn: Task<T>`, `await Task<T> -> T`,
+      `join_all(Task<T>[]) -> T[]`, E0836/E0837/E0838, E0831 refinement;
       `join_all` effect-transparent.
-- [ ] **Emits valid `.sfn-asm`** — `join_all` emission mirroring `parallel`.
-- [ ] **Lowers to LLVM IR** — `sfn_join_all` combinator + builtin descriptor;
+- [x] **Emits valid `.sfn-asm`** — `join_all` emission mirroring `parallel`.
+- [x] **Lowers to LLVM IR** — `sfn_join_all` combinator + builtin descriptor;
       handle arrays lower through a pointer-width element slot.
-- [ ] **Regression coverage** — §9; all existing concurrency tests stay green;
+- [x] **Regression coverage** — §9; all existing concurrency tests stay green;
       E0831 still fires for the un-annotated case.
-- [ ] **Self-hosts** — additive; old seed compiles new compiler; bundle with
+- [x] **Self-hosts** — additive; old seed compiles new compiler; bundle with
       consumer (no seed cut).
-- [ ] **`sfn fmt --check` clean** — every touched `.sfn`.
-- [ ] **Documented in `docs/status.md` + spec** — SFN-441 flips the `spawn`/
+- [x] **`sfn fmt --check` clean** — every touched `.sfn`.
+- [x] **Documented in `docs/status.md` + spec** — SFN-441 flips the `spawn`/
       `await` (line 468) and `parallel` (line 469) rows and the concurrency
-      preview chapter to describe `Task<T>`/`join_all`; adds E0834–E0836.
+      preview chapter to describe `Task<T>`/`join_all`; adds E0836–E0838.
 
 ## 9. Test plan
 
@@ -445,8 +476,8 @@ alongside keeping the existing structured-concurrency suite green:
   `spawn_empty_array_push_test.sfn`); the **un-annotated** `let mut hs = []` push
   still fails closed with E0831 (unchanged); the `[fatal]` lowering backstop still
   fires on the unenumerated future→scalar shape.
-- **Ownership:** double-await (`await h; await h;`) → **E0834**; a handle escaping
-  a `routine { }` → **E0835**; a heterogeneous handle-array push → **E0836**
+- **Ownership:** double-await (`await h; await h;`) → **E0837**; a handle escaping
+  a `routine { }` → **E0838**; a heterogeneous handle-array push → **E0836**
   (unit `does_not_compile` negatives).
 - **Effect:** `join_all` over pure-bodied tasks requires no effect; over an
   `![io]`-bodied task, `io` is required (from the body, at spawn) — a
@@ -456,19 +487,27 @@ alongside keeping the existing structured-concurrency suite green:
 
 ## 10. Implementation split and blocker graph
 
-- **SFN-440** (this SFEP) — design record. Blocks **SFN-441**.
-- **SFN-441** (estimate 3 / M) — the implementation leaf: `Task<T>` prelude type +
-  `spawn: Task<T>` typing + `await`/`join_all` + `sfn_join_all` combinator +
-  E0831 refinement + E0834/E0835/E0836 + tests + docs. **Assessment: this remains
-  a single M leaf.** The ownership diagnostics reuse the shipped affine single-use
-  floor (`E0901`/`E0907`, #1209) and the existing non-local-exit escape machinery
-  (`collect_routine_escape_diagnostics`), so they are incremental, not a new
-  subsystem; the `join_all` combinator reuses the `sfn_parallel` shape. No further
-  split is required. **Contingency:** if, at pickup, the ownership diagnostics
-  (E0834/E0835) prove larger than a bounded reuse of the affine floor, split them
-  into a follow-up leaf (typed handles + `join_all` land first; the diagnostics
-  harden second) and record the new blocker in Linear — do not silently grow
-  SFN-441.
+- **SFN-440** — this SFEP's design record; completed before implementation.
+- **SFN-441** (estimate 3 / M) — delivered the `Task<T>` prelude type,
+  `spawn: Task<T>` typing, `await`/`join_all`, the `sfn_join_all` combinator,
+  E0831 refinement, E0836, tests, and docs.
+- **SFN-446** — completed the §10 contingency split after pickup confirmed that
+  E0837/E0838 needed task-aware consumption and value-lifetime tracking beyond
+  the existing generic affine and control-flow escape floors. It classifies
+  `Task<T>` as affine, consumes direct `await` and `join_all` inputs, propagates
+  Task state through lexical/control-flow joins and nursery provenance through
+  handle bindings/arrays, conditionals, and aggregates using declared field
+  metadata, treats indexed/member extraction as owner consumption, makes a
+  Task-capturing closure affine and nursery-bound, rejects spelling-only opaque
+  Task-argument escape paths and direct nursery returns,
+  preserves declared local/imported and first-class Task-returning call identity
+  (including callable parameters, with nursery provenance only for explicit or
+  proven-fresh producers), substitutes generic aggregate field types, carries
+  affine/nursery identity through Task-bearing parameters, `self`, method
+  receivers, and `for` targets, resolves
+  method identities by explicit, inferred, generic, `self`, nested-member, and
+  struct-literal receivers,
+  and enforces both diagnostics during `sfn check`.
 
 ## 11. References
 
@@ -497,5 +536,5 @@ alongside keeping the existing structured-concurrency suite green:
   runtime surface (`sfn_spawn_<kind>`, `struct Task`, nursery join-all,
   `sfn_parallel`) `Task<T>`/`join_all` build over.
 - `docs/status.md:465-469` — the documented concurrency contract SFN-441 updates.
-- `docs/style-guide.md` (E08xx table) — the diagnostic-code range; E0834–E0836
-  reserved by this SFEP.
+- `docs/style-guide.md` (E08xx table) — the diagnostic-code range; E0836–E0838
+  allocated to this SFEP's task-handle surface.

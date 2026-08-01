@@ -4,7 +4,7 @@
 // Iterates over local functions, calls emit_llvm_function with each,
 // and merges results into the output lines.
 //
-// Extracted from lowering_core.sfn to reduce per-file memory footprint.
+// Extracted from lowering_core/mod.sfn to reduce per-file memory footprint.
 import { Diag } from "../../diagnostic";
 import { NativeFunction } from "../../native_ir";
 import { append_function_effect_entry, find_function_effect_entry } from "../effects";

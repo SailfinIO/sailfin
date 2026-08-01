@@ -76,7 +76,7 @@ import {
 } from "../utils";
 import { emit_llvm_function } from "./emission";
 import { lower_to_llvm_with_context, lower_to_llvm_with_parsed_context } from "./entrypoints";
-import { lower_to_llvm_lines_with_parsed_context_for_tests } from "./lowering_core";
+import { lower_to_llvm_lines_with_parsed_context_for_tests } from "./lowering_core/test_harness";
 import {
     empty_trait_metadata,
     extend_native_enums,

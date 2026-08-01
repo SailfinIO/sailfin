@@ -9,7 +9,7 @@
 // since PR #183). Tier 1C tracks removing the light-recovery primary path in
 // lowering_core.
 //
-// Extracted from lowering_core.sfn to reduce per-file memory footprint.
+// Extracted from lowering_core/mod.sfn to reduce per-file memory footprint.
 import {
     NativeEnum,
     NativeEnumLayout,

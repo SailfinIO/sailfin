@@ -98,16 +98,15 @@ import {
     trim_text
 } from "../utils";
 import { emit_llvm_function } from "./emission";
+import { lower_to_llvm_lines_with_parsed_context } from "./lowering_core";
+import { has_fatal_lowering_diagnostic, print_fatal_lowering_diagnostics } from "./lowering_core/diagnostics";
 import {
     compile_native_lines_to_llvm_file,
     compile_native_lines_to_llvm_file_with_context,
     compile_native_text_to_llvm_file,
-    compile_native_text_to_llvm_file_with_context,
-    has_fatal_lowering_diagnostic,
-    lower_to_llvm_lines_with_parsed_context,
-    lower_to_llvm_lines_with_parsed_context_for_tests,
-    print_fatal_lowering_diagnostics
-} from "./lowering_core";
+    compile_native_text_to_llvm_file_with_context
+} from "./lowering_core/file_emission";
+import { lower_to_llvm_lines_with_parsed_context_for_tests } from "./lowering_core/test_harness";
 import {
     DeclareSignature,
     MangledModuleResult,

@@ -138,7 +138,7 @@ allocates:
 | Value | Source | x86_64-Linux | aarch64-Linux | Action |
 |---|---|---|---|---|
 | `st_mode` offset in `struct stat` | `lowering_debug_state.sfn` `stat_st_mode_offset_value` | 24 | **16** | Re-key on `(os, arch)` via `_host_arch()`. |
-| `jmp_buf` frame buffer size | `runtime/sfn/exception.sfn` (was 256, now 512); `llvm/lowering/{instructions_try,emission,lowering_core}.sfn` stack allocas (was 256, now 512) | 200 fits | **~312 overruns** | **Done.** Over-allocated to **512** on both the heap buffer (SFN-471) and the three stack allocas (SFN-644) — covers all three targets, needs **no** arch seam; the stack allocas also carry `align 16` for MSVC's `_JUMP_BUFFER` (SFN-549). |
+| `jmp_buf` frame buffer size | `runtime/sfn/exception.sfn` (was 256, now 512); `llvm/lowering/instructions_try.sfn`, `llvm/lowering/emission.sfn`, and `llvm/lowering/lowering_core/test_harness.sfn` stack allocas (was 256, now 512) | 200 fits | **~312 overruns** | **Done.** Over-allocated to **512** on both the heap buffer (SFN-471) and the three stack allocas (SFN-644) — covers all three targets, needs **no** arch seam; the stack allocas also carry `align 16` for MSVC's `_JUMP_BUFFER` (SFN-549). |
 | `errno` locator symbol | `errno_locator_symbol` | `__errno_location` | `__errno_location` (glibc-common) | none |
 | `CLOCK_MONOTONIC` id | `clock_monotonic_id_value` | 1 | 1 (glibc-common) | none |
 | `_SC_NPROCESSORS_ONLN` | `sc_nprocessors_onln_value` | 84 | 84 (glibc-defined) | none |
@@ -247,7 +247,7 @@ self-host stay green at every step:
   (shipped, SFN-471). Plain Sailfin source; the old x86_64 seed compiling the
   new source produces a larger, still-correct allocation. No compiler-baked
   immediate involved.
-- `llvm/lowering/{instructions_try,emission,lowering_core}.sfn` — the same
+- `llvm/lowering/instructions_try.sfn`, `llvm/lowering/emission.sfn`, and `llvm/lowering/lowering_core/test_harness.sfn` — the same
   256 → 512 widening for the three compiler-emitted stack `jmp_buf` allocas
   (shipped, SFN-644). This is compiler source, so widening it changes emitted IR — but
   the change is a pure alloca widening with no compiler-baked immediate on the
