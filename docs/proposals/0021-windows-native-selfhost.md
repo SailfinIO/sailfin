@@ -4,7 +4,7 @@ title: Native Windows Self-Host (MSVC ABI)
 status: Accepted
 type: runtime
 created: 2026-06-22
-updated: 2026-07-24
+updated: 2026-08-01
 author: "agent:compiler-architect"
 tracking: "SFN-53, SFN-54, SFN-55, SFN-56, SFN-57, SFN-58"
 supersedes:
@@ -136,7 +136,7 @@ emit-leg** change, not a C-source port. Item by item:
 | **CRT** | mingw libc (`-lm -lpthread -lws2_32`) | UCRT / MSVCRT | `link-libs` in `runtime/capsule.toml:51` is `["-lm", "-lpthread"]` — POSIX. Need a target-conditioned link-lib set (Windows: none required; `ws2_32`/`kernel32` are auto-linked by clang-cl). |
 | **Exception model** | `setjmp`/`longjmp` on a 256-byte heap jmp_buf (`exception.sfn:136-138,199-213`) | Same — `setjmp`/`longjmp` are CRT functions on MSVC too | The Sailfin exception runtime calls libc `setjmp`/`longjmp` and **does not use SEH**. MSVC UCRT provides `setjmp`/`longjmp`; the 256-byte buffer oversizes the MSVC `jmp_buf` (`exception.sfn:52-57`). **No SEH interaction** — this is the single biggest risk-reducer vs. the brief's worry. Caveat: MSVC `setjmp` is a macro (`_setjmp`/`_setjmpex`); the emitted `call @setjmp` must bind to the CRT's actual symbol — see Risk R1. |
 | **TLS** | `-femulated-tls` (PR #1481) because native PE TLS faulted on the IR-cross image | **Re-test native MSVC TLS.** The fault was specific to the mingw IR-cross image's uninitialized PE TLS directory. A native clang-msvc compile emits a proper `.tls` section + `_tls_index`; native TLS likely works. **Keep `-femulated-tls` as the safe default for milestone 1, drop it once native TLS is verified** (own milestone). `thread_local sfn_exception_frame_head_addr` (`exception.sfn:182`) is the only TLS global. |
-| **Name mangling / calling conv** | mingw uses SysV-ish + cdecl on x64 | MSVC x64 ABI | x86_64 Windows has **one** calling convention (Microsoft x64) for both ABIs, and Sailfin emits C-ABI `i8*`/`i64`/`double` signatures with no name mangling (bare `@sfn_*`). Emitted IR is ABI-neutral at the LLVM level; clang's backend applies the MSVC x64 ABI when given the msvc triple. **No source change** — but verify struct-by-value ABI (the channel `channel:<struct>` work, #1472) lowers correctly under the MSVC struct-return rules (Risk R3). |
+| **Name mangling / calling conv** | mingw uses SysV-ish + cdecl on x64 | MSVC x64 ABI | x86_64 Windows has **one** calling convention (Microsoft x64) for both ABIs, and Sailfin emits C-ABI `i8*`/`i64`/`double` signatures with no name mangling (bare `@sfn_*`). Emitted IR is ABI-neutral at the LLVM level; clang's backend applies the MSVC x64 ABI when given the msvc triple. **No source change** — struct-by-value ABI (the channel `channel:<struct>` work, #1472) verified natively under the MSVC struct-return rules; see Risk R3, resolved by SFN-650. Note the "emitted IR is ABI-neutral" claim in this row holds only because the emitter boxes structs to pointers — it is not a general property of LLVM IR. |
 | **`windows_stubs.ll`** | provides `apply_default_mem_limit`, `sailfin_runtime_serve`, `realpath`→`_fullpath`, assert handlers (`windows_stubs.ll:28-82`) | Same gaps exist under MSVC | Re-audit each stub under MSVC: `_fullpath` is UCRT (OK); `realpath` shim still needed; the no-op stubs are target-neutral IR (OK). The file stays Windows-only. **Migrate it from a Makefile-only artifact into the driver's Windows link path** (see 4.2) so native self-host links it. |
 | **Emitted code C-ABI** | bare `i8*`/`i64`/`double`, no mangling | identical | Already ABI-neutral. The emit-time *legs* (errno symbol, exe_path, fs sentinels, clock id) are the only target-divergent pieces — all selected in `lowering_debug_state.sfn` and `core_call_emission.sfn` (`:805-820` exe_path, `:906-1088` fs sentinels). These already have a Windows leg; the work is making the **selector** not shell out (blocker 4). |
 
@@ -400,16 +400,132 @@ Linux+macOS before merge.
    (`process.sfn:499+`). Use blocking reads with both pipes drained on separate
    reads to avoid the classic full-buffer deadlock.
 
-3. **R3 — struct-by-value ABI divergence (Microsoft x64).** Recent concurrency
-   work added by-value struct channel elements (#1472) and struct returns. The
-   Microsoft x64 ABI passes/returns aggregates differently from SysV (>8/16-byte
-   structs go by hidden pointer; specific size rules differ). If the emitter's
-   IR assumes SysV aggregate lowering anywhere, MSVC codegen silently mismatches.
-   **Mitigation:** the emitter produces typed LLVM aggregates and lets clang's
-   backend apply the target ABI, so this *should* be transparent — but verify
-   with a struct-channel + struct-return fixture in M7/M8. Detection: a value
-   round-trip test; failure mode is garbage struct fields, caught by an equality
-   assert.
+3. **R3 — struct-by-value ABI divergence (Microsoft x64). RESOLVED (SFN-650).**
+   Recent concurrency work added by-value struct channel elements (#1472) and
+   struct returns. The Microsoft x64 ABI passes/returns aggregates differently
+   from SysV (>8/16-byte structs go by hidden pointer; specific size rules
+   differ). If the emitter's IR assumed SysV aggregate lowering anywhere, MSVC
+   codegen would silently mismatch.
+
+   **The mitigation originally recorded here was wrong on both halves. It is
+   corrected rather than silently deleted, because a future change would
+   otherwise cite it as license to stop boxing.** It claimed the emitter "produces typed LLVM aggregates and lets
+   clang's backend apply the target ABI." First, it does not: every user struct
+   crosses a function boundary as a *pointer* (the boxed-struct ABI in
+   `llvm/type_mapping.sfn`, adopted to dodge an AArch64 aggregate-return
+   legalizer miscompile). Second, "let the backend apply the target ABI" is not
+   a property LLVM offers — **LLVM IR is not ABI-neutral for aggregates.**
+   Clang's *frontend* performs C ABI lowering (`byval`, `sret`, coercion to
+   register-sized integers); the backend given a first-class aggregate applies
+   its own internally-consistent lowering that carries no guarantee of matching
+   the platform C ABI. Had the emitter actually passed aggregates by value, R3
+   would have been a live bug, not a transparent non-issue.
+
+   **Why we are nonetheless safe.** Two independent reasons, and it is worth
+   keeping them separate because they protect different things.
+
+   *User structs* are boxed, so no user aggregate is passed or returned by value
+   at all and MS x64's size-based classification has nothing to act on — a
+   pointer is one INTEGER-class eightbyte under both ABIs.
+
+   *Runtime aggregates are a real and much larger surface than "no aggregates
+   anywhere".* Two 16-byte by-value shapes cross function boundaries in the
+   emitted IR — precisely the size MS x64 routes through memory while SysV
+   splits across two registers:
+
+   - `{i8*, i64}` — the string ABI (M1.A.2): `@sfn_print`, the `@sfn_print_*`
+     family, `@sfn_str_concat`, `@sfn_str_append`, `@sfn_getenv`,
+     `@sfn_home_dir`, `@sfn_str_codepoint_lv`, `@sfn_str_grapheme_at_lv`,
+     `@sfn_array_to_string`, and more.
+   - `{i8*, i8*}` — the closure pair (`@sfn_array_sfn_map`,
+     `@sfn_array_sfn_filter`, `@sfn_array_sfn_reduce`) and, on the same
+     spelling, every **interface** value: interfaces deliberately stay by value
+     (`llvm/type_mapping.sfn:756-766`), a far wider surface than the three array
+     helpers.
+
+   One further by-value shape is **not** 16 bytes and does not fit the
+   reasoning above: a **union** lowers to a tagged struct `{ i32, <A>, <B>, … }`
+   of arbitrary size (`llvm/type_mapping.sfn:817-830`). It is unboxed, so it is
+   the one construct where a large Sailfin-to-Sailfin by-value aggregate can
+   cross a boundary — exactly the case the AArch64 legalizer note below warns
+   about. Nothing observed today is wrong, but if a Windows-only or
+   AArch64-only aggregate corruption ever appears, unions are the first place
+   to look, not user structs.
+
+   These are safe not because they are absent, and **not** because they are
+   Sailfin-to-Sailfin. That reasoning is tempting and this SFEP must not record
+   it, because our own boxing rationale is its counterexample: per
+   `llvm/type_mapping.sfn:726-731`, LLVM's AArch64 aggregate-return legalizer
+   runs per translation unit, so cross-module calls *within pure Sailfin, one
+   backend, one triple* non-deterministically truncated returned aggregates.
+   Same backend does not imply agreement. Boxing exists precisely because it
+   did not.
+
+   They are safe because of their **shape**: each is two eightbytes of
+   unambiguous register class (`{i8*, i64}`, `{i8*, i8*}`), which every
+   in-scope ABI classifies identically and no legalizer has latitude over.
+   Size and class, not provenance, are what make them safe. The property that makes
+   this hold is that no aggregate crosses a *C* boundary, which was verified
+   directly — all 504 `extern fn` declarations in `runtime/**` and
+   `compiler/src/**` take and return only scalars and pointers, struct-typed
+   parameters always being `*T` (`*PthreadMutex`, `*File`, `*Timespec`).
+
+   **The invariant is therefore narrower and sharper than "don't pass structs by
+   value": never give a by-value aggregate a C prototype on either side.** And
+   for `extern fn` that invariant is already **mechanically enforced**, not left
+   to vigilance: `_is_c_abi_type_inner`
+   (`compiler/src/typecheck_types/extern_abi.sfn:49-95`) accepts only primitives, raw pointers and function
+   pointers, so a bare struct name or an aggregate spelling on an `extern fn`
+   signature is rejected with an **E0801-E0805** diagnostic (the code varies by
+   spelling: E0801 for `string`, E0802 for `T[]`, E0805 for a bare struct name)
+   by `check_extern_signature`
+   (`compiler/src/typecheck_types/declaration_and_statement_checks.sfn:198-242`).
+   There is no path today for an `extern fn` to declare `{i8*, i64}` at all.
+
+   The residual exposure is precisely the surface the typechecker does **not**
+   see: hand-written LLVM IR. `runtime/ir/windows_stubs.ll` is the only such
+   artifact in the Windows link, and it is scalar/pointer-only today — but
+   nothing enforces that, so it is the one place a future by-value aggregate
+   could enter without any such diagnostic. That, not the emitter, is where to look first
+   if a Windows-only struct corruption ever appears.
+
+   **A correction to R3's own premise.** This row's framing attributes the risk
+   to "the channel `channel:<struct>` work (#1472)". That attribution is
+   miscalibrated. `try_lower_channel_method`
+   (`compiler/src/llvm/expression_lowering/native/core_concurrency_lowering.sfn:93+`)
+   does emit genuine first-class aggregate `alloca %T` / `store %T` / `load %T`
+   for a struct channel element — but those are *intra-function* operations, and
+   LLVM applies calling-convention legalization only to `call`/`ret` signatures.
+   The actual runtime crossing is `sfn_channel_send(ch: *u8, elem: *u8) -> i64`
+   / `sfn_channel_recv(ch: *u8) -> *u8`
+   (`runtime/sfn/concurrency/channel.sfn:179,225`), with the aggregate bitcast
+   to `i8*` and copied bytewise. So channels carry no MSVC calling-convention exposure
+   whatsoever, and R3's real (small) surface was always the string/closure
+   aggregates named above.
+
+   **Verified (SFN-650), natively:** a 24-check struct fixture — arguments and
+   returns at 4/8/16/24 bytes, all-`f64`, mixed `i64`/`f64`, nested, a struct
+   sandwiched between scalar arguments, and chained round-trips — produced
+   field-for-field identical results on Linux x86-64 and on a native Windows
+   MSVC build (LLVM 22.1.8, `x86_64-pc-windows-msvc`), with a deliberately
+   falsified control confirming the harness detects mismatches. Both by-value
+   aggregate families were exercised on the same native binary: `{i8*, i64}` by
+   every concat in the fixture, and `{i8*, i8*}` by a `map`/`filter`/`reduce`
+   probe. Regression coverage: `compiler/tests/e2e/struct_abi_test.sfn`, whose
+   structural test asserts the boxed-pointer signatures and the absence of
+   the by-value parameter and return spellings for the user struct, so
+   reintroducing a classifiable by-value user aggregate fails there rather than
+   silently on a Windows runner.
+
+   That test deliberately does **not** assert the absence of `byval`/`sret`.
+   Those are clang *frontend* attributes that this emitter has never emitted, so
+   such an assertion is unconditionally true and would stay green through the
+   exact regression it appears to guard: a de-boxed struct parameter emits as a
+   bare `%P %p`, carrying no attribute at all. Nor is "no by-value aggregate
+   anywhere in the module" an invariant worth asserting — adding a single
+   `string` to the fixture introduces eight legitimate `{i8*, i64}` signatures.
+   The guard has to name the aggregate spelling for the specific type, and it
+   does.
 
 **Honorable mention (downgraded by §2.1):** the brief's headline risk — C
 runtime MSVC incompatibility — is **largely retired**: there is no C runtime.
