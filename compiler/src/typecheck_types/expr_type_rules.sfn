@@ -212,7 +212,7 @@ fn unwrap_ownership_wrapper(annotation: string) -> string {
 }
 
 // True iff a type annotation names a uniquely-owned / affine value
-// (`OwnedBuf`, `Affine<T>`, `Linear<T>`). Shared classifier so the
+// (`OwnedBuf`, `Affine<T>`, `Linear<T>`, `Task<T>`). Shared classifier so the
 // ownership checker (`ownership_checker.sfn`) and the typecheck side
 // stay in lockstep as new owned wrappers are added — the move rules key
 // off this, mirroring the prefix set `unwrap_ownership_wrapper` strips.
@@ -235,7 +235,16 @@ fn is_owned_type(annotation: string) -> boolean {
     if starts_with(trimmed, "OwnedBuf<") { return true; }
     if starts_with(trimmed, "Affine<") { return true; }
     if starts_with(trimmed, "Linear<") { return true; }
+    if starts_with(trimmed, "Task<") { return true; }
     return false;
+}
+
+// True iff a type annotation names a scalar task handle or a task-handle
+// collection. `Task<T>` is an affine phantom newtype over a runtime future
+// pointer; the array form is affine as a whole because `join_all` consumes the
+// collection and every handle it contains (SFEP-0055 §3.2, SFN-446).
+fn is_task_type(annotation: string) -> boolean {
+    return starts_with(trim_text(annotation), "Task<");
 }
 
 // True iff a type annotation names a *linear* value (`Linear<T>`) — a

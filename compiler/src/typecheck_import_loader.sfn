@@ -30,8 +30,7 @@
 import { Statement } from "./ast";
 import {
     ImportSymbolTable,
-    append_import_decorator_function,
-    append_import_function_from_module,
+    append_import_function_signature_from_module,
     empty_import_symbols
 } from "./effect_imports";
 import { NativeFunction } from "./native_ir";
@@ -119,7 +118,7 @@ fn interfaces_from_native_artifact(text: string) -> ArtifactInterfaceParse {
             // same `.sfn-asm` metadata channel — `NativeFunction.decorators`
             // already round-trips the `@decorator` marker — so no new artifact
             // plumbing is needed.
-            function_effects = append_import_decorator_function(function_effects, function.name, function.effects, _native_function_is_tier1_decorator(function));
+            function_effects = append_import_function_signature_from_module(function_effects, function.name, function.effects, _native_function_is_tier1_decorator(function), "", function.return_type);
         }
         i += 1;
     }
@@ -331,7 +330,7 @@ fn load_imported_interfaces_from_paths(paths: string[]) -> ImportedInterfaceLoad
             // per-batch merge — a plain `append_import_function` would reset
             // it to false, defeating the metadata channel before it reaches
             // `localize_import_symbols_for_program`.
-            function_effects = append_import_function_from_module(function_effects, entry.name, entry.effects, entry.is_decorator, _provider_module_from_artifact_path(path));
+            function_effects = append_import_function_signature_from_module(function_effects, entry.name, entry.effects, entry.is_decorator, _provider_module_from_artifact_path(path), entry.return_type);
             k += 1;
         }
         if parsed.interfaces.length == 0 { skipped.push(path); } else {

@@ -94,13 +94,37 @@ array as `Task<int>[]` is now the documented remediation.
 
 The ownership/lifetime side of `Task<T>` — rejecting a double-await
 (use-after-move) and a handle escaping its `routine {}` nursery scope — is
-**planned** (SFN-446) and not yet enforced. Design record: SFEP-0055
+enforced during checking. Direct `await`, movement into a task array, and
+`join_all` consume their handles; indexed extraction consumes a task collection
+as a whole. Declared local and imported Task-returning calls keep this identity
+for inferred locals, with receiver-qualified method lookup and callable
+shadowing. First-class Task-returning lambdas, moved function values, and
+callable-typed parameters retain their declared Task result, while only bodies
+whose Task returns are all proven fresh introduce nursery provenance.
+Conservative joins retain possible consumption across mutually
+exclusive branches, repeated loop iterations, and try/catch paths, so consuming
+the same handle again raises `E0837`. A live nursery-origin handle
+stored in an outer binding — including through a nested indexed or module-global
+task collection, aggregate field, direct return, or locally proven fresh-Task
+helper — must be awaited (or its collection passed to `join_all`) before the
+`routine` ends, or checking raises `E0838`; assigning `[]` clears an outer task
+collection and its nursery provenance. Ordinary closure capture and aggregate
+construction move affine handles, and a closure that owns a Task capture is
+itself affine and carries the captured handle's nursery provenance. Conditional
+Task results preserve both identity and provenance, and declared struct-field
+metadata—including generic field substitution—keeps empty-but-typed Task
+collections, Task-bearing parameters/`self`, method receivers, and `for` targets
+affine without treating sibling non-Task fields as handles. Provenance follows
+explicit `spawn` and local helpers
+whose every Task return is provably fresh; passing a nursery Task through an
+opaque helper or method is rejected fail-closed unless the resolved operation is
+the builtin `join_all` or a Task-collection push. A Task return annotation alone
+does not make an ambient identity helper nursery-bound (SFN-446). Design record: SFEP-0055
 (`docs/proposals/0055-typed-task-handles.md`).
 
 **Remaining work**: full `async fn` return-value `await` wired into the live
-typecheck walk, a generic `channel<T>(...)` constructor, `Task<T>`'s
-ownership/lifetime diagnostics (`E0837` double-await, `E0838` nursery escape,
-SFN-446), `parallel`'s own raw result handle staying untyped, cancellation,
+typecheck walk, a generic `channel<T>(...)` constructor, `parallel`'s own raw
+result handle staying untyped, cancellation,
 async I/O, and the `OwnedBuf` capture-buffer ABI across the thread boundary
 (#1476).
 See the [roadmap](/roadmap).

@@ -291,6 +291,7 @@ fn is_copy_type(type_annotation: string, llvm_type: string) -> boolean {
     let mut _if307: boolean = false;
     if starts_with(trimmed, "Affine<") { _if307 = true; }
     if starts_with(trimmed, "Linear<") { _if307 = true; }
+    if starts_with(trimmed, "Task<") { _if307 = true; }
     if _if307 { return false; }
     let mut _if308: boolean = false;
     if trimmed == "Affine" { _if308 = true; }
