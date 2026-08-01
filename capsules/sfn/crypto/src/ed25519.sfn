@@ -2,6 +2,8 @@
 //
 // Verify-only Ed25519 (RFC 8032) for the sfn/crypto capsule — the crypto
 // primitive the signed-toolchain trust model rests on (SFEP-0046 §3.5).
+import { ptr_off, string_to_bytes } from "./bits";
+
 // Backed by OpenSSL libcrypto via extern: `-lcrypto` is already linked
 // into every Sailfin binary for TLS (SFEP-0036), so this adds no new
 // dependency. Fail-closed: any malformed input or OpenSSL error yields
@@ -24,13 +26,6 @@ extern fn EVP_MD_CTX_free(ctx: *u8) -> void;
 extern fn EVP_DigestVerifyInit(ctx: *u8, pctx: **u8, md_type: *u8, e: *u8, pkey: *u8) -> i32;
 
 extern fn EVP_DigestVerify(ctx: *u8, sig: *u8, siglen: usize, tbs: *u8, tbslen: usize) -> i32;
-
-// `_ed_ptr_off(p, off)` — byte-stride pointer arithmetic for a variable
-// offset (copy of the net.sfn / http.sfn helper).
-fn _ed_ptr_off(p: *u8, off: i64) -> *u8 {
-    let addr: i64 = (p as i64) + off;
-    return addr as *u8;
-}
 
 // Map a single hex character to its 0-15 value, or -1 if `c` is not a hex
 // digit.
@@ -82,23 +77,10 @@ fn _ed_bytes_to_native(bytes: int[]) -> *u8 {
     let mut i: i64 = 0;
     loop {
         if i >= bytes.length as i64 { break; }
-        memset(_ed_ptr_off(buf, i), (bytes[i] & 255) as i32, 1 as usize);
+        memset(ptr_off(buf, i), (bytes[i] & 255) as i32, 1 as usize);
         i += 1;
     }
     return buf;
-}
-
-// Decode a string's raw bytes into an `int[]` (byte-oriented, matching
-// `sha256_hex`'s decode loop).
-fn _ed_string_to_bytes(s: string) -> int[] {
-    let mut bytes: int[] = [];
-    let mut i: int = 0;
-    loop {
-        if i >= s.length { break; }
-        bytes.push(char_code(s[i]) & 255);
-        i += 1;
-    }
-    return bytes;
 }
 
 // Verify an Ed25519 signature (RFC 8032) over a raw byte message.
@@ -162,5 +144,5 @@ fn ed25519_verify(public_key_hex: string, message: int[], signature_hex: string)
 // Convenience for a NUL-free text message (e.g. a SHA256SUMS manifest).
 // Verifies over the string's raw bytes. Delegates to ed25519_verify.
 fn ed25519_verify_utf8(public_key_hex: string, message: string, signature_hex: string) -> bool {
-    return ed25519_verify(public_key_hex, _ed_string_to_bytes(message), signature_hex);
+    return ed25519_verify(public_key_hex, string_to_bytes(message), signature_hex);
 }

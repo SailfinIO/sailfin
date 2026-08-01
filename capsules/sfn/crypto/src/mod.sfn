@@ -4,6 +4,7 @@
 // content-addressable storage), base64 encode/decode, and verify-only
 // Ed25519 signature verification (RFC 8032). No effects required — pure
 // computation.
+import { hex_byte, string_to_bytes } from "./bits";
 import { hmac_sha256_bytes } from "./hkdf";
 
 export { ed25519_verify, ed25519_verify_utf8 } from "./ed25519";
@@ -138,37 +139,20 @@ export {
 // the byte-oriented key/data strings, runs the MAC, and hex-encodes the 32
 // output bytes. Retiring the former `HMAC`/`EVP_sha256` libcrypto externs is
 // SFEP-0048 Phase D prep toward a zero-OpenSSL build.
-fn crypto_byte_hex(byte: int) -> string {
-    let digits: string[] = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "a", "b", "c", "d", "e", "f",];
-    return digits[(byte >> 4) & 15] + digits[byte & 15];
-}
-
 fn hmac_sha256(key: string, data: string) -> string {
     // Return the bare 64-character lowercase hex HMAC-SHA-256 digest. Inputs are
     // NUL-free byte-oriented strings, matching `sha256_hex` / `base64_encode`
     // (`s[i]` is the i-th byte, `char_code` its 0-255 value); embedded 0x00
     // bytes are unrepresentable under the current NUL-terminated `string` model.
-    let mut key_bytes: int[] = [];
-    let mut ki: int = 0;
-    loop {
-        if ki >= key.length { break; }
-        key_bytes.push(char_code(key[ki]) & 255);
-        ki += 1;
-    }
-    let mut data_bytes: int[] = [];
-    let mut di: int = 0;
-    loop {
-        if di >= data.length { break; }
-        data_bytes.push(char_code(data[di]) & 255);
-        di += 1;
-    }
+    let key_bytes: int[] = string_to_bytes(key);
+    let data_bytes: int[] = string_to_bytes(data);
 
     let mac: int[] = hmac_sha256_bytes(key_bytes, data_bytes);
     let mut hex: string = "";
     let mut i: int = 0;
     loop {
         if i >= mac.length { break; }
-        hex = hex + crypto_byte_hex(mac[i] & 255);
+        hex = hex + hex_byte(mac[i]);
         i += 1;
     }
     return hex;
@@ -187,15 +171,8 @@ fn sha256_rotr(x: int, n: int) -> int {
 
 // Render a 32-bit word as 8 lowercase hex characters.
 fn sha256_word_hex(x: int) -> string {
-    let digits: string[] = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "a", "b", "c", "d", "e", "f",];
-    let mut out: string = "";
-    let mut shift: int = 28;
-    loop {
-        if shift < 0 { break; }
-        out = out + digits[(x >> shift) & 15];
-        shift -= 4;
-    }
-    return out;
+    return hex_byte((x >> 24) & 255) + hex_byte((x >> 16) & 255) + hex_byte((x >> 8) & 255)
+        + hex_byte(x & 255);
 }
 
 fn sha256_hex(data: string) -> string {
@@ -211,13 +188,7 @@ fn sha256_hex(data: string) -> string {
     //    `.length` are byte-oriented (`s[i]` is the i-th byte, `char_code`
     //    returns its 0-255 value), so this hashes the raw UTF-8 bytes and
     //    matches `sha256sum` for arbitrary content, not just ASCII.
-    let mut bytes: int[] = [];
-    let mut bi: int = 0;
-    loop {
-        if bi >= data.length { break; }
-        bytes.push(char_code(data[bi]) & 255);
-        bi += 1;
-    }
+    let mut bytes: int[] = string_to_bytes(data);
     let bit_len: int = bytes.length * 8;
 
     // 2. Pad: append 0x80, then zeros until length ≡ 56 (mod 64), then the
@@ -352,13 +323,7 @@ fn base64_encode(data: string) -> string {
     //
     let alphabet: string[] = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "+", "/",];
 
-    let mut bytes: int[] = [];
-    let mut bi: int = 0;
-    loop {
-        if bi >= data.length { break; }
-        bytes.push(char_code(data[bi]) & 255);
-        bi += 1;
-    }
+    let mut bytes: int[] = string_to_bytes(data);
 
     let len: int = bytes.length;
     let mut out: string = "";

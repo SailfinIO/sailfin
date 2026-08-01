@@ -9,7 +9,12 @@
 //
 // SHA-384 is this same core under a different IV truncated to 6 words,
 // which is why `sha384.sfn` imports from here.
-import { load_u32_be, store_u32_be } from "./bits";
+import {
+    hex_byte,
+    load_u32_be,
+    store_u32_be,
+    string_to_bytes
+} from "./bits";
 
 // 64-bit XOR: componentwise.
 fn _xor64(a: int[], b: int[]) -> int[] {
@@ -198,21 +203,12 @@ fn sha512_state(msg: int[], iv: int[][]) -> int[][] {
 
 // Render a 64-bit `[hi, lo]` word as 16 lowercase hex characters.
 fn sha512_word_hex(hi: int, lo: int) -> string {
-    let digits: string[] = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "a", "b", "c", "d", "e", "f",];
-    let mut out: string = "";
-    let mut shift: int = 28;
-    loop {
-        if shift < 0 { break; }
-        out = out + digits[(hi >> shift) & 15];
-        shift -= 4;
-    }
-    shift = 28;
-    loop {
-        if shift < 0 { break; }
-        out = out + digits[(lo >> shift) & 15];
-        shift -= 4;
-    }
-    return out;
+    return hex_byte((hi >> 24) & 255) + hex_byte((hi >> 16) & 255) + hex_byte((hi >> 8) & 255)
+        + hex_byte(hi & 255)
+        + hex_byte((lo >> 24) & 255)
+        + hex_byte((lo >> 16) & 255)
+        + hex_byte((lo >> 8) & 255)
+        + hex_byte(lo & 255);
 }
 
 // The FIPS 180-4 §5.3.5 SHA-512 initial state H[0..7], as [hi, lo] decimal
@@ -244,13 +240,7 @@ fn sha512_hex(data: string) -> string {
     // Compute the SHA-512 digest of `data` (byte-oriented over raw UTF-8
     // bytes, matching `sha512sum`) and return the bare 128-character
     // lowercase hex string.
-    let mut bytes: int[] = [];
-    let mut bi: int = 0;
-    loop {
-        if bi >= data.length { break; }
-        bytes.push(char_code(data[bi]) & 255);
-        bi += 1;
-    }
+    let mut bytes: int[] = string_to_bytes(data);
     let h: int[][] = sha512_state(bytes, _sha512_iv());
 
     return sha512_word_hex(h[0][0], h[0][1]) + sha512_word_hex(h[1][0], h[1][1])
