@@ -83,7 +83,6 @@ export {
     hs_client_recv_encrypted_extensions,
     hs_client_recv_certificate,
     hs_client_recv_certificate_verify,
-    hs_client_recv_certificate_verify_unverified,
     hs_client_recv_finished,
     hs_client_finished_message,
     hs_transcript_hash,

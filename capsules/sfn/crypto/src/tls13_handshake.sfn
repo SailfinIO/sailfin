@@ -33,6 +33,13 @@
 // shared across successive states rather than copied: it is append-only, and
 // copying it at each of the six steps would be quadratic in the handshake
 // size.
+//
+// That sharing makes a `ClientHandshake` SINGLE-USE, and callers must treat it
+// so: once a step returns, discard the state you passed in, on Err as much as
+// on Ok. Re-invoking a step with a stale state passes the state guard — the
+// old struct's scalar `state` never advanced — while appending to the same
+// shared transcript a second time. The handshake then fails several steps
+// later at the server Finished MAC, pointing at the wrong message entirely.
 import { ct_eq_bytes } from "./bits";
 import { ed25519_verify } from "./ed25519";
 import { hmac_sha256_bytes, sha256_bytes } from "./hkdf";
@@ -52,6 +59,7 @@ import {
     parse_certificate,
     parse_certificate_verify,
     parse_client_hello_cipher_suites,
+    parse_client_hello_legacy_session_id,
     parse_encrypted_extensions,
     parse_finished,
     parse_handshake_message,
@@ -60,7 +68,8 @@ import {
     tls_cipher_chacha20_poly1305_sha256,
     tls_group_x25519,
     tls_sigalg_ed25519,
-    tls_version_13
+    tls_version_13,
+    tls_version_legacy
 } from "./tls13_handshake_codec";
 import {
     hkdf_expand_label,
@@ -123,6 +132,7 @@ struct ClientHandshake {
     client_private: int[];
     client_public: int[];
     offered_cipher_suites: int[];
+    sent_legacy_session_id: int[];
     cipher_suite: int;
     group: int;
     shared_secret: int[];
@@ -187,6 +197,7 @@ fn _with(hs: ClientHandshake, state: int) -> ClientHandshake {
         client_private: hs.client_private,
         client_public: hs.client_public,
         offered_cipher_suites: hs.offered_cipher_suites,
+        sent_legacy_session_id: hs.sent_legacy_session_id,
         cipher_suite: hs.cipher_suite,
         group: hs.group,
         shared_secret: hs.shared_secret,
@@ -235,9 +246,14 @@ fn tls13_finished_key(traffic_secret: int[]) -> int[] {
 
 // verify_data = HMAC(finished_key, Transcript-Hash(Handshake Context)).
 // Returns [] fail-closed when the finished key could not be derived (a
-// traffic secret of the wrong length).
+// traffic secret of the wrong length) or when `transcript_hash` is not a
+// SHA-256 digest. The second check matters because HMAC accepts any input
+// length: a caller passing raw transcript bytes instead of their hash would
+// otherwise get a plausible-looking verify_data for the wrong context rather
+// than an error.
 fn tls13_finished_verify_data(traffic_secret: int[], transcript_hash: int[]) -> int[] {
     let empty: int[] = [];
+    if transcript_hash.length != _hash_len() { return empty; }
     let key: int[] = tls13_finished_key(traffic_secret);
     if key.length != _hash_len() { return empty; }
     return hmac_sha256_bytes(key, transcript_hash);
@@ -296,25 +312,30 @@ fn hs_client_new(client_private: int[]) -> Result<ClientHandshake, string> {
         };
     }
 
-    let empty: int[] = [];
+    // Each empty field gets its own literal rather than sharing one `let
+    // empty`. Arrays are reference-typed, so a single shared `[]` would make
+    // ten field names alias one array, and the first in-place append to any of
+    // them would silently corrupt the other nine — surfacing as a wrong key
+    // schedule rather than a crash.
     return Result.Ok {
         value: ClientHandshake {
             state: hs_state_start(),
             transcript: [],
             client_private: client_private,
             client_public: public_key,
-            offered_cipher_suites: empty,
+            offered_cipher_suites: [],
+            sent_legacy_session_id: [],
             cipher_suite: 0,
             group: 0,
-            shared_secret: empty,
+            shared_secret: [],
             early_secret: early,
-            handshake_secret: empty,
-            master_secret: empty,
-            client_handshake_traffic_secret: empty,
-            server_handshake_traffic_secret: empty,
-            client_application_traffic_secret: empty,
-            server_application_traffic_secret: empty,
-            server_leaf_certificate: empty,
+            handshake_secret: [],
+            master_secret: [],
+            client_handshake_traffic_secret: [],
+            server_handshake_traffic_secret: [],
+            client_application_traffic_secret: [],
+            server_application_traffic_secret: [],
+            server_leaf_certificate: [],
             server_certificate_verified: false
         }
     };
@@ -367,6 +388,17 @@ fn hs_client_send_hello(hs: ClientHandshake, client_hello: int[]) -> Result<Clie
         };
     }
 
+    // RFC 8446 §4.1.3 requires aborting if the ServerHello does not echo this
+    // back verbatim, so it has to be remembered rather than re-derived.
+    let session_id: Result<int[], string> = parse_client_hello_legacy_session_id(ch_body);
+    let mut sent_session_id: int[] = [];
+    match session_id {
+        Result.Err { error } => {
+            return Result.Err { error: "hs_client_send_hello: " + error };
+        },
+        Result.Ok { value } => { sent_session_id = value; }
+    }
+
     _append(hs.transcript, client_hello);
     return Result.Ok {
         value: ClientHandshake {
@@ -375,6 +407,7 @@ fn hs_client_send_hello(hs: ClientHandshake, client_hello: int[]) -> Result<Clie
             client_private: hs.client_private,
             client_public: hs.client_public,
             offered_cipher_suites: offered,
+            sent_legacy_session_id: sent_session_id,
             cipher_suite: hs.cipher_suite,
             group: hs.group,
             shared_secret: hs.shared_secret,
@@ -444,9 +477,23 @@ fn hs_client_recv_server_hello(hs: ClientHandshake, message: int[]) -> Result<Cl
     // Negotiation: the minimal cut offers exactly one version, group and
     // cipher suite, so anything else is a downgrade or a mismatch and must
     // abort rather than be tolerated.
+    if sh.legacy_version != tls_version_legacy() {
+        return Result.Err {
+            error: "hs_client_recv_server_hello: legacy_version must be 0x0303 (RFC 8446 §4.1.3)"
+        };
+    }
     if sh.selected_version != tls_version_13() {
         return Result.Err {
             error: "hs_client_recv_server_hello: server did not select TLS 1.3"
+        };
+    }
+    // RFC 8446 §4.1.3: "A client which receives a legacy_session_id_echo field
+    // that does not match what it sent in the ClientHello MUST abort the
+    // handshake with an illegal_parameter alert." Compared in constant time
+    // for uniformity with the other equality checks on handshake material.
+    if !ct_eq_bytes(hs.sent_legacy_session_id, sh.legacy_session_id_echo) {
+        return Result.Err {
+            error: "hs_client_recv_server_hello: legacy_session_id_echo does not match the ClientHello"
         };
     }
     if !_was_offered(hs.offered_cipher_suites, sh.cipher_suite) {
@@ -487,8 +534,15 @@ fn hs_client_recv_server_hello(hs: ClientHandshake, message: int[]) -> Result<Cl
         };
     }
 
-    _append(hs.transcript, message);
-    let th: int[] = sha256_bytes(hs.transcript);
+    // Hash a copy rather than appending to the shared transcript: three
+    // derivation checks below can still fail, and because `transcript` is
+    // shared by reference an early append would leave the CALLER's state
+    // polluted with a ServerHello the handshake then rejected. Every other
+    // step appends immediately before returning Ok, for the same reason.
+    let mut pending: int[] = [];
+    _append(pending, hs.transcript);
+    _append(pending, message);
+    let th: int[] = sha256_bytes(pending);
 
     let client_hs: int[] = tls13_client_handshake_traffic_secret(handshake, th);
     let server_hs: int[] = tls13_server_handshake_traffic_secret(handshake, th);
@@ -513,6 +567,9 @@ fn hs_client_recv_server_hello(hs: ClientHandshake, message: int[]) -> Result<Cl
         };
     }
 
+    // Every failure path is behind us, so the shared transcript can now take
+    // the ServerHello. `pending` above was only ever a copy to hash from.
+    _append(hs.transcript, message);
     return Result.Ok {
         value: ClientHandshake {
             state: hs_state_wait_encrypted_extensions(),
@@ -520,6 +577,7 @@ fn hs_client_recv_server_hello(hs: ClientHandshake, message: int[]) -> Result<Cl
             client_private: hs.client_private,
             client_public: hs.client_public,
             offered_cipher_suites: hs.offered_cipher_suites,
+            sent_legacy_session_id: hs.sent_legacy_session_id,
             cipher_suite: sh.cipher_suite,
             group: sh.selected_group,
             shared_secret: shared,
@@ -630,6 +688,7 @@ fn hs_client_recv_certificate(hs: ClientHandshake, message: int[]) -> Result<Cli
             client_private: hs.client_private,
             client_public: hs.client_public,
             offered_cipher_suites: hs.offered_cipher_suites,
+            sent_legacy_session_id: hs.sent_legacy_session_id,
             cipher_suite: hs.cipher_suite,
             group: hs.group,
             shared_secret: hs.shared_secret,
@@ -721,6 +780,7 @@ fn hs_client_recv_certificate_verify(hs: ClientHandshake, message: int[], leaf_p
             client_private: hs.client_private,
             client_public: hs.client_public,
             offered_cipher_suites: hs.offered_cipher_suites,
+            sent_legacy_session_id: hs.sent_legacy_session_id,
             cipher_suite: hs.cipher_suite,
             group: hs.group,
             shared_secret: hs.shared_secret,
@@ -753,14 +813,23 @@ fn hs_client_recv_certificate_verify(hs: ClientHandshake, message: int[], leaf_p
 // Callers that need an authenticated peer must use
 // `hs_client_recv_certificate_verify` and check
 // `server_certificate_verified`.
-fn hs_client_recv_certificate_verify_unverified(hs: ClientHandshake, message: int[]) -> Result<ClientHandshake, string> {
+//
+// Deliberately NOT re-exported from `mod.sfn`: it is reachable only by
+// importing this module directly, which the in-capsule tests do. The hazard is
+// that this is currently the path that *works* against a real server — the
+// verifying path rejects the RSA-PSS and ECDSA signatures every real server
+// sends — so a consumer picking whichever function does not demand a leaf
+// public key would get a fully-keyed, entirely unauthenticated connection. Keep
+// it off the capsule surface until SFN-653 makes the verifying path usable, at
+// which point this should be deleted rather than promoted.
+fn hs_client_recv_certificate_verify_without_authenticating(hs: ClientHandshake, message: int[]) -> Result<ClientHandshake, string> {
     if hs.state != hs_state_wait_certificate_verify() {
         return Result.Err {
-            error: "hs_client_recv_certificate_verify_unverified: unexpected CertificateVerify in this state"
+            error: "hs_client_recv_certificate_verify_without_authenticating: unexpected CertificateVerify in this state"
         };
     }
 
-    let body: Result<int[], string> = _take_body(message, hs_type_certificate_verify(), "hs_client_recv_certificate_verify_unverified");
+    let body: Result<int[], string> = _take_body(message, hs_type_certificate_verify(), "hs_client_recv_certificate_verify_without_authenticating");
     let mut cv_body: int[] = [];
     match body {
         Result.Err { error } => {
@@ -773,7 +842,8 @@ fn hs_client_recv_certificate_verify_unverified(hs: ClientHandshake, message: in
     match parsed {
         Result.Err { error } => {
             return Result.Err {
-                error: "hs_client_recv_certificate_verify_unverified: " + error
+                error: "hs_client_recv_certificate_verify_without_authenticating: "
+                    + error
             };
         },
         Result.Ok { value } => { }
@@ -853,6 +923,7 @@ fn hs_client_recv_finished(hs: ClientHandshake, message: int[]) -> Result<Client
             client_private: hs.client_private,
             client_public: hs.client_public,
             offered_cipher_suites: hs.offered_cipher_suites,
+            sent_legacy_session_id: hs.sent_legacy_session_id,
             cipher_suite: hs.cipher_suite,
             group: hs.group,
             shared_secret: hs.shared_secret,
@@ -914,7 +985,7 @@ export {
     hs_client_new,
     hs_client_recv_certificate,
     hs_client_recv_certificate_verify,
-    hs_client_recv_certificate_verify_unverified,
+    hs_client_recv_certificate_verify_without_authenticating,
     hs_client_recv_encrypted_extensions,
     hs_client_recv_finished,
     hs_client_recv_server_hello,

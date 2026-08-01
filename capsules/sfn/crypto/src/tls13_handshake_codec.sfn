@@ -89,17 +89,30 @@ fn _push_u24(dst: int[], v: int) -> void {
     dst.push(v & 255);
 }
 
-// Read a big-endian uint16 at `off`. Returns -1 if fewer than 2 bytes remain.
+// Read a big-endian uint16 at `off`. Returns -1 if `off` is negative or fewer
+// than 2 bytes remain. The negative guard matches `_slice`: every call site
+// today passes a provably non-negative offset, but these are the module's
+// lowest-level readers and an asymmetric guard invites a future caller to
+// assume a bounds check that is not there.
 fn _read_u16(buf: int[], off: int) -> int {
+    if off < 0 { return -1; }
     if off + 2 > buf.length { return -1; }
     return ((buf[off] & 255) << 8) | (buf[off + 1] & 255);
 }
 
-// Read a big-endian uint24 at `off`. Returns -1 if fewer than 3 bytes remain.
+// Read a big-endian uint24 at `off`. Returns -1 if `off` is negative or fewer
+// than 3 bytes remain.
 fn _read_u24(buf: int[], off: int) -> int {
+    if off < 0 { return -1; }
     if off + 3 > buf.length { return -1; }
     return ((buf[off] & 255) << 16) | ((buf[off + 1] & 255) << 8) | (buf[off + 2] & 255);
 }
+
+// The largest value a uint16 length prefix can carry. `_push_u16` masks rather
+// than failing, so any caller computing a length from caller-supplied data must
+// check this bound first or it will emit a wrapped, structurally corrupt
+// message instead of failing closed.
+fn _max_u16() -> int { return 65535; }
 
 // Extract `len` bytes starting at `off`. Returns `[]` if out of range.
 fn _slice(buf: int[], off: int, len: int) -> int[] {
@@ -162,6 +175,31 @@ fn parse_client_hello_cipher_suites(body: int[]) -> Result<int[], string> {
     return Result.Ok { value: suites };
 }
 
+// Extract the legacy_session_id a ClientHello carried, from its
+// handshake-message body (RFC 8446 §4.1.2). RFC 8446 §4.1.3 makes the client
+// abort if the ServerHello's legacy_session_id_echo does not match, so the
+// state machine has to remember what it sent.
+fn parse_client_hello_legacy_session_id(body: int[]) -> Result<int[], string> {
+    if body.length < 35 {
+        return Result.Err {
+            error: "parse_client_hello_legacy_session_id: truncated before legacy_session_id"
+        };
+    }
+    let session_id_len: int = body[34] & 255;
+    if session_id_len > 32 {
+        return Result.Err {
+            error: "parse_client_hello_legacy_session_id: legacy_session_id exceeds 32 bytes"
+        };
+    }
+    let session_id: int[] = _slice(body, 35, session_id_len);
+    if session_id.length != session_id_len {
+        return Result.Err {
+            error: "parse_client_hello_legacy_session_id: truncated legacy_session_id"
+        };
+    }
+    return Result.Ok { value: session_id };
+}
+
 // ── Framing (RFC 8446 §4) ──────────────────────────────────────────
 struct HandshakeMessage {
     msg_type: int;
@@ -218,7 +256,17 @@ fn _push_extension(dst: int[], ext_type: int, ext_data: int[]) -> void {
     _append(dst, ext_data);
 }
 
+// Returns [] if the host name is too long to length-prefix. The host reaches
+// here from caller configuration or a user-supplied URL, so an unchecked length
+// would wrap the uint16 and put a corrupt ClientHello on the wire — and into
+// the transcript — rather than failing.
 fn _encode_server_name_extension(server_name: string) -> int[] {
+    let empty: int[] = [];
+    // The host sits under three nested length prefixes; bounding the innermost
+    // at _max_u16() - 5 keeps the list length and the extension length in range
+    // too.
+    if server_name.length > _max_u16() - 5 { return empty; }
+
     let mut host: int[] = [];
     let mut i: int = 0;
     loop {
@@ -293,13 +341,18 @@ fn encode_client_hello(random: int[], legacy_session_id: int[], key_share_public
 
     let mut extensions: int[] = [];
     if server_name.length > 0 {
-        _push_extension(extensions, ext_server_name(), _encode_server_name_extension(server_name));
+        let sni: int[] = _encode_server_name_extension(server_name);
+        if sni.length == 0 {
+            return empty;
+        }  // host name too long to frame
+        _push_extension(extensions, ext_server_name(), sni);
     }
     _push_extension(extensions, ext_supported_groups(), _encode_supported_groups_extension());
     _push_extension(extensions, ext_signature_algorithms(), _encode_signature_algorithms_extension());
     _push_extension(extensions, ext_supported_versions(), _encode_supported_versions_extension());
     _push_extension(extensions, ext_key_share(), _encode_key_share_extension(key_share_public));
 
+    if extensions.length > _max_u16() { return empty; }
     _push_u16(body, extensions.length);
     _append(body, extensions);
 
@@ -344,12 +397,25 @@ struct _ServerHelloExtScan {
 }
 
 // Walk the ServerHello extensions block, extracting supported_versions (43)
-// and key_share (51) in ServerHello form and skipping everything else.
+// and key_share (51) in ServerHello form.
+//
+// RFC 8446 §4.2 constrains a ServerHello's extension block twice over, and
+// both constraints are enforced here rather than tolerated. A repeated
+// extension type is rejected ("There MUST NOT be more than one extension of
+// the same type in a given extension block") instead of last-wins overwriting
+// an earlier value; and only key_share, pre_shared_key and supported_versions
+// may appear at all, so anything else — a server echoing server_name out of
+// TLS 1.2 habit, say — is refused rather than skipped. Silently skipping would
+// make this client and a reference stack disagree about what the same bytes
+// said, which is the parser differential a project claiming a machine-checked
+// contract can least afford.
 fn _scan_server_hello_extensions(ext_block: int[]) -> _ServerHelloExtScan {
     let no_kex: int[] = [];
     let mut selected_version: int = 0;
     let mut selected_group: int = 0;
     let mut key_exchange: int[] = no_kex;
+    let mut seen_supported_versions: bool = false;
+    let mut seen_key_share: bool = false;
 
     let mut off: int = 0;
     loop {
@@ -378,7 +444,30 @@ fn _scan_server_hello_extensions(ext_block: int[]) -> _ServerHelloExtScan {
 
         let data: int[] = _slice(ext_block, off + 4, ext_len);
 
+        // RFC 8446 §4.2: only these three may appear in a ServerHello.
+        // pre_shared_key (41) is permitted by the RFC but unreachable here —
+        // this client never offers a PSK — so it is refused with the rest.
+        if ext_type != ext_supported_versions() && ext_type != ext_key_share() {
+            return _ServerHelloExtScan {
+                ok: false,
+                error: "parse_server_hello: extension not permitted in a ServerHello (RFC 8446 §4.2)",
+                selected_version: 0,
+                selected_group: 0,
+                key_exchange: no_kex
+            };
+        }
+
         if ext_type == ext_supported_versions() {
+            if seen_supported_versions {
+                return _ServerHelloExtScan {
+                    ok: false,
+                    error: "parse_server_hello: duplicate supported_versions extension",
+                    selected_version: 0,
+                    selected_group: 0,
+                    key_exchange: no_kex
+                };
+            }
+            seen_supported_versions = true;
             if ext_len != 2 {
                 return _ServerHelloExtScan {
                     ok: false,
@@ -392,6 +481,16 @@ fn _scan_server_hello_extensions(ext_block: int[]) -> _ServerHelloExtScan {
         }
 
         if ext_type == ext_key_share() {
+            if seen_key_share {
+                return _ServerHelloExtScan {
+                    ok: false,
+                    error: "parse_server_hello: duplicate key_share extension",
+                    selected_version: 0,
+                    selected_group: 0,
+                    key_exchange: no_kex
+                };
+            }
+            seen_key_share = true;
             if ext_len < 4 {
                 return _ServerHelloExtScan {
                     ok: false,
@@ -590,6 +689,14 @@ fn parse_certificate(body: int[]) -> Result<CertificateMsg, string> {
         };
     }
     let ctx_len: int = body[0] & 255;
+    // RFC 8446 §4.4.2: "In the case of server authentication, this field SHALL
+    // be zero length." A client only ever parses a server Certificate here, so
+    // a non-empty context is always a protocol violation.
+    if ctx_len != 0 {
+        return Result.Err {
+            error: "parse_certificate: certificate_request_context must be empty for server authentication"
+        };
+    }
     let ctx: int[] = _slice(body, 1, ctx_len);
     if ctx.length != ctx_len {
         return Result.Err {
@@ -620,6 +727,14 @@ fn parse_certificate(body: int[]) -> Result<CertificateMsg, string> {
         if cert_len < 0 {
             return Result.Err {
                 error: "parse_certificate: truncated cert_data length"
+            };
+        }
+        // RFC 8446 §4.4.2 declares cert_data<1..2^24-1>: a zero-length entry
+        // is forbidden. Without this the length check below passes vacuously
+        // (0 == 0) and an empty leaf certificate reaches the state machine.
+        if cert_len < 1 {
+            return Result.Err {
+                error: "parse_certificate: zero-length cert_data"
             };
         }
         let cert_data_off: int = off + 3;
@@ -741,6 +856,7 @@ export {
     parse_handshake_message,
     encode_client_hello,
     parse_client_hello_cipher_suites,
+    parse_client_hello_legacy_session_id,
     parse_server_hello,
     parse_encrypted_extensions,
     parse_certificate,

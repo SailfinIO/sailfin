@@ -27,7 +27,7 @@ import {
     hs_client_new,
     hs_client_recv_certificate,
     hs_client_recv_certificate_verify,
-    hs_client_recv_certificate_verify_unverified,
+    hs_client_recv_certificate_verify_without_authenticating,
     hs_client_recv_encrypted_extensions,
     hs_client_recv_finished,
     hs_client_recv_server_hello,
@@ -59,7 +59,10 @@ fn hexb(s: string) -> int[] {
     let mut out: int[] = [];
     let mut i: int = 0;
     loop {
-        if i >= s.length { break; }
+        // `i + 1` rather than `i` so an odd-length literal returns what it
+        // parsed instead of indexing past the end and killing the runner —
+        // a mistyped vector should fail an assertion, not crash the suite.
+        if i + 1 >= s.length { break; }
         let hi: int = _hexval(s[i]);
         let lo: int = _hexval(s[i + 1]);
         out.push(((hi << 4) | lo) & 255);
@@ -137,7 +140,7 @@ test "tls13_handshake: RFC 8448 client key share derives from the client private
 
 test "tls13_handshake: a new state starts at START and carries the key share" {
     let created: Result<ClientHandshake, string> = hs_client_new(v_client_private());
-    let mut hs: ClientHandshake = _sentinel();
+    let mut hs: ClientHandshake = _sentinel_unreachable();
     match created {
         Result.Ok { value } => { hs = value; },
         Result.Err { error } => { assert error.length == 0; }
@@ -148,17 +151,9 @@ test "tls13_handshake: a new state starts at START and carries the key share" {
     assert eq_bytes(hs.early_secret, hexb("33ad0a1c607ec03b09e6cd9893680ce210adf300aa1f2660e1b22e10f170f92a"));
 }
 
-// A state used only to initialise a `let mut` before a `match` fills it in;
-// its START state is never asserted against, so a step that failed to
-// produce a real state fails the following assertion rather than passing.
-fn _sentinel() -> ClientHandshake {
-    let created: Result<ClientHandshake, string> = hs_client_new(v_client_private());
-    match created {
-        Result.Ok { value } => { return value; },
-        Result.Err { error } => { return _sentinel_unreachable(); }
-    }
-}
-
+// Initialises a `let mut` before a `match` fills it in. Its state is -1, which
+// no real state ever equals, so a step that failed to produce a state fails the
+// following assertion instead of passing vacuously against a plausible one.
 fn _sentinel_unreachable() -> ClientHandshake {
     let empty: int[] = [];
     return ClientHandshake {
@@ -167,6 +162,7 @@ fn _sentinel_unreachable() -> ClientHandshake {
         client_private: empty,
         client_public: empty,
         offered_cipher_suites: empty,
+        sent_legacy_session_id: empty,
         cipher_suite: 0,
         group: 0,
         shared_secret: empty,
@@ -238,7 +234,7 @@ test "tls13_handshake: RFC 8448 simple 1-RTT handshake reproduces every secret" 
     assert hs.server_leaf_certificate.length == 432;
 
     // CertificateVerify: RSA-PSS, so the signature cannot be checked yet.
-    let r5: Result<ClientHandshake, string> = hs_client_recv_certificate_verify_unverified(hs, v_certificate_verify());
+    let r5: Result<ClientHandshake, string> = hs_client_recv_certificate_verify_without_authenticating(hs, v_certificate_verify());
     match r5 {
         Result.Ok { value } => { hs = value; },
         Result.Err { error } => { assert error.length == 0; }
@@ -565,7 +561,7 @@ fn _drive_to_wait_certificate_verify() -> ClientHandshake {
 
 fn _drive_to_wait_finished() -> ClientHandshake {
     let mut hs: ClientHandshake = _drive_to_wait_certificate_verify();
-    let r5: Result<ClientHandshake, string> = hs_client_recv_certificate_verify_unverified(hs, v_certificate_verify());
+    let r5: Result<ClientHandshake, string> = hs_client_recv_certificate_verify_without_authenticating(hs, v_certificate_verify());
     match r5 {
         Result.Ok { value } => { hs = value; },
         Result.Err { error } => { return _sentinel_unreachable(); }
