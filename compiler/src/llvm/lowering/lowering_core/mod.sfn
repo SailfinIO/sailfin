@@ -1,0 +1,729 @@
+// compiler/src/llvm/lowering/lowering_core/mod.sfn
+//
+// Core LLVM lowering orchestrator. Phase-specific work lives in the
+// sibling modules in this folder and in lowering_phase_*.sfn.
+import { Diag } from "../../../diagnostic";
+import { NativeModule } from "../../../emit_native";
+import { LayoutManifest, NativeFunction, ParseNativeResult } from "../../../native_ir";
+import { parse_native_artifact } from "../../../native_ir_api";
+import { test_runner_active, test_runner_trace } from "../../../test_runner_state";
+import {
+    append_unique_effect,
+    collect_direct_function_effects,
+    collect_function_call_graph,
+    collect_runtime_helper_targets,
+    propagate_function_effects
+} from "../../effects";
+import { apply_layout_manifest_to_module } from "../../imports";
+import { skip_module_globals, trace_call_lowering, trace_lowering } from "../../lowering_debug_state";
+import { monomorphize_native_text } from "../../monomorphize";
+import { collect_exported_symbol_names } from "../../rendering_helpers";
+import { empty_string_constant_set, merge_string_constants } from "../../strings";
+import { set_syscall_lowering_module } from "../../syscall";
+import {
+    FunctionEffectEntry,
+    LifetimeRegionMetadata,
+    LocalBinding,
+    LoweredLLVMLinesResult,
+    StringConstant
+} from "../../types";
+import {
+    append_missing_legacy_lowering_diags,
+    extend_diag_array,
+    index_of,
+    number_to_string,
+    stamp_lowering_diag_file_paths,
+    starts_with
+} from "../../utils";
+import { emit_llvm_function } from "../emission";
+import {
+    collect_prelude_mirror_symbols_from_lines,
+    collect_runtime_helper_targets_from_lines,
+    extend_native_enums,
+    extend_native_interfaces,
+    extend_native_structs,
+    inject_prelude_error_struct,
+    inject_prelude_result_enum,
+    is_test_module_slug,
+    native_enums_have_name,
+    native_structs_have_name,
+    seed_default_runtime_helpers
+} from "../lowering_helpers";
+import {
+    apply_module_symbol_mangling,
+    build_trait_metadata,
+    concat_native_functions,
+    empty_capability_manifest,
+    extend_native_functions_inplace,
+    flatten_struct_methods
+} from "../lowering_helpers_mangling";
+import {
+    extend_string_lines,
+    extend_string_lines_checked,
+    module_source_filename
+} from "../lowering_io";
+import { lower_all_functions } from "../lowering_phase_functions";
+import { build_import_alias_signatures, gather_imported_module_symbols } from "../lowering_phase_imports";
+import { render_llvm_preamble } from "../lowering_phase_render";
+import {
+    recover_safe_functions,
+    recover_structs_if_corrupt,
+    sanitize_bindings,
+    sanitize_diagnostics,
+    sanitize_entry_points,
+    sanitize_enums,
+    sanitize_functions,
+    sanitize_imported_manifests,
+    sanitize_imported_native_texts,
+    sanitize_imports,
+    sanitize_interfaces,
+    sanitize_lowering_inputs,
+    sanitize_structs
+} from "../lowering_phase_sanitize";
+import { build_type_context_with_recovery } from "../lowering_phase_types";
+import { lower_imported_bindings_to_globals, lower_module_bindings_to_globals } from "../module_globals";
+import { emit_type_descriptors } from "../type_descriptors";
+import { _decorator_import_local_names } from "./decorator_imports";
+import {
+    _append_missing_opaque_forward_decls,
+    dedup_module_declare_lines,
+    hoist_closure_env_type_decls
+} from "./finalization";
+
+fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_arg: ParseNativeResult, imported_manifests: LayoutManifest[], imported_native_texts: string[], diagnostics_in: string[], mangle_symbols: boolean, native_text_override_path_in: string) -> LoweredLLVMLinesResult ![io] {
+    set_syscall_lowering_module(native_module.module_name);
+    // Generic-function monomorphization (#1869, SFEP-0038 §3.3). This is the
+    // single lowering choke point every entry path funnels through. Specialize
+    // generic `.fn`s and rewrite their call sites, then re-parse the rewritten
+    // text so every downstream consumer (recovery re-parse, symbol mangling)
+    // sees the monomorphic form. `monomorphize_native_text` is an inert no-op
+    // for any module with no generic function, so the re-parse only runs when
+    // the text actually changed — non-generic modules are byte-for-byte
+    // unaffected and pay no extra parse.
+    let native_text_override_path = monomorphize_native_text(native_text_override_path_in);
+    let mut parse_in = parse_arg;
+    if native_text_override_path != native_text_override_path_in {
+        parse_in = parse_native_artifact(native_text_override_path);
+    }
+    let debug_lowering = trace_lowering();
+    if debug_lowering { print.err("emit-llvm: phase=start"); }
+    if debug_lowering {
+        let mut artifact_count: int = 0;
+        if native_module.artifacts != null {
+            artifact_count = native_module.artifacts.length;
+        }
+        print.err("emit-llvm: native artifacts=" + number_to_string(artifact_count));
+    }
+
+    // ── Phase 1: Sanitize & recover inputs ──────────────────────────
+    let parse = sanitize_lowering_inputs(parse_in, native_text_override_path, native_module, imported_manifests, imported_native_texts, diagnostics_in, debug_lowering);
+
+    let safe_imported_manifests = sanitize_imported_manifests(imported_manifests, debug_lowering);
+    let safe_imported_native_texts = sanitize_imported_native_texts(imported_native_texts, debug_lowering);
+    let mut diagnostics = sanitize_diagnostics(diagnostics_in);
+    let mut diags: Diag[] = [];
+    if debug_lowering {
+        print.err("emit-llvm: dbg-F after diagnostics sanitize");
+    }
+    let safe_entry_points = sanitize_entry_points(native_module.entry_points, debug_lowering);
+    let _trace_enums = trace_call_lowering();
+
+    let mut is_test_module = is_test_module_slug(native_module.module_name);
+    if !is_test_module {
+        if test_runner_active() { is_test_module = true; }
+    }
+
+    let mut safe_imports = sanitize_imports(parse.imports, debug_lowering);
+    if debug_lowering {
+        print.err("emit-llvm: safe_imports.length=" + number_to_string(safe_imports.length));
+        if safe_imports.length > 0 {
+            let first_import = safe_imports[0];
+            if first_import != null {
+                let mut import_kind = "<null>";
+                if first_import.kind != null {
+                    import_kind = first_import.kind;
+                }
+                let mut import_module = "<null>";
+                if first_import.module != null {
+                    import_module = first_import.module;
+                }
+                let mut import_spec_count = 0;
+                if first_import.specifiers != null {
+                    import_spec_count = first_import.specifiers.length;
+                }
+                print.err("emit-llvm: safe_imports[0].kind=" + import_kind
+                    + " module="
+                    + import_module
+                    + " specs="
+                    + number_to_string(import_spec_count));
+            } else { print.err("emit-llvm: safe_imports[0]=<null>"); }
+        }
+    }
+    // SFN-436: test modules still link imported capsules as separate LLVM
+    // objects, so their parsed directives must survive long enough to
+    // localize aliased signatures. The older empty-list treatment belonged
+    // to the retired textual-inlining path and made
+    // `import { ones as tensor_ones }` unresolvable.
+    let mut safe_structs = sanitize_structs(parse.structs, diagnostics);
+    let safe_enums = sanitize_enums(parse.enums, diagnostics, _trace_enums);
+    let safe_interfaces = sanitize_interfaces(parse.interfaces, diagnostics);
+    if debug_lowering {
+        print.err("emit-llvm: dbg-H after structs/enums/interfaces sanitize");
+    }
+    let mut safe_functions = sanitize_functions(parse.functions, native_text_override_path, debug_lowering);
+    safe_functions = recover_safe_functions(safe_functions, native_text_override_path, debug_lowering);
+
+    if debug_lowering {
+        print.err("emit-llvm: functions parsed=" + number_to_string(parse.functions.length)
+            + " safe="
+            + number_to_string(safe_functions.length));
+    }
+
+    safe_structs = recover_structs_if_corrupt(safe_structs, native_text_override_path, debug_lowering);
+
+    let safe_bindings = sanitize_bindings(parse.bindings, diagnostics, native_text_override_path);
+
+    let mut safe_parse_diagnostics = parse.diagnostics;
+    if safe_parse_diagnostics == null { safe_parse_diagnostics = []; }
+    diagnostics = extend_string_lines_checked(diagnostics, safe_parse_diagnostics, "parse");
+
+    // ── Trace/timing setup ──────────────────────────────────────────
+    // Per-phase timing prints are gated on the trace flag
+    // (`SAILFIN_TRACE_TEST_RUNNER`), not merely on being in a test run, so
+    // an ordinary `sfn test` / `make test` stays quiet. Set the trace env
+    // to surface the `test llvm: phase=…` breakdown.
+    let trace = test_runner_trace();
+    let timing = test_runner_trace();
+    let start_ms = monotonic_millis();
+
+    if trace {
+        print.err("test llvm: lower_to_llvm_lines_with_parsed_context start");
+    }
+    if timing {
+        print.err("test llvm: phase=parse ms=" + number_to_string(monotonic_millis() - start_ms));
+    }
+
+    // ── Phase 2: Gather imported module context ─────────────────────
+    let exported_symbols = collect_exported_symbol_names(safe_imports);
+
+    let mut module_structs = safe_structs;
+    let mut module_enums = safe_enums;
+    if !is_test_module {
+        let mut module_manifest: LayoutManifest? = null;
+        let manifest_application = apply_layout_manifest_to_module(safe_structs, safe_enums, module_manifest);
+        diagnostics = extend_string_lines_checked(diagnostics, manifest_application.diagnostics, "layout application");
+        module_structs = manifest_application.structs;
+        if module_structs == null { module_structs = []; }
+        module_enums = manifest_application.enums;
+        if module_enums == null { module_enums = []; }
+        if debug_lowering { print.err("emit-llvm: phase=manifest"); }
+    }
+    if timing {
+        print.err("test llvm: phase=manifest ms=" + number_to_string(monotonic_millis() - start_ms));
+    }
+
+    // Phase 2 body extracted to lowering_phase_imports.sfn::gather_imported_module_symbols.
+    // Immediate destructure into locals matches the PR #229 "same-module
+    // destructure before downstream use" pattern that closed the April 21
+    // ParseNativeResult cross-module ABI SEGV.
+    let imported_syms = gather_imported_module_symbols(safe_imported_native_texts, safe_imported_manifests);
+    let imported_structs = imported_syms.structs;
+    let imported_enums = imported_syms.enums;
+    let imported_interfaces = imported_syms.interfaces;
+    let imported_functions = imported_syms.functions;
+    let imported_struct_methods = imported_syms.struct_methods;
+    let imported_bindings = imported_syms.bindings;
+    // Computed here (not at `safe_imports`) because the `@decorator` marker
+    // check needs the parsed imported functions (SFN-72).
+    let decorator_import_names = _decorator_import_local_names(safe_imports, imported_functions);
+
+    if debug_lowering { print.err("emit-llvm: phase=imports"); }
+
+    // ── Phase 3: Combine types, build type context ──────────────────
+    // #960: build `combined_structs`/`combined_enums` from a FRESH array so
+    // `extend_native_structs`/`extend_native_enums` (which alias + mutate
+    // their first arg in place via `.push`) do not contaminate
+    // `module_structs`/`module_enums` with imported declarations. Without the
+    // fresh seed, the in-place append leaked imported structs into
+    // `module_structs`, and the later `flatten_struct_methods(module_structs)`
+    // re-emitted imported (body-less) methods as local `ret 0` stubs that
+    // shadowed the real cross-module method symbol (garbage `self`).
+    let mut combined_structs = extend_native_structs(extend_native_structs([], module_structs), imported_structs);
+    let mut combined_enums = extend_native_enums(extend_native_enums([], module_enums), imported_enums);
+    // #1021: surface the prelude `Result<T, E>` / `Error` decls so bare user
+    // files (no in-file enum, no explicit import) lower `Result.Ok` / `.Err` +
+    // `match` to a real `%Result` layout + discriminant test instead of `i8*`.
+    // No-op when an in-file or imported decl already provides the name.
+    // Record whether each was absent BEFORE injection: a name we inject must
+    // have its type-descriptor registration suppressed (see below), but a name
+    // the module already defines/imports must still register normally.
+    let prelude_result_present = native_enums_have_name(combined_enums, "Result");
+    let prelude_error_present = native_structs_have_name(combined_structs, "Error");
+    combined_enums = inject_prelude_result_enum(combined_enums);
+    combined_structs = inject_prelude_error_struct(combined_structs);
+    // Names actually injected here. `emit_type_descriptors` skips registering
+    // them so modules that don't define `Result`/`Error` themselves don't gain
+    // an undefined `sfn_type_register` reference — the prelude module owns that
+    // registration. Without this, every module emitting zero other types went
+    // from "no descriptors" to a `@llvm.global_ctors` entry calling
+    // `sfn_type_register`, breaking standalone-link roundtrip tests (#1021 CI).
+    let mut injected_prelude_type_names: string[] = [];
+    if !prelude_result_present {
+        injected_prelude_type_names.push("Result");
+    }
+    if !prelude_error_present { injected_prelude_type_names.push("Error"); }
+    let mut combined_interfaces = extend_native_interfaces(safe_interfaces, imported_interfaces);
+    if is_test_module {
+        combined_interfaces = [];
+        if trace {
+            print.err("test llvm: skipping interface metadata for inlined tests");
+        }
+    }
+
+    if trace { print.err("test llvm: trait metadata start"); }
+    let trait_metadata = build_trait_metadata(combined_interfaces, combined_structs);
+    if debug_lowering { print.err("emit-llvm: phase=trait_metadata"); }
+    if trace { print.err("test llvm: enum layout fixup start"); }
+
+    if trace { print.err("test llvm: type context build start"); }
+    let _tc_build = build_type_context_with_recovery(combined_structs, combined_enums, combined_interfaces, diagnostics, _trace_enums, debug_lowering);
+    let type_context = _tc_build.context;
+    diagnostics = extend_string_lines_checked(diagnostics, _tc_build.diagnostics, "type context");
+    if trace { print.err("test llvm: type context built"); }
+    if timing {
+        print.err("test llvm: phase=type_context ms=" + number_to_string(monotonic_millis() - start_ms));
+    }
+
+    // ── Build context functions ─────────────────────────────────────
+    if debug_lowering {
+        print.err("emit-llvm: phase=struct_methods_start");
+    }
+    let module_struct_methods = flatten_struct_methods(module_structs);
+    if debug_lowering { print.err("emit-llvm: phase=struct_methods_done"); }
+    // #1700: drop any `safe_functions` entry that duplicates a flattened
+    // struct method (same name). A module whose only callables are struct
+    // methods (no free functions) makes `sanitize_functions` take its
+    // empty-parse recovery path, where `recover_native_functions_light`
+    // re-derives the struct methods AS top-level functions. That light
+    // parser does not recognize `.let`, so the recovered copies carry
+    // `Unknown` instructions and never populate locals — a `.push` on a
+    // local array then fails lowering with `cannot resolve return type for
+    // call to '<arr>.push'` (e.g. backend.sfn's argv builders when inlined
+    // into the `LlvmTextBackend` methods). `flatten_struct_methods` above
+    // already produced the authoritative copy of every struct method, so
+    // the recovered duplicate must be dropped; genuine free functions
+    // (distinct names) are kept. The dedup only fires when BOTH copies
+    // exist, so a true empty-parse recovery (structs also corrupt → no
+    // flattened method) keeps its recovered functions.
+    let mut deduped_safe_functions: NativeFunction[] = [];
+    let mut _dsf_i: int = 0;
+    loop {
+        if _dsf_i >= safe_functions.length { break; }
+        let _sf = safe_functions[_dsf_i];
+        let mut _is_dup_method: boolean = false;
+        let mut _msm_i: int = 0;
+        loop {
+            if _msm_i >= module_struct_methods.length { break; }
+            if module_struct_methods[_msm_i].name == _sf.name {
+                _is_dup_method = true;
+                break;
+            }
+            _msm_i += 1;
+        }
+        if !_is_dup_method { deduped_safe_functions.push(_sf); }
+        _dsf_i += 1;
+    }
+    let local_functions = extend_native_functions_inplace(deduped_safe_functions, module_struct_methods);
+    if debug_lowering { print.err("emit-llvm: phase=local_functions"); }
+    // Site 2 — must stay copying: local_functions is reused by
+    // collect_runtime_helper_targets, render_llvm_preamble, and
+    // lower_all_functions below, so context_functions must be a distinct
+    // array so imported_functions don't contaminate local_functions.
+    let mut context_functions = concat_native_functions(local_functions, imported_functions);
+    // Site 3 — safe in-place extend: context_functions is a fresh array from
+    // site 2, no prior snapshot is aliased.
+    context_functions = extend_native_functions_inplace(context_functions, imported_struct_methods);
+    // Aliased function imports (`import { make as m }`): register the
+    // provider's signature under the local alias name so call-site signature
+    // resolution finds it. Resolution-only entries (empty body) added to the
+    // context table — not to `imported_functions`, so no extra `declare` is
+    // emitted; the IR-text mangling pass already rewrites `@m` → the provider
+    // symbol. See build_import_alias_signatures (lowering_phase_imports.sfn).
+    let import_alias_signatures = build_import_alias_signatures(safe_imports, context_functions);
+    context_functions = extend_native_functions_inplace(context_functions, import_alias_signatures);
+    if debug_lowering { print.err("emit-llvm: phase=context_functions"); }
+
+    // ── Effect analysis ─────────────────────────────────────────────
+    // Helper collection runs in two phases now (M1.7.5a / #501):
+    //
+    //   * Pre-lowering: `collect_runtime_helper_targets(local_functions)`
+    //     walks every function in `local_functions`, extracting call
+    //     targets from `NativeInstruction` text. Catches user-source
+    //     call sites — `print(x)`, `string.length`, `string.to_number`
+    //     etc. — that surface as identifier text in instruction fields.
+    //
+    //   * Post-lowering: `collect_runtime_helper_targets_from_lines`
+    //     (called after the module bodies are lowered, just below)
+    //     scans every emitted LLVM IR line for `call <type> @<symbol>(`
+    //     and maps each symbol back to a descriptor target. Catches
+    //     helpers emitted by `emit_runtime_call` and by raw
+    //     `wrapper_lines.push("  call ...")` lines (panic-wrapper inlines
+    //     around every user `main`, post-coercion calls inserted by
+    //     `expression_lowering/native/core_operands.sfn`, etc.) that
+    //     the pre-lowering walker is structurally blind to.
+    //
+    // The two phases together let the preamble's helper declares track
+    // actual per-module usage; `seed_default_runtime_helpers` is now
+    // a top-up only for genuinely undiscoverable cases — prelude
+    // module-level `let` bindings, `extern fn` shims, and `fs.*` /
+    // `process.*` direct-emit paths that never route through either
+    // descriptor-driven walker.
+    //
+    // Either walker can discover targets that are already declared
+    // inline by `render_llvm_preamble` (the typed spawn/await family
+    // from `async_runtime_declare_lines`, the seedcheck enum-tag
+    // reader, the arena allocation/free helpers, the rc-release
+    // helper); `render_runtime_helper_declarations` filters those out
+    // so the emitted IR never carries duplicate `declare` lines. See
+    // the matching skip block in `compiler/src/llvm/rendering.sfn` if
+    // a future preamble-inlined declare needs the same treatment.
+    let skip_helper_collection = false;
+    // Bootstrap guard (commit 65b065ad, "make check completes binary not
+    // valid"): effect analysis currently introduces instability in
+    // selfhost/native lowering for some modules. Keep disabled by default.
+    let skip_effect_propagation = true;
+    let mut runtime_helpers: string[] = [];
+    let mut _if255: boolean = false;
+    if !is_test_module {
+        if !skip_helper_collection { _if255 = true; }
+    }
+    if _if255 {
+        if debug_lowering { print.err("emit-llvm: phase=helpers_start"); }
+        runtime_helpers = collect_runtime_helper_targets(local_functions, decorator_import_names);
+        if debug_lowering { print.err("emit-llvm: phase=helpers_done"); }
+    } else if trace {
+        print.err("test llvm: skipping runtime helper collection for test module");
+    }
+    let mut direct_effects: FunctionEffectEntry[] = [];
+    let mut aggregated_effects: FunctionEffectEntry[] = [];
+    if !skip_effect_propagation {
+        if debug_lowering { print.err("emit-llvm: phase=direct_effects"); }
+        direct_effects = collect_direct_function_effects(context_functions);
+        aggregated_effects = direct_effects;
+        if !is_test_module {
+            let call_graph = collect_function_call_graph(context_functions);
+            aggregated_effects = propagate_function_effects(direct_effects, call_graph);
+        } else if trace {
+            print.err("test llvm: skipping effect propagation for inlined tests");
+        }
+    }
+    if trace { print.err("test llvm: runtime helpers collected"); }
+    if timing {
+        print.err("test llvm: phase=effects ms=" + number_to_string(monotonic_millis() - start_ms));
+    }
+    if debug_lowering { print.err("emit-llvm: phase=effects"); }
+
+    // ── Module globals (lowered before preamble so that any helper
+    // calls emitted by initializer expressions land in the body lines
+    // we hand to `collect_runtime_helper_targets_from_lines` below).
+    if debug_lowering {
+        print.err("emit-llvm: phase=module_globals");
+        print.err("emit-llvm: module bindings count=" + number_to_string(safe_bindings.length));
+    }
+    let mut module_globals_needs_init_call: boolean = false;
+    let mut module_global_locals: LocalBinding[] = [];
+    let mut module_preamble_lines: string[] = [];
+    let mut module_init_lines: string[] = [];
+    let mut module_init_symbol: string = "";
+    let mut module_init_function: NativeFunction? = null;
+    let mut module_string_constants: StringConstant[] = empty_string_constant_set();
+    if safe_bindings.length == 0 {
+        if debug_lowering {
+            print.err("emit-llvm: module bindings empty; skipping module globals");
+        }
+    } else if skip_module_globals() {
+        if debug_lowering {
+            print.err("emit-llvm: skipping module globals");
+        }
+    } else {
+        let _mg = lower_module_bindings_to_globals(safe_bindings, type_context, native_module.module_name);
+        module_globals_needs_init_call = _mg.needs_init_call;
+        module_preamble_lines = _mg.preamble_lines;
+        module_init_lines = _mg.init_function_lines;
+        module_init_symbol = _mg.init_function_symbol;
+        module_init_function = _mg.init_function;
+        module_global_locals = _mg.locals;
+        module_string_constants = _mg.string_constants;
+        if _mg.diagnostics.length > 0 {
+            diagnostics = extend_string_lines_checked(diagnostics, _mg.diagnostics, "module globals");
+        }
+    }
+    // #1368: materialise module-level `let` constants that imported capsules
+    // EXPORT as the importer's own value-carrying globals, and register a
+    // local binding for each, so a cross-capsule reference loads the
+    // producer's value instead of falling through to the zero-default
+    // recovery in statement lowering. Must run before `lower_all_functions`
+    // so function bodies see the imported-constant bindings in
+    // `module_global_locals`.
+    if imported_bindings.length > 0 {
+        let mut existing_global_names: string[] = [];
+        let mut _eg: int = 0;
+        loop {
+            if _eg >= module_global_locals.length { break; }
+            existing_global_names.push(module_global_locals[_eg].name);
+            _eg += 1;
+        }
+        let _ib = lower_imported_bindings_to_globals(imported_bindings, type_context, existing_global_names);
+        if _ib.preamble_lines.length > 0 {
+            module_preamble_lines = extend_string_lines(module_preamble_lines, _ib.preamble_lines);
+        }
+        let mut _ibl: int = 0;
+        loop {
+            if _ibl >= _ib.locals.length { break; }
+            module_global_locals.push(_ib.locals[_ibl]);
+            _ibl += 1;
+        }
+    }
+    // #1386: emit the body of `@sailfin_module_init__<module>` so its call
+    // (planted at user-main entry) resolves at link time. The synthetic
+    // function assigns each runtime-evaluated global into `@global.<name>`;
+    // it is lowered here rather than in the pure module-globals pass because
+    // expression lowering is `![io]` and needs the full type/function
+    // context. `needs_module_init_call` is forced false so the init function
+    // does not recursively call itself. Its `@sfn_*` helper calls ride the
+    // post-lowering `collect_runtime_helper_targets_from_lines` scan via
+    // `module_init_lines`; its string constants are merged so they render.
+    if module_init_function != null {
+        let init_lowered = emit_llvm_function(module_init_function, context_functions, [], type_context, native_module.module_name, safe_entry_points, exported_symbols, imported_functions, module_global_locals, module_init_symbol, false, decorator_import_names);
+        module_init_lines = init_lowered.lines;
+        if init_lowered.diagnostics.length > 0 {
+            diagnostics = extend_string_lines_checked(diagnostics, init_lowered.diagnostics, "module init");
+        }
+        diags = extend_diag_array(diags, init_lowered.diags);
+        if init_lowered.string_constants.length > 0 {
+            module_string_constants = merge_string_constants(module_string_constants, init_lowered.string_constants);
+        }
+    }
+    if trace { print.err("test llvm: module globals lowered"); }
+    if timing {
+        print.err("test llvm: phase=globals ms=" + number_to_string(monotonic_millis() - start_ms));
+    }
+
+    // ── Lower all functions (also pre-preamble; the emitted call
+    // lines feed the post-lowering helper scan that closes the gap
+    // for `emit_runtime_call` and panic-wrapper inline calls).
+    let function_result = lower_all_functions(local_functions, context_functions, aggregated_effects, type_context, native_module.module_name, safe_entry_points, exported_symbols, imported_functions, module_global_locals, module_init_symbol, module_globals_needs_init_call, module_string_constants, trace, debug_lowering, decorator_import_names);
+    diagnostics = extend_string_lines_checked(diagnostics, function_result.diagnostics, "function lowering");
+    diags = extend_diag_array(diags, function_result.diags);
+
+    // ── M2.10 (#402): type-metadata descriptors. Emitted before
+    // the body assembly so the constructor's `call @sfn_type_register`
+    // lines participate in the post-lowering helper scan and the
+    // descriptor globals + name strings ride along in the preamble
+    // section we hand to the renderer below.
+    let type_descriptor_emission = emit_type_descriptors(type_context, native_module.module_name, injected_prelude_type_names);
+
+    // ── Assemble the body before rendering the preamble so the
+    // helper-target scan covers every `call @<sym>(` emitted by the
+    // module-globals initializer, the function bodies, and the
+    // panic-wrapper inlines.
+    let mut body_lines: string[] = [];
+    if module_preamble_lines.length > 0 {
+        body_lines = extend_string_lines(body_lines, module_preamble_lines);
+        body_lines = extend_string_lines(body_lines, [""]);
+    }
+    if module_init_lines.length > 0 {
+        body_lines = extend_string_lines(body_lines, module_init_lines);
+        body_lines = extend_string_lines(body_lines, [""]);
+    }
+    body_lines = extend_string_lines(body_lines, function_result.lines);
+    if type_descriptor_emission.has_descriptors {
+        body_lines = extend_string_lines(body_lines, [""]);
+        body_lines = extend_string_lines(body_lines, type_descriptor_emission.body_lines);
+    }
+
+    // ── Phase 4: Augment helpers with post-lowering observations and
+    // render the preamble.
+    let post_lowering_targets = collect_runtime_helper_targets_from_lines(body_lines);
+    let mut tmp_helpers = runtime_helpers;
+    let mut _pli: int = 0;
+    loop {
+        if _pli >= post_lowering_targets.length { break; }
+        tmp_helpers = append_unique_effect(tmp_helpers, post_lowering_targets[_pli]);
+        _pli += 1;
+    }
+    // #1780 (SFEP-0035 §3.2): add the prelude-mirror symbols this module calls
+    // (descriptor-independent, since the hand-typed rows were removed) so the
+    // declare-emitter derives a `declare` for each one referenced by a
+    // non-prelude-importing caller.
+    let mirror_targets = collect_prelude_mirror_symbols_from_lines(body_lines);
+    let mut _mti: int = 0;
+    loop {
+        if _mti >= mirror_targets.length { break; }
+        tmp_helpers = append_unique_effect(tmp_helpers, mirror_targets[_mti]);
+        _mti += 1;
+    }
+    runtime_helpers = seed_default_runtime_helpers(tmp_helpers);
+    // #1436: detect whether this module *defines* `@runtime` (the
+    // `extern var runtime: * u8 = null` in `runtime/sfn/runtime_globals.sfn`
+    // lowers to a `@runtime = global ...` line in the module-globals
+    // preamble). The defining module must NOT also emit the `external
+    // global` declaration — that would be a duplicate-symbol redefinition.
+    let mut module_defines_runtime: boolean = false;
+    let mut _rdi: int = 0;
+    loop {
+        if _rdi >= module_preamble_lines.length { break; }
+        if starts_with(module_preamble_lines[_rdi], "@runtime = global ") {
+            module_defines_runtime = true;
+            break;
+        }
+        _rdi += 1;
+    }
+    let mut lines = render_llvm_preamble(native_module.module_name, type_context, trait_metadata, context_functions, local_functions, imported_functions, runtime_helpers, module_defines_runtime, debug_lowering);
+    // M2.10 (#402): inject `@__sfn_type_desc.*` globals and the
+    // `declare void @sfn_type_register(i8*)` into the preamble.
+    // Constructor + `@llvm.global_ctors` lines were appended to
+    // `body_lines` above so the post-lowering helper scan saw
+    // them.
+    if type_descriptor_emission.has_descriptors {
+        lines = extend_string_lines(lines, type_descriptor_emission.preamble_lines);
+    }
+    lines = extend_string_lines(lines, body_lines);
+
+    // Capturing-lambda env type decls (#687). The lambda-site
+    // env_alloc marker and the lifted-function prologue marker each
+    // emit a `; closure_env_type_decl %sfn_closure_env_<N> = type {...}`
+    // hint inline with the using function's IR. LLVM requires named
+    // struct types to be declared at module scope BEFORE any use, so
+    // we lift the hints to the preamble — right after the
+    // `source_filename` line — with dedup by type name.
+    lines = hoist_closure_env_type_decls(lines);
+
+    if timing {
+        print.err("test llvm: phase=functions ms=" + number_to_string(monotonic_millis() - start_ms));
+    }
+
+    // ── Mangling ────────────────────────────────────────────────────
+    let effective_mangle_symbols = mangle_symbols;
+    if debug_lowering {
+        if !effective_mangle_symbols {
+            print.err("emit-llvm: skipping mangling (mangle_symbols=false)");
+        }
+    }
+    if effective_mangle_symbols {
+        let mangled = apply_module_symbol_mangling(lines, safe_imports, native_module.module_name, safe_imported_native_texts, native_text_override_path);
+        let mut _ci0: int = 0;
+        loop {
+            if _ci0 >= mangled.diagnostics.length { break; }
+            diagnostics.push(mangled.diagnostics[_ci0]);
+            _ci0 += 1;
+        }
+        lines = mangled.lines;
+    }
+    // Drop exact-duplicate module-scope `declare` lines. The runtime-helper
+    // preamble and the imported-function / inline-preamble paths can each
+    // emit a byte-identical `declare <ret> @<sym>(...)` for the same symbol
+    // (e.g. `sfn_array_sfn_map` is both a registered runtime helper and a
+    // `runtime/prelude.sfn` import). LLVM's library API merges identical
+    // declares, but clang's textual-IR parser — the `clang -c <file>.ll`
+    // path `_emit_runtime_sfn_to_obj` (cli_main.sfn) uses to build runtime
+    // objects — rejects the repeat with "invalid redefinition of function",
+    // which breaks a cold `make test` (the cached `.o` masks it in CI). Run
+    // the dedup here, after mangling so symbol names are final, keeping the
+    // first occurrence and preserving order so the stage2==stage3 fixed
+    // point is unaffected.
+    lines = dedup_module_declare_lines(lines);
+    // SFN-154: a runtime-helper `declare` may reference a named struct type —
+    // e.g. `%OwnedBuf*` from `io.read_fd` — that this module neither defines nor
+    // forward-declares (the type reaches the helper-declare pass but is not
+    // emitted as a body here), and clang then rejects `use of undefined type`.
+    // Run this on the FINAL text, after mangling + declare-dedup, so it covers
+    // both the `mangle_symbols=false` runtime-sfn-source path and the
+    // `mangle_symbols=true` capsule path (mangling runs between the preamble's
+    // own type pass and here, so the fix must be last). Keys on emitted text: a
+    // module that already spells the full `%Name = type { ... }` body is skipped,
+    // so no LLVM redefinition.
+    lines = _append_missing_opaque_forward_decls(lines);
+    let mut has_vectorize_loop: boolean = false;
+    let mut _vl_idx: int = 0;
+    loop {
+        if _vl_idx >= lines.length { break; }
+        if index_of(lines[_vl_idx], "!llvm.loop !0") >= 0 {
+            has_vectorize_loop = true;
+            break;
+        }
+        _vl_idx += 1;
+    }
+    if has_vectorize_loop {
+        // SFN-448: vectorized native loops share the module's one enable-only
+        // loop policy. LLVM requires the loop ID to be a self-referential
+        // metadata node attached to the latch backedge.
+        lines.push("");
+        lines.push("!0 = distinct !{!0, !1}");
+        lines.push("!1 = !{!\"llvm.loop.vectorize.enable\", i1 true}");
+    }
+    if debug_lowering { print.err("emit-llvm: phase=mangle"); }
+    if trace { print.err("test llvm: mangling stage done"); }
+    if timing {
+        print.err("test llvm: phase=finalize ms=" + number_to_string(monotonic_millis() - start_ms));
+    }
+
+    // ── Final result ────────────────────────────────────────────────
+    let manifest = empty_capability_manifest();
+    let mut function_effects: FunctionEffectEntry[] = [];
+    let mut lifetime_regions: LifetimeRegionMetadata[] = [];
+    let all_string_constants = empty_string_constant_set();
+
+    if trace {
+        let mut nonempty: int = 0;
+        let mut first_len: int = 0;
+        let mut i: int = 0;
+        loop {
+            if i >= lines.length { break; }
+            if lines[i].length > 0 {
+                nonempty += 1;
+                if first_len == 0 { first_len = lines[i].length; }
+            }
+            i += 1;
+        }
+        print.err("test llvm: lowered lines=" + number_to_string(lines.length)
+            + " nonempty="
+            + number_to_string(nonempty)
+            + " first_len="
+            + number_to_string(first_len)
+            + " diagnostics="
+            + number_to_string(diagnostics.length));
+        let mut diag_index: int = 0;
+        loop {
+            if diag_index >= diagnostics.length { break; }
+            print.err("test llvm: diagnostic " + diagnostics[diag_index]);
+            diag_index += 1;
+        }
+    }
+    if lines.length == 0 {
+        print.err("emit-llvm: lowering produced no lines (functions="
+            + number_to_string(local_functions.length)
+            + " structs="
+            + number_to_string(module_structs.length)
+            + " enums="
+            + number_to_string(module_enums.length)
+            + " diagnostics="
+            + number_to_string(diagnostics.length)
+            + ")");
+    }
+    if debug_lowering {
+        print.err("emit-llvm: phase=end lines=" + number_to_string(lines.length));
+    }
+    diags = append_missing_legacy_lowering_diags(diags, diagnostics);
+    diags = stamp_lowering_diag_file_paths(diags, module_source_filename(native_module.module_name));
+    return LoweredLLVMLinesResult {
+        lines: lines,
+        diagnostics: diagnostics,
+        diags: diags,
+        trait_metadata: trait_metadata,
+        function_effects: function_effects,
+        lifetime_regions: lifetime_regions,
+        capability_manifest: manifest,
+        string_constants: all_string_constants
+    };
+}

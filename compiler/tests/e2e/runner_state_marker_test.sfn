@@ -108,7 +108,7 @@ test "runner state: SAILFIN_TRACE_TEST_RUNNER=1 propagates to lowering" ![io] {
     assert r.exit == 0;
     // Orchestrator-side trace (cli_commands.sfn).
     assert find(r.log, "test runner: compile start", 0) >= 0;
-    // LLVM-lowering-side trace (lowering_core.sfn): proves the in-process
+    // LLVM-lowering-side trace (lowering_core/mod.sfn): proves the in-process
     // flag set by the orchestrator was observed on the lowering hot path.
     assert find(r.log, "test llvm:", 0) >= 0;
 }

@@ -78,11 +78,8 @@ import {
     string_array_contains
 } from "../utils";
 import { emit_llvm_function } from "./emission";
-import {
-    has_fatal_lowering_diagnostic,
-    lower_to_llvm_lines_with_parsed_context_for_tests,
-    print_fatal_lowering_diagnostics
-} from "./lowering_core";
+import { has_fatal_lowering_diagnostic, print_fatal_lowering_diagnostics } from "./lowering_core/diagnostics";
+import { lower_to_llvm_lines_with_parsed_context_for_tests } from "./lowering_core/test_harness";
 import {
     empty_trait_metadata,
     extend_native_enums,

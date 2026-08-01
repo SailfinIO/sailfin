@@ -13,7 +13,7 @@
 
 ## 1. The mechanism
 
-`has_fatal_lowering_diagnostic` (`compiler/src/llvm/lowering/lowering_core.sfn:841`)
+`has_fatal_lowering_diagnostic` (`compiler/src/llvm/lowering/lowering_core/diagnostics.sfn`)
 returns true iff some diagnostic string contains the literal substring
 `[fatal]`. It is the only thing that turns a lowering diagnostic into a build
 failure. Diagnostics travel as untyped `string[]` in
@@ -24,8 +24,8 @@ Five sites consult the gate:
 
 | Site | Prints the cause? | Extra action |
 |---|---|---|
-| `lowering_core.sfn:742` | yes — every `[fatal]` line | deletes a stale `.ll` |
-| `lowering_core.sfn:809` | yes | dry-run gate for `emit native` |
+| `lowering_core/file_emission.sfn` | yes — every `[fatal]` line | deletes a stale `.ll` |
+| `lowering_core/file_emission.sfn` | yes | dry-run gate for `emit native` |
 | `entrypoints.sfn:287` | yes | refuses before printing IR |
 | `entrypoints.sfn:335` | **no** | returns `false` silently |
 | `entrypoints_tests_writer.sfn:151` | **no** | returns `false` silently |
@@ -165,8 +165,8 @@ not recognise is silently omitted from the function body.
 
 | Site | Problem |
 |---|---|
-| `lowering_phase_sanitize.sfn:89-96` (`sanitize_diagnostics`, called at `lowering_core.sfn:881`) | if the inbound array exceeds 1,000,000 entries the **whole array is replaced with `[]`** — including any `[fatal]` |
-| `lowering_io.sfn:44-59` (`extend_string_lines_checked`, used at `lowering_core.sfn:945, 971, 1048, 1272`) | an oversized batch is replaced by one generic "skipped oversized" line, discarding every individual message including `[fatal]` |
+| `lowering_phase_sanitize.sfn:89-96` (`sanitize_diagnostics`, called at `lowering_core/mod.sfn`) | if the inbound array exceeds 1,000,000 entries the **whole array is replaced with `[]`** — including any `[fatal]` |
+| `lowering_io.sfn:44-59` (`extend_string_lines_checked`, used at `lowering_core/mod.sfn`) | an oversized batch is replaced by one generic "skipped oversized" line, discarding every individual message including `[fatal]` |
 | `entrypoints.sfn:335`, `entrypoints_tests_writer.sfn:151` | refuse the build without printing *why* |
 
 The thresholds are impractical to reach, but there is no "keep any `[fatal]`"
@@ -196,7 +196,7 @@ own tagging, not by anything in `arrays.sfn`.)
 
 `native_ir_utils_layout.sfn` — ~60 push sites, **zero** tagged. Its diagnostics
 reach the same untagged channel via `native_ir_parser_defs.sfn` →
-`ParseNativeResult.diagnostics` → `lowering_core.sfn:943-945`. On a malformed
+`ParseNativeResult.diagnostics` → `lowering_core/mod.sfn`. On a malformed
 `.layout` line the caller silently drops the offending field/variant/payload
 from the constructed layout (`native_ir_parser_defs.sfn:408-409` only pushes on
 `success`), or emits the struct with `layout: null`. A truncated layout yields
@@ -225,7 +225,7 @@ These are untagged and should stay untagged.
 | `runtime_call.sfn:209` | falls back to the **original uncoerced operand** — a real value, not a fabrication; degraded but not invented |
 | `core_call_lowering.sfn:396, 411` | non-terminal; the arity backstop at `:436` fail-closes on the resulting drift — **but only since SFN-548; see the correction below** |
 | `core_concurrency_lowering.sfn:1410` (non-`double` await) | deliberate accepted gap for the still-untyped `i8*`/ptr await path, documented in-source (#829); the `double` shape *is* escalated |
-| `lowering_core.sfn:329` | informational: test module defines its own `main`, harness skipped |
+| `lowering_core/test_harness.sfn` | informational: test module defines its own `main`, harness skipped |
 | `emission.sfn:249` | parameter missing a type annotation defaults to `i8*` — pre-existing ABI policy, not a lowering failure |
 | `statement_suspension.sfn:128, 150` | suspension-conflict notes; borrows are documented "Parsed only" (`docs/status.md:529`) |
 | `core_ownership.sfn:74, 102` | use-after-move — **enforcement lives elsewhere**: `ownership_checker.sfn`, wired fail-closed at `main.sfn:145, 326, 382, 413`, raising `E0901`/`E0904`. These lowering copies are vestigial detectors, not the gate. |
@@ -299,7 +299,7 @@ reproduces #631/#1954 exactly, and nothing tests for it.
 
 ## 7. The `[fatal]` contract
 
-Documented at the definition site (`lowering_core.sfn`, above
+Documented at the definition site (`lowering_core/diagnostics.sfn`, above
 `has_fatal_lowering_diagnostic`) by this issue. In summary:
 
 1. `[fatal]` anywhere in a diagnostic string fails the build. There is no other
@@ -335,7 +335,7 @@ valid as written; A1 is their shared generalization.
 ```
 build/bin/sfn test compiler/tests/unit/     # pass
 make compile                                # self-hosts
-sfn fmt --check compiler/src/llvm/lowering/lowering_core.sfn
+build/bin/sfn fmt --check compiler/src/llvm/lowering/lowering_core/*.sfn
 ```
 
 This note and the contract comment change no behaviour.

@@ -4,7 +4,7 @@
 // Validates null/length invariants on parse results and performs
 // recovery from native text when the ABI corrupts struct fields.
 //
-// Extracted from lowering_core.sfn to reduce per-file memory footprint.
+// Extracted from lowering_core/mod.sfn to reduce per-file memory footprint.
 import { NativeModule } from "../../emit_native";
 import {
     LayoutManifest,

@@ -35,7 +35,7 @@ import {
 } from "./llvm/lowering/entrypoints";
 import { lower_to_llvm_for_tests } from "./llvm/lowering/entrypoints_tests";
 import { write_llvm_ir_for_tests_from_text_with_context } from "./llvm/lowering/entrypoints_tests_writer";
-import { native_text_passes_lowering_gate } from "./llvm/lowering/lowering_core";
+import { native_text_passes_lowering_gate } from "./llvm/lowering/lowering_core/file_emission";
 import { runtime_helper_call_names } from "./llvm/runtime_helpers/mod";
 import { LayoutManifest } from "./native_ir";
 import { parse_native_artifact } from "./native_ir_api";

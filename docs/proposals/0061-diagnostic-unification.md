@@ -21,7 +21,7 @@ representations. The frontend's `Diagnostic` (`compiler/src/typecheck_types.sfn:
 is correct — code, severity, span, and structured fix-it. The backend never
 adopted it, and instead uses a bare `string[]` in which severity is encoded as
 the literal substring `[fatal]`, scanned by `has_fatal_lowering_diagnostic`
-(`compiler/src/llvm/lowering/lowering_core.sfn`).
+(`compiler/src/llvm/lowering/lowering_core/diagnostics.sfn`).
 
 | Channel | Code | Span | Severity | Fix-it |
 |---|---|---|---|---|

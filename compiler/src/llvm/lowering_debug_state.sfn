@@ -192,7 +192,7 @@ fn trace_lowering() -> boolean ![io] {
 // True when the user requested call-lowering trace via
 // `SAILFIN_TRACE_CALL_LOWERING=1` (or the legacy
 // `.trace_call_lowering` file). Read in 2 sites — enum lowering in
-// `lowering_core.sfn` and the call emission path in
+// `lowering_core/mod.sfn` and the call emission path in
 // `core_call_lowering.sfn`. Independent of `trace_lowering` because
 // users typically want one or the other, not both.
 fn trace_call_lowering() -> boolean ![io] {

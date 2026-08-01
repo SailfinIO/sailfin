@@ -233,9 +233,9 @@ Passes touched:
 - **`runtime/sfn/assert.sfn`** — replace the `results.log`/`fail.bin` file
   writers (`sfn_test_report_pass`/`caught`/`skipped`, `sailfin_assert_fail`) with
   framed-record writes to fd 2. This is the substantive change.
-- **`compiler/src/llvm/lowering/lowering_core.sfn`** — the harness only emits
+- **`compiler/src/llvm/lowering/lowering_core/test_harness.sfn`** — the harness only emits
   `call void @sfn_test_report_*(...)` and `@sfn_test_set_phase(...)`
-  (`lowering_core.sfn:445-570`); if the extern report signatures are unchanged,
+  (`lowering_core/test_harness.sfn`); if the extern report signatures are unchanged,
   the emitted IR is unchanged and this file needs **no change**. In scope for the
   record but expected to be a no-op or a minimal edit.
 - **`compiler/src/test_results.sfn`** — extend the `TestResultRecord` parser to
@@ -419,6 +419,6 @@ Tooling/runtime-driver change; no user-facing language surface.
   `:2829` (`_pool_child_env`), `:2900-2922` (`_test_exec_argv` json wrapper),
   `:2951` (`_extract_json_uint_after`); `compiler/src/test_results.sfn`
   (`TestResultRecord`); `compiler/src/assert_failure.sfn` (`SFAF` parser, retired);
-  `compiler/src/llvm/lowering/lowering_core.sfn:445-570` (harness emission);
+  `compiler/src/llvm/lowering/lowering_core/test_harness.sfn` (harness emission);
   `compiler/src/test_runner_json.sfn` (`--json` schema v2, unchanged). Prior art:
   Go `cmd/test2json`, Rust `libtest --format json`.

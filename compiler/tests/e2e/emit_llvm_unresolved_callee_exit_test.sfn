@@ -63,7 +63,7 @@ test "emit-llvm: unresolved-callee return path fails closed (-o file)" ![io] {
     let out = _scratch_dir() + "/emit_llvm_1954_unresolved.ll";
     // Seed a stale `.ll` so this pins the FULL fail-closed contract, not just
     // the exit code: on a `[fatal]`, `lowering_core` deletes any prior output
-    // and refuses to write (lowering_core.sfn:482-486), so downstream tooling
+    // and refuses to write (lowering_core/file_emission.sfn), so downstream tooling
     // that only stats `out` cannot mistake a stale file for fresh IR.
     fs.writeFile(out, "; stale IR from a prior successful build\n");
     let exit = process.run_capture([_sfn_bin(), "emit", "-o", out, "llvm", src], process.environ());

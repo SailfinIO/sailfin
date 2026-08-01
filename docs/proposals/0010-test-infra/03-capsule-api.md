@@ -140,7 +140,7 @@ The effect list (`![io]` above) is the hook body's own effect row, parsed like
 a test block's. Each hook lowers to a `TestDeclaration` carrying `hook_kind`
 (`compiler/src/ast.sfn`); `emit_native` emits it under a `hook:<kind>` symbol
 kept out of the RUN/PASS test scan. The LLVM test-harness synthesizer
-(`compiler/src/llvm/lowering/lowering_core.sfn`) discovers each kind
+(`compiler/src/llvm/lowering/lowering_core/test_harness.sfn`) discovers each kind
 **statically** and emits **direct calls** into the synthesized `@main`:
 `before_all` once before the test loop, `before_each`/`after_each` wrapping each
 test call, `after_all` once after. There is no runtime registry and no indirect

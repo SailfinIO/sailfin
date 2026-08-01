@@ -1,0 +1,72 @@
+// compiler/src/llvm/lowering/lowering_core/diagnostics.sfn
+//
+// Fail-closed lowering diagnostic gate and rendering.
+import { Diag } from "../../../diagnostic";
+import { index_of, render_lowering_error_diag } from "../../utils";
+
+// Returns true if any diagnostic in the list carries the `[fatal]`
+// sentinel tag (issue #306). This is the whole severity model for
+// lowering diagnostics; the contract it defines is audited in full by
+// `docs/proposals/design-notes/sfn-526-lowering-fatal-gate-audit.md`.
+//
+// 1. `[fatal]` anywhere in the string fails the build. There is no other
+//    severity and NO advisory channel: an untagged diagnostic is not a
+//    warning, it is discarded. The only path that ever surfaces one is
+//    `entrypoints.sfn`'s zero-lines branch, which prints `diagnostics[0]`
+//    alone and only when the build is already failing for another reason.
+//    Diagnostics are untyped `string[]` (`llvm/types.sfn` —
+//    `LoweredLLVMLinesResult`), so there is no severity field to set
+//    instead.
+// 2. Tag when reaching the diagnostic implies the emitted IR is wrong.
+//    Do not tag a condition the language does not yet claim to enforce —
+//    borrow exclusivity is "Parsed only" (`docs/status.md`), and
+//    use-after-move is enforced by `ownership_checker.sfn` (`E0901`),
+//    not here.
+// 3. Tag the site that FABRICATES or DROPS IR, not the site that detects
+//    the problem. A leaf returning `operand: null` is safe on its own;
+//    what makes it wrong code is a consumer substituting
+//    `default_return_literal` (`llvm/expressions_helpers.sfn`) or skipping
+//    the instruction. Escalating detection sites instead of consumption
+//    sites is why SFN-492 and SFN-392 both ship silent wrong code.
+// 4. Prefer the `llvm lowering [fatal] [E0xxx]: …` spelling used by
+//    `atomics.sfn`/`byte_load.sfn` and allocate an E-code. The bare
+//    `[fatal] llvm lowering: …` form also trips the gate — matching is a
+//    substring search — but carries no code for the user to look up.
+// 5. Every intermediate frame must forward its sub-results' diagnostics.
+//    A dropped forward silently swallows a `[fatal]` and exits 0; that
+//    regression has already shipped twice (#631, #1954).
+fn has_fatal_lowering_diagnostic(diagnostics: string[]) -> boolean {
+    if diagnostics == null { return false; }
+    let mut idx: int = 0;
+    loop {
+        if idx >= diagnostics.length { break; }
+        if index_of(diagnostics[idx], "[fatal]") >= 0 { return true; }
+        idx += 1;
+    }
+    return false;
+}
+
+// Render the typed sidecar while the legacy string array remains the
+// fail-closed gate. The canonical first line keeps existing grep-oriented
+// diagnostics stable; Set A adds a source location on the following line.
+fn print_fatal_lowering_diagnostics(diagnostics: string[], diags: Diag[]) -> void ![io.console] {
+    let mut printed: boolean = false;
+    let mut diag_index: int = 0;
+    loop {
+        if diag_index >= diags.length { break; }
+        if diags[diag_index].severity == "error" {
+            print.err(render_lowering_error_diag(diags[diag_index]));
+            printed = true;
+        }
+        diag_index += 1;
+    }
+    if printed { return; }
+    let mut legacy_index: int = 0;
+    loop {
+        if legacy_index >= diagnostics.length { break; }
+        if index_of(diagnostics[legacy_index], "[fatal]") >= 0 {
+            print.err(diagnostics[legacy_index]);
+        }
+        legacy_index += 1;
+    }
+}

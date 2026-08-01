@@ -20,8 +20,8 @@
 | `compiler/src/llvm/lowering/lowering_io.sfn:136-149` `write_llvm_lines_chunked` | `.ll` |
 
 `write_llvm_lines_chunked` reaches the helper from two callers:
-`lowering_core.sfn:781` (live) and `entrypoints.sfn:339` `write_llvm_ir`, which is
-imported at `main.sfn:29` but never called. Only `lowering_core.sfn:780` and
+`lowering_core/file_emission.sfn` (live) and `entrypoints.sfn:339` `write_llvm_ir`, which is
+imported at `main.sfn:29` but never called. Only `lowering_core/file_emission.sfn` and
 `emit_native.sfn:207` had a destination pre-delete, so the dead `write_llvm_ir`
 path inherits one it never had; harmless while it stays dead, noted so a future
 revival does not acquire the policy silently.
@@ -63,7 +63,7 @@ returned, and it is already threaded end-to-end with no signature changes:
 `emit_native_text_to_file_with_module_name` → `write_native_text_file_with_module`
 (`main.sfn:749`) → `write_native_text_file_with_module_gated` → CLI exit code;
 `write_llvm_lines_chunked` → `compile_native_text_to_llvm_file`
-(`lowering_core.sfn:781`) / `write_llvm_ir` (`entrypoints.sfn:339`) →
+(`lowering_core/file_emission.sfn`) / `write_llvm_ir` (`entrypoints.sfn:339`) →
 `compile_to_llvm_file_with_module` (`main.sfn:810`) → `cli/commands/build.sfn:406`,
 which prints and returns 1. Callers stop consuming `fs.exists` as the
 completeness check, which is what retires the stale-reads-as-success hazard —
