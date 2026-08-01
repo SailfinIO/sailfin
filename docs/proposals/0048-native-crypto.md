@@ -6,7 +6,7 @@ type: runtime
 created: 2026-07-12
 updated: 2026-07-31
 author: "agent:compiler-architect; human review"
-tracking:
+tracking: SFN-659, SFN-660
 supersedes:
 superseded-by:
 graduates-to:
@@ -219,7 +219,7 @@ fn ct_eq_bytes(a: int[], b: int[]) -> bool {
 dependency. There is a **second, previously unphased external-dependency
 class** in the same toolchain, unrelated to TLS: binary-artifact SHA-256 is
 computed by shelling out to `sha256sum`/`shasum` via `_sha256_of_file_cmd`
-(`compiler/src/build/fs.sfn:507-519`) rather than by any Sailfin-owned code.
+(`compiler/src/build/fs.sfn:511-523`) rather than by any Sailfin-owned code.
 
 **Consumers.** Build-cache keys (`compiler/src/build_cache.sfn:1178,1198`),
 compiler self-identity (`compiler/src/cli_selfhost.sfn:392`), seed/toolchain
@@ -231,15 +231,15 @@ package`/`add`/`publish` (`compiler/src/cli/commands/package.sfn:239,428,599`,
 **The blocker is not crypto.** Pure SHA-256 already exists and self-hosts
 (`compiler/src/build/hash.sfn`). It cannot be used on binaries because
 `fs.readFile` coerces its `i8*` return to a Sailfin string via `strlen`
-(`compiler/src/llvm/core_operands.sfn:1013-1043`), truncating at the first
+(`compiler/src/llvm/expression_lowering/native/core_operands/pointer_coercion.sfn:42-83`), truncating at the first
 NUL. This constraint is recorded verbatim at `hash.sfn:11-19` and
-`fs.sfn:521-534`. The unblock is a binary-safe read primitive, not a crypto
+`fs.sfn:525-534`. The unblock is a binary-safe read primitive, not a crypto
 port.
 
 **The performance constraint any fix must clear.** The in-process path
 already exists for text files but bails above 64 KiB because the vendored
 hasher's byte loop collapses under `-O0` CI shard builds — hashing in-process
-drove one CI shard from ~6 min to ~23 min (`fs.sfn:541-548`). A naive
+drove one CI shard from ~6 min to ~23 min (`fs.sfn:662-669`). A naive
 in-process swap for binaries would regress CI the same way; the `-O0`
 question must be answered as part of the work, not discovered after landing
 it.
@@ -255,6 +255,62 @@ non-functional on Windows by construction, not by bug.
 CLI and would additionally need Ed25519 *signing* — which the verify-only
 port (§7) does not provide — before it could be retired. That is separate
 work, not part of Phase E.
+
+**Amendment (2026-07-31) — the read primitive landed; route recorded
+(SFN-659).** The binary-safe read this phase was gated on is
+`_read_file_bytes(file_path) -> FileBytes ![io]` in
+`compiler/src/build/fs.sfn`, returning `{ addr, length, status }`. It is a
+plain Sailfin function over libc externs already declared in that module
+(`fopen`/`fread`/`fclose`/`ferror`/`malloc`/`free`, plus `realloc` and
+`memset`), modelled on the `_copy_file` chunked-`fread` loop in the same
+file. `fread` reports the true byte count regardless of embedded NULs, so
+binary safety follows from never routing bytes through the `i8*`-to-`string`
+coercion (`core_operands/pointer_coercion.sfn:42-83`) that `fs.readFile`
+performs.
+
+*Route and its seed-sequencing consequence.* No builtin, no runtime-helper
+descriptor row, no intrinsic sentinel, no new runtime symbol — every
+construct is one the pinned seed already compiles, so **no seed cut is
+required** and the consumer work may land independently. A `fs.readBinary`
+builtin was rejected for the opposite reason: the consumer is *compiler
+source*, which the pinned seed compiles during `make compile`, so a
+descriptor row added to the working tree would not help the call site and
+would force a seed cut for a single consumer — the carve-out shape
+`.claude/rules/seed-dependency.md` exists to avoid.
+
+*Deviation from §3.3 item 6, stated deliberately.* That rule mandates
+`int[]` for arbitrary binary output; its stated reason is that byte `0x00`
+is unrepresentable in a Sailfin `string`. An `(addr, length)` pair does not
+violate that reason, and `int[]` would: one i64 per byte, built by
+bounds-checked appends, is precisely the `-O0` blow-up this section
+pre-forbids. `int[]` remains correct for `capsules/sfn/crypto/` public APIs
+and is the wrong shape for a build-driver whole-file slurp. Consumers read
+bytes back via the `load_byte(addr) -> int` intrinsic.
+
+*Failure modes.* `0` ok · `1` not found · `2` unreadable or I/O error · `3`
+allocation failure · `4` over the 512 MiB cap. The buffer is allocated
+before the read loop, so a genuinely empty file yields `status == 0,
+length == 0, addr != 0` while every failure yields `addr == 0`; the
+`""`-means-failure mapping stays the caller's choice rather than being
+collapsed the way `fs.readFile` collapses it today. Status `4` is a
+deliberate seam: `_sha256_of_file_cmd` stays alive as the pathological-size
+fallback rather than silently truncating into a confidently-wrong digest.
+
+*Still open, and owned by the consumer issue (SFN-660).* The `-O0`
+constraint above is **not** resolved by this primitive.
+`sha256_hex_of_string` (`compiler/src/build/hash.sfn:50`) materialises a
+whole-message `int[]` plus padding, so even fed correct bytes it reproduces
+the regression that put the 64 KiB threshold there. Retiring
+`_sha256_of_file_cmd` requires a scalar `sha256_hex_of_bytes(addr, len)`
+entry point streaming 64-byte blocks via `load_byte`, and an actual
+measurement. If streaming still does not clear the bar under `-O0`, the
+honest outcome is that Phase E waits on the CI shards moving off `-O0` —
+not that the threshold is quietly raised.
+
+*Windows.* `fopen`/`fread`/`fclose`/`ferror` all resolve on the Windows leg
+(the read uses `"rb"`, never `"r"`, so no CRLF translation corrupts binary
+input), so this path is a route to closing the platform-incompleteness noted
+above — once SFN-660 repoints the callers.
 
 ## 4. Effect & capability impact
 
