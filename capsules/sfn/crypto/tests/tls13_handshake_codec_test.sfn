@@ -1,0 +1,645 @@
+// capsules/sfn/crypto/tests/tls13_handshake_codec_test.sfn
+//
+// Direct unit coverage for the TLS 1.3 handshake-message wire codec
+// (RFC 8446 §4) in `tls13_handshake_codec.sfn` (SFN-337). The state-machine
+// test in `tls13_handshake_test.sfn` drives the codec end-to-end against the
+// single RFC 8448 §3 trace, which is one well-formed path: not a single
+// codec `Result.Err` branch is exercised there. This file hand-builds
+// malformed and truncated wire bytes to pin the fail-closed behaviour the
+// module's header comment promises: "Every function here fails closed."
+import {
+    CertificateMsg,
+    CertificateVerifyMsg,
+    ServerHelloMsg,
+    encode_client_hello,
+    encode_handshake_message,
+    parse_certificate,
+    parse_certificate_verify,
+    parse_client_hello_cipher_suites,
+    parse_client_hello_legacy_session_id,
+    parse_finished,
+    parse_handshake_message,
+    parse_server_hello,
+    tls_cipher_aes_128_gcm_sha256,
+    tls_group_x25519,
+    tls_version_13
+} from "../src/tls13_handshake_codec";
+
+// Parse an even-length lowercase hex string into an int[] of bytes.
+fn hexb(s: string) -> int[] {
+    let mut out: int[] = [];
+    let mut i: int = 0;
+    loop {
+        // `i + 1` rather than `i` so an odd-length literal returns what it
+        // parsed instead of indexing past the end and killing the runner —
+        // a mistyped vector should fail an assertion, not crash the suite.
+        if i + 1 >= s.length { break; }
+        let hi: int = _hexval(s[i]);
+        let lo: int = _hexval(s[i + 1]);
+        out.push(((hi << 4) | lo) & 255);
+        i += 2;
+    }
+    return out;
+}
+
+fn _hexval(c: string) -> int {
+    let code: int = char_code(c) & 255;
+    if code >= 48 && code <= 57 {
+        return code - 48;
+    }  // '0'-'9'
+    if code >= 97 && code <= 102 {
+        return code - 97 + 10;
+    }  // 'a'-'f'
+    return 0;
+}
+
+fn eq_bytes(a: int[], b: int[]) -> bool {
+    if a.length != b.length { return false; }
+    let mut i: int = 0;
+    loop {
+        if i >= a.length { break; }
+        if a[i] != b[i] { return false; }
+        i += 1;
+    }
+    return true;
+}
+
+// ── Local byte-building helpers (mechanical, not codec logic) ────
+fn _extend(dst: int[], src: int[]) -> void {
+    let mut i: int = 0;
+    loop {
+        if i >= src.length { break; }
+        dst.push(src[i] & 255);
+        i += 1;
+    }
+}
+
+fn _u16b(v: int) -> int[] { return [(v >> 8) & 255, v & 255]; }
+
+fn _u24b(v: int) -> int[] {
+    return [(v >> 16) & 255, (v >> 8) & 255, v & 255];
+}
+
+fn _bytes(n: int, fill: int) -> int[] {
+    let mut out: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= n { break; }
+        out.push(fill & 255);
+        i += 1;
+    }
+    return out;
+}
+
+// Naive substring search, used only to check that an error message mentions
+// a specific word (no `string.contains` idiom is used elsewhere in this
+// capsule's tests, so this stays local rather than assumed).
+fn _contains(haystack: string, needle: string) -> bool {
+    if needle.length == 0 { return true; }
+    if needle.length > haystack.length { return false; }
+    let mut i: int = 0;
+    loop {
+        if i + needle.length > haystack.length { break; }
+        let mut j: int = 0;
+        let mut ok: bool = true;
+        loop {
+            if j >= needle.length { break; }
+            if char_code(haystack[i + j]) != char_code(needle[j]) {
+                ok = false;
+                break;
+            }
+            j += 1;
+        }
+        if ok { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+// ── parse_handshake_message ───────────────────────────────────────
+test "tls13_handshake_codec: a well-formed message parses type, body and consumed" {
+    let buf: int[] = [1, 0, 0, 3, 10, 20, 30];
+    let result: Result<HandshakeMessage, string> = parse_handshake_message(buf, 0);
+    match result {
+        Result.Ok { value } => {
+            assert value.msg_type == 1;
+            assert eq_bytes(value.body, [10, 20, 30]);
+            assert value.consumed == 4 + value.body.length;
+            assert value.consumed == 7;
+        },
+        Result.Err { error } => { assert false; }
+    }
+}
+
+test "tls13_handshake_codec: fewer than 4 bytes is a short header" {
+    let buf: int[] = [1, 0, 0];
+    let result: Result<HandshakeMessage, string> = parse_handshake_message(buf, 0);
+    match result {
+        Result.Ok { value } => { assert false; },
+        Result.Err { error } => { assert error.length > 0; }
+    }
+}
+
+test "tls13_handshake_codec: a uint24 length exceeding the remaining buffer is rejected" {
+    // Declared body length 5, but only 2 bytes of body actually follow.
+    let buf: int[] = [1, 0, 0, 5, 10, 20];
+    let result: Result<HandshakeMessage, string> = parse_handshake_message(buf, 0);
+    match result {
+        Result.Ok { value } => { assert false; },
+        Result.Err { error } => { assert error.length > 0; }
+    }
+}
+
+test "tls13_handshake_codec: parsing at a non-zero offset reads the second message" {
+    let msg1: int[] = [1, 0, 0, 2, 7, 8];  // type 1, body [7, 8], consumed 6
+    let msg2: int[] = [2, 0, 0, 1, 9];  // type 2, body [9], consumed 5
+    let mut buf: int[] = [];
+    _extend(buf, msg1);
+    _extend(buf, msg2);
+
+    let first: Result<HandshakeMessage, string> = parse_handshake_message(buf, 0);
+    let mut first_consumed: int = 0 - 1;
+    match first {
+        Result.Ok { value } => { first_consumed = value.consumed; },
+        Result.Err { error } => { assert error.length == 0; }
+    }
+    assert first_consumed == 6;
+
+    let second: Result<HandshakeMessage, string> = parse_handshake_message(buf, first_consumed);
+    match second {
+        Result.Ok { value } => {
+            assert value.msg_type == 2;
+            assert eq_bytes(value.body, [9]);
+            assert value.consumed == 5;
+        },
+        Result.Err { error } => { assert false; }
+    }
+}
+
+// ── encode_handshake_message ──────────────────────────────────────
+test "tls13_handshake_codec: an encoded message round-trips through the parser" {
+    let body: int[] = [1, 2, 3, 4, 5];
+    let encoded: int[] = encode_handshake_message(5, body);
+    let result: Result<HandshakeMessage, string> = parse_handshake_message(encoded, 0);
+    match result {
+        Result.Ok { value } => {
+            assert value.msg_type == 5;
+            assert eq_bytes(value.body, body);
+            assert value.consumed == encoded.length;
+        },
+        Result.Err { error } => { assert false; }
+    }
+}
+
+// A body of length >= 16777216 must encode to `[]`. Skipped: constructing a
+// 16 MB int[] just to exercise the guard is expensive for no additional
+// coverage over the bound check already read in the source.
+// ── parse_server_hello ────────────────────────────────────────────
+fn _sh_header() -> int[] {
+    // legacy_version ‖ random(32, non-sentinel) ‖ session_id_len(0) ‖
+    // cipher_suite ‖ compression_method(0). Ends right before ext_len.
+    let mut out: int[] = [];
+    _extend(out, _u16b(771));
+    _extend(out, _bytes(32, 7));
+    out.push(0);
+    _extend(out, _u16b(tls_cipher_aes_128_gcm_sha256()));
+    out.push(0);
+    return out;
+}
+
+fn _ext_supported_versions_ok() -> int[] {
+    let mut out: int[] = [];
+    _extend(out, _u16b(43));
+    _extend(out, _u16b(2));
+    _extend(out, _u16b(tls_version_13()));
+    return out;
+}
+
+fn _ext_key_share_ok() -> int[] {
+    let mut entry: int[] = [];
+    _extend(entry, _u16b(tls_group_x25519()));
+    _extend(entry, _u16b(32));
+    _extend(entry, _bytes(32, 9));
+    let mut out: int[] = [];
+    _extend(out, _u16b(51));
+    _extend(out, _u16b(entry.length));
+    _extend(out, entry);
+    return out;
+}
+
+fn _server_hello_body_ok() -> int[] {
+    let mut ext_block: int[] = [];
+    _extend(ext_block, _ext_supported_versions_ok());
+    _extend(ext_block, _ext_key_share_ok());
+    let mut body: int[] = [];
+    _extend(body, _sh_header());
+    _extend(body, _u16b(ext_block.length));
+    _extend(body, ext_block);
+    return body;
+}
+
+fn _hrr_sentinel_random() -> int[] {
+    return [207, 33, 173, 116, 229, 154, 97, 17, 190, 29, 140, 2, 30, 101, 184, 145, 194, 162, 17, 22, 122, 187, 140, 94, 7, 158, 9, 226, 200, 168, 51, 156];
+}
+
+test "tls13_handshake_codec: parse_server_hello truncated before random is rejected" {
+    let body: int[] = _u16b(771);  // legacy_version only
+    let result: Result<ServerHelloMsg, string> = parse_server_hello(body);
+    match result {
+        Result.Ok { value } => { assert false; },
+        Result.Err { error } => { assert error.length > 0; }
+    }
+}
+
+test "tls13_handshake_codec: parse_server_hello rejects legacy_session_id_echo over 32 bytes" {
+    let mut body: int[] = [];
+    _extend(body, _u16b(771));
+    _extend(body, _bytes(32, 7));
+    body.push(33);  // legacy_session_id_echo length byte
+    let result: Result<ServerHelloMsg, string> = parse_server_hello(body);
+    match result {
+        Result.Ok { value } => { assert false; },
+        Result.Err { error } => { assert error.length > 0; }
+    }
+}
+
+test "tls13_handshake_codec: parse_server_hello rejects a non-zero compression method" {
+    let mut body: int[] = [];
+    _extend(body, _u16b(771));
+    _extend(body, _bytes(32, 7));
+    body.push(0);  // legacy_session_id_echo length = 0
+    _extend(body, _u16b(tls_cipher_aes_128_gcm_sha256()));
+    body.push(1);  // non-null compression method
+    let result: Result<ServerHelloMsg, string> = parse_server_hello(body);
+    match result {
+        Result.Ok { value } => { assert false; },
+        Result.Err { error } => { assert error.length > 0; }
+    }
+}
+
+test "tls13_handshake_codec: parse_server_hello rejects the HelloRetryRequest sentinel" {
+    let mut body: int[] = [];
+    _extend(body, _u16b(771));
+    _extend(body, _hrr_sentinel_random());
+    let result: Result<ServerHelloMsg, string> = parse_server_hello(body);
+    match result {
+        Result.Ok { value } => { assert false; },
+        Result.Err { error } => {
+            assert _contains(error, "HelloRetryRequest");
+        }
+    }
+}
+
+test "tls13_handshake_codec: parse_server_hello rejects a supported_versions extension with the wrong length" {
+    let mut ext_block: int[] = [];
+    _extend(ext_block, _u16b(43));  // supported_versions
+    _extend(ext_block, _u16b(1));  // length must be 2
+    ext_block.push(3);
+    let mut body: int[] = [];
+    _extend(body, _sh_header());
+    _extend(body, _u16b(ext_block.length));
+    _extend(body, ext_block);
+    let result: Result<ServerHelloMsg, string> = parse_server_hello(body);
+    match result {
+        Result.Ok { value } => { assert false; },
+        Result.Err { error } => { assert error.length > 0; }
+    }
+}
+
+test "tls13_handshake_codec: parse_server_hello rejects a key_share whose inner length disagrees" {
+    let mut entry_data: int[] = [];
+    _extend(entry_data, _u16b(tls_group_x25519()));
+    _extend(entry_data, _u16b(32));  // kex_len field claims 32...
+    _extend(entry_data, _bytes(31, 9));  // ...but only 31 bytes follow
+    let mut ext_block: int[] = [];
+    _extend(ext_block, _u16b(51));
+    _extend(ext_block, _u16b(entry_data.length));
+    _extend(ext_block, entry_data);
+    let mut body: int[] = [];
+    _extend(body, _sh_header());
+    _extend(body, _u16b(ext_block.length));
+    _extend(body, ext_block);
+    let result: Result<ServerHelloMsg, string> = parse_server_hello(body);
+    match result {
+        Result.Ok { value } => { assert false; },
+        Result.Err { error } => { assert error.length > 0; }
+    }
+}
+
+test "tls13_handshake_codec: parse_server_hello rejects a duplicate key_share extension" {
+    let mut ext_block: int[] = [];
+    _extend(ext_block, _ext_key_share_ok());
+    _extend(ext_block, _ext_key_share_ok());
+    let mut body: int[] = [];
+    _extend(body, _sh_header());
+    _extend(body, _u16b(ext_block.length));
+    _extend(body, ext_block);
+    let result: Result<ServerHelloMsg, string> = parse_server_hello(body);
+    match result {
+        Result.Ok { value } => { assert false; },
+        Result.Err { error } => { assert error.length > 0; }
+    }
+}
+
+test "tls13_handshake_codec: parse_server_hello rejects a duplicate supported_versions extension" {
+    let mut ext_block: int[] = [];
+    _extend(ext_block, _ext_supported_versions_ok());
+    _extend(ext_block, _ext_supported_versions_ok());
+    let mut body: int[] = [];
+    _extend(body, _sh_header());
+    _extend(body, _u16b(ext_block.length));
+    _extend(body, ext_block);
+    let result: Result<ServerHelloMsg, string> = parse_server_hello(body);
+    match result {
+        Result.Ok { value } => { assert false; },
+        Result.Err { error } => { assert error.length > 0; }
+    }
+}
+
+test "tls13_handshake_codec: parse_server_hello rejects an extension type not permitted (server_name)" {
+    let mut ext_block: int[] = [];
+    _extend(ext_block, _u16b(0));  // server_name(0) — not permitted in a ServerHello
+    _extend(ext_block, _u16b(0));  // zero-length ext_data
+    let mut body: int[] = [];
+    _extend(body, _sh_header());
+    _extend(body, _u16b(ext_block.length));
+    _extend(body, ext_block);
+    let result: Result<ServerHelloMsg, string> = parse_server_hello(body);
+    match result {
+        Result.Ok { value } => { assert false; },
+        Result.Err { error } => { assert error.length > 0; }
+    }
+}
+
+test "tls13_handshake_codec: parse_server_hello rejects a truncated extension block" {
+    let mut body: int[] = [];
+    _extend(body, _sh_header());
+    _extend(body, _u16b(50));  // declared extensions length: 50 bytes
+    _extend(body, _bytes(10, 0));  // only 10 bytes actually present
+    let result: Result<ServerHelloMsg, string> = parse_server_hello(body);
+    match result {
+        Result.Ok { value } => { assert false; },
+        Result.Err { error } => { assert error.length > 0; }
+    }
+}
+
+test "tls13_handshake_codec: a well-formed minimal ServerHello parses correctly" {
+    let body: int[] = _server_hello_body_ok();
+    let result: Result<ServerHelloMsg, string> = parse_server_hello(body);
+    match result {
+        Result.Ok { value } => {
+            assert value.cipher_suite == tls_cipher_aes_128_gcm_sha256();
+            assert value.selected_version == tls_version_13();
+            assert value.selected_group == tls_group_x25519();
+            assert value.key_exchange.length == 32;
+            assert eq_bytes(value.key_exchange, _bytes(32, 9));
+        },
+        Result.Err { error } => { assert false; }
+    }
+}
+
+// ── parse_certificate ─────────────────────────────────────────────
+test "tls13_handshake_codec: parse_certificate rejects a non-empty request context" {
+    let body: int[] = [1, 170];  // certificate_request_context_len = 1
+    let result: Result<CertificateMsg, string> = parse_certificate(body);
+    match result {
+        Result.Ok { value } => { assert false; },
+        Result.Err { error } => { assert error.length > 0; }
+    }
+}
+
+test "tls13_handshake_codec: parse_certificate rejects a zero-length cert_data" {
+    let mut body: int[] = [];
+    body.push(0);  // certificate_request_context_len = 0
+    _extend(body, _u24b(5));  // certificate_list length
+    _extend(body, _u24b(0));  // cert_data length = 0 (forbidden)
+    _extend(body, _u16b(0));  // per-entry extensions length = 0
+    let result: Result<CertificateMsg, string> = parse_certificate(body);
+    match result {
+        Result.Ok { value } => { assert false; },
+        Result.Err { error } => { assert error.length > 0; }
+    }
+}
+
+test "tls13_handshake_codec: parse_certificate rejects an empty certificate_list" {
+    let mut body: int[] = [];
+    body.push(0);
+    _extend(body, _u24b(0));  // certificate_list length = 0
+    let result: Result<CertificateMsg, string> = parse_certificate(body);
+    match result {
+        Result.Ok { value } => { assert false; },
+        Result.Err { error } => { assert error.length > 0; }
+    }
+}
+
+test "tls13_handshake_codec: parse_certificate handles two entries with non-empty per-entry extensions" {
+    let cert1: int[] = _bytes(5, 65);
+    let ext1: int[] = [1, 2, 3];
+    let mut entry1: int[] = [];
+    _extend(entry1, _u24b(cert1.length));
+    _extend(entry1, cert1);
+    _extend(entry1, _u16b(ext1.length));
+    _extend(entry1, ext1);
+
+    let cert2: int[] = _bytes(4, 66);
+    let ext2: int[] = [9, 9];
+    let mut entry2: int[] = [];
+    _extend(entry2, _u24b(cert2.length));
+    _extend(entry2, cert2);
+    _extend(entry2, _u16b(ext2.length));
+    _extend(entry2, ext2);
+
+    let mut list: int[] = [];
+    _extend(list, entry1);
+    _extend(list, entry2);
+
+    let mut body: int[] = [];
+    body.push(0);
+    _extend(body, _u24b(list.length));
+    _extend(body, list);
+
+    let result: Result<CertificateMsg, string> = parse_certificate(body);
+    match result {
+        Result.Ok { value } => {
+            assert value.entry_count == 2;
+            assert eq_bytes(value.leaf, cert1);
+        },
+        Result.Err { error } => { assert false; }
+    }
+}
+
+test "tls13_handshake_codec: parse_certificate rejects trailing garbage after the certificate_list" {
+    let cert: int[] = [1, 2, 3];
+    let mut entry: int[] = [];
+    _extend(entry, _u24b(cert.length));
+    _extend(entry, cert);
+    _extend(entry, _u16b(0));
+
+    let mut body: int[] = [];
+    body.push(0);
+    _extend(body, _u24b(entry.length));
+    _extend(body, entry);
+    body.push(255);  // trailing garbage beyond the declared list length
+
+    let result: Result<CertificateMsg, string> = parse_certificate(body);
+    match result {
+        Result.Ok { value } => { assert false; },
+        Result.Err { error } => { assert error.length > 0; }
+    }
+}
+
+// ── parse_certificate_verify ──────────────────────────────────────
+test "tls13_handshake_codec: a well-formed CertificateVerify parses algorithm and signature" {
+    let mut body: int[] = [];
+    _extend(body, _u16b(2055));  // ed25519
+    _extend(body, _u16b(4));
+    _extend(body, [9, 9, 9, 9]);
+    let result: Result<CertificateVerifyMsg, string> = parse_certificate_verify(body);
+    match result {
+        Result.Ok { value } => {
+            assert value.algorithm == 2055;
+            assert eq_bytes(value.signature, [9, 9, 9, 9]);
+        },
+        Result.Err { error } => { assert false; }
+    }
+}
+
+test "tls13_handshake_codec: parse_certificate_verify rejects trailing garbage after the signature" {
+    let mut body: int[] = [];
+    _extend(body, _u16b(2055));
+    _extend(body, _u16b(4));
+    _extend(body, [9, 9, 9, 9]);
+    body.push(0);  // one byte beyond the signature
+    let result: Result<CertificateVerifyMsg, string> = parse_certificate_verify(body);
+    match result {
+        Result.Ok { value } => { assert false; },
+        Result.Err { error } => { assert error.length > 0; }
+    }
+}
+
+test "tls13_handshake_codec: parse_certificate_verify rejects a truncated signature" {
+    let mut body: int[] = [];
+    _extend(body, _u16b(2055));
+    _extend(body, _u16b(10));  // declared signature length: 10 bytes
+    _extend(body, [1, 2, 3, 4]);  // only 4 bytes actually present
+    let result: Result<CertificateVerifyMsg, string> = parse_certificate_verify(body);
+    match result {
+        Result.Ok { value } => { assert false; },
+        Result.Err { error } => { assert error.length > 0; }
+    }
+}
+
+// ── parse_finished ────────────────────────────────────────────────
+test "tls13_handshake_codec: parse_finished accepts a body matching hash_len" {
+    let body: int[] = [1, 2, 3, 4];
+    let result: Result<int[], string> = parse_finished(body, 4);
+    match result {
+        Result.Ok { value } => { assert eq_bytes(value, body); },
+        Result.Err { error } => { assert false; }
+    }
+}
+
+test "tls13_handshake_codec: parse_finished rejects a body shorter than hash_len" {
+    let body: int[] = [1, 2, 3];
+    let result: Result<int[], string> = parse_finished(body, 4);
+    match result {
+        Result.Ok { value } => { assert false; },
+        Result.Err { error } => { assert error.length > 0; }
+    }
+}
+
+test "tls13_handshake_codec: parse_finished rejects a body longer than hash_len" {
+    let body: int[] = [1, 2, 3, 4, 5];
+    let result: Result<int[], string> = parse_finished(body, 4);
+    match result {
+        Result.Ok { value } => { assert false; },
+        Result.Err { error } => { assert error.length > 0; }
+    }
+}
+
+// ── ClientHello field extraction (RFC 8448 §3 ClientHello) ───────
+// The complete RFC 8448 ClientHello handshake message: offers 0x1301,
+// 0x1303, 0x1302 and carries a zero-length legacy_session_id.
+fn _rfc8448_client_hello_message() -> int[] {
+    return hexb("010000c00303cb34ecb1e78163ba1c38c6dacb196a6dffa21a8d9912ec18a2ef6283024dece7000006130113031302010000910000000b0009000006736572766572ff01000100000a00140012001d0017001800190100010101020103010400230000003300260024001d002099381de560e4bd43d23d8e435a7dbafeb3c06e51c13cae4d5413691e529aaf2c002b0003020304000d0020001e040305030603020308040805080604010501060102010402050206020202002d00020101001c00024001");
+}
+
+fn _rfc8448_client_hello_body() -> int[] {
+    let empty: int[] = [];
+    let parsed: Result<HandshakeMessage, string> = parse_handshake_message(_rfc8448_client_hello_message(), 0);
+    match parsed {
+        Result.Ok { value } => { return value.body; },
+        Result.Err { error } => { return empty; }
+    }
+}
+
+test "tls13_handshake_codec: parse_client_hello_cipher_suites extracts the RFC 8448 vector" {
+    let body: int[] = _rfc8448_client_hello_body();
+    let result: Result<int[], string> = parse_client_hello_cipher_suites(body);
+    match result {
+        Result.Ok { value } => {
+            assert eq_bytes(value, [4865, 4867, 4866]);
+        },
+        Result.Err { error } => { assert false; }
+    }
+}
+
+test "tls13_handshake_codec: parse_client_hello_legacy_session_id extracts the RFC 8448 vector" {
+    let body: int[] = _rfc8448_client_hello_body();
+    let result: Result<int[], string> = parse_client_hello_legacy_session_id(body);
+    match result {
+        Result.Ok { value } => { assert value.length == 0; },
+        Result.Err { error } => { assert false; }
+    }
+}
+
+test "tls13_handshake_codec: parse_client_hello_cipher_suites rejects an odd-length list" {
+    let mut body: int[] = [];
+    _extend(body, _u16b(771));
+    _extend(body, _bytes(32, 1));
+    body.push(0);  // legacy_session_id length = 0
+    _extend(body, _u16b(3));  // cipher_suites length: 3 (not a multiple of 2)
+    _extend(body, [9, 9, 9]);
+    let result: Result<int[], string> = parse_client_hello_cipher_suites(body);
+    match result {
+        Result.Ok { value } => { assert false; },
+        Result.Err { error } => { assert error.length > 0; }
+    }
+}
+
+test "tls13_handshake_codec: parse_client_hello_legacy_session_id rejects a length byte over 32" {
+    let mut body: int[] = [];
+    _extend(body, _u16b(771));
+    _extend(body, _bytes(32, 1));
+    body.push(33);  // legacy_session_id length byte
+    let result: Result<int[], string> = parse_client_hello_legacy_session_id(body);
+    match result {
+        Result.Ok { value } => { assert false; },
+        Result.Err { error } => { assert error.length > 0; }
+    }
+}
+
+// ── encode_client_hello fail-closed ───────────────────────────────
+test "tls13_handshake_codec: encode_client_hello rejects a random of the wrong length" {
+    let random: int[] = _bytes(31, 0);  // must be 32
+    let session_id: int[] = [];
+    let key_share: int[] = _bytes(32, 0);
+    let message: int[] = encode_client_hello(random, session_id, key_share, "");
+    assert message.length == 0;
+}
+
+test "tls13_handshake_codec: encode_client_hello rejects a key_share of the wrong length" {
+    let random: int[] = _bytes(32, 0);
+    let session_id: int[] = [];
+    let key_share: int[] = _bytes(31, 0);  // must be 32
+    let message: int[] = encode_client_hello(random, session_id, key_share, "");
+    assert message.length == 0;
+}
+
+test "tls13_handshake_codec: encode_client_hello rejects a legacy_session_id over 32 bytes" {
+    let random: int[] = _bytes(32, 0);
+    let session_id: int[] = _bytes(33, 0);  // must be <= 32
+    let key_share: int[] = _bytes(32, 0);
+    let message: int[] = encode_client_hello(random, session_id, key_share, "");
+    assert message.length == 0;
+}
