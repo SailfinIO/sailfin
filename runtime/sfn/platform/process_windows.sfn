@@ -1038,6 +1038,26 @@ fn _pw_framed_consume(gb: *PwGrowBuf, ret_len: i64, consume_len: i64) -> *u8 {
     return res;
 }
 
+// `_pw_framed_find_newline(gb)` — index of the first `'\n'` in the stash,
+// or -1. Byte-oriented on purpose: a line is framed on the LF byte, so a
+// CRLF stream keeps its `'\r'` at the end of the returned line exactly as
+// the POSIX peer leaves it. Mirrors `_framed_find_newline`
+// (`runtime/sfn/process.sfn`); the two must agree or a framed reader would
+// see different line boundaries per platform (SFN-690).
+fn _pw_framed_find_newline(gb: *PwGrowBuf) -> i64 {
+    let addr: i64 = gb.addr;
+    if addr == 0 { return -1; }
+    let len: i64 = gb.len;
+    let mut i: i64 = 0;
+    loop {
+        if i >= len { break; }
+        let b: i32 = sailfin_intrinsic_pointer_read_i32((addr + i) as *u8) & 255;
+        if b == 10 { return i; }
+        i = i + 1;
+    }
+    return -1;
+}
+
 // `_pw_spawn_impl(argv, env_flat)` — real Windows non-blocking spawn. Three
 // anonymous pipes (stdin/stdout/stderr) are wired to the child through
 // `STARTUPINFOA`, the child is launched, and a live `PwProcHandle` address
@@ -1267,6 +1287,39 @@ fn sfn_process_handle_write(handle_id: i64, data: *u8) -> i64 ![io] {
     return off;
 }
 
+// Write exactly `len` bytes of `data` to the child's stdin. Unlike
+// `handle_write`, which `strlen`s a NUL-terminated cstring, this honors an
+// explicit length, so embedded NULs in a binary frame are written verbatim
+// — the whole reason the framed protocol needs it. Returns bytes written
+// (`== len` on success), or `-1` on a zero handle, null `data`, a negative
+// length, an already-closed stdin, or a write error. `len == 0` writes
+// nothing and returns 0.
+//
+// The POSIX peer resumes on `EINTR`; Win32 has no such interruption on a
+// blocking `WriteFile` to a pipe, so a `FALSE` return is terminal here and
+// a short write is resumed by the loop alone (SFN-690).
+fn sfn_process_handle_write_bytes(handle_id: i64, data: *u8, len: i64) -> i64 ![io] {
+    if handle_id == 0 { return -1; }
+    if data as i64 == 0 { return -1; }
+    if len < 0 { return -1; }
+    let h: *PwProcHandle = handle_id as *PwProcHandle;
+    let hw: i64 = h.h_stdin_wr;
+    if hw == 0 { return -1; }
+    if len == 0 { return 0; }
+    let base: i64 = data as i64;
+    let mut off: i64 = 0;
+    loop {
+        if off >= len { break; }
+        let mut wrote: i32 = 0;
+        let wrote_ptr: *i32 = & wrote;
+        let ok: i32 = WriteFile(hw, (base + off) as *u8, (len - off) as i32, wrote_ptr, null);
+        if ok == 0 { return -1; }
+        if wrote <= 0 { return -1; }
+        off = off + (wrote as i64);
+    }
+    return off;
+}
+
 // Close the parent's write end so the child sees EOF on stdin. The slot is
 // zeroed so `handle_wait`'s cleanup does not double-close it (the POSIX
 // peer persists `-1` into `stdin_fd` for the same reason).
@@ -1387,6 +1440,35 @@ fn sfn_process_handle_read_bytes_stdout(handle_id: i64, n: i64) -> *u8 ![io] {
     if take > gb.len { take = gb.len; }
     if take <= 0 { return _pw_empty_cstr(); }
     return _pw_framed_consume(gb, take, take);
+}
+
+// Return one `'\n'`-delimited line from the child's stdout, without the
+// trailing newline, leaving any bytes past it in the stash for the next
+// call. On EOF the final unterminated partial line is returned, then the
+// empty string. Mirrors the POSIX `sfn_process_handle_read_line_stdout`
+// (`runtime/sfn/process.sfn`) — this is the framing entry point `sfn/os`'s
+// `handle_read_line_stdout` calls, and without it nothing importing
+// `sfn/test` links on Windows at all (SFN-690).
+//
+// The loop terminates because `_pw_h_pump(h, 0, 0)` returns only once the
+// stash has grown or stdout hit EOF (which zeroes `h_stdout_rd`). Either
+// outcome advances the next iteration: more bytes to scan, or the
+// EOF branch above. It needs no guard counter for that reason — the
+// progress condition is the pump's own postcondition, not the input.
+fn sfn_process_handle_read_line_stdout(handle_id: i64) -> *u8 ![io] {
+    if handle_id == 0 { return _pw_empty_cstr(); }
+    let h: *PwProcHandle = handle_id as *PwProcHandle;
+    let gb: *PwGrowBuf = _pw_h_out_gb(h);
+    loop {
+        let idx: i64 = _pw_framed_find_newline(gb);
+        if idx >= 0 { return _pw_framed_consume(gb, idx, idx + 1); }
+        // No newline buffered. Once stdout is at EOF the stash tail is the
+        // last (unterminated) line, and the call after that yields "".
+        if h.h_stdout_rd == 0 {
+            return _pw_framed_consume(gb, gb.len, gb.len);
+        }
+        _pw_h_pump(h, 0, 0);
+    }
 }
 
 fn sfn_process_handle_read_bytes_stderr(handle_id: i64, n: i64) -> *u8 ![io] {
