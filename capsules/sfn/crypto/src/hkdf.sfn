@@ -18,7 +18,13 @@ fn _sha256_k() -> int[] {
 // as an int[]. Mechanical transcription of the shipped `sha256_hex`
 // (mod.sfn): input is already an int[] (no string decode), and the digest is
 // pushed as big-endian bytes (via `bits::store_u32_be`) instead of hex.
-fn _sha256_bytes(msg: int[]) -> int[] {
+//
+// Capsule-internal, mirroring `sha384_bytes` (sha384.sfn): the SHA-256 core
+// exists exactly once here, and byte-oriented consumers inside the capsule
+// import it directly rather than going through `mod.sfn`'s hex wrappers. The
+// TLS 1.3 handshake transcript hash (tls13_handshake.sfn, SFN-337) is one such
+// consumer — a transcript is arbitrary binary, so a hex digest will not do.
+fn sha256_bytes(msg: int[]) -> int[] {
     let mask: int = 4294967295;
 
     let mut bytes: int[] = [];
@@ -141,7 +147,7 @@ fn _sha256_bytes(msg: int[]) -> int[] {
 // (values 0-255); returns the 32-byte MAC as an int[]. RFC 2104.
 fn hmac_sha256_bytes(key: int[], data: int[]) -> int[] {
     let mut k: int[] = key;
-    if k.length > 64 { k = _sha256_bytes(k); }
+    if k.length > 64 { k = sha256_bytes(k); }
 
     let mut k_pad: int[] = [];
     let mut ki: int = 0;
@@ -178,7 +184,7 @@ fn hmac_sha256_bytes(key: int[], data: int[]) -> int[] {
         inner_msg.push(data[di] & 255);
         di += 1;
     }
-    let inner: int[] = _sha256_bytes(inner_msg);
+    let inner: int[] = sha256_bytes(inner_msg);
 
     let mut outer_msg: int[] = [];
     let mut oi: int = 0;
@@ -193,7 +199,7 @@ fn hmac_sha256_bytes(key: int[], data: int[]) -> int[] {
         outer_msg.push(inner[ni]);
         ni += 1;
     }
-    return _sha256_bytes(outer_msg);
+    return sha256_bytes(outer_msg);
 }
 
 // HKDF-Extract (RFC 5869 §2.2). salt and ikm are int[] byte arrays; salt may

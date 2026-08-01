@@ -1,0 +1,749 @@
+// capsules/sfn/crypto/src/tls13_handshake_codec.sfn
+//
+// TLS 1.3 handshake-message wire codec (RFC 8446 §4) for the sfn/crypto
+// capsule (SFEP-0048, Phase B). Pure byte encode/parse for
+// ClientHello/ServerHello/EncryptedExtensions/Certificate/CertificateVerify/
+// Finished — zero crypto dependency, zero imports. The handshake state
+// machine and key schedule wiring live in `tls13_handshake.sfn` (not this
+// file).
+//
+// Operates end-to-end on `int[]` byte arrays (never `string`): handshake
+// messages are arbitrary binary that routinely contain 0x00 bytes, which a
+// Sailfin `string` cannot represent (SFEP-0048 §3.3 item 6). Every function
+// here fails closed: malformed, truncated, or trailing-garbage input returns
+// `Result.Err` (or `[]` for the fail-closed encoders) rather than a
+// best-effort partial parse.
+// ── Handshake types (RFC 8446 §4) ────────────────────────────────
+fn hs_type_client_hello() -> int { return 1; }
+
+fn hs_type_server_hello() -> int { return 2; }
+
+fn hs_type_encrypted_extensions() -> int { return 8; }
+
+fn hs_type_certificate() -> int { return 11; }
+
+fn hs_type_certificate_verify() -> int { return 15; }
+
+fn hs_type_finished() -> int { return 20; }
+
+// ── Cipher suite / group / signature scheme (RFC 8446 §B.3, §B.4) ─
+// TLS_CHACHA20_POLY1305_SHA256 (0x1303) — the one suite the capsule can
+// actually seal records with (SFEP-0048 §6.3 defers AES-GCM), and therefore
+// the only one `encode_client_hello` offers.
+fn tls_cipher_chacha20_poly1305_sha256() -> int { return 4867; }
+
+// TLS_AES_128_GCM_SHA256 (0x1301). Named but never offered: the capsule has
+// no AES-GCM AEAD. It exists because it shares SHA-256 with 0x1303, so its
+// transcript hash and key schedule are bit-identical, which is what lets the
+// handshake state machine be checked against RFC 8448 §3 — that trace
+// negotiates 0x1301.
+fn tls_cipher_aes_128_gcm_sha256() -> int { return 4865; }
+
+// x25519 (0x001d).
+fn tls_group_x25519() -> int { return 29; }
+
+// ed25519 (0x0807).
+fn tls_sigalg_ed25519() -> int { return 2055; }
+
+// ── Protocol versions ─────────────────────────────────────────────
+// legacy_version 0x0303 (TLS 1.2), carried for middlebox compatibility.
+fn tls_version_legacy() -> int { return 771; }
+
+// The real negotiated version, carried in the supported_versions extension
+// (0x0304).
+fn tls_version_13() -> int { return 772; }
+
+// ── Extension types (RFC 8446 §4.2) ───────────────────────────────
+fn ext_server_name() -> int { return 0; }
+
+fn ext_supported_groups() -> int { return 10; }
+
+fn ext_signature_algorithms() -> int { return 13; }
+
+fn ext_supported_versions() -> int { return 43; }
+
+fn ext_key_share() -> int { return 51; }
+
+// ── Byte helpers (module-private) ─────────────────────────────────
+// Append every byte of `src` to `dst`, masked to a byte (arrays are
+// reference-typed, so the caller's buffer grows in place).
+fn _append(dst: int[], src: int[]) -> void {
+    let mut i: int = 0;
+    loop {
+        if i >= src.length { break; }
+        dst.push(src[i] & 255);
+        i += 1;
+    }
+}
+
+// Append `v` as a big-endian uint16.
+fn _push_u16(dst: int[], v: int) -> void {
+    dst.push((v >> 8) & 255);
+    dst.push(v & 255);
+}
+
+// Append `v` as a big-endian uint24.
+fn _push_u24(dst: int[], v: int) -> void {
+    dst.push((v >> 16) & 255);
+    dst.push((v >> 8) & 255);
+    dst.push(v & 255);
+}
+
+// Read a big-endian uint16 at `off`. Returns -1 if fewer than 2 bytes remain.
+fn _read_u16(buf: int[], off: int) -> int {
+    if off + 2 > buf.length { return -1; }
+    return ((buf[off] & 255) << 8) | (buf[off + 1] & 255);
+}
+
+// Read a big-endian uint24 at `off`. Returns -1 if fewer than 3 bytes remain.
+fn _read_u24(buf: int[], off: int) -> int {
+    if off + 3 > buf.length { return -1; }
+    return ((buf[off] & 255) << 16) | ((buf[off + 1] & 255) << 8) | (buf[off + 2] & 255);
+}
+
+// Extract `len` bytes starting at `off`. Returns `[]` if out of range.
+fn _slice(buf: int[], off: int, len: int) -> int[] {
+    let empty: int[] = [];
+    if off < 0 || len < 0 || off + len > buf.length { return empty; }
+    let mut out: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= len { break; }
+        out.push(buf[off + i] & 255);
+        i += 1;
+    }
+    return out;
+}
+
+// Extract the cipher_suites a ClientHello offered, from its handshake-message
+// body (RFC 8446 §4.1.2). A client must abort on a ServerHello naming a suite
+// it never offered (§4.1.3), and the state machine can only make that check
+// against the ClientHello it actually sent — which is not necessarily one this
+// module encoded.
+fn parse_client_hello_cipher_suites(body: int[]) -> Result<int[], string> {
+    // legacy_version(2) + random(32) = 34, then the session id.
+    if body.length < 35 {
+        return Result.Err {
+            error: "parse_client_hello_cipher_suites: truncated before legacy_session_id"
+        };
+    }
+    let session_id_len: int = body[34] & 255;
+    if session_id_len > 32 {
+        return Result.Err {
+            error: "parse_client_hello_cipher_suites: legacy_session_id exceeds 32 bytes"
+        };
+    }
+
+    let off: int = 35 + session_id_len;
+    let suites_len: int = _read_u16(body, off);
+    if suites_len < 0 {
+        return Result.Err {
+            error: "parse_client_hello_cipher_suites: truncated cipher_suites length"
+        };
+    }
+    if (suites_len % 2) != 0 {
+        return Result.Err {
+            error: "parse_client_hello_cipher_suites: cipher_suites length is not a multiple of 2"
+        };
+    }
+    if off + 2 + suites_len > body.length {
+        return Result.Err {
+            error: "parse_client_hello_cipher_suites: truncated cipher_suites list"
+        };
+    }
+
+    let mut suites: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= suites_len { break; }
+        suites.push(_read_u16(body, off + 2 + i));
+        i += 2;
+    }
+    return Result.Ok { value: suites };
+}
+
+// ── Framing (RFC 8446 §4) ──────────────────────────────────────────
+struct HandshakeMessage {
+    msg_type: int;
+    body: int[];
+    consumed: int;
+}
+
+// Frame a Handshake message: msg_type(1) ‖ uint24 body.length ‖ body.
+// Returns `[]` fail-closed if `body.length` does not fit in 24 bits or
+// `msg_type` is outside a single byte.
+fn encode_handshake_message(msg_type: int, body: int[]) -> int[] {
+    let empty: int[] = [];
+    if body.length >= 16777216 { return empty; }
+    if msg_type < 0 || msg_type > 255 { return empty; }
+
+    let mut out: int[] = [];
+    out.push(msg_type & 255);
+    _push_u24(out, body.length);
+    _append(out, body);
+    return out;
+}
+
+// Parse the 4-byte Handshake header at `offset` and slice out `body`. Fails
+// closed on a short header or a declared length that would run past `buf`.
+fn parse_handshake_message(buf: int[], offset: int) -> Result<HandshakeMessage, string> {
+    if offset < 0 || offset + 4 > buf.length {
+        return Result.Err { error: "parse_handshake_message: short header" };
+    }
+
+    let msg_type: int = buf[offset] & 255;
+    let length: int = _read_u24(buf, offset + 1);
+    if length < 0 {
+        return Result.Err { error: "parse_handshake_message: short header" };
+    }
+    if offset + 4 + length > buf.length {
+        return Result.Err { error: "parse_handshake_message: truncated body" };
+    }
+
+    let body: int[] = _slice(buf, offset + 4, length);
+    return Result.Ok {
+        value: HandshakeMessage {
+            msg_type: msg_type,
+            body: body,
+            consumed: 4 + length
+        }
+    };
+}
+
+// ── ClientHello encode (RFC 8446 §4.1.2) ──────────────────────────
+// Build one extension: uint16 ext_type ‖ uint16 ext_data_length ‖ ext_data.
+fn _push_extension(dst: int[], ext_type: int, ext_data: int[]) -> void {
+    _push_u16(dst, ext_type);
+    _push_u16(dst, ext_data.length);
+    _append(dst, ext_data);
+}
+
+fn _encode_server_name_extension(server_name: string) -> int[] {
+    let mut host: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= server_name.length { break; }
+        host.push(char_code(server_name[i]) & 255);
+        i += 1;
+    }
+
+    let mut data: int[] = [];
+    // server_name_list_length = 1 (name_type) + 2 (host_name length) + host.length
+    _push_u16(data, 1 + 2 + host.length);
+    data.push(0);  // name_type = host_name(0)
+    _push_u16(data, host.length);
+    _append(data, host);
+    return data;
+}
+
+fn _encode_supported_groups_extension() -> int[] {
+    let mut data: int[] = [];
+    _push_u16(data, 2);
+    _push_u16(data, tls_group_x25519());
+    return data;
+}
+
+fn _encode_signature_algorithms_extension() -> int[] {
+    let mut data: int[] = [];
+    _push_u16(data, 2);
+    _push_u16(data, tls_sigalg_ed25519());
+    return data;
+}
+
+fn _encode_supported_versions_extension() -> int[] {
+    let mut data: int[] = [];
+    data.push(2);  // versions length (1-byte prefix, ClientHello form)
+    _push_u16(data, tls_version_13());
+    return data;
+}
+
+fn _encode_key_share_extension(key_share_public: int[]) -> int[] {
+    let mut entry: int[] = [];
+    _push_u16(entry, tls_group_x25519());
+    _push_u16(entry, key_share_public.length);
+    _append(entry, key_share_public);
+
+    let mut data: int[] = [];
+    _push_u16(data, entry.length);
+    _append(data, entry);
+    return data;
+}
+
+// Build the complete ClientHello handshake message (type ‖ uint24 length ‖
+// body). Fails closed (`[]`) if `random.length != 32`,
+// `legacy_session_id.length > 32`, or `key_share_public.length != 32`.
+fn encode_client_hello(random: int[], legacy_session_id: int[], key_share_public: int[], server_name: string) -> int[] {
+    let empty: int[] = [];
+    if random.length != 32 { return empty; }
+    if legacy_session_id.length > 32 { return empty; }
+    if key_share_public.length != 32 { return empty; }
+
+    let mut body: int[] = [];
+    _push_u16(body, tls_version_legacy());
+    _append(body, random);
+
+    body.push(legacy_session_id.length & 255);
+    _append(body, legacy_session_id);
+
+    _push_u16(body, 2);
+    _push_u16(body, tls_cipher_chacha20_poly1305_sha256());
+
+    body.push(1);  // legacy_compression_methods length
+    body.push(0);  // null compression
+
+    let mut extensions: int[] = [];
+    if server_name.length > 0 {
+        _push_extension(extensions, ext_server_name(), _encode_server_name_extension(server_name));
+    }
+    _push_extension(extensions, ext_supported_groups(), _encode_supported_groups_extension());
+    _push_extension(extensions, ext_signature_algorithms(), _encode_signature_algorithms_extension());
+    _push_extension(extensions, ext_supported_versions(), _encode_supported_versions_extension());
+    _push_extension(extensions, ext_key_share(), _encode_key_share_extension(key_share_public));
+
+    _push_u16(body, extensions.length);
+    _append(body, extensions);
+
+    return encode_handshake_message(hs_type_client_hello(), body);
+}
+
+// ── ServerHello parse (RFC 8446 §4.1.3) ───────────────────────────
+struct ServerHelloMsg {
+    legacy_version: int;
+    random: int[];
+    legacy_session_id_echo: int[];
+    cipher_suite: int;
+    selected_version: int;
+    selected_group: int;
+    key_exchange: int[];
+}
+
+// The HelloRetryRequest sentinel `random` value (RFC 8446 §4.1.3). A
+// ServerHello carrying it is a HelloRetryRequest, not a real ServerHello.
+fn _hello_retry_request_sentinel() -> int[] {
+    return [207, 33, 173, 116, 229, 154, 97, 17, 190, 29, 140, 2, 30, 101, 184, 145, 194, 162, 17, 22, 122, 187, 140, 94, 7, 158, 9, 226, 200, 168, 51, 156];
+}
+
+fn _is_hello_retry_request(random: int[]) -> bool {
+    let sentinel: int[] = _hello_retry_request_sentinel();
+    if random.length != sentinel.length { return false; }
+    let mut i: int = 0;
+    loop {
+        if i >= sentinel.length { break; }
+        if (random[i] & 255) != sentinel[i] { return false; }
+        i += 1;
+    }
+    return true;
+}
+
+struct _ServerHelloExtScan {
+    ok: bool;
+    error: string;
+    selected_version: int;
+    selected_group: int;
+    key_exchange: int[];
+}
+
+// Walk the ServerHello extensions block, extracting supported_versions (43)
+// and key_share (51) in ServerHello form and skipping everything else.
+fn _scan_server_hello_extensions(ext_block: int[]) -> _ServerHelloExtScan {
+    let no_kex: int[] = [];
+    let mut selected_version: int = 0;
+    let mut selected_group: int = 0;
+    let mut key_exchange: int[] = no_kex;
+
+    let mut off: int = 0;
+    loop {
+        if off >= ext_block.length { break; }
+
+        let ext_type: int = _read_u16(ext_block, off);
+        let ext_len: int = _read_u16(ext_block, off + 2);
+        if ext_type < 0 || ext_len < 0 {
+            return _ServerHelloExtScan {
+                ok: false,
+                error: "parse_server_hello: truncated extension header",
+                selected_version: 0,
+                selected_group: 0,
+                key_exchange: no_kex
+            };
+        }
+        if off + 4 + ext_len > ext_block.length {
+            return _ServerHelloExtScan {
+                ok: false,
+                error: "parse_server_hello: truncated extension data",
+                selected_version: 0,
+                selected_group: 0,
+                key_exchange: no_kex
+            };
+        }
+
+        let data: int[] = _slice(ext_block, off + 4, ext_len);
+
+        if ext_type == ext_supported_versions() {
+            if ext_len != 2 {
+                return _ServerHelloExtScan {
+                    ok: false,
+                    error: "parse_server_hello: bad supported_versions length",
+                    selected_version: 0,
+                    selected_group: 0,
+                    key_exchange: no_kex
+                };
+            }
+            selected_version = _read_u16(data, 0);
+        }
+
+        if ext_type == ext_key_share() {
+            if ext_len < 4 {
+                return _ServerHelloExtScan {
+                    ok: false,
+                    error: "parse_server_hello: truncated key_share extension",
+                    selected_version: 0,
+                    selected_group: 0,
+                    key_exchange: no_kex
+                };
+            }
+            let group: int = _read_u16(data, 0);
+            let kex_len: int = _read_u16(data, 2);
+            if group < 0 || kex_len < 0 || 4 + kex_len != ext_len {
+                return _ServerHelloExtScan {
+                    ok: false,
+                    error: "parse_server_hello: bad key_share length",
+                    selected_version: 0,
+                    selected_group: 0,
+                    key_exchange: no_kex
+                };
+            }
+            selected_group = group;
+            key_exchange = _slice(data, 4, kex_len);
+        }
+
+        off = off + 4 + ext_len;
+    }
+
+    return _ServerHelloExtScan {
+        ok: true,
+        error: "",
+        selected_version: selected_version,
+        selected_group: selected_group,
+        key_exchange: key_exchange
+    };
+}
+
+// Parse a ServerHello handshake body. Fails closed on truncation, a
+// malformed legacy_session_id_echo, a non-null legacy_compression_method,
+// any malformed extension, or a detected HelloRetryRequest (out of scope for
+// SFN-337).
+fn parse_server_hello(body: int[]) -> Result<ServerHelloMsg, string> {
+    let legacy_version: int = _read_u16(body, 0);
+    if legacy_version < 0 {
+        return Result.Err {
+            error: "parse_server_hello: truncated legacy_version"
+        };
+    }
+
+    let random: int[] = _slice(body, 2, 32);
+    if random.length != 32 {
+        return Result.Err { error: "parse_server_hello: truncated random" };
+    }
+    if _is_hello_retry_request(random) {
+        return Result.Err {
+            error: "parse_server_hello: HelloRetryRequest is out of scope for SFN-337"
+        };
+    }
+
+    let session_id_off: int = 34;
+    if session_id_off + 1 > body.length {
+        return Result.Err {
+            error: "parse_server_hello: truncated legacy_session_id_echo length"
+        };
+    }
+    let session_id_len: int = body[session_id_off] & 255;
+    if session_id_len > 32 {
+        return Result.Err {
+            error: "parse_server_hello: legacy_session_id_echo too long"
+        };
+    }
+    let legacy_session_id_echo: int[] = _slice(body, session_id_off + 1, session_id_len);
+    if legacy_session_id_echo.length != session_id_len {
+        return Result.Err {
+            error: "parse_server_hello: truncated legacy_session_id_echo"
+        };
+    }
+
+    let cipher_off: int = session_id_off + 1 + session_id_len;
+    let cipher_suite: int = _read_u16(body, cipher_off);
+    if cipher_suite < 0 {
+        return Result.Err {
+            error: "parse_server_hello: truncated cipher_suite"
+        };
+    }
+
+    let compression_off: int = cipher_off + 2;
+    if compression_off + 1 > body.length {
+        return Result.Err {
+            error: "parse_server_hello: truncated legacy_compression_method"
+        };
+    }
+    if (body[compression_off] & 255) != 0 {
+        return Result.Err {
+            error: "parse_server_hello: non-null legacy_compression_method"
+        };
+    }
+
+    let ext_len_off: int = compression_off + 1;
+    let ext_block_len: int = _read_u16(body, ext_len_off);
+    if ext_block_len < 0 {
+        return Result.Err {
+            error: "parse_server_hello: truncated extensions length"
+        };
+    }
+    let ext_block_off: int = ext_len_off + 2;
+    let ext_block: int[] = _slice(body, ext_block_off, ext_block_len);
+    if ext_block.length != ext_block_len {
+        return Result.Err {
+            error: "parse_server_hello: truncated extensions block"
+        };
+    }
+    if ext_block_off + ext_block_len != body.length {
+        return Result.Err { error: "parse_server_hello: trailing garbage" };
+    }
+
+    let scan: _ServerHelloExtScan = _scan_server_hello_extensions(ext_block);
+    if !scan.ok {
+        return Result.Err { error: scan.error };
+    }
+
+    return Result.Ok {
+        value: ServerHelloMsg {
+            legacy_version: legacy_version,
+            random: random,
+            legacy_session_id_echo: legacy_session_id_echo,
+            cipher_suite: cipher_suite,
+            selected_version: scan.selected_version,
+            selected_group: scan.selected_group,
+            key_exchange: scan.key_exchange
+        }
+    };
+}
+
+// ── EncryptedExtensions parse (RFC 8446 §4.3.1) ───────────────────
+// Validate the extensions block frames cleanly and return the extension
+// count. Fails closed on truncation or trailing garbage.
+fn parse_encrypted_extensions(body: int[]) -> Result<int, string> {
+    let ext_block_len: int = _read_u16(body, 0);
+    if ext_block_len < 0 {
+        return Result.Err {
+            error: "parse_encrypted_extensions: truncated extensions length"
+        };
+    }
+    if 2 + ext_block_len != body.length {
+        return Result.Err {
+            error: "parse_encrypted_extensions: length mismatch"
+        };
+    }
+
+    let mut count: int = 0;
+    let mut off: int = 2;
+    loop {
+        if off >= body.length { break; }
+
+        let ext_type: int = _read_u16(body, off);
+        let ext_len: int = _read_u16(body, off + 2);
+        if ext_type < 0 || ext_len < 0 {
+            return Result.Err {
+                error: "parse_encrypted_extensions: truncated extension header"
+            };
+        }
+        if off + 4 + ext_len > body.length {
+            return Result.Err {
+                error: "parse_encrypted_extensions: truncated extension data"
+            };
+        }
+
+        off = off + 4 + ext_len;
+        count += 1;
+    }
+
+    if off != body.length {
+        return Result.Err {
+            error: "parse_encrypted_extensions: trailing garbage"
+        };
+    }
+
+    return Result.Ok { value: count };
+}
+
+// ── Certificate parse (RFC 8446 §4.4.2) ───────────────────────────
+struct CertificateMsg {
+    certificate_request_context: int[];
+    leaf: int[];
+    entry_count: int;
+}
+
+// Parse a Certificate handshake body. Sets `leaf` to the first
+// CertificateEntry's cert_data and `entry_count` to the number of entries.
+// Fails closed on truncation, trailing garbage, or an empty
+// certificate_list.
+fn parse_certificate(body: int[]) -> Result<CertificateMsg, string> {
+    if body.length < 1 {
+        return Result.Err {
+            error: "parse_certificate: truncated certificate_request_context length"
+        };
+    }
+    let ctx_len: int = body[0] & 255;
+    let ctx: int[] = _slice(body, 1, ctx_len);
+    if ctx.length != ctx_len {
+        return Result.Err {
+            error: "parse_certificate: truncated certificate_request_context"
+        };
+    }
+
+    let list_len_off: int = 1 + ctx_len;
+    let list_len: int = _read_u24(body, list_len_off);
+    if list_len < 0 {
+        return Result.Err {
+            error: "parse_certificate: truncated certificate_list length"
+        };
+    }
+    let list_off: int = list_len_off + 3;
+    if list_off + list_len != body.length {
+        return Result.Err { error: "parse_certificate: length mismatch" };
+    }
+
+    let no_leaf: int[] = [];
+    let mut leaf: int[] = no_leaf;
+    let mut entry_count: int = 0;
+    let mut off: int = list_off;
+    loop {
+        if off >= list_off + list_len { break; }
+
+        let cert_len: int = _read_u24(body, off);
+        if cert_len < 0 {
+            return Result.Err {
+                error: "parse_certificate: truncated cert_data length"
+            };
+        }
+        let cert_data_off: int = off + 3;
+        let cert_data: int[] = _slice(body, cert_data_off, cert_len);
+        if cert_data.length != cert_len {
+            return Result.Err {
+                error: "parse_certificate: truncated cert_data"
+            };
+        }
+
+        let cert_ext_len_off: int = cert_data_off + cert_len;
+        let cert_ext_len: int = _read_u16(body, cert_ext_len_off);
+        if cert_ext_len < 0 {
+            return Result.Err {
+                error: "parse_certificate: truncated certificate entry extensions length"
+            };
+        }
+        let cert_ext_off: int = cert_ext_len_off + 2;
+        if cert_ext_off + cert_ext_len > body.length {
+            return Result.Err {
+                error: "parse_certificate: truncated certificate entry extensions"
+            };
+        }
+
+        if entry_count == 0 { leaf = cert_data; }
+        entry_count += 1;
+        off = cert_ext_off + cert_ext_len;
+    }
+
+    if off != list_off + list_len {
+        return Result.Err { error: "parse_certificate: trailing garbage" };
+    }
+    if entry_count == 0 {
+        return Result.Err { error: "parse_certificate: empty certificate_list" };
+    }
+
+    return Result.Ok {
+        value: CertificateMsg {
+            certificate_request_context: ctx,
+            leaf: leaf,
+            entry_count: entry_count
+        }
+    };
+}
+
+// ── CertificateVerify parse (RFC 8446 §4.4.3) ─────────────────────
+struct CertificateVerifyMsg {
+    algorithm: int;
+    signature: int[];
+}
+
+fn parse_certificate_verify(body: int[]) -> Result<CertificateVerifyMsg, string> {
+    let algorithm: int = _read_u16(body, 0);
+    if algorithm < 0 {
+        return Result.Err {
+            error: "parse_certificate_verify: truncated algorithm"
+        };
+    }
+
+    let sig_len: int = _read_u16(body, 2);
+    if sig_len < 0 {
+        return Result.Err {
+            error: "parse_certificate_verify: truncated signature length"
+        };
+    }
+    let signature: int[] = _slice(body, 4, sig_len);
+    if signature.length != sig_len {
+        return Result.Err {
+            error: "parse_certificate_verify: truncated signature"
+        };
+    }
+    if 4 + sig_len != body.length {
+        return Result.Err {
+            error: "parse_certificate_verify: trailing garbage"
+        };
+    }
+
+    return Result.Ok {
+        value: CertificateVerifyMsg {
+            algorithm: algorithm,
+            signature: signature
+        }
+    };
+}
+
+// ── Finished parse (RFC 8446 §4.4.4) ──────────────────────────────
+// The Finished body IS the verify_data (no length prefix). Fails closed if
+// its length does not match `hash_len`.
+fn parse_finished(body: int[], hash_len: int) -> Result<int[], string> {
+    if body.length != hash_len {
+        return Result.Err { error: "parse_finished: length mismatch" };
+    }
+    return Result.Ok { value: _slice(body, 0, body.length) };
+}
+
+export {
+    hs_type_client_hello,
+    hs_type_server_hello,
+    hs_type_encrypted_extensions,
+    hs_type_certificate,
+    hs_type_certificate_verify,
+    hs_type_finished,
+    tls_cipher_chacha20_poly1305_sha256,
+    tls_cipher_aes_128_gcm_sha256,
+    tls_group_x25519,
+    tls_sigalg_ed25519,
+    tls_version_legacy,
+    tls_version_13,
+    ext_server_name,
+    ext_supported_groups,
+    ext_signature_algorithms,
+    ext_supported_versions,
+    ext_key_share,
+    HandshakeMessage,
+    ServerHelloMsg,
+    CertificateMsg,
+    CertificateVerifyMsg,
+    encode_handshake_message,
+    parse_handshake_message,
+    encode_client_hello,
+    parse_client_hello_cipher_suites,
+    parse_server_hello,
+    parse_encrypted_extensions,
+    parse_certificate,
+    parse_certificate_verify,
+    parse_finished
+};
