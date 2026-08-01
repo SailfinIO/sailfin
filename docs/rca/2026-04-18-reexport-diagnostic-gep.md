@@ -184,7 +184,7 @@ re-exported imports.
 
 When `parse_layout_manifest` has every line-kind guard dropped, it returns
 `LayoutManifest { structs: [], enums: [], diagnostics: [] }` for *every*
-transitively-imported module. The direct-import path in `lowering_core.sfn`
+transitively-imported module. The direct-import path in `lowering_core/mod.sfn`
 survives because it parses structs from the module's own `.sfn-asm` native
 text (populated by `parse_native_structs_for_import`, which uses a different
 code path). Only depth-1+ imports — where `native_text` is deliberately empty

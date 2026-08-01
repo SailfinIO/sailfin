@@ -1,7 +1,7 @@
 // compiler/src/llvm/lowering/lowering_text_utils.sfn
 //
 // Text processing utilities and structured data parsers used by the
-// LLVM lowering recovery code.  Extracted from lowering_core.sfn to
+// LLVM lowering recovery code.  Extracted from lowering_core/mod.sfn to
 // reduce per-file memory footprint during self-hosting compilation.
 import { char_code, substring } from "../../string_utils";
 import { StringConstant } from "../types";

@@ -378,7 +378,7 @@ matches the shipped code.
    opaque-forward-decl pass (`rendering.sfn`) did not cover it, because it keys on
    the module's own functions/structs, not the injected helper declares. Fix: a
    new text-level pass `_append_missing_opaque_forward_decls` in
-   `lowering_core.sfn`, called once on the final `lines` **after**
+   `lowering_core/finalization.sfn`, called once on the final `lines` **after**
    `apply_module_symbol_mangling` + `dedup_module_declare_lines` — it appends
    `%Name = type opaque` for any named type referenced by a `declare` line with no
    `%Name = type …` definition in that module. It had to run *after* mangling

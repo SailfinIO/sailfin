@@ -1,0 +1,193 @@
+// compiler/src/llvm/lowering/lowering_core/file_emission.sfn
+//
+// Native-text and native-lines LLVM file entry points.
+import { NativeModule } from "../../../emit_native";
+import { NativeArtifact } from "../../../emit_native_layout";
+import { lines_to_native_text, native_lines_have_text } from "../../../emit_native_state";
+import { ParseNativeResult } from "../../../native_ir";
+import { parse_native_artifact, parse_native_artifact_from_lines } from "../../../native_ir_api";
+import { collect_imported_module_context_for_module } from "../../imports";
+import { string_array_contains } from "../../utils";
+import { collect_defined_function_symbols } from "../lowering_helpers";
+import { write_llvm_lines_chunked } from "../lowering_io";
+import { has_fatal_lowering_diagnostic, print_fatal_lowering_diagnostics } from "./diagnostics";
+import { lower_to_llvm_lines_with_parsed_context } from "./mod";
+
+fn make_native_module_for_emit(module_name: string, native_text: string) -> NativeModule {
+    return NativeModule {
+        module_name: module_name,
+        artifacts: [NativeArtifact {
+            name: module_name, format: "sailfin-native-text", contents: native_text
+        }],
+        entry_points: [],
+        symbol_count: 0
+    };
+}
+
+fn compile_native_text_to_llvm_file(native_text: string, module_name: string, out_path: string) -> boolean ![io] {
+    // In-module-only path: no staged sibling/entry bodies to thread.
+    // Delegates to the context-carrying variant with an empty set so
+    // there is a single lowering implementation (#999).
+    let no_texts: string[] = [];
+    return compile_native_text_to_llvm_file_with_context(native_text, module_name, out_path, no_texts);
+}
+
+// Lines-array counterpart of `compile_native_text_to_llvm_file` (#1817).
+fn compile_native_lines_to_llvm_file(native_lines: string[], module_name: string, out_path: string) -> boolean ![io] {
+    let no_texts: string[] = [];
+    return compile_native_lines_to_llvm_file_with_context(native_lines, module_name, out_path, no_texts);
+}
+
+// Context-carrying variant for the `-p` per-module build path (#999).
+// The build driver stages each module's direct-import `.sfn-asm` bodies
+// — including the walk-excluded entry (#984) — and loads them via
+// `load_imported_interfaces_from_paths`. The plain
+// `compile_native_text_to_llvm_file` re-derives import context solely
+// from this module's own embedded `import` directives, so a sibling
+// that imports a value-returning fn from the walk-excluded entry could
+// not resolve the callee's return type and hit the `[fatal]`
+// unresolved-callee gate (`core_call_emission/dispatch.sfn`). This variant
+// UNIONS the staged `imported_native_texts` with the
+// embedded-import-derived `collect_imported_module_context_for_module`
+// texts (the module's own imports AND the staged bodies are both
+// needed) so cross-module callee signatures resolve. The `[fatal]` gate
+// is preserved unchanged — this supplies the missing input, it does not
+// weaken the gate (#306).
+fn compile_native_text_to_llvm_file_with_context(native_text: string, module_name: string, out_path: string, imported_native_texts: string[]) -> boolean ![io] {
+    if native_text.length == 0 {
+        print.err("emit-llvm: empty native text for module " + module_name);
+        return false;
+    }
+    return _lower_parsed_native_to_llvm_file(parse_native_artifact(native_text), native_text, module_name, out_path, imported_native_texts);
+}
+
+// Lines-array counterpart of `compile_native_text_to_llvm_file_with_context`
+// for the in-process emit→lower handoff (#1817). Parses the emitter's line
+// array directly (no join→split), reconstructing the joined text only for
+// the recovery re-parse the lowering still consumes on the happy path
+// (`recover_functions_for_lowering` cross-checks the structured parse and
+// `make_native_module_for_emit` carries it as the fallback). `recovery_text`
+// is byte-identical to the old `native_text`, so output is unchanged; the
+// win is skipping the primary `parse_native_artifact` re-split.
+fn compile_native_lines_to_llvm_file_with_context(native_lines: string[], module_name: string, out_path: string, imported_native_texts: string[]) -> boolean ![io] {
+    if !native_lines_have_text(native_lines) {
+        print.err("emit-llvm: empty native text for module " + module_name);
+        return false;
+    }
+    let recovery_text = lines_to_native_text(native_lines);
+    return _lower_parsed_native_to_llvm_file(parse_native_artifact_from_lines(native_lines), recovery_text, module_name, out_path, imported_native_texts);
+}
+
+// Shared lowering tail for the text and lines entry points above. Given the
+// parsed native artifact and the joined native text (needed by the recovery
+// re-parse / `make_native_module_for_emit` fallback), union the import
+// context, lower to LLVM lines, gate on `[fatal]` diagnostics, and write the
+// `.ll`.
+fn _lower_parsed_native_to_llvm_file(parse: ParseNativeResult, native_text: string, module_name: string, out_path: string, imported_native_texts: string[]) -> boolean ![io] {
+    let import_context = collect_imported_module_context_for_module(parse.imports, module_name);
+    let mut combined_texts: string[] = import_context.native_texts;
+    let mut _it: int = 0;
+    loop {
+        if _it >= imported_native_texts.length { break; }
+        let staged = imported_native_texts[_it];
+        if staged.length > 0 {
+            if !string_array_contains(combined_texts, staged) {
+                combined_texts.push(staged);
+            }
+        }
+        _it += 1;
+    }
+    let dummy_module = make_native_module_for_emit(module_name, native_text);
+    let lowered_lines = lower_to_llvm_lines_with_parsed_context(dummy_module, parse, import_context.manifests, combined_texts, import_context.diagnostics, true, native_text);
+    if lowered_lines.lines == null {
+        print.err("emit-llvm: lowered lines null");
+        return false;
+    }
+    // Refuse to write IR when any lowering pass surfaced a `[fatal]`
+    // diagnostic. Issued by `core_call_emission/dispatch.sfn` for calls whose
+    // return type cannot be resolved (issue #306) and by
+    // `lower_expression`'s `<closure_pair_fatal_mutable ...>` handler
+    // for capturing lambdas with mutable captures (issue #687). A
+    // partial IR file with the side-effecting call silently dropped
+    // would be worse than no output at all. Print every fatal so the
+    // user sees the underlying cause before the build aborts.
+    if has_fatal_lowering_diagnostic(lowered_lines.diagnostics) {
+        print_fatal_lowering_diagnostics(lowered_lines.diagnostics, lowered_lines.diags);
+        // Drop any stale `.ll` from a previous successful build so
+        // downstream tooling that only stats `out_path` cannot mistake
+        // it for fresh output (mirrors the empty-native-text branch in
+        // `compile_to_llvm_file_with_module`).
+        if fs.exists(out_path) { fs.deleteFile(out_path); }
+        return false;
+    }
+    let lowered_count = lowered_lines.lines.length;
+    if lowered_count > 0 {
+        let defined = collect_defined_function_symbols(lowered_lines.lines);
+        if defined.length == 0 { return false; }
+    }
+    let lines = lowered_lines.lines;
+    let mut _if247: boolean = false;
+    if lines == null { _if247 = true; }
+    if lines.length == 0 { _if247 = true; }
+    if _if247 {
+        print.err("emit-llvm: lowering produced no output lines");
+        return false;
+    }
+    return write_llvm_lines_chunked(out_path, lines);
+}
+
+// Dry-run the lowering gate over already-emitted native text WITHOUT
+// writing any artifact. Used by `sfn emit native` (issue #906) so that
+// command fails closed on the same unresolved-callee inputs that
+// `sfn build` / `sfn emit llvm` reject via `compile_native_text_to_llvm_file`.
+// `emit native` stops at the native-IR stage (stage 5), before LLVM
+// lowering (stage 6) where the `cannot resolve return type for call to
+// ...` `[fatal]` is produced — so it never participated in return-type
+// resolution and false-greened. This reuses the exact same lowering
+// path and `[fatal]` scan as the `build` / `emit llvm` gate, guaranteeing
+// byte-for-byte parity, but discards the lowered IR and writes nothing.
+// Returns true when the native text lowers clean (no fatal), false on a
+// fatal, empty/null input, or a lowering failure.
+//
+// NOTE: this lives off the self-host build path. The build's per-module
+// stage-5 emit (`capsule_resolver.sfn`) calls the native-emit workers
+// directly and never invokes this gate, so adding it cannot break
+// self-hosting (cross-module signature resolution still happens later at
+// the LLVM stage as before).
+fn native_text_passes_lowering_gate(native_text: string, module_name: string) -> boolean ![io] {
+    if native_text.length == 0 {
+        // No text to gate: the native emitter already failed upstream
+        // (typecheck / effect / re-export error) and produced nothing.
+        return false;
+    }
+    let parse = parse_native_artifact(native_text);
+    let import_context = collect_imported_module_context_for_module(parse.imports, module_name);
+    let dummy_module = make_native_module_for_emit(module_name, native_text);
+    let lowered_lines = lower_to_llvm_lines_with_parsed_context(dummy_module, parse, import_context.manifests, import_context.native_texts, import_context.diagnostics, true, native_text);
+    if lowered_lines.lines == null {
+        print.err("emit-native: lowered lines null");
+        return false;
+    }
+    // Same fatal contract as `compile_native_text_to_llvm_file` above:
+    // print every `[fatal]` so the user sees the underlying cause, then
+    // refuse the emit.
+    if has_fatal_lowering_diagnostic(lowered_lines.diagnostics) {
+        print_fatal_lowering_diagnostics(lowered_lines.diagnostics, lowered_lines.diags);
+        return false;
+    }
+    // Mirror the remaining non-fatal rejection conditions in
+    // `compile_native_text_to_llvm_file` above so `emit native` matches
+    // `emit llvm` exactly, not just on `[fatal]`: lowering that produces
+    // lines but no defined function symbols, or no output lines at all, is
+    // a hard error there and must be one here too.
+    let lowered_count = lowered_lines.lines.length;
+    if lowered_count > 0 {
+        let defined = collect_defined_function_symbols(lowered_lines.lines);
+        if defined.length == 0 { return false; }
+    }
+    if lowered_lines.lines.length == 0 {
+        print.err("emit-native: lowering produced no output lines");
+        return false;
+    }
+    return true;
+}

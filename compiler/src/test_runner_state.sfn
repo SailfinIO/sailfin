@@ -74,7 +74,7 @@ fn exit_test_runner_mode() {
 
 // True when the running compile was invoked via `sfn test`. Read
 // in 10+ LLVM lowering sites — including the behavior-changing
-// `is_test_module` gate in `lowering_core.sfn` — and in
+// `is_test_module` gate in `lowering_core/mod.sfn` — and in
 // `compile_tests_to_llvm_file_with_module_imports` in `main.sfn`.
 fn test_runner_active() -> boolean { return _active; }
 

@@ -5,7 +5,7 @@
 // vtables), runtime helper declarations, imported function declarations,
 // and libc declarations.
 //
-// Extracted from lowering_core.sfn to reduce per-file memory footprint.
+// Extracted from lowering_core/mod.sfn to reduce per-file memory footprint.
 import { NativeFunction } from "../../native_ir";
 import { target_uses_comdat } from "../lowering_debug_state";
 import {

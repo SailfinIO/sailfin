@@ -1,7 +1,8 @@
 // Regression coverage for SFN-529: the `[fatal]` gate must survive its own
 // size guards.
 //
-// `has_fatal_lowering_diagnostic` (`compiler/src/llvm/lowering/lowering_core.sfn`)
+// `has_fatal_lowering_diagnostic`
+// (`compiler/src/llvm/lowering/lowering_core/diagnostics.sfn`)
 // is the only thing that turns a lowering diagnostic into a build failure, and
 // two guards upstream of it used to discard the entire diagnostic array once it
 // exceeded 1,000,000 entries — `[fatal]` included. A tripped guard therefore
@@ -148,7 +149,7 @@ test "lowering diagnostics: retain_fatal_diagnostics keeps only tagged entries" 
     let batch = ["llvm lowering: advisory", _fatal_entry(), "llvm lowering: another advisory", "[fatal] llvm lowering: bare-prefix spelling"];
     let retained = retain_fatal_diagnostics(batch, batch.length);
     // Both `[fatal]` spellings in the tree are substring matches, so both are
-    // kept (`lowering_core.sfn`'s gate contract, point 4).
+    // kept (`lowering_core/diagnostics.sfn`'s gate contract, point 4).
     assert retained.length == 2;
     assert _array_contains(retained, _fatal_entry());
     assert _array_contains(retained, "[fatal] llvm lowering: bare-prefix spelling");

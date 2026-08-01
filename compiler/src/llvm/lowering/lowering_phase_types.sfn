@@ -6,7 +6,7 @@
 // from in-memory NativeEnum[] when cross-module ABI corruption causes
 // enums to arrive empty or with empty names.
 //
-// Extracted from lowering_core.sfn to reduce per-file memory footprint.
+// Extracted from lowering_core/mod.sfn to reduce per-file memory footprint.
 import { NativeEnum, NativeInterface, NativeStruct } from "../../native_ir";
 import { build_type_context } from "../type_context";
 import {

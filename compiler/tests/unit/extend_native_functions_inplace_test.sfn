@@ -14,7 +14,7 @@
 //
 // If ANY of these three guarantees breaks in the runtime, the function's
 // in-place contract breaks with it. Call sites that depend on the alias
-// (lowering_core.sfn:568, 576) would then silently see stale data —
+// (lowering_core/mod.sfn) would then silently see stale data —
 // the same class of bug as the 220c8b7 revert, just from the opposite
 // direction.
 //
@@ -27,7 +27,7 @@
 // lowering_helpers_mangling.sfn:424 cross-references this file.
 //
 // See docs/proposals/0006-build-architecture.md Phase 1b and the aliasing commentary at
-// lowering_core.sfn:565-578 for the full rationale.
+// lowering_core/mod.sfn for the full rationale.
 test "runtime contract: mut binding shares storage with input (no copy)" {
     let original: int[] = [1, 2, 3];
     let mut alias_view = original;
@@ -69,7 +69,7 @@ test "runtime contract: appending through returned alias is visible through inpu
     //
     // The test asserts that after the function body runs, the *input* array
     // (not just the returned reference) contains the extended data. That is
-    // the critical invariant at lowering_core.sfn:568 where `safe_functions`
+    // the critical invariant at lowering_core/mod.sfn where `safe_functions`
     // must alias `local_functions` post-call.
     let dst: string[] = ["a", "b"];
     let src: string[] = ["c", "d"];

@@ -1,0 +1,77 @@
+// Line-budget sentinel for compiler/src/llvm/lowering/.
+//
+// lowering_core.sfn reached 1,762 lines and was split into the
+// lowering_core/ modules, with the orchestrator kept below 750 lines.
+// The folder walk covers future submodules automatically. Existing
+// oversized siblings are pinned at their present sizes and may only
+// shrink; every other module must remain below 750 lines.
+//
+// Raising a grandfathered ceiling requires an explicit reviewed change.
+// SFN-639 tracks removing the grandfather list as the remaining modules
+// are decomposed.
+import { ends_with, find_char_local } from "../../src/string_utils";
+
+let LOWERING_MODULE_LINE_BUDGET: int = 750;
+let LOWERING_ROOT: string = "compiler/src/llvm/lowering";
+
+fn _count_lowering_newlines(source: string) -> int {
+    let mut count: int = 0;
+    let mut pos: int = 0;
+    loop {
+        let idx = find_char_local(source, "\n", pos);
+        if idx < 0 { break; }
+        count += 1;
+        pos = idx + 1;
+    }
+    return count;
+}
+
+fn _grandfathered_lowering_ceiling(path: string) -> int {
+    if path == LOWERING_ROOT + "/lowering_helpers.sfn" { return 1547; }
+    if path == LOWERING_ROOT + "/lowering_recovery.sfn" { return 1056; }
+    if path == LOWERING_ROOT + "/instructions_let.sfn" { return 1031; }
+    if path == LOWERING_ROOT + "/instructions_match.sfn" { return 924; }
+    if path == LOWERING_ROOT + "/instructions.sfn" { return 861; }
+    if path == LOWERING_ROOT + "/instructions_helpers.sfn" { return 849; }
+    if path == LOWERING_ROOT + "/instructions_if.sfn" { return 831; }
+    if path == LOWERING_ROOT + "/emission.sfn" { return 818; }
+    return 0;
+}
+
+test "LLVM lowering: every module stays within its line budget" ![io] {
+    let mut dir_queue: string[] = [LOWERING_ROOT];
+    let mut head: int = 0;
+    let mut checked: int = 0;
+
+    loop {
+        if head >= dir_queue.length { break; }
+        let dir = dir_queue[head];
+        head += 1;
+        let entries = fs.listDirectory(dir);
+        let mut i: int = 0;
+        loop {
+            if i >= entries.length { break; }
+            let entry = entries[i];
+            let full = dir + "/" + entry;
+            if ends_with(entry, ".sfn") {
+                let source = fs.readFile(full);
+                assert source.length > 0;
+                let lines = _count_lowering_newlines(source);
+                assert lines > 0;
+                let ceiling = _grandfathered_lowering_ceiling(full);
+                if ceiling > 0 { assert lines <= ceiling; } else {
+                    assert lines < LOWERING_MODULE_LINE_BUDGET;
+                }
+                checked += 1;
+            } else { dir_queue.push(full); }
+            i += 1;
+        }
+    }
+
+    assert checked > 30;
+}
+
+test "LLVM lowering: the flat lowering_core module does not shadow the folder" ![io] {
+    assert ! fs.exists(LOWERING_ROOT + "/lowering_core.sfn");
+    assert fs.exists(LOWERING_ROOT + "/lowering_core/mod.sfn");
+}

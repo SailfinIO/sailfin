@@ -108,7 +108,7 @@ write_llvm_ir_from_native_text[_with_context](native_text, ..., import_asm_paths
 ```
 
 The lowering chain that follows — `compile_native_lines_to_llvm_file_with_context`
-(`lowering_core.sfn:432`) — has the signature `(native_lines: string[],
+(`lowering_core/file_emission.sfn`) — has the signature `(native_lines: string[],
 module_name, out_path, imported_native_texts: string[])`. **It never receives
 `program` or the `TypeContext`.** Its first acts (`lines_to_native_text` +
 `parse_native_artifact_from_lines`) read only `native_lines` and re-allocate
@@ -424,7 +424,7 @@ fragmentation (1505 MB vs 972 MB on `core_operands`).
   (`sfn_str_sfn_from_cstr` adopts a foreign buffer in place), `:778`
   (`sfn_str_append` grow guard).
 - Liveness boundary: `compiler/src/main.sfn:667`, `:574`
-  (`write_native_text_file_with_module`); `compiler/src/llvm/lowering/lowering_core.sfn:432`;
+  (`write_native_text_file_with_module`); `compiler/src/llvm/lowering/lowering_core/file_emission.sfn`;
   `compiler/src/emit_native.sfn:164,192`.
 - Build model: `compiler/src/capsule_resolver.sfn:966` (`_cr_stage_one`, native
   staging), `:1527` (`_cr_compile_one`, in-process re-parse+lower);
