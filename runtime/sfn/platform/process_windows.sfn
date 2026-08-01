@@ -1041,9 +1041,19 @@ fn _pw_framed_consume(gb: *PwGrowBuf, ret_len: i64, consume_len: i64) -> *u8 {
 // `_pw_framed_find_newline(gb)` — index of the first `'\n'` in the stash,
 // or -1. Byte-oriented on purpose: a line is framed on the LF byte, so a
 // CRLF stream keeps its `'\r'` at the end of the returned line exactly as
-// the POSIX peer leaves it. Mirrors `_framed_find_newline`
-// (`runtime/sfn/process.sfn`); the two must agree or a framed reader would
-// see different line boundaries per platform (SFN-690).
+// the POSIX peer leaves it. The two must agree on that or a framed reader
+// would see different line boundaries per platform (SFN-690).
+//
+// Reads through `load_byte`, a genuine one-byte load, rather than the
+// `sailfin_intrinsic_pointer_read_i32` + mask the POSIX `_framed_find_newline`
+// uses. That is a real difference, not a stylistic one: the i32 form loads
+// FOUR bytes, and is safe on the POSIX side only because `_framed_fill`
+// maintains `gb.cap >= gb.len + 8` (`runtime/sfn/process.sfn`). `PwGrowBuf`
+// has no such invariant — `_pw_gb_append` reserves `len + n + 1`, one byte
+// for the NUL — so scanning the final byte with a 4-byte load would read
+// two bytes past the allocation. `load_byte` removes the dependency on any
+// slack invariant instead of importing POSIX's, which is the same reason
+// it exists at all (`runtime/sfn/string.sfn`).
 fn _pw_framed_find_newline(gb: *PwGrowBuf) -> i64 {
     let addr: i64 = gb.addr;
     if addr == 0 { return -1; }
@@ -1051,8 +1061,7 @@ fn _pw_framed_find_newline(gb: *PwGrowBuf) -> i64 {
     let mut i: i64 = 0;
     loop {
         if i >= len { break; }
-        let b: i32 = sailfin_intrinsic_pointer_read_i32((addr + i) as *u8) & 255;
-        if b == 10 { return i; }
+        if load_byte(addr + i) == 10 { return i; }
         i = i + 1;
     }
     return -1;
@@ -1287,6 +1296,10 @@ fn sfn_process_handle_write(handle_id: i64, data: *u8) -> i64 ![io] {
     return off;
 }
 
+// Largest span handed to a single `WriteFile`. Comfortably inside the
+// DWORD the API takes, so the i64 -> i32 narrowing below cannot wrap.
+let PW_MAX_WRITE_CHUNK: i64 = 1073741824;
+
 // Write exactly `len` bytes of `data` to the child's stdin. Unlike
 // `handle_write`, which `strlen`s a NUL-terminated cstring, this honors an
 // explicit length, so embedded NULs in a binary frame are written verbatim
@@ -1310,9 +1323,16 @@ fn sfn_process_handle_write_bytes(handle_id: i64, data: *u8, len: i64) -> i64 ![
     let mut off: i64 = 0;
     loop {
         if off >= len { break; }
+        // `WriteFile`'s count is a DWORD, so the remaining span is clamped
+        // before the narrowing cast. `len` is an i64 the caller chooses: a
+        // frame above 2 GiB would otherwise wrap the cast negative and hand
+        // Win32 a nonsense byte count. The loop already resumes short
+        // writes, so capping a single pass costs nothing.
+        let mut chunk: i64 = len - off;
+        if chunk > PW_MAX_WRITE_CHUNK { chunk = PW_MAX_WRITE_CHUNK; }
         let mut wrote: i32 = 0;
         let wrote_ptr: *i32 = & wrote;
-        let ok: i32 = WriteFile(hw, (base + off) as *u8, (len - off) as i32, wrote_ptr, null);
+        let ok: i32 = WriteFile(hw, (base + off) as *u8, chunk as i32, wrote_ptr, null);
         if ok == 0 { return -1; }
         if wrote <= 0 { return -1; }
         off = off + (wrote as i64);
