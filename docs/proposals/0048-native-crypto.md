@@ -4,9 +4,9 @@ title: Native crypto + TLS stack — removing the OpenSSL dependency
 status: Accepted
 type: runtime
 created: 2026-07-12
-updated: 2026-07-31
+updated: 2026-08-01
 author: "agent:compiler-architect; human review"
-tracking: SFN-659, SFN-660
+tracking: SFN-333, SFN-335, SFN-336, SFN-337, SFN-659, SFN-660
 supersedes:
 superseded-by:
 graduates-to:
@@ -101,6 +101,21 @@ Because the three TLS consumers forward-declare only the **`tls_*` wrapper
 names** (not raw OpenSSL symbols), Phase D changes only `tls.sfn`'s function
 *bodies* and `websocket.sfn`'s three externs — no consumer-signature churn.
 Phase D is where the seal blocker is actually cleared.
+
+**Amendment (2026-08-01) — Phase B progress: client handshake landed
+(SFN-337).** The record layer (`tls13_record.sfn`, SFN-336) and key schedule
+(`tls13_schedule.sfn`, SFN-333) now have a client-side handshake driving them:
+`capsules/sfn/crypto/src/tls13_handshake.sfn` +
+`tls13_handshake_codec.sfn` implement the RFC 8446 §4 ClientHello/ServerHello/
+EncryptedExtensions/Certificate/CertificateVerify/Finished state machine and
+wire code, checked against the RFC 8448 §3 "Simple 1-RTT Handshake" trace
+(16 tests, `capsules/sfn/crypto/tests/tls13_handshake_test.sfn`, plus 34 fail-closed codec tests in `tls13_handshake_codec_test.sfn`). It is pure
+computation with no socket I/O — `runtime/sfn/platform/tls.sfn` is untouched
+and still OpenSSL-backed (the swap is SFN-341); CertificateVerify checking is
+Ed25519-only pending RSA-PSS/ECDSA-P256 (SFN-653); and there is no certificate
+chain/trust decision (SFN-340) or server-side handshake (SFN-654) yet. Phase B
+therefore stays open; see `docs/status.md`'s `sfn/crypto` row for the full
+capability and limitation list.
 
 ### 3.2 Where the code lives
 

@@ -1,0 +1,596 @@
+// capsules/sfn/crypto/tests/tls13_handshake_test.sfn
+//
+// Regression coverage for the TLS 1.3 client handshake state machine
+// (RFC 8446 §4) and its wire codec, driven end-to-end against the canonical
+// RFC 8448 §3 "Simple 1-RTT Handshake" trace: the same ClientHello,
+// ServerHello, EncryptedExtensions, Certificate, CertificateVerify and
+// Finished bytes a real server sent, checked against the transcript hashes
+// and secrets the RFC states at each step.
+//
+// Two properties of that trace shape these tests:
+//
+//   * It negotiates TLS_AES_128_GCM_SHA256 (0x1301), not ChaCha20-Poly1305.
+//     Both are SHA-256 suites, so the transcript hash and the whole key
+//     schedule are bit-identical and the handshake is exercised faithfully;
+//     only the record layer's AEAD would differ, and that is not this
+//     module's concern.
+//   * Its CertificateVerify signs with rsa_pss_rsae_sha256 (0x0804).
+//     RFC 8446 §4.2.3 forbids PKCS#1v1.5 there, so every published TLS 1.3
+//     trace signs with RSA-PSS or ECDSA — neither of which the capsule can
+//     verify until SFN-653. The end-to-end test therefore drives
+//     CertificateVerify through the explicitly unverified path, and the
+//     signature-checking path is covered separately by its rejection cases.
+import {
+    ClientHandshake,
+    hs_client_finished_message,
+    hs_client_hello,
+    hs_client_new,
+    hs_client_recv_certificate,
+    hs_client_recv_certificate_verify,
+    hs_client_recv_certificate_verify_without_authenticating,
+    hs_client_recv_encrypted_extensions,
+    hs_client_recv_finished,
+    hs_client_recv_server_hello,
+    hs_client_send_hello,
+    hs_state_connected,
+    hs_state_start,
+    hs_state_wait_certificate,
+    hs_state_wait_certificate_verify,
+    hs_state_wait_encrypted_extensions,
+    hs_state_wait_finished,
+    hs_state_wait_server_hello,
+    hs_transcript_hash,
+    tls13_certificate_verify_content,
+    tls13_traffic_iv,
+    tls13_traffic_key
+} from "../src/tls13_handshake";
+import {
+    encode_client_hello,
+    parse_client_hello_cipher_suites,
+    parse_handshake_message,
+    tls_cipher_aes_128_gcm_sha256,
+    tls_cipher_chacha20_poly1305_sha256,
+    tls_group_x25519
+} from "../src/tls13_handshake_codec";
+import { x25519_base } from "../src/x25519";
+
+// Parse an even-length lowercase hex string into an int[] of bytes.
+fn hexb(s: string) -> int[] {
+    let mut out: int[] = [];
+    let mut i: int = 0;
+    loop {
+        // `i + 1` rather than `i` so an odd-length literal returns what it
+        // parsed instead of indexing past the end and killing the runner —
+        // a mistyped vector should fail an assertion, not crash the suite.
+        if i + 1 >= s.length { break; }
+        let hi: int = _hexval(s[i]);
+        let lo: int = _hexval(s[i + 1]);
+        out.push(((hi << 4) | lo) & 255);
+        i += 2;
+    }
+    return out;
+}
+
+fn _hexval(c: string) -> int {
+    let code: int = char_code(c) & 255;
+    if code >= 48 && code <= 57 {
+        return code - 48;
+    }  // '0'-'9'
+    if code >= 97 && code <= 102 {
+        return code - 97 + 10;
+    }  // 'a'-'f'
+    return 0;
+}
+
+fn eq_bytes(a: int[], b: int[]) -> bool {
+    if a.length != b.length { return false; }
+    let mut i: int = 0;
+    loop {
+        if i >= a.length { break; }
+        if a[i] != b[i] { return false; }
+        i += 1;
+    }
+    return true;
+}
+
+// ── RFC 8448 §3 vectors ──────────────────────────────────────────
+// The client's ephemeral X25519 key pair.
+fn v_client_private() -> int[] {
+    return hexb("49af42ba7f7994852d713ef2784bcbcaa7911de26adc5642cb634540e7ea5005");
+}
+
+fn v_client_public() -> int[] {
+    return hexb("99381de560e4bd43d23d8e435a7dbafeb3c06e51c13cae4d5413691e529aaf2c");
+}
+
+// Complete handshake messages: type byte, uint24 length, body.
+fn v_client_hello() -> int[] {
+    return hexb("010000c00303cb34ecb1e78163ba1c38c6dacb196a6dffa21a8d9912ec18a2ef6283024dece7000006130113031302010000910000000b0009000006736572766572ff01000100000a00140012001d0017001800190100010101020103010400230000003300260024001d002099381de560e4bd43d23d8e435a7dbafeb3c06e51c13cae4d5413691e529aaf2c002b0003020304000d0020001e040305030603020308040805080604010501060102010402050206020202002d00020101001c00024001");
+}
+
+fn v_server_hello() -> int[] {
+    return hexb("020000560303a6af06a4121860dc5e6e60249cd34c95930c8ac5cb1434dac155772ed3e2692800130100002e00330024001d0020c9828876112095fe66762bdbf7c672e156d6cc253b833df1dd69b1b04e751f0f002b00020304");
+}
+
+fn v_encrypted_extensions() -> int[] {
+    return hexb("080000240022000a00140012001d00170018001901000101010201030104001c0002400100000000");
+}
+
+fn v_certificate() -> int[] {
+    return hexb("0b0001b9000001b50001b0308201ac30820115a003020102020102300d06092a864886f70d01010b0500300e310c300a06035504031303727361301e170d3136303733303031323335395a170d3236303733303031323335395a300e310c300a0603550403130372736130819f300d06092a864886f70d010101050003818d0030818902818100b4bb498f8279303d980836399b36c6988c0c68de55e1bdb826d3901a2461eafd2de49a91d015abbc9a95137ace6c1af19eaa6af98c7ced43120998e187a80ee0ccb0524b1b018c3e0b63264d449a6d38e22a5fda430846748030530ef0461c8ca9d9efbfae8ea6d1d03e2bd193eff0ab9a8002c47428a6d35a8d88d79f7f1e3f0203010001a31a301830090603551d1304023000300b0603551d0f0404030205a0300d06092a864886f70d01010b05000381810085aad2a0e5b9276b908c65f73a7267170618a54c5f8a7b337d2df7a594365417f2eae8f8a58c8f8172f9319cf36b7fd6c55b80f21a03015156726096fd335e5e67f2dbf102702e608ccae6bec1fc63a42a99be5c3eb7107c3c54e9b9eb2bd5203b1c3b84e0a8b2f759409ba3eac9d91d402dcc0cc8f8961229ac9187b42b4de10000");
+}
+
+fn v_certificate_verify() -> int[] {
+    return hexb("0f000084080400805a747c5d88fa9bd2e55ab085a61015b7211f824cd484145ab3ff52f1fda8477b0b7abc90db78e2d33a5c141a078653fa6bef780c5ea248eeaaa785c4f394cab6d30bbe8d4859ee511f602957b15411ac027671459e46445c9ea58c181e818e95b8c3fb0bf3278409d3be152a3da5043e063dda65cdf5aea20d53dfacd42f74f3");
+}
+
+fn v_server_finished() -> int[] {
+    return hexb("140000209b9b141d906337fbd2cbdce71df4deda4ab42c309572cb7fffee5454b78f0718");
+}
+
+fn v_client_finished() -> int[] {
+    return hexb("14000020a8ec436d677634ae525ac1fcebe11a039ec17694fac6e98527b642f2edd5ce61");
+}
+
+// ── The X25519 key share ─────────────────────────────────────────
+test "tls13_handshake: RFC 8448 client key share derives from the client private key" {
+    let pub_key: int[] = x25519_base(v_client_private());
+    assert eq_bytes(pub_key, v_client_public());
+}
+
+test "tls13_handshake: a new state starts at START and carries the key share" {
+    let created: Result<ClientHandshake, string> = hs_client_new(v_client_private());
+    let mut hs: ClientHandshake = _sentinel_unreachable();
+    match created {
+        Result.Ok { value } => { hs = value; },
+        Result.Err { error } => { assert error.length == 0; }
+    }
+    assert hs.state == hs_state_start();
+    assert eq_bytes(hs.client_public, v_client_public());
+    // Early Secret with no PSK (RFC 8448 §3).
+    assert eq_bytes(hs.early_secret, hexb("33ad0a1c607ec03b09e6cd9893680ce210adf300aa1f2660e1b22e10f170f92a"));
+}
+
+// Initialises a `let mut` before a `match` fills it in. Its state is -1, which
+// no real state ever equals, so a step that failed to produce a state fails the
+// following assertion instead of passing vacuously against a plausible one.
+fn _sentinel_unreachable() -> ClientHandshake {
+    let empty: int[] = [];
+    return ClientHandshake {
+        state: 0 - 1,
+        transcript: empty,
+        client_private: empty,
+        client_public: empty,
+        offered_cipher_suites: empty,
+        sent_legacy_session_id: empty,
+        cipher_suite: 0,
+        group: 0,
+        shared_secret: empty,
+        early_secret: empty,
+        handshake_secret: empty,
+        master_secret: empty,
+        client_handshake_traffic_secret: empty,
+        server_handshake_traffic_secret: empty,
+        client_application_traffic_secret: empty,
+        server_application_traffic_secret: empty,
+        server_leaf_certificate: empty,
+        server_certificate_verified: false
+    };
+}
+
+// ── The full RFC 8448 §3 handshake ───────────────────────────────
+// Every intermediate value asserted below is quoted from RFC 8448 §3, so
+// this walks the state machine, the transcript hash and the key schedule
+// against an independently published trace rather than against itself.
+test "tls13_handshake: RFC 8448 simple 1-RTT handshake reproduces every secret" {
+    let created: Result<ClientHandshake, string> = hs_client_new(v_client_private());
+    let mut hs: ClientHandshake = _sentinel_unreachable();
+    match created {
+        Result.Ok { value } => { hs = value; },
+        Result.Err { error } => { assert error.length == 0; }
+    }
+
+    // ClientHello.
+    let r1: Result<ClientHandshake, string> = hs_client_send_hello(hs, v_client_hello());
+    match r1 {
+        Result.Ok { value } => { hs = value; },
+        Result.Err { error } => { assert error.length == 0; }
+    }
+    assert hs.state == hs_state_wait_server_hello();
+    assert hs.offered_cipher_suites.length == 3;
+
+    // ServerHello: completes the key exchange and the handshake secrets.
+    let r2: Result<ClientHandshake, string> = hs_client_recv_server_hello(hs, v_server_hello());
+    match r2 {
+        Result.Ok { value } => { hs = value; },
+        Result.Err { error } => { assert error.length == 0; }
+    }
+    assert hs.state == hs_state_wait_encrypted_extensions();
+    assert hs.cipher_suite == tls_cipher_aes_128_gcm_sha256();
+    assert hs.group == tls_group_x25519();
+    assert eq_bytes(hs.shared_secret, hexb("8bd4054fb55b9d63fdfbacf9f04b9f0d35e6d63f537563efd46272900f89492d"));
+    // Transcript-Hash(ClientHello..ServerHello).
+    assert eq_bytes(hs_transcript_hash(hs), hexb("860c06edc07858ee8e78f0e7428c58edd6b43f2ca3e6e95f02ed063cf0e1cad8"));
+    assert eq_bytes(hs.handshake_secret, hexb("1dc826e93606aa6fdc0aadc12f741b01046aa6b99f691ed221a9f0ca043fbeac"));
+    assert eq_bytes(hs.client_handshake_traffic_secret, hexb("b3eddb126e067f35a780b3abf45e2d8f3b1a950738f52e9600746a0e27a55a21"));
+    assert eq_bytes(hs.server_handshake_traffic_secret, hexb("b67b7d690cc16c4e75e54213cb2d37b4e9c912bcded9105d42befd59d391ad38"));
+    assert eq_bytes(hs.master_secret, hexb("18df06843d13a08bf2a449844c5f8a478001bc4d4c627984d5a41da8d0402919"));
+
+    // EncryptedExtensions.
+    let r3: Result<ClientHandshake, string> = hs_client_recv_encrypted_extensions(hs, v_encrypted_extensions());
+    match r3 {
+        Result.Ok { value } => { hs = value; },
+        Result.Err { error } => { assert error.length == 0; }
+    }
+    assert hs.state == hs_state_wait_certificate();
+
+    // Certificate: the leaf is retained for the signature check.
+    let r4: Result<ClientHandshake, string> = hs_client_recv_certificate(hs, v_certificate());
+    match r4 {
+        Result.Ok { value } => { hs = value; },
+        Result.Err { error } => { assert error.length == 0; }
+    }
+    assert hs.state == hs_state_wait_certificate_verify();
+    assert hs.server_leaf_certificate.length == 432;
+
+    // CertificateVerify: RSA-PSS, so the signature cannot be checked yet.
+    let r5: Result<ClientHandshake, string> = hs_client_recv_certificate_verify_without_authenticating(hs, v_certificate_verify());
+    match r5 {
+        Result.Ok { value } => { hs = value; },
+        Result.Err { error } => { assert error.length == 0; }
+    }
+    assert hs.state == hs_state_wait_finished();
+    assert ! hs.server_certificate_verified;
+
+    // Server Finished: the MAC must verify, then the application secrets fall
+    // out of the transcript that now includes it.
+    let r6: Result<ClientHandshake, string> = hs_client_recv_finished(hs, v_server_finished());
+    match r6 {
+        Result.Ok { value } => { hs = value; },
+        Result.Err { error } => { assert error.length == 0; }
+    }
+    assert hs.state == hs_state_connected();
+    // Transcript-Hash(ClientHello..server Finished).
+    assert eq_bytes(hs_transcript_hash(hs), hexb("9608102a0f1ccc6db6250b7b7e417b1a000eaada3daae4777a7686c9ff83df13"));
+    assert eq_bytes(hs.client_application_traffic_secret, hexb("9e40646ce79a7f9dc05af8889bce6552875afa0b06df0087f792ebb7c17504a5"));
+    assert eq_bytes(hs.server_application_traffic_secret, hexb("a11af9f05531f856ad47116b45a950328204b4f44bfb6b3a4b4f1f3fcb631643"));
+
+    // The client's own Finished must reproduce the RFC's bytes exactly — the
+    // end-to-end proof that the transcript never diverged.
+    let fin: Result<int[], string> = hs_client_finished_message(hs);
+    match fin {
+        Result.Ok { value } => {
+            assert eq_bytes(value, v_client_finished());
+        },
+        Result.Err { error } => { assert error.length == 0; }
+    }
+}
+
+// ── Record-layer key switch (RFC 8446 §7.3) ──────────────────────
+test "tls13_handshake: traffic key/iv match RFC 8448 for the negotiated suite" {
+    let client_ap: int[] = hexb("9e40646ce79a7f9dc05af8889bce6552875afa0b06df0087f792ebb7c17504a5");
+    // RFC 8448 negotiates AES-128-GCM, so the key is 16 bytes.
+    let key: int[] = tls13_traffic_key(client_ap, tls_cipher_aes_128_gcm_sha256());
+    let iv: int[] = tls13_traffic_iv(client_ap);
+    assert eq_bytes(key, hexb("17422dda596ed5d9acd890e3c63f5051"));
+    assert eq_bytes(iv, hexb("5b78923dee08579033e523d9"));
+}
+
+test "tls13_handshake: ChaCha20-Poly1305 takes a 32-byte traffic key" {
+    let client_ap: int[] = hexb("9e40646ce79a7f9dc05af8889bce6552875afa0b06df0087f792ebb7c17504a5");
+    let key: int[] = tls13_traffic_key(client_ap, tls_cipher_chacha20_poly1305_sha256());
+    assert key.length == 32;
+    // Not a prefix of the 16-byte AES-128-GCM key derived from the same
+    // secret: HKDF-Expand-Label encodes the output length inside the HkdfLabel
+    // it expands, so changing the length changes every byte. Asserting the
+    // difference pins that the length is bound into the derivation rather
+    // than merely truncating a common stream.
+    let aes_key: int[] = tls13_traffic_key(client_ap, tls_cipher_aes_128_gcm_sha256());
+    assert aes_key.length == 16;
+    assert ! eq_bytes(_prefix(key, 16), aes_key);
+}
+
+test "tls13_handshake: an unsupported suite yields no traffic key" {
+    let client_ap: int[] = hexb("9e40646ce79a7f9dc05af8889bce6552875afa0b06df0087f792ebb7c17504a5");
+    // TLS_AES_256_GCM_SHA384 (0x1302) is a SHA-384 suite and is not supported.
+    assert tls13_traffic_key(client_ap, 4866).length == 0;
+}
+
+fn _prefix(xs: int[], n: int) -> int[] {
+    let mut out: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= n { break; }
+        if i >= xs.length { break; }
+        out.push(xs[i]);
+        i += 1;
+    }
+    return out;
+}
+
+// ── CertificateVerify signed content (RFC 8446 §4.4.3) ───────────
+test "tls13_handshake: CertificateVerify content is 64 spaces, context, 0x00, hash" {
+    let th: int[] = hexb("860c06edc07858ee8e78f0e7428c58edd6b43f2ca3e6e95f02ed063cf0e1cad8");
+    let content: int[] = tls13_certificate_verify_content("TLS 1.3, server CertificateVerify", th);
+    // 64 + 33 + 1 + 32
+    assert content.length == 130;
+    let mut i: int = 0;
+    loop {
+        if i >= 64 { break; }
+        assert content[i] == 32;
+        i += 1;
+    }
+    assert content[64] == 84;  // 'T'
+    assert content[96] == 121;  // 'y', the last byte of the context string
+    assert content[97] == 0;  // the separator
+    let mut j: int = 0;
+    loop {
+        if j >= 32 { break; }
+        assert content[98 + j] == th[j];
+        j += 1;
+    }
+}
+
+// ── Fail-closed behaviour ────────────────────────────────────────
+test "tls13_handshake: messages arriving out of order are rejected" {
+    let created: Result<ClientHandshake, string> = hs_client_new(v_client_private());
+    let mut hs: ClientHandshake = _sentinel_unreachable();
+    match created {
+        Result.Ok { value } => { hs = value; },
+        Result.Err { error } => { assert error.length == 0; }
+    }
+    // A ServerHello before the ClientHello has been sent.
+    let early: Result<ClientHandshake, string> = hs_client_recv_server_hello(hs, v_server_hello());
+    match early {
+        Result.Ok { value } => { assert false; },
+        Result.Err { error } => { assert error.length > 0; }
+    }
+}
+
+test "tls13_handshake: EncryptedExtensions cannot stand in for a Certificate" {
+    let mut hs: ClientHandshake = _drive_to_wait_certificate();
+    assert hs.state == hs_state_wait_certificate();
+    // Replaying EncryptedExtensions where a Certificate belongs.
+    let bad: Result<ClientHandshake, string> = hs_client_recv_certificate(hs, v_encrypted_extensions());
+    match bad {
+        Result.Ok { value } => { assert false; },
+        Result.Err { error } => { assert error.length > 0; }
+    }
+}
+
+test "tls13_handshake: a tampered server Finished MAC is rejected" {
+    let mut hs: ClientHandshake = _drive_to_wait_finished();
+    assert hs.state == hs_state_wait_finished();
+
+    let mut tampered: int[] = [];
+    let good: int[] = v_server_finished();
+    let mut i: int = 0;
+    loop {
+        if i >= good.length { break; }
+        tampered.push(good[i]);
+        i += 1;
+    }
+    // Flip one bit of the verify_data (the last byte of the message).
+    tampered[tampered.length - 1] = tampered[tampered.length - 1] ^ 1;
+
+    let bad: Result<ClientHandshake, string> = hs_client_recv_finished(hs, tampered);
+    match bad {
+        Result.Ok { value } => { assert false; },
+        Result.Err { error } => { assert error.length > 0; }
+    }
+}
+
+test "tls13_handshake: an RSA-PSS CertificateVerify is refused by the verifying path" {
+    let mut hs: ClientHandshake = _drive_to_wait_certificate_verify();
+    assert hs.state == hs_state_wait_certificate_verify();
+    // The verifying path must refuse rsa_pss_rsae_sha256 rather than pretend
+    // to have checked it — only ed25519 is available until SFN-653.
+    let bad: Result<ClientHandshake, string> = hs_client_recv_certificate_verify(hs, v_certificate_verify(), "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff");
+    match bad {
+        Result.Ok { value } => { assert false; },
+        Result.Err { error } => { assert error.length > 0; }
+    }
+}
+
+test "tls13_handshake: the client Finished is unavailable before the server's" {
+    let mut hs: ClientHandshake = _drive_to_wait_finished();
+    let premature: Result<int[], string> = hs_client_finished_message(hs);
+    match premature {
+        Result.Ok { value } => { assert false; },
+        Result.Err { error } => { assert error.length > 0; }
+    }
+}
+
+// ── ClientHello encoding ─────────────────────────────────────────
+// The RFC 8448 trace exercises exactly one ClientHello — one this module did
+// not encode — so on its own it cannot catch a wrong length prefix in a field
+// that trace happens not to stress. This vector was derived independently from
+// the RFC 8446 §4.1.2 wire format and pins every prefix byte-for-byte:
+// note the 1-byte versions prefix inside supported_versions (43) against the
+// 2-byte prefixes everywhere else, and the doubly-nested lengths in
+// server_name (0) and key_share (51).
+test "tls13_handshake: the encoded ClientHello matches the RFC 8446 wire format" {
+    let mut random: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= 32 { break; }
+        random.push(i);
+        i += 1;
+    }
+    let mut key_share: int[] = [];
+    let mut j: int = 0;
+    loop {
+        if j >= 32 { break; }
+        key_share.push(255 - j);
+        j += 1;
+    }
+    let session_id: int[] = [];
+    let message: int[] = encode_client_hello(random, session_id, key_share, "example.com");
+    assert eq_bytes(message, hexb("010000800303000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f00000213030100005500000010000e00000b6578616d706c652e636f6d000a00040002001d000d000400020807002b0003020304003300260024001d0020fffefdfcfbfaf9f8f7f6f5f4f3f2f1f0efeeedecebeae9e8e7e6e5e4e3e2e1e0"));
+}
+
+// A ClientHello with no server_name must simply omit the extension rather
+// than emit an empty one.
+test "tls13_handshake: an empty server_name omits the extension entirely" {
+    let mut random: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= 32 { break; }
+        random.push(i);
+        i += 1;
+    }
+    let mut key_share: int[] = [];
+    let mut j: int = 0;
+    loop {
+        if j >= 32 { break; }
+        key_share.push(255 - j);
+        j += 1;
+    }
+    let session_id: int[] = [];
+    let with_sni: int[] = encode_client_hello(random, session_id, key_share, "example.com");
+    let without: int[] = encode_client_hello(random, session_id, key_share, "");
+    // The server_name extension is 4 header bytes + 16 data bytes: the
+    // 2-byte list length, the 1-byte name type, the 2-byte host length and
+    // the 11-byte host itself.
+    assert with_sni.length - without.length == 20;
+}
+
+test "tls13_handshake: the encoded ClientHello frames and offers correctly" {
+    let created: Result<ClientHandshake, string> = hs_client_new(v_client_private());
+    let mut hs: ClientHandshake = _sentinel_unreachable();
+    match created {
+        Result.Ok { value } => { hs = value; },
+        Result.Err { error } => { assert error.length == 0; }
+    }
+
+    let random: int[] = hexb("cb34ecb1e78163ba1c38c6dacb196a6dffa21a8d9912ec18a2ef6283024dece7");
+    let session_id: int[] = [];
+    let message: int[] = hs_client_hello(hs, random, session_id, "server");
+    assert message.length > 0;
+
+    // The message must be well-framed...
+    let parsed: Result<int, string> = _framed_body_length(message);
+    match parsed {
+        Result.Ok { value } => { assert value + 4 == message.length; },
+        Result.Err { error } => { assert error.length == 0; }
+    }
+
+    // ...and must offer exactly the one suite the capsule can seal with.
+    let body: int[] = _body_of(message);
+    let suites: Result<int[], string> = parse_client_hello_cipher_suites(body);
+    match suites {
+        Result.Ok { value } => {
+            assert value.length == 1;
+            assert value[0] == tls_cipher_chacha20_poly1305_sha256();
+        },
+        Result.Err { error } => { assert error.length == 0; }
+    }
+
+    // A ClientHello this module encoded must be acceptable to its own state
+    // machine — the round trip the RFC 8448 vector cannot exercise.
+    let sent: Result<ClientHandshake, string> = hs_client_send_hello(hs, message);
+    match sent {
+        Result.Ok { value } => {
+            assert value.state == hs_state_wait_server_hello();
+        },
+        Result.Err { error } => { assert error.length == 0; }
+    }
+}
+
+test "tls13_handshake: a ServerHello selecting an unoffered suite is rejected" {
+    let created: Result<ClientHandshake, string> = hs_client_new(v_client_private());
+    let mut hs: ClientHandshake = _sentinel_unreachable();
+    match created {
+        Result.Ok { value } => { hs = value; },
+        Result.Err { error } => { assert error.length == 0; }
+    }
+
+    // Send a ClientHello offering only ChaCha20-Poly1305...
+    let random: int[] = hexb("cb34ecb1e78163ba1c38c6dacb196a6dffa21a8d9912ec18a2ef6283024dece7");
+    let session_id: int[] = [];
+    let message: int[] = hs_client_hello(hs, random, session_id, "server");
+    let sent: Result<ClientHandshake, string> = hs_client_send_hello(hs, message);
+    match sent {
+        Result.Ok { value } => { hs = value; },
+        Result.Err { error } => { assert error.length == 0; }
+    }
+
+    // ...then reply with RFC 8448's ServerHello, which selects AES-128-GCM.
+    let bad: Result<ClientHandshake, string> = hs_client_recv_server_hello(hs, v_server_hello());
+    match bad {
+        Result.Ok { value } => { assert false; },
+        Result.Err { error } => { assert error.length > 0; }
+    }
+}
+
+// ── Drive helpers ────────────────────────────────────────────────
+fn _drive_to_wait_certificate() -> ClientHandshake {
+    let created: Result<ClientHandshake, string> = hs_client_new(v_client_private());
+    let mut hs: ClientHandshake = _sentinel_unreachable();
+    match created {
+        Result.Ok { value } => { hs = value; },
+        Result.Err { error } => { return _sentinel_unreachable(); }
+    }
+    let r1: Result<ClientHandshake, string> = hs_client_send_hello(hs, v_client_hello());
+    match r1 {
+        Result.Ok { value } => { hs = value; },
+        Result.Err { error } => { return _sentinel_unreachable(); }
+    }
+    let r2: Result<ClientHandshake, string> = hs_client_recv_server_hello(hs, v_server_hello());
+    match r2 {
+        Result.Ok { value } => { hs = value; },
+        Result.Err { error } => { return _sentinel_unreachable(); }
+    }
+    let r3: Result<ClientHandshake, string> = hs_client_recv_encrypted_extensions(hs, v_encrypted_extensions());
+    match r3 {
+        Result.Ok { value } => { hs = value; },
+        Result.Err { error } => { return _sentinel_unreachable(); }
+    }
+    return hs;
+}
+
+fn _drive_to_wait_certificate_verify() -> ClientHandshake {
+    let mut hs: ClientHandshake = _drive_to_wait_certificate();
+    let r4: Result<ClientHandshake, string> = hs_client_recv_certificate(hs, v_certificate());
+    match r4 {
+        Result.Ok { value } => { hs = value; },
+        Result.Err { error } => { return _sentinel_unreachable(); }
+    }
+    return hs;
+}
+
+fn _drive_to_wait_finished() -> ClientHandshake {
+    let mut hs: ClientHandshake = _drive_to_wait_certificate_verify();
+    let r5: Result<ClientHandshake, string> = hs_client_recv_certificate_verify_without_authenticating(hs, v_certificate_verify());
+    match r5 {
+        Result.Ok { value } => { hs = value; },
+        Result.Err { error } => { return _sentinel_unreachable(); }
+    }
+    return hs;
+}
+
+fn _framed_body_length(message: int[]) -> Result<int, string> {
+    let parsed: Result<int, string> = _parse_len(message);
+    return parsed;
+}
+
+fn _parse_len(message: int[]) -> Result<int, string> {
+    let parsed = parse_handshake_message(message, 0);
+    match parsed {
+        Result.Ok { value } => {
+            return Result.Ok { value: value.body.length };
+        },
+        Result.Err { error } => {
+            return Result.Err { error: error };
+        }
+    }
+}
+
+fn _body_of(message: int[]) -> int[] {
+    let empty: int[] = [];
+    let parsed = parse_handshake_message(message, 0);
+    match parsed {
+        Result.Ok { value } => { return value.body; },
+        Result.Err { error } => { return empty; }
+    }
+}

@@ -1,0 +1,1007 @@
+// capsules/sfn/crypto/src/tls13_handshake.sfn
+//
+// TLS 1.3 client handshake state machine (RFC 8446 §4) for the sfn/crypto
+// capsule (SFEP-0048, Phase B). Drives ClientHello -> ServerHello ->
+// EncryptedExtensions -> Certificate -> CertificateVerify -> Finished,
+// maintaining the running transcript hash and wiring the X25519 key share
+// (x25519.sfn) into the key schedule (tls13_schedule.sfn) so the record layer
+// (tls13_record.sfn) can be rekeyed at each transition.
+//
+// Wire encode/parse lives in `tls13_handshake_codec.sfn`; this module owns
+// only sequencing, the transcript, the key schedule and the Finished MAC. The
+// server handshake is a sibling issue (SFN-654). Resumption, 0-RTT and
+// HelloRetryRequest are outside the minimal cut and are rejected rather than
+// mis-handled.
+//
+// This module performs no I/O: it consumes handshake messages the caller has
+// already deframed from the record layer and returns the bytes the caller must
+// send. That keeps it pure and lets it be driven end-to-end from a canned
+// transcript such as RFC 8448 §3. Wiring it to a live socket is Phase D's job
+// (SFN-341), which is also where the runtime-side vendoring question deferred
+// by SFEP-0048 §6.5 gets answered.
+//
+// Operates end-to-end on `int[]` byte arrays (never `string`): handshake
+// messages are arbitrary binary that routinely contain 0x00 bytes, which a
+// Sailfin `string` cannot represent (SFEP-0048 §3.3 item 6).
+//
+// Shape note — why every step returns a fresh state. A scalar field written
+// through a function parameter does not propagate back to the caller in
+// Sailfin today, while array fields, being reference-typed, do. An in-place
+// state machine would therefore silently lose every `state` transition while
+// appearing to work on the byte buffers. Each step consequently builds and
+// returns a whole `ClientHandshake`. The `transcript` array is deliberately
+// shared across successive states rather than copied: it is append-only, and
+// copying it at each of the six steps would be quadratic in the handshake
+// size.
+//
+// That sharing makes a `ClientHandshake` SINGLE-USE, and callers must treat it
+// so: once a step returns, discard the state you passed in, on Err as much as
+// on Ok. Re-invoking a step with a stale state passes the state guard — the
+// old struct's scalar `state` never advanced — while appending to the same
+// shared transcript a second time. The handshake then fails several steps
+// later at the server Finished MAC, pointing at the wrong message entirely.
+import { ct_eq_bytes } from "./bits";
+import { ed25519_verify } from "./ed25519";
+import { hmac_sha256_bytes, sha256_bytes } from "./hkdf";
+import {
+    CertificateMsg,
+    CertificateVerifyMsg,
+    HandshakeMessage,
+    ServerHelloMsg,
+    encode_client_hello,
+    encode_handshake_message,
+    hs_type_certificate,
+    hs_type_certificate_verify,
+    hs_type_client_hello,
+    hs_type_encrypted_extensions,
+    hs_type_finished,
+    hs_type_server_hello,
+    parse_certificate,
+    parse_certificate_verify,
+    parse_client_hello_cipher_suites,
+    parse_client_hello_legacy_session_id,
+    parse_encrypted_extensions,
+    parse_finished,
+    parse_handshake_message,
+    parse_server_hello,
+    tls_cipher_aes_128_gcm_sha256,
+    tls_cipher_chacha20_poly1305_sha256,
+    tls_group_x25519,
+    tls_sigalg_ed25519,
+    tls_version_13,
+    tls_version_legacy
+} from "./tls13_handshake_codec";
+import {
+    hkdf_expand_label,
+    tls13_client_application_traffic_secret,
+    tls13_client_handshake_traffic_secret,
+    tls13_early_secret,
+    tls13_handshake_secret,
+    tls13_master_secret,
+    tls13_server_application_traffic_secret,
+    tls13_server_handshake_traffic_secret
+} from "./tls13_schedule";
+import { x25519, x25519_base, x25519_is_zero } from "./x25519";
+
+// ── Client handshake states (RFC 8446 §A.1) ──────────────────────
+// The subset the minimal cut reaches. WAIT_CERT_CR is collapsed into
+// WAIT_CERT because certificate_request (client authentication) is not
+// offered, and WAIT_EOED/WAIT_FINISHED's early-data branches do not exist
+// without 0-RTT.
+fn hs_state_start() -> int { return 0; }
+
+fn hs_state_wait_server_hello() -> int { return 1; }
+
+fn hs_state_wait_encrypted_extensions() -> int { return 2; }
+
+fn hs_state_wait_certificate() -> int { return 3; }
+
+fn hs_state_wait_certificate_verify() -> int { return 4; }
+
+fn hs_state_wait_finished() -> int { return 5; }
+
+fn hs_state_connected() -> int { return 6; }
+
+// SHA-256 output length. The minimal cut accepts only SHA-256 cipher suites,
+// so every transcript hash, chaining secret and Finished verify_data is
+// exactly 32 bytes.
+fn _hash_len() -> int { return 32; }
+
+// The AEAD write_iv length is 12 for every TLS 1.3 suite (RFC 8446 §5.3).
+fn _aead_iv_len() -> int { return 12; }
+
+// Whether `suite` is a TLS 1.3 cipher suite this module can drive a handshake
+// for. Both are SHA-256 suites, so they share one transcript hash and one key
+// schedule and differ only in the AEAD — which is the record layer's concern,
+// not the handshake's. TLS_AES_256_GCM_SHA384 (0x1302) is excluded because it
+// is SHA-384: accepting it would silently change every hash length here.
+fn _is_supported_suite(suite: int) -> bool {
+    if suite == tls_cipher_chacha20_poly1305_sha256() { return true; }
+    if suite == tls_cipher_aes_128_gcm_sha256() { return true; }
+    return false;
+}
+
+// ── Handshake state ──────────────────────────────────────────────
+// The whole client-side handshake context. Secrets are carried as raw byte
+// arrays; `server_certificate_verified` records whether CertificateVerify's
+// signature was actually checked, so a caller can refuse to use a connection
+// whose peer was never authenticated.
+struct ClientHandshake {
+    state: int;
+    transcript: int[];
+    client_private: int[];
+    client_public: int[];
+    offered_cipher_suites: int[];
+    sent_legacy_session_id: int[];
+    cipher_suite: int;
+    group: int;
+    shared_secret: int[];
+    early_secret: int[];
+    handshake_secret: int[];
+    master_secret: int[];
+    client_handshake_traffic_secret: int[];
+    server_handshake_traffic_secret: int[];
+    client_application_traffic_secret: int[];
+    server_application_traffic_secret: int[];
+    server_leaf_certificate: int[];
+    server_certificate_verified: bool;
+}
+
+// ── Byte helpers ─────────────────────────────────────────────────
+// Append every byte of `src` to `dst`, masked to a byte (arrays are
+// reference-typed, so the caller's buffer grows in place).
+fn _append(dst: int[], src: int[]) -> void {
+    let mut i: int = 0;
+    loop {
+        if i >= src.length { break; }
+        dst.push(src[i] & 255);
+        i += 1;
+    }
+}
+
+// Lowercase hex encoding, for the one primitive whose surface is hex-typed
+// (`ed25519_verify`). Everything else in this module stays on byte arrays.
+fn _to_hex(bytes: int[]) -> string {
+    let digits: string = "0123456789abcdef";
+    let mut out: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= bytes.length { break; }
+        let b: int = bytes[i] & 255;
+        out = out + digits[(b >> 4) & 15] + digits[b & 15];
+        i += 1;
+    }
+    return out;
+}
+
+// Encode an ASCII string as bytes. Used only for the fixed RFC 8446 §4.4.3
+// context strings, which are ASCII by construction.
+fn _ascii_bytes(s: string) -> int[] {
+    let mut out: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= s.length { break; }
+        out.push(char_code(s[i]) & 255);
+        i += 1;
+    }
+    return out;
+}
+
+// Build the state that results from `hs` plus the fields a step changed.
+// Sailfin has no struct update syntax, so each step spells the whole record
+// out; this helper keeps that in one place rather than six.
+fn _with(hs: ClientHandshake, state: int) -> ClientHandshake {
+    return ClientHandshake {
+        state: state,
+        transcript: hs.transcript,
+        client_private: hs.client_private,
+        client_public: hs.client_public,
+        offered_cipher_suites: hs.offered_cipher_suites,
+        sent_legacy_session_id: hs.sent_legacy_session_id,
+        cipher_suite: hs.cipher_suite,
+        group: hs.group,
+        shared_secret: hs.shared_secret,
+        early_secret: hs.early_secret,
+        handshake_secret: hs.handshake_secret,
+        master_secret: hs.master_secret,
+        client_handshake_traffic_secret: hs.client_handshake_traffic_secret,
+        server_handshake_traffic_secret: hs.server_handshake_traffic_secret,
+        client_application_traffic_secret: hs.client_application_traffic_secret,
+        server_application_traffic_secret: hs.server_application_traffic_secret,
+        server_leaf_certificate: hs.server_leaf_certificate,
+        server_certificate_verified: hs.server_certificate_verified
+    };
+}
+
+// ── Traffic keys (RFC 8446 §7.3) ─────────────────────────────────
+// Derive the AEAD key for a traffic secret. "Switching keys" in TLS 1.3 is
+// exactly this call against the next secret in the schedule plus a per-
+// direction sequence number reset to 0 — the record layer itself is stateless
+// (tls13_record.sfn), so there is no key-install step to perform.
+//
+// The key length is the negotiated suite's, not a constant: ChaCha20-Poly1305
+// takes 32 bytes and AES-128-GCM 16. Returns [] fail-closed for a suite this
+// module does not support, rather than guessing a length.
+fn tls13_traffic_key(traffic_secret: int[], cipher_suite: int) -> int[] {
+    let empty: int[] = [];
+    if cipher_suite == tls_cipher_chacha20_poly1305_sha256() {
+        return hkdf_expand_label(traffic_secret, "key", [], 32);
+    }
+    if cipher_suite == tls_cipher_aes_128_gcm_sha256() {
+        return hkdf_expand_label(traffic_secret, "key", [], 16);
+    }
+    return empty;
+}
+
+// Derive the AEAD write_iv for a traffic secret (RFC 8446 §7.3).
+fn tls13_traffic_iv(traffic_secret: int[]) -> int[] {
+    return hkdf_expand_label(traffic_secret, "iv", [], _aead_iv_len());
+}
+
+// ── Finished (RFC 8446 §4.4.4) ───────────────────────────────────
+// finished_key = HKDF-Expand-Label(BaseKey, "finished", "", Hash.length).
+fn tls13_finished_key(traffic_secret: int[]) -> int[] {
+    return hkdf_expand_label(traffic_secret, "finished", [], _hash_len());
+}
+
+// verify_data = HMAC(finished_key, Transcript-Hash(Handshake Context)).
+// Returns [] fail-closed when the finished key could not be derived (a
+// traffic secret of the wrong length) or when `transcript_hash` is not a
+// SHA-256 digest. The second check matters because HMAC accepts any input
+// length: a caller passing raw transcript bytes instead of their hash would
+// otherwise get a plausible-looking verify_data for the wrong context rather
+// than an error.
+fn tls13_finished_verify_data(traffic_secret: int[], transcript_hash: int[]) -> int[] {
+    let empty: int[] = [];
+    if transcript_hash.length != _hash_len() { return empty; }
+    let key: int[] = tls13_finished_key(traffic_secret);
+    if key.length != _hash_len() { return empty; }
+    return hmac_sha256_bytes(key, transcript_hash);
+}
+
+// ── CertificateVerify signed content (RFC 8446 §4.4.3) ───────────
+// The signature is computed over 64 octets of 0x20, the context string, a
+// single 0x00 separator, and the transcript hash. The 64-space prefix exists
+// so a TLS 1.3 signature can never be confused with a TLS 1.2 one, and the
+// context string is what stops a client signature being replayed as a server
+// signature — so both are load-bearing, not padding.
+fn tls13_certificate_verify_content(context: string, transcript_hash: int[]) -> int[] {
+    let mut out: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= 64 { break; }
+        out.push(32);
+        i += 1;
+    }
+    _append(out, _ascii_bytes(context));
+    out.push(0);
+    _append(out, transcript_hash);
+    return out;
+}
+
+// The context string a client uses to check the server's CertificateVerify.
+fn tls13_server_certificate_verify_context() -> string {
+    return "TLS 1.3, server CertificateVerify";
+}
+
+// ── Step 0: create the client state ──────────────────────────────
+// `client_private` is the 32-byte X25519 scalar. It is supplied by the caller
+// rather than generated here so that this module stays free of the ![rand]
+// effect and can be driven from a known-answer transcript; a live client
+// passes `random_bytes(32)` (rand.sfn).
+fn hs_client_new(client_private: int[]) -> Result<ClientHandshake, string> {
+    if client_private.length != 32 {
+        return Result.Err {
+            error: "hs_client_new: client_private must be 32 bytes"
+        };
+    }
+
+    let public_key: int[] = x25519_base(client_private);
+    if public_key.length != 32 {
+        return Result.Err {
+            error: "hs_client_new: X25519 base point multiplication failed"
+        };
+    }
+
+    // Early Secret with no PSK: HKDF-Extract(0, 0) (RFC 8446 §7.1).
+    let no_psk: int[] = [];
+    let early: int[] = tls13_early_secret(no_psk, _hash_len());
+    if early.length != _hash_len() {
+        return Result.Err {
+            error: "hs_client_new: early secret derivation failed"
+        };
+    }
+
+    // Each empty field gets its own literal rather than sharing one `let
+    // empty`. Arrays are reference-typed, so a single shared `[]` would make
+    // ten field names alias one array, and the first in-place append to any of
+    // them would silently corrupt the other nine — surfacing as a wrong key
+    // schedule rather than a crash.
+    return Result.Ok {
+        value: ClientHandshake {
+            state: hs_state_start(),
+            transcript: [],
+            client_private: client_private,
+            client_public: public_key,
+            offered_cipher_suites: [],
+            sent_legacy_session_id: [],
+            cipher_suite: 0,
+            group: 0,
+            shared_secret: [],
+            early_secret: early,
+            handshake_secret: [],
+            master_secret: [],
+            client_handshake_traffic_secret: [],
+            server_handshake_traffic_secret: [],
+            client_application_traffic_secret: [],
+            server_application_traffic_secret: [],
+            server_leaf_certificate: [],
+            server_certificate_verified: false
+        }
+    };
+}
+
+// The ClientHello this state would send: a complete handshake message
+// offering TLS 1.3, X25519 and TLS_CHACHA20_POLY1305_SHA256, carrying the
+// state's own key share. Returns [] if the state is not at START.
+fn hs_client_hello(hs: ClientHandshake, random: int[], legacy_session_id: int[], server_name: string) -> int[] {
+    let empty: int[] = [];
+    if hs.state != hs_state_start() { return empty; }
+    return encode_client_hello(random, legacy_session_id, hs.client_public, server_name);
+}
+
+// ── Step 1: record the ClientHello that was sent ─────────────────
+// Takes the encoded ClientHello handshake message rather than encoding it
+// here, because the transcript must hash the exact bytes that went on the
+// wire. A client pairs this with `hs_client_hello`; a known-answer test feeds
+// a canned ClientHello (RFC 8448 §3) whose extension set this module does not
+// need to reproduce byte-for-byte.
+fn hs_client_send_hello(hs: ClientHandshake, client_hello: int[]) -> Result<ClientHandshake, string> {
+    if hs.state != hs_state_start() {
+        return Result.Err {
+            error: "hs_client_send_hello: not in the START state"
+        };
+    }
+
+    let body: Result<int[], string> = _take_body(client_hello, hs_type_client_hello(), "hs_client_send_hello");
+    let mut ch_body: int[] = [];
+    match body {
+        Result.Err { error } => {
+            return Result.Err { error: error };
+        },
+        Result.Ok { value } => { ch_body = value; }
+    }
+
+    // Remember what was offered so the ServerHello's selection can be checked
+    // against it rather than against what this module would have offered.
+    let suites: Result<int[], string> = parse_client_hello_cipher_suites(ch_body);
+    let mut offered: int[] = [];
+    match suites {
+        Result.Err { error } => {
+            return Result.Err { error: "hs_client_send_hello: " + error };
+        },
+        Result.Ok { value } => { offered = value; }
+    }
+    if offered.length == 0 {
+        return Result.Err {
+            error: "hs_client_send_hello: ClientHello offered no cipher suites"
+        };
+    }
+
+    // RFC 8446 §4.1.3 requires aborting if the ServerHello does not echo this
+    // back verbatim, so it has to be remembered rather than re-derived.
+    let session_id: Result<int[], string> = parse_client_hello_legacy_session_id(ch_body);
+    let mut sent_session_id: int[] = [];
+    match session_id {
+        Result.Err { error } => {
+            return Result.Err { error: "hs_client_send_hello: " + error };
+        },
+        Result.Ok { value } => { sent_session_id = value; }
+    }
+
+    _append(hs.transcript, client_hello);
+    return Result.Ok {
+        value: ClientHandshake {
+            state: hs_state_wait_server_hello(),
+            transcript: hs.transcript,
+            client_private: hs.client_private,
+            client_public: hs.client_public,
+            offered_cipher_suites: offered,
+            sent_legacy_session_id: sent_session_id,
+            cipher_suite: hs.cipher_suite,
+            group: hs.group,
+            shared_secret: hs.shared_secret,
+            early_secret: hs.early_secret,
+            handshake_secret: hs.handshake_secret,
+            master_secret: hs.master_secret,
+            client_handshake_traffic_secret: hs.client_handshake_traffic_secret,
+            server_handshake_traffic_secret: hs.server_handshake_traffic_secret,
+            client_application_traffic_secret: hs.client_application_traffic_secret,
+            server_application_traffic_secret: hs.server_application_traffic_secret,
+            server_leaf_certificate: hs.server_leaf_certificate,
+            server_certificate_verified: hs.server_certificate_verified
+        }
+    };
+}
+
+// Whether `suite` appears in the offered list.
+fn _was_offered(offered: int[], suite: int) -> bool {
+    let mut i: int = 0;
+    loop {
+        if i >= offered.length { break; }
+        if offered[i] == suite { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+// ── Step 2: ServerHello ──────────────────────────────────────────
+// Completes the key exchange: checks the negotiated parameters, runs X25519
+// against the server's key share, and derives the Handshake Secret plus both
+// handshake traffic secrets over Transcript-Hash(ClientHello..ServerHello).
+// This is the transition at which the record layer switches from cleartext to
+// the handshake traffic keys.
+fn hs_client_recv_server_hello(hs: ClientHandshake, message: int[]) -> Result<ClientHandshake, string> {
+    if hs.state != hs_state_wait_server_hello() {
+        return Result.Err {
+            error: "hs_client_recv_server_hello: unexpected ServerHello in this state"
+        };
+    }
+
+    let body: Result<int[], string> = _take_body(message, hs_type_server_hello(), "hs_client_recv_server_hello");
+    let mut sh_body: int[] = [];
+    match body {
+        Result.Err { error } => {
+            return Result.Err { error: error };
+        },
+        Result.Ok { value } => { sh_body = value; }
+    }
+
+    let parsed: Result<ServerHelloMsg, string> = parse_server_hello(sh_body);
+    let mut sh: ServerHelloMsg = ServerHelloMsg {
+        legacy_version: 0,
+        random: [],
+        legacy_session_id_echo: [],
+        cipher_suite: 0,
+        selected_version: 0,
+        selected_group: 0,
+        key_exchange: []
+    };
+    match parsed {
+        Result.Err { error } => {
+            return Result.Err { error: "hs_client_recv_server_hello: " + error };
+        },
+        Result.Ok { value } => { sh = value; }
+    }
+
+    // Negotiation: the minimal cut offers exactly one version, group and
+    // cipher suite, so anything else is a downgrade or a mismatch and must
+    // abort rather than be tolerated.
+    if sh.legacy_version != tls_version_legacy() {
+        return Result.Err {
+            error: "hs_client_recv_server_hello: legacy_version must be 0x0303 (RFC 8446 §4.1.3)"
+        };
+    }
+    if sh.selected_version != tls_version_13() {
+        return Result.Err {
+            error: "hs_client_recv_server_hello: server did not select TLS 1.3"
+        };
+    }
+    // RFC 8446 §4.1.3: "A client which receives a legacy_session_id_echo field
+    // that does not match what it sent in the ClientHello MUST abort the
+    // handshake with an illegal_parameter alert." Compared in constant time
+    // for uniformity with the other equality checks on handshake material.
+    if !ct_eq_bytes(hs.sent_legacy_session_id, sh.legacy_session_id_echo) {
+        return Result.Err {
+            error: "hs_client_recv_server_hello: legacy_session_id_echo does not match the ClientHello"
+        };
+    }
+    if !_was_offered(hs.offered_cipher_suites, sh.cipher_suite) {
+        return Result.Err {
+            error: "hs_client_recv_server_hello: server selected a cipher suite the ClientHello did not offer"
+        };
+    }
+    if !_is_supported_suite(sh.cipher_suite) {
+        return Result.Err {
+            error: "hs_client_recv_server_hello: server selected a cipher suite whose hash this module does not implement (SHA-256 suites only)"
+        };
+    }
+    if sh.selected_group != tls_group_x25519() {
+        return Result.Err {
+            error: "hs_client_recv_server_hello: server selected an unoffered group"
+        };
+    }
+    if sh.key_exchange.length != 32 {
+        return Result.Err {
+            error: "hs_client_recv_server_hello: server key share is not 32 bytes"
+        };
+    }
+
+    let shared: int[] = x25519(hs.client_private, sh.key_exchange);
+    // RFC 8446 §7.4.2 requires aborting on an all-zero shared secret: it means
+    // the peer sent a small-order point, and every such point yields the same
+    // secret regardless of our private key.
+    if x25519_is_zero(shared) {
+        return Result.Err {
+            error: "hs_client_recv_server_hello: X25519 produced an all-zero shared secret"
+        };
+    }
+
+    let handshake: int[] = tls13_handshake_secret(hs.early_secret, shared);
+    if handshake.length != _hash_len() {
+        return Result.Err {
+            error: "hs_client_recv_server_hello: handshake secret derivation failed"
+        };
+    }
+
+    // Hash a copy rather than appending to the shared transcript: three
+    // derivation checks below can still fail, and because `transcript` is
+    // shared by reference an early append would leave the CALLER's state
+    // polluted with a ServerHello the handshake then rejected. Every other
+    // step appends immediately before returning Ok, for the same reason.
+    let mut pending: int[] = [];
+    _append(pending, hs.transcript);
+    _append(pending, message);
+    let th: int[] = sha256_bytes(pending);
+
+    let client_hs: int[] = tls13_client_handshake_traffic_secret(handshake, th);
+    let server_hs: int[] = tls13_server_handshake_traffic_secret(handshake, th);
+    if client_hs.length != _hash_len() {
+        return Result.Err {
+            error: "hs_client_recv_server_hello: client handshake traffic secret derivation failed"
+        };
+    }
+    if server_hs.length != _hash_len() {
+        return Result.Err {
+            error: "hs_client_recv_server_hello: server handshake traffic secret derivation failed"
+        };
+    }
+
+    // The Master Secret depends only on the Handshake Secret, so it is fixed
+    // here; the application traffic secrets it feeds still need the transcript
+    // through the server's Finished and are derived in that step.
+    let master: int[] = tls13_master_secret(handshake);
+    if master.length != _hash_len() {
+        return Result.Err {
+            error: "hs_client_recv_server_hello: master secret derivation failed"
+        };
+    }
+
+    // Every failure path is behind us, so the shared transcript can now take
+    // the ServerHello. `pending` above was only ever a copy to hash from.
+    _append(hs.transcript, message);
+    return Result.Ok {
+        value: ClientHandshake {
+            state: hs_state_wait_encrypted_extensions(),
+            transcript: hs.transcript,
+            client_private: hs.client_private,
+            client_public: hs.client_public,
+            offered_cipher_suites: hs.offered_cipher_suites,
+            sent_legacy_session_id: hs.sent_legacy_session_id,
+            cipher_suite: sh.cipher_suite,
+            group: sh.selected_group,
+            shared_secret: shared,
+            early_secret: hs.early_secret,
+            handshake_secret: handshake,
+            master_secret: master,
+            client_handshake_traffic_secret: client_hs,
+            server_handshake_traffic_secret: server_hs,
+            client_application_traffic_secret: hs.client_application_traffic_secret,
+            server_application_traffic_secret: hs.server_application_traffic_secret,
+            server_leaf_certificate: hs.server_leaf_certificate,
+            server_certificate_verified: hs.server_certificate_verified
+        }
+    };
+}
+
+// Validate a handshake message's framing and type, returning its body.
+fn _take_body(message: int[], expected_type: int, who: string) -> Result<int[], string> {
+    let parsed: Result<HandshakeMessage, string> = parse_handshake_message(message, 0);
+    match parsed {
+        Result.Err { error } => {
+            return Result.Err { error: who + ": " + error };
+        },
+        Result.Ok { value } => {
+            if value.msg_type != expected_type {
+                return Result.Err {
+                    error: who + ": unexpected handshake message type"
+                };
+            }
+            if value.consumed != message.length {
+                return Result.Err {
+                    error: who + ": trailing bytes after the handshake message"
+                };
+            }
+            return Result.Ok { value: value.body };
+        }
+    }
+}
+
+// ── Step 3: EncryptedExtensions ──────────────────────────────────
+// The first message under the handshake traffic keys. Its contents are
+// advisory for the minimal cut (no ALPN, no early data), so this step
+// validates the framing and transcripts it.
+fn hs_client_recv_encrypted_extensions(hs: ClientHandshake, message: int[]) -> Result<ClientHandshake, string> {
+    if hs.state != hs_state_wait_encrypted_extensions() {
+        return Result.Err {
+            error: "hs_client_recv_encrypted_extensions: unexpected EncryptedExtensions in this state"
+        };
+    }
+
+    let body: Result<int[], string> = _take_body(message, hs_type_encrypted_extensions(), "hs_client_recv_encrypted_extensions");
+    let mut ee_body: int[] = [];
+    match body {
+        Result.Err { error } => {
+            return Result.Err { error: error };
+        },
+        Result.Ok { value } => { ee_body = value; }
+    }
+
+    let parsed: Result<int, string> = parse_encrypted_extensions(ee_body);
+    match parsed {
+        Result.Err { error } => {
+            return Result.Err {
+                error: "hs_client_recv_encrypted_extensions: " + error
+            };
+        },
+        Result.Ok { value } => { }
+    }
+
+    _append(hs.transcript, message);
+    return Result.Ok { value: _with(hs, hs_state_wait_certificate()) };
+}
+
+// ── Step 4: Certificate ──────────────────────────────────────────
+// Stores the leaf certificate for the CertificateVerify check. Chain
+// building and the trust decision are deliberately out of scope (SFN-340);
+// this step performs no validation beyond framing.
+fn hs_client_recv_certificate(hs: ClientHandshake, message: int[]) -> Result<ClientHandshake, string> {
+    if hs.state != hs_state_wait_certificate() {
+        return Result.Err {
+            error: "hs_client_recv_certificate: unexpected Certificate in this state"
+        };
+    }
+
+    let body: Result<int[], string> = _take_body(message, hs_type_certificate(), "hs_client_recv_certificate");
+    let mut cert_body: int[] = [];
+    match body {
+        Result.Err { error } => {
+            return Result.Err { error: error };
+        },
+        Result.Ok { value } => { cert_body = value; }
+    }
+
+    let parsed: Result<CertificateMsg, string> = parse_certificate(cert_body);
+    let mut leaf: int[] = [];
+    match parsed {
+        Result.Err { error } => {
+            return Result.Err { error: "hs_client_recv_certificate: " + error };
+        },
+        Result.Ok { value } => { leaf = value.leaf; }
+    }
+
+    _append(hs.transcript, message);
+    return Result.Ok {
+        value: ClientHandshake {
+            state: hs_state_wait_certificate_verify(),
+            transcript: hs.transcript,
+            client_private: hs.client_private,
+            client_public: hs.client_public,
+            offered_cipher_suites: hs.offered_cipher_suites,
+            sent_legacy_session_id: hs.sent_legacy_session_id,
+            cipher_suite: hs.cipher_suite,
+            group: hs.group,
+            shared_secret: hs.shared_secret,
+            early_secret: hs.early_secret,
+            handshake_secret: hs.handshake_secret,
+            master_secret: hs.master_secret,
+            client_handshake_traffic_secret: hs.client_handshake_traffic_secret,
+            server_handshake_traffic_secret: hs.server_handshake_traffic_secret,
+            client_application_traffic_secret: hs.client_application_traffic_secret,
+            server_application_traffic_secret: hs.server_application_traffic_secret,
+            server_leaf_certificate: leaf,
+            server_certificate_verified: hs.server_certificate_verified
+        }
+    };
+}
+
+// ── Step 5: CertificateVerify ────────────────────────────────────
+// Verifies the server's signature over Transcript-Hash(ClientHello..
+// Certificate) — note the hash is taken BEFORE this message joins the
+// transcript, since the server signed a transcript that did not yet contain
+// its own signature.
+//
+// `leaf_public_key_hex` is the server's public key, supplied by the caller
+// rather than extracted from `server_leaf_certificate`: X.509 DER parsing is
+// SFN-504's scope and the trust decision is SFN-340's. This module checks that
+// the signature is valid for a key; deciding that the key is the right one is
+// the caller's job, and `server_certificate_verified` records which happened.
+//
+// Only Ed25519 is accepted, because `ed25519_verify` is the only signature
+// primitive in the capsule today. RSA-PSS and ECDSA-P256 — which real servers,
+// including RFC 8448's, actually use — are rejected here rather than skipped;
+// they become available with SFN-653.
+fn hs_client_recv_certificate_verify(hs: ClientHandshake, message: int[], leaf_public_key_hex: string) -> Result<ClientHandshake, string> {
+    if hs.state != hs_state_wait_certificate_verify() {
+        return Result.Err {
+            error: "hs_client_recv_certificate_verify: unexpected CertificateVerify in this state"
+        };
+    }
+
+    let body: Result<int[], string> = _take_body(message, hs_type_certificate_verify(), "hs_client_recv_certificate_verify");
+    let mut cv_body: int[] = [];
+    match body {
+        Result.Err { error } => {
+            return Result.Err { error: error };
+        },
+        Result.Ok { value } => { cv_body = value; }
+    }
+
+    let parsed: Result<CertificateVerifyMsg, string> = parse_certificate_verify(cv_body);
+    let mut cv: CertificateVerifyMsg = CertificateVerifyMsg {
+        algorithm: 0,
+        signature: []
+    };
+    match parsed {
+        Result.Err { error } => {
+            return Result.Err {
+                error: "hs_client_recv_certificate_verify: " + error
+            };
+        },
+        Result.Ok { value } => { cv = value; }
+    }
+
+    if cv.algorithm != tls_sigalg_ed25519() {
+        return Result.Err {
+            error: "hs_client_recv_certificate_verify: unsupported signature algorithm (only ed25519 is available; RSA-PSS and ECDSA-P256 arrive with SFN-653)"
+        };
+    }
+    if leaf_public_key_hex.length != 64 {
+        return Result.Err {
+            error: "hs_client_recv_certificate_verify: leaf public key must be 32 bytes of hex"
+        };
+    }
+
+    // Hash the transcript as it stood through Certificate, before appending.
+    let th: int[] = sha256_bytes(hs.transcript);
+    let content: int[] = tls13_certificate_verify_content(tls13_server_certificate_verify_context(), th);
+    let ok: bool = ed25519_verify(leaf_public_key_hex, content, _to_hex(cv.signature));
+    if !ok {
+        return Result.Err {
+            error: "hs_client_recv_certificate_verify: signature did not verify"
+        };
+    }
+
+    _append(hs.transcript, message);
+    return Result.Ok {
+        value: ClientHandshake {
+            state: hs_state_wait_finished(),
+            transcript: hs.transcript,
+            client_private: hs.client_private,
+            client_public: hs.client_public,
+            offered_cipher_suites: hs.offered_cipher_suites,
+            sent_legacy_session_id: hs.sent_legacy_session_id,
+            cipher_suite: hs.cipher_suite,
+            group: hs.group,
+            shared_secret: hs.shared_secret,
+            early_secret: hs.early_secret,
+            handshake_secret: hs.handshake_secret,
+            master_secret: hs.master_secret,
+            client_handshake_traffic_secret: hs.client_handshake_traffic_secret,
+            server_handshake_traffic_secret: hs.server_handshake_traffic_secret,
+            client_application_traffic_secret: hs.client_application_traffic_secret,
+            server_application_traffic_secret: hs.server_application_traffic_secret,
+            server_leaf_certificate: hs.server_leaf_certificate,
+            server_certificate_verified: true
+        }
+    };
+}
+
+// Transcript a CertificateVerify WITHOUT checking its signature, leaving
+// `server_certificate_verified` false.
+//
+// This exists because the handshake's key schedule and the peer-authentication
+// decision are separable, and today only the former can be exercised against a
+// real trace: RFC 8446 §4.2.3 forbids PKCS#1v1.5 in CertificateVerify, so
+// every published TLS 1.3 vector — RFC 8448 §3 included — signs with RSA-PSS
+// or ECDSA, neither of which the capsule can verify until SFN-653. Refusing
+// the message outright would make the transcript, the traffic secrets and the
+// Finished MAC untestable end-to-end.
+//
+// A connection reaching `hs_state_connected()` through this path is
+// unauthenticated and is only as trustworthy as the channel it ran over.
+// Callers that need an authenticated peer must use
+// `hs_client_recv_certificate_verify` and check
+// `server_certificate_verified`.
+//
+// Deliberately NOT re-exported from `mod.sfn`: it is reachable only by
+// importing this module directly, which the in-capsule tests do. The hazard is
+// that this is currently the path that *works* against a real server — the
+// verifying path rejects the RSA-PSS and ECDSA signatures every real server
+// sends — so a consumer picking whichever function does not demand a leaf
+// public key would get a fully-keyed, entirely unauthenticated connection. Keep
+// it off the capsule surface until SFN-653 makes the verifying path usable, at
+// which point this should be deleted rather than promoted.
+fn hs_client_recv_certificate_verify_without_authenticating(hs: ClientHandshake, message: int[]) -> Result<ClientHandshake, string> {
+    if hs.state != hs_state_wait_certificate_verify() {
+        return Result.Err {
+            error: "hs_client_recv_certificate_verify_without_authenticating: unexpected CertificateVerify in this state"
+        };
+    }
+
+    let body: Result<int[], string> = _take_body(message, hs_type_certificate_verify(), "hs_client_recv_certificate_verify_without_authenticating");
+    let mut cv_body: int[] = [];
+    match body {
+        Result.Err { error } => {
+            return Result.Err { error: error };
+        },
+        Result.Ok { value } => { cv_body = value; }
+    }
+
+    let parsed: Result<CertificateVerifyMsg, string> = parse_certificate_verify(cv_body);
+    match parsed {
+        Result.Err { error } => {
+            return Result.Err {
+                error: "hs_client_recv_certificate_verify_without_authenticating: "
+                    + error
+            };
+        },
+        Result.Ok { value } => { }
+    }
+
+    _append(hs.transcript, message);
+    return Result.Ok { value: _with(hs, hs_state_wait_finished()) };
+}
+
+// ── Step 6: server Finished ──────────────────────────────────────
+// Checks the server's Finished MAC over Transcript-Hash(ClientHello..
+// CertificateVerify) — again taken before the message joins the transcript —
+// then derives both application traffic secrets over the transcript that now
+// includes it. This is the transition at which the record layer switches from
+// the handshake keys to the application keys, with each direction's sequence
+// number reset to 0.
+fn hs_client_recv_finished(hs: ClientHandshake, message: int[]) -> Result<ClientHandshake, string> {
+    if hs.state != hs_state_wait_finished() {
+        return Result.Err {
+            error: "hs_client_recv_finished: unexpected Finished in this state"
+        };
+    }
+
+    let body: Result<int[], string> = _take_body(message, hs_type_finished(), "hs_client_recv_finished");
+    let mut fin_body: int[] = [];
+    match body {
+        Result.Err { error } => {
+            return Result.Err { error: error };
+        },
+        Result.Ok { value } => { fin_body = value; }
+    }
+
+    let parsed: Result<int[], string> = parse_finished(fin_body, _hash_len());
+    let mut received: int[] = [];
+    match parsed {
+        Result.Err { error } => {
+            return Result.Err { error: "hs_client_recv_finished: " + error };
+        },
+        Result.Ok { value } => { received = value; }
+    }
+
+    let th_before: int[] = sha256_bytes(hs.transcript);
+    let expected: int[] = tls13_finished_verify_data(hs.server_handshake_traffic_secret, th_before);
+    if expected.length != _hash_len() {
+        return Result.Err {
+            error: "hs_client_recv_finished: server Finished verify_data derivation failed"
+        };
+    }
+    // Constant-time: a byte-at-a-time comparison would leak how much of the
+    // MAC an attacker guessed correctly.
+    if !ct_eq_bytes(expected, received) {
+        return Result.Err {
+            error: "hs_client_recv_finished: server Finished MAC did not verify"
+        };
+    }
+
+    _append(hs.transcript, message);
+    let th_after: int[] = sha256_bytes(hs.transcript);
+
+    let client_ap: int[] = tls13_client_application_traffic_secret(hs.master_secret, th_after);
+    let server_ap: int[] = tls13_server_application_traffic_secret(hs.master_secret, th_after);
+    if client_ap.length != _hash_len() {
+        return Result.Err {
+            error: "hs_client_recv_finished: client application traffic secret derivation failed"
+        };
+    }
+    if server_ap.length != _hash_len() {
+        return Result.Err {
+            error: "hs_client_recv_finished: server application traffic secret derivation failed"
+        };
+    }
+
+    return Result.Ok {
+        value: ClientHandshake {
+            state: hs_state_connected(),
+            transcript: hs.transcript,
+            client_private: hs.client_private,
+            client_public: hs.client_public,
+            offered_cipher_suites: hs.offered_cipher_suites,
+            sent_legacy_session_id: hs.sent_legacy_session_id,
+            cipher_suite: hs.cipher_suite,
+            group: hs.group,
+            shared_secret: hs.shared_secret,
+            early_secret: hs.early_secret,
+            handshake_secret: hs.handshake_secret,
+            master_secret: hs.master_secret,
+            client_handshake_traffic_secret: hs.client_handshake_traffic_secret,
+            server_handshake_traffic_secret: hs.server_handshake_traffic_secret,
+            client_application_traffic_secret: client_ap,
+            server_application_traffic_secret: server_ap,
+            server_leaf_certificate: hs.server_leaf_certificate,
+            server_certificate_verified: hs.server_certificate_verified
+        }
+    };
+}
+
+// ── Step 7: the client's Finished ────────────────────────────────
+// Built over Transcript-Hash(ClientHello..server Finished) under the CLIENT
+// handshake traffic secret — the same transcript the application secrets were
+// derived from, which is why this is available only once the server's
+// Finished has been accepted. Returns the complete handshake message ready to
+// be sealed into a record.
+fn hs_client_finished_message(hs: ClientHandshake) -> Result<int[], string> {
+    if hs.state != hs_state_connected() {
+        return Result.Err {
+            error: "hs_client_finished_message: the server Finished has not been accepted yet"
+        };
+    }
+
+    let th: int[] = sha256_bytes(hs.transcript);
+    let verify_data: int[] = tls13_finished_verify_data(hs.client_handshake_traffic_secret, th);
+    if verify_data.length != _hash_len() {
+        return Result.Err {
+            error: "hs_client_finished_message: client Finished verify_data derivation failed"
+        };
+    }
+
+    let message: int[] = encode_handshake_message(hs_type_finished(), verify_data);
+    if message.length == 0 {
+        return Result.Err {
+            error: "hs_client_finished_message: could not encode the Finished message"
+        };
+    }
+    return Result.Ok { value: message };
+}
+
+// The transcript hash as it stands right now — Transcript-Hash over every
+// handshake message accepted so far. Exposed so a caller (or a known-answer
+// test) can check the transcript at each step without reaching into the
+// state.
+fn hs_transcript_hash(hs: ClientHandshake) -> int[] {
+    return sha256_bytes(hs.transcript);
+}
+
+export {
+    ClientHandshake,
+    hs_client_finished_message,
+    hs_client_hello,
+    hs_client_new,
+    hs_client_recv_certificate,
+    hs_client_recv_certificate_verify,
+    hs_client_recv_certificate_verify_without_authenticating,
+    hs_client_recv_encrypted_extensions,
+    hs_client_recv_finished,
+    hs_client_recv_server_hello,
+    hs_client_send_hello,
+    hs_state_connected,
+    hs_state_start,
+    hs_state_wait_certificate,
+    hs_state_wait_certificate_verify,
+    hs_state_wait_encrypted_extensions,
+    hs_state_wait_finished,
+    hs_state_wait_server_hello,
+    hs_transcript_hash,
+    tls13_certificate_verify_content,
+    tls13_finished_key,
+    tls13_finished_verify_data,
+    tls13_server_certificate_verify_context,
+    tls13_traffic_iv,
+    tls13_traffic_key
+};
