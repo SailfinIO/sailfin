@@ -4,7 +4,7 @@
 // Phase 1 #2 of the runtime-rewrite roadmap. Most of the integer
 // arithmetic dispatch was already wired (operation_name_for_symbol,
 // dominant_type, the integer-literal short-circuit in
-// `core.sfn:lower_expression`); these tests pin that down so a
+// `core_expression.sfn:lower_expression`); these tests pin that down so a
 // future regression is caught here. The previously-broken case was
 // `let x: float = 3.14`: `map_primitive_type` had no entry for
 // `float`, so the local was lowered as `i8*` (string pointer) and

@@ -2,14 +2,13 @@
 //
 // Operand selection for a numeric literal under an expected type.
 //
-// Lifted out of `lower_expression`'s number-literal arm (./core.sfn) so the
+// Lifted out of `lower_expression`'s number-literal arm
+// (`./core_expression.sfn`) so the
 // choice of carrier is a pure text-to-operand function: it takes the literal
 // source and the typing pressure and returns the LLVM type and value, with
 // no lines, temps, or diagnostics involved. That makes each rule below
-// directly unit-testable, and keeps `core.sfn` — which sits at its
-// line-budget ceiling in
-// `compiler/tests/unit/native_lowering_line_budget_test.sfn` — from growing
-// every time a carrier rule is added.
+// directly unit-testable and keeps the ordered expression dispatcher focused
+// on precedence and routing rather than carrier details.
 //
 // Three rules apply in order:
 //

@@ -6,7 +6,8 @@
 //   `cannot resolve return type for call to `idx.toString``
 // because the method-dispatch resolver could not establish the receiver's
 // type. The fix (`_try_lower_tostring_method` in
-// `compiler/src/llvm/expression_lowering/native/core.sfn`) intercepts a
+// `compiler/src/llvm/expression_lowering/native/core_expression_tail.sfn`)
+// intercepts a
 // primitive `.toString()` in `lower_expression` and lowers it through the
 // `number.to_string` conversion, reading the receiver type straight off
 // the lowered base operand — so a struct-field, array-length, and direct

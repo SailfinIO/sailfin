@@ -15,7 +15,7 @@
 // ships without a guard is a split that gets undone (SFN-566 records the
 // same drift pattern elsewhere).
 //
-// Why per-file ceilings rather than one family-wide maximum. Thirteen
+// Why per-file ceilings rather than one family-wide maximum. Twelve
 // siblings are still over budget, the largest at 1,608 lines. A single
 // budget set to that maximum would nominally "cover" the family while
 // licensing `core_text.sfn` (759) to grow to 1,608 in silence — the exact
@@ -62,7 +62,6 @@ fn _count_newlines(source: string) -> int {
 // ceiling that may only ever be lowered. Returns 0 for a file that is not
 // grandfathered, which then has to satisfy the full budget.
 fn _grandfathered_ceiling(name: string) -> int {
-    if name == "core.sfn" { return 1600; }
     if name == "core_concurrency_lowering.sfn" { return 1608; }
     if name == "core_ops_lowering.sfn" { return 1581; }
     if name == "core_literals_lowering.sfn" { return 1447; }

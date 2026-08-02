@@ -4,7 +4,7 @@
 // not the original parameter.
 //
 // Before the fix, identifier resolution in
-// `compiler/src/llvm/expression_lowering/native/core.sfn` searched
+// `compiler/src/llvm/expression_lowering/native/core_expression_tail.sfn` searched
 // `find_parameter_binding` before `find_local_binding`, so the
 // parameter always won. The locals list already records bindings
 // newest-first; the fix is to consult it first and only fall
