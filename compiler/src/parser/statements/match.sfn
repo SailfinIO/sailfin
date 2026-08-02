@@ -1,0 +1,368 @@
+// compiler/src/parser/statements/match.sfn
+//
+// Match statement, case, and guard parsing.
+import {
+    Block,
+    Decorator,
+    Expression,
+    MatchCase,
+    Statement
+} from "../../ast";
+import { Token } from "../../token";
+import { expression_from_tokens } from "../expressions";
+import {
+    append_token,
+    collect_pattern_until_arrow,
+    collect_until,
+    consume_keyword,
+    find_top_level_identifier,
+    identifier_matches,
+    parser_advance_raw,
+    parser_peek_raw,
+    skip_trivia,
+    source_span_from_tokens,
+    symbol_matches,
+    token_slice,
+    tokens_to_text,
+    trim_token_edges
+} from "../token_utils";
+import {
+    BlockStatementParseResult,
+    MatchCaseParseResult,
+    MatchCaseTokenSplit,
+    MatchCasesParseResult,
+    Parser
+} from "../types";
+import { trim_text } from "../utils";
+import { parse_block } from "./block";
+
+fn parse_match_statement(parser: Parser, decorators: Decorator[]) -> BlockStatementParseResult {
+    let original = parser;
+    let mut current = skip_trivia(parser);
+    if !identifier_matches(parser_peek_raw(current), "match") {
+        return BlockStatementParseResult {
+            parser: original,
+            statement: null,
+            success: false
+        };
+    }
+    current = consume_keyword(current, "match");
+
+    let value_capture = collect_until(skip_trivia(current), ["{"]);
+    current = value_capture.parser;
+    let value_tokens = trim_token_edges(value_capture.tokens);
+    if value_tokens.length == 0 {
+        return BlockStatementParseResult {
+            parser: original,
+            statement: null,
+            success: false
+        };
+    }
+    let match_expression = expression_from_tokens(value_tokens);
+
+    let body_result = parse_match_cases(current);
+    if !body_result.success {
+        return BlockStatementParseResult {
+            parser: original,
+            statement: null,
+            success: false
+        };
+    }
+    current = body_result.parser;
+
+    current = skip_trivia(current);
+    if current.index < current.tokens.length {
+        let terminator = parser_peek_raw(current);
+        if symbol_matches(terminator, ";") {
+            current = parser_advance_raw(current);
+        }
+    }
+
+    let statement = Statement.MatchStatement {
+        expression: match_expression,
+        cases: body_result.cases,
+        decorators: decorators
+    };
+
+    return BlockStatementParseResult {
+        parser: current,
+        statement: statement,
+        success: true
+    };
+}
+
+fn parse_match_cases(parser: Parser) -> MatchCasesParseResult {
+    let mut current = skip_trivia(parser);
+    current = advance_to_symbol_local(current, "{");
+    let peek = parser_peek_raw(current);
+    if !symbol_matches(peek, "{") {
+        return MatchCasesParseResult {
+            parser: parser,
+            cases: [],
+            success: false
+        };
+    }
+    current = parser_advance_raw(current);
+
+    let mut cases: MatchCase[] = [];
+
+    loop {
+        current = skip_trivia(current);
+        let token = parser_peek_raw(current);
+        if symbol_matches(token, "}") {
+            current = parser_advance_raw(current);
+            break;
+        }
+        if token.kind.variant == "EndOfFile" {
+            return MatchCasesParseResult {
+                parser: parser,
+                cases: [],
+                success: false
+            };
+        }
+
+        let case_result = parse_match_case(current);
+        let mut _if411: boolean = false;
+        if !case_result.success { _if411 = true; }
+        if case_result.case == null { _if411 = true; }
+        if _if411 {
+            return MatchCasesParseResult {
+                parser: parser,
+                cases: [],
+                success: false
+            };
+        }
+        current = case_result.parser;
+        cases = append_match_case(cases, case_result.case);
+
+        current = skip_trivia(current);
+        let separator = parser_peek_raw(current);
+        if symbol_matches(separator, ",") {
+            current = parser_advance_raw(current);
+        }
+    }
+
+    return MatchCasesParseResult {
+        parser: current,
+        cases: cases,
+        success: true
+    };
+}
+
+fn parse_match_case(parser: Parser) -> MatchCaseParseResult {
+    let original = parser;
+    let mut current = skip_trivia(parser);
+
+    if identifier_matches(parser_peek_raw(current), "case") {
+        current = consume_keyword(current, "case");
+        current = skip_trivia(current);
+    }
+
+    let pattern_capture = collect_pattern_until_arrow(current);
+    if !pattern_capture.success {
+        return MatchCaseParseResult {
+            parser: original,
+            case: null,
+            success: false
+        };
+    }
+    current = pattern_capture.parser;
+    let split_tokens = split_match_case_tokens(pattern_capture.tokens);
+    if split_tokens.pattern_tokens.length == 0 {
+        return MatchCaseParseResult {
+            parser: original,
+            case: null,
+            success: false
+        };
+    }
+
+    let pattern_expression = expression_from_tokens(split_tokens.pattern_tokens);
+
+    let mut guard_expression: Expression? = null;
+    if split_tokens.has_guard {
+        if split_tokens.guard_tokens.length == 0 {
+            return MatchCaseParseResult {
+                parser: original,
+                case: null,
+                success: false
+            };
+        }
+        guard_expression = expression_from_tokens(split_tokens.guard_tokens);
+    }
+
+    current = skip_trivia(current);
+    let next = parser_peek_raw(current);
+
+    let mut body: Block? = null;
+
+    if symbol_matches(next, "{") {
+        let body_result = parse_block(current);
+        if body_result.block.tokens.length == 0 {
+            return MatchCaseParseResult {
+                parser: original,
+                case: null,
+                success: false
+            };
+        }
+        current = body_result.parser;
+        body = body_result.block;
+    } else if identifier_matches(next, "return") {
+        let mut block_tokens: Token[] = [];
+
+        block_tokens = append_token(block_tokens, next);
+        current = parser_advance_raw(current);
+
+        let capture = collect_until(current, [";", ",", "}"]);
+        let mut index: int = 0;
+        loop {
+            if index >= capture.tokens.length { break; }
+            block_tokens = append_token(block_tokens, capture.tokens[index]);
+            index += 1;
+        }
+
+        let trimmed_expression_tokens = trim_token_edges(capture.tokens);
+        let mut return_expression: Expression? = null;
+        if trimmed_expression_tokens.length > 0 {
+            return_expression = expression_from_tokens(trimmed_expression_tokens);
+        } else if capture.tokens.length > 0 {
+            return_expression = expression_from_tokens(capture.tokens);
+        }
+
+        current = skip_trivia(capture.parser);
+        let terminator = parser_peek_raw(current);
+        if symbol_matches(terminator, ";") {
+            block_tokens = append_token(block_tokens, terminator);
+            current = parser_advance_raw(current);
+        }
+
+        block_tokens = trim_token_edges(block_tokens);
+
+        let statement_span = source_span_from_tokens(block_tokens);
+
+        let mut statements: Statement[] = [];
+        statements = append_statement(statements, Statement.ReturnStatement {
+            expression: return_expression, span: statement_span
+        });
+        let text = trim_text(tokens_to_text(block_tokens));
+        body = Block {
+            tokens: block_tokens,
+            text: text,
+            statements: statements
+        };
+    } else {
+        let capture = collect_until(current, [";", ",", "}"]);
+        let trimmed_expression_tokens = trim_token_edges(capture.tokens);
+        if trimmed_expression_tokens.length == 0 {
+            return MatchCaseParseResult {
+                parser: original,
+                case: null,
+                success: false
+            };
+        }
+
+        let expression = expression_from_tokens(trimmed_expression_tokens);
+
+        let mut block_tokens: Token[] = [];
+        let mut index: int = 0;
+        loop {
+            if index >= capture.tokens.length { break; }
+            block_tokens = append_token(block_tokens, capture.tokens[index]);
+            index += 1;
+        }
+
+        current = skip_trivia(capture.parser);
+        let terminator = parser_peek_raw(current);
+        if symbol_matches(terminator, ";") {
+            block_tokens = append_token(block_tokens, terminator);
+            current = parser_advance_raw(current);
+        }
+
+        block_tokens = trim_token_edges(block_tokens);
+
+        let statement_span = source_span_from_tokens(block_tokens);
+
+        let mut statements: Statement[] = [];
+        statements = append_statement(statements, Statement.ExpressionStatement {
+            expression: expression, span: statement_span
+        });
+        let text = trim_text(tokens_to_text(block_tokens));
+        body = Block {
+            tokens: block_tokens,
+            text: text,
+            statements: statements
+        };
+    }
+
+    if body == null {
+        return MatchCaseParseResult {
+            parser: original,
+            case: null,
+            success: false
+        };
+    }
+
+    let case = MatchCase {
+        pattern: pattern_expression,
+        guard: guard_expression,
+        body: body
+    };
+
+    return MatchCaseParseResult {
+        parser: current,
+        case: case,
+        success: true
+    };
+}
+
+fn split_match_case_tokens(tokens: Token[]) -> MatchCaseTokenSplit {
+    let trimmed = trim_token_edges(tokens);
+    if trimmed.length == 0 {
+        return MatchCaseTokenSplit {
+            pattern_tokens: [],
+            guard_tokens: [],
+            has_guard: false
+        };
+    }
+
+    let guard_index = find_top_level_identifier(trimmed, "if");
+    if guard_index == -1 {
+        return MatchCaseTokenSplit {
+            pattern_tokens: trimmed,
+            guard_tokens: [],
+            has_guard: false
+        };
+    }
+
+    let pattern_tokens = trim_token_edges(token_slice(trimmed, 0, guard_index));
+    let guard_tokens = trim_token_edges(token_slice(trimmed, guard_index + 1, trimmed.length));
+
+    return MatchCaseTokenSplit {
+        pattern_tokens: pattern_tokens,
+        guard_tokens: guard_tokens,
+        has_guard: true
+    };
+}
+
+fn advance_to_symbol_local(parser: Parser, symbol: string) -> Parser {
+    let mut current = parser;
+    loop {
+        current = skip_trivia(current);
+        let token = parser_peek_raw(current);
+        if symbol_matches(token, symbol) { return current; }
+        if token.kind.variant == "EndOfFile" { return current; }
+        let next = parser_advance_raw(current);
+        if next.index == current.index { return current; }
+        current = next;
+    }
+    return current;
+}
+
+fn append_statement(statements: Statement[], statement: Statement) -> Statement[] {
+    statements.push(statement);
+    return statements;
+}
+
+fn append_match_case(cases: MatchCase[], case: MatchCase) -> MatchCase[] {
+    cases.push(case);
+    return cases;
+}

@@ -457,7 +457,7 @@ optional `unsafe` prefix"*). Extend that into a coherent boundary:
   arithmetic on, or `free`-ing a raw `* T` is permitted **only**:
   - inside an `extern fn` body, or
   - inside an explicit `unsafe { … }` block — the syntax **already parses today**
-    as a block statement (`compiler/src/parser/statements.sfn:287-298`) but
+    as a block statement (`compiler/src/parser/statements/block.sfn`) but
     carries **no ownership semantics yet**; this proposal gives it the
     aliasing-boundary meaning, or
   - inside a function marked `unsafe fn` (the `unsafe` prefix already parses on

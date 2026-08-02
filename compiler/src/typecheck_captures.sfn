@@ -432,7 +432,7 @@ fn walk_expression(scope: LocalBinding[], expression: Expression?) -> CaptureWal
 // pre-order property holds.
 //
 // Lambda bodies now arrive fully parsed: the expression-side lambda
-// parser delegates to the structured `parse_block` in statements.sfn
+// parser delegates to the structured `parse_block` in statements/block.sfn
 // (issue #520), so `body.statements` is populated and we walk it
 // directly — no re-parse of `body.tokens` is needed.
 fn analyze_lambda(outer_scope: LocalBinding[], lambda: Expression) -> CaptureWalkResult {

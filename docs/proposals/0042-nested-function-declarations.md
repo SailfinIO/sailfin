@@ -34,7 +34,7 @@ function values); using a nested `fn`'s bare name as a first-class value reuses
 ## 2. Motivation
 
 Today, statement-position `fn name(...)` does not parse. `parse_block_statement`
-(`compiler/src/parser/statements.sfn:198`) has arms for `let`, `for`, `loop`,
+(`compiler/src/parser/statements/block.sfn`) has arms for `let`, `for`, `loop`,
 `routine`, `if`, `match`, `with`, `unsafe`, `return`, `throw`, `try`, `assert`,
 and a `while` reserved-guard — but **no `fn` arm**. A `fn helper() { ... }`
 inside a function body therefore falls through to `parse_expression_statement`
@@ -159,10 +159,10 @@ fn bump_ok(base: int) -> int {
 
 ### 3.2 Pipeline stages
 
-#### S1 — Parser (`compiler/src/parser/statements.sfn`)
+#### S1 — Parser (`compiler/src/parser/statements/block.sfn`)
 
 Add an `fn`-name dispatch arm to `parse_block_statement`, placed before the
-`parse_expression_statement` fallthrough (before `statements.sfn:365`). Detect
+`parse_expression_statement` fallthrough in `statements/block.sfn`. Detect
 the arm with two-token lookahead: `identifier_matches(token, "fn")` **and** the
 next non-trivia token is an identifier (a *name*), which distinguishes a nested
 declaration from an anonymous lambda expression `fn(` (whose next token is `(`).
@@ -186,7 +186,7 @@ Modifier handling in v0 (reject cleanly rather than silently mis-handle):
 - `unsafe fn name(...)` → the top-level `parse_function` already threads
   `is_unsafe`; a nested `unsafe fn` is trivially supported (the body's
   `unsafe`-gated operations are checked as usual), so accept it. The `unsafe`
-  *block* arm (`statements.sfn:290`) is unaffected — that matches `unsafe {`,
+  *block* arm (`statements/block.sfn`) is unaffected — that matches `unsafe {`,
   not `unsafe fn`.
 
 #### S2 — Typecheck + scope (`compiler/src/typecheck.sfn`, `typecheck_captures.sfn`)
@@ -411,7 +411,7 @@ Net effect-system behaviour after the fix:
 
 ## 5. Self-hosting impact
 
-Passes touched, in pipeline order: **parser** (`statements.sfn`, new dispatch
+Passes touched, in pipeline order: **parser** (`statements/block.sfn`, new dispatch
 arm), **typecheck** (`typecheck.sfn` block-hoist pre-pass + E0421 walk;
 `typecheck_captures.sfn` scope reuse), **effect checker** (`effect_checker.sfn`
 inline-bug fix + nested-signature registration), **emitter/lift**
