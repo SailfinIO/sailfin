@@ -17,18 +17,6 @@
 ; Retires wholesale with the cross-windows bridge when
 ; `sfn build --target=x86_64-w64-mingw32` lands.
 
-; Self-applied compiler memory budget
-; (`runtime/sfn/platform/rlimit.sfn`, excluded from RUNTIME_MODS —
-; mingw has no getrlimit/setrlimit, so the module's libc externs
-; cannot resolve in a static Windows link; the process.sfn exclusion
-; precedent). A no-op is the correct Windows behavior: RLIMIT_AS is
-; a POSIX concept and the Sailfin implementation already gates on a
-; Linux /proc probe. Sync pinned by
-; compiler/tests/e2e/test_cross_windows_runtime_modules.sh.
-define i32 @apply_default_mem_limit() {
-  ret i32 0
-}
-
 ; Legacy untyped `serve(handler, config?)` prelude target
 ; (`runtime/sfn/concurrency/serve.sfn`, excluded from RUNTIME_MODS —
 ; serve.sfn pulls BSD-socket + scheduler externs that cannot resolve

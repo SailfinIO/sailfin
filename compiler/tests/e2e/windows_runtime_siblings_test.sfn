@@ -49,6 +49,23 @@ test "windows siblings: rlimit_windows.sfn emits and defines apply_default_mem_l
     assert contains(ir, "define i32 @apply_default_mem_limit()");
 }
 
+// SFN-698: this module was a no-op returning 0 for as long as it existed,
+// which left native Windows as the only platform running the compiler with no
+// memory ceiling at all. Pin the job-object surface so a regression back to a
+// pure pass-through fails here rather than on a host that runs out of RAM.
+// The IR is emitted for a Windows target from any host, so this stays a
+// Linux-runnable guard on code that only executes on Windows.
+test "windows siblings: rlimit_windows.sfn arms a job-object memory budget" ![io] {
+    let ir = _emit_windows("runtime/sfn/platform/rlimit_windows.sfn", "rlimit-windows-jobobj");
+    assert ir.length > 0;
+    assert contains(ir, "declare i64 @CreateJobObjectA(");
+    assert contains(ir, "declare i32 @SetInformationJobObject(");
+    assert contains(ir, "declare i32 @AssignProcessToJobObject(");
+    // The cap has to cover this process, not merely be configured — the
+    // assignment is what makes the limit bind.
+    assert contains(ir, "@GetCurrentProcess(");
+}
+
 test "windows siblings: rand_windows.sfn emits and defines sfn_rand_fill" ![io] {
     let ir = _emit_windows("runtime/sfn/platform/rand_windows.sfn", "rand-windows-emit");
     assert ir.length > 0;

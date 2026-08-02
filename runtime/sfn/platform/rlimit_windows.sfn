@@ -2,18 +2,216 @@
 //
 // Windows sibling of `runtime/sfn/platform/rlimit.sfn` (SFN-549), swapped in
 // by `target_condition_runtime_sfn_sources`
-// (`compiler/src/build/target.sfn:145-146`) for a Windows target, which
-// otherwise DROPS `rlimit.sfn` outright — leaving `apply_default_mem_limit`
+// (`compiler/src/build/target.sfn`) for a Windows target, which otherwise
+// DROPS `rlimit.sfn` outright — leaving `apply_default_mem_limit`
 // unresolved, since `compiler/src/cli/entry.sfn:156` calls it from `fn main`
 // on every compiler run.
 //
-// `apply_default_mem_limit` is a no-op returning 0, matching the real
-// module's success return for "no cap installed" (`rlimit.sfn:204`, the
-// Windows/unknown-host tail of its own platform dispatch). This is the
-// correct Windows semantic, not a degradation: `RLIMIT_AS` is POSIX, and
-// `rlimit.sfn` already gates its Linux-only enforcement behind a
-// `/proc/self/status` probe (`rlimit.sfn:178-181`) — a Windows host was
-// always going to fall through to the no-cap return. Retired only if
-// Sailfin gains a real Windows memory-budget primitive (job objects), at
-// which point this file grows a body and stops being a pure pass-through.
-fn apply_default_mem_limit() -> i32 ![io] { return 0; }
+// SFN-698: this module used to be a no-op returning 0, on the reasoning that
+// `RLIMIT_AS` is POSIX and a Windows host was always going to fall through to
+// the POSIX module's own no-cap return. That was true about `RLIMIT_AS` and
+// wrong about the consequence: it left native Windows as the ONE platform
+// running the compiler with no memory ceiling whatsoever. Measured on a
+// 14 GiB host, a native self-host's parent process grew 2.78 GiB -> 5.03 GiB
+// in 20 seconds and kept climbing; nothing would have stopped it before the
+// host died. That is precisely the failure `.claude/rules/compiler-safety.md`
+// describes as "a hard host kill, not an `sfn` error", and it is worse on a
+// 16 GiB `windows-latest` runner than on a workstation.
+//
+// Job objects are the native equivalent of `RLIMIT_AS`. A job's
+// `ProcessMemoryLimit` caps committed memory PER PROCESS in the job, which is
+// the same shape as the POSIX per-process address-space cap, and job
+// membership is inherited by child processes — so the per-module emit
+// children, `clang`, and `lld-link` all inherit the ceiling exactly as they
+// inherit `RLIMIT_AS` across fork/exec on Linux. Exceeding it fails the
+// allocation rather than killing the machine.
+//
+// Nested jobs (Windows 8+) make the "never loosen an inherited cap" rule
+// automatic: if this process is ALREADY in a job — CI harnesses commonly do
+// this — `AssignProcessToJobObject` nests, and the kernel enforces the
+// intersection of the limits. A caller-imposed tighter cap therefore wins
+// without this module having to query and compare it.
+//
+// The contract mirrors `rlimit.sfn` exactly: `SAILFIN_MEM_LIMIT` overrides
+// the 8 GiB default (bytes only); `unlimited`/`off`/`0` disables the cap
+// entirely and must short-circuit before anything is armed (sanitizer legs
+// depend on that path); a value under 1 MiB is misconfiguration and keeps the
+// default; `SAILFIN_TRACE_MEM_LIMIT=1` narrates the decision to stderr.
+// Returns 0 when the budget is in place or intentionally absent, -1 on an
+// unexpected API/allocation failure — advisory only, since a missing budget
+// removes the guardrail but must never block a build.
+// kernel32 job-object surface. Plain `extern fn` declarations, exactly as
+// `platform/process_windows.sfn` declares `CreateProcessA`/`CreatePipe` — no
+// new compiler capability is involved, so this module needs nothing from the
+// pinned seed beyond what already compiles it.
+extern fn CreateJobObjectA(attrs: *u8, name: *u8) -> i64;
+
+extern fn SetInformationJobObject(job: i64, info_class: i32, info: *u8, len: i32) -> i32;
+
+extern fn AssignProcessToJobObject(job: i64, process: i64) -> i32;
+
+extern fn GetCurrentProcess() -> i64;
+
+extern fn malloc(size: usize) -> *u8;
+
+extern fn free(ptr: *u8) -> void;
+
+extern fn memset(ptr: *u8, value: i32, n: usize) -> *u8;
+
+extern fn getenv(name: *u8) -> *u8;
+
+extern fn strlen(s: *u8) -> usize;
+
+extern fn memcmp(a: *u8, b: *u8, n: usize) -> i32;
+
+extern fn strtoll(s: *u8, end: *u8, base: i32) -> i64;
+
+// `write(2, ...)` for the trace line. The UCRT exports this POSIX shim, and
+// `platform/openssl_absent_windows.sfn` already declares and uses it the same
+// way for its stderr warnings.
+extern fn write(fd: i32, buf: *u8, count: usize) -> i64;
+
+extern fn sfn_str_eq(a: *u8, b: *u8) -> bool;
+
+// 4-byte overlay for the DWORD fields of the job-limit struct, mirroring
+// `PwDword` in `platform/process_windows.sfn`. The struct is written through
+// computed byte offsets rather than a full Sailfin mirror of
+// `JOBOBJECT_EXTENDED_LIMIT_INFORMATION`, because only two of its fields are
+// non-zero and a full mirror would restate 144 bytes of layout — including
+// two padding holes — that nothing else reads.
+struct RwDword {
+    v: i32
+}
+
+// `SAILFIN_TRACE_MEM_LIMIT` gate: non-empty and not `"0"`.
+fn _win_mem_limit_trace_enabled() -> bool {
+    let s_env: string = "SAILFIN_TRACE_MEM_LIMIT";
+    let v: *u8 = getenv(s_env as *u8);
+    if v as i64 == 0 { return false; }
+    let s_empty: string = "";
+    if memcmp(v, s_empty as *u8, 1 as usize) == 0 { return false; }
+    let s_zero: string = "0";
+    if sfn_str_eq(v, s_zero as *u8) { return false; }
+    return true;
+}
+
+// Stderr trace line. `2` is the stderr fd (inline-numeric per the
+// module-header convention in `rlimit.sfn`).
+fn _win_mem_limit_trace(msg: string) ![io] {
+    if !_win_mem_limit_trace_enabled() { return; }
+    let p: *u8 = msg as *u8;
+    write(2, p, strlen(p));
+}
+
+// Install `target` bytes as a per-process committed-memory cap on a job
+// object holding this process. Returns 0 on success, -1 on any API or
+// allocation failure.
+//
+// `JOBOBJECT_EXTENDED_LIMIT_INFORMATION` is 144 bytes on x86_64:
+//
+//   0    BasicLimitInformation.PerProcessUserTimeLimit  (8)
+//   8    BasicLimitInformation.PerJobUserTimeLimit      (8)
+//   16   BasicLimitInformation.LimitFlags               (4) + 4 padding
+//   24   BasicLimitInformation.MinimumWorkingSetSize    (8)
+//   32   BasicLimitInformation.MaximumWorkingSetSize    (8)
+//   40   BasicLimitInformation.ActiveProcessLimit       (4) + 4 padding
+//   48   BasicLimitInformation.Affinity                 (8)
+//   56   BasicLimitInformation.PriorityClass            (4)
+//   60   BasicLimitInformation.SchedulingClass          (4)
+//   64   IoInfo                                         (48, six ULONGLONGs)
+//   112  ProcessMemoryLimit                             (8)
+//   120  JobMemoryLimit                                 (8)
+//   128  PeakProcessMemoryUsed                          (8)
+//   136  PeakJobMemoryUsed                              (8)
+//
+// Only `LimitFlags` @16 and `ProcessMemoryLimit` @112 are set; the buffer is
+// zeroed first so every other field reads as "no limit".
+fn _win_apply_job_memory_limit(target: i64) -> i32 ![io] {
+    // A NULL name creates an unnamed job, and a NULL security-attributes
+    // pointer gives it default (non-inheritable-handle) security. Neither
+    // needs a real argument here.
+    let job: i64 = CreateJobObjectA(null, null);
+    if job == 0 { return -1; }
+
+    let buf: *u8 = malloc(144 as usize);
+    if buf as i64 == 0 { return -1; }
+    memset(buf, 0, 144 as usize);
+
+    // JOB_OBJECT_LIMIT_PROCESS_MEMORY (0x00000100) — the flag that makes the
+    // kernel read `ProcessMemoryLimit` at all.
+    let flags_view: *RwDword = (buf as i64 + 16) as *RwDword;
+    flags_view.v = 256;
+
+    atomic_store((buf as i64 + 112) as *i64, target);
+
+    // JobObjectExtendedLimitInformation = 9.
+    let rc: i32 = SetInformationJobObject(job, 9, buf, 144);
+    free(buf);
+    if rc == 0 { return -1; }
+
+    if AssignProcessToJobObject(job, GetCurrentProcess()) == 0 { return -1; }
+
+    // The job handle is deliberately NOT closed. The cap must outlive this
+    // function for the whole compiler run, and a job survives its last handle
+    // closing only while processes remain assigned — so holding the handle
+    // open is the honest way to express "for the lifetime of this process",
+    // and the OS reclaims it at exit. `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` is
+    // deliberately NOT set: children must outlive nothing here, and arming it
+    // would turn a handle-lifetime mistake into killed build children.
+    return 0;
+}
+
+// Apply the compiler's default memory budget. Returns 0 when the budget is in
+// place (or intentionally absent: disabled via env), -1 on an unexpected job
+// object/allocation failure — callers treat that as advisory, not fatal.
+fn apply_default_mem_limit() -> i32 ![io] {
+    // Resolve the requested budget first, mirroring `rlimit.sfn` so the two
+    // platforms cannot drift on what `SAILFIN_MEM_LIMIT` means. 8 GiB is the
+    // historical repo-wide default.
+    let mut target: i64 = 8589934592;
+    let mut explicit: bool = false;
+
+    let s_env: string = "SAILFIN_MEM_LIMIT";
+    let env_val: *u8 = getenv(s_env as *u8);
+    if env_val as i64 != 0 {
+        let s_empty: string = "";
+        if memcmp(env_val, s_empty as *u8, 1 as usize) != 0 {
+            let s_unlimited: string = "unlimited";
+            let s_off: string = "off";
+            let s_zero: string = "0";
+            if sfn_str_eq(env_val, s_unlimited as *u8) || sfn_str_eq(env_val, s_off as *u8)
+                || sfn_str_eq(env_val, s_zero as *u8) {
+                let m_off: string = "[mem-limit] self-cap disabled via SAILFIN_MEM_LIMIT\n";
+                _win_mem_limit_trace(m_off);
+                return 0;
+            }
+            let parsed: i64 = strtoll(env_val, null, 10);
+            if parsed >= 1048576 {
+                target = parsed;
+                explicit = true;
+            } else {
+                // Below 1 MiB (or unparsable) is misconfiguration — most
+                // likely a suffixed value like "4G" that strtoll truncates to
+                // 4. Keep the default rather than installing a budget that
+                // kills the process at the first allocation.
+                let m_bad: string = "[mem-limit] invalid SAILFIN_MEM_LIMIT (want bytes >= 1048576, or 'unlimited') — keeping the 8 GiB default\n";
+                _win_mem_limit_trace(m_bad);
+            }
+        }
+    }
+
+    if _win_apply_job_memory_limit(target) != 0 {
+        let m_fail: string = "[mem-limit] job-object memory limit failed — continuing without a self-cap\n";
+        _win_mem_limit_trace(m_fail);
+        return -1;
+    }
+
+    if explicit {
+        let m_env: string = "[mem-limit] job-object ProcessMemoryLimit set from SAILFIN_MEM_LIMIT\n";
+        _win_mem_limit_trace(m_env);
+    } else {
+        let m_def: string = "[mem-limit] job-object ProcessMemoryLimit set to the 8 GiB default\n";
+        _win_mem_limit_trace(m_def);
+    }
+    return 0;
+}
