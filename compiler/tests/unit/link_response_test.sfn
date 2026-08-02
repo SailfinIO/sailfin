@@ -1,0 +1,72 @@
+// compiler/tests/unit/link_response_test.sfn
+//
+// Pure unit coverage for the length-gated link response-file path
+// (SFN-641). `link_argv_or_response_file` itself is `![io]` and covered
+// by `compiler/tests/integration/link_response_collapse_test.sfn`; these
+// tests cover the pure length/escaping helpers it builds on.
+//
+// The escaping cases matter disproportionately: their payload
+// (backslash-separated paths) only occurs on a Windows host, so a Linux
+// CI run would never produce one naturally even though it exercises the
+// response-file path itself on every over-threshold link.
+import { expect_eq_bool, expect_eq_int, expect_eq_str } from "sfn/test";
+
+import { link_argv_flat_length, link_response_body, link_response_threshold } from "../../src/build/link_response";
+
+test "link response: flat length counts three overhead chars per argument" ![pure] {
+    // Mirrors `_pw_build_cmdline`: every arg gets two wrapping quotes
+    // plus one separator, unconditionally. "ld"(2+3) + "-o"(2+3) +
+    // "out"(3+3) = 16.
+    let argv = ["ld", "-o", "out"];
+    assert expect_eq_int(link_argv_flat_length(argv), 16).ok;
+}
+
+test "link response: flat length overhead does not depend on whitespace" ![pure] {
+    // The runtime quotes every arg whether or not it contains a space,
+    // so a space costs only its own character. Modelling the quotes as
+    // whitespace-triggered undercounts the real command line.
+    let plain = ["ld", "-o", "abcdefghi"];
+    let spaced = ["ld", "-o", "abcde fghi"];
+    assert expect_eq_int(link_argv_flat_length(spaced), link_argv_flat_length(plain)
+        + 1).ok;
+}
+
+test "link response: threshold stays below the Windows CreateProcess cap" ![pure] {
+    assert expect_eq_bool(link_response_threshold() < 32767, true).ok;
+}
+
+test "link response: body omits argv[0] and emits one entry per line" ![pure] {
+    let argv = ["ld.lld", "-o", "out"];
+    let body = link_response_body(argv);
+    assert expect_eq_str(body, "-o\nout\n").ok;
+}
+
+test "link response: body escapes the backslashes in a Windows path" ![pure] {
+    // The regression this encoding exists for: both consumers tokenize
+    // response files by GNU rules, where `\` escapes the next character.
+    // Unescaped, `C:\build\link-obj\x.o` reaches the linker as
+    // `C:buildlink-objx.o` and the Windows link fails.
+    let argv = ["clang", "C:\\build\\link-obj\\x.o"];
+    let body = link_response_body(argv);
+    assert expect_eq_str(body, "C:\\\\build\\\\link-obj\\\\x.o\n").ok;
+}
+
+test "link response: body escapes whitespace and quote characters" ![pure] {
+    let argv = ["clang", "has space", "it's", "a\"b"];
+    let body = link_response_body(argv);
+    assert expect_eq_str(body, "has\\ space\nit\\'s\na\\\"b\n").ok;
+}
+
+test "link response: body writes an empty argument as an empty quoted string" ![pure] {
+    // An empty entry cannot be expressed by escaping alone — a blank
+    // line is a whitespace run the tokenizer skips, silently dropping
+    // the argument.
+    let argv = ["clang", "", "out"];
+    let body = link_response_body(argv);
+    assert expect_eq_str(body, "\"\"\nout\n").ok;
+}
+
+test "link response: a short argv stays under the response-file threshold" ![pure] {
+    let argv = ["ld.lld", "-o", "out", "main.o"];
+    assert expect_eq_bool(link_argv_flat_length(argv) <= link_response_threshold(), true).ok;
+}
