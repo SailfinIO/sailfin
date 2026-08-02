@@ -118,8 +118,11 @@ test "let s = a + b lowers to arena-aware @sfn_str_concat(..., ptr null)" ![io] 
     assert ! contains(ir, "@sfn_str_concat_arena(");
     // Must NOT reference the legacy sailfin_runtime_string_concat family
     assert ! contains(ir, "@sailfin_runtime_string_concat");
-    // extractvalue must follow for the i8* pointer extraction
-    assert contains(ir, "extractvalue {i8*, i64}");
+    // SFN-689: the aggregate is the result shape. No `extractvalue` down to
+    // a bare `i8*` follows the call — that extraction is what hid a concat
+    // result from the numeric-stringify gate in chained expressions.
+    assert contains(ir, "call {i8*, i64} @sfn_str_concat(");
+    assert ! contains(ir, "extractvalue {i8*, i64}");
 }
 
 // ---- Test 5: emitted IR drops @sfn_default_arena, keeps @sfn_str_concat declare ----
