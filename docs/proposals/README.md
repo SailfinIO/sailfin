@@ -86,6 +86,7 @@ The next number is `max + 1`. Add a row in the same PR that introduces an SFEP.
 | [0061](./0061-diagnostic-unification.md) | Diagnostic Unification — One Coded, Spanned, Severity-Bearing Diagnostic | Accepted | tooling |
 | [0062](./0062-numerical-contracts.md) | Numerical and Behavioural Contracts (the Result Pillar) | Accepted | language |
 | [0063](./0063-sync-capsule.md) | `sfn/sync` — scope and blocking predecessor for a synchronization capsule | Accepted | language |
+| [0064](./0064-reclamation-seam.md) | Generic resource-reclamation seam | Draft | runtime |
 
 ## Drafts under review (numbers assigned at merge)
 
