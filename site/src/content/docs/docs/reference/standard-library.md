@@ -319,8 +319,8 @@ You should not call this function directly. It appears in generated code and in 
 > **Status:** `routine`, `await`, and `parallel` are shipped language
 > constructs. `spawn fn() -> T { ... }` is also shipped, and `routine { ... }`
 > is the structured-concurrency nursery that joins its children. The v0
-> `channel(N)` surface is a language builtin; the typed `sfn/sync` capsule
-> wrapper is not yet built.
+> `channel(N)` surface is a language builtin. Concurrency is language-level
+> throughout — there is no `sfn/sync` capsule API, and none is planned.
 
 #### `monotonic_millis() -> int ![clock]`
 
@@ -340,9 +340,9 @@ fn timed_operation() ![io, clock] {
 Create a bounded MPMC channel for passing values between concurrent tasks. The
 capacity is fixed at construction. Elements are pointer-sized in v0; when a
 bare channel's element kind cannot be inferred, annotate the receive target as
-`int` or `float`. A `Channel<T>` binding annotation enforces the element kind,
-but the generic `channel<T>(...)` constructor and typed `sfn/sync` capsule API
-are not yet shipped.
+`int` or `float`. A `Channel<T>` binding annotation enforces the element kind.
+The generic `channel<T>(...)` constructor is not yet shipped; there is no
+`sfn/sync` capsule API and none is planned.
 
 ```sfn
 fn main() ![io] {
