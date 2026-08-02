@@ -4,9 +4,20 @@
 // binding. These negative fixtures drive the complete frontend through
 // `sfn check --json`; the positive test is compiled, lowered, and executed by
 // the Sailfin-native test runner.
-import { assert_does_not_compile } from "sfn/test";
+import { CompileExpect, assert_compiles, assert_does_not_compile } from "sfn/test";
 
-fn _nursery_probe() -> int { return 7; }
+fn _nested_task_handle_source() -> string {
+    return "fn _probe() -> int { return 7; }\n" + "fn main() -> int {\n"
+        + "    routine {\n"
+        + "        let handle = spawn _probe();\n"
+        + "        routine {\n"
+        + "            let scratch: int = 1;\n"
+        + "        }\n"
+        + "        let value: int = await handle;\n"
+        + "    }\n"
+        + "    return 0;\n"
+        + "}\n";
+}
 
 fn _direct_global_escape_source() -> string {
     return "let mut g_ch = channel(1);\n" + "fn main() -> int {\n"
@@ -87,14 +98,18 @@ test "channel nursery escape: nested handle-free routine does not flag the enclo
 // The `Task<T>` half of the same defect (SFN-446's path, which SFN-694
 // inherited). `spawn` then a nested routine then `await` is ordinary
 // structured concurrency and must check.
-test "task nursery escape: nested routine does not flag the enclosing task handle (SFN-696)" {
-    routine {
-        let handle = spawn _nursery_probe();
-        routine {
-            let scratch: int = 1;
-            assert scratch == 1;
-        }
-        let value: int = await handle;
-        assert value == 7;
-    }
+//
+// Asserted at check level rather than executed, because `await` on a spawn
+// handle does not lower yet (`docs/status.md`: classified by kind, lowering
+// is #1084) — an execution form fails with E1002 on the `await` initializer,
+// which would be testing that gap rather than this one. SFN-696 is a
+// check-time regression, so `sfn check` is the layer that matters here.
+test "task nursery escape: nested routine does not flag the enclosing task handle (SFN-696)" ![io] {
+    let expect = CompileExpect {
+        effects: [],
+        ok: true,
+        diagnostic_pattern: ""
+    };
+    let result = assert_compiles(_nested_task_handle_source(), expect);
+    assert result.ok;
 }
