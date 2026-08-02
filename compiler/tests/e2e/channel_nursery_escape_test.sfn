@@ -1,0 +1,45 @@
+// SFN-694: channels created inside `routine { }` belong to that nursery.
+// The check-time E0838 gate makes later nursery-exit reclamation sound by
+// preventing either a direct handle or an alias from reaching a longer-lived
+// binding. These negative fixtures drive the complete frontend through
+// `sfn check --json`; the positive test is compiled, lowered, and executed by
+// the Sailfin-native test runner.
+import { assert_does_not_compile } from "sfn/test";
+
+fn _direct_global_escape_source() -> string {
+    return "let mut g_ch = channel(1);\n" + "fn main() -> int {\n"
+        + "    routine { g_ch = channel(8); }\n"
+        + "    g_ch.send(42);\n"
+        + "    let value: int = g_ch.receive();\n"
+        + "    return value;\n"
+        + "}\n";
+}
+
+fn _aliased_global_escape_source() -> string {
+    return "let mut g_ch = channel(1);\n" + "fn main() -> int {\n"
+        + "    routine {\n"
+        + "        let ch = channel(4);\n"
+        + "        g_ch = ch;\n"
+        + "    }\n"
+        + "    return 0;\n"
+        + "}\n";
+}
+
+test "channel nursery escape: direct global reassignment is rejected" ![io] {
+    let result = assert_does_not_compile(_direct_global_escape_source(), "channel handle `g_ch` escapes its `routine` nursery");
+    assert result.ok;
+}
+
+test "channel nursery escape: aliased global reassignment is rejected" ![io] {
+    let result = assert_does_not_compile(_aliased_global_escape_source(), "channel handle `g_ch` escapes its `routine` nursery");
+    assert result.ok;
+}
+
+test "channel nursery escape: routine-local channel lowers and runs" {
+    routine {
+        let ch = channel(1);
+        ch.send(7);
+        let value: int = ch.receive();
+        assert value == 7;
+    }
+}
