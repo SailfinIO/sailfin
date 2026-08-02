@@ -177,8 +177,7 @@ fn _sanitizer_reported(combined: string) -> boolean {
 // Parse the `N` out of a `SUMMARY: AddressSanitizer: N byte(s) leaked` line
 // (LSAN's leak-total summary). Returns -1 when the marker, or a valid
 // integer between it and " byte(s) leaked", is not found.
-fn _parse_leaked_bytes(report: string) -> int {
-    let marker = "SUMMARY: AddressSanitizer: ";
+fn _parse_leaked_with_marker(report: string, marker: string) -> int {
     let start = find(report, marker, 0);
     if start < 0 { return -1; }
     let after = start + marker.length;
@@ -193,6 +192,26 @@ fn _parse_leaked_bytes(report: string) -> int {
     return -1;
 }
 
+// Both spellings occur in the wild: a combined ASAN+LSAN build summarizes
+// under `AddressSanitizer`, a standalone LeakSanitizer under its own name.
+fn _parse_leaked_bytes(report: string) -> int {
+    let combined_marker = _parse_leaked_with_marker(report, "SUMMARY: AddressSanitizer: ");
+    if combined_marker >= 0 { return combined_marker; }
+    return _parse_leaked_with_marker(report, "SUMMARY: LeakSanitizer: ");
+}
+
+// A run that leaks nothing prints no `SUMMARY` line at all, so an absent
+// marker on a clean exit means zero leaked — not an unmeasurable run.
+// Treating it as unmeasurable would silently skip this leg exactly when the
+// fix works, which is when the coverage matters most. Only a nonzero exit
+// with no parseable total is genuinely unmeasurable (-1).
+fn _leaked_bytes_or_zero(report: string, exit_code: int) -> int {
+    let parsed = _parse_leaked_bytes(report);
+    if parsed >= 0 { return parsed; }
+    if exit_code == 0 { return 0; }
+    return -1;
+}
+
 // ── Leg 1: churn execution, always runs, no sanitizer ──────────────────────
 test "channel nursery reclaim: 5000 routine-scoped channel churns settle with no double-free (SFN-688)" ![io] {
     let dir = _scratch_dir();
@@ -201,7 +220,7 @@ test "channel nursery reclaim: 5000 routine-scoped channel churns settle with no
     let bin = _build_churn(dir, "churn", iters, work_dir);
     assert bin.length > 0;
 
-    let exit = process.run_capture([bin], []);
+    let exit = process.run_capture([bin], _relink_env());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     let combined = out + err;
@@ -274,11 +293,11 @@ test "channel nursery reclaim: ASAN leak growth stays bounded across churn scale
         return;
     }
 
-    let low_leaked = _parse_leaked_bytes(low_combined);
-    let high_leaked = _parse_leaked_bytes(high_combined);
+    let low_leaked = _leaked_bytes_or_zero(low_combined, low_exit);
+    let high_leaked = _leaked_bytes_or_zero(high_combined, high_exit);
     if low_leaked < 0 || high_leaked < 0 {
-        // Could not parse a SUMMARY line from one or both runs — skip
-        // rather than assert on an unparseable measurement.
+        // Nonzero exit with no parseable total — genuinely unmeasurable.
+        // A clean run with no SUMMARY already resolved to 0 above.
         assert true;
         return;
     }
