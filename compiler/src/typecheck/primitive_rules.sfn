@@ -1,0 +1,233 @@
+// compiler/src/typecheck/primitive_rules.sfn
+//
+// Proven-primitive inference and compatibility checks for SFN-675. This is a
+// deliberately narrow bridge to the structural TypeId work: it judges only
+// literal/annotated/local-call shapes whose primitive kind is certain, and
+// returns the unknown sentinel "" for every compound or unresolved shape.
+import { Expression, SourceSpan, TypeAnnotation } from "../ast";
+import { Diagnostic } from "../typecheck_types";
+import { classify_declared_primitive } from "../typecheck_types/annotation_shape_checks";
+import { SymbolEntry, find_value_symbol } from "../typecheck_types/symbol_table_and_raw_exprs";
+import { number_to_string, token_from_name } from "../typecheck_types/text_utils";
+
+fn _expression_primitive_type(expression: Expression?, bindings: SymbolEntry[]) -> string {
+    if expression == null { return ""; }
+    if expression.variant == "NumberLiteral" {
+        return _primitive_number_kind(expression.value);
+    }
+    if expression.variant == "StringLiteral" { return "string"; }
+    if expression.variant == "BooleanLiteral" { return "boolean"; }
+    if expression.variant == "Unary" {
+        if strings_equal(expression.operator, "-") {
+            if expression.operand.variant == "NumberLiteral" {
+                return _primitive_number_kind(expression.operand.value);
+            }
+        }
+        return "";
+    }
+    if expression.variant == "Identifier" {
+        let entry = find_value_symbol(bindings, expression.name);
+        if entry == null { return ""; }
+        return entry.declared_prim;
+    }
+    if expression.variant == "Cast" {
+        return classify_declared_primitive(expression.target_type.text);
+    }
+    if expression.variant == "Call" {
+        if expression.callee == null { return ""; }
+        if expression.callee.variant != "Identifier" { return ""; }
+        let entry = _find_proven_call_symbol(bindings, expression.callee.name);
+        if entry == null { return ""; }
+        if entry.is_generic { return ""; }
+        return _function_return_primitive(entry);
+    }
+    if expression.variant == "Serve" {
+        let entry = _find_user_serve_symbol(bindings);
+        if entry == null { return ""; }
+        if entry.is_generic { return ""; }
+        return _function_return_primitive(entry);
+    }
+    return "";
+}
+
+fn check_expected_primitive_type(expression: Expression?, expected: TypeAnnotation?, bindings: SymbolEntry[], position: string, anchor_name: string, span: SourceSpan?) -> Diagnostic[] {
+    if expected == null { return []; }
+    return _check_expected_primitive_kind(expression, classify_declared_primitive(expected.text), bindings, position, anchor_name, span);
+}
+
+fn _check_expected_primitive_kind(expression: Expression?, expected: string, bindings: SymbolEntry[], position: string, anchor_name: string, span: SourceSpan?) -> Diagnostic[] {
+    if expected.length == 0 { return []; }
+    let actual = _expression_primitive_type(expression, bindings);
+    if actual.length == 0 { return []; }
+    if _primitive_types_compatible(expected, actual) { return []; }
+    return [_make_primitive_type_mismatch_diagnostic(expected, actual, position, anchor_name, span)];
+}
+
+// Non-generic local free-function calls can be judged from the primitive proof
+// metadata on their resolved SymbolEntry. Imported/member/generic signatures
+// remain fail-open until structural signature resolution lands.
+fn call_argument_type_diagnostics(expression: Expression, bindings: SymbolEntry[]) -> Diagnostic[] {
+    if expression.variant != "Call" { return []; }
+    if expression.callee == null { return []; }
+    if expression.callee.variant != "Identifier" { return []; }
+    let entry = _find_proven_call_symbol(bindings, expression.callee.name);
+    if entry == null { return []; }
+    if entry.is_generic { return []; }
+
+    let mut diagnostics: Diagnostic[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= expression.arguments.length { break; }
+        let expected = _function_parameter_primitive(entry, index);
+        if expected.length == 0 {
+            index += 1;
+            continue;
+        }
+        let position = "argument " + number_to_string(index + 1) + " to `"
+            + expression.callee.name
+            + "`";
+        let next = _check_expected_primitive_kind(expression.arguments[index], expected, bindings, position, expression.callee.name, expression.callee.span);
+        let mut diagnostic_index: int = 0;
+        loop {
+            if diagnostic_index >= next.length { break; }
+            diagnostics.push(next[diagnostic_index]);
+            diagnostic_index += 1;
+        }
+        index += 1;
+    }
+    return diagnostics;
+}
+
+// The parser reserves `serve(...)` as `Expression.Serve` even when an in-scope
+// function named `serve` shadows the builtin. Mirror ordinary call argument
+// checking for that structured shape so local primitive signatures keep the
+// same E0309 boundary.
+fn serve_argument_type_diagnostics(expression: Expression, bindings: SymbolEntry[]) -> Diagnostic[] {
+    if expression.variant != "Serve" { return []; }
+    let entry = _find_user_serve_symbol(bindings);
+    if entry == null { return []; }
+    if entry.is_generic { return []; }
+    let mut diagnostics = _check_expected_primitive_kind(expression.handler, _function_parameter_primitive(entry, 0), bindings, "argument 1 to `serve`", "serve", expression.span);
+    if expression.port != null {
+        diagnostics = diagnostics.concat(_check_expected_primitive_kind(expression.port, _function_parameter_primitive(entry, 1), bindings, "argument 2 to `serve`", "serve", expression.span));
+    }
+    return diagnostics;
+}
+
+// The auto-imported prelude also contributes a `serve` binding after source
+// symbols are collected, so the ordinary last-match lookup can hide a local
+// `fn serve` behind that import. Select the nearest source function explicitly
+// for the parser-reserved Serve node.
+fn _find_user_serve_symbol(bindings: SymbolEntry[]) -> SymbolEntry? {
+    return _find_proven_call_symbol(bindings, "serve");
+}
+
+// Prelude/import rows are appended after source declarations, so the ordinary
+// reverse lookup can hide a user `fn sleep`/`fn print` behind an imported
+// helper of the same name. Skip only import rows while searching for a proven
+// source function. A nearer data binding still shadows the function and keeps
+// the primitive rule fail-open.
+fn _find_proven_call_symbol(bindings: SymbolEntry[], name: string) -> SymbolEntry? {
+    let mut index = bindings.length - 1;
+    loop {
+        if index < 0 { break; }
+        let entry = bindings[index];
+        if strings_equal(entry.name, name) {
+            if strings_equal(entry.kind, "function") {
+                // Parsed source declarations receive a `fnprim:` proof marker.
+                // Prelude/runtime interface rows are appended later without
+                // that marker and must not hide the source contract.
+                if entry.element_kind.length >= 7 {
+                    if substring(entry.element_kind, 0, 7) == "fnprim:" {
+                        return entry;
+                    }
+                }
+            } else {
+                if !strings_equal(entry.kind, "import") {
+                    if !strings_equal(entry.kind, "prelude") { return null; }
+                }
+            }
+        }
+        index -= 1;
+    }
+    return null;
+}
+
+fn _function_return_primitive(entry: SymbolEntry) -> string {
+    let marker = entry.element_kind;
+    if marker.length < 8 { return ""; }
+    if substring(marker, 0, 7) != "fnprim:" { return ""; }
+    return _primitive_kind_from_code(marker[7]);
+}
+
+fn _function_parameter_primitive(entry: SymbolEntry, index: int) -> string {
+    let marker = entry.element_kind;
+    if marker.length < 8 { return ""; }
+    if substring(marker, 0, 7) != "fnprim:" { return ""; }
+    let offset = 8 + index;
+    if offset >= marker.length { return ""; }
+    return _primitive_kind_from_code(marker[offset]);
+}
+
+fn _primitive_kind_from_code(code: string) -> string {
+    if strings_equal(code, "i") { return "int"; }
+    if strings_equal(code, "f") { return "float"; }
+    if strings_equal(code, "s") { return "string"; }
+    if strings_equal(code, "b") { return "boolean"; }
+    return "";
+}
+
+fn _primitive_types_compatible(expected: string, actual: string) -> boolean {
+    if strings_equal(expected, actual) { return true; }
+    // Existing runtime/compiler compatibility boundaries explicitly coerce
+    // both directions between int and float (`process.exit` is float -> i64).
+    // Preserve those semantics here; numeric identity tightening belongs to
+    // the structural precision work, not this proven cross-family check.
+    let expected_numeric = strings_equal(expected, "int") || strings_equal(expected, "float");
+    let actual_numeric = strings_equal(actual, "int") || strings_equal(actual, "float");
+    if expected_numeric {
+        if actual_numeric { return true; }
+        // Keep bool-to-number bindings on the established ABI mismatch path,
+        // which owns the E0537 diagnostic and its explicit-cast fix-it.
+        if strings_equal(actual, "boolean") { return true; }
+    }
+    return false;
+}
+
+fn _make_primitive_type_mismatch_diagnostic(expected: string, actual: string, position: string, anchor_name: string, span: SourceSpan?) -> Diagnostic {
+    return Diagnostic {
+        code: "E0309",
+        severity: "error",
+        message: "type mismatch in " + position + ": expected `" + expected
+            + "`, found `"
+            + actual
+            + "`",
+        file_path: "",
+        primary: token_from_name(anchor_name, span),
+        suggestion: null
+    };
+}
+
+fn make_undefined_value_diagnostic(name: string, span: SourceSpan?) -> Diagnostic {
+    return Diagnostic {
+        code: "E0014",
+        severity: "error",
+        message: "undefined value `" + name + "`",
+        file_path: "",
+        primary: token_from_name(name, span),
+        suggestion: null
+    };
+}
+
+fn _primitive_number_kind(value: string) -> string {
+    let mut index: int = 0;
+    loop {
+        if index >= value.length { break; }
+        let ch = value[index];
+        if strings_equal(ch, ".") { return "float"; }
+        if strings_equal(ch, "e") { return "float"; }
+        if strings_equal(ch, "E") { return "float"; }
+        index += 1;
+    }
+    return "int";
+}

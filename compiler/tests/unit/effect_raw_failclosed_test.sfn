@@ -15,14 +15,14 @@
 // contains no effect keyword still fires (no text scan, no effect-keyword
 // anchor); (d) match-arm shorthand patterns (which legitimately degrade to
 // `Raw`) are exempt.
-import { Expression, Statement } from "../../src/ast";
+import { Expression, SourceSpan, Statement } from "../../src/ast";
 import { empty_import_symbols } from "../../src/effect_imports";
 import { parse_program } from "../../src/parser/mod";
 import { typecheck_diagnostics } from "../../src/typecheck";
 import { TypeckCtx, make_typeck_ctx } from "../../src/typecheck/context";
 import { walk_expression, walk_match_pattern } from "../../src/typecheck/expression_walk";
 import { Diagnostic } from "../../src/typecheck_types";
-import { SymbolEntry } from "../../src/typecheck_types/symbol_table_and_raw_exprs";
+import { SymbolEntry, append_symbol } from "../../src/typecheck_types/symbol_table_and_raw_exprs";
 
 fn _no_bindings() -> SymbolEntry[] {
     let empty: SymbolEntry[] = [];
@@ -37,6 +37,13 @@ fn _walk_ctx() -> TypeckCtx {
     let no_interfaces: Statement[] = [];
     let no_generic_structs: string[] = [];
     return make_typeck_ctx(_no_bindings(), empty_import_symbols(), no_interfaces, _no_bindings(), false, no_generic_structs);
+}
+
+fn _walk_ctx_with_binding(name: string, span: SourceSpan) -> TypeckCtx {
+    let no_interfaces: Statement[] = [];
+    let no_generic_structs: string[] = [];
+    let bindings = append_symbol(_no_bindings(), name, "variable", span);
+    return make_typeck_ctx(bindings, empty_import_symbols(), no_interfaces, bindings, false, no_generic_structs);
 }
 
 fn _has_code(diags: Diagnostic[], code: string) -> boolean {
@@ -78,9 +85,19 @@ test "raw: a whitespace-only Raw is clean (trimmed to empty)" ![io] {
 // A structured expression mentioning `print` as a substring must NOT fire
 // E0818 — the backstop keys on `variant == "Raw"`, never on text content.
 test "raw: a structured Identifier mentioning `print` does not fire E0818" ![io] {
-    let ident = Expression.Identifier { name: "printable", span: null };
-    let diags = walk_expression(ident, _walk_ctx());
+    let ident_span = SourceSpan {
+        start_line: 1,
+        start_column: 1,
+        end_line: 1,
+        end_column: 10
+    };
+    let ident = Expression.Identifier { name: "printable", span: ident_span };
+    // Keep this test isolated to the Raw-vs-structured distinction: the
+    // identifier is deliberately bound so SFN-675's E0014 rule is not the
+    // behavior under test here.
+    let diags = walk_expression(ident, _walk_ctx_with_binding("printable", ident_span));
     assert ! _has_code(diags, "E0818");
+    assert ! _has_code(diags, "E0014");
 }
 
 // Conversely a Raw whose text contains no effectful builtin still fails —
@@ -117,6 +134,7 @@ test "match pattern: a structured Identifier pattern walks clean" ![io] {
     let pattern = Expression.Identifier { name: "x", span: null };
     let diags = walk_match_pattern(pattern, _walk_ctx());
     assert ! _has_code(diags, "E0818");
+    assert ! _has_code(diags, "E0014");
 }
 
 // ── end-to-end: a match with a shorthand-destructure arm self-hosts clean ──

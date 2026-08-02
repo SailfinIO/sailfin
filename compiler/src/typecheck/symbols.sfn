@@ -9,16 +9,19 @@ import {
     TypeParameter
 } from "../ast";
 import { Diagnostic } from "../typecheck_types";
-import { declared_array_marker, type_parameter_names } from "../typecheck_types/annotation_shape_checks";
+import {
+    classify_declared_primitive,
+    declared_array_marker,
+    type_parameter_names
+} from "../typecheck_types/annotation_shape_checks";
 import { make_thread_local_requires_mut_diagnostic } from "../typecheck_types/declaration_and_statement_checks";
 import { bound_base_name, check_generic_instantiation } from "../typecheck_types/generic_bounds";
 import { parse_type_arguments, resolve_interface_annotation } from "../typecheck_types/interface_and_generics";
 import {
     SymbolCollectionResult,
     SymbolEntry,
-    register_symbol,
-    signature_is_c_abi,
-    signature_is_generic
+    register_function_symbol,
+    register_symbol
 } from "../typecheck_types/symbol_table_and_raw_exprs";
 import { TypeckCtx } from "./context";
 
@@ -155,13 +158,18 @@ fn collect_top_level_symbols(program: Program) -> SymbolCollectionResult {
             if !_string_list_has(seen_variables, statement.name) {
                 seen_variables.push(statement.name);
                 let declared_struct = _declared_struct_annotation(statement.type_annotation, symbols, no_type_params);
-                if declared_struct.length > 0 {
+                let mut declared_prim: string = "";
+                if statement.type_annotation != null {
+                    declared_prim = classify_declared_primitive(statement.type_annotation.text);
+                }
+                if declared_struct.length > 0 || declared_prim.length > 0 {
                     let mut index: int = 0;
                     loop {
                         if index >= symbols.length { break; }
                         if strings_equal(symbols[index].name, statement.name) {
                             if strings_equal(symbols[index].kind, "variable") {
                                 symbols[index].declared_struct = declared_struct;
+                                symbols[index].declared_prim = declared_prim;
                             }
                             break;
                         }
@@ -299,10 +307,10 @@ fn _declared_struct_annotation(annotation: TypeAnnotation?, bindings: SymbolEntr
 
 fn register_top_level_symbol(statement: Statement, existing: SymbolEntry[]) -> SymbolCollectionResult {
     if statement.variant == "FunctionDeclaration" {
-        return register_symbol(statement.signature.name, "function", statement.signature.name_span, existing, signature_is_generic(statement.signature), signature_is_c_abi(statement.signature));
+        return register_function_symbol(statement.signature, "function", existing);
     }
     if statement.variant == "ExternFunctionDeclaration" {
-        return register_symbol(statement.signature.name, "extern function", statement.signature.name_span, existing, signature_is_generic(statement.signature), signature_is_c_abi(statement.signature));
+        return register_function_symbol(statement.signature, "extern function", existing);
     }
     if statement.variant == "ExternVarDeclaration" {
         return register_symbol(statement.name, "extern variable", statement.name_span, existing);

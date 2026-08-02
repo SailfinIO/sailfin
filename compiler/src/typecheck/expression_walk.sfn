@@ -9,11 +9,12 @@ import {
     check_bare_fn_type_annotation,
     check_malformed_array_annotation,
     check_unknown_type_annotation,
+    classify_declared_primitive,
     declared_array_marker
 } from "../typecheck_types/annotation_shape_checks";
 import { make_nested_fn_capture_diagnostic, make_undefined_function_diagnostic } from "../typecheck_types/declaration_and_statement_checks";
 import { make_parse_error_diagnostic } from "../typecheck_types/expr_type_rules";
-import { is_builtin_call_name } from "../typecheck_types/extern_abi";
+import { is_builtin_call_name, is_builtin_member_root } from "../typecheck_types/extern_abi";
 import {
     SymbolEntry,
     check_char_literal_raw,
@@ -23,11 +24,12 @@ import {
     classify_fn_cast,
     clone_bindings,
     find_symbol,
+    find_value_symbol,
     is_function_kind,
     make_fn_value_position_diagnostic,
     register_local_symbol
 } from "../typecheck_types/symbol_table_and_raw_exprs";
-import { check_intersection_value_type_annotation } from "../typecheck_types/value_and_object_checks";
+import { check_intersection_value_type_annotation, check_object_literal_target } from "../typecheck_types/value_and_object_checks";
 import {
     _struct_arithmetic_diagnostics,
     array_arithmetic_diagnostics,
@@ -40,8 +42,14 @@ import {
     check_spawn_kind,
     push_spawn_handle_diagnostics
 } from "./concurrency_rules";
-import { TypeckCtx, ctx_enter_body } from "./context";
+import { TypeckCtx, ctx_enter_body, ctx_with_bindings } from "./context";
 import { _serve_resolves_to_user_fn } from "./patterns";
+import {
+    call_argument_type_diagnostics,
+    check_expected_primitive_type,
+    make_undefined_value_diagnostic,
+    serve_argument_type_diagnostics
+} from "./primitive_rules";
 import { _declared_struct_annotation } from "./symbols";
 import { _is_syscall_name, _syscall_call_diagnostics } from "./syscalls";
 import { _conditional_branch_type, check_conditional_types } from "./try_and_conditional";
@@ -119,6 +127,7 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
         // `primitive_method_diagnostics`), so it rejects exactly the calls the
         // lowerer would fatal on ("callee signature is not known").
         diagnostics = diagnostics.concat(primitive_method_diagnostics(expression, ctx));
+        diagnostics = diagnostics.concat(call_argument_type_diagnostics(expression, bindings));
         return diagnostics;
     }
     if expression.variant == "Binary" {
@@ -151,7 +160,21 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
         // Non-identifier objects (`foo().bar`, `xs[0].field`) still
         // recurse so nested diagnostics surface.
         if expression.object != null {
-            if expression.object.variant == "Identifier" { return []; }
+            if expression.object.variant == "Identifier" {
+                let receiver = expression.object;
+                let mut entry = find_value_symbol(bindings, receiver.name);
+                if entry == null {
+                    entry = find_value_symbol(ctx.top_level, receiver.name);
+                }
+                if entry != null {
+                    if strings_equal(entry.kind, "outer_local") {
+                        return [make_nested_fn_capture_diagnostic(receiver.name, receiver.span)];
+                    }
+                    return [];
+                }
+                if is_builtin_member_root(receiver.name) { return []; }
+                return [make_undefined_value_diagnostic(receiver.name, receiver.span)];
+            }
         }
         return walk_expression(expression.object, ctx);
     }
@@ -198,6 +221,10 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
         // parameter may shadow an enclosing name without tripping E0001, while
         // parameter-vs-parameter duplicates are still caught.
         let mut body_bindings: SymbolEntry[] = clone_bindings(bindings);
+        if ctx.is_top_level {
+            body_bindings = clone_bindings(ctx.top_level);
+        }
+        let default_bindings: SymbolEntry[] = clone_bindings(body_bindings);
         let param_scope_start = body_bindings.length;
         let mut diagnostics: Diagnostic[] = [];
         let mut _pp: int = 0;
@@ -205,13 +232,21 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
             if _pp >= expression.parameters.length { break; }
             let param = expression.parameters[_pp];
             let mut param_array: string = "";
+            let mut param_prim: string = "";
             if param.type_annotation != null {
                 param_array = declared_array_marker(param.type_annotation.text);
+                param_prim = classify_declared_primitive(param.type_annotation.text);
             }
             let declared_struct = _declared_struct_annotation(param.type_annotation, body_bindings, ctx.type_params);
-            let registration = register_local_symbol(body_bindings, param.name, "parameter", param.span, param_scope_start, false, false, param_array, "", declared_struct);
+            let registration = register_local_symbol(body_bindings, param.name, "parameter", param.span, param_scope_start, false, false, param_array, param_prim, declared_struct);
             body_bindings = registration.bindings;
             diagnostics = diagnostics.concat(registration.diagnostics);
+            let default_ctx = ctx_with_bindings(ctx, default_bindings, param_scope_start);
+            diagnostics = diagnostics.concat(walk_expression(param.default_value, default_ctx));
+            diagnostics = diagnostics.concat(check_expected_primitive_type(param.default_value, param.type_annotation, default_bindings, "default for `"
+                + param.name
+                + "`", param.name, param.span));
+            diagnostics = diagnostics.concat(check_object_literal_target(param.default_value, param.type_annotation, param.name, param.span, default_bindings));
             _pp += 1;
         }
         diagnostics = diagnostics.concat(walk_block_expressions(expression.body, ctx_enter_body(ctx, body_bindings, expression.return_type)));
@@ -292,7 +327,7 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
         // `%Name*` that only `clang` rejected (capitalized).
         let cast_target_diags = check_unknown_type_annotation(expression.target_type, expression.target_type.text, expression.span, ctx.known_types, ctx.type_params);
         if expression.operand.variant == "Identifier" {
-            let fn_entry = find_symbol(bindings, expression.operand.name);
+            let fn_entry = find_value_symbol(bindings, expression.operand.name);
             if fn_entry != null {
                 if is_function_kind(fn_entry.kind) {
                     return cast_target_diags.concat(classify_fn_cast(expression.operand.name, expression.target_type.text, fn_entry, expression.span));
@@ -342,6 +377,16 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
         if expression.capacity == null { return []; }
         return walk_expression(expression.capacity, ctx);
     }
+    if expression.variant == "Parallel" {
+        let mut diagnostics: Diagnostic[] = [];
+        let mut index: int = 0;
+        loop {
+            if index >= expression.tasks.length { break; }
+            diagnostics = diagnostics.concat(walk_expression(expression.tasks[index], ctx));
+            index += 1;
+        }
+        return diagnostics;
+    }
     if expression.variant == "Serve" {
         // SFN-29 (#1329): a `serve(...)` token sequence always parses to
         // `Expression.Serve`, but a `serve` that resolves to a user-defined
@@ -357,9 +402,33 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
             if expression.port != null {
                 diagnostics = diagnostics.concat(walk_expression(expression.port, ctx));
             }
+            diagnostics = diagnostics.concat(serve_argument_type_diagnostics(expression, bindings));
             return diagnostics;
         }
-        return [];
+        let mut diagnostics: Diagnostic[] = [];
+        if expression.handler.variant == "Identifier" {
+            let handler = expression.handler;
+            let mut entry = find_value_symbol(bindings, handler.name);
+            if entry == null {
+                entry = find_value_symbol(ctx.top_level, handler.name);
+            }
+            if entry == null {
+                diagnostics.push(make_undefined_value_diagnostic(handler.name, handler.span));
+            } else if strings_equal(entry.kind, "outer_local") {
+                diagnostics.push(make_nested_fn_capture_diagnostic(handler.name, handler.span));
+            }
+        } else {
+            diagnostics = diagnostics.concat(walk_expression(expression.handler, ctx));
+        }
+        if expression.port != null {
+            diagnostics = diagnostics.concat(walk_expression(expression.port, ctx));
+        }
+        // A source-level function named `serve` may still reach this branch
+        // when parser/effect disambiguation treats the spelling as builtin.
+        // The primitive helper resolves the symbol directly and is a no-op
+        // when no local signature exists.
+        diagnostics = diagnostics.concat(serve_argument_type_diagnostics(expression, bindings));
+        return diagnostics;
     }
     // A parser-originated diagnostic node (issue #1531): the parser emitted
     // this for syntax that must fail closed (e.g. the internal-only
@@ -375,7 +444,17 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
     // (handled below), so a structured `Identifier` here is always an
     // unsupported value use (e.g. `let f = worker;`, `take(worker)`).
     if expression.variant == "Identifier" {
-        let entry = find_symbol(bindings, expression.name);
+        let mut entry = find_value_symbol(bindings, expression.name);
+        // Top-level initializer walks use the sequential declaration scope in
+        // `bindings`; imports and forward declarations live in the pre-collected
+        // resolution scope. Consult it on a miss so prelude aliases such as
+        // `let runtime_sleep_fn = sfn_sleep` resolve their imported value.
+        if entry == null {
+            entry = find_value_symbol(ctx.top_level, expression.name);
+        }
+        if entry == null {
+            return [make_undefined_value_diagnostic(expression.name, expression.span)];
+        }
         if entry != null {
             // A nested `fn` body resolving a name to an enclosing data local
             // (tagged `"outer_local"` by `_build_nested_fn_scope`) is an
@@ -426,5 +505,8 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
 fn walk_match_pattern(pattern: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
     if pattern == null { return []; }
     if pattern.variant == "Raw" { return []; }
+    // A bare identifier pattern introduces a binding (or is the `_`
+    // wildcard); it is never a read from the surrounding value scope.
+    if pattern.variant == "Identifier" { return []; }
     return walk_expression(pattern, ctx);
 }

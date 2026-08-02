@@ -14,9 +14,9 @@
 // of exiting 0 in silence. This test pins that at each consumer site plus
 // the combined `sfn build` repro from the issue.
 //
-// `sfn check` still passes on every fixture below — these are all lowering
-// failures, not typecheck failures. Making the typecheck pass reject them
-// earlier is SFN-543, a separate unit of work.
+// SFN-675 moved the two proven primitive return/initializer mismatches to the
+// shared frontend as E0309. The remaining fixtures still exercise lowering's
+// E1002 backstop because their invalidity is not yet structurally proven there.
 //
 // SFN-565 splits the structural function-body fallback by reachability over
 // the emitted LLVM block graph. The infinite-loop exit block remains
@@ -63,6 +63,20 @@ fn _assert_emit_fails_closed(name: string, source: string, substring: string) ![
     assert find(combined, substring, 0) >= 0;
 }
 
+// Proven primitive mismatches now stop in the shared frontend, before LLVM
+// lowering can fabricate a placeholder value at the same consumer site.
+fn _assert_frontend_primitive_fails_closed(name: string, source: string, substring: string) ![io] {
+    let src = _write_source(name, source);
+    let exit = process.run_capture([_sfn_bin(), "emit", "llvm", src], process.environ());
+    let sout = process.capture_take_stdout();
+    let serr = process.capture_take_stderr();
+    let combined = sout + serr;
+    assert exit != 0;
+    assert find(combined, "error[E0309]:", 0) >= 0;
+    assert find(combined, substring, 0) >= 0;
+    assert find(combined, "llvm lowering [fatal]", 0) < 0;
+}
+
 test "lowering fail-closed gate: bare return in value-returning fn" ![io] {
     _assert_emit_fails_closed("sfn527_empty_return.sfn", "fn f() -> i32 { return; }\nfn main() -> i32 { return 0; }\n", "missing return value in `f`");
 }
@@ -72,7 +86,7 @@ test "lowering fail-closed gate: unknown field in return position" ![io] {
 }
 
 test "lowering fail-closed gate: return operand uncoercible to declared type" ![io] {
-    _assert_emit_fails_closed("sfn527_return_coerce.sfn", "fn r_str(s: string) -> i32 { return s; }\nfn main() -> i32 { return 0; }\n", "unable to coerce return expression to `i32` in `r_str`");
+    _assert_frontend_primitive_fails_closed("sfn527_return_coerce.sfn", "fn r_str(s: string) -> i32 { return s; }\nfn main() -> i32 { return 0; }\n", "type mismatch in return value: expected `int`, found `string`");
 }
 
 test "lowering fail-closed gate: assignment RHS fails to lower" ![io] {
@@ -84,7 +98,7 @@ test "lowering fail-closed gate: assignment RHS uncoercible" ![io] {
 }
 
 test "lowering fail-closed gate: let initializer uncoercible" ![io] {
-    _assert_emit_fails_closed("sfn527_let_coerce.sfn", "fn l_str(s: string) -> i32 { let y: i32 = s; return y; }\nfn main() -> i32 { return 0; }\n", "unable to coerce initializer for `y` to `i32` in `l_str`");
+    _assert_frontend_primitive_fails_closed("sfn527_let_coerce.sfn", "fn l_str(s: string) -> i32 { let y: i32 = s; return y; }\nfn main() -> i32 { return 0; }\n", "type mismatch in initializer for `y`: expected `int`, found `string`");
 }
 
 test "lowering fail-closed gate: let initializer fails to lower" ![io] {

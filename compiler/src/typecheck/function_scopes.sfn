@@ -19,9 +19,8 @@ import {
     clone_bindings,
     has_symbol,
     is_function_kind,
-    register_local_symbol,
-    signature_is_c_abi,
-    signature_is_generic
+    register_local_function_symbol,
+    register_local_symbol
 } from "../typecheck_types/symbol_table_and_raw_exprs";
 import { check_object_literal_target } from "../typecheck_types/value_and_object_checks";
 import {
@@ -30,6 +29,8 @@ import {
     ctx_with_bindings,
     ctx_with_type_params
 } from "./context";
+import { walk_expression } from "./expression_walk";
+import { check_expected_primitive_type } from "./primitive_rules";
 import { check_statement } from "./statement_checks";
 import { _decl_type_params, _declared_struct_annotation } from "./symbols";
 
@@ -81,6 +82,26 @@ fn seed_parameter_scope(signature: FunctionSignature, ctx: TypeckCtx) -> ScopeRe
             diagnostics.push(default_diags[_di]);
             _di += 1;
         }
+        // Defaults lower at the call site, outside the callee's parameter
+        // frame. Validate them against module scope, never against the
+        // parameter currently being declared or an earlier parameter.
+        let default_ctx = ctx_with_bindings(ctx, ctx.top_level, 0);
+        let value_diags = walk_expression(parameter.default_value, default_ctx);
+        let mut _vi: int = 0;
+        loop {
+            if _vi >= value_diags.length { break; }
+            diagnostics.push(value_diags[_vi]);
+            _vi += 1;
+        }
+        let primitive_diags = check_expected_primitive_type(parameter.default_value, parameter.type_annotation, ctx.top_level, "default for `"
+            + parameter.name
+            + "`", parameter.name, parameter.span);
+        let mut _pi: int = 0;
+        loop {
+            if _pi >= primitive_diags.length { break; }
+            diagnostics.push(primitive_diags[_pi]);
+            _pi += 1;
+        }
     }
 
     return ScopeResult { bindings: bindings, diagnostics: diagnostics };
@@ -102,7 +123,7 @@ fn _hoist_nested_fn_names(statements: Statement[], bindings: SymbolEntry[], scop
         if _i >= statements.length { break; }
         let statement = statements[_i];
         if statement.variant == "FunctionDeclaration" {
-            let registration = register_local_symbol(scope, statement.signature.name, "function", statement.signature.name_span, scope_start, signature_is_generic(statement.signature), signature_is_c_abi(statement.signature));
+            let registration = register_local_function_symbol(scope, statement.signature, "function", scope_start);
             scope = registration.bindings;
             let mut _ci: int = 0;
             loop {
@@ -163,6 +184,7 @@ fn _build_nested_fn_scope(signature: FunctionSignature, ctx: TypeckCtx) -> Scope
     }
     // (4) own parameters — highest priority; may shadow any of the above.
     let param_scope_start = scope.length;
+    let default_bindings = clone_bindings(scope);
     let mut diagnostics: Diagnostic[] = [];
     let param_type_params = _decl_type_params(ctx, signature.type_parameters);
     for parameter in signature.parameters {
@@ -181,6 +203,15 @@ fn _build_nested_fn_scope(signature: FunctionSignature, ctx: TypeckCtx) -> Scope
             diagnostics.push(registration.diagnostics[_ci]);
             _ci += 1;
         }
+        // A nested function is non-capturing, and defaults lower before its
+        // parameter frame exists. Keep module/sibling resolution and E0421
+        // outer-local sentinels, but exclude every own parameter.
+        let default_ctx = ctx_with_bindings(ctx, default_bindings, param_scope_start);
+        diagnostics = diagnostics.concat(walk_expression(parameter.default_value, default_ctx));
+        diagnostics = diagnostics.concat(check_expected_primitive_type(parameter.default_value, parameter.type_annotation, default_bindings, "default for `"
+            + parameter.name
+            + "`", parameter.name, parameter.span));
+        diagnostics = diagnostics.concat(check_object_literal_target(parameter.default_value, parameter.type_annotation, parameter.name, parameter.span, default_bindings));
     }
     return ScopeResult { bindings: scope, diagnostics: diagnostics };
 }

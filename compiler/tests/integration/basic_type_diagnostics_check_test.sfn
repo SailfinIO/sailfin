@@ -1,0 +1,245 @@
+// SFN-675: the shipped `sfn check` path must reject basic primitive type
+// mismatches and unresolved value identifiers before they reach lowering.
+// Each case drives the built CLI so it pins the rendered E-code, source span,
+// and non-zero process exit rather than only exercising a leaf helper.
+struct CheckResult {
+    exit_code: i64;
+    output: string;
+    path: string;
+    dir: string;
+}
+
+fn _contains(haystack: string, needle: string) -> boolean {
+    if needle.length == 0 { return true; }
+    if needle.length > haystack.length { return false; }
+    let mut index: int = 0;
+    let limit = haystack.length - needle.length;
+    loop {
+        if index > limit { break; }
+        if substring(haystack, index, index + needle.length) == needle {
+            return true;
+        }
+        index += 1;
+    }
+    return false;
+}
+
+fn _run_check(name: string, source: string) -> CheckResult ![io] {
+    let dir = fs.mkdtemp("sfn-675-");
+    assert dir.length > 0;
+    let path = dir + "/" + name;
+    fs.writeFile(path, source);
+    let exit_code = process.run_capture(["build/bin/sfn", "check", path], []);
+    let output = process.capture_take_stdout() + process.capture_take_stderr();
+    return CheckResult {
+        exit_code: exit_code,
+        output: output,
+        path: path,
+        dir: dir
+    };
+}
+
+fn _assert_spanned_error(result: CheckResult, code: string) {
+    assert result.exit_code != 0;
+    assert _contains(result.output, "error[" + code + "]");
+    assert _contains(result.output, "--> " + result.path + ":");
+    assert _contains(result.output, "^");
+}
+
+fn _assert_contains(output: string, expected: string) {
+    assert _contains(output, expected);
+}
+
+fn _assert_not_contains(output: string, unexpected: string) {
+    assert ! _contains(output, unexpected);
+}
+
+fn _assert_clean_without(result: CheckResult, code: string) {
+    assert result.exit_code == 0;
+    assert ! _contains(result.output, "error[" + code + "]");
+}
+
+fn _clean_result(result: CheckResult) ![io] {
+    fs.deleteFile(result.path);
+    fs.removeDirectory(result.dir, true);
+}
+
+test "SFN-675: string initializer cannot satisfy int binding" ![io] {
+    let result = _run_check("a_let_str_to_int.sfn", "fn main() {\n    let x: int = \"not an int\";\n}\n");
+    _assert_spanned_error(result, "E0309");
+    _assert_contains(result.output, "expected `int`, found `string`");
+    _clean_result(result);
+}
+
+test "SFN-675: int initializer cannot satisfy string binding" ![io] {
+    let result = _run_check("b_let_int_to_str.sfn", "fn main() {\n    let s: string = 42;\n}\n");
+    _assert_spanned_error(result, "E0309");
+    _assert_contains(result.output, "expected `string`, found `int`");
+    _clean_result(result);
+}
+
+test "SFN-675: string argument cannot satisfy int parameter" ![io] {
+    let source = "fn takes_int(a: int) {}\n\nfn main() {\n    takes_int(\"string\");\n}\n";
+    let result = _run_check("c_arg_mismatch.sfn", source);
+    _assert_spanned_error(result, "E0309");
+    _assert_contains(result.output, "argument 1 to `takes_int`");
+    _assert_contains(result.output, "expected `int`, found `string`");
+    _clean_result(result);
+}
+
+test "SFN-675: string return cannot satisfy int result" ![io] {
+    let source = "fn gives_int() -> int {\n    return \"string\";\n}\n\nfn main() {}\n";
+    let result = _run_check("d_return_mismatch.sfn", source);
+    _assert_spanned_error(result, "E0309");
+    _assert_contains(result.output, "type mismatch in return value");
+    _assert_contains(result.output, "expected `int`, found `string`");
+    _clean_result(result);
+}
+
+test "SFN-675: unresolved value identifier is rejected" ![io] {
+    let source = "fn main() ![io.console] {\n    print(nonexistent_variable);\n}\n";
+    let result = _run_check("e_undefined_var.sfn", source);
+    _assert_spanned_error(result, "E0014");
+    _assert_contains(result.output, "undefined value `nonexistent_variable`");
+    _clean_result(result);
+}
+
+test "SFN-675: ordinary try, catch, and finally blocks are checked" ![io] {
+    let source = "fn main() ![io.console] {\n"
+        + "    try { let x: int = \"bad\"; }\n"
+        + "    catch (err) { print(err); print(nonexistent_catch_value); }\n"
+        + "    finally { let s: string = 42; }\n"
+        + "}\n";
+    let result = _run_check("f_try_blocks.sfn", source);
+    _assert_spanned_error(result, "E0309");
+    _assert_contains(result.output, "initializer for `x`: expected `int`, found `string`");
+    _assert_contains(result.output, "undefined value `nonexistent_catch_value`");
+    _assert_not_contains(result.output, "undefined value `err`");
+    _assert_contains(result.output, "initializer for `s`: expected `string`, found `int`");
+    _clean_result(result);
+}
+
+test "SFN-675: a lambda catch binding is in scope" ![io] {
+    let source = "fn main() {\n" + "    let recover = fn() -> string {\n"
+        + "        try { throw \"boom\"; } catch (err) { return err; }\n"
+        + "        return \"ok\";\n"
+        + "    };\n"
+        + "}\n";
+    let result = _run_check("g_lambda_catch_binding.sfn", source);
+    _assert_clean_without(result, "E0014");
+    _clean_result(result);
+}
+
+test "SFN-675: ordinary throw and with expressions are checked" ![io] {
+    let source = "fn throw_bad() { throw nonexistent_thrown_value; }\n"
+        + "fn main() { with nonexistent_resource { } }\n";
+    let result = _run_check("h_throw_with_values.sfn", source);
+    _assert_spanned_error(result, "E0014");
+    _assert_contains(result.output, "undefined value `nonexistent_thrown_value`");
+    _assert_contains(result.output, "undefined value `nonexistent_resource`");
+    _clean_result(result);
+}
+
+test "SFN-675: concurrency and member value positions are checked" ![io] {
+    let source = "fn main() ![io, net] {\n"
+        + "    parallel [nonexistent_parallel_task];\n"
+        + "    serve(nonexistent_handler, nonexistent_port);\n"
+        + "    nonexistent_receiver.print;\n"
+        + "}\n";
+    let result = _run_check("i_concurrency_member_values.sfn", source);
+    _assert_spanned_error(result, "E0014");
+    _assert_contains(result.output, "undefined value `nonexistent_parallel_task`");
+    _assert_contains(result.output, "undefined value `nonexistent_handler`");
+    _assert_contains(result.output, "undefined value `nonexistent_port`");
+    _assert_contains(result.output, "undefined value `nonexistent_receiver`");
+    _clean_result(result);
+}
+
+test "SFN-675: parameter defaults are checked" ![io] {
+    let source = "fn defaults(a: int = \"bad\", b: int = nonexistent_default) {}\n"
+        + "fn main() {\n"
+        + "    fn nested(a: int = \"nested bad\", b: int = nonexistent_nested_default) {}\n"
+        + "    let lambda = fn(a: int = \"lambda bad\") -> int { return a; };\n"
+        + "    let encoded = base64.encode(\"ok\");\n"
+        + "}\n";
+    let result = _run_check("j_parameter_defaults.sfn", source);
+    _assert_spanned_error(result, "E0309");
+    _assert_contains(result.output, "default for `a`: expected `int`, found `string`");
+    _assert_contains(result.output, "undefined value `nonexistent_default`");
+    _assert_contains(result.output, "undefined value `nonexistent_nested_default`");
+    _assert_not_contains(result.output, "undefined value `base64`");
+    _clean_result(result);
+}
+
+test "SFN-675: a user-defined serve receives primitive argument checks" ![io] {
+    let source = "fn serve(handler: int, port: int) -> int { return handler; }\n"
+        + "fn sleep(duration: int) -> int { return duration; }\n"
+        + "fn main() ![clock] {\n"
+        + "    let result: int = serve(\"bad\", 8080);\n"
+        + "    sleep(\"also bad\");\n"
+        + "}\n";
+    let result = _run_check("k_user_serve_argument.sfn", source);
+    _assert_spanned_error(result, "E0309");
+    _assert_contains(result.output, "argument 1 to `serve`: expected `int`, found `string`");
+    _assert_contains(result.output, "argument 1 to `sleep`: expected `int`, found `string`");
+    _clean_result(result);
+}
+
+test "SFN-675: generic primitive slots remain fail-open" ![io] {
+    let source = "fn generic<T>(value: int) -> int { return value; }\n"
+        + "fn main() { generic(\"not proven through generic instantiation\"); }\n";
+    let result = _run_check("l_generic_fail_open.sfn", source);
+    _assert_clean_without(result, "E0309");
+    _clean_result(result);
+}
+
+test "SFN-675: valued match fields do not fabricate bindings" ![io] {
+    let source = "struct Box { value: int; }\n" + "fn main() ![io.console] {\n"
+        + "    let boxed = Box { value: 1 };\n"
+        + "    match boxed {\n"
+        + "        Box { value: 1 } => { print(value); },\n"
+        + "        _ => {}\n"
+        + "    }\n"
+        + "}\n";
+    let result = _run_check("m_valued_match_field.sfn", source);
+    _assert_spanned_error(result, "E0014");
+    _assert_contains(result.output, "undefined value `value`");
+    _clean_result(result);
+}
+
+test "SFN-675: annotated globals retain primitive metadata" ![io] {
+    let source = "let global_text: string = \"bad\";\n"
+        + "fn takes_global_int(value: int) {}\n"
+        + "fn global_result() -> int { return global_text; }\n"
+        + "fn main() {\n"
+        + "    let local_int: int = global_text;\n"
+        + "    takes_global_int(global_text);\n"
+        + "}\n";
+    let result = _run_check("n_global_primitive_metadata.sfn", source);
+    _assert_spanned_error(result, "E0309");
+    _assert_contains(result.output, "initializer for `local_int`: expected `int`, found `string`");
+    _assert_contains(result.output, "argument 1 to `takes_global_int`: expected `int`, found `string`");
+    _assert_contains(result.output, "return value: expected `int`, found `string`");
+    _clean_result(result);
+}
+
+test "SFN-675: defaults cannot resolve callee parameters" ![io] {
+    let source = "fn invalid_default(a: int, b: int = a) {}\n"
+        + "fn main() { invalid_default(1); }\n";
+    let result = _run_check("o_default_parameter_scope.sfn", source);
+    _assert_spanned_error(result, "E0014");
+    _assert_contains(result.output, "undefined value `a`");
+    _clean_result(result);
+}
+
+test "SFN-675: source globals outrank placeholders and resolve forward" ![io] {
+    let source = "let sleep: string = \"source global\";\n"
+        + "let forward_int: int = later_text;\n"
+        + "let later_text: string = \"later\";\n"
+        + "fn main() { let local_int: int = sleep; }\n";
+    let result = _run_check("p_global_resolution_precedence.sfn", source);
+    _assert_spanned_error(result, "E0309");
+    _assert_contains(result.output, "initializer for `forward_int`: expected `int`, found `string`");
+    _assert_contains(result.output, "initializer for `local_int`: expected `int`, found `string`");
+    _clean_result(result);
+}

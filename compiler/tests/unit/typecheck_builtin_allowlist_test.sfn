@@ -18,7 +18,27 @@
 // library helper flagged by the #616 audit as missing from the
 // pre-existing inline list, deliberately kept out of the envelope so
 // user code can shadow it).
-import { is_builtin_call_name } from "../../src/typecheck_types/extern_abi";
+import { is_builtin_call_name, is_builtin_member_root } from "../../src/typecheck_types/extern_abi";
+
+test "builtin member roots mirror the runtime helper registry" {
+    assert is_builtin_member_root("array");
+    assert is_builtin_member_root("base64");
+    assert is_builtin_member_root("console");
+    assert is_builtin_member_root("crypto");
+    assert is_builtin_member_root("env");
+    assert is_builtin_member_root("fs");
+    assert is_builtin_member_root("http");
+    assert is_builtin_member_root("intrinsic");
+    assert is_builtin_member_root("io");
+    assert is_builtin_member_root("number");
+    assert is_builtin_member_root("print");
+    assert is_builtin_member_root("process");
+    assert is_builtin_member_root("rc");
+    assert is_builtin_member_root("runtime");
+    assert is_builtin_member_root("string");
+    assert is_builtin_member_root("websocket");
+    assert ! is_builtin_member_root("unknown_namespace");
+}
 
 test "builtin allowlist: print is in envelope" {
     assert is_builtin_call_name("print") == true;
