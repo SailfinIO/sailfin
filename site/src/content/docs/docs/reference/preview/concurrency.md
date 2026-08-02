@@ -38,6 +38,12 @@ construct. Nursery exit joins every child, and non-local exits (`return`,
 per-thread, joins without destroying its state, and does not cancel sibling
 tasks when one fails.
 
+A channel created inside a `routine {}` is owned by that nursery. It may be
+used and aliased within the block, but assigning the handle directly or through
+an alias to a longer-lived scalar, aggregate field, indexed collection, or
+module global raises `E0838`. Channels created outside a nursery—including the
+module-global sharing pattern—remain ambient and are not flagged (SFN-694).
+
 ### Capture-env ownership for `spawn` / `parallel` (#1475, epic #1466)
 
 A task lambda that captures variables from the enclosing scope owns its heap environment across the thread boundary and frees it exactly once after the task body completes. The mechanics:

@@ -1,7 +1,7 @@
-// Task call identity and fresh-spawn provenance summaries for the ownership
+// Nursery-handle call identity and fresh-producer summaries for the ownership
 // checker. Keeping this program-level analysis separate prevents the main
-// ownership walk from conflating a declared `Task<T>` result with proof that a
-// helper creates a nursery-bound task.
+// ownership walk from conflating a declared handle result with proof that a
+// helper creates a nursery-bound handle.
 import {
     Block,
     Expression,
@@ -174,8 +174,62 @@ fn task_type_is_bearing(names: string[], type_text: string) -> boolean {
     return _task_type_is_bearing_with_seen(names, trim_text(type_text), seen);
 }
 
+fn _is_channel_type(type_text: string) -> boolean {
+    let concrete = trim_text(type_text);
+    if concrete == "Channel" || concrete == "channel" { return true; }
+    if concrete.length >= 8 {
+        let prefix = substring(concrete, 0, 8);
+        if prefix == "Channel<" || prefix == "channel:" { return true; }
+    }
+    return false;
+}
+
+fn _channel_type_is_bearing_with_seen(names: string[], type_text: string, seen: string[]) -> boolean {
+    if _is_channel_type(type_text) { return true; }
+    let concrete_type = trim_text(type_text);
+    if _name_in_list(seen, concrete_type) { return false; }
+    let mut next_seen = seen;
+    next_seen.push(concrete_type);
+    let owner = _task_owner_base(type_text);
+    let field_prefix = "field-type:" + owner + ".";
+    let parameters = _task_type_parameters(names, type_text);
+    let arguments = _task_type_arguments(type_text);
+    let mut index: int = 0;
+    loop {
+        if index >= names.length { break; }
+        if starts_with(names[index], field_prefix) {
+            let equals = index_of(names[index], "=");
+            if equals >= 0 {
+                let raw = substring(names[index], equals + 1, names[index].length);
+                let concrete = _substitute_task_field_type(raw, parameters, arguments);
+                if _channel_type_is_bearing_with_seen(names, concrete, next_seen) {
+                    return true;
+                }
+            }
+        }
+        index += 1;
+    }
+    return false;
+}
+
+// The field metadata table serves all nursery handle kinds even though this
+// module predates Channel tracking. Walk it transitively so extracting a
+// Channel-bearing nested struct or an array element cannot erase provenance.
+fn channel_type_is_bearing(names: string[], type_text: string) -> boolean {
+    let seen: string[] = [];
+    return _channel_type_is_bearing_with_seen(names, trim_text(type_text), seen);
+}
+
 fn fresh_task_key(callable_key: string) -> string {
     return "fresh:" + callable_key;
+}
+
+fn channel_return_key(callable_key: string) -> string {
+    return "channel-return:" + callable_key;
+}
+
+fn fresh_channel_key(callable_key: string) -> string {
+    return "fresh-channel:" + callable_key;
 }
 
 fn _name_in_list(names: string[], name: string) -> boolean {
@@ -230,6 +284,120 @@ fn _block_task_return_proof(block: Block, names: string[]) -> TaskReturnProof {
 fn block_proves_fresh_task_returns(block: Block, names: string[]) -> boolean {
     let proof = _block_task_return_proof(block, names);
     return proof.total > 0 && proof.total == proof.fresh;
+}
+
+// Channel producers use a distinct proof namespace from Tasks: Channel
+// handles remain copyable, but a helper that creates one inside a routine
+// still returns a nursery-bound identity. Aggregate literals count as fresh
+// when any contained value is proven fresh because the returned aggregate then
+// carries that nursery handle.
+fn _expression_is_proven_fresh_channel(expression: Expression?, names: string[]) -> boolean {
+    if expression == null { return false; }
+    if expression.variant == "Channel" { return true; }
+    if expression.variant == "Call" {
+        let callee = expression.callee;
+        if callee.variant == "Identifier" {
+            return _name_in_list(names, fresh_channel_key(callee.name));
+        }
+        return false;
+    }
+    if expression.variant == "Conditional" {
+        return _expression_is_proven_fresh_channel(expression.then_value, names)
+            && _expression_is_proven_fresh_channel(expression.else_value, names);
+    }
+    if expression.variant == "Array" {
+        let mut index: int = 0;
+        loop {
+            if index >= expression.elements.length { break; }
+            if _expression_is_proven_fresh_channel(expression.elements[index], names) {
+                return true;
+            }
+            index += 1;
+        }
+    }
+    if expression.variant == "Object" || expression.variant == "Struct" {
+        let mut index: int = 0;
+        loop {
+            if index >= expression.fields.length { break; }
+            if _expression_is_proven_fresh_channel(expression.fields[index].value, names) {
+                return true;
+            }
+            index += 1;
+        }
+    }
+    return false;
+}
+
+fn _block_channel_return_proof(block: Block, names: string[]) -> TaskReturnProof {
+    let mut proof = TaskReturnProof { total: 0, fresh: 0 };
+    let mut index: int = 0;
+    loop {
+        if index >= block.statements.length { break; }
+        proof = _merge_task_return_proof(proof, _statement_channel_return_proof(block.statements[index], names));
+        index += 1;
+    }
+    return proof;
+}
+
+fn block_proves_fresh_channel_returns(block: Block, names: string[]) -> boolean {
+    let proof = _block_channel_return_proof(block, names);
+    return proof.total > 0 && proof.total == proof.fresh;
+}
+
+fn _statement_channel_return_proof(statement: Statement, names: string[]) -> TaskReturnProof {
+    if statement.variant == "ReturnStatement" {
+        let mut fresh: int = 0;
+        if _expression_is_proven_fresh_channel(statement.expression, names) {
+            fresh = 1;
+        }
+        return TaskReturnProof { total: 1, fresh: fresh };
+    }
+    if statement.variant == "BlockStatement" {
+        return _block_channel_return_proof(statement.body, names);
+    }
+    if statement.variant == "IfStatement" {
+        let mut proof = _block_channel_return_proof(statement.then_block, names);
+        let else_branch = statement.else_branch;
+        if else_branch != null {
+            let else_body = else_branch.body;
+            if else_body != null {
+                proof = _merge_task_return_proof(proof, _block_channel_return_proof(else_body, names));
+            }
+            let else_statement = else_branch.statement;
+            if else_statement != null {
+                proof = _merge_task_return_proof(proof, _statement_channel_return_proof(else_statement, names));
+            }
+        }
+        return proof;
+    }
+    if statement.variant == "LoopStatement" || statement.variant == "RoutineStatement"
+        || statement.variant == "ForStatement"
+        || statement.variant == "WithStatement" {
+        return _block_channel_return_proof(statement.body, names);
+    }
+    if statement.variant == "MatchStatement" {
+        let mut proof = TaskReturnProof { total: 0, fresh: 0 };
+        let mut index: int = 0;
+        loop {
+            if index >= statement.cases.length { break; }
+            proof = _merge_task_return_proof(proof, _block_channel_return_proof(statement.cases[index].body, names));
+            index += 1;
+        }
+        return proof;
+    }
+    if statement.variant == "TryStatement" {
+        let mut proof = _block_channel_return_proof(statement.try_block, names);
+        let catch_block = statement.catch_block;
+        if catch_block != null {
+            proof = _merge_task_return_proof(proof, _block_channel_return_proof(catch_block, names));
+        }
+        let finally_block = statement.finally_block;
+        if finally_block != null {
+            proof = _merge_task_return_proof(proof, _block_channel_return_proof(finally_block, names));
+        }
+        return proof;
+    }
+    return TaskReturnProof { total: 0, fresh: 0 };
 }
 
 fn _statement_task_return_proof(statement: Statement, names: string[]) -> TaskReturnProof {
@@ -342,6 +510,87 @@ fn _append_proven_program_task_producers(program: Program, initial_names: string
     return names;
 }
 
+fn _append_proven_program_channel_producers(program: Program, initial_names: string[]) -> string[] {
+    let mut names = initial_names;
+    let mut pass: int = 0;
+    loop {
+        if pass > program.statements.length { break; }
+        let mut index: int = 0;
+        loop {
+            if index >= program.statements.length { break; }
+            let statement = program.statements[index];
+            if statement.variant == "FunctionDeclaration" {
+                let return_type = statement.signature.return_type;
+                if return_type != null {
+                    if channel_type_is_bearing(names, return_type.text) {
+                        let proof = _block_channel_return_proof(statement.body, names);
+                        let key = fresh_channel_key(statement.signature.name);
+                        if proof.total > 0 && proof.total == proof.fresh && !_name_in_list(names, key) {
+                            names.push(key);
+                        }
+                    }
+                }
+            }
+            if statement.variant == "StructDeclaration" {
+                let mut method_index: int = 0;
+                loop {
+                    if method_index >= statement.methods.length { break; }
+                    let method = statement.methods[method_index];
+                    let return_type = method.signature.return_type;
+                    if return_type != null {
+                        if channel_type_is_bearing(names, return_type.text) {
+                            let proof = _block_channel_return_proof(method.body, names);
+                            let callable_key = task_method_key(statement.name, method.signature.name);
+                            let key = fresh_channel_key(callable_key);
+                            if proof.total > 0 && proof.total == proof.fresh
+                                && !_name_in_list(names, key) {
+                                names.push(key);
+                            }
+                        }
+                    }
+                    method_index += 1;
+                }
+            }
+            index += 1;
+        }
+        pass += 1;
+    }
+    return names;
+}
+
+fn _append_declared_channel_callables(program: Program, initial_names: string[]) -> string[] {
+    let mut names = initial_names;
+    let mut index: int = 0;
+    loop {
+        if index >= program.statements.length { break; }
+        let statement = program.statements[index];
+        if statement.variant == "FunctionDeclaration" || statement.variant == "ExternFunctionDeclaration" {
+            let return_type = statement.signature.return_type;
+            if return_type != null {
+                if channel_type_is_bearing(names, return_type.text) {
+                    names.push(channel_return_key(statement.signature.name));
+                }
+            }
+        }
+        if statement.variant == "StructDeclaration" {
+            let mut method_index: int = 0;
+            loop {
+                if method_index >= statement.methods.length { break; }
+                let method = statement.methods[method_index];
+                let return_type = method.signature.return_type;
+                if return_type != null {
+                    if channel_type_is_bearing(names, return_type.text) {
+                        names.push(channel_return_key(task_method_key(statement.name, method.signature.name)));
+                    }
+                }
+                method_index += 1;
+            }
+        }
+        index += 1;
+    }
+    return names;
+}
+
 fn _append_struct_task_metadata(program: Program, initial_names: string[]) -> string[] {
     let mut names = initial_names;
     let mut index: int = 0;
@@ -403,10 +652,10 @@ fn _append_struct_task_metadata(program: Program, initial_names: string[]) -> st
 }
 
 // Calls do not retain their inferred result type in the ownership AST. Gather
-// the declared Task-returning surface once so `let h = make_task()` preserves
-// Task identity even without a redundant local annotation. Methods use a
-// `Receiver.method` key so unrelated same-named methods cannot make an
-// ordinary return value spuriously affine.
+// the declared Task- and Channel-returning surface once so inferred local
+// bindings preserve handle identity without redundant annotations. Methods use
+// a `Receiver.method` key so unrelated same-named methods cannot make an
+// ordinary return value spuriously affine or nursery-bound.
 fn gather_task_returning_names(program: Program, imports: ImportSymbolTable) -> string[] {
     let mut names: string[] = [];
     let mut index: int = 0;
@@ -439,7 +688,9 @@ fn gather_task_returning_names(program: Program, imports: ImportSymbolTable) -> 
         index += 1;
     }
     names = _append_struct_task_metadata(program, names);
+    names = _append_declared_channel_callables(program, names);
     names = _append_proven_program_task_producers(program, names);
+    names = _append_proven_program_channel_producers(program, names);
     let localized = localize_import_symbols_for_program(program, imports);
     index = 0;
     loop {
@@ -451,6 +702,9 @@ fn gather_task_returning_names(program: Program, imports: ImportSymbolTable) -> 
                 if !_name_in_list(names, entry.name) {
                     names.push(entry.name);
                 }
+            }
+            if channel_type_is_bearing(names, entry.return_type) {
+                names.push(channel_return_key(entry.name));
             }
         }
         index += 1;
@@ -471,6 +725,9 @@ fn gather_block_task_returning_names(block: Block, initial_names: string[]) -> s
                 if is_task_type(return_type.text) {
                     names.push(statement.signature.name);
                 }
+                if channel_type_is_bearing(names, return_type.text) {
+                    names.push(channel_return_key(statement.signature.name));
+                }
             }
         }
         index += 1;
@@ -487,6 +744,18 @@ fn gather_block_task_returning_names(block: Block, initial_names: string[]) -> s
                 let key = fresh_task_key(statement.signature.name);
                 if proof.total > 0 && proof.total == proof.fresh && !_name_in_list(names, key) {
                     names.push(key);
+                }
+            }
+            if statement.variant == "FunctionDeclaration" {
+                let return_type = statement.signature.return_type;
+                if return_type != null {
+                    if channel_type_is_bearing(names, return_type.text) {
+                        let proof = _block_channel_return_proof(statement.body, names);
+                        let key = fresh_channel_key(statement.signature.name);
+                        if proof.total > 0 && proof.total == proof.fresh && !_name_in_list(names, key) {
+                            names.push(key);
+                        }
+                    }
                 }
             }
             index += 1;

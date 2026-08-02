@@ -58,11 +58,11 @@ test "emit_runtime_call: string.concat renders SfnString-aggregate call to sfn_s
     // slot with `ptr null` (the runtime resolves the arena via
     // `_sfn_resolve_arena`'s `sfn_arena_global()` fallback), so the
     // fixture uses the null operand to match real emission. The return
-    // type is the SfnString aggregate `{i8*, i64}`; the hardcoded
-    // call-site emitters follow the `call` with an `extractvalue` to
-    // recover the legacy `i8*` operand. This fixture pins the call shape
-    // itself; the extract step lives in the call-site emitters and is
-    // covered by the e2e test `test_runtime_string_allocating.sh`.
+    // type is the SfnString aggregate `{i8*, i64}`, which SFN-689 made the
+    // call-site emitters return as-is — they no longer follow the `call`
+    // with an `extractvalue` down to a legacy `i8*`. This fixture pins the
+    // call shape itself; the result shape is covered by
+    // `compiler/tests/e2e/runtime_string_allocating_test.sfn`.
     let lhs = _sfn_string_operand("%a");
     let rhs = _sfn_string_operand("%b");
     let arena = _ptr_operand("null");

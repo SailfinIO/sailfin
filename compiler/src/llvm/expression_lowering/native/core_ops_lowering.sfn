@@ -456,8 +456,8 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
         // unresolved types all lower to, so admitting it here would turn
         // `buf + n` pointer arithmetic into a string concat that calls
         // `strlen` on a raw, non-NUL-terminated buffer. Strings reach this
-        // path as the aggregate — literals, locals, and parameters alike —
-        // so keying off it costs no real concat shape.
+        // path as the aggregate — literals, locals, parameters, and prior
+        // `+` results alike — so keying off it costs no real concat shape.
         let lhs_is_string_aggregate = lhs_type == "{i8*, i64}";
         let rhs_is_string_aggregate = rhs_type == "{i8*, i64}";
         let lhs_is_stringifiable = _is_stringifiable_numeric(lhs_type);
@@ -578,14 +578,16 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
             let concat_result = emit_runtime_call("string.concat", concat_operands, empty_runtime_call_overrides(), current_temp, current_lines);
             diagnostics = extend_string_array(diagnostics, concat_result.diagnostics);
             current_lines = concat_result.lines;
+            // SFN-689: return the aggregate, as `emit_string_concat`
+            // (core_strings.sfn) does. Extracting the data pointer made a
+            // chained `"a" + n + "b" + m` read as `*u8` arithmetic at the
+            // gate above, and the dropped coercion took the call with it.
             let agg_name = format_temp_name(current_temp);
             current_temp += 1;
-            let data_name = format_temp_name(current_temp);
-            current_temp += 1;
-            current_lines.push("  " + data_name + " = extractvalue {i8*, i64} "
-                + agg_name
-                + ", 0");
-            let operand = LLVMOperand { llvm_type: "i8*", value: data_name };
+            let operand = LLVMOperand {
+                llvm_type: "{i8*, i64}",
+                value: agg_name
+            };
             return ExpressionResult {
                 lines: current_lines,
                 temp_index: current_temp,
@@ -819,15 +821,13 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
             diagnostics = extend_string_array(diagnostics, concat_result.diagnostics);
             current_lines = concat_result.lines;
             let agg_name = format_temp_name(current_temp);
-            let data_name = format_temp_name(current_temp + 1);
-            let extract_line = "  " + data_name + " = extractvalue {i8*, i64} "
-                + agg_name
-                + ", 0";
-            current_lines.push(extract_line);
-            let operand = LLVMOperand { llvm_type: "i8*", value: data_name };
+            let operand = LLVMOperand {
+                llvm_type: "{i8*, i64}",
+                value: agg_name
+            };
             return ExpressionResult {
                 lines: current_lines,
-                temp_index: current_temp + 2,
+                temp_index: current_temp + 1,
                 operand: operand,
                 diagnostics: diagnostics,
                 string_constants: string_constants

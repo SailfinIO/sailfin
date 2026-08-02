@@ -16,6 +16,8 @@
 //   - E5: use-after-move (`E0901`) and second-live-binding (`E0904`)
 //     diagnostics with both spans, plus a clean move-and-consume
 //     negative case
+import { contains } from "sfn/strings";
+
 import { append_import_function_signature_from_module, empty_import_symbols } from "../../src/effect_imports";
 import {
     OwnershipBinding,
@@ -106,7 +108,7 @@ test "ownership: match destructure pattern bindings are tracked" ![io] {
 test "ownership: lattice helpers flip owned to moved" ![io] {
     let mut bindings: OwnershipBinding[] = [];
     bindings.push(OwnershipBinding {
-        name: "x", declared_type: "", state: "owned", span: null, is_owned: true, is_linear: false, is_task: false, nursery_bound: false, nursery_span: null, moved_span: null
+        name: "x", alias_roots: [0], declared_type: "", state: "owned", span: null, is_owned: true, is_linear: false, is_task: false, is_channel: false, nursery_bound: false, nursery_span: null, moved_span: null
     });
     assert binding_state(bindings, "x") == "owned";
     assert binding_state(bindings, "missing") == "";
@@ -661,6 +663,267 @@ test "ownership: routine-local Task storage does not escape its nursery" ![io] {
     let source = "fn f() -> int {\n    routine {\n        let mut handles: Task<int>[] = [];\n        handles.push(spawn fn() -> int { return 7; });\n    }\n    return 0;\n}\n";
     let warnings = check_ownership(parse_program(source));
     assert warnings.length == 0;
+}
+
+// -------------------------------------------------------------------
+// SFN-694: Channel nursery lifetime (E0838)
+// -------------------------------------------------------------------
+test "ownership: nursery Channel assigned to a module global emits E0838" ![io] {
+    let source = "let mut g_ch = channel(1);\nfn f() -> int {\n    routine { g_ch = channel(8); }\n    return 0;\n}\n";
+    let warnings = check_ownership(parse_program(source));
+    assert warnings.length == 1;
+    assert warnings[0].code == "E0838";
+    assert warnings[0].binding_name == "g_ch";
+    assert contains(warnings[0].message, "channel handle");
+    assert warnings[0].trigger != null;
+    assert warnings[0].moved_trigger != null;
+}
+
+test "ownership: nursery Channel alias assigned to a module global emits E0838" ![io] {
+    let source = "let mut g_ch = channel(1);\nfn f() -> int {\n    routine {\n        let ch = channel(4);\n        g_ch = ch;\n    }\n    return 0;\n}\n";
+    let warnings = check_ownership(parse_program(source));
+    assert warnings.length == 1;
+    assert warnings[0].code == "E0838";
+    assert warnings[0].binding_name == "g_ch";
+    assert contains(warnings[0].message, "channel handle");
+}
+
+test "ownership: nursery Channel stored in outer aggregate destinations emits E0838" ![io] {
+    let field_source = "struct Holder { ch: Channel<int> }\nfn f() -> int {\n    let mut outer = Holder { ch: channel(1) };\n    routine { outer.ch = channel(4); }\n    return 0;\n}\n";
+    let field_warnings = check_ownership(parse_program(field_source));
+    assert field_warnings.length == 1;
+    assert field_warnings[0].code == "E0838";
+    assert field_warnings[0].binding_name == "outer";
+    assert contains(field_warnings[0].message, "channel handle");
+
+    let index_source = "fn f() -> int {\n    let mut outer: Channel<int>[] = [channel(1)];\n    routine { outer[0] = channel(4); }\n    return 0;\n}\n";
+    let index_warnings = check_ownership(parse_program(index_source));
+    assert index_warnings.length == 1;
+    assert index_warnings[0].code == "E0838";
+    assert index_warnings[0].binding_name == "outer";
+    assert contains(index_warnings[0].message, "channel handle");
+}
+
+test "ownership: extracting a nursery Channel from a local aggregate emits E0838" ![io] {
+    let field_source = "let mut g_ch = channel(1);\nstruct Holder { ch: Channel<int>; value: int }\nfn f() -> int {\n    routine {\n        let holder = Holder { ch: channel(4), value: 7 };\n        g_ch = holder.ch;\n    }\n    return 0;\n}\n";
+    let field_warnings = check_ownership(parse_program(field_source));
+    assert field_warnings.length == 1;
+    assert field_warnings[0].code == "E0838";
+    assert field_warnings[0].binding_name == "g_ch";
+    assert contains(field_warnings[0].message, "channel handle");
+
+    let index_source = "let mut g_ch = channel(1);\nfn f() -> int {\n    routine {\n        let channels: Channel<int>[] = [channel(4)];\n        g_ch = channels[0];\n    }\n    return 0;\n}\n";
+    let index_warnings = check_ownership(parse_program(index_source));
+    assert index_warnings.length == 1;
+    assert index_warnings[0].code == "E0838";
+    assert index_warnings[0].binding_name == "g_ch";
+    assert contains(index_warnings[0].message, "channel handle");
+}
+
+test "ownership: mutating then extracting a local Channel aggregate emits E0838" ![io] {
+    let field_source = "let mut g_ch = channel(1);\nstruct Holder { ch: Channel<int> }\nfn f() -> int {\n    let ambient = channel(1);\n    routine {\n        let mut holder = Holder { ch: ambient };\n        holder.ch = channel(4);\n        g_ch = holder.ch;\n    }\n    return 0;\n}\n";
+    let field_warnings = check_ownership(parse_program(field_source));
+    assert field_warnings.length == 1;
+    assert field_warnings[0].code == "E0838";
+    assert field_warnings[0].binding_name == "g_ch";
+
+    let index_source = "let mut g_ch = channel(1);\nfn f() -> int {\n    let ambient = channel(1);\n    routine {\n        let mut channels: Channel<int>[] = [ambient];\n        channels[0] = channel(4);\n        g_ch = channels[0];\n    }\n    return 0;\n}\n";
+    let index_warnings = check_ownership(parse_program(index_source));
+    assert index_warnings.length == 1;
+    assert index_warnings[0].code == "E0838";
+    assert index_warnings[0].binding_name == "g_ch";
+}
+
+test "ownership: extracting a nested Channel-bearing aggregate emits E0838" ![io] {
+    let source = "struct Inner { ch: Channel<int> }\nstruct Outer { inner: Inner }\nlet ambient = channel(1);\nlet mut g_inner = Inner { ch: ambient };\nfn f() -> int {\n    routine {\n        let outer = Outer { inner: Inner { ch: channel(4) } };\n        g_inner = outer.inner;\n    }\n    return 0;\n}\n";
+    let warnings = check_ownership(parse_program(source));
+    assert warnings.length == 1;
+    assert warnings[0].code == "E0838";
+    assert warnings[0].binding_name == "g_inner";
+    assert contains(warnings[0].message, "channel handle");
+}
+
+test "ownership: Channel-capturing closure cannot escape its nursery" ![io] {
+    let source = "fn f() -> int {\n    let mut escaped = fn() -> int { return 0; };\n    routine {\n        let ch = channel(1);\n        escaped = fn() -> int { ch.send(7); return 0; };\n    }\n    return 0;\n}\n";
+    let warnings = check_ownership(parse_program(source));
+    assert warnings.length == 1;
+    assert warnings[0].code == "E0838";
+    assert warnings[0].binding_name == "escaped";
+    assert contains(warnings[0].message, "channel handle");
+}
+
+test "ownership: Channel-capturing closure escape survives control-flow joins" ![io] {
+    let source = "fn f(flag: boolean) -> int {\n    let mut escaped = fn() -> int { return 0; };\n    routine {\n        let ch = channel(1);\n        if flag { escaped = fn() -> int { ch.send(7); return 0; }; }\n    }\n    return 0;\n}\n";
+    let warnings = check_ownership(parse_program(source));
+    assert warnings.length == 1;
+    assert warnings[0].code == "E0838";
+    assert warnings[0].binding_name == "escaped";
+    assert contains(warnings[0].message, "channel handle");
+}
+
+test "ownership: Channel for target retains nursery provenance" ![io] {
+    let source = "let mut g_ch = channel(1);\nfn f() -> int {\n    routine {\n        let channels: Channel<int>[] = [channel(4)];\n        for ch in channels { g_ch = ch; }\n    }\n    return 0;\n}\n";
+    let warnings = check_ownership(parse_program(source));
+    assert warnings.length == 1;
+    assert warnings[0].code == "E0838";
+    assert warnings[0].binding_name == "g_ch";
+    assert contains(warnings[0].message, "channel handle");
+}
+
+test "ownership: routine-local and ambient Channels remain clean" ![io] {
+    let local_source = "fn f() -> int {\n    routine {\n        let ch = channel(1);\n        let alias = ch;\n        alias.send(7);\n        let value: int = alias.receive();\n    }\n    return 0;\n}\n";
+    assert check_ownership(parse_program(local_source)).length == 0;
+
+    let global_source = "let g_ch = channel(1);\nfn f() -> int {\n    routine {\n        g_ch.send(7);\n        let value: int = g_ch.receive();\n    }\n    return 0;\n}\n";
+    assert check_ownership(parse_program(global_source)).length == 0;
+
+    let sibling_source = "struct Holder { ch: Channel<int>; value: int }\nfn f() -> int {\n    let mut result = 0;\n    routine {\n        let holder = Holder { ch: channel(1), value: 7 };\n        result = holder.value;\n    }\n    return result;\n}\n";
+    assert check_ownership(parse_program(sibling_source)).length == 0;
+}
+
+test "ownership: Channel-producing calls retain nursery provenance" ![io] {
+    let direct_source = "let mut g_ch = channel(1);\nfn make_channel() -> Channel<int> { return channel(4); }\nfn f() -> int {\n    routine { g_ch = make_channel(); }\n    return 0;\n}\n";
+    let direct_warnings = check_ownership(parse_program(direct_source));
+    assert direct_warnings.length == 1;
+    assert direct_warnings[0].code == "E0838";
+    assert direct_warnings[0].binding_name == "g_ch";
+
+    let method_source = "let mut g_ch = channel(1);\nstruct Factory {\n    fn make(self) -> Channel<int> { return channel(4); }\n}\nfn f(factory: Factory) -> int {\n    routine { g_ch = factory.make(); }\n    return 0;\n}\n";
+    let method_warnings = check_ownership(parse_program(method_source));
+    assert method_warnings.length == 1;
+    assert method_warnings[0].code == "E0838";
+    assert method_warnings[0].binding_name == "g_ch";
+
+    let iife_source = "let mut g_ch = channel(1);\nfn f() -> int {\n    routine { g_ch = fn() -> Channel<int> { return channel(4); }(); }\n    return 0;\n}\n";
+    let iife_warnings = check_ownership(parse_program(iife_source));
+    assert iife_warnings.length == 1;
+    assert iife_warnings[0].code == "E0838";
+    assert iife_warnings[0].binding_name == "g_ch";
+}
+
+test "ownership: Channel-returning calls propagate concrete receiver and capture provenance" ![io] {
+    let receiver_source = "let mut g_ch = channel(1);\nstruct Holder {\n    ch: Channel<int>;\n    fn get(self) -> Channel<int> { return self.ch; }\n}\nfn f() -> int {\n    routine {\n        let holder = Holder { ch: channel(4) };\n        g_ch = holder.get();\n    }\n    return 0;\n}\n";
+    let receiver_warnings = check_ownership(parse_program(receiver_source));
+    assert receiver_warnings.length == 1;
+    assert receiver_warnings[0].code == "E0838";
+    assert receiver_warnings[0].binding_name == "g_ch";
+
+    let capture_source = "let mut g_ch = channel(1);\nfn f() -> int {\n    routine {\n        let ch = channel(4);\n        g_ch = fn() -> Channel<int> { return ch; }();\n    }\n    return 0;\n}\n";
+    let capture_warnings = check_ownership(parse_program(capture_source));
+    assert capture_warnings.length == 1;
+    assert capture_warnings[0].code == "E0838";
+    assert capture_warnings[0].binding_name == "g_ch";
+
+    let ambient_source = "let mut g_ch = channel(1);\nfn f(ambient: Channel<int>) -> int {\n    routine { g_ch = fn() -> Channel<int> { return ambient; }(); }\n    return 0;\n}\n";
+    assert check_ownership(parse_program(ambient_source)).length == 0;
+}
+
+test "ownership: Channel identity helper preserves ambient provenance" ![io] {
+    let source = "let mut g_ch = channel(1);\nfn identity(ch: Channel<int>) -> Channel<int> { return ch; }\nfn f(ambient: Channel<int>) -> int {\n    routine { g_ch = identity(ambient); }\n    return 0;\n}\n";
+    assert check_ownership(parse_program(source)).length == 0;
+}
+
+test "ownership: match aliases retain nursery Channel provenance" ![io] {
+    let direct_source = "let mut g_ch = channel(1);\nfn f() -> int {\n    routine {\n        match channel(4) {\n            ch => { g_ch = ch; }\n        }\n    }\n    return 0;\n}\n";
+    let direct_warnings = check_ownership(parse_program(direct_source));
+    assert direct_warnings.length == 1;
+    assert direct_warnings[0].code == "E0838";
+    assert direct_warnings[0].binding_name == "g_ch";
+
+    let field_source = "let mut g_ch = channel(1);\nstruct Holder { ch: Channel<int>; value: int }\nfn f() -> int {\n    routine {\n        let holder = Holder { ch: channel(4), value: 7 };\n        match holder {\n            Holder { ch, value } => { g_ch = ch; }\n        }\n    }\n    return 0;\n}\n";
+    let field_warnings = check_ownership(parse_program(field_source));
+    assert field_warnings.length == 1;
+    assert field_warnings[0].code == "E0838";
+    assert field_warnings[0].binding_name == "g_ch";
+
+    let sibling_source = "struct Holder { ch: Channel<int>; value: int }\nfn f() -> int {\n    let mut result = 0;\n    routine {\n        let holder = Holder { ch: channel(4), value: 7 };\n        match holder {\n            Holder { ch, value } => { result = value; }\n        }\n    }\n    return result;\n}\n";
+    assert check_ownership(parse_program(sibling_source)).length == 0;
+}
+
+test "ownership: local Channel collection push retains nursery provenance" ![io] {
+    let local_source = "fn f() -> int {\n    routine {\n        let mut channels: Channel<int>[] = [];\n        channels.push(channel(4));\n    }\n    return 0;\n}\n";
+    assert check_ownership(parse_program(local_source)).length == 0;
+
+    let extraction_source = "let mut g_ch = channel(1);\nfn f() -> int {\n    routine {\n        let mut channels: Channel<int>[] = [];\n        channels.push(channel(4));\n        g_ch = channels[0];\n    }\n    return 0;\n}\n";
+    let extraction_warnings = check_ownership(parse_program(extraction_source));
+    assert extraction_warnings.length == 1;
+    assert extraction_warnings[0].code == "E0838";
+    assert extraction_warnings[0].binding_name == "g_ch";
+
+    let ambient_source = "fn f(ambient: Channel<int>) -> int {\n    routine {\n        let mut channels: Channel<int>[] = [];\n        channels.push(ambient);\n    }\n    return 0;\n}\n";
+    assert check_ownership(parse_program(ambient_source)).length == 0;
+}
+
+test "ownership: custom push on Channel-bearing receiver remains opaque" ![io] {
+    let source = "let mut g_ch = channel(1);\nstruct Sink {\n    retained: Channel<int>;\n    fn push(self, ch: Channel<int>) { g_ch = ch; }\n}\nfn f(sink: Sink) -> int {\n    routine { sink.push(channel(4)); }\n    return 0;\n}\n";
+    let warnings = check_ownership(parse_program(source));
+    assert warnings.length == 1;
+    assert warnings[0].code == "E0838";
+}
+
+test "ownership: aggregate destination aliases retain canonical nursery identity" ![io] {
+    let member_source = "struct Holder { ch: Channel<int> }\nfn f() -> int {\n    let ambient = channel(1);\n    let mut outer = Holder { ch: ambient };\n    routine {\n        let alias = outer;\n        alias.ch = channel(4);\n    }\n    return 0;\n}\n";
+    let member_warnings = check_ownership(parse_program(member_source));
+    assert member_warnings.length == 1;
+    assert member_warnings[0].code == "E0838";
+    assert member_warnings[0].binding_name == "outer";
+
+    let index_source = "fn f() -> int {\n    let ambient = channel(1);\n    let mut outer: Channel<int>[] = [ambient];\n    routine {\n        let alias = outer;\n        alias[0] = channel(4);\n    }\n    return 0;\n}\n";
+    let index_warnings = check_ownership(parse_program(index_source));
+    assert index_warnings.length == 1;
+    assert index_warnings[0].code == "E0838";
+    assert index_warnings[0].binding_name == "outer";
+
+    let local_source = "let mut g_ch = channel(1);\nstruct Holder { ch: Channel<int> }\nfn f() -> int {\n    let ambient = channel(1);\n    routine {\n        let holder = Holder { ch: ambient };\n        let alias = holder;\n        alias.ch = channel(4);\n        g_ch = holder.ch;\n    }\n    return 0;\n}\n";
+    let local_warnings = check_ownership(parse_program(local_source));
+    assert local_warnings.length == 1;
+    assert local_warnings[0].code == "E0838";
+    assert local_warnings[0].binding_name == "g_ch";
+}
+
+test "ownership: aggregate Channel aliases use stable roots through shadowing" ![io] {
+    let source = "struct Holder { ch: Channel<int> }\nfn f() -> int {\n    let ambient = channel(1);\n    let mut outer = Holder { ch: ambient };\n    routine {\n        let alias = outer;\n        {\n            let outer = Holder { ch: ambient };\n            alias.ch = channel(4);\n        }\n    }\n    return 0;\n}\n";
+    let warnings = check_ownership(parse_program(source));
+    assert warnings.length == 1;
+    assert warnings[0].code == "E0838";
+    assert warnings[0].binding_name == "outer";
+}
+
+test "ownership: conditional aggregate Channel aliases retain every possible root" ![io] {
+    let source = "struct Holder { ch: Channel<int> }\nfn f(flag: boolean) -> int {\n    let ambient = channel(1);\n    let mut outer_a = Holder { ch: ambient };\n    let mut outer_b = Holder { ch: ambient };\n    routine {\n        let alias = flag ? outer_a : outer_b;\n        alias.ch = channel(4);\n    }\n    return 0;\n}\n";
+    let warnings = check_ownership(parse_program(source));
+    assert warnings.length == 2;
+    assert warnings[0].code == "E0838";
+    assert warnings[1].code == "E0838";
+}
+
+test "ownership: branch-rebound aggregate Channel aliases retain every possible root" ![io] {
+    let source = "struct Holder { ch: Channel<int> }\nfn f(flag: boolean) -> int {\n    let ambient = channel(1);\n    let mut outer_a = Holder { ch: ambient };\n    let mut outer_b = Holder { ch: ambient };\n    routine {\n        let mut alias = outer_a;\n        if flag { alias = outer_b; }\n        alias.ch = channel(4);\n    }\n    return 0;\n}\n";
+    let warnings = check_ownership(parse_program(source));
+    assert warnings.length == 2;
+    assert warnings[0].code == "E0838";
+    assert warnings[1].code == "E0838";
+}
+
+test "ownership: rebinding an aggregate Channel alias to fresh local storage clears its root" ![io] {
+    let source = "fn f() -> int {\n    let ambient = channel(1);\n    let mut outer: Channel<int>[] = [ambient];\n    routine {\n        let mut alias = outer;\n        alias = [];\n        alias.push(channel(4));\n    }\n    return 0;\n}\n";
+    assert check_ownership(parse_program(source)).length == 0;
+}
+
+test "ownership: child-local aggregate roots rebase to a surviving Channel alias" ![io] {
+    let source = "struct Holder { ch: Channel<int> }\nfn f() -> int {\n    let ambient = channel(1);\n    let mut escaped = Holder { ch: ambient };\n    routine {\n        {\n            let local = Holder { ch: ambient };\n            escaped = local;\n        }\n        let unrelated = Holder { ch: ambient };\n        escaped.ch = channel(4);\n    }\n    return 0;\n}\n";
+    let warnings = check_ownership(parse_program(source));
+    assert warnings.length == 1;
+    assert warnings[0].code == "E0838";
+    assert warnings[0].binding_name == "escaped";
+}
+
+test "ownership: routine-local aggregate roots rebase before the next nursery" ![io] {
+    let source = "struct Holder { ch: Channel<int> }\nfn f() -> int {\n    let ambient = channel(1);\n    let mut escaped = Holder { ch: ambient };\n    routine {\n        let local = Holder { ch: ambient };\n        escaped = local;\n    }\n    routine {\n        let unrelated = Holder { ch: ambient };\n        escaped.ch = channel(4);\n    }\n    return 0;\n}\n";
+    let warnings = check_ownership(parse_program(source));
+    assert warnings.length == 1;
+    assert warnings[0].code == "E0838";
+    assert warnings[0].binding_name == "escaped";
 }
 
 test "ownership: nested nursery cannot store a Task in its outer nursery binding" ![io] {

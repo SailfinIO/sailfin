@@ -150,3 +150,28 @@ test "string concat: result bound to a variable before use" {
     let m = "n=" + n;
     assert m == "n=7";
 }
+
+// SFN-689: concat lowering used to discard the aggregate result's length and
+// return its bare data pointer. A later numeric operand could not distinguish
+// that pointer from raw pointer arithmetic, so lowering dropped the enclosing
+// call or retained only fragments after the failed operand.
+test "string concat: numeric operands stringify throughout chained expressions" {
+    let a: i64 = 7;
+    let b: i64 = 8;
+    let s = "S";
+
+    assert "1|" + a == "1|7";
+    assert "2|" + a + "|" == "2|7|";
+    assert "3|" + a + "|" + b == "3|7|8";
+    assert "4|" + a + "|" + b + "|" == "4|7|8|";
+    assert "5|" + a + "|" + b + "|" + a == "5|7|8|7";
+    assert "6|" + a + "|" + b + "|" + a + "|" == "6|7|8|7|";
+    assert "7|" + s + "|" + a == "7|S|7";
+    assert "8|" + s + "|" + a + "|" + s == "8|S|7|S";
+
+    // The length half of the aggregate is authoritative, so it has to
+    // survive the chain too — a bare data pointer left `.length` undef.
+    let m = "n=" + a + " of " + b;
+    assert m == "n=7 of 8";
+    assert m.length == 8;
+}
