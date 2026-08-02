@@ -278,6 +278,32 @@ fn is_builtin_call_name(name: string) -> boolean {
     return _ret;
 }
 
+// Namespace roots backed by the runtime-helper registry. These names are
+// valid only as the receiver of a member access (`fs.exists`, `process.run`,
+// `string.concat`, ...); they are not ordinary value bindings and therefore
+// do not appear in the typecheck symbol table. Keep this set aligned with the
+// descriptor target roots under `llvm/runtime_helpers/registry_*.sfn`.
+fn is_builtin_member_root(name: string) -> boolean {
+    let mut _ret: boolean = false;
+    if strings_equal(name, "array") { _ret = true; }
+    if strings_equal(name, "base64") { _ret = true; }
+    if strings_equal(name, "console") { _ret = true; }
+    if strings_equal(name, "crypto") { _ret = true; }
+    if strings_equal(name, "env") { _ret = true; }
+    if strings_equal(name, "fs") { _ret = true; }
+    if strings_equal(name, "http") { _ret = true; }
+    if strings_equal(name, "intrinsic") { _ret = true; }
+    if strings_equal(name, "io") { _ret = true; }
+    if strings_equal(name, "number") { _ret = true; }
+    if strings_equal(name, "print") { _ret = true; }
+    if strings_equal(name, "process") { _ret = true; }
+    if strings_equal(name, "rc") { _ret = true; }
+    if strings_equal(name, "runtime") { _ret = true; }
+    if strings_equal(name, "string") { _ret = true; }
+    if strings_equal(name, "websocket") { _ret = true; }
+    return _ret;
+}
+
 // Pure: identifiers that v0 accepts as opaque-pointer pointees behind
 // a leading `*`. The v0 rule is "starts with an uppercase ASCII letter
 // and contains only identifier characters." This is intentionally

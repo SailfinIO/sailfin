@@ -218,8 +218,8 @@ relative to `compiler/src/`):
 
 | Range | Domain | Home |
 |---|---|---|
-| `E00xx` | Names / generic resolution; unresolved primitive-receiver method call (`E0012`, SFN-385) | `typecheck_types.sfn` |
-| `E03xx` | Duplicate symbols / type conflicts; mixed `int`/`float` arithmetic operand reject (`E0306`, SFN-385); array/struct arithmetic rejects (`E0307`/`E0308`, SFN-562/SFN-584) | `typecheck*.sfn` |
+| `E00xx` | Names / generic resolution; unresolved primitive-receiver method call (`E0012`, SFN-385); unresolved value identifier (`E0014`, SFN-675) | `typecheck*.sfn` |
+| `E03xx` | Duplicate symbols / type conflicts; mixed `int`/`float` arithmetic operand reject (`E0306`, SFN-385); array/struct arithmetic rejects (`E0307`/`E0308`, SFN-562/SFN-584); proven primitive mismatch (`E0309`, SFN-675) | `typecheck*.sfn` |
 | `E04xx` | Effect violations (`E0404` unrecognized effect root, SFEP-0017); workspace capability-envelope policy (`E0405` member declared-effect drift, `E0406` malformed `[workspace.capabilities]` envelope entry, SFEP-0051/SFN-416); value resolution (`E0420` undefined free-function callee, SFN-544); relative-import resolution (`E0430` cannot find module, `E0431` symbol not defined in closure, #1953) | `diagnostics_render.sfn`, `effect_checker.sfn`, `typecheck_types.sfn`, `capsule_resolver.sfn` |
 | `E05xx`–`E06xx` | Build / check tooling; parse diagnostics `E0500` (unrecognized top-level construct), `E0501` (malformed function parameter list), `E0502` (missing variable initializer), `E0503` (missing struct field type) | `tools/check.sfn` |
 | `E07xx` | Decorator resolution (SFEP-0023): `E0701` (imported symbol is not a decorator), `E0702` (unknown decorator — not imported, not a built-in) | `decorator_resolver.sfn` |

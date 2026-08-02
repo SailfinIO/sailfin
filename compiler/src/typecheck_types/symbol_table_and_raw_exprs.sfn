@@ -15,6 +15,7 @@ import {
 } from "../string_utils";
 import { Token } from "../token";
 import { Diagnostic } from "../typecheck_types";
+import { classify_declared_primitive } from "./annotation_shape_checks";
 import { is_c_abi_parameter_type, is_c_abi_return_type } from "./extern_abi";
 import { number_to_string, token_from_name, trim_text } from "./text_utils";
 
@@ -33,7 +34,9 @@ struct SymbolEntry {
     // For a `variable` bound with a `Channel<T>` type annotation: the
     // monomorphized element kind `T` resolves to (one of the six kinds
     // `spawn_future_kind` produces), so `check_channel_send` can enforce
-    // element-type on `ch.send(v)` (#1942). Empty for every other symbol.
+    // element-type on `ch.send(v)` (#1942). Function entries use the otherwise
+    // disjoint `fnprim:<return-code><parameter-codes>` marker added by SFN-675
+    // so local call contracts do not require a SymbolEntry layout change.
     element_kind: string;
     // For a `variable`/`parameter` bound with an explicit primitive type
     // annotation: the normalized closed primitive kind ("string" | "int" |
@@ -102,6 +105,63 @@ fn append_symbol(symbols: SymbolEntry[], name: string, kind: string, span: Sourc
     return updated;
 }
 
+// Attach the primitive proof slice of a function signature to the symbol entry
+// created by the ordinary duplicate-aware registrars. Keeping this metadata on
+// the semantic symbol lets every expression walk resolve local calls without a
+// second AST scan. Unknown/compound types are recorded as "" and never reject.
+fn register_local_function_symbol(bindings: SymbolEntry[], signature: FunctionSignature, kind: string, scope_start: int) -> ScopeResult {
+    let registration = register_local_symbol(bindings, signature.name, kind, signature.name_span, scope_start, signature_is_generic(signature), signature_is_c_abi(signature));
+    if registration.diagnostics.length > 0 { return registration; }
+    let mut updated = registration.bindings;
+    let index = updated.length - 1;
+    updated[index].element_kind = _function_primitive_marker(signature);
+    return ScopeResult {
+        bindings: updated,
+        diagnostics: registration.diagnostics
+    };
+}
+
+fn register_function_symbol(signature: FunctionSignature, kind: string, existing: SymbolEntry[]) -> SymbolCollectionResult {
+    let registration = register_symbol(signature.name, kind, signature.name_span, existing, signature_is_generic(signature), signature_is_c_abi(signature));
+    if registration.diagnostics.length > 0 { return registration; }
+    let mut updated = registration.symbols;
+    let index = updated.length - 1;
+    updated[index].element_kind = _function_primitive_marker(signature);
+    return SymbolCollectionResult {
+        symbols: updated,
+        diagnostics: registration.diagnostics
+    };
+}
+
+fn _function_primitive_marker(signature: FunctionSignature) -> string {
+    let mut marker = "fnprim:" + _primitive_kind_code(_signature_return_prim(signature));
+    let mut index: int = 0;
+    loop {
+        if index >= signature.parameters.length { break; }
+        let parameter = signature.parameters[index];
+        let mut kind: string = "";
+        if parameter.type_annotation != null {
+            kind = classify_declared_primitive(parameter.type_annotation.text);
+        }
+        marker = marker + _primitive_kind_code(kind);
+        index += 1;
+    }
+    return marker;
+}
+
+fn _signature_return_prim(signature: FunctionSignature) -> string {
+    if signature.return_type == null { return ""; }
+    return classify_declared_primitive(signature.return_type.text);
+}
+
+fn _primitive_kind_code(kind: string) -> string {
+    if strings_equal(kind, "int") { return "i"; }
+    if strings_equal(kind, "float") { return "f"; }
+    if strings_equal(kind, "string") { return "s"; }
+    if strings_equal(kind, "boolean") { return "b"; }
+    return "u";
+}
+
 fn clone_bindings(source: SymbolEntry[]) -> SymbolEntry[] {
     let mut copy: SymbolEntry[] = [];
     let mut _ci: int = 0;
@@ -135,6 +195,27 @@ fn find_symbol(symbols: SymbolEntry[], name: string) -> SymbolEntry? {
         _si -= 1;
     }
     return null;
+}
+
+// Value resolution uses the same innermost-first ordering as `find_symbol`,
+// except that resolution-only import/prelude placeholders must not hide a real
+// source binding of the same name. Keep the nearest placeholder as a fallback
+// so genuinely imported/prelude values still resolve when no source binding
+// exists.
+fn find_value_symbol(symbols: SymbolEntry[], name: string) -> SymbolEntry? {
+    let mut fallback: SymbolEntry? = null;
+    let mut index = symbols.length - 1;
+    loop {
+        if index < 0 { break; }
+        let entry = symbols[index];
+        if strings_equal(entry.name, name) {
+            if strings_equal(entry.kind, "import") || strings_equal(entry.kind, "prelude") {
+                if fallback == null { fallback = entry; }
+            } else { return entry; }
+        }
+        index -= 1;
+    }
+    return fallback;
 }
 
 // Whether a symbol kind denotes a callable function (defined or

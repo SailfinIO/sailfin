@@ -37,9 +37,9 @@ import { check_struct_implements_interfaces } from "../typecheck_types/interface
 import {
     ScopeResult,
     SymbolEntry,
-    register_local_symbol,
-    signature_is_c_abi,
-    signature_is_generic
+    append_symbol,
+    register_local_function_symbol,
+    register_local_symbol
 } from "../typecheck_types/symbol_table_and_raw_exprs";
 import {
     check_interface_field_members,
@@ -60,6 +60,7 @@ import {
     check_nested_function_body
 } from "./function_scopes";
 import { register_match_pattern_bindings } from "./patterns";
+import { check_expected_primitive_type } from "./primitive_rules";
 import {
     _decl_type_params,
     _declared_struct_annotation,
@@ -166,9 +167,14 @@ fn check_statement(statement: Statement, ctx: TypeckCtx) -> ScopeResult {
         let intersection_diags = check_intersection_value_type_annotation(statement.type_annotation, statement.name, statement.span);
         let object_literal_diags = check_object_literal_target(statement.initializer, statement.type_annotation, statement.name, statement.span, top_level);
         let uninferable_ctor_diags = check_uninferable_generic_constructor(statement, ctx.generic_struct_names);
+        let mut primitive_bindings = bindings;
+        if is_top_level { primitive_bindings = top_level; }
+        let primitive_diags = check_expected_primitive_type(statement.initializer, statement.type_annotation, primitive_bindings, "initializer for `"
+            + statement.name
+            + "`", statement.name, statement.initializer_span);
         return ScopeResult {
             bindings: registration.bindings,
-            diagnostics: registration.diagnostics.concat(walk_diags).concat(annotation_diags).concat(array_diags).concat(unknown_diags).concat(intersection_diags).concat(object_literal_diags).concat(uninferable_ctor_diags)
+            diagnostics: registration.diagnostics.concat(walk_diags).concat(annotation_diags).concat(array_diags).concat(unknown_diags).concat(intersection_diags).concat(object_literal_diags).concat(uninferable_ctor_diags).concat(primitive_diags)
         };
     }
     if statement.variant == "FunctionDeclaration" {
@@ -191,7 +197,7 @@ fn check_statement(statement: Statement, ctx: TypeckCtx) -> ScopeResult {
                 diagnostics: nested_diags
             };
         }
-        let registration = register_local_symbol(bindings, statement.signature.name, "function", statement.signature.name_span, scope_start, signature_is_generic(statement.signature), signature_is_c_abi(statement.signature));
+        let registration = register_local_function_symbol(bindings, statement.signature, "function", scope_start);
         let mut diagnostics = registration.diagnostics;
         let _sig_diags = check_function_signature(statement.signature, interfaces, top_level, ctx.known_types, ctx.type_params);
         let mut _ci: int = 0;
@@ -220,7 +226,7 @@ fn check_statement(statement: Statement, ctx: TypeckCtx) -> ScopeResult {
         };
     }
     if statement.variant == "ExternFunctionDeclaration" {
-        let registration = register_local_symbol(bindings, statement.signature.name, "extern function", statement.signature.name_span, scope_start, signature_is_generic(statement.signature), signature_is_c_abi(statement.signature));
+        let registration = register_local_function_symbol(bindings, statement.signature, "extern function", scope_start);
         let mut diagnostics = registration.diagnostics;
         let _sig_diags = check_extern_signature(statement.signature);
         let mut _ci: int = 0;
@@ -366,18 +372,23 @@ fn check_statement(statement: Statement, ctx: TypeckCtx) -> ScopeResult {
         };
     }
     if statement.variant == "WithStatement" {
-        return ScopeResult {
-            bindings: bindings,
-            diagnostics: check_block(statement.body, ctx_with_bindings(ctx, bindings, scope_start))
-        };
+        let mut diagnostics: Diagnostic[] = [];
+        let mut clause_index: int = 0;
+        loop {
+            if clause_index >= statement.clauses.length { break; }
+            diagnostics = diagnostics.concat(walk_expression(statement.clauses[clause_index].expression, ctx));
+            clause_index += 1;
+        }
+        diagnostics = diagnostics.concat(check_block(statement.body, ctx_with_bindings(ctx, bindings, scope_start)));
+        return ScopeResult { bindings: bindings, diagnostics: diagnostics };
     }
     if statement.variant == "ForStatement" {
-        let target_diags = walk_expression(statement.clause.target, ctx);
         let iter_diags = walk_expression(statement.clause.iterable, ctx);
-        let body_diags = check_block(statement.body, ctx_with_bindings(ctx, bindings, scope_start));
+        let loop_bindings = register_match_pattern_bindings(statement.clause.target, bindings);
+        let body_diags = check_block(statement.body, ctx_with_bindings(ctx, loop_bindings, scope_start));
         return ScopeResult {
             bindings: bindings,
-            diagnostics: target_diags.concat(iter_diags).concat(body_diags)
+            diagnostics: iter_diags.concat(body_diags)
         };
     }
     if statement.variant == "LoopStatement" {
@@ -393,9 +404,10 @@ fn check_statement(statement: Statement, ctx: TypeckCtx) -> ScopeResult {
             if index >= statement.cases.length { break; }
             let case = statement.cases[index];
             diagnostics = diagnostics.concat(walk_match_pattern(case.pattern, ctx));
-            diagnostics = diagnostics.concat(walk_expression(case.guard, ctx));
             let arm_bindings = register_match_pattern_bindings(case.pattern, bindings);
-            let _blk_diags = check_block(case.body, ctx_with_bindings(ctx, arm_bindings, scope_start));
+            let arm_ctx = ctx_with_bindings(ctx, arm_bindings, scope_start);
+            diagnostics = diagnostics.concat(walk_expression(case.guard, arm_ctx));
+            let _blk_diags = check_block(case.body, arm_ctx);
             let mut _ci: int = 0;
             loop {
                 if _ci >= _blk_diags.length { break; }
@@ -449,6 +461,20 @@ fn check_statement(statement: Statement, ctx: TypeckCtx) -> ScopeResult {
             diagnostics: check_block(statement.body, ctx_with_bindings(ctx, bindings, scope_start))
         };
     }
+    if statement.variant == "TryStatement" {
+        let mut diagnostics = check_block(statement.try_block, ctx_with_bindings(ctx, bindings, scope_start));
+        if statement.catch_block != null {
+            let mut catch_bindings = bindings;
+            if statement.catch_name != null {
+                catch_bindings = append_symbol(catch_bindings, statement.catch_name, "variable", null);
+            }
+            diagnostics = diagnostics.concat(check_block(statement.catch_block, ctx_with_bindings(ctx, catch_bindings, scope_start)));
+        }
+        if statement.finally_block != null {
+            diagnostics = diagnostics.concat(check_block(statement.finally_block, ctx_with_bindings(ctx, bindings, scope_start)));
+        }
+        return ScopeResult { bindings: bindings, diagnostics: diagnostics };
+    }
     if statement.variant == "TypeAliasDeclaration" {
         let registration = register_local_symbol(bindings, statement.name, "type", statement.name_span, scope_start);
         let mut diagnostics = registration.diagnostics;
@@ -474,6 +500,12 @@ fn check_statement(statement: Statement, ctx: TypeckCtx) -> ScopeResult {
             diagnostics: walk_expression(statement.expression, ctx)
         };
     }
+    if statement.variant == "ThrowStatement" {
+        return ScopeResult {
+            bindings: bindings,
+            diagnostics: walk_expression(statement.expression, ctx)
+        };
+    }
     if statement.variant == "ReturnStatement" {
         let return_diags = walk_expression(statement.expression, ctx);
         // A `return { ... }` is classified against the enclosing function's
@@ -489,9 +521,10 @@ fn check_statement(statement: Statement, ctx: TypeckCtx) -> ScopeResult {
             };
         }
         let object_literal_diags = check_object_literal_target(statement.expression, enclosing_return_type, "return", statement.span, top_level);
+        let primitive_diags = check_expected_primitive_type(statement.expression, enclosing_return_type, bindings, "return value", "return", statement.span);
         return ScopeResult {
             bindings: bindings,
-            diagnostics: return_diags.concat(object_literal_diags)
+            diagnostics: return_diags.concat(object_literal_diags).concat(primitive_diags)
         };
     }
     if statement.variant == "Unknown" {

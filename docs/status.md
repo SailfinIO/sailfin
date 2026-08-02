@@ -304,6 +304,18 @@ here.
   before lowering. Fail-open: each fires only when the frontend can prove
   invalidity, so string methods, imported free functions, canonical `T[]`
   arrays, and same-type/mixed-width integer arithmetic are unaffected.
+- **Basic primitive type and value resolution diagnostics (SFN-675).** The
+  shared frontend now rejects a proven primitive mismatch at an annotated
+  `let`, a body-bearing callable's parameter default, local free-function
+  argument, or declared return (`E0309`), and an unresolved identifier in a
+  checked function-body value expression (`E0014`), including member receivers
+  and structured-concurrency operands. Both `sfn check` and build stop before
+  lowering, with source spans. Declaration-only extern/interface defaults are
+  outside this slice. The rule remains fail-open for compound, imported,
+  generic, and otherwise uninferred types, and preserves the language's
+  existing numeric compatibility boundaries: `int`/`float` coercions remain
+  accepted here, while the established lowering gate continues to own
+  boolean-to-numeric `E0537` and its explicit-cast fix-it.
 - **Emit pipeline.** Parallel per-module emit fan-out (Stage E PR3, #278)
   with a shared retry + validator cascade (#515); driver `--work-dir` flag
   (#378); cross-Windows packaging leg (`ci-cross-windows`, #280).
