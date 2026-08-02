@@ -151,8 +151,8 @@ superseded history, not the current constraint.
 | `Mutex` | Buildable, unsafe to reclaim | No destructor hook fires at refcount zero, and nothing tracks who releases a shared handle (§3.1). The blocker is substrate completion, not an ownership-checker exemption. |
 | `RwLock` | Buildable, unsafe to reclaim | Same root cause as `Mutex`. |
 | `Semaphore` | Buildable, unsafe to reclaim | Same root cause as `Mutex`. |
-| `Once` | Buildable, unsafe to reclaim | Same root cause as `Mutex`. |
-| Atomics (`AtomicInt`, etc.) | Buildable, unsafe to reclaim | Same root cause as `Mutex` — a shared atomic cell has the identical reclamation problem even though the update itself is lock-free. |
+| `Once` | ~~Buildable, unsafe to reclaim~~ — **superseded by SFEP-0065 §3.4** | This row lumped `Once` in with `Mutex` without analysing it. SFEP-0065 §3.4 overrides it: `Once` owns a single `i64` and no OS resource, so the destructor question this row gates on is vacuous for the type, and it ships *before* the reclamation seam. |
+| Atomics (`AtomicInt`, etc.) | ~~Buildable, unsafe to reclaim~~ — **superseded by SFEP-0065 §3.5** | SFEP-0065 §3.5 overrides this row by exporting no atomic surface at all, on a different and concrete ground: `is_atomic_builtin` short-circuits ahead of the runtime-helper registry, so a capsule-defined `atomic_*` would be silently unreachable even when explicitly imported. |
 | `WaitGroup` | Rejected as redundant | `routine { }` already joins every spawned child at scope exit (`runtime/sfn/concurrency/nursery.sfn:1-13`); a `WaitGroup` would be that same barrier reimplemented with a manual, unsafe counter. |
 | `select` over channels | Blocked on separate plumbing | `sfn_io_poll_any` (`runtime/sfn/process.sfn:836`) is a real N-way `poll` with timeout, but it is strictly fd-based; `Channel<T>` signals readiness via `pthread_cond_t` (`runtime/sfn/concurrency/channel.sfn:85-93,155-278`), which has no fd, and no self-pipe/eventfd bridge between the two exists. This blocker is independent of §3.1's reclamation gap. |
 

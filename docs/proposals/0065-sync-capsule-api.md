@@ -55,6 +55,12 @@ shape. The one place where the shape leaks into the API surface (whether a
 `routine { }` scope can be probed for absence at creation time) is recorded in
 §3.8 as an open question rather than guessed.
 
+This gate is now purely a **landing-order** dependency, not a **seed-cut**
+one: SFEP-0064's rewrite establishes that the indirect-call capability the
+seam needs already ships in the pinned seed, so `Mutex` and everything after
+it need only wait for the seam's runtime-source PR to merge, not for a
+cadence seed bump to be pinned. See §5.
+
 ## 2. Motivation
 
 SFEP-0063 Phase 0 made `capsules/sfn/sync/` honest — an empty reserved shell
@@ -166,11 +172,14 @@ lock, and the closure boundary handles each by a different mechanism:
 | Escape | Why it cannot leak the lock |
 |---|---|
 | Early `return` in the body | Returns from the *closure*, not the enclosing function. Control lands on `with_lock`'s release path. |
-| `break` / `continue` targeting an enclosing loop | Not expressible across a lambda boundary at all. |
+| `break` / `continue` targeting an enclosing loop | The body is lifted into its own function at the closure boundary, so a `break`/`continue` inside it cannot transfer control past `with_lock`'s frame into a loop the closure does not lexically enclose — the release path still runs. No diagnostic rejecting the syntax was found during this review; whether the compiler diagnoses it or simply cannot reach the target loop (making the question moot) is unverified and worth a separate probe. |
 | `throw` from the body | Caught by the combinator's `catch`, released, then re-thrown unchanged. |
 
-The first two are structural properties of the closure boundary and cost
-nothing to guarantee. Only the third needs code, and it is four lines.
+The first is a structural property of the closure boundary and costs nothing
+to guarantee. The second's safety conclusion holds for the same structural
+reason — lambda lifting, not a compile-time rejection — even though the exact
+diagnosed-vs-silently-inapplicable behavior at the language boundary is
+unverified. Only the third needs code, and it is four lines.
 
 **What the body cannot do.** Because effects and control flow are contained,
 the body also cannot `return` a value out of the enclosing function — it must
@@ -283,22 +292,88 @@ shipped builtin lowering to `cmpxchg` with `seq_cst` ordering
 `atomic_store(state, 2)`. Losers spin on `atomic_load(state)` until it reads 2.
 No mutex, no condvar, no destructor.
 
-Three consequences to record honestly:
+**A design bug in that protocol, and its fix.** If `init` throws, the winner's
+throw unwinds via `sfn_throw_frame` → `longjmp`
+(`compiler/src/llvm/lowering/instructions_try.sfn:199-213`) straight out of
+`once_do`, and `state` is stranded at `1` — the winner's transition to `2`
+never runs. Every other caller, including any future retry by the same caller,
+then spins on `atomic_load(state)` forever, at full CPU, with no diagnostic.
+That is exactly the undebuggable hang §3.2's combinator design exists to
+prevent, and it would ship in the one phase billed as gate-free. The fix:
+
+```sfn
+// States: 0 = untried, 1 = running, 2 = done, 3 = failed (poisoned).
+fn once_do(o: Once, init: fn () -> int) -> int {
+    if atomic_cas(o.addr as *i64, 0, 1) {
+        try {
+            let result = init();
+            atomic_store((o.addr + 8) as *i64, result);
+            atomic_store(o.addr as *i64, 2);
+            return result;
+        } catch (e) {
+            atomic_store(o.addr as *i64, 3);
+            throw e;
+        }
+    }
+    let mut spins: int = 0;
+    loop {
+        let state = atomic_load(o.addr as *i64);
+        if state == 2 { return atomic_load((o.addr + 8) as *i64); }
+        if state == 3 {
+            throw SyncError.InitFailed(0);
+        }
+        spins = spins + 1;
+        if spins > ONCE_SPIN_GUARD_LIMIT {
+            throw SyncError.InitFailed(0);
+        }
+    }
+}
+```
+
+A losing caller that observes state `3` throws rather than spinning forever —
+the same `init` failure the winner saw, not a fresh attempt (this is a
+single-shot `Once`, not a retryable one; retry-on-failure is a different,
+unproposed primitive). The spin loop also gets the guard counter the
+code-style rule requires on an input-driven loop
+(`.claude/rules/code-style.md`: "Guard counters on input-driven loops") — §3.5
+already invokes that rule for `spin_until`, so omitting it here would be
+inconsistent. `ONCE_SPIN_GUARD_LIMIT` fires a `SyncError`, not a silent
+`panic`, since a live production `init` that is merely slow should not be
+mistaken for a poisoned one; the limit needs to be generous enough that a slow
+but succeeding initializer does not trip it, which is a tuning question for
+implementation, not for this design.
+
+Three further consequences to record honestly:
 
 - **Losers busy-wait.** For one-time initialization — the only thing `Once` is
   for — the wait is bounded by the initializer and typically microseconds. A
   futex/condvar-backed park is a later refinement and would move `Once` behind
   the seam, so it is explicitly not part of the first phase.
-- **The cell is heap-allocated because Sailfin has no address-of operator.** A
-  module-level `let mut` cannot yield a `*int`, and the runtime idiom is
-  uniformly `malloc` + cast (`runtime/sfn/memory/rc.sfn:119,133`). So
-  `once_create` allocates. This is a decided point, not an open question, and it
-  does not change the phase ordering.
+- **The cell is heap-allocated because a module-level `let mut` cannot yield a
+  `*int`.** Saying Sailfin "has no address-of operator" would overstate it:
+  `&T`/`&mut T` parse and lower
+  (`compiler/src/llvm/expression_lowering/native/core_borrow_lowering.sfn`),
+  though `docs/status.md:687` records them as parsed-only with exclusivity
+  unchecked. The narrower, correct claim is the one this design actually needs:
+  there is no way to take the address of a module-level binding and get a
+  `*int` out of it, so the runtime idiom is uniformly `malloc` + cast
+  (`runtime/sfn/memory/rc.sfn:119,133`). `once_create` allocates for that
+  reason. This is a decided point, not an open question, and it does not
+  change the phase ordering.
 - **The intentional leak must be declared to leak-checking test legs.** An
   ASAN/LSAN run will see the eight bytes. The `Once` phase must either suppress
   it explicitly or route the allocation through an allocator the leg already
   excludes; whichever it does, the reason belongs in a comment naming this
   section, per `docs/conventions/sanitizer-tests.md`.
+
+**This is an explicit override of SFEP-0063's verdict, not a fresh finding.**
+SFEP-0063 §3.2's verdict table (`docs/proposals/0063-sync-capsule.md:154`)
+lists `Once` as `Buildable, unsafe to reclaim`, gated on reclamation like every
+other row in that table. The merits favor shipping it ahead of the seam
+anyway — one `i64` word, no OS resource, so the destructor question SFEP-0063
+gated on is vacuous for this type — but that is a deliberate override of an
+Accepted proposal's row, and it is recorded here as exactly that rather than
+presented as though SFEP-0063 already said so.
 
 ### 3.5 Atomics — export nothing
 
@@ -340,6 +415,14 @@ What the capsule *may* add later, without collision, is a **composed** helper
 that is not one-to-one with a builtin — a saturating counter, or a bounded
 `spin_until(cell, value, max_iterations)` with the guard counter the code-style
 rule requires on input-driven loops. None of that is in the shipped scope here.
+
+**This, too, is an explicit override of SFEP-0063's verdict.** SFEP-0063
+§3.2's verdict table (`docs/proposals/0063-sync-capsule.md:155`) lists Atomics
+as `Buildable, unsafe to reclaim`, the same reclamation gate as every other
+row. This section effectively overrides that row by exporting nothing at all
+— there is no reclaimable object here for the gate to apply to, since the
+builtins operate on caller-owned memory rather than a capsule-owned handle —
+and that override is recorded here rather than left implicit.
 
 ### 3.6 Error and failure semantics
 
@@ -504,15 +587,18 @@ capsule code, being the smallest generic surface in the capsule.
 ### 3.10 Phasing
 
 Each phase is one session's work, `Ready` to merged PR, ordered so the least
-gated ships first. Only Phase 1 can start before the reclamation seam.
+gated ships first. Only Phase 1 can start before the reclamation seam lands.
+Per §5, the seam gate is a **landing-order** dependency now, not a seed-cut
+one — Phase 2 can start the session after the seam's runtime-source PR merges,
+with no cadence-bump wait in between.
 
 | Phase | Contents | Gate |
 |---|---|---|
-| **1 — Once + the atomics decision** | `Once`, `once_create`, `once_do`, `SyncError`. Capsule docs recording §3.5's "no atomics wrapper" rule and the builtin names it forbids exporting. Manifest stays `required = []`. | **Ungated.** Uses only shipped builtins (§5). Workable during the seam's seed-cut wait. |
-| **2 — `Mutex`** | `Mutex`, `mutex_create`, `with_lock`, `with_try_lock`, error-checking mutex type + `SelfDeadlock` (§3.6), nursery registration + the §3.8 resolution, ASAN reclamation leg. | **Seam, in the pinned seed.** Carries `## Required in pinned seed: <seam predecessor>`. |
-| **3 — `RwLock` + `Semaphore`** | `RwLock` and `Semaphore` with their combinators (§3.7). | Seam. Unblocked with Phase 2; no additional gate. |
-| **4 — Timed variants** | `with_lock_timeout` and siblings, `![clock]`, manifest becomes `required = ["clock"]` (§4). | Seam. Independent of Phase 3; can precede or follow it. |
-| **5 — Value cell** | `Cell<T>` / `with_cell<T>` (§3.9). | Seam, plus a generics feasibility probe in production capsule source (§3.3). |
+| **1 — Once + the atomics decision** | `Once`, `once_create`, `once_do`, `SyncError`. Capsule docs recording §3.5's "no atomics wrapper" rule and the builtin names it forbids exporting. Manifest stays `required = []`. | **Ungated.** Uses only shipped builtins (§5). Workable in parallel with the seam PR. |
+| **2 — `Mutex`** | `Mutex`, `mutex_create`, `with_lock`, `with_try_lock`, error-checking mutex type + `SelfDeadlock` (§3.6), nursery registration + the §3.8 resolution, ASAN reclamation leg. | Waits on the seam's runtime-source PR merging (SFEP-0064 §3.3–§3.7); no seed cut to wait on beyond that. |
+| **3 — `RwLock` + `Semaphore`** | `RwLock` and `Semaphore` with their combinators (§3.7). | Seam merged. Unblocked with Phase 2; no additional gate. |
+| **4 — Timed variants** | `with_lock_timeout` and siblings, `![clock]`, manifest becomes `required = ["clock"]` (§4). | Seam merged. Independent of Phase 3; can precede or follow it. |
+| **5 — Value cell** | `Cell<T>` / `with_cell<T>` (§3.9). | Seam merged, plus a generics feasibility probe in production capsule source (§3.3). |
 
 Two notes on the ordering. **Phases 2 and 3 should not be split further** —
 `RwLock` and `Semaphore` are the same handle shape, the same combinator
@@ -564,12 +650,19 @@ introduces a static rule for a compiler pass to enforce. The relevant existing
 code is `E0806`, which already governs the atomic builtins' type contract and is
 not extended.
 
-A verified scan of allocated codes (`rg -o --no-filename '[EW][0-9]{4}' compiler
-runtime docs site | sort -u`) shows `E08xx` occupied through `E0839`, `E09xx`
-holding `E0901`–`E0907` and `E0910`–`E0915`, `E10xx` holding `E1001`–`E1019`,
-and `E1100`–`E1114` belonging to SFEP-0062. **`E1200`–`E1299` is entirely
-unallocated**, and that is the range a future `sfn/sync` diagnostic should draw
-from. The likely first candidate is the §3.8 lifetime rule — a sync handle
+A scan of allocated codes (`rg -o --no-filename '[EW][0-9]{4}' compiler runtime
+docs site | sort -u`) originally reported `E08xx` occupied through `E0839`, but
+that scan was self-contaminated: `E0839` appeared only because sibling
+SFEP-0064, drafted the same day under `docs/proposals/`, reserved it in a
+draft — a repo-wide `rg` over `docs/` cannot distinguish an allocated code from
+a proposed one in a sibling document. SFEP-0064's rewrite (its own §8) has
+since dropped that reservation, and the corrected count is `E08xx` occupied
+through `E0838`, the highest code actually allocated in shipped compiler
+source. `E09xx` holds `E0901`–`E0907` and `E0910`–`E0915`, `E10xx` holds
+`E1001`–`E1019`, and `E1100`–`E1114` belongs to SFEP-0062; these were not
+affected by the contamination. **`E1200`–`E1299` is entirely unallocated**, and
+that is the range a future `sfn/sync` diagnostic should draw from, unaffected
+by the correction above. The likely first candidate is the §3.8 lifetime rule — a sync handle
 created in a `routine { }` scope escaping into longer-lived storage — which
 needs an escape analysis that does not exist and is therefore not proposed here.
 

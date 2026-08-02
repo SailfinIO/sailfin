@@ -14,23 +14,54 @@ graduates-to:
 
 # SFEP-0064 — Generic resource-reclamation seam
 
+> **Correction (2026-08-02).** An earlier draft of this proposal asserted that
+> a thin, env-less function pointer cannot be *consumed* today, that
+> `*fn (A) -> R` was a new spelling this proposal introduces, and that this
+> forced a seed cut. **All three claims are false**, and an adversarial review
+> falsified them before this draft was accepted. The capability shipped as
+> #1089: `try_lower_plain_fn_ptr_call`
+> (`compiler/src/llvm/expression_lowering/native/core_call_lowering.sfn:65-92`,
+> dispatched at line 268, before closure resolution) already recognizes a
+> local/parameter annotated `*fn (A) -> R` (both `*fn(` and `*fn (` spellings)
+> and emits a bitcast-plus-`call`, with no `extractvalue` and no environment
+> argument. It is documented at `docs/status.md:526-528`, pinned by
+> `compiler/tests/e2e/plain_fn_ptr_call_test.sfn`, and already has production
+> callers — `runtime/sfn/concurrency/scheduler.sfn:607`,
+> `runtime/sfn/concurrency/future.sfn`,
+> `runtime/sfn/concurrency/serve.sfn:709,1042,1095,1149,1217`,
+> `capsules/sfn/http/src/server.sfn:117,149,160`, and
+> `capsules/sfn/http/src/router.sfn:97,247`. Decisively: `runtime/capsule.toml:70`
+> lists `sfn/concurrency/scheduler.sfn` in `sfn-sources`, so the **pinned seed**
+> already compiles a file that calls through `*fn` on every build — a seed that
+> could not parse it could not build the runtime. SFEP-0030
+> (`docs/proposals/0030-first-class-function-values.md`, status **Accepted**)
+> already documents all of this at lines 103, 211-213, 628, and 798, and already
+> considered and rejected an env-less `{ptr, null}` carrier at lines 198-213.
+> This draft is rewritten below to reflect that; the history is kept rather
+> than hidden because the earlier reasoning — and how it was falsified — is
+> useful to a future reader.
+
 ## 1. Summary
 
-The nursery already owns and reclaims the channels created in its scope, but the
-seam is channel-specific: the registry stores a bare handle and
+The nursery already owns and reclaims the channels created in its scope, but
+the seam is channel-specific: the registry stores a bare handle and
 `sfn_nursery_exit` hardcodes `sfn_channel_close` + `sfn_channel_destroy`. This
 proposal generalizes it into a **resource-reclamation seam** — a registry of
 `(handle, destructor)` pairs, drained after the join-all barrier by calling
-through the stored destructor. Doing so requires one compiler capability the
-language does not have: an **indirect call through a thin, C-ABI function
-pointer**. Sailfin can *produce* a function address today (`<fn> as * u8`,
-shipped as the `pthread_create` start-routine primitive) but cannot *consume*
-one — the only indirect-call path in the lowering is closure dispatch, which
-assumes a fat `{i8*, i8*}` pair and an env-first ABI. This proposal designs the
-thin function-pointer type `*fn (A, …) -> R`, the seam that consumes it, and the
-phasing, and closes the identical gap in `runtime/sfn/memory/rc.sfn` (`drop_fn`
-is stored but never dereferenced). It does **not** design a synchronization
-library; that is SFEP-0063's downstream concern.
+through the stored destructor — and closes the identical gap in
+`runtime/sfn/memory/rc.sfn` (`drop_fn` is stored but never dereferenced).
+
+Both consumers need exactly one capability: *call a `fn(*u8) -> void` whose
+address was stored in memory at runtime.* That capability already ships
+(#1089, see the correction above), so **this proposal requires no compiler
+change, no new type, and no seed gate** to do the runtime-source work in §3.3
+through §3.7. It does **not** design a synchronization library; that is
+SFEP-0063's downstream concern.
+
+Two genuinely small compiler-side gaps remain — `*fn` in struct-field position
+and `*fn` in extern-parameter position (§3.2) — but they are independent of
+the seam, do not block it, and (per §5) do not force a seed cut either, since
+they can land compiler-only with no runtime consumer in the same change.
 
 ## 2. Motivation
 
@@ -65,26 +96,36 @@ header is refcount `i64` at offset 0, `drop_fn: *u8` at offset 8;
 `sfn_rc_sfn_alloc` stores the pointer (`rc.sfn:103`), and
 `sfn_rc_sfn_release` — at `prev == 1` — calls libc `free` **directly**
 (`rc.sfn:142`) without ever dereferencing it. The file header says invocation is
-"deferred to M2.4/M2.6." It has been deferred because the capability does not
-exist, not because the design is unsettled.
+"deferred to M2.4/M2.6." It has been deferred because nobody has wired it yet,
+not because the capability is missing — see the correction above.
 
 `rc.sfn` has **zero production consumers** — only `compiler/tests/e2e/runtime_memory_rc_test.sfn`
 drives it, passing a null `drop_fn` so the gap is explicitly modeled. It is a
 proof-of-life module; its shape is free to change.
 
-### 2.3 Both gaps are one capability
+### 2.3 Both gaps are already unblocked by one shipped capability
 
 Both need: *call a `fn(*u8) -> void` whose address was stored in memory at
-runtime.* That is a single, concrete, small capability with two known consumers
-today and at least two more already documented as blocked
-(`runtime/sfn/platform/pthread.sfn`'s typed `start` parameter,
-`runtime/sfn/concurrency/scheduler.sfn`'s `Task` entry field, which its header
-calls "unspellable today"). Designing it once, generally, is cheaper than
-keyholing it — and the seed-cut economics in §7 make "once" close to mandatory.
+runtime.* That capability already ships as #1089 (see the correction above),
+with two production consumer families already exercising it
+(`runtime/sfn/concurrency/scheduler.sfn`, `.../serve.sfn`,
+`capsules/sfn/http/src/{server,router}.sfn`) and, per §3.2, two positions
+(struct-field, extern-parameter) where the *annotation* — not the call — is
+still unspellable.
+
+**Correcting a mischaracterization an earlier draft made.** The workarounds
+recorded at `runtime/sfn/platform/pthread.sfn:19-32` and
+`runtime/sfn/concurrency/scheduler.sfn:39-45` are about **annotation
+position**, not about the indirect call itself. `scheduler.sfn` performs that
+exact indirect call successfully 560 lines later, at line 607. The header
+comments describe a real but narrow gap — a typed `extern fn` parameter or a
+typed struct field cannot yet be spelled `*fn (…)`, so the call site casts
+through `* u8` — not an inability to call through a stored pointer, which
+already works.
 
 ## 3. Design
 
-### 3.1 The pivotal finding: the capability is **not** expressible today, and the reason is a type overload
+### 3.1 The capability already ships: consuming a thin function pointer
 
 **Producing** a function address ships. `<fn> as * u8` materializes the address
 of a concrete, non-generic, C-ABI function; misuse is diagnosed by `E0808`
@@ -94,89 +135,69 @@ generic function), both in
 `runtime/sfn/concurrency/scheduler.sfn:187-193` already uses it to hand
 `sfn_scheduler_worker`'s address to `pthread_create`.
 
-**Consuming** one does not. The only indirect-call path in native lowering is
-`emit_closure_dispatch`
-(`compiler/src/llvm/expression_lowering/native/core_call_emission/closure_dispatch.sfn`),
-reached via `try_resolve_closure_callee`
-(`.../core_call_resolution/closure_callee.sfn:223`). It assumes the callee
-operand is a **fat** `{i8*, i8*}` aggregate and emits, unconditionally:
+**Consuming** one also ships, as `*fn (A, …) -> R` (#1089). Native lowering has
+two indirect-call paths that are structurally disjoint by a leading `*`:
 
-```llvm
-%fp  = extractvalue { i8*, i8* } %closure, 0
-%env = extractvalue { i8*, i8* } %closure, 1
-%f   = bitcast i8* %fp to void (i8*, i8*)*
-       call void %f(i8* %env, i8* %arg)      ; env is a HIDDEN FIRST ARGUMENT
-```
+- The **fat** closure-dispatch path
+  (`compiler/src/llvm/expression_lowering/native/core_call_emission/closure_dispatch.sfn`,
+  reached via `try_resolve_closure_callee` in
+  `.../core_call_resolution/closure_callee.sfn:223`) treats the callee as a
+  `{i8*, i8*}` aggregate and emits `extractvalue` for both the function
+  pointer and an env-first hidden argument.
+- The **thin** path — `try_lower_plain_fn_ptr_call`
+  (`compiler/src/llvm/expression_lowering/native/core_call_lowering.sfn:65-92`,
+  dispatched at line 268, *before* the closure/method resolution the fat path
+  lives behind) — recognizes a local or parameter annotated `*fn (A) -> R` (or
+  `*fn(A) -> R`; `_strip_leading_star_fn` accepts both), loads the raw code
+  pointer, bitcasts it to the typed function-pointer LLVM type, and emits a
+  direct `call <ret> <fnptr>(<args>)` with **no** hidden environment argument.
+  Its own comment states the invariant precisely: "The leading `*` makes the
+  two spellings structurally disjoint, so the env-prepending closure dispatch
+  never fires for a plain pointer."
 
-Two things follow. First, a `*u8` holding a raw function address is not an
-aggregate — `extractvalue` on it is invalid IR. Second, even if it were, the
-emitted call passes `env` as argument 0, which a plain
-`fn sfn_channel_destroy(ch: *u8)` does not accept. There is no env-less
-indirect-call form anywhere in the lowering.
+Regression coverage: `compiler/tests/e2e/plain_fn_ptr_call_test.sfn` and its
+fixture `compiler/tests/e2e/fixtures/plain_fn_ptr_call.sfn`. Documentation:
+`docs/status.md:526-528`. Production callers:
+`runtime/sfn/concurrency/scheduler.sfn:607`,
+`runtime/sfn/concurrency/future.sfn`,
+`runtime/sfn/concurrency/serve.sfn:709,1042,1095,1149,1217`,
+`capsules/sfn/http/src/server.sfn:117,149,160`, and
+`capsules/sfn/http/src/router.sfn:97,247`.
 
-**The overload is the real finding.** The spelling `fn (A) -> R` already means
-two incompatible things depending on position:
+**Nothing in §3.3 through §3.7 below needs new grammar, a new type, or a new
+lowering path.** Every code sample in this proposal that reads
+`let d: *fn (*u8) -> void = addr as *fn (*u8) -> void; d(handle);` already
+compiles today.
 
-| Position | Meaning today | LLVM shape | ABI |
-|---|---|---|---|
-| `extern fn` parameter | thin C function pointer, via `is_c_abi_function_pointer` (`compiler/src/typecheck_types/extern_abi.sfn:307`) | `i8*` | plain C |
-| Sailfin `let` / parameter annotation | closure pair (`#688`), via `_looks_like_fn_pointer_annotation` | `{i8*, i8*}` | env-first |
+### 3.2 Genuinely remaining compiler-side gaps: struct-field and extern-parameter position
 
-So the "fix" that `pthread.sfn`'s header asks for — loosening
-`is_c_abi_function_pointer` to accept the `fn (` spelling that `sfn fmt`
-produces — is the **wrong fix**. It would not unblock anything (the extern side
-already lowers to `i8*`; the problem was never the extern side) and it would
-cement a spelling whose meaning silently flips between two ABIs. Writing
-`let d: fn (*u8) -> void = some_ptr; d(x);` today is precisely the trap: the
-annotation matches the closure predicate and lowering emits `extractvalue` on an
-`i8*`.
+Two positions still cannot spell `*fn (…)`, and both are small, independent of
+the seam below, and — per §5 — do not force a seed cut:
 
-The capability therefore needs a **distinct thin spelling**, not a relaxed
-accept-list.
+- **Struct-field position.** `Route.handler`
+  (`capsules/sfn/http/src/router.sfn:70-77`) and `Task.fn_ptr`
+  (`runtime/sfn/concurrency/scheduler.sfn:91-99`) are both still declared `i64`,
+  with the call site casting to `*fn (…)` at the use site rather than at the
+  field declaration.
+- **Extern-parameter position.** `is_c_abi_function_pointer`
+  (`compiler/src/typecheck_types/extern_abi.sfn:307`) still requires a literal
+  `fn(` prefix and knows nothing of the `*fn (…)` spelling, so a typed
+  `extern fn` parameter is still spelled `* u8` and cast at the call site
+  (`runtime/sfn/platform/pthread.sfn:19-32`).
 
-### 3.2 The thin function-pointer type: `*fn (A, …) -> R`
+**No accept-list restriction is proposed for either gap.** An earlier draft of
+this proposal wanted to bound the (nonexistent) new type to "every parameter
+and return type must be a C-ABI scalar or pointer, no by-value aggregates."
+Shipped code already violates that bound: `*fn (OwnedBuf) -> OwnedBuf`
+(`serve.sfn:709`), `*fn (Request) -> Response` (`server.sfn:149`),
+`*fn (Request, Params) -> Response` (`router.sfn:97`), and `*fn () -> f64` /
+`*fn (*u8) -> bool` (`future.sfn:187,276`) all compile and run today. Imposing
+such a bound would reject source that already compiles. Recording this
+explicitly so nobody re-proposes it.
 
-Introduce a pointer-to-function type spelled with the existing pointer sigil:
-
-```sfn
-// Thin: a raw C-ABI function pointer. LLVM `R (A, ...)*`. No environment.
-let reclaim: *fn (*u8) -> void = sfn_channel_reclaim as *fn (*u8) -> void;
-reclaim(handle);
-
-// Fat, unchanged: a Sailfin closure. LLVM `{i8*, i8*}`. Env-first ABI.
-let add: fn (int) -> int = (n) => n + 1;
-```
-
-Rationale, against the "boring syntax wins" test: C spells this
-`void (*)(void *)`; Rust spells it `fn(*mut u8)` and reserves the `Fn*` traits
-for closures. Sailfin already spent the bare `fn (…) -> R` spelling on closures,
-so the thin form needs a mark, and `*` — "pointer to" — is the mark the language
-already uses. No new keyword; `*fn (…)` composes with the existing `*T` / `**T`
-grammar.
-
-Scope bound for the first landing: **every parameter type and the return type
-must be a C-ABI scalar or pointer** — the same accept-list
-`is_c_abi_function_pointer` already enforces. No generics, no varargs, no
-by-value aggregates, no closures as parameters, no effect rows (see §4).
-
-Both spellings (`*fn(` and `*fn (`) are accepted from day one on the new path.
-`_parse_fn_pointer_annotation` (`closure_callee.sfn:43-57`) already demonstrates
-the two-spelling pattern; the formatter's canonical output is `*fn (`.
-
-Lowering emits the env-less form, structurally distinct from closure dispatch —
-**no `extractvalue`, no hidden argument**:
-
-```llvm
-%f = bitcast i8* %fp to void (i8*)*
-     call void %f(i8* %arg)
-```
-
-`extern fn` parameters migrate to the thin spelling
-(`extern fn pthread_create(thread: *usize, attr: *PthreadAttr, start: *fn (*u8) -> *u8, arg: *u8) -> i32`),
-retiring the `* u8`-and-cast degradation. The bare `fn (…)` spelling in extern
-position is **deprecated, not fixed** — `is_c_abi_function_pointer`'s literal
-`fn(` rule stays exactly as it is, so no existing extern changes meaning, and
-new code has one unambiguous way to say "thin."
+These two gaps are small, mechanical parser/typecheck extensions to a
+spelling that already works everywhere else. They are out of the critical path
+for the nursery seam and `rc.sfn` (§3.3–§3.7), which need neither.
 
 ### 3.3 The seam: a stride-16 pair registry
 
@@ -320,7 +341,8 @@ case the seam cannot rule out by construction.
 
 ### 3.7 `rc.sfn`: the second consumer, and why direct dispatch does not replace the seam
 
-The `rc.sfn` change is small and mechanical once the capability exists:
+The `rc.sfn` change is small and mechanical, using the already-shipped call
+capability:
 
 ```sfn
 fn sfn_rc_sfn_release(payload: *u8) -> void {
@@ -363,10 +385,11 @@ type at a release site, it may devirtualize to a direct
 substitute for it.
 
 **Landing order.** The two consumers are genuinely independent — different
-modules, no shared code beyond the compiler feature — and each is small. They
-land as two issues that can run in parallel once the capability is pinned
-(§7). Neither gates the other, and because both consume the *same* already-
-pinned capability, splitting them costs no extra seed cut.
+modules, no shared code beyond the shared, already-shipped call capability —
+and each is small. They land as two issues that can run in parallel; neither
+gates the other, and since both consume a capability that is already in the
+pinned seed, nothing about landing them in parallel or in either order forces
+a seed cut.
 
 ## 4. Effect & capability impact
 
@@ -378,7 +401,8 @@ permitted to do. The v0 contract is therefore that a reclaimer is
 the *address-taking* site: `<fn> as *fn (*u8) -> void` should be rejected when
 the named function declares effects, for the same reason `E0809` rejects taking
 a generic function's address — there is no single, honest thing the resulting
-pointer could mean.
+pointer could mean. This is an augmentation of the existing, shipped
+address-of diagnostics, not a new type or new code (§8).
 
 The consequence worth naming: **a resource whose reclamation needs `![io]`
 cannot ride this seam in v0.** File-descriptor reclamation is the obvious next
@@ -397,47 +421,55 @@ checker cannot already see.
 
 ## 5. Self-hosting impact
 
-**Phase A (compiler capability) is purely additive.** No file under
-`compiler/src/` uses `*fn (…)`, and none should in the landing PR. The pinned
-seed's parser never sees the new type form, so it compiles the new compiler
-exactly as before; the new compiler then understands the form. `make compile`
-holds throughout. Passes touched:
+**No seed cut is needed, and this proposal makes no compiler-pass change at
+all in its critical path.** The capability every code sample in §3.3–§3.7
+depends on — an env-less indirect call through a stored `*fn (A) -> R` — is
+already in the pinned seed: `runtime/capsule.toml:70` lists
+`sfn/concurrency/scheduler.sfn` in `sfn-sources`, and that file already calls
+through `*fn` at line 607 on every build. A seed that could not parse or lower
+`*fn` could not build the runtime today. `.claude/rules/seed-dependency.md`'s
+runtime-source carve-out — the rule that would otherwise force this work to
+land as a standalone `seed-blocker` — simply does not bite, because there is no
+new capability for the seed to lack.
 
-| Stage | Change |
-|---|---|
-| Lexer | none — `*`, `fn`, `(`, `->` are all existing tokens |
-| Parser (`compiler/src/parser/`, type grammar) | parse `*fn (P, …) -> R` as a type in let/parameter/field/extern position; preserve the verbatim annotation text as the existing `fn (…)` path does. The `-> R` / enclosing-signature ambiguity is already solved by the paren-depth handling `#688` shipped for fat annotations |
-| AST | no new node — the annotation is carried as type text, matching the existing function-pointer handling |
-| Typecheck (`compiler/src/typecheck_types/`) | `extern_abi.sfn`: accept `*fn (…)` in extern signatures with the existing C-ABI element accept-list. `symbol_table_and_raw_exprs.sfn`: extend the `E0808`/`E0809` address-of rules so `<fn> as *fn (…) -> R` is a supported target and shape-checks against the named function's signature; reject an effectful function (§4) |
-| Effects | none |
-| `emit_native.sfn` / `native_ir.sfn` | carry the annotation through to the local/parameter binding so lowering can see it; no new `.sfn-asm` instruction |
-| LLVM lowering | `core_call_resolution/closure_callee.sfn`: recognise a `*fn (…)`-annotated local/parameter as a **thin** callee, distinct from the fat path. New emitter beside `core_call_emission/closure_dispatch.sfn`: bitcast + `call`, no `extractvalue`, no env argument. `core_type_mapping.sfn`: map `*fn (…)` to `i8*` at boundaries and to `R (P, …)*` at the call site |
-| `sfn fmt` | canonical spelling `*fn (P, …) -> R`; round-trip idempotence in all four positions |
+Concretely, the nursery-seam generalization (§3.3–§3.6) and the `rc.sfn`
+`drop_fn` invocation (§3.7) are ordinary runtime-source changes under
+`runtime/sfn/concurrency/` and `runtime/sfn/memory/`, compiled by the pinned
+seed exactly as today's channel and `rc.sfn` code already is. `make compile`
+holds throughout, with no `make clean-build` required — neither change alters
+the compiler's own build graph or introduces a new type.
 
-**Phases B and C touch runtime source only** (`runtime/sfn/concurrency/`,
-`runtime/sfn/memory/rc.sfn`) and no compiler pass. They are compiled by the
-**pinned seed** — see §7.
+**The two remaining compiler-side gaps (§3.2) are independent and also do not
+force a seed cut**, provided they land the way this proposal scopes them: as
+compiler-only parser/typecheck extensions (struct-field and extern-parameter
+positions for the already-existing `*fn (…)` spelling), with **no runtime
+consumer in the same change**. `make compile` then builds the new compiler
+from the unchanged pinned seed exactly as before; migrating
+`pthread.sfn` / `scheduler.sfn` / `router.sfn` to the new spelling is optional
+follow-up cleanup, out of scope here, and whoever does it later applies
+ordinary bundling per `.claude/rules/seed-dependency.md` (the migration is
+runtime source calling a compiler capability — at that point the capability
+would already be in a released seed via ordinary cadence, so bundling works
+normally).
 
 ## 6. Alternatives considered
 
-**A tagged-kind enum with a dispatch switch (the no-new-capability fallback).**
-Store `(handle, kind)` and switch on `kind` in `sfn_nursery_exit`, calling
-`sfn_channel_reclaim` / `sfn_mutex_reclaim` / … directly. It needs zero compiler
-work and would ship today. Rejected as the design, kept as the contingency:
+**A tagged-kind enum with a dispatch switch.** Store `(handle, kind)` and
+switch on `kind` in `sfn_nursery_exit`, calling `sfn_channel_reclaim` /
+`sfn_mutex_reclaim` / … directly. Rejected as the design, kept as a note:
 
-- It **inverts the dependency**. `nursery.sfn` — the generic scope owner — would
-  have to import and link every resource module. Every new resource type edits
-  the nursery.
+- It **inverts the dependency**. `nursery.sfn` — the generic scope owner —
+  would have to import and link every resource module. Every new resource type
+  edits the nursery.
 - It **cannot close the `rc.sfn` gap at all**. `drop_fn` is genuinely dynamic;
   there is no finite kind set.
 - It **makes the sync capsule un-shippable as a capsule** (SFEP-0063): a
   third-party resource type could never register, because it could never add a
   variant to a runtime-internal enum.
-- Crucially, it **saves almost nothing on the runtime side**. The registry
-  generalization (stride-16 pairs) is the *same* work either way; only the drain
-  loop's dispatch differs. So the fallback is available cheaply if Phase A slips
-  — land the pair registry storing a kind tag, then swap the tag for a pointer
-  later — but taking it *by choice* buys a few weeks and pays for them twice.
+- It **saves almost nothing on the runtime side**. The registry generalization
+  (stride-16 pairs) is the *same* work either way; only the drain loop's
+  dispatch differs. Since the pointer-call capability already ships, there is
+  no schedule pressure that would make this fallback worth taking.
 
 **Two parallel arrays (`channels_addr` + `destructors_addr`).** Smaller diff
 (the existing stride-8 growth code survives). Rejected: two counts that must
@@ -445,140 +477,116 @@ stay in lockstep is an invariant maintained by discipline, where stride-16 makes
 it structural. The seam is exactly the place where a desynchronized index is a
 use-after-free.
 
-**A keyhole intrinsic — `sailfin_intrinsic_call_ptr_v1(f: *u8, a0: *u8)`.**
-Zero new type syntax; mirrors the existing
-`sailfin_intrinsic_pointer_read_i64` idiom the runtime already uses. Tempting,
-and genuinely smaller. Rejected on the seed economics: `.claude/rules/seed-dependency.md`'s
-runtime carve-out says that because the gate is unavoidable, cross it **once**
-and land the complete capability family in that single PR. A keyhole covering
-only `fn(*u8) -> void` guarantees a second crossing for the *already documented*
-`fn(*u8) -> *u8` (scheduler worker entry) and whatever comes third, each costing
-its own seed cut. The general type is more work in one PR and less work in
-total, and it also unblocks the two spelling complaints in `pthread.sfn` and
-`scheduler.sfn` that the keyhole leaves standing.
-
 **Loosening `is_c_abi_function_pointer` to accept the `fn (` spelling.** This is
-what `runtime/sfn/platform/pthread.sfn:19-32` asks for, and it is the wrong fix
-(§3.1): it unblocks nothing, because the extern side already lowers to `i8*`,
-and it cements a spelling whose ABI silently flips between extern position
-(thin) and Sailfin position (fat, env-first). Rejected in favour of a distinct
-spelling and leaving the existing rule untouched.
+what `runtime/sfn/platform/pthread.sfn:19-32` asks for, and it is the wrong fix:
+it would not close the extern-parameter gap in §3.2, because the request is to
+accept the closure-style `fn (` spelling in extern position, which lowers to
+the *fat* `{i8*, i8*}` shape everywhere else in the language — cementing a
+spelling whose ABI silently flips between extern position (thin, if accepted)
+and Sailfin position (fat, env-first). The correct fix, tracked in §3.2, is to
+teach `is_c_abi_function_pointer` about the already-existing `*fn (…)`
+spelling instead, leaving the bare `fn (` rule untouched.
 
-**Reusing the closure pair — register a `{i8*, i8*}` lambda as the
-destructor.** Fails mechanically: reconstituting an aggregate from two loaded
-`i64` slots needs `insertvalue`, which Sailfin source cannot express, and the
-loaded value's LLVM type must be `{i8*, i8*}` for `extractvalue` to be valid.
-It also drags closure-env lifetime into scope teardown, which is precisely the
-problem the seam exists to solve.
+**Reusing the closure pair — register a `{i8*, i8*}` lambda as the destructor,
+instead of the already-shipped thin `*fn` pointer.** Fails mechanically:
+reconstituting an aggregate from two loaded `i64` slots needs `insertvalue`,
+which Sailfin source cannot express, and the loaded value's LLVM type must be
+`{i8*, i8*}` for `extractvalue` to be valid. It also drags closure-env lifetime
+into scope teardown, which is precisely the problem the seam exists to solve.
 
 **Monomorphizing `sfn_rc_sfn_release` per payload type.** Covered in §3.7:
 retained as a future devirtualization, rejected as the mechanism.
 
 ## 7. Phasing and seed dependency
 
-This is **runtime source calling a compiler capability the pinned seed lacks** —
-the structural carve-out in `.claude/rules/seed-dependency.md`. Bundling does not
-help: `make compile` builds the new compiler from the old seed, but the *seed*
-is what compiles working-tree runtime source
-(`_compile_runtime_sfn_sources`, `compiler/src/build/runtime_objs.sfn`). So the
-capability **must land alone, labelled `seed-blocker`**, and the consumers carry
-`## Required in pinned seed: #<Phase A>`. Precedent, recorded verbatim in
-`runtime/sfn/string.sfn`: "seed 0.7.0-alpha.41 carries the `load_byte` builtin."
+**No seed cut.** §5 gives the evidence: `runtime/capsule.toml:70` plus
+`scheduler.sfn:607` prove the pinned seed already parses and lowers `*fn`, so
+`.claude/rules/seed-dependency.md`'s runtime carve-out does not apply — there is
+no capability for the seed to lack. This retracts the earlier draft's
+conclusion that one seed cut was forced; that conclusion was wrong.
 
-Because the gate is unavoidable, the rule's instruction is to **cross it once**
-with the complete capability family, not per consumer. That is the decisive
-argument for the general `*fn (…)` type over a keyhole intrinsic (§6).
+With no seed dependency, the two runtime-source changes and the two
+compiler-side gaps are simply independent pieces of work, each sized for one
+session:
 
-**One seed cut is forced.** It queues onto the next scheduled cadence bump
-(SFEP-0026 WS-C) — this is not release-critical and does not justify a reactive
-cut.
-
-| Phase | Scope | Size | Gate |
+| Item | Scope | Size | Gate |
 |---|---|---|---|
-| **A** | The `*fn (…) -> R` capability: parser type grammar, extern accept-list, `E0808`/`E0809` extension for the new cast target, effect rejection, native-IR annotation carry-through, thin indirect-call lowering, `sfn fmt`. Compiler-side tests only — **no runtime consumer in this PR** | M–L (deliberately the one large issue; bounded by the C-ABI-scalars-and-pointers restriction in §3.2) | `seed-blocker`; lands alone |
-| *(seed cut)* | Cadence bump pins a seed carrying Phase A | — | queued, not reactive |
-| **B** | Generic nursery seam: stride-16 registry, `sfn_nursery_register_resource`, `sfn_channel_reclaim`, drain loop calls through the pointer, `sfn_channel_create` registers the pair | M | `## Required in pinned seed: #<A>` |
-| **C** | `rc.sfn` `drop_fn` invocation; retire the "deferred to M2.4/M2.6" header note; extend the e2e test off its null-`drop_fn` shape | S | `## Required in pinned seed: #<A>`; parallel with B |
-| **D** | Runtime spelling migration: `pthread.sfn` / `scheduler.sfn` externs and the `Task` entry field move from `* u8`-and-cast to `*fn (…)`; delete the two header workaround notes | S | `## Required in pinned seed: #<A>`; parallel with B and C |
+| Nursery seam | Stride-16 registry, `sfn_nursery_register_resource`, `sfn_channel_reclaim`, drain loop, `sfn_channel_create` registers the pair (§3.3–§3.6) | M | none — ordinary `make compile` |
+| `rc.sfn` | `drop_fn` invocation; retire the "deferred to M2.4/M2.6" header note; extend the e2e test off its null-`drop_fn` shape (§3.7) | S | none — ordinary `make compile`; parallel with the nursery seam |
+| Struct-field `*fn` | `Route.handler`, `Task.fn_ptr` move from `i64`-and-cast to typed `*fn (…)` fields (§3.2) | S | none, provided it lands compiler-only with no runtime consumer in the same PR |
+| Extern-parameter `*fn` | `is_c_abi_function_pointer` recognizes `*fn (…)`; `pthread.sfn`'s `start` parameter migrates (§3.2) | S | same as above |
 
-B, C, and D are three genuinely independent consumers of one pinned capability,
-in three different modules, with no shared code. They are not a manufactured
-split: each is a separate session, none gates another, and none forces an
-additional seed cut. Bundling them would produce one large PR touching
-concurrency, memory, and platform for no shipping benefit.
-
-Everything downstream — a second resource type actually riding the seam, i.e.
-the sync capsule — is SFEP-0063's, and out of scope here.
-
-**Contingency if Phase A slips.** Ship Phase B with a kind tag in the second
-slot and a direct-dispatch switch (§6), then swap tag for pointer when the
-capability lands. The registry work is identical; only the drain loop changes.
-Take this only under schedule pressure — it is a dead end for `rc.sfn` and for
-third-party resources.
+Nothing here queues a cadence seed bump. The struct-field and extern-parameter
+items are the only ones with a `seed-dependency.md` consideration at all, and
+only if a later change bundles them with a runtime consumer in the same PR —
+which this proposal explicitly scopes them not to do.
 
 ## 8. Diagnostics
 
-**Prefer zero new codes.** The producer side is already covered by `E0808` /
-`E0809`; extending them to recognise `*fn (…)` as a supported cast target is a
-message change, not a new code. Arity and parameter-type mismatch at a thin
-indirect call should route through the existing call-checking diagnostics rather
-than gain a bespoke code.
+**Prefer zero new codes**, and correcting an earlier draft's E-code survey,
+which mixed live and reserved codes into a mistaken "holes are presumed
+retired" heuristic:
 
-**One code is reserved for the case that has no existing home: `E0839`** —
-function-pointer *kind* mismatch, i.e. a closure type `fn (A) -> R` and a thin
-C-ABI pointer `*fn (A) -> R` used interconvertibly. This is the §3.1 trap
-(`let d: fn (*u8) -> void = some_raw_ptr;`), which today produces invalid IR or
-an ABI-mismatched call rather than an error; leaving it undiagnosed while adding
-a second, near-identical spelling would be negligent. `E0839` is verified free:
-`E0801`–`E0838` are in use, with holes at `E0806`, `E0817`, `E0824`, `E0825`
-that this proposal does **not** claim (holes are presumed retired codes).
-`E09xx` is ownership/affine and untouched.
+- `E0806` is **live** — the atomic-builtin type contract
+  (`compiler/src/llvm/atomics.sfn:15`), pinned by
+  `compiler/tests/e2e/atomic_add_sub_compile_test.sfn:139,158`.
+- `E0817` is **live** — the enum same-name field conflict, pinned by
+  `compiler/tests/e2e/enum_same_name_field_conflict_test.sfn:140`.
+- `E0824`/`E0825` are **reserved by SFEP-0058**
+  (`docs/proposals/0058-sized-integer-types.md:211,225`), not retired.
 
-Allocate `E0839` only if the check genuinely cannot reuse an existing
-type-mismatch code with a specific message; the reservation is a ceiling, not a
-commitment.
+None of these are gaps this proposal may claim. The "holes are presumed
+retired codes" reasoning is dropped outright — it would license reusing a live
+or already-reserved code, which is exactly the mistake a hole-based heuristic
+invites. `E0838` is the highest allocated code; `E0839` is genuinely free.
+
+**Reassessing whether `E0839` is still wanted.** An earlier draft reserved it
+for a closure-vs-thin kind-mismatch diagnostic
+(`let d: fn (*u8) -> void = some_raw_ptr;`). That confusion risk is far lower
+than originally argued: the two spellings are structurally disjoint by the
+leading `*` (§3.1), and the two shapes at that boundary are ordinary,
+already-diagnosed cases rather than a new gap — assigning a raw `*fn (…)`
+pointer where a `fn (…) -> R` closure type is expected (or vice versa) is a
+plain type mismatch between an `i8*`-shaped value and a `{i8*, i8*}`-shaped
+one, caught by existing type-checking with no bespoke wording needed.
+**Dropping the reservation** is therefore the right call: this proposal
+allocates no diagnostic code, and `E0839` remains free for whatever next
+proposal needs it.
+
+Arity and parameter-type mismatch at a thin indirect call — should the §3.2
+extensions ever surface one in a new position — should route through the
+existing call-checking diagnostics rather than gain a bespoke code, consistent
+with how the already-shipped let/parameter position behaves today.
 
 ## 9. Stage1 readiness mapping
 
-- [ ] Parses — `*fn (P, …) -> R` in let, parameter, struct-field, and extern
-      position
-- [ ] Type-checks / effect-checks — C-ABI element accept-list; `<fn> as
-      *fn (…)` shape check; effectful-function rejection (§4); closure/thin
-      non-interconvertibility
-- [ ] Emits valid `.sfn-asm` — annotation carried to the binding; no new
-      instruction
-- [ ] Lowers to LLVM IR — `bitcast i8*` → `R (P, …)*` + `call`, with **no**
-      `extractvalue` and **no** env argument
+The underlying `*fn (A) -> R` capability this proposal builds on is already
+Stage1-shipped (`docs/status.md:526-528`); the checklist below is for the work
+this proposal actually adds — the nursery-seam generalization and `rc.sfn`
+wiring, plus the two small independent compiler gaps in §3.2.
+
+- [ ] Parses — struct-field and extern-parameter `*fn (…)` (§3.2); the
+      let/parameter form already parses today and needs no further work
+- [ ] Type-checks / effect-checks — effectful-function rejection at the
+      address-taking site (§4); C-ABI accept-list extension to
+      `is_c_abi_function_pointer` for the extern gap (§3.2)
+- [ ] Emits valid `.sfn-asm` / Lowers to LLVM IR — no new instruction or
+      lowering path for the nursery seam or `rc.sfn`, which reuse the shipped
+      thin-call path as-is; the §3.2 struct-field/extern extensions carry the
+      existing annotation through to a new binding position only
 - [ ] Regression coverage — §10
-- [ ] Self-hosts — `make compile` after Phase A; `make clean-build` first, since
-      Phase A is structurally a new type form
-- [ ] `sfn fmt --check` clean — canonical `*fn (` spelling, idempotent
-- [ ] Documented in `docs/status.md` + the spec's type chapter
+- [ ] Self-hosts — `make compile` after each item; no `make clean-build`
+      required (§5)
+- [ ] `sfn fmt --check` clean
+- [ ] Documented in `docs/status.md` — update the nursery/rc.sfn section; the
+      underlying call capability is already documented
 
 ## 10. Test plan
 
 E2E tests are Sailfin `*_test.sfn` files driving subprocesses via
 `process.run_capture` — never bash (`.claude/rules/no-bash-e2e.md`).
 
-**Phase A — compiler.**
-
-- `compiler/tests/unit/` — type-parse round-trip for `*fn (A) -> R` in let,
-  parameter, struct-field, and extern position; both `*fn(` and `*fn (`
-  spellings accepted; `sfn fmt` idempotence in all four.
-- `compiler/tests/unit/` — typecheck accepts `<concrete C-ABI fn> as
-  *fn (A) -> R`; rejects a generic function (`E0809`); rejects an effectful
-  function; rejects closure↔thin assignment in both directions.
-- `compiler/tests/integration/` — **IR shape assertion**, the load-bearing one:
-  the emitted call for a thin pointer contains `bitcast i8* … to void (i8*)*`
-  followed by `call void %…(i8* %…)` and contains **no** `extractvalue`. This
-  is what distinguishes the new path from closure dispatch, and a regression
-  here is a silent ABI break, not a compile error.
-- `compiler/tests/e2e/` — a program that stores a function's address in a struct
-  field, loads it, calls through it, and observes the side effect; plus the
-  round-trip through `sfn fmt --write` to prove the canonical spelling still
-  compiles.
-
-**Phase B — nursery seam.** Extend
+**Nursery seam.** Extend
 `compiler/tests/e2e/channel_nursery_reclaim_test.sfn`:
 
 - A `routine` creating N channels exits cleanly and each reclaimer runs
@@ -593,34 +601,31 @@ E2E tests are Sailfin `*_test.sfn` files driving subprocesses via
   `compiler/tests/{e2e,unit}/routine_nursery_test.sfn` must stay green — the
   module-global (`n == 0`) path is unchanged.
 
-**Phase C — `rc.sfn`.** Extend `compiler/tests/e2e/runtime_memory_rc_test.sfn`
-off its current null-`drop_fn` shape: a real `drop_fn` bumping a counter runs
+**`rc.sfn`.** Extend `compiler/tests/e2e/runtime_memory_rc_test.sfn` off its
+current null-`drop_fn` shape: a real `drop_fn` bumping a counter runs
 **exactly once**, at the release that takes the refcount to zero and not on
 earlier releases; the null-`drop_fn` path still frees without calling anything;
 the destructor observes a live payload (it runs before `free`).
 
-**Phase D — spelling migration.** `pthread.sfn` and `scheduler.sfn` typecheck
-and `sfn fmt --check` clean under the new spelling; the scheduler's existing
-linked single-thread and multi-thread roundtrips stay green, proving the
-`pthread_create` start routine still reaches libc as the same `i8*`.
+**§3.2 struct-field / extern-parameter (if pursued in this pass).**
+`compiler/tests/unit/` — type-parse round-trip for `*fn (A) -> R` in
+struct-field and extern position; `compiler/tests/e2e/` — `pthread.sfn` and
+`scheduler.sfn`/`router.sfn` typecheck and `sfn fmt --check` clean under the
+new spelling, and existing linked single-thread/multi-thread roundtrips stay
+green. No IR-shape assertion is needed here — that coverage already exists for
+the let/parameter position in `compiler/tests/e2e/plain_fn_ptr_call_test.sfn`
+and the lowering path is unchanged; these positions only add a new place the
+same annotation can appear.
 
-**Every phase:** `make compile` before targeted tests; `make check` before the
-Phase A seed-blocker merges, since it changes the type grammar.
+**Every item:** `make compile` before targeted tests. No item in this table
+needs `make check` as a merge gate beyond the project's ordinary bar — there is
+no seed-blocker to guard.
 
 ## 11. Risks
 
-**The overload trap is the biggest risk.** `fn (A) -> R` and `*fn (A) -> R`
-differ by one character and by an entire ABI. A confusion that typechecks
-produces a call with a spurious or missing first argument — silent memory
-corruption, not a crash at the mismatch. Mitigations, in order of importance:
-the `E0839` kind-mismatch check (§8), the IR-shape integration test that asserts
-`extractvalue` is absent (§10), and never using the thin form in
-`compiler/src/` so a mistake cannot reach the self-host path unnoticed.
-
-**Phase A is the largest single issue in the plan** and the seed gate means it
-cannot be de-risked by splitting. Mitigation: the §3.2 restriction to C-ABI
-scalars and pointers, and shipping it with compiler-side tests only so no
-runtime behaviour rides on the first landing.
+**Effect erasure is a real capability hole**, not just a v0 simplification
+(§4). Naming it now avoids someone discovering at sync-capsule time that a
+file-handle reclaimer cannot be registered.
 
 **Stride-16 pointer arithmetic in the drain loop.** The existing code uses a
 three-statement offset split specifically to avoid a cast-of-pointer-arithmetic
@@ -628,30 +633,52 @@ miscompile (`nursery.sfn:263-268`). The new loop computes two offsets per slot
 and must keep that discipline; a regression here is a use-after-free at scope
 exit, which is the worst possible place for one.
 
-**Effect erasure is a real capability hole**, not just a v0 simplification
-(§4). Naming it now avoids someone discovering at sync-capsule time that a
-file-handle reclaimer cannot be registered.
+**Confusing the fat and thin spellings remains a real, if now smaller, risk.**
+`fn (A) -> R` and `*fn (A) -> R` differ by one character and by an entire ABI.
+Because that confusion resolves to an ordinary type mismatch rather than a
+silent miscompile (§8), the residual risk is a rejected build, not memory
+corruption — but it is still worth flagging to anyone extending the §3.2
+positions: verify the new binding positions route through the same
+`_strip_leading_star_fn` / `_parse_fn_pointer_annotation` machinery rather than
+duplicating an ad hoc check.
 
 ## 12. References
 
+- SFEP-0030 (`docs/proposals/0030-first-class-function-values.md`), status
+  **Accepted** — the proposal that actually designed and shipped `*fn (A) -> R`
+  consumption (#1089), including the rejected env-less `{ptr, null}` carrier
+  alternative at lines 198-213. Reviewing against this document before drafting
+  would have caught the false premise corrected above; any future proposal
+  touching function-pointer types should start here.
 - SFEP-0063 (`docs/proposals/0063-sync-capsule.md`) §3.6 — the section that
   scopes this proposal; the downstream synchronization library
 - SFEP-0055 — related concurrency design context
 - SFEP-0026 (`docs/proposals/0026-delivery-process.md`) WS-B/WS-C — seed
-  dependency and cadence batching
+  dependency and cadence batching (referenced for context; does not apply to
+  this proposal's critical path per §5/§7)
 - SFEP-0025 (`docs/proposals/0025-native-runtime-architecture.md`)
   `#322-reference-counting`, `#37-scheduler-and-concurrency` — the `RcHeader`
   layout and the scheduler's typed-entry want
-- `.claude/rules/seed-dependency.md` — the runtime-source carve-out governing §7
+- `.claude/rules/seed-dependency.md` — the runtime-source carve-out; confirmed
+  in §5/§7 not to apply here
 - `runtime/sfn/concurrency/nursery.sfn:225-333` — the seam being generalized
 - `runtime/sfn/memory/rc.sfn` — the `drop_fn` gap
+- `runtime/capsule.toml:70` — `sfn/concurrency/scheduler.sfn` in `sfn-sources`,
+  the evidence that the pinned seed already compiles `*fn` call sites
 - `runtime/sfn/platform/pthread.sfn:19-32`,
-  `runtime/sfn/concurrency/scheduler.sfn:29-45` — the two recorded
-  "unspellable today" workarounds this retires
+  `runtime/sfn/concurrency/scheduler.sfn:39-45,607` — the two recorded
+  annotation-position workarounds (§2.3) and the already-working call site
+- `docs/status.md:526-528` — where the shipped `*fn (A) -> R` capability is
+  documented
+- `compiler/tests/e2e/plain_fn_ptr_call_test.sfn`,
+  `compiler/tests/e2e/fixtures/plain_fn_ptr_call.sfn` — regression coverage for
+  the shipped capability
 - `compiler/src/typecheck_types/extern_abi.sfn:302-317` —
-  `is_c_abi_function_pointer`
+  `is_c_abi_function_pointer`, the site the §3.2 extern-parameter gap touches
 - `compiler/src/typecheck_types/symbol_table_and_raw_exprs.sfn:214-283` —
   `E0808` / `E0809`, the shipped address-of primitive
+- `compiler/src/llvm/expression_lowering/native/core_call_lowering.sfn:65-92,268` —
+  `try_lower_plain_fn_ptr_call` and its dispatch order
 - `compiler/src/llvm/expression_lowering/native/core_call_resolution/closure_callee.sfn`,
   `.../core_call_emission/closure_dispatch.sfn` — the fat indirect-call path the
-  thin path must not be confused with
+  thin path is structurally disjoint from
