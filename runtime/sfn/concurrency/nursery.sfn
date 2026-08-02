@@ -63,14 +63,24 @@ import { PthreadMutex } from "../platform/pthread_layout";
 // guards `tasks_addr`/`count`/`capacity`/`faulted` — a child running on
 // a worker could register concurrently if cross-thread inheritance is
 // ever added, and the lock is cheap insurance that matches the queue
-// discipline. Layout (Linux x86_64): five i64s (40 B) + PthreadMutex
-// (64 B) = 104 bytes.
+// discipline.
+//
+// `channels_addr`/`chan_count`/`chan_capacity` are the same growable-list
+// shape for `Channel*` handles created inside this scope (SFN-688). The
+// nursery owns their reclamation: `sfn_nursery_exit` destroys each one
+// after the join barrier, which is precisely the precondition
+// `sfn_channel_destroy` requires (no thread still holds or is blocked on
+// the handle). Layout (Linux x86_64): eight i64s (64 B) + PthreadMutex
+// (64 B) = 128 bytes.
 struct Nursery {
     parent: i64;
     tasks_addr: i64;
     count: i64;
     capacity: i64;
     faulted: i64;
+    channels_addr: i64;
+    chan_count: i64;
+    chan_capacity: i64;
     mutex: PthreadMutex;
 }
 
@@ -99,6 +109,23 @@ extern fn pthread_mutex_destroy(m: *PthreadMutex) -> i32;
 // user `await` reads the result separately).
 extern fn sfn_task_join(task: *u8) -> *u8;
 
+// Channel teardown (SFN-688). Destroys both condvars and the mutex,
+// drains abandoned owned elements, and frees the ring buffer and the
+// handle. Re-declared rather than imported for the reason above; the
+// link is resolved at final link, so `channel.sfn` calling back into
+// `sfn_nursery_register_channel` is not an import cycle.
+extern fn sfn_channel_destroy(ch: *u8) -> void;
+
+// `sfn_channel_destroy` documents that the caller closes first
+// (`channel.sfn`), and it goes straight to `pthread_cond_destroy` on both
+// condvars — destroying a condvar with a waiter is undefined under POSIX.
+// The join barrier already guarantees no nursery child is still blocked, so
+// this is belt-and-braces today; it keeps the callee's stated precondition
+// true rather than leaving the only caller quietly contradicting it, and it
+// stays correct if cross-thread nursery inheritance ever admits a waiter at
+// exit. Cost is one broadcast per channel.
+extern fn sfn_channel_close(ch: *u8) -> void;
+
 // ── Per-thread current nursery ────────────────────────────────
 // Top-of-stack `Nursery*` for the executing thread (0 = none). Lowered
 // to an `internal thread_local global i64` — genuinely per-thread.
@@ -109,9 +136,9 @@ thread_local let mut _sfn_g_current_nursery: i64 = 0;
 // the new task is owned by a nursery.
 fn sfn_nursery_current() -> i64 { return _sfn_g_current_nursery; }
 
-// Byte size of a `Nursery` (five i64s + 64-byte mutex). The allocator
+// Byte size of a `Nursery` (eight i64s + 64-byte mutex). The allocator
 // path is the only layout dependency; tracks the struct above.
-fn _sfn_nursery_struct_size() -> i64 { return 104; }
+fn _sfn_nursery_struct_size() -> i64 { return 128; }
 
 // Initial registration-list capacity, grown by doubling. Most routines
 // spawn a handful of tasks; 8 covers the common case without a regrow.
@@ -143,6 +170,9 @@ fn sfn_nursery_enter() -> i64 {
     nursery.count = 0;
     nursery.capacity = 0;
     nursery.faulted = 0;
+    nursery.channels_addr = 0;
+    nursery.chan_count = 0;
+    nursery.chan_capacity = 0;
 
     _sfn_g_current_nursery = nursery_ptr as i64;
     return nursery_ptr as i64;
@@ -192,6 +222,57 @@ fn sfn_nursery_register(n: i64, task: i64) -> i64 {
     return 1;
 }
 
+// `sfn_nursery_register_channel(n, ch)` — record `ch` (a `Channel*` as
+// i64, from `sfn_channel_create`) against nursery `n` so it is destroyed
+// at exit (SFN-688). Same growable-list discipline as
+// `sfn_nursery_register`, over the separate `channels_addr` list.
+//
+// A zero `n` means the channel was created outside any `routine` scope —
+// notably a module global, which is initialised before any nursery
+// exists. Those are deliberately left to process exit: there is no scope
+// whose end proves no thread still holds the handle, so destroying them
+// early would trade a bounded leak for a use-after-free. Returns 1 (the
+// channel is valid and usable, simply unowned).
+//
+// On OOM growing the list, sets `faulted` and returns 0: the channel is
+// NOT recorded, so it leaks rather than being destroyed while live —
+// failure closed, matching the task path.
+fn sfn_nursery_register_channel(n: i64, ch: i64) -> i64 {
+    if n == 0 { return 1; }
+    if ch == 0 { return 1; }
+
+    let nursery: *Nursery = n as *Nursery;
+    pthread_mutex_lock(nursery.mutex);
+
+    if nursery.chan_count >= nursery.chan_capacity {
+        let mut new_cap: i64 = nursery.chan_capacity * 2;
+        if new_cap < _sfn_nursery_initial_capacity() {
+            new_cap = _sfn_nursery_initial_capacity();
+        }
+        let old_buf: *u8 = nursery.channels_addr as *u8;
+        let new_buf: *u8 = realloc(old_buf, (new_cap * 8) as usize);
+        if new_buf as i64 == 0 {
+            nursery.faulted = 1;
+            pthread_mutex_unlock(nursery.mutex);
+            return 0;
+        }
+        nursery.channels_addr = new_buf as i64;
+        nursery.chan_capacity = new_cap;
+    }
+
+    // Append at slot `chan_count`. Three-statement offset split (not the
+    // inline `(base + idx*8) as * i64`) to stay clear of the
+    // cast-of-pointer-arithmetic miscompile.
+    let base: i64 = nursery.channels_addr;
+    let slot_addr: i64 = base + nursery.chan_count * 8;
+    let slot: *i64 = slot_addr as *i64;
+    atomic_store(slot, ch);
+    nursery.chan_count = nursery.chan_count + 1;
+
+    pthread_mutex_unlock(nursery.mutex);
+    return 1;
+}
+
 // `sfn_nursery_exit(n)` — the structured-join barrier. Blocks on every
 // registered task (`sfn_task_join`, FIFO) so control cannot leave the
 // routine until all children have completed, then pops `n` from the
@@ -219,12 +300,32 @@ fn sfn_nursery_exit(n: i64) -> i64 {
         i = i + 1;
     }
 
+    // Reclaim channels created in this scope (SFN-688). Strictly AFTER
+    // the join loop above: every child has completed, so no thread can
+    // still hold or be blocked on one of these handles. That ordering is
+    // what turns `sfn_channel_destroy`'s documentation-only precondition
+    // into a structural one — do not hoist this above the joins.
+    let mut c: i64 = 0;
+    loop {
+        if c >= nursery.chan_count { break; }
+        let chan_base: i64 = nursery.channels_addr;
+        let chan_slot_addr: i64 = chan_base + c * 8;
+        let chan_slot: *i64 = chan_slot_addr as *i64;
+        let chan_addr: i64 = atomic_load(chan_slot);
+        if chan_addr != 0 {
+            sfn_channel_close(chan_addr as *u8);
+            sfn_channel_destroy(chan_addr as *u8);
+        }
+        c = c + 1;
+    }
+
     let fault: i64 = nursery.faulted;
 
     // Pop: restore the enclosing nursery as current before tearing down.
     _sfn_g_current_nursery = nursery.parent;
 
     if nursery.tasks_addr != 0 { free(nursery.tasks_addr as *u8); }
+    if nursery.channels_addr != 0 { free(nursery.channels_addr as *u8); }
     pthread_mutex_destroy(nursery.mutex);
     free(n as *u8);
 

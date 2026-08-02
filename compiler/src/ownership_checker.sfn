@@ -1272,13 +1272,38 @@ fn _clear_nursery_bound_at(bindings: OwnershipBinding[], target: int) -> Ownersh
 // Task binding/collection marked nursery-bound is legal when it was consumed
 // in the routine; a live Task or Channel in a parent binding is the E0838
 // escape.
-fn _sweep_nursery_escapes(scope: OwnershipScope, outer_count: int) -> OwnershipScope {
+// Snapshot which parent-prefix bindings already carry nursery provenance
+// when a routine opens (SFN-696). A handle bound before this routine began
+// belongs to an ENCLOSING nursery, so this routine's exit sweep must not
+// claim it: sitting in an inner nursery's parent prefix is the normal
+// resting place of a correctly-scoped outer-routine handle, not an escape.
+fn _nursery_bound_marks(bindings: OwnershipBinding[], count: int) -> boolean[] {
+    let mut marks: boolean[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= bindings.length { break; }
+        if index >= count { break; }
+        marks.push(bindings[index].nursery_bound);
+        index += 1;
+    }
+    return marks;
+}
+
+fn _sweep_nursery_escapes(scope: OwnershipScope, outer_count: int, entry_marks: boolean[]) -> OwnershipScope {
     let mut next = scope;
     let mut bindings = scope.bindings;
     let mut index: int = 0;
     loop {
         if index >= bindings.length { break; }
         if index >= outer_count { break; }
+        // Bound before this routine opened -> owned by an enclosing nursery,
+        // and swept at that nursery's boundary instead (SFN-696). A handle
+        // this routine stores into a parent binding is flagged at the store
+        // itself, so skipping here loses no genuine escape.
+        if index < entry_marks.length && entry_marks[index] {
+            index += 1;
+            continue;
+        }
         let binding = bindings[index];
         if (binding.is_task || binding.is_channel) && binding.nursery_bound && (binding.state == "owned"
             || binding.state == "maybe_moved") {
@@ -1315,9 +1340,10 @@ fn _routine_block_scope(block: Block, scope: OwnershipScope) -> OwnershipScope {
         task_returning_names: scope.task_returning_names,
         routine_outer_count: outer_count
     };
+    let entry_marks = _nursery_bound_marks(scope.bindings, outer_count);
     let child_out = _scope_after_block(block, child_in);
     let linear_swept = _sweep_unconsumed_linear(child_out, child_out.bindings, outer_count);
-    let nursery_swept = _sweep_nursery_escapes(linear_swept, outer_count);
+    let nursery_swept = _sweep_nursery_escapes(linear_swept, outer_count, entry_marks);
     return OwnershipScope {
         bindings: _binding_prefix(nursery_swept.bindings, outer_count),
         tracked: nursery_swept.tracked,

@@ -4,7 +4,20 @@
 // binding. These negative fixtures drive the complete frontend through
 // `sfn check --json`; the positive test is compiled, lowered, and executed by
 // the Sailfin-native test runner.
-import { assert_does_not_compile } from "sfn/test";
+import { CompileExpect, assert_compiles, assert_does_not_compile } from "sfn/test";
+
+fn _nested_task_handle_source() -> string {
+    return "fn _probe() -> int { return 7; }\n" + "fn main() -> int {\n"
+        + "    routine {\n"
+        + "        let handle = spawn _probe();\n"
+        + "        routine {\n"
+        + "            let scratch: int = 1;\n"
+        + "        }\n"
+        + "        let value: int = await handle;\n"
+        + "    }\n"
+        + "    return 0;\n"
+        + "}\n";
+}
 
 fn _direct_global_escape_source() -> string {
     return "let mut g_ch = channel(1);\n" + "fn main() -> int {\n"
@@ -42,4 +55,61 @@ test "channel nursery escape: routine-local channel lowers and runs" {
         let value: int = ch.receive();
         assert value == 7;
     }
+}
+
+// SFN-696: a handle bound by an ENCLOSING nursery lands in the inner
+// nursery's parent prefix, which is its normal resting place rather than an
+// escape. The exit sweep previously claimed any parent-prefix handle without
+// asking which nursery bound it, so a handle declaration followed by ANY
+// nested `routine { }` falsely tripped E0838 — the inner block's contents
+// were irrelevant, and reversing the order silently passed. That made nested
+// structured concurrency uncompilable. Both handle kinds shared the
+// comparison, so both are pinned here.
+test "channel nursery escape: nested routine does not flag the enclosing channel (SFN-696)" {
+    routine {
+        let outer = channel(1);
+        routine {
+            let inner = channel(1);
+            inner.send(2);
+            let inner_value: int = inner.receive();
+            assert inner_value == 2;
+        }
+        outer.send(1);
+        let outer_value: int = outer.receive();
+        assert outer_value == 1;
+    }
+}
+
+// The inner routine declares no handle at all — isolating the trigger to the
+// nesting itself rather than to anything the inner scope contains.
+test "channel nursery escape: nested handle-free routine does not flag the enclosing channel (SFN-696)" {
+    routine {
+        let outer = channel(1);
+        routine {
+            let scratch: int = 1;
+            assert scratch == 1;
+        }
+        outer.send(3);
+        let outer_value: int = outer.receive();
+        assert outer_value == 3;
+    }
+}
+
+// The `Task<T>` half of the same defect (SFN-446's path, which SFN-694
+// inherited). `spawn` then a nested routine then `await` is ordinary
+// structured concurrency and must check.
+//
+// Asserted at check level rather than executed, because `await` on a spawn
+// handle does not lower yet (`docs/status.md`: classified by kind, lowering
+// is #1084) — an execution form fails with E1002 on the `await` initializer,
+// which would be testing that gap rather than this one. SFN-696 is a
+// check-time regression, so `sfn check` is the layer that matters here.
+test "task nursery escape: nested routine does not flag the enclosing task handle (SFN-696)" ![io] {
+    let expect = CompileExpect {
+        effects: [],
+        ok: true,
+        diagnostic_pattern: ""
+    };
+    let result = assert_compiles(_nested_task_handle_source(), expect);
+    assert result.ok;
 }

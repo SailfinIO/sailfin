@@ -1,0 +1,316 @@
+// E2E: the routine-scoped channel reclaim SFN-688 added —
+// `sfn_channel_create` (`runtime/sfn/concurrency/channel.sfn`) registers
+// every channel opened inside a `routine { }` with
+// `sfn_nursery_register_channel(sfn_nursery_current(), ...)`, and
+// `sfn_nursery_exit` (`runtime/sfn/concurrency/nursery.sfn`) destroys each
+// registered channel AFTER its join-all loop, then frees the list. A
+// channel created outside a `routine` (e.g. a module global) is never
+// registered and deliberately lives until process exit.
+//
+// Two legs:
+//   1. A churn-execution leg (always runs, no sanitizer): 5000 iterations
+//      each open a fresh routine-scoped channel, round-trip one int through
+//      it, and close. A double free / use-after-free from a broken teardown
+//      aborts glibc with a distinctive message and nonzero exit even
+//      without a sanitizer, so this alone is a meaningful corruption gate.
+//   2. A leak-GROWTH leg under ASAN+LSAN (skips when no sanitizer runtime is
+//      available): the same fixture built at a low and a high iteration
+//      count, run with `detect_leaks=1`, asserting the high-count leak total
+//      does not exceed the low-count total by more than a generous
+//      per-iteration slack. A whole-program absolute-zero leak assertion is
+//      not usable — the runtime carries known process-lifetime allocations
+//      (one-time global init, a boxed-int channel-element per-element leak)
+//      — so growth, not the absolute count, is what a regression in the new
+//      teardown would move.
+import {
+    contains,
+    find,
+    parse_int,
+    trim
+} from "sfn/strings";
+import { clean_runner_env, nested_runner_scratch } from "sfn/test";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+// Full ambient environment — used ONLY for the clang/bash relink steps and
+// for running the produced native binaries below. Neither is a nested `sfn`
+// invocation, so the SFN-401 pool-key leak `sfn/test`'s `clean_runner_env`
+// guards against does not apply here; this mirrors
+// `concurrency_ownedbuf_asan_interleave_test.sfn`'s `_child_env`, which the
+// toolchain link needs in full (PATH for clang/ld, HOME/TMPDIR, etc).
+fn _relink_env() -> string[] ![io] { return process.environ(); }
+
+// ASAN + LeakSanitizer child env: `SAILFIN_MEM_LIMIT=unlimited` so the
+// instrumented binary's ~16 TB shadow reservation is not aborted by the
+// toolchain's 8 GiB self-cap (`.claude/rules/compiler-safety.md`).
+// `detect_leaks=1` — unlike the corruption-only model test, leg 2 needs
+// LSAN's leak summary to measure growth.
+fn _asan_run_env() -> string[] ![io] {
+    let mut e = _relink_env();
+    e.push("SAILFIN_MEM_LIMIT=unlimited");
+    e.push("ASAN_OPTIONS=detect_leaks=1");
+    return e;
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    fs.createDirectory(base, true);
+    return fs.mkdtemp(base + "/sfn-channel-nursery-reclaim-");
+}
+
+// The churn fixture: `iters` iterations, each opening a fresh `routine { }`
+// that creates a bounded channel, round-trips one int through it, and
+// closes — the exact registration/reclaim seam SFN-688 added.
+fn _churn_fixture(iters: int) -> string {
+    return "fn main() ![io] {\n" + "    let mut sum: int = 0;\n"
+        + "    let mut i: int = 0;\n"
+        + "    loop {\n"
+        + "        if i >= "
+        + number_to_string(iters)
+        + " { break; }\n"
+        + "        routine {\n"
+        + "            let ch = channel(4);\n"
+        + "            ch.send(i);\n"
+        + "            let v: int = ch.receive();\n"
+        + "            sum = sum + v;\n"
+        + "        }\n"
+        + "        i = i + 1;\n"
+        + "    }\n"
+        + "    print.info(\"sum: \" + number_to_string(sum));\n"
+        + "}\n";
+}
+
+// sum(0..iters-1) — the only value reachable if every churned channel
+// round-trips its element exactly once. A lost or duplicated element from a
+// corrupted reclaim would shift this.
+fn _expected_sum(iters: int) -> int { return iters * (iters - 1) / 2; }
+
+// Write `_churn_fixture(iters)` under `dir/<label>.sfn` and build it via a
+// nested `sfn build --work-dir` (the persisted runtime object set
+// `_asan_relink` below needs). Returns the built binary path, or "" on a
+// build failure.
+fn _build_churn(dir: string, label: string, iters: int, work_dir: string) -> string ![io] {
+    let src = dir + "/" + label + ".sfn";
+    fs.writeFile(src, _churn_fixture(iters));
+    let bin = dir + "/" + label + "_bin";
+    let build_env = clean_runner_env(nested_runner_scratch("channel-nursery-"
+        + label));
+    let exit = process.run_capture([_sfn_bin(), "build", "--work-dir", work_dir, "-o", bin, src], build_env);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    if exit != 0 {
+        print.err("channel-nursery-reclaim: nested `sfn build` failed (" + label
+            + ")\nstdout: "
+            + out
+            + "\nstderr: "
+            + err);
+        return "";
+    }
+    return bin;
+}
+
+// ── ASAN relink scaffolding, mirrored from
+//    `concurrency_ownedbuf_asan_interleave_test.sfn` (see that file's header
+//    for the full compile/link strategy rationale — duplicated rather than
+//    shared because e2e fixtures carry no cross-file helper import seam). ──
+fn _asan_relink(work_dir: string, extra_ll_glob: string, bin: string) -> string ![io] {
+    let saildir = work_dir + "/sailfin";
+    let prog_ll = saildir + "/program.ll";
+    if !fs.exists(prog_ll) { return ""; }
+
+    let prog_o = saildir + "/program.o";
+    let cexit = process.run_capture(["clang", "-c", "-Wno-override-module", prog_ll, "-o", prog_o], _relink_env());
+    let _co = process.capture_take_stdout();
+    let _ce = process.capture_take_stderr();
+    if cexit != 0 { return ""; }
+
+    if extra_ll_glob.length > 0 {
+        let compile_extras = "n=0; for f in " + extra_ll_glob
+            + "; do clang -c -Wno-override-module \"$f\" -o \""
+            + saildir
+            + "/xcap_$n.o\" || exit 1; n=$((n+1)); done";
+        let xexit = process.run_capture(["bash", "-c", compile_extras], _relink_env());
+        let _xo = process.capture_take_stdout();
+        let _xe = process.capture_take_stderr();
+        if xexit != 0 { return ""; }
+    }
+
+    let link_clang = "clang -fsanitize=address -Wno-override-module " + saildir
+        + "/*.o -lpthread -lm -o "
+        + bin;
+    let lexit = process.run_capture(["bash", "-c", link_clang], _relink_env());
+    let _lo = process.capture_take_stdout();
+    let _le = process.capture_take_stderr();
+    if lexit == 0 { return bin; }
+
+    let link_gcc = "gcc -fsanitize=address " + saildir
+        + "/*.o -lpthread -lm -o "
+        + bin;
+    let gexit = process.run_capture(["bash", "-c", link_gcc], _relink_env());
+    let _go = process.capture_take_stdout();
+    let _ge = process.capture_take_stderr();
+    if gexit == 0 { return bin; }
+    return "";
+}
+
+// True iff ASAN reported a genuine memory-corruption finding (double-free /
+// use-after-free / heap-overflow) — distinct from a leak-only report, and
+// the one verdict leg 2 fails hard on regardless of the leak-growth budget.
+fn _asan_reported(out: string, err: string) -> boolean {
+    return find(out + err, "ERROR: AddressSanitizer:", 0) >= 0;
+}
+
+// True iff the sanitizer runtime engaged and printed ANY report — a
+// corruption finding OR a leak finding (LSAN's error line names
+// "LeakSanitizer", not "AddressSanitizer") — as opposed to the process
+// aborting at startup (vmem cap / missing compiler-rt) before either
+// sanitizer produced output.
+fn _sanitizer_reported(combined: string) -> boolean {
+    return find(combined, "ERROR: AddressSanitizer:", 0) >= 0 || find(combined, "ERROR: LeakSanitizer:", 0) >= 0;
+}
+
+// Parse the `N` out of a `SUMMARY: AddressSanitizer: N byte(s) leaked` line
+// (LSAN's leak-total summary). Returns -1 when the marker, or a valid
+// integer between it and " byte(s) leaked", is not found.
+fn _parse_leaked_with_marker(report: string, marker: string) -> int {
+    let start = find(report, marker, 0);
+    if start < 0 { return -1; }
+    let after = start + marker.length;
+    let tail = " byte(s) leaked";
+    let end = find(report, tail, after);
+    if end < 0 { return -1; }
+    let num_str = trim(substring(report, after, end));
+    match parse_int(num_str) {
+        Result.Ok { value } => { return value; },
+        Result.Err { error } => { return -1; }
+    }
+    return -1;
+}
+
+// Both spellings occur in the wild: a combined ASAN+LSAN build summarizes
+// under `AddressSanitizer`, a standalone LeakSanitizer under its own name.
+fn _parse_leaked_bytes(report: string) -> int {
+    let combined_marker = _parse_leaked_with_marker(report, "SUMMARY: AddressSanitizer: ");
+    if combined_marker >= 0 { return combined_marker; }
+    return _parse_leaked_with_marker(report, "SUMMARY: LeakSanitizer: ");
+}
+
+// A run that leaks nothing prints no `SUMMARY` line at all, so an absent
+// marker on a clean exit means zero leaked — not an unmeasurable run.
+// Treating it as unmeasurable would silently skip this leg exactly when the
+// fix works, which is when the coverage matters most. Only a nonzero exit
+// with no parseable total is genuinely unmeasurable (-1).
+fn _leaked_bytes_or_zero(report: string, exit_code: int) -> int {
+    let parsed = _parse_leaked_bytes(report);
+    if parsed >= 0 { return parsed; }
+    if exit_code == 0 { return 0; }
+    return -1;
+}
+
+// ── Leg 1: churn execution, always runs, no sanitizer ──────────────────────
+test "channel nursery reclaim: 5000 routine-scoped channel churns settle with no double-free (SFN-688)" ![io] {
+    let dir = _scratch_dir();
+    let iters = 5000;
+    let work_dir = dir + "/churnwd";
+    let bin = _build_churn(dir, "churn", iters, work_dir);
+    assert bin.length > 0;
+
+    let exit = process.run_capture([bin], _relink_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    let combined = out + err;
+
+    // A double free / heap corruption from a broken per-routine reclaim
+    // aborts glibc with one of these messages and a nonzero exit even
+    // without a sanitizer — assert directly on the message so a corrupted
+    // allocator state cannot hide behind a coincidentally-zero exit.
+    assert ! contains(combined, "double free");
+    assert ! contains(combined, "corrupted");
+    assert ! contains(combined, "Aborted");
+    assert exit == 0;
+    assert contains(combined, "sum: " + number_to_string(_expected_sum(iters)));
+}
+
+// ── Leg 2: ASAN+LSAN leak-growth, skips when no sanitizer runtime exists ───
+test "channel nursery reclaim: ASAN leak growth stays bounded across churn scale (SFN-688)" ![io] {
+    let dir = _scratch_dir();
+    let low_iters = 100;
+    let high_iters = 5000;
+
+    let low_wd = dir + "/lowwd";
+    let low_bin = _build_churn(dir, "low", low_iters, low_wd);
+    let high_wd = dir + "/highwd";
+    let high_bin = _build_churn(dir, "high", high_iters, high_wd);
+    if low_bin.length == 0 || high_bin.length == 0 {
+        // Leg 1 already pins the build+run path itself; this leg is purely
+        // about the ASAN leak measurement, so a build failure here is a
+        // skip, not this leg's concern.
+        assert true;
+        return;
+    }
+
+    let low_asan = dir + "/low_asan";
+    let low_relinked = _asan_relink(low_wd, "", low_asan);
+    let high_asan = dir + "/high_asan";
+    let high_relinked = _asan_relink(high_wd, "", high_asan);
+    if low_relinked.length == 0 || high_relinked.length == 0 {
+        // Neither clang compiler-rt nor gcc libasan available — skip.
+        assert true;
+        return;
+    }
+
+    let low_exit = process.run_capture([low_asan], _asan_run_env());
+    let low_out = process.capture_take_stdout();
+    let low_err = process.capture_take_stderr();
+    let high_exit = process.run_capture([high_asan], _asan_run_env());
+    let high_out = process.capture_take_stdout();
+    let high_err = process.capture_take_stderr();
+
+    // A genuine memory-corruption finding fails the test outright,
+    // independent of the leak-growth budget below.
+    if _asan_reported(low_out, low_err) || _asan_reported(high_out, high_err) {
+        assert false;
+        return;
+    }
+
+    let low_combined = low_out + low_err;
+    let high_combined = high_out + high_err;
+
+    // A run that exits nonzero without EITHER sanitizer's report aborted at
+    // startup (vmem cap / missing compiler-rt) rather than reporting a leak
+    // — skip.
+    if low_exit != 0 && !_sanitizer_reported(low_combined) {
+        assert true;
+        return;
+    }
+    if high_exit != 0 && !_sanitizer_reported(high_combined) {
+        assert true;
+        return;
+    }
+
+    let low_leaked = _leaked_bytes_or_zero(low_combined, low_exit);
+    let high_leaked = _leaked_bytes_or_zero(high_combined, high_exit);
+    if low_leaked < 0 || high_leaked < 0 {
+        // Nonzero exit with no parseable total — genuinely unmeasurable.
+        // A clean run with no SUMMARY already resolved to 0 above.
+        assert true;
+        return;
+    }
+
+    // Growth budget: 64 bytes/iteration over the (high - low) extra churn.
+    // The regression this leg guards leaked ~336 bytes per channel (the
+    // 224-byte handle + 64-byte mutex + two 48-byte condvars + ring buffer)
+    // if `sfn_nursery_exit` stopped reclaiming routine-scoped channels;
+    // 64 bytes/iteration is generous slack so the pre-existing boxed-int
+    // channel-element leak does not trip this, while a real regression
+    // across the 4900-iteration gap (~1.6 MB) still does.
+    let extra_iters = high_iters - low_iters;
+    let slack = extra_iters * 64;
+    let growth = high_leaked - low_leaked;
+    assert growth <= slack;
+}
