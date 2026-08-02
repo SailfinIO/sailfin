@@ -1,6 +1,12 @@
 // compiler/src/llvm/lowering/lowering_core/test_harness.sfn
 //
 // Recoverable LLVM test-harness synthesis.
+import {
+    build_target_os,
+    target_setjmp_call_line,
+    target_setjmp_declare,
+    target_setjmp_symbol
+} from "../../../build/target";
 import { NativeModule } from "../../../emit_native";
 import { LayoutManifest, NativeFunction, ParseNativeResult } from "../../../native_ir";
 import { substring } from "../../../string_utils";
@@ -64,7 +70,11 @@ fn _harness_has_declare(lines: string[], symbol: string) -> boolean {
 // the SSA temps; the single `%frame`/`%jmpbuf` alloca pair (declared once
 // in `entry`) is reused across regions since the harness is fully
 // unrolled (no harness local is live across a `setjmp`).
-fn _harness_region_setup(rid: string, run_label: string, caught_label: string) -> string[] {
+// `target_os` selects the save-point spelling (SFN-647): Windows takes the
+// UCRT's two-parameter `_setjmp` with a null frame. Passed in rather than
+// resolved here so this stays pure — the caller already holds an `![io]`
+// context, matching the convention `build/target.sfn` documents.
+fn _harness_region_setup(rid: string, run_label: string, caught_label: string, target_os: string) -> string[] {
     return ["  %jbslot." + rid
         + " = getelementptr [3 x i64], [3 x i64]* %frame, i64 0, i64 1", "  %jbaddr."
         + rid
@@ -74,9 +84,8 @@ fn _harness_region_setup(rid: string, run_label: string, caught_label: string) -
         + rid, "  %msgslot."
         + rid
         + " = getelementptr [3 x i64], [3 x i64]* %frame, i64 0, i64 2", "  store i64 0, i64* %msgslot."
-        + rid, "  call void @sfn_exception_push_frame(i8* %frame.i8)", "  %sj."
-        + rid
-        + " = call i32 @setjmp(i8* %jmpbuf.i8)", "  %first."
+        + rid, "  call void @sfn_exception_push_frame(i8* %frame.i8)", target_setjmp_call_line(target_os, "%sj."
+        + rid, "%jmpbuf.i8"), "  %first."
         + rid
         + " = icmp eq i32 %sj."
         + rid
@@ -281,8 +290,12 @@ fn lower_to_llvm_lines_with_parsed_context_for_tests(native_module: NativeModule
     // `sailfin_assert_fail`, longjmp'ing back to the harness's own
     // `setjmp`. `@sfn_print_err` is already declared by the base module.
     let mut harness_declares: string[] = [];
-    if !_harness_has_declare(base.lines, "setjmp") {
-        harness_declares = extend_string_lines(harness_declares, ["declare i32 @setjmp(i8*)",]);
+    // SFN-647: declare whichever save point this target actually calls.
+    // `_harness_has_declare` is keyed on the same symbol so the dedup still
+    // matches the base module's own declaration.
+    let harness_target_os: string = build_target_os();
+    if !_harness_has_declare(base.lines, target_setjmp_symbol(harness_target_os)) {
+        harness_declares = extend_string_lines(harness_declares, [target_setjmp_declare(harness_target_os),]);
     }
     if !_harness_has_declare(base.lines, "sfn_exception_push_frame") {
         harness_declares = extend_string_lines(harness_declares, ["declare void @sfn_exception_push_frame(i8*)",]);
@@ -329,7 +342,7 @@ fn lower_to_llvm_lines_with_parsed_context_for_tests(native_module: NativeModule
         harness = extend_string_lines(harness, ["region0:",]);
         harness = extend_string_lines(harness, _harness_print_marker("@.hba", number_to_string(("  HOOK before_all").length
             + 1), number_to_string(("  HOOK before_all").length), "hba"));
-        harness = extend_string_lines(harness, _harness_region_setup("r0", "run_r0", "caught_r0"));
+        harness = extend_string_lines(harness, _harness_region_setup("r0", "run_r0", "caught_r0", harness_target_os));
         harness = extend_string_lines(harness, ["run_r0:", "  call void @sfn_test_set_phase(i32 0)", "  call void @"
             + before_all_sym
             + "()", "  call void @sfn_exception_reset_head()", "  br label %"
@@ -387,7 +400,7 @@ fn lower_to_llvm_lines_with_parsed_context_for_tests(native_module: NativeModule
         harness = extend_string_lines(harness, _harness_print_marker("@.tname."
             + tj_s, run_arr, run_blen, "tn"
             + rj_s));
-        harness = extend_string_lines(harness, _harness_region_setup(rid, run_lbl, caught_lbl));
+        harness = extend_string_lines(harness, _harness_region_setup(rid, run_lbl, caught_lbl, harness_target_os));
         // run: before_each -> test -> report_pass -> after_each -> pop.
         harness = extend_string_lines(harness, [run_lbl + ":",]);
         if before_each_sym.length > 0 {
@@ -445,7 +458,7 @@ fn lower_to_llvm_lines_with_parsed_context_for_tests(native_module: NativeModule
             + 1), number_to_string(("  HOOK after_all").length), "haa"));
         harness = extend_string_lines(harness, _harness_region_setup(rid, "run_"
             + rid, "caught_"
-            + rid));
+            + rid, harness_target_os));
         harness = extend_string_lines(harness, ["run_" + rid + ":", "  call void @sfn_test_set_phase(i32 4)", "  call void @"
             + after_all_sym
             + "()", "  call void @sfn_exception_reset_head()", "  br label %epilogue", "caught_"

@@ -26,6 +26,9 @@ import {
     target_filter_link_libs,
     target_forced_linker_flag,
     target_os_is_windows,
+    target_setjmp_call_line,
+    target_setjmp_declare,
+    target_setjmp_symbol,
     target_uses_gnu_link_gc
 } from "../../src/build/target";
 
@@ -285,4 +288,52 @@ test "target: artifact tag never yields a path separator or traversal" ![pure] {
     assert expect_eq_str(target_artifact_tag("a\\b"), "other").ok;
     assert expect_eq_bool(contains(target_artifact_tag("Linux"), "/"), false).ok;
     assert expect_eq_bool(contains(target_artifact_tag("Windows"), ".."), false).ok;
+}
+
+// ---- SFN-647: the exception save point's per-target spelling ----
+//
+// Windows x64 has no one-argument `setjmp`: the UCRT header maps
+// `setjmp(buf)` onto `_setjmp(buf, frame)`, and `longjmp` reads that second
+// argument back out of `_JUMP_BUFFER.Frame` to choose between a plain
+// register restore and a full `RtlUnwindEx` SEH unwind. Emitting the POSIX
+// one-argument call left the frame register holding garbage, so the first
+// `throw` in a natively-built program died before any catch block ran —
+// `try-catch-finally.sfn` exited 40 having printed nothing.
+test "target: the save point is _setjmp on Windows and setjmp elsewhere" ![pure] {
+    assert expect_eq_str(target_setjmp_symbol("Windows"), "_setjmp").ok;
+    assert expect_eq_str(target_setjmp_symbol("Linux"), "setjmp").ok;
+    assert expect_eq_str(target_setjmp_symbol("Darwin"), "setjmp").ok;
+}
+
+// An unrecognized target must read as non-Windows here exactly as it does
+// everywhere else — `target_os_is_windows` is an exact match, so a typo in
+// `SAILFIN_TARGET_OS` keeps the POSIX save point rather than emitting a
+// two-argument call libc would not resolve.
+test "target: an unrecognized target keeps the POSIX save point" ![pure] {
+    assert expect_eq_str(target_setjmp_symbol("Plan9"), "setjmp").ok;
+    assert expect_eq_str(target_setjmp_symbol(""), "setjmp").ok;
+}
+
+// The declaration must agree with the call's arity, or LLVM rejects the
+// module. Both halves are derived from the same `target_os` so they cannot
+// drift apart.
+test "target: the save-point declaration matches the call arity" ![pure] {
+    assert expect_eq_str(target_setjmp_declare("Windows"), "declare i32 @_setjmp(i8*, i8*)").ok;
+    assert expect_eq_str(target_setjmp_declare("Linux"), "declare i32 @setjmp(i8*)").ok;
+}
+
+// The Windows call passes a NULL frame. That is the load-bearing detail:
+// a zero `_JUMP_BUFFER.Frame` is what selects longjmp's non-unwinding
+// path, which is the one Sailfin's exception model wants (`sfn_throw`
+// longjmps straight to the matching save point, with no SEH handlers to
+// run on the way out).
+test "target: the Windows save-point call passes a null frame" ![pure] {
+    assert expect_eq_str(target_setjmp_call_line("Windows", "%sj", "%jmpbuf_i8"), "  %sj = call i32 @_setjmp(i8* %jmpbuf_i8, i8* null)").ok;
+}
+
+// Non-Windows emission is byte-identical to the pre-SFN-647 line, so the
+// Linux/macOS IR does not move (#1112 zero-behaviour gate).
+test "target: the POSIX save-point call is unchanged" ![pure] {
+    assert expect_eq_str(target_setjmp_call_line("Linux", "%sj", "%jmpbuf_i8"), "  %sj = call i32 @setjmp(i8* %jmpbuf_i8)").ok;
+    assert expect_eq_str(target_setjmp_call_line("Darwin", "%sj.r0", "%jmpbuf.i8"), "  %sj.r0 = call i32 @setjmp(i8* %jmpbuf.i8)").ok;
 }

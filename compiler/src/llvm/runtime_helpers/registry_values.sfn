@@ -250,6 +250,22 @@ fn _rh_descriptors_10(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "setjmp", symbol: "setjmp", return_type: "i32", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: null
     });
+    // SFN-647: the Windows x64 save point. The UCRT has no one-argument
+    // `setjmp` — its header maps `setjmp(buf)` onto `_setjmp(buf, frame)`,
+    // and `longjmp` reads that second argument back out of
+    // `_JUMP_BUFFER.Frame` to decide between a plain register restore and a
+    // full `RtlUnwindEx` SEH unwind. `build/target.sfn::target_setjmp_*`
+    // picks between this descriptor and the POSIX one above; the emitting
+    // side passes a null frame, which selects the non-unwinding path Sailfin
+    // wants. Cataloguing both is what keeps the choice out of this registry:
+    // declarations are derived by matching `descriptor.symbol` against the
+    // symbols actually called in a module
+    // (`collect_runtime_helper_targets_from_lines`), so a non-Windows module
+    // never calls `_setjmp`, never matches this row, and emits byte-identical
+    // IR.
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "_setjmp", symbol: "_setjmp", return_type: "i32", parameter_types: ["i8*", "i8*"], effects: [], native_signature: null, c_abi_return_type: null
+    });
 
     // ---- Package-manager primitives ----
     // SHA-256 hashing. M3 (#816): SHA-256 now lives in pure Sailfin under

@@ -1,6 +1,7 @@
 // compiler/src/llvm/lowering/instructions_try.sfn
 //
 // Control flow handlers: try/catch/finally/throw instruction lowering.
+import { build_target_os, target_setjmp_symbol } from "../../build/target";
 import { Diag } from "../../diagnostic";
 import { NativeFunction, NativeInstruction, NativeSourceSpan } from "../../native_ir";
 import { char_code, grapheme_at, substring } from "../../string_utils";
@@ -398,7 +399,17 @@ fn lower_try_instruction(function: NativeFunction, start_index: int, llvm_return
         llvm_type: "i8*",
         value: jmpbuf_i8
     };
-    let setjmp_call = emit_runtime_call("setjmp", [jmpbuf_operand], empty_runtime_call_overrides(), current_temp, current_lines);
+    // SFN-647: a Windows target takes the UCRT's two-parameter `_setjmp`
+    // with a NULL frame, which is what keeps `longjmp` on the plain
+    // register-restore path instead of `RtlUnwindEx`. Both spellings are
+    // catalogued in the helper registry, so the declaration follows the
+    // symbol actually called and non-Windows IR is byte-identical.
+    let setjmp_target: string = target_setjmp_symbol(build_target_os());
+    let mut setjmp_operands: LLVMOperand[] = [jmpbuf_operand];
+    if setjmp_target == "_setjmp" {
+        setjmp_operands.push(LLVMOperand { llvm_type: "i8*", value: "null" });
+    }
+    let setjmp_call = emit_runtime_call(setjmp_target, setjmp_operands, empty_runtime_call_overrides(), current_temp, current_lines);
     let mut _ci_sj: int = 0;
     loop {
         if _ci_sj >= setjmp_call.diagnostics.length { break; }

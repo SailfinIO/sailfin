@@ -10,6 +10,7 @@
 // at link time via symbol mangling. This cycle is intentional: async emission
 // needs the main emit_llvm_function for the inner body, while the main
 // emitter delegates async wrapper generation to the async module.
+import { build_target_os, target_setjmp_call_line } from "../../build/target";
 import { Diag, diag_to_legacy_string } from "../../diagnostic";
 import { NativeFunction } from "../../native_ir";
 import { substring } from "../../string_utils";
@@ -747,8 +748,7 @@ fn emit_llvm_function(function: NativeFunction, functions: NativeFunction[], eff
         wrapper_lines.push("  %msg_slot = getelementptr [3 x i64], [3 x i64]* %frame, i64 0, i64 2");
         wrapper_lines.push("  store i64 0, i64* %msg_slot");
         wrapper_lines.push("  call void @sfn_exception_push_frame(i8* %frame_i8)");
-        wrapper_lines.push("  %sj = call i32 @setjmp(i8* %jmpbuf_i8)");
-        wrapper_lines.push("  %is_first = icmp eq i32 %sj, 0");
+        wrapper_lines = extend_string_array(wrapper_lines, [target_setjmp_call_line(build_target_os(), "%sj", "%jmpbuf_i8"), "  %is_first = icmp eq i32 %sj, 0"]);
         wrapper_lines.push("  br i1 %is_first, label %main.try, label %main.catch");
         // Try block: call the user's body, pop the frame on success,
         // forward the user's return value as the process exit code.
