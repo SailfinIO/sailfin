@@ -168,4 +168,10 @@ test "string concat: numeric operands stringify throughout chained expressions" 
     assert "6|" + a + "|" + b + "|" + a + "|" == "6|7|8|7|";
     assert "7|" + s + "|" + a == "7|S|7";
     assert "8|" + s + "|" + a + "|" + s == "8|S|7|S";
+
+    // The length half of the aggregate is authoritative, so it has to
+    // survive the chain too — a bare data pointer left `.length` undef.
+    let m = "n=" + a + " of " + b;
+    assert m == "n=7 of 8";
+    assert m.length == 8;
 }
