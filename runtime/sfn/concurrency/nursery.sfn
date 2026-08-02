@@ -116,6 +116,16 @@ extern fn sfn_task_join(task: *u8) -> *u8;
 // `sfn_nursery_register_channel` is not an import cycle.
 extern fn sfn_channel_destroy(ch: *u8) -> void;
 
+// `sfn_channel_destroy` documents that the caller closes first
+// (`channel.sfn`), and it goes straight to `pthread_cond_destroy` on both
+// condvars — destroying a condvar with a waiter is undefined under POSIX.
+// The join barrier already guarantees no nursery child is still blocked, so
+// this is belt-and-braces today; it keeps the callee's stated precondition
+// true rather than leaving the only caller quietly contradicting it, and it
+// stays correct if cross-thread nursery inheritance ever admits a waiter at
+// exit. Cost is one broadcast per channel.
+extern fn sfn_channel_close(ch: *u8) -> void;
+
 // ── Per-thread current nursery ────────────────────────────────
 // Top-of-stack `Nursery*` for the executing thread (0 = none). Lowered
 // to an `internal thread_local global i64` — genuinely per-thread.
@@ -302,7 +312,10 @@ fn sfn_nursery_exit(n: i64) -> i64 {
         let chan_slot_addr: i64 = chan_base + c * 8;
         let chan_slot: *i64 = chan_slot_addr as *i64;
         let chan_addr: i64 = atomic_load(chan_slot);
-        if chan_addr != 0 { sfn_channel_destroy(chan_addr as *u8); }
+        if chan_addr != 0 {
+            sfn_channel_close(chan_addr as *u8);
+            sfn_channel_destroy(chan_addr as *u8);
+        }
         c = c + 1;
     }
 
