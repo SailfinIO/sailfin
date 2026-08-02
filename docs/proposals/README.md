@@ -85,7 +85,9 @@ The next number is `max + 1`. Add a row in the same PR that introduces an SFEP.
 | [0060](./0060-owned-syscall-layer.md) | The Owned Syscall Layer (Axis 3, tier-1 Linux x86-64) | Accepted | runtime |
 | [0061](./0061-diagnostic-unification.md) | Diagnostic Unification — One Coded, Spanned, Severity-Bearing Diagnostic | Accepted | tooling |
 | [0062](./0062-numerical-contracts.md) | Numerical and Behavioural Contracts (the Result Pillar) | Accepted | language |
-| [0063](./0063-sync-capsule.md) | `sfn/sync` — scope and blocking predecessor for a synchronization capsule | Draft | language |
+| [0063](./0063-sync-capsule.md) | `sfn/sync` — scope and blocking predecessor for a synchronization capsule | Accepted | language |
+| [0064](./0064-reclamation-seam.md) | Generic resource-reclamation seam | Draft | runtime |
+| [0065](./0065-sync-capsule-api.md) | `sfn/sync` — public API surface and semantics | Draft | language |
 
 ## Drafts under review (numbers assigned at merge)
 

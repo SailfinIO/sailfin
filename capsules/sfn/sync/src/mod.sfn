@@ -1,30 +1,28 @@
-// sfn/sync — Concurrency and synchronization primitives for Sailfin.
+// sfn/sync — reserved name. No exports.
 //
-// The untyped `channel`, `parallel`, and `spawn` exports were removed
-// (issue #617, a sub-task of #613) because the structured-concurrency
-// runtime they fronted is not yet implemented: their C bridges
-// (`sailfin_runtime_{channel,parallel,spawn}`) silently returned NULL
-// / no-op'd, so callers built and ran but did nothing concurrent. The
-// project's `llms.txt` rule forbids "parsed but unenforced" surface, so
-// the entire untyped wrapper layer is gone — the prelude wrappers,
-// this capsule's exports, and the LLVM lowering descriptors that
-// bridged them to the C runtime. Any caller that names `channel`,
-// `parallel`, or `spawn` now fails the LLVM lowering pass with a
-// `llvm lowering [fatal]: cannot resolve return type for call to ...`
-// diagnostic. The regression test
-// `compiler/tests/e2e/test_sync_rejects_unimplemented_concurrency.sh`
-// pins the visible-failure surface. (`sfn check` itself still accepts
-// these — that's the open undefined-identifier gap tracked under #616.)
+// Concurrency in Sailfin is language-level, not capsule surface:
+// `routine { }` (the structured-concurrency nursery), `spawn` / `await`,
+// `parallel`, `channel(N)`, and `Task<T>` / `join_all` are builtins backed
+// by `runtime/sfn/concurrency/`. Nothing is imported from here, and no
+// capsule wrapper around those constructs is planned.
 //
-// Migration:
-//   - For task-style concurrency, use the typed `spawn_*` / `await_*`
-//     primitives backed by real pthread implementations in
-//     `runtime/native/src/sailfin_runtime.c` (e.g. `spawn_number`,
-//     `spawn_string`, `spawn_bool`, `spawn_ptr`, `spawn_void`, plus
-//     `_ctx` variants for closures).
-//   - For channels / `parallel(...)`, wait for the structured-
-//     concurrency runtime (tracked under #500, roadmap M4).
+// This capsule once exported untyped `channel`, `parallel`, and `spawn`
+// that delegated to C bridges which silently returned NULL or no-op'd.
+// That surface was deleted rather than left "parsed but unenforced"; any
+// caller naming those symbols still fails closed, pinned by
+// `compiler/tests/e2e/sync_rejects_unimplemented_concurrency_test.sfn`.
 //
-// The capsule intentionally stays in the workspace as an empty shell
-// so the `sfn/sync` name remains reserved for when the real runtime
-// ships and re-introduces these exports with working implementations.
+// A real synchronization library (`Mutex`, `RwLock`, `Semaphore`, `Once`)
+// is buildable today — an ordinary struct holding a `pthread_mutex_t` is
+// not an owned type, so the ownership checker's spawn-capture move rule
+// never fires on it, and such an object can already be shared across
+// tasks. What is missing is a way to tear one down safely: the nursery's
+// reclamation registry records bare handles with a hardcoded channel
+// destructor, and `sfn_rc_sfn_release` frees at refcount zero without
+// invoking its stored `drop_fn`. The capability both gaps need — an
+// indirect call through a stored function pointer — already ships; what
+// remains is wiring it into the nursery registry and `rc.sfn`. Design:
+// SFEP-0063 (scope and verdicts) and its successor (the reclamation seam).
+//
+// The shell stays so the `sfn/sync` name remains reserved. Remove it, or
+// give it exports, once that seam lands.

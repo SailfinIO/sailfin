@@ -89,9 +89,9 @@ executable asynchronous work today.
 
 ## Channels
 
-`channel(capacity)` creates a bounded MPMC channel. It is a language builtin;
-the typed `sfn/sync` capsule wrapper and generic `channel<T>(...)` constructor
-do not ship yet.
+`channel(capacity)` creates a bounded MPMC channel. It is a language builtin.
+The generic `channel<T>(...)` constructor does not ship yet; there is no
+`sfn/sync` capsule wrapper and none is planned.
 
 ```sfn
 fn main() ![io] {

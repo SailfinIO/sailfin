@@ -6,7 +6,10 @@ description = "Concurrency and synchronization primitives for Sailfin"
 [dependencies]
 
 [capabilities]
-required = ["io"]
+# Empty by design: this capsule has no code, so it needs no capability.
+# A manifest that over-claims on an empty capsule undercuts the Reach
+# pillar's claim that Sailfin manifests are tight (SFEP-0063 Phase 0).
+required = []
 
 [build]
 entry = "src/mod.sfn"

@@ -1,10 +1,10 @@
 ---
 sfep: 0063
 title: sfn/sync — scope and blocking predecessor for a synchronization capsule
-status: Draft
+status: Accepted
 type: language
 created: 2026-08-01
-updated: 2026-08-01
+updated: 2026-08-02
 author: "agent:compiler-architect; human review"
 tracking:
 supersedes:
@@ -85,6 +85,14 @@ An existence proof already ships in-tree:
 written in Sailfin against `runtime/sfn/platform/pthread_layout.sfn:43-65`.
 Structurally that is a mutex plus condvars, and it works.
 
+> **Update (2026-08-02, at acceptance).** The leak described in the next
+> paragraph has since been fixed, and the fix validated this section's
+> analysis: reclamation now happens at `routine { }` scope exit, strictly
+> after the join-all barrier, which is exactly the point this proposal
+> predicted. The paragraph is kept as written because it is the evidence the
+> argument rests on. What it does **not** do is unblock the capsule — see
+> §3.6 for what the fix changed and what it left.
+
 That same file also demonstrates the gap, not just the capability. It defines
 a complete and correct teardown — `sfn_channel_destroy`
 (`runtime/sfn/concurrency/channel.sfn:286-327`) destroys both condvars and the
@@ -143,8 +151,8 @@ superseded history, not the current constraint.
 | `Mutex` | Buildable, unsafe to reclaim | No destructor hook fires at refcount zero, and nothing tracks who releases a shared handle (§3.1). The blocker is substrate completion, not an ownership-checker exemption. |
 | `RwLock` | Buildable, unsafe to reclaim | Same root cause as `Mutex`. |
 | `Semaphore` | Buildable, unsafe to reclaim | Same root cause as `Mutex`. |
-| `Once` | Buildable, unsafe to reclaim | Same root cause as `Mutex`. |
-| Atomics (`AtomicInt`, etc.) | Buildable, unsafe to reclaim | Same root cause as `Mutex` — a shared atomic cell has the identical reclamation problem even though the update itself is lock-free. |
+| `Once` | ~~Buildable, unsafe to reclaim~~ — **superseded by SFEP-0065 §3.4** | This row lumped `Once` in with `Mutex` without analysing it. SFEP-0065 §3.4 overrides it: `Once` owns a single `i64` and no OS resource, so the destructor question this row gates on is vacuous for the type, and it ships *before* the reclamation seam. |
+| Atomics (`AtomicInt`, etc.) | ~~Buildable, unsafe to reclaim~~ — **superseded by SFEP-0065 §3.5** | SFEP-0065 §3.5 overrides this row by exporting no atomic surface at all, on a different and concrete ground: `is_atomic_builtin` short-circuits ahead of the runtime-helper registry, so a capsule-defined `atomic_*` would be silently unreachable even when explicitly imported. |
 | `WaitGroup` | Rejected as redundant | `routine { }` already joins every spawned child at scope exit (`runtime/sfn/concurrency/nursery.sfn:1-13`); a `WaitGroup` would be that same barrier reimplemented with a manual, unsafe counter. |
 | `select` over channels | Blocked on separate plumbing | `sfn_io_poll_any` (`runtime/sfn/process.sfn:836`) is a real N-way `poll` with timeout, but it is strictly fd-based; `Channel<T>` signals readiness via `pthread_cond_t` (`runtime/sfn/concurrency/channel.sfn:85-93,155-278`), which has no fd, and no self-pipe/eventfd bridge between the two exists. This blocker is independent of §3.1's reclamation gap. |
 
@@ -221,6 +229,58 @@ fix. Two notes for whoever takes it: the spec's canonical import example
 tightening the check must first settle what happens to the compiler-special-
 cased `Channel`/`channel` names, which are the reason these three imports
 resolve at all.
+
+### 3.6 State at acceptance: what the channel-leak fix changed, and what it left
+
+The channel leak in §3.1 was fixed before this proposal was accepted, and the
+fix is recorded here because it moves the boundary this proposal draws — it
+does not erase it.
+
+**What it established.** The nursery now *owns* the channels created in its
+scope: `sfn_channel_create` hands each new handle to `sfn_nursery_current()`
+as its final step (so a handle that failed pthread init is never registered),
+and `sfn_nursery_exit` destroys every registered channel strictly after the
+join-all barrier, then frees the list. Ordering after the joins is the whole
+point — it is precisely the precondition `sfn_channel_destroy` documents, so
+that safety contract is now structural rather than a comment. **Scope-bound
+reclamation for shared concurrent objects is a solved, shipped pattern**, and
+that is the mechanism a sync capsule would build on.
+
+**What it left.** The seam is channel-specific, in two ways that matter to any
+second resource type:
+
+1. `sfn_nursery_register_channel(n: i64, ch: i64)` records a **bare handle**.
+   No destructor travels with it.
+2. `sfn_nursery_exit` **hardcodes** `sfn_channel_close` followed by
+   `sfn_channel_destroy` in its teardown loop.
+
+So a `Mutex` cannot ride the existing seam. It would need either a parallel
+`register_mutex` list — which does not scale past a second resource type — or
+generalization of the registry to `(handle, destructor)` pairs.
+
+**The remaining blocker is now runtime-integration work, not a missing
+capability.** Generalizing the seam requires calling a destructor through a
+*stored function pointer* — and that capability already ships (SFEP-0064
+§3.1, #1089): a local or parameter annotated `*fn (A) -> R` already lowers to
+a direct indirect call with no compiler change needed. What is missing is the
+wiring: the nursery registry still records a bare handle with a hardcoded
+channel destructor instead of a `(handle, destructor)` pair, and
+`sfn_rc_sfn_release` (`runtime/sfn/memory/rc.sfn`) still calls libc `free`
+directly when the refcount hits zero instead of dereferencing the stored
+`drop_fn` first. Related and probably entangled: `runtime/sfn/platform/pthread.sfn`'s
+header records that the extern accept-list requires a literal `fn(` prefix
+while `sfn fmt` rewrites it to `fn (`, so typed function-pointer externs are
+currently spelled `* u8` and cast at the call site.
+
+This is a **narrowing**, and a favourable one. At drafting, the blocker was an
+undesigned reclamation story. It is now runtime-integration work — generalizing
+the nursery registry and wiring `drop_fn` invocation — with two known
+consumers (the generic nursery seam, `rc.sfn`'s drop_fn) and one known
+adjacent constraint (the extern spelling conflict), and it needs no compiler
+capability the seed lacks. That is small enough to design directly, and the
+follow-up SFEP this proposal defers to should be scoped to exactly it rather
+than to a synchronization library. The library is downstream of that
+integration work, not of this document.
 
 ## 4. Effect & capability impact
 
