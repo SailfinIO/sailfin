@@ -41,6 +41,22 @@ graduates-to:
 > than hidden because the earlier reasoning — and how it was falsified — is
 > useful to a future reader.
 
+> **Addendum (2026-08-02) — a structural review found a real capability
+> hole, not a false premise this time.** `classify_fn_cast`
+> (`compiler/src/typecheck_types/symbol_table_and_raw_exprs.sfn:271-284`)
+> accepts `<fn> as * u8` and `<fn> as *fn (…)` for any non-generic function —
+> it checks only `entry.is_generic`, never the function's effect row — and
+> §3.3's registration path erases the resulting pointer to `*u8` before it
+> ever reaches the nursery registry. Nothing today stops an `![io]` function
+> from being cast to `*u8`/`*fn (*u8) -> void` and registered as a reclaimer,
+> so it can run from effect-free nursery teardown with neither the caller nor
+> the derived capability manifest declaring `io`. That is a hole in the Reach
+> pillar the seam would ship with, not a stylistic gap: §4 already states the
+> *intent* ("`<fn> as *fn (…)` should be rejected when the named function
+> declares effects") but that intent is not implemented, not tested, and not
+> yet elevated to a blocking condition on this proposal. §4 below now makes
+> it one.
+
 ## 1. Summary
 
 The nursery already owns and reclaims the channels created in its scope, but
@@ -243,7 +259,17 @@ loop {
     if handle != 0 {
         if dtor != 0 {
             let reclaim: *fn (*u8) -> void = dtor as *fn (*u8) -> void;
-            reclaim(handle as *u8);
+            // The contract (§3.4) requires a total reclaimer, but
+            // `fn(*u8) -> void` does not prevent `throw` — a `try`/`catch`
+            // per call is what actually keeps that promise, not the
+            // signature alone. Without it, the first throwing reclaimer
+            // unwinds out of the drain loop entirely, skipping every later
+            // resource and the nursery's own cleanup below.
+            try {
+                reclaim(handle as *u8);
+            } catch (e) {
+                nursery.faulted = 1;
+            }
         }
     }
     c = c + 1;
@@ -297,11 +323,15 @@ header):
 1. Signature is exactly `fn(*u8) -> void`. Total: it may not fail, and it has no
    way to report failure.
 2. Called **at most once** per registered handle, on a non-null handle, after
-   every child of the scope has joined.
-3. Must tolerate being called with a handle it already reclaimed (belt and
-   braces — the seam guarantees once, the reclaimer should not rely on it).
-4. Must not register new resources with any nursery.
-5. Must not be effectful in the `![…]` sense (§4).
+   every child of the scope has joined. This is not something the reclaimer can
+   independently guard against: `sfn_channel_reclaim` (§3.4) calls
+   `sfn_channel_destroy`, which frees the handle, so invoking it a second time
+   on that same non-null handle dereferences freed memory. The registry's
+   clear-before-call discipline (§3.3, §3.5) is therefore the *only* thing
+   standing between a correct reclaimer and a use-after-free, not a belt
+   alongside the reclaimer's own braces.
+3. Must not register new resources with any nursery.
+4. Must not be effectful in the `![…]` sense (§4).
 
 ### 3.5 Double-registration and double-destroy
 
@@ -329,15 +359,19 @@ case the seam cannot rule out by construction.
   is valid and usable, simply unowned," mirroring the existing `n == 0`
   module-global precedent (`nursery.sfn:230-235`). A leaked resource is strictly
   better than a resource the drain will skip in a way nobody notices.
-- **A destructor that faults mid-loop: teardown continues.** The drain loop has
-  no early exit and accumulates no error from destructors. This follows from the
-  reclaimer being total (§3.4 contract 1): a `void` return has no channel to
-  report failure through, and there is no sensible recovery at scope exit — the
-  alternatives are leak-the-rest or abort, and leaking the rest is the worse
-  one. **`nursery.faulted` continues to reflect registration failures only**;
-  this is a deliberate narrowing, not an oversight. A destructor that *traps*
-  (segfault, `panic`) terminates the process, as it would anywhere else in the
-  runtime; the seam does not and cannot catch it.
+- **A destructor that throws mid-loop: teardown continues.** The reclaimer
+  contract (§3.4 contract 1) requires totality, but `fn(*u8) -> void` does not
+  prevent `throw`, so the drain loop wraps each reclaimer call in its own
+  `try`/`catch` (§3.3) rather than trusting the signature: a throwing
+  reclaimer's fault is recorded on `nursery.faulted` and the loop proceeds to
+  the next slot, instead of unwinding out of the drain entirely and skipping
+  every later resource and the nursery's own cleanup. **`nursery.faulted` is
+  therefore set on both a registration failure and a throwing reclaimer** —
+  a widening from the registration-only signal in earlier drafts, made
+  necessary once the per-reclaimer `try`/`catch` exists to observe the fault.
+  A destructor that *traps* (segfault, `panic`) still terminates the process,
+  as it would anywhere else in the runtime; the seam does not and cannot catch
+  that.
 
 ### 3.7 `rc.sfn`: the second consumer, and why direct dispatch does not replace the seam
 
@@ -597,6 +631,9 @@ E2E tests are Sailfin `*_test.sfn` files driving subprocesses via
   nursery (returns 1, resource unowned).
 - Re-entrancy: the cleared-slot guard means a second drain over the same array
   is a no-op.
+- A reclaimer that throws sets `nursery.faulted` and the drain continues:
+  every later resource is still reclaimed (module-global counters prove each
+  ran), rather than the throw unwinding out of the drain loop.
 - `compiler/tests/e2e/channel_nursery_escape_test.sfn` and
   `compiler/tests/{e2e,unit}/routine_nursery_test.sfn` must stay green — the
   module-global (`n == 0`) path is unchanged.

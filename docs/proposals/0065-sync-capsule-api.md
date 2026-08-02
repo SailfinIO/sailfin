@@ -266,13 +266,17 @@ resource.**
 The distinction that matters is not "does it allocate" but "does freeing it
 require running a destructor." A `Mutex` owns a `pthread_mutex_t`: `free`-ing
 it without `pthread_mutex_destroy` is unsound, and destroying it while another
-thread holds it is unsound, so it genuinely needs the seam. A `Once` owns a
-single `i64` word. Leaking it costs eight bytes for the process lifetime and
-loses nothing.
+thread holds it is unsound, so it genuinely needs the seam. A `Once` owns
+**two `i64` slots — sixteen bytes, not one word** — because `once_do` (below)
+stores the state word at `addr` and the winner's result at `addr + 8`; a single
+`i64` allocation would make that second store an out-of-bounds write. Leaking
+the sixteen bytes costs the process lifetime and loses nothing.
 
 ```sfn
 // Opaque handle to a process-lifetime once-cell. Deliberately never freed:
 // it owns no OS resource, so the reclamation seam is not required.
+// `once_create` allocates 16 bytes: state word at `addr`, result word at
+// `addr + 8`.
 struct Once {
     addr: i64;
 }
@@ -315,33 +319,56 @@ fn once_do(o: Once, init: fn () -> int) -> int {
             throw e;
         }
     }
-    let mut spins: int = 0;
+    // Backoff wait. No iteration cap: see the note below on why a finite
+    // one is unsound here.
+    let mut backoff_ns: int = _once_backoff_floor_ns();
     loop {
         let state = atomic_load(o.addr as *i64);
         if state == 2 { return atomic_load((o.addr + 8) as *i64); }
         if state == 3 {
             throw SyncError.InitFailed(0);
         }
-        spins = spins + 1;
-        if spins > ONCE_SPIN_GUARD_LIMIT {
-            throw SyncError.InitFailed(0);
-        }
+        _once_backoff_sleep(backoff_ns);
+        backoff_ns = _once_backoff_next(backoff_ns);
     }
 }
 ```
 
+`_once_backoff_sleep` is a short `nanosleep` — `runtime/sfn/platform/posix.sfn`
+already declares that extern and `runtime/sfn/clock.sfn` already consumes it,
+so no new primitive is needed. The backoff climbs from a sub-microsecond floor
+to a bounded ceiling, so a fast initializer is not penalised and a slow one
+does not burn a core. (POSIX `sched_yield` would be a marginally better first
+step than a minimum-duration sleep, but it is not currently declared anywhere
+in `runtime/sfn/platform/`, and adding it is not worth making this phase
+depend on.)
+
 A losing caller that observes state `3` throws rather than spinning forever —
 the same `init` failure the winner saw, not a fresh attempt (this is a
 single-shot `Once`, not a retryable one; retry-on-failure is a different,
-unproposed primitive). The spin loop also gets the guard counter the
-code-style rule requires on an input-driven loop
-(`.claude/rules/code-style.md`: "Guard counters on input-driven loops") — §3.5
-already invokes that rule for `spin_until`, so omitting it here would be
-inconsistent. `ONCE_SPIN_GUARD_LIMIT` fires a `SyncError`, not a silent
-`panic`, since a live production `init` that is merely slow should not be
-mistaken for a poisoned one; the limit needs to be generous enough that a slow
-but succeeding initializer does not trip it, which is a tuning question for
-implementation, not for this design.
+unproposed primitive).
+
+**Why the wait carries no iteration cap, deliberately.** An earlier draft of
+this section put a fixed `ONCE_SPIN_GUARD_LIMIT` on the loop, citing the
+code-style rule "Guard counters on input-driven loops"
+(`.claude/rules/code-style.md`). **That was a misapplication of the rule and
+the cap is removed.** The rule targets loops whose trip count is driven by
+untrusted input, where an unbounded loop is a denial-of-service vector. This
+loop is a *blocking wait* on another thread's progress, and its trip count is
+governed by scheduling, not by input. A finite cap there is not a safety net —
+it is a correctness bug: the cap can expire while the winning initializer is
+merely preempted or legitimately slow, so losers throw `InitFailed` for an
+initialization that subsequently succeeds. No "generous" constant fixes this,
+because there is no finite number of iterations that a preempted thread cannot
+exceed; choosing one only trades a certain bug for a rare, load-dependent, and
+almost undebuggable one. Blocking semantics and a finite spin cap are mutually
+exclusive, so the cap goes and the wait blocks as advertised. Anyone tempted to
+re-add it on the strength of the code-style rule should read this paragraph
+first.
+
+If a bounded wait is ever wanted, it belongs in a *separate, explicitly timed*
+entry point (`once_do_timeout(o, init, deadline)`) that returns a distinct
+timeout outcome — not as a hidden cap on the untimed one.
 
 Three further consequences to record honestly:
 
@@ -370,8 +397,8 @@ Three further consequences to record honestly:
 SFEP-0063 §3.2's verdict table (`docs/proposals/0063-sync-capsule.md:154`)
 lists `Once` as `Buildable, unsafe to reclaim`, gated on reclamation like every
 other row in that table. The merits favor shipping it ahead of the seam
-anyway — one `i64` word, no OS resource, so the destructor question SFEP-0063
-gated on is vacuous for this type — but that is a deliberate override of an
+anyway — two `i64` words and no OS resource, so the destructor question
+SFEP-0063 gated on is vacuous for this type — but that is a deliberate override of an
 Accepted proposal's row, and it is recorded here as exactly that rather than
 presented as though SFEP-0063 already said so.
 
@@ -683,22 +710,23 @@ that rule governs resolve as follows.
 long-shipped and present in any current seed. It bundles its capsule tests in
 the same PR and needs no cut.
 
-*The gated phases inherit a seed gate they do not own.* The reclamation seam
-is a compiler/runtime capability consumed by **runtime source** — the nursery
-registry in `runtime/sfn/concurrency/nursery.sfn` and `drop_fn` invocation in
-`runtime/sfn/memory/rc.sfn`. That is the explicit carve-out in the
-seed-dependency rule: the **pinned seed** compiles the working-tree runtime, so
-bundling does not help and the capability must land alone as `seed-blocker`.
-That gate belongs to the sibling proposal, not to this one. The consequence for
-phasing is concrete and must be planned for: **`Mutex` and everything after it
-cannot merge until a seed carrying the seam is pinned**, and the issue for the
-first gated phase carries `## Required in pinned seed: <the seam predecessor>`.
-Per the same rule, that queued cut batches onto the next scheduled cadence bump
-rather than triggering a reactive one.
+*The gated phases wait on a landing-order dependency, not a seed gate.* The
+reclamation seam is runtime source — the nursery registry in
+`runtime/sfn/concurrency/nursery.sfn` and `drop_fn` invocation in
+`runtime/sfn/memory/rc.sfn` — and the `.claude/rules/seed-dependency.md`
+runtime-source carve-out would ordinarily force such a capability to land
+alone as `seed-blocker`. It does not bite here: SFEP-0064's rewrite
+establishes that the capability both consumers need (an env-less indirect
+call through a stored `*fn (A) -> R`) already ships in the pinned seed —
+`runtime/capsule.toml:70` lists `sfn/concurrency/scheduler.sfn` in
+`sfn-sources`, and that file already calls through `*fn` on every build. The
+consequence for phasing is concrete: **`Mutex` and everything after it can
+merge as soon as the seam's runtime-source PR merges**, an ordinary
+landing-order dependency with no cadence seed bump to wait on.
 
 The practical scheduling consequence is the reason §3.4 matters: **the ungated
-`Once`/atomics-decision phase can be worked during the seam's seed-cut wait**,
-so the gate costs no wall-clock time.
+`Once`/atomics-decision phase can be worked in parallel with the seam's
+runtime-source PR**, so the dependency costs no wall-clock time.
 
 **Formatting.** All capsule source is subject to `sfn fmt --check`. Note that
 `fmt` renders function-type annotations as `fn (int) -> int` with a space
@@ -734,8 +762,8 @@ document follow that spelling, and implementers should not hand-tune it.
   debuggable.
 - **Waiting for the seam before shipping anything.** Rejected in §3.4: `Once`
   and the atomics decision hold no OS resource and need no teardown, so gating
-  them on the seam would idle a full session's work behind a queued seed cut for
-  no safety benefit.
+  them on the seam would idle a full session's work behind the seam's
+  landing-order dependency for no safety benefit.
 - **Deferring the whole API design until the seam is accepted.** Rejected in §2:
   the surface depends on the seam's existence, not its shape, and the one place
   it genuinely does depend on the shape is isolated as an open question in §3.8
@@ -863,7 +891,9 @@ changes — but is run once per phase to confirm that claim rather than assume i
   generic function monomorphization coverage.
 - `runtime/prelude.sfn:162` (`Result<T, E>`), `capsules/sfn/time/src/mod.sfn:34`
   — generic `Result` in shipped capsule code.
-- `.claude/rules/seed-dependency.md` — the runtime-source carve-out that makes
-  the seam a `seed-blocker` and gates §5's later phases.
+- `.claude/rules/seed-dependency.md` — the runtime-source carve-out that would
+  ordinarily make the seam a `seed-blocker`, and that SFEP-0064's rewrite
+  establishes does not bite here because the capability the seam needs already
+  ships in the pinned seed (§5).
 - `docs/conventions/sanitizer-tests.md` — the skip-not-fail ASAN procedure §8
   and §3.4 depend on.

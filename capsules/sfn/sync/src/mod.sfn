@@ -19,9 +19,10 @@
 // tasks. What is missing is a way to tear one down safely: the nursery's
 // reclamation registry records bare handles with a hardcoded channel
 // destructor, and `sfn_rc_sfn_release` frees at refcount zero without
-// invoking its stored `drop_fn`. Both want the same capability — an
-// indirect call through a stored function pointer. Design: SFEP-0063
-// (scope and verdicts) and its successor (the reclamation seam).
+// invoking its stored `drop_fn`. The capability both gaps need — an
+// indirect call through a stored function pointer — already ships; what
+// remains is wiring it into the nursery registry and `rc.sfn`. Design:
+// SFEP-0063 (scope and verdicts) and its successor (the reclamation seam).
 //
 // The shell stays so the `sfn/sync` name remains reserved. Remove it, or
 // give it exports, once that seam lands.

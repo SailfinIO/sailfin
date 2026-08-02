@@ -258,25 +258,29 @@ So a `Mutex` cannot ride the existing seam. It would need either a parallel
 `register_mutex` list — which does not scale past a second resource type — or
 generalization of the registry to `(handle, destructor)` pairs.
 
-**The remaining blocker is now a single, concrete capability.** Generalizing
-the seam requires calling a destructor through a *stored function pointer*.
-That is the same capability `sfn_rc_sfn_release`
-(`runtime/sfn/memory/rc.sfn`) needs and still lacks: it continues to call
-libc `free` directly when the refcount hits zero, never dereferencing the
-stored `drop_fn`, with invocation deferred. Related and probably entangled:
-`runtime/sfn/platform/pthread.sfn`'s header records that the extern
-accept-list requires a literal `fn(` prefix while `sfn fmt` rewrites it to
-`fn (`, so typed function-pointer externs are currently spelled `* u8` and
-cast at the call site.
+**The remaining blocker is now runtime-integration work, not a missing
+capability.** Generalizing the seam requires calling a destructor through a
+*stored function pointer* — and that capability already ships (SFEP-0064
+§3.1, #1089): a local or parameter annotated `*fn (A) -> R` already lowers to
+a direct indirect call with no compiler change needed. What is missing is the
+wiring: the nursery registry still records a bare handle with a hardcoded
+channel destructor instead of a `(handle, destructor)` pair, and
+`sfn_rc_sfn_release` (`runtime/sfn/memory/rc.sfn`) still calls libc `free`
+directly when the refcount hits zero instead of dereferencing the stored
+`drop_fn` first. Related and probably entangled: `runtime/sfn/platform/pthread.sfn`'s
+header records that the extern accept-list requires a literal `fn(` prefix
+while `sfn fmt` rewrites it to `fn (`, so typed function-pointer externs are
+currently spelled `* u8` and cast at the call site.
 
 This is a **narrowing**, and a favourable one. At drafting, the blocker was an
-undesigned reclamation story. It is now one capability — indirect call
-through a stored function pointer — with two known consumers (the generic
-nursery seam, `rc.sfn`'s drop_fn) and one known adjacent constraint (the
-extern spelling conflict). That is small enough to design directly, and the
+undesigned reclamation story. It is now runtime-integration work — generalizing
+the nursery registry and wiring `drop_fn` invocation — with two known
+consumers (the generic nursery seam, `rc.sfn`'s drop_fn) and one known
+adjacent constraint (the extern spelling conflict), and it needs no compiler
+capability the seed lacks. That is small enough to design directly, and the
 follow-up SFEP this proposal defers to should be scoped to exactly it rather
 than to a synchronization library. The library is downstream of that
-capability, not of this document.
+integration work, not of this document.
 
 ## 4. Effect & capability impact
 
