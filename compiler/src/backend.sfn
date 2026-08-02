@@ -52,6 +52,11 @@ import {
 // macOS SDK probe (`xcrun --show-sdk-path`, `sw_vers`), both of which sit
 // behind the Darwin gate and so are unreachable off Darwin.
 import { _shell_read_cmd } from "./build/fs";
+// Length-gated response-file collapse for the final link argv (SFN-641):
+// Windows `CreateProcess` caps `lpCommandLine` at 32,767 chars, and the
+// self-host link measures 45,941 across 412 objects and 70 retain-root
+// flags.
+import { link_argv_or_response_file } from "./build/link_response";
 // Target conditioning (SFN-52, SFEP-0021 §4.2(A)): the final link resolves
 // the build target once and threads the `-target` triple + POSIX-lib
 // filtering through both link layouts. All identity/empty on Linux/macOS.
@@ -359,17 +364,24 @@ struct LlvmTextBackend {
         let direct = resolve_direct_ld_lld(target_os);
         if direct.ok {
             let direct_argv = direct_ld_lld_argv(direct, eff_plan.objects, eff_plan.out_path, eff_plan.libs, eff_plan.link_flags);
+            // The trace keeps receiving the ORIGINAL argv so
+            // `SAILFIN_TRACE_LINK` still prints the full command
+            // (#1908); only the spawned argv collapses onto a response
+            // file when it is over the Windows `CreateProcess` cap.
+            let direct_spawn = link_argv_or_response_file(direct_argv, eff_plan.out_path);
             _llvm_text_trace_link(direct_argv);
-            return process.run(direct_argv);
+            return process.run(direct_spawn);
         }
         trace_direct_link_fallback(direct.reason);
         if eff_plan.test_mode {
             let test_argv = _llvm_text_link_test_argv(eff_plan, driver_flags);
+            let test_spawn = link_argv_or_response_file(test_argv, eff_plan.out_path);
             _llvm_text_trace_link(test_argv);
-            return process.run(test_argv);
+            return process.run(test_spawn);
         }
         let program_argv = _llvm_text_link_program_argv(eff_plan, driver_flags);
+        let program_spawn = link_argv_or_response_file(program_argv, eff_plan.out_path);
         _llvm_text_trace_link(program_argv);
-        return process.run(program_argv);
+        return process.run(program_spawn);
     }
 }

@@ -1,0 +1,140 @@
+// compiler/src/build/link_response.sfn
+//
+// Windows `CreateProcess` flattens argv into a single `lpCommandLine`
+// buffer capped at 32,767 chars, so Sailfin's array-based `process.run`
+// is NOT exempt from that limit (SFN-641). Measured on the current tree
+// with `SAILFIN_TRACE_LINK`, the compiler's own self-host link is 45,941
+// chars across 412 objects and 70 `-u` retain-root flags — 40% past the
+// cap, and it grows with every module added.
+//
+// The gate below is on MEASURED LENGTH, never on target OS: both
+// `ld.lld` and the clang driver accept an `@file` response file
+// everywhere, so length-gating means the Linux CI leg exercises the same
+// response-file path Windows depends on, instead of that path going
+// untested until a Windows-only build first hits the cap. What Linux
+// CANNOT cover is the escaping below, whose payload (backslash-separated
+// paths) only occurs on a Windows host — hence the explicit unit
+// coverage for it.
+//
+// The response file is left in place after the link rather than cleaned
+// up: it is the only record of what was actually passed once the argv
+// stops appearing in a process listing, which is worth more than the few
+// KB it occupies next to the binary it produced.
+// A response-file entry is tokenized by the CONSUMER, and both consumers
+// here use GNU rules: `ld.lld` always does, and the clang driver selects
+// Windows tokenization only in clang-cl mode — the Windows link runs
+// `clang -target x86_64-pc-windows-msvc` (`build/target.sfn`), not
+// `clang-cl`, so it is GNU-tokenized on a Windows host too.
+//
+// Under GNU rules `\` escapes the following character, including inside
+// double quotes. That matters because Windows paths arrive
+// backslash-separated (`platform/realpath_windows.sfn` returns them from
+// `_fullpath`, and every consumer concatenates onto that same string):
+// an unescaped `C:\build\link-obj\x.o` de-escapes to
+// `C:buildlink-objx.o` and the link fails. Escaping each significant
+// character is therefore the correct encoding, and it removes any need
+// for wrapping quotes.
+fn _link_char_needs_escape(ch: string) -> boolean {
+    if ch == "\\" { return true; }
+    if ch == "\"" { return true; }
+    if ch == "'" { return true; }
+    if ch == " " { return true; }
+    if ch == "\t" { return true; }
+    return false;
+}
+
+// GNU-escape one response-file entry so it tokenizes back to exactly the
+// argv element it came from.
+fn _link_escape_gnu(arg: string) -> string {
+    let mut out: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= arg.length { break; }
+        let ch = arg[i];
+        if _link_char_needs_escape(ch) { out = out + "\\"; }
+        out = out + ch;
+        i += 1;
+    }
+    return out;
+}
+
+// The exact length `CreateProcess` receives, mirroring the cmdline
+// builder in `runtime/sfn/platform/process_windows.sfn`
+// (`sfn_process_run` and `_pw_build_cmdline`): that loop adds
+// `strlen(arg) + 3` for EVERY arg — two wrapping quotes plus one
+// separating space — unconditionally, not only for args containing
+// whitespace. Modelling it any more cheaply undercounts by ~2 chars per
+// arg, which silently eats the threshold's margin at exactly the argv
+// sizes this exists to catch.
+fn link_argv_flat_length(argv: string[]) -> int {
+    let mut total: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= argv.length { break; }
+        total = total + argv[i].length + 3;
+        i += 1;
+    }
+    return total;
+}
+
+// 2,767 chars below the 32,767 `CreateProcess` cap. Since
+// `link_argv_flat_length` is now exact rather than approximate, this is
+// pure headroom for argv growth between the measurement and the spawn.
+fn link_response_threshold() -> int { return 30000; }
+
+// Build the `@file` response-file body: `argv[1]` onward (argv[0] stays
+// the spawned program, never part of the file), one GNU-escaped entry
+// per line. An empty arg is the one case escaping cannot express — an
+// empty line is a whitespace run the tokenizer skips — so it is written
+// as an explicit empty quoted string.
+fn link_response_body(argv: string[]) -> string {
+    let mut body: string = "";
+    let mut i: int = 1;
+    loop {
+        if i >= argv.length { break; }
+        let arg = argv[i];
+        if arg.length == 0 { body = body + "\"\"\n"; } else {
+            body = body + _link_escape_gnu(arg) + "\n";
+        }
+        i += 1;
+    }
+    return body;
+}
+
+// Collapse `argv` into a two-element `[program, "@response-file"]` argv
+// when its flattened length exceeds the threshold; otherwise return
+// `argv` unchanged. `out_path` names the response file (`out_path +
+// ".rsp"`) — deliberately derived from the link's own unique output
+// path rather than a fixed name like `link.rsp` in a shared directory,
+// which would let concurrent links under CI's parallel `--jobs N` pool
+// overwrite each other's response file.
+fn link_argv_or_response_file(argv: string[], out_path: string) -> string[] ![io] {
+    if argv.length < 2 { return argv; }
+    if link_argv_flat_length(argv) <= link_response_threshold() { return argv; }
+    let rsp_path = out_path + ".rsp";
+    // Clear any response file left by an earlier link to this same
+    // `out_path` BEFORE writing, then confirm it is gone. `fs.writeFile`
+    // returns `void`, so a post-write `fs.exists` is the only success
+    // signal available — and against a surviving stale file that probe
+    // answers "true" for the PREVIOUS run's object list, silently
+    // linking the wrong objects. `out_path` reuse is routine, not
+    // hypothetical: the test runner links every test file to the same
+    // `<scratch>/test` path.
+    if fs.exists(rsp_path) { fs.deleteFile(rsp_path); }
+    if fs.exists(rsp_path) { return argv; }
+    fs.writeFile(rsp_path, link_response_body(argv));
+    // Fail open: if the file didn't land, return the original argv so the
+    // link fails with its own real error instead of a confusing "no such
+    // file" on a response file that was never written. A partial write
+    // still passes this probe, but that degrades to a link error rather
+    // than a wrong binary.
+    if !fs.exists(rsp_path) { return argv; }
+    return [argv[0], "@" + rsp_path];
+}
+
+export {
+    link_argv_flat_length,
+    link_response_threshold,
+    link_response_body,
+    link_argv_or_response_file
+};

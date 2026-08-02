@@ -1,0 +1,100 @@
+// compiler/tests/integration/link_response_collapse_test.sfn
+//
+// SFN-641 regression: `compiler/tests/unit/link_response_test.sfn` covers
+// only the pure length/body helpers. The acceptance criteria also require
+// proving that a synthetic over-threshold object list actually takes the
+// response-file path, which means exercising the `![io]` entry point
+// `link_argv_or_response_file` — something the pure unit tests cannot
+// reach.
+import { contains, starts_with } from "sfn/strings";
+import {
+    expect_contains_str,
+    expect_eq_bool,
+    expect_eq_int,
+    expect_eq_str,
+    nested_runner_scratch
+} from "sfn/test";
+
+import {
+    link_argv_flat_length,
+    link_argv_or_response_file,
+    link_response_threshold
+} from "../../src/build/link_response";
+import { number_to_string } from "../../src/main";
+
+// Build an argv shaped like the real self-host link: the clang driver
+// invocation followed by `count` content-addressed object paths matching
+// `object_dir + "/" + key_hash + ".o"` from `clang_argv.sfn`.
+fn _self_host_link_argv(count: int) -> string[] {
+    let mut argv: string[] = ["clang", "-O2", "-Wno-override-module"];
+    let mut i: int = 0;
+    loop {
+        if i >= count { break; }
+        let stem = "obj" + number_to_string(i)
+            + "0000000000000000000000000000000000000000000000000000000000";
+        argv.push("build/sailfin/link-obj/" + stem + ".o");
+        i += 1;
+    }
+    return argv;
+}
+
+test "link response: a realistic self-host object list exceeds the threshold" ![io] {
+    let argv = _self_host_link_argv(376);
+    let exceeds = link_argv_flat_length(argv) > link_response_threshold();
+    assert expect_eq_bool(exceeds, true).ok;
+}
+
+test "link response: an over-threshold argv collapses to a response file" ![io] {
+    let scratch = nested_runner_scratch("sfn641-collapse");
+    fs.createDirectory(scratch, true);
+    let argv = _self_host_link_argv(376);
+    let out_path = scratch + "/prog";
+    let result = link_argv_or_response_file(argv, out_path);
+    assert expect_eq_int(result.length, 2).ok;
+    assert expect_eq_str(result[0], argv[0]).ok;
+    assert expect_eq_str(result[1], "@" + out_path + ".rsp").ok;
+    assert expect_eq_bool(fs.exists(out_path + ".rsp"), true).ok;
+}
+
+test "link response: the response file lists every argument after the program" ![io] {
+    let scratch = nested_runner_scratch("sfn641-rsp-body");
+    fs.createDirectory(scratch, true);
+    let argv = _self_host_link_argv(376);
+    let out_path = scratch + "/prog";
+    let _result = link_argv_or_response_file(argv, out_path);
+    let body = fs.readFile(out_path + ".rsp");
+    assert expect_contains_str(body, argv[1]).ok;
+    assert expect_contains_str(body, argv[argv.length - 1]).ok;
+    assert expect_contains_str(body, "-Wno-override-module").ok;
+    assert expect_eq_bool(starts_with(body, "clang\n"), false).ok;
+}
+
+// A response file is named from `out_path`, which is stable across
+// rebuilds, so one left by an earlier link is sitting there when the next
+// link to the same output starts. Since `fs.writeFile` returns `void`, the
+// only success signal is a post-write `fs.exists` — which a stale file
+// answers "true" for the PREVIOUS object list. Reusing it would link the
+// wrong objects with no diagnostic, so the write must replace it.
+test "link response: a stale response file is replaced, never reused" ![io] {
+    let scratch = nested_runner_scratch("sfn641-stale-rsp");
+    fs.createDirectory(scratch, true);
+    let out_path = scratch + "/prog";
+    let stale = "build/sailfin/link-obj/stale-object-from-a-previous-link.o";
+    fs.writeFile(out_path + ".rsp", stale + "\n");
+    assert expect_eq_bool(fs.exists(out_path + ".rsp"), true).ok;
+    let argv = _self_host_link_argv(376);
+    let _result = link_argv_or_response_file(argv, out_path);
+    let body = fs.readFile(out_path + ".rsp");
+    assert expect_eq_bool(contains(body, stale), false).ok;
+    assert expect_contains_str(body, argv[argv.length - 1]).ok;
+}
+
+test "link response: an under-threshold argv is returned unchanged" ![io] {
+    let scratch = nested_runner_scratch("sfn641-under-threshold");
+    fs.createDirectory(scratch, true);
+    let argv = ["clang", "-o", "out", "main.o"];
+    let out_path = scratch + "/small";
+    let result = link_argv_or_response_file(argv, out_path);
+    assert expect_eq_int(result.length, 4).ok;
+    assert expect_eq_bool(fs.exists(out_path + ".rsp"), false).ok;
+}
