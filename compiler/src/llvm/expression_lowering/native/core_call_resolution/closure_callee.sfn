@@ -200,7 +200,7 @@ fn _strip_env_parameter(parameter_types: string[]) -> string[] {
 
 // Extract the lifted-lambda function name (no leading `@`) from a
 // `<closure_pair @sfn_lambda_<N> ...>` marker, or "" if malformed. Mirrors the
-// symbol parse in `lower_closure_pair_marker` (core.sfn) so the two agree on
+// symbol parse in `lower_closure_pair_marker` (core_closure_lowering.sfn) so the two agree on
 // which function the marker names.
 fn _closure_pair_symbol(marker: string) -> string {
     let prefix = "<closure_pair ";

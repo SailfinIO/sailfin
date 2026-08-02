@@ -1,0 +1,568 @@
+// compiler/src/llvm/expression_lowering/native/core_expression.sfn
+//
+// Ordered dispatch for LLVM expression lowering.
+import { NativeFunction } from "../../../native_ir";
+import { char_at, substring } from "../../../string_utils";
+import { format_temp_name } from "../../expressions_helpers";
+import { trace_lowering } from "../../lowering_debug_state";
+import { find_function_by_name_or_import } from "../../rendering_helpers";
+import { empty_string_constant_set } from "../../strings";
+import { ends_with_pointer_suffix, strip_pointer_suffix } from "../../type_mapping";
+import {
+    ExpressionResult,
+    LLVMOperand,
+    LocalBinding,
+    ParameterBinding,
+    TypeContext
+} from "../../types";
+import { ends_with, extend_string_array, starts_with } from "../../utils";
+import { lower_raw_address_expression } from "./core_addressing";
+import { lower_borrow_expression } from "./core_borrow_lowering";
+import { lower_call_expression } from "./core_call_lowering";
+import { find_call_site, split_call_arguments } from "./core_calls";
+import {
+    lower_cast_expression,
+    lower_is_expression,
+    try_lower_interpolated_string_literal
+} from "./core_cast_lowering";
+import {
+    _parse_marker_int_field,
+    _parse_marker_string_field,
+    lower_closure_pair_marker
+} from "./core_closure_lowering";
+import {
+    lower_await_expression,
+    lower_channel_capacity_expression,
+    lower_channel_typed_expression,
+    lower_join_all_expression,
+    lower_parallel_expression,
+    lower_serve_expression,
+    lower_spawn_expression,
+    lower_spawn_typed_expression
+} from "./core_concurrency_lowering";
+import { lower_postfix_expression } from "./core_expression_tail";
+import { number_literal_operand } from "./core_number_literal";
+import {
+    find_bitwise_and_operator,
+    find_bitwise_or_operator,
+    find_bitwise_xor_operator,
+    find_comparison_operator,
+    find_logical_operator,
+    find_shift_operator,
+    find_top_level_operator,
+    strip_enclosing_parentheses
+} from "./core_operators";
+import {
+    lower_binary_operation,
+    lower_comparison_operation,
+    lower_logical_and,
+    lower_logical_not_result,
+    lower_logical_or,
+    lower_numeric_negation_result,
+    lower_ternary_expression
+} from "./core_ops_lowering";
+import {
+    parse_borrow_expression,
+    parse_cast_expression,
+    parse_is_expression,
+    parse_raw_address_expression,
+    parse_ternary_expression
+} from "./core_parsing";
+import { lower_string_literal } from "./core_strings";
+import {
+    append_string,
+    is_boolean_literal,
+    is_null_literal,
+    is_number_literal,
+    is_string_literal,
+    matches_case_insensitive,
+    number_to_string,
+    trim_text
+} from "./core_text";
+
+fn lower_expression(expression: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string) -> ExpressionResult ![io] {
+    let trimmed = trim_text(expression);
+    let mut diagnostics: string[] = [];
+    let empty_constants = empty_string_constant_set();
+    let dbg_expr = trace_lowering();
+    if dbg_expr {
+        print.err("emit-llvm: lower_expression ENTER expr=" + trimmed
+            + " bindings_len="
+            + number_to_string(bindings.length)
+            + " expected="
+            + expected_type);
+    }
+    if trimmed.length == 0 {
+        diagnostics.push("llvm lowering: empty expression encountered");
+        return ExpressionResult {
+            lines: lines,
+            temp_index: temp_index,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: empty_constants
+        };
+    }
+
+    let stripped = strip_enclosing_parentheses(trimmed);
+    if stripped != trimmed {
+        return lower_expression(stripped, bindings, locals, temp_index, lines, functions, context, expected_type);
+    }
+
+    // Closure-pair marker (issue #686). The lambda-lifting pre-pass
+    // in `emit_native` rewrites every non-capturing `Expression.Lambda`
+    // into `<closure_pair @sfn_lambda_<N> null>`, which arrives here
+    // verbatim as the `.let` initializer text. Detect the prefix
+    // before any other parse so the marker never gets mistaken for
+    // a regular identifier or member-access expression. Capturing
+    // lambdas (#687) use the same prefix with an extended env_alloc
+    // payload — handled by `lower_closure_pair_marker`.
+    //
+    // Inline IIFE (#1949): `(fn (n) => n + 1)(5)` lifts to
+    // `<closure_pair @sfn_lambda_<N> ...>(5)` — the marker's closing `>` is
+    // followed by a `(args)` call suffix. Route it through the call path (which
+    // materialises the pair via `try_resolve_closure_callee` and emits the
+    // closure dispatch) rather than the bare-marker lowering below, which would
+    // drop the call and return the pair itself. This must happen HERE, before
+    // the generic operator dispatch, because the marker's own `<`/`>` would
+    // otherwise be mis-read as comparison operators by `find_comparison_operator`.
+    if starts_with(stripped, "<closure_pair ") {
+        let call_at = find_call_site(stripped);
+        if call_at > 0 && ends_with(stripped, ")") {
+            let marker_only = trim_text(substring(stripped, 0, call_at));
+            if ends_with(marker_only, ">") {
+                let args_text = substring(stripped, call_at + 1, stripped.length - 1);
+                let arg_entries = split_call_arguments(args_text);
+                return lower_call_expression(marker_only, arg_entries, bindings, locals, temp_index, lines, functions, context, expected_type);
+            }
+        }
+        let pair_result = lower_closure_pair_marker(stripped, functions, context, bindings, locals, temp_index, lines);
+        let mut _ci_pair: int = 0;
+        loop {
+            if _ci_pair >= pair_result.diagnostics.length { break; }
+            diagnostics.push(pair_result.diagnostics[_ci_pair]);
+            _ci_pair += 1;
+        }
+        return ExpressionResult {
+            lines: pair_result.lines,
+            temp_index: pair_result.temp_index,
+            operand: pair_result.operand,
+            diagnostics: diagnostics,
+            string_constants: empty_constants
+        };
+    }
+
+    // Mutable-capture refusal (issue #687). The lifting pass emits
+    // this marker in place of a real closure pair when the lambda's
+    // capture set contains a `mutable` binding. The `[fatal]` prefix
+    // matches the sentinel scanned by
+    // `lowering_core/diagnostics.sfn:has_fatal_lowering_diagnostic` — IR writes
+    // are skipped, the build exits non-zero.
+    if starts_with(stripped, "<closure_pair_fatal_mutable ") {
+        let cap_name = _parse_marker_string_field(stripped, "name=");
+        let lam_id = _parse_marker_int_field(stripped, "lambda_id=");
+        let mut name_for_diag: string = cap_name;
+        if name_for_diag.length == 0 { name_for_diag = "<unknown>"; }
+        diagnostics.push("llvm lowering [fatal]: capturing lambda #"
+            + number_to_string(lam_id)
+            + " has mutable capture `"
+            + name_for_diag
+            + "` (not yet supported, see #687)");
+        return ExpressionResult {
+            lines: lines,
+            temp_index: temp_index,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: empty_constants
+        };
+    }
+
+    // Mutable-OwnedBuf-across-spawn refusal (SFN-381). The lifting pass emits
+    // this marker in place of a real closure pair when a spawn/parallel task
+    // lambda's FIRST capture is a mutable `OwnedBuf`: the `owned_buf`
+    // trampoline reads env offset 0 as a by-value 32-byte OwnedBuf, but a
+    // mutable capture lowers by reference (an 8-byte `%OwnedBuf*` slot
+    // pointer) — the two ABIs collide. The `[fatal]` prefix matches the
+    // sentinel scanned by `lowering_core/diagnostics.sfn:has_fatal_lowering_diagnostic`,
+    // so IR writes are skipped and the build exits non-zero.
+    if starts_with(stripped, "<closure_pair_fatal_owned_buf_mut ") {
+        let cap_name = _parse_marker_string_field(stripped, "name=");
+        let lam_id = _parse_marker_int_field(stripped, "lambda_id=");
+        let mut name_for_diag: string = cap_name;
+        if name_for_diag.length == 0 { name_for_diag = "<unknown>"; }
+        diagnostics.push("llvm lowering [fatal]: spawn/parallel task lambda #"
+            + number_to_string(lam_id)
+            + " captures mutable `OwnedBuf` `"
+            + name_for_diag
+            + "` by reference across the task boundary (not yet supported, see SFN-381)");
+        return ExpressionResult {
+            lines: lines,
+            temp_index: temp_index,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: empty_constants
+        };
+    }
+
+    // Concurrency frontend lowering (M4.0, epic #965, issue #1085).
+    // The parser builds `Spawn`/`Channel`/`Parallel`/`Serve` nodes and
+    // `emit_native_format` (#1084) renders them to `.sfn-asm` text:
+    //   `spawn[:<kind>] <operand>`
+    //   `channel[:<kind>](<capacity>)`
+    //   `parallel [<task>, ...]`
+    //   `serve(<handler>[, <port>])`
+    // Each form lowers to a call to the matching runtime-helper symbol
+    // wired in `runtime_helpers.sfn`. `Await` is handled earlier in this
+    // function and never reaches here.
+    // ── spawn:<kind> <operand> ──────────────────────────────────────────
+    // Typed spawn: the kind tag selects spawn_<kind> / Future<kind>*.
+    // The operand is a function reference that becomes a typed fn ptr.
+    if starts_with(stripped, "spawn:") {
+        return lower_spawn_typed_expression(stripped, bindings, locals, temp_index, lines, functions, context);
+    }
+
+    // ── spawn <operand> ─────────────────────────────────────────────────
+    // Untyped spawn: use the generic `spawn_task` adapter (i8* → i8*).
+    if starts_with(stripped, "spawn ") {
+        return lower_spawn_expression(stripped, bindings, locals, temp_index, lines, functions, context);
+    }
+
+    // ── channel(<capacity>) / channel:<kind>(<capacity>) ───────────────
+    // Both forms lower to
+    // `sfn_channel_create(i64 capacity, i64 elem_size, i64 owned)` matching
+    // `runtime/sfn/concurrency/channel.sfn` (#1266, was 1-arg i32 in #1091;
+    // the `owned` flag added in #1476). The bare form monomorphizes to
+    // pointer-sized elements (`elem_size` = 8, `owned` = 0). The typed form
+    // sizes the ring slot to the aggregate width and sets `owned` = 1 only
+    // for `channel:OwnedBuf`, so destroy can drain abandoned buffers.
+    if starts_with(stripped, "channel(") {
+        return lower_channel_capacity_expression(stripped, bindings, locals, temp_index, lines, functions, context);
+    }
+    if starts_with(stripped, "channel:") {
+        return lower_channel_typed_expression(stripped, bindings, locals, temp_index, lines, functions, context);
+    }
+
+    // ── parallel [<task>, ...] ──────────────────────────────────────────
+    // Structured fan-out/join (#1474). Every task is lowered to an
+    // (fn_ptr, ctx) i64 pair, packed into two stack arrays, and handed to
+    // the runtime `sfn_parallel(fn_ptrs, ctxs, count)` combinator
+    // (runtime/sfn/concurrency/parallel.sfn): it spawns ALL tasks onto the
+    // shared scheduler pool first (so they run concurrently), then awaits
+    // them and returns a malloc'd `count`-element i64 results array in
+    // input order. The result handle is `i8*` (the raw results array).
+    //
+    // Task operand shapes:
+    //   1. A lifted-lambda closure pair `{i8*, i8*}` = {fn_ptr, env}
+    //      (issue #686). The lifted worker is `fn(i8* env) -> <ret>` —
+    //      exactly what `sfn_parallel`'s per-task `sfn_spawn(fn, ctx, …)`
+    //      invokes — so extract slot 0 (fn) and slot 1 (env) and pass them
+    //      through. Non-capturing lambdas carry a null env; capturing
+    //      lambdas (follow-up #1475) carry a heap env.
+    //   2. A bare function reference (zero-argument worker): coerce to i8*,
+    //      `ptrtoint` to the fn address, and pass a zero ctx.
+    // This replaces the former per-task `sfn_spawn_task` stub call, which
+    // allocated a Task but never enqueued it — the tasks never ran.
+    if starts_with(stripped, "parallel [") {
+        return lower_parallel_expression(stripped, bindings, locals, temp_index, lines, functions, context);
+    }
+
+    // ── serve(<handler>[, <port>]) ──────────────────────────────────────
+    // Lower to `sfn_serve(i8* handler, i32 port)` — the Sailfin-native
+    // server accept loop in `runtime/sfn/concurrency/serve.sfn` (#1092).
+    // The serve call does not return (it runs an accept loop), so the
+    // result operand is void / null.
+    //
+    // GATE (#1323): only the *builtin* concurrency `serve` takes this path.
+    // If `serve` resolves to a user-defined / imported function (e.g. the
+    // typed `sfn/http` capsule `serve(handler: * fn (Request) -> Response,
+    // port)`), fall through to normal call lowering so the imported
+    // function is invoked — it registers a trampoline and calls
+    // `sfn_serve_framed`. The bare builtin (no `serve` in scope) is
+    // unchanged, so `test_runtime_serve.sh` stays green.
+    if starts_with(stripped, "serve(") && find_function_by_name_or_import(functions, "serve") == null {
+        return lower_serve_expression(stripped, bindings, locals, temp_index, lines, functions, context);
+    }
+
+    // ── join_all(<handles>) ─────────────────────────────────────────────
+    // Ordered multi-await over an already-spawned `Task<T>[]` (SFEP-0055).
+    // Lowers to `sfn_join_all(i8* data, i64 count)` over the handle array's
+    // data pointer + length, returning an `SfnArray` reinterpreted as `T[]`
+    // in input order. GATE: only the *builtin* takes this path; a user or
+    // imported `join_all` in scope falls through to normal call lowering.
+    if starts_with(stripped, "join_all(") && find_function_by_name_or_import(functions, "join_all") == null {
+        return lower_join_all_expression(stripped, bindings, locals, temp_index, lines, functions, context, expected_type);
+    }
+
+    // Literal expressions.
+    if is_boolean_literal(stripped) {
+        let mut value = "0";
+        if matches_case_insensitive(trim_text(stripped), "true") { value = "1"; }
+        let operand = LLVMOperand { llvm_type: "i1", value: value };
+        return ExpressionResult {
+            lines: lines,
+            temp_index: temp_index,
+            operand: operand,
+            diagnostics: diagnostics,
+            string_constants: empty_constants
+        };
+    }
+    if is_null_literal(stripped) {
+        let trimmed_expected = trim_text(expected_type);
+        let mut null_type = "i8*";
+        if trimmed_expected.length > 0 {
+            if ends_with_pointer_suffix(trimmed_expected) {
+                null_type = trimmed_expected;
+            }
+        }
+        let operand = LLVMOperand { llvm_type: null_type, value: "null" };
+        return ExpressionResult {
+            lines: lines,
+            temp_index: temp_index,
+            operand: operand,
+            diagnostics: diagnostics,
+            string_constants: empty_constants
+        };
+    }
+    if is_number_literal(stripped) {
+        // Carrier selection lives in ./core_number_literal as a pure
+        // text-to-operand function so each rule is unit-testable.
+        let literal = number_literal_operand(stripped, expected_type);
+        let operand = LLVMOperand {
+            llvm_type: literal.llvm_type,
+            value: literal.value
+        };
+        return ExpressionResult {
+            lines: lines,
+            temp_index: temp_index,
+            operand: operand,
+            diagnostics: diagnostics,
+            string_constants: empty_constants
+        };
+    }
+    if is_string_literal(stripped) {
+        let interpolated = try_lower_interpolated_string_literal(stripped, bindings, locals, temp_index, lines, functions, context);
+        if interpolated != null {
+            let result = interpolated;
+            diagnostics = extend_string_array(diagnostics, result.diagnostics);
+            return ExpressionResult {
+                lines: result.lines,
+                temp_index: result.temp_index,
+                operand: result.operand,
+                diagnostics: diagnostics,
+                string_constants: result.string_constants
+            };
+        }
+        let literal_result = lower_string_literal(stripped, temp_index, lines);
+        diagnostics = extend_string_array(diagnostics, literal_result.diagnostics);
+        return ExpressionResult {
+            lines: literal_result.lines,
+            temp_index: literal_result.temp_index,
+            operand: literal_result.operand,
+            diagnostics: diagnostics,
+            string_constants: literal_result.string_constants
+        };
+    }
+
+    // `await <expr>` joins a thread-backed future and extracts its value.
+    if starts_with(stripped, "await") {
+        if stripped.length == 5 {
+            diagnostics.push("llvm lowering: await expression missing operand");
+            return ExpressionResult {
+                lines: lines,
+                temp_index: temp_index,
+                operand: null,
+                diagnostics: diagnostics,
+                string_constants: empty_constants
+            };
+        }
+        let next = char_at(stripped, 5);
+        let mut _if52: boolean = false;
+        if next == " " { _if52 = true; }
+        if next == "\t" { _if52 = true; }
+        if next == "(" { _if52 = true; }
+        if _if52 {
+            return lower_await_expression(stripped, bindings, locals, temp_index, lines, functions, context, expected_type);
+        }
+    }
+
+    // Check for ternary operator first (lowest precedence)
+    let ternary_parse = parse_ternary_expression(stripped);
+    if ternary_parse.success {
+        return lower_ternary_expression(ternary_parse, bindings, locals, temp_index, lines, functions, context, expected_type);
+    }
+
+    let cast_parse = parse_cast_expression(stripped);
+    if cast_parse.recognized {
+        return lower_cast_expression(cast_parse, bindings, locals, temp_index, lines, functions, context);
+    }
+
+    let raw_address_parse = parse_raw_address_expression(stripped);
+    if raw_address_parse.recognized {
+        return lower_raw_address_expression(raw_address_parse, bindings, locals, temp_index, lines);
+    }
+
+    let borrow_parse = parse_borrow_expression(stripped);
+    if borrow_parse.recognized {
+        return lower_borrow_expression(borrow_parse, bindings, locals, temp_index, lines);
+    }
+
+    let logical = find_logical_operator(stripped);
+    if logical.success {
+        if logical.symbol == "&&" {
+            return lower_logical_and(stripped, logical, bindings, locals, temp_index, lines, functions, context);
+        }
+        if logical.symbol == "||" {
+            return lower_logical_or(stripped, logical, bindings, locals, temp_index, lines, functions, context);
+        }
+    }
+
+    // `is` type-guard (#1753). Placed AFTER the logical split so
+    // `x is T && y` peels `&&` first, but BEFORE the comparison/bitwise
+    // finders so a generic target's angle brackets (`x is Foo<X>`) are not
+    // mis-split at `<`. `parse_is_expression` declines when the target
+    // carries a top-level operator, so a clean `(operand) is Type` only
+    // reaches here once the surrounding operators are already peeled.
+    let is_parse = parse_is_expression(stripped);
+    if is_parse.recognized {
+        return lower_is_expression(is_parse, bindings, locals, temp_index, lines, functions, context);
+    }
+
+    // Slice B (2026-05-02): bitwise + shift operator dispatch.
+    // C/Rust precedence: |  <  ^  <  &  <  ==/!=  <  </<=/>/>=  <
+    // <</>>  <  +/-. Lowest-precedence first wins the top-level
+    // split, so we call the bitwise-OR/XOR/AND finders BEFORE
+    // comparison and the shift finder AFTER comparison.
+    // `lower_binary_operation` handles all of these because
+    // `operation_name_for_symbol` maps them to LLVM
+    // and/or/xor/shl/ashr.
+    let bitwise_or = find_bitwise_or_operator(stripped);
+    if bitwise_or.success {
+        return lower_binary_operation(stripped, bitwise_or, bindings, locals, temp_index, lines, functions, context);
+    }
+    let bitwise_xor = find_bitwise_xor_operator(stripped);
+    if bitwise_xor.success {
+        return lower_binary_operation(stripped, bitwise_xor, bindings, locals, temp_index, lines, functions, context);
+    }
+    let bitwise_and = find_bitwise_and_operator(stripped);
+    if bitwise_and.success {
+        return lower_binary_operation(stripped, bitwise_and, bindings, locals, temp_index, lines, functions, context);
+    }
+
+    let comparison = find_comparison_operator(stripped);
+    if comparison.success {
+        return lower_comparison_operation(stripped, comparison, bindings, locals, temp_index, lines, functions, context);
+    }
+
+    let shift = find_shift_operator(stripped);
+    if shift.success {
+        return lower_binary_operation(stripped, shift, bindings, locals, temp_index, lines, functions, context);
+    }
+
+    let additive = find_top_level_operator(stripped, "+-");
+    if dbg_expr {
+        let mut add_succ = "false";
+        if additive.success { add_succ = "true"; }
+        print.err("emit-llvm: lower_expression additive_check expr=" + stripped
+            + " success="
+            + add_succ
+            + " index="
+            + number_to_string(additive.index)
+            + " symbol="
+            + additive.symbol);
+    }
+    if additive.success {
+        if dbg_expr {
+            print.err("emit-llvm: lower_expression DISPATCH binary_op expr="
+                + stripped);
+        }
+        return lower_binary_operation(stripped, additive, bindings, locals, temp_index, lines, functions, context);
+    }
+
+    let multiplicative = find_top_level_operator(stripped, "*/%");
+    if multiplicative.success {
+        return lower_binary_operation(stripped, multiplicative, bindings, locals, temp_index, lines, functions, context);
+    }
+
+    // Unary prefix operators have higher precedence than binary operators.
+    // We therefore handle them only after attempting to split on lower-precedence
+    // operators like &&, ||, comparisons, +, -, *, /, %.
+    if stripped.length > 0 {
+        if substring(stripped, 0, 1) == "!" {
+            let operand_text = trim_text(substring(stripped, 1, stripped.length));
+            if operand_text.length > 0 {
+                let lowered_operand = lower_expression(operand_text, bindings, locals, temp_index, lines, functions, context, "");
+                return lower_logical_not_result(lowered_operand, diagnostics);
+            }
+        }
+        if substring(stripped, 0, 1) == "-" {
+            let operand_text = trim_text(substring(stripped, 1, stripped.length));
+            if operand_text.length > 0 {
+                let lowered_operand = lower_expression(operand_text, bindings, locals, temp_index, lines, functions, context, expected_type);
+                return lower_numeric_negation_result(lowered_operand, diagnostics);
+            }
+        }
+        if substring(stripped, 0, 1) == "*" {
+            let operand_text = trim_text(substring(stripped, 1, stripped.length));
+            if operand_text.length == 0 {
+                diagnostics.push("llvm lowering: deref expression missing operand");
+                return ExpressionResult {
+                    lines: lines,
+                    temp_index: temp_index,
+                    operand: null,
+                    diagnostics: diagnostics,
+                    string_constants: empty_constants
+                };
+            }
+            let lowered_ptr = lower_expression(operand_text, bindings, locals, temp_index, lines, functions, context, "");
+            let mut _ci1: int = 0;
+            loop {
+                if _ci1 >= lowered_ptr.diagnostics.length { break; }
+                diagnostics.push(lowered_ptr.diagnostics[_ci1]);
+                _ci1 += 1;
+            }
+            if lowered_ptr.operand == null {
+                return ExpressionResult {
+                    lines: lowered_ptr.lines,
+                    temp_index: lowered_ptr.temp_index,
+                    operand: null,
+                    diagnostics: diagnostics,
+                    string_constants: lowered_ptr.string_constants
+                };
+            }
+            let ptr_operand = lowered_ptr.operand;
+            if !ends_with_pointer_suffix(ptr_operand.llvm_type) {
+                let with_issue = append_string(diagnostics, "llvm lowering: cannot dereference non-pointer type `"
+                    + ptr_operand.llvm_type
+                    + "`");
+                return ExpressionResult {
+                    lines: lowered_ptr.lines,
+                    temp_index: lowered_ptr.temp_index,
+                    operand: null,
+                    diagnostics: with_issue,
+                    string_constants: lowered_ptr.string_constants
+                };
+            }
+            let element_type = strip_pointer_suffix(ptr_operand.llvm_type);
+            let load_name = format_temp_name(lowered_ptr.temp_index);
+            let updated_lines = append_string(lowered_ptr.lines, "  "
+                + load_name
+                + " = load "
+                + element_type
+                + ", "
+                + element_type
+                + "* "
+                + ptr_operand.value);
+            let operand = LLVMOperand {
+                llvm_type: element_type,
+                value: load_name
+            };
+            return ExpressionResult {
+                lines: updated_lines,
+                temp_index: lowered_ptr.temp_index + 1,
+                operand: operand,
+                diagnostics: diagnostics,
+                string_constants: lowered_ptr.string_constants
+            };
+        }
+    }
+    return lower_postfix_expression(expression, stripped, bindings, locals, temp_index, lines, functions, context, expected_type);
+}

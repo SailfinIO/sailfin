@@ -17,7 +17,7 @@
 // no capsule import staging — so the imported `serve` never entered the
 // lowering `functions` list, `find_function_by_name_or_import` returned
 // null, and the #1323 gate
-// (`compiler/src/llvm/expression_lowering/native/core.sfn`) hijacked the
+// (`compiler/src/llvm/expression_lowering/native/core_expression.sfn`) hijacked the
 // call to the builtin. The fix makes a user-facing `emit` stage capsule
 // dependencies first, exactly as `check` / `build` / `run` already do.
 //

@@ -91,7 +91,7 @@ fn resolve_call_method_target(trimmed_target: string, arguments: string[], bindi
     // -1 and the whole HOF branch went dark. Stripping here is what lets the
     // renderer emit the group, which is what stops `(a..b).x` and `(a..b)[i]`
     // binding their trailing access to the end operand. Mirrors the strip
-    // `lower_expression` already does at entry (`core.sfn`); it only removes a
+    // `lower_expression` already does at entry (`core_expression.sfn`); it only removes a
     // fully-enclosing pair, so a non-range base is passed through untouched.
     if method_operand == null {
         if injected_argument_count == 0 {

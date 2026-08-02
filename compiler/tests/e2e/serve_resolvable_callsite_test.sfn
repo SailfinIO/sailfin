@@ -7,7 +7,7 @@
 // (`compiler/src/parser/expressions/prefix.sfn`), so the builtin-vs-resolvable
 // distinction is made downstream — in typecheck and the effect checker —
 // mirroring the lowering gate in
-// `compiler/src/llvm/expression_lowering/native/core.sfn`, which only lowers
+// `compiler/src/llvm/expression_lowering/native/core_expression.sfn`, which only lowers
 // builtin serve to `@sfn_serve` when no resolvable `serve` is in scope.
 //
 // These drive the whole frontend (parse -> typecheck -> effect-check) via
