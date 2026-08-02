@@ -58,9 +58,16 @@ test "cross-windows RUNTIME_MODS / manifest per-module contracts" ![io] {
     assert contains(makefile, "runtime/sfn/platform/process_windows.sfn");
     assert ! contains(manifest, "process_windows");
 
-    // rlimit.sfn: in the manifest, excluded from RUNTIME_MODS.
+    // rlimit.sfn: in the manifest, excluded from RUNTIME_MODS — its
+    // getrlimit/setrlimit externs have no static-mingw provider. SFN-698
+    // swapped its Windows sibling in rather than stubbing the symbol: the
+    // sibling arms a kernel32 job-object budget, so it links under mingw
+    // exactly as process_windows.sfn does, and the bridge now carries a real
+    // memory cap instead of a no-op.
     assert contains(manifest, "\"sfn/platform/rlimit.sfn\"");
     assert ! contains(makefile, "runtime/sfn/platform/rlimit.sfn");
+    assert contains(makefile, "runtime/sfn/platform/rlimit_windows.sfn");
+    assert ! contains(manifest, "rlimit_windows");
 
     // rand.sfn (SFN-123): in the manifest, excluded from RUNTIME_MODS — its
     // getentropy / /dev/urandom externs have no static-mingw provider. The
@@ -124,7 +131,11 @@ test "cross-windows windows_stubs.ll defines the required Windows stubs" ![io] {
 
     // Strong stubs Windows resolves in place of the excluded modules / the
     // deleted sailfin_runtime.c (#1308, #822).
-    assert contains(stubs, "define i32 @apply_default_mem_limit");
+    // SFN-698 retired the `@apply_default_mem_limit` no-op: the bridge now
+    // links `platform/rlimit_windows.sfn`, which defines the symbol for real.
+    // Pinned negatively so a re-added stub would collide with that definition
+    // here rather than at link time.
+    assert ! contains(stubs, "define i32 @apply_default_mem_limit");
     assert contains(stubs, "define void @sailfin_runtime_serve");
     assert contains(stubs, "@realpath");
     assert contains(stubs, "@runtime_assert_fail_fn");
