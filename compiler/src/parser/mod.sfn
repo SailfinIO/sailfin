@@ -7,7 +7,7 @@
 //   - utils.sfn:        String utilities (trim_text, string_array_contains, etc.)
 //   - token_utils.sfn:  Token manipulation (skip_trivia, collect_until, etc.)
 //   - expressions/:     Expression parsing (Pratt parser, literals, lambdas)
-//   - statements.sfn:   Block statement parsing (control flow, return, match)
+//   - statements/:     Block statement parsing (control flow, return, match)
 //   - declarations/:    Top-level declarations (fn, struct, enum, import, etc.)
 import {
     Decorator,

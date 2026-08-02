@@ -7,7 +7,7 @@
 // emitter.
 //
 // Why a post-parse walk and not the effect/type checker: `assert cond;`
-// is desugared at parse time (`parser/statements.sfn:parse_assert_statement`)
+// is desugared at parse time (`parser/statements/special.sfn:parse_assert_statement`)
 // into an `IfStatement` whose `else` branch calls `runtime_assert_fail_fn`,
 // so no dedicated `assert` node ever reaches a later pass, and neither the
 // effect checker nor the type checker tracks "currently inside a test

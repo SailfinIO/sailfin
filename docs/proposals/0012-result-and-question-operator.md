@@ -311,11 +311,11 @@ separate follow-up that gets its own `/groom`, not a milestone here.**
 Rationale (real count + self-hosting risk): the compiler's actual `try`
 usage is far smaller than the "~20" estimate in the epic. The AST has a
 single `TryStatement` node (`ast.sfn:302`) parsed by one function,
-`parse_try_statement` (`compiler/src/parser/statements.sfn:1107`), and a
+`parse_try_statement` (`compiler/src/parser/statements/special.sfn`), and a
 grep for `try {` blocks in `compiler/src/` finds only **2** real
 occurrences (the rest of the "try" matches are substrings like `entry` /
 `retry` or comments). The `catch` keyword is consumed in exactly one place
-(`statements.sfn:1135`). So the migration surface is small, but it is still
+(`statements/special.sfn`). So the migration surface is small, but it is still
 *self-hosting-critical*: changing how the compiler handles its own errors
 must round-trip through the seed. Bundling that into the same epic that
 introduces `Result` would entangle "does `Result` work" with "did we break
@@ -651,7 +651,7 @@ These representative inputs must behave as stated end-to-end.
     reference to make real)
   - `compiler/src/ast.sfn:146` (`EnumVariant`), `:257` (`EnumDeclaration`
     with `type_parameters`), `:16` (`TypeParameter`)
-  - `compiler/src/parser/statements.sfn:1107` (`parse_try_statement` —
+  - `compiler/src/parser/statements/special.sfn` (`parse_try_statement` —
     the single parser entrypoint for `try`/`catch`; only 2 `try {` usage
     sites exist in `compiler/src/`, Q6)
 

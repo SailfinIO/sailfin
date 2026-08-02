@@ -198,7 +198,7 @@ for the common case:
    A pattern of `Expression.Struct { type_name, fields }`
    (`ast.sfn:77`) with `type_name.length == 2` — the `Enum.Variant { ... }`
    shorthand the parser already produces for `Response.Ok { value }`
-   (`compiler/src/parser/statements.sfn:845`, `expression_from_tokens`) —
+   (`compiler/src/parser/statements/match.sfn`, `expression_from_tokens`) —
    names its enum directly as `type_name[0]` and its variant as
    `type_name[1]`. If **every** non-wildcard, non-guarded case pattern in the
    `match` resolves to `Struct` patterns naming the *same* enum (found in the

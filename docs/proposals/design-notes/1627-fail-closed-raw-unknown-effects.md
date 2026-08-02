@@ -36,7 +36,7 @@ Trust these over the §"Root cause" line numbers below.
 - **Assignment** has **no AST node at all** (no `Statement.Assignment`, no
   `Expression.Assignment`). `a = b;` parses as
   `Statement.ExpressionStatement { expression: expression_from_tokens("a = b") }`
-  (statements.sfn ~:1495-1500), and `=` has precedence `-1` in
+  (`statements/expression_recovery.sfn`), and `=` has precedence `-1` in
   `binary_precedence` (~:1831/1861) so the climb leaves `=` unconsumed →
   **leftover tokens → `Expression.Raw{text:"a = b"}`**. Lowering re-parses that
   Raw text in `llvm/.../statement.sfn::lower_expr_stmt` via
@@ -408,7 +408,7 @@ member/index assignments before vs after) + `effect_assignment_test.sfn`
 
 `Statement.Unknown` is produced by `parse_unknown`
 (`parser/declarations/recovery.sfn`, called by declaration fallbacks) and
-`parse_unknown_statement` (`parser/statements.sfn`, called from `parse_block`).
+`parse_unknown_statement` (`parser/statements/expression_recovery.sfn`, called from `parse_block`).
 **No diagnostic is recorded at any site.** Zero in-source `Unknown` nodes exist (the tree
 self-hosts).
 
@@ -558,7 +558,7 @@ firstpass→seedcheck build, exactly like #957.
 ### Files affected (parts A–F), by pipeline stage
 
 - **Parser:** `compiler/src/parser/expressions.sfn` (cast-target reader A/C;
-  prefix `*`/`&` B; assignment seam D), `compiler/src/parser/statements.sfn`
+  prefix `*`/`&` B; assignment seam D), `compiler/src/parser/statements/`
   (E0817 at `parse_unknown_statement` E).
 - **AST:** `compiler/src/ast.sfn` (`Assignment` node D).
 - **Typecheck:** `compiler/src/typecheck.sfn` (`Cast` arm classification A;
@@ -834,7 +834,7 @@ Self-host gate: `make compile` + `make check`.
   A nested `Statement.Unknown` (unparseable statement inside a block) is silently
   dropped — no diagnostic, no effects; top-level gets `E0500`, nested gets
   nothing. Promote `parse_unknown`/`parse_unknown_statement` call sites
-  (`parser/declarations/recovery.sfn`, `statements.sfn`) to record a parse diagnostic
+  (`parser/declarations/recovery.sfn`, `statements/expression_recovery.sfn`) to record a parse diagnostic
   with a precise span (analog of `ParseError`, #1531), gated to avoid
   double-firing with `E0500`/`E0411`/removed-keyword. Cleaner than threading a
   top-level flag through the shared `check_statement` walker. Cite SFEP-0008.

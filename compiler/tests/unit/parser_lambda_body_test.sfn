@@ -4,7 +4,7 @@
 // (`parse_block_for_lambda`) that only collected raw tokens, leaving
 // `Expression.Lambda.body.statements` empty; downstream passes had to
 // re-parse `body.tokens` to recover structure. The parser now delegates
-// to the structured `parse_block` in statements.sfn, so a lambda body
+// to the structured `parse_block` in statements/block.sfn, so a lambda body
 // arrives with its `statements` list populated. These tests pin that:
 // every lambda whose source has at least one parsed statement exposes a
 // non-empty `body.statements`, and nested blocks / nested lambdas parse

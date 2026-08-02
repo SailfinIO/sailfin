@@ -399,7 +399,7 @@ fn emit_statement_control_flow(state: NativeState, statement: Statement) -> Nati
         // error), and routine-decorator semantics are undefined until that
         // runtime lands. Fail closed rather than silently dropping the
         // decorator (llms.txt: no parsed-but-unenforced surface) — the parser
-        // does attach decorators to the node (`parser/statements.sfn:537`).
+        // does attach decorators to the node (`parser/statements/control_flow.sfn`).
         let mut current = state;
         if statement.decorators.length > 0 {
             current = state_add_diag(current, Diag {
