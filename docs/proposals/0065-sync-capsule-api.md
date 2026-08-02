@@ -14,6 +14,21 @@ graduates-to:
 
 # SFEP-0065 — `sfn/sync`: public API surface and semantics
 
+> **Correction (2026-08-02).** A structural review found four gaps this draft
+> had understated or left as documentation rather than enforcement: §3.8's
+> lifetime contract has no mechanism stopping a handle from escaping its
+> owning scope (C2); §3.6's error-checking-mutex `SelfDeadlock` guarantee has
+> no Windows implementation and Windows has no primitive that can provide one
+> (C3); `mutex_create()` called from a `spawn`-nested worker sees no current
+> nursery because the pointer is thread-local and not inherited, which §3.8
+> does not reconcile with this section's own open question (C4); and §3.9's
+> `with_cell<T>` claim that unsynchronized access is "unrepresentable" does
+> not hold for a `T` that is itself a pointer, handle, or aliasing-capable
+> aggregate (C5). Each is recorded as a prerequisite below, with explicit
+> acceptance criteria, rather than folded silently into the affected section.
+> The consequence for phasing: **Phase 1 (`Once`) is close to ready; Phase 2
+> (`Mutex`) is not ready**, and §3.10's phase table is revised accordingly.
+
 ## 1. Summary
 
 SFEP-0063 established that synchronization objects are already *buildable* in
@@ -527,6 +542,37 @@ fallback is default attributes plus a documented non-reentrancy contract — but
 the burden of proof sits with the faster-and-hangs option, not the
 slower-and-diagnoses one.
 
+> **Prerequisite (blocking): `SelfDeadlock` has no Windows implementation, and
+> Windows has no primitive that provides one.** Verified against
+> `runtime/sfn/platform/pthread_windows.sfn:34,38-51`: `pthread_mutex_lock`
+> lowers to `AcquireSRWLockExclusive`, and the file has no
+> `pthread_mutexattr_settype` or any mutex-attribute function at all — the
+> header (line 53-56) records that `SRWLOCK` has no destroy call either, an
+> even more basic gap than attributes. `AcquireSRWLockExclusive` is
+> non-recursive and, per the Win32 SRWLOCK contract, a same-thread recursive
+> acquire is undefined behavior that hangs rather than returning an error
+> code — there is no Windows primitive analogous to POSIX's
+> `PTHREAD_MUTEX_ERRORCHECK` to detect it. So §3.6 as written either fails to
+> link on Windows (if it calls a `pthread_mutexattr_settype` that does not
+> exist there) or silently violates the `SelfDeadlock` guarantee it promises
+> (if it falls back to plain `AcquireSRWLockExclusive`, where a nested
+> `with_lock` hangs instead of throwing). Phase 2 must pick one of two paths,
+> not leave this implicit:
+>
+> 1. **A genuine Windows-specific implementation** — e.g. tracking the owning
+>    thread ID alongside the `SRWLOCK` storage and checking it before
+>    `AcquireSRWLockExclusive` to raise `SyncError.SelfDeadlock` in Sailfin
+>    code rather than relying on an OS error code — plus a Windows-run test
+>    proving a nested `with_lock` throws rather than hangs on that platform.
+> 2. **An explicit, documented platform limitation**: `SelfDeadlock` detection
+>    is POSIX-only, and `self_deadlock_test.sfn` (§8) is marked
+>    platform-conditional with the reason recorded next to the test and in
+>    this section, rather than silently skipped or silently hanging in CI.
+>
+> This proposal does not pick between them — that is a design decision for
+> whoever implements Phase 2 — but Phase 2 cannot ship claiming
+> `SelfDeadlock` as a cross-platform guarantee without choosing one.
+
 ### 3.7 The rest of the surface
 
 `RwLock` and `Semaphore` follow the same combinator discipline, with no
@@ -572,6 +618,35 @@ must not be stored anywhere that outlives it.** With no borrow checker this is
 a documented contract, not an enforced one. It is the strongest candidate for
 the capsule's eventual first diagnostic (§4).
 
+> **Prerequisite (blocking, verified against source): equivalent escape
+> enforcement, not documentation, is required before Phase 2 reclamation
+> ships.** Channels avoid exactly the hang-turned-use-after-free this
+> paragraph describes via `E0838`
+> (`compiler/src/ownership_checker.sfn:515-538`), which raises "channel handle
+> `<name>` escapes its `routine` nursery" when a channel binding (or an alias
+> of it) is assigned to a destination outside the creating nursery. But
+> `_make_nursery_finding`'s `E0838` path is keyed on a compiler-known
+> `handle_kind` string (`"channel"`, `"task"`) — it is wired to specific
+> compiler-special-cased types, not to an arbitrary user/capsule struct. §3.1
+> is explicit that `Mutex` is deliberately an *ordinary* struct precisely so
+> the ownership checker's affine move rule never fires on it
+> (`is_owned_type` is false for it); that same ordinariness means `E0838`'s
+> nursery-escape check does not fire on it either. Freeing each `Mutex` at
+> nursery exit (Phase 2) while an outer or global binding still aliases the
+> handle leaves that binding holding a dangling `pthread_mutex_t*` with no
+> diagnostic anywhere. This is not solvable by "document it harder" — it
+> needs one of: (a) teaching the ownership checker to recognize capsule-level
+> handle types (a new registration surface `ownership_checker.sfn` does not
+> have today), or (b) a different enforcement point entirely (e.g. a runtime
+> generation check on the handle, catching use-after-reclaim at the pthread
+> call site rather than at compile time). Both are open design questions, not
+> designed here — the acceptance criterion for Phase 2 is that one of them
+> (or an equivalent) exists and is tested, not that the existing documentation
+> paragraph above is deemed sufficient. Negative test required: a `Mutex`
+> created inside a `routine { }` and stored into a module-global or an outer
+> binding must be caught (statically) or safely detected (dynamically) rather
+> than silently producing a dangling handle.
+
 **Creating one outside any `routine { }` scope should fail closed**, returning
 `Err(SyncError.NoScope)` rather than silently allocating an object nothing will
 ever reclaim. The cost of this strictness is near zero in practice: a lock is
@@ -592,6 +667,41 @@ scope the check demands is one the program already has.
 > the API cannot be finalized without the seam; it must be resolved when
 > SFEP-0064 is accepted, and it is a one-variant change either way.
 
+> **Prerequisite (blocking), and a second half of the same open question
+> this section already flags: `mutex_create()` called from a spawned worker
+> also sees no current nursery, for a different reason than top-level.**
+> Verified against source: `_sfn_g_current_nursery`
+> (`runtime/sfn/concurrency/nursery.sfn:132,137`) is a `thread_local` global,
+> set on `sfn_nursery_enter` (line 177) and restored on exit (line 325). A
+> worker spawned by `sfn_scheduler_spawn` runs on a different OS thread, and
+> nothing in the scheduler copies the parent thread's `_sfn_g_current_nursery`
+> value into the worker's own thread-local slot — this is deliberate: a
+> nursery pointer is not safely shareable across threads without its own
+> synchronization. The consequence is that `mutex_create()` called from a
+> `spawn`-nested closure inside a `routine { }` sees `sfn_nursery_current() ==
+> 0` on its own thread, identically to the true top-level case this section
+> already discusses — except this call site is *not* top-level, so treating
+> it as `NoScope` is misleading (a nursery genuinely exists, just not visible
+> from this thread) and treating it as process-lifetime-leaked is wrong for
+> the same reason (the object's natural lifetime is the *parent's* nursery,
+> which will eventually reclaim things the worker cannot register into).
+> **This is not a second, separate gap — it is the same open question this
+> section already raises, and must be resolved together with it, not
+> separately:** whichever answer the seam gives to "is scope absence
+> observable at creation time" also has to say what a spawned worker sees,
+> because a worker's `sfn_nursery_current()` is indistinguishable from
+> genuine top-level absence today. Acceptance criteria: either (a) worker-side
+> `mutex_create()` is documented as unsupported and returns
+> `Err(SyncError.NoScope)` — accepting the same false-positive-shaped result
+> as top-level, with the restriction stated plainly — or (b) the seam design
+> adds a mechanism for a spawned worker to register against its *parent's*
+> nursery (an ownership-registration path distinct from the thread-local
+> pointer), in which case that mechanism is designed in SFEP-0064, not
+> guessed here. A test proving whichever answer is chosen (worker-side
+> `mutex_create` returns the documented result, or registers against the
+> correct parent nursery and is reclaimed at the parent's exit) is required
+> before Phase 2 ships.
+
 ### 3.9 Evolution: the value-cell form
 
 The intended successor to the bare `Mutex` is not the guard-passing `Mutex<T>`
@@ -603,13 +713,38 @@ rejected in §3.3, but a **by-value cell with functional update**:
 fn with_cell<T>(c: Cell<T>, body: fn (T) -> T) -> void
 ```
 
-This gets the real safety property `Mutex<T>` promises — unsynchronized access
-is unrepresentable — *without* a borrow checker, because a copy-typed payload
-handed by value has nothing to escape with. It costs a copy per critical
-section, which is right for small guarded state and wrong for large aggregates.
-It is listed here so the bare-`Mutex` decision reads as a first step rather than
-a dead end, and because it is the natural place to prove generics in production
-capsule code, being the smallest generic surface in the capsule.
+It costs a copy per critical section, which is right for small guarded state
+and wrong for large aggregates. It is listed here so the bare-`Mutex` decision
+reads as a first step rather than a dead end, and because it is the natural
+place to prove generics in production capsule code, being the smallest generic
+surface in the capsule.
+
+**The "unsynchronized access is unrepresentable" claim above is overclaimed
+and must be weakened before `with_cell<T>` can ship carrying it.** Passing `T`
+by value stops the *cell's storage slot* from being aliased — the body cannot
+get a reference into the cell itself — but it does nothing about a `T` that is
+itself, or contains, an alias to something else. Sailfin has no trait bound
+restricting `T`, so nothing stops `Cell<*u8>`, `Cell<SomeHandle>` (an ordinary
+struct wrapping a heap address, exactly `Mutex`'s own shape per §3.1), or a
+struct/array `T` containing such a field. A body of type
+`fn (T) -> T` that receives such a value can copy the pointer/handle out to a
+module global and dereference or mutate the pointee **after** `with_cell`
+releases the lock — the by-value parameter prevented nothing, because the
+alias was never inside the copied bytes to begin with, only reachable through
+them. **Prerequisite before `with_cell<T>` may claim the unrepresentable-access
+property:** either (a) restrict `T` to a recursively value-only type set — no
+raw pointer, no handle-shaped struct, no reference, checked transitively
+through struct fields and array elements, which needs a trait-bound or
+compiler-recognized marker mechanism that does not exist in Sailfin today and
+is out of scope to design here — or (b) narrow the claim to a small, explicit
+concrete type list (e.g. the scalar/numeric types) rather than an unconstrained
+generic `T`, dropping the word "unrepresentable" for the general case. Until
+one of these lands, §3.9's claim must read as "unsynchronized access to the
+cell's own storage is unrepresentable; unsynchronized access to values
+reachable *through* `T` is not addressed" — record that weaker, accurate
+statement in place of the current claim, and treat the value-only constraint
+(or the narrow type list) as required future work, not a detail to fill in at
+implementation time.
 
 ### 3.10 Phasing
 
@@ -619,13 +754,18 @@ Per §5, the seam gate is a **landing-order** dependency now, not a seed-cut
 one — Phase 2 can start the session after the seam's runtime-source PR merges,
 with no cadence-bump wait in between.
 
+**Revised per the 2026-08-02 structural review (top-of-document correction):
+Phase 1 is close to ready; Phase 2 is explicitly NOT ready, and must not start
+until C1/C2/C3 below are resolved** — these are prerequisites, not polish, and
+none of them is a documentation fix.
+
 | Phase | Contents | Gate |
 |---|---|---|
-| **1 — Once + the atomics decision** | `Once`, `once_create`, `once_do`, `SyncError`. Capsule docs recording §3.5's "no atomics wrapper" rule and the builtin names it forbids exporting. Manifest stays `required = []`. | **Ungated.** Uses only shipped builtins (§5). Workable in parallel with the seam PR. |
-| **2 — `Mutex`** | `Mutex`, `mutex_create`, `with_lock`, `with_try_lock`, error-checking mutex type + `SelfDeadlock` (§3.6), nursery registration + the §3.8 resolution, ASAN reclamation leg. | Waits on the seam's runtime-source PR merging (SFEP-0064 §3.3–§3.7); no seed cut to wait on beyond that. |
-| **3 — `RwLock` + `Semaphore`** | `RwLock` and `Semaphore` with their combinators (§3.7). | Seam merged. Unblocked with Phase 2; no additional gate. |
-| **4 — Timed variants** | `with_lock_timeout` and siblings, `![clock]`, manifest becomes `required = ["clock"]` (§4). | Seam merged. Independent of Phase 3; can precede or follow it. |
-| **5 — Value cell** | `Cell<T>` / `with_cell<T>` (§3.9). | Seam merged, plus a generics feasibility probe in production capsule source (§3.3). |
+| **1 — Once + the atomics decision** | `Once`, `once_create`, `once_do`, `SyncError`. Capsule docs recording §3.5's "no atomics wrapper" rule and the builtin names it forbids exporting. Manifest stays `required = []`. | **Close to ready.** Uses only shipped builtins (§5), ungated, no open review finding against it. Workable in parallel with the seam PR. |
+| **2 — `Mutex`** | `Mutex`, `mutex_create`, `with_lock`, `with_try_lock`, error-checking mutex type + `SelfDeadlock` (§3.6), nursery registration + the §3.8 resolution, ASAN reclamation leg. | **NOT ready.** Blocked on three unresolved prerequisites, none satisfied by documentation alone: **C1** — SFEP-0064's effect-safe callback materialization (`docs/proposals/0064-reclamation-seam.md` §4) must land before the seam itself is safe to register a reclaimer through; **C2** — equivalent escape enforcement for sync handles, since `E0838` does not cover `Mutex` (§3.8); **C3** — a Windows `SelfDeadlock` implementation or an explicit documented platform limitation (§3.6), since Windows has no error-checking mutex primitive today. Also carries **C4**'s worker-side-creation resolution, folded into §3.8 above. Waiting on the seam's runtime-source PR merging is necessary but no longer sufficient. |
+| **3 — `RwLock` + `Semaphore`** | `RwLock` and `Semaphore` with their combinators (§3.7). | Seam merged, **and Phase 2's C1/C2/C3 resolved** — `RwLock`/`Semaphore` share `Mutex`'s handle shape and reclamation path, so they inherit its open prerequisites rather than only its shipped code. |
+| **4 — Timed variants** | `with_lock_timeout` and siblings, `![clock]`, manifest becomes `required = ["clock"]` (§4). | Seam merged, Phase 2 prerequisites resolved. Independent of Phase 3; can precede or follow it. |
+| **5 — Value cell** | `Cell<T>` / `with_cell<T>` (§3.9). | Seam merged, Phase 2 prerequisites resolved, plus a generics feasibility probe in production capsule source (§3.3), **plus C5** — `with_cell<T>`'s "unrepresentable" claim must be narrowed to a value-only `T` constraint or an explicit concrete type list (§3.9) before this phase may ship the claim as written. |
 
 Two notes on the ordering. **Phases 2 and 3 should not be split further** —
 `RwLock` and `Semaphore` are the same handle shape, the same combinator
