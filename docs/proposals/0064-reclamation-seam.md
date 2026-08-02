@@ -438,6 +438,36 @@ a generic function's address — there is no single, honest thing the resulting
 pointer could mean. This is an augmentation of the existing, shipped
 address-of diagnostics, not a new type or new code (§8).
 
+**Prerequisite (blocking, not v0 polish): effect-safe callback materialization
+must land before §3.3's registration path ships.** As verified against source,
+`classify_fn_cast` (`compiler/src/typecheck_types/symbol_table_and_raw_exprs.sfn:271-284`)
+today checks only `entry.is_generic`; it has no effect-row check at all, so the
+rejection this section describes does not exist yet. Registering a reclaimer
+that erases an effectful function's address is a hole in the Reach pillar —
+the derived capability manifest would be incomplete — and the seam must not
+ship able to create that hole. Acceptance criteria for this prerequisite:
+
+1. `classify_fn_cast` (or an added check reached from the same call site)
+   rejects `<fn> as *fn (…)` and `<fn> as *u8` when `entry`'s declared effect
+   row is non-empty, with a diagnostic distinguishing this from `E0809`'s
+   generic-function case (§8 allocates the code once this lands).
+2. The check must cover **erased casts**, not only casts that immediately
+   produce a typed `*fn (…)`: a function first cast to `*u8` and later cast
+   back to `*fn (*u8) -> void` (or passed to `sfn_nursery_register_resource`
+   as a raw `*u8`) must be caught at the original address-taking site, since
+   that is the only point where the function's declared effect row is still
+   available — once erased to `*u8` there is nothing left to check.
+3. Negative tests are required, not optional: at minimum, one test asserting
+   an `![io]`-declared function's address-of is rejected in reclaimer
+   position, and one exercising the erase-then-recast path in (2) to prove
+   the check is not bypassable by routing through an intermediate `*u8`
+   binding.
+
+Until this lands, §3.3's registration path and §7's phasing table below must
+not be read as ready to ship — the stride-16 registry and drain loop are
+runtime-source work independent of this prerequisite, but the seam as a whole
+is not safe to land ahead of it.
+
 The consequence worth naming: **a resource whose reclamation needs `![io]`
 cannot ride this seam in v0.** File-descriptor reclamation is the obvious next
 want. The mitigation already exists in the runtime's layering — primitives such
@@ -545,7 +575,8 @@ session:
 
 | Item | Scope | Size | Gate |
 |---|---|---|---|
-| Nursery seam | Stride-16 registry, `sfn_nursery_register_resource`, `sfn_channel_reclaim`, drain loop, `sfn_channel_create` registers the pair (§3.3–§3.6) | M | none — ordinary `make compile` |
+| Effect-safe callback materialization | `classify_fn_cast` rejects effectful-function address-taking in reclaimer position, covering erased-then-recast casts, plus negative tests (§4) | S | **blocking prerequisite of the nursery seam row below** — must land first |
+| Nursery seam | Stride-16 registry, `sfn_nursery_register_resource`, `sfn_channel_reclaim`, drain loop, `sfn_channel_create` registers the pair (§3.3–§3.6) | M | waits on the effect-safe callback row above; otherwise ordinary `make compile` |
 | `rc.sfn` | `drop_fn` invocation; retire the "deferred to M2.4/M2.6" header note; extend the e2e test off its null-`drop_fn` shape (§3.7) | S | none — ordinary `make compile`; parallel with the nursery seam |
 | Struct-field `*fn` | `Route.handler`, `Task.fn_ptr` move from `i64`-and-cast to typed `*fn (…)` fields (§3.2) | S | none, provided it lands compiler-only with no runtime consumer in the same PR |
 | Extern-parameter `*fn` | `is_c_abi_function_pointer` recognizes `*fn (…)`; `pthread.sfn`'s `start` parameter migrates (§3.2) | S | same as above |
@@ -602,8 +633,9 @@ wiring, plus the two small independent compiler gaps in §3.2.
 - [ ] Parses — struct-field and extern-parameter `*fn (…)` (§3.2); the
       let/parameter form already parses today and needs no further work
 - [ ] Type-checks / effect-checks — effectful-function rejection at the
-      address-taking site (§4); C-ABI accept-list extension to
-      `is_c_abi_function_pointer` for the extern gap (§3.2)
+      address-taking site, **blocking on the nursery seam** (§4); C-ABI
+      accept-list extension to `is_c_abi_function_pointer` for the extern gap
+      (§3.2)
 - [ ] Emits valid `.sfn-asm` / Lowers to LLVM IR — no new instruction or
       lowering path for the nursery seam or `rc.sfn`, which reuse the shipped
       thin-call path as-is; the §3.2 struct-field/extern extensions carry the
@@ -661,8 +693,12 @@ no seed-blocker to guard.
 ## 11. Risks
 
 **Effect erasure is a real capability hole**, not just a v0 simplification
-(§4). Naming it now avoids someone discovering at sync-capsule time that a
-file-handle reclaimer cannot be registered.
+(§4) — a structural review confirmed `classify_fn_cast` has no effect-row
+check today, so it is now a **blocking prerequisite** of the seam rather than
+a risk to merely name. Naming it now avoids someone discovering at
+sync-capsule time that a file-handle reclaimer cannot be registered, and
+shipping the seam without the check first would let an `![io]` reclaimer run
+from effect-free teardown with no manifest entry recording it.
 
 **Stride-16 pointer arithmetic in the drain loop.** The existing code uses a
 three-statement offset split specifically to avoid a cast-of-pointer-arithmetic
