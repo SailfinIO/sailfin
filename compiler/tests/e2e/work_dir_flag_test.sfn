@@ -17,7 +17,9 @@
 // NOTE: assert on captured output with `sfn/strings` predicates — the
 // `sfn/test` `expect_*` matchers are `![pure]` and cannot be used from
 // an `![io]` test (#842).
-import { find, contains } from "sfn/strings";
+import { contains, find } from "sfn/strings";
+
+import { build_target_os, target_exe_name } from "../../src/build/target";
 
 fn _sfn_bin() -> string ![io] {
     let configured = env.get("SAILFIN_BIN");
@@ -89,8 +91,12 @@ test "work-dir-flag: --work-dir writes default-binary + sailfin/" ![io] {
     let _e = process.capture_take_stderr();
     assert exit == 0;
     // With -o omitted the default binary lands under <DIR>/native/, and
-    // the virtualized module tree under <DIR>/sailfin/.
-    assert fs.exists(work + "/native/sailfin");
+    // the virtualized module tree under <DIR>/sailfin/. The expected
+    // binary name tracks the same `target_exe_name` rule the build
+    // subprocess applies (SFN-693) — on a native Windows runner both
+    // this process and the child resolve `build_target_os()` to
+    // "Windows" with no override in play, so the two agree.
+    assert fs.exists(target_exe_name(work + "/native/sailfin", build_target_os()));
     assert fs.exists(work + "/sailfin");
 }
 

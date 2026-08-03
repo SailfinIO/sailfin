@@ -43,6 +43,7 @@ import { _print_cache_summary, _resolve_sailfin_cache_dir_for_work } from "../..
 import { _clang_link_multi } from "../../build/link";
 import { _ends_with, _ensure_dir } from "../../build/paths";
 import { _runtime_bundle_exists } from "../../build/runtime_objs";
+import { build_target_os, target_exe_name } from "../../build/target";
 import { cache_root, merge_cache_stats, resolve_build_cache_config } from "../../build_cache";
 import { prepare_project_capsules } from "../../capsule_resolver";
 import { empty_resolver_consumer } from "../../capsule_resolver/types";
@@ -116,7 +117,10 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     _ensure_dir(run_cache_dir);
 
     let ll_path = run_cache_dir + "/run.ll";
-    let exe_path = run_cache_dir + "/run";
+    // Derived name (never an explicit `-o`), so it carries Windows' `.exe`
+    // suffix from birth: `CreateProcessA` below and the link's `-o` must
+    // agree by construction (SFN-693).
+    let exe_path = target_exe_name(run_cache_dir + "/run", build_target_os());
 
     // Resolve and compile capsule deps before lowering the main file. The
     // unified resolver covers relative imports, manifest-declared capsule
@@ -190,6 +194,12 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     }
     if run_cache_config.trace { _print_cache_summary(run_cache_stats); }
     let run_rc = process.run([exe_path]);
+    // A spawn failure (e.g. a bare 127) with no binary on disk at the
+    // attempted path is a naming/link disagreement, not a program exit —
+    // name the exact path so it doesn't read as an opaque 127 (SFN-693).
+    if run_rc != 0 && !fs.exists(exe_path) {
+        print.err("sfn run: no binary at " + exe_path);
+    }
     return run_rc;
 }
 

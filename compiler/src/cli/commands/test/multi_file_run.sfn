@@ -189,7 +189,7 @@ fn _run_multi_file(test_files: string[], file_suite_index: int[], suites_in: Tes
                 if launched - ti >= jobs { break; }
                 let spawn_scratch = sub_root + "/sub-" + number_to_string(launched);
                 _ensure_dir_cmd(spawn_scratch);
-                handles.push(process.spawn_with_env(_pool_child_argv(self_exe, test_files[launched], name_filter, tag_filter, json_output, no_test_cache), _pool_child_env(pool_base_env, spawn_scratch, sub_root, stamp_nonce, update_snapshots, json_output)));
+                handles.push(process.spawn_with_env(_pool_child_argv(self_exe, test_files[launched], name_filter, tag_filter, json_output, no_test_cache), _pool_child_env(pool_base_env, spawn_scratch, sub_root, stamp_nonce, update_snapshots, json_output, self_exe)));
                 launched += 1;
             }
             let path = test_files[ti];
@@ -270,7 +270,7 @@ fn _run_multi_file(test_files: string[], file_suite_index: int[], suites_in: Tes
             // stale side-channel file to unlink; a double crash that
             // never emits a summary falls back to `sf_counts[rti]` via
             // `reap.summary_seen` below.
-            let retry_handle = process.spawn_with_env(_pool_child_argv(self_exe, rpath, name_filter, tag_filter, json_output, no_test_cache), _pool_child_env(pool_base_env, rchild_scratch, sub_root, stamp_nonce, update_snapshots, json_output));
+            let retry_handle = process.spawn_with_env(_pool_child_argv(self_exe, rpath, name_filter, tag_filter, json_output, no_test_cache), _pool_child_env(pool_base_env, rchild_scratch, sub_root, stamp_nonce, update_snapshots, json_output, self_exe));
             let reap = _reap_test_child(retry_handle, deadline_ms, json_output);
             let rc = reap.rc;
             if rc == 0 { suites[rsuite_idx].pass_count += 1; } else {
@@ -314,7 +314,7 @@ fn _run_multi_file(test_files: string[], file_suite_index: int[], suites_in: Tes
             // to inherited stdio, exactly like the pool path.
             let child_scratch = sub_root + "/sub-" + number_to_string(ti);
             _ensure_dir_cmd(child_scratch);
-            let child_env = _pool_child_env(pool_base_env, child_scratch, sub_root, stamp_nonce, update_snapshots, json_output);
+            let child_env = _pool_child_env(pool_base_env, child_scratch, sub_root, stamp_nonce, update_snapshots, json_output, self_exe);
             let child_argv = _pool_child_argv(self_exe, path, name_filter, tag_filter, json_output, no_test_cache);
             let mut reap = _reap_test_child(process.spawn_with_env(child_argv, child_env), deadline_ms, json_output);
             if _should_retry_test(reap.rc, sub_retries_disabled) {

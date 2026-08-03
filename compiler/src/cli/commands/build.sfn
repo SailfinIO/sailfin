@@ -49,6 +49,7 @@ import { _do_determinism_check } from "../../build/determinism";
 import { _clang_link_multi } from "../../build/link";
 import { _dirname, _ensure_dir, _resolve_self_path } from "../../build/paths";
 import { _runtime_bundle_exists, clean_runtime_object_cache } from "../../build/runtime_objs";
+import { build_target_os, target_exe_name } from "../../build/target";
 import { cache_root, merge_cache_stats, resolve_build_cache_config } from "../../build_cache";
 import { emit_compiler_build_stamp_if_applicable } from "../../build_stamp";
 import {
@@ -279,6 +280,11 @@ fn _run_single_build(capsule_path: string, input_path_arg: string, out_path_arg:
     }
 
     if out_path.length == 0 {
+        // Resolved once and reused below: every branch in this block
+        // derives `out_path` itself (never from an explicit `-o`), so
+        // each derived executable name gets Windows' `.exe` suffix
+        // (SFN-693).
+        let target_os = build_target_os();
         // `--work-dir <root>` overrides the canonical
         // per-capsule layout: when set, the default output is
         // `<root>/native/sailfin` for binary builds (matching
@@ -293,7 +299,7 @@ fn _run_single_build(capsule_path: string, input_path_arg: string, out_path_arg:
         // the scoped `build/capsules/...` layout.
         if work_dir.length > 0 {
             if no_link { out_path = sailfin_cache_dir + "/program.o"; } else {
-                out_path = work_dir + "/native/sailfin";
+                out_path = target_exe_name(work_dir + "/native/sailfin", target_os);
             }
         } else {
             // Stage C2b: when `-p` is used and `-o` was NOT
@@ -316,14 +322,14 @@ fn _run_single_build(capsule_path: string, input_path_arg: string, out_path_arg:
                     let bin_name = capsule_default_bin_name(consumer.name);
                     if bin_name.length > 0 {
                         _ensure_dir(cap_dir + "/bin");
-                        out_path = capsule_artifact_bin_path(consumer.scope, consumer.name, bin_name);
+                        out_path = target_exe_name(capsule_artifact_bin_path(consumer.scope, consumer.name, bin_name), target_os);
                         canonical_set = true;
                     }
                 }
             }
             if !canonical_set {
                 if no_link { out_path = "build/sailfin/program.o"; } else {
-                    out_path = "build/sailfin/program";
+                    out_path = target_exe_name("build/sailfin/program", target_os);
                 }
             }
         }

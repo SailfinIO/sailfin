@@ -22,6 +22,7 @@ import {
     target_clang_flags,
     target_clang_triple,
     target_condition_runtime_sfn_sources,
+    target_exe_name,
     target_extra_link_libs,
     target_filter_link_libs,
     target_forced_linker_flag,
@@ -336,4 +337,29 @@ test "target: the Windows save-point call passes a null frame" ![pure] {
 test "target: the POSIX save-point call is unchanged" ![pure] {
     assert expect_eq_str(target_setjmp_call_line("Linux", "%sj", "%jmpbuf_i8"), "  %sj = call i32 @setjmp(i8* %jmpbuf_i8)").ok;
     assert expect_eq_str(target_setjmp_call_line("Darwin", "%sj.r0", "%jmpbuf.i8"), "  %sj.r0 = call i32 @setjmp(i8* %jmpbuf.i8)").ok;
+}
+
+// ---- SFN-693: the .exe suffix on compiler-derived Windows executables ----
+//
+// `CreateProcessA` (`runtime/sfn/platform/process_windows.sfn`) is called
+// with `lpApplicationName = null`, so Win32 derives the module name from
+// the command line and appends `.exe` only when the parsed name has no
+// extension of its own — an extensionless PE this compiler produces is
+// otherwise unlaunchable. This applies only to names the compiler itself
+// derives; an explicit `-o` is never touched.
+test "target: Windows appends .exe to a derived name" ![pure] {
+    assert expect_eq_str(target_exe_name("build/sailfin/program", "Windows"), "build/sailfin/program.exe").ok;
+}
+
+test "target: host targets leave the derived name unchanged" ![pure] {
+    assert expect_eq_str(target_exe_name("build/sailfin/program", "Linux"), "build/sailfin/program").ok;
+    assert expect_eq_str(target_exe_name("build/sailfin/program", "Darwin"), "build/sailfin/program").ok;
+}
+
+test "target: an already-.exe name is not doubled" ![pure] {
+    assert expect_eq_str(target_exe_name("build/sailfin/program.exe", "Windows"), "build/sailfin/program.exe").ok;
+}
+
+test "target: a dot elsewhere in the name still gets .exe on Windows" ![pure] {
+    assert expect_eq_str(target_exe_name("build/sailfin/my.app", "Windows"), "build/sailfin/my.app.exe").ok;
 }
