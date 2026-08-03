@@ -18,6 +18,7 @@
 //     negative case
 import { contains } from "sfn/strings";
 
+import { run_ownership_checker } from "../../src/check/ownership";
 import { append_import_function_signature_from_module, empty_import_symbols } from "../../src/effect_imports";
 import {
     OwnershipBinding,
@@ -25,8 +26,7 @@ import {
     binding_state,
     check_ownership,
     check_ownership_with_imports,
-    mark_binding_moved,
-    run_ownership_checker
+    mark_binding_moved
 } from "../../src/ownership_checker";
 import { parse_program } from "../../src/parser/mod";
 

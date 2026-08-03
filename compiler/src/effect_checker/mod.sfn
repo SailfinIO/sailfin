@@ -3,11 +3,11 @@
 // Stable effect-checker facade. Implementation is partitioned by concern so
 // each compiler module stays below the source-file line budget.
 import { Expression, FunctionSignature, Program } from "../ast";
-import { ImportSymbolTable } from "../effect_imports";
+import { ImportSymbolTable, empty_import_symbols, with_intrinsic_effects } from "../effect_imports";
+import { runtime_helper_effect_table } from "../llvm/runtime_helpers/mod";
 import {
     inferred_public_effects_api,
     is_program_entry_point_api,
-    validate_effects_api,
     validate_effects_with_imports_api
 } from "./analyzer";
 import { collect_effects_from_expression_api } from "./collector";
@@ -20,11 +20,11 @@ import {
 import { validate_capsule_capabilities_api, validate_recognized_effects_api } from "./validations";
 
 fn validate_effects(program: Program) -> EffectViolation[] {
-    return validate_effects_api(program);
+    return validate_effects_with_imports_api(program, with_intrinsic_effects(empty_import_symbols(), runtime_helper_effect_table()));
 }
 
 fn validate_effects_with_imports(program: Program, imports: ImportSymbolTable) -> EffectViolation[] {
-    return validate_effects_with_imports_api(program, imports);
+    return validate_effects_with_imports_api(program, with_intrinsic_effects(imports, runtime_helper_effect_table()));
 }
 
 fn validate_capsule_capabilities(program: Program, capabilities_required: string[]) -> CapabilityViolation[] {
@@ -36,11 +36,11 @@ fn validate_recognized_effects(program: Program) -> UnrecognizedEffectViolation[
 }
 
 fn inferred_public_effects(program: Program, imports: ImportSymbolTable) -> string[] {
-    return inferred_public_effects_api(program, imports);
+    return inferred_public_effects_api(program, with_intrinsic_effects(imports, runtime_helper_effect_table()));
 }
 
 fn collect_effects_from_expression(expression: Expression?, imports: ImportSymbolTable) -> EffectRequirement[] {
-    return collect_effects_from_expression_api(expression, imports);
+    return collect_effects_from_expression_api(expression, with_intrinsic_effects(imports, runtime_helper_effect_table()));
 }
 
 fn is_program_entry_point(signature: FunctionSignature) -> boolean {

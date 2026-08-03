@@ -1,0 +1,291 @@
+// compiler/src/analyzer.sfn
+//
+// Pure semantic-analysis facade for compiler and tooling consumers. Callers
+// supply a parsed program plus resolver-owned import/runtime context; this
+// module runs name/import, type, effect, ownership, decorator, and semantic
+// diagnostic passes without filesystem, network, clock, process, or CLI
+// authority. Presentation is deliberately absent: driver adapters render the
+// returned diagnostic data as human text or protocol envelopes.
+import { Program, Statement } from "./ast";
+import { collect_bare_assert_findings } from "./bare_assert_check";
+import { FixSuggestion } from "./diagnostic";
+import { validate_effects_with_imports_api } from "./effect_checker/analyzer";
+import { validate_capsule_capabilities_api, validate_recognized_effects_api } from "./effect_checker/validations";
+import {
+    capability_violation_to_diagnostic_data,
+    effect_violation_to_diagnostic_data,
+    unrecognized_effect_violation_to_diagnostic_data
+} from "./effect_diagnostics";
+import { ImportSymbolTable, with_intrinsic_effects } from "./effect_imports";
+import { ImportResolutionContext, collect_import_resolution_findings } from "./import_resolution_check";
+import { IntrinsicEffectTable } from "./intrinsic_effects";
+import { check_ownership_with_imports } from "./ownership_checker";
+import { collect_reexport_violations } from "./reexport_check";
+import { Token, TokenKind } from "./token";
+import {
+    collect_decorator_deprecation_findings,
+    typecheck_diagnostics_with_import_symbols_prelude
+} from "./typecheck";
+import { Diagnostic } from "./typecheck_types";
+
+// All authority-bearing preparation lives outside this contract. In
+// particular, the driver parses source, stages imported interfaces, scans the
+// runtime for implicit globals, resolves relative module paths, and reads the
+// effect-enforcement policy before constructing this value.
+struct AnalyzerInput {
+    program: Program;
+    file_path: string;
+    imported_interfaces: Statement[];
+    imported_symbols: ImportSymbolTable;
+    intrinsic_effects: IntrinsicEffectTable;
+    prelude_globals: string[];
+    capabilities_required: string[];
+    import_context: ImportResolutionContext;
+    allow_bare_assert: boolean;
+    effect_severity: string;
+}
+
+// Semantic data retained for downstream analysis/codegen consumers. The
+// validated program and its imported contract travel together, giving later
+// extraction work one stable result boundary.
+struct AnalyzedProgram {
+    program: Program;
+    imported_interfaces: Statement[];
+    imported_symbols: ImportSymbolTable;
+}
+
+// `producers` is parallel to `diagnostics` and remains separate from the
+// legacy token-backed `Diagnostic` shape. Driver protocol adapters use it to
+// preserve the published producer field without widening that legacy type.
+struct AnalyzerResult {
+    file_path: string;
+    analyzed_program: AnalyzedProgram;
+    diagnostics: Diagnostic[];
+    producers: string[];
+    error_count: int;
+    warning_count: int;
+}
+
+fn _parse_diagnostic_for_unknown(statement: Statement, file_path: string) -> Diagnostic {
+    let mut anchor: Token? = null;
+    let mut near: string = "";
+    if statement.tokens.length > 0 {
+        anchor = statement.tokens[0];
+        near = " near `" + statement.tokens[0].lexeme + "`";
+    }
+    let mut code: string = "E0500";
+    let mut message: string = "parse error: unrecognized syntax" + near;
+    if statement.code.length > 0 {
+        code = statement.code;
+        message = statement.message;
+    }
+    return Diagnostic {
+        code: code,
+        severity: "error",
+        message: message,
+        file_path: file_path,
+        primary: anchor,
+        suggestion: null
+    };
+}
+
+fn _record_severity(diagnostic: Diagnostic, errors: int, warnings: int) -> int[] {
+    let mut next_errors = errors;
+    let mut next_warnings = warnings;
+    if diagnostic.severity == "error" { next_errors += 1; }
+    if diagnostic.severity == "warning" { next_warnings += 1; }
+    return [next_errors, next_warnings];
+}
+
+fn analyze_program(input: AnalyzerInput) -> AnalyzerResult {
+    let program = input.program;
+    let analysis_symbols = with_intrinsic_effects(input.imported_symbols, input.intrinsic_effects);
+    let type_diagnostics = typecheck_diagnostics_with_import_symbols_prelude(program, input.imported_interfaces, analysis_symbols, input.prelude_globals);
+    let ownership_findings = check_ownership_with_imports(program, analysis_symbols);
+    let effect_violations = validate_effects_with_imports_api(program, analysis_symbols);
+    let capability_violations = validate_capsule_capabilities_api(program, input.capabilities_required);
+    let unrecognized_effects = validate_recognized_effects_api(program);
+
+    let mut diagnostics: Diagnostic[] = [];
+    let mut producers: string[] = [];
+    let mut errors: int = 0;
+    let mut warnings: int = 0;
+
+    // Parser recovery represents malformed top-level syntax as Unknown nodes.
+    let mut unknown_index: int = 0;
+    loop {
+        if unknown_index >= program.statements.length { break; }
+        let statement = program.statements[unknown_index];
+        if statement.variant == "Unknown" {
+            diagnostics.push(_parse_diagnostic_for_unknown(statement, input.file_path));
+            producers.push("parse");
+            errors += 1;
+        }
+        unknown_index += 1;
+    }
+
+    let reexport_violations = collect_reexport_violations(program);
+    let mut reexport_index: int = 0;
+    loop {
+        if reexport_index >= reexport_violations.length { break; }
+        diagnostics.push(Diagnostic {
+            code: "E0600", severity: "error", message: reexport_violations[reexport_index], file_path: input.file_path, primary: null, suggestion: null
+        });
+        producers.push("reexport");
+        errors += 1;
+        reexport_index += 1;
+    }
+
+    let import_findings = collect_import_resolution_findings(program, input.file_path, input.import_context);
+    let mut import_index: int = 0;
+    loop {
+        if import_index >= import_findings.length { break; }
+        diagnostics.push(import_findings[import_index]);
+        producers.push("import");
+        errors += 1;
+        import_index += 1;
+    }
+
+    if !input.allow_bare_assert {
+        let bare_asserts = collect_bare_assert_findings(program);
+        let mut assert_index: int = 0;
+        loop {
+            if assert_index >= bare_asserts.length { break; }
+            let finding = bare_asserts[assert_index];
+            let assert_token = Token {
+                kind: TokenKind.Identifier(),
+                lexeme: "assert",
+                line: finding.line,
+                column: finding.column
+            };
+            diagnostics.push(Diagnostic {
+                code: "W0210", severity: "warning", message: "prefer expect() over a bare assert inside a test block\nuse an sfn/test matcher (expect_eq_*, expect_contains_str, ...) for a descriptive failure; pass --allow-bare-assert to suppress", file_path: input.file_path, primary: assert_token, suggestion: FixSuggestion {
+                    message: "replace the bare `assert` with an `expect()` matcher, e.g. `assert expect_eq_int(actual, expected).ok;`", edits: []
+                }
+            });
+            producers.push("lint");
+            warnings += 1;
+            assert_index += 1;
+        }
+    }
+
+    let decorator_deprecations = collect_decorator_deprecation_findings(program, analysis_symbols);
+    let mut decorator_index: int = 0;
+    loop {
+        if decorator_index >= decorator_deprecations.length { break; }
+        let name = decorator_deprecations[decorator_index];
+        diagnostics.push(Diagnostic {
+            code: "W0211", severity: "warning", message: "deprecated-api: the built-in `@"
+                + name
+                + "` decorator is deprecated; import it from `log` (`import { "
+                + name
+                + " } from \"log\";`)", file_path: input.file_path, primary: null, suggestion: FixSuggestion {
+                message: "import the decorator from `log`, e.g. `import { "
+                    + name
+                    + " } from \"log\";`", edits: []
+            }
+        });
+        producers.push("lint");
+        warnings += 1;
+        decorator_index += 1;
+    }
+
+    let mut type_index: int = 0;
+    loop {
+        if type_index >= type_diagnostics.length { break; }
+        type_diagnostics[type_index].file_path = input.file_path;
+        let diagnostic = type_diagnostics[type_index];
+        diagnostics.push(diagnostic);
+        producers.push("typecheck");
+        let counts = _record_severity(diagnostic, errors, warnings);
+        errors = counts[0];
+        warnings = counts[1];
+        type_index += 1;
+    }
+
+    let mut ownership_index: int = 0;
+    loop {
+        if ownership_index >= ownership_findings.length { break; }
+        let finding = ownership_findings[ownership_index];
+        let diagnostic = Diagnostic {
+            code: finding.code,
+            severity: finding.severity,
+            message: finding.message,
+            file_path: input.file_path,
+            primary: finding.trigger,
+            suggestion: null
+        };
+        diagnostics.push(diagnostic);
+        // Ownership remains part of the published typecheck producer family.
+        producers.push("typecheck");
+        let counts = _record_severity(diagnostic, errors, warnings);
+        errors = counts[0];
+        warnings = counts[1];
+        ownership_index += 1;
+    }
+
+    let mut effect_index: int = 0;
+    loop {
+        if effect_index >= effect_violations.length { break; }
+        let mut violation = effect_violations[effect_index];
+        violation.severity = input.effect_severity;
+        let mut diagnostic = effect_violation_to_diagnostic_data(violation);
+        diagnostic.file_path = input.file_path;
+        diagnostics.push(diagnostic);
+        producers.push("effect");
+        let counts = _record_severity(diagnostic, errors, warnings);
+        errors = counts[0];
+        warnings = counts[1];
+        effect_index += 1;
+    }
+
+    let mut capability_index: int = 0;
+    loop {
+        if capability_index >= capability_violations.length { break; }
+        let mut violation = capability_violations[capability_index];
+        violation.severity = input.effect_severity;
+        let mut diagnostic = capability_violation_to_diagnostic_data(violation);
+        diagnostic.file_path = input.file_path;
+        diagnostics.push(diagnostic);
+        producers.push("effect");
+        let counts = _record_severity(diagnostic, errors, warnings);
+        errors = counts[0];
+        warnings = counts[1];
+        capability_index += 1;
+    }
+
+    let mut unrecognized_index: int = 0;
+    loop {
+        if unrecognized_index >= unrecognized_effects.length { break; }
+        let mut violation = unrecognized_effects[unrecognized_index];
+        violation.severity = input.effect_severity;
+        let mut diagnostic = unrecognized_effect_violation_to_diagnostic_data(violation);
+        diagnostic.file_path = input.file_path;
+        diagnostics.push(diagnostic);
+        producers.push("effect");
+        let counts = _record_severity(diagnostic, errors, warnings);
+        errors = counts[0];
+        warnings = counts[1];
+        unrecognized_index += 1;
+    }
+
+    return AnalyzerResult {
+        file_path: input.file_path,
+        analyzed_program: AnalyzedProgram {
+            program: program,
+            imported_interfaces: input.imported_interfaces,
+            imported_symbols: analysis_symbols
+        },
+        diagnostics: diagnostics,
+        producers: producers,
+        error_count: errors,
+        warning_count: warnings
+    };
+}
+
+export {
+    AnalyzedProgram,
+    AnalyzerInput,
+    AnalyzerResult,
+    analyze_program
+};

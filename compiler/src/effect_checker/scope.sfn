@@ -34,7 +34,10 @@ fn _copy_effect_table(table: ImportSymbolTable) -> ImportSymbolTable {
         copied.push(table.functions[k]);
         k += 1;
     }
-    return ImportSymbolTable { functions: copied };
+    return ImportSymbolTable {
+        functions: copied,
+        intrinsic_effects: table.intrinsic_effects
+    };
 }
 
 // Enumerate every nested / local `fn` reachable inside a block, at any depth,
@@ -261,7 +264,10 @@ fn _local_effect_table(imports: ImportSymbolTable, nested: Statement[]) -> Impor
         copied.push(imports.functions[k]);
         k += 1;
     }
-    let mut merged = ImportSymbolTable { functions: copied };
+    let mut merged = ImportSymbolTable {
+        functions: copied,
+        intrinsic_effects: imports.intrinsic_effects
+    };
     let mut i: int = 0;
     loop {
         if i >= nested.length { break; }
@@ -334,7 +340,10 @@ fn _hoist_block_local_fns(imports: ImportSymbolTable, block: Block) -> ImportSym
         copied.push(imports.functions[k]);
         k += 1;
     }
-    let mut merged = ImportSymbolTable { functions: copied };
+    let mut merged = ImportSymbolTable {
+        functions: copied,
+        intrinsic_effects: imports.intrinsic_effects
+    };
     let mut i: int = 0;
     loop {
         if i >= block.statements.length { break; }

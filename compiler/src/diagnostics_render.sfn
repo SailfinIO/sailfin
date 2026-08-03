@@ -31,147 +31,36 @@
 // and the seed compiler does not handle import cycles cleanly. The
 // duplication is small (~50 lines, four pure string helpers) and
 // changes here are decoupled from changes to `main.sfn`'s own copies.
-import {
-    Diag,
-    FixSuggestion,
-    Span,
-    TextEdit
-} from "./diagnostic";
+import { Diag, Span } from "./diagnostic";
 import {
     CapabilityViolation,
     EffectRequirement,
     EffectViolation,
     UnrecognizedEffectViolation
 } from "./effect_checker/types";
-import { canonical_effects } from "./effect_taxonomy";
+import {
+    capability_violation_to_diagnostic_data,
+    code_for_missing_effect_data,
+    effect_violation_to_diagnostic_data,
+    join_effects_data,
+    unrecognized_effect_violation_to_diagnostic_data
+} from "./effect_diagnostics";
 import { substring } from "./string_utils";
-import { Token } from "./token";
 import { Diagnostic } from "./typecheck_types";
 
 // -------------------------------------------------------------------
 // Effect-violation → Diagnostic
 // -------------------------------------------------------------------
 fn join_effects(effects: string[]) -> string {
-    if effects.length == 0 { return ""; }
-    let mut out = effects[0];
-    let mut i: int = 1;
-    loop {
-        if i >= effects.length { break; }
-        out = out + ", " + effects[i];
-        i += 1;
-    }
-    return out;
+    return join_effects_data(effects);
 }
 
 fn code_for_missing_effect(missing_effects: string[], requirements: EffectRequirement[]) -> string {
-    // E0400 — missing effect declaration (general, in-module)
-    // E0401 — decorator-implied effect missing
-    // E0402 — cross-module effect not propagated from imported callee
-    //
-    // E0402 is identified by the description prefix `imported \``
-    // that `effect_checker._propagate_imported_callee_effects`
-    // attaches when the offending callee is an imported function.
-    // E0401 wins over E0402 when both apply (decorator-implied
-    // effects are typically I/O regardless of any cross-module
-    // propagation), matching the historical Phase A precedence.
-    let mut has_imported: boolean = false;
-    let mut i: int = 0;
-    loop {
-        if i >= requirements.length { break; }
-        let desc = requirements[i].description;
-        if desc.length > 0 {
-            if desc[0] == "@" { return "E0401"; }
-            if _description_starts_with_imported(desc) { has_imported = true; }
-        }
-        i += 1;
-    }
-    if has_imported { return "E0402"; }
-    return "E0400";
-}
-
-fn _description_starts_with_imported(desc: string) -> boolean {
-    let prefix = "imported `";
-    if desc.length < prefix.length { return false; }
-    let mut i: int = 0;
-    loop {
-        if i >= prefix.length { break; }
-        if desc[i] != prefix[i] { return false; }
-        i += 1;
-    }
-    return true;
+    return code_for_missing_effect_data(missing_effects, requirements);
 }
 
 fn effect_violation_to_diagnostic(violation: EffectViolation) -> Diagnostic {
-    let effects_text = join_effects(violation.missing_effects);
-    let mut message = "function `" + violation.routine_name
-        + "` is missing required effects: !["
-        + effects_text
-        + "]";
-
-    if violation.requirements.length > 0 {
-        message = message + "\nrequired by:";
-        let mut i: int = 0;
-        loop {
-            if i >= violation.requirements.length { break; }
-            let req = violation.requirements[i];
-            message = message + "\n  - " + req.description + " requires !["
-                + req.effect
-                + "]";
-            i += 1;
-        }
-    }
-
-    if violation.missing_effects.length > 0 {
-        message = message + "\nsuggestion: add ![" + effects_text
-            + "] to the function signature";
-    }
-
-    let code = code_for_missing_effect(violation.missing_effects, violation.requirements);
-    // `severity` rides on the violation since Phase A so the gate
-    // (`effect_gate.sfn`) can flip warning/error from
-    // `SAILFIN_EFFECT_ENFORCE` without reaching into the renderer.
-    // Empty-string fallback keeps callers that never set severity
-    // (e.g. seed-compiler test fixtures) on the historical default.
-    let mut sev = violation.severity;
-    if sev.length == 0 { sev = "error"; }
-    return Diagnostic {
-        code: code,
-        severity: sev,
-        message: message,
-        file_path: "",
-        primary: violation.trigger,
-        // B3 stage 2: structured fix-it. When the effect checker
-        // captured a body-opening brace token AND there's at least
-        // one missing effect, splice `![effects] ` in at the brace
-        // column. Tools like `sfn fix` and the LSP code-action
-        // handler apply the edit directly; the textual
-        // "suggestion: add ..." line in `message` remains for
-        // human readers.
-        suggestion: _suggestion_for_missing_effect(violation.missing_effects, violation.body_open_token)
-    };
-}
-
-// Build the structured `FixSuggestion` for an `E0400`/`E0401`/`E0402`
-// diagnostic. Returns null when the editor wouldn't have a stable
-// anchor (no body-open token, or no effects to add). The edit is an
-// insertion (zero-width range) at the column of the body's `{` —
-// inserting `![effect, ...] ` produces
-// `fn foo(...) ![io] {` from `fn foo(...) {`.
-fn _suggestion_for_missing_effect(missing_effects: string[], body_open_token: Token?) -> FixSuggestion? {
-    if missing_effects.length == 0 { return null; }
-    if body_open_token == null { return null; }
-    let tok: Token? = body_open_token;
-    let effects_text = join_effects(missing_effects);
-    let mut edits: TextEdit[] = [];
-    edits.push(TextEdit {
-        start_line: tok.line, start_column: tok.column, end_line: tok.line, end_column: tok.column, replacement: "!["
-            + effects_text
-            + "] "
-    });
-    return FixSuggestion {
-        message: "add ![" + effects_text + "] to the function signature",
-        edits: edits
-    };
+    return effect_violation_to_diagnostic_data(violation);
 }
 
 // Phase F: render a `CapabilityViolation` as an `E0403` diagnostic.
@@ -193,45 +82,7 @@ fn _suggestion_for_missing_effect(missing_effects: string[], body_open_token: To
 // silences it on the build path. `=error` (the post-Phase-D default)
 // fails the build.
 fn capability_violation_to_diagnostic(violation: CapabilityViolation) -> Diagnostic {
-    let excess_text = join_effects(violation.excess_effects);
-    let surface_text = join_effects(violation.capabilities_required);
-    let mut message = "function `" + violation.routine_name
-        + "` declares effect"
-        + _excess_plural_suffix(violation.excess_effects)
-        + " !["
-        + excess_text
-        + "] outside capsule capability surface !["
-        + surface_text
-        + "]";
-    message = message + "\nnote: capsule declares capabilities = !["
-        + surface_text
-        + "]";
-    if violation.excess_effects.length > 0 {
-        message = message + "\nsuggestion: add " + _quoted_effects_csv(violation.excess_effects)
-            + " to capsule.toml [capabilities] required, or remove !["
-            + excess_text
-            + "] from this function";
-    }
-    let mut sev = violation.severity;
-    if sev.length == 0 { sev = "error"; }
-    return Diagnostic {
-        code: "E0403",
-        severity: sev,
-        message: message,
-        file_path: "",
-        primary: violation.trigger,
-        // B3 stage 1: capability cross-check has no auto-fix today.
-        // The two-pronged fix-it (widen manifest vs narrow function)
-        // is documented in `message`; stage 2 may promote one branch
-        // to a `FixSuggestion` once we decide which is the
-        // less-risky default. Until then, leave it null.
-        suggestion: null
-    };
-}
-
-fn _excess_plural_suffix(excess: string[]) -> string {
-    if excess.length == 1 { return ""; }
-    return "s";
+    return capability_violation_to_diagnostic_data(violation);
 }
 
 // Gate G6 (SFEP-0017 D1): render an `UnrecognizedEffectViolation` as an
@@ -243,47 +94,7 @@ fn _excess_plural_suffix(excess: string[]) -> string {
 // is obvious. Severity threads through the same `SAILFIN_EFFECT_ENFORCE`
 // contract as the sibling renderers.
 fn unrecognized_effect_violation_to_diagnostic(violation: UnrecognizedEffectViolation) -> Diagnostic {
-    let effects_text = join_effects(violation.unrecognized_effects);
-    let mut message = "function `" + violation.routine_name
-        + "` declares unrecognized effect"
-        + _unrecognized_plural_suffix(violation.unrecognized_effects)
-        + " !["
-        + effects_text
-        + "]";
-    message = message
-        + "\nnote: an effect root must be one of the canonical six !["
-        + join_effects(canonical_effects())
-        + "] or `pure`; sub-effects refine a canonical root (e.g. `io.fs`)";
-    message = message + "\nsuggestion: correct the effect name or remove !["
-        + effects_text
-        + "] from this function";
-    let mut sev = violation.severity;
-    if sev.length == 0 { sev = "error"; }
-    return Diagnostic {
-        code: "E0404",
-        severity: sev,
-        message: message,
-        file_path: "",
-        primary: violation.trigger,
-        suggestion: null
-    };
-}
-
-fn _unrecognized_plural_suffix(effects: string[]) -> string {
-    if effects.length == 1 { return ""; }
-    return "s";
-}
-
-fn _quoted_effects_csv(effects: string[]) -> string {
-    if effects.length == 0 { return ""; }
-    let mut out = "\"" + effects[0] + "\"";
-    let mut i: int = 1;
-    loop {
-        if i >= effects.length { break; }
-        out = out + ", \"" + effects[i] + "\"";
-        i += 1;
-    }
-    return out;
+    return unrecognized_effect_violation_to_diagnostic_data(violation);
 }
 
 // -------------------------------------------------------------------

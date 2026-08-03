@@ -33,6 +33,7 @@ import {
     append_import_function_signature_from_module,
     empty_import_symbols
 } from "./effect_imports";
+import { ClosureSymbolSet } from "./import_resolution_check";
 import { NativeFunction } from "./native_ir";
 import { parse_native_artifact_for_import_context } from "./native_ir_api";
 import { interfaces_from_native } from "./typecheck_imports";
@@ -192,11 +193,6 @@ fn _strip_spaces(text: string) -> string {
 // unreadable artifact. Over-accepting is a deliberate false-negative bias
 // — it can only make E0431 more permissive, never false-positive on valid
 // code.
-struct ClosureSymbolSet {
-    names: string[];
-    complete: boolean;
-}
-
 fn build_closure_symbol_set(asm_paths: string[]) -> ClosureSymbolSet ![io] {
     let mut names: string[] = [];
     let mut complete: boolean = true;
@@ -395,7 +391,6 @@ fn load_imported_native_texts_from_paths(paths: string[]) -> string[] ![io] {
 
 export {
     ArtifactInterfaceParse,
-    ClosureSymbolSet,
     ImportedInterfaceLoadResult,
     build_closure_symbol_set,
     interfaces_from_native_artifact,

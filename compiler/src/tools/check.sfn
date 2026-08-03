@@ -1,72 +1,27 @@
 // compiler/src/tools/check.sfn
 //
-// Fast analysis pass for Sailfin source files. Runs parse, typecheck,
-// and effect-check without emitting native IR or invoking clang.
-//
-// Orchestration only — reuses parse_program, typecheck_diagnostics,
-// validate_effects, and (since Phase B) the shared rendering surface
-// in `compiler/src/diagnostics_render.sfn`. No new analysis logic is
-// introduced here.
-//
-// Phase B (`docs/proposals/0008-effect-validation.md` §5) extracted the
-// effect-violation → Diagnostic conversion and `render_diagnostic`
-// out into `diagnostics_render.sfn` so the build path
-// (`main.sfn` via `effect_gate.sfn`) renders effect violations in
-// the same shape `sfn check` always has. Severity for effect
-// violations now flows through `resolve_effect_enforcement` so the
-// `SAILFIN_EFFECT_ENFORCE` env var steers `sfn check` and the build
-// path consistently — a `=warning` setting in Phase B keeps
-// `sfn check` green for the duration of the audit, while `=error`
-// reproduces the post-Phase-D gate locally for contributors.
-//
-// See docs/proposals/0004-check-architecture.md for the broader design.
-import { Statement } from "../ast";
-import { collect_bare_assert_findings } from "../bare_assert_check";
-import { FixSuggestion } from "../diagnostic";
-import {
-    capability_violation_to_diagnostic,
-    effect_violation_to_diagnostic,
-    render_diagnostic,
-    split_source_lines,
-    unrecognized_effect_violation_to_diagnostic
-} from "../diagnostics_render";
-import {
-    validate_capsule_capabilities,
-    validate_effects_with_imports,
-    validate_recognized_effects
-} from "../effect_checker";
+// Driver adapter for the pure analyzer facade. This module prepares
+// authority-bearing check inputs (runtime globals, environment policy, and
+// relative-module resolution), then converts diagnostic data into the legacy
+// human-rendered `CheckResult` shape. Semantic analysis lives in
+// `compiler/src/analyzer.sfn`; JSON envelope rendering stays in
+// `check/engine.sfn`.
+import { AnalyzerInput, AnalyzerResult, analyze_program } from "../analyzer";
+import { Program, Statement } from "../ast";
+import { resolve_import_context } from "../check/import_resolution";
+import { render_diagnostic, split_source_lines } from "../diagnostics_render";
 import { read_effect_enforcement_env, resolve_effect_enforcement } from "../effect_gate";
 import { ImportSymbolTable, empty_import_symbols } from "../effect_imports";
-import { collect_import_resolution_findings } from "../import_resolution_check";
-import { runtime_helper_call_names } from "../llvm/runtime_helpers/mod";
+import { ClosureSymbolSet } from "../import_resolution_check";
+import { runtime_helper_call_names, runtime_helper_effect_table } from "../llvm/runtime_helpers/mod";
 import { number_to_string } from "../num_format";
-import { check_ownership_with_imports } from "../ownership_checker";
 import { parse_program } from "../parser/mod";
 import { load_prelude_global_names } from "../prelude_globals";
-import { collect_reexport_violations } from "../reexport_check";
-import { substring } from "../string_utils";
-import { Token, TokenKind } from "../token";
-import {
-    collect_decorator_deprecation_findings,
-    typecheck_diagnostics_with_import_symbols_prelude
-} from "../typecheck";
-import { ClosureSymbolSet } from "../typecheck_import_loader";
 import { Diagnostic, diagnostic_to_diag } from "../typecheck_types";
 
-// -------------------------------------------------------------------
-// Result types
-// -------------------------------------------------------------------
 struct CheckResult {
     file_path: string;
     diagnostics: Diagnostic[];
-    // `producers` is parallel to `diagnostics`; producers[i] describes
-    // which analysis pass minted diagnostics[i]. Kept as a sibling
-    // array (rather than a field on `Diagnostic`) so widening the
-    // shared `Diagnostic` struct stays out of the re-export GEP
-    // hazard zone (see docs/rca/2026-04-18-reexport-diagnostic-gep.md
-    // — every `Diagnostic` widening risks reintroducing that bug).
-    // `check/engine.sfn`'s `--json` path consumes this directly; the
-    // human renderer ignores it.
     producers: string[];
     rendered: string[];
     error_count: int;
@@ -79,391 +34,76 @@ struct CheckSummary {
     total_warnings: int;
 }
 
-// -------------------------------------------------------------------
-// Orchestration
-// -------------------------------------------------------------------
-fn _is_sfn_file(path: string) -> boolean {
-    if path.length < 4 { return false; }
-    let start = path.length - 4;
-    return substring(path, start, path.length) == ".sfn";
+// `off` is a build-only escape hatch. Explicit `sfn check` continues to
+// validate effects at the default severity, matching its historical contract.
+fn effect_severity_for_check(file_path: string) -> string ![io] {
+    let mut severity = resolve_effect_enforcement(read_effect_enforcement_env(file_path));
+    if severity == "off" { severity = resolve_effect_enforcement(""); }
+    return severity;
 }
 
-// Build the `E0500` parse diagnostic for a top-level `Statement.Unknown`
-// node. The parser recovers from unrecognized syntax by emitting an
-// `Unknown` statement (carrying the consumed tokens) rather than a
-// diagnostic, so `sfn check` historically reported genuinely malformed
-// input as clean. Anchor the diagnostic at the first consumed token when
-// one exists; the `near `<lexeme>`` hint points the reader at the offending
-// token. Severity is always `error` — unrecognized syntax is never a
-// warning — independent of the `SAILFIN_EFFECT_ENFORCE` knob that steers
-// effect diagnostics.
-fn _parse_diagnostic_for_unknown(stmt: Statement, file_path: string) -> Diagnostic {
-    let mut anchor: Token? = null;
-    let mut near: string = "";
-    if stmt.tokens.length > 0 {
-        anchor = stmt.tokens[0];
-        near = " near `" + stmt.tokens[0].lexeme + "`";
-    }
-    // A malformed-but-dispatched declaration (`fn broken( {`, `let x = ;`,
-    // `struct S { x: }`) carries a precise `E05xx` code + message set by the
-    // parser (SFN-18). A genuinely unrecognized top-level construct carries
-    // neither and renders as the generic `E0500`. Both are `producer: parse`.
-    let mut code: string = "E0500";
-    let mut message: string = "parse error: unrecognized syntax" + near;
-    if stmt.code.length > 0 {
-        code = stmt.code;
-        message = stmt.message;
-    }
-    return Diagnostic {
-        code: code,
-        severity: "error",
-        message: message,
+// Driver-side constructor for the facade contract. Parsed syntax and staged
+// interfaces arrive from the caller; all remaining authority-bearing inputs
+// are resolved here before the pure `analyze_program` call.
+fn analyzer_input_for_check(program: Program, file_path: string, imported_interfaces: Statement[], imported_symbols: ImportSymbolTable, capabilities_required: string[], closure_symbols: ClosureSymbolSet, allow_bare_assert: boolean) -> AnalyzerInput ![io] {
+    let prelude_globals = load_prelude_global_names(runtime_helper_call_names());
+    let import_context = resolve_import_context(program, file_path, closure_symbols);
+    return AnalyzerInput {
+        program: program,
         file_path: file_path,
-        primary: anchor,
-        suggestion: null
+        imported_interfaces: imported_interfaces,
+        imported_symbols: imported_symbols,
+        intrinsic_effects: runtime_helper_effect_table(),
+        prelude_globals: prelude_globals,
+        capabilities_required: capabilities_required,
+        import_context: import_context,
+        allow_bare_assert: allow_bare_assert,
+        effect_severity: effect_severity_for_check(file_path)
+    };
+}
+
+// Presentation adapter: semantic diagnostic data becomes the existing human
+// rendering array without changing codes, ordering, messages, or counts.
+fn check_result_from_analysis(result: AnalyzerResult, source: string) -> CheckResult {
+    let source_lines = split_source_lines(source);
+    let mut rendered: string[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= result.diagnostics.length { break; }
+        let producer = result.producers[index];
+        rendered.push(render_diagnostic(diagnostic_to_diag(result.diagnostics[index], producer), source_lines, producer));
+        index += 1;
+    }
+    return CheckResult {
+        file_path: result.file_path,
+        diagnostics: result.diagnostics,
+        producers: result.producers,
+        rendered: rendered,
+        error_count: result.error_count,
+        warning_count: result.warning_count
     };
 }
 
 fn check_source(source: string, file_path: string) -> CheckResult ![io] {
-    let no_interfaces: Statement[] = [];
-    let no_caps: string[] = [];
-    // Standalone single-file check: no staged closure, so mark it
-    // incomplete — E0431 (closure-wide symbol existence) is skipped, but
-    // E0430 (on-disk module-path probe) still fires.
-    let no_closure = ClosureSymbolSet { names: [], complete: false };
-    return check_source_with_imports(source, file_path, no_interfaces, empty_import_symbols(), no_caps, no_closure, false);
+    let imported_interfaces: Statement[] = [];
+    let capabilities_required: string[] = [];
+    let closure_symbols = ClosureSymbolSet { names: [], complete: false };
+    return check_source_with_imports(source, file_path, imported_interfaces, empty_import_symbols(), capabilities_required, closure_symbols, false);
 }
 
-// Cross-module-aware variant: `imported_interfaces` carries
-// `Statement.InterfaceDeclaration` values sourced from staged
-// `.sfn-asm` artifacts (see `typecheck_import_loader.sfn`). Paired
-// with `function_effects`, they are passed through to
-// `typecheck_diagnostics_with_import_symbols` so cross-module
-// `implements` clauses are conformance-checked against the real
-// interface definitions and the typecheck walker can resolve
-// free-function callees against the same symbol surface the effect
-// checker sees (issue #811).
-//
-// Phase E: `function_effects` carries the per-build cross-module
-// effect symbol table built from the same `.sfn-asm` artifacts.
-// It is threaded into `validate_effects_with_imports` so a caller
-// missing `![<imported_callee_effect>]` produces an `E0402`
-// diagnostic alongside any in-module `E0400` / `E0401` findings,
-// and into `typecheck_diagnostics_with_import_symbols` so issue D
-// (#812) can flip on `E0420` for undefined callees without a
-// follow-up wiring PR. Both entry points localize the global table
-// internally — callers always pass the loader-built global.
-//
-// Phase F: `capabilities_required` carries the project manifest's
-// `[capabilities] required = [...]` surface so `sfn check`
-// surfaces `E0403` for any function declaring an effect outside
-// the manifest-allowed set. Empty list = no manifest in scope =
-// skip the cross-check (standalone .sfn files outside any capsule
-// keep working unchanged).
-fn check_source_with_imports(source: string, file_path: string, imported_interfaces: Statement[], function_effects: ImportSymbolTable, capabilities_required: string[], closure_symbols: ClosureSymbolSet, allow_bare_assert: boolean) -> CheckResult ![io] {
+// Backwards-compatible source adapter retained for existing tool consumers.
+// New analyzer-only consumers parse independently and call `analyze_program`
+// with an `AnalyzerInput`, avoiding every driver/LLVM dependency in this file.
+fn check_source_with_imports(source: string, file_path: string, imported_interfaces: Statement[], imported_symbols: ImportSymbolTable, capabilities_required: string[], closure_symbols: ClosureSymbolSet, allow_bare_assert: boolean) -> CheckResult ![io] {
     let program = parse_program(source);
-    let prelude_globals = load_prelude_global_names(runtime_helper_call_names());
-    let type_diags = typecheck_diagnostics_with_import_symbols_prelude(program, imported_interfaces, function_effects, prelude_globals);
-    let ownership_warnings = check_ownership_with_imports(program, function_effects);
-    let effect_violations = validate_effects_with_imports(program, function_effects);
-    let capability_violations = validate_capsule_capabilities(program, capabilities_required);
-    let unrecognized_violations = validate_recognized_effects(program);
-
-    let source_lines = split_source_lines(source);
-    let mut combined: Diagnostic[] = [];
-    let mut producers: string[] = [];
-    let mut rendered: string[] = [];
-    let mut errors: int = 0;
-    let mut warnings: int = 0;
-
-    // Parse-error surfacing (#974). The parser emits `Statement.Unknown`
-    // for unrecognized top-level constructs instead of recording a parse
-    // diagnostic, so `sfn check` used to report syntactically broken
-    // input (e.g. `@@@ !!!`, a stray `}`) as clean. Walk the top-level
-    // statements and mint an `E0500` parse diagnostic for each `Unknown`
-    // node before typechecking. Limitation: malformed-but-dispatched
-    // declarations (e.g. a function with a broken parameter list) parse
-    // into a recognized declaration node, not an `Unknown`, so they are
-    // not yet flagged — that requires parser-level error recovery,
-    // tracked as a follow-up.
-    let mut ui: int = 0;
-    loop {
-        if ui >= program.statements.length { break; }
-        let stmt = program.statements[ui];
-        if stmt.variant == "Unknown" {
-            let pdiag = _parse_diagnostic_for_unknown(stmt, file_path);
-            combined.push(pdiag);
-            producers.push("parse");
-            rendered.push(render_diagnostic(diagnostic_to_diag(pdiag, "parse"), source_lines, "parse"));
-            errors += 1;
-        }
-        ui += 1;
-    }
-
-    // Implicit re-export surfacing. `export { X };` where X is only
-    // imported (no local definition) from a local module path produces
-    // no `.fn X` entry in the re-exporter's .sfn-asm, so consumers fall
-    // back to `i8*` and miscompile boolean `if` guards. The build path
-    // already rejects this (main.sfn:_reject_reexport_violations); run
-    // the same analysis here so `sfn check` catches it in the inner loop
-    // instead of waiting on the self-host build (replaces the former
-    // scripts/lint_no_implicit_reexports.py). Always `error`, and — unlike
-    // effect diagnostics — independent of SAILFIN_EFFECT_ENFORCE: this is
-    // a hard correctness gate, never a warning.
-    // Code family E06xx = module-structure; see diagnostics_json.sfn
-    // classify_producer. Violations carry no token span, so primary is
-    // null (render_diagnostic falls back to a location-only line).
-    let reexport_violations = collect_reexport_violations(program);
-    let mut rxi: int = 0;
-    loop {
-        if rxi >= reexport_violations.length { break; }
-        let rxdiag = Diagnostic {
-            code: "E0600",
-            severity: "error",
-            message: reexport_violations[rxi],
-            file_path: file_path,
-            primary: null,
-            suggestion: null
-        };
-        combined.push(rxdiag);
-        producers.push("reexport");
-        rendered.push(render_diagnostic(diagnostic_to_diag(rxdiag, "reexport"), source_lines, "reexport"));
-        errors += 1;
-        rxi += 1;
-    }
-
-    // #1953: unresolved-import surfacing. A relative `import { ... } from
-    // "./x"` that resolves to no module on disk (E0430), or a named
-    // specifier defined nowhere in the staged import closure (E0431), used
-    // to pass `check` clean and only fail much later at LLVM lowering. Run
-    // the resolution pass here so the inner loop catches it. `closure_symbols`
-    // is empty and incomplete for the standalone `check_source` path
-    // (single-file, no staged closure) — E0430 still fires from the on-disk
-    // probe; E0431 is simply skipped when the closure is incomplete. Always
-    // `error`.
-    let import_findings = collect_import_resolution_findings(program, file_path, closure_symbols);
-    let mut ifi: int = 0;
-    loop {
-        if ifi >= import_findings.length { break; }
-        let idiag = import_findings[ifi];
-        combined.push(idiag);
-        producers.push("import");
-        rendered.push(render_diagnostic(diagnostic_to_diag(idiag, "import"), source_lines, "import"));
-        errors += 1;
-        ifi += 1;
-    }
-
-    // W0210 (#1173): soft-deprecate a bare `assert` inside a `test`
-    // block in favor of `expect()` matchers, which carry a descriptive
-    // failure message instead of just the expression text. Detection
-    // runs over the parser's desugared assert shape (see
-    // bare_assert_check.sfn); only statements lexically inside a test
-    // body are visited, so an `assert` in ordinary code never warns.
-    // Always a `warning`, never an error, so the compiler's own
-    // bare-assert-heavy suite stays green; `--allow-bare-assert`
-    // suppresses it entirely. Code family W02xx = lint; see
-    // diagnostics_json.sfn classify_producer.
-    if !allow_bare_assert {
-        let bare_asserts = collect_bare_assert_findings(program);
-        let mut bai: int = 0;
-        loop {
-            if bai >= bare_asserts.length { break; }
-            let finding = bare_asserts[bai];
-            let assert_token = Token {
-                kind: TokenKind.Identifier(),
-                lexeme: "assert",
-                line: finding.line,
-                column: finding.column
-            };
-            let fix = FixSuggestion {
-                message: "replace the bare `assert` with an `expect()` matcher, e.g. `assert expect_eq_int(actual, expected).ok;`",
-                edits: []
-            };
-            let badiag = Diagnostic {
-                code: "W0210",
-                severity: "warning",
-                message: "prefer expect() over a bare assert inside a test block\nuse an sfn/test matcher (expect_eq_*, expect_contains_str, ...) for a descriptive failure; pass --allow-bare-assert to suppress",
-                file_path: file_path,
-                primary: assert_token,
-                suggestion: fix
-            };
-            combined.push(badiag);
-            producers.push("lint");
-            rendered.push(render_diagnostic(diagnostic_to_diag(badiag, "lint"), source_lines, "lint"));
-            warnings += 1;
-            bai += 1;
-        }
-    }
-
-    // W0211 (SFEP-0023 §4.5): soft-deprecate the built-in `@logExecution`/
-    // `@trace` applied without importing them from `log`. The capsule-
-    // resolved import is the supported path; the built-in still works via
-    // the runtime-helper fallback until the seed re-cut deletes it (step F).
-    // Always a `warning`. `function_effects` is the resolved import table, so
-    // the finding fires only on the genuinely un-imported use — matching the
-    // lowering fallback's discriminator. Code family W02xx = lint.
-    let decorator_deprecations = collect_decorator_deprecation_findings(program, function_effects);
-    let mut ddi: int = 0;
-    loop {
-        if ddi >= decorator_deprecations.length { break; }
-        let dname = decorator_deprecations[ddi];
-        let ddfix = FixSuggestion {
-            message: "import the decorator from `log`, e.g. `import { " + dname
-                + " } from \"log\";`",
-            edits: []
-        };
-        let dddiag = Diagnostic {
-            code: "W0211",
-            severity: "warning",
-            message: "deprecated-api: the built-in `@" + dname
-                + "` decorator is deprecated; import it from `log` (`import { "
-                + dname
-                + " } from \"log\";`)",
-            file_path: file_path,
-            primary: null,
-            suggestion: ddfix
-        };
-        combined.push(dddiag);
-        producers.push("lint");
-        rendered.push(render_diagnostic(diagnostic_to_diag(dddiag, "lint"), source_lines, "lint"));
-        warnings += 1;
-        ddi += 1;
-    }
-
-    // Stamp the originating module path onto each typecheck diagnostic
-    // and render it in one pass. Factories mint diagnostics with an
-    // empty file_path; this is the single point that knows which
-    // module is currently being analyzed.
-    let mut ti: int = 0;
-    loop {
-        if ti >= type_diags.length { break; }
-        type_diags[ti].file_path = file_path;
-        let diag = type_diags[ti];
-        combined.push(diag);
-        producers.push("typecheck");
-        rendered.push(render_diagnostic(diagnostic_to_diag(diag, "typecheck"), source_lines, "typecheck"));
-        if strings_equal(diag.severity, "error") { errors += 1; }
-        if strings_equal(diag.severity, "warning") { warnings += 1; }
-        ti += 1;
-    }
-
-    // Ownership is a check-time correctness gate, not only a build-time one.
-    // Convert the shared ownership findings here so `sfn check` catches Task
-    // double-consumption (E0837) and nursery escape (E0838) in the fast inner
-    // loop with the same diagnostics the build path emits.
-    let mut oi: int = 0;
-    loop {
-        if oi >= ownership_warnings.length { break; }
-        let finding = ownership_warnings[oi];
-        let odiag = Diagnostic {
-            code: finding.code,
-            severity: finding.severity,
-            message: finding.message,
-            file_path: file_path,
-            primary: finding.trigger,
-            suggestion: null
-        };
-        combined.push(odiag);
-        // Ownership diagnostics are part of the frontend type-safety gate.
-        // Keep the published check-JSON producer enum stable rather than
-        // introducing a schema-breaking producer value for this sub-pass.
-        producers.push("typecheck");
-        rendered.push(render_diagnostic(diagnostic_to_diag(odiag, "typecheck"), source_lines, "typecheck"));
-        if strings_equal(odiag.severity, "error") { errors += 1; }
-        if strings_equal(odiag.severity, "warning") { warnings += 1; }
-        oi += 1;
-    }
-
-    // Route effect-violation severity through the same env-var
-    // contract the build path uses. `sfn check` honors `=warning`
-    // and `=error`; post-Phase-D the unset default is "error", so
-    // `sfn check` enforces declared effects by default. Contributors
-    // who want the pre-Phase-D audit mode opt in with `=warning`.
-    //
-    // Per proposal §4.7, `=off` is a build-path escape hatch only
-    // — "does not turn off sfn check validation, only the build
-    // path." `sfn check` therefore ignores `=off` and falls back
-    // to whatever severity would apply for an unset env var — the
-    // Phase D "error" default — without a second knob for `sfn check`
-    // to track.
-    //
-    // `read_effect_enforcement_env` reads `SAILFIN_EFFECT_ENFORCE`
-    // directly via `env.get`; the `file_path` argument is retained
-    // only for API compatibility and is ignored.
-    let raw_severity = resolve_effect_enforcement(read_effect_enforcement_env(file_path));
-    let mut effect_severity: string = raw_severity;
-    if effect_severity == "off" {
-        effect_severity = resolve_effect_enforcement("");
-    }
-    let mut ei: int = 0;
-    loop {
-        if ei >= effect_violations.length { break; }
-        let mut violation = effect_violations[ei];
-        violation.severity = effect_severity;
-        let mut diag = effect_violation_to_diagnostic(violation);
-        diag.file_path = file_path;
-        combined.push(diag);
-        producers.push("effect");
-        rendered.push(render_diagnostic(diagnostic_to_diag(diag, "effect"), source_lines, "effect"));
-        if strings_equal(diag.severity, "error") { errors += 1; }
-        if strings_equal(diag.severity, "warning") { warnings += 1; }
-        ei += 1;
-    }
-
-    // Phase F: capsule capability cross-check renders alongside
-    // the in-module / cross-module effect findings. Same severity
-    // contract — `sfn check` ignores `=off` so these diagnostics
-    // still surface even when the build path is bypassed.
-    let mut ci: int = 0;
-    loop {
-        if ci >= capability_violations.length { break; }
-        let mut cv = capability_violations[ci];
-        cv.severity = effect_severity;
-        let mut cdiag = capability_violation_to_diagnostic(cv);
-        cdiag.file_path = file_path;
-        combined.push(cdiag);
-        producers.push("effect");
-        rendered.push(render_diagnostic(diagnostic_to_diag(cdiag, "effect"), source_lines, "effect"));
-        if strings_equal(cdiag.severity, "error") { errors += 1; }
-        if strings_equal(cdiag.severity, "warning") { warnings += 1; }
-        ci += 1;
-    }
-
-    // Gate G6 (SFEP-0017 D1): an effect string whose root is outside the
-    // canonical six (and isn't `pure`) is rejected as `E0404`. Shares the
-    // effect-severity contract with the sibling streams above.
-    let mut ui2: int = 0;
-    loop {
-        if ui2 >= unrecognized_violations.length { break; }
-        let mut uv = unrecognized_violations[ui2];
-        uv.severity = effect_severity;
-        let mut udiag = unrecognized_effect_violation_to_diagnostic(uv);
-        udiag.file_path = file_path;
-        combined.push(udiag);
-        producers.push("effect");
-        rendered.push(render_diagnostic(diagnostic_to_diag(udiag, "effect"), source_lines, "effect"));
-        if strings_equal(udiag.severity, "error") { errors += 1; }
-        if strings_equal(udiag.severity, "warning") { warnings += 1; }
-        ui2 += 1;
-    }
-
-    return CheckResult {
-        file_path: file_path,
-        diagnostics: combined,
-        producers: producers,
-        rendered: rendered,
-        error_count: errors,
-        warning_count: warnings
-    };
+    let input = analyzer_input_for_check(program, file_path, imported_interfaces, imported_symbols, capabilities_required, closure_symbols, allow_bare_assert);
+    return check_result_from_analysis(analyze_program(input), source);
 }
 
 fn check_file(path: string, inlined_source: string) -> CheckResult ![io] {
     return check_source(inlined_source, path);
 }
 
-// -------------------------------------------------------------------
-// Summary
-// -------------------------------------------------------------------
 fn render_summary(summary: CheckSummary) -> string {
     let files_str = number_to_string(summary.files_checked);
     if summary.total_errors == 0 {
@@ -476,36 +116,31 @@ fn render_summary(summary: CheckSummary) -> string {
 }
 
 fn summarize(results: CheckResult[]) -> CheckSummary {
-    let mut total_err: int = 0;
-    let mut total_warn: int = 0;
-    let mut i: int = 0;
+    let mut total_errors: int = 0;
+    let mut total_warnings: int = 0;
+    let mut index: int = 0;
     loop {
-        if i >= results.length { break; }
-        total_err += results[i].error_count;
-        total_warn += results[i].warning_count;
-        i += 1;
+        if index >= results.length { break; }
+        total_errors += results[index].error_count;
+        total_warnings += results[index].warning_count;
+        index += 1;
     }
     return CheckSummary {
         files_checked: results.length as int,
-        total_errors: total_err,
-        total_warnings: total_warn
+        total_errors: total_errors,
+        total_warnings: total_warnings
     };
 }
 
-// Note: `effect_violation_to_diagnostic` and `render_diagnostic` are
-// not re-exported here — Sailfin's emitter rejects re-exports of
-// imported symbols without a local definition (see
-// `docs/rca/2026-04-18-reexport-diagnostic-gep.md` and the
-// `_reject_reexport_violations` gate in `main.sfn`). Consumers
-// (`check/engine.sfn`, future tooling) import them directly from
-// `compiler/src/diagnostics_render.sfn` — same source of truth as
-// the build-path gate in `effect_gate.sfn`.
 export {
     CheckResult,
     CheckSummary,
+    analyzer_input_for_check,
     check_file,
+    check_result_from_analysis,
     check_source,
     check_source_with_imports,
+    effect_severity_for_check,
     render_summary,
     summarize
 };

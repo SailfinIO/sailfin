@@ -1,0 +1,39 @@
+// Driver adapter for the pure ownership analysis pass. This module owns
+// presentation and stderr authority so analyzer consumers never pull them into
+// the semantic dependency closure.
+import { Program } from "../ast";
+import { render_diagnostic } from "../diagnostics_render";
+import { ImportSymbolTable, empty_import_symbols } from "../effect_imports";
+import { analyze_program_ownership_with_imports } from "../ownership_checker";
+import { Diagnostic, diagnostic_to_diag } from "../typecheck_types";
+
+fn run_ownership_checker(program: Program) -> int ![io] {
+    return run_ownership_checker_with_imports(program, empty_import_symbols());
+}
+
+fn run_ownership_checker_with_imports(program: Program, imports: ImportSymbolTable) -> int ![io] {
+    let summary = analyze_program_ownership_with_imports(program, imports);
+    let empty_lines: string[] = [];
+    let mut errors: int = 0;
+    let mut index: int = 0;
+    loop {
+        if index >= summary.warnings.length { break; }
+        let finding = summary.warnings[index];
+        if finding.severity == "error" {
+            errors += 1;
+            let diagnostic = Diagnostic {
+                code: finding.code,
+                severity: "error",
+                message: finding.message,
+                file_path: "",
+                primary: finding.trigger,
+                suggestion: null
+            };
+            print.err(render_diagnostic(diagnostic_to_diag(diagnostic, "ownership"), empty_lines, "ownership"));
+        }
+        index += 1;
+    }
+    return errors;
+}
+
+export { run_ownership_checker, run_ownership_checker_with_imports };
