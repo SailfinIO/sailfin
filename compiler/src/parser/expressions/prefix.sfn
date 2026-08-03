@@ -1,9 +1,8 @@
 // compiler/src/parser/expressions/prefix.sfn
 //
 // Prefix and primary expression parsing.
-import { Expression } from "../../ast";
+import { Expression, TypeAnnotation } from "../../ast";
 import { normalize_number_literal_value, strings_equal } from "../../string_utils";
-import { spawn_future_kind } from "../../typecheck_types/expr_type_rules";
 import {
     identifier_matches,
     identifier_text,
@@ -128,25 +127,21 @@ fn parse_prefix_expression(state: ExpressionTokens) -> ExpressionParseResult {
             }
             let operand_result = parse_expression_bp(advanced, unary_precedence());
             if !operand_result.success { return operand_result; }
-            // Tag the future kind when it is statically derivable from the
-            // operand: a lambda literal carries its declared return type
-            // (issue #1082, "the lambda/fn the parser attaches"). A bare
-            // named-fn call (`spawn foo()`) needs symbol resolution that is
-            // out of scope here, so its kind stays "" for #1084 to fill.
-            let mut spawn_kind: string = "";
+            // Preserve the lambda's source return annotation for analysis.
+            // The parser deliberately leaves the semantic future kind empty;
+            // resolving it belongs to typecheck (SFN-708 / SFEP-0020 §3.5).
+            let mut spawn_return: TypeAnnotation? = null;
             let spawn_operand = operand_result.expression;
             if spawn_operand.variant == "Lambda" {
-                let spawn_return = spawn_operand.return_type;
-                if spawn_return != null {
-                    spawn_kind = spawn_future_kind(spawn_return.text);
-                }
+                spawn_return = spawn_operand.return_type;
             }
             return ExpressionParseResult {
                 state: operand_result.state,
                 expression: Expression.Spawn {
                     operand: operand_result.expression,
                     span: source_span_from_tokens([token]),
-                    kind: spawn_kind
+                    kind: "",
+                    return_type: spawn_return
                 },
                 success: true
             };

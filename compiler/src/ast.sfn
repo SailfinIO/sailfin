@@ -190,13 +190,17 @@ enum Expression {
     // expression (mirroring Unary/TryOperator's `operand`); `channel`,
     // `parallel`, and `serve` are value-producing constructs.
     //
-    // `spawn <expr>` — enqueue a task, yields a future (§2.6.2). `kind`
-    // tags the monomorphized future kind (one of void/number/int/bool/
-    // string/ptr; "" when not statically resolvable) so emit-native
-    // (#1084) selects the matching `spawn_*` runtime helper. Appended
-    // after `span` to keep existing positional GEP reads stable; the
-    // parser supplies "" by default (mirroring the `captures` roll-in).
-    Spawn { operand: Expression, span: SourceSpan?, kind: string },
+    // `spawn <expr>` — enqueue a task, yields a future (§2.6.2).
+    // `return_type` preserves the source annotation carried by a lambda
+    // operand; `kind` is analysis-owned and tags the resolved monomorphized
+    // future kind (void/number/int/bool/string/ptr). The parser leaves `kind`
+    // empty so syntax never applies semantic type rules (SFN-708).
+    Spawn {
+        operand: Expression,
+        span: SourceSpan?,
+        kind: string,
+        return_type: TypeAnnotation?
+    },
     // `await <expr>` — block on a future, yields its result (§2.6.3).
     // `kind` tags the awaited future's element kind ("" until resolved).
     Await { operand: Expression, span: SourceSpan?, kind: string },

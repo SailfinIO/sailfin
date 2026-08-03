@@ -921,7 +921,8 @@ fn _rewrite_expression(ctx: LiftContext, expression: Expression) -> ExpressionRe
             expression: Expression.Spawn {
                 operand: inner.expression,
                 span: expression.span,
-                kind: expression.kind
+                kind: expression.kind,
+                return_type: expression.return_type
             }
         };
     }

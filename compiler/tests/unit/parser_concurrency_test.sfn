@@ -83,14 +83,15 @@ test "concurrency: spawn of an identifier parses to Spawn of Identifier" ![io] {
     assert expr.operand.variant == "Identifier";
 }
 
-// `spawn` of a lambda with a declared return type tags the future kind
-// (#1082): the parser resolves the lambda's return-type annotation to one of
-// the six monomorphized kinds via `spawn_future_kind`.
-test "concurrency: spawn of an int-returning lambda tags kind int" ![io] {
+// `spawn` of a lambda preserves the source return annotation but leaves the
+// semantic future kind unresolved for analysis (SFN-708).
+test "concurrency: spawn preserves lambda return annotation for analysis" ![io] {
     let expr = first_let_initializer("let f = spawn fn() -> int { return 1; };");
     assert expr.variant == "Spawn";
     assert expr.operand.variant == "Lambda";
-    assert strings_equal(expr.kind, "int");
+    assert strings_equal(expr.kind, "");
+    assert expr.return_type != null;
+    assert strings_equal(expr.return_type.text, "int");
 }
 
 // A bare named-fn `spawn foo()` cannot be resolved at parse time (needs
@@ -100,6 +101,7 @@ test "concurrency: spawn of a named-fn call leaves kind unresolved" ![io] {
     let expr = first_let_initializer("let f = spawn worker();");
     assert expr.variant == "Spawn";
     assert strings_equal(expr.kind, "");
+    assert expr.return_type == null;
 }
 
 // -------------------------------------------------------------------
