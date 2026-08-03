@@ -57,6 +57,7 @@ import {
     _sha256_of_file_cmd,
     _sha256_of_text_file
 } from "./build/fs";
+import { host_exe_name } from "./build/target";
 import {
     DeterminismModule,
     DeterminismSnapshot,
@@ -88,13 +89,13 @@ struct SelfhostConfig {
     strict: boolean;
 }
 
-fn _selfhost_default_config() -> SelfhostConfig {
+fn _selfhost_default_config() -> SelfhostConfig ![io] {
     return SelfhostConfig {
         work_dir: "build/selfhost",
-        first_pass: "build/bin/sfn",
-        seedcheck_out: "build/bin/sfn-seedcheck",
-        stage3_out: "build/bin/sfn-stage3",
-        promote_to: "build/bin/sfn",
+        first_pass: host_exe_name("build/bin/sfn"),
+        seedcheck_out: host_exe_name("build/bin/sfn-seedcheck"),
+        stage3_out: host_exe_name("build/bin/sfn-stage3"),
+        promote_to: host_exe_name("build/bin/sfn"),
         smoke_timeout: "10",
         json: false,
         no_promote: false,
@@ -547,8 +548,8 @@ fn handle_selfhost_command(args: string[], binary_dir: string) -> int ![io] {
     // property while removing that sibling collision.
     let s2_bin_dir = s2_work + "/bin";
     let s3_bin_dir = s3_work + "/bin";
-    let s2_linked_bin = s2_bin_dir + "/sfn";
-    let s3_linked_bin = s3_bin_dir + "/sfn";
+    let s2_linked_bin = host_exe_name(s2_bin_dir + "/sfn");
+    let s3_linked_bin = host_exe_name(s3_bin_dir + "/sfn");
 
     if !fs.exists(cfg.first_pass) {
         print.err("[selfhost] first-pass binary missing: " + cfg.first_pass

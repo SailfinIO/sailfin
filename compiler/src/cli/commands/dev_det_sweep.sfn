@@ -34,6 +34,7 @@ import {
     _sha256_of_text_file,
     _shell_read_cmd
 } from "../../build/fs";
+import { host_exe_name } from "../../build/target";
 import { number_to_string } from "../../num_format";
 import { _sort_strings_cmd } from "../../string_cmd_utils";
 import {
@@ -494,7 +495,7 @@ fn _det_orchestrate(seed: string, jobs: int, iters: int, out_in: string, roots: 
 
 fn det_sweep_command_def() -> Command {
     let mut sweep: Command = command("determinism-sweep", "Emit each module N times under load; flag any with non-deterministic IR (retires scripts/diag_determinism_sweep.sh)");
-    sweep = with_flag(sweep, flag_value("seed", "Path to the candidate compiler binary (default build/bin/sfn)"));
+    sweep = with_flag(sweep, flag_value("seed", "Path to the candidate compiler binary (default build/bin/sfn, or build/bin/sfn.exe on a Windows host)"));
     sweep = with_flag(sweep, flag_int("jobs", "Modules to sweep concurrently (default 4)"));
     sweep = with_flag(sweep, flag_int("iters", "Emit iterations per module (default 10)"));
     sweep = with_flag(sweep, flag_value("out", "Output/artifact directory (default /tmp/sailfin-diag-det)"));
@@ -504,7 +505,7 @@ fn det_sweep_command_def() -> Command {
 }
 
 fn det_sweep_run(matches: Matches, ctx: CliContext) -> int ![io] {
-    let seed = get_or(matches, "seed", "build/bin/sfn");
+    let seed = get_or(matches, "seed", host_exe_name("build/bin/sfn"));
     let mut jobs = 4;
     if has(matches, "jobs") { jobs = get_int(matches, "jobs"); }
     if jobs < 1 || jobs > 256 {

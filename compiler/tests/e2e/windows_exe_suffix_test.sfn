@@ -122,3 +122,51 @@ test "exe suffix: a bare non-Windows-target build traces a non-.exe output path"
     });
     assert outcome == 0;
 }
+
+// SFN-701: the HOST-side gate. The two tests above cover `target_exe_name`
+// — what a build EMITS, keyed on `SAILFIN_TARGET_OS`. This covers
+// `host_exe_name` — a binary THIS machine must execute, keyed on
+// `SAILFIN_HOST_OS`. The two live together deliberately: they are the same
+// suffix logic behind deliberately different gates, and a reader who
+// changes one should see the other immediately.
+//
+// `SAILFIN_HOST_OS` is the documented test seam (`build/target.sfn`),
+// existing precisely so a Windows-host leg is exercisable on a Linux
+// runner. With no `--first-pass` override the selfhost driver resolves its
+// default through `host_exe_name`, so a simulated Windows host names
+// `build/bin/sfn.exe`, and the driver's own missing-binary diagnostic
+// echoes the resolved name.
+//
+// The child MUST run with cwd inside the `with_tmp_dir` scratch. That
+// default is RELATIVE, so under the parent's cwd (the repo root) it would
+// resolve to a real file on exactly the platform this change is for: on a
+// native Windows runner `build/bin/sfn.exe` exists, the existence probe at
+// `cli_selfhost.sfn:554` passes, and the driver runs to completion — two
+// full `-p compiler` builds nested inside a pool worker (blowing the
+// N x 8 GiB budget in `.claude/rules/compiler-safety.md`), and then a
+// promotion over `build/bin/sfn.exe` itself, replacing the compiler
+// running the suite mid-run. Only `--work-dir` is redirected here, so
+// `--promote-to` keeps its default; `--no-promote` would not save this
+// either, since it stops the promotion but not the two builds. An empty
+// scratch cwd makes the relative default unresolvable on every host, so
+// the probe fails fast everywhere and this stays a pure argument-defaulting
+// test.
+//
+// Asserting the observable Windows answer this way is strictly stronger
+// than asserting `host_exe_name(x) == target_exe_name(x, build_host_os())`,
+// which holds on every host but would also hold if both were broken.
+test "exe suffix: the selfhost first-pass default is host-gated" ![io] {
+    let sfn = _sfn_bin_abs();
+    let outcome = with_tmp_dir(fn (dir: string) -> int {
+        let mut child_env = clean_runner_env(nested_runner_scratch("exe-suffix-hostgate"));
+        child_env.push("SAILFIN_HOST_OS=Windows");
+        let _exit = process.run_capture_cwd([sfn, "selfhost", "--work-dir", dir
+            + "/wd"], child_env, dir);
+        let _out = process.capture_take_stdout();
+        let err = process.capture_take_stderr();
+        assert contains(err, "first-pass binary missing");
+        assert contains(err, "build/bin/sfn.exe");
+        return 0;
+    });
+    assert outcome == 0;
+}

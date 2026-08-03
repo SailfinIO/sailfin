@@ -663,7 +663,7 @@ check-strict:
 
 check-impl:
 	@$(MAKE) compile NATIVE_OPT="$(SELFHOST1_OPT)"
-	@seed="build/bin/sfn"; \
+	@seed="build/bin/sfn$(EXE_EXT)"; \
 	if [ ! -x "$$seed" ]; then \
 		echo "[check][error] missing $$seed (run: make compile)"; \
 		exit 1; \
@@ -681,19 +681,19 @@ check-impl:
 	@# (escape hatch for bisect / pre-release double-check).
 ifeq ($(CHECK_FULL_PASS1),1)
 	@echo "[check] CHECK_FULL_PASS1=1: running full suite on first-pass binary (jobs=$(CHECK_TEST_JOBS), test-timeout=$(CHECK_TEST_TIMEOUT)s)..."
-	@$(CHECK_TEST_TIMEOUT_ENV) $(MAKE) test NATIVE_BIN=build/bin/sfn TEST_BIN_CACHE_FLAGS=--no-test-cache TEST_JOBS=$(CHECK_TEST_JOBS)
+	@$(CHECK_TEST_TIMEOUT_ENV) $(MAKE) test NATIVE_BIN=build/bin/sfn$(EXE_EXT) TEST_BIN_CACHE_FLAGS=--no-test-cache TEST_JOBS=$(CHECK_TEST_JOBS)
 else
 	@echo "[check] pass1 smoke gate: hello-world + sfn/test capsule tests (jobs=$(CHECK_TEST_JOBS))..."
 	@t60=""; \
 	if command -v timeout >/dev/null 2>&1; then t60="timeout 60"; \
 	elif command -v gtimeout >/dev/null 2>&1; then t60="gtimeout 60"; fi; \
-	$$t60 build/bin/sfn run examples/basics/hello-world.sfn
+	$$t60 build/bin/sfn$(EXE_EXT) run examples/basics/hello-world.sfn
 	@if [ "$${SAILFIN_AGENT_REPORT:-}" = "1" ]; then \
 		mkdir -p build; \
 		set -o pipefail; \
-		build/bin/sfn test capsules/sfn/test/tests --jobs $(CHECK_TEST_JOBS) --json | tee build/agent-test.check-pass1.jsonl || exit $$?; \
+		build/bin/sfn$(EXE_EXT) test capsules/sfn/test/tests --jobs $(CHECK_TEST_JOBS) --json | tee build/agent-test.check-pass1.jsonl || exit $$?; \
 	else \
-		build/bin/sfn test capsules/sfn/test/tests --jobs $(CHECK_TEST_JOBS) || exit $$?; \
+		build/bin/sfn$(EXE_EXT) test capsules/sfn/test/tests --jobs $(CHECK_TEST_JOBS) || exit $$?; \
 	fi
 endif
 	@echo "[check] pass1 smoke passed — validating self-host (stage2/stage3 fixed point)..."
@@ -713,16 +713,23 @@ endif
 	@# so `NATIVE_OPT` overrides for stage2/stage3 are still ignored (no
 	@# regression — the prior shell had the same gap). The suite legs and
 	@# the first-pass `make compile` stay Make-driven (issue `Out:` scope).
-	@build/bin/sfn selfhost \
+	@# Every binary path here carries $(EXE_EXT) (SFN-701). These are
+	@# EXPLICIT flags, and the driver honours an explicit path verbatim —
+	@# so without the suffix they would override the driver's own
+	@# host-aware defaults and hand a native Windows host extensionless
+	@# names, which `CreateProcess` cannot launch. That would silently
+	@# bypass the whole fix on the one platform it is for. $(EXE_EXT) is
+	@# empty everywhere else, so POSIX invocation is byte-identical.
+	@build/bin/sfn$(EXE_EXT) selfhost \
 		--work-dir build/selfhost \
-		--first-pass build/bin/sfn \
-		--seedcheck-out build/bin/sfn-seedcheck \
-		--stage3-out build/bin/sfn-stage3 \
+		--first-pass build/bin/sfn$(EXE_EXT) \
+		--seedcheck-out build/bin/sfn-seedcheck$(EXE_EXT) \
+		--stage3-out build/bin/sfn-stage3$(EXE_EXT) \
 		--promote-to $(NATIVE_BIN) \
 		--smoke-timeout 10 \
 		$(SELFHOST_STRICT_FLAG)
 	@echo "[check] running full test suite with seedcheck binary (cold backstop, jobs=$(CHECK_TEST_JOBS), test-timeout=$(CHECK_TEST_TIMEOUT)s)..."
-	@$(CHECK_TEST_TIMEOUT_ENV) $(MAKE) test NATIVE_BIN=build/bin/sfn-seedcheck TEST_BIN_CACHE_FLAGS=--no-test-cache TEST_JOBS=$(CHECK_TEST_JOBS)
+	@$(CHECK_TEST_TIMEOUT_ENV) $(MAKE) test NATIVE_BIN=build/bin/sfn-seedcheck$(EXE_EXT) TEST_BIN_CACHE_FLAGS=--no-test-cache TEST_JOBS=$(CHECK_TEST_JOBS)
 
 # Fast PR-feedback gate: run `sfn check` against the compiler tree and
 # the runtime prelude. No codegen, no clang, just parse + typecheck +
