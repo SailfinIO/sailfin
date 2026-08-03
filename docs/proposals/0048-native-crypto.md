@@ -4,9 +4,9 @@ title: Native crypto + TLS stack — removing the OpenSSL dependency
 status: Accepted
 type: runtime
 created: 2026-07-12
-updated: 2026-08-02
+updated: 2026-08-03
 author: "agent:compiler-architect; human review"
-tracking: SFN-333, SFN-335, SFN-336, SFN-337, SFN-655, SFN-659, SFN-660
+tracking: SFN-333, SFN-335, SFN-336, SFN-337, SFN-655, SFN-659, SFN-660, SFN-699
 supersedes:
 superseded-by:
 graduates-to:
@@ -267,9 +267,25 @@ non-functional on Windows by construction, not by bug.
 
 **Recorded follow-on, not scoped here.** The release-signing *producer* path
 (`scripts/sign-release-manifest.sh:28,34-35,78,86`) shells to the `openssl`
-CLI and would additionally need Ed25519 *signing* — which the verify-only
-port (§7) does not provide — before it could be retired. That is separate
-work, not part of Phase E.
+CLI. Pure Ed25519 signing has since landed in `sfn/crypto` (SFN-699; amendment
+below), but rewiring that script remains separate work, not part of Phase E.
+
+**Amendment (2026-08-03) — pure Ed25519 signing landed (SFN-699).**
+`capsules/sfn/crypto/src/ed25519_sign.sfn` implements deterministic RFC 8032
+signing as `ed25519_sign(seed: int[], message: int[]) -> int[]`, returning the
+canonical 64-byte signature or `[]` for a wrong-length seed. Secret base-point
+multiplication uses 256 fixed double/add rounds with branch-free coordinate
+selection; secret bits never drive control flow or array indexes. The same
+module exposes binary-safe, fail-closed RFC 8410 version-0 key decoding as
+`ed25519_seed_from_pkcs8_der` and `ed25519_seed_from_pkcs8_pem`. It accepts the
+canonical unencrypted Ed25519 PrivateKeyInfo subset and rejects other
+algorithms, parameters, extensions, encrypted labels, trailing data, and
+malformed DER/PEM. All five RFC 8032 section 7.1 signing vectors pass.
+
+The primitive is the signing dependency consumed by the TLS 1.3 server
+CertificateVerify state machine (SFN-654) and by the eventual OpenSSL runtime
+body swap (SFN-341). SFN-699 does not implement either consumer, delete link
+wiring, or rewire release automation.
 
 **Amendment (2026-07-31) — the read primitive landed; route recorded
 (SFN-659).** The binary-safe read this phase was gated on is

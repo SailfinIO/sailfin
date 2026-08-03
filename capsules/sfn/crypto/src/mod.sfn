@@ -1,13 +1,18 @@
 // sfn/crypto — Cryptographic hashing, encoding, and signature functions.
 //
 // Provides SHA-256 and SHA-512 hashing (data integrity, checksums,
-// content-addressable storage), base64 encode/decode, and verify-only
-// Ed25519 signature verification (RFC 8032). No effects required — pure
-// computation.
+// content-addressable storage), base64 encode/decode, and Ed25519 signing and
+// verification (RFC 8032). No effects required — pure computation.
 import { hex_byte, string_to_bytes } from "./bits";
 import { hmac_sha256_bytes, sha256_bytes } from "./hkdf";
 
 export { ed25519_verify, ed25519_verify_utf8 } from "./ed25519";
+
+export {
+    ed25519_seed_from_pkcs8_der,
+    ed25519_seed_from_pkcs8_pem,
+    ed25519_sign
+} from "./ed25519_sign";
 
 export { sha1_hex } from "./sha1";
 

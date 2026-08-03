@@ -375,6 +375,7 @@ fn x25519_is_zero(shared: int[]) -> bool {
 // Ed25519. `src/mod.sfn` deliberately re-exports only the public X25519 API.
 export {
     _fadd,
+    _finv,
     _fmul,
     _fnormalize,
     _fsub,
