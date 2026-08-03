@@ -198,6 +198,26 @@ test "target: Windows fs_exec_mode swap survives without the other platform anch
     assert expect_eq_bool(out.length > 1, true).ok;
 }
 
+test "target: Windows rename_ops swap survives without the other platform anchors" ![pure] {
+    // rename_ops.sfn is itself a platform/ anchor, so the swap must fire
+    // with rlimit/rand/tls/exec all absent — same coupling guard as the
+    // fs_exec_mode test above (SFN-720).
+    let sources: string[] = ["/rt/sfn/platform/rename_ops.sfn"];
+    let out = target_condition_runtime_sfn_sources(sources, "Windows");
+    assert expect_eq_str(out[0], "/rt/sfn/platform/rename_ops_windows.sfn").ok;
+    assert expect_eq_bool(out.length > 1, true).ok;
+}
+
+test "target: host targets keep the POSIX rename module" ![pure] {
+    // The identity contract (#1112), and load-bearing beyond byte-identity:
+    // swapping rename_ops_windows.sfn in for every target would route POSIX
+    // publishes through MoveFileExA, which does not exist outside kernel32.
+    // Windows is the exception, not the default (SFN-720).
+    let sources: string[] = ["/rt/sfn/platform/rename_ops.sfn", "/rt/sfn/io.sfn"];
+    assert expect_eq_str_array(target_condition_runtime_sfn_sources(sources, "Linux"), sources).ok;
+    assert expect_eq_str_array(target_condition_runtime_sfn_sources(sources, "Darwin"), sources).ok;
+}
+
 test "target: host targets keep the POSIX X_OK fs_exec_mode module" ![pure] {
     // The identity contract (#1112): Linux and macOS DO have an execute
     // permission bit, so they must keep platform/fs_exec_mode.sfn and its

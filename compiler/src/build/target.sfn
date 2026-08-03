@@ -317,6 +317,15 @@ fn target_condition_runtime_sfn_sources(sources: string[], target_os: string) ->
             // the Windows sibling supplies `F_OK` (0) instead (SFN-649).
             platform_dir = _dirname(src);
             out.push(_path_join(platform_dir, "fs_exec_mode_windows.sfn"));
+        } else if base == "rename_ops.sfn" {
+            // Already in platform/ — same as the four above. The CRT's
+            // `rename()` fails EEXIST on an existing destination where
+            // POSIX `rename(2)` replaces atomically, so every
+            // publish-into-place in the toolchain worked once per
+            // destination and then failed forever. The sibling uses
+            // `MoveFileExA` + `MOVEFILE_REPLACE_EXISTING` (SFN-720).
+            platform_dir = _dirname(src);
+            out.push(_path_join(platform_dir, "rename_ops_windows.sfn"));
         } else if base == "exec.sfn" {
             // exec.sfn itself is unchanged (its `realpath` extern is
             // satisfied by the appended sibling below, not by swapping

@@ -63,6 +63,7 @@ sfn-sources = [
     "sfn/platform/pthread_layout.sfn",
     "sfn/platform/rand.sfn",
     "sfn/platform/fs_exec_mode.sfn",
+    "sfn/platform/rename_ops.sfn",
     "sfn/adapters/filesystem.sfn",
     "sfn/adapters/http.sfn",
     "sfn/adapters/websocket.sfn",

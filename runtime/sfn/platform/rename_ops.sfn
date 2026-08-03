@@ -1,0 +1,39 @@
+// runtime/sfn/platform/rename_ops.sfn
+//
+// Publish-into-place: move `src` onto `dst`, REPLACING `dst` when it
+// already exists. Isolated behind one symbol so the Windows divergence
+// is expressible as a module swap — swapped for `rename_ops_windows.sfn`
+// on a Windows target by `target_condition_runtime_sfn_sources`
+// (`compiler/src/build/target.sfn`), the same mechanism used for
+// `fs_exec_mode.sfn` and `socket_ops.sfn` (SFN-720).
+//
+// Why this needs conditioning at all. The whole toolchain publishes
+// artifacts by writing to a temporary sibling and then renaming it over
+// the destination — `_atomic_rename_into_place` in
+// `compiler/src/build/fs.sfn`, reached from 18 call sites (object
+// files, `.sfn-asm` staging, cache entries, manifests, the installed
+// compiler, the selfhost stage binaries). That pattern is only correct
+// because POSIX `rename(2)` atomically REPLACES an existing
+// destination.
+//
+// The Windows CRT's `rename()` does not. It fails with `EEXIST`.
+// Measured, not assumed:
+//
+//   rename over EXISTING dst: rc=-1 errno=17 (File exists)
+//   rename onto ABSENT dst:   rc=0  errno=0  (No error)
+//
+// So on Windows every publish succeeded exactly once per destination
+// and failed forever after, until something deleted the target. The
+// symptom that surfaced this was `sfn selfhost` failing on its SECOND
+// run with "failed to copy stage2 binary", having written
+// `build/bin/sfn-seedcheck.exe` on the first.
+//
+// On POSIX this is a direct pass-through, so behaviour is unchanged.
+extern fn rename(oldpath: *u8, newpath: *u8) -> i32;
+
+// Move `src` onto `dst`, replacing `dst` if present. Returns 0 on
+// success and non-zero on failure, matching `rename(2)`'s convention so
+// the caller's test is identical on both platforms.
+fn sfn_rename_replace(src: *u8, dst: *u8) -> i32 { return rename(src, dst); }
+
+export { sfn_rename_replace };
