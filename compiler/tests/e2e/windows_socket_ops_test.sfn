@@ -1,0 +1,124 @@
+// compiler/tests/e2e/windows_socket_ops_test.sfn
+//
+// SFN-671: pins the emitted surface of BOTH halves of the
+// `platform/socket_ops.sfn` / `socket_ops_windows.sfn` sibling pair.
+//
+// Why this can run on a Linux host: `sfn emit` takes an explicit module
+// path, so the Windows sibling can be emitted and inspected anywhere —
+// only the LINK needs a Windows target. That makes the Windows half of
+// this fix assertable on ordinary CI instead of waiting for the native
+// Windows leg (SFN-668 / SFN-55).
+//
+// What is NOT covered here, stated plainly: that `closesocket` actually
+// disposes of a handle, and that `WSAStartup` actually enables socket
+// creation, are runtime behaviours no Linux runner can observe. Those
+// were verified directly against Win32 while developing this change —
+// a C program calling `WSAStartup` + `socket` + `close((int)s)` exits
+// `0xC0000409` at the `close`, and the same program using `closesocket`
+// exits 0. This test pins the two things a Linux host CAN prove: that
+// the Windows module reaches for the right symbols, and that the POSIX
+// module does not reach for the fatal one.
+import { contains, split, starts_with } from "sfn/strings";
+import { clean_runner_env, nested_runner_scratch, with_tmp_dir } from "sfn/test";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+// True iff `ir` has a module-scope `declare` for exactly `@sym(`. The
+// trailing paren makes this an exact-symbol test: `@close(` does not
+// match `@closesocket(` or `@fclose(`, which is the whole point of the
+// negative assertions below.
+fn _has_declare(ir: string, sym: string) -> boolean {
+    let lines = split(ir, "\n");
+    let mut i: int = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        if starts_with(line, "declare ") && contains(line, "@" + sym + "(") {
+            return true;
+        }
+        i += 1;
+    }
+    return false;
+}
+
+// Same shape as `_has_declare` but for a module-scope `define`. The two
+// are NOT interchangeable: a bare `contains(ir, "@sym(")` is satisfied
+// by a forward `declare`, so a module that only declared the pair would
+// pass a containment check while defining nothing.
+fn _has_define(ir: string, sym: string) -> boolean {
+    let lines = split(ir, "\n");
+    let mut i: int = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        if starts_with(line, "define ") && contains(line, "@" + sym + "(") {
+            return true;
+        }
+        i += 1;
+    }
+    return false;
+}
+
+fn _emit(tag: string, module_path: string, dir: string) -> string ![io] {
+    let outpath = dir + "/" + tag + ".ll";
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", outpath, "llvm", module_path], clean_runner_env(nested_runner_scratch(tag)));
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return "EMIT_FAILED"; }
+    return fs.readFile(outpath);
+}
+
+test "socket-ops: the Windows sibling reaches for Winsock, never POSIX close" ![io] {
+    let outcome = with_tmp_dir(fn (dir: string) -> int {
+        let ir = _emit("sockwin", "runtime/sfn/platform/socket_ops_windows.sfn", dir);
+        assert ir != "EMIT_FAILED";
+        // The two symbols the whole fix exists to reach.
+        assert _has_declare(ir, "closesocket");
+        assert _has_declare(ir, "WSAStartup");
+        // The fatal one must be absent. `@close(` cannot match
+        // `@closesocket(`, so this is a real assertion and not a
+        // tautology satisfied by the line above.
+        assert ! _has_declare(ir, "close");
+        return 0;
+    });
+    assert outcome == 0;
+}
+
+test "socket-ops: the POSIX module keeps close and never links Winsock" ![io] {
+    let outcome = with_tmp_dir(fn (dir: string) -> int {
+        let ir = _emit("sockposix", "runtime/sfn/platform/socket_ops.sfn", dir);
+        assert ir != "EMIT_FAILED";
+        assert _has_declare(ir, "close");
+        assert _has_declare(ir, "socket");
+        // Linux and macOS have no ws2_32 to resolve these against, so
+        // leaking either into the POSIX module would break every
+        // non-Windows link — the identity half of the contract (#1112).
+        assert ! _has_declare(ir, "closesocket");
+        assert ! _has_declare(ir, "WSAStartup");
+        return 0;
+    });
+    assert outcome == 0;
+}
+
+// Both halves must define the same two symbols, or the swap produces a
+// link with an unresolved reference on whichever target loses. This is
+// the contract `target_condition_runtime_sfn_sources` depends on and
+// that no type checker enforces across a module swap.
+test "socket-ops: both siblings define the same exported surface" ![io] {
+    let outcome = with_tmp_dir(fn (dir: string) -> int {
+        let posix = _emit("sockposix2", "runtime/sfn/platform/socket_ops.sfn", dir);
+        let win = _emit("sockwin2", "runtime/sfn/platform/socket_ops_windows.sfn", dir);
+        assert posix != "EMIT_FAILED";
+        assert win != "EMIT_FAILED";
+        assert _has_define(posix, "sfn_socket_open");
+        assert _has_define(posix, "sfn_socket_close");
+        assert _has_define(win, "sfn_socket_open");
+        assert _has_define(win, "sfn_socket_close");
+        return 0;
+    });
+    assert outcome == 0;
+}

@@ -120,7 +120,17 @@ extern fn strtoll(s: *u8, end: *u8, base: i32) -> i64;
 // adapters cast the family-specific sockaddr struct through `* u8`
 // at the call site). `accept` takes NULL for the peer-addr / len
 // out-params — the v0 server does not inspect the client address.
-extern fn socket(domain: i32, ty: i32, protocol: i32) -> i32;
+// Socket creation and disposal route through `platform/socket_ops.sfn`
+// rather than libc `socket`/`close`, because both diverge on Windows:
+// POSIX `close` on a Winsock `SOCKET` fastfails the process
+// (`0xC0000409`) instead of returning an error, and Winsock refuses
+// every call until `WSAStartup` has run, which nothing did. That module
+// is swapped for `socket_ops_windows.sfn` on a Windows target by
+// `target_condition_runtime_sfn_sources`, so these stay ordinary
+// externs and the linker binds whichever sibling was compiled — the
+// same shape as `_sfn_fs_access_exec_mode` in `filesystem.sfn`
+// (SFN-671).
+extern fn sfn_socket_open(domain: i32, ty: i32, protocol: i32) -> i32;
 
 extern fn bind(sockfd: i32, addr: *u8, addrlen: i32) -> i32;
 
@@ -132,7 +142,7 @@ extern fn send(sockfd: i32, buf: *u8, len: i64, flags: i32) -> i64;
 
 extern fn recv(sockfd: i32, buf: *u8, len: i64, flags: i32) -> i64;
 
-extern fn close(fd: i32) -> i32;
+extern fn sfn_socket_close(fd: i32) -> i32;
 
 // `setsockopt` — arm SO_RCVTIMEO / SO_SNDTIMEO (recv/send deadlines) on an
 // accepted connection (#1581). `optval` is the `struct timeval` byte buffer
@@ -782,7 +792,7 @@ fn _serve_conn_worker(ctx: *u8) -> *u8 {
         if !keep_alive { break; }
         if !sent_ok { break; }
     }
-    close(client_fd as i32);
+    sfn_socket_close(client_fd as i32);
     return null;
 }
 
@@ -832,7 +842,7 @@ fn _serve_conn_worker_framed(ctx: *u8) -> *u8 {
         if !keep_alive { break; }
         if !sent_ok { break; }
     }
-    close(client_fd as i32);
+    sfn_socket_close(client_fd as i32);
     return null;
 }
 
@@ -877,7 +887,7 @@ fn _serve_conn_worker_tls(ctx: *u8) -> *u8 {
     // fallback on a TLS port).
     let ssl: *u8 = tls_accept_fd(server_ctx as *u8, client_fd as i32);
     if ssl as i64 == 0 {
-        close(client_fd as i32);
+        sfn_socket_close(client_fd as i32);
         return null;
     }
 
@@ -900,7 +910,7 @@ fn _serve_conn_worker_tls(ctx: *u8) -> *u8 {
         if !sent_ok { break; }
     }
     tls_shutdown_free(ssl);
-    close(client_fd as i32);
+    sfn_socket_close(client_fd as i32);
     return null;
 }
 
@@ -924,7 +934,7 @@ fn _serve_conn_worker_framed_tls(ctx: *u8) -> *u8 {
 
     let ssl: *u8 = tls_accept_fd(server_ctx as *u8, client_fd as i32);
     if ssl as i64 == 0 {
-        close(client_fd as i32);
+        sfn_socket_close(client_fd as i32);
         return null;
     }
 
@@ -945,7 +955,7 @@ fn _serve_conn_worker_framed_tls(ctx: *u8) -> *u8 {
         if !sent_ok { break; }
     }
     tls_shutdown_free(ssl);
-    close(client_fd as i32);
+    sfn_socket_close(client_fd as i32);
     return null;
 }
 
@@ -965,14 +975,14 @@ fn _serve_bind_listen(port: i64) -> i32 {
     let mut attempt: i64 = 0;
     loop {
         if attempt >= 2 { break; }
-        let fd: i32 = socket(2, 1, 0);
+        let fd: i32 = sfn_socket_open(2, 1, 0);
         if fd < 0 { return 0 - 1; }
         // Allow immediate rebind after a restart (skip TIME_WAIT
         // EADDRINUSE) — armed before `bind` (#1583).
         _serve_set_reuseaddr(fd);
         let addr: *u8 = malloc(16 as usize);
         if addr as i64 == 0 {
-            close(fd);
+            sfn_socket_close(fd);
             return 0 - 1;
         }
         memset(addr, 0, 16 as usize);
@@ -992,10 +1002,10 @@ fn _serve_bind_listen(port: i64) -> i32 {
         free(addr);
         if rc == 0 {
             if listen(fd, 128) == 0 { return fd; }
-            close(fd);
+            sfn_socket_close(fd);
             return 0 - 1;
         }
-        close(fd);
+        sfn_socket_close(fd);
         attempt = attempt + 1;
     }
     return 0 - 1;
@@ -1013,14 +1023,14 @@ fn sfn_serve(handler: *u8, port: i32) -> void ![net, io] {
     // One shared queue + fixed worker pool for the whole server.
     let queue: *u8 = sfn_taskqueue_create(256);
     if queue as i64 == 0 {
-        close(listen_fd);
+        sfn_socket_close(listen_fd);
         return;
     }
     let scheduler: *u8 = sfn_scheduler_create(queue);
     if scheduler as i64 == 0 {
         // Tear down the already-initialized queue before bailing.
         sfn_taskqueue_destroy(queue);
-        close(listen_fd);
+        sfn_socket_close(listen_fd);
         return;
     }
 
@@ -1031,7 +1041,7 @@ fn sfn_serve(handler: *u8, port: i32) -> void ![net, io] {
         // Pack [client_fd][handler] for the connection worker.
         let conn_ctx: *u8 = malloc(16 as usize);
         if conn_ctx as i64 == 0 {
-            close(client_fd);
+            sfn_socket_close(client_fd);
             continue;
         }
         let fd_slot: *i64 = conn_ctx as *i64;
@@ -1043,13 +1053,13 @@ fn sfn_serve(handler: *u8, port: i32) -> void ![net, io] {
         let task: *u8 = sfn_task_create_detached(worker as i64, conn_ctx as i64);
         if task as i64 == 0 {
             free(conn_ctx);
-            close(client_fd);
+            sfn_socket_close(client_fd);
             continue;
         }
         sfn_taskqueue_enqueue(queue, task);
     }
 
-    close(listen_fd);
+    sfn_socket_close(listen_fd);
 }
 
 // `sfn_serve_framed(handler, port)` — like `sfn_serve`, but the handler
@@ -1067,13 +1077,13 @@ fn sfn_serve_framed(handler: *u8, port: i32) -> void ![net, io] {
     // One shared queue + fixed worker pool for the whole server.
     let queue: *u8 = sfn_taskqueue_create(256);
     if queue as i64 == 0 {
-        close(listen_fd);
+        sfn_socket_close(listen_fd);
         return;
     }
     let scheduler: *u8 = sfn_scheduler_create(queue);
     if scheduler as i64 == 0 {
         sfn_taskqueue_destroy(queue);
-        close(listen_fd);
+        sfn_socket_close(listen_fd);
         return;
     }
 
@@ -1084,7 +1094,7 @@ fn sfn_serve_framed(handler: *u8, port: i32) -> void ![net, io] {
         // Pack [client_fd][handler] for the connection worker.
         let conn_ctx: *u8 = malloc(16 as usize);
         if conn_ctx as i64 == 0 {
-            close(client_fd);
+            sfn_socket_close(client_fd);
             continue;
         }
         let fd_slot: *i64 = conn_ctx as *i64;
@@ -1096,13 +1106,13 @@ fn sfn_serve_framed(handler: *u8, port: i32) -> void ![net, io] {
         let task: *u8 = sfn_task_create_detached(worker as i64, conn_ctx as i64);
         if task as i64 == 0 {
             free(conn_ctx);
-            close(client_fd);
+            sfn_socket_close(client_fd);
             continue;
         }
         sfn_taskqueue_enqueue(queue, task);
     }
 
-    close(listen_fd);
+    sfn_socket_close(listen_fd);
 }
 
 // `sfn_serve_framed_tls(handler, port, cert_path, key_path)` — TLS twin of
@@ -1120,13 +1130,13 @@ fn sfn_serve_framed_tls(handler: *u8, port: i32, cert_path: *u8, key_path: *u8) 
 
     let queue: *u8 = sfn_taskqueue_create(256);
     if queue as i64 == 0 {
-        close(listen_fd);
+        sfn_socket_close(listen_fd);
         return;
     }
     let scheduler: *u8 = sfn_scheduler_create(queue);
     if scheduler as i64 == 0 {
         sfn_taskqueue_destroy(queue);
-        close(listen_fd);
+        sfn_socket_close(listen_fd);
         return;
     }
 
@@ -1136,7 +1146,7 @@ fn sfn_serve_framed_tls(handler: *u8, port: i32, cert_path: *u8, key_path: *u8) 
 
         let conn_ctx: *u8 = malloc(24 as usize);
         if conn_ctx as i64 == 0 {
-            close(client_fd);
+            sfn_socket_close(client_fd);
             continue;
         }
         let fd_slot: *i64 = conn_ctx as *i64;
@@ -1150,13 +1160,13 @@ fn sfn_serve_framed_tls(handler: *u8, port: i32, cert_path: *u8, key_path: *u8) 
         let task: *u8 = sfn_task_create_detached(worker as i64, conn_ctx as i64);
         if task as i64 == 0 {
             free(conn_ctx);
-            close(client_fd);
+            sfn_socket_close(client_fd);
             continue;
         }
         sfn_taskqueue_enqueue(queue, task);
     }
 
-    close(listen_fd);
+    sfn_socket_close(listen_fd);
 }
 
 // `sfn_serve_tls(handler, port, cert_path, key_path)` — like `sfn_serve`,
@@ -1186,13 +1196,13 @@ fn sfn_serve_tls(handler: *u8, port: i32, cert_path: *u8, key_path: *u8) -> void
     // One shared queue + fixed worker pool for the whole server.
     let queue: *u8 = sfn_taskqueue_create(256);
     if queue as i64 == 0 {
-        close(listen_fd);
+        sfn_socket_close(listen_fd);
         return;
     }
     let scheduler: *u8 = sfn_scheduler_create(queue);
     if scheduler as i64 == 0 {
         sfn_taskqueue_destroy(queue);
-        close(listen_fd);
+        sfn_socket_close(listen_fd);
         return;
     }
 
@@ -1204,7 +1214,7 @@ fn sfn_serve_tls(handler: *u8, port: i32, cert_path: *u8, key_path: *u8) -> void
         // worker (24 bytes; the plaintext workers use a 16-byte pair).
         let conn_ctx: *u8 = malloc(24 as usize);
         if conn_ctx as i64 == 0 {
-            close(client_fd);
+            sfn_socket_close(client_fd);
             continue;
         }
         let fd_slot: *i64 = conn_ctx as *i64;
@@ -1218,13 +1228,13 @@ fn sfn_serve_tls(handler: *u8, port: i32, cert_path: *u8, key_path: *u8) -> void
         let task: *u8 = sfn_task_create_detached(worker as i64, conn_ctx as i64);
         if task as i64 == 0 {
             free(conn_ctx);
-            close(client_fd);
+            sfn_socket_close(client_fd);
             continue;
         }
         sfn_taskqueue_enqueue(queue, task);
     }
 
-    close(listen_fd);
+    sfn_socket_close(listen_fd);
 }
 
 // `sailfin_runtime_serve(handler, config)` — #1308: the legacy untyped
