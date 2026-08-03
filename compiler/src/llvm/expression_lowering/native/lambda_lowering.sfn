@@ -902,12 +902,9 @@ fn _rewrite_expression(ctx: LiftContext, expression: Expression) -> ExpressionRe
             }
         };
     }
-    // Lift lambdas nested inside spawn/await operands (#1090). A lambda
-    // operand is a spawn target — its captured env crosses the thread
-    // boundary and the worker frees it (#1475), so lift it with
-    // `owned_env = true` (routes the env to `@sfn_env_alloc`). Non-lambda
-    // operands (e.g. a bare `spawn foo()` fn ref) have no capture env and
-    // take the ordinary rewrite.
+    // A spawned lambda's capture env crosses the thread boundary and is freed
+    // by the worker, so lift it with owned storage (#1475). Other operands
+    // take the ordinary rewrite because they carry no capture environment.
     if expression.variant == "Spawn" {
         let mut inner: ExpressionRewriteResult = ExpressionRewriteResult {
             ctx: ctx,
