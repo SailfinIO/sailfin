@@ -73,7 +73,9 @@ verify order (fail closed at each step):
   →  only then extract and mark the toolchain usable
 ```
 
-`ed25519_verify_utf8` is `sfn/crypto`'s verify-only Ed25519 primitive (SFN-170).
+`ed25519_verify_utf8` is `sfn/crypto`'s text-message verification API. The
+capsule also exposes byte-oriented pure-Sailfin signing and PKCS#8 seed decoding
+(SFN-699), but the release producer remains on the separately managed CI path.
 
 ## Key provisioning status
 

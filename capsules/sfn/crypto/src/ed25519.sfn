@@ -8,6 +8,7 @@ import { ct_eq_bytes, string_to_bytes } from "./bits";
 import { sha512_bytes } from "./sha512";
 import {
     _fadd as _ed_gf_add,
+    _finv as _ed_gf_inv,
     _fmul as _ed_gf_mul,
     _fnormalize as _ed_gf_normalize,
     _fsqr as _ed_gf_sqr,
@@ -151,6 +152,21 @@ fn _ed_base_point() -> int[][] {
     let mut t: int[] = _ed_gf_zero();
     _ed_gf_mul(t, x, y);
     return [x, y, _ed_gf_one(), t];
+}
+
+// Encode an extended-coordinate point in RFC 8032's compressed form. The
+// inversion chain and field reduction have fixed control flow, including when
+// the point was produced from secret scalar material.
+fn _ed_point_encode(p: int[][]) -> int[] {
+    let mut zinv: int[] = _ed_gf_zero();
+    let mut x: int[] = _ed_gf_zero();
+    let mut y: int[] = _ed_gf_zero();
+    _ed_gf_inv(zinv, p[2]);
+    _ed_gf_mul(x, p[0], zinv);
+    _ed_gf_mul(y, p[1], zinv);
+    let mut encoded: int[] = _ed_gf_pack(y);
+    encoded[31] = encoded[31] | (_ed_gf_parity(x) << 7);
+    return encoded;
 }
 
 // Complete twisted-Edwards addition formula from RFC 8032 §5.1.4.
@@ -316,15 +332,19 @@ fn _ed_scalar_is_canonical(s: int[]) -> bool {
     return false;
 }
 
-// Reduce a 64-byte little-endian SHA-512 digest modulo L. This is the narrow
-// signed-i64 reduction used by TweetNaCl: all intermediates stay below 2^20.
-fn _ed_reduce_scalar(digest: int[]) -> int[] {
+// Reduce 64 little-endian signed-i64 coefficients modulo L. This is
+// TweetNaCl's narrow reduction: it accepts byte coefficients from SHA-512 and
+// the wider schoolbook coefficients produced by signing's scalar mul-add. The
+// latter start below 2^21 and remain below 2^34 through the reduction, leaving
+// at least 29 bits of signed-i64 headroom.
+fn _ed_mod_l(coefficients: int[]) -> int[] {
+    if coefficients.length != 64 { return []; }
     let l: int[] = _ed_group_order();
     let mut x: int[] = [];
     let mut xi: int = 0;
     loop {
         if xi >= 64 { break; }
-        x.push(digest[xi] & 255);
+        x.push(coefficients[xi]);
         xi += 1;
     }
 
@@ -372,6 +392,19 @@ fn _ed_reduce_scalar(digest: int[]) -> int[] {
     return out;
 }
 
+// Reduce a 64-byte little-endian SHA-512 digest modulo L.
+fn _ed_reduce_scalar(digest: int[]) -> int[] {
+    if digest.length != 64 { return []; }
+    let mut coefficients: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= 64 { break; }
+        coefficients.push(digest[i] & 255);
+        i += 1;
+    }
+    return _ed_mod_l(coefficients);
+}
+
 fn _ed_challenge(r: int[], public_key: int[], message: int[]) -> int[] {
     let mut input: int[] = [];
     _ed_append(input, r);
@@ -412,4 +445,15 @@ fn ed25519_verify_utf8(public_key_hex: string, message: string, signature_hex: s
     return ed25519_verify(public_key_hex, string_to_bytes(message), signature_hex);
 }
 
-export { ed25519_verify, ed25519_verify_utf8 };
+// Underscored exports are capsule-internal group/scalar machinery shared with
+// the constant-time signer. `src/mod.sfn` exposes only the public APIs.
+export {
+    _ed_base_point,
+    _ed_mod_l,
+    _ed_point_add,
+    _ed_point_copy,
+    _ed_point_encode,
+    _ed_point_identity,
+    ed25519_verify,
+    ed25519_verify_utf8
+};

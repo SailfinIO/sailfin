@@ -1,0 +1,332 @@
+// capsules/sfn/crypto/src/ed25519_sign.sfn
+//
+// Pure-Sailfin RFC 8032 Ed25519 signing from a 32-byte seed, plus strict
+// RFC 8410 PKCS#8 DER/PEM seed decoding. Secret scalar multiplication uses a
+// fixed operation schedule and branch-free coordinate selection.
+import {
+    _ed_base_point,
+    _ed_mod_l,
+    _ed_point_add,
+    _ed_point_copy,
+    _ed_point_encode,
+    _ed_point_identity
+} from "./ed25519";
+import { sha512_bytes } from "./sha512";
+
+fn _eds_append(out: int[], bytes: int[]) -> void {
+    let mut i: int = 0;
+    loop {
+        if i >= bytes.length { break; }
+        out.push(bytes[i] & 255);
+        i += 1;
+    }
+}
+
+fn _eds_slice(bytes: int[], start: int, length: int) -> int[] {
+    let mut out: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= length { break; }
+        out.push(bytes[start + i] & 255);
+        i += 1;
+    }
+    return out;
+}
+
+// Select `right` when bit is one and `left` when it is zero. Every coordinate
+// and limb is read and written on both paths; the secret bit reaches only a
+// bitwise mask, never control flow or an array index.
+fn _eds_point_select(left: int[][], right: int[][], bit: int) -> int[][] {
+    let mask: int = 0 - bit;
+    let mut out: int[][] = [];
+    let mut coordinate: int = 0;
+    loop {
+        if coordinate >= 4 { break; }
+        let mut limbs: int[] = [];
+        let mut limb: int = 0;
+        loop {
+            if limb >= 16 { break; }
+            let a: int = left[coordinate][limb];
+            let b: int = right[coordinate][limb];
+            limbs.push(a ^ (mask & (a ^ b)));
+            limb += 1;
+        }
+        out.push(limbs);
+        coordinate += 1;
+    }
+    return out;
+}
+
+// Multiply the fixed Ed25519 base point by a secret scalar. The loop count,
+// scalar byte index, shift amount, additions, and memory accesses are fixed by
+// the public iteration number; only the masked point selection sees a bit.
+fn _eds_secret_base_scalarmult(scalar: int[]) -> int[][] {
+    let base: int[][] = _ed_base_point();
+    let mut result: int[][] = _ed_point_identity();
+    let mut i: int = 255;
+    loop {
+        if i < 0 { break; }
+        let mut doubled: int[][] = _ed_point_copy(result);
+        _ed_point_add(doubled, doubled);
+        let mut added: int[][] = _ed_point_copy(doubled);
+        _ed_point_add(added, base);
+        let bit: int = (scalar[i >> 3] >> (i & 7)) & 1;
+        result = _eds_point_select(doubled, added, bit);
+        i -= 1;
+    }
+    return result;
+}
+
+// Compute addend + left * right modulo the Ed25519 group order. The
+// schoolbook coefficients remain well inside signed i64 and `_ed_mod_l` uses
+// a fixed loop schedule independent of the secret scalar values.
+fn _eds_scalar_mul_add(left: int[], right: int[], addend: int[]) -> int[] {
+    let mut coefficients: int[] = [];
+    let mut z: int = 0;
+    loop {
+        if z >= 64 { break; }
+        coefficients.push(0);
+        z += 1;
+    }
+
+    let mut i: int = 0;
+    loop {
+        if i >= 32 { break; }
+        coefficients[i] = coefficients[i] + (addend[i] & 255);
+        let mut j: int = 0;
+        loop {
+            if j >= 32 { break; }
+            coefficients[i + j] = coefficients[i + j] + (left[i] & 255) * (right[j] & 255);
+            j += 1;
+        }
+        i += 1;
+    }
+    return _ed_mod_l(coefficients);
+}
+
+fn _eds_public_key(expanded_scalar: int[]) -> int[] {
+    return _ed_point_encode(_eds_secret_base_scalarmult(expanded_scalar));
+}
+
+// ed25519_sign signs raw message bytes from a 32-byte Ed25519 seed. It returns
+// the canonical 64-byte `R || S` signature, or `[]` for a wrong-length seed.
+// The result is deterministic as required by RFC 8032.
+fn ed25519_sign(seed: int[], message: int[]) -> int[] {
+    if seed.length != 32 { return []; }
+
+    let expanded: int[] = sha512_bytes(seed);
+    let mut scalar: int[] = _eds_slice(expanded, 0, 32);
+    scalar[0] = scalar[0] & 248;
+    scalar[31] = (scalar[31] & 63) | 64;
+    let prefix: int[] = _eds_slice(expanded, 32, 32);
+    let public_key: int[] = _eds_public_key(scalar);
+
+    let mut nonce_input: int[] = [];
+    _eds_append(nonce_input, prefix);
+    _eds_append(nonce_input, message);
+    let nonce: int[] = _ed_mod_l(sha512_bytes(nonce_input));
+    let r_encoded: int[] = _ed_point_encode(_eds_secret_base_scalarmult(nonce));
+
+    let mut challenge_input: int[] = [];
+    _eds_append(challenge_input, r_encoded);
+    _eds_append(challenge_input, public_key);
+    _eds_append(challenge_input, message);
+    let challenge: int[] = _ed_mod_l(sha512_bytes(challenge_input));
+    let s: int[] = _eds_scalar_mul_add(challenge, scalar, nonce);
+
+    let mut signature: int[] = [];
+    _eds_append(signature, r_encoded);
+    _eds_append(signature, s);
+    return signature;
+}
+
+fn _eds_are_bytes(bytes: int[]) -> bool {
+    let mut i: int = 0;
+    loop {
+        if i >= bytes.length { break; }
+        if bytes[i] < 0 || bytes[i] > 255 { return false; }
+        i += 1;
+    }
+    return true;
+}
+
+// Decode a canonical DER length at `cursor`. The result is `[length, next]`;
+// malformed, non-minimal, truncated, or impractically wide lengths yield `[]`.
+fn _eds_der_length(der: int[], cursor: int) -> int[] {
+    if cursor < 0 || cursor >= der.length { return []; }
+    let first: int = der[cursor] & 255;
+    if first < 128 { return [first, cursor + 1]; }
+
+    let width: int = first & 127;
+    if width < 1 || width > 4 { return []; }
+    if cursor + 1 + width > der.length { return []; }
+    if (der[cursor + 1] & 255) == 0 { return []; }
+
+    let mut length: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= width { break; }
+        length = (length << 8) | (der[cursor + 1 + i] & 255);
+        i += 1;
+    }
+    if length < 128 { return []; }
+    return [length, cursor + 1 + width];
+}
+
+// Read one exact-tag DER value. The result is `[content_start, content_end]`;
+// callers advance to `content_end`, since DER forbids indefinite lengths here.
+fn _eds_der_tlv(der: int[], cursor: int, tag: int) -> int[] {
+    if cursor < 0 || cursor >= der.length { return []; }
+    if (der[cursor] & 255) != tag { return []; }
+    let length_info: int[] = _eds_der_length(der, cursor + 1);
+    if length_info.length != 2 { return []; }
+    let start: int = length_info[1];
+    let end: int = start + length_info[0];
+    if end < start || end > der.length { return []; }
+    return [start, end];
+}
+
+// ed25519_seed_from_pkcs8_der decodes the canonical unencrypted RFC 8410
+// version-0 PrivateKeyInfo subset and returns its 32-byte Ed25519 seed. Wrong
+// algorithms, parameters, extensions, trailing bytes, and malformed DER yield
+// `[]`; every 32-byte seed value, including all-zero, remains valid key data.
+fn ed25519_seed_from_pkcs8_der(der: int[]) -> int[] {
+    if !_eds_are_bytes(der) { return []; }
+    let outer: int[] = _eds_der_tlv(der, 0, 48);
+    if outer.length != 2 || outer[1] != der.length { return []; }
+
+    let mut cursor: int = outer[0];
+    let version: int[] = _eds_der_tlv(der, cursor, 2);
+    if version.length != 2 || version[1] - version[0] != 1 { return []; }
+    if (der[version[0]] & 255) != 0 { return []; }
+    cursor = version[1];
+
+    let algorithm: int[] = _eds_der_tlv(der, cursor, 48);
+    if algorithm.length != 2 || algorithm[1] > outer[1] { return []; }
+    let oid: int[] = _eds_der_tlv(der, algorithm[0], 6);
+    if oid.length != 2 || oid[1] != algorithm[1] { return []; }
+    if oid[1] - oid[0] != 3 { return []; }
+    if (der[oid[0]] & 255) != 43 { return []; }
+    if (der[oid[0] + 1] & 255) != 101 { return []; }
+    if (der[oid[0] + 2] & 255) != 112 { return []; }
+    cursor = algorithm[1];
+
+    let private_key: int[] = _eds_der_tlv(der, cursor, 4);
+    if private_key.length != 2 || private_key[1] != outer[1] { return []; }
+    let seed: int[] = _eds_der_tlv(der, private_key[0], 4);
+    if seed.length != 2 || seed[1] != private_key[1] { return []; }
+    if seed[1] - seed[0] != 32 { return []; }
+    return _eds_slice(der, seed[0], 32);
+}
+
+fn _eds_base64_sextet(c: string) -> int {
+    let code: int = char_code(c) & 255;
+    if code >= 65 && code <= 90 { return code - 65; }
+    if code >= 97 && code <= 122 { return code - 97 + 26; }
+    if code >= 48 && code <= 57 { return code - 48 + 52; }
+    if code == 43 { return 62; }
+    if code == 47 { return 63; }
+    return -1;
+}
+
+// Decode strict RFC 4648 base64 into bytes, including embedded zero bytes.
+fn _eds_base64_bytes(encoded: string) -> int[] {
+    if encoded.length == 0 || (encoded.length & 3) != 0 { return []; }
+    let mut out: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= encoded.length { break; }
+        let d0: int = _eds_base64_sextet(encoded[i]);
+        let d1: int = _eds_base64_sextet(encoded[i + 1]);
+        if d0 < 0 || d1 < 0 { return []; }
+
+        let c2: string = encoded[i + 2];
+        let c3: string = encoded[i + 3];
+        let pad2: bool = c2 == "=";
+        let pad3: bool = c3 == "=";
+        if (pad2 || pad3) && i + 4 != encoded.length { return []; }
+        if pad2 && !pad3 { return []; }
+        out.push(((d0 << 2) | (d1 >> 4)) & 255);
+
+        if pad2 {
+            if (d1 & 15) != 0 { return []; }
+        } else {
+            let d2: int = _eds_base64_sextet(c2);
+            if d2 < 0 { return []; }
+            out.push(((d1 << 4) | (d2 >> 2)) & 255);
+            if pad3 {
+                if (d2 & 3) != 0 { return []; }
+            } else {
+                let d3: int = _eds_base64_sextet(c3);
+                if d3 < 0 { return []; }
+                out.push(((d2 << 6) | d3) & 255);
+            }
+        }
+        i += 4;
+    }
+    return out;
+}
+
+fn _eds_is_ascii_space(c: string) -> bool {
+    let code: int = char_code(c) & 255;
+    return code == 9 || code == 10 || code == 13 || code == 32;
+}
+
+fn _eds_matches_at(input: string, start: int, expected: string) -> bool {
+    if start < 0 || start + expected.length > input.length { return false; }
+    let mut i: int = 0;
+    loop {
+        if i >= expected.length { break; }
+        if input[start + i] != expected[i] { return false; }
+        i += 1;
+    }
+    return true;
+}
+
+// ed25519_seed_from_pkcs8_pem decodes an unencrypted `PRIVATE KEY` PEM block
+// containing RFC 8410 PKCS#8 DER. LF/CRLF wrapping and ASCII whitespace in the
+// encoded body are accepted; other labels and malformed input yield `[]`.
+fn ed25519_seed_from_pkcs8_pem(pem: string) -> int[] {
+    let header: string = "-----BEGIN PRIVATE KEY-----";
+    let footer: string = "-----END PRIVATE KEY-----";
+    let mut cursor: int = 0;
+    loop {
+        if cursor >= pem.length || !_eds_is_ascii_space(pem[cursor]) { break; }
+        cursor += 1;
+    }
+    if !_eds_matches_at(pem, cursor, header) { return []; }
+    cursor += header.length;
+    if cursor >= pem.length || !_eds_is_ascii_space(pem[cursor]) { return []; }
+
+    let mut encoded: string = "";
+    let mut found_footer: bool = false;
+    loop {
+        if cursor >= pem.length { break; }
+        if _eds_matches_at(pem, cursor, footer) {
+            found_footer = true;
+            cursor += footer.length;
+            break;
+        }
+        if _eds_is_ascii_space(pem[cursor]) { cursor += 1; } else {
+            // The accepted version-0 DER is exactly 48 bytes, hence exactly 64
+            // base64 characters. Cap before concatenation so malformed PEM
+            // cannot grow an attacker-sized temporary string.
+            if encoded.length >= 64 { return []; }
+            encoded = encoded + pem[cursor];
+            cursor += 1;
+        }
+    }
+    if !found_footer { return []; }
+    loop {
+        if cursor >= pem.length || !_eds_is_ascii_space(pem[cursor]) { break; }
+        cursor += 1;
+    }
+    if cursor != pem.length { return []; }
+    return ed25519_seed_from_pkcs8_der(_eds_base64_bytes(encoded));
+}
+
+export {
+    ed25519_seed_from_pkcs8_der,
+    ed25519_seed_from_pkcs8_pem,
+    ed25519_sign
+};
