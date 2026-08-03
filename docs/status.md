@@ -174,8 +174,8 @@ here.
   `cli_main.sfn` retains only the `@main` entry shims (`main`,
   `native_cli_main`, `sailfin_cli_main_with_paths`, `_arena_telemetry_*`) plus
   `_usage`. The former `cli_commands.sfn` / `cli_commands_utils.sfn` emitters
-  were deleted, their bodies relocated by consumer (backend-shared helpers to
-  `compiler/src/build/`; the `compiler-common` boundary is deferred to
+  were deleted, their bodies relocated by consumer (driver-owned helpers to
+  `compiler/src/build/`; the role-oriented private capsule graph is deferred to
   SFEP-0020 / #345). Per-worker peak RSS drop drove the sequencing
   (SFEP-0027 §2.1); a line-budget sentinel
   (`compiler/tests/unit/cli_main_line_budget_test.sfn`) guards against

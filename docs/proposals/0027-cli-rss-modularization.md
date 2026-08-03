@@ -4,7 +4,7 @@ title: CLI Modularization — Per-Worker RSS Relief First, Then Migration
 status: Implemented
 type: tooling
 created: 2026-06-26
-updated: 2026-07-06
+updated: 2026-08-03
 author: "agent:compiler-architect; human review"
 tracking: "#1671"
 supersedes: 9
@@ -126,7 +126,8 @@ still bypass `sfn/cli`. The legacy `cli_main.sfn` imports the capsule for a
 single `bold` symbol only (`cli_main.sfn:4` — the R1 link-feasibility canary,
 not parsing) and otherwise walks argv by hand (44 `strings_equal` comparisons);
 `cli_commands.sfn` imports nothing from `sfn/cli`. Decomposing the compiler into
-`sfn/compiler-common` + a binary capsule (#345) would therefore inherit
+the role-oriented private capsules plus the `sfn/compiler` binary described by
+SFEP-0020 would therefore inherit
 **3,067 + 1,075 + 713 = 4,855 lines** of un-migrated `cli_*` (`cli_main` +
 `cli_commands` + `cli_commands_utils`) — including the build driver and the
 937-line legacy function — as dead weight in the `sfn/compiler` binary capsule.
@@ -253,22 +254,22 @@ directly instead of reaching into `cli_main`.
 ### 3.5 Phase C — relocate `cli_commands_utils.sfn` (713 lines) residue
 
 `cli_commands_utils.sfn` is "FS-atomic / shell / crypto helpers that have
-nothing to do with the CLI" (SFEP-0020 §4.3 flags it as *backend-used*).
+nothing to do with the CLI" (SFEP-0020 §3.4–3.5 now classifies them by
+responsibility).
 Reconcile with #345/SFEP-0020 so we **do not double-own**:
 
 - **FS-atomic + path helpers** used by the build backend (`_mktemp_sibling_cmd`,
   `_atomic_rename_into_place`, `_ensure_dir_recursive_cmd`, `_write_text_cmd`,
   `_path_join_cmd`, `_dirname_cmd`, `_strip_trailing_slashes_cmd`): these are
-  what SFEP-0020 §4.3 earmarks for `sfn/compiler-common` / backend. **Leave
-  them compiler-local** (move into `compiler/src/build/fs.sfn` or keep in a
-  slimmed util module) and let #345 draw the `compiler-common` boundary — do
-  **not** push them into a stdlib capsule here.
+  driver-owned under the amended SFEP-0020. **Leave them compiler-local**
+  (move into `compiler/src/build/fs.sfn` or keep in a slimmed util module); do
+  **not** push them into a stdlib or code-generation capsule here.
 - **String helpers** (`_string_lt_cmd`, `_sort_strings_cmd`,
   `_string_contains_cmd`, `_has_prefix_cmd`, `_byte_at_cmd`,
   `_word_matches_cmd`, `_string_list_contains_cmd`): **do not relocate to
-  `sfn/strings` in this epic.** SFEP-0020 §7 owns the `sfn/strings` dogfooding
-  swap; relocating them here would collide. Keep them compiler-local; tag them
-  in the issue as "candidates for #345 §7's `sfn/strings` swap."
+  `sfn/strings` in this epic.** SFEP-0020 §3.5 owns the standard-library
+  dogfooding rule; relocating them here would collide. Keep them compiler-local;
+  tag them in the issue as candidates for that migration.
 - **Shell/crypto/registry helpers** (`_shell_read_cmd`, `_curl_post_json_cmd`,
   `_curl_download_cmd`, `_sha256_of_file_cmd`, `_extract_sfnpkg_cmd`): move with
   their consuming command (`publish`/`add`/`package`) — they are command-local,
@@ -375,7 +376,7 @@ bodies between `compiler/src/*.sfn` modules. Therefore:
 - **Push build-driver helpers down into `sfn/cli` or a new stdlib capsule.**
   Rejected: they are compiler-internal build orchestration, not a reusable CLI
   library surface; pushing them into stdlib would invert the dependency and
-  collide with #345's `compiler-common` boundary (SFEP-0020 §7).
+  violate SFEP-0020's driver-ownership boundary (§3.3–3.5).
 - **Fold this into #345 (compiler decomposition).** Rejected: #345 is a larger,
   riskier graph-cut; this epic is independently shippable and *reduces #345's
   blast radius* by stripping the binary capsule first. Keep them cross-
@@ -402,7 +403,7 @@ This is a structural refactor, not a language feature; the checklist maps to
 - [x] `sfn fmt --check` clean — every touched `.sfn`.
 - [x] Documented — `docs/status.md` "Toolchain" section carries the post-Phase-C
   CLI dispatch map (v2 sole router; `cli_main.sfn` = entry shims + `_usage`),
-  cross-referencing SFEP-0020 for the deferred `compiler-common` boundary; this
+  cross-referencing SFEP-0020 for the deferred role-oriented capsule graph; this
   SFEP is `Implemented` (Phase C landed in #1797).
 
 ## 8. Test plan
