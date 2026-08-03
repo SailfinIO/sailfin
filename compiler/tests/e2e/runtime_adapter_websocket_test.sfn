@@ -159,14 +159,21 @@ test "websocket emit: define for every sfn_websocket_* client export" ![io] {
     assert _has_define(ir, "sfn_websocket_serve");
 }
 
-test "websocket emit: declares the BSD-sockets libc surface" ![io] {
+// SFN-671: creation and disposal route through `platform/socket_ops.sfn`
+// rather than libc, because both diverge on Windows — see the matching
+// test in `runtime_adapter_http_test.sfn` for the full rationale. The
+// negative assertions are the load-bearing half: they catch a
+// regression that reintroduced a direct `close(fd)` on a socket.
+test "websocket emit: declares the socket surface, POSIX close retired" ![io] {
     let ir = _emit_module("websocket", "runtime/sfn/adapters/websocket.sfn");
     assert ir != "EMIT_FAILED";
-    assert _has_declare(ir, "socket");
+    assert _has_declare(ir, "sfn_socket_open");
     assert _has_declare(ir, "connect");
     assert _has_declare(ir, "send");
     assert _has_declare(ir, "recv");
-    assert _has_declare(ir, "close");
+    assert _has_declare(ir, "sfn_socket_close");
+    assert ! _has_declare(ir, "socket");
+    assert ! _has_declare(ir, "close");
 }
 
 test "websocket emit: retires the OpenSSL handshake crypto externs" ![io] {
