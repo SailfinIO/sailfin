@@ -1,0 +1,1647 @@
+// compiler/tests/unit/compiler_capsule_boundary_test.sfn
+//
+// Static dependency ratchet for SFEP-0020 §§3.3, 3.5, and 8. It classifies the
+// monolith by semantic role, follows future physical capsule moves, and keeps
+// every migration exception exact and stale-on-repair.
+import {
+    contains,
+    ends_with,
+    replace,
+    split,
+    starts_with,
+    substring,
+    trim
+} from "sfn/strings";
+
+import { collect_scoped_import_specs } from "../../src/capsule_import_scan";
+
+let ROLE_SYNTAX: string = "syntax";
+let ROLE_ANALYZER: string = "analyzer";
+let ROLE_IR: string = "ir";
+let ROLE_CODEGEN: string = "codegen";
+let ROLE_LLVM: string = "codegen-llvm";
+let ROLE_DRIVER: string = "compiler-driver";
+let ROLE_STDLIB: string = "narrow-stdlib";
+let ROLE_AUTHORITY: string = "authority-bearing-stdlib";
+let ROLE_UNKNOWN: string = "unclassified-dependency";
+let ROLE_COMPAT_LEAF: string = "monolith-narrow-leaf";
+let ROLE_RUNTIME_PRELUDE: string = "runtime-prelude";
+let ROLE_RUNTIME_INTERNAL: string = "runtime-implementation";
+
+struct BoundaryException {
+    importer: string;
+    importee: string;
+    seam: string;
+}
+
+struct AuthorityException {
+    module: string;
+    token: string;
+    expected_count: int;
+    seam: string;
+}
+
+fn _boundary_exception(importer: string, importee: string, seam: string) -> BoundaryException {
+    return BoundaryException {
+        importer: importer,
+        importee: importee,
+        seam: seam
+    };
+}
+
+fn _boundary_exceptions() -> BoundaryException[] {
+    let mut out: BoundaryException[] = [];
+
+    // SFEP-0020 §3.5.2 / SFN-709: artifact and module interchange shapes are
+    // still constructed in target-neutral emit modules instead of owned by IR.
+    let artifact = "IR artifact contracts remain codegen-owned (SFN-709)";
+    out.push(_boundary_exception("native_ir_api", "emit_native_layout", artifact));
+    out.push(_boundary_exception("llvm/lowering/lowering_phase_sanitize", "emit_native", artifact));
+    out.push(_boundary_exception("llvm/lowering/entrypoints_tests", "emit_native", artifact));
+    out.push(_boundary_exception("llvm/lowering/entrypoints_tests_writer", "emit_native", artifact));
+    out.push(_boundary_exception("llvm/lowering/entrypoints", "emit_native", artifact));
+    out.push(_boundary_exception("llvm/lowering/lowering_helpers", "emit_native", artifact));
+    out.push(_boundary_exception("llvm/lowering/lowering_core/mod", "emit_native", artifact));
+    out.push(_boundary_exception("llvm/lowering/lowering_core/file_emission", "emit_native", artifact));
+    out.push(_boundary_exception("llvm/lowering/lowering_core/file_emission", "emit_native_layout", artifact));
+    out.push(_boundary_exception("llvm/lowering/lowering_core/file_emission", "emit_native_state", artifact));
+    out.push(_boundary_exception("llvm/lowering/lowering_core/test_harness", "emit_native", artifact));
+
+    // SFEP-0020 §3.5.3 / SFN-710: analyzer effect metadata still comes from
+    // the LLVM runtime-helper registry.
+    out.push(_boundary_exception("effect_checker/mod", "llvm/runtime_helpers/mod", "intrinsic effect metadata remains LLVM-owned (SFN-710)"));
+
+    // SFEP-0020 §3.5.4 / SFN-711: closure preparation still crosses both
+    // directions of the LLVM boundary.
+    let closures = "lambda capture preparation still crosses the LLVM boundary (SFN-711)";
+    out.push(_boundary_exception("emit_native", "llvm/expression_lowering/native/lambda_lowering", closures));
+    out.push(_boundary_exception("llvm/closures", "ast", closures));
+    out.push(_boundary_exception("llvm/expression_lowering/native/lambda_param_inference", "ast", closures));
+    out.push(_boundary_exception("llvm/expression_lowering/native/lambda_param_inference", "emit_native_format", closures));
+    out.push(_boundary_exception("llvm/expression_lowering/native/lambda_lowering", "ast", closures));
+    out.push(_boundary_exception("llvm/expression_lowering/native/lambda_lowering", "parser/statements/mod", closures));
+    out.push(_boundary_exception("llvm/expression_lowering/native/lambda_lowering", "parser/types", closures));
+    out.push(_boundary_exception("llvm/expression_lowering/native/lambda_lowering", "typecheck_captures", closures));
+    out.push(_boundary_exception("llvm/expression_lowering/native/core_closure_lowering", "ast", closures));
+
+    // SFEP-0020 §3.5.5 / SFN-712: emit paths still select destinations and
+    // call driver-owned publication helpers.
+    let publication = "code generation still owns driver publication policy (SFN-712)";
+    out.push(_boundary_exception("emit_native", "build/fs", publication));
+    out.push(_boundary_exception("llvm/lowering/lowering_io", "build/fs", publication));
+
+    // The monolith also passes target/debug/test state through driver globals.
+    // The exact inventory prevents growth while the provider contract is made
+    // explicit; it is deliberately separate from persistent publication.
+    let context = "LLVM provider still reads driver target and test context (SFN-718)";
+    out.push(_boundary_exception("llvm/lowering_debug_state", "build/target", context));
+    out.push(_boundary_exception("llvm/lowering_debug_state", "build_flags", context));
+    out.push(_boundary_exception("llvm/syscall", "build/target", context));
+    out.push(_boundary_exception("llvm/effects", "test_runner_state", context));
+    out.push(_boundary_exception("llvm/imports", "test_runner_state", context));
+    out.push(_boundary_exception("llvm/lowering/emission", "build/target", context));
+    out.push(_boundary_exception("llvm/lowering/emission", "test_runner_state", context));
+    out.push(_boundary_exception("llvm/lowering/instructions", "test_runner_state", context));
+    out.push(_boundary_exception("llvm/lowering/instructions_try", "build/target", context));
+    out.push(_boundary_exception("llvm/expression_lowering/native/statement", "test_runner_state", context));
+    out.push(_boundary_exception("llvm/lowering/lowering_core/mod", "test_runner_state", context));
+    out.push(_boundary_exception("llvm/lowering/lowering_core/test_harness", "build/target", context));
+
+    // SFEP-0020 §3.5.6: the analyzer-side prelude scanner borrows a line
+    // splitter from driver presentation code.
+    out.push(_boundary_exception("prelude_scan", "diagnostics_render", "analyzer line splitting remains driver-renderer-owned (SFN-717)"));
+
+    // SFEP-0020 §3.4/§3.5.6 assigns diagnostic data contracts to analyzer.
+    // LLVM still consumes those contracts directly instead of receiving
+    // provider-owned lowering diagnostics through its IR-facing boundary.
+    let diagnostic = "LLVM lowering still imports analyzer-owned diagnostic contracts (SFEP-0020 §3.5.6)";
+    let diagnostic_importers: string[] = ["llvm/expression_lowering/native/statement", "llvm/lowering/emission", "llvm/lowering/emission_async", "llvm/lowering/instructions", "llvm/lowering/instructions_for", "llvm/lowering/instructions_for_range", "llvm/lowering/instructions_if", "llvm/lowering/instructions_let", "llvm/lowering/instructions_loops", "llvm/lowering/instructions_match", "llvm/lowering/instructions_routine", "llvm/lowering/instructions_try", "llvm/lowering/lowering_core/diagnostics", "llvm/lowering/lowering_core/mod", "llvm/lowering/lowering_phase_functions", "llvm/types", "llvm/utils"];
+    let mut diagnostic_i: int = 0;
+    loop {
+        if diagnostic_i >= diagnostic_importers.length { break; }
+        out.push(_boundary_exception(diagnostic_importers[diagnostic_i], "diagnostic", diagnostic));
+        diagnostic_i += 1;
+    }
+
+    // SFEP-0020 §3.5.7: generic monolith string helpers have not yet graduated
+    // to sfn/strings or a role-owned implementation. Keep every importer exact
+    // so moving any caller to its proper contract makes this inventory stale.
+    let compat = "generic string helpers remain monolith-owned (SFEP-0020 §3.5.7)";
+    let compat_importers: string[] = ["llvm/closures", "llvm/effects", "llvm/expression_lowering/arrays", "llvm/expression_lowering/native/core_call_emission/dispatch", "llvm/expression_lowering/native/core_call_lowering", "llvm/expression_lowering/native/core_call_resolution/closure_callee", "llvm/expression_lowering/native/core_call_resolution/method_target", "llvm/expression_lowering/native/core_call_resolution/signature", "llvm/expression_lowering/native/core_calls", "llvm/expression_lowering/native/core_closure_lowering", "llvm/expression_lowering/native/core_concurrency_lowering", "llvm/expression_lowering/native/core_expression", "llvm/expression_lowering/native/core_expression_tail", "llvm/expression_lowering/native/core_helpers", "llvm/expression_lowering/native/core_index_lowering", "llvm/expression_lowering/native/core_literals_lowering", "llvm/expression_lowering/native/core_member_lowering", "llvm/expression_lowering/native/core_operators", "llvm/expression_lowering/native/core_ops_lowering", "llvm/expression_lowering/native/core_parse", "llvm/expression_lowering/native/core_parsing", "llvm/expression_lowering/native/core_scopes", "llvm/expression_lowering/native/core_text", "llvm/expression_lowering/native/core_type_mapping", "llvm/expression_lowering/native/lambda_param_inference", "llvm/expression_lowering/native/statement_assignment", "llvm/expression_lowering/native/statement_parsing", "llvm/expression_lowering/native/statement_suspension", "llvm/expression_lowering/native/statement_type_mapping", "llvm/expression_lowering/native/temp_recovery", "llvm/expression_lowering/splitting", "llvm/expressions_helpers", "llvm/expressions_literals", "llvm/expressions_operators", "llvm/expressions_parsing", "llvm/imports", "llvm/lifetime", "llvm/lowering/emission", "llvm/lowering/emission_reachability", "llvm/lowering/entrypoints", "llvm/lowering/entrypoints_tests", "llvm/lowering/entrypoints_tests_writer", "llvm/lowering/instructions", "llvm/lowering/instructions_condition", "llvm/lowering/instructions_for", "llvm/lowering/instructions_helpers", "llvm/lowering/instructions_if", "llvm/lowering/instructions_let", "llvm/lowering/instructions_loops", "llvm/lowering/instructions_match", "llvm/lowering/instructions_try", "llvm/lowering/lowering_core/finalization", "llvm/lowering/lowering_core/test_harness", "llvm/lowering/lowering_helpers", "llvm/lowering/lowering_helpers_mangling", "llvm/lowering/lowering_io", "llvm/lowering/lowering_recovery", "llvm/lowering/lowering_text_utils", "llvm/lowering/phi", "llvm/monomorphize", "llvm/rendering", "llvm/rendering_helpers", "llvm/strings", "llvm/type_context", "llvm/type_context_queries", "llvm/type_mapping", "llvm/utils", "parser/declarations/enums", "parser/declarations/imports_exports", "parser/declarations/syntax", "parser/expressions/lambdas", "parser/expressions/mod", "parser/expressions/normalize", "parser/expressions/postfix", "parser/expressions/prefix", "parser/expressions/type_targets", "parser/statements/block", "parser/statements/expression_recovery", "parser/statements/special", "parser/token_utils", "parser/utils", "typecheck/syscalls", "typecheck_types/annotation_shape_checks", "typecheck_types/declaration_and_statement_checks", "typecheck_types/expr_type_rules", "typecheck_types/extern_abi", "typecheck_types/generic_bounds", "typecheck_types/interface_and_generics", "typecheck_types/symbol_table_and_raw_exprs", "typecheck_types/value_and_object_checks"];
+    let mut compat_i: int = 0;
+    loop {
+        if compat_i >= compat_importers.length { break; }
+        out.push(_boundary_exception(compat_importers[compat_i], "string_utils", compat));
+        compat_i += 1;
+    }
+    let remaining_compat_importers: string[] = ["emit_native", "emit_native_layout", "emit_native_state", "emitter_sailfin_utils", "import_resolution_check", "intrinsic_effects", "lexer", "native_ir_parser", "native_ir_parser_defs", "native_ir_parser_instructions", "native_ir_utils_layout", "native_ir_utils_parse", "native_ir_utils_text", "ownership_task_provenance", "prelude_scan", "reexport_check", "symbols_index", "typecheck_captures"];
+    let mut remaining_compat_i: int = 0;
+    loop {
+        if remaining_compat_i >= remaining_compat_importers.length { break; }
+        out.push(_boundary_exception(remaining_compat_importers[remaining_compat_i], "string_utils", compat));
+        remaining_compat_i += 1;
+    }
+    let num_format_importers: string[] = ["ownership_checker", "tensor_ir", "tensor_ir_emit_stablehlo", "tensor_ir_lower_scalar", "type_interner", "typed_ssa", "typed_ssa_render", "typed_ssa_verify"];
+    let mut num_format_i: int = 0;
+    loop {
+        if num_format_i >= num_format_importers.length { break; }
+        out.push(_boundary_exception(num_format_importers[num_format_i], "num_format", compat));
+        num_format_i += 1;
+    }
+
+    // §3.3 grants the runtime prelude only to syntax, IR, and the driver. These
+    // analyzer/LLVM imports are current migration seams, not a general waiver.
+    let prelude = "runtime prelude remains imported outside its owning role matrix (SFEP-0020 §3.3)";
+    out.push(_boundary_exception("type_interner", "runtime/prelude", prelude));
+    out.push(_boundary_exception("llvm/atomics_check", "runtime/prelude", prelude));
+    out.push(_boundary_exception("llvm/lowering/abi_hash", "runtime/prelude", prelude));
+    return out;
+}
+
+fn _authority_exception(module: string, token: string, expected_count: int, seam: string) -> AuthorityException {
+    return AuthorityException {
+        module: module,
+        token: token,
+        expected_count: expected_count,
+        seam: seam
+    };
+}
+
+fn _append_effect_authority_exceptions(initial: AuthorityException[]) -> AuthorityException[] {
+    let mut out = initial;
+    let seam = "internal compiler roles still declare I/O effects before capability-free extraction (SFEP-0020 §4)";
+    out.push(_authority_exception("emit_native", "effect:io", 2, seam));
+    out.push(_authority_exception("lexer", "effect:io", 1, seam));
+    out.push(_authority_exception("llvm/atomics", "effect:io", 6, seam));
+    out.push(_authority_exception("llvm/byte_load", "effect:io", 1, seam));
+    out.push(_authority_exception("llvm/effects", "effect:io", 1, seam));
+    out.push(_authority_exception("llvm/expression_lowering/arrays", "effect:io", 2, seam));
+    out.push(_authority_exception("llvm/expression_lowering/native/core_call_emission/arguments", "effect:io", 1, seam));
+    out.push(_authority_exception("llvm/expression_lowering/native/core_call_emission/arrays", "effect:io", 1, seam));
+    out.push(_authority_exception("llvm/expression_lowering/native/core_call_emission/closure_dispatch", "effect:io", 1, seam));
+    out.push(_authority_exception("llvm/expression_lowering/native/core_call_emission/dispatch", "effect:io", 1, seam));
+    out.push(_authority_exception("llvm/expression_lowering/native/core_call_emission/filesystem_intrinsics", "effect:io", 1, seam));
+    out.push(_authority_exception("llvm/expression_lowering/native/core_call_emission/filesystem_list", "effect:io", 1, seam));
+    out.push(_authority_exception("llvm/expression_lowering/native/core_call_emission/platform_intrinsics", "effect:io", 1, seam));
+    out.push(_authority_exception("llvm/expression_lowering/native/core_call_lowering", "effect:io", 2, seam));
+    out.push(_authority_exception("llvm/expression_lowering/native/core_call_resolution/builtin_dispatch", "effect:io", 3, seam));
+    out.push(_authority_exception("llvm/expression_lowering/native/core_call_resolution/closure_callee", "effect:io", 1, seam));
+    out.push(_authority_exception("llvm/expression_lowering/native/core_call_resolution/method_target", "effect:io", 1, seam));
+    out.push(_authority_exception("llvm/expression_lowering/native/core_call_resolution/parsed_method_dispatch", "effect:io", 1, seam));
+    out.push(_authority_exception("llvm/expression_lowering/native/core_cast_lowering", "effect:io", 3, seam));
+    out.push(_authority_exception("llvm/expression_lowering/native/core_concurrency_lowering", "effect:io", 10, seam));
+    out.push(_authority_exception("llvm/expression_lowering/native/core_expression", "effect:io", 1, seam));
+    out.push(_authority_exception("llvm/expression_lowering/native/core_expression_tail", "effect:io", 1, seam));
+    out.push(_authority_exception("llvm/expression_lowering/native/core_index_lowering", "effect:io", 1, seam));
+    out.push(_authority_exception("llvm/expression_lowering/native/core_literals_lowering", "effect:io", 4, seam));
+    out.push(_authority_exception("llvm/expression_lowering/native/core_member_lowering", "effect:io", 3, seam));
+    out.push(_authority_exception("llvm/expression_lowering/native/core_operands/dispatch", "effect:io", 3, seam));
+    out.push(_authority_exception("llvm/expression_lowering/native/core_operands/general_fallback", "effect:io", 1, seam));
+    out.push(_authority_exception("llvm/expression_lowering/native/core_operands/numeric_coercion", "effect:io", 1, seam));
+    out.push(_authority_exception("llvm/expression_lowering/native/core_operands/numeric_float", "effect:io", 1, seam));
+    out.push(_authority_exception("llvm/expression_lowering/native/core_operands/numeric_integer", "effect:io", 1, seam));
+    out.push(_authority_exception("llvm/expression_lowering/native/core_operands/pointer_coercion", "effect:io", 1, seam));
+    out.push(_authority_exception("llvm/expression_lowering/native/core_operands/pointer_tail", "effect:io", 1, seam));
+    out.push(_authority_exception("llvm/expression_lowering/native/core_operands/union_fallback", "effect:io", 1, seam));
+    out.push(_authority_exception("llvm/expression_lowering/native/core_ops_lowering", "effect:io", 8, seam));
+    out.push(_authority_exception("llvm/expression_lowering/native/core_strings", "effect:io", 7, seam));
+    out.push(_authority_exception("llvm/expression_lowering/native/mem_footprint_lowering", "effect:io", 1, seam));
+    out.push(_authority_exception("llvm/expression_lowering/native/runtime_call", "effect:io", 1, seam));
+    out.push(_authority_exception("llvm/expression_lowering/native/statement", "effect:io", 2, seam));
+    out.push(_authority_exception("llvm/expression_lowering/native/statement_assignment", "effect:io", 1, seam));
+    out.push(_authority_exception("llvm/imports", "effect:io", 6, seam));
+    out.push(_authority_exception("llvm/lowering/emission", "effect:io", 1, seam));
+    out.push(_authority_exception("llvm/lowering/emission_async", "effect:io", 1, seam));
+    out.push(_authority_exception("llvm/lowering/entrypoints", "effect:io", 15, seam));
+    out.push(_authority_exception("llvm/lowering/entrypoints_tests", "effect:io", 1, seam));
+    out.push(_authority_exception("llvm/lowering/entrypoints_tests_writer", "effect:io", 1, seam));
+    out.push(_authority_exception("llvm/lowering/instructions", "effect:io", 1, seam));
+    out.push(_authority_exception("llvm/lowering/instructions_condition", "effect:io", 1, seam));
+    out.push(_authority_exception("llvm/lowering/instructions_for", "effect:io", 2, seam));
+    out.push(_authority_exception("llvm/lowering/instructions_for_range", "effect:io", 1, seam));
+    out.push(_authority_exception("llvm/lowering/instructions_if", "effect:io", 1, seam));
+    out.push(_authority_exception("llvm/lowering/instructions_let", "effect:io", 1, seam));
+    out.push(_authority_exception("llvm/lowering/instructions_loops", "effect:io", 1, seam));
+    out.push(_authority_exception("llvm/lowering/instructions_match", "effect:io", 1, seam));
+    out.push(_authority_exception("llvm/lowering/instructions_match_condition", "effect:io", 1, seam));
+    out.push(_authority_exception("llvm/lowering/instructions_routine", "effect:io", 1, seam));
+    out.push(_authority_exception("llvm/lowering/instructions_try", "effect:io", 2, seam));
+    out.push(_authority_exception("llvm/lowering/lowering_core/diagnostics", "effect:io", 1, seam));
+    out.push(_authority_exception("llvm/lowering/lowering_core/file_emission", "effect:io", 6, seam));
+    out.push(_authority_exception("llvm/lowering/lowering_core/mod", "effect:io", 1, seam));
+    out.push(_authority_exception("llvm/lowering/lowering_core/test_harness", "effect:io", 1, seam));
+    out.push(_authority_exception("llvm/lowering/lowering_helpers", "effect:io", 1, seam));
+    out.push(_authority_exception("llvm/lowering/lowering_helpers_mangling", "effect:io", 1, seam));
+    out.push(_authority_exception("llvm/lowering/lowering_io", "effect:io", 2, seam));
+    out.push(_authority_exception("llvm/lowering/lowering_phase_functions", "effect:io", 1, seam));
+    out.push(_authority_exception("llvm/lowering/lowering_phase_render", "effect:io", 1, seam));
+    out.push(_authority_exception("llvm/lowering/lowering_phase_sanitize", "effect:io", 10, seam));
+    out.push(_authority_exception("llvm/lowering/lowering_phase_types", "effect:io", 1, seam));
+    out.push(_authority_exception("llvm/lowering/lowering_recovery", "effect:io", 1, seam));
+    out.push(_authority_exception("llvm/lowering/type_descriptors", "effect:io", 1, seam));
+    out.push(_authority_exception("llvm/lowering_debug_state", "effect:io", 14, seam));
+    out.push(_authority_exception("llvm/syscall", "effect:io", 2, seam));
+    out.push(_authority_exception("parser/mod", "effect:io", 2, seam));
+    return out;
+}
+
+fn _authority_exceptions() -> AuthorityException[] {
+    let out: AuthorityException[] = [];
+    return _append_effect_authority_exceptions(out);
+}
+
+fn _strip_sfn(path: string) -> string {
+    if !ends_with(path, ".sfn") { return path; }
+    return substring(path, 0, path.length - 4);
+}
+
+fn _monolith_module_id(path: string) -> string {
+    let prefix = "compiler/src/";
+    if !starts_with(path, prefix) { return ""; }
+    return _strip_sfn(substring(path, prefix.length, path.length));
+}
+
+fn _spec_is_capsule(spec: string, capsule: string) -> boolean {
+    return spec == capsule || starts_with(spec, capsule + "/");
+}
+
+fn _role_from_internal_spec(spec: string) -> string {
+    if spec == "runtime/prelude" { return ROLE_RUNTIME_PRELUDE; }
+    if starts_with(spec, "runtime/") { return ROLE_RUNTIME_INTERNAL; }
+    if spec == "sfn/syntax" || starts_with(spec, "sfn/syntax/") {
+        return ROLE_SYNTAX;
+    }
+    if spec == "sfn/analyzer" || starts_with(spec, "sfn/analyzer/") {
+        return ROLE_ANALYZER;
+    }
+    if spec == "sfn/ir" || starts_with(spec, "sfn/ir/") { return ROLE_IR; }
+    if spec == "sfn/codegen" || starts_with(spec, "sfn/codegen/") {
+        return ROLE_CODEGEN;
+    }
+    if spec == "sfn/codegen-llvm" || starts_with(spec, "sfn/codegen-llvm/") {
+        return ROLE_LLVM;
+    }
+    if spec == "sfn/compiler" || starts_with(spec, "sfn/compiler/") {
+        return ROLE_DRIVER;
+    }
+    if _spec_is_capsule(spec, "sfn/bench") || _spec_is_capsule(spec, "sfn/cli")
+        || _spec_is_capsule(spec, "sfn/device")
+        || _spec_is_capsule(spec, "sfn/fs")
+        || _spec_is_capsule(spec, "sfn/http")
+        || _spec_is_capsule(spec, "sfn/layers")
+        || _spec_is_capsule(spec, "sfn/log")
+        || _spec_is_capsule(spec, "sfn/net")
+        || _spec_is_capsule(spec, "sfn/nn")
+        || _spec_is_capsule(spec, "sfn/os")
+        || _spec_is_capsule(spec, "sfn/process")
+        || _spec_is_capsule(spec, "sfn/tensor")
+        || _spec_is_capsule(spec, "sfn/test")
+        || _spec_is_capsule(spec, "sfn/time") { return ROLE_AUTHORITY; }
+    if _spec_is_capsule(spec, "sfn/crypto") || _spec_is_capsule(spec, "sfn/json")
+        || _spec_is_capsule(spec, "sfn/losses")
+        || _spec_is_capsule(spec, "sfn/math")
+        || _spec_is_capsule(spec, "sfn/path")
+        || _spec_is_capsule(spec, "sfn/prelude")
+        || _spec_is_capsule(spec, "sfn/strings")
+        || _spec_is_capsule(spec, "sfn/sync")
+        || _spec_is_capsule(spec, "sfn/toml") { return ROLE_STDLIB; }
+    if starts_with(spec, "sfn/") { return ROLE_UNKNOWN; }
+    return "";
+}
+
+fn _physical_capsule_role(path: string) -> string {
+    if starts_with(path, "compiler/capsules/syntax/src/") { return ROLE_SYNTAX; }
+    if starts_with(path, "compiler/capsules/analyzer/src/") {
+        return ROLE_ANALYZER;
+    }
+    if starts_with(path, "compiler/capsules/ir/src/") { return ROLE_IR; }
+    if starts_with(path, "compiler/capsules/codegen/src/") {
+        return ROLE_CODEGEN;
+    }
+    if starts_with(path, "compiler/capsules/codegen-llvm/src/") {
+        return ROLE_LLVM;
+    }
+    return "";
+}
+
+fn _is_driver_module_id(id: string) -> boolean {
+    if starts_with(id, "build/") || starts_with(id, "capsule_resolver/")
+        || starts_with(id, "check/")
+        || starts_with(id, "cli/")
+        || starts_with(id, "tools/") { return true; }
+    return id == "arena_relocate" || id == "assert_failure" || id == "backend"
+        || id == "bootstrap_manifest"
+        || id == "build_cache"
+        || id == "build_flags"
+        || id == "build_report"
+        || id == "build_stamp"
+        || id == "capsule_artifact"
+        || id == "capsule_emit_parallel"
+        || id == "capsule_import_scan"
+        || id == "capsule_names"
+        || id == "cli_selfhost"
+        || id == "diagnostics_json"
+        || id == "diagnostics_render"
+        || id == "dist_manifest"
+        || id == "effect_gate"
+        || id == "emit_helpers"
+        || id == "ice"
+        || id == "lock"
+        || id == "main"
+        || id == "num_format"
+        || id == "prelude_globals"
+        || id == "release_trust"
+        || id == "runtime_capsule_resolver"
+        || id == "semver"
+        || id == "string_cmd_utils"
+        || id == "string_utils"
+        || id == "tensor_ir_link_harness"
+        || id == "test_results"
+        || id == "test_runner_json"
+        || id == "test_runner_state"
+        || id == "toml_parser"
+        || id == "typecheck_import_loader"
+        || id == "version";
+}
+
+fn _module_role(path: string) -> string {
+    let physical = _physical_capsule_role(path);
+    if physical.length > 0 { return physical; }
+    let id = _monolith_module_id(path);
+    if id.length == 0 { return ""; }
+
+    if id == "ast" || id == "lexer" || id == "token" || starts_with(id, "parser/") {
+        return ROLE_SYNTAX;
+    }
+    if _is_driver_module_id(id) { return ROLE_DRIVER; }
+    if id == "analyzer" || starts_with(id, "typecheck/") || starts_with(id, "typecheck_types/")
+        || starts_with(id, "effect_checker/")
+        || starts_with(id, "typecheck_")
+        || starts_with(id, "effect_")
+        || starts_with(id, "ownership_")
+        || starts_with(id, "decorator_")
+        || id == "bare_assert_check"
+        || id == "import_resolution_check"
+        || id == "prelude_scan"
+        || id == "reexport_check"
+        || id == "symbols_index"
+        || id == "type_id"
+        || id == "type_interner"
+        || id == "diagnostic" { return ROLE_ANALYZER; }
+    if starts_with(id, "native_ir") || id == "intrinsic_effects" || id == "typed_ssa"
+        || id == "typed_ssa_render"
+        || id == "typed_ssa_verify"
+        || id == "tensor_ir"
+        || id == "tensor_ir_fusion"
+        || id == "tensor_ir_verify" { return ROLE_IR; }
+    if starts_with(id, "emit_native") || starts_with(id, "emitter_sailfin")
+        || id == "typed_ssa_produce"
+        || id == "tensor_ir_emit_stablehlo"
+        || id == "tensor_ir_lower_scalar" { return ROLE_CODEGEN; }
+    if starts_with(id, "llvm/") { return ROLE_LLVM; }
+    return "";
+}
+
+fn _role_rule(importer_role: string, importee_role: string) -> string {
+    if importer_role == ROLE_STDLIB {
+        return "top-level standard-library capsules must not import internal compiler capsules";
+    }
+    if importee_role == ROLE_AUTHORITY {
+        return "only sfn/compiler may depend on capability-bearing standard-library capsules";
+    }
+    if importee_role == ROLE_UNKNOWN {
+        return "every dependency must be classified before a compiler role imports it";
+    }
+    if importee_role == ROLE_RUNTIME_INTERNAL {
+        return "internal compiler libraries may import runtime/prelude but not runtime implementation modules";
+    }
+    if importee_role == ROLE_RUNTIME_PRELUDE {
+        return "only syntax, IR, and compiler-driver roles may import runtime/prelude";
+    }
+    if importee_role == ROLE_COMPAT_LEAF {
+        return "monolith compatibility helpers require an exact importer/importee migration exception";
+    }
+    if importee_role == ROLE_DRIVER && importer_role != ROLE_DRIVER {
+        return "internal libraries must not import sfn/compiler or driver-owned modules";
+    }
+    if importer_role == ROLE_SYNTAX {
+        return "syntax may depend only on syntax and narrow standard-library contracts";
+    }
+    if importer_role == ROLE_IR {
+        return "IR may not depend on syntax, analyzer, codegen, LLVM, or driver modules";
+    }
+    if importer_role == ROLE_ANALYZER {
+        return "analyzer may depend only on syntax, IR, analyzer, and narrow standard-library contracts";
+    }
+    if importer_role == ROLE_CODEGEN {
+        return "codegen may depend only on syntax, analyzer, IR, and codegen";
+    }
+    if importer_role == ROLE_LLVM {
+        return "codegen-llvm may depend only on IR and codegen-llvm";
+    }
+    return "the import is outside the SFEP-0020 role dependency graph";
+}
+
+fn _role_import_allowed(importer_role: string, importee_role: string) -> boolean {
+    if importer_role.length == 0 || importee_role.length == 0 { return true; }
+    if importee_role == ROLE_UNKNOWN { return false; }
+    if importer_role == ROLE_DRIVER { return true; }
+    if importer_role == importee_role { return true; }
+    if importer_role == ROLE_SYNTAX || importer_role == ROLE_IR {
+        return importee_role == ROLE_STDLIB || importee_role == ROLE_RUNTIME_PRELUDE;
+    }
+    if importer_role == ROLE_ANALYZER {
+        return importee_role == ROLE_SYNTAX || importee_role == ROLE_IR
+            || importee_role == ROLE_STDLIB;
+    }
+    if importer_role == ROLE_CODEGEN {
+        return importee_role == ROLE_SYNTAX || importee_role == ROLE_ANALYZER
+            || importee_role == ROLE_IR;
+    }
+    if importer_role == ROLE_LLVM { return importee_role == ROLE_IR; }
+    return false;
+}
+
+fn _is_internal_compiler_role(role: string) -> boolean {
+    return role == ROLE_SYNTAX || role == ROLE_ANALYZER || role == ROLE_IR
+        || role == ROLE_CODEGEN
+        || role == ROLE_LLVM
+        || role == ROLE_DRIVER;
+}
+
+fn _dirname(path: string) -> string {
+    let mut last: int = -1;
+    let mut i: int = 0;
+    loop {
+        if i >= path.length { break; }
+        if path[i] == "/" { last = i; }
+        i += 1;
+    }
+    if last < 0 { return "."; }
+    return substring(path, 0, last);
+}
+
+fn _normalize_path(path: string) -> string {
+    let components = split(path, "/");
+    let mut stack: string[] = [];
+    let mut depth: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= components.length { break; }
+        let part = components[i];
+        i += 1;
+        if part.length == 0 || part == "." { continue; }
+        if part == ".." {
+            if depth > 0 { depth -= 1; }
+            continue;
+        }
+        if depth < stack.length { stack[depth] = part; } else {
+            stack.push(part);
+        }
+        depth += 1;
+    }
+    let mut out = "";
+    let mut j: int = 0;
+    loop {
+        if j >= depth { break; }
+        if out.length > 0 { out = out + "/"; }
+        out = out + stack[j];
+        j += 1;
+    }
+    return out;
+}
+
+fn _resolve_relative_import(importer: string, spec: string) -> string ![io] {
+    let base = _normalize_path(_dirname(importer) + "/" + spec);
+    if ends_with(base, ".sfn") {
+        if fs.exists(base) { return base; }
+        let without_extension = substring(base, 0, base.length - 4);
+        if fs.exists(without_extension + "/mod.sfn") {
+            return without_extension + "/mod.sfn";
+        }
+    }
+    if fs.exists(base + ".sfn") { return base + ".sfn"; }
+    if fs.exists(base + "/mod.sfn") { return base + "/mod.sfn"; }
+    return "";
+}
+
+fn _collect_sfn_files(root: string, acc: string[]) -> string[] ![io] {
+    let mut out = acc;
+    if !fs.exists(root) { return out; }
+    let entries = fs.listDirectory(root);
+    let mut i: int = 0;
+    loop {
+        if i >= entries.length { break; }
+        let name = entries[i];
+        i += 1;
+        if name == "." || name == ".." { continue; }
+        let full = root + "/" + name;
+        let children = fs.listDirectory(full);
+        if children.length > 0 { out = _collect_sfn_files(full, out); } else if ends_with(name, ".sfn") {
+            out.push(full);
+        }
+    }
+    return out;
+}
+
+fn _collect_stdlib_sources() -> string[] ![io] {
+    let mut out: string[] = [];
+    let root = "capsules/sfn";
+    let capsules = fs.listDirectory(root);
+    let mut i: int = 0;
+    loop {
+        if i >= capsules.length { break; }
+        let name = capsules[i];
+        i += 1;
+        out = _collect_sfn_files(root + "/" + name + "/src", out);
+    }
+    return out;
+}
+
+// The production scoped scanner deliberately excludes runtime/* because the
+// resolver stages runtime separately. Rewriting only the prefix lets the same
+// comment/string-aware scanner expose those specs to this architectural audit.
+fn _collect_runtime_import_specs(source: string) -> string[] {
+    let marker = "sfn-runtime-audit/";
+    let rewritten = replace(source, "runtime/", marker);
+    let scanned = collect_scoped_import_specs(rewritten);
+    let mut out: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= scanned.length { break; }
+        let spec = scanned[i];
+        i += 1;
+        if !starts_with(spec, marker) { continue; }
+        out.push("runtime/" + substring(spec, marker.length, spec.length));
+    }
+    return out;
+}
+
+fn _is_identifier_char(ch: string) -> boolean {
+    return contains("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_", ch);
+}
+
+fn _word_at(source: string, index: int, word: string) -> boolean {
+    if !_text_at(source, index, word) { return false; }
+    if index > 0 && _is_identifier_char(source[index - 1]) { return false; }
+    let after = index + word.length;
+    if after < source.length && _is_identifier_char(source[after]) {
+        return false;
+    }
+    return true;
+}
+
+fn _skip_trivia(source: string, start: int) -> int {
+    let mut i = start;
+    loop {
+        if i >= source.length { return i; }
+        if _is_space(source[i]) {
+            i += 1;
+            continue;
+        }
+        if source[i] == "/" && _text_at(source, i + 1, "/") {
+            i += 2;
+            loop {
+                if i >= source.length || source[i] == "\n" { break; }
+                i += 1;
+            }
+            continue;
+        }
+        if source[i] == "/" && _text_at(source, i + 1, "*") {
+            i += 2;
+            loop {
+                if i >= source.length { return i; }
+                if source[i] == "*" && _text_at(source, i + 1, "/") {
+                    i += 2;
+                    break;
+                }
+                i += 1;
+            }
+            continue;
+        }
+        return i;
+    }
+}
+
+fn _find_import_from(source: string, start: int) -> int {
+    let mut i = start;
+    let mut in_string = false;
+    let mut escaping = false;
+    let mut brace_depth: int = 1;
+    loop {
+        if i >= source.length { return -1; }
+        let ch = source[i];
+        if in_string {
+            if escaping { escaping = false; } else if ch == "\\" {
+                escaping = true;
+            } else if ch == "\"" { in_string = false; }
+            i += 1;
+            continue;
+        }
+        let after_trivia = _skip_trivia(source, i);
+        if after_trivia != i {
+            i = after_trivia;
+            continue;
+        }
+        if ch == "\"" {
+            in_string = true;
+            i += 1;
+            continue;
+        }
+        if ch == "{" { brace_depth += 1; }
+        if ch == "}" {
+            brace_depth -= 1;
+            if brace_depth == 0 {
+                let from_start = _skip_trivia(source, i + 1);
+                if _word_at(source, from_start, "from") {
+                    return from_start + 4;
+                }
+                return -1;
+            }
+        }
+        i += 1;
+    }
+}
+
+fn _decode_import_string(text: string) -> string {
+    let mut decoded = "";
+    let mut i: int = 0;
+    loop {
+        if i >= text.length { break; }
+        let ch = text[i];
+        if ch != "\\" || i + 1 >= text.length {
+            decoded = decoded + ch;
+            i += 1;
+            continue;
+        }
+        let escaped = text[i + 1];
+        if escaped == "n" { decoded = decoded + "\n"; } else if escaped == "t" {
+            decoded = decoded + "\t";
+        } else if escaped == "r" { decoded = decoded + "\r"; } else if escaped == "\"" {
+            decoded = decoded + "\"";
+        } else if escaped == "\\" { decoded = decoded + "\\"; } else if escaped == "$" {
+            decoded = decoded + "$";
+        } else { decoded = decoded + escaped; }
+        i += 2;
+    }
+    return decoded;
+}
+
+fn _collect_parser_import_specs(source: string) -> string[] {
+    let mut out: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= source.length { break; }
+        let after_trivia = _skip_trivia(source, i);
+        if after_trivia != i {
+            i = after_trivia;
+            continue;
+        }
+        if source[i] == "\"" {
+            i += 1;
+            let mut escaping = false;
+            loop {
+                if i >= source.length { break; }
+                if escaping { escaping = false; } else if source[i] == "\\" {
+                    escaping = true;
+                } else if source[i] == "\"" {
+                    i += 1;
+                    break;
+                }
+                i += 1;
+            }
+            continue;
+        }
+        if !_word_at(source, i, "import") && !_word_at(source, i, "export") {
+            i += 1;
+            continue;
+        }
+        let specifier_start = _skip_trivia(source, i + 6);
+        if specifier_start >= source.length || source[specifier_start] != "{" {
+            i += 6;
+            continue;
+        }
+        let from_end = _find_import_from(source, specifier_start + 1);
+        if from_end < 0 {
+            i += 6;
+            continue;
+        }
+        let spec_start = _skip_trivia(source, from_end);
+        if spec_start >= source.length { break; }
+        if source[spec_start] == "\"" {
+            let mut end = spec_start + 1;
+            let mut escaping = false;
+            loop {
+                if end >= source.length { break; }
+                if escaping { escaping = false; } else if source[end] == "\\" {
+                    escaping = true;
+                } else if source[end] == "\"" { break; }
+                end += 1;
+            }
+            if end <= source.length {
+                out.push(_decode_import_string(substring(source, spec_start + 1, end)));
+            }
+            i = end + 1;
+            continue;
+        }
+        let mut end = spec_start;
+        loop {
+            if end >= source.length || source[end] == ";" { break; }
+            end += 1;
+        }
+        let spec = trim(substring(source, spec_start, end));
+        if spec.length > 0 { out.push(spec); }
+        i = end + 1;
+    }
+    return out;
+}
+
+fn _all_import_specs(source: string) -> string[] {
+    return _collect_parser_import_specs(source);
+}
+
+fn _importee_path(importer: string, spec: string) -> string ![io] {
+    if starts_with(spec, "./") || starts_with(spec, "../") {
+        return _resolve_relative_import(importer, spec);
+    }
+    return spec;
+}
+
+fn _importee_role(path_or_spec: string) -> string {
+    let scoped = _role_from_internal_spec(path_or_spec);
+    if scoped.length > 0 { return scoped; }
+    // These monolith-local helpers are driver-owned compatibility leaves, but
+    // imports to their pure contracts stand in for the narrow standard-library
+    // dependencies allowed by SFEP-0020 §3.5.7. They are not a common capsule.
+    let id = _monolith_module_id(path_or_spec);
+    if id == "string_utils" || id == "num_format" { return ROLE_COMPAT_LEAF; }
+    let module_role = _module_role(path_or_spec);
+    if module_role.length > 0 { return module_role; }
+    return ROLE_UNKNOWN;
+}
+
+fn _edge_module_id(path_or_spec: string) -> string {
+    let monolith = _monolith_module_id(path_or_spec);
+    if monolith.length > 0 { return monolith; }
+    let syntax = "compiler/capsules/syntax/src/";
+    if starts_with(path_or_spec, syntax) {
+        return _strip_sfn(substring(path_or_spec, syntax.length, path_or_spec.length));
+    }
+    let analyzer = "compiler/capsules/analyzer/src/";
+    if starts_with(path_or_spec, analyzer) {
+        return _strip_sfn(substring(path_or_spec, analyzer.length, path_or_spec.length));
+    }
+    let ir = "compiler/capsules/ir/src/";
+    if starts_with(path_or_spec, ir) {
+        return _strip_sfn(substring(path_or_spec, ir.length, path_or_spec.length));
+    }
+    let codegen = "compiler/capsules/codegen/src/";
+    if starts_with(path_or_spec, codegen) {
+        return _strip_sfn(substring(path_or_spec, codegen.length, path_or_spec.length));
+    }
+    let llvm = "compiler/capsules/codegen-llvm/src/";
+    if starts_with(path_or_spec, llvm) {
+        return "llvm/" + _strip_sfn(substring(path_or_spec, llvm.length, path_or_spec.length));
+    }
+    let scoped_syntax = "sfn/syntax/";
+    if starts_with(path_or_spec, scoped_syntax) {
+        return _strip_sfn(substring(path_or_spec, scoped_syntax.length, path_or_spec.length));
+    }
+    let scoped_analyzer = "sfn/analyzer/";
+    if starts_with(path_or_spec, scoped_analyzer) {
+        return _strip_sfn(substring(path_or_spec, scoped_analyzer.length, path_or_spec.length));
+    }
+    let scoped_ir = "sfn/ir/";
+    if starts_with(path_or_spec, scoped_ir) {
+        return _strip_sfn(substring(path_or_spec, scoped_ir.length, path_or_spec.length));
+    }
+    let scoped_codegen = "sfn/codegen/";
+    if starts_with(path_or_spec, scoped_codegen) {
+        return _strip_sfn(substring(path_or_spec, scoped_codegen.length, path_or_spec.length));
+    }
+    let scoped_llvm = "sfn/codegen-llvm/";
+    if starts_with(path_or_spec, scoped_llvm) {
+        return "llvm/" + _strip_sfn(substring(path_or_spec, scoped_llvm.length, path_or_spec.length));
+    }
+    let scoped_driver = "sfn/compiler/";
+    if starts_with(path_or_spec, scoped_driver) {
+        return _strip_sfn(substring(path_or_spec, scoped_driver.length, path_or_spec.length));
+    }
+    return path_or_spec;
+}
+
+fn _find_exception(exceptions: BoundaryException[], importer: string, importee: string) -> int {
+    let mut i: int = 0;
+    loop {
+        if i >= exceptions.length { break; }
+        if exceptions[i].importer == importer && exceptions[i].importee == importee {
+            return i;
+        }
+        i += 1;
+    }
+    return -1;
+}
+
+fn _find_authority_exception(exceptions: AuthorityException[], module: string, token: string) -> int {
+    let mut i: int = 0;
+    loop {
+        if i >= exceptions.length { break; }
+        if exceptions[i].module == module && exceptions[i].token == token {
+            return i;
+        }
+        i += 1;
+    }
+    return -1;
+}
+
+fn _text_at(source: string, index: int, value: string) -> boolean {
+    if index < 0 || index + value.length > source.length { return false; }
+    return substring(source, index, index + value.length) == value;
+}
+
+fn _is_space(ch: string) -> boolean {
+    return ch == " " || ch == "\t" || ch == "\n" || ch == "\r";
+}
+
+fn _next_nontrivia_char(source: string, start: int) -> string {
+    let mut i = start;
+    loop {
+        if i >= source.length { return ""; }
+        let ch = source[i];
+        if _is_space(ch) {
+            i += 1;
+            continue;
+        }
+        if ch == "/" && _text_at(source, i + 1, "/") {
+            i += 2;
+            loop {
+                if i >= source.length || source[i] == "\n" { break; }
+                i += 1;
+            }
+            continue;
+        }
+        if ch == "/" && _text_at(source, i + 1, "*") {
+            i += 2;
+            loop {
+                if i >= source.length { return ""; }
+                if source[i] == "*" && _text_at(source, i + 1, "/") {
+                    i += 2;
+                    break;
+                }
+                i += 1;
+            }
+            continue;
+        }
+        return ch;
+    }
+}
+
+fn _previous_nontrivia_index(source: string, before: int) -> int {
+    let mut i: int = 0;
+    let mut last: int = -1;
+    let mut in_string = false;
+    let mut escaping = false;
+    loop {
+        if i >= before || i >= source.length { break; }
+        let ch = source[i];
+        if in_string {
+            if escaping { escaping = false; } else if ch == "\\" {
+                escaping = true;
+            } else if ch == "\"" {
+                in_string = false;
+                last = i;
+            }
+            i += 1;
+            continue;
+        }
+        if _is_space(ch) {
+            i += 1;
+            continue;
+        }
+        if ch == "/" && _text_at(source, i + 1, "/") {
+            i += 2;
+            loop {
+                if i >= before || i >= source.length || source[i] == "\n" {
+                    break;
+                }
+                i += 1;
+            }
+            continue;
+        }
+        if ch == "/" && _text_at(source, i + 1, "*") {
+            i += 2;
+            loop {
+                if i >= before || i >= source.length { break; }
+                if source[i] == "*" && _text_at(source, i + 1, "/") {
+                    i += 2;
+                    break;
+                }
+                i += 1;
+            }
+            continue;
+        }
+        if ch == "\"" { in_string = true; }
+        last = i;
+        i += 1;
+    }
+    return last;
+}
+
+fn _parenthesized_authority_has_follow(source: string, root_start: int, root_end: int, expected: string) -> boolean {
+    let mut after = _skip_trivia(source, root_end);
+    let mut closing_count: int = 0;
+    loop {
+        if after >= source.length || source[after] != ")" { break; }
+        closing_count += 1;
+        after = _skip_trivia(source, after + 1);
+    }
+    if closing_count == 0 || after >= source.length || source[after] != expected {
+        return false;
+    }
+    let mut before = root_start;
+    let mut opening_count: int = 0;
+    loop {
+        let previous = _previous_nontrivia_index(source, before);
+        if previous < 0 || source[previous] != "(" { break; }
+        opening_count += 1;
+        before = previous;
+    }
+    if opening_count != closing_count { return false; }
+    let receiver = _previous_nontrivia_index(source, before);
+    if receiver < 0 { return true; }
+    let receiver_ch = source[receiver];
+    if receiver_ch == ")" || receiver_ch == "]" || receiver_ch == "." {
+        return false;
+    }
+    if !_is_identifier_char(receiver_ch) { return true; }
+    let mut word_start = receiver;
+    loop {
+        if word_start <= 0 || !_is_identifier_char(source[word_start - 1]) {
+            break;
+        }
+        word_start -= 1;
+    }
+    let word = substring(source, word_start, receiver + 1);
+    return word == "if" || word == "while" || word == "return" || word == "else"
+        || word == "match";
+}
+
+fn _effect_annotation_end(source: string, bang_index: int) -> int {
+    if !_text_at(source, bang_index, "!") { return -1; }
+    let open = _skip_trivia(source, bang_index + 1);
+    if open >= source.length || source[open] != "[" { return -1; }
+    let allowed = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.,";
+    let mut i = open + 1;
+    loop {
+        if i >= source.length { return -1; }
+        let after_trivia = _skip_trivia(source, i);
+        if after_trivia != i {
+            i = after_trivia;
+            continue;
+        }
+        let ch = source[i];
+        if ch == "]" {
+            let after = _skip_trivia(source, i + 1);
+            if after >= source.length { return -1; }
+            if source[after] == "{" || source[after] == ";" || _text_at(source, after, "->")
+                || _text_at(source, after, "=>") { return i + 1; }
+            return -1;
+        }
+        if !contains(allowed, ch) { return -1; }
+        i += 1;
+    }
+}
+
+fn _effect_annotation_has_root(source: string, bang_index: int, annotation_end: int, root: string) -> boolean {
+    let open = _skip_trivia(source, bang_index + 1);
+    let mut i = open + 1;
+    loop {
+        i = _skip_trivia(source, i);
+        if i >= annotation_end || source[i] == "]" { break; }
+        if !_is_identifier_char(source[i]) || contains("0123456789", source[i]) {
+            i += 1;
+            continue;
+        }
+        let start = i;
+        i += 1;
+        loop {
+            if i >= annotation_end || !_is_identifier_char(source[i]) { break; }
+            i += 1;
+        }
+        let mut effect = substring(source, start, i);
+        loop {
+            if i >= annotation_end || source[i] != "." { break; }
+            let segment_start = i + 1;
+            if segment_start >= annotation_end || !_is_identifier_char(source[segment_start])
+                || contains("0123456789", source[segment_start]) { break; }
+            i = segment_start + 1;
+            loop {
+                if i >= annotation_end || !_is_identifier_char(source[i]) {
+                    break;
+                }
+                i += 1;
+            }
+            effect = effect + "." + substring(source, segment_start, i);
+        }
+        if effect == root || starts_with(effect, root + ".") { return true; }
+    }
+    return false;
+}
+
+fn _declared_authority_effect_count(source: string, root: string) -> int {
+    let mut count: int = 0;
+    let mut i: int = 0;
+    let mut in_string = false;
+    let mut escaping = false;
+    let mut in_line_comment = false;
+    let mut in_block_comment = false;
+    loop {
+        if i >= source.length { break; }
+        let ch = source[i];
+        if in_line_comment {
+            if ch == "\n" { in_line_comment = false; }
+            i += 1;
+            continue;
+        }
+        if in_block_comment {
+            if ch == "*" && _text_at(source, i + 1, "/") {
+                in_block_comment = false;
+                i += 2;
+            } else { i += 1; }
+            continue;
+        }
+        if in_string {
+            if escaping { escaping = false; } else if ch == "\\" {
+                escaping = true;
+            } else if ch == "\"" { in_string = false; }
+            i += 1;
+            continue;
+        }
+        if ch == "/" && _text_at(source, i + 1, "/") {
+            in_line_comment = true;
+            i += 2;
+            continue;
+        }
+        if ch == "/" && _text_at(source, i + 1, "*") {
+            in_block_comment = true;
+            i += 2;
+            continue;
+        }
+        if ch == "\"" {
+            in_string = true;
+            i += 1;
+            continue;
+        }
+        if ch == "!" {
+            let annotation_end = _effect_annotation_end(source, i);
+            if annotation_end >= 0 {
+                if _effect_annotation_has_root(source, i, annotation_end, root) {
+                    count += 1;
+                }
+                i = annotation_end;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    return count;
+}
+
+// Count one direct authority token outside comments and ordinary string text.
+// Interpolation expressions are executable, so `${ ... }` re-enters code mode.
+// Runtime-helper metadata contains quoted target names; a plain substring scan
+// would misclassify that declarative lowering data as I/O.
+fn _direct_authority_count(source: string, token: string) -> int {
+    let mut root = token;
+    let dotted = ends_with(token, ".");
+    if dotted { root = substring(token, 0, token.length - 1); }
+    let identifier_chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_";
+    let mut count: int = 0;
+    let mut i: int = 0;
+    let mut in_string = false;
+    let mut escaping = false;
+    let mut in_line_comment = false;
+    let mut in_block_comment = false;
+    let mut interpolation_depth: int = 0;
+    let mut string_resume_depths: int[] = [];
+    let mut string_resume_count: int = 0;
+    let mut previous_significant = "";
+    loop {
+        if i >= source.length { break; }
+        let ch = source[i];
+        if in_line_comment {
+            if ch == "\n" { in_line_comment = false; }
+            i += 1;
+            continue;
+        }
+        if in_block_comment {
+            if ch == "*" && _text_at(source, i + 1, "/") {
+                in_block_comment = false;
+                i += 2;
+            } else { i += 1; }
+            continue;
+        }
+        if in_string {
+            if escaping { escaping = false; } else if ch == "\\" {
+                escaping = true;
+            } else if ch == "$" && _text_at(source, i + 1, "{") {
+                in_string = false;
+                if string_resume_count < string_resume_depths.length {
+                    string_resume_depths[string_resume_count] = interpolation_depth;
+                } else { string_resume_depths.push(interpolation_depth); }
+                string_resume_count += 1;
+                interpolation_depth += 1;
+                previous_significant = "{";
+                i += 2;
+                continue;
+            } else if ch == "\"" {
+                in_string = false;
+                previous_significant = "value";
+            }
+            i += 1;
+            continue;
+        }
+        if ch == "/" && _text_at(source, i + 1, "/") {
+            in_line_comment = true;
+            i += 2;
+            continue;
+        }
+        if ch == "/" && _text_at(source, i + 1, "*") {
+            in_block_comment = true;
+            i += 2;
+            continue;
+        }
+        if ch == "!" && _text_at(source, i + 1, "[") {
+            let effect_end = _effect_annotation_end(source, i);
+            if effect_end >= 0 {
+                i = effect_end;
+                continue;
+            }
+        }
+        if ch == "\"" {
+            in_string = true;
+            i += 1;
+            continue;
+        }
+        if interpolation_depth > 0 && ch == "{" {
+            interpolation_depth += 1;
+            previous_significant = "{";
+            i += 1;
+            continue;
+        }
+        if interpolation_depth > 0 && ch == "}" {
+            interpolation_depth -= 1;
+            if string_resume_count > 0 {
+                let resume_depth = string_resume_depths[string_resume_count - 1];
+                if resume_depth == interpolation_depth {
+                    string_resume_count -= 1;
+                    in_string = true;
+                }
+            }
+            previous_significant = "}";
+            i += 1;
+            continue;
+        }
+        if _is_space(ch) {
+            i += 1;
+            continue;
+        }
+        if contains(identifier_chars, ch) && !contains("0123456789", ch) {
+            let start = i;
+            i += 1;
+            loop {
+                if i >= source.length || !contains(identifier_chars, source[i]) {
+                    break;
+                }
+                i += 1;
+            }
+            let word = substring(source, start, i);
+            if word == root && previous_significant != "." {
+                let mut expected = "(";
+                if dotted { expected = "."; }
+                let direct = _next_nontrivia_char(source, i) == expected;
+                let mut parenthesized = false;
+                if !direct {
+                    parenthesized = _parenthesized_authority_has_follow(source, start, i, expected);
+                }
+                if direct || parenthesized { count += 1; }
+            }
+            previous_significant = "identifier";
+            continue;
+        }
+        previous_significant = ch;
+        i += 1;
+    }
+    return count;
+}
+
+fn _violation_diagnostic(importer: string, importee: string, importer_role: string, importee_role: string) -> string {
+    return "compiler capsule boundary: importer '" + importer + "' ("
+        + importer_role
+        + ") imports '"
+        + importee
+        + "' ("
+        + importee_role
+        + "); violated rule: "
+        + _role_rule(importer_role, importee_role);
+}
+
+fn _int_text(value: int) -> string {
+    if value == 0 { return "0"; }
+    let digits = "0123456789";
+    let mut n = value;
+    let mut out = "";
+    loop {
+        if n <= 0 { break; }
+        out = digits[n % 10] + out;
+        n = n / 10;
+    }
+    return out;
+}
+
+fn _report_boundary_failures(failures: string[]) ![io] {
+    let mut i: int = 0;
+    loop {
+        if i >= failures.length { break; }
+        print.error(failures[i]);
+        i += 1;
+    }
+    assert failures.length == 0;
+}
+
+test "capsule roles: encode every SFEP-0020 dependency invariant" {
+    assert ! _role_import_allowed(ROLE_SYNTAX, ROLE_ANALYZER);
+    assert ! _role_import_allowed(ROLE_IR, ROLE_SYNTAX);
+    assert ! _role_import_allowed(ROLE_IR, ROLE_ANALYZER);
+    assert ! _role_import_allowed(ROLE_IR, ROLE_CODEGEN);
+    assert ! _role_import_allowed(ROLE_IR, ROLE_LLVM);
+    assert ! _role_import_allowed(ROLE_IR, ROLE_DRIVER);
+    assert ! _role_import_allowed(ROLE_LLVM, ROLE_SYNTAX);
+    assert ! _role_import_allowed(ROLE_LLVM, ROLE_ANALYZER);
+    assert ! _role_import_allowed(ROLE_LLVM, ROLE_CODEGEN);
+    assert ! _role_import_allowed(ROLE_LLVM, ROLE_DRIVER);
+    assert ! _role_import_allowed(ROLE_ANALYZER, ROLE_DRIVER);
+    assert ! _role_import_allowed(ROLE_CODEGEN, ROLE_DRIVER);
+    assert ! _role_import_allowed(ROLE_LLVM, ROLE_AUTHORITY);
+    assert ! _role_import_allowed(ROLE_ANALYZER, ROLE_UNKNOWN);
+    assert ! _role_import_allowed(ROLE_DRIVER, ROLE_UNKNOWN);
+    assert ! _role_import_allowed(ROLE_CODEGEN, ROLE_STDLIB);
+    assert ! _role_import_allowed(ROLE_LLVM, ROLE_STDLIB);
+    assert ! _role_import_allowed(ROLE_LLVM, ROLE_RUNTIME_INTERNAL);
+    assert _role_import_allowed(ROLE_DRIVER, ROLE_SYNTAX);
+    assert _role_import_allowed(ROLE_DRIVER, ROLE_ANALYZER);
+    assert _role_import_allowed(ROLE_DRIVER, ROLE_IR);
+    assert _role_import_allowed(ROLE_DRIVER, ROLE_CODEGEN);
+    assert _role_import_allowed(ROLE_DRIVER, ROLE_LLVM);
+    assert _role_import_allowed(ROLE_ANALYZER, ROLE_STDLIB);
+    assert _role_import_allowed(ROLE_SYNTAX, ROLE_STDLIB);
+    assert _role_import_allowed(ROLE_IR, ROLE_STDLIB);
+    assert ! _role_import_allowed(ROLE_CODEGEN, ROLE_COMPAT_LEAF);
+    assert ! _role_import_allowed(ROLE_ANALYZER, ROLE_RUNTIME_PRELUDE);
+    assert ! _role_import_allowed(ROLE_LLVM, ROLE_RUNTIME_PRELUDE);
+    assert _role_import_allowed(ROLE_SYNTAX, ROLE_RUNTIME_PRELUDE);
+    assert _role_import_allowed(ROLE_IR, ROLE_RUNTIME_PRELUDE);
+}
+
+test "capsule roles: classification survives physical compiler capsule moves" {
+    assert _module_role("compiler/capsules/syntax/src/parser/mod.sfn") == ROLE_SYNTAX;
+    assert _module_role("compiler/capsules/analyzer/src/mod.sfn") == ROLE_ANALYZER;
+    assert _module_role("compiler/capsules/ir/src/native_ir.sfn") == ROLE_IR;
+    assert _module_role("compiler/capsules/codegen/src/emit.sfn") == ROLE_CODEGEN;
+    assert _module_role("compiler/capsules/codegen-llvm/src/lowering/mod.sfn") == ROLE_LLVM;
+    assert _edge_module_id("compiler/capsules/analyzer/src/type_interner.sfn") == "type_interner";
+    assert _edge_module_id("compiler/capsules/codegen-llvm/src/lowering/mod.sfn") == "llvm/lowering/mod";
+    let moved_exceptions = _boundary_exceptions();
+    let moved_importer = _edge_module_id("compiler/capsules/codegen-llvm/src/types.sfn");
+    let moved_importee = _edge_module_id("compiler/capsules/analyzer/src/diagnostic.sfn");
+    assert _find_exception(moved_exceptions, moved_importer, moved_importee) >= 0;
+    assert _edge_module_id("sfn/analyzer/diagnostic") == "diagnostic";
+    assert _edge_module_id("sfn/codegen/emit_native") == "emit_native";
+    assert _edge_module_id("sfn/codegen-llvm/lowering/mod") == "llvm/lowering/mod";
+    assert _find_exception(moved_exceptions, _edge_module_id("sfn/codegen-llvm/types"), _edge_module_id("sfn/analyzer/diagnostic")) >= 0;
+    let moved_authority = _edge_module_id("compiler/capsules/codegen-llvm/src/imports.sfn");
+    assert _find_authority_exception(_authority_exceptions(), moved_authority, "effect:io") >= 0;
+    assert _role_from_internal_spec("sfn/compiler/build") == ROLE_DRIVER;
+    assert _role_from_internal_spec("sfn/fs/private") == ROLE_AUTHORITY;
+    assert _role_from_internal_spec("sfn/strings/scan") == ROLE_STDLIB;
+    assert _role_from_internal_spec("sfn/future-pure") == ROLE_UNKNOWN;
+    assert _role_from_internal_spec("runtime/prelude") == ROLE_RUNTIME_PRELUDE;
+    assert _role_from_internal_spec("runtime/sfn/filesystem") == ROLE_RUNTIME_INTERNAL;
+    assert _module_role("compiler/src/diagnostic.sfn") == ROLE_ANALYZER;
+    assert _module_role("compiler/src/new_unclassified_role.sfn") == "";
+}
+
+test "compiler driver: workspace, process, assembly, and final-link owners classify as driver" {
+    assert _module_role("compiler/src/capsule_resolver/mod.sfn") == ROLE_DRIVER;
+    assert _module_role("compiler/src/build/fs.sfn") == ROLE_DRIVER;
+    assert _module_role("compiler/src/backend.sfn") == ROLE_DRIVER;
+    assert _module_role("compiler/src/build/link.sfn") == ROLE_DRIVER;
+    assert _module_role("compiler/src/build/direct_link.sfn") == ROLE_DRIVER;
+    assert _module_role("compiler/src/cli/commands/build.sfn") == ROLE_DRIVER;
+    assert _module_role("compiler/src/typecheck_import_loader.sfn") == ROLE_DRIVER;
+    assert _module_role("compiler/src/emit_helpers.sfn") == ROLE_DRIVER;
+}
+
+test "capsule diagnostics: new reverse edge identifies importer, importee, and role rule" {
+    let message = _violation_diagnostic("compiler/capsules/ir/src/model.sfn", "sfn/analyzer", ROLE_IR, ROLE_ANALYZER);
+    assert contains(message, "importer 'compiler/capsules/ir/src/model.sfn'");
+    assert contains(message, "imports 'sfn/analyzer'");
+    assert contains(message, "violated rule: IR may not depend on");
+    let stdlib_message = _violation_diagnostic("capsules/sfn/json/src/mod.sfn", "sfn/compiler", ROLE_STDLIB, ROLE_DRIVER);
+    assert contains(stdlib_message, "violated rule: top-level standard-library capsules must not import internal compiler capsules");
+}
+
+test "capsule authority: scanner counts every unquoted token kind exactly" {
+    let source = "// fs.readFile ignored\n"
+        + "let quoted = \"process.run and env.get\";\n"
+        + "if fs.exists(path) { fs.readFile(path); }\n"
+        + "process.run(args);\n"
+        + "env.get(\"HOME\");\n"
+        + "io.read_line(0);\n"
+        + "let rendered = \""
+        + "$"
+        + "{fs.readFile(path)} "
+        + "$"
+        + "{process.run(args)} "
+        + "$"
+        + "{http.download(url, dest)}\";\n"
+        + "let nested = \""
+        + "$"
+        + "{ \"inner "
+        + "$"
+        + "{fs.readFile(path)}\" } "
+        + "$"
+        + "{process.run(args)}\";\n"
+        + "let nested_member = record.fs.readFile;\n"
+        + "let spaced_member = record. fs.readFile;\n"
+        + "fs\n"
+        + "    // direct-root trivia\n"
+        + "    .readFile(path);\n"
+        + "record.\n"
+        + "    // nested-member trivia\n"
+        + "    fs.readFile;\n"
+        + "(fs).readFile(path);\n"
+        + "((process)).run(args);\n"
+        + "(record.fs).readFile;\n"
+        + "let denied = ![fs.exists(path)][0];\n"
+        + "serve(handler, 8080);\n"
+        + "runtime_serve_fn(handler, config);\n"
+        + "logExecution(task);\n"
+        + "runtime_log_execution_fn(task);\n"
+        + "((sleep))(1.0);\n"
+        + "fn console_only() -> void ![io.console] {}\n"
+        + "let refs = value; refs.length;\n";
+    assert _direct_authority_count(source, "fs.") == 7;
+    assert _direct_authority_count(source, "process.") == 4;
+    assert _direct_authority_count(source, "env.") == 1;
+    assert _direct_authority_count(source, "http.") == 1;
+    assert _direct_authority_count(source, "io.") == 1;
+    assert _direct_authority_count(source, "websocket.") == 0;
+    assert _direct_authority_count(source, "serve") == 1;
+    assert _direct_authority_count(source, "runtime_serve_fn") == 1;
+    assert _direct_authority_count(source, "logExecution") == 1;
+    assert _direct_authority_count(source, "runtime_log_execution_fn") == 1;
+    assert _direct_authority_count(source, "sleep") == 1;
+    let effects = "fn write() -> void ![io] { fs_write_file(path, text); }\n"
+        + "@logExecution fn traced() -> void ![io] {}\n"
+        + "fn server() -> void ![io, net] { runtime_serve_fn(handler, config); }\n"
+        + "fn timed() -> int ![clock] { return runtime_monotonic_millis_fn(); }\n"
+        + "fn effect_first() ![io] -> int { return 0; }\n"
+        + "let lambda = fn () ![io] => 0;\n"
+        + "fn spaced_bang() ! /* declaration trivia */ [io] -> int { return 0; }\n"
+        + "fn listed_comment() -> void ![io /* list trivia */] {}\n"
+        + "fn accelerator() -> void ![gpu, model, rand] {}\n";
+    assert _declared_authority_effect_count(effects, "io") == 7;
+    assert _declared_authority_effect_count(effects, "net") == 1;
+    assert _declared_authority_effect_count(effects, "clock") == 1;
+    assert _declared_authority_effect_count(effects, "gpu") == 1;
+    assert _declared_authority_effect_count(effects, "model") == 1;
+    assert _declared_authority_effect_count(effects, "rand") == 1;
+}
+
+test "capsule imports: runtime audit sees prelude and rejects hidden implementation specs" {
+    let source = "import { char_code } from \"runtime/prelude\";\n"
+        + "// import { hidden } from \"runtime/sfn/filesystem\";\n"
+        + "import { read_secret } from \"runtime/sfn/filesystem\";\n";
+    let specs = _collect_runtime_import_specs(source);
+    assert specs.length == 2;
+    assert specs[0] == "runtime/prelude";
+    assert specs[1] == "runtime/sfn/filesystem";
+    assert _role_import_allowed(ROLE_IR, _importee_role(specs[0]));
+    assert ! _role_import_allowed(ROLE_LLVM, _importee_role(specs[1]));
+}
+
+test "capsule imports: scanner audits scoped and bare unknown dependencies" {
+    let source = "import { strings_equal } from \"sfn/strings\";\n"
+        + "// import { hidden } from \"vendor/hidden\";\n"
+        + "import { reverse } from /* parser trivia */ \"../../typecheck/foo\";\n"
+        + "import { scoped } from // line trivia\n\"vendor/capability\";\n"
+        + "import { bare } from bare-package;\n"
+        + "import { from as origin } from \"sfn/syntax\";\n"
+        + "export { from as analyzed } from \"sfn/analyzer\";\n"
+        + "export fn f(from: string) -> string { return from; }\n"
+        + "fn export(from: string) -> string { return from; }\n"
+        + "export { ir } from \"sfn/ir\"";
+    let specs = _all_import_specs(source);
+    assert specs.length == 7;
+    assert specs[0] == "sfn/strings";
+    assert specs[1] == "../../typecheck/foo";
+    assert specs[2] == "vendor/capability";
+    assert specs[3] == "bare-package";
+    assert specs[4] == "sfn/syntax";
+    assert specs[5] == "sfn/analyzer";
+    assert specs[6] == "sfn/ir";
+    assert _importee_role(specs[0]) == ROLE_STDLIB;
+    assert _importee_role(specs[2]) == ROLE_UNKNOWN;
+    assert _importee_role(specs[3]) == ROLE_UNKNOWN;
+    assert ! _role_import_allowed(ROLE_ANALYZER, _importee_role(specs[2]));
+    assert ! _role_import_allowed(ROLE_DRIVER, _importee_role(specs[3]));
+    assert _decode_import_string("..\\/diagnostic.sfn") == "../diagnostic.sfn";
+}
+
+test "capsule imports: explicit Sailfin extension resolves to the imported module" ![io] {
+    let resolved = _resolve_relative_import("compiler/src/llvm/types.sfn", "../diagnostic.sfn");
+    assert resolved == "compiler/src/diagnostic.sfn";
+    let directory = _resolve_relative_import("compiler/src/typecheck.sfn", "./llvm.sfn");
+    assert directory == "compiler/src/llvm/mod.sfn";
+}
+
+test "capsule boundaries: compiler imports obey the role graph and exact exception inventory" ![io] {
+    let mut files: string[] = [];
+    files = _collect_sfn_files("compiler/src", files);
+    files = _collect_sfn_files("compiler/capsules", files);
+    let exceptions = _boundary_exceptions();
+    let authority_exceptions = _authority_exceptions();
+    let mut seen: boolean[] = [];
+    let mut authority_seen: boolean[] = [];
+    let mut ei: int = 0;
+    loop {
+        if ei >= exceptions.length { break; }
+        seen.push(false);
+        ei += 1;
+    }
+    let mut aei: int = 0;
+    loop {
+        if aei >= authority_exceptions.length { break; }
+        authority_seen.push(false);
+        aei += 1;
+    }
+    let mut failures: string[] = [];
+    let mut syntax_count: int = 0;
+    let mut analyzer_count: int = 0;
+    let mut ir_count: int = 0;
+    let mut codegen_count: int = 0;
+    let mut llvm_count: int = 0;
+    let mut driver_count: int = 0;
+    let mut import_count: int = 0;
+    let mut fi: int = 0;
+    loop {
+        if fi >= files.length { break; }
+        let importer = files[fi];
+        fi += 1;
+        let importer_role = _module_role(importer);
+        if importer_role.length == 0 {
+            failures.push("unclassified compiler module: '" + importer
+                + "'; assign one SFEP-0020 semantic role before adding dependencies");
+            continue;
+        }
+        if importer_role == ROLE_SYNTAX { syntax_count += 1; }
+        if importer_role == ROLE_ANALYZER { analyzer_count += 1; }
+        if importer_role == ROLE_IR { ir_count += 1; }
+        if importer_role == ROLE_CODEGEN { codegen_count += 1; }
+        if importer_role == ROLE_LLVM { llvm_count += 1; }
+        if importer_role == ROLE_DRIVER { driver_count += 1; }
+        let source = fs.readFile(importer);
+        if importer_role != ROLE_DRIVER {
+            // Compilable Sailfin code must declare every transitive effect, so
+            // capability effects are the stable authority boundary even when
+            // prelude roots are locally aliased or renamed during extraction.
+            let authority_effects: string[] = ["clock", "gpu", "io", "model", "net", "rand"];
+            let mut authority_effect_i: int = 0;
+            loop {
+                if authority_effect_i >= authority_effects.length { break; }
+                let effect = authority_effects[authority_effect_i];
+                authority_effect_i += 1;
+                let effect_count = _declared_authority_effect_count(source, effect);
+                if effect_count <= 0 { continue; }
+                let effect_token = "effect:" + effect;
+                let authority_module = _edge_module_id(importer);
+                let authority_index = _find_authority_exception(authority_exceptions, authority_module, effect_token);
+                if authority_index >= 0 {
+                    authority_seen[authority_index] = true;
+                    let expected = authority_exceptions[authority_index].expected_count;
+                    if effect_count != expected {
+                        failures.push("compiler capsule authority effect count changed: module '"
+                            + importer
+                            + "' ("
+                            + importer_role
+                            + ") declares '"
+                            + effect
+                            + "' "
+                            + _int_text(effect_count)
+                            + " times; exact exception expects "
+                            + _int_text(expected));
+                    }
+                } else {
+                    failures.push("compiler capsule authority effect: module '"
+                        + importer
+                        + "' ("
+                        + importer_role
+                        + ") declares '"
+                        + effect
+                        + "' "
+                        + _int_text(effect_count)
+                        + " times; violated rule: internal compiler libraries target required = []");
+                }
+            }
+        }
+        let specs = _all_import_specs(source);
+        import_count += specs.length;
+        let mut si: int = 0;
+        loop {
+            if si >= specs.length { break; }
+            let importee = _importee_path(importer, specs[si]);
+            si += 1;
+            if importee.length == 0 { continue; }
+            let importee_role = _importee_role(importee);
+            if importee_role.length == 0 { continue; }
+            if _role_import_allowed(importer_role, importee_role) { continue; }
+            let importer_id = _edge_module_id(importer);
+            let importee_id = _edge_module_id(importee);
+            let exception_index = _find_exception(exceptions, importer_id, importee_id);
+            if exception_index >= 0 {
+                seen[exception_index] = true;
+                continue;
+            }
+            failures.push(_violation_diagnostic(importer, importee, importer_role, importee_role));
+        }
+    }
+    let mut stale_i: int = 0;
+    loop {
+        if stale_i >= exceptions.length { break; }
+        if !seen[stale_i] {
+            let stale = exceptions[stale_i];
+            failures.push("stale compiler capsule exception: importer '" + stale.importer
+                + "' no longer imports '"
+                + stale.importee
+                + "'; remove seam '"
+                + stale.seam
+                + "'");
+        }
+        stale_i += 1;
+    }
+    let mut stale_authority_i: int = 0;
+    loop {
+        if stale_authority_i >= authority_exceptions.length { break; }
+        if !authority_seen[stale_authority_i] {
+            let stale = authority_exceptions[stale_authority_i];
+            failures.push("stale compiler capsule authority exception: module '"
+                + stale.module
+                + "' no longer uses exact token '"
+                + stale.token
+                + "' "
+                + _int_text(stale.expected_count)
+                + " times; remove seam '"
+                + stale.seam
+                + "'");
+        }
+        stale_authority_i += 1;
+    }
+    assert files.length > 300;
+    assert syntax_count > 20;
+    assert analyzer_count > 20;
+    assert ir_count > 10;
+    assert codegen_count > 5;
+    assert llvm_count > 100;
+    assert driver_count > 50;
+    assert import_count > 500;
+    _report_boundary_failures(failures);
+}
+
+test "capsule boundaries: top-level standard-library capsules do not import compiler internals" ![io] {
+    let files = _collect_stdlib_sources();
+    let mut failures: string[] = [];
+    let mut fi: int = 0;
+    loop {
+        if fi >= files.length { break; }
+        let importer = files[fi];
+        fi += 1;
+        let specs = _all_import_specs(fs.readFile(importer));
+        let mut si: int = 0;
+        loop {
+            if si >= specs.length { break; }
+            let importee = _importee_path(importer, specs[si]);
+            si += 1;
+            if importee.length == 0 { continue; }
+            let importee_role = _importee_role(importee);
+            let relative_internal = starts_with(importee, "compiler/src/")
+                || starts_with(importee, "compiler/capsules/");
+            if !relative_internal && !_is_internal_compiler_role(importee_role) {
+                continue;
+            }
+            failures.push(_violation_diagnostic(importer, importee, ROLE_STDLIB, importee_role));
+        }
+    }
+    assert files.length > 20;
+    _report_boundary_failures(failures);
+}
