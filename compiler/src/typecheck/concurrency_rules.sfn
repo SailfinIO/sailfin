@@ -25,6 +25,27 @@ import { SymbolEntry, find_symbol } from "../typecheck_types/symbol_table_and_ra
 // ship as helpers — live wiring waits on operand-type inference, exactly as
 // `check_try_operator`'s rule 3 does. Kind resolution mirrors
 // `llvm/type_mapping.sfn:831-905` so emit-native (#1084) agrees.
+// Assign the semantic future kind to a parsed spawn expression while
+// preserving its source return annotation. Syntax leaves `kind` empty and
+// records only `return_type`; this analyzer-owned step is the sole bridge
+// from source annotation to the monomorphized runtime kind (SFN-708).
+fn analyze_spawn_expression(expression: Expression) -> Expression {
+    if !strings_equal(expression.variant, "Spawn") { return expression; }
+    let mut kind = expression.kind;
+    if kind.length == 0 {
+        let return_type = expression.return_type;
+        if return_type != null {
+            kind = spawn_future_kind(return_type.text);
+        }
+    }
+    return Expression.Spawn {
+        operand: expression.operand,
+        span: expression.span,
+        kind: kind,
+        return_type: expression.return_type
+    };
+}
+
 // `spawn` rule: a spawned callee must have a determinable future kind.
 // `return_type_text` is the callee's declared return-type annotation, or null
 // when the spawn target declares no return type (E0813). A non-null
@@ -41,6 +62,18 @@ fn check_spawn_kind(return_type_text: string?, span: SourceSpan?) -> Diagnostic[
         diagnostics.push(make_spawn_unresolvable_kind_diagnostic(span));
     }
     return diagnostics;
+}
+
+// Validate the analyzed form used by the live expression walk. This remains
+// intentionally limited to lambda operands; named calls still need the live
+// expression-type inferencer before absence of a parsed annotation is an
+// error rather than an unresolved symbol-table lookup.
+fn check_spawn_expression(expression: Expression) -> Diagnostic[] {
+    let analyzed = analyze_spawn_expression(expression);
+    if analyzed.kind.length == 0 {
+        return [make_spawn_unresolvable_kind_diagnostic(expression.span)];
+    }
+    return [];
 }
 
 // `await` rule (1): the operand must be a future type -> E0814. The

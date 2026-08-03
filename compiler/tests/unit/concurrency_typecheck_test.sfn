@@ -12,7 +12,9 @@
 import { Expression } from "../../src/ast";
 import { parse_program } from "../../src/parser/mod";
 import { index_of } from "../../src/string_utils";
+import { typecheck_diagnostics } from "../../src/typecheck";
 import {
+    analyze_spawn_expression,
     await_receive_result_kind,
     await_result_type,
     check_await_operand,
@@ -38,6 +40,17 @@ fn _first_let_initializer(source: string) -> Expression ![io] {
     let init = stmt.initializer;
     assert init != null;
     return init;
+}
+
+fn _produces_diagnostic(source: string, code: string) -> boolean ![io] {
+    let diagnostics = typecheck_diagnostics(parse_program(source));
+    let mut index: int = 0;
+    loop {
+        if index >= diagnostics.length { break; }
+        if strings_equal(diagnostics[index].code, code) { return true; }
+        index += 1;
+    }
+    return false;
 }
 
 // Collapse the not-found case so the assert sites stay free of optional
@@ -156,6 +169,21 @@ test "spawn op: a declared return type (incl. user types) type-checks" {
     assert check_spawn_kind("void", null).length == 0;
     // A user/struct return type resolves to the ptr future (catch-all).
     assert check_spawn_kind("MyStruct", null).length == 0;
+}
+
+test "spawn analysis: assigns kind from the parsed return annotation" ![io] {
+    let parsed = _first_let_initializer("let f = spawn fn() -> int { return 1; };");
+    assert strings_equal(parsed.kind, "");
+    assert parsed.return_type != null;
+    let analyzed = analyze_spawn_expression(parsed);
+    assert strings_equal(analyzed.kind, "int");
+    assert analyzed.return_type != null;
+    assert strings_equal(analyzed.return_type.text, "int");
+}
+
+test "spawn analysis: missing lambda result fails in the frontend" ![io] {
+    let source = "let f = spawn fn() { return 1; };";
+    assert _produces_diagnostic(source, "E0813");
 }
 
 // --- channel: send element-kind mismatch -> E0815 ---------------------------

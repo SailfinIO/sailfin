@@ -124,7 +124,8 @@ fn _make_spawn_routine(name: string, declared_effects: string[], span_line: int)
     let spawn_expr = Expression.Spawn {
         operand: call,
         span: span,
-        kind: ""
+        kind: "",
+        return_type: null
     };
     let body_stmt = Statement.ExpressionStatement {
         expression: spawn_expr,
@@ -167,7 +168,8 @@ fn _make_spawn_io_routine(name: string, declared_effects: string[], span_line: i
     let spawn_expr = Expression.Spawn {
         operand: io_call,
         span: span,
-        kind: ""
+        kind: "",
+        return_type: null
     };
     let body_stmt = Statement.ExpressionStatement {
         expression: spawn_expr,

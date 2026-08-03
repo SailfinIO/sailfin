@@ -66,6 +66,16 @@ fn _run_and_capture(label: string, source: string) -> string ![io] {
     return out + err;
 }
 
+fn _emit_llvm_and_capture(label: string, source: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let src = dir + "/" + label + ".sfn";
+    fs.writeFile(src, source);
+    let exit = process.run_capture([_sfn_bin(), "emit", "llvm", src], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    return "EXIT:" + number_to_string(exit) + "\n" + out + err;
+}
+
 // ── three spawned int tasks run on the pool and round-trip via await ──
 test "spawn/await: non-capturing int tasks execute on the pool (#1474)" ![io] {
     let out = _run_and_capture("int_fanout", "fn main() ![io] {\n"
@@ -91,8 +101,8 @@ test "spawn/await: non-capturing int tasks execute on the pool (#1474)" ![io] {
 // ── effectful task lambda (`-> int ![io]`) round-trips its typed result ──
 // Regression for #1546: the lambda parser collected the return type through
 // the body `{`, swallowing a trailing effect annotation into the
-// return-type text (`int ![io]`). `spawn_future_kind` then fell to the
-// `ptr` catch-all, so `spawn fn() -> int ![io] { ... }` lowered through
+// return-type text (`int ![io]`). Future-kind analysis then fell to the `ptr`
+// catch-all, so `spawn fn() -> int ![io] { ... }` lowered through
 // `sfn_spawn_ptr_ctx` / `sfn_await_ptr` (and the worker returned `i8*`),
 // and `await` yielded a garbage pointer-as-int instead of the value. The
 // fix stops the return-type capture at the effect marker `!` (mirroring the
@@ -107,4 +117,14 @@ test "spawn/await: effectful task lambda result survives await (#1546)" ![io] {
         + "}");
     assert contains(out, "v: 42");
     assert contains(out, "EFF-OK");
+}
+
+// A lambda without a declared return type cannot select a monomorphized
+// future helper. Analysis must retain the E0813 frontend rejection and stop
+// before LLVM sees the unresolved spawn (SFN-708).
+test "spawn: unresolved lambda result fails before LLVM" ![io] {
+    let out = _emit_llvm_and_capture("missing_result", "fn main() { let h = spawn fn() { return 1; }; }");
+    assert contains(out, "EXIT:1");
+    assert contains(out, "E0813");
+    assert ! contains(out, "[fatal]");
 }

@@ -24,6 +24,7 @@ import {
     quote_string,
     trim_text
 } from "./emit_native_state";
+import { analyze_spawn_expression } from "./typecheck/concurrency_rules";
 
 // ── Expression formatting ────────────────────────────────────────────
 // Render an operand that's about to appear inside a Binary expression.
@@ -354,19 +355,19 @@ fn format_expression_into(expression: Expression, out: string[]) -> string[] {
         return out;
     }
     if expression.variant == "Spawn" {
+        let analyzed = analyze_spawn_expression(expression);
         // `spawn[:<kind>] <operand>` (docs/proposals/0025-native-runtime-architecture.md §3.7 `#37-scheduler-and-concurrency`).
-        // `kind` is "" when not statically derivable (#829); rendered as a
-        // `spawn:<kind>` qualifier so the LLVM lowering (#1085) selects the
-        // matching helper. Fails closed downstream until that lands.
-        if expression.kind.length > 0 {
+        // The analyzer resolves the preserved source annotation to a semantic
+        // kind; an unresolved named call remains bare until inference (#829).
+        if analyzed.kind.length > 0 {
             out.push("spawn:");
-            out.push(expression.kind);
+            out.push(analyzed.kind);
             out.push(" ");
-            _format_binary_operand_into(expression.operand, out);
+            _format_binary_operand_into(analyzed.operand, out);
             return out;
         }
         out.push("spawn ");
-        _format_binary_operand_into(expression.operand, out);
+        _format_binary_operand_into(analyzed.operand, out);
         return out;
     }
     if expression.variant == "Channel" {

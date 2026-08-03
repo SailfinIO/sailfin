@@ -39,7 +39,7 @@ import {
 import { walk_block_expressions } from "./block_walk";
 import {
     channel_send_diagnostics,
-    check_spawn_kind,
+    check_spawn_expression,
     push_spawn_handle_diagnostics
 } from "./concurrency_rules";
 import { TypeckCtx, ctx_enter_body, ctx_with_bindings } from "./context";
@@ -363,10 +363,7 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
     if expression.variant == "Spawn" {
         let mut diagnostics = walk_expression(expression.operand, ctx);
         if expression.operand.variant == "Lambda" {
-            let return_type = expression.operand.return_type;
-            if return_type == null {
-                diagnostics = diagnostics.concat(check_spawn_kind(null, expression.span));
-            }
+            diagnostics = diagnostics.concat(check_spawn_expression(expression));
         }
         return diagnostics;
     }

@@ -78,7 +78,8 @@ fn _make_spawn_fn(name: string, effects: string[], span_line: int) -> Statement 
     let spawn_expr = Expression.Spawn {
         operand: inner_call,
         span: _span(span_line + 1, 4),
-        kind: ""
+        kind: "",
+        return_type: null
     };
     let body_stmt = Statement.ExpressionStatement {
         expression: spawn_expr,
@@ -117,7 +118,8 @@ fn _make_spawn_io_fn(name: string, effects: string[], span_line: int) -> Stateme
     let spawn_expr = Expression.Spawn {
         operand: io_call,
         span: _span(span_line + 1, 4),
-        kind: ""
+        kind: "",
+        return_type: null
     };
     let body_stmt = Statement.ExpressionStatement {
         expression: spawn_expr,

@@ -17,9 +17,9 @@ fn _contains(haystack: string, needle: string) -> boolean {
     return index_of(haystack, needle) >= 0;
 }
 
-// `spawn` of an int-returning lambda carries the kind the parser tagged
-// (`parser/expressions/prefix.sfn`, via `spawn_future_kind`), rendered as the
-// `spawn:<kind>` qualifier #1085 will lower against.
+// `spawn` of an int-returning lambda carries the source annotation the parser
+// retained; analysis resolves it to the `spawn:<kind>` qualifier lowering
+// consumes (SFN-708).
 test "emit_native: spawn of an int lambda tags kind in the IR" ![io] {
     let source = "fn main() ![io] { let f = spawn fn() -> int { return 1; }; }";
     let program = parse_program(source);
