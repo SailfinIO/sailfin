@@ -149,13 +149,14 @@ test "cross-windows windows_stubs.ll defines the required Windows stubs" ![io] {
     assert contains(stubs, "define i64 @tls_read");
     assert contains(stubs, "define i64 @tls_write");
 
-    // OpenSSL EVP symbols pulled in by the `sfn/crypto` compiler dependency
-    // (SFN-168): the static mingw link has no `-lcrypto`, so these resolve to
-    // the Windows no-op stubs. `EVP_PKEY_new_raw_public_key` returning null
-    // keeps `ed25519_verify` fail-closed on Windows.
-    assert contains(stubs, "define i8* @EVP_PKEY_new_raw_public_key");
-    assert contains(stubs, "define i32 @EVP_DigestVerify");
-    assert contains(stubs, "define i8* @EVP_MD_CTX_new");
+    // SFN-655 retired the Ed25519 EVP externs. Pin the Windows stubs negatively
+    // so the deleted fail-closed compatibility surface cannot return unnoticed.
+    assert ! contains(stubs, "@EVP_PKEY_new_raw_public_key");
+    assert ! contains(stubs, "@EVP_PKEY_free");
+    assert ! contains(stubs, "@EVP_MD_CTX_new");
+    assert ! contains(stubs, "@EVP_MD_CTX_free");
+    assert ! contains(stubs, "@EVP_DigestVerifyInit");
+    assert ! contains(stubs, "@EVP_DigestVerify");
 
     // `EVP_sha256` / `HMAC` (SFN-549): retired from windows_stubs.ll — the
     // pure-Sailfin `hmac_sha256` (`capsules/sfn/crypto/src/mod.sfn`) replaced

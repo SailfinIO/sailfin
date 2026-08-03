@@ -1,148 +1,415 @@
 // capsules/sfn/crypto/src/ed25519.sfn
 //
-// Verify-only Ed25519 (RFC 8032) for the sfn/crypto capsule — the crypto
-// primitive the signed-toolchain trust model rests on (SFEP-0046 §3.5).
-import { ptr_off, string_to_bytes } from "./bits";
+// Pure-Sailfin verify-only Ed25519 (RFC 8032). The implementation shares the
+// 16 x 16-bit field layer used by X25519, then supplies the twisted-Edwards
+// group law, point decompression, scalar reduction, and SHA-512 challenge.
+// Verification is pure computation: malformed inputs fail closed to false.
+import { ct_eq_bytes, string_to_bytes } from "./bits";
+import { sha512_bytes } from "./sha512";
+import {
+    _fadd as _ed_gf_add,
+    _fmul as _ed_gf_mul,
+    _fnormalize as _ed_gf_normalize,
+    _fsqr as _ed_gf_sqr,
+    _fsub as _ed_gf_sub,
+    _gf_copy as _ed_gf_copy,
+    _gf_one as _ed_gf_one,
+    _gf_zero as _ed_gf_zero,
+    _pack25519 as _ed_gf_pack,
+    _unpack25519 as _ed_gf_unpack
+} from "./x25519";
 
-// Backed by OpenSSL libcrypto via extern: `-lcrypto` is already linked
-// into every Sailfin binary for TLS (SFEP-0036), so this adds no new
-// dependency. Fail-closed: any malformed input or OpenSSL error yields
-// `false`, never a panic. A pure-Sailfin port is deferred post-1.0
-// (SFEP-0046 §3.5).
-extern fn malloc(size: usize) -> *u8;
+// Edwards25519 d = -121665 / 121666 in the shared 16-bit limb layout.
+fn _ed_d() -> int[] {
+    return [30883, 4953, 19914, 30187, 55467, 16705, 2637, 112, 59544, 30585, 16505, 36039, 65139, 11119, 27886, 20995];
+}
 
-extern fn free(ptr: *u8) -> void;
+fn _ed_d2() -> int[] {
+    return [61785, 9906, 39828, 60374, 45398, 33411, 5274, 224, 53552, 61171, 33010, 6542, 64743, 22239, 55772, 9222];
+}
 
-extern fn memset(dst: *u8, byte: i32, n: usize) -> *u8;
+// sqrt(-1) mod p, used when the first square-root candidate has the opposite
+// quadratic character.
+fn _ed_sqrt_m1() -> int[] {
+    return [41136, 18958, 6951, 50414, 58488, 44335, 6150, 12099, 55207, 15867, 153, 11085, 57099, 20417, 9344, 11139];
+}
 
-extern fn EVP_PKEY_new_raw_public_key(key_type: i32, e: *u8, key: *u8, keylen: usize) -> *u8;
+fn _ed_base_x() -> int[] {
+    return [54554, 36645, 11616, 51542, 42930, 38181, 51040, 26924, 56412, 64982, 57905, 49316, 21502, 52590, 14035, 8553];
+}
 
-extern fn EVP_PKEY_free(pkey: *u8) -> void;
+fn _ed_base_y() -> int[] {
+    return [26200, 26214, 26214, 26214, 26214, 26214, 26214, 26214, 26214, 26214, 26214, 26214, 26214, 26214, 26214, 26214];
+}
 
-extern fn EVP_MD_CTX_new() -> *u8;
+// L = 2^252 + 27742317777372353535851937790883648493, little-endian.
+fn _ed_group_order() -> int[] {
+    return [237, 211, 245, 92, 26, 99, 18, 88, 214, 156, 247, 162, 222, 249, 222, 20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 16];
+}
 
-extern fn EVP_MD_CTX_free(ctx: *u8) -> void;
-
-extern fn EVP_DigestVerifyInit(ctx: *u8, pctx: **u8, md_type: *u8, e: *u8, pkey: *u8) -> i32;
-
-extern fn EVP_DigestVerify(ctx: *u8, sig: *u8, siglen: usize, tbs: *u8, tbslen: usize) -> i32;
-
-// Map a single hex character to its 0-15 value, or -1 if `c` is not a hex
-// digit.
+// Map a single hex character to its 0-15 value, or -1 for non-hex input.
 fn _ed_hex_val(c: string) -> int {
     let code: int = char_code(c) & 255;
-    if code >= 48 && code <= 57 {
-        return code - 48;
-    }  // '0'..'9'
-    if code >= 97 && code <= 102 {
-        return code - 97 + 10;
-    }  // 'a'..'f'
-    if code >= 65 && code <= 70 {
-        return code - 65 + 10;
-    }  // 'A'..'F'
+    if code >= 48 && code <= 57 { return code - 48; }
+    if code >= 97 && code <= 102 { return code - 97 + 10; }
+    if code >= 65 && code <= 70 { return code - 65 + 10; }
     return -1;
 }
 
-// Decode `hex` into `expect_len` raw bytes. Fail-closed: returns `[]` if
-// `hex` is not exactly `expect_len * 2` hex characters.
+// Decode exactly `expect_len` bytes. Invalid length or characters return [].
 fn _ed_hex_to_bytes(hex: string, expect_len: int) -> int[] {
     if hex.length != expect_len * 2 { return []; }
     let mut out: int[] = [];
-    let mut j: int = 0;
+    let mut i: int = 0;
     loop {
-        if j >= expect_len { break; }
-        let hi: int = _ed_hex_val(hex[2 * j]);
-        let lo: int = _ed_hex_val(hex[2 * j + 1]);
-        if hi < 0 { return []; }
-        if lo < 0 { return []; }
+        if i >= expect_len { break; }
+        let hi: int = _ed_hex_val(hex[2 * i]);
+        let lo: int = _ed_hex_val(hex[2 * i + 1]);
+        if hi < 0 || lo < 0 { return []; }
         out.push((hi << 4) | lo);
-        j += 1;
+        i += 1;
     }
     return out;
 }
 
-// Copy `bytes` into a freshly `malloc`ed native buffer, one byte at a time
-// (no pointer_write intrinsic exists, so `memset` with n=1 is the write
-// idiom). Returns `null` on allocation failure. Caller frees.
-fn _ed_bytes_to_native(bytes: int[]) -> *u8 {
-    if bytes.length == 0 {
-        // OpenSSL reads no bytes here (tbslen is 0), but zero the byte so
-        // the helper never hands back uninitialized memory.
-        let empty_buf: *u8 = malloc(1 as usize);
-        if empty_buf as i64 != 0 { memset(empty_buf, 0, 1 as usize); }
-        return empty_buf;
-    }
-    let buf: *u8 = malloc(bytes.length as usize);
-    if buf as i64 == 0 { return null; }
-    let mut i: i64 = 0;
+fn _ed_slice(bytes: int[], start: int, length: int) -> int[] {
+    let mut out: int[] = [];
+    let mut i: int = 0;
     loop {
-        if i >= bytes.length as i64 { break; }
-        memset(ptr_off(buf, i), (bytes[i] & 255) as i32, 1 as usize);
+        if i >= length { break; }
+        out.push(bytes[start + i] & 255);
         i += 1;
     }
-    return buf;
+    return out;
 }
 
-// Verify an Ed25519 signature (RFC 8032) over a raw byte message.
-// public_key_hex: 64 hex chars (32-byte raw Ed25519 public key).
-// signature_hex:  128 hex chars (64-byte signature).
-// Returns true iff the signature is valid; fail-closed (false, never panic)
-// on any malformed input or OpenSSL error.
+fn _ed_append(out: int[], bytes: int[]) -> void {
+    let mut i: int = 0;
+    loop {
+        if i >= bytes.length { break; }
+        out.push(bytes[i] & 255);
+        i += 1;
+    }
+}
+
+fn _ed_bytes_are_zero(bytes: int[]) -> bool {
+    let mut acc: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= bytes.length { break; }
+        acc = acc | (bytes[i] & 255);
+        i += 1;
+    }
+    return acc == 0;
+}
+
+fn _ed_gf_equal(a: int[], b: int[]) -> bool {
+    return ct_eq_bytes(_ed_gf_pack(a), _ed_gf_pack(b));
+}
+
+fn _ed_gf_is_zero(a: int[]) -> bool {
+    return _ed_bytes_are_zero(_ed_gf_pack(a));
+}
+
+fn _ed_gf_parity(a: int[]) -> int {
+    let packed: int[] = _ed_gf_pack(a);
+    return packed[0] & 1;
+}
+
+// z^(2^252 - 3) = z^((p - 5) / 8), the fixed square-root chain used by
+// RFC 8032 point decompression. The branch is on the public loop counter.
+fn _ed_pow2523(o: int[], z: int[]) -> void {
+    let mut c: int[] = _ed_gf_copy(z);
+    let mut a: int = 250;
+    loop {
+        if a < 0 { break; }
+        _ed_gf_sqr(c, c);
+        if a != 1 { _ed_gf_mul(c, c, z); }
+        a -= 1;
+    }
+    let mut i: int = 0;
+    loop {
+        if i >= 16 { break; }
+        o[i] = c[i];
+        i += 1;
+    }
+}
+
+// Point representation: extended homogeneous coordinates [X, Y, Z, T], with
+// x = X/Z, y = Y/Z, and xy = T/Z.
+fn _ed_point_identity() -> int[][] {
+    return [_ed_gf_zero(), _ed_gf_one(), _ed_gf_one(), _ed_gf_zero()];
+}
+
+fn _ed_point_copy(p: int[][]) -> int[][] {
+    return [_ed_gf_copy(p[0]), _ed_gf_copy(p[1]), _ed_gf_copy(p[2]), _ed_gf_copy(p[3])];
+}
+
+fn _ed_base_point() -> int[][] {
+    let x: int[] = _ed_base_x();
+    let y: int[] = _ed_base_y();
+    let mut t: int[] = _ed_gf_zero();
+    _ed_gf_mul(t, x, y);
+    return [x, y, _ed_gf_one(), t];
+}
+
+// Complete twisted-Edwards addition formula from RFC 8032 §5.1.4.
+// All products are computed before p is overwritten, so p may alias q.
+fn _ed_point_add(p: int[][], q: int[][]) -> void {
+    let mut a: int[] = _ed_gf_zero();
+    let mut b: int[] = _ed_gf_zero();
+    let mut c: int[] = _ed_gf_zero();
+    let mut d: int[] = _ed_gf_zero();
+    let mut e: int[] = _ed_gf_zero();
+    let mut f: int[] = _ed_gf_zero();
+    let mut g: int[] = _ed_gf_zero();
+    let mut h: int[] = _ed_gf_zero();
+    let mut t: int[] = _ed_gf_zero();
+
+    _ed_gf_sub(a, p[1], p[0]);
+    _ed_gf_sub(t, q[1], q[0]);
+    _ed_gf_mul(a, a, t);
+    _ed_gf_add(b, p[0], p[1]);
+    _ed_gf_add(t, q[0], q[1]);
+    _ed_gf_mul(b, b, t);
+    _ed_gf_mul(c, p[3], q[3]);
+    _ed_gf_mul(c, c, _ed_d2());
+    _ed_gf_mul(d, p[2], q[2]);
+    _ed_gf_add(d, d, d);
+    _ed_gf_normalize(d);
+    _ed_gf_sub(e, b, a);
+    _ed_gf_sub(f, d, c);
+    _ed_gf_add(g, d, c);
+    _ed_gf_add(h, b, a);
+
+    let mut x: int[] = _ed_gf_zero();
+    let mut y: int[] = _ed_gf_zero();
+    let mut z: int[] = _ed_gf_zero();
+    let mut xy: int[] = _ed_gf_zero();
+    _ed_gf_mul(x, e, f);
+    _ed_gf_mul(y, h, g);
+    _ed_gf_mul(z, g, f);
+    _ed_gf_mul(xy, e, h);
+    p[0] = x;
+    p[1] = y;
+    p[2] = z;
+    p[3] = xy;
+}
+
+// Verification scalars are public, so a straightforward double-and-add keeps
+// the implementation small without exposing secret material through branches.
+fn _ed_point_scalarmult(scalar: int[], point: int[][]) -> int[][] {
+    let mut result: int[][] = _ed_point_identity();
+    let mut addend: int[][] = _ed_point_copy(point);
+    let mut i: int = 0;
+    loop {
+        if i >= 256 { break; }
+        let bit: int = (scalar[i >> 3] >> (i & 7)) & 1;
+        if bit == 1 { _ed_point_add(result, addend); }
+        _ed_point_add(addend, addend);
+        i += 1;
+    }
+    return result;
+}
+
+fn _ed_point_equal(p: int[][], q: int[][]) -> bool {
+    let mut px: int[] = _ed_gf_zero();
+    let mut qx: int[] = _ed_gf_zero();
+    let mut py: int[] = _ed_gf_zero();
+    let mut qy: int[] = _ed_gf_zero();
+    _ed_gf_mul(px, p[0], q[2]);
+    _ed_gf_mul(qx, q[0], p[2]);
+    if !_ed_gf_equal(px, qx) { return false; }
+    _ed_gf_mul(py, p[1], q[2]);
+    _ed_gf_mul(qy, q[1], p[2]);
+    return _ed_gf_equal(py, qy);
+}
+
+// Reject the eight low-order points. Without this check the identity public
+// key would validate the trivial R=identity, S=0 signature for every message.
+fn _ed_point_is_small_order(p: int[][]) -> bool {
+    let mut q: int[][] = _ed_point_copy(p);
+    _ed_point_add(q, q);
+    _ed_point_add(q, q);
+    _ed_point_add(q, q);
+    return _ed_point_equal(q, _ed_point_identity());
+}
+
+// Reject y >= p before decompression by round-tripping the sign-cleared field
+// encoding through the canonical packer.
+fn _ed_point_encoding_is_canonical(encoded: int[]) -> bool {
+    if encoded.length != 32 { return false; }
+    let y: int[] = _ed_gf_unpack(encoded);
+    let packed: int[] = _ed_gf_pack(y);
+    let mut i: int = 0;
+    loop {
+        if i >= 31 { break; }
+        if packed[i] != (encoded[i] & 255) { return false; }
+        i += 1;
+    }
+    return packed[31] == (encoded[31] & 127);
+}
+
+// Decode a canonical compressed point. Returns [] when y is non-canonical,
+// no square root exists, or x == 0 is paired with the forbidden sign bit 1.
+fn _ed_point_decompress(encoded: int[]) -> int[][] {
+    let empty: int[][] = [];
+    if !_ed_point_encoding_is_canonical(encoded) { return empty; }
+
+    let y: int[] = _ed_gf_unpack(encoded);
+    let one: int[] = _ed_gf_one();
+    let mut num: int[] = _ed_gf_zero();
+    let mut den: int[] = _ed_gf_zero();
+    let mut den2: int[] = _ed_gf_zero();
+    let mut den4: int[] = _ed_gf_zero();
+    let mut den6: int[] = _ed_gf_zero();
+    let mut t: int[] = _ed_gf_zero();
+    let mut check: int[] = _ed_gf_zero();
+    let mut x: int[] = _ed_gf_zero();
+
+    _ed_gf_sqr(num, y);
+    _ed_gf_mul(den, num, _ed_d());
+    _ed_gf_sub(num, num, one);
+    _ed_gf_add(den, den, one);
+    _ed_gf_sqr(den2, den);
+    _ed_gf_sqr(den4, den2);
+    _ed_gf_mul(den6, den4, den2);
+    _ed_gf_mul(t, den6, num);
+    _ed_gf_mul(t, t, den);
+    _ed_pow2523(t, t);
+    _ed_gf_mul(t, t, num);
+    _ed_gf_mul(t, t, den);
+    _ed_gf_mul(t, t, den);
+    _ed_gf_mul(x, t, den);
+
+    _ed_gf_sqr(check, x);
+    _ed_gf_mul(check, check, den);
+    if !_ed_gf_equal(check, num) { _ed_gf_mul(x, x, _ed_sqrt_m1()); }
+    _ed_gf_sqr(check, x);
+    _ed_gf_mul(check, check, den);
+    if !_ed_gf_equal(check, num) { return empty; }
+
+    let sign: int = (encoded[31] >> 7) & 1;
+    if _ed_gf_is_zero(x) && sign == 1 { return empty; }
+    if _ed_gf_parity(x) != sign {
+        _ed_gf_sub(x, _ed_gf_zero(), x);
+        _ed_gf_normalize(x);
+    }
+
+    let mut xy: int[] = _ed_gf_zero();
+    _ed_gf_mul(xy, x, y);
+    return [x, y, one, xy];
+}
+
+// Strict RFC 8032 range check for the little-endian S scalar.
+fn _ed_scalar_is_canonical(s: int[]) -> bool {
+    if s.length != 32 { return false; }
+    let l: int[] = _ed_group_order();
+    let mut i: int = 31;
+    loop {
+        if i < 0 { break; }
+        let si: int = s[i] & 255;
+        if si < l[i] { return true; }
+        if si > l[i] { return false; }
+        i -= 1;
+    }
+    return false;
+}
+
+// Reduce a 64-byte little-endian SHA-512 digest modulo L. This is the narrow
+// signed-i64 reduction used by TweetNaCl: all intermediates stay below 2^20.
+fn _ed_reduce_scalar(digest: int[]) -> int[] {
+    let l: int[] = _ed_group_order();
+    let mut x: int[] = [];
+    let mut xi: int = 0;
+    loop {
+        if xi >= 64 { break; }
+        x.push(digest[xi] & 255);
+        xi += 1;
+    }
+
+    let mut i: int = 63;
+    loop {
+        if i < 32 { break; }
+        let mut carry: int = 0;
+        let mut j: int = i - 32;
+        loop {
+            if j >= i - 12 { break; }
+            x[j] = x[j] + carry - 16 * x[i] * l[j - (i - 32)];
+            carry = (x[j] + 128) >> 8;
+            x[j] = x[j] - (carry << 8);
+            j += 1;
+        }
+        x[j] = x[j] + carry;
+        x[i] = 0;
+        i -= 1;
+    }
+
+    let mut carry: int = 0;
+    let mut j: int = 0;
+    loop {
+        if j >= 32 { break; }
+        x[j] = x[j] + carry - (x[31] >> 4) * l[j];
+        carry = x[j] >> 8;
+        x[j] = x[j] & 255;
+        j += 1;
+    }
+    j = 0;
+    loop {
+        if j >= 32 { break; }
+        x[j] = x[j] - carry * l[j];
+        j += 1;
+    }
+
+    let mut out: int[] = [];
+    i = 0;
+    loop {
+        if i >= 32 { break; }
+        x[i + 1] = x[i + 1] + (x[i] >> 8);
+        out.push(x[i] & 255);
+        i += 1;
+    }
+    return out;
+}
+
+fn _ed_challenge(r: int[], public_key: int[], message: int[]) -> int[] {
+    let mut input: int[] = [];
+    _ed_append(input, r);
+    _ed_append(input, public_key);
+    _ed_append(input, message);
+    return _ed_reduce_scalar(sha512_bytes(input));
+}
+
+// Verify an Ed25519 signature over raw message bytes. Public key and signature
+// retain the established hexadecimal API used by the compiler toolchain.
 fn ed25519_verify(public_key_hex: string, message: int[], signature_hex: string) -> bool {
-    let key_bytes: int[] = _ed_hex_to_bytes(public_key_hex, 32);
-    if key_bytes.length != 32 { return false; }
-    let sig_bytes: int[] = _ed_hex_to_bytes(signature_hex, 64);
-    if sig_bytes.length != 64 { return false; }
+    let public_key: int[] = _ed_hex_to_bytes(public_key_hex, 32);
+    if public_key.length != 32 { return false; }
+    if _ed_bytes_are_zero(public_key) { return false; }
+    let signature: int[] = _ed_hex_to_bytes(signature_hex, 64);
+    if signature.length != 64 { return false; }
 
-    let key_buf: *u8 = _ed_bytes_to_native(key_bytes);
-    if key_buf as i64 == 0 { return false; }
+    let r_encoded: int[] = _ed_slice(signature, 0, 32);
+    let s: int[] = _ed_slice(signature, 32, 32);
+    if !_ed_scalar_is_canonical(s) { return false; }
 
-    // NID_ED25519 / EVP_PKEY_ED25519 = 1087 (decimal; no hex literals).
-    let pkey: *u8 = EVP_PKEY_new_raw_public_key(1087, null, key_buf, 32 as usize);
-    free(key_buf);  // OpenSSL copies the key.
-    if pkey as i64 == 0 { return false; }
+    let a: int[][] = _ed_point_decompress(public_key);
+    if a.length != 4 { return false; }
+    if _ed_point_is_small_order(a) { return false; }
+    let r: int[][] = _ed_point_decompress(r_encoded);
+    if r.length != 4 { return false; }
+    if _ed_point_is_small_order(r) { return false; }
 
-    let ctx: *u8 = EVP_MD_CTX_new();
-    if ctx as i64 == 0 {
-        EVP_PKEY_free(pkey);
-        return false;
-    }
-
-    // Ed25519 is a single-shot signature scheme: md and pctx are null.
-    let init_rc: i32 = EVP_DigestVerifyInit(ctx, null, null, null, pkey);
-    if init_rc != 1 {
-        EVP_MD_CTX_free(ctx);
-        EVP_PKEY_free(pkey);
-        return false;
-    }
-
-    let sig_buf: *u8 = _ed_bytes_to_native(sig_bytes);
-    if sig_buf as i64 == 0 {
-        EVP_MD_CTX_free(ctx);
-        EVP_PKEY_free(pkey);
-        return false;
-    }
-    let msg_buf: *u8 = _ed_bytes_to_native(message);
-    if msg_buf as i64 == 0 {
-        free(sig_buf);
-        EVP_MD_CTX_free(ctx);
-        EVP_PKEY_free(pkey);
-        return false;
-    }
-    let msg_len: int = message.length;
-
-    let rc: i32 = EVP_DigestVerify(ctx, sig_buf, 64 as usize, msg_buf, msg_len as usize);
-
-    free(sig_buf);
-    free(msg_buf);
-    EVP_MD_CTX_free(ctx);
-    EVP_PKEY_free(pkey);
-
-    return rc == 1;
+    let k: int[] = _ed_challenge(r_encoded, public_key, message);
+    let sb: int[][] = _ed_point_scalarmult(s, _ed_base_point());
+    let mut rhs: int[][] = _ed_point_scalarmult(k, a);
+    _ed_point_add(rhs, r);
+    return _ed_point_equal(sb, rhs);
 }
 
-// Convenience for a NUL-free text message (e.g. a SHA256SUMS manifest).
-// Verifies over the string's raw bytes. Delegates to ed25519_verify.
+// Convenience for NUL-free text such as a signed SHA256SUMS manifest.
 fn ed25519_verify_utf8(public_key_hex: string, message: string, signature_hex: string) -> bool {
     return ed25519_verify(public_key_hex, string_to_bytes(message), signature_hex);
 }
+
+export { ed25519_verify, ed25519_verify_utf8 };

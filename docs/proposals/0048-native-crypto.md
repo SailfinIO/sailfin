@@ -4,9 +4,9 @@ title: Native crypto + TLS stack — removing the OpenSSL dependency
 status: Accepted
 type: runtime
 created: 2026-07-12
-updated: 2026-08-01
+updated: 2026-08-02
 author: "agent:compiler-architect; human review"
-tracking: SFN-333, SFN-335, SFN-336, SFN-337, SFN-659, SFN-660
+tracking: SFN-333, SFN-335, SFN-336, SFN-337, SFN-655, SFN-659, SFN-660
 supersedes:
 superseded-by:
 graduates-to:
@@ -62,21 +62,21 @@ cross-build entirely (`runtime/ir/windows_stubs.ll` stubs the `tls_*` wrappers),
 so `https://` silently degrades to null on Windows today. Removing it collapses
 three platform forks into one native code path.
 
-**Current surface (ground truth).** Exactly one file
-(`runtime/sfn/platform/tls.sfn`) owns the entire OpenSSL extern surface (24
-`SSL_*`/`SSL_CTX_*` symbols) and defines every `tls_*` wrapper. Three consumers
-(`http.sfn`, `websocket.sfn`, `serve.sfn`) forward-declare the `tls_*` wrapper
+**Original surface (baseline at acceptance).** Exactly one file
+(`runtime/sfn/platform/tls.sfn`) owned the entire OpenSSL extern surface (24
+`SSL_*`/`SSL_CTX_*` symbols) and defined every `tls_*` wrapper. Three consumers
+(`http.sfn`, `websocket.sfn`, `serve.sfn`) forward-declared the `tls_*` wrapper
 signatures (the #306 cross-module-extern workaround) rather than importing
-`tls.sfn`. Separately, `websocket.sfn` declares three **libcrypto** externs —
+`tls.sfn`. Separately, `websocket.sfn` declared three **libcrypto** externs —
 `SHA1`, `EVP_EncodeBlock`, `RAND_bytes` — used **unconditionally** for the RFC
 6455 handshake and frame masking on *every* WebSocket connection, `ws://` and
-`wss://` alike. This matters: naively dropping `-lcrypto` breaks all WebSocket
+`wss://` alike. This mattered: naively dropping `-lcrypto` broke all WebSocket
 traffic, not just TLS. Phase A's SHA-1 + base64 (already shipped) + a CSPRNG
-source are the prerequisites that let Phase D remove those three externs.
-Additionally, `capsules/sfn/crypto/src/mod.sfn` itself uses libcrypto for
-`hmac_sha256` (the `HMAC`/`EVP_sha256` externs) and `ed25519.sfn` uses the
-OpenSSL EVP surface for Ed25519 verify — a fully OpenSSL-free build eventually
-needs pure-Sailfin replacements for those too (out of Phase A scope; noted in §7).
+source were the prerequisites that let Phase D remove those three externs.
+Additionally, `capsules/sfn/crypto/src/mod.sfn` itself used libcrypto for
+`hmac_sha256` (the `HMAC`/`EVP_sha256` externs), and `ed25519.sfn` used the
+OpenSSL EVP surface for Ed25519 verify. The implementation amendments in §6.4
+and §7 record the pure-Sailfin replacements that have landed since this baseline.
 
 **The honest constraint (§6).** A from-scratch TLS 1.3 stack is a multi-quarter
 effort and a security surface. This SFEP does not pretend otherwise. It scopes
@@ -498,8 +498,8 @@ already uses — not by relocating the tested source of truth out of the capsule
   is unblocked. SFN-502 therefore records no current need for widening multiply
   and files no proposal; see
   `docs/proposals/design-notes/sfn-502-widening-multiply-scope.md`.
-  Ed25519-verify remains a separate follow-on (§8 of the limb-strategy note)
-  still gated on the same field-arithmetic port plus SHA-512.
+  Ed25519-verify was the separate follow-on (§8 of the limb-strategy note); it
+  shipped in pure Sailfin as SFN-655 after the field port and SHA-512 landed.
 
 - **AES-GCM AEAD — deliberately deferred (not a hard blocker for the chosen
   cut).** Constant-time software AES needs either bitsliced AES (very large,
@@ -536,6 +536,18 @@ already uses — not by relocating the tested source of truth out of the capsule
   OpenSSL extern in the crypto capsule, and because `compiler/capsule.toml:59`
   makes the compiler itself depend on `sfn/crypto`, this single module is what
   keeps `-lcrypto` on the compiler's own link line.
+
+  **Amendment (2026-08-02) — RESOLVED (SFN-655).** Ed25519 verification is now
+  pure Sailfin in `capsules/sfn/crypto/src/ed25519.sfn`, sharing the 16×16-bit
+  field layer from `x25519.sfn` and the byte-oriented SHA-512 from SFN-652. The
+  implementation covers twisted-Edwards addition and scalar multiplication,
+  canonical point decompression with the fixed `(p−5)/8` square-root chain,
+  scalar reduction, and the RFC 8032 §5.1.7 `S < L` check. All RFC 8032 §7.1
+  Ed25519 vectors and malformed-input regressions pass. No `extern` declaration
+  remains in `ed25519.sfn`; the public `ed25519_verify` and
+  `ed25519_verify_utf8` surface is unchanged. This retires the crypto capsule's
+  final OpenSSL use. The runtime TLS implementation still owns the remaining
+  `-lssl`/`-lcrypto` link dependency until SFN-341 performs the body swap.
 
 ## 8. Stage1 readiness mapping
 
@@ -586,9 +598,10 @@ re-pointed at the native stack.
 - `0058-sized-integer-types.md` — was cited as the missing capability behind the
   X25519 / Ed25519 blocker (§7); X25519 no longer depends on it (§6.4
   amendment, `docs/proposals/design-notes/sfn-335-x25519-limb-strategy.md`).
-  Ed25519-verify remains a separate follow-on.
+  Ed25519 verification subsequently shipped on the same narrow field layer
+  (SFN-655), without sized integers.
 - Prior art: `capsules/sfn/crypto/src/mod.sfn` (SHA-256, base64, HMAC-SHA-256),
-  `capsules/sfn/crypto/src/ed25519.sfn` (OpenSSL-EVP wrapper pattern),
+  `capsules/sfn/crypto/src/ed25519.sfn` (pure RFC 8032 verify),
   `compiler/src/build/hash.sfn` (vendored SHA-256 — the runtime-vendoring
   template for Phases B–D).
 - Ground-truth extern surface: `runtime/sfn/platform/tls.sfn`,

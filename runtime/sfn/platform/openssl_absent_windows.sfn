@@ -9,32 +9,20 @@
 // all 22 `SSL_*`/`TLS_*` externs wholesale rather than trying to link
 // against a library the target does not have.
 //
-// This module defines ONLY what a Windows consumer actually reaches:
-// the 8 `tls_*` wrappers `adapters/http.sfn` and `concurrency/serve.sfn`
-// each `extern fn`-declare (never imported directly — a definition
-// anywhere in the link satisfies an extern declaration elsewhere, the
-// same mechanism `realpath_windows.sfn`'s header documents), plus the 6
-// `EVP_*` symbols `capsules/sfn/crypto/src/ed25519.sfn:16-26` externs
-// for Ed25519 signature verification — reached via
-// `compiler/capsule.toml`'s `sfn/crypto` dependency, so it cannot be
-// dropped just because the TLS half is unavailable.
+// This module defines ONLY the 8 `tls_*` wrappers Windows consumers reach.
+// `adapters/http.sfn` and `concurrency/serve.sfn` each `extern fn`-declare
+// them (never imported directly — a definition anywhere in the link satisfies
+// an extern declaration elsewhere, the same mechanism
+// `realpath_windows.sfn`'s header documents).
 //
 // FAIL LOUDLY AND CLOSED. Every entry point that would otherwise perform
 // real cryptographic or network work returns definitive failure — `null`
-// for a context/handshake, `-1` for read/write, `null`/`0` for the EVP
-// verify chain — and NEVER a silent success or a plaintext downgrade.
-// `ctx`/`connect`/`accept`/`EVP_PKEY_new_raw_public_key` additionally
-// write a one-line reason to stderr, since those are the calls a caller
-// could otherwise mistake for "returned fast" rather than "cannot run
-// here": `ed25519.sfn:119`'s `if pkey == 0` guard already turns a null
-// `EVP_PKEY_new_raw_public_key` into `ed25519_verify == false`, so
-// `toolchain install`'s signature check refuses rather than silently
-// skipping verification. The teardown wrappers (`tls_ctx_free`,
-// `tls_shutdown_free`, `EVP_PKEY_free`, `EVP_MD_CTX_*`,
-// `EVP_DigestVerify*`) are unreached in that guarded chain — every real
-// caller null-checks the handle before tearing it down — so they stay
-// plain no-ops/failure returns without adding stderr noise on top of the
-// one diagnostic already printed at the failure's origin.
+// for a context/handshake and `-1` for read/write — and NEVER a silent success
+// or a plaintext downgrade. `ctx`/`connect`/`accept` additionally write a
+// one-line reason to stderr, since those are the calls a caller could otherwise
+// mistake for "returned fast" rather than "cannot run here". The teardown
+// wrappers are unreachable after those failures, so they stay plain no-ops
+// without adding stderr noise on top of the diagnostic at the failure's origin.
 //
 // Removal condition: SFN-341 ("swap tls_* bodies to native stack; delete
 // OpenSSL externs") — once a pure-Sailfin TLS stack lands, this module's
@@ -91,35 +79,3 @@ fn tls_write(ssl: *u8, buf: *u8, n: i64) -> i64 ![io] {
 fn tls_shutdown_free(ssl: *u8) -> void { }
 
 fn tls_ctx_free(ctx: *u8) -> void { }
-
-// ── EVP surface (Ed25519 verify path, fail-closed) ────────────
-// Signatures copied verbatim from `capsules/sfn/crypto/src/ed25519.sfn:16-26`,
-// the sole consumer's own extern declarations.
-fn EVP_PKEY_new_raw_public_key(key_type: i32, e: *u8, key: *u8, keylen: usize) -> *u8 ![io] {
-    _tls_absent_warn("sailfin: OpenSSL unavailable on this Windows build (SFN-341 tracks a native crypto stack) — refusing EVP_PKEY_new_raw_public_key\n");
-    return null;
-}
-
-fn EVP_PKEY_free(pkey: *u8) -> void { }
-
-// Unreached: `ed25519.sfn:119`'s `if pkey == 0` guard returns `false`
-// before ever calling `EVP_MD_CTX_new`. Fails closed anyway (null) for
-// any future caller that skips the guard.
-fn EVP_MD_CTX_new() -> *u8 { return null; }
-
-fn EVP_MD_CTX_free(ctx: *u8) -> void { }
-
-// Unreached for the same reason as `EVP_MD_CTX_new` above. `0` is
-// OpenSSL's real failure return for `EVP_DigestVerifyInit` — never `1`
-// (success), which would let a caller that bypasses the `pkey == 0`
-// guard treat an absent OpenSSL as an initialized verifier.
-fn EVP_DigestVerifyInit(ctx: *u8, pctx: **u8, md_type: *u8, e: *u8, pkey: *u8) -> i32 {
-    return 0;
-}
-
-// `0` is OpenSSL's real failure return for `EVP_DigestVerify` — never
-// `1` (verified), which is the one return value that must never come
-// from an absent verifier.
-fn EVP_DigestVerify(ctx: *u8, sig: *u8, siglen: usize, tbs: *u8, tbslen: usize) -> i32 {
-    return 0;
-}
