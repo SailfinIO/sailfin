@@ -34,7 +34,7 @@ import {
 } from "./fs";
 import { sha256_hex_of_string } from "./hash";
 import { _dirname, _ensure_dir } from "./paths";
-import { build_target_os, host_is_windows, target_exe_name } from "./target";
+import { build_target_os, host_exe_name, target_exe_name } from "./target";
 
 // The default fingerprint scope: the compiler's own `.sfn` source tree plus
 // the Sailfin-native runtime it links against — the same scope the retired
@@ -60,15 +60,21 @@ fn pending_fingerprint_path() -> string {
 
 // The canonical install location for a freshly built compiler. Windows
 // binaries carry the `.exe` suffix; every other host uses the bare name.
+//
+// HOST-gated (SFN-701), because this names a binary THIS machine has to
+// execute. Its target-gated twin is `built_program_path()` just below —
+// that one names what a build EMITS, so it follows the target. The two
+// sit adjacent on purpose and must not be unified: under a cross build
+// they legitimately disagree, and collapsing them onto one gate silently
+// breaks whichever side loses.
 fn native_install_path() -> string ![io] {
-    if host_is_windows() { return "build/bin/sfn.exe"; }
-    return "build/bin/sfn";
+    return host_exe_name("build/bin/sfn");
 }
 
 // Where `<seed> build -p compiler` writes the freshly built binary before
 // it is installed. Must track the exact literal `build.sfn`'s no-`-p`
 // fallback derives (`"build/sailfin/program"`, `target_exe_name`-wrapped)
-// and gate on the same `build_target_os()` — not `host_is_windows()` above
+// and gate on the same `build_target_os()` — not `host_exe_name()` above
 // — so the two producers agree by construction under a cross `-target`
 // bootstrap; a same-target gate on this call site and a different-target
 // gate on the writer is exactly the producer/consumer split SFN-693 exists

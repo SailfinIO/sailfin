@@ -18,6 +18,8 @@ import { expect_eq_bool, expect_eq_str, expect_eq_str_array } from "sfn/test";
 import { LinkPlan, _llvm_text_link_program_argv, _llvm_text_link_test_argv } from "../../src/backend";
 import { _llvm_text_assemble_argv } from "../../src/build/clang_argv";
 import {
+    build_host_os,
+    host_exe_name,
     target_artifact_tag,
     target_clang_flags,
     target_clang_triple,
@@ -362,4 +364,31 @@ test "target: an already-.exe name is not doubled" ![pure] {
 
 test "target: a dot elsewhere in the name still gets .exe on Windows" ![pure] {
     assert expect_eq_str(target_exe_name("build/sailfin/my.app", "Windows"), "build/sailfin/my.app.exe").ok;
+}
+
+// ---- SFN-701: host_exe_name, the host-side sibling of target_exe_name ----
+//
+// `target_exe_name` names what a build EMITS for its target;
+// `host_exe_name` names a binary THIS machine must execute (the
+// installed compiler, a self-host stage's own output). Regression guard
+// that adding `host_exe_name` did not perturb `target_exe_name` itself.
+test "target: target_exe_name is unchanged for the Windows/Linux pair" ![pure] {
+    assert expect_eq_str(target_exe_name("build/bin/sfn", "Windows"), "build/bin/sfn.exe").ok;
+    assert expect_eq_str(target_exe_name("build/bin/sfn", "Linux"), "build/bin/sfn").ok;
+}
+
+// `host_exe_name` reads the real host (`![io]`), so its answer is
+// host-dependent and must never be asserted directly (the exact defect
+// fixed in the SFN-693 e2e test). Assert only the invariant that holds on
+// every host: it is `target_exe_name` gated on `build_host_os()`, and it
+// is idempotent.
+test "target: host_exe_name matches target_exe_name(x, build_host_os())" ![io] {
+    let host = build_host_os();
+    assert expect_eq_str(host_exe_name("build/bin/sfn"), target_exe_name("build/bin/sfn", host)).ok;
+    assert expect_eq_str(host_exe_name("build/bin/sfn-seedcheck"), target_exe_name("build/bin/sfn-seedcheck", host)).ok;
+}
+
+test "target: host_exe_name is idempotent" ![io] {
+    let once = host_exe_name("build/bin/sfn");
+    assert expect_eq_str(host_exe_name(once), once).ok;
 }

@@ -97,6 +97,18 @@ fn target_exe_name(name: string, target_os: string) -> string {
     return name + ".exe";
 }
 
+// `target_exe_name` gated on the HOST rather than the target (SFN-701),
+// for a binary THIS machine must execute — the installed compiler, a
+// self-host stage's own output — as opposed to `target_exe_name` above,
+// which names what a build emits FOR its target. Using the target gate
+// here would be wrong: a cross-build names its output for the target it's
+// building for, but a self-host stage binary has to actually run on the
+// host that just built it, regardless of what target that build is aimed
+// at.
+fn host_exe_name(name: string) -> string ![io] {
+    return target_exe_name(name, build_host_os());
+}
+
 // The clang `-target` triple for `target_os`, or "" to use clang's host
 // default. Only Windows diverges (the MSVC ABI: `x86_64-pc-windows-msvc`,
 // linking `lld-link` + the UCRT); every other target keeps the host
@@ -366,6 +378,7 @@ export {
     build_target_os,
     target_os_is_windows,
     target_exe_name,
+    host_exe_name,
     target_clang_triple,
     target_clang_flags,
     target_forced_linker_flag,
