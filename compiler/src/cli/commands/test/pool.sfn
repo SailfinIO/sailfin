@@ -74,7 +74,16 @@ fn _resolve_test_self_path(binary_dir: string) -> string ![io] {
         // Probe the canonical `sfn` name first, then the legacy
         // `sailfin` name (a binary that predates the build/bin/sfn
         // rename), mirroring `_resolve_self_path`'s host-neutral list.
-        let names: string[] = ["sfn", "sailfin"];
+        // The `.exe` variants are load-bearing, not decoration: on
+        // native Windows the compiler on disk is `sfn.exe`, so a
+        // suffixless-only list resolves to "" and every caller silently
+        // degrades — the pooled child would get an empty argv[0], and
+        // the `SAILFIN_BIN` seed below would be skipped, leaving the
+        // e2e `_sfn_bin()` helpers on their POSIX default on the exact
+        // platform that seed exists to fix (SFN-693). This list must
+        // stay in step with `_resolve_self_path` (`build/paths.sfn`);
+        // it drifted from it once already.
+        let names: string[] = ["sfn", "sfn.exe", "sailfin", "sailfin.exe"];
         let mut i: int = 0;
         loop {
             if i >= names.length { break; }
@@ -153,7 +162,24 @@ fn _pool_env_snapshot() -> string[] ![io] { return process.environ(); }
 // `SAILFIN_TEST_SCRATCH` (nested runner) or `SAILFIN_UPDATE_SNAPSHOTS`,
 // and POSIX `getenv` returns the FIRST match — so the inherited value
 // would shadow the per-child one without this filter.
-fn _pool_child_env(base_env: string[], child_scratch: string, runtime_objdir: string, stamp_nonce: string, update_snapshots: boolean, json_output: boolean) -> string[] {
+//
+// SFN-693: also seeds `SAILFIN_BIN=<self_exe>` — `_resolve_test_self_path`,
+// already computed once by the caller into `self_exe` — so the 285 e2e
+// fixtures' identical `_sfn_bin()` helper resolves correctly instead of
+// falling through to its hardcoded `build/bin/sfn` POSIX default; correct
+// on every OS, and specifically `.exe`-correct on Windows. `self_exe` here
+// IS precisely the compiler running each pooled child: it is that child's
+// own argv[0] (`_pool_child_argv`), so seeding it back into that same
+// child's env is correct by construction. The single-file path
+// (`_test_exec_env`, `./exec.sfn`) seeds the identical key from
+// `ctx.compiler_path` instead — NOT `_resolve_test_self_path` — because
+// there is no argv[0] to mirror; a reader who finds one seed should read
+// the other rather than assume it is a bug that they differ. Unlike the
+// drop-then-push keys above, an inherited
+// `SAILFIN_BIN` is deliberately left standing rather than overwritten —
+// an outer explicit override (e.g. `scripts/corpus-run.sh`) must keep
+// winning, so this only ever fills a gap the snapshot left.
+fn _pool_child_env(base_env: string[], child_scratch: string, runtime_objdir: string, stamp_nonce: string, update_snapshots: boolean, json_output: boolean, self_exe: string) -> string[] {
     let mut env_flat: string[] = [];
     let mut i: int = 0;
     loop {
@@ -192,6 +218,14 @@ fn _pool_child_env(base_env: string[], child_scratch: string, runtime_objdir: st
     // entirely rather than appended beside it.
     if !_env_snapshot_has_key(base_env, "SAILFIN_BUILD_JOBS") {
         env_flat.push("SAILFIN_BUILD_JOBS=1");
+    }
+    // `self_exe` is "" when the resolver found no binary. Pushing an
+    // empty `SAILFIN_BIN=` would be harmless today (the e2e helpers
+    // length-check it and fall through) but it advertises a compiler
+    // path that does not exist, so skip it and leave the child on its
+    // own default rather than a lie.
+    if self_exe.length > 0 && !_env_snapshot_has_key(base_env, "SAILFIN_BIN") {
+        env_flat.push("SAILFIN_BIN=" + self_exe);
     }
     return env_flat;
 }

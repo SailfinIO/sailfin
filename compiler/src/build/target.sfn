@@ -24,6 +24,7 @@
 // Windows target, and the runtime module set is only ever rewritten for a
 // Windows target.
 import { _get_env_cmd } from "../build_flags";
+import { ends_with } from "../string_utils";
 import { _dirname, _path_basename, _path_join } from "./paths";
 
 // The resolved build HOST OS — the OS the compile is running on, as
@@ -73,6 +74,27 @@ fn build_target_os() -> string ![io] {
 
 fn target_os_is_windows(target_os: string) -> boolean {
     return target_os == "Windows";
+}
+
+// Appends `.exe` to a COMPILER-DERIVED executable name when `target_os` is
+// Windows; every other target returns `name` unchanged. This applies only
+// to names the compiler itself derives (`build/sailfin/program`, a
+// capsule's artifact path, a test/run scratch binary) — an explicit
+// user-supplied `-o` is honored verbatim, matching Windows `clang.exe`'s
+// own behaviour of never rewriting an explicit output path.
+//
+// The suffix is required, not cosmetic: every runtime spawn site
+// (`runtime/sfn/platform/process_windows.sfn`) calls `CreateProcessA` with
+// `lpApplicationName = null`, so Win32 derives the module name by parsing
+// the command line and appends `.exe` only when the parsed name already
+// has no extension of its own — an extensionless PE built by this
+// compiler is otherwise unlaunchable (SFN-693).
+//
+// Idempotent: a name already ending in `.exe` is left alone.
+fn target_exe_name(name: string, target_os: string) -> string {
+    if !target_os_is_windows(target_os) { return name; }
+    if ends_with(name, ".exe") { return name; }
+    return name + ".exe";
 }
 
 // The clang `-target` triple for `target_os`, or "" to use clang's host
@@ -343,6 +365,7 @@ export {
     host_is_windows,
     build_target_os,
     target_os_is_windows,
+    target_exe_name,
     target_clang_triple,
     target_clang_flags,
     target_forced_linker_flag,

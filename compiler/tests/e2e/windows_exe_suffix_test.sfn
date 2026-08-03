@@ -1,0 +1,124 @@
+// compiler/tests/e2e/windows_exe_suffix_test.sfn
+//
+// SFN-693: a compiler-DERIVED Windows executable name must carry `.exe`
+// from birth. Every runtime spawn site
+// (`runtime/sfn/platform/process_windows.sfn`) calls `CreateProcessA` with
+// `lpApplicationName = null`, so Win32 derives the module name by parsing
+// the command line and appends `.exe` only when the parsed name already
+// has no extension — an extensionless PE this compiler produces is
+// otherwise unlaunchable. `target_exe_name`
+// (`compiler/src/build/target.sfn`) is the producer; this pins it at an
+// observable seam.
+//
+// The Windows-target link itself fails on a Linux host (no MSVC import
+// libs), but the naming decision happens upstream of the link, so this
+// drives a bare `sfn build main.sfn` (no `-o`, so the compiler derives the
+// name — an explicit `-o` is honored verbatim and out of scope here) under
+// `SAILFIN_TRACE_LINK=1` and asserts on the traced `-o` argument in
+// stderr, not on the exit code.
+//
+// No-bash e2e (`.claude/rules/no-bash-e2e.md`): a nested build via
+// `process.run_capture_cwd`, `clean_runner_env` + `nested_runner_scratch`
+// per `docs/conventions/e2e-tests.md` (PATH is threaded because
+// `clean_runner_env` is the full parent `process.environ()` snapshot minus
+// only the pool-managed keys, so the nested build's `clang` stays
+// resolvable).
+import { contains, ends_with, split } from "sfn/strings";
+import { clean_runner_env, nested_runner_scratch, with_tmp_dir } from "sfn/test";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+fn _first_line(text: string) -> string {
+    let lines = split(text, "\n");
+    if lines.length == 0 { return text; }
+    return lines[0];
+}
+
+// `run_capture_cwd` resolves the child's argv[0] against the CHILD cwd, not
+// the parent's — an unqualified "build/bin/sfn" would not resolve once the
+// nested build's cwd is the fixture scratch dir. Mirrors
+// `workspace_default_members_cli_test.sfn`'s `_sfn_bin_abs`.
+fn _sfn_bin_abs() -> string ![io] {
+    let bin = _sfn_bin();
+    if bin.length > 0 && bin[0] == "/" { return bin; }
+    let exit = process.run_capture(["pwd"], clean_runner_env(nested_runner_scratch("windows-exe-suffix-pwd")));
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    if exit != 0 { return bin; }
+    return _first_line(out) + "/" + bin;
+}
+
+fn _write_fixture(dir: string) -> void ![io] {
+    fs.writeFile(dir + "/main.sfn", "fn main() -> int {\n    return 0;\n}\n");
+}
+
+// Build `main.sfn` bare (no `-o`) with `dir` as the child cwd, tracing the
+// resolved link argv. `target_os` pushes `SAILFIN_TARGET_OS` when
+// non-empty; empty leaves the host default. Returns captured stderr — the
+// build is expected to FAIL at the link step for a Windows target on a
+// Linux host (no MSVC import libs), which is fine: the trace line fires
+// before the link is actually run.
+fn _traced_build_stderr(dir: string, sfn: string, target_os: string, label: string) -> string ![io] {
+    let mut child_env = clean_runner_env(nested_runner_scratch(label));
+    child_env.push("SAILFIN_TRACE_LINK=1");
+    if target_os.length > 0 {
+        child_env.push("SAILFIN_TARGET_OS=" + target_os);
+    }
+    let _exit = process.run_capture_cwd([sfn, "build", "main.sfn"], child_env, dir);
+    let _out = process.capture_take_stdout();
+    return process.capture_take_stderr();
+}
+
+// The argv token immediately following a `-o` token in the traced
+// `[trace-link] <argv...>` stderr line, or "" if absent.
+fn _trace_out_arg(err: string) -> string {
+    let tokens = split(err, " ");
+    let mut i: int = 0;
+    loop {
+        if i >= tokens.length { break; }
+        if tokens[i] == "-o" && i + 1 < tokens.length {
+            return tokens[i + 1];
+        }
+        i += 1;
+    }
+    return "";
+}
+
+test "exe suffix: a bare Windows-target build traces a .exe output path" ![io] {
+    let sfn = _sfn_bin_abs();
+    let outcome = with_tmp_dir(fn (dir: string) -> int {
+        _write_fixture(dir);
+        let err = _traced_build_stderr(dir, sfn, "Windows", "exe-suffix-windows");
+        assert contains(err, "[trace-link]");
+        let out_arg = _trace_out_arg(err);
+        assert out_arg.length > 0;
+        assert ends_with(out_arg, ".exe");
+        return 0;
+    });
+    assert outcome == 0;
+}
+
+// The negative case pins `SAILFIN_TARGET_OS=Linux` rather than leaving the
+// target to default to the host. Defaulting would make the assertion
+// host-dependent — on a Windows host `build_target_os()` resolves to
+// `Windows` and this build legitimately DOES produce `.exe`, so the test
+// would fail on exactly the native-Windows leg (SFN-668) it needs to
+// survive. Pinning the target keeps this a test of the target gate, which
+// is the thing `target_exe_name` actually keys on.
+test "exe suffix: a bare non-Windows-target build traces a non-.exe output path" ![io] {
+    let sfn = _sfn_bin_abs();
+    let outcome = with_tmp_dir(fn (dir: string) -> int {
+        _write_fixture(dir);
+        let err = _traced_build_stderr(dir, sfn, "Linux", "exe-suffix-nonwindows");
+        assert contains(err, "[trace-link]");
+        let out_arg = _trace_out_arg(err);
+        assert out_arg.length > 0;
+        assert ! ends_with(out_arg, ".exe");
+        return 0;
+    });
+    assert outcome == 0;
+}

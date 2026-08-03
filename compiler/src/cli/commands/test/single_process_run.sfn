@@ -1,5 +1,6 @@
 import { Program, Statement } from "../../../ast";
 import { _sanitize_filename_cmd, _write_text_cmd } from "../../../build/fs";
+import { build_target_os, target_exe_name } from "../../../build/target";
 import {
     CacheKey,
     cache_copy_artifact_to,
@@ -66,7 +67,24 @@ import {
 fn _run_single_process(test_files: string[], file_suite_index: int[], suites_in: TestSuite[], json_output: boolean, json_subframe: boolean, trace_runner: boolean, no_test_cache: boolean, update_snapshots: boolean, emit_banners: boolean, scratch_root: string, scratch_owned: boolean, runtime_root: string, binary_dir: string, ctx: CliContext) -> int ![clock, io, net] {
     let mut suites = suites_in;
     let ll_path = scratch_root + "/test.ll";
-    let exe_path = scratch_root + "/test";
+    // Derived name (never an explicit `-o`), so it carries Windows' `.exe`
+    // suffix from birth: the link's `-o`, the cache copy target, and the
+    // spawn below must all agree by construction (SFN-693).
+    let exe_path = target_exe_name(scratch_root + "/test", build_target_os());
+    // SFN-693: threaded into every `_run_test_binary` call below as the
+    // `SAILFIN_BIN` seed, so the compiled test binaries' `_sfn_bin()`
+    // e2e fixtures resolve the compiler actually running them. Unlike
+    // the pooled path's `self_exe` (`_pool_child_env`, `./pool.sfn`),
+    // which resolves `_resolve_test_self_path(binary_dir)` because there
+    // `self_exe` genuinely IS the pooled child's own argv[0]
+    // (`_pool_child_argv`), this is `ctx.compiler_path` — the exact
+    // canonical executable resolved at the native entrypoint. Do NOT
+    // reconstruct it from `binary_dir` here: a preferred sibling such as
+    // `sfn` may contain different bytes when the running compiler is
+    // named `sailfin` or `sfn-selfhost2` (see the identical warning
+    // above `tb_compiler_path`, which resolves this the same way for
+    // cache identity).
+    let self_exe = ctx.compiler_path;
     let dump_sources = _env_flag("SAILFIN_DUMP_TEST_SOURCES")
         || _legacy_flag_file("build/sailfin/.dump_test_sources");
     let grouping = _resolve_test_groups(test_files, binary_dir, trace_runner);
@@ -346,7 +364,7 @@ fn _run_single_process(test_files: string[], file_suite_index: int[], suites_in:
         // this parent, so no nesting/concurrency collision is possible.
         if trace_runner { print.err("test runner: exec start"); }
         let deadline_ms = _test_deadline_ms();
-        let mut br = _run_test_binary(exe_path, scratch_root, update_snapshots, json_output, deadline_ms);
+        let mut br = _run_test_binary(exe_path, scratch_root, update_snapshots, json_output, deadline_ms, self_exe);
         // Signal-kill retry (ported from `scripts/run_native_test.sh`
         // by issue #845). 137 (OOM-SIGKILL) / 139 (SIGSEGV) are
         // transient under sustained CI memory pressure on the
@@ -370,12 +388,18 @@ fn _run_single_process(test_files: string[], file_suite_index: int[], suites_in:
             // retry starts from a clean channel with no stale-record
             // carryover to unlink — the collision the file side-channel
             // needed guarding against is structurally gone.
-            br = _run_test_binary(exe_path, scratch_root, update_snapshots, json_output, deadline_ms);
+            br = _run_test_binary(exe_path, scratch_root, update_snapshots, json_output, deadline_ms, self_exe);
         }
         let run_rc = br.rc;
         if trace_runner {
             print.err("test runner: exec done (exit=" + number_to_string(run_rc)
                 + ")");
+        }
+        // A spawn failure with no binary on disk at the attempted path is
+        // a naming/link disagreement, not a test failure — name the exact
+        // path so it doesn't read as an opaque exit code (SFN-693).
+        if run_rc != 0 && !fs.exists(exe_path) {
+            print.err("test runner: no binary at " + exe_path);
         }
         // Split the streamed records: `failure` is the first assert-location
         // record (the `fail.bin` SFAF analog), `results` the `test`/`hook`

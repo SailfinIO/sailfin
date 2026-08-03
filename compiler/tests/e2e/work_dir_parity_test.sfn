@@ -27,6 +27,8 @@
 import { contains } from "sfn/strings";
 import { report_child_failure } from "sfn/test";
 
+import { build_target_os, target_exe_name } from "../../src/build/target";
+
 fn _sfn_bin() -> string ![io] {
     let configured = env.get("SAILFIN_BIN");
     if configured.length > 0 { return configured; }
@@ -88,9 +90,14 @@ fn _cmp_identical(a: string, b: string) -> boolean ![io] {
 
 // Build `-p compiler` into `work_dir` (idempotent: skips if the binary is
 // already present so re-runs within the pool don't rebuild). Returns the
-// build exit code (0 when the binary already exists).
+// build exit code (0 when the binary already exists). The idempotency
+// probe tracks the same `target_exe_name` rule the build subprocess
+// applies (SFN-693): this process and the child resolve `build_target_os()`
+// the same way (no override in play), so both agree on the name.
 fn _build_compiler_into(work_dir: string) -> int ![io] {
-    if fs.exists(work_dir + "/native/sailfin") { return 0; }
+    if fs.exists(target_exe_name(work_dir + "/native/sailfin", build_target_os())) {
+        return 0;
+    }
     let exit = process.run_capture([_sfn_bin(), "build", "-p", "compiler", "--work-dir", work_dir], _child_env());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
@@ -169,7 +176,7 @@ fn _subset(a: string[], b: string[]) -> boolean {
 // the full byte-fixed-point determinism check lives in `make check`.
 test "work-dir-parity: two --work-dir builds produce byte-identical compilers" ![io] {
     let work_a = _scratch_base() + "/sfn-work-dir-parity-a";
-    let bin_a = work_a + "/native/sailfin";
+    let bin_a = target_exe_name(work_a + "/native/sailfin", build_target_os());
 
     let ra = _build_compiler_into(work_a);
     assert ra == 0;
@@ -184,7 +191,7 @@ test "work-dir-parity: two --work-dir builds produce byte-identical compilers" !
     }
 
     let work_b = _scratch_base() + "/sfn-work-dir-parity-b";
-    let bin_b = work_b + "/native/sailfin";
+    let bin_b = target_exe_name(work_b + "/native/sailfin", build_target_os());
 
     let rb = _build_compiler_into(work_b);
     assert rb == 0;
@@ -211,11 +218,11 @@ test "work-dir-parity: import-context filename set matches across roots" ![io] {
 
     let ra = _build_compiler_into(work_a);
     assert ra == 0;
-    assert fs.exists(work_a + "/native/sailfin");
+    assert fs.exists(target_exe_name(work_a + "/native/sailfin", build_target_os()));
 
     let rb = _build_compiler_into(work_b);
     assert rb == 0;
-    assert fs.exists(work_b + "/native/sailfin");
+    assert fs.exists(target_exe_name(work_b + "/native/sailfin", build_target_os()));
 
     let set_a = _ic_file_set(work_a);
     let set_b = _ic_file_set(work_b);

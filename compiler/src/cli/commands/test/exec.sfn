@@ -171,7 +171,24 @@ struct TestBinResult {
 // fixtures' temp-dir root — `with_tmp_dir`/`nested_runner_scratch`) and
 // `SAILFIN_UPDATE_SNAPSHOTS` (snapshot rebaseline). Inherited copies are
 // dropped first so POSIX `getenv` (first match wins) returns the override.
-fn _test_exec_env(scratch_root: string, update_snapshots: boolean) -> string[] ![io] {
+//
+// SFN-693: also seeds `SAILFIN_BIN=<self_exe>` — `ctx.compiler_path`,
+// threaded in from `_run_single_process` — so the 285 e2e fixtures'
+// identical `_sfn_bin()` helper resolves correctly when run via
+// `sfn test <single-file>` (this path), not only via the pooled
+// `_pool_child_env` (`./pool.sfn`, the multi-file path). `ctx.compiler_path`
+// rather than `_resolve_test_self_path(binary_dir)`: the latter would
+// reconstruct the path by probing sibling names (`sfn`/`sailfin`/…) in
+// `binary_dir`, and a preferred sibling can be different bytes from the
+// binary actually running this process (e.g. under `NATIVE_BIN=…-stage3`)
+// — the same hazard `tb_compiler_path` above guards against for cache
+// identity. `_pool_child_env` (`./pool.sfn`) DOES use
+// `_resolve_test_self_path` for its own `self_exe`, correctly, because
+// there that value is the pooled child's own argv[0], not a
+// reconstruction of this process's path. An inherited `SAILFIN_BIN` is
+// left standing rather than overwritten, mirroring `_pool_child_env`'s
+// outer-override-wins rule.
+fn _test_exec_env(scratch_root: string, update_snapshots: boolean, self_exe: string) -> string[] ![io] {
     let base = process.environ();
     let mut env_flat: string[] = [];
     let mut i: int = 0;
@@ -185,6 +202,12 @@ fn _test_exec_env(scratch_root: string, update_snapshots: boolean) -> string[] !
     }
     env_flat.push("SAILFIN_TEST_SCRATCH=" + scratch_root);
     if update_snapshots { env_flat.push("SAILFIN_UPDATE_SNAPSHOTS=1"); }
+    // Skipped when `self_exe` is "" (resolver found nothing) — see the
+    // same guard in `_pool_child_env`: advertising a compiler path that
+    // does not exist is worse than leaving the child on its default.
+    if self_exe.length > 0 && !_env_snapshot_has_key(base, "SAILFIN_BIN") {
+        env_flat.push("SAILFIN_BIN=" + self_exe);
+    }
     return env_flat;
 }
 
@@ -276,8 +299,8 @@ fn _test_deadline_ms() -> int ![io] {
 // 137 to 124 so it is never confused with an OOM/crash 137 (see §f of the
 // SFN-393 runner-transport design note). `handle_wait` is the sole
 // reaper/free path and is always called.
-fn _run_test_binary(exe_path: string, scratch_root: string, update_snapshots: boolean, json_output: boolean, deadline_ms: int) -> TestBinResult ![io] {
-    let env = _test_exec_env(scratch_root, update_snapshots);
+fn _run_test_binary(exe_path: string, scratch_root: string, update_snapshots: boolean, json_output: boolean, deadline_ms: int, self_exe: string) -> TestBinResult ![io] {
+    let env = _test_exec_env(scratch_root, update_snapshots, self_exe);
     let h = process.spawn_with_env([exe_path], env);
     if h == 0 {
         // Spawn failure — mirror `process.run`'s 127 missing-command code.

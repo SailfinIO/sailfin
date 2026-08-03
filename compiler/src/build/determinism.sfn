@@ -16,6 +16,7 @@ import { capsule_artifact_manifest_path, is_safe_scope_name, parse_scope_name } 
 import { number_to_string } from "../main";
 import { _sha256_of_file_cmd, _shell_single_quote_arg } from "./fs";
 import { _find_substring_from, _resolve_self_path } from "./paths";
+import { build_target_os, target_exe_name } from "./target";
 
 // -------------------------------------------------------------------
 // Determinism check (issue #779)
@@ -147,11 +148,16 @@ fn _derive_pass2_work_dir(pass1_work_dir: string) -> string {
 // Compute pass 2's effective binary path. Pass 2 always provides
 // `--work-dir`, so the default `out_path` derivation in the build
 // subcommand routes through the `work_dir.length > 0` branch:
-// `<work_dir>/sailfin/program.o` for libraries, `<work_dir>/native/sailfin`
-// for binaries.
-fn _pass2_out_path(pass2_work_dir: string, is_library: boolean) -> string {
+// `<work_dir>/sailfin/program.o` for libraries,
+// `target_exe_name(<work_dir>/native/sailfin, target_os)` for binaries —
+// must track `build.sfn`'s derived name exactly (SFN-693), or a Windows
+// `--check-determinism` run writes pass 2's binary as `....sailfin.exe`
+// and this reads back the pre-suffix path, sha256-ing nothing and
+// hard-failing at the pass-2 read below on a build that actually
+// succeeded.
+fn _pass2_out_path(pass2_work_dir: string, is_library: boolean, target_os: string) -> string {
     if is_library { return pass2_work_dir + "/sailfin/program.o"; }
-    return pass2_work_dir + "/native/sailfin";
+    return target_exe_name(pass2_work_dir + "/native/sailfin", target_os);
 }
 
 // Reconstruct the second pass's argv and invoke it as a subprocess.
@@ -267,7 +273,7 @@ fn _do_determinism_check(pass1_out: string, is_library: boolean, cap_capsule_nam
     };
 
     let pass2_work_dir = _derive_pass2_work_dir(work_dir);
-    let pass2_out = _pass2_out_path(pass2_work_dir, is_library);
+    let pass2_out = _pass2_out_path(pass2_work_dir, is_library, build_target_os());
     // #1482: resolve through `_resolve_self_path` so the `.exe`
     // variants are tried on Windows (and the binary's existence is
     // verified) instead of blindly concatenating `<dir>/sailfin`. On
