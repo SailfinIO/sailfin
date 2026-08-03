@@ -14,6 +14,9 @@
 // is when the e2e shape gets exercised through `sfn build`.
 import {
     RuntimeCapsuleArtifacts,
+    _rcr_normalize_path,
+    _rcr_path_join,
+    _rcr_resolve_path,
     empty_runtime_capsule_artifacts,
     enumerate_runtime_capsule_artifacts
 } from "../../src/runtime_capsule_resolver";
@@ -230,4 +233,166 @@ test "enumerate: empty workspace_root returns empty" ![io] {
     let empty: string[] = [];
     let result = enumerate_runtime_capsule_artifacts("", empty);
     assert result.length == 0;
+}
+
+// --------------------------------------------------------------
+// _rcr_normalize_path — SFN-642 root and separator handling
+// --------------------------------------------------------------
+// Pure string logic: no filesystem, no Windows host, no target
+// conditioning. The Windows expectations below are not invented —
+// each was read off Win32 `[System.IO.Path]::GetFullPath` and is
+// cited on the case it pins.
+test "normalize-path: POSIX behaviour is unchanged" {
+    // The documented motivating case from the function header.
+    assert _rcr_normalize_path("runtime/native/../sfn/io.sfn") == "runtime/sfn/io.sfn";
+    assert _rcr_normalize_path("/a/b/../c") == "/a/c";
+    assert _rcr_normalize_path("./a") == "a";
+    assert _rcr_normalize_path("a/b/..") == "a";
+    assert _rcr_normalize_path("") == "";
+}
+
+test "normalize-path: an absolute POSIX root absorbs excess .." {
+    assert _rcr_normalize_path("/..") == "/";
+    assert _rcr_normalize_path("/a/../../..") == "/";
+}
+
+test "normalize-path: a relative path keeps uncollapsible leading .." {
+    assert _rcr_normalize_path("../sfn/io.sfn") == "../sfn/io.sfn";
+    assert _rcr_normalize_path("a/../..") == "..";
+}
+
+// A doubled leading slash is a legal POSIX path, NOT a UNC root.
+// This is why `_rcr_root_prefix_len` detects UNC only in its
+// backslash form — recognizing `//` would silently change this.
+test "normalize-path: a doubled POSIX slash is not a UNC root" {
+    assert _rcr_normalize_path("//home/x") == "/home/x";
+}
+
+// The exact corruption reported in SFN-642: with `/`-only splitting
+// the drive-qualified prefix was one opaque segment and the `..`
+// deleted it, yielding a bare relative `runtime`.
+test "normalize-path: a mixed-separator drive path keeps its drive" {
+    assert _rcr_normalize_path("C:\\Users\\foo\\bin/../runtime") == "C:/Users/foo/runtime";
+    assert _rcr_normalize_path("C:\\a\\b") == "C:/a/b";
+    assert _rcr_normalize_path("C:\\a\\b/../c") == "C:/a/c";
+}
+
+// The case that separator-agnostic splitting ALONE does not fix: the
+// drive prefix must be a root, or one extra `..` pops it.
+// Win32: GetFullPath("C:/a/b/../../../../c") -> "C:\c"
+test "normalize-path: a drive root absorbs excess .." {
+    assert _rcr_normalize_path("C:\\a\\..\\..\\b") == "C:/b";
+    assert _rcr_normalize_path("C:/a/b/../../../../c") == "C:/c";
+    assert _rcr_normalize_path("C:\\") == "C:/";
+    assert _rcr_normalize_path("C:\\..") == "C:/";
+}
+
+// `C:a` is drive-RELATIVE (the working directory on drive C), which
+// is a different file from `C:\a` — so the root must not acquire a
+// separator, and a leading `..` stays meaningful.
+test "normalize-path: a drive-relative root is not absolute" {
+    assert _rcr_normalize_path("C:a/../b") == "C:b";
+    assert _rcr_normalize_path("C:..\\x") == "C:../x";
+    assert _rcr_normalize_path("C:") == "C:";
+}
+
+// Win32: GetFullPath("//server/share/a/../..") -> "\\server\share"
+// The share is part of the root; `..` never climbs to `\\server`.
+test "normalize-path: a UNC root spans the share and absorbs .." {
+    assert _rcr_normalize_path("\\\\server\\share\\a\\..\\b") == "\\\\server\\share/b";
+    assert _rcr_normalize_path("\\\\server\\share\\a\\..\\..") == "\\\\server\\share";
+}
+
+// Extended-length and device paths bypass Win32 path parsing and are
+// valid only with backslashes, so they are handed back untouched.
+test "normalize-path: extended-length and device paths pass through" {
+    assert _rcr_normalize_path("\\\\?\\C:\\a\\..\\b") == "\\\\?\\C:\\a\\..\\b";
+    assert _rcr_normalize_path("\\\\.\\PIPE\\x") == "\\\\.\\PIPE\\x";
+}
+
+// `_rcr_artifacts_from_manifest` re-normalizes `manifest_dir`
+// whether or not it has already been normalized, so a second pass
+// must be a no-op. This is what forbids rewriting a `\\server\share`
+// root to `//server/share`: the next pass would read that back as a
+// POSIX root and return `/server/share`.
+test "normalize-path: normalization is idempotent" {
+    // Includes every output that CLAMPS to a bare root, because those
+    // are the outputs whose re-parse is least obvious — and the
+    // function is re-fed its own output 5+ times per capsule.
+    let cases = ["/a/b/../c", "runtime/native/../sfn/io.sfn", "C:\\Users\\foo\\bin/../runtime", "C:\\a\\..\\..\\b", "C:a/../b", "\\\\server\\share\\a\\..\\b", "//home/x", "/..", "C:\\..", "C:", "\\\\server\\share\\a\\..\\..", "a/..", "a/../..", "\\\\", "\\\\srv", "\\\\srv\\", "\\\\srv\\\\a\\b"];
+    let mut i: int = 0;
+    loop {
+        if i >= cases.length { break; }
+        let once = _rcr_normalize_path(cases[i]);
+        assert _rcr_normalize_path(once) == once;
+        i += 1;
+    }
+}
+
+// `a/..` is the ONLY way to reach the `return "."` branch — `a/b/..`
+// and `a/../..` both miss it.
+test "normalize-path: collapsing to nothing yields a dot" {
+    assert _rcr_normalize_path("a/..") == ".";
+    assert _rcr_normalize_path(".") == ".";
+}
+
+test "normalize-path: POSIX shape edge cases" {
+    assert _rcr_normalize_path("/") == "/";
+    assert _rcr_normalize_path("..") == "..";
+    assert _rcr_normalize_path("a/b/") == "a/b";
+    assert _rcr_normalize_path("/a//b") == "/a/b";
+}
+
+// A `\` is legal in a POSIX filename, so host-agnostic string logic
+// cannot tell it from a Windows separator. These two inputs change
+// meaning by design; pinned so the trade-off is visible rather than
+// discovered later.
+test "normalize-path: a backslash is always a separator" {
+    assert _rcr_normalize_path("dir/a\\b") == "dir/a/b";
+    assert _rcr_normalize_path("\\a") == "/a";
+}
+
+test "normalize-path: degenerate UNC roots survive" {
+    assert _rcr_normalize_path("\\\\") == "\\\\";
+    assert _rcr_normalize_path("\\\\srv") == "\\\\srv";
+    assert _rcr_normalize_path("\\\\srv\\") == "\\\\srv\\";
+}
+
+// A doubled separator yields an EMPTY share, which makes the token
+// after it an ordinary poppable segment. That is counter-intuitive,
+// so it is pinned against the platform rather than against intuition:
+//   GetFullPath("//srv//a/../../b")   -> "\\srv\b"     a is popped
+//   GetFullPath("//srv/sh/a/../../b") -> "\\srv\sh\b"  sh is kept
+test "normalize-path: a doubled UNC separator gives an empty share" {
+    assert _rcr_normalize_path("\\\\srv\\\\a\\..\\..\\b") == "\\\\srv\\b";
+    assert _rcr_normalize_path("\\\\srv\\sh\\a\\..\\..\\b") == "\\\\srv\\sh/b";
+}
+
+// --------------------------------------------------------------
+// _rcr_path_join / _rcr_resolve_path — the composition
+// --------------------------------------------------------------
+// `_rcr_resolve_path` is normalize(join(dir, rel)), and it is what
+// every artifact path actually goes through. Testing the normalizer
+// alone missed a join bug that silently promoted a drive-RELATIVE
+// root to drive-absolute.
+test "path-join: a bare drive-relative root takes no separator" {
+    // `C:` + `sfn` is `C:sfn` (cwd on drive C), NOT `C:/sfn` (root of
+    // drive C). Those are different files.
+    assert _rcr_path_join("C:", "sfn") == "C:sfn";
+    // `C:a` already has a segment, so it joins normally.
+    assert _rcr_path_join("C:a", "b") == "C:a/b";
+    assert _rcr_path_join("a", "b") == "a/b";
+    assert _rcr_path_join("a/", "b") == "a/b";
+    // A backslash already terminates the base — do not add a second
+    // separator.
+    assert _rcr_path_join("C:\\a\\", "b") == "C:\\a\\b";
+}
+
+test "path-resolve: manifest-relative paths keep their root" {
+    assert _rcr_resolve_path("runtime/native", "../sfn/io.sfn") == "runtime/sfn/io.sfn";
+    assert _rcr_resolve_path("C:/rt", "../sfn/io.sfn") == "C:/sfn/io.sfn";
+    assert _rcr_resolve_path("C:\\rt", "./x.c") == "C:/rt/x.c";
+    assert _rcr_resolve_path("\\\\srv\\share", "../x.c") == "\\\\srv\\share/x.c";
+    // The drive-relative root must survive the round trip.
+    assert _rcr_resolve_path("C:", "sfn/io.sfn") == "C:sfn/io.sfn";
 }

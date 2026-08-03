@@ -89,17 +89,99 @@ fn empty_runtime_capsule_artifacts() -> RuntimeCapsuleArtifacts {
 }
 
 // ---- Path helpers ----
-// `path_join("a", "b")` → `"a/b"`. Idempotent on trailing slashes.
+// True iff `ch` is a path separator. Windows accepts `/` and `\`
+// interchangeably in every Win32 file API, and both
+// `GetModuleFileNameA` and `_fullpath` hand back `\` — so a path
+// reaching this module on Windows routinely carries either, or
+// both in one string (SFN-642).
+fn _rcr_is_sep(ch: string) -> boolean { return ch == "/" || ch == "\\"; }
+
+// True iff `ch` is an ASCII letter, i.e. a candidate drive letter.
+fn _rcr_is_drive_letter(ch: string) -> boolean {
+    let code = char_code(ch);
+    if code >= 65 && code <= 90 { return true; }
+    return code >= 97 && code <= 122;
+}
+
+// True iff `path` is exactly a bare drive-relative root (`C:`), with
+// no segment after it. `C:a` is not this — it already has a segment.
+fn _rcr_is_bare_drive_root(path: string) -> boolean {
+    if path.length != 2 { return false; }
+    if substring(path, 1, 2) != ":" { return false; }
+    return _rcr_is_drive_letter(substring(path, 0, 1));
+}
+
+// `path_join("a", "b")` → `"a/b"`. Idempotent on trailing separators.
 fn _rcr_path_join(base: string, name: string) -> string {
     if base.length == 0 { return name; }
     if name.length == 0 { return base; }
-    if substring(base, base.length - 1, base.length) == "/" {
+    // A bare drive-relative root takes NO separator: `C:` names the
+    // working directory on drive C, so `C:` + `sfn` is `C:sfn`.
+    // Inserting a `/` would silently promote it to `C:/sfn`, the root
+    // of drive C — a different file. `_rcr_normalize_path` defends
+    // this same distinction when it reassembles (see its `lead`), and
+    // the two must agree or the round trip through
+    // `_rcr_resolve_path` loses it (SFN-642).
+    if _rcr_is_bare_drive_root(base) { return base + name; }
+    if _rcr_is_sep(substring(base, base.length - 1, base.length)) {
         return base + name;
     }
     return base + "/" + name;
 }
 
-// Collapse `.` and `..` segments in a `/`-separated path. Used
+// Length of the leading ROOT of `path`, or 0 when `path` is
+// relative. The root is the prefix `..` may never climb past.
+//
+// Recognized roots:
+//   `/`               POSIX                      -> 1
+//   `C:/` or `C:\`    drive-absolute             -> 3
+//   `C:`              drive-RELATIVE             -> 2
+//   `\\server\share`  UNC                        -> through the share
+//
+// UNC is detected ONLY in its backslash form. `//foo/bar` is a
+// legal POSIX path that must keep collapsing to `/foo/bar`, and
+// no Windows tool emits a forward-slash UNC — so treating `//` as
+// a UNC root would break POSIX byte-identity to buy nothing.
+fn _rcr_root_prefix_len(path: string) -> int {
+    if path.length == 0 { return 0; }
+    if path.length >= 2 && substring(path, 0, 2) == "\\\\" {
+        // Scan the server component, then the share component. Both
+        // belong to the root: `\\server\share\..` clamps to
+        // `\\server\share` and never climbs to `\\server`.
+        let mut i: int = 2;
+        loop {
+            if i >= path.length { break; }
+            if _rcr_is_sep(substring(path, i, i + 1)) { break; }
+            i += 1;
+        }
+        if i >= path.length { return path.length; }
+        // Consume exactly ONE separator, never a run. On a doubled
+        // separator (`\\srv\\a`) the share scan then starts on the
+        // second separator and matches an EMPTY share, so the root is
+        // `\\srv\` and `a` is an ordinary poppable segment. That looks
+        // like an off-by-one but it is precisely what Win32 does —
+        // verified, because the intuitive reading is wrong:
+        //   GetFullPath("//srv//a/../../b")   -> "\\srv\b"    (a popped)
+        //   GetFullPath("//srv/sh/a/../../b") -> "\\srv\sh\b" (sh kept)
+        // Skipping the run instead would keep `a` as the share and
+        // diverge from the platform.
+        i += 1;
+        loop {
+            if i >= path.length { break; }
+            if _rcr_is_sep(substring(path, i, i + 1)) { break; }
+            i += 1;
+        }
+        return i;
+    }
+    if path.length >= 2 && substring(path, 1, 2) == ":" && _rcr_is_drive_letter(substring(path, 0, 1)) {
+        if path.length >= 3 && _rcr_is_sep(substring(path, 2, 3)) { return 3; }
+        return 2;
+    }
+    if _rcr_is_sep(substring(path, 0, 1)) { return 1; }
+    return 0;
+}
+
+// Collapse `.` and `..` segments in a path. Used
 // by `_rcr_resolve_path` to produce canonical workspace-rooted
 // paths from manifest entries that climb out of the manifest
 // dir (e.g. `runtime/native` + `../sfn/io.sfn` →
@@ -120,16 +202,96 @@ fn _rcr_path_join(base: string, name: string) -> string {
 // symlink resolution). Leading `..` segments that can't be
 // collapsed survive in the output (e.g. `../sfn/io.sfn` stays
 // `../sfn/io.sfn` when there's no parent to consume).
+//
+// SFN-642 — separator-agnostic and root-aware. Splitting on `/`
+// alone made a drive-qualified Windows path a single opaque
+// segment, so `C:\Users\foo\bin/../runtime` collapsed to a bare
+// `runtime`: silent corruption of the runtime root. Splitting on
+// both separators is necessary but NOT sufficient — under the old
+// `path[0] == "/"` absoluteness test a drive prefix stays an
+// ordinary poppable segment, so `C:\a\..\..\b` still yields `b`.
+// The root has to be recognized AS a root.
+//
+// The rule applied is the one Windows itself uses, and the one this
+// function already applied to `/`: an absolute root ABSORBS excess
+// `..`. Verified against Win32 rather than assumed —
+//   GetFullPath("C:/a/b/../../../../c")   -> "C:\c"
+//   GetFullPath("//server/share/a/../..") -> "\\server\share"
+//
+// Output form: segments always rejoin with `/`, which Win32 accepts
+// in drive and UNC paths alike, so the rest of the compiler keeps
+// its single `/`-shaped assumption. The root is emitted verbatim
+// apart from the drive/POSIX separator (`C:\` → `C:/`), because
+// this function must be IDEMPOTENT — `_rcr_artifacts_from_manifest`
+// normalizes `manifest_dir` and then re-normalizes it once per
+// artifact through `_rcr_resolve_path`, so already-normalized output
+// is re-fed 5+ times per capsule. Rewriting a `\\server\share` root
+// to `//server/share` would make the next pass re-read it as a POSIX
+// root and hand back `/server/share`.
+//
+// Idempotent is not the same as extension-stable, and this function
+// is only the former. `normalize("\\srv\\a")` renders the empty-share
+// root as `\\srv\a`, promoting `a` from a segment to the share, so a
+// later `../b` clamps instead of popping. Win32 `GetFullPath` has the
+// identical property — its own output re-parsed reads `a` as a share
+// too — so this matches the platform including its lossiness.
+//
+// DO NOT unify this with the `\`→`/` flattener in
+// `module_name_from_path` (`main.sfn`). That one rewrites separators
+// unconditionally,
+// which maps a UNC `\\srv\share` to `//srv/share` — exactly the
+// rewrite avoided above. The two do not conflict today (main.sfn
+// produces a module slug that is never re-fed to itself), but
+// collapsing them into one helper reintroduces the
+// `//server/share` → `/server/share` corruption on the second pass.
+//
+// Two POSIX inputs DO change meaning, deliberately. `\` is a legal
+// character in a POSIX filename, so host-agnostic string logic
+// cannot distinguish "a file named `a\b`" from "a Windows path":
+//   `dir/a\b` → `dir/a/b`   (a `\` in a name becomes a separator)
+//   `\a`      → `/a`        (relative is promoted to absolute)
+// Pure forward-slash input is byte-identical to the pre-SFN-642
+// output, and that covers every path reached in practice: workspace
+// member paths are gated by `_rcr_is_safe_member_path`, which
+// rejects `\` outright. The manifest's artifact relatives
+// (`c-sources`, `ll-sources`, `sfn-sources`, `include-dirs`,
+// `prelude-entry`) are NOT gated, so a manifest that declares a
+// POSIX filename containing a literal `\` resolves differently than
+// it used to. Treating that as a separator is the intended reading
+// on the platform this function exists to support, and a `\` in a
+// build-input filename is pathological on either.
 fn _rcr_normalize_path(path: string) -> string {
     if path.length == 0 { return path; }
-    let mut absolute: boolean = false;
-    if substring(path, 0, 1) == "/" { absolute = true; }
+
+    // Win32 extended-length (`\\?\C:\x`) and device (`\\.\PIPE\x`)
+    // paths bypass Win32 path parsing entirely and are valid ONLY
+    // with backslashes, so normalizing one would break it. Nothing
+    // in the toolchain produces one today; handing the input back
+    // untouched is degraded-but-correct rather than corrupting.
+    if path.length >= 4 && substring(path, 0, 2) == "\\\\" && substring(path, 3, 4) == "\\" {
+        let device = substring(path, 2, 3);
+        if device == "?" || device == "." { return path; }
+    }
+
+    let root_len = _rcr_root_prefix_len(path);
+    let mut root = substring(path, 0, root_len);
+    let drive_relative = root_len == 2 && substring(path, 1, 2) == ":";
+    // A drive-relative root (`C:foo`) names the per-drive working
+    // directory, so it is NOT absolute: a leading `..` stays
+    // meaningful and survives, as it does for a bare relative path.
+    let mut absolute: boolean = root_len > 0;
+    if drive_relative { absolute = false; }
+    if root_len == 1 { root = "/"; }
+    if root_len == 3 && substring(path, 1, 2) == ":" {
+        root = substring(path, 0, 2) + "/";
+    }
+
     let mut segments: string[] = [];
-    let mut start: int = 0;
-    let mut i: int = 0;
+    let mut start: int = root_len;
+    let mut i: int = root_len;
     loop {
         if i > path.length { break; }
-        if i == path.length || substring(path, i, i + 1) == "/" {
+        if i == path.length || _rcr_is_sep(substring(path, i, i + 1)) {
             if i > start {
                 let segment = substring(path, start, i);
                 if segment == "." {
@@ -160,18 +322,27 @@ fn _rcr_normalize_path(path: string) -> string {
         }
         i += 1;
     }
-    let mut out: string = "";
-    if absolute { out = "/"; }
+    // Separator between the root and the first segment. A root that
+    // already ends in one (`/`, `C:/`) needs none. A UNC root does.
+    // A drive-relative root must NOT gain one — `C:a` and `C:/a`
+    // name different files.
+    let mut lead: string = "";
+    if root.length > 0 && !drive_relative && !_rcr_is_sep(substring(root, root.length - 1, root.length)) {
+        lead = "/";
+    }
+
+    if segments.length == 0 {
+        if root.length > 0 { return root; }
+        return ".";
+    }
+
+    let mut out: string = root;
     let mut j: int = 0;
     loop {
         if j >= segments.length { break; }
-        if j > 0 { out = out + "/"; }
+        if j == 0 { out = out + lead; } else { out = out + "/"; }
         out = out + segments[j];
         j += 1;
-    }
-    if out.length == 0 {
-        if absolute { return "/"; }
-        return ".";
     }
     return out;
 }
@@ -388,6 +559,13 @@ fn runtime_capsule_from_root(runtime_root: string) -> RuntimeCapsuleArtifacts[] 
 
 export {
     RuntimeCapsuleArtifacts,
+    // Module-private by convention; exported solely as a test seat so
+    // the SFN-642 root/separator rules are assertable as pure string
+    // logic on a Linux host, with no Windows and no filesystem. Same
+    // arrangement as `_strip_trailing_slashes_cmd` in `build/fs.sfn`.
+    _rcr_normalize_path,
+    _rcr_path_join,
+    _rcr_resolve_path,
     empty_runtime_capsule_artifacts,
     enumerate_runtime_capsule_artifacts,
     runtime_capsule_from_root
