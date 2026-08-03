@@ -30,6 +30,7 @@
 // rewrites). That keeps cross-module name collisions from emitting
 // spurious `E0402` against a same-named in-module function.
 import { Program } from "./ast";
+import { IntrinsicEffectTable, empty_intrinsic_effects } from "./intrinsic_effects";
 
 // One callable signature exposed to a downstream caller. `name` is
 // the identifier the importing module sees after alias resolution
@@ -84,6 +85,7 @@ struct ImportedFunctionSignature {
 // `methods` field without breaking existing consumers.
 struct ImportSymbolTable {
     functions: ImportedFunctionSignature[];
+    intrinsic_effects: IntrinsicEffectTable;
 }
 
 // Construct an empty table — used by build-path callers that don't
@@ -93,7 +95,19 @@ struct ImportSymbolTable {
 // effect_checker's lookup loop branchless.
 fn empty_import_symbols() -> ImportSymbolTable {
     let empty: ImportedFunctionSignature[] = [];
-    return ImportSymbolTable { functions: empty };
+    return ImportSymbolTable {
+        functions: empty,
+        intrinsic_effects: empty_intrinsic_effects()
+    };
+}
+
+// Attach driver/provider-owned intrinsic semantics to an otherwise ordinary
+// imported-symbol table. Scope localization and shadowing preserve this value
+// unchanged; only callable import rows are filtered or rewritten.
+fn with_intrinsic_effects(table: ImportSymbolTable, intrinsic_effects: IntrinsicEffectTable) -> ImportSymbolTable {
+    let mut updated = table;
+    updated.intrinsic_effects = intrinsic_effects;
+    return updated;
 }
 
 // Push a single (name, effects) pair onto an existing table. The
@@ -208,7 +222,7 @@ fn lookup_imported_function(table: ImportSymbolTable, name: string) -> ImportedF
 // The function is pure — no I/O — so unit tests can synthesize a
 // global table + program in-memory and assert the localized result.
 fn localize_import_symbols_for_program(program: Program, table: ImportSymbolTable) -> ImportSymbolTable {
-    let mut local = empty_import_symbols();
+    let mut local = with_intrinsic_effects(empty_import_symbols(), table.intrinsic_effects);
     let mut i: int = 0;
     loop {
         if i >= program.statements.length { break; }
@@ -247,5 +261,6 @@ export {
     append_local_function,
     empty_import_symbols,
     localize_import_symbols_for_program,
-    lookup_imported_function
+    lookup_imported_function,
+    with_intrinsic_effects
 };

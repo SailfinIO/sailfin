@@ -30,10 +30,77 @@
 // -------------------------------------------------------------------
 // Imports — real exported symbols (light closure via diagnostics_render)
 // -------------------------------------------------------------------
+import { AnalyzerInput, analyze_program } from "../../src/analyzer";
+import { Program, Statement } from "../../src/ast";
 import { code_for_missing_effect, join_effects } from "../../src/diagnostics_render";
 import { EffectRequirement } from "../../src/effect_checker/types";
+import { empty_import_symbols } from "../../src/effect_imports";
+import { ClosureSymbolSet, ImportResolutionContext } from "../../src/import_resolution_check";
+import {
+    append_intrinsic_effects,
+    empty_intrinsic_effects,
+    intrinsic_effects_for_callee_target
+} from "../../src/intrinsic_effects";
 import { number_to_string } from "../../src/num_format";
 import { CheckSummary, render_summary } from "../../src/tools/check";
+
+// -------------------------------------------------------------------
+// Tests — pure analyzer facade
+// -------------------------------------------------------------------
+test "check: analyzer facade accepts resolved parsed input without authority" {
+    let statements: Statement[] = [];
+    let interfaces: Statement[] = [];
+    let names: string[] = [];
+    let globals: string[] = [];
+    let capabilities: string[] = [];
+    let resolved_specs: string[] = [];
+    let result = analyze_program(AnalyzerInput {
+        program: Program { statements: statements }, file_path: "clean.sfn", imported_interfaces: interfaces, imported_symbols: empty_import_symbols(), prelude_globals: globals, capabilities_required: capabilities, import_context: ImportResolutionContext {
+            closure_symbols: ClosureSymbolSet { names: names, complete: true }, resolved_relative_specs: resolved_specs
+        }, intrinsic_effects: empty_intrinsic_effects(), allow_bare_assert: false, effect_severity: "error"
+    });
+    assert result.diagnostics.length == 0;
+    assert result.error_count == 0;
+    assert result.warning_count == 0;
+    assert result.analyzed_program.program.statements.length == 0;
+}
+
+test "check: analyzer facade imports no driver, codegen, or LLVM modules" ![io] {
+    let source = fs.readFile("compiler/src/analyzer.sfn");
+    let effect_diagnostics = fs.readFile("compiler/src/effect_diagnostics.sfn");
+    let effect_collector = fs.readFile("compiler/src/effect_checker/collector.sfn");
+    let import_checker = fs.readFile("compiler/src/import_resolution_check.sfn");
+    let ownership_checker = fs.readFile("compiler/src/ownership_checker.sfn");
+    assert ! _contains(source, "![io");
+    assert ! _contains(source, "![net");
+    assert ! _contains(source, "![clock");
+    assert ! _contains(source, "from \"./build");
+    assert ! _contains(source, "from \"./cli");
+    assert ! _contains(source, "from \"./emit");
+    assert ! _contains(source, "from \"./llvm");
+    assert ! _contains(source, "diagnostics_render");
+    assert ! _contains(effect_diagnostics, "render_diagnostic");
+    assert ! _contains(effect_diagnostics, "![io");
+    assert ! _contains(effect_collector, "from \"../llvm");
+    assert ! _contains(import_checker, "![io");
+    assert ! _contains(import_checker, "fs.");
+    assert ! _contains(ownership_checker, "render_diagnostic");
+    assert ! _contains(ownership_checker, "fn run_ownership_checker");
+    assert ! _contains(ownership_checker, "print.err");
+}
+
+test "check: intrinsic effects preserve exact and namespace lookup" {
+    let mut table = empty_intrinsic_effects();
+    table = append_intrinsic_effects(table, "http.get", ["net.http"]);
+    table = append_intrinsic_effects(table, "http.download", ["net.http", "io"]);
+    let exact = intrinsic_effects_for_callee_target(table, "http.get");
+    assert exact.length == 1;
+    assert exact[0] == "net.http";
+    let fallback = intrinsic_effects_for_callee_target(table, "http.unknown");
+    assert fallback.length == 2;
+    assert fallback[0] == "net.http";
+    assert fallback[1] == "io";
+}
 
 // -------------------------------------------------------------------
 // Local helpers

@@ -9,12 +9,13 @@
 // groups its files by `(project_root, workspace_root)`, runs a single
 // `prepare_project_capsules_for_check` pass per group, loads the
 // resulting `.sfn-asm` import-context once per group, and feeds the
-// converted interface list into `check_source_with_imports`.
+// converted interface list into the pure analyzer facade.
 // Cross-module `implements` clauses are now conformance-checked
 // end-to-end without any textual import inlining, and `sfn check
 // pathA pathB` invocations that span different capsules / workspaces
 // resolve each project independently rather than silently anchoring
 // on whichever path came first.
+import { analyze_program } from "../analyzer";
 import { Statement } from "../ast";
 import { _collect_sfn_files_cmd, _dirname_cmd, _path_join_cmd } from "../build/fs";
 import { prepare_project_capsules_for_check } from "../capsule_resolver";
@@ -30,16 +31,18 @@ import {
 } from "../diagnostics_json";
 import { render_diagnostic } from "../diagnostics_render";
 import { ImportSymbolTable, empty_import_symbols } from "../effect_imports";
+import { ClosureSymbolSet } from "../import_resolution_check";
+import { parse_program } from "../parser/mod";
 import { Token } from "../token";
 import {
     CheckResult,
     CheckSummary,
-    check_source_with_imports,
+    analyzer_input_for_check,
+    check_result_from_analysis,
     render_summary,
     summarize
 } from "../tools/check";
 import {
-    ClosureSymbolSet,
     ImportedInterfaceLoadResult,
     build_closure_symbol_set,
     load_imported_interfaces_from_paths
@@ -57,17 +60,17 @@ struct CheckGroup {
     interfaces: Statement[];
     // Phase E: cross-module effect propagation table built from the
     // same artifacts the `interfaces` list pulls from. Threaded into
-    // `check_source_with_imports` so a caller missing
+    // the analyzer so a caller missing
     // `![<callee_effect>]` produces an `E0402` diagnostic.
     function_effects: ImportSymbolTable;
     // Phase F: capsule manifest's `[capabilities] required = [...]`
     // surface, sourced from the same per-group resolver pass that
     // populates `interfaces`. Threaded into
-    // `check_source_with_imports` so any function declaring an
+    // the analyzer so any function declaring an
     // effect outside the surface produces an `E0403` diagnostic.
     capabilities_required: string[];
     // #1953: the set of every symbol name defined in this group's staged
-    // import closure. Threaded into `check_source_with_imports` so a
+    // import closure. Threaded into the analyzer so a
     // relative import of a nonexistent module (E0430) or a symbol defined
     // nowhere in the closure (E0431) is diagnosed.
     closure_symbols: ClosureSymbolSet;
@@ -352,11 +355,11 @@ fn handle_check_command(args: string[], binary_dir: string) -> int ![io] {
         groups[gi].interfaces = load.interfaces;
         // Phase E: stash the cross-module function-effect table so
         // the per-file analysis loop below can hand it to
-        // `check_source_with_imports` alongside the interface list.
+        // the analyzer alongside the interface list.
         groups[gi].function_effects = load.function_effects;
         // Phase F: stash the capsule manifest's
         // `[capabilities] required` surface from the resolver pass.
-        // The per-file loop hands it to `check_source_with_imports`
+        // The per-file loop hands it to the analyzer
         // so any function declaring an effect outside the surface
         // produces an `E0403` diagnostic.
         groups[gi].capabilities_required = resolution.capabilities_required;
@@ -427,7 +430,9 @@ fn handle_check_command(args: string[], binary_dir: string) -> int ![io] {
         let path = files[fi];
         let group_idx = file_group_index[fi];
         let source = fs.readFile(path);
-        let result = check_source_with_imports(source, path, groups[group_idx].interfaces, groups[group_idx].function_effects, groups[group_idx].capabilities_required, groups[group_idx].closure_symbols, allow_bare_assert);
+        let program = parse_program(source);
+        let analyzer_input = analyzer_input_for_check(program, path, groups[group_idx].interfaces, groups[group_idx].function_effects, groups[group_idx].capabilities_required, groups[group_idx].closure_symbols, allow_bare_assert);
+        let result = check_result_from_analysis(analyze_program(analyzer_input), source);
         // Emit any diagnostic — error or warning — so contributors
         // running `sfn check` under Phase B (warning default) actually
         // see the effect-violation output. The summary line keys on

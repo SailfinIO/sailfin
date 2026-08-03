@@ -96,7 +96,6 @@ import {
     SourceSpan,
     Statement
 } from "./ast";
-import { render_diagnostic } from "./diagnostics_render";
 import { ImportSymbolTable, empty_import_symbols } from "./effect_imports";
 import { number_to_string } from "./num_format";
 import {
@@ -115,7 +114,6 @@ import {
 } from "./ownership_task_provenance";
 import { Token, TokenKind } from "./token";
 import { LocalBinding, analyze_lambda } from "./typecheck_captures";
-import { Diagnostic, diagnostic_to_diag } from "./typecheck_types";
 import { is_linear_type, is_owned_type, is_task_type } from "./typecheck_types/expr_type_rules";
 import { is_identifier_char, trim_text } from "./typecheck_types/text_utils";
 
@@ -3053,38 +3051,4 @@ fn check_ownership(program: Program) -> OwnershipWarning[] {
 
 fn check_ownership_with_imports(program: Program, imports: ImportSymbolTable) -> OwnershipWarning[] {
     return analyze_program_ownership_with_imports(program, imports).warnings;
-}
-
-// Build-path gate wrapper for `main.sfn`, shaped like
-// `validate_and_render_effects`: renders every error-severity finding to
-// stderr and returns the error count. Callers gate on `> 0`. Programs
-// with no owned/affine bindings (the compiler's own source) produce zero
-// findings, so the gate stays transparent for self-hosting.
-fn run_ownership_checker(program: Program) -> int ![io] {
-    return run_ownership_checker_with_imports(program, empty_import_symbols());
-}
-
-fn run_ownership_checker_with_imports(program: Program, imports: ImportSymbolTable) -> int ![io] {
-    let summary = analyze_program_ownership_with_imports(program, imports);
-    let empty_lines: string[] = [];
-    let mut errors: int = 0;
-    let mut index: int = 0;
-    loop {
-        if index >= summary.warnings.length { break; }
-        let finding = summary.warnings[index];
-        if finding.severity == "error" {
-            errors += 1;
-            let diagnostic = Diagnostic {
-                code: finding.code,
-                severity: "error",
-                message: finding.message,
-                file_path: "",
-                primary: finding.trigger,
-                suggestion: null
-            };
-            print.err(render_diagnostic(diagnostic_to_diag(diagnostic, "ownership"), empty_lines, "ownership"));
-        }
-        index += 1;
-    }
-    return errors;
 }

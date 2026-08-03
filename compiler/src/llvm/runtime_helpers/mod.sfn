@@ -6,13 +6,14 @@
 // `docs/conventions/runtime-helpers.md`: populate `native_signature` with the
 // canonical `sfn_<domain>_<op>` symbol and route call sites through
 // `emit_runtime_call`.
-import { RuntimeHelperDescriptor } from "../types";
 import {
-    join_with_separator,
-    starts_with,
-    string_array_contains,
-    trim_text
-} from "../utils";
+    IntrinsicEffectTable,
+    append_intrinsic_effects,
+    empty_intrinsic_effects,
+    intrinsic_effects_for_callee_target
+} from "../../intrinsic_effects";
+import { RuntimeHelperDescriptor } from "../types";
+import { join_with_separator, string_array_contains, trim_text } from "../utils";
 import { _rh_descriptors_02, _rh_descriptors_03, _rh_descriptors_04 } from "./registry_concurrency";
 import { _rh_descriptors_00, _rh_descriptors_01 } from "./registry_platform";
 import { _rh_descriptors_05, _rh_descriptors_06 } from "./registry_process";
@@ -123,6 +124,21 @@ fn find_runtime_helper(target: string) -> RuntimeHelperDescriptor? {
     return null;
 }
 
+// Driver/provider adapter for the analyzer-owned intrinsic effect contract.
+// LLVM descriptors remain the metadata source, but semantic consumers receive
+// only target/effect values and never import LLVM types or lowering modules.
+fn runtime_helper_effect_table() -> IntrinsicEffectTable {
+    let descriptors = runtime_helper_descriptors();
+    let mut table = empty_intrinsic_effects();
+    let mut index: int = 0;
+    loop {
+        if index >= descriptors.length { break; }
+        table = append_intrinsic_effects(table, descriptors[index].target, descriptors[index].effects);
+        index += 1;
+    }
+    return table;
+}
+
 // Resolve the capability effects a builtin callee `target` requires from
 // the authoritative `target -> effects` descriptor registry above
 // (#1183, epic #1180 Phase G). This registry is the single source of
@@ -147,49 +163,7 @@ fn find_runtime_helper(target: string) -> RuntimeHelperDescriptor? {
 // rows here, so the effect checker derives them from this registry too —
 // completing the "zero hardcoded name->effect chains" goal of Phase G.
 fn effects_for_callee_target(target: string) -> string[] {
-    let trimmed = trim_text(target);
-    let exact = find_runtime_helper(trimmed);
-    if exact != null { return exact.effects; }
-    let prefix = _rh_namespace_prefix(trimmed);
-    let descriptors = runtime_helper_descriptors();
-    let mut accumulated: string[] = [];
-    let mut index: int = 0;
-    loop {
-        if index >= descriptors.length { break; }
-        if starts_with(descriptors[index].target, prefix) {
-            accumulated = _rh_union_effects(accumulated, descriptors[index].effects);
-        }
-        index += 1;
-    }
-    return accumulated;
-}
-
-// Namespace prefix for the union fallback: the text up to and including
-// the first `.` ("fs.read" -> "fs."), or `<target>.` when the target has
-// no dot ("console" -> "console.").
-fn _rh_namespace_prefix(target: string) -> string {
-    let mut root = "";
-    let mut index: int = 0;
-    loop {
-        if index >= target.length { break; }
-        if target[index] == "." { break; }
-        root = root + target[index];
-        index += 1;
-    }
-    return root + ".";
-}
-
-fn _rh_union_effects(into: string[], additions: string[]) -> string[] {
-    let mut out = into;
-    let mut index: int = 0;
-    loop {
-        if index >= additions.length { break; }
-        if !string_array_contains(out, additions[index]) {
-            out.push(additions[index]);
-        }
-        index += 1;
-    }
-    return out;
+    return intrinsic_effects_for_callee_target(runtime_helper_effect_table(), trim_text(target));
 }
 
 // LLVM return type for `declare`-line emission. Mirrors the

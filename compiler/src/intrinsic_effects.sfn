@@ -1,0 +1,103 @@
+// compiler/src/intrinsic_effects.sfn
+//
+// Target-neutral intrinsic effect metadata consumed by semantic analysis.
+// The compiler driver builds this table from its runtime-helper provider and
+// passes it into the pure analyzer; the analyzer never imports LLVM symbols,
+// ABI spellings, or lowering descriptors.
+import { substring } from "./string_utils";
+
+struct IntrinsicEffectEntry {
+    target: string;
+    effects: string[];
+}
+
+struct IntrinsicEffectTable {
+    entries: IntrinsicEffectEntry[];
+}
+
+fn empty_intrinsic_effects() -> IntrinsicEffectTable {
+    return IntrinsicEffectTable { entries: [] };
+}
+
+fn append_intrinsic_effects(table: IntrinsicEffectTable, target: string, effects: string[]) -> IntrinsicEffectTable {
+    let mut updated = table;
+    updated.entries.push(IntrinsicEffectEntry {
+        target: target, effects: effects
+    });
+    return updated;
+}
+
+fn _ie_starts_with(text: string, prefix: string) -> boolean {
+    if prefix.length > text.length { return false; }
+    return substring(text, 0, prefix.length) == prefix;
+}
+
+fn _ie_namespace_prefix(target: string) -> string {
+    let mut root = "";
+    let mut index: int = 0;
+    loop {
+        if index >= target.length { break; }
+        if target[index] == "." { break; }
+        root = root + target[index];
+        index += 1;
+    }
+    return root + ".";
+}
+
+fn _ie_contains(items: string[], target: string) -> boolean {
+    let mut index: int = 0;
+    loop {
+        if index >= items.length { break; }
+        if items[index] == target { return true; }
+        index += 1;
+    }
+    return false;
+}
+
+fn _ie_union(into: string[], additions: string[]) -> string[] {
+    let mut out = into;
+    let mut index: int = 0;
+    loop {
+        if index >= additions.length { break; }
+        if !_ie_contains(out, additions[index]) {
+            out.push(additions[index]);
+        }
+        index += 1;
+    }
+    return out;
+}
+
+// Exact target first, then conservative namespace union. This preserves the
+// existing effect-checker contract: `http.download` keeps its precise
+// `[net.http, io]`, while an unlisted `fs.*` member inherits the union of the
+// provider's `fs.*` entries.
+fn intrinsic_effects_for_callee_target(table: IntrinsicEffectTable, target: string) -> string[] {
+    let mut index: int = 0;
+    loop {
+        if index >= table.entries.length { break; }
+        if table.entries[index].target == target {
+            return table.entries[index].effects;
+        }
+        index += 1;
+    }
+    let prefix = _ie_namespace_prefix(target);
+    let mut accumulated: string[] = [];
+    let mut fallback_index: int = 0;
+    loop {
+        if fallback_index >= table.entries.length { break; }
+        let entry = table.entries[fallback_index];
+        if _ie_starts_with(entry.target, prefix) {
+            accumulated = _ie_union(accumulated, entry.effects);
+        }
+        fallback_index += 1;
+    }
+    return accumulated;
+}
+
+export {
+    IntrinsicEffectEntry,
+    IntrinsicEffectTable,
+    append_intrinsic_effects,
+    empty_intrinsic_effects,
+    intrinsic_effects_for_callee_target
+};

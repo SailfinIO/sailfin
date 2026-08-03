@@ -1,0 +1,106 @@
+// compiler/src/check/import_resolution.sfn
+//
+// Driver-owned filesystem preparation for the pure analyzer's import context.
+// Path behavior mirrors the capsule resolver, including `./dir` ->
+// `dir/mod.sfn`; semantic E0430/E0431 decisions remain in
+// `import_resolution_check.sfn`.
+import { Program } from "../ast";
+import { ClosureSymbolSet, ImportResolutionContext } from "../import_resolution_check";
+import { substring } from "../string_utils";
+
+fn _cir_dirname(path: string) -> string {
+    let mut last_slash: int = -1;
+    let mut index: int = 0;
+    loop {
+        if index >= path.length { break; }
+        if substring(path, index, index + 1) == "/" { last_slash = index; }
+        index += 1;
+    }
+    if last_slash < 0 { return "."; }
+    if last_slash == 0 { return "/"; }
+    return substring(path, 0, last_slash);
+}
+
+fn _cir_path_join(base: string, name: string) -> string {
+    if base.length == 0 { return name; }
+    if substring(base, base.length - 1, base.length) == "/" {
+        return base + name;
+    }
+    return base + "/" + name;
+}
+
+fn _cir_ends_with(text: string, suffix: string) -> boolean {
+    if suffix.length > text.length { return false; }
+    return substring(text, text.length - suffix.length, text.length) == suffix;
+}
+
+fn _cir_starts_with(text: string, prefix: string) -> boolean {
+    if prefix.length > text.length { return false; }
+    return substring(text, 0, prefix.length) == prefix;
+}
+
+fn _cir_is_relative(spec: string) -> boolean {
+    if _cir_starts_with(spec, "./") { return true; }
+    if _cir_starts_with(spec, "../") { return true; }
+    return false;
+}
+
+fn _cir_resolve_relative_import(base_dir: string, spec: string) -> string {
+    let mut current_base = base_dir;
+    let mut remainder = spec;
+    loop {
+        if remainder.length >= 3 {
+            if substring(remainder, 0, 3) == "../" {
+                current_base = _cir_dirname(current_base);
+                remainder = substring(remainder, 3, remainder.length);
+                continue;
+            }
+        }
+        if remainder.length >= 2 {
+            if substring(remainder, 0, 2) == "./" {
+                remainder = substring(remainder, 2, remainder.length);
+                continue;
+            }
+        }
+        break;
+    }
+    let path = _cir_path_join(current_base, remainder);
+    if _cir_ends_with(path, ".sfn") { return path; }
+    return path + ".sfn";
+}
+
+fn _cir_resolve_existing(base_dir: string, spec: string) -> string ![io] {
+    let dependency = _cir_resolve_relative_import(base_dir, spec);
+    if fs.exists(dependency) { return dependency; }
+    if _cir_ends_with(dependency, ".sfn") {
+        let mod_fallback = substring(dependency, 0, dependency.length - 4)
+            + "/mod.sfn";
+        if fs.exists(mod_fallback) { return mod_fallback; }
+    }
+    return "";
+}
+
+fn resolve_import_context(program: Program, file_path: string, closure: ClosureSymbolSet) -> ImportResolutionContext ![io] {
+    let mut resolved_relative_specs: string[] = [];
+    let base_dir = _cir_dirname(file_path);
+    let mut index: int = 0;
+    loop {
+        if index >= program.statements.length { break; }
+        let statement = program.statements[index];
+        if statement.variant == "ImportDeclaration" {
+            let spec_path = statement.source;
+            if _cir_is_relative(spec_path) {
+                if _cir_resolve_existing(base_dir, spec_path).length > 0 {
+                    resolved_relative_specs.push(spec_path);
+                }
+            }
+        }
+        index += 1;
+    }
+    return ImportResolutionContext {
+        closure_symbols: closure,
+        resolved_relative_specs: resolved_relative_specs
+    };
+}
+
+export { resolve_import_context };

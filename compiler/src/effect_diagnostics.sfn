@@ -1,0 +1,194 @@
+// Pure conversion from semantic effect findings to structured diagnostics.
+// Rendering belongs to driver adapters; analyzer consumers can depend on this
+// module without pulling text presentation or authority-bearing code into the
+// semantic-analysis closure.
+import { FixSuggestion, TextEdit } from "./diagnostic";
+import {
+    CapabilityViolation,
+    EffectRequirement,
+    EffectViolation,
+    UnrecognizedEffectViolation
+} from "./effect_checker/types";
+import { canonical_effects } from "./effect_taxonomy";
+import { Token } from "./token";
+import { Diagnostic } from "./typecheck_types";
+
+fn join_effects_data(effects: string[]) -> string {
+    if effects.length == 0 { return ""; }
+    let mut out = effects[0];
+    let mut i: int = 1;
+    loop {
+        if i >= effects.length { break; }
+        out = out + ", " + effects[i];
+        i += 1;
+    }
+    return out;
+}
+
+fn _description_starts_with_imported(desc: string) -> boolean {
+    let prefix = "imported `";
+    if desc.length < prefix.length { return false; }
+    let mut i: int = 0;
+    loop {
+        if i >= prefix.length { break; }
+        if desc[i] != prefix[i] { return false; }
+        i += 1;
+    }
+    return true;
+}
+
+fn code_for_missing_effect_data(missing_effects: string[], requirements: EffectRequirement[]) -> string {
+    let mut has_imported: boolean = false;
+    let mut i: int = 0;
+    loop {
+        if i >= requirements.length { break; }
+        let desc = requirements[i].description;
+        if desc.length > 0 {
+            if desc[0] == "@" { return "E0401"; }
+            if _description_starts_with_imported(desc) { has_imported = true; }
+        }
+        i += 1;
+    }
+    if has_imported { return "E0402"; }
+    return "E0400";
+}
+
+fn _suggestion_for_missing_effect(missing_effects: string[], body_open_token: Token?) -> FixSuggestion? {
+    if missing_effects.length == 0 { return null; }
+    if body_open_token == null { return null; }
+    let tok: Token? = body_open_token;
+    let effects_text = join_effects_data(missing_effects);
+    let mut edits: TextEdit[] = [];
+    edits.push(TextEdit {
+        start_line: tok.line, start_column: tok.column, end_line: tok.line, end_column: tok.column, replacement: "!["
+            + effects_text
+            + "] "
+    });
+    return FixSuggestion {
+        message: "add ![" + effects_text + "] to the function signature",
+        edits: edits
+    };
+}
+
+fn effect_violation_to_diagnostic_data(violation: EffectViolation) -> Diagnostic {
+    let effects_text = join_effects_data(violation.missing_effects);
+    let mut message = "function `" + violation.routine_name
+        + "` is missing required effects: !["
+        + effects_text
+        + "]";
+    if violation.requirements.length > 0 {
+        message = message + "\nrequired by:";
+        let mut i: int = 0;
+        loop {
+            if i >= violation.requirements.length { break; }
+            let req = violation.requirements[i];
+            message = message + "\n  - " + req.description + " requires !["
+                + req.effect
+                + "]";
+            i += 1;
+        }
+    }
+    if violation.missing_effects.length > 0 {
+        message = message + "\nsuggestion: add ![" + effects_text
+            + "] to the function signature";
+    }
+    let mut sev = violation.severity;
+    if sev.length == 0 { sev = "error"; }
+    return Diagnostic {
+        code: code_for_missing_effect_data(violation.missing_effects, violation.requirements),
+        severity: sev,
+        message: message,
+        file_path: "",
+        primary: violation.trigger,
+        suggestion: _suggestion_for_missing_effect(violation.missing_effects, violation.body_open_token)
+    };
+}
+
+fn _excess_plural_suffix(excess: string[]) -> string {
+    if excess.length == 1 { return ""; }
+    return "s";
+}
+
+fn _quoted_effects_csv(effects: string[]) -> string {
+    if effects.length == 0 { return ""; }
+    let mut out = "\"" + effects[0] + "\"";
+    let mut i: int = 1;
+    loop {
+        if i >= effects.length { break; }
+        out = out + ", \"" + effects[i] + "\"";
+        i += 1;
+    }
+    return out;
+}
+
+fn capability_violation_to_diagnostic_data(violation: CapabilityViolation) -> Diagnostic {
+    let excess_text = join_effects_data(violation.excess_effects);
+    let surface_text = join_effects_data(violation.capabilities_required);
+    let mut message = "function `" + violation.routine_name
+        + "` declares effect"
+        + _excess_plural_suffix(violation.excess_effects)
+        + " !["
+        + excess_text
+        + "] outside capsule capability surface !["
+        + surface_text
+        + "]";
+    message = message + "\nnote: capsule declares capabilities = !["
+        + surface_text
+        + "]";
+    if violation.excess_effects.length > 0 {
+        message = message + "\nsuggestion: add " + _quoted_effects_csv(violation.excess_effects)
+            + " to capsule.toml [capabilities] required, or remove !["
+            + excess_text
+            + "] from this function";
+    }
+    let mut sev = violation.severity;
+    if sev.length == 0 { sev = "error"; }
+    return Diagnostic {
+        code: "E0403",
+        severity: sev,
+        message: message,
+        file_path: "",
+        primary: violation.trigger,
+        suggestion: null
+    };
+}
+
+fn _unrecognized_plural_suffix(effects: string[]) -> string {
+    if effects.length == 1 { return ""; }
+    return "s";
+}
+
+fn unrecognized_effect_violation_to_diagnostic_data(violation: UnrecognizedEffectViolation) -> Diagnostic {
+    let effects_text = join_effects_data(violation.unrecognized_effects);
+    let mut message = "function `" + violation.routine_name
+        + "` declares unrecognized effect"
+        + _unrecognized_plural_suffix(violation.unrecognized_effects)
+        + " !["
+        + effects_text
+        + "]";
+    message = message
+        + "\nnote: an effect root must be one of the canonical six !["
+        + join_effects_data(canonical_effects())
+        + "] or `pure`; sub-effects refine a canonical root (e.g. `io.fs`)";
+    message = message + "\nsuggestion: correct the effect name or remove !["
+        + effects_text
+        + "] from this function";
+    let mut sev = violation.severity;
+    if sev.length == 0 { sev = "error"; }
+    return Diagnostic {
+        code: "E0404",
+        severity: sev,
+        message: message,
+        file_path: "",
+        primary: violation.trigger,
+        suggestion: null
+    };
+}
+
+export {
+    capability_violation_to_diagnostic_data,
+    code_for_missing_effect_data,
+    effect_violation_to_diagnostic_data,
+    join_effects_data,
+    unrecognized_effect_violation_to_diagnostic_data
+};

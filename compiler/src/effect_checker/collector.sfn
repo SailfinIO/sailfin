@@ -15,7 +15,7 @@ import {
     lookup_imported_function
 } from "../effect_imports";
 import { is_universally_allowed_effect } from "../effect_taxonomy";
-import { effects_for_callee_target } from "../llvm/runtime_helpers/mod";
+import { intrinsic_effects_for_callee_target } from "../intrinsic_effects";
 import { Token } from "../token";
 import {
     _copy_effect_table,
@@ -281,14 +281,14 @@ fn _propagate_imported_member_effects(member: string, imports: ImportSymbolTable
 }
 
 // G1 (#1183): append one EffectRequirement per capability the builtin
-// callee `target` requires, sourced from the authoritative runtime
-// descriptor registry (`effects_for_callee_target` in
-// `llvm/runtime_helpers/`). This keeps the effect checker free of
+// callee `target` requires, sourced from the driver-supplied target-neutral
+// intrinsic table. The driver derives that table from its runtime provider,
+// while this semantic pass stays free of LLVM imports and
 // hardcoded name->effect chains for registry-backed builtins: a
 // descriptor's `effects` change flows through here with zero edits.
 // `trigger` carets the diagnostic at the call/namespace token.
-fn _append_builtin_effects(base: EffectRequirement[], target: string, trigger: Token?) -> EffectRequirement[] {
-    let effects = effects_for_callee_target(target);
+fn _append_builtin_effects(base: EffectRequirement[], target: string, trigger: Token?, imports: ImportSymbolTable) -> EffectRequirement[] {
+    let effects = intrinsic_effects_for_callee_target(imports.intrinsic_effects, target);
     let mut required = base;
     let mut index: int = 0;
     loop {
@@ -323,14 +323,14 @@ fn collect_effects_from_expression(expression: Expression?, imports: ImportSymbo
                 // collected above. The registry-driven append stays (not
                 // deleted) so a future scheduler-level effect on the row flows
                 // through with no arm edit.
-                required = _append_builtin_effects(required, "spawn_task", callee_trigger);
+                required = _append_builtin_effects(required, "spawn_task", callee_trigger, imports);
             }
             // Registry-driven bare builtins: `print(...)` / `console(...)`
             // (the Call-form analog of the Member-form `print.info(...)`
             // paths in the "Member" branch — closes #614), `sleep(...)`
             // (clock), and the Call-form `serve(...)` (-> io, net via the
             // `serve` metadata row, #1601). EFFECTS come from the
-            // descriptor registry (#1183/#1601); this replaces the former
+            // intrinsic metadata table (#1183/#1601); this replaces the former
             // hardcoded `if name == "serve"` net-only check.
             //
             // The NAME set stays explicit because bare identifiers are not
@@ -358,7 +358,7 @@ fn collect_effects_from_expression(expression: Expression?, imports: ImportSymbo
                 _bare_builtin = true;
             }
             if _bare_builtin {
-                required = _append_builtin_effects(required, name, callee_trigger);
+                required = _append_builtin_effects(required, name, callee_trigger, imports);
             }
             // Phase E: cross-module call resolution. The imports
             // table is per-program-localized (alias-rewritten,
@@ -389,12 +389,12 @@ fn collect_effects_from_expression(expression: Expression?, imports: ImportSymbo
                 // descriptor target (`send` -> `channel_send`, `receive` ->
                 // `channel_receive`) and derive the effect from the row. The
                 // mapping is required — passing the bare `method` to
-                // `effects_for_callee_target` would miss the exact row and
+                // intrinsic lookup would miss the exact row and
                 // namespace-union to `[]`. Effect-transparent (SFEP-0049):
                 // the rows are now `[]`, so a pure `ch.send(v)`/`ch.receive()`
                 // requires nothing; any effect comes from the argument walk.
                 let channel_target = "channel_" + method;
-                required = _append_builtin_effects(required, channel_target, callee_trigger);
+                required = _append_builtin_effects(required, channel_target, callee_trigger, imports);
             }
         }
         // Member-callee effects (e.g. `fs.exists(...)`) are already
@@ -425,9 +425,8 @@ fn collect_effects_from_expression(expression: Expression?, imports: ImportSymbo
             // the namespace identifier is the user-visible cue the
             // diagnostic carets (e.g. `fs` in `fs.exists(...)`).
             let object_trigger = _token_from_span(expression.object.span, root);
-            // Registry-driven builtin effect resolution (#1183): the
-            // authoritative `target -> effects` registry in
-            // `llvm/runtime_helpers/` is the single source of truth.
+            // Metadata-driven builtin effect resolution (#1183): the driver
+            // supplies the provider's authoritative `target -> effects` table.
             // Exact descriptor first (`fs.exists`, `http.get`,
             // `http.download` -> `[net, io]`), namespace-union fallback
             // for members with no exact row (`fs.read` inherits `fs.*`
@@ -436,12 +435,12 @@ fn collect_effects_from_expression(expression: Expression?, imports: ImportSymbo
             // with zero edits. Covers `fs.*`, `print.*`, `console.*`,
             // `http.*` — the literal-name `if` chains they replaced.
             // As of #1601 this covers `websocket.*` too: the
-            // `websocket.<op>` metadata rows in `runtime_helpers.sfn`
+            // `websocket.<op>` metadata rows in that table
             // resolve to `["net"]` here (exact row or namespace-union),
             // so the former explicit `if root == "websocket"` net check
             // is gone — `websocket.*` is now registry-derived like
             // `fs.*` / `http.*`.
-            required = _append_builtin_effects(required, root + "." + expression.member, object_trigger);
+            required = _append_builtin_effects(required, root + "." + expression.member, object_trigger, imports);
             // G1b (#1184): cross-module member callee `mod.fetch()`. When
             // the member name resolves to an imported function with
             // declared effects, require them of the caller (`E0402`),
@@ -571,7 +570,7 @@ fn collect_effects_from_expression(expression: Expression?, imports: ImportSymbo
         // Effect-transparent (SFEP-0049): the row is `[]`, so `required` is
         // exactly the operand's effects collected above; the append stays so a
         // future scheduler-level effect on the row flows through with no edit.
-        required = _append_builtin_effects(required, "spawn_task", spawn_trigger);
+        required = _append_builtin_effects(required, "spawn_task", spawn_trigger, imports);
         return required;
     }
     if expression.variant == "Await" {
@@ -597,7 +596,7 @@ fn collect_effects_from_expression(expression: Expression?, imports: ImportSymbo
         // descriptor row exists: the paren-call `parallel(...)` of the
         // unimplemented `sfn/sync` surface must stay fail-closed in lowering,
         // which a row would break; the empty-append preserves that property.
-        required = _append_builtin_effects(required, "spawn_task", parallel_trigger);
+        required = _append_builtin_effects(required, "spawn_task", parallel_trigger, imports);
         return required;
     }
     if expression.variant == "Serve" {
@@ -621,7 +620,7 @@ fn collect_effects_from_expression(expression: Expression?, imports: ImportSymbo
         if lookup_imported_function(imports, "serve") != null {
             required = _propagate_imported_callee_effects("serve", imports, required, serve_trigger);
         } else {
-            required = _append_builtin_effects(required, "serve", serve_trigger);
+            required = _append_builtin_effects(required, "serve", serve_trigger, imports);
         }
         return required;
     }

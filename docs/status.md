@@ -257,6 +257,18 @@ here.
   `BuildReport` (#259); `sfn check --json` emits the `sailfin-check/1`
   envelope (`docs/reference/check-json-schema.md`), consumed by the MCP
   server.
+- **Pure analyzer boundary (SFN-713, SFEP-0020 §3.5.6).**
+  `compiler/src/analyzer.sfn` exposes an authority-free
+  `AnalyzerInput -> AnalyzerResult` contract over parsed syntax, imported
+  interfaces/symbols, resolved import context, runtime-global names, and
+  effect policy. It returns analyzed program data plus producer-tagged semantic
+  diagnostics without importing driver, codegen, or LLVM modules.
+  Target-neutral intrinsic effects cross the same boundary through
+  `intrinsic_effects.sfn`; the driver adapts LLVM runtime-helper descriptors
+  into that pure table, so effect analysis no longer imports lowering metadata.
+  `check/engine.sfn` remains driver-owned: it resolves workspaces and relative
+  modules, reads sources/runtime context and policy, calls the facade, and
+  renders the existing text or `sailfin-check/1` JSON presentation unchanged.
 - **Diagnostics.** One renderer (`diagnostics_render.sfn`) serves check and
   build paths. Its sink model is the unified `Diag`/`Span` type from
   `diagnostic.sfn`, including code, string severity, file path, producing
