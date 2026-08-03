@@ -101,38 +101,6 @@ define void @tls_shutdown_free(i8* %ssl) {
   ret void
 }
 
-; OpenSSL libcrypto EVP symbols pulled into the compiler by the `sfn/crypto`
-; dependency (SFN-168, SFEP-0046 §4): `sfn toolchain install` verifies a
-; signed release manifest with `ed25519_verify` (capsules/sfn/crypto/src/
-; ed25519.sfn), which calls these `EVP_*` externs. On Linux/macOS the
-; compiler's link resolves them from `-lcrypto` (already linked for TLS); the
-; static mingw link has no OpenSSL, mirroring the `@tls_*` exclusion above.
-; No-op stubs are the correct degraded Windows behavior and preserve the
-; fail-closed contract: `EVP_PKEY_new_raw_public_key` returning null makes
-; `ed25519_verify` return false (its `if pkey == 0` guard), so
-; `sfn toolchain install` on Windows refuses to install rather than skipping
-; verification. Native Windows crypto rides the same M10 OS-independent extern
-; surface as TLS. Sync pinned by
-; compiler/tests/e2e/cross_windows_runtime_modules_test.sfn.
-define i8* @EVP_PKEY_new_raw_public_key(i32 %key_type, i8* %e, i8* %key, i64 %keylen) {
-  ret i8* null
-}
-define void @EVP_PKEY_free(i8* %pkey) {
-  ret void
-}
-define i8* @EVP_MD_CTX_new() {
-  ret i8* null
-}
-define void @EVP_MD_CTX_free(i8* %ctx) {
-  ret void
-}
-define i32 @EVP_DigestVerifyInit(i8* %ctx, i8* %pctx, i8* %md_type, i8* %e, i8* %pkey) {
-  ret i32 0
-}
-define i32 @EVP_DigestVerify(i8* %ctx, i8* %sig, i64 %siglen, i8* %tbs, i64 %tbslen) {
-  ret i32 0
-}
-
 ; Native OS entropy primitive (SFN-123, SFEP-0048 Phase D).
 ; `runtime/sfn/platform/rand.sfn` is excluded from RUNTIME_MODS — its
 ; `getentropy(2)` / `/dev/urandom` (`open`/`read`/`close`) externs have no
@@ -142,8 +110,8 @@ define i32 @EVP_DigestVerify(i8* %ctx, i8* %sig, i64 %siglen, i8* %tbs, i64 %tbs
 ; defined at the Windows link. A fail-closed stub (return 0 = failure) is the
 ; correct degraded behavior: `random_bytes` surfaces `[]`, never zeroed or
 ; partial entropy. It is unreached during normal compiler operation (the
-; compiler only pulls `sfn/crypto` for `ed25519_verify`, and the WebSocket
-; adapter that consumes it for real is itself excluded from RUNTIME_MODS);
+; compiler does not call `random_bytes`, and the WebSocket adapter that consumes
+; it for real is itself excluded from RUNTIME_MODS);
 ; native Windows entropy rides the same M10 OS-independent surface as TLS.
 ; Sync pinned by compiler/tests/e2e/cross_windows_runtime_modules_test.sfn.
 define i32 @sfn_rand_fill(i8* %buf, i64 %n) {

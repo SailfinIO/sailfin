@@ -218,7 +218,7 @@ fn target_setjmp_call_line(target_os: string, result_temp: string, jmpbuf_operan
 // `apply_default_mem_limit` unresolved once `windows_stubs.ll` stopped
 // linking on the native path), `rand.sfn` (getentropy/`/dev/urandom`) for
 // `platform/rand_windows.sfn` (SFN-549, `BCryptGenRandom`), and `tls.sfn`
-// (the OpenSSL `SSL_*`/`TLS_*`/`EVP_*` surface) for
+// (the OpenSSL `SSL_*`/`TLS_*` surface) for
 // `platform/openssl_absent_windows.sfn` (SFN-549 — the Windows target has
 // no OpenSSL to link, so the fail-closed native module replaces it
 // rather than the link merely dropping `-lssl -lcrypto` and leaving the

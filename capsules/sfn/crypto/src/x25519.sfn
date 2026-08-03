@@ -152,6 +152,15 @@ fn _fmul(o: int[], a: int[], b: int[]) -> void {
 
 fn _fsqr(o: int[], a: int[]) -> void { _fmul(o, a, a); }
 
+// Normalize a non-negative L-form field element to C-form. Ed25519's
+// extended-coordinate addition needs this after doubling Z1*Z2; keeping the
+// carry primitive here preserves one field implementation for both curves.
+fn _fnormalize(o: int[]) -> void {
+    _carry(o);
+    _carry(o);
+    _carry(o);
+}
+
 // Constant-time conditional exchange for a secret bit `b` in {0, 1}.
 fn _cswap(p: int[], q: int[], b: int) -> void {
     // `0 - b` is 0 or -1 (all ones) — the branch-free masked-select idiom
@@ -362,4 +371,20 @@ fn x25519_is_zero(shared: int[]) -> bool {
     return acc == 0;
 }
 
-export { x25519, x25519_base, x25519_is_zero };
+// The underscored exports are capsule-internal field machinery shared with
+// Ed25519. `src/mod.sfn` deliberately re-exports only the public X25519 API.
+export {
+    _fadd,
+    _fmul,
+    _fnormalize,
+    _fsub,
+    _fsqr,
+    _gf_copy,
+    _gf_one,
+    _gf_zero,
+    _pack25519,
+    _unpack25519,
+    x25519,
+    x25519_base,
+    x25519_is_zero
+};
