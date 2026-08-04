@@ -57,7 +57,7 @@ A task lambda that captures variables from the enclosing scope owns its heap env
 
 ### Effect transparency (SFEP-0049)
 
-`spawn`, `parallel`, and channel `send`/`receive` are **effect-transparent**: the in-process primitive contributes no effect of its own, and the caller inherits exactly the effects of the body it spawns/sends. A concurrency op over a **pure** body requires no effect; over an effectful body (e.g. one that calls `print`), that body's effects (`io`, …) propagate. The requirement is derived from a single source of truth — the runtime-helper descriptor registry (#1655), whose concurrency rows now carry no effect — so the checker and the registry can never disagree.
+`spawn`, `parallel`, and channel `send`/`receive` are **effect-transparent**: the in-process primitive contributes no effect of its own, and the caller inherits exactly the effects of the body it spawns/sends. A concurrency op over a **pure** body requires no effect; over an effectful body (e.g. one that calls `print`), that body's effects (`io`, …) propagate. The requirement is derived from the target-neutral intrinsic registry (#1655); these concurrency targets have no semantic rows, so the checker treats the primitives themselves as pure.
 
 This is principled, not conservative: the v0 scheduler primitives are pure in-process pthread mutex/condvar/MPMC-queue and touch no filesystem, network, console, or clock, so under the canonical taxonomy (`io, net, model, gpu, rand, clock`) none genuinely exercises `io` — as Go treats goroutine spawn as effect-free. The **join-side** counterpart (`await` and `routine {}` nursery-exit effect propagation) is out of scope here and tracked with the concurrency-maturity work (SFN-124).
 

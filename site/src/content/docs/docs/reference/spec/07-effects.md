@@ -35,7 +35,7 @@ fn analyze(text: string) ![io, model] { }      // multiple effects
 
 **Sub-effect refinements** (SFEP-0017, shipped): sub-effects are dotted-name
 refinements *within* the locked six roots — `io.fs ⊑ io` — never a seventh
-canonical effect. The runtime-helper registry detects four families: `fs.*`
+canonical effect. The target-neutral intrinsic registry detects four families: `fs.*`
 calls require `io.fs`, `print.*`/`console.*` calls require `io.console`,
 `http.*` calls require `net.http`, and `websocket.*` calls require `net.ws`
 (the `io`/`net` rows in the table above cover these sub-effects). A bare-root

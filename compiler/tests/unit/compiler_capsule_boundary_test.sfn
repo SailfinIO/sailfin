@@ -67,10 +67,6 @@ fn _boundary_exceptions() -> BoundaryException[] {
     out.push(_boundary_exception("llvm/lowering/lowering_core/file_emission", "emit_native_state", artifact));
     out.push(_boundary_exception("llvm/lowering/lowering_core/test_harness", "emit_native", artifact));
 
-    // SFEP-0020 §3.5.3 / SFN-710: analyzer effect metadata still comes from
-    // the LLVM runtime-helper registry.
-    out.push(_boundary_exception("effect_checker/mod", "llvm/runtime_helpers/mod", "intrinsic effect metadata remains LLVM-owned (SFN-710)"));
-
     // SFEP-0020 §3.5.4 / SFN-711: closure preparation still crosses both
     // directions of the LLVM boundary.
     let closures = "lambda capture preparation still crosses the LLVM boundary (SFN-711)";

@@ -32,7 +32,7 @@ import {
 import { EffectViolation } from "../../src/effect_checker/types";
 import { append_import_function, empty_import_symbols } from "../../src/effect_imports";
 import { canonical_effects, is_canonical_effect } from "../../src/effect_taxonomy";
-import { effects_for_callee_target } from "../../src/llvm/runtime_helpers/mod";
+import { intrinsic_effects_for_target } from "../../src/intrinsic_effects";
 import { Token, TokenKind } from "../../src/token";
 
 // -------------------------------------------------------------------
@@ -666,12 +666,11 @@ test "effect violation: declared ![io] suppresses TryOperator operand violation"
 }
 
 test "effect transparency: bare spawn() Call requires no effect" {
-    // Effect-transparency (SFEP-0049): the Call-form `spawn(...)` arm appends
-    // the `spawn_task` row's (now empty) effects, so a bare `spawn(...)` over
-    // no effectful argument produces no violation — the Call-form went
-    // transparent alongside the prefix form. (Caret-at-callee for a primitive
-    // that DOES carry an effect stays covered by the sleep/print/console
-    // bare-call tests below.)
+    // Effect-transparency (SFEP-0049): `spawn_task` has no target-neutral
+    // semantic row, so a bare `spawn(...)` over no effectful argument produces
+    // no violation — the Call-form went transparent alongside the prefix form.
+    // (Caret-at-callee for an effectful primitive stays covered by the
+    // sleep/print/console bare-call tests below.)
     let stmt = _routine_with_bare_call("worker", [], 8, "spawn", 11, 5);
     let program = Program { statements: [stmt] };
     let violations = validate_effects(program);
@@ -745,11 +744,11 @@ test "effect violation: bare console() Call carets at the callee for io effect" 
 }
 
 test "effect (#1183): http.download Member call requires net AND io from the registry" {
-    // Registry-driven proof. The descriptor for `http.download` carries
-    // `effects: ["net.http", "io"]`, while `http.get` carries
+    // Registry-driven proof. The target-neutral `http.download` row carries
+    // `["net.http", "io"]`, while `http.get` carries
     // `["net.http"]`. A hardcoded `root == "http" -> net` chain could
     // never produce the `io` requirement here — it can only come from
-    // `effects_for_callee_target` reading the descriptor's effects.
+    // `intrinsic_effects_for_target` reading the semantic contract.
     let stmt = _routine_with_member_call("save_remote", [], 1, "http", "download", 9, 5);
     let program = Program { statements: [stmt] };
     let violations = validate_effects(program);
@@ -777,8 +776,8 @@ test "effect (#1183): fs.read_bytes Member call requires io from the registry" {
 }
 
 test "effect (#1183): fs.read Member call (no exact row) still requires io via namespace union" {
-    // `fs.read` has no exact descriptor; the namespace-union fallback in
-    // `effects_for_callee_target` must still derive io from the `fs.*`
+    // `fs.read` has no exact identity; the namespace-union fallback in
+    // `intrinsic_effects_for_target` must still derive io from the `fs.*`
     // family so conservative coverage is never dropped — an
     // under-approximation here would be a capability escape.
     let stmt = _routine_with_member_call("reader", [], 1, "fs", "read", 4, 5);
@@ -799,7 +798,7 @@ test "effect (#1183): console.log Member call requires io from the registry" {
 test "effect (#1601): websocket.send Member call requires net from the registry" {
     // `websocket.*` is now registry-derived (#1601): the
     // `websocket.send` metadata row resolves to `["net"]` via
-    // `effects_for_callee_target`, replacing the former hardcoded
+    // `intrinsic_effects_for_target`, replacing the former hardcoded
     // `if root == "websocket"` check. Lock that net enforcement is NOT
     // regressed by the registry refactor.
     let stmt = _routine_with_member_call("push", [], 1, "websocket", "send", 4, 5);
@@ -820,8 +819,8 @@ test "effect (#1601): websocket.serve Member call requires net from the registry
 }
 
 test "effect (#1601): websocket.broadcast (no exact row) requires net via namespace union" {
-    // `websocket.broadcast` has no exact descriptor; the namespace-union
-    // fallback in `effects_for_callee_target` must still derive net from
+    // `websocket.broadcast` has no exact identity; the namespace-union
+    // fallback in `intrinsic_effects_for_target` must still derive net from
     // the `websocket.*` family so conservative coverage is never dropped
     // for an op the future runtime might add.
     let stmt = _routine_with_member_call("fanout", [], 1, "websocket", "broadcast", 4, 5);
@@ -869,19 +868,19 @@ test "effect (#1601): Call-form serve declaring ![io, net] is clean" {
 
 // Direct accessor assertions pinning the #1601 acceptance criteria at
 // the registry level, independent of the effect-checker wiring above.
-test "registry (#1601): effects_for_callee_target(\"websocket.\") returns net" {
-    let effects = effects_for_callee_target("websocket.");
+test "registry (#1601): intrinsic_effects_for_target(\"websocket.\") returns net" {
+    let effects = intrinsic_effects_for_target("websocket.");
     assert effects.length == 1;
     assert _effects_contains(effects, "net.ws");
 }
 
-test "registry (#1601): effects_for_callee_target(\"websocket.send\") contains net" {
-    let effects = effects_for_callee_target("websocket.send");
+test "registry (#1601): intrinsic_effects_for_target(\"websocket.send\") contains net" {
+    let effects = intrinsic_effects_for_target("websocket.send");
     assert _effects_contains(effects, "net.ws");
 }
 
-test "registry (#1601): effects_for_callee_target(\"serve\") contains io and net" {
-    let effects = effects_for_callee_target("serve");
+test "registry (#1601): intrinsic_effects_for_target(\"serve\") contains io and net" {
+    let effects = intrinsic_effects_for_target("serve");
     assert _effects_contains(effects, "io");
     assert _effects_contains(effects, "net");
 }

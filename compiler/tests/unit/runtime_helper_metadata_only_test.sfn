@@ -1,21 +1,17 @@
 // compiler/tests/unit/runtime_helper_metadata_only_test.sfn
 //
-// Standing guard for #1631 (epic #1180, Phase G). The effect-metadata-only
-// descriptor rows #1601 registered — so the effect checker can derive the
-// Call-form `serve` and `websocket.serve` capabilities from the registry —
-// must NEVER produce a `declare` line. Their `symbol`s are deliberately fake
-// (`sfn_websocket_unbridged` / `sfn_serve_unbridged`): no runtime is bridged,
-// and `render_runtime_helper_declarations` sentinel-skips them in
-// `rendering.sfn` (the `_preamble_inlined` cascade).
+// Standing guards for target-neutral intrinsic semantics and #1631 (epic
+// #1180, Phase G). Semantic effects live outside the LLVM descriptors; the
+// first test requires each effectful identity to retain lowering metadata.
+// The remaining tests ensure metadata-only call forms never produce a
+// declaration for an unbridged symbol.
 //
-// `websocket.connect` / `.send` / `.close` are NO LONGER in this set: they
-// were bridged to the real `sfn_websocket_*` client runtime in #1876, so
-// their sentinel-skips were removed and they now emit real declares (covered
-// by `compiler/tests/e2e/runtime_adapter_websocket_test.sfn`). Only the
-// still-unbridged `serve` and `websocket.serve` remain guarded here
-// (`websocket.serve`'s runtime bridge is tracked in #1877).
+// The websocket client and server operations are bridged to real
+// `sfn_websocket_*` runtime symbols. Only the still-unbridged Call-form
+// `serve` remains guarded as metadata-only here.
 //
-// Today the only guard is `make compile`: if a sentinel-skip is removed, the
+// Without the targeted guards below, `make compile` is the fallback signal:
+// if a sentinel-skip is removed, the
 // source-text walker (`filter_runtime_helper_targets`) can surface the target
 // into `used_targets`, the declare loop emits `declare ... @sfn_serve_unbridged(...)`,
 // and the LINK fails with an undefined symbol — a slow, indirect signal. This
@@ -26,15 +22,12 @@
 import { find } from "sfn/strings";
 
 import { render_runtime_helper_declarations } from "../../src/llvm/rendering";
+import { runtime_helper_registry_covers_intrinsic_effects } from "../../src/llvm/runtime_helpers/mod";
 import { TypeContext } from "../../src/llvm/types";
 import { NativeFunction } from "../../src/native_ir";
 
-// The effect-metadata-only targets that remain after the #1876 client
-// bridge: the Call-form `serve` and `websocket.serve` (the three bridged
-// `websocket.connect`/`.send`/`.close` ops are no longer metadata-only).
-fn _metadata_only_targets() -> string[] {
-    return ["serve", "websocket.serve"];
-}
+// The Call-form `serve` is the only remaining metadata-only target.
+fn _metadata_only_targets() -> string[] { return ["serve"]; }
 
 // Empty type context: the metadata-only rows carry no prelude-mirror
 // reconciliation (#1779), so no struct/enum tables are consulted.
@@ -58,21 +51,23 @@ fn _any_line_contains(lines: string[], needle: string) -> boolean {
     return false;
 }
 
-test "metadata-only rows (#1631): sentinel targets emit no declare for the unbridged symbols" {
-    // Both remaining metadata-only targets present in `used_targets`. Each is
-    // sentinel-skipped, so the fake symbols must never reach a `declare`.
-    // Removing either `_preamble_inlined` skip in `rendering.sfn` makes the
-    // corresponding row emit `declare void @sfn_*_unbridged()`, tripping these
-    // assertions at unit speed instead of as a link failure.
+test "intrinsic effect registry: every semantic identity has LLVM lowering metadata" {
+    assert runtime_helper_registry_covers_intrinsic_effects();
+}
+
+test "metadata-only rows (#1631): the serve sentinel emits no unbridged declare" {
+    // The remaining metadata-only target is sentinel-skipped, so its fake
+    // symbol must never reach a `declare`. Removing its `_preamble_inlined`
+    // skip in `rendering.sfn` makes the row emit an undefined-symbol declare,
+    // tripping this assertion at unit speed instead of as a link failure.
     let no_locals: NativeFunction[] = [];
     let no_imports: NativeFunction[] = [];
     let lines = render_runtime_helper_declarations(_metadata_only_targets(), no_locals, no_imports, _empty_context());
 
     assert ! _any_line_contains(lines, "sfn_serve_unbridged");
-    assert ! _any_line_contains(lines, "sfn_websocket_unbridged");
 }
 
-test "metadata-only rows (#1631): the real serve_start row still declares (skip is narrow)" {
+test "metadata-only rows (#1631): the real serve_start row declares with neutral effects" {
     // Negative control: the sentinel-skip must not over-reach. The real
     // `serve_start` row is a distinct target backed by the genuine
     // `sfn_serve` symbol (via `native_signature`); it MUST still emit its
@@ -85,5 +80,6 @@ test "metadata-only rows (#1631): the real serve_start row still declares (skip 
     let lines = render_runtime_helper_declarations(["serve_start"], no_locals, no_imports, _empty_context());
 
     assert _any_line_contains(lines, "@sfn_serve(");
+    assert _any_line_contains(lines, "; intrinsic sfn_serve requires capabilities: ![net, io]");
     assert ! _any_line_contains(lines, "sfn_serve_unbridged");
 }

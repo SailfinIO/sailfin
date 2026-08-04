@@ -13,7 +13,8 @@ import { render_diagnostic, split_source_lines } from "../diagnostics_render";
 import { read_effect_enforcement_env, resolve_effect_enforcement } from "../effect_gate";
 import { ImportSymbolTable, empty_import_symbols } from "../effect_imports";
 import { ClosureSymbolSet } from "../import_resolution_check";
-import { runtime_helper_call_names, runtime_helper_effect_table } from "../llvm/runtime_helpers/mod";
+import { intrinsic_effect_table } from "../intrinsic_effects";
+import { runtime_helper_call_names } from "../llvm/runtime_helpers/mod";
 import { number_to_string } from "../num_format";
 import { parse_program } from "../parser/mod";
 import { load_prelude_global_names } from "../prelude_globals";
@@ -53,7 +54,7 @@ fn analyzer_input_for_check(program: Program, file_path: string, imported_interf
         file_path: file_path,
         imported_interfaces: imported_interfaces,
         imported_symbols: imported_symbols,
-        intrinsic_effects: runtime_helper_effect_table(),
+        intrinsic_effects: intrinsic_effect_table(),
         prelude_globals: prelude_globals,
         capabilities_required: capabilities_required,
         import_context: import_context,

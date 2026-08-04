@@ -28,7 +28,6 @@ test "abi_version: descriptor accepts native_signature: null (default)" {
         symbol: "sailfin_runtime_test_target",
         return_type: "void",
         parameter_types: ["i8*"],
-        effects: [],
         native_signature: null,
         c_abi_return_type: null
     };
@@ -46,7 +45,6 @@ test "abi_version: descriptor accepts native_signature: <string> (M2 flip)" {
         symbol: "sailfin_runtime_test_target",
         return_type: "void",
         parameter_types: ["i8*"],
-        effects: [],
         native_signature: "sfn_test_target",
         c_abi_return_type: null
     };
@@ -116,7 +114,6 @@ test "abi_version: predicate picks symbol when native_signature is null" {
         symbol: "sailfin_runtime_sleep",
         return_type: "void",
         parameter_types: ["double"],
-        effects: ["clock"],
         native_signature: null,
         c_abi_return_type: null
     };
@@ -130,7 +127,6 @@ test "abi_version: predicate picks native_signature when set" {
         symbol: "sailfin_runtime_sleep",
         return_type: "void",
         parameter_types: ["double"],
-        effects: ["clock"],
         native_signature: "sfn_sleep",
         c_abi_return_type: null
     };
@@ -154,7 +150,6 @@ test "abi_version: predicate rejects empty-string native_signature" {
         symbol: "sailfin_runtime_sleep",
         return_type: "void",
         parameter_types: ["double"],
-        effects: ["clock"],
         native_signature: "",
         c_abi_return_type: null
     };

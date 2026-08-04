@@ -1,9 +1,8 @@
 // compiler/src/intrinsic_effects.sfn
 //
-// Target-neutral intrinsic effect metadata consumed by semantic analysis.
-// The compiler driver builds this table from its runtime-helper provider and
-// passes it into the pure analyzer; the analyzer never imports LLVM symbols,
-// ABI spellings, or lowering descriptors.
+// Target-neutral intrinsic identity and effect metadata consumed by semantic
+// analysis and target providers. LLVM descriptors keep symbol/type/ABI data
+// and key into this contract by target; they do not own semantic effects.
 import { substring } from "./string_utils";
 
 struct IntrinsicEffectEntry {
@@ -25,6 +24,111 @@ fn append_intrinsic_effects(table: IntrinsicEffectTable, target: string, effects
         target: target, effects: effects
     });
     return updated;
+}
+
+// Canonical semantic registry. Only effectful identities need rows: a missing
+// exact row means the intrinsic is pure. Target providers may own additional
+// lowering-only identities, but every row here must have a corresponding
+// provider descriptor so semantic and lowering registries cannot drift.
+fn intrinsic_effect_table() -> IntrinsicEffectTable {
+    let mut table = empty_intrinsic_effects();
+    table = append_intrinsic_effects(table, "runtime_monotonic_millis_fn", ["clock"]);
+    table = append_intrinsic_effects(table, "monotonic_millis", ["clock"]);
+    table = append_intrinsic_effects(table, "runtime_unix_millis_fn", ["clock"]);
+    table = append_intrinsic_effects(table, "runtime_log_execution_fn", ["io"]);
+    table = append_intrinsic_effects(table, "runtime_serve_fn", ["io", "net"]);
+    table = append_intrinsic_effects(table, "print", ["io.console"]);
+    table = append_intrinsic_effects(table, "print.err", ["io.console"]);
+    table = append_intrinsic_effects(table, "print.info", ["io.console"]);
+    table = append_intrinsic_effects(table, "print.error", ["io.console"]);
+    table = append_intrinsic_effects(table, "print.warn", ["io.console"]);
+    table = append_intrinsic_effects(table, "console.info", ["io.console"]);
+    table = append_intrinsic_effects(table, "console.log", ["io.console"]);
+    table = append_intrinsic_effects(table, "console.error", ["io.console"]);
+    table = append_intrinsic_effects(table, "fs.exists", ["io.fs"]);
+    table = append_intrinsic_effects(table, "sailfin_intrinsic_exe_path", ["io"]);
+    table = append_intrinsic_effects(table, "sailfin_intrinsic_fs_symlink", ["io"]);
+    table = append_intrinsic_effects(table, "sailfin_intrinsic_fs_mkdtemp", ["io"]);
+    table = append_intrinsic_effects(table, "sailfin_intrinsic_fs_exists", ["io"]);
+    table = append_intrinsic_effects(table, "sailfin_intrinsic_fs_get_perms", ["io"]);
+    table = append_intrinsic_effects(table, "sailfin_intrinsic_fs_list_dir", ["io"]);
+    table = append_intrinsic_effects(table, "sailfin_intrinsic_fs_read_link", ["io"]);
+    table = append_intrinsic_effects(table, "http.get", ["net.http"]);
+    table = append_intrinsic_effects(table, "http.post", ["net.http"]);
+    table = append_intrinsic_effects(table, "sleep", ["clock"]);
+    table = append_intrinsic_effects(table, "runtime_sleep_fn", ["clock"]);
+    table = append_intrinsic_effects(table, "process.run", ["io"]);
+    table = append_intrinsic_effects(table, "process.exit", ["io"]);
+    table = append_intrinsic_effects(table, "process.run_capture", ["io"]);
+    table = append_intrinsic_effects(table, "process.exec", ["io"]);
+    table = append_intrinsic_effects(table, "process.run_capture_cwd", ["io"]);
+    table = append_intrinsic_effects(table, "process.run_capture_rlimit_as", ["io"]);
+    table = append_intrinsic_effects(table, "process.capture_take_stdout", ["io"]);
+    table = append_intrinsic_effects(table, "process.capture_take_stderr", ["io"]);
+    table = append_intrinsic_effects(table, "process.run_capture_metered", ["io", "clock"]);
+    table = append_intrinsic_effects(table, "process.capture_take_wall_ms", ["io"]);
+    table = append_intrinsic_effects(table, "process.capture_take_peak_rss_kb", ["io"]);
+    table = append_intrinsic_effects(table, "process.spawn_with_env", ["io"]);
+    table = append_intrinsic_effects(table, "process.spawn_with_env_cwd", ["io"]);
+    table = append_intrinsic_effects(table, "process.handle_write", ["io"]);
+    table = append_intrinsic_effects(table, "process.handle_close_stdin", ["io"]);
+    table = append_intrinsic_effects(table, "process.handle_read_stdout", ["io"]);
+    table = append_intrinsic_effects(table, "process.handle_read_stderr", ["io"]);
+    table = append_intrinsic_effects(table, "process.handle_read_line_stdout", ["io"]);
+    table = append_intrinsic_effects(table, "process.handle_read_bytes_stdout", ["io"]);
+    table = append_intrinsic_effects(table, "process.handle_stdout_at_eof", ["io"]);
+    table = append_intrinsic_effects(table, "process.handle_write_bytes", ["io"]);
+    table = append_intrinsic_effects(table, "process.handle_wait", ["io"]);
+    table = append_intrinsic_effects(table, "process.handle_stdout_fd", ["io"]);
+    table = append_intrinsic_effects(table, "process.handle_stderr_fd", ["io"]);
+    table = append_intrinsic_effects(table, "process.handle_read_bytes_stderr", ["io"]);
+    table = append_intrinsic_effects(table, "process.handle_stderr_at_eof", ["io"]);
+    table = append_intrinsic_effects(table, "process.handle_kill", ["io"]);
+    table = append_intrinsic_effects(table, "process.environ", ["io"]);
+    table = append_intrinsic_effects(table, "io.poll_readable", ["io"]);
+    table = append_intrinsic_effects(table, "io.poll_any", ["io"]);
+    table = append_intrinsic_effects(table, "io.read_fd", ["io"]);
+    table = append_intrinsic_effects(table, "io.read_line", ["io"]);
+    table = append_intrinsic_effects(table, "fs_read_file", ["io.fs"]);
+    table = append_intrinsic_effects(table, "fs.readFile", ["io.fs"]);
+    table = append_intrinsic_effects(table, "fs_write_file", ["io.fs"]);
+    table = append_intrinsic_effects(table, "fs.writeFile", ["io.fs"]);
+    table = append_intrinsic_effects(table, "fs_append_file", ["io.fs"]);
+    table = append_intrinsic_effects(table, "fs.appendFile", ["io.fs"]);
+    table = append_intrinsic_effects(table, "fs_write_lines", ["io.fs"]);
+    table = append_intrinsic_effects(table, "fs.writeLines", ["io.fs"]);
+    table = append_intrinsic_effects(table, "fs_list_directory", ["io.fs"]);
+    table = append_intrinsic_effects(table, "fs.listDirectory", ["io.fs"]);
+    table = append_intrinsic_effects(table, "fs_delete_file", ["io.fs"]);
+    table = append_intrinsic_effects(table, "fs.deleteFile", ["io.fs"]);
+    table = append_intrinsic_effects(table, "fs_create_directory", ["io.fs"]);
+    table = append_intrinsic_effects(table, "fs.createDirectory", ["io.fs"]);
+    table = append_intrinsic_effects(table, "fs_remove_directory", ["io.fs"]);
+    table = append_intrinsic_effects(table, "fs.removeDirectory", ["io.fs"]);
+    table = append_intrinsic_effects(table, "fs.set_perms", ["io.fs"]);
+    table = append_intrinsic_effects(table, "fs.get_perms", ["io.fs"]);
+    table = append_intrinsic_effects(table, "fs.mkdtemp", ["io.fs"]);
+    table = append_intrinsic_effects(table, "fs.is_executable", ["io.fs"]);
+    table = append_intrinsic_effects(table, "fs.symlink", ["io.fs"]);
+    table = append_intrinsic_effects(table, "fs.read_link", ["io.fs"]);
+    table = append_intrinsic_effects(table, "http_get", ["net.http"]);
+    table = append_intrinsic_effects(table, "http_post", ["net.http"]);
+    table = append_intrinsic_effects(table, "serve_start", ["net", "io"]);
+    table = append_intrinsic_effects(table, "serve_handler_dispatch", ["net", "io"]);
+    table = append_intrinsic_effects(table, "websocket.serve", ["net.ws"]);
+    table = append_intrinsic_effects(table, "websocket.serve_tls", ["net.ws"]);
+    table = append_intrinsic_effects(table, "websocket.send", ["net.ws"]);
+    table = append_intrinsic_effects(table, "websocket.close", ["net.ws"]);
+    table = append_intrinsic_effects(table, "websocket.connect", ["net.ws"]);
+    table = append_intrinsic_effects(table, "serve", ["io", "net"]);
+    table = append_intrinsic_effects(table, "sailfin_intrinsic_mem_footprint", ["io"]);
+    table = append_intrinsic_effects(table, "http.get_body", ["net.http"]);
+    table = append_intrinsic_effects(table, "http.post_json", ["net.http"]);
+    table = append_intrinsic_effects(table, "http.download", ["net.http", "io"]);
+    table = append_intrinsic_effects(table, "env.get", ["io"]);
+    table = append_intrinsic_effects(table, "env.home", ["io"]);
+    table = append_intrinsic_effects(table, "fs.read_bytes", ["io.fs"]);
+    return table;
 }
 
 fn _ie_starts_with(text: string, prefix: string) -> boolean {
@@ -94,10 +198,29 @@ fn intrinsic_effects_for_callee_target(table: IntrinsicEffectTable, target: stri
     return accumulated;
 }
 
+fn intrinsic_effects_for_exact_target(table: IntrinsicEffectTable, target: string) -> string[] {
+    let mut index: int = 0;
+    loop {
+        if index >= table.entries.length { break; }
+        if table.entries[index].target == target {
+            return table.entries[index].effects;
+        }
+        index += 1;
+    }
+    return [];
+}
+
+fn intrinsic_effects_for_target(target: string) -> string[] {
+    return intrinsic_effects_for_callee_target(intrinsic_effect_table(), target);
+}
+
 export {
     IntrinsicEffectEntry,
     IntrinsicEffectTable,
     append_intrinsic_effects,
     empty_intrinsic_effects,
-    intrinsic_effects_for_callee_target
+    intrinsic_effect_table,
+    intrinsic_effects_for_callee_target,
+    intrinsic_effects_for_exact_target,
+    intrinsic_effects_for_target
 };
