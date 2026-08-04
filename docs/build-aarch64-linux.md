@@ -32,6 +32,12 @@ links a trivial C file through that wrapper and fails immediately if the
 shadowing is not in effect, LLD is unavailable, or the amd64 link inputs are
 missing, rather than after the ~30-minute emulated build.
 
+Compiler A and native pass-1 report the source tree's version rather than the
+pinned seed version. Their pass-1 and pass-2 builds therefore set
+`SAILFIN_BOOTSTRAP=off`: these are already the explicit self-host transitions,
+and redispatching the ordinary contributor seed gate would incorrectly look
+for a native aarch64 asset of the older x86_64 bring-up seed.
+
 Download the **x86_64 Linux** asset for the exact version in
 `bootstrap.toml [seed].version`; do not use the host-architecture selection in
 `make fetch-seed`, because no aarch64 seed exists during first bring-up.

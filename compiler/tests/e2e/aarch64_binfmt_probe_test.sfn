@@ -105,6 +105,15 @@ test "aarch64 bootstrap: x86_64 cross wrapper selects LLD" ![io] {
     assert contains(source, "exec \"$NATIVE_CC_PATH\" --target=x86_64-linux-gnu -fuse-ld=lld");
 }
 
+test "aarch64 bootstrap: self-host passes do not fetch a native seed" ![io] {
+    let source = fs.readFile(_script());
+    assert contains(source, "SAILFIN_BOOTSTRAP=off SAILFIN_TARGET_ARCH=aarch64 \\\n\t\trun_x86");
+    assert contains(source, "SAILFIN_BOOTSTRAP=off SAILFIN_TARGET_ARCH=aarch64 \\\n\t\t\"$WORK_DIR/pass-1/sfn\" build");
+
+    let workflow = fs.readFile(".github/workflows/ci.yml");
+    assert contains(workflow, "SAILFIN_BOOTSTRAP=off \\\n            SAILFIN_LINKER=lld");
+}
+
 test "aarch64 binfmt: enabled x86_64 entry is detected alongside an unreadable register node" ![io] {
     let dir = _test_root("t1");
     fs.writeFile(dir + "/status", "enabled\n");

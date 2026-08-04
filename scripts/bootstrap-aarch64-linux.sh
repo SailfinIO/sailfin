@@ -201,7 +201,9 @@ esac
 printf '[bootstrap-aarch64] building native pass-1 with compiler A\n'
 (
 	cd "$ROOT"
-	SAILFIN_TARGET_ARCH=aarch64 \
+	# SFEP-0056 section 3.4 makes compiler A the vehicle for this pass;
+	# redispatching to a host-native pinned seed would undo the bootstrap.
+	SAILFIN_BOOTSTRAP=off SAILFIN_TARGET_ARCH=aarch64 \
 		run_x86 "$WORK_DIR/compiler-a/sfn" build --no-cache -p compiler \
 		--work-dir "$WORK_DIR/pass-1" -o "$WORK_DIR/pass-1/sfn"
 )
@@ -217,7 +219,8 @@ printf '[bootstrap-aarch64] checking native pass-1\n'
 printf '[bootstrap-aarch64] building native pass-2\n'
 (
 	cd "$ROOT"
-	SAILFIN_TARGET_ARCH=aarch64 \
+	# Pass-1 is now the self-hosting vehicle; keep the same SFEP-0056 chain.
+	SAILFIN_BOOTSTRAP=off SAILFIN_TARGET_ARCH=aarch64 \
 		"$WORK_DIR/pass-1/sfn" build --no-cache -p compiler \
 		--work-dir "$WORK_DIR/pass-2" -o "$WORK_DIR/pass-2/sfn"
 )

@@ -767,7 +767,10 @@ jobs:
           echo "$PWD/build/aarch64-bootstrap/bin" >> "$GITHUB_PATH"
           echo "SAILFIN_LINKER=lld" >> "$GITHUB_ENV"
           echo "SAILFIN_TARGET_ARCH=aarch64" >> "$GITHUB_ENV"
+          # SFEP-0056 makes pass-1 the self-hosting vehicle here; the ordinary
+          # contributor gate must not redispatch to a host-native pinned seed.
           PATH="$PWD/build/aarch64-bootstrap/bin:$PATH" \
+            SAILFIN_BOOTSTRAP=off \
             SAILFIN_LINKER=lld \
             SAILFIN_TARGET_ARCH=aarch64 \
             "$PWD/build/aarch64-bootstrap/pass-1/sfn" build --no-cache -p compiler \
