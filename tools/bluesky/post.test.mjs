@@ -36,6 +36,13 @@ test("builds a link card from Open Graph metadata", async () => {
   assert.deepEqual(card.external, { uri: releaseUrl, title: "Sailfin & friends", description: "Release notes" });
 });
 
+test("derives a stable TID record key from the canonical URL", () => {
+  const rkey = recordKey(releaseUrl);
+  assert.match(rkey, /^[234567abcdefghij][234567abcdefghijklmnopqrstuvwxyz]{12}$/u);
+  assert.equal(recordKey(releaseUrl), rkey);
+  assert.notEqual(recordKey(`${releaseUrl}-different`), rkey);
+});
+
 test("uses a deterministic record key and skips an existing post", async () => {
   const calls = [];
   const fetchImpl = async (url, options = {}) => {
