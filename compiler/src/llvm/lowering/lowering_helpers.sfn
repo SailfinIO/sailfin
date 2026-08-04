@@ -101,10 +101,9 @@ fn extend_native_enums(values: NativeEnum[], extras: NativeEnum[]) -> NativeEnum
     return out;
 }
 
-// True iff a `NativeEnum` named `name` is already present. Used both by the
-// prelude injector's guard and by `lowering_core` to decide whether a prelude
-// `Result` was actually injected (so its descriptor registration can be
-// suppressed — see #1021 note below).
+// True iff a `NativeEnum` named `name` is present. Used by the prelude guard and
+// `lowering_core` to suppress descriptor registration for an injected `Result`
+// (#1021).
 fn native_enums_have_name(enums: NativeEnum[], name: string) -> boolean {
     if enums == null { return false; }
     let mut index: int = 0;
