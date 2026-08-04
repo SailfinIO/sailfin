@@ -10,7 +10,7 @@ Use Ubuntu 24.04 arm64 (a physical host, VM, or native arm runner) with:
 
 - `qemu-user`/`qemu-user-binfmt` (the script enables the x86_64 registration
   through `update-binfmts` when passwordless privilege is available);
-- `clang`, `readelf`, and `sha256sum`;
+- `clang`, `lld`, `readelf`, and `sha256sum`;
 - an x86_64 glibc development sysroot and the x86_64 development libraries
   needed by the compiler link (`libc`, pthread, math, OpenSSL, and crypto),
   **including the x86_64 GCC runtime** (`libgcc-*-dev:amd64`). Stage 1 links
@@ -25,10 +25,18 @@ may also require `QEMU_LD_PREFIX` to name the x86_64 sysroot.
 
 Stage 1 does not read `SAILFIN_CC`. The seed resolves its C compiler by looking
 up the bare name `clang` on `PATH`, so the script shadows `clang` with a
-`--target=x86_64-linux-gnu` wrapper on a directory prepended to `PATH` for that
-stage alone. A preflight compiles and links a trivial C file through that
-wrapper and fails immediately if the shadowing is not in effect or the amd64
-link inputs are missing, rather than after the ~30-minute emulated build.
+`--target=x86_64-linux-gnu -fuse-ld=lld` wrapper on a directory prepended to
+`PATH` for that stage alone. Selecting LLD is required because the native GNU
+linker on an aarch64 host cannot link x86_64 objects. A preflight compiles and
+links a trivial C file through that wrapper and fails immediately if the
+shadowing is not in effect, LLD is unavailable, or the amd64 link inputs are
+missing, rather than after the ~30-minute emulated build.
+
+Compiler A and native pass-1 report the source tree's version rather than the
+pinned seed version. Their pass-1 and pass-2 builds therefore set
+`SAILFIN_BOOTSTRAP=off`: these are already the explicit self-host transitions,
+and redispatching the ordinary contributor seed gate would incorrectly look
+for a native aarch64 asset of the older x86_64 bring-up seed.
 
 Download the **x86_64 Linux** asset for the exact version in
 `bootstrap.toml [seed].version`; do not use the host-architecture selection in

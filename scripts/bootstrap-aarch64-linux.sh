@@ -159,7 +159,9 @@ NATIVE_CC_PATH="$(command -v "$NATIVE_CC")" \
 
 cat >"$CROSS_BIN/clang" <<EOF
 #!/usr/bin/env bash
-exec "$NATIVE_CC_PATH" --target=x86_64-linux-gnu "\$@"
+# The host linker is an aarch64 GNU ld and cannot link x86_64 objects. Use
+# LLVM's architecture-neutral linker for this cross stage explicitly.
+exec "$NATIVE_CC_PATH" --target=x86_64-linux-gnu -fuse-ld=lld "\$@"
 EOF
 chmod +x "$CROSS_BIN/clang"
 
@@ -176,7 +178,7 @@ case "$(elf_machine "$WORK_DIR/cross-probe.o")" in
 	*) fail "PATH shadowing is not taking effect: the probe object is $(elf_machine "$WORK_DIR/cross-probe.o"), not x86_64" ;;
 esac
 PATH="$CROSS_BIN:$PATH" clang "$WORK_DIR/cross-probe.c" -o "$WORK_DIR/cross-probe" \
-	|| fail "x86_64 cross link failed; the amd64 CRT/libgcc development packages are missing (need libc6-dev:amd64 and libgcc-*-dev:amd64)"
+	|| fail "x86_64 cross link with LLD failed; verify lld and the amd64 CRT/libgcc development packages (libc6-dev:amd64 and libgcc-*-dev:amd64)"
 
 run_x86() {
 	local binary="$1"
@@ -199,7 +201,9 @@ esac
 printf '[bootstrap-aarch64] building native pass-1 with compiler A\n'
 (
 	cd "$ROOT"
-	SAILFIN_TARGET_ARCH=aarch64 \
+	# SFEP-0056 section 3.4 makes compiler A the vehicle for this pass;
+	# redispatching to a host-native pinned seed would undo the bootstrap.
+	SAILFIN_BOOTSTRAP=off SAILFIN_TARGET_ARCH=aarch64 \
 		run_x86 "$WORK_DIR/compiler-a/sfn" build --no-cache -p compiler \
 		--work-dir "$WORK_DIR/pass-1" -o "$WORK_DIR/pass-1/sfn"
 )
@@ -215,7 +219,8 @@ printf '[bootstrap-aarch64] checking native pass-1\n'
 printf '[bootstrap-aarch64] building native pass-2\n'
 (
 	cd "$ROOT"
-	SAILFIN_TARGET_ARCH=aarch64 \
+	# Pass-1 is now the self-hosting vehicle; keep the same SFEP-0056 chain.
+	SAILFIN_BOOTSTRAP=off SAILFIN_TARGET_ARCH=aarch64 \
 		"$WORK_DIR/pass-1/sfn" build --no-cache -p compiler \
 		--work-dir "$WORK_DIR/pass-2" -o "$WORK_DIR/pass-2/sfn"
 )
