@@ -59,7 +59,7 @@ test "fs writer: appendFile accumulates the full payload" ![io] {
 }
 
 // `fs.writeLines` is the primary self-host IR emit path
-// (`emit_native.sfn` → `write_llvm_lines_chunked`); a long final line must
+// (`main.sfn` → `_publish_lines_atomic`); a long final line must
 // survive intact, since the module's trailing `define @main` is emitted as
 // the last line.
 test "fs writer: writeLines preserves a long final line" ![io] {

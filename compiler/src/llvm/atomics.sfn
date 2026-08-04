@@ -92,8 +92,8 @@ fn lower_atomic_builtin(name: string, arguments: string[], bindings: ParameterBi
     // `is_atomic_builtin` without a matching dispatch arm, fall
     // through to a `[fatal]` diagnostic so the build exits non-zero
     // — matching the issue #306 contract that the emit-level
-    // entrypoints (`compile_native_text_to_llvm_file`, `write_llvm_ir`)
-    // refuse to write IR when any diagnostic carries `[fatal]`.
+    // artifact result gate refuses publication when any diagnostic carries
+    // `[fatal]`.
     // Without the sentinel, `is_atomic_builtin` would short-circuit
     // the rest of the call pipeline and the .ll file would be
     // written with the side-effecting atomic call silently dropped.
@@ -121,8 +121,8 @@ fn _lower_atomic_load(arguments: string[], bindings: ParameterBinding[], locals:
 
     if arguments.length != 1 {
         // E0806 carries the `[fatal]` sentinel so the emit-level
-        // entrypoints (`compile_native_text_to_llvm_file`, `write_llvm_ir`)
-        // refuse to write IR — matching the issue #306 contract for
+        // artifact result gate refuses publication — matching the issue #306
+        // contract for
         // unresolvable callees. `print.err` mirrors the diagnostic to
         // stderr the same way `core_call_emission/dispatch.sfn` does, so the
         // user sees the failure rather than a silently-empty IR file.

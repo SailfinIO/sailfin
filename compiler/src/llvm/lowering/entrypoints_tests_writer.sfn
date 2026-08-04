@@ -1,6 +1,6 @@
 // compiler/src/llvm/lowering/entrypoints_tests_writer.sfn
 //
-// Test LLVM IR writer — write_llvm_ir_for_tests_from_text_with_context.
+// Test LLVM IR artifact generation.
 //
 // Single resolver-driven entry point. Threads import-context (manifests
 // + native texts) from `prepare_project_capsules_for_test` (in
@@ -64,6 +64,7 @@ import {
 import { build_type_context, fixup_enum_layouts } from "../type_context";
 import {
     FunctionEffectEntry,
+    LLVMArtifactResult,
     LifetimeRegionMetadata,
     LoweredLLVMLinesResult,
     StringConstant,
@@ -79,7 +80,7 @@ import {
     string_array_contains
 } from "../utils";
 import { emit_llvm_function } from "./emission";
-import { has_fatal_lowering_diagnostic, print_fatal_lowering_diagnostics } from "./lowering_core/diagnostics";
+import { has_fatal_lowering_diagnostic } from "./lowering_core/diagnostics";
 import { lower_to_llvm_lines_with_parsed_context_for_tests } from "./lowering_core/test_harness";
 import {
     empty_trait_metadata,
@@ -103,7 +104,26 @@ import {
 } from "./lowering_io";
 import { lower_module_bindings_to_globals } from "./module_globals";
 
-// Build and write LLVM IR for tests, threading import-context through
+fn _failed_test_llvm_artifact(failure_message: string) -> LLVMArtifactResult {
+    return LLVMArtifactResult {
+        ok: false,
+        artifact_name: "test-module.ll",
+        artifact_format: "llvm-ir-text",
+        lines: [],
+        diagnostics: [],
+        diags: [],
+        failure_message: failure_message
+    };
+}
+
+fn _failed_test_llvm_artifact_from_lowering(failure_message: string, lowered: LoweredLLVMLinesResult) -> LLVMArtifactResult {
+    let mut result = _failed_test_llvm_artifact(failure_message);
+    result.diagnostics = lowered.diagnostics;
+    result.diags = lowered.diags;
+    return result;
+}
+
+// Build LLVM IR for tests, threading import-context through
 // from the resolver pass. `imported_manifests` and
 // `imported_native_texts` come from
 // `prepare_project_capsules_for_test` (via
@@ -116,10 +136,9 @@ import { lower_module_bindings_to_globals } from "./module_globals";
 // `load_imported_interfaces_from_paths` already partitions
 // parse-failure artifacts upstream and surfaces them as W0002
 // warnings rather than re-feeding them into lowering.
-fn write_llvm_ir_for_tests_from_text_with_context(native_text: string, module_name: string, out_path: string, imported_manifests: LayoutManifest[], imported_native_texts: string[], imported_diagnostics: string[]) -> boolean ![io] {
+fn lower_llvm_for_tests_from_text_with_context(native_text: string, module_name: string, imported_manifests: LayoutManifest[], imported_native_texts: string[], imported_diagnostics: string[]) -> LLVMArtifactResult ![io] {
     if native_text.length == 0 {
-        print.err("test llvm: empty native text");
-        return false;
+        return _failed_test_llvm_artifact("test llvm: empty native text");
     }
     // Structured parser (Phase 4 PR 2). The 0.5.9 seed + PR #229's in-memory
     // lowering handle typed-instruction variants (Let, Return, If, …)
@@ -137,39 +156,30 @@ fn write_llvm_ir_for_tests_from_text_with_context(native_text: string, module_na
     };
     let lowered_lines = lower_to_llvm_lines_with_parsed_context_for_tests(dummy_module, parse, imported_manifests, imported_native_texts, imported_diagnostics);
     if lowered_lines.lines.length == 0 {
-        print.err("test llvm: no lines emitted from native text");
-        return false;
+        return _failed_test_llvm_artifact_from_lowering("test llvm: no lines emitted from native text", lowered_lines);
     }
-    // Refuse to write IR when any lowering pass surfaced a `[fatal]`
+    // Refuse to return publishable IR when any lowering pass surfaced a `[fatal]`
     // diagnostic (issue #675). The non-test entry points
-    // (`write_llvm_ir`, `compile_native_text_to_llvm_file`) already
-    // gate on this — the test path bypassed the gate, so a `[fatal]`
+    // already gate on this before returning a publishable artifact — the test
+    // path bypassed the gate, so a `[fatal]`
     // ABI primitive mismatch at a call site (e.g. `number → int`
     // coercion across an `await` boundary) was emitted to stderr but
     // then the partial IR ran the corrupted call anyway.
-    // Print the cause before refusing, like the non-test writers do — the
-    // silent `return false` left `sfn test` reporting a build failure with
-    // no reason (SFN-529).
+    // The driver renders the cause before refusing publication (SFN-529).
     if has_fatal_lowering_diagnostic(lowered_lines.diagnostics) {
-        print_fatal_lowering_diagnostics(lowered_lines.diagnostics, lowered_lines.diags);
-        return false;
+        return _failed_test_llvm_artifact_from_lowering("", lowered_lines);
     }
     let ir = _join_llvm_lines_linear(lowered_lines.lines);
     if ir.length == 0 {
-        print.err("test llvm: empty IR after join from native text");
-        return false;
+        return _failed_test_llvm_artifact_from_lowering("test llvm: empty IR after join from native text", lowered_lines);
     }
-    let payload = ir + "\n";
-    fs.writeFile(out_path, payload);
-    // Verify the write landed in full. A truncated `.ll` (e.g. from a
-    // pressure-induced short `fwrite`) drops its trailing `define @main`
-    // and links as `undefined main`; reading back and comparing length
-    // converts that into a clean, retriable compile-fail here instead of a
-    // downstream link ICE on IR the compiler itself corrupted.
-    let readback = fs.readFile(out_path);
-    if readback.length != payload.length {
-        print.err("test llvm: wrote truncated IR to " + out_path);
-        return false;
-    }
-    return true;
+    return LLVMArtifactResult {
+        ok: true,
+        artifact_name: "test-module.ll",
+        artifact_format: "llvm-ir-text",
+        lines: lowered_lines.lines,
+        diagnostics: lowered_lines.diagnostics,
+        diags: lowered_lines.diags,
+        failure_message: ""
+    };
 }

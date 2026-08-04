@@ -27,8 +27,8 @@ fn resolve_call_signature(trimmed_target: string, helper_descriptor: RuntimeHelp
     // Empty signals "unresolved". `coerce_and_emit_call` emits a fatal
     // diagnostic (`llvm lowering [fatal]: cannot resolve return type ...`)
     // when this stays empty through emission; the emit-level entrypoints
-    // (`compile_native_text_to_llvm_file`, `write_llvm_ir`) scan for the
-    // `[fatal]` sentinel and return `false`, so the CLI exits non-zero
+    // LLVM artifact result gate scans for the `[fatal]` sentinel and refuses
+    // publication, so the CLI exits non-zero
     // rather than guessing a return type. Pre-issue #306 this defaulted
     // to `i8*`, producing declare/call type mismatches that clang
     // tolerated for unused returns but were structurally malformed.
