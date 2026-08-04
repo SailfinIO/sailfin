@@ -12,11 +12,11 @@ fn _rh_descriptors_00(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     // aggregate ABI. The C trampoline in sailfin_runtime.c unpacks the
     // aggregate and forwards to sailfin_runtime_print_raw.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "print", symbol: "sfn_print", return_type: "void", parameter_types: ["{i8*, i64}"], effects: ["io.console"], native_signature: "sfn_print", c_abi_return_type: null
+        target: "print", symbol: "sfn_print", return_type: "void", parameter_types: ["{i8*, i64}"], native_signature: "sfn_print", c_abi_return_type: null
     });
     // Raw stderr print: writes to stderr with no prefix, no decoration.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "print.err", symbol: "sfn_print_err", return_type: "void", parameter_types: ["{i8*, i64}"], effects: ["io.console"], native_signature: "sfn_print_err", c_abi_return_type: null
+        target: "print.err", symbol: "sfn_print_err", return_type: "void", parameter_types: ["{i8*, i64}"], native_signature: "sfn_print_err", c_abi_return_type: null
     });
 
     // Prefixed print variants — print.err/print.warn/print.error write to
@@ -24,22 +24,22 @@ fn _rh_descriptors_00(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     // Compiler diagnostics should use print.err() so they do not pollute
     // stdout (LLVM IR output, program output, etc.).
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "print.info", symbol: "sfn_print_info", return_type: "void", parameter_types: ["{i8*, i64}"], effects: ["io.console"], native_signature: "sfn_print_info", c_abi_return_type: null
+        target: "print.info", symbol: "sfn_print_info", return_type: "void", parameter_types: ["{i8*, i64}"], native_signature: "sfn_print_info", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "print.error", symbol: "sfn_print_error", return_type: "void", parameter_types: ["{i8*, i64}"], effects: ["io.console"], native_signature: "sfn_print_error", c_abi_return_type: null
+        target: "print.error", symbol: "sfn_print_error", return_type: "void", parameter_types: ["{i8*, i64}"], native_signature: "sfn_print_error", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "print.warn", symbol: "sfn_print_warn", return_type: "void", parameter_types: ["{i8*, i64}"], effects: ["io.console"], native_signature: "sfn_print_warn", c_abi_return_type: null
+        target: "print.warn", symbol: "sfn_print_warn", return_type: "void", parameter_types: ["{i8*, i64}"], native_signature: "sfn_print_warn", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "console.info", symbol: "sfn_print", return_type: "void", parameter_types: ["{i8*, i64}"], effects: ["io.console"], native_signature: "sfn_print", c_abi_return_type: null
+        target: "console.info", symbol: "sfn_print", return_type: "void", parameter_types: ["{i8*, i64}"], native_signature: "sfn_print", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "console.log", symbol: "sfn_print", return_type: "void", parameter_types: ["{i8*, i64}"], effects: ["io.console"], native_signature: "sfn_print", c_abi_return_type: null
+        target: "console.log", symbol: "sfn_print", return_type: "void", parameter_types: ["{i8*, i64}"], native_signature: "sfn_print", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "console.error", symbol: "sfn_print_error", return_type: "void", parameter_types: ["{i8*, i64}"], effects: ["io.console"], native_signature: "sfn_print_error", c_abi_return_type: null
+        target: "console.error", symbol: "sfn_print_error", return_type: "void", parameter_types: ["{i8*, i64}"], native_signature: "sfn_print_error", c_abi_return_type: null
     });
 
     // Filesystem intrinsics
@@ -53,7 +53,7 @@ fn _rh_descriptors_00(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     // through `native_signature` per the `effective_symbol`
     // resolution in `rendering.sfn`.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "fs.exists", symbol: "sfn_fs_exists", return_type: "i1", parameter_types: ["i8*"], effects: ["io.fs"], native_signature: "sfn_fs_exists", c_abi_return_type: null
+        target: "fs.exists", symbol: "sfn_fs_exists", return_type: "i1", parameter_types: ["i8*"], native_signature: "sfn_fs_exists", c_abi_return_type: null
     });
 
     // Arena mark / rewind. Phase 5a (`docs/proposals/archive/phase-5a-arena-reset.md`)
@@ -78,10 +78,10 @@ fn _rh_descriptors_00(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     // `sailfin_intrinsic_runtime_arena_mark()` (or a friendlier
     // alias added at that time).
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "sailfin_intrinsic_runtime_arena_mark", symbol: "sfn_arena_sfn_mark", return_type: "i64", parameter_types: [], effects: [], native_signature: "sfn_arena_sfn_mark", c_abi_return_type: "double"
+        target: "sailfin_intrinsic_runtime_arena_mark", symbol: "sfn_arena_sfn_mark", return_type: "i64", parameter_types: [], native_signature: "sfn_arena_sfn_mark", c_abi_return_type: "double"
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "sailfin_intrinsic_runtime_arena_rewind", symbol: "sfn_arena_sfn_rewind", return_type: "void", parameter_types: ["double"], effects: [], native_signature: "sfn_arena_sfn_rewind", c_abi_return_type: null
+        target: "sailfin_intrinsic_runtime_arena_rewind", symbol: "sfn_arena_sfn_rewind", return_type: "void", parameter_types: ["double"], native_signature: "sfn_arena_sfn_rewind", c_abi_return_type: null
     });
 
     // Pointer-read intrinsics (#875, epic #763). These lower directly to an
@@ -91,18 +91,18 @@ fn _rh_descriptors_00(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     // symbol resolution and emits `load i32`/`load i64`/`load double` (with a
     // leading `bitcast` when the operand isn't already the matching pointer
     // type).
-    // Empty effects is intentional: a raw load is not a capability — the
-    // effect lives on the upstream syscall that produced the pointer. The
+    // No semantic registry row is intentional: a raw load is not a capability
+    // — the effect lives on the upstream syscall that produced the pointer. The
     // declare loop in `rendering.sfn` skips them so no bogus
     // `declare @sailfin_intrinsic_pointer_read_*` links to nothing.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "sailfin_intrinsic_pointer_read_i32", symbol: "sailfin_intrinsic_pointer_read_i32", return_type: "i32", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: null
+        target: "sailfin_intrinsic_pointer_read_i32", symbol: "sailfin_intrinsic_pointer_read_i32", return_type: "i32", parameter_types: ["i8*"], native_signature: null, c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "sailfin_intrinsic_pointer_read_i64", symbol: "sailfin_intrinsic_pointer_read_i64", return_type: "i64", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: null
+        target: "sailfin_intrinsic_pointer_read_i64", symbol: "sailfin_intrinsic_pointer_read_i64", return_type: "i64", parameter_types: ["i8*"], native_signature: null, c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "sailfin_intrinsic_pointer_read_f64", symbol: "sailfin_intrinsic_pointer_read_f64", return_type: "double", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: null
+        target: "sailfin_intrinsic_pointer_read_f64", symbol: "sailfin_intrinsic_pointer_read_f64", return_type: "double", parameter_types: ["i8*"], native_signature: null, c_abi_return_type: null
     });
 
     // errno-location sentinel (#877, epic #763). Resolves the
@@ -119,12 +119,12 @@ fn _rh_descriptors_00(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     // and is what lets `runtime/sfn/clock.sfn` read `errno` without
     // hardcoding the glibc-only locator (which broke the macOS link —
     // see #876/#882 — and the Windows cross-compile link — see #877).
-    // Empty effects: choosing/reading the locator is not a capability.
+    // No semantic registry row: choosing/reading the locator is not a capability.
     // The declare loop in `rendering.sfn` skips the sentinel target; the
     // concrete locator's `declare` is emitted by the lowering branch
     // itself.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "sailfin_intrinsic_errno_location", symbol: "sailfin_intrinsic_errno_location", return_type: "i32*", parameter_types: [], effects: [], native_signature: null, c_abi_return_type: null
+        target: "sailfin_intrinsic_errno_location", symbol: "sailfin_intrinsic_errno_location", return_type: "i32*", parameter_types: [], native_signature: null, c_abi_return_type: null
     });
     // Concrete errno-locator C symbols backing the sentinel above.
     // These exist only so the post-lowering call-target scan
@@ -141,10 +141,10 @@ fn _rh_descriptors_00(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     // Linux and then fail to link. Callers must go through the
     // target-aware sentinel; these rows are internal-only.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "intrinsic.errno_location.glibc", symbol: "__errno_location", return_type: "i32*", parameter_types: [], effects: [], native_signature: null, c_abi_return_type: null
+        target: "intrinsic.errno_location.glibc", symbol: "__errno_location", return_type: "i32*", parameter_types: [], native_signature: null, c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "intrinsic.errno_location.darwin", symbol: "__error", return_type: "i32*", parameter_types: [], effects: [], native_signature: null, c_abi_return_type: null
+        target: "intrinsic.errno_location.darwin", symbol: "__error", return_type: "i32*", parameter_types: [], native_signature: null, c_abi_return_type: null
     });
     // Windows/mingw-w64 spells the errno-slot accessor `int *_errno(void)`.
     // Selected when the sentinel resolves the *target* OS to Windows via
@@ -153,7 +153,7 @@ fn _rh_descriptors_00(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     // `lowering_debug_state.sfn`, #877). Dotted target, same rationale as
     // the rows above: internal-only, never a bare source-level global.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "intrinsic.errno_location.mingw", symbol: "_errno", return_type: "i32*", parameter_types: [], effects: [], native_signature: null, c_abi_return_type: null
+        target: "intrinsic.errno_location.mingw", symbol: "_errno", return_type: "i32*", parameter_types: [], native_signature: null, c_abi_return_type: null
     });
     return descriptors;
 }
@@ -175,13 +175,13 @@ fn _rh_descriptors_01(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     // probe shipped in #905/#819: a later PR can swap
     // `runtime/sfn/clock.sfn`'s try-1-fall-back-to-6 probe for a single
     // emit-time constant once this intrinsic lands in a cut+pinned seed,
-    // removing the extra macOS `clock_gettime` syscall. Empty effects:
+    // removing the extra macOS `clock_gettime` syscall. No semantic registry row:
     // selecting a constant is not a capability — the `![clock]` effect
     // lives on the `clock_gettime` call the constant feeds. The declare
     // loop in `rendering.sfn` skips the sentinel target; since the
     // lowering emits no call, there is no concrete symbol to declare.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "sailfin_intrinsic_clock_monotonic_id", symbol: "sailfin_intrinsic_clock_monotonic_id", return_type: "i32", parameter_types: [], effects: [], native_signature: null, c_abi_return_type: null
+        target: "sailfin_intrinsic_clock_monotonic_id", symbol: "sailfin_intrinsic_clock_monotonic_id", return_type: "i32", parameter_types: [], native_signature: null, c_abi_return_type: null
     });
 
     // `_SC_NPROCESSORS_ONLN` `sysconf` request-number sentinel (#1480,
@@ -203,12 +203,12 @@ fn _rh_descriptors_01(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     // intrinsic-then-seed-then-swap sequence the clk_id sentinel above
     // followed for `clock.sfn`); scheduler.sfn is an `sfn-source` the seed
     // compiles during self-host, so the swap cannot precede the seed.
-    // Empty effects: selecting a constant is not a capability — the request
+    // No semantic registry row: selecting a constant is not a capability — the request
     // feeds the `sysconf` call whose effects live on that call. The declare
     // loop in `rendering.sfn` skips the sentinel target; since the lowering
     // emits no call, there is no concrete symbol to declare.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "sailfin_intrinsic_sc_nprocessors_onln", symbol: "sailfin_intrinsic_sc_nprocessors_onln", return_type: "i32", parameter_types: [], effects: [], native_signature: null, c_abi_return_type: null
+        target: "sailfin_intrinsic_sc_nprocessors_onln", symbol: "sailfin_intrinsic_sc_nprocessors_onln", return_type: "i32", parameter_types: [], native_signature: null, c_abi_return_type: null
     });
 
     // executable-path sentinel (#967, epic #390). Resolves the running
@@ -226,11 +226,11 @@ fn _rh_descriptors_01(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     // declare loop in `rendering.sfn` skips the sentinel target; whichever
     // concrete symbol the dispatcher emits a `call` to gets its `declare`
     // from the post-lowering call-target scan via the concrete rows below.
-    // `effects: ["io"]` — observing the process path is an environment read,
+    // The neutral registry assigns `io` — observing the process path is an environment read,
     // gated like the rest of `exec.sfn` (`![io]`), unlike errno which is not
     // a capability.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "sailfin_intrinsic_exe_path", symbol: "sailfin_intrinsic_exe_path", return_type: "i64", parameter_types: ["i8*", "i64"], effects: ["io"], native_signature: null, c_abi_return_type: null
+        target: "sailfin_intrinsic_exe_path", symbol: "sailfin_intrinsic_exe_path", return_type: "i64", parameter_types: ["i8*", "i64"], native_signature: null, c_abi_return_type: null
     });
     // Concrete exe-path primitives backing the sentinel above. Exactly like
     // the errno concrete rows, these exist only so the post-lowering
@@ -243,13 +243,13 @@ fn _rh_descriptors_01(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     // or called, so the non-host symbols cannot trigger a cross-platform
     // unresolved-symbol link error.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "intrinsic.exe_path.linux", symbol: "readlink", return_type: "i64", parameter_types: ["i8*", "i8*", "i64"], effects: [], native_signature: null, c_abi_return_type: null
+        target: "intrinsic.exe_path.linux", symbol: "readlink", return_type: "i64", parameter_types: ["i8*", "i8*", "i64"], native_signature: null, c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "intrinsic.exe_path.darwin", symbol: "_NSGetExecutablePath", return_type: "i32", parameter_types: ["i8*", "i32*"], effects: [], native_signature: null, c_abi_return_type: null
+        target: "intrinsic.exe_path.darwin", symbol: "_NSGetExecutablePath", return_type: "i32", parameter_types: ["i8*", "i32*"], native_signature: null, c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "intrinsic.exe_path.mingw", symbol: "GetModuleFileNameA", return_type: "i32", parameter_types: ["i8*", "i8*", "i32"], effects: [], native_signature: null, c_abi_return_type: null
+        target: "intrinsic.exe_path.mingw", symbol: "GetModuleFileNameA", return_type: "i32", parameter_types: ["i8*", "i8*", "i32"], native_signature: null, c_abi_return_type: null
     });
     // `strlen` backs the Darwin leg's success-path length recovery:
     // `_NSGetExecutablePath` fills a NUL-terminated path but reports no
@@ -265,7 +265,7 @@ fn _rh_descriptors_01(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     // `{i8*, i64}` aggregate), so this is the sole declare — no
     // duplication risk.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "intrinsic.exe_path.darwin.strlen", symbol: "strlen", return_type: "i64", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: null
+        target: "intrinsic.exe_path.darwin.strlen", symbol: "strlen", return_type: "i64", parameter_types: ["i8*"], native_signature: null, c_abi_return_type: null
     });
 
     // Filesystem sentinels (#1308): retire the last platform-divergent C fs
@@ -296,19 +296,19 @@ fn _rh_descriptors_01(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     //   get_perms(path)       -> i64     ; POSIX stat+st_mode, Windows `-1` stub
     //   list_dir(path)        -> i8*     ; POSIX opendir/readdir, Windows FindFirstFile
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "sailfin_intrinsic_fs_symlink", symbol: "sailfin_intrinsic_fs_symlink", return_type: "i1", parameter_types: ["i8*", "i8*"], effects: ["io"], native_signature: null, c_abi_return_type: null
+        target: "sailfin_intrinsic_fs_symlink", symbol: "sailfin_intrinsic_fs_symlink", return_type: "i1", parameter_types: ["i8*", "i8*"], native_signature: null, c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "sailfin_intrinsic_fs_mkdtemp", symbol: "sailfin_intrinsic_fs_mkdtemp", return_type: "i1", parameter_types: ["i8*"], effects: ["io"], native_signature: null, c_abi_return_type: null
+        target: "sailfin_intrinsic_fs_mkdtemp", symbol: "sailfin_intrinsic_fs_mkdtemp", return_type: "i1", parameter_types: ["i8*"], native_signature: null, c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "sailfin_intrinsic_fs_exists", symbol: "sailfin_intrinsic_fs_exists", return_type: "i1", parameter_types: ["i8*"], effects: ["io"], native_signature: null, c_abi_return_type: null
+        target: "sailfin_intrinsic_fs_exists", symbol: "sailfin_intrinsic_fs_exists", return_type: "i1", parameter_types: ["i8*"], native_signature: null, c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "sailfin_intrinsic_fs_get_perms", symbol: "sailfin_intrinsic_fs_get_perms", return_type: "i64", parameter_types: ["i8*"], effects: ["io"], native_signature: null, c_abi_return_type: null
+        target: "sailfin_intrinsic_fs_get_perms", symbol: "sailfin_intrinsic_fs_get_perms", return_type: "i64", parameter_types: ["i8*"], native_signature: null, c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "sailfin_intrinsic_fs_list_dir", symbol: "sailfin_intrinsic_fs_list_dir", return_type: "i8*", parameter_types: ["i8*"], effects: ["io"], native_signature: null, c_abi_return_type: null
+        target: "sailfin_intrinsic_fs_list_dir", symbol: "sailfin_intrinsic_fs_list_dir", return_type: "i8*", parameter_types: ["i8*"], native_signature: null, c_abi_return_type: null
     });
     // SFN-46: single-hop `readlink(path, buf, size) -> i64` byte count.
     // POSIX legs emit `call i64 @readlink(...)`; the Windows leg is a bare
@@ -319,7 +319,7 @@ fn _rh_descriptors_01(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     // extern-is-the-declare-source contract as `symlink`/`mkdtemp`. This
     // sentinel is inert until that consumer (`fs.read_link`) lands post-seed.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "sailfin_intrinsic_fs_read_link", symbol: "sailfin_intrinsic_fs_read_link", return_type: "i64", parameter_types: ["i8*", "i8*", "i64"], effects: ["io"], native_signature: null, c_abi_return_type: null
+        target: "sailfin_intrinsic_fs_read_link", symbol: "sailfin_intrinsic_fs_read_link", return_type: "i64", parameter_types: ["i8*", "i8*", "i64"], native_signature: null, c_abi_return_type: null
     });
 
     // Network intrinsics.
@@ -329,10 +329,10 @@ fn _rh_descriptors_01(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     // `(url, body)` POST wrapper matching this row's arity). ABI-verified,
     // link-time resolved against the already-shipped bodies.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "http.get", symbol: "sfn_http_get", return_type: "i8*", parameter_types: ["i8*"], effects: ["net.http"], native_signature: "sfn_http_get", c_abi_return_type: null
+        target: "http.get", symbol: "sfn_http_get", return_type: "i8*", parameter_types: ["i8*"], native_signature: "sfn_http_get", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "http.post", symbol: "sfn_http_post2", return_type: "i8*", parameter_types: ["i8*", "i8*"], effects: ["net.http"], native_signature: "sfn_http_post2", c_abi_return_type: null
+        target: "http.post", symbol: "sfn_http_post2", return_type: "i8*", parameter_types: ["i8*", "i8*"], native_signature: "sfn_http_post2", c_abi_return_type: null
     });
 
     // Concurrency intrinsics. Sleep call sites route through the
@@ -344,10 +344,10 @@ fn _rh_descriptors_01(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     // (`sailfin_runtime_sleep`) and its per-symbol descriptor are
     // both gone.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "sleep", symbol: "sfn_sleep", return_type: "void", parameter_types: ["double"], effects: ["clock"], native_signature: null, c_abi_return_type: null
+        target: "sleep", symbol: "sfn_sleep", return_type: "void", parameter_types: ["double"], native_signature: null, c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "runtime_sleep_fn", symbol: "sfn_sleep", return_type: "void", parameter_types: ["double"], effects: ["clock"], native_signature: null, c_abi_return_type: null
+        target: "runtime_sleep_fn", symbol: "sfn_sleep", return_type: "void", parameter_types: ["double"], native_signature: null, c_abi_return_type: null
     });
     // Per-symbol fallback signature for libc `nanosleep`, called from
     // `runtime/sfn/clock.sfn::sfn_sleep`. When `posix.sfn-asm` is staged,
@@ -371,7 +371,7 @@ fn _rh_descriptors_01(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     // `prelude_mirror_drift_fatal_test.sfn`) once the cross-windows
     // standalone `clock` emit is retired or gains its own posix staging.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "nanosleep", symbol: "nanosleep", return_type: "i32", parameter_types: ["i8*", "i8*"], effects: [], native_signature: null, c_abi_return_type: null
+        target: "nanosleep", symbol: "nanosleep", return_type: "i32", parameter_types: ["i8*", "i8*"], native_signature: null, c_abi_return_type: null
     });
     // Per-symbol fallback signature for libc `clock_gettime`, called
     // from `runtime/sfn/clock.sfn::sfn_clock_monotonic_nanos` (#878).
@@ -381,7 +381,7 @@ fn _rh_descriptors_01(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     // (SFN-58) standalone `clock` re-emit that reads posix from the
     // SHARED tree.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "clock_gettime", symbol: "clock_gettime", return_type: "i32", parameter_types: ["i32", "i8*"], effects: [], native_signature: null, c_abi_return_type: null
+        target: "clock_gettime", symbol: "clock_gettime", return_type: "i32", parameter_types: ["i32", "i8*"], native_signature: null, c_abi_return_type: null
     });
     return descriptors;
 }

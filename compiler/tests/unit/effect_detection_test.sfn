@@ -131,7 +131,7 @@ test "detect: fs.* filesystem helper -> io.fs (exact descriptor)" ![io] {
 test "detect: fs.* non-exact member -> io.fs (namespace union)" ![io] {
     // No `fs.read` descriptor row exists; the resolution path must still
     // attribute `io.fs` via the namespace-union fallback in
-    // `effects_for_callee_target`.
+    // `intrinsic_effects_for_callee_target`.
     _assert_detects("fs.read(p)", "io.fs");
 }
 

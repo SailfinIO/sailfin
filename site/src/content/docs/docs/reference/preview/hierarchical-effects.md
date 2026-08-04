@@ -10,7 +10,7 @@ Shipped: `io.fs`, `io.console`, `net.http`, `net.ws` — sub-effects that are
 `rand`), not new top-level effects. `io.fs` refines `io` (`io.fs ⊑ io`); the
 taxonomy stays locked at six atoms (`compiler/src/effect_taxonomy.sfn`).
 
-The runtime-helper descriptor registry detects effectful builtin calls and
+The target-neutral intrinsic registry detects effectful builtin calls and
 attributes the narrow sub-effect: `fs.*` calls require `io.fs`, `print.*` /
 `console.*` calls require `io.console`, `http.*` calls require `net.http`, and
 `websocket.*` calls require `net.ws` (`http.download` stays plain `net.http` +

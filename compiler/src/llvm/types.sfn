@@ -70,7 +70,6 @@ struct RuntimeHelperDescriptor {
     symbol: string;
     return_type: string;
     parameter_types: string[];
-    effects: string[];
     // Optional Sailfin-native ABI symbol. When non-null, lowering
     // emits a call to this symbol instead of `symbol` (the C ABI).
     // M2 flips helpers from `sailfin_runtime_*` to `sfn_*` per-symbol

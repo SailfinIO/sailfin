@@ -3,8 +3,8 @@
 // channel-`send`, and channel-`receive` contribute NO effect of their
 // own: a pure body/value requires nothing, and an effectful body/argument
 // propagates its own effects. `serve` still requires `![io, net]` (the
-// live `Serve`-node arm is registry-driven off the `serve` descriptor
-// row -> [io, net]; #1601, #1629). With the matching effect(s) declared,
+// live `Serve`-node arm queries the target-neutral `serve` semantic row;
+// #1601, #1629). With the matching effect(s) declared,
 // the checker produces zero violations.
 //
 // `spawn` and `serve` are first-class AST nodes (Expression.Spawn /

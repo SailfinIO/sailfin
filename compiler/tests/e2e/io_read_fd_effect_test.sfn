@@ -1,6 +1,6 @@
 // End-to-end effect-checker coverage for the `io.read_fd` / `io.read_line`
 // builtins (#1579, epic #1540 Track A gap A2). The descriptors carry
-// `effects: ["io"]` (`runtime_helpers.sfn`), so calling either from a
+// target-neutral `io` effect metadata (`intrinsic_effects.sfn`), so calling either from a
 // non-`![io]` context must fire the effect checker's E0400. This drives
 // the full parse → typecheck → effect-check pipeline via `sfn check`,
 // mirroring `check_effect_call_site_caret_test.sfn`.

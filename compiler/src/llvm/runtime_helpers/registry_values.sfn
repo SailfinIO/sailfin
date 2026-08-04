@@ -6,16 +6,16 @@ import { append_runtime_helper } from "./registry_support";
 fn _rh_descriptors_09(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelperDescriptor[] {
     let mut descriptors = descriptors_in;
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "string.to_number", symbol: "sfn_str_to_number", return_type: "double", parameter_types: ["{i8*, i64}"], effects: [], native_signature: "sfn_str_to_number_lv", c_abi_return_type: null
+        target: "string.to_number", symbol: "sfn_str_to_number", return_type: "double", parameter_types: ["{i8*, i64}"], native_signature: "sfn_str_to_number_lv", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "strings_equal", symbol: "strings_equal", return_type: "i1", parameter_types: ["i8*", "i8*"], effects: [], native_signature: "sfn_str_eq", c_abi_return_type: null
+        target: "strings_equal", symbol: "strings_equal", return_type: "i1", parameter_types: ["i8*", "i8*"], native_signature: "sfn_str_eq", c_abi_return_type: null
     });
     // #1365: lexicographic string ordering (`<`/`>`/`<=`/`>=`). The lowering
     // emits `call i32 @sfn_str_cmp(i8*, i8*)` then `icmp <pred> i32 ..., 0`.
     // Auto-declared via the post-lowering line scan, exactly like sfn_str_eq.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "string.compare", symbol: "sfn_str_cmp", return_type: "i32", parameter_types: ["i8*", "i8*"], effects: [], native_signature: "sfn_str_cmp", c_abi_return_type: null
+        target: "string.compare", symbol: "sfn_str_cmp", return_type: "i32", parameter_types: ["i8*", "i8*"], native_signature: "sfn_str_cmp", c_abi_return_type: null
     });
     // #1704: length-aware (`_lv`) equality / ordering over the `{i8*, i64}`
     // aggregate. These rows are DECLARE-ONLY: the hardcoded `==`/`!=` and
@@ -28,10 +28,10 @@ fn _rh_descriptors_09(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     // The bare `strings_equal` / `string.compare` rows stay for the old
     // `(i8*, i8*)` ABI the pinned seed still emits during `make compile`.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "string.eq_lv", symbol: "sfn_str_eq_lv", return_type: "i1", parameter_types: ["i8*", "i64", "i8*", "i64"], effects: [], native_signature: null, c_abi_return_type: null
+        target: "string.eq_lv", symbol: "sfn_str_eq_lv", return_type: "i1", parameter_types: ["i8*", "i64", "i8*", "i64"], native_signature: null, c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "string.cmp_lv", symbol: "sfn_str_cmp_lv", return_type: "i32", parameter_types: ["i8*", "i64", "i8*", "i64"], effects: [], native_signature: null, c_abi_return_type: null
+        target: "string.cmp_lv", symbol: "sfn_str_cmp_lv", return_type: "i32", parameter_types: ["i8*", "i64", "i8*", "i64"], native_signature: null, c_abi_return_type: null
     });
     // #1780 (SFEP-0035 §3.2): the hand-typed `char_code` / `char_at` /
     // `char_from_code` prelude-mirror rows were removed here. Their declares and
@@ -47,7 +47,7 @@ fn _rh_descriptors_09(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     // `number_to_string` as archeology — `effective_symbol` resolution
     // prefers `native_signature` whenever it is set.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "number_to_string", symbol: "number_to_string", return_type: "i8*", parameter_types: ["double"], effects: [], native_signature: "sfn_number_to_str", c_abi_return_type: null
+        target: "number_to_string", symbol: "number_to_string", return_type: "i8*", parameter_types: ["double"], native_signature: "sfn_number_to_str", c_abi_return_type: null
     });
     // M2.5 (#403): grapheme descriptors flip to the wave-2 trampolines
     // (`sfn_str_grapheme_count`, `sfn_str_grapheme_at`). Both
@@ -59,22 +59,22 @@ fn _rh_descriptors_09(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     // canonical symbol so freshly-emitted IR has zero references to
     // the legacy `sailfin_runtime_grapheme_*` names.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "runtime_grapheme_count_fn", symbol: "sfn_str_grapheme_count", return_type: "i64", parameter_types: ["{i8*, i64}"], effects: [], native_signature: "sfn_str_grapheme_count_lv", c_abi_return_type: "double"
+        target: "runtime_grapheme_count_fn", symbol: "sfn_str_grapheme_count", return_type: "i64", parameter_types: ["{i8*, i64}"], native_signature: "sfn_str_grapheme_count_lv", c_abi_return_type: "double"
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "runtime_grapheme_at_fn", symbol: "sfn_str_grapheme_at", return_type: "i8*", parameter_types: ["{i8*, i64}", "double"], effects: [], native_signature: "sfn_str_grapheme_at_lv", c_abi_return_type: null
+        target: "runtime_grapheme_at_fn", symbol: "sfn_str_grapheme_at", return_type: "i8*", parameter_types: ["{i8*, i64}", "double"], native_signature: "sfn_str_grapheme_at_lv", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "grapheme_at", symbol: "sfn_str_grapheme_at", return_type: "i8*", parameter_types: ["{i8*, i64}", "double"], effects: [], native_signature: "sfn_str_grapheme_at_lv", c_abi_return_type: null
+        target: "grapheme_at", symbol: "sfn_str_grapheme_at", return_type: "i8*", parameter_types: ["{i8*, i64}", "double"], native_signature: "sfn_str_grapheme_at_lv", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "is_whitespace_char", symbol: "sfn_str_is_whitespace", return_type: "i1", parameter_types: ["i8"], effects: [], native_signature: "sfn_str_is_whitespace", c_abi_return_type: null
+        target: "is_whitespace_char", symbol: "sfn_str_is_whitespace", return_type: "i1", parameter_types: ["i8"], native_signature: "sfn_str_is_whitespace", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "is_decimal_digit", symbol: "sfn_str_is_digit", return_type: "i1", parameter_types: ["i8"], effects: [], native_signature: "sfn_str_is_digit", c_abi_return_type: null
+        target: "is_decimal_digit", symbol: "sfn_str_is_digit", return_type: "i1", parameter_types: ["i8"], native_signature: "sfn_str_is_digit", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "is_alpha_char", symbol: "sfn_str_is_alpha", return_type: "i1", parameter_types: ["i8"], effects: [], native_signature: "sfn_str_is_alpha", c_abi_return_type: null
+        target: "is_alpha_char", symbol: "sfn_str_is_alpha", return_type: "i1", parameter_types: ["i8"], native_signature: "sfn_str_is_alpha", c_abi_return_type: null
     });
 
     // M1.2 (#461): SfnString method descriptors registered with their
@@ -89,16 +89,16 @@ fn _rh_descriptors_09(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     // caller is connected. `parameter_types` use the SfnString aggregate
     // shape (`{i8*, i64}`) — matches the M1.A lock-in for fresh emission.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "string.starts_with", symbol: "sfn_str_starts_with", return_type: "i1", parameter_types: ["{i8*, i64}", "{i8*, i64}"], effects: [], native_signature: "sfn_str_starts_with", c_abi_return_type: null
+        target: "string.starts_with", symbol: "sfn_str_starts_with", return_type: "i1", parameter_types: ["{i8*, i64}", "{i8*, i64}"], native_signature: "sfn_str_starts_with", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "string.ends_with", symbol: "sfn_str_ends_with", return_type: "i1", parameter_types: ["{i8*, i64}", "{i8*, i64}"], effects: [], native_signature: "sfn_str_ends_with", c_abi_return_type: null
+        target: "string.ends_with", symbol: "sfn_str_ends_with", return_type: "i1", parameter_types: ["{i8*, i64}", "{i8*, i64}"], native_signature: "sfn_str_ends_with", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "string.contains", symbol: "sfn_str_contains", return_type: "i1", parameter_types: ["{i8*, i64}", "{i8*, i64}"], effects: [], native_signature: "sfn_str_contains", c_abi_return_type: null
+        target: "string.contains", symbol: "sfn_str_contains", return_type: "i1", parameter_types: ["{i8*, i64}", "{i8*, i64}"], native_signature: "sfn_str_contains", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "string.repeat", symbol: "sfn_str_repeat", return_type: "i8*", parameter_types: ["{i8*, i64}", "i64"], effects: [], native_signature: "sfn_str_repeat", c_abi_return_type: null
+        target: "string.repeat", symbol: "sfn_str_repeat", return_type: "i8*", parameter_types: ["{i8*, i64}", "i64"], native_signature: "sfn_str_repeat", c_abi_return_type: null
     });
     return descriptors;
 }
@@ -130,13 +130,13 @@ fn _rh_descriptors_10(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     // `SfnArray*` which is ABI-compatible at the System V x86_64
     // register level (linker resolves by symbol name only).
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "append_string", symbol: "sfn_array_push_string", return_type: "{ i8**, i64, i64 }*", parameter_types: ["{ i8**, i64, i64 }*", "i8*"], effects: [], native_signature: "sfn_array_push_string", c_abi_return_type: null
+        target: "append_string", symbol: "sfn_array_push_string", return_type: "{ i8**, i64, i64 }*", parameter_types: ["{ i8**, i64, i64 }*", "i8*"], native_signature: "sfn_array_push_string", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "concat", symbol: "sfn_array_concat", return_type: "{ i8**, i64, i64 }*", parameter_types: ["{ i8**, i64, i64 }*", "{ i8**, i64, i64 }*"], effects: [], native_signature: "sfn_array_concat", c_abi_return_type: null
+        target: "concat", symbol: "sfn_array_concat", return_type: "{ i8**, i64, i64 }*", parameter_types: ["{ i8**, i64, i64 }*", "{ i8**, i64, i64 }*"], native_signature: "sfn_array_concat", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "copy_bytes", symbol: "sfn_mem_copy_bytes", return_type: "void", parameter_types: ["i8*", "i8*", "i64"], effects: [], native_signature: "sfn_mem_copy_bytes", c_abi_return_type: null
+        target: "copy_bytes", symbol: "sfn_mem_copy_bytes", return_type: "void", parameter_types: ["i8*", "i8*", "i64"], native_signature: "sfn_mem_copy_bytes", c_abi_return_type: null
     });
 
     // M1.B v2 byte-wise push: takes data, len, cap pointers + elem_size.
@@ -147,19 +147,19 @@ fn _rh_descriptors_10(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     // delegating to `sailfin_runtime_array_push_slot_v2`); the C
     // definition was retired in the same flip.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "array_push_slot", symbol: "sfn_array_push_slot", return_type: "i8*", parameter_types: ["i8**", "i64*", "i64*", "i64"], effects: [], native_signature: "sfn_array_push_slot", c_abi_return_type: null
+        target: "array_push_slot", symbol: "sfn_array_push_slot", return_type: "i8*", parameter_types: ["i8**", "i64*", "i64*", "i64"], native_signature: "sfn_array_push_slot", c_abi_return_type: null
     });
 
     // Generic field accessor for opaque imported types
     // Takes object pointer and field name, returns field value as i8*
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "get_field", symbol: "sfn_mem_get_field", return_type: "i8*", parameter_types: ["i8*", "i8*"], effects: [], native_signature: "sfn_mem_get_field", c_abi_return_type: null
+        target: "get_field", symbol: "sfn_mem_get_field", return_type: "i8*", parameter_types: ["i8*", "i8*"], native_signature: "sfn_mem_get_field", c_abi_return_type: null
     });
 
     // String persistence helper for Stage2 memory management
     // Marks string pointers as persistent so they survive across LLVM function boundaries
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "mark_persistent", symbol: "sailfin_runtime_mark_persistent", return_type: "void", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: null
+        target: "mark_persistent", symbol: "sailfin_runtime_mark_persistent", return_type: "void", parameter_types: ["i8*"], native_signature: null, c_abi_return_type: null
     });
 
     // M1.7.2a (issue #496): heap allocation primitive registered for
@@ -179,7 +179,7 @@ fn _rh_descriptors_10(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     // in `runtime/native/` for seed-built IR until the M3 seed cut, but every
     // fresh emission now resolves through `effective_symbol` to `@sfn_alloc_struct`.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "alloc_struct", symbol: "sfn_alloc_struct", return_type: "i8*", parameter_types: ["i64"], effects: [], native_signature: "sfn_alloc_struct", c_abi_return_type: null
+        target: "alloc_struct", symbol: "sfn_alloc_struct", return_type: "i8*", parameter_types: ["i64"], native_signature: "sfn_alloc_struct", c_abi_return_type: null
     });
 
     // M1.7.2a (issue #496): arena-aware free for boxed return values.
@@ -189,7 +189,7 @@ fn _rh_descriptors_10(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     // metadata; the runtime exposes the matching arena-aware entrypoint
     // here. Already declared via `lowering_phase_render.sfn:167`.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "runtime.free", symbol: "sfn_mem_free", return_type: "void", parameter_types: ["i8*"], effects: [], native_signature: "sfn_mem_free", c_abi_return_type: null
+        target: "runtime.free", symbol: "sfn_mem_free", return_type: "void", parameter_types: ["i8*"], native_signature: "sfn_mem_free", c_abi_return_type: null
     });
 
     // Exceptions — live TLS message-slot API.
@@ -202,13 +202,13 @@ fn _rh_descriptors_10(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     // seed-built IR until the M3 seed cut, but every fresh emission now
     // resolves through `effective_symbol` to the `sfn_*` exports.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "set_exception", symbol: "sfn_set_exception", return_type: "void", parameter_types: ["i8*"], effects: [], native_signature: "sfn_set_exception", c_abi_return_type: null
+        target: "set_exception", symbol: "sfn_set_exception", return_type: "void", parameter_types: ["i8*"], native_signature: "sfn_set_exception", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "clear_exception", symbol: "sfn_clear_exception", return_type: "void", parameter_types: [], effects: [], native_signature: "sfn_clear_exception", c_abi_return_type: null
+        target: "clear_exception", symbol: "sfn_clear_exception", return_type: "void", parameter_types: [], native_signature: "sfn_clear_exception", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "has_exception", symbol: "sfn_has_exception", return_type: "i1", parameter_types: [], effects: [], native_signature: "sfn_has_exception", c_abi_return_type: null
+        target: "has_exception", symbol: "sfn_has_exception", return_type: "i1", parameter_types: [], native_signature: "sfn_has_exception", c_abi_return_type: null
     });
 
     // M2.7b (#404) replaced the legacy TLS-polling exception primitives
@@ -231,24 +231,24 @@ fn _rh_descriptors_10(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     // Coexists with the legacy TLS-polling family above until M2.7c
     // retires the C runtime symbols.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "sfn_exception_push_frame", symbol: "sfn_exception_push_frame", return_type: "void", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: null
+        target: "sfn_exception_push_frame", symbol: "sfn_exception_push_frame", return_type: "void", parameter_types: ["i8*"], native_signature: null, c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "sfn_exception_pop_frame", symbol: "sfn_exception_pop_frame", return_type: "void", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: null
+        target: "sfn_exception_pop_frame", symbol: "sfn_exception_pop_frame", return_type: "void", parameter_types: ["i8*"], native_signature: null, c_abi_return_type: null
     });
     // Distinct target key from the zero-arg legacy `take_exception` so
     // both descriptors coexist in the registry.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "sfn_take_exception_frame", symbol: "sfn_take_exception", return_type: "i8*", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: null
+        target: "sfn_take_exception_frame", symbol: "sfn_take_exception", return_type: "i8*", parameter_types: ["i8*"], native_signature: null, c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "sfn_throw_frame", symbol: "sfn_throw", return_type: "void", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: null
+        target: "sfn_throw_frame", symbol: "sfn_throw", return_type: "void", parameter_types: ["i8*"], native_signature: null, c_abi_return_type: null
     });
     // libc setjmp — the inline setjmp call site lives in user code at
     // each try entry. Declared via the helper registry so every emitting
     // module carries a paired `declare i32 @setjmp(i8*)`.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "setjmp", symbol: "setjmp", return_type: "i32", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: null
+        target: "setjmp", symbol: "setjmp", return_type: "i32", parameter_types: ["i8*"], native_signature: null, c_abi_return_type: null
     });
     // SFN-647: the Windows x64 save point. The UCRT has no one-argument
     // `setjmp` — its header maps `setjmp(buf)` onto `_setjmp(buf, frame)`,
@@ -264,7 +264,7 @@ fn _rh_descriptors_10(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     // never calls `_setjmp`, never matches this row, and emits byte-identical
     // IR.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "_setjmp", symbol: "_setjmp", return_type: "i32", parameter_types: ["i8*", "i8*"], effects: [], native_signature: null, c_abi_return_type: null
+        target: "_setjmp", symbol: "_setjmp", return_type: "i32", parameter_types: ["i8*", "i8*"], native_signature: null, c_abi_return_type: null
     });
 
     // ---- Package-manager primitives ----
@@ -276,7 +276,7 @@ fn _rh_descriptors_10(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     // `runtime/native/src/sailfin_sha256.c`. The capsule's own `sha256()` calls
     // `sha256_hex()` in-language, so this descriptor has no in-tree caller today.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "crypto.sha256", symbol: "sha256__capsules__sfn__crypto__src__mod", return_type: "i8*", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: null
+        target: "crypto.sha256", symbol: "sha256__capsules__sfn__crypto__src__mod", return_type: "i8*", parameter_types: ["i8*"], native_signature: null, c_abi_return_type: null
     });
     return descriptors;
 }
@@ -292,13 +292,13 @@ fn _rh_descriptors_11(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     // post-lowering call scan emit declarations only when the Darwin leg is
     // present.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "sailfin_intrinsic_mem_footprint", symbol: "sailfin_intrinsic_mem_footprint", return_type: "i64", parameter_types: [], effects: ["io"], native_signature: null, c_abi_return_type: null
+        target: "sailfin_intrinsic_mem_footprint", symbol: "sailfin_intrinsic_mem_footprint", return_type: "i64", parameter_types: [], native_signature: null, c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "intrinsic.mem_footprint.darwin.getpid", symbol: "getpid", return_type: "i32", parameter_types: [], effects: [], native_signature: null, c_abi_return_type: null
+        target: "intrinsic.mem_footprint.darwin.getpid", symbol: "getpid", return_type: "i32", parameter_types: [], native_signature: null, c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "intrinsic.mem_footprint.darwin.proc_pid_rusage", symbol: "proc_pid_rusage", return_type: "i32", parameter_types: ["i32", "i32", "i8*"], effects: [], native_signature: null, c_abi_return_type: null
+        target: "intrinsic.mem_footprint.darwin.proc_pid_rusage", symbol: "proc_pid_rusage", return_type: "i32", parameter_types: ["i32", "i32", "i8*"], native_signature: null, c_abi_return_type: null
     });
 
     // Base64 encode. M3 (#817): base64 encode now lives in pure Sailfin under
@@ -309,7 +309,7 @@ fn _rh_descriptors_11(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     // body stays linked for seed compat until M3.9 deletes
     // `runtime/native/src/sailfin_base64.c`.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "base64.encode", symbol: "base64_encode__capsules__sfn__crypto__src__mod", return_type: "i8*", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: null
+        target: "base64.encode", symbol: "base64_encode__capsules__sfn__crypto__src__mod", return_type: "i8*", parameter_types: ["i8*"], native_signature: null, c_abi_return_type: null
     });
 
     // HTTP helpers. M3 (#818): flipped from the curl-subprocess C path
@@ -320,13 +320,13 @@ fn _rh_descriptors_11(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     // `http.post_json` / `http.download` to `sfn_http_get` /
     // `sfn_http_post` (url, body, auth_header) / `sfn_http_download`.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "http.get_body", symbol: "sfn_http_get", return_type: "i8*", parameter_types: ["i8*"], effects: ["net.http"], native_signature: "sfn_http_get", c_abi_return_type: null
+        target: "http.get_body", symbol: "sfn_http_get", return_type: "i8*", parameter_types: ["i8*"], native_signature: "sfn_http_get", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "http.post_json", symbol: "sfn_http_post", return_type: "i8*", parameter_types: ["i8*", "i8*", "i8*"], effects: ["net.http"], native_signature: "sfn_http_post", c_abi_return_type: null
+        target: "http.post_json", symbol: "sfn_http_post", return_type: "i8*", parameter_types: ["i8*", "i8*", "i8*"], native_signature: "sfn_http_post", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "http.download", symbol: "sfn_http_download", return_type: "i8*", parameter_types: ["i8*", "i8*"], effects: ["net.http", "io"], native_signature: "sfn_http_download", c_abi_return_type: null
+        target: "http.download", symbol: "sfn_http_download", return_type: "i8*", parameter_types: ["i8*", "i8*"], native_signature: "sfn_http_download", c_abi_return_type: null
     });
 
     // Environment & path helpers
@@ -340,13 +340,13 @@ fn _rh_descriptors_11(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     // extractvalue coercion in `coerce_pointer_or_struct` for the
     // legacy `i8*` string-typed locals.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "env.get", symbol: "sfn_getenv", return_type: "{i8*, i64}", parameter_types: ["{i8*, i64}", "ptr"], effects: ["io"], native_signature: "sfn_getenv", c_abi_return_type: null
+        target: "env.get", symbol: "sfn_getenv", return_type: "{i8*, i64}", parameter_types: ["{i8*, i64}", "ptr"], native_signature: "sfn_getenv", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "env.home", symbol: "sfn_home_dir", return_type: "{i8*, i64}", parameter_types: ["ptr"], effects: ["io"], native_signature: "sfn_home_dir", c_abi_return_type: null
+        target: "env.home", symbol: "sfn_home_dir", return_type: "{i8*, i64}", parameter_types: ["ptr"], native_signature: "sfn_home_dir", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "fs.read_bytes", symbol: "sfn_fs_read_bytes", return_type: "i8*", parameter_types: ["i8*", "i8*"], effects: ["io.fs"], native_signature: "sfn_fs_read_bytes", c_abi_return_type: null
+        target: "fs.read_bytes", symbol: "sfn_fs_read_bytes", return_type: "i8*", parameter_types: ["i8*", "i8*"], native_signature: "sfn_fs_read_bytes", c_abi_return_type: null
     });
 
     // #1780 (SFEP-0035 §3.2): the hand-typed `find_char` / `string_starts_with`

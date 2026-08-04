@@ -64,11 +64,11 @@
 // NULs download faithfully even though the get/post `i8*` return is
 // also NUL-terminated for string use.
 //
-// Effects: `![net]` for get/post, `![net, io]` for download (it
-// opens a file). The flipped descriptors carry the same effects, so
-// calling `http.get_body` / `http.post_json` without `![net]` (or
-// `http.download` without `![net, io]`) on the call chain remains a
-// compile-time error after the flip.
+// Effects: the target-neutral intrinsic registry assigns `![net]` to get/post
+// and `![net, io]` to download (it opens a file). The LLVM descriptors supply
+// only symbols and ABI, while calling `http.get_body` / `http.post_json`
+// without `![net]` (or `http.download` without `![net, io]`) on the call chain
+// remains a compile-time error after the runtime flip.
 //
 // Why inline the externs rather than `import` from
 // `../platform/net.sfn` / `../platform/libc.sfn`? Same rationale as

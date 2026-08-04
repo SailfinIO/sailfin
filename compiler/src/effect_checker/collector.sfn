@@ -281,11 +281,9 @@ fn _propagate_imported_member_effects(member: string, imports: ImportSymbolTable
 }
 
 // G1 (#1183): append one EffectRequirement per capability the builtin
-// callee `target` requires, sourced from the driver-supplied target-neutral
-// intrinsic table. The driver derives that table from its runtime provider,
-// while this semantic pass stays free of LLVM imports and
-// hardcoded name->effect chains for registry-backed builtins: a
-// descriptor's `effects` change flows through here with zero edits.
+// callee `target` requires, sourced from the target-neutral intrinsic table.
+// This semantic pass stays free of LLVM imports and hardcoded name->effect
+// chains: a contract-row change flows through here with zero edits.
 // `trigger` carets the diagnostic at the call/namespace token.
 fn _append_builtin_effects(base: EffectRequirement[], target: string, trigger: Token?, imports: ImportSymbolTable) -> EffectRequirement[] {
     let effects = intrinsic_effects_for_callee_target(imports.intrinsic_effects, target);
@@ -317,20 +315,20 @@ fn collect_effects_from_expression(expression: Expression?, imports: ImportSymbo
             let callee_trigger = _token_from_span(expression.callee.span, name);
             if name == "spawn" {
                 // Registry-driven (#1655): derive the primitive's own effect
-                // from the `spawn_task` descriptor row. Effect-transparent
-                // (SFEP-0049): that row is now `[]`, so this appends nothing
-                // and the requirement is exactly the spawned body's effects
-                // collected above. The registry-driven append stays (not
-                // deleted) so a future scheduler-level effect on the row flows
-                // through with no arm edit.
+                // from the target-neutral `spawn_task` identity.
+                // Effect-transparent (SFEP-0049): it has no semantic row, so
+                // this appends nothing and the requirement is exactly the
+                // spawned body's effects collected above. The lookup stays so
+                // a future scheduler-level effect flows through with no arm
+                // edit.
                 required = _append_builtin_effects(required, "spawn_task", callee_trigger, imports);
             }
             // Registry-driven bare builtins: `print(...)` / `console(...)`
             // (the Call-form analog of the Member-form `print.info(...)`
             // paths in the "Member" branch — closes #614), `sleep(...)`
             // (clock), and the Call-form `serve(...)` (-> io, net via the
-            // `serve` metadata row, #1601). EFFECTS come from the
-            // intrinsic metadata table (#1183/#1601); this replaces the former
+            // target-neutral `serve` semantic row, #1601). Effects come from
+            // the intrinsic registry (#1183/#1601); this replaces the former
             // hardcoded `if name == "serve"` net-only check.
             //
             // The NAME set stays explicit because bare identifiers are not
@@ -386,13 +384,12 @@ fn collect_effects_from_expression(expression: Expression?, imports: ImportSymbo
             if _is_channel_op {
                 let callee_trigger = _token_from_span(expression.callee.span, method);
                 // Registry-driven (#1655): map the bare member name to its
-                // descriptor target (`send` -> `channel_send`, `receive` ->
-                // `channel_receive`) and derive the effect from the row. The
-                // mapping is required — passing the bare `method` to
-                // intrinsic lookup would miss the exact row and
-                // namespace-union to `[]`. Effect-transparent (SFEP-0049):
-                // the rows are now `[]`, so a pure `ch.send(v)`/`ch.receive()`
-                // requires nothing; any effect comes from the argument walk.
+                // target-neutral identity (`send` -> `channel_send`,
+                // `receive` -> `channel_receive`). Effect-transparent
+                // (SFEP-0049): neither identity has a semantic row, so lookup
+                // contributes nothing; any effect comes from the argument
+                // walk. Keeping the identity mapping lets a future semantic
+                // row flow through without changing this arm.
                 let channel_target = "channel_" + method;
                 required = _append_builtin_effects(required, channel_target, callee_trigger, imports);
             }
@@ -425,13 +422,13 @@ fn collect_effects_from_expression(expression: Expression?, imports: ImportSymbo
             // the namespace identifier is the user-visible cue the
             // diagnostic carets (e.g. `fs` in `fs.exists(...)`).
             let object_trigger = _token_from_span(expression.object.span, root);
-            // Metadata-driven builtin effect resolution (#1183): the driver
-            // supplies the provider's authoritative `target -> effects` table.
-            // Exact descriptor first (`fs.exists`, `http.get`,
+            // Metadata-driven builtin effect resolution (#1183): the analyzer
+            // receives the authoritative `target -> effects` contract.
+            // Exact identity first (`fs.exists`, `http.get`,
             // `http.download` -> `[net, io]`), namespace-union fallback
             // for members with no exact row (`fs.read` inherits `fs.*`
             // -> io) so conservative capability coverage is never
-            // dropped. A descriptor's `effects` change is picked up here
+            // dropped. A contract-row change is picked up here
             // with zero edits. Covers `fs.*`, `print.*`, `console.*`,
             // `http.*` — the literal-name `if` chains they replaced.
             // As of #1601 this covers `websocket.*` too: the
@@ -566,10 +563,11 @@ fn collect_effects_from_expression(expression: Expression?, imports: ImportSymbo
     if expression.variant == "Spawn" {
         let spawn_trigger = _token_from_span(expression.span, "spawn");
         let mut required = collect_effects_from_expression(expression.operand, imports);
-        // Registry-driven (#1655): append the `spawn_task` row's effects.
-        // Effect-transparent (SFEP-0049): the row is `[]`, so `required` is
-        // exactly the operand's effects collected above; the append stays so a
-        // future scheduler-level effect on the row flows through with no edit.
+        // Registry-driven (#1655): query the target-neutral `spawn_task`
+        // identity. Effect-transparent (SFEP-0049): it has no semantic row, so
+        // `required` is exactly the operand's effects collected above. The
+        // lookup stays so a future scheduler-level effect flows through with
+        // no arm edit.
         required = _append_builtin_effects(required, "spawn_task", spawn_trigger, imports);
         return required;
     }
@@ -589,13 +587,13 @@ fn collect_effects_from_expression(expression: Expression?, imports: ImportSymbo
             required = merge_requirements(required, collect_effects_from_expression(expression.tasks[task_index], imports));
             task_index += 1;
         }
-        // Registry-driven (#1655): parallel is fan-out of spawns, so it takes
-        // its own effect from the `spawn_task` row. Effect-transparent
-        // (SFEP-0049): that row is `[]`, so `required` is exactly the union of
-        // the task bodies' effects merged above. No dedicated `parallel`
-        // descriptor row exists: the paren-call `parallel(...)` of the
-        // unimplemented `sfn/sync` surface must stay fail-closed in lowering,
-        // which a row would break; the empty-append preserves that property.
+        // Registry-driven (#1655): parallel is fan-out of spawns, so it queries
+        // the target-neutral `spawn_task` identity. Effect-transparent
+        // (SFEP-0049): that identity has no semantic row, so `required` is
+        // exactly the union of the task bodies' effects merged above. There is
+        // also no dedicated `parallel` lowering descriptor: the paren-call
+        // `parallel(...)` of the unimplemented `sfn/sync` surface must stay
+        // fail-closed in lowering, which such a descriptor would break.
         required = _append_builtin_effects(required, "spawn_task", parallel_trigger, imports);
         return required;
     }

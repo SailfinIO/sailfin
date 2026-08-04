@@ -74,10 +74,11 @@
 // The connection `ctx` pair is freed by the worker body; the response
 // `OwnedBuf` is freed by the worker after the send.
 //
-// Effects: `sfn_serve` is `![net, io]`; the flipped `serve_start`
-// descriptor carries the same effects, so calling `serve(...)`
-// without `![net, io]` on the call chain remains a compile-time
-// error after the flip. The connection worker and dispatch
+// Effects: the target-neutral intrinsic registry assigns the source identity
+// `serve` `![io, net]`, so calling `serve(...)` without those effects remains
+// a compile-time error. Its bespoke lowering queries the separate
+// `serve_start` identity (`![net, io]`); the LLVM descriptor supplies only the
+// symbol and ABI. The connection worker and dispatch
 // trampoline call only effect-free externs (and the handler through
 // an effect-erased pointer), so they carry no effect annotation —
 // matching the `future.sfn` trampoline convention.

@@ -6,12 +6,7 @@
 // `docs/conventions/runtime-helpers.md`: populate `native_signature` with the
 // canonical `sfn_<domain>_<op>` symbol and route call sites through
 // `emit_runtime_call`.
-import {
-    IntrinsicEffectTable,
-    append_intrinsic_effects,
-    empty_intrinsic_effects,
-    intrinsic_effects_for_callee_target
-} from "../../intrinsic_effects";
+import { intrinsic_effect_table } from "../../intrinsic_effects";
 import { RuntimeHelperDescriptor } from "../types";
 import { join_with_separator, string_array_contains, trim_text } from "../utils";
 import { _rh_descriptors_02, _rh_descriptors_03, _rh_descriptors_04 } from "./registry_concurrency";
@@ -22,7 +17,7 @@ import { _rh_descriptors_09, _rh_descriptors_10, _rh_descriptors_11 } from "./re
 
 // Synthetic descriptor constructors for array `concat()` and `push()`
 // dispatch. Unlike the registry entries in the sibling partitions (which each
-// carry a distinct symbol/effect/parameter shape), these two methods are
+// carry a distinct symbol/parameter shape), these two methods are
 // resolved at call lowering time against the receiver's element type
 // and produce a fresh descriptor per call site. Hoisting their struct
 // shape here keeps future `RuntimeHelperDescriptor` field additions
@@ -33,7 +28,6 @@ fn make_concat_descriptor(return_type: string, params: string[]) -> RuntimeHelpe
         symbol: "",
         return_type: return_type,
         parameter_types: params,
-        effects: [],
         native_signature: null,
         c_abi_return_type: null
     };
@@ -45,7 +39,6 @@ fn make_push_descriptor(return_type: string, params: string[]) -> RuntimeHelperD
         symbol: "",
         return_type: return_type,
         parameter_types: params,
-        effects: [],
         native_signature: null,
         c_abi_return_type: null
     };
@@ -124,46 +117,29 @@ fn find_runtime_helper(target: string) -> RuntimeHelperDescriptor? {
     return null;
 }
 
-// Driver/provider adapter for the analyzer-owned intrinsic effect contract.
-// LLVM descriptors remain the metadata source, but semantic consumers receive
-// only target/effect values and never import LLVM types or lowering modules.
-fn runtime_helper_effect_table() -> IntrinsicEffectTable {
+// Static drift guard for the target-neutral semantic registry. LLVM may own
+// additional pure lowering helpers, but every effectful intrinsic identity
+// must retain an exact descriptor here or targeted tests fail closed.
+fn runtime_helper_registry_covers_intrinsic_effects() -> boolean {
+    let contract = intrinsic_effect_table();
     let descriptors = runtime_helper_descriptors();
-    let mut table = empty_intrinsic_effects();
-    let mut index: int = 0;
+    let mut effect_index: int = 0;
     loop {
-        if index >= descriptors.length { break; }
-        table = append_intrinsic_effects(table, descriptors[index].target, descriptors[index].effects);
-        index += 1;
+        if effect_index >= contract.entries.length { break; }
+        let mut found: boolean = false;
+        let mut descriptor_index: int = 0;
+        loop {
+            if descriptor_index >= descriptors.length { break; }
+            if descriptors[descriptor_index].target == contract.entries[effect_index].target {
+                found = true;
+                break;
+            }
+            descriptor_index += 1;
+        }
+        if !found { return false; }
+        effect_index += 1;
     }
-    return table;
-}
-
-// Resolve the capability effects a builtin callee `target` requires from
-// the authoritative `target -> effects` descriptor registry above
-// (#1183, epic #1180 Phase G). This registry is the single source of
-// truth the effect checker keys on, so a descriptor's `effects` change
-// is picked up by the checker with zero edits to `effect_checker.sfn`.
-//
-// Resolution is exact-target-first, namespace-union fallback:
-//   1. An exact descriptor for `target` (e.g. "fs.exists", "http.get",
-//      "http.download", "sleep") returns that descriptor's precise
-//      effects — so `http.get` stays `[net]` while `http.download`
-//      carries `[net, io]`. Flat-unioning the whole namespace would
-//      leak `http.download`'s `io` onto every `http.*` sibling.
-//   2. A target with no exact descriptor (e.g. "fs.read", or a bare
-//      namespace root like "console") inherits the UNION of effects
-//      across its namespace ("fs.*", "console.*"). This preserves the
-//      conservative root-keyed coverage the checker had before #1183 —
-//      an under-approximation here would drop a required capability,
-//      the one failure the effect pillar must never allow.
-//
-// Returns an empty list when nothing matches. As of #1601 `websocket.*`
-// (-> net) and the Call-form `serve` (-> io, net) have metadata-only
-// rows here, so the effect checker derives them from this registry too —
-// completing the "zero hardcoded name->effect chains" goal of Phase G.
-fn effects_for_callee_target(target: string) -> string[] {
-    return intrinsic_effects_for_callee_target(runtime_helper_effect_table(), trim_text(target));
+    return true;
 }
 
 // LLVM return type for `declare`-line emission. Mirrors the

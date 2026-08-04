@@ -31,6 +31,12 @@ In practice this means:
   `.sfn-asm` IR; the dispatch maps it back to a descriptor at
   emit time.
 
+Intrinsic identity and semantic effects are target-neutral contracts in
+`compiler/src/intrinsic_effects.sfn`. Runtime-helper descriptors use `target`
+to consume that contract but own only LLVM symbol, declaration, and ABI data.
+Every effectful intrinsic identity must have an exact lowering descriptor; the
+targeted metadata test fails closed if the registries drift.
+
 ## Platform externs are the native boundary
 
 Platform services are declared with `extern fn` in `runtime/sfn/platform/` and
@@ -167,7 +173,8 @@ It is **not** the right place for:
 
 ## References
 
-- `compiler/src/llvm/runtime_helpers/mod.sfn` — registry facade, lookup, effect, and declaration APIs.
+- `compiler/src/intrinsic_effects.sfn` — target-neutral intrinsic identity and semantic-effect registry.
+- `compiler/src/llvm/runtime_helpers/mod.sfn` — LLVM descriptor registry and lookup/declaration APIs.
 - `compiler/src/llvm/runtime_helpers/registry_*.sfn` — descriptor partitions grouped by concern.
 - `compiler/src/llvm/rendering.sfn:render_runtime_helper_declarations` — preamble emission.
 - `compiler/src/llvm/lowering/lowering_helpers.sfn:collect_runtime_helper_targets_from_lines` — post-lowering scan that observes every emitted call site.
