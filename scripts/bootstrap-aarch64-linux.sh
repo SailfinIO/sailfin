@@ -159,7 +159,9 @@ NATIVE_CC_PATH="$(command -v "$NATIVE_CC")" \
 
 cat >"$CROSS_BIN/clang" <<EOF
 #!/usr/bin/env bash
-exec "$NATIVE_CC_PATH" --target=x86_64-linux-gnu "\$@"
+# The host linker is an aarch64 GNU ld and cannot link x86_64 objects. Use
+# LLVM's architecture-neutral linker for this cross stage explicitly.
+exec "$NATIVE_CC_PATH" --target=x86_64-linux-gnu -fuse-ld=lld "\$@"
 EOF
 chmod +x "$CROSS_BIN/clang"
 
@@ -176,7 +178,7 @@ case "$(elf_machine "$WORK_DIR/cross-probe.o")" in
 	*) fail "PATH shadowing is not taking effect: the probe object is $(elf_machine "$WORK_DIR/cross-probe.o"), not x86_64" ;;
 esac
 PATH="$CROSS_BIN:$PATH" clang "$WORK_DIR/cross-probe.c" -o "$WORK_DIR/cross-probe" \
-	|| fail "x86_64 cross link failed; the amd64 CRT/libgcc development packages are missing (need libc6-dev:amd64 and libgcc-*-dev:amd64)"
+	|| fail "x86_64 cross link with LLD failed; verify lld and the amd64 CRT/libgcc development packages (libc6-dev:amd64 and libgcc-*-dev:amd64)"
 
 run_x86() {
 	local binary="$1"

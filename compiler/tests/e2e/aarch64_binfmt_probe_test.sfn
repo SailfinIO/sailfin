@@ -100,6 +100,11 @@ fn _decoy_entry() -> string {
     return "enabled\ninterpreter /usr/bin/python3.12\nflags:\noffset 0\nmagic 550a\n";
 }
 
+test "aarch64 bootstrap: x86_64 cross wrapper selects LLD" ![io] {
+    let source = fs.readFile(_script());
+    assert contains(source, "exec \"$NATIVE_CC_PATH\" --target=x86_64-linux-gnu -fuse-ld=lld");
+}
+
 test "aarch64 binfmt: enabled x86_64 entry is detected alongside an unreadable register node" ![io] {
     let dir = _test_root("t1");
     fs.writeFile(dir + "/status", "enabled\n");
