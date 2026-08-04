@@ -10,16 +10,19 @@
 // at link time via symbol mangling. This cycle is intentional: async emission
 // needs the main emit_llvm_function for the inner body, while the main
 // emitter delegates async wrapper generation to the async module.
-import { build_target_os, target_setjmp_call_line } from "../../build/target";
 import { Diag, diag_to_legacy_string } from "../../diagnostic";
 import { NativeFunction } from "../../native_ir";
 import { substring } from "../../string_utils";
-import { test_runner_trace } from "../../test_runner_state";
 import { make_string_constant_name_for_module } from "../expression_lowering/native/core_text";
 import { emit_runtime_call, empty_runtime_call_overrides } from "../expression_lowering/native/runtime_call";
 import { default_return_literal } from "../expressions_helpers";
 import { format_root_scope_id } from "../lifetime";
-import { trace_lowering } from "../lowering_debug_state";
+import {
+    build_target_os,
+    target_setjmp_call_line,
+    test_runner_trace,
+    trace_lowering
+} from "../lowering_debug_state";
 import { should_internalize_function } from "../rendering_helpers";
 import {
     append_string_constant,

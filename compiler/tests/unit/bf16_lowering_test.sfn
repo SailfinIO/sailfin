@@ -16,6 +16,7 @@
 // (`docs/proposals/design-notes/sfn-609-bf16-conversion-lowering.md`).
 import { contains } from "sfn/strings";
 
+import { resolve_llvm_provider_context } from "../../src/build/llvm_provider_context";
 import { emit_native_text_with_module_name } from "../../src/emit_native";
 import {
     emit_bf16_narrow_from_double,
@@ -25,7 +26,7 @@ import {
     emit_i64_round_to_odd
 } from "../../src/llvm/expression_lowering/native/core_bf16_lowering";
 import { coerce_operand_to_string } from "../../src/llvm/expression_lowering/native/core_strings";
-import { lower_to_llvm_ir_from_text } from "../../src/llvm/lowering/entrypoints";
+import { lower_to_llvm_ir_from_text_with_provider_context } from "../../src/llvm/lowering/entrypoints";
 import { LLVMOperand } from "../../src/llvm/types";
 import { parse_program } from "../../src/parser/mod";
 
@@ -115,7 +116,7 @@ test "lowering: bf16 interpolation widens without `fpext bfloat` (SFN-610)" ![io
         + "}";
     let program = parse_program(source);
     let native = emit_native_text_with_module_name(program, "bf16_interp_test");
-    let ir = lower_to_llvm_ir_from_text(native, "bf16_interp_test");
+    let ir = lower_to_llvm_ir_from_text_with_provider_context(native, "bf16_interp_test", resolve_llvm_provider_context());
 
     assert ! contains(ir, "fpext bfloat");
     // Narrowings are named individually rather than as a blanket `to bfloat`:

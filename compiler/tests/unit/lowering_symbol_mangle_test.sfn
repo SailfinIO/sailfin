@@ -19,8 +19,9 @@
 // source twice in one process is byte-identical (determinism guard; the
 // macOS arm64 IR pipeline has a history of intermittent symbol corruption,
 // so a repeatability check is the load-bearing assertion).
+import { resolve_llvm_provider_context } from "../../src/build/llvm_provider_context";
 import { emit_native_text_with_module_name } from "../../src/emit_native";
-import { lower_to_llvm_ir_from_text } from "../../src/llvm/lowering/entrypoints";
+import { lower_to_llvm_ir_from_text_with_provider_context } from "../../src/llvm/lowering/entrypoints";
 import { parse_program } from "../../src/parser/mod";
 import { index_of } from "../../src/string_utils";
 
@@ -58,7 +59,7 @@ fn _lower_sample() -> string ![io] {
         + "}";
     let program = parse_program(source);
     let native = emit_native_text_with_module_name(program, "symbol_mangle_test");
-    return lower_to_llvm_ir_from_text(native, "symbol_mangle_test");
+    return lower_to_llvm_ir_from_text_with_provider_context(native, "symbol_mangle_test", resolve_llvm_provider_context());
 }
 
 // ── All three functions + both literals reach the IR ──

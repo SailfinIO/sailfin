@@ -2,15 +2,16 @@
 // epic #965 (M4). Verifies that `channel`/`spawn` emit the correct
 // runtime-helper call sites in the lowered LLVM IR.
 //
-// Strategy: ONE `_emit_llvm` call for the whole file. `lower_to_llvm_ir_from_text`
+// Strategy: ONE `_emit_llvm` call for the whole file. `lower_to_llvm_ir_from_text_with_provider_context`
 // is expensive (it invokes clang); multiple calls in one test process accumulate
 // memory and trigger OOM when the full unit suite runs. All assertions share a
 // single combined source program so only one lowering is needed.
 //
 // Scope: lowering call-site shapes only. Runtime bodies are separate
 // issues (#1090/#1091).
+import { resolve_llvm_provider_context } from "../../src/build/llvm_provider_context";
 import { emit_native_text_with_module_name } from "../../src/emit_native";
-import { lower_to_llvm_ir_from_text } from "../../src/llvm/lowering/entrypoints";
+import { lower_to_llvm_ir_from_text_with_provider_context } from "../../src/llvm/lowering/entrypoints";
 import { parse_program } from "../../src/parser/mod";
 import { index_of } from "../../src/string_utils";
 
@@ -30,7 +31,7 @@ test "lowering: channel and spawn emit correct runtime helper symbols (#1085)" !
         + "}";
     let program = parse_program(source);
     let native = emit_native_text_with_module_name(program, "concurrency_lowering_test");
-    let ir = lower_to_llvm_ir_from_text(native, "concurrency_lowering_test");
+    let ir = lower_to_llvm_ir_from_text_with_provider_context(native, "concurrency_lowering_test", resolve_llvm_provider_context());
     assert _contains(ir, "@sfn_channel_create");
     assert _contains(ir, "sfn_channel_create(i64 4, i64 8");
     assert _contains(ir, "sfn_spawn_int");

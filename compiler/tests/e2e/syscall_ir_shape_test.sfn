@@ -73,6 +73,32 @@ fn _rejection(os: string, arch: string, tag: string) -> string ![io] {
     return stderr;
 }
 
+fn _native_file_rejection(os: string, arch: string, tag: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let source = dir + "/native-file-reject-" + tag + ".sfn";
+    let output = dir + "/native-file-reject-" + tag + ".sfn-asm";
+    fs.writeFile(source, _fixture_source());
+    if fs.exists(output) { fs.deleteFile(output); }
+    let exit = process.run_capture([_sfn_bin(), "emit", "--module-name", "runtime/sfn/platform/syscall_linux.sfn", "-o", output, "native", source], _target_env(os, arch));
+    let _stdout = process.capture_take_stdout();
+    let stderr = process.capture_take_stderr();
+    assert exit != 0;
+    assert ! fs.exists(output);
+    return stderr;
+}
+
+fn _native_stdout_rejection(os: string, arch: string, tag: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let source = dir + "/native-stdout-reject-" + tag + ".sfn";
+    fs.writeFile(source, _fixture_source());
+    let exit = process.run_capture([_sfn_bin(), "emit", "--module-name", "runtime/sfn/platform/syscall_linux.sfn", "native", source], _target_env(os, arch));
+    let stdout = process.capture_take_stdout();
+    let stderr = process.capture_take_stderr();
+    assert exit != 0;
+    assert stdout.length == 0;
+    return stderr;
+}
+
 test "syscall1 through syscall6 pin the Linux x86-64 inline-asm ABI" ![io] {
     let ir = _emit("Linux", "x86_64", "linux-x86-64");
     assert ir.length > 0;
@@ -92,6 +118,18 @@ test "syscall lowering rejects non-Linux targets" ![io] {
 
 test "syscall lowering rejects non-x86-64 targets" ![io] {
     let stderr = _rejection("Linux", "aarch64", "linux-aarch64");
+    assert contains(stderr, "E1019");
+    assert contains(stderr, "requires the Linux x86-64 target");
+}
+
+test "native file emit resolves the provider target before its lowering gate" ![io] {
+    let stderr = _native_file_rejection("Darwin", "x86_64", "darwin");
+    assert contains(stderr, "E1019");
+    assert contains(stderr, "requires the Linux x86-64 target");
+}
+
+test "native stdout emit resolves the provider target before its lowering gate" ![io] {
+    let stderr = _native_stdout_rejection("Darwin", "x86_64", "darwin");
     assert contains(stderr, "E1019");
     assert contains(stderr, "requires the Linux x86-64 target");
 }

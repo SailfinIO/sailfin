@@ -1,7 +1,6 @@
 // compiler/src/llvm/lowering/instructions_try.sfn
 //
 // Control flow handlers: try/catch/finally/throw instruction lowering.
-import { build_target_os, target_setjmp_symbol } from "../../build/target";
 import { Diag } from "../../diagnostic";
 import { NativeFunction, NativeInstruction, NativeSourceSpan } from "../../native_ir";
 import { char_code, grapheme_at, substring } from "../../string_utils";
@@ -11,6 +10,7 @@ import { append_local_binding } from "../expression_lowering/native/core_scopes"
 import { emit_runtime_call, empty_runtime_call_overrides } from "../expression_lowering/native/runtime_call";
 import { format_local_pointer_name, format_temp_name } from "../expressions_helpers";
 import { make_child_scope_id } from "../lifetime";
+import { build_target_os, target_setjmp_symbol } from "../lowering_debug_state";
 import { empty_string_constant_set, merge_string_constants } from "../strings";
 import {
     BlockLoweringResult,

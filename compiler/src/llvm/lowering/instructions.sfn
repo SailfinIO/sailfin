@@ -10,7 +10,6 @@
 import { Diag } from "../../diagnostic";
 import { NativeFunction, NativeInstruction } from "../../native_ir";
 import { substring } from "../../string_utils";
-import { test_runner_trace } from "../../test_runner_state";
 import {
     decode_captures,
     emit_closure_env_load_prologue,
@@ -21,7 +20,7 @@ import { emit_runtime_call, empty_runtime_call_overrides } from "../expression_l
 import { lower_expression_statement, lower_return_instruction } from "../expression_lowering/native/statement";
 import { parse_inline_let_expression } from "../expression_lowering/native/statement_parsing";
 import { apply_lifetime_release_events, is_scope_descendant } from "../lifetime";
-import { trace_lowering } from "../lowering_debug_state";
+import { test_runner_trace, trace_lowering } from "../lowering_debug_state";
 import { empty_string_constant_set, merge_string_constants } from "../strings";
 import {
     BlockLoweringResult,

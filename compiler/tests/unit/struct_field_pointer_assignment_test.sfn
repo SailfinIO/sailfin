@@ -8,15 +8,16 @@
 // fix the slot exists, so the assignment now lowers to the expected
 // `getelementptr ... i32 0, i32 1` + `store i8*` pair. This test pins that
 // shape so the store-drop cannot resurface.
+import { resolve_llvm_provider_context } from "../../src/build/llvm_provider_context";
 import { emit_native_text_with_module_name } from "../../src/emit_native";
-import { lower_to_llvm_ir_from_text } from "../../src/llvm/lowering/entrypoints";
+import { lower_to_llvm_ir_from_text_with_provider_context } from "../../src/llvm/lowering/entrypoints";
 import { parse_program } from "../../src/parser/mod";
 import { index_of } from "../../src/string_utils";
 
 fn _emit_llvm(source: string) -> string ![io] {
     let program = parse_program(source);
     let native = emit_native_text_with_module_name(program, "struct_field_pointer_assignment_test");
-    return lower_to_llvm_ir_from_text(native, "struct_field_pointer_assignment_test");
+    return lower_to_llvm_ir_from_text_with_provider_context(native, "struct_field_pointer_assignment_test", resolve_llvm_provider_context());
 }
 
 fn _store_source() -> string {
@@ -34,7 +35,7 @@ fn _store_source() -> string {
 
 // ── The pointer field assignment GEPs to field index 1 ───────────────
 // One lowering pass covers both the GEP-index and store-shape assertions
-// — `lower_to_llvm_ir_from_text` is the heavy step, so we run it once to
+// — `lower_to_llvm_ir_from_text_with_provider_context` is the heavy step, so we run it once to
 // stay within the unit harness' per-file memory cap.
 test "ptr store: `drop_fn` assignment GEPs to field index 1 and emits `store i8*`" ![io] {
     let llvm = _emit_llvm(_store_source());

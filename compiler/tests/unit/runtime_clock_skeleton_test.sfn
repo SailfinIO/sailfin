@@ -12,16 +12,17 @@
 // `sfn fmt --check` over `runtime/` and `make compile` typechecks these
 // sfn-sources.
 //
-// Strategy: ONE `lower_to_llvm_ir_from_text` call over the REAL
+// Strategy: ONE `lower_to_llvm_ir_from_text_with_provider_context` call over the REAL
 // `clock.sfn` (read via `fs.readFile`). `clock.sfn` imports `nanosleep`
-// from `./platform/posix`; `lower_to_llvm_ir_from_text` resolves imported
+// from `./platform/posix`; `lower_to_llvm_ir_from_text_with_provider_context` resolves imported
 // `extern` signatures through `collect_imported_module_context_for_module`
 // (the same path the `sfn emit llvm` driver uses), so the cross-module
 // `nanosleep` call lowers to a `declare` + `call`. The errno locator is
 // host-dependent — `@__errno_location` on glibc, `@__error` on Darwin —
 // so accept either.
+import { resolve_llvm_provider_context } from "../../src/build/llvm_provider_context";
 import { emit_native_text_with_module_name } from "../../src/emit_native";
-import { lower_to_llvm_ir_from_text } from "../../src/llvm/lowering/entrypoints";
+import { lower_to_llvm_ir_from_text_with_provider_context } from "../../src/llvm/lowering/entrypoints";
 import { parse_program } from "../../src/parser/mod";
 import { index_of, substring } from "../../src/string_utils";
 
@@ -33,7 +34,7 @@ test "lowering: runtime/sfn/clock.sfn wraps @nanosleep in an EINTR loop (#397/#6
     let source = fs.readFile("runtime/sfn/clock.sfn");
     let program = parse_program(source);
     let native = emit_native_text_with_module_name(program, "runtime/sfn/clock");
-    let ir = lower_to_llvm_ir_from_text(native, "runtime/sfn/clock");
+    let ir = lower_to_llvm_ir_from_text_with_provider_context(native, "runtime/sfn/clock", resolve_llvm_provider_context());
 
     // Module-level shape: wrapper defined, imported nanosleep declared,
     // and the pre-PR2 C trampoline fully retired (a partial revert

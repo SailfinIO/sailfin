@@ -7,7 +7,6 @@
 // and expression parsing live in sibling submodules.
 import { Diag, diag_to_legacy_string } from "../../../diagnostic";
 import { NativeFunction, NativeInstruction, NativeSourceSpan } from "../../../native_ir";
-import { test_runner_trace } from "../../../test_runner_state";
 import { default_return_literal, is_simple_identifier } from "../../expressions_helpers";
 // `format_root_scope_id` lives in the lifetime utilities module; the
 // `core_scopes` re-export points to the same canonical implementation.
@@ -16,7 +15,7 @@ import { format_root_scope_id } from "../../lifetime";
 // helper walks the scope chain inner-to-outer and emits
 // `sfn_rc_release` calls for every owned RC local at scope close.
 import { emit_drops_for_scope_chain } from "../../lowering/instructions_helpers";
-import { trace_lowering } from "../../lowering_debug_state";
+import { test_runner_trace, trace_lowering } from "../../lowering_debug_state";
 // Import string constant management
 import { empty_string_constant_set } from "../../strings";
 // Import types from modular structure

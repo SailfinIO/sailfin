@@ -4,7 +4,7 @@
 // route markers and lvalues to the right branch.
 //
 // Two regressions live on the same discriminator, so both are pinned from a
-// single LLVM emission (`lower_to_llvm_ir_from_text` is expensive — one call
+// single LLVM emission (`lower_to_llvm_ir_from_text_with_provider_context` is expensive — one call
 // per test file keeps the unit suite off the arena-OOM cliff, mirroring
 // `concurrency_lowering_test.sfn`):
 //
@@ -21,8 +21,9 @@
 //      closing `]` and the genuine top-level `=` is swallowed — silently
 //      dropping the store. Guard: the shifted-index store is present (`shl
 //      i64` computes the index and `store i64 9` writes the element).
+import { resolve_llvm_provider_context } from "../../src/build/llvm_provider_context";
 import { emit_native_text_with_module_name } from "../../src/emit_native";
-import { lower_to_llvm_ir_from_text } from "../../src/llvm/lowering/entrypoints";
+import { lower_to_llvm_ir_from_text_with_provider_context } from "../../src/llvm/lowering/entrypoints";
 import { parse_program } from "../../src/parser/mod";
 import { index_of } from "../../src/string_utils";
 
@@ -41,7 +42,7 @@ test "lowering: bare spawn stmt and <<-subscript assignment both emit IR (SFN-40
         + "}";
     let program = parse_program(source);
     let native = emit_native_text_with_module_name(program, "bare_spawn_expr_stmt_lowering_test");
-    let ir = lower_to_llvm_ir_from_text(native, "bare_spawn_expr_stmt_lowering_test");
+    let ir = lower_to_llvm_ir_from_text_with_provider_context(native, "bare_spawn_expr_stmt_lowering_test", resolve_llvm_provider_context());
     // (1) the bare spawn statement was lowered, not dropped.
     assert _contains(ir, "sfn_spawn_int");
     // (2) the <<-subscript index-assignment still emits its store.

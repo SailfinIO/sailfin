@@ -52,23 +52,6 @@ fn _boundary_exception(importer: string, importee: string, seam: string) -> Boun
 fn _boundary_exceptions() -> BoundaryException[] {
     let mut out: BoundaryException[] = [];
 
-    // The monolith also passes target/debug/test state through driver globals.
-    // The exact inventory prevents growth while the provider contract is made
-    // explicit; it is deliberately separate from persistent publication.
-    let context = "LLVM provider still reads driver target and test context (SFN-718)";
-    out.push(_boundary_exception("llvm/lowering_debug_state", "build/target", context));
-    out.push(_boundary_exception("llvm/lowering_debug_state", "build_flags", context));
-    out.push(_boundary_exception("llvm/syscall", "build/target", context));
-    out.push(_boundary_exception("llvm/effects", "test_runner_state", context));
-    out.push(_boundary_exception("llvm/imports", "test_runner_state", context));
-    out.push(_boundary_exception("llvm/lowering/emission", "build/target", context));
-    out.push(_boundary_exception("llvm/lowering/emission", "test_runner_state", context));
-    out.push(_boundary_exception("llvm/lowering/instructions", "test_runner_state", context));
-    out.push(_boundary_exception("llvm/lowering/instructions_try", "build/target", context));
-    out.push(_boundary_exception("llvm/expression_lowering/native/statement", "test_runner_state", context));
-    out.push(_boundary_exception("llvm/lowering/lowering_core/mod", "test_runner_state", context));
-    out.push(_boundary_exception("llvm/lowering/lowering_core/test_harness", "build/target", context));
-
     // SFEP-0020 §3.4/§3.5.6 assigns diagnostic data contracts to analyzer.
     // LLVM still consumes those contracts directly instead of receiving
     // provider-owned lowering diagnostics through its IR-facing boundary.
@@ -171,7 +154,7 @@ fn _append_effect_authority_exceptions(initial: AuthorityException[]) -> Authori
     out.push(_authority_exception("llvm/imports", "effect:io", 6, seam));
     out.push(_authority_exception("llvm/lowering/emission", "effect:io", 1, seam));
     out.push(_authority_exception("llvm/lowering/emission_async", "effect:io", 1, seam));
-    out.push(_authority_exception("llvm/lowering/entrypoints", "effect:io", 14, seam));
+    out.push(_authority_exception("llvm/lowering/entrypoints", "effect:io", 13, seam));
     out.push(_authority_exception("llvm/lowering/entrypoints_tests", "effect:io", 1, seam));
     out.push(_authority_exception("llvm/lowering/entrypoints_tests_writer", "effect:io", 1, seam));
     out.push(_authority_exception("llvm/lowering/instructions", "effect:io", 1, seam));
@@ -197,7 +180,6 @@ fn _append_effect_authority_exceptions(initial: AuthorityException[]) -> Authori
     out.push(_authority_exception("llvm/lowering/lowering_phase_types", "effect:io", 1, seam));
     out.push(_authority_exception("llvm/lowering/lowering_recovery", "effect:io", 1, seam));
     out.push(_authority_exception("llvm/lowering/type_descriptors", "effect:io", 1, seam));
-    out.push(_authority_exception("llvm/lowering_debug_state", "effect:io", 14, seam));
     out.push(_authority_exception("llvm/syscall", "effect:io", 2, seam));
     out.push(_authority_exception("parser/mod", "effect:io", 2, seam));
     return out;
@@ -1474,9 +1456,9 @@ test "capsule boundaries: compiler imports obey the role graph and exact excepti
         let source = fs.readFile(importer);
         if importer_role != ROLE_DRIVER {
             // Provider libraries may still carry temporary I/O effect
-            // exceptions while SFN-718 threads explicit context, but persistent
-            // artifact publication is driver-only. Quoted runtime-helper names
-            // are ignored by `_direct_authority_count`.
+            // exceptions, but persistent artifact publication is driver-only.
+            // Quoted runtime-helper names are ignored by
+            // `_direct_authority_count`.
             let publication_tokens: string[] = ["fs.appendFile", "fs.createDirectory", "fs.deleteFile", "fs.mkdtemp", "fs.removeDirectory", "fs.set_perms", "fs.symlink", "fs.writeFile", "fs.writeLines"];
             let mut publication_i: int = 0;
             loop {

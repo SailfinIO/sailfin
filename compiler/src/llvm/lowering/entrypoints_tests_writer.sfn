@@ -42,6 +42,7 @@ import {
     apply_layout_manifest_to_module,
     collect_imported_module_context_for_module
 } from "../imports";
+import { LLVMProviderContext, install_llvm_provider_context } from "../lowering_debug_state";
 import {
     render_enum_type_definitions,
     render_imported_function_declarations,
@@ -136,7 +137,8 @@ fn _failed_test_llvm_artifact_from_lowering(failure_message: string, lowered: Lo
 // `load_imported_interfaces_from_paths` already partitions
 // parse-failure artifacts upstream and surfaces them as W0002
 // warnings rather than re-feeding them into lowering.
-fn lower_llvm_for_tests_from_text_with_context(native_text: string, module_name: string, imported_manifests: LayoutManifest[], imported_native_texts: string[], imported_diagnostics: string[]) -> LLVMArtifactResult ![io] {
+fn lower_llvm_for_tests_from_text_with_provider_context(native_text: string, module_name: string, imported_manifests: LayoutManifest[], imported_native_texts: string[], imported_diagnostics: string[], provider_context: LLVMProviderContext) -> LLVMArtifactResult ![io] {
+    install_llvm_provider_context(provider_context);
     if native_text.length == 0 {
         return _failed_test_llvm_artifact("test llvm: empty native text");
     }

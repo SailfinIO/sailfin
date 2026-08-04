@@ -74,11 +74,12 @@ false:
    raised the three stack allocas, which that first fix left at 256 because the
    heap path is dead for compiler-emitted `try`.
 2. **`struct stat` `st_mode` offset.** `lowering_debug_state.sfn`'s
-   `stat_st_mode_offset_value()` keys the offset on **OS only** (Linux → 24).
+   `stat_st_mode_offset_value()` originally keyed the offset on **OS only**
+   (Linux → 24).
    glibc aarch64 reorders `struct stat` so `st_mode` is at offset **16**, not
-   24, so the `fs_get_perms` sentinel reads the wrong field. The host-detection
-   locators (`_host_os()`) have **no arch dimension** — that is the seam this
-   SFEP adds.
+   24, so the `fs_get_perms` sentinel reads the wrong field. The explicit LLVM
+   provider context therefore needs an architecture dimension alongside its
+   resolved target OS.
 
 ## 3. Design
 
@@ -93,22 +94,23 @@ not touch macOS arm64 or Windows.
 
 ### 3.2 The arch-detection seam (resolves deliverable (a))
 
-The compiler already de-shelled host-OS detection (SFN-49): `_host_os()` in
-`llvm/lowering_debug_state.sfn` (mirrored by `_build_host_os()` in
-`build/target.sfn`) probes filesystem markers instead of shelling `uname -s`, so
+The compiler already de-shelled host-OS detection (SFN-49):
+`build/target.sfn` probes filesystem markers instead of shelling `uname -s`, so
 a single binary bakes the correct platform legs on whatever host it runs on, and
-a `SAILFIN_TARGET_OS` override wins first for cross-emit. **We add the arch
-dimension the exact same way.**
+a `SAILFIN_TARGET_OS` override wins first for cross-emit. The driver snapshots
+that result into the explicit LLVM provider context. **We add the arch dimension
+to that same snapshot.**
 
-Introduce `_host_arch()` beside `_host_os()`, using a filesystem-marker probe —
-the aarch64 dynamic loader is at a well-known path — with x86_64 as the dominant
+Resolve the provider's target architecture in
+`build/llvm_provider_context.sfn`, using a filesystem-marker probe — the
+aarch64 dynamic loader is at a well-known path — with x86_64 as the dominant
 default (never wrong on the existing Tier-1 host):
 
 ```sfn
-// llvm/lowering_debug_state.sfn — mirrors _host_os() (SFN-49).
+// build/llvm_provider_context.sfn — driver-owned context resolution.
 // SAILFIN_TARGET_ARCH override wins first (cross-emit + e2e hook), else a
 // non-shelling loader-path probe. "aarch64" | "x86_64" (uname -m style).
-fn _host_arch() -> string ![io] {
+fn _resolve_llvm_target_arch() -> string ![io] {
     let override = _get_env_cmd("SAILFIN_TARGET_ARCH");
     if override.length > 0 { return override; }
     if fs.exists("/lib/ld-linux-aarch64.so.1") { return "aarch64"; }
@@ -116,8 +118,9 @@ fn _host_arch() -> string ![io] {
 }
 ```
 
-Why a loader-path probe (not a new runtime primitive): it is byte-for-byte the
-same mechanism `_host_os()` and `rlimit.sfn`/`sizes_linux.sfn` already use, needs
+Why a loader-path probe (not a new runtime primitive): it is the same
+filesystem-marker mechanism host-OS resolution and
+`rlimit.sfn`/`sizes_linux.sfn` already use, needs
 no new FFI (`uname(2)` binding), and stays correct under emulation — a
 qemu-user x86_64 process on an aarch64 host sees the aarch64 host filesystem and
 probes `aarch64`, which is exactly what the bootstrap needs (§3.4). The
@@ -125,7 +128,7 @@ probes `aarch64`, which is exactly what the bootstrap needs (§3.4). The
 cross-emit hook and — critically — the **e2e test hook** that lets x86_64 CI
 verify the aarch64 leg without an arm runner.
 
-The seam has exactly **one** compiler-baked consumer: re-key
+The seam has exactly **one** compiler-baked consumer: key
 `stat_st_mode_offset_value()` on the `(os, arch)` pair — `Darwin → 4`,
 `Linux + aarch64 → 16`, else `24`. Every other target-baked immediate is
 arch-invariant on glibc and needs **no** change (verified §3.3).
@@ -137,7 +140,7 @@ allocates:
 
 | Value | Source | x86_64-Linux | aarch64-Linux | Action |
 |---|---|---|---|---|
-| `st_mode` offset in `struct stat` | `lowering_debug_state.sfn` `stat_st_mode_offset_value` | 24 | **16** | Re-key on `(os, arch)` via `_host_arch()`. |
+| `st_mode` offset in `struct stat` | `lowering_debug_state.sfn` `stat_st_mode_offset_value` | 24 | **16** | Key on the provider context's `(os, arch)`. |
 | `jmp_buf` frame buffer size | `runtime/sfn/exception.sfn` (was 256, now 512); `llvm/lowering/instructions_try.sfn`, `llvm/lowering/emission.sfn`, and `llvm/lowering/lowering_core/test_harness.sfn` stack allocas (was 256, now 512) | 200 fits | **~312 overruns** | **Done.** Over-allocated to **512** on both the heap buffer (SFN-471) and the three stack allocas (SFN-644) — covers all three targets, needs **no** arch seam; the stack allocas also carry `align 16` for MSVC's `_JUMP_BUFFER` (SFN-549). |
 | `errno` locator symbol | `errno_locator_symbol` | `__errno_location` | `__errno_location` (glibc-common) | none |
 | `CLOCK_MONOTONIC` id | `clock_monotonic_id_value` | 1 | 1 (glibc-common) | none |
@@ -172,7 +175,7 @@ arm64 runner**, because clang on the arm runner is already native aarch64:
    binary that runs under qemu but **is arch-aware**.
 3. **Stage 2 — first native aarch64 compiler B (pass-1).** Compiler A (under
    qemu) builds the compiler from source targeting the native host. Because A is
-   arch-aware and its `_host_arch()` probes the **real aarch64 host filesystem**,
+   arch-aware and its driver-side resolver probes the **real aarch64 host filesystem**,
    it bakes `st_mode = 16` and the runtime source's 512-byte `jmp_buf` — so
    **pass-1 is already arch-correct**, emitted by an arch-aware compiler. clang
    compiles it to native aarch64.
@@ -225,24 +228,27 @@ x86_64`** and hardcodes `/usr/lib/x86_64-linux-gnu` multiarch dirs +
 performance optimization, **not** a correctness blocker. It is therefore
 **deferred, in-scope-but-optional** (§5, Issue 5, `Performance`): teach the arch
 gate + `aarch64-linux-gnu` multiarch dirs + `/lib/ld-linux-aarch64.so.1` + an
-aarch64 `_gcc_crt_dir` probe, reusing `_host_arch()`. It can land any time after
+aarch64 `_gcc_crt_dir` probe, reusing the provider target-architecture resolver.
+It can land any time after
 the seam (Issue 1) and does not gate the seed, the self-host, or the release.
 
 ## 4. Effect & capability impact
 
 None. Effects and capability enforcement are arch-invariant; this epic is a
-backend/runtime-platform port. `_host_arch()` and the layout resolvers are
-ordinary `![io]` filesystem probes, consistent with the existing `_host_os()`
-locators. The three pillars (effects, capabilities, concurrency) are untouched.
+backend/runtime-platform port. The driver-side target-architecture resolver is
+an ordinary `![io]` filesystem probe; the LLVM provider consumes only the pure
+resolved context. The three pillars (effects, capabilities, concurrency) are
+untouched.
 
 ## 5. Self-hosting impact
 
 Every change is **additive and arch-gated**, so Linux-x86_64 and macOS-arm64
 self-host stay green at every step:
 
-- `llvm/lowering_debug_state.sfn` — adds `_host_arch()` + `SAILFIN_TARGET_ARCH`
-  and re-keys `stat_st_mode_offset_value` on `(os, arch)`. The x86_64 branch
-  returns 24 as before → **byte-identical** emitted IR on Tier 1.
+- `build/llvm_provider_context.sfn` resolves `SAILFIN_TARGET_ARCH` and passes it
+  into LLVM; `llvm/lowering_debug_state.sfn` keys
+  `stat_st_mode_offset_value` on `(os, arch)`. The x86_64 branch returns 24 as
+  before → **byte-identical** emitted IR on Tier 1.
 - `runtime/sfn/exception.sfn` — the `jmp_buf` buffer constant grew 256 → 512
   (shipped, SFN-471). Plain Sailfin source; the old x86_64 seed compiling the
   new source produces a larger, still-correct allocation. No compiler-baked
@@ -269,7 +275,7 @@ before merge.
 - **Compile-time arch constants / a `cfg`-style split** (per SFEP-0025 §2.9 Q7's
   per-target `.sfn` files). Rejected for now: Sailfin has no conditional
   compilation, and a runtime filesystem-marker probe (matching the shipped
-  `_host_os()` seam) keeps a single binary correct on every host with no new
+  host-OS seam) keeps a single binary correct on every host with no new
   machinery — exactly the trade SFN-49 already made for host-OS.
 - **A `uname(2)`/`GetNativeSystemInfo` runtime primitive** for arch. Rejected as
   overkill: it adds an FFI binding for a value a loader-path probe already yields,
@@ -299,8 +305,8 @@ This epic ports an existing pipeline to a new target rather than adding a
 language construct; the checklist maps to the port surface:
 
 - [ ] Parses — n/a (no new syntax)
-- [ ] Type-checks / effect-checks — `_host_arch()` and resolvers are ordinary
-      `![io]` fns; `sfn check` clean
+- [ ] Type-checks / effect-checks — driver target resolvers are ordinary
+      `![io]` fns and provider decisions are pure; `sfn check` clean
 - [ ] Emits valid `.sfn-asm` — n/a (arch-neutral IR unchanged)
 - [ ] Lowers to LLVM IR — `st_mode` offset re-keyed; verified by a forced-arch
       snapshot (§8)
@@ -344,8 +350,9 @@ language construct; the checklist maps to the port surface:
   discipline (§3.4).
 - Code: `install.sh` (arch detection, already arm64-ready), `Makefile`
   `fetch-seed`, `runtime/sfn/exception.sfn` (`jmp_buf`),
-  `compiler/src/llvm/lowering_debug_state.sfn` (`_host_os`, `stat_st_mode_offset_value`,
-  errno/clock/nproc locators), `compiler/src/build/target.sfn` /
+  `compiler/src/llvm/lowering_debug_state.sfn` (`stat_st_mode_offset_value`,
+  errno/clock/nproc decisions), `compiler/src/build/llvm_provider_context.sfn`,
+  `compiler/src/build/target.sfn` /
   `direct_link.sfn` / `clang_argv.sfn`, `compiler/src/cli/commands/package.sfn`
   and `toolchain.sfn` (client arch maps), `.github/workflows/release-tag.yml` /
   `release-branches.yml` / `ci.yml`, `site/.../getting-started/install.md`,

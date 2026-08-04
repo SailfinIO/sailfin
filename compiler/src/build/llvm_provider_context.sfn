@@ -1,0 +1,32 @@
+// compiler/src/build/llvm_provider_context.sfn
+//
+// Driver-side resolution for the LLVM provider's primitive input context.
+// Target and debug/test state remain compiler-driver concerns; codegen-LLVM
+// receives the resolved snapshot and owns only pure lowering decisions.
+import { _env_flag, _get_env_cmd, _legacy_flag_file } from "../build_flags";
+import { LLVMProviderContext } from "../llvm/lowering_debug_state";
+import { test_runner_active, test_runner_trace } from "../test_runner_state";
+import { build_target_os } from "./target";
+
+fn _resolve_llvm_target_arch() -> string ![io] {
+    let target_override = _get_env_cmd("SAILFIN_TARGET_ARCH");
+    if target_override.length > 0 { return target_override; }
+    if fs.exists("/lib/ld-linux-aarch64.so.1") { return "aarch64"; }
+    return "x86_64";
+}
+
+fn resolve_llvm_provider_context() -> LLVMProviderContext ![io] {
+    return LLVMProviderContext {
+        target_os: build_target_os(),
+        target_arch: _resolve_llvm_target_arch(),
+        trace_lowering: _env_flag("SAILFIN_TRACE_LOWERING") || _legacy_flag_file("build/sailfin/.trace_lowering"),
+        trace_call_lowering: _env_flag("SAILFIN_TRACE_CALL_LOWERING")
+            || _legacy_flag_file("build/sailfin/.trace_call_lowering"),
+        skip_module_globals: _env_flag("SAILFIN_SKIP_MODULE_GLOBALS")
+            || _legacy_flag_file("build/sailfin/.skip_module_globals"),
+        test_runner_active: test_runner_active(),
+        test_runner_trace: test_runner_trace()
+    };
+}
+
+export { resolve_llvm_provider_context };

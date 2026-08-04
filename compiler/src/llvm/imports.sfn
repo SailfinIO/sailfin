@@ -10,7 +10,7 @@ import {
 } from "../native_ir";
 import { parse_layout_manifest, parse_native_imports_for_import } from "../native_ir_api";
 import { substring } from "../string_utils";
-import { test_runner_trace } from "../test_runner_state";
+import { test_runner_trace } from "./lowering_debug_state";
 import { ImportedModuleContext, LayoutManifestApplication } from "./types";
 import {
     append_string,
