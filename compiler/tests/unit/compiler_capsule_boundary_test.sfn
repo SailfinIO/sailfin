@@ -52,21 +52,6 @@ fn _boundary_exception(importer: string, importee: string, seam: string) -> Boun
 fn _boundary_exceptions() -> BoundaryException[] {
     let mut out: BoundaryException[] = [];
 
-    // SFEP-0020 §3.5.2 / SFN-709: artifact and module interchange shapes are
-    // still constructed in target-neutral emit modules instead of owned by IR.
-    let artifact = "IR artifact contracts remain codegen-owned (SFN-709)";
-    out.push(_boundary_exception("native_ir_api", "emit_native_layout", artifact));
-    out.push(_boundary_exception("llvm/lowering/lowering_phase_sanitize", "emit_native", artifact));
-    out.push(_boundary_exception("llvm/lowering/entrypoints_tests", "emit_native", artifact));
-    out.push(_boundary_exception("llvm/lowering/entrypoints_tests_writer", "emit_native", artifact));
-    out.push(_boundary_exception("llvm/lowering/entrypoints", "emit_native", artifact));
-    out.push(_boundary_exception("llvm/lowering/lowering_helpers", "emit_native", artifact));
-    out.push(_boundary_exception("llvm/lowering/lowering_core/mod", "emit_native", artifact));
-    out.push(_boundary_exception("llvm/lowering/lowering_core/file_emission", "emit_native", artifact));
-    out.push(_boundary_exception("llvm/lowering/lowering_core/file_emission", "emit_native_layout", artifact));
-    out.push(_boundary_exception("llvm/lowering/lowering_core/file_emission", "emit_native_state", artifact));
-    out.push(_boundary_exception("llvm/lowering/lowering_core/test_harness", "emit_native", artifact));
-
     // SFEP-0020 §3.5.4 / SFN-711: closure preparation still crosses both
     // directions of the LLVM boundary.
     let closures = "lambda capture preparation still crosses the LLVM boundary (SFN-711)";

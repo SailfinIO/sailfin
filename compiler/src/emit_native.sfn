@@ -45,7 +45,6 @@ import {
     render_native_specifiers
 } from "./emit_native_format";
 import {
-    NativeArtifact,
     build_layout_context,
     compute_enum_layout_lines,
     compute_struct_layout_lines,
@@ -60,8 +59,6 @@ import {
     builder_to_string,
     join_type_annotations,
     join_with_separator,
-    lines_to_native_text,
-    native_lines_have_text,
     number_to_string,
     state_add_diag,
     state_emit_blank,
@@ -85,16 +82,11 @@ import {
 // `mod.sfn` barrel audit lands, any *new* import from this
 // subtree should likewise target the leaf file directly.
 import { lift_non_capturing_lambdas } from "./llvm/expression_lowering/native/lambda_lowering";
+import { NativeArtifact, NativeModule } from "./native_ir";
+import { lines_to_native_text, native_lines_have_text } from "./native_ir_utils_text";
 import { char_code } from "./string_utils";
 
 // ── Public data structures ───────────────────────────────────────────
-struct NativeModule {
-    module_name: string;
-    artifacts: NativeArtifact[];
-    entry_points: string[];
-    symbol_count: int;
-}
-
 struct EmitNativeResult {
     module: NativeModule;
     diagnostics: string[];

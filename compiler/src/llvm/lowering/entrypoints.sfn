@@ -1,9 +1,9 @@
 // compiler/src/llvm/lowering/entrypoints.sfn
 //
 // LLVM IR lowering entrypoints — public API surface.
-import { NativeArtifact, NativeModule } from "../../emit_native";
 import {
     LayoutManifest,
+    NativeArtifact,
     NativeBinding,
     NativeEnum,
     NativeFunction,
@@ -11,6 +11,7 @@ import {
     NativeImportSpecifier,
     NativeInstruction,
     NativeInterface,
+    NativeModule,
     NativeParameter,
     NativeStruct,
     NativeStructField,

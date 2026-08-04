@@ -31,6 +31,8 @@ export {
     index_of,
     strip_quotes,
     split_lines,
+    lines_to_native_text,
+    native_lines_have_text,
     strip_generics,
     last_index_of,
     split_text,
@@ -131,6 +133,40 @@ fn split_lines(value: string) -> string[] {
     }
     lines.push(substring(value, start, value_len));
     return lines;
+}
+
+// Join native-IR lines with the artifact format's trailing-newline contract.
+// This lives with the IR renderer/parser text helpers so emit and lowering can
+// share the serialized contract without a reverse dependency on codegen.
+fn lines_to_native_text(lines: string[]) -> string {
+    if lines == null { return ""; }
+    if lines.length == 0 { return ""; }
+    let mut current = lines;
+    loop {
+        if current.length <= 1 { break; }
+        let mut next: string[] = [];
+        let mut index: int = 0;
+        loop {
+            if index >= current.length { break; }
+            if index + 1 < current.length {
+                next.push(current[index] + "\n" + current[index + 1]);
+            } else { next.push(current[index]); }
+            index += 2;
+        }
+        current = next;
+    }
+    let content = current[0];
+    if content.length == 0 { return ""; }
+    return content + "\n";
+}
+
+// True iff `lines_to_native_text(lines)` would be non-empty, without
+// materializing the joined artifact.
+fn native_lines_have_text(lines: string[]) -> boolean {
+    if lines == null { return false; }
+    if lines.length == 0 { return false; }
+    if lines.length > 1 { return true; }
+    return lines[0].length > 0;
 }
 
 fn strip_generics(name: string) -> string {

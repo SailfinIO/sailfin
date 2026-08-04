@@ -7,11 +7,10 @@
 // prelude which isn't available in standalone test files. Those are exercised
 // indirectly through the emit_native integration test and the full test suite.
 //
-// Exception (#1817): `lines_to_native_text` / `native_lines_have_text` are
-// pure (no substring/char_code, hence no prelude dependency), so they are
-// imported directly — the equivalence tests below gate the *real*
-// implementations, not local mirrors.
-import { lines_to_native_text, native_lines_have_text } from "../../src/emit_native_state";
+// The IR-owned artifact text helpers are pure (no substring/char_code, hence
+// no prelude dependency), so the equivalence tests below gate the real
+// implementations rather than local mirrors.
+import { lines_to_native_text, native_lines_have_text } from "../../src/native_ir_utils_text";
 
 // ── Local copies of functions under test ─────────────────────────────
 fn _ends_with(value: string, suffix: string) -> boolean {

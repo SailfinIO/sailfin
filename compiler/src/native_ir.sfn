@@ -93,6 +93,22 @@ struct NativeImport {
     specifiers: NativeImportSpecifier[];
 }
 
+// Serialized native-IR interchange contracts. Codegen constructs these
+// values, while parsers, verifiers, analyzer import loading, and target
+// lowering consume them without depending back on the emitter.
+struct NativeArtifact {
+    name: string;
+    format: string;
+    contents: string;
+}
+
+struct NativeModule {
+    module_name: string;
+    artifacts: NativeArtifact[];
+    entry_points: string[];
+    symbol_count: int;
+}
+
 struct NativeStructField {
     name: string;
     type_annotation: string;

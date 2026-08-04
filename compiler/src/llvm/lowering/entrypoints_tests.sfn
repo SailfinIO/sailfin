@@ -5,12 +5,13 @@
 // Dead function bodies were removed to fix OOM during selfhost.
 // Imports are preserved — the seed linker needs the full import graph
 // for correct cross-module symbol resolution.
-import { NativeArtifact, NativeModule } from "../../emit_native";
 import {
     LayoutManifest,
+    NativeArtifact,
     NativeEnum,
     NativeFunction,
     NativeInterface,
+    NativeModule,
     NativeStruct,
     ParseNativeResult
 } from "../../native_ir";

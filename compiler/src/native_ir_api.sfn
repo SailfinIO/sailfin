@@ -3,12 +3,12 @@
 // Public API entry points for `.sfn-asm` parsing.
 // Thin wrappers around parse_native_artifact_impl (in native_ir_parser)
 // plus the layout-manifest parser.
-import { NativeArtifact } from "./emit_native_layout";
 import {
     EnumLayoutHeaderParse,
     EnumLayoutPayloadParse,
     EnumLayoutVariantParse,
     LayoutManifest,
+    NativeArtifact,
     NativeBinding,
     NativeEnum,
     NativeEnumLayout,
