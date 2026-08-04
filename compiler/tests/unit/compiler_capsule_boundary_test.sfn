@@ -69,10 +69,6 @@ fn _boundary_exceptions() -> BoundaryException[] {
     out.push(_boundary_exception("llvm/lowering/lowering_core/mod", "test_runner_state", context));
     out.push(_boundary_exception("llvm/lowering/lowering_core/test_harness", "build/target", context));
 
-    // SFEP-0020 §3.5.6: the analyzer-side prelude scanner borrows a line
-    // splitter from driver presentation code.
-    out.push(_boundary_exception("prelude_scan", "diagnostics_render", "analyzer line splitting remains driver-renderer-owned (SFN-717)"));
-
     // SFEP-0020 §3.4/§3.5.6 assigns diagnostic data contracts to analyzer.
     // LLVM still consumes those contracts directly instead of receiving
     // provider-owned lowering diagnostics through its IR-facing boundary.

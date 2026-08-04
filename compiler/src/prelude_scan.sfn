@@ -11,8 +11,44 @@
 // everything at column 0 and uses only `//` line comments, so a leading
 // `fn ` / `let ` / `extern fn ` / `unsafe extern fn ` uniquely marks a
 // top-level declaration.
-import { split_source_lines } from "./diagnostics_render";
 import { substring } from "./string_utils";
+
+// Keep source segmentation with the pure scanner rather than borrowing the
+// driver renderer's presentation helper. Runtime sources may use LF, CRLF, or
+// CR line endings, and a trailing terminator preserves the final empty line.
+fn _ps_split_source_lines(source: string) -> string[] {
+    let mut lines: string[] = [];
+    let mut current: string = "";
+    let mut index: int = 0;
+    loop {
+        if index >= source.length { break; }
+        let next_index = index + 1;
+        let ch = substring(source, index, next_index);
+        if ch == "\r" {
+            lines.push(current);
+            current = "";
+            if next_index < source.length {
+                let after_next = index + 2;
+                if substring(source, next_index, after_next) == "\n" {
+                    index += 2;
+                    continue;
+                }
+            }
+            index += 1;
+            continue;
+        }
+        if ch == "\n" {
+            lines.push(current);
+            current = "";
+            index += 1;
+            continue;
+        }
+        current = current + ch;
+        index += 1;
+    }
+    lines.push(current);
+    return lines;
+}
 
 fn _ps_is_ident_char(ch: string) -> boolean {
     if ch.length == 0 { return false; }
@@ -65,7 +101,7 @@ fn _ps_name_after_prefix(line: string, prefix: string) -> string {
 // for each.
 fn prelude_global_names_from_source(source: string) -> string[] {
     let mut names: string[] = [];
-    let lines = split_source_lines(source);
+    let lines = _ps_split_source_lines(source);
     let mut i: int = 0;
     loop {
         if i >= lines.length { break; }
