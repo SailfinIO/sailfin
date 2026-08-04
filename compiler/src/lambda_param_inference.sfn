@@ -1,4 +1,4 @@
-// compiler/src/llvm/expression_lowering/native/lambda_param_inference.sfn
+// compiler/src/lambda_param_inference.sfn
 //
 // Untyped-lambda parameter/return type backfill (issue #1683, bundled with
 // the SFEP-0029 `fn(x) => expr` short form).
@@ -34,110 +34,14 @@ import {
     Program,
     Statement,
     TypeAnnotation
-} from "../../../ast";
-import { infer_expression_type } from "../../../emit_native_format";
-import { index_of, substring } from "../../../string_utils";
-import { ends_with, starts_with, trim_text } from "../../utils";
-
-// ── fn-type text splitter ────────────────────────────────────────────
-//
-// Splits a function-type annotation text (`fn(int, string) -> bool`) into its
-// parameter type texts and return type text. No existing helper does this —
-// function types map wholesale to `{i8*, i8*}` in `type_mapping.sfn`. This is
-// a deliberately total, textual splitter: it never throws and returns
-// `ok: false` on anything it does not recognise (the caller then no-ops).
-struct FnTypeParts {
-    ok: boolean;
-    param_types: string[];
-    return_type: string;
-}
-
-fn parse_fn_type_text(text: string) -> FnTypeParts {
-    let trimmed = trim_text(text);
-    // `sfn fmt` normalises `fn(` to `fn (`; accept either spelling.
-    let mut params_start: int = -1;
-    if starts_with(trimmed, "fn(") { params_start = 3; } else if starts_with(trimmed, "fn (") {
-        params_start = 4;
-    }
-    if params_start < 0 {
-        return FnTypeParts { ok: false, param_types: [], return_type: "" };
-    }
-
-    // Depth-match the opening `(` so a nested fn-type / generic param does
-    // not terminate the list early. The opening paren is already consumed,
-    // so depth starts at 1.
-    let mut depth: int = 1;
-    let mut cursor: int = params_start;
-    let mut params_end: int = -1;
-    loop {
-        if cursor >= trimmed.length { break; }
-        let ch = substring(trimmed, cursor, cursor + 1);
-        if ch == "(" { depth += 1; } else if ch == ")" {
-            depth -= 1;
-            if depth == 0 {
-                params_end = cursor;
-                break;
-            }
-        }
-        cursor += 1;
-    }
-    if params_end < 0 {
-        return FnTypeParts { ok: false, param_types: [], return_type: "" };
-    }
-
-    let params_text = trim_text(substring(trimmed, params_start, params_end));
-    let param_types = _split_top_level_commas(params_text);
-    let after = trim_text(substring(trimmed, params_end + 1, trimmed.length));
-    let mut return_type: string = "";
-    if starts_with(after, "->") {
-        return_type = trim_text(substring(after, 2, after.length));
-    } else if starts_with(after, ":") {
-        // `:` return separator tolerance (SFEP-0005) — harmless leniency.
-        return_type = trim_text(substring(after, 1, after.length));
-    }
-    return FnTypeParts {
-        ok: true,
-        param_types: param_types,
-        return_type: return_type
-    };
-}
-
-// Split `text` on top-level commas only — depth-balanced over `()`, `<>`,
-// and `[]` so `Map<string, int>`, `fn(int, int) -> int`, and `int[]` inside a
-// parameter list never split on an inner comma. An empty/whitespace text
-// yields zero segments.
-fn _split_top_level_commas(text: string) -> string[] {
-    let mut result: string[] = [];
-    if trim_text(text).length == 0 { return result; }
-    let mut paren: int = 0;
-    let mut angle: int = 0;
-    let mut bracket: int = 0;
-    let mut start: int = 0;
-    let mut i: int = 0;
-    loop {
-        if i >= text.length { break; }
-        let ch = substring(text, i, i + 1);
-        if ch == "(" { paren += 1; } else if ch == ")" {
-            if paren > 0 { paren -= 1; }
-        } else if ch == "<" { angle += 1; } else if ch == ">" {
-            if angle > 0 { angle -= 1; }
-        } else if ch == "[" { bracket += 1; } else if ch == "]" {
-            if bracket > 0 { bracket -= 1; }
-        } else if ch == "," {
-            if paren == 0 {
-                if angle == 0 {
-                    if bracket == 0 {
-                        result.push(trim_text(substring(text, start, i)));
-                        start = i + 1;
-                    }
-                }
-            }
-        }
-        i += 1;
-    }
-    result.push(trim_text(substring(text, start, text.length)));
-    return result;
-}
+} from "./ast";
+import { infer_expression_type } from "./emit_native_format";
+import {
+    ends_with,
+    index_of,
+    parse_fn_type_text,
+    trim_text
+} from "./native_ir_utils_text";
 
 // Strip a leading `name:` from a function-type parameter segment so a named
 // fn-type param (`fn(x: int) -> int`) yields the bare type `int`, matching the
@@ -705,7 +609,6 @@ fn _expected_arg_fn_type(callee: Expression, arg_index: int, signatures: FnSigEn
 export {
     BindingEntry,
     FnSigEntry,
-    FnTypeParts,
     array_builtin_expected_fn_type,
     backfill_call_argument,
     backfill_lambda_from_fn_type,
@@ -714,6 +617,5 @@ export {
     build_fn_signature_table,
     declared_binding_type,
     lookup_binding_type,
-    parse_fn_type_text,
     receiver_element_type
 };

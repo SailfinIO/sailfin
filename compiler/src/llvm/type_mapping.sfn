@@ -601,8 +601,8 @@ fn map_type_annotation(annotation: string) -> string {
     // silent default rather than a hard failure because lowering also calls
     // this with SYNTHETIC annotations carrying LLVM type text that no typecheck
     // pass ever sees — `TypeAnnotation { text: "i8*" }` for a lambda's `__env`
-    // parameter (expression_lowering/native/lambda_lowering.sfn:516) and
-    // `closure_sentinel_type_text()` (:1359). Asserting here would reject those.
+    // parameter (`lambda_lowering.sfn`) and the synthetic closure sentinel.
+    // Asserting here would reject those.
     return "i8*";
 }
 

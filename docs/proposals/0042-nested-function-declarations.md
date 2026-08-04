@@ -74,7 +74,7 @@ There are two established designs:
 Sailfin already has the closure half of Rust's split: `let f = fn(x) => expr`
 and the block form `let f = fn(x) -> T { ... }` capture enclosing variables
 (SFEP-0029; capturing-lambda lifting in
-`llvm/expression_lowering/native/lambda_lowering.sfn`). What it lacks is the
+`lambda_lowering.sfn`). What it lacks is the
 **named static** half. Adopting Go's capturing-closure-only model would either
 duplicate what `let`-lambdas already do or silently make `fn name` capture —
 reintroducing the by-reference footgun and forcing a heap-allocated environment
@@ -230,7 +230,7 @@ Three sub-changes, all additive:
    scope with the fn's parameters and walks the body — reuse its
    `extend_with_parameters` shape to build the restricted scope.
 
-#### S3 — Emit / lift (`compiler/src/llvm/expression_lowering/native/lambda_lowering.sfn`, called from `emit_native.sfn`)
+#### S3 — Emit / lift (`compiler/src/lambda_lowering.sfn`, called from `emit_native.sfn`)
 
 Reuse the **shape** of `lift_non_capturing_lambdas` (`lambda_lowering.sfn:123`,
 invoked from `emit_native.sfn:111,166`) but with a simpler target. That pass

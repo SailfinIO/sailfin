@@ -2,7 +2,7 @@
 //
 // Golden IR fixtures for the closure env-struct emission helpers
 // introduced in stage A2 of #450 M1.5 (issue #459). Each test
-// feeds a synthetic `Capture[]` through the public API exported by
+// feeds a synthetic `NativeLambdaCapture[]` through the public API exported by
 // `compiler/src/llvm/closures.sfn` and pins the rendered LLVM IR
 // against the canonical shape documented in
 // `docs/proposals/0025-native-runtime-architecture.md` `#393-typed-closures`.
@@ -30,7 +30,6 @@
 // emitted env struct into a callable closure pair. Until then, the
 // emit pipeline never invokes these helpers — the tests pin the
 // API surface so A3 can rely on a settled IR shape.
-import { Capture } from "../../src/ast";
 import {
     ClosureCaptureOperand,
     closure_env_type_name,
@@ -39,74 +38,68 @@ import {
     emit_closure_env_load_prologue,
     synthesize_closure_env_struct
 } from "../../src/llvm/closures";
+import { NativeLambdaCapture } from "../../src/native_ir";
 
-fn _capture_int(name: string) -> Capture {
-    return Capture {
+fn _capture_int(name: string) -> NativeLambdaCapture {
+    return NativeLambdaCapture {
         name: name,
         type_text: "int",
         by_value: true,
-        mutable: false,
-        span: null
+        mutable: false
     };
 }
 
-fn _capture_int_mut(name: string) -> Capture {
-    return Capture {
+fn _capture_int_mut(name: string) -> NativeLambdaCapture {
+    return NativeLambdaCapture {
         name: name,
         type_text: "int",
         by_value: true,
-        mutable: true,
-        span: null
+        mutable: true
     };
 }
 
-fn _capture_bool(name: string) -> Capture {
-    return Capture {
+fn _capture_bool(name: string) -> NativeLambdaCapture {
+    return NativeLambdaCapture {
         name: name,
         type_text: "boolean",
         by_value: true,
-        mutable: false,
-        span: null
+        mutable: false
     };
 }
 
-fn _capture_float(name: string) -> Capture {
-    return Capture {
+fn _capture_float(name: string) -> NativeLambdaCapture {
+    return NativeLambdaCapture {
         name: name,
         type_text: "float",
         by_value: true,
-        mutable: false,
-        span: null
+        mutable: false
     };
 }
 
-fn _capture_string(name: string) -> Capture {
-    return Capture {
+fn _capture_string(name: string) -> NativeLambdaCapture {
+    return NativeLambdaCapture {
         name: name,
         type_text: "string",
         by_value: true,
-        mutable: false,
-        span: null
+        mutable: false
     };
 }
 
-fn _capture_user_pointer(name: string, type_text: string) -> Capture {
-    return Capture {
+fn _capture_user_pointer(name: string, type_text: string) -> NativeLambdaCapture {
+    return NativeLambdaCapture {
         name: name,
         type_text: type_text,
         by_value: false,
-        mutable: false,
-        span: null
+        mutable: false
     };
 }
 
-fn _capture_untyped(name: string) -> Capture {
-    return Capture {
+fn _capture_untyped(name: string) -> NativeLambdaCapture {
+    return NativeLambdaCapture {
         name: name,
         type_text: "",
         by_value: true,
-        mutable: false,
-        span: null
+        mutable: false
     };
 }
 
@@ -139,7 +132,7 @@ test "closure_env: user-type annotation lowers to %T* pointer field" {
 
 // ── Empty-capture regression guard ───────────────────────────────────
 test "closure_env: empty captures produce an is_empty layout with no decl" {
-    let empty: Capture[] = [];
+    let empty: NativeLambdaCapture[] = [];
     let layout = synthesize_closure_env_struct(empty, 0);
     assert layout.is_empty;
     assert layout.type_decl == "";
@@ -148,7 +141,7 @@ test "closure_env: empty captures produce an is_empty layout with no decl" {
 }
 
 test "closure_env: empty layout emits no alloc lines (non-capturing lambda guard)" {
-    let empty: Capture[] = [];
+    let empty: NativeLambdaCapture[] = [];
     let layout = synthesize_closure_env_struct(empty, 3);
     let no_operands: ClosureCaptureOperand[] = [];
     let result = emit_closure_env_alloc(layout, no_operands, 0);
@@ -159,7 +152,7 @@ test "closure_env: empty layout emits no alloc lines (non-capturing lambda guard
 }
 
 test "closure_env: empty layout emits no prologue (non-capturing lambda guard)" {
-    let empty: Capture[] = [];
+    let empty: NativeLambdaCapture[] = [];
     let layout = synthesize_closure_env_struct(empty, 5);
     let result = emit_closure_env_load_prologue(layout, "%env_raw", 0);
     assert result.lines.length == 0;
@@ -169,7 +162,7 @@ test "closure_env: empty layout emits no prologue (non-capturing lambda guard)" 
 
 // ── Single-capture struct shape ──────────────────────────────────────
 test "closure_env: single-int capture renders %sfn_closure_env_0 = type { i64 }" {
-    let captures: Capture[] = [_capture_int("x")];
+    let captures: NativeLambdaCapture[] = [_capture_int("x")];
     let layout = synthesize_closure_env_struct(captures, 0);
     assert ! layout.is_empty;
     assert layout.type_name == "%sfn_closure_env_0";
@@ -182,7 +175,7 @@ test "closure_env: single-int capture renders %sfn_closure_env_0 = type { i64 }"
 
 // ── Multi-capture deterministic ordering ─────────────────────────────
 test "closure_env: multi-capture preserves capture-set order in the struct decl" {
-    let captures: Capture[] = [_capture_int("a"), _capture_bool("flag"), _capture_float("ratio"), _capture_string("label")];
+    let captures: NativeLambdaCapture[] = [_capture_int("a"), _capture_bool("flag"), _capture_float("ratio"), _capture_string("label")];
     let layout = synthesize_closure_env_struct(captures, 1);
     assert layout.type_name == "%sfn_closure_env_1";
     assert layout.type_decl == "%sfn_closure_env_1 = type { i64, i1, double, i8* }";
@@ -198,21 +191,21 @@ test "closure_env: multi-capture preserves capture-set order in the struct decl"
 }
 
 test "closure_env: heap-pointer capture lowers to %T* in the struct decl" {
-    let captures: Capture[] = [_capture_int("count"), _capture_user_pointer("acc", "Buffer")];
+    let captures: NativeLambdaCapture[] = [_capture_int("count"), _capture_user_pointer("acc", "Buffer")];
     let layout = synthesize_closure_env_struct(captures, 2);
     assert layout.type_decl == "%sfn_closure_env_2 = type { i64, %Buffer* }";
     assert layout.fields[1].llvm_type == "%Buffer*";
     assert ! layout.fields[1].by_value;
 }
 
-// `Capture.mutable` flows through to `ClosureEnvField.mutable`
+// `NativeLambdaCapture.mutable` flows through to `ClosureEnvField.mutable`
 // so stage A3 (#460) can wire the mutating-capture diagnostic
 // without re-running `analyze_lambda_captures`. Per the briefing
 // comment on #459, mutable is informational here — but losing it
 // would force A3 to re-derive scope information from the source
 // that A1 already walked.
-test "closure_env: Capture.mutable propagates onto the field record" {
-    let captures: Capture[] = [_capture_int("read_only"), _capture_int_mut("counter")];
+test "closure_env: NativeLambdaCapture.mutable propagates onto the field record" {
+    let captures: NativeLambdaCapture[] = [_capture_int("read_only"), _capture_int_mut("counter")];
     let layout = synthesize_closure_env_struct(captures, 8);
     assert layout.fields[0].name == "read_only";
     assert ! layout.fields[0].mutable;
@@ -222,7 +215,7 @@ test "closure_env: Capture.mutable propagates onto the field record" {
 
 // ── Env allocation walk at the lambda expression site ────────────────
 test "closure_env: single-capture alloc emits size-via-GEP-null + alloc + populate" {
-    let captures: Capture[] = [_capture_int("x")];
+    let captures: NativeLambdaCapture[] = [_capture_int("x")];
     let layout = synthesize_closure_env_struct(captures, 0);
     let operands: ClosureCaptureOperand[] = [ClosureCaptureOperand {
         name: "x", llvm_value: "%x_local", llvm_type: ""
@@ -241,7 +234,7 @@ test "closure_env: single-capture alloc emits size-via-GEP-null + alloc + popula
 }
 
 test "closure_env: multi-capture alloc populates each field in capture-set order" {
-    let captures: Capture[] = [_capture_int("a"), _capture_bool("flag")];
+    let captures: NativeLambdaCapture[] = [_capture_int("a"), _capture_bool("flag")];
     let layout = synthesize_closure_env_struct(captures, 4);
     let operands: ClosureCaptureOperand[] = [ClosureCaptureOperand {
         name: "a", llvm_value: "%a", llvm_type: ""
@@ -263,7 +256,7 @@ test "closure_env: multi-capture alloc populates each field in capture-set order
 }
 
 test "closure_env: missing operand falls back to deterministic zero-init store" {
-    let captures: Capture[] = [_capture_int("count"), _capture_user_pointer("acc", "Buffer")];
+    let captures: NativeLambdaCapture[] = [_capture_int("count"), _capture_user_pointer("acc", "Buffer")];
     let layout = synthesize_closure_env_struct(captures, 6);
     let operands: ClosureCaptureOperand[] = [];
     let result = emit_closure_env_alloc(layout, operands, 0);
@@ -274,7 +267,7 @@ test "closure_env: missing operand falls back to deterministic zero-init store" 
 
 // ── Env-load prologue inside the lifted lambda body ──────────────────
 test "closure_env: prologue bitcasts env param then loads each capture" {
-    let captures: Capture[] = [_capture_int("x"), _capture_string("label")];
+    let captures: NativeLambdaCapture[] = [_capture_int("x"), _capture_string("label")];
     let layout = synthesize_closure_env_struct(captures, 0);
     let result = emit_closure_env_load_prologue(layout, "%env_raw", 0);
     // 1 bitcast + 2 fields * (gep + load) = 5 lines
@@ -295,7 +288,7 @@ test "closure_env: prologue bitcasts env param then loads each capture" {
 }
 
 test "closure_env: prologue threads custom env-param SSA name through bitcast" {
-    let captures: Capture[] = [_capture_int("counter")];
+    let captures: NativeLambdaCapture[] = [_capture_int("counter")];
     let layout = synthesize_closure_env_struct(captures, 9);
     let result = emit_closure_env_load_prologue(layout, "%captures_ptr", 5);
     assert result.lines[0] == "  %t5 = bitcast i8* %captures_ptr to %sfn_closure_env_9*";

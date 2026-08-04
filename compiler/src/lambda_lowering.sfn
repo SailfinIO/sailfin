@@ -1,4 +1,4 @@
-// compiler/src/llvm/expression_lowering/native/lambda_lowering.sfn
+// compiler/src/lambda_lowering.sfn
 //
 // Lambda-lifting pass for non-capturing lambdas (issue #686, M1.5
 // A3-part-1 of #450). Runs as a pre-pass over the AST inside
@@ -9,11 +9,8 @@
 //   1. Synthesises a top-level `Statement.FunctionDeclaration`
 //      named `sfn_lambda_<N>` with a hidden `__env: i8*` first
 //      parameter (unused) followed by the lambda's own parameters.
-//      The body is re-parsed from `lambda.body.tokens` here to
-//      rebuild the statement list this pass mutates. Since #520 the
-//      parser populates `lambda.body.statements` directly, so this
-//      re-parse is now redundant and can be retired in a follow-up
-//      that reads `body.statements` instead.
+//      The body is consumed from the parser-populated structured block and
+//      rewritten before native IR is emitted.
 //   2. Replaces the in-tree `Expression.Lambda` with
 //      `Expression.Raw { text: "<closure_pair @sfn_lambda_<N> null>" }`.
 //      The Raw marker rides through `format_expression` verbatim
@@ -56,12 +53,8 @@ import {
     Statement,
     TypeAnnotation,
     WithClause
-} from "../../../ast";
-import { parse_block } from "../../../parser/statements";
-import { Parser } from "../../../parser/types";
-import { LambdaCaptureRecord, analyze_lambda_captures } from "../../../typecheck_captures";
-import { percent_escape_capture_text } from "../../closures";
-import { number_to_string } from "../../utils";
+} from "./ast";
+import { number_to_string } from "./emit_native_state";
 import {
     BindingEntry,
     FnSigEntry,
@@ -70,6 +63,8 @@ import {
     build_binding_table,
     build_fn_signature_table
 } from "./lambda_param_inference";
+import { percent_escape_capture_text } from "./native_ir_utils_text";
+import { LambdaCaptureRecord, analyze_lambda_captures } from "./typecheck_captures";
 
 // Mutable walker state threaded through every rewrite call. The
 // counter is module-monotonic and is the source of truth for both
@@ -456,13 +451,10 @@ fn _capture_mode_text(capture: Capture) -> string {
 // non-capturing closures. The parameter is named `__env` to avoid
 // shadowing any user-declared binding.
 //
-// Body re-parse: the parser stashes only raw tokens on the lambda
-// body. `analyze_lambda` in `typecheck_captures.sfn` re-parses via
-// `parse_block` for the same reason; we follow that pattern so the
-// emitted body sees structured statements. The re-parsed body is then
-// rewritten through the lifting walker so lambdas nested inside it are
-// lifted too (#1614) — see `_synthesize_lifted_function_rewritten`.
-// Prepend the env-load prologue marker statement to a re-parsed
+// Lambda bodies are normalized into structured `Block.statements` by syntax
+// before this codegen pass runs. Rewrite that typed structure directly so no
+// source tokens or parser entry points cross into LLVM preparation.
+// Prepend the env-load prologue marker statement to the rewritten
 // lambda body when the lambda has captures. Non-capturing lambdas
 // return the block unchanged so #686's IR shape is preserved.
 //
@@ -491,17 +483,10 @@ fn _prepend_capture_prologue(body: Block, lambda_id: int, captures: Capture[]) -
     };
 }
 
-fn _reparse_lambda_body(body: Block) -> Block {
-    if body.tokens.length == 0 { return body; }
-    let body_parser = Parser { tokens: body.tokens, index: 0 };
-    let parsed = parse_block(body_parser);
-    return parsed.block;
-}
-
 // Synthesise the lifted top-level function for `lambda`, recursively
 // lifting any lambdas NESTED inside its body (#1614). The lambda's own
 // id is `lambda_id`; the incoming `ctx.counter` must already be advanced
-// past it so nested lambdas claim later ids. The re-parsed body is run
+// past it so nested lambdas claim later ids. The structured body is run
 // through `_rewrite_block`, which lifts inner lambdas and appends their
 // synthesised functions to `ctx.lifted` — without this descent, a HOF
 // call nested inside a lifted lambda body (e.g. `outer(fn (s) {
@@ -532,13 +517,12 @@ fn _synthesize_lifted_function_rewritten(ctx: LiftContext, lambda: Expression, l
         name_span: null
     };
 
-    let parsed_body = _reparse_lambda_body(lambda.body);
     // Seed the lambda body with its OWN parameter shadows (#1940): a lambda
     // parameter sharing a name with a sibling nested fn shadows it, so a call to
     // that name invokes the parameter, not the lifted sibling. Callers reset
     // `renames` from their own `ctx`, so the seed never leaks past this body.
     let seeded_ctx = _with_renames(ctx, _shadow_parameters(ctx.renames, lambda.parameters));
-    let rewritten = _rewrite_block(seeded_ctx, parsed_body);
+    let rewritten = _rewrite_block(seeded_ctx, lambda.body);
     let body_with_prologue = _prepend_capture_prologue(rewritten.block, lambda_id, captures);
     let no_decorators: Decorator[] = [];
     let lifted_fn = Statement.FunctionDeclaration {

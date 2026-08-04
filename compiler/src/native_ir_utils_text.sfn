@@ -4,6 +4,15 @@
 // No dependencies on native_ir types.
 import { substring } from "./string_utils";
 
+// Parsed native-IR function type used by codegen lambda normalization and LLVM
+// call lowering. Keeping this textual interchange shape in IR prevents either
+// provider from importing the other's implementation module.
+struct FnTypeParts {
+    ok: boolean;
+    param_types: string[];
+    return_type: string;
+}
+
 // Local implementations of starts_with / strip_prefix so that this module's
 // .sfn-asm contains real `.fn` definitions for them.  When these were pure
 // re-exports (import then export, no local `.fn`), the LLVM lowering of
@@ -14,6 +23,13 @@ fn starts_with(value: string, prefix: string) -> boolean {
     if value.length < prefix.length { return false; }
     let head = substring(value, 0, prefix.length);
     return head == prefix;
+}
+
+fn ends_with(value: string, suffix: string) -> boolean {
+    if suffix.length == 0 { return true; }
+    if value.length < suffix.length { return false; }
+    let start = value.length - suffix.length;
+    return substring(value, start, value.length) == suffix;
 }
 
 fn strip_prefix(value: string, prefix: string) -> string {
@@ -27,6 +43,7 @@ export {
     is_trim_char,
     trim_text,
     starts_with,
+    ends_with,
     strip_prefix,
     index_of,
     strip_quotes,
@@ -41,6 +58,10 @@ export {
     trim_trailing_delimiters,
     maybe_trim_trailing,
     split_top_level_commas,
+    FnTypeParts,
+    parse_fn_type_text,
+    percent_escape_capture_text,
+    percent_unescape_capture_text,
     find_matching_angle,
     find_matching_paren,
     split_whitespace
@@ -74,6 +95,116 @@ fn trim_text(value: string) -> string {
         if end == value.length { return value; }
     }
     return substring(value, start, end);
+}
+
+// Split a function type (`fn(A, B) -> R`) into the parameter type texts and
+// result type carried by native IR. The parser is total: malformed or non-fn
+// text returns `ok: false` so provider callers can keep their existing
+// diagnostic path.
+fn parse_fn_type_text(text: string) -> FnTypeParts {
+    let trimmed = trim_text(text);
+    let mut open_index: int = -1;
+    if starts_with(trimmed, "fn(") { open_index = 2; } else if starts_with(trimmed, "fn (") {
+        open_index = 3;
+    }
+    if open_index < 0 {
+        return FnTypeParts { ok: false, param_types: [], return_type: "" };
+    }
+    let params_end = find_matching_paren(trimmed, open_index);
+    if params_end < 0 {
+        return FnTypeParts { ok: false, param_types: [], return_type: "" };
+    }
+
+    let params_text = trim_text(substring(trimmed, open_index + 1, params_end));
+    let param_types = split_top_level_commas(params_text);
+    let after = trim_text(substring(trimmed, params_end + 1, trimmed.length));
+    let mut return_type: string = "";
+    if starts_with(after, "->") {
+        return_type = trim_text(substring(after, 2, after.length));
+    } else if starts_with(after, ":") {
+        return_type = trim_text(substring(after, 1, after.length));
+    }
+    return FnTypeParts {
+        ok: true,
+        param_types: param_types,
+        return_type: return_type
+    };
+}
+
+// Escape native-IR capture marker delimiters so names and type text remain
+// unambiguous inside `captures=name:type;...` fields.
+fn percent_escape_capture_text(text: string) -> string {
+    let mut buffer: string = "";
+    let mut idx: int = 0;
+    loop {
+        if idx >= text.length { break; }
+        let ch = text[idx];
+        if ch == "%" { buffer = buffer + "%25"; } else if ch == " " {
+            buffer = buffer + "%20";
+        } else if ch == "," { buffer = buffer + "%2C"; } else if ch == ":" {
+            buffer = buffer + "%3A";
+        } else if ch == ";" { buffer = buffer + "%3B"; } else if ch == "<" {
+            buffer = buffer + "%3C";
+        } else if ch == ">" { buffer = buffer + "%3E"; } else {
+            buffer = buffer + ch;
+        }
+        idx += 1;
+    }
+    return buffer;
+}
+
+// Inverse of `percent_escape_capture_text`. Unknown escape sequences remain
+// verbatim so malformed native IR reaches the normal lowering diagnostic path.
+fn percent_unescape_capture_text(text: string) -> string {
+    let mut buffer: string = "";
+    let mut idx: int = 0;
+    loop {
+        if idx >= text.length { break; }
+        let ch = text[idx];
+        if ch != "%" {
+            buffer = buffer + ch;
+            idx += 1;
+            continue;
+        }
+        let mut decoded: boolean = false;
+        if idx + 2 < text.length {
+            let two = substring(text, idx + 1, idx + 3);
+            if two == "25" {
+                buffer = buffer + "%";
+                idx += 3;
+                decoded = true;
+            } else if two == "20" {
+                buffer = buffer + " ";
+                idx += 3;
+                decoded = true;
+            } else if two == "2C" {
+                buffer = buffer + ",";
+                idx += 3;
+                decoded = true;
+            } else if two == "3A" {
+                buffer = buffer + ":";
+                idx += 3;
+                decoded = true;
+            } else if two == "3B" {
+                buffer = buffer + ";";
+                idx += 3;
+                decoded = true;
+            } else if two == "3C" {
+                buffer = buffer + "<";
+                idx += 3;
+                decoded = true;
+            } else if two == "3E" {
+                buffer = buffer + ">";
+                idx += 3;
+                decoded = true;
+            }
+        }
+        if !decoded {
+            buffer = buffer + ch;
+            idx += 1;
+        }
+    }
+    return buffer;
 }
 
 fn index_of(value: string, target: string) -> int {
