@@ -14,6 +14,7 @@ import {
     emit_native_lines_with_module_name,
     emit_native_with_module_name
 } from "../../src/emit_native";
+import { lower_native_lines_to_llvm_artifact } from "../../src/llvm/lowering/entrypoints";
 import { parse_program } from "../../src/parser/mod";
 import { index_of } from "../../src/string_utils";
 
@@ -104,6 +105,8 @@ test "emit_native: the lines path carries the same diags as the module path" ![i
     let program = parse_program(_unresolved_field_source());
     let module_result = emit_native_with_module_name(program, "test_emit_native_diag");
     let lines_result = emit_native_lines_with_module_name(program, "test_emit_native_diag");
+    assert lines_result.artifact_name == module_result.module.artifacts[0].name;
+    assert lines_result.artifact_format == module_result.module.artifacts[0].format;
     assert lines_result.diags.length > 0;
     assert lines_result.diags.length == module_result.diags.length;
     let mut index: int = 0;
@@ -115,6 +118,17 @@ test "emit_native: the lines path carries the same diags as the module path" ![i
         assert lines_result.diags[index].stage == module_result.diags[index].stage;
         index += 1;
     }
+}
+
+test "emit artifacts: LLVM lowering returns identity and lines without a destination" ![io] {
+    let program = parse_program("fn main() -> int { return 0; }");
+    let native = emit_native_lines_with_module_name(program, "artifact_contract_test");
+    let llvm = lower_native_lines_to_llvm_artifact(native.lines, "artifact_contract_test");
+    assert llvm.ok;
+    assert llvm.artifact_name == "module.ll";
+    assert llvm.artifact_format == "llvm-ir-text";
+    assert llvm.lines.length > 0;
+    assert llvm.failure_message.length == 0;
 }
 
 // SFEP-0061 §4 and D2: every previously-untagged site migrates to `note`,

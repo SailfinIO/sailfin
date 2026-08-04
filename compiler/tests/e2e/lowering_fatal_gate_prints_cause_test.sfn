@@ -1,6 +1,6 @@
 // compiler/tests/e2e/lowering_fatal_gate_prints_cause_test.sfn
 //
-// Regression for SFN-529: `write_llvm_ir_for_tests_from_text_with_context`
+// Regression for SFN-529: `lower_llvm_for_tests_from_text_with_context`
 // (the entrypoint behind `sfn test`, `entrypoints_tests_writer.sfn`) used to
 // refuse a build tripping a `[fatal]` lowering diagnostic with a bare
 // `return false` — printing nothing — so `sfn test` on such a source

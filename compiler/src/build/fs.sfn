@@ -170,7 +170,7 @@ fn _atomic_rename_into_place(tmp_path: string, dst_path: string) -> boolean ![io
 }
 
 // A null or empty line array publishes a zero-length artifact, matching
-// the pre-SFN-578 `write_llvm_lines_chunked` contract. `fs.writeLines`
+// the pre-SFN-712 LLVM publication contract. `fs.writeLines`
 // returns early on a null handle without touching the file, so the empty
 // case routes through `fs.writeFile` instead.
 fn _write_lines_or_empty(target: string, lines: string[]) -> void ![io] {

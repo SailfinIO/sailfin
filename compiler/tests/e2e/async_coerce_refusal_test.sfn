@@ -4,10 +4,10 @@
 // Native replacement for the former `test_async_coerce_refusal.sh`
 // (test-infra Phase 3, epic #842; ratchet #1327).
 //
-// Pre-fix, `write_llvm_ir_for_tests_from_text_with_context` (the
+// Pre-fix, `lower_llvm_for_tests_from_text_with_context` (the
 // entrypoint behind `sfn test`) skipped the `has_fatal_lowering_-
-// diagnostic` gate that `write_llvm_ir` and
-// `compile_native_text_to_llvm_file` honor. Result: a `number → int`
+// diagnostic` gate that the non-test LLVM artifact path honors. Result: a
+// `number → int`
 // coercion across an `await` boundary (e.g. `step1() -> number` followed
 // by `step2(input: int)`) emitted the `[fatal]` diagnostic to stderr,
 // then wrote partial IR that ran the corrupted call site anyway — the

@@ -427,7 +427,7 @@ test "publish-lines: empty array publishes a zero-length artifact" ![io] {
     process.run(["mkdir", "-p", scratch]);
     let dst = scratch + "/artifact.ll";
 
-    // Preserves the pre-SFN-578 `write_llvm_lines_chunked` contract: an
+    // Preserves the pre-SFN-712 LLVM publication contract: an
     // empty line array is a successful zero-length publish, not a failure.
     assert _publish_lines_atomic(dst, []);
     assert fs.exists(dst);

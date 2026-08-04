@@ -65,12 +65,6 @@ fn _boundary_exceptions() -> BoundaryException[] {
     out.push(_boundary_exception("llvm/expression_lowering/native/lambda_lowering", "typecheck_captures", closures));
     out.push(_boundary_exception("llvm/expression_lowering/native/core_closure_lowering", "ast", closures));
 
-    // SFEP-0020 §3.5.5 / SFN-712: emit paths still select destinations and
-    // call driver-owned publication helpers.
-    let publication = "code generation still owns driver publication policy (SFN-712)";
-    out.push(_boundary_exception("emit_native", "build/fs", publication));
-    out.push(_boundary_exception("llvm/lowering/lowering_io", "build/fs", publication));
-
     // The monolith also passes target/debug/test state through driver globals.
     // The exact inventory prevents growth while the provider contract is made
     // explicit; it is deliberately separate from persistent publication.
@@ -151,7 +145,7 @@ fn _authority_exception(module: string, token: string, expected_count: int, seam
 fn _append_effect_authority_exceptions(initial: AuthorityException[]) -> AuthorityException[] {
     let mut out = initial;
     let seam = "internal compiler roles still declare I/O effects before capability-free extraction (SFEP-0020 §4)";
-    out.push(_authority_exception("emit_native", "effect:io", 2, seam));
+    out.push(_authority_exception("emit_native", "effect:io", 1, seam));
     out.push(_authority_exception("lexer", "effect:io", 1, seam));
     out.push(_authority_exception("llvm/atomics", "effect:io", 6, seam));
     out.push(_authority_exception("llvm/byte_load", "effect:io", 1, seam));
@@ -193,7 +187,7 @@ fn _append_effect_authority_exceptions(initial: AuthorityException[]) -> Authori
     out.push(_authority_exception("llvm/imports", "effect:io", 6, seam));
     out.push(_authority_exception("llvm/lowering/emission", "effect:io", 1, seam));
     out.push(_authority_exception("llvm/lowering/emission_async", "effect:io", 1, seam));
-    out.push(_authority_exception("llvm/lowering/entrypoints", "effect:io", 15, seam));
+    out.push(_authority_exception("llvm/lowering/entrypoints", "effect:io", 14, seam));
     out.push(_authority_exception("llvm/lowering/entrypoints_tests", "effect:io", 1, seam));
     out.push(_authority_exception("llvm/lowering/entrypoints_tests_writer", "effect:io", 1, seam));
     out.push(_authority_exception("llvm/lowering/instructions", "effect:io", 1, seam));
@@ -213,7 +207,6 @@ fn _append_effect_authority_exceptions(initial: AuthorityException[]) -> Authori
     out.push(_authority_exception("llvm/lowering/lowering_core/test_harness", "effect:io", 1, seam));
     out.push(_authority_exception("llvm/lowering/lowering_helpers", "effect:io", 1, seam));
     out.push(_authority_exception("llvm/lowering/lowering_helpers_mangling", "effect:io", 1, seam));
-    out.push(_authority_exception("llvm/lowering/lowering_io", "effect:io", 2, seam));
     out.push(_authority_exception("llvm/lowering/lowering_phase_functions", "effect:io", 1, seam));
     out.push(_authority_exception("llvm/lowering/lowering_phase_render", "effect:io", 1, seam));
     out.push(_authority_exception("llvm/lowering/lowering_phase_sanitize", "effect:io", 10, seam));
@@ -1494,6 +1487,27 @@ test "capsule boundaries: compiler imports obey the role graph and exact excepti
         if importer_role == ROLE_DRIVER { driver_count += 1; }
         let source = fs.readFile(importer);
         if importer_role != ROLE_DRIVER {
+            // Provider libraries may still carry temporary I/O effect
+            // exceptions while SFN-718 threads explicit context, but persistent
+            // artifact publication is driver-only. Quoted runtime-helper names
+            // are ignored by `_direct_authority_count`.
+            let publication_tokens: string[] = ["fs.appendFile", "fs.createDirectory", "fs.deleteFile", "fs.mkdtemp", "fs.removeDirectory", "fs.set_perms", "fs.symlink", "fs.writeFile", "fs.writeLines"];
+            let mut publication_i: int = 0;
+            loop {
+                if publication_i >= publication_tokens.length { break; }
+                let publication_token = publication_tokens[publication_i];
+                publication_i += 1;
+                let publication_count = _direct_authority_count(source, publication_token);
+                if publication_count > 0 {
+                    failures.push("compiler capsule persistent mutation authority: module '"
+                        + importer
+                        + "' ("
+                        + importer_role
+                        + ") calls '"
+                        + publication_token
+                        + "' directly; violated rule: only the compiler driver mutates persistent artifact state");
+                }
+            }
             // Compilable Sailfin code must declare every transitive effect, so
             // capability effects are the stable authority boundary even when
             // prelude roots are locally aliased or renamed during extraction.

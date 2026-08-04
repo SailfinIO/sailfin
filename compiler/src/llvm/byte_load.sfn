@@ -70,8 +70,8 @@ fn lower_byte_load(name: string, arguments: string[], bindings: ParameterBinding
 
     if arguments.length != 1 {
         // `[fatal]` sentinel so the emit-level entrypoints
-        // (`compile_native_text_to_llvm_file`, `write_llvm_ir`) refuse
-        // to write IR rather than silently dropping the load — mirrors
+        // artifact result gate refuses to publish IR rather than silently
+        // dropping the load — mirrors
         // the atomic-builtin arity gate (issue #306 contract).
         let diag1 = "llvm lowering [fatal] [E0806]: load_byte expects exactly 1 argument (`int` address), got "
             + number_to_string(arguments.length);

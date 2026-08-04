@@ -4,7 +4,7 @@
 // (sitofp) until the residual double-ABI helper descriptors flip.
 // This fixture pins that asymmetry — it must compile cleanly and the
 // assertion must hold, demonstrating that the new fatal-diagnostic
-// gate in `write_llvm_ir_for_tests_from_text_with_context` doesn't
+// gate in `lower_llvm_for_tests_from_text_with_context` doesn't
 // over-refuse safe widening.
 async fn produce_int() -> int { return 5; }
 

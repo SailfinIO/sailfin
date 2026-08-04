@@ -1,9 +1,8 @@
 // compiler/src/llvm/lowering/lowering_io.sfn
 //
-// String array operations, file I/O helpers, and miscellaneous lowering
-// utilities.  Extracted from the former flat lowering_core.sfn to reduce per-file
-// memory footprint during self-hosting compilation.
-import { _publish_lines_atomic } from "../../build/fs";
+// String array operations and miscellaneous lowering utilities. Extracted
+// from the former flat lowering_core.sfn to reduce per-file memory footprint
+// during self-hosting compilation.
 import { substring } from "../../string_utils";
 import { LifetimeRegionMetadata, StringConstant } from "../types";
 import {
@@ -131,55 +130,6 @@ fn insert_string_at(values: string[], insert_index: int, value: string) -> strin
     }
     if insert_index >= values.length { out.push(value); }
     return out;
-}
-
-// ── File I/O helpers ─────────────────────────────────────────────────
-// Publishes `lines` as `path` atomically via a sibling temp + rename
-// (SFN-578), so no reader observes a partially-written `.ll`.
-fn write_llvm_lines_chunked(path: string, lines: string[]) -> boolean ![io] {
-    return _publish_lines_atomic(path, lines);
-}
-
-fn _write_llvm_lines_chunked_unused(path: string, lines: string[]) -> boolean ![io] {
-    let mut _if257: boolean = false;
-    if lines == null { _if257 = true; }
-    if lines.length == 0 { _if257 = true; }
-    if _if257 {
-        fs.writeFile(path, "");
-        return fs.exists(path);
-    }
-
-    let chunk_limit = 100000000;
-    let mut buffer: string = "";
-    let mut buffered: int = 0;
-    let mut wrote: boolean = false;
-
-    let mut index2: int = 0;
-    loop {
-        if index2 >= lines.length { break; }
-        let line2 = lines[index2] + "\n";
-        let next_len = buffered + line2.length;
-        if next_len > chunk_limit {
-            if buffer.length > 0 {
-                if wrote { fs.appendFile(path, buffer); } else {
-                    fs.writeFile(path, buffer);
-                    wrote = true;
-                }
-                buffer = "";
-                buffered = 0;
-            }
-        }
-        buffer = buffer + line2;
-        buffered += line2.length;
-        index2 += 1;
-    }
-
-    if buffer.length > 0 {
-        if wrote { fs.appendFile(path, buffer); } else {
-            fs.writeFile(path, buffer);
-        }
-    }
-    return fs.exists(path);
 }
 
 // ── Module helpers ───────────────────────────────────────────────────

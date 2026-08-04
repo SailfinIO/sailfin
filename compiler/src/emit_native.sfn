@@ -25,7 +25,6 @@ import {
     Statement,
     TypeAnnotation
 } from "./ast";
-import { _publish_lines_atomic } from "./build/fs";
 import { Diag, Span } from "./diagnostic";
 import { block_contains_try, desugar_try_in_block } from "./emit_native_desugar_try";
 import {
@@ -83,7 +82,7 @@ import {
 // subtree should likewise target the leaf file directly.
 import { lift_non_capturing_lambdas } from "./llvm/expression_lowering/native/lambda_lowering";
 import { NativeArtifact, NativeModule } from "./native_ir";
-import { lines_to_native_text, native_lines_have_text } from "./native_ir_utils_text";
+import { lines_to_native_text } from "./native_ir_utils_text";
 import { char_code } from "./string_utils";
 
 // ── Public data structures ───────────────────────────────────────────
@@ -98,6 +97,8 @@ struct EmitNativeResult {
 // `{ text, diags }` shape — see the size rule above
 // `emit_native_lines_with_module_name`.
 struct EmitNativeLines {
+    artifact_name: string;
+    artifact_format: string;
     lines: string[];
     diags: Diag[];
 }
@@ -197,9 +198,16 @@ fn emit_native_lines_with_module_name(program: Program, module_name: string) -> 
     let state = _emit_native_state(lifted_program, layout_context, module_name);
     if state.builder.lines == null {
         let empty: string[] = [];
-        return EmitNativeLines { lines: empty, diags: state.diags };
+        return EmitNativeLines {
+            artifact_name: "module.sfn-asm",
+            artifact_format: "sailfin-native-text",
+            lines: empty,
+            diags: state.diags
+        };
     }
     return EmitNativeLines {
+        artifact_name: "module.sfn-asm",
+        artifact_format: "sailfin-native-text",
         lines: state.builder.lines,
         diags: state.diags
     };
@@ -212,20 +220,6 @@ fn emit_native_lines_with_module_name(program: Program, module_name: string) -> 
 // join with `lines_to_native_text` itself (SFN-608).
 fn emit_native_text_with_module_name(program: Program, module_name: string) -> string {
     return lines_to_native_text(emit_native_lines_with_module_name(program, module_name).lines);
-}
-
-// Stream an already-emitted line array straight to disk rather than joining
-// to one string first — byte-identical output, one fewer full-text copy
-// (#1817) — publishing atomically via a sibling temp + rename (SFN-578) so
-// no reader observes a partially-written `.sfn-asm`.
-//
-// Takes the lines rather than the `Program` so the caller keeps the emit
-// result in hand and can report its diagnostics before writing (SFN-608);
-// the previous emit-and-write helper returned `boolean` and so could not
-// surface them at all.
-fn write_native_lines_to_file(lines: string[], out_path: string) -> boolean ![io] {
-    if !native_lines_have_text(lines) { return false; }
-    return _publish_lines_atomic(out_path, lines);
 }
 
 fn emit_native_module_with_module_name(program: Program, module_name: string) -> NativeModule {

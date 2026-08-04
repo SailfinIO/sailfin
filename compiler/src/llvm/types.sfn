@@ -136,6 +136,19 @@ struct LoweredLLVMLinesResult {
     diags: Diag[];
 }
 
+// Provider-owned lowering result. The driver chooses the destination and
+// publication/cache policy; codegen-llvm returns only artifact identity,
+// generated payload, and diagnostics.
+struct LLVMArtifactResult {
+    ok: boolean;
+    artifact_name: string;
+    artifact_format: string;
+    lines: string[];
+    diagnostics: string[];
+    diags: Diag[];
+    failure_message: string;
+}
+
 struct LayoutManifestApplication {
     structs: NativeStruct[];
     enums: NativeEnum[];
