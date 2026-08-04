@@ -245,7 +245,7 @@ fn target_setjmp_call_line(target_os: string, result_temp: string, jmpbuf_operan
 }
 
 // Rewrite the runtime capsule's `sfn-sources` list for `target_os`. On
-// Windows, six POSIX-only modules are swapped for their Win32 siblings:
+// Windows, seven POSIX-only modules are swapped for their Win32 siblings:
 // `process.sfn` (posix_spawnp/waitpid) for `platform/process_windows.sfn`,
 // `rlimit.sfn` (getrlimit/setrlimit) for `platform/rlimit_windows.sfn`
 // (SFN-549 — previously dropped outright, leaving
@@ -277,8 +277,8 @@ fn target_setjmp_call_line(target_os: string, result_temp: string, jmpbuf_operan
 // basename so the manifest-root prefix is irrelevant, and rebuild the
 // swapped path from the source's own directory so it stays correctly
 // rooted (`<root>/sfn/process.sfn` → `<root>/sfn/platform/process_windows.sfn`).
-// `rlimit.sfn`/`rand.sfn`/`tls.sfn`/`fs_exec_mode.sfn`/`socket_ops.sfn`
-// already live in `platform/`, so their
+// `rlimit.sfn`/`rand.sfn`/`tls.sfn`/`fs_exec_mode.sfn`/`socket_ops.sfn`/
+// `rename_ops.sfn` already live in `platform/`, so their
 // siblings are joined directly onto that same directory rather than
 // appending another `platform/` segment.
 fn target_condition_runtime_sfn_sources(sources: string[], target_os: string) -> string[] {
@@ -286,9 +286,9 @@ fn target_condition_runtime_sfn_sources(sources: string[], target_os: string) ->
     let mut out: string[] = [];
     // Anchor for the append block below — the `platform/` directory,
     // discovered from whichever of rlimit.sfn/rand.sfn/tls.sfn/
-    // fs_exec_mode.sfn/socket_ops.sfn/exec.sfn happens to be present in
-    // `sources`, since none of the six is guaranteed by this function's
-    // own contract.
+    // fs_exec_mode.sfn/socket_ops.sfn/rename_ops.sfn/exec.sfn happens to
+    // be present in `sources`, since none of the seven is guaranteed by
+    // this function's own contract.
     let mut platform_dir: string = "";
     let mut i: int = 0;
     loop {
@@ -328,6 +328,15 @@ fn target_condition_runtime_sfn_sources(sources: string[], target_os: string) ->
             // (SFN-671).
             platform_dir = _dirname(src);
             out.push(_path_join(platform_dir, "socket_ops_windows.sfn"));
+        } else if base == "rename_ops.sfn" {
+            // Already in platform/ — same as the four above. The CRT's
+            // `rename()` fails EEXIST on an existing destination where
+            // POSIX `rename(2)` replaces atomically, so every
+            // publish-into-place in the toolchain worked once per
+            // destination and then failed forever. The sibling uses
+            // `MoveFileExA` + `MOVEFILE_REPLACE_EXISTING` (SFN-720).
+            platform_dir = _dirname(src);
+            out.push(_path_join(platform_dir, "rename_ops_windows.sfn"));
         } else if base == "exec.sfn" {
             // exec.sfn itself is unchanged (its `realpath` extern is
             // satisfied by the appended sibling below, not by swapping

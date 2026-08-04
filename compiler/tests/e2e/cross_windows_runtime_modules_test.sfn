@@ -116,6 +116,18 @@ test "cross-windows RUNTIME_MODS / manifest per-module contracts" ![io] {
     assert ! contains(makefile, "runtime/sfn/platform/socket_ops.sfn");
     assert contains(makefile, "runtime/sfn/platform/socket_ops_windows.sfn");
     assert ! contains(manifest, "socket_ops_windows");
+    // rename_ops.sfn (SFN-720): identical shape to fs_exec_mode above.
+    // The POSIX module's rename(2) replaces an existing destination
+    // atomically; the Windows CRT's rename() fails EEXIST instead, which
+    // broke every publish-into-place after the first. The sibling uses
+    // MoveFileExA + MOVEFILE_REPLACE_EXISTING. This list feeds the
+    // released Windows seed, so the entry is what puts the fix IN that
+    // seed. Substrings are exact both ways: "rename_ops.sfn" is NOT a
+    // substring of "rename_ops_windows.sfn".
+    assert contains(manifest, "\"sfn/platform/rename_ops.sfn\"");
+    assert ! contains(makefile, "runtime/sfn/platform/rename_ops.sfn");
+    assert contains(makefile, "runtime/sfn/platform/rename_ops_windows.sfn");
+    assert ! contains(manifest, "rename_ops_windows");
 
     // assert.sfn: in the manifest, excluded from RUNTIME_MODS.
     assert contains(manifest, "\"sfn/assert.sfn\"");

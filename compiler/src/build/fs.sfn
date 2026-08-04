@@ -32,11 +32,16 @@ import { host_is_windows } from "./target";
 // `platform/realpath_windows.sfn`. `close` has no such sibling yet and
 // remains an unresolved symbol on the native MSVC leg; out of scope for
 // SFN-549's link-bridge slice, tracked separately.
-extern fn rename(oldpath: *u8, newpath: *u8) -> i32;
-
 extern fn mkstemp(template: *u8) -> i32;
 
 extern fn close(fd: i32) -> i32;
+
+// Publish-into-place, replacing an existing destination. Defined by
+// `runtime/sfn/platform/rename_ops.sfn` and swapped for its Windows
+// sibling per target — declared as an extern here rather than imported,
+// matching the SFN-635 cross-module workaround the runtime modules use
+// (SFN-720). Returns 0 on success, like `rename(2)`.
+extern fn sfn_rename_replace(src: *u8, dst: *u8) -> i32;
 
 extern fn ferror(f: *File) -> i32;
 
@@ -135,17 +140,29 @@ fn _mktemp_sibling_cmd(dst_path: string) -> string ![io] {
         + "/.sfn_stage.XXXXXX");
 }
 
-// Atomically publish an already-written temp file as `dst_path` via
-// libc `rename(2)`. The rename is atomic only when `tmp_path` and
-// `dst_path` share a filesystem — pair this with
-// `_mktemp_sibling_cmd(dst_path)` so the temp lives beside the
-// destination. A concurrent reader then observes `dst_path` as either
-// the prior complete file or the new complete file, never a partial
-// write — the invariant that fixes the parallel-emit staging race
-// (#1011) and the cache race (#1034). On failure the temp is removed
-// and false returned.
+// Atomically publish an already-written temp file as `dst_path`. The
+// move is atomic only when `tmp_path` and `dst_path` share a filesystem
+// — pair this with `_mktemp_sibling_cmd(dst_path)` so the temp lives
+// beside the destination. A concurrent reader then observes `dst_path`
+// as either the prior complete file or the new complete file, never a
+// partial write — the invariant that fixes the parallel-emit staging
+// race (#1011) and the cache race (#1034). On failure the temp is
+// removed and false returned.
+//
+// Routed through `sfn_rename_replace` (`platform/rename_ops.sfn`,
+// swapped for its Windows sibling by
+// `target_condition_runtime_sfn_sources`) rather than calling libc
+// `rename` directly, because REPLACING an existing destination is the
+// load-bearing half of this contract and Windows does not do it: the
+// CRT's `rename()` returns `EEXIST` where POSIX `rename(2)` replaces
+// atomically. Every publish here therefore worked exactly once per
+// destination on Windows and failed forever after — `sfn selfhost`
+// failing on its second run is how it surfaced (SFN-720). The Windows
+// sibling uses `MoveFileExA` + `MOVEFILE_REPLACE_EXISTING`; the POSIX
+// one is a pass-through to the same `rename(2)` this used before, so
+// non-Windows behaviour is unchanged.
 fn _atomic_rename_into_place(tmp_path: string, dst_path: string) -> boolean ![io] {
-    if rename(tmp_path as *u8, dst_path as *u8) != 0 {
+    if sfn_rename_replace(tmp_path as *u8, dst_path as *u8) != 0 {
         fs.deleteFile(tmp_path);
         return false;
     }

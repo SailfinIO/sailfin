@@ -1,0 +1,49 @@
+// runtime/sfn/platform/rename_ops_windows.sfn
+//
+// Windows sibling of `rename_ops.sfn`, swapped in for a Windows target
+// by `target_condition_runtime_sfn_sources`
+// (`compiler/src/build/target.sfn`). See that module's header for why
+// the operation is conditioned at all; the short version is that the
+// CRT's `rename()` fails `EEXIST` on an existing destination where
+// POSIX `rename(2)` atomically replaces, which broke every republish in
+// the toolchain (SFN-720).
+//
+// `MoveFileExA` with `MOVEFILE_REPLACE_EXISTING` is the direct Win32
+// equivalent and is atomic within a volume. Verified against Win32
+// rather than assumed:
+//
+//   MOVEFILE_REPLACE_EXISTING  = 0x1
+//   replace over EXISTING dst  -> ok=1, dst holds the new bytes,
+//                                 src no longer exists
+//   replace onto ABSENT dst    -> ok=1
+//
+// One call therefore covers both cases, so no "does the destination
+// exist" probe is needed — and adding one would be worse than useless,
+// since it would reintroduce exactly the check-then-act race the atomic
+// publish exists to avoid.
+//
+// `ReplaceFileA` was the alternative. It preserves the destination's
+// ACLs and attributes, but it REQUIRES the destination to exist, so it
+// would need the caller to branch on existence — the race above — and
+// the artifacts published here are build outputs with no ACLs worth
+// preserving. `MoveFileExA` is the better fit.
+//
+// Delete-then-rename was rejected outright: it is not atomic and leaves
+// a window in which neither file is present, which a concurrent reader
+// (the parallel emit fan-out publishes objects this way) could observe.
+extern fn MoveFileExA(existing: *u8, new_name: *u8, flags: i32) -> i32;
+
+// `MOVEFILE_REPLACE_EXISTING`. Named rather than inlined because `1` at
+// a call site says nothing, and the whole point of this module is that
+// flag.
+let MOVEFILE_REPLACE_EXISTING: i32 = 1;
+
+// Move `src` onto `dst`, replacing `dst` if present. Returns 0 on
+// success and non-zero on failure, matching `rename(2)`'s convention —
+// note this INVERTS `MoveFileExA`, which returns non-zero for success.
+fn sfn_rename_replace(src: *u8, dst: *u8) -> i32 {
+    if MoveFileExA(src, dst, MOVEFILE_REPLACE_EXISTING) != 0 { return 0; }
+    return -1;
+}
+
+export { sfn_rename_replace };

@@ -1202,6 +1202,14 @@ ci-cross-windows:
 	: "the init; -lws2_32 below already resolves both. Without this"; \
 	: "entry http.sfn's sfn_socket_open/sfn_socket_close externs have"; \
 	: "no definition in the bridge link."; \
+	: "Also MINUS platform/rename_ops.sfn PLUS its sibling"; \
+	: "platform/rename_ops_windows.sfn (SFN-720): the CRT rename()"; \
+	: "fails EEXIST on an existing destination where POSIX rename(2)"; \
+	: "replaces atomically, so every publish-into-place in the"; \
+	: "toolchain worked once per destination and then failed. The"; \
+	: "sibling uses MoveFileExA + MOVEFILE_REPLACE_EXISTING. This"; \
+	: "list feeds the RELEASED Windows seed, so without the entry"; \
+	: "the shipped seed carries the broken POSIX leg."; \
 	: "clock is"; \
 	: "re-emitted with SAILFIN_TARGET_OS=Windows for the errno->_errno"; \
 	: "fix (#877), and exec for the exe-path intrinsic leg (#967/#971):"; \
@@ -1210,7 +1218,7 @@ ci-cross-windows:
 	: "readlink reference once the MinGW stub is gone; Windows selects the"; \
 	: "GetModuleFileNameA leg instead. The rest are target-independent IR"; \
 	: "compiled for mingw. Each <module>:<source> pair is space-separated."; \
-	RUNTIME_MODS="prelude:runtime/prelude.sfn runtime_globals:runtime/sfn/runtime_globals.sfn arena:runtime/sfn/memory/arena.sfn rc:runtime/sfn/memory/rc.sfn mem:runtime/sfn/memory/mem.sfn ownedbuf:runtime/sfn/memory/ownedbuf.sfn string:runtime/sfn/string.sfn array:runtime/sfn/array.sfn clock:runtime/sfn/clock.sfn io:runtime/sfn/io.sfn exception:runtime/sfn/exception.sfn type_meta:runtime/sfn/type_meta.sfn exec:runtime/sfn/platform/exec.sfn filesystem:runtime/sfn/adapters/filesystem.sfn http:runtime/sfn/adapters/http.sfn process_windows:runtime/sfn/platform/process_windows.sfn fs_exec_mode_windows:runtime/sfn/platform/fs_exec_mode_windows.sfn rlimit_windows:runtime/sfn/platform/rlimit_windows.sfn socket_ops_windows:runtime/sfn/platform/socket_ops_windows.sfn"; \
+	RUNTIME_MODS="prelude:runtime/prelude.sfn runtime_globals:runtime/sfn/runtime_globals.sfn arena:runtime/sfn/memory/arena.sfn rc:runtime/sfn/memory/rc.sfn mem:runtime/sfn/memory/mem.sfn ownedbuf:runtime/sfn/memory/ownedbuf.sfn string:runtime/sfn/string.sfn array:runtime/sfn/array.sfn clock:runtime/sfn/clock.sfn io:runtime/sfn/io.sfn exception:runtime/sfn/exception.sfn type_meta:runtime/sfn/type_meta.sfn exec:runtime/sfn/platform/exec.sfn filesystem:runtime/sfn/adapters/filesystem.sfn http:runtime/sfn/adapters/http.sfn process_windows:runtime/sfn/platform/process_windows.sfn fs_exec_mode_windows:runtime/sfn/platform/fs_exec_mode_windows.sfn rlimit_windows:runtime/sfn/platform/rlimit_windows.sfn socket_ops_windows:runtime/sfn/platform/socket_ops_windows.sfn rename_ops_windows:runtime/sfn/platform/rename_ops_windows.sfn"; \
 	RUNTIME_OBJS=""; \
 	for pair in $$RUNTIME_MODS; do \
 		mod="$${pair%%:*}"; \

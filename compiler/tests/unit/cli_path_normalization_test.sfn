@@ -180,6 +180,50 @@ test "atomic-publish: temp lives in dest dir and rename round-trips" ![io] {
     process.run(["rm", "-rf", scratch]);
 }
 
+// SFN-720: the test above publishes onto an ABSENT destination, which
+// is why the Windows defect survived — the CRT's `rename()` succeeds
+// exactly once per destination and then fails `EEXIST`, where POSIX
+// `rename(2)` replaces atomically. Republishing is the overwhelmingly
+// common case in this toolchain (every incremental rebuild, every
+// cache refresh, every `sfn selfhost` after the first), so pin it.
+//
+// This asserts a property, not a platform: on POSIX it always held; on
+// Windows it holds only because `_atomic_rename_into_place` now routes
+// through `sfn_rename_replace`, whose Windows sibling uses
+// `MoveFileExA` + `MOVEFILE_REPLACE_EXISTING`.
+test "atomic-publish: a second publish REPLACES an existing destination" ![io] {
+    let scratch = "/tmp/sfn_atomic_republish_test";
+    process.run(["rm", "-rf", scratch]);
+    process.run(["mkdir", "-p", scratch]);
+    let dst = scratch + "/artifact.ll";
+
+    let first = _mktemp_sibling_cmd(dst);
+    assert first.length > 0;
+    fs.writeFile(first, "; first");
+    assert _atomic_rename_into_place(first, dst);
+    assert fs.readFile(dst) == "; first";
+
+    // The destination now EXISTS. This is the case that failed on
+    // Windows.
+    let second = _mktemp_sibling_cmd(dst);
+    assert second.length > 0;
+    fs.writeFile(second, "; second");
+    assert _atomic_rename_into_place(second, dst);
+    assert fs.exists(dst);
+    assert fs.readFile(dst) == "; second";
+    assert ! fs.exists(second);
+
+    // A third, to catch a fix that special-cases only the first
+    // overwrite (e.g. a delete-then-rename that leaves stale state).
+    let third = _mktemp_sibling_cmd(dst);
+    assert third.length > 0;
+    fs.writeFile(third, "; third");
+    assert _atomic_rename_into_place(third, dst);
+    assert fs.readFile(dst) == "; third";
+
+    process.run(["rm", "-rf", scratch]);
+}
+
 // `_mktemp_sibling_cmd` mints its name into a `calloc(n + 1)` buffer
 // that libc rewrites in place, then hands the raw pointer back as a
 // `string` whose length is recovered by scanning for the NUL. An
