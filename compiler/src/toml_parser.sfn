@@ -4,10 +4,20 @@
 // so callers never need to allocate the SailToml struct across modules.
 import { find_char_local } from "./string_utils";
 
+// CapsulePublishPolicy carries the typed `[capsule] publish` contract. Invalid
+// values carry no policy value, so downstream policy cannot coerce them.
+struct CapsulePublishPolicy {
+    publish: boolean?;
+    has_declaration: boolean;
+    error: string;
+}
+
 struct SailToml {
     name: string;
     version: string;
     description: string;
+    publish: boolean?;
+    has_publish_declaration: boolean;
     entry: string;
     dependencies: TomlDependency[];
     dev_dependencies: TomlDependency[];
@@ -183,12 +193,96 @@ fn _toml_strip_line_comment(line: string) -> string {
     return _toml_trim(substring(line, 0, hash));
 }
 
+// A missing `=` after the exact bare key is still an attempted publish
+// declaration and must fail as a manifest error rather than look omitted.
+fn _toml_is_malformed_publish_key(line: string) -> boolean {
+    let key = "publish";
+    if line.length < key.length { return false; }
+    if !strings_equal(substring(line, 0, key.length), key) { return false; }
+    if line.length == key.length { return true; }
+    let next = line[key.length];
+    return next == " " || next == "\t";
+}
+
+// SFEP-0020 §3.6: resolve `[capsule] publish` from its raw scalar spelling.
+// Quoted strings must be rejected before `_toml_strip_quotes` can erase their
+// type distinction. Omission defaults to public for backwards compatibility.
+fn _toml_parse_capsule_publish(text: string) -> CapsulePublishPolicy {
+    let lines = _toml_split_lines(text);
+    let mut current_section: string = "";
+    let mut has_declaration: boolean = false;
+    let mut publish: boolean? = true;
+    let mut i: int = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = _toml_trim(lines[i]);
+        i += 1;
+        if line.length == 0 { continue; }
+        if line[0] == "#" { continue; }
+        if line[0] == "[" {
+            let close = find_char_local(line, "]", 0);
+            if close > 0 {
+                current_section = _toml_trim(substring(line, 1, close));
+            }
+            continue;
+        }
+        if !strings_equal(current_section, "capsule") { continue; }
+        // Strip the comment before looking for `=` so a comment cannot make a
+        // malformed bare key look like an unrelated assignment.
+        let content = _toml_strip_line_comment(line);
+        let eq_pos = find_char_local(content, "=", 0);
+        if eq_pos < 0 {
+            if _toml_is_malformed_publish_key(content) {
+                return CapsulePublishPolicy {
+                    publish: null,
+                    has_declaration: true,
+                    error: "manifest error: [capsule] publish must be a boolean (true or false)"
+                };
+            }
+            continue;
+        }
+        let raw_key = _toml_trim(substring(content, 0, eq_pos));
+        let key = _toml_strip_quotes(raw_key);
+        if !strings_equal(key, "publish") { continue; }
+        if has_declaration {
+            return CapsulePublishPolicy {
+                publish: null,
+                has_declaration: true,
+                error: "manifest error: duplicate [capsule] publish declaration"
+            };
+        }
+        has_declaration = true;
+        let raw_value = _toml_trim(substring(content, eq_pos + 1, content.length));
+        if strings_equal(raw_value, "true") {
+            publish = true;
+            continue;
+        }
+        if strings_equal(raw_value, "false") {
+            publish = false;
+            continue;
+        }
+        return CapsulePublishPolicy {
+            publish: null,
+            has_declaration: true,
+            error: "manifest error: [capsule] publish must be a boolean (true or false)"
+        };
+    }
+    return CapsulePublishPolicy {
+        publish: publish,
+        has_declaration: has_declaration,
+        error: ""
+    };
+}
+
 // ---- Internal parse ----
 fn _parse_toml_internal(text: string) -> SailToml {
+    let publish_policy = _toml_parse_capsule_publish(text);
     let mut toml = SailToml {
         name: "",
         version: "0.1.0",
         description: "",
+        publish: publish_policy.publish,
+        has_publish_declaration: publish_policy.has_declaration,
         entry: "src/main.sfn",
         dependencies: [],
         dev_dependencies: [],
@@ -315,6 +409,12 @@ fn toml_get_entry(text: string) -> string {
 fn toml_get_description(text: string) -> string {
     let t = _parse_toml_internal(text);
     return t.description;
+}
+
+// toml_get_publish resolves the typed private-capsule policy. A null `publish`
+// is always paired with a non-empty manifest error.
+fn toml_get_publish(text: string) -> CapsulePublishPolicy {
+    return _toml_parse_capsule_publish(text);
 }
 
 fn toml_get_toolchain_sfn(text: string) -> string {
@@ -747,6 +847,10 @@ fn toml_generate(name: string, version: string, description: string, entry: stri
 // Add a dependency to an existing capsule.toml text and return the updated text.
 // If the dependency already exists, update its version.
 fn toml_add_dependency(toml_text: string, capsule: string, version: string) -> string {
+    // Manifest mutation has no error channel, so preserve invalid input
+    // verbatim rather than normalize a non-boolean policy into default true.
+    let publish_policy = _toml_parse_capsule_publish(toml_text);
+    if publish_policy.error.length > 0 { return toml_text; }
     let t = _parse_toml_internal(toml_text);
     let mut found: boolean = false;
     let mut di: int = 0;
@@ -768,6 +872,8 @@ fn toml_add_dependency(toml_text: string, capsule: string, version: string) -> s
 
 // Add a dev dependency to an existing capsule.toml text and return the updated text.
 fn toml_add_dev_dependency(toml_text: string, capsule: string, version: string) -> string {
+    let publish_policy = _toml_parse_capsule_publish(toml_text);
+    if publish_policy.error.length > 0 { return toml_text; }
     let t = _parse_toml_internal(toml_text);
     let mut found: boolean = false;
     let mut di: int = 0;
@@ -797,6 +903,8 @@ fn toml_add_dev_dependency(toml_text: string, capsule: string, version: string) 
 // ignored; an empty `caps` list returns the text unchanged modulo
 // manifest normalization.
 fn toml_merge_capabilities_required(toml_text: string, caps: string[]) -> string {
+    let publish_policy = _toml_parse_capsule_publish(toml_text);
+    if publish_policy.error.length > 0 { return toml_text; }
     let t = _parse_toml_internal(toml_text);
     let mut ci: int = 0;
     loop {
@@ -823,6 +931,12 @@ fn _write_toml(toml: SailToml) -> string {
     out = out + "version = \"" + toml.version + "\"\n";
     if toml.description.length > 0 {
         out = out + "description = \"" + toml.description + "\"\n";
+    }
+    if toml.has_publish_declaration && toml.publish != null {
+        let publish: boolean = toml.publish;
+        if publish { out = out + "publish = true\n"; } else {
+            out = out + "publish = false\n";
+        }
     }
     if toml.toolchain_sfn.length > 0 || toml.toolchain_channel.length > 0 {
         out = out + "\n[toolchain]\n";

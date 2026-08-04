@@ -1,6 +1,6 @@
 # Status
 
-Updated: 2026-08-01. Seed pinned to `0.8.4` (`bootstrap.toml`
+Updated: 2026-08-04. Seed pinned to `0.8.4` (`bootstrap.toml`
 `[seed].version` — SFEP-0047); the compiler version source of truth is
 `compiler/capsule.toml`.
 
@@ -18,6 +18,12 @@ here.
 
 ## Toolchain (Current)
 
+- **Private-capsule manifest policy — schema.** `[capsule] publish` is parsed
+  as a strict boolean and defaults to `true` for existing manifests. The typed
+  `toml_get_publish` accessor returns no policy value plus a manifest error for
+  strings, integers, arrays, malformed values, or duplicate declarations;
+  downstream publish and resolver enforcement remains tracked separately
+  (SFEP-0020 §3.6, SFN-707).
 - **Build driver.** `<seed> build -p compiler` is the sole self-build driver
   (`compiler/src/cli_main.sfn` + `capsule_resolver.sfn` — pure orchestration,
   no fixups). The `scripts/build.sh` orchestrator (Stage E PR7, #383) and the
