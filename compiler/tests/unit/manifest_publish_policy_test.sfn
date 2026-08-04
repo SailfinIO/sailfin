@@ -1,0 +1,115 @@
+// compiler/tests/unit/manifest_publish_policy_test.sfn
+//
+// SFEP-0020 §3.6 regression coverage for the canonical private-capsule
+// manifest policy. Invalid values must never produce a boolean policy value.
+import {
+    toml_add_dependency,
+    toml_add_dev_dependency,
+    toml_get_publish,
+    toml_merge_capabilities_required
+} from "../../src/toml_parser";
+
+fn _assert_publish_value(text: string, expected: boolean, has_declaration: boolean) {
+    let policy = toml_get_publish(text);
+    assert policy.error.length == 0;
+    assert policy.has_declaration == has_declaration;
+    assert policy.publish != null;
+    if policy.publish != null {
+        let value: boolean = policy.publish;
+        assert value == expected;
+    }
+}
+
+fn _assert_publish_error(text: string) {
+    let policy = toml_get_publish(text);
+    assert policy.publish == null;
+    assert policy.has_declaration;
+    assert policy.error.length > 0;
+}
+
+fn _assert_publish_error_unchanged(original: string, updated: string) {
+    assert strings_equal(updated, original);
+    _assert_publish_error(updated);
+}
+
+test "manifest publish: omission defaults to true" {
+    _assert_publish_value("[capsule]\nname = \"existing\"\nversion = \"0.8.4\"\n", true, false);
+}
+
+test "manifest publish: explicit true resolves" {
+    _assert_publish_value("[capsule]\nname = \"public\"\npublish = true\n", true, true);
+}
+
+test "manifest publish: explicit false resolves" {
+    _assert_publish_value("[capsule]\nname = \"private\"\npublish = false\n", false, true);
+}
+
+test "manifest publish: inline comments preserve boolean type" {
+    _assert_publish_value("[capsule]\nname = \"private\"\npublish = false # workspace-only\n", false, true);
+}
+
+test "manifest publish: another section does not override the default" {
+    _assert_publish_value("[capsule]\nname = \"existing\"\n\n[build]\npublish = false\n", true, false);
+}
+
+test "manifest publish: string is a manifest error" {
+    _assert_publish_error("[capsule]\npublish = \"false\"\n");
+}
+
+test "manifest publish: integer is a manifest error" {
+    _assert_publish_error("[capsule]\npublish = 0\n");
+}
+
+test "manifest publish: array is a manifest error" {
+    _assert_publish_error("[capsule]\npublish = [false]\n");
+}
+
+test "manifest publish: malformed token is a manifest error" {
+    _assert_publish_error("[capsule]\npublish = fals\n");
+}
+
+test "manifest publish: missing value is a manifest error" {
+    _assert_publish_error("[capsule]\npublish =\n");
+}
+
+test "manifest publish: missing equals is a manifest error" {
+    _assert_publish_error("[capsule]\npublish false\n");
+}
+
+test "manifest publish: equals inside comment cannot hide missing equals" {
+    _assert_publish_error("[capsule]\npublish # forgot = false\n");
+}
+
+test "manifest publish: duplicate declaration is a manifest error" {
+    _assert_publish_error("[capsule]\npublish = true\npublish = false\n");
+}
+
+test "manifest publish: dependency mutation preserves explicit false" {
+    let original = "[capsule]\nname = \"private\"\nversion = \"0.8.4\"\npublish = false\n";
+    let updated = toml_add_dependency(original, "sfn/strings", "0.8.4");
+    _assert_publish_value(updated, false, true);
+}
+
+test "manifest publish: dependency mutation preserves explicit true" {
+    let original = "[capsule]\nname = \"public\"\nversion = \"0.8.4\"\npublish = true\n";
+    let updated = toml_add_dependency(original, "sfn/strings", "0.8.4");
+    _assert_publish_value(updated, true, true);
+}
+
+test "manifest publish: dependency mutation preserves invalid declaration" {
+    let original = "[capsule]\nname = \"invalid\"\npublish = \"false\"\n";
+    let updated = toml_add_dependency(original, "sfn/strings", "0.8.4");
+    _assert_publish_error_unchanged(original, updated);
+}
+
+test "manifest publish: dev dependency mutation preserves invalid declaration" {
+    let original = "[capsule]\nname = \"invalid\"\npublish = 0\n";
+    let updated = toml_add_dev_dependency(original, "sfn/test", "0.8.4");
+    _assert_publish_error_unchanged(original, updated);
+}
+
+test "manifest publish: capability mutation preserves invalid declaration" {
+    let original = "[capsule]\nname = \"invalid\"\npublish = [false]\n";
+    let updated = toml_merge_capabilities_required(original, ["io"]);
+    _assert_publish_error_unchanged(original, updated);
+}
