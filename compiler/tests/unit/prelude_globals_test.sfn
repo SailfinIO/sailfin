@@ -81,6 +81,14 @@ test "prelude scanner: collects multiple declarations" {
     assert _contains_name(names, "gamma");
 }
 
+test "prelude scanner: accepts runtime source line endings" {
+    let source = "fn alpha() {}\r\nlet beta = 1;\rfn gamma() {}\n";
+    let names = prelude_global_names_from_source(source);
+    assert _contains_name(names, "alpha");
+    assert _contains_name(names, "beta");
+    assert _contains_name(names, "gamma");
+}
+
 test "prelude scanner: empty source yields no names" {
     let names = prelude_global_names_from_source("");
     assert names.length == 0;
