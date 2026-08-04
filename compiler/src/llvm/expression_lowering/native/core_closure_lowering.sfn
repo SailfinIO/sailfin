@@ -1,8 +1,7 @@
 // compiler/src/llvm/expression_lowering/native/core_closure_lowering.sfn
 //
 // Closure-pair marker lowering and capture-environment materialization.
-import { Capture } from "../../../ast";
-import { NativeFunction } from "../../../native_ir";
+import { NativeFunction, NativeLambdaCapture } from "../../../native_ir";
 import { char_code, index_of, substring } from "../../../string_utils";
 import {
     ClosureCaptureOperand,
@@ -242,7 +241,7 @@ struct _ResolvedCaptureOperands {
 // are used verbatim. Missing names fall through to
 // `_field_zero_value` behaviour inside `emit_closure_env_alloc` —
 // that path is instrumented by the A2 golden tests.
-fn _resolve_capture_operands(captures: Capture[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[]) -> _ResolvedCaptureOperands {
+fn _resolve_capture_operands(captures: NativeLambdaCapture[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[]) -> _ResolvedCaptureOperands {
     let mut diagnostics: string[] = [];
     let mut operands: ClosureCaptureOperand[] = [];
     let mut current_lines: string[] = lines;

@@ -81,7 +81,7 @@ Trust these over the §"Root cause" line numbers below.
   exactly these files: `effect_checker.sfn:897`, `typecheck.sfn:1015`,
   `typecheck_captures.sfn:323`, `ownership_checker.sfn:936`,
   `emit_native_format.sfn:203`, `emitter_sailfin_expr.sfn:137`,
-  `llvm/expression_lowering/native/lambda_lowering.sfn:606`.
+  `lambda_lowering.sfn`.
 
 ### Live effect escapes still open today (re-probed 2026-06-27)
 
@@ -571,7 +571,7 @@ firstpass→seedcheck build, exactly like #957.
 - **Ownership:** `compiler/src/ownership_checker.sfn` (`Assignment` arm D).
 - **Emit / format:** `compiler/src/emit_native_format.sfn` (`Assignment` arm D),
   `compiler/src/emitter_sailfin_expr.sfn` (`Assignment` arm D).
-- **Lowering:** `compiler/src/llvm/expression_lowering/native/lambda_lowering.sfn`
+- **Lowering:** `compiler/src/lambda_lowering.sfn`
   (`Assignment` capture-rewrite arm D). **No new codegen arm** — Cast/Unary/
   Conditional/Assignment all serialize to the exact text the shadow parser
   already lowers.

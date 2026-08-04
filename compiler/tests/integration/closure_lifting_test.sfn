@@ -24,26 +24,17 @@
 //      `Expression.Lambda` node so they continue to flow through
 //      `format_expression` as `<lambda>` until #687 wires the env
 //      struct end-to-end.
-import {
-    Capture,
-    Expression,
-    Program,
-    Statement
-} from "../../src/ast";
-import {
-    ClosurePairResult,
-    decode_captures,
-    emit_closure_pair_aggregate,
-    percent_escape_capture_text,
-    percent_unescape_capture_text
-} from "../../src/llvm/closures";
+import { Expression, Program, Statement } from "../../src/ast";
 import {
     LiftResult,
     closure_pair_marker,
     closure_sentinel_type_text,
     lift_non_capturing_lambdas,
     lifted_function_name
-} from "../../src/llvm/expression_lowering/native/lambda_lowering";
+} from "../../src/lambda_lowering";
+import { ClosurePairResult, decode_captures, emit_closure_pair_aggregate } from "../../src/llvm/closures";
+import { NativeLambdaCapture } from "../../src/native_ir";
+import { percent_escape_capture_text, percent_unescape_capture_text } from "../../src/native_ir_utils_text";
 import { parse_program } from "../../src/parser/mod";
 
 // ── Closure-pair aggregate emission ──────────────────────────────────
@@ -322,7 +313,7 @@ test "captures: decode_captures recovers generic-typed entries" {
     // encoder now produces) so the marker field parsers, which
     // terminate at the next space, cannot truncate the list (#1106).
     let encoded = "items:Map%3Cstring%2C%20int%3E;handler:fn(int)%20-%3E%20boolean";
-    let decoded: Capture[] = decode_captures(encoded);
+    let decoded: NativeLambdaCapture[] = decode_captures(encoded);
     assert decoded.length == 2;
     assert decoded[0].name == "items";
     assert decoded[0].type_text == "Map<string, int>";
@@ -337,7 +328,7 @@ test "captures: decode_captures maps the mode segment to by_value/mutable" {
     // by reference. decode must map each form to the right
     // `by_value`/`mutable` flags so the env-field shape agrees between
     // the lambda-site alloc and the lifted-body prologue.
-    let decoded: Capture[] = decode_captures("acc:int:ref_mut;x:int");
+    let decoded: NativeLambdaCapture[] = decode_captures("acc:int:ref_mut;x:int");
     assert decoded.length == 2;
     assert decoded[0].name == "acc";
     assert decoded[0].type_text == "int";

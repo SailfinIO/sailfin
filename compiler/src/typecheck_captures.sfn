@@ -743,7 +743,7 @@ fn number_literal_kind(value: string) -> string {
 // `store i8* %col, i8** ...` — invalid IR rejected at link.
 //
 // Mirrors the emitter's `array_builtin_expected_fn_type` / `receiver_element_type`
-// (`llvm/expression_lowering/native/lambda_param_inference.sfn`), kept local to
+// (`lambda_param_inference.sfn`), kept local to
 // avoid a typecheck -> emit module dependency (as the #1610 literal recovery
 // does). The shipped array/range HOF mapper bodies are `int`-element only, so
 // inference is `int`-gated and agrees with the param type the emitter assigns

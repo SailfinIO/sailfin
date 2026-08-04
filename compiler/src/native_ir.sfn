@@ -82,6 +82,18 @@ struct NativeFunction {
     instructions: NativeInstruction[];
 }
 
+// Prepared lambda-capture contract consumed by target providers. Codegen
+// serializes these fields into native IR after analyzer capture inference and
+// lambda lifting have completed; LLVM reconstructs this IR-owned value without
+// importing syntax or analyzer data structures. `by_value` and `mutable`
+// preserve the existing capture ownership mode across the provider boundary.
+struct NativeLambdaCapture {
+    name: string;
+    type_text: string;
+    by_value: boolean;
+    mutable: boolean;
+}
+
 struct NativeImportSpecifier {
     name: string;
     alias: string?;

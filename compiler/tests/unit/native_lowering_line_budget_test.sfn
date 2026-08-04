@@ -65,7 +65,6 @@ fn _grandfathered_ceiling(name: string) -> int {
     if name == "core_concurrency_lowering.sfn" { return 1608; }
     if name == "core_ops_lowering.sfn" { return 1581; }
     if name == "core_literals_lowering.sfn" { return 1447; }
-    if name == "lambda_lowering.sfn" { return 1401; }
     if name == "core_member_lowering.sfn" { return 1212; }
     if name == "core_parse.sfn" { return 1137; }
     if name == "core_parsing.sfn" { return 1053; }

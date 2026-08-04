@@ -38,7 +38,7 @@ import {
     LiftResult,
     lift_non_capturing_lambdas,
     lifted_function_name
-} from "../../src/llvm/expression_lowering/native/lambda_lowering";
+} from "../../src/lambda_lowering";
 ```
 
 ## Why this matters

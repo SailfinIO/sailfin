@@ -451,7 +451,7 @@ correctness, so coverage exists even where ASAN can't start.
 - `compiler/src/llvm/expression_lowering/native/core.sfn` — set the
   spawn-owned flag when building a closure pair for a `spawn:`/`parallel` operand
   (inc. 2); parallel arm unchanged if §4.2 runtime-wrap is chosen (inc. 3).
-- `compiler/src/llvm/expression_lowering/native/lambda_lowering.sfn` — emit
+- `compiler/src/lambda_lowering.sfn` — emit
   `owned_env=1` on the spawn-target closure marker (inc. 2, Option A).
 
 **Ownership (already wired — tests only):**
