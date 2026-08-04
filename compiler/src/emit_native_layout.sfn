@@ -28,6 +28,7 @@ import {
     strip_optional_suffix,
     trim_text
 } from "./emit_native_state";
+import { NativeArtifact } from "./native_ir";
 import { char_at, contains_string, starts_with } from "./string_utils";
 
 // ── Layout-specific data structures ──────────────────────────────────
@@ -79,12 +80,6 @@ struct CanonicalTypeLayout {
     name: string;
     size: int;
     align: int;
-}
-
-struct NativeArtifact {
-    name: string;
-    format: string;
-    contents: string;
 }
 
 // ── Context construction ─────────────────────────────────────────────

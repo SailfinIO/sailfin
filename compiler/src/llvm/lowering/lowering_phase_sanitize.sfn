@@ -5,7 +5,6 @@
 // recovery from native text when the ABI corrupts struct fields.
 //
 // Extracted from lowering_core/mod.sfn to reduce per-file memory footprint.
-import { NativeModule } from "../../emit_native";
 import {
     LayoutManifest,
     NativeBinding,
@@ -13,6 +12,7 @@ import {
     NativeFunction,
     NativeImport,
     NativeInterface,
+    NativeModule,
     NativeStruct,
     ParseNativeResult
 } from "../../native_ir";

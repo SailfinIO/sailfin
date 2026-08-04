@@ -11,12 +11,13 @@
 // `write_llvm_ir_for_tests_from_text`) were retired in Stage B PR2's
 // A4 deletion alongside `compile_tests_to_llvm_file_with_module` and
 // the textual import inliner.
-import { NativeArtifact, NativeModule } from "../../emit_native";
 import {
     LayoutManifest,
+    NativeArtifact,
     NativeEnum,
     NativeFunction,
     NativeInterface,
+    NativeModule,
     NativeStruct,
     ParseNativeResult
 } from "../../native_ir";

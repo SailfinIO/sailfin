@@ -7,8 +7,12 @@ import {
     target_setjmp_declare,
     target_setjmp_symbol
 } from "../../../build/target";
-import { NativeModule } from "../../../emit_native";
-import { LayoutManifest, NativeFunction, ParseNativeResult } from "../../../native_ir";
+import {
+    LayoutManifest,
+    NativeFunction,
+    NativeModule,
+    ParseNativeResult
+} from "../../../native_ir";
 import { substring } from "../../../string_utils";
 import { escape_string_for_llvm } from "../../strings";
 import { LoweredLLVMLinesResult } from "../../types";

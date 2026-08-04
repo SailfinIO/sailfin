@@ -1,9 +1,9 @@
 // compiler/src/llvm/lowering/lowering_helpers.sfn
 //
 // Shared utility functions for LLVM IR lowering.
-import { NativeArtifact, NativeModule } from "../../emit_native";
 import {
     LayoutManifest,
+    NativeArtifact,
     NativeEnum,
     NativeEnumLayout,
     NativeEnumVariant,
@@ -14,6 +14,7 @@ import {
     NativeImportSpecifier,
     NativeInstruction,
     NativeInterface,
+    NativeModule,
     NativeParameter,
     NativeStruct,
     NativeStructField,

@@ -1,11 +1,9 @@
 // compiler/src/llvm/lowering/lowering_core/file_emission.sfn
 //
 // Native-text and native-lines LLVM file entry points.
-import { NativeModule } from "../../../emit_native";
-import { NativeArtifact } from "../../../emit_native_layout";
-import { lines_to_native_text, native_lines_have_text } from "../../../emit_native_state";
-import { ParseNativeResult } from "../../../native_ir";
+import { NativeArtifact, NativeModule, ParseNativeResult } from "../../../native_ir";
 import { parse_native_artifact, parse_native_artifact_from_lines } from "../../../native_ir_api";
+import { lines_to_native_text, native_lines_have_text } from "../../../native_ir_utils_text";
 import { collect_imported_module_context_for_module } from "../../imports";
 import { string_array_contains } from "../../utils";
 import { collect_defined_function_symbols } from "../lowering_helpers";
