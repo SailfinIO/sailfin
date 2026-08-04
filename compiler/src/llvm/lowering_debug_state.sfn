@@ -1,426 +1,138 @@
 // compiler/src/llvm/lowering_debug_state.sfn
 //
-// Cached env-var probes for compiler-internal LLVM-lowering debug
-// toggles. Replaces three `fs.exists("build/sailfin/.X")` flag-file
-// probes that issue #312 retired:
-//
-//   build/sailfin/.trace_lowering        — 11 probe sites on per-
-//                                          statement / per-function
-//                                          lowering hot paths
-//   build/sailfin/.trace_call_lowering   — 2 probe sites paired with
-//                                          .trace_lowering on the
-//                                          enum/call lowering path
-//   build/sailfin/.skip_module_globals   — 1 probe site at module-
-//                                          globals emission entry
-//
-// **Why migrate.** The flag-file pattern was the same race-prone
-// shape that issues #308 and #311 retired for user-facing toggles
-// and the `.test_runner_active` marker: a parent compiler that
-// touched any of these files silently affected spawned children
-// (the runtime-sfn-source emit loop in `_compile_runtime_sfn_sources`,
-// the parallel per-module emit loop in `_cr_run_parallel_emit`).
-// Env vars inherit cleanly and can be scrubbed per-spawn with
-// `sh -c "SAILFIN_X= <self> ..."` when isolation is required.
-//
-// **Why cache.** `_env_flag` reads the env via
-// `_get_env_cmd → _shell_read_cmd → sailfin_runtime_shell_capture`
-// (popen). That cost is ~1ms per probe — negligible at startup,
-// but `.trace_lowering` is read inside per-statement loops in
-// `lower_to_llvm_lines_with_parsed_context`, `emit_llvm_function`,
-// `lower_instruction_range`, and friends. A naive `_env_flag` swap
-// would have added ~1ms × N statements × M functions of overhead.
-// The cached probe collapses that to one popen at first use and
-// two `load i1` reads thereafter.
-//
-// **Why dual-boolean (not sentinel-encoded int).** Each flag is
-// represented by two `boolean` cells: `_X_initialized` and `_X_value`.
-// A single sentinel-encoded `int` cache (`-1` = uninit) would lower
-// to `load i64` followed by `sitofp` + `fcmp oeq` because the seed
-// compiler silently widens `int` operands to `double` when comparing
-// against integer literals (the Slice E int↔float disambiguation
-// gap; see roadmap). Two booleans give pure-i1 IR — `load i1` →
-// `br i1` → `load i1` — with no float ops on the hot path. This is
-// the same shape `compiler/src/test_runner_state.sfn` uses for the
-// `.test_runner_active` marker after issue #311.
-//
-// **Lifetime contract.** Each toggle is read from the env exactly
-// once per process (lazily, on first probe). Subsequent probes hit
-// the cached value. The compiler does not re-read the env mid-run;
-// users wanting to toggle a flag re-invoke the binary. This matches
-// the `.test_runner_active` semantics in `test_runner_state.sfn`
-// but lazy-init rather than explicit-enter, because trace flags are
-// process-global rather than scoped to a single CLI subcommand.
-//
-// **Back-compat.** `_legacy_flag_file` keeps `touch
-// build/sailfin/.trace_lowering` working for one release. Drop the
-// shim in the release after #312 ships.
-import { build_host_os } from "../build/target";
-import { _env_flag, _get_env_cmd, _legacy_flag_file } from "../build_flags";
+// Provider-owned lowering context for target selection and diagnostic/test
+// tracing. The compiler driver resolves environment, host, and test-runner
+// state once at the LLVM entrypoint and passes the primitive snapshot here.
+// Lowering hot paths read these cached primitives without importing driver
+// modules or repeating authority-bearing probes.
+struct LLVMProviderContext {
+    target_os: string;
+    target_arch: string;
+    trace_lowering: boolean;
+    trace_call_lowering: boolean;
+    skip_module_globals: boolean;
+    test_runner_active: boolean;
+    test_runner_trace: boolean;
+}
+
+let mut _target_os: string = "Linux";
+let mut _target_arch: string = "x86_64";
+let mut _trace_lowering: boolean = false;
+let mut _trace_call_lowering: boolean = false;
+let mut _skip_module_globals: boolean = false;
+let mut _test_runner_active: boolean = false;
+let mut _test_runner_trace: boolean = false;
+
+fn install_llvm_provider_context(context: LLVMProviderContext) {
+    _target_os = context.target_os;
+    _target_arch = context.target_arch;
+    _trace_lowering = context.trace_lowering;
+    _trace_call_lowering = context.trace_call_lowering;
+    _skip_module_globals = context.skip_module_globals;
+    _test_runner_active = context.test_runner_active;
+    _test_runner_trace = context.test_runner_trace;
+}
+
+fn build_target_os() -> string { return _target_os; }
+
+fn target_arch_for_lowering() -> string { return _target_arch; }
+
+fn trace_lowering() -> boolean { return _trace_lowering; }
+
+fn trace_call_lowering() -> boolean { return _trace_call_lowering; }
+
+fn skip_module_globals() -> boolean { return _skip_module_globals; }
+
+fn test_runner_active() -> boolean { return _test_runner_active; }
+
+fn test_runner_trace() -> boolean {
+    if !_test_runner_active { return false; }
+    return _test_runner_trace;
+}
+
+// Provider-owned target decisions. The driver supplies the resolved target;
+// LLVM owns how that target changes emitted symbols, constants, and ABI legs.
+fn errno_locator_symbol() -> string {
+    if _target_os == "Darwin" { return "__error"; }
+    if _target_os == "Windows" { return "_errno"; }
+    return "__errno_location";
+}
+
+fn clock_monotonic_id_value() -> int {
+    if _target_os == "Darwin" { return 6; }
+    return 1;
+}
+
+fn sc_nprocessors_onln_value() -> int {
+    if _target_os == "Darwin" { return 58; }
+    return 84;
+}
+
+fn exe_path_locator() -> string {
+    if _target_os == "Darwin" { return "darwin"; }
+    if _target_os == "Windows" { return "mingw"; }
+    return "linux";
+}
+
+fn fs_platform_leg() -> string {
+    if _target_os == "Darwin" { return "darwin"; }
+    if _target_os == "Windows" { return "mingw"; }
+    return "linux";
+}
+
+fn comdat_leg_for_os(os: string) -> boolean { return os == "Windows"; }
+
+fn target_uses_comdat() -> boolean { return comdat_leg_for_os(_target_os); }
+
+fn stat_st_mode_offset_value() -> int {
+    if _target_os == "Darwin" { return 4; }
+    if _target_os == "Linux" && _target_arch == "aarch64" { return 16; }
+    return 24;
+}
+
+fn stat_buf_size_value() -> int { return 160; }
+
+// Windows x64 uses the UCRT two-argument `_setjmp`; all other targets keep
+// the POSIX one-argument spelling and call shape.
+fn target_setjmp_symbol(target_os: string) -> string {
+    if target_os == "Windows" { return "_setjmp"; }
+    return "setjmp";
+}
+
+fn target_setjmp_declare(target_os: string) -> string {
+    if target_os == "Windows" { return "declare i32 @_setjmp(i8*, i8*)"; }
+    return "declare i32 @setjmp(i8*)";
+}
+
+fn target_setjmp_call_line(target_os: string, result_temp: string, jmpbuf_operand: string) -> string {
+    if target_os == "Windows" {
+        return "  " + result_temp + " = call i32 @_setjmp(i8* " + jmpbuf_operand
+            + ", i8* null)";
+    }
+    return "  " + result_temp + " = call i32 @setjmp(i8* " + jmpbuf_operand
+        + ")";
+}
 
 export {
+    LLVMProviderContext,
+    install_llvm_provider_context,
+    build_target_os,
+    target_arch_for_lowering,
     trace_lowering,
     trace_call_lowering,
     skip_module_globals,
+    test_runner_active,
+    test_runner_trace,
     errno_locator_symbol,
     clock_monotonic_id_value,
     sc_nprocessors_onln_value,
-    target_arch_for_lowering,
+    exe_path_locator,
+    fs_platform_leg,
     comdat_leg_for_os,
-    target_uses_comdat
+    target_uses_comdat,
+    stat_st_mode_offset_value,
+    stat_buf_size_value,
+    target_setjmp_symbol,
+    target_setjmp_declare,
+    target_setjmp_call_line
 };
-
-// Per-flag cache cells. `_X_initialized` flips from false to true on
-// the first call to the flag's probe; `_X_value` is the resolved
-// env-or-legacy probe result. Order of writes is irrelevant under
-// single-threaded compile (the runtime is single-process per stage),
-// but for clarity the value is written before the initialized flag
-// in each probe body.
-let mut _trace_lowering_initialized: boolean = false;
-let mut _trace_lowering_value: boolean = false;
-let mut _trace_call_lowering_initialized: boolean = false;
-let mut _trace_call_lowering_value: boolean = false;
-let mut _skip_module_globals_initialized: boolean = false;
-let mut _skip_module_globals_value: boolean = false;
-// Cache for the resolved `errno`-location C symbol (#877, epic #763).
-// `_errno_locator_initialized` flips to true after the one-time
-// resolution (the `SAILFIN_TARGET_OS` override or the `_host_os`
-// host resolver); `_errno_locator_value` holds the resolved symbol name
-// (`__errno_location` on Linux/glibc, `__error` on Darwin, `_errno`
-// on Windows/mingw-w64). See `errno_locator_symbol` below.
-let mut _errno_locator_initialized: boolean = false;
-let mut _errno_locator_value: string = "";
-// Cache for the resolved `CLOCK_MONOTONIC` `clk_id` (#908, epic #763).
-// `_clock_monotonic_id_initialized` flips to true after the one-time
-// resolution (the `SAILFIN_TARGET_OS` override or the `_host_os`
-// host resolver); `_clock_monotonic_id_value` holds the resolved immediate
-// (`1` on Linux/glibc, `6` on Darwin/macOS). See
-// `clock_monotonic_id_value` below.
-let mut _clock_monotonic_id_initialized: boolean = false;
-let mut _clock_monotonic_id_value: int = 0;
-// Cache for the resolved `_SC_NPROCESSORS_ONLN` `sysconf` request number
-// (#1480, epic #763). `_sc_nprocessors_onln_initialized` flips to true
-// after the one-time resolution (the `SAILFIN_TARGET_OS` override or the
-// `_host_os` host resolver); `_sc_nprocessors_onln_value` holds the resolved
-// immediate (`84` on Linux/glibc, `58` on Darwin/macOS). See
-// `sc_nprocessors_onln_value` below.
-let mut _sc_nprocessors_onln_initialized: boolean = false;
-let mut _sc_nprocessors_onln_value: int = 0;
-// Cache for the resolved executable-path leg tag (#967, epic #390).
-// `_exe_path_locator_initialized` flips to true after the one-time
-// resolution (the `SAILFIN_TARGET_OS` override or the `_host_os`
-// host resolver); `_exe_path_locator_value` holds the short leg tag
-// (`linux`, `darwin`, or `mingw`). See `exe_path_locator` below.
-let mut _exe_path_locator_initialized: boolean = false;
-let mut _exe_path_locator_value: string = "";
-
-// Filesystem-sentinel target-OS resolvers (#1308, retiring the last
-// platform-divergent C fs symbols via the emit-time sentinel seam, same
-// pattern as `exe_path_locator` above). `_fs_platform_leg_value` holds the
-// leg tag (`linux`/`darwin`/`mingw`); `_stat_st_mode_offset_value` holds
-// the byte offset of `st_mode` in `struct stat` (24 on Linux x86_64, 16 on
-// Linux aarch64, 4 on macOS arm64); `_stat_buf_size_value` is a safe
-// over-allocation for a stack `struct stat` buffer. Each lazily resolved +
-// cached once.
-let mut _fs_platform_leg_initialized: boolean = false;
-let mut _fs_platform_leg_value: string = "";
-let mut _stat_st_mode_offset_initialized: boolean = false;
-let mut _stat_st_mode_offset_value: int = 0;
-let mut _stat_buf_size_initialized: boolean = false;
-let mut _stat_buf_size_value: int = 0;
-
-// Cache for the resolved COMDAT leg (SFN-549). COFF is the only object
-// format that both tolerates and requires an explicit comdat group to fold
-// duplicate `linkonce_odr` type-descriptor / ABI-version globals; ELF
-// auto-groups them and Mach-O rejects comdat outright. `_comdat_target_value`
-// holds the resolved decision (true only for a Windows target). See
-// `target_uses_comdat` below.
-let mut _comdat_target_initialized: boolean = false;
-let mut _comdat_target_value: boolean = false;
-
-// The host OS the emit-time leg locators below resolve against, as the
-// `uname -s`-compatible name they compare with. Non-shelling (SFN-49, epic
-// #1485; M1 in `docs/proposals/0021-windows-native-selfhost.md` §4.2(E)):
-// `sh`/`uname` do not exist on native Windows, so the compiler identifies its
-// platform from markers instead of a subprocess. The probe ladder and the
-// reasoning for each marker live with the implementation in
-// `build/target.sfn::build_host_os` — deliberately not restated here, since a
-// second copy is what drifted last time (see SFN-682 below). The
-// `SAILFIN_TARGET_OS` override is checked first by every caller and still wins
-// for the cross-compile path.
-//
-// SFN-682: this delegates to `build_host_os` rather than repeating the probe.
-// The two bodies were identical except that `build_host_os` honours the
-// `SAILFIN_HOST_OS` override and this one did not, so `SAILFIN_HOST_OS` alone
-// keyed a module's cached IR (`build_target_os` -> the SFN-677 cache-key fold)
-// under a target whose platform legs the emitter never baked. Delegating makes
-// the agreement `build/target.sfn` asserts structural — there is one resolver,
-// so the key side and the emit side cannot drift apart.
-//
-// The override is deliberately returned VERBATIM, not validated against the
-// three known names: an unrecognized value has to reach both sides unchanged so
-// both classify it the same way. Validating here (or there) would restore the
-// divergence at a different input rather than close it.
-fn _host_os() -> string ![io] { return build_host_os(); }
-
-// Non-shelling host-architecture probe (SFN-471, SFEP-0056 §3.2). The target
-// override is the cross-emit and e2e seam; native builds otherwise identify
-// aarch64 from its well-known glibc loader path. x86_64 is the dominant
-// default, preserving every existing Tier-1 host when the marker is absent.
-fn _host_arch() -> string ![io] {
-    let arch = _get_env_cmd("SAILFIN_TARGET_ARCH");
-    if arch.length > 0 { return arch; }
-    if fs.exists("/lib/ld-linux-aarch64.so.1") { return "aarch64"; }
-    return "x86_64";
-}
-
-fn target_arch_for_lowering() -> string ![io] { return _host_arch(); }
-
-// True when the user requested LLVM-lowering stderr trace via
-// `SAILFIN_TRACE_LOWERING=1` (or the legacy `.trace_lowering` file).
-// Read in 11 sites across `lowering/`, `expression_lowering/`, and
-// `lowering_helpers_mangling.sfn`. First call performs the env
-// probe; later calls return the cached boolean.
-fn trace_lowering() -> boolean ![io] {
-    if !_trace_lowering_initialized {
-        _trace_lowering_value = _env_flag("SAILFIN_TRACE_LOWERING")
-            || _legacy_flag_file("build/sailfin/.trace_lowering");
-        _trace_lowering_initialized = true;
-    }
-    return _trace_lowering_value;
-}
-
-// True when the user requested call-lowering trace via
-// `SAILFIN_TRACE_CALL_LOWERING=1` (or the legacy
-// `.trace_call_lowering` file). Read in 2 sites — enum lowering in
-// `lowering_core/mod.sfn` and the call emission path in
-// `core_call_lowering.sfn`. Independent of `trace_lowering` because
-// users typically want one or the other, not both.
-fn trace_call_lowering() -> boolean ![io] {
-    if !_trace_call_lowering_initialized {
-        _trace_call_lowering_value = _env_flag("SAILFIN_TRACE_CALL_LOWERING")
-            || _legacy_flag_file("build/sailfin/.trace_call_lowering");
-        _trace_call_lowering_initialized = true;
-    }
-    return _trace_call_lowering_value;
-}
-
-// True when the user requested module-globals emission to be
-// skipped via `SAILFIN_SKIP_MODULE_GLOBALS=1` (or the legacy
-// `.skip_module_globals` file). Behavior-changing — used for
-// triaging emitter regressions in module-global lowering. Read
-// once per module compile.
-fn skip_module_globals() -> boolean ![io] {
-    if !_skip_module_globals_initialized {
-        _skip_module_globals_value = _env_flag("SAILFIN_SKIP_MODULE_GLOBALS")
-            || _legacy_flag_file("build/sailfin/.skip_module_globals");
-        _skip_module_globals_initialized = true;
-    }
-    return _skip_module_globals_value;
-}
-
-// The C symbol for the thread-local `errno` slot address (#877,
-// epic #763). The spelling is platform-specific: glibc exposes
-// `int *__errno_location(void)`, Darwin/macOS `int *__error(void)`,
-// and Windows/mingw-w64 `int *_errno(void)`. The `sailfin_intrinsic_
-// errno_location` sentinel's lowering branch
-// (`core_call_emission/dispatch.sfn`) reads this to emit the correct
-// `call i32* @<sym>()` so the same compiler source links on every
-// platform (CI emits target-neutral IR resolved by the host clang).
-//
-// Resolution order:
-//   1. `SAILFIN_TARGET_OS` env override — the *target* OS, distinct
-//      from the build host. This exists for cross-compilation: the
-//      Windows binary is cross-compiled from a Linux host (see
-//      `make ci-cross-windows`), where a bare host probe would
-//      report `Linux` and wrongly bake in `__errno_location` — a
-//      symbol mingw-w64 does not provide (the link fails with an
-//      undefined reference). The cross-compile Makefile target sets
-//      `SAILFIN_TARGET_OS=Windows` when it re-emits errno-bearing
-//      runtime modules so they get `_errno` instead.
-//   2. `_host_os` host resolver — the native-build path (the host *is*
-//      the target). `Darwin` → `__error`, anything else → the glibc
-//      spelling, so the dominant Linux leg is never wrong.
-//
-// Probed once and cached (the lowering hot path may hit this per
-// errno read); mirrors the lazy-init contract of the trace toggles
-// above.
-fn errno_locator_symbol() -> string ![io] {
-    if !_errno_locator_initialized {
-        let mut os: string = _get_env_cmd("SAILFIN_TARGET_OS");
-        if os.length == 0 { os = _host_os(); }
-        if os == "Darwin" { _errno_locator_value = "__error"; } else if os == "Windows" {
-            _errno_locator_value = "_errno";
-        } else { _errno_locator_value = "__errno_location"; }
-        _errno_locator_initialized = true;
-    }
-    return _errno_locator_value;
-}
-
-// The `CLOCK_MONOTONIC` `clk_id` immediate for the host target (#908,
-// epic #763). POSIX leaves the numeric `clk_id` implementation-defined
-// and it diverges by platform — Linux/glibc `1`, Darwin/macOS `6` — so
-// the `sailfin_intrinsic_clock_monotonic_id` sentinel's lowering branch
-// (`core_call_emission/dispatch.sfn`) reads this to emit a bare `i32` immediate
-// (no `call`, no `declare`), letting the same compiler source bake the
-// correct constant on either platform when built natively.
-//
-// Resolution order matches `errno_locator_symbol` above:
-//   1. `SAILFIN_TARGET_OS` env override — the *target* OS, for the
-//      cross-compile path where a bare host probe reports the host.
-//   2. `_host_os` host resolver — the native-build path. `Darwin` → 6,
-//      anything else → 1, so the dominant Linux leg is the default and
-//      Windows (no POSIX `CLOCK_MONOTONIC`) harmlessly falls through to
-//      the Linux value.
-//
-// Probed once and cached; mirrors the lazy-init contract of the trace
-// toggles and `errno_locator_symbol`.
-fn clock_monotonic_id_value() -> int ![io] {
-    if !_clock_monotonic_id_initialized {
-        let mut os: string = _get_env_cmd("SAILFIN_TARGET_OS");
-        if os.length == 0 { os = _host_os(); }
-        if os == "Darwin" { _clock_monotonic_id_value = 6; } else {
-            _clock_monotonic_id_value = 1;
-        }
-        _clock_monotonic_id_initialized = true;
-    }
-    return _clock_monotonic_id_value;
-}
-
-// The `_SC_NPROCESSORS_ONLN` `sysconf` request number for the host target
-// (#1480, epic #763). POSIX leaves the numeric request implementation-
-// defined and it diverges by platform — Linux/glibc `84`, Darwin/macOS
-// `58` — so the `sailfin_intrinsic_sc_nprocessors_onln` sentinel's lowering
-// branch (`core_call_emission/dispatch.sfn`) reads this to emit a bare `i32`
-// immediate (no `call`, no `declare`), letting the same compiler source
-// bake the correct request number on either platform when built natively.
-// The scheduler currently hardcodes the Linux `84`, so `sysconf(84)` fails
-// closed to `-1` on macOS and the pool falls back to the two-worker
-// deadlock floor regardless of real core count; a seed-gated follow-up PR
-// swaps that hardcode for this intrinsic once it lands in a pinned seed.
-//
-// Resolution order matches `clock_monotonic_id_value` above:
-//   1. `SAILFIN_TARGET_OS` env override — the *target* OS, for the
-//      cross-compile path where a bare host probe reports the host.
-//   2. `_host_os` host resolver — the native-build path. `Darwin` → 58,
-//      anything else → 84, so the dominant Linux leg is the default and
-//      Windows (no POSIX `sysconf`) harmlessly falls through to the Linux
-//      value.
-//
-// Probed once and cached; mirrors the lazy-init contract of the trace
-// toggles and `clock_monotonic_id_value`.
-fn sc_nprocessors_onln_value() -> int ![io] {
-    if !_sc_nprocessors_onln_initialized {
-        let mut os: string = _get_env_cmd("SAILFIN_TARGET_OS");
-        if os.length == 0 { os = _host_os(); }
-        if os == "Darwin" { _sc_nprocessors_onln_value = 58; } else {
-            _sc_nprocessors_onln_value = 84;
-        }
-        _sc_nprocessors_onln_initialized = true;
-    }
-    return _sc_nprocessors_onln_value;
-}
-
-// Resolve which executable-path leg the call-emission dispatcher
-// (`core_call_emission/dispatch.sfn`) should emit for the `sailfin_intrinsic_exe_path`
-// sentinel (#967, epic #390). Same resolution order and lazy-init cache as
-// `errno_locator_symbol` above:
-//   1. `SAILFIN_TARGET_OS` env override — the *target* OS, for the Windows
-//      cross-compile from a Linux host (`make ci-cross-windows`).
-//   2. `_host_os` host resolver — the native-build path.
-// Returns a short leg tag so the dispatcher switches on the *leg* while the
-// concrete symbol names live in the registry rows:
-//   "Darwin"  -> "darwin"   (`_NSGetExecutablePath`)
-//   "Windows" -> "mingw"    (`GetModuleFileNameA`)
-//   otherwise -> "linux"    (`readlink`), so the dominant Linux leg is the
-//                            default and is never wrong.
-fn exe_path_locator() -> string ![io] {
-    if !_exe_path_locator_initialized {
-        let mut os: string = _get_env_cmd("SAILFIN_TARGET_OS");
-        if os.length == 0 { os = _host_os(); }
-        if os == "Darwin" { _exe_path_locator_value = "darwin"; } else if os == "Windows" {
-            _exe_path_locator_value = "mingw";
-        } else { _exe_path_locator_value = "linux"; }
-        _exe_path_locator_initialized = true;
-    }
-    return _exe_path_locator_value;
-}
-
-// Resolve the filesystem-sentinel leg the call-emission dispatcher
-// (`core_call_emission/dispatch.sfn`) should emit for the `sailfin_intrinsic_fs_*`
-// sentinels (#1308). Same resolution order + lazy cache as
-// `exe_path_locator` above:
-//   "Darwin"  -> "darwin"   (POSIX `stat`/`symlink`/`mkdtemp`)
-//   "Windows" -> "mingw"    (Win stub legs — no POSIX symbol in the IR)
-//   otherwise -> "linux"    (POSIX leg; the dominant default, never wrong)
-fn fs_platform_leg() -> string ![io] {
-    if !_fs_platform_leg_initialized {
-        let mut os: string = _get_env_cmd("SAILFIN_TARGET_OS");
-        if os.length == 0 { os = _host_os(); }
-        if os == "Darwin" { _fs_platform_leg_value = "darwin"; } else if os == "Windows" {
-            _fs_platform_leg_value = "mingw";
-        } else { _fs_platform_leg_value = "linux"; }
-        _fs_platform_leg_initialized = true;
-    }
-    return _fs_platform_leg_value;
-}
-
-// Pure decision: COFF is the only object format that both tolerates and
-// requires an explicit comdat group to fold duplicate `linkonce_odr`
-// definitions. ELF auto-groups them; Mach-O rejects comdat outright
-// (`llc` aborts with "MachO doesn't support COMDATs"), so Darwin and every
-// non-Windows target must never see the clause. (SFN-549)
-fn comdat_leg_for_os(os: string) -> boolean { return os == "Windows"; }
-
-// Resolve whether the current target requires the comdat clause on
-// `linkonce_odr` globals (SFN-549). Same resolution order + lazy cache as
-// `fs_platform_leg` above:
-//   1. `SAILFIN_TARGET_OS` env override — the *target* OS, for the Windows
-//      cross-compile from a Linux host.
-//   2. `_host_os` host resolver — the native-build path.
-// Delegates the leg decision to `comdat_leg_for_os` so an unknown host
-// falls through the dominant Linux default and never selects the comdat
-// leg.
-fn target_uses_comdat() -> boolean ![io] {
-    if !_comdat_target_initialized {
-        let mut os: string = _get_env_cmd("SAILFIN_TARGET_OS");
-        if os.length == 0 { os = _host_os(); }
-        _comdat_target_value = comdat_leg_for_os(os);
-        _comdat_target_initialized = true;
-    }
-    return _comdat_target_value;
-}
-
-// Byte offset of `st_mode` within `struct stat`, baked per target for the
-// `sailfin_intrinsic_fs_get_perms` sentinel (#1308, SFN-471). macOS arm64
-// places `st_mode` at offset 4; Linux aarch64 at 16; Linux x86_64 at 24.
-// Windows falls through to 24 harmlessly — its `get_perms` leg is a bare
-// stub that never reads the buffer. The target OS override wins over the
-// host-OS probe; `_host_arch` applies the corresponding target-arch override
-// before its loader-marker probe.
-fn stat_st_mode_offset_value() -> int ![io] {
-    if !_stat_st_mode_offset_initialized {
-        let mut os: string = _get_env_cmd("SAILFIN_TARGET_OS");
-        if os.length == 0 { os = _host_os(); }
-        if os == "Darwin" { _stat_st_mode_offset_value = 4; } else {
-            if os == "Linux" && _host_arch() == "aarch64" {
-                _stat_st_mode_offset_value = 16;
-            } else { _stat_st_mode_offset_value = 24; }
-        }
-        _stat_st_mode_offset_initialized = true;
-    }
-    return _stat_st_mode_offset_value;
-}
-
-// Size (bytes) of a stack `struct stat` buffer for the `stat`-based fs
-// sentinels (`fs_exists` / `get_perms`, #1308). A fixed over-allocation
-// large enough for both targets (`sizeof(struct stat)` is 144 on Linux
-// x86_64 and macOS arm64); over-allocating an `alloca` is harmless and
-// avoids a per-target size constant. Lazily cached for symmetry with the
-// sibling resolvers (the value is target-independent today).
-fn stat_buf_size_value() -> int ![io] {
-    if !_stat_buf_size_initialized {
-        _stat_buf_size_value = 160;
-        _stat_buf_size_initialized = true;
-    }
-    return _stat_buf_size_value;
-}

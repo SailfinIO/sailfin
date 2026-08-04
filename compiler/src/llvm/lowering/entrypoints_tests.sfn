@@ -38,6 +38,7 @@ import {
     apply_layout_manifest_to_module,
     collect_imported_module_context_for_module
 } from "../imports";
+import { LLVMProviderContext, install_llvm_provider_context } from "../lowering_debug_state";
 import {
     render_enum_type_definitions,
     render_imported_function_declarations,
@@ -100,8 +101,10 @@ import {
 } from "./lowering_io";
 import { lower_module_bindings_to_globals } from "./module_globals";
 
-// Stub: kept for import-graph compatibility (main.sfn imports this symbol).
-fn lower_to_llvm_for_tests(native_module: NativeModule) -> LoweredLLVMResult ![io] {
+// Native-module test entrypoint retained for callers that already hold the
+// structured artifact instead of its serialized text.
+fn lower_to_llvm_for_tests(native_module: NativeModule, provider_context: LLVMProviderContext) -> LoweredLLVMResult ![io] {
+    install_llvm_provider_context(provider_context);
     let artifact = select_text_artifact(native_module.artifacts);
     if artifact == null {
         return LoweredLLVMResult {

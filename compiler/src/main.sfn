@@ -4,6 +4,7 @@
 import { free_heap_string, relocate_string_to_heap } from "./arena_relocate";
 import { Program, Statement } from "./ast";
 import { _publish_lines_atomic } from "./build/fs";
+import { resolve_llvm_provider_context } from "./build/llvm_provider_context";
 import { _env_flag, _legacy_flag_file } from "./build_flags";
 import { run_ownership_checker, run_ownership_checker_with_imports } from "./check/ownership";
 import { Diag } from "./diagnostic";
@@ -23,16 +24,15 @@ import {
 import { emit_program } from "./emitter_sailfin";
 import { ice_enter_stage, ice_set_source } from "./ice";
 import {
-    lower_native_lines_to_llvm_artifact,
-    lower_native_lines_to_llvm_artifact_with_context,
-    lower_native_text_to_llvm_artifact,
-    lower_native_text_to_llvm_artifact_with_context,
-    lower_to_llvm_ir,
-    lower_to_llvm_ir_from_text,
-    print_llvm_ir_from_text
+    lower_native_lines_to_llvm_artifact_with_context_and_provider,
+    lower_native_lines_to_llvm_artifact_with_provider_context,
+    lower_native_text_to_llvm_artifact_with_context_and_provider,
+    lower_native_text_to_llvm_artifact_with_provider_context,
+    lower_to_llvm_ir_from_text_with_provider_context,
+    lower_to_llvm_ir_with_provider_context,
+    print_llvm_ir_from_text_with_provider_context
 } from "./llvm/lowering/entrypoints";
-import { lower_to_llvm_for_tests } from "./llvm/lowering/entrypoints_tests";
-import { lower_llvm_for_tests_from_text_with_context } from "./llvm/lowering/entrypoints_tests_writer";
+import { lower_llvm_for_tests_from_text_with_provider_context } from "./llvm/lowering/entrypoints_tests_writer";
 import { has_fatal_lowering_diagnostic, print_fatal_lowering_diagnostics } from "./llvm/lowering/lowering_core/diagnostics";
 import { native_text_passes_lowering_gate } from "./llvm/lowering/lowering_core/file_emission";
 import { runtime_helper_call_names } from "./llvm/runtime_helpers/mod";
@@ -366,7 +366,7 @@ fn compile_to_llvm(source: string) -> string ![io] {
         }
     }
     if native_text.length > 0 {
-        let ir = lower_to_llvm_ir_from_text(native_text, "main");
+        let ir = lower_to_llvm_ir_from_text_with_provider_context(native_text, "main", resolve_llvm_provider_context());
         if trace_emit {
             print.err("emit-llvm: llvm bytes=" + number_to_string(ir.length));
             if ir.length > 0 {
@@ -386,7 +386,7 @@ fn compile_to_llvm(source: string) -> string ![io] {
     // and `emit_llvm_with_retry` re-runs on each attempt — so the same note
     // legitimately appears once per compile pass under the debug gate.
     let native_result = emit_native_with_module_name(program, "main");
-    let ir = lower_to_llvm_ir(native_result.module);
+    let ir = lower_to_llvm_ir_with_provider_context(native_result.module, resolve_llvm_provider_context());
     if trace_emit {
         print.err("emit-llvm: llvm bytes=" + number_to_string(ir.length));
         if ir.length > 0 {
@@ -425,7 +425,7 @@ fn print_llvm_with_module(source: string, module_name: string) -> boolean ![io] 
     _report_emit_native_diags(emitted.diags, module_name);
     let native_text = lines_to_native_text(emitted.lines);
     if native_text.length == 0 { return false; }
-    return print_llvm_ir_from_text(native_text, module_name);
+    return print_llvm_ir_from_text_with_provider_context(native_text, module_name, resolve_llvm_provider_context());
 }
 
 fn compile_to_llvm_with_module(source: string, module_name: string) -> string ![io] {
@@ -471,14 +471,14 @@ fn compile_to_llvm_with_module(source: string, module_name: string) -> string ![
     // The re-emits below carry the same diagnostics the primary emit above
     // already reported; re-reporting would duplicate them (SFN-608).
     if native_text.length > 0 {
-        ir = lower_to_llvm_ir_from_text(native_text, module_name);
+        ir = lower_to_llvm_ir_from_text_with_provider_context(native_text, module_name, resolve_llvm_provider_context());
         if ir.length == 0 {
             let native_result = emit_native_with_module_name(program, module_name);
-            ir = lower_to_llvm_ir(native_result.module);
+            ir = lower_to_llvm_ir_with_provider_context(native_result.module, resolve_llvm_provider_context());
         }
     } else {
         let native_result = emit_native_with_module_name(program, module_name);
-        ir = lower_to_llvm_ir(native_result.module);
+        ir = lower_to_llvm_ir_with_provider_context(native_result.module, resolve_llvm_provider_context());
     }
     if trace_emit {
         print.err("emit-llvm: llvm bytes=" + number_to_string(ir.length));
@@ -559,11 +559,11 @@ fn compile_to_llvm_with_module_timed(source: string, module_name: string) -> str
     ice_enter_stage("lower_llvm");
     let mut ir = "";
     if native_text.length > 0 {
-        ir = lower_to_llvm_ir_from_text(native_text, module_name);
+        ir = lower_to_llvm_ir_from_text_with_provider_context(native_text, module_name, resolve_llvm_provider_context());
     } else {
         // Already reported above; re-emitting is deterministic (SFN-608).
         let native_result = emit_native_with_module_name(program, module_name);
-        ir = lower_to_llvm_ir(native_result.module);
+        ir = lower_to_llvm_ir_with_provider_context(native_result.module, resolve_llvm_provider_context());
     }
     if trace_emit {
         print.err("emit-llvm: llvm bytes=" + number_to_string(ir.length));
@@ -694,7 +694,7 @@ fn compile_tests_to_llvm_file_with_module_imports(source: string, module_name: s
     }
 
     let empty_diagnostics: string[] = [];
-    let generated = lower_llvm_for_tests_from_text_with_context(native_text, module_name, imported_manifests, imported_native_texts, empty_diagnostics);
+    let generated = lower_llvm_for_tests_from_text_with_provider_context(native_text, module_name, imported_manifests, imported_native_texts, empty_diagnostics, resolve_llvm_provider_context());
     if !_publish_llvm_artifact(generated, out_path, "test llvm: wrote truncated IR to "
         + out_path) { return false; }
     if !fs.exists(out_path) { return false; }
@@ -826,7 +826,7 @@ fn write_native_text_file_with_module_gated(source: string, module_name: string,
     if !ok { return false; }
     if !run_gate { return true; }
     let native_text = fs.readFile(out_path);
-    if native_text_passes_lowering_gate(native_text, module_name) {
+    if native_text_passes_lowering_gate(native_text, module_name, resolve_llvm_provider_context()) {
         return true;
     }
     if fs.exists(out_path) { fs.deleteFile(out_path); }
@@ -852,7 +852,7 @@ fn print_native_text_with_module_gated(source: string, module_name: string, run_
     // same sentinel.
     if native_text.length == 0 { return false; }
     if run_gate {
-        if !native_text_passes_lowering_gate(native_text, module_name) {
+        if !native_text_passes_lowering_gate(native_text, module_name, resolve_llvm_provider_context()) {
             return false;
         }
     }
@@ -985,10 +985,10 @@ fn compile_to_llvm_file_with_module_imports(source: string, module_name: string,
         let mut ok: boolean = false;
         if import_asm_paths.length > 0 {
             let reloaded = load_imported_interfaces_from_paths(import_asm_paths);
-            let generated = lower_native_text_to_llvm_artifact_with_context(heap_text, module_name, reloaded.native_texts);
+            let generated = lower_native_text_to_llvm_artifact_with_context_and_provider(heap_text, module_name, reloaded.native_texts, resolve_llvm_provider_context());
             ok = _publish_llvm_artifact(generated, out_path, "");
         } else {
-            let generated = lower_native_text_to_llvm_artifact(heap_text, module_name);
+            let generated = lower_native_text_to_llvm_artifact_with_provider_context(heap_text, module_name, resolve_llvm_provider_context());
             ok = _publish_llvm_artifact(generated, out_path, "");
         }
         free_heap_string(heap_text);
@@ -998,13 +998,13 @@ fn compile_to_llvm_file_with_module_imports(source: string, module_name: string,
     // `-p` cross-module path: thread the staged import bodies into
     // lowering so sibling call sites resolve the entry's exported
     // function signatures (#999). The empty-import / in-process path
-    // (`import_asm_paths.length == 0`) keeps routing through the
-    // context-free lowering result — no behavior change there.
+    // (`import_asm_paths.length == 0`) keeps routing through the direct
+    // provider entrypoint.
     if import_asm_paths.length > 0 {
-        let generated = lower_native_lines_to_llvm_artifact_with_context(native_lines, module_name, imported_native_texts);
+        let generated = lower_native_lines_to_llvm_artifact_with_context_and_provider(native_lines, module_name, imported_native_texts, resolve_llvm_provider_context());
         return _publish_llvm_artifact(generated, out_path, "");
     }
-    let generated = lower_native_lines_to_llvm_artifact(native_lines, module_name);
+    let generated = lower_native_lines_to_llvm_artifact_with_provider_context(native_lines, module_name, resolve_llvm_provider_context());
     return _publish_llvm_artifact(generated, out_path, "");
 }
 

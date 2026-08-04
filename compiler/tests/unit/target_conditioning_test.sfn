@@ -29,11 +29,22 @@ import {
     target_filter_link_libs,
     target_forced_linker_flag,
     target_os_is_windows,
+    target_uses_gnu_link_gc
+} from "../../src/build/target";
+import { lower_to_llvm_ir_from_text_with_provider_context } from "../../src/llvm/lowering/entrypoints";
+import {
+    LLVMProviderContext,
+    build_target_os,
+    skip_module_globals,
+    target_arch_for_lowering,
     target_setjmp_call_line,
     target_setjmp_declare,
     target_setjmp_symbol,
-    target_uses_gnu_link_gc
-} from "../../src/build/target";
+    test_runner_active,
+    test_runner_trace,
+    trace_call_lowering,
+    trace_lowering
+} from "../../src/llvm/lowering_debug_state";
 
 // Membership check over an emitted argv (`string[]`).
 fn _argv_contains(argv: string[], needle: string) -> boolean ![pure] {
@@ -44,6 +55,47 @@ fn _argv_contains(argv: string[], needle: string) -> boolean ![pure] {
         i += 1;
     }
     return false;
+}
+
+// An LLVM entrypoint must replace the complete primitive snapshot on every
+// invocation. This guards in-process compiler/test runs from inheriting a
+// previous target, debug toggle, or test-runner state.
+test "target: provider entrypoint overwrites its complete context" ![io] {
+    let first = LLVMProviderContext {
+        target_os: "Darwin",
+        target_arch: "aarch64",
+        trace_lowering: false,
+        trace_call_lowering: false,
+        skip_module_globals: false,
+        test_runner_active: false,
+        test_runner_trace: false
+    };
+    let _first_ir = lower_to_llvm_ir_from_text_with_provider_context("", "provider_context_first", first);
+    assert expect_eq_str(build_target_os(), "Darwin").ok;
+    assert expect_eq_str(target_arch_for_lowering(), "aarch64").ok;
+    assert expect_eq_bool(trace_lowering(), false).ok;
+    assert expect_eq_bool(trace_call_lowering(), false).ok;
+    assert expect_eq_bool(skip_module_globals(), false).ok;
+    assert expect_eq_bool(test_runner_active(), false).ok;
+    assert expect_eq_bool(test_runner_trace(), false).ok;
+
+    let second = LLVMProviderContext {
+        target_os: "Windows",
+        target_arch: "x86_64",
+        trace_lowering: true,
+        trace_call_lowering: true,
+        skip_module_globals: true,
+        test_runner_active: true,
+        test_runner_trace: true
+    };
+    let _second_ir = lower_to_llvm_ir_from_text_with_provider_context("", "provider_context_second", second);
+    assert expect_eq_str(build_target_os(), "Windows").ok;
+    assert expect_eq_str(target_arch_for_lowering(), "x86_64").ok;
+    assert expect_eq_bool(trace_lowering(), true).ok;
+    assert expect_eq_bool(trace_call_lowering(), true).ok;
+    assert expect_eq_bool(skip_module_globals(), true).ok;
+    assert expect_eq_bool(test_runner_active(), true).ok;
+    assert expect_eq_bool(test_runner_trace(), true).ok;
 }
 
 // ---- Target OS classification ----

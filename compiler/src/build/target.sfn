@@ -9,11 +9,9 @@
 //
 // The target OS is the `SAILFIN_TARGET_OS` override (the cross-compile +
 // e2e-test hook) else a non-shelling host probe. `build_host_os` below is
-// the single host resolver: the emit-time `_host_os()` locator in
-// `llvm/lowering_debug_state.sfn` (SFN-49, M1) delegates to it rather than
-// repeating the probe, so a module's emitted platform legs cannot disagree
-// with the target this resolves (SFN-682 — they were two bodies that
-// diverged on the `SAILFIN_HOST_OS` override).
+// the single host resolver. The driver snapshots this resolver into the
+// explicit LLVM provider context, so emitted platform legs cannot disagree
+// with the target this resolves.
 // Values are uname-style: "Linux" | "Darwin" | "Windows".
 //
 // Zero-behaviour contract (#1112): every non-Windows target returns an
@@ -40,10 +38,10 @@ import { _dirname, _path_basename, _path_join } from "./paths";
 // probe for Darwin, then the `SystemRoot` env var for Windows, defaulting
 // to Linux. No `uname`/`sh` subprocess — native Windows has neither.
 //
-// This is the one host resolver in the compiler; `_host_os()` in
-// `llvm/lowering_debug_state.sfn` delegates here (SFN-682) so the emit-time
-// platform legs and every `target_os`-keyed build decision — including the
-// SFN-677 `.ll` cache-key fold — resolve identically.
+// This is the one host resolver in the compiler. The LLVM provider-context
+// resolver snapshots its result so emit-time platform legs and every
+// `target_os`-keyed build decision — including the SFN-677 `.ll` cache-key
+// fold — resolve identically.
 //
 // The override is returned VERBATIM and unvalidated. That is deliberate: an
 // unrecognized value must reach every consumer unchanged so they all
@@ -195,53 +193,6 @@ fn target_filter_link_libs(libs: string[], target_os: string) -> string[] {
 fn target_extra_link_libs(target_os: string) -> string[] {
     if target_os_is_windows(target_os) { return ["-lbcrypt", "-lws2_32"]; }
     return [];
-}
-
-// SFN-647: Windows x64 has no one-argument `setjmp`. The UCRT header maps
-// `setjmp(buf)` onto `_setjmp(buf, frame)`, and MSVC's `longjmp` reads that
-// second argument back out of `_JUMP_BUFFER.Frame`: a NON-ZERO `Frame` sends
-// the restore down `RtlUnwindEx` (a full SEH unwind) instead of the plain
-// register restore. Emitting the POSIX one-argument call left `rdx` holding
-// whatever the caller happened to leave there, so the first `throw` in a
-// natively-built program unwound against a garbage frame and the process died
-// before reaching any catch block — `try-catch-finally.sfn` exited 40 having
-// printed nothing, while `hello-world.sfn` survived only because it never
-// throws.
-//
-// A NULL second argument is what selects longjmp's non-unwinding path, and it
-// is the correct choice here: Sailfin's exception model does no SEH unwinding
-// — `sfn_throw` `longjmp`s straight to the matching save point. (clang passes
-// `llvm.frameaddress(0)` when compiling C because C's `longjmp` must run SEH
-// unwind handlers on the way out; Sailfin has none to run.)
-//
-// Every non-Windows target keeps the one-argument POSIX form, so their IR is
-// byte-identical.
-fn target_setjmp_symbol(target_os: string) -> string {
-    if target_os_is_windows(target_os) { return "_setjmp"; }
-    return "setjmp";
-}
-
-// The module-scope `declare` for `target_os`'s `setjmp`. On Windows the
-// registry's POSIX `declare i32 @setjmp(i8*)` (`runtime_helpers/
-// registry_values.sfn`) is left in place and simply goes unreferenced —
-// LLVM drops an unused declaration — so the registry needs no target
-// threading.
-fn target_setjmp_declare(target_os: string) -> string {
-    if target_os_is_windows(target_os) {
-        return "declare i32 @_setjmp(i8*, i8*)";
-    }
-    return "declare i32 @setjmp(i8*)";
-}
-
-// One `<result_temp> = call i32 @<setjmp>(...)` line saving into
-// `jmpbuf_operand` (the `i8*` value text of the jmpbuf pointer).
-fn target_setjmp_call_line(target_os: string, result_temp: string, jmpbuf_operand: string) -> string {
-    if target_os_is_windows(target_os) {
-        return "  " + result_temp + " = call i32 @_setjmp(i8* " + jmpbuf_operand
-            + ", i8* null)";
-    }
-    return "  " + result_temp + " = call i32 @setjmp(i8* " + jmpbuf_operand
-        + ")";
 }
 
 // Rewrite the runtime capsule's `sfn-sources` list for `target_os`. On
@@ -405,9 +356,6 @@ export {
     target_uses_gnu_link_gc,
     target_filter_link_libs,
     target_extra_link_libs,
-    target_setjmp_symbol,
-    target_setjmp_declare,
-    target_setjmp_call_line,
     target_condition_runtime_sfn_sources,
     target_artifact_tag
 };

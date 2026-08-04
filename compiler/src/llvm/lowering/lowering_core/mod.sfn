@@ -10,7 +10,6 @@ import {
     ParseNativeResult
 } from "../../../native_ir";
 import { parse_native_artifact } from "../../../native_ir_api";
-import { test_runner_active, test_runner_trace } from "../../../test_runner_state";
 import {
     append_unique_effect,
     collect_direct_function_effects,
@@ -19,7 +18,13 @@ import {
     propagate_function_effects
 } from "../../effects";
 import { apply_layout_manifest_to_module } from "../../imports";
-import { skip_module_globals, trace_call_lowering, trace_lowering } from "../../lowering_debug_state";
+import {
+    skip_module_globals,
+    test_runner_active,
+    test_runner_trace,
+    trace_call_lowering,
+    trace_lowering
+} from "../../lowering_debug_state";
 import { monomorphize_native_text } from "../../monomorphize";
 import { collect_exported_symbol_names } from "../../rendering_helpers";
 import { empty_string_constant_set, merge_string_constants } from "../../strings";

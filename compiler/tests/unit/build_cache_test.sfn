@@ -1117,10 +1117,9 @@ test "build_cache: cache_key_for changes when the build target changes" ![io] {
     _write_file(src, "fn hello() -> string { return \"world\"; }");
     let no_deps: string[] = [];
     let no_dep_slugs: string[] = [];
-    // SFN-677 contract: `llvm/lowering_debug_state.sfn` reads the
-    // resolved target at emit time, so identical inputs at different
-    // targets are genuinely different IR and must not share a cache
-    // entry.
+    // SFN-677 contract: the driver passes the resolved target into LLVM at
+    // emit time, so identical inputs at different targets are genuinely
+    // different IR and must not share a cache entry.
     let key_linux = cache_key_for(src, no_dep_slugs, no_deps, "0.5.10-alpha.2", "[]", "target_sensitive", "Linux");
     let key_windows = cache_key_for(src, no_dep_slugs, no_deps, "0.5.10-alpha.2", "[]", "target_sensitive", "Windows");
     let key_darwin = cache_key_for(src, no_dep_slugs, no_deps, "0.5.10-alpha.2", "[]", "target_sensitive", "Darwin");

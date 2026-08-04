@@ -8,27 +8,27 @@ import {
 
 // compiler/src/test_runner_state.sfn
 //
-// In-process test-runner state shared between the orchestrator
-// (`cli/commands/test/mod.sfn:run`) and the LLVM lowering
-// pipeline. Replaces two flag files that issue #311 retired:
+// In-process state owned by the test-runner orchestrator
+// (`cli/commands/test/mod.sfn:run`). The compiler driver snapshots the active
+// and trace bits into each explicit LLVM provider context. Replaces two flag
+// files that issue #311 retired:
 //
 //   build/sailfin/.test_runner_active   — was: written by
 //                                          the `sfn test` runner at
 //                                          entry, deleted on each of
 //                                          the 6 return paths,
-//                                          read in 2 LLVM lowering
-//                                          sites + 1 main.sfn site
+//                                          read by the driver context
+//                                          resolver + 1 main.sfn site
 //   build/sailfin/.trace_test_runner    — was: env-var or legacy
 //                                          file, paired-read in 6
 //                                          lowering trace gates
 //
 // Both were intra-process state masquerading as cross-process IPC.
-// The test runner invokes `compile_tests_to_llvm_file_with_module_-
-// imports` via direct in-process function calls, never via a
-// spawned child compiler — `process.run([exe_path])` runs the
-// compiled test binary, not a nested `sfn`. Each `fs.exists()`
-// probe was a popen-shaped syscall on hot paths inside per-
-// statement / per-function loops.
+// The test runner invokes `compile_tests_to_llvm_file_with_module_imports`
+// via direct in-process function calls, never via a spawned child compiler —
+// `process.run([exe_path])` runs the compiled test binary, not a nested `sfn`.
+// Snapshotting these bits preserves that lifecycle while keeping driver state
+// out of the LLVM provider.
 //
 // Lifetime contract:
 //
@@ -72,10 +72,9 @@ fn exit_test_runner_mode() {
     _scratch_root = "";
 }
 
-// True when the running compile was invoked via `sfn test`. Read
-// in 10+ LLVM lowering sites — including the behavior-changing
-// `is_test_module` gate in `lowering_core/mod.sfn` — and in
-// `compile_tests_to_llvm_file_with_module_imports` in `main.sfn`.
+// True when the running compile was invoked via `sfn test`. The driver reads
+// this when constructing the provider context and when preparing the test
+// program in `compile_tests_to_llvm_file_with_module_imports`.
 fn test_runner_active() -> boolean { return _active; }
 
 // True only when the runner is active AND the user requested

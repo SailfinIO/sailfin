@@ -352,11 +352,10 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     // replaces that side-channel file.)
     let json_subframe = json_output && _env_flag("SAILFIN_TEST_JSON_SUBFRAME");
 
-    // Resolve the trace toggle once (popen-cost is fine on the
-    // cold orchestrator path) and stash both bits in the
-    // process-local `test_runner_state` module so the LLVM
-    // lowering pipeline reads them via direct boolean loads
-    // instead of re-probing the filesystem on every statement.
+    // Resolve the trace toggle once on the cold orchestrator path and stash
+    // both bits in process-local test-runner state. The driver snapshots them
+    // into each LLVM provider context instead of letting lowering import this
+    // state or re-probe the filesystem on every statement.
     // See `compiler/src/test_runner_state.sfn` for the contract.
     let trace_runner = _env_flag("SAILFIN_TRACE_TEST_RUNNER")
         || _legacy_flag_file("build/sailfin/.trace_test_runner");

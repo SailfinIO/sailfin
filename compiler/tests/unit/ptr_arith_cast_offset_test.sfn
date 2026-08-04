@@ -10,8 +10,9 @@
 // from_text` call (it invokes clang and is memory-heavy) over a single
 // combined source carrying every form under test. The functions return the
 // computed pointer so the arithmetic is not dead-stripped.
+import { resolve_llvm_provider_context } from "../../src/build/llvm_provider_context";
 import { emit_native_text_with_module_name } from "../../src/emit_native";
-import { lower_to_llvm_ir_from_text } from "../../src/llvm/lowering/entrypoints";
+import { lower_to_llvm_ir_from_text_with_provider_context } from "../../src/llvm/lowering/entrypoints";
 import { parse_program } from "../../src/parser/mod";
 import { index_of } from "../../src/string_utils";
 
@@ -32,7 +33,7 @@ test "lowering: `(ptr as i64 + N) as * T` keeps the offset (#1189)" ![io] {
         + "}";
     let program = parse_program(source);
     let native = emit_native_text_with_module_name(program, "ptr_arith_cast_offset_test");
-    let ir = lower_to_llvm_ir_from_text(native, "ptr_arith_cast_offset_test");
+    let ir = lower_to_llvm_ir_from_text_with_provider_context(native, "ptr_arith_cast_offset_test", resolve_llvm_provider_context());
 
     // The pointer operand is reinterpreted as an integer (not bitcast).
     assert _contains(ir, "ptrtoint i8* %task to i64");

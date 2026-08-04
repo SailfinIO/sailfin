@@ -2,18 +2,18 @@
 //
 // Recoverable LLVM test-harness synthesis.
 import {
-    build_target_os,
-    target_setjmp_call_line,
-    target_setjmp_declare,
-    target_setjmp_symbol
-} from "../../../build/target";
-import {
     LayoutManifest,
     NativeFunction,
     NativeModule,
     ParseNativeResult
 } from "../../../native_ir";
 import { substring } from "../../../string_utils";
+import {
+    build_target_os,
+    target_setjmp_call_line,
+    target_setjmp_declare,
+    target_setjmp_symbol
+} from "../../lowering_debug_state";
 import { escape_string_for_llvm } from "../../strings";
 import { LoweredLLVMLinesResult } from "../../types";
 import { index_of, number_to_string, sanitize_symbol } from "../../utils";
@@ -77,7 +77,7 @@ fn _harness_has_declare(lines: string[], symbol: string) -> boolean {
 // `target_os` selects the save-point spelling (SFN-647): Windows takes the
 // UCRT's two-parameter `_setjmp` with a null frame. Passed in rather than
 // resolved here so this stays pure — the caller already holds an `![io]`
-// context, matching the convention `build/target.sfn` documents.
+// context, matching the provider-owned target contract.
 fn _harness_region_setup(rid: string, run_label: string, caught_label: string, target_os: string) -> string[] {
     return ["  %jbslot." + rid
         + " = getelementptr [3 x i64], [3 x i64]* %frame, i64 0, i64 1", "  %jbaddr."
