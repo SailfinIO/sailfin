@@ -680,7 +680,9 @@ jobs:
           exec clang-18 --target=aarch64-linux-gnu "$@"
           EOF
           chmod +x build/aarch64-cross/bin/clang
-          PATH="$PWD/build/aarch64-cross/bin:$PATH" \
+          # SFEP-0056 makes the downloaded arch-aware compiler the vehicle;
+          # redispatching to the pinned seed would turn pass-1 back into stage 1.
+          PATH="$PWD/build/aarch64-cross/bin:$PATH" SAILFIN_BOOTSTRAP=off \
             SAILFIN_LINKER=lld \
             SAILFIN_TARGET_ARCH=aarch64 \
             build/bin/sfn build --no-cache -p compiler \

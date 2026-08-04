@@ -111,6 +111,7 @@ test "aarch64 bootstrap: self-host passes do not fetch a native seed" ![io] {
     assert contains(source, "SAILFIN_BOOTSTRAP=off SAILFIN_TARGET_ARCH=aarch64 \\\n\t\t\"$WORK_DIR/pass-1/sfn\" build");
 
     let workflow = fs.readFile(".github/workflows/ci.yml");
+    assert contains(workflow, "PATH=\"$PWD/build/aarch64-cross/bin:$PATH\" SAILFIN_BOOTSTRAP=off");
     assert contains(workflow, "SAILFIN_BOOTSTRAP=off \\\n            SAILFIN_LINKER=lld");
 }
 
