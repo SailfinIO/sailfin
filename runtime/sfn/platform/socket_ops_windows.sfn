@@ -1,0 +1,92 @@
+// runtime/sfn/platform/socket_ops_windows.sfn
+//
+// Windows sibling of `socket_ops.sfn`, swapped in for a Windows
+// target by `target_condition_runtime_sfn_sources`
+// (`compiler/src/build/target.sfn`). See that module's header for why
+// only creation and disposal are conditioned; everything else in the
+// socket surface is byte-compatible with POSIX and resolves from
+// `ws2_32.dll`, already linked by `target_extra_link_libs` (SFN-649).
+//
+// `closesocket` instead of `close` — `close` on a `SOCKET` is a
+// process-killing `__fastfail(0xC0000409)`, not an error return.
+//
+// `WSAStartup` before creation — Winsock refuses every call until the
+// library is initialized per process, so without this `socket()`
+// returns `INVALID_SOCKET` with `WSANOTINITIALISED` (10093) and no
+// Sailfin program can open a socket at all on native Windows.
+//
+// Why call `WSAStartup` on EVERY open rather than once behind a
+// module-global flag: it is documented as callable more than once and
+// is internally reference-counted, and that is verified here — four
+// consecutive `WSAStartup` + `socket` pairs each returned `rc=0` and a
+// valid handle. Calling it unconditionally removes a mutable global
+// and, with it, the lazy-initialization race that a global would
+// otherwise need guarding against. Every call after the first only
+// bumps a refcount, which is noise beside the TCP handshake that
+// follows — but note this IS on the per-connection client path, not a
+// once-per-process one, so the refcount grows monotonically for the
+// life of the process and is never released. That is the deliberate
+// consequence of having no `WSACleanup` (below), not a leak to fix.
+//
+// Why no `WSACleanup`: it would have to balance every `WSAStartup`,
+// and an unbalanced call tears the library down while other sockets
+// in the process are still live. Process exit reclaims the
+// reservation, which is the correct lifetime for a runtime that has
+// no shutdown hook.
+//
+// The `i32` handle width is deliberate and safe, not an oversight. A
+// `SOCKET` is a `UINT_PTR` (8 bytes here), but 64-bit Windows
+// guarantees handle values are 32-bit representable so they can be
+// shared with 32-bit processes — measured: real handles came back as
+// `0xf8`/`0x100` with a zero high word, and `INVALID_SOCKET`
+// (`0xffffffffffffffff`) truncates to `-1`, which is exactly what the
+// adapters' `if fd < 0` guards test. Passing one back through an
+// `i32` parameter is equally safe because the x64 convention
+// zero-extends a 32-bit register write. Widening the adapters to
+// `i64` would have touched ~90 call sites for no behavioural change
+// (SFN-671).
+extern fn closesocket(s: i32) -> i32;
+
+extern fn socket(domain: i32, ty: i32, protocol: i32) -> i32;
+
+// `WSAStartup(wVersionRequested, lpWSAData)`. `lpWSAData` is an out
+// parameter the caller owns; it must be writable for `sizeof(WSADATA)`
+// bytes, which is 408 on this SDK.
+extern fn WSAStartup(version: i32, data: *u8) -> i32;
+
+extern fn malloc(size: usize) -> *u8;
+
+extern fn free(ptr: *u8) -> void;
+
+// `MAKEWORD(2, 2)` — Winsock 2.2, the version every supported Windows
+// provides.
+let WSA_VERSION_2_2: i32 = 514;
+
+// Comfortably above the measured `sizeof(WSADATA)` of 408, so a future
+// SDK growing the struct cannot turn this into a buffer overrun.
+let WSA_DATA_SIZE: i64 = 512;
+
+// Initialize Winsock. Returns 0 on success, non-zero otherwise. The
+// `WSADATA` block is scratch — the negotiated version and vendor
+// strings it reports are of no use here — so it is freed immediately.
+fn _sfn_wsa_startup() -> i32 {
+    let buf: *u8 = malloc(WSA_DATA_SIZE as usize);
+    if buf as i64 == 0 { return 0 - 1; }
+    let rc: i32 = WSAStartup(WSA_VERSION_2_2, buf);
+    free(buf);
+    return rc;
+}
+
+// Create a socket, initializing Winsock first. On initialization
+// failure this returns `-1` rather than attempting the call, which
+// matches `INVALID_SOCKET`'s truncated form and so satisfies the
+// callers' existing `if fd < 0` failure test.
+fn sfn_socket_open(domain: i32, ty: i32, protocol: i32) -> i32 {
+    if _sfn_wsa_startup() != 0 { return 0 - 1; }
+    return socket(domain, ty, protocol);
+}
+
+// Dispose of a socket. `closesocket`, never `close`.
+fn sfn_socket_close(fd: i32) -> i32 { return closesocket(fd); }
+
+export { sfn_socket_open, sfn_socket_close };

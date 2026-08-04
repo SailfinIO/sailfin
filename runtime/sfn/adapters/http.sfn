@@ -153,7 +153,17 @@ extern fn atoi(s: *u8) -> i32;
 // `addr` is spelled `* u8` (the `net.sfn` opaque-handle policy:
 // adapters cast the family-specific sockaddr struct through `* u8`
 // at the call site). Identical C ABI to `const struct sockaddr *`.
-extern fn socket(domain: i32, ty: i32, protocol: i32) -> i32;
+// Socket creation and disposal route through `platform/socket_ops.sfn`
+// rather than libc `socket`/`close`, because both diverge on Windows:
+// POSIX `close` on a Winsock `SOCKET` fastfails the process
+// (`0xC0000409`) instead of returning an error, and Winsock refuses
+// every call until `WSAStartup` has run, which nothing did. That module
+// is swapped for `socket_ops_windows.sfn` on a Windows target by
+// `target_condition_runtime_sfn_sources`, so these stay ordinary
+// externs and the linker binds whichever sibling was compiled — the
+// same shape as `_sfn_fs_access_exec_mode` in `filesystem.sfn`
+// (SFN-671).
+extern fn sfn_socket_open(domain: i32, ty: i32, protocol: i32) -> i32;
 
 extern fn connect(sockfd: i32, addr: *u8, addrlen: i32) -> i32;
 
@@ -161,7 +171,7 @@ extern fn send(sockfd: i32, buf: *u8, len: i64, flags: i32) -> i64;
 
 extern fn recv(sockfd: i32, buf: *u8, len: i64, flags: i32) -> i64;
 
-extern fn close(fd: i32) -> i32;
+extern fn sfn_socket_close(fd: i32) -> i32;
 
 // `setsockopt` — arm SO_RCVTIMEO / SO_SNDTIMEO (recv/send deadlines) on
 // the client socket (#1581). `optval` is the `struct timeval` byte buffer
@@ -449,7 +459,7 @@ fn _connect_tcp(host: *u8, port: i64) -> i32 ![net] {
         memset(_ptr_off(addr, 3), (port & 255) as i32, 1 as usize);
         // sin_addr octets at offset 4..8.
         if _host_ip4(host, _ptr_off(addr, 4)) {
-            let fd: i32 = socket(2, 1, 0);
+            let fd: i32 = sfn_socket_open(2, 1, 0);
             if fd < 0 {
                 free(addr);
                 return 0 - 1;
@@ -460,7 +470,7 @@ fn _connect_tcp(host: *u8, port: i64) -> i32 ![net] {
             let rc: i32 = connect(fd, addr, 16);
             free(addr);
             if rc == 0 { return fd; }
-            close(fd);
+            sfn_socket_close(fd);
         } else {
             free(addr);
             return 0 - 1;
@@ -747,7 +757,7 @@ fn _extract_body(resp: *u8, total_len: i64, body_len_slot: *i64) -> *u8 {
 // and its `SSL_CTX*`. Both may be null (the plaintext-http path), making
 // this a no-op there, so it can be called unconditionally on every
 // post-handshake exit of a TLS-capable request. `tls_shutdown_free`
-// writes a close_notify over the fd, so this must run before `close(fd)`.
+// writes a close_notify over the fd, so this must run before `sfn_socket_close(fd)`.
 fn _tls_teardown(ssl: *u8, ctx: *u8) -> void ![net] {
     if ssl as i64 != 0 { tls_shutdown_free(ssl); }
     if ctx as i64 != 0 { tls_ctx_free(ctx); }
@@ -890,21 +900,21 @@ fn _http_send_once(url: *u8, is_post: bool, body: *u8, auth_header: *u8, body_le
     // null for plaintext http, so the single `_send_all`/`_recv_all` path
     // below routes bytes through TLS or raw sockets accordingly. Every
     // post-handshake exit runs `_tls_teardown(ssl, tls_ctx)` (a no-op on
-    // http) before `close(fd)`.
+    // http) before `sfn_socket_close(fd)`.
     let mut ssl: *u8 = null;
     let mut tls_ctx: *u8 = null;
     if is_https {
         tls_ctx = tls_client_ctx();
         if tls_ctx as i64 == 0 {
             free(authority);
-            close(fd);
+            sfn_socket_close(fd);
             return null;
         }
         ssl = tls_connect_fd(tls_ctx, fd, authority);
         if ssl as i64 == 0 {
             tls_ctx_free(tls_ctx);
             free(authority);
-            close(fd);
+            sfn_socket_close(fd);
             return null;
         }
     }
@@ -923,7 +933,7 @@ fn _http_send_once(url: *u8, is_post: bool, body: *u8, auth_header: *u8, body_le
         if clen as i64 == 0 {
             _tls_teardown(ssl, tls_ctx);
             free(authority);
-            close(fd);
+            sfn_socket_close(fd);
             return null;
         }
         // Optional Authorization header.
@@ -947,7 +957,7 @@ fn _http_send_once(url: *u8, is_post: bool, body: *u8, auth_header: *u8, body_le
             _tls_teardown(ssl, tls_ctx);
             free(clen);
             free(authority);
-            close(fd);
+            sfn_socket_close(fd);
             return null;
         }
         let mut off: i64 = 0;
@@ -973,13 +983,13 @@ fn _http_send_once(url: *u8, is_post: bool, body: *u8, auth_header: *u8, body_le
             } else {
                 _tls_teardown(ssl, tls_ctx);
                 free(authority);
-                close(fd);
+                sfn_socket_close(fd);
                 return null;
             }
         } else {
             _tls_teardown(ssl, tls_ctx);
             free(authority);
-            close(fd);
+            sfn_socket_close(fd);
             return null;
         }
     } else {
@@ -991,7 +1001,7 @@ fn _http_send_once(url: *u8, is_post: bool, body: *u8, auth_header: *u8, body_le
         if head as i64 == 0 {
             _tls_teardown(ssl, tls_ctx);
             free(authority);
-            close(fd);
+            sfn_socket_close(fd);
             return null;
         }
         let mut off: i64 = 0;
@@ -1009,7 +1019,7 @@ fn _http_send_once(url: *u8, is_post: bool, body: *u8, auth_header: *u8, body_le
         } else {
             _tls_teardown(ssl, tls_ctx);
             free(authority);
-            close(fd);
+            sfn_socket_close(fd);
             return null;
         }
     }
@@ -1018,7 +1028,7 @@ fn _http_send_once(url: *u8, is_post: bool, body: *u8, auth_header: *u8, body_le
     let mut total_len: i64 = 0;
     let resp: *u8 = _recv_all(fd, ssl, & total_len);
     _tls_teardown(ssl, tls_ctx);
-    close(fd);
+    sfn_socket_close(fd);
     // Surface the status + any redirect target BEFORE body extraction, so the
     // `_http_send` loop can follow a 3xx (whose body is empty) rather than
     // returning it. `url` (unfreed) is the base for a relative `Location`.
@@ -1187,14 +1197,14 @@ fn sfn_http_request_raw(method: *u8, url: *u8, headers: *u8, body: *u8) -> *u8 !
         tls_ctx = tls_client_ctx();
         if tls_ctx as i64 == 0 {
             free(authority);
-            close(fd);
+            sfn_socket_close(fd);
             return null;
         }
         ssl = tls_connect_fd(tls_ctx, fd, authority);
         if ssl as i64 == 0 {
             tls_ctx_free(tls_ctx);
             free(authority);
-            close(fd);
+            sfn_socket_close(fd);
             return null;
         }
     }
@@ -1225,7 +1235,7 @@ fn sfn_http_request_raw(method: *u8, url: *u8, headers: *u8, body: *u8) -> *u8 !
         if clen as i64 == 0 {
             _tls_teardown(ssl, tls_ctx);
             free(authority);
-            close(fd);
+            sfn_socket_close(fd);
             return null;
         }
         clen_len = strlen(clen) as i64;
@@ -1244,7 +1254,7 @@ fn sfn_http_request_raw(method: *u8, url: *u8, headers: *u8, body: *u8) -> *u8 !
         if clen as i64 != 0 { free(clen); }
         _tls_teardown(ssl, tls_ctx);
         free(authority);
-        close(fd);
+        sfn_socket_close(fd);
         return null;
     }
     let mut off: i64 = 0;
@@ -1269,14 +1279,14 @@ fn sfn_http_request_raw(method: *u8, url: *u8, headers: *u8, body: *u8) -> *u8 !
     if !head_ok {
         _tls_teardown(ssl, tls_ctx);
         free(authority);
-        close(fd);
+        sfn_socket_close(fd);
         return null;
     }
     if body_len > 0 {
         if !_send_all(fd, ssl, body, body_len) {
             _tls_teardown(ssl, tls_ctx);
             free(authority);
-            close(fd);
+            sfn_socket_close(fd);
             return null;
         }
     }
@@ -1285,7 +1295,7 @@ fn sfn_http_request_raw(method: *u8, url: *u8, headers: *u8, body: *u8) -> *u8 !
     let mut total_len: i64 = 0;
     let resp: *u8 = _recv_all(fd, ssl, & total_len);
     _tls_teardown(ssl, tls_ctx);
-    close(fd);
+    sfn_socket_close(fd);
     // Return the full raw response verbatim — the capsule parses the
     // status code and headers out of it. `_recv_all` NUL-terminates the
     // buffer; null (socket/recv error) propagates to the caller.
@@ -1533,20 +1543,20 @@ fn sfn_http_conn_open(url: *u8) -> i64 ![net] {
         let ctx: *u8 = tls_client_ctx();
         if ctx as i64 == 0 {
             free(authority);
-            close(fd);
+            sfn_socket_close(fd);
             return 0 - 1;
         }
         let ssl: *u8 = tls_connect_fd(ctx, fd, authority);
         if ssl as i64 == 0 {
             tls_ctx_free(ctx);
             free(authority);
-            close(fd);
+            sfn_socket_close(fd);
             return 0 - 1;
         }
         if !_conn_tls_register(fd as i64, ssl, ctx) {
             _tls_teardown(ssl, ctx);
             free(authority);
-            close(fd);
+            sfn_socket_close(fd);
             return 0 - 1;
         }
     }
@@ -1663,7 +1673,7 @@ fn sfn_http_conn_send(fd: i64, method: *u8, url: *u8, headers: *u8, body: *u8) -
 fn sfn_http_conn_close(fd: i64) -> void ![net] {
     if fd >= 0 {
         _conn_tls_remove(fd);
-        close(fd as i32);
+        sfn_socket_close(fd as i32);
     }
 }
 

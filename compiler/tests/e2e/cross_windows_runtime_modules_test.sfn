@@ -101,6 +101,21 @@ test "cross-windows RUNTIME_MODS / manifest per-module contracts" ![io] {
     assert contains(makefile, "runtime/sfn/platform/fs_exec_mode_windows.sfn");
     assert ! contains(manifest, "fs_exec_mode_windows");
 
+    // socket_ops.sfn (SFN-671): identical shape to fs_exec_mode above.
+    // The POSIX module calls close(2) on what is a Winsock SOCKET on
+    // Windows — a process-killing fastfail, not an error return — and
+    // nothing anywhere called WSAStartup, so sockets could not be opened
+    // at all. The sibling supplies closesocket plus the initialization.
+    // http.sfn is the only socket-owning module in RUNTIME_MODS, and it
+    // declares sfn_socket_open/sfn_socket_close as externs, so without
+    // the sibling in the list the bridge link has no definition for
+    // either. The substring checks are exact in both directions:
+    // "socket_ops.sfn" is NOT a substring of "socket_ops_windows.sfn",
+    // and the manifest never names the sibling.
+    assert contains(manifest, "\"sfn/platform/socket_ops.sfn\"");
+    assert ! contains(makefile, "runtime/sfn/platform/socket_ops.sfn");
+    assert contains(makefile, "runtime/sfn/platform/socket_ops_windows.sfn");
+    assert ! contains(manifest, "socket_ops_windows");
     // rename_ops.sfn (SFN-720): identical shape to fs_exec_mode above.
     // The POSIX module's rename(2) replaces an existing destination
     // atomically; the Windows CRT's rename() fails EEXIST instead, which

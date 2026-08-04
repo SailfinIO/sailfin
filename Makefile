@@ -1192,6 +1192,16 @@ ci-cross-windows:
 	: "module gains a Windows sibling. A guard test"; \
 	: "(compiler/tests/e2e/cross_windows_runtime_modules_test.sfn) asserts"; \
 	: "this list stays in sync with the manifest (Risk R4)."; \
+	: "Also MINUS platform/socket_ops.sfn PLUS its sibling"; \
+	: "platform/socket_ops_windows.sfn (SFN-671): the same shape one"; \
+	: "step further — the POSIX module calls close(2) on what Windows"; \
+	: "makes a Winsock SOCKET, which fastfails the process rather than"; \
+	: "returning an error, and nothing called WSAStartup at all, so"; \
+	: "http.sfn (the only socket-owning module in this list) could not"; \
+	: "open a socket here either. The sibling supplies closesocket plus"; \
+	: "the init; -lws2_32 below already resolves both. Without this"; \
+	: "entry http.sfn's sfn_socket_open/sfn_socket_close externs have"; \
+	: "no definition in the bridge link."; \
 	: "Also MINUS platform/rename_ops.sfn PLUS its sibling"; \
 	: "platform/rename_ops_windows.sfn (SFN-720): the CRT rename()"; \
 	: "fails EEXIST on an existing destination where POSIX rename(2)"; \
@@ -1208,7 +1218,7 @@ ci-cross-windows:
 	: "readlink reference once the MinGW stub is gone; Windows selects the"; \
 	: "GetModuleFileNameA leg instead. The rest are target-independent IR"; \
 	: "compiled for mingw. Each <module>:<source> pair is space-separated."; \
-	RUNTIME_MODS="prelude:runtime/prelude.sfn runtime_globals:runtime/sfn/runtime_globals.sfn arena:runtime/sfn/memory/arena.sfn rc:runtime/sfn/memory/rc.sfn mem:runtime/sfn/memory/mem.sfn ownedbuf:runtime/sfn/memory/ownedbuf.sfn string:runtime/sfn/string.sfn array:runtime/sfn/array.sfn clock:runtime/sfn/clock.sfn io:runtime/sfn/io.sfn exception:runtime/sfn/exception.sfn type_meta:runtime/sfn/type_meta.sfn exec:runtime/sfn/platform/exec.sfn filesystem:runtime/sfn/adapters/filesystem.sfn http:runtime/sfn/adapters/http.sfn process_windows:runtime/sfn/platform/process_windows.sfn fs_exec_mode_windows:runtime/sfn/platform/fs_exec_mode_windows.sfn rlimit_windows:runtime/sfn/platform/rlimit_windows.sfn rename_ops_windows:runtime/sfn/platform/rename_ops_windows.sfn"; \
+	RUNTIME_MODS="prelude:runtime/prelude.sfn runtime_globals:runtime/sfn/runtime_globals.sfn arena:runtime/sfn/memory/arena.sfn rc:runtime/sfn/memory/rc.sfn mem:runtime/sfn/memory/mem.sfn ownedbuf:runtime/sfn/memory/ownedbuf.sfn string:runtime/sfn/string.sfn array:runtime/sfn/array.sfn clock:runtime/sfn/clock.sfn io:runtime/sfn/io.sfn exception:runtime/sfn/exception.sfn type_meta:runtime/sfn/type_meta.sfn exec:runtime/sfn/platform/exec.sfn filesystem:runtime/sfn/adapters/filesystem.sfn http:runtime/sfn/adapters/http.sfn process_windows:runtime/sfn/platform/process_windows.sfn fs_exec_mode_windows:runtime/sfn/platform/fs_exec_mode_windows.sfn rlimit_windows:runtime/sfn/platform/rlimit_windows.sfn socket_ops_windows:runtime/sfn/platform/socket_ops_windows.sfn rename_ops_windows:runtime/sfn/platform/rename_ops_windows.sfn"; \
 	RUNTIME_OBJS=""; \
 	for pair in $$RUNTIME_MODS; do \
 		mod="$${pair%%:*}"; \

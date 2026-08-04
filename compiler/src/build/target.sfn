@@ -245,7 +245,7 @@ fn target_setjmp_call_line(target_os: string, result_temp: string, jmpbuf_operan
 }
 
 // Rewrite the runtime capsule's `sfn-sources` list for `target_os`. On
-// Windows, five POSIX-only modules are swapped for their Win32 siblings:
+// Windows, seven POSIX-only modules are swapped for their Win32 siblings:
 // `process.sfn` (posix_spawnp/waitpid) for `platform/process_windows.sfn`,
 // `rlimit.sfn` (getrlimit/setrlimit) for `platform/rlimit_windows.sfn`
 // (SFN-549 — previously dropped outright, leaving
@@ -277,17 +277,17 @@ fn target_setjmp_call_line(target_os: string, result_temp: string, jmpbuf_operan
 // basename so the manifest-root prefix is irrelevant, and rebuild the
 // swapped path from the source's own directory so it stays correctly
 // rooted (`<root>/sfn/process.sfn` → `<root>/sfn/platform/process_windows.sfn`).
-// `rlimit.sfn`/`rand.sfn`/`tls.sfn`/`fs_exec_mode.sfn` already live in
-// `platform/`, so their
+// `rlimit.sfn`/`rand.sfn`/`tls.sfn`/`fs_exec_mode.sfn`/`socket_ops.sfn`/
+// `rename_ops.sfn` already live in `platform/`, so their
 // siblings are joined directly onto that same directory rather than
 // appending another `platform/` segment.
 fn target_condition_runtime_sfn_sources(sources: string[], target_os: string) -> string[] {
     if !target_os_is_windows(target_os) { return sources; }
     let mut out: string[] = [];
     // Anchor for the append block below — the `platform/` directory,
-    // discovered from whichever of
-    // rlimit.sfn/rand.sfn/tls.sfn/fs_exec_mode.sfn/exec.sfn happens to
-    // be present in `sources`, since none of the five is guaranteed by
+    // discovered from whichever of rlimit.sfn/rand.sfn/tls.sfn/
+    // fs_exec_mode.sfn/socket_ops.sfn/rename_ops.sfn/exec.sfn happens to
+    // be present in `sources`, since none of the seven is guaranteed by
     // this function's own contract.
     let mut platform_dir: string = "";
     let mut i: int = 0;
@@ -317,6 +317,17 @@ fn target_condition_runtime_sfn_sources(sources: string[], target_os: string) ->
             // the Windows sibling supplies `F_OK` (0) instead (SFN-649).
             platform_dir = _dirname(src);
             out.push(_path_join(platform_dir, "fs_exec_mode_windows.sfn"));
+        } else if base == "socket_ops.sfn" {
+            // Already in platform/ — same as the four above. POSIX
+            // `close` on a Winsock `SOCKET` fastfails the process
+            // (`0xC0000409`) exactly like `X_OK` above, and Winsock
+            // additionally refuses every call until `WSAStartup` runs,
+            // which nothing did — so sockets were non-functional on
+            // native Windows rather than merely leaky. The sibling
+            // supplies `closesocket` and the missing initialization
+            // (SFN-671).
+            platform_dir = _dirname(src);
+            out.push(_path_join(platform_dir, "socket_ops_windows.sfn"));
         } else if base == "rename_ops.sfn" {
             // Already in platform/ — same as the four above. The CRT's
             // `rename()` fails EEXIST on an existing destination where

@@ -75,7 +75,17 @@ extern fn atoi(s: *u8) -> i32;
 // address-length in/out parameter. Declared inline (not imported) per the
 // same SFN-635 cross-module-extern workaround as `http.sfn` / `serve.sfn`;
 // the linker resolves each module's `declare` to the single libc symbol.
-extern fn socket(domain: i32, ty: i32, protocol: i32) -> i32;
+// Socket creation and disposal route through `platform/socket_ops.sfn`
+// rather than libc `socket`/`close`, because both diverge on Windows:
+// POSIX `close` on a Winsock `SOCKET` fastfails the process
+// (`0xC0000409`) instead of returning an error, and Winsock refuses
+// every call until `WSAStartup` has run, which nothing did. That module
+// is swapped for `socket_ops_windows.sfn` on a Windows target by
+// `target_condition_runtime_sfn_sources`, so these stay ordinary
+// externs and the linker binds whichever sibling was compiled — the
+// same shape as `_sfn_fs_access_exec_mode` in `filesystem.sfn`
+// (SFN-671).
+extern fn sfn_socket_open(domain: i32, ty: i32, protocol: i32) -> i32;
 
 extern fn connect(sockfd: i32, addr: *u8, addrlen: i32) -> i32;
 
@@ -91,7 +101,7 @@ extern fn send(sockfd: i32, buf: *u8, len: i64, flags: i32) -> i64;
 
 extern fn recv(sockfd: i32, buf: *u8, len: i64, flags: i32) -> i64;
 
-extern fn close(fd: i32) -> i32;
+extern fn sfn_socket_close(fd: i32) -> i32;
 
 extern fn setsockopt(sockfd: i32, level: i32, optname: i32, optval: *u8, optlen: i32) -> i32;
 
@@ -323,7 +333,7 @@ fn sfn_net_connect(host: *u8, port: i64) -> i32 ![net] {
         _net_fill_sockaddr(addr, attempt, port);
         // sin_addr octets at offset 4..8.
         if _net_host_ip4(host, _net_ptr_off(addr, 4)) {
-            let fd: i32 = socket(2, 1, 0);
+            let fd: i32 = sfn_socket_open(2, 1, 0);
             if fd < 0 {
                 free(addr);
                 return 0 - 1;
@@ -332,7 +342,7 @@ fn sfn_net_connect(host: *u8, port: i64) -> i32 ![net] {
             let rc: i32 = connect(fd, addr, 16);
             free(addr);
             if rc == 0 { return fd; }
-            close(fd);
+            sfn_socket_close(fd);
         } else {
             free(addr);
             return 0 - 1;
@@ -418,7 +428,7 @@ fn sfn_net_read_bytes(fd: i32, max: i64) -> *u8 ![net] {
 // `sfn_net_close(fd)` — close a connection or listener fd. Negative fds
 // (the failure sentinel from connect/listen/accept) are ignored.
 fn sfn_net_close(fd: i32) -> void {
-    if fd >= 0 { close(fd); }
+    if fd >= 0 { sfn_socket_close(fd); }
 }
 
 // `sfn_net_listen(host, port)` — open a stream socket bound to `host:port`
@@ -430,12 +440,12 @@ fn sfn_net_listen(host: *u8, port: i64) -> i32 ![net] {
     let mut attempt: i64 = 0;
     loop {
         if attempt >= 2 { break; }
-        let fd: i32 = socket(2, 1, 0);
+        let fd: i32 = sfn_socket_open(2, 1, 0);
         if fd < 0 { return 0 - 1; }
         _net_set_reuseaddr(fd);
         let addr: *u8 = malloc(16 as usize);
         if addr as i64 == 0 {
-            close(fd);
+            sfn_socket_close(fd);
             return 0 - 1;
         }
         _net_fill_sockaddr(addr, attempt, port);
@@ -448,15 +458,15 @@ fn sfn_net_listen(host: *u8, port: i64) -> i32 ![net] {
                     _net_set_socket_timeouts(fd);
                     return fd;
                 }
-                close(fd);
+                sfn_socket_close(fd);
                 return 0 - 1;
             }
         } else {
             free(addr);
-            close(fd);
+            sfn_socket_close(fd);
             return 0 - 1;
         }
-        close(fd);
+        sfn_socket_close(fd);
         attempt = attempt + 1;
     }
     return 0 - 1;
