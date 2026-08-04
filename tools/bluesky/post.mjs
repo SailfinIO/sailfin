@@ -5,6 +5,8 @@ import { pathToFileURL } from "node:url";
 
 const DEFAULT_PDS_URL = "https://bsky.social";
 const MAX_GRAPHEMES = 300;
+const TID_ALPHABET = "234567abcdefghijklmnopqrstuvwxyz";
+const TID_VALUE_MASK = (1n << 63n) - 1n;
 const segmenter = new Intl.Segmenter("en", { granularity: "grapheme" });
 
 function graphemes(value) {
@@ -115,7 +117,13 @@ async function xrpc(fetchImpl, pdsUrl, method, name, { token, body, params } = {
 }
 
 export function recordKey(canonicalUrl) {
-  return `sailfin-${createHash("sha256").update(canonicalUrl).digest("hex")}`;
+  let value = createHash("sha256").update(canonicalUrl).digest().readBigUInt64BE() & TID_VALUE_MASK;
+  let rkey = "";
+  for (let index = 0; index < 13; index += 1) {
+    rkey = TID_ALPHABET[Number(value & 31n)] + rkey;
+    value >>= 5n;
+  }
+  return rkey;
 }
 
 export async function publish({ post, card, handle, appPassword, pdsUrl = DEFAULT_PDS_URL, fetchImpl = fetch, now = new Date() }) {
