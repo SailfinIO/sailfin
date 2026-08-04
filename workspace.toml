@@ -38,5 +38,5 @@ members = [
 # alpha), so it never rejects a running toolchain today — it documents the
 # minimum stability contract and tightens only if raised to `beta`/`rc`/`stable`.
 [toolchain]
-sfn = "0.8.4"
+sfn = "0.9.0"
 channel = "alpha"
