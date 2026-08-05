@@ -476,8 +476,9 @@ fetch/dispatch (with the added `![io]`/`![net]` note from §4).
   layout. `[toolchain]` is the toolchain analogue of that capsule-pinning story;
   the store reuses the `~/.sfn/` config + `~/.local/share/sailfin/versions`
   install layout.
-- `docs/proposals/0003-tooling.md` — the built-in tooling surface (`sfn
-  init/build/run/check/test`) this SFEP extends with the gate.
+- `docs/proposals/0003-tooling.md` — the toolchain surface and its output
+  contracts. The commands this SFEP gates (`sfn build/run/check/test`) are mapped
+  there; `sfn init` and the rest of the distribution verbs belong to SFEP-0002.
 - `install.sh` — the one-shot bootstrap installer whose release-asset *layout*
   (asset naming `sailfin_<version>_<os>_<arch>.tar.gz`, GitHub-release fetch,
   INSTALL_BASE `~/.local/share/sailfin/versions`, prerelease selection) the native

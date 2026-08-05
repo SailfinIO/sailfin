@@ -17,7 +17,7 @@ guess at unfamiliar field shapes.
 
 Additive changes (new optional fields, new event kinds) keep the same version
 string. The schema-lock test
-(`compiler/tests/e2e/test_check_json_schema.sh`) guards the field set so a
+(`compiler/tests/e2e/check_json_schema_test.sfn`) guards the field set so a
 silent leak fails CI before it lands.
 
 ## Envelope shape
@@ -240,5 +240,5 @@ no ICE occurs.
   must tolerate unknown fields.
 - Field renames or type changes bump to `sailfin-check/2`.
 - The schema-lock test exercises the curated fixture tree at
-  `compiler/tests/e2e/test_check_json_schema.sh` and asserts the field set
+  `compiler/tests/e2e/check_json_schema_test.sfn` and asserts the field set
   matches this document.

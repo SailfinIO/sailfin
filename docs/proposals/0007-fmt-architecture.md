@@ -4,7 +4,7 @@ title: "sfn fmt — Canonical Formatter"
 status: Implemented
 type: tooling
 created: 2026-04-15
-updated: 2026-07-31
+updated: 2026-08-05
 author: "agent:compiler-architect"
 tracking:
 supersedes:
@@ -14,9 +14,13 @@ graduates-to:
 
 # Architecture: `sfn fmt` — Canonical Formatter
 
-Status: In Progress (Steps 1-2 complete)  
-Date: April 15, 2026  
-Parent: [docs/proposals/0003-tooling.md](../proposals/0003-tooling.md)
+> **Amendment (2026-08-05).** The legacy prose `Status:`/`Date:`/`Parent:` header
+> was removed per SFEP-0001 §3 — the front-matter is the single source of truth for
+> status, and the prose block contradicted it (`Status: In Progress` beneath
+> `status: Implemented`). `sfn fmt` ships and CI enforces `sfn fmt --check` across
+> `compiler/src/` and `runtime/`. The parent relationship the block recorded stands:
+> [SFEP-0003](./0003-tooling.md) owns the toolchain surface, and this SFEP owns the
+> formatter.
 
 ## Overview
 

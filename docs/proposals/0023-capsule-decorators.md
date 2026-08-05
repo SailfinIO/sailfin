@@ -19,7 +19,8 @@ Author: compiler architecture
 Related: `docs/proposals/0008-effect-validation.md`,
 `docs/proposals/0004-check-architecture.md`,
 `docs/proposals/0020-compiler-decomposition.md` §7 (stdlib dogfooding),
-`docs/proposals/0003-tooling.md` (deprecated-api lint).
+`docs/proposals/0003-tooling.md` §3.4 (where lint lives — this SFEP *ships* the
+`W0211` deprecated-api lint that 0003 only ever proposed).
 
 ## 1. Goal
 

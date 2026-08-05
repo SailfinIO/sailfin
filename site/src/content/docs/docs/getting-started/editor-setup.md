@@ -45,15 +45,16 @@ code --install-extension SailfinIO.sfn
 | Bracket matching and auto-indentation | Available |
 | Comment toggling (`//` line comments) | Available |
 | Code snippets for common patterns | Available |
-| Error diagnostics and inline squiggles | Planned (requires LSP, post-1.0) |
-| Go-to-definition | Planned (post-1.0) |
-| Inline type hovers | Planned (post-1.0) |
-| Auto-complete | Planned (post-1.0) |
+| Error diagnostics and inline squiggles | Planned (requires a language server) |
+| Go-to-definition | Planned (requires a language server) |
+| Inline type hovers | Planned (requires a language server) |
+| Auto-complete | Planned (requires a language server) |
 
-Richer features such as error diagnostics and go-to-definition depend on the
-Sailfin language server, which is planned for development after the 1.0 compiler
-release. In the meantime, use a terminal build task (see
-[VS Code tasks](#vs-code-tasks) below) to surface compiler errors.
+Richer features such as error diagnostics and go-to-definition depend on a
+Sailfin language server, which has not been started. In the meantime, use a
+terminal build task (see [VS Code tasks](#vs-code-tasks) below) to surface
+compiler errors — the compiler's diagnostics carry file paths, line numbers, and
+fix-it hints.
 
 ### Confirming the Extension Is Working
 
@@ -393,15 +394,22 @@ any community submissions.
 
 ## Compiler-Backed Diagnostics via LSP (Planned)
 
-A Sailfin **language server** (LSP server) is planned for development after the
-1.0 compiler release. When available, it will provide:
+A Sailfin **language server** (LSP server) is planned but has not been started.
+When available, it will provide:
 
 - Inline error diagnostics in any LSP-capable editor
 - Go-to-definition across files
 - Hover documentation for types and effects
 - Auto-complete for struct fields and function signatures
 
-Until the language server ships, the recommended approach for all editors is to
+The prerequisite is not the protocol layer — `sfn check --json` already emits a
+versioned diagnostic envelope an editor client could consume directly. What is
+missing is analysis that survives between requests: today every `sfn` invocation
+starts cold, analyzes, prints, and exits, whereas a language server must keep a
+file cache and re-analyze incrementally as you type. That engine is the work, and
+it is what the language server is waiting on.
+
+Until it ships, the recommended approach for all editors is to
 run the compiler in a terminal or via a build task and read error output there.
 The Sailfin compiler's diagnostics include file paths, line numbers, and
 fix-it hints that make it straightforward to navigate to errors manually.

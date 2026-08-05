@@ -177,7 +177,7 @@ than redesigning them.
 | `bootstrap.toml`, seed pinning — explicitly *not* public manifest schema | **SFEP-0047** (Implemented) |
 | Build-artifact cache (axis 1) and the `sfn cache` verb | **SFEP-0040** (Implemented) |
 | Runtime capability enforcement — the seal | **SFEP-0016** §4 (Accepted) |
-| `sfn vet` / `lsp` / `doc` / `fix` | **SFEP-0003** (Accepted) |
+| The toolchain surface, its output-envelope contract, and `lsp` / `doc` / `fix` (`vet` is retracted — lint lives in `sfn check`'s `W02xx` range) | **SFEP-0003** (Accepted) |
 | Toolchain release cadence and seed cuts | **SFEP-0026** §3.3 (Accepted) |
 | Effect subsumption for sub-effects | **SFEP-0017** (Implemented) |
 | `[capsule] publish` — both the boolean *schema* and the publish-time refusal it specifies | **SFEP-0020** §3.6 (Accepted) |

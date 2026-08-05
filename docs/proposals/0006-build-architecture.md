@@ -1784,6 +1784,12 @@ Design record: `docs/proposals/0043-phase-scoped-arena-reclamation.md` (SFEP-004
 - `docs/proposals/0002-package-management.md` — user-facing registry and
   `sfn add` semantics. This proposal extends the manifest schema it
   defines.
-- `docs/proposals/0003-tooling.md` — `sfn check`, `sfn doc`, `sfn fix` all
-  depend on the in-process driver landing in Stage C. `sfn lsp`
-  specifically benefits from the Stage G sub-capsule decomposition.
+- `docs/proposals/0003-tooling.md` — the toolchain surface and the
+  output-envelope contract every tool satisfies. `sfn bench` (Stage C5) is owned
+  here, not there. Two claims in this bullet have since been discharged or
+  superseded: `sfn check` no longer waits on the in-process driver (it shipped,
+  SFEP-0004), and the expectation that `sfn lsp` "benefits from the Stage G
+  sub-capsule decomposition" is superseded by SFEP-0020, which made those capsules
+  workspace-private (`publish = false`) — a language server's actual gate is
+  resident incremental analysis, per 0003 §3.5. `sfn doc` and `sfn fix` remain
+  open there.
