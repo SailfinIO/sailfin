@@ -65,7 +65,7 @@ test "trace-link: SAILFIN_TRACE_LINK=1 echoes the resolved link argv" ![io] {
     let main_path = _write_fixture(dir);
     let err = _build_stderr(main_path, dir + "/traced-bin", true);
     // The greppable marker plus the invoker it prefixes. On Linux x86-64
-    // the final link is a direct `ld.lld` invocation (SFEP-0015 §8), on
+    // the final link is a direct `ld.lld` invocation (SFEP-0066 §3.1), on
     // macOS/Windows (or a direct-link fallback) it is `clang` — assert on
     // either so the pin stays platform-independent.
     assert contains(err, "[trace-link]");

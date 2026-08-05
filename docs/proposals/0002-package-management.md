@@ -176,7 +176,7 @@ than redesigning them.
 | `[toolchain]` manifest section, pin semantics, floor semver, channel gate, `sfn toolchain install` | **SFEP-0046** §3.1 (Accepted) |
 | `bootstrap.toml`, seed pinning — explicitly *not* public manifest schema | **SFEP-0047** (Implemented) |
 | Build-artifact cache (axis 1) and the `sfn cache` verb | **SFEP-0040** (Implemented) |
-| Runtime capability enforcement — the seal | **SFEP-0016** §4 (Accepted) |
+| Runtime capability enforcement — the seal | **SFEP-0016** §3.2 (Accepted) |
 | The toolchain surface, its output-envelope contract, and `lsp` / `doc` / `fix` (`vet` is retracted — lint lives in `sfn check`'s `W02xx` range) | **SFEP-0003** (Accepted) |
 | Toolchain release cadence and seed cuts | **SFEP-0026** §3.3 (Accepted) |
 | Effect subsumption for sub-effects | **SFEP-0017** (Implemented) |
@@ -360,7 +360,7 @@ the power (decision-brief §3).
 Two constraints. First, `meta` is **derived, not authored** — there is no new
 manifest surface for a publisher to hand-write and get wrong, and no way to
 publish a `meta` that disagrees with the embedded `capsule.toml`. Second, it is
-**not a runtime guarantee**: per SFEP-0016 §1 and §4, the manifest is a
+**not a runtime guarantee**: per SFEP-0016 §1 and §3.2, the manifest is a
 compile-time declaration checked as E0403 — "a *lint*, not a *cage*" — and
 0016 §8's threat model bounds what a seal would and would not cover. Wording
 must stay at "declared and cross-checked," never "enforced at runtime," until

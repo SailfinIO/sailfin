@@ -5,8 +5,8 @@
 // between parsed `.sfn-asm` and backend-specific lowering (LLVM or a native
 // backend), carrying effect/capability metadata without any LLVM spelling.
 //
-// The contract is normative in SFEP-0015 §9 (see docs/proposals/
-// 0015-llvm-independence.md) and was locked by SFN-452. Identities are
+// The contract is normative in SFEP-0059 §10 (see docs/proposals/
+// 0059-typed-ssa-activation.md) and was locked by SFN-452. Identities are
 // unsigned integer handles represented as `int`; -1 is the "none" sentinel.
 // The rendering and verifier passes live in typed_ssa_render.sfn and
 // typed_ssa_verify.sfn. This module is intentionally not imported from

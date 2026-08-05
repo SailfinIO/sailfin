@@ -1,6 +1,6 @@
 # Status
 
-Updated: 2026-08-04. Seed pinned to `0.8.4` (`bootstrap.toml`
+Updated: 2026-08-05. Seed pinned to `0.9.1` (`bootstrap.toml`
 `[seed].version` — SFEP-0047); the compiler version source of truth is
 `compiler/capsule.toml`.
 
@@ -413,26 +413,36 @@ here.
   tool is absent (`compiler/tests/e2e/tensor_ir_stablehlo_emit_test.sfn`). A spike
   — full op coverage, autodiff lowering, the vendor-FFI exit, collectives, and
   dynamic shapes are out of scope.
-- **Backend seam** (`compiler/src/backend.sfn`, #1112; SFEP-15 Stage 0):
-  every codegen/link `clang` invocation routes through a `Backend` interface
-  whose sole impl is `LlvmTextBackend` (today's textual-LLVM-IR + clang path).
-  Zero behavior change — the driver still computes runtime objects, linker
-  selection, dead-strip, and link-libs; the backend owns only the final argv +
-  `process.run`. The seam is the prerequisite for the LLVM C-API backend (#347)
-  and the seal-sufficient native backend (#1640) to plug in without
-  re-hardcoding LLVM across the driver. `SAILFIN_TRACE_LINK=1` echoes the
-  resolved clang link argv to stderr (`[trace-link] <argv>`, #1908) for both
-  the program and test link layouts; linker-choice diagnostics (`[link] ...`)
-  are trace-gated too. On Darwin, the backend self-supplies the SDK and host
-  deployment target so outdated Homebrew LLVM does not infer stale macOS
-  versions during links. The trace path has no behavior change when unset.
+- **Backend seam** (`compiler/src/backend.sfn`, #1112; SFEP-0066 §3.2): a
+  `Backend` interface hides the driver's codegen/link `process.run` call
+  sites; `LlvmTextBackend` (today's textual-LLVM-IR + clang path) is the
+  sole impl. Zero behavior change — the driver still computes runtime
+  objects, linker selection, dead-strip, and link-libs; the backend owns
+  only the final argv + `process.run`. The seam is not pluggable dispatch:
+  `compiler/src` does not self-host interface-typed values, so the driver
+  constructs `LlvmTextBackend {}` concretely. A future code generator — the
+  LLVM C-API binding (#347) or a seal-sufficient native backend
+  (SFEP-0066 §3.3) — plugs in at the capsule boundary instead (a
+  `sfn/codegen-native` capsule beside `sfn/codegen-llvm`), not through this
+  interface. On Linux x86-64/aarch64 the final link is no longer a clang
+  invocation: `direct_link.sfn` builds a bare `ld.lld` argv and tries it
+  first, falling back to a traced clang invocation on any missing
+  prerequisite (SFEP-0066 §3.1 role table). `SAILFIN_TRACE_LINK=1` echoes
+  the resolved link argv to stderr (`[trace-link] <argv>`, #1908, naming
+  `ld.lld` or `clang` per the path taken) for both the program and test
+  link layouts; linker-choice diagnostics (`[link] ...`) are trace-gated
+  too. On Darwin, the backend self-supplies the SDK and host deployment
+  target so outdated Homebrew LLVM does not infer stale macOS versions
+  during links. The trace path has no behavior change when unset.
   **Object-only link boundary (SFN-453):** program, capsule-dependency, and test
   LLVM inputs are content-addressed and assembled before `Backend.link`;
   `LinkPlan` contains only object paths, so clang's assembler and linker-driver
   roles no longer share one invocation. A read-only shared object cache falls
   back to ephemeral objects beside the IR, never to raw `.ll` at final link.
-  **Independence status:** Stage 0 and this first Stage-1 isolation slice are
-  complete. Typed SSA's L1 declaration producer is also reachable through
+  **Independence status:** the external-tool invocation seam and the
+  object-only link boundary are complete; Link is owned on Linux
+  x86-64/aarch64 (`docs/backend-independence.md` §7). Typed SSA's L1
+  declaration producer is also reachable through
   `sfn emit typed-ssa`: scalar signatures, linkage, and canonical effect sets
   are parsed from `.sfn-asm`, verified, and rendered deterministically; an
   unsupported signature rejects the whole module. The typed SSA model,
@@ -448,7 +458,8 @@ here.
   unconnected. Function bodies, capability derivation/manifests, direct linker
   ownership, native object/code emission, gated call sites, and native-backend
   self-hosting are not shipped. #343's mold/lld selection still runs behind
-  clang and is a Stage-1 precursor, not an owned link path.
+  clang on the fallback path and is not itself an owned link path
+  (`docs/backend-independence.md` §7).
 - **Build-host OpenSSL dependency** (SFEP-0036, #1782/#1821). The native
   runtime links `-lssl -lcrypto` (TLS; `runtime/sfn/platform/tls.sfn`), so
   **every** Sailfin binary — including the compiler and each per-test binary
@@ -909,9 +920,9 @@ the former with zero work toward the latter.
 
 | Platform | Base support | Sealed support |
 |---|---|---|
-| Linux x86-64 | Shipped; primary CI host (`ci.yml`); release asset published | In progress — direct `ld.lld` link path exists (`build/direct_link.sfn::resolve_direct_ld_lld`); owned syscall layer not started (SFEP-0015 Axis 3, #1641) |
-| macOS arm64 (Apple Silicon) | Shipped; CI host; release asset published; effect enforcement partial (#613) | Not a target — mediated vendor-library shim (SFEP-0015 §10; no stable raw-syscall ABI) |
-| Windows x86-64 | Cross-compiled from Linux (`ci-cross-windows`); release asset published; native MSVC self-host in progress (SFEP-0021, tracking SFN-53–58) | Not a target — mediated vendor-library shim (SFEP-0015 §10) |
+| Linux x86-64 | Shipped; primary CI host (`ci.yml`); release asset published | In progress — direct `ld.lld` link path exists (`build/direct_link.sfn::resolve_direct_ld_lld`); owned syscall layer not started — the raw-syscall primitive ships (`compiler/src/llvm/syscall.sfn`, SFEP-0060), its sole permitted consumer `runtime/sfn/platform/syscall_linux.sfn` is unwritten |
+| macOS arm64 (Apple Silicon) | Shipped; CI host; release asset published; effect enforcement partial (#613) | Not a target — mediated vendor-library shim (SFEP-0016 §3.1; no stable raw-syscall ABI) |
+| Windows x86-64 | Cross-compiled from Linux (`ci-cross-windows`); release asset published; native MSVC self-host in progress (SFEP-0021, tracking SFN-53–58) | Not a target — mediated vendor-library shim (SFEP-0016 §3.1) |
 | Linux aarch64 | Tier-3 advisory CI cross-emits pass-1 with an arch-aware x86_64 compiler, then builds native pass-2, verifies the pass-1/pass-2 fixed point, and runs the full suite on `ubuntu-24.04-arm` for source PRs and a nightly soak (SFN-474, SFEP-0056 §3.4–3.5); host-layout probe and direct `ld.lld` fast path included (SFN-473, §3.6); release workflows bootstrap a native fixed point and publish the `linux_arm64` installer asset (SFN-475) | Not a target |
 
 **Base support is never a claim that the seal holds on that platform** — the

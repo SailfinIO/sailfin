@@ -1,7 +1,6 @@
 // compiler/src/backend.sfn
 //
-// Stage 0 of the toolchain-independence arc (SFEP-15,
-// `docs/proposals/0015-llvm-independence.md` §6/§8/§11): a `Backend`
+// The external-tool invocation seam (SFEP-0066 §3.2): a `Backend`
 // interface that hides the driver's `process.run(["clang", …])` codegen
 // and link call sites behind a single seam. Today's textual-LLVM-IR +
 // clang path is the sole implementation (`LlvmTextBackend`); it
@@ -14,12 +13,13 @@
 //
 // Later codegen/link work plugs in here instead of re-hardcoding LLVM
 // assumptions across the driver: the LLVM C-API binding (#347) lands as
-// an `LlvmApiBackend`, and the seal-sufficient native backend (#1640) as
-// a `NativeBackend`. The driver stays pure orchestration: it keeps
-// computing the runtime objects, the linker selection, the dead-strip
-// decision (and its diagnostic), and the link-lib dedup, then hands the
-// already-ordered pieces to the backend, which owns only the final argv
-// assembly + `process.run`.
+// an `LlvmApiBackend`. A native code generator does not plug in here —
+// SFEP-0066 §3.2 places that provider seam at the capsule boundary (a
+// future `sfn/codegen-native` capsule), not in this interface. The driver
+// stays pure orchestration: it keeps computing the runtime objects, the
+// linker selection, the dead-strip decision (and its diagnostic), and the
+// link-lib dedup, then hands the already-ordered pieces to the backend,
+// which owns only the final argv assembly + `process.run`.
 //
 // Dispatch note: `compiler/src/` has never exercised interface-typed
 // *values* in its own source (it can lower trait objects but does not
@@ -39,10 +39,10 @@
 // importing this module (and emitting the `LlvmTextBackend` vtable). See
 // that file's header for the seed-lowering reason (#1730).
 import { _llvm_text_assemble_argv } from "./build/clang_argv";
-// Stage 1 of toolchain independence (SFEP-0015 §8, `direct_link.sfn`): own
-// the Linux x86-64 final link with a direct `ld.lld` invocation instead of
-// clang. Resolves `ok=false` (a controlled fallback to the clang path) on
-// any non-Linux target or missing prerequisite.
+// Sailfin owns the Link role on Linux x86-64 (SFEP-0066 §3.1 role table,
+// `direct_link.sfn`): a direct `ld.lld` invocation instead of clang.
+// Resolves `ok=false` (a controlled fallback to the clang path) on any
+// non-Linux target or missing prerequisite.
 import {
     direct_ld_lld_argv,
     resolve_direct_ld_lld,
@@ -71,9 +71,10 @@ import {
 // `_get_env_cmd` reads a single env var (the macOS SDK probe below).
 import { _env_flag, _get_env_cmd } from "./build_flags";
 
-// Reserved opaque object-file handle for later backend stages (#347 /
-// #1640 produce these in-process). The current driver still passes paths
-// directly, so this pins the shape the semantic seam will grow into.
+// Reserved opaque object-file handle for later backend stages (#347, or a
+// future `sfn/codegen-native` provider per SFEP-0066 §3.2, produce these
+// in-process). The current driver still passes paths directly, so this
+// pins the shape the semantic seam will grow into.
 struct ObjectArtifact {
     path: string;
 }
@@ -355,12 +356,12 @@ struct LlvmTextBackend {
         let target_os = build_target_os();
         let driver_flags = _concat_driver_flags(target_clang_flags(target_os), _macos_sdk_link_flags());
         let eff_plan = _target_conditioned_plan(plan, target_os);
-        // Stage 1 (SFEP-0015 §8): take the direct `ld.lld` path when the
-        // Linux x86-64 link contract resolves, for both the program and
-        // test layouts (test mode carries empty `link_flags`, so the same
-        // builder serves both). Any non-Linux target or missing
-        // prerequisite falls back to the clang driver below with a
-        // trace-visible reason — never a silent ABI change.
+        // Sailfin owns Link on Linux x86-64 (SFEP-0066 §3.1 role table):
+        // take the direct `ld.lld` path when the link contract resolves,
+        // for both the program and test layouts (test mode carries empty
+        // `link_flags`, so the same builder serves both). Any non-Linux
+        // target or missing prerequisite falls back to the clang driver
+        // below with a trace-visible reason — never a silent ABI change.
         let direct = resolve_direct_ld_lld(target_os);
         if direct.ok {
             let direct_argv = direct_ld_lld_argv(direct, eff_plan.objects, eff_plan.out_path, eff_plan.libs, eff_plan.link_flags);

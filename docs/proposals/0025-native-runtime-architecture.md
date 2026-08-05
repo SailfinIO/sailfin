@@ -56,7 +56,7 @@ holding end-to-end: capability effects can only be enforced "to the syscall"
 (SFEP-0016) if the syscall surface is itself Sailfin source the compiler can see
 and gate; the ownership floor (SFEP-0018) is only meaningful if the allocator and
 drop machinery it governs are emitted by the same compiler; and a Sailfin-native
-backend (SFEP-0015) needs a runtime ABI it controls. The runtime rewrite was the
+backend (SFEP-0066) needs a runtime ABI it controls. The runtime rewrite was the
 load-bearing structural change that made those possible.
 
 This document records the resulting architecture so the *why* behind each
@@ -826,8 +826,8 @@ The runtime subsystems are pinned by `compiler/tests/{unit,integration,e2e}/`:
 - `SFEP-0005` — Colon Type Annotations (the `int`/`float`/`as`/`number` reform that
   the runtime ABI's integer fields depend on).
 - `SFEP-0012` — `Result<T, E>` and the `?` Operator (adapter error returns).
-- `SFEP-0015` — Toolchain Independence: a Sailfin-Native Backend (the backend that
-  consumes this runtime ABI).
+- `SFEP-0066` — Codegen Provider Ownership (a Sailfin-native backend that would
+  consume this runtime ABI).
 - `SFEP-0016` — The Capability-Sealed Runtime (enforcing effects to the syscall;
   builds on the structure recorded here).
 - `SFEP-0018` — Borrow / Ownership Checking for the Native Runtime (the ownership

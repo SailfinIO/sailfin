@@ -15,7 +15,8 @@ external market. Referenced from `CLAUDE.md`.
 
 **Canonical architecture docs (these win on architecture; this brief wins on
 positioning):** `docs/proposals/0016-capability-sealed-runtime.md`,
-`docs/proposals/0015-llvm-independence.md`, `docs/proposals/0052-ml-acceleration-strategy.md`,
+`docs/proposals/0066-codegen-provider-ownership.md`, `docs/backend-independence.md`,
+`docs/proposals/0052-ml-acceleration-strategy.md`,
 `docs/proposals/0053-shape-typed-tensor-ir.md`, `docs/proposals/0054-low-precision-numerics.md`.
 
 ---
@@ -127,10 +128,11 @@ advantage nobody can copy without starting over.
 **The claim to make:** *the compiler is the only place a capability manifest can
 be proven complete rather than authored by hand.*
 
-**The claim not to make:** that untrusted code is caged. SFEP-0016 §8.2 already
-narrows the honest claim to *Sailfin-authored code cannot make an un-gated
-syscall* — a statement about cooperative code. Marketing the adversarial version
-is a discipline violation (§8).
+**The claim not to make:** that untrusted code is caged. SFEP-0016 §3.1's claim
+ladder narrows the honest claim to *Sailfin-authored code cannot make an un-gated
+syscall* — a statement about cooperative code, and the **provenance-sealed** tier
+rather than the fully sealed one. Marketing the adversarial version is a
+discipline violation (§8).
 
 **Positioning against the OS-sandbox precedent.** JEP 486 permanently disabled
 Java's SecurityManager, with Oracle's stated rationale that applications should
@@ -282,7 +284,7 @@ Ordered. Each item is a consequence of §2–§5, not a preference.
    `E0804` forbids effect annotations on externs, so enforcement depends on
    voluntary wrapping; that hole defeats Reach's completeness claim, defeats the
    seal's adversarial claim, and defeats Result/Cost the moment the fast path
-   is typed vendor FFI. SFEP-0016 §9 Q3 is unresolved. Owner-level design gate.
+   is typed vendor FFI. SFEP-0016 §4.4 Q3 is unresolved. Owner-level design gate.
 7. **Track B's taint/`PII<T>` story demotes.** It is the restriction the market
    declined, relocated to an accelerator, and the `extern` hole defeats it anyway.
 8. **Submit one number to something you do not control.** Cheapest credibility
@@ -304,7 +306,8 @@ Ordered. Each item is a consequence of §2–§5, not a preference.
 - **Base support vs. sealed support.** Base support — builds, runs, tests green,
   installer ships — targets macOS/Windows/Linux. Sealed support — owned codegen,
   owned syscalls, no un-gated syscall path — is tier-1 Linux x86-64 only, per
-  SFEP-0015 §10. Adding a base platform does not multiply seal work. Shipping a
+  SFEP-0016 §3.1 and `docs/backend-independence.md`. Adding a base platform does
+  not multiply seal work. Shipping a
   platform is never a claim that the seal holds on it. See `docs/status.md`
   Support Tiers for the live table.
 
@@ -333,7 +336,8 @@ Recorded so they are not re-derived. Each was believed, tested, and failed.
 - What is the determinism tax of Result, measured? The claim is only a power if
   it beats the 34–61% incumbents pay for their opt-in modes.
 - Is `extern` capability-typed, forbidden in untrusted units, or something else?
-  (SFEP-0016 §9 Q3.) Blocks all three pillars.
+  (SFEP-0016 §4.4 Q3.) Blocks all three pillars.
 - Does the seal need a written threat model naming memory corruption as a
-  capability-forgery vector? SFEP-0016 §8 concedes runtime-as-TCB but never
-  connects it to SFEP-0018's incomplete ownership work.
+  capability-forgery vector? SFEP-0016 §4.1 concedes runtime-as-TCB and §4.4 Q5
+  now names forgery as open, but neither connects it to SFEP-0018's incomplete
+  ownership work.

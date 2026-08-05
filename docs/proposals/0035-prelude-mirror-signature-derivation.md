@@ -475,8 +475,8 @@ until `make compile` is green (per the validation ladder in `CLAUDE.md`).
   reworked `char_code`/`char_at`/`find_char`/`string_starts_with`; this SFEP
   must stay consistent with it (the mirror rows' `{i8*, i64}` parameter shapes
   derive from it).
-- **SFEP-0025** (`docs/proposals/0025-native-runtime-architecture.md`),
-  **SFEP-0015** (`docs/proposals/0015-llvm-independence.md`) — runtime/backend
+- **SFEP-0025** (`docs/proposals/0025-native-runtime-architecture.md`) — runtime
+  framing; `docs/backend-independence.md` — backend/toolchain-independence
   framing.
 - **SFEP-0006** (`docs/proposals/0006-build-architecture.md`) — build graph;
   Option A's artifact approach is gated on the build-architecture work it

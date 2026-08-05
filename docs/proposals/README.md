@@ -37,8 +37,8 @@ The next number is `max + 1`. Add a row in the same PR that introduces an SFEP.
 | [0012](./0012-result-and-question-operator.md) | `Result<T, E>` and the `?` Operator | Implemented | language |
 | [0013](./0013-host-aware-exe-path-intrinsic.md) | Host-Aware `exe_path` Intrinsic | Implemented | runtime |
 | [0014](./0014-agent-output-orchestration.md) | Agent-Legible Build/Test Output | Accepted | tooling |
-| [0015](./0015-llvm-independence.md) | Toolchain Independence — Sailfin-Native Backend | Accepted | runtime |
-| [0016](./0016-capability-sealed-runtime.md) | The Capability-Sealed Runtime — Effects Enforced to the Syscall | Accepted | runtime |
+| [0015](./archive/0015-llvm-independence.md) | Toolchain Independence — Sailfin-Native Backend | Superseded | runtime |
+| [0016](./0016-capability-sealed-runtime.md) | The Capability-Sealed Runtime — Claim Ladder and Link-Time Admission | Accepted | runtime |
 | [0017](./0017-hierarchical-effects.md) | Hierarchical Sub-Effects as Subsumption | Implemented | language |
 | [0018](./0018-borrow-checking-1.0.md) | Borrow / Ownership Checking for the Native Runtime | Accepted | runtime |
 | [0019](./0019-sfn-http-capsule.md) | `sfn/http` — Typed HTTP Surface | Implemented | tooling |
@@ -88,6 +88,7 @@ The next number is `max + 1`. Add a row in the same PR that introduces an SFEP.
 | [0063](./0063-sync-capsule.md) | `sfn/sync` — scope and blocking predecessor for a synchronization capsule | Accepted | language |
 | [0064](./0064-reclamation-seam.md) | Generic resource-reclamation seam | Draft | runtime |
 | [0065](./0065-sync-capsule-api.md) | `sfn/sync` — public API surface and semantics | Draft | language |
+| [0066](./0066-codegen-provider-ownership.md) | Codegen Provider Ownership — Which Toolchain Roles Sailfin Owns | Draft | tooling |
 
 ## Drafts under review (numbers assigned at merge)
 
@@ -109,12 +110,21 @@ Index row. Two slates are in review.
 
 The **capability-seal critical path** designs graduated out of this slate on
 2026-07-25 and now hold Index rows: SFEP-0059 (typed SSA activation) and
-SFEP-0060 (the owned syscall layer). Both are implementation designs under
-SFEP-0015 (*what*) and SFEP-0016 (*why*), and both amended their parents rather
-than standing alone — SFEP-0059 §3.3–3.4 closed two gaps in the normative
-SFEP-0015 §9 contract (no conversion instruction; no producer input for
-capability atoms), and SFEP-0060 §2.2 named three holes now recorded as
-SFEP-0016 §8.1 (`getaddrinfo`, `popen`, and OpenSSL's own syscall paths).
+SFEP-0060 (the owned syscall layer). Both amended their parents rather than
+standing alone — SFEP-0059 §3.3–3.4 closed two gaps in the normative typed-SSA
+contract (no conversion instruction; no producer input for capability atoms), and
+SFEP-0060 §2.2 named three holes now recorded as SFEP-0016 §4.2 (`getaddrinfo`,
+shell-out, and OpenSSL's own syscall paths).
+
+Those parents were restructured on 2026-08-05. SFEP-0015 is **Superseded** and
+archived: it mixed a strategy survey, a roadmap, and a normative IR contract in
+one file and never met SFEP-0001 §6. The contract now lives in **SFEP-0059 §10**
+(subsections map one-for-one, `§9.N` → `§10.N`), the provider seam in
+**SFEP-0066**, and the axis/staging survey in `docs/backend-independence.md`.
+SFEP-0016 was rewritten around its normative core — the claim ladder, the
+link-time admission rule, and the manifest schema — with its positioning prose
+returned to `docs/strategy/decision-brief.md`; see its §10 for an old→new section
+map.
 
 SFEP-0038 (`0038-generic-constraints.md`, Implemented) is the root foundation:
 `draft-generic-collections`, `draft-derive`, and SFEP-0028 all depend on it. Draft diagnostic codes are

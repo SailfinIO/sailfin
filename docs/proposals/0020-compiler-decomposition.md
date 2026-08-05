@@ -4,8 +4,8 @@ title: Role-Oriented Compiler Capsules
 status: Accepted
 type: tooling
 created: 2026-06-22
-updated: 2026-08-03
-author: "agent:compiler-architect; project owner (direction + naming); agent:Codex (2026-08-03 amendment)"
+updated: 2026-08-05
+author: "agent:compiler-architect; project owner (direction + naming); agent:Codex (2026-08-03 amendment); agent:implementer (2026-08-05 provider slot)"
 tracking: "#345 (historical epic); successor implementation issues TBD"
 supersedes:
 superseded-by:
@@ -27,7 +27,10 @@ Decompose the self-hosted compiler into six workspace-private capsules:
 `sfn/codegen-llvm`, and the `sfn/compiler` binary. Each name denotes a stable
 responsibility and an explicit input/output contract. All six capsules live
 under `compiler/`, carry `[capsule] publish = false`, version in lockstep with
-the compiler, and remain implementation details of the Sailfin toolchain.
+the compiler, and remain implementation details of the Sailfin toolchain. A
+seventh name, `sfn/codegen-native`, is **reserved but not created** by this
+proposal — it is the peer-provider slot SFEP-0066 §3.2 requires, and every
+count of "six capsules" below excludes it.
 
 This design deliberately has no `frontend`, `backend`, or `common` capsule.
 Those labels describe relative position, not ownership. A generic common
@@ -58,7 +61,7 @@ The original two-way cut no longer describes this system. In particular:
    and future language services need different subsets of those facilities.
 2. `backend` bundled target-neutral IR, optimization, LLVM-specific lowering,
    filesystem publication, assembly, and linking. That boundary conflicts with
-   SFEP-0015's requirement that LLVM be a replaceable provider.
+   SFEP-0066's requirement that LLVM be a replaceable provider.
 3. `common` was defined by the existence of cycles rather than by a coherent
    contract. That rewards the current dependency graph instead of correcting it.
 4. The old proposal marked reusable compiler libraries publishable. These are
@@ -75,7 +78,7 @@ what it may depend on, and what it returns.
 
 ### 3.1 Naming and visibility decisions
 
-The accepted capsule set is:
+The accepted capsule set is six, plus one reserved slot marked as such:
 
 | Capsule | Responsibility | Stable output | Must not own |
 |---|---|---|---|
@@ -84,6 +87,7 @@ The accepted capsule set is:
 | `sfn/ir` | Native IR, typed-SSA, and tensor-IR data models, parsers, renderers, and verifiers | validated IR values | AST traversal, target code generation, file publication |
 | `sfn/codegen` | Target-neutral lowering from analyzed syntax into Sailfin IR, including IR-producing optimization passes | verified Sailfin IR | LLVM spelling, process execution, linking |
 | `sfn/codegen-llvm` | LLVM-specific lowering from Sailfin IR to LLVM IR/object inputs | LLVM module text or object-ready data | parsing source, semantic analysis, final linking |
+| `sfn/codegen-native` | *(empty slot)* A native code-generation provider, peer to `sfn/codegen-llvm`, consuming verified Sailfin IR directly instead of LLVM text | object-ready data | parsing source, semantic analysis, final linking |
 | `sfn/compiler` | The `sfn` binary: command dispatch, workspace resolution, build planning, caches, artifact I/O, toolchain selection, assembly, and linking | executable/tool responses | reusable language-phase implementations |
 
 `analyzer` is preferred to `semantics` because it names an executable service:
@@ -92,6 +96,8 @@ diagnostics. `codegen` is retained because it is the precise industry term for
 the transformation being performed. The LLVM implementation is named
 `codegen-llvm` rather than `backend` so its target dependency is visible and a
 future provider can sit beside it without renaming the rest of the compiler.
+`sfn/codegen-native` is that named slot (SFEP-0066 §3.2); it stays empty until
+it clears §3.7's no-placeholder rule.
 
 The `sfn/*` names are workspace identities, not public-library promises.
 `publish = false` is the normative distribution boundary. Promoting any one of
@@ -147,7 +153,8 @@ The allowed direct dependencies are:
 | `sfn/analyzer` | `sfn/syntax`, `sfn/ir`, and narrow standard-library capsules |
 | `sfn/codegen` | `sfn/syntax`, `sfn/analyzer`, `sfn/ir` |
 | `sfn/codegen-llvm` | `sfn/ir` |
-| `sfn/compiler` | all five internal libraries, runtime, and required standard-library capsules |
+| `sfn/codegen-native` | `sfn/ir` |
+| `sfn/compiler` | all internal libraries, runtime, and required standard-library capsules |
 
 The intended data flow is:
 
@@ -470,7 +477,7 @@ does not qualify as Implemented.
 
 - SFEP-0006 — Unified Build Architecture
 - SFEP-0014 — Agent-Legible Build/Test Output
-- SFEP-0015 — Toolchain Independence — Sailfin-Native Backend
+- SFEP-0066 — Codegen Provider Ownership (the `sfn/codegen-native` slot, §3.2)
 - SFEP-0027 — CLI Modularization
 - SFEP-0041 — Unified Expected-Type and Typing-Environment Context
 - SFEP-0046 — Native Toolchain Version Pinning and Dispatch

@@ -1,4 +1,4 @@
-// Typed SSA conversion contract coverage for SFEP-0015 §9.4 and §9.6.
+// Typed SSA conversion contract coverage for SFEP-0059 §10.4 and §10.6.
 import { index_of } from "../../src/string_utils";
 import {
     ConvertKind,

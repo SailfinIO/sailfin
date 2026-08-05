@@ -22,13 +22,14 @@ graduates-to:
 
 §5's carve-out **stands**: the XLA/StableHLO dependency is a runtime dependency
 of compiled ML programs, never of the bootstrap, so self-hosting and the
-SFEP-0015 trajectory are untouched by anything below.
+`docs/backend-independence.md` trajectory are untouched by anything below.
 
 What changes is Track A's **role**. The external substrate is reclassified as
 **oracle and fallback, not product**: it is how tensor programs stay fast
 today, and how Sailfin-generated kernels are differentially tested — exactly
-the role LLVM plays for the CPU backend per SFEP-0015 ("we never surrender
-LLVM's optimizer, we stop paying for it during iteration"). Track B is the
+the role LLVM plays for the CPU backend per `docs/backend-independence.md` §5
+("we never surrender LLVM's optimizer, we stop paying for it during
+iteration"). Track B is the
 product.
 
 The reason is not purity, it is the seal. StableHLO carries no effect or
@@ -50,7 +51,7 @@ practice today: `E0804` forbids effect annotations on `extern`, and a raw
 guarantee is defeated by the same door Track A's performance path walks
 through — a collision no document in the slate previously addressed. If
 revived, it should be a **Reach** consequence after the `extern` gate
-(SFEP-0016 §9 Q3) resolves, not a headline. The rest of Track B — effects and
+(SFEP-0016 §4.4 Q3) resolves, not a headline. The rest of Track B — effects and
 capabilities reaching the device — is unaffected.
 
 ## 1. Summary
@@ -255,7 +256,7 @@ continues to compile itself through the existing scalar `native_ir` → LLVM →
 route. `make compile` remains the gate and does not require a GPU. Track A's
 substrate dependency (XLA/vendor libs) is a *runtime* dependency of compiled ML
 programs, never of the bootstrap — preserving `bootstrap.toml`/seed discipline and
-the SFEP-0015 toolchain-independence trajectory for the compiler itself.
+the `docs/backend-independence.md` toolchain-independence trajectory for the compiler itself.
 
 ## 6. Alternatives considered
 
@@ -310,8 +311,8 @@ scalar path stays a trustworthy oracle. All native `*_test.sfn` (no bash e2e).
 - SFEP-0024 — Model Engines, Adapters, Tensors, Training (`Draft`; the library
   surface this backend serves).
 - SFEP-0016 — The Capability-Sealed Runtime (sealed model artifacts).
-- SFEP-0015 — Toolchain Independence (compiler-side backend trajectory; Track A's
-  substrate dependency is runtime-only, not bootstrap).
+- `docs/backend-independence.md` — Toolchain Independence (compiler-side backend
+  trajectory; Track A's substrate dependency is runtime-only, not bootstrap).
 - SFEP-0051 — Workspace Manifest / capability envelope (device/collective axis).
 - `CLAUDE.md` — three-pillars charter, "libraries over keywords," "chase timeless
   problems."
