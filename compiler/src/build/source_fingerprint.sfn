@@ -208,14 +208,26 @@ fn write_fingerprint(path: string, digest: string) -> boolean ![io] {
     return true;
 }
 
-// Install a freshly built compiler at `src` as `dst`, atomically. Modeled
+// Install a freshly built compiler at `src` as `dst`. Modeled
 // on `cli_selfhost.sfn::_selfhost_promote_binary`: stage a copy beside
 // `dst`, force it executable (0o755 — the installed binary must run
 // regardless of the built artifact's source mode), then `rename(2)` it
-// into place. `dst` may be the currently executing binary, so it is
-// never opened for write directly (`ETXTBSY`) — only ever replaced via
-// rename. Returns false, leaving no partial file at `dst`, when `src` is
-// missing or any staging step fails.
+// into place. Returns false, leaving no partial file at `dst`, when
+// `src` is missing or any staging step fails.
+//
+// `dst` may be the currently executing binary, and the two hosts refuse
+// that for different reasons — the distinction matters because only one
+// of them is handled here. POSIX refuses the WRITE: opening a running
+// image with `fopen(…, "wb")` yields `ETXTBSY`, so `dst` is never
+// opened directly, only ever replaced by moving a separately-staged
+// file onto it, which POSIX permits. Windows refuses the REPLACE too —
+// the loader locks the running image's path, so the move itself fails
+// `ERROR_ACCESS_DENIED`. That half is absorbed inside
+// `sfn_rename_replace`'s Windows sibling, which displaces the live
+// image to `dst.old` before publishing; see
+// `platform/rename_ops_windows.sfn`. Consequently the publish is atomic
+// on POSIX and on any Windows destination that is not running, but not
+// when replacing a live Windows image, where no atomic form exists.
 fn install_built_compiler(src: string, dst: string) -> boolean ![io] {
     if !fs.exists(src) { return false; }
     _ensure_dir(_dirname(dst));

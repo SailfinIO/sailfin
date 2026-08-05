@@ -129,6 +129,19 @@ test "cross-windows RUNTIME_MODS / manifest per-module contracts" ![io] {
     assert contains(makefile, "runtime/sfn/platform/rename_ops_windows.sfn");
     assert ! contains(manifest, "rename_ops_windows");
 
+    // SFN-721: source-drift guard, not a behaviour proof — pins that the
+    // running-image displace-then-publish fallback lives ONLY in the
+    // Windows sibling, and that the POSIX module (whose plain `rename(2)`
+    // displaces regardless of readers and needs no such fallback) stays
+    // byte-identical to before. A Linux host cannot observe the fallback
+    // actually firing; this only proves the two sources have not drifted
+    // apart.
+    let rename_win = fs.readFile("runtime/sfn/platform/rename_ops_windows.sfn");
+    let rename_posix = fs.readFile("runtime/sfn/platform/rename_ops.sfn");
+    assert contains(rename_win, ".old");
+    assert ! contains(rename_posix, ".old");
+    assert ! contains(rename_posix, "MoveFileExA");
+
     // assert.sfn: in the manifest, excluded from RUNTIME_MODS.
     assert contains(manifest, "\"sfn/assert.sfn\"");
     assert ! contains(makefile, "runtime/sfn/assert.sfn");

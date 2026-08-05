@@ -161,6 +161,19 @@ fn _mktemp_sibling_cmd(dst_path: string) -> string ![io] {
 // sibling uses `MoveFileExA` + `MOVEFILE_REPLACE_EXISTING`; the POSIX
 // one is a pass-through to the same `rename(2)` this used before, so
 // non-Windows behaviour is unchanged.
+//
+// The atomicity stated above has one exception, and it is reachable
+// only where this function already returned false. Windows cannot
+// atomically replace a RUNNING image — Win32 has no such operation — so
+// the Windows sibling displaces the live image and then publishes,
+// leaving a window in which `dst_path` is briefly absent. That window
+// is entered only after the atomic form has already failed, so no
+// publish that succeeds today loses the concurrent-reader invariant.
+// Only two callers can reach it, both publishing a compiler binary:
+// `cli_selfhost.sfn`'s `--promote-to` and
+// `source_fingerprint.sfn::install_built_compiler`. Every other
+// destination here is an object file, IR, cache entry or manifest,
+// which is never a running image and so always takes the atomic path.
 fn _atomic_rename_into_place(tmp_path: string, dst_path: string) -> boolean ![io] {
     if sfn_rename_replace(tmp_path as *u8, dst_path as *u8) != 0 {
         fs.deleteFile(tmp_path);

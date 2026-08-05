@@ -275,6 +275,23 @@ fn _selfhost_remove_tree(root: string) -> boolean ![io] {
 // observed truncated or missing, which matters because the next `make
 // check` step immediately executes the binary just promoted.
 //
+// That last sentence is POSIX reasoning and does not carry to Windows.
+// POSIX rebinds a PATH to a fresh inode and leaves the running image's
+// inode alone, so the swap is atomic. Windows locks the running image's
+// path itself, not merely its bytes, so the direct replace fails
+// `ERROR_ACCESS_DENIED` (measured, not inferred), and Win32 offers no
+// atomic replace of a running image at all — the only alternative is
+// `MOVEFILE_DELAY_UNTIL_REBOOT`, which needs a reboot and a privilege.
+// `sfn_rename_replace`'s Windows sibling therefore displaces the live
+// image to `dst.old` and moves the staged copy in: a window two
+// metadata operations wide in which `dst` is absent. Three things keep
+// that safe here. It is entered ONLY where the atomic form already
+// failed, so no promote that succeeds today loses atomicity. It closes
+// before this function returns, so the caller that executes the
+// promoted binary next never observes it. And the displaced image
+// survives at `dst.old`, so a failed publish rolls back rather than
+// leaving `dst` missing. See `platform/rename_ops_windows.sfn`.
+//
 // The mode step is equally load-bearing: `_copy_file` creates a missing
 // destination with `fopen`'s 0666-and-umask default, which is *not*
 // executable, whereas `cp -f` carried the source's permissions across.
