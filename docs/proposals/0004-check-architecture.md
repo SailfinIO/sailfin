@@ -4,7 +4,7 @@ title: "sfn check — Fast Analysis Without Codegen"
 status: Implemented
 type: tooling
 created: 2026-04-15
-updated: 2026-07-27
+updated: 2026-08-05
 author: "agent:compiler-architect"
 tracking:
 supersedes:
@@ -14,9 +14,14 @@ graduates-to: reference/cli.md
 
 # Architecture: `sfn check` — Fast Analysis Without Codegen
 
-Status: Shipped (initial v1 — parse + typecheck + effect-check, default stderr rendering, `--quiet`); Track A complete (A1–A4 all shipped); Track B designed (B1–B7), in progress
-Date: April 15, 2026 (design); shipped April 18, 2026; A1 (cross-module conformance hookup) shipped April 25, 2026; A2 (resolver wiring) shipped April 25, 2026; A3 (Phase 1 diagnostic infrastructure — severity + file_path on Diagnostic, structured load warnings) shipped April 25, 2026; A4 (legacy helper deletion) shipped April 26, 2026 alongside Stage B PR2's `sfn test` migration; Track B (production hardening) designed April 26, 2026
-Parent: [docs/proposals/0003-tooling.md](../proposals/0003-tooling.md)
+> **Amendment (2026-08-05).** The legacy prose `Status:`/`Date:`/`Parent:` header
+> was removed per SFEP-0001 §3 — the front-matter is the single source of truth for
+> status. The parent relationship it recorded stands:
+> [SFEP-0003](./0003-tooling.md) owns the toolchain surface, and this SFEP owns
+> `sfn check`. One design in §"Downstream Consumers" is now retracted: `sfn vet`
+> does not ship as a command, because the `W02xx` lint range landed inside `sfn
+> check` instead (SFEP-0003 §2.1, §3.4). The delivery history the old `Date:` line
+> carried is preserved in the Implementation Status sections below.
 
 ## Implementation Status
 
@@ -773,16 +778,34 @@ source tree.
                               │
               ┌───────────────┼───────────────┐
               │               │               │
-          sfn vet         sfn lsp         sfn fix
-      (additional AST     (check on      (apply fixes
-       analysis rules)     every save)    from suggestions)
+        W02xx lints      language server   sfn fix
+       (in-process,      (needs resident   (apply fixes
+        not a verb)       incremental      from suggestions)
+                          analysis)
 ```
 
-### `sfn vet` — Additional Analysis
+Two branches changed shape since this diagram was drawn. The advisory-lint branch
+is **not** a separate `sfn vet` binary — it is the `W02xx` severity range inside
+`check` itself. And the editor branch's gate turned out not to be `check` at all
+but resident incremental analysis, which no proposal owns yet. See SFEP-0003 §3.4
+and §3.5.
 
-`sfn vet` runs `sfn check` first, then runs additional AST visitor rules
-(unused imports, dead code, etc.). It extends the diagnostic set — it never
-replaces or skips the typecheck/effect passes.
+### `sfn vet` — Additional Analysis (**retracted**)
+
+**Retracted 2026-08-05; recorded for provenance.** The design below never shipped
+and will not: the advisory-lint channel it describes landed *inside* `sfn check` as
+the `W02xx` warning range (`W0210`, `W0211`), whose home `docs/style-guide.md`
+assigns to `tools/check.sfn`. A separate verb would have duplicated
+`check/engine.sfn`'s staging and import-context resolution for no user-visible
+gain, and most of the rules originally proposed for it are hard errors owned by
+other `Exxxx` ranges. Full reasoning and the rule-by-rule reassignment:
+SFEP-0003 §2.1 and §3.4.
+
+The original text: "`sfn vet` runs `sfn check` first, then runs additional AST
+visitor rules (unused imports, dead code, etc.). It extends the diagnostic set —
+it never replaces or skips the typecheck/effect passes." The *shape* of that claim
+survives; only the separate command is gone. A new advisory rule is a new `W02xx`
+code in `tools/check.sfn`.
 
 ### `sfn lsp` — Continuous Checking
 
@@ -1109,8 +1132,11 @@ Rationale:
   the contract for breaking changes; consumers can hard-fail on
   unknown versions without inspecting unknown fields.
 - **`producer` discriminator.** Distinct from `code` because two
-  different producers can legitimately share a code range (today
-  W0001/W0002 are load-only; tomorrow `sfn vet` adds W02xx).
+  different producers can legitimately share a code range (W0001/W0002
+  are load-only). The original note here predicted "tomorrow `sfn vet`
+  adds W02xx" — that is not what happened: `W02xx` landed inside `sfn
+  check` itself (`W0210`, `W0211`), and `sfn vet` is retracted
+  (SFEP-0003 §2.1). The discriminator is still worth having.
 - **`primary: null` when no token.** Today `EffectViolation` carries a
   synthesized signature token, so most E04xx diagnostics will have a
   primary. Load warnings (W01xx) genuinely have no source location
@@ -1833,7 +1859,7 @@ doesn't reinvent it.
 | `sfn lsp` Phase 2 (quick-fix) | B3 (FixSuggestion → LSP code action) |
 | MCP `sailfin_diagnostics` | B2 (JSON envelope) |
 | MCP `sailfin_effect_trace` | B1 (per-call attribution) + B2 (JSON) |
-| `sfn vet` | Independent of Track B (uses existing `Diagnostic` shape) |
+| ~~`sfn vet`~~ (retracted — lint ships in `sfn check`'s `W02xx` range, SFEP-0003 §2.1) | n/a |
 | CI golden tests | B4 (single rendered format across paths) |
 
 #### What Track B does *not* change

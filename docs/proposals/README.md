@@ -25,7 +25,7 @@ The next number is `max + 1`. Add a row in the same PR that introduces an SFEP.
 |---|---|---|---|
 | [0001](./0001-sfep-process.md) | SFEP Purpose and Process | Accepted | process |
 | [0002](./0002-package-management.md) | Capsule Distribution and the Registry Protocol | Accepted | tooling |
-| [0003](./0003-tooling.md) | Built-in Tooling | Accepted | informational |
+| [0003](./0003-tooling.md) | The Toolchain Surface and Its Output Contracts | Accepted | tooling |
 | [0004](./0004-check-architecture.md) | `sfn check` — Fast Analysis Without Codegen | Implemented | tooling |
 | [0005](./0005-colon-type-annotations.md) | Colon Type Annotations | Implemented | language |
 | [0006](./0006-build-architecture.md) | Unified Build Architecture | Implemented | tooling |

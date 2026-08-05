@@ -249,6 +249,8 @@ with top-level `status:"warn"` / `failure:"nondeterminism"` and **exit 0**.
 
 - Emitter + classification: `scripts/agent_report.sh`.
 - Makefile wiring: the nine `<target>` / `<target>-impl` pairs.
-- Phase 3 will add a schema-lock test (mirroring
-  `compiler/tests/e2e/test_check_json_schema.sh`) that guards the exact
-  delimiters and the field/enum set.
+- Schema-lock tests (mirroring
+  `compiler/tests/e2e/check_json_schema_test.sfn`) guard the exact delimiters and
+  the field/enum set: `compiler/tests/e2e/make_result_contract_test.sfn` for the
+  verdict block, and `compiler/tests/e2e/make_report_contract_test.sfn` for the
+  `JSON=1` report file.
