@@ -1,0 +1,188 @@
+// End-to-end test for the Windows running-image replace fallback in
+// `sfn_rename_replace` (`runtime/sfn/platform/rename_ops_windows.sfn`,
+// SFN-721): a direct `MoveFileExA` replace over the currently-executing
+// compiler's own path fails `ERROR_ACCESS_DENIED`, so the fix displaces
+// the locked image to a fixed `.old` sibling before publishing the new
+// bytes onto the vacated path.
+//
+// PLATFORM GATE. The fallback this exercises lives ONLY in the Windows
+// runtime module (`rename_ops_windows.sfn`, in the cross-windows
+// RUNTIME_MODS, NOT in `runtime/capsule.toml`). On Linux/macOS the test
+// binary instead links the POSIX `rename_ops.sfn`, whose `rename(2)` has
+// no such fallback to prove, so this SKIPS (asserts trivially) off
+// Windows. Detection mirrors `process_run_capture_windows_test.sfn` /
+// `process_handle_windows_test.sfn`: the `OS` / `SYSTEMROOT` / `windir`
+// environment variables Windows always sets.
+//
+// No-bash e2e (`.claude/rules/no-bash-e2e.md`): the nested fixture builds
+// use `clean_runner_env(nested_runner_scratch(label))`
+// (`docs/conventions/e2e-tests.md`), which threads `PATH` (needed for the
+// nested build's `clang`) and re-points `SAILFIN_TEST_SCRATCH` at an
+// isolated subdir per invocation.
+//
+// NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]` and
+// unusable from an `![io]` test (#842); assert directly on values instead.
+import { find } from "sfn/strings";
+import { clean_runner_env, nested_runner_scratch } from "sfn/test";
+
+// Declared directly rather than resolved through the compiler under
+// test: calling the runtime symbol as an extern lets this test prove the
+// primitive without needing a compiler binary that already carries the
+// fix (mirrors `runtime/sfn/platform/fs.sfn`'s own extern declaration of
+// the same symbol).
+extern fn sfn_rename_replace(src: *u8, dst: *u8) -> i32;
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+// True when the test runner is a Windows binary (the only platform whose
+// `rename_ops_windows.sfn` fallback is reachable).
+fn _is_windows() -> bool ![io] {
+    let os = env.get("OS");
+    if find(os, "Windows", 0) >= 0 { return true; }
+    if env.get("SYSTEMROOT").length > 0 { return true; }
+    if env.get("windir").length > 0 { return true; }
+    return false;
+}
+
+// Per-child environment for spawning the compiled fixtures: threads the
+// parent's Windows essentials so a spawned native binary resolves its
+// runtime. `spawn_with_env`'s `env` is the child's whole environment
+// (empty array == empty environment, never "inherit"), so the vars the
+// child needs must be passed explicitly.
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let sysroot = env.get("SYSTEMROOT");
+    if sysroot.length > 0 { e.push("SYSTEMROOT=" + sysroot); }
+    let windir = env.get("windir");
+    if windir.length > 0 { e.push("windir=" + windir); }
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let temp = env.get("TEMP");
+    if temp.length > 0 { e.push("TEMP=" + temp); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+// Per-invocation scratch directory for the fixture sources/binaries.
+fn _scratch_dir() -> string ![io] {
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { return scratch; }
+    let temp = env.get("TEMP");
+    if temp.length > 0 { return temp; }
+    return ".";
+}
+
+// The "running image" fixture: polls `VICTIM_SENTINEL` for existence,
+// sleeping between checks, then exits. Bounded by `guard` per the
+// input-driven-loop rule (`.claude/rules/code-style.md`) rather than
+// looping forever — 600 x 100ms is a 60s backstop.
+fn _victim_source() -> string {
+    return "fn main() -> int ![clock, io] {\n"
+        + "    let sentinel = env.get(\"VICTIM_SENTINEL\");\n"
+        + "    let mut guard = 0;\n"
+        + "    loop {\n"
+        + "        guard = guard + 1;\n"
+        + "        if guard > 600 { break; }\n"
+        + "        if fs.exists(sentinel) { break; }\n"
+        + "        sleep(100);\n"
+        + "    }\n"
+        + "    return 0;\n"
+        + "}\n";
+}
+
+// The replacement image: a trivially different body so the compiled
+// bytes differ from `_victim_source()`'s.
+fn _replacement_source() -> string {
+    return "fn main() -> int {\n" + "    return 1;\n" + "}\n";
+}
+
+// Build `src_text` at `<dir>/<name>.sfn` into `<dir>/<name>.exe` via a
+// nested `sfn build -o`, isolated per `.claude/rules/no-bash-e2e.md` /
+// `docs/conventions/e2e-tests.md`. `-o` is honored verbatim (unlike a
+// bare build, which derives the name — `windows_exe_suffix_test.sfn`),
+// so the binary lands at exactly the returned path. Returns "" on a
+// build failure.
+fn _build_fixture(dir: string, name: string, src_text: string, label: string) -> string ![io] {
+    let src = dir + "/" + name + ".sfn";
+    let bin = dir + "/" + name + ".exe";
+    fs.writeFile(src, src_text);
+    let exit = process.run_capture([_sfn_bin(), "build", "-o", bin, src], clean_runner_env(nested_runner_scratch(label)));
+    let _out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    if exit != 0 { return ""; }
+    return bin;
+}
+
+test "rename running image (windows): displace-then-publish replaces a locked running exe" ![io] {
+    if !_is_windows() {
+        // Off Windows this test binary links the POSIX `rename_ops.sfn`,
+        // not the module under test — skip (mirrors
+        // `process_run_capture_windows_test.sfn` / `process_handle_windows_test.sfn`).
+        assert true;
+        return;
+    }
+
+    let dir = fs.mkdtemp(_scratch_dir() + "/rename-running-");
+    // `mkdtemp` returns "" on failure. An empty root would make every
+    // path below relative to the process cwd instead of an isolated
+    // scratch dir, making the test host-dependent.
+    assert dir.length > 0;
+
+    let sentinel = dir + "/sentinel";
+    let victim = _build_fixture(dir, "victim", _victim_source(), "rename_running_image-victim");
+    assert victim.length > 0;
+
+    let replacement = _build_fixture(dir, "replacement", _replacement_source(), "rename_running_image-replacement");
+    assert replacement.length > 0;
+    let replacement_bytes = fs.readFile(replacement);
+
+    // Spawn the victim so its image is genuinely locked — precedent
+    // `process_handle_windows_test.sfn:90`/`:98`.
+    let mut victim_env = _child_env();
+    victim_env.push("VICTIM_SENTINEL=" + sentinel);
+    let id = process.spawn_with_env([victim], victim_env);
+    assert id != 0;
+
+    // Call the fixed symbol directly on the live path — this proves the
+    // runtime primitive without needing a compiler that already carries
+    // the fix.
+    let victim_ptr: *u8 = victim as *u8;
+    let replacement_ptr: *u8 = replacement as *u8;
+    let rc = sfn_rename_replace(replacement_ptr, victim_ptr);
+    assert rc == 0;
+
+    let old_path = victim + ".old";
+    assert fs.exists(old_path);
+    assert fs.readFile(victim) == replacement_bytes;
+
+    // Let the still-running (now displaced) child exit, then reap it.
+    fs.writeFile(sentinel, "go");
+    let exit = process.handle_wait(id);
+    assert exit == 0;
+
+    // The lock releases once the child has exited — the displaced image
+    // is now deletable. This pins the litter-bound claim (the fixed
+    // `.old` name relies on the NEXT replace sweeping it, not on this
+    // process ever deleting it directly), not merely that the replace
+    // itself succeeded.
+    fs.deleteFile(old_path);
+    assert ! fs.exists(old_path);
+
+    // Negative control: with nothing running, a replace takes the fast
+    // path and leaves no `.old` sibling.
+    let plain_dst = dir + "/plain_dst";
+    let plain_src = dir + "/plain_src";
+    fs.writeFile(plain_dst, "old-bytes");
+    fs.writeFile(plain_src, "new-bytes");
+    let plain_dst_ptr: *u8 = plain_dst as *u8;
+    let plain_src_ptr: *u8 = plain_src as *u8;
+    let plain_rc = sfn_rename_replace(plain_src_ptr, plain_dst_ptr);
+    assert plain_rc == 0;
+    assert fs.readFile(plain_dst) == "new-bytes";
+    assert ! fs.exists(plain_dst + ".old");
+}

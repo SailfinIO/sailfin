@@ -31,6 +31,42 @@
 // Delete-then-rename was rejected outright: it is not atomic and leaves
 // a window in which neither file is present, which a concurrent reader
 // (the parallel emit fan-out publishes objects this way) could observe.
+//
+// The direct replace above still fails when `dst` is the running
+// compiler's own image: Windows locks a running image's *path* (not its
+// bytes), so `MoveFileExA` onto it returns `ok=0 err=5`
+// (`ERROR_ACCESS_DENIED` — the observed failure code of the direct
+// replace, nothing more) even though the OS permits RENAMING a running
+// image aside. Measured against a genuinely running process:
+//
+//   replace RUNNING exe directly                                       ok=0 err=5 (ERROR_ACCESS_DENIED)
+//   MoveFileExA(RUNNING exe, EXISTING .old, MOVEFILE_REPLACE_EXISTING)  ok=1 err=0
+//   MoveFileExA(RUNNING .old, original path, MOVEFILE_REPLACE_EXISTING) ok=1 err=0
+//   DeleteFileA on the displaced running image                         ok=0 err=5
+//
+// So `sfn_rename_replace` unconditionally falls back to a
+// displace-then-publish sequence whenever the direct replace fails for
+// ANY reason: rename `dst` aside onto the reserved `dst + ".old"` name,
+// move `src` into the now-vacant `dst`, and leave the displaced file at
+// `.old` rather than deleting it. `<dst>.old` is a name this function
+// owns — step 3 below overwrites it unconditionally, both sweeping the
+// previous generation's `.old` and displacing a currently-locked image
+// in the same `MOVEFILE_REPLACE_EXISTING` call, which is why no
+// `DeleteFileA` is needed: `DeleteFileA` on a running image fails the
+// same `ERROR_ACCESS_DENIED`, so a best-effort delete after a successful
+// publish would be dead code on exactly the path that needs it.
+//
+// The fallback is unconditional rather than gated on a specific error
+// code: it is only entered where the atomic form already returned
+// failure, so it can only turn a failure into a success — it never
+// weakens a call that succeeds today. This is also the POSIX-faithful
+// behaviour: `rename(2)` displaces regardless of readers.
+//
+// This is a different failure mode than the delete-then-rename rejection
+// above, and does not reopen it: displace-then-publish never destroys
+// `dst`'s bytes (they survive at `.old`, and step 5 restores them on
+// failure) and never deletes a locked file, so the concurrent-reader gap
+// that rejection was about does not apply here.
 extern fn MoveFileExA(existing: *u8, new_name: *u8, flags: i32) -> i32;
 
 // `MOVEFILE_REPLACE_EXISTING`. Named rather than inlined because `1` at
@@ -43,6 +79,24 @@ let MOVEFILE_REPLACE_EXISTING: i32 = 1;
 // note this INVERTS `MoveFileExA`, which returns non-zero for success.
 fn sfn_rename_replace(src: *u8, dst: *u8) -> i32 {
     if MoveFileExA(src, dst, MOVEFILE_REPLACE_EXISTING) != 0 { return 0; }
+
+    // Per the cast-quirk note in `exec.sfn`'s module header: route the
+    // destination through a `string`-typed local before concatenating,
+    // never cast a literal directly — `dst as string` extracts the
+    // pointer through the alloca-backed parameter slot, which lowers
+    // correctly.
+    let dst_str: string = dst as string;
+    let sideline_str: string = dst_str + ".old";
+    let sideline: *u8 = sideline_str as *u8;
+
+    if MoveFileExA(dst, sideline, MOVEFILE_REPLACE_EXISTING) == 0 { return -1; }
+    if MoveFileExA(src, dst, MOVEFILE_REPLACE_EXISTING) != 0 { return 0; }
+
+    // Rollback: best-effort restore of the displaced image. Its result
+    // is ignored — there is no better fallback to report, and `dst`
+    // being left absent (the only failure mode here) is still no worse
+    // than the `-1` this returns.
+    MoveFileExA(sideline, dst, MOVEFILE_REPLACE_EXISTING);
     return -1;
 }
 
