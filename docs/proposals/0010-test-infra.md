@@ -323,6 +323,7 @@ to `Implemented` when the tiers collapse, not before.
 | `--json` event stream, `-k` / `--tag` filtering | Shipped |
 | Bash e2e collapse | Shipped — to **zero**, exceeding the target of ≤3 hold-outs |
 | Collapse of the two tiers under effect polymorphism | **Pending** — the one thing holding this at `Accepted` |
+| Migration of `AssertFailure` / `MatchResult` onto the shipped `Result<T, E>` | **Pending, unblocked.** Both are hand-rolled stand-ins predating SFEP-0012; `ok`/`present` map to `Ok(())`/`Err(failure)` with no call-site change. Independent of the row above |
 | Cross-capsule hook composition | **Deferred**, post-1.0, explicitly not a 1.0 goal |
 
 **Retracted from this SFEP** — carried by the original directory as pending work,

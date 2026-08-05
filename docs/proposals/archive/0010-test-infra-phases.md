@@ -294,5 +294,3 @@ Total pre-1.0 footprint: ~12 calendar weeks at 3 agents, comparable to
 the runtime-enablement Phase 1+2 in `CLAUDE.md`. The two epics can run
 in parallel because the test framework needs P4/P5 stdlib gap-fills
 that runtime enablement also needs.
-</content>
-</invoke>

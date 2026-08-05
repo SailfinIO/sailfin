@@ -6,13 +6,14 @@
 // `AssertFailure` in `mod.sfn` (just inverted: `ok` is the success
 // discriminator, `present` is the failure discriminator). See
 // `docs/proposals/0010-test-infra.md` §3.3 for the two-tier design this
-// serves. When `Result<T, E>` lands (1.0 critical path
-// Phase 1) the matcher tier folds into `Result<(), AssertFailure>`
-// alongside the `pure_assert_*` tier — `ok == true` maps to `Ok(())`
-// and `ok == false` to `Err(failure)` with no call-site change.
+// serves. `Result<T, E>` has since shipped (SFEP-0012,
+// `runtime/prelude.sfn`), so folding the matcher tier into
+// `Result<(), AssertFailure>` alongside `pure_assert_*` is a pending
+// migration, not a blocked one — `ok == true` maps to `Ok(())` and
+// `ok == false` to `Err(failure)`, with no call-site change.
 //
 // Every function here is `![pure]`: matchers never print. Consumers
-// (an `expect_*(...).ok` call site today; 1.4's runner tomorrow) inspect
+// (an `expect_*(...).ok` call site, or the runner) inspect
 // `.ok` and decide how to surface the failure. This keeps a test calling
 // only `expect_*`/matchers `![pure]` even though the capsule manifest
 // keeps `required = ["io"]` for the legacy `assert_*` tier.

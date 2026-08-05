@@ -12,10 +12,11 @@
 //   1. Legacy `assert_*` — `![io]`. Prints diagnostics on mismatch via
 //      `print.err`, then `assert false` to fail the test.
 //   2. `pure_assert_*` — `![pure]`. Returns an `AssertFailure` record
-//      with `present == true` on mismatch (effectively
-//      `Result<(), AssertFailure>` until that type ships). The capsule
-//      body never prints; consumers (today: a hand-rolled `if r.present
-//      { assert false; }`; tomorrow: 1.4's `expect()` matcher) decide
+//      with `present == true` on mismatch — a hand-rolled
+//      `Result<(), AssertFailure>` predating that type. `Result<T, E>`
+//      has since shipped (SFEP-0012), so the fold is pending. The capsule
+//      body never prints; consumers (a hand-rolled `if r.present
+//      { assert false; }`, or the shipped `expect_*` matchers) decide
 //      how to surface the failure. This lets a test calling only
 //      `pure_assert_*` stay `![pure]` even though the capsule manifest
 //      keeps `required = ["io"]` for the legacy tier.
