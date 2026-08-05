@@ -1,14 +1,17 @@
 {
   "mcpServers": {
     "linear": {
+      "type": "stdio",
       "command": "npx",
       "args": [
         "-y",
         "mcp-remote",
-        "https://mcp.linear.app/mcp"
+        "https://mcp.linear.app/mcp",
+        "--silent"
       ]
     },
     "sailfin": {
+      "type": "stdio",
       "command": "node",
       "args": [
         "tools/mcp-server/dist/index.js"
