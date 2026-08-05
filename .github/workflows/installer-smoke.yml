@@ -22,17 +22,25 @@ concurrency:
 
 jobs:
   unix-installer:
-    name: v0.8.0 install (${{ matrix.os }})
+    name: v0.9.1 install (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: ubuntu-24.04
-            asset: sailfin_0.8.0_linux_x86_64.tar.gz
+            asset: sailfin_0.9.1_linux_x86_64.tar.gz
+            file_pattern: "ELF 64-bit.*x86-64"
+            verify_seed_selfhost: false
+          - os: ubuntu-24.04-arm
+            asset: sailfin_0.9.1_linux_arm64.tar.gz
+            file_pattern: "ELF 64-bit.*ARM aarch64"
+            verify_seed_selfhost: true
           - os: macos-26
-            asset: sailfin_0.8.0_macos_arm64.tar.gz
+            asset: sailfin_0.9.1_macos_arm64.tar.gz
+            file_pattern: "Mach-O 64-bit executable arm64"
+            verify_seed_selfhost: false
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
 
@@ -42,24 +50,41 @@ jobs:
           set -euo pipefail
           bash -n install.sh
           curl --fail --silent --show-error --location --head \
-            "https://github.com/SailfinIO/sailfin/releases/download/v0.8.0/${{ matrix.asset }}"
+            "https://github.com/SailfinIO/sailfin/releases/download/v0.9.1/${{ matrix.asset }}"
 
-      - name: Install pinned v0.8.0 into an empty prefix
+      - name: Install pinned v0.9.1 into an empty prefix
         shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          export VERSION=0.8.0
+          export VERSION=0.9.1
           export INSTALL_BASE="${RUNNER_TEMP}/sailfin/versions"
           export GLOBAL_BIN_DIR="${RUNNER_TEMP}/sailfin/bin"
           ./install.sh
           test -x "${GLOBAL_BIN_DIR}/sailfin"
           test -x "${GLOBAL_BIN_DIR}/sfn"
-          "${GLOBAL_BIN_DIR}/sfn" --version
+          file -L "${GLOBAL_BIN_DIR}/sfn" | grep -E '${{ matrix.file_pattern }}'
+          test "$("${GLOBAL_BIN_DIR}/sfn" --version)" = "sfn 0.9.1"
+          "${GLOBAL_BIN_DIR}/sfn" run examples/basics/hello-world.sfn
+
+      - name: Verify pinned native ARM seed self-host
+        if: ${{ matrix.verify_seed_selfhost }}
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            binutils clang-18 lld llvm-18 libssl-dev
+          make fetch-seed
+          file -L build/toolchains/seed/bin/sfn \
+            | grep -E 'ELF 64-bit.*ARM aarch64'
+          make compile
 
   windows-installer:
-    name: v0.8.0 install (windows-latest)
+    name: v0.9.1 install (windows-latest)
     runs-on: windows-latest
     timeout-minutes: 10
     steps:
@@ -80,15 +105,15 @@ jobs:
           }
           Invoke-WebRequest `
             -Method Head `
-            -Uri "https://github.com/SailfinIO/sailfin/releases/download/v0.8.0/sailfin_0.8.0_windows_x86_64.tar.gz" `
+            -Uri "https://github.com/SailfinIO/sailfin/releases/download/v0.9.1/sailfin_0.9.1_windows_x86_64.tar.gz" `
             -UseBasicParsing
 
-      - name: Install pinned v0.8.0 into an empty prefix
+      - name: Install pinned v0.9.1 into an empty prefix
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          $env:VERSION = "0.8.0"
+          $env:VERSION = "0.9.1"
           $env:INSTALL_BASE = Join-Path $env:RUNNER_TEMP "sailfin\versions"
           $env:GLOBAL_BIN_DIR = Join-Path $env:RUNNER_TEMP "sailfin\bin"
           & ./install.ps1
