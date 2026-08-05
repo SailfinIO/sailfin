@@ -7,6 +7,12 @@
         "mcp-remote",
         "https://mcp.linear.app/mcp"
       ]
+    },
+    "sailfin": {
+      "command": "node",
+      "args": [
+        "tools/mcp-server/dist/index.js"
+      ]
     }
   }
 }
