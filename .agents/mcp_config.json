@@ -6,7 +6,7 @@
       "args": [
         "-y",
         "mcp-remote",
-        "https://mcp.linear.app/mcp"
+        "https://mcp.linear.app/sse"
       ]
     },
     "sailfin": {
