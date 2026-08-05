@@ -401,8 +401,8 @@ Tooling/runtime-driver change; no user-facing language surface.
   choice") while keeping SFN-17's band-aid to land PR #2411.
 - **SFN-17 / PR #2411** — introduced `results.log`/`fail.bin`; the band-aid lives
   in `compiler/tests/e2e/recoverable_harness_test.sfn:50-82`.
-- **SFEP-0010** (`docs/proposals/0010-test-infra/`) — the Sailfin-native
-  test-infra epic this runner belongs to; the `--json` schema goal.
+- **SFEP-0010** (`docs/proposals/0010-test-infra.md`) — the Sailfin-native
+  test-infra design this runner belongs to; the `--json` schema goal.
 - **SFEP-0045** (`docs/proposals/0045-shared-frontend-test-runner.md`) — §3.5's
   exec-only `__run-test-bin` child forwards streamed records up its pipe; this
   SFEP is its transport.

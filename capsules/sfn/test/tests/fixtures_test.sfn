@@ -1,4 +1,4 @@
-// Tests for the sfn/test scoped fixtures (#979, proposal §2.2).
+// Tests for the sfn/test scoped fixtures (#979; SFEP-0010 §3.2).
 //
 // `with_tmp_dir(body)` creates a temp dir, runs the closure `body`, and
 // recursively removes the tree on scope exit — including when `body`

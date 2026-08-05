@@ -13,9 +13,11 @@
 //   assert expect_to_throw(thunk).ok;
 //
 // Why free functions and not a fluent `expect(x).to_be(y)` builder:
-//   1. The generic `Expectation<T>` surface in
-//      `docs/proposals/0010-test-infra/03-capsule-api.md` needs generic
-//      monomorphization + `where` clauses, which the frontend lacks.
+//   1. A generic `Expectation<T>` surface needs generic monomorphization
+//      + `where` clauses, which the frontend lacks — SFEP-0038's
+//      territory. SFEP-0010 §7 retracted that surface from the test-
+//      infrastructure design rather than carry it as pending; the free-
+//      function form below is the shipped design, not a placeholder.
 //   2. A concrete per-type `struct Expectation { fn to_be(self, ...) }`
 //      builder needs cross-module struct-method dispatch — and that is
 //      currently miscompiled: a method's `self` is passed incorrectly

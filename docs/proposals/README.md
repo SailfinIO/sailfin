@@ -32,8 +32,8 @@ The next number is `max + 1`. Add a row in the same PR that introduces an SFEP.
 | [0007](./0007-fmt-architecture.md) | `sfn fmt` — Canonical Formatter | Implemented | tooling |
 | [0008](./0008-effect-validation.md) | Effect Validation as Build Gate | Implemented | language |
 | [0009](./0009-cli-modularization-epic.md) | CLI Modularization | Superseded | tooling |
-| [0010](./0010-test-infra/00-overview.md) | Sailfin-Native Test Infrastructure | Accepted | tooling |
-| [0011](./0011-ci-test-speed.md) | CI Test-Speed Plan | Accepted | tooling |
+| [0010](./0010-test-infra.md) | Sailfin-Native Test Infrastructure | Accepted | tooling |
+| [0011](./0011-ci-test-speed.md) | Content-Addressed Test Artifacts and Deterministic Suite Partitioning | Implemented | tooling |
 | [0012](./0012-result-and-question-operator.md) | `Result<T, E>` and the `?` Operator | Implemented | language |
 | [0013](./0013-host-aware-exe-path-intrinsic.md) | Host-Aware `exe_path` Intrinsic | Implemented | runtime |
 | [0014](./0014-agent-output-orchestration.md) | Agent-Legible Build/Test Output | Accepted | tooling |

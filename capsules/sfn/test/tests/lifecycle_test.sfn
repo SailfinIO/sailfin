@@ -15,8 +15,8 @@
 // field and called");
 // (b) trade #975's static direct calls for indirect dispatch; and (c) make hook
 // order depend on runtime registration sequence instead of static module order.
-// See `docs/proposals/0010-test-infra/03-capsule-api.md` (Lifecycle hooks) for
-// the full architecture decision.
+// See `docs/proposals/0010-test-infra.md` §6.4 for the full architecture
+// decision, including why cross-capsule hook composition stays deferred.
 //
 // A module-scoped mutable accumulator records hook/body execution order.
 // Because a test body cannot observe hooks that run *after* it, this in-process

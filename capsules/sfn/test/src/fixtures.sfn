@@ -1,4 +1,4 @@
-// sfn/test — Scoped test fixtures (issue #979, proposal §2.2).
+// sfn/test — Scoped test fixtures (issue #979; SFEP-0010 §3.2).
 //
 // A scoped fixture sets up a resource, runs a body closure, and tears the
 // resource down on scope exit — including when the body throws. The body

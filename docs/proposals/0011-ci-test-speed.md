@@ -1,551 +1,352 @@
 ---
 sfep: 11
-title: "CI Test-Speed Plan"
-status: Accepted
+title: Content-Addressed Test Artifacts and Deterministic Suite Partitioning
+status: Implemented
 type: tooling
 created: 2026-05-01
-updated: 2026-07-06
-author: "agent:compiler-architect"
-tracking: "#1012, #843"
+updated: 2026-08-05
+author: "agent:compiler-architect (2026-05 plan); agent:Sailbot (2026-08 rewrite); human review"
+tracking: "#1012, #1230, #1233, #843 (historical intake); SFN-431, SFN-545, SFN-547"
 supersedes:
 superseded-by:
-graduates-to:
+graduates-to: site/src/content/docs/docs/reference/spec/11-testing.md
 ---
 
-# CI Test-Speed Plan: cutting PR feedback time
-
-Status: Phase 1 (CI sharding + shard-cover lint) implemented in PR #1012;
-Levers 2 (per-test binary cache) and 3 (scope trim) remain proposed.
-Author: compiler-architect
-Reconciles with: #839/#843 (test-infra epic, Phase 4), #513 (Makefile
-slim-down), #339 (build perf), #940 (multi-file runner forking), #1011
-(macOS flakes under parallel-build contention).
-
----
-
-## 1. Goal
-
-Cut PR CI wall time — currently Linux ~24 min / macOS ~47 min — by
-attacking the test suite, which is ~90% of wall time on a warm build
-cache, **without losing any total coverage** and **without requiring the
-post-1.0 `routine`/`spawn` runtime that Phase 4 (#843) is blocked on.**
-
-Target after Phase 1: macOS 47 min → ~14-16 min, Linux 24 min → ~9-10 min.
-
----
-
-## 2. Current state (measured)
-
-Run 26894545759 (warm content-addressed module cache):
-
-| Phase | Linux | macOS |
-|---|---|---|
-| `make rebuild` (selfhost, warm cache) | 1m32s | 3m15s |
-| `make test` | **21m47s** | **42m22s** |
-| fmt + canary + cross + package + upload | ~75s | ~60s |
-
-The suite is the pain; macOS is ~2x slower per-test than Linux.
-
-### How the suite runs today
-
-- PR `ci.yml` (`.github/workflows/ci.yml:40-126`): one matrix leg per OS;
-  the `sailfin-build` composite action
-  (`.github/actions/sailfin-build/action.yml:121-125`) calls `make test`.
-- `make test` (`Makefile:153-166`): one process —
-  `$(NATIVE_BIN) test compiler/tests/unit compiler/tests/integration
-  compiler/tests/e2e capsules` — then `make test-e2e-sh`
-  (`Makefile:268-296`, the 94 legacy `test_*.sh` scripts).
-- The unified runner `handle_test_command`
-  (`compiler/src/cli_commands.sfn:875`) discovers all `_test.sfn` files,
-  then for >1 file takes the **multi-file subprocess path**
-  (`cli_commands.sfn:1071-1175`): a **sequential `loop`**
-  (`cli_commands.sfn:1144-1170`) that forks one `<self> test <file>`
-  child (`_run_test_child`, `cli_commands.sfn:840-853`) per file. Each
-  child compiles the test through LLVM lowering + a clang link
-  (`_clang_link_test_cmd_with_deps`, `cli_commands.sfn:140-193`) and
-  runs the binary.
-- The runtime capsule is warmed **once** per invocation into a shared
-  objdir and shared via `SAILFIN_TEST_RUNTIME_OBJDIR`
-  (`cli_commands.sfn:1121-1141`) — so the per-test cost is
-  lower+link+run of the test itself, not the runtime.
-- **No test-level parallelism** (the loop is serial) and **no per-test
-  binary cache** (every child re-lowers + re-links + re-runs every run).
-
-### File counts (the shardable surface)
-
-- 118 unit, 30 integration, 4 e2e `_test.sfn`; 23 capsule `_test.sfn`;
-  94 legacy e2e `test_*.sh`. ~1,876 `test` blocks total.
-
-### Cache plumbing (the seam sharding must respect)
-
-- Content-addressed module IR cache `build/cache/` keyed by
-  `cache_key_for` (`compiler/src/build_cache.sfn`): hashes source content
-  + sorted dep-manifest hashes + compiler version + canonicalized flags
-  (`build_cache.sfn:17-29, 508-522`). No paths/mtimes — reusable across
-  runners.
-- Primed by `build-quality.yml` on push:main
-  (`build-quality.yml:238-250`), restored in the composite action
-  (`action.yml:84-91`) with prefix `restore-keys`. So with warm cache the
-  build is ~free; the cost is the test compile+link+run, which is **not**
-  cached.
-
-### Why Phase 4 (#843) is blocked but we are not
-
-Phase 4.1 (`02-phases.md:61-75`) is *in-process* parallelism (`sfn test
---jobs N` running N `routine`s), gated on the structured-concurrency
-runtime that doesn't exist. **CI-level sharding (separate OS processes /
-CI jobs) needs none of that** — GitHub gives us the parallelism for free
-across matrix legs. This plan pulls the *value* of Phase 4 forward via CI
-fan-out + an OS-process `xargs -P` seam, explicitly **not** via the
-blocked in-process runtime.
-
----
-
-## 3. Constraints (non-negotiable)
-
-- **Self-hosting invariant.** Compiler fixes land in `compiler/src/*.sfn`;
-  the driver is pure orchestration, no fixups.
-- **Memory cap.** Every compiler invocation on Linux/WSL prefixed
-  `ulimit -v 8388608`. Parallelism multiplies memory pressure — the shard
-  count must respect the per-job RAM budget (`detect_build_jobs.sh`
-  rationale: ~2 GB/worst-module; macOS runner ~7 GB ceiling).
-- **Formatting gate.** `sfn fmt --check` must pass on touched `.sfn`.
-- **Determinism.** Any test-binary caching must not weaken the
-  fixed-point / `--check-determinism` gates (`ci.yml:277-330`,
-  `build-quality.yml:180-236`). Those gate the *compiler build*, not test
-  binaries — but a test-binary cache must invalidate correctly so a
-  changed dep never reuses a stale binary.
-- **#1011 — scratch isolation.** macOS flakes when parallel module builds
-  contend on shared cache/staging. Any new parallelism (sharded jobs,
-  `xargs -P`) must give each worker an isolated scratch root via
-  `SAILFIN_TEST_SCRATCH` / `SAILFIN_TEST_RUNTIME_OBJDIR`
-  (`_test_scratch_root`, `cli_commands.sfn:218`); see §7.
-
----
-
-## 4. The three levers
-
-### Lever 1 — Shard the suite across parallel CI jobs (highest ROI, lowest risk)
-
-**Idea.** Fan the `ci.yml` matrix from 2 legs (one per OS) to `2 x N`
-legs: each leg builds the compiler once, then runs only its shard of the
-test surface. GitHub runs them concurrently, so wall time ≈ build +
-(suite / N) + fixed overhead.
-
-**Where it lives:** CI-config (`ci.yml`) + a thin path-selection seam.
-The runner *already* accepts multiple positional suite paths
-(`handle_test_command`, `cli_commands.sfn:919-937`) and multiple
-`_test.sfn` files, so **no compiler change is required for a coarse
-suite-level shard.**
-
-**Shard map (coarse, Phase 1 — by existing suite, balanced by file count):**
-
-| Shard | Contents | ~files |
-|---|---|---|
-| `unit-a` | first half of `compiler/tests/unit` | ~59 |
-| `unit-b` | second half of `compiler/tests/unit` | ~59 |
-| `int-e2e-caps` | `integration` + `e2e` + `capsules` | ~57 |
-| `e2e-sh` | the 94 legacy `test_*.sh` (`make test-e2e-sh`) | 94 scripts |
-
-Four shards per OS. macOS critical path drops from ~42 min to roughly
-`max(shard) ≈ 42/3.5 ≈ ~12 min` for the `.sfn` shards (the `.sh` shard
-runs in parallel and is independent). Unit is split in half because it is
-the largest single suite; the runner has no built-in "half a directory"
-selector, so we pass explicit file lists (see seam below).
-
-**The build-cost-per-shard problem and its fix.** Each shard leg runs
-`make rebuild` first (`action.yml:104-113`), so naively every shard pays
-the 1.5-3 min build. Two options:
-
-- **1a (Phase 1, simplest):** accept the rebuild per shard. With the warm
-  content-addressed cache restored (`action.yml:84-91`) the build is
-  1m32s (Linux) / 3m15s (macOS). Total added build cost = `(N-1) x
-  build` of *parallel* runner-minutes, but **wall time is unchanged**
-  because shards run concurrently. The only cost is runner-minute
-  consumption (4x build instead of 1x). Acceptable for Phase 1; ship it.
-- **1b (Phase 2, optimization):** split the build into its own job that
-  uploads `build/bin/sfn` + `build/compiler/import-context` +
-  `build/cache` as a workflow artifact (or `actions/cache` with a
-  per-run key), and have each shard `needs:` that job and download
-  instead of rebuilding. Saves the redundant build runner-minutes and
-  removes build-time variance from the shard critical path. This is the
-  right end-state and aligns with #513 (sfn owning build/check) — the
-  build job becomes the single `sfn build -p compiler` producer.
-
-**Seam for "half a directory".** Two implementation choices, in
-increasing compiler involvement:
-
-- **Seam A (CI-only, zero compiler change):** the shard's CI step does
-  `find compiler/tests/unit -name '*_test.sfn' | sort | awk 'NR%2==0'`
-  (or `split`) and passes the explicit file list as positionals to
-  `sailfin test`. The runner already handles a positional file list. A
-  thin `make test-shard SHARD=unit-a` target (or inline in `ci.yml`)
-  encapsulates the selection. **Recommended for Phase 1.** Owner: CI.
-- **Seam B (compiler, deferred):** add `sailfin test --shard I/N <paths>`
-  that does deterministic file-count-balanced partitioning internally
-  (hash filename → bucket, or stable sort + stride). Cleaner, keeps shard
-  logic in one tested place, and is reusable by `make`/nightly. This is a
-  small, safe runner addition (`handle_test_command` flag parse +
-  partition over the already-collected `test_files` list,
-  `cli_commands.sfn:978-995`). **Defer to Phase 2** — Seam A unblocks
-  immediately; Seam B is the durable home and should land before the
-  shard count grows past ~4.
-
-**Coverage preservation.** The union of shards = the current
-`make test` surface, file-for-file. A `ci.yml` "shard-cover" lint step
-(or a `make test-shard-cover` that asserts `sort -u` of all shard file
-lists == `find ... -name '*_test.sfn' | sort`) guarantees no file is
-dropped or double-counted as shards are rebalanced. **This guard is
-mandatory** — it's the only thing standing between "rebalance the shard
-map" and "silently stop running 12 tests."
-
-**Risk:** runner-minute cost (1a); rebalancing drift (mitigated by the
-cover lint); macOS contention if a single runner ever hosts >1 shard
-(it won't — each shard is its own runner). Low overall.
-
-**Expected wall delta:** macOS PR critical path ~47 → ~16-18 min
-(build 3m + ~12-14 min worst shard + overhead). Linux ~24 → ~10-11 min.
-
----
-
-### Lever 2 — Per-test binary cache (the fundamental incremental fix)
-
-**Idea.** Content-address each test's compiled native binary on `(test
-source hash + transitive dep hashes + compiler version + clang flags)`,
-mirroring `cache_key_for`. On a cache hit, skip LLVM lowering + clang
-link and **just run the cached binary** (or skip entirely if we also
-cache the pass/fail result — see below). On an incremental PR that
-touches 3 files, only the tests whose transitive dep set changed re-link;
-the rest hit.
-
-**Where it lives:** compiler runner (`compiler/src/cli_commands.sfn`),
-reusing `build_cache.sfn` primitives. This is **runner-internals work**,
-not CI-config.
-
-**Cache key.** Reuse the existing content-hash machinery in
-`build_cache.sfn` (`content_hash` at `:529`, dep-manifest sorting at
-`:443`, `canonicalize_flags` at `:508`). The per-test key is:
-
-```
-sha256(
-  content_hash(test.sfn)
-  || sorted(content_hash(each transitive dep .sfn / .sfn-asm))
-  || compiler_version
-  || canonical(clang_flags)        // "-O0", runtime objdir contract, target triple
-  || build_cache_schema_version()
-)
-```
-
-The transitive dep set is exactly what the per-group resolver already
-computes (`TestGroup.native_texts` / `dep_ll_paths`,
-`cli_commands.sfn:1189-1211`) — the dep `.ll`/`.sfn-asm` inputs to the
-link are enumerable at link time, so the key has access to every input
-hash. **Correctness hinge:** a changed dep changes its content hash,
-changes the key, misses the cache. This is the same invariant
-`cache_key_for` already upholds for the module IR cache; we are not
-inventing a new correctness model, just a second consumer of it.
-
-**Two cache granularities (ship the first, consider the second):**
-
-- **2a — cached binary (conservative, recommended first):** store the
-  linked `test` executable keyed as above under
-  `build/cache/test-bin/v1/<key>`. On hit, skip lower+link, still **run**
-  the binary. Saves the LLVM-lower + clang-link cost (the dominant cost —
-  clang link of a test + runtime objects is the expensive step), keeps
-  the run (so flaky-at-runtime tests still surface, and we never trust a
-  cached *result*). Lowest correctness risk.
-- **2b — cached result (aggressive, gate behind a flag):** also store the
-  exit code / pass-fail, and skip the run on hit. Faster but trusts that
-  a test with identical inputs is deterministic. **Only enable on
-  PR-shard runs, never on the nightly full `make check` or the
-  determinism gates.** Off by default; `SAILFIN_TEST_RESULT_CACHE=1`.
-
-**Invalidation & safety:**
-
-- Keyed on content, so any source/dep/compiler/flag change misses —
-  never a false hit. Same model as the module cache.
-- LRU-evicted by GitHub's cache; in-tree it lives under `build/cache/`
-  (already git-ignored, already the cache root).
-- **Must not touch the determinism gates.** Those run `sfn build
-  --no-cache` / `--check-determinism` against the *compiler* build
-  (`ci.yml:305-311`, `build-quality.yml:174-213`) — a separate code path
-  from `handle_test_command`. The test-binary cache is read only by the
-  runner. Add an explicit `--no-test-cache` flag (and have `make check` /
-  nightly pass it) so the full-suite gate always cold-builds test
-  binaries and the cache can never mask a test-compile regression.
-- **#1011 interaction:** the cache write must be atomic
-  (write-to-temp-in-scratch + rename into `build/cache/test-bin/`) so two
-  shards racing on the same key don't half-write. The existing hash-tmp
-  pattern (`build_cache.sfn:417`, unique-per-worker suffix) is the
-  precedent; reuse it. Reads are lock-free (content-addressed: a present
-  file under `<key>` is correct or absent).
-
-**CI plumbing.** Add `build/cache` is *already* restored
-(`action.yml:84-91`); extend the restore/save to include the
-`test-bin/v1` subtree (it's under the same `build/cache` path, so the
-existing cache step covers it — but the **save** currently only happens
-in `build-quality.yml` on push:main, which runs **no tests**, so it never
-populates `test-bin`). Two options:
-
-- Add a `actions/cache/save` of `build/cache/test-bin` at the end of each
-  PR shard (per-OS, per-shard key) so the *next* PR push warms from the
-  prior one. Scoped to branch + base-branch per GitHub cache rules, so a
-  PR's second push reuses its first push's test binaries — the
-  incremental-PR win.
-- Optionally have a nightly/push:main job populate a baseline
-  `test-bin` cache (full suite) that PRs restore from, so even a
-  PR's *first* push gets hits for unchanged tests. Best ROI but more
-  plumbing; defer to Phase 3. **Refinement (SFN-431):** this baseline
-  warmer (`test-bin-baseline` in `build-quality.yml`) restores its *own*
-  prior test-bin cache and builds incrementally rather than cold — the
-  cold-producer choice was hygiene, not soundness (only the `build-quality`
-  determinism gate has a cold-build invariant, and it reads no test
-  binaries). Cross-commit correctness holds because each entry is
-  content-addressed by compiler binary SHA-256 + source (SFN-545),
-  so a changed test misses and recompiles.
-
-**Risk:** medium. Correctness rests on the dep-hash set being *complete*
-(miss a dep → false hit → stale test passes). Mitigation: derive the dep
-list from the same resolver output the link already consumes (no
-separate, drift-prone enumeration), and gate the full suite with
-`--no-test-cache` so any escaped staleness is caught nightly/at-merge.
-Start with 2a (still runs the binary) to bound the blast radius.
-
-**Expected wall delta:** depends on PR churn. A typical PR touching a
-handful of `compiler/src` files invalidates the tests transitively
-depending on them but hits the rest — on incremental pushes the suite
-can drop 50-80% when most tests are unchanged. Stacks multiplicatively
-with Lever 1 (each shard caches its own subset).
-
----
-
-### Lever 3 — Trim PR scope; full suite to nightly/merge
-
-**Idea.** PRs run a fast **smoke subset** (especially on macOS, the long
-pole); the full suite gates on push:main and nightly.
-
-**Where it lives:** CI-config + a tag/selection seam in the runner.
-
-**Defining "smoke".** Three candidate selectors, in order of preference:
-
-- **3a — tag-based (recommended).** The runner already supports
-  `--tag <value>` filtering (`cli_commands.sfn:904-910`, `set_test_filters`).
-  Tag a curated set `@tag("smoke")` covering: the effect-gate /
-  exit-code regression (#615/#807, already a discrete `ci.yml` step),
-  the cross-module ABI tests (#633), the canary/lowering paths, one test
-  per major feature area. PR macOS runs `sailfin test --tag smoke`;
-  Linux runs the full sharded suite (Linux is cheap enough to keep full
-  coverage on every PR). Owner: needs someone to *curate and apply* the
-  tag across ~176 files — a one-time content pass, plus a CODEOWNERS-style
-  rule that new feature tests get a smoke tag where appropriate.
-- **3b — path/changed-file selection.** Run only tests in suites touched
-  by the PR diff (e.g. a PR touching only `compiler/src/llvm/**` runs
-  unit+integration but skips capsules). Riskier (cross-cutting changes
-  under-test) and needs a diff→suite mapping; defer.
-- **3c — keep e2e-sh and capsules off macOS PRs.** The 94 `.sh` scripts
-  and capsule tests run on Linux PRs + nightly macOS only. Cheap, safe
-  for the long pole.
-
-**The coverage guarantee (the hard part).** Trimming PR scope is only
-safe if the full suite gates *somewhere before release*. Current state:
-
-- push:main `build-quality.yml` runs **no tests** — it only gates
-  determinism + cache hit-rate. **Gap:** nothing runs the full suite on
-  merge to main today except the PR that merged it.
-- nightly `selfhost.yml` runs the full `make check` (triple-pass) on
-  Linux + macos-26.
-
-So Lever 3 **requires** closing the merge-gate gap: either (i) add a
-full-suite job to `build-quality.yml` (push:main) — preferred, it's the
-merge gate — or (ii) accept nightly as the full-suite backstop and
-document that a smoke-only PR can land a macOS-specific regression that
-surfaces ≤24h later in nightly. **Recommendation:** add a full-suite
-sharded run to push:main so the full suite gates on every merge, and PRs
-run smoke-on-macOS + full-on-Linux. That keeps total signal: every line
-of test still runs on every merge, just not on every PR macOS leg.
-
-**Risk:** medium-high — this is the lever that actually *removes*
-coverage from the PR gate. The mitigations (full suite on push:main,
-Linux stays full on PR) keep the net signal, but a macOS-only regression
-gets a slightly longer feedback loop (merge instead of PR). Only pursue
-after Levers 1+2 land, and only if their wall-time wins prove
-insufficient.
-
-**Expected wall delta:** macOS PR leg → smoke subset (~2-4 min of tests)
-+ build. But the win overlaps heavily with Lever 1 — if sharding already
-gets macOS to ~12 min, Lever 3's marginal value is smaller and its
-coverage cost is real. Treat as the *last* lever, not the first.
-
----
-
-### Lever 4 — Within-shard `--jobs` parallelism (Phase 1 follow-on, shipped 2026-07-01)
-
-**Idea.** Levers 1–3 parallelize *across* CI legs but each leg still runs
-its shard **serially internally** (`sailfin test --jobs 1`). The multi-file
-runner's bounded worker pool (`--jobs N`, #1236) is already shipped and
-proven equivalence-safe (`runner_jobs_parallel_test.sfn`), but CI never
-opted in — the serial-internal default was calibrated on the 3.23 GiB heavy
-*compiler-module* emit (SFEP-0022 §2.4), which CI shards never build.
-
-**Benchmark (2026-07-01, self-hosted `0.7.0-alpha.50`, on a 4-vCPU/16 GiB
-box == the ubuntu runner).** Wall time + tree-wide peak RSS (summed across
-all `sailfin`/`clang`/`ld` processes) per shard, sweeping `--jobs`:
-
-| shard | jobs=1 | jobs=2 | jobs=3 | jobs=4 | peak RSS |
-|---|---|---|---|---|---|
-| `e2e-c` (build-spawners, heaviest type) | 389.7s | 218.9s (1.78×) | 189.4s (2.06×) | 173.7s (2.24×) | 1.6 → 2.1 GiB |
-| `unit-a` (frontend compiles) | 596.4s | — | — | 88.4s (**6.75×**) | 3.6 → 3.2 GiB |
-
-Peak RSS stays **flat or drops** under parallelism, topping out at 3.6 GiB —
-22% of the 16 GiB runner — because test-fixture emits are ~30× lighter than
-a heavy compiler module. Memory was never the binding constraint for the
-test surface. e2e shards gain ~2× (each test already spawns a nested
-multi-core `sfn build`); frontend/unit shards gain ~6× (single compiles that
-leave cores idle on link/spawn stalls when serial).
-
-> **Measurement method / accuracy.** The `peak RSS` column is the tree-wide
-> anonymous working set from a 0.2 s `ps` sampler (matched `sailfin`/`clang`/
-> `ld…` process names; page cache excluded). This box has no GNU
-> `/usr/bin/time`, so per-module `make bench` memory reads 0 — a separate
-> limitation that does not affect these figures. Cross-checked against the
-> kernel's own cgroup accounting (`memory.max_usage_in_bytes`, reset then
-> read after one run): e2e-c @ jobs=3 charged **3.18 GiB** total vs the
-> sampler's 2.1 GiB — the ~1 GiB delta is reclaimable page cache from the
-> IR/object/binary writes (evicted under pressure before any OOM), plus a
-> little RSS the name filter misses. So the honest ceiling is ~3.2 GiB
-> cache-inclusive / ~2.1 GiB hard working set; both sit far under the 16 GiB
-> (Linux) / 7 GiB (macOS) budgets, and the jobs=3/2 decision holds under the
-> higher, kernel-measured number. macOS remains the extrapolated case (no
-> `RLIMIT_AS` backstop) pending one CI confirmation run.
-
-**Shipped.** `scripts/test_shards.sh run` reads `SAILFIN_TEST_JOBS` (default
-1 = byte-identical serial; non-numeric → serial, which also blocks
-word-injection into the unquoted expansion); the `sailfin-build` action
-forwards it via a `shard_test_jobs` input; `ci.yml` sets **3** on Linux legs
-and a conservative **2** on macOS legs. macOS is conservative because Darwin
-has **no** `RLIMIT_AS` backstop (SFEP-0022) and the runner is 7 GiB/3-vCPU;
-its value should be confirmed against one real CI run before raising, per
-SFEP-0022 §7. The compiled-in runner default stays 1 for local determinism
-and arbitrary callers. Emit fan-out (`_cr_resolve_jobs`, clamp `[1, 8]`) is
-**unchanged** — it already resolves to 3 (Linux) / 1 (macOS 7 GiB) on
-GitHub runners, so raising the clamp buys nothing until runners exceed 8
-cores.
-
-> Observed but out of scope: `effect_gate_build_path_entry_test.sfn` (line
-> 129) fails standalone in a fresh container (exit 134) — identical at every
-> `--jobs` level, so parallelism-independent. Tracked separately.
-
----
-
-## 5. Reconciliation with existing epics
-
-- **#843 Phase 4 (post-1.0, blocked on `routine`/`spawn`).** This plan
-  does **not** unblock or pull forward in-process `--jobs` parallelism.
-  It achieves the *same wall-time goal* via OS-level CI sharding (Lever 1)
-  and caching (Lever 2), neither of which needs the concurrency runtime.
-  When Phase 4 lands post-1.0, `sailfin test --jobs N` becomes an
-  *additional* in-leg multiplier composable with sharding. Update
-  `02-phases.md` to note that the CI-sharding path (this doc) is the
-  pre-1.0 stand-in for 4.1's wall-time goal; 4.1 remains the in-process
-  story. No conflict.
-- **#513 Makefile slim-down (sfn owns build/check/cross/stamp).** Lever 1
-  Seam B (`sailfin test --shard I/N`) and Lever 2 (cache in the runner)
-  both move logic *into* `sfn`, aligning with #513. The Phase-1 CI-only
-  Seam A is a temporary bash/Makefile seam; flag it for migration to
-  Seam B so we don't accrete shard logic in `ci.yml` long-term.
-- **#940 (multi-file runner forking).** Lever 2 builds directly on the
-  per-invocation runtime-objdir warming (`cli_commands.sfn:1121-1141`)
-  and the per-file subprocess shape. The binary cache slots into
-  `_run_test_child` / `_clang_link_test_cmd_with_deps` — check the cache
-  before lowering+linking, populate it after a successful link.
-- **#1011 (macOS parallel-build contention).** Lever 1 makes each shard a
-  separate runner (no shared scratch — strictly *safer* than today's
-  single-runner BUILD_JOBS=2). Lever 2's cache writes must be atomic
-  (rename-into-place) to be shard-safe. The `xargs -P` intra-shard
-  variant (NOT recommended for Phase 1) would reintroduce single-runner
-  contention and must isolate `SAILFIN_TEST_SCRATCH` per worker — only
-  pursue if shard count hits diminishing returns.
-
----
-
-## 6. Sequencing & ownership
-
-| Step | Lever | Where | Owner | Risk | Wall delta (macOS) |
-|---|---|---|---|---|---|
-| 1 | L1 Seam A: shard `ci.yml` matrix 2→2x4, file-list selection, per-shard `make rebuild`, **shard-cover lint** | CI-config + thin Makefile target | CI | low | 47→~16-18 min |
-| 2 | L1 1b: split build into a `needs:` job, share `build/native` + `build/cache` artifact across shards | CI-config | CI | low-med | removes redundant build minutes; small wall win |
-| 3 | L1 Seam B: `sailfin test --shard I/N` deterministic partition | runner (`cli_commands.sfn`) | compiler | low | (durability, not wall) |
-| 4 | L2 2a: per-test binary cache (key + read/write in runner), atomic writes, `--no-test-cache` for full suite — **shipped (#1230)** | runner (`cli_commands.sfn` + `build_cache.sfn`) | compiler | med | incremental PRs 50-80% suite skip |
-| 5 | L2 CI: save/restore `build/cache/test-bin` per shard; nightly baseline warm | CI-config | CI | low | warms first-push hits |
-| 6 | L3: smoke tag + macOS-smoke PR leg + **full suite on push:main** | runner tag (exists) + CI-config + content pass | CI + compiler (curation) | med-high | only if 1-2 insufficient |
-
-**Dependencies:** Step 2 depends on 1. Step 3 supersedes Seam A from 1
-(do after 1 ships). Step 5 depends on 4. Step 6 depends on 1 (and the
-push:main full-suite job) and should only proceed if 1+2 leave macOS
-above target.
-
----
-
-## 7. Phase 1 — ship this week (safe quick win, zero compiler change)
-
-Do exactly Lever 1 Seam A + the cover lint. This is pure CI-config plus
-one thin Makefile target and **touches no `.sfn`**, so it can't break
-self-hosting, the determinism gates, or formatting:
-
-1. Add `make test-shard SHARD=<name>` (or inline in `ci.yml`) that maps a
-   shard name to a `find ... | sort | split/stride` file list and runs
-   `$(NATIVE_BIN) test <files>` (and, for the `e2e-sh` shard, `make
-   test-e2e-sh`). Honor `ulimit -v 8388608` on Linux as today.
-2. Fan `ci.yml`'s matrix to `os x shard` (4 shards/OS as in §4). Each leg:
-   build (warm cache) + its shard. Keep fmt/canary/effect-gate/cross on
-   **one** designated leg per OS (e.g. `unit-a`) so they run once, not 4x.
-3. Add a `shard-cover` check: assert `sort -u` of every shard's file
-   list equals `find compiler/tests -name '*_test.sfn' | sort` plus the
-   capsule glob (and the `.sh` set for the e2e-sh shard). Fail CI if a
-   file is uncovered or double-covered.
-4. Keep `build-quality.yml` (push:main) and nightly `selfhost.yml`
-   exactly as-is — full coverage still gates at merge-adjacent points.
-
-Expected result this week: macOS PR ~47 → ~16-18 min, Linux ~24 → ~10-11
-min, **no coverage lost, no compiler risk.** Levers 2 and 3 follow as
-runner work and a scope decision respectively.
-
----
-
-## 8. Verification
-
-- **Per-shard correctness (Phase 1):** the sum of per-shard pass counts
-  across a full PR run equals the pre-shard `make test` pass count.
-  Concretely: run the cover lint (step 3 above) + compare aggregate
-  `═══ ...: N/M passed ═══` banner totals against a baseline `make test`
-  run on the same SHA.
-- **No coverage drift:** `shard-cover` lint green on every PR.
-- **Determinism untouched:** `ci.yml` fixed-point step
-  (`ci.yml:277-330`) and `build-quality.yml` gates still pass on
-  push:main — they don't read the test-binary cache, and Lever 2 ships
-  with `--no-test-cache` on the full-suite/check paths.
-- **Lever 2 cache correctness:** a PR that edits one
-  `compiler/src/*.sfn` dep must show cache *misses* for every test
-  transitively importing it and *hits* for the rest (assert via a
-  `cache.test_bin_hit_rate` field added to the runner's `--json`
-  summary, mirroring `cache.hit_rate`). A no-op rerun must show ~100%
-  test-bin hits.
-- **Self-host + fmt (any `.sfn` touched in Steps 3-6):** `make compile &&
-  make test` green; `sfn fmt --check` clean on touched files.
-
----
-
-## 9. Future considerations (toward 1.0)
-
-- **Phase 4 composability.** When `routine`/`spawn` land, `sailfin test
-  --jobs N` (4.1) multiplies *within* each shard; the shard map and the
-  binary cache both survive unchanged. The `--shard I/N` partition (Seam
-  B) and `--jobs N` are orthogonal axes.
-- **#513 end-state.** Seam B + the test-binary cache push more build/test
-  ownership into `sfn`, shrinking the Makefile/CI bash surface — exactly
-  the #513 direction. The Phase-1 bash seam is explicitly temporary.
-- **Optional stacked follow-up (NOT prioritized here):** lld/mold +
-  raising the macOS `BUILD_JOBS` cap (#343). The per-test clang **link**
-  is the dominant per-test cost (§Lever 2); a faster linker compounds
-  with both sharding and the binary cache. Mention only — out of scope
-  for this plan.
+# SFEP-0011 — Content-Addressed Test Artifacts and Deterministic Suite Partitioning
+
+> **Amendment, 2026-08-05.** This document was previously titled *"CI Test-Speed
+> Plan"* and was not an enhancement proposal. It was three other genres wearing
+> SFEP front-matter: a dated status report ("ship this week", a wall-time table
+> from one CI run), a CI-configuration plan (fan the matrix, add cache steps,
+> assign owners), and a sequencing table with risk columns. None of those are
+> design; SFEP-0001 §1 places them in conventions, RCAs, and Linear respectively.
+>
+> The operational half now lives in `docs/conventions/ci-test-topology.md` —
+> shard names, job counts, cache plumbing, gate placement. The one durable
+> finding from its `--jobs` benchmark (peak RSS stays flat under test-suite
+> parallelism) survives as rationale there; the raw sweep is retired, since it
+> justified a hardcoded job count that a computed budget has since replaced.
+> What remains here is the design: **why test artifacts are content-addressed,
+> what makes that sound, and what was rejected.**
+>
+> The filename keeps its `ci-test-speed` slug deliberately. SFEP-0001 §2 makes
+> `SFEP-0011` the citable identifier, not the path; renaming would rewrite nine
+> in-tree citations across `.sfn`, `Makefile`, and workflow files to buy nothing.
+> Do not "fix" it.
+
+## 1. Summary
+
+Two mechanisms let the test suite scale without losing coverage, and both rest
+on determinism rather than on scheduling.
+
+**Content-addressed test artifacts.** Each test's linked native binary is keyed
+by a hash over every input the link consumed. An unchanged test skips LLVM
+lowering and the `clang` link — the dominant per-test cost — and re-runs its
+cached executable. The binary is always *run*; a pass/fail result is never
+cached.
+
+**Deterministic suite partitioning.** `sfn test --shard I/N` splits a discovered
+file list by stable stride, and `sfn dev shard` names the CI-facing shard map.
+A mandatory cover lint proves the partition is disjoint and exhaustive.
+
+The unifying claim: *a cache is only as sound as the completeness of its key's
+input set, and a partition is only as safe as the proof that it covers.* Both
+halves of this SFEP are that claim applied twice.
+
+The normative user-facing description of the cache is
+[spec §11 "Per-test binary cache"](../../site/src/content/docs/docs/reference/spec/11-testing.md);
+the current shard map and job budget are in
+`docs/conventions/ci-test-topology.md`. This document is the *why* behind both
+and restates neither.
+
+## 2. Motivation
+
+The suite is roughly 90% of CI wall time on a warm build cache, and it grows
+monotonically — the surface has gone from ~175 test files to ~708, and from
+~1,900 `test` blocks to ~5,285, in the span this proposal has existed. Any
+approach that scales with *runners rented* rather than *work actually changed*
+loses that race.
+
+Three properties are non-negotiable in fixing it, and they are what make this a
+design problem rather than a configuration one:
+
+1. **No coverage may be lost.** A speed-up that silently stops running tests is
+   strictly worse than a slow suite, because it converts a red signal into a
+   green one.
+2. **A stale artifact must never be reused.** A false cache hit produces a
+   passing test that did not test the current code — the single worst failure
+   mode available to a build system, since it is invisible by construction.
+3. **The mechanism must be usable outside CI.** Logic that lives in workflow
+   YAML cannot be run locally, cannot be unit-tested, and drifts from the
+   runner it partitions.
+
+## 3. Design
+
+### 3.1 The cache key is the whole design
+
+The key is a hash over the test source, the sorted hashes of every transitive
+dependency the link consumes, the compiler's identity, the runtime's identity,
+the canonicalized `clang` flags, and a schema version. The exact composition is
+normative in spec §11 and is not duplicated here.
+
+What matters is the invariant beneath it: **the key's input set must be complete.
+Every byte that can change the produced binary must be folded in.** A missing
+input is not a performance bug, it is a correctness bug that manifests as a
+green test.
+
+Two properties enforce this in practice:
+
+- **The dependency set is not enumerated separately.** It is the resolver output
+  that the link *already consumes* for the test's closure. A second, parallel
+  enumeration would be a second source of truth, and the two would drift. Using
+  the link's own inputs means the key cannot describe a different program than
+  the one that was built.
+- **The mechanism is a second consumer of an existing model.** Content-addressed
+  keying with sorted dep-manifest hashes is what the module IR cache already does
+  (`compiler/src/build_cache.sfn`). This introduces no new correctness model,
+  only a new consumer of a proven one.
+
+### 3.2 Completeness was got wrong twice, and that is the useful part
+
+The cache schema has reached `v3`. Each bump was an input discovered to be
+missing, and recording them is more valuable than the key itself:
+
+- **Compiler identity.** Keying on the version string was insufficient: the build
+  stamp's `+dev.<hash>` metadata made byte-identical compilers miss, while
+  materially different compilers at the same version could hit. The fix keys on
+  the running binary's own SHA-256 with the stamp metadata stripped (SFN-545) —
+  identity by *content*, matching the rest of the model.
+- **Runtime identity.** A header-only edit under a runtime include root changed
+  the produced binary without changing any hashed input; soundness was leaning on
+  the assumption that a runtime change would force a compiler rebuild and shift
+  the stamp. That assumption was never guaranteed. The fix folds the runtime link
+  inputs in by content — sources, prelude, headers under each include root, each
+  as `<path>@<sha256>` so distinct inputs cannot alias.
+
+**The generalizable rule: an input that "can only change when something else
+already in the key changes" is an assumption, not a guarantee, and belongs in the
+key explicitly.**
+
+### 3.3 Fail closed, never fall back
+
+If the running compiler binary cannot be resolved or hashed, the runner
+**disables test-bin cache reads and writes for that invocation** rather than
+falling back to a weaker identity. A degraded key is worse than no cache: it
+preserves the speed-up while silently removing the property that made it safe.
+Losing cache hits is a performance outcome; a weakened identity is a correctness
+outcome. They are not comparable, so the choice is not a trade-off.
+
+### 3.4 The escape hatch is part of the design, not a debugging flag
+
+`--no-test-cache` bypasses both read and write, forcing a cold lower + link for
+every test. Two paths pass it, and being precise about which matters:
+
+- **`make check`** — the full-suite triple-pass gate, run nightly and before a
+  release cut. This is the authoritative cold path.
+- **The advisory aarch64-Linux lane** — runs a cold full suite on every PR, but
+  is `continue-on-error` and excluded from the merge gate, so it *observes* a
+  discrepancy without blocking on one.
+
+This is defence in depth with an explicit threat model: §3.1 and §3.2 argue the
+key is complete, and §3.2 is the record of that argument having been wrong twice.
+So the cold path does not rely on the argument at all, and any escaped staleness
+surfaces there rather than at a release. A cache whose soundness cannot be
+independently re-checked is a cache that must be trusted; one with a cold path is
+a cache that can be *audited*.
+
+The honest limit of this: because the blocking gate is nightly rather than
+per-merge, a false hit can live on `main` for up to a day. That is a deliberate
+cost — a per-PR blocking cold suite would forfeit most of the cache's value —
+but it is a cost, not an absence of one.
+
+### 3.5 Partition by stable stride, and prove the cover
+
+`sfn test --shard I/N` keeps file index `i` when `i % N == I - 1` over a sorted
+file list. Deterministic, stable across runs, no coordination between shards, and
+no state carried between legs.
+
+A time-balanced bin-pack would produce more even legs, and was not chosen: it
+requires per-test timing data that does not durably exist (see §5), it is
+unstable — the same file lands in different shards as timings drift, destroying
+per-shard cache locality — and it makes "which shard runs this test" unanswerable
+without replaying the packer.
+
+**The cover lint is mandatory and is the load-bearing half.** `sfn dev shard
+cover` asserts the named shards are disjoint, exhaustive, and contain nothing
+outside the surface `make test` discovers. Without it, a rebalance that drops a
+group of files produces sixteen green legs and no signal. Every shard map needs
+this property; a stride partition merely makes it cheap to prove.
+
+### 3.6 The shard map belongs in the compiler
+
+The map is `sfn dev shard`, not workflow YAML and not a bash script — the earlier
+`scripts/test_shards.sh` was retired into it.
+
+Three reasons, in order of weight: the cover invariant is only enforceable if the
+map has one representation to check; the map is reusable by `make`, nightly, and
+a developer reproducing one CI leg locally; and it is testable
+(`compiler/tests/e2e/dev_shard_test.sfn`), which YAML is not. This also runs with
+the grain of moving build and test ownership into `sfn` and shrinking the
+Makefile/CI bash surface.
+
+## 4. Effect and capability impact
+
+**None on the language surface.** No new effect, no change to the taxonomy, no
+change to capability enforcement or the seal.
+
+One interaction is worth stating because it is easy to get wrong: the cache and
+the partition both add concurrency, and concurrency interacts with the memory
+budget, which is a *fleet* property the per-process cap does not cover. The
+per-process `RLIMIT_AS` self-cap bounds one `sfn`; N concurrent children bound
+nothing collectively. Any fan-out therefore budgets host RAM itself, and pooled
+children are pinned so nested fan-outs cannot multiply (SFN-547). That contract
+is owned by `.claude/rules/compiler-safety.md`; this design composes with it and
+does not restate it.
+
+Cache writes are atomic (temp file + rename into place), so concurrent legs
+racing on the same key cannot half-write an entry. Reads need no lock: under
+content addressing, a file present at `<key>` is correct or absent.
+
+## 5. Self-hosting impact
+
+Both mechanisms live in the runner and the cache layer —
+`compiler/src/cli/commands/test/` and `compiler/src/build_cache.sfn` — plus
+`compiler/src/cli/commands/dev_shard.sfn` for the named map. No language surface
+changes: no lexer, parser, AST, typecheck, or effect-checker involvement.
+
+The self-hosting risk is indirect but real, and it is the reason for §3.4. The
+compiler is built and tested by the same toolchain this caches. A cache defect
+that masked a test-compile regression would hide a self-hosting break rather than
+cause one — the failure mode is a *missing* signal. The §3.4 cold paths exist
+precisely so the self-host proof never depends on a cache hit.
+
+**A known gap, recorded honestly:** there is no durable time-series for
+test-suite wall time, unlike the build-time series in `perf-history.yml`. Per-run
+`test_seconds` and `test_bin_hit_rate` are written to the step summary and then
+discarded. A regression in cache hit rate or shard balance is therefore currently
+detectable only against the same run's own numbers. Closing this is the natural
+follow-on to this proposal.
+
+## 6. Alternatives considered
+
+### 6.1 Caching the pass/fail result, not just the binary
+
+**Rejected.** Storing the exit code and skipping the run entirely is faster, and
+it trusts that a test with identical inputs is deterministic. Tests are precisely
+the code where that assumption is least safe: a flaky-at-runtime test would be
+cached green on its first pass and never observed again. Caching the *binary*
+saves the dominant cost (lower + link) while preserving the property that every
+reported pass corresponds to an execution that actually happened. The remaining
+speed-up was not worth converting a flake into a permanent false green.
+
+### 6.2 Timestamp or mtime invalidation
+
+**Rejected.** Not reusable across runners or checkouts — a fresh clone rewrites
+every mtime, so CI would never hit — and unsound under branch switching, where a
+file can revert to older content with a newer timestamp. Content addressing is
+the only model that is both cross-runner portable and monotonic in the right
+variable.
+
+### 6.3 Shard selection in CI bash (the original "Seam A")
+
+**Rejected, after shipping.** Selecting a shard's file list with
+`find | sort | awk 'NR%2==0'` inside the workflow required no compiler change and
+was the fastest way to get value. It was always labelled temporary, and it was
+retired for the reasons in §3.6 — chiefly that the cover invariant is
+unenforceable when the map has two representations.
+
+Recorded as a genuine sequencing success rather than a mistake: shipping the
+throwaway seam first proved the shard shape before any compiler surface was
+committed to it.
+
+### 6.4 Intra-shard `xargs -P` fan-out
+
+**Rejected.** Running multiple test processes from one runner via shell
+parallelism reintroduces exactly the shared-scratch contention that separate
+shard legs avoid, and it requires per-worker isolation of the scratch root to be
+safe at all. The in-runner job pool supersedes it: it isolates scratch per child
+by construction and budgets memory against actual host RAM.
+
+### 6.5 Trimming PR scope — a curated `smoke` tag on the long-pole OS
+
+**Rejected.** Running only a tagged subset on the slower OS's PR legs, with the
+full suite deferred to merge or nightly, was the largest single wall-time lever
+available. It is also the only lever that *removes coverage from the PR gate*
+rather than doing the same work faster.
+
+It fails property (1) of §2. The mitigations available — full suite on Linux PRs,
+full suite on push:main — do not restore the property, they relocate it: a
+platform-specific regression would surface after merge instead of before it,
+which is a strictly longer and more expensive feedback loop. It also requires
+curating and maintaining a tag across hundreds of files, with no mechanism
+comparable to the cover lint to detect the curation going stale.
+
+The mechanisms in §3 reached the target without spending coverage, which is what
+made this rejectable rather than merely deferred. It should stay rejected unless
+someone can propose a *proof* that the smoke set is sufficient — the analogue of
+the cover invariant — rather than a curated list.
+
+### 6.6 Accepting a full compiler rebuild per shard leg
+
+**Rejected, after shipping as an interim.** Having each shard leg rebuild the
+compiler costs no wall time (legs run concurrently) but multiplies runner-minutes
+by the shard count and puts build-time variance on every leg's critical path. The
+shipped shape builds once per OS and has the shard legs download the tree.
+
+## 7. Stage1 readiness mapping
+
+Runner and cache work; no language surface, so the codegen rungs are satisfied
+vacuously rather than exercised.
+
+- [x] Parses — n/a, no new syntax
+- [x] Type-checks / effect-checks — the implementing modules do
+- [x] Emits valid `.sfn-asm` — n/a
+- [x] Lowers to LLVM IR — n/a
+- [x] Regression coverage — see §8
+- [x] Self-hosts — in the shipped compiler; the suite runs through this path
+- [x] `sfn fmt --check` clean
+- [x] Documented — the cache in `docs/status.md` and spec §11 "Per-test binary
+      cache"; the partition flags (`--shard`, `sfn dev shard`) in
+      `site/src/content/docs/docs/reference/cli.md`. The two halves document in
+      different places, which is worth knowing before looking for one in the
+      other's home.
+
+**Status is `Implemented`.** Both mechanisms ship end-to-end, are exercised by
+every CI run, and carry regression coverage. The alternatives in §6 are rejected
+rather than pending, so no commitment in this document's body is outstanding. The
+missing wall-time time-series (§5) is a gap in *observability of* this design,
+not an unshipped part of it, and belongs to a follow-on issue.
+
+## 8. Test plan
+
+- `compiler/tests/e2e/test_bin_cache_test.sfn` — cache hit/miss behaviour and
+  key sensitivity.
+- `compiler/tests/e2e/dev_shard_test.sfn` — the named shard map and the cover
+  invariant.
+- `compiler/tests/e2e/run_cache_flags_test.sfn`,
+  `dep_object_cache_test.sfn`, `runtime_obj_shared_cache_test.sfn` — surrounding
+  cache-layer behaviour the key composes with.
+- **The standing invariant test** is the one no file encodes: a PR editing one
+  `compiler/src/*.sfn` must show cache *misses* for every test transitively
+  importing it and *hits* for the rest, observable via `test_bin_hit_rate` in the
+  `--json` summary. A no-op re-run must show ~100% hits. Any change to the key's
+  input set should be checked against both directions by hand, because §3.2 is
+  the record of that check being skipped twice.
+
+## 9. References
+
+- **Spec / reference** — [`spec/11-testing.md`](../../site/src/content/docs/docs/reference/spec/11-testing.md),
+  "Per-test binary cache" (normative);
+  [`reference/cli.md`](../../site/src/content/docs/docs/reference/cli.md) for the
+  `--shard` and `sfn dev shard` flag surface
+- **Convention** — `docs/conventions/ci-test-topology.md` (shard map, job budget,
+  cache plumbing, gate placement)
+- **Related SFEPs** — SFEP-0010 (the test framework this partitions and caches),
+  SFEP-0044 (runner invocation cache and link-window cost), SFEP-0045 (runner
+  architecture, `Draft`), SFEP-0050 (streamed harness↔runner IPC),
+  SFEP-0006 (build architecture and the content-addressed module cache this
+  reuses), SFEP-0003 §3.1 (toolchain territory map)
+- **Rules** — `.claude/rules/compiler-safety.md` (the memory budget this fan-out
+  composes with), `.claude/rules/no-bash-e2e.md`
+- **Historical intake** — GitHub #1012 (CI sharding), #1230 / #1233 (per-test
+  binary cache and self-validating entry keys), #843 (test-infra epic, Track A)
