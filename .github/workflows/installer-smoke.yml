@@ -1,5 +1,20 @@
 name: Installer and install docs
 
+# The release this smoke test installs is resolved from `bootstrap.toml`'s
+# [seed].version key rather than hardcoded, so the published-installer path
+# stays covered for the *current* release instead of drifting onto a stale one
+# (SFN-581). `cadence-seed-pin.yml` advances that pin after every green
+# release, and `[seed].policy = "exact"` with `source = "github-release"`
+# guarantees the version names a real published release — so the asset this
+# workflow requests always exists. Kept in sync with ci.yml,
+# release-branches.yml, release-tag.yml, nightly-selfhost.yml, and the
+# Makefile, which all read the same key.
+#
+# Resolving from the same key also keeps the two halves of the ARM leg
+# consistent: the installed compiler and the `make fetch-seed` seed verified
+# against it now come from one source, where a hardcoded version could silently
+# diverge from the pin after a cadence bump.
+
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
@@ -21,22 +36,58 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Job names deliberately carry no version: they are the check names branch
+  # protection would reference, and a version-bearing name would break that
+  # reference on every release. The resolved version is echoed by this job and
+  # appears in each consuming step's environment.
+  resolve-version:
+    name: Resolve pinned release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.seed.outputs.seed_version }}
+      tag: ${{ steps.seed.outputs.seed_tag }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Resolve seed version from bootstrap.toml
+        id: seed
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -f bootstrap.toml ]; then
+            echo "[seed-pin] bootstrap.toml is missing from checkout" >&2
+            exit 1
+          fi
+          pin="$(awk '
+            /^\[[^]]+\]/ { section=$0 }
+            section == "[seed]" && /^version[[:space:]]*=/ { gsub(/"/, "", $3); print $3; exit }
+          ' bootstrap.toml)"
+          if [ -z "$pin" ]; then
+            echo "[seed-pin] bootstrap.toml [seed].version is empty or missing" >&2
+            exit 1
+          fi
+          echo "[seed-pin] smoke-testing the installer for release v$pin"
+          echo "seed_version=$pin" >> "$GITHUB_OUTPUT"
+          echo "seed_tag=v$pin" >> "$GITHUB_OUTPUT"
+
   unix-installer:
-    name: v0.9.1 install (${{ matrix.os }})
+    name: install (${{ matrix.os }})
+    needs: resolve-version
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: ubuntu-24.04
-            asset: sailfin_0.9.1_linux_x86_64.tar.gz
+            slug: linux_x86_64
             file_pattern: "ELF 64-bit.*x86-64"
             verify_seed_selfhost: false
           - os: ubuntu-24.04-arm
-            asset: sailfin_0.9.1_linux_arm64.tar.gz
+            slug: linux_arm64
             file_pattern: "ELF 64-bit.*ARM aarch64"
             verify_seed_selfhost: true
           - os: macos-26
-            asset: sailfin_0.9.1_macos_arm64.tar.gz
+            slug: macos_arm64
             file_pattern: "Mach-O 64-bit executable arm64"
             verify_seed_selfhost: false
     runs-on: ${{ matrix.os }}
@@ -46,26 +97,30 @@ jobs:
 
       - name: Check installer syntax and release asset
         shell: bash
+        env:
+          SEED_TAG: ${{ needs.resolve-version.outputs.tag }}
+          ASSET: sailfin_${{ needs.resolve-version.outputs.version }}_${{ matrix.slug }}.tar.gz
         run: |
           set -euo pipefail
           bash -n install.sh
           curl --fail --silent --show-error --location --head \
-            "https://github.com/SailfinIO/sailfin/releases/download/v0.9.1/${{ matrix.asset }}"
+            "https://github.com/SailfinIO/sailfin/releases/download/${SEED_TAG}/${ASSET}"
 
-      - name: Install pinned v0.9.1 into an empty prefix
+      - name: Install the pinned release into an empty prefix
         shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SEED_VERSION: ${{ needs.resolve-version.outputs.version }}
         run: |
           set -euo pipefail
-          export VERSION=0.9.1
+          export VERSION="${SEED_VERSION}"
           export INSTALL_BASE="${RUNNER_TEMP}/sailfin/versions"
           export GLOBAL_BIN_DIR="${RUNNER_TEMP}/sailfin/bin"
           ./install.sh
           test -x "${GLOBAL_BIN_DIR}/sailfin"
           test -x "${GLOBAL_BIN_DIR}/sfn"
           file -L "${GLOBAL_BIN_DIR}/sfn" | grep -E '${{ matrix.file_pattern }}'
-          test "$("${GLOBAL_BIN_DIR}/sfn" --version)" = "sfn 0.9.1"
+          test "$("${GLOBAL_BIN_DIR}/sfn" --version)" = "sfn ${SEED_VERSION}"
           "${GLOBAL_BIN_DIR}/sfn" run examples/basics/hello-world.sfn
 
       - name: Verify pinned native ARM seed self-host
@@ -84,7 +139,8 @@ jobs:
           make compile
 
   windows-installer:
-    name: v0.9.1 install (windows-latest)
+    name: install (windows-latest)
+    needs: resolve-version
     runs-on: windows-latest
     timeout-minutes: 10
     steps:
@@ -92,6 +148,9 @@ jobs:
 
       - name: Check PowerShell syntax and release asset
         shell: pwsh
+        env:
+          SEED_TAG: ${{ needs.resolve-version.outputs.tag }}
+          SEED_VERSION: ${{ needs.resolve-version.outputs.version }}
         run: |
           $errors = $null
           [void][System.Management.Automation.Language.Parser]::ParseFile(
@@ -103,17 +162,19 @@ jobs:
             $errors | Format-List
             exit 1
           }
+          $asset = "sailfin_$($env:SEED_VERSION)_windows_x86_64.tar.gz"
           Invoke-WebRequest `
             -Method Head `
-            -Uri "https://github.com/SailfinIO/sailfin/releases/download/v0.9.1/sailfin_0.9.1_windows_x86_64.tar.gz" `
+            -Uri "https://github.com/SailfinIO/sailfin/releases/download/$($env:SEED_TAG)/$asset" `
             -UseBasicParsing
 
-      - name: Install pinned v0.9.1 into an empty prefix
+      - name: Install the pinned release into an empty prefix
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SEED_VERSION: ${{ needs.resolve-version.outputs.version }}
         run: |
-          $env:VERSION = "0.9.1"
+          $env:VERSION = $env:SEED_VERSION
           $env:INSTALL_BASE = Join-Path $env:RUNNER_TEMP "sailfin\versions"
           $env:GLOBAL_BIN_DIR = Join-Path $env:RUNNER_TEMP "sailfin\bin"
           & ./install.ps1
