@@ -110,6 +110,30 @@ jobs:
                   echo "[seed-pin] using seed $pin"
                   echo "seed_version=$pin" >> "$GITHUB_OUTPUT"
 
+            - name: Select aarch64 seed mode
+              id: arm_seed
+              if: matrix.package_label == 'linux-arm64'
+              shell: bash
+              env:
+                  GITHUB_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
+                  SEED_VERSION: ${{ steps.seed.outputs.seed_version }}
+              run: |
+                  set -euo pipefail
+                  probe="scripts/select-aarch64-seed-mode.sh"
+                  # A checkout that predates SFN-580 has no probe. release-tag.yml checks out
+                  # the tag being (re)built, so this is the normal state when repairing an
+                  # older release — and such a tag's pinned seed is one the qemu bootstrap
+                  # already handled. Falling back keeps retroactive rebuilds working; the
+                  # worst case is a post-arm64-assets tag taking the slower emulated path.
+                  if [ ! -f "$probe" ]; then
+                      echo "[arm-seed] $probe absent from this checkout — using the qemu fallback"
+                      echo "mode=qemu" >> "$GITHUB_OUTPUT"
+                      exit 0
+                  fi
+                  mode="$(bash "$probe")"
+                  echo "[arm-seed] seed mode: $mode"
+                  echo "mode=$mode" >> "$GITHUB_OUTPUT"
+
             - name: Install clang (Linux)
               if: runner.os == 'Linux' && matrix.package_label != 'linux-arm64'
               run: |
@@ -117,8 +141,20 @@ jobs:
                   sudo apt-get install -y clang-18 llvm-18 jq
                   echo "CLANG=clang-18" >> "$GITHUB_ENV"
 
-            - name: Install native and emulated build toolchains (aarch64 Linux)
+            - name: Install native build toolchain (aarch64 Linux)
               if: matrix.package_label == 'linux-arm64'
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  sudo apt-get update
+                  sudo apt-get install -y --no-install-recommends \
+                      binutils clang-18 curl jq lld llvm-18 libssl-dev
+                  echo "CLANG=clang-18" >> "$GITHUB_ENV"
+
+            # Only the fallback path needs an emulated x86_64 sysroot
+            # (SFN-580). The native path self-hosts on device.
+            - name: Install emulated x86_64 seed toolchain (aarch64 Linux)
+              if: matrix.package_label == 'linux-arm64' && steps.arm_seed.outputs.mode == 'qemu'
               shell: bash
               run: |
                   set -euo pipefail
@@ -146,10 +182,8 @@ jobs:
                   EOF
                   sudo apt-get update
                   sudo apt-get install -y --no-install-recommends \
-                      binfmt-support binutils clang-18 curl jq lld llvm-18 \
-                      qemu-user qemu-user-binfmt \
-                      libc6-dev:amd64 libgcc-13-dev:amd64 libssl-dev libssl-dev:amd64
-                  echo "CLANG=clang-18" >> "$GITHUB_ENV"
+                      binfmt-support qemu-user qemu-user-binfmt \
+                      libc6-dev:amd64 libgcc-13-dev:amd64 libssl-dev:amd64
 
             - name: Install jq + LLVM tools (macOS)
               if: runner.os == 'macOS'
@@ -167,6 +201,7 @@ jobs:
                   clang: ${{ matrix.clang }}
                   seed_version: ${{ steps.seed.outputs.seed_version }}
                   test_jobs: ${{ matrix.test_jobs }}
+                  arm_seed_mode: ${{ steps.arm_seed.outputs.mode || 'qemu' }}
 
             - name: Report compiler metadata
               shell: bash {0}

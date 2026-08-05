@@ -20,6 +20,16 @@ inputs:
     description: "Optional tag to exclude"
     required: false
     default: ""
+  arm_seed_mode:
+    description: >-
+      aarch64-Linux seed strategy. 'native' = fetch the pinned linux-arm64
+      seed and self-host on device (steady state, SFN-580). 'qemu' = fetch the
+      pinned x86_64 seed and run the SFN-472 first-bootstrap under emulation
+      (fallback for tags whose pinned release predates ARM assets). Ignored
+      unless `target` is linux-arm64. Callers resolve it with
+      scripts/select-aarch64-seed-mode.sh.
+    required: false
+    default: "qemu"
   build_jobs:
     description: "Parallel module builds (BUILD_JOBS). Empty = let the Makefile auto-detect via scripts/detect_build_jobs.sh (CPU + RAM heuristic; macOS capped at 2). Set to a specific N to pin (e.g. for a regression bisect)."
     required: false
@@ -59,6 +69,16 @@ inputs:
 runs:
   using: "composite"
   steps:
+    # Every seed-acquisition and build step below is gated on this being
+    # exactly 'native' or 'qemu'; an off-value would skip all of them and
+    # fail much later in `make ci-package` against an absent binary.
+    - name: Reject unknown aarch64 seed mode
+      if: ${{ inputs.mode != 'skip-build' && inputs.target == 'linux-arm64' && inputs.arm_seed_mode != 'native' && inputs.arm_seed_mode != 'qemu' }}
+      shell: bash {0}
+      run: |
+        echo "[arm-seed][error] arm_seed_mode must be 'native' or 'qemu', got '${{ inputs.arm_seed_mode }}'" >&2
+        exit 1
+
     # Restore the fetched seed binary keyed on target + pinned version.
     # The key is exact (no restore-keys): a hit guarantees the binary
     # matches `bootstrap.toml [seed].version`, so the fetch step below can
@@ -74,14 +94,14 @@ runs:
     # (compiler/src/build_cache.sfn) embeds the real seed/compiler
     # version in the on-disk digest, so a stale-seed entry simply misses.
     - name: Restore seed cache
-      if: ${{ inputs.mode != 'skip-build' && inputs.target != 'linux-arm64' && inputs.seed_version != '' && inputs.seed_version != 'latest' }}
+      if: ${{ inputs.mode != 'skip-build' && (inputs.target != 'linux-arm64' || inputs.arm_seed_mode == 'native') && inputs.seed_version != '' && inputs.seed_version != 'latest' }}
       uses: actions/cache@v4
       with:
         path: build/toolchains/seed
         key: sailfin-seed-store-${{ inputs.target }}-${{ inputs.seed_version }}
 
     - name: Fetch released seed compiler
-      if: ${{ inputs.mode != 'skip-build' && inputs.target != 'linux-arm64' }}
+      if: ${{ inputs.mode != 'skip-build' && (inputs.target != 'linux-arm64' || inputs.arm_seed_mode == 'native') }}
       shell: bash {0}
       run: |
         set -euo pipefail
@@ -102,6 +122,36 @@ runs:
         fi
         echo "[ci] seed binary: build/toolchains/seed/bin/sfn"
         build/toolchains/seed/bin/sfn version
+
+    # Fail closed on the native aarch64 fast path (SFN-580). `make fetch-seed`
+    # verifies the signed SHA256SUMS digest (install.sh), but nothing downstream
+    # checks that the binary it installed is actually an AArch64 build of the
+    # pinned version — a mis-selected or stale seed would otherwise surface as a
+    # confusing self-host failure much later. The qemu fallback gets the
+    # equivalent assertions from scripts/bootstrap-aarch64-linux.sh.
+    - name: Verify native aarch64 seed
+      if: ${{ inputs.mode != 'skip-build' && inputs.target == 'linux-arm64' && inputs.arm_seed_mode == 'native' }}
+      shell: bash {0}
+      env:
+        SEED_VERSION: ${{ inputs.seed_version }}
+      run: |
+        set -euo pipefail
+        seed="build/toolchains/seed/bin/sfn"
+        if [ -z "${SEED_VERSION}" ] || [ "${SEED_VERSION}" = "latest" ]; then
+          echo "[arm-seed][error] the native path requires a concrete seed_version, got '${SEED_VERSION}'" >&2
+          exit 1
+        fi
+        if ! file -L "$seed" | grep -E 'ELF 64-bit.*ARM aarch64' >/dev/null; then
+          echo "[arm-seed][error] fetched seed is not an AArch64 executable:" >&2
+          file -L "$seed" >&2
+          exit 1
+        fi
+        reported="$("$seed" --version)"
+        if [ "$reported" != "sfn ${SEED_VERSION}" ]; then
+          echo "[arm-seed][error] seed reports '${reported}', expected 'sfn ${SEED_VERSION}'" >&2
+          exit 1
+        fi
+        echo "[arm-seed] native AArch64 seed ${SEED_VERSION} verified"
 
     # Module-layout fingerprint: the sorted set of `.sfn` PATHS, without
     # their contents. It segments the build-cache key space below so a
@@ -235,7 +285,7 @@ runs:
         echo "[ci] macOS OpenSSL link path: ${prefix}/lib"
 
     - name: Build native compiler (selfhost from released seed)
-      if: ${{ inputs.mode != 'skip-build' && inputs.target != 'linux-arm64' }}
+      if: ${{ inputs.mode != 'skip-build' && (inputs.target != 'linux-arm64' || inputs.arm_seed_mode == 'native') }}
       shell: bash {0}
       env:
         GITHUB_TOKEN: ${{ env.GITHUB_TOKEN }}
@@ -286,12 +336,14 @@ runs:
           echo "[ci-metrics] build phase: ${_build_s}s, module-IR cache.hit_rate=${_hit_rate}"
         fi
 
-    # The first aarch64-Linux release cannot use `make fetch-seed`: the
-    # installer correctly selects linux-arm64 on this runner, but that asset is
-    # exactly what this job is producing. Fetch and verify the pinned x86_64
-    # native package explicitly, then run the SFN-472 bootstrap under qemu.
+    # Fallback path (SFN-580): the pinned release predates the linux-arm64
+    # assets (or is being rebuilt from such a tag), so `make fetch-seed` has
+    # no native seed to select. Fetch and verify the pinned x86_64 native
+    # package explicitly, then run the SFN-472 bootstrap under qemu.
+    # scripts/select-aarch64-seed-mode.sh is what picks this path; SFN-580
+    # made `native` (above) the steady state.
     - name: Fetch pinned x86_64 seed for aarch64 bootstrap
-      if: ${{ inputs.mode != 'skip-build' && inputs.target == 'linux-arm64' }}
+      if: ${{ inputs.mode != 'skip-build' && inputs.target == 'linux-arm64' && inputs.arm_seed_mode == 'qemu' }}
       id: aarch64_seed
       shell: bash {0}
       env:
@@ -331,7 +383,7 @@ runs:
         echo "path=$seed" >> "$GITHUB_OUTPUT"
 
     - name: Bootstrap native aarch64 compiler and fixed point
-      if: ${{ inputs.mode != 'skip-build' && inputs.target == 'linux-arm64' }}
+      if: ${{ inputs.mode != 'skip-build' && inputs.target == 'linux-arm64' && inputs.arm_seed_mode == 'qemu' }}
       shell: bash {0}
       env:
         SEED_X86_64: ${{ steps.aarch64_seed.outputs.path }}
