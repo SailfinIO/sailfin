@@ -1,4 +1,4 @@
-// Verifier regression coverage for the typed SSA v0 IR (SFEP-0015 §9.6).
+// Verifier regression coverage for the typed SSA v0 IR (SFEP-0059 §10.6).
 // A positive scalar CFG with a conditional branch, a call, and returns must
 // verify; each acceptance-named invariant class (invalid value use, block
 // target, terminator placement, type edge, metadata attachment) must fail with

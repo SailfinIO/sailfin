@@ -435,7 +435,7 @@ Accelerator tests compare against the scalar oracle; they do not replace it.
 - [SFEP-0052 — Accelerated ML strategy](./0052-ml-acceleration-strategy.md),
   especially §3.1(2) and Alternative 2.
 - [SFEP-0001 — SFEP purpose and process](./0001-sfep-process.md).
-- [SFEP-0015 — Toolchain independence](./0015-llvm-independence.md).
+- [Toolchain independence](../backend-independence.md).
 - [SFEP-0024 — Model engines and training](./0024-model-engines-and-training.md).
 - Linear SFN-424 — this design gate.
 - Linear SFN-427 — tensor IR skeleton and scalar-reference lowering.

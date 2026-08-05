@@ -291,7 +291,7 @@ now is a field to migrate twice. Recorded on SFN-508 itself; if that issue has
 already extended the type, SFN-537 reconciles rather than reverts.
 
 **Typed SSA is not the natural carrier.** `Instr`/`SsaBlock`/`SsaFunction`
-(`typed_ssa.sfn:132-186`) carry **no source locations at all**, and SFEP-0015 §9
+(`typed_ssa.sfn:132-186`) carry **no source locations at all**, and SFEP-0059 §10
 does not lock one; SFEP-0059 §2 states v0 "cannot represent any substantial
 Sailfin function," so it would carry the type for ~0% of real diagnostics. The
 natural carrier is the **sink**, which every channel already reaches.
@@ -299,7 +299,7 @@ natural carrier is the **sink**, which every channel already reaches.
 > Forward note for SFEP-0059: typed SSA should acquire a span slot **before** L3
 > makes it load-bearing, or it re-mints exactly this problem.
 
-**SFEP-0015 (native backend) — precede.** Instruction selection, register
+**SFEP-0066 (native backend) — precede.** Instruction selection, register
 allocation, and object emission will mint a new diagnostic surface. Settling
 `Diag` first means that surface is born with codes, spans, and severity.
 **Adopted at the design gate: SFN-534 and SFN-535 are a prerequisite of the

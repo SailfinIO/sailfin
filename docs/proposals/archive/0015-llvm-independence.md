@@ -1,16 +1,42 @@
 ---
 sfep: 15
 title: "Toolchain Independence — Sailfin-Native Backend"
-status: Accepted
+status: Superseded
 type: runtime
 created: 2026-06-05
-updated: 2026-07-29
+updated: 2026-08-05
 author: "agent:compiler-architect"
-tracking: "#1640, #1641, SFN-585"
+tracking:
 supersedes:
-superseded-by:
-graduates-to: reference/runtime-abi.md
+superseded-by: 66
+graduates-to:
 ---
+
+> # RETIRED — do not cite this document.
+>
+> **Superseded 2026-08-05.** This proposal mixed three genres in one file: a
+> strategy survey, a roadmap, and a 660-line normative IR contract. It never
+> conformed to SFEP-0001 §6 (no *Effect & capability impact*, *Self-hosting
+> impact*, *Alternatives considered*, *Stage1 readiness mapping*, or *Test plan*
+> section), and several of its factual claims had gone stale — most consequentially
+> that clang still drove the final link, which `compiler/src/build/direct_link.sfn`
+> had already made false on Linux x86-64/aarch64.
+>
+> Its content was redistributed:
+>
+> | Content | New home |
+> |---|---|
+> | §9 Typed SSA v0 contract (normative), incl. §9.2.1/§9.2.2 | **SFEP-0059 §10** — subsections map one-for-one (`§9.N` → `§10.N`) |
+> | §6 provider seam, §3 role ownership, §8 Stage 1/2, §10 non-goals, §11–12 | **SFEP-0066** — Codegen Provider Ownership |
+> | §2 axis taxonomy, §4 why, §5 costs, §7 tracks, §8 staging | **`docs/backend-independence.md`** — living tracker |
+> | §8 stage sequencing as schedule | Linear Projects |
+>
+> Two corrections were recorded during redistribution, both against claims made
+> below: the provider interface in §6 does not match the shipped one and cannot
+> carry a native code generator (SFEP-0066 §3.2), and the assertion that owning
+> the syscall layer depends on owning the backend is false (SFEP-0066 §3.5).
+>
+> Kept verbatim below for the historical record only.
 
 # Proposal: Toolchain Independence — A Sailfin-Native Backend
 

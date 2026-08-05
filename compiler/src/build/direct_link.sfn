@@ -1,7 +1,7 @@
 // compiler/src/build/direct_link.sfn
 //
-// Stage 1 of the toolchain-independence arc (SFEP-0015 §8 "Own the link",
-// `docs/proposals/0015-llvm-independence.md`; mirror #2550). SFN-453 made
+// Sailfin owns the Link role on Linux x86-64/aarch64 (SFEP-0066 §3.1 role
+// table; mirror #2550). SFN-453 made
 // `Backend.link` object-only; this leaf owns the Linux x86-64/aarch64 final-link
 // contract directly instead of delegating it to clang's driver: it resolves
 // the startup objects, dynamic linker, library search paths, and runtime

@@ -1,7 +1,7 @@
 // compiler/tests/unit/direct_link_argv_test.sfn
 //
-// Unit guard for the direct `ld.lld` argv builder (SFEP-0015 §8 Stage 1,
-// `compiler/src/build/direct_link.sfn`; mirror #2550). Pins the argv
+// Unit guard for the direct `ld.lld` argv builder (SFEP-0066 §3.1 role
+// table, `compiler/src/build/direct_link.sfn`; mirror #2550). Pins the argv
 // contract that replaces clang as the Linux x86-64/aarch64 final linker: the
 // startup-object wrap, the dynamic-linker/target-identity flags, the
 // object/library ordering, and — critically — the translation of the

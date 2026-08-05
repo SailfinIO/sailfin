@@ -14,11 +14,13 @@ graduates-to: reference/runtime-abi.md
 
 # SFEP-0060 — The Owned Syscall Layer (Axis 3, tier-1 Linux x86-64)
 
-> Implementation design for SFEP-0015 §8 Stage 4(a) / Axis 3, and the
-> enforcement chokepoint SFEP-0016 §3 depends on. SFEP-0015 says *what*
-> ("drop libc on tier-1") and SFEP-0016 says *why* ("one chokepoint the
-> compiler controls"). Neither says *which calls*, *what primitive*, or
-> *in what order* — this does.
+> Implementation design for Axis 3 (`docs/backend-independence.md` §1) — the
+> enforcement chokepoint SFEP-0016 §3.7 depends on. This work has **no
+> dependency on owning code generation** (SFEP-0066 §3.5): the primitive
+> already ships in `compiler/src/llvm/syscall.sfn`, and the blocker is that
+> `runtime/sfn/platform/syscall_linux.sfn` does not exist. SFEP-0016 says *why*
+> ("one chokepoint the compiler controls"); neither says *which calls*, *what
+> primitive*, or *in what order* — this does.
 
 ## 1. Summary
 
@@ -29,7 +31,7 @@ compiler-owned primitive — a `syscall1`…`syscall6` builtin, restricted by a
 module allowlist to exactly one runtime module — through which those thirty
 route on Linux x86-64. macOS and Windows keep their vendor-library leg behind
 the same Sailfin-level seam so the gate mediates uniformly on all tier-1
-targets (SFEP-0015 §10).
+targets (SFEP-0016 §3.1).
 
 The load-bearing claim is not "raw syscalls are faster or purer." It is that
 **an effect annotation is only enforceable if every path to the kernel passes
@@ -96,7 +98,7 @@ non-obvious hazard — LLVM's idiom recognizer synthesizes calls to `memcpy` /
 ### 2.2 Three holes the classification exposes
 
 These are not implementation details; they bound what the seal can honestly
-claim, and SFEP-0016 §8 does not currently name them.
+claim. SFEP-0016 §4.2 now records these as its three named holes.
 
 1. **`getaddrinfo` bypasses the gate.** Every `sfn/net` DNS resolution today
    enters libc, which opens its own UDP socket and talks to port 53. Routing
@@ -110,10 +112,13 @@ claim, and SFEP-0016 §8 does not currently name them.
    process that can spawn a shell has no seal.
 3. **OpenSSL is linked native code.** `runtime/capsule.toml` links `-lssl
    -lcrypto` into *every* Sailfin binary. Those objects contain their own
-   `syscall` paths. This is the concrete instance of SFEP-0016 open question 4,
-   and it is unanswered: a byte-level "no raw `syscall` opcode in linked
-   objects" rule rejects OpenSSL, and a rule permissive enough to admit OpenSSL
-   admits everything.
+   `syscall` paths. This was the concrete instance of what was SFEP-0016 open
+   question 4; SFEP-0016 §3.4–§3.6 has since resolved it in favor of digest-based
+   link-time provenance over an opcode scan — a byte-level "no raw `syscall`
+   opcode in linked objects" rule would reject OpenSSL, and a rule permissive
+   enough to admit it would admit everything, so OpenSSL is instead admitted by
+   explicit digest declaration (`vetted-link-inputs`) and remains TCB until
+   SFEP-0048 removes it.
 
 ## 3. Design
 
@@ -176,7 +181,7 @@ Two modules with identical signatures, selected by
   module permitted to call the builtin.
 - `runtime/sfn/platform/syscall_posix.sfn` — the same wrapper names and
   effects, implemented over the existing libc externs. This is the macOS and
-  Windows leg SFEP-0015 §10 requires: neither platform exposes a stable
+  Windows leg SFEP-0016 §3.1 requires: neither platform exposes a stable
   raw-syscall ABI, and **the gate hook lives in both legs**, so capability
   mediation is uniform even where the kernel entry is not owned.
 
@@ -194,7 +199,7 @@ and are stale.)
 Each wrapper opens with a check against the process's sealed capability mask
 before issuing the instruction. v0 is a process-wide mask derived from the
 linked capsule manifest and emitted as a module global; per-task attenuation
-(SFEP-0016 §5) replaces the mask read with a scheduler-context read without
+(SFEP-0016 §3.3) replaces the mask read with a scheduler-context read without
 changing any wrapper's shape. A denied call returns a capability-violation
 result — it traps, it does not segfault, and it does not fall through to libc.
 
@@ -221,9 +226,9 @@ every Class A symbol there is a reference implementation on the same machine
 with identical observable semantics, so each conversion has a mechanical,
 falsifiable acceptance test: run the same fixture against the libc leg and the
 owned leg and compare return values, errno values, and externally visible
-state. This is the same differential-testing property SFEP-0015 §5 credits for
-compressing the seal-sufficient backend timeline, and it applies at least as
-strongly here.
+state. This is the same differential-testing property
+`docs/backend-independence.md` §5 credits for compressing the seal-sufficient
+backend timeline, and it applies at least as strongly here.
 
 ### 3.6 Self-hosting: exactly one seed gate
 
@@ -252,7 +257,7 @@ thread creation (Class C `pthread_*`), and a resolution of the OpenSSL question
 in §2.2. Until that link exists, libc remains reachable through the PLT and the
 seal's claim is bounded to "Sailfin-authored code cannot make an un-gated
 syscall" — which is a real, testable claim, but is **not** the stronger claim in
-SFEP-0016 §8 ("even via FFI or dynamically loaded native code"). That stronger
+SFEP-0016 §4.3 ("even via FFI or dynamically loaded native code"). That stronger
 claim must not be marketed before the `-nostdlib` link ships.
 
 ## 4. Effect & capability impact
@@ -285,7 +290,7 @@ land only after the seed carries it.
 ## 6. Alternatives considered
 
 - **General inline asm.** Strictly more expressive and strictly worse here: a
-  user-reachable `asm` block makes SFEP-0016 §8's "no un-gated syscall path"
+  user-reachable `asm` block makes SFEP-0016 §4.1's "no un-gated syscall path"
   unenforceable by construction, and it is a permanent language surface added
   for one runtime module. Rejected — a keyword can never become a variable name
   (CLAUDE.md), and a hole can never be un-punched.
@@ -331,9 +336,12 @@ land only after the seed carries it.
 
 ## 9. References
 
-- SFEP-0015 §8 Stage 4, §10 (tier-1 scoping), §3 (dependency map)
-- SFEP-0016 §3 (the chokepoint), §7 (dependency chain), §8 (threat model),
-  §9 open question 4 (link-time sealing)
+- `docs/backend-independence.md` §1 (Axis 3 definition), §5 (seal-sufficient vs
+  perf-parity, tier-1 scoping)
+- SFEP-0016 §3.2 (the chokepoint), §3.7 (dependency chain, corrected),
+  §4.1–§4.3 (threat model), §3.4–§3.6 (link-time admission rule, resolving what
+  was open question 4)
+- SFEP-0066 §3.5 (no dependency on owning code generation)
 - SFEP-0025 §3.9.4 (atomic intrinsics — the builtin precedent), §3.9.5 (`extern
   fn` lowering), §3.9.7 (runtime helper registry)
 - `compiler/src/llvm/byte_load.sfn`, `compiler/src/llvm/atomics.sfn`

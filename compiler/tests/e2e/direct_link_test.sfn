@@ -1,7 +1,7 @@
 // compiler/tests/e2e/direct_link_test.sfn
 //
 // End-to-end guard for the direct `ld.lld` Linux x86-64/aarch64 link path
-// (SFEP-0015 §8 Stage 1, `compiler/src/build/direct_link.sfn`; mirror
+// (SFEP-0066 §3.1 role table, `compiler/src/build/direct_link.sfn`; mirror
 // #2550). Two contracts are pinned by building a real hello-world with
 // `SAILFIN_TRACE_LINK=1`:
 //

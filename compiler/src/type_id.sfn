@@ -2,7 +2,7 @@
 //
 // Owner-qualified identities and target-neutral structural type records for
 // the post-v0 type graph. Source aliases are resolver provenance and never
-// appear as graph nodes. See SFEP-0015 §9.2.1 and SFEP-0059 §3.5.
+// appear as graph nodes. See SFEP-0059 §10.2.1 and §3.5.
 // TypeId is a dense handle owned by one module-local TypeInterner.
 struct TypeId {
     value: int;

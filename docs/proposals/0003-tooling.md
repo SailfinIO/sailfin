@@ -302,7 +302,7 @@ Dispatch is a single `Command` tree in `compiler/src/cli/main.sfn`
 | `sfn run` | `cli/commands/run.sfn` | — | SFEP-0006 |
 | `sfn test [suite...]` | `cli/commands/test/` (9 modules) | `--json`; streamed IPC | SFEP-0010/0011/0044/0050 |
 | `sfn bench` | `cli/commands/bench.sfn` + `bench_json.sfn` | `sailfin.bench/v1`; `docs/reference/bench-json-schema.md`; **exit 2** on `--budget-time`/`--budget-mem` violation | SFEP-0006 Stage C5 |
-| `sfn emit <llvm\|sailfin\|native>` | `cli/commands/emit.sfn` | textual IR | SFEP-0015 |
+| `sfn emit <llvm\|sailfin\|native>` | `cli/commands/emit.sfn` | textual IR | SFEP-0066 |
 
 **Distribution, configuration, environment** — all SFEP-0002 / SFEP-0046 /
 SFEP-0040 territory, listed for completeness: `init`, `add`, `publish`, `lock`,

@@ -1,9 +1,12 @@
-# #1112 — Backend interface seam (SFEP-15 Stage 0)
+# #1112 — Backend interface seam (SFEP-0066 §3.2)
 
 Design doc for the design gate of #1112. **Stage 0 of the toolchain-independence
-arc** — the *design record* is SFEP-15 (`../0015-llvm-independence.md` §6/§8/§11);
-this note is the single-issue implementation gate, so it carries no SFEP number.
-Unblocks #347 (LLVM C-API backend) and #1640 (seal-sufficient native backend).
+arc** — the *design record* was SFEP-15 §6/§8/§11 at the time; that document is
+retired, and the seam it sketched is now specified by SFEP-0066 §3.2 (which
+corrects the seam's shape) and surveyed by `docs/backend-independence.md`; this
+note is the single-issue implementation gate, so it carries no SFEP number.
+Unblocks #347 (LLVM C-API backend) and the seal-sufficient native backend
+(SFEP-0066 §3.3).
 
 ---
 
@@ -13,18 +16,19 @@ Introduce a single `Backend` seam that hides every `process.run(["clang", …])`
 codegen/link call site behind one module (`compiler/src/backend.sfn`), with
 today's textual-LLVM-IR + clang path as its sole implementation
 (`LlvmTextBackend`). **Zero behavior change** — emitted `.o`/binary byte-identical,
-`--check-determinism` passes with no rebaseline. This is SFEP-15 §8 Stage 0 and
-the prerequisite seam for #347 and #1640 to plug in cleanly rather than
-re-hardcoding LLVM across the driver.
+`--check-determinism` passes with no rebaseline. This was SFEP-15 §8 Stage 0
+(now SFEP-0066 §3.2) and the prerequisite seam for #347 and the seal-sufficient
+native backend (SFEP-0066 §3.3) to plug in cleanly rather than re-hardcoding
+LLVM across the driver.
 
 ## Motivation
 
-Per SFEP-15 §3/§6: the clang dependency is co-located in the driver but spread
+Per SFEP-0066 §2/§3.2: the clang dependency is co-located in the driver but spread
 across several call sites wearing four hats (compile runtime C, assemble
 `.ll`→`.o`, link the final binary, pull in libc). There is no seam to slot an
 alternative backend into. Stage 0 creates that seam mechanically, with no
 semantic change, so #347 lands as "a faster LLVM backend impl" and the native
-backend (#1640) arrives as a second impl.
+backend (SFEP-0066 §3.3) arrives as a second impl.
 
 ## Design
 
@@ -37,7 +41,7 @@ in its own source, even though the LLVM backend *can* lower one. The seam is a
 declared for documentation/conformance but **not** used as a dynamic value type.
 The backend is selected by direct construction at the driver call sites
 (`let backend = LlvmTextBackend {};`) — the issue's "hard-wired, no flag/env"
-scope. When #347/#1640 add a second impl, the selection point becomes a small
+scope. When #347 or the SFEP-0066 §3.3 native backend add a second impl, the selection point becomes a small
 factory returning the concrete struct chosen by build mode.
 
 ### The real call-site inventory (grounded)
@@ -71,7 +75,7 @@ optional add once a second backend exists.
 
 ### Interface + types (final shapes wrapping today's behavior verbatim)
 
-The SFEP-15 sketch (`lower(module: NativeModule) -> ObjectArtifact`,
+The SFEP-15 sketch (documented as disproven by SFEP-0066 §2; `lower(module: NativeModule) -> ObjectArtifact`,
 `link(objects, out, libs)`) does not match what actually flows: the driver never
 hands the backend a `NativeModule`, and program/capsule `.ll`s are assembled
 *inline by the linker*, not pre-lowered to objects. The implemented shapes:
@@ -79,8 +83,8 @@ hands the backend a `NativeModule`, and program/capsule `.ll`s are assembled
 ```sfn
 // compiler/src/backend.sfn
 
-// Reserved object-file handle for later stages (#347/#1640 produce these
-// in-process); Stage 0 returns the clang exit code directly.
+// Reserved object-file handle for later stages (#347 and the SFEP-0066 §3.3
+// native backend produce these in-process); Stage 0 returns the clang exit code directly.
 struct ObjectArtifact { path: string; }
 
 // Semantic link inputs computed by the driver; `test_mode` selects which
@@ -129,7 +133,8 @@ Threading notes (verbatim-preservation):
   enumeration into `link_flags`, and the runtime `libs` — exactly as now. The
   backend only owns the final `process.run(argv)`, keeping determinism-sensitive
   flag *computation* in the driver and byte-stable.
-- `ObjectArtifact` is the named return wrapper reserved for #347/#1640; Stage 0
+- `ObjectArtifact` is the named return wrapper reserved for #347 and the
+  SFEP-0066 §3.3 native backend; Stage 0
   keeps `assemble`/`link` returning `int` (the clang exit code callers already
   consume) to avoid disturbing `LinkResult`/`RuntimeLinkInputs` plumbing.
 
@@ -159,8 +164,8 @@ trait-object value), conformance is the only interface machinery exercised.
   consumer (the driver) land in **one PR** (seed-dependency rule: bundle).
 
 Two build-only failures surfaced during implementation — both **#1389-class**
-(`sfn check` green, `make compile` red) and worth recording because #347/#1640
-will grow this surface:
+(`sfn check` green, `make compile` red) and worth recording because #347 and
+the SFEP-0066 §3.3 native backend will grow this surface:
 
 1. **`.push` inside a struct method body does not lower.** The first cut put the
    argv-assembly loops directly in the `LlvmTextBackend.assemble`/`link` **method
@@ -190,13 +195,13 @@ will grow this surface:
 
 ## Alternatives
 
-1. **Trait-object dynamic dispatch** (the SFEP-15 sketch literally). Rejected for
+1. **Trait-object dynamic dispatch** (the SFEP-15 sketch literally, per SFEP-0066 §2). Rejected for
    Stage 0: exercises codegen the compiler has never run on *itself*, risking a
    self-host regression for zero Stage-0 value. Adopt when a second impl needs
    runtime selection.
 2. **Free functions in a `backend` namespace, no interface.** Loses the conformance
-   contract #347/#1640 cite; the interface declaration is cheap and documents the
-   seam.
+   contract #347 and the SFEP-0066 §3.3 native backend cite; the interface
+   declaration is cheap and documents the seam.
 3. **Fold validation into the seam now.** Out of issue scope, larger blast radius,
    and a native backend's validation differs; defer to `validate()`.
 
@@ -220,7 +225,8 @@ The gate is *zero behavior change*, so verification is the existing suite plus:
 
 ## References
 
-- SFEP-15 `../0015-llvm-independence.md` §6, §8 (Stage 0), §11.
-- #347 (LLVM C-API backend), #1640 (seal-sufficient native backend).
+- SFEP-0066 §3.2 (the seam, correcting the SFEP-15 §6/§8/§11 sketch); retired:
+  `../archive/0015-llvm-independence.md`.
+- #347 (LLVM C-API backend); the seal-sufficient native backend (SFEP-0066 §3.3).
 - Touched: `compiler/src/backend.sfn` (new), `compiler/src/cli_main.sfn`,
   `compiler/src/cli/commands/test.sfn`, `docs/status.md`.

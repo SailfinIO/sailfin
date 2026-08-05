@@ -3,7 +3,7 @@
 // Deterministic text renderer for the typed SSA v0 IR (compiler/src/
 // typed_ssa.sfn). The output is a canonical, human-readable debug dump used
 // by tests and diagnostics; it is not a parseable surface. Format is
-// normative in SFEP-0015 §9.7 (docs/proposals/0015-llvm-independence.md).
+// normative in SFEP-0059 §10.7 (docs/proposals/0059-typed-ssa-activation.md).
 import { number_to_string } from "./num_format";
 import {
     BinaryOp,

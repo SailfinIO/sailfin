@@ -609,8 +609,9 @@ re-pointed at the native stack.
   unblocks; 1.0 hallmark / GA blocker per `docs/strategy/decision-brief.md`.
 - SFEP-0036 (`0036-tls-runtime.md`, Implemented) — the OpenSSL TLS runtime this
   replaces; its `tls_*` wrapper contracts are the Phase D swap target.
-- SFEP-0015 (`0015-llvm-independence.md`) — backend/syscall ownership; the seal's
-  other prerequisite.
+- SFEP-0060 (`0060-owned-syscall-layer.md`) — owned syscall ownership, the seal's
+  other prerequisite; SFEP-0066 §3.5 corrects this as independent of backend
+  (code-generation) ownership.
 - `0058-sized-integer-types.md` — was cited as the missing capability behind the
   X25519 / Ed25519 blocker (§7); X25519 no longer depends on it (§6.4
   amendment, `docs/proposals/design-notes/sfn-335-x25519-limb-strategy.md`).

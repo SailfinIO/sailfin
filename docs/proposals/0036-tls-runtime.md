@@ -264,7 +264,7 @@ the enclosing `![net]` Sailfin fns exactly as the socket externs do today (the
 same "externs are effect holes" property SFEP-0019 §6 notes — pre-existing, not
 introduced here). No new capability, no manifest capability flag: linking
 `libssl` is a build-time link decision, not a runtime capability gate. If the
-capability-sealed runtime (#1639, SFEP-0016) later wants to gate
+capability-sealed runtime (SFEP-0016) later wants to gate
 "opens-TLS-connections" distinctly from "opens-sockets," that is a separate
 follow-up — for 1.0, TLS == `![net]`.
 
@@ -377,8 +377,8 @@ is gated first (see §10 issue #1).
 - **#1485 M10** (Windows native self-host) — also wants native TLS; the extern
   surface here is OS-independent and reused there (only link form + CA path
   differ). Coordinate cert-store discovery.
-- **#934** (`sfn/capability`) — TLS == `![net]`; any future "opens-TLS" sub-gate
-  is its concern, not B1's.
+- **SFEP-0016** (§3.7 item 5, the `sfn/capability` work) — TLS == `![net]`; any
+  future "opens-TLS" sub-gate is its concern, not B1's.
 - Shipped substrate: **#1707** (DNS/`getaddrinfo`), **#1581** (socket timeouts),
   **#1711** (keep-alive), **#1708** (chunked decode) — all reused unchanged.
 - **#1088** — the `pthread_create` start-routine / fn-address callback gap this

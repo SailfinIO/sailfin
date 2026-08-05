@@ -3,7 +3,7 @@
 // Deterministic module-local interning for the owner-qualified structural type
 // graph. Equality is fieldwise, hashes come from a private structural encoding,
 // and human-readable rendering is diagnostic output only. See SFN-588,
-// SFEP-0015 §9.2.1, and SFEP-0059 §3.5.
+// SFEP-0059 §10.2.1, and §3.5.
 import { number_to_string } from "./num_format";
 import {
     DeclarationId,

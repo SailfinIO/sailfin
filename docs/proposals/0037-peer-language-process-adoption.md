@@ -380,7 +380,7 @@ their self-hosting analysis in their own SFEPs.
 - **Generic reducers (C-Reduce/`treereduce` with a Sailfin grammar)** instead
   of a native `sfn reduce`. Viable as a stopgap, but a native reducer is
   AST-aware (fewer invalid candidates), dogfoods the language, and matches
-  the toolchain-independence direction (SFEP-0015). The stopgap-vs-native
+  the toolchain-independence direction (`docs/backend-independence.md`). The stopgap-vs-native
   call is made in the reducer's own SFEP.
 - **Rust-style editions** as the 1.0 compatibility mechanism. Rejected
   pre-1.0: the promise + deprecation ladder (§3.11) covers the need at a
@@ -426,7 +426,7 @@ The gates verify themselves by injection, not by unit tests:
   discovery), SFEP-0006 (build architecture — the <5 min target §3.3
   enforces), SFEP-0011 (content-addressed test artifacts and suite
   partitioning), SFEP-0014 (agent-legible output),
-  SFEP-0015 (toolchain independence), SFEP-0004/0007 (tool-SFEP precedent
+  `docs/backend-independence.md` (toolchain independence), SFEP-0004/0007 (tool-SFEP precedent
   for §3.5), SFEP-0017 (a future consumer of §3.9), SFEP-0021 (Windows —
   enters via §3.10 tiers)
 - Issues: #1245 (memory regression killed runners → §3.3), #1386/#1389
