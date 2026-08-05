@@ -7,8 +7,8 @@ description = "Test assertion helpers and utilities for Sailfin"
 # `sfn/strings::find` replaces the hand-rolled `_find_in_string` helper
 # the capsule used to inline. That capsule was renamed (#856) from its
 # former `fmt` name to `strings` so its name matches its contents — pure
-# string ops, not formatters (the name the proposal cited in
-# `docs/proposals/0010-test-infra/02-phases.md`, issue 1.3). Integer
+# string ops, not formatters (`docs/proposals/0010-test-infra.md` §3.2
+# lists the module layout this dependency serves). Integer
 # formatting still goes through the runtime intrinsic `number_to_string`,
 # the same formatter `pure_assert_eq_float` already uses for fractions.
 "sfn/strings" = "*"

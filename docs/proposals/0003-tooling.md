@@ -235,7 +235,11 @@ which is the drift mechanism this boundary exists to stop.
 | Agent-legible build/test output, failure taxonomy, `build/agent-report.json` | SFEP-0014 (`Accepted`) |
 | Compiler decomposition into role-oriented capsules; the analyzer boundary | SFEP-0020 (`Accepted`) |
 | CLI structure, `Command` tree, subcommand modularization | SFEP-0027 (supersedes SFEP-0009) |
-| Test-runner architecture and performance | SFEP-0010, SFEP-0011, SFEP-0044, SFEP-0045 |
+| Test/hook syntax and the `sfn/test` capsule contract | SFEP-0010 |
+| Test-artifact caching and suite partitioning | SFEP-0011 |
+| Runner performance internals | SFEP-0044 |
+| Runner architecture | SFEP-0045 (`Draft`) |
+| Harness↔runner IPC | SFEP-0050 |
 | Capsule distribution, registry protocol, `publish`/`add`/`lock` | SFEP-0002 |
 | Workspace capability envelope, `sfn capabilities audit` | SFEP-0051 |
 | `sfn symbols --json` schema and rationale | `docs/proposals/design-notes/sfn-444-symbols-json-index.md` + `docs/reference/symbols-json-schema.md` |
@@ -263,6 +267,11 @@ this rewrite:
   init/build/run/check/test`)" — the old title, plus distribution commands this
   SFEP cedes to SFEP-0002. Its bullet now names the toolchain surface and splits
   the command list correctly.
+- The territory table's "Test-runner architecture and performance" row named
+  SFEP-0010, SFEP-0011, SFEP-0044, and SFEP-0045 undifferentiated. SFEP-0010's
+  2026-08 rewrite states the actual boundary in its §3.5; this table now mirrors
+  it with five rows instead of one, and adds SFEP-0050 (harness↔runner IPC),
+  which the old row omitted.
 
 ### 3.2 Shipped baseline
 

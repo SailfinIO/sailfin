@@ -1,3 +1,18 @@
+# Archived — SFEP-0010 bash-collapse migration audit
+
+> **Not live design; a completed migration audit.** This planned the migration
+> of 38 `compiler/tests/e2e/*.sh` scripts to Sailfin tests, targeting three
+> justified bash hold-outs.
+>
+> **The actual outcome was zero hold-outs.** The surface first grew to 122
+> scripts and was then migrated in full (epic #840). All three scripts this
+> document argued should stay as bash — `test_check_compiler_src.sh`,
+> `test_publish.sh`, `test_sfn_package.sh` — were migrated. See
+> `.claude/rules/no-bash-e2e.md`, which is binding: there is no `.sh` test
+> surface and no allowlist that would make a new one acceptable.
+
+---
+
 # Bash collapse plan
 
 The 38 shell scripts under `compiler/tests/e2e/*.sh` total ~7442 LOC.

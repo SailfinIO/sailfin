@@ -107,7 +107,11 @@ not remove the failure mode.
 |---|---|
 | The `sfn check` JSON envelope (`sailfin-check/1`), passes, incremental design | SFEP-0004 |
 | `BuildReport` and `--check-determinism`; the build driver; Stage D Makefile retirement | SFEP-0006 |
-| Test-runner architecture, `--json` jsonl schema, harness↔runner IPC | SFEP-0010, SFEP-0011, SFEP-0044, SFEP-0050 |
+| Test/hook syntax and the `sfn/test` capsule contract | SFEP-0010 |
+| Test-artifact caching and suite partitioning | SFEP-0011 |
+| Runner performance internals | SFEP-0044 |
+| Runner architecture | SFEP-0045 (`Draft`) |
+| Harness↔runner IPC; the `--json` jsonl schema | SFEP-0050 |
 | The `Diag`/`Span` type, severity model, fix-it structure | SFEP-0061 |
 | The toolchain inventory and the envelope pattern as a cross-cutting rule | SFEP-0003 |
 | Per-job RAM budgeting and the `RLIMIT_AS` self-cap | `.claude/rules/compiler-safety.md` |
@@ -454,7 +458,8 @@ failure could not be recorded as success:
 - `docs/proposals/0006-build-architecture.md` — §4.11 structured link diagnostics
   (this SFEP's original parent); Stage D Makefile retirement (`:1509,1533`);
   "No orchestration layer above `sfn`" (`:597-600`)
-- `docs/proposals/0010-test-infra/00-overview.md` — test-runner architecture
+- `docs/proposals/0010-test-infra.md` — test/hook syntax and the `sfn/test`
+  capsule contract
 - `docs/proposals/0021-windows-native-selfhost.md` — `sfn build --target=`, which
   retires `ci-cross-windows`
 - `docs/proposals/0050-streamed-test-ipc.md` — harness↔runner IPC; the `--json` v2

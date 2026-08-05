@@ -6,15 +6,17 @@
 //
 // Requires ![io] for diagnostic printing on failure.
 //
-// Two API tiers (per `docs/proposals/0010-test-infra/03-capsule-api.md`):
+// Two API tiers (per `docs/proposals/0010-test-infra.md` §3.3, which also
+// states the condition for collapsing them into one):
 //
 //   1. Legacy `assert_*` — `![io]`. Prints diagnostics on mismatch via
 //      `print.err`, then `assert false` to fail the test.
 //   2. `pure_assert_*` — `![pure]`. Returns an `AssertFailure` record
-//      with `present == true` on mismatch (effectively
-//      `Result<(), AssertFailure>` until that type ships). The capsule
-//      body never prints; consumers (today: a hand-rolled `if r.present
-//      { assert false; }`; tomorrow: 1.4's `expect()` matcher) decide
+//      with `present == true` on mismatch — a hand-rolled
+//      `Result<(), AssertFailure>` predating that type. `Result<T, E>`
+//      has since shipped (SFEP-0012), so the fold is pending. The capsule
+//      body never prints; consumers (a hand-rolled `if r.present
+//      { assert false; }`, or the shipped `expect_*` matchers) decide
 //      how to surface the failure. This lets a test calling only
 //      `pure_assert_*` stay `![pure]` even though the capsule manifest
 //      keeps `required = ["io"]` for the legacy tier.
@@ -22,7 +24,7 @@
 // Both tiers collapse into a single generic `assert_eq` parameterized
 // over the caller's effect row when row-polymorphic effects ship
 // post-1.0. Until then, `pure_assert_*` is the production-ready
-// interim — see issue #370 / proposal §P3.
+// interim — see issue #370; SFEP-0010 §3.3.
 import { find } from "sfn/strings";
 
 // ---------------------------------------------------------------------------
@@ -225,7 +227,7 @@ fn assert_false(value: boolean, label: string) ![io] {
 }
 
 // ---------------------------------------------------------------------------
-// Pure-effect assertions (issue #370 / proposal §P3)
+// Pure-effect assertions (issue #370; SFEP-0010 §3.3)
 // ---------------------------------------------------------------------------
 //
 // The `pure_assert_*` family returns an `AssertFailure` record instead
@@ -342,7 +344,7 @@ fn pure_assert_false(value: boolean, label: string) -> AssertFailure ![pure] {
 }
 
 // ---------------------------------------------------------------------------
-// `expect()` matchers (issue #847, proposal §1.4)
+// `expect()` matchers (issue #847; SFEP-0010 §3.2)
 // ---------------------------------------------------------------------------
 // The matcher surface lives in `expect.sfn` (the per-type `expect_*`
 // entry points) and `matcher.sfn` (the `MatchResult` core + comparison/
@@ -373,7 +375,7 @@ export {
 } from "./expect";
 
 // ---------------------------------------------------------------------------
-// Snapshot / golden-file matcher (issue #977, proposal §2.4)
+// Snapshot / golden-file matcher (issue #977; SFEP-0010 §3.2)
 // ---------------------------------------------------------------------------
 // `expect_snapshot(actual, key)` is the `![io]` entry point: write on
 // first run / `--update-snapshots`, compare thereafter. `snapshot_match_in`
@@ -382,7 +384,7 @@ export {
 export { expect_snapshot, snapshot_match_in } from "./snapshot";
 
 // ---------------------------------------------------------------------------
-// Compile-as-test assertions (issue #974, proposal §2.6)
+// Compile-as-test assertions (issue #974; SFEP-0010 §3.2)
 // ---------------------------------------------------------------------------
 // `assert_compiles` / `assert_does_not_compile` shell out to the
 // shipped `sfn check --json` via `process.run_capture` and parse the
@@ -391,7 +393,7 @@ export { expect_snapshot, snapshot_match_in } from "./snapshot";
 export { CompileExpect, assert_compiles, assert_does_not_compile } from "./compile_assert";
 
 // ---------------------------------------------------------------------------
-// Scoped fixtures (issue #979, proposal §2.2)
+// Scoped fixtures (issue #979; SFEP-0010 §3.2)
 // ---------------------------------------------------------------------------
 // `with_tmp_dir(body)` creates a temp dir, runs the (possibly capturing)
 // `body` closure against it, and recursively removes the tree on scope

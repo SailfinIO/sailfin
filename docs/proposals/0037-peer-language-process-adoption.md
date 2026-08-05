@@ -424,7 +424,8 @@ The gates verify themselves by injection, not by unit tests:
 
 - SFEP-0001 (process), SFEP-0026 (delivery process — cadence, seed
   discovery), SFEP-0006 (build architecture — the <5 min target §3.3
-  enforces), SFEP-0011 (CI test-speed), SFEP-0014 (agent-legible output),
+  enforces), SFEP-0011 (content-addressed test artifacts and suite
+  partitioning), SFEP-0014 (agent-legible output),
   SFEP-0015 (toolchain independence), SFEP-0004/0007 (tool-SFEP precedent
   for §3.5), SFEP-0017 (a future consumer of §3.9), SFEP-0021 (Windows —
   enters via §3.10 tiers)
