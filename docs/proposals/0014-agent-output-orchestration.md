@@ -368,7 +368,7 @@ retract it.
 | **1 — keystone** | S | **Shipped** | `Makefile`, `scripts/agent_report.sh`, `docs/reference/make-result-schema.md` | Always-last `===SAILFIN-RESULT===` block on 9 targets, with `status` + `failure` |
 | **2 — full report** | M | **Shipped** | `JSON=1` passthrough; per-target report composition | `build/agent-report.<target>.json` with a `phases[]` array |
 | **3 — taxonomy + first-error** | S | **Partial** | `classify()`; schema lock | Taxonomy shipped (7 classes). **Phase ledger regressed — [§3.3](#33-the-regression-the-phase-ledger-is-dead)** |
-| **5 — interim ledger repair** | S | Not started | `check_phase_ledger_test.sfn` first, then `agent_report.sh` detectors | **Fix the test before the regexes**: drive it against real `make check` output rather than `echo` stubs, so it can fail. Then re-sync detectors to the `[selfhost]` banners and the corrected phase *order*, restoring the `nondeterminism` warn path. Closes the blind window before a seed carries Phase 6. |
+| **5 — interim ledger repair** | S | Not started | `check_phase_ledger_test.sfn` first, then `agent_report.sh` detectors | **Fix the test before the regexes.** Replace the `echo`-stub fixtures with a *marker-presence assertion*: every literal the detectors grep must appear verbatim in a producer (`Makefile` or `cli_selfhost.sfn`). Static, milliseconds, and it would have failed on `#1502` — where driving a real 15–20 min `make check` from a test is unaffordable and a recorded transcript would become the next fossil. Then re-sync detectors to the `[selfhost]` banners and the corrected phase *order*, restoring the `nondeterminism` warn path. Closes the blind window before a seed carries Phase 6. |
 | **6 — native verb** | M | Not started | new `cli/commands/dev_verify.sfn`; `sfn selfhost --json` sub-envelope; incremental report writes | `sfn dev verify [--fast] [--full-pass1] [--json]` runs the pipeline and emits the verdict from child envelopes and exit status. Ledger and classification per [§3.5](#35-the-target-host-sfn-dev-verify)/[§3.7](#37-classification-becomes-producer-emitted). Ships with the Phase 5 test repointed at the native verb. |
 | **7 — cutover** | M | Not started | rename schema doc; bump tests; delete `agent_report.sh` and the `$(AGENT_REPORT)` wrapping; amend SFEP-0003 §3.2 | `sailfin-run/2` is the sole envelope. `make check` becomes a wrapper over `sfn dev verify` or is deleted with the Makefile, whichever Stage D reaches first. |
 | **4 — surfacing** | S | Not started, gated on 7 | `CLAUDE.md` + `.claude/agents/*`; `sailfin_verify` MCP tool; `llms.txt` | Agents are told to read the sentinel. MCP clients get it as `structuredContent` — which also closes the gap where `sailfin_build` and `sailfin_test` pass `--json` through as raw text (`tools/mcp-server/src/index.ts:388-447`) while `sailfin_diagnostics` parses it properly. |
@@ -413,9 +413,12 @@ failure could not be recorded as success:
   scrolling.
 - `failure` distinguishes all seven classes, and each maps to a distinct documented
   response.
-- **A failing phase is named correctly.** Verified by a test that runs the **real**
-  pipeline and asserts the reported `phase` matches the phase actually broken —
-  never by replaying expected banners into the classifier.
+- **A failing phase is named correctly**, and never verified by replaying expected
+  banners into the classifier. The guard is tiered to what each host can afford:
+  Phase 5 asserts every grepped marker exists verbatim in a producer (static, and
+  sufficient to catch the `#1502` drift); Phase 6 injects a real failure into each
+  of the five phases and asserts the reported `phase` matches — which is affordable
+  precisely because the native verb dispatches the phases it reports on.
 - **A refactor of a phase's human output cannot change the reported `phase`.** This
   is the invariant `#1502` violated, and it is the one metric the bash mechanism
   cannot satisfy at any level of regex care.
