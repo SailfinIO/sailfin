@@ -12,7 +12,7 @@
 // This is a pure text emitter — no `sfn build`/link — so the round-trip leg
 // only needs PATH to locate the tool, not the nested-compile isolation the
 // build-and-run e2e tests thread. See `.claude/rules/no-bash-e2e.md`.
-import { expect_snapshot, with_tmp_dir } from "sfn/test";
+import { snapshot_match_in, with_tmp_dir } from "sfn/test";
 
 import {
     TensorFunction,
@@ -85,7 +85,8 @@ fn _stablehlo_opt() -> string ![io] {
 
 test "stablehlo emit: op-set golden snapshot" ![io] {
     let text = emit_stablehlo_module(_spike_module());
-    assert expect_snapshot(text, "tensor_ir_stablehlo_spike").ok;
+    let update = env.get("SAILFIN_UPDATE_SNAPSHOTS") == "1";
+    assert snapshot_match_in(text, "compiler/tests/__snapshots__", "tensor_ir_stablehlo_spike", update).ok;
 }
 
 test "stablehlo emit: emitted text round-trips through stablehlo-opt when present" ![io] {
