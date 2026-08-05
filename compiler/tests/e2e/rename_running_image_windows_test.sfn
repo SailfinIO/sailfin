@@ -28,8 +28,9 @@ import { clean_runner_env, nested_runner_scratch } from "sfn/test";
 // Declared directly rather than resolved through the compiler under
 // test: calling the runtime symbol as an extern lets this test prove the
 // primitive without needing a compiler binary that already carries the
-// fix (mirrors `runtime/sfn/platform/fs.sfn`'s own extern declaration of
-// the same symbol).
+// fix. Mirrors how the compiler itself reaches the symbol —
+// `compiler/src/build/fs.sfn` declares the identical `extern fn` rather
+// than importing it, the SFN-635 cross-module workaround.
 extern fn sfn_rename_replace(src: *u8, dst: *u8) -> i32;
 
 fn _sfn_bin() -> string ![io] {
@@ -140,6 +141,9 @@ test "rename running image (windows): displace-then-publish replaces a locked ru
     let replacement = _build_fixture(dir, "replacement", _replacement_source(), "rename_running_image-replacement");
     assert replacement.length > 0;
     let replacement_bytes = fs.readFile(replacement);
+    // Captured before the replace so the displaced copy can be checked
+    // byte-for-byte below.
+    let victim_bytes = fs.readFile(victim);
 
     // Spawn the victim so its image is genuinely locked — precedent
     // `process_handle_windows_test.sfn:90`/`:98`.
@@ -159,6 +163,13 @@ test "rename running image (windows): displace-then-publish replaces a locked ru
     let old_path = victim + ".old";
     assert fs.exists(old_path);
     assert fs.readFile(victim) == replacement_bytes;
+    // The displaced image is intact, not merely present. This is the
+    // machine-checkable form of the module header's claim that
+    // displace-then-publish never destroys `dst`'s bytes — the property
+    // that distinguishes it from the delete-then-rename that header
+    // rejects, and the precondition for the rollback path being able to
+    // restore anything.
+    assert fs.readFile(old_path) == victim_bytes;
 
     // Let the still-running (now displaced) child exit, then reap it.
     fs.writeFile(sentinel, "go");
