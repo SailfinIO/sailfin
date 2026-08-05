@@ -1,6 +1,7 @@
 {
   "mcpServers": {
     "linear": {
+      "type": "stdio",
       "command": "npx",
       "args": [
         "-y",
@@ -9,6 +10,7 @@
       ]
     },
     "sailfin": {
+      "type": "stdio",
       "command": "node",
       "args": [
         "tools/mcp-server/dist/index.js"
