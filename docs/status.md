@@ -1,6 +1,6 @@
 # Status
 
-Updated: 2026-08-04. Seed pinned to `0.8.4` (`bootstrap.toml`
+Updated: 2026-08-05. Seed pinned to `0.9.1` (`bootstrap.toml`
 `[seed].version` — SFEP-0047); the compiler version source of truth is
 `compiler/capsule.toml`.
 
@@ -881,10 +881,14 @@ unit; history in the linked issues.
 
 - Release tarballs follow `sailfin_<version>_<os>_<arch>.tar.gz`. Release builds
   publish Linux x86_64, Linux arm64, macOS arm64 (Apple Silicon), and Windows
-  x86_64 installer assets. The aarch64 release leg bootstraps the first native
-  compiler from the pinned x86_64 seed and verifies a native fixed point before
-  packaging. Other OS/architecture pairs detected by the bootstrap scripts are
-  not supported until a matching release asset is published.
+  x86_64 installer assets. The aarch64 release leg self-hosts on the pinned
+  native `linux-arm64` seed once the pin carries arm64 assets — the steady
+  state since SFN-580 (pinned seed `0.9.1` carries them) — and falls back to
+  bootstrapping the first native compiler from the pinned x86_64 seed under
+  qemu (SFN-472) only when rebuilding a tag whose pin predates them; see
+  `docs/build-aarch64-linux.md`. Other OS/architecture pairs detected by the
+  bootstrap scripts are not supported until a matching release asset is
+  published.
 - The bootstrap installers verify the signed `SHA256SUMS` manifest and selected
   archive digest before extraction when OpenSSL 1.1.1+ raw-Ed25519 support is
   available. A missing manifest/signature (for an older unsigned release) or
