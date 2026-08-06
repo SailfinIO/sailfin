@@ -259,26 +259,39 @@ fn _publish_lines_atomic(path: string, lines: string[]) -> boolean ![io] {
     return true;
 }
 
+// Outcome of `_copy_file_counted`: whether the copy succeeded, and how
+// many bytes were written. On failure `bytes` is whatever was written
+// before the failure, matching `FileBytes`'s "report what happened, don't
+// hide the partial state" shape above.
+struct CopyOutcome {
+    ok: boolean;
+    bytes: int;
+}
+
 // Copy `src` to `dst` byte-for-byte through libc stdio, replacing any
-// existing `dst`. Returns false on any open, short-write, or close
+// existing `dst`. Returns `ok: false` on any open, short-write, or close
 // failure, leaving `dst` in whatever state the partial write reached
 // — callers publish through `_atomic_rename_into_place` so a failed
-// copy never becomes the visible artifact.
+// copy never becomes the visible artifact. `bytes` is the count
+// successfully written, letting a caller learn a copied file's size
+// without a second read or a `stat`.
 //
 // Chunked rather than a single sized read: the cache stores multi-
 // megabyte `.o` and `.ll` artifacts, and a whole-file buffer would
 // scale the compiler's peak RSS with the largest object under the
 // 8 GiB self-cap. `guard` bounds the loop so a pathological stream
 // that never reports EOF terminates instead of spinning forever.
-fn _copy_file(src: string, dst: string) -> boolean ![io] {
+fn _copy_file_counted(src: string, dst: string) -> CopyOutcome ![io] {
     let read_mode: string = "rb";
     let fin: *File = fopen(src as *u8, read_mode as *u8);
-    if fin as i64 == 0 { return false; }
+    if fin as i64 == 0 {
+        return CopyOutcome { ok: false, bytes: 0 };
+    }
     let write_mode: string = "wb";
     let fout: *File = fopen(dst as *u8, write_mode as *u8);
     if fout as i64 == 0 {
         fclose(fin);
-        return false;
+        return CopyOutcome { ok: false, bytes: 0 };
     }
 
     let chunk: i64 = 65536;
@@ -286,10 +299,11 @@ fn _copy_file(src: string, dst: string) -> boolean ![io] {
     if buf as i64 == 0 {
         fclose(fin);
         fclose(fout);
-        return false;
+        return CopyOutcome { ok: false, bytes: 0 };
     }
 
     let mut ok: boolean = true;
+    let mut total: i64 = 0;
     let mut guard: i64 = 0;
     // At 64 KiB a chunk this bounds the copy at ~61 GiB, far above any
     // plausible object file.
@@ -312,6 +326,7 @@ fn _copy_file(src: string, dst: string) -> boolean ![io] {
             let w: i64 = fwrite(part, 1 as usize, (got - written) as usize, fout) as i64;
             if w <= 0 { break; }
             written += w;
+            total += w;
         }
         if written < got {
             ok = false;
@@ -333,7 +348,13 @@ fn _copy_file(src: string, dst: string) -> boolean ![io] {
     // here means the copy is incomplete even though every `fwrite`
     // reported success.
     if fclose(fout) != 0 { ok = false; }
-    return ok;
+    return CopyOutcome { ok: ok, bytes: total };
+}
+
+// Thin wrapper over `_copy_file_counted` for callers that only need the
+// pass/fail result — kept so there is exactly one copy loop.
+fn _copy_file(src: string, dst: string) -> boolean ![io] {
+    return _copy_file_counted(src, dst).ok;
 }
 
 fn _toml_trim_cmd(text: string) -> string {
@@ -733,6 +754,8 @@ export {
     _atomic_rename_into_place,
     _publish_lines_atomic,
     _copy_file,
+    CopyOutcome,
+    _copy_file_counted,
     _ensure_dir_cmd,
     _ensure_dir_recursive_cmd,
     _write_text_cmd,
