@@ -30,12 +30,12 @@ import {
     has_flag,
     with_flag
 } from "sfn/cli";
+import { int_to_string } from "sfn/strings";
 
 import { _sha256_of_file_cmd, _shell_read_cmd, _shell_single_quote_arg } from "../../build/fs";
 import { host_exe_name } from "../../build/target";
 import { is_safe_scope_name, parse_scope_name } from "../../capsule_artifact";
 import { DistManifest, dist_manifest_to_json, empty_dist_manifest } from "../../dist_manifest";
-import { number_to_string } from "../../num_format";
 import { substring } from "../../string_utils";
 import { toml_get_name, toml_get_version } from "../../toml_parser";
 import { CliContext } from "../context";
@@ -232,7 +232,7 @@ fn _package_compiler(target: string, out_dir: string, compiler_bin: string) -> i
     let tar_rc = process.run(["tar", "-czf", tarball, "-C", staging, "sailfin-native-"
         + target,]);
     if tar_rc != 0 {
-        print("sfn package: tar failed (exit=" + number_to_string(tar_rc) + ")");
+        print("sfn package: tar failed (exit=" + int_to_string(tar_rc) + ")");
         process.run(["rm", "-rf", staging]);
         return 1;
     }
@@ -410,7 +410,7 @@ fn _package_installer(target: string, out_dir: string, compiler_bin: string) -> 
             + "/import-context"]);
         if cp_import_ctx != 0 {
             print("sfn package: failed to stage import-context (cp exit="
-                + number_to_string(cp_import_ctx)
+                + int_to_string(cp_import_ctx)
                 + ")");
             process.run(["rm", "-rf", staging]);
             return 1;
@@ -421,7 +421,7 @@ fn _package_installer(target: string, out_dir: string, compiler_bin: string) -> 
     let tarball = out_dir + "/" + stem + ".tar.gz";
     let tar_rc = process.run(["tar", "-czf", tarball, "-C", staging, ".",]);
     if tar_rc != 0 {
-        print("sfn package: tar failed (exit=" + number_to_string(tar_rc) + ")");
+        print("sfn package: tar failed (exit=" + int_to_string(tar_rc) + ")");
         process.run(["rm", "-rf", staging]);
         return 1;
     }
@@ -592,7 +592,7 @@ fn _package_user_capsule(target: string, out_dir: string, capsule_path: string) 
         + "-"
         + target,]);
     if tar_rc != 0 {
-        print("sfn package: tar failed (exit=" + number_to_string(tar_rc) + ")");
+        print("sfn package: tar failed (exit=" + int_to_string(tar_rc) + ")");
         process.run(["rm", "-rf", staging]);
         return 1;
     }

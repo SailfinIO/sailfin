@@ -18,6 +18,7 @@ import {
     with_flag,
     with_subcommand
 } from "sfn/cli";
+import { int_to_string } from "sfn/strings";
 
 import {
     BOOTSTRAP_MANIFEST_PATH,
@@ -28,7 +29,6 @@ import {
 import { _shell_read_cmd } from "../../build/fs";
 import { cache_root } from "../../build_cache";
 import { _selfhost_remove_tree } from "../../cli_selfhost";
-import { number_to_string } from "../../num_format";
 import {
     ends_with,
     index_of,
@@ -245,10 +245,10 @@ fn _clean_execute(label: string, targets: string[], dry: boolean, preserved: str
     } else if targets.length == 0 {
         print("[clean] nothing to remove (" + label + " tree already clean)");
     } else if dry {
-        print("[clean] dry-run: " + number_to_string(targets.length)
+        print("[clean] dry-run: " + int_to_string(targets.length)
             + " entries would be removed (nothing was removed)");
     } else {
-        print("[clean] removed " + number_to_string(removed) + " entries");
+        print("[clean] removed " + int_to_string(removed) + " entries");
     }
 
     if failures > 0 { return 1; }

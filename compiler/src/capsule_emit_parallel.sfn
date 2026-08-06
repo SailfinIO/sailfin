@@ -1,3 +1,5 @@
+import { int_to_string } from "sfn/strings";
+
 // capsule_emit_parallel.sfn — parallel `sfn emit` orchestration + job sizing.
 //
 // Extracted from capsule_resolver.sfn (#1512 build-memory work). Holds the
@@ -9,7 +11,6 @@
 import { _atomic_rename_into_place, _mktemp_sibling_cmd } from "./build/fs";
 import { build_host_os } from "./build/target";
 import { validate_llvm_ir } from "./emit_helpers";
-import { number_to_string } from "./main";
 import { substring } from "./string_utils";
 
 // Resolve the per-build job count for parallel subprocess emits.
@@ -574,7 +575,7 @@ fn _cr_emit_pool_round(tasks: ParallelEmitTask[], mode: string, sailfin_exe: str
         let mut ok: boolean = rc == 0;
         if !ok {
             print.err("capsule-resolver: emit failed for " + t.slug + " (exit "
-                + number_to_string(rc)
+                + int_to_string(rc)
                 + ")");
         }
         if ok {

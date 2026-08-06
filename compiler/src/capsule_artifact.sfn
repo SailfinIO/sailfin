@@ -526,9 +526,8 @@ fn _ca_json_number_field(name: string, value: int) -> string {
     return _ca_json_field(name, _ca_number_to_string(value));
 }
 
-// Same repeated-subtraction algorithm as `build_report.sfn` and
-// `compiler/src/main.sfn::number_to_string` — Sailfin's `number`
-// is a float, so `working / 10` doesn't truncate.
+// Same repeated-subtraction algorithm as `build_report.sfn` — Sailfin's
+// `number` is a float, so `working / 10` doesn't truncate.
 fn _ca_number_to_string(value: int) -> string {
     if value == 0 { return "0"; }
     let mut working: int = value;

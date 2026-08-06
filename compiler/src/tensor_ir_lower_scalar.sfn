@@ -3,7 +3,8 @@
 // Deterministic scalar-reference exit for shape-typed tensor IR. It emits
 // ordinary native-IR loops and executes the same graph as the CPU numerical
 // oracle. See SFEP-0053 and SFN-427.
-import { number_to_string } from "./num_format";
+import { int_to_string } from "sfn/strings";
+
 import {
     TensorFunction,
     TensorModule,
@@ -45,7 +46,7 @@ fn _ts_empty_buffer() -> TensorBuffer {
 }
 
 fn _ts_value_name(value_id: int) -> string {
-    return "v" + number_to_string(value_id);
+    return "v" + int_to_string(value_id);
 }
 
 fn _ts_parameter_value_id(function: TensorFunction, parameter_index: int) -> int {
@@ -70,8 +71,8 @@ fn _ts_emit_elementwise(operation: TensorOp, symbol: string) -> string {
     let result = _ts_value_name(operation.result_id);
     let left = _ts_value_name(operation.operands[0]);
     let right = _ts_value_name(operation.operands[1]);
-    let index = "i" + number_to_string(operation.result_id);
-    let size = number_to_string(tensor_shape_product(operation.result_type.shape));
+    let index = "i" + int_to_string(operation.result_id);
+    let size = int_to_string(tensor_shape_product(operation.result_type.shape));
     return "    .let mut " + result + " : float[] = []\n" + "    .let mut "
         + index
         + " : int = 0\n"
@@ -105,7 +106,7 @@ fn _ts_emit_elementwise(operation: TensorOp, symbol: string) -> string {
 fn _ts_emit_reduce_sum(operation: TensorOp) -> string {
     let result = _ts_value_name(operation.result_id);
     let operand = _ts_value_name(operation.operands[0]);
-    let index = "i" + number_to_string(operation.result_id);
+    let index = "i" + int_to_string(operation.result_id);
     return "    .let mut " + result + " : float = 0.0\n" + "    .let mut "
         + index
         + " : int = 0\n"
@@ -134,10 +135,10 @@ fn _ts_emit_reduce_sum(operation: TensorOp) -> string {
 
 fn _ts_matrix_offset_text(tensor_type: TensorType, row: string, column: string) -> string {
     if tensor_type.minor_to_major[0] == 1 {
-        return row + " * " + number_to_string(tensor_type.shape[1]) + " + "
+        return row + " * " + int_to_string(tensor_type.shape[1]) + " + "
             + column;
     }
-    return column + " * " + number_to_string(tensor_type.shape[0]) + " + " + row;
+    return column + " * " + int_to_string(tensor_type.shape[0]) + " + " + row;
 }
 
 fn _ts_emit_matmul(function: TensorFunction, operation: TensorOp, operation_index: int) -> string {
@@ -146,7 +147,7 @@ fn _ts_emit_matmul(function: TensorFunction, operation: TensorOp, operation_inde
     let right = _ts_value_name(operation.operands[1]);
     let left_type = _ts_find_operation_type(function, operation.operands[0], operation_index);
     let right_type = _ts_find_operation_type(function, operation.operands[1], operation_index);
-    let suffix = number_to_string(operation.result_id);
+    let suffix = int_to_string(operation.result_id);
     let init_index = "z" + suffix;
     let row = "r" + suffix;
     let column = "c" + suffix;
@@ -154,12 +155,12 @@ fn _ts_emit_matmul(function: TensorFunction, operation: TensorOp, operation_inde
     let scale = "a" + suffix;
     let left_extent = "left_extent" + suffix;
     let right_extent = "right_extent" + suffix;
-    let total = number_to_string(tensor_shape_product(operation.result_type.shape));
-    let rows = number_to_string(left_type.shape[0]);
-    let columns = number_to_string(right_type.shape[1]);
-    let width = number_to_string(left_type.shape[1]);
-    let left_last = number_to_string(tensor_shape_product(left_type.shape) - 1);
-    let right_last = number_to_string(tensor_shape_product(right_type.shape) - 1);
+    let total = int_to_string(tensor_shape_product(operation.result_type.shape));
+    let rows = int_to_string(left_type.shape[0]);
+    let columns = int_to_string(right_type.shape[1]);
+    let width = int_to_string(left_type.shape[1]);
+    let left_last = int_to_string(tensor_shape_product(left_type.shape) - 1);
+    let right_last = int_to_string(tensor_shape_product(right_type.shape) - 1);
     let left_offset = _ts_matrix_offset_text(left_type, row, contract);
     let right_offset = _ts_matrix_offset_text(right_type, contract, column);
     let result_offset = _ts_matrix_offset_text(operation.result_type, row, column);

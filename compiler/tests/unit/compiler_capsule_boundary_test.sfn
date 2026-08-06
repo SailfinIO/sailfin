@@ -83,13 +83,6 @@ fn _boundary_exceptions() -> BoundaryException[] {
         out.push(_boundary_exception(remaining_compat_importers[remaining_compat_i], "string_utils", compat));
         remaining_compat_i += 1;
     }
-    let num_format_importers: string[] = ["ownership_checker", "tensor_ir", "tensor_ir_emit_stablehlo", "tensor_ir_lower_scalar", "type_interner", "typed_ssa", "typed_ssa_render", "typed_ssa_verify"];
-    let mut num_format_i: int = 0;
-    loop {
-        if num_format_i >= num_format_importers.length { break; }
-        out.push(_boundary_exception(num_format_importers[num_format_i], "num_format", compat));
-        num_format_i += 1;
-    }
 
     // §3.3 grants the runtime prelude only to syntax, IR, and the driver. These
     // analyzer/LLVM imports are current migration seams, not a general waiver.
@@ -288,7 +281,6 @@ fn _is_driver_module_id(id: string) -> boolean {
         || id == "ice"
         || id == "lock"
         || id == "main"
-        || id == "num_format"
         || id == "prelude_globals"
         || id == "release_trust"
         || id == "runtime_capsule_resolver"
@@ -376,10 +368,10 @@ fn _role_rule(importer_role: string, importee_role: string) -> string {
         return "analyzer may depend only on syntax, IR, analyzer, and narrow standard-library contracts";
     }
     if importer_role == ROLE_CODEGEN {
-        return "codegen may depend only on syntax, analyzer, IR, and codegen";
+        return "codegen may depend only on syntax, analyzer, IR, codegen, and narrow standard-library contracts";
     }
     if importer_role == ROLE_LLVM {
-        return "codegen-llvm may depend only on IR and codegen-llvm";
+        return "codegen-llvm may depend only on IR, codegen-llvm, and narrow standard-library contracts";
     }
     return "the import is outside the SFEP-0020 role dependency graph";
 }
@@ -398,9 +390,12 @@ fn _role_import_allowed(importer_role: string, importee_role: string) -> boolean
     }
     if importer_role == ROLE_CODEGEN {
         return importee_role == ROLE_SYNTAX || importee_role == ROLE_ANALYZER
-            || importee_role == ROLE_IR;
+            || importee_role == ROLE_IR
+            || importee_role == ROLE_STDLIB;
     }
-    if importer_role == ROLE_LLVM { return importee_role == ROLE_IR; }
+    if importer_role == ROLE_LLVM {
+        return importee_role == ROLE_IR || importee_role == ROLE_STDLIB;
+    }
     return false;
 }
 
@@ -716,7 +711,7 @@ fn _importee_role(path_or_spec: string) -> string {
     // imports to their pure contracts stand in for the narrow standard-library
     // dependencies allowed by SFEP-0020 §3.5.7. They are not a common capsule.
     let id = _monolith_module_id(path_or_spec);
-    if id == "string_utils" || id == "num_format" { return ROLE_COMPAT_LEAF; }
+    if id == "string_utils" { return ROLE_COMPAT_LEAF; }
     let module_role = _module_role(path_or_spec);
     if module_role.length > 0 { return module_role; }
     return ROLE_UNKNOWN;
@@ -1225,10 +1220,11 @@ test "capsule roles: encode every SFEP-0020 dependency invariant" {
     assert ! _role_import_allowed(ROLE_ANALYZER, ROLE_DRIVER);
     assert ! _role_import_allowed(ROLE_CODEGEN, ROLE_DRIVER);
     assert ! _role_import_allowed(ROLE_LLVM, ROLE_AUTHORITY);
+    assert ! _role_import_allowed(ROLE_CODEGEN, ROLE_AUTHORITY);
     assert ! _role_import_allowed(ROLE_ANALYZER, ROLE_UNKNOWN);
     assert ! _role_import_allowed(ROLE_DRIVER, ROLE_UNKNOWN);
-    assert ! _role_import_allowed(ROLE_CODEGEN, ROLE_STDLIB);
-    assert ! _role_import_allowed(ROLE_LLVM, ROLE_STDLIB);
+    assert _role_import_allowed(ROLE_CODEGEN, ROLE_STDLIB);
+    assert _role_import_allowed(ROLE_LLVM, ROLE_STDLIB);
     assert ! _role_import_allowed(ROLE_LLVM, ROLE_RUNTIME_INTERNAL);
     assert _role_import_allowed(ROLE_DRIVER, ROLE_SYNTAX);
     assert _role_import_allowed(ROLE_DRIVER, ROLE_ANALYZER);

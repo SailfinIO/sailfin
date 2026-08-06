@@ -1,5 +1,6 @@
+import { int_to_string } from "sfn/strings";
+
 import { AssertFailure, _empty_assert_failure } from "../../../assert_failure";
-import { number_to_string } from "../../../num_format";
 import { TestResultRecord } from "../../../test_results";
 import { TestEntry, render_hook_event, render_test_event } from "../../../test_runner_json";
 
@@ -140,8 +141,7 @@ fn _emit_results_events(entries: TestEntry[], records: TestResultRecord[], failu
 fn _format_assert_failure(test_path: string, failure: AssertFailure) -> string {
     let mut location = test_path;
     if failure.file.length > 0 { location = failure.file; }
-    return location + ":" + number_to_string(failure.line) + ":"
-        + number_to_string(failure.col)
+    return location + ":" + int_to_string(failure.line) + ":" + int_to_string(failure.col)
         + ": "
         + failure.message;
 }
@@ -178,11 +178,10 @@ fn _emit_suite_banners(suites: TestSuite[]) ![io] {
         let s = suites[bi];
         let total = s.pass_count + s.fail_count;
         print("");
-        print("═══ " + s.name + ": " + number_to_string(s.pass_count)
-            + "/"
-            + number_to_string(total)
+        print("═══ " + s.name + ": " + int_to_string(s.pass_count) + "/"
+            + int_to_string(total)
             + " passed, "
-            + number_to_string(s.fail_count)
+            + int_to_string(s.fail_count)
             + " failed ═══");
         if s.fail_count > 0 {
             print("");

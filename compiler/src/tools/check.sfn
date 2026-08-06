@@ -6,6 +6,8 @@
 // human-rendered `CheckResult` shape. Semantic analysis lives in
 // `compiler/src/analyzer.sfn`; JSON envelope rendering stays in
 // `check/engine.sfn`.
+import { int_to_string } from "sfn/strings";
+
 import { AnalyzerInput, AnalyzerResult, analyze_program } from "../analyzer";
 import { Program, Statement } from "../ast";
 import { resolve_import_context } from "../check/import_resolution";
@@ -15,7 +17,6 @@ import { ImportSymbolTable, empty_import_symbols } from "../effect_imports";
 import { ClosureSymbolSet } from "../import_resolution_check";
 import { intrinsic_effect_table } from "../intrinsic_effects";
 import { runtime_helper_call_names } from "../llvm/runtime_helpers/mod";
-import { number_to_string } from "../num_format";
 import { parse_program } from "../parser/mod";
 import { load_prelude_global_names } from "../prelude_globals";
 import { Diagnostic, diagnostic_to_diag } from "../typecheck_types";
@@ -106,11 +107,11 @@ fn check_file(path: string, inlined_source: string) -> CheckResult ![io] {
 }
 
 fn render_summary(summary: CheckSummary) -> string {
-    let files_str = number_to_string(summary.files_checked);
+    let files_str = int_to_string(summary.files_checked);
     if summary.total_errors == 0 {
         return "checked " + files_str + " files: ok";
     }
-    let errors_str = number_to_string(summary.total_errors);
+    let errors_str = int_to_string(summary.total_errors);
     let mut label: string = " errors";
     if summary.total_errors == 1 { label = " error"; }
     return "checked " + files_str + " files: " + errors_str + label;

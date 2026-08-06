@@ -6,14 +6,15 @@
 // `~/.sfn/cache/capsules/<scope>/<name>/<ver>/src/` after `sfn add` — and walks
 // each tree into `CapsuleSource` records with stable slugs.
 //
-// `number_to_string` comes from `../num_format`, its defining module, rather
+// `int_to_string` comes from the `sfn/strings` standard-library capsule rather
 // than via `../main`: routing it through `main` would pull the whole compiler
 // into every consumer of this module's import closure.
+import { int_to_string } from "sfn/strings";
+
 import { _collect_sfn_files_cmd } from "../build/fs";
 import { is_safe_scope_name, parse_scope_name } from "../capsule_artifact";
 import { _display_capsule_name_cmd } from "../capsule_names";
 import { lock_get_versions } from "../lock";
-import { number_to_string } from "../num_format";
 import { enumerate_runtime_capsule_artifacts } from "../runtime_capsule_resolver";
 import {
     SemVer,
@@ -253,7 +254,7 @@ fn _cr_collect_capsule_sources(src_dir: string, spec: string, origin: string) ->
         if iterations >= max_iterations {
             print.err("capsule-resolver: _cr_collect_capsule_sources hit "
                 + "iteration cap ("
-                + number_to_string(max_iterations)
+                + int_to_string(max_iterations)
                 + ") under "
                 + src_dir
                 + " — some sources may be missing; please file a bug");

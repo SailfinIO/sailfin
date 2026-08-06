@@ -24,7 +24,8 @@
 // the formatter when a panic fires. `binary_dir` is stashed (not the resolved
 // version) so the version's filesystem read is paid lazily, only on an actual
 // panic, not on every CLI invocation.
-import { number_to_string } from "./num_format";
+import { int_to_string } from "sfn/strings";
+
 import { resolve_compiler_version } from "./version";
 
 // New-issue URL prefilled with the ICE template. Kept grep-stable: /triage
@@ -117,7 +118,7 @@ fn format_backend_failure_banner(binary_dir: string, tool: string, ir_path: stri
     let mut banner: string = "error: internal compiler error (ICE): backend "
         + tool
         + " failed (exit "
-        + number_to_string(rc)
+        + int_to_string(rc)
         + ")\n";
     banner = banner
         + "note: a backend failure on compiler-emitted IR usually means a compiler bug (not an error in your code), though it can also stem from the toolchain, configuration, or IO\n";

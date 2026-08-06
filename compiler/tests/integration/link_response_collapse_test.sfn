@@ -7,6 +7,7 @@
 // `link_argv_or_response_file` — something the pure unit tests cannot
 // reach.
 import { contains, starts_with } from "sfn/strings";
+import { int_to_string } from "sfn/strings";
 import {
     expect_contains_str,
     expect_eq_bool,
@@ -20,7 +21,6 @@ import {
     link_argv_or_response_file,
     link_response_threshold
 } from "../../src/build/link_response";
-import { number_to_string } from "../../src/main";
 
 // Build an argv shaped like the real self-host link: the clang driver
 // invocation followed by `count` content-addressed object paths matching
@@ -30,7 +30,7 @@ fn _self_host_link_argv(count: int) -> string[] {
     let mut i: int = 0;
     loop {
         if i >= count { break; }
-        let stem = "obj" + number_to_string(i)
+        let stem = "obj" + int_to_string(i)
             + "0000000000000000000000000000000000000000000000000000000000";
         argv.push("build/sailfin/link-obj/" + stem + ".o");
         i += 1;

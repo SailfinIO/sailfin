@@ -88,6 +88,8 @@
 // `Raw` text).
 //
 // Proposal §3.2 / §3.3 / §4; epic #1209; this issue: #1216.
+import { int_to_string } from "sfn/strings";
+
 import {
     Block,
     Expression,
@@ -97,7 +99,6 @@ import {
     Statement
 } from "./ast";
 import { ImportSymbolTable, empty_import_symbols } from "./effect_imports";
-import { number_to_string } from "./num_format";
 import {
     block_proves_fresh_channel_returns,
     block_proves_fresh_task_returns,
@@ -191,8 +192,8 @@ struct OwnershipSummary {
 // Owned/affine-type classification (`OwnedBuf`, `Affine<T>`, `Linear<T>`)
 // is shared with the typecheck side via `is_owned_type` in
 // `typecheck_types/expr_type_rules.sfn` so the two passes can't drift as new owned
-// wrappers are added. Integer formatting reuses `number_to_string` from
-// `num_format.sfn`.
+// wrappers are added. Integer formatting reuses `int_to_string` from
+// `sfn/strings`.
 // Synthesize an identifier token from an AST span so the finding can
 // feed the shared diagnostic renderer (which keys carets off a Token).
 fn _token_from_span(name: string, span: SourceSpan?) -> Token? {
@@ -210,7 +211,7 @@ fn _token_from_span(name: string, span: SourceSpan?) -> Token? {
 fn _span_location(span: SourceSpan?) -> string {
     if span == null { return ""; }
     let s: SourceSpan = span;
-    return " at " + number_to_string(s.start_line) + ":" + number_to_string(s.start_column);
+    return " at " + int_to_string(s.start_line) + ":" + int_to_string(s.start_column);
 }
 
 // The in-place mutator method set (proposal §3.2). A call of the shape

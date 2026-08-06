@@ -168,7 +168,7 @@ preserving the combination (e.g. `"slow+highmem"`).
       "status": "ok"
     },
     {
-      "name": "num_format",
+      "name": "build_flags",
       "ops": 0,
       "unit": "ms",
       "time_ms": { "min": 151, "median": 151, "max": 151, "stddev": 0 },

@@ -1,3 +1,5 @@
+import { int_to_string } from "sfn/strings";
+
 // Shared emit retry + LLVM-IR validator cascade (#515).
 //
 // Lifts the robustness the multi-source `sfn build` path already
@@ -40,8 +42,7 @@ import { _atomic_rename_into_place, _mktemp_sibling_cmd } from "./build/fs";
 import { host_is_windows } from "./build/target";
 import {
     compile_to_llvm_file_with_module,
-    compile_to_llvm_file_with_module_imports,
-    number_to_string
+    compile_to_llvm_file_with_module_imports
 } from "./main";
 import { substring } from "./string_utils";
 
@@ -127,9 +128,9 @@ fn _eh_resolve_inject() -> int ![io] {
 
 fn _eh_trace(trace: boolean, module_name: string, attempt: int, max_attempts: int, reason: string) -> void ![io] {
     if !trace { return; }
-    print.err("[emit retry] " + module_name + " attempt " + number_to_string(attempt)
+    print.err("[emit retry] " + module_name + " attempt " + int_to_string(attempt)
         + "/"
-        + number_to_string(max_attempts)
+        + int_to_string(max_attempts)
         + " — "
         + reason);
 }
@@ -312,7 +313,7 @@ fn emit_subprocess_with_retry(sailfin_exe: string, module_name: string, source_p
         let rc = process.run(emit_args);
         if rc != 0 {
             _eh_trace(trace, module_name, attempt, max_attempts, "exit="
-                + number_to_string(rc));
+                + int_to_string(rc));
             attempt_ok = false;
         }
         if attempt_ok {

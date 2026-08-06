@@ -3,7 +3,7 @@
 // Shape-typed tensor IR definitions and deterministic text rendering. This
 // tier retains tensor algebra until an explicit scalar or accelerator exit.
 // See SFEP-0053 and SFN-427.
-import { number_to_string } from "./num_format";
+import { int_to_string } from "sfn/strings";
 
 enum TensorDType {
     Pred,
@@ -199,7 +199,7 @@ fn _tensor_join_ints(values: int[], separator: string) -> string {
     loop {
         if index >= values.length { break; }
         if index > 0 { text = text + separator; }
-        text = text + number_to_string(values[index]);
+        text = text + int_to_string(values[index]);
         index += 1;
     }
     return text;
@@ -233,14 +233,13 @@ fn render_tensor_module(module: TensorModule) -> string {
         loop {
             if operation_index >= function.operations.length { break; }
             let operation = function.operations[operation_index];
-            text = text + "    %" + number_to_string(operation.result_id)
-                + " = "
+            text = text + "    %" + int_to_string(operation.result_id) + " = "
                 + tensor_op_name(operation.kind);
             if operation.operands.length > 0 {
                 text = text + " %" + _tensor_join_ints(operation.operands, ", %");
             }
             if operation.kind.variant == "Parameter" {
-                text = text + " [index=" + number_to_string(operation.parameter_index)
+                text = text + " [index=" + int_to_string(operation.parameter_index)
                     + "]";
             }
             if operation.kind.variant == "ReduceSum" {
@@ -251,7 +250,7 @@ fn render_tensor_module(module: TensorModule) -> string {
                 + "\n";
             operation_index += 1;
         }
-        text = text + "    return %" + number_to_string(function.return_value_id)
+        text = text + "    return %" + int_to_string(function.return_value_id)
             + "\n  }\n";
         function_index += 1;
     }

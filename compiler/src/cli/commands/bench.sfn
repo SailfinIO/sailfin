@@ -25,6 +25,7 @@ import {
     with_arg,
     with_flag
 } from "sfn/cli";
+import { int_to_string } from "sfn/strings";
 
 import {
     _collect_sfn_files_cmd,
@@ -34,7 +35,6 @@ import {
 } from "../../build/fs";
 import { _ensure_dir, _resolve_self_path } from "../../build/paths";
 import { module_name_from_path } from "../../main";
-import { number_to_string } from "../../num_format";
 import { char_code_at_text, index_of } from "../../string_utils";
 import { resolve_compiler_version } from "../../version";
 import { CliContext } from "../context";
@@ -72,9 +72,9 @@ fn command_def() -> Command {
 fn _fmt_secs(ms: int) -> string {
     let s = ms / 1000;
     let cs = (ms % 1000) / 10;
-    let mut cs_str = number_to_string(cs);
+    let mut cs_str = int_to_string(cs);
     if cs < 10 { cs_str = "0" + cs_str; }
-    return number_to_string(s) + "." + cs_str;
+    return int_to_string(s) + "." + cs_str;
 }
 
 // Slug (path with slashes, no `.sfn`) for a `compiler/src/**.sfn` module,
@@ -189,7 +189,7 @@ fn _run_compiler_mode(matches: Matches, ctx: CliContext) -> int ![clock, io] {
 
     if !json {
         print("[bench] seed: " + self_bin + " (" + version + ")");
-        print("[bench] modules: " + number_to_string(sources.length));
+        print("[bench] modules: " + int_to_string(sources.length));
         print("");
         print("  MODULE                                                     TIME      PEAK     IR LINES  STATUS");
         print("  ------                                                     ----      ----     --------  ------");
@@ -255,9 +255,9 @@ fn _run_compiler_mode(matches: Matches, ctx: CliContext) -> int ![clock, io] {
 
         if !json {
             print("  " + name + "  " + _fmt_secs(wall_ms) + "s  "
-                + number_to_string(peak_kb / 1024)
+                + int_to_string(peak_kb / 1024)
                 + "MB  "
-                + number_to_string(ir_lines)
+                + int_to_string(ir_lines)
                 + "  "
                 + status);
         }
@@ -297,26 +297,26 @@ fn _run_compiler_mode(matches: Matches, ctx: CliContext) -> int ![clock, io] {
         print("");
         print("  SUMMARY");
         print("  -------");
-        print("  Modules:       " + number_to_string(names.length));
+        print("  Modules:       " + int_to_string(names.length));
         print("  Total time:    " + _fmt_secs(total_ms) + "s");
         print("  Slowest:       " + _fmt_secs(max_ms) + "s  (" + max_ms_name
             + ")");
-        print("  Peak memory:   " + number_to_string(max_kb / 1024) + "MB  ("
+        print("  Peak memory:   " + int_to_string(max_kb / 1024) + "MB  ("
             + max_kb_name
             + ")");
         if fail_count > 0 {
-            print("  FAILURES:      " + number_to_string(fail_count));
+            print("  FAILURES:      " + int_to_string(fail_count));
         }
         if budget_time > 0 {
-            print("  Over budget:   " + number_to_string(slow_count)
+            print("  Over budget:   " + int_to_string(slow_count)
                 + " modules > "
-                + number_to_string(budget_time)
+                + int_to_string(budget_time)
                 + "s");
         }
         if budget_mem > 0 {
-            print("  Over memory:   " + number_to_string(highmem_count)
+            print("  Over memory:   " + int_to_string(highmem_count)
                 + " modules > "
-                + number_to_string(budget_mem / 1024)
+                + int_to_string(budget_mem / 1024)
                 + "MB");
         }
         print("");
@@ -342,9 +342,9 @@ fn _run_compiler_mode(matches: Matches, ctx: CliContext) -> int ![clock, io] {
             if i >= names.length { break; }
             csv_content = csv_content + names[i] + "," + _fmt_secs(wall_ms_list[i])
                 + ","
-                + number_to_string(peak_kb_list[i])
+                + int_to_string(peak_kb_list[i])
                 + ","
-                + number_to_string(lines_list[i])
+                + int_to_string(lines_list[i])
                 + ","
                 + status_list[i]
                 + ","
@@ -357,7 +357,7 @@ fn _run_compiler_mode(matches: Matches, ctx: CliContext) -> int ![clock, io] {
     }
 
     if !json && top_n > 0 && names.length > top_n {
-        print("  TOP " + number_to_string(top_n) + " BY COMPILE TIME");
+        print("  TOP " + int_to_string(top_n) + " BY COMPILE TIME");
         print("  -------------------------");
         let mut order: int[] = [];
         i = 0;
@@ -416,7 +416,7 @@ fn _run_compiler_mode(matches: Matches, ctx: CliContext) -> int ![clock, io] {
     }
 
     if fail_count > 0 {
-        print.err("[bench] FAIL: " + number_to_string(fail_count)
+        print.err("[bench] FAIL: " + int_to_string(fail_count)
             + " modules failed to compile");
         return 1;
     }
@@ -725,7 +725,7 @@ fn _bench_rt_median(xs: int[]) -> int {
 fn _bench_rt_ops_per_ms(ops: int, median_ms: int) -> string {
     if median_ms <= 0 { return "0.0"; }
     let tenths = (ops * 10 + median_ms / 2) / median_ms;
-    return number_to_string(tenths / 10) + "." + number_to_string(tenths % 10);
+    return int_to_string(tenths / 10) + "." + int_to_string(tenths % 10);
 }
 
 // Left-justify `s` to `width` columns with trailing spaces (no truncation).
@@ -932,10 +932,10 @@ fn _run_runtime_mode(matches: Matches, ctx: CliContext) -> int ![clock, io] {
     if !json {
         print("[bench] runner: " + self_bin + " (" + version + ")");
         print("[bench] platform: " + platform);
-        print("[bench] workloads: " + number_to_string(sources.length));
-        print("[bench] timed runs per workload: " + number_to_string(iterations)
+        print("[bench] workloads: " + int_to_string(sources.length));
+        print("[bench] timed runs per workload: " + int_to_string(iterations)
             + " (+"
-            + number_to_string(warmup)
+            + int_to_string(warmup)
             + " warm-up)");
         print("");
         print("  " + _bench_rt_pad("WORKLOAD", 31) + " " + _bench_rt_pad("MEDIAN", 10)
@@ -961,10 +961,10 @@ fn _run_runtime_mode(matches: Matches, ctx: CliContext) -> int ![clock, io] {
         if i >= sources.length { break; }
         let r = _bench_rt_one(self_bin, sources[i], work_dir, child_env, iterations, warmup, budget_time, budget_mem);
         if !json {
-            print("  " + _bench_rt_pad(r.name, 31) + " " + _bench_rt_pad(number_to_string(r.inner_median)
+            print("  " + _bench_rt_pad(r.name, 31) + " " + _bench_rt_pad(int_to_string(r.inner_median)
                 + "ms", 10)
                 + "  "
-                + _bench_rt_pad(number_to_string(r.peak_kb / 1024)
+                + _bench_rt_pad(int_to_string(r.peak_kb / 1024)
                 + "MB", 8)
                 + "  "
                 + _bench_rt_pad(r.ops_per_ms, 10)
@@ -1009,28 +1009,27 @@ fn _run_runtime_mode(matches: Matches, ctx: CliContext) -> int ![clock, io] {
         print("");
         print("  SUMMARY");
         print("  -------");
-        print("  Workloads:     " + number_to_string(results.length));
-        print("  Slowest:       " + number_to_string(slowest) + "ms  ("
+        print("  Workloads:     " + int_to_string(results.length));
+        print("  Slowest:       " + int_to_string(slowest) + "ms  ("
             + slowest_name
             + ")");
-        print("  Peak memory:   " + number_to_string(max_mem / 1024) + "MB  ("
+        print("  Peak memory:   " + int_to_string(max_mem / 1024) + "MB  ("
             + max_mem_name
             + ")");
         if buildfail > 0 {
-            print("  BUILD FAILS:   " + number_to_string(buildfail));
+            print("  BUILD FAILS:   " + int_to_string(buildfail));
         }
         if runfail > 0 {
-            print("  RUN FAILS:     " + number_to_string(runfail));
+            print("  RUN FAILS:     " + int_to_string(runfail));
         }
         if budget_time > 0 {
-            print("  Over budget:   " + number_to_string(slow) + " workloads > "
-                + number_to_string(budget_time)
+            print("  Over budget:   " + int_to_string(slow) + " workloads > "
+                + int_to_string(budget_time)
                 + "ms");
         }
         if budget_mem > 0 {
-            print("  Over memory:   " + number_to_string(highmem)
-                + " workloads > "
-                + number_to_string(budget_mem / 1024)
+            print("  Over memory:   " + int_to_string(highmem) + " workloads > "
+                + int_to_string(budget_mem / 1024)
                 + "MB");
         }
         print("");
@@ -1043,12 +1042,12 @@ fn _run_runtime_mode(matches: Matches, ctx: CliContext) -> int ![clock, io] {
         loop {
             if i >= results.length { break; }
             let r = results[i];
-            csv = csv + r.name + "," + number_to_string(r.inner_min) + ","
-                + number_to_string(r.inner_median)
+            csv = csv + r.name + "," + int_to_string(r.inner_min) + ","
+                + int_to_string(r.inner_median)
                 + ","
-                + number_to_string(r.peak_kb)
+                + int_to_string(r.peak_kb)
                 + ","
-                + number_to_string(r.ops)
+                + int_to_string(r.ops)
                 + ","
                 + r.ops_per_ms
                 + ","
@@ -1065,7 +1064,7 @@ fn _run_runtime_mode(matches: Matches, ctx: CliContext) -> int ![clock, io] {
     }
 
     if !json && top_n > 0 && results.length > top_n {
-        print("  TOP " + number_to_string(top_n) + " BY MEDIAN INNER TIME");
+        print("  TOP " + int_to_string(top_n) + " BY MEDIAN INNER TIME");
         print("  ------------------------------");
         let mut order: int[] = [];
         i = 0;
@@ -1095,7 +1094,7 @@ fn _run_runtime_mode(matches: Matches, ctx: CliContext) -> int ![clock, io] {
         loop {
             if t >= top_n { break; }
             let r = results[order[t]];
-            print("  " + _bench_rt_pad(r.name, 31) + " " + number_to_string(r.inner_median)
+            print("  " + _bench_rt_pad(r.name, 31) + " " + int_to_string(r.inner_median)
                 + "ms");
             t += 1;
         }
@@ -1122,9 +1121,9 @@ fn _run_runtime_mode(matches: Matches, ctx: CliContext) -> int ![clock, io] {
     }
 
     if buildfail > 0 || runfail > 0 {
-        print.err("[bench] FAIL: " + number_to_string(buildfail)
+        print.err("[bench] FAIL: " + int_to_string(buildfail)
             + " build failure(s), "
-            + number_to_string(runfail)
+            + int_to_string(runfail)
             + " run failure(s)");
         return 1;
     }

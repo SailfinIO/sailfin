@@ -1,3 +1,5 @@
+import { int_to_string } from "sfn/strings";
+
 // compiler/src/build/determinism.sfn
 //
 // Determinism (pass-2 / sidecar) check orchestration extracted from
@@ -13,7 +15,6 @@ import {
     make_determinism_module
 } from "../build_report";
 import { capsule_artifact_manifest_path, is_safe_scope_name, parse_scope_name } from "../capsule_artifact";
-import { number_to_string } from "../main";
 import { _sha256_of_file_cmd, _shell_single_quote_arg } from "./fs";
 import { _find_substring_from, _resolve_self_path } from "./paths";
 import { build_target_os, target_exe_name } from "./target";
@@ -292,8 +293,7 @@ fn _do_determinism_check(pass1_out: string, is_library: boolean, cap_capsule_nam
     let pass2_rc = _run_determinism_pass2(self_exe, capsule_path, input_path, pass2_work_dir, cache_trace_flag, json_flag);
     if pass2_rc != 0 {
         if !json_flag {
-            print.err("[determinism] pass-2 build failed (exit="
-                + number_to_string(pass2_rc)
+            print.err("[determinism] pass-2 build failed (exit=" + int_to_string(pass2_rc)
                 + ")");
         }
         return pass2_rc;

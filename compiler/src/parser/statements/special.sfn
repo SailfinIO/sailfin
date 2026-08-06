@@ -304,9 +304,8 @@ fn parse_try_statement(parser: Parser) -> BlockStatementParseResult {
 // Integer-to-string for non-negative values, used to embed line/col
 // in the desugared assert call site. Local copy to avoid widening
 // the parser's import surface; the value is always a token's
-// `line` / `column` (small positive number). Sailfin's `/`
-// operator is float division so we extract digits via repeated
-// subtraction — same shape as `compiler/src/main.sfn:number_to_string`.
+// `line` / `column` (small positive number). Digits are extracted
+// via repeated subtraction rather than division.
 fn _assert_int_to_string(value: int) -> string {
     if value <= 0 { return "0"; }
     let digits = "0123456789";

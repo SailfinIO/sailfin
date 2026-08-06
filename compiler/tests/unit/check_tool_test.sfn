@@ -15,14 +15,18 @@
 //     `diagnostics_render.sfn`, whose closure is light (~8 modules:
 //     effect_checker, string_utils, token, typecheck_types). These are
 //     imported below and exercised against the REAL exported symbols.
-//   - `number_to_string` and `render_summary` are now also imported from
-//     the real source. #986 extracted `number_to_string` out of
-//     `main.sfn` into the leaf module `num_format.sfn` (closure: just
-//     `runtime/prelude`), which dropped `main.sfn`'s full ~130-module
-//     backend out of `tools/check.sfn`'s closure as well — so
-//     `render_summary` (`tools/check.sfn`) is now unit-test-linkable.
-//     The old `_local_num_to_string` / `_local_render_summary` mirrors
-//     are deleted.
+//   - `int_to_string` and `render_summary` are now also imported from
+//     the real source. #986 first extracted integer formatting out of
+//     `main.sfn` into a compiler-private leaf module; SFN-735 retired
+//     that module for `sfn/strings::int_to_string`, whose closure is
+//     that one capsule plus the prelude globals it uses (`substring`,
+//     `strings_equal`, `char_code`) — and per the paragraph above the
+//     runner links `runtime/prelude` into every test regardless, so
+//     that half costs nothing here. Either way `main.sfn`'s full
+//     ~130-module backend stays out of `tools/check.sfn`'s closure, so
+//     `render_summary` (`tools/check.sfn`) is unit-test-linkable. The
+//     old `_local_num_to_string` / `_local_render_summary` mirrors are
+//     deleted.
 //
 // See docs/conventions/unit-test-import-envelope.md for the supported
 // test-import envelope, and docs/proposals/design-notes/unit-test-import-envelope.md
@@ -30,6 +34,8 @@
 // -------------------------------------------------------------------
 // Imports — real exported symbols (light closure via diagnostics_render)
 // -------------------------------------------------------------------
+import { int_to_string } from "sfn/strings";
+
 import { AnalyzerInput, analyze_program } from "../../src/analyzer";
 import { Program, Statement } from "../../src/ast";
 import { code_for_missing_effect, join_effects } from "../../src/diagnostics_render";
@@ -41,7 +47,6 @@ import {
     empty_intrinsic_effects,
     intrinsic_effects_for_callee_target
 } from "../../src/intrinsic_effects";
-import { number_to_string } from "../../src/num_format";
 import { CheckSummary, render_summary } from "../../src/tools/check";
 
 // -------------------------------------------------------------------
@@ -287,13 +292,13 @@ test "check: summary reports singular error" {
 // Tests — number-to-string helper
 // -------------------------------------------------------------------
 test "check: num_to_string handles zero" {
-    assert strings_equal(number_to_string(0), "0");
+    assert strings_equal(int_to_string(0), "0");
 }
 
 test "check: num_to_string handles small positives" {
-    assert strings_equal(number_to_string(7), "7");
-    assert strings_equal(number_to_string(42), "42");
-    assert strings_equal(number_to_string(120), "120");
+    assert strings_equal(int_to_string(7), "7");
+    assert strings_equal(int_to_string(42), "42");
+    assert strings_equal(int_to_string(120), "120");
 }
 
 // -------------------------------------------------------------------
