@@ -159,6 +159,12 @@ import {
     _shell_single_quote_arg,
     _write_text_cmd
 } from "./build/fs";
+import {
+    list_child_dirs,
+    remove_empty_dirs_under,
+    remove_tree,
+    walk_dirs
+} from "./build/fs_tree";
 import { sha256_hex_of_string } from "./build/hash";
 import { host_is_windows } from "./build/target";
 import { _get_env_cmd } from "./build_flags";
@@ -316,21 +322,16 @@ fn resolve_build_cache_config(no_cache_flag: boolean, trace_flag: boolean, clean
 }
 
 // Wipe the schema-versioned subtree under `root`. Returns true on
-// success (or no-op when the directory didn't exist), false if
-// `rm` failed. Defensive: refuses to operate on an empty path.
+// success (or no-op when the directory didn't exist), false if the tree
+// could not be fully removed. `remove_tree` carries the empty-path and
+// `"/"` refusals.
 //
 // Note: deletes the FULL `<root>/v<N>/...` tree the cache stores
 // under. Callers should resolve `cache_root(capsule_name)` first and
 // pass that — wiping the bare cache base (e.g. `$SAILFIN_BUILD_CACHE_DIR`)
 // would nuke any sibling schema versions that future compilers might
 // be relying on.
-fn cache_clean(root: string) -> boolean ![io] {
-    if root.length == 0 { return false; }
-    if strings_equal(root, "/") { return false; }
-    if !fs.exists(root) { return true; }
-    let rc = process.run(["rm", "-rf", root]);
-    return rc == 0;
-}
+fn cache_clean(root: string) -> boolean ![io] { return remove_tree(root); }
 
 // ----------------------------------------------------------------
 // Cache GC: mtime-on-hit, info, prune, stale-schema sweep
@@ -338,9 +339,10 @@ fn cache_clean(root: string) -> boolean ![io] {
 // SFEP-0040 §3.2–3.4. All operate on a resolved schema root
 // (`<base>/v<N>`) and never touch the cache *key*, entry *layout*, or
 // the atomic-publish protocol — only when entries are removed and the
-// recency signal `cache_prune` reads. Every removal path is `![io]`
-// (the same effect class the cache already carries) and shell-quotes
-// the root, which can derive from `$SAILFIN_BUILD_CACHE_DIR`.
+// recency signal `cache_prune` reads. Every removal path is `![io]`, the
+// same effect class the cache already carries. Enumeration and removal
+// are shell-free; the remaining shell-quoted reads below (`stat`, `du`,
+// `date`) are what SFN-754 replaces.
 // A cache HIT copies artifacts OUT of the entry directory into the
 // build tree; it never writes into the entry itself, so the entry's
 // mtime would otherwise stay pinned at creation time and `cache_prune`
@@ -352,32 +354,15 @@ fn cache_touch_entry(root: string, key: CacheKey) -> boolean ![io] {
     if !_is_valid_digest(key.digest) { return false; }
     let dir = _cache_entry_dir(root, key);
     if !fs.exists(dir) { return false; }
-    // A Windows host has no `touch`. LRU freshness is advisory and the
-    // GC that *reads* this mtime (`cache_prune`) is itself still shell-
-    // bound, so it cannot run there either — report success rather than
-    // failing a restore over a recency hint no local reader consumes.
-    // Both sides lift together with the deferred cache-GC de-shelling
-    // (SFN-494); a `utimes` extern here alone would buy nothing.
+    // A Windows host has no `touch`. The reader of this mtime
+    // (`_entry_mtime_epoch`) is still shell-bound and yields 0 there, so
+    // `cache_prune`'s age axis is inert on that host and no local consumer
+    // exists for the hint — report success rather than failing a restore
+    // over it. This short-circuit must be deleted by the same change that
+    // makes the reader real (SFN-754), or hits would silently stop
+    // refreshing recency on the one host whose age axis just came alive.
     if host_is_windows() { return true; }
     return process.run(["touch", dir]) == 0;
-}
-
-// Split `text` on newlines, dropping empty lines and stray `\r`.
-fn _split_lines(text: string) -> string[] {
-    let mut out: string[] = [];
-    let mut cur: string = "";
-    let mut i: int = 0;
-    loop {
-        if i >= text.length { break; }
-        let ch = substring(text, i, i + 1);
-        if ch == "\n" {
-            if cur.length > 0 { out.push(cur); }
-            cur = "";
-        } else if ch != "\r" { cur = cur + ch; }
-        i += 1;
-    }
-    if cur.length > 0 { out.push(cur); }
-    return out;
 }
 
 // Parse a leading run of decimal digits as a non-negative int. Returns
@@ -403,12 +388,18 @@ fn _basename_cmd(path: string) -> string {
 }
 
 // The `<prefix>/<key>` entry directories under `root` (layout depth 2).
+//
+// `walk_dirs` classifies a child as a directory by whether listing it
+// yields entries, so an entry directory that has lost its artifact is
+// invisible here where `find -type d` would have reported it (SFN-755
+// removes that limitation). That is the right set for both callers of
+// THIS helper: `cache_info` should not count an entry holding nothing,
+// and `cache_prune` has nothing to reclaim from one — and either way
+// `_prune_empty_shards` reaps it at the end of the same prune. The
+// argument does not extend to `cache_sweep_stale_schemas`, which walks a
+// different root; see the note there.
 fn _cache_entry_dirs(root: string) -> string[] ![io] {
-    if !fs.exists(root) { return []; }
-    let q = _shell_single_quote_arg(root);
-    let out = _shell_read_cmd("find " + q
-        + " -mindepth 2 -maxdepth 2 -type d 2>/dev/null");
-    return _split_lines(out);
+    return walk_dirs(root, 2, 2);
 }
 
 // Directory mtime in epoch seconds. Tries GNU `stat -c %Y` then BSD
@@ -430,24 +421,25 @@ fn _dir_size_bytes(dir: string) -> int ![io] {
     return _parse_nonneg_int(out) * 1024;
 }
 
+// Deliberately still shelled, and it must stay that way until
+// `_entry_mtime_epoch` moves with it (SFN-754). `_shell_read_cmd` yields
+// `""` on a Windows host, so this returns 0 and `cache_prune`'s `now > 0`
+// guard switches the age axis off there entirely. De-shelling this alone
+// would open that guard while the mtime read still returned 0, making
+// every entry read as infinitely old — a single `sfn cache prune` would
+// then evict the whole cache. The two are one change, not two.
 fn _now_epoch() -> int ![io] {
     return _parse_nonneg_int(_shell_read_cmd("date +%s"));
 }
 
-// `rm -rf` guarded against the empty path and `/` (mirrors cache_clean).
-fn _rm_rf_dir(dir: string) -> boolean ![io] {
-    if dir.length == 0 { return false; }
-    if strings_equal(dir, "/") { return false; }
-    return process.run(["rm", "-rf", dir]) == 0;
-}
+// Recursive delete guarded against the empty path and `/` (mirrors
+// cache_clean); both guards live in `remove_tree`.
+fn _rm_rf_dir(dir: string) -> boolean ![io] { return remove_tree(dir); }
 
 // Best-effort removal of now-empty prefix shards (and any empty entry
 // dirs) so `cache info` entry counts stay honest after a prune.
 fn _prune_empty_shards(root: string) ![io] {
-    if !fs.exists(root) { return; }
-    let q = _shell_single_quote_arg(root);
-    let _ = _shell_read_cmd("find " + q
-        + " -mindepth 1 -type d -empty -delete 2>/dev/null");
+    let _ = remove_empty_dirs_under(root);
 }
 
 // Index permutation that orders `mtimes` ascending (oldest first).
@@ -606,11 +598,13 @@ fn cache_sweep_stale_schemas(root: string) -> int ![io] {
     let base = _dirname_cmd(root);
     let cur_num = _parse_schema_num(_basename_cmd(root));
     if cur_num < 0 { return 0; }
-    if !fs.exists(base) { return 0; }
-    let q = _shell_single_quote_arg(base);
-    let out = _shell_read_cmd("find " + q
-        + " -mindepth 1 -maxdepth 1 -type d 2>/dev/null");
-    let entries = _split_lines(out);
+    // Unlike `_cache_entry_dirs`, an invisible directory here is NOT
+    // reaped by anything afterwards: `_prune_empty_shards` runs against
+    // `root` (`<base>/v<N>`), never against `base`. So a `<base>/v<M>`
+    // that is already empty survives the sweep and is left uncounted,
+    // where `find -type d` would have removed it. That is ~4 KiB of cruft
+    // per stale-but-empty schema, and it resolves with SFN-755.
+    let entries = list_child_dirs(base);
     let mut removed: int = 0;
     let mut i: int = 0;
     loop {

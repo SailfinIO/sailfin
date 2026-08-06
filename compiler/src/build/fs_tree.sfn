@@ -1,0 +1,287 @@
+// compiler/src/build/fs_tree.sfn
+//
+// Tree-shaped filesystem composition — the counterpart to `build/fs.sfn`
+// (single-file atomic publish + hashing). Everything here composes over
+// already-shipped `fs.*` intrinsics; no new extern, builtin, or intrinsic
+// sentinel is introduced (SFN-494 groundwork).
+//
+// There is no `fs.isDirectory` intrinsic, so entry classification is
+// probe-based throughout this file, and each function documents which
+// probe it uses and why:
+//
+//   * `remove_tree` may delete anything under `path`, so it classifies by
+//     attempting `fs.deleteFile` first (only a file/symlink succeeds) and
+//     falling back to directory handling — the same shape
+//     `_selfhost_remove_tree` (`compiler/src/cli_selfhost.sfn`) already
+//     uses.
+//   * `remove_empty_dirs_under` must never delete a non-empty directory or
+//     a file, so it classifies by attempting `fs.removeDirectory` (which
+//     only ever succeeds on an empty directory) and falls back to treating
+//     a non-empty `fs.listDirectory` result as "directory with children to
+//     explore" — anything left over is a file and is left untouched.
+//   * `walk_dirs` is read-only, so neither destructive probe is available.
+//     It falls back to the `_collect_sfn_files_cmd` heuristic
+//     (`build/fs.sfn`): `fs.listDirectory(entry).length > 0` implies
+//     "directory". This misclassifies an EMPTY directory as a file, so a
+//     directory that is empty at walk time is invisible to `walk_dirs`.
+//     `fs.get_perms` cannot rescue this — its lowering masks `st_mode` to
+//     the low 12 bits (`& 0o7777`,
+//     `llvm/expression_lowering/native/core_call_emission/filesystem_intrinsics.sfn`),
+//     so the `S_IFDIR` bit never reaches the caller.
+//
+//     This is acceptable for every consumer here: cache shard and entry
+//     directories always hold at least one artifact, and an entry that has
+//     lost its artifact is exactly what `remove_empty_dirs_under` exists to
+//     reap. A non-destructive directory predicate would need a new
+//     `fs.is_directory` intrinsic, which is a seed gate — see SFN-755.
+//
+// There is deliberately no `copy_tree` here. `cp -R`/`cp -a` has no
+// consumer in SFN-494, and the heuristic above is not merely lossy for a
+// copy: an empty source subdirectory would be treated as a file, creating a
+// spurious empty file at the destination before failing the whole copy.
+// The `cp -R` replacement lands with its first real consumer (SFN-495),
+// which can weigh `fs.is_directory` on the strength of having several.
+//
+// Symlinks: `fs.deleteFile` is `unlink(2)`, which removes a
+// symlink-to-directory without following it, so `remove_tree`'s deletion
+// pass can never escape `path`. `fs.listDirectory` is `opendir`, which DOES
+// follow, so `walk_dirs` may report paths reached through a symlink and
+// `remove_empty_dirs_under` may `rmdir` an empty directory outside `root`
+// — neither of which `find` does without `-L`. `FS_TREE_MAX_DEPTH` is what
+// makes a symlink cycle terminate rather than spin.
+//
+// Bounds: every traversal below is iterative (an explicit worklist, never
+// recursion), bounded by `FS_TREE_MAX_DEPTH` (16 levels) and
+// `FS_TREE_MAX_NODES` (200000 parent directories expanded — the
+// classification listing of each child is not separately counted, so the
+// true `fs.listDirectory` ceiling is that plus one per entry encountered).
+// These are not user-source inputs, so hitting a bound is never a panic or
+// a `Diagnostic`; it degrades to best-effort.
+//
+// The degradation is reported where a false success would mislead and
+// silent where truncation is safe. `remove_tree` returns `false`, because a
+// fabricated `true` would let `cache_clean` claim it wiped a tree that
+// survived. `remove_empty_dirs_under` returns a short count. `walk_dirs`
+// truncates silently: a short result set makes its callers do strictly
+// less work — `cache_info` under-reports, `cache_prune` under-prunes —
+// and neither is unsafe.
+let FS_TREE_MAX_DEPTH: int = 16;
+
+let FS_TREE_MAX_NODES: int = 200000;
+
+// The depth-1 directories directly under `dir`.
+fn list_child_dirs(dir: string) -> string[] ![io] {
+    return walk_dirs(dir, 1, 1);
+}
+
+// Directory paths under `root` at depth in `[min_depth, max_depth]`
+// inclusive, where `root` itself is depth 0. Order need not match `find`'s.
+// Returns `[]` if `root` does not exist. See the module header for the
+// directory-classification limitation (an empty directory is invisible).
+fn walk_dirs(root: string, min_depth: int, max_depth: int) -> string[] ![io] {
+    let mut results: string[] = [];
+    if !fs.exists(root) { return results; }
+    // Clamped so the depth bound is enforced by the single loop condition
+    // below rather than by a second check that could drift from it.
+    let mut effective_max = max_depth;
+    if effective_max > FS_TREE_MAX_DEPTH { effective_max = FS_TREE_MAX_DEPTH; }
+    if 0 >= min_depth && 0 <= effective_max { results.push(root); }
+    let mut level: string[] = [root];
+    let mut depth: int = 0;
+    let mut nodes: int = 0;
+    let mut hit_bound: boolean = false;
+    loop {
+        if level.length == 0 { break; }
+        // Listing a level at `depth` can only yield entries at `depth + 1`,
+        // so the last level worth listing is `effective_max - 1`. Stopping
+        // at `>` instead would list one level too many — and since
+        // classification lists every child, that costs an `opendir` on
+        // every FILE at the boundary depth. For `walk_dirs(root, 2, 2)`
+        // over a cache that is one `opendir` per stored artifact.
+        if depth >= effective_max { break; }
+        let mut next_level: string[] = [];
+        let mut li: int = 0;
+        loop {
+            if li >= level.length { break; }
+            if nodes >= FS_TREE_MAX_NODES {
+                hit_bound = true;
+                break;
+            }
+            let dir = level[li];
+            nodes += 1;
+            let entries = fs.listDirectory(dir);
+            let mut ei: int = 0;
+            loop {
+                if ei >= entries.length { break; }
+                let full = dir + "/" + entries[ei];
+                let child_entries = fs.listDirectory(full);
+                if child_entries.length > 0 {
+                    if depth + 1 >= min_depth { results.push(full); }
+                    next_level.push(full);
+                }
+                ei += 1;
+            }
+            li += 1;
+        }
+        if hit_bound { break; }
+        level = next_level;
+        depth += 1;
+    }
+    return results;
+}
+
+// Delete `path` and everything beneath it, the shell-free replacement for
+// `rm -rf`. Guards match `_rm_rf_dir` and `cache_clean`
+// (`compiler/src/build_cache.sfn`): an empty path or
+// `"/"` returns `false` and deletes nothing. A path that does not exist
+// returns `true` (already gone). Returns whether `path` is gone afterward,
+// or `false` on hitting a traversal bound (best-effort; some of the tree
+// may remain).
+fn remove_tree(path: string) -> boolean ![io] {
+    if path.length == 0 { return false; }
+    if path == "/" { return false; }
+    if !fs.exists(path) { return true; }
+    // A file root has no entries to walk; `fs.removeDirectory` would
+    // refuse it.
+    if fs.deleteFile(path) { return true; }
+
+    // BFS by level so children are discovered strictly after their
+    // parent, in `dirs` (an append-only, discovery-order record). Every
+    // directory therefore sits at a smaller index than its own children,
+    // so removing `dirs` in reverse always empties children before their
+    // parent — the same invariant `_selfhost_remove_tree`
+    // (`compiler/src/cli_selfhost.sfn`) relies on. That helper is not
+    // interchangeable with this one: it has no depth limit, so it still
+    // suits the deeper `build/` stage trees this module's bound would cut.
+    let mut dirs: string[] = [path];
+    let mut level: string[] = [path];
+    let mut depth: int = 0;
+    let mut nodes: int = 0;
+    let mut hit_bound: boolean = false;
+    loop {
+        if level.length == 0 { break; }
+        if depth >= FS_TREE_MAX_DEPTH {
+            hit_bound = true;
+            break;
+        }
+        let mut next_level: string[] = [];
+        let mut li: int = 0;
+        loop {
+            if li >= level.length { break; }
+            if nodes >= FS_TREE_MAX_NODES {
+                hit_bound = true;
+                break;
+            }
+            let dir = level[li];
+            nodes += 1;
+            let entries = fs.listDirectory(dir);
+            let mut ei: int = 0;
+            loop {
+                if ei >= entries.length { break; }
+                let full = dir + "/" + entries[ei];
+                if !fs.deleteFile(full) {
+                    dirs.push(full);
+                    next_level.push(full);
+                }
+                ei += 1;
+            }
+            li += 1;
+        }
+        if hit_bound { break; }
+        level = next_level;
+        depth += 1;
+    }
+
+    let mut ri: int = dirs.length - 1;
+    loop {
+        if ri < 0 { break; }
+        fs.removeDirectory(dirs[ri]);
+        ri -= 1;
+    }
+    if hit_bound { return false; }
+    return !fs.exists(path);
+}
+
+// Remove every directory strictly under `root` that is empty, or becomes
+// empty once its own empty descendants are removed — the shell-free
+// replacement for `find <root> -mindepth 1 -type d -empty -delete`.
+// `root` itself is never removed. Returns the count removed, or a short
+// count on hitting a traversal bound (best-effort).
+fn remove_empty_dirs_under(root: string) -> int ![io] {
+    if !fs.exists(root) { return 0; }
+
+    // Two passes, mirroring `remove_tree`'s discovery-order/reverse-order
+    // trick: a directory found empty at discovery time is removed
+    // immediately (via the `fs.removeDirectory` probe, which only
+    // succeeds on an empty directory); anything else with children is
+    // recorded in `dirs` (discovery order — parent before child) and
+    // retried in reverse once its own children have had a chance to empty
+    // out. A `fs.listDirectory` result with entries left over after the
+    // `removeDirectory` probe fails is a non-empty directory to descend
+    // into; a result with no entries left over is a file, and is left
+    // untouched.
+    let mut removed: int = 0;
+    let mut dirs: string[] = [];
+    let mut level: string[] = [root];
+    let mut depth: int = 0;
+    let mut nodes: int = 0;
+    let mut hit_bound: boolean = false;
+    loop {
+        if level.length == 0 { break; }
+        if depth >= FS_TREE_MAX_DEPTH { break; }
+        let mut next_level: string[] = [];
+        let mut li: int = 0;
+        loop {
+            if li >= level.length { break; }
+            if nodes >= FS_TREE_MAX_NODES {
+                hit_bound = true;
+                break;
+            }
+            let dir = level[li];
+            nodes += 1;
+            let entries = fs.listDirectory(dir);
+            let mut ei: int = 0;
+            loop {
+                if ei >= entries.length { break; }
+                let full = dir + "/" + entries[ei];
+                if fs.removeDirectory(full) {
+                    removed += 1;
+                    ei += 1;
+                    continue;
+                }
+                let child_entries = fs.listDirectory(full);
+                if child_entries.length > 0 {
+                    dirs.push(full);
+                    next_level.push(full);
+                }
+                ei += 1;
+            }
+            li += 1;
+        }
+        if hit_bound { break; }
+        level = next_level;
+        depth += 1;
+    }
+
+    let mut ri: int = dirs.length - 1;
+    loop {
+        if ri < 0 { break; }
+        if fs.removeDirectory(dirs[ri]) { removed += 1; }
+        ri -= 1;
+    }
+    return removed;
+}
+
+// Thin wrapper over `fs.createDirectory(path, true)` for surface symmetry
+// with the rest of this module.
+fn ensure_dir_p(path: string) -> boolean ![io] {
+    return fs.createDirectory(path, true);
+}
+
+export {
+    walk_dirs,
+    list_child_dirs,
+    remove_tree,
+    remove_empty_dirs_under,
+    ensure_dir_p
+};
