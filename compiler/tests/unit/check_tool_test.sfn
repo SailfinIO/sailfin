@@ -19,7 +19,10 @@
 //     the real source. #986 first extracted integer formatting out of
 //     `main.sfn` into a compiler-private leaf module; SFN-735 retired
 //     that module for `sfn/strings::int_to_string`, whose closure is
-//     the strings capsule alone. Either way `main.sfn`'s full
+//     that one capsule plus the prelude globals it uses (`substring`,
+//     `strings_equal`, `char_code`) — and per the paragraph above the
+//     runner links `runtime/prelude` into every test regardless, so
+//     that half costs nothing here. Either way `main.sfn`'s full
 //     ~130-module backend stays out of `tools/check.sfn`'s closure, so
 //     `render_summary` (`tools/check.sfn`) is unit-test-linkable. The
 //     old `_local_num_to_string` / `_local_render_summary` mirrors are
