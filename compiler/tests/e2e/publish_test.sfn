@@ -193,10 +193,15 @@ fn _first_line(text: string) -> string {
 fn _abs_sfn_bin() -> string ![io] {
     let bin = _sfn_bin();
     if substring(bin, 0, 1) == "/" { return bin; }
-    let _exit = process.run_capture(["pwd"], _child_env());
+    let exit = process.run_capture(["pwd"], _child_env());
     let out = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
+    // Fail here rather than returning a bogus path: a failed or empty `pwd`
+    // would otherwise make the cwd test fail inside the shell, for a reason
+    // that has nothing to do with the gate under test.
+    assert exit == 0;
     let pwd = _first_line(out);
+    assert pwd.length > 0;
     return pwd + "/" + bin;
 }
 

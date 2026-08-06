@@ -103,10 +103,13 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io] {
     // SFEP-0020 §3.6: `[capsule] publish = false` is the private-capsule
     // distribution boundary. The gate sits here deliberately — after the
     // manifest yields the capsule name the diagnostic must report, and before
-    // credential discovery, packaging, and the registry upload — so a private
-    // capsule is rejected before any side effect. The gate reads only the
-    // manifest text already in scope, so an explicit `[path]`, current-directory
-    // discovery, and an `SFN_REGISTRY` override all reach it identically.
+    // credential discovery, packaging, and the registry upload. Reading the
+    // manifest above is itself a filesystem read, so the guarantee is not
+    // "before any side effect" but the narrower one that matters: a private
+    // capsule produces no package artifact, no credential access, and no
+    // network traffic. The gate reads only the manifest text already in scope,
+    // so an explicit `[path]`, current-directory discovery, and an
+    // `SFN_REGISTRY` override all reach it identically.
     // An invalid value carries no policy (SFN-707), so it is rejected rather
     // than coerced to either boolean. `E0612` is the code SFEP-0002 §3.7
     // allocates for this refusal; it is emitted as a message prefix because
