@@ -534,7 +534,7 @@ half does not, and SFEP-0001 §4 is explicit that a safety feature is not
 | **Phase 2** — `yanked` enforcement (E0611) | **Pending** — no gate |
 | **Phase 3** — derived capability manifest in index `meta` | **Pending** — gated on registry service support |
 | **Phase 4** — transitive fetch | **Pending** — no gate |
-| **Phase 5** — `publish = false` enforcement (E0612) | **Pending** — no gate; SFN-707 |
+| **Phase 5** — `publish = false` enforcement (E0612) | **Implemented** — SFN-714 |
 | Version ranges + solver | **Deferred** — gated on Phase 4 + a `SemVer` range predicate |
 | Signed provenance | **Deferred** — gated on key distribution |
 | Port the registry client to the native `![net]` HTTP surface | **Out of scope here** — no gate; orthogonal to all five phases (§6) |
