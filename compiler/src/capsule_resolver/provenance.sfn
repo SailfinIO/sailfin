@@ -15,9 +15,9 @@
 // `capsule_origin_is_known`.
 import { toml_get_publish } from "../toml_parser";
 
-// Origin tags stamped onto every `CapsuleSource`. Sailfin has no module-level
-// constant form, so these are functions, in the same spirit as
-// `effect_taxonomy.sfn::canonical_effects()`.
+// Origin tags stamped onto every `CapsuleSource`. These are exported functions
+// rather than module-level constants because they cross module boundaries,
+// following `effect_taxonomy.sfn::canonical_effects()`.
 // Sources the consumer itself owns: relative imports, the entry module, and a
 // `-p` project's own `src/` tree. Publish policy never applies — these are the
 // thing being built, not a dependency fetched from anywhere.
@@ -59,6 +59,13 @@ export fn capsule_origin_is_known(origin: string) -> boolean {
 // is the correct one. A manifest with no `publish` key at all resolves to the
 // `true` default and is not denied, which keeps every existing cached capsule
 // building unchanged.
+//
+// An absent manifest is likewise not a denial: `toml_get_publish("")` yields
+// the same `true` default. That is narrower than the fail-closed reading above,
+// and deliberately so — `sfn add` always extracts a `capsule.toml` into the
+// cache entry (`cli/commands/add.sfn`), so a cache directory with no manifest
+// is a corrupt or hand-made entry that the locator's own existence checks
+// govern, not a publish-policy decision.
 export fn capsule_manifest_denies_publication(manifest_text: string) -> boolean {
     let policy = toml_get_publish(manifest_text);
     if policy.error.length > 0 { return true; }
@@ -101,9 +108,19 @@ fn _cr_publish_denial_reason(manifest_text: string) -> string {
 export fn capsule_provenance_rejects(spec: string, manifest_path: string, manifest_text: string, origin: string) -> boolean ![io.console] {
     if !capsule_origin_is_fetched(origin) { return false; }
     if !capsule_manifest_denies_publication(manifest_text) { return false; }
+    // Both halves of the message branch together: telling the owner of a
+    // malformed manifest that their capsule is "private" sends them to the
+    // wrong fix (relocating it) instead of the right one (repairing the key).
+    let policy = toml_get_publish(manifest_text);
+    let mut remedy: string = "a private capsule may only be built from a"
+        + " declared local workspace path";
+    if policy.error.length > 0 || policy.publish == null {
+        remedy = "a fetched capsule must declare a valid [capsule] publish"
+            + " policy; repair or re-fetch the manifest";
+    }
     print.err("E0613: " + spec + ": " + manifest_path + " "
         + _cr_publish_denial_reason(manifest_text)
-        + " but was resolved from the capsule cache — a private capsule may"
-        + " only be built from a declared local workspace path");
+        + " but was resolved from the capsule cache — "
+        + remedy);
     return true;
 }

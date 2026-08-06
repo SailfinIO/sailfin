@@ -472,11 +472,17 @@ fn enumerate_capsule_sources(project_root: string) -> CapsuleSource[] ![io] {
         // src_dir, so the staged artifact path matches `imports.sfn`'s
         // expectation regardless of which lookup supplied it.
         let mut src_dir: string = "";
-        // A declared workspace member is local by construction, so it may
-        // legitimately carry `publish = false` (SFEP-0020 §3.6).
-        let mut origin: string = capsule_origin_workspace();
+        // Seeded to the least-trusted origin so a branch added below that sets
+        // `src_dir` without setting `origin` fails closed at the gate rather
+        // than silently inheriting workspace trust.
+        let mut origin: string = capsule_origin_cache();
         if members.length > 0 {
             src_dir = workspace_member_for_spec(members, spec);
+            if src_dir.length > 0 {
+                // A declared workspace member is local by construction, so it
+                // may legitimately carry `publish = false` (SFEP-0020 §3.6).
+                origin = capsule_origin_workspace();
+            }
         }
         if src_dir.length == 0 {
             // Lockfile-pinned version wins over the capsule.toml range.

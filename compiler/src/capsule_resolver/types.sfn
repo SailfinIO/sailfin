@@ -39,7 +39,7 @@ struct CapsuleSource {
 // found it. `_cr_locate_capsule_src` checks an in-tree checkout before the
 // user cache and the two differ in trust, so the caller has to know which
 // branch matched (SFN-715). `src_dir` is empty when the capsule could not be
-// located; `origin` is then the least-trusted value and is never read.
+// located; `origin` is then the least-trusted value and is never acted on.
 struct CapsuleLocation {
     src_dir: string;
     origin: string;
