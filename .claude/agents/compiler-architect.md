@@ -4,7 +4,6 @@ description: Opus-powered architect for designing compiler features, refactors, 
 tools: Read, Grep, Glob, Bash, Write, mcp__Linear__list_initiatives, mcp__Linear__get_initiative, mcp__Linear__list_projects, mcp__Linear__get_project, mcp__Linear__list_issues, mcp__Linear__get_issue, mcp__Linear__save_issue, mcp__Linear__save_project
 model: opus
 effort: high
-maxTurns: 30
 color: purple
 ---
 
