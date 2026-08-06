@@ -1,6 +1,21 @@
 // Regression tests for compile-time capsule dependency resolution.
 // Tests the dependency lookup helper, capsule name resolution, and
 // import span collection for non-stdlib scoped imports.
+//
+// The provenance block at the bottom imports the production helpers directly
+// rather than duplicating them (SFN-715): they are the enforcement point for
+// SFEP-0020 §3.6, so a copy that drifted from the real gate would assert
+// nothing worth knowing.
+import {
+    capsule_manifest_denies_publication,
+    capsule_origin_cache,
+    capsule_origin_is_fetched,
+    capsule_origin_is_known,
+    capsule_origin_local,
+    capsule_origin_workspace,
+    capsule_provenance_rejects
+} from "../../src/capsule_resolver/provenance";
+
 // -- String helpers --
 fn _str_eq(a: string, b: string) -> boolean { return strings_equal(a, b); }
 
@@ -254,4 +269,86 @@ test "cached path: runtime prefix excluded" {
     let path = _resolve_cached_path("runtime/prelude", deps, "/home/user");
     // runtime/* should never resolve as a cached capsule
     assert _str_eq(path, "");
+}
+
+// --------------------------------------------------------------
+// Private-capsule provenance (SFN-715, SFEP-0020 §3.6)
+// --------------------------------------------------------------
+// Manifest bodies shared by the gate tests below. Only the `[capsule]`
+// section matters to the publish policy.
+fn _manifest_with(publish_line: string) -> string {
+    return "[capsule]\nname = \"priv/lib\"\nversion = \"0.1.0\"\n"
+        + publish_line
+        + "\n[build]\nkind = \"library\"\nentry = \"src/mod.sfn\"\n";
+}
+
+test "provenance: the three origins are distinct tags" {
+    assert ! _str_eq(capsule_origin_local(), capsule_origin_workspace());
+    assert ! _str_eq(capsule_origin_local(), capsule_origin_cache());
+    assert ! _str_eq(capsule_origin_workspace(), capsule_origin_cache());
+}
+
+test "provenance: only the cache origin counts as fetched" {
+    assert capsule_origin_is_fetched(capsule_origin_cache());
+    assert ! capsule_origin_is_fetched(capsule_origin_workspace());
+    assert ! capsule_origin_is_fetched(capsule_origin_local());
+}
+
+test "provenance: unknown origins are refused fail-closed" {
+    assert capsule_origin_is_known(capsule_origin_local());
+    assert capsule_origin_is_known(capsule_origin_workspace());
+    assert capsule_origin_is_known(capsule_origin_cache());
+    // An unstamped source (a construction site that forgot to declare
+    // provenance) must not be treated as trusted.
+    assert ! capsule_origin_is_known("");
+    assert ! capsule_origin_is_known("registry");
+    assert ! capsule_origin_is_known("Workspace");
+}
+
+test "provenance: publish policy resolves omitted and explicit values" {
+    // Omitted defaults to publishable, so every existing capsule is unaffected.
+    assert ! capsule_manifest_denies_publication(_manifest_with(""));
+    assert ! capsule_manifest_denies_publication(_manifest_with("publish = true\n"));
+    assert capsule_manifest_denies_publication(_manifest_with("publish = false\n"));
+    // A manifest that could not be read at all is not a denial.
+    assert ! capsule_manifest_denies_publication("");
+}
+
+test "provenance: malformed publish values deny fail-closed" {
+    // SFEP-0020 §3.6: a non-boolean is a manifest error and must never be
+    // coerced. This predicate only runs against fetched candidates, so an
+    // unreadable policy means the resolver cannot prove the capsule is
+    // publishable — it must refuse.
+    assert capsule_manifest_denies_publication(_manifest_with("publish = \"false\"\n"));
+    assert capsule_manifest_denies_publication(_manifest_with("publish = 0\n"));
+    assert capsule_manifest_denies_publication(_manifest_with("publish = [false]\n"));
+}
+
+test "provenance: a private capsule from the cache is rejected" ![io.console] {
+    let private_manifest = _manifest_with("publish = false\n");
+    assert capsule_provenance_rejects("priv/lib", "/cache/priv/lib/capsule.toml", private_manifest, capsule_origin_cache());
+}
+
+test "provenance: a private capsule from a local workspace path is allowed" ![io.console] {
+    // The headline allowance: a declared workspace member may be private and
+    // still build from its own path.
+    let private_manifest = _manifest_with("publish = false\n");
+    assert ! capsule_provenance_rejects("priv/lib", "/ws/capsules/priv/lib/capsule.toml", private_manifest, capsule_origin_workspace());
+    assert ! capsule_provenance_rejects("priv/lib", "/ws/capsules/priv/lib/capsule.toml", private_manifest, capsule_origin_local());
+}
+
+test "provenance: a publishable capsule from the cache still resolves" ![io.console] {
+    // The gate must not disturb ordinary registry consumption.
+    assert ! capsule_provenance_rejects("sfn/http", "/cache/sfn/http/capsule.toml", _manifest_with("publish = true\n"), capsule_origin_cache());
+    assert ! capsule_provenance_rejects("sfn/http", "/cache/sfn/http/capsule.toml", _manifest_with(""), capsule_origin_cache());
+    // A cached capsule with no manifest at all is unchanged from before.
+    assert ! capsule_provenance_rejects("sfn/http", "/cache/sfn/http/capsule.toml", "", capsule_origin_cache());
+}
+
+test "provenance: a malformed publish policy is refused only when fetched" ![io.console] {
+    let malformed = _manifest_with("publish = \"false\"\n");
+    assert capsule_provenance_rejects("priv/lib", "/cache/priv/lib/capsule.toml", malformed, capsule_origin_cache());
+    // A local member with a malformed policy is left to the manifest/publish
+    // layer (E0612) rather than being blocked from building here.
+    assert ! capsule_provenance_rejects("priv/lib", "/ws/capsules/priv/lib/capsule.toml", malformed, capsule_origin_workspace());
 }

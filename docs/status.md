@@ -30,8 +30,22 @@ here.
   refusal is `E0612`, names the capsule, and exits 1. The gate reads the
   manifest already loaded for name/version, so an explicit `[path]`,
   current-directory discovery, and an `SFN_REGISTRY` override all reach it.
-  The resolver half of §3.6 — refusing a *fetched* manifest that carries
-  `publish = false` before staging or compilation — is **not** enforced yet.
+- **Private-capsule manifest policy — resolver provenance** (SFEP-0020 §3.6,
+  SFN-715). Every `CapsuleSource` carries an `origin` stamped by the locator
+  that resolved it — `local` (relative imports, the entry module, the project's
+  own `src/`), `workspace` (a declared member or in-tree `capsules/` checkout),
+  or `cache` (the `~/.sfn/cache` tree `sfn add` populates). A declared local
+  member may carry `publish = false` and builds normally; a cache-resolved
+  candidate whose manifest denies publication — including one whose `publish`
+  value fails to resolve — is refused with `E0613` before any of its sources are
+  collected, staged, or compiled. Because a fetched private candidate is
+  rejected outright, it can neither shadow nor substitute for a declared local
+  private member. `stage_capsule_imports` additionally refuses any source whose
+  origin is empty or unrecognized, so a future locator cannot bypass the gate by
+  omitting provenance. The pinned seed (0.9.1) already parses a globbed member
+  list, resolves private members from local paths, orders them transitively, and
+  links them into a binary, so adopting the field in compiler manifests needs no
+  seed cut (`compiler/tests/e2e/seed_private_workspace_fixture_test.sfn`).
 - **Build driver.** `<seed> build -p compiler` is the sole self-build driver
   (`compiler/src/cli_main.sfn` + `capsule_resolver.sfn` — pure orchestration,
   no fixups). The `scripts/build.sh` orchestrator (Stage E PR7, #383) and the

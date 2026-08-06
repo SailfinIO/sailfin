@@ -30,6 +30,7 @@ import {
     _cr_import_context_root,
     _cr_string_in_array
 } from "./paths";
+import { capsule_origin_is_known } from "./provenance";
 import {
     _cr_canonicalise_path,
     enumerate_relative_sources,
@@ -104,7 +105,33 @@ fn _cr_write_srchash(srchash_path: string, src_path: string) ![io] {
 // back to the in-process path that's worked since Stage B; the
 // fallback is what `sfn check` and tests with small dep sets
 // continue to use.
+// Fail-closed provenance check for one source (SFN-715). Every source reaching
+// staging must carry an origin stamped by the locator that resolved it. An
+// empty or unrecognised origin means a construction site produced a
+// `CapsuleSource` without declaring where it came from — the resolver cannot
+// prove that source is locally declared, so it must not be staged. The
+// private-capsule rejection itself happens earlier, during resolution; this is
+// the structural backstop that keeps a future locator from bypassing it
+// silently.
+//
+// `stage_capsule_imports` runs this over the whole set before it picks a
+// staging strategy, because two of its three branches never reach
+// `_cr_stage_one`, and the cache-hit probe inside `_cr_stage_one` short-
+// circuits before any per-source work. A guard placed anywhere downstream of
+// either would be dead on the paths that matter.
+fn _cr_check_provenance(src: CapsuleSource) -> boolean ![io.console] {
+    if capsule_origin_is_known(src.origin) { return true; }
+    print.err("capsule-resolver: refusing to stage " + src.source_path
+        + " — unknown capsule provenance \""
+        + src.origin
+        + "\"");
+    return false;
+}
+
 fn _cr_stage_one(src: CapsuleSource, sailfin_exe: string, work_dir: string) -> boolean ![io] {
+    // Re-checked here so a direct caller of `_cr_stage_one` is covered too.
+    // Must precede the cache-hit probe below, which returns early.
+    if !_cr_check_provenance(src) { return false; }
     let context_root = _cr_import_context_root(work_dir);
     let asm_path = context_root + "/" + src.slug + ".sfn-asm";
     let manifest_path = context_root + "/" + src.slug + ".layout-manifest";
@@ -289,6 +316,16 @@ fn stage_capsule_imports(sources: CapsuleSource[], sailfin_exe: string, work_dir
     _cr_ensure_dir(context_root);
 
     if sources.length == 0 { return true; }
+
+    // Validate provenance across the whole set before choosing a staging
+    // strategy, so the guard covers the serial, jobs<=1, and parallel branches
+    // alike and runs ahead of every cache-hit probe.
+    let mut pi: int = 0;
+    loop {
+        if pi >= sources.length { break; }
+        if !_cr_check_provenance(sources[pi]) { return false; }
+        pi += 1;
+    }
 
     // Serial path — when no `sailfin_exe` (in-process emit) or the
     // task list is small enough that subprocess overhead would

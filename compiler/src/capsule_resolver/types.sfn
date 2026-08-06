@@ -26,6 +26,23 @@ struct CapsuleSource {
     // consumer + dep layout is known. Never observed empty by
     // downstream callers.
     ll_path: string;
+    // Where this source came from — one of `capsule_origin_local()`,
+    // `capsule_origin_workspace()`, or `capsule_origin_cache()`
+    // (`provenance.sfn`). Stamped by the locator that resolved the source, so
+    // the private-capsule gate and the fail-closed staging guard can tell a
+    // declared local member from a fetched one without re-deriving provenance
+    // from `source_path` (SFN-715, SFEP-0020 §3.6).
+    origin: string;
+}
+
+// A located capsule `src/` dir paired with the provenance of the lookup that
+// found it. `_cr_locate_capsule_src` checks an in-tree checkout before the
+// user cache and the two differ in trust, so the caller has to know which
+// branch matched (SFN-715). `src_dir` is empty when the capsule could not be
+// located; `origin` is then the least-trusted value and is never acted on.
+struct CapsuleLocation {
+    src_dir: string;
+    origin: string;
 }
 
 // Identifies the "consumer" capsule of a resolver pass — the

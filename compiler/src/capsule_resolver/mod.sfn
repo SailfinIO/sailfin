@@ -152,6 +152,7 @@ import {
     discover_project_root,
     mangle_slug
 } from "./paths";
+import { capsule_origin_local } from "./provenance";
 import {
     _cr_canonicalise_path,
     _cr_empty_relative_scan_memo,
@@ -332,7 +333,9 @@ fn prepare_project_capsules(input_path: string, config: BuildCacheConfig, consum
             let entry_slug = module_name_from_path(entry_path);
             let mut entry_src: CapsuleSource[] = [];
             entry_src.push(CapsuleSource {
-                spec: "", source_path: entry_path, slug: entry_slug, ll_path: ""
+                spec: "", source_path: entry_path, slug: entry_slug, ll_path: "",
+                // The build's own entry module.
+                origin: capsule_origin_local()
             });
             let entry_staged = stage_capsule_imports(entry_src, effective_exe, work_dir);
             if !entry_staged {

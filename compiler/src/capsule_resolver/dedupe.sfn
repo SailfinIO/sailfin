@@ -442,7 +442,10 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer, bun
         let routing_slug = _cr_routing_slug(cur, consumer_root_prefix);
         let ll = _cr_resolve_ll_path(routing_slug, layout);
         resolved.push(CapsuleSource {
-            spec: cur.spec, source_path: cur.source_path, slug: cur.slug, ll_path: ll
+            spec: cur.spec, source_path: cur.source_path, slug: cur.slug, ll_path: ll,
+            // Provenance survives the ll_path rewrite — this pass only routes
+            // output paths and must not launder where a source came from.
+            origin: cur.origin
         });
         ri += 1;
     }

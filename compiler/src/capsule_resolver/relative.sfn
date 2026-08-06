@@ -15,6 +15,7 @@ import { number_to_string } from "../num_format";
 import { substring } from "../string_utils";
 import { _cr_collect_capsule_sources, enumerate_capsule_sources } from "./discovery";
 import { _cr_dirname, _cr_ends_with, _cr_path_join } from "./paths";
+import { capsule_origin_local } from "./provenance";
 import { CapsuleSource, WorkspaceMember } from "./types";
 
 // Resolve a relative import spec ("./foo", "../bar/baz") against `base_dir`
@@ -379,7 +380,11 @@ fn _cr_enumerate_relative_sources_memo(entry_path: string, members: WorkspaceMem
                             spec: spec,
                             source_path: dep_path,
                             slug: slug,
-                            ll_path: ""
+                            ll_path: "",
+                            // Relative imports are intra-capsule: the consumer
+                            // owns these files, so publish policy never
+                            // applies to them.
+                            origin: capsule_origin_local()
                         };
                         memo.dep_paths.push(dep_path);
                         memo.dep_sources.push(dep_source);

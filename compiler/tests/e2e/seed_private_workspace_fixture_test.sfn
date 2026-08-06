@@ -1,0 +1,136 @@
+// compiler/tests/e2e/seed_private_workspace_fixture_test.sfn
+//
+// SFN-715 acceptance criterion 4 / SFEP-0020 §5
+// (`docs/proposals/0020-compiler-decomposition.md`): before compiler
+// manifests adopt `publish = false`, the **pinned seed** compiler (not the
+// self-hosted binary under test) must already be able to, unmodified:
+//   1. parse an expanded workspace member list (glob form),
+//   2. resolve `publish = false` library members from their local workspace
+//      paths,
+//   3. build their transitive dependency order, and
+//   4. link them into a binary,
+// while tolerating the `[capsule] publish` key it does not itself
+// understand. This fixture proves all four against the real seed binary
+// pinned by `bootstrap.toml`, so a regression here would block the
+// `publish = false` rollout before it starts.
+import { find, split } from "sfn/strings";
+import { clean_runner_env, nested_runner_scratch, report_child_failure } from "sfn/test";
+
+// The pinned seed binary, resolved relative to the repo root this test
+// runner starts from (mirrors the seed-store layout `bootstrap.toml`
+// describes; there is no `sfn/test` accessor for it, so this is resolved by
+// hand as the other e2e fixtures resolve `_sfn_bin`).
+fn _seed_bin_relative() -> string { return "build/toolchains/seed/bin/sfn"; }
+
+// Absolutize a repo-relative path against the test runner's own cwd (the
+// repo root) via `pwd`, so it still resolves once the nested seed build
+// runs with the fixture root as its cwd.
+fn _abs_repo_path(relative: string) -> string ![io] {
+    let exit = process.run_capture(["pwd"], clean_runner_env(nested_runner_scratch("seed-private-workspace-pwd")));
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    if exit != 0 { return relative; }
+    return _first_line(out) + "/" + relative;
+}
+
+fn _first_line(text: string) -> string {
+    let lines = split(text, "\n");
+    if lines.length == 0 { return text; }
+    return lines[0];
+}
+
+fn _write_fixture(root: string) -> void ![io] {
+    fs.writeFile(root + "/workspace.toml", "[workspace]\n" + "members = [\n"
+        + "    \"app\",\n"
+        + "    \"capsules/priv/*\",\n"
+        + "]\n");
+
+    fs.createDirectory(root + "/app/src", true);
+    fs.writeFile(root + "/app/capsule.toml", "[capsule]\n"
+        + "name = \"priv/app\"\n"
+        + "version = \"0.1.0\"\n"
+        + "publish = false\n\n"
+        + "[dependencies]\n"
+        + "\"priv/lib\" = \"*\"\n\n"
+        + "[capabilities]\n"
+        + "required = []\n\n"
+        + "[build]\n"
+        + "entry = \"src/main.sfn\"\n"
+        + "kind = \"binary\"\n");
+    fs.writeFile(root + "/app/src/main.sfn", "import { lib_answer } from \"priv/lib\";\n\n"
+        + "fn main() -> int ![io] {\n"
+        + "    print(\"answer=\" + lib_answer().toString());\n"
+        + "    return 0;\n"
+        + "}\n");
+
+    fs.createDirectory(root + "/capsules/priv/lib/src", true);
+    fs.writeFile(root + "/capsules/priv/lib/capsule.toml", "[capsule]\n"
+        + "name = \"priv/lib\"\n"
+        + "version = \"0.1.0\"\n"
+        + "publish = false\n\n"
+        + "[dependencies]\n"
+        + "\"priv/base\" = \"*\"\n\n"
+        + "[capabilities]\n"
+        + "required = []\n\n"
+        + "[build]\n"
+        + "entry = \"src/mod.sfn\"\n"
+        + "kind = \"library\"\n");
+    fs.writeFile(root + "/capsules/priv/lib/src/mod.sfn", "import { base_value } from \"priv/base\";\n\n"
+        + "export fn lib_answer() -> int {\n"
+        + "    return base_value() + 2;\n"
+        + "}\n");
+
+    fs.createDirectory(root + "/capsules/priv/base/src", true);
+    fs.writeFile(root + "/capsules/priv/base/capsule.toml", "[capsule]\n"
+        + "name = \"priv/base\"\n"
+        + "version = \"0.1.0\"\n"
+        + "publish = false\n\n"
+        + "[capabilities]\n"
+        + "required = []\n\n"
+        + "[build]\n"
+        + "entry = \"src/mod.sfn\"\n"
+        + "kind = \"library\"\n");
+    fs.writeFile(root + "/capsules/priv/base/src/mod.sfn", "export fn base_value() -> int {\n"
+        + "    return 40;\n"
+        + "}\n");
+}
+
+test "seed fixture: pinned seed builds private workspace members transitively" ![io] {
+    let seed = _abs_repo_path(_seed_bin_relative());
+    if !fs.exists(seed) {
+        // No pinned seed checked out in this environment (e.g. a source-only
+        // checkout without `sfn dev bootstrap fetch`) — skip rather than
+        // fail, matching the absent-toolchain precedent in
+        // `docs/conventions/e2e-tests.md`.
+        assert true;
+        return;
+    }
+
+    let root = fs.mkdtemp("sfn-seed-private-workspace-");
+    assert root.length > 0;
+    _write_fixture(root);
+
+    // `-p` takes the workspace member's local path ("app"), not its
+    // capsule name ("priv/app") — the latter fails with "capsule manifest
+    // not found".
+    let child_env = clean_runner_env(nested_runner_scratch("seed-private-workspace-build"));
+    let exit = process.run_capture_cwd([seed, "build", "-p", "app"], child_env, root);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    // Surface the seed's captured stdout+stderr on failure — this fixture
+    // exists to be a diagnosable CI failure, not a bare "assertion failed".
+    report_child_failure("seed private-workspace build", exit, out, err);
+    assert exit == 0;
+
+    let binary = root + "/build/capsules/priv/app/bin/app";
+    assert fs.exists(binary);
+
+    let run_exit = process.run_capture_cwd([binary], child_env, root);
+    let run_out = process.capture_take_stdout();
+    let run_err = process.capture_take_stderr();
+    report_child_failure("seed private-workspace app run", run_exit, run_out, run_err);
+    assert run_exit == 0;
+    assert find(run_out, "answer=42", 0) >= 0;
+
+    process.run(["rm", "-rf", root]);
+}
