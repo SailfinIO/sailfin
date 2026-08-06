@@ -30,12 +30,12 @@ import {
     get_or,
     with_flag
 } from "sfn/cli";
+import { int_to_string } from "sfn/strings";
 
 import { _get_env_cmd } from "../../build_flags";
 import { resolve_workspace_lock_entries } from "../../capsule_resolver/capability";
 import { discover_workspace_root } from "../../capsule_resolver/workspace";
 import { workspace_lock_write } from "../../lock";
-import { number_to_string } from "../../num_format";
 import { CliContext } from "../context";
 
 fn handle_lock_command(args: string[]) -> int ![io] {
@@ -70,7 +70,7 @@ fn handle_lock_command(args: string[]) -> int ![io] {
     let lock_text = workspace_lock_write(entries);
     let lock_path = workspace_root + "/workspace.lock";
     fs.writeFile(lock_path, lock_text);
-    print("wrote " + lock_path + " (" + number_to_string(entries.length)
+    print("wrote " + lock_path + " (" + int_to_string(entries.length)
         + " members)");
     return 0;
 }

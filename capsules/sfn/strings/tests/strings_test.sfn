@@ -2,7 +2,14 @@
 //
 // The older fmt regressions below stay inlined because they predate direct
 // capsule imports; new public-surface coverage imports the real API.
-import { ascii_lowercase, ascii_uppercase } from "../src/mod";
+import {
+    ascii_lowercase,
+    ascii_uppercase,
+    char_code_at,
+    contains_string,
+    last_index_of_char,
+    strip_prefix
+} from "../src/mod";
 
 fn _find(text: string, needle: string, start: int) -> int {
     if needle.length == 0 { return start; }
@@ -209,4 +216,32 @@ test "#1315: grapheme_count via length" {
 test "#1315: char_from_code roundtrips through char_code" {
     assert char_code(char_from_code(104)) == 104;
     assert strings_equal(char_from_code(65), "A");
+}
+
+test "strings: strip_prefix removes a leading prefix only when present" {
+    assert strings_equal(strip_prefix("hello world", "hello "), "world");
+    assert strings_equal(strip_prefix("hello world", "bye "), "hello world");
+    assert strings_equal(strip_prefix("hello", ""), "hello");
+    assert strings_equal(strip_prefix("hello", "hello"), "");
+}
+
+test "strings: contains_string reports membership in a string list" {
+    assert contains_string(["a", "b", "c"], "b") == true;
+    assert contains_string(["a", "b", "c"], "z") == false;
+    assert contains_string([], "a") == false;
+}
+
+test "strings: last_index_of_char finds the final occurrence and rejects multi-char needles" {
+    assert last_index_of_char("banana", "a") == 5;
+    assert last_index_of_char("hello", "h") == 0;
+    assert last_index_of_char("hello", "z") == -1;
+    assert last_index_of_char("hello", "ab") == -1;
+    assert last_index_of_char("", "a") == -1;
+}
+
+test "strings: char_code_at returns the code at an index and -1 out of bounds" {
+    assert char_code_at("A", 0) == 65;
+    assert char_code_at("abc", 2) == 99;
+    assert char_code_at("abc", -1) == -1;
+    assert char_code_at("abc", 3) == -1;
 }

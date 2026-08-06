@@ -1,3 +1,5 @@
+import { int_to_string } from "sfn/strings";
+
 import { Program, Statement } from "../../../ast";
 import {
     _dirname_cmd,
@@ -11,7 +13,6 @@ import { discover_project_root } from "../../../capsule_resolver/paths";
 import { ResolverConsumer } from "../../../capsule_resolver/types";
 import { discover_workspace_root } from "../../../capsule_resolver/workspace";
 import { ImportSymbolTable, empty_import_symbols } from "../../../effect_imports";
-import { number_to_string } from "../../../num_format";
 import { parse_program } from "../../../parser/mod";
 import { substring } from "../../../string_utils";
 import { test_decl_is_matching_test, test_decl_matches_filters } from "../../../test_runner_state";
@@ -306,10 +307,9 @@ fn _resolve_test_groups(test_files: string[], binary_dir: string, trace_runner: 
     loop {
         if gi >= groups.length { break; }
         if trace_runner {
-            print.err("test runner: resolver pass start (group="
-                + number_to_string(gi)
+            print.err("test runner: resolver pass start (group=" + int_to_string(gi)
                 + ", files="
-                + number_to_string(groups[gi].entry_paths.length)
+                + int_to_string(groups[gi].entry_paths.length)
                 + ")");
         }
         // P1 (#363): derive the resolver consumer from the host
@@ -379,10 +379,9 @@ fn _resolve_test_groups(test_files: string[], binary_dir: string, trace_runner: 
         // body declaring an effect outside the surface.
         groups[gi].capabilities_required = resolution.capabilities_required;
         if trace_runner {
-            print.err("test runner: resolver pass done (group="
-                + number_to_string(gi)
+            print.err("test runner: resolver pass done (group=" + int_to_string(gi)
                 + ", deps="
-                + number_to_string(resolution.ll_paths.length)
+                + int_to_string(resolution.ll_paths.length)
                 + ")");
         }
         gi += 1;

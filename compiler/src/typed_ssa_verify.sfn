@@ -6,7 +6,8 @@
 // holds. Diagnostics carry a stable code plus a message identifying the
 // module, function, block, and offending id. This module is not imported from
 // main.sfn (SFN-454): checked and self-hostable, not yet selected by builds.
-import { number_to_string } from "./num_format";
+import { int_to_string } from "sfn/strings";
+
 import {
     Instr,
     Module,
@@ -68,13 +69,13 @@ fn _type_name(module: Module, tid: int) -> string {
     if kind == "Int" {
         let mut sign: string = "u";
         if module.types[tid].int_signed { sign = "i"; }
-        return sign + number_to_string(module.types[tid].int_width);
+        return sign + int_to_string(module.types[tid].int_width);
     }
     if kind == "Float" {
-        return "f" + number_to_string(module.types[tid].float_width);
+        return "f" + int_to_string(module.types[tid].float_width);
     }
     if kind == "Pointer" {
-        return "pointer(as" + number_to_string(module.types[tid].address_space)
+        return "pointer(as" + int_to_string(module.types[tid].address_space)
             + ")";
     }
     return kind;
@@ -151,9 +152,9 @@ fn _verify_module_structure(module: Module) -> TssaDiagnostic[] {
                     + ": duplicate symbol \""
                     + module.symbols[i]
                     + "\" at ids "
-                    + number_to_string(i)
+                    + int_to_string(i)
                     + " and "
-                    + number_to_string(j)));
+                    + int_to_string(j)));
             }
             j += 1;
         }
@@ -169,9 +170,9 @@ fn _verify_module_structure(module: Module) -> TssaDiagnostic[] {
             if types_structurally_equal(module.types[i], module.types[j]) {
                 diags.push(_diag("TSSA002", "module " + module.module_name
                     + ": non-canonical type table, t"
-                    + number_to_string(i)
+                    + int_to_string(i)
                     + " duplicates t"
-                    + number_to_string(j)));
+                    + int_to_string(j)));
             }
             j += 1;
         }
@@ -185,9 +186,9 @@ fn _verify_module_structure(module: Module) -> TssaDiagnostic[] {
         if func.result < 0 || func.result >= module.types.length {
             diags.push(_diag("TSSA003", "module " + module.module_name
                 + ": function f"
-                + number_to_string(func.id)
+                + int_to_string(func.id)
                 + " result type t"
-                + number_to_string(func.result)
+                + int_to_string(func.result)
                 + " out of range"));
         }
         let mut p: int = 0;
@@ -196,9 +197,9 @@ fn _verify_module_structure(module: Module) -> TssaDiagnostic[] {
             if func.parameters[p] < 0 || func.parameters[p] >= module.types.length {
                 diags.push(_diag("TSSA003", "module " + module.module_name
                     + ": function f"
-                    + number_to_string(func.id)
+                    + int_to_string(func.id)
                     + " parameter type t"
-                    + number_to_string(func.parameters[p])
+                    + int_to_string(func.parameters[p])
                     + " out of range"));
             }
             p += 1;
@@ -206,17 +207,17 @@ fn _verify_module_structure(module: Module) -> TssaDiagnostic[] {
         if func.effects < 0 || func.effects >= module.effect_sets.length {
             diags.push(_diag("TSSA004", "module " + module.module_name
                 + ": function f"
-                + number_to_string(func.id)
+                + int_to_string(func.id)
                 + " effect set e"
-                + number_to_string(func.effects)
+                + int_to_string(func.effects)
                 + " out of range"));
         }
         if func.capabilities < 0 || func.capabilities >= module.capability_sets.length {
             diags.push(_diag("TSSA004", "module " + module.module_name
                 + ": function f"
-                + number_to_string(func.id)
+                + int_to_string(func.id)
                 + " capability set c"
-                + number_to_string(func.capabilities)
+                + int_to_string(func.capabilities)
                 + " out of range"));
         }
         i += 1;
@@ -230,7 +231,7 @@ fn _verify_module_structure(module: Module) -> TssaDiagnostic[] {
             if ep < 0 || ep >= module.functions.length {
                 diags.push(_diag("TSSA064", "module " + module.module_name
                     + ": manifest entry point f"
-                    + number_to_string(ep)
+                    + int_to_string(ep)
                     + " does not resolve"));
             }
             k += 1;
@@ -489,7 +490,7 @@ fn _dominates_use(func: SsaFunction, defs: DefSites, dom: int[], n: int, v: int,
 // ---------------------------------------------------------------------------
 fn _verify_function(module: Module, func: SsaFunction) -> TssaDiagnostic[] {
     let mut diags: TssaDiagnostic[] = [];
-    let fname: string = "f" + number_to_string(func.id) + " (" + symbol_name(module, func.symbol)
+    let fname: string = "f" + int_to_string(func.id) + " (" + symbol_name(module, func.symbol)
         + ")";
     if !func.is_defined {
         // External declaration: no body; structural id checks already done.
@@ -504,7 +505,7 @@ fn _verify_function(module: Module, func: SsaFunction) -> TssaDiagnostic[] {
     // §9.6.7 dense block ids, entry is id 0.
     if func.blocks[0].id != 0 {
         diags.push(_diag("TSSA070", "function " + fname + ": entry block id is "
-            + number_to_string(func.blocks[0].id)
+            + int_to_string(func.blocks[0].id)
             + ", expected 0"));
     }
     let mut bi: int = 0;
@@ -513,9 +514,9 @@ fn _verify_function(module: Module, func: SsaFunction) -> TssaDiagnostic[] {
         if func.blocks[bi].id != bi {
             diags.push(_diag("TSSA070", "function " + fname
                 + ": block at position "
-                + number_to_string(bi)
+                + int_to_string(bi)
                 + " has non-dense id "
-                + number_to_string(func.blocks[bi].id)));
+                + int_to_string(func.blocks[bi].id)));
         }
         bi += 1;
     }
@@ -523,9 +524,9 @@ fn _verify_function(module: Module, func: SsaFunction) -> TssaDiagnostic[] {
     let entry: SsaBlock = func.blocks[0];
     if entry.param_types.length != func.parameters.length {
         diags.push(_diag("TSSA030", "function " + fname + ": entry block has "
-            + number_to_string(entry.param_types.length)
+            + int_to_string(entry.param_types.length)
             + " parameters, signature declares "
-            + number_to_string(func.parameters.length)));
+            + int_to_string(func.parameters.length)));
     } else {
         let mut j: int = 0;
         loop {
@@ -533,20 +534,20 @@ fn _verify_function(module: Module, func: SsaFunction) -> TssaDiagnostic[] {
             if entry.param_types[j] != func.parameters[j] {
                 diags.push(_diag("TSSA030", "function " + fname
                     + ": entry parameter "
-                    + number_to_string(j)
+                    + int_to_string(j)
                     + " type t"
-                    + number_to_string(entry.param_types[j])
+                    + int_to_string(entry.param_types[j])
                     + " does not match signature t"
-                    + number_to_string(func.parameters[j])));
+                    + int_to_string(func.parameters[j])));
             }
             if entry.params[j] != j {
                 diags.push(_diag("TSSA030", "function " + fname
                     + ": entry parameter "
-                    + number_to_string(j)
+                    + int_to_string(j)
                     + " value id is v"
-                    + number_to_string(entry.params[j])
+                    + int_to_string(entry.params[j])
                     + ", expected v"
-                    + number_to_string(j)));
+                    + int_to_string(j)));
             }
             j += 1;
         }
@@ -558,12 +559,12 @@ fn _verify_function(module: Module, func: SsaFunction) -> TssaDiagnostic[] {
         if bi >= n { break; }
         if !func.blocks[bi].has_terminator {
             diags.push(_diag("TSSA041", "function " + fname + ": block b"
-                + number_to_string(func.blocks[bi].id)
+                + int_to_string(func.blocks[bi].id)
                 + " has no terminator"));
         }
         if bi != 0 && reachable[bi] == 0 {
             diags.push(_diag("TSSA042", "function " + fname + ": block b"
-                + number_to_string(func.blocks[bi].id)
+                + int_to_string(func.blocks[bi].id)
                 + " is unreachable from a named predecessor"));
         }
         bi += 1;
@@ -615,15 +616,15 @@ fn _use_dominates(module: Module, func: SsaFunction, fname: string, defs: DefSit
     if v < 0 || v >= func.value_types.length {
         diags.push(_diag("TSSA020", "function " + fname + ": " + ctx
             + " references undefined value v"
-            + number_to_string(v)));
+            + int_to_string(v)));
         return diags;
     }
     if !_dominates_use(func, defs, dom, n, v, use_block, use_pos) {
         diags.push(_diag("TSSA021", "function " + fname + ": " + ctx
             + " uses value v"
-            + number_to_string(v)
+            + int_to_string(v)
             + " that does not dominate the use in block b"
-            + number_to_string(func.blocks[use_block].id)));
+            + int_to_string(func.blocks[use_block].id)));
     }
     return diags;
 }
@@ -631,8 +632,8 @@ fn _use_dominates(module: Module, func: SsaFunction, fname: string, defs: DefSit
 fn _verify_instr(module: Module, func: SsaFunction, fname: string, block: SsaBlock, instr: Instr, defs: DefSites, dom: int[], n: int, bi: int, ii: int, reachable: int[]) -> TssaDiagnostic[] {
     let mut diags: TssaDiagnostic[] = [];
     let rt: int = instr.result_type;
-    let where: string = "instruction " + number_to_string(ii) + " in block b"
-        + number_to_string(block.id);
+    let where: string = "instruction " + int_to_string(ii) + " in block b"
+        + int_to_string(block.id);
     if instr.kind.variant == "ConstBool" {
         if !_is_bool(module, rt) {
             diags.push(_diag("TSSA050", "function " + fname + ": " + where
@@ -753,7 +754,7 @@ fn _verify_instr(module: Module, func: SsaFunction, fname: string, block: SsaBlo
             if a >= instr.call_args.length { break; }
             let ad: TssaDiagnostic[] = _use_dominates(module, func, fname, defs, dom, n, bi, ii, instr.call_args[a], where
                 + " call argument "
-                + number_to_string(a));
+                + int_to_string(a));
             diags = _concat(diags, ad);
             a += 1;
         }
@@ -762,17 +763,17 @@ fn _verify_instr(module: Module, func: SsaFunction, fname: string, block: SsaBlo
         if callee_id < 0 || callee_id >= module.functions.length {
             diags.push(_diag("TSSA051", "function " + fname + ": " + where
                 + " calls unresolved function f"
-                + number_to_string(callee_id)));
+                + int_to_string(callee_id)));
         } else {
             let callee: SsaFunction = module.functions[callee_id];
             if instr.call_args.length != callee.parameters.length {
                 diags.push(_diag("TSSA051", "function " + fname + ": " + where
                     + " passes "
-                    + number_to_string(instr.call_args.length)
+                    + int_to_string(instr.call_args.length)
                     + " arguments to f"
-                    + number_to_string(callee_id)
+                    + int_to_string(callee_id)
                     + " which declares "
-                    + number_to_string(callee.parameters.length)));
+                    + int_to_string(callee.parameters.length)));
             } else {
                 let mut k: int = 0;
                 loop {
@@ -781,7 +782,7 @@ fn _verify_instr(module: Module, func: SsaFunction, fname: string, block: SsaBlo
                         diags.push(_diag("TSSA051", "function " + fname + ": "
                             + where
                             + " call argument "
-                            + number_to_string(k)
+                            + int_to_string(k)
                             + " type does not match callee parameter"));
                     }
                     k += 1;
@@ -809,13 +810,13 @@ fn _verify_instr(module: Module, func: SsaFunction, fname: string, block: SsaBlo
             if !effect_set_is_subset(module, callee.effects, instr.call_effects) {
                 diags.push(_diag("TSSA060", "function " + fname + ": " + where
                     + " call effect set is not a superset of callee f"
-                    + number_to_string(callee_id)
+                    + int_to_string(callee_id)
                     + " declared effects"));
             }
             if !capability_set_is_subset(module, callee.capabilities, instr.call_capabilities) {
                 diags.push(_diag("TSSA061", "function " + fname + ": " + where
                     + " call capability set is not a superset of callee f"
-                    + number_to_string(callee_id)
+                    + int_to_string(callee_id)
                     + " declared capabilities"));
             }
         }
@@ -885,18 +886,18 @@ fn _verify_branch_args(module: Module, func: SsaFunction, fname: string, defs: D
     if tidx < 0 {
         diags.push(_diag("TSSA031", "function " + fname + ": " + edge
             + " targets nonexistent block b"
-            + number_to_string(target_id)));
+            + int_to_string(target_id)));
         return diags;
     }
     let target: SsaBlock = func.blocks[tidx];
     if args.length != target.param_types.length {
         diags.push(_diag("TSSA032", "function " + fname + ": " + edge
             + " passes "
-            + number_to_string(args.length)
+            + int_to_string(args.length)
             + " arguments to block b"
-            + number_to_string(target_id)
+            + int_to_string(target_id)
             + " which declares "
-            + number_to_string(target.param_types.length)
+            + int_to_string(target.param_types.length)
             + " parameters"));
         return diags;
     }
@@ -905,16 +906,16 @@ fn _verify_branch_args(module: Module, func: SsaFunction, fname: string, defs: D
         if i >= args.length { break; }
         let ud: TssaDiagnostic[] = _use_dominates(module, func, fname, defs, dom, n, bi, term_pos, args[i], edge
             + " argument "
-            + number_to_string(i));
+            + int_to_string(i));
         diags = _concat(diags, ud);
         if _value_type(func, args[i]) != target.param_types[i] {
             diags.push(_diag("TSSA033", "function " + fname + ": " + edge
                 + " argument "
-                + number_to_string(i)
+                + int_to_string(i)
                 + " type does not match block b"
-                + number_to_string(target_id)
+                + int_to_string(target_id)
                 + " parameter "
-                + number_to_string(i)));
+                + int_to_string(i)));
         }
         i += 1;
     }
@@ -924,7 +925,7 @@ fn _verify_branch_args(module: Module, func: SsaFunction, fname: string, defs: D
 fn _verify_terminator(module: Module, func: SsaFunction, fname: string, block: SsaBlock, defs: DefSites, dom: int[], n: int, bi: int, term_pos: int) -> TssaDiagnostic[] {
     let mut diags: TssaDiagnostic[] = [];
     let term: Terminator = block.terminator;
-    let where: string = "terminator of block b" + number_to_string(block.id);
+    let where: string = "terminator of block b" + int_to_string(block.id);
     if term.kind.variant == "Branch" {
         let bd: TssaDiagnostic[] = _verify_branch_args(module, func, fname, defs, dom, n, bi, term_pos, term.target, term.args, where
             + " branch");
@@ -937,7 +938,7 @@ fn _verify_terminator(module: Module, func: SsaFunction, fname: string, block: S
         if !_is_bool(module, _value_type(func, term.condition)) {
             diags.push(_diag("TSSA054", "function " + fname + ": " + where
                 + " cond_branch condition v"
-                + number_to_string(term.condition)
+                + int_to_string(term.condition)
                 + " is not Bool"));
         }
         let td: TssaDiagnostic[] = _verify_branch_args(module, func, fname, defs, dom, n, bi, term_pos, term.target, term.args, where

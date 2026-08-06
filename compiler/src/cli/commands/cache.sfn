@@ -26,6 +26,7 @@ import {
     with_flag,
     with_subcommand
 } from "sfn/cli";
+import { int_to_string } from "sfn/strings";
 
 import {
     CacheInfo,
@@ -36,7 +37,6 @@ import {
     cache_root,
     cache_sweep_stale_schemas
 } from "../../build_cache";
-import { number_to_string } from "../../num_format";
 import { CliContext } from "../context";
 
 // Render a byte count as `<n> bytes (<m> MiB)` for `cache info`. Integer
@@ -44,14 +44,13 @@ import { CliContext } from "../context";
 // byte count stays authoritative.
 fn _format_bytes(bytes: int) -> string {
     let mib = bytes / 1048576;
-    return number_to_string(bytes) + " bytes (" + number_to_string(mib)
-        + " MiB)";
+    return int_to_string(bytes) + " bytes (" + int_to_string(mib) + " MiB)";
 }
 
 fn _run_info(root: string) -> int ![io] {
     let info: CacheInfo = cache_info(root);
     print("root: " + info.root);
-    print("entries: " + number_to_string(info.entry_count));
+    print("entries: " + int_to_string(info.entry_count));
     print("size: " + _format_bytes(info.total_bytes));
     return 0;
 }
@@ -71,7 +70,7 @@ fn _run_prune(root: string, matches: Matches) -> int ![io] {
         max_age = 30;
     }
     let result: PruneResult = cache_prune(root, max_size, max_age);
-    print("pruned " + number_to_string(result.removed_entries) + " entries ("
+    print("pruned " + int_to_string(result.removed_entries) + " entries ("
         + _format_bytes(result.removed_bytes)
         + ")");
     return 0;
@@ -85,7 +84,7 @@ fn _run_clean(root: string, matches: Matches) -> int ![io] {
     }
     if all_schemas {
         let removed = cache_sweep_stale_schemas(root);
-        print("cleaned cache and swept " + number_to_string(removed)
+        print("cleaned cache and swept " + int_to_string(removed)
             + " stale schema version(s)");
         return 0;
     }

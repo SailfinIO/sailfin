@@ -4,7 +4,8 @@
 // graph. Equality is fieldwise, hashes come from a private structural encoding,
 // and human-readable rendering is diagnostic output only. See SFN-588,
 // SFEP-0059 §10.2.1, and §3.5.
-import { number_to_string } from "./num_format";
+import { int_to_string } from "sfn/strings";
+
 import {
     DeclarationId,
     EffectSetId,
@@ -248,7 +249,7 @@ fn _sorted_unique_strings(values: string[]) -> string[] {
 }
 
 fn _encoded_string(value: string) -> string {
-    return number_to_string(value.length) + ":" + value;
+    return int_to_string(value.length) + ":" + value;
 }
 
 fn _effect_key(names: string[]) -> string {
@@ -298,7 +299,7 @@ fn _module_key(identity: ModuleIdentity) -> string {
 }
 
 fn _qualified_declaration_key(id: QualifiedDeclarationId) -> string {
-    return _module_key(id.origin) + "D" + number_to_string(id.declaration.value);
+    return _module_key(id.origin) + "D" + int_to_string(id.declaration.value);
 }
 
 fn _constructor_key(interner: TypeInterner, id: TypeConstructorId) -> string {
@@ -315,7 +316,7 @@ fn _type_key_for_id(interner: TypeInterner, id: TypeId) -> string {
 }
 
 fn _type_id_list_key(interner: TypeInterner, ids: TypeId[]) -> string {
-    let mut key = number_to_string(ids.length) + "[";
+    let mut key = int_to_string(ids.length) + "[";
     let mut index: int = 0;
     loop {
         if index >= ids.length { break; }
@@ -332,7 +333,7 @@ fn _structural_key(interner: TypeInterner, node: StructuralType) -> string {
     if node.kind.variant == "Int" {
         let mut signedness = "u";
         if node.int_signed { signedness = "s"; }
-        return "I" + signedness + number_to_string(node.int_width);
+        return "I" + signedness + int_to_string(node.int_width);
     }
     if node.kind.variant == "Float" {
         return "F" + node.float_format.variant;
@@ -346,7 +347,7 @@ fn _structural_key(interner: TypeInterner, node: StructuralType) -> string {
         if node.has_pointee {
             pointee = _type_key_for_id(interner, node.pointee);
         }
-        return "P" + permission + number_to_string(node.address_space)
+        return "P" + permission + int_to_string(node.address_space)
             + _encoded_string(pointee);
     }
     if node.kind.variant == "Reference" {
@@ -356,7 +357,7 @@ fn _structural_key(interner: TypeInterner, node: StructuralType) -> string {
     }
     if node.kind.variant == "TypeParameter" {
         return "T" + _qualified_declaration_key(node.type_parameter_owner) + "P"
-            + number_to_string(node.type_parameter_index);
+            + int_to_string(node.type_parameter_index);
     }
     if node.kind.variant == "Applied" {
         return "A" + _encoded_string(_constructor_key(interner, node.constructor))
@@ -756,7 +757,7 @@ fn type_interner_len(interner: TypeInterner) -> int {
 }
 
 fn _render_qualified_declaration(id: QualifiedDeclarationId) -> string {
-    return id.origin.capsule + "/" + id.origin.module + "#d" + number_to_string(id.declaration.value);
+    return id.origin.capsule + "/" + id.origin.module + "#d" + int_to_string(id.declaration.value);
 }
 
 fn _render_constructor(interner: TypeInterner, id: TypeConstructorId) -> string {
@@ -792,7 +793,7 @@ fn render_structural_type(interner: TypeInterner, id: TypeId) -> string {
     if node.kind.variant == "Int" {
         let mut prefix = "u";
         if node.int_signed { prefix = "i"; }
-        return prefix + number_to_string(node.int_width);
+        return prefix + int_to_string(node.int_width);
     }
     if node.kind.variant == "Float" {
         if node.float_format.variant == "F16" { return "f16"; }
@@ -810,7 +811,7 @@ fn render_structural_type(interner: TypeInterner, id: TypeId) -> string {
             target = render_structural_type(interner, node.pointee);
         }
         if node.address_space == 0 { return prefix + target; }
-        return prefix + target + " as" + number_to_string(node.address_space);
+        return prefix + target + " as" + int_to_string(node.address_space);
     }
     if node.kind.variant == "Reference" {
         let mut prefix = "&";
@@ -818,7 +819,7 @@ fn render_structural_type(interner: TypeInterner, id: TypeId) -> string {
         return prefix + render_structural_type(interner, node.referent);
     }
     if node.kind.variant == "TypeParameter" {
-        return "T" + number_to_string(node.type_parameter_index) + "@"
+        return "T" + int_to_string(node.type_parameter_index) + "@"
             + _render_qualified_declaration(node.type_parameter_owner);
     }
     if node.kind.variant == "Applied" {
@@ -862,8 +863,7 @@ fn render_type_interner(interner: TypeInterner) -> string {
     loop {
         if index >= interner.types.length { break; }
         let id = TypeId { value: index };
-        output = output + "t" + number_to_string(index) + " hash="
-            + number_to_string(structural_type_hash(interner, id))
+        output = output + "t" + int_to_string(index) + " hash=" + int_to_string(structural_type_hash(interner, id))
             + " = "
             + render_structural_type(interner, id)
             + "\n";

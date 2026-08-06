@@ -6,12 +6,13 @@
 // imported by scope name), and the cache-implicit path (a scoped import
 // resolved against `~/.sfn/cache` on a manifest-less bare build).
 //
-// `number_to_string` comes from `../num_format`, its defining module, rather
+// `int_to_string` comes from the `sfn/strings` standard-library capsule rather
 // than via `../main`; `module_name_from_path` is defined in `main.sfn` and has
 // no other home.
+import { int_to_string } from "sfn/strings";
+
 import { _cr_source_imports_host, collect_scoped_import_specs } from "../capsule_import_scan";
 import { module_name_from_path } from "../main";
-import { number_to_string } from "../num_format";
 import { substring } from "../string_utils";
 import { toml_get_dependencies } from "../toml_parser";
 import { workspace_member_for_spec } from "./capability";
@@ -96,7 +97,7 @@ fn enumerate_binary_capsule_sources(project_root: string, entry_path: string) ->
         if iterations >= max_iterations {
             print.err("capsule-resolver: enumerate_binary_capsule_sources hit "
                 + "iteration cap ("
-                + number_to_string(max_iterations)
+                + int_to_string(max_iterations)
                 + ") under "
                 + src_dir
                 + " — some sources may be missing; please file a bug");

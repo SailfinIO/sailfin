@@ -29,11 +29,11 @@ import {
     with_subcommand
 } from "sfn/cli";
 import { ed25519_verify_utf8 } from "sfn/crypto";
+import { int_to_string } from "sfn/strings";
 
 import { _sha256_of_file_cmd, _shell_read_cmd, _toml_trim_cmd } from "../../build/fs";
 import { _env_flag, _get_home_cmd } from "../../build_flags";
 import { ToolchainDecision, toolchain_decide, toolchain_print_mismatch } from "../../capsule_resolver/toolchain";
-import { number_to_string } from "../../num_format";
 import { release_signing_public_key_hex } from "../../release_trust";
 import {
     char_code,
@@ -402,7 +402,7 @@ fn toolchain_install_to_base(version_arg: string, store_base: string, work_root:
     let tar_rc = process.run(["tar", "-xzf", tarball, "-C", extract_dir]);
     if tar_rc != 0 {
         print("error: failed to extract " + asset + " (tar exit "
-            + number_to_string(tar_rc)
+            + int_to_string(tar_rc)
             + ")");
         process.run(["rm", "-rf", tmp]);
         return 1;

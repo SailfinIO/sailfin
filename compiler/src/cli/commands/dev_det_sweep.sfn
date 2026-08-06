@@ -27,6 +27,7 @@ import {
     with_arg,
     with_flag
 } from "sfn/cli";
+import { int_to_string } from "sfn/strings";
 
 import {
     _collect_sfn_files_cmd,
@@ -35,7 +36,6 @@ import {
     _shell_read_cmd
 } from "../../build/fs";
 import { host_exe_name } from "../../build/target";
-import { number_to_string } from "../../num_format";
 import { _sort_strings_cmd } from "../../string_cmd_utils";
 import {
     char_code_at_text,
@@ -148,7 +148,7 @@ fn _det_count_nonascii(text: string) -> int {
 }
 
 fn _det_worker_argv(self_exe: string, seed: string, iters: int, out: string, src: string) -> string[] {
-    return [self_exe, "dev", "determinism-sweep", "--module", src, "--seed", seed, "--iters", number_to_string(iters), "--out", out];
+    return [self_exe, "dev", "determinism-sweep", "--module", src, "--seed", seed, "--iters", int_to_string(iters), "--out", out];
 }
 
 // Emit `src` `iters` times in an isolated per-module cwd, hash each output,
@@ -190,8 +190,7 @@ fn _det_worker(src: string, seed: string, iters: int, out: string) -> int ![io] 
         if k > iters { break; }
         process.run(["rm", "-rf", mod_cwd + "/build/sailfin"]);
         _ensure_dir_cmd(mod_cwd + "/build/sailfin");
-        let out_ll = out + "/out/" + safe + ".iter" + number_to_string(k)
-            + ".ll";
+        let out_ll = out + "/out/" + safe + ".iter" + int_to_string(k) + ".ll";
         let _ec = process.run_capture_cwd(["timeout", "60", abs_seed, "emit", "-o", out_ll, "llvm", abs_src], base_env, mod_cwd);
         let _o = process.capture_take_stdout();
         let _e = process.capture_take_stderr();
@@ -205,12 +204,12 @@ fn _det_worker(src: string, seed: string, iters: int, out: string) -> int ![io] 
             nonascii_total += _det_count_nonascii(contents);
         }
         hashes.push(h);
-        sizes = sizes + " " + number_to_string(sz);
+        sizes = sizes + " " + int_to_string(sz);
         k += 1;
     }
 
     let distinct = _det_distinct_count(hashes);
-    let row = slug + "\t" + number_to_string(distinct) + "\t" + number_to_string(nonascii_total)
+    let row = slug + "\t" + int_to_string(distinct) + "\t" + int_to_string(nonascii_total)
         + "\t"
         + sizes;
     fs.writeFile(out + "/rows/" + safe + ".tsv", row + "\n");
@@ -271,7 +270,7 @@ fn _det_parse_row(line: string) -> _DetRow {
 }
 
 // Minimal non-negative decimal parser for the row fields written by
-// `number_to_string` above — avoids pulling in a general int-parse dependency
+// `int_to_string` above — avoids pulling in a general int-parse dependency
 // for two small fixed-format columns.
 fn _det_parse_int(s: string) -> int {
     let mut value = 0;
@@ -361,11 +360,11 @@ fn _det_orchestrate(seed: string, jobs: int, iters: int, out_in: string, roots: 
     _ensure_dir_cmd(out + "/out");
     _ensure_dir_cmd(out + "/cwd");
 
-    print.err("[det-sweep] seed=" + seed + " modules=" + number_to_string(modules.length)
+    print.err("[det-sweep] seed=" + seed + " modules=" + int_to_string(modules.length)
         + " jobs="
-        + number_to_string(jobs)
+        + int_to_string(jobs)
         + " iters="
-        + number_to_string(iters));
+        + int_to_string(iters));
 
     let base_env = process.environ();
     let mut handles: int[] = [];
@@ -409,9 +408,9 @@ fn _det_orchestrate(seed: string, jobs: int, iters: int, out_in: string, roots: 
     let mut ri = 0;
     loop {
         if ri >= rows.length { break; }
-        results = results + rows[ri].module + "\t" + number_to_string(rows[ri].distinct)
+        results = results + rows[ri].module + "\t" + int_to_string(rows[ri].distinct)
             + "\t"
-            + number_to_string(rows[ri].nonascii)
+            + int_to_string(rows[ri].nonascii)
             + "\t"
             + rows[ri].sizes
             + "\n";
@@ -427,9 +426,9 @@ fn _det_orchestrate(seed: string, jobs: int, iters: int, out_in: string, roots: 
     loop {
         if di >= rows.length { break; }
         if rows[di].distinct > 1 {
-            print.err(rows[di].module + "\t" + number_to_string(rows[di].distinct)
+            print.err(rows[di].module + "\t" + int_to_string(rows[di].distinct)
                 + "\t"
-                + number_to_string(rows[di].nonascii)
+                + int_to_string(rows[di].nonascii)
                 + "\t"
                 + rows[di].sizes);
             nondet += 1;
@@ -443,9 +442,9 @@ fn _det_orchestrate(seed: string, jobs: int, iters: int, out_in: string, roots: 
     loop {
         if ni >= rows.length { break; }
         if rows[ni].nonascii > 0 {
-            print.err(rows[ni].module + "\t" + number_to_string(rows[ni].distinct)
+            print.err(rows[ni].module + "\t" + int_to_string(rows[ni].distinct)
                 + "\t"
-                + number_to_string(rows[ni].nonascii)
+                + int_to_string(rows[ni].nonascii)
                 + "\t"
                 + rows[ni].sizes);
             nonascii += 1;
@@ -459,9 +458,9 @@ fn _det_orchestrate(seed: string, jobs: int, iters: int, out_in: string, roots: 
     loop {
         if ei >= rows.length { break; }
         if _det_all_sizes_zero(rows[ei].sizes) {
-            print.err(rows[ei].module + "\t" + number_to_string(rows[ei].distinct)
+            print.err(rows[ei].module + "\t" + int_to_string(rows[ei].distinct)
                 + "\t"
-                + number_to_string(rows[ei].nonascii)
+                + int_to_string(rows[ei].nonascii)
                 + "\t"
                 + rows[ei].sizes);
             emit_failed += 1;
@@ -477,13 +476,13 @@ fn _det_orchestrate(seed: string, jobs: int, iters: int, out_in: string, roots: 
         wi += 1;
     }
     print.err("");
-    print.err("totals: non-deterministic=" + number_to_string(nondet)
+    print.err("totals: non-deterministic=" + int_to_string(nondet)
         + " nonascii="
-        + number_to_string(nonascii)
+        + int_to_string(nonascii)
         + " emit-failed="
-        + number_to_string(emit_failed)
+        + int_to_string(emit_failed)
         + " no-result="
-        + number_to_string(missing.length));
+        + int_to_string(missing.length));
 
     // Fail loudly rather than pass on an incomplete or vacuous sweep: a module
     // that never emitted (all-zero sizes) or whose worker left no row at all

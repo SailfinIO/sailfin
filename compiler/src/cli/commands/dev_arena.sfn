@@ -24,10 +24,10 @@ import {
     with_arg,
     with_flag
 } from "sfn/cli";
+import { int_to_string } from "sfn/strings";
 
 import { _collect_sfn_files_cmd } from "../../build/fs";
 import { _ensure_dir, _resolve_self_path } from "../../build/paths";
-import { number_to_string } from "../../num_format";
 import { _sort_strings_cmd } from "../../string_cmd_utils";
 import {
     char_code_at_text,
@@ -201,7 +201,7 @@ fn _arena_check_module(self_bin: string, src: string) -> boolean ![io] {
     }
 
     if strings_equal(no_content, yes_content) {
-        print("[arena] PASS: " + src + " (" + number_to_string(no_content.length)
+        print("[arena] PASS: " + src + " (" + int_to_string(no_content.length)
             + " bytes identical)");
         return true;
     }
@@ -212,7 +212,7 @@ fn _arena_check_module(self_bin: string, src: string) -> boolean ![io] {
     print("[arena]   SAILFIN_USE_ARENA=0: " + no_ll);
     print("[arena]   SAILFIN_USE_ARENA=1: " + yes_ll);
     if idx >= 0 {
-        print("[arena]   first divergence at line " + number_to_string(_line_number_at(no_content, idx))
+        print("[arena]   first divergence at line " + int_to_string(_line_number_at(no_content, idx))
             + ":");
         print("[arena]     [arena=0] " + _line_at(no_content, idx));
         print("[arena]     [arena=1] " + _line_at(yes_content, idx));
@@ -247,7 +247,7 @@ fn arena_run(matches: Matches, ctx: CliContext) -> int ![io] {
     _ensure_dir(_arena_work_dir());
 
     print("[arena] seed: " + self_bin);
-    print("[arena] modules: " + number_to_string(modules.length));
+    print("[arena] modules: " + int_to_string(modules.length));
     print("");
 
     let mut pass = 0;
@@ -262,10 +262,10 @@ fn arena_run(matches: Matches, ctx: CliContext) -> int ![io] {
     }
 
     print("");
-    print("[arena] summary: " + number_to_string(pass) + " passed, "
-        + number_to_string(fail)
+    print("[arena] summary: " + int_to_string(pass) + " passed, "
+        + int_to_string(fail)
         + " failed (of "
-        + number_to_string(modules.length)
+        + int_to_string(modules.length)
         + ")");
     if fail > 0 { return 1; }
     return 0;

@@ -35,6 +35,24 @@ fn ends_with(text: string, suffix: string) -> boolean {
     return strings_equal(substring(text, start, text.length), suffix);
 }
 
+fn strip_prefix(text: string, prefix: string) -> string {
+    // Remove prefix from the front of text if present; otherwise return text unchanged.
+    if prefix.length == 0 { return text; }
+    if !starts_with(text, prefix) { return text; }
+    return substring(text, prefix.length, text.length);
+}
+
+fn contains_string(values: string[], target: string) -> boolean {
+    // Returns true if any element of values equals target.
+    let mut i: int = 0;
+    loop {
+        if i >= values.length { break; }
+        if strings_equal(values[i], target) { return true; }
+        i += 1;
+    }
+    return false;
+}
+
 fn contains(text: string, needle: string) -> boolean {
     // Returns true if text contains needle.
     return find(text, needle, 0) >= 0;
@@ -53,6 +71,19 @@ fn find(text: string, needle: string, start: int) -> int {
             return i;
         }
         i += 1;
+    }
+    return -1;
+}
+
+fn last_index_of_char(text: string, ch: string) -> int {
+    // Find the last occurrence of the single character ch in text.
+    // Returns -1 if not found or if ch is not exactly one character.
+    if ch.length != 1 { return -1; }
+    let mut i: int = text.length - 1;
+    loop {
+        if i < 0 { return -1; }
+        if strings_equal(substring(text, i, i + 1), ch) { return i; }
+        i -= 1;
     }
     return -1;
 }
@@ -203,6 +234,12 @@ fn char_at_index(text: string, index: int) -> string {
     // Return the character at the given index, or empty string if out of bounds.
     if index < 0 || index >= text.length { return ""; }
     return substring(text, index, index + 1);
+}
+
+fn char_code_at(text: string, index: int) -> int {
+    // Return the character code at the given index, or -1 if out of bounds.
+    if index < 0 || index >= text.length { return -1; }
+    return char_code(char_at_index(text, index));
 }
 
 fn reverse(text: string) -> string {

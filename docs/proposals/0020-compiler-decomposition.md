@@ -4,8 +4,8 @@ title: Role-Oriented Compiler Capsules
 status: Accepted
 type: tooling
 created: 2026-06-22
-updated: 2026-08-05
-author: "agent:compiler-architect; project owner (direction + naming); agent:Codex (2026-08-03 amendment); agent:implementer (2026-08-05 provider slot)"
+updated: 2026-08-06
+author: "agent:compiler-architect; project owner (direction + naming); agent:Codex (2026-08-03 amendment); agent:implementer (2026-08-05 provider slot); agent:Sailbot (2026-08-06 narrow-stdlib matrix amendment)"
 tracking: "#345 (historical epic); successor implementation issues TBD"
 supersedes:
 superseded-by:
@@ -151,9 +151,9 @@ The allowed direct dependencies are:
 | `sfn/syntax` | runtime prelude and narrow standard-library capsules |
 | `sfn/ir` | runtime prelude and narrow standard-library capsules |
 | `sfn/analyzer` | `sfn/syntax`, `sfn/ir`, and narrow standard-library capsules |
-| `sfn/codegen` | `sfn/syntax`, `sfn/analyzer`, `sfn/ir` |
-| `sfn/codegen-llvm` | `sfn/ir` |
-| `sfn/codegen-native` | `sfn/ir` |
+| `sfn/codegen` | `sfn/syntax`, `sfn/analyzer`, `sfn/ir`, and narrow standard-library capsules |
+| `sfn/codegen-llvm` | `sfn/ir` and narrow standard-library capsules |
+| `sfn/codegen-native` | `sfn/ir` and narrow standard-library capsules |
 | `sfn/compiler` | all internal libraries, runtime, and required standard-library capsules |
 
 The intended data flow is:
@@ -166,6 +166,16 @@ source text
   -> sfn/codegen-llvm    (LLVM/object input)
   -> sfn/compiler        (artifact publication, assembly, and link)
 ```
+
+Narrow standard-library capsules (`sfn/strings`, `sfn/json`, `sfn/path`, and
+the rest of the non-capability-bearing set) are available to *every* internal
+role, including `sfn/codegen` and the codegen providers. They are leaf
+dependencies: they import no internal compiler capsule, so granting them
+creates no reverse edge and preserves dependency fan-out. Without this,
+§3.5.7's "generic helpers graduate" is unachievable for codegen and the
+providers, which would be left owning private copies of exactly the generic
+helpers the correction retires. Capability-bearing capsules remain restricted
+to `sfn/compiler`; that is the boundary this grant does not cross.
 
 `sfn/ir` is a representation dependency used by the middle stages, not an
 orchestrating stage. Its representations must therefore remain independent of

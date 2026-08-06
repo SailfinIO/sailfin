@@ -39,12 +39,12 @@ import {
     subcommand_path,
     with_subcommand
 } from "sfn/cli";
+import { int_to_string } from "sfn/strings";
 
 import { _ends_with } from "../build/paths";
 import { _runtime_bundle_exists } from "../build/runtime_objs";
 import { handle_selfhost_command } from "../cli_selfhost";
 import { ice_set_binary_dir } from "../ice";
-import { number_to_string } from "../num_format";
 import { command_def as add_command_def, run as add_run } from "./commands/add";
 import { command_def as bench_command_def, run as bench_run } from "./commands/bench";
 import { command_def as build_command_def, run as build_run } from "./commands/build";
@@ -171,11 +171,11 @@ fn sailfin_cli_main_with_paths(argv: string[], runtime_root: string, binary_dir:
 // unknown paths all emit the argv trace under the toggle (pinned by
 // `compiler/tests/e2e/compiler_debug_toggle_env_vars_test.sfn`).
 fn _v2_trace_argv(argv: string[]) ![io] {
-    print.err("cli: argv.len=" + number_to_string(argv.length));
+    print.err("cli: argv.len=" + int_to_string(argv.length));
     let mut trace_index: int = 0;
     loop {
         if trace_index >= argv.length { break; }
-        print.err("cli: argv[" + number_to_string(trace_index) + "]=" + argv[trace_index]);
+        print.err("cli: argv[" + int_to_string(trace_index) + "]=" + argv[trace_index]);
         trace_index += 1;
     }
 }
