@@ -53,6 +53,7 @@ fn intrinsic_effect_table() -> IntrinsicEffectTable {
     table = append_intrinsic_effects(table, "sailfin_intrinsic_fs_get_perms", ["io"]);
     table = append_intrinsic_effects(table, "sailfin_intrinsic_fs_list_dir", ["io"]);
     table = append_intrinsic_effects(table, "sailfin_intrinsic_fs_read_link", ["io"]);
+    table = append_intrinsic_effects(table, "sailfin_intrinsic_fs_is_directory", ["io"]);
     table = append_intrinsic_effects(table, "http.get", ["net.http"]);
     table = append_intrinsic_effects(table, "http.post", ["net.http"]);
     table = append_intrinsic_effects(table, "sleep", ["clock"]);
@@ -111,6 +112,7 @@ fn intrinsic_effect_table() -> IntrinsicEffectTable {
     table = append_intrinsic_effects(table, "fs.is_executable", ["io.fs"]);
     table = append_intrinsic_effects(table, "fs.symlink", ["io.fs"]);
     table = append_intrinsic_effects(table, "fs.read_link", ["io.fs"]);
+    table = append_intrinsic_effects(table, "fs.is_directory", ["io.fs"]);
     table = append_intrinsic_effects(table, "http_get", ["net.http"]);
     table = append_intrinsic_effects(table, "http_post", ["net.http"]);
     table = append_intrinsic_effects(table, "serve_start", ["net", "io"]);

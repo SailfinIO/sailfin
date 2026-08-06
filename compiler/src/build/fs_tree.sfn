@@ -27,20 +27,24 @@
 //     `fs.get_perms` cannot rescue this — its lowering masks `st_mode` to
 //     the low 12 bits (`& 0o7777`,
 //     `llvm/expression_lowering/native/core_call_emission/filesystem_intrinsics.sfn`),
-//     so the `S_IFDIR` bit never reaches the caller.
+//     so the `S_IFDIR` bit never reaches the caller. The
+//     `sailfin_intrinsic_fs_is_directory` sentinel that answers this
+//     properly now exists (SFN-755), but is not yet callable from Sailfin
+//     source: its runtime wrapper needs the sentinel present in the PINNED
+//     seed, which the next cadence bump supplies.
 //
 //     This is acceptable for every consumer here: cache shard and entry
 //     directories always hold at least one artifact, and an entry that has
 //     lost its artifact is exactly what `remove_empty_dirs_under` exists to
-//     reap. A non-destructive directory predicate would need a new
-//     `fs.is_directory` intrinsic, which is a seed gate — see SFN-755.
+//     reap. SFN-756 switches this walk over once the seed advances, and
+//     deletes this note.
 //
 // There is deliberately no `copy_tree` here. `cp -R`/`cp -a` has no
 // consumer in SFN-494, and the heuristic above is not merely lossy for a
 // copy: an empty source subdirectory would be treated as a file, creating a
 // spurious empty file at the destination before failing the whole copy.
 // The `cp -R` replacement lands with its first real consumer (SFN-495),
-// which can weigh `fs.is_directory` on the strength of having several.
+// on top of `fs.is_directory` once SFN-756 makes it callable.
 //
 // Symlinks: `fs.deleteFile` is `unlink(2)`, which removes a
 // symlink-to-directory without following it, so `remove_tree`'s deletion

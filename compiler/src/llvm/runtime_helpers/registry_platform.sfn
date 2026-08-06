@@ -307,6 +307,16 @@ fn _rh_descriptors_01(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "sailfin_intrinsic_fs_get_perms", symbol: "sailfin_intrinsic_fs_get_perms", return_type: "i64", parameter_types: ["i8*"], native_signature: null, c_abi_return_type: null
     });
+    // `sailfin_intrinsic_fs_is_directory` (SFN-755): the non-destructive
+    // directory predicate. Deliberately separate from `get_perms` rather
+    // than derived from it — `get_perms` masks `st_mode` to the low 12
+    // bits, which is what its `chmod` consumer wants (`_selfhost_promote_binary`
+    // carries the source mode onto the staged binary verbatim), but that
+    // mask strips `S_IFDIR` on the way out. Both share one `stat` call
+    // shape and differ only in which bits they keep.
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "sailfin_intrinsic_fs_is_directory", symbol: "sailfin_intrinsic_fs_is_directory", return_type: "i1", parameter_types: ["i8*"], native_signature: null, c_abi_return_type: null
+    });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "sailfin_intrinsic_fs_list_dir", symbol: "sailfin_intrinsic_fs_list_dir", return_type: "i8*", parameter_types: ["i8*"], native_signature: null, c_abi_return_type: null
     });

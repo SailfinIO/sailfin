@@ -1,0 +1,300 @@
+// compiler/tests/unit/fs_is_directory_sentinel_test.sfn
+//
+// Standing coverage for the `sailfin_intrinsic_fs_is_directory` sentinel
+// (SFN-755). The runtime wrapper `sfn_fs_is_directory` cannot exist until
+// the pinned seed carries the two new registry rows (the seed rejects the
+// wrapper with `E0420` today), so this file is the ONLY coverage the
+// lowering gets until that follow-up lands — it pins the emitted IR
+// directly rather than through a source-level call.
+//
+// Global-state hygiene. `install_llvm_provider_context` mutates a
+// module-level `_target_os`/`_target_arch` pair in `lowering_debug_state.sfn`
+// that every other test in the same process observes, and Sailfin has no
+// `defer`/`finally`, so a restore written as the last statement of a test
+// body is SKIPPED when an earlier `assert` fails. A restore alone therefore
+// cannot be relied on: one failing assertion here would silently retarget
+// every test that runs afterward, turning a single defect into a cascade of
+// unrelated failures — the worst possible triage signal.
+//
+// So the real protection is at entry, not exit: every test below installs
+// the context it needs as its FIRST statement and never depends on what a
+// predecessor left behind. The trailing restores are a courtesy to tests in
+// other files (which never install a context of their own) and are
+// best-effort on the success path only.
+import { find } from "sfn/strings";
+
+import { emit_filesystem_intrinsic } from "../../src/llvm/expression_lowering/native/core_call_emission/filesystem_intrinsics";
+import { LLVMProviderContext, install_llvm_provider_context } from "../../src/llvm/lowering_debug_state";
+import { render_runtime_helper_declarations } from "../../src/llvm/rendering";
+import { find_runtime_helper } from "../../src/llvm/runtime_helpers/mod";
+import {
+    ExpressionResult,
+    LLVMOperand,
+    RuntimeHelperDescriptor,
+    StringConstant,
+    TypeContext
+} from "../../src/llvm/types";
+import { NativeFunction } from "../../src/native_ir";
+
+// The default provider context installed by the driver: Linux/x86_64, every
+// trace/test-runner toggle off. Every test restores this before returning.
+fn _linux_context() -> LLVMProviderContext {
+    return LLVMProviderContext {
+        target_os: "Linux",
+        target_arch: "x86_64",
+        trace_lowering: false,
+        trace_call_lowering: false,
+        skip_module_globals: false,
+        test_runner_active: false,
+        test_runner_trace: false
+    };
+}
+
+fn _windows_context() -> LLVMProviderContext {
+    return LLVMProviderContext {
+        target_os: "Windows",
+        target_arch: "x86_64",
+        trace_lowering: false,
+        trace_call_lowering: false,
+        skip_module_globals: false,
+        test_runner_active: false,
+        test_runner_trace: false
+    };
+}
+
+// Empty type context: the sentinel row carries no prelude-mirror
+// reconciliation, so no struct/enum tables are consulted.
+fn _empty_context() -> TypeContext {
+    return TypeContext {
+        structs: [],
+        enums: [],
+        interfaces: [],
+        vtables: []
+    };
+}
+
+// True if any emitted line contains `needle` as a substring.
+fn _any_line_contains(lines: string[], needle: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= lines.length { break; }
+        if find(lines[i], needle, 0) >= 0 { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+test "fs is_directory sentinel: the POSIX leg stats and tests S_IFDIR" ![io] {
+    install_llvm_provider_context(_linux_context());
+
+    // Fetch the real row rather than fabricating a descriptor, so this test
+    // also pins the row's existence in the registry.
+    let descriptor = find_runtime_helper("sailfin_intrinsic_fs_is_directory");
+    assert descriptor != null;
+    if descriptor != null {
+        let operands: LLVMOperand[] = [LLVMOperand {
+            llvm_type: "i8*", value: "%path"
+        }];
+        let no_lines: string[] = [];
+        let no_diagnostics: string[] = [];
+        let no_constants: StringConstant[] = [];
+        let result = emit_filesystem_intrinsic(descriptor, operands, 0, no_lines, no_diagnostics, no_constants);
+
+        assert _any_line_contains(result.lines, "call i32 @stat(");
+        assert _any_line_contains(result.lines, "and i32 ");
+        assert _any_line_contains(result.lines, ", 61440");
+        assert _any_line_contains(result.lines, "icmp eq i32 ");
+        assert _any_line_contains(result.lines, ", 16384");
+        // `4095` is `get_perms`'s low-12-bit permission mask; its presence
+        // here would mean someone copy-pasted the wrong mask onto the type
+        // check instead of `S_IFMT` (61440).
+        assert ! _any_line_contains(result.lines, "4095");
+        assert ! _any_line_contains(result.lines, "GetFileAttributesA");
+
+        // The `st_mode` load must be threaded from
+        // `stat_st_mode_offset_value()`, which answers 24 on x86_64 Linux.
+        assert _any_line_contains(result.lines, ", i64 24");
+
+        // The phi, pinned as a whole line — the highest-value assertion in
+        // this file. Every check above still passes if the lowering returns
+        // the raw `icmp` (`%t8`) instead of the phi (`%t9`): the lines are
+        // all still emitted and the type is `i1` either way. But returning
+        // `%t8` is an SSA violation (defined in the `ok` block, used in
+        // `done`, which it does not dominate) that `llvm-as` rejects, and
+        // it is the single most likely bug in this shape of code. It also
+        // pins the fail leg's `false`, which is the "a path that cannot be
+        // inspected is not a directory" behaviour the lowering advertises.
+        assert _any_line_contains(result.lines, "  %t9 = phi i1 [ %t8, %is_directory_ok_0 ], [ false, %is_directory_fail_0 ]");
+
+        assert result.operand != null;
+        if result.operand != null {
+            assert result.operand.llvm_type == "i1";
+            // Returning the pre-phi value would satisfy every other
+            // assertion here.
+            assert result.operand.value == "%t9";
+        }
+    }
+
+    // Restore, even though this leg never left the default.
+    install_llvm_provider_context(_linux_context());
+}
+
+// The per-arch seam, pinned deliberately. `st_mode` sits at a DIFFERENT
+// byte offset on each supported target — `stat_st_mode_offset_value()`
+// (`compiler/src/llvm/lowering_debug_state.sfn`) answers 4 on Darwin, 16
+// on aarch64 Linux, 24 otherwise. A predicate that hardcoded one offset
+// would pass every x86_64 test and silently misread the file type on the
+// other two, which is precisely why this sentinel reuses that function
+// instead of carrying its own table. This test fails if someone inlines
+// a constant.
+test "fs is_directory sentinel: the st_mode offset tracks the target arch" ![io] {
+    let aarch64_context = LLVMProviderContext {
+        target_os: "Linux",
+        target_arch: "aarch64",
+        trace_lowering: false,
+        trace_call_lowering: false,
+        skip_module_globals: false,
+        test_runner_active: false,
+        test_runner_trace: false
+    };
+    install_llvm_provider_context(aarch64_context);
+
+    let descriptor = find_runtime_helper("sailfin_intrinsic_fs_is_directory");
+    assert descriptor != null;
+    if descriptor != null {
+        let operands: LLVMOperand[] = [LLVMOperand {
+            llvm_type: "i8*", value: "%path"
+        }];
+        let no_lines: string[] = [];
+        let no_diagnostics: string[] = [];
+        let no_constants: StringConstant[] = [];
+        let result = emit_filesystem_intrinsic(descriptor, operands, 0, no_lines, no_diagnostics, no_constants);
+
+        assert _any_line_contains(result.lines, ", i64 16");
+        assert ! _any_line_contains(result.lines, ", i64 24");
+    }
+
+    // Darwin is the anomalous leg and the one most worth pinning: offset 4,
+    // and a 16-bit `mode_t` there (`st_dev` i32 at 0, `st_mode` u16 at 4,
+    // `st_nlink` u16 at 6), so the `i32` load also picks up `st_nlink`.
+    // Benign only because `S_IFMT` sits in bits 12-15 — see the load-width
+    // note in `filesystem_intrinsics.sfn`.
+    let darwin_context = LLVMProviderContext {
+        target_os: "Darwin",
+        target_arch: "aarch64",
+        trace_lowering: false,
+        trace_call_lowering: false,
+        skip_module_globals: false,
+        test_runner_active: false,
+        test_runner_trace: false
+    };
+    install_llvm_provider_context(darwin_context);
+
+    let darwin_descriptor = find_runtime_helper("sailfin_intrinsic_fs_is_directory");
+    assert darwin_descriptor != null;
+    if darwin_descriptor != null {
+        let operands: LLVMOperand[] = [LLVMOperand {
+            llvm_type: "i8*", value: "%path"
+        }];
+        let no_lines: string[] = [];
+        let no_diagnostics: string[] = [];
+        let no_constants: StringConstant[] = [];
+        let result = emit_filesystem_intrinsic(darwin_descriptor, operands, 0, no_lines, no_diagnostics, no_constants);
+
+        assert _any_line_contains(result.lines, ", i64 4");
+        assert ! _any_line_contains(result.lines, ", i64 24");
+        assert ! _any_line_contains(result.lines, ", i64 16");
+    }
+
+    // Restore before any sibling test runs.
+    install_llvm_provider_context(_linux_context());
+}
+
+test "fs is_directory sentinel: the Windows leg tests FILE_ATTRIBUTE_DIRECTORY and rejects INVALID_FILE_ATTRIBUTES" ![io] {
+    install_llvm_provider_context(_windows_context());
+
+    let descriptor = find_runtime_helper("sailfin_intrinsic_fs_is_directory");
+    assert descriptor != null;
+    if descriptor != null {
+        let operands: LLVMOperand[] = [LLVMOperand {
+            llvm_type: "i8*", value: "%path"
+        }];
+        let no_lines: string[] = [];
+        let no_diagnostics: string[] = [];
+        let no_constants: StringConstant[] = [];
+        let result = emit_filesystem_intrinsic(descriptor, operands, 0, no_lines, no_diagnostics, no_constants);
+
+        // Asserted as whole lines, not substrings. Substring matching is too
+        // weak here in two ways: `", 16"` also matches `", 16384"` (S_IFDIR),
+        // so a leaked POSIX constant would pass; and no substring pins how
+        // the two comparisons are WIRED, which is where this leg can go
+        // wrong silently. The operand is fixed (`%path`) and the temp
+        // counter starts at 0, so the emitted sequence is deterministic.
+        assert _any_line_contains(result.lines, "  %t0 = call i32 @GetFileAttributesA(i8* %path)");
+        // Load-bearing, not defensive: `-1` (INVALID_FILE_ATTRIBUTES) is
+        // all-bits-set, so `FILE_ATTRIBUTE_DIRECTORY` (0x10) reads as set on
+        // a MISSING path too. Without this guard a path that does not exist
+        // reports as a directory.
+        assert _any_line_contains(result.lines, "  %t1 = icmp ne i32 %t0, -1");
+        // Both tests must read the SAME attribute word (`%t0`) ...
+        assert _any_line_contains(result.lines, "  %t2 = and i32 %t0, 16");
+        assert _any_line_contains(result.lines, "  %t3 = icmp ne i32 %t2, 0");
+        // ... and the result must be their conjunction. Dropping either
+        // operand here is the silent failure this pins: `%t3` alone answers
+        // `true` for a missing path, `%t1` alone answers `true` for a file.
+        assert _any_line_contains(result.lines, "  %t4 = and i1 %t1, %t3");
+        assert ! _any_line_contains(result.lines, "call i32 @stat(");
+        assert ! _any_line_contains(result.lines, "16384");
+
+        assert result.operand != null;
+        if result.operand != null {
+            assert result.operand.llvm_type == "i1";
+        }
+    }
+
+    // Restore before any sibling test runs.
+    install_llvm_provider_context(_linux_context());
+}
+
+test "fs is_directory sentinel: emits no declare for the sentinel symbol" ![io] {
+    install_llvm_provider_context(_linux_context());
+
+    // Modeled on the metadata-only rows guard
+    // (`runtime_helper_metadata_only_test.sfn`): the sentinel is skipped in
+    // `rendering.sfn`'s `_preamble_inlined` arm, so its fake symbol must
+    // never reach a `declare`.
+    let targets: string[] = ["sailfin_intrinsic_fs_is_directory"];
+    let no_locals: NativeFunction[] = [];
+    let no_imports: NativeFunction[] = [];
+    let lines = render_runtime_helper_declarations(targets, no_locals, no_imports, _empty_context());
+
+    assert ! _any_line_contains(lines, "sailfin_intrinsic_fs_is_directory");
+
+    // Positive control, mirroring the third test in
+    // `runtime_helper_metadata_only_test.sfn`. Without it the assertion
+    // above passes forever on a typo'd target string or a
+    // `render_runtime_helper_declarations` that returned nothing. It also
+    // pins that the skip keys on this specific sentinel target rather than
+    // on an `fs`-shaped prefix that would swallow real rows.
+    let bridged: string[] = ["fs.get_perms"];
+    let bridged_lines = render_runtime_helper_declarations(bridged, no_locals, no_imports, _empty_context());
+
+    assert _any_line_contains(bridged_lines, "@sfn_fs_get_perms(");
+}
+
+test "fs is_directory sentinel: a missing path operand is a diagnostic, not a fabricated result" ![io] {
+    install_llvm_provider_context(_linux_context());
+
+    let descriptor = find_runtime_helper("sailfin_intrinsic_fs_is_directory");
+    assert descriptor != null;
+    if descriptor != null {
+        let no_operands: LLVMOperand[] = [];
+        let no_lines: string[] = [];
+        let no_diagnostics: string[] = [];
+        let no_constants: StringConstant[] = [];
+        let result = emit_filesystem_intrinsic(descriptor, no_operands, 0, no_lines, no_diagnostics, no_constants);
+
+        assert result.diagnostics.length > 0;
+        assert result.operand == null;
+    }
+}

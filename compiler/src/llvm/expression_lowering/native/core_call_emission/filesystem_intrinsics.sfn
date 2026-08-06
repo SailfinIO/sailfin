@@ -372,6 +372,180 @@ fn emit_filesystem_intrinsic(helper_descriptor: RuntimeHelperDescriptor, final_o
         }
     }
 
+    // `is_directory(path) -> bool` sentinel (SFN-755): the non-destructive
+    // directory predicate. Both legs answer from a single syscall and
+    // never mutate, which is what separates this from the destructive
+    // probes (`fs.deleteFile` succeeds only on a file, `fs.removeDirectory`
+    // only on an empty directory) that a read-only walk cannot use.
+    //
+    // POSIX: the same `stat` + `st_mode` load `get_perms` performs, keeping
+    // a different field — `st_mode & S_IFMT` (0170000 = 61440) compared
+    // against `S_IFDIR` (0040000 = 16384) — where `get_perms` keeps the
+    // low 12 permission bits and discards the type. A `stat` failure
+    // (missing path, EACCES on a parent) yields `false` via the phi, so a
+    // path that cannot be inspected is reported "not a directory" rather
+    // than erroring; every consumer treats the predicate as a filter.
+    //
+    // `stat` FOLLOWS symlinks, so a symlink to a directory answers `true`
+    // (`lstat` would answer `false`). That matches `fs.exists`, which is
+    // also `stat`-based, and it is the behaviour a tree walker wants:
+    // `fs.listDirectory` is `opendir`, which follows too, so the predicate
+    // agrees with what the enumeration will actually do.
+    //
+    // Windows: `GetFileAttributesA` + `FILE_ATTRIBUTE_DIRECTORY` (0x10).
+    // The `!= -1` (INVALID_FILE_ATTRIBUTES) guard is load-bearing, not
+    // defensive — `-1` is all-bits-set, so the attribute test alone would
+    // report a MISSING path as a directory.
+    //
+    // The `st_mode` load is `i32` on every POSIX target even though Darwin's
+    // `mode_t` is 16-bit (`st_dev` i32 at 0, `st_mode` u16 at 4, `st_nlink`
+    // u16 at 6), so there the load also pulls `st_nlink` into the high half.
+    // That is harmless HERE only because `S_IFMT` (0170000) lives in bits
+    // 12-15 — inside the low 16 — exactly as `get_perms`' `& 0o7777` lives
+    // in bits 0-11. Both masks are safe by construction, not by accident.
+    // Anyone reading a WIDER field out of `st_mode` must narrow the load to
+    // `i16` on Darwin first; the read stays in bounds either way
+    // (`stat_buf_size_value()` over-allocates at 160 bytes against a 144-byte
+    // Darwin `struct stat`).
+    if helper_descriptor != null {
+        if helper_descriptor.symbol == "sailfin_intrinsic_fs_is_directory" {
+            if final_operands.length < 1 {
+                result_diagnostics.push("llvm lowering: sailfin_intrinsic_fs_is_directory requires (path: i8*) operand");
+            } else {
+                let _fs_leg = fs_platform_leg();
+                let _fs_path = final_operands[0].value;
+                if _fs_leg == "mingw" {
+                    let _fs_attr = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _fs_valid = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _fs_masked = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _fs_isdir = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _fs_out = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    result_lines.push("  " + _fs_attr
+                        + " = call i32 @GetFileAttributesA(i8* "
+                        + _fs_path
+                        + ")");
+                    result_lines.push("  " + _fs_valid + " = icmp ne i32 "
+                        + _fs_attr
+                        + ", -1");
+                    result_lines.push("  " + _fs_masked + " = and i32 "
+                        + _fs_attr
+                        + ", 16");
+                    result_lines.push("  " + _fs_isdir + " = icmp ne i32 "
+                        + _fs_masked
+                        + ", 0");
+                    result_lines.push("  " + _fs_out + " = and i1 " + _fs_valid
+                        + ", "
+                        + _fs_isdir);
+                    let _fs_operand = LLVMOperand {
+                        llvm_type: "i1",
+                        value: _fs_out
+                    };
+                    return ExpressionResult {
+                        lines: result_lines,
+                        temp_index: result_temp,
+                        operand: _fs_operand,
+                        diagnostics: result_diagnostics,
+                        string_constants: collected_string_constants
+                    };
+                } else {
+                    let _fs_id = number_to_string(result_temp);
+                    let _fs_bufsz = number_to_string(stat_buf_size_value());
+                    let _fs_off = number_to_string(stat_st_mode_offset_value());
+                    let _fs_buf = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _fs_bufp = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _fs_rc = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _fs_okc = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _fs_modep = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _fs_modepi = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _fs_mode = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _fs_fmt = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _fs_isdir = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _fs_out = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _fs_ok_lbl = "is_directory_ok_" + _fs_id;
+                    let _fs_fail_lbl = "is_directory_fail_" + _fs_id;
+                    let _fs_done_lbl = "is_directory_done_" + _fs_id;
+                    result_lines.push("  " + _fs_buf + " = alloca [" + _fs_bufsz
+                        + " x i8], align 8");
+                    result_lines.push("  " + _fs_bufp + " = getelementptr ["
+                        + _fs_bufsz
+                        + " x i8], ["
+                        + _fs_bufsz
+                        + " x i8]* "
+                        + _fs_buf
+                        + ", i32 0, i32 0");
+                    result_lines.push("  " + _fs_rc + " = call i32 @stat(i8* "
+                        + _fs_path
+                        + ", i8* "
+                        + _fs_bufp
+                        + ")");
+                    result_lines.push("  " + _fs_okc + " = icmp eq i32 "
+                        + _fs_rc
+                        + ", 0");
+                    result_lines.push("  br i1 " + _fs_okc + ", label %"
+                        + _fs_ok_lbl
+                        + ", label %"
+                        + _fs_fail_lbl);
+                    result_lines.push("");
+                    result_lines.push(_fs_ok_lbl + ":");
+                    result_lines.push("  " + _fs_modep
+                        + " = getelementptr i8, i8* "
+                        + _fs_bufp
+                        + ", i64 "
+                        + _fs_off);
+                    result_lines.push("  " + _fs_modepi + " = bitcast i8* "
+                        + _fs_modep
+                        + " to i32*");
+                    result_lines.push("  " + _fs_mode + " = load i32, i32* "
+                        + _fs_modepi);
+                    result_lines.push("  " + _fs_fmt + " = and i32 " + _fs_mode
+                        + ", 61440");
+                    result_lines.push("  " + _fs_isdir + " = icmp eq i32 "
+                        + _fs_fmt
+                        + ", 16384");
+                    result_lines.push("  br label %" + _fs_done_lbl);
+                    result_lines.push("");
+                    result_lines.push(_fs_fail_lbl + ":");
+                    result_lines.push("  br label %" + _fs_done_lbl);
+                    result_lines.push("");
+                    result_lines.push(_fs_done_lbl + ":");
+                    result_lines.push("  " + _fs_out + " = phi i1 [ "
+                        + _fs_isdir
+                        + ", %"
+                        + _fs_ok_lbl
+                        + " ], [ false, %"
+                        + _fs_fail_lbl
+                        + " ]");
+                    let _fs_operand = LLVMOperand {
+                        llvm_type: "i1",
+                        value: _fs_out
+                    };
+                    return ExpressionResult {
+                        lines: result_lines,
+                        temp_index: result_temp,
+                        operand: _fs_operand,
+                        diagnostics: result_diagnostics,
+                        string_constants: collected_string_constants
+                    };
+                }
+            }
+        }
+    }
+
     return ExpressionResult {
         lines: result_lines,
         temp_index: result_temp,
