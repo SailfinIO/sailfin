@@ -5,7 +5,7 @@ status: Accepted
 type: tooling
 created: 2026-06-22
 updated: 2026-08-06
-author: "agent:compiler-architect; project owner (direction + naming); agent:Codex (2026-08-03 amendment); agent:implementer (2026-08-05 provider slot)"
+author: "agent:compiler-architect; project owner (direction + naming); agent:Codex (2026-08-03 amendment); agent:implementer (2026-08-05 provider slot); agent:Sailbot (2026-08-06 §3.5 correction 7 prelude-slug extension)"
 tracking: "#345 (historical epic); Linear project Role-Oriented Compiler Capsules. §3.7 steps 1-2 (landed): SFN-705, SFN-706, SFN-707, SFN-708, SFN-709, SFN-710, SFN-711, SFN-712, SFN-713, SFN-714, SFN-715, SFN-717, SFN-718. §3.7 steps 3-8 (groomed 2026-08-06): SFN-734 through SFN-751."
 supersedes:
 superseded-by:
@@ -249,6 +249,32 @@ monolith, then moves files:
    helpers belong to `sfn/ir`; build filesystem helpers remain in
    `sfn/compiler`. There is no catch-all support capsule.
 
+   This includes the prelude's share of that surface. Seven files under
+   `compiler/src/` import from the slug `"runtime/prelude"`, and between them
+   they take exactly three symbols — `char_code` (4 sites), `substring` (3),
+   `char_at` (2) — which are `sfn/strings` material by the rule above.
+   §3.3 permits `sfn/syntax`, `sfn/ir`, and `sfn/analyzer` to depend on the
+   runtime prelude, so this is not an invariant breach; it is the same
+   generic-helper cleanup, and doing it here removes the prelude from four of
+   the five library capsules' dependency sets for free.
+
+   What remains after that cleanup is a migration hazard rather than a
+   boundary error, and it is **not this proposal's to fix.** `"runtime/prelude"`
+   is a path-shaped import slug resolving to something that is not a capsule:
+   no manifest resolution consults it, and the `capsules/sfn/prelude/` stub
+   that nominally represents it contains only a `capsule.toml` whose
+   `entry = "../../../runtime/prelude.sfn"` escapes its own root. §3.2 states
+   that filesystem location is not an implicit public API; this slug is one,
+   and the files holding it move to new relative depths under
+   `compiler/capsules/*/src/`. SFEP-0006 §2.11 already catalogues the four
+   privileges behind this (hard-coded location, hard-coded `runtime__prelude`
+   module name, a link position outside `llvm-link`'s merge, and an implicit
+   dependency from every other compile), and §4.8 already designs the fix —
+   `sfn/prelude` as a real `implicit = true` library capsule, which is
+   outstanding Stage F work. **Verify slug resolution from the new capsule
+   depths as part of step 3**, and treat any breakage as a reason to pull
+   SFEP-0006 §4.8 forward rather than to add a compensating path constant here.
+
 Each correction must reduce or preserve dependency fan-out. A move that creates
 a reverse edge is incomplete even if the workspace still compiles.
 
@@ -461,6 +487,10 @@ does not qualify as Implemented.
 - Prove `sfn/codegen-llvm` has no parser, analyzer, driver, filesystem, process,
   or network imports.
 - Prove no `capsules/sfn/*` source imports an internal compiler capsule.
+- Prove the `"runtime/prelude"` slug resolves from every capsule that still
+  holds it after §3.5 correction 7, at its post-move depth under
+  `compiler/capsules/*/src/`. A capsule that no longer needs the prelude should
+  assert it imports nothing from it.
 
 ### Behavioral preservation
 
