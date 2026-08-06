@@ -8,12 +8,14 @@
 //
 // `publish` takes a single optional positional `[path]` — the capsule
 // directory to publish, defaulting to `.` (the current directory). `run`
-// reproduces the legacy handler byte-for-byte: the same token resolution
-// (`SFN_TOKEN` env then `~/.sfn/credentials`), the same packaging, the same
-// registry upload, and every message and exit code:
+// reproduces the legacy handler: the same token resolution (`SFN_TOKEN` env
+// then `~/.sfn/credentials`), the same packaging, the same registry upload,
+// and every message and exit code, plus the private-capsule gate below:
 //   - 0 — published (server response printed).
-//   - 1 — no `capsule.toml`, missing name/version, no token, temp-file /
-//         digest / payload failure, or a non-2xx / unreachable registry.
+//   - 1 — no `capsule.toml`, missing name/version, a private capsule or an
+//         invalid `[capsule] publish` value (SFEP-0020 §3.6), no token,
+//         temp-file / digest / payload failure, or a non-2xx / unreachable
+//         registry.
 // The usage error (2) for an extra positional (`sfn publish a b c`) is
 // enforced by the v2 dispatch in `cli/main.sfn`: a second positional makes
 // the parse non-ok while still marking `publish` as descended, and the
@@ -54,7 +56,7 @@ import {
 } from "../../build/fs";
 import { _get_env_cmd, _get_home_cmd } from "../../build_flags";
 import { find_char_local, substring } from "../../string_utils";
-import { toml_get_name, toml_get_version } from "../../toml_parser";
+import { toml_get_name, toml_get_publish, toml_get_version } from "../../toml_parser";
 import { CliContext } from "../context";
 import { _resolve_registry_url_cmd } from "./cmd_shared";
 
@@ -66,8 +68,9 @@ fn command_def() -> Command {
 
 // Package the capsule at `[path]` (or the current directory) and upload it
 // to the registry, authenticating with the token from `SFN_TOKEN` or
-// `~/.sfn/credentials`. Byte-identical to the legacy `publish` command-handler
-// body. `ctx` is part of the per-command contract but unused here.
+// `~/.sfn/credentials`. Identical to the legacy `publish` command-handler body
+// apart from the private-capsule gate (SFEP-0020 §3.6), which runs before the
+// token lookup. `ctx` is part of the per-command contract but unused here.
 fn run(matches: Matches, ctx: CliContext) -> int ![io] {
     let mut capsule_dir: string = get(matches, "path");
     if capsule_dir.length > 0 {
@@ -94,6 +97,41 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io] {
     }
     if pkg_version.length == 0 {
         print("capsule.toml: missing capsule version");
+        return 1;
+    }
+
+    // SFEP-0020 §3.6: `[capsule] publish = false` is the private-capsule
+    // distribution boundary. The gate sits here deliberately — after the
+    // manifest yields the capsule name the diagnostic must report, and before
+    // credential discovery, packaging, and the registry upload. Reading the
+    // manifest above is itself a filesystem read, so the guarantee is not
+    // "before any side effect" but the narrower one that matters: a private
+    // capsule produces no package artifact, no credential access, and no
+    // network traffic. The gate reads only the manifest text already in scope,
+    // so an explicit `[path]`, current-directory discovery, and an
+    // `SFN_REGISTRY` override all reach it identically.
+    // An invalid value carries no policy (SFN-707), so it is rejected rather
+    // than coerced to either boolean. `E0612` is the code SFEP-0002 §3.7
+    // allocates for this refusal; it is emitted as a message prefix because
+    // every diagnostic in this command is a plain `print` + non-zero return.
+    let publish_policy = toml_get_publish(toml_text);
+    if publish_policy.error.length > 0 {
+        print(toml_path + ": " + publish_policy.error);
+        return 1;
+    }
+    // Fail closed on an unresolved policy. `toml_get_publish` pairs a null
+    // `publish` with a non-empty `error` today, so the branch below is
+    // unreachable — but this is a distribution boundary reached across a module
+    // edge, and permitting publication for a policy that did not resolve is the
+    // wrong default if that pairing ever changes.
+    if publish_policy.publish == null {
+        print(toml_path + ": could not resolve the [capsule] publish policy");
+        return 1;
+    }
+    let publish_allowed: boolean = publish_policy.publish;
+    if !publish_allowed {
+        print("E0612: " + pkg_name + ": " + toml_path
+            + " sets [capsule] publish = false — this capsule is private and cannot be published");
         return 1;
     }
 

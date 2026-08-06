@@ -21,9 +21,17 @@ here.
 - **Private-capsule manifest policy — schema.** `[capsule] publish` is parsed
   as a strict boolean and defaults to `true` for existing manifests. The typed
   `toml_get_publish` accessor returns no policy value plus a manifest error for
-  strings, integers, arrays, malformed values, or duplicate declarations;
-  downstream publish and resolver enforcement remains tracked separately
+  strings, integers, arrays, malformed values, or duplicate declarations
   (SFEP-0020 §3.6, SFN-707).
+- **Private-capsule manifest policy — publish enforcement** (SFEP-0020 §3.6,
+  SFEP-0002 §3.7 Phase 5, SFN-714). `sfn publish` rejects a capsule declaring
+  `[capsule] publish = false`, and any capsule whose `publish` value fails to
+  resolve, before credential discovery, packaging, and the registry upload; the
+  refusal is `E0612`, names the capsule, and exits 1. The gate reads the
+  manifest already loaded for name/version, so an explicit `[path]`,
+  current-directory discovery, and an `SFN_REGISTRY` override all reach it.
+  The resolver half of §3.6 — refusing a *fetched* manifest that carries
+  `publish = false` before staging or compilation — is **not** enforced yet.
 - **Build driver.** `<seed> build -p compiler` is the sole self-build driver
   (`compiler/src/cli_main.sfn` + `capsule_resolver.sfn` — pure orchestration,
   no fixups). The `scripts/build.sh` orchestrator (Stage E PR7, #383) and the

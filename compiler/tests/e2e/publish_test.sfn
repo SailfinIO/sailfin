@@ -74,6 +74,18 @@ fn _make_capsule(dir: string, name: string, version: string) -> void ![io] {
     fs.writeFile(dir + "/src/mod.sfn", "fn hello() -> string {\n    return \"hello\";\n}\n");
 }
 
+// Same as `_make_capsule`, but inserts `publish_line` (raw manifest text,
+// e.g. `publish = false`) as its own line right after `version = "..."`.
+fn _make_capsule_with_publish(dir: string, name: string, version: string, publish_line: string) -> void ![io] {
+    fs.createDirectory(dir + "/src", true);
+    let toml = "[capsule]\nname = \"" + name + "\"\nversion = \"" + version
+        + "\"\n"
+        + publish_line
+        + "\n\n[dependencies]\n\n[capabilities]\nrequired = [\"io\"]\n\n[build]\nentry = \"src/mod.sfn\"\n";
+    fs.writeFile(dir + "/capsule.toml", toml);
+    fs.writeFile(dir + "/src/mod.sfn", "fn hello() -> string {\n    return \"hello\";\n}\n");
+}
+
 // Write `<home>/.sfn/credentials` with the fake token, as the .sh does.
 fn _write_credentials(home: string) -> void ![io] {
     fs.createDirectory(home + "/.sfn", true);
@@ -173,6 +185,24 @@ fn _first_line(text: string) -> string {
     let lines = split(text, "\n");
     if lines.length == 0 { return text; }
     return lines[0];
+}
+
+// Absolute path to the compiler under test. Needed for the `sh -c "cd ... &&
+// exec ..."` cwd-discovery test, since a relative binary path would not
+// resolve after the shell changes directory.
+fn _abs_sfn_bin() -> string ![io] {
+    let bin = _sfn_bin();
+    if substring(bin, 0, 1) == "/" { return bin; }
+    let exit = process.run_capture(["pwd"], _child_env());
+    let out = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    // Fail here rather than returning a bogus path: a failed or empty `pwd`
+    // would otherwise make the cwd test fail inside the shell, for a reason
+    // that has nothing to do with the gate under test.
+    assert exit == 0;
+    let pwd = _first_line(out);
+    assert pwd.length > 0;
+    return pwd + "/" + bin;
 }
 
 // ---- Test 1: publish with too many args shows usage ----
@@ -421,4 +451,156 @@ test "publish: SFN_REGISTRY strips trailing slash" ![io] {
     assert fs.exists(captured);
     let url = _first_line(fs.readFile(captured));
     assert url == "https://slashy.test/api/publish";
+}
+
+// ---- SFEP-0020 §3.6 / SFN-714: [capsule] publish = false private-capsule
+// gate. The gate sits between manifest-name resolution and credential
+// discovery / packaging / registry upload, so it must reject before any of
+// those side effects regardless of how the capsule was discovered. ----
+// ---- Test 14: private capsule is rejected before credential discovery ----
+test "publish: private capsule is rejected before credential discovery" ![io] {
+    let root = _test_root("t14");
+    let home = root + "/home";
+    let workdir = root + "/work";
+    fs.createDirectory(home, true);
+    // No credentials written, and SFN_TOKEN omitted: without the gate this
+    // run would fail on the missing token instead of the private-capsule
+    // rejection. Asserting the token message's absence is the ordering proof.
+    _make_capsule_with_publish(workdir, "private/cap", "1.0.0", "publish = false");
+    let e = _env_for(home, "", []);
+    let _exit = process.run_capture([_sfn_bin(), "publish", workdir], e);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    let all = out + err;
+    assert _exit != 0;
+    assert contains(all, "private/cap");
+    assert contains(all, "is private and cannot be published");
+    assert ! contains(all, "no auth token found");
+    assert ! contains(all, "packaging");
+    assert contains(all, "E0612");
+}
+
+// ---- Test 15: private capsule makes no network call ----
+test "publish: private capsule makes no network call" ![io] {
+    let root = _test_root("t15");
+    let home = root + "/home";
+    let workdir = root + "/work";
+    let shim_dir = root + "/shim";
+    let captured = root + "/body";
+    _write_credentials(home);
+    _make_capsule_with_publish(workdir, "private/cap", "1.0.0", "publish = false");
+    _make_curl_shim_capture_body(shim_dir);
+    let e = _env_for(home, shim_dir, ["CAPTURE_BODY_TO=" + captured]);
+    let _exit = process.run_capture([_sfn_bin(), "publish", workdir], e);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    let all = out + err;
+    assert _exit != 0;
+    assert contains(all, "is private and cannot be published");
+    // curl was never invoked, so the shim never wrote the capture file.
+    assert ! fs.exists(captured);
+    assert ! contains(all, "packaging");
+}
+
+// ---- Test 16: registry override cannot bypass the private gate ----
+test "publish: registry override cannot bypass the private gate" ![io] {
+    let root = _test_root("t16");
+    let home = root + "/home";
+    let workdir = root + "/work";
+    let shim_dir = root + "/shim";
+    let captured = root + "/url";
+    _write_credentials(home);
+    _make_capsule_with_publish(workdir, "private/cap", "1.0.0", "publish = false");
+    _make_curl_shim_capture_url(shim_dir);
+    let e = _env_for(home, shim_dir, ["CAPTURE_URL_TO=" + captured, "SFN_REGISTRY=http://127.0.0.1:9/private-bypass"]);
+    let _exit = process.run_capture([_sfn_bin(), "publish", workdir], e);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    let all = out + err;
+    assert _exit != 0;
+    assert contains(all, "is private and cannot be published");
+    assert ! fs.exists(captured);
+    assert ! contains(all, "packaging");
+}
+
+// ---- Test 17: cwd discovery cannot bypass the private gate ----
+// run_capture (two-arg form) cannot chdir, so this exercises the no-path
+// codepath via `sh -c "cd ... && exec ..."` instead, which requires an
+// absolute binary path since the shell has already changed directory.
+test "publish: cwd discovery cannot bypass the private gate" ![io] {
+    let root = _test_root("t17");
+    let home = root + "/home";
+    let workdir = root + "/work";
+    _write_credentials(home);
+    _make_capsule_with_publish(workdir, "private/cap", "1.0.0", "publish = false");
+    let bin = _abs_sfn_bin();
+    let e = _env_for(home, "", []);
+    let _exit = process.run_capture(["sh", "-c", "cd '" + workdir
+        + "' && exec '"
+        + bin
+        + "' publish"], e);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    let all = out + err;
+    assert _exit != 0;
+    assert contains(all, "private/cap");
+    assert contains(all, "is private and cannot be published");
+}
+
+// ---- Test 18: explicit publish = true preserves publishing ----
+test "publish: explicit publish = true preserves publishing" ![io] {
+    let root = _test_root("t18");
+    let home = root + "/home";
+    let workdir = root + "/work";
+    let shim_dir = root + "/shim";
+    let captured = root + "/body";
+    _write_credentials(home);
+    _make_capsule_with_publish(workdir, "test/pkg", "1.0.0", "publish = true");
+    _make_curl_shim_capture_body(shim_dir);
+    let e = _env_for(home, shim_dir, ["CAPTURE_BODY_TO=" + captured]);
+    let _exit = process.run_capture([_sfn_bin(), "publish", workdir], e);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert contains(out + err, "packaging test/pkg@1.0.0");
+    assert fs.exists(captured);
+}
+
+// ---- Test 19: omitted publish preserves publishing ----
+test "publish: omitted publish preserves publishing" ![io] {
+    let root = _test_root("t19");
+    let home = root + "/home";
+    let workdir = root + "/work";
+    let shim_dir = root + "/shim";
+    let captured = root + "/body";
+    _write_credentials(home);
+    _make_capsule(workdir, "test/pkg", "1.0.0");
+    _make_curl_shim_capture_body(shim_dir);
+    let e = _env_for(home, shim_dir, ["CAPTURE_BODY_TO=" + captured]);
+    let _exit = process.run_capture([_sfn_bin(), "publish", workdir], e);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert contains(out + err, "packaging test/pkg@1.0.0");
+    assert fs.exists(captured);
+}
+
+// ---- Test 20: invalid publish value is a manifest error ----
+test "publish: invalid publish value is a manifest error" ![io] {
+    let root = _test_root("t20");
+    let home = root + "/home";
+    let workdir = root + "/work";
+    let shim_dir = root + "/shim";
+    let captured = root + "/body";
+    _write_credentials(home);
+    // A quoted string must not be coerced to either boolean.
+    _make_capsule_with_publish(workdir, "test/pkg", "1.0.0", "publish = \"false\"");
+    _make_curl_shim_capture_body(shim_dir);
+    let e = _env_for(home, shim_dir, ["CAPTURE_BODY_TO=" + captured]);
+    let _exit = process.run_capture([_sfn_bin(), "publish", workdir], e);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    let all = out + err;
+    assert _exit != 0;
+    assert contains(all, "manifest error");
+    assert ! contains(all, "packaging");
+    assert ! fs.exists(captured);
 }
