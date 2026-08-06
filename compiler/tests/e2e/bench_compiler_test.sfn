@@ -34,7 +34,7 @@ test "bench: --compiler on a single module reports a summary" ![io] {
     let work = nested_runner_scratch("bench-compiler-summary");
     assert work.length > 0;
     fs.createDirectory(work, true);
-    let exit = process.run_capture([_sfn_bin(), "bench", "--compiler", "--module", "num_format", "--top", "1", "--work-dir", work], _child_env());
+    let exit = process.run_capture([_sfn_bin(), "bench", "--compiler", "--module", "build_flags", "--top", "1", "--work-dir", work], _child_env());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     report_child_failure("bench --compiler summary", exit, out, err);
@@ -54,18 +54,18 @@ test "bench: --compiler honors an isolated work dir per invocation" ![io] {
     fs.createDirectory(work_a, true);
     fs.createDirectory(work_b, true);
 
-    let shared = "build/bench/num_format.ll";
+    let shared = "build/bench/build_flags.ll";
     let shared_existed = fs.exists(shared);
     let mut shared_len_before = 0;
     if shared_existed { shared_len_before = fs.readFile(shared).length; }
 
-    let exit_a = process.run_capture([_sfn_bin(), "bench", "--compiler", "--module", "num_format", "--top", "1", "--work-dir", work_a], _child_env());
+    let exit_a = process.run_capture([_sfn_bin(), "bench", "--compiler", "--module", "build_flags", "--top", "1", "--work-dir", work_a], _child_env());
     let out_a = process.capture_take_stdout();
     let err_a = process.capture_take_stderr();
     report_child_failure("bench --compiler isolation a", exit_a, out_a, err_a);
     assert exit_a == 0;
 
-    let exit_b = process.run_capture([_sfn_bin(), "bench", "--compiler", "--module", "num_format", "--top", "1", "--work-dir", work_b], _child_env());
+    let exit_b = process.run_capture([_sfn_bin(), "bench", "--compiler", "--module", "build_flags", "--top", "1", "--work-dir", work_b], _child_env());
     let out_b = process.capture_take_stdout();
     let err_b = process.capture_take_stderr();
     report_child_failure("bench --compiler isolation b", exit_b, out_b, err_b);
@@ -74,14 +74,14 @@ test "bench: --compiler honors an isolated work dir per invocation" ![io] {
     // Compiler bench mode deletes <work_dir>/<module>.ll before each emit
     // (_run_compiler_mode); a shared default work dir let parallel pool jobs
     // invalidate one another's output (SFN-723). Distinct --work-dir roots
-    // must each retain their own non-empty num_format.ll.
-    assert fs.exists(work_a + "/num_format.ll");
-    assert fs.readFile(work_a + "/num_format.ll").length > 0;
-    assert fs.exists(work_b + "/num_format.ll");
-    assert fs.readFile(work_b + "/num_format.ll").length > 0;
+    // must each retain their own non-empty build_flags.ll.
+    assert fs.exists(work_a + "/build_flags.ll");
+    assert fs.readFile(work_a + "/build_flags.ll").length > 0;
+    assert fs.exists(work_b + "/build_flags.ll");
+    assert fs.readFile(work_b + "/build_flags.ll").length > 0;
 
     // A before/after snapshot (not `assert !fs.exists(shared)`) because the
-    // shared default may already hold a stale num_format.ll from a
+    // shared default may already hold a stale build_flags.ll from a
     // developer's earlier `make bench`; asserting absence would flake on
     // that pre-existing state. SFN-723 only requires that this invocation,
     // routed through --work-dir, leaves the shared default untouched.

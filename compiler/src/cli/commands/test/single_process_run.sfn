@@ -1,3 +1,5 @@
+import { int_to_string } from "sfn/strings";
+
 import { Program, Statement } from "../../../ast";
 import { _sanitize_filename_cmd, _write_text_cmd } from "../../../build/fs";
 import { build_target_os, target_exe_name } from "../../../build/target";
@@ -17,7 +19,6 @@ import { empty_import_symbols } from "../../../effect_imports";
 import { format_backend_failure_banner } from "../../../ice";
 import { compile_tests_to_llvm_file_with_module_imports, module_name_from_path } from "../../../main";
 import { LayoutManifest } from "../../../native_ir";
-import { number_to_string } from "../../../num_format";
 import { parse_program } from "../../../parser/mod";
 import {
     TestEntry,
@@ -320,7 +321,7 @@ fn _run_single_process(test_files: string[], file_suite_index: int[], suites_in:
                 }
                 if json_output {
                     let outcome = _outcome_setup_failure(_synthetic_assert_failure(path, "link failed (clang exit="
-                        + number_to_string(link_rc)
+                        + int_to_string(link_rc)
                         + ")"));
                     let packed = _emit_file_test_events(entries, outcome);
                     total_passed += _trj_decode_passed(packed);
@@ -338,7 +339,7 @@ fn _run_single_process(test_files: string[], file_suite_index: int[], suites_in:
                 // log audits) sees one shape.
                 let lf_basename = _package_basename(path);
                 print("[test] FAIL: " + lf_basename + " (exit code "
-                    + number_to_string(link_rc)
+                    + int_to_string(link_rc)
                     + ")");
                 suites[file_suite_index[index]].fail_count += 1;
                 suites[file_suite_index[index]].failed_files.push(lf_basename);
@@ -381,7 +382,7 @@ fn _run_single_process(test_files: string[], file_suite_index: int[], suites_in:
             if !json_output {
                 let test_basename = _package_basename(path);
                 print("[test] RETRY: " + test_basename + " (exit code "
-                    + number_to_string(br.rc)
+                    + int_to_string(br.rc)
                     + ", retrying once)");
             }
             // The streamed records live on the child's own pipe, so a
@@ -392,7 +393,7 @@ fn _run_single_process(test_files: string[], file_suite_index: int[], suites_in:
         }
         let run_rc = br.rc;
         if trace_runner {
-            print.err("test runner: exec done (exit=" + number_to_string(run_rc)
+            print.err("test runner: exec done (exit=" + int_to_string(run_rc)
                 + ")");
         }
         // A spawn failure with no binary on disk at the attempted path is
@@ -430,7 +431,7 @@ fn _run_single_process(test_files: string[], file_suite_index: int[], suites_in:
                 let rf_basename = _package_basename(path);
                 if res_failed > 0 {
                     print("[test] FAIL: " + rf_basename + " (exit code "
-                        + number_to_string(run_rc)
+                        + int_to_string(run_rc)
                         + ")");
                     suites[file_suite_index[index]].fail_count += 1;
                     suites[file_suite_index[index]].failed_files.push(rf_basename);
@@ -454,7 +455,7 @@ fn _run_single_process(test_files: string[], file_suite_index: int[], suites_in:
                 let mut effective = failure;
                 if !effective.present {
                     effective = _synthetic_assert_failure(path, "test process exited with code "
-                        + number_to_string(run_rc));
+                        + int_to_string(run_rc));
                 }
                 let failed_index = locate_failing_test(entries, effective);
                 let outcome = _outcome_failed_at(failed_index as int, effective, file_elapsed_ms as int);
@@ -479,8 +480,7 @@ fn _run_single_process(test_files: string[], file_suite_index: int[], suites_in:
             // attribution the grep heuristic was reconstructing
             // post-hoc.
             let rf_basename = _package_basename(path);
-            print("[test] FAIL: " + rf_basename + " (exit code "
-                + number_to_string(run_rc)
+            print("[test] FAIL: " + rf_basename + " (exit code " + int_to_string(run_rc)
                 + ")");
             if failure.present {
                 print("test failed: " + _format_assert_failure(path, failure));

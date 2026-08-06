@@ -1,8 +1,9 @@
+import { int_to_string } from "sfn/strings";
+
 import { Program } from "../../../ast";
 import { _ensure_dir_cmd, _sanitize_filename_cmd } from "../../../build/fs";
 import { assemble_runtime_capsule_link_inputs, write_runtime_identity_stamp } from "../../../build/runtime_objs";
 import { build_target_os } from "../../../build/target";
-import { number_to_string } from "../../../num_format";
 import { parse_program } from "../../../parser/mod";
 import { runtime_capsule_from_root } from "../../../runtime_capsule_resolver";
 import { collect_test_entries, render_start_event, render_summary_event } from "../../../test_runner_json";
@@ -99,7 +100,7 @@ fn _run_multi_file(test_files: string[], file_suite_index: int[], suites_in: Tes
                 + " (children will retry per file)");
         } else {
             let candidate_nonce = _sanitize_filename_cmd(sub_root) + "-"
-                + number_to_string(monotonic_millis());
+                + int_to_string(monotonic_millis());
             let warm_identity = _test_bin_runtime_identity(runtime_root, _sanitize_filename_cmd(sub_root));
             if write_runtime_identity_stamp(warm_caps, sub_root, "-O0", binary_dir, candidate_nonce, warm_identity, build_target_os()) {
                 stamp_nonce = candidate_nonce;
@@ -187,7 +188,7 @@ fn _run_multi_file(test_files: string[], file_suite_index: int[], suites_in: Tes
             loop {
                 if launched >= test_files.length { break; }
                 if launched - ti >= jobs { break; }
-                let spawn_scratch = sub_root + "/sub-" + number_to_string(launched);
+                let spawn_scratch = sub_root + "/sub-" + int_to_string(launched);
                 _ensure_dir_cmd(spawn_scratch);
                 handles.push(process.spawn_with_env(_pool_child_argv(self_exe, test_files[launched], name_filter, tag_filter, json_output, no_test_cache), _pool_child_env(pool_base_env, spawn_scratch, sub_root, stamp_nonce, update_snapshots, json_output, self_exe)));
                 launched += 1;
@@ -259,11 +260,11 @@ fn _run_multi_file(test_files: string[], file_suite_index: int[], suites_in: Tes
             let rti = retry_pending[ri];
             let rpath = test_files[rti];
             let rsuite_idx = file_suite_index[rti];
-            let rchild_scratch = sub_root + "/sub-" + number_to_string(rti);
+            let rchild_scratch = sub_root + "/sub-" + int_to_string(rti);
             if !json_output {
                 print("[test] RETRY: " + _package_basename(rpath)
                     + " (exit code "
-                    + number_to_string(retry_rc[ri])
+                    + int_to_string(retry_rc[ri])
                     + ", retrying once)");
             }
             // The retry's records live on its own fresh pipe — no
@@ -312,7 +313,7 @@ fn _run_multi_file(test_files: string[], file_suite_index: int[], suites_in: Tes
             // SFEP-0050: spawn via `spawn_with_env` + reap so the child's
             // `summary` (now on its captured stderr) is skimmed, not lost
             // to inherited stdio, exactly like the pool path.
-            let child_scratch = sub_root + "/sub-" + number_to_string(ti);
+            let child_scratch = sub_root + "/sub-" + int_to_string(ti);
             _ensure_dir_cmd(child_scratch);
             let child_env = _pool_child_env(pool_base_env, child_scratch, sub_root, stamp_nonce, update_snapshots, json_output, self_exe);
             let child_argv = _pool_child_argv(self_exe, path, name_filter, tag_filter, json_output, no_test_cache);
@@ -324,7 +325,7 @@ fn _run_multi_file(test_files: string[], file_suite_index: int[], suites_in: Tes
                 if !json_output {
                     print("[test] RETRY: " + _package_basename(path)
                         + " (exit code "
-                        + number_to_string(reap.rc)
+                        + int_to_string(reap.rc)
                         + ", retrying once)");
                 }
                 reap = _reap_test_child(process.spawn_with_env(child_argv, child_env), deadline_ms, json_output);

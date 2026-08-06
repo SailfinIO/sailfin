@@ -8,10 +8,11 @@
 //
 // `module_name_from_path` has no home outside `../main` (defined at
 // `main.sfn:170`), so this module still reaches the compiler root for that one
-// symbol; `number_to_string` comes from its defining module instead.
+// symbol; `int_to_string` comes from its defining module instead.
+import { int_to_string } from "sfn/strings";
+
 import { _cr_find_substring, collect_relative_import_specs } from "../capsule_import_scan";
 import { module_name_from_path } from "../main";
-import { number_to_string } from "../num_format";
 import { substring } from "../string_utils";
 import { _cr_collect_capsule_sources, enumerate_capsule_sources } from "./discovery";
 import { _cr_dirname, _cr_ends_with, _cr_path_join } from "./paths";
@@ -293,7 +294,7 @@ fn _cr_enumerate_relative_sources_memo(entry_path: string, members: WorkspaceMem
         if iterations >= max_iterations {
             print.err("capsule-resolver: enumerate_relative_sources hit "
                 + "iteration cap ("
-                + number_to_string(max_iterations)
+                + int_to_string(max_iterations)
                 + ") — some relative imports may be missing; please file a bug");
             break;
         }

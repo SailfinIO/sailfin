@@ -44,6 +44,7 @@ import {
     with_arg,
     with_flag
 } from "sfn/cli";
+import { int_to_string } from "sfn/strings";
 
 import { AssertFailure, _empty_assert_failure } from "../../../assert_failure";
 import { Program, Statement } from "../../../ast";
@@ -85,7 +86,6 @@ import { ImportSymbolTable, empty_import_symbols } from "../../../effect_imports
 import { format_backend_failure_banner } from "../../../ice";
 import { compile_tests_to_llvm_file_with_module_imports, module_name_from_path } from "../../../main";
 import { LayoutManifest } from "../../../native_ir";
-import { number_to_string } from "../../../num_format";
 import { parse_program } from "../../../parser/mod";
 import { runtime_capsule_from_root } from "../../../runtime_capsule_resolver";
 import { _has_prefix_cmd, _sort_strings_cmd } from "../../../string_cmd_utils";
@@ -243,7 +243,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     let jobs: int = _resolve_test_jobs(matches);
     if jobs < 1 || jobs > 256 {
         print("sfn test: --jobs requires a positive integer in [1, 256] (got '"
-            + number_to_string(jobs)
+            + int_to_string(jobs)
             + "')");
         return 2;
     }
@@ -482,7 +482,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     // below groups every test under one resolver pass whose
     // `native_texts` is the UNION of every test's imports — and tests
     // with conflicting expectations for the same symbol cannot
-    // coexist in that union. The canonical case: `number_to_string`
+    // coexist in that union. The canonical case: `int_to_string`
     // resolves to the `![pure]` int-signature import for
     // `cross_module_int_signature_test` (pinning the #633 fix) but to
     // the `double` runtime-helper descriptor for `pure_assert_smoke_test`

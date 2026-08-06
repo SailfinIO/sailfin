@@ -17,6 +17,7 @@
 // runner's `SAILFIN_TEST_SCRATCH` (or a fresh `mkdtemp` when unset), so
 // concurrent pool workers never share an output path (`.claude/rules/
 // no-bash-e2e.md`).
+import { int_to_string } from "sfn/strings";
 import { nested_runner_scratch } from "sfn/test";
 
 import { assemble_link_inputs } from "../../src/build/clang_argv";
@@ -26,10 +27,9 @@ import {
     _cr_run_bounded_processes_with_stats,
     _cr_run_parallel_emit
 } from "../../src/capsule_emit_parallel";
-import { number_to_string } from "../../src/main";
 
 fn _valid_source(n: int) -> string {
-    return "fn add" + number_to_string(n)
+    return "fn add" + int_to_string(n)
         + "(a: int, b: int) -> int {\n    return a + b;\n}\n";
 }
 

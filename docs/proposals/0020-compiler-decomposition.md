@@ -5,7 +5,7 @@ status: Accepted
 type: tooling
 created: 2026-06-22
 updated: 2026-08-06
-author: "agent:compiler-architect; project owner (direction + naming); agent:Codex (2026-08-03 amendment); agent:implementer (2026-08-05 provider slot); agent:Sailbot (2026-08-06 §3.5 correction 7 prelude-slug extension)"
+author: "agent:compiler-architect; project owner (direction + naming); agent:Codex (2026-08-03 amendment); agent:implementer (2026-08-05 provider slot); agent:Sailbot (2026-08-06 narrow-stdlib matrix amendment; 2026-08-06 §3.5 correction 7 prelude-slug extension)"
 tracking: "#345 (historical epic); Linear project Role-Oriented Compiler Capsules. §3.7 steps 1-2 (landed): SFN-705, SFN-706, SFN-707, SFN-708, SFN-709, SFN-710, SFN-711, SFN-712, SFN-713, SFN-714, SFN-715, SFN-717, SFN-718. §3.7 steps 3-8 (groomed 2026-08-06): SFN-734 through SFN-751."
 supersedes:
 superseded-by:
@@ -151,9 +151,9 @@ The allowed direct dependencies are:
 | `sfn/syntax` | runtime prelude and narrow standard-library capsules |
 | `sfn/ir` | runtime prelude and narrow standard-library capsules |
 | `sfn/analyzer` | `sfn/syntax`, `sfn/ir`, and narrow standard-library capsules |
-| `sfn/codegen` | `sfn/syntax`, `sfn/analyzer`, `sfn/ir` |
-| `sfn/codegen-llvm` | `sfn/ir` |
-| `sfn/codegen-native` | `sfn/ir` |
+| `sfn/codegen` | `sfn/syntax`, `sfn/analyzer`, `sfn/ir`, and narrow standard-library capsules |
+| `sfn/codegen-llvm` | `sfn/ir` and narrow standard-library capsules |
+| `sfn/codegen-native` | `sfn/ir` and narrow standard-library capsules |
 | `sfn/compiler` | all internal libraries, runtime, and required standard-library capsules |
 
 The intended data flow is:
@@ -166,6 +166,16 @@ source text
   -> sfn/codegen-llvm    (LLVM/object input)
   -> sfn/compiler        (artifact publication, assembly, and link)
 ```
+
+Narrow standard-library capsules (`sfn/strings`, `sfn/json`, `sfn/path`, and
+the rest of the non-capability-bearing set) are available to *every* internal
+role, including `sfn/codegen` and the codegen providers. They are leaf
+dependencies: they import no internal compiler capsule, so granting them
+creates no reverse edge and preserves dependency fan-out. Without this,
+§3.5.7's "generic helpers graduate" is unachievable for codegen and the
+providers, which would be left owning private copies of exactly the generic
+helpers the correction retires. Capability-bearing capsules remain restricted
+to `sfn/compiler`; that is the boundary this grant does not cross.
 
 `sfn/ir` is a representation dependency used by the middle stages, not an
 orchestrating stage. Its representations must therefore remain independent of
@@ -252,7 +262,8 @@ monolith, then moves files:
    This includes the prelude's share of that surface. Seven files under
    `compiler/src/` import from the slug `"runtime/prelude"`, and between them
    they take exactly three symbols — `char_code` (4 sites), `substring` (3),
-   `char_at` (2) — which are `sfn/strings` material by the rule above.
+   `char_at` (2) — which are `sfn/strings` material by the rule above, and
+   reachable there from every holding capsule under §3.3's narrow-stdlib grant.
    §3.3 permits `sfn/syntax`, `sfn/ir`, and `sfn/analyzer` to depend on the
    runtime prelude, so this is not an invariant breach; it is the same
    generic-helper cleanup, and doing it here removes the prelude from four of

@@ -12,7 +12,8 @@
 // typed_ssa_verify.sfn. This module is intentionally not imported from
 // main.sfn: it is checked and self-hostable but not yet selected by ordinary
 // builds (SFN-454).
-import { number_to_string } from "./num_format";
+import { int_to_string } from "sfn/strings";
+
 import { char_at, char_code } from "runtime/prelude";
 
 // ---------------------------------------------------------------------------
@@ -431,7 +432,7 @@ fn metadata_value_key(module: Module, v: MetadataValue) -> string {
         if v.bool_value { return "b:true"; }
         return "b:false";
     }
-    if v.kind == "Int" { return "i:" + number_to_string(v.int_value); }
+    if v.kind == "Int" { return "i:" + int_to_string(v.int_value); }
     if v.kind == "String" {
         return "s:\"" + _tssa_json_escape(v.string_value) + "\"";
     }

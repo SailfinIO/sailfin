@@ -39,6 +39,7 @@ import {
     with_flag,
     with_subcommand
 } from "sfn/cli";
+import { int_to_string } from "sfn/strings";
 
 import {
     BOOTSTRAP_MANIFEST_PATH,
@@ -59,7 +60,6 @@ import {
     source_fingerprint_path,
     write_fingerprint
 } from "../../build/source_fingerprint";
-import { number_to_string } from "../../num_format";
 import { starts_with, strings_equal, substring } from "../../string_utils";
 import { _strip_build_metadata, resolve_compiler_version } from "../../version";
 import { CliContext } from "../context";
@@ -351,7 +351,7 @@ fn _dev_bootstrap_build(force: boolean) -> int ![io, net] {
     if rc != 0 {
         fs.deleteFile(pending_fingerprint_path());
         print.err("error: compiler build failed (seed " + m.version + ", exit "
-            + number_to_string(rc)
+            + int_to_string(rc)
             + ")");
         return rc;
     }
@@ -375,7 +375,7 @@ fn _dev_bootstrap_build(force: boolean) -> int ![io, net] {
         fs.deleteFile(pending_fingerprint_path());
         print.err("error: the compiler built at " + built_program_path()
             + " failed its smoke check (exit "
-            + number_to_string(smoke_rc)
+            + int_to_string(smoke_rc)
             + "); "
             + out
             + " was left unchanged");
@@ -485,7 +485,7 @@ fn _dev_bootstrap_install(from_path: string) -> int ![io] {
         fs.deleteFile(pending_path);
         print.err("error: the compiler at " + src
             + " failed its smoke check (exit "
-            + number_to_string(smoke_rc)
+            + int_to_string(smoke_rc)
             + "); "
             + out
             + " was left unchanged");
@@ -527,7 +527,7 @@ fn _dev_bootstrap_check() -> int ![io, net] {
     let build_rc = _bootstrap_run_compiler_build(m);
     if build_rc != 0 {
         print.err("error: compiler build failed (seed " + m.version + ", exit "
-            + number_to_string(build_rc)
+            + int_to_string(build_rc)
             + ")");
         return build_rc;
     }
@@ -539,7 +539,7 @@ fn _dev_bootstrap_check() -> int ![io, net] {
     let smoke_rc = process.run([built, "version"]);
     if smoke_rc != 0 {
         print.err("error: the built compiler failed its smoke check (exit "
-            + number_to_string(smoke_rc)
+            + int_to_string(smoke_rc)
             + ")");
         return smoke_rc;
     }

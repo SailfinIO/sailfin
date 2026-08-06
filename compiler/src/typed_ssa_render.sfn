@@ -4,7 +4,8 @@
 // typed_ssa.sfn). The output is a canonical, human-readable debug dump used
 // by tests and diagnostics; it is not a parseable surface. Format is
 // normative in SFEP-0059 §10.7 (docs/proposals/0059-typed-ssa-activation.md).
-import { number_to_string } from "./num_format";
+import { int_to_string } from "sfn/strings";
+
 import {
     BinaryOp,
     CapabilityAtom,
@@ -46,16 +47,16 @@ fn _render_type(t: TssaType) -> string {
     if t.kind.variant == "Int" {
         let mut signedness: string = "unsigned";
         if t.int_signed { signedness = "signed"; }
-        return "int(" + signedness + "," + number_to_string(t.int_width) + ")";
+        return "int(" + signedness + "," + int_to_string(t.int_width) + ")";
     }
     if t.kind.variant == "Float" {
-        return "float(" + number_to_string(t.float_width) + ")";
+        return "float(" + int_to_string(t.float_width) + ")";
     }
     // Pointer
     if t.pointee == -1 {
-        return "ptr(opaque,as" + number_to_string(t.address_space) + ")";
+        return "ptr(opaque,as" + int_to_string(t.address_space) + ")";
     }
-    return "ptr(t" + number_to_string(t.pointee) + ",as" + number_to_string(t.address_space)
+    return "ptr(t" + int_to_string(t.pointee) + ",as" + int_to_string(t.address_space)
         + ")";
 }
 
@@ -64,7 +65,7 @@ fn _render_metadata_value(module: Module, v: MetadataValue) -> string {
         if v.bool_value { return "true"; }
         return "false";
     }
-    if v.kind == "Int" { return number_to_string(v.int_value); }
+    if v.kind == "Int" { return int_to_string(v.int_value); }
     if v.kind == "String" {
         return "\"" + _tssa_render_json_escape(v.string_value) + "\"";
     }
@@ -162,7 +163,7 @@ fn _render_convert_kind_name(kind: ConvertKind) -> string {
 fn _render_instr(module: Module, instr: Instr) -> string {
     let mut prefix: string = "";
     if instr.result != -1 {
-        prefix = "v" + number_to_string(instr.result) + " = ";
+        prefix = "v" + int_to_string(instr.result) + " = ";
     }
     if instr.kind.variant == "ConstBool" {
         let mut value: string = "false";
@@ -170,30 +171,30 @@ fn _render_instr(module: Module, instr: Instr) -> string {
         return prefix + "const_bool " + value;
     }
     if instr.kind.variant == "ConstInt" {
-        return prefix + "const_int " + number_to_string(instr.int_value);
+        return prefix + "const_int " + int_to_string(instr.int_value);
     }
     if instr.kind.variant == "ConstFloat" {
-        return prefix + "const_float " + number_to_string(instr.float_bits);
+        return prefix + "const_float " + int_to_string(instr.float_bits);
     }
     if instr.kind.variant == "Unary" {
         return prefix + _render_unary_op_name(instr.unary_op) + " v"
-            + number_to_string(instr.operand_a);
+            + int_to_string(instr.operand_a);
     }
     if instr.kind.variant == "Binary" {
         return prefix + _render_binary_op_name(instr.binary_op) + " v"
-            + number_to_string(instr.operand_a)
+            + int_to_string(instr.operand_a)
             + ", v"
-            + number_to_string(instr.operand_b);
+            + int_to_string(instr.operand_b);
     }
     if instr.kind.variant == "Compare" {
         return prefix + _render_compare_pred_name(instr.compare_pred) + " v"
-            + number_to_string(instr.operand_a)
+            + int_to_string(instr.operand_a)
             + ", v"
-            + number_to_string(instr.operand_b);
+            + int_to_string(instr.operand_b);
     }
     if instr.kind.variant == "Convert" {
         return prefix + _render_convert_kind_name(instr.convert_kind) + " v"
-            + number_to_string(instr.operand_a);
+            + int_to_string(instr.operand_a);
     }
     // Call
     let mut args: string = "";
@@ -201,15 +202,14 @@ fn _render_instr(module: Module, instr: Instr) -> string {
     loop {
         if i >= instr.call_args.length { break; }
         if i > 0 { args = args + ", "; }
-        args = args + "v" + number_to_string(instr.call_args[i]);
+        args = args + "v" + int_to_string(instr.call_args[i]);
         i += 1;
     }
-    return prefix + "call f" + number_to_string(instr.call_function) + "("
-        + args
+    return prefix + "call f" + int_to_string(instr.call_function) + "(" + args
         + ") effects=e"
-        + number_to_string(instr.call_effects)
+        + int_to_string(instr.call_effects)
         + " capabilities=c"
-        + number_to_string(instr.call_capabilities);
+        + int_to_string(instr.call_capabilities);
 }
 
 fn _render_value_list(ids: int[]) -> string {
@@ -218,7 +218,7 @@ fn _render_value_list(ids: int[]) -> string {
     loop {
         if i >= ids.length { break; }
         if i > 0 { out = out + ", "; }
-        out = out + "v" + number_to_string(ids[i]);
+        out = out + "v" + int_to_string(ids[i]);
         i += 1;
     }
     return out;
@@ -226,25 +226,23 @@ fn _render_value_list(ids: int[]) -> string {
 
 fn _render_terminator(term: Terminator) -> string {
     if term.kind.variant == "Branch" {
-        return "branch b" + number_to_string(term.target) + "("
+        return "branch b" + int_to_string(term.target) + "("
             + _render_value_list(term.args)
             + ")";
     }
     if term.kind.variant == "CondBranch" {
-        return "cond_branch v" + number_to_string(term.condition) + ", b"
-            + number_to_string(term.target)
+        return "cond_branch v" + int_to_string(term.condition) + ", b"
+            + int_to_string(term.target)
             + "("
             + _render_value_list(term.args)
             + "), b"
-            + number_to_string(term.else_target)
+            + int_to_string(term.else_target)
             + "("
             + _render_value_list(term.else_args)
             + ")";
     }
     if term.kind.variant == "Return" {
-        if term.has_value {
-            return "return v" + number_to_string(term.value);
-        }
+        if term.has_value { return "return v" + int_to_string(term.value); }
         return "return";
     }
     // Unreachable
@@ -257,14 +255,14 @@ fn _render_block_params(ids: int[], types: int[]) -> string {
     loop {
         if i >= ids.length { break; }
         if i > 0 { out = out + ", "; }
-        out = out + "v" + number_to_string(ids[i]) + ":t" + number_to_string(types[i]);
+        out = out + "v" + int_to_string(ids[i]) + ":t" + int_to_string(types[i]);
         i += 1;
     }
     return out;
 }
 
 fn _render_block(module: Module, block: SsaBlock) -> string {
-    let mut out: string = "  b" + number_to_string(block.id) + "("
+    let mut out: string = "  b" + int_to_string(block.id) + "("
         + _render_block_params(block.params, block.param_types)
         + "):\n";
     let mut i: int = 0;
@@ -285,8 +283,8 @@ fn _render_function_params(func: SsaFunction) -> string {
         loop {
             if i >= entry.params.length { break; }
             if i > 0 { out = out + ", "; }
-            out = out + "v" + number_to_string(entry.params[i]) + ":t"
-                + number_to_string(entry.param_types[i]);
+            out = out + "v" + int_to_string(entry.params[i]) + ":t"
+                + int_to_string(entry.param_types[i]);
             i += 1;
         }
         return out;
@@ -295,7 +293,7 @@ fn _render_function_params(func: SsaFunction) -> string {
     loop {
         if i >= func.parameters.length { break; }
         if i > 0 { out = out + ", "; }
-        out = out + "t" + number_to_string(func.parameters[i]);
+        out = out + "t" + int_to_string(func.parameters[i]);
         i += 1;
     }
     return out;
@@ -312,11 +310,11 @@ fn _render_function(module: Module, func: SsaFunction) -> string {
     let mut out: string = _render_linkage_prefix(func) + "fn " + name + "("
         + _render_function_params(func)
         + ") -> t"
-        + number_to_string(func.result)
+        + int_to_string(func.result)
         + " effects=e"
-        + number_to_string(func.effects)
+        + int_to_string(func.effects)
         + " capabilities=c"
-        + number_to_string(func.capabilities);
+        + int_to_string(func.capabilities);
     if func.is_defined {
         out = out + " {\n";
         let mut i: int = 0;
@@ -336,22 +334,21 @@ fn render_module(module: Module) -> string {
     let mut i: int = 0;
     loop {
         if i >= module.types.length { break; }
-        out = out + "type t" + number_to_string(i) + " = " + _render_type(module.types[i])
+        out = out + "type t" + int_to_string(i) + " = " + _render_type(module.types[i])
             + "\n";
         i += 1;
     }
     i = 0;
     loop {
         if i >= module.effect_sets.length { break; }
-        out = out + "effects e" + number_to_string(i) + " = {"
-            + _render_effect_set(module, i)
+        out = out + "effects e" + int_to_string(i) + " = {" + _render_effect_set(module, i)
             + "}\n";
         i += 1;
     }
     i = 0;
     loop {
         if i >= module.capability_sets.length { break; }
-        out = out + "capabilities c" + number_to_string(i) + " = {"
+        out = out + "capabilities c" + int_to_string(i) + " = {"
             + _render_capability_set(module, i)
             + "}\n";
         i += 1;

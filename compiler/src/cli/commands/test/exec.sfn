@@ -1,6 +1,7 @@
+import { int_to_string } from "sfn/strings";
+
 import { AssertFailure, _empty_assert_failure } from "../../../assert_failure";
 import { _get_env_cmd } from "../../../build_flags";
-import { number_to_string } from "../../../num_format";
 import { char_code_at_text, index_of, substring } from "../../../string_utils";
 import { TestResultRecord, parse_test_record_line } from "../../../test_results";
 
@@ -93,7 +94,7 @@ fn _is_signal_exit(exit_code: int) -> boolean {
 // a distinct crash signal, and `_emit_crash_diagnostic_neutral` covers it
 // with wording that doesn't assert a cause.
 fn _emit_crash_diagnostic(basename: string, exit_code: int) -> void ![io] {
-    print("[test] FAIL: " + basename + " (exit code " + number_to_string(exit_code)
+    print("[test] FAIL: " + basename + " (exit code " + int_to_string(exit_code)
         + " — child terminated by signal; output may be truncated "
         + "(crash before stdio flush))");
 }
@@ -104,7 +105,7 @@ fn _emit_crash_diagnostic(basename: string, exit_code: int) -> void ![io] {
 // authoritative signal) rather than implying a truncated/corrupted
 // crash the way `_emit_crash_diagnostic` does for real signal kills.
 fn _emit_crash_diagnostic_neutral(basename: string, exit_code: int) -> void ![io] {
-    print("[test] FAIL: " + basename + " (exit code " + number_to_string(exit_code)
+    print("[test] FAIL: " + basename + " (exit code " + int_to_string(exit_code)
         + " — this is the ordinary exit code of a failed assertion or "
         + "abort(); see the test's own reported assertion line above)");
 }

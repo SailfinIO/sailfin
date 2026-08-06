@@ -36,7 +36,7 @@ test "bench json: --compiler emits sailfin.bench/v1 envelope" ![io] {
     let work = nested_runner_scratch("bench-json-compiler");
     assert work.length > 0;
     fs.createDirectory(work, true);
-    let exit = process.run_capture([_sfn_bin(), "bench", "--compiler", "--module", "num_format", "--json", "--work-dir", work], _child_env());
+    let exit = process.run_capture([_sfn_bin(), "bench", "--compiler", "--module", "build_flags", "--json", "--work-dir", work], _child_env());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     report_child_failure("bench --compiler --json", exit, out, err);
@@ -117,7 +117,7 @@ test "bench json: stdout is a single JSON object, no human table" ![io] {
     let work = nested_runner_scratch("bench-json-stdout");
     assert work.length > 0;
     fs.createDirectory(work, true);
-    let exit = process.run_capture([_sfn_bin(), "bench", "--compiler", "--module", "num_format", "--json", "--work-dir", work], _child_env());
+    let exit = process.run_capture([_sfn_bin(), "bench", "--compiler", "--module", "build_flags", "--json", "--work-dir", work], _child_env());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     report_child_failure("bench --json stdout shape", exit, out, err);

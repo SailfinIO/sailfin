@@ -33,8 +33,8 @@ import {
     with_flag,
     with_subcommand
 } from "sfn/cli";
+import { int_to_string } from "sfn/strings";
 
-import { number_to_string } from "../../num_format";
 import { _sort_strings_cmd } from "../../string_cmd_utils";
 import { strings_equal } from "../../string_utils";
 import { CliContext } from "../context";
@@ -244,11 +244,11 @@ fn _shard_run_one(name: string, json: boolean, jobs: int, ctx: CliContext) -> in
     }
     if def.total > 0 {
         argv.push("--shard");
-        argv.push(number_to_string(def.index) + "/" + number_to_string(def.total));
+        argv.push(int_to_string(def.index) + "/" + int_to_string(def.total));
     }
     if jobs >= 1 {
         argv.push("--jobs");
-        argv.push(number_to_string(jobs));
+        argv.push(int_to_string(jobs));
     }
     if json { argv.push("--json"); }
 
@@ -340,9 +340,9 @@ fn _shard_cover() -> int ![io] {
     }
 
     if rc == 0 {
-        print("[shard-cover] ok: " + number_to_string(full.length)
+        print("[shard-cover] ok: " + int_to_string(full.length)
             + " *_test.sfn across "
-            + number_to_string(defs.length)
+            + int_to_string(defs.length)
             + " shards; no gaps or overlaps");
     }
     return rc;

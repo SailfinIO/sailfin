@@ -1,3 +1,5 @@
+import { int_to_string } from "sfn/strings";
+
 // compiler/src/build/runtime_objs.sfn
 //
 // Runtime-object compile/cache orchestration extracted from
@@ -19,7 +21,7 @@ import {
 import { _env_flag } from "../build_flags";
 import { ParallelProcessTask, _cr_resolve_jobs, _cr_run_bounded_processes } from "../capsule_emit_parallel";
 import { resolve_import_module_slug_for_module } from "../llvm/imports";
-import { module_name_from_path, number_to_string } from "../main";
+import { module_name_from_path } from "../main";
 import { parse_native_imports_for_import } from "../native_ir_api";
 import { RuntimeCapsuleArtifacts } from "../runtime_capsule_resolver";
 import { resolve_compiler_version } from "../version";
@@ -837,7 +839,7 @@ fn _prepare_runtime_sfn_object(self_path: string, cap_prefix: string, src: strin
         if ll_tmp.length > 0 { fs.deleteFile(ll_tmp); }
         print("sfn build: failed to emit runtime sfn-source " + src
             + " (child exit="
-            + number_to_string(rc)
+            + int_to_string(rc)
             + ")");
         return _ready_runtime_sfn_object("", stats);
     }
@@ -1040,7 +1042,7 @@ fn _stage_one_runtime_sfn_import_context(self_path: string, src: string, slug: s
         print("sfn build: failed to stage runtime sfn-source import-context for "
             + src
             + " (child exit="
-            + number_to_string(rc)
+            + int_to_string(rc)
             + ")");
         if staged.length > 0 { fs.deleteFile(staged); }
         return false;
