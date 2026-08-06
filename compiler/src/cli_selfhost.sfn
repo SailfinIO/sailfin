@@ -1,3 +1,5 @@
+import { int_to_string } from "sfn/strings";
+
 // compiler/src/cli_selfhost.sfn
 //
 // CLI handler for `sfn selfhost` — the triple-pass self-host
@@ -66,7 +68,6 @@ import {
     determinism_diff_to_text,
     make_determinism_module
 } from "./build_report";
-import { number_to_string } from "./main";
 import { substring } from "./string_utils";
 
 // Resolved configuration for one `sfn selfhost` invocation. Defaults
@@ -579,7 +580,7 @@ fn handle_selfhost_command(args: string[], binary_dir: string) -> int ![io] {
     _ensure_dir_recursive_cmd(s2_bin_dir);
     let s2_rc = _selfhost_build_stage(cfg.first_pass, s2_scratch, s2_work, s2_linked_bin);
     if s2_rc != 0 {
-        print.err("[selfhost] stage2 build failed (exit=" + number_to_string(s2_rc)
+        print.err("[selfhost] stage2 build failed (exit=" + int_to_string(s2_rc)
             + ")");
         return s2_rc;
     }
@@ -623,7 +624,7 @@ fn handle_selfhost_command(args: string[], binary_dir: string) -> int ![io] {
     _ensure_dir_recursive_cmd(s3_bin_dir);
     let s3_rc = _selfhost_build_stage(cfg.seedcheck_out, s3_scratch, s3_work, s3_linked_bin);
     if s3_rc != 0 {
-        print.err("[selfhost] stage3 build failed (exit=" + number_to_string(s3_rc)
+        print.err("[selfhost] stage3 build failed (exit=" + int_to_string(s3_rc)
             + ")");
         return s3_rc;
     }

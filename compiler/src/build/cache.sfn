@@ -1,3 +1,5 @@
+import { int_to_string } from "sfn/strings";
+
 // compiler/src/build/cache.sfn
 //
 // Build-cache/spec/sidecar/report helpers extracted from cli_main.sfn
@@ -22,7 +24,6 @@ import {
     parse_scope_name
 } from "../capsule_artifact";
 import { ProjectCapsuleResult } from "../capsule_resolver/types";
-import { number_to_string } from "../main";
 import {
     toml_get_build_kind,
     toml_get_entry,
@@ -56,14 +57,14 @@ fn _write_llvm_text(path: string, llvm: string) ![io] {
 // `--json`'s machine-readable report.
 fn _print_cache_summary(stats: CacheStats) ![io] {
     if cache_stats_is_empty(stats) { return; }
-    print.err("[cache] hits=" + number_to_string(stats.hits) + " misses="
-        + number_to_string(stats.misses)
+    print.err("[cache] hits=" + int_to_string(stats.hits) + " misses="
+        + int_to_string(stats.misses)
         + " stores="
-        + number_to_string(stats.stores)
+        + int_to_string(stats.stores)
         + " invalid_keys="
-        + number_to_string(stats.invalid_keys)
+        + int_to_string(stats.invalid_keys)
         + " copy_failures="
-        + number_to_string(stats.copy_failures));
+        + int_to_string(stats.copy_failures));
 }
 
 // Stage C2a — write `build/capsules/<scope>/<name>/manifest.json`
