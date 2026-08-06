@@ -3,7 +3,6 @@ name: test-runner
 description: Runs Sailfin compiler tests safely (with timeouts; the compiler self-caps memory) and provides intelligent failure analysis. Use for running tests, diagnosing failures, and verifying changes haven't broken the compiler.
 tools: Bash, Read, Grep, Glob
 model: sonnet
-maxTurns: 20
 color: yellow
 ---
 
