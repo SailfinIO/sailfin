@@ -3,9 +3,11 @@ import { int_to_string } from "sfn/strings";
 // compiler/src/build/determinism.sfn
 //
 // Determinism (pass-2 / sidecar) check orchestration extracted from
-// cli_main.sfn (SFEP-0027 §3.1, issue #1732). Behavior-preserving
-// move: bodies are verbatim; this module is pure `![io]` build-driver
-// orchestration (no fixups, no post-processing of compiler output).
+// cli_main.sfn (SFEP-0027 §3.1, issue #1732) as a behavior-preserving
+// move. Bodies were verbatim at extraction; `_run_determinism_pass2`
+// has since been de-shelled (SFN-752). This module is pure `![io]`
+// build-driver orchestration (no fixups, no post-processing of
+// compiler output).
 import {
     DeterminismModule,
     DeterminismSnapshot,
@@ -15,7 +17,7 @@ import {
     make_determinism_module
 } from "../build_report";
 import { capsule_artifact_manifest_path, is_safe_scope_name, parse_scope_name } from "../capsule_artifact";
-import { _sha256_of_file_cmd, _shell_single_quote_arg } from "./fs";
+import { _sha256_of_file_cmd } from "./fs";
 import { _find_substring_from, _resolve_self_path } from "./paths";
 import { build_target_os, target_exe_name } from "./target";
 
@@ -168,19 +170,23 @@ fn _pass2_out_path(pass2_work_dir: string, is_library: boolean, target_os: strin
 // sibling of pass 1's; never propagates `-o` (pass 2 derives from
 // its own work-dir).
 //
-// In `--json` mode pass 2's stdout/stderr are routed to `/dev/null`
-// through `sh -c "<argv> >/dev/null 2>&1"` so the orchestrator's
-// determinism-diff JSON line stays the sole structured output on
-// stdout (alongside pass 1's BuildReport JSON that the existing
-// build path already emits). Without this, pass 2 would print its
-// own `build` BuildReport JSON and the `[capsule-artifact] ...`
-// stderr lines to the same stream the caller is parsing, breaking
-// the "one line per logical event" contract of `--json`.
+// In `--json` mode pass 2's stdout/stderr are captured and dropped so
+// the orchestrator's determinism-diff JSON line stays the sole
+// structured output on stdout (alongside pass 1's BuildReport JSON
+// that the existing build path already emits). Without this, pass 2
+// would print its own `build` BuildReport JSON and the
+// `[capsule-artifact] ...` stderr lines to the same stream the caller
+// is parsing, breaking the "one line per logical event" contract of
+// `--json`.
 //
 // In non-`--json` mode pass 2's output is left to inherit so a
 // human watching the build sees both passes' `built:` / cache
 // summary lines.
-fn _run_determinism_pass2(self_exe: string, capsule_path: string, input_path: string, pass2_work_dir: string, cache_trace_flag: boolean, json_flag: boolean) -> int ![io] {
+// Pure argv builder, split out so the shape can be asserted without
+// spawning anything — the same reason `_selfhost_stage_argv` is a
+// separate function. The unit test over this is what keeps a shell
+// wrapper from creeping back in (SFN-752).
+fn _determinism_pass2_argv(self_exe: string, capsule_path: string, input_path: string, pass2_work_dir: string, cache_trace_flag: boolean, json_flag: boolean) -> string[] {
     let mut args: string[] = [];
     args.push(self_exe);
     args.push("build");
@@ -192,19 +198,40 @@ fn _run_determinism_pass2(self_exe: string, capsule_path: string, input_path: st
         args.push("-p");
         args.push(capsule_path);
     } else { args.push(input_path); }
+    return args;
+}
+
+fn _run_determinism_pass2(self_exe: string, capsule_path: string, input_path: string, pass2_work_dir: string, cache_trace_flag: boolean, json_flag: boolean) -> int ![io] {
+    let args = _determinism_pass2_argv(self_exe, capsule_path, input_path, pass2_work_dir, cache_trace_flag, json_flag);
     if json_flag {
-        // Shell-quote each arg so paths with spaces / metacharacters
-        // (e.g. `--work-dir "with spaces"`) survive the wrapper.
-        let mut cmd: string = "";
-        let mut i: int = 0;
-        loop {
-            if i >= args.length { break; }
-            if i > 0 { cmd = cmd + " "; }
-            cmd = cmd + _shell_single_quote_arg(args[i]);
-            i += 1;
-        }
-        cmd = cmd + " >/dev/null 2>&1";
-        return process.run(["sh", "-c", cmd]);
+        // `run_capture` buffers both child streams instead of passing
+        // them through, which is exactly what the displaced
+        // `sh -c "<argv> >/dev/null 2>&1"` was buying — without a
+        // shell, and without flattening argv into a quoted command
+        // string. The env is inherited verbatim so pass 2 sees pass
+        // 1's environment; that is load-bearing for the comparison.
+        //
+        // No deadline: `run_capture` drains to EOF with an infinite
+        // poll, so a pass-2 grandchild (`clang`, `llvm-link`) holding
+        // fd 1/2 open would wedge this call where the old redirect
+        // could not. Bounded by SFN-619 alongside the selfhost gate.
+        let rc = process.run_capture(args, process.environ());
+        // Discard the captures — that is the `>/dev/null 2>&1`. Taking
+        // them is hygiene matching the surrounding discard convention,
+        // not cross-contamination defence: `_run_capture_impl` frees
+        // and zeroes both stashes on entry to every call.
+        let _ = process.capture_take_stdout();
+        let _ = process.capture_take_stderr();
+        // `run_capture` reports a spawn or reap failure as -1, which the
+        // caller would return as a process exit code and the OS would
+        // truncate to 255. Map it to the 127 the displaced shell already
+        // produced for a failed launch, so "could not execute" stays
+        // distinguishable from a pass-2 build that ran and failed —
+        // this branch is `--json`-only, where the caller's
+        // `[determinism] pass-2 build failed` message is suppressed and
+        // the exit code is the whole signal.
+        if rc < 0 { return 127; }
+        return rc;
     }
     return process.run(args);
 }
