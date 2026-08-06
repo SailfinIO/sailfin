@@ -6,7 +6,7 @@ type: tooling
 created: 2026-06-22
 updated: 2026-08-06
 author: "agent:compiler-architect; project owner (direction + naming); agent:Codex (2026-08-03 amendment); agent:implementer (2026-08-05 provider slot); agent:Sailbot (2026-08-06 narrow-stdlib matrix amendment)"
-tracking: "#345 (historical epic); successor implementation issues TBD"
+tracking: "#345 (historical epic); Linear project Role-Oriented Compiler Capsules. §3.7 steps 1-2 (landed): SFN-705, SFN-706, SFN-707, SFN-708, SFN-709, SFN-710, SFN-711, SFN-712, SFN-713, SFN-714, SFN-715, SFN-717, SFN-718. §3.7 steps 3-8 (groomed 2026-08-06): SFN-734 through SFN-751."
 supersedes:
 superseded-by:
 graduates-to:
