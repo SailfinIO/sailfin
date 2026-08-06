@@ -1,9 +1,13 @@
 [capsule]
 name = "sfn/crypto"
-version = "0.18.0"
+version = "0.19.0"
 description = "Cryptographic hashing and digest functions for Sailfin"
 
 [dependencies]
+# `sfn/strings::int_to_string` renders object-identifier arcs as dotted decimal
+# in `src/der.sfn`, and `ascii_lowercase`/`split` fold and label-split names for
+# RFC 6125 hostname matching in `src/x509.sfn` (SFN-504).
+"sfn/strings" = "*"
 
 [capabilities]
 required = []
