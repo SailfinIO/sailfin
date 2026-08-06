@@ -28,6 +28,12 @@ import {
     _cr_path_join,
     _cr_string_array_contains
 } from "./paths";
+import {
+    capsule_origin_cache,
+    capsule_origin_local,
+    capsule_origin_workspace,
+    capsule_provenance_rejects
+} from "./provenance";
 import { _cr_relative_slug, enumerate_relative_sources } from "./relative";
 import { CapsuleSource, ResolverConsumer, WorkspaceMember } from "./types";
 
@@ -114,7 +120,10 @@ fn enumerate_binary_capsule_sources(project_root: string, entry_path: string) ->
                 if !strings_equal(full, entry_path) {
                     let slug = _cr_relative_slug(entry_dir, full);
                     out.push(CapsuleSource {
-                        spec: "", source_path: full, slug: slug, ll_path: ""
+                        spec: "", source_path: full, slug: slug, ll_path: "",
+                        // The project's own `src/` tree — the thing being
+                        // built, never a fetched dependency.
+                        origin: capsule_origin_local()
                     });
                 }
             } else {
@@ -233,7 +242,9 @@ fn enumerate_workspace_implicit_sources(entry_path: string, members: WorkspaceMe
             let src_dir = workspace_member_for_spec(members, canonical);
             if src_dir.length == 0 { continue; }
             covered.push(canonical);
-            let found = _cr_collect_capsule_sources(src_dir, canonical);
+            // A declared sibling member resolved from its local path may be
+            // private (SFEP-0020 §3.6).
+            let found = _cr_collect_capsule_sources(src_dir, canonical, capsule_origin_workspace());
             let mut j: int = 0;
             loop {
                 if j >= found.length { break; }
@@ -300,7 +311,19 @@ fn enumerate_cache_implicit_sources(entry_path: string, excluded_specs: string[]
             let src_dir = _cr_locate_cached_capsule_src_latest(canonical);
             if src_dir.length == 0 { continue; }
             covered.push(canonical);
-            let found = _cr_collect_capsule_sources(src_dir, canonical);
+            // Cache-resolved candidate: refuse a private capsule before any of
+            // its sources are collected or staged (SFN-715). `covered` is
+            // marked above so a rejected candidate is not retried on a later
+            // BFS hop.
+            let cache_manifest = _cr_path_join(_cr_dirname(src_dir), "capsule.toml");
+            let mut cache_text: string = "";
+            if fs.exists(cache_manifest) {
+                cache_text = fs.readFile(cache_manifest);
+            }
+            if capsule_provenance_rejects(canonical, cache_manifest, cache_text, capsule_origin_cache()) {
+                continue;
+            }
+            let found = _cr_collect_capsule_sources(src_dir, canonical, capsule_origin_cache());
             let mut j: int = 0;
             loop {
                 if j >= found.length { break; }

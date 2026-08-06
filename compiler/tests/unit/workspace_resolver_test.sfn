@@ -227,3 +227,34 @@ test "workspace: default-members entry that is not a member is ignored" {
     assert selected.length == 1;
     assert _str_eq(selected[0], "compiler");
 }
+
+// --------------------------------------------------------------
+// Private-member provenance (SFN-715, SFEP-0020 §3.6)
+// --------------------------------------------------------------
+// A declared member resolves to its own local `src_dir`, which is what makes
+// the workspace branch of `enumerate_capsule_sources` run before the
+// project-relative + `~/.sfn/cache` locator is consulted at all. A fetched
+// candidate for the same spec therefore never gets the chance to shadow it,
+// and a fetched private one is refused outright by `capsule_provenance_rejects`
+// even when no local member exists to shadow.
+test "workspace: a declared member resolves to its local path" {
+    let mut members: WorkspaceMember[] = [];
+    members.push(WorkspaceMember {
+        name: "priv/lib", member_path: "capsules/priv/lib", src_dir: "/ws/capsules/priv/lib/src"
+    });
+    members.push(WorkspaceMember {
+        name: "priv/base", member_path: "capsules/priv/base", src_dir: "/ws/capsules/priv/base/src"
+    });
+    assert _str_eq(workspace_member_for_spec(members, "priv/lib"), "/ws/capsules/priv/lib/src");
+    assert _str_eq(workspace_member_for_spec(members, "priv/base"), "/ws/capsules/priv/base/src");
+}
+
+test "workspace: an undeclared spec has no local member to resolve" {
+    // Only a *declared* member short-circuits the cache locator. An
+    // undeclared spec falls through, where the provenance gate applies.
+    let mut members: WorkspaceMember[] = [];
+    members.push(WorkspaceMember {
+        name: "priv/lib", member_path: "capsules/priv/lib", src_dir: "/ws/capsules/priv/lib/src"
+    });
+    assert _str_eq(workspace_member_for_spec(members, "priv/absent"), "");
+}

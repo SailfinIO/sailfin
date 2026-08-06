@@ -1,0 +1,109 @@
+// compiler/src/capsule_resolver/provenance.sfn
+//
+// Provenance tagging and private-capsule enforcement for resolved capsule
+// sources (SFN-715; design: SFEP-0020 §3.6).
+//
+// A `publish = false` capsule is toolchain-internal. The workspace that owns
+// it may build it from its declared local path, but the same manifest arriving
+// from a registry or the on-disk cache is refused before any of its sources
+// reach staging or compilation.
+//
+// Provenance is stamped at the locator that resolved the source — the boundary
+// that actually knows where the bytes came from — rather than re-derived later
+// from a `source_path` prefix. A new locator therefore cannot silently inherit
+// "trusted": it has to name an origin, and an unrecognised one is refused by
+// `capsule_origin_is_known`.
+import { toml_get_publish } from "../toml_parser";
+
+// Origin tags stamped onto every `CapsuleSource`. Sailfin has no module-level
+// constant form, so these are functions, in the same spirit as
+// `effect_taxonomy.sfn::canonical_effects()`.
+// Sources the consumer itself owns: relative imports, the entry module, and a
+// `-p` project's own `src/` tree. Publish policy never applies — these are the
+// thing being built, not a dependency fetched from anywhere.
+export fn capsule_origin_local() -> string { return "local"; }
+
+// A declared workspace member resolved from its local path, or an in-tree
+// `capsules/<scope>/<name>/src` checkout. Allowed to be private.
+export fn capsule_origin_workspace() -> string { return "workspace"; }
+
+// Fetched: the `~/.sfn/cache` tree that `sfn add` populates from a registry.
+// Never allowed to supply a private capsule.
+export fn capsule_origin_cache() -> string { return "cache"; }
+
+// True for an origin the resolver treats as fetched rather than locally
+// declared. The publish gate keys off this predicate instead of comparing
+// against a string literal at each call site, so a future fetched provenance
+// is covered by adding it here once.
+export fn capsule_origin_is_fetched(origin: string) -> boolean {
+    return strings_equal(origin, capsule_origin_cache());
+}
+
+// Fail-closed guard for the staging boundary: only the three origins above are
+// stageable. An empty or unrecognised origin means some construction site
+// produced a `CapsuleSource` without declaring where it came from, and the
+// resolver cannot prove that source is locally declared — so it must not be
+// staged.
+export fn capsule_origin_is_known(origin: string) -> boolean {
+    if strings_equal(origin, capsule_origin_local()) { return true; }
+    if strings_equal(origin, capsule_origin_workspace()) { return true; }
+    return strings_equal(origin, capsule_origin_cache());
+}
+
+// Resolve whether a capsule manifest denies publication.
+//
+// A malformed `[capsule] publish` value is a manifest error under SFEP-0020
+// §3.6 and must never be coerced to either boolean. It counts as denied here:
+// this predicate only ever runs against a fetched candidate, and for those the
+// resolver cannot prove the capsule is publishable, so the fail-closed reading
+// is the correct one. A manifest with no `publish` key at all resolves to the
+// `true` default and is not denied, which keeps every existing cached capsule
+// building unchanged.
+export fn capsule_manifest_denies_publication(manifest_text: string) -> boolean {
+    let policy = toml_get_publish(manifest_text);
+    if policy.error.length > 0 { return true; }
+    if policy.publish == null { return true; }
+    let publish_allowed: boolean = policy.publish;
+    return !publish_allowed;
+}
+
+// Describe why a fetched manifest was refused. An explicit `publish = false`
+// and a policy that cannot be resolved at all both deny publication, but they
+// need different fixes — depublishing versus repairing a malformed manifest —
+// so the diagnostic must not claim the manifest "sets publish = false" when it
+// actually sets `publish = "false"`.
+fn _cr_publish_denial_reason(manifest_text: string) -> string {
+    let policy = toml_get_publish(manifest_text);
+    if policy.error.length > 0 {
+        return "has an unresolvable [capsule] publish policy (" + policy.error
+            + ")";
+    }
+    if policy.publish == null {
+        return "has an unresolvable [capsule] publish policy";
+    }
+    return "sets [capsule] publish = false";
+}
+
+// Reject a private capsule that arrived from a fetched origin, before any of
+// its sources are collected, staged, or compiled. Returns true when the
+// candidate must be dropped.
+//
+// Because a fetched private candidate is refused outright, it can neither
+// shadow nor substitute for a declared local private member: workspace lookup
+// already runs first, and the cache fallback that would otherwise stand in for
+// a missing local member is refused here.
+//
+// E0613 is the resolver-side twin of E0612 (`sfn publish` refusing to publish
+// a private capsule, SFN-714) — same SFEP-0020 §3.6 contract, opposite
+// direction. It is printed rather than raised as a structured `Diagnostic` to
+// match E0612's precedent and the surrounding resolver reporting idiom; there
+// is no user-source span to attach.
+export fn capsule_provenance_rejects(spec: string, manifest_path: string, manifest_text: string, origin: string) -> boolean ![io.console] {
+    if !capsule_origin_is_fetched(origin) { return false; }
+    if !capsule_manifest_denies_publication(manifest_text) { return false; }
+    print.err("E0613: " + spec + ": " + manifest_path + " "
+        + _cr_publish_denial_reason(manifest_text)
+        + " but was resolved from the capsule cache — a private capsule may"
+        + " only be built from a declared local workspace path");
+    return true;
+}

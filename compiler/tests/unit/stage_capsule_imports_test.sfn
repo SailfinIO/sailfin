@@ -18,6 +18,7 @@
 // Each test uses its own `/tmp` namespace so parallel runs don't collide,
 // and cleans up on exit.
 import { sha256_of_file } from "../../src/build_cache";
+import { capsule_origin_local } from "../../src/capsule_resolver/provenance";
 import {
     _cr_collect_per_source_dep_slugs,
     _cr_srchash_path,
@@ -180,13 +181,15 @@ test "capsule resolver: splitting a dependency module changes its dependents' de
         spec: "",
         source_path: a_path,
         slug: "a",
-        ll_path: ""
+        ll_path: "",
+        origin: capsule_origin_local()
     };
     let dep_src = CapsuleSource {
         spec: "",
         source_path: dep_path,
         slug: "dep",
-        ll_path: ""
+        ll_path: "",
+        origin: capsule_origin_local()
     };
     let before = _cr_collect_per_source_dep_slugs([a_src, dep_src], [a_src, dep_src]);
     assert before[0].length == 1;
@@ -207,13 +210,15 @@ test "capsule resolver: splitting a dependency module changes its dependents' de
         spec: "",
         source_path: dep_mod_path,
         slug: "dep/mod",
-        ll_path: ""
+        ll_path: "",
+        origin: capsule_origin_local()
     };
     let dep_impl_src = CapsuleSource {
         spec: "",
         source_path: dep_impl_path,
         slug: "dep/impl",
-        ll_path: ""
+        ll_path: "",
+        origin: capsule_origin_local()
     };
     let after = _cr_collect_per_source_dep_slugs([a_src, dep_mod_src], [a_src, dep_mod_src, dep_impl_src]);
     // `a.sfn` did not change, but its resolved dep slug did — this is

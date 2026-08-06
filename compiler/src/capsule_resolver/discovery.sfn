@@ -33,7 +33,13 @@ import {
     _cr_is_safe_version,
     _cr_path_join
 } from "./paths";
-import { CapsuleSource, WorkspaceMember } from "./types";
+import {
+    capsule_origin_cache,
+    capsule_origin_local,
+    capsule_origin_workspace,
+    capsule_provenance_rejects
+} from "./provenance";
+import { CapsuleLocation, CapsuleSource, WorkspaceMember } from "./types";
 import { discover_workspace_root, load_workspace_members } from "./workspace";
 
 // Parse "name=version\n" lines from toml_get_dependencies output, skipping
@@ -115,32 +121,51 @@ fn _cr_lookup_locked_version(lock_entries: _CrDepEntry[], spec: string) -> strin
 // Locate the src/ directory for a capsule dep. Checks the in-tree
 // capsules/<scope>/<name>/src/ first (compiler self-build and ecosystem
 // development) and falls back to ~/.sfn/cache/capsules/<scope>/<name>/<version>/src/
-// (end-user builds after `sfn add`). Returns "" if neither exists.
-fn _cr_locate_capsule_src(project_root: string, spec: string, version: string) -> string ![io] {
+// (end-user builds after `sfn add`).
+//
+// Returns the provenance alongside the path (SFN-715): the two branches differ
+// in trust, and only the caller that knows which one matched can apply the
+// private-capsule gate. A miss reports the least-trusted origin so a caller
+// that ignores the empty `src_dir` cannot accidentally treat a miss as local.
+fn _cr_locate_capsule_src(project_root: string, spec: string, version: string) -> CapsuleLocation ![io] {
+    let missing = CapsuleLocation {
+        src_dir: "",
+        origin: capsule_origin_cache()
+    };
     let slash = _cr_find_char(spec, "/", 0);
-    if slash <= 0 { return ""; }
+    if slash <= 0 { return missing; }
     let slash2 = _cr_find_char(substring(spec, slash + 1, spec.length), "/", 0);
-    if slash2 >= 0 { return ""; }
+    if slash2 >= 0 { return missing; }
     let scope = substring(spec, 0, slash);
     let name = substring(spec, slash + 1, spec.length);
-    if !_cr_is_safe_segment(scope) { return ""; }
-    if !_cr_is_safe_segment(name) { return ""; }
+    if !_cr_is_safe_segment(scope) { return missing; }
+    if !_cr_is_safe_segment(name) { return missing; }
 
     // Prefer in-tree source if we're inside a sailfin repo checkout.
     let in_tree = _cr_path_join(project_root, "capsules/" + scope + "/" + name
         + "/src");
-    if fs.exists(in_tree) { return in_tree; }
+    if fs.exists(in_tree) {
+        return CapsuleLocation {
+            src_dir: in_tree,
+            origin: capsule_origin_workspace()
+        };
+    }
 
     // Fall back to the user cache populated by `sfn add`.
-    if version.length == 0 { return ""; }
-    if !_cr_is_safe_version(version) { return ""; }
+    if version.length == 0 { return missing; }
+    if !_cr_is_safe_version(version) { return missing; }
     let home = _cr_get_home();
-    if home.length == 0 { return ""; }
+    if home.length == 0 { return missing; }
     let cached = home + "/.sfn/cache/capsules/" + scope + "/" + name + "/"
         + version
         + "/src";
-    if fs.exists(cached) { return cached; }
-    return "";
+    if fs.exists(cached) {
+        return CapsuleLocation {
+            src_dir: cached,
+            origin: capsule_origin_cache()
+        };
+    }
+    return missing;
 }
 
 // Locate the src/ dir for a scoped capsule in the user cache
@@ -201,7 +226,7 @@ fn _cr_locate_cached_capsule_src_latest(spec: string) -> string ![io] {
 // nested files, "sfn/cli/util/foo"). Iterative to match the existing
 // _collect_sfn_files_cmd pattern — the seed compiler has historically
 // been brittle around recursive accumulators.
-fn _cr_collect_capsule_sources(src_dir: string, spec: string) -> CapsuleSource[] ![io] {
+fn _cr_collect_capsule_sources(src_dir: string, spec: string, origin: string) -> CapsuleSource[] ![io] {
     let mut out: CapsuleSource[] = [];
     if !fs.exists(src_dir) { return out; }
 
@@ -255,7 +280,7 @@ fn _cr_collect_capsule_sources(src_dir: string, spec: string) -> CapsuleSource[]
                 // doing it post-dedupe keeps the layout decision
                 // in one place.
                 out.push(CapsuleSource {
-                    spec: spec, source_path: full, slug: slug, ll_path: ""
+                    spec: spec, source_path: full, slug: slug, ll_path: "", origin: origin
                 });
             } else {
                 // Treat anything without a .sfn suffix as a potential
@@ -283,7 +308,7 @@ fn _cr_collect_capsule_sources(src_dir: string, spec: string) -> CapsuleSource[]
 // relative-import / workspace-implicit walks. Skipped when
 // `<project_root>/src/` doesn't exist.
 //
-// Slug shape mirrors `_cr_collect_capsule_sources(src_dir, spec)`:
+// Slug shape mirrors `_cr_collect_capsule_sources(src_dir, spec, origin)`:
 // for `[capsule].name = "my-app"` and `<project_root>/src/mod.sfn`
 // the resolver produces `slug = "my-app/mod"`. The test source's
 // `import { fn } from "my-app";` resolves to provider slug
@@ -313,7 +338,9 @@ fn _cr_enumerate_host_capsule_sources(project_root: string) -> CapsuleSource[] !
     }
     let src_dir = _cr_path_join(project_root, "src");
     if !fs.exists(src_dir) { return out; }
-    return _cr_collect_capsule_sources(src_dir, capsule_name);
+    // The host capsule is the project being built, not a fetched dependency,
+    // so publish policy never applies to its own sources.
+    return _cr_collect_capsule_sources(src_dir, capsule_name, capsule_origin_local());
 }
 
 // Enumerate every .sfn source file for every dep declared in the project's
@@ -445,6 +472,9 @@ fn enumerate_capsule_sources(project_root: string) -> CapsuleSource[] ![io] {
         // src_dir, so the staged artifact path matches `imports.sfn`'s
         // expectation regardless of which lookup supplied it.
         let mut src_dir: string = "";
+        // A declared workspace member is local by construction, so it may
+        // legitimately carry `publish = false` (SFEP-0020 §3.6).
+        let mut origin: string = capsule_origin_workspace();
         if members.length > 0 {
             src_dir = workspace_member_for_spec(members, spec);
         }
@@ -476,10 +506,23 @@ fn enumerate_capsule_sources(project_root: string) -> CapsuleSource[] ![io] {
                         + "` to lock it");
                 }
             }
-            src_dir = _cr_locate_capsule_src(project_root, spec, effective_version);
+            let located = _cr_locate_capsule_src(project_root, spec, effective_version);
+            src_dir = located.src_dir;
+            origin = located.origin;
         }
         if src_dir.length > 0 {
-            let found = _cr_collect_capsule_sources(src_dir, spec);
+            // Read the dep's manifest once, before collecting any source: the
+            // private-capsule gate and the transitive-dep enqueue below both
+            // need it, and the gate has to run before a single fetched source
+            // is collected, staged, or compiled (SFN-715).
+            let dep_manifest = _cr_path_join(_cr_dirname(src_dir), "capsule.toml");
+            let mut dep_text: string = "";
+            let has_dep_manifest = fs.exists(dep_manifest);
+            if has_dep_manifest { dep_text = fs.readFile(dep_manifest); }
+            if capsule_provenance_rejects(spec, dep_manifest, dep_text, origin) {
+                continue;
+            }
+            let found = _cr_collect_capsule_sources(src_dir, spec, origin);
             let mut fi: int = 0;
             loop {
                 if fi >= found.length { break; }
@@ -489,9 +532,7 @@ fn enumerate_capsule_sources(project_root: string) -> CapsuleSource[] ![io] {
             // Enqueue this dep's OWN declared deps (transitive closure). The
             // dep's manifest sits beside its `src/` dir. Runtime-capsule and
             // already-visited specs are filtered here as well as at dequeue.
-            let dep_manifest = _cr_path_join(_cr_dirname(src_dir), "capsule.toml");
-            if fs.exists(dep_manifest) {
-                let dep_text = fs.readFile(dep_manifest);
+            if has_dep_manifest {
                 let dep_entries = _cr_parse_deps(toml_get_dependencies(dep_text));
                 let mut di: int = 0;
                 loop {
