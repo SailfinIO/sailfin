@@ -387,6 +387,16 @@ fn _window_code(cert: X509Certificate, now_ms: int) -> string {
 // So the recognised set is exactly what this module enforces, and it is
 // deliberately short. Adding an OID here is a claim that the code below
 // actually acts on it — never a way to quiet a rejection.
+//
+// This is applied to trust anchors as well as to the certificates below them.
+// Exempting anchors would reproduce exactly the same over-accept one level up,
+// since a name-constrained *root* is a real deployment shape. The obvious
+// worry is that being strict about anchors rejects real trust stores, so it
+// was measured rather than assumed: across all 128 roots in the macOS system
+// bundle (`/etc/ssl/cert.pem`), the only critical extensions present are
+// basicConstraints (125) and keyUsage (113), both recognised here, and every
+// one of the 128 asserts basicConstraints. No production root in that bundle
+// is refused by this check.
 fn _critical_extensions_code(cert: X509Certificate) -> string {
     let mut i: int = 0;
     loop {
