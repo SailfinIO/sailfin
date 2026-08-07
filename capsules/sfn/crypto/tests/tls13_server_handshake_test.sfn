@@ -159,15 +159,12 @@ fn v_client_finished() -> int[] {
 
 // ── RFC 8032 §7.1 TEST 1 Ed25519 key pair ────────────────────────
 // The interop half needs a signing key whose public half is known so the
-// client can verify the CertificateVerify the server actually produces. A
+// client can verify the CertificateVerify the server actually produces
+// against the leaf certificate that carries it (`_ed_leaf_chain()`). A
 // published vector is used rather than a generated pair so the test needs no
 // ![rand] and the public key can be written down.
 fn ed_seed() -> int[] {
     return hexb("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60");
-}
-
-fn ed_public_hex() -> string {
-    return "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a";
 }
 
 // ── Sentinels ────────────────────────────────────────────────────
@@ -221,15 +218,20 @@ fn _client_sentinel() -> ClientHandshake {
         client_application_traffic_secret: [],
         server_application_traffic_secret: [],
         server_leaf_certificate: [],
+        server_certificate_chain: [],
         server_certificate_verified: false
     };
 }
 
-// A stand-in certificate chain for the cases that never put a real one on the
-// wire. The state machine treats cert_data as opaque — chain verification is
-// the client's job (SFN-340) — so any non-empty blob exercises the same paths.
-fn _stub_chain() -> int[][] {
-    let leaf: int[] = hexb("3082010a0203040506");
+// A real Ed25519 leaf certificate (self-signed, CN=localhost, SAN
+// DNS:localhost) carrying exactly `ed_seed()`'s RFC 8032 §7.1 TEST 1 public
+// key. `hs_client_recv_certificate_verify` now derives the verifying key from
+// `hs.server_leaf_certificate` via `x509_parse` rather than taking it from the
+// caller, so the interop test below needs a parseable certificate whose SPKI
+// key matches the server's Ed25519 signing key for the CertificateVerify step
+// to succeed.
+fn _ed_leaf_chain() -> int[][] {
+    let leaf: int[] = hexb("3082015430820106a003020102021361818efdc93d849e49dc87d20ad6021fe2ed2f300506032b657030143112301006035504030c096c6f63616c686f73743020170d3236303830373231303833345a180f32313236303731343231303833345a30143112301006035504030c096c6f63616c686f7374302a300506032b6570032100d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511aa3693067301d0603551d0e041604145b27aa5589179770e47575b162a1ded97b8bfc6d301f0603551d230418301680145b27aa5589179770e47575b162a1ded97b8bfc6d300f0603551d130101ff040530030101ff30140603551d11040d300b82096c6f63616c686f7374300506032b65700341001dc3be8fd533b477c0bb974b1b92b3df833c3b0b950421002196c30caf2511a7442b31b9db56709258f6b852676dedfac85e94bbd9342a2c191cad7db9cdfa0c");
     let mut chain: int[][] = [];
     chain.push(leaf);
     return chain;
@@ -237,7 +239,7 @@ fn _stub_chain() -> int[][] {
 
 // ── The full RFC 8448 §3 handshake, server side ──────────────────
 test "tls13_server_handshake: RFC 8448 simple 1-RTT handshake reproduces every secret" {
-    let created: Result<ServerHandshake, string> = hs_server_new(v_server_private(), _stub_chain(), ed_seed());
+    let created: Result<ServerHandshake, string> = hs_server_new(v_server_private(), _ed_leaf_chain(), ed_seed());
     let mut hs: ServerHandshake = _server_sentinel();
     match created {
         Result.Ok { value } => { hs = value; },
@@ -347,12 +349,12 @@ test "tls13_server_handshake: client and server interoperate over x25519 and cha
     let server_random: int[] = hexb("202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f");
     let session_id: int[] = hexb("cafebabecafebabecafebabecafebabecafebabecafebabecafebabecafebabe");
 
-    // Leaf certificate bytes are opaque to both state machines — the client
-    // takes the leaf public key from its caller, and chain verification is
-    // SFN-340's — so a stand-in blob exercises the same paths a real DER
-    // certificate would.
-    let mut chain: int[][] = [];
-    chain.push(hexb("308201aa0203040506070809"));
+    // The client now derives the CertificateVerify verifying key from the
+    // certificate the server sends (`x509_parse` on `hs.server_leaf_certificate`),
+    // so this interop run needs a real, parseable leaf whose SPKI key matches
+    // the server's Ed25519 signing key — `_ed_leaf_chain()`'s RFC 8032 TEST 1
+    // key pair, the same one `ed_seed()` signs with below.
+    let chain: int[][] = _ed_leaf_chain();
 
     let mut c: ClientHandshake = _client_sentinel();
     match hs_client_new(client_private) {
@@ -430,9 +432,11 @@ test "tls13_server_handshake: client and server interoperate over x25519 and cha
     }
 
     // CertificateVerify: the server signs, and the client verifies that exact
-    // signature against the leaf key. This is the one assertion that ties
-    // SFN-699's signing primitive to the client's verifier across the
-    // RFC 8446 §4.4.3 signed-content construction.
+    // signature against the key in the certificate the server sent — a
+    // genuine end-to-end proof that our server's Ed25519 signature verifies
+    // against the leaf it presented, ties SFN-699's signing primitive to the
+    // client's verifier across the RFC 8446 §4.4.3 signed-content
+    // construction.
     let mut cv: int[] = [];
     match hs_server_certificate_verify_message(s) {
         Result.Ok { value } => { cv = value; },
@@ -442,7 +446,7 @@ test "tls13_server_handshake: client and server interoperate over x25519 and cha
         Result.Ok { value } => { s = value; },
         Result.Err { error } => { assert error.length == 0; }
     }
-    match hs_client_recv_certificate_verify(c, cv, ed_public_hex()) {
+    match hs_client_recv_certificate_verify(c, cv) {
         Result.Ok { value } => { c = value; },
         Result.Err { error } => { assert error.length == 0; }
     }
@@ -505,7 +509,7 @@ test "tls13_server_handshake: client and server interoperate over x25519 and cha
 // ── Fail-closed behaviour ────────────────────────────────────────
 test "tls13_server_handshake: a short X25519 scalar is rejected at construction" {
     let short_scalar: int[] = hexb("b1580eeadf6dd589b8ef4f2d5652578cc810e9980191ec8d058308cea216a2");
-    match hs_server_new(short_scalar, _stub_chain(), ed_seed()) {
+    match hs_server_new(short_scalar, _ed_leaf_chain(), ed_seed()) {
         Result.Ok { value } => { assert value.state == -1; },
         Result.Err { error } => { assert error.length > 0; }
     }
@@ -531,7 +535,7 @@ test "tls13_server_handshake: a zero-length chain entry is rejected at construct
 
 test "tls13_server_handshake: a short Ed25519 seed is rejected at construction" {
     let short_seed: int[] = hexb("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f");
-    match hs_server_new(v_server_private(), _stub_chain(), short_seed) {
+    match hs_server_new(v_server_private(), _ed_leaf_chain(), short_seed) {
         Result.Ok { value } => { assert value.state == -1; },
         Result.Err { error } => { assert error.length > 0; }
     }
@@ -539,7 +543,7 @@ test "tls13_server_handshake: a short Ed25519 seed is rejected at construction" 
 
 test "tls13_server_handshake: a ServerHello is refused before any ClientHello" {
     let mut hs: ServerHandshake = _server_sentinel();
-    match hs_server_new(v_server_private(), _stub_chain(), ed_seed()) {
+    match hs_server_new(v_server_private(), _ed_leaf_chain(), ed_seed()) {
         Result.Ok { value } => { hs = value; },
         Result.Err { error } => { assert error.length == 0; }
     }
@@ -551,7 +555,7 @@ test "tls13_server_handshake: a ServerHello is refused before any ClientHello" {
 
 test "tls13_server_handshake: a Certificate sent before EncryptedExtensions is refused" {
     let mut hs: ServerHandshake = _server_sentinel();
-    match hs_server_new(v_server_private(), _stub_chain(), ed_seed()) {
+    match hs_server_new(v_server_private(), _ed_leaf_chain(), ed_seed()) {
         Result.Ok { value } => { hs = value; },
         Result.Err { error } => { assert error.length == 0; }
     }
@@ -573,7 +577,7 @@ test "tls13_server_handshake: a Certificate sent before EncryptedExtensions is r
 
 test "tls13_server_handshake: CertificateVerify is refused when the client did not offer ed25519" {
     let mut hs: ServerHandshake = _server_sentinel();
-    match hs_server_new(v_server_private(), _stub_chain(), ed_seed()) {
+    match hs_server_new(v_server_private(), _ed_leaf_chain(), ed_seed()) {
         Result.Ok { value } => { hs = value; },
         Result.Err { error } => { assert error.length == 0; }
     }
@@ -603,7 +607,7 @@ test "tls13_server_handshake: CertificateVerify is refused when the client did n
 
 test "tls13_server_handshake: a tampered client Finished MAC is rejected" {
     let mut hs: ServerHandshake = _server_sentinel();
-    match hs_server_new(v_server_private(), _stub_chain(), ed_seed()) {
+    match hs_server_new(v_server_private(), _ed_leaf_chain(), ed_seed()) {
         Result.Ok { value } => { hs = value; },
         Result.Err { error } => { assert error.length == 0; }
     }
@@ -645,7 +649,7 @@ test "tls13_server_handshake: a ServerHello whose key share is not this state's 
     // A different scalar, so the trace's ServerHello carries a share this
     // state holds no private key for.
     let other_private: int[] = hexb("5dab087e624a8a4b79e17f8b83800ee66f3bb1292618b6fd1c2f8b27ff88e0eb");
-    match hs_server_new(other_private, _stub_chain(), ed_seed()) {
+    match hs_server_new(other_private, _ed_leaf_chain(), ed_seed()) {
         Result.Ok { value } => { hs = value; },
         Result.Err { error } => { assert error.length == 0; }
     }

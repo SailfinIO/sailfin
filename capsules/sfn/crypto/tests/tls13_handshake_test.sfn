@@ -14,12 +14,13 @@
 //     schedule are bit-identical and the handshake is exercised faithfully;
 //     only the record layer's AEAD would differ, and that is not this
 //     module's concern.
-//   * Its CertificateVerify signs with rsa_pss_rsae_sha256 (0x0804).
-//     RFC 8446 §4.2.3 forbids PKCS#1v1.5 there, so every published TLS 1.3
-//     trace signs with RSA-PSS or ECDSA — neither of which the capsule can
-//     verify until SFN-653. The end-to-end test therefore drives
-//     CertificateVerify through the explicitly unverified path, and the
-//     signature-checking path is covered separately by its rejection cases.
+//   * Its CertificateVerify signs with rsa_pss_rsae_sha256 (0x0804), which
+//     RFC 8446 §4.2.3 requires over PKCS#1v1.5. That signature is verified
+//     here for real, against the 1024-bit RSA key in the leaf the trace
+//     itself carries — so this file is not only a key-schedule check but the
+//     capsule's evidence that it can authenticate a signature produced by a
+//     server it did not write. The other schemes, the algorithm/key-type
+//     rejections and the chain-trust step live in `tls13_peer_auth_test.sfn`.
 import {
     ClientHandshake,
     hs_client_finished_message,
@@ -27,7 +28,6 @@ import {
     hs_client_new,
     hs_client_recv_certificate,
     hs_client_recv_certificate_verify,
-    hs_client_recv_certificate_verify_without_authenticating,
     hs_client_recv_encrypted_extensions,
     hs_client_recv_finished,
     hs_client_recv_server_hello,
@@ -174,6 +174,7 @@ fn _sentinel_unreachable() -> ClientHandshake {
         client_application_traffic_secret: empty,
         server_application_traffic_secret: empty,
         server_leaf_certificate: empty,
+        server_certificate_chain: [],
         server_certificate_verified: false
     };
 }
@@ -233,14 +234,18 @@ test "tls13_handshake: RFC 8448 simple 1-RTT handshake reproduces every secret" 
     assert hs.state == hs_state_wait_certificate_verify();
     assert hs.server_leaf_certificate.length == 432;
 
-    // CertificateVerify: RSA-PSS, so the signature cannot be checked yet.
-    let r5: Result<ClientHandshake, string> = hs_client_recv_certificate_verify_without_authenticating(hs, v_certificate_verify());
+    // CertificateVerify: rsa_pss_rsae_sha256 over the transcript through
+    // Certificate, checked against the 1024-bit RSA key in the leaf the trace
+    // itself carries. This is the whole point of the vector — the signature is
+    // a real one produced by a real server, verified here by the capsule's own
+    // RSA-PSS with the key taken from the certificate rather than handed in.
+    let r5: Result<ClientHandshake, string> = hs_client_recv_certificate_verify(hs, v_certificate_verify());
     match r5 {
         Result.Ok { value } => { hs = value; },
         Result.Err { error } => { assert error.length == 0; }
     }
     assert hs.state == hs_state_wait_finished();
-    assert ! hs.server_certificate_verified;
+    assert hs.server_certificate_verified;
 
     // Server Finished: the MAC must verify, then the application secrets fall
     // out of the transcript that now includes it.
@@ -380,12 +385,15 @@ test "tls13_handshake: a tampered server Finished MAC is rejected" {
     }
 }
 
-test "tls13_handshake: an RSA-PSS CertificateVerify is refused by the verifying path" {
+test "tls13_handshake: a tampered RSA-PSS CertificateVerify signature is refused" {
     let mut hs: ClientHandshake = _drive_to_wait_certificate_verify();
     assert hs.state == hs_state_wait_certificate_verify();
-    // The verifying path must refuse rsa_pss_rsae_sha256 rather than pretend
-    // to have checked it — only ed25519 is available until SFN-653.
-    let bad: Result<ClientHandshake, string> = hs_client_recv_certificate_verify(hs, v_certificate_verify(), "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff");
+    // Flip one byte of the RFC 8448 signature. Everything else — leaf key,
+    // transcript, scheme — stays valid, so a pass here would mean the
+    // signature is not actually being checked.
+    let mut tampered: int[] = v_certificate_verify();
+    tampered[tampered.length - 1] = tampered[tampered.length - 1] ^ 1;
+    let bad: Result<ClientHandshake, string> = hs_client_recv_certificate_verify(hs, tampered);
     match bad {
         Result.Ok { value } => { assert false; },
         Result.Err { error } => { assert error.length > 0; }
@@ -426,7 +434,7 @@ test "tls13_handshake: the encoded ClientHello matches the RFC 8446 wire format"
     }
     let session_id: int[] = [];
     let message: int[] = encode_client_hello(random, session_id, key_share, "example.com");
-    assert eq_bytes(message, hexb("010000800303000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f00000213030100005500000010000e00000b6578616d706c652e636f6d000a00040002001d000d000400020807002b0003020304003300260024001d0020fffefdfcfbfaf9f8f7f6f5f4f3f2f1f0efeeedecebeae9e8e7e6e5e4e3e2e1e0"));
+    assert eq_bytes(message, hexb("010000860303000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f00000213030100005b00000010000e00000b6578616d706c652e636f6d000a00040002001d000d000a00080403080408050807002b0003020304003300260024001d0020fffefdfcfbfaf9f8f7f6f5f4f3f2f1f0efeeedecebeae9e8e7e6e5e4e3e2e1e0"));
 }
 
 // A ClientHello with no server_name must simply omit the extension rather
@@ -561,7 +569,7 @@ fn _drive_to_wait_certificate_verify() -> ClientHandshake {
 
 fn _drive_to_wait_finished() -> ClientHandshake {
     let mut hs: ClientHandshake = _drive_to_wait_certificate_verify();
-    let r5: Result<ClientHandshake, string> = hs_client_recv_certificate_verify_without_authenticating(hs, v_certificate_verify());
+    let r5: Result<ClientHandshake, string> = hs_client_recv_certificate_verify(hs, v_certificate_verify());
     match r5 {
         Result.Ok { value } => { hs = value; },
         Result.Err { error } => { return _sentinel_unreachable(); }

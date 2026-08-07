@@ -122,6 +122,12 @@ fn x509_verify_err_unrecognized_critical_extension() -> string {
     return "unrecognized-critical-extension";
 }
 
+// Not produced by `x509_verify_chain`, which deliberately does not look at
+// names. It belongs to this family so that a caller composing chain building
+// with `x509_hostname_matches` — `hs_client_verify_peer` is the one in tree —
+// can report both outcomes through a single `X509ChainResult.code`.
+fn x509_verify_err_hostname_mismatch() -> string { return "hostname-mismatch"; }
+
 struct X509VerifyOptions {
     now_ms: int;  // caller-supplied Unix-millisecond snapshot; the caller owns ![clock]
     max_depth: int;  // maximum intermediates between leaf and anchor; <= 0 selects the default
@@ -193,7 +199,7 @@ struct RsaPublicKey {
 // That inner DER is not covered by the certificate-level structure guard, so
 // it is re-checked here before being walked — the same caution x509.sfn's
 // `X509Extension.value_der` comment records for extension bodies.
-fn _rsa_public_key_from_spki(spki_key: int[]) -> RsaPublicKey {
+fn x509_rsa_public_key_from_spki(spki_key: int[]) -> RsaPublicKey {
     let limits: DerLimits = der_default_limits();
     let guard: DerOutcome = der_check_structure(spki_key, limits);
     if !guard.ok {
@@ -342,7 +348,7 @@ fn _verify_link(issuer: X509Certificate, subject: X509Certificate) -> string {
         if issuer.spki_algorithm != x509_oid_rsa_encryption() {
             return x509_verify_err_unsupported_algorithm();
         }
-        let key: RsaPublicKey = _rsa_public_key_from_spki(issuer.spki_key);
+        let key: RsaPublicKey = x509_rsa_public_key_from_spki(issuer.spki_key);
         if !key.ok { return x509_verify_err_bad_signature(); }
 
         let mut rsa_ok: boolean = false;
@@ -626,5 +632,7 @@ export {
     x509_verify_err_unrecognized_critical_extension,
     x509_verify_oid_sha256_rsa,
     x509_verify_oid_sha384_rsa,
-    x509_verify_oid_ec_public_key
+    x509_verify_oid_ec_public_key,
+    x509_rsa_public_key_from_spki,
+    x509_verify_err_hostname_mismatch
 };

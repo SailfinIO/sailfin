@@ -477,6 +477,74 @@ test "tls13_handshake_codec: parse_certificate handles two entries with non-empt
     }
 }
 
+test "tls13_handshake_codec: parse_certificate retains a single-entry chain" {
+    let cert: int[] = _bytes(6, 7);
+    let mut entry: int[] = [];
+    _extend(entry, _u24b(cert.length));
+    _extend(entry, cert);
+    _extend(entry, _u16b(0));
+
+    let mut body: int[] = [];
+    body.push(0);
+    _extend(body, _u24b(entry.length));
+    _extend(body, entry);
+
+    let result: Result<CertificateMsg, string> = parse_certificate(body);
+    match result {
+        Result.Ok { value } => {
+            assert value.entry_count == 1;
+            assert value.chain.length == 1;
+            assert eq_bytes(value.chain[0], cert);
+            assert eq_bytes(value.leaf, cert);
+        },
+        Result.Err { error } => { assert false; }
+    }
+}
+
+test "tls13_handshake_codec: parse_certificate retains a multi-entry chain in wire order" {
+    let cert1: int[] = _bytes(5, 65);
+    let cert2: int[] = _bytes(4, 66);
+    let cert3: int[] = _bytes(7, 67);
+
+    let mut entry1: int[] = [];
+    _extend(entry1, _u24b(cert1.length));
+    _extend(entry1, cert1);
+    _extend(entry1, _u16b(0));
+
+    let mut entry2: int[] = [];
+    _extend(entry2, _u24b(cert2.length));
+    _extend(entry2, cert2);
+    _extend(entry2, _u16b(0));
+
+    let mut entry3: int[] = [];
+    _extend(entry3, _u24b(cert3.length));
+    _extend(entry3, cert3);
+    _extend(entry3, _u16b(0));
+
+    let mut list: int[] = [];
+    _extend(list, entry1);
+    _extend(list, entry2);
+    _extend(list, entry3);
+
+    let mut body: int[] = [];
+    body.push(0);
+    _extend(body, _u24b(list.length));
+    _extend(body, list);
+
+    let result: Result<CertificateMsg, string> = parse_certificate(body);
+    match result {
+        Result.Ok { value } => {
+            assert value.entry_count == 3;
+            assert value.chain.length == 3;
+            assert eq_bytes(value.chain[0], cert1);
+            assert eq_bytes(value.leaf, cert1);
+            assert eq_bytes(value.chain[1], cert2);
+            assert eq_bytes(value.chain[2], cert3);
+        },
+        Result.Err { error } => { assert false; }
+    }
+}
+
 test "tls13_handshake_codec: parse_certificate rejects trailing garbage after the certificate_list" {
     let cert: int[] = [1, 2, 3];
     let mut entry: int[] = [];
@@ -626,6 +694,60 @@ test "tls13_handshake_codec: parse_client_hello_legacy_session_id rejects a leng
         Result.Ok { value } => { assert false; },
         Result.Err { error } => { assert error.length > 0; }
     }
+}
+
+// The offset of `needle` inside `haystack`, or -1 if absent. Used below to
+// locate the signature_algorithms extension inside an encoded ClientHello
+// without duplicating the whole-message pin already in
+// tls13_handshake_test.sfn.
+fn _find_bytes(haystack: int[], needle: int[]) -> int {
+    if needle.length < 1 { return -1; }
+    let mut i: int = 0;
+    loop {
+        if i + needle.length > haystack.length { break; }
+        let mut matched: bool = true;
+        let mut j: int = 0;
+        loop {
+            if j >= needle.length { break; }
+            if haystack[i + j] != needle[j] { matched = false; }
+            j += 1;
+        }
+        if matched { return i; }
+        i += 1;
+    }
+    return -1;
+}
+
+// ── signature_algorithms extension order (RFC 8446 §4.2.3) ────────
+test "tls13_handshake_codec: the signature_algorithms extension offers exactly four schemes in order" {
+    let random: int[] = _bytes(32, 0);
+    let session_id: int[] = [];
+    let key_share: int[] = _bytes(32, 1);
+    let message: int[] = encode_client_hello(random, session_id, key_share, "example.com");
+
+    // ext_signature_algorithms (0x000d) followed by its 2-byte extension_data
+    // length and 2-byte list length, then the four scheme codes in the exact
+    // order the encoder must offer them: ecdsa_secp256r1_sha256,
+    // rsa_pss_rsae_sha256, rsa_pss_rsae_sha384, ed25519.
+    let expected: int[] = hexb("000d000a00080403080408050807");
+    let at: int = _find_bytes(message, expected);
+    assert at >= 0;
+
+    // Not merely a substring match by accident: the extension must appear
+    // exactly once.
+    let second: int[] = _slice_from(message, at + 1);
+    assert _find_bytes(second, expected) < 0;
+}
+
+fn _slice_from(xs: int[], start: int) -> int[] {
+    let mut out: int[] = [];
+    let mut i: int = start;
+    loop {
+        if i >= xs.length { break; }
+        out.push(xs[i]);
+        i += 1;
+    }
+    return out;
 }
 
 // ── encode_client_hello fail-closed ───────────────────────────────

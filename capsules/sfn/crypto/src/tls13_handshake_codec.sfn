@@ -47,6 +47,15 @@ fn tls_group_x25519() -> int { return 29; }
 // ed25519 (0x0807).
 fn tls_sigalg_ed25519() -> int { return 2055; }
 
+// rsa_pss_rsae_sha256 (0x0804).
+fn tls_sigalg_rsa_pss_rsae_sha256() -> int { return 2052; }
+
+// rsa_pss_rsae_sha384 (0x0805).
+fn tls_sigalg_rsa_pss_rsae_sha384() -> int { return 2053; }
+
+// ecdsa_secp256r1_sha256 (0x0403).
+fn tls_sigalg_ecdsa_secp256r1_sha256() -> int { return 1027; }
+
 // ── Protocol versions ─────────────────────────────────────────────
 // legacy_version 0x0303 (TLS 1.2), carried for middlebox compatibility.
 fn tls_version_legacy() -> int { return 771; }
@@ -287,10 +296,20 @@ fn _encode_supported_groups_extension() -> int[] {
     return data;
 }
 
+// RFC 8446 4.2.3. Offered most-preferred first. Ed25519 stays last rather
+// than being dropped: no public CA issues Ed25519 leaves, but the capsule's
+// own server side signs with it, so removing it would break loopback against
+// `tls13_server_handshake.sfn`.
 fn _encode_signature_algorithms_extension() -> int[] {
     let mut data: int[] = [];
-    _push_u16(data, 2);
-    _push_u16(data, tls_sigalg_ed25519());
+    let schemes: int[] = [tls_sigalg_ecdsa_secp256r1_sha256(), tls_sigalg_rsa_pss_rsae_sha256(), tls_sigalg_rsa_pss_rsae_sha384(), tls_sigalg_ed25519()];
+    _push_u16(data, schemes.length * 2);
+    let mut i: int = 0;
+    loop {
+        if i >= schemes.length { break; }
+        _push_u16(data, schemes[i]);
+        i += 1;
+    }
     return data;
 }
 
@@ -1250,13 +1269,18 @@ fn encode_certificate(certificate_request_context: int[], chain: int[][]) -> int
 struct CertificateMsg {
     certificate_request_context: int[];
     leaf: int[];
+    // Every CertificateEntry's cert_data in wire order, leaf first. `leaf` is
+    // `chain[0]`, kept as its own field because most callers want only it;
+    // `chain[1..]` are the intermediates `x509_verify_chain` needs, which the
+    // parser used to discard.
+    chain: int[][];
     entry_count: int;
 }
 
 // Parse a Certificate handshake body. Sets `leaf` to the first
-// CertificateEntry's cert_data and `entry_count` to the number of entries.
-// Fails closed on truncation, trailing garbage, or an empty
-// certificate_list.
+// CertificateEntry's cert_data, `chain` to every entry in wire order, and
+// `entry_count` to the number of entries. Fails closed on truncation,
+// trailing garbage, or an empty certificate_list.
 fn parse_certificate(body: int[]) -> Result<CertificateMsg, string> {
     if body.length < 1 {
         return Result.Err {
@@ -1293,6 +1317,7 @@ fn parse_certificate(body: int[]) -> Result<CertificateMsg, string> {
 
     let no_leaf: int[] = [];
     let mut leaf: int[] = no_leaf;
+    let mut chain: int[][] = [];
     let mut entry_count: int = 0;
     let mut off: int = list_off;
     loop {
@@ -1335,6 +1360,7 @@ fn parse_certificate(body: int[]) -> Result<CertificateMsg, string> {
         }
 
         if entry_count == 0 { leaf = cert_data; }
+        chain.push(cert_data);
         entry_count += 1;
         off = cert_ext_off + cert_ext_len;
     }
@@ -1350,6 +1376,7 @@ fn parse_certificate(body: int[]) -> Result<CertificateMsg, string> {
         value: CertificateMsg {
             certificate_request_context: ctx,
             leaf: leaf,
+            chain: chain,
             entry_count: entry_count
         }
     };

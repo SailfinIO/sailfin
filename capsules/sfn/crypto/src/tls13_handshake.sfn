@@ -40,9 +40,13 @@
 // old struct's scalar `state` never advanced — while appending to the same
 // shared transcript a second time. The handshake then fails several steps
 // later at the server Finished MAC, pointing at the wrong message entirely.
+import { int_to_string } from "sfn/strings";
+
 import { ct_eq_bytes, string_to_bytes } from "./bits";
+import { ecdsa_p256_verify_sha256 } from "./ecdsa";
 import { ed25519_verify } from "./ed25519";
 import { hmac_sha256_bytes, sha256_bytes } from "./hkdf";
+import { rsa_pss_verify_sha256, rsa_pss_verify_sha384 } from "./rsa";
 import {
     CertificateMsg,
     CertificateVerifyMsg,
@@ -67,7 +71,10 @@ import {
     tls_cipher_aes_128_gcm_sha256,
     tls_cipher_chacha20_poly1305_sha256,
     tls_group_x25519,
+    tls_sigalg_ecdsa_secp256r1_sha256,
     tls_sigalg_ed25519,
+    tls_sigalg_rsa_pss_rsae_sha256,
+    tls_sigalg_rsa_pss_rsae_sha384,
     tls_version_13,
     tls_version_legacy
 } from "./tls13_handshake_codec";
@@ -82,6 +89,23 @@ import {
     tls13_server_handshake_traffic_secret
 } from "./tls13_schedule";
 import { x25519, x25519_base, x25519_is_zero } from "./x25519";
+import {
+    X509Certificate,
+    x509_hostname_matches,
+    x509_oid_ed25519,
+    x509_oid_rsa_encryption,
+    x509_parse
+} from "./x509";
+import {
+    RsaPublicKey,
+    X509ChainResult,
+    x509_rsa_public_key_from_spki,
+    x509_verify_chain,
+    x509_verify_err_bad_input,
+    x509_verify_err_hostname_mismatch,
+    x509_verify_oid_ec_public_key,
+    x509_verify_options
+} from "./x509_verify";
 
 // ── Client handshake states (RFC 8446 §A.1) ──────────────────────
 // The subset the minimal cut reaches. WAIT_CERT_CR is collapsed into
@@ -144,6 +168,10 @@ struct ClientHandshake {
     client_application_traffic_secret: int[];
     server_application_traffic_secret: int[];
     server_leaf_certificate: int[];
+    // Every CertificateEntry from the server Certificate message, leaf first.
+    // `server_leaf_certificate` is `server_certificate_chain[0]`; the rest are
+    // the intermediates `hs_client_verify_peer` feeds to `x509_verify_chain`.
+    server_certificate_chain: int[][];
     server_certificate_verified: bool;
 }
 
@@ -200,6 +228,7 @@ fn _with(hs: ClientHandshake, state: int) -> ClientHandshake {
         client_application_traffic_secret: hs.client_application_traffic_secret,
         server_application_traffic_secret: hs.server_application_traffic_secret,
         server_leaf_certificate: hs.server_leaf_certificate,
+        server_certificate_chain: hs.server_certificate_chain,
         server_certificate_verified: hs.server_certificate_verified
     };
 }
@@ -327,6 +356,7 @@ fn hs_client_new(client_private: int[]) -> Result<ClientHandshake, string> {
             client_application_traffic_secret: [],
             server_application_traffic_secret: [],
             server_leaf_certificate: [],
+            server_certificate_chain: [],
             server_certificate_verified: false
         }
     };
@@ -410,6 +440,7 @@ fn hs_client_send_hello(hs: ClientHandshake, client_hello: int[]) -> Result<Clie
             client_application_traffic_secret: hs.client_application_traffic_secret,
             server_application_traffic_secret: hs.server_application_traffic_secret,
             server_leaf_certificate: hs.server_leaf_certificate,
+            server_certificate_chain: hs.server_certificate_chain,
             server_certificate_verified: hs.server_certificate_verified
         }
     };
@@ -580,6 +611,7 @@ fn hs_client_recv_server_hello(hs: ClientHandshake, message: int[]) -> Result<Cl
             client_application_traffic_secret: hs.client_application_traffic_secret,
             server_application_traffic_secret: hs.server_application_traffic_secret,
             server_leaf_certificate: hs.server_leaf_certificate,
+            server_certificate_chain: hs.server_certificate_chain,
             server_certificate_verified: hs.server_certificate_verified
         }
     };
@@ -643,9 +675,10 @@ fn hs_client_recv_encrypted_extensions(hs: ClientHandshake, message: int[]) -> R
 }
 
 // ── Step 4: Certificate ──────────────────────────────────────────
-// Stores the leaf certificate for the CertificateVerify check. Chain
-// building and the trust decision are deliberately out of scope (SFN-340);
-// this step performs no validation beyond framing.
+// Stores the leaf certificate for the CertificateVerify check and the full
+// entry list for chain building. This step performs no validation beyond
+// framing: the trust decision is `hs_client_verify_peer`, which the caller
+// drives once the handshake has produced a peer to judge.
 fn hs_client_recv_certificate(hs: ClientHandshake, message: int[]) -> Result<ClientHandshake, string> {
     if hs.state != hs_state_wait_certificate() {
         return Result.Err {
@@ -664,11 +697,15 @@ fn hs_client_recv_certificate(hs: ClientHandshake, message: int[]) -> Result<Cli
 
     let parsed: Result<CertificateMsg, string> = parse_certificate(cert_body);
     let mut leaf: int[] = [];
+    let mut chain: int[][] = [];
     match parsed {
         Result.Err { error } => {
             return Result.Err { error: "hs_client_recv_certificate: " + error };
         },
-        Result.Ok { value } => { leaf = value.leaf; }
+        Result.Ok { value } => {
+            leaf = value.leaf;
+            chain = value.chain;
+        }
     }
 
     _append(hs.transcript, message);
@@ -691,8 +728,95 @@ fn hs_client_recv_certificate(hs: ClientHandshake, message: int[]) -> Result<Cli
             client_application_traffic_secret: hs.client_application_traffic_secret,
             server_application_traffic_secret: hs.server_application_traffic_secret,
             server_leaf_certificate: leaf,
+            server_certificate_chain: chain,
             server_certificate_verified: hs.server_certificate_verified
         }
+    };
+}
+
+// Check a CertificateVerify signature under the scheme `cv.algorithm` names,
+// against the key the leaf certificate actually carries.
+//
+// `Err` means the scheme is unusable here — unknown, or naming a key type this
+// leaf does not hold. `Ok(false)` means the scheme applied and the signature
+// failed. Keeping those apart matters: a scheme/key-type mismatch must never
+// collapse into "signature bad" and never into "check skipped", because RFC
+// 8446 §4.4.3 lets the peer choose the scheme, and a peer that could pick a
+// scheme the verifier silently ignores would be unauthenticated.
+//
+// The transcript hash is fixed at SHA-256 by the only cipher suites the
+// capsule negotiates; the SHA-384 branch is the signature's own hash over the
+// signed content, not the transcript's.
+//
+// RFC 8446 4.4.3 requires the receiver to reject a scheme it did not offer, so
+// the branches below must stay the same set as
+// `_encode_signature_algorithms_extension` writes into the ClientHello.
+// Widening one without the other is the bug this note exists to catch:
+// widening only the offer draws signatures this rejects, and widening only
+// this accepts a scheme the peer was never told it could use.
+fn _verify_certificate_verify_signature(leaf: X509Certificate, cv: CertificateVerifyMsg, content: int[]) -> Result<bool, string> {
+    if cv.algorithm == tls_sigalg_ed25519() {
+        if leaf.spki_algorithm != x509_oid_ed25519() {
+            return Result.Err {
+                error: "signature algorithm ed25519 does not match the leaf key type ("
+                    + leaf.spki_algorithm
+                    + ")"
+            };
+        }
+        if leaf.spki_key.length != 32 {
+            return Result.Err {
+                error: "ed25519 leaf public key must be 32 bytes"
+            };
+        }
+        return Result.Ok {
+            value: ed25519_verify(_to_hex(leaf.spki_key), content, _to_hex(cv.signature))
+        };
+    }
+
+    if cv.algorithm == tls_sigalg_ecdsa_secp256r1_sha256() {
+        if leaf.spki_algorithm != x509_verify_oid_ec_public_key() {
+            return Result.Err {
+                error: "signature algorithm ecdsa_secp256r1_sha256 does not match the leaf key type ("
+                    + leaf.spki_algorithm
+                    + ")"
+            };
+        }
+        // `ecdsa_p256_verify_sha256` decodes the SEC1 point itself and rejects
+        // a key off the curve or on the wrong one, so a P-384 key reaching
+        // here fails closed rather than being verified against P-256.
+        return Result.Ok {
+            value: ecdsa_p256_verify_sha256(leaf.spki_key, content, cv.signature)
+        };
+    }
+
+    let is_pss_256: bool = cv.algorithm == tls_sigalg_rsa_pss_rsae_sha256();
+    let is_pss_384: bool = cv.algorithm == tls_sigalg_rsa_pss_rsae_sha384();
+    if is_pss_256 || is_pss_384 {
+        if leaf.spki_algorithm != x509_oid_rsa_encryption() {
+            return Result.Err {
+                error: "signature algorithm rsa_pss_rsae does not match the leaf key type ("
+                    + leaf.spki_algorithm
+                    + ")"
+            };
+        }
+        let key: RsaPublicKey = x509_rsa_public_key_from_spki(leaf.spki_key);
+        if !key.ok {
+            return Result.Err {
+                error: "leaf RSA public key did not parse: " + key.error
+            };
+        }
+        if is_pss_256 {
+            return Result.Ok {
+                value: rsa_pss_verify_sha256(key.modulus, key.exponent, content, cv.signature)
+            };
+        }
+        return Result.Ok {
+            value: rsa_pss_verify_sha384(key.modulus, key.exponent, content, cv.signature)
+        };
+    }
+
+    return Result.Err {
+        error: "unsupported signature algorithm " + int_to_string(cv.algorithm)
     };
 }
 
@@ -702,17 +826,16 @@ fn hs_client_recv_certificate(hs: ClientHandshake, message: int[]) -> Result<Cli
 // transcript, since the server signed a transcript that did not yet contain
 // its own signature.
 //
-// `leaf_public_key_hex` is the server's public key, supplied by the caller
-// rather than extracted from `server_leaf_certificate`: X.509 DER parsing is
-// SFN-504's scope and the trust decision is SFN-340's. This module checks that
-// the signature is valid for a key; deciding that the key is the right one is
-// the caller's job, and `server_certificate_verified` records which happened.
+// The verifying key comes from `server_leaf_certificate`, not from the caller.
+// A signature checked against a caller-supplied key proves only that someone
+// holds that key; binding the check to the certificate the peer actually
+// presented is what lets `server_certificate_verified` mean "this peer holds
+// the private key for the leaf it sent".
 //
-// Only Ed25519 is accepted, because `ed25519_verify` is the only signature
-// primitive in the capsule today. RSA-PSS and ECDSA-P256 — which real servers,
-// including RFC 8448's, actually use — are rejected here rather than skipped;
-// they become available with SFN-653.
-fn hs_client_recv_certificate_verify(hs: ClientHandshake, message: int[], leaf_public_key_hex: string) -> Result<ClientHandshake, string> {
+// That flag is half of peer authentication. It says the peer owns the leaf,
+// not that the leaf is trusted — `hs_client_verify_peer` is the other half,
+// and a caller needs both.
+fn hs_client_recv_certificate_verify(hs: ClientHandshake, message: int[]) -> Result<ClientHandshake, string> {
     if hs.state != hs_state_wait_certificate_verify() {
         return Result.Err {
             error: "hs_client_recv_certificate_verify: unexpected CertificateVerify in this state"
@@ -742,21 +865,33 @@ fn hs_client_recv_certificate_verify(hs: ClientHandshake, message: int[], leaf_p
         Result.Ok { value } => { cv = value; }
     }
 
-    if cv.algorithm != tls_sigalg_ed25519() {
+    if hs.server_leaf_certificate.length < 1 {
         return Result.Err {
-            error: "hs_client_recv_certificate_verify: unsupported signature algorithm (only ed25519 is available; RSA-PSS and ECDSA-P256 arrive with SFN-653)"
+            error: "hs_client_recv_certificate_verify: no server certificate to verify against"
         };
     }
-    if leaf_public_key_hex.length != 64 {
+    let leaf: X509Certificate = x509_parse(hs.server_leaf_certificate);
+    if !leaf.ok {
         return Result.Err {
-            error: "hs_client_recv_certificate_verify: leaf public key must be 32 bytes of hex"
+            error: "hs_client_recv_certificate_verify: leaf certificate did not parse: "
+                + leaf.error
         };
     }
 
     // Hash the transcript as it stood through Certificate, before appending.
     let th: int[] = sha256_bytes(hs.transcript);
     let content: int[] = tls13_certificate_verify_content(tls13_server_certificate_verify_context(), th);
-    let ok: bool = ed25519_verify(leaf_public_key_hex, content, _to_hex(cv.signature));
+
+    let checked: Result<bool, string> = _verify_certificate_verify_signature(leaf, cv, content);
+    let mut ok: bool = false;
+    match checked {
+        Result.Err { error } => {
+            return Result.Err {
+                error: "hs_client_recv_certificate_verify: " + error
+            };
+        },
+        Result.Ok { value } => { ok = value; }
+    }
     if !ok {
         return Result.Err {
             error: "hs_client_recv_certificate_verify: signature did not verify"
@@ -783,65 +918,93 @@ fn hs_client_recv_certificate_verify(hs: ClientHandshake, message: int[], leaf_p
             client_application_traffic_secret: hs.client_application_traffic_secret,
             server_application_traffic_secret: hs.server_application_traffic_secret,
             server_leaf_certificate: hs.server_leaf_certificate,
+            server_certificate_chain: hs.server_certificate_chain,
             server_certificate_verified: true
         }
     };
 }
 
-// Transcript a CertificateVerify WITHOUT checking its signature, leaving
-// `server_certificate_verified` false.
+// `X509ChainResult` has no struct-update syntax and callers read every field,
+// so a failure must spell out its defaults — the same shape `x509.sfn`'s
+// failed-certificate constructor records.
+fn _peer_auth_failure(code: string, message: string) -> X509ChainResult {
+    return X509ChainResult {
+        ok: false,
+        code: code,
+        error: "hs_client_verify_peer: " + message,
+        depth: 0,
+        anchor_subject_cn: ""
+    };
+}
+
+// ── Peer authentication ──────────────────────────────────────────
+// The trust half of authenticating a server: rebuilds the presented chain,
+// verifies it to a configured anchor, and checks the hostname.
 //
-// This exists because the handshake's key schedule and the peer-authentication
-// decision are separable, and today only the former can be exercised against a
-// real trace: RFC 8446 §4.2.3 forbids PKCS#1v1.5 in CertificateVerify, so
-// every published TLS 1.3 vector — RFC 8448 §3 included — signs with RSA-PSS
-// or ECDSA, neither of which the capsule can verify until SFN-653. Refusing
-// the message outright would make the transcript, the traffic secrets and the
-// Finished MAC untestable end-to-end.
+// Kept separate from `hs_client_recv_certificate_verify` because the two
+// answer different questions. That step proves the peer holds the leaf's
+// private key; this one decides whether that leaf is one we trust, for the
+// name we asked for. A caller needs both, and this refuses to run before the
+// first has succeeded rather than reporting a trusted chain for a peer that
+// never proved possession.
 //
-// A connection reaching `hs_state_connected()` through this path is
-// unauthenticated and is only as trustworthy as the channel it ran over.
-// Callers that need an authenticated peer must use
-// `hs_client_recv_certificate_verify` and check
-// `server_certificate_verified`.
+// Returns a bare `X509ChainResult` rather than a `Result<..., string>`: that
+// struct is already this capsule's verification-outcome type, carrying `ok`,
+// a machine-readable `code` and a human `error`, and `x509_verify_chain`
+// returns it unwrapped for the same reason. Wrapping it would give the caller
+// two error channels for one outcome and force it to branch twice.
 //
-// Deliberately NOT re-exported from `mod.sfn`: it is reachable only by
-// importing this module directly, which the in-capsule tests do. The hazard is
-// that this is currently the path that *works* against a real server — the
-// verifying path rejects the RSA-PSS and ECDSA signatures every real server
-// sends — so a consumer picking whichever function does not demand a leaf
-// public key would get a fully-keyed, entirely unauthenticated connection. Keep
-// it off the capsule surface until SFN-653 makes the verifying path usable, at
-// which point this should be deleted rather than promoted.
-fn hs_client_recv_certificate_verify_without_authenticating(hs: ClientHandshake, message: int[]) -> Result<ClientHandshake, string> {
-    if hs.state != hs_state_wait_certificate_verify() {
-        return Result.Err {
-            error: "hs_client_recv_certificate_verify_without_authenticating: unexpected CertificateVerify in this state"
-        };
+// `now_ms` is supplied by the caller rather than read here, which keeps this
+// module free of `![clock]` — the same split `x509_verify_options` records.
+fn hs_client_verify_peer(hs: ClientHandshake, hostname: string, anchors: X509Certificate[], now_ms: int) -> X509ChainResult {
+    if !hs.server_certificate_verified {
+        return _peer_auth_failure(x509_verify_err_bad_input(), "peer has not proved possession of the leaf key; run hs_client_recv_certificate_verify first");
+    }
+    if hs.server_leaf_certificate.length < 1 {
+        return _peer_auth_failure(x509_verify_err_bad_input(), "no certificate chain was received");
     }
 
-    let body: Result<int[], string> = _take_body(message, hs_type_certificate_verify(), "hs_client_recv_certificate_verify_without_authenticating");
-    let mut cv_body: int[] = [];
-    match body {
-        Result.Err { error } => {
-            return Result.Err { error: error };
-        },
-        Result.Ok { value } => { cv_body = value; }
+    // Deliberately the leaf `hs_client_recv_certificate_verify` proved
+    // possession against, not `server_certificate_chain[0]`. The two are the
+    // same bytes today because `parse_certificate` sets `leaf` from the first
+    // entry, but reading the field the possession check used makes "the
+    // certificate we trust is the one the peer proved it holds" structural
+    // rather than a coincidence of how the chain was assembled.
+    let leaf: X509Certificate = x509_parse(hs.server_leaf_certificate);
+    if !leaf.ok {
+        return _peer_auth_failure(x509_verify_err_bad_input(), "leaf certificate did not parse: "
+            + leaf.error);
     }
 
-    let parsed: Result<CertificateVerifyMsg, string> = parse_certificate_verify(cv_body);
-    match parsed {
-        Result.Err { error } => {
-            return Result.Err {
-                error: "hs_client_recv_certificate_verify_without_authenticating: "
-                    + error
-            };
-        },
-        Result.Ok { value } => { }
+    // Entries after the leaf are the intermediates the server offered. A
+    // malformed one fails the handshake rather than being skipped: dropping a
+    // link would turn a verifiable chain into `no-anchor`, reporting an
+    // untrusted peer for the wrong reason.
+    let mut intermediates: X509Certificate[] = [];
+    let mut i: int = 1;
+    loop {
+        if i >= hs.server_certificate_chain.length { break; }
+        let cert: X509Certificate = x509_parse(hs.server_certificate_chain[i]);
+        if !cert.ok {
+            return _peer_auth_failure(x509_verify_err_bad_input(), "intermediate certificate did not parse: "
+                + cert.error);
+        }
+        intermediates.push(cert);
+        i += 1;
     }
 
-    _append(hs.transcript, message);
-    return Result.Ok { value: _with(hs, hs_state_wait_finished()) };
+    let chain: X509ChainResult = x509_verify_chain(leaf, intermediates, anchors, x509_verify_options(now_ms));
+    if !chain.ok { return chain; }
+
+    // Ordered after chain verification deliberately: a name match on an
+    // untrusted certificate carries no weight, and returning it first would
+    // invite a caller to treat it as though it did.
+    if !x509_hostname_matches(leaf, hostname) {
+        return _peer_auth_failure(x509_verify_err_hostname_mismatch(), "certificate is not valid for "
+            + hostname);
+    }
+
+    return chain;
 }
 
 // ── Step 6: server Finished ──────────────────────────────────────
@@ -926,6 +1089,7 @@ fn hs_client_recv_finished(hs: ClientHandshake, message: int[]) -> Result<Client
             client_application_traffic_secret: client_ap,
             server_application_traffic_secret: server_ap,
             server_leaf_certificate: hs.server_leaf_certificate,
+            server_certificate_chain: hs.server_certificate_chain,
             server_certificate_verified: hs.server_certificate_verified
         }
     };
@@ -976,11 +1140,11 @@ export {
     hs_client_new,
     hs_client_recv_certificate,
     hs_client_recv_certificate_verify,
-    hs_client_recv_certificate_verify_without_authenticating,
     hs_client_recv_encrypted_extensions,
     hs_client_recv_finished,
     hs_client_recv_server_hello,
     hs_client_send_hello,
+    hs_client_verify_peer,
     hs_state_connected,
     hs_state_start,
     hs_state_wait_certificate,

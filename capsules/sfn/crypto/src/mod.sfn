@@ -203,7 +203,8 @@ export {
     x509_verify_err_not_a_ca,
     x509_verify_err_path_len_exceeded,
     x509_verify_err_eku,
-    x509_verify_err_path_too_long
+    x509_verify_err_path_too_long,
+    x509_verify_err_hostname_mismatch
 } from "./x509_verify";
 
 // System trust store (SFEP-0048 Phase C, SFN-340) — the anchors a path may
@@ -250,6 +251,7 @@ export {
     hs_client_recv_encrypted_extensions,
     hs_client_recv_certificate,
     hs_client_recv_certificate_verify,
+    hs_client_verify_peer,
     hs_client_recv_finished,
     hs_client_finished_message,
     hs_transcript_hash,
@@ -313,6 +315,9 @@ export {
     tls_cipher_aes_128_gcm_sha256,
     tls_group_x25519,
     tls_sigalg_ed25519,
+    tls_sigalg_rsa_pss_rsae_sha256,
+    tls_sigalg_rsa_pss_rsae_sha384,
+    tls_sigalg_ecdsa_secp256r1_sha256,
     tls_version_legacy,
     tls_version_13,
     encode_handshake_message,
