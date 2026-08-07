@@ -1214,11 +1214,9 @@ fn lower_enum_literal(parse: EnumLiteralParse, bindings: ParameterBinding[], loc
                     // aggregate (`{i8*, i64}`) is narrowed to its `i8*` data
                     // pointer so it fits the pointer-width payload slot and
                     // matches the match-arm read (which maps `string` -> i8*).
-                    // Hoisted above the generic-adoption block below so both
-                    // it and the boxing branch share one aggregate test —
-                    // `field_operand` is not reassigned in between. Keeping two
-                    // copies of this rule let them drift, which is how SFN-770
-                    // reached the payload store with an unboxed aggregate.
+                    // Shared with the adoption block below (`field_operand` is
+                    // not reassigned between them) — two drifting copies of this
+                    // test are how SFN-770 reached the store unboxed.
                     let trimmed_field_type = trim_text(field_operand.llvm_type);
                     let mut _let69: boolean = false;
                     if starts_with(trimmed_field_type, "%") { _let69 = true; }
@@ -1228,32 +1226,18 @@ fn lower_enum_literal(parse: EnumLiteralParse, bindings: ParameterBinding[], loc
                         if trimmed_field_type == "{i8*, i64}" {
                             field_llvm_type = "i8*";
                         } else if trimmed_field_type.length > 0 {
-                            // SFN-770: a generic payload slot is pointer-width,
-                            // and the match-arm read maps a user struct, enum,
-                            // or interface payload to `%T*`. An aggregate that
-                            // surfaced in value form (`%T`) — which is how an
-                            // identifier bound to a struct local lowers, unlike
-                            // a struct literal or a call, both of which already
-                            // yield `%T*` — must be adopted in pointer form so
-                            // the boxing branch below heap-boxes it. Adopting
-                            // `%T` stored the whole aggregate into the 8-byte
-                            // slot, overrunning the enum and leaving readers to
-                            // dereference the first field as if it were the
-                            // payload pointer.
-                            //
-                            // The closure pair `{i8*, i8*}` is the one aggregate
-                            // whose reader still loads by value, so writer and
-                            // reader disagree for a generic closure payload.
-                            // That shape does not occur in tree and was equally
-                            // broken before (both sides overran the slot); it is
-                            // tracked as its own defect in SFN-771.
-                            let mut adopted_type: string = trimmed_field_type;
+                            // SFN-770: the payload slot is pointer-width and the
+                            // match arm reads a struct/enum/interface payload as
+                            // `%T*`, so an aggregate in value form is adopted as a
+                            // pointer for the boxing branch below to box it. Why,
+                            // and the `{i8*, i8*}` gap left open as SFN-771:
+                            // `compiler/tests/unit/enum_payload_struct_local_test.sfn`.
+                            field_llvm_type = trimmed_field_type;
                             if field_is_aggregate {
                                 if !ends_with_pointer_suffix(trimmed_field_type) {
-                                    adopted_type = trimmed_field_type + "*";
+                                    field_llvm_type = trimmed_field_type + "*";
                                 }
                             }
-                            field_llvm_type = adopted_type;
                         }
                     }
                     if ends_with_pointer_suffix(field_llvm_type) {
