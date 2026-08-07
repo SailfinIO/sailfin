@@ -1,0 +1,107 @@
+// Regression test: a struct-typed local passed as a generic enum payload
+// (`Result.Ok { value: p }`) must be heap-boxed, not stored by value.
+//
+// Background (SFN-770): `Result<T, E>` is generic, so `lower_enum_literal`
+// in `compiler/src/llvm/expression_lowering/native/core_literals_lowering.sfn`
+// takes the `field_is_generic` path — it lowers the payload with no type
+// hint and then adopts the operand's own LLVM type as the field type.
+//
+// That adoption assumed the operand always surfaces in the boxed-struct ABI's
+// pointer form. It does for a struct literal or a call (both end in
+// `box_aggregate_operand`, which yields `%T*`), but an identifier bound to a
+// struct local surfaces in *value* form: the local's slot is `alloca %P`, so
+// reading it emits `load %P`. `field_llvm_type` then became `%P` rather than
+// `%P*`, which skipped the boxing branch and emitted
+//
+//     store %P %t16, ptr %t19
+//
+// storing a 24-byte aggregate into the pointer-width (8-byte) payload slot.
+// Two things broke at once: the store overran the enum — which is why the
+// original report saw the outcome flip when unrelated functions were added or
+// removed, since that shifts what the overrun lands on — and the match-arm
+// read, which maps a struct payload to `%T*`, dereferenced the aggregate's
+// first field as if it were the payload pointer. Fields read back garbage,
+// and touching the `string` field segfaulted.
+//
+// The corrupted-but-running half is the dangerous one: the caller enters the
+// `Ok` arm and trusts a payload that was never constructed.
+//
+// The fix adopts the pointer form for an aggregate value-form operand so the
+// existing boxing branch heap-boxes it. Each row of the issue's shape table is
+// covered below; only the local-binding rows regressed, but the neighbouring
+// shapes are pinned so a future change cannot fix one by breaking another.
+struct P {
+    ok: boolean;
+    error: string;
+    depth: int;
+}
+
+fn make_p() -> P {
+    return P { ok: true, error: "", depth: 3 };
+}
+
+fn w_inline() -> Result<P, string> {
+    return Result.Ok {
+        value: P { ok: true, error: "", depth: 3 }
+    };
+}
+
+fn w_local_literal() -> Result<P, string> {
+    let p: P = P { ok: true, error: "", depth: 3 };
+    return Result.Ok { value: p };
+}
+
+fn w_local_from_call() -> Result<P, string> {
+    let p: P = make_p();
+    return Result.Ok { value: p };
+}
+
+fn w_local_reconstructed() -> Result<P, string> {
+    let p: P = make_p();
+    return Result.Ok {
+        value: P { ok: p.ok, error: p.error, depth: p.depth }
+    };
+}
+
+fn w_bare_struct_return() -> P {
+    let p: P = make_p();
+    return p;
+}
+
+fn assert_payload(r: Result<P, string>) {
+    match r {
+        Result.Ok { value } => {
+            assert value.depth == 3;
+            assert value.ok;
+            assert value.error.length == 0;
+        },
+        Result.Err { error } => {
+            // Reaching the Err arm at all is the failure — every wrapper above
+            // returns Ok unconditionally.
+            assert false;
+        }
+    }
+}
+
+test "enum payload: inline struct literal payload round-trips" {
+    assert_payload(w_inline());
+}
+
+test "enum payload: struct local bound from a literal round-trips" {
+    assert_payload(w_local_literal());
+}
+
+test "enum payload: struct local bound from a call round-trips" {
+    assert_payload(w_local_from_call());
+}
+
+test "enum payload: reconstructed inline payload round-trips" {
+    assert_payload(w_local_reconstructed());
+}
+
+test "enum payload: bare struct return is unaffected" {
+    let p = w_bare_struct_return();
+    assert p.depth == 3;
+    assert p.ok;
+    assert p.error.length == 0;
+}
