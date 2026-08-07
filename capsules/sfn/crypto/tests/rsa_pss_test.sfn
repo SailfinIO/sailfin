@@ -1,0 +1,697 @@
+// capsules/sfn/crypto/tests/rsa_pss_test.sfn
+//
+// SFN-658: RSASSA-PSS verification (RFC 8017 §8.1.2) — the mode TLS 1.3
+// mandates for CertificateVerify, over the bignum core SFN-656 landed.
+//
+// Vector provenance: NIST CAVP FIPS 186-3 RSA validation archive
+// (186-3rsatestvectors.zip, sha256
+// 8405aeb3572a4f98ed4b1a3ccb3f2f49e725462dd28ec4759d6a15d88855d19c — the same
+// archive rsa_pkcs1_test.sfn draws on), file SigVerPSS_186-3.rsp, group
+// [mod = 2048]. Record indices are positions within that group.
+//
+// Unlike the SigVer15 file, this one's `Result = F` lines DO carry NIST's own
+// parenthesized reason text, so the failure reasons named against each record
+// below are quoted, not this test's own classification.
+//
+// Every record used here has SaltLen equal to its digest length — 32 for
+// SHA-256, 48 for SHA-384 — which is the only salt length TLS 1.3's
+// `rsa_pss_rsae_*` and `rsa_pss_pss_*` schemes permit, and the only one the
+// verifier implements. The archive's 3072-bit group uses SaltLen 0 for SHA-256
+// and is therefore deliberately not used: those records are valid PSS but not
+// valid TLS 1.3, and a verifier that accepted them would be wrong.
+//
+// Note that NIST's [mod = 2048] group carries a DISTINCT modulus per SHAAlg
+// subsection, not one key per group. The SHA-384 records below are under their
+// own key, which is why there is a fourth modulus constant.
+//
+// Cost shape, per design note §6.3
+// (docs/proposals/design-notes/sfn-653-p256-rsa-bigint-strategy.md): a 2048-bit
+// verification is ~1.19 million primitive operations under -O0, measured at
+// 13 ms by rsa_pkcs1_test.sfn. This file caps itself at 10 known-answer records
+// — 8 SHA-256 and 2 SHA-384 — rather than transcribing all 18 SHA-256 and 18
+// SHA-384 records the group offers. That cap is deliberate and worth stating:
+// the remaining records are the same five NIST failure classes under different
+// keys, so they add key diversity and nothing else, while each one costs a
+// modexp AND a 512-hex-character constant to compile. The 10 chosen records
+// cover all five NIST failure classes plus a positive under four distinct keys.
+//
+// Every structural forgery case below costs no modexp at all. They drive
+// `_emsa_pss_verify` — the verifier's actual decision function — with a forged
+// encoding recovered once from record 13. That is not merely a cost trick: it
+// is what makes each check individually pinned. A test that only asserted
+// "rsa_pss_verify_sha256 rejects this signature" could not say WHICH check did
+// the rejecting, so a verifier that dropped one check and still rejected via a
+// later one would pass. These cases fail if the specific check they name is
+// removed.
+import { unix_millis } from "sfn/time";
+
+import { sha256_bytes } from "../src/hkdf";
+import {
+    _emsa_pss_verify,
+    _mgf1,
+    _pss_sha256,
+    _pss_sha384,
+    _rsa_modulus_bits,
+    rsa_pss_verify_sha256,
+    rsa_pss_verify_sha384
+} from "../src/rsa";
+
+fn hexb(s: string) -> int[] {
+    let mut out: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= s.length { break; }
+        let hi: int = _hexval(s[i]);
+        let lo: int = _hexval(s[i + 1]);
+        out.push(((hi << 4) | lo) & 255);
+        i += 2;
+    }
+    return out;
+}
+
+fn _hexval(c: string) -> int {
+    let code: int = char_code(c) & 255;
+    if code >= 48 && code <= 57 { return code - 48; }
+    if code >= 97 && code <= 102 { return code - 97 + 10; }
+    return 0;
+}
+
+fn _repeat(value: int, count: int) -> int[] {
+    let mut out: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= count { break; }
+        out.push(value & 255);
+        i += 1;
+    }
+    return out;
+}
+
+fn _concat(a: int[], b: int[]) -> int[] {
+    let mut out: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= a.length { break; }
+        out.push(a[i]);
+        i += 1;
+    }
+    let mut j: int = 0;
+    loop {
+        if j >= b.length { break; }
+        out.push(b[j]);
+        j += 1;
+    }
+    return out;
+}
+
+fn _slice(bytes: int[], start: int, end: int) -> int[] {
+    let mut out: int[] = [];
+    let mut i: int = start;
+    loop {
+        if i >= end { break; }
+        if i >= 0 && i < bytes.length { out.push(bytes[i]); }
+        i += 1;
+    }
+    return out;
+}
+
+// The bit length emBits takes for every record here: all four moduli are
+// 2048-bit, so emBits is 2047 and emLen is 256 octets with exactly one unused
+// leading bit.
+fn _em_bits_2048() -> int { return 2047; }
+
+fn _e_a() -> int { return 1107007; }
+
+fn _e_a_changed() -> int { return 3960017; }
+
+fn _e_b() -> int { return 3401103; }
+
+fn _e_c() -> int { return 10831377; }
+
+fn _e_d384() -> int { return 2421183; }
+
+fn _nist_n_a() -> string {
+    return "a47d04e7cacdba4ea26eca8a4c6e14563c2ce03b623b768c0d49868a57121301"
+        + "dbf783d82f4c055e73960e70550187d0af62ac3496f0a3d9103c2eb7919a7275"
+        + "2fa7ce8c688d81e3aee99468887a15288afbb7acb845b7c522b5c64e678fcd3d"
+        + "22feb84b44272700be527d2b2025a3f83c2383bf6a39cf5b4e48b3cf2f56eef0"
+        + "dfff18555e31037b915248694876f3047814415164f2c660881e694b58c28038"
+        + "a032ad25634aad7b39171dee368e3d59bfb7299e4601d4587e68caaf8db457b7"
+        + "5af42fc0cf1ae7caced286d77fac6cedb03ad94f1433d2c94d08e60bc1fdef05"
+        + "43cd2951e765b38230fdd18de5d2ca627ddc032fe05bbd2ff21e2db1c2f94d8b";
+}
+
+fn _nist_n_b() -> string {
+    return "9c003978e1f71731e2d1128e1be81bd6c99cd3251672b9c4186497243b17ce52"
+        + "3ab113bd4fe397178e6fb5f3090b0680e42cfe78b3928c22da53ef43595b1c57"
+        + "92a2794f86622bc4a997932dc20df9cc429b5010e18d73c71796df877fb66e72"
+        + "d372081260fe7760d46ff916ac74292ee6e1659c2480a22c9522bdfa1beaa71a"
+        + "e2a5581eb0045bbfb7b1d687553cf3cfb061bd2e811e6085d9e4849f30735bb9"
+        + "5b34ae40aef5a5eb399331704907b67094b8f418deb76b6ff419031a5b2cbc7b"
+        + "64487b49d418d67747f1609040f08adc42b1b0724869d838bb932511a580ac9d"
+        + "872d5a053f3b61b3f51c43fb2b3d510a696a9068e093eea0670e55e58571904f";
+}
+
+fn _nist_n_c() -> string {
+    return "a6754738bdf94dbc846ceb937a3896e747d5c6222453a83f6c86310e58191296"
+        + "13f9857d5e4a06bc5d927bdb011d23d8219549ced82c20592bdc419deb67fe43"
+        + "da87fcdfd01ac1acb07e513170c45d1e058fb56d8cb090a7f2565381785c4478"
+        + "362b253d47e056053516be15f448878d01c9dac06be45957882ccffc5ddaf06b"
+        + "c131c866349668de950e9121b134e5ae1c29815473a20028b9b7ea64d9dd8253"
+        + "a518b766dea714f7b37185a1d707a21cfa526a7d76f55119af728626b77e5b66"
+        + "328c2b37ec78be56380a4cd3900fe6a757f21b5728d31e5f1344aca933042b99"
+        + "240f89dc09e76a03678b402780bf64813c339e79893a3355674ff4807b200775";
+}
+
+fn _nist_n_d384() -> string {
+    return "cb59aae30883db678ea7b2a5e7009799066f060757525166030714a25e808482"
+        + "e752f04f78611b3509d6005b411530c9ada4d8fbddc85f9db3d209eccc6cf0ca"
+        + "e9aeb902e96688d2547974b7eb3323eeaa2257cf8d5c7c97f5176e2cfd29e19d"
+        + "0487380e3e64338c73bd592d52e9dbcc9606ed5835758c1a112c6a004256b5c4"
+        + "338322695df2ba573be0e79a7b9f9afd497dd38eed39f05f88d7d399d1e984d0"
+        + "48067596ad1847ce51221babf51873bad2d81fa91cf3d9fd307e3ebd41fc49a8"
+        + "b3252ed7a71fd2357330bef2f1f89f2c80f740567e2ae8d168e56f007e8fefa3"
+        + "3d2eb92b7d830a4f978ffe842ef0697db50602b19642afc50ac1f837e476c0fd";
+}
+
+fn _a_pass_msg() -> string {
+    return "e002377affb04f0fe4598de9d92d31d6c786040d5776976556a2cfc55e54a1dc"
+        + "b3cb1b126bd6a4bed2a184990ccea773fcc79d246553e6c64f686d21ad415267"
+        + "3cafec22aeb40f6a084e8a5b4991f4c64cf8a927effd0fd775e71e8329e41fdd"
+        + "4457b3911173187b4f09a817d79ea2397fc12dfe3d9c9a0290c8ead31b6690a6";
+}
+
+fn _a_pass_sig() -> string {
+    return "4f9b425c2058460e4ab2f5c96384da2327fd29150f01955a76b4efe956af06dc"
+        + "08779a374ee4607eab61a93adc5608f4ec36e47f2a0f754e8ff839a8a19b1db1"
+        + "e884ea4cf348cd455069eb87afd53645b44e28a0a56808f5031da5ba9112768d"
+        + "fbfca44ebe63a0c0572b731d66122fb71609be1480faa4e4f75e43955159d70f"
+        + "081e2a32fbb19a48b9f162cf6b2fb445d2d6994bc58910a26b5943477803cdaa"
+        + "a1bd74b0da0a5d053d8b1dc593091db5388383c26079f344e2aea600d0e32416"
+        + "4b450f7b9b465111b7265f3b1b063089ae7e2623fc0fda8052cf4bf3379102fb"
+        + "f71d7c98e8258664ceed637d20f95ff0111881e650ce61f251d9c3a629ef222d";
+}
+
+fn _a_msgchg_msg() -> string {
+    return "a3bf44cae8aa8347fd07d84a33eec5dbbdd7b6431368887c988c4be779c5473d"
+        + "d8c33ec82a35f1d3dddfe55f3eed67179b87ce86a4a50088172538fe9d1b06c6"
+        + "ef6897eb3c8e3618cfc21353ed4343e7fceb09a2eb035441cd5c8829c79b8158"
+        + "2dd5d69ae85c5a001bd8e98e069961342a2bee00ad2b8b91015ac5cfc1f0c2d9";
+}
+
+fn _a_msgchg_sig() -> string {
+    return "877f20eed60f8ce286108a5dde9b6828b37e3fbdb08fe153e591513897440f21"
+        + "f81214598fba08ea077394ba8c2a44aa4f0d8f3a5fbaec3dc69b3bddfbe28397"
+        + "c90adf35d08ea771c7aaa31eb06413c1c62b77618af940f4c71859fa4384d29b"
+        + "48e5cfc941d69bf0a3804d2008e758742b8ed68754bc71d231623d181347c368"
+        + "33a7d7160f742a37ce7d432d748e514aa7d8156b50c532151390d086cdcf9d59"
+        + "f122c6d97f4ccb737289f7b00a237cb6b4aae6ba79d41ff73d019a26b59ade04"
+        + "c967356e2aad52f115357ffb7676f190db38dcfc98666e5b258559c8c85fa329"
+        + "42cbcb99d757e8847e56a1687b3302415698708191b136d923349b02fe38b6be";
+}
+
+fn _a_sigchg_msg() -> string {
+    return "e1c46c309b6366fb4d56ac08c9393cee9a7c95bbe7b7c0e79a3d9187c0f42bc3"
+        + "3364c28a770da585e3fe7b4901a3ccd037dfc42aa65a3470521ddafa835ce2d1"
+        + "6c92ac670bd4d086505e608781736dc4dd64cc5080ee19e586c8fd1d737dade5"
+        + "d378b32f1d5df1e8dda0e32a125024b2d53334943c18782d7e69825a580093e7";
+}
+
+fn _a_sigchg_sig() -> string {
+    return "8ed1f28fd16d45d416a21554e104c006fd7868e5895e8b99831ae0938135b543"
+        + "610df64a8c3574d08118bfe396f9a5609a8dbda21b9a8530ff0ba90e629d6abe"
+        + "30d2c1b590600db971fcda80e6eaa84017e209b9bd3b641f3c81d5d27f842bec"
+        + "8019790ed99a0e5db4aedc1c070b047c19410cbc56e9a0ff12d8f6e5d7371b10"
+        + "11ecfecf7be7a74f94403590a52f95238dd69e0b5f4c1fcde97ecfdb1acc3803"
+        + "e59ad8b3088b2bc509e3dd12d40d875625dc8362c579176799c75e4fadcdb392"
+        + "c68f401f68d854e46377f084c081f9d83743039f6934722e30ef3f0226bc841d"
+        + "79a4eb68c5cccbb6ae0e9200444e50ff0d0953047ef955d2d39a70c3b837c5f4";
+}
+
+fn _a_echg_msg() -> string {
+    return "08d3ac24a595da811cc9bba78828f1452ff390ae653f22d1ad91ef6b22aa7b7b"
+        + "15a44ff7f83efcbd7a755eccf4541eb4040c7a4b774749a26dba3937b7f95c6c"
+        + "8490e3383d4f291dade5f35a65b1f6615fd4998be18bfd0ba4bc3a2136ceec90"
+        + "9dbeef513d6f6689fc4202b9a3e78134877374d76ab246f49cbe7a8f65d034cd";
+}
+
+fn _a_echg_sig() -> string {
+    return "72ea7d669ac699a149c13aa168eb3e148f590bbc0424951f1c3144c541915573"
+        + "ecf05cabb5275488c98d0ebe55b1f1af49ef8cc72cf00e849897c6afa53833ca"
+        + "f9ffc00eb84cfe55b8277e93a6ac3e04b111c9d07ad62082ca32854c40de1e09"
+        + "56a18f8460438484403abb91e6fad12b28f114157f1b6ef563d2fa438ccb8a16"
+        + "aa3afe6ec5e98365c30d9a355e7e14b039bbdecf59f91248d0f1e317d2e3c819"
+        + "096ed68cf98361d7f9310b354f4f45e2f7c4dfb82c218cd438f3174a6f017f0f"
+        + "148a71c40ad5b7e2c8081ddbaeaa764d601bb2e075eb3618aabaa4b5060022c6"
+        + "d23ef072643686a759227daef0331b28ee76da4ab3b5ad5dda8991b9937d1a59";
+}
+
+fn _a_hashleft_msg() -> string {
+    return "7518c85b67e7aef7f26bf006899faef76e076f0c6c946e5dc9c83521771a6d29"
+        + "8a9cf5adefdb314b5a07a54d8054c22b879fff50ba552c218291033c918401fd"
+        + "611a7447dddad4815e0f56ded825bfe256557622a385de4b4a69e265c1efd259"
+        + "e2da6db19aac3fa0e5ca2d42fadb4e24c271fc078feb2be10b9afa256f228844";
+}
+
+fn _a_hashleft_sig() -> string {
+    return "992d48b21bb3d2219b44e8fcc8633cf3aeb591de90f4386496ac7ecd284cb63d"
+        + "7dff81a50b8c4fed9f2ef737692ea6be05248ca138947b49b4e7f3cce6640e04"
+        + "9ac2154c40f57e22fa14f97e7a9507e1dc98b206ce6ea0e180039199d1be0a15"
+        + "d1f5093a459e5101aaca2a23cb1f59cad2f1fb99dc956b9d4344bad2c1121d63"
+        + "b915004acbfc7ac60ac9a7b0b1c6812b30bfe087f7f0c7d1625f9c4f458515e1"
+        + "1478e3604aa39d14d08bea30b01fcd6189e6f9b701d360e4714d45556b29815c"
+        + "8d8fa8e46e10749ba5e8d445a4c0f487e70ab5890b7ccc1651282a54e87e7db4"
+        + "bb2f7d4a671e71c43c55cf6486416f171d1955037474d06a71dd078767848e5d";
+}
+
+fn _a_padzero_msg() -> string {
+    return "925d59f953cb3ffb6d5a3a55c079cb1083997536e33d7c8aed50ed76aebcde45"
+        + "9938f79229613200c70dde2ceddceae08c10608aab9e30ec51842f14a65e5f8f"
+        + "553471da3497881927ec400b4207ef3e2dfc2b7fcd318c9520b8b22f69dc8a1a"
+        + "8efaceb7be93cbad569e67db062362913005dcff902018ed22937fad405fe84e";
+}
+
+fn _a_padzero_sig() -> string {
+    return "62b07f6d1b8f13651d7f22ce2ce01061090029db5af7dcecfeafef20621dd9e2"
+        + "54a0fb914f76a3d79662257489cb8122708583d30778791a77da83c7bea81140"
+        + "c61e4d0484806e20fb85f24d1bbf774ef2ed38809c9b14f2a58c6e8649b760ba"
+        + "a901544522ed94bd405c77201d07c8d12864a8d1e97a4d322c29994b214fc83c"
+        + "2ecd5c955b9bdec424e7ca5a1325ec0aae4ab0c202b980a2187f096aaaaa5e85"
+        + "550ebd325799f4f30ef2ead07e79c7a475667f5965e6b50269513659ab5962a3"
+        + "91c43cbc3a3da34c0fdd1546c40ea7e2eb5352ce6a06ce6a6385ca0ddd5d162c"
+        + "137836df9ea1f89cfa00c3eb1671a43bd625526f3b6ba8e48a7a2d56fb4f01c6";
+}
+
+fn _b_pass_msg() -> string {
+    return "a6a2c5c8718c64105fab8d44fc69d334273aa71e7475d924ce625cfc61944aea"
+        + "b77927eb202f6a33589939da64b375d3bd22f61db010183d053676ebdf3af50c"
+        + "e33c05e09cac237d1e5ea27ceae0acf2120b84a29ed80d702d759019e098ba22"
+        + "7314e40eadaa98d4fb215090589880796f1cd7130476c2a6904633ee2b56a014";
+}
+
+fn _b_pass_sig() -> string {
+    return "8ec5b4e7671975686b72eb3930f77ef3622119d0b2ae0618fa52c7410519c4f8"
+        + "46c986001d3d82844ae4c13e99dee463448a498a652e9b725ddeb6323b83d552"
+        + "1637be0dee7b224c50dcaf6c7b9a2d26f9b0aad81ac6e4651f241d7a860b51c9"
+        + "6ebfc3df978c5373b7846d3139f509dc16726f712c0e61af620b2c6db0955d0a"
+        + "e9cd4760bb9de6151e04bfa19df4d5aca2576f91ee7aba9eb446fee77c604faa"
+        + "5af87536f22fa6e239e898de906642fc6594be9328571b35a3a8420ac697ef99"
+        + "3016f78def8a17d13698cc4c1876ee1006d814dc60161214a8f8b6f2a345c8b0"
+        + "c0fc645873b6bf9d2fbace2246f643a6d3a2e0b88929623a2e2a73823f6e325a";
+}
+
+fn _c_pass_msg() -> string {
+    return "dc4c136c805849fe77b4b381e4c6b22a3ff69947a9b5aa6b7cbe42cb279c50e8"
+        + "396d0b6ebbe5e55cc396ba66466e4e982e81f63bac0895fcd0aaca4b57fb6802"
+        + "c4432747b28099b368ae5fb4ae459c2fdf04aa6a40ed0c2a9091a418e08d2669"
+        + "a555cdbe0c304d498d840832c35484397b071d9c0b6bf73be5f937fa6b5b7367";
+}
+
+fn _c_pass_sig() -> string {
+    return "723f89429e5f8443defd528d57798d67548279cd169d185a0052e09472e1b37c"
+        + "313250136b2a5f8910e31229363515ad674ca9489d6c7ca7974277ba323110c1"
+        + "52f664a79cfdb3453d4cfa6edd124f81384daae9b06f24f3599884e13db02439"
+        + "3b5e211ca352149521eb37d29902de0c4392b44bcdf79d2f3792cc0a7edc3995"
+        + "aff9629719507a2bb35eaf2be9a88b74551a068e6e556d78f1662f0a78cc29be"
+        + "00acf9af7ba491940b8a731a3af7003654f15205c6171d009a015b68d423166e"
+        + "971cfce113bf2c7edae6af28a500d43e2f3bcb3b8dbe940eb0f8bb1a077bbfea"
+        + "c4cd20dbfe058605c31b3d1be79aaf1d051e27daab45597ac2838763e49caebe";
+}
+
+fn _d384_pass_msg() -> string {
+    return "f991a40a6c3cda01f1a2fed01ca0cf425588a071205eb997a147fa205f3ec104"
+        + "48090e53f56be512309cf445b3f6764d33f157749d5199c7a09ef6246bd5c793"
+        + "b85d24d9093c4d4b318b48e11727cc8bb7aa5ec8699aba7466e074e1887bdf2a"
+        + "51752ec42f16d956fe5943cbcf9c99a5e89bfd940c9fe447fcf3bc823d98d371";
+}
+
+fn _d384_pass_sig() -> string {
+    return "6b42514e88d93079d158336897dc34b450e424d61f6ddcf86fe8c9a368ae8a22"
+        + "c4ee4084c978b5169379da10ae6a6ae8cd80028e198cd0a8db532cd78a409f53"
+        + "baf7d231b545835b0dc06d594d76868d986889419a959268fd321bbc8bad5e80"
+        + "0e452fe1a1a2a5a851d542494473deb425171a2f37ffc4cf0600a8d561b20f77"
+        + "7407bbef1b596f92e518c0929e8bd52b015c2718d14443a56056f65015515673"
+        + "deef32ae5399ae71f97873ec1508f8c41d6a66a13017685134e5425c4b580a7f"
+        + "6986c26fb272f0ed215d6698dcec9e7c5258173b295b3611869254a538945de9"
+        + "52dedf291837df0d7a205e1b76b01140df4edce3afe7245d46ee3b292bb117b1";
+}
+
+fn _d384_sigchg_msg() -> string {
+    return "59632917bcef9eaa6edb1bb6013bef9e5d285fe212c49b44ed78f129ca804141"
+        + "a8aab16a035aa1d25ed2e25c1fb022469fb8ab0882d44e7f4459994a158c5175"
+        + "e7651c54c5937db266bf052c0215c8d764010f2941364c16c8f553797a8cc6b6"
+        + "3c1dd19daaa01892af2beeeb5271c89ad38af10cf7f27f51a0d3857ca0878a4d";
+}
+
+fn _d384_sigchg_sig() -> string {
+    return "77a69f4fbd9456eb8cb973e2623d8ea83df850f3c7bc7c8f976728f11b2daa62"
+        + "04ec45e15cd36dcdba5d88bcdeca490bf488a32d12be8c93d9fc63d2a91fcbd7"
+        + "9b4bed113dd98bf5b93673a1c143828f47935aeeada7938c65717fb8b370cf64"
+        + "9134f6fde56602ba7d6f890ba166d3fe1c51e7471c98b661a6022d7d1d0caa5b"
+        + "e5d140e94e70cd1478b9b33622ad69559e27cd6878925cf07f37f5dbd1ae457e"
+        + "ea785053d06e2e4d010fd885b897f743ec09c2b06f774407123ac30cd91f8108"
+        + "0845f885062fa4be9da31f4e6f626c61a7fefbc123e8b7b80978682b773b5537"
+        + "b2366d1118f506464d27db3991fc2af283abbed6d0c552120f82f906c38c2e0b";
+}
+
+fn _em_valid() -> string {
+    return "67ed11639f2ac610ce9c96d24cc5f792bf2016d428be0abafa1156b38b4363a6"
+        + "1ce32ac8d2dd6a40946864e7b7aef4ae26e46204fd78c4129d6f462c80982de8"
+        + "0a2d290abbd42cb7ac4ac7ce075f107ba3b886e7c000f87989b7d41a546f706d"
+        + "961db3a82e7b2512dcd447d36608b1fd6a09c1cd6d612ef23b86af70f5596307"
+        + "a819cc67e9daba4383dd4ab5627b15bbf01c04b535f9d4e20c8bf1e030c25142"
+        + "69b73d1012c20d122e30e2d1601e6668c2b42fd289af506eb4c3d34dceab31b2"
+        + "009476f08e4966810d6d27fd7c83c6e5555be7eb43a9ad3185ba4af59e08ae3a"
+        + "95619c6d59572246e7058a0cf75a286cd841e9cc7e9f7da3abbe24731b03e1bc";
+}
+
+fn _em_trailer() -> string {
+    return "67ed11639f2ac610ce9c96d24cc5f792bf2016d428be0abafa1156b38b4363a6"
+        + "1ce32ac8d2dd6a40946864e7b7aef4ae26e46204fd78c4129d6f462c80982de8"
+        + "0a2d290abbd42cb7ac4ac7ce075f107ba3b886e7c000f87989b7d41a546f706d"
+        + "961db3a82e7b2512dcd447d36608b1fd6a09c1cd6d612ef23b86af70f5596307"
+        + "a819cc67e9daba4383dd4ab5627b15bbf01c04b535f9d4e20c8bf1e030c25142"
+        + "69b73d1012c20d122e30e2d1601e6668c2b42fd289af506eb4c3d34dceab31b2"
+        + "009476f08e4966810d6d27fd7c83c6e5555be7eb43a9ad3185ba4af59e08ae3a"
+        + "95619c6d59572246e7058a0cf75a286cd841e9cc7e9f7da3abbe24731b03e1bb";
+}
+
+fn _em_topbit() -> string {
+    return "e7ed11639f2ac610ce9c96d24cc5f792bf2016d428be0abafa1156b38b4363a6"
+        + "1ce32ac8d2dd6a40946864e7b7aef4ae26e46204fd78c4129d6f462c80982de8"
+        + "0a2d290abbd42cb7ac4ac7ce075f107ba3b886e7c000f87989b7d41a546f706d"
+        + "961db3a82e7b2512dcd447d36608b1fd6a09c1cd6d612ef23b86af70f5596307"
+        + "a819cc67e9daba4383dd4ab5627b15bbf01c04b535f9d4e20c8bf1e030c25142"
+        + "69b73d1012c20d122e30e2d1601e6668c2b42fd289af506eb4c3d34dceab31b2"
+        + "009476f08e4966810d6d27fd7c83c6e5555be7eb43a9ad3185ba4af59e08ae3a"
+        + "95619c6d59572246e7058a0cf75a286cd841e9cc7e9f7da3abbe24731b03e1bc";
+}
+
+fn _em_nodelim() -> string {
+    return "67ed11639f2ac610ce9c96d24cc5f792bf2016d428be0abafa1156b38b4363a6"
+        + "1ce32ac8d2dd6a40946864e7b7aef4ae26e46204fd78c4129d6f462c80982de8"
+        + "0a2d290abbd42cb7ac4ac7ce075f107ba3b886e7c000f87989b7d41a546f706d"
+        + "961db3a82e7b2512dcd447d36608b1fd6a09c1cd6d612ef23b86af70f5596307"
+        + "a819cc67e9daba4383dd4ab5627b15bbf01c04b535f9d4e20c8bf1e030c25142"
+        + "69b73d1012c20d122e30e2d1601e6668c2b42fd289af506eb4c3d34dceab30b2"
+        + "009476f08e4966810d6d27fd7c83c6e5555be7eb43a9ad3185ba4af59e08ae3a"
+        + "95619c6d59572246e7058a0cf75a286cd841e9cc7e9f7da3abbe24731b03e1bc";
+}
+
+fn _em_psdirty() -> string {
+    return "67ed11639f2ac610ce9c96d24cc5f792bf2016d428be0abafa1156b38b4363a6"
+        + "1ce32ac8d2dd6a40946864e7b7aef4ae26e46204fd78c4129d6f462c80982de8"
+        + "0a2d290abbd42cb7ac4ac7ce075f107ba3b886e7c000f87989b7d41a546f706d"
+        + "961db3a82e7b2512dcd447d36608b1fd6a09c1cd6d612ef23b86af70f5596307"
+        + "a819cc67e9daba4383dd4ab5627b15bbf01c04b535f9d4e20c8bf1e030c25142"
+        + "69b73d1012c20d122e30e2d1601e6668c2b42fd289af506eb4c3d34dceaa31b2"
+        + "009476f08e4966810d6d27fd7c83c6e5555be7eb43a9ad3185ba4af59e08ae3a"
+        + "95619c6d59572246e7058a0cf75a286cd841e9cc7e9f7da3abbe24731b03e1bc";
+}
+
+fn _em_badsalt() -> string {
+    return "67ed11639f2ac610ce9c96d24cc5f792bf2016d428be0abafa1156b38b4363a6"
+        + "1ce32ac8d2dd6a40946864e7b7aef4ae26e46204fd78c4129d6f462c80982de8"
+        + "0a2d290abbd42cb7ac4ac7ce075f107ba3b886e7c000f87989b7d41a546f706d"
+        + "961db3a82e7b2512dcd447d36608b1fd6a09c1cd6d612ef23b86af70f5596307"
+        + "a819cc67e9daba4383dd4ab5627b15bbf01c04b535f9d4e20c8bf1e030c25142"
+        + "69b73d1012c20d122e30e2d1601e6668c2b42fd289af506eb4c3d34dceab31b3"
+        + "009476f08e4966810d6d27fd7c83c6e5555be7eb43a9ad3185ba4af59e08ae3a"
+        + "95619c6d59572246e7058a0cf75a286cd841e9cc7e9f7da3abbe24731b03e1bc";
+}
+
+fn _mhash_valid() -> string {
+    return "09e605cacee4063a2fa3b2bb6b3c901b81fb9878da411fbbff44262210aaace4";
+}
+
+fn _mhash_wrong() -> string {
+    return "08e605cacee4063a2fa3b2bb6b3c901b81fb9878da411fbbff44262210aaace4";
+}
+
+fn _mgf1_ref_70() -> string {
+    return "33039fca04699df0cbf328f37d8fd61eeac2612d2d2cddb89d4c6fc4a4a1a3de"
+        + "6d0d07a7d8f116124cf7dc8817849be15168935f3a61991db4effbc3e7bdb8c6"
+        + "858cf4d22eca";
+}
+
+// ── Known-answer records (RFC 8017 §8.1.2, NIST SigVerPSS_186-3.rsp) ──
+test "rsa-pss: NIST record 13 verifies under SHA-256" {
+    assert rsa_pss_verify_sha256(hexb(_nist_n_a()), _e_a(), hexb(_a_pass_msg()), hexb(_a_pass_sig()));
+}
+
+test "rsa-pss: NIST record 46 verifies under a second SHA-256 key" {
+    assert rsa_pss_verify_sha256(hexb(_nist_n_b()), _e_b(), hexb(_b_pass_msg()), hexb(_b_pass_sig()));
+}
+
+test "rsa-pss: NIST record 72 verifies under a third SHA-256 key" {
+    assert rsa_pss_verify_sha256(hexb(_nist_n_c()), _e_c(), hexb(_c_pass_msg()), hexb(_c_pass_sig()));
+}
+
+test "rsa-pss: NIST record 22 verifies under SHA-384 with a 48-octet salt" {
+    // The SHA-384 entry point is exported, so it carries its own known answer
+    // rather than resting on the SHA-256 records and a shared code path. The
+    // salt length differs (48, not 32), which is the part a hash-agnostic
+    // implementation gets wrong.
+    assert rsa_pss_verify_sha384(hexb(_nist_n_d384()), _e_d384(), hexb(_d384_pass_msg()), hexb(_d384_pass_sig()));
+}
+
+test "rsa-pss: NIST record 14 rejects a changed message" {
+    // Result = F (1 - Message changed)
+    assert ! rsa_pss_verify_sha256(hexb(_nist_n_a()), _e_a(), hexb(_a_msgchg_msg()), hexb(_a_msgchg_sig()));
+}
+
+test "rsa-pss: NIST record 15 rejects a changed signature" {
+    // Result = F (3 - Signature changed)
+    assert ! rsa_pss_verify_sha256(hexb(_nist_n_a()), _e_a(), hexb(_a_sigchg_msg()), hexb(_a_sigchg_sig()));
+}
+
+test "rsa-pss: NIST record 20 rejects a changed signature under SHA-384" {
+    // Result = F (3 - Signature changed)
+    assert ! rsa_pss_verify_sha384(hexb(_nist_n_d384()), _e_d384(), hexb(_d384_sigchg_msg()), hexb(_d384_sigchg_sig()));
+}
+
+test "rsa-pss: NIST record 17 rejects a changed public exponent" {
+    // Result = F (2 - Public Key e changed). The modulus and signature are a
+    // genuine pair; only `e` is wrong, so this exercises the exponentiation
+    // rather than any encoding check.
+    assert ! rsa_pss_verify_sha256(hexb(_nist_n_a()), _e_a_changed(), hexb(_a_echg_msg()), hexb(_a_echg_sig()));
+}
+
+test "rsa-pss: NIST record 12 rejects an encoding with the hash moved left" {
+    // Result = F (4 - Format of the EM is incorrect - hash moved to left)
+    assert ! rsa_pss_verify_sha256(hexb(_nist_n_a()), _e_a(), hexb(_a_hashleft_msg()), hexb(_a_hashleft_sig()));
+}
+
+test "rsa-pss: NIST record 16 rejects an encoding with the pad terminator removed" {
+    // Result = F (5 - Format of the EM is incorrect - 00 on end of pad removed)
+    assert ! rsa_pss_verify_sha256(hexb(_nist_n_a()), _e_a(), hexb(_a_padzero_msg()), hexb(_a_padzero_sig()));
+}
+
+// ── Structural checks, each pinned individually ──
+//
+// The encoding below is the genuine EM recovered from NIST record 13 by
+// computing S^e mod n once, offline. Every case in this section is that EM with
+// one property broken, so a case that stops failing means the check it names was
+// removed — not that some unrelated check happened to fire.
+test "rsa-pss: the recovered NIST encoding verifies at the EM level" {
+    // The baseline the forgery cases mutate. Without it, a typo in the shared
+    // encoding constant would make every case below vacuously pass.
+    assert _emsa_pss_verify(hexb(_mhash_valid()), hexb(_em_valid()), _em_bits_2048(), _pss_sha256());
+}
+
+test "rsa-pss: a wrong trailer octet is rejected" {
+    // RFC 8017 §9.1.2 step 4. 0xbc changed to 0xbb; nothing else differs.
+    assert ! _emsa_pss_verify(hexb(_mhash_valid()), hexb(_em_trailer()), _em_bits_2048(), _pss_sha256());
+}
+
+test "rsa-pss: a non-zero leftmost bit is rejected before unmasking" {
+    // RFC 8017 §9.1.2 step 6, and the subtlest check in the verifier. emBits is
+    // 2047 with emLen 256, so the top bit of EM[0] must already be zero on the
+    // encoding as received.
+    //
+    // This case is precisely the one that distinguishes a correct verifier from
+    // a plausible wrong one. Step 9 clears those same bits from DB after
+    // unmasking, so an implementation that performs ONLY the step-9 clear and
+    // skips the step-6 check still recovers an identical DB from this encoding
+    // and ACCEPTS it, because step 9's mask clears the very bit that was set
+    // (SFN-658). The forged signature then represents an integer at or above
+    // 2^emBits, which no conforming signer can produce.
+    assert ! _emsa_pss_verify(hexb(_mhash_valid()), hexb(_em_topbit()), _em_bits_2048(), _pss_sha256());
+}
+
+test "rsa-pss: a missing 0x01 delimiter is rejected" {
+    // RFC 8017 §9.1.2 step 10. DB's delimiter octet zeroed and the encoding
+    // re-masked under the original H, so maskedDB is internally consistent and
+    // only the delimiter is wrong.
+    assert ! _emsa_pss_verify(hexb(_mhash_valid()), hexb(_em_nodelim()), _em_bits_2048(), _pss_sha256());
+}
+
+test "rsa-pss: a non-zero PS octet is rejected" {
+    // RFC 8017 §9.1.2 step 10, the half that is easy to omit: the delimiter is
+    // still 0x01 and in the right place, but the padding before it carries a
+    // set octet. A verifier that searches DB for the first 0x01 instead of
+    // requiring PS to be zero accepts this.
+    assert ! _emsa_pss_verify(hexb(_mhash_valid()), hexb(_em_psdirty()), _em_bits_2048(), _pss_sha256());
+}
+
+test "rsa-pss: a tampered salt fails the H' comparison" {
+    // RFC 8017 §9.1.2 steps 12-14. One salt octet flipped and the encoding
+    // re-masked, so every structural check still passes and only H' differs.
+    assert ! _emsa_pss_verify(hexb(_mhash_valid()), hexb(_em_badsalt()), _em_bits_2048(), _pss_sha256());
+}
+
+test "rsa-pss: a mismatched message digest fails the H' comparison" {
+    // The genuine encoding against a digest that is one bit different — the
+    // tampered-message case reduced to the EM level.
+    assert ! _emsa_pss_verify(hexb(_mhash_wrong()), hexb(_em_valid()), _em_bits_2048(), _pss_sha256());
+}
+
+test "rsa-pss: a SHA-256 encoding is rejected when read as SHA-384" {
+    // Salt and digest lengths are bound to the hash, so the same octets must not
+    // verify under the other scheme.
+    assert ! _emsa_pss_verify(hexb(_mhash_valid()), hexb(_em_valid()), _em_bits_2048(), _pss_sha384());
+}
+
+// ── Malformed input: refused, never a panic ──
+test "rsa-pss: an encoding too short for the salt and digest is rejected" {
+    // RFC 8017 §9.1.2 step 3: emLen < hLen + sLen + 2 is inconsistent. 65 octets
+    // is one below the 66-octet floor for SHA-256.
+    let short_em: int[] = _repeat(188, 65);
+    assert ! _emsa_pss_verify(hexb(_mhash_valid()), short_em, 519, _pss_sha256());
+}
+
+test "rsa-pss: a digest of the wrong length is rejected" {
+    let stunted: int[] = _slice(hexb(_mhash_valid()), 0, 31);
+    assert ! _emsa_pss_verify(stunted, hexb(_em_valid()), _em_bits_2048(), _pss_sha256());
+}
+
+test "rsa-pss: an em_bits inconsistent with the encoding length is rejected" {
+    // 8 * emLen - emBits must land in 0..7. A caller that passed a mismatched
+    // pair would otherwise compute a nonsensical mask.
+    assert ! _emsa_pss_verify(hexb(_mhash_valid()), hexb(_em_valid()), 2000, _pss_sha256());
+    assert ! _emsa_pss_verify(hexb(_mhash_valid()), hexb(_em_valid()), 2049, _pss_sha256());
+}
+
+test "rsa-pss: an empty modulus is rejected" {
+    let empty: int[] = [];
+    assert ! rsa_pss_verify_sha256(empty, _e_a(), hexb(_a_pass_msg()), hexb(_a_pass_sig()));
+}
+
+test "rsa-pss: an all-zero modulus is rejected" {
+    let zeros: int[] = _repeat(0, 256);
+    assert ! rsa_pss_verify_sha256(zeros, _e_a(), hexb(_a_pass_msg()), hexb(_a_pass_sig()));
+}
+
+test "rsa-pss: a signature whose length differs from the modulus is rejected" {
+    let truncated: int[] = _slice(hexb(_a_pass_sig()), 0, 255);
+    assert ! rsa_pss_verify_sha256(hexb(_nist_n_a()), _e_a(), hexb(_a_pass_msg()), truncated);
+    let mut overlong: int[] = _slice(hexb(_a_pass_sig()), 0, 256);
+    overlong.push(0);
+    assert ! rsa_pss_verify_sha256(hexb(_nist_n_a()), _e_a(), hexb(_a_pass_msg()), overlong);
+}
+
+test "rsa-pss: a signature not less than the modulus is rejected" {
+    let saturated: int[] = _repeat(255, 256);
+    assert ! rsa_pss_verify_sha256(hexb(_nist_n_a()), _e_a(), hexb(_a_pass_msg()), saturated);
+}
+
+test "rsa-pss: an out-of-range or even public exponent is rejected" {
+    assert ! rsa_pss_verify_sha256(hexb(_nist_n_a()), 2, hexb(_a_pass_msg()), hexb(_a_pass_sig()));
+    assert ! rsa_pss_verify_sha256(hexb(_nist_n_a()), 65538, hexb(_a_pass_msg()), hexb(_a_pass_sig()));
+}
+
+test "rsa-pss: an empty message and an empty signature are rejected without panicking" {
+    let empty: int[] = [];
+    assert ! rsa_pss_verify_sha256(hexb(_nist_n_a()), _e_a(), empty, empty);
+    assert ! rsa_pss_verify_sha384(hexb(_nist_n_a()), _e_a(), empty, empty);
+}
+
+// ── MGF1 and the modulus bit length ──
+test "rsa-pss: MGF1 produces the RFC 8017 §B.2.1 counter-mode stream" {
+    // 70 octets from a 3-octet seed: not a digest multiple, so this pins both
+    // the counter increment and the truncation of the final block.
+    let mask: int[] = _mgf1([1, 2, 3], 70, _pss_sha256());
+    let expected: int[] = hexb(_mgf1_ref_70());
+    assert mask.length == 70;
+    assert mask.length == expected.length;
+    let mut i: int = 0;
+    loop {
+        if i >= expected.length { break; }
+        assert mask[i] == expected[i];
+        i += 1;
+    }
+}
+
+test "rsa-pss: MGF1 agrees with a direct hash on its first block" {
+    // The first block is Hash(seed || 00 00 00 00) with the counter at zero.
+    let mask: int[] = _mgf1([1, 2, 3], 32, _pss_sha256());
+    let direct: int[] = sha256_bytes([1, 2, 3, 0, 0, 0, 0]);
+    let mut i: int = 0;
+    loop {
+        if i >= 32 { break; }
+        assert mask[i] == direct[i];
+        i += 1;
+    }
+}
+
+test "rsa-pss: MGF1 returns nothing for a non-positive length" {
+    assert _mgf1([1, 2, 3], 0, _pss_sha256()).length == 0;
+    assert _mgf1([1, 2, 3], -1, _pss_sha256()).length == 0;
+}
+
+test "rsa-pss: the modulus bit length ignores DER sign padding" {
+    // emLen depends on modBits, so a DER INTEGER's leading zero octet must not
+    // inflate it by 8 and push the verifier onto the wrong EM alignment. These
+    // pass UNSTRIPPED input deliberately: the function strips internally, and
+    // asserting only on pre-stripped input would leave that guarantee unpinned.
+    assert _rsa_modulus_bits([0, 128, 0]) == 16;
+    assert _rsa_modulus_bits([128, 0]) == 16;
+    assert _rsa_modulus_bits([1]) == 1;
+    assert _rsa_modulus_bits([255, 255]) == 16;
+    assert _rsa_modulus_bits(hexb(_nist_n_a())) == 2048;
+    let der_padded: int[] = _concat([0], hexb(_nist_n_a()));
+    assert _rsa_modulus_bits(der_padded) == 2048;
+}
+
+test "rsa-pss: an all-zero or empty octet string has zero bit length" {
+    // The fail-closed edge. An all-zero modulus of any length must collapse to
+    // 0 rather than to 8 * (length - 1), which is what a version that trusted
+    // its caller to have stripped would report.
+    let empty: int[] = [];
+    assert _rsa_modulus_bits(empty) == 0;
+    assert _rsa_modulus_bits([0]) == 0;
+    assert _rsa_modulus_bits([0, 0]) == 0;
+    assert _rsa_modulus_bits(_repeat(0, 256)) == 0;
+}
+
+test "rsa-pss: one 2048-bit verification stays inside the -O0 shard budget" ![clock] {
+    // The same hang guard rsa_pkcs1_test.sfn carries, for the same reason and
+    // with the same caveats: a 2-second ceiling against a ~13 ms measured cost
+    // catches a verify that stops terminating and deliberately does not claim to
+    // catch a constant-factor regression. PSS adds MGF1 on top of the modexp,
+    // which is a few hundred SHA-256 compressions — immaterial next to the
+    // exponentiation.
+    let started: Result<int, string> = unix_millis();
+    assert _is_ok(started);
+
+    assert rsa_pss_verify_sha256(hexb(_nist_n_a()), _e_a(), hexb(_a_pass_msg()), hexb(_a_pass_sig()));
+
+    let finished: Result<int, string> = unix_millis();
+    assert _is_ok(finished);
+
+    assert _ok_value(finished) - _ok_value(started) < 2000;
+}
+
+fn _is_ok(result: Result<int, string>) -> bool {
+    match result {
+        Result.Ok { value } => { return true; },
+        Result.Err { error } => { return false; }
+    }
+}
+
+fn _ok_value(result: Result<int, string>) -> int {
+    match result {
+        Result.Ok { value } => { return value; },
+        Result.Err { error } => { return 0; }
+    }
+}

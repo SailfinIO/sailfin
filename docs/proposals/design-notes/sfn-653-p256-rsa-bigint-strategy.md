@@ -424,7 +424,7 @@ fragile “constant-time” exceptional-case workaround.
 | `_emsa_pkcs1_v1_5` | reconstruct the exact `00 01 FF...FF 00 DigestInfo` byte string |
 | `rsa_pkcs1_v1_5_verify_sha256` | RFC 8017 section 8.2.2, full-encoding equality |
 | `rsa_pkcs1_v1_5_verify_sha384` | same with SHA-384 DigestInfo |
-| `_mgf1_sha256` / `_mgf1_sha384` | RFC 8017 appendix B.2.1 mask generation |
+| `_mgf1` | RFC 8017 appendix B.2.1 mask generation; shipped as one hash-tagged function rather than the per-digest pair sketched here, so the counter loop is not duplicated (SFN-658) |
 | `_emsa_pss_verify` | RFC 8017 section 9.1.2 structural checks and hash recomputation |
 | `rsa_pss_verify_sha256` / `rsa_pss_verify_sha384` | TLS 1.3 profile: salt length equals digest length |
 
