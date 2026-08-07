@@ -4,9 +4,9 @@ title: Native crypto + TLS stack — removing the OpenSSL dependency
 status: Accepted
 type: runtime
 created: 2026-07-12
-updated: 2026-08-06
+updated: 2026-08-07
 author: "agent:compiler-architect; human review"
-tracking: SFN-333, SFN-335, SFN-336, SFN-337, SFN-504, SFN-655, SFN-659, SFN-660, SFN-699
+tracking: SFN-333, SFN-335, SFN-336, SFN-337, SFN-504, SFN-654, SFN-655, SFN-659, SFN-660, SFN-699
 supersedes:
 superseded-by:
 graduates-to:
@@ -144,6 +144,44 @@ verification and the system trust store — the rest of Phase C's original
 scope — remain unshipped and tracked separately (SFN-340), which stays
 blocked on signature-verification primitives (RSA verify lands per §6.3's
 amendment; ECDSA-P256 per SFN-653). Phase C therefore stays open.
+
+**Amendment (2026-08-07) — Phase B: the server handshake has landed
+(SFN-654); Phase B is now complete for the handshake layer.**
+`capsules/sfn/crypto/src/tls13_server_handshake.sfn` adds a `ServerHandshake`
+state machine, the sibling of the SFN-337 client, driving the RFC 8446 §4
+ClientHello/ServerHello/EncryptedExtensions/Certificate/CertificateVerify/
+Finished exchange from the server side over the same record layer
+(`tls13_record.sfn`, SFN-336) and key schedule (`tls13_schedule.sfn`,
+SFN-333), with its own running transcript hash and the X25519 key share wired
+into the schedule so the record layer can be rekeyed at each transition.
+`tls13_handshake_codec.sfn` gained the server-direction encoders
+(`encode_server_hello`, `encode_encrypted_extensions`, `encode_certificate`,
+`encode_certificate_verify`) plus `struct ClientHelloMsg` /
+`parse_client_hello`, so the codec now covers both directions. It is checked
+against the RFC 8448 §3 "Simple 1-RTT Handshake" trace **from the server
+side** (11 tests, `capsules/sfn/crypto/tests/tls13_server_handshake_test.sfn`),
+and against the SFN-337 client directly via a client/server interop test
+driving a real X25519 exchange, a real Ed25519 CertificateVerify the client
+verifies, cross-checked Finished MACs on both sides, and a sealed/opened
+application record — RFC 8448 §3 is now reproduced from both directions. New
+`capsules/sfn/crypto/src/pem.sfn` (`pem_decode_blocks`,
+`pem_certificates_to_der`; 6 tests) decodes PEM → DER for loading a
+certificate chain, binary-safe unlike `mod.sfn`'s `string`-returning
+`base64_decode`, which cannot carry DER's 0x00 bytes. CertificateVerify signs
+with Ed25519 only (`ed25519_sign`, SFN-699); a ClientHello that does not offer
+ed25519 is refused at the CertificateVerify step, and RSA-PSS/ECDSA-P256
+signing remain unimplemented (SFN-658/SFN-653 territory). This supersedes the
+2026-08-01 amendment's "no server-side handshake (SFN-654) yet" clause. Like
+the client, this is pure computation with no socket I/O —
+`runtime/sfn/platform/tls.sfn` is untouched and still OpenSSL-backed
+(`tls_accept_fd`/`tls_server_ctx` unchanged); swapping those bodies onto the
+native stack is still Phase D's job (SFN-341), so Phase B's link-line status
+in §3.1's table — "still linked (fallback); native path selectable" — is
+unchanged. There is still no client authentication/mTLS, no session
+resumption, no tickets, no 0-RTT, and no HelloRetryRequest, and the server
+performs no certificate chain verification of its own (trust remains the
+client's decision, SFN-340). See `docs/status.md`'s `sfn/crypto` row for the
+full capability and limitation list.
 
 ### 3.2 Where the code lives
 
