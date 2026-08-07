@@ -1,0 +1,466 @@
+// capsules/sfn/crypto/src/bignum.sfn
+//
+// Variable-length non-negative big integers over 26-bit limbs, with coarsely
+// integrated operand scanning (CIOS) Montgomery multiplication and public
+// square-and-multiply modular exponentiation. This is the shared arithmetic
+// core for RSA signature verification (src/rsa.sfn).
+//
+// THIS CODE IS DELIBERATELY NOT CONSTANT TIME. DO NOT "FIX" THAT.
+// Every value it touches — public modulus, public exponent, public signature,
+// public message digest — is already known to an attacker, so there is no
+// secret whose timing could leak. Square-and-multiply branches on exponent
+// bits, normalization branches on comparisons against the modulus, and the
+// loop bounds are the public modulus length. Adding branch-free selection here
+// would buy nothing and would add risk surface to code whose only job is to be
+// correct. The full argument is docs/proposals/design-notes/
+// sfn-653-p256-rsa-bigint-strategy.md §2, and it applies to verification only:
+// none of this is approved for RSA signing, decryption, or any operation with
+// a secret exponent.
+//
+// The relaxation does not excuse unsafe indexing. Every index below is bounded
+// by a checked input length or a loop bound, and malformed input fails closed.
+//
+// Why 26 bits: Sailfin `int` lowers to signed i64, and the safety target is to
+// keep every proved intermediate below 2^62. A whole-column 26-bit schoolbook
+// product reaches 2^59.30 at 4096 bits — only 2.7 bits of headroom — so CIOS
+// is used instead, masking each inner result before the next limb. Its worst
+// inner value is below 2^52 + 2^28 regardless of modulus length, about 10 bits
+// of headroom. The margin tables are design note §6.1 and §6.2.
+//
+// Every constant is decimal: hex literals are unavailable in Sailfin source
+// (SFEP-0048 §3.3 item 7).
+fn _bn_limb_bits() -> int { return 26; }
+
+fn _bn_limb_mask() -> int { return 67108863; }
+
+fn _bn_limb_base() -> int { return 67108864; }
+
+// Supported modulus sizes, in bytes. The floor keeps the engine away from
+// moduli too small to be a real key; the ceiling bounds the quadratic work an
+// untrusted certificate can demand, since a verify costs O(limbs^2) per
+// Montgomery multiply. 128..512 bytes is 1024..4096 bits, covering the
+// 2048/3072/4096 sizes the design note sizes the cost model for (§6.3).
+fn _bn_min_modulus_bytes() -> int { return 128; }
+
+fn _bn_max_modulus_bytes() -> int { return 512; }
+
+// A parsed Montgomery context: the modulus in limb form plus the two derived
+// constants a multiply needs. `r2` is the expensive one (a linear-in-bits
+// doubling chain), so a caller that verifies more than one signature against
+// the same key should build the context once and reuse it — the design note
+// calls this out as a per-key cost to cache, separate from per-verify cost.
+struct MontCtx {
+    ok: boolean;
+    error: string;
+    n: int[];  // modulus, little-endian 26-bit limbs, length `limbs`
+    limbs: int;  // limb count; 26 * limbs is strictly greater than the modulus bit length
+    n0_prime: int;  // -n[0]^-1 mod 2^26
+    r2: int[];  // R^2 mod n, where R = 2^(26 * limbs)
+}
+
+fn _mont_ctx_err(message: string) -> MontCtx {
+    let empty: int[] = [];
+    return MontCtx {
+        ok: false,
+        error: message,
+        n: empty,
+        limbs: 0,
+        n0_prime: 0,
+        r2: empty
+    };
+}
+
+// ── Limb-vector helpers ──
+fn _bn_zero(limbs: int) -> int[] {
+    let mut out: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= limbs { break; }
+        out.push(0);
+        i += 1;
+    }
+    return out;
+}
+
+fn _bn_copy(x: int[]) -> int[] {
+    let mut out: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= x.length { break; }
+        out.push(x[i]);
+        i += 1;
+    }
+    return out;
+}
+
+// Reading past either end yields zero, so a caller may compare or subtract
+// vectors of different lengths without a bounds branch at every use.
+fn _bn_at(x: int[], i: int) -> int {
+    if i < 0 { return 0; }
+    if i >= x.length { return 0; }
+    return x[i];
+}
+
+fn _bn_is_zero(x: int[]) -> bool {
+    let mut i: int = 0;
+    loop {
+        if i >= x.length { break; }
+        if x[i] != 0 { return false; }
+        i += 1;
+    }
+    return true;
+}
+
+fn _bn_is_one(x: int[]) -> bool {
+    if x.length < 1 { return false; }
+    if x[0] != 1 { return false; }
+    let mut i: int = 1;
+    loop {
+        if i >= x.length { break; }
+        if x[i] != 0 { return false; }
+        i += 1;
+    }
+    return true;
+}
+
+// Returns 1 when a > b, -1 when a < b, 0 when equal.
+fn _bn_cmp(a: int[], b: int[]) -> int {
+    let mut n: int = a.length;
+    if b.length > n { n = b.length; }
+    let mut i: int = n - 1;
+    loop {
+        if i < 0 { break; }
+        let av: int = _bn_at(a, i);
+        let bv: int = _bn_at(b, i);
+        if av > bv { return 1; }
+        if av < bv { return -1; }
+        i -= 1;
+    }
+    return 0;
+}
+
+// a - b, over a.length limbs, for a >= b. Every call site establishes that by a
+// preceding `_bn_cmp`; a borrow out of the top limb would wrap silently rather
+// than signal, so do not call this without the comparison.
+fn _bn_sub(a: int[], b: int[]) -> int[] {
+    let mut out: int[] = [];
+    let mut borrow: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= a.length { break; }
+        let mut d: int = _bn_at(a, i) - _bn_at(b, i) - borrow;
+        if d < 0 {
+            d = d + _bn_limb_base();
+            borrow = 1;
+        } else { borrow = 0; }
+        out.push(d);
+        i += 1;
+    }
+    return out;
+}
+
+// (2 * x) mod n, for 0 <= x < n. One conditional subtraction is sufficient
+// because 2x < 2n. No carry can leave the top limb: `mont_ctx_from_be` sizes
+// the limb count so that 26 * limbs strictly exceeds the modulus bit length,
+// which leaves at least one spare bit above 2n.
+fn _bn_double_mod(x: int[], n: int[]) -> int[] {
+    let mut out: int[] = [];
+    let mut carry: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= x.length { break; }
+        let t: int = (x[i] << 1) | carry;
+        out.push(t & _bn_limb_mask());
+        carry = (t >> _bn_limb_bits()) & 1;
+        i += 1;
+    }
+    if _bn_cmp(out, n) >= 0 { return _bn_sub(out, n); }
+    return out;
+}
+
+// ── Byte conversion ──
+// Big-endian bytes to `limbs` little-endian 26-bit limbs. Bytes beyond the
+// limb capacity are dropped; callers size `limbs` from the same byte length,
+// so that never fires in practice. The accumulator holds at most 25 carried
+// bits plus one byte, so it stays below 2^33.
+fn _bn_from_be(bytes: int[], limbs: int) -> int[] {
+    let mut out: int[] = _bn_zero(limbs);
+    let mut acc: int = 0;
+    let mut acc_bits: int = 0;
+    let mut out_i: int = 0;
+    let mut i: int = bytes.length - 1;
+    loop {
+        if i < 0 { break; }
+        acc = acc | ((bytes[i] & 255) << acc_bits);
+        acc_bits += 8;
+        if acc_bits >= _bn_limb_bits() {
+            if out_i < limbs {
+                out[out_i] = acc & _bn_limb_mask();
+                out_i += 1;
+            }
+            acc = acc >> _bn_limb_bits();
+            acc_bits -= _bn_limb_bits();
+        }
+        i -= 1;
+    }
+    if acc_bits > 0 {
+        if out_i < limbs { out[out_i] = acc & _bn_limb_mask(); }
+    }
+    return out;
+}
+
+// Little-endian 26-bit limbs to exactly `out_len` big-endian bytes, left-padded
+// with zeros. This is I2OSP: the length is fixed by the caller, never by the
+// magnitude of the value, so a small integer still yields a full-width string.
+fn _bn_to_be(x: int[], out_len: int) -> int[] {
+    let mut le: int[] = [];
+    let mut acc: int = 0;
+    let mut acc_bits: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= x.length { break; }
+        acc = acc | ((x[i] & _bn_limb_mask()) << acc_bits);
+        acc_bits += _bn_limb_bits();
+        loop {
+            if acc_bits < 8 { break; }
+            le.push(acc & 255);
+            acc = acc >> 8;
+            acc_bits -= 8;
+        }
+        i += 1;
+    }
+    loop {
+        if acc_bits <= 0 { break; }
+        le.push(acc & 255);
+        acc = acc >> 8;
+        acc_bits -= 8;
+    }
+
+    let mut out: int[] = [];
+    let mut k: int = out_len - 1;
+    loop {
+        if k < 0 { break; }
+        if k < le.length { out.push(le[k]); } else { out.push(0); }
+        k -= 1;
+    }
+    return out;
+}
+
+// ── Montgomery setup ──
+// -n0^-1 mod 2^26 by Newton iteration, which doubles the number of correct
+// bits per round: 1, 2, 4, 8, 16, 32. Five rounds therefore cover 26 bits.
+// Both operands are masked to 26 bits before each multiply, so no intermediate
+// exceeds 2^52 even though `2 - t` is negative for every realistic input.
+// Masking a negative value with a positive mask yields its non-negative
+// residue, which is exactly the wanted mod-2^26 reduction.
+fn _mont_n0_prime(n0: int) -> int {
+    let mut inv: int = 1;
+    let mut i: int = 0;
+    loop {
+        if i >= 5 { break; }
+        let t: int = (n0 * inv) & _bn_limb_mask();
+        inv = (inv * (2 - t)) & _bn_limb_mask();
+        i += 1;
+    }
+    return (0 - inv) & _bn_limb_mask();
+}
+
+// R^2 mod n, R = 2^(26 * limbs), by repeated modular doubling from 1. This is
+// linear in the modulus bit length rather than quadratic, but it is still the
+// dominant setup cost, which is why the result is cached on the context.
+// A general division primitive is deliberately not required (design note §6.2).
+fn _mont_r2(n: int[], limbs: int) -> int[] {
+    if limbs < 1 { return _bn_zero(0); }
+    let mut x: int[] = _bn_zero(limbs);
+    x[0] = 1;
+    let total: int = 2 * _bn_limb_bits() * limbs;
+    let mut i: int = 0;
+    loop {
+        if i >= total { break; }
+        x = _bn_double_mod(x, n);
+        i += 1;
+    }
+    return x;
+}
+
+// Build a context for a checked odd modulus given as minimal big-endian bytes
+// (no leading zero byte). Callers holding a DER INTEGER must strip the sign
+// padding first; `src/rsa.sfn` does.
+fn mont_ctx_from_be(n_bytes: int[]) -> MontCtx {
+    // The byte counts in these two messages restate `_bn_min_modulus_bytes` and
+    // `_bn_max_modulus_bytes`; change them together. They are spelled out rather
+    // than interpolated so the arithmetic core does not take a cross-capsule
+    // dependency on `sfn/strings` for two error strings.
+    if n_bytes.length < _bn_min_modulus_bytes() {
+        return _mont_ctx_err("bignum: modulus is shorter than the supported 128-byte minimum");
+    }
+    if n_bytes.length > _bn_max_modulus_bytes() {
+        return _mont_ctx_err("bignum: modulus is longer than the supported 512-byte maximum");
+    }
+
+    // 26 * limbs strictly exceeds 8 * n_bytes.length, so there is always at
+    // least one spare bit above the modulus. `_bn_double_mod` and the CIOS
+    // final subtraction both rely on that.
+    let limbs: int = (n_bytes.length * 8) / _bn_limb_bits() + 1;
+    let n: int[] = _bn_from_be(n_bytes, limbs);
+
+    if _bn_is_zero(n) { return _mont_ctx_err("bignum: modulus is zero"); }
+    if (n[0] & 1) == 0 { return _mont_ctx_err("bignum: modulus is even"); }
+    if _bn_is_one(n) { return _mont_ctx_err("bignum: modulus is one"); }
+
+    let n0_prime: int = _mont_n0_prime(n[0]);
+    let r2: int[] = _mont_r2(n, limbs);
+    return MontCtx {
+        ok: true,
+        error: "",
+        n: n,
+        limbs: limbs,
+        n0_prime: n0_prime,
+        r2: r2
+    };
+}
+
+// ── Montgomery arithmetic ──
+// CIOS Montgomery multiply: given a, b < n, returns a * b * R^-1 mod n, fully
+// reduced. One multiply row and one reduction row are interleaved per outer
+// iteration, and every inner result is masked before the next limb, which is
+// what keeps the bound at 2^52 + 2^28 independent of modulus length. Do not
+// replace this with a whole-column accumulator without re-reading design note
+// §6.1 — at 26 bits a 4096-bit column has only 2.7 bits of headroom.
+fn _mont_mul(a: int[], b: int[], ctx: MontCtx) -> int[] {
+    let m: int = ctx.limbs;
+    let n: int[] = ctx.n;
+    let n0_prime: int = ctx.n0_prime;
+    let mask: int = _bn_limb_mask();
+    let bits: int = _bn_limb_bits();
+
+    let mut t: int[] = _bn_zero(m + 2);
+
+    let mut i: int = 0;
+    loop {
+        if i >= m { break; }
+
+        // Multiply row: t += a * b[i].
+        let bi: int = _bn_at(b, i);
+        let mut c: int = 0;
+        let mut j: int = 0;
+        loop {
+            if j >= m { break; }
+            let z: int = t[j] + _bn_at(a, j) * bi + c;
+            t[j] = z & mask;
+            c = z >> bits;
+            j += 1;
+        }
+        let z_hi: int = t[m] + c;
+        t[m] = z_hi & mask;
+        t[m + 1] = z_hi >> bits;
+
+        // Reduction row: t = (t + q * n) / 2^26, where q is chosen so that the
+        // low limb of t + q * n is zero.
+        let q: int = (t[0] * n0_prime) & mask;
+        let z0: int = t[0] + q * n[0];
+        c = z0 >> bits;
+        let mut k: int = 1;
+        loop {
+            if k >= m { break; }
+            let z: int = t[k] + q * n[k] + c;
+            t[k - 1] = z & mask;
+            c = z >> bits;
+            k += 1;
+        }
+        let z_top: int = t[m] + c;
+        t[m - 1] = z_top & mask;
+        t[m] = t[m + 1] + (z_top >> bits);
+
+        i += 1;
+    }
+
+    // The CIOS invariant leaves the result below 2n, so a single public
+    // conditional subtraction canonicalizes it.
+    //
+    // `t[m]` is provably zero here and is therefore not inspected. Entering an
+    // iteration with t < 2n, a < n, and b[i] < B gives
+    // t + a*b[i] + q*n <= (2n - 1) + (n - 1)(B - 1) + (B - 1)n = B(2n - 1), so
+    // the shifted result stays below 2n; and `mont_ctx_from_be` leaves a spare
+    // bit, so 2n < B^m. The precondition that carries this is a, b < n — every
+    // call site holds it, and a caller that broke it would get a silently wrong
+    // residue rather than a diagnostic.
+    let mut r: int[] = _bn_zero(m);
+    let mut w: int = 0;
+    loop {
+        if w >= m { break; }
+        r[w] = t[w];
+        w += 1;
+    }
+    if _bn_cmp(r, n) >= 0 { return _bn_sub(r, n); }
+    return r;
+}
+
+fn _mont_in(x: int[], ctx: MontCtx) -> int[] {
+    return _mont_mul(x, ctx.r2, ctx);
+}
+
+fn _mont_out(x: int[], ctx: MontCtx) -> int[] {
+    // A rejected context has zero limbs; refuse it rather than index into the
+    // empty vector, so the module header's no-unguarded-index claim holds even
+    // for a caller that skipped the `ctx.ok` check.
+    if ctx.limbs < 1 { return _bn_zero(0); }
+    let mut one: int[] = _bn_zero(ctx.limbs);
+    one[0] = 1;
+    return _mont_mul(x, one, ctx);
+}
+
+// base^e mod n for a small public exponent, by left-to-right square-and-
+// multiply in the Montgomery domain. `base` and the result are in the ordinary
+// domain; the two conversions are folded into the cost. For e = 65537 this is
+// 16 squarings, 1 multiply, and 2 conversions — 19 Montgomery multiplications,
+// which is the count design note §6.3 sizes the -O0 CI budget against.
+//
+// `e` must be positive; `_rsa_public_op` enforces the tighter policy (odd, at
+// least 3, and within a positive 31-bit int) that stops an untrusted
+// certificate from turning one verification into a denial of service.
+fn _modexp_public(base: int[], e: int, ctx: MontCtx) -> int[] {
+    if e <= 0 { return _bn_zero(ctx.limbs); }
+
+    let base_mont: int[] = _mont_in(base, ctx);
+    let mut acc: int[] = _bn_copy(base_mont);
+
+    // Scan from bit 62 rather than from the 31-bit policy ceiling `rsa.sfn`
+    // applies, so this routine stays correct for any positive `int` exponent
+    // instead of silently dropping high bits if a later caller widens that
+    // policy. Bounding the exponent is the caller's job, not this loop's.
+    let mut top: int = 62;
+    loop {
+        if top < 0 { break; }
+        if ((e >> top) & 1) == 1 { break; }
+        top -= 1;
+    }
+
+    let mut i: int = top - 1;
+    loop {
+        if i < 0 { break; }
+        acc = _mont_mul(acc, acc, ctx);
+        if ((e >> i) & 1) == 1 { acc = _mont_mul(acc, base_mont, ctx); }
+        i -= 1;
+    }
+
+    return _mont_out(acc, ctx);
+}
+
+// Deliberately narrow: only what `src/rsa.sfn` and the regression tests consume.
+// The unexported helpers carry preconditions that produce a silently wrong
+// residue rather than an error when broken — `_mont_mul` requires both operands
+// below the modulus, `_bn_sub` requires a >= b, `_bn_double_mod` requires
+// x < n and matching lengths. Keeping them file-local means a future caller has
+// to come here and read those contracts first. Widen this list when SFN-658
+// needs more, not pre-emptively.
+export {
+    MontCtx,
+    _bn_cmp,
+    _bn_from_be,
+    _bn_limb_mask,
+    _bn_to_be,
+    _modexp_public,
+    _mont_n0_prime,
+    mont_ctx_from_be
+};

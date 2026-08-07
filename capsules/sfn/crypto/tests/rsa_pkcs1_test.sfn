@@ -1,0 +1,734 @@
+// capsules/sfn/crypto/tests/rsa_pkcs1_test.sfn
+//
+// SFN-656: RSASSA-PKCS1-v1_5 verification (RFC 8017 §8.2.2) and the 26-bit
+// Montgomery bignum core underneath it.
+//
+// Test-shape constraint, from design note §6.3
+// (docs/proposals/design-notes/sfn-653-p256-rsa-bigint-strategy.md): a 2048-bit
+// verification is roughly 1.19 million primitive operations under the -O0 test
+// build, so the negative cases must NOT each repeat one. They do not. Only the
+// six NIST known-answer records and the wrong-modulus case run a full
+// exponentiation; every forgery case drives the decision function
+// `_rsa_pkcs1_v1_5_verify_em` directly, every malformed-input case is refused by
+// a pre-modexp guard, and the arithmetic cases use synthetic moduli.
+//
+// The forgery cases buy that cheapness by calling `_rsa_pkcs1_v1_5_verify_em`
+// — the verifier's actual decision function — with a forged encoding, instead
+// of by comparing byte strings. The distinction matters: a test that only
+// asserted "this forgery differs from the rebuilt encoding" would hold for any
+// implementation, including one rewritten to walk the recovered padding, which
+// is precisely the regression these cases exist to catch.
+//
+// Vector provenance: NIST CAVP FIPS 186-3 RSA validation archive
+// (186-3rsatestvectors.zip, sha256
+// 8405aeb3572a4f98ed4b1a3ccb3f2f49e725462dd28ec4759d6a15d88855d19c), file
+// SigVer15_186-3.rsp, groups [mod = 2048] and [mod = 3072]. Record indices are
+// positions within their group.
+//
+// One honest caveat on those records: this archive's `Result = F` lines carry
+// NO parenthesized reason text (unlike the sibling truncated-SHA file), so the
+// per-record failure reasons named below are DERIVED structurally — by
+// recovering S^e mod n and inspecting the encoding — not quoted from the file.
+// Treat the reason labels as this test's own classification. What is quoted
+// verbatim from NIST is the only thing the assertions depend on: the P/F verdict.
+import { unix_millis } from "sfn/time";
+
+import {
+    MontCtx,
+    _bn_from_be,
+    _bn_limb_mask,
+    _bn_to_be,
+    _modexp_public,
+    _mont_n0_prime,
+    mont_ctx_from_be
+} from "../src/bignum";
+import { sha256_bytes } from "../src/hkdf";
+import {
+    RsaBytesResult,
+    _digestinfo_sha256,
+    _digestinfo_sha384,
+    _emsa_pkcs1_v1_5,
+    _rsa_bytes_eq,
+    _rsa_pkcs1_v1_5_verify_em,
+    _rsa_public_op,
+    _rsa_strip_leading_zeros,
+    rsa_pkcs1_v1_5_verify_sha256,
+    rsa_pkcs1_v1_5_verify_sha384
+} from "../src/rsa";
+
+fn hexb(s: string) -> int[] {
+    let mut out: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= s.length { break; }
+        let hi: int = _hexval(s[i]);
+        let lo: int = _hexval(s[i + 1]);
+        out.push(((hi << 4) | lo) & 255);
+        i += 2;
+    }
+    return out;
+}
+
+fn _hexval(c: string) -> int {
+    let code: int = char_code(c) & 255;
+    if code >= 48 && code <= 57 { return code - 48; }
+    if code >= 97 && code <= 102 { return code - 97 + 10; }
+    return 0;
+}
+
+// A copy of `bytes` with one octet replaced — the mutation primitive the
+// forgery cases use to bend a valid encoding out of shape.
+fn _with_byte(bytes: int[], index: int, value: int) -> int[] {
+    let mut out: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= bytes.length { break; }
+        if i == index { out.push(value & 255); } else {
+            out.push(bytes[i]);
+        }
+        i += 1;
+    }
+    return out;
+}
+
+fn _slice(bytes: int[], start: int, end: int) -> int[] {
+    let mut out: int[] = [];
+    let mut i: int = start;
+    loop {
+        if i >= end { break; }
+        if i >= 0 && i < bytes.length { out.push(bytes[i]); }
+        i += 1;
+    }
+    return out;
+}
+
+fn _repeat(value: int, count: int) -> int[] {
+    let mut out: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= count { break; }
+        out.push(value & 255);
+        i += 1;
+    }
+    return out;
+}
+
+fn _concat(a: int[], b: int[]) -> int[] {
+    let mut out: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= a.length { break; }
+        out.push(a[i]);
+        i += 1;
+    }
+    let mut j: int = 0;
+    loop {
+        if j >= b.length { break; }
+        out.push(b[j]);
+        j += 1;
+    }
+    return out;
+}
+
+// A synthetic odd modulus of the requested octet length, for the rejection and
+// raw-arithmetic paths. Its factorization is irrelevant: no test checks a real
+// signature against it. It exists so those cases can pick a limb count directly
+// — 1024-bit for the cheap ones, 4096-bit to exercise the widest shape — rather
+// than paying for a real 2048-bit key they do not need.
+fn _synthetic_modulus(len: int) -> int[] {
+    let mut n: int[] = [];
+    n.push(193);
+    let mut i: int = 1;
+    loop {
+        if i >= len - 1 { break; }
+        n.push((i * 7 + 11) & 255);
+        i += 1;
+    }
+    n.push(157);
+    return n;
+}
+
+fn _small_modulus() -> int[] { return _synthetic_modulus(128); }
+
+// The public exponents attached to the selected records.
+fn _e_block_a() -> int { return 4838049; }
+
+fn _e_block_a_changed() -> int { return 477275; }
+
+fn _e_block_b() -> int { return 2762459; }
+
+// Modulus of the SigVer15_186-3.rsp [mod = 2048] key block shared by records 13, 15, 16, and 17.
+fn _nist_n_a() -> string {
+    return "c47abacc2a84d56f3614d92fd62ed36ddde459664b9301dcd1d61781cfcc026b"
+        + "cb2399bee7e75681a80b7bf500e2d08ceae1c42ec0b707927f2b2fe92ae85208"
+        + "7d25f1d260cc74905ee5f9b254ed05494a9fe06732c3680992dd6f0dc634568d"
+        + "11542a705f83ae96d2a49763d5fbb24398edf3702bc94bc168190166492b8671"
+        + "de874bb9cecb058c6c8344aa8c93754d6effcd44a41ed7de0a9dcd9144437f21"
+        + "2b18881d042d331a4618a9e630ef9bb66305e4fdf8f0391b3b2313fe549f0189"
+        + "ff968b92f33c266a4bc2cffc897d1937eeb9e406f5d0eaa7a14782e76af3fce9"
+        + "8f54ed237b4a04a4159a5f6250a296a902880204e61d891c4da29f2d65f34cbb";
+}
+
+// Modulus of the key block carrying the SHA-384 record 20.
+fn _nist_n_b() -> string {
+    return "c858aea188541c0dd2626eec9a8c98511ca03870353128c1687d94a1be762a49"
+        + "40fca789831a720e108f2f7c1fc20aab38336b5668205d62963c51aad7475718"
+        + "3faae7c0c59b9f679e96393e7f93e8a30ce99fed1b8e85e7146bd69a3f8dc573"
+        + "4bbacd51359f4f66aa507fbf4e69708877f7cd7cfb6868006e330869d9eee99f"
+        + "466962b0dee9080d9413bdec2e41445190394a49ecb191167350be411cdd6ade"
+        + "4eb38c4c4bf891b43c91b5981a3bcc8a66f85e5cbaef751e3cbe94c7f193fd78"
+        + "ac55048800250d5cc9e41b89319ac3d0258aa640299e165b0cf7e5e108f76a12"
+        + "f72132f6a2a4c239df0544d3d8407b94f9f38e9156c825a7eae001543fb264eb";
+}
+
+// record 13, Result = P, SHAAlg = SHA256 — Msg.
+fn _pass256_msg() -> string {
+    return "95123c8d1b236540b86976a11cea31f8bd4e6c54c235147d20ce722b03a6ad75"
+        + "6fbd918c27df8ea9ce3104444c0bbe877305bc02e35535a02a58dcda306e632a"
+        + "d30b3dc3ce0ba97fdf46ec192965dd9cd7f4a71b02b8cba3d442646eeec4af59"
+        + "0824ca98d74fbca934d0b6867aa1991f3040b707e806de6e66b5934f05509bea";
+}
+
+// record 13, Result = P, SHAAlg = SHA256 — S.
+fn _pass256_sig() -> string {
+    return "51265d96f11ab338762891cb29bf3f1d2b3305107063f5f3245af376dfcc7027"
+        + "d39365de70a31db05e9e10eb6148cb7f6425f0c93c4fb0e2291adbd22c77656a"
+        + "fc196858a11e1c670d9eeb592613e69eb4f3aa501730743ac4464486c7ae68fd"
+        + "509e896f63884e9424f69c1c5397959f1e52a368667a598a1fc90125273d9341"
+        + "295d2f8e1cc4969bf228c860e07a3546be2eeda1cde48ee94d062801fe666e4a"
+        + "7ae8cb9cd79262c017b081af874ff00453ca43e34efdb43fffb0bb42a4e2d32a"
+        + "5e5cc9e8546a221fe930250e5f5333e0efe58ffebf19369a3b8ae5a67f6a048b"
+        + "c9ef915bda25160729b508667ada84a0c27e7e26cf2abca413e5e4693f4a9405";
+}
+
+// record 15, Result = F — Msg.
+fn _fail_msg_msg() -> string {
+    return "915c5e4c16acfa0f49de43d6491f0060a944034475ba518572c08366a8d36c7f"
+        + "1e6afc11e5e4649757bf7b9da10a61d57f1d626847871d8a2948e551b54167c7"
+        + "9de88d3ebd40a3e35809b996a53348f98a9918c7a7ec606896ed30c271e00c51"
+        + "953dd97aa6a8fe1cd423c3695c83fcf45120ec0a9cd1644642182b60e599a246";
+}
+
+// record 15, Result = F — S.
+fn _fail_msg_sig() -> string {
+    return "3d57ea5961db8fc144301ca4278f799911229d865ea3e992c7fbc4d03c655172"
+        + "9e26034e95dd71da312340e4051c9dd9b12f7700a821fe3b7c37785d5106350b"
+        + "667ac255a57c13da5842d90bcadea9e6b1f720c607d6893a2caa3c5f3c4074e9"
+        + "14451a45380a767c291a67cac3f1cab1fbd05adc37036856a8404e7cea365401"
+        + "9466de449ad6e92b27254f3d25949b1b860065406455a13db7c5fe25d1af7a84"
+        + "cddf7792c64e16260c950d60bd86d005924148ad097c126b84947ab6e89d48f6"
+        + "1e711d62522b6e48f16186d1339e6ab3f58c359eb24cb68043737591cd7d9390"
+        + "a468c0022b3b253be52f1a7fc408f84e9ffb4c34fa9e01605851d6583aa13032";
+}
+
+// record 16, Result = F — Msg.
+fn _fail_key_msg() -> string {
+    return "03d2f0693517cffb2b724c1f30502c5359c051c1bcd88dc1dd54b89e6981009d"
+        + "275a813b2bf016b74d0f6ed0d91e62d0884785c9afd8fd1fb7e99246cd4005cd"
+        + "da71a39cb649197a996d8ad2d23fdfb6bb015f24ec3d7f88af64fb83b4b525eb"
+        + "06607d133eec834cf7d6c9ab817b4c0dda370459d9cfba05ad0c1adc86a909fe";
+}
+
+// record 16, Result = F — S.
+fn _fail_key_sig() -> string {
+    return "511abd82218cab344979b2887b02600d2427f1eb12ac01d97684c2a443a92728"
+        + "34c3f79cded07a39dbee3770dde827a74dc994b17bfd8a26d07b239d26d58c42"
+        + "f79d560264c31b7e1c3dddef6d7556f228c394414f4cec561c3da2686a8eebec"
+        + "7702f32850809a93deeb84b2a02fcdba224d2fd9efb8e056e796f49b57d56e9f"
+        + "3e90d0b49b08bdee93a2e12e676fb4d4fa838c5bd88eda008f1b592a72465587"
+        + "be0ae17d9b156b904f44a7e04d3b58d24ad67b71b0f4c699fa51639546b62b9f"
+        + "83597ff03d465f1bb396ae15e92d0e92e85647d5df113e2c7518d0e3ad2e7aa7"
+        + "dac720c98347aa151e4f37fea081dbed350cc9c93f606b38f21a3e5de6d140d2";
+}
+
+// record 17, Result = F — Msg.
+fn _fail_sig_msg() -> string {
+    return "dffe42bfda886e1a73fe8a8dfcf71c9fb44deb054588a9bb9199d554aecce08f"
+        + "2ff88f2aa6f8a0fb675fb03c8e685c27432ca7c33c189bfd849d34fa7b2979ac"
+        + "1f57eca389632426bae0b98398ad60a3342557e14e96041c1bf4d90b46cf7ad1"
+        + "348322d28caf43c4f7e86c0924ae703c109ec50a84ea2a43df078c3015a52b28";
+}
+
+// record 17, Result = F — S.
+fn _fail_sig_sig() -> string {
+    return "8f4dd479239f2d08dc05d7d40539288b67c4d77210ecb16be76f0b1925e8b088"
+        + "570831e361a1ca57893135f8af64b8e2996b8d635899da4e04c68acb9b1b3813"
+        + "697d57da90c57f18509e0ab6705c704feb448cca5c07d258ecd884ab93f508ce"
+        + "fdb25f2bc3061c4006099e2e33b27972c3edb0a0a33114d381c82ab506d041ff"
+        + "680af595ef3400a8bb6774030d2e38dd304272092bd32a553017f7bda4b998b2"
+        + "7aa8aca12def327b1f11063a5342b0d55738183417d321c5682fc4ab64e79174"
+        + "216feebb989521e1e3d827647068003be34fe1d093964d28f4877c49b4065672"
+        + "448597a89b91919cfb55ca13836e7e6f3b3fd04f417cf1c16d9872538bf4e87a";
+}
+
+// record 20, Result = P, SHAAlg = SHA384 — Msg.
+fn _pass384_msg() -> string {
+    return "d6a169031049b0b3b582d22bf40b9fca45d2618457146c2b4ac6f6ed1f34291f"
+        + "6de8773955cd2e21b7944caca65794621a7ce181e5ddbb45e9252867877dc4e3"
+        + "5b6914ff26ec18890bf31f60fff1df367bc6c59373e58a1d8cb607188a394a29"
+        + "07ede95f6bf096731867f44fe520aacece76b5c3ea75023c9d3f3c080eaee376";
+}
+
+// record 20, Result = P, SHAAlg = SHA384 — S.
+fn _pass384_sig() -> string {
+    return "b9794f252e6907dc4c41de42ea5a0e6361114ac3814c4a92583ca70fd78e9819"
+        + "0a0d9215bd5282e8520422093eff2e1cfa335cffcdcc27fe9bafe4516e74445d"
+        + "4aa17a08db754fc69b156d86ff26eb9e814f605142a3051d2fa64305d3e5c5c5"
+        + "f67c7d9e38c5054d069c14b23e4278fa5a73381f61f90a9ec428c883f1366e27"
+        + "ec0219db8c942582a284c161eead307285d0e4df6b0d7dea0e8216d7ef2e4b2e"
+        + "de2296e0b780e5a3f8d15f123f737b9d6170074f758de32b6f1e958b27e422b0"
+        + "53df8f5fbbbafbc14119260f7022cd2934e8faeffbd7085aabc44497bfe07387"
+        + "bc0e5aa02399eab99318adb98f99a677aa0683e0c11d638cb13907fc5c3147e5";
+}
+
+// Modulus of the SigVer15_186-3.rsp [mod = 3072] key block carrying record 17.
+fn _nist_n_3072() -> string {
+    return "9bbb099e1ec285594e73f9d11cbe81e7f1fa06fd34f3ec0b799394aed30fc2ed"
+        + "9de7b2a6866fde69846fb55a6ab98e552f9d20f05aa0d55c967817e4e04bdf9b"
+        + "f52fabcfcfa41265a7561b033ca3d56fb8e8a2e4de63e960cfb5a689129b188e"
+        + "5641f20dbf8908dab8e30e82f1d0e288e23869c7cac2b0318602610a776a19c1"
+        + "f93968c652b64f51406e7a4b2508d25b632606834a9638074e2633eb323324b8"
+        + "b30fdbd8e8fdad8602b11f25f3906439055afe947f9b9bcffb45dad88a1df530"
+        + "4c879bb4a6eddb4d3d1846bf907d2ca269845c790b2f0af8154aad9c4acb75e1"
+        + "8a5d0e4f9f88137032b9964fe171dfa0d0f286090790f52157179a6734b5f9a6"
+        + "4e3d2ed529722c3d3836d4501496f927a0f8e389ca35332b836d99e995f4a3e8"
+        + "6f581bf9abdc7a10e06a6b31296ae3b43e6ddc9a0d9a7d0d9c4053af0875e851"
+        + "192d1de7b08d1beb7b857e227f8803a5620726a31920bcab922d3370a78033b3"
+        + "15024a0fc1f6c276be565e58de77f294c8089ff4c43fb334d26006ab5757c65b";
+}
+
+// [mod = 3072] record 17, Result = P, SHAAlg = SHA256 — Msg.
+fn _pass3072_msg() -> string {
+    return "170dcd5458adfbdccc757e0b5abc19278112f24b418b995d395b46410da3624c"
+        + "0a8b49fc0d914fe6a02101ef6765adbfbb5e24739434be92acca9f43e19639bd"
+        + "dbb012fef028c7c0449d52a9350b88c2f6e5e52a79648c0c931e8ace5bda5b8b"
+        + "d3a3afc4ca1b6e520012f99f8c57b3167bcec0d8bac30cb1367e8f4a4118d0a0";
+}
+
+// [mod = 3072] record 17, Result = P, SHAAlg = SHA256 — S.
+fn _pass3072_sig() -> string {
+    return "6a4db2e6c13ee8ec6174bf57ae5bb7555e66dc2e3b618f259d913b5b8b6c16b9"
+        + "760290c9c576b563316f510ad2461cd5086b6d9670551ec74b8a9d15ebd43ccd"
+        + "fdcd74cad660a3fe3f36992c86559cd8e9e4d3568924b1f7e55bc5d8df4cf53f"
+        + "240fb3b945a08d24f205d5a7081410ea3e8136ca282fc99e6be0b1fa2faa742c"
+        + "9d682d08a77b791bb0421241e6a82f84605dda359e4f8475cef346c9f6a54a08"
+        + "5492fc4bbb30b1047c66f5fc529ecb6aa9ece561e5a3a62f9a19eca2badbfa32"
+        + "a2aa205713b16081519c2cde2f8e8261726fad49145dce0d9e24f6e085e44bd8"
+        + "6f670a114ba98d54389f0ed683d062735cd495e6a8a6eef9fd70355b92b4cf6c"
+        + "f0c24e898b6d3f7fe51dcd1548a1adc67ba585e2d18809ea658d6ec4bb5e33e8"
+        + "501d11a266f5e0928ecb58547e72c27db8b07aae31eefef865bcf6a08485675d"
+        + "3037f432c157e5ee428d292bfc24c654d8fca7a60107dc18461251906521e1e9"
+        + "965fc80c7b5f582ac3dc3798a0a2937e76d7e7fd7122d3fd9083feeb9a44ad7c";
+}
+
+fn _e_3072() -> int { return 11300273; }
+
+// ── Known-answer verification (the only tests that run a full exponentiation) ──
+test "rsa: NIST CAVP SigVer15 mod=2048 SHA-256 accepts a valid signature" {
+    assert rsa_pkcs1_v1_5_verify_sha256(hexb(_nist_n_a()), _e_block_a(), hexb(_pass256_msg()), hexb(_pass256_sig()));
+}
+
+test "rsa: NIST CAVP SigVer15 mod=2048 SHA-384 accepts a valid signature" {
+    assert rsa_pkcs1_v1_5_verify_sha384(hexb(_nist_n_b()), _e_block_b(), hexb(_pass384_msg()), hexb(_pass384_sig()));
+}
+
+test "rsa: a tampered message is rejected" {
+    // NIST record 15, Result = F. Derived reason: the message was changed, so S
+    // still recovers a structurally perfect encoding whose embedded digest does
+    // not match. This is the case a verifier that checks padding shape but
+    // compares the digest sloppily would pass.
+    assert ! rsa_pkcs1_v1_5_verify_sha256(hexb(_nist_n_a()), _e_block_a(), hexb(_fail_msg_msg()), hexb(_fail_msg_sig()));
+}
+
+test "rsa: a tampered signature is rejected" {
+    // NIST record 17, Result = F. Derived reason: the signature was changed, so
+    // S^e is unstructured and matches no encoding at all.
+    assert ! rsa_pkcs1_v1_5_verify_sha256(hexb(_nist_n_a()), _e_block_a(), hexb(_fail_sig_msg()), hexb(_fail_sig_sig()));
+}
+
+test "rsa: a wrong public exponent is rejected" {
+    // NIST record 16, Result = F. Derived reason: the public exponent differs
+    // from the one the signature was produced under.
+    assert ! rsa_pkcs1_v1_5_verify_sha256(hexb(_nist_n_a()), _e_block_a_changed(), hexb(_fail_key_msg()), hexb(_fail_key_sig()));
+}
+
+test "rsa: NIST CAVP SigVer15 mod=3072 SHA-256 accepts a valid signature" {
+    // The 119-limb shape. Design note §6.3 item 3 asks for one smoke case at
+    // each of 3072 and 4096 bits so those limb counts do not ship untested; this
+    // is the 3072 one, and it is a real NIST record rather than a synthetic
+    // exponentiation. The 4096 shape is covered by the bignum case below, since
+    // SigVer15_186-3.rsp tops out at 3072.
+    assert rsa_pkcs1_v1_5_verify_sha256(hexb(_nist_n_3072()), _e_3072(), hexb(_pass3072_msg()), hexb(_pass3072_sig()));
+}
+
+test "rsa: a wrong modulus is rejected" {
+    // The record-13 signature checked against the *other* key block's modulus.
+    // Both are well-formed 2048-bit RSA moduli, so this exercises a real
+    // exponentiation that simply lands nowhere near a valid encoding.
+    assert ! rsa_pkcs1_v1_5_verify_sha256(hexb(_nist_n_b()), _e_block_a(), hexb(_pass256_msg()), hexb(_pass256_sig()));
+}
+
+// ── Forgery resistance ──
+//
+// These cases drive `_rsa_pkcs1_v1_5_verify_em`, which IS the verifier's
+// decision: both public entry points are `_rsa_public_op` followed by exactly
+// that call. What is skipped here is only the exponentiation that would have
+// produced each forged encoding — a 2048-bit modexp per case, which design note
+// §6.3 asks this file not to repeat. The function under test is still the one
+// that decides, so a rewrite of it into a padding-walking parser fails these.
+fn _pass256_digest() -> int[] {
+    return sha256_bytes(hexb(_pass256_msg()));
+}
+
+fn _valid_em() -> int[] {
+    let built: RsaBytesResult = _emsa_pkcs1_v1_5(_pass256_digest(), _digestinfo_sha256(), 256);
+    return built.value;
+}
+
+fn _accepts(em: int[]) -> bool {
+    return _rsa_pkcs1_v1_5_verify_em(em, _pass256_digest(), _digestinfo_sha256());
+}
+
+// Every forgery case is a negative assertion, so a dead fixture — an empty
+// `_valid_em()`, or a decision function that rejects everything — would make all
+// of them pass while testing nothing. Each case asserts this first, so the guard
+// still runs when a single case is selected with `sfn test -k`.
+fn _fixture_is_live() -> bool {
+    if _valid_em().length != 256 { return false; }
+    return _accepts(_valid_em());
+}
+
+// Index arithmetic for a 256-octet encoding over a 19-octet SHA-256 DigestInfo
+// prefix and a 32-octet digest: 00 01, then PS, then the 00 separator.
+fn _ps_len_256() -> int { return 256 - 19 - 32 - 3; }
+
+fn _separator_index() -> int { return 2 + _ps_len_256(); }
+
+test "rsa: the rebuilt encoding matches RFC 8017 section 9.2 octet for octet" {
+    let digest: int[] = _pass256_digest();
+    let prefix: int[] = _digestinfo_sha256();
+    let built: RsaBytesResult = _emsa_pkcs1_v1_5(digest, prefix, 256);
+    assert built.ok;
+
+    let em: int[] = built.value;
+    assert em.length == 256;
+    assert em[0] == 0;
+    assert em[1] == 1;
+
+    // PS is all 255 and comfortably longer than the eight-octet floor.
+    let ps_len: int = _ps_len_256();
+    assert ps_len >= 8;
+    let mut i: int = 2;
+    loop {
+        if i >= 2 + ps_len { break; }
+        assert em[i] == 255;
+        i += 1;
+    }
+
+    assert em[_separator_index()] == 0;
+
+    let mut j: int = 0;
+    loop {
+        if j >= prefix.length { break; }
+        assert em[_separator_index() + 1 + j] == prefix[j];
+        j += 1;
+    }
+
+    let mut d: int = 0;
+    loop {
+        if d >= digest.length { break; }
+        assert em[_separator_index() + 1 + prefix.length + d] == digest[d];
+        d += 1;
+    }
+
+    // The decision function accepts the encoding it just rebuilt, which is what
+    // makes every negative case below meaningful.
+    assert _accepts(em);
+}
+
+test "rsa: garbage after the DigestInfo is rejected" {
+    // The Bleichenbacher'06 shape: the minimum eight octets of FF padding, the
+    // separator, a *genuine* DigestInfo and digest, and then attacker-chosen
+    // filler out to the modulus width. A verifier that walks the recovered
+    // padding and stops once it has read a well-formed DigestInfo accepts this
+    // with no private key involved. This is the single most important case in
+    // the file.
+    assert _fixture_is_live();
+
+    let digest: int[] = _pass256_digest();
+    let mut forged: int[] = _concat(_repeat(0, 1), _repeat(1, 1));
+    forged = _concat(forged, _repeat(255, 8));
+    forged = _concat(forged, _repeat(0, 1));
+    forged = _concat(forged, _digestinfo_sha256());
+    forged = _concat(forged, digest);
+    forged = _concat(forged, _repeat(171, 256 - forged.length));
+
+    assert forged.length == 256;
+    // The forgery really does carry a valid DigestInfo and the correct digest —
+    // it is rejected for its padding, not because the hash is wrong.
+    assert _rsa_bytes_eq(_slice(forged, 11, 11 + 19 + 32), _concat(_digestinfo_sha256(), digest));
+    assert ! _accepts(forged);
+}
+
+test "rsa: too-short PS padding is rejected" {
+    assert _fixture_is_live();
+
+    let digest: int[] = _pass256_digest();
+    let mut forged: int[] = _concat(_repeat(0, 1), _repeat(1, 1));
+    forged = _concat(forged, _repeat(255, 7));
+    forged = _concat(forged, _repeat(0, 1));
+    forged = _concat(forged, _digestinfo_sha256());
+    forged = _concat(forged, digest);
+    forged = _concat(forged, _repeat(171, 256 - forged.length));
+
+    assert forged.length == 256;
+    assert ! _accepts(forged);
+
+    // The encoder also refuses to *emit* a PS shorter than eight octets: for a
+    // 19-octet prefix and a 32-octet digest the smallest legal width is 62.
+    let too_narrow: RsaBytesResult = _emsa_pkcs1_v1_5(digest, _digestinfo_sha256(), 61);
+    assert ! too_narrow.ok;
+    let exactly_wide_enough: RsaBytesResult = _emsa_pkcs1_v1_5(digest, _digestinfo_sha256(), 62);
+    assert exactly_wide_enough.ok;
+    assert exactly_wide_enough.value.length == 62;
+    assert exactly_wide_enough.value[2] == 255;
+    assert exactly_wide_enough.value[9] == 255;
+    assert exactly_wide_enough.value[10] == 0;
+
+    // An encoding narrower than the floor is refused by the decision function
+    // too, not merely by the encoder.
+    assert ! _accepts(_slice(_valid_em(), 0, 61));
+}
+
+test "rsa: a wrong DigestInfo prefix is rejected" {
+    // A SHA-384 AlgorithmIdentifier wrapped around a SHA-256 digest: the same
+    // length, so only the prefix octets differ.
+    assert _fixture_is_live();
+
+    let digest: int[] = _pass256_digest();
+    let mut forged: int[] = _concat(_repeat(0, 1), _repeat(1, 1));
+    forged = _concat(forged, _repeat(255, _ps_len_256()));
+    forged = _concat(forged, _repeat(0, 1));
+    forged = _concat(forged, _digestinfo_sha384());
+    forged = _concat(forged, digest);
+
+    assert forged.length == 256;
+    assert ! _accepts(forged);
+}
+
+test "rsa: a missing 00 01 header is rejected" {
+    assert _fixture_is_live();
+    let em: int[] = _valid_em();
+
+    // Leading octet not 00.
+    assert ! _accepts(_with_byte(em, 0, 1));
+    // Block type not 01.
+    assert ! _accepts(_with_byte(em, 1, 2));
+    // The classic "shift everything left by one and pad the tail" attempt.
+    let shifted: int[] = _concat(_slice(em, 1, 256), _repeat(0, 1));
+    assert shifted.length == 256;
+    assert ! _accepts(shifted);
+}
+
+test "rsa: a corrupted separator or padding octet is rejected" {
+    assert _fixture_is_live();
+    let em: int[] = _valid_em();
+
+    // The single 00 between PS and DigestInfo turned into more padding.
+    assert ! _accepts(_with_byte(em, _separator_index(), 255));
+    // A padding octet that is not FF.
+    assert ! _accepts(_with_byte(em, 10, 254));
+    // A flipped digest octet, at the very end of the encoding.
+    assert ! _accepts(_with_byte(em, 255, em[255] ^ 1));
+}
+
+// ── Malformed input fails closed and never panics ──
+test "rsa: malformed moduli, lengths, and exponents are refused" {
+    let sig: int[] = hexb(_pass256_sig());
+    let n_a: int[] = hexb(_nist_n_a());
+
+    // An all-zero modulus. It strips to empty, so this is refused on the
+    // length check rather than by the context builder's zero guard; that guard
+    // is reached directly in the out-of-range test below.
+    let zero: RsaBytesResult = _rsa_public_op(_repeat(0, 256), 65537, sig);
+    assert ! zero.ok;
+
+    // Even modulus — a real 2048-bit value with its low bit cleared.
+    let even: RsaBytesResult = _rsa_public_op(_with_byte(n_a, 255, n_a[255] & 254), 65537, sig);
+    assert ! even.ok;
+
+    // Modulus shorter than the signature.
+    let short_modulus: RsaBytesResult = _rsa_public_op(_slice(n_a, 0, 200), 65537, sig);
+    assert ! short_modulus.ok;
+
+    // Signature longer than the modulus.
+    let long_signature: RsaBytesResult = _rsa_public_op(n_a, 65537, _concat(sig, _repeat(0, 1)));
+    assert ! long_signature.ok;
+
+    // Modulus below the supported 1024-bit floor.
+    let tiny: RsaBytesResult = _rsa_public_op(_repeat(3, 64), 65537, _repeat(1, 64));
+    assert ! tiny.ok;
+
+    // Exponent policy: below 3, even, and wider than a positive 31-bit int.
+    let small_modulus: int[] = _small_modulus();
+    let sig_small: int[] = _repeat(2, 128);
+    assert ! _rsa_public_op(small_modulus, 1, sig_small).ok;
+    assert ! _rsa_public_op(small_modulus, 2, sig_small).ok;
+    assert ! _rsa_public_op(small_modulus, 4, sig_small).ok;
+    assert ! _rsa_public_op(small_modulus, 2147483648, sig_small).ok;
+
+    // Empty everything: the lengths agree at zero, so this reaches the context
+    // builder and is refused there rather than indexing off the end.
+    let empty: int[] = [];
+    assert ! rsa_pkcs1_v1_5_verify_sha256(empty, 65537, empty, empty);
+    assert ! rsa_pkcs1_v1_5_verify_sha384(empty, 65537, empty, empty);
+}
+
+test "rsa: a signature not less than the modulus is refused" {
+    // The modulus itself, reinterpreted as a signature: equal, so out of range.
+    let n: int[] = _small_modulus();
+    let equal: RsaBytesResult = _rsa_public_op(n, 65537, n);
+    assert ! equal.ok;
+}
+
+test "rsa: DER sign padding on the modulus is tolerated" {
+    // An X.509 RSAPublicKey carries the modulus as a DER INTEGER, which prefixes
+    // a 00 octet whenever the top bit is set. Stripping it is what keeps the
+    // signature-length check comparing k against k.
+    let n_a: int[] = hexb(_nist_n_a());
+    let padded: int[] = _concat(_repeat(0, 1), n_a);
+    assert padded.length == 257;
+    assert _rsa_strip_leading_zeros(padded).length == 256;
+    assert _rsa_bytes_eq(_rsa_strip_leading_zeros(padded), n_a);
+    assert _rsa_strip_leading_zeros(_repeat(0, 8)).length == 0;
+}
+
+test "rsa: out-of-range modulus sizes and signature lengths are refused" {
+    // A signature shorter than a well-formed modulus. RFC 8017 §8.2.2 requires
+    // exactly k octets; the over-long mirror case is covered above.
+    assert ! _rsa_public_op(hexb(_nist_n_a()), 65537, _slice(hexb(_pass256_sig()), 0, 255)).ok;
+
+    // A modulus above the supported 512-byte ceiling, which bounds the quadratic
+    // work an untrusted certificate can demand.
+    assert ! _rsa_public_op(_synthetic_modulus(520), 65537, _repeat(2, 520)).ok;
+
+    // The context builder's own guards, reached directly because `_rsa_public_op`
+    // strips leading zeros and would refuse these on length first.
+    assert ! mont_ctx_from_be(_repeat(0, 128)).ok;
+    assert ! mont_ctx_from_be(_concat(_repeat(0, 127), _repeat(1, 1))).ok;
+    assert ! mont_ctx_from_be(_repeat(0, 0)).ok;
+    assert ! mont_ctx_from_be(_synthetic_modulus(513)).ok;
+    assert mont_ctx_from_be(_small_modulus()).ok;
+}
+
+// ── Bignum arithmetic ──
+test "bignum: the Montgomery n0 constant inverts the low limb" {
+    // n0_prime is -n[0]^-1 mod 2^26, so n[0] * n0_prime + 1 must vanish mod 2^26
+    // for every odd low limb.
+    let mut n0: int = 1;
+    loop {
+        if n0 > 4001 { break; }
+        assert((n0 * _mont_n0_prime(n0) + 1) & _bn_limb_mask()) == 0;
+        n0 += 2;
+    }
+
+    // Design note §4.3 records n0_prime = 1 for the P-256 field prime, whose low
+    // 26-bit limb is 2^26 - 1.
+    assert _mont_n0_prime(67108863) == 1;
+}
+
+test "bignum: big-endian conversion round-trips through 26-bit limbs" {
+    let n: int[] = hexb(_nist_n_a());
+    let limbs: int = (256 * 8) / 26 + 1;
+    assert limbs == 79;
+    assert _rsa_bytes_eq(_bn_to_be(_bn_from_be(n, limbs), 256), n);
+
+    // I2OSP pads to the requested width rather than to the magnitude.
+    let one: int[] = _bn_from_be(_concat(_repeat(0, 255), _repeat(1, 1)), limbs);
+    let wide: int[] = _bn_to_be(one, 256);
+    assert wide.length == 256;
+    assert wide[0] == 0;
+    assert wide[255] == 1;
+}
+
+test "bignum: Montgomery exponentiation agrees with plain integer arithmetic" {
+    // A cube small enough that the modular reduction is the identity, so the
+    // answer is checkable by ordinary arithmetic: 65535^3 = 281462092005375.
+    // This catches a wrong n0_prime, a wrong R^2, or a dropped CIOS carry, which
+    // design note §9 lists as the primary implementation risk.
+    let ctx: MontCtx = mont_ctx_from_be(_small_modulus());
+    assert ctx.ok;
+    assert ctx.limbs == 40;
+
+    let base: int[] = _bn_from_be(_concat(_repeat(0, 126), _repeat(255, 2)), ctx.limbs);
+    let cubed: int[] = _bn_to_be(_modexp_public(base, 3, ctx), 128);
+    let expected: int[] = _concat(_repeat(0, 122), [255, 253, 0, 2, 255, 255]);
+    assert _rsa_bytes_eq(cubed, expected);
+
+    // Exponent 1 exercises the conversion pair on its own: mont_out(mont_in(x))
+    // must be the identity, which is a direct check on R^2.
+    assert _rsa_bytes_eq(_bn_to_be(_modexp_public(base, 1, ctx), 128), _concat(_repeat(0, 126), _repeat(255, 2)));
+}
+
+test "bignum: the 4096-bit limb shape exponentiates correctly" {
+    // 158 limbs, the widest modulus the engine accepts. Same checkable cube as
+    // the 1024-bit case: 65535^3 stays far below the modulus, so the reduction
+    // is the identity and the answer is verifiable by ordinary arithmetic. This
+    // exists so the largest limb count does not ship without ever being run.
+    let ctx: MontCtx = mont_ctx_from_be(_synthetic_modulus(512));
+    assert ctx.ok;
+    assert ctx.limbs == 158;
+
+    let base: int[] = _bn_from_be(_concat(_repeat(0, 510), _repeat(255, 2)), ctx.limbs);
+    let cubed: int[] = _bn_to_be(_modexp_public(base, 3, ctx), 512);
+    assert _rsa_bytes_eq(cubed, _concat(_repeat(0, 506), [255, 253, 0, 2, 255, 255]));
+}
+
+// ── Cost guard ──
+fn _is_ok(result: Result<int, string>) -> bool {
+    match result {
+        Result.Ok { value } => { return true; },
+        Result.Err { error } => { return false; }
+    }
+}
+
+fn _ok_value(result: Result<int, string>) -> int {
+    match result {
+        Result.Ok { value } => { return value; },
+        Result.Err { error } => { return 0; }
+    }
+}
+
+test "rsa: one 2048-bit verification stays inside the -O0 shard budget" ![clock] {
+    // Design note §6.3 sizes a 2048-bit verify at ~1.19 million primitive
+    // operations under -O0 and caps the whole fast file at 30 seconds. The
+    // measurement that closed that question, taken on the -O0 test binary when
+    // this landed: one verify — Montgomery context setup included — is 13 ms.
+    // The note's worry does not materialize; this file's wall time is dominated
+    // by compiling its vector constants, not by arithmetic.
+    //
+    // The ceiling is therefore set two orders of magnitude above the measured
+    // cost, which makes this a hang guard and nothing finer. It catches a verify
+    // that stops terminating — an unbounded exponent scan, a runaway carry loop
+    // — and it cannot flake on a loaded or slower runner. It deliberately does
+    // NOT claim to catch a constant-factor regression: at 154x headroom, none of
+    // the plausible ones would trip it, and tightening the bound far enough to
+    // catch them would trade a real property for a flaky one. Guarding the
+    // constant factor is a benchmark's job (SFEP-0006), not this file's.
+    //
+    // `unix_millis` is wall-clock, not monotonic, so an NTP step during the
+    // measured window can make the delta meaningless in either direction. That
+    // is acceptable here: a spurious *small* delta only fails to catch a hang,
+    // and a spurious large one is bounded by the same 2-second ceiling that a
+    // real hang would blow past.
+    let started: Result<int, string> = unix_millis();
+    assert _is_ok(started);
+
+    assert rsa_pkcs1_v1_5_verify_sha256(hexb(_nist_n_a()), _e_block_a(), hexb(_pass256_msg()), hexb(_pass256_sig()));
+
+    let finished: Result<int, string> = unix_millis();
+    assert _is_ok(finished);
+
+    let elapsed_ms: int = _ok_value(finished) - _ok_value(started);
+    assert elapsed_ms < 2000;
+}

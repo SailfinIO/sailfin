@@ -58,6 +58,14 @@ export { chacha20_block, chacha20_xor } from "./chacha20";
 // note, docs/proposals/design-notes/sfn-335-x25519-limb-strategy.md).
 export { x25519, x25519_base, x25519_is_zero } from "./x25519";
 
+// RSASSA-PKCS1-v1_5 signature verification (RFC 8017 §8.2.2) — the mode X.509
+// certificate signatures use, over the 26-bit Montgomery bignum core in
+// src/bignum.sfn (SFEP-0048 Phase C as amended, and the limb selection in
+// docs/proposals/design-notes/sfn-653-p256-rsa-bigint-strategy.md). The bignum
+// layer stays capsule-internal: SFN-658's PSS mode imports it directly rather
+// than through this surface.
+export { rsa_pkcs1_v1_5_verify_sha256, rsa_pkcs1_v1_5_verify_sha384 } from "./rsa";
+
 // Minimal DER/ASN.1 reader — definite-length TLV walk over the subset X.509
 // needs, with explicit nesting-depth and total-length guards against
 // adversarial input (SFN-504; guard precedent SFN-156).

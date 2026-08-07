@@ -2,7 +2,8 @@
 //
 // SFN-504: the current-time integration for X.509 validity classification.
 //
-// This is the only sfn/crypto test that needs `![clock]`, and that is the point.
+// This is one of only two sfn/crypto tests that need `![clock]` (the other is
+// the SFN-656 RSA cost guard), and that is the point.
 // `x509_validity_at` is pure: it takes a caller-supplied Unix-millisecond
 // snapshot and never reads ambient time. The capability therefore lives with the
 // caller, which is what keeps sfn/crypto effect-free while still letting a
