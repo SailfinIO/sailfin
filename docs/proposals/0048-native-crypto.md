@@ -201,7 +201,12 @@ the §6.3 amendment's RSA-in-scope decision in the dispatch table for
 certificate-signature verification, though RSASSA-PSS (SFN-658) stays out of
 this dispatch, since PSS is the CertificateVerify scheme, not the X.509
 cert-signature scheme; any other OID rejects the link rather than skipping
-it. Enforces RFC 5280 §4.1.1.2 outer/inner signatureAlgorithm agreement,
+it. Enforces RFC 5280 §6.1.3(f) — a certificate asserting a *critical*
+extension outside the recognised set (basicConstraints, keyUsage,
+extendedKeyUsage, subjectAltName) rejects the chain rather than being
+processed with that extension ignored, which is what stops a
+technically-constrained sub-CA carrying critical `nameConstraints` from being
+treated as unconstrained; §4.1.1.2 outer/inner signatureAlgorithm agreement,
 validity at every position in the path (not just the leaf), basicConstraints
 CA flag, keyUsage keyCertSign when present, pathLenConstraint, and
 extendedKeyUsage serverAuth on the leaf when present; trust anchors are not

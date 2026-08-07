@@ -12,6 +12,16 @@
 // signature algorithm this capsule cannot verify rejects the link rather than
 // skipping it — an unrecognised algorithm is never treated as acceptable.
 //
+// **`ok: true` is not an authentication result.** It answers exactly one
+// question — does a path exist from this leaf to a configured anchor on which
+// every signature verifies and every constraint this module enforces holds. It
+// does NOT say the certificate belongs to the host you are talking to: no
+// hostname is matched here (that is `x509_hostname_matches`, and a caller that
+// skips it has authenticated nothing), no revocation is checked (no OCSP, no
+// CRL), and extendedKeyUsage is enforced on the leaf only, not nested down the
+// path. A caller wiring this into a TLS client owes the hostname check
+// separately.
+//
 // Pure computation: this module reads no ambient time and performs no I/O.
 // The caller owns `![clock]` and supplies one Unix-millisecond snapshot,
 // mirroring `x509_validity_at` (SFN-504); locating and reading a platform CA
@@ -38,11 +48,16 @@ import { ed25519_verify } from "./ed25519";
 import { rsa_pkcs1_v1_5_verify_sha256, rsa_pkcs1_v1_5_verify_sha384 } from "./rsa";
 import {
     X509Certificate,
+    X509Extension,
     x509_key_usage_key_cert_sign,
+    x509_oid_basic_constraints,
     x509_oid_ecdsa_p256_sha256,
     x509_oid_ed25519,
     x509_oid_eku_server_auth,
+    x509_oid_extended_key_usage,
+    x509_oid_key_usage,
     x509_oid_rsa_encryption,
+    x509_oid_subject_alt_name,
     x509_validity_at,
     x509_validity_expired,
     x509_validity_in_window,
@@ -59,8 +74,18 @@ fn x509_verify_oid_sha384_rsa() -> string { return "1.2.840.113549.1.1.12"; }
 // id-ecPublicKey. Note this OID identifies the key *type* only: P-256 and
 // P-384 keys carry the same one and differ solely in the algorithm
 // parameters, which x509.sfn does not expose. Curve agreement is therefore
-// enforced by the signature OID gate below plus `_p256_point_decode`'s exact
-// 65/33-byte SEC1 length check, which rejects a foreign-curve point.
+// enforced downstream, and by more than one mechanism — worth spelling out,
+// because the obvious argument is not the complete one:
+//
+//   * a differently-sized curve (P-384) fails `_p256_point_decode`'s exact
+//     65/33-byte SEC1 length check (`p256.sfn:410,433`), and its
+//     `ecdsa-with-SHA384` signature OID is refused as unsupported anyway;
+//   * a SAME-SIZED foreign curve (secp256k1, brainpoolP256r1 — both 65 bytes
+//     uncompressed) passes that length check, and is rejected instead by
+//     `_p256_is_on_curve` and the `x >= p` coordinate check.
+//
+// The length check alone would not be sufficient, so do not simplify this to
+// "the length check handles it".
 fn x509_verify_oid_ec_public_key() -> string { return "1.2.840.10045.2.1"; }
 
 // ── Outcome codes. Stable strings so a caller (and a test) can distinguish
@@ -92,6 +117,10 @@ fn x509_verify_err_path_len_exceeded() -> string { return "path-len-exceeded"; }
 fn x509_verify_err_eku() -> string { return "eku"; }
 
 fn x509_verify_err_path_too_long() -> string { return "path-too-long"; }
+
+fn x509_verify_err_unrecognized_critical_extension() -> string {
+    return "unrecognized-critical-extension";
+}
 
 struct X509VerifyOptions {
     now_ms: int;  // caller-supplied Unix-millisecond snapshot; the caller owns ![clock]
@@ -220,6 +249,19 @@ fn _rsa_public_key_from_spki(spki_key: int[]) -> RsaPublicKey {
             exponent: 0
         };
     }
+    // `der_integer_bytes` returns the content octets verbatim, sign included,
+    // so a DER-negative modulus (high bit set on the leading octet, no 0x00
+    // sign byte) would otherwise be read as a positive number of the same
+    // bits. Reject it here rather than reinterpret it — the same call
+    // `_ecdsa_scalar` makes for scalars.
+    if modulus_res.value.length > 0 && (modulus_res.value[0] & 128) != 0 {
+        return RsaPublicKey {
+            ok: false,
+            error: "x509_verify: RSA modulus is a negative DER integer",
+            modulus: [],
+            exponent: 0
+        };
+    }
 
     let exponent_tlv: DerTlv = der_next_sibling(spki_key, outer, modulus_tlv);
     if !exponent_tlv.ok {
@@ -330,6 +372,50 @@ fn _window_code(cert: X509Certificate, now_ms: int) -> string {
     return x509_verify_err_bad_input();
 }
 
+// "" when every extension `cert` marks CRITICAL is one this module actually
+// processes. RFC 5280 6.1.3(f): a critical extension the validator does not
+// recognise MUST reject the certificate.
+//
+// This is the difference between ignoring a constraint and honouring it. A
+// technically-constrained sub-CA carries critical `nameConstraints`
+// (2.5.29.30) permitting, say, only `corp.example`; a validator that skips the
+// extension because it does not implement name constraints has silently
+// promoted a constrained CA into an unconstrained one, and it will happily
+// verify that CA's certificate for any name on the internet. The same reading
+// applies to critical `policyConstraints` and `inhibitAnyPolicy`.
+//
+// So the recognised set is exactly what this module enforces, and it is
+// deliberately short. Adding an OID here is a claim that the code below
+// actually acts on it — never a way to quiet a rejection.
+fn _critical_extensions_code(cert: X509Certificate) -> string {
+    let mut i: int = 0;
+    loop {
+        if i >= cert.extensions.length { break; }
+        let extension: X509Extension = cert.extensions[i];
+        if extension.critical {
+            let oid: string = extension.oid;
+            let recognized: boolean = oid == x509_oid_basic_constraints() || oid == x509_oid_key_usage()
+                || oid == x509_oid_extended_key_usage()
+                || oid == x509_oid_subject_alt_name();
+            if !recognized {
+                return x509_verify_err_unrecognized_critical_extension();
+            }
+        }
+        i += 1;
+    }
+    return "";
+}
+
+// Note this applies to anchors too, so an anchor asserting basicConstraints
+// CA:FALSE is refused as an issuer. That is correct for path validation and is
+// *not* certificate pinning: pinning a self-signed end-entity certificate is a
+// different trust model and is not implemented here. The common self-signed
+// case still works, because `openssl req -x509` supplies critical
+// basicConstraints CA:TRUE by default — verified against the fixture shape
+// `compiler/tests/e2e/tls_loopback_test.sfn:195` generates. A caller that
+// genuinely wants leaf pinning wants a different entry point, not a relaxation
+// of this one.
+//
 // "" when `cert` may act as an issuer over `below` intermediates beneath it.
 // RFC 5280 4.2.1.9: basicConstraints CA MUST be asserted, keyUsage — when
 // present — MUST include keyCertSign, and pathLenConstraint bounds the
@@ -398,6 +484,12 @@ fn _find_issuer(candidates: X509Certificate[], used: boolean[], subject: X509Cer
             continue;
         }
 
+        let critical: string = _critical_extensions_code(candidate);
+        if critical != "" {
+            if reason == "" { reason = critical; }
+            i += 1;
+            continue;
+        }
         let ca: string = _ca_code(candidate, below);
         if ca != "" {
             if reason == "" { reason = ca; }
@@ -437,6 +529,11 @@ fn x509_verify_chain(leaf: X509Certificate, intermediates: X509Certificate[], an
 
     let mut max_depth: int = options.max_depth;
     if max_depth <= 0 { max_depth = x509_verify_default_max_depth(); }
+
+    let leaf_critical: string = _critical_extensions_code(leaf);
+    if leaf_critical != "" {
+        return _chain_err(leaf_critical, "x509_verify: leaf asserts a critical extension this module does not process");
+    }
 
     let leaf_window: string = _window_code(leaf, options.now_ms);
     if leaf_window != "" {
@@ -526,6 +623,7 @@ export {
     x509_verify_err_path_len_exceeded,
     x509_verify_err_eku,
     x509_verify_err_path_too_long,
+    x509_verify_err_unrecognized_critical_extension,
     x509_verify_oid_sha256_rsa,
     x509_verify_oid_sha384_rsa,
     x509_verify_oid_ec_public_key
