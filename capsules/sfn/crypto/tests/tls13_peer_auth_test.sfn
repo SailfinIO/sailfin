@@ -1,0 +1,312 @@
+// capsules/sfn/crypto/tests/tls13_peer_auth_test.sfn
+//
+// Regression coverage for `hs_client_recv_certificate_verify`'s scheme
+// dispatch (ecdsa_secp256r1_sha256 / rsa_pss_rsae_sha256 / rsa_pss_rsae_sha384
+// / ed25519, RFC 8446 §4.2.3) and for `hs_client_verify_peer`, the trust half
+// of server authentication that runs after it (SFN-767).
+//
+// Kept separate from `tls13_handshake_test.sfn`, which stays focused on the
+// single RFC 8448 §3 trace — that trace signs with rsa_pss_rsae_sha256, so it
+// never exercises the ECDSA or Ed25519 branches, the algorithm/key-type
+// mismatch rejections, or the chain-trust step at all.
+//
+// The ECDSA and Ed25519 fixtures below (certificates and their
+// CertificateVerify signatures) were generated with OpenSSL and cross-checked
+// independently before being embedded; the RSA-PSS success path is already
+// covered end-to-end by the RFC 8448 vector, so it is not duplicated here.
+import {
+    ClientHandshake,
+    hs_client_recv_certificate_verify,
+    hs_client_verify_peer,
+    hs_state_wait_certificate_verify,
+    hs_state_wait_finished
+} from "../src/tls13_handshake";
+import {
+    encode_certificate_verify,
+    tls_sigalg_ecdsa_secp256r1_sha256,
+    tls_sigalg_ed25519,
+    tls_sigalg_rsa_pss_rsae_sha256
+} from "../src/tls13_handshake_codec";
+import { X509Certificate, x509_parse } from "../src/x509";
+import {
+    X509ChainResult,
+    x509_verify_err_bad_input,
+    x509_verify_err_expired,
+    x509_verify_err_hostname_mismatch,
+    x509_verify_err_no_anchor,
+    x509_verify_ok
+} from "../src/x509_verify";
+
+// Parse an even-length lowercase hex string into an int[] of bytes.
+fn hexb(s: string) -> int[] {
+    let mut out: int[] = [];
+    let mut i: int = 0;
+    loop {
+        // `i + 1` rather than `i` so an odd-length literal returns what it
+        // parsed instead of indexing past the end and killing the runner —
+        // a mistyped vector should fail an assertion, not crash the suite.
+        if i + 1 >= s.length { break; }
+        let hi: int = _hexval(s[i]);
+        let lo: int = _hexval(s[i + 1]);
+        out.push(((hi << 4) | lo) & 255);
+        i += 2;
+    }
+    return out;
+}
+
+fn _hexval(c: string) -> int {
+    let code: int = char_code(c) & 255;
+    if code >= 48 && code <= 57 {
+        return code - 48;
+    }  // '0'-'9'
+    if code >= 97 && code <= 102 {
+        return code - 97 + 10;
+    }  // 'a'-'f'
+    return 0;
+}
+
+fn eq_bytes(a: int[], b: int[]) -> bool {
+    if a.length != b.length { return false; }
+    let mut i: int = 0;
+    loop {
+        if i >= a.length { break; }
+        if a[i] != b[i] { return false; }
+        i += 1;
+    }
+    return true;
+}
+
+// The fixed 32-byte transcript every CertificateVerify fixture below signs
+// over: `tls13_certificate_verify_content` hashes it and prepends the 64
+// spaces and context string, reproducing exactly what
+// `hs_client_recv_certificate_verify` computes when `hs.transcript` is these
+// bytes.
+fn fx_transcript() -> int[] {
+    return hexb("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f");
+}
+
+// ── EC P-256 leaf (CN=localhost, SAN localhost) ───────────────────
+fn fx_ec_leaf() -> string {
+    return "308201963082013ba0030201020214727730e33a6043d9234d4dec32d882caca00bd3e300a06082a8648ce3d04030230143112301006035504030c096c6f63616c686f73743020170d3236303830373231303834345a180f32313236303731343231303834345a30143112301006035504030c096c6f63616c686f73743059301306072a8648ce3d020106082a8648ce3d0301070342000494f971eef484c6300976334b13d06653cb36823b22b8d2e58932c9d7c966e800e4c5c897b18bc889fc71b90e09eae7acfdcda803952b38ad3315c12554d4884ca3693067301d0603551d0e041604148cb5c3739293ef80bf76b12a8649f77fdd4da2f2301f0603551d230418301680148cb5c3739293ef80bf76b12a8649f77fdd4da2f2300f0603551d130101ff040530030101ff30140603551d11040d300b82096c6f63616c686f7374300a06082a8648ce3d040302034900304602210085784788c685408db6e75c4283a6289b9f15943ecd41f30e98a8598431db7ec6022100a22942b5f102478d764974c416176ae96806979e7aa402f9c4ab358f2ae72ca2";
+}
+
+// ECDSA-SHA256 signature (DER Ecdsa-Sig-Value) over `fx_transcript()`'s
+// CertificateVerify content, produced with `fx_ec_leaf()`'s private key.
+fn fx_ec_signature() -> string {
+    return "3046022100f0d53a2d7fc8428f54e2b8dabbdd2bb8aa1f7bc195e8d82d28ab09edb1549d28022100848eaf973a3320a861e49dc580f16741619a37188b09c1e9554335347af38e80";
+}
+
+// ── Ed25519 leaf, RFC 8032 §7.1 TEST 1 public key ─────────────────
+fn fx_ed_leaf() -> string {
+    return "3082015430820106a003020102021361818efdc93d849e49dc87d20ad6021fe2ed2f300506032b657030143112301006035504030c096c6f63616c686f73743020170d3236303830373231303833345a180f32313236303731343231303833345a30143112301006035504030c096c6f63616c686f7374302a300506032b6570032100d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511aa3693067301d0603551d0e041604145b27aa5589179770e47575b162a1ded97b8bfc6d301f0603551d230418301680145b27aa5589179770e47575b162a1ded97b8bfc6d300f0603551d130101ff040530030101ff30140603551d11040d300b82096c6f63616c686f7374300506032b65700341001dc3be8fd533b477c0bb974b1b92b3df833c3b0b950421002196c30caf2511a7442b31b9db56709258f6b852676dedfac85e94bbd9342a2c191cad7db9cdfa0c";
+}
+
+// Ed25519 signature over `fx_transcript()`'s CertificateVerify content,
+// produced with the RFC 8032 TEST 1 private key.
+fn fx_ed_signature() -> string {
+    return "52a4973548a23dad5176ae41f71930e8a77bcbfca6484fff2ec7cd08e466946fc93e87196b1cc50bf74d20255a283e5f31e6da3805002e1c91f3cdf4ee14310a";
+}
+
+// A `ClientHandshake` at WAIT_CERTIFICATE_VERIFY, holding `leaf_hex` as both
+// the leaf and the (single-entry) chain, ready for
+// `hs_client_recv_certificate_verify`. Every other field is empty/0 — the
+// dispatch under test reads only the transcript and the leaf certificate.
+fn _cv_handshake(leaf_hex: string) -> ClientHandshake {
+    let leaf: int[] = hexb(leaf_hex);
+    let empty: int[] = [];
+    return ClientHandshake {
+        state: hs_state_wait_certificate_verify(),
+        transcript: fx_transcript(),
+        client_private: empty,
+        client_public: empty,
+        offered_cipher_suites: empty,
+        sent_legacy_session_id: empty,
+        cipher_suite: 0,
+        group: 0,
+        shared_secret: empty,
+        early_secret: empty,
+        handshake_secret: empty,
+        master_secret: empty,
+        client_handshake_traffic_secret: empty,
+        server_handshake_traffic_secret: empty,
+        client_application_traffic_secret: empty,
+        server_application_traffic_secret: empty,
+        server_leaf_certificate: leaf,
+        server_certificate_chain: [leaf],
+        server_certificate_verified: false
+    };
+}
+
+// ── CertificateVerify dispatch: success ────────────────────────────
+test "tls13_peer_auth: an ecdsa_secp256r1_sha256 CertificateVerify verifies against the EC leaf" {
+    let hs: ClientHandshake = _cv_handshake(fx_ec_leaf());
+    let message: int[] = encode_certificate_verify(tls_sigalg_ecdsa_secp256r1_sha256(), hexb(fx_ec_signature()));
+    match hs_client_recv_certificate_verify(hs, message) {
+        Result.Ok { value } => {
+            assert value.server_certificate_verified;
+            assert value.state == hs_state_wait_finished();
+            // The leaf carried into the returned state is the one that was
+            // actually verified against, not a copy or a caller-supplied key.
+            assert eq_bytes(value.server_leaf_certificate, hexb(fx_ec_leaf()));
+        },
+        Result.Err { error } => { assert error.length == 0; }
+    }
+}
+
+test "tls13_peer_auth: an ed25519 CertificateVerify verifies against the Ed25519 leaf" {
+    let hs: ClientHandshake = _cv_handshake(fx_ed_leaf());
+    let message: int[] = encode_certificate_verify(tls_sigalg_ed25519(), hexb(fx_ed_signature()));
+    match hs_client_recv_certificate_verify(hs, message) {
+        Result.Ok { value } => {
+            assert value.server_certificate_verified;
+            assert value.state == hs_state_wait_finished();
+            assert eq_bytes(value.server_leaf_certificate, hexb(fx_ed_leaf()));
+        },
+        Result.Err { error } => { assert error.length == 0; }
+    }
+}
+
+// ── CertificateVerify dispatch: algorithm/key-type disagreement ───
+test "tls13_peer_auth: rsa_pss_rsae_sha256 against an EC leaf is refused" {
+    let hs: ClientHandshake = _cv_handshake(fx_ec_leaf());
+    // The scheme names an RSA key; the leaf holds an EC one. The signature
+    // bytes are irrelevant — the key-type check must reject before any
+    // signature verification runs.
+    let message: int[] = encode_certificate_verify(tls_sigalg_rsa_pss_rsae_sha256(), hexb(fx_ec_signature()));
+    match hs_client_recv_certificate_verify(hs, message) {
+        Result.Ok { value } => { assert false; },
+        Result.Err { error } => { assert error.length > 0; }
+    }
+}
+
+test "tls13_peer_auth: ecdsa_secp256r1_sha256 against an Ed25519 leaf is refused" {
+    let hs: ClientHandshake = _cv_handshake(fx_ed_leaf());
+    let message: int[] = encode_certificate_verify(tls_sigalg_ecdsa_secp256r1_sha256(), hexb(fx_ed_signature()));
+    match hs_client_recv_certificate_verify(hs, message) {
+        Result.Ok { value } => { assert false; },
+        Result.Err { error } => { assert error.length > 0; }
+    }
+}
+
+// ── CertificateVerify dispatch: tampered signature ─────────────────
+test "tls13_peer_auth: a tampered ECDSA CertificateVerify signature is refused" {
+    let hs: ClientHandshake = _cv_handshake(fx_ec_leaf());
+    let mut tampered: int[] = hexb(fx_ec_signature());
+    tampered[tampered.length - 1] = tampered[tampered.length - 1] ^ 1;
+    let message: int[] = encode_certificate_verify(tls_sigalg_ecdsa_secp256r1_sha256(), tampered);
+    match hs_client_recv_certificate_verify(hs, message) {
+        Result.Ok { value } => { assert false; },
+        Result.Err { error } => { assert error.length > 0; }
+    }
+}
+
+// ── CertificateVerify dispatch: unknown/forbidden scheme ───────────
+test "tls13_peer_auth: rsa_pkcs1_sha1 (forbidden by RFC 8446 §4.2.3) is refused" {
+    let hs: ClientHandshake = _cv_handshake(fx_ec_leaf());
+    let message: int[] = encode_certificate_verify(513, hexb(fx_ec_signature()));  // 0x0201, rsa_pkcs1_sha1
+    match hs_client_recv_certificate_verify(hs, message) {
+        Result.Ok { value } => { assert false; },
+        Result.Err { error } => { assert error.length > 0; }
+    }
+}
+
+// ── hs_client_verify_peer ──────────────────────────────────────────
+// Fixtures copied from x509_verify_test.sfn (SFN-340): the local convention is
+// per-file fixtures rather than a shared test-fixture module.
+fn now_ms() -> int { return 1780272000000; }
+
+fn before_ms() -> int { return 1748736000000; }
+
+fn after_ms() -> int { return 1830297600000; }
+
+fn fx_ed_inter() -> string {
+    return "3082015130820103a003020102020112300506032b6570301f311d301b06035504030c145361696c66696e205465737420456420526f6f74301e170d3236303130313030303030305a170d3237303130313030303030305a301d311b301906035504030c125361696c66696e2054657374204564204341302a300506032b6570032100313790aa4a531edf573a688aa43535cf69a219a2ac2fb516d9313de6fc3778f4a366306430120603551d130101ff040830060101ff020100300e0603551d0f0101ff040403020106301d0603551d0e04160414226768f6483d21e17344cd4338a7bb4b035b000f301f0603551d23041830168014e1c0df748f0c20f7f85f48966a09be9da834dc54300506032b6570034100d5c61928f6d304285bd2d4fb899389b577144daa713fb83100b9ab340e8a26214477e53ca319945c8464c35985f2a5b130113fd654e0ef13eeb7f9857d066a0f";
+}
+
+fn fx_ed_verify_leaf() -> string {
+    return "3082018030820132a003020102020113300506032b6570301d311b301906035504030c125361696c66696e2054657374204564204341301e170d3236303130313030303030305a170d3237303130313030303030305a30163114301206035504030c0b6578616d706c652e636f6d302a300506032b65700321007269d8384a31069150b30ae775d99433464e7956f4554d2bb7a6cf5335c7e6dda3819d30819a300c0603551d130101ff04023000300e0603551d0f0101ff04040302078030130603551d25040c300a06082b0601050507030130250603551d11041e301c820b6578616d706c652e636f6d820d2a2e6578616d706c652e636f6d301d0603551d0e041604147380118f809f57757dd55dbfb87943ec5aead34a301f0603551d23041830168014226768f6483d21e17344cd4338a7bb4b035b000f300506032b6570034100d34e4d2e2d0cce5a5b164da3842a210917de63cfc7cdf169757537cf0aaec9d3325e504399f9a5c3c2b466265116004abf01d8a46be5eb9088d79f4333de8807";
+}
+
+fn fx_ed_root() -> string {
+    return "308201313081e4a003020102020111300506032b6570301f311d301b06035504030c145361696c66696e205465737420456420526f6f74301e170d3236303130313030303030305a170d3336303130313030303030305a301f311d301b06035504030c145361696c66696e205465737420456420526f6f74302a300506032b65700321008dedbd4cebdb8b18c247a91fbb5c29234e3c51e282b5b92de49bcddeac9112d6a345304330120603551d130101ff040830060101ff020101300e0603551d0f0101ff040403020106301d0603551d0e04160414e1c0df748f0c20f7f85f48966a09be9da834dc54300506032b657003410089c6b2fffa02628e7dc288914db44e7325feb034ac7264b9733965222ba19165fdd3d7898a2a9e45a74c5a52efdbbb76a114a57d0a72ba43fcd3714e35d70f0a";
+}
+
+fn fx_other_root() -> string {
+    return "308201363081e9a00302010202020081300506032b65703021311f301d06035504030c165361696c66696e20556e72656c6174656420526f6f74301e170d3236303130313030303030305a170d3336303130313030303030305a3021311f301d06035504030c165361696c66696e20556e72656c6174656420526f6f74302a300506032b65700321009f93f1b4a4cbfeafd02a098d472095692aacbaa72f4cca03febd5bb8bb438029a345304330120603551d130101ff040830060101ff020101300e0603551d0f0101ff040403020106301d0603551d0e04160414449dc7374c2db49c151bb63feeaa632f8cecd486300506032b65700341009a6d2b332bae80665ccce1363b25d5c248072667e05dd2615ec5419758ff50aeee9072b615cfa3630083a5bb3708b170c7c1ac4225ecbf63d0ff6fb3fdae1309";
+}
+
+fn _cert(hex: string) -> X509Certificate { return x509_parse(hexb(hex)); }
+
+// A `ClientHandshake` that has already proved possession of the leaf key
+// (`server_certificate_verified: true`), carrying the leaf and one
+// intermediate — everything `hs_client_verify_peer` needs.
+fn _peer_handshake(verified: bool) -> ClientHandshake {
+    let leaf: int[] = hexb(fx_ed_verify_leaf());
+    let inter: int[] = hexb(fx_ed_inter());
+    let empty: int[] = [];
+    return ClientHandshake {
+        state: hs_state_wait_finished(),
+        transcript: empty,
+        client_private: empty,
+        client_public: empty,
+        offered_cipher_suites: empty,
+        sent_legacy_session_id: empty,
+        cipher_suite: 0,
+        group: 0,
+        shared_secret: empty,
+        early_secret: empty,
+        handshake_secret: empty,
+        master_secret: empty,
+        client_handshake_traffic_secret: empty,
+        server_handshake_traffic_secret: empty,
+        client_application_traffic_secret: empty,
+        server_application_traffic_secret: empty,
+        server_leaf_certificate: leaf,
+        server_certificate_chain: [leaf, inter],
+        server_certificate_verified: verified
+    };
+}
+
+test "tls13_peer_auth: hs_client_verify_peer succeeds for a trusted, current, matching-name chain" {
+    let hs: ClientHandshake = _peer_handshake(true);
+    let anchors: X509Certificate[] = [_cert(fx_ed_root())];
+    let result: X509ChainResult = hs_client_verify_peer(hs, "example.com", anchors, now_ms());
+    assert result.ok;
+    assert result.code == x509_verify_ok();
+}
+
+test "tls13_peer_auth: hs_client_verify_peer rejects an expired chain" {
+    let hs: ClientHandshake = _peer_handshake(true);
+    let anchors: X509Certificate[] = [_cert(fx_ed_root())];
+    let result: X509ChainResult = hs_client_verify_peer(hs, "example.com", anchors, after_ms());
+    assert ! result.ok;
+    assert result.code == x509_verify_err_expired();
+}
+
+test "tls13_peer_auth: hs_client_verify_peer rejects a hostname the leaf does not cover" {
+    let hs: ClientHandshake = _peer_handshake(true);
+    let anchors: X509Certificate[] = [_cert(fx_ed_root())];
+    let result: X509ChainResult = hs_client_verify_peer(hs, "wrong.example", anchors, now_ms());
+    assert ! result.ok;
+    // The chain itself is trusted here; only the name fails, and the code must
+    // say so rather than reporting the chain as unverifiable.
+    assert result.code == x509_verify_err_hostname_mismatch();
+}
+
+test "tls13_peer_auth: hs_client_verify_peer rejects an unrecognised anchor" {
+    let hs: ClientHandshake = _peer_handshake(true);
+    let anchors: X509Certificate[] = [_cert(fx_other_root())];
+    let result: X509ChainResult = hs_client_verify_peer(hs, "example.com", anchors, now_ms());
+    assert ! result.ok;
+    assert result.code == x509_verify_err_no_anchor();
+}
+
+// The ordering guarantee: a trusted chain must not be reported for a peer that
+// never proved it holds the leaf's private key.
+test "tls13_peer_auth: hs_client_verify_peer refuses before key possession is proved" {
+    let hs: ClientHandshake = _peer_handshake(false);
+    let anchors: X509Certificate[] = [_cert(fx_ed_root())];
+    let result: X509ChainResult = hs_client_verify_peer(hs, "example.com", anchors, now_ms());
+    assert ! result.ok;
+    assert result.code == x509_verify_err_bad_input();
+}

@@ -101,6 +101,8 @@ import {
     X509ChainResult,
     x509_rsa_public_key_from_spki,
     x509_verify_chain,
+    x509_verify_err_bad_input,
+    x509_verify_err_hostname_mismatch,
     x509_verify_oid_ec_public_key,
     x509_verify_options
 } from "./x509_verify";
@@ -922,6 +924,19 @@ fn hs_client_recv_certificate_verify(hs: ClientHandshake, message: int[]) -> Res
     };
 }
 
+// `X509ChainResult` has no struct-update syntax and callers read every field,
+// so a failure must spell out its defaults — the same shape `x509.sfn`'s
+// failed-certificate constructor records.
+fn _peer_auth_failure(code: string, message: string) -> X509ChainResult {
+    return X509ChainResult {
+        ok: false,
+        code: code,
+        error: "hs_client_verify_peer: " + message,
+        depth: 0,
+        anchor_subject_cn: ""
+    };
+}
+
 // ── Peer authentication ──────────────────────────────────────────
 // The trust half of authenticating a server: rebuilds the presented chain,
 // verifies it to a configured anchor, and checks the hostname.
@@ -933,31 +948,31 @@ fn hs_client_recv_certificate_verify(hs: ClientHandshake, message: int[]) -> Res
 // first has succeeded rather than reporting a trusted chain for a peer that
 // never proved possession.
 //
+// Returns a bare `X509ChainResult` rather than a `Result<..., string>`: that
+// struct is already this capsule's verification-outcome type, carrying `ok`,
+// a machine-readable `code` and a human `error`, and `x509_verify_chain`
+// returns it unwrapped for the same reason. Wrapping it would give the caller
+// two error channels for one outcome and force it to branch twice.
+//
 // `now_ms` is supplied by the caller rather than read here, which keeps this
 // module free of `![clock]` — the same split `x509_verify_options` records.
-fn hs_client_verify_peer(hs: ClientHandshake, hostname: string, anchors: X509Certificate[], now_ms: int) -> Result<X509ChainResult, string> {
+fn hs_client_verify_peer(hs: ClientHandshake, hostname: string, anchors: X509Certificate[], now_ms: int) -> X509ChainResult {
     if !hs.server_certificate_verified {
-        return Result.Err {
-            error: "hs_client_verify_peer: peer has not proved possession of the leaf key; run hs_client_recv_certificate_verify first"
-        };
+        return _peer_auth_failure(x509_verify_err_bad_input(), "peer has not proved possession of the leaf key; run hs_client_recv_certificate_verify first");
     }
     if hs.server_certificate_chain.length < 1 {
-        return Result.Err {
-            error: "hs_client_verify_peer: no certificate chain was received"
-        };
+        return _peer_auth_failure(x509_verify_err_bad_input(), "no certificate chain was received");
     }
 
     let leaf: X509Certificate = x509_parse(hs.server_certificate_chain[0]);
     if !leaf.ok {
-        return Result.Err {
-            error: "hs_client_verify_peer: leaf certificate did not parse: "
-                + leaf.error
-        };
+        return _peer_auth_failure(x509_verify_err_bad_input(), "leaf certificate did not parse: "
+            + leaf.error);
     }
 
     // Entries after the leaf are the intermediates the server offered. A
     // malformed one fails the handshake rather than being skipped: dropping a
-    // link would turn a verifiable chain into `no_anchor`, reporting an
+    // link would turn a verifiable chain into `no-anchor`, reporting an
     // untrusted peer for the wrong reason.
     let mut intermediates: X509Certificate[] = [];
     let mut i: int = 1;
@@ -965,35 +980,25 @@ fn hs_client_verify_peer(hs: ClientHandshake, hostname: string, anchors: X509Cer
         if i >= hs.server_certificate_chain.length { break; }
         let cert: X509Certificate = x509_parse(hs.server_certificate_chain[i]);
         if !cert.ok {
-            return Result.Err {
-                error: "hs_client_verify_peer: intermediate certificate did not parse: "
-                    + cert.error
-            };
+            return _peer_auth_failure(x509_verify_err_bad_input(), "intermediate certificate did not parse: "
+                + cert.error);
         }
         intermediates.push(cert);
         i += 1;
     }
 
     let chain: X509ChainResult = x509_verify_chain(leaf, intermediates, anchors, x509_verify_options(now_ms));
-    if !chain.ok {
-        return Result.Err {
-            error: "hs_client_verify_peer: chain verification failed (" + chain.code
-                + "): "
-                + chain.error
-        };
-    }
+    if !chain.ok { return chain; }
 
     // Ordered after chain verification deliberately: a name match on an
     // untrusted certificate carries no weight, and returning it first would
     // invite a caller to treat it as though it did.
     if !x509_hostname_matches(leaf, hostname) {
-        return Result.Err {
-            error: "hs_client_verify_peer: certificate is not valid for "
-                + hostname
-        };
+        return _peer_auth_failure(x509_verify_err_hostname_mismatch(), "certificate is not valid for "
+            + hostname);
     }
 
-    return Result.Ok { value: chain };
+    return chain;
 }
 
 // ── Step 6: server Finished ──────────────────────────────────────
