@@ -325,6 +325,9 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], operand
         if filesystem_symbol == "sailfin_intrinsic_fs_get_perms" {
             filesystem_min_args = 1;
         }
+        if filesystem_symbol == "sailfin_intrinsic_fs_is_directory" {
+            filesystem_min_args = 1;
+        }
         if filesystem_min_args > 0 {
             if final_operands.length >= filesystem_min_args {
                 return emit_filesystem_intrinsic(helper_descriptor, final_operands, result_temp, result_lines, result_diagnostics, collected_string_constants);
@@ -343,6 +346,9 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], operand
             }
             if filesystem_symbol == "sailfin_intrinsic_fs_get_perms" {
                 result_diagnostics.push("llvm lowering: sailfin_intrinsic_fs_get_perms requires (path: i8*) operand");
+            }
+            if filesystem_symbol == "sailfin_intrinsic_fs_is_directory" {
+                result_diagnostics.push("llvm lowering: sailfin_intrinsic_fs_is_directory requires (path: i8*) operand");
             }
         }
     }
