@@ -134,10 +134,10 @@ test "pem: a decoded block over 65535 bytes is rejected" {
     assert blocks.length == 0;
 }
 
-// ── Fix 1 regression guard ──────────────────────────────────────────
-test "pem: a non-ASCII character whose low byte lands in the base64 alphabet is rejected" {
-    // U+0141 ('Ł') & 255 == 0x41 == 'A'. The old `char_code(c) & 255` masking
-    // would decode this as if it were 'A' instead of rejecting it.
+test "pem: a non-ASCII character in a block body is rejected" {
+    // Sailfin string indexing is byte-oriented, so U+0141 ('Ł') reaches the
+    // decoder as its two UTF-8 bytes 0xC5 0x81. Neither is in the base64
+    // alphabet, so the block fails closed rather than decoding to something.
     let pem: string = "-----BEGIN CERTIFICATE-----\nAŁB=\n-----END CERTIFICATE-----\n";
     let blocks: int[][] = pem_certificates_to_der(pem);
     assert blocks.length == 0;

@@ -13,12 +13,12 @@
 // Map a single standard-alphabet base64 character to its 6-bit value, or -1
 // if `c` is not an alphabet character (`=` padding included).
 fn _pem_base64_sextet(c: string) -> int {
-    // `char_code` returns a Unicode code point, not a byte: masking to 8
-    // bits would fold a non-ASCII character (e.g. U+0141 `Ł`) onto an
-    // alphabet character instead of rejecting it, so reject out-of-byte
-    // range codes before any classification.
-    let code: int = char_code(c);
-    if code < 0 || code > 255 { return -1; }
+    // Sailfin string indexing is byte-oriented, so `c` is a single byte and
+    // `char_code` yields 0-255; the mask documents that contract rather than
+    // narrowing anything, matching `bits.sfn::string_to_bytes`. A multi-byte
+    // UTF-8 character therefore arrives here one byte at a time, and every
+    // continuation byte is outside the alphabet, so it is rejected.
+    let code: int = char_code(c) & 255;
     if code >= 65 && code <= 90 { return code - 65; }
     if code >= 97 && code <= 122 { return code - 97 + 26; }
     if code >= 48 && code <= 57 { return code - 48 + 52; }
@@ -71,10 +71,7 @@ fn _pem_base64_bytes(encoded: string) -> int[] {
 }
 
 fn _pem_is_ascii_space(c: string) -> bool {
-    // Same reasoning as `_pem_base64_sextet`: masking would read a
-    // non-ASCII code point whose low byte is 0x0D as a carriage return.
-    let code: int = char_code(c);
-    if code < 0 || code > 255 { return false; }
+    let code: int = char_code(c) & 255;
     return code == 9 || code == 10 || code == 13 || code == 32;
 }
 
