@@ -1,0 +1,192 @@
+// capsules/sfn/crypto/tests/x509_hostname_test.sfn
+//
+// RFC 6125 §6.4.3 hostname-matching coverage for sfn/crypto's X.509 module
+// (SFN-504, design SFEP-0048 Phase C): the pattern-matching truth table and
+// certificate-level x509_hostname_matches behavior, including the
+// commonName-is-not-a-hostname-source cut (RFC 6125 §6.4.4).
+import {
+    X509Certificate,
+    x509_parse,
+    x509_hostname_matches,
+    x509_dns_name_matches
+} from "../src/x509";
+
+fn hexb(s: string) -> int[] {
+    let mut out: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= s.length { break; }
+        let hi: int = _hexval(s[i]);
+        let lo: int = _hexval(s[i + 1]);
+        out.push(((hi << 4) | lo) & 255);
+        i += 2;
+    }
+    return out;
+}
+
+fn _hexval(c: string) -> int {
+    let code: int = char_code(c) & 255;
+    if code >= 48 && code <= 57 {
+        return code - 48;
+    }  // '0'-'9'
+    if code >= 97 && code <= 102 {
+        return code - 97 + 10;
+    }  // 'a'-'f'
+    return 0;
+}
+
+// Fixture A: an Ed25519 leaf certificate, CN=Sailfin Test Leaf, SAN
+// example.com / *.example.com / www.example.org. Duplicated from
+// x509_test.sfn per this capsule's convention of not sharing fixtures
+// across test files. No signature is verified by this test.
+fn fixture_a_hex() -> string {
+    return "308201ba3082016ca00302010202080102030405060708300506032b6570303b311a301806035504030c115361696c66696e2054657374204c6561663110300e060355040a0c075361696c66696e310b3009060355040613025553301e170d3236303130313030303030305a170d3237303130313030303030305a303b311a301806035504030c115361696c66696e2054657374204c6561663110300e060355040a0c075361696c66696e310b3009060355040613025553302a300506032b6570032100ca7b28b5ebd179909c5fb9e6dba6f8678cdbe209dd4e0e2d689ea4e818a79156a3818d30818a300c0603551d130101ff04023000300e0603551d0f0101ff04040302078030130603551d25040c300a06082b0601050507030130360603551d11042f302d820b6578616d706c652e636f6d820d2a2e6578616d706c652e636f6d820f7777772e6578616d706c652e6f7267301d0603551d0e04160414dae9f13ce305fe193bbf7734e12927291ec5119e300506032b6570034100d13358f4f9134f32333e18b2ca533dc44d9a81e94c26338b1336229de15fad2a5ccaa50f446ef820a7c80b9a4ec27a3befded1db8d2087012f4d606b0d413800";
+}
+
+test "x509: *.example.com matches a.example.com" {
+    assert x509_dns_name_matches("*.example.com", "a.example.com");
+}
+
+test "x509: *.example.com does not match the base domain itself" {
+    assert ! x509_dns_name_matches("*.example.com", "example.com");
+}
+
+test "x509: *.example.com does not match a two-level-deeper name" {
+    assert ! x509_dns_name_matches("*.example.com", "a.b.example.com");
+}
+
+test "x509: a bare * never matches" {
+    assert ! x509_dns_name_matches("*", "example.com");
+    assert ! x509_dns_name_matches("*", "com");
+}
+
+test "x509: a registry-level wildcard *.com is refused" {
+    assert ! x509_dns_name_matches("*.com", "a.com");
+}
+
+test "x509: a partial-label wildcard f*.example.com is refused" {
+    assert ! x509_dns_name_matches("f*.example.com", "foo.example.com");
+}
+
+test "x509: a partial-label wildcard *o.example.com is refused" {
+    assert ! x509_dns_name_matches("*o.example.com", "foo.example.com");
+}
+
+test "x509: a non-leftmost wildcard a.*.example.com is refused" {
+    assert ! x509_dns_name_matches("a.*.example.com", "a.b.example.com");
+}
+
+test "x509: an exact non-wildcard match succeeds" {
+    assert x509_dns_name_matches("example.com", "example.com");
+}
+
+test "x509: matching is case-insensitive on both sides" {
+    assert x509_dns_name_matches("EXAMPLE.com", "example.COM");
+}
+
+test "x509: a wildcard pattern matches case-insensitively" {
+    assert x509_dns_name_matches("*.EXAMPLE.com", "A.example.com");
+}
+
+test "x509: a trailing dot on the hostname is stripped before comparison" {
+    assert x509_dns_name_matches("example.com", "example.com.");
+}
+
+test "x509: a trailing dot on the pattern is stripped before comparison" {
+    assert x509_dns_name_matches("example.com.", "example.com");
+}
+
+test "x509: a trailing dot on a wildcard pattern is stripped before comparison" {
+    assert x509_dns_name_matches("*.example.com.", "a.example.com");
+}
+
+test "x509: a non-wildcard pattern does not match a name with an extra label" {
+    assert ! x509_dns_name_matches("example.com", "a.example.com");
+}
+
+test "x509: a longer pattern does not match a shorter hostname" {
+    assert ! x509_dns_name_matches("a.example.com", "example.com");
+}
+
+test "x509: an empty hostname never matches" {
+    assert ! x509_dns_name_matches("example.com", "");
+}
+
+test "x509: an empty pattern never matches" {
+    assert ! x509_dns_name_matches("", "example.com");
+}
+
+test "x509: a hostname may not itself be a pattern" {
+    assert ! x509_dns_name_matches("example.com", "*.example.com");
+}
+
+test "x509: an empty label in the pattern is rejected" {
+    assert ! x509_dns_name_matches("a..example.com", "a..example.com");
+}
+
+test "x509: a leading empty label is rejected" {
+    assert ! x509_dns_name_matches(".example.com", ".example.com");
+}
+
+test "x509: a space is not a valid name byte" {
+    assert ! x509_dns_name_matches("example.com", "exam ple.com");
+}
+
+test "x509: x509_hostname_matches finds an exact SAN entry" {
+    let cert: X509Certificate = x509_parse(hexb(fixture_a_hex()));
+    assert cert.ok;
+    assert x509_hostname_matches(cert, "example.com");
+}
+
+test "x509: x509_hostname_matches finds a wildcard SAN entry" {
+    let cert: X509Certificate = x509_parse(hexb(fixture_a_hex()));
+    assert cert.ok;
+    assert x509_hostname_matches(cert, "foo.example.com");
+}
+
+test "x509: x509_hostname_matches finds a second SAN entry" {
+    let cert: X509Certificate = x509_parse(hexb(fixture_a_hex()));
+    assert cert.ok;
+    assert x509_hostname_matches(cert, "www.example.org");
+}
+
+test "x509: x509_hostname_matches rejects a name two levels below the wildcard" {
+    let cert: X509Certificate = x509_parse(hexb(fixture_a_hex()));
+    assert cert.ok;
+    assert ! x509_hostname_matches(cert, "a.b.example.com");
+}
+
+test "x509: x509_hostname_matches rejects an unrelated domain" {
+    let cert: X509Certificate = x509_parse(hexb(fixture_a_hex()));
+    assert cert.ok;
+    assert ! x509_hostname_matches(cert, "example.org");
+}
+
+test "x509: x509_hostname_matches is case-insensitive" {
+    let cert: X509Certificate = x509_parse(hexb(fixture_a_hex()));
+    assert cert.ok;
+    assert x509_hostname_matches(cert, "EXAMPLE.COM");
+}
+
+test "x509: x509_hostname_matches strips a trailing dot" {
+    let cert: X509Certificate = x509_parse(hexb(fixture_a_hex()));
+    assert cert.ok;
+    assert x509_hostname_matches(cert, "example.com.");
+}
+
+test "x509: a failed parse never matches" {
+    let empty: int[] = [];
+    let cert: X509Certificate = x509_parse(empty);
+    assert ! cert.ok;
+    assert ! x509_hostname_matches(cert, "example.com");
+}
+
+// commonName is deliberately not consulted: RFC 6125 §6.4.4 restricts
+// hostname matching to identifiers in the certificate's SAN extension when
+// one is present, so a name that appears only in commonName must not match.
+test "x509: commonName is not a hostname source" {
+    let cert: X509Certificate = x509_parse(hexb(fixture_a_hex()));
+    assert cert.ok;
+    assert strings_equal(cert.subject_cn, "Sailfin Test Leaf");
+    assert ! x509_hostname_matches(cert, "sailfin test leaf");
+}

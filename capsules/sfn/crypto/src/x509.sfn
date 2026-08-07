@@ -1,0 +1,907 @@
+// capsules/sfn/crypto/src/x509.sfn
+//
+// This module parses X.509 certificates and answers structural questions
+// about them. It performs no signature verification and no chain validation.
+// Extensions including basicConstraints, keyUsage and extendedKeyUsage are
+// parsed and exposed but never enforced. Trust decisions belong to SFN-340.
+// Design: SFEP-0048 Phase C; encoding rules: RFC 5280.
+import { ascii_lowercase, split } from "sfn/strings";
+
+import {
+    DerLimits,
+    DerTextResult,
+    DerTlv,
+    der_ascii_text,
+    der_bit_string_bytes,
+    der_bit_string_unused,
+    der_boolean,
+    der_check_structure,
+    der_default_limits,
+    der_integer_bytes,
+    der_integer_small,
+    der_octet_string_bytes,
+    der_oid_string,
+    der_read_tlv,
+    der_tag_bit_string,
+    der_tag_boolean,
+    der_tag_integer,
+    der_tag_octet_string,
+    der_tag_oid,
+    der_tag_sequence,
+    der_tag_set,
+    der_time_millis
+} from "./der";
+
+// ── Well-known OIDs ──
+fn x509_oid_common_name() -> string { return "2.5.4.3"; }
+
+fn x509_oid_subject_alt_name() -> string { return "2.5.29.17"; }
+
+fn x509_oid_basic_constraints() -> string { return "2.5.29.19"; }
+
+fn x509_oid_key_usage() -> string { return "2.5.29.15"; }
+
+fn x509_oid_extended_key_usage() -> string { return "2.5.29.37"; }
+
+fn x509_oid_ed25519() -> string { return "1.3.101.112"; }
+
+fn x509_oid_ecdsa_p256_sha256() -> string { return "1.2.840.10045.4.3.2"; }
+
+fn x509_oid_rsa_encryption() -> string { return "1.2.840.113549.1.1.1"; }
+
+fn x509_oid_eku_server_auth() -> string { return "1.3.6.1.5.5.7.3.1"; }
+
+fn x509_oid_eku_client_auth() -> string { return "1.3.6.1.5.5.7.3.2"; }
+
+// RFC 5280 profiles a handful of extensions; real certificates carry well under
+// 20. The cap bounds both the duplicate-OID scan (which is linear per extension,
+// so quadratic overall) and the memory held by `extensions`, neither of which
+// max_input_len bounds usefully on its own (SFN-504).
+fn _max_extensions() -> int { return 64; }
+
+// ── tbsCertificate context-specific tags. The two 130s are genuinely
+// different types in different containers (subjectUniqueID vs. a GeneralName
+// dNSName); two names for the same octet is the point (SFN-504). ──
+fn _tag_version() -> int {
+    return 160;
+}  // [0] EXPLICIT Version, constructed
+
+fn _tag_issuer_unique_id() -> int {
+    return 129;
+}  // [1] IMPLICIT, primitive
+
+fn _tag_subject_unique_id() -> int {
+    return 130;
+}  // [2] IMPLICIT, primitive
+
+fn _tag_extensions() -> int {
+    return 163;
+}  // [3] EXPLICIT Extensions, constructed
+
+fn _tag_dns_name() -> int {
+    return 130;
+}  // [2] IMPLICIT IA5String in GeneralName
+
+// ── KeyUsage bit accessors (RFC 5280 §4.2.1.3). Reported, never enforced. ──
+fn x509_key_usage_digital_signature() -> int { return 1; }
+
+fn x509_key_usage_non_repudiation() -> int { return 2; }
+
+fn x509_key_usage_key_encipherment() -> int { return 4; }
+
+fn x509_key_usage_data_encipherment() -> int { return 8; }
+
+fn x509_key_usage_key_agreement() -> int { return 16; }
+
+fn x509_key_usage_key_cert_sign() -> int { return 32; }
+
+fn x509_key_usage_crl_sign() -> int { return 64; }
+
+fn x509_key_usage_encipher_only() -> int { return 128; }
+
+fn x509_key_usage_decipher_only() -> int { return 256; }
+
+struct X509Extension {
+    oid: string;  // dotted decimal
+    critical: boolean;
+    // extnValue OCTET STRING content, verbatim. der_check_structure's depth
+    // cap does not cover this: x509_parse_with_limits runs it once over the
+    // whole certificate before parsing begins, and this DER is only skipped
+    // over there since extensions are read as opaque OCTET STRING content. A
+    // caller walking this inner DER should run der_check_structure on it
+    // first (SFN-504).
+    value_der: int[];
+}
+
+struct X509Certificate {
+    ok: boolean;
+    error: string;
+
+    version: int;  // 1, 2 or 3; 1 when the [0] EXPLICIT Version is absent
+    serial: int[];  // INTEGER content bytes, big-endian, opaque
+    signature_algorithm: string;  // tbsCertificate.signature algorithm OID
+    issuer_der: int[];  // the issuer Name TLV verbatim, header included
+    subject_der: int[];  // the subject Name TLV verbatim, header included
+    issuer_cn: string;  // last commonName attribute, "" when absent
+    subject_cn: string;
+    not_before_ms: int;  // signed Unix milliseconds
+    not_after_ms: int;
+    spki_algorithm: string;  // SubjectPublicKeyInfo algorithm OID
+    spki_key: int[];  // subjectPublicKey BIT STRING, unused-bits octet removed
+    dns_names: string[];  // SAN dNSName entries, verbatim (not case-folded)
+    has_basic_constraints: boolean;
+    is_ca: boolean;  // parsed, never enforced
+    path_len_constraint: int;  // -1 when absent
+    has_key_usage: boolean;
+    key_usage_bits: int;  // parsed, never enforced
+    has_extended_key_usage: boolean;
+    extended_key_usages: string[];  // dotted OIDs, parsed, never enforced
+    extensions: X509Extension[];  // every extension in wire order
+}
+
+// A fully-populated failed certificate. There is no struct update syntax, and
+// callers read every field unconditionally, so a failure path must still
+// spell out empty/0/-1/"" defaults rather than leaving a field unset.
+fn _failed(message: string) -> X509Certificate {
+    return X509Certificate {
+        ok: false,
+        error: message,
+        version: 0,
+        serial: [],
+        signature_algorithm: "",
+        issuer_der: [],
+        subject_der: [],
+        issuer_cn: "",
+        subject_cn: "",
+        not_before_ms: 0,
+        not_after_ms: 0,
+        spki_algorithm: "",
+        spki_key: [],
+        dns_names: [],
+        has_basic_constraints: false,
+        is_ca: false,
+        path_len_constraint: -1,
+        has_key_usage: false,
+        key_usage_bits: 0,
+        has_extended_key_usage: false,
+        extended_key_usages: [],
+        extensions: []
+    };
+}
+
+fn _text_err(message: string) -> DerTextResult {
+    return DerTextResult { ok: false, error: message, value: "" };
+}
+
+fn _text_ok(value: string) -> DerTextResult {
+    return DerTextResult { ok: true, error: "", value: value };
+}
+
+// Extract `len` bytes starting at `off`, verbatim. `.slice()` is a no-op stub
+// (runtime/sfn/array.sfn:463); der.sfn's copy of this helper is module-
+// private, so x509.sfn hand-rolls its own (precedent: tls13_handshake_codec.sfn
+// `_slice`).
+fn _slice(buf: int[], off: int, len: int) -> int[] {
+    let empty: int[] = [];
+    if off < 0 || len < 0 || off + len > buf.length { return empty; }
+    let mut out: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= len { break; }
+        out.push(buf[off + i] & 255);
+        i += 1;
+    }
+    return out;
+}
+
+// Render one byte as a printable-ASCII character. Sailfin string indexing is
+// byte-oriented, so this 95-character table (bytes [32, 126]) doubles as a
+// byte-to-character map. Used only for subjectAltName dNSName rendering,
+// which validates its own byte range ([33, 126]) before calling this.
+fn _byte_to_char(b: int) -> string {
+    let table: string = " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~";
+    return table[b - 32];
+}
+
+// The last commonName attribute value in a Name, ASCII-rendered. "" when the
+// Name carries no commonName. A Name is a SEQUENCE OF RelativeDistinguishedName
+// (SET OF AttributeTypeAndValue), RFC 5280 §4.1.2.4.
+fn _name_common_name(buf: int[], name: DerTlv) -> DerTextResult {
+    if !name.ok { return _text_err(name.error); }
+    if name.tag != der_tag_sequence() {
+        return _text_err("x509: expected Name SEQUENCE");
+    }
+    let mut cn: string = "";
+    let mut rdn_cur: int = name.content_off;
+    let rdn_end: int = name.end_off;
+    loop {
+        if rdn_cur >= rdn_end { break; }
+        let rdn: DerTlv = der_read_tlv(buf, rdn_cur, rdn_end);
+        if !rdn.ok { return _text_err(rdn.error); }
+        if rdn.end_off <= rdn_cur {
+            return _text_err("x509: parser made no progress");
+        }
+        if rdn.tag != der_tag_set() {
+            return _text_err("x509: expected RelativeDistinguishedName SET");
+        }
+        let mut atv_cur: int = rdn.content_off;
+        let atv_end: int = rdn.end_off;
+        loop {
+            if atv_cur >= atv_end { break; }
+            let atv: DerTlv = der_read_tlv(buf, atv_cur, atv_end);
+            if !atv.ok { return _text_err(atv.error); }
+            if atv.end_off <= atv_cur {
+                return _text_err("x509: parser made no progress");
+            }
+            if atv.tag != der_tag_sequence() {
+                return _text_err("x509: expected AttributeTypeAndValue SEQUENCE");
+            }
+            let type_tlv: DerTlv = der_read_tlv(buf, atv.content_off, atv.end_off);
+            if !type_tlv.ok { return _text_err(type_tlv.error); }
+            let type_res = der_oid_string(buf, type_tlv);
+            if !type_res.ok { return _text_err(type_res.error); }
+            // AttributeTypeAndValue ::= SEQUENCE { type, value } has fixed
+            // arity — exactly these two children, unlike its RDN SET and Name
+            // SEQUENCE OF parents, which legitimately hold many (SFN-504).
+            let value_tlv: DerTlv = der_read_tlv(buf, type_tlv.end_off, atv.end_off);
+            if !value_tlv.ok { return _text_err(value_tlv.error); }
+            if value_tlv.end_off != atv.end_off {
+                return _text_err("x509: unexpected trailing data in name attribute");
+            }
+            if strings_equal(type_res.value, x509_oid_common_name()) {
+                // A non-ASCII commonName is not a parse failure: commonName is
+                // not used for any decision here (RFC 6125 §6.4.4, see
+                // x509_hostname_matches), so record "" and keep walking rather
+                // than fail the whole certificate.
+                let rendered = der_ascii_text(buf, value_tlv);
+                if rendered.ok { cn = rendered.value; } else { cn = ""; }
+            }
+            atv_cur = atv.end_off;
+        }
+        rdn_cur = rdn.end_off;
+    }
+    return _text_ok(cn);
+}
+
+fn x509_parse(der: int[]) -> X509Certificate {
+    return x509_parse_with_limits(der, der_default_limits());
+}
+
+fn x509_parse_with_limits(der: int[], limits: DerLimits) -> X509Certificate {
+    let guard = der_check_structure(der, limits);
+    if !guard.ok { return _failed(guard.error); }
+
+    let outer: DerTlv = der_read_tlv(der, 0, der.length);
+    if !outer.ok { return _failed(outer.error); }
+    if outer.tag != der_tag_sequence() {
+        return _failed("x509: expected certificate SEQUENCE");
+    }
+    if outer.end_off != der.length {
+        return _failed("x509: trailing data after certificate");
+    }
+
+    // Certificate ::= SEQUENCE { tbsCertificate, signatureAlgorithm, signatureValue }
+    let tbs: DerTlv = der_read_tlv(der, outer.content_off, outer.end_off);
+    if !tbs.ok { return _failed(tbs.error); }
+    if tbs.tag != der_tag_sequence() {
+        return _failed("x509: expected tbsCertificate SEQUENCE");
+    }
+    let sig_alg_outer: DerTlv = der_read_tlv(der, tbs.end_off, outer.end_off);
+    if !sig_alg_outer.ok { return _failed(sig_alg_outer.error); }
+    if sig_alg_outer.tag != der_tag_sequence() {
+        return _failed("x509: expected signatureAlgorithm SEQUENCE");
+    }
+    let sig_value: DerTlv = der_read_tlv(der, sig_alg_outer.end_off, outer.end_off);
+    if !sig_value.ok { return _failed(sig_value.error); }
+    if sig_value.tag != der_tag_bit_string() {
+        return _failed("x509: expected signatureValue BIT STRING");
+    }
+    if sig_value.end_off != outer.end_off {
+        return _failed("x509: unexpected trailing field in certificate");
+    }
+
+    // The signature value itself is never exposed and never used: this module
+    // makes no trust decision.
+    let tbs_end: int = tbs.end_off;
+    let mut cur: int = tbs.content_off;
+
+    // optional [0] EXPLICIT Version
+    let mut version: int = 1;
+    let mut peek: DerTlv = der_read_tlv(der, cur, tbs_end);
+    if !peek.ok { return _failed(peek.error); }
+    if peek.tag == _tag_version() {
+        let v_child: DerTlv = der_read_tlv(der, peek.content_off, peek.end_off);
+        if !v_child.ok { return _failed(v_child.error); }
+        let v_int = der_integer_small(der, v_child);
+        if !v_int.ok { return _failed(v_int.error); }
+        version = v_int.value + 1;
+        if version < 1 || version > 3 {
+            return _failed("x509: unsupported certificate version");
+        }
+        if v_child.end_off != peek.end_off {
+            return _failed("x509: unexpected trailing data in version");
+        }
+        cur = peek.end_off;
+        peek = der_read_tlv(der, cur, tbs_end);
+        if !peek.ok { return _failed(peek.error); }
+    }
+
+    // serialNumber INTEGER
+    if peek.tag != der_tag_integer() {
+        return _failed("x509: unexpected tbsCertificate field");
+    }
+    let serial_res = der_integer_bytes(der, peek);
+    if !serial_res.ok { return _failed(serial_res.error); }
+    let serial: int[] = serial_res.value;
+    cur = peek.end_off;
+
+    // signature AlgorithmIdentifier SEQUENCE
+    peek = der_read_tlv(der, cur, tbs_end);
+    if !peek.ok { return _failed(peek.error); }
+    if peek.tag != der_tag_sequence() {
+        return _failed("x509: unexpected tbsCertificate field");
+    }
+    let sig_oid_tlv: DerTlv = der_read_tlv(der, peek.content_off, peek.end_off);
+    if !sig_oid_tlv.ok { return _failed(sig_oid_tlv.error); }
+    let sig_oid_res = der_oid_string(der, sig_oid_tlv);
+    if !sig_oid_res.ok { return _failed(sig_oid_res.error); }
+    let signature_algorithm: string = sig_oid_res.value;
+    cur = peek.end_off;
+
+    // issuer Name
+    peek = der_read_tlv(der, cur, tbs_end);
+    if !peek.ok { return _failed(peek.error); }
+    if peek.tag != der_tag_sequence() {
+        return _failed("x509: unexpected tbsCertificate field");
+    }
+    let issuer_der: int[] = _slice(der, cur, peek.end_off - cur);
+    let issuer_cn_res = _name_common_name(der, peek);
+    if !issuer_cn_res.ok { return _failed(issuer_cn_res.error); }
+    let issuer_cn: string = issuer_cn_res.value;
+    cur = peek.end_off;
+
+    // validity SEQUENCE { notBefore, notAfter }
+    peek = der_read_tlv(der, cur, tbs_end);
+    if !peek.ok { return _failed(peek.error); }
+    if peek.tag != der_tag_sequence() {
+        return _failed("x509: unexpected tbsCertificate field");
+    }
+    let v_end: int = peek.end_off;
+    let nb_tlv: DerTlv = der_read_tlv(der, peek.content_off, v_end);
+    if !nb_tlv.ok { return _failed(nb_tlv.error); }
+    let nb_res = der_time_millis(der, nb_tlv);
+    if !nb_res.ok { return _failed(nb_res.error); }
+    let not_before_ms: int = nb_res.value;
+    let na_tlv: DerTlv = der_read_tlv(der, nb_tlv.end_off, v_end);
+    if !na_tlv.ok { return _failed(na_tlv.error); }
+    let na_res = der_time_millis(der, na_tlv);
+    if !na_res.ok { return _failed(na_res.error); }
+    let not_after_ms: int = na_res.value;
+    if not_after_ms < not_before_ms {
+        return _failed("x509: validity window ends before it begins");
+    }
+    if na_tlv.end_off != v_end {
+        return _failed("x509: unexpected trailing data in validity");
+    }
+    cur = peek.end_off;
+
+    // subject Name
+    peek = der_read_tlv(der, cur, tbs_end);
+    if !peek.ok { return _failed(peek.error); }
+    if peek.tag != der_tag_sequence() {
+        return _failed("x509: unexpected tbsCertificate field");
+    }
+    let subject_der: int[] = _slice(der, cur, peek.end_off - cur);
+    let subject_cn_res = _name_common_name(der, peek);
+    if !subject_cn_res.ok { return _failed(subject_cn_res.error); }
+    let subject_cn: string = subject_cn_res.value;
+    cur = peek.end_off;
+
+    // subjectPublicKeyInfo SEQUENCE { algorithm, subjectPublicKey }
+    peek = der_read_tlv(der, cur, tbs_end);
+    if !peek.ok { return _failed(peek.error); }
+    if peek.tag != der_tag_sequence() {
+        return _failed("x509: unexpected tbsCertificate field");
+    }
+    let spki_end: int = peek.end_off;
+    let spki_alg_outer: DerTlv = der_read_tlv(der, peek.content_off, spki_end);
+    if !spki_alg_outer.ok { return _failed(spki_alg_outer.error); }
+    if spki_alg_outer.tag != der_tag_sequence() {
+        return _failed("x509: expected SubjectPublicKeyInfo algorithm SEQUENCE");
+    }
+    let spki_oid_tlv: DerTlv = der_read_tlv(der, spki_alg_outer.content_off, spki_alg_outer.end_off);
+    if !spki_oid_tlv.ok { return _failed(spki_oid_tlv.error); }
+    let spki_oid_res = der_oid_string(der, spki_oid_tlv);
+    if !spki_oid_res.ok { return _failed(spki_oid_res.error); }
+    let spki_algorithm: string = spki_oid_res.value;
+    let spki_bits_tlv: DerTlv = der_read_tlv(der, spki_alg_outer.end_off, spki_end);
+    if !spki_bits_tlv.ok { return _failed(spki_bits_tlv.error); }
+    if spki_bits_tlv.tag != der_tag_bit_string() {
+        return _failed("x509: expected subjectPublicKey BIT STRING");
+    }
+    let spki_unused_res = der_bit_string_unused(der, spki_bits_tlv);
+    if !spki_unused_res.ok { return _failed(spki_unused_res.error); }
+    if spki_unused_res.value != 0 {
+        return _failed("x509: subject public key is not byte-aligned");
+    }
+    let spki_key_res = der_bit_string_bytes(der, spki_bits_tlv);
+    if !spki_key_res.ok { return _failed(spki_key_res.error); }
+    let spki_key: int[] = spki_key_res.value;
+    if spki_bits_tlv.end_off != spki_end {
+        return _failed("x509: unexpected trailing data in subjectPublicKeyInfo");
+    }
+    cur = peek.end_off;
+
+    // Remaining optional fields, in order: [1]/[2] IMPLICIT unique IDs
+    // (skipped, not exposed) and [3] EXPLICIT Extensions.
+    let mut has_basic_constraints: boolean = false;
+    let mut is_ca: boolean = false;
+    let mut path_len_constraint: int = -1;
+    let mut has_key_usage: boolean = false;
+    let mut key_usage_bits_val: int = 0;
+    let mut has_extended_key_usage: boolean = false;
+    let mut extended_key_usages: string[] = [];
+    let mut dns_names: string[] = [];
+    let mut extensions: X509Extension[] = [];
+    let mut seen_oids: string[] = [];
+
+    // A monotonic stage counter enforces both the field order and that each
+    // optional trailing field appears at most once, so a crafted second `[3]`
+    // Extensions block cannot smuggle a second, attacker-chosen
+    // subjectAltName past this loop (SFN-504).
+    let mut stage: int = 1;
+
+    loop {
+        if cur >= tbs_end { break; }
+        let field: DerTlv = der_read_tlv(der, cur, tbs_end);
+        if !field.ok { return _failed(field.error); }
+        if field.end_off <= cur {
+            return _failed("x509: parser made no progress");
+        }
+        if field.tag == _tag_issuer_unique_id() {
+            if stage > 1 {
+                return _failed("x509: unexpected tbsCertificate field");
+            }
+            stage = 2;
+            cur = field.end_off;
+            continue;
+        }
+        if field.tag == _tag_subject_unique_id() {
+            if stage > 2 {
+                return _failed("x509: unexpected tbsCertificate field");
+            }
+            stage = 3;
+            cur = field.end_off;
+            continue;
+        }
+        if field.tag != _tag_extensions() {
+            return _failed("x509: unexpected tbsCertificate field");
+        }
+        if stage > 3 {
+            return _failed("x509: unexpected tbsCertificate field");
+        }
+        stage = 4;
+
+        // [3] EXPLICIT Extensions ::= SEQUENCE OF Extension
+        let ext_seq: DerTlv = der_read_tlv(der, field.content_off, field.end_off);
+        if !ext_seq.ok { return _failed(ext_seq.error); }
+        if ext_seq.tag != der_tag_sequence() {
+            return _failed("x509: expected Extensions SEQUENCE");
+        }
+        if ext_seq.end_off != field.end_off {
+            return _failed("x509: unexpected trailing data in extensions");
+        }
+        let mut ext_cur: int = ext_seq.content_off;
+        let ext_end: int = ext_seq.end_off;
+        loop {
+            if ext_cur >= ext_end { break; }
+            let ext_tlv: DerTlv = der_read_tlv(der, ext_cur, ext_end);
+            if !ext_tlv.ok { return _failed(ext_tlv.error); }
+            if ext_tlv.end_off <= ext_cur {
+                return _failed("x509: parser made no progress");
+            }
+            if ext_tlv.tag != der_tag_sequence() {
+                return _failed("x509: unexpected extension field");
+            }
+
+            // Extension ::= SEQUENCE { extnID OID, critical BOOLEAN DEFAULT
+            // FALSE, extnValue OCTET STRING }
+            let e_end: int = ext_tlv.end_off;
+            let oid_tlv: DerTlv = der_read_tlv(der, ext_tlv.content_off, e_end);
+            if !oid_tlv.ok { return _failed(oid_tlv.error); }
+            let oid_res = der_oid_string(der, oid_tlv);
+            if !oid_res.ok { return _failed(oid_res.error); }
+            let oid: string = oid_res.value;
+
+            // Checked before the dedup scan and before the push below, so
+            // neither the O(n) scan nor the `extensions`/`seen_oids` arrays
+            // can be driven past the cap (SFN-504).
+            if extensions.length >= _max_extensions() {
+                return _failed("x509: too many extensions");
+            }
+
+            // RFC 5280 §4.2: a certificate MUST NOT include more than one
+            // instance of a particular extension. This generalizes over every
+            // extension, not only the four this parser interprets below.
+            let mut dup: boolean = false;
+            let mut si: int = 0;
+            loop {
+                if si >= seen_oids.length { break; }
+                if strings_equal(seen_oids[si], oid) {
+                    dup = true;
+                    break;
+                }
+                si += 1;
+            }
+            if dup { return _failed("x509: duplicate extension"); }
+            seen_oids.push(oid);
+
+            let mut critical: boolean = false;
+            let mut value_peek: DerTlv = der_read_tlv(der, oid_tlv.end_off, e_end);
+            if !value_peek.ok { return _failed(value_peek.error); }
+            if value_peek.tag == der_tag_boolean() {
+                let critical_res = der_boolean(der, value_peek);
+                if !critical_res.ok { return _failed(critical_res.error); }
+                critical = critical_res.value;
+                value_peek = der_read_tlv(der, value_peek.end_off, e_end);
+                if !value_peek.ok { return _failed(value_peek.error); }
+            }
+            if value_peek.tag != der_tag_octet_string() {
+                return _failed("x509: unexpected extension field");
+            }
+            let value_res = der_octet_string_bytes(der, value_peek);
+            if !value_res.ok { return _failed(value_res.error); }
+            let value_der: int[] = value_res.value;
+            if value_peek.end_off != e_end {
+                return _failed("x509: unexpected trailing data in extension");
+            }
+
+            extensions.push(X509Extension {
+                oid: oid, critical: critical, value_der: value_der
+            });
+
+            if strings_equal(oid, x509_oid_subject_alt_name()) {
+                let gn_seq: DerTlv = der_read_tlv(value_der, 0, value_der.length);
+                if !gn_seq.ok { return _failed(gn_seq.error); }
+                if gn_seq.tag != der_tag_sequence() {
+                    return _failed("x509: unexpected subjectAltName field");
+                }
+                if gn_seq.end_off != value_der.length {
+                    return _failed("x509: unexpected trailing data in extension value");
+                }
+                let mut gn_cur: int = gn_seq.content_off;
+                let gn_end: int = gn_seq.end_off;
+                loop {
+                    if gn_cur >= gn_end { break; }
+                    let gn_tlv: DerTlv = der_read_tlv(value_der, gn_cur, gn_end);
+                    if !gn_tlv.ok { return _failed(gn_tlv.error); }
+                    if gn_tlv.end_off <= gn_cur {
+                        return _failed("x509: parser made no progress");
+                    }
+                    if gn_tlv.tag == _tag_dns_name() {
+                        // [2] IMPLICIT IA5String dNSName, primitive.
+                        let mut name: string = "";
+                        let mut k: int = 0;
+                        loop {
+                            if k >= gn_tlv.content_len { break; }
+                            let b: int = value_der[gn_tlv.content_off + k] & 255;
+                            if b < 33 || b > 126 {
+                                return _failed("x509: subjectAltName dNSName contains a non-printable byte");
+                            }
+                            name = name + _byte_to_char(b);
+                            k += 1;
+                        }
+                        dns_names.push(name);
+                    }
+                    // Any other GeneralName tag (rfc822Name, iPAddress,
+                    // otherName, ...) is out of scope: skipped, not an error.
+                    gn_cur = gn_tlv.end_off;
+                }
+            } else if strings_equal(oid, x509_oid_basic_constraints()) {
+                has_basic_constraints = true;
+                let bc_seq: DerTlv = der_read_tlv(value_der, 0, value_der.length);
+                if !bc_seq.ok { return _failed(bc_seq.error); }
+                if bc_seq.tag != der_tag_sequence() {
+                    return _failed("x509: unexpected basicConstraints field");
+                }
+                if bc_seq.end_off != value_der.length {
+                    return _failed("x509: unexpected trailing data in extension value");
+                }
+                let mut bc_cur: int = bc_seq.content_off;
+                let bc_end: int = bc_seq.end_off;
+                if bc_cur < bc_end {
+                    let bc_peek: DerTlv = der_read_tlv(value_der, bc_cur, bc_end);
+                    if !bc_peek.ok { return _failed(bc_peek.error); }
+                    if bc_peek.tag == der_tag_boolean() {
+                        let ca_res = der_boolean(value_der, bc_peek);
+                        if !ca_res.ok { return _failed(ca_res.error); }
+                        is_ca = ca_res.value;
+                        bc_cur = bc_peek.end_off;
+                    }
+                }
+                if bc_cur < bc_end {
+                    let pl_peek: DerTlv = der_read_tlv(value_der, bc_cur, bc_end);
+                    if !pl_peek.ok { return _failed(pl_peek.error); }
+                    if pl_peek.tag == der_tag_integer() {
+                        let pl_res = der_integer_small(value_der, pl_peek);
+                        if !pl_res.ok { return _failed(pl_res.error); }
+                        path_len_constraint = pl_res.value;
+                    }
+                }
+            } else if strings_equal(oid, x509_oid_key_usage()) {
+                has_key_usage = true;
+                let ku_tlv: DerTlv = der_read_tlv(value_der, 0, value_der.length);
+                if !ku_tlv.ok { return _failed(ku_tlv.error); }
+                if ku_tlv.end_off != value_der.length {
+                    return _failed("x509: unexpected trailing data in extension value");
+                }
+                let ku_bytes_res = der_bit_string_bytes(value_der, ku_tlv);
+                if !ku_bytes_res.ok { return _failed(ku_bytes_res.error); }
+                let ku_unused_res = der_bit_string_unused(value_der, ku_tlv);
+                if !ku_unused_res.ok {
+                    return _failed(ku_unused_res.error);
+                }
+                let ku_bytes: int[] = ku_bytes_res.value;
+                let total_bits: int = 8 * ku_bytes.length - ku_unused_res.value;
+                let mut bits: int = 0;
+                let mut i: int = 0;
+                loop {
+                    if i >= total_bits { break; }
+                    if i >= 9 {
+                        break;
+                    }  // ignore bits at or past index 9
+                    let byte_idx: int = i / 8;
+                    let bit_idx: int = 7 - (i % 8);
+                    let byte_val: int = ku_bytes[byte_idx] & 255;
+                    if (byte_val & (1 << bit_idx)) != 0 {
+                        bits = bits | (1 << i);
+                    }
+                    i += 1;
+                }
+                key_usage_bits_val = bits;
+            } else if strings_equal(oid, x509_oid_extended_key_usage()) {
+                has_extended_key_usage = true;
+                let eku_seq: DerTlv = der_read_tlv(value_der, 0, value_der.length);
+                if !eku_seq.ok { return _failed(eku_seq.error); }
+                if eku_seq.tag != der_tag_sequence() {
+                    return _failed("x509: unexpected extendedKeyUsage field");
+                }
+                if eku_seq.end_off != value_der.length {
+                    return _failed("x509: unexpected trailing data in extension value");
+                }
+                let mut eku_cur: int = eku_seq.content_off;
+                let eku_end: int = eku_seq.end_off;
+                loop {
+                    if eku_cur >= eku_end { break; }
+                    let eku_tlv: DerTlv = der_read_tlv(value_der, eku_cur, eku_end);
+                    if !eku_tlv.ok { return _failed(eku_tlv.error); }
+                    if eku_tlv.end_off <= eku_cur {
+                        return _failed("x509: parser made no progress");
+                    }
+                    let eku_oid_res = der_oid_string(value_der, eku_tlv);
+                    if !eku_oid_res.ok {
+                        return _failed(eku_oid_res.error);
+                    }
+                    extended_key_usages.push(eku_oid_res.value);
+                    eku_cur = eku_tlv.end_off;
+                }
+            }
+
+            ext_cur = ext_tlv.end_off;
+        }
+
+        cur = field.end_off;
+    }
+
+    return X509Certificate {
+        ok: true,
+        error: "",
+        version: version,
+        serial: serial,
+        signature_algorithm: signature_algorithm,
+        issuer_der: issuer_der,
+        subject_der: subject_der,
+        issuer_cn: issuer_cn,
+        subject_cn: subject_cn,
+        not_before_ms: not_before_ms,
+        not_after_ms: not_after_ms,
+        spki_algorithm: spki_algorithm,
+        spki_key: spki_key,
+        dns_names: dns_names,
+        has_basic_constraints: has_basic_constraints,
+        is_ca: is_ca,
+        path_len_constraint: path_len_constraint,
+        has_key_usage: has_key_usage,
+        key_usage_bits: key_usage_bits_val,
+        has_extended_key_usage: has_extended_key_usage,
+        extended_key_usages: extended_key_usages,
+        extensions: extensions
+    };
+}
+
+// ── Validity classification (RFC 5280 §4.1.2.5, both bounds inclusive) ──
+fn x509_validity_unknown() -> int {
+    return 0;
+}  // the certificate did not parse
+
+fn x509_validity_in_window() -> int { return 1; }
+
+fn x509_validity_not_yet_valid() -> int { return 2; }
+
+fn x509_validity_expired() -> int { return 3; }
+
+// Classify a certificate's validity window against a caller-supplied Unix
+// millisecond snapshot. Pure: this module never reads ambient time, so
+// sfn/crypto stays effect-free and classification stays deterministic. The
+// caller owns ![clock], handles the fallible read, and passes one snapshot.
+// This is a window comparison, not a trust decision (SFN-504).
+fn x509_validity_at(cert: X509Certificate, unix_millis: int) -> int {
+    if !cert.ok { return x509_validity_unknown(); }
+    if unix_millis < cert.not_before_ms {
+        return x509_validity_not_yet_valid();
+    }
+    if unix_millis > cert.not_after_ms { return x509_validity_expired(); }
+    return x509_validity_in_window();
+}
+
+// ── Hostname matching (RFC 6125 §6.4.3) ──
+// ASCII-lowercase `name`, then strip one trailing "." if present, so a
+// trailing-dot FQDN compares equal to its dotless form.
+fn _normalize_name(name: string) -> string {
+    let lowered: string = ascii_lowercase(name);
+    if lowered.length > 0 && strings_equal(lowered[lowered.length - 1], ".") {
+        return _strip_last_char(lowered);
+    }
+    return lowered;
+}
+
+// `s` with its final character removed. Used to strip one trailing "." from
+// a lowercased FQDN.
+fn _strip_last_char(s: string) -> string {
+    let mut out: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= s.length - 1 { break; }
+        out = out + s[i];
+        i += 1;
+    }
+    return out;
+}
+
+fn _contains_star(s: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= s.length { break; }
+        if char_code(s[i]) == 42 { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+fn _label_bytes_valid(label: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= label.length { break; }
+        let b: int = char_code(label[i]);
+        if b < 33 || b > 126 { return false; }
+        i += 1;
+    }
+    return true;
+}
+
+// Does one presented dNSName pattern match `hostname`? RFC 6125 §6.4.3, with
+// a deliberate narrowing: a leftmost-only, whole-label wildcard, refused
+// below three labels, never a partial label (SFN-504).
+fn x509_dns_name_matches(pattern: string, hostname: string) -> boolean {
+    let p: string = _normalize_name(pattern);
+    let h: string = _normalize_name(hostname);
+    if p.length == 0 || h.length == 0 { return false; }
+    // A queried name is never itself a pattern.
+    if _contains_star(h) { return false; }
+
+    let p_labels: string[] = split(p, ".");
+    let h_labels: string[] = split(h, ".");
+
+    let mut i: int = 0;
+    loop {
+        if i >= p_labels.length { break; }
+        if p_labels[i].length == 0 { return false; }
+        if !_label_bytes_valid(p_labels[i]) { return false; }
+        i += 1;
+    }
+    i = 0;
+    loop {
+        if i >= h_labels.length { break; }
+        if h_labels[i].length == 0 { return false; }
+        if !_label_bytes_valid(h_labels[i]) { return false; }
+        i += 1;
+    }
+
+    if !_contains_star(p) {
+        if p_labels.length != h_labels.length { return false; }
+        i = 0;
+        loop {
+            if i >= p_labels.length { break; }
+            if !strings_equal(p_labels[i], h_labels[i]) { return false; }
+            i += 1;
+        }
+        return true;
+    }
+
+    // Wildcard form. The "*" must appear only in label 0, and label 0 must be
+    // exactly "*". RFC 6125 §6.4.3 permits a partial-label wildcard
+    // (f*.example.com); we refuse it here as a deliberate narrowing choice,
+    // not an oversight — do not "fix" this back to RFC 6125's permissive
+    // partial-label form (SFN-504).
+    if !strings_equal(p_labels[0], "*") { return false; }
+    i = 1;
+    loop {
+        if i >= p_labels.length { break; }
+        if _contains_star(p_labels[i]) { return false; }
+        i += 1;
+    }
+    // Require at least three labels, which refuses a bare "*" and a
+    // single-label wildcard like "*.com". It does NOT refuse a multi-label
+    // public suffix: "*.co.uk" still matches "victim.co.uk". Closing that
+    // needs a public-suffix list, which is deliberately out of scope here —
+    // the same line browsers and rustls draw, leaving multi-label suffixes to
+    // CA issuance policy (SFN-504).
+    if p_labels.length < 3 { return false; }
+    if p_labels.length != h_labels.length { return false; }
+    if h_labels[0].length == 0 { return false; }
+
+    i = 1;
+    loop {
+        if i >= p_labels.length { break; }
+        if !strings_equal(p_labels[i], h_labels[i]) { return false; }
+        i += 1;
+    }
+    return true;
+}
+
+// Does `hostname` match this certificate's SAN dNSName entries? SAN-only:
+// commonName is deliberately not consulted, per RFC 6125 §6.4.4 (SFN-504).
+// This reports a name match only — it is not an authentication result.
+fn x509_hostname_matches(cert: X509Certificate, hostname: string) -> boolean {
+    if !cert.ok { return false; }
+    let mut i: int = 0;
+    loop {
+        if i >= cert.dns_names.length { break; }
+        if x509_dns_name_matches(cert.dns_names[i], hostname) { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+export {
+    X509Extension,
+    X509Certificate,
+    x509_oid_common_name,
+    x509_oid_subject_alt_name,
+    x509_oid_basic_constraints,
+    x509_oid_key_usage,
+    x509_oid_extended_key_usage,
+    x509_oid_ed25519,
+    x509_oid_ecdsa_p256_sha256,
+    x509_oid_rsa_encryption,
+    x509_oid_eku_server_auth,
+    x509_oid_eku_client_auth,
+    x509_key_usage_digital_signature,
+    x509_key_usage_non_repudiation,
+    x509_key_usage_key_encipherment,
+    x509_key_usage_data_encipherment,
+    x509_key_usage_key_agreement,
+    x509_key_usage_key_cert_sign,
+    x509_key_usage_crl_sign,
+    x509_key_usage_encipher_only,
+    x509_key_usage_decipher_only,
+    x509_validity_unknown,
+    x509_validity_in_window,
+    x509_validity_not_yet_valid,
+    x509_validity_expired,
+    x509_parse,
+    x509_parse_with_limits,
+    x509_validity_at,
+    x509_hostname_matches,
+    x509_dns_name_matches
+};

@@ -58,6 +58,93 @@ export { chacha20_block, chacha20_xor } from "./chacha20";
 // note, docs/proposals/design-notes/sfn-335-x25519-limb-strategy.md).
 export { x25519, x25519_base, x25519_is_zero } from "./x25519";
 
+// Minimal DER/ASN.1 reader — definite-length TLV walk over the subset X.509
+// needs, with explicit nesting-depth and total-length guards against
+// adversarial input (SFN-504; guard precedent SFN-156).
+export {
+    DerLimits,
+    DerTlv,
+    DerIntResult,
+    DerBytesResult,
+    DerTextResult,
+    DerBoolResult,
+    DerOutcome,
+    der_tag_boolean,
+    der_tag_integer,
+    der_tag_bit_string,
+    der_tag_octet_string,
+    der_tag_null,
+    der_tag_oid,
+    der_tag_utf8_string,
+    der_tag_printable_string,
+    der_tag_t61_string,
+    der_tag_ia5_string,
+    der_tag_utc_time,
+    der_tag_generalized_time,
+    der_tag_bmp_string,
+    der_tag_sequence,
+    der_tag_set,
+    der_is_constructed,
+    der_is_context,
+    der_context_number,
+    der_is_directory_string,
+    der_default_limits,
+    der_read_tlv,
+    der_expect_tlv,
+    der_check_structure,
+    der_integer_bytes,
+    der_integer_small,
+    der_boolean,
+    der_bit_string_bytes,
+    der_bit_string_unused,
+    der_octet_string_bytes,
+    der_oid_string,
+    der_ascii_text,
+    der_time_millis,
+    der_days_from_civil,
+    der_is_leap_year,
+    der_days_in_month,
+    der_first_child,
+    der_next_sibling
+} from "./der";
+
+// X.509 certificate structure parse, validity-window classification, and RFC
+// 6125 hostname matching (SFEP-0048 Phase C, SFN-504). Inspection only: nothing
+// here verifies a signature, builds a chain, or enforces basicConstraints /
+// keyUsage. Trust decisions belong to the chain verifier, not this surface.
+export {
+    X509Certificate,
+    X509Extension,
+    x509_oid_common_name,
+    x509_oid_subject_alt_name,
+    x509_oid_basic_constraints,
+    x509_oid_key_usage,
+    x509_oid_extended_key_usage,
+    x509_oid_ed25519,
+    x509_oid_ecdsa_p256_sha256,
+    x509_oid_rsa_encryption,
+    x509_oid_eku_server_auth,
+    x509_oid_eku_client_auth,
+    x509_key_usage_digital_signature,
+    x509_key_usage_non_repudiation,
+    x509_key_usage_key_encipherment,
+    x509_key_usage_data_encipherment,
+    x509_key_usage_key_agreement,
+    x509_key_usage_key_cert_sign,
+    x509_key_usage_crl_sign,
+    x509_key_usage_encipher_only,
+    x509_key_usage_decipher_only,
+    x509_validity_unknown,
+    x509_validity_in_window,
+    x509_validity_not_yet_valid,
+    x509_validity_expired,
+    x509_parse,
+    x509_parse_with_limits,
+    x509_validity_at,
+    x509_hostname_matches,
+    x509_dns_name_matches
+} from "./x509";
+
 // CSPRNG — secure random bytes from the host OS entropy source. The capsule's
 // one effectful primitive: `random_bytes` carries `![rand]` (SFEP-0048 Phase D).
 export { random_bytes } from "./rand";

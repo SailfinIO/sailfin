@@ -1,0 +1,594 @@
+// capsules/sfn/crypto/tests/der_test.sfn
+//
+// Regression coverage for the sfn/crypto DER/ASN.1 reader (SFN-504, guard
+// precedent SFN-156): TLV header decoding, the depth/size validation guards,
+// value decoders (INTEGER, BOOLEAN, BIT STRING, OCTET STRING, OID, text,
+// time), and sibling/child traversal.
+import {
+    DerLimits,
+    DerTlv,
+    der_default_limits,
+    der_read_tlv,
+    der_expect_tlv,
+    der_check_structure,
+    der_integer_bytes,
+    der_integer_small,
+    der_boolean,
+    der_bit_string_bytes,
+    der_bit_string_unused,
+    der_octet_string_bytes,
+    der_oid_string,
+    der_ascii_text,
+    der_time_millis,
+    der_days_from_civil,
+    der_first_child,
+    der_next_sibling,
+    der_tag_sequence,
+    der_tag_integer
+} from "../src/der";
+
+fn hexb(s: string) -> int[] {
+    let mut out: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= s.length { break; }
+        let hi: int = _hexval(s[i]);
+        let lo: int = _hexval(s[i + 1]);
+        out.push(((hi << 4) | lo) & 255);
+        i += 2;
+    }
+    return out;
+}
+
+fn _hexval(c: string) -> int {
+    let code: int = char_code(c) & 255;
+    if code >= 48 && code <= 57 {
+        return code - 48;
+    }  // '0'-'9'
+    if code >= 97 && code <= 102 {
+        return code - 97 + 10;
+    }  // 'a'-'f'
+    return 0;
+}
+
+fn eq_bytes(a: int[], b: int[]) -> boolean {
+    if a.length != b.length { return false; }
+    let mut i: int = 0;
+    loop {
+        if i >= a.length { break; }
+        if a[i] != b[i] { return false; }
+        i += 1;
+    }
+    return true;
+}
+
+// Encode `len` as a minimal DER length octet sequence: short form under 128,
+// otherwise the fewest big-endian long-form bytes.
+fn _length_prefix(len: int) -> int[] {
+    let mut out: int[] = [];
+    if len < 128 {
+        out.push(len);
+        return out;
+    }
+    let mut le: int[] = [];
+    let mut v: int = len;
+    loop {
+        if v == 0 { break; }
+        le.push(v & 255);
+        v = v / 256;
+    }
+    let mut be: int[] = [];
+    let mut i: int = le.length - 1;
+    loop {
+        if i < 0 { break; }
+        be.push(le[i]);
+        i -= 1;
+    }
+    out.push(128 | be.length);
+    let mut j: int = 0;
+    loop {
+        if j >= be.length { break; }
+        out.push(be[j]);
+        j += 1;
+    }
+    return out;
+}
+
+// Build `depth` levels of nested empty SEQUENCEs, innermost first.
+fn _nest(depth: int) -> int[] {
+    let mut content: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= depth { break; }
+        let mut next: int[] = [];
+        next.push(der_tag_sequence());
+        let prefix: int[] = _length_prefix(content.length);
+        let mut k: int = 0;
+        loop {
+            if k >= prefix.length { break; }
+            next.push(prefix[k]);
+            k += 1;
+        }
+        let mut m: int = 0;
+        loop {
+            if m >= content.length { break; }
+            next.push(content[m]);
+            m += 1;
+        }
+        content = next;
+        i += 1;
+    }
+    return content;
+}
+
+test "der: short-form header decodes content_off/content_len/end_off" {
+    let buf: int[] = hexb("0403010203");
+    let tlv: DerTlv = der_read_tlv(buf, 0, buf.length);
+    assert tlv.ok;
+    assert tlv.content_off == 2;
+    assert tlv.content_len == 3;
+    assert tlv.end_off == 5;
+}
+
+test "der: long-form header decodes content_off/content_len/end_off" {
+    let mut buf: int[] = hexb("3081c8");
+    let mut i: int = 0;
+    loop {
+        if i >= 200 { break; }
+        buf.push(0);
+        i += 1;
+    }
+    let tlv: DerTlv = der_read_tlv(buf, 0, buf.length);
+    assert tlv.ok;
+    assert tlv.content_off == 3;
+    assert tlv.content_len == 200;
+    assert tlv.end_off == 203;
+}
+
+test "der: der_expect_tlv tag mismatch is a clean ok:false" {
+    let buf: int[] = hexb("0403010203");
+    let tlv: DerTlv = der_expect_tlv(buf, 0, buf.length, der_tag_sequence());
+    assert ! tlv.ok;
+    assert strings_equal(tlv.error, "der: unexpected tag");
+}
+
+test "der: indefinite length is rejected" {
+    let buf: int[] = hexb("3080");
+    let tlv: DerTlv = der_read_tlv(buf, 0, buf.length);
+    assert ! tlv.ok;
+    assert strings_equal(tlv.error, "der: indefinite length is not valid DER");
+}
+
+test "der: a truncated TLV (declared length exceeds the two bytes present) is rejected" {
+    let buf: int[] = hexb("30050102");  // len=5, only 2 content bytes present
+    let tlv: DerTlv = der_read_tlv(buf, 0, buf.length);
+    assert ! tlv.ok;
+    assert strings_equal(tlv.error, "der: length exceeds available data");
+}
+
+test "der: a bare identifier octet with no length byte is truncated" {
+    let buf: int[] = hexb("30");
+    let tlv: DerTlv = der_read_tlv(buf, 0, buf.length);
+    assert ! tlv.ok;
+    assert strings_equal(tlv.error, "der: truncated length");
+}
+
+test "der: a length exceeding the buffer (0x7f short-form claiming 127 bytes) is rejected" {
+    let buf: int[] = hexb("047f000102");  // short-form length 127, only 3 content bytes present
+    let tlv: DerTlv = der_read_tlv(buf, 0, buf.length);
+    assert ! tlv.ok;
+    assert strings_equal(tlv.error, "der: length exceeds available data");
+}
+
+test "der: non-minimal long-form length (encodable in short form) is rejected" {
+    let buf: int[] = hexb("308105");  // long form for a value (5) that fits short form
+    let mut i: int = 0;
+    loop {
+        if i >= 5 { break; }
+        buf.push(0);
+        i += 1;
+    }
+    let tlv: DerTlv = der_read_tlv(buf, 0, buf.length);
+    assert ! tlv.ok;
+    assert strings_equal(tlv.error, "der: non-minimal length encoding");
+}
+
+test "der: long-form length with a leading zero octet is rejected" {
+    let buf: int[] = hexb("30820005");
+    let mut i: int = 0;
+    loop {
+        if i >= 5 { break; }
+        buf.push(0);
+        i += 1;
+    }
+    let tlv: DerTlv = der_read_tlv(buf, 0, buf.length);
+    assert ! tlv.ok;
+    assert strings_equal(tlv.error, "der: non-minimal length encoding");
+}
+
+test "der: an overflow-shaped length (8 length octets) is refused by width, not accumulated" {
+    let buf: int[] = hexb("3088ffffffffffffffff");
+    let tlv: DerTlv = der_read_tlv(buf, 0, buf.length);
+    assert ! tlv.ok;
+    assert strings_equal(tlv.error, "der: length exceeds supported width");
+}
+
+test "der: a large 4-octet length fails cleanly on available data, not by wrapping" {
+    let buf: int[] = hexb("30847fffffff");
+    let tlv: DerTlv = der_read_tlv(buf, 0, buf.length);
+    assert ! tlv.ok;
+    assert strings_equal(tlv.error, "der: length exceeds available data");
+}
+
+test "der: reserved length form (0xff) is rejected" {
+    let buf: int[] = hexb("30ff");
+    let tlv: DerTlv = der_read_tlv(buf, 0, buf.length);
+    assert ! tlv.ok;
+    assert strings_equal(tlv.error, "der: reserved length form");
+}
+
+test "der: multi-byte tag is not supported" {
+    let buf: int[] = hexb("1f0100");
+    let tlv: DerTlv = der_read_tlv(buf, 0, buf.length);
+    assert ! tlv.ok;
+    assert strings_equal(tlv.error, "der: multi-byte tag is not supported");
+}
+
+test "der: validate accepts nesting under the default depth cap" {
+    let outcome = der_check_structure(_nest(20), der_default_limits());
+    assert outcome.ok;
+}
+
+test "der: validate rejects nesting past the default depth cap" {
+    let outcome = der_check_structure(_nest(200), der_default_limits());
+    assert ! outcome.ok;
+    assert strings_equal(outcome.error, "der: maximum nesting depth exceeded");
+}
+
+test "der: a tightened depth cap rejects nesting the default would accept" {
+    let tight: DerLimits = DerLimits { max_depth: 3, max_input_len: 1048576 };
+    let outcome = der_check_structure(_nest(10), tight);
+    assert ! outcome.ok;
+    assert strings_equal(outcome.error, "der: maximum nesting depth exceeded");
+}
+
+test "der: a tightened size cap rejects input the default would accept" {
+    let tight: DerLimits = DerLimits { max_depth: 64, max_input_len: 4 };
+    let buf: int[] = hexb("0403010203");
+    let outcome = der_check_structure(buf, tight);
+    assert ! outcome.ok;
+    assert strings_equal(outcome.error, "der: input exceeds maximum size");
+}
+
+test "der: validate rejects empty input" {
+    let empty: int[] = [];
+    let outcome = der_check_structure(empty, der_default_limits());
+    assert ! outcome.ok;
+    assert strings_equal(outcome.error, "der: empty input");
+}
+
+test "der: der_oid_string renders ed25519" {
+    let buf: int[] = hexb("06032b6570");
+    let tlv: DerTlv = der_read_tlv(buf, 0, buf.length);
+    let result = der_oid_string(buf, tlv);
+    assert result.ok;
+    assert strings_equal(result.value, "1.3.101.112");
+}
+
+test "der: der_oid_string renders ecdsa-with-SHA256" {
+    let buf: int[] = hexb("06082a8648ce3d040302");
+    let tlv: DerTlv = der_read_tlv(buf, 0, buf.length);
+    let result = der_oid_string(buf, tlv);
+    assert result.ok;
+    assert strings_equal(result.value, "1.2.840.10045.4.3.2");
+}
+
+test "der: der_oid_string renders rsaEncryption" {
+    let buf: int[] = hexb("06092a864886f70d010101");
+    let tlv: DerTlv = der_read_tlv(buf, 0, buf.length);
+    let result = der_oid_string(buf, tlv);
+    assert result.ok;
+    assert strings_equal(result.value, "1.2.840.113549.1.1.1");
+}
+
+test "der: der_oid_string rejects a truncated arc" {
+    let buf: int[] = hexb("06022b81");
+    let tlv: DerTlv = der_read_tlv(buf, 0, buf.length);
+    let result = der_oid_string(buf, tlv);
+    assert ! result.ok;
+    assert strings_equal(result.error, "der: truncated object identifier");
+}
+
+test "der: der_oid_string rejects a non-minimal arc" {
+    let buf: int[] = hexb("06032b8001");
+    let tlv: DerTlv = der_read_tlv(buf, 0, buf.length);
+    let result = der_oid_string(buf, tlv);
+    assert ! result.ok;
+    assert strings_equal(result.error, "der: non-minimal object identifier arc");
+}
+
+test "der: der_oid_string rejects an oversized arc" {
+    let buf: int[] = hexb("060b2bffffffffffffffffffff");
+    let tlv: DerTlv = der_read_tlv(buf, 0, buf.length);
+    let result = der_oid_string(buf, tlv);
+    assert ! result.ok;
+    assert strings_equal(result.error, "der: object identifier arc too large");
+}
+
+test "der: der_oid_string decodes a multi-byte first subidentifier (2.999.3)" {
+    let buf: int[] = hexb("0603883703");
+    let tlv: DerTlv = der_read_tlv(buf, 0, buf.length);
+    let result = der_oid_string(buf, tlv);
+    assert result.ok;
+    assert strings_equal(result.value, "2.999.3");
+}
+
+test "der: der_oid_string rejects a single-byte first subidentifier that is not minimal (06 01 80)" {
+    let buf: int[] = hexb("060180");
+    let tlv: DerTlv = der_read_tlv(buf, 0, buf.length);
+    let result = der_oid_string(buf, tlv);
+    assert ! result.ok;
+    assert result.error.length > 0;
+}
+
+test "der: der_oid_string rejects a two-byte encoding of what should be one byte (06 02 80 01)" {
+    let buf: int[] = hexb("06028001");
+    let tlv: DerTlv = der_read_tlv(buf, 0, buf.length);
+    let result = der_oid_string(buf, tlv);
+    assert ! result.ok;
+    assert result.error.length > 0;
+}
+
+test "der: der_integer_bytes rejects a non-minimal encoding" {
+    let buf: int[] = hexb("02020001");
+    let tlv: DerTlv = der_read_tlv(buf, 0, buf.length);
+    let result = der_integer_bytes(buf, tlv);
+    assert ! result.ok;
+    assert strings_equal(result.error, "der: non-minimal integer");
+}
+
+test "der: der_integer_bytes rejects a DerTlv read against a different, shorter buffer" {
+    let tlv: DerTlv = der_read_tlv(hexb("02020001"), 0, 4);
+    let result = der_integer_bytes([], tlv);
+    assert ! result.ok;
+    assert strings_equal(result.error, "der: element does not belong to this buffer");
+}
+
+test "der: der_integer_bytes accepts a minimal zero" {
+    let buf: int[] = hexb("020100");
+    let tlv: DerTlv = der_read_tlv(buf, 0, buf.length);
+    let result = der_integer_bytes(buf, tlv);
+    assert result.ok;
+    assert eq_bytes(result.value, [0]);
+}
+
+test "der: der_integer_small decodes a small value" {
+    let buf: int[] = hexb("020103");
+    let tlv: DerTlv = der_read_tlv(buf, 0, buf.length);
+    let result = der_integer_small(buf, tlv);
+    assert result.ok;
+    assert result.value == 3;
+}
+
+test "der: der_integer_small refuses a value wider than the accumulator" {
+    let buf: int[] = hexb("02050102030405");
+    let tlv: DerTlv = der_read_tlv(buf, 0, buf.length);
+    let result = der_integer_small(buf, tlv);
+    assert ! result.ok;
+    assert strings_equal(result.error, "der: integer exceeds supported width");
+}
+
+test "der: der_boolean decodes canonical true" {
+    let buf: int[] = hexb("0101ff");
+    let tlv: DerTlv = der_read_tlv(buf, 0, buf.length);
+    let result = der_boolean(buf, tlv);
+    assert result.ok;
+    assert result.value == true;
+}
+
+test "der: der_boolean decodes canonical false" {
+    let buf: int[] = hexb("010100");
+    let tlv: DerTlv = der_read_tlv(buf, 0, buf.length);
+    let result = der_boolean(buf, tlv);
+    assert result.ok;
+    assert result.value == false;
+}
+
+test "der: der_boolean rejects a non-canonical encoding" {
+    let buf: int[] = hexb("010101");
+    let tlv: DerTlv = der_read_tlv(buf, 0, buf.length);
+    let result = der_boolean(buf, tlv);
+    assert ! result.ok;
+    assert strings_equal(result.error, "der: non-canonical boolean");
+}
+
+test "der: der_bit_string_bytes strips the unused-bits octet" {
+    let buf: int[] = hexb("030300abcd");
+    let tlv: DerTlv = der_read_tlv(buf, 0, buf.length);
+    let result = der_bit_string_bytes(buf, tlv);
+    assert result.ok;
+    assert eq_bytes(result.value, [171, 205]);
+}
+
+test "der: der_bit_string_bytes rejects invalid padding" {
+    let buf: int[] = hexb("03020800");
+    let tlv: DerTlv = der_read_tlv(buf, 0, buf.length);
+    let result = der_bit_string_bytes(buf, tlv);
+    assert ! result.ok;
+    assert strings_equal(result.error, "der: invalid bit string padding");
+}
+
+test "der: der_octet_string_bytes returns the content verbatim" {
+    let buf: int[] = hexb("0403deadbe");
+    let tlv: DerTlv = der_read_tlv(buf, 0, buf.length);
+    let result = der_octet_string_bytes(buf, tlv);
+    assert result.ok;
+    assert eq_bytes(result.value, [222, 173, 190]);
+}
+
+test "der: der_bit_string_unused reports the declared unused-bit count" {
+    let buf: int[] = hexb("030203ff");
+    let tlv: DerTlv = der_read_tlv(buf, 0, buf.length);
+    let result = der_bit_string_unused(buf, tlv);
+    assert result.ok;
+    assert result.value == 3;
+}
+
+test "der: der_ascii_text renders a UTF8String" {
+    let buf: int[] = hexb("0c0568656c6c6f");
+    let tlv: DerTlv = der_read_tlv(buf, 0, buf.length);
+    let result = der_ascii_text(buf, tlv);
+    assert result.ok;
+    assert strings_equal(result.value, "hello");
+}
+
+test "der: der_ascii_text rejects a DerTlv read against a different, empty buffer" {
+    let tlv: DerTlv = der_read_tlv(hexb("0c0568656c6c6f"), 0, 7);
+    let result = der_ascii_text([], tlv);
+    assert ! result.ok;
+    assert strings_equal(result.error, "der: element does not belong to this buffer");
+}
+
+test "der: der_ascii_text rejects a non-printable byte" {
+    let buf: int[] = hexb("0c0101");
+    let tlv: DerTlv = der_read_tlv(buf, 0, buf.length);
+    let result = der_ascii_text(buf, tlv);
+    assert ! result.ok;
+    assert strings_equal(result.error, "der: text contains a non-printable byte");
+}
+
+test "der: der_time_millis decodes a UTCTime" {
+    let buf: int[] = hexb("170d3236303130313030303030305a");
+    let tlv: DerTlv = der_read_tlv(buf, 0, buf.length);
+    let result = der_time_millis(buf, tlv);
+    assert result.ok;
+    assert result.value == 1767225600000;
+}
+
+test "der: der_time_millis decodes a GeneralizedTime" {
+    let buf: int[] = hexb("180f32303532303130313030303030305a");
+    let tlv: DerTlv = der_read_tlv(buf, 0, buf.length);
+    let result = der_time_millis(buf, tlv);
+    assert result.ok;
+    assert result.value == 2587680000000;
+}
+
+test "der: der_time_millis UTCTime two-digit-year pivot lands in 1950" {
+    let buf: int[] = hexb("170d3530303130313030303030305a");
+    let tlv: DerTlv = der_read_tlv(buf, 0, buf.length);
+    let result = der_time_millis(buf, tlv);
+    assert result.ok;
+    assert result.value == -631152000000;
+}
+
+test "der: der_time_millis UTCTime two-digit-year pivot lands in 2049" {
+    let buf: int[] = hexb("170d3439303130313030303030305a");
+    let tlv: DerTlv = der_read_tlv(buf, 0, buf.length);
+    let result = der_time_millis(buf, tlv);
+    assert result.ok;
+    assert result.value == 2493072000000;
+}
+
+test "der: der_time_millis rejects a missing Z suffix" {
+    let buf: int[] = hexb("170d32363031303130303030303041");
+    let tlv: DerTlv = der_read_tlv(buf, 0, buf.length);
+    let result = der_time_millis(buf, tlv);
+    assert ! result.ok;
+    assert strings_equal(result.error, "der: time must be UTC (Z)");
+}
+
+test "der: der_time_millis rejects a 12-byte UTCTime" {
+    let buf: int[] = hexb("170b323630313031303030305a");
+    let tlv: DerTlv = der_read_tlv(buf, 0, buf.length);
+    let result = der_time_millis(buf, tlv);
+    assert ! result.ok;
+    assert strings_equal(result.error, "der: malformed time");
+}
+
+test "der: der_time_millis rejects a non-digit byte" {
+    let buf: int[] = hexb("170d3258303130313030303030305a");
+    let tlv: DerTlv = der_read_tlv(buf, 0, buf.length);
+    let result = der_time_millis(buf, tlv);
+    assert ! result.ok;
+    assert strings_equal(result.error, "der: malformed time");
+}
+
+test "der: der_time_millis rejects month 13" {
+    let buf: int[] = hexb("170d3236313330313030303030305a");
+    let tlv: DerTlv = der_read_tlv(buf, 0, buf.length);
+    let result = der_time_millis(buf, tlv);
+    assert ! result.ok;
+    assert strings_equal(result.error, "der: invalid time field");
+}
+
+test "der: der_time_millis rejects day 30 in February" {
+    let buf: int[] = hexb("170d3236303233303030303030305a");
+    let tlv: DerTlv = der_read_tlv(buf, 0, buf.length);
+    let result = der_time_millis(buf, tlv);
+    assert ! result.ok;
+    assert strings_equal(result.error, "der: invalid time field");
+}
+
+test "der: der_time_millis rejects hour 24" {
+    let buf: int[] = hexb("170d3236303130313234303030305a");
+    let tlv: DerTlv = der_read_tlv(buf, 0, buf.length);
+    let result = der_time_millis(buf, tlv);
+    assert ! result.ok;
+    assert strings_equal(result.error, "der: invalid time field");
+}
+
+test "der: der_days_from_civil at the epoch" {
+    assert der_days_from_civil(1970, 1, 1) == 0;
+}
+
+test "der: der_days_from_civil after the epoch" {
+    assert der_days_from_civil(2000, 3, 1) == 11017;
+}
+
+test "der: der_days_from_civil the day before the epoch" {
+    assert der_days_from_civil(1969, 12, 31) == -1;
+}
+
+test "der: der_days_from_civil after the epoch, a second sample date" {
+    assert der_days_from_civil(2026, 1, 1) == 20454;
+}
+
+// `der_time_millis` rejects year < 1, so no reachable time input takes the
+// floor-division correction branch — but `der_days_from_civil` is exported,
+// so the branch is live API and needs its own reachable coverage (SFN-504).
+// Derivation: 719468 days from 0000-03-01 to 1970-01-01, plus the 60 days of
+// January and February in the proleptic-Gregorian leap year 0.
+test "der: der_days_from_civil proves the floor-division correction" {
+    assert der_days_from_civil(0, 1, 1) == -719528;
+}
+
+test "der: der_first_child and der_next_sibling traverse children in order" {
+    let buf: int[] = hexb("3006020101020102");
+    let parent: DerTlv = der_read_tlv(buf, 0, buf.length);
+    assert parent.ok;
+    let first: DerTlv = der_first_child(buf, parent);
+    assert first.ok;
+    assert first.tag == der_tag_integer();
+    let second: DerTlv = der_next_sibling(buf, parent, first);
+    assert second.ok;
+    assert second.tag == der_tag_integer();
+}
+
+test "der: der_first_child rejects a primitive parent" {
+    let buf: int[] = hexb("020101");
+    let parent: DerTlv = der_read_tlv(buf, 0, buf.length);
+    assert parent.ok;
+    let child: DerTlv = der_first_child(buf, parent);
+    assert ! child.ok;
+    assert strings_equal(child.error, "der: element is not constructed");
+}
+
+test "der: der_next_sibling exhaustion is ok:false with an empty error, not a failure" {
+    let buf: int[] = hexb("3003020101");
+    let parent: DerTlv = der_read_tlv(buf, 0, buf.length);
+    let first: DerTlv = der_first_child(buf, parent);
+    assert first.ok;
+    let exhausted: DerTlv = der_next_sibling(buf, parent, first);
+    assert ! exhausted.ok;
+    assert exhausted.error.length == 0;
+}

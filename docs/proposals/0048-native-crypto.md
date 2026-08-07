@@ -4,9 +4,9 @@ title: Native crypto + TLS stack — removing the OpenSSL dependency
 status: Accepted
 type: runtime
 created: 2026-07-12
-updated: 2026-08-03
+updated: 2026-08-06
 author: "agent:compiler-architect; human review"
-tracking: SFN-333, SFN-335, SFN-336, SFN-337, SFN-655, SFN-659, SFN-660, SFN-699
+tracking: SFN-333, SFN-335, SFN-336, SFN-337, SFN-504, SFN-655, SFN-659, SFN-660, SFN-699
 supersedes:
 superseded-by:
 graduates-to:
@@ -116,6 +116,34 @@ Ed25519-only pending RSA-PSS/ECDSA-P256 (SFN-653); and there is no certificate
 chain/trust decision (SFN-340) or server-side handshake (SFN-654) yet. Phase B
 therefore stays open; see `docs/status.md`'s `sfn/crypto` row for the full
 capability and limitation list.
+
+**Amendment (2026-08-06) — Phase C: the inspection half has landed
+(SFN-504); chain verification and the trust store have not, so Phase C is
+partially complete.** `capsules/sfn/crypto/src/der.sfn` adds a minimal
+definite-length DER/ASN.1 TLV reader covering the subset X.509 needs
+(SEQUENCE, SET, INTEGER, OBJECT IDENTIFIER, BIT STRING, OCTET STRING,
+BOOLEAN, NULL, UTCTime/GeneralizedTime, directory strings), hardened with
+nesting-depth and total-length guards on the SFN-156 precedent and strict
+about non-minimal lengths/integers/OID arcs, non-canonical booleans, and
+over-wide length fields. `capsules/sfn/crypto/src/x509.sfn` adds certificate
+structure parsing, RFC 6125 §6.4.3 SAN-`dNSName`-only hostname matching
+(commonName is deliberately not consulted, §6.4.4), and a pure
+`x509_validity_at(cert, unix_millis)` window classifier that takes a
+caller-supplied snapshot rather than reading ambient time — the caller owns
+`![clock]` and the fallible `sfn/time::unix_millis()` read (SFN-623), which is
+what keeps `sfn/crypto` effect-free through this addition. The capsule gains
+a `sfn/strings` dependency edge and moves 0.18.0 → 0.19.0;
+`[capabilities] required` stays `[]`.
+
+This is parsing and inspection only, exactly the "parsed but not enforced"
+distinction this SFEP's own bar (CLAUDE.md Stage1 readiness) draws: no
+signature is verified, no chain is built, and basicConstraints/keyUsage/
+extendedKeyUsage are parsed and exposed via `X509Extension` but never
+enforced. None of this is wired into `runtime/sfn/platform/tls.sfn`. Chain
+verification and the system trust store — the rest of Phase C's original
+scope — remain unshipped and tracked separately (SFN-340), which stays
+blocked on signature-verification primitives (RSA verify lands per §6.3's
+amendment; ECDSA-P256 per SFN-653). Phase C therefore stays open.
 
 ### 3.2 Where the code lives
 
