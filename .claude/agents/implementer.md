@@ -4,7 +4,6 @@ description: Sonnet-powered implementer that writes routine compiler/runtime cod
 tools: Read, Grep, Glob, Edit, Write, Bash
 model: sonnet
 effort: medium
-maxTurns: 30
 color: teal
 ---
 

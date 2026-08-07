@@ -4,7 +4,6 @@ description: Diagnoses compiler bugs affecting self-hosting correctness and buil
 tools: Read, Grep, Glob, Bash
 model: opus
 effort: high
-maxTurns: 25
 color: red
 ---
 

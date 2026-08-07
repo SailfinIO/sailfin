@@ -1,0 +1,54 @@
+// Unit coverage for the pure argv builder in
+// `compiler/src/build/determinism.sfn`. The determinism comparator
+// itself is covered by `build_report_determinism_test.sfn`; this file
+// targets the pass-2 command line, which is spawned without a shell
+// (SFN-752).
+//
+// The `--json` branch of `_run_determinism_pass2` had no automated
+// coverage at all before this file: the committed e2e
+// (`work_dir_flag_test.sfn`) drives `--check-determinism` only in
+// non-JSON mode, which is the one branch the de-shell did not touch.
+import { expect_eq_str_array } from "sfn/test";
+
+import { _determinism_pass2_argv } from "../../src/build/determinism";
+
+// --------------------------------------------------------------
+// _determinism_pass2_argv — the pass-2 build command line
+// --------------------------------------------------------------
+// Whole-array equality is the point: it pins `argv[0]` to the compiler
+// binary and proves no `sh`/`-c` wrapper crept back in. Pass 2 must
+// never carry `--check-determinism` (no recursion) or `-o` (it derives
+// its output from its own work-dir).
+test "determinism_pass2_argv: invokes the compiler directly, with no shell" {
+    assert expect_eq_str_array(_determinism_pass2_argv("build/bin/sfn", "", "hello.sfn", "build/wd-pass2", false, true), ["build/bin/sfn", "build", "--work-dir", "build/wd-pass2", "--json", "hello.sfn"]).ok;
+}
+
+// Arguments reach `execve` verbatim, so a space stays inside one
+// argument instead of being shell-quoted — the former `sh -c` command
+// string needed `_shell_single_quote_arg` for exactly this, and this
+// is the case that silently corrupted paths when the quoting was wrong.
+test "determinism_pass2_argv: passes a spaced work-dir through unquoted" {
+    assert expect_eq_str_array(_determinism_pass2_argv("drv", "", "in.sfn", "work dir-pass2", false, true), ["drv", "build", "--work-dir", "work dir-pass2", "--json", "in.sfn"]).ok;
+}
+
+// A shell-metacharacter path is inert in an argv array. Under the
+// displaced `sh -c` form these characters were live syntax and only a
+// correct quoter kept them from being interpreted.
+test "determinism_pass2_argv: leaves shell metacharacters inert" {
+    assert expect_eq_str_array(_determinism_pass2_argv("drv", "", "a;rm -rf b.sfn", "wd$(x)-pass2", false, true), ["drv", "build", "--work-dir", "wd$(x)-pass2", "--json", "a;rm -rf b.sfn"]).ok;
+}
+
+// A capsule build passes `-p <capsule>` and drops the positional input.
+test "determinism_pass2_argv: prefers the capsule flag over the positional input" {
+    assert expect_eq_str_array(_determinism_pass2_argv("drv", "compiler", "ignored.sfn", "wd-pass2", false, false), ["drv", "build", "--work-dir", "wd-pass2", "-p", "compiler"]).ok;
+}
+
+test "determinism_pass2_argv: threads the cache-trace flag ahead of the target" {
+    assert expect_eq_str_array(_determinism_pass2_argv("drv", "", "in.sfn", "wd-pass2", true, false), ["drv", "build", "--work-dir", "wd-pass2", "--cache-trace", "in.sfn"]).ok;
+}
+
+// Non-JSON mode is the inherited-output path; the argv is identical
+// apart from the absent `--json`, so both branches spawn the same shape.
+test "determinism_pass2_argv: omits the json flag in inherited-output mode" {
+    assert expect_eq_str_array(_determinism_pass2_argv("drv", "", "in.sfn", "wd-pass2", false, false), ["drv", "build", "--work-dir", "wd-pass2", "in.sfn"]).ok;
+}

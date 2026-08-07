@@ -1,0 +1,258 @@
+// Unit coverage for `compiler/src/build/fs_tree.sfn` (SFN-494 groundwork)
+// and the byte-counting copy added alongside it in
+// `compiler/src/build/fs.sfn`. Every directory-tree helper here is
+// probe-based (no `fs.isDirectory` intrinsic exists), so several fixtures
+// are deliberately shaped to exercise the empty-directory edge the naive
+// "non-empty `listDirectory` result means directory" heuristic gets wrong.
+import { expect_eq_bool, expect_eq_int, expect_eq_str } from "sfn/test";
+
+import { _copy_file, _copy_file_counted } from "../../src/build/fs";
+import {
+    ensure_dir_p,
+    list_child_dirs,
+    remove_empty_dirs_under,
+    remove_tree,
+    walk_dirs
+} from "../../src/build/fs_tree";
+
+// Falls back to a repo-relative path rather than `/tmp`: this file exists
+// to prove the tree helpers carry no POSIX assumption, so its own fixtures
+// must not carry one either. Same fallback shape as
+// `cli/commands/test/cache_scratch.sfn`.
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "build/sailfin"; }
+    dir = dir + "/sfn-fs-tree-unit";
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+fn _contains_str(values: string[], target: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= values.length { break; }
+        if values[i] == target { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+// --------------------------------------------------------------
+// remove_tree
+// --------------------------------------------------------------
+test "fs_tree: remove_tree deletes a nested tree" ![io] {
+    let root = _scratch_dir() + "/remove-nested";
+    if fs.exists(root) { remove_tree(root); }
+    fs.createDirectory(root + "/a/b", true);
+    fs.writeFile(root + "/a/b/file.txt", "hi");
+    fs.writeFile(root + "/top.txt", "hi");
+
+    let removed = remove_tree(root);
+    assert expect_eq_bool(removed, true).ok;
+    assert ! fs.exists(root);
+}
+
+// The case the naive "non-empty listDirectory means directory" heuristic
+// gets wrong: an empty directory has zero entries, exactly like a file.
+test "fs_tree: remove_tree deletes an empty directory" ![io] {
+    let root = _scratch_dir() + "/remove-empty-dir";
+    if fs.exists(root) { remove_tree(root); }
+    fs.createDirectory(root, true);
+
+    let removed = remove_tree(root);
+    assert expect_eq_bool(removed, true).ok;
+    assert ! fs.exists(root);
+}
+
+test "fs_tree: remove_tree on a nonexistent path returns true" ![io] {
+    let path = _scratch_dir() + "/does-not-exist-remove";
+    if fs.exists(path) { remove_tree(path); }
+
+    assert expect_eq_bool(remove_tree(path), true).ok;
+}
+
+test "fs_tree: remove_tree on an empty path returns false and deletes nothing" ![io] {
+    assert expect_eq_bool(remove_tree(""), false).ok;
+}
+
+test "fs_tree: remove_tree on / returns false and deletes nothing" ![io] {
+    assert expect_eq_bool(remove_tree("/"), false).ok;
+    assert fs.exists("/");
+}
+
+// --------------------------------------------------------------
+// walk_dirs / list_child_dirs
+// --------------------------------------------------------------
+// A single-child chain with a file at the leaf so every intermediate
+// directory is non-empty and therefore visible to the classification
+// heuristic.
+fn _build_depth_chain(root: string) -> void ![io] {
+    if fs.exists(root) { remove_tree(root); }
+    fs.createDirectory(root + "/d1/d2/d3", true);
+    fs.writeFile(root + "/d1/d2/d3/leaf.txt", "leaf");
+}
+
+test "fs_tree: walk_dirs at min_depth 0 max_depth 0 returns only root" ![io] {
+    let root = _scratch_dir() + "/walk-chain-a";
+    _build_depth_chain(root);
+
+    let dirs = walk_dirs(root, 0, 0);
+    assert expect_eq_int(dirs.length, 1).ok;
+    assert _contains_str(dirs, root);
+}
+
+test "fs_tree: walk_dirs at min_depth 1 max_depth 1 excludes root and returns d1" ![io] {
+    let root = _scratch_dir() + "/walk-chain-b";
+    _build_depth_chain(root);
+
+    let dirs = walk_dirs(root, 1, 1);
+    assert expect_eq_int(dirs.length, 1).ok;
+    assert _contains_str(dirs, root + "/d1");
+    assert ! _contains_str(dirs, root);
+}
+
+test "fs_tree: walk_dirs at min_depth 1 max_depth 2 returns d1 and d2 only" ![io] {
+    let root = _scratch_dir() + "/walk-chain-c";
+    _build_depth_chain(root);
+
+    let dirs = walk_dirs(root, 1, 2);
+    assert expect_eq_int(dirs.length, 2).ok;
+    assert _contains_str(dirs, root + "/d1");
+    assert _contains_str(dirs, root + "/d1/d2");
+    assert ! _contains_str(dirs, root + "/d1/d2/d3");
+    assert ! _contains_str(dirs, root);
+}
+
+test "fs_tree: walk_dirs on a nonexistent root returns an empty array" ![io] {
+    let root = _scratch_dir() + "/walk-missing";
+    if fs.exists(root) { remove_tree(root); }
+
+    let dirs = walk_dirs(root, 0, 4);
+    assert expect_eq_int(dirs.length, 0).ok;
+}
+
+test "fs_tree: list_child_dirs returns the depth-1 directories" ![io] {
+    let root = _scratch_dir() + "/list-child-dirs";
+    _build_depth_chain(root);
+
+    let dirs = list_child_dirs(root);
+    assert expect_eq_int(dirs.length, 1).ok;
+    assert _contains_str(dirs, root + "/d1");
+}
+
+// --------------------------------------------------------------
+// remove_empty_dirs_under
+// --------------------------------------------------------------
+test "fs_tree: remove_empty_dirs_under removes a nested empty chain bottom-up" ![io] {
+    let root = _scratch_dir() + "/prune-empty-chain";
+    if fs.exists(root) { remove_tree(root); }
+    fs.createDirectory(root + "/x/y/z", true);
+
+    let removed = remove_empty_dirs_under(root);
+    assert expect_eq_int(removed, 3).ok;
+    assert fs.exists(root);
+    assert ! fs.exists(root + "/x");
+}
+
+test "fs_tree: remove_empty_dirs_under leaves a directory containing a file" ![io] {
+    let root = _scratch_dir() + "/prune-nonempty";
+    if fs.exists(root) { remove_tree(root); }
+    fs.createDirectory(root + "/a", true);
+    fs.writeFile(root + "/a/file.txt", "keep me");
+
+    let removed = remove_empty_dirs_under(root);
+    assert expect_eq_int(removed, 0).ok;
+    assert fs.exists(root + "/a");
+    assert fs.exists(root + "/a/file.txt");
+}
+
+// --------------------------------------------------------------
+// _copy_file_counted / _copy_file
+// --------------------------------------------------------------
+test "fs_tree: _copy_file_counted reports the correct byte count" ![io] {
+    let dir = _scratch_dir();
+    let src = dir + "/counted-src.bin";
+    let dst = dir + "/counted-dst.bin";
+    let content = "0123456789";
+    fs.writeFile(src, content);
+
+    let outcome = _copy_file_counted(src, dst);
+    assert expect_eq_bool(outcome.ok, true).ok;
+    assert expect_eq_int(outcome.bytes, content.length).ok;
+    assert expect_eq_str(fs.readFile(dst), content).ok;
+}
+
+test "fs_tree: _copy_file still copies content unchanged" ![io] {
+    let dir = _scratch_dir();
+    let src = dir + "/plain-src.bin";
+    let dst = dir + "/plain-dst.bin";
+    let content = "the quick brown fox";
+    fs.writeFile(src, content);
+
+    let ok = _copy_file(src, dst);
+    assert expect_eq_bool(ok, true).ok;
+    assert expect_eq_str(fs.readFile(dst), content).ok;
+}
+
+// --------------------------------------------------------------
+// ensure_dir_p
+// --------------------------------------------------------------
+test "fs_tree: ensure_dir_p creates a missing directory" ![io] {
+    let dir = _scratch_dir() + "/ensure-dir-p";
+    if fs.exists(dir) { remove_tree(dir); }
+
+    assert expect_eq_bool(ensure_dir_p(dir), true).ok;
+    assert fs.exists(dir);
+}
+
+// --------------------------------------------------------------
+// walk_dirs depth-window boundary
+// --------------------------------------------------------------
+// Pins the prune condition. Listing a level at `depth` can only produce
+// entries at `depth + 1`, so the loop must stop at `depth >= max_depth`,
+// not `depth > max_depth`. Stopping one level late still returns the
+// correct set — which is why only a cost check catches it — but it costs
+// an `fs.listDirectory` on every FILE at the boundary depth, and for
+// `_cache_entry_dirs` (`walk_dirs(root, 2, 2)`) that is one `opendir` per
+// stored artifact on every `sfn cache info`.
+//
+// The assertion is on the result set rather than the syscall count, which
+// this harness cannot observe: a tree deeper than `max_depth` with files
+// at the boundary would silently regress in cost while staying green, so
+// this test pins correctness and the module comment carries the cost
+// rationale.
+test "fs_tree: walk_dirs stops at max_depth and ignores deeper levels" ![io] {
+    let root = _scratch_dir() + "/walk-boundary";
+    if fs.exists(root) { remove_tree(root); }
+    fs.createDirectory(root + "/s1/e1", true);
+    fs.createDirectory(root + "/s2/e2", true);
+    // Files at the boundary depth: these are what the extra level would
+    // have pointlessly listed.
+    fs.writeFile(root + "/s1/e1/artifact.bin", "a");
+    fs.writeFile(root + "/s2/e2/artifact.bin", "b");
+
+    let dirs = walk_dirs(root, 2, 2);
+    assert expect_eq_int(dirs.length, 2).ok;
+    assert _contains_str(dirs, root + "/s1/e1");
+    assert _contains_str(dirs, root + "/s2/e2");
+    assert ! _contains_str(dirs, root + "/s1");
+    assert ! _contains_str(dirs, root);
+    assert ! _contains_str(dirs, root + "/s1/e1/artifact.bin");
+}
+
+// An entry directory holding no files is invisible to the classification
+// heuristic where `find -type d` reported it. Pinned rather than merely
+// documented, because SFN-755 is expected to change this answer and the
+// change should be deliberate.
+test "fs_tree: walk_dirs cannot see an artifact-less directory" ![io] {
+    let root = _scratch_dir() + "/walk-empty-entry";
+    if fs.exists(root) { remove_tree(root); }
+    fs.createDirectory(root + "/shard/empty-entry", true);
+    fs.createDirectory(root + "/shard/full-entry", true);
+    fs.writeFile(root + "/shard/full-entry/artifact.bin", "x");
+
+    let dirs = walk_dirs(root, 2, 2);
+    assert expect_eq_int(dirs.length, 1).ok;
+    assert _contains_str(dirs, root + "/shard/full-entry");
+    assert ! _contains_str(dirs, root + "/shard/empty-entry");
+}
