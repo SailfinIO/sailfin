@@ -1,0 +1,215 @@
+// capsules/sfn/crypto/src/ecdsa.sfn
+//
+// ECDSA signature verification over NIST P-256 with SHA-256, per FIPS 186-4
+// (SFN-657). Verify only.
+//
+// Design: docs/proposals/design-notes/sfn-653-p256-rsa-bigint-strategy.md §7.1
+// (verification sequence) and §8.1 (known-answer gates). SFEP-0048 Phase C.
+//
+// Signing and key generation are deliberately absent. The private-key side is
+// where the constant-time and nonce-generation hazards live, none of it is
+// needed to validate a certificate chain, and `src/p256.sfn`'s branchy
+// public-data arithmetic is explicitly not approved for it (design note §9,
+// "Scope reuse").
+//
+// The DER `(r, s)` reader below is SFN-504's `src/der.sfn`, not a second parser:
+// design note §7.1 says to follow the delivered DER types rather than founding
+// one, and a bespoke TLV walk here is exactly the kind of duplicate attack
+// surface that hardening effort then has to be spent on twice.
+import { MontCtx } from "./bignum";
+import {
+    DerBytesResult,
+    DerOutcome,
+    DerTlv,
+    der_check_structure,
+    der_default_limits,
+    der_integer_bytes,
+    der_read_tlv,
+    der_tag_integer,
+    der_tag_sequence
+} from "./der";
+import { sha256_bytes } from "./hkdf";
+import {
+    P256Point,
+    P256PointResult,
+    P256Value,
+    _p256_affine_x_be,
+    _p256_bytes,
+    _p256_eq,
+    _p256_joint_mul,
+    _p256_n_ctx,
+    _p256_n_from_be_checked,
+    _p256_n_inv,
+    _p256_n_mul,
+    _p256_n_reduce_256,
+    _p256_n_to_be,
+    _p256_p_ctx,
+    _p256_point_decode
+} from "./p256";
+
+// A parsed Ecdsa-Sig-Value. `r` and `s` are canonical 10x26 limb vectors, each
+// already range-checked to 1 <= value < n.
+struct EcdsaSignature {
+    ok: boolean;
+    error: string;
+    r: int[];
+    s: int[];
+}
+
+fn _ecdsa_sig_err(message: string) -> EcdsaSignature {
+    return EcdsaSignature {
+        ok: false,
+        error: message,
+        r: [],
+        s: []
+    };
+}
+
+fn _ecdsa_drop_first(bytes: int[]) -> int[] {
+    let mut out: int[] = [];
+    let mut i: int = 1;
+    loop {
+        if i >= bytes.length { break; }
+        out.push(bytes[i] & 255);
+        i += 1;
+    }
+    return out;
+}
+
+// One DER INTEGER's content bytes to a range-checked signature scalar.
+//
+// `der_integer_bytes` enforces DER-minimal encoding but leaves sign to the
+// caller, so the sign test is this function's job: a negative INTEGER is a
+// malformed signature, never a large positive scalar. After that, minimal
+// encoding permits exactly one leading zero byte, and only to clear the sign
+// bit, so dropping a single leading zero is sufficient rather than a loop.
+fn _ecdsa_scalar(content: int[]) -> P256Value {
+    if content.length == 0 {
+        return P256Value {
+            ok: false,
+            error: "ecdsa: empty signature scalar",
+            value: []
+        };
+    }
+    if (content[0] & 128) != 0 {
+        return P256Value {
+            ok: false,
+            error: "ecdsa: negative signature scalar",
+            value: []
+        };
+    }
+    let mut body: int[] = content;
+    if content[0] == 0 && content.length > 1 {
+        body = _ecdsa_drop_first(content);
+    }
+    // Refuses r or s equal to zero, or at least n. Omitting these four cases is
+    // the standard ECDSA acceptance hole, so they are enforced in
+    // `_p256_n_from_be_checked` on the way in rather than assumed.
+    return _p256_n_from_be_checked(body);
+}
+
+// Ecdsa-Sig-Value ::= SEQUENCE { r INTEGER, s INTEGER } (RFC 3279 §2.2.3).
+//
+// Rejects trailing data both after the SEQUENCE and after `s` inside it. A
+// verifier that tolerated either would accept a signature carrying attacker
+// chosen bytes that a stricter peer parses differently.
+fn _ecdsa_parse_signature(signature: int[]) -> EcdsaSignature {
+    let structure: DerOutcome = der_check_structure(signature, der_default_limits());
+    if !structure.ok { return _ecdsa_sig_err(structure.error); }
+
+    let outer: DerTlv = der_read_tlv(signature, 0, signature.length);
+    if !outer.ok { return _ecdsa_sig_err(outer.error); }
+    if outer.tag != der_tag_sequence() {
+        return _ecdsa_sig_err("ecdsa: signature is not a SEQUENCE");
+    }
+    if outer.end_off != signature.length {
+        return _ecdsa_sig_err("ecdsa: trailing data after signature");
+    }
+
+    let r_tlv: DerTlv = der_read_tlv(signature, outer.content_off, outer.end_off);
+    if !r_tlv.ok { return _ecdsa_sig_err(r_tlv.error); }
+    if r_tlv.tag != der_tag_integer() {
+        return _ecdsa_sig_err("ecdsa: r is not an INTEGER");
+    }
+    let r_bytes: DerBytesResult = der_integer_bytes(signature, r_tlv);
+    if !r_bytes.ok { return _ecdsa_sig_err(r_bytes.error); }
+
+    let s_tlv: DerTlv = der_read_tlv(signature, r_tlv.end_off, outer.end_off);
+    if !s_tlv.ok { return _ecdsa_sig_err(s_tlv.error); }
+    if s_tlv.tag != der_tag_integer() {
+        return _ecdsa_sig_err("ecdsa: s is not an INTEGER");
+    }
+    let s_bytes: DerBytesResult = der_integer_bytes(signature, s_tlv);
+    if !s_bytes.ok { return _ecdsa_sig_err(s_bytes.error); }
+
+    if s_tlv.end_off != outer.end_off {
+        return _ecdsa_sig_err("ecdsa: trailing data inside signature");
+    }
+
+    let r: P256Value = _ecdsa_scalar(r_bytes.value);
+    if !r.ok { return _ecdsa_sig_err(r.error); }
+    let s: P256Value = _ecdsa_scalar(s_bytes.value);
+    if !s.ok { return _ecdsa_sig_err(s.error); }
+
+    return EcdsaSignature {
+        ok: true,
+        error: "",
+        r: r.value,
+        s: s.value
+    };
+}
+
+// Verify a P-256 signature over an already-computed 32-byte digest.
+//
+// `public_key` is a SEC1 point (uncompressed 0x04, or compressed 0x02/0x03);
+// `signature` is the DER Ecdsa-Sig-Value. This is the entry point an X.509
+// chain verifier wants, because it hashes the tbsCertificate itself.
+//
+// FIPS 186-4 §6.4.2, in the order design note §7.1 fixes:
+//   1. require a valid, non-infinity, on-curve public point
+//   2. require 1 <= r < n and 1 <= s < n
+//   3. e = the whole digest as a 256-bit integer, reduced mod n
+//   4. w = s^-1, u1 = e*w, u2 = r*w
+//   5. R = u1*G + u2*Q
+//   6. reject infinity, then accept only if R.x mod n equals r
+//
+// Steps 3 and 6 both reduce rather than reject: a digest or an x-coordinate at
+// least n is ordinary, and rejecting either would fail valid signatures.
+fn ecdsa_p256_verify_digest(public_key: int[], digest: int[], signature: int[]) -> bool {
+    if digest.length != _p256_bytes() { return false; }
+
+    let p_ctx: MontCtx = _p256_p_ctx();
+    let n_ctx: MontCtx = _p256_n_ctx();
+
+    let key: P256PointResult = _p256_point_decode(public_key, p_ctx);
+    if !key.ok { return false; }
+    if key.point.infinity { return false; }
+
+    let sig: EcdsaSignature = _ecdsa_parse_signature(signature);
+    if !sig.ok { return false; }
+
+    let e: int[] = _p256_n_reduce_256(digest);
+    let w: int[] = _p256_n_inv(sig.s, n_ctx);
+    let u1: int[] = _p256_n_mul(e, w, n_ctx);
+    let u2: int[] = _p256_n_mul(sig.r, w, n_ctx);
+
+    let point: P256Point = _p256_joint_mul(_p256_n_to_be(u1), _p256_n_to_be(u2), key.point, p_ctx);
+    if point.infinity { return false; }
+
+    let x_be: int[] = _p256_affine_x_be(point, p_ctx);
+    return _p256_eq(_p256_n_reduce_256(x_be), sig.r);
+}
+
+// Verify a P-256 signature over a message, hashing it with SHA-256 first. This
+// is the `ecdsa-with-SHA256` profile (RFC 5758 §3.2).
+fn ecdsa_p256_verify_sha256(public_key: int[], message: int[], signature: int[]) -> bool {
+    return ecdsa_p256_verify_digest(public_key, sha256_bytes(message), signature);
+}
+
+export {
+    EcdsaSignature,
+    _ecdsa_parse_signature,
+    _ecdsa_scalar,
+    ecdsa_p256_verify_digest,
+    ecdsa_p256_verify_sha256
+};

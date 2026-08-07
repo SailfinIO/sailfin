@@ -447,20 +447,37 @@ fn _modexp_public(base: int[], e: int, ctx: MontCtx) -> int[] {
     return _mont_out(acc, ctx);
 }
 
-// Deliberately narrow: only what `src/rsa.sfn` and the regression tests consume.
-// The unexported helpers carry preconditions that produce a silently wrong
-// residue rather than an error when broken — `_mont_mul` requires both operands
-// below the modulus, `_bn_sub` requires a >= b, `_bn_double_mod` requires
-// x < n and matching lengths. Keeping them file-local means a future caller has
-// to come here and read those contracts first. Widen this list when SFN-658
-// needs more, not pre-emptively.
+// Narrow by intent: only what `src/rsa.sfn`, `src/p256.sfn`, and the regression
+// tests consume. Widen it when a consumer needs more, not pre-emptively.
+//
+// Several of these carry preconditions that produce a silently wrong residue
+// rather than an error when broken — `_mont_mul` requires both operands below
+// the modulus and a limb count whose capacity leaves a spare bit above 2n,
+// `_bn_sub` requires a >= b, `_bn_double_mod` requires x < n and matching
+// lengths. Those contracts used to be enforced by keeping the helpers
+// file-local. They no longer are: `src/p256.sfn` drives this same CIOS
+// primitive through fixed 10-limb contexts for the P-256 field prime and
+// subgroup order (design note §5), rather than founding a second CIOS. So the
+// contracts now travel with the export, and `src/p256.sfn` is the second file
+// that has to honour them — its header records why each of its call sites does.
+//
+// All of these stay out of `src/mod.sfn`'s public barrel regardless: they are
+// capsule-internal arithmetic, not a user-facing surface.
 export {
     MontCtx,
+    _bn_at,
     _bn_cmp,
     _bn_from_be,
+    _bn_is_zero,
+    _bn_limb_bits,
     _bn_limb_mask,
+    _bn_sub,
     _bn_to_be,
+    _bn_zero,
     _modexp_public,
+    _mont_in,
+    _mont_mul,
     _mont_n0_prime,
+    _mont_out,
     mont_ctx_from_be
 };
