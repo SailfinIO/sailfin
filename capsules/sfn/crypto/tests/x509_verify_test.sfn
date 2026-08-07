@@ -307,6 +307,10 @@ test "x509_verify: a pathlen:1 root over two intermediates is rejected" {
     let root: X509Certificate = cert(fx_q1_root());
     assert root.ok;
     assert root.path_len_constraint == 1;
+    // Both intermediates are unconstrained, so the rejection can only come
+    // from the root's bound and not incidentally from one of them.
+    assert cert(fx_q1_i1()).path_len_constraint == -1;
+    assert cert(fx_q1_i2()).path_len_constraint == -1;
 
     let result: X509ChainResult = x509_verify_chain(cert(fx_q1_leaf()), [cert(fx_q1_i1()), cert(fx_q1_i2())], [root], x509_verify_options(now_ms()));
     assert ! result.ok;

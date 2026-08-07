@@ -397,6 +397,13 @@ fn _window_code(cert: X509Certificate, now_ms: int) -> string {
 // basicConstraints (125) and keyUsage (113), both recognised here, and every
 // one of the 128 asserts basicConstraints. No production root in that bundle
 // is refused by this check.
+//
+// The exposure is peer-sent intermediates, not the trust store: a
+// technically-constrained sub-CA carries critical `nameConstraints` by
+// definition, so such a chain is refused here even though OpenSSL accepts it.
+// That is the correct reading of 6.1.3(f) and must not be relaxed — the fix is
+// to *implement* name constraints (SFN-765), never to add 2.5.29.30 to the set
+// above while this function still cannot evaluate it.
 fn _critical_extensions_code(cert: X509Certificate) -> string {
     let mut i: int = 0;
     loop {
