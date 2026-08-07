@@ -1,0 +1,953 @@
+// capsules/sfn/crypto/tests/x509_test.sfn
+//
+// Regression coverage for the sfn/crypto X.509 parser (SFN-504, design
+// SFEP-0048 Phase C): certificate structure, extensions, validity
+// classification, and fail-closed behavior on malformed input. No signature
+// is verified anywhere in this file, so the private keys behind these
+// fixtures are irrelevant to the test.
+import {
+    DerLimits,
+    DerTlv,
+    der_first_child,
+    der_next_sibling,
+    der_oid_string,
+    der_read_tlv,
+    der_tag_sequence
+} from "../src/der";
+import {
+    X509Certificate,
+    x509_key_usage_crl_sign,
+    x509_key_usage_digital_signature,
+    x509_key_usage_key_cert_sign,
+    x509_parse,
+    x509_parse_with_limits,
+    x509_validity_at,
+    x509_validity_expired,
+    x509_validity_in_window,
+    x509_validity_not_yet_valid,
+    x509_validity_unknown
+} from "../src/x509";
+
+fn hexb(s: string) -> int[] {
+    let mut out: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= s.length { break; }
+        let hi: int = _hexval(s[i]);
+        let lo: int = _hexval(s[i + 1]);
+        out.push(((hi << 4) | lo) & 255);
+        i += 2;
+    }
+    return out;
+}
+
+fn _hexval(c: string) -> int {
+    let code: int = char_code(c) & 255;
+    if code >= 48 && code <= 57 {
+        return code - 48;
+    }  // '0'-'9'
+    if code >= 97 && code <= 102 {
+        return code - 97 + 10;
+    }  // 'a'-'f'
+    return 0;
+}
+
+fn eq_bytes(a: int[], b: int[]) -> boolean {
+    if a.length != b.length { return false; }
+    let mut i: int = 0;
+    loop {
+        if i >= a.length { break; }
+        if a[i] != b[i] { return false; }
+        i += 1;
+    }
+    return true;
+}
+
+fn eq_strings(a: string[], b: string[]) -> boolean {
+    if a.length != b.length { return false; }
+    let mut i: int = 0;
+    loop {
+        if i >= a.length { break; }
+        if !strings_equal(a[i], b[i]) { return false; }
+        i += 1;
+    }
+    return true;
+}
+
+fn _first_n(buf: int[], n: int) -> int[] {
+    let mut out: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= n { break; }
+        out.push(buf[i]);
+        i += 1;
+    }
+    return out;
+}
+
+fn _drop_first_n(buf: int[], n: int) -> int[] {
+    let mut out: int[] = [];
+    let mut i: int = n;
+    loop {
+        if i >= buf.length { break; }
+        out.push(buf[i]);
+        i += 1;
+    }
+    return out;
+}
+
+// Overwrite the `n`-byte big-endian long-form length field at `off` in-place
+// with `value`, keeping the existing header width. The hand-spliced fixtures
+// below insert a block into the content a length field describes and then
+// use this to keep that length field consistent, without growing any DER
+// header (SFN-504).
+fn _write_be_length(buf: int[], off: int, n: int, value: int) -> void {
+    // A zero-width write is always a mistake: it silently leaves the length
+    // field untouched, which makes the splice a no-op and the test pass for the
+    // wrong reason. Fail loudly instead (SFN-504).
+    assert n > 0;
+    let mut i: int = 0;
+    loop {
+        if i >= n { break; }
+        let shift: int = (n - 1 - i) * 8;
+        buf[off + i] = (value >> shift) & 255;
+        i += 1;
+    }
+}
+
+// Rewrite the length field of the TLV starting at `start` to `value`, keeping
+// the header's existing width. The two DER length forms put the field in
+// different places: the short form is the single octet at `start + 1`, while the
+// long form is the big-endian run of `n` octets after the `0x80 | n` count
+// octet at `start + 1`. Computing the offset as `start + 2` unconditionally
+// yields a zero-width no-op on every short-form header, so callers must go
+// through this (SFN-504).
+fn _rewrite_length(buf: int[], start: int, content_off: int, value: int) -> void {
+    let first: int = buf[start + 1] & 255;
+    if first < 128 {
+        // Short form cannot express 128 or more without widening the header,
+        // which would shift every following offset.
+        assert value <= 127;
+        buf[start + 1] = value & 255;
+        return;
+    }
+    // Long form must stay minimal, so a value that has dropped below 128 would
+    // need the header to narrow.
+    assert value >= 128;
+    _write_be_length(buf, start + 2, content_off - (start + 2), value);
+}
+
+// `original[0:at]` followed by `extra`, followed by `original[at:]`.
+fn _insert_at(original: int[], at: int, extra: int[]) -> int[] {
+    let mut out: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= at { break; }
+        out.push(original[i]);
+        i += 1;
+    }
+    let mut j: int = 0;
+    loop {
+        if j >= extra.length { break; }
+        out.push(extra[j]);
+        j += 1;
+    }
+    i = at;
+    loop {
+        if i >= original.length { break; }
+        out.push(original[i]);
+        i += 1;
+    }
+    return out;
+}
+
+// FIX 1 fixture: fixture B with a second, smuggled [3] Extensions block
+// appended inside tbsCertificate (right after the existing one), carrying a
+// subjectAltName for "evil.com". `extra` is a hand-built minimal DER block:
+//   a3 17                                  [3] EXPLICIT, len 23
+//     30 15                                  Extensions SEQUENCE, len 21
+//       30 13                                  Extension SEQUENCE, len 19
+//         06 03 55 1d 11                        OID 2.5.29.17 (subjectAltName)
+//         04 0c                                  extnValue OCTET STRING, len 12
+//           30 0a                                  GeneralNames SEQUENCE, len 10
+//             82 08 65 76 69 6c 2e 63 6f 6d          [2] dNSName "evil.com"
+// tbsCertificate's content grows by exactly extra.length (25 bytes), and so
+// does the outer Certificate's, so both existing long-form length fields are
+// rewritten in place rather than grown (SFN-504).
+fn _fixture_b_with_smuggled_san() -> int[] {
+    let original: int[] = hexb(fixture_b_hex());
+    let outer: DerTlv = der_read_tlv(original, 0, original.length);
+    assert outer.ok;
+    let tbs_start: int = outer.content_off;
+    let tbs: DerTlv = der_read_tlv(original, tbs_start, outer.end_off);
+    assert tbs.ok;
+
+    let extra: int[] = hexb("a317301530130603551d11040c300a82086576696c2e636f6d");
+
+    let outer_len_off: int = 2;
+    let outer_len_n: int = outer.content_off - outer_len_off;
+    let tbs_len_off: int = tbs_start + 2;
+    let tbs_len_n: int = tbs.content_off - tbs_len_off;
+
+    let mut out: int[] = _insert_at(original, tbs.end_off, extra);
+    _write_be_length(out, tbs_len_off, tbs_len_n, tbs.content_len + extra.length);
+    _write_be_length(out, outer_len_off, outer_len_n, outer.content_len + extra.length);
+
+    // Precondition: the splice must really have put a second [3] block *inside*
+    // tbsCertificate, or this test would pass for some unrelated reason instead
+    // of by reaching the parser's field-ordering check. tbsCertificate is the
+    // first of the outer SEQUENCE's three children, so it must still end
+    // strictly before the outer element does — signatureAlgorithm and
+    // signatureValue follow it.
+    let reparsed_outer: DerTlv = der_read_tlv(out, 0, out.length);
+    assert reparsed_outer.ok;
+    assert reparsed_outer.end_off == out.length;
+    let reparsed_tbs: DerTlv = der_read_tlv(out, reparsed_outer.content_off, reparsed_outer.end_off);
+    assert reparsed_tbs.ok;
+    assert reparsed_tbs.content_len == tbs.content_len + extra.length;
+    assert reparsed_tbs.end_off < reparsed_outer.end_off;
+
+    // ...and the appended block is the final field of tbsCertificate, carrying
+    // the [3] EXPLICIT Extensions tag.
+    let smuggled_off: int = reparsed_tbs.end_off - extra.length;
+    let smuggled: DerTlv = der_read_tlv(out, smuggled_off, reparsed_tbs.end_off);
+    assert smuggled.ok;
+    assert smuggled.tag == 163;  // [3] EXPLICIT Extensions
+    assert smuggled.end_off == reparsed_tbs.end_off;
+
+    return out;
+}
+
+// FIX 3 fixture: fixture A with a fourth, well-formed child (a NULL TLV)
+// appended inside the outer Certificate SEQUENCE, after signatureValue. The
+// outer length field is rewritten in place to cover it.
+fn _fixture_a_with_extra_child_in_certificate() -> int[] {
+    let original: int[] = hexb(fixture_a_hex());
+    let outer: DerTlv = der_read_tlv(original, 0, original.length);
+    assert outer.ok;
+    assert outer.end_off == original.length;
+
+    let extra: int[] = hexb("0500");
+    let mut out: int[] = _insert_at(original, outer.end_off, extra);
+    _write_be_length(out, 2, outer.content_off - 2, outer.content_len + extra.length);
+
+    // Precondition: the rewritten outer TLV now covers the whole buffer
+    // end-to-end and exposes exactly four top-level children (tbsCertificate,
+    // signatureAlgorithm, signatureValue, the appended NULL) — not the
+    // original three — or this test would pass for the wrong reason.
+    let reparsed: DerTlv = der_read_tlv(out, 0, out.length);
+    assert reparsed.ok;
+    assert reparsed.end_off == out.length;
+    let c1: DerTlv = der_first_child(out, reparsed);
+    assert c1.ok;
+    let c2: DerTlv = der_next_sibling(out, reparsed, c1);
+    assert c2.ok;
+    let c3: DerTlv = der_next_sibling(out, reparsed, c2);
+    assert c3.ok;
+    let c4: DerTlv = der_next_sibling(out, reparsed, c3);
+    assert c4.ok;
+    let c5: DerTlv = der_next_sibling(out, reparsed, c4);
+    assert ! c5.ok;
+    assert c5.error.length == 0;  // exhaustion, not failure: exactly 4 children
+
+    return out;
+}
+
+// FIX 9 fixture: fixture A with its subjectKeyIdentifier extension (OID
+// 2.5.29.14) duplicated verbatim inside the Extensions SEQUENCE. Walks the
+// tree the same way x509_parse does — tbsCertificate's trailing fields to the
+// [3] Extensions wrapper, then its inner SEQUENCE, then each Extension — to
+// find the target by OID rather than a hardcoded offset, then rewrites the
+// four nested length fields the duplication touches (Extensions SEQUENCE,
+// the [3] wrapper, tbsCertificate, outer Certificate).
+fn _fixture_a_with_duplicate_subject_key_id() -> int[] {
+    let original: int[] = hexb(fixture_a_hex());
+    let outer: DerTlv = der_read_tlv(original, 0, original.length);
+    assert outer.ok;
+    let tbs_start: int = outer.content_off;
+    let tbs: DerTlv = der_read_tlv(original, tbs_start, outer.end_off);
+    assert tbs.ok;
+
+    let mut field_start: int = tbs.content_off;
+    let mut field: DerTlv = der_read_tlv(original, field_start, tbs.end_off);
+    assert field.ok;
+    loop {
+        if field.tag == 163 { break; }
+        field_start = field.end_off;
+        field = der_read_tlv(original, field_start, tbs.end_off);
+        assert field.ok;
+    }
+    let ext_wrapper_start: int = field_start;
+    let ext_wrapper: DerTlv = field;
+    let ext_seq_start: int = ext_wrapper.content_off;
+    let ext_seq: DerTlv = der_read_tlv(original, ext_seq_start, ext_wrapper.end_off);
+    assert ext_seq.ok;
+
+    let mut target_start: int = ext_seq.content_off;
+    let mut target: DerTlv = der_read_tlv(original, target_start, ext_seq.end_off);
+    assert target.ok;
+    loop {
+        let oid_tlv: DerTlv = der_read_tlv(original, target.content_off, target.end_off);
+        assert oid_tlv.ok;
+        let oid_res = der_oid_string(original, oid_tlv);
+        assert oid_res.ok;
+        if strings_equal(oid_res.value, "2.5.29.14") { break; }
+        target_start = target.end_off;
+        target = der_read_tlv(original, target_start, ext_seq.end_off);
+        assert target.ok;
+    }
+
+    let dup: int[] = _first_n(_drop_first_n(original, target_start), target.end_off - target_start);
+    assert dup.length > 0;
+
+    let outer_len_off: int = 2;
+    let outer_len_n: int = outer.content_off - outer_len_off;
+    let tbs_len_off: int = tbs_start + 2;
+    let tbs_len_n: int = tbs.content_off - tbs_len_off;
+    let wrapper_len_off: int = ext_wrapper_start + 2;
+    let wrapper_len_n: int = ext_wrapper.content_off - wrapper_len_off;
+    let ext_seq_len_off: int = ext_seq_start + 2;
+    let ext_seq_len_n: int = ext_seq.content_off - ext_seq_len_off;
+
+    let mut out: int[] = _insert_at(original, target.end_off, dup);
+    _write_be_length(out, ext_seq_len_off, ext_seq_len_n, ext_seq.content_len
+        + dup.length);
+    _write_be_length(out, wrapper_len_off, wrapper_len_n, ext_wrapper.content_len
+        + dup.length);
+    _write_be_length(out, tbs_len_off, tbs_len_n, tbs.content_len + dup.length);
+    _write_be_length(out, outer_len_off, outer_len_n, outer.content_len + dup.length);
+
+    // Precondition: reparsing must show exactly six extensions in the [3]
+    // Extensions SEQUENCE (the original five plus the duplicate), all inside
+    // a buffer whose outer TLV still covers it end-to-end, or this test would
+    // pass for the wrong reason.
+    let reparsed_outer: DerTlv = der_read_tlv(out, 0, out.length);
+    assert reparsed_outer.ok;
+    assert reparsed_outer.end_off == out.length;
+    let reparsed_tbs: DerTlv = der_read_tlv(out, reparsed_outer.content_off, reparsed_outer.end_off);
+    assert reparsed_tbs.ok;
+    let mut fcur: int = reparsed_tbs.content_off;
+    let mut fwrapper: DerTlv = der_read_tlv(out, fcur, reparsed_tbs.end_off);
+    assert fwrapper.ok;
+    loop {
+        if fwrapper.tag == 163 { break; }
+        fcur = fwrapper.end_off;
+        fwrapper = der_read_tlv(out, fcur, reparsed_tbs.end_off);
+        assert fwrapper.ok;
+    }
+    let fseq: DerTlv = der_read_tlv(out, fwrapper.content_off, fwrapper.end_off);
+    assert fseq.ok;
+    let mut ecount: int = 0;
+    let mut ecur: int = fseq.content_off;
+    loop {
+        if ecur >= fseq.end_off { break; }
+        let e: DerTlv = der_read_tlv(out, ecur, fseq.end_off);
+        assert e.ok;
+        ecur = e.end_off;
+        ecount += 1;
+    }
+    assert ecount == 6;
+
+    return out;
+}
+
+// FIX B fixture: fixture A with a well-formed NULL TLV inserted immediately
+// after the Extensions SEQUENCE but still inside the enclosing [3] EXPLICIT
+// wrapper. Only the [3] wrapper's, tbsCertificate's and the outer
+// Certificate's length fields grow; the Extensions SEQUENCE's own length is
+// untouched since the extra bytes sit outside it.
+fn _fixture_a_with_trailing_tlv_in_extensions() -> int[] {
+    let original: int[] = hexb(fixture_a_hex());
+    let outer: DerTlv = der_read_tlv(original, 0, original.length);
+    assert outer.ok;
+    let tbs_start: int = outer.content_off;
+    let tbs: DerTlv = der_read_tlv(original, tbs_start, outer.end_off);
+    assert tbs.ok;
+
+    let mut field_start: int = tbs.content_off;
+    let mut field: DerTlv = der_read_tlv(original, field_start, tbs.end_off);
+    assert field.ok;
+    loop {
+        if field.tag == 163 { break; }
+        field_start = field.end_off;
+        field = der_read_tlv(original, field_start, tbs.end_off);
+        assert field.ok;
+    }
+    let ext_wrapper_start: int = field_start;
+    let ext_wrapper: DerTlv = field;
+    let ext_seq: DerTlv = der_read_tlv(original, ext_wrapper.content_off, ext_wrapper.end_off);
+    assert ext_seq.ok;
+
+    // Precondition: the Extensions SEQUENCE must currently end exactly where
+    // the [3] wrapper does, or inserting right after it would land outside
+    // the wrapper instead of the intended position (SFN-504).
+    assert ext_seq.end_off == ext_wrapper.end_off;
+
+    let extra: int[] = hexb("0500");
+
+    let outer_len_off: int = 2;
+    let outer_len_n: int = outer.content_off - outer_len_off;
+    let tbs_len_off: int = tbs_start + 2;
+    let tbs_len_n: int = tbs.content_off - tbs_len_off;
+    let wrapper_len_off: int = ext_wrapper_start + 2;
+    let wrapper_len_n: int = ext_wrapper.content_off - wrapper_len_off;
+
+    let mut out: int[] = _insert_at(original, ext_seq.end_off, extra);
+    _write_be_length(out, wrapper_len_off, wrapper_len_n, ext_wrapper.content_len
+        + extra.length);
+    _write_be_length(out, tbs_len_off, tbs_len_n, tbs.content_len + extra.length);
+    _write_be_length(out, outer_len_off, outer_len_n, outer.content_len + extra.length);
+
+    // Precondition: reparsing must show the extra NULL TLV landing strictly
+    // inside the [3] wrapper, after the Extensions SEQUENCE ends, or this
+    // test would pass for some unrelated reason instead of by reaching the
+    // trailing-data check inside the wrapper.
+    let reparsed_outer: DerTlv = der_read_tlv(out, 0, out.length);
+    assert reparsed_outer.ok;
+    assert reparsed_outer.end_off == out.length;
+    let reparsed_tbs: DerTlv = der_read_tlv(out, reparsed_outer.content_off, reparsed_outer.end_off);
+    assert reparsed_tbs.ok;
+    let mut fcur: int = reparsed_tbs.content_off;
+    let mut fwrapper: DerTlv = der_read_tlv(out, fcur, reparsed_tbs.end_off);
+    assert fwrapper.ok;
+    loop {
+        if fwrapper.tag == 163 { break; }
+        fcur = fwrapper.end_off;
+        fwrapper = der_read_tlv(out, fcur, reparsed_tbs.end_off);
+        assert fwrapper.ok;
+    }
+    let fseq: DerTlv = der_read_tlv(out, fwrapper.content_off, fwrapper.end_off);
+    assert fseq.ok;
+    assert fseq.tag == der_tag_sequence();
+    assert fseq.end_off < fwrapper.end_off;
+    let ftrailer: DerTlv = der_read_tlv(out, fseq.end_off, fwrapper.end_off);
+    assert ftrailer.ok;
+    assert ftrailer.tag == 5;  // NULL
+    assert ftrailer.end_off == fwrapper.end_off;
+
+    return out;
+}
+
+// FIX C fixture: fixture A with a well-formed NULL TLV inserted immediately
+// after the value of the subject's first AttributeTypeAndValue (commonName),
+// still inside that AttributeTypeAndValue's own SEQUENCE. Only the ATV, its
+// enclosing RDN SET, the subject Name SEQUENCE, tbsCertificate and the outer
+// Certificate length fields grow — all by exactly 2 bytes, which stays within
+// each field's existing short/long-form header width.
+fn _fixture_a_with_trailing_data_in_name_attribute() -> int[] {
+    let original: int[] = hexb(fixture_a_hex());
+    let outer: DerTlv = der_read_tlv(original, 0, original.length);
+    assert outer.ok;
+    let tbs_start: int = outer.content_off;
+    let tbs: DerTlv = der_read_tlv(original, tbs_start, outer.end_off);
+    assert tbs.ok;
+
+    // Walk to the subject Name: version[optional], serial, signature,
+    // issuer, validity, subject — the sixth field of tbsCertificate.
+    let mut cur: int = tbs.content_off;
+    let mut peek: DerTlv = der_read_tlv(original, cur, tbs.end_off);
+    assert peek.ok;
+    if peek.tag == 160 {
+        cur = peek.end_off;
+        peek = der_read_tlv(original, cur, tbs.end_off);
+        assert peek.ok;
+    }
+    cur = peek.end_off;  // serial
+    peek = der_read_tlv(original, cur, tbs.end_off);
+    assert peek.ok;
+    cur = peek.end_off;  // signature
+    peek = der_read_tlv(original, cur, tbs.end_off);
+    assert peek.ok;
+    cur = peek.end_off;  // issuer
+    peek = der_read_tlv(original, cur, tbs.end_off);
+    assert peek.ok;
+    cur = peek.end_off;  // validity
+    let subject_start: int = cur;
+    let subject: DerTlv = der_read_tlv(original, subject_start, tbs.end_off);
+    assert subject.ok;
+
+    let rdn_start: int = subject.content_off;
+    let rdn: DerTlv = der_read_tlv(original, rdn_start, subject.end_off);
+    assert rdn.ok;
+    let atv_start: int = rdn.content_off;
+    let atv: DerTlv = der_read_tlv(original, atv_start, rdn.end_off);
+    assert atv.ok;
+    let type_tlv: DerTlv = der_read_tlv(original, atv.content_off, atv.end_off);
+    assert type_tlv.ok;
+    let value_tlv: DerTlv = der_read_tlv(original, type_tlv.end_off, atv.end_off);
+    assert value_tlv.ok;
+
+    // Precondition: this AttributeTypeAndValue must currently end exactly
+    // where its value does, or inserting right after it would land outside
+    // the ATV instead of the intended position (SFN-504).
+    assert value_tlv.end_off == atv.end_off;
+
+    let extra: int[] = hexb("0500");
+
+    // Every enclosing container grows by exactly `extra.length`. The subject,
+    // RDN and ATV headers are all short form here, so these must go through
+    // _rewrite_length rather than assuming a long-form field offset.
+    let mut out: int[] = _insert_at(original, atv.end_off, extra);
+    _rewrite_length(out, atv_start, atv.content_off, atv.content_len + extra.length);
+    _rewrite_length(out, rdn_start, rdn.content_off, rdn.content_len + extra.length);
+    _rewrite_length(out, subject_start, subject.content_off, subject.content_len
+        + extra.length);
+    _rewrite_length(out, tbs_start, tbs.content_off, tbs.content_len + extra.length);
+    _rewrite_length(out, 0, outer.content_off, outer.content_len + extra.length);
+
+    // Precondition: reparsing must show the extra NULL TLV landing strictly
+    // inside the rewritten ATV, after its value ends, or this test would
+    // pass for some unrelated reason instead of by reaching the trailing-data
+    // check inside the name attribute.
+    let reparsed_outer: DerTlv = der_read_tlv(out, 0, out.length);
+    assert reparsed_outer.ok;
+    assert reparsed_outer.end_off == out.length;
+    let reparsed_tbs: DerTlv = der_read_tlv(out, reparsed_outer.content_off, reparsed_outer.end_off);
+    assert reparsed_tbs.ok;
+    let mut rcur: int = reparsed_tbs.content_off;
+    let mut rpeek: DerTlv = der_read_tlv(out, rcur, reparsed_tbs.end_off);
+    assert rpeek.ok;
+    if rpeek.tag == 160 {
+        rcur = rpeek.end_off;
+        rpeek = der_read_tlv(out, rcur, reparsed_tbs.end_off);
+        assert rpeek.ok;
+    }
+    rcur = rpeek.end_off;
+    rpeek = der_read_tlv(out, rcur, reparsed_tbs.end_off);
+    assert rpeek.ok;
+    rcur = rpeek.end_off;
+    rpeek = der_read_tlv(out, rcur, reparsed_tbs.end_off);
+    assert rpeek.ok;
+    rcur = rpeek.end_off;
+    rpeek = der_read_tlv(out, rcur, reparsed_tbs.end_off);
+    assert rpeek.ok;
+    rcur = rpeek.end_off;
+    let rsubject: DerTlv = der_read_tlv(out, rcur, reparsed_tbs.end_off);
+    assert rsubject.ok;
+    let rrdn: DerTlv = der_read_tlv(out, rsubject.content_off, rsubject.end_off);
+    assert rrdn.ok;
+    let ratv: DerTlv = der_read_tlv(out, rrdn.content_off, rrdn.end_off);
+    assert ratv.ok;
+    let rtype: DerTlv = der_read_tlv(out, ratv.content_off, ratv.end_off);
+    assert rtype.ok;
+    let rvalue: DerTlv = der_read_tlv(out, rtype.end_off, ratv.end_off);
+    assert rvalue.ok;
+    assert rvalue.end_off < ratv.end_off;
+    let rtrailer: DerTlv = der_read_tlv(out, rvalue.end_off, ratv.end_off);
+    assert rtrailer.ok;
+    assert rtrailer.tag == 5;  // NULL
+    assert rtrailer.end_off == ratv.end_off;
+
+    return out;
+}
+
+// FIX A fixture: a synthetic minimal Certificate whose [3] Extensions
+// SEQUENCE carries `count` distinct-OID extensions, each the minimal 9-byte
+// `30 07 06 03 2b 06 <arc> 04 00` (private-enterprise OID 1.3.6.<arc>, empty
+// OCTET STRING value). Built from scratch rather than spliced into fixture A:
+// growing fixture A's extension count by dozens pushes its length fields past
+// their current header width, and der_read_tlv rejects a non-minimal length
+// encoding (SFN-504).
+fn _synthetic_cert_with_extension_count(count: int) -> int[] {
+    let version_field: int[] = hexb("a003020102");  // [0] EXPLICIT Version INTEGER 2 (v3)
+    let serial: int[] = hexb("020101");  // INTEGER 1
+    let alg_id: int[] = hexb("300506032b6570");  // SEQUENCE { OID Ed25519 }
+    let name: int[] = hexb("3000");  // empty Name SEQUENCE
+    let validity: int[] = hexb("301e170d3236303130313030303030305a170d3237303130313030303030305a");
+    let spki: int[] = hexb("302a300506032b6570032100"
+        + "0000000000000000000000000000000000000000000000000000000000000000");
+
+    let mut extensions_content: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= count { break; }
+        // 06 03 2b 06 <arc>: OID 1.3.6.<arc>, arc in [0, 127] to stay a single
+        // content octet per extension, keeping every extension distinct.
+        let arc: int = i & 127;
+        extensions_content.push(48);
+        extensions_content.push(7);
+        extensions_content.push(6);
+        extensions_content.push(3);
+        extensions_content.push(43);
+        extensions_content.push(6);
+        extensions_content.push(arc);
+        extensions_content.push(4);
+        extensions_content.push(0);
+        i += 1;
+    }
+    // Distinctness requires `count <= 128` distinct single-byte final arcs;
+    // both call sites below (64 and 65) stay under that.
+    let ext_seq_len: int[] = _der_len_bytes(extensions_content.length);
+    let mut ext_seq: int[] = [];
+    ext_seq.push(48);
+    ext_seq = ext_seq.concat(ext_seq_len);
+    ext_seq = ext_seq.concat(extensions_content);
+    let wrapper_len: int[] = _der_len_bytes(ext_seq.length);
+    let mut wrapper: int[] = [];
+    wrapper.push(163);
+    wrapper = wrapper.concat(wrapper_len);
+    wrapper = wrapper.concat(ext_seq);
+
+    let mut tbs_content: int[] = [];
+    tbs_content = tbs_content.concat(version_field);
+    tbs_content = tbs_content.concat(serial);
+    tbs_content = tbs_content.concat(alg_id);
+    tbs_content = tbs_content.concat(name);
+    tbs_content = tbs_content.concat(validity);
+    tbs_content = tbs_content.concat(name);
+    tbs_content = tbs_content.concat(spki);
+    tbs_content = tbs_content.concat(wrapper);
+    let tbs_len: int[] = _der_len_bytes(tbs_content.length);
+    let mut tbs: int[] = [];
+    tbs.push(48);
+    tbs = tbs.concat(tbs_len);
+    tbs = tbs.concat(tbs_content);
+
+    let sig_value: int[] = hexb("03020000");  // BIT STRING, 0 unused bits, empty
+
+    let mut cert_content: int[] = [];
+    cert_content = cert_content.concat(tbs);
+    cert_content = cert_content.concat(alg_id);
+    cert_content = cert_content.concat(sig_value);
+    let cert_len: int[] = _der_len_bytes(cert_content.length);
+    let mut cert: int[] = [];
+    cert.push(48);
+    cert = cert.concat(cert_len);
+    cert = cert.concat(cert_content);
+    return cert;
+}
+
+// A synthetic v3 certificate carrying the deprecated issuerUniqueID [1] and
+// subjectUniqueID [2] fields, in order, between the SPKI and the Extensions
+// wrapper. `UniqueIdentifier` is a BIT STRING, tagged IMPLICIT, so the fields
+// are primitive 0x81 / 0x82.
+//
+// This is the accept direction of the tbsCertificate field-ordering guard. Every
+// other test of that guard proves it *rejects* something; without this one, a
+// mis-set stage transition that wrongly refused a legal `[1] [2] [3]`
+// certificate would pass the whole suite. openssl will not emit these fields
+// (they are v2-only and deprecated), hence a hand-built certificate — nothing
+// here verifies a signature, so the placeholder key and signature are
+// immaterial (SFN-504).
+fn _synthetic_cert_with_unique_ids() -> int[] {
+    let version_field: int[] = hexb("a003020102");  // [0] EXPLICIT Version INTEGER 2 (v3)
+    let serial: int[] = hexb("020101");  // INTEGER 1
+    let alg_id: int[] = hexb("300506032b6570");  // SEQUENCE { OID Ed25519 }
+    let name: int[] = hexb("3000");  // empty Name SEQUENCE
+    let validity: int[] = hexb("301e170d3236303130313030303030305a170d3237303130313030303030305a");
+    let spki: int[] = hexb("302a300506032b6570032100"
+        + "0000000000000000000000000000000000000000000000000000000000000000");
+    let issuer_unique_id: int[] = hexb("810200ff");  // [1] IMPLICIT BIT STRING
+    let subject_unique_id: int[] = hexb("820200aa");  // [2] IMPLICIT BIT STRING
+    // [3] EXPLICIT (a3 0b) { Extensions SEQUENCE (30 09) { Extension (30 07)
+    //   { OID 1.3.6.0 (06 03 2b 06 00), extnValue OCTET STRING empty (04 00) } } }
+    let wrapper: int[] = hexb("a30b3009300706032b06000400");
+
+    let mut tbs_content: int[] = [];
+    tbs_content = tbs_content.concat(version_field);
+    tbs_content = tbs_content.concat(serial);
+    tbs_content = tbs_content.concat(alg_id);
+    tbs_content = tbs_content.concat(name);
+    tbs_content = tbs_content.concat(validity);
+    tbs_content = tbs_content.concat(name);
+    tbs_content = tbs_content.concat(spki);
+    tbs_content = tbs_content.concat(issuer_unique_id);
+    tbs_content = tbs_content.concat(subject_unique_id);
+    tbs_content = tbs_content.concat(wrapper);
+    let tbs_len: int[] = _der_len_bytes(tbs_content.length);
+    let mut tbs: int[] = [];
+    tbs.push(48);
+    tbs = tbs.concat(tbs_len);
+    tbs = tbs.concat(tbs_content);
+
+    let sig_value: int[] = hexb("03020000");  // BIT STRING, 0 unused bits, empty
+
+    let mut cert_content: int[] = [];
+    cert_content = cert_content.concat(tbs);
+    cert_content = cert_content.concat(alg_id);
+    cert_content = cert_content.concat(sig_value);
+    let cert_len: int[] = _der_len_bytes(cert_content.length);
+    let mut cert: int[] = [];
+    cert.push(48);
+    cert = cert.concat(cert_len);
+    cert = cert.concat(cert_content);
+    return cert;
+}
+
+// Minimal-form DER length octets for `len`, long-form only when `len > 127`.
+fn _der_len_bytes(len: int) -> int[] {
+    if len <= 127 {
+        let mut out: int[] = [];
+        out.push(len);
+        return out;
+    }
+    let mut body: int[] = [];
+    let mut n: int = len;
+    loop {
+        if n <= 0 { break; }
+        body.push(n & 255);
+        n = n / 256;
+    }
+    let mut rev: int[] = [];
+    let mut i: int = body.length - 1;
+    loop {
+        if i < 0 { break; }
+        rev.push(body[i]);
+        i -= 1;
+    }
+    let mut out: int[] = [];
+    out.push(128 | rev.length);
+    out = out.concat(rev);
+    return out;
+}
+
+// Fixture A: an Ed25519 leaf certificate, CN=Sailfin Test Leaf, O=Sailfin,
+// C=US, serial 0102030405060708, UTCTime validity 2026-01-01 -> 2027-01-01,
+// SAN example.com / *.example.com / www.example.org, basicConstraints
+// CA:FALSE (critical), keyUsage digitalSignature (critical), extendedKeyUsage
+// serverAuth, plus a subjectKeyIdentifier. Produced with:
+//   openssl req -new -x509 -key <ed25519 key> -set_serial 0x0102030405060708 \
+//     -not_before 20260101000000Z -not_after 20270101000000Z ...
+// No signature is verified by this test; the key material behind the
+// fixture is irrelevant.
+fn fixture_a_hex() -> string {
+    return "308201ba3082016ca00302010202080102030405060708300506032b6570303b311a301806035504030c115361696c66696e2054657374204c6561663110300e060355040a0c075361696c66696e310b3009060355040613025553301e170d3236303130313030303030305a170d3237303130313030303030305a303b311a301806035504030c115361696c66696e2054657374204c6561663110300e060355040a0c075361696c66696e310b3009060355040613025553302a300506032b6570032100ca7b28b5ebd179909c5fb9e6dba6f8678cdbe209dd4e0e2d689ea4e818a79156a3818d30818a300c0603551d130101ff04023000300e0603551d0f0101ff04040302078030130603551d25040c300a06082b0601050507030130360603551d11042f302d820b6578616d706c652e636f6d820d2a2e6578616d706c652e636f6d820f7777772e6578616d706c652e6f7267301d0603551d0e04160414dae9f13ce305fe193bbf7734e12927291ec5119e300506032b6570034100d13358f4f9134f32333e18b2ca533dc44d9a81e94c26338b1336229de15fad2a5ccaa50f446ef820a7c80b9a4ec27a3befded1db8d2087012f4d606b0d413800";
+}
+
+// Fixture B: an Ed25519 root certificate, CN=Sailfin Test Root, serial 0x2a,
+// UTCTime notBefore + GeneralizedTime notAfter (2026-01-01 -> 2052-01-01),
+// basicConstraints CA:TRUE pathlen:1 (critical), keyUsage keyCertSign /
+// cRLSign (critical), no SAN. Produced the same way as fixture A. No
+// signature is verified by this test.
+fn fixture_b_hex() -> string {
+    return "3082012d3081e0a00302010202012a300506032b6570301c311a301806035504030c115361696c66696e205465737420526f6f743020170d3236303130313030303030305a180f32303532303130313030303030305a301c311a301806035504030c115361696c66696e205465737420526f6f74302a300506032b6570032100c845c799982b7bc9da167aeee1c6fff8e19b3478e9db0666737ecd6e0b78d2a6a345304330120603551d130101ff040830060101ff020101300e0603551d0f0101ff040403020106301d0603551d0e04160414caf81cb14535e6af8236dbaaf0bbc00d991c0bae300506032b6570034100e71f1332a9d047a520fba41cf495cfadc7ec30b1dcb1352c96f4953b59ba770896e5df5c5dd0e0752759cdea0e9c93978062d250b611fe311bb416b0ec376c07";
+}
+
+test "x509: fixture A parses with the expected tbsCertificate fields" {
+    let cert: X509Certificate = x509_parse(hexb(fixture_a_hex()));
+    assert cert.ok;
+    assert cert.version == 3;
+    assert eq_bytes(cert.serial, [1, 2, 3, 4, 5, 6, 7, 8]);
+    assert strings_equal(cert.signature_algorithm, "1.3.101.112");
+    assert strings_equal(cert.subject_cn, "Sailfin Test Leaf");
+    assert strings_equal(cert.issuer_cn, "Sailfin Test Leaf");
+    assert cert.not_before_ms == 1767225600000;
+    assert cert.not_after_ms == 1798761600000;
+    assert strings_equal(cert.spki_algorithm, "1.3.101.112");
+}
+
+test "x509: fixture A subjectPublicKeyInfo carries the raw Ed25519 key bytes" {
+    let cert: X509Certificate = x509_parse(hexb(fixture_a_hex()));
+    assert cert.ok;
+    let want: int[] = hexb("ca7b28b5ebd179909c5fb9e6dba6f8678cdbe209dd4e0e2d689ea4e818a79156");
+    assert eq_bytes(cert.spki_key, want);
+}
+
+test "x509: fixture A subjectAltName dNSName entries decode in wire order" {
+    let cert: X509Certificate = x509_parse(hexb(fixture_a_hex()));
+    assert cert.ok;
+    let want: string[] = ["example.com", "*.example.com", "www.example.org"];
+    assert eq_strings(cert.dns_names, want);
+}
+
+test "x509: fixture A basicConstraints, keyUsage and extendedKeyUsage are parsed and reported" {
+    let cert: X509Certificate = x509_parse(hexb(fixture_a_hex()));
+    assert cert.ok;
+    assert cert.has_basic_constraints;
+    assert ! cert.is_ca;
+    assert cert.path_len_constraint == -1;
+    assert cert.has_key_usage;
+    assert cert.key_usage_bits == x509_key_usage_digital_signature();
+    assert cert.has_extended_key_usage;
+    assert eq_strings(cert.extended_key_usages, ["1.3.6.1.5.5.7.3.1"]);
+}
+
+test "x509: fixture A records every extension verbatim and keeps issuer_der intact" {
+    let cert: X509Certificate = x509_parse(hexb(fixture_a_hex()));
+    assert cert.ok;
+    assert cert.extensions.length == 5;
+    assert cert.issuer_der.length > 0;
+    assert cert.issuer_der[0] == der_tag_sequence();
+}
+
+test "x509: fixture B parses with a GeneralizedTime notAfter and no SAN" {
+    let cert: X509Certificate = x509_parse(hexb(fixture_b_hex()));
+    assert cert.ok;
+    assert eq_bytes(cert.serial, [42]);
+    assert strings_equal(cert.subject_cn, "Sailfin Test Root");
+    assert cert.not_before_ms == 1767225600000;
+    assert cert.not_after_ms == 2587680000000;
+    assert cert.dns_names.length == 0;
+    assert ! cert.has_extended_key_usage;
+    assert cert.extensions.length == 3;
+}
+
+test "x509: fixture B basicConstraints and keyUsage report CA and cert-signing bits" {
+    let cert: X509Certificate = x509_parse(hexb(fixture_b_hex()));
+    assert cert.ok;
+    assert cert.is_ca;
+    assert cert.path_len_constraint == 1;
+    assert cert.key_usage_bits == (x509_key_usage_key_cert_sign() | x509_key_usage_crl_sign());
+}
+
+// The accept direction of the field-ordering guard: a legal [1] [2] [3] run must
+// still parse. Pairs with the rejection tests below, which alone would be
+// satisfied by a guard that refused everything.
+test "x509: issuerUniqueID and subjectUniqueID are skipped, not rejected" {
+    let cert: X509Certificate = x509_parse(_synthetic_cert_with_unique_ids());
+    assert cert.ok;
+    assert cert.version == 3;
+    assert eq_bytes(cert.serial, hexb("01"));
+    // The unique IDs are skipped rather than exposed, and the [3] block after
+    // them is still reached and parsed.
+    assert cert.extensions.length == 1;
+    assert strings_equal(cert.extensions[0].oid, "1.3.6.0");
+}
+
+test "x509: a second [3] extensions block cannot smuggle a subjectAltName" {
+    let cert: X509Certificate = x509_parse(_fixture_b_with_smuggled_san());
+    assert ! cert.ok;
+    assert strings_equal(cert.error, "x509: unexpected tbsCertificate field");
+}
+
+test "x509: a fourth well-formed child inside the certificate SEQUENCE is rejected" {
+    let cert: X509Certificate = x509_parse(_fixture_a_with_extra_child_in_certificate());
+    assert ! cert.ok;
+    assert strings_equal(cert.error, "x509: unexpected trailing field in certificate");
+}
+
+test "x509: a duplicated subjectKeyIdentifier extension is rejected" {
+    let cert: X509Certificate = x509_parse(_fixture_a_with_duplicate_subject_key_id());
+    assert ! cert.ok;
+    assert strings_equal(cert.error, "x509: duplicate extension");
+}
+
+test "x509: a certificate with exactly the extension cap still parses" {
+    let cert: X509Certificate = x509_parse(_synthetic_cert_with_extension_count(64));
+    assert cert.ok;
+    assert cert.extensions.length == 64;
+}
+
+test "x509: a certificate exceeding the extension cap is rejected" {
+    let cert: X509Certificate = x509_parse(_synthetic_cert_with_extension_count(65));
+    assert ! cert.ok;
+    assert strings_equal(cert.error, "x509: too many extensions");
+}
+
+test "x509: a well-formed TLV after the Extensions SEQUENCE but inside the [3] wrapper is rejected" {
+    let cert: X509Certificate = x509_parse(_fixture_a_with_trailing_tlv_in_extensions());
+    assert ! cert.ok;
+    assert strings_equal(cert.error, "x509: unexpected trailing data in extensions");
+}
+
+test "x509: a well-formed TLV after a name attribute's value is rejected" {
+    let cert: X509Certificate = x509_parse(_fixture_a_with_trailing_data_in_name_attribute());
+    assert ! cert.ok;
+    assert strings_equal(cert.error, "x509: unexpected trailing data in name attribute");
+}
+
+test "x509: validity classification treats both bounds as inclusive" {
+    let cert: X509Certificate = x509_parse(hexb(fixture_a_hex()));
+    assert cert.ok;
+    assert x509_validity_at(cert, 1767225600000) == x509_validity_in_window();
+    assert x509_validity_at(cert, 1798761600000) == x509_validity_in_window();
+    assert x509_validity_at(cert, 1767225599999) == x509_validity_not_yet_valid();
+    assert x509_validity_at(cert, 1798761600001) == x509_validity_expired();
+    assert x509_validity_at(cert, 1780000000000) == x509_validity_in_window();
+}
+
+test "x509: validity classification on a failed parse is unknown" {
+    let empty: int[] = [];
+    let cert: X509Certificate = x509_parse(empty);
+    assert ! cert.ok;
+    assert x509_validity_at(cert, 1780000000000) == x509_validity_unknown();
+}
+
+test "x509: a truncated certificate is rejected cleanly" {
+    let truncated: int[] = _first_n(hexb(fixture_a_hex()), 40);
+    let cert: X509Certificate = x509_parse(truncated);
+    assert ! cert.ok;
+    assert cert.error.length > 0;
+}
+
+// A malformed trailing byte is refused by the structural guard walk, which runs
+// before any value decoding, so the `der:` layer names this one. The assertion
+// is deliberately on "rejected with an error" rather than on the exact message:
+// which layer gets first refusal is an ordering detail, not a contract.
+test "x509: a malformed trailing byte is rejected cleanly" {
+    let mut with_trailer: int[] = hexb(fixture_a_hex());
+    with_trailer.push(0);
+    let cert: X509Certificate = x509_parse(with_trailer);
+    assert ! cert.ok;
+    assert cert.error.length > 0;
+}
+
+// A *well-formed* trailing TLV (here a NULL) passes the guard walk, so it is the
+// x509 layer's own "the outer SEQUENCE must end at the last byte" check that has
+// to catch it. Without this case that check would be unreachable from any test.
+test "x509: a well-formed trailing TLV after the certificate SEQUENCE is rejected" {
+    let mut with_trailer: int[] = hexb(fixture_a_hex());
+    with_trailer.push(5);
+    with_trailer.push(0);
+    let cert: X509Certificate = x509_parse(with_trailer);
+    assert ! cert.ok;
+    assert strings_equal(cert.error, "x509: trailing data after certificate");
+}
+
+test "x509: an indefinite-length outer SEQUENCE is rejected cleanly" {
+    let original: int[] = hexb(fixture_a_hex());
+    let mut indefinite: int[] = hexb("3080");
+    let body: int[] = _drop_first_n(original, 4);
+    let mut i: int = 0;
+    loop {
+        if i >= body.length { break; }
+        indefinite.push(body[i]);
+        i += 1;
+    }
+    let cert: X509Certificate = x509_parse(indefinite);
+    assert ! cert.ok;
+    assert cert.error.length > 0;
+}
+
+test "x509: der_check_structure's nesting-depth guard propagates verbatim through x509_parse_with_limits" {
+    let tight: DerLimits = DerLimits { max_depth: 1, max_input_len: 1048576 };
+    let cert: X509Certificate = x509_parse_with_limits(hexb(fixture_a_hex()), tight);
+    assert ! cert.ok;
+    assert strings_equal(cert.error, "der: maximum nesting depth exceeded");
+}
+
+test "x509: der_check_structure's size guard propagates verbatim through x509_parse_with_limits" {
+    let tight: DerLimits = DerLimits { max_depth: 64, max_input_len: 4 };
+    let cert: X509Certificate = x509_parse_with_limits(hexb(fixture_a_hex()), tight);
+    assert ! cert.ok;
+    assert strings_equal(cert.error, "der: input exceeds maximum size");
+}
+
+test "x509: a length field claiming more bytes than the buffer holds is rejected cleanly" {
+    let short: int[] = _first_n(hexb(fixture_a_hex()), 10);
+    let cert: X509Certificate = x509_parse(short);
+    assert ! cert.ok;
+    assert cert.error.length > 0;
+}
+
+test "x509: empty input is rejected cleanly" {
+    let empty: int[] = [];
+    let cert: X509Certificate = x509_parse(empty);
+    assert ! cert.ok;
+    assert cert.error.length > 0;
+}
+
+// No-trust-surface check: this module makes no trust decision. Classifying a
+// certificate's validity window never mutates the certificate itself, and a
+// certificate with is_ca == false still classifies purely on its notBefore/
+// notAfter window — nothing here enforces basicConstraints. The real
+// guarantee is the absent verify_*/validate_* API surface, enforced by
+// review (SFN-504).
+test "x509: validity classification never changes cert.ok, and CA status is not enforced" {
+    let cert: X509Certificate = x509_parse(hexb(fixture_a_hex()));
+    assert cert.ok;
+    assert ! cert.is_ca;
+    let classification: int = x509_validity_at(cert, 1780000000000);
+    assert cert.ok;
+    assert classification == x509_validity_in_window();
+}

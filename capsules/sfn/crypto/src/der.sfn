@@ -1,0 +1,668 @@
+// capsules/sfn/crypto/src/der.sfn
+//
+// A minimal DER (definite-length only) TLV reader covering the subset X.509
+// needs. It performs no signature verification and no trust decision; it is
+// hardened against adversarial input with explicit depth and total-length
+// guards (SFN-504, precedent SFN-156).
+import { int_to_string } from "sfn/strings";
+
+// ── Identifier-octet tag constants, verbatim as they appear on the wire ──
+fn der_tag_boolean() -> int { return 1; }
+
+fn der_tag_integer() -> int { return 2; }
+
+fn der_tag_bit_string() -> int { return 3; }
+
+fn der_tag_octet_string() -> int { return 4; }
+
+fn der_tag_null() -> int { return 5; }
+
+fn der_tag_oid() -> int { return 6; }
+
+fn der_tag_utf8_string() -> int { return 12; }
+
+fn der_tag_printable_string() -> int { return 19; }
+
+fn der_tag_t61_string() -> int { return 20; }
+
+fn der_tag_ia5_string() -> int { return 22; }
+
+fn der_tag_utc_time() -> int { return 23; }
+
+fn der_tag_generalized_time() -> int { return 24; }
+
+fn der_tag_bmp_string() -> int { return 30; }
+
+fn der_tag_sequence() -> int { return 48; }
+
+fn der_tag_set() -> int { return 49; }
+
+fn der_is_constructed(tag: int) -> boolean { return (tag & 32) != 0; }
+
+// Class bits `10` (bits 7-6 of the identifier octet) mean context-specific.
+fn der_is_context(tag: int) -> boolean { return (tag & 192) == 128; }
+
+fn der_context_number(tag: int) -> int { return tag & 31; }
+
+fn der_is_directory_string(tag: int) -> boolean {
+    return tag == der_tag_utf8_string() || tag == der_tag_printable_string()
+        || tag == der_tag_t61_string()
+        || tag == der_tag_ia5_string()
+        || tag == der_tag_bmp_string();
+}
+
+// ── Limits (mirrors json::ParseLimits / default_limits, SFN-156) ──
+// Real certificate chains nest under 15 levels and no legitimate certificate
+// approaches 1 MiB; both caps are generous ceilings, not tuning knobs.
+// `max_depth` also equals der_check_structure's recursion depth, so it is a
+// stack-safety bound, not only a policy knob: raising it far above the
+// default risks a native stack overflow on adversarial input, so it is a
+// ceiling to lower, never to raise (SFN-504).
+struct DerLimits {
+    max_depth: int;  // maximum constructed-TLV nesting depth before a clean reject
+    max_input_len: int;  // maximum total input length before a clean reject
+}
+
+fn der_default_limits() -> DerLimits {
+    return DerLimits { max_depth: 64, max_input_len: 1048576 };
+}
+
+// ── Outcome structs (SFN-156 precedent: plain ok/error, no Result<T, E>) ──
+struct DerTlv {
+    ok: boolean;
+    error: string;
+    tag: int;  // identifier octet verbatim: class + constructed bit + number
+    content_off: int;  // absolute offset of the first content byte
+    content_len: int;
+    end_off: int;  // content_off + content_len, the first byte past this TLV
+}
+
+struct DerIntResult {
+    ok: boolean;
+    error: string;
+    value: int;
+}
+
+struct DerBytesResult {
+    ok: boolean;
+    error: string;
+    value: int[];
+}
+
+struct DerTextResult {
+    ok: boolean;
+    error: string;
+    value: string;
+}
+
+struct DerBoolResult {
+    ok: boolean;
+    error: string;
+    value: boolean;
+}
+
+struct DerOutcome {
+    ok: boolean;
+    error: string;
+}
+
+fn _tlv_err(message: string) -> DerTlv {
+    return DerTlv {
+        ok: false,
+        error: message,
+        tag: 0,
+        content_off: 0,
+        content_len: 0,
+        end_off: 0
+    };
+}
+
+fn _int_err(message: string) -> DerIntResult {
+    return DerIntResult { ok: false, error: message, value: 0 };
+}
+
+fn _int_ok(value: int) -> DerIntResult {
+    return DerIntResult { ok: true, error: "", value: value };
+}
+
+fn _bytes_err(message: string) -> DerBytesResult {
+    let empty: int[] = [];
+    return DerBytesResult { ok: false, error: message, value: empty };
+}
+
+fn _bytes_ok(value: int[]) -> DerBytesResult {
+    return DerBytesResult { ok: true, error: "", value: value };
+}
+
+fn _text_err(message: string) -> DerTextResult {
+    return DerTextResult { ok: false, error: message, value: "" };
+}
+
+fn _text_ok(value: string) -> DerTextResult {
+    return DerTextResult { ok: true, error: "", value: value };
+}
+
+fn _bool_err(message: string) -> DerBoolResult {
+    return DerBoolResult { ok: false, error: message, value: false };
+}
+
+fn _bool_ok(value: boolean) -> DerBoolResult {
+    return DerBoolResult { ok: true, error: "", value: value };
+}
+
+// Extract `len` bytes starting at `off`. Returns `[]` if out of range. `.slice()`
+// is a no-op stub (runtime/sfn/array.sfn:463), so every consumer hand-rolls this
+// copy (precedent: tls13_handshake_codec.sfn `_slice`).
+fn _slice(buf: int[], off: int, len: int) -> int[] {
+    let empty: int[] = [];
+    if off < 0 || len < 0 || off + len > buf.length { return empty; }
+    let mut out: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= len { break; }
+        out.push(buf[off + i] & 255);
+        i += 1;
+    }
+    return out;
+}
+
+// Read one definite-length TLV header at `off`, requiring the whole element to
+// end at or before `end` (exclusive). `end` is the parent's content end, or
+// buf.length at the top level.
+fn der_read_tlv(buf: int[], off: int, end: int) -> DerTlv {
+    if off < 0 || end > buf.length || off >= end {
+        return _tlv_err("der: truncated identifier");
+    }
+    let t: int = buf[off] & 255;
+    if (t & 31) == 31 {
+        return _tlv_err("der: multi-byte tag is not supported");
+    }
+    if off + 1 >= end { return _tlv_err("der: truncated length"); }
+    let b0: int = buf[off + 1] & 255;
+    let mut content_len: int = 0;
+    let mut header_len: int = 0;
+    if b0 == 128 {
+        return _tlv_err("der: indefinite length is not valid DER");
+    } else if b0 == 255 { return _tlv_err("der: reserved length form"); } else if b0 < 128 {
+        content_len = b0;
+        header_len = 2;
+    } else {
+        // Long form: n = number of length octets, big-endian.
+        let n: int = b0 & 127;
+        if n > 4 {
+            // The overflow guard: a naive accumulator over 5+ length octets is
+            // what an attacker aims at, so refuse the width outright rather
+            // than accumulate and check.
+            return _tlv_err("der: length exceeds supported width");
+        }
+        if off + 2 + n > end { return _tlv_err("der: truncated length"); }
+        if (buf[off + 2] & 255) == 0 {
+            return _tlv_err("der: non-minimal length encoding");
+        }
+        let mut acc: int = 0;
+        let mut i: int = 0;
+        loop {
+            if i >= n { break; }
+            acc = (acc << 8) | (buf[off + 2 + i] & 255);
+            i += 1;
+        }
+        content_len = acc;
+        if n == 1 && content_len < 128 {
+            return _tlv_err("der: non-minimal length encoding");
+        }
+        header_len = 2 + n;
+    }
+    let content_off: int = off + header_len;
+    if content_off + content_len > end {
+        return _tlv_err("der: length exceeds available data");
+    }
+    return DerTlv {
+        ok: true,
+        error: "",
+        tag: t,
+        content_off: content_off,
+        content_len: content_len,
+        end_off: content_off + content_len
+    };
+}
+
+// Read a TLV at `off` and require its identifier octet to equal `want`.
+fn der_expect_tlv(buf: int[], off: int, end: int, want: int) -> DerTlv {
+    let tlv: DerTlv = der_read_tlv(buf, off, end);
+    if !tlv.ok { return tlv; }
+    if tlv.tag != want { return _tlv_err("der: unexpected tag"); }
+    return tlv;
+}
+
+// Walk one sibling run, recursing into constructed elements, enforcing the
+// nesting-depth cap. Structural hardening only: decodes no values.
+fn _validate_span(buf: int[], off: int, end: int, depth: int, limits: DerLimits) -> DerOutcome {
+    let mut cur: int = off;
+    loop {
+        if cur >= end { break; }
+        let tlv: DerTlv = der_read_tlv(buf, cur, end);
+        if !tlv.ok {
+            return DerOutcome { ok: false, error: tlv.error };
+        }
+        if tlv.end_off <= cur {
+            // Guards against an element that never advances the cursor, so a
+            // malformed input can never spin the sibling loop.
+            return DerOutcome {
+                ok: false,
+                error: "der: parser made no progress"
+            };
+        }
+        if der_is_constructed(tlv.tag) {
+            if depth >= limits.max_depth {
+                return DerOutcome {
+                    ok: false,
+                    error: "der: maximum nesting depth exceeded"
+                };
+            }
+            let inner: DerOutcome = _validate_span(buf, tlv.content_off, tlv.end_off, depth
+                + 1, limits);
+            if !inner.ok { return inner; }
+        }
+        cur = tlv.end_off;
+    }
+    return DerOutcome { ok: true, error: "" };
+}
+
+// Walk the whole TLV tree, recursing into constructed elements, enforcing the
+// total-length and nesting-depth caps. Structural hardening only: it decodes
+// no values and makes no trust decision (SFN-504; guard precedent SFN-156).
+fn der_check_structure(buf: int[], limits: DerLimits) -> DerOutcome {
+    if buf.length == 0 {
+        return DerOutcome { ok: false, error: "der: empty input" };
+    }
+    if buf.length > limits.max_input_len {
+        return DerOutcome {
+            ok: false,
+            error: "der: input exceeds maximum size"
+        };
+    }
+    return _validate_span(buf, 0, buf.length, 1, limits);
+}
+
+// A DerTlv is only meaningful against the buffer it was read from. Callers
+// hold both, so a mismatched pair is a programming error we refuse rather
+// than let reach a bounds-check abort (SFN-504).
+fn _tlv_in_buf(buf: int[], tlv: DerTlv) -> boolean {
+    if !tlv.ok { return false; }
+    if tlv.content_off < 0 || tlv.content_len < 0 { return false; }
+    return tlv.content_off + tlv.content_len <= buf.length;
+}
+
+// Raw INTEGER content, big-endian, DER-minimal. Sign is the caller's business:
+// X.509 serial numbers are consumed as opaque bytes.
+fn der_integer_bytes(buf: int[], tlv: DerTlv) -> DerBytesResult {
+    if !tlv.ok { return _bytes_err(tlv.error); }
+    if !_tlv_in_buf(buf, tlv) {
+        return _bytes_err("der: element does not belong to this buffer");
+    }
+    if tlv.tag != der_tag_integer() {
+        return _bytes_err("der: expected integer");
+    }
+    if tlv.content_len == 0 { return _bytes_err("der: empty integer"); }
+    let content: int[] = _slice(buf, tlv.content_off, tlv.content_len);
+    if tlv.content_len >= 2 {
+        let b0: int = content[0] & 255;
+        let b1: int = content[1] & 255;
+        if (b0 == 0 && b1 < 128) || (b0 == 255 && b1 >= 128) {
+            return _bytes_err("der: non-minimal integer");
+        }
+    }
+    return _bytes_ok(content);
+}
+
+// A small non-negative INTEGER (version, pathLenConstraint). Refuses anything
+// wider than 4 content octets so no input can overflow the accumulator.
+fn der_integer_small(buf: int[], tlv: DerTlv) -> DerIntResult {
+    let bytes: DerBytesResult = der_integer_bytes(buf, tlv);
+    if !bytes.ok { return _int_err(bytes.error); }
+    if bytes.value.length > 4 {
+        return _int_err("der: integer exceeds supported width");
+    }
+    if (bytes.value[0] & 255) >= 128 {
+        return _int_err("der: negative integer is not supported here");
+    }
+    let mut acc: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= bytes.value.length { break; }
+        acc = (acc << 8) | (bytes.value[i] & 255);
+        i += 1;
+    }
+    return _int_ok(acc);
+}
+
+fn der_boolean(buf: int[], tlv: DerTlv) -> DerBoolResult {
+    if !tlv.ok { return _bool_err(tlv.error); }
+    if !_tlv_in_buf(buf, tlv) {
+        return _bool_err("der: element does not belong to this buffer");
+    }
+    if tlv.tag != der_tag_boolean() {
+        return _bool_err("der: expected boolean");
+    }
+    if tlv.content_len != 1 { return _bool_err("der: malformed boolean"); }
+    let b: int = buf[tlv.content_off] & 255;
+    if b == 0 { return _bool_ok(false); }
+    if b == 255 { return _bool_ok(true); }
+    return _bool_err("der: non-canonical boolean");
+}
+
+// BIT STRING content with the leading unused-bits octet removed.
+fn der_bit_string_bytes(buf: int[], tlv: DerTlv) -> DerBytesResult {
+    if !tlv.ok { return _bytes_err(tlv.error); }
+    if !_tlv_in_buf(buf, tlv) {
+        return _bytes_err("der: element does not belong to this buffer");
+    }
+    if tlv.tag != der_tag_bit_string() {
+        return _bytes_err("der: expected bit string");
+    }
+    if tlv.content_len < 1 { return _bytes_err("der: empty bit string"); }
+    let unused: int = buf[tlv.content_off] & 255;
+    if unused > 7 { return _bytes_err("der: invalid bit string padding"); }
+    if tlv.content_len == 1 && unused != 0 {
+        return _bytes_err("der: invalid bit string padding");
+    }
+    return _bytes_ok(_slice(buf, tlv.content_off + 1, tlv.content_len - 1));
+}
+
+// The number of unused trailing bits declared by a BIT STRING.
+fn der_bit_string_unused(buf: int[], tlv: DerTlv) -> DerIntResult {
+    if !tlv.ok { return _int_err(tlv.error); }
+    if !_tlv_in_buf(buf, tlv) {
+        return _int_err("der: element does not belong to this buffer");
+    }
+    if tlv.tag != der_tag_bit_string() {
+        return _int_err("der: expected bit string");
+    }
+    if tlv.content_len < 1 { return _int_err("der: empty bit string"); }
+    let unused: int = buf[tlv.content_off] & 255;
+    if unused > 7 { return _int_err("der: invalid bit string padding"); }
+    return _int_ok(unused);
+}
+
+fn der_octet_string_bytes(buf: int[], tlv: DerTlv) -> DerBytesResult {
+    if !tlv.ok { return _bytes_err(tlv.error); }
+    if !_tlv_in_buf(buf, tlv) {
+        return _bytes_err("der: element does not belong to this buffer");
+    }
+    if tlv.tag != der_tag_octet_string() {
+        return _bytes_err("der: expected octet string");
+    }
+    return _bytes_ok(_slice(buf, tlv.content_off, tlv.content_len));
+}
+
+// Dotted-decimal rendering of an OBJECT IDENTIFIER, e.g. "1.3.101.112".
+fn der_oid_string(buf: int[], tlv: DerTlv) -> DerTextResult {
+    if !tlv.ok { return _text_err(tlv.error); }
+    if !_tlv_in_buf(buf, tlv) {
+        return _text_err("der: element does not belong to this buffer");
+    }
+    if tlv.tag != der_tag_oid() {
+        return _text_err("der: expected object identifier");
+    }
+    if tlv.content_len == 0 {
+        return _text_err("der: empty object identifier");
+    }
+    // Decode every subidentifier, including the first, through one base-128
+    // accumulator (SFN-504: the previous algorithm treated the first octet as
+    // the whole first subidentifier, mis-decoding anything beyond a single
+    // byte there).
+    let mut out: string = "";
+    let mut first: boolean = true;
+    let mut i: int = tlv.content_off;
+    let end: int = tlv.content_off + tlv.content_len;
+    loop {
+        if i >= end { break; }
+        // X.690 8.19.2: a subidentifier's leading octet is never 0x80, which
+        // would be a non-minimal encoding of a leading zero septet.
+        if (buf[i] & 255) == 128 {
+            return _text_err("der: non-minimal object identifier arc");
+        }
+        let mut acc: int = 0;
+        let mut pending: boolean = true;
+        loop {
+            if i >= end { break; }
+            let b: int = buf[i] & 255;
+            i += 1;
+            // Bound the accumulator before the shift, not after, so no input
+            // can wrap it (SFN-504).
+            if acc > 1099511627776 {
+                return _text_err("der: object identifier arc too large");
+            }
+            acc = (acc << 7) | (b & 127);
+            if (b & 128) == 0 {
+                pending = false;
+                break;
+            }
+        }
+        if pending { return _text_err("der: truncated object identifier"); }
+        if first {
+            // X.690 8.19.4: the first subidentifier packs arc1 * 40 + arc2,
+            // and arc1 saturates at 2 because arc2 is unbounded only in the
+            // arc-2 tree.
+            let mut arc1: int = acc / 40;
+            if arc1 > 2 { arc1 = 2; }
+            let arc2: int = acc - arc1 * 40;
+            out = int_to_string(arc1) + "." + int_to_string(arc2);
+            first = false;
+        } else { out = out + "." + int_to_string(acc); }
+    }
+    if first { return _text_err("der: empty object identifier"); }
+    return _text_ok(out);
+}
+
+// Render one byte as a printable-ASCII character. Sailfin string indexing is
+// byte-oriented, so this 95-character table (bytes [32, 126]) doubles as a
+// byte-to-character map.
+fn _byte_to_char(b: int) -> string {
+    let table: string = " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~";
+    return table[b - 32];
+}
+
+// ASCII rendering of a DER string. Refuses any byte outside printable ASCII so
+// no control byte or non-ASCII sequence can reach a comparison or a log line.
+// Accepts a tag in the directory-string set; it does not decode BMPString's
+// UCS-2 pairs, so a non-ASCII BMPString is refused, not mis-rendered.
+fn der_ascii_text(buf: int[], tlv: DerTlv) -> DerTextResult {
+    if !tlv.ok { return _text_err(tlv.error); }
+    if !_tlv_in_buf(buf, tlv) {
+        return _text_err("der: element does not belong to this buffer");
+    }
+    if !der_is_directory_string(tlv.tag) {
+        return _text_err("der: expected a text string");
+    }
+    let mut out: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= tlv.content_len { break; }
+        let b: int = buf[tlv.content_off + i] & 255;
+        if b < 32 || b > 126 {
+            return _text_err("der: text contains a non-printable byte");
+        }
+        out = out + _byte_to_char(b);
+        i += 1;
+    }
+    return _text_ok(out);
+}
+
+// Floor division: Sailfin `/` truncates toward zero (LLVM `sdiv`), so a
+// negative dividend needs this correction to floor instead.
+fn _floor_div(a: int, b: int) -> int {
+    let q: int = a / b;
+    let r: int = a - q * b;
+    if r != 0 && ((r < 0) != (b < 0)) { return q - 1; }
+    return q;
+}
+
+fn der_is_leap_year(y: int) -> boolean {
+    if y % 4 != 0 { return false; }
+    if y % 100 != 0 { return true; }
+    return y % 400 == 0;
+}
+
+fn der_days_in_month(y: int, m: int) -> int {
+    if m == 1 || m == 3 || m == 5 || m == 7 || m == 8 || m == 10 || m == 12 {
+        return 31;
+    }
+    if m == 4 || m == 6 || m == 9 || m == 11 { return 30; }
+    if der_is_leap_year(y) { return 29; }
+    return 28;
+}
+
+// Days since 1970-01-01 for a proleptic-Gregorian date. Howard Hinnant's
+// days_from_civil: exact integer arithmetic, no floating point, no table.
+fn der_days_from_civil(y: int, m: int, d: int) -> int {
+    let mut yy: int = y;
+    if m <= 2 { yy -= 1; }
+    let era: int = _floor_div(yy, 400);
+    let yoe: int = yy - era * 400;  // [0, 399]
+    let mp: int = (m + 9) % 12;  // March = 0
+    let doy: int = (153 * mp + 2) / 5 + d - 1;  // [0, 365]
+    let doe: int = yoe * 365 + yoe / 4 - yoe / 100 + doy;  // [0, 146096]
+    return era * 146097 + doe - 719468;
+}
+
+fn _is_digit(b: int) -> boolean { return b >= 48 && b <= 57; }
+
+fn _digit_value(b: int) -> int { return b - 48; }
+
+// Decode UTCTime / GeneralizedTime to signed milliseconds since the Unix
+// epoch. RFC 5280 §4.1.2.5 requires the seconds field and the "Z" suffix in
+// both forms, so anything else is refused rather than guessed at.
+fn der_time_millis(buf: int[], tlv: DerTlv) -> DerIntResult {
+    if !tlv.ok { return _int_err(tlv.error); }
+    if !_tlv_in_buf(buf, tlv) {
+        return _int_err("der: element does not belong to this buffer");
+    }
+    let is_utc: boolean = tlv.tag == der_tag_utc_time();
+    let is_generalized: boolean = tlv.tag == der_tag_generalized_time();
+    if !is_utc && !is_generalized {
+        return _int_err("der: expected a time value");
+    }
+    let mut want_len: int = 15;
+    if is_utc { want_len = 13; }
+    if tlv.content_len != want_len { return _int_err("der: malformed time"); }
+    let content: int[] = _slice(buf, tlv.content_off, tlv.content_len);
+    if content[content.length - 1] != 90 {
+        return _int_err("der: time must be UTC (Z)");
+    }
+    let mut i: int = 0;
+    loop {
+        if i >= content.length - 1 { break; }
+        if !_is_digit(content[i] & 255) {
+            return _int_err("der: malformed time");
+        }
+        i += 1;
+    }
+    let mut year: int = 0;
+    let mut idx: int = 0;
+    if is_utc {
+        let yy: int = _digit_value(content[0]) * 10 + _digit_value(content[1]);
+        if yy >= 50 { year = 1900 + yy; } else { year = 2000 + yy; }
+        idx = 2;
+    } else {
+        year = _digit_value(content[0]) * 1000 + _digit_value(content[1]) * 100
+            + _digit_value(content[2]) * 10
+            + _digit_value(content[3]);
+        idx = 4;
+    }
+    let month: int = _digit_value(content[idx]) * 10 + _digit_value(content[idx
+        + 1]);
+    let day: int = _digit_value(content[idx + 2]) * 10 + _digit_value(content[idx
+        + 3]);
+    let hour: int = _digit_value(content[idx + 4]) * 10 + _digit_value(content[idx
+        + 5]);
+    let minute: int = _digit_value(content[idx + 6]) * 10 + _digit_value(content[idx
+        + 7]);
+    let second: int = _digit_value(content[idx + 8]) * 10 + _digit_value(content[idx
+        + 9]);
+    if year < 1 { return _int_err("der: invalid time field"); }
+    if month < 1 || month > 12 { return _int_err("der: invalid time field"); }
+    if day < 1 || day > der_days_in_month(year, month) {
+        return _int_err("der: invalid time field");
+    }
+    if hour < 0 || hour > 23 { return _int_err("der: invalid time field"); }
+    if minute < 0 || minute > 59 {
+        return _int_err("der: invalid time field");
+    }
+    if second < 0 || second > 59 {
+        return _int_err("der: invalid time field");
+    }
+    let millis: int = (der_days_from_civil(year, month, day) * 86400 + hour * 3600
+        + minute * 60
+        + second) * 1000;
+    return _int_ok(millis);
+}
+
+// Iterate the direct children of a constructed TLV. Returns the child at
+// `child_off`; callers advance with the returned `end_off`.
+fn der_first_child(buf: int[], parent: DerTlv) -> DerTlv {
+    if !parent.ok { return _tlv_err(parent.error); }
+    if !der_is_constructed(parent.tag) {
+        return _tlv_err("der: element is not constructed");
+    }
+    if parent.content_len <= 0 { return _tlv_err(""); }
+    return der_read_tlv(buf, parent.content_off, parent.content_off + parent.content_len);
+}
+
+// `der_next_sibling` returns `ok: false` with `error: ""` when `prev.end_off`
+// reaches the parent's content end — i.e. exhaustion is not an error. Callers
+// distinguish exhaustion from failure by checking `error.length == 0`.
+fn der_next_sibling(buf: int[], parent: DerTlv, prev: DerTlv) -> DerTlv {
+    if !parent.ok { return _tlv_err(parent.error); }
+    if !prev.ok { return _tlv_err(prev.error); }
+    let end: int = parent.content_off + parent.content_len;
+    if prev.end_off >= end { return _tlv_err(""); }
+    return der_read_tlv(buf, prev.end_off, end);
+}
+
+export {
+    DerLimits,
+    DerTlv,
+    DerIntResult,
+    DerBytesResult,
+    DerTextResult,
+    DerBoolResult,
+    DerOutcome,
+    der_tag_boolean,
+    der_tag_integer,
+    der_tag_bit_string,
+    der_tag_octet_string,
+    der_tag_null,
+    der_tag_oid,
+    der_tag_utf8_string,
+    der_tag_printable_string,
+    der_tag_t61_string,
+    der_tag_ia5_string,
+    der_tag_utc_time,
+    der_tag_generalized_time,
+    der_tag_bmp_string,
+    der_tag_sequence,
+    der_tag_set,
+    der_is_constructed,
+    der_is_context,
+    der_context_number,
+    der_is_directory_string,
+    der_default_limits,
+    der_read_tlv,
+    der_expect_tlv,
+    der_check_structure,
+    der_integer_bytes,
+    der_integer_small,
+    der_boolean,
+    der_bit_string_bytes,
+    der_bit_string_unused,
+    der_octet_string_bytes,
+    der_oid_string,
+    der_ascii_text,
+    der_time_millis,
+    der_days_from_civil,
+    der_is_leap_year,
+    der_days_in_month,
+    der_first_child,
+    der_next_sibling
+};

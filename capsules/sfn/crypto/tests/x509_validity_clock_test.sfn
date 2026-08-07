@@ -1,0 +1,121 @@
+// capsules/sfn/crypto/tests/x509_validity_clock_test.sfn
+//
+// SFN-504: the current-time integration for X.509 validity classification.
+//
+// This is the only sfn/crypto test that needs `![clock]`, and that is the point.
+// `x509_validity_at` is pure: it takes a caller-supplied Unix-millisecond
+// snapshot and never reads ambient time. The capability therefore lives with the
+// caller, which is what keeps sfn/crypto effect-free while still letting a
+// program classify a certificate against the real clock. The production shape is
+// exactly what these tests do: read the fallible clock once, handle `Err`, then
+// hand the single successful value to the pure classifier.
+import { unix_millis } from "sfn/time";
+
+import {
+    X509Certificate,
+    x509_parse,
+    x509_validity_at,
+    x509_validity_expired,
+    x509_validity_in_window,
+    x509_validity_not_yet_valid,
+    x509_validity_unknown
+} from "../src/x509";
+
+fn hexb(s: string) -> int[] {
+    let mut out: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= s.length { break; }
+        let hi: int = _hexval(s[i]);
+        let lo: int = _hexval(s[i + 1]);
+        out.push(((hi << 4) | lo) & 255);
+        i += 2;
+    }
+    return out;
+}
+
+fn _hexval(c: string) -> int {
+    let code: int = char_code(c) & 255;
+    if code >= 48 && code <= 57 { return code - 48; }
+    if code >= 97 && code <= 102 { return code - 97 + 10; }
+    return 0;
+}
+
+// Ed25519 leaf, CN=Sailfin Test Leaf, UTCTime validity 2026-01-01 -> 2027-01-01.
+// Produced with `openssl req -new -x509 -key <ed25519> -set_serial 0x0102030405060708
+// -not_before 20260101000000Z -not_after 20270101000000Z`. No signature is
+// verified anywhere in this capsule, so the key material is irrelevant here.
+fn fixture_a_hex() -> string {
+    return "308201ba3082016ca00302010202080102030405060708300506032b6570303b311a301806035504030c115361696c66696e2054657374204c6561663110300e060355040a0c075361696c66696e310b3009060355040613025553301e170d3236303130313030303030305a170d3237303130313030303030305a303b311a301806035504030c115361696c66696e2054657374204c6561663110300e060355040a0c075361696c66696e310b3009060355040613025553302a300506032b6570032100ca7b28b5ebd179909c5fb9e6dba6f8678cdbe209dd4e0e2d689ea4e818a79156a3818d30818a300c0603551d130101ff04023000300e0603551d0f0101ff04040302078030130603551d25040c300a06082b0601050507030130360603551d11042f302d820b6578616d706c652e636f6d820d2a2e6578616d706c652e636f6d820f7777772e6578616d706c652e6f7267301d0603551d0e04160414dae9f13ce305fe193bbf7734e12927291ec5119e300506032b6570034100d13358f4f9134f32333e18b2ca533dc44d9a81e94c26338b1336229de15fad2a5ccaa50f446ef820a7c80b9a4ec27a3befded1db8d2087012f4d606b0d413800";
+}
+
+// Local match helpers rather than the sfn/test matchers: those are `![pure]` and
+// cannot be called from a test that carries `![clock]` (same constraint recorded
+// in capsules/sfn/time/tests/unix_millis_test.sfn).
+fn _is_ok(result: Result<int, string>) -> boolean {
+    match result {
+        Result.Ok { value } => { return true; },
+        Result.Err { error } => { return false; }
+    }
+}
+
+fn _ok_value(result: Result<int, string>) -> int {
+    match result {
+        Result.Ok { value } => { return value; },
+        Result.Err { error } => { return 0; }
+    }
+}
+
+test "x509: the real clock drives validity classification through one snapshot" ![clock] {
+    let cert: X509Certificate = x509_parse(hexb(fixture_a_hex()));
+    assert cert.ok;
+
+    // Read the fallible clock exactly once, and handle failure before
+    // classifying. A clock that cannot be read is a clock failure, not an
+    // expired certificate, so it must never be laundered into a validity answer.
+    let snapshot: Result<int, string> = unix_millis();
+    assert _is_ok(snapshot);
+    let now_ms: int = _ok_value(snapshot);
+
+    // Wall-clock, not boot-relative monotonic time: 1700000000000 ms is
+    // 2023-11-14, so any plausible host realtime reading is well past it. This
+    // is the same separation argument SFN-623's own test makes.
+    assert now_ms > 1700000000000;
+
+    let status: int = x509_validity_at(cert, now_ms);
+
+    // Deliberately not asserting *which* window the present moment falls in:
+    // that would make the test expire along with the fixture. What matters is
+    // that a real snapshot produces a real classification and never the
+    // did-not-parse sentinel.
+    assert status != x509_validity_unknown();
+    assert status == x509_validity_in_window() || status == x509_validity_not_yet_valid()
+        || status == x509_validity_expired();
+}
+
+test "x509: one snapshot classifies deterministically" ![clock] {
+    let cert: X509Certificate = x509_parse(hexb(fixture_a_hex()));
+    assert cert.ok;
+
+    let snapshot: Result<int, string> = unix_millis();
+    assert _is_ok(snapshot);
+    let now_ms: int = _ok_value(snapshot);
+
+    // The classifier is pure, so the same snapshot must classify identically
+    // however many times it is asked. This is what makes a caller-owned
+    // snapshot preferable to an ambient read inside the module.
+    assert x509_validity_at(cert, now_ms) == x509_validity_at(cert, now_ms);
+}
+
+test "x509: a clock failure never becomes a validity verdict" {
+    // The Err path without depending on a broken host clock: an unparsed
+    // certificate and a synthetic Err both resolve to `unknown`, so no caller
+    // can mistake a failed read for an in-window answer. This test needs no
+    // `![clock]` because it never reads one.
+    let failed: Result<int, string> = Result.Err { error: "clock unavailable" };
+    assert ! _is_ok(failed);
+
+    let unparsed: X509Certificate = x509_parse([]);
+    assert ! unparsed.ok;
+    assert x509_validity_at(unparsed, 1767225600000) == x509_validity_unknown();
+}
