@@ -179,6 +179,46 @@ export {
     x509_dns_name_matches
 } from "./x509";
 
+// X.509 certification-path validation (SFEP-0048 Phase C, SFN-340) — the trust
+// decision the parse surface above withholds: chain building, signature
+// verification across Ed25519 / ECDSA-P256 / RSASSA-PKCS1-v1_5, and
+// basicConstraints / keyUsage / pathLenConstraint / validity-window
+// enforcement at every position. Fail-closed: a signature algorithm this
+// capsule cannot verify rejects the link rather than skipping it. Pure — the
+// caller supplies the Unix-millisecond snapshot.
+export {
+    X509ChainResult,
+    X509VerifyOptions,
+    x509_verify_chain,
+    x509_verify_options,
+    x509_verify_default_max_depth,
+    x509_verify_ok,
+    x509_verify_err_bad_input,
+    x509_verify_err_no_anchor,
+    x509_verify_err_bad_signature,
+    x509_verify_err_unsupported_algorithm,
+    x509_verify_err_algorithm_mismatch,
+    x509_verify_err_expired,
+    x509_verify_err_not_yet_valid,
+    x509_verify_err_not_a_ca,
+    x509_verify_err_path_len_exceeded,
+    x509_verify_err_eku,
+    x509_verify_err_path_too_long
+} from "./x509_verify";
+
+// System trust store (SFEP-0048 Phase C, SFN-340) — the anchors a path may
+// terminate at. `trust_store_from_pem` is pure; only `trust_store_load` and
+// `trust_store_load_from` carry `![io]`, so a caller that supplies its own
+// anchors inherits no filesystem requirement.
+export {
+    TrustStore,
+    trust_store_from_pem,
+    trust_store_load,
+    trust_store_load_from,
+    trust_store_default_paths,
+    trust_store_env_vars
+} from "./trust_store";
+
 // CSPRNG — secure random bytes from the host OS entropy source. The capsule's
 // one effectful primitive: `random_bytes` carries `![rand]` (SFEP-0048 Phase D).
 export { random_bytes } from "./rand";

@@ -1,0 +1,169 @@
+// capsules/sfn/crypto/tests/trust_store_test.sfn
+//
+// Regression coverage for system trust-store loading (SFN-340, design
+// SFEP-0048 Phase C).
+//
+// The decode-and-parse path is pure, so almost everything here runs
+// effect-free against an in-memory PEM bundle — no filesystem, no network, no
+// ambient clock. Only the two path-probing tests carry `![io]`, and neither
+// depends on a CA bundle actually being present on the host, so they behave
+// identically on a developer machine and a bare CI container.
+import {
+    TrustStore,
+    trust_store_default_paths,
+    trust_store_env_vars,
+    trust_store_from_pem,
+    trust_store_load_from
+} from "../src/trust_store";
+import { X509Certificate, x509_parse } from "../src/x509";
+import {
+    X509ChainResult,
+    x509_verify_chain,
+    x509_verify_ok,
+    x509_verify_options
+} from "../src/x509_verify";
+
+// 2026-06-01T00:00:00Z, inside every fixture's validity window.
+fn now_ms() -> int { return 1780272000000; }
+
+fn hexb(s: string) -> int[] {
+    let mut out: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= s.length { break; }
+        out.push(((_hexval(s[i]) << 4) | _hexval(s[i + 1])) & 255);
+        i += 2;
+    }
+    return out;
+}
+
+fn _hexval(c: string) -> int {
+    let code: int = char_code(c) & 255;
+    if code >= 48 && code <= 57 { return code - 48; }
+    if code >= 97 && code <= 102 { return code - 97 + 10; }
+    return 0;
+}
+
+test "trust_store: a two-certificate bundle loads both anchors" {
+    let store: TrustStore = trust_store_from_pem(pem_ed_root() + pem_ec_root());
+    assert store.ok;
+    assert store.anchors.length == 2;
+    assert store.skipped == 0;
+    assert store.source == "";
+    assert store.anchors[0].subject_cn == "Sailfin Test Ed Root";
+    assert store.anchors[1].subject_cn == "Sailfin Test Ec Root";
+}
+
+test "trust_store: a bundle with no CERTIFICATE block is rejected" {
+    let store: TrustStore = trust_store_from_pem("not a bundle at all\n");
+    assert ! store.ok;
+    assert store.anchors.length == 0;
+}
+
+test "trust_store: an empty bundle is rejected" {
+    let store: TrustStore = trust_store_from_pem("");
+    assert ! store.ok;
+}
+
+test "trust_store: an unparseable entry is skipped and counted, not fatal" {
+    // A well-formed PEM block whose payload is not a certificate. Dropping an
+    // anchor can only shrink what this process trusts, so the load degrades
+    // toward rejecting chains rather than failing shut on a real-world bundle
+    // that carries one bad entry.
+    let junk: string = "-----BEGIN CERTIFICATE-----\nAQIDBAU=\n-----END CERTIFICATE-----\n";
+    let store: TrustStore = trust_store_from_pem(pem_ed_root() + junk);
+    assert store.ok;
+    assert store.anchors.length == 1;
+    assert store.skipped == 1;
+    assert store.anchors[0].subject_cn == "Sailfin Test Ed Root";
+}
+
+test "trust_store: a bundle whose every entry is unparseable is rejected" {
+    let junk: string = "-----BEGIN CERTIFICATE-----\nAQIDBAU=\n-----END CERTIFICATE-----\n";
+    let store: TrustStore = trust_store_from_pem(junk);
+    assert ! store.ok;
+    assert store.anchors.length == 0;
+}
+
+test "trust_store: loaded anchors drive a real chain verification" {
+    // The integration point: a store built from PEM feeds x509_verify_chain
+    // directly, and the extraneous ecdsa anchor does not disturb the decision.
+    let store: TrustStore = trust_store_from_pem(pem_ec_root() + pem_ed_root());
+    assert store.ok;
+
+    let result: X509ChainResult = x509_verify_chain(x509_parse(hexb(fx_ed_leaf())), [x509_parse(hexb(fx_ed_inter()))], store.anchors, x509_verify_options(now_ms()));
+    assert result.ok;
+    assert result.code == x509_verify_ok();
+    assert result.anchor_subject_cn == "Sailfin Test Ed Root";
+}
+
+test "trust_store: a chain outside the loaded anchors is still rejected" {
+    // Same store, a chain it does not anchor: loading anchors must not make
+    // the verifier permissive.
+    let store: TrustStore = trust_store_from_pem(pem_ec_root());
+    assert store.ok;
+
+    let result: X509ChainResult = x509_verify_chain(x509_parse(hexb(fx_ed_leaf())), [x509_parse(hexb(fx_ed_inter()))], store.anchors, x509_verify_options(now_ms()));
+    assert ! result.ok;
+}
+
+test "trust_store: the probe list and environment overrides are well-formed" {
+    let paths: string[] = trust_store_default_paths();
+    assert paths.length > 0;
+
+    // Both names are honoured, and SAILFIN_TLS_CAFILE is consulted first.
+    // `runtime/sfn/platform/tls.sfn` reads SAILFIN_TLS_CAFILE today, so
+    // dropping it here would silently downgrade an already-configured program
+    // to the system bundle once SFN-341 swaps that runtime onto this stack.
+    let overrides: string[] = trust_store_env_vars();
+    assert overrides.length == 2;
+    assert overrides[0] == "SAILFIN_TLS_CAFILE";
+    assert overrides[1] == "SSL_CERT_FILE";
+
+    // Every probe path must be absolute: a relative CA-bundle path would
+    // resolve against the process working directory, which is attacker-
+    // influenced in a way an absolute path is not.
+    let mut i: int = 0;
+    loop {
+        if i >= paths.length { break; }
+        assert paths[i][0] == "/";
+        i += 1;
+    }
+}
+
+test "trust_store: an empty path is rejected without touching the filesystem" ![io] {
+    let store: TrustStore = trust_store_load_from("");
+    assert ! store.ok;
+}
+
+test "trust_store: a missing bundle path fails closed" ![io] {
+    // Fail-closed on a path that cannot exist: a trust store that cannot be
+    // read must not become an empty-but-successful store, because an empty
+    // anchor set that reports success is how a verifier ends up trusting a
+    // chain it never checked.
+    let store: TrustStore = trust_store_load_from("/nonexistent/sfn340/ca-bundle.pem");
+    assert ! store.ok;
+    assert store.anchors.length == 0;
+}
+
+// ── Fixtures ──
+//
+// `pem_*` are the PEM encodings of the ed25519 and ecdsa-p256 roots from
+// `x509_verify_test.sfn`; `fx_*` are the DER hex of the ed25519 leaf and
+// intermediate signed by that root. Generation is documented in
+// `x509_verify_test.sfn`'s fixture block.
+fn pem_ed_root() -> string {
+    return "-----BEGIN CERTIFICATE-----\nMIIBMTCB5KADAgECAgERMAUGAytlcDAfMR0wGwYDVQQDDBRTYWlsZmluIFRlc3Qg\nRWQgUm9vdDAeFw0yNjAxMDEwMDAwMDBaFw0zNjAxMDEwMDAwMDBaMB8xHTAbBgNV\nBAMMFFNhaWxmaW4gVGVzdCBFZCBSb290MCowBQYDK2VwAyEAje29TOvbixjCR6kf\nu1wpI048UeKCtbkt5JvN3qyREtajRTBDMBIGA1UdEwEB/wQIMAYBAf8CAQEwDgYD\nVR0PAQH/BAQDAgEGMB0GA1UdDgQWBBThwN90jwwg9/hfSJZqCb6dqDTcVDAFBgMr\nZXADQQCJxrL/+gJijn3CiJFNtE5zJf6wNKxyZLlzOWUiK6GRZf3T14mKKp5Fp0xa\nUu/bu3ahFKV9CnK6Q/zTcU411w8K\n-----END CERTIFICATE-----\n";
+}
+
+fn pem_ec_root() -> string {
+    return "-----BEGIN CERTIFICATE-----\nMIIBczCCARigAwIBAgIBITAKBggqhkjOPQQDAjAfMR0wGwYDVQQDDBRTYWlsZmlu\nIFRlc3QgRWMgUm9vdDAeFw0yNjAxMDEwMDAwMDBaFw0zNjAxMDEwMDAwMDBaMB8x\nHTAbBgNVBAMMFFNhaWxmaW4gVGVzdCBFYyBSb290MFkwEwYHKoZIzj0CAQYIKoZI\nzj0DAQcDQgAE5yo2drYrdWm4Jyu5sX/fRWlF/c8aMepVB/FOlkMjs2py5TLYB/2X\n88U8TruPEyNJ/llslH46zKDUeTKraGVnM6NFMEMwEgYDVR0TAQH/BAgwBgEB/wIB\nATAOBgNVHQ8BAf8EBAMCAQYwHQYDVR0OBBYEFEk7Gk8QNfQo+YGBfKXfpbSOw43y\nMAoGCCqGSM49BAMCA0kAMEYCIQCIxImw7mCVoDy6eavy3YJBFACR2Km7v2GjY0z+\nVnOFpQIhAPX7347o6CJIuSFHLvHioXK3dv7sfoeRPOlaiqQurC6/\n-----END CERTIFICATE-----\n";
+}
+
+fn fx_ed_inter() -> string {
+    return "3082015130820103a003020102020112300506032b6570301f311d301b06035504030c145361696c66696e205465737420456420526f6f74301e170d3236303130313030303030305a170d3237303130313030303030305a301d311b301906035504030c125361696c66696e2054657374204564204341302a300506032b6570032100313790aa4a531edf573a688aa43535cf69a219a2ac2fb516d9313de6fc3778f4a366306430120603551d130101ff040830060101ff020100300e0603551d0f0101ff040403020106301d0603551d0e04160414226768f6483d21e17344cd4338a7bb4b035b000f301f0603551d23041830168014e1c0df748f0c20f7f85f48966a09be9da834dc54300506032b6570034100d5c61928f6d304285bd2d4fb899389b577144daa713fb83100b9ab340e8a26214477e53ca319945c8464c35985f2a5b130113fd654e0ef13eeb7f9857d066a0f";
+}
+
+fn fx_ed_leaf() -> string {
+    return "3082018030820132a003020102020113300506032b6570301d311b301906035504030c125361696c66696e2054657374204564204341301e170d3236303130313030303030305a170d3237303130313030303030305a30163114301206035504030c0b6578616d706c652e636f6d302a300506032b65700321007269d8384a31069150b30ae775d99433464e7956f4554d2bb7a6cf5335c7e6dda3819d30819a300c0603551d130101ff04023000300e0603551d0f0101ff04040302078030130603551d25040c300a06082b0601050507030130250603551d11041e301c820b6578616d706c652e636f6d820d2a2e6578616d706c652e636f6d301d0603551d0e041604147380118f809f57757dd55dbfb87943ec5aead34a301f0603551d23041830168014226768f6483d21e17344cd4338a7bb4b035b000f300506032b6570034100d34e4d2e2d0cce5a5b164da3842a210917de63cfc7cdf169757537cf0aaec9d3325e504399f9a5c3c2b466265116004abf01d8a46be5eb9088d79f4333de8807";
+}

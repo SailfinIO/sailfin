@@ -6,7 +6,7 @@ type: runtime
 created: 2026-07-12
 updated: 2026-08-07
 author: "agent:compiler-architect; human review"
-tracking: SFN-333, SFN-335, SFN-336, SFN-337, SFN-504, SFN-654, SFN-655, SFN-659, SFN-660, SFN-699
+tracking: SFN-333, SFN-335, SFN-336, SFN-337, SFN-340, SFN-504, SFN-654, SFN-655, SFN-656, SFN-657, SFN-658, SFN-659, SFN-660, SFN-699
 supersedes:
 superseded-by:
 graduates-to:
@@ -182,6 +182,58 @@ resumption, no tickets, no 0-RTT, and no HelloRetryRequest, and the server
 performs no certificate chain verification of its own (trust remains the
 client's decision, SFN-340). See `docs/status.md`'s `sfn/crypto` row for the
 full capability and limitation list.
+
+**Amendment (2026-08-07) — Phase C: chain verification and the trust store
+have landed (SFN-340); Phase C is now complete.** This supersedes the
+2026-08-06 amendment's closing claim that "Chain verification and the system
+trust store — the rest of Phase C's original scope — remain unshipped
+(SFN-340)." New `capsules/sfn/crypto/src/x509_verify.sfn` (pure, no effects;
+caller supplies the Unix-millisecond snapshot, the same boundary
+`x509_validity_at` established under SFN-504) adds
+`x509_verify_chain(leaf, intermediates, anchors, options) -> X509ChainResult`:
+chain building treats `intermediates` as an unordered bag and walks greedily
+without backtracking, safe because a candidate issuer is accepted only after
+its signature over the subject verifies, each intermediate is consumed at
+most once, and the turn count is bounded by the bag size. Signature dispatch
+on the certificate's signature-algorithm OID covers Ed25519, ECDSA-P256/
+SHA-256 (SFN-657), and RSASSA-PKCS1-v1.5/SHA-256/SHA-384 (SFN-656) — realizing
+the §6.3 amendment's RSA-in-scope decision in the dispatch table for
+certificate-signature verification, though RSASSA-PSS (SFN-658) stays out of
+this dispatch, since PSS is the CertificateVerify scheme, not the X.509
+cert-signature scheme; any other OID rejects the link rather than skipping
+it. Enforces RFC 5280 §4.1.1.2 outer/inner signatureAlgorithm agreement,
+validity at every position in the path (not just the leaf), basicConstraints
+CA flag, keyUsage keyCertSign when present, pathLenConstraint, and
+extendedKeyUsage serverAuth on the leaf when present; trust anchors are not
+exempt from validity or CA constraints. New
+`capsules/sfn/crypto/src/trust_store.sfn` adds the anchor set:
+`trust_store_from_pem` is pure; `trust_store_load()`/
+`trust_store_load_from(path)` are the only `![io]` surface added to
+`sfn/crypto`, consulting `SAILFIN_TLS_CAFILE` then `SSL_CERT_FILE` before
+probing `trust_store_default_paths()`. `SAILFIN_TLS_CAFILE` is honoured first
+because it is the name the OpenSSL-backed `runtime/sfn/platform/tls.sfn`
+already reads, so a program configured against today's stack keeps its custom
+CA when SFN-341 swaps those bodies onto this one rather than silently falling
+back to the system bundle. macOS is documented, not solved: the real
+system trust store is the Keychain, not a file, and is not read by this
+path — a caller needing Keychain fidelity supplies anchors via
+`trust_store_from_pem`, and a Security.framework binding is outside this cut.
+`x509.sfn` gained `signature_algorithm_outer`/`tbs_der`/`signature_value`
+fields so a signature can be checked at all, exposed but never enforced
+there — `x509.sfn` itself still makes no trust decision. Capsule version
+0.25.0 → 0.26.0; `[capabilities] required` stays `[]`. Full capability and
+limitation list: `docs/status.md`'s `sfn/crypto` row.
+
+**Phase C's completion does not advance Phase D.**
+`runtime/sfn/platform/tls.sfn` is untouched; `-lssl`/`-lcrypto` are still
+linked; §3.1's table entry for Phase C ("still linked") is unchanged, and
+SFN-341 remains the seal blocker. Neither TLS 1.3 handshake's
+CertificateVerify accepts ECDSA-P256 or RSA yet, and neither
+`tls13_handshake.sfn` nor `tls13_server_handshake.sfn` calls
+`x509_verify_chain` — the capability exists in the capsule but is not wired
+into either state machine. No OCSP/CRL/revocation, no name constraints
+beyond SAN matching, no client-cert/mTLS. Phase C is complete; Phase D
+(dropping `-lssl`/`-lcrypto` from the link line) has not begun.
 
 ### 3.2 Where the code lives
 

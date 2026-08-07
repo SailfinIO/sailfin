@@ -120,6 +120,12 @@ struct X509Certificate {
     version: int;  // 1, 2 or 3; 1 when the [0] EXPLICIT Version is absent
     serial: int[];  // INTEGER content bytes, big-endian, opaque
     signature_algorithm: string;  // tbsCertificate.signature algorithm OID
+    signature_algorithm_outer: string;  // Certificate.signatureAlgorithm OID
+    // tbsCertificate TLV verbatim, identifier and length octets included: the
+    // exact byte range a certificate signature is computed over (RFC 5280
+    // 4.1.1.3). Exposed, never checked here.
+    tbs_der: int[];
+    signature_value: int[];  // signatureValue BIT STRING content, unused-bits octet removed
     issuer_der: int[];  // the issuer Name TLV verbatim, header included
     subject_der: int[];  // the subject Name TLV verbatim, header included
     issuer_cn: string;  // last commonName attribute, "" when absent
@@ -149,6 +155,9 @@ fn _failed(message: string) -> X509Certificate {
         version: 0,
         serial: [],
         signature_algorithm: "",
+        signature_algorithm_outer: "",
+        tbs_der: [],
+        signature_value: [],
         issuer_der: [],
         subject_der: [],
         issuer_cn: "",
@@ -300,8 +309,25 @@ fn x509_parse_with_limits(der: int[], limits: DerLimits) -> X509Certificate {
         return _failed("x509: unexpected trailing field in certificate");
     }
 
-    // The signature value itself is never exposed and never used: this module
-    // makes no trust decision.
+    let outer_alg_oid_tlv: DerTlv = der_read_tlv(der, sig_alg_outer.content_off, sig_alg_outer.end_off);
+    if !outer_alg_oid_tlv.ok { return _failed(outer_alg_oid_tlv.error); }
+    let outer_alg_res = der_oid_string(der, outer_alg_oid_tlv);
+    if !outer_alg_res.ok { return _failed(outer_alg_res.error); }
+    let signature_algorithm_outer: string = outer_alg_res.value;
+
+    let tbs_der: int[] = _slice(der, outer.content_off, tbs.end_off - outer.content_off);
+
+    let sig_unused_res = der_bit_string_unused(der, sig_value);
+    if !sig_unused_res.ok { return _failed(sig_unused_res.error); }
+    if sig_unused_res.value != 0 {
+        return _failed("x509: signature value is not byte-aligned");
+    }
+    let sig_bytes_res = der_bit_string_bytes(der, sig_value);
+    if !sig_bytes_res.ok { return _failed(sig_bytes_res.error); }
+    let signature_value: int[] = sig_bytes_res.value;
+
+    // The signature is exposed above but never checked here: this module still
+    // makes no trust decision (SFN-340 owns chain verification).
     let tbs_end: int = tbs.end_off;
     let mut cur: int = tbs.content_off;
 
@@ -699,6 +725,9 @@ fn x509_parse_with_limits(der: int[], limits: DerLimits) -> X509Certificate {
         version: version,
         serial: serial,
         signature_algorithm: signature_algorithm,
+        signature_algorithm_outer: signature_algorithm_outer,
+        tbs_der: tbs_der,
+        signature_value: signature_value,
         issuer_der: issuer_der,
         subject_der: subject_der,
         issuer_cn: issuer_cn,
