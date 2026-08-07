@@ -10,18 +10,27 @@
 import {
     CertificateMsg,
     CertificateVerifyMsg,
+    ClientHelloMsg,
     ServerHelloMsg,
+    encode_certificate,
+    encode_certificate_verify,
     encode_client_hello,
+    encode_encrypted_extensions,
     encode_handshake_message,
+    encode_server_hello,
     parse_certificate,
     parse_certificate_verify,
+    parse_client_hello,
     parse_client_hello_cipher_suites,
     parse_client_hello_legacy_session_id,
+    parse_encrypted_extensions,
     parse_finished,
     parse_handshake_message,
     parse_server_hello,
     tls_cipher_aes_128_gcm_sha256,
+    tls_cipher_chacha20_poly1305_sha256,
     tls_group_x25519,
+    tls_sigalg_ed25519,
     tls_version_13
 } from "../src/tls13_handshake_codec";
 
@@ -642,4 +651,222 @@ test "tls13_handshake_codec: encode_client_hello rejects a legacy_session_id ove
     let key_share: int[] = _bytes(32, 0);
     let message: int[] = encode_client_hello(random, session_id, key_share, "");
     assert message.length == 0;
+}
+
+// ── encode_server_hello round-trip and fail-closed ────────────────
+test "tls13_handshake_codec: encode_server_hello round-trips through parse_server_hello" {
+    let random: int[] = _bytes(32, 3);
+    let session_id_echo: int[] = _bytes(16, 5);
+    let key_share: int[] = _bytes(32, 9);
+    let message: int[] = encode_server_hello(random, session_id_echo, tls_cipher_chacha20_poly1305_sha256(), key_share);
+    assert message.length > 0;
+
+    let parsed: Result<HandshakeMessage, string> = parse_handshake_message(message, 0);
+    match parsed {
+        Result.Ok { value } => {
+            assert value.msg_type == 2;  // hs_type_server_hello
+            let result: Result<ServerHelloMsg, string> = parse_server_hello(value.body);
+            match result {
+                Result.Ok { value } => {
+                    assert eq_bytes(value.random, random);
+                    assert eq_bytes(value.legacy_session_id_echo, session_id_echo);
+                    assert value.cipher_suite == tls_cipher_chacha20_poly1305_sha256();
+                    assert value.selected_version == tls_version_13();
+                    assert value.selected_group == tls_group_x25519();
+                    assert eq_bytes(value.key_exchange, key_share);
+                },
+                Result.Err { error } => { assert false; }
+            }
+        },
+        Result.Err { error } => { assert false; }
+    }
+}
+
+test "tls13_handshake_codec: encode_server_hello rejects a random of the wrong length" {
+    let random: int[] = _bytes(31, 0);  // must be 32
+    let session_id_echo: int[] = [];
+    let key_share: int[] = _bytes(32, 0);
+    let message: int[] = encode_server_hello(random, session_id_echo, tls_cipher_chacha20_poly1305_sha256(), key_share);
+    assert message.length == 0;
+}
+
+// ── encode_encrypted_extensions round-trip ────────────────────────
+test "tls13_handshake_codec: encode_encrypted_extensions round-trips through parse_encrypted_extensions" {
+    let message: int[] = encode_encrypted_extensions();
+    let parsed: Result<HandshakeMessage, string> = parse_handshake_message(message, 0);
+    match parsed {
+        Result.Ok { value } => {
+            assert value.msg_type == 8;  // hs_type_encrypted_extensions
+            let result: Result<int, string> = parse_encrypted_extensions(value.body);
+            match result {
+                Result.Ok { value } => { assert value == 0; },
+                Result.Err { error } => { assert false; }
+            }
+        },
+        Result.Err { error } => { assert false; }
+    }
+}
+
+// ── encode_certificate round-trip and fail-closed ─────────────────
+test "tls13_handshake_codec: encode_certificate round-trips through parse_certificate" {
+    let leaf: int[] = _bytes(5, 65);
+    let intermediate: int[] = _bytes(4, 66);
+    let chain: int[][] = [leaf, intermediate];
+    let message: int[] = encode_certificate([], chain);
+    assert message.length > 0;
+
+    let parsed: Result<HandshakeMessage, string> = parse_handshake_message(message, 0);
+    match parsed {
+        Result.Ok { value } => {
+            assert value.msg_type == 11;  // hs_type_certificate
+            let result: Result<CertificateMsg, string> = parse_certificate(value.body);
+            match result {
+                Result.Ok { value } => {
+                    assert value.entry_count == 2;
+                    assert eq_bytes(value.leaf, leaf);
+                    assert value.certificate_request_context.length == 0;
+                },
+                Result.Err { error } => { assert false; }
+            }
+        },
+        Result.Err { error } => { assert false; }
+    }
+}
+
+test "tls13_handshake_codec: encode_certificate rejects an empty chain" {
+    let empty_chain: int[][] = [];
+    let message: int[] = encode_certificate([], empty_chain);
+    assert message.length == 0;
+}
+
+test "tls13_handshake_codec: encode_certificate rejects a zero-length chain entry" {
+    let bad: int[] = [];
+    let chain: int[][] = [bad];
+    let message: int[] = encode_certificate([], chain);
+    assert message.length == 0;
+}
+
+// ── encode_certificate_verify round-trip and fail-closed ──────────
+test "tls13_handshake_codec: encode_certificate_verify round-trips through parse_certificate_verify" {
+    let signature: int[] = _bytes(64, 7);
+    let message: int[] = encode_certificate_verify(tls_sigalg_ed25519(), signature);
+    assert message.length > 0;
+
+    let parsed: Result<HandshakeMessage, string> = parse_handshake_message(message, 0);
+    match parsed {
+        Result.Ok { value } => {
+            assert value.msg_type == 15;  // hs_type_certificate_verify
+            let result: Result<CertificateVerifyMsg, string> = parse_certificate_verify(value.body);
+            match result {
+                Result.Ok { value } => {
+                    assert value.algorithm == tls_sigalg_ed25519();
+                    assert eq_bytes(value.signature, signature);
+                },
+                Result.Err { error } => { assert false; }
+            }
+        },
+        Result.Err { error } => { assert false; }
+    }
+}
+
+test "tls13_handshake_codec: encode_certificate_verify rejects an empty signature" {
+    let signature: int[] = [];
+    let message: int[] = encode_certificate_verify(tls_sigalg_ed25519(), signature);
+    assert message.length == 0;
+}
+
+// ── parse_client_hello ─────────────────────────────────────────────
+test "tls13_handshake_codec: parse_client_hello extracts the RFC 8448 vector" {
+    let body: int[] = _rfc8448_client_hello_body();
+    let result: Result<ClientHelloMsg, string> = parse_client_hello(body);
+    match result {
+        Result.Ok { value } => {
+            assert value.random.length == 32;
+            assert eq_bytes(value.cipher_suites, [4865, 4867, 4866]);
+            assert value.offers_tls13 == true;
+            assert value.key_share_group == tls_group_x25519();
+            assert value.key_exchange.length == 32;
+        },
+        Result.Err { error } => { assert false; }
+    }
+}
+
+test "tls13_handshake_codec: parse_client_hello rejects a truncated body" {
+    let body: int[] = _u16b(771);  // legacy_version only
+    let result: Result<ClientHelloMsg, string> = parse_client_hello(body);
+    match result {
+        Result.Ok { value } => { assert false; },
+        Result.Err { error } => { assert error.length > 0; }
+    }
+}
+
+test "tls13_handshake_codec: parse_client_hello rejects a duplicated extension type" {
+    let mut ext_block: int[] = [];
+    _extend(ext_block, _ext_supported_versions_ok());
+    _extend(ext_block, _ext_supported_versions_ok());
+    let mut body: int[] = [];
+    _extend(body, _u16b(771));
+    _extend(body, _bytes(32, 1));
+    body.push(0);  // legacy_session_id length = 0
+    _extend(body, _u16b(2));  // cipher_suites length
+    _extend(body, _u16b(tls_cipher_aes_128_gcm_sha256()));
+    body.push(1);  // legacy_compression_methods length
+    body.push(0);  // null compression
+    _extend(body, _u16b(ext_block.length));
+    _extend(body, ext_block);
+    let result: Result<ClientHelloMsg, string> = parse_client_hello(body);
+    match result {
+        Result.Ok { value } => { assert false; },
+        Result.Err { error } => { assert error.length > 0; }
+    }
+}
+
+// A key_share extension carrying two KeyShareEntry values for the same
+// group (x25519), which RFC 8446 §4.2.8 forbids.
+fn _ext_key_share_duplicate_x25519() -> int[] {
+    let mut entry: int[] = [];
+    _extend(entry, _u16b(tls_group_x25519()));
+    _extend(entry, _u16b(32));
+    _extend(entry, _bytes(32, 9));
+    let mut list: int[] = [];
+    _extend(list, entry);
+    _extend(list, entry);
+    let mut out: int[] = [];
+    _extend(out, _u16b(51));  // ext_key_share
+    _extend(out, _u16b(list.length));
+    _extend(out, list);
+    return out;
+}
+
+test "tls13_handshake_codec: parse_client_hello rejects a duplicate KeyShareEntry for the same group" {
+    let mut body: int[] = [];
+    _extend(body, _u16b(771));
+    _extend(body, _bytes(32, 1));
+    body.push(0);  // legacy_session_id length = 0
+    _extend(body, _u16b(2));  // cipher_suites length
+    _extend(body, _u16b(tls_cipher_aes_128_gcm_sha256()));
+    body.push(1);  // legacy_compression_methods length
+    body.push(0);  // null compression
+    let ext_block: int[] = _ext_key_share_duplicate_x25519();
+    _extend(body, _u16b(ext_block.length));
+    _extend(body, ext_block);
+    let result: Result<ClientHelloMsg, string> = parse_client_hello(body);
+    match result {
+        Result.Ok { value } => { assert false; },
+        Result.Err { error } => { assert error.length > 0; }
+    }
+}
+
+test "tls13_handshake_codec: parse_client_hello rejects an odd-length cipher_suites list" {
+    let mut body: int[] = [];
+    _extend(body, _u16b(771));
+    _extend(body, _bytes(32, 1));
+    body.push(0);  // legacy_session_id length = 0
+    _extend(body, _u16b(3));  // cipher_suites length: 3 (not a multiple of 2)
+    _extend(body, [9, 9, 9]);
+    let result: Result<ClientHelloMsg, string> = parse_client_hello(body);
+    match result {
+        Result.Ok { value } => { assert false; },
+        Result.Err { error } => { assert error.length > 0; }
+    }
 }

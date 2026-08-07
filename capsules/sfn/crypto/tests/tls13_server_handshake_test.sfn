@@ -1,0 +1,666 @@
+// capsules/sfn/crypto/tests/tls13_server_handshake_test.sfn
+//
+// Regression coverage for the TLS 1.3 server handshake state machine
+// (RFC 8446 §4, SFN-654), in two halves.
+//
+// The first half drives the server against the canonical RFC 8448 §3 "Simple
+// 1-RTT Handshake" trace — the same ClientHello, ServerHello,
+// EncryptedExtensions, Certificate, CertificateVerify and Finished bytes the
+// client-side tests use, but consumed and emitted from the other direction.
+// Every secret and transcript hash asserted there is quoted from the RFC, so
+// this checks the state machine against an independently published trace
+// rather than against itself.
+//
+// Two properties of that trace shape those tests:
+//
+//   * It negotiates TLS_AES_128_GCM_SHA256 (0x1301), not ChaCha20-Poly1305.
+//     Both are SHA-256 suites, so the transcript hash and the whole key
+//     schedule are bit-identical; only the record layer's AEAD would differ,
+//     and that is not this module's concern.
+//   * Its CertificateVerify signs with rsa_pss_rsae_sha256 (0x0804), which
+//     this capsule cannot produce. The trace's CertificateVerify is therefore
+//     committed as canned bytes rather than generated — what the transcript
+//     needs is the exact bytes, and the RFC's server Finished then has to
+//     reproduce byte-for-byte, which is the end-to-end proof the transcript
+//     never diverged.
+//
+// The second half is the client/server interop: the two state machines drive
+// each other end to end with a real X25519 exchange, a real Ed25519
+// CertificateVerify signature that the client actually verifies, and both
+// Finished MACs checked by the opposite side. It runs in memory rather than
+// over a socket because `sfn/crypto` declares `[capabilities] required = []`
+// and SFEP-0048 keeps the crypto capsule effect-free; the socket transport is
+// `sfn/net`'s, and wiring these state machines to it is SFN-341's.
+import {
+    ClientHandshake,
+    hs_client_finished_message,
+    hs_client_hello,
+    hs_client_new,
+    hs_client_recv_certificate,
+    hs_client_recv_certificate_verify,
+    hs_client_recv_encrypted_extensions,
+    hs_client_recv_finished,
+    hs_client_recv_server_hello,
+    hs_client_send_hello,
+    hs_state_connected,
+    tls13_traffic_iv,
+    tls13_traffic_key
+} from "../src/tls13_handshake";
+import {
+    tls_cipher_aes_128_gcm_sha256,
+    tls_cipher_chacha20_poly1305_sha256,
+    tls_group_x25519
+} from "../src/tls13_handshake_codec";
+import { TlsRecordPlaintext, tls13_open_record, tls13_seal_record } from "../src/tls13_record";
+import {
+    ServerHandshake,
+    hs_server_certificate_message,
+    hs_server_certificate_verify_message,
+    hs_server_encrypted_extensions_message,
+    hs_server_finished_message,
+    hs_server_hello,
+    hs_server_new,
+    hs_server_recv_client_hello,
+    hs_server_recv_finished,
+    hs_server_send_certificate,
+    hs_server_send_certificate_verify,
+    hs_server_send_encrypted_extensions,
+    hs_server_send_finished,
+    hs_server_send_hello,
+    hs_server_state_connected,
+    hs_server_state_negotiated,
+    hs_server_state_send_certificate,
+    hs_server_state_send_certificate_verify,
+    hs_server_state_send_encrypted_extensions,
+    hs_server_state_send_finished,
+    hs_server_state_wait_client_finished,
+    hs_server_transcript_hash
+} from "../src/tls13_server_handshake";
+
+// Parse an even-length lowercase hex string into an int[] of bytes.
+fn hexb(s: string) -> int[] {
+    let mut out: int[] = [];
+    let mut i: int = 0;
+    loop {
+        // `i + 1` rather than `i` so an odd-length literal returns what it
+        // parsed instead of indexing past the end and killing the runner —
+        // a mistyped vector should fail an assertion, not crash the suite.
+        if i + 1 >= s.length { break; }
+        let hi: int = _hexval(s[i]);
+        let lo: int = _hexval(s[i + 1]);
+        out.push(((hi << 4) | lo) & 255);
+        i += 2;
+    }
+    return out;
+}
+
+fn _hexval(c: string) -> int {
+    let code: int = char_code(c) & 255;
+    if code >= 48 && code <= 57 {
+        return code - 48;
+    }  // '0'-'9'
+    if code >= 97 && code <= 102 {
+        return code - 97 + 10;
+    }  // 'a'-'f'
+    return 0;
+}
+
+fn eq_bytes(a: int[], b: int[]) -> bool {
+    if a.length != b.length { return false; }
+    let mut i: int = 0;
+    loop {
+        if i >= a.length { break; }
+        if a[i] != b[i] { return false; }
+        i += 1;
+    }
+    return true;
+}
+
+// ── RFC 8448 §3 vectors ──────────────────────────────────────────
+// The server's ephemeral X25519 key pair. The public half is what the trace's
+// ServerHello carries in its key_share, so `hs_server_send_hello`'s
+// consistency check ties the two together.
+fn v_server_private() -> int[] {
+    return hexb("b1580eeadf6dd589b8ef4f2d5652578cc810e9980191ec8d058308cea216a21e");
+}
+
+fn v_server_public() -> int[] {
+    return hexb("c9828876112095fe66762bdbf7c672e156d6cc253b833df1dd69b1b04e751f0f");
+}
+
+// Complete handshake messages: type byte, uint24 length, body.
+fn v_client_hello() -> int[] {
+    return hexb("010000c00303cb34ecb1e78163ba1c38c6dacb196a6dffa21a8d9912ec18a2ef6283024dece7000006130113031302010000910000000b0009000006736572766572ff01000100000a00140012001d0017001800190100010101020103010400230000003300260024001d002099381de560e4bd43d23d8e435a7dbafeb3c06e51c13cae4d5413691e529aaf2c002b0003020304000d0020001e040305030603020308040805080604010501060102010402050206020202002d00020101001c00024001");
+}
+
+fn v_server_hello() -> int[] {
+    return hexb("020000560303a6af06a4121860dc5e6e60249cd34c95930c8ac5cb1434dac155772ed3e2692800130100002e00330024001d0020c9828876112095fe66762bdbf7c672e156d6cc253b833df1dd69b1b04e751f0f002b00020304");
+}
+
+fn v_encrypted_extensions() -> int[] {
+    return hexb("080000240022000a00140012001d00170018001901000101010201030104001c0002400100000000");
+}
+
+fn v_certificate() -> int[] {
+    return hexb("0b0001b9000001b50001b0308201ac30820115a003020102020102300d06092a864886f70d01010b0500300e310c300a06035504031303727361301e170d3136303733303031323335395a170d3236303733303031323335395a300e310c300a0603550403130372736130819f300d06092a864886f70d010101050003818d0030818902818100b4bb498f8279303d980836399b36c6988c0c68de55e1bdb826d3901a2461eafd2de49a91d015abbc9a95137ace6c1af19eaa6af98c7ced43120998e187a80ee0ccb0524b1b018c3e0b63264d449a6d38e22a5fda430846748030530ef0461c8ca9d9efbfae8ea6d1d03e2bd193eff0ab9a8002c47428a6d35a8d88d79f7f1e3f0203010001a31a301830090603551d1304023000300b0603551d0f0404030205a0300d06092a864886f70d01010b05000381810085aad2a0e5b9276b908c65f73a7267170618a54c5f8a7b337d2df7a594365417f2eae8f8a58c8f8172f9319cf36b7fd6c55b80f21a03015156726096fd335e5e67f2dbf102702e608ccae6bec1fc63a42a99be5c3eb7107c3c54e9b9eb2bd5203b1c3b84e0a8b2f759409ba3eac9d91d402dcc0cc8f8961229ac9187b42b4de10000");
+}
+
+fn v_certificate_verify() -> int[] {
+    return hexb("0f000084080400805a747c5d88fa9bd2e55ab085a61015b7211f824cd484145ab3ff52f1fda8477b0b7abc90db78e2d33a5c141a078653fa6bef780c5ea248eeaaa785c4f394cab6d30bbe8d4859ee511f602957b15411ac027671459e46445c9ea58c181e818e95b8c3fb0bf3278409d3be152a3da5043e063dda65cdf5aea20d53dfacd42f74f3");
+}
+
+fn v_server_finished() -> int[] {
+    return hexb("140000209b9b141d906337fbd2cbdce71df4deda4ab42c309572cb7fffee5454b78f0718");
+}
+
+fn v_client_finished() -> int[] {
+    return hexb("14000020a8ec436d677634ae525ac1fcebe11a039ec17694fac6e98527b642f2edd5ce61");
+}
+
+// ── RFC 8032 §7.1 TEST 1 Ed25519 key pair ────────────────────────
+// The interop half needs a signing key whose public half is known so the
+// client can verify the CertificateVerify the server actually produces. A
+// published vector is used rather than a generated pair so the test needs no
+// ![rand] and the public key can be written down.
+fn ed_seed() -> int[] {
+    return hexb("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60");
+}
+
+fn ed_public_hex() -> string {
+    return "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a";
+}
+
+// ── Sentinels ────────────────────────────────────────────────────
+// Initialise a `let mut` before a `match` fills it in. The state is -1, which
+// no real state ever equals, so a step that failed to produce a state fails
+// the following assertion instead of passing vacuously against a plausible
+// one.
+fn _server_sentinel() -> ServerHandshake {
+    return ServerHandshake {
+        state: -1,
+        transcript: [],
+        server_private: [],
+        server_public: [],
+        certificate_chain: [],
+        signing_seed: [],
+        client_random: [],
+        client_legacy_session_id: [],
+        client_key_exchange: [],
+        client_offered_cipher_suites: [],
+        client_offers_ed25519_sigalg: false,
+        cipher_suite: 0,
+        group: 0,
+        shared_secret: [],
+        early_secret: [],
+        handshake_secret: [],
+        master_secret: [],
+        client_handshake_traffic_secret: [],
+        server_handshake_traffic_secret: [],
+        client_application_traffic_secret: [],
+        server_application_traffic_secret: [],
+        client_finished_verified: false
+    };
+}
+
+fn _client_sentinel() -> ClientHandshake {
+    return ClientHandshake {
+        state: -1,
+        transcript: [],
+        client_private: [],
+        client_public: [],
+        offered_cipher_suites: [],
+        sent_legacy_session_id: [],
+        cipher_suite: 0,
+        group: 0,
+        shared_secret: [],
+        early_secret: [],
+        handshake_secret: [],
+        master_secret: [],
+        client_handshake_traffic_secret: [],
+        server_handshake_traffic_secret: [],
+        client_application_traffic_secret: [],
+        server_application_traffic_secret: [],
+        server_leaf_certificate: [],
+        server_certificate_verified: false
+    };
+}
+
+// A stand-in certificate chain for the cases that never put a real one on the
+// wire. The state machine treats cert_data as opaque — chain verification is
+// the client's job (SFN-340) — so any non-empty blob exercises the same paths.
+fn _stub_chain() -> int[][] {
+    let leaf: int[] = hexb("3082010a0203040506");
+    let mut chain: int[][] = [];
+    chain.push(leaf);
+    return chain;
+}
+
+// ── The full RFC 8448 §3 handshake, server side ──────────────────
+test "tls13_server_handshake: RFC 8448 simple 1-RTT handshake reproduces every secret" {
+    let created: Result<ServerHandshake, string> = hs_server_new(v_server_private(), _stub_chain(), ed_seed());
+    let mut hs: ServerHandshake = _server_sentinel();
+    match created {
+        Result.Ok { value } => { hs = value; },
+        Result.Err { error } => { assert error.length == 0; }
+    }
+    assert eq_bytes(hs.server_public, v_server_public());
+
+    // ClientHello: negotiation picks the first offered suite this module
+    // supports, which for this trace is TLS_AES_128_GCM_SHA256.
+    let r1: Result<ServerHandshake, string> = hs_server_recv_client_hello(hs, v_client_hello());
+    match r1 {
+        Result.Ok { value } => { hs = value; },
+        Result.Err { error } => { assert error.length == 0; }
+    }
+    assert hs.state == hs_server_state_negotiated();
+    assert hs.cipher_suite == tls_cipher_aes_128_gcm_sha256();
+    assert hs.client_offered_cipher_suites.length == 3;
+    assert hs.client_key_exchange.length == 32;
+    // RFC 8448 §3's ClientHello offers fifteen signature schemes and ed25519
+    // is not among them, which is why the ed25519 requirement is enforced at
+    // the CertificateVerify step rather than here.
+    assert ! hs.client_offers_ed25519_sigalg;
+
+    // ServerHello: completes the key exchange and the handshake secrets.
+    let r2: Result<ServerHandshake, string> = hs_server_send_hello(hs, v_server_hello());
+    match r2 {
+        Result.Ok { value } => { hs = value; },
+        Result.Err { error } => { assert error.length == 0; }
+    }
+    assert hs.state == hs_server_state_send_encrypted_extensions();
+    assert hs.group == tls_group_x25519();
+    assert eq_bytes(hs.shared_secret, hexb("8bd4054fb55b9d63fdfbacf9f04b9f0d35e6d63f537563efd46272900f89492d"));
+    // Transcript-Hash(ClientHello..ServerHello).
+    assert eq_bytes(hs_server_transcript_hash(hs), hexb("860c06edc07858ee8e78f0e7428c58edd6b43f2ca3e6e95f02ed063cf0e1cad8"));
+    assert eq_bytes(hs.handshake_secret, hexb("1dc826e93606aa6fdc0aadc12f741b01046aa6b99f691ed221a9f0ca043fbeac"));
+    assert eq_bytes(hs.client_handshake_traffic_secret, hexb("b3eddb126e067f35a780b3abf45e2d8f3b1a950738f52e9600746a0e27a55a21"));
+    assert eq_bytes(hs.server_handshake_traffic_secret, hexb("b67b7d690cc16c4e75e54213cb2d37b4e9c912bcded9105d42befd59d391ad38"));
+    assert eq_bytes(hs.master_secret, hexb("18df06843d13a08bf2a449844c5f8a478001bc4d4c627984d5a41da8d0402919"));
+
+    // EncryptedExtensions.
+    let r3: Result<ServerHandshake, string> = hs_server_send_encrypted_extensions(hs, v_encrypted_extensions());
+    match r3 {
+        Result.Ok { value } => { hs = value; },
+        Result.Err { error } => { assert error.length == 0; }
+    }
+    assert hs.state == hs_server_state_send_certificate();
+
+    // Certificate.
+    let r4: Result<ServerHandshake, string> = hs_server_send_certificate(hs, v_certificate());
+    match r4 {
+        Result.Ok { value } => { hs = value; },
+        Result.Err { error } => { assert error.length == 0; }
+    }
+    assert hs.state == hs_server_state_send_certificate_verify();
+
+    // CertificateVerify: RSA-PSS, so the trace's bytes are committed rather
+    // than generated.
+    let r5: Result<ServerHandshake, string> = hs_server_send_certificate_verify(hs, v_certificate_verify());
+    match r5 {
+        Result.Ok { value } => { hs = value; },
+        Result.Err { error } => { assert error.length == 0; }
+    }
+    assert hs.state == hs_server_state_send_finished();
+
+    // The server's own Finished must reproduce the RFC's bytes exactly — the
+    // end-to-end proof that the transcript never diverged.
+    let fin: Result<int[], string> = hs_server_finished_message(hs);
+    match fin {
+        Result.Ok { value } => {
+            assert eq_bytes(value, v_server_finished());
+        },
+        Result.Err { error } => { assert error.length == 0; }
+    }
+
+    // Committing it keys the application secrets off
+    // Transcript-Hash(ClientHello..server Finished).
+    let r6: Result<ServerHandshake, string> = hs_server_send_finished(hs, v_server_finished());
+    match r6 {
+        Result.Ok { value } => { hs = value; },
+        Result.Err { error } => { assert error.length == 0; }
+    }
+    assert hs.state == hs_server_state_wait_client_finished();
+    assert eq_bytes(hs_server_transcript_hash(hs), hexb("9608102a0f1ccc6db6250b7b7e417b1a000eaada3daae4777a7686c9ff83df13"));
+    assert eq_bytes(hs.client_application_traffic_secret, hexb("9e40646ce79a7f9dc05af8889bce6552875afa0b06df0087f792ebb7c17504a5"));
+    assert eq_bytes(hs.server_application_traffic_secret, hexb("a11af9f05531f856ad47116b45a950328204b4f44bfb6b3a4b4f1f3fcb631643"));
+
+    // The client's Finished from the same trace must verify against the
+    // client handshake traffic secret this side derived independently.
+    let r7: Result<ServerHandshake, string> = hs_server_recv_finished(hs, v_client_finished());
+    match r7 {
+        Result.Ok { value } => { hs = value; },
+        Result.Err { error } => { assert error.length == 0; }
+    }
+    assert hs.state == hs_server_state_connected();
+    assert hs.client_finished_verified;
+}
+
+// ── Client/server interop ────────────────────────────────────────
+// Both state machines driven against each other with a real X25519 exchange
+// and a real Ed25519 CertificateVerify the client actually verifies. This is
+// AC3 of SFN-654, read as in-memory interop: `sfn/crypto` is effect-free, so
+// the socket transport belongs to SFN-341.
+test "tls13_server_handshake: client and server interoperate over x25519 and chacha20-poly1305" {
+    let client_private: int[] = hexb("77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a");
+    let server_private: int[] = hexb("5dab087e624a8a4b79e17f8b83800ee66f3bb1292618b6fd1c2f8b27ff88e0eb");
+    let client_random: int[] = hexb("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f");
+    let server_random: int[] = hexb("202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f");
+    let session_id: int[] = hexb("cafebabecafebabecafebabecafebabecafebabecafebabecafebabecafebabe");
+
+    // Leaf certificate bytes are opaque to both state machines — the client
+    // takes the leaf public key from its caller, and chain verification is
+    // SFN-340's — so a stand-in blob exercises the same paths a real DER
+    // certificate would.
+    let mut chain: int[][] = [];
+    chain.push(hexb("308201aa0203040506070809"));
+
+    let mut c: ClientHandshake = _client_sentinel();
+    match hs_client_new(client_private) {
+        Result.Ok { value } => { c = value; },
+        Result.Err { error } => { assert error.length == 0; }
+    }
+    let mut s: ServerHandshake = _server_sentinel();
+    match hs_server_new(server_private, chain, ed_seed()) {
+        Result.Ok { value } => { s = value; },
+        Result.Err { error } => { assert error.length == 0; }
+    }
+
+    // ClientHello.
+    let client_hello: int[] = hs_client_hello(c, client_random, session_id, "example.com");
+    assert client_hello.length > 0;
+    match hs_client_send_hello(c, client_hello) {
+        Result.Ok { value } => { c = value; },
+        Result.Err { error } => { assert error.length == 0; }
+    }
+    match hs_server_recv_client_hello(s, client_hello) {
+        Result.Ok { value } => { s = value; },
+        Result.Err { error } => { assert error.length == 0; }
+    }
+    // The client offers exactly one suite, so this is the negotiated one.
+    assert s.cipher_suite == tls_cipher_chacha20_poly1305_sha256();
+    assert s.client_offers_ed25519_sigalg;
+
+    // ServerHello.
+    let server_hello: int[] = hs_server_hello(s, server_random);
+    assert server_hello.length > 0;
+    match hs_server_send_hello(s, server_hello) {
+        Result.Ok { value } => { s = value; },
+        Result.Err { error } => { assert error.length == 0; }
+    }
+    match hs_client_recv_server_hello(c, server_hello) {
+        Result.Ok { value } => { c = value; },
+        Result.Err { error } => { assert error.length == 0; }
+    }
+    // Independently derived on each side from the same exchange.
+    assert eq_bytes(c.shared_secret, s.shared_secret);
+    assert eq_bytes(c.handshake_secret, s.handshake_secret);
+    assert eq_bytes(c.client_handshake_traffic_secret, s.client_handshake_traffic_secret);
+    assert eq_bytes(c.server_handshake_traffic_secret, s.server_handshake_traffic_secret);
+    assert c.cipher_suite == tls_cipher_chacha20_poly1305_sha256();
+    assert c.group == tls_group_x25519();
+
+    // EncryptedExtensions.
+    let mut ee: int[] = [];
+    match hs_server_encrypted_extensions_message(s) {
+        Result.Ok { value } => { ee = value; },
+        Result.Err { error } => { assert error.length == 0; }
+    }
+    match hs_server_send_encrypted_extensions(s, ee) {
+        Result.Ok { value } => { s = value; },
+        Result.Err { error } => { assert error.length == 0; }
+    }
+    match hs_client_recv_encrypted_extensions(c, ee) {
+        Result.Ok { value } => { c = value; },
+        Result.Err { error } => { assert error.length == 0; }
+    }
+
+    // Certificate.
+    let mut cert: int[] = [];
+    match hs_server_certificate_message(s) {
+        Result.Ok { value } => { cert = value; },
+        Result.Err { error } => { assert error.length == 0; }
+    }
+    match hs_server_send_certificate(s, cert) {
+        Result.Ok { value } => { s = value; },
+        Result.Err { error } => { assert error.length == 0; }
+    }
+    match hs_client_recv_certificate(c, cert) {
+        Result.Ok { value } => { c = value; },
+        Result.Err { error } => { assert error.length == 0; }
+    }
+
+    // CertificateVerify: the server signs, and the client verifies that exact
+    // signature against the leaf key. This is the one assertion that ties
+    // SFN-699's signing primitive to the client's verifier across the
+    // RFC 8446 §4.4.3 signed-content construction.
+    let mut cv: int[] = [];
+    match hs_server_certificate_verify_message(s) {
+        Result.Ok { value } => { cv = value; },
+        Result.Err { error } => { assert error.length == 0; }
+    }
+    match hs_server_send_certificate_verify(s, cv) {
+        Result.Ok { value } => { s = value; },
+        Result.Err { error } => { assert error.length == 0; }
+    }
+    match hs_client_recv_certificate_verify(c, cv, ed_public_hex()) {
+        Result.Ok { value } => { c = value; },
+        Result.Err { error } => { assert error.length == 0; }
+    }
+    assert c.server_certificate_verified;
+
+    // Server Finished, checked by the client.
+    let mut sfin: int[] = [];
+    match hs_server_finished_message(s) {
+        Result.Ok { value } => { sfin = value; },
+        Result.Err { error } => { assert error.length == 0; }
+    }
+    match hs_server_send_finished(s, sfin) {
+        Result.Ok { value } => { s = value; },
+        Result.Err { error } => { assert error.length == 0; }
+    }
+    match hs_client_recv_finished(c, sfin) {
+        Result.Ok { value } => { c = value; },
+        Result.Err { error } => { assert error.length == 0; }
+    }
+    assert c.state == hs_state_connected();
+    assert eq_bytes(c.client_application_traffic_secret, s.client_application_traffic_secret);
+    assert eq_bytes(c.server_application_traffic_secret, s.server_application_traffic_secret);
+
+    // Client Finished, checked by the server.
+    let mut cfin: int[] = [];
+    match hs_client_finished_message(c) {
+        Result.Ok { value } => { cfin = value; },
+        Result.Err { error } => { assert error.length == 0; }
+    }
+    match hs_server_recv_finished(s, cfin) {
+        Result.Ok { value } => { s = value; },
+        Result.Err { error } => { assert error.length == 0; }
+    }
+    assert s.state == hs_server_state_connected();
+    assert s.client_finished_verified;
+
+    // The negotiated keys must actually drive the record layer: the server
+    // seals an application record and the client opens it with the traffic
+    // secret it derived independently.
+    let server_key: int[] = tls13_traffic_key(s.server_application_traffic_secret, s.cipher_suite);
+    let server_iv: int[] = tls13_traffic_iv(s.server_application_traffic_secret);
+    let client_key: int[] = tls13_traffic_key(c.server_application_traffic_secret, c.cipher_suite);
+    let client_iv: int[] = tls13_traffic_iv(c.server_application_traffic_secret);
+    assert server_key.length == 32;
+    assert eq_bytes(server_key, client_key);
+    assert eq_bytes(server_iv, client_iv);
+
+    let payload: int[] = hexb("48656c6c6f2c205361696c66696e21");
+    let record: int[] = tls13_seal_record(server_key, server_iv, 0, 23, payload, 0);
+    assert record.length > 0;
+    match tls13_open_record(client_key, client_iv, 0, record) {
+        Result.Ok { value } => {
+            assert value.content_type == 23;
+            assert eq_bytes(value.content, payload);
+        },
+        Result.Err { error } => { assert error.length == 0; }
+    }
+}
+
+// ── Fail-closed behaviour ────────────────────────────────────────
+test "tls13_server_handshake: a short X25519 scalar is rejected at construction" {
+    let short_scalar: int[] = hexb("b1580eeadf6dd589b8ef4f2d5652578cc810e9980191ec8d058308cea216a2");
+    match hs_server_new(short_scalar, _stub_chain(), ed_seed()) {
+        Result.Ok { value } => { assert value.state == -1; },
+        Result.Err { error } => { assert error.length > 0; }
+    }
+}
+
+test "tls13_server_handshake: an empty certificate chain is rejected at construction" {
+    let empty_chain: int[][] = [];
+    match hs_server_new(v_server_private(), empty_chain, ed_seed()) {
+        Result.Ok { value } => { assert value.state == -1; },
+        Result.Err { error } => { assert error.length > 0; }
+    }
+}
+
+test "tls13_server_handshake: a zero-length chain entry is rejected at construction" {
+    let mut chain: int[][] = [];
+    let empty_leaf: int[] = [];
+    chain.push(empty_leaf);
+    match hs_server_new(v_server_private(), chain, ed_seed()) {
+        Result.Ok { value } => { assert value.state == -1; },
+        Result.Err { error } => { assert error.length > 0; }
+    }
+}
+
+test "tls13_server_handshake: a short Ed25519 seed is rejected at construction" {
+    let short_seed: int[] = hexb("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f");
+    match hs_server_new(v_server_private(), _stub_chain(), short_seed) {
+        Result.Ok { value } => { assert value.state == -1; },
+        Result.Err { error } => { assert error.length > 0; }
+    }
+}
+
+test "tls13_server_handshake: a ServerHello is refused before any ClientHello" {
+    let mut hs: ServerHandshake = _server_sentinel();
+    match hs_server_new(v_server_private(), _stub_chain(), ed_seed()) {
+        Result.Ok { value } => { hs = value; },
+        Result.Err { error } => { assert error.length == 0; }
+    }
+    match hs_server_send_hello(hs, v_server_hello()) {
+        Result.Ok { value } => { assert value.state == -1; },
+        Result.Err { error } => { assert error.length > 0; }
+    }
+}
+
+test "tls13_server_handshake: a Certificate sent before EncryptedExtensions is refused" {
+    let mut hs: ServerHandshake = _server_sentinel();
+    match hs_server_new(v_server_private(), _stub_chain(), ed_seed()) {
+        Result.Ok { value } => { hs = value; },
+        Result.Err { error } => { assert error.length == 0; }
+    }
+    match hs_server_recv_client_hello(hs, v_client_hello()) {
+        Result.Ok { value } => { hs = value; },
+        Result.Err { error } => { assert error.length == 0; }
+    }
+    match hs_server_send_hello(hs, v_server_hello()) {
+        Result.Ok { value } => { hs = value; },
+        Result.Err { error } => { assert error.length == 0; }
+    }
+    // The flight order is EncryptedExtensions then Certificate; skipping
+    // ahead must fail rather than transcript the message out of order.
+    match hs_server_send_certificate(hs, v_certificate()) {
+        Result.Ok { value } => { assert value.state == -1; },
+        Result.Err { error } => { assert error.length > 0; }
+    }
+}
+
+test "tls13_server_handshake: CertificateVerify is refused when the client did not offer ed25519" {
+    let mut hs: ServerHandshake = _server_sentinel();
+    match hs_server_new(v_server_private(), _stub_chain(), ed_seed()) {
+        Result.Ok { value } => { hs = value; },
+        Result.Err { error } => { assert error.length == 0; }
+    }
+    // RFC 8448 §3's ClientHello offers no ed25519, so the trace reaches the
+    // signing step with nothing this module can sign with.
+    match hs_server_recv_client_hello(hs, v_client_hello()) {
+        Result.Ok { value } => { hs = value; },
+        Result.Err { error } => { assert error.length == 0; }
+    }
+    match hs_server_send_hello(hs, v_server_hello()) {
+        Result.Ok { value } => { hs = value; },
+        Result.Err { error } => { assert error.length == 0; }
+    }
+    match hs_server_send_encrypted_extensions(hs, v_encrypted_extensions()) {
+        Result.Ok { value } => { hs = value; },
+        Result.Err { error } => { assert error.length == 0; }
+    }
+    match hs_server_send_certificate(hs, v_certificate()) {
+        Result.Ok { value } => { hs = value; },
+        Result.Err { error } => { assert error.length == 0; }
+    }
+    match hs_server_certificate_verify_message(hs) {
+        Result.Ok { value } => { assert value.length == 0; },
+        Result.Err { error } => { assert error.length > 0; }
+    }
+}
+
+test "tls13_server_handshake: a tampered client Finished MAC is rejected" {
+    let mut hs: ServerHandshake = _server_sentinel();
+    match hs_server_new(v_server_private(), _stub_chain(), ed_seed()) {
+        Result.Ok { value } => { hs = value; },
+        Result.Err { error } => { assert error.length == 0; }
+    }
+    match hs_server_recv_client_hello(hs, v_client_hello()) {
+        Result.Ok { value } => { hs = value; },
+        Result.Err { error } => { assert error.length == 0; }
+    }
+    match hs_server_send_hello(hs, v_server_hello()) {
+        Result.Ok { value } => { hs = value; },
+        Result.Err { error } => { assert error.length == 0; }
+    }
+    match hs_server_send_encrypted_extensions(hs, v_encrypted_extensions()) {
+        Result.Ok { value } => { hs = value; },
+        Result.Err { error } => { assert error.length == 0; }
+    }
+    match hs_server_send_certificate(hs, v_certificate()) {
+        Result.Ok { value } => { hs = value; },
+        Result.Err { error } => { assert error.length == 0; }
+    }
+    match hs_server_send_certificate_verify(hs, v_certificate_verify()) {
+        Result.Ok { value } => { hs = value; },
+        Result.Err { error } => { assert error.length == 0; }
+    }
+    match hs_server_send_finished(hs, v_server_finished()) {
+        Result.Ok { value } => { hs = value; },
+        Result.Err { error } => { assert error.length == 0; }
+    }
+
+    // Flip the last byte of the RFC's client Finished.
+    let tampered: int[] = hexb("14000020a8ec436d677634ae525ac1fcebe11a039ec17694fac6e98527b642f2edd5ce60");
+    match hs_server_recv_finished(hs, tampered) {
+        Result.Ok { value } => { assert value.state == -1; },
+        Result.Err { error } => { assert error.length > 0; }
+    }
+}
+
+test "tls13_server_handshake: a ServerHello whose key share is not this state's is rejected" {
+    let mut hs: ServerHandshake = _server_sentinel();
+    // A different scalar, so the trace's ServerHello carries a share this
+    // state holds no private key for.
+    let other_private: int[] = hexb("5dab087e624a8a4b79e17f8b83800ee66f3bb1292618b6fd1c2f8b27ff88e0eb");
+    match hs_server_new(other_private, _stub_chain(), ed_seed()) {
+        Result.Ok { value } => { hs = value; },
+        Result.Err { error } => { assert error.length == 0; }
+    }
+    match hs_server_recv_client_hello(hs, v_client_hello()) {
+        Result.Ok { value } => { hs = value; },
+        Result.Err { error } => { assert error.length == 0; }
+    }
+    // Captured before the failing call: `transcript` is shared by reference,
+    // so if `hs_server_send_hello` appended the ServerHello ahead of its
+    // consistency check, this state's hash would move even though the step
+    // returned Err (SFN-654 code review).
+    let before: int[] = hs_server_transcript_hash(hs);
+    match hs_server_send_hello(hs, v_server_hello()) {
+        Result.Ok { value } => { assert value.state == -1; },
+        Result.Err { error } => { assert error.length > 0; }
+    }
+    assert eq_bytes(hs_server_transcript_hash(hs), before);
+}

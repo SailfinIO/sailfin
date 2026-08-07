@@ -1,0 +1,144 @@
+// capsules/sfn/crypto/tests/pem_test.sfn
+//
+// Direct unit coverage for the binary-safe PEM decoder (SFN-654,
+// SFEP-0048 Phase B) in `pem.sfn`. Fixtures are short synthetic base64
+// strings computed by hand over small byte arrays — never a real
+// certificate.
+import { pem_certificates_to_der, pem_decode_blocks } from "../src/pem";
+
+fn eq_bytes(a: int[], b: int[]) -> bool {
+    if a.length != b.length { return false; }
+    let mut i: int = 0;
+    loop {
+        if i >= a.length { break; }
+        if a[i] != b[i] { return false; }
+        i += 1;
+    }
+    return true;
+}
+
+test "pem: a two-block chain decodes to two DER blobs in order" {
+    // block1 = [1,2,3,4,5] -> "AQIDBAU="; block2 = [9,8,7] -> "CQgH"
+    let pem: string = "-----BEGIN CERTIFICATE-----\nAQIDBAU=\n-----END CERTIFICATE-----\nsome preamble text\n-----BEGIN CERTIFICATE-----\nCQgH\n-----END CERTIFICATE-----\n";
+    let blocks: int[][] = pem_certificates_to_der(pem);
+    assert blocks.length == 2;
+    assert eq_bytes(blocks[0], [1, 2, 3, 4, 5]);
+    assert eq_bytes(blocks[1], [9, 8, 7]);
+}
+
+test "pem: a decoded block containing a 0x00 byte survives intact" {
+    // [10, 0, 20] -> "CgAU"
+    let pem: string = "-----BEGIN CERTIFICATE-----\nCgAU\n-----END CERTIFICATE-----\n";
+    let blocks: int[][] = pem_certificates_to_der(pem);
+    assert blocks.length == 1;
+    assert eq_bytes(blocks[0], [10, 0, 20]);
+    assert blocks[0][1] == 0;
+}
+
+test "pem: an unterminated BEGIN returns an empty result" {
+    let pem: string = "-----BEGIN CERTIFICATE-----\nAQIDBAU=\n";
+    let blocks: int[][] = pem_certificates_to_der(pem);
+    assert blocks.length == 0;
+}
+
+test "pem: an invalid base64 character returns an empty result" {
+    let pem: string = "-----BEGIN CERTIFICATE-----\nAQ!DBAU=\n-----END CERTIFICATE-----\n";
+    let blocks: int[][] = pem_certificates_to_der(pem);
+    assert blocks.length == 0;
+}
+
+test "pem: CRLF line endings decode identically to LF" {
+    let pem_lf: string = "-----BEGIN CERTIFICATE-----\nAQIDBAU=\n-----END CERTIFICATE-----\n";
+    let pem_crlf: string = "-----BEGIN CERTIFICATE-----\r\nAQIDBAU=\r\n-----END CERTIFICATE-----\r\n";
+    let blocks_lf: int[][] = pem_certificates_to_der(pem_lf);
+    let blocks_crlf: int[][] = pem_certificates_to_der(pem_crlf);
+    assert blocks_lf.length == 1;
+    assert blocks_crlf.length == 1;
+    assert eq_bytes(blocks_lf[0], blocks_crlf[0]);
+}
+
+test "pem: pem_decode_blocks selects only blocks matching the requested label" {
+    let pem: string = "-----BEGIN PRIVATE KEY-----\nCQgH\n-----END PRIVATE KEY-----\n-----BEGIN CERTIFICATE-----\nAQIDBAU=\n-----END CERTIFICATE-----\n";
+    let blocks: int[][] = pem_decode_blocks(pem, "CERTIFICATE");
+    assert blocks.length == 1;
+    assert eq_bytes(blocks[0], [1, 2, 3, 4, 5]);
+}
+
+// ── Strict padding negatives ──────────────────────────────────────
+test "pem: padding outside the final quad is rejected" {
+    let pem: string = "-----BEGIN CERTIFICATE-----\nA=B=\n-----END CERTIFICATE-----\n";
+    let blocks: int[][] = pem_certificates_to_der(pem);
+    assert blocks.length == 0;
+}
+
+test "pem: a single-pad final quad with nonzero low bits under padding is rejected" {
+    // "QUJ=": d2 = sextet('J') = 9, and 9 & 3 != 0.
+    let pem: string = "-----BEGIN CERTIFICATE-----\nQUJ=\n-----END CERTIFICATE-----\n";
+    let blocks: int[][] = pem_certificates_to_der(pem);
+    assert blocks.length == 0;
+}
+
+test "pem: a double-pad final quad with nonzero low bits under padding is rejected" {
+    // "AC==": d1 = sextet('C') = 2, and 2 & 15 != 0.
+    let pem: string = "-----BEGIN CERTIFICATE-----\nAC==\n-----END CERTIFICATE-----\n";
+    let blocks: int[][] = pem_certificates_to_der(pem);
+    assert blocks.length == 0;
+}
+
+test "pem: '=' in the first position of a quad is rejected" {
+    let pem: string = "-----BEGIN CERTIFICATE-----\n=ABC\n-----END CERTIFICATE-----\n";
+    let blocks: int[][] = pem_certificates_to_der(pem);
+    assert blocks.length == 0;
+}
+
+test "pem: '=' in the second position of a quad is rejected" {
+    let pem: string = "-----BEGIN CERTIFICATE-----\nA=BC\n-----END CERTIFICATE-----\n";
+    let blocks: int[][] = pem_certificates_to_der(pem);
+    assert blocks.length == 0;
+}
+
+// ── Block-count and size caps ──────────────────────────────────────
+test "pem: 17 blocks exceeds the 16-block cap and is rejected" {
+    let mut pem: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= 17 { break; }
+        pem = pem
+            + "-----BEGIN CERTIFICATE-----\nAA==\n-----END CERTIFICATE-----\n";
+        i += 1;
+    }
+    let blocks: int[][] = pem_certificates_to_der(pem);
+    assert blocks.length == 0;
+}
+
+// A decoded block over 65535 bytes must be rejected. Writing that block's
+// base64 as a literal is impractical (tens of thousands of characters), so
+// it is built by repeated doubling of a valid quad ("AAAA" -> 3 zero bytes)
+// until the encoded body comfortably exceeds the length that decodes past
+// the cap; substring trims it to an exact multiple of 4.
+fn _repeat_to_length(unit: string, n: int) -> string {
+    let mut s: string = unit;
+    loop {
+        if s.length >= n { break; }
+        s = s + s;
+    }
+    return substring(s, 0, n);
+}
+
+test "pem: a decoded block over 65535 bytes is rejected" {
+    // 21846 quads of "AAAA" decode to 65538 bytes, past the 65535-byte cap.
+    let encoded: string = _repeat_to_length("AAAA", 21846 * 4);
+    let pem: string = "-----BEGIN CERTIFICATE-----\n" + encoded
+        + "\n-----END CERTIFICATE-----\n";
+    let blocks: int[][] = pem_certificates_to_der(pem);
+    assert blocks.length == 0;
+}
+
+test "pem: a non-ASCII character in a block body is rejected" {
+    // Sailfin string indexing is byte-oriented, so U+0141 ('Ł') reaches the
+    // decoder as its two UTF-8 bytes 0xC5 0x81. Neither is in the base64
+    // alphabet, so the block fails closed rather than decoding to something.
+    let pem: string = "-----BEGIN CERTIFICATE-----\nAŁB=\n-----END CERTIFICATE-----\n";
+    let blocks: int[][] = pem_certificates_to_der(pem);
+    assert blocks.length == 0;
+}
