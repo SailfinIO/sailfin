@@ -14,6 +14,11 @@ export {
     ed25519_sign
 } from "./ed25519_sign";
 
+// Binary-safe PEM decoding for a TLS 1.3 server certificate chain (SFN-654,
+// SFEP-0048 Phase B) — separate from `base64_decode` below, which cannot
+// represent a decoded 0x00 byte.
+export { pem_certificates_to_der, pem_decode_blocks } from "./pem";
+
 export { sha1_hex } from "./sha1";
 
 export { sha384_hex } from "./sha384";
@@ -202,12 +207,39 @@ export {
     tls13_server_certificate_verify_context
 } from "./tls13_handshake";
 
+export {
+    ServerHandshake,
+    hs_server_new,
+    hs_server_recv_client_hello,
+    hs_server_hello,
+    hs_server_send_hello,
+    hs_server_encrypted_extensions_message,
+    hs_server_send_encrypted_extensions,
+    hs_server_certificate_message,
+    hs_server_send_certificate,
+    hs_server_certificate_verify_message,
+    hs_server_send_certificate_verify,
+    hs_server_finished_message,
+    hs_server_send_finished,
+    hs_server_recv_finished,
+    hs_server_transcript_hash,
+    hs_server_state_start,
+    hs_server_state_negotiated,
+    hs_server_state_send_encrypted_extensions,
+    hs_server_state_send_certificate,
+    hs_server_state_send_certificate_verify,
+    hs_server_state_send_finished,
+    hs_server_state_wait_client_finished,
+    hs_server_state_connected
+} from "./tls13_server_handshake";
+
 // TLS 1.3 handshake wire codec (RFC 8446 §4) — message framing plus the
 // ClientHello encoder and the ServerHello/EncryptedExtensions/Certificate/
 // CertificateVerify/Finished parsers the state machine drives.
 export {
     HandshakeMessage,
     ServerHelloMsg,
+    ClientHelloMsg,
     CertificateMsg,
     CertificateVerifyMsg,
     hs_type_client_hello,
@@ -224,7 +256,12 @@ export {
     tls_version_13,
     encode_handshake_message,
     parse_handshake_message,
+    encode_certificate,
+    encode_certificate_verify,
     encode_client_hello,
+    encode_encrypted_extensions,
+    encode_server_hello,
+    parse_client_hello,
     parse_client_hello_cipher_suites,
     parse_server_hello,
     parse_encrypted_extensions,

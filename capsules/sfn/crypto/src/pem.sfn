@@ -1,0 +1,157 @@
+// capsules/sfn/crypto/src/pem.sfn
+//
+// Binary-safe PEM decoding for the TLS 1.3 server certificate chain
+// (SFN-654, SFEP-0048 Phase B). It exists separately from `mod.sfn`'s
+// `base64_decode` because that one returns a `string` and collapses to the
+// "" sentinel on any decoded 0x00 byte — and DER routinely contains them —
+// so it cannot represent a certificate chain.
+//
+// Operates on `int[]` byte arrays (never `string`) for the decoded output,
+// mirroring `tls13_handshake_codec.sfn`'s wire-codec convention. Every
+// function here fails closed: malformed or truncated input returns `[]`
+// rather than a best-effort partial decode.
+// Map a single standard-alphabet base64 character to its 6-bit value, or -1
+// if `c` is not an alphabet character (`=` padding included).
+fn _pem_base64_sextet(c: string) -> int {
+    let code: int = char_code(c) & 255;
+    if code >= 65 && code <= 90 { return code - 65; }
+    if code >= 97 && code <= 122 { return code - 97 + 26; }
+    if code >= 48 && code <= 57 { return code - 48 + 52; }
+    if code == 43 { return 62; }
+    if code == 47 { return 63; }
+    return -1;
+}
+
+// Decode strict RFC 4648 base64 into bytes, including embedded 0x00 bytes.
+// Modelled on `_eds_base64_bytes` in `ed25519_sign.sfn`: same strict padding
+// rules (`=` legal only in the final quad; `X=Y=` rejected; the low bits
+// under padding must be zero), but returning `int[]` with no 0x00 collapsing
+// and no 64-character cap — a certificate chain can carry many kilobytes of
+// DER.
+fn _pem_base64_bytes(encoded: string) -> int[] {
+    if encoded.length == 0 || (encoded.length & 3) != 0 { return []; }
+    let mut out: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= encoded.length { break; }
+        let d0: int = _pem_base64_sextet(encoded[i]);
+        let d1: int = _pem_base64_sextet(encoded[i + 1]);
+        if d0 < 0 || d1 < 0 { return []; }
+
+        let c2: string = encoded[i + 2];
+        let c3: string = encoded[i + 3];
+        let pad2: bool = c2 == "=";
+        let pad3: bool = c3 == "=";
+        if (pad2 || pad3) && i + 4 != encoded.length { return []; }
+        if pad2 && !pad3 { return []; }
+        out.push(((d0 << 2) | (d1 >> 4)) & 255);
+
+        if pad2 {
+            if (d1 & 15) != 0 { return []; }
+        } else {
+            let d2: int = _pem_base64_sextet(c2);
+            if d2 < 0 { return []; }
+            out.push(((d1 << 4) | (d2 >> 2)) & 255);
+            if pad3 {
+                if (d2 & 3) != 0 { return []; }
+            } else {
+                let d3: int = _pem_base64_sextet(c3);
+                if d3 < 0 { return []; }
+                out.push(((d2 << 6) | d3) & 255);
+            }
+        }
+        i += 4;
+    }
+    return out;
+}
+
+fn _pem_is_ascii_space(c: string) -> bool {
+    let code: int = char_code(c) & 255;
+    return code == 9 || code == 10 || code == 13 || code == 32;
+}
+
+fn _pem_matches_at(input: string, start: int, expected: string) -> bool {
+    if start < 0 || start + expected.length > input.length { return false; }
+    let mut i: int = 0;
+    loop {
+        if i >= expected.length { break; }
+        if input[start + i] != expected[i] { return false; }
+        i += 1;
+    }
+    return true;
+}
+
+// The largest single decoded block this module accepts. A certificate this
+// large is not one the record layer will put on the wire, and an unbounded
+// decode is an attacker-sized allocation.
+fn _pem_max_block_bytes() -> int { return 65535; }
+
+// The largest number of blocks a single PEM file may declare. Guards the
+// scan loop against an adversarial file with unbounded BEGIN/END pairs.
+fn _pem_max_blocks() -> int { return 16; }
+
+// Extract every `-----BEGIN <label>-----` … `-----END <label>-----` block in
+// `pem`, in order, and base64-decode each to DER bytes. Text between blocks
+// (and before the first / after the last) is ignored — real chain files
+// carry human-readable subject/issuer preambles between certificates. LF and
+// CRLF line endings and ASCII whitespace inside the body are accepted.
+//
+// Returns `[]` (empty outer array) fail-closed if any block is malformed: a
+// BEGIN with no matching END, a base64 body with an invalid character or bad
+// padding, an empty decoded block, more than `_pem_max_blocks()` blocks, or
+// any single decoded block exceeding `_pem_max_block_bytes()`.
+fn pem_decode_blocks(pem: string, label: string) -> int[][] {
+    let none: int[][] = [];
+    let header: string = "-----BEGIN " + label + "-----";
+    let footer: string = "-----END " + label + "-----";
+
+    let mut blocks: int[][] = [];
+    let mut cursor: int = 0;
+    loop {
+        if cursor >= pem.length { break; }
+        if !_pem_matches_at(pem, cursor, header) {
+            cursor += 1;
+            continue;
+        }
+        if blocks.length >= _pem_max_blocks() { return none; }
+
+        cursor += header.length;
+        let mut encoded: string = "";
+        let mut found_footer: bool = false;
+        loop {
+            if cursor >= pem.length { break; }
+            if _pem_matches_at(pem, cursor, footer) {
+                found_footer = true;
+                cursor += footer.length;
+                break;
+            }
+            if _pem_is_ascii_space(pem[cursor]) { cursor += 1; } else {
+                // A base64-encoded block this large decodes past
+                // `_pem_max_block_bytes()`; stop growing the string before
+                // that happens.
+                if encoded.length > (_pem_max_block_bytes() + 2) / 3 * 4 {
+                    return none;
+                }
+                encoded = encoded + pem[cursor];
+                cursor += 1;
+            }
+        }
+        if !found_footer { return none; }
+
+        let decoded: int[] = _pem_base64_bytes(encoded);
+        if decoded.length < 1 || decoded.length > _pem_max_block_bytes() {
+            return none;
+        }
+        blocks.push(decoded);
+    }
+
+    return blocks;
+}
+
+// Thin wrapper over `pem_decode_blocks` for the `CERTIFICATE` label — the
+// server certificate chain PEM format (RFC 7468 §5.1).
+fn pem_certificates_to_der(pem: string) -> int[][] {
+    return pem_decode_blocks(pem, "CERTIFICATE");
+}
+
+export { pem_certificates_to_der, pem_decode_blocks };
