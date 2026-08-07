@@ -1,0 +1,187 @@
+// capsules/sfn/crypto/src/trust_store.sfn
+//
+// System trust-store loading (SFN-340, design: SFEP-0048 Phase C) — the set
+// of certificates `x509_verify_chain` is willing to terminate a path at.
+// Locating and reading a platform CA bundle is the one part of the trust
+// decision that touches the filesystem, so it is isolated in this module and
+// nowhere else.
+//
+// The effect boundary follows `rand.sfn`, the capsule's existing precedent:
+// the effect sits on the function, not the manifest. `trust_store_from_pem` is
+// pure and carries the whole decode-and-parse path, so it is what the tests
+// exercise; only `trust_store_load`/`trust_store_load_from` declare `![io]`,
+// and they add no capsule dependency because `fs.*` and `env.*` are
+// compiler-provided globals. `sfn/crypto`'s `[capabilities] required` stays
+// `[]`, matching how `random_bytes` already carries `![rand]` under the same
+// empty manifest — a caller that only wants SHA-256 inherits no filesystem
+// requirement. Note `required = []` also disables the E0403 capsule/effect
+// cross-check outright rather than asserting "no effects" (SFN-764), so it
+// documents nothing on its own; the honest capability surface is the
+// per-function effect annotations and `docs/status.md`'s `sfn/crypto` row.
+import { pem_certificates_to_der } from "./pem";
+import { X509Certificate, x509_parse } from "./x509";
+
+struct TrustStore {
+    ok: boolean;
+    error: string;
+    source: string;  // the path the anchors were read from; "" when built from memory
+    anchors: X509Certificate[];
+    // PEM blocks that did not parse as certificates and were dropped. Skipping
+    // an anchor can only ever shrink the set of things this process trusts, so
+    // a partially-unreadable bundle degrades toward rejecting chains, never
+    // toward accepting them — which is why a malformed entry is skipped and
+    // counted rather than failing the whole load. A caller that wants a strict
+    // bundle asserts `skipped == 0`.
+    skipped: int;
+}
+
+fn _store_err(message: string) -> TrustStore {
+    let empty: X509Certificate[] = [];
+    return TrustStore {
+        ok: false,
+        error: message,
+        source: "",
+        anchors: empty,
+        skipped: 0
+    };
+}
+
+// Environment overrides, consulted in this order before any built-in location.
+//
+// `SAILFIN_TLS_CAFILE` comes first because it is the name the existing
+// OpenSSL-backed runtime already honours (`runtime/sfn/platform/tls.sfn`), so
+// a program configured against today's stack keeps its custom CA when SFN-341
+// swaps those bodies onto this one. Dropping it would silently downgrade such
+// a program to the system bundle — a trust change, made invisibly.
+// `SSL_CERT_FILE` follows as the ecosystem-standard name OpenSSL and curl use.
+fn trust_store_env_vars() -> string[] {
+    return ["SAILFIN_TLS_CAFILE", "SSL_CERT_FILE"];
+}
+
+// Well-known CA-bundle locations, in probe order:
+//
+//   /etc/ssl/certs/ca-certificates.crt      Debian, Ubuntu, Alpine
+//   /etc/pki/tls/certs/ca-bundle.crt        RHEL, Fedora, CentOS
+//   /etc/ssl/ca-bundle.pem                  openSUSE
+//   /etc/pki/tls/cacert.pem                 older RHEL
+//   /etc/ssl/cert.pem                       macOS, FreeBSD, Alpine
+//   /opt/homebrew/etc/openssl@3/cert.pem    Homebrew, Apple silicon
+//   /usr/local/etc/openssl@3/cert.pem       Homebrew, Intel
+//
+// macOS is the honest caveat: the real system trust store is the Keychain,
+// which is not a file and is not readable through this path. `/etc/ssl/cert.pem`
+// exists on macOS and is what the bundled LibreSSL and Homebrew OpenSSL builds
+// ship, but it does not reflect Keychain trust decisions — user-added or
+// administratively-revoked anchors will not be seen. A macOS caller that needs
+// Keychain fidelity must supply anchors explicitly via `trust_store_from_pem`.
+// Reading the Keychain would need a Security.framework binding, which is
+// outside SFEP-0048's chosen cut.
+//
+// The annotations live above rather than inline deliberately: `sfn fmt`
+// collapses a multi-line array literal onto one line and folds any trailing
+// `//` comment into it, commenting out every element that follows and leaving
+// source that does not parse. Inline them again once SFN-763 is fixed.
+fn trust_store_default_paths() -> string[] {
+    return ["/etc/ssl/certs/ca-certificates.crt", "/etc/pki/tls/certs/ca-bundle.crt", "/etc/ssl/ca-bundle.pem", "/etc/pki/tls/cacert.pem", "/etc/ssl/cert.pem", "/opt/homebrew/etc/openssl@3/cert.pem", "/usr/local/etc/openssl@3/cert.pem"];
+}
+
+// Parse a PEM CA bundle into trust anchors. Pure: this is the whole decode and
+// parse path, and it is what the tests exercise.
+fn trust_store_from_pem(pem: string) -> TrustStore {
+    let blocks: int[][] = pem_certificates_to_der(pem);
+    if blocks.length == 0 {
+        return _store_err("trust_store: no CERTIFICATE blocks in bundle");
+    }
+
+    let mut anchors: X509Certificate[] = [];
+    let mut skipped: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= blocks.length { break; }
+        let candidate: X509Certificate = x509_parse(blocks[i]);
+        if candidate.ok { anchors.push(candidate); } else { skipped += 1; }
+        i += 1;
+    }
+
+    if anchors.length == 0 {
+        return _store_err("trust_store: no certificate in bundle parsed");
+    }
+
+    return TrustStore {
+        ok: true,
+        error: "",
+        source: "",
+        anchors: anchors,
+        skipped: skipped
+    };
+}
+
+// Read and parse a CA bundle from an explicit path. `![io]`.
+fn trust_store_load_from(path: string) -> TrustStore ![io] {
+    if path.length == 0 {
+        return _store_err("trust_store: empty bundle path");
+    }
+    if !fs.exists(path) {
+        return _store_err("trust_store: no CA bundle at " + path);
+    }
+    let pem: string = fs.readFile(path);
+    if pem.length == 0 {
+        return _store_err("trust_store: CA bundle is empty at " + path);
+    }
+
+    let store: TrustStore = trust_store_from_pem(pem);
+    if !store.ok { return _store_err(store.error + " (" + path + ")"); }
+    return TrustStore {
+        ok: true,
+        error: "",
+        source: path,
+        anchors: store.anchors,
+        skipped: store.skipped
+    };
+}
+
+// Locate and load the platform CA bundle: the first environment override in
+// `trust_store_env_vars()` that is set, otherwise the first readable entry in
+// `trust_store_default_paths()`. `![io]`.
+//
+// Fail-closed: when no bundle is found this returns a failed store rather than
+// an empty one, and `x509_verify_chain` rejects an empty anchor set anyway —
+// there is no path on which a missing trust store degrades into trusting
+// everything.
+fn trust_store_load() -> TrustStore ![io] {
+    let overrides: string[] = trust_store_env_vars();
+    let mut v: int = 0;
+    loop {
+        if v >= overrides.length { break; }
+        let override_path: string = env.get(overrides[v]);
+        if override_path.length > 0 {
+            // The first override that is *set* wins outright, even if it does
+            // not resolve: an explicit override that fails is an error, never a
+            // silent fallback to the system bundle. A caller who pointed at a
+            // private CA must not be quietly handed the public one instead.
+            return trust_store_load_from(override_path);
+        }
+        v += 1;
+    }
+
+    let paths: string[] = trust_store_default_paths();
+    let mut i: int = 0;
+    loop {
+        if i >= paths.length { break; }
+        if fs.exists(paths[i]) {
+            let store: TrustStore = trust_store_load_from(paths[i]);
+            if store.ok { return store; }
+        }
+        i += 1;
+    }
+    return _store_err("trust_store: no readable CA bundle in any known location");
+}
+
+export {
+    TrustStore,
+    trust_store_from_pem,
+    trust_store_load,
+    trust_store_load_from,
+    trust_store_default_paths,
+    trust_store_env_vars
+};
