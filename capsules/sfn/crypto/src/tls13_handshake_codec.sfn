@@ -522,6 +522,7 @@ fn _scan_client_hello_extensions(ext_block: int[]) -> _ClientHelloExtScan {
             }
             let mut koff: int = 2;
             let mut found_x25519: bool = false;
+            let mut seen_groups: int[] = [];
             loop {
                 if koff >= 2 + list_len { break; }
                 let group: int = _read_u16(data, koff);
@@ -538,6 +539,19 @@ fn _scan_client_hello_extensions(ext_block: int[]) -> _ClientHelloExtScan {
                         server_name: no_name
                     };
                 }
+                if _int_array_contains(seen_groups, group) {
+                    return _ClientHelloExtScan {
+                        ok: false,
+                        error: "parse_client_hello: duplicate KeyShareEntry for the same group (RFC 8446 §4.2.8)",
+                        offers_tls13: false,
+                        key_share_group: 0,
+                        key_exchange: no_kex,
+                        offers_x25519_group: false,
+                        offers_ed25519_sigalg: false,
+                        server_name: no_name
+                    };
+                }
+                seen_groups.push(group);
                 if !found_x25519 && group == tls_group_x25519() {
                     key_share_group = group;
                     key_exchange = _slice(data, koff + 4, kex_len);

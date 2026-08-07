@@ -821,6 +821,42 @@ test "tls13_handshake_codec: parse_client_hello rejects a duplicated extension t
     }
 }
 
+// A key_share extension carrying two KeyShareEntry values for the same
+// group (x25519), which RFC 8446 §4.2.8 forbids.
+fn _ext_key_share_duplicate_x25519() -> int[] {
+    let mut entry: int[] = [];
+    _extend(entry, _u16b(tls_group_x25519()));
+    _extend(entry, _u16b(32));
+    _extend(entry, _bytes(32, 9));
+    let mut list: int[] = [];
+    _extend(list, entry);
+    _extend(list, entry);
+    let mut out: int[] = [];
+    _extend(out, _u16b(51));  // ext_key_share
+    _extend(out, _u16b(list.length));
+    _extend(out, list);
+    return out;
+}
+
+test "tls13_handshake_codec: parse_client_hello rejects a duplicate KeyShareEntry for the same group" {
+    let mut body: int[] = [];
+    _extend(body, _u16b(771));
+    _extend(body, _bytes(32, 1));
+    body.push(0);  // legacy_session_id length = 0
+    _extend(body, _u16b(2));  // cipher_suites length
+    _extend(body, _u16b(tls_cipher_aes_128_gcm_sha256()));
+    body.push(1);  // legacy_compression_methods length
+    body.push(0);  // null compression
+    let ext_block: int[] = _ext_key_share_duplicate_x25519();
+    _extend(body, _u16b(ext_block.length));
+    _extend(body, ext_block);
+    let result: Result<ClientHelloMsg, string> = parse_client_hello(body);
+    match result {
+        Result.Ok { value } => { assert false; },
+        Result.Err { error } => { assert error.length > 0; }
+    }
+}
+
 test "tls13_handshake_codec: parse_client_hello rejects an odd-length cipher_suites list" {
     let mut body: int[] = [];
     _extend(body, _u16b(771));

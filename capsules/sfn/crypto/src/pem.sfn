@@ -13,7 +13,12 @@
 // Map a single standard-alphabet base64 character to its 6-bit value, or -1
 // if `c` is not an alphabet character (`=` padding included).
 fn _pem_base64_sextet(c: string) -> int {
-    let code: int = char_code(c) & 255;
+    // `char_code` returns a Unicode code point, not a byte: masking to 8
+    // bits would fold a non-ASCII character (e.g. U+0141 `Ł`) onto an
+    // alphabet character instead of rejecting it, so reject out-of-byte
+    // range codes before any classification.
+    let code: int = char_code(c);
+    if code < 0 || code > 255 { return -1; }
     if code >= 65 && code <= 90 { return code - 65; }
     if code >= 97 && code <= 122 { return code - 97 + 26; }
     if code >= 48 && code <= 57 { return code - 48 + 52; }
@@ -23,11 +28,11 @@ fn _pem_base64_sextet(c: string) -> int {
 }
 
 // Decode strict RFC 4648 base64 into bytes, including embedded 0x00 bytes.
-// Modelled on `_eds_base64_bytes` in `ed25519_sign.sfn`: same strict padding
-// rules (`=` legal only in the final quad; `X=Y=` rejected; the low bits
-// under padding must be zero), but returning `int[]` with no 0x00 collapsing
-// and no 64-character cap — a certificate chain can carry many kilobytes of
-// DER.
+// The strict padding rules (`=` legal only in the final quad; `X=Y=`
+// rejected; the low bits under padding must be zero) match
+// `_eds_base64_bytes` in `ed25519_sign.sfn`. The contrast is against
+// `mod.sfn::base64_decode`, which returns a `string` and cannot carry DER's
+// 0x00 bytes — this function returns binary-safe `int[]` instead.
 fn _pem_base64_bytes(encoded: string) -> int[] {
     if encoded.length == 0 || (encoded.length & 3) != 0 { return []; }
     let mut out: int[] = [];
@@ -66,7 +71,10 @@ fn _pem_base64_bytes(encoded: string) -> int[] {
 }
 
 fn _pem_is_ascii_space(c: string) -> bool {
-    let code: int = char_code(c) & 255;
+    // Same reasoning as `_pem_base64_sextet`: masking would read a
+    // non-ASCII code point whose low byte is 0x0D as a carriage return.
+    let code: int = char_code(c);
+    if code < 0 || code > 255 { return false; }
     return code == 9 || code == 10 || code == 13 || code == 32;
 }
 

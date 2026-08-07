@@ -57,6 +57,8 @@ import {
     tls13_server_certificate_verify_context
 } from "./tls13_handshake";
 import {
+    CertificateMsg,
+    CertificateVerifyMsg,
     ClientHelloMsg,
     HandshakeMessage,
     ServerHelloMsg,
@@ -71,7 +73,10 @@ import {
     hs_type_encrypted_extensions,
     hs_type_finished,
     hs_type_server_hello,
+    parse_certificate,
+    parse_certificate_verify,
     parse_client_hello,
+    parse_encrypted_extensions,
     parse_finished,
     parse_handshake_message,
     parse_server_hello,
@@ -259,13 +264,16 @@ fn _select_cipher_suite(offered: int[]) -> int {
 }
 
 // Commit an outbound handshake message of `expected_type` to the transcript
-// and advance to `next_state`. The four middle steps of the server flight
-// differ only in which message they carry, so they share this. The framing is
+// and advance to `next_state`. Three of the server flight's steps differ only
+// in which message they carry, so they share this. The framing is
 // re-validated rather than trusted: the caller may be committing canned bytes
 // (a known-answer test) or bytes from a future codepath, and a message that
 // does not parse must never reach the transcript, because the resulting
 // mismatch would surface as an unexplained Finished MAC failure two steps
-// later instead of an error here.
+// later instead of an error here. The message body is validated by the three
+// callers before delegating here — see each of
+// `hs_server_send_encrypted_extensions`, `hs_server_send_certificate` and
+// `hs_server_send_certificate_verify`.
 fn _commit_outbound(hs: ServerHandshake, message: int[], expected_type: int, expected_state: int, next_state: int, who: string) -> Result<ServerHandshake, string> {
     if hs.state != expected_state {
         return Result.Err { error: who + ": unexpected in this state" };
@@ -456,6 +464,11 @@ fn hs_server_recv_client_hello(hs: ServerHandshake, message: int[]) -> Result<Se
             error: "hs_server_recv_client_hello: client offered no x25519 key share (HelloRetryRequest is outside the minimal cut)"
         };
     }
+    if !ch.offers_x25519_group {
+        return Result.Err {
+            error: "hs_server_recv_client_hello: client sent an x25519 key share without offering x25519 in supported_groups (RFC 8446 §4.2.8)"
+        };
+    }
     if ch.key_exchange.length != 32 {
         return Result.Err {
             error: "hs_server_recv_client_hello: client key share is not 32 bytes"
@@ -548,6 +561,11 @@ fn hs_server_send_hello(hs: ServerHandshake, server_hello: int[]) -> Result<Serv
         Result.Ok { value } => { sh = value; }
     }
 
+    if sh.legacy_version != tls_version_legacy() {
+        return Result.Err {
+            error: "hs_server_send_hello: legacy_version must be 0x0303 (RFC 8446 §4.1.3)"
+        };
+    }
     if sh.selected_version != tls_version_13() {
         return Result.Err {
             error: "hs_server_send_hello: ServerHello does not select TLS 1.3"
@@ -688,6 +706,27 @@ fn hs_server_encrypted_extensions_message(hs: ServerHandshake) -> Result<int[], 
 }
 
 fn hs_server_send_encrypted_extensions(hs: ServerHandshake, message: int[]) -> Result<ServerHandshake, string> {
+    // Validate the body before committing: `_commit_outbound` only checks
+    // framing, and a corrupt body left uncaught here would surface several
+    // steps later as an unexplained Finished MAC failure instead of an error
+    // at the message that actually caused it.
+    let body: Result<int[], string> = _take_body(message, hs_type_encrypted_extensions(), "hs_server_send_encrypted_extensions");
+    let mut ee_body: int[] = [];
+    match body {
+        Result.Err { error } => {
+            return Result.Err { error: error };
+        },
+        Result.Ok { value } => { ee_body = value; }
+    }
+    let parsed: Result<int, string> = parse_encrypted_extensions(ee_body);
+    match parsed {
+        Result.Err { error } => {
+            return Result.Err {
+                error: "hs_server_send_encrypted_extensions: " + error
+            };
+        },
+        Result.Ok { value } => { }
+    }
     return _commit_outbound(hs, message, hs_type_encrypted_extensions(), hs_server_state_send_encrypted_extensions(), hs_server_state_send_certificate(), "hs_server_send_encrypted_extensions");
 }
 
@@ -711,6 +750,23 @@ fn hs_server_certificate_message(hs: ServerHandshake) -> Result<int[], string> {
 }
 
 fn hs_server_send_certificate(hs: ServerHandshake, message: int[]) -> Result<ServerHandshake, string> {
+    // See `hs_server_send_encrypted_extensions` for why the body is parsed
+    // here rather than left to `_commit_outbound`'s framing-only check.
+    let body: Result<int[], string> = _take_body(message, hs_type_certificate(), "hs_server_send_certificate");
+    let mut cert_body: int[] = [];
+    match body {
+        Result.Err { error } => {
+            return Result.Err { error: error };
+        },
+        Result.Ok { value } => { cert_body = value; }
+    }
+    let parsed: Result<CertificateMsg, string> = parse_certificate(cert_body);
+    match parsed {
+        Result.Err { error } => {
+            return Result.Err { error: "hs_server_send_certificate: " + error };
+        },
+        Result.Ok { value } => { }
+    }
     return _commit_outbound(hs, message, hs_type_certificate(), hs_server_state_send_certificate(), hs_server_state_send_certificate_verify(), "hs_server_send_certificate");
 }
 
@@ -759,6 +815,25 @@ fn hs_server_certificate_verify_message(hs: ServerHandshake) -> Result<int[], st
 }
 
 fn hs_server_send_certificate_verify(hs: ServerHandshake, message: int[]) -> Result<ServerHandshake, string> {
+    // See `hs_server_send_encrypted_extensions` for why the body is parsed
+    // here rather than left to `_commit_outbound`'s framing-only check.
+    let body: Result<int[], string> = _take_body(message, hs_type_certificate_verify(), "hs_server_send_certificate_verify");
+    let mut cv_body: int[] = [];
+    match body {
+        Result.Err { error } => {
+            return Result.Err { error: error };
+        },
+        Result.Ok { value } => { cv_body = value; }
+    }
+    let parsed: Result<CertificateVerifyMsg, string> = parse_certificate_verify(cv_body);
+    match parsed {
+        Result.Err { error } => {
+            return Result.Err {
+                error: "hs_server_send_certificate_verify: " + error
+            };
+        },
+        Result.Ok { value } => { }
+    }
     return _commit_outbound(hs, message, hs_type_certificate_verify(), hs_server_state_send_certificate_verify(), hs_server_state_send_finished(), "hs_server_send_certificate_verify");
 }
 

@@ -63,3 +63,82 @@ test "pem: pem_decode_blocks selects only blocks matching the requested label" {
     assert blocks.length == 1;
     assert eq_bytes(blocks[0], [1, 2, 3, 4, 5]);
 }
+
+// ── Strict padding negatives ──────────────────────────────────────
+test "pem: padding outside the final quad is rejected" {
+    let pem: string = "-----BEGIN CERTIFICATE-----\nA=B=\n-----END CERTIFICATE-----\n";
+    let blocks: int[][] = pem_certificates_to_der(pem);
+    assert blocks.length == 0;
+}
+
+test "pem: a single-pad final quad with nonzero low bits under padding is rejected" {
+    // "QUJ=": d2 = sextet('J') = 9, and 9 & 3 != 0.
+    let pem: string = "-----BEGIN CERTIFICATE-----\nQUJ=\n-----END CERTIFICATE-----\n";
+    let blocks: int[][] = pem_certificates_to_der(pem);
+    assert blocks.length == 0;
+}
+
+test "pem: a double-pad final quad with nonzero low bits under padding is rejected" {
+    // "AC==": d1 = sextet('C') = 2, and 2 & 15 != 0.
+    let pem: string = "-----BEGIN CERTIFICATE-----\nAC==\n-----END CERTIFICATE-----\n";
+    let blocks: int[][] = pem_certificates_to_der(pem);
+    assert blocks.length == 0;
+}
+
+test "pem: '=' in the first position of a quad is rejected" {
+    let pem: string = "-----BEGIN CERTIFICATE-----\n=ABC\n-----END CERTIFICATE-----\n";
+    let blocks: int[][] = pem_certificates_to_der(pem);
+    assert blocks.length == 0;
+}
+
+test "pem: '=' in the second position of a quad is rejected" {
+    let pem: string = "-----BEGIN CERTIFICATE-----\nA=BC\n-----END CERTIFICATE-----\n";
+    let blocks: int[][] = pem_certificates_to_der(pem);
+    assert blocks.length == 0;
+}
+
+// ── Block-count and size caps ──────────────────────────────────────
+test "pem: 17 blocks exceeds the 16-block cap and is rejected" {
+    let mut pem: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= 17 { break; }
+        pem = pem
+            + "-----BEGIN CERTIFICATE-----\nAA==\n-----END CERTIFICATE-----\n";
+        i += 1;
+    }
+    let blocks: int[][] = pem_certificates_to_der(pem);
+    assert blocks.length == 0;
+}
+
+// A decoded block over 65535 bytes must be rejected. Writing that block's
+// base64 as a literal is impractical (tens of thousands of characters), so
+// it is built by repeated doubling of a valid quad ("AAAA" -> 3 zero bytes)
+// until the encoded body comfortably exceeds the length that decodes past
+// the cap; substring trims it to an exact multiple of 4.
+fn _repeat_to_length(unit: string, n: int) -> string {
+    let mut s: string = unit;
+    loop {
+        if s.length >= n { break; }
+        s = s + s;
+    }
+    return substring(s, 0, n);
+}
+
+test "pem: a decoded block over 65535 bytes is rejected" {
+    // 21846 quads of "AAAA" decode to 65538 bytes, past the 65535-byte cap.
+    let encoded: string = _repeat_to_length("AAAA", 21846 * 4);
+    let pem: string = "-----BEGIN CERTIFICATE-----\n" + encoded
+        + "\n-----END CERTIFICATE-----\n";
+    let blocks: int[][] = pem_certificates_to_der(pem);
+    assert blocks.length == 0;
+}
+
+// ── Fix 1 regression guard ──────────────────────────────────────────
+test "pem: a non-ASCII character whose low byte lands in the base64 alphabet is rejected" {
+    // U+0141 ('Ł') & 255 == 0x41 == 'A'. The old `char_code(c) & 255` masking
+    // would decode this as if it were 'A' instead of rejecting it.
+    let pem: string = "-----BEGIN CERTIFICATE-----\nAŁB=\n-----END CERTIFICATE-----\n";
+    let blocks: int[][] = pem_certificates_to_der(pem);
+    assert blocks.length == 0;
+}

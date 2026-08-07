@@ -653,8 +653,14 @@ test "tls13_server_handshake: a ServerHello whose key share is not this state's 
         Result.Ok { value } => { hs = value; },
         Result.Err { error } => { assert error.length == 0; }
     }
+    // Captured before the failing call: `transcript` is shared by reference,
+    // so if `hs_server_send_hello` appended the ServerHello ahead of its
+    // consistency check, this state's hash would move even though the step
+    // returned Err (SFN-654 code review).
+    let before: int[] = hs_server_transcript_hash(hs);
     match hs_server_send_hello(hs, v_server_hello()) {
         Result.Ok { value } => { assert value.state == -1; },
         Result.Err { error } => { assert error.length > 0; }
     }
+    assert eq_bytes(hs_server_transcript_hash(hs), before);
 }
