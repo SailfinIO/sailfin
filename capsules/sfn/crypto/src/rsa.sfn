@@ -1,0 +1,234 @@
+// capsules/sfn/crypto/src/rsa.sfn
+//
+// RSASSA-PKCS1-v1_5 signature verification (RFC 8017 §8.2.2) over the 26-bit
+// Montgomery bignum core in src/bignum.sfn. This is the mode X.509 uses for
+// certificate signatures, and it is what makes a native chain check work
+// against the RSA-rooted majority of the public web rather than only against
+// known Ed25519 peers (SFEP-0048 Phase C, design note §7.2).
+//
+// Verification only. There is no signing, key generation, decryption, or OAEP
+// here, and the bignum core this calls is not constant time — see its module
+// comment. Every input is public, so that is the correct trade; it also means
+// none of this may be reused for a private-key operation.
+//
+// The one subtlety worth reading before editing: the encoding check compares
+// the WHOLE reconstructed EM byte string against the whole recovered one. It
+// does not parse the recovered padding and it does not search it for a digest.
+// A permissive parser here is the Bleichenbacher'06 signature forgery — with a
+// small public exponent, slack anywhere in the padding lets an attacker craft
+// a perfect cube (or e-th power) whose expansion merely *contains* a valid
+// DigestInfo, and the forgery needs no private key at all. That bug has been
+// reintroduced in shipped TLS libraries repeatedly. Build the expected string
+// and compare it; never inspect the recovered one.
+//
+// Every constant is decimal: hex literals are unavailable in Sailfin source
+// (SFEP-0048 §3.3 item 7).
+import {
+    MontCtx,
+    _bn_cmp,
+    _bn_from_be,
+    _bn_to_be,
+    _modexp_public,
+    mont_ctx_from_be
+} from "./bignum";
+import { sha256_bytes } from "./hkdf";
+import { sha384_bytes } from "./sha384";
+
+// ── Outcome struct (SFN-156 precedent: plain ok/error, no Result<T, E>) ──
+struct RsaBytesResult {
+    ok: boolean;
+    error: string;
+    value: int[];
+}
+
+fn _rsa_err(message: string) -> RsaBytesResult {
+    let empty: int[] = [];
+    return RsaBytesResult { ok: false, error: message, value: empty };
+}
+
+fn _rsa_ok(value: int[]) -> RsaBytesResult {
+    return RsaBytesResult { ok: true, error: "", value: value };
+}
+
+// The DER DigestInfo prefixes from RFC 8017 §9.2, each an AlgorithmIdentifier
+// with an explicit NULL parameter followed by the OCTET STRING header. The
+// absent-NULL variant is a different byte string and is deliberately not
+// accepted: RFC 8017 §9.2 note 1 requires the NULL form for these algorithms,
+// and accepting both would reopen exactly the encoding slack this module
+// exists to close.
+fn _digestinfo_sha256() -> int[] {
+    return [48, 49, 48, 13, 6, 9, 96, 134, 72, 1, 101, 3, 4, 2, 1, 5, 0, 4, 32];
+}
+
+fn _digestinfo_sha384() -> int[] {
+    return [48, 65, 48, 13, 6, 9, 96, 134, 72, 1, 101, 3, 4, 2, 2, 5, 0, 4, 48];
+}
+
+// The smallest public exponent RFC 8017 permits, and the ceiling that keeps a
+// hostile certificate from turning one verification into a multi-thousand-bit
+// exponentiation. A positive 31-bit int covers 65537 and every exponent in the
+// NIST validation vectors (design note §6.2).
+fn _rsa_min_exponent() -> int { return 3; }
+
+fn _rsa_max_exponent() -> int { return 2147483647; }
+
+// Drop the leading zero bytes a DER INTEGER carries as sign padding, so the
+// modulus length used for the signature-length check and for I2OSP is the true
+// octet length k. An all-zero input collapses to empty, which the context
+// builder then rejects on its length floor.
+fn _rsa_strip_leading_zeros(bytes: int[]) -> int[] {
+    let mut start: int = 0;
+    loop {
+        if start >= bytes.length { break; }
+        if (bytes[start] & 255) != 0 { break; }
+        start += 1;
+    }
+    let mut out: int[] = [];
+    let mut i: int = start;
+    loop {
+        if i >= bytes.length { break; }
+        out.push(bytes[i] & 255);
+        i += 1;
+    }
+    return out;
+}
+
+fn _rsa_bytes_eq(a: int[], b: int[]) -> bool {
+    if a.length != b.length { return false; }
+    let mut i: int = 0;
+    loop {
+        if i >= a.length { break; }
+        if (a[i] & 255) != (b[i] & 255) { return false; }
+        i += 1;
+    }
+    return true;
+}
+
+// RSAVP1 (RFC 8017 §5.2.2) plus the surrounding length discipline: the shared
+// public operation behind both PKCS#1 v1.5 and the PSS mode SFN-658 adds. It
+// takes the modulus and signature as big-endian octet strings and returns the
+// recovered encoded message, always exactly k octets.
+//
+// A caller that verifies several signatures under one key pays the Montgomery
+// setup once per call here. That is acceptable for certificate-chain use, where
+// each link has its own key; a batch caller should hoist `mont_ctx_from_be`.
+fn _rsa_public_op(n_bytes: int[], e: int, sig: int[]) -> RsaBytesResult {
+    if e < _rsa_min_exponent() {
+        return _rsa_err("rsa: public exponent is below 3");
+    }
+    if e > _rsa_max_exponent() {
+        return _rsa_err("rsa: public exponent exceeds the supported 31-bit range");
+    }
+    if (e & 1) == 0 { return _rsa_err("rsa: public exponent is even"); }
+
+    let modulus: int[] = _rsa_strip_leading_zeros(n_bytes);
+    let k: int = modulus.length;
+    if sig.length != k {
+        return _rsa_err("rsa: signature length differs from the modulus length");
+    }
+
+    let ctx: MontCtx = mont_ctx_from_be(modulus);
+    if !ctx.ok { return _rsa_err(ctx.error); }
+
+    let s: int[] = _bn_from_be(sig, ctx.limbs);
+    if _bn_cmp(s, ctx.n) >= 0 {
+        return _rsa_err("rsa: signature is not less than the modulus");
+    }
+
+    let m: int[] = _modexp_public(s, e, ctx);
+    return _rsa_ok(_bn_to_be(m, k));
+}
+
+// EMSA-PKCS1-v1_5-ENCODE (RFC 8017 §9.2): 00 || 01 || PS || 00 || DigestInfo,
+// where PS is all 255 and at least 8 octets long. This constructs the expected
+// encoding; nothing in this module ever parses a recovered one.
+fn _emsa_pkcs1_v1_5(digest: int[], prefix: int[], em_len: int) -> RsaBytesResult {
+    let t_len: int = prefix.length + digest.length;
+    // 3 fixed octets (00, 01, and the 00 separator) plus the 8-octet minimum PS.
+    if em_len < t_len + 11 {
+        return _rsa_err("rsa: intended encoded message length is too short");
+    }
+
+    let mut em: int[] = [];
+    em.push(0);
+    em.push(1);
+
+    let ps_len: int = em_len - t_len - 3;
+    let mut i: int = 0;
+    loop {
+        if i >= ps_len { break; }
+        em.push(255);
+        i += 1;
+    }
+    em.push(0);
+
+    let mut j: int = 0;
+    loop {
+        if j >= prefix.length { break; }
+        em.push(prefix[j] & 255);
+        j += 1;
+    }
+    let mut d: int = 0;
+    loop {
+        if d >= digest.length { break; }
+        em.push(digest[d] & 255);
+        d += 1;
+    }
+
+    return _rsa_ok(em);
+}
+
+// The shared body of both verify entry points: recover EM, rebuild the expected
+// EM from a freshly computed digest, and require the two to be equal octet for
+// octet. Any failure — malformed key, wrong length, out-of-range signature,
+// short modulus — is a non-verification, never a panic.
+// The encoding decision, and the only place a recovered encoding is ever
+// judged. It reads `em` for its length and then hands it to the comparator; it
+// never walks it, parses it, or searches it. That property is the whole
+// forgery defence, so it is split out from the exponentiation above rather than
+// inlined: the regression tests drive this function directly, which lets them
+// pin the property without paying a 2048-bit modexp per case. If someone
+// rewrites this to inspect `em`, those tests are what should stop them.
+fn _rsa_pkcs1_v1_5_verify_em(em: int[], digest: int[], prefix: int[]) -> bool {
+    let expected: RsaBytesResult = _emsa_pkcs1_v1_5(digest, prefix, em.length);
+    if !expected.ok { return false; }
+
+    return _rsa_bytes_eq(em, expected.value);
+}
+
+fn _rsa_pkcs1_v1_5_verify(n_bytes: int[], e: int, digest: int[], prefix: int[], sig: int[]) -> bool {
+    let recovered: RsaBytesResult = _rsa_public_op(n_bytes, e, sig);
+    if !recovered.ok { return false; }
+
+    return _rsa_pkcs1_v1_5_verify_em(recovered.value, digest, prefix);
+}
+
+// RFC 8017 §8.2.2 with SHA-256. `n_bytes` is the modulus as a big-endian octet
+// string (a DER INTEGER's leading zero byte is tolerated), `e` the public
+// exponent, `message` the raw signed bytes, `sig` the signature octet string.
+fn rsa_pkcs1_v1_5_verify_sha256(n_bytes: int[], e: int, message: int[], sig: int[]) -> bool {
+    return _rsa_pkcs1_v1_5_verify(n_bytes, e, sha256_bytes(message), _digestinfo_sha256(), sig);
+}
+
+// RFC 8017 §8.2.2 with SHA-384.
+fn rsa_pkcs1_v1_5_verify_sha384(n_bytes: int[], e: int, message: int[], sig: int[]) -> bool {
+    return _rsa_pkcs1_v1_5_verify(n_bytes, e, sha384_bytes(message), _digestinfo_sha384(), sig);
+}
+
+// The underscored exports are capsule-internal: SFN-658's PSS mode reuses
+// `_rsa_public_op` rather than forking a second bignum path, and the negative
+// encoding tests drive `_emsa_pkcs1_v1_5` directly so they do not each repeat a
+// 2048-bit exponentiation (design note §6.3). `src/mod.sfn` re-exports only the
+// two public verify functions.
+export {
+    RsaBytesResult,
+    _digestinfo_sha256,
+    _digestinfo_sha384,
+    _emsa_pkcs1_v1_5,
+    _rsa_bytes_eq,
+    _rsa_pkcs1_v1_5_verify_em,
+    _rsa_public_op,
+    _rsa_strip_leading_zeros,
+    rsa_pkcs1_v1_5_verify_sha256,
+    rsa_pkcs1_v1_5_verify_sha384
+};
