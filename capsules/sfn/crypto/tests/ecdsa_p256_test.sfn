@@ -1,0 +1,869 @@
+// capsules/sfn/crypto/tests/ecdsa_p256_test.sfn
+//
+// SFN-657: ECDSA-P256 signature verification (FIPS 186-4 §6.4.2) and the
+// field/scalar arithmetic underneath it in `src/p256.sfn`.
+//
+// Design: docs/proposals/design-notes/sfn-653-p256-rsa-bigint-strategy.md,
+// §8.1 (known-answer gate requirements), §9 (primary risks — wrong fixed
+// Montgomery context, incomplete public-key validation, scope reuse).
+//
+// Vector provenance:
+//   - RFC 6979 appendix A.2.5, P-256/SHA-256. Reproduced with an independent
+//     implementation that matches the RFC's published `Ux`, `Uy`, `r`, and `s`
+//     for message `sample` exactly; the `test` message values come from that
+//     same validated implementation.
+//   - NIST CAVP FIPS 186-4 archive `186-4ecdsatestvectors.zip`, file
+//     `SigVer.rsp`, group `[P-256,SHA-256]`. Record indices are positions
+//     within that group. The `Result` verdicts and the parenthesized failure
+//     reasons are quoted VERBATIM from the file. An independent
+//     implementation agrees with all 15 records in the group.
+import { unix_millis } from "sfn/time";
+
+import { _mont_n0_prime } from "../src/bignum";
+import { string_to_bytes } from "../src/bits";
+import {
+    EcdsaSignature,
+    _ecdsa_parse_signature,
+    ecdsa_p256_verify_digest,
+    ecdsa_p256_verify_sha256
+} from "../src/ecdsa";
+import { sha256_bytes } from "../src/hkdf";
+import {
+    P256PointResult,
+    P256Value,
+    _p256_from_be,
+    _p256_mod_add,
+    _p256_mod_mul,
+    _p256_mod_sqr,
+    _p256_mod_sub,
+    _p256_n_ctx,
+    _p256_n_from_be_checked,
+    _p256_n_inv,
+    _p256_n_mod,
+    _p256_n_mul,
+    _p256_n_n0_prime,
+    _p256_n_reduce_256,
+    _p256_n_to_be,
+    _p256_p_ctx,
+    _p256_p_inv,
+    _p256_p_mod,
+    _p256_p_n0_prime,
+    _p256_point_decode,
+    _p256_to_be
+} from "../src/p256";
+
+// Returns -1 for a nibble outside `[0-9a-f]` rather than silently coercing it
+// to 0, so a transcription typo or an uppercase letter breaks `_hexbytes`
+// loudly instead of quietly turning one valid-looking vector into another.
+fn _hexval(c: string) -> int {
+    let code: int = char_code(c) & 255;
+    if code >= 48 && code <= 57 { return code - 48; }
+    if code >= 97 && code <= 102 { return code - 97 + 10; }
+    return -1;
+}
+
+fn _hexbytes(s: string) -> int[] {
+    // An odd-length literal has no valid byte decoding at all, so it fails
+    // the same way an invalid nibble does rather than silently returning a
+    // truncated prefix.
+    if (s.length & 1) != 0 { return []; }
+    let mut out: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= s.length { break; }
+        let hi: int = _hexval(s[i]);
+        let lo: int = _hexval(s[i + 1]);
+        if hi < 0 || lo < 0 { return []; }
+        out.push(((hi << 4) | lo) & 255);
+        i += 2;
+    }
+    return out;
+}
+
+fn _bytes_eq(a: int[], b: int[]) -> bool {
+    if a.length != b.length { return false; }
+    let mut i: int = 0;
+    loop {
+        if i >= a.length { break; }
+        if a[i] != b[i] { return false; }
+        i += 1;
+    }
+    return true;
+}
+
+test "test helpers: _hexbytes rejects an invalid nibble or an odd length" {
+    // A typo'd/uppercase byte must fail loudly rather than silently becoming
+    // a different, still valid-looking, vector.
+    assert _hexbytes("zz").length == 0;
+    assert _hexbytes("0a1").length == 0;
+}
+
+// ── RFC 6979 A.2.5 vectors ──
+fn _pk_uncompressed() -> string {
+    return "0460fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb6"
+        + "7903fe1008b8bc99a41ae9e95628bc64f2f1b20c2d7e9f5177a3c294d4462299";
+}
+
+fn _pk_compressed() -> string {
+    return "0360fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb6";
+}
+
+fn _sig_sample() -> string {
+    return "3046022100efd48b2aacb6a8fd1140dd9cd45e81d69d2c877b56aaf991c34d0ea84"
+        + "eaf3716022100f7cb1c942d657c41d436c7a1b6e29f65f3e900dbb9aff4064dc4ab2"
+        + "f843acda8";
+}
+
+fn _sig_test() -> string {
+    return "3045022100f1abb023518351cd71d881567b1ea663ed3efcf6c5132b354f28d3b0"
+        + "b7d383670220019f4113742a2b14bd25926b49c649155f267e60d3814b4c0cc8425"
+        + "0e46f0083";
+}
+
+fn _cavp_r3_key() -> string {
+    return "04e424dc61d4bb3cb7ef4344a7f8957a0c5134e16f7a67c074f82e6e12f49abf3c"
+        + "970eed7aa2bc48651545949de1dddaf0127e5965ac85d1243d6f60e7dfaee927";
+}
+
+test "ecdsa p256: RFC 6979 sample vector verifies with the uncompressed key" {
+    assert ecdsa_p256_verify_sha256(_hexbytes(_pk_uncompressed()), string_to_bytes("sample"), _hexbytes(_sig_sample()));
+}
+
+test "ecdsa p256: RFC 6979 sample vector verifies with the compressed key" {
+    // Exercises point decompression and the SEC1 y-parity branch: `Uy` ends in
+    // `99`, which is odd, hence prefix `03`.
+    assert ecdsa_p256_verify_sha256(_hexbytes(_pk_compressed()), string_to_bytes("sample"), _hexbytes(_sig_sample()));
+}
+
+test "ecdsa p256: RFC 6979 test vector verifies" {
+    assert ecdsa_p256_verify_sha256(_hexbytes(_pk_uncompressed()), string_to_bytes("test"), _hexbytes(_sig_test()));
+}
+
+test "ecdsa p256: the digest entry point agrees with the message entry point" {
+    let digest: int[] = sha256_bytes(string_to_bytes("sample"));
+    assert ecdsa_p256_verify_digest(_hexbytes(_pk_uncompressed()), digest, _hexbytes(_sig_sample()));
+}
+
+test "ecdsa p256: a tampered message is rejected" {
+    assert ! ecdsa_p256_verify_sha256(_hexbytes(_pk_uncompressed()), string_to_bytes("samplf"), _hexbytes(_sig_sample()));
+}
+
+test "ecdsa p256: signatures do not cross-verify between the sample and test messages" {
+    assert ! ecdsa_p256_verify_sha256(_hexbytes(_pk_uncompressed()), string_to_bytes("test"), _hexbytes(_sig_sample()));
+    assert ! ecdsa_p256_verify_sha256(_hexbytes(_pk_uncompressed()), string_to_bytes("sample"), _hexbytes(_sig_test()));
+}
+
+test "ecdsa p256: a signature verified against the wrong public key is rejected" {
+    assert ! ecdsa_p256_verify_sha256(_hexbytes(_cavp_r3_key()), string_to_bytes("sample"), _hexbytes(_sig_sample()));
+}
+
+test "ecdsa p256: a wrong-length digest is rejected" {
+    let sig: int[] = _hexbytes(_sig_sample());
+    let key: int[] = _hexbytes(_pk_uncompressed());
+    let digest: int[] = sha256_bytes(string_to_bytes("sample"));
+    let mut short: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= 31 { break; }
+        short.push(digest[i]);
+        i += 1;
+    }
+    assert short.length == 31;
+    assert ! ecdsa_p256_verify_digest(key, short, sig);
+
+    let long: int[] = short.concat([0, 0]);
+    assert long.length == 33;
+    assert ! ecdsa_p256_verify_digest(key, long, sig);
+}
+
+// ── Range-check negatives: the standard ECDSA acceptance hole (design note
+// §8.1). `r = 0`, `s = 0`, `r = n`, and `s = n` must be refused by
+// `_p256_n_from_be_checked`'s range check, not merely by a later comparison
+// failure; `r = n - 1` is in range and is refused only as a wrong signature.
+// All built on the `"sample"` vector against `_pk_uncompressed()`.
+fn _der_r_zero() -> string {
+    return "3026020100022100f7cb1c942d657c41d436c7a1b6e29f65f3e900dbb9aff4064d"
+        + "c4ab2f843acda8";
+}
+
+fn _der_s_zero() -> string {
+    return "3026022100efd48b2aacb6a8fd1140dd9cd45e81d69d2c877b56aaf991c34d0ea8"
+        + "4eaf3716020100";
+}
+
+fn _der_r_eq_n() -> string {
+    return "3046022100ffffffff00000000ffffffffffffffffbce6faada7179e84f3b9ca"
+        + "c2fc632551022100f7cb1c942d657c41d436c7a1b6e29f65f3e900dbb9aff4064d"
+        + "c4ab2f843acda8";
+}
+
+fn _der_s_eq_n() -> string {
+    return "3046022100efd48b2aacb6a8fd1140dd9cd45e81d69d2c877b56aaf991c34d0ea"
+        + "84eaf3716022100ffffffff00000000ffffffffffffffffbce6faada7179e84f3"
+        + "b9cac2fc632551";
+}
+
+fn _der_r_eq_n_minus_1() -> string {
+    return "3046022100ffffffff00000000ffffffffffffffffbce6faada7179e84f3b9ca"
+        + "c2fc632550022100f7cb1c942d657c41d436c7a1b6e29f65f3e900dbb9aff4064d"
+        + "c4ab2f843acda8";
+}
+
+test "ecdsa p256: zero r or s is refused by the range check" {
+    let key: int[] = _hexbytes(_pk_uncompressed());
+    let msg: int[] = string_to_bytes("sample");
+
+    assert ! ecdsa_p256_verify_sha256(key, msg, _hexbytes(_der_r_zero()));
+    assert ! _ecdsa_parse_signature(_hexbytes(_der_r_zero())).ok;
+
+    assert ! ecdsa_p256_verify_sha256(key, msg, _hexbytes(_der_s_zero()));
+    assert ! _ecdsa_parse_signature(_hexbytes(_der_s_zero())).ok;
+}
+
+test "ecdsa p256: r or s at least n is refused by the range check" {
+    let key: int[] = _hexbytes(_pk_uncompressed());
+    let msg: int[] = string_to_bytes("sample");
+
+    assert ! ecdsa_p256_verify_sha256(key, msg, _hexbytes(_der_r_eq_n()));
+    assert ! _ecdsa_parse_signature(_hexbytes(_der_r_eq_n())).ok;
+
+    assert ! ecdsa_p256_verify_sha256(key, msg, _hexbytes(_der_s_eq_n()));
+    assert ! _ecdsa_parse_signature(_hexbytes(_der_s_eq_n())).ok;
+}
+
+test "ecdsa p256: r = n - 1 parses but the signature is still wrong" {
+    // In range, so it clears the range check and is refused only as an
+    // ordinary wrong signature — the layer distinction the range-check tests
+    // above exist to isolate.
+    let key: int[] = _hexbytes(_pk_uncompressed());
+    let msg: int[] = string_to_bytes("sample");
+    let sig: int[] = _hexbytes(_der_r_eq_n_minus_1());
+
+    assert _ecdsa_parse_signature(sig).ok;
+    assert ! ecdsa_p256_verify_sha256(key, msg, sig);
+}
+
+// ── Invalid public keys (design note §7.1 step 1 and §9's "incomplete
+// public-key validation" risk). All paired with the `"sample"` message and
+// signature. ──
+fn _pk_off_curve() -> string {
+    return "0460fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb6"
+        + "7903fe1008b8bc99a41ae9e95628bc64f2f1b20c2d7e9f5177a3c294d446229a";
+}
+
+fn _pk_x_eq_p() -> string {
+    return "04ffffffff00000001000000000000000000000000ffffffffffffffffffffffff"
+        + "7903fe1008b8bc99a41ae9e95628bc64f2f1b20c2d7e9f5177a3c294d4462299";
+}
+
+fn _pk_infinity() -> string { return "00"; }
+
+fn _pk_truncated() -> string {
+    return "0460fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb6"
+        + "7903fe1008b8bc99a41ae9e95628bc64f2f1b20c2d7e9f5177a3c294d44622";
+}
+
+fn _pk_bad_prefix() -> string {
+    return "0560fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb6"
+        + "7903fe1008b8bc99a41ae9e95628bc64f2f1b20c2d7e9f5177a3c294d4462299";
+}
+
+fn _pk_compressed_x_not_on_curve() -> string {
+    return "020000000000000000000000000000000000000000000000000000000000000002";
+}
+
+test "ecdsa p256: an off-curve public key is rejected" {
+    let key: int[] = _hexbytes(_pk_off_curve());
+    assert ! _p256_point_decode(key, _p256_p_ctx()).ok;
+    assert ! ecdsa_p256_verify_sha256(key, string_to_bytes("sample"), _hexbytes(_sig_sample()));
+}
+
+test "ecdsa p256: a public key x-coordinate not reduced mod p is rejected" {
+    let key: int[] = _hexbytes(_pk_x_eq_p());
+    assert ! _p256_point_decode(key, _p256_p_ctx()).ok;
+    assert ! ecdsa_p256_verify_sha256(key, string_to_bytes("sample"), _hexbytes(_sig_sample()));
+}
+
+test "ecdsa p256: the point-at-infinity encoding is rejected" {
+    let key: int[] = _hexbytes(_pk_infinity());
+    assert ! _p256_point_decode(key, _p256_p_ctx()).ok;
+    assert ! ecdsa_p256_verify_sha256(key, string_to_bytes("sample"), _hexbytes(_sig_sample()));
+}
+
+test "ecdsa p256: a truncated public key encoding is rejected" {
+    let key: int[] = _hexbytes(_pk_truncated());
+    assert ! _p256_point_decode(key, _p256_p_ctx()).ok;
+    assert ! ecdsa_p256_verify_sha256(key, string_to_bytes("sample"), _hexbytes(_sig_sample()));
+}
+
+test "ecdsa p256: an unsupported point prefix is rejected" {
+    let key: int[] = _hexbytes(_pk_bad_prefix());
+    assert ! _p256_point_decode(key, _p256_p_ctx()).ok;
+    assert ! ecdsa_p256_verify_sha256(key, string_to_bytes("sample"), _hexbytes(_sig_sample()));
+}
+
+test "ecdsa p256: a compressed key whose x has no valid y is rejected" {
+    // x = 2. The curve's right-hand side at x = 2 is a quadratic non-residue
+    // mod p, which exercises the square-and-compare check in the
+    // decompression path.
+    let key: int[] = _hexbytes(_pk_compressed_x_not_on_curve());
+    assert ! _p256_point_decode(key, _p256_p_ctx()).ok;
+    assert ! ecdsa_p256_verify_sha256(key, string_to_bytes("sample"), _hexbytes(_sig_sample()));
+}
+
+test "ecdsa p256: an empty public key is rejected" {
+    let key: int[] = [];
+    assert ! _p256_point_decode(key, _p256_p_ctx()).ok;
+    assert ! ecdsa_p256_verify_sha256(key, string_to_bytes("sample"), _hexbytes(_sig_sample()));
+}
+
+// 3G — the base point tripled — for the even y-parity (`0x02`) branch.
+// `_pk_compressed()`/`_pk_uncompressed()` above only exercise `0x03` (odd
+// `y`), so an inverted parity test would still pass one direction and fail
+// only the other.
+fn _pt_3g_compressed() -> string {
+    return "025ecbe4d1a6330a44c8f7ef951d4bf165e6c6b721efada985fb41661bc6e7fd6c";
+}
+
+fn _pt_3g_uncompressed() -> string {
+    return "045ecbe4d1a6330a44c8f7ef951d4bf165e6c6b721efada985fb41661bc6e7fd6c"
+        + "8734640c4998ff7e374b06ce1a64a2ecd82ab036384fb83d9a79b127a27d5032";
+}
+
+fn _pt_3g_y() -> string {
+    return "8734640c4998ff7e374b06ce1a64a2ecd82ab036384fb83d9a79b127a27d5032";
+}
+
+test "ecdsa p256: compressed and uncompressed encodings decode to the same point" {
+    let uncompressed: P256PointResult = _p256_point_decode(_hexbytes(_pk_uncompressed()), _p256_p_ctx());
+    let compressed: P256PointResult = _p256_point_decode(_hexbytes(_pk_compressed()), _p256_p_ctx());
+    assert uncompressed.ok;
+    assert compressed.ok;
+    assert _bytes_eq(_p256_to_be(uncompressed.point.x, _p256_p_ctx()), _p256_to_be(compressed.point.x, _p256_p_ctx()));
+    // `y` is the only output the decompression branch actually recomputes;
+    // comparing only `x` above would still pass with the SEC1 y-parity
+    // branch inverted.
+    assert _bytes_eq(_p256_to_be(uncompressed.point.y, _p256_p_ctx()), _p256_to_be(compressed.point.y, _p256_p_ctx()));
+}
+
+test "ecdsa p256: the even-parity (0x02) compressed branch decodes to the same y as uncompressed" {
+    // The `_pk_compressed()` key above is `0x03` (odd y); this pins the other
+    // parity branch so an inverted comparison fails one case or the other.
+    let uncompressed: P256PointResult = _p256_point_decode(_hexbytes(_pt_3g_uncompressed()), _p256_p_ctx());
+    let compressed: P256PointResult = _p256_point_decode(_hexbytes(_pt_3g_compressed()), _p256_p_ctx());
+    assert uncompressed.ok;
+    assert compressed.ok;
+    assert _bytes_eq(_p256_to_be(compressed.point.y, _p256_p_ctx()), _hexbytes(_pt_3g_y()));
+    assert _bytes_eq(_p256_to_be(compressed.point.y, _p256_p_ctx()), _p256_to_be(uncompressed.point.y, _p256_p_ctx()));
+}
+
+// ── Malformed DER signatures (design note §7's DER-integration boundary).
+// The three DER-structural cases (non-minimal, empty INTEGER, length
+// overruns the SEQUENCE) are refused by `src/der.sfn`'s reader (SFN-504); the
+// sign and width checks are `_ecdsa_scalar`'s job; the tag and trailing-data
+// checks belong to `_ecdsa_parse_signature` itself. Asserting on
+// `_ecdsa_parse_signature` and not only on the boolean verify result is the
+// point: it pins which layer refuses which malformation. All paired with
+// `_pk_uncompressed()` and `"sample"`. ──
+fn _der_not_a_sequence() -> string {
+    return "3146022100efd48b2aacb6a8fd1140dd9cd45e81d69d2c877b56aaf991c34d0ea"
+        + "84eaf3716022100f7cb1c942d657c41d436c7a1b6e29f65f3e900dbb9aff4064d"
+        + "c4ab2f843acda8";
+}
+
+fn _der_truncated_length() -> string { return "3046022100efd48b2aacb6a8fd11"; }
+
+fn _der_r_not_integer() -> string {
+    return "3046042100efd48b2aacb6a8fd1140dd9cd45e81d69d2c877b56aaf991c34d0ea"
+        + "84eaf3716022100f7cb1c942d657c41d436c7a1b6e29f65f3e900dbb9aff4064d"
+        + "c4ab2f843acda8";
+}
+
+fn _der_trailing_byte() -> string {
+    return "3046022100efd48b2aacb6a8fd1140dd9cd45e81d69d2c877b56aaf991c34d0ea"
+        + "84eaf3716022100f7cb1c942d657c41d436c7a1b6e29f65f3e900dbb9aff4064d"
+        + "c4ab2f843acda800";
+}
+
+fn _der_s_missing() -> string {
+    return "3023022100efd48b2aacb6a8fd1140dd9cd45e81d69d2c877b56aaf991c34d0e"
+        + "a84eaf3716";
+}
+
+fn _der_negative_r() -> string {
+    return "3045022080efd48b2aacb6a8fd1140dd9cd45e81d69d2c877b56aaf991c34d0e"
+        + "a84eaf16022100f7cb1c942d657c41d436c7a1b6e29f65f3e900dbb9aff4064dc"
+        + "4ab2f843acda8";
+}
+
+// A superfluous `00` pad in front of an `r` whose top byte is already below
+// 128. `der_integer_bytes` refuses it as a non-minimal integer.
+fn _der_nonminimal_r_low() -> string {
+    return "304502210071abb023518351cd71d881567b1ea663ed3efcf6c5132b354f28d3b0b7d38367022017c55095819089c2e03b9cd415abdf12444e323075d98f31920b9e0f57ec871c";
+}
+
+// `ff` followed by a high-bit byte — the other non-minimal integer form
+// `der_integer_bytes` refuses.
+fn _der_nonminimal_r_ff() -> string {
+    return "30450220ff80000000000000000000000000000000000000000000000000000000000000022100f7cb1c942d657c41d436c7a1b6e29f65f3e900dbb9aff4064dc4ab2f843acda8";
+}
+
+fn _der_empty_r() -> string {
+    return "30250200022100f7cb1c942d657c41d436c7a1b6e29f65f3e900dbb9aff4064d"
+        + "c4ab2f843acda8";
+}
+
+fn _der_r_len_overruns() -> string {
+    return "30220240efd48b2aacb6a8fd1140dd9cd45e81d69d2c877b56aaf991c34d0ea84"
+        + "eaf3716";
+}
+
+// `r` content is `00` followed by 33 `ff` bytes (34 bytes), which strips one
+// leading zero to a 33-byte scalar — wide enough to reach
+// `_p256_n_from_be_checked`'s `bytes.length > 32` guard. Short-form outer
+// length (0x47 = 71 < 128), so `der_check_structure` accepts the framing and
+// the scalar-width check is actually exercised, unlike the non-minimal-length
+// vector below.
+fn _der_r_too_wide() -> string {
+    return "3047022200ffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+        + "ffffffffff022100f7cb1c942d657c41d436c7a1b6e29f65f3e900dbb9aff4064d"
+        + "c4ab2f843acda8";
+}
+
+// The original `30 81 47 ...` outer header: 0x47 = 71 < 128, so the long-form
+// length is non-minimal DER and `der_check_structure` (SFN-504) rejects it
+// before the SEQUENCE is even read — this never reaches the scalar-width
+// check `_der_r_too_wide` above is named for. Kept as its own case because a
+// non-minimal outer length is a genuine, distinct rejection.
+fn _der_nonminimal_outer_length() -> string {
+    return "308147022200ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff022100f7cb1c942d657c41d436c7a1b6e29f65f3e900dbb9aff4064dc4ab2f843acda8";
+}
+
+// 33 bytes of `ff`: wider than the 32-byte ceiling, so this must be refused
+// directly by the width guard regardless of any DER framing.
+fn _scalar_33_bytes_wide() -> string {
+    return "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+        + "ffff";
+}
+
+// 33 bytes encoding 16*2^256 + 1 = 2^260 + 1. `_bn_from_be` only keeps 260
+// bits (10 limbs of 26 bits), so without the `bytes.length > 32` guard this
+// value would silently truncate to the perfectly valid scalar `1`. This is
+// the truncation witness for why the width check must run before
+// `_bn_from_be`, not after.
+fn _scalar_2_260_plus_1() -> string {
+    return "100000000000000000000000000000000000000000000000000000000000"
+        + "000001";
+}
+
+test "ecdsa p256: a non-SEQUENCE DER signature is rejected" {
+    let key: int[] = _hexbytes(_pk_uncompressed());
+    let sig: int[] = _hexbytes(_der_not_a_sequence());
+    assert ! ecdsa_p256_verify_sha256(key, string_to_bytes("sample"), sig);
+    assert ! _ecdsa_parse_signature(sig).ok;
+}
+
+test "ecdsa p256: a truncated DER length is rejected" {
+    let key: int[] = _hexbytes(_pk_uncompressed());
+    let sig: int[] = _hexbytes(_der_truncated_length());
+    assert ! ecdsa_p256_verify_sha256(key, string_to_bytes("sample"), sig);
+    assert ! _ecdsa_parse_signature(sig).ok;
+}
+
+test "ecdsa p256: r tagged as something other than INTEGER is rejected" {
+    let key: int[] = _hexbytes(_pk_uncompressed());
+    let sig: int[] = _hexbytes(_der_r_not_integer());
+    assert ! ecdsa_p256_verify_sha256(key, string_to_bytes("sample"), sig);
+    assert ! _ecdsa_parse_signature(sig).ok;
+}
+
+test "ecdsa p256: trailing bytes after the DER SEQUENCE are rejected" {
+    let key: int[] = _hexbytes(_pk_uncompressed());
+    let sig: int[] = _hexbytes(_der_trailing_byte());
+    assert ! ecdsa_p256_verify_sha256(key, string_to_bytes("sample"), sig);
+    assert ! _ecdsa_parse_signature(sig).ok;
+}
+
+test "ecdsa p256: a signature missing s is rejected" {
+    let key: int[] = _hexbytes(_pk_uncompressed());
+    let sig: int[] = _hexbytes(_der_s_missing());
+    assert ! ecdsa_p256_verify_sha256(key, string_to_bytes("sample"), sig);
+    assert ! _ecdsa_parse_signature(sig).ok;
+}
+
+test "ecdsa p256: a negative r is rejected" {
+    let key: int[] = _hexbytes(_pk_uncompressed());
+    let sig: int[] = _hexbytes(_der_negative_r());
+    assert ! ecdsa_p256_verify_sha256(key, string_to_bytes("sample"), sig);
+    assert ! _ecdsa_parse_signature(sig).ok;
+}
+
+test "ecdsa p256: non-minimal DER integer encodings are rejected" {
+    let key: int[] = _hexbytes(_pk_uncompressed());
+    let low: int[] = _hexbytes(_der_nonminimal_r_low());
+    let ff: int[] = _hexbytes(_der_nonminimal_r_ff());
+    assert ! ecdsa_p256_verify_sha256(key, string_to_bytes("sample"), low);
+    assert ! _ecdsa_parse_signature(low).ok;
+    assert ! ecdsa_p256_verify_sha256(key, string_to_bytes("sample"), ff);
+    assert ! _ecdsa_parse_signature(ff).ok;
+}
+
+test "ecdsa p256: an empty r INTEGER is rejected" {
+    let key: int[] = _hexbytes(_pk_uncompressed());
+    let sig: int[] = _hexbytes(_der_empty_r());
+    assert ! ecdsa_p256_verify_sha256(key, string_to_bytes("sample"), sig);
+    assert ! _ecdsa_parse_signature(sig).ok;
+}
+
+test "ecdsa p256: an r length overrunning the SEQUENCE is rejected" {
+    let key: int[] = _hexbytes(_pk_uncompressed());
+    let sig: int[] = _hexbytes(_der_r_len_overruns());
+    assert ! ecdsa_p256_verify_sha256(key, string_to_bytes("sample"), sig);
+    assert ! _ecdsa_parse_signature(sig).ok;
+}
+
+test "ecdsa p256: r wider than 32 bytes is rejected" {
+    let key: int[] = _hexbytes(_pk_uncompressed());
+    let sig: int[] = _hexbytes(_der_r_too_wide());
+    assert ! ecdsa_p256_verify_sha256(key, string_to_bytes("sample"), sig);
+    assert ! _ecdsa_parse_signature(sig).ok;
+
+    // Direct unit assertion so `_p256_n_from_be_checked`'s `bytes.length > 32`
+    // guard is pinned independently of DER framing.
+    assert ! _p256_n_from_be_checked(_hexbytes(_scalar_33_bytes_wide())).ok;
+
+    // The truncation witness: without the width guard, `_bn_from_be` keeps
+    // only 260 bits and this 2^260 + 1 value would silently collapse to the
+    // perfectly valid scalar `1`.
+    assert ! _p256_n_from_be_checked(_hexbytes(_scalar_2_260_plus_1())).ok;
+}
+
+test "ecdsa p256: a non-minimal outer DER length is rejected" {
+    // 0x47 = 71 < 128, so the long-form outer length is non-minimal DER and
+    // is refused by `src/der.sfn`'s reader before the SEQUENCE is even read —
+    // a distinct rejection from the scalar-width case above, which needs a
+    // minimal (short-form) outer length to reach `_ecdsa_scalar` at all.
+    let key: int[] = _hexbytes(_pk_uncompressed());
+    let sig: int[] = _hexbytes(_der_nonminimal_outer_length());
+    assert ! ecdsa_p256_verify_sha256(key, string_to_bytes("sample"), sig);
+    assert ! _ecdsa_parse_signature(sig).ok;
+}
+
+test "ecdsa p256: an empty signature byte array is rejected" {
+    let key: int[] = _hexbytes(_pk_uncompressed());
+    let sig: int[] = [];
+    assert ! ecdsa_p256_verify_sha256(key, string_to_bytes("sample"), sig);
+    assert ! _ecdsa_parse_signature(sig).ok;
+}
+
+// ── NIST CAVP SigVer.rsp, group [P-256,SHA-256] ──
+// Record index and the verbatim `Result` text are recorded on each case.
+fn _cavp_record3_msg() -> string {
+    return "e1130af6a38ccb412a9c8d13e15dbfc9e69a16385af3c3f1e5da954fd5e7c45fd7"
+        + "5e2b8c36699228e92840c0562fbf3772f07e17f1add56588dd45f7450e1217ad23"
+        + "9922dd9c32695dc71ff2424ca0dec1321aa47064a044b7fe3c2b97d03ce470a592"
+        + "304c5ef21eed9f93da56bb232d1eeb0035f9bf0dfafdcc4606272b20a3";
+}
+
+fn _cavp_record3_key() -> string {
+    return "04e424dc61d4bb3cb7ef4344a7f8957a0c5134e16f7a67c074f82e6e12f49abf3c"
+        + "970eed7aa2bc48651545949de1dddaf0127e5965ac85d1243d6f60e7dfaee927";
+}
+
+fn _cavp_record3_sig() -> string {
+    return "3045022100bf96b99aa49c705c910be33142017c642ff540c76349b9dab72f98"
+        + "1fd9347f4f022017c55095819089c2e03b9cd415abdf12444e323075d98f31920"
+        + "b9e0f57ec871c";
+}
+
+fn _cavp_record7_msg() -> string {
+    return "1669bfb657fdc62c3ddd63269787fc1c969f1850fb04c933dda063ef74a56ce13e"
+        + "3a649700820f0061efabf849a85d474326c8a541d99830eea8131eaea584f22d8"
+        + "8c353965dabcdc4bf6b55949fd529507dfb803ab6b480cd73ca0ba00ca19c4388"
+        + "49e2cea262a1c57d8f81cd257fb58e19dec7904da97d8386e87b84948169";
+}
+
+fn _cavp_record7_key() -> string {
+    return "0469b7667056e1e11d6caf6e45643f8b21e7a4bebda463c7fdbc13bc98efbd0214"
+        + "d3f9b12eb46c7c6fda0da3fc85bc1fd831557f9abc902a3be3cb3e8be7d1aa2f";
+}
+
+fn _cavp_record7_sig() -> string {
+    return "30440220288f7a1cd391842cce21f00e6f15471c04dc182fe4b14d92dc189108"
+        + "797997900220247b3c4e89a3bcadfea73c7bfd361def43715fa382b8c3edf4ae1"
+        + "5d6e55e9979";
+}
+
+fn _cavp_record1_msg() -> string {
+    return "069a6e6b93dfee6df6ef6997cd80dd2182c36653cef10c655d524585655462d68"
+        + "3877f95ecc6d6c81623d8fac4e900ed0019964094e7de91f1481989ae18730045"
+        + "65789cbf5dc56c62aedc63f62f3b894c9c6f7788c8ecaadc9bd0e81ad91b2b356"
+        + "9ea12260e93924fdddd3972af5273198f5efda0746219475017557616170e";
+}
+
+fn _cavp_record1_key() -> string {
+    return "045cf02a00d205bdfee2016f7421807fc38ae69e6b7ccd064ee689fc1a94a9f7d2"
+        + "ec530ce3cc5c9d1af463f264d685afe2b4db4b5828d7e61b748930f3ce622a85";
+}
+
+fn _cavp_record1_sig() -> string {
+    return "3046022100dc23d130c6117fb5751201455e99f36f59aba1a6a21cf2d0e7481a"
+        + "97451d6693022100d6ce7708c18dbf35d4f8aa7240922dc6823f2e7058cbc1484"
+        + "fcad1599db5018c";
+}
+
+fn _cavp_record0_msg() -> string {
+    return "e4796db5f785f207aa30d311693b3702821dff1168fd2e04c0836825aefd850d9"
+        + "aa60326d88cde1a23c7745351392ca2288d632c264f197d05cd424a30336c19fd"
+        + "09bb229654f0222fcb881a4b35c290a093ac159ce13409111ff0358411133c24f"
+        + "5b8e2090d6db6558afc36f06ca1f6ef779785adba68db27a409859fc4c4a0";
+}
+
+fn _cavp_record0_key() -> string {
+    return "0487f8f2b218f49845f6f10eec3877136269f5c1a54736dbdf69f89940cad4155"
+        + "5e15f369036f49842fac7a86c8a2b0557609776814448b8f5e84aa9f4395205e9";
+}
+
+fn _cavp_record0_sig() -> string {
+    return "3046022100d19ff48b324915576416097d2544f7cbdf8768b1454ad20e0baac"
+        + "50e211f23b0022100a3e81e59311cdfff2d4784949f7a2cb50ba6c3a91fa5471"
+        + "0568e61aca3e847c6";
+}
+
+fn _cavp_record2_msg() -> string {
+    return "df04a346cf4d0e331a6db78cca2d456d31b0a000aa51441defdb97bbeb20b94d8"
+        + "d746429a393ba88840d661615e07def615a342abedfa4ce912e562af71495989"
+        + "6858af817317a840dcff85a057bb91a3c2bf90105500362754a6dd321cdd8612"
+        + "8cfc5f04667b57aa78c112411e42da304f1012d48cd6a7052d7de44ebcc01de";
+}
+
+fn _cavp_record2_key() -> string {
+    return "042ddfd145767883ffbb0ac003ab4a44346d08fa2570b3120dcce94562422244cb"
+        + "5f70c7d11ac2b7a435ccfbbae02c3df1ea6b532cc0e9db74f93fffca7c6f9a64";
+}
+
+fn _cavp_record2_sig() -> string {
+    return "30460221009913111cff6f20c5bf453a99cd2c2019a4e749a49724a08774d14"
+        + "e4c113edda80221009467cd4cd21ecb56b0cab0a9a453b43386845459127a952"
+        + "421f5c6382866c5cc";
+}
+
+test "ecdsa p256: NIST CAVP SigVer record 3 (Result = P) verifies" {
+    assert ecdsa_p256_verify_sha256(_hexbytes(_cavp_record3_key()), _hexbytes(_cavp_record3_msg()), _hexbytes(_cavp_record3_sig()));
+}
+
+test "ecdsa p256: NIST CAVP SigVer record 7 (Result = F (1 - Message changed)) is rejected" {
+    assert ! ecdsa_p256_verify_sha256(_hexbytes(_cavp_record7_key()), _hexbytes(_cavp_record7_msg()), _hexbytes(_cavp_record7_sig()));
+}
+
+test "ecdsa p256: NIST CAVP SigVer record 1 (Result = F (2 - R changed)) is rejected" {
+    assert ! ecdsa_p256_verify_sha256(_hexbytes(_cavp_record1_key()), _hexbytes(_cavp_record1_msg()), _hexbytes(_cavp_record1_sig()));
+}
+
+test "ecdsa p256: NIST CAVP SigVer record 0 (Result = F (3 - S changed)) is rejected" {
+    assert ! ecdsa_p256_verify_sha256(_hexbytes(_cavp_record0_key()), _hexbytes(_cavp_record0_msg()), _hexbytes(_cavp_record0_sig()));
+}
+
+test "ecdsa p256: NIST CAVP SigVer record 2 (Result = F (4 - Q changed)) is rejected" {
+    assert ! ecdsa_p256_verify_sha256(_hexbytes(_cavp_record2_key()), _hexbytes(_cavp_record2_msg()), _hexbytes(_cavp_record2_sig()));
+}
+
+// ── Field and scalar arithmetic unit vectors (design note §9 requires
+// unit-testing both contexts against independently generated multiply/inverse
+// values before relying on point tests). All values are canonical 32-byte
+// big-endian hex. Also reused below by the Montgomery-context guards, since
+// it is an arbitrary 32-byte value with no special relationship to either
+// modulus.
+fn _field_a() -> string {
+    return "2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a";
+}
+
+fn _mont_one() -> string {
+    return "0000000000000000000000000000000000000000000000000000000000000001";
+}
+
+// ── Montgomery-context guards (design note §9's primary risk: the field and
+// scalar engines share `_mont_mul` but NOT their modulus/n0_prime/R^2
+// constants). ──
+test "ecdsa p256: the field and scalar n0_prime constants match independent derivation" {
+    assert _mont_n0_prime(_p256_p_mod()[0]) == _p256_p_n0_prime();
+    assert _mont_n0_prime(_p256_n_mod()[0]) == _p256_n_n0_prime();
+}
+
+test "ecdsa p256: the field Montgomery round trip is the identity" {
+    let a_bytes: int[] = _hexbytes(_field_a());
+    let a_val: P256Value = _p256_from_be(a_bytes, _p256_p_ctx());
+    assert a_val.ok;
+    assert _bytes_eq(_p256_to_be(a_val.value, _p256_p_ctx()), a_bytes);
+
+    let one_bytes: int[] = _hexbytes(_mont_one());
+    let one_val: P256Value = _p256_from_be(one_bytes, _p256_p_ctx());
+    assert one_val.ok;
+    assert _bytes_eq(_p256_to_be(one_val.value, _p256_p_ctx()), one_bytes);
+}
+
+test "ecdsa p256: reduction mod n round-trips a value already below n" {
+    let a_bytes: int[] = _hexbytes(_field_a());
+    assert _bytes_eq(_p256_n_to_be(_p256_n_reduce_256(a_bytes)), a_bytes);
+}
+
+fn _field_b() -> string {
+    return "e6d5c4baa29180eae2d3c4b5a69788796a5b4c362e1f00918273645546372820";
+}
+
+fn _field_a_plus_b() -> string {
+    return "1212121a1202027c86888a8c8e8f9193959799939d8f822426282a2c2e2f313b";
+}
+
+fn _field_a_minus_b() -> string {
+    return "446688a2ccdf00a8c0e10121416080a0c0e101294151810121416181a1c0e0f9";
+}
+
+fn _field_b_minus_a() -> string {
+    return "bb99775c3320ff583f1efedebe9f7f5f3f1efed7beae7efedebe9e7e5e3f1f06";
+}
+
+fn _field_a_times_b() -> string {
+    return "dc04fb1217f6a23c62433083deaaa416eb92b767c4e531465579ab971ca5cf90";
+}
+
+fn _field_a_squared() -> string {
+    return "3e8ce6088a180709c5679bc5466309b198cbba19dd8a409d348b359a50f8df09";
+}
+
+fn _field_a_inv() -> string {
+    return "bb7c6756b74156bfeae0d9865ce0e141ba7e35f377b8cf69830b23d4d6e70407";
+}
+
+fn _scalar_b() -> string {
+    // The same source integer as `_field_a()`, reduced mod n rather than mod
+    // p — n and p are different moduli, so this is a distinct value from
+    // `_field_b()`.
+    return "e6d5c4baa29180eae2d3c4b5a697887b400a717d9c79aaeed85ed9005f8122e2";
+}
+
+fn _scalar_a_times_b() -> string {
+    return "0b52fe5ee7fbe85c6f7702ac36264ca1c347ba748df4949c155f1db4aa037787";
+}
+
+fn _scalar_a_squared() -> string {
+    return "c9cf4527d0569de597ed189e7abed54d38ced435d36ec31ec326e6e8042c8e96";
+}
+
+fn _scalar_a_inv() -> string {
+    return "bd869118fca9cd5c465abc91578640a7a4aa4714e078e8ae8278ebe9bc508713";
+}
+
+test "p256 field: modular add, sub, mul, square, and inverse match independent vectors" {
+    let ctx = _p256_p_ctx();
+    let a: P256Value = _p256_from_be(_hexbytes(_field_a()), ctx);
+    let b: P256Value = _p256_from_be(_hexbytes(_field_b()), ctx);
+    assert a.ok;
+    assert b.ok;
+
+    assert _bytes_eq(_p256_to_be(_p256_mod_add(a.value, b.value, ctx), ctx), _hexbytes(_field_a_plus_b()));
+    assert _bytes_eq(_p256_to_be(_p256_mod_sub(a.value, b.value, ctx), ctx), _hexbytes(_field_a_minus_b()));
+    // `b - a` exercises the borrow path where the modulus must be added first.
+    assert _bytes_eq(_p256_to_be(_p256_mod_sub(b.value, a.value, ctx), ctx), _hexbytes(_field_b_minus_a()));
+    assert _bytes_eq(_p256_to_be(_p256_mod_mul(a.value, b.value, ctx), ctx), _hexbytes(_field_a_times_b()));
+    assert _bytes_eq(_p256_to_be(_p256_mod_sqr(a.value, ctx), ctx), _hexbytes(_field_a_squared()));
+
+    let a_inv: int[] = _p256_p_inv(a.value, ctx);
+    assert _bytes_eq(_p256_to_be(a_inv, ctx), _hexbytes(_field_a_inv()));
+    assert _bytes_eq(_p256_to_be(_p256_mod_mul(a.value, a_inv, ctx), ctx), _hexbytes(_mont_one()));
+}
+
+test "p256 scalar: modular multiply and inverse match independent vectors" {
+    let ctx = _p256_n_ctx();
+    let a: int[] = _p256_n_reduce_256(_hexbytes(_field_a()));
+    let b: int[] = _p256_n_reduce_256(_hexbytes(_scalar_b()));
+
+    assert _bytes_eq(_p256_n_to_be(_p256_n_mul(a, b, ctx)), _hexbytes(_scalar_a_times_b()));
+    assert _bytes_eq(_p256_n_to_be(_p256_n_mul(a, a, ctx)), _hexbytes(_scalar_a_squared()));
+
+    let a_inv: int[] = _p256_n_inv(a, ctx);
+    assert _bytes_eq(_p256_n_to_be(a_inv), _hexbytes(_scalar_a_inv()));
+    assert _bytes_eq(_p256_n_to_be(_p256_n_mul(a, a_inv, ctx)), _hexbytes(_mont_one()));
+}
+
+// ── Reduction mod n (design note §5: "for a SHA-256 digest or a canonical
+// field x-coordinate, use `_n_reduce_256`... without a scalar range check").
+// `_p256_n_reduce_256` reduces rather than rejects an input >= n because FIPS
+// 186-4 reduces the digest, and design note §7.1 step 6 requires the same
+// tolerance for the recovered x-coordinate; rejecting either would fail valid
+// signatures. ──
+fn _reduce_2_256_minus_1() -> string {
+    return "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
+}
+
+fn _reduce_expected() -> string {
+    return "00000000ffffffff00000000000000004319055258e8617b0c46353d039cdaae";
+}
+
+fn _n_minus_1() -> string {
+    return "ffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632550";
+}
+
+fn _n_exact() -> string {
+    return "ffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551";
+}
+
+fn _all_zero_32() -> string {
+    return "0000000000000000000000000000000000000000000000000000000000000000";
+}
+
+test "p256 scalar: reduction mod n matches FIPS 186-4 digest-reduction tolerance" {
+    assert _bytes_eq(_p256_n_to_be(_p256_n_reduce_256(_hexbytes(_reduce_2_256_minus_1()))), _hexbytes(_reduce_expected()));
+    // n - 1 is already canonical, so reduction is the identity.
+    assert _bytes_eq(_p256_n_to_be(_p256_n_reduce_256(_hexbytes(_n_minus_1()))), _hexbytes(_n_minus_1()));
+    // n itself reduces to zero.
+    assert _bytes_eq(_p256_n_to_be(_p256_n_reduce_256(_hexbytes(_n_exact()))), _hexbytes(_all_zero_32()));
+}
+
+test "p256 scalar: range-checked scalar parsing enforces 1 <= value < n" {
+    assert ! _p256_n_from_be_checked(_hexbytes(_all_zero_32())).ok;
+    assert ! _p256_n_from_be_checked(_hexbytes(_n_exact())).ok;
+    assert _p256_n_from_be_checked(_hexbytes(_n_minus_1())).ok;
+    assert _p256_n_from_be_checked([1]).ok;
+}
+
+// ── Cost guard ──
+fn _is_ok(result: Result<int, string>) -> bool {
+    match result {
+        Result.Ok { value } => { return true; },
+        Result.Err { error } => { return false; }
+    }
+}
+
+fn _ok_value(result: Result<int, string>) -> int {
+    match result {
+        Result.Ok { value } => { return value; },
+        Result.Err { error } => { return 0; }
+    }
+}
+
+test "ecdsa p256: one verification stays inside the hang-guard budget" ![clock] {
+    // Measured on the -O0 test binary when this landed: one full
+    // `ecdsa_p256_verify_sha256` call is ~65 ms, and this file's wall time is
+    // dominated by compiling its vector constants, not by arithmetic. The
+    // 2000 ms ceiling is therefore a hang guard — it catches a
+    // non-terminating ladder or a runaway carry loop — and it deliberately
+    // does NOT claim to catch a constant-factor regression; guarding the
+    // constant factor is a benchmark's job (SFEP-0006).
+    //
+    // `unix_millis` is wall-clock, not monotonic, so an NTP step during the
+    // measured window can make the delta meaningless in either direction.
+    // That is acceptable here: a spurious *small* delta only fails to catch a
+    // hang, and a spurious large one is bounded by the same 2-second ceiling
+    // that a real hang would blow past.
+    let started: Result<int, string> = unix_millis();
+    assert _is_ok(started);
+
+    assert ecdsa_p256_verify_sha256(_hexbytes(_pk_uncompressed()), string_to_bytes("sample"), _hexbytes(_sig_sample()));
+
+    let finished: Result<int, string> = unix_millis();
+    assert _is_ok(finished);
+
+    let elapsed_ms: int = _ok_value(finished) - _ok_value(started);
+    assert elapsed_ms < 2000;
+}

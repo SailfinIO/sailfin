@@ -377,8 +377,8 @@ are private unless a downstream parser needs the public-key decoder.
 | `_p256_point_decode` | SEC1 compressed/uncompressed point; range and on-curve checks |
 | `_p256_point_add` / `_p256_point_double` | Jacobian formulas, including infinity and exceptional public cases |
 | `_p256_joint_mul` | public Shamir/Straus calculation `u1*G + u2*Q` |
-| `_n_from_be_checked` / `_n_to_be` | checked signature-scalar encoding into Montgomery form / canonical encoding out; require `1 <= value < n` |
-| `_n_reduce_256` | any 256-bit digest/coordinate to a Montgomery-domain residue in `[0,n)` with at most one subtraction before conversion |
+| `_n_from_be_checked` / `_n_to_be` | checked signature-scalar encoding into canonical limbs / canonical encoding out; require `1 <= value < n` (Montgomery conversion happens internally, at the point of use, inside the scalar helpers that need it) |
+| `_n_reduce_256` | any 256-bit digest/coordinate to a canonical residue in `[0,n)` with at most one subtraction (Montgomery conversion happens internally, at the point of use, inside the scalar helpers that need it — `r` is also needed canonically for step 6's comparison) |
 | `_n_mont_mul` / `_n_mul` / `_n_inv` | fixed 10x26 scalar arithmetic modulo `n` |
 
 `capsules/sfn/crypto/src/ecdsa.sfn` owns DER parsing integration and exports a

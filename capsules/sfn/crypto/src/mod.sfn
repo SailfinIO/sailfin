@@ -81,6 +81,17 @@ export {
     rsa_pss_verify_sha384
 } from "./rsa";
 
+// ECDSA over NIST P-256 with SHA-256 (FIPS 186-4), verification only. The
+// digest entry point is the one an X.509 chain verifier wants, since it hashes
+// the tbsCertificate itself; the message entry point is the `ecdsa-with-SHA256`
+// profile.
+//
+// The P-256 field, scalar, and point layer stays capsule-internal in
+// src/p256.sfn, for the same reason the bignum layer does: it is arithmetic
+// this capsule's verifiers share, not a surface to build on. Signing is absent
+// by design — see the src/ecdsa.sfn header.
+export { ecdsa_p256_verify_digest, ecdsa_p256_verify_sha256 } from "./ecdsa";
+
 // Minimal DER/ASN.1 reader — definite-length TLV walk over the subset X.509
 // needs, with explicit nesting-depth and total-length guards against
 // adversarial input (SFN-504; guard precedent SFN-156).
