@@ -70,6 +70,28 @@ fn w_bare_struct_return() -> P {
     return p;
 }
 
+enum Wrapped<T> {
+    Some { item: T },
+    None { }
+}
+
+struct Outer {
+    inner: P;
+}
+
+// `Result` carries its own boxed-generic recovery in the match lowering, so a
+// user-declared generic enum is what proves the general path.
+fn w_user_generic() -> Wrapped<P> {
+    let p: P = make_p();
+    return Wrapped.Some { item: p };
+}
+
+// A field read is the other producer of a value-form struct operand.
+fn w_member_access() -> Result<P, string> {
+    let o: Outer = Outer { inner: make_p() };
+    return Result.Ok { value: o.inner };
+}
+
 fn assert_payload(r: Result<P, string>) {
     match r {
         Result.Ok { value } => {
@@ -106,4 +128,29 @@ test "enum payload: bare struct return is unaffected" {
     assert expect_eq_int(p.depth, 3).ok;
     assert expect_eq_bool(p.ok, true).ok;
     assert expect_eq_int(p.error.length, 0).ok;
+}
+
+test "enum payload: user-declared generic enum boxes a struct local" {
+    match w_user_generic() {
+        Wrapped.Some { item } => {
+            assert expect_eq_int(item.depth, 3).ok;
+            assert expect_eq_bool(item.ok, true).ok;
+            assert expect_eq_int(item.error.length, 0).ok;
+        },
+        Wrapped.None { } => { assert expect_eq_bool(true, false).ok; }
+    }
+}
+
+test "enum payload: struct field read as payload round-trips" {
+    assert_payload(w_member_access());
+}
+
+test "enum payload: payload is a copy, not an alias of the local" {
+    let mut p: P = make_p();
+    let r = Result.Ok { value: p };
+    // The payload is heap-boxed at construction, so later writes to the local
+    // must not be visible through it.
+    p.depth = 99;
+    assert_payload(r);
+    assert expect_eq_int(p.depth, 99).ok;
 }
