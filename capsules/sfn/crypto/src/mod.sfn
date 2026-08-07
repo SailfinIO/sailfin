@@ -63,13 +63,23 @@ export { chacha20_block, chacha20_xor } from "./chacha20";
 // note, docs/proposals/design-notes/sfn-335-x25519-limb-strategy.md).
 export { x25519, x25519_base, x25519_is_zero } from "./x25519";
 
-// RSASSA-PKCS1-v1_5 signature verification (RFC 8017 §8.2.2) — the mode X.509
-// certificate signatures use, over the 26-bit Montgomery bignum core in
+// RSA signature verification over the 26-bit Montgomery bignum core in
 // src/bignum.sfn (SFEP-0048 Phase C as amended, and the limb selection in
-// docs/proposals/design-notes/sfn-653-p256-rsa-bigint-strategy.md). The bignum
-// layer stays capsule-internal: SFN-658's PSS mode imports it directly rather
-// than through this surface.
-export { rsa_pkcs1_v1_5_verify_sha256, rsa_pkcs1_v1_5_verify_sha384 } from "./rsa";
+// docs/proposals/design-notes/sfn-653-p256-rsa-bigint-strategy.md), in both
+// modes the trust path needs: RSASSA-PKCS1-v1_5 (RFC 8017 §8.2.2) for X.509
+// certificate signatures, and RSASSA-PSS (RFC 8017 §8.1.2) for TLS 1.3
+// CertificateVerify, which RFC 8446 §4.2.3 forbids the v1.5 schemes in. The PSS
+// entry points fix the salt length at the digest length, the only length the
+// TLS 1.3 `rsa_pss_rsae_*` / `rsa_pss_pss_*` schemes permit.
+//
+// The bignum layer stays capsule-internal; both modes share `_rsa_public_op`
+// inside src/rsa.sfn rather than reaching through this surface.
+export {
+    rsa_pkcs1_v1_5_verify_sha256,
+    rsa_pkcs1_v1_5_verify_sha384,
+    rsa_pss_verify_sha256,
+    rsa_pss_verify_sha384
+} from "./rsa";
 
 // Minimal DER/ASN.1 reader — definite-length TLV walk over the subset X.509
 // needs, with explicit nesting-depth and total-length guards against

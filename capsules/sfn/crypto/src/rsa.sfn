@@ -1,19 +1,29 @@
 // capsules/sfn/crypto/src/rsa.sfn
 //
-// RSASSA-PKCS1-v1_5 signature verification (RFC 8017 §8.2.2) over the 26-bit
-// Montgomery bignum core in src/bignum.sfn. This is the mode X.509 uses for
-// certificate signatures, and it is what makes a native chain check work
-// against the RSA-rooted majority of the public web rather than only against
-// known Ed25519 peers (SFEP-0048 Phase C, design note §7.2).
+// RSA signature verification over the 26-bit Montgomery bignum core in
+// src/bignum.sfn, in the two modes the trust path actually needs:
+//
+//   - RSASSA-PKCS1-v1_5 (RFC 8017 §8.2.2) — what X.509 uses for certificate
+//     signatures, and what makes a native chain check work against the
+//     RSA-rooted majority of the public web rather than only against known
+//     Ed25519 peers (SFEP-0048 Phase C, design note §7.2).
+//   - RSASSA-PSS (RFC 8017 §8.1.2) — what TLS 1.3 CertificateVerify requires,
+//     because RFC 8446 §4.2.3 removes the v1.5 schemes from it. Neither mode
+//     substitutes for the other: v1.5 alone validates a chain against a server
+//     it then cannot handshake with (SFN-658).
+//
+// The two share `_rsa_public_op` and the bignum core; there is no second
+// modexp path.
 //
 // Verification only. There is no signing, key generation, decryption, or OAEP
 // here, and the bignum core this calls is not constant time — see its module
 // comment. Every input is public, so that is the correct trade; it also means
 // none of this may be reused for a private-key operation.
 //
-// The one subtlety worth reading before editing: the encoding check compares
-// the WHOLE reconstructed EM byte string against the whole recovered one. It
-// does not parse the recovered padding and it does not search it for a digest.
+// The one subtlety worth reading before editing the v1.5 path: its encoding
+// check compares the WHOLE reconstructed EM byte string against the whole
+// recovered one. It does not parse the recovered padding and it does not search
+// it for a digest.
 // A permissive parser here is the Bleichenbacher'06 signature forgery — with a
 // small public exponent, slack anywhere in the padding lets an attacker craft
 // a perfect cube (or e-th power) whose expansion merely *contains* a valid
@@ -215,20 +225,283 @@ fn rsa_pkcs1_v1_5_verify_sha384(n_bytes: int[], e: int, message: int[], sig: int
     return _rsa_pkcs1_v1_5_verify(n_bytes, e, sha384_bytes(message), _digestinfo_sha384(), sig);
 }
 
-// The underscored exports are capsule-internal: SFN-658's PSS mode reuses
+// ── RSASSA-PSS (RFC 8017 §8.1.2) ──
+//
+// The mode TLS 1.3 mandates for CertificateVerify. RFC 8446 §4.2.3 removes the
+// `rsa_pkcs1_*` schemes from CertificateVerify entirely, so an RSA-keyed server
+// is unreachable without this even when the certificate chain above it verifies
+// under the v1.5 path (SFN-658).
+//
+// The salt length is fixed at the digest length. That is not a simplification:
+// the `rsa_pss_rsae_*` and `rsa_pss_pss_*` schemes TLS 1.3 defines each bind the
+// salt length to the digest length of the same hash, so a variable-salt verifier
+// would accept encodings no conforming TLS peer may produce. Recovering the salt
+// length from the encoding instead — the RFC's optional `sLen = -2` mode — is a
+// strictly weaker check and is deliberately absent.
+//
+// PSS has no single reconstructed byte string to compare against, so the v1.5
+// module comment's "build the expected string, never inspect the recovered one"
+// rule cannot apply here: mask removal necessarily walks the recovered DB. What
+// replaces it is that EVERY structural check below is mandatory and none may be
+// skipped on the grounds that a later one subsumes it. A verifier that drops the
+// trailer byte, the leftmost-bit, the PS-is-zero, or the 0x01 delimiter check
+// still accepts every genuine signature — it just also accepts forgeries, which
+// is why each one is pinned by its own regression test.
+fn _pss_sha256() -> int { return 0; }
+
+fn _pss_sha384() -> int { return 1; }
+
+fn _pss_hash(tag: int, message: int[]) -> int[] {
+    if tag == _pss_sha384() { return sha384_bytes(message); }
+    return sha256_bytes(message);
+}
+
+fn _pss_hash_len(tag: int) -> int {
+    if tag == _pss_sha384() { return 48; }
+    return 32;
+}
+
+// MGF1 (RFC 8017 §B.2.1): the counter-mode expansion of `seed` to `mask_len`
+// octets. `counter` is appended as a 4-octet big-endian I2OSP string.
+//
+// The loop is bounded by construction rather than by a guard counter: each pass
+// appends a full digest, so `out.length` strictly increases by at least 32 and
+// the `mask_len` test is reached in at most `mask_len / 32 + 1` passes.
+// `mask_len` itself is bounded by the modulus length, which `mont_ctx_from_be`
+// has already accepted.
+fn _mgf1(seed: int[], mask_len: int, tag: int) -> int[] {
+    let mut out: int[] = [];
+    if mask_len <= 0 { return out; }
+
+    let mut counter: int = 0;
+    loop {
+        if out.length >= mask_len { break; }
+
+        let mut block: int[] = [];
+        let mut s: int = 0;
+        loop {
+            if s >= seed.length { break; }
+            block.push(seed[s] & 255);
+            s += 1;
+        }
+        block.push((counter >> 24) & 255);
+        block.push((counter >> 16) & 255);
+        block.push((counter >> 8) & 255);
+        block.push(counter & 255);
+
+        let t: int[] = _pss_hash(tag, block);
+        let mut j: int = 0;
+        loop {
+            if j >= t.length { break; }
+            if out.length >= mask_len { break; }
+            out.push(t[j] & 255);
+            j += 1;
+        }
+        counter += 1;
+    }
+    return out;
+}
+
+// EMSA-PSS-VERIFY (RFC 8017 §9.1.2) with the salt length fixed to the digest
+// length. `em_bits` is `modBits - 1`, so `em` may be one octet shorter than the
+// modulus; the caller has already stripped and checked that octet.
+//
+// This is the decision function, split out from the exponentiation for the same
+// reason `_rsa_pkcs1_v1_5_verify_em` is: the structural regression tests drive it
+// directly and so pin each check without paying a 2048-bit modexp per case.
+fn _emsa_pss_verify(m_hash: int[], em: int[], em_bits: int, tag: int) -> bool {
+    let h_len: int = _pss_hash_len(tag);
+    let s_len: int = h_len;
+    let em_len: int = em.length;
+
+    if m_hash.length != h_len { return false; }
+
+    // Step 3: the encoding cannot hold PS-free DB, H, and the trailer.
+    if em_len < h_len + s_len + 2 { return false; }
+
+    // Step 4: the 0xbc trailer octet.
+    if (em[em_len - 1] & 255) != 188 { return false; }
+
+    // Steps 5-6: maskedDB is the leading `db_len` octets, H the `h_len` after it.
+    let db_len: int = em_len - h_len - 1;
+    let unused_bits: int = 8 * em_len - em_bits;
+    if unused_bits < 0 { return false; }
+    if unused_bits > 7 { return false; }
+    let low_mask: int = 255 >> unused_bits;
+    let high_mask: int = (255 << (8 - unused_bits)) & 255;
+
+    // Step 6: the leftmost `unused_bits` of maskedDB must already be zero. This
+    // runs BEFORE unmasking, on the encoding as received. Checking only the
+    // post-unmask copy (step 9) would let a signature whose integer value is at
+    // or above 2^em_bits verify, since step 9 clears those bits unconditionally.
+    if ((em[0] & 255) & high_mask) != 0 { return false; }
+
+    let mut h: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= h_len { break; }
+        h.push(em[db_len + i] & 255);
+        i += 1;
+    }
+
+    // Steps 7-8: DB = maskedDB XOR MGF1(H, db_len).
+    let db_mask: int[] = _mgf1(h, db_len, tag);
+    if db_mask.length != db_len { return false; }
+
+    let mut db: int[] = [];
+    let mut j: int = 0;
+    loop {
+        if j >= db_len { break; }
+        db.push(((em[j] & 255) ^ (db_mask[j] & 255)) & 255);
+        j += 1;
+    }
+
+    // Step 9: clear the leftmost `unused_bits` of DB, which MGF1 masked but the
+    // encoder never set.
+    if db_len <= 0 { return false; }
+    db[0] = db[0] & low_mask;
+
+    // Step 10: DB is PS || 0x01 || salt, with PS all zero. Both halves are
+    // mandatory — a verifier that checks the delimiter but not PS accepts a
+    // forged DB that carries payload in the padding.
+    let ps_len: int = db_len - s_len - 1;
+    if ps_len < 0 { return false; }
+    let mut p: int = 0;
+    loop {
+        if p >= ps_len { break; }
+        if (db[p] & 255) != 0 { return false; }
+        p += 1;
+    }
+    if (db[ps_len] & 255) != 1 { return false; }
+
+    // Step 11: the recovered salt.
+    let mut salt: int[] = [];
+    let mut q: int = ps_len + 1;
+    loop {
+        if q >= db_len { break; }
+        salt.push(db[q] & 255);
+        q += 1;
+    }
+
+    // Steps 12-14: M' = (0x00 * 8) || mHash || salt, and H' must equal H.
+    let mut m_prime: int[] = [];
+    let mut z: int = 0;
+    loop {
+        if z >= 8 { break; }
+        m_prime.push(0);
+        z += 1;
+    }
+    let mut a: int = 0;
+    loop {
+        if a >= m_hash.length { break; }
+        m_prime.push(m_hash[a] & 255);
+        a += 1;
+    }
+    let mut b: int = 0;
+    loop {
+        if b >= salt.length { break; }
+        m_prime.push(salt[b] & 255);
+        b += 1;
+    }
+
+    return _rsa_bytes_eq(h, _pss_hash(tag, m_prime));
+}
+
+// The bit length of a big-endian octet string, zero for an empty or all-zero
+// input.
+//
+// It strips leading zero octets itself rather than requiring a stripped
+// argument. That is one redundant pass at the single call site below, which
+// already strips, and it is worth paying: emLen is derived from this result, so
+// a caller that forgot to strip would not get a wrong-by-a-little answer — it
+// would get one inflated by 8 per padding octet and silently align the whole
+// encoding wrong.
+fn _rsa_modulus_bits(modulus: int[]) -> int {
+    let stripped: int[] = _rsa_strip_leading_zeros(modulus);
+    if stripped.length == 0 { return 0; }
+    let mut bits: int = 0;
+    let mut top: int = stripped[0] & 255;
+    loop {
+        if top == 0 { break; }
+        bits += 1;
+        top = top >> 1;
+    }
+    return (stripped.length - 1) * 8 + bits;
+}
+
+// RSASSA-PSS-VERIFY (RFC 8017 §8.1.2). `m_hash` is the already-computed digest
+// of the signed message under the same hash `tag` names.
+fn _rsa_pss_verify(n_bytes: int[], e: int, m_hash: int[], sig: int[], tag: int) -> bool {
+    let modulus: int[] = _rsa_strip_leading_zeros(n_bytes);
+    let mod_bits: int = _rsa_modulus_bits(modulus);
+    if mod_bits < 2 { return false; }
+
+    let recovered: RsaBytesResult = _rsa_public_op(n_bytes, e, sig);
+    if !recovered.ok { return false; }
+
+    // emLen = ceil(emBits / 8) with emBits = modBits - 1, so a modulus whose bit
+    // length is one more than a multiple of 8 yields an EM one octet shorter than
+    // the k-octet RSAVP1 output. Those leading octets must be zero: a non-zero one
+    // means the recovered integer is at or above 2^emBits, which no valid encoding
+    // reaches.
+    let em_bits: int = mod_bits - 1;
+    let em_len: int = (em_bits + 7) / 8;
+    let k: int = recovered.value.length;
+    if em_len > k { return false; }
+
+    let pad: int = k - em_len;
+    let mut i: int = 0;
+    loop {
+        if i >= pad { break; }
+        if (recovered.value[i] & 255) != 0 { return false; }
+        i += 1;
+    }
+
+    let mut em: int[] = [];
+    let mut j: int = pad;
+    loop {
+        if j >= k { break; }
+        em.push(recovered.value[j] & 255);
+        j += 1;
+    }
+
+    return _emsa_pss_verify(m_hash, em, em_bits, tag);
+}
+
+// RFC 8017 §8.1.2 with SHA-256 and a 32-octet salt — TLS 1.3
+// `rsa_pss_rsae_sha256` / `rsa_pss_pss_sha256`. Argument shape matches
+// `rsa_pkcs1_v1_5_verify_sha256`.
+fn rsa_pss_verify_sha256(n_bytes: int[], e: int, message: int[], sig: int[]) -> bool {
+    return _rsa_pss_verify(n_bytes, e, sha256_bytes(message), sig, _pss_sha256());
+}
+
+// RFC 8017 §8.1.2 with SHA-384 and a 48-octet salt — TLS 1.3
+// `rsa_pss_rsae_sha384` / `rsa_pss_pss_sha384`.
+fn rsa_pss_verify_sha384(n_bytes: int[], e: int, message: int[], sig: int[]) -> bool {
+    return _rsa_pss_verify(n_bytes, e, sha384_bytes(message), sig, _pss_sha384());
+}
+
+// The underscored exports are capsule-internal: the PSS mode reuses
 // `_rsa_public_op` rather than forking a second bignum path, and the negative
-// encoding tests drive `_emsa_pkcs1_v1_5` directly so they do not each repeat a
-// 2048-bit exponentiation (design note §6.3). `src/mod.sfn` re-exports only the
-// two public verify functions.
+// encoding tests drive `_emsa_pkcs1_v1_5` and `_emsa_pss_verify` directly so they
+// do not each repeat a 2048-bit exponentiation (design note §6.3). `src/mod.sfn`
+// re-exports only the four public verify functions.
 export {
     RsaBytesResult,
     _digestinfo_sha256,
     _digestinfo_sha384,
     _emsa_pkcs1_v1_5,
+    _emsa_pss_verify,
+    _mgf1,
+    _pss_sha256,
+    _pss_sha384,
     _rsa_bytes_eq,
+    _rsa_modulus_bits,
     _rsa_pkcs1_v1_5_verify_em,
     _rsa_public_op,
     _rsa_strip_leading_zeros,
     rsa_pkcs1_v1_5_verify_sha256,
-    rsa_pkcs1_v1_5_verify_sha384
+    rsa_pkcs1_v1_5_verify_sha384,
+    rsa_pss_verify_sha256,
+    rsa_pss_verify_sha384
 };
