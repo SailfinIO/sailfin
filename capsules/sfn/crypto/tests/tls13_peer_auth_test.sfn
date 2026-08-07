@@ -10,10 +10,13 @@
 // never exercises the ECDSA or Ed25519 branches, the algorithm/key-type
 // mismatch rejections, or the chain-trust step at all.
 //
-// The ECDSA and Ed25519 fixtures below (certificates and their
-// CertificateVerify signatures) were generated with OpenSSL and cross-checked
-// independently before being embedded; the RSA-PSS success path is already
-// covered end-to-end by the RFC 8448 vector, so it is not duplicated here.
+// The fixtures below (certificates and their CertificateVerify signatures)
+// were generated with OpenSSL and cross-checked independently before being
+// embedded. rsa_pss_rsae_sha256 is not duplicated here — the RFC 8448 vector
+// in `tls13_handshake_test.sfn` covers it end-to-end against a real server's
+// signature, which is stronger than a locally-minted one.
+import { contains } from "sfn/strings";
+
 import {
     ClientHandshake,
     hs_client_recv_certificate_verify,
@@ -25,7 +28,8 @@ import {
     encode_certificate_verify,
     tls_sigalg_ecdsa_secp256r1_sha256,
     tls_sigalg_ed25519,
-    tls_sigalg_rsa_pss_rsae_sha256
+    tls_sigalg_rsa_pss_rsae_sha256,
+    tls_sigalg_rsa_pss_rsae_sha384
 } from "../src/tls13_handshake_codec";
 import { X509Certificate, x509_parse } from "../src/x509";
 import {
@@ -107,30 +111,48 @@ fn fx_ed_signature() -> string {
     return "52a4973548a23dad5176ae41f71930e8a77bcbfca6484fff2ec7cd08e466946fc93e87196b1cc50bf74d20255a283e5f31e6da3805002e1c91f3cdf4ee14310a";
 }
 
+// RSA-2048 leaf (CN=localhost). The RFC 8448 trace covers rsa_pss_rsae_sha256
+// end-to-end, but nothing there reaches the SHA-384 branch — and that branch
+// is where the "the scheme's hash covers the signed content, never the
+// transcript" distinction could regress unnoticed, since the transcript stays
+// SHA-256 either way.
+fn fx_rsa_verify_leaf() -> string {
+    return "3082032130820209a00302010202142660a23114de5c4839699f35562c2a64383db9b1300d06092a864886f70d01010b050030143112301006035504030c096c6f63616c686f73743020170d3236303830373232313330335a180f32313236303731343232313330335a30143112301006035504030c096c6f63616c686f737430820122300d06092a864886f70d01010105000382010f003082010a0282010100b3728d092a0bdf05b4ed63bb1b12f14bd83d3b715aad7fb8f4fa3757800d08e0ef6ac0fd6562805753b8fccb484453e6ba4d83fc7b516352d2526e878f616cd32ce37498cd60a0f728d991673c42ab8cbc83458a25578a549cb172106535a2171eece352982135b92649da58b93a45c1ca7fc49f20ffca712fe9a4dc6a44c280b354fdf03a6ff267682a8c30dc03a289a26eacdaedbde3dbd279a8691860bff8cd54f636b715d8e91cb52d0210acdaa012ab0b01c9a4feaf6647c37e079fd25eed9faddc63bd4e0b01a1759dd4d21925c13af7c5c146007ed3b87b045d9dc5beb90a206f3ad81fee4af2d7e354d66c39d2a279bbb9cb9b75035d652a056bb0050203010001a3693067301d0603551d0e04160414010c8b22361b135bf970394bfd3907a2f3c2b47e301f0603551d23041830168014010c8b22361b135bf970394bfd3907a2f3c2b47e300f0603551d130101ff040530030101ff30140603551d11040d300b82096c6f63616c686f7374300d06092a864886f70d01010b05000382010100648d00d18c51eb0ba2d470cd8b3cfc9b5c3523de0e39dac70d2d62a142a26e6d2f68c144bc87e843ef37db1df2061b90321e7054f625093f0a5a3edbb1deecee9d7ea06209ee79d4894e8882eef2cd530507cb7677782629fa70f9f09cd9a5e62fa0e6002e01f05a8724dc53334d00c136eff7e2f061163f1e8058ed903eb8d6c105ea6202e703400dc8f70c4185ea959a411c895be35b88073eb740de4c849f2aea5439764a3ccf5cc6e7e6e297eef27a2b0298a95ac47d108dfd0f60523ef5ec725bd310ab0d0e9d63383236f8db31351a117966a593fe4d582d77a2317cd2e0462ee3ed945af4300d6ed4790211c375091b37ae1905542635d344bab54a27";
+}
+
+// rsa_pss_rsae_sha384 signature over `fx_transcript()`'s CertificateVerify
+// content, salt length 48 per RFC 8446 §4.2.3.
+fn fx_rsa_sha384_signature() -> string {
+    return "6a445fc665adbb897e75e8a1d7993a0551b2632bf83e316fef5ce21e696b140e776015eb484d5268ee7b5ef788bf9c86a240be02b4c90af7570d41a6a3a010fcb9ffbc4ebb8f9176986e7211f10f0918c1ba17ab0b004d382bffe187dddec23c2147cc988d6d329150c5f12a20bd11693ecf05a425f3f168385d29d28859e7e792945f474a3c736a5c3713824dec3710b4f485a9ff44f8e3790373d84ce7c2bfa8a37b4fe698a33b1254baf4444b7ef0434fd08dca815c42516f5a0959c5606f2947b3238ce6dd91a794aaacea26f17dfe6775b479c5952175f499835e5082a2c6cac624b6db4ae94b75d459723e8e6ba41832e30a0bfbc6e68c70ce60b97d0d";
+}
+
 // A `ClientHandshake` at WAIT_CERTIFICATE_VERIFY, holding `leaf_hex` as both
 // the leaf and the (single-entry) chain, ready for
 // `hs_client_recv_certificate_verify`. Every other field is empty/0 — the
 // dispatch under test reads only the transcript and the leaf certificate.
 fn _cv_handshake(leaf_hex: string) -> ClientHandshake {
     let leaf: int[] = hexb(leaf_hex);
-    let empty: int[] = [];
+    // Each array field gets its own `[]`. A single shared empty would make
+    // every one of them alias one array, so the first in-place append to any
+    // would corrupt the rest — the hazard `tls13_handshake.sfn` records on
+    // `hs_client_new`.
     return ClientHandshake {
         state: hs_state_wait_certificate_verify(),
         transcript: fx_transcript(),
-        client_private: empty,
-        client_public: empty,
-        offered_cipher_suites: empty,
-        sent_legacy_session_id: empty,
+        client_private: [],
+        client_public: [],
+        offered_cipher_suites: [],
+        sent_legacy_session_id: [],
         cipher_suite: 0,
         group: 0,
-        shared_secret: empty,
-        early_secret: empty,
-        handshake_secret: empty,
-        master_secret: empty,
-        client_handshake_traffic_secret: empty,
-        server_handshake_traffic_secret: empty,
-        client_application_traffic_secret: empty,
-        server_application_traffic_secret: empty,
+        shared_secret: [],
+        early_secret: [],
+        handshake_secret: [],
+        master_secret: [],
+        client_handshake_traffic_secret: [],
+        server_handshake_traffic_secret: [],
+        client_application_traffic_secret: [],
+        server_application_traffic_secret: [],
         server_leaf_certificate: leaf,
         server_certificate_chain: [leaf],
         server_certificate_verified: false
@@ -166,6 +188,32 @@ test "tls13_peer_auth: an ed25519 CertificateVerify verifies against the Ed25519
     }
 }
 
+test "tls13_peer_auth: an rsa_pss_rsae_sha384 CertificateVerify verifies against the RSA leaf" {
+    let hs: ClientHandshake = _cv_handshake(fx_rsa_verify_leaf());
+    let message: int[] = encode_certificate_verify(tls_sigalg_rsa_pss_rsae_sha384(), hexb(fx_rsa_sha384_signature()));
+    match hs_client_recv_certificate_verify(hs, message) {
+        Result.Ok { value } => {
+            assert value.server_certificate_verified;
+            assert value.state == hs_state_wait_finished();
+        },
+        Result.Err { error } => { assert error.length == 0; }
+    }
+}
+
+// The SHA-256 and SHA-384 RSA branches take the same key and differ only in
+// the content hash, so a signature made under one must not verify under the
+// other. This is what a copy-paste between the two branches would break.
+test "tls13_peer_auth: an rsa_pss_rsae_sha384 signature is refused under rsa_pss_rsae_sha256" {
+    let hs: ClientHandshake = _cv_handshake(fx_rsa_verify_leaf());
+    let message: int[] = encode_certificate_verify(tls_sigalg_rsa_pss_rsae_sha256(), hexb(fx_rsa_sha384_signature()));
+    match hs_client_recv_certificate_verify(hs, message) {
+        Result.Ok { value } => { assert false; },
+        Result.Err { error } => {
+            assert contains(error, "signature did not verify");
+        }
+    }
+}
+
 // ── CertificateVerify dispatch: algorithm/key-type disagreement ───
 test "tls13_peer_auth: rsa_pss_rsae_sha256 against an EC leaf is refused" {
     let hs: ClientHandshake = _cv_handshake(fx_ec_leaf());
@@ -175,7 +223,9 @@ test "tls13_peer_auth: rsa_pss_rsae_sha256 against an EC leaf is refused" {
     let message: int[] = encode_certificate_verify(tls_sigalg_rsa_pss_rsae_sha256(), hexb(fx_ec_signature()));
     match hs_client_recv_certificate_verify(hs, message) {
         Result.Ok { value } => { assert false; },
-        Result.Err { error } => { assert error.length > 0; }
+        Result.Err { error } => {
+            assert contains(error, "does not match the leaf key type");
+        }
     }
 }
 
@@ -184,7 +234,9 @@ test "tls13_peer_auth: ecdsa_secp256r1_sha256 against an Ed25519 leaf is refused
     let message: int[] = encode_certificate_verify(tls_sigalg_ecdsa_secp256r1_sha256(), hexb(fx_ed_signature()));
     match hs_client_recv_certificate_verify(hs, message) {
         Result.Ok { value } => { assert false; },
-        Result.Err { error } => { assert error.length > 0; }
+        Result.Err { error } => {
+            assert contains(error, "does not match the leaf key type");
+        }
     }
 }
 
@@ -196,7 +248,9 @@ test "tls13_peer_auth: a tampered ECDSA CertificateVerify signature is refused" 
     let message: int[] = encode_certificate_verify(tls_sigalg_ecdsa_secp256r1_sha256(), tampered);
     match hs_client_recv_certificate_verify(hs, message) {
         Result.Ok { value } => { assert false; },
-        Result.Err { error } => { assert error.length > 0; }
+        Result.Err { error } => {
+            assert contains(error, "signature did not verify");
+        }
     }
 }
 
@@ -243,24 +297,24 @@ fn _cert(hex: string) -> X509Certificate { return x509_parse(hexb(hex)); }
 fn _peer_handshake(verified: bool) -> ClientHandshake {
     let leaf: int[] = hexb(fx_ed_verify_leaf());
     let inter: int[] = hexb(fx_ed_inter());
-    let empty: int[] = [];
+    // Per-field `[]` for the same aliasing reason as `_cv_handshake`.
     return ClientHandshake {
         state: hs_state_wait_finished(),
-        transcript: empty,
-        client_private: empty,
-        client_public: empty,
-        offered_cipher_suites: empty,
-        sent_legacy_session_id: empty,
+        transcript: [],
+        client_private: [],
+        client_public: [],
+        offered_cipher_suites: [],
+        sent_legacy_session_id: [],
         cipher_suite: 0,
         group: 0,
-        shared_secret: empty,
-        early_secret: empty,
-        handshake_secret: empty,
-        master_secret: empty,
-        client_handshake_traffic_secret: empty,
-        server_handshake_traffic_secret: empty,
-        client_application_traffic_secret: empty,
-        server_application_traffic_secret: empty,
+        shared_secret: [],
+        early_secret: [],
+        handshake_secret: [],
+        master_secret: [],
+        client_handshake_traffic_secret: [],
+        server_handshake_traffic_secret: [],
+        client_application_traffic_secret: [],
+        server_application_traffic_secret: [],
         server_leaf_certificate: leaf,
         server_certificate_chain: [leaf, inter],
         server_certificate_verified: verified

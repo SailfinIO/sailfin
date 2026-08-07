@@ -960,11 +960,17 @@ fn hs_client_verify_peer(hs: ClientHandshake, hostname: string, anchors: X509Cer
     if !hs.server_certificate_verified {
         return _peer_auth_failure(x509_verify_err_bad_input(), "peer has not proved possession of the leaf key; run hs_client_recv_certificate_verify first");
     }
-    if hs.server_certificate_chain.length < 1 {
+    if hs.server_leaf_certificate.length < 1 {
         return _peer_auth_failure(x509_verify_err_bad_input(), "no certificate chain was received");
     }
 
-    let leaf: X509Certificate = x509_parse(hs.server_certificate_chain[0]);
+    // Deliberately the leaf `hs_client_recv_certificate_verify` proved
+    // possession against, not `server_certificate_chain[0]`. The two are the
+    // same bytes today because `parse_certificate` sets `leaf` from the first
+    // entry, but reading the field the possession check used makes "the
+    // certificate we trust is the one the peer proved it holds" structural
+    // rather than a coincidence of how the chain was assembled.
+    let leaf: X509Certificate = x509_parse(hs.server_leaf_certificate);
     if !leaf.ok {
         return _peer_auth_failure(x509_verify_err_bad_input(), "leaf certificate did not parse: "
             + leaf.error);

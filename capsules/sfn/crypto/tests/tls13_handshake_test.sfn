@@ -14,12 +14,13 @@
 //     schedule are bit-identical and the handshake is exercised faithfully;
 //     only the record layer's AEAD would differ, and that is not this
 //     module's concern.
-//   * Its CertificateVerify signs with rsa_pss_rsae_sha256 (0x0804).
-//     RFC 8446 §4.2.3 forbids PKCS#1v1.5 there, so every published TLS 1.3
-//     trace signs with RSA-PSS or ECDSA — neither of which the capsule can
-//     verify until SFN-653. The end-to-end test therefore drives
-//     CertificateVerify through the explicitly unverified path, and the
-//     signature-checking path is covered separately by its rejection cases.
+//   * Its CertificateVerify signs with rsa_pss_rsae_sha256 (0x0804), which
+//     RFC 8446 §4.2.3 requires over PKCS#1v1.5. That signature is verified
+//     here for real, against the 1024-bit RSA key in the leaf the trace
+//     itself carries — so this file is not only a key-schedule check but the
+//     capsule's evidence that it can authenticate a signature produced by a
+//     server it did not write. The other schemes, the algorithm/key-type
+//     rejections and the chain-trust step live in `tls13_peer_auth_test.sfn`.
 import {
     ClientHandshake,
     hs_client_finished_message,

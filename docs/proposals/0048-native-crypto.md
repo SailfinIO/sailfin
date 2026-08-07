@@ -232,12 +232,13 @@ limitation list: `docs/status.md`'s `sfn/crypto` row.
 **Phase C's completion does not advance Phase D.**
 `runtime/sfn/platform/tls.sfn` is untouched; `-lssl`/`-lcrypto` are still
 linked; §3.1's table entry for Phase C ("still linked") is unchanged, and
-SFN-341 remains the seal blocker. Neither TLS 1.3 handshake's
-CertificateVerify accepts ECDSA-P256 or RSA yet, and neither
-`tls13_handshake.sfn` nor `tls13_server_handshake.sfn` calls
-`x509_verify_chain` — the capability exists in the capsule but is not wired
-into either state machine. No OCSP/CRL/revocation, no name constraints
-beyond SAN matching, no client-cert/mTLS. Phase C is complete; Phase D
+SFN-341 remains the seal blocker. (Superseded in part by SFN-767: the client
+handshake's CertificateVerify now accepts ECDSA-P256 and RSA-PSS, and
+`hs_client_verify_peer` drives `x509_verify_chain` from client handshake
+state. `tls13_server_handshake.sfn` still does not call it — a server only
+verifies a chain for client certificates, which remain out of scope.) No
+OCSP/CRL/revocation, no name constraints beyond SAN matching, no
+client-cert/mTLS. Phase C is complete; Phase D
 (dropping `-lssl`/`-lcrypto` from the link line) has not begun.
 
 **Amendment (2026-08-07) — Phase D is five slices, not one step; §3.2's
@@ -269,11 +270,19 @@ it; the full routing, with citations, is
   SHA-256; the same idiom carries every byte of every TLS record. The record
   layer specifically must be re-expressed in the `*u8` idiom; everything else
   stays `int[]`.
-- **§6.3's RSA amendment is not yet realized in the handshake.** The verify
-  primitives landed (SFN-656/657/658) but `_encode_signature_algorithms_extension`
-  still offers only `ed25519` and CertificateVerify still dispatches only
-  Ed25519, so the native client cannot authenticate any real server. Tracked as
-  SFN-767.
+- **§6.3's RSA amendment is now realized in the handshake (SFN-767).** The
+  verify primitives (SFN-656/657/658) are wired in: `ClientHello` now offers
+  `ecdsa_secp256r1_sha256`, `rsa_pss_rsae_sha256`, `rsa_pss_rsae_sha384`, and
+  `ed25519` (previously `ed25519` only), and CertificateVerify dispatches on
+  the peer's chosen scheme against the key type in the leaf certificate the
+  peer actually presented. The full DER chain is now retained on handshake
+  state (`ClientHandshake.server_certificate_chain`), reachable via
+  `hs_client_verify_peer(hs, hostname, anchors, now_ms)`, which composes
+  `x509_parse` → `x509_verify_chain` → `x509_hostname_matches` and refuses to
+  run unless `server_certificate_verified` is already true. This makes peer
+  authentication possible for the first time; it does not by itself deliver a
+  working `https://` client against a real public server — that still needs
+  the OpenSSL-to-native body swap (SFN-341).
 - **A user-visible narrowing this SFEP does not state.** Because RSA/ECDSA
   *signing* is deliberately out of §6.3 scope, after the swap `sfn_serve_tls`
   accepts an Ed25519 certificate only, where today it accepts anything OpenSSL
