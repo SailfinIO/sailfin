@@ -30,6 +30,8 @@
 // existing boxing branch heap-boxes it. Each row of the issue's shape table is
 // covered below; only the local-binding rows regressed, but the neighbouring
 // shapes are pinned so a future change cannot fix one by breaking another.
+import { expect_eq_bool, expect_eq_int } from "sfn/test";
+
 struct P {
     ok: boolean;
     error: string;
@@ -71,14 +73,14 @@ fn w_bare_struct_return() -> P {
 fn assert_payload(r: Result<P, string>) {
     match r {
         Result.Ok { value } => {
-            assert value.depth == 3;
-            assert value.ok;
-            assert value.error.length == 0;
+            assert expect_eq_int(value.depth, 3).ok;
+            assert expect_eq_bool(value.ok, true).ok;
+            assert expect_eq_int(value.error.length, 0).ok;
         },
         Result.Err { error } => {
             // Reaching the Err arm at all is the failure — every wrapper above
             // returns Ok unconditionally.
-            assert false;
+            assert expect_eq_bool(true, false).ok;
         }
     }
 }
@@ -101,7 +103,7 @@ test "enum payload: reconstructed inline payload round-trips" {
 
 test "enum payload: bare struct return is unaffected" {
     let p = w_bare_struct_return();
-    assert p.depth == 3;
-    assert p.ok;
-    assert p.error.length == 0;
+    assert expect_eq_int(p.depth, 3).ok;
+    assert expect_eq_bool(p.ok, true).ok;
+    assert expect_eq_int(p.error.length, 0).ok;
 }
