@@ -6,7 +6,7 @@ type: runtime
 created: 2026-07-12
 updated: 2026-08-07
 author: "agent:compiler-architect; human review"
-tracking: SFN-333, SFN-335, SFN-336, SFN-337, SFN-340, SFN-504, SFN-654, SFN-655, SFN-656, SFN-657, SFN-658, SFN-659, SFN-660, SFN-699
+tracking: SFN-333, SFN-335, SFN-336, SFN-337, SFN-340, SFN-341, SFN-504, SFN-654, SFN-655, SFN-656, SFN-657, SFN-658, SFN-659, SFN-660, SFN-699, SFN-766, SFN-767, SFN-768, SFN-769
 supersedes:
 superseded-by:
 graduates-to:
@@ -239,6 +239,52 @@ CertificateVerify accepts ECDSA-P256 or RSA yet, and neither
 into either state machine. No OCSP/CRL/revocation, no name constraints
 beyond SAN matching, no client-cert/mTLS. Phase C is complete; Phase D
 (dropping `-lssl`/`-lcrypto` from the link line) has not begun.
+
+**Amendment (2026-08-07) — Phase D is five slices, not one step; §3.2's
+"vendor it" is now load-bearing at a scale it was not written for.** §3.1's
+Phase D row and §3.2's consumption paragraph were written while Phases B and C
+were hypothetical. With both landed, an attempted pickup of SFN-341 found the
+body swap is roughly 15% of the work, and that three prerequisites this SFEP
+treats as solved are not. Recorded here so the next reader does not re-derive
+it; the full routing, with citations, is
+`docs/proposals/design-notes/sfn-341-native-tls-runtime-swap.md`.
+
+- **Reachability.** §3.2 says Phase B–D vendor each needed primitive into the
+  runtime "exactly as `build/hash.sfn` vendors SHA-256." That was written when
+  the closure was a few hash primitives; it is now ~10,146 lines across ~20
+  modules. Vendoring is still the right answer — `--gc-sections` runs after
+  symbol resolution, so the `tls_*` definitions must be in the runtime link
+  set, and the `runtime/`-slug mangling bypass
+  (`llvm/lowering/lowering_helpers_mangling.sfn:146-150`) is what lets the
+  runtime copy coexist with the capsule original — but the scale, the 13
+  flat-namespace collisions, the drift gate, and the projected +8-12% self-host
+  wall time are new facts, not details.
+- **The I/O driver does not exist.** §4 says "replacing OpenSSL's record layer
+  with a native one does not change the effect surface," which is true and
+  incomplete: OpenSSL was also supplying session allocation, partial-record
+  reassembly, leftover-plaintext buffering, sequence tracking, rekeying,
+  plaintext/CCS record framing, handshake defragmentation, and alert handling.
+  None of it exists anywhere in-tree. ~900-1,100 new lines.
+- **Throughput.** §3.5 already records the `int[]`-under-`-O0` collapse for
+  SHA-256; the same idiom carries every byte of every TLS record. The record
+  layer specifically must be re-expressed in the `*u8` idiom; everything else
+  stays `int[]`.
+- **§6.3's RSA amendment is not yet realized in the handshake.** The verify
+  primitives landed (SFN-656/657/658) but `_encode_signature_algorithms_extension`
+  still offers only `ed25519` and CertificateVerify still dispatches only
+  Ed25519, so the native client cannot authenticate any real server. Tracked as
+  SFN-767.
+- **A user-visible narrowing this SFEP does not state.** Because RSA/ECDSA
+  *signing* is deliberately out of §6.3 scope, after the swap `sfn_serve_tls`
+  accepts an Ed25519 certificate only, where today it accepts anything OpenSSL
+  loads. ECDSA-P256 signing is the follow-on that closes it.
+
+The §5 one-PR requirement is **unchanged and satisfied**: every slice before
+the last is purely additive and leaves `-lssl`/`-lcrypto` linked, so SFN-341
+still lands the body swap and the link deletion together, with no seed cut. The
+one branch that would force a cut is SFN-766 discovering that the runtime
+sfn-source emit path cannot lower `Result`/`match` — which is why it runs
+first, alone, at one point.
 
 ### 3.2 Where the code lives
 
