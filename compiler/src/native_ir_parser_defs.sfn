@@ -2,6 +2,8 @@
 //
 // Struct and enum definition parsing, extracted from native_ir_parser.sfn
 // to keep the module under the seed compiler's OOM threshold.
+import { substring } from "sfn/strings";
+
 import {
     EnumParseResult,
     InstructionParseResult,
@@ -48,7 +50,6 @@ import {
     strip_prefix,
     trim_text
 } from "./native_ir_utils_text";
-import { char_code, substring } from "./string_utils";
 
 fn parse_source_span(text: string) -> NativeSourceSpan? {
     let trimmed = trim_text(text);

@@ -2,7 +2,6 @@
 //
 // Expression statements and unknown-statement recovery.
 import { Decorator, Statement } from "../../ast";
-import { strings_equal } from "../../string_utils";
 import { Token } from "../../token";
 import { expression_from_tokens } from "../expressions";
 import {

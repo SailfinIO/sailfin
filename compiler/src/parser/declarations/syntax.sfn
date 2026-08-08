@@ -1,6 +1,8 @@
 // compiler/src/parser/declarations/syntax.sfn
 //
 // Shared declaration syntax - decorators, effects, generics, and parameters.
+import { char_at_index } from "sfn/strings";
+
 import {
     Decorator,
     DecoratorArgument,
@@ -9,7 +11,6 @@ import {
     TypeAnnotation,
     TypeParameter
 } from "../../ast";
-import { char_at, normalize_number_literal_value, strings_equal } from "../../string_utils";
 import { Token, TokenKind } from "../../token";
 import { expression_from_tokens, normalize_expression } from "../expressions";
 import {
@@ -44,7 +45,12 @@ import {
     TypeParameterParseResult,
     TypeSeparatorParseResult
 } from "../types";
-import { looks_like_number, strip_surrounding_quotes, trim_text } from "../utils";
+import {
+    looks_like_number,
+    normalize_number_literal_value,
+    strip_surrounding_quotes,
+    trim_text
+} from "../utils";
 import {
     append_decorator,
     append_decorator_argument,
@@ -209,8 +215,8 @@ fn parse_decorator_argument(tokens: Token[]) -> DecoratorArgument? {
         let raw_text = trim_text(tokens_to_text(value_tokens));
         let mut _if398: boolean = false;
         if raw_text.length >= 2 {
-            if char_at(raw_text, 0) == "\"" {
-                if char_at(raw_text, raw_text.length - 1) == "\"" {
+            if char_at_index(raw_text, 0) == "\"" {
+                if char_at_index(raw_text, raw_text.length - 1) == "\"" {
                     _if398 = true;
                 }
             }

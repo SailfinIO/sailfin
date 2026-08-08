@@ -1,6 +1,8 @@
 // compiler/src/parser/statements/special.sfn
 //
 // Resource, exit, exception, and assertion statement parsing.
+import { substring } from "sfn/strings";
+
 import {
     Block,
     Decorator,
@@ -9,7 +11,6 @@ import {
     Statement,
     WithClause
 } from "../../ast";
-import { substring } from "../../string_utils";
 import { Token } from "../../token";
 import { expression_from_tokens } from "../expressions";
 import {

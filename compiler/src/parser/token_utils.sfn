@@ -2,13 +2,9 @@
 //
 // Token manipulation utilities - functions for working with token arrays,
 // parser state management, trivia handling, and token-to-text conversion.
+import { char_at_index, char_code_at, substring } from "sfn/strings";
+
 import { SourceSpan } from "../ast";
-import {
-    char_at,
-    char_code,
-    strings_equal,
-    substring
-} from "../string_utils";
 import { Token, eof_token } from "../token";
 import {
     CaptureResult,
@@ -93,8 +89,8 @@ fn string_literal_value(token: Token) -> string {
 
 fn strip_surrounding_quotes_local(text: string) -> string {
     if text.length < 2 { return text; }
-    let first = char_code(char_at(text, 0));
-    let last = char_code(char_at(text, text.length - 1));
+    let first = char_code_at(text, 0);
+    let last = char_code_at(text, text.length - 1);
     if first == 34 {
         if last == 34 { return substring(text, 1, text.length - 1); }
     }
@@ -107,7 +103,7 @@ fn decode_string_literal_escapes_local(text: string) -> string {
     let mut index: int = 0;
     loop {
         if index >= text.length { break; }
-        let ch = char_at(text, index);
+        let ch = char_at_index(text, index);
         if ch == "\\" {
             let next_index = index + 1;
             if next_index >= text.length {
@@ -115,7 +111,7 @@ fn decode_string_literal_escapes_local(text: string) -> string {
                 index += 1;
                 continue;
             }
-            let escaped = char_at(text, next_index);
+            let escaped = char_at_index(text, next_index);
             if escaped == "n" { decoded = decoded + "\n"; } else if escaped == "t" {
                 decoded = decoded + "\t";
             } else if escaped == "r" { decoded = decoded + "\r"; } else if escaped == "\"" {
@@ -193,7 +189,7 @@ fn is_whitespace_lexeme(text: string) -> boolean {
     let mut index: int = 0;
     loop {
         if index >= text.length { break; }
-        let ch = char_at(text, index);
+        let ch = char_at_index(text, index);
         if !is_trim_whitespace_local(ch) { return false; }
         index += 1;
     }
@@ -201,7 +197,7 @@ fn is_whitespace_lexeme(text: string) -> boolean {
 }
 
 fn is_trim_whitespace_local(ch: string) -> boolean {
-    let code = char_code(ch);
+    let code = char_code_at(ch, 0);
     if code == 32 { return true; }
     if code == 10 { return true; }
     if code == 9 { return true; }
@@ -338,7 +334,7 @@ fn source_span_from_tokens(tokens: Token[]) -> SourceSpan? {
     let mut index: int = 0;
     loop {
         if index >= lexeme.length { break; }
-        let ch = char_at(lexeme, index);
+        let ch = char_at_index(lexeme, index);
         if ch == "\n" {
             end_line += 1;
             end_column = 1;

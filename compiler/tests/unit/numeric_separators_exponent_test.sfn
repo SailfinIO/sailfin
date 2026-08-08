@@ -9,7 +9,7 @@
 // and started an identifier (`1_000` -> `1`, `_000`), collapsing the RHS to
 // `Expression.Raw` — silently wrong.
 import { lex } from "../../src/lexer";
-import { normalize_number_literal_value, strings_equal } from "../../src/string_utils";
+import { normalize_number_literal_value } from "../../src/parser/utils";
 
 // ---- normalisation contract (the literal -> value path) ----
 test "numeric: underscores are stripped from integers" {

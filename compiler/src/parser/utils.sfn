@@ -2,12 +2,7 @@
 //
 // Parser utility functions for string manipulation, text processing,
 // and general helpers used throughout the parser.
-import {
-    substring,
-    char_code,
-    char_at,
-    strings_equal
-} from "../string_utils";
+import { char_at_index, char_code_at, substring } from "sfn/strings";
 
 // ============================================================================
 // String Utilities
@@ -18,7 +13,7 @@ fn trim_text(value: string) -> string {
 
     loop {
         if start >= end { break; }
-        let ch = char_at(value, start);
+        let ch = char_at_index(value, start);
         if is_trim_whitespace(ch) {
             start += 1;
             continue;
@@ -28,7 +23,7 @@ fn trim_text(value: string) -> string {
 
     loop {
         if end <= start { break; }
-        let ch = char_at(value, end - 1);
+        let ch = char_at_index(value, end - 1);
         if is_trim_whitespace(ch) {
             end -= 1;
             continue;
@@ -40,7 +35,7 @@ fn trim_text(value: string) -> string {
 }
 
 fn is_trim_whitespace(ch: string) -> boolean {
-    let code = char_code(ch);
+    let code = char_code_at(ch, 0);
     if code == 32 { return true; }
     if code == 10 { return true; }
     if code == 9 { return true; }
@@ -50,8 +45,8 @@ fn is_trim_whitespace(ch: string) -> boolean {
 
 fn strip_surrounding_quotes(text: string) -> string {
     if text.length < 2 { return text; }
-    let first = char_code(char_at(text, 0));
-    let last = char_code(char_at(text, text.length - 1));
+    let first = char_code_at(text, 0);
+    let last = char_code_at(text, text.length - 1);
     if first == 34 {
         if last == 34 { return substring(text, 1, text.length - 1); }
     }
@@ -64,7 +59,7 @@ fn strip_loose_quotes(text: string) -> string {
     let mut end: int = text.length;
     loop {
         if start >= end { break; }
-        let first = char_code(char_at(text, start));
+        let first = char_code_at(text, start);
         if first == 34 {
             start += 1;
             continue;
@@ -73,7 +68,7 @@ fn strip_loose_quotes(text: string) -> string {
     }
     loop {
         if end <= start { break; }
-        let last = char_code(char_at(text, end - 1));
+        let last = char_code_at(text, end - 1);
         if last == 34 {
             end -= 1;
             continue;
@@ -92,7 +87,7 @@ fn decode_string_literal_escapes(text: string) -> string {
     let mut index: int = 0;
     loop {
         if index >= text.length { break; }
-        let ch = char_at(text, index);
+        let ch = char_at_index(text, index);
         if ch == "\\" {
             let next_index = index + 1;
             if next_index >= text.length {
@@ -100,7 +95,7 @@ fn decode_string_literal_escapes(text: string) -> string {
                 index += 1;
                 continue;
             }
-            let escaped = char_at(text, next_index);
+            let escaped = char_at_index(text, next_index);
             if escaped == "n" { decoded = decoded + "\n"; } else if escaped == "t" {
                 decoded = decoded + "\t";
             } else if escaped == "r" { decoded = decoded + "\r"; } else if escaped == "\"" {
@@ -120,8 +115,8 @@ fn decode_string_literal_escapes(text: string) -> string {
 fn normalize_test_name(text: string) -> string {
     let trimmed = trim_text(text);
     if trimmed.length >= 2 {
-        let first = char_code(char_at(trimmed, 0));
-        let last = char_code(char_at(trimmed, trimmed.length - 1));
+        let first = char_code_at(trimmed, 0);
+        let last = char_code_at(trimmed, trimmed.length - 1);
         if first == 34 {
             if last == 34 { return strip_surrounding_quotes(trimmed); }
         }
@@ -136,13 +131,13 @@ fn looks_like_number(text: string) -> boolean {
     if text.length == 0 { return false; }
     let mut has_decimal: boolean = false;
     let mut index: int = 0;
-    if char_at(text, 0) == "-" {
+    if char_at_index(text, 0) == "-" {
         if text.length == 1 { return false; }
         index = 1;
     }
     loop {
         if index >= text.length { break; }
-        let ch = char_at(text, index);
+        let ch = char_at_index(text, index);
         if ch == "." {
             if has_decimal { return false; }
             has_decimal = true;
@@ -153,6 +148,59 @@ fn looks_like_number(text: string) -> boolean {
         index += 1;
     }
     return true;
+}
+
+// Normalise a raw numeric lexeme (as scanned by the lexer, e.g. `1_000_000`
+// or `1.0e6`) into the plain decimal form the codegen and int-vs-float
+// classification paths already understand: strip `_` digit separators, and
+// when a scientific exponent is present ensure the mantissa carries a `.`
+// (LLVM rejects `1e6` but accepts `1.0e6`; the `.`-or-not shape then drives
+// the existing float-vs-int classification with no further change). The
+// exponent marker is canonicalised to lowercase `e`. Input is a bare literal
+// with no leading sign — `-3` parses as a `Unary` over a `NumberLiteral`.
+fn normalize_number_literal_value(text: string) -> string {
+    let mut mantissa: string = "";
+    let mut exponent: string = "";
+    let mut seen_exp: boolean = false;
+    let mut exp_has_digit: boolean = false;
+    let mut mantissa_has_dot: boolean = false;
+    let mut i: int = 0;
+    loop {
+        if i >= text.length { break; }
+        let ch = char_at_index(text, i);
+        if ch == "_" {
+            i += 1;
+            continue;
+        }
+        let mut _is_exp_marker: boolean = false;
+        if ch == "e" { _is_exp_marker = true; }
+        if ch == "E" { _is_exp_marker = true; }
+        if _is_exp_marker {
+            if !seen_exp {
+                seen_exp = true;
+                exponent = "e";
+                i += 1;
+                continue;
+            }
+        }
+        if seen_exp {
+            exponent = exponent + ch;
+            if ch >= "0" {
+                if ch <= "9" { exp_has_digit = true; }
+            }
+        } else {
+            if ch == "." { mantissa_has_dot = true; }
+            mantissa = mantissa + ch;
+        }
+        i += 1;
+    }
+    if !seen_exp { return mantissa; }
+    // A digitless exponent (`1e`) cannot reach here from the lexer or the
+    // `looks_like_number`-gated callers, but the helper is exported: degrade
+    // to the `_`-stripped mantissa rather than emit an LLVM-invalid `1.0e`.
+    if !exp_has_digit { return mantissa; }
+    if !mantissa_has_dot { mantissa = mantissa + ".0"; }
+    return mantissa + exponent;
 }
 
 fn is_decimal_digit(ch: string) -> boolean {
@@ -177,7 +225,7 @@ fn string_array_contains(values: string[], target: string) -> boolean {
     let mut index: int = 0;
     loop {
         if index >= values.length { break; }
-        if strings_equal(values[index], target) { return true; }
+        if values[index] == target { return true; }
         index += 1;
     }
     return false;

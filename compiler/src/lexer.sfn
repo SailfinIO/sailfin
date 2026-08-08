@@ -4,7 +4,8 @@
 // implementation is intentionally modest: it tokenises identifier-like runs and
 // individual punctuation characters, preserving whitespace and comments so the
 // parser can decide what to ignore.
-import { char_code } from "./string_utils";
+import { char_code_at } from "sfn/strings";
+
 import { Token, TokenKind, eof_token } from "./token";
 
 // Deliberately holds no `source` field. String-typed struct fields lower to a
@@ -387,7 +388,7 @@ fn is_identifier_part(ch: string) -> boolean {
 }
 
 fn is_letter(ch: string) -> boolean {
-    let c = char_code(ch);
+    let c = char_code_at(ch, 0);
     let mut _ret41: boolean = false;
     if c >= 65 {
         if c <= 90 { _ret41 = true; }
@@ -399,7 +400,7 @@ fn is_letter(ch: string) -> boolean {
 }
 
 fn is_digit(ch: string) -> boolean {
-    let c = char_code(ch);
+    let c = char_code_at(ch, 0);
     let mut _ret42: boolean = false;
     if c >= 48 {
         if c <= 57 { _ret42 = true; }

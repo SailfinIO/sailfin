@@ -3,7 +3,7 @@
 // Target-neutral intrinsic identity and effect metadata consumed by semantic
 // analysis and target providers. LLVM descriptors keep symbol/type/ABI data
 // and key into this contract by target; they do not own semantic effects.
-import { substring } from "./string_utils";
+import { substring } from "sfn/strings";
 
 struct IntrinsicEffectEntry {
     target: string;

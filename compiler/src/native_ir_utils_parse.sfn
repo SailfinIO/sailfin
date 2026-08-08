@@ -2,6 +2,8 @@
 //
 // IR definition and instruction parsing utilities: imports, cases, decorators,
 // interfaces, structs, enums, bindings, parameters, and effects.
+import { substring } from "sfn/strings";
+
 import {
     BindingComponents,
     CaseComponents,
@@ -36,7 +38,6 @@ import {
     trim_text,
     trim_trailing_delimiters
 } from "./native_ir_utils_text";
-import { substring } from "./string_utils";
 
 export {
     parse_case_instruction,
