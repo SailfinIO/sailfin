@@ -32,6 +32,13 @@
 // this also keeps exercising the SFN-146 slug derivation that a private
 // out-of-tree root broke.
 //
+// SFN-800 adds the re-export leg. The SFN-773 fixture imports
+// `sfn/strings::int_to_string`, which `strings/mod.sfn` DEFINES — so it never
+// exercised `export … from`, the shape every real library capsule uses for its
+// public surface. The second test below imports through a re-export chain and
+// asserts the *defining* submodule reaches the `.import-deps` sidecar; see
+// that test for why build success alone cannot catch the defect.
+//
 // NOTE: `sfn/test` `expect_*` matchers are `![pure]` and cannot be called from
 // an `![io]` test; assertions use plain `assert` per
 // `.claude/rules/no-bash-e2e.md`. Shape follows `runtime_identity_stamp_test.sfn`.
@@ -59,9 +66,24 @@ fn _child_env(scratch: string) -> string[] ![io] {
     return e;
 }
 
-test "runtime capsule dep: a runtime module calls a capsule provider out-of-tree" ![io] {
-    let scratch = fs.mkdtemp("sfn-rtcapdep-");
+fn _contains_text(haystack: string, needle: string) -> boolean {
+    if needle.length == 0 { return true; }
+    let mut pos: int = 0;
+    loop {
+        if pos + needle.length > haystack.length { return false; }
+        if substring(haystack, pos, pos + needle.length) == needle { return true; }
+        pos += 1;
+    }
+}
 
+// Stage a private out-of-tree runtime root declaring `dep_spec` and carrying
+// `probe_rel` as an `sfn-source`. Returns the runtime root path.
+//
+// `locate_runtime_dep_capsule_src` resolves a runtime dep at
+// `<dirname(manifest_dir)>/capsules/<scope>/<name>/src`, so the capsule tree
+// has to sit beside the runtime copy — the same shape an installed toolchain
+// has (`<prefix>/runtime` + `<prefix>/capsules`).
+fn _stage_runtime_fixture(scratch: string, dep_spec: string, probe_rel: string, probe_source: string) -> string ![io] {
     // Private runtime tree. The name has no `runtime/` segment on purpose.
     let runtime_copy = scratch + "/runtime-copy";
     let cp_rt = process.run_capture(["cp", "-R", "runtime", runtime_copy], _child_env(scratch));
@@ -69,10 +91,6 @@ test "runtime capsule dep: a runtime module calls a capsule provider out-of-tree
     let _ = process.capture_take_stderr();
     assert cp_rt == 0;
 
-    // `locate_runtime_dep_capsule_src` resolves a runtime dep at
-    // `<dirname(manifest_dir)>/capsules/<scope>/<name>/src`, so the capsule
-    // tree has to sit beside the runtime copy — the same shape an installed
-    // toolchain has (`<prefix>/runtime` + `<prefix>/capsules`).
     let cp_caps = process.run_capture(["cp", "-R", "capsules", scratch
         + "/capsules"], _child_env(scratch));
     let _ = process.capture_take_stdout();
@@ -86,24 +104,22 @@ test "runtime capsule dep: a runtime module calls a capsule provider out-of-tree
     let manifest_path = runtime_copy + "/capsule.toml";
     let manifest = fs.readFile(manifest_path);
     assert manifest.length > 0;
-    let with_dep = manifest + "\n[dependencies]\n\"sfn/strings\" = \"*\"\n";
-    let seeded = _insert_probe_source(with_dep);
+    let with_dep = manifest + "\n[dependencies]\n\"" + dep_spec + "\" = \"*\"\n";
+    let seeded = _insert_probe_source(with_dep, probe_rel);
     // The probe must be listed, or it is never emitted and the test proves
     // nothing.
     assert seeded.length > with_dep.length;
     fs.writeFile(manifest_path, seeded);
+    fs.writeFile(runtime_copy + "/" + probe_rel, probe_source);
+    return runtime_copy;
+}
 
-    fs.writeFile(runtime_copy + "/sfn/rtcapdep_probe.sfn", "import { int_to_string } from \"sfn/strings\";\n"
-        + "\n"
-        + "fn rtcapdep_probe_render(value: int) -> string {\n"
-        + "    return int_to_string(value);\n"
-        + "}\n");
-
-    // A trivial program: it never calls the probe. That is the point — the
-    // probe is an `sfn-source`, so its call into `sfn/strings` is emitted into
-    // EVERY binary, and `--gc-sections` runs after symbol resolution. If the
-    // provider's definitions are not in the link set this fails even though
-    // nothing reachable from `main` touches them.
+// Build a trivial program against the staged runtime root. The program never
+// calls the probe. That is the point — the probe is an `sfn-source`, so its
+// call into the capsule is emitted into EVERY binary, and `--gc-sections` runs
+// after symbol resolution. If the provider's definitions are not in the link
+// set this fails even though nothing reachable from `main` touches them.
+fn _build_against_runtime(scratch: string, runtime_copy: string) -> int ![io] {
     let prog = scratch + "/prog.sfn";
     fs.writeFile(prog, "fn main() -> int { return 0; }\n");
 
@@ -117,15 +133,74 @@ test "runtime capsule dep: a runtime module calls a capsule provider out-of-tree
         print("runtime capsule dep: build failed");
         print(out);
         print(err);
+        return build_exit;
     }
-    assert build_exit == 0;
     assert fs.exists(out_bin);
+    return build_exit;
+}
+
+test "runtime capsule dep: a runtime module calls a capsule provider out-of-tree" ![io] {
+    let scratch = fs.mkdtemp("sfn-rtcapdep-");
+    let runtime_copy = _stage_runtime_fixture(scratch, "sfn/strings", "sfn/rtcapdep_probe.sfn", "import { int_to_string } from \"sfn/strings\";\n"
+        + "\n"
+        + "fn rtcapdep_probe_render(value: int) -> string {\n"
+        + "    return int_to_string(value);\n"
+        + "}\n");
+    let build_exit = _build_against_runtime(scratch, runtime_copy);
+    assert build_exit == 0;
+}
+
+// SFN-800: the provider symbol is reached through `export { sha1_hex } from
+// "./sha1";` in `capsules/sfn/crypto/src/mod.sfn`, not defined in the entry
+// module.
+//
+// Build success alone does NOT discriminate here, and asserting only that
+// would re-create the SFN-773 blind spot at one more hop: signature
+// resolution for a re-export goes through `load_imported_module_context`
+// (`compiler/src/import_context.sfn`), whose BFS already follows `.export`
+// edges, so this program links either way. The defect is on the sidecar the
+// build writes — `_write_runtime_sfn_import_deps` recorded only the re-export
+// SURFACE (`sfn/crypto/mod.sfn-asm`), whose text does not change when the
+// defining submodule is edited. `_runtime_obj_key_with_sibling_deps` folds
+// exactly that list into the consumer's object cache key, so a signature
+// change in `sha1.sfn` left the cached `.o` valid and the link reused a
+// stale-ABI object — the defect class #1288 exists to prevent. Hence the
+// assertion is on the sidecar contents, which is what actually regressed.
+test "runtime capsule dep: a re-exported provider symbol records its defining module" ![io] {
+    let scratch = fs.mkdtemp("sfn-rtcapdep-reexport-");
+    let runtime_copy = _stage_runtime_fixture(scratch, "sfn/crypto", "sfn/rtcapdep_reexport_probe.sfn", "import { sha1_hex } from \"sfn/crypto\";\n"
+        + "\n"
+        + "fn rtcapdep_reexport_probe_render(value: string) -> string {\n"
+        + "    return sha1_hex(value);\n"
+        + "}\n");
+    let build_exit = _build_against_runtime(scratch, runtime_copy);
+    assert build_exit == 0;
+
+    // The staged import-context tree lives beside the build's runtime objects
+    // (`_runtime_sfn_ctx_root`), and the probe stages at the SFN-146-derived
+    // `runtime/sfn/...` slug even though the root is named `runtime-copy`.
+    let deps_path = scratch + "/rt-import-context/runtime/sfn/rtcapdep_reexport_probe.import-deps";
+    assert fs.exists(deps_path);
+    let deps = fs.readFile(deps_path);
+
+    // The re-export surface is the module the import names, so it is listed
+    // both before and after the fix.
+    assert _contains_text(deps, "/sfn/crypto/mod.sfn-asm");
+
+    // The defining submodule is what the fix adds. Before SFN-800 the sidecar
+    // stopped at the surface and this line was absent.
+    assert _contains_text(deps, "/sfn/crypto/sha1.sfn-asm");
+
+    // A second, unrelated re-export target (`mod.sfn` -> `./x509_verify`),
+    // so the assertion above cannot pass on a one-off special case: what is
+    // recorded is the provider's whole re-export closure, not one edge.
+    assert _contains_text(deps, "/sfn/crypto/x509_verify.sfn-asm");
 }
 
 // Prepend the probe to the manifest's `sfn-sources` array. Returns the input
 // unchanged when the anchor is absent, which the caller asserts against rather
 // than silently producing a runtime with no probe in it.
-fn _insert_probe_source(manifest: string) -> string {
+fn _insert_probe_source(manifest: string, probe_rel: string) -> string {
     let anchor = "sfn-sources = [";
     let mut pos: int = 0;
     loop {
@@ -133,7 +208,7 @@ fn _insert_probe_source(manifest: string) -> string {
         if substring(manifest, pos, pos + anchor.length) == anchor {
             let head = substring(manifest, 0, pos + anchor.length);
             let tail = substring(manifest, pos + anchor.length, manifest.length);
-            return head + "\n    \"sfn/rtcapdep_probe.sfn\"," + tail;
+            return head + "\n    \"" + probe_rel + "\"," + tail;
         }
         pos += 1;
     }

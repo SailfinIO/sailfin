@@ -1101,15 +1101,6 @@ fn _stage_one_runtime_sfn_import_context(self_path: string, src: string, slug: s
     return true;
 }
 
-// Write a module's `.import-deps` sidecar (one staged `.sfn-asm`
-// path per line — the exact shape `_read_import_deps` parses and the
-// resolver's `_cr_stage_import_deps` writes). An import is listed
-// when its resolved slug is in `staged_slugs`: a staged sibling
-// sfn-source, or (SFN-344) an imported platform extern module staged
-// by `_stage_imported_platform_externs` (e.g. `runtime/sfn/clock.sfn`
-// -> `./platform/posix` for nanosleep/clock_gettime). A module with
-// no such imports gets no sidecar at all — its child emit then
-// degrades to the exact pre-#1288 legacy path.
 // Resolve an import's slug against the staged import-context slugs, mirroring
 // `resolve_import_provider_module_name`
 // (`llvm/lowering/lowering_helpers_mangling.sfn`):
@@ -1137,11 +1128,101 @@ fn _runtime_staged_slug_for_dep(dep_slug: string, staged_slugs: string[]) -> str
     return "";
 }
 
+// Expand a staged provider slug into itself plus every staged module
+// reachable through its `export … from` chain (SFN-800).
+//
+// A library capsule's entry module is normally a pure re-export surface —
+// `capsules/sfn/crypto/src/mod.sfn` re-exports ~25 siblings and defines
+// only a handful of symbols itself. A consumer importing the bare spec
+// (`from "sfn/crypto"`) resolves to that surface, so without this walk the
+// sidecar records a dependency ONLY on `sfn/crypto/mod.sfn-asm` — whose
+// text does not change when the *defining* submodule is edited. The
+// consumer's object cache key (`_runtime_obj_key_with_sibling_deps`) then
+// stays constant across a provider signature change and the link silently
+// reuses a stale-ABI object: exactly the defect class that fold exists to
+// prevent (#1288), one re-export hop wide. The same list feeds the
+// cross-module effect table (`load_imported_interfaces_from_paths`), so an
+// unfollowed chain also under-approximates callee-effect transitivity.
+//
+// A `.export` with no `from` clause carries an empty module and is dropped
+// by `_runtime_staged_slug_for_dep`'s empty guard.
+//
+// The closure stops at the CAPSULE boundary, not at the re-export chain's
+// end: `_runtime_staged_slug_for_dep` only matches `staged_slugs`, and
+// `_stage_runtime_sfn_import_context` deliberately does not walk transitive
+// capsule deps (see the note on its `capsule_deps` loop). So a provider
+// re-exporting from a *different* capsule resolves to an unstaged slug and
+// that edge is dropped. Deliberate — widening it means staging the
+// transitive dep closure, which is a separate decision — but it does mean
+// this closure is complete only within one capsule.
+//
+// Membership is checked at the PUSH site, so `queue` can never exceed
+// `staged_slugs` and the walk terminates on a re-export cycle. `guard` is a
+// backstop for that invariant rather than the primary bound (a dequeue-time
+// check would let the queue grow to the number of export EDGES, which for a
+// wide capsule is O(modules x re-exports) and could silently truncate) — it
+// prints rather than truncating in silence, because a truncated closure
+// reinstates exactly the stale-object defect this function exists to fix.
+fn _runtime_reexport_closure(ctx_root: string, root_slug: string, staged_slugs: string[]) -> string[] ![io] {
+    let mut out: string[] = [];
+    out.push(root_slug);
+    let mut queue_index: int = 0;
+    let mut guard: int = 0;
+    loop {
+        if queue_index >= out.length { break; }
+        guard += 1;
+        if guard > 4096 {
+            print("sfn build: re-export closure for `" + root_slug
+                + "` exceeded its guard; the `.import-deps` sidecar may be incomplete");
+            break;
+        }
+        let current = out[queue_index];
+        queue_index += 1;
+        let current_asm = ctx_root + "/" + current + ".sfn-asm";
+        if !fs.exists(current_asm) { continue; }
+        let entries = parse_native_imports_for_import(fs.readFile(current_asm));
+        let mut entry_index: int = 0;
+        loop {
+            if entry_index >= entries.length { break; }
+            if entries[entry_index].kind == "export" {
+                let target = resolve_import_module_slug_for_module(entries[entry_index].module, current);
+                let staged = _runtime_staged_slug_for_dep(target, staged_slugs);
+                if staged.length > 0 && !_slug_already_staged(out, staged) {
+                    out.push(staged);
+                }
+            }
+            entry_index += 1;
+        }
+    }
+    return out;
+}
+
+// Write a module's `.import-deps` sidecar (one staged `.sfn-asm`
+// path per line — the exact shape `_read_import_deps` parses and the
+// resolver's `_cr_stage_import_deps` writes). An import is listed
+// when its resolved slug is in `staged_slugs`: a staged sibling
+// sfn-source, or (SFN-344) an imported platform extern module staged
+// by `_stage_imported_platform_externs` (e.g. `runtime/sfn/clock.sfn`
+// -> `./platform/posix` for nanosleep/clock_gettime). A module with
+// no such imports gets no sidecar at all — its child emit then
+// degrades to the exact pre-#1288 legacy path.
+//
+// SFN-800: each resolved import expands to its provider's re-export
+// closure, not just the provider itself, so a symbol reached through
+// `export … from` records the module that DEFINES it. Both consumers of
+// this sidecar need that: `_runtime_obj_key_with_sibling_deps` cannot bust
+// a consumer's cached `.o` on a provider edit it never hashed, and the
+// cross-module effect table (`load_imported_interfaces_from_paths`, via
+// `cli/commands/emit.sfn`) cannot enforce callee-effect transitivity for a
+// callee whose defining artifact it never loaded.
 fn _write_runtime_sfn_import_deps(asm_path: string, slug: string, ctx_root: string, staged_slugs: string[]) -> void ![io] {
     let deps_path = ctx_root + "/" + slug + ".import-deps";
     let asm_text = fs.readFile(asm_path);
     let entries = parse_native_imports_for_import(asm_text);
-    let mut deps: string = "";
+    // Deduplicated: two imports of the same capsule expand to overlapping
+    // re-export closures, and a repeated path would be hashed twice into the
+    // consumer's cache key for no added discrimination.
+    let mut dep_slugs: string[] = [];
     let mut i: int = 0;
     loop {
         if i >= entries.length { break; }
@@ -1149,10 +1230,27 @@ fn _write_runtime_sfn_import_deps(asm_path: string, slug: string, ctx_root: stri
             let dep_slug = resolve_import_module_slug_for_module(entries[i].module, slug);
             let staged = _runtime_staged_slug_for_dep(dep_slug, staged_slugs);
             if staged.length > 0 {
-                deps = deps + ctx_root + "/" + staged + ".sfn-asm\n";
+                let closure = _runtime_reexport_closure(ctx_root, staged, staged_slugs);
+                let mut ci: int = 0;
+                loop {
+                    if ci >= closure.length { break; }
+                    // A cycle back through the importer would otherwise make
+                    // the module its own dep.
+                    if closure[ci] != slug && !_slug_already_staged(dep_slugs, closure[ci]) {
+                        dep_slugs.push(closure[ci]);
+                    }
+                    ci += 1;
+                }
             }
         }
         i += 1;
+    }
+    let mut deps: string = "";
+    let mut di: int = 0;
+    loop {
+        if di >= dep_slugs.length { break; }
+        deps = deps + ctx_root + "/" + dep_slugs[di] + ".sfn-asm\n";
+        di += 1;
     }
     if deps.length == 0 {
         // No sibling imports: drop any stale sidecar from a previous
