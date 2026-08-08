@@ -17,9 +17,9 @@
 //      runtime constructor.
 //
 // The hash itself runs in pure Sailfin — `compiler/src/llvm/lowering/`
-// `abi_hash.sfn` only imports `char_code` and `substring` from the
-// runtime prelude, so the unit-test budget stays small (no LLVM-
-// lowering subsystem pulled in).
+// `abi_hash.sfn` only imports `char_code_at` and `substring` from
+// `sfn/strings`, so the unit-test budget stays small (no LLVM-lowering
+// subsystem pulled in).
 import { fnv1a_64_hash, sfn_abi_hash_decimal, sfn_abi_locked_layout_string } from "../../src/llvm/lowering/abi_hash";
 
 test "abi_hash: layout string pins SfnString and SfnArray shapes" {

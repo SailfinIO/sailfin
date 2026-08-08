@@ -20,7 +20,7 @@
 // (i64). Every intermediate stays well below 2^53 so the values
 // also fit in f64 — earlier seeds compiled this code as f64 with
 // exact results.
-import { char_code, substring } from "runtime/prelude";
+import { char_code_at, substring } from "sfn/strings";
 
 struct AbiHashLimbs {
     h0: int;
@@ -75,7 +75,7 @@ fn fnv1a_64_hash(input: string) -> AbiHashLimbs {
     let mut i: int = 0;
     loop {
         if i >= input.length { break; }
-        let byte = char_code(substring(input, i, i + 1));
+        let byte = char_code_at(input, i);
         // XOR the input byte into the low byte of h0 (other limbs untouched).
         let split = _u16_split_by_byte(state.h0);
         let new_low = _xor_byte(split.lo, byte);
