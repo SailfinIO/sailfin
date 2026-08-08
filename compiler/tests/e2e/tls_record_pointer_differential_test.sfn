@@ -1,0 +1,687 @@
+// compiler/tests/e2e/tls_record_pointer_differential_test.sfn
+//
+// Differential coverage for `runtime/sfn/platform/tls_record.sfn` (SFN-768;
+// design `docs/proposals/design-notes/sfn-341-native-tls-runtime-swap.md`
+// §3.3), the `*u8` pointer-idiom TLS 1.3 record layer.
+//
+// Why a second implementation exists to differential-test against: the
+// `int[]` record layer in `sfn/crypto` (`capsules/sfn/crypto/src/tls13_record.sfn`,
+// imported here as `tls13_seal_record` / `tls13_open_record`) stores one byte
+// per bounds-checked i64 array slot and makes several full copies per record.
+// The pointer version exists purely to avoid that cost on the per-byte hot
+// path; correctness rests entirely on it agreeing byte-for-byte with the
+// `int[]` oracle, since both must accept and reject exactly the same records.
+//
+// These tests are pure (no `![io]`): `malloc`/`free`/`memset` calls carry no
+// effect, and staying pure keeps `sfn/test`'s `expect_*` matchers available,
+// though bare `assert` is used throughout for consistency with the
+// differential-comparison style below.
+import { TlsRecordPlaintext, tls13_open_record, tls13_seal_record } from "sfn/crypto";
+import { contains, int_to_string } from "sfn/strings";
+
+extern fn malloc(size: usize) -> *u8;
+
+extern fn free(ptr: *u8) -> void;
+
+extern fn memset(ptr: *u8, value: i32, n: usize) -> *u8;
+
+extern fn sfn_tls_record_seal(key: *u8, key_len: i64, iv: *u8, iv_len: i64, seq: i64, content_type: i64, content: *u8, content_len: i64, padding: i64, out: *u8) -> i64;
+
+extern fn sfn_tls_record_open(key: *u8, key_len: i64, iv: *u8, iv_len: i64, seq: i64, record: *u8, record_len: i64) -> i64;
+
+// ── Pointer helpers (SFN-768 idiom: `_tlsrec_` is reserved by the module
+// under test, so every helper here carries the `_td_` prefix to stay
+// collision-free against that module's externally-linked symbols) ─────────
+fn _td_off(p: *u8, o: int) -> *u8 {
+    let a: int = (p as i64) + o;
+    return a as *u8;
+}
+
+fn _td_put(p: *u8, o: int, b: int) -> void {
+    memset(_td_off(p, o), (b & 255) as i32, 1 as usize);
+}
+
+fn _td_get(p: *u8, o: int) -> int {
+    return load_byte((p as i64) + o) & 255;
+}
+
+// Copy an `int[]` byte array into a freshly malloc'd buffer. Allocates at
+// least 1 byte so a zero-length array never hands back a null pointer.
+fn _td_buf(src: int[]) -> *u8 {
+    let n: int = src.length;
+    let mut sz: int = n;
+    if sz == 0 { sz = 1; }
+    let p: *u8 = malloc(sz as usize);
+    let mut i: int = 0;
+    loop {
+        if i >= n { break; }
+        _td_put(p, i, src[i]);
+        i += 1;
+    }
+    return p;
+}
+
+// ── int[] helpers shared by the oracle side of the differential ──────────
+fn _td_clone(a: int[]) -> int[] {
+    let mut out: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= a.length { break; }
+        out.push(a[i]);
+        i += 1;
+    }
+    return out;
+}
+
+fn _td_take(a: int[], n: int) -> int[] {
+    let mut out: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= n { break; }
+        out.push(a[i]);
+        i += 1;
+    }
+    return out;
+}
+
+fn _td_zeros(n: int) -> int[] {
+    let mut out: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= n { break; }
+        out.push(0);
+        i += 1;
+    }
+    return out;
+}
+
+// Build a raw TLSCiphertext-shaped record (5-byte header ‖ body) with a
+// caller-chosen declared length, so a case can disagree the declared length
+// from the actual body length on purpose (the short-encrypted-record guard).
+fn _td_raw_record(outer_type: int, declared: int, body: int[]) -> int[] {
+    let mut out: int[] = [];
+    out.push(outer_type & 255);
+    out.push(3);
+    out.push(3);
+    out.push((declared >> 8) & 255);
+    out.push(declared & 255);
+    let mut i: int = 0;
+    loop {
+        if i >= body.length { break; }
+        out.push(body[i] & 255);
+        i += 1;
+    }
+    return out;
+}
+
+// Deterministic fixed key/iv shared by every test below (bytes chosen only
+// to avoid an all-zero key/iv, not for any security property).
+fn _td_key32() -> int[] {
+    let mut k: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= 32 { break; }
+        k.push((i * 7 + 3) & 255);
+        i += 1;
+    }
+    return k;
+}
+
+fn _td_iv12() -> int[] {
+    let mut v: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= 12 { break; }
+        v.push((i * 13 + 5) & 255);
+        i += 1;
+    }
+    return v;
+}
+
+// Drive the `int[]` oracle's open path and collapse its `Result` into an
+// error string: "" on `Ok`, the error message on `Err`. Every error message
+// this module produces is non-empty, so callers can test on `.length > 0`.
+fn _td_oracle_open_err(key: int[], iv: int[], seq: int, record: int[]) -> string {
+    let r: Result<TlsRecordPlaintext, string> = tls13_open_record(key, iv, seq, record);
+    match r {
+        Result.Ok { value } => { return ""; },
+        Result.Err { error } => { return error; }
+    }
+}
+
+// ── Test 1: pointer seal matches the oracle across record lengths ────────
+test "tls record: pointer seal matches the int[] oracle byte-for-byte across record lengths" {
+    let key: int[] = _td_key32();
+    let iv: int[] = _td_iv12();
+    let kp: *u8 = _td_buf(key);
+    let ivp: *u8 = _td_buf(iv);
+
+    // Sweep every block/boundary case for the ChaCha20 64-byte block and the
+    // 16-byte Poly1305 block, plus the 2^14 plaintext ceiling.
+    let lens: int[] = [0, 1, 2, 15, 16, 17, 31, 32, 33, 63, 64, 65, 127, 128, 129, 255, 256, 257, 1023, 1024, 1025, 4096, 8192, 16383, 16384];
+    let pads: int[] = [0, 1, 7];
+
+    let mut diff_count: int = 0;
+    let mut first_bad_len: int = -1;
+
+    let mut li: int = 0;
+    loop {
+        if li >= lens.length { break; }
+        let len: int = lens[li];
+
+        let mut content: int[] = [];
+        let mut j: int = 0;
+        loop {
+            if j >= len { break; }
+            content.push((j * 31 + len) & 255);
+            j += 1;
+        }
+        let cp: *u8 = _td_buf(content);
+
+        let mut pi: int = 0;
+        loop {
+            if pi >= pads.length { break; }
+            let pad: int = pads[pi];
+
+            // Distinct non-zero sequence numbers per combination; the largest
+            // length/padding combination crosses the 32-bit boundary in the
+            // big-endian nonce derivation (RFC 8446 §5.3).
+            let mut seq: int = (li * 3 + pi + 1) * 97 + 13;
+            if len == 16384 && pad == 7 { seq = 4294967296 + len; }
+
+            let want: int[] = tls13_seal_record(key, iv, seq, 23, content, pad);
+            let out_sz: int = len + pad + 64;
+            let outp: *u8 = malloc(out_sz as usize);
+            let got_len: int = sfn_tls_record_seal(kp, 32, ivp, 12, seq, 23, cp, len, pad, outp);
+
+            if got_len != want.length {
+                diff_count += 1;
+                if first_bad_len == -1 { first_bad_len = len; }
+            } else {
+                let mut k: int = 0;
+                let mut mismatched: int = 0;
+                loop {
+                    if k >= want.length { break; }
+                    if _td_get(outp, k) != want[k] { mismatched += 1; }
+                    k += 1;
+                }
+                if mismatched != 0 {
+                    diff_count += 1;
+                    if first_bad_len == -1 { first_bad_len = len; }
+                }
+            }
+            free(outp);
+            pi += 1;
+        }
+        free(cp);
+        li += 1;
+    }
+    free(kp);
+    free(ivp);
+
+    assert diff_count == 0;
+    assert first_bad_len == -1;
+}
+
+// ── Test 2: pointer open recovers what the oracle sealed ─────────────────
+test "tls record: pointer open recovers what the int[] oracle sealed" {
+    let key: int[] = _td_key32();
+    let iv: int[] = _td_iv12();
+    let kp: *u8 = _td_buf(key);
+    let ivp: *u8 = _td_buf(iv);
+
+    let lens: int[] = [0, 1, 17, 32, 65, 129, 257, 1025, 4096, 16384];
+    let pads: int[] = [0, 1, 7];
+    let content_type: int = 23;
+
+    let mut li: int = 0;
+    loop {
+        if li >= lens.length { break; }
+        let len: int = lens[li];
+        let mut content: int[] = [];
+        let mut j: int = 0;
+        loop {
+            if j >= len { break; }
+            content.push((j * 17 + len + 3) & 255);
+            j += 1;
+        }
+
+        let mut pi: int = 0;
+        loop {
+            if pi >= pads.length { break; }
+            let pad: int = pads[pi];
+            let seq: int = (li * 5 + pi + 1) * 211 + 7;
+
+            // The oracle seals; the pointer implementation opens. This is the
+            // cross-direction check — a nonce or AAD disagreement between the
+            // two implementations would fail here even if each is internally
+            // consistent with itself.
+            let sealed: int[] = tls13_seal_record(key, iv, seq, content_type, content, pad);
+            assert sealed.length > 0;
+
+            let rp: *u8 = _td_buf(sealed);
+            let r: int = sfn_tls_record_open(kp, 32, ivp, 12, seq, rp, sealed.length);
+            assert r >= 0;
+            let got_type: int = r >> 32;
+            let got_len: int = r & 4294967295;
+            assert got_type == content_type;
+            assert got_len == len;
+
+            let mut k: int = 0;
+            let mut mismatched: int = 0;
+            loop {
+                if k >= len { break; }
+                if _td_get(rp, 5 + k) != content[k] { mismatched += 1; }
+                k += 1;
+            }
+            assert mismatched == 0;
+
+            free(rp);
+            pi += 1;
+        }
+        li += 1;
+    }
+    free(kp);
+    free(ivp);
+}
+
+// ── Test 3: pointer open agrees with the oracle on every fail-closed path ─
+test "tls record: pointer open agrees with the int[] oracle on every fail-closed path" {
+    let key: int[] = _td_key32();
+    let iv: int[] = _td_iv12();
+    let kp: *u8 = _td_buf(key);
+    let ivp: *u8 = _td_buf(iv);
+
+    let content: int[] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32];
+    let base_seq: int = 4200;
+    let base_record: int[] = tls13_seal_record(key, iv, base_seq, 23, content, 1);
+    assert base_record.length > 0;
+    let base_ptr: *u8 = _td_buf(base_record);
+    let base_len: int = base_record.length;
+
+    // -- short header: record_len 0 and 4 --
+    let dummy: *u8 = malloc(8 as usize);
+    let short0: int = sfn_tls_record_open(kp, 32, ivp, 12, base_seq, dummy, 0);
+    assert short0 == 0 - 6;
+    let empty_arr: int[] = [];
+    assert _td_oracle_open_err(key, iv, base_seq, empty_arr).length > 0;
+
+    let short4: int = sfn_tls_record_open(kp, 32, ivp, 12, base_seq, base_ptr, 4);
+    assert short4 == 0 - 6;
+    let short4_arr: int[] = _td_take(base_record, 4);
+    assert _td_oracle_open_err(key, iv, base_seq, short4_arr).length > 0;
+    free(dummy);
+
+    // -- unexpected outer content type: byte 0 set to 22 --
+    let bad_type_arr: int[] = _td_clone(base_record);
+    bad_type_arr[0] = 22;
+    let bad_type_ptr: *u8 = _td_buf(bad_type_arr);
+    let bad_type_res: int = sfn_tls_record_open(kp, 32, ivp, 12, base_seq, bad_type_ptr, base_len);
+    assert bad_type_res == 0 - 7;
+    assert _td_oracle_open_err(key, iv, base_seq, bad_type_arr).length > 0;
+    free(bad_type_ptr);
+
+    // -- length mismatch: declared record_len - 1 --
+    let mismatch_res: int = sfn_tls_record_open(kp, 32, ivp, 12, base_seq, base_ptr, base_len - 1);
+    assert mismatch_res == 0 - 8;
+    let mismatch_arr: int[] = _td_take(base_record, base_len - 1);
+    assert _td_oracle_open_err(key, iv, base_seq, mismatch_arr).length > 0;
+
+    // -- encrypted_record shorter than tag: declared length 15 --
+    let short_enc_arr: int[] = _td_raw_record(23, 15, _td_zeros(15));
+    let short_enc_ptr: *u8 = _td_buf(short_enc_arr);
+    let short_enc_res: int = sfn_tls_record_open(kp, 32, ivp, 12, base_seq, short_enc_ptr, short_enc_arr.length);
+    assert short_enc_res == 0 - 9;
+    assert _td_oracle_open_err(key, iv, base_seq, short_enc_arr).length > 0;
+    free(short_enc_ptr);
+
+    // -- tag mismatch: flipped tag byte, flipped ciphertext byte, flipped
+    // header byte covered by the AAD (byte 1, not the length field at 3/4 —
+    // flipping either of those changes the declared length and hits the
+    // length-mismatch guard first, matching the oracle's guard order). --
+    let flip_tag_arr: int[] = _td_clone(base_record);
+    flip_tag_arr[base_len - 1] = (flip_tag_arr[base_len - 1] ^ 1) & 255;
+    let flip_tag_ptr: *u8 = _td_buf(flip_tag_arr);
+    assert sfn_tls_record_open(kp, 32, ivp, 12, base_seq, flip_tag_ptr, base_len) == 0 - 10;
+    assert _td_oracle_open_err(key, iv, base_seq, flip_tag_arr).length > 0;
+    free(flip_tag_ptr);
+
+    let flip_body_arr: int[] = _td_clone(base_record);
+    flip_body_arr[10] = (flip_body_arr[10] ^ 1) & 255;
+    let flip_body_ptr: *u8 = _td_buf(flip_body_arr);
+    assert sfn_tls_record_open(kp, 32, ivp, 12, base_seq, flip_body_ptr, base_len) == 0 - 10;
+    assert _td_oracle_open_err(key, iv, base_seq, flip_body_arr).length > 0;
+    free(flip_body_ptr);
+
+    let flip_hdr_arr: int[] = _td_clone(base_record);
+    flip_hdr_arr[1] = (flip_hdr_arr[1] ^ 1) & 255;
+    let flip_hdr_ptr: *u8 = _td_buf(flip_hdr_arr);
+    assert sfn_tls_record_open(kp, 32, ivp, 12, base_seq, flip_hdr_ptr, base_len) == 0 - 10;
+    assert _td_oracle_open_err(key, iv, base_seq, flip_hdr_arr).length > 0;
+    free(flip_hdr_ptr);
+
+    // -- all-zero plaintext: content_type=0, content_len=0, padding=0 makes
+    // the whole TLSInnerPlaintext a single zero content-type byte. --
+    let zero_content: int[] = [];
+    let zero_seq: int = base_seq + 1;
+    let zero_record: int[] = tls13_seal_record(key, iv, zero_seq, 0, zero_content, 0);
+    assert zero_record.length > 0;
+    let zero_ptr: *u8 = _td_buf(zero_record);
+    assert sfn_tls_record_open(kp, 32, ivp, 12, zero_seq, zero_ptr, zero_record.length) == 0 - 11;
+    let zero_msg: string = _td_oracle_open_err(key, iv, zero_seq, zero_record);
+    assert zero_msg.length > 0;
+    assert contains(zero_msg, "no content type");
+    free(zero_ptr);
+
+    // -- bad key/iv length --
+    let short_key: int[] = _td_take(key, 31);
+    let short_key_res: int = sfn_tls_record_open(kp, 31, ivp, 12, base_seq, base_ptr, base_len);
+    assert short_key_res == 0 - 1;
+    assert _td_oracle_open_err(short_key, iv, base_seq, base_record).length > 0;
+
+    let short_iv: int[] = _td_take(iv, 11);
+    let short_iv_res: int = sfn_tls_record_open(kp, 32, ivp, 11, base_seq, base_ptr, base_len);
+    assert short_iv_res == 0 - 2;
+    assert _td_oracle_open_err(key, short_iv, base_seq, base_record).length > 0;
+
+    free(base_ptr);
+    free(kp);
+    free(ivp);
+}
+
+// ── Test 4: pointer seal fails closed on out-of-range framing inputs ─────
+test "tls record: pointer seal fails closed on out-of-range framing inputs" {
+    let key: int[] = _td_key32();
+    let iv: int[] = _td_iv12();
+    let kp: *u8 = _td_buf(key);
+    let ivp: *u8 = _td_buf(iv);
+
+    // -- negative padding --
+    let small_content: int[] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    let small_cp: *u8 = _td_buf(small_content);
+    let small_out: *u8 = malloc(64 as usize);
+    let neg_pad_res: int = sfn_tls_record_seal(kp, 32, ivp, 12, 1, 23, small_cp, small_content.length, 0 - 1, small_out);
+    assert neg_pad_res == 0 - 3;
+    let neg_pad_want: int[] = tls13_seal_record(key, iv, 1, 23, small_content, 0 - 1);
+    assert neg_pad_want.length == 0;
+    free(small_cp);
+    free(small_out);
+
+    // -- content overflow: content_len = 16385 (> 2^14). The guard runs
+    // before any content read, so the content/out buffers need not be filled
+    // or sized for the (rejected) real length. --
+    let overflow_len: int = 16385;
+    let overflow_cp: *u8 = malloc(1 as usize);
+    let overflow_out: *u8 = malloc(1 as usize);
+    let overflow_res: int = sfn_tls_record_seal(kp, 32, ivp, 12, 2, 23, overflow_cp, overflow_len, 0, overflow_out);
+    assert overflow_res == 0 - 4;
+    let overflow_content: int[] = _td_zeros(overflow_len);
+    let overflow_want: int[] = tls13_seal_record(key, iv, 2, 23, overflow_content, 0);
+    assert overflow_want.length == 0;
+    free(overflow_cp);
+    free(overflow_out);
+
+    // -- record overflow: content at the plaintext ceiling plus padding that
+    // pushes encrypted_record past 2^14 + 256. Same no-read guard order. --
+    let big_len: int = 16384;
+    let big_pad: int = 1000;
+    let big_cp: *u8 = malloc(1 as usize);
+    let big_out: *u8 = malloc(1 as usize);
+    let big_res: int = sfn_tls_record_seal(kp, 32, ivp, 12, 3, 23, big_cp, big_len, big_pad, big_out);
+    assert big_res == 0 - 5;
+    let big_content: int[] = _td_zeros(big_len);
+    let big_want: int[] = tls13_seal_record(key, iv, 3, 23, big_content, big_pad);
+    assert big_want.length == 0;
+    free(big_cp);
+    free(big_out);
+
+    free(kp);
+    free(ivp);
+}
+
+// ── Test 5: pointer keystream pins the RFC 8439 §2.8.2 ChaCha20 vector ───
+fn _td_hexval(c: string) -> int {
+    let code: int = char_code(c) & 255;
+    if code >= 48 && code <= 57 {
+        return code - 48;
+    }  // '0'-'9'
+    if code >= 97 && code <= 102 {
+        return code - 97 + 10;
+    }  // 'a'-'f'
+    return 0;
+}
+
+fn _td_hexb(s: string) -> int[] {
+    let mut out: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= s.length { break; }
+        let hi: int = _td_hexval(s[i]);
+        let lo: int = _td_hexval(s[i + 1]);
+        out.push(((hi << 4) | lo) & 255);
+        i += 2;
+    }
+    return out;
+}
+
+fn _td_str_bytes(s: string) -> int[] {
+    let mut out: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= s.length { break; }
+        out.push(char_code(s[i]) & 255);
+        i += 1;
+    }
+    return out;
+}
+
+// This pins the ChaCha20 cipher core directly against the RFC rather than
+// only against the oracle. Setting `iv` to the RFC nonce and `seq = 0` makes
+// the derived per-record nonce (§5.3: iv XOR zero-padded seq) equal the RFC
+// nonce exactly, and the AEAD encrypts starting at block counter 1 in both
+// implementations, so the ciphertext bytes at `out[5 .. 5+114)` must match
+// the RFC's expected ciphertext byte-for-byte. The Poly1305 TAG will NOT
+// match the RFC's: the TLS record layer authenticates the 5-byte record
+// header as AAD, not the RFC's 12-byte AAD, so the tags are computed over
+// different inputs by design — do not "fix" this by changing the AAD. Tag
+// correctness against a real key/iv pair is covered by the oracle
+// differential in tests 1 and 2 above.
+test "tls record: pointer keystream matches the RFC 8439 §2.8.2 ChaCha20 vector" {
+    let mut key: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= 32 { break; }
+        key.push(128 + i);
+        i += 1;
+    }
+    let iv: int[] = _td_hexb("070000004041424344454647");
+    let kp: *u8 = _td_buf(key);
+    let ivp: *u8 = _td_buf(iv);
+
+    let plaintext: string = "Ladies and Gentlemen of the class of '99: If I could offer you only one tip for the future, sunscreen would be it.";
+    let content: int[] = _td_str_bytes(plaintext);
+    assert content.length == 114;
+
+    let expected_ct: int[] = _td_hexb("d31a8d34648e60db7b86afbc53ef7ec2a4aded51296e08fea9e2b5a736ee62d63dbea45e8ca9671282fafb69da92728b1a71de0a9e060b2905d6a5b67ecd3b3692ddbd7f2d778b8c9803aee328091b58fab324e4fad675945585808b4831d7bc3ff4def08e4b7a9de576d26586cec64b6116");
+    assert expected_ct.length == 114;
+
+    let cp: *u8 = _td_buf(content);
+    let out_sz: int = content.length + 1 + 16 + 5;
+    let outp: *u8 = malloc(out_sz as usize);
+    let got_len: int = sfn_tls_record_seal(kp, 32, ivp, 12, 0, 23, cp, content.length, 0, outp);
+    assert got_len == out_sz;
+
+    let mut mismatched: int = 0;
+    let mut k: int = 0;
+    loop {
+        if k >= expected_ct.length { break; }
+        if _td_get(outp, 5 + k) != expected_ct[k] { mismatched += 1; }
+        k += 1;
+    }
+    assert mismatched == 0;
+
+    free(cp);
+    free(outp);
+    free(kp);
+    free(ivp);
+}
+
+// ── Test 6: negative content_len, no oracle counterpart ──────────────────
+test "tls record: pointer seal rejects negative content_len with no oracle counterpart" {
+    let key: int[] = _td_key32();
+    let iv: int[] = _td_iv12();
+    let kp: *u8 = _td_buf(key);
+    let ivp: *u8 = _td_buf(iv);
+
+    // `content_len < 0` has no oracle counterpart: `int[].length` is
+    // non-negative by construction, so the differential can never construct
+    // this input. Asserted against the pointer implementation alone
+    // (SFN-768). `out` is allocated with real slack so that, if this guard
+    // ever regresses, a stray write corrupts this scratch buffer rather than
+    // something live.
+    let dummy_content: *u8 = malloc(1 as usize);
+    let out: *u8 = malloc(4096 as usize);
+
+    let neg32: int = sfn_tls_record_seal(kp, 32, ivp, 12, 1, 23, dummy_content, 0 - 32, 0, out);
+    assert neg32 == 0 - 4;
+
+    let neg1: int = sfn_tls_record_seal(kp, 32, ivp, 12, 2, 23, dummy_content, 0 - 1, 0, out);
+    assert neg1 == 0 - 4;
+
+    free(dummy_content);
+    free(out);
+    free(kp);
+    free(ivp);
+}
+
+// ── Test 7: ct_len == 0 (declared == tag_len, tag-only record) ───────────
+test "tls record: open rejects a ct_len == 0 record" {
+    let key: int[] = _td_key32();
+    let iv: int[] = _td_iv12();
+    let kp: *u8 = _td_buf(key);
+    let ivp: *u8 = _td_buf(iv);
+
+    // declared = 16 (== tag_len) makes ct_len == 0: an all-zero-plaintext
+    // record shape with no ciphertext bytes at all. A genuine tag is not
+    // needed to reach this case: empirically, the AEAD authentication guard
+    // fires first on the fake all-zero tag, before either implementation
+    // ever reaches the no-content-type guard the all-zero-plaintext shape
+    // was aiming at.
+    let raw: int[] = _td_raw_record(23, 16, _td_zeros(16));
+    let raw_ptr: *u8 = _td_buf(raw);
+    let seq: int = 9001;
+
+    let got: int = sfn_tls_record_open(kp, 32, ivp, 12, seq, raw_ptr, raw.length);
+    assert got == 0 - 10;
+    let msg: string = _td_oracle_open_err(key, iv, seq, raw);
+    assert msg.length > 0;
+    assert contains(msg, "authentication failed");
+
+    free(raw_ptr);
+    free(kp);
+    free(ivp);
+}
+
+// ── Test 8: the documented zero-copy seal path (content == out + 5) ──────
+test "tls record: seal's zero-copy content pointer matches the copying path" {
+    let key: int[] = _td_key32();
+    let iv: int[] = _td_iv12();
+    let kp: *u8 = _td_buf(key);
+    let ivp: *u8 = _td_buf(iv);
+
+    let len: int = 500;
+    let mut content: int[] = [];
+    let mut j: int = 0;
+    loop {
+        if j >= len { break; }
+        content.push((j * 41 + 5) & 255);
+        j += 1;
+    }
+    let seq: int = 777;
+    let pad: int = 3;
+
+    // Path A: a disjoint content buffer, the ordinary path where
+    // `sfn_tls_record_seal` copies content into `out + 5` with `memcpy`.
+    let cp: *u8 = _td_buf(content);
+    let out_a: *u8 = malloc((len + pad + 64) as usize);
+    let got_a: int = sfn_tls_record_seal(kp, 32, ivp, 12, seq, 23, cp, len, pad, out_a);
+    assert got_a > 0;
+
+    // Path B: `content` already sits at `out + 5`, the documented zero-copy
+    // path where the `memcpy` is skipped entirely (SFN-768).
+    let out_b: *u8 = malloc((len + pad + 64) as usize);
+    let body_b: *u8 = _td_off(out_b, 5);
+    let mut k: int = 0;
+    loop {
+        if k >= len { break; }
+        _td_put(body_b, k, content[k]);
+        k += 1;
+    }
+    let got_b: int = sfn_tls_record_seal(kp, 32, ivp, 12, seq, 23, body_b, len, pad, out_b);
+    assert got_b > 0;
+    assert got_a == got_b;
+
+    let mut mismatched: int = 0;
+    let mut m: int = 0;
+    loop {
+        if m >= got_a { break; }
+        if _td_get(out_a, m) != _td_get(out_b, m) { mismatched += 1; }
+        m += 1;
+    }
+    assert mismatched == 0;
+
+    free(cp);
+    free(out_a);
+    free(out_b);
+    free(kp);
+    free(ivp);
+}
+
+// ── Test 9: padding above 7, and an inner content type other than 23/0 ───
+test "tls record: seal/open handle padding above 7 and a non-application_data inner content type" {
+    let key: int[] = _td_key32();
+    let iv: int[] = _td_iv12();
+    let kp: *u8 = _td_buf(key);
+    let ivp: *u8 = _td_buf(iv);
+
+    let len: int = 40;
+    let mut content: int[] = [];
+    let mut j: int = 0;
+    loop {
+        if j >= len { break; }
+        content.push((j * 19 + 11) & 255);
+        j += 1;
+    }
+    let cp: *u8 = _td_buf(content);
+    let pad: int = 200;
+    let inner_content_type: int = 21;  // alert
+    let seq: int = 555;
+
+    let want: int[] = tls13_seal_record(key, iv, seq, inner_content_type, content, pad);
+    assert want.length > 0;
+
+    let out: *u8 = malloc((len + pad + 64) as usize);
+    let got_len: int = sfn_tls_record_seal(kp, 32, ivp, 12, seq, inner_content_type, cp, len, pad, out);
+    assert got_len == want.length;
+
+    let mut mismatched: int = 0;
+    let mut k: int = 0;
+    loop {
+        if k >= want.length { break; }
+        if _td_get(out, k) != want[k] { mismatched += 1; }
+        k += 1;
+    }
+    assert mismatched == 0;
+
+    let opened: int = sfn_tls_record_open(kp, 32, ivp, 12, seq, out, got_len);
+    assert opened >= 0;
+    let got_type: int = opened >> 32;
+    let got_content_len: int = opened & 4294967295;
+    assert got_type == inner_content_type;
+    assert got_content_len == len;
+
+    free(cp);
+    free(out);
+    free(kp);
+    free(ivp);
+}
