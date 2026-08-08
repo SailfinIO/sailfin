@@ -1,0 +1,243 @@
+// compiler/tests/e2e/target_flag_cache_key_test.sfn
+//
+// SFN-778 (design SFEP-0068 §3.1-§3.2): pins the `--target=<triple>` flag,
+// its precedence over `SAILFIN_TARGET_TRIPLE`/`SAILFIN_TARGET_OS`, its
+// interaction with the legacy `SAILFIN_TARGET_OS` OS-axis resolver
+// (`build_target_os()`, `compiler/src/build/target.sfn:85-92`), and the
+// SFN-774 triple fold into the runtime-object cache key
+// (`_runtime_obj_key_with_target`, `compiler/src/build/runtime_objs.sfn`).
+//
+// This must be a subprocess suite: the runtime has no `setenv`
+// (`compiler/src/build_cache.sfn:279`, `runtime/sfn/process.sfn:1941`), so
+// the only way to observe an env-driven resolution is to spawn a child `sfn`
+// with a controlled environment and read what it traces or writes to disk.
+//
+// No-bash e2e (`.claude/rules/no-bash-e2e.md`): every spawn goes through
+// `process.run_capture_cwd` with `clean_runner_env(nested_runner_scratch(
+// "<label>"))` per `docs/conventions/e2e-tests.md`, using a distinct label
+// per spawn so pool-parallel runs of this file do not collide. Any build
+// that needs on-disk artifacts is redirected with `--work-dir`, since that
+// beats `SAILFIN_TEST_SCRATCH` (`compiler/src/build/cache.sfn:185-190`) and
+// keeps output paths deterministic.
+import { contains, split } from "sfn/strings";
+import { clean_runner_env, nested_runner_scratch, with_tmp_dir } from "sfn/test";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+fn _first_line(text: string) -> string {
+    let lines = split(text, "\n");
+    if lines.length == 0 { return text; }
+    return lines[0];
+}
+
+// `run_capture_cwd` resolves the child's argv[0] against the CHILD cwd, not
+// the parent's — an unqualified "build/bin/sfn" would not resolve once the
+// nested build's cwd is the fixture scratch dir. Mirrors
+// `windows_exe_suffix_test.sfn`'s `_sfn_bin_abs`.
+fn _sfn_bin_abs() -> string ![io] {
+    let bin = _sfn_bin();
+    if bin.length > 0 && bin[0] == "/" { return bin; }
+    let exit = process.run_capture(["pwd"], clean_runner_env(nested_runner_scratch("target-flag-cache-key-pwd")));
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    if exit != 0 { return bin; }
+    return _first_line(out) + "/" + bin;
+}
+
+fn _write_fixture(dir: string) -> void ![io] {
+    fs.writeFile(dir + "/main.sfn", "fn main() -> int {\n    return 0;\n}\n");
+}
+
+// E0614 rejects an unsupported `--target` triple before any compilation
+// happens, so this needs no `--work-dir` and is fast.
+test "target flag: an unsupported --target triple is rejected with E0614" ![io] {
+    let sfn = _sfn_bin_abs();
+    let outcome = with_tmp_dir(fn (dir: string) -> int {
+        _write_fixture(dir);
+        let child_env = clean_runner_env(nested_runner_scratch("target-flag-e0614"));
+        let exit = process.run_capture_cwd([sfn, "build", "--target=bogus-triple", "main.sfn"], child_env, dir);
+        let _out = process.capture_take_stdout();
+        let err = process.capture_take_stderr();
+        assert exit == 2;
+        assert contains(err, "error[E0614]");
+        assert contains(err, "unsupported --target triple: \"bogus-triple\"");
+        assert contains(err, "x86_64-unknown-linux-gnu");
+        assert contains(err, "x86_64-pc-windows-msvc");
+        assert contains(err, "x86_64-w64-mingw32");
+        assert ! fs.exists(dir + "/build");
+        return 0;
+    });
+    assert outcome == 0;
+}
+
+// The legacy `SAILFIN_TARGET_OS` alias must keep resolving to the msvc
+// triple — this is the seam `windows_socket_ops_test.sfn`,
+// `windows_runtime_siblings_test.sfn`, and `runtime_adapter_http_test.sfn`
+// depend on. The cross-target link fails on a Linux host (no MSVC import
+// libs), but `SAILFIN_TRACE_LINK=1` traces the resolved argv before the
+// link subprocess actually runs, so this asserts on stderr, never on the
+// exit code.
+test "target flag: the legacy SAILFIN_TARGET_OS alias still resolves to the msvc triple" ![io] {
+    let sfn = _sfn_bin_abs();
+    let outcome = with_tmp_dir(fn (dir: string) -> int {
+        _write_fixture(dir);
+        let mut child_env = clean_runner_env(nested_runner_scratch("target-flag-legacy-os"));
+        child_env.push("SAILFIN_TARGET_OS=Windows");
+        child_env.push("SAILFIN_TRACE_LINK=1");
+        let _exit = process.run_capture_cwd([sfn, "build", "main.sfn"], child_env, dir);
+        let _out = process.capture_take_stdout();
+        let err = process.capture_take_stderr();
+        assert contains(err, "[trace-link]");
+        assert contains(err, "-target x86_64-pc-windows-msvc");
+        return 0;
+    });
+    assert outcome == 0;
+}
+
+// Precedence (`compiler/src/build/target.sfn:85-92`, `:222-230`): a
+// `--target` flag beats `SAILFIN_TARGET_TRIPLE`, which beats
+// `SAILFIN_TARGET_OS`. Two spawns, each pinning a different rung of the
+// precedence ladder.
+//
+// Both spawns pin `SAILFIN_TARGET_OS=Windows` (a RECOGNIZED value) rather
+// than `Linux`. `build_target_os()` — the separate OS-only resolver that
+// gates direct-`ld.lld` vs. the clang driver
+// (`compiler/src/backend.sfn:361-382`, `resolve_direct_ld_lld`) — checks
+// its own `SAILFIN_TARGET_OS` override FIRST, ahead of any `--target`
+// flag's triple. `SAILFIN_TARGET_OS=Linux` makes that gate take the
+// direct-`ld.lld` path unconditionally (verified empirically against this
+// commit), which never renders a clang `-target` token at all regardless
+// of which triple resolver would otherwise win. Pinning `Windows` keeps
+// both spawns on the clang-driver path, isolating the assertion to the
+// triple resolver's precedence — the thing this test exists to pin.
+test "target flag: --target beats SAILFIN_TARGET_TRIPLE beats SAILFIN_TARGET_OS" ![io] {
+    let sfn = _sfn_bin_abs();
+    let outcome = with_tmp_dir(fn (dir: string) -> int {
+        _write_fixture(dir);
+
+        // SAILFIN_TARGET_TRIPLE beats SAILFIN_TARGET_OS when no --target flag
+        // is present.
+        let mut env_a = clean_runner_env(nested_runner_scratch("target-flag-precedence-a"));
+        env_a.push("SAILFIN_TARGET_TRIPLE=x86_64-w64-mingw32");
+        env_a.push("SAILFIN_TARGET_OS=Windows");
+        env_a.push("SAILFIN_TRACE_LINK=1");
+        let _exit_a = process.run_capture_cwd([sfn, "build", "main.sfn"], env_a, dir);
+        let _out_a = process.capture_take_stdout();
+        let err_a = process.capture_take_stderr();
+        assert contains(err_a, "-target x86_64-w64-mingw32");
+        assert ! contains(err_a, "-target x86_64-pc-windows-msvc");
+
+        // --target beats both SAILFIN_TARGET_TRIPLE and SAILFIN_TARGET_OS.
+        let mut env_b = clean_runner_env(nested_runner_scratch("target-flag-precedence-b"));
+        env_b.push("SAILFIN_TARGET_TRIPLE=x86_64-w64-mingw32");
+        env_b.push("SAILFIN_TARGET_OS=Windows");
+        env_b.push("SAILFIN_TRACE_LINK=1");
+        let _exit_b = process.run_capture_cwd([sfn, "build", "--target=x86_64-pc-windows-msvc", "main.sfn"], env_b, dir);
+        let _out_b = process.capture_take_stdout();
+        let err_b = process.capture_take_stderr();
+        assert contains(err_b, "-target x86_64-pc-windows-msvc");
+        assert ! contains(err_b, "-target x86_64-w64-mingw32");
+
+        return 0;
+    });
+    assert outcome == 0;
+}
+
+// The deliberate divergence documented at `compiler/src/build/target.sfn:
+// 68-84`: `build_target_os()` returns an unrecognized `SAILFIN_TARGET_OS`
+// override VERBATIM and unvalidated, while `build_target_triple()` has no
+// such override to check and falls through to the host probe instead. The
+// two resolvers agree on every RECOGNIZED value but diverge on a typo. This
+// is written as a contrast pair, not a single assertion, because the
+// contrast — not either half alone — is what pins the divergence: asserting
+// only the unrecognized half would also pass if the OS resolver had simply
+// stopped tracing anything, and asserting a specific host-probed triple for
+// the unrecognized case would make the test host-dependent.
+test "target flag: an unrecognized SAILFIN_TARGET_OS diverges from the triple resolver" ![io] {
+    let sfn = _sfn_bin_abs();
+    let outcome = with_tmp_dir(fn (dir: string) -> int {
+        _write_fixture(dir);
+
+        // Recognized: both resolvers agree.
+        let mut env_recognized = clean_runner_env(nested_runner_scratch("target-flag-divergence-recognized"));
+        env_recognized.push("SAILFIN_TARGET_OS=Windows");
+        env_recognized.push("SAILFIN_TRACE_LINK=1");
+        let _exit_r = process.run_capture_cwd([sfn, "build", "main.sfn"], env_recognized, dir);
+        let _out_r = process.capture_take_stdout();
+        let err_r = process.capture_take_stderr();
+        assert contains(err_r, "target is not Linux (Windows)");
+        assert contains(err_r, "-target x86_64-pc-windows-msvc");
+
+        // Unrecognized: the OS resolver echoes the typo verbatim, but the
+        // triple resolver ignores it and falls through to the host probe,
+        // so no msvc `-target` token appears.
+        let mut env_typo = clean_runner_env(nested_runner_scratch("target-flag-divergence-typo"));
+        env_typo.push("SAILFIN_TARGET_OS=Plan9");
+        env_typo.push("SAILFIN_TRACE_LINK=1");
+        let _exit_t = process.run_capture_cwd([sfn, "build", "main.sfn"], env_typo, dir);
+        let _out_t = process.capture_take_stdout();
+        let err_t = process.capture_take_stderr();
+        assert contains(err_t, "target is not Linux (Plan9)");
+        assert ! contains(err_t, "-target x86_64-pc-windows-msvc");
+
+        return 0;
+    });
+    assert outcome == 0;
+}
+
+// SFN-774: the ABI component of a triple keys the four link decisions that
+// diverge between the two Windows ABIs, and that key is folded into the
+// runtime-object cache key's `tgt2:` line
+// (`_runtime_obj_key_with_target`, `compiler/src/build/runtime_objs.sfn`).
+// Building both Windows triples into one shared `--work-dir` must not
+// clobber either bucket. Both cross-target links fail on this Linux host
+// (no MSVC/mingw import libs), so both exit codes are ignored — the cache
+// key and artifact are written before the link is attempted.
+test "target flag: the two Windows triples occupy distinct cache-key and artifact buckets" ![io] {
+    let sfn = _sfn_bin_abs();
+    let outcome = with_tmp_dir(fn (dir: string) -> int {
+        _write_fixture(dir);
+        let work_dir = dir + "/wd";
+
+        let env_msvc = clean_runner_env(nested_runner_scratch("target-flag-buckets-msvc"));
+        let _exit_msvc = process.run_capture_cwd([sfn, "build", "--work-dir", work_dir, "--target=x86_64-pc-windows-msvc", "main.sfn"], env_msvc, dir);
+        let _out_msvc = process.capture_take_stdout();
+        let _err_msvc = process.capture_take_stderr();
+
+        let env_gnu = clean_runner_env(nested_runner_scratch("target-flag-buckets-gnu"));
+        let _exit_gnu = process.run_capture_cwd([sfn, "build", "--work-dir", work_dir, "--target=x86_64-w64-mingw32", "main.sfn"], env_gnu, dir);
+        let _out_gnu = process.capture_take_stdout();
+        let _err_gnu = process.capture_take_stderr();
+
+        let artifacts_dir = work_dir + "/sailfin";
+        let msvc_key = artifacts_dir
+            + "/sfn__runtime-native__clock.sfn-windows-msvc-O2.o.key";
+        let gnu_key = artifacts_dir
+            + "/sfn__runtime-native__clock.sfn-windows-gnu-O2.o.key";
+        let msvc_obj = artifacts_dir
+            + "/sfn__runtime-native__clock.sfn-windows-msvc-O2.o";
+        let gnu_obj = artifacts_dir
+            + "/sfn__runtime-native__clock.sfn-windows-gnu-O2.o";
+
+        assert fs.exists(msvc_key);
+        assert fs.exists(gnu_key);
+        assert fs.exists(msvc_obj);
+        assert fs.exists(gnu_obj);
+
+        // The `.key` sidecar is the literal cache-key preimage; its last
+        // line is the SFN-774 triple fold. The two buckets must not
+        // collapse into one.
+        let msvc_key_content = fs.readFile(msvc_key);
+        let gnu_key_content = fs.readFile(gnu_key);
+        assert msvc_key_content != gnu_key_content;
+        assert contains(msvc_key_content, "tgt2:x86_64-pc-windows-msvc");
+        assert contains(gnu_key_content, "tgt2:x86_64-w64-mingw32");
+
+        return 0;
+    });
+    assert outcome == 0;
+}
