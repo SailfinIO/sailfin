@@ -1,0 +1,7 @@
+// compiler/tests/e2e/fixtures/reexport_transitive_order/reexport.sfn
+//
+// Inline re-export of `./leaf` — a depth-0 edge from `main`. Before the
+// SFN-779 fix, this re-reach of `leaf` (already `seen` from `./b`'s
+// depth-1 import) was dedup-skipped instead of promoted to depth 0, so
+// `leaf`'s `.fn` signatures never entered `imported_functions`.
+export { ro_is_yes } from "./leaf";

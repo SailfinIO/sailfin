@@ -1,0 +1,10 @@
+// compiler/tests/e2e/fixtures/reexport_transitive_order/b.sfn
+//
+// Plain import of `./leaf` — queues `leaf` at BFS depth 1 during
+// `llvm/imports.sfn`'s traversal, so `leaf`'s native text is (pre-fix)
+// dropped once `seen` records this first-dequeued, non-zero depth.
+import { ro_tag } from "./leaf";
+
+fn b_tag() -> string { return "b:" + ro_tag(); }
+
+export { b_tag };

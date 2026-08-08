@@ -1,0 +1,12 @@
+// compiler/tests/e2e/fixtures/reexport_transitive_order/leaf.sfn
+//
+// Origin module for the SFN-779 regression. Reached two ways from `main`:
+// transitively (through `./b`'s plain import, at BFS depth 1) and via
+// `./reexport`'s inline re-export (at BFS depth 0). Only the depth-0 reach must
+// win for this module's full native text (including `.fn` signatures) to
+// survive the import-graph traversal.
+fn ro_is_yes(value: string) -> boolean { return value == "yes"; }
+
+fn ro_tag() -> string { return "leaf"; }
+
+export { ro_is_yes, ro_tag };
