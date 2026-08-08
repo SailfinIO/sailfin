@@ -10,7 +10,7 @@ import { _emit_captured_stream, _env_entry_has_key, _env_snapshot_has_key } from
 // cache write lands. Resolving + compiling the union closure here (per
 // resolver group) makes every child cache-hit. Best-effort: a warm
 // failure logs and returns; children then compile per file as before.
-fn _prewarm_test_dep_closures(test_files: string[], binary_dir: string) -> void ![io] {
+fn _prewarm_test_dep_closures(test_files: string[], runtime_root: string, binary_dir: string) -> void ![io] {
     // Partition into resolver groups exactly as the leaf path does
     // (group key = capsule/project the file resolves under), so a
     // multi-project invocation warms each project's closure separately.
@@ -45,7 +45,7 @@ fn _prewarm_test_dep_closures(test_files: string[], binary_dir: string) -> void 
         if g >= group_files.length { break; }
         let files = group_files[g];
         if files.length > 0 {
-            let consumer = _test_resolver_consumer_for_group(files[0]);
+            let consumer = _test_resolver_consumer_for_group(files[0], runtime_root);
             // Trailing args MUST be exactly ("", "", binary_dir) —
             // byte-identical to the child call site (currently
             // test.sfn line ~1028). The module cache key folds
