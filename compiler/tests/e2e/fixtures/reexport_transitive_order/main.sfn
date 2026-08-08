@@ -1,0 +1,23 @@
+// compiler/tests/e2e/fixtures/reexport_transitive_order/main.sfn
+//
+// Consumer for the SFN-779 regression. The bug is import-order dependent:
+// `./b` must be reached BEFORE `./reexport` so the BFS in `llvm/imports.sfn`
+// queues `leaf` first via `./b`'s plain import (depth 1, text dropped) and
+// only later re-reaches it via `./reexport`'s depth-0 re-export
+// (dedup-skipped pre-fix). `sfn fmt` alphabetizes import declarations
+// (`docs/style-guide.md`), so these two modules are deliberately named
+// `b`/`reexport` — "b" < "reexport" — to keep the required order stable
+// under formatting; do not rename either file in a way that flips that
+// lexical order, or this test is silently neutered.
+import { b_tag } from "./b";
+import { ro_is_yes } from "./reexport";
+
+fn main() ![io] {
+    print(b_tag());
+    if ro_is_yes("yes") { print("bool-yes-ok"); } else {
+        print("bool-yes-FAIL");
+    }
+    if ro_is_yes("no") { print("bool-no-FAIL"); } else {
+        print("bool-no-ok");
+    }
+}
