@@ -17,6 +17,7 @@ import { expect_eq_bool, expect_eq_str, expect_eq_str_array } from "sfn/test";
 
 import { LinkPlan, _llvm_text_link_program_argv, _llvm_text_link_test_argv } from "../../src/backend";
 import { _llvm_text_assemble_argv } from "../../src/build/clang_argv";
+import { empty_llvm_import_context } from "../../src/build/llvm_provider_context";
 import {
     build_host_os,
     build_target_triple,
@@ -76,7 +77,7 @@ test "target: provider entrypoint overwrites its complete context" ![io] {
         test_runner_active: false,
         test_runner_trace: false
     };
-    let _first_ir = lower_to_llvm_ir_from_text_with_provider_context("", "provider_context_first", first);
+    let _first_ir = lower_to_llvm_ir_from_text_with_provider_context("", "provider_context_first", empty_llvm_import_context(), first);
     assert expect_eq_str(build_target_os(), "Darwin").ok;
     assert expect_eq_str(target_arch_for_lowering(), "aarch64").ok;
     assert expect_eq_bool(trace_lowering(), false).ok;
@@ -94,7 +95,7 @@ test "target: provider entrypoint overwrites its complete context" ![io] {
         test_runner_active: true,
         test_runner_trace: true
     };
-    let _second_ir = lower_to_llvm_ir_from_text_with_provider_context("", "provider_context_second", second);
+    let _second_ir = lower_to_llvm_ir_from_text_with_provider_context("", "provider_context_second", empty_llvm_import_context(), second);
     assert expect_eq_str(build_target_os(), "Windows").ok;
     assert expect_eq_str(target_arch_for_lowering(), "x86_64").ok;
     assert expect_eq_bool(trace_lowering(), true).ok;

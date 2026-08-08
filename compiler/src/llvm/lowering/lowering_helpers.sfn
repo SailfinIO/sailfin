@@ -34,7 +34,6 @@ import {
 import { split_lines } from "../../native_ir_utils_text";
 import { char_code, substring } from "../../string_utils";
 import { append_unique_effect } from "../effects";
-import { resolve_import_artifact_slug, resolve_import_module_slug_for_module } from "../imports";
 import { is_prelude_mirror_symbol } from "../prelude_mirror_signatures";
 import { find_function_by_name, should_internalize_function } from "../rendering";
 import { runtime_helper_descriptors } from "../runtime_helpers/mod";
@@ -43,7 +42,6 @@ import {
     EnumTypeInfo,
     EnumVariantInfo,
     FunctionEffectEntry,
-    ImportedModuleContext,
     LifetimeRegionMetadata,
     LoweredLLVMLinesResult,
     LoweredLLVMResult,
@@ -379,19 +377,6 @@ fn collect_available_import_module_names(imported_native_texts: string[]) -> str
         index += 1;
     }
     return names;
-}
-
-fn resolve_import_provider_module_name(import_path: string, current_module_slug: string, available_module_names: string[]) -> string ![io] {
-    let base = resolve_import_module_slug_for_module(import_path, current_module_slug);
-    if base.length == 0 { return base; }
-    let resolved = resolve_import_artifact_slug(base);
-    if resolved.length > 0 { return resolved; }
-    if string_array_contains(available_module_names, base) { return base; }
-    let mod_slug = base + "/mod";
-    if string_array_contains(available_module_names, mod_slug) {
-        return mod_slug;
-    }
-    return base;
 }
 
 fn collect_defined_function_symbols(lines: string[]) -> string[] {

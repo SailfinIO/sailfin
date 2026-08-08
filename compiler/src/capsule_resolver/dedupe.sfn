@@ -7,7 +7,7 @@
 // source's `ll_path` once the consumer and dep layout are known.
 import { cache_key_for } from "../build_cache";
 import { capsule_artifact_layout_from_specs } from "../capsule_artifact";
-import { module_name_from_path } from "../main";
+import { module_name_from_path } from "../module_paths";
 import { enumerate_runtime_capsule_artifacts } from "../runtime_capsule_resolver";
 import { toml_get_capabilities_required, toml_get_dependencies, toml_get_name } from "../toml_parser";
 import { _cr_enumerate_host_capsule_sources, enumerate_capsule_sources } from "./discovery";

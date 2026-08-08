@@ -2,6 +2,8 @@
 // checker. Keeping this program-level analysis separate prevents the main
 // ownership walk from conflating a declared handle result with proof that a
 // helper creates a nursery-bound handle.
+import { find, starts_with, substring } from "sfn/strings";
+
 import {
     Block,
     Expression,
@@ -9,7 +11,6 @@ import {
     Statement
 } from "./ast";
 import { ImportSymbolTable, localize_import_symbols_for_program } from "./effect_imports";
-import { index_of, starts_with } from "./string_utils";
 import { is_task_type } from "./typecheck_types/expr_type_rules";
 import {
     extract_generic_argument_block,
@@ -30,7 +31,7 @@ fn _task_owner_base(type_name: string) -> string {
         if substring(base, base.length - 2, base.length) != "[]" { break; }
         base = trim_text(substring(base, 0, base.length - 2));
     }
-    let generic_start = index_of(base, "<");
+    let generic_start = find(base, "<", 0);
     if generic_start >= 0 {
         return trim_text(substring(base, 0, generic_start));
     }
@@ -155,7 +156,7 @@ fn _task_type_is_bearing_with_seen(names: string[], type_text: string, seen: str
     loop {
         if index >= names.length { break; }
         if starts_with(names[index], field_prefix) {
-            let equals = index_of(names[index], "=");
+            let equals = find(names[index], "=", 0);
             if equals >= 0 {
                 let raw = substring(names[index], equals + 1, names[index].length);
                 let concrete = _substitute_task_field_type(raw, parameters, arguments);
@@ -198,7 +199,7 @@ fn _channel_type_is_bearing_with_seen(names: string[], type_text: string, seen: 
     loop {
         if index >= names.length { break; }
         if starts_with(names[index], field_prefix) {
-            let equals = index_of(names[index], "=");
+            let equals = find(names[index], "=", 0);
             if equals >= 0 {
                 let raw = substring(names[index], equals + 1, names[index].length);
                 let concrete = _substitute_task_field_type(raw, parameters, arguments);

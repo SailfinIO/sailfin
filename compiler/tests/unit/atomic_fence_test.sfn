@@ -20,7 +20,7 @@
 // Lowering pulls the full backend closure and accumulates arena memory;
 // a single combined source carrying both `atomic_fence` call sites keeps
 // the per-file cost to one lowering.
-import { resolve_llvm_provider_context } from "../../src/build/llvm_provider_context";
+import { empty_llvm_import_context, resolve_llvm_provider_context } from "../../src/build/llvm_provider_context";
 import { emit_native_text_with_module_name } from "../../src/emit_native";
 import { is_atomic_builtin } from "../../src/llvm/atomics_check";
 import { lower_to_llvm_ir_from_text_with_provider_context } from "../../src/llvm/lowering/entrypoints";
@@ -98,7 +98,7 @@ test "lowering: atomic_fence emits one bare `fence seq_cst` per call site (#334)
         + "}";
     let program = parse_program(source);
     let native = emit_native_text_with_module_name(program, "atomic_fence_test");
-    let ir = lower_to_llvm_ir_from_text_with_provider_context(native, "atomic_fence_test", resolve_llvm_provider_context());
+    let ir = lower_to_llvm_ir_from_text_with_provider_context(native, "atomic_fence_test", empty_llvm_import_context(), resolve_llvm_provider_context());
 
     // Present, and exactly one per call site (the fixture has two).
     assert _contains(ir, "fence seq_cst");

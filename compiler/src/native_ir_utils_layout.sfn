@@ -1,6 +1,8 @@
 // compiler/src/native_ir_utils_layout.sfn
 //
 // Layout parsing utilities for struct and enum layout sections in .sfn-asm IR.
+import { substring } from "sfn/strings";
+
 import {
     EnumLayoutHeaderParse,
     EnumLayoutPayloadParse,
@@ -17,7 +19,6 @@ import {
     starts_with,
     trim_text
 } from "./native_ir_utils_text";
-import { substring } from "./string_utils";
 
 export {
     parse_decimal_number,

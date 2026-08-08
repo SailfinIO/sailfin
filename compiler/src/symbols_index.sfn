@@ -13,11 +13,11 @@
 // in the envelope.
 //
 // JSON is hand-rolled (the `_sym_json_*` helpers) rather than routed
-// through the `sfn/json` capsule, mirroring `diagnostics_json.sfn`: the
-// compiler proper doesn't import its own stdlib capsules (build cycle),
-// and a fixed manual field order is what makes the output byte-stable.
+// through the `sfn/json` capsule, mirroring `diagnostics_json.sfn`: a fixed
+// manual field order keeps the schema-sensitive output byte-stable.
+import { char_code_at, substring } from "sfn/strings";
+
 import { FunctionSignature, Program } from "./ast";
-import { char_code_at_text, substring } from "./string_utils";
 
 // One public function in the index. `import_path` is "" for prelude
 // symbols (rendered as JSON null — no import needed) and the capsule
@@ -45,7 +45,7 @@ struct SymbolParameter {
 // the public callable surface and must be excluded from the index.
 fn _sym_is_private_name(name: string) -> boolean {
     if name.length == 0 { return true; }
-    return char_code_at_text(name, 0) == 95;
+    return char_code_at(name, 0) == 95;
 }
 
 // Collect the public free functions declared at the top level of a
@@ -133,8 +133,8 @@ fn _sym_string_lt(a: string, b: string) -> boolean {
     let mut i: int = 0;
     loop {
         if i >= a.length || i >= b.length { break; }
-        let ca = char_code_at_text(a, i);
-        let cb = char_code_at_text(b, i);
+        let ca = char_code_at(a, i);
+        let cb = char_code_at(b, i);
         if ca < cb { return true; }
         if ca > cb { return false; }
         i += 1;

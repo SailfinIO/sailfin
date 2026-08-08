@@ -2,7 +2,6 @@
 //
 // Prefix and primary expression parsing.
 import { Expression, TypeAnnotation } from "../../ast";
-import { normalize_number_literal_value, strings_equal } from "../../string_utils";
 import {
     identifier_matches,
     identifier_text,
@@ -11,6 +10,7 @@ import {
     symbol_matches
 } from "../token_utils";
 import { ExpressionParseResult, ExpressionTokens } from "../types";
+import { normalize_number_literal_value } from "../utils";
 import {
     parse_channel_expression,
     parse_parallel_expression,

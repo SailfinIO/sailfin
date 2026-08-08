@@ -2,6 +2,7 @@
 //
 // Recoverable LLVM test-harness synthesis.
 import {
+    ImportedModuleContext,
     LayoutManifest,
     NativeFunction,
     NativeModule,
@@ -124,7 +125,7 @@ fn _harness_print_marker(gvar: string, arr_len: string, byte_len: string, tp: st
         + ".agg1)"];
 }
 
-fn lower_to_llvm_lines_with_parsed_context_for_tests(native_module: NativeModule, parse: ParseNativeResult, imported_manifests: LayoutManifest[], imported_native_texts: string[], imported_diagnostics: string[]) -> LoweredLLVMLinesResult ![io] {
+fn lower_to_llvm_lines_with_parsed_context_for_tests(native_module: NativeModule, parse: ParseNativeResult, import_context: ImportedModuleContext) -> LoweredLLVMLinesResult ![io] {
     let mut native_text_for_recovery: string = "";
     if native_module.artifacts != null {
         if native_module.artifacts.length > 0 {
@@ -142,7 +143,7 @@ fn lower_to_llvm_lines_with_parsed_context_for_tests(native_module: NativeModule
     // mangled definitions the resolver-driven dependency .ll files
     // produce. The harness call sites below match by appending the same
     // module suffix to each `test:` symbol.
-    let base = lower_to_llvm_lines_with_parsed_context(native_module, parse, imported_manifests, imported_native_texts, imported_diagnostics, true, native_text_for_recovery);
+    let base = lower_to_llvm_lines_with_parsed_context(native_module, parse, import_context, true, native_text_for_recovery);
     if base.lines.length == 0 { return base; }
 
     let mut test_count: int = 0;

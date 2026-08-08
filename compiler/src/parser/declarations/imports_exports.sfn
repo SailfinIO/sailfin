@@ -1,8 +1,9 @@
 // compiler/src/parser/declarations/imports_exports.sfn
 //
 // Import and export declaration parsing.
+import { char_at_index } from "sfn/strings";
+
 import { ExportSpecifier, ImportSpecifier, Statement } from "../../ast";
-import { char_at, strings_equal } from "../../string_utils";
 import {
     collect_until,
     consume_keyword,
@@ -44,7 +45,7 @@ fn parse_import(initial_parser: Parser) -> StatementParseResult {
     let text = token.lexeme;
     let mut _if399: boolean = false;
     if text.length > 0 {
-        if strings_equal(char_at(text, 0), "\"") { _if399 = true; }
+        if char_at_index(text, 0) == "\"" { _if399 = true; }
     }
     if _if399 {
         source = string_literal_value(token);
@@ -86,7 +87,7 @@ fn parse_export(initial_parser: Parser) -> StatementParseResult {
     let text = token.lexeme;
     let mut _if400: boolean = false;
     if text.length > 0 {
-        if strings_equal(char_at(text, 0), "\"") { _if400 = true; }
+        if char_at_index(text, 0) == "\"" { _if400 = true; }
     }
     if _if400 {
         source = string_literal_value(token);

@@ -2,8 +2,9 @@
 //
 // Direct syscall builtin checks — name recognition, arity, and operand
 // type rules for the `syscall*` intrinsics.
+import { find } from "sfn/strings";
+
 import { Expression } from "../ast";
-import { index_of } from "../string_utils";
 import { Diagnostic } from "../typecheck_types";
 import { make_syscall_builtin_diagnostic } from "../typecheck_types/declaration_and_statement_checks";
 import { SymbolEntry, find_symbol } from "../typecheck_types/symbol_table_and_raw_exprs";
@@ -32,7 +33,7 @@ fn _syscall_operand_is_non_int(argument: Expression?, bindings: SymbolEntry[]) -
     if strings_equal(argument.variant, "BooleanLiteral") { return true; }
     if strings_equal(argument.variant, "NullLiteral") { return true; }
     if strings_equal(argument.variant, "NumberLiteral") {
-        return index_of(argument.value, ".") >= 0;
+        return find(argument.value, ".", 0) >= 0;
     }
     if strings_equal(argument.variant, "Unary") {
         if strings_equal(argument.operator, "!") { return true; }

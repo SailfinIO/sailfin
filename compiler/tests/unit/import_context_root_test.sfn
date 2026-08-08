@@ -1,31 +1,35 @@
 // compiler/tests/unit/import_context_root_test.sfn
 //
-// SFN-167: the LLVM-lowering import-context reader must resolve staged capsule
-// sidecars under the SAME per-invocation root the resolver's writer uses
-// (`set_import_context_root`, called at the `stage_capsule_imports` choke
-// point with `_cr_import_context_root(work_dir)`). Before this, the reader
-// hardcoded the fixed shared `build/compiler/import-context/`, so a
-// `--work-dir` build wrote its capsule interfaces into its private tree yet
-// lowered by reading the shared one — which two concurrent builds could tear
-// (a capsule's per-module `.sfn-asm` / `.layout-manifest` sidecars are renamed
-// in independently), yielding "type not in lowering type context". This pins
-// the reader-root routing so a future edit can't silently re-hardcode the path.
-import {
-    layout_manifest_path_for_slug,
-    native_text_path_for_slug,
-    set_import_context_root
-} from "../../src/llvm/imports";
+// SFN-167/SFN-736: the driver derives an import-context root per invocation
+// and passes the resulting loaded data into LLVM. No process-global reader
+// root remains in the lowering subtree.
+import { import_context_root, load_imported_module_context } from "../../src/import_context";
+import { NativeImport } from "../../src/native_ir";
 
-test "import-context reader: empty root resolves the canonical shared default" {
-    set_import_context_root("");
-    assert layout_manifest_path_for_slug("sfn/http/mod") == "build/compiler/import-context/sfn/http/mod.layout-manifest";
-    assert native_text_path_for_slug("sfn/http/mod") == "build/compiler/import-context/sfn/http/mod.sfn-asm";
+test "import-context reader: empty work dir resolves the canonical shared default" {
+    assert import_context_root("") == "build/compiler/import-context";
 }
 
-test "import-context reader: a --work-dir root routes both sidecar paths under it" {
-    set_import_context_root("/w/compiler/import-context");
-    assert layout_manifest_path_for_slug("sfn/http/types") == "/w/compiler/import-context/sfn/http/types.layout-manifest";
-    assert native_text_path_for_slug("sfn/http/types") == "/w/compiler/import-context/sfn/http/types.sfn-asm";
-    // Restore the canonical default for any subsequent reader in this process.
-    set_import_context_root("");
+test "import-context reader: a work dir gets an isolated explicit root" {
+    assert import_context_root("/w") == "/w/compiler/import-context";
+}
+
+test "import-context reader: native-only capsule entry takes the mod fallback" ![io] {
+    let root = fs.mkdtemp("sfn-import-context-");
+    let provider_dir = root + "/sfn/example";
+    fs.createDirectory(root + "/sfn");
+    fs.createDirectory(provider_dir);
+    let native_text = ".module sfn/example/mod\n";
+    fs.writeFile(provider_dir + "/mod.sfn-asm", native_text);
+
+    let imports: NativeImport[] = [NativeImport {
+        kind: "import", module: "sfn/example", specifiers: []
+    }];
+    let context = load_imported_module_context(imports, "runtime/probe", root);
+
+    assert context.native_texts.length == 1;
+    assert context.native_texts[0] == native_text;
+    assert context.module_aliases.length == 1;
+    assert context.module_aliases[0].import_slug == "sfn/example";
+    assert context.module_aliases[0].provider_slug == "sfn/example/mod";
 }

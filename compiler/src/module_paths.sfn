@@ -1,0 +1,116 @@
+// Stable source-path to module-slug conversion shared by driver modules.
+import { substring } from "./string_utils";
+
+fn module_name_from_path(source_path: string) -> string {
+    if source_path.length == 0 { return "main"; }
+
+    let mut normalized: string = "";
+    let mut index: int = 0;
+    loop {
+        if index >= source_path.length { break; }
+        let ch = source_path[index];
+        if ch == "\\" { normalized = normalized + "/"; } else {
+            normalized = normalized + ch;
+        }
+        index += 1;
+    }
+
+    loop {
+        if normalized.length < 2 { break; }
+        if substring(normalized, 0, 2) != "./" { break; }
+        normalized = substring(normalized, 2, normalized.length);
+    }
+
+    let compiler_prefix = "compiler/src/";
+    let runtime_prefix = "runtime/";
+    let mut start: int = 0;
+    let mut last_compiler: int = -1;
+    let compiler_search_limit = normalized.length - compiler_prefix.length;
+    index = 0;
+    loop {
+        if index > compiler_search_limit { break; }
+        if substring(normalized, index, index + compiler_prefix.length) == compiler_prefix {
+            last_compiler = index;
+        }
+        index += 1;
+    }
+    if last_compiler >= 0 { start = last_compiler + compiler_prefix.length; } else {
+        let mut is_absolute: boolean = false;
+        if normalized.length > 0 {
+            if normalized[0] == "/" { is_absolute = true; }
+        }
+        if !is_absolute {
+            if normalized.length >= 3 {
+                if normalized[1] == ":" {
+                    if normalized[2] == "/" { is_absolute = true; }
+                }
+            }
+        }
+        if is_absolute {
+            let mut last_runtime: int = -1;
+            let runtime_search_limit = normalized.length - runtime_prefix.length;
+            index = 0;
+            loop {
+                if index > runtime_search_limit { break; }
+                if substring(normalized, index, index + runtime_prefix.length) == runtime_prefix {
+                    last_runtime = index;
+                }
+                index += 1;
+            }
+            if last_runtime >= 0 { start = last_runtime; }
+        } else {
+            let mut first_named: int = 0;
+            loop {
+                let remaining = normalized.length - first_named;
+                if remaining >= 3 {
+                    if substring(normalized, first_named, first_named + 3) == "../" {
+                        first_named += 3;
+                        continue;
+                    }
+                }
+                if remaining >= 2 {
+                    if substring(normalized, first_named, first_named + 2) == "./" {
+                        first_named += 2;
+                        continue;
+                    }
+                }
+                break;
+            }
+            if first_named + runtime_prefix.length <= normalized.length {
+                if substring(normalized, first_named, first_named
+                    + runtime_prefix.length) == runtime_prefix {
+                    start = first_named;
+                }
+            }
+        }
+    }
+
+    let mut last_slash: int = -1;
+    index = start;
+    loop {
+        if index >= normalized.length { break; }
+        if normalized[index] == "/" { last_slash = index; }
+        index += 1;
+    }
+    let mut end: int = normalized.length;
+    let mut dot_index: int = -1;
+    index = normalized.length;
+    let dot_limit = last_slash + 1;
+    loop {
+        if index <= dot_limit { break; }
+        index -= 1;
+        if normalized[index] == "." {
+            dot_index = index;
+            break;
+        }
+    }
+    if dot_index >= 0 { end = dot_index; }
+
+    if end <= start { return "main"; }
+    let mut base = substring(normalized, start, end);
+    if base.length == 0 { return "main"; }
+    if base[0] == "/" { base = substring(base, 1, base.length); }
+    return base;
+}
+
+export { module_name_from_path };

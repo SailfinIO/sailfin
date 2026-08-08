@@ -2,7 +2,7 @@
 //
 // Shape, pass-boundary, native-loop snapshot, and CPU-oracle coverage for the
 // SFEP-0053 tensor IR foundation (SFN-427).
-import { resolve_llvm_provider_context } from "../../src/build/llvm_provider_context";
+import { empty_llvm_import_context, resolve_llvm_provider_context } from "../../src/build/llvm_provider_context";
 import { lower_to_llvm_ir_from_text_with_provider_context } from "../../src/llvm/lowering/entrypoints";
 import { index_of } from "../../src/string_utils";
 import {
@@ -226,7 +226,7 @@ test "tensor_ir: scalar native-loop snapshot lowers through LLVM" ![io] {
         + "    ret v2\n"
         + ".endfn\n";
     assert lowered.native_text == expected;
-    let llvm = lower_to_llvm_ir_from_text_with_provider_context(lowered.native_text, "tensor_test", resolve_llvm_provider_context());
+    let llvm = lower_to_llvm_ir_from_text_with_provider_context(lowered.native_text, "tensor_test", empty_llvm_import_context(), resolve_llvm_provider_context());
     assert index_of(llvm, "define") >= 0;
     assert index_of(llvm, "@tensor_add_oracle") >= 0;
 }
@@ -240,7 +240,7 @@ test "tensor_ir: matmul emits a contiguous vectorized loop with proved unchecked
     assert index_of(lowered.native_text, ".unchecked(v0)[r2 * 3 + k2]") >= 0;
     assert index_of(lowered.native_text, ".unchecked(v1)[k2 * 2 + c2]") >= 0;
     assert index_of(lowered.native_text, ".unchecked(v2)[r2 * 2 + c2]") >= 0;
-    let llvm = lower_to_llvm_ir_from_text_with_provider_context(lowered.native_text, "tensor_test", resolve_llvm_provider_context());
+    let llvm = lower_to_llvm_ir_from_text_with_provider_context(lowered.native_text, "tensor_test", empty_llvm_import_context(), resolve_llvm_provider_context());
     assert index_of(llvm, "!llvm.loop !0") >= 0;
     assert index_of(llvm, "!0 = distinct !{!0, !1}") >= 0;
     assert index_of(llvm, "!1 = !{!\"llvm.loop.vectorize.enable\", i1 true}") >= 0;

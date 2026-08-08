@@ -18,7 +18,7 @@
 import { int_to_string } from "sfn/strings";
 
 import { _clang_link_multi } from "./build/link";
-import { resolve_llvm_provider_context } from "./build/llvm_provider_context";
+import { empty_llvm_import_context, resolve_llvm_provider_context } from "./build/llvm_provider_context";
 import { lower_to_llvm_ir_from_text_with_provider_context } from "./llvm/lowering/entrypoints";
 import { compile_to_native_text_with_module } from "./main";
 import { runtime_capsule_from_root } from "./runtime_capsule_resolver";
@@ -239,7 +239,7 @@ fn build_tensor_matmul_kernel_binary(kernel_module: TensorModule, kernel_fn_name
                 + "` not found for splice"]
         };
     }
-    let ir = lower_to_llvm_ir_from_text_with_provider_context(spliced, "main", resolve_llvm_provider_context());
+    let ir = lower_to_llvm_ir_from_text_with_provider_context(spliced, "main", empty_llvm_import_context(), resolve_llvm_provider_context());
     if ir.length == 0 {
         return TensorMatmulBuildResult {
             binary_path: "",

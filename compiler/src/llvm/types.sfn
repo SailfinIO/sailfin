@@ -155,12 +155,6 @@ struct LayoutManifestApplication {
     diagnostics: string[];
 }
 
-struct ImportedModuleContext {
-    manifests: LayoutManifest[];
-    native_texts: string[];
-    diagnostics: string[];
-}
-
 struct LoweredLLVMFunction {
     lines: string[];
     diagnostics: string[];

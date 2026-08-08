@@ -1,0 +1,242 @@
+// Driver-owned staged import-context discovery and artifact loading.
+import { ends_with, starts_with, trim } from "sfn/strings";
+
+import { resolve_import_module_slug_for_module } from "./llvm/imports";
+import {
+    ImportModuleAlias,
+    ImportedModuleContext,
+    LayoutManifest,
+    NativeEnum,
+    NativeImport,
+    NativeStruct
+} from "./native_ir";
+import { parse_layout_manifest, parse_native_imports_for_import } from "./native_ir_api";
+
+fn import_context_root(work_dir: string) -> string {
+    if work_dir.length == 0 { return "build/compiler/import-context"; }
+    return work_dir + "/compiler/import-context";
+}
+
+fn _context_contains(items: string[], needle: string) -> boolean {
+    let mut index: int = 0;
+    loop {
+        if index >= items.length { break; }
+        if items[index] == needle { return true; }
+        index += 1;
+    }
+    return false;
+}
+
+fn _layout_path(root: string, slug: string) -> string {
+    return root + "/" + slug + ".layout-manifest";
+}
+
+fn _native_text_path(root: string, slug: string) -> string {
+    return root + "/" + slug + ".sfn-asm";
+}
+
+fn _artifact_slug_exists(root: string, slug: string) -> boolean ![io] {
+    return fs.exists(_layout_path(root, slug)) || fs.exists(_native_text_path(root, slug));
+}
+
+fn _resolve_artifact_slug(root: string, slug: string) -> string ![io] {
+    if slug.length == 0 { return slug; }
+    // Runtime sfn-source staging intentionally publishes native text without a
+    // layout manifest. Treat either artifact as enough to resolve the provider
+    // slug so a bare capsule import can still take the `<slug>/mod` fallback.
+    if _artifact_slug_exists(root, slug) { return slug; }
+    if !ends_with(slug, "/mod") {
+        let mod_slug = slug + "/mod";
+        if _artifact_slug_exists(root, mod_slug) { return mod_slug; }
+    }
+    let alias_path = root + "/" + slug + ".slugalias";
+    if fs.exists(alias_path) { return trim(fs.readFile(alias_path)); }
+    return slug;
+}
+
+fn _append_module_alias(aliases: ImportModuleAlias[], import_slug: string, provider_slug: string) -> ImportModuleAlias[] {
+    if import_slug.length == 0 { return aliases; }
+    if provider_slug.length == 0 { return aliases; }
+    if import_slug == provider_slug { return aliases; }
+    let mut index: int = 0;
+    loop {
+        if index >= aliases.length { break; }
+        if aliases[index].import_slug == import_slug { return aliases; }
+        index += 1;
+    }
+    let mut updated = aliases;
+    updated.push(ImportModuleAlias {
+        import_slug: import_slug, provider_slug: provider_slug
+    });
+    return updated;
+}
+
+fn import_module_aliases(imports: NativeImport[], current_module_slug: string, root: string) -> ImportModuleAlias[] ![io] {
+    let mut aliases: ImportModuleAlias[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= imports.length { break; }
+        let base_slug = resolve_import_module_slug_for_module(imports[index].module, current_module_slug);
+        let provider_slug = _resolve_artifact_slug(root, base_slug);
+        aliases = _append_module_alias(aliases, base_slug, provider_slug);
+        index += 1;
+    }
+    return aliases;
+}
+
+fn imported_module_context_from_loaded_data(imports: NativeImport[], current_module_slug: string, root: string, manifests: LayoutManifest[], native_texts: string[], diagnostics: string[]) -> ImportedModuleContext ![io] {
+    return ImportedModuleContext {
+        manifests: manifests,
+        native_texts: native_texts,
+        diagnostics: diagnostics,
+        module_aliases: import_module_aliases(imports, current_module_slug, root)
+    };
+}
+
+fn load_imported_module_context(imports: NativeImport[], current_module_slug: string, root: string) -> ImportedModuleContext ![io] {
+    let mut manifests: LayoutManifest[] = [];
+    let mut native_texts: string[] = [];
+    let mut diagnostics: string[] = [];
+    let mut module_aliases: ImportModuleAlias[] = [];
+    let mut seen: string[] = [];
+    let mut queue_paths: string[] = [];
+    let mut queue_parent_slugs: string[] = [];
+    let mut queue_depths: int[] = [];
+
+    let mut init_index: int = 0;
+    loop {
+        if init_index >= imports.length { break; }
+        queue_paths.push(imports[init_index].module);
+        queue_parent_slugs.push(current_module_slug);
+        queue_depths.push(0);
+        init_index += 1;
+    }
+
+    let max_transitive_depth: int = 3;
+    let mut round_depth: int = 0;
+    let mut seen_at_round_depth: int = 0;
+    let mut queue_index: int = 0;
+    loop {
+        if queue_index >= queue_paths.length {
+            if seen_at_round_depth == 0 { break; }
+            if round_depth > max_transitive_depth { break; }
+            round_depth += 1;
+            queue_index = 0;
+            seen_at_round_depth = 0;
+            continue;
+        }
+        let depth = queue_depths[queue_index];
+        if depth != round_depth {
+            queue_index += 1;
+            continue;
+        }
+        seen_at_round_depth += 1;
+        let module_path = queue_paths[queue_index];
+        let parent_slug = queue_parent_slugs[queue_index];
+        queue_index += 1;
+
+        let base_slug = resolve_import_module_slug_for_module(module_path, parent_slug);
+        let slug = _resolve_artifact_slug(root, base_slug);
+        module_aliases = _append_module_alias(module_aliases, base_slug, slug);
+        if slug.length == 0 { continue; }
+        if _context_contains(seen, slug) { continue; }
+        seen.push(slug);
+
+        let manifest_path = _layout_path(root, slug);
+        let native_text_path = _native_text_path(root, slug);
+        let mut manifest_structs: NativeStruct[] = [];
+        let mut manifest_enums: NativeEnum[] = [];
+        if fs.exists(manifest_path) {
+            let parsed_manifest = parse_layout_manifest(fs.readFile(manifest_path));
+            manifest_structs = parsed_manifest.structs;
+            manifest_enums = parsed_manifest.enums;
+        } else {
+            let is_cached_capsule = !starts_with(module_path, "./") && !starts_with(module_path, "../")
+                && !starts_with(module_path, "runtime/")
+                && _context_has_slash(module_path);
+            if is_cached_capsule {
+                diagnostics.push("layout manifest: missing artifact for capsule import `"
+                    + module_path
+                    + "` — ensure imports are inlined before LLVM lowering");
+            } else {
+                diagnostics.push("layout manifest: missing artifact for import `"
+                    + module_path
+                    + "` (expected "
+                    + manifest_path
+                    + ")");
+            }
+        }
+
+        let mut native_text: string = "";
+        let mut native_text_for_discovery: string = "";
+        if fs.exists(native_text_path) {
+            let contents = fs.readFile(native_text_path);
+            if depth == 0 { native_text = contents; }
+            if depth < max_transitive_depth {
+                native_text_for_discovery = contents;
+            }
+        } else if depth == 0 {
+            diagnostics.push("native lowering: missing native text artifact for import `"
+                + module_path
+                + "` (expected "
+                + native_text_path
+                + ")");
+        }
+
+        manifests.push(LayoutManifest {
+            structs: manifest_structs, enums: manifest_enums, diagnostics: []
+        });
+        native_texts.push(native_text);
+
+        if native_text_for_discovery.length > 0 {
+            let transitive_imports = parse_native_imports_for_import(native_text_for_discovery);
+            let mut import_index: int = 0;
+            loop {
+                if import_index >= transitive_imports.length { break; }
+                let entry = transitive_imports[import_index];
+                if entry.kind == "import" {
+                    queue_paths.push(entry.module);
+                    queue_parent_slugs.push(slug);
+                    queue_depths.push(depth + 1);
+                }
+                if entry.kind == "export" {
+                    queue_paths.push(entry.module);
+                    queue_parent_slugs.push(slug);
+                    queue_depths.push(depth);
+                }
+                import_index += 1;
+            }
+        }
+    }
+    return ImportedModuleContext {
+        manifests: manifests,
+        native_texts: native_texts,
+        diagnostics: diagnostics,
+        module_aliases: module_aliases
+    };
+}
+
+fn _context_has_slash(text: string) -> boolean {
+    let mut index: int = 0;
+    loop {
+        if index >= text.length { break; }
+        if text[index] == "/" { return true; }
+        index += 1;
+    }
+    return false;
+}
+
+fn empty_imported_module_context() -> ImportedModuleContext {
+    return ImportedModuleContext {
+        manifests: [],
+        native_texts: [],
+        diagnostics: [],
+        module_aliases: []
+    };
+}
+
+export {
+    empty_imported_module_context,
+    import_context_root,
+    load_imported_module_context
+};

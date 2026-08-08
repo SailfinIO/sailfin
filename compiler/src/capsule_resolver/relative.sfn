@@ -12,7 +12,7 @@
 import { int_to_string } from "sfn/strings";
 
 import { _cr_find_substring, collect_relative_import_specs } from "../capsule_import_scan";
-import { module_name_from_path } from "../main";
+import { module_name_from_path } from "../module_paths";
 import { substring } from "../string_utils";
 import { _cr_collect_capsule_sources, enumerate_capsule_sources } from "./discovery";
 import { _cr_dirname, _cr_ends_with, _cr_path_join } from "./paths";

@@ -8,14 +8,14 @@
 // primary lines path its own `EmitNativeLines` carrier, so both are covered
 // here; the CLI-level assertion lives in
 // `compiler/tests/e2e/emit_native_structured_diagnostic_test.sfn`.
-import { resolve_llvm_provider_context } from "../../src/build/llvm_provider_context";
+import { empty_llvm_import_context, resolve_llvm_provider_context } from "../../src/build/llvm_provider_context";
 import { diag_is_error } from "../../src/diagnostic";
 import {
     emit_native_diag_lines,
     emit_native_lines_with_module_name,
     emit_native_with_module_name
 } from "../../src/emit_native";
-import { lower_native_lines_to_llvm_artifact_with_provider_context } from "../../src/llvm/lowering/entrypoints";
+import { lower_native_lines_to_llvm_artifact_with_context_and_provider } from "../../src/llvm/lowering/entrypoints";
 import { parse_program } from "../../src/parser/mod";
 import { index_of } from "../../src/string_utils";
 
@@ -124,7 +124,7 @@ test "emit_native: the lines path carries the same diags as the module path" ![i
 test "emit artifacts: LLVM lowering returns identity and lines without a destination" ![io] {
     let program = parse_program("fn main() -> int { return 0; }");
     let native = emit_native_lines_with_module_name(program, "artifact_contract_test");
-    let llvm = lower_native_lines_to_llvm_artifact_with_provider_context(native.lines, "artifact_contract_test", resolve_llvm_provider_context());
+    let llvm = lower_native_lines_to_llvm_artifact_with_context_and_provider(native.lines, "artifact_contract_test", empty_llvm_import_context(), resolve_llvm_provider_context());
     assert llvm.ok;
     assert llvm.artifact_name == "module.ll";
     assert llvm.artifact_format == "llvm-ir-text";

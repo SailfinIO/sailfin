@@ -68,7 +68,7 @@ fn _boundary_exceptions() -> BoundaryException[] {
     // to sfn/strings or a role-owned implementation. Keep every importer exact
     // so moving any caller to its proper contract makes this inventory stale.
     let compat = "generic string helpers remain monolith-owned (SFEP-0020 §3.5.7)";
-    let compat_importers: string[] = ["llvm/closures", "llvm/effects", "llvm/expression_lowering/arrays", "llvm/expression_lowering/native/core_call_emission/dispatch", "llvm/expression_lowering/native/core_call_lowering", "llvm/expression_lowering/native/core_call_resolution/closure_callee", "llvm/expression_lowering/native/core_call_resolution/method_target", "llvm/expression_lowering/native/core_call_resolution/signature", "llvm/expression_lowering/native/core_calls", "llvm/expression_lowering/native/core_closure_lowering", "llvm/expression_lowering/native/core_concurrency_lowering", "llvm/expression_lowering/native/core_expression", "llvm/expression_lowering/native/core_expression_tail", "llvm/expression_lowering/native/core_helpers", "llvm/expression_lowering/native/core_index_lowering", "llvm/expression_lowering/native/core_literals_lowering", "llvm/expression_lowering/native/core_member_lowering", "llvm/expression_lowering/native/core_operators", "llvm/expression_lowering/native/core_ops_lowering", "llvm/expression_lowering/native/core_parse", "llvm/expression_lowering/native/core_parsing", "llvm/expression_lowering/native/core_scopes", "llvm/expression_lowering/native/core_text", "llvm/expression_lowering/native/core_type_mapping", "llvm/expression_lowering/native/statement_assignment", "llvm/expression_lowering/native/statement_parsing", "llvm/expression_lowering/native/statement_suspension", "llvm/expression_lowering/native/statement_type_mapping", "llvm/expression_lowering/native/temp_recovery", "llvm/expression_lowering/splitting", "llvm/expressions_helpers", "llvm/expressions_literals", "llvm/expressions_operators", "llvm/expressions_parsing", "llvm/imports", "llvm/lifetime", "llvm/lowering/emission", "llvm/lowering/emission_reachability", "llvm/lowering/entrypoints", "llvm/lowering/entrypoints_tests", "llvm/lowering/entrypoints_tests_writer", "llvm/lowering/instructions", "llvm/lowering/instructions_condition", "llvm/lowering/instructions_for", "llvm/lowering/instructions_helpers", "llvm/lowering/instructions_if", "llvm/lowering/instructions_loops", "llvm/lowering/instructions_match", "llvm/lowering/instructions_try", "llvm/lowering/lowering_core/finalization", "llvm/lowering/lowering_core/test_harness", "llvm/lowering/lowering_helpers", "llvm/lowering/lowering_helpers_mangling", "llvm/lowering/lowering_helpers_structs", "llvm/lowering/lowering_io", "llvm/lowering/lowering_recovery", "llvm/lowering/lowering_text_utils", "llvm/lowering/phi", "llvm/monomorphize", "llvm/rendering", "llvm/rendering_helpers", "llvm/strings", "llvm/type_context", "llvm/type_context_queries", "llvm/type_mapping", "llvm/utils", "parser/declarations/enums", "parser/declarations/imports_exports", "parser/declarations/syntax", "parser/expressions/lambdas", "parser/expressions/mod", "parser/expressions/normalize", "parser/expressions/postfix", "parser/expressions/prefix", "parser/expressions/type_targets", "parser/statements/block", "parser/statements/expression_recovery", "parser/statements/special", "parser/token_utils", "parser/utils", "typecheck/syscalls", "typecheck_types/annotation_shape_checks", "typecheck_types/declaration_and_statement_checks", "typecheck_types/expr_type_rules", "typecheck_types/extern_abi", "typecheck_types/generic_bounds", "typecheck_types/interface_and_generics", "typecheck_types/symbol_table_and_raw_exprs", "typecheck_types/value_and_object_checks"];
+    let compat_importers: string[] = ["llvm/closures", "llvm/effects", "llvm/expression_lowering/arrays", "llvm/expression_lowering/native/core_call_emission/dispatch", "llvm/expression_lowering/native/core_call_lowering", "llvm/expression_lowering/native/core_call_resolution/closure_callee", "llvm/expression_lowering/native/core_call_resolution/method_target", "llvm/expression_lowering/native/core_call_resolution/signature", "llvm/expression_lowering/native/core_calls", "llvm/expression_lowering/native/core_closure_lowering", "llvm/expression_lowering/native/core_concurrency_lowering", "llvm/expression_lowering/native/core_expression", "llvm/expression_lowering/native/core_expression_tail", "llvm/expression_lowering/native/core_helpers", "llvm/expression_lowering/native/core_index_lowering", "llvm/expression_lowering/native/core_literals_lowering", "llvm/expression_lowering/native/core_member_lowering", "llvm/expression_lowering/native/core_operators", "llvm/expression_lowering/native/core_ops_lowering", "llvm/expression_lowering/native/core_parse", "llvm/expression_lowering/native/core_parsing", "llvm/expression_lowering/native/core_scopes", "llvm/expression_lowering/native/core_text", "llvm/expression_lowering/native/core_type_mapping", "llvm/expression_lowering/native/statement_assignment", "llvm/expression_lowering/native/statement_parsing", "llvm/expression_lowering/native/statement_suspension", "llvm/expression_lowering/native/statement_type_mapping", "llvm/expression_lowering/native/temp_recovery", "llvm/expression_lowering/splitting", "llvm/expressions_helpers", "llvm/expressions_literals", "llvm/expressions_operators", "llvm/expressions_parsing", "llvm/imports", "llvm/lifetime", "llvm/lowering/emission", "llvm/lowering/emission_reachability", "llvm/lowering/entrypoints", "llvm/lowering/entrypoints_tests", "llvm/lowering/entrypoints_tests_writer", "llvm/lowering/instructions", "llvm/lowering/instructions_condition", "llvm/lowering/instructions_for", "llvm/lowering/instructions_helpers", "llvm/lowering/instructions_if", "llvm/lowering/instructions_loops", "llvm/lowering/instructions_match", "llvm/lowering/instructions_try", "llvm/lowering/lowering_core/finalization", "llvm/lowering/lowering_core/test_harness", "llvm/lowering/lowering_helpers", "llvm/lowering/lowering_helpers_mangling", "llvm/lowering/lowering_helpers_structs", "llvm/lowering/lowering_io", "llvm/lowering/lowering_recovery", "llvm/lowering/lowering_text_utils", "llvm/lowering/phi", "llvm/monomorphize", "llvm/rendering", "llvm/rendering_helpers", "llvm/strings", "llvm/type_context", "llvm/type_context_queries", "llvm/type_mapping", "llvm/utils"];
     let mut compat_i: int = 0;
     loop {
         if compat_i >= compat_importers.length { break; }
@@ -76,7 +76,7 @@ fn _boundary_exceptions() -> BoundaryException[] {
         compat_i += 1;
     }
     out.push(_boundary_exception("llvm/lowering/instructions_let", "string_utils", compat));
-    let remaining_compat_importers: string[] = ["emit_native", "emit_native_layout", "emit_native_state", "emitter_sailfin_utils", "import_resolution_check", "intrinsic_effects", "lexer", "native_ir_parser", "native_ir_parser_defs", "native_ir_parser_instructions", "native_ir_utils_layout", "native_ir_utils_parse", "native_ir_utils_text", "ownership_task_provenance", "prelude_scan", "reexport_check", "symbols_index", "typecheck_captures"];
+    let remaining_compat_importers: string[] = ["emit_native", "emit_native_layout", "emit_native_state", "emitter_sailfin_utils"];
     let mut remaining_compat_i: int = 0;
     loop {
         if remaining_compat_i >= remaining_compat_importers.length { break; }
@@ -144,10 +144,9 @@ fn _append_effect_authority_exceptions(initial: AuthorityException[]) -> Authori
     out.push(_authority_exception("llvm/expression_lowering/native/runtime_call", "effect:io", 1, seam));
     out.push(_authority_exception("llvm/expression_lowering/native/statement", "effect:io", 2, seam));
     out.push(_authority_exception("llvm/expression_lowering/native/statement_assignment", "effect:io", 1, seam));
-    out.push(_authority_exception("llvm/imports", "effect:io", 6, seam));
     out.push(_authority_exception("llvm/lowering/emission", "effect:io", 1, seam));
     out.push(_authority_exception("llvm/lowering/emission_async", "effect:io", 1, seam));
-    out.push(_authority_exception("llvm/lowering/entrypoints", "effect:io", 13, seam));
+    out.push(_authority_exception("llvm/lowering/entrypoints", "effect:io", 11, seam));
     out.push(_authority_exception("llvm/lowering/entrypoints_tests", "effect:io", 1, seam));
     out.push(_authority_exception("llvm/lowering/entrypoints_tests_writer", "effect:io", 1, seam));
     out.push(_authority_exception("llvm/lowering/instructions", "effect:io", 1, seam));
@@ -162,10 +161,9 @@ fn _append_effect_authority_exceptions(initial: AuthorityException[]) -> Authori
     out.push(_authority_exception("llvm/lowering/instructions_routine", "effect:io", 1, seam));
     out.push(_authority_exception("llvm/lowering/instructions_try", "effect:io", 2, seam));
     out.push(_authority_exception("llvm/lowering/lowering_core/diagnostics", "effect:io", 1, seam));
-    out.push(_authority_exception("llvm/lowering/lowering_core/file_emission", "effect:io", 6, seam));
+    out.push(_authority_exception("llvm/lowering/lowering_core/file_emission", "effect:io", 4, seam));
     out.push(_authority_exception("llvm/lowering/lowering_core/mod", "effect:io", 1, seam));
     out.push(_authority_exception("llvm/lowering/lowering_core/test_harness", "effect:io", 1, seam));
-    out.push(_authority_exception("llvm/lowering/lowering_helpers", "effect:io", 1, seam));
     out.push(_authority_exception("llvm/lowering/lowering_helpers_mangling", "effect:io", 1, seam));
     out.push(_authority_exception("llvm/lowering/lowering_phase_functions", "effect:io", 1, seam));
     out.push(_authority_exception("llvm/lowering/lowering_phase_render", "effect:io", 1, seam));
@@ -280,7 +278,12 @@ fn _is_driver_module_id(id: string) -> boolean {
         || id == "emit_helpers"
         || id == "ice"
         || id == "lock"
+        || id == "llvm_validation"
         || id == "main"
+        || id == "import_context"
+        || id == "module_paths"
+        || id == "native_artifact_writer"
+        || id == "native_emit_subprocess"
         || id == "prelude_globals"
         || id == "release_trust"
         || id == "runtime_capsule_resolver"
@@ -791,6 +794,16 @@ fn _find_authority_exception(exceptions: AuthorityException[], module: string, t
     return -1;
 }
 
+fn _boundary_string_index(items: string[], needle: string) -> int {
+    let mut index: int = 0;
+    loop {
+        if index >= items.length { break; }
+        if items[index] == needle { return index; }
+        index += 1;
+    }
+    return -1;
+}
+
 fn _text_at(source: string, index: int, value: string) -> boolean {
     if index < 0 || index + value.length > source.length { return false; }
     return substring(source, index, index + value.length) == value;
@@ -1257,7 +1270,7 @@ test "capsule roles: classification survives physical compiler capsule moves" {
     assert _edge_module_id("sfn/codegen/emit_native") == "emit_native";
     assert _edge_module_id("sfn/codegen-llvm/lowering/mod") == "llvm/lowering/mod";
     assert _find_exception(moved_exceptions, _edge_module_id("sfn/codegen-llvm/types"), _edge_module_id("sfn/analyzer/diagnostic")) >= 0;
-    let moved_authority = _edge_module_id("compiler/capsules/codegen-llvm/src/imports.sfn");
+    let moved_authority = _edge_module_id("compiler/capsules/codegen-llvm/src/atomics.sfn");
     assert _find_authority_exception(_authority_exceptions(), moved_authority, "effect:io") >= 0;
     assert _role_from_internal_spec("sfn/compiler/build") == ROLE_DRIVER;
     assert _role_from_internal_spec("sfn/fs/private") == ROLE_AUTHORITY;
@@ -1575,6 +1588,39 @@ test "capsule boundaries: compiler imports obey the role graph and exact excepti
     assert driver_count > 50;
     assert import_count > 500;
     _report_boundary_failures(failures);
+}
+
+test "capsule boundaries: check multi-capsule staging excludes LLVM lowering" ![io] {
+    let mut queue: string[] = ["compiler/src/check/engine.sfn"];
+    let mut seen: string[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= queue.length { break; }
+        let path = queue[index];
+        index += 1;
+        if !fs.exists(path) { continue; }
+        if _boundary_string_index(seen, path) >= 0 { continue; }
+        seen.push(path);
+        let specs = _all_import_specs(fs.readFile(path));
+        let mut spec_index: int = 0;
+        loop {
+            if spec_index >= specs.length { break; }
+            let imported = _importee_path(path, specs[spec_index]);
+            spec_index += 1;
+            if starts_with(imported, "compiler/src/") {
+                queue.push(imported);
+            }
+        }
+    }
+    let mut closure_index: int = 0;
+    loop {
+        if closure_index >= seen.length { break; }
+        let module_path = seen[closure_index];
+        assert ! starts_with(module_path, "compiler/src/llvm/lowering/");
+        assert module_path != "compiler/src/main.sfn";
+        closure_index += 1;
+    }
+    assert seen.length > 20;
 }
 
 test "capsule boundaries: top-level standard-library capsules do not import compiler internals" ![io] {

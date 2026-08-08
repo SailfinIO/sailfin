@@ -1,0 +1,109 @@
+// Check-only capsule preparation. Keeping this entry point outside the
+// build resolver facade prevents `sfn check` from importing driver emission
+// and LLVM lowering modules that it never executes.
+import { module_name_from_path } from "../module_paths";
+import { toml_get_entry } from "../toml_parser";
+import { _cr_resolve_and_dedupe } from "./dedupe";
+import {
+    _cr_dirname,
+    _cr_import_context_root,
+    _cr_path_join,
+    discover_project_root
+} from "./paths";
+import { _cr_srchash_path, _cr_stage_cache_hit, stage_capsule_imports } from "./staging";
+import { CheckCapsuleResolution, ResolverConsumer } from "./types";
+
+// A previously staged project entry is useful as a best-effort provider
+// inventory for E0420 import suggestions. Never stage it on behalf of an
+// unrelated check: entry diagnostics belong to checks that actually request
+// the entry, and a broken entry must not turn a healthy-file check into a
+// resolver setup failure.
+fn _check_project_entry_artifact(entry_paths: string[], work_dir: string) -> string ![io] {
+    if entry_paths.length == 0 { return ""; }
+    let project_root = discover_project_root(_cr_dirname(entry_paths[0]));
+    if project_root.length == 0 { return ""; }
+    let manifest_path = _cr_path_join(project_root, "capsule.toml");
+    if !fs.exists(manifest_path) { return ""; }
+    let entry = toml_get_entry(fs.readFile(manifest_path));
+    if entry.length == 0 { return ""; }
+    let source_path = _cr_path_join(project_root, entry);
+    if !fs.exists(source_path) { return ""; }
+    let mut index: int = 0;
+    loop {
+        if index >= entry_paths.length { break; }
+        if entry_paths[index] == source_path { return ""; }
+        index += 1;
+    }
+    let slug = module_name_from_path(source_path);
+    let context_root = _cr_import_context_root(work_dir);
+    let artifact = context_root + "/" + slug + ".sfn-asm";
+    let manifest = context_root + "/" + slug + ".layout-manifest";
+    let srchash = _cr_srchash_path(context_root, slug);
+    if _cr_stage_cache_hit(artifact, manifest, srchash, source_path) {
+        return artifact;
+    }
+    return "";
+}
+
+fn prepare_project_capsules_for_check(entry_paths: string[], consumer: ResolverConsumer, sailfin_exe: string, work_dir: string, binary_dir: string) -> CheckCapsuleResolution ![io] {
+    let empty_paths: string[] = [];
+    let project_entry_artifact = _check_project_entry_artifact(entry_paths, work_dir);
+    let resolved = _cr_resolve_and_dedupe(entry_paths, consumer, binary_dir);
+    if resolved.has_collision {
+        return CheckCapsuleResolution {
+            asm_paths: empty_paths,
+            capsule_count: 0,
+            staging_failed: true,
+            capabilities_required: resolved.capabilities_required
+        };
+    }
+    if resolved.sources.length == 0 {
+        let mut no_source_paths: string[] = [];
+        if project_entry_artifact.length > 0 {
+            no_source_paths.push(project_entry_artifact);
+        }
+        return CheckCapsuleResolution {
+            asm_paths: no_source_paths,
+            capsule_count: 0,
+            staging_failed: false,
+            capabilities_required: resolved.capabilities_required
+        };
+    }
+
+    let staged = stage_capsule_imports(resolved.sources, sailfin_exe, work_dir);
+    if !staged {
+        print.err("capsule-resolver: failed to stage import-context for project capsules");
+        return CheckCapsuleResolution {
+            asm_paths: empty_paths,
+            capsule_count: 0,
+            staging_failed: true,
+            capabilities_required: resolved.capabilities_required
+        };
+    }
+
+    let context_root = _cr_import_context_root(work_dir);
+    let mut asm_paths: string[] = [];
+    let mut project_entry_already_present: boolean = false;
+    let mut index: int = 0;
+    loop {
+        if index >= resolved.sources.length { break; }
+        let artifact = context_root + "/" + resolved.sources[index].slug
+            + ".sfn-asm";
+        if artifact == project_entry_artifact {
+            project_entry_already_present = true;
+        }
+        asm_paths.push(artifact);
+        index += 1;
+    }
+    if project_entry_artifact.length > 0 && !project_entry_already_present {
+        asm_paths.push(project_entry_artifact);
+    }
+    return CheckCapsuleResolution {
+        asm_paths: asm_paths,
+        capsule_count: resolved.sources.length as int,
+        staging_failed: false,
+        capabilities_required: resolved.capabilities_required
+    };
+}
+
+export { prepare_project_capsules_for_check };

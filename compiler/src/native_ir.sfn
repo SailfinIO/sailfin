@@ -335,6 +335,24 @@ struct LayoutManifest {
     diagnostics: string[];
 }
 
+// Driver-resolved mapping from a path-shaped import slug to the canonical
+// provider slug whose staged artifact was loaded. LLVM consumes this value
+// when mangling imported call sites; it never reads `.slugalias` itself.
+struct ImportModuleAlias {
+    import_slug: string;
+    provider_slug: string;
+}
+
+// Explicit staged-interface payload crossing the driver/codegen boundary.
+// The driver discovers and reads these artifacts; LLVM lowering consumes only
+// the already-loaded data in this value.
+struct ImportedModuleContext {
+    manifests: LayoutManifest[];
+    native_texts: string[];
+    diagnostics: string[];
+    module_aliases: ImportModuleAlias[];
+}
+
 struct BindingComponents {
     name: string;
     type_annotation: string;

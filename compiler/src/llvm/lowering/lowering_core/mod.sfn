@@ -4,6 +4,7 @@
 // sibling modules in this folder and in lowering_phase_*.sfn.
 import { Diag } from "../../../diagnostic";
 import {
+    ImportedModuleContext,
     LayoutManifest,
     NativeFunction,
     NativeModule,
@@ -101,8 +102,13 @@ import {
     hoist_closure_env_type_decls
 } from "./finalization";
 
-fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_arg: ParseNativeResult, imported_manifests: LayoutManifest[], imported_native_texts: string[], diagnostics_in: string[], mangle_symbols: boolean, native_text_override_path_in: string) -> LoweredLLVMLinesResult ![io] {
+fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_arg: ParseNativeResult, import_context: ImportedModuleContext, mangle_symbols: boolean, native_text_override_path_in: string) -> LoweredLLVMLinesResult ![io] {
     set_syscall_lowering_module(native_module.module_name);
+    let imported_manifests = import_context.manifests;
+    let imported_native_texts = import_context.native_texts;
+    let diagnostics_in = import_context.diagnostics;
+    let mut module_aliases = import_context.module_aliases;
+    if module_aliases == null { module_aliases = []; }
     // Generic-function monomorphization (#1869, SFEP-0038 §3.3). This is the
     // single lowering choke point every entry path funnels through. Specialize
     // generic `.fn`s and rewrite their call sites, then re-parse the rewritten
@@ -622,7 +628,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_ar
         }
     }
     if effective_mangle_symbols {
-        let mangled = apply_module_symbol_mangling(lines, safe_imports, native_module.module_name, safe_imported_native_texts, native_text_override_path);
+        let mangled = apply_module_symbol_mangling(lines, safe_imports, native_module.module_name, safe_imported_native_texts, module_aliases, native_text_override_path);
         let mut _ci0: int = 0;
         loop {
             if _ci0 >= mangled.diagnostics.length { break; }

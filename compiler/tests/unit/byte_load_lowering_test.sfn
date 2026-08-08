@@ -13,7 +13,7 @@
 //      pinned in-process via parse → emit_native → lower_to_llvm_ir.
 //      ONE lowering call for the file (the suite's per-process memory
 //      budget makes multiple lowerings a poor trade).
-import { resolve_llvm_provider_context } from "../../src/build/llvm_provider_context";
+import { empty_llvm_import_context, resolve_llvm_provider_context } from "../../src/build/llvm_provider_context";
 import { emit_native_text_with_module_name } from "../../src/emit_native";
 import { is_byte_load_builtin } from "../../src/llvm/byte_load";
 import { lower_to_llvm_ir_from_text_with_provider_context } from "../../src/llvm/lowering/entrypoints";
@@ -62,7 +62,7 @@ test "lowering: load_byte emits inttoptr + load i8 + zext (#1308)" ![io] {
         + "}";
     let program = parse_program(source);
     let native = emit_native_text_with_module_name(program, "byte_load_test");
-    let ir = lower_to_llvm_ir_from_text_with_provider_context(native, "byte_load_test", resolve_llvm_provider_context());
+    let ir = lower_to_llvm_ir_from_text_with_provider_context(native, "byte_load_test", empty_llvm_import_context(), resolve_llvm_provider_context());
 
     assert _contains(ir, "inttoptr i64");
     assert _contains(ir, "load i8, i8*");

@@ -1,0 +1,36 @@
+// Driver-owned LLVM text validation shared by serial and parallel emitters.
+fn _validator_argv(tool: string, ll_path: string, out_path: string) -> string[] {
+    if tool == "llvm-as" || tool == "llvm-as-18" {
+        return [tool, ll_path, "-o", out_path];
+    }
+    return [tool, "-c", "-emit-llvm", "-x", "ir", ll_path, "-o", out_path];
+}
+
+fn validate_llvm_ir(ll_path: string) -> boolean ![io] {
+    let candidates: string[] = ["llvm-as", "llvm-as-18", "clang", "clang-18"];
+    let child_env = process.environ();
+    let sink = ll_path + ".validate.bc";
+    let mut ok: boolean = false;
+    let mut index: int = 0;
+    loop {
+        if index >= candidates.length { break; }
+        let tool = candidates[index];
+        let probe_rc = process.run_capture([tool, "--version"], child_env);
+        let _probe_out = process.capture_take_stdout();
+        let _probe_err = process.capture_take_stderr();
+        if probe_rc == 0 {
+            let rc = process.run_capture(_validator_argv(tool, ll_path, sink), child_env);
+            let _out = process.capture_take_stdout();
+            let _err = process.capture_take_stderr();
+            if rc == 0 {
+                ok = true;
+                break;
+            }
+        }
+        index += 1;
+    }
+    if fs.exists(sink) { fs.deleteFile(sink); }
+    return ok;
+}
+
+export { validate_llvm_ir };

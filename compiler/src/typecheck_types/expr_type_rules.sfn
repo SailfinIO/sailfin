@@ -2,15 +2,16 @@
 //
 // `?` operator, ternary, and concurrency (spawn/await/channel) type rules.
 // Extracted from typecheck_types.sfn (SFN-625).
-import { SourceSpan, Statement, TypeAnnotation } from "../ast";
 import {
     contains_string,
     ends_with,
-    index_of,
+    find,
     starts_with,
     strings_equal,
     substring
-} from "../string_utils";
+} from "sfn/strings";
+
+import { SourceSpan, Statement, TypeAnnotation } from "../ast";
 import { Diagnostic } from "../typecheck_types";
 import { parse_type_arguments } from "./interface_and_generics";
 import {
@@ -532,11 +533,11 @@ fn check_uninferable_generic_constructor(statement: Statement, generic_struct_na
 fn _annotation_instantiates_struct(annotation: TypeAnnotation?, struct_name: string) -> boolean {
     if annotation == null { return false; }
     let needle = struct_name + "<";
-    let at = index_of(annotation.text, needle);
+    let at = find(annotation.text, needle, 0);
     if at < 0 { return false; }
     // Require a closing `>` after the `<` so a malformed spelling never counts.
     let rest = slice_text(annotation.text, at + needle.length, annotation.text.length);
-    return index_of(rest, ">") >= 0;
+    return find(rest, ">", 0) >= 0;
 }
 
 fn make_uninferable_generic_constructor_diagnostic(struct_name: string, member: string, span: SourceSpan?) -> Diagnostic {
