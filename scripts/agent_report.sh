@@ -118,19 +118,89 @@ FIRST_ERROR="null"
 # Match helper: case-insensitive fixed-ish regex over the captured output.
 out_has() { grep -Eiq -- "$1" "$OUTFILE" 2>/dev/null; }
 
+# Match helper for a FIXED (non-regex) marker literal. The check-phase table
+# below is matched with this so its entries can be compared byte-for-byte
+# against the producer that prints them.
+out_has_fixed() { grep -Fiq -- "$1" "$OUTFILE" 2>/dev/null; }
+
+# --- check phase ledger (SFN-724) --------------------------------------------
+# The ordered `make check` ledger, and the producer banner marking entry into
+# each phase. ONE declaration drives both detect_check_phase and
+# compose_check_phases so the two can no longer drift apart.
+#
+# Each record is `<phase-name>[|<literal>...]`; a phase is "reached" when ANY of
+# its literals appears in the captured output. Literals are FIXED strings, each
+# a verbatim substring of the producer that prints it — the Makefile
+# `check-impl` target or `sfn selfhost` (compiler/src/cli_selfhost.sfn). Each
+# stops short of any `$(...)` the Makefile interpolates, so the recorded text is
+# what actually reaches the log.
+#
+# compiler/tests/e2e/check_phase_ledger_test.sfn asserts that
+# verbatim-substring property against both producers, so rewording a banner
+# without re-syncing this table fails the suite. That assertion is the point:
+# the drift this table repairs (#1502 moved the self-host stages into
+# `sfn selfhost`, changing every banner) went unnoticed for two releases
+# because the previous test manufactured its own inputs from the old wording.
+#
+# `compile` heads the list with no literal — `check-impl` runs `make compile`
+# before printing anything, so it is always reached.
+#
+# Order is the real pipeline order: `sfn selfhost` runs stage2 -> smoke ->
+# stage3 -> fixed-point as one internal chain, and the seedcheck suite runs
+# AFTER that chain (Makefile `check-impl`), not before stage3.
+#
+# `pass1-smoke` carries two literals because the gate has two forms: the
+# default hello-world + `sfn/test` capsule smoke, and the full first-pass suite
+# under `CHECK_FULL_PASS1=1`. They are mutually exclusive and occupy the same
+# ordinal, so one record with both literals keeps the ledger strictly linear.
+# `fixed-point` likewise carries all three of `sfn selfhost`'s outcome lines.
+#
+# This layer is interim: SFEP-0014 Phase 6 replaces banner-scraping with a
+# native verb that cannot drift (SFN-725).
+CHECK_PHASE_MARKERS=(
+	'compile'
+	'pass1-smoke|[check] pass1 smoke gate: hello-world + sfn/test capsule tests|[check] CHECK_FULL_PASS1=1: running full suite on first-pass binary'
+	'seedcheck-build|[selfhost] building stage2 (seedcheck)...'
+	'seedcheck-smoke|[selfhost] validating seedcheck binary runs hello-world...'
+	'stage3-build|[selfhost] building stage3 (driven by seedcheck) for fixed-point check...'
+	'fixed-point|[selfhost] stage2 == stage3: compiler is a fixed point|[selfhost] stage2 == stage3: every module IR digest matched|[selfhost] stage2 != stage3: compiler output is not yet a fixed point'
+	'seedcheck-tests|[check] running full test suite with seedcheck binary'
+)
+
+# The lone non-fatal signal: `sfn selfhost` prints this and still exits 0,
+# promoting the validated seedcheck binary anyway (cli_selfhost.sfn's
+# exit/promotion policy). `--strict` (`make check-strict`) makes the same
+# mismatch fatal — see the rc guard in classify().
+CHECK_MARKER_NONDETERMINISM='[selfhost] stage2 != stage3: compiler output is not yet a fixed point'
+
+# True when any literal of a `<name>|<lit>|...` record appears in the captured
+# output. A record with no literal (`compile`) is unconditionally reached.
+check_phase_reached() {
+	local record="$1" rest lit
+	rest="${record#*|}"
+	[ "$rest" = "$record" ] && return 0
+	while [ -n "$rest" ]; do
+		lit="${rest%%|*}"
+		if [ "$lit" = "$rest" ]; then rest=""; else rest="${rest#*|}"; fi
+		[ -n "$lit" ] && out_has_fixed "$lit" && return 0
+	done
+	return 1
+}
+
+# 1-based index of the latest phase reached. `compile` guarantees at least 1.
+check_last_reached() {
+	local i last=1
+	for i in "${!CHECK_PHASE_MARKERS[@]}"; do
+		check_phase_reached "${CHECK_PHASE_MARKERS[$i]}" && last=$((i + 1))
+	done
+	printf '%s' "$last"
+}
+
 detect_check_phase() {
-	# Echo the last phase whose start-marker appears in the log. Markers are
-	# the human banners `make check` already prints (Makefile check: target).
-	local phase="null"
-	out_has '\[check\] running test suite on first-pass binary' && phase="first-pass-tests"
-	out_has 'proceeding to seedcheck build|verifying seed selfhost \(stage2\)' && phase="seedcheck-build"
-	out_has 'validating seedcheck binary can run programs' && phase="seedcheck-smoke"
-	out_has 'running test suite with seedcheck binary' && phase="seedcheck-tests"
-	out_has 'building stage3 for fixed-point' && phase="stage3-build"
-	out_has 'comparing stage2 vs stage3' && phase="fixed-point"
-	# If nothing matched yet we're still in the compile phase.
-	[ "$phase" = "null" ] && phase="compile"
-	printf '%s' "$phase"
+	local names last
+	names=("${CHECK_PHASE_MARKERS[@]%%|*}")
+	last="$(check_last_reached)"
+	printf '%s' "${names[$((last - 1))]}"
 }
 
 detect_first_error() {
@@ -143,8 +213,16 @@ detect_first_error() {
 
 classify() {
 	# Nondeterminism is a non-fatal WARN even though `make check` exits 0.
-	# Surface it without flipping the exit code.
-	if out_has '\[check\]\[WARN\] stage2 != stage3'; then
+	# Surface it without flipping the exit code. Gated on rc == 0 because
+	# `make check-strict` passes `--strict` to `sfn selfhost`, where the very
+	# same mismatch line is followed by a fatal exit — that run is a `fail`
+	# with a real failure class, not a `warn`.
+	# Scoped to `check` because `fixed-point` is a check-only phase name: every
+	# other classification path routes non-check targets through PHASE=$TARGET,
+	# so an unscoped match here could report `"target":"test"` with a phase
+	# that target does not have.
+	if [ "$TARGET" = "check" ] && [ "$RC" -eq 0 ] \
+		&& out_has_fixed "$CHECK_MARKER_NONDETERMINISM"; then
 		STATUS="warn"
 		FAILURE="nondeterminism"
 		PHASE="fixed-point"
@@ -193,7 +271,14 @@ classify() {
 		FAILURE="timeout"
 	elif out_has "missing seed compiler|is not invokable|SEED_VERSION is empty|\[fetch-seed\]\[error\]|(seed|bootstrap\.toml|fetch-seed|SEED=)[^[:cntrl:]]*No such file or directory|run: make compile|run 'make compile'|GITHUB_TOKEN"; then
 		FAILURE="setup-error"
-	elif out_has 'passed, [1-9][0-9]* failed|\[check\]\[FAIL\]|assertion failed|[0-9]+ failed ═══'; then
+	# The `═══ <suite>: N/M passed, K failed ═══` banner is printed for EVERY
+	# suite regardless of outcome (cli/commands/test/reporting.sfn), so the
+	# count must be anchored non-zero here exactly as in the first alternative.
+	# With `[0-9]+` a plain `make check` matched its own passing pass1 banner,
+	# and every later failure — stage2/stage3 build, seedcheck smoke, a strict
+	# fixed-point abort — classified as `test-failure`, sending the agent to
+	# hunt a test that never failed (SFN-724).
+	elif out_has 'passed, [1-9][0-9]* failed|\[check\]\[FAIL\]|assertion failed|[1-9][0-9]* failed ═══'; then
 		FAILURE="test-failure"
 	elif out_has 'error:|\[rebuild\]\[error\]|sfn build failed|cannot resolve|lowering error|parse error|type error|effect error'; then
 		FAILURE="compile-error"
@@ -318,56 +403,37 @@ artifact_looks_intact_no_jq() {
 	return 0
 }
 
-# The ordered seven-phase ledger for `make check` (#1124, epic #1056 Phase 2).
-PHASES_CHECK="compile first-pass-tests seedcheck-build seedcheck-smoke seedcheck-tests stage3-build fixed-point"
-
 # Compose the seven-phase `make check` ledger (#1124). Echoes a JSON array of
-# seven `{"name":<phase>,"status":<s>}` entries in pipeline order. Each phase's
-# status is derived from the human banners `check-impl` prints (the same marker
-# set `detect_check_phase` keys off), with phases after the failing/last-reached
-# one marked `skipped`:
-#   - phases the run advanced PAST (a later phase's start banner appeared) -> pass
-#   - the last-reached phase -> mirrors the verdict: fail / warn / pass
+# `{"name":<phase>,"status":<s>}` entries in pipeline order, derived from the
+# CHECK_PHASE_MARKERS table above (the same marker set `detect_check_phase`
+# keys off):
+#   - phases the run advanced PAST (a later phase's banner appeared) -> pass
+#   - the last-reached phase -> `fail` when the verdict failed, else `pass`
 #   - phases never reached -> skipped
-# `compile` is the first thing check-impl runs, so it is always reached.
-# The fixed-point `stage2 != stage3` mismatch is the lone `warn` (exit 0),
-# and seedcheck-smoke fails independently of the build/test phases.
+# `compile` is the first thing check-impl runs, so it is always reached, and
+# seedcheck-smoke fails independently of the build/test phases.
+#
+# The fixed-point `stage2 != stage3` mismatch is the lone phase `warn`, and it
+# is pinned to `fixed-point` rather than mirrored onto the last-reached phase:
+# `sfn selfhost` prints the mismatch and continues, so the seedcheck suite
+# still runs (and passes) after it. Mirroring would park the warn on
+# `seedcheck-tests` and report `fixed-point` as a clean pass — inverting the
+# one signal the warn exists to carry.
 compose_check_phases() {
-	# Reached flags per phase, parallel to PHASES_CHECK. compile is unconditional.
-	local r_compile=1 r_fptests=0 r_scbuild=0 r_scsmoke=0 r_sctests=0 r_s3build=0 r_fixed=0
-	out_has '\[check\] running test suite on first-pass binary' && r_fptests=1
-	out_has 'proceeding to seedcheck build|verifying seed selfhost \(stage2\)' && r_scbuild=1
-	out_has 'validating seedcheck binary can run programs' && r_scsmoke=1
-	out_has 'running test suite with seedcheck binary' && r_sctests=1
-	out_has 'building stage3 for fixed-point' && r_s3build=1
-	out_has 'comparing stage2 vs stage3' && r_fixed=1
+	local last i idx pstatus names out="[" first=1
+	names=("${CHECK_PHASE_MARKERS[@]%%|*}")
+	last="$(check_last_reached)"
 
-	local reached=("$r_compile" "$r_fptests" "$r_scbuild" "$r_scsmoke" "$r_sctests" "$r_s3build" "$r_fixed")
-
-	# Latest reached phase (1-based). compile guarantees at least 1.
-	local last=1 i
-	for i in 0 1 2 3 4 5 6; do
-		[ "${reached[$i]}" -eq 1 ] && last=$((i + 1))
-	done
-
-	# The last-reached phase mirrors the verdict; nondeterminism is the warn.
-	local last_status="pass"
-	if [ "$STATUS" = "fail" ]; then
-		last_status="fail"
-	elif [ "$STATUS" = "warn" ]; then
-		last_status="warn"
-	fi
-
-	local names=($PHASES_CHECK)
-	local out="[" first=1 idx pstatus
-	for i in 0 1 2 3 4 5 6; do
+	for i in "${!names[@]}"; do
 		idx=$((i + 1))
-		if [ "$idx" -lt "$last" ]; then
-			pstatus="pass"
-		elif [ "$idx" -eq "$last" ]; then
-			pstatus="$last_status"
-		else
+		if [ "$idx" -gt "$last" ]; then
 			pstatus="skipped"
+		elif [ "$STATUS" = "warn" ] && [ "${names[$i]}" = "fixed-point" ]; then
+			pstatus="warn"
+		elif [ "$idx" -eq "$last" ] && [ "$STATUS" = "fail" ]; then
+			pstatus="fail"
+		else
+			pstatus="pass"
 		fi
 		[ "$first" -eq 1 ] || out="${out},"
 		first=0

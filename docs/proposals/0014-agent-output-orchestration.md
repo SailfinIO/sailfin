@@ -151,6 +151,17 @@ Two corrections to this document's own record:
 
 ### 3.3 The regression: the phase ledger is dead
 
+> **Resolved by Phase 5 (SFN-724).** The diagnosis below is kept as written —
+> it is the record of how a scraping layer goes dark silently. What changed:
+> `agent_report.sh` now carries one `CHECK_PHASE_MARKERS` table (fixed-string
+> literals, real pipeline order, a `pass1-smoke` entry) driving both
+> `detect_check_phase` and `compose_check_phases`, and
+> `check_phase_ledger_test.sfn` asserts every literal in it still appears
+> verbatim in its producer — so the next reword fails the suite instead of
+> going unnoticed. The "all live on `main`" consequences below no longer are.
+> The layer is still banner-scraping, and still interim: §5 Phase 6 (SFN-725)
+> replaces it with a native verb that cannot drift.
+
 `#1502` (design note `docs/proposals/design-notes/1502-selfhost-check.md`) moved the
 stage2/stage3 build, viability smoke, and fixed-point diff out of ~90 lines of
 Makefile shell into `sfn selfhost` (`compiler/src/cli_selfhost.sfn`). The new verb

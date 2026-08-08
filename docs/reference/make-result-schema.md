@@ -123,11 +123,15 @@ an OOM-kill is never mislabelled a crash.
 `make check` runs seven phases; on failure `phase` resolves to the latest one
 reached (best-effort, from the human banners `check` already prints):
 
-`compile`, `first-pass-tests`, `seedcheck-build`, `seedcheck-smoke`,
-`seedcheck-tests`, `stage3-build`, `fixed-point`.
+`compile`, `pass1-smoke`, `seedcheck-build`, `seedcheck-smoke`, `stage3-build`,
+`fixed-point`, `seedcheck-tests`.
 
 The `seedcheck-smoke` phase (the hello-world viability step) can fail
 independently of the build and test phases.
+
+`pass1-smoke` covers the first-pass gate in both its forms: the default
+hello-world + `sfn/test` capsule smoke, and the full first-pass suite under
+`CHECK_FULL_PASS1=1`. They are mutually exclusive and occupy the same ordinal.
 
 ## Examples
 
@@ -222,28 +226,58 @@ never broken by a missing or malformed artifact.
 (`{"name":…,"status":…}`) — observability only; the ledger never alters what
 `check-impl` runs or its human output. The phases, in order:
 
-`compile`, `first-pass-tests`, `seedcheck-build`, `seedcheck-smoke`,
-`seedcheck-tests`, `stage3-build`, `fixed-point`.
+`compile`, `pass1-smoke`, `seedcheck-build`, `seedcheck-smoke`, `stage3-build`,
+`fixed-point`, `seedcheck-tests`.
 
-Per-phase status is derived from the human banners `check-impl` prints (the same
-marker set the top-level `phase` field keys off):
+That order is the real pipeline order, not the reading order of `check-impl`:
+`sfn selfhost` (#1502) runs stage2 → smoke → stage3 → fixed-point as one
+internal chain, and the full seedcheck suite runs **after** that chain
+completes, making `seedcheck-tests` the last phase rather than the fifth.
+
+Per-phase status is derived from the human banners `check-impl` and
+`sfn selfhost` print (the same marker set the top-level `phase` field keys
+off — one table, `CHECK_PHASE_MARKERS` in `scripts/agent_report.sh`):
 
 - A phase the run advanced **past** (a later phase's start banner appeared) is
   `pass` — control reaching a later phase proves the earlier ones completed.
-- The **last-reached** phase mirrors the top-level verdict: `fail` on a failure,
-  `warn` on the `fixed-point` nondeterminism mismatch, else `pass`.
+- The **last-reached** phase is `fail` on a failure, else `pass`.
 - Phases that were **never reached** (the run stopped earlier) are `skipped`.
 
 `compile` is the first thing `check-impl` runs, so it is always reached. The
 `seedcheck-smoke` phase (the hello-world viability step) can fail
 **independently** of the build and test phases — a `seedcheck-smoke` `fail`
-marks `seedcheck-tests`, `stage3-build`, and `fixed-point` `skipped`. The
-`fixed-point` `stage2 != stage3` mismatch is the lone phase `warn`: it pairs
-with top-level `status:"warn"` / `failure:"nondeterminism"` and **exit 0**.
+marks `stage3-build`, `fixed-point`, and `seedcheck-tests` `skipped`.
+
+The `fixed-point` `stage2 != stage3` mismatch is the lone phase `warn`: it
+pairs with top-level `status:"warn"` / `failure:"nondeterminism"` and **exit
+0**. The warn is pinned to `fixed-point` rather than mirrored onto the
+last-reached phase, because `sfn selfhost` prints the mismatch and continues —
+the seedcheck suite still runs, and passes, after it. Under
+`make check-strict` (`sfn selfhost --strict`) the same mismatch is fatal, so
+that run is a `fail` with a non-zero exit, never a `warn` — it classifies as
+`compile-error` (the closed set has no fixed-point class) at
+`phase:"fixed-point"`. `check-strict` delegates to `check`, so its verdict
+reports `"target":"check"`; nothing in the block distinguishes a strict run
+from a default one.
+
+A failure in any phase after the pass1 gate is classified from the log text,
+and the pass1 leg always prints a **passing** `═══ <suite>: N/M passed, 0
+failed ═══` banner on a plain (non-`JSON=1`) run. The `test-failure` patterns
+therefore anchor the count non-zero; without that anchor every post-pass1
+failure — a stage2/stage3 build break, a seedcheck-smoke failure, a strict
+fixed-point abort — matched that passing banner and reported `test-failure`,
+sending a consumer to read test output that does not exist (SFN-724).
 
 ```json
-{"schema_version":"sailfin-make/1","target":"check","status":"warn","failure":"nondeterminism","phase":"fixed-point","first_error":null,"report":"build/agent-report.check.json","phases":[{"name":"compile","status":"pass"},{"name":"first-pass-tests","status":"pass"},{"name":"seedcheck-build","status":"pass"},{"name":"seedcheck-smoke","status":"pass"},{"name":"seedcheck-tests","status":"pass"},{"name":"stage3-build","status":"pass"},{"name":"fixed-point","status":"warn"}]}
+{"schema_version":"sailfin-make/1","target":"check","status":"warn","failure":"nondeterminism","phase":"fixed-point","first_error":null,"report":"build/agent-report.check.json","phases":[{"name":"compile","status":"pass"},{"name":"pass1-smoke","status":"pass"},{"name":"seedcheck-build","status":"pass"},{"name":"seedcheck-smoke","status":"pass"},{"name":"stage3-build","status":"pass"},{"name":"fixed-point","status":"warn"},{"name":"seedcheck-tests","status":"pass"}]}
 ```
+
+The marker table is an interim layer: it reconstructs phase state by scraping
+human banners, so it can only be kept honest by
+`compiler/tests/e2e/check_phase_ledger_test.sfn`, which asserts every literal
+in the table still appears verbatim in its producer. SFEP-0014 Phase 6
+(SFN-725) replaces the scraping with a native verb that emits its own verdict
+and cannot drift.
 
 ## Implementation
 
