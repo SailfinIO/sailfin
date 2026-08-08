@@ -59,7 +59,8 @@ import {
     build_target_triple,
     target_artifact_tag,
     target_condition_runtime_sfn_sources,
-    target_os_is_windows
+    target_os_is_windows,
+    triple_artifact_tags
 } from "./target";
 
 // Issue #940: validate the declarative runtime bundle by the
@@ -1613,8 +1614,12 @@ fn _push_if_present(argv: string[], path: string) ![io] {
 // the single stem composer every compile path now shares; keep the two in
 // sync. SFN-617: the stem is now target-tagged, so cleaning only the
 // active target's stem would leave a stale other-target object behind;
-// the sweep therefore covers the closed tag set (`target_artifact_tag`'s
-// range) rather than just the resolved build target.
+// the sweep therefore covers `triple_artifact_tags()` (`./target.sfn`) —
+// the single source of truth for the closed tag set `target_artifact_tag`
+// can produce — rather than a hand-maintained literal that can drift out
+// of sync with it (SFN-774: a stale `["linux", "darwin", "windows",
+// "other"]` literal silently stopped matching once `target_artifact_tag`
+// grew per-arch/per-ABI tags, resurrecting SFN-14).
 //
 // The sweep is complete on the TARGET axis only. It resolves stems from
 // the capsule set as handed in, which the `--clean` call site
@@ -1629,7 +1634,7 @@ fn _push_if_present(argv: string[], path: string) ![io] {
 // freshly-computed object paths and every reuse is content-key gated).
 // `rm -f` is idempotent, so an unpopulated cache is a clean no-op.
 fn clean_runtime_object_cache(runtime_capsules: RuntimeCapsuleArtifacts[], out_dir: string, opt_flag: string) ![io] {
-    let tags: string[] = ["linux", "darwin", "windows", "other"];
+    let tags = triple_artifact_tags();
     let mut argv: string[] = ["rm", "-f"];
     let mut i: int = 0;
     loop {

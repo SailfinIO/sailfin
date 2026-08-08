@@ -65,12 +65,29 @@ fn build_host_os() -> string ![io] {
 // host-parallelism / host-probe leaf helpers off the POSIX shell path.
 fn host_is_windows() -> boolean ![io] { return build_host_os() == "Windows"; }
 
-// The resolved build target OS: the `SAILFIN_TARGET_OS` override wins (the
-// cross-compile + e2e-test hook the emit-time locators already honor),
-// else the host OS.
+// The resolved build target OS (SFN-774 / SFEP-0068 §3.2). Precedence
+// relative to `build_target_triple()` below: the `SAILFIN_TARGET_OS`
+// override is checked FIRST, ahead of the triple, so the pre-existing
+// verbatim-override contract (see `build_host_os` above) survives
+// unchanged — an unrecognized override reaches every OS-keyed consumer
+// unvalidated, exactly as before. Once that override is absent, this
+// derives its answer FROM the triple (`build_target_triple` ->
+// `triple_target_os`) rather than probing the host a second time, so
+// `--target=<triple>` alone (with no `SAILFIN_TARGET_OS` set) is enough to
+// flip every OS-keyed decision — runtime module swap, `.exe` naming, the
+// direct-lld gate — consistently with the ABI-keyed decisions that were
+// already triple-driven. This is the one deliberate divergence between the
+// two resolvers: for an UNRECOGNIZED `SAILFIN_TARGET_OS`, this function
+// returns it verbatim (the override branch above), while
+// `build_target_triple()` has no such override to check and falls through
+// to the host probe instead — the two are not expected to agree on a typo,
+// only on every value both recognize.
 fn build_target_os() -> string ![io] {
     let target_override = _get_env_cmd("SAILFIN_TARGET_OS");
     if target_override.length > 0 { return target_override; }
+    let triple = build_target_triple();
+    let os = triple_target_os(triple);
+    if os.length > 0 { return os; }
     return build_host_os();
 }
 
@@ -140,7 +157,7 @@ fn triple_abi(triple: string) -> string {
 // from the cache key (`_runtime_obj_key_with_target`), which carries the
 // raw triple, so two unknown triples sharing a filename still mismatch on
 // key and recompile rather than cross-link.
-fn triple_artifact_tag(triple: string) -> string {
+fn _triple_artifact_tag(triple: string) -> string {
     if triple == "x86_64-unknown-linux-gnu" { return "linux-x86_64"; }
     if triple == "aarch64-unknown-linux-gnu" { return "linux-aarch64"; }
     if triple == "x86_64-apple-darwin" { return "darwin-x86_64"; }
@@ -148,6 +165,18 @@ fn triple_artifact_tag(triple: string) -> string {
     if triple == "x86_64-pc-windows-msvc" { return "windows-msvc"; }
     if triple == "x86_64-w64-mingw32" { return "windows-gnu"; }
     return "other";
+}
+
+// The complete closed set of tags `_triple_artifact_tag`/`target_artifact_tag`
+// can return — every supported triple's tag, plus the `"other"` fallback
+// for an unrecognized triple. Single source of truth for anything that
+// must sweep or enumerate every possible tag (SFN-774): `target_artifact_tag`
+// itself is derived from `triple_is_supported`'s set below, and
+// `clean_runtime_object_cache` (`./runtime_objs.sfn`) sweeps exactly this
+// list rather than hand-maintaining a parallel literal that can drift out
+// of sync with the tag function (the SFN-14 regression this closes).
+fn triple_artifact_tags() -> string[] {
+    return ["linux-x86_64", "linux-aarch64", "darwin-x86_64", "darwin-arm64", "windows-msvc", "windows-gnu", "other"];
 }
 
 // Map a `build_host_os()`-shaped OS string to its default triple in the
@@ -158,12 +187,24 @@ fn triple_artifact_tag(triple: string) -> string {
 // own host triple rather than x86_64's. Shared by the `SAILFIN_TARGET_OS`
 // legacy alias and the final host-probe fallback in `build_target_triple`
 // below, so both spell a Linux/Darwin/Windows OS string the same triple.
+// The three `SAILFIN_TARGET_ARCH` probes (here, `_resolve_llvm_target_arch`
+// in `./llvm_provider_context.sfn`, and `resolve_direct_ld_lld` in
+// `./direct_link.sfn`) must agree on the override precedence and the
+// non-shelling aarch64 fallback probe (SFN-774) — a mismatch would let two
+// of the three resolve one arch while the third resolves another for the
+// identical process environment.
 fn _host_default_triple(os: string) -> string ![io] {
     if os == "Windows" { return "x86_64-pc-windows-msvc"; }
+    // Known limitation: hardcodes the x86_64 Darwin triple, so an Apple
+    // Silicon host mislabels its own tag. Not fixed here (SFN-774, Slice
+    // A1) — Darwin arm64 host detection is out of scope for this slice.
     if os == "Darwin" { return "x86_64-apple-darwin"; }
-    if fs.exists("/lib/ld-linux-aarch64.so.1") {
-        return "aarch64-unknown-linux-gnu";
+    let mut arch = _get_env_cmd("SAILFIN_TARGET_ARCH");
+    if arch.length == 0 {
+        arch = "x86_64";
+        if fs.exists("/lib/ld-linux-aarch64.so.1") { arch = "aarch64"; }
     }
+    if arch == "aarch64" { return "aarch64-unknown-linux-gnu"; }
     return "x86_64-unknown-linux-gnu";
 }
 
@@ -471,15 +512,15 @@ fn target_condition_runtime_sfn_sources(sources: string[], target_os: string) ->
 // SFEP-0068 §3.6). A resolved triple may originate from
 // `SAILFIN_TARGET_TRIPLE`/`SAILFIN_TARGET_OS` — unvalidated environment
 // strings — so it must never be interpolated into a filesystem path
-// directly; this delegates to `triple_artifact_tag`'s closed set of
+// directly; this delegates to `_triple_artifact_tag`'s closed set of
 // path-safe tokens. `windows-msvc` and `windows-gnu` are now DISTINCT
 // tags, which is the on-disk half of the §3.6 correctness fix: before
 // this, both Windows ABIs shared the single `"windows"` tag and could
 // overwrite each other's cached runtime objects even after the cache-key
-// fold below stopped colliding them. See `triple_artifact_tag` for the
+// fold below stopped colliding them. See `_triple_artifact_tag` for the
 // unknown-triple fallback rationale.
 fn target_artifact_tag(triple: string) -> string {
-    return triple_artifact_tag(triple);
+    return _triple_artifact_tag(triple);
 }
 
 export {
@@ -499,7 +540,7 @@ export {
     target_condition_runtime_sfn_sources,
     target_artifact_tag,
     triple_abi,
-    triple_artifact_tag,
+    triple_artifact_tags,
     triple_is_supported,
     triple_target_os
 };

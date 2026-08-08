@@ -32,7 +32,7 @@ import {
     target_os_is_windows,
     target_uses_gnu_link_gc,
     triple_abi,
-    triple_artifact_tag,
+    triple_artifact_tags,
     triple_is_supported,
     triple_target_os
 } from "../../src/build/target";
@@ -390,7 +390,7 @@ fn _driver_plan(test_mode: boolean) -> LinkPlan ![pure] {
 }
 
 test "target: program link argv carries -target when the driver flags do" ![pure] {
-    // `LlvmTextBackend.link` prefixes `target_clang_flags(target_os)` onto
+    // `LlvmTextBackend.link` prefixes `target_clang_flags(triple)` onto
     // the driver-flag slice both layouts splice after `-Wno-override-module`.
     let driver_flags: string[] = ["-target", "x86_64-pc-windows-msvc"];
     let argv = _llvm_text_link_program_argv(_driver_plan(false), driver_flags);
@@ -432,8 +432,30 @@ test "target: msvc and windows-gnu artifact tags are distinct" ![pure] {
     assert expect_eq_bool(target_artifact_tag("x86_64-pc-windows-msvc") == target_artifact_tag("x86_64-w64-mingw32"), false).ok;
 }
 
-test "target: triple_artifact_tag agrees with target_artifact_tag" ![pure] {
-    assert expect_eq_str(triple_artifact_tag("x86_64-w64-mingw32"), target_artifact_tag("x86_64-w64-mingw32")).ok;
+// SFN-774 H1 drift guard: `clean_runtime_object_cache`'s `--clean` sweep
+// (`build/runtime_objs.sfn`) now iterates `triple_artifact_tags()` rather
+// than a hand-maintained literal, so every tag `target_artifact_tag` can
+// actually produce for a supported triple must appear in that list — the
+// exact drift that let `--clean` silently stop sweeping runtime objects
+// once `target_artifact_tag` grew the `linux-x86_64`/`linux-aarch64`/
+// `darwin-x86_64`/`darwin-arm64`/`windows-msvc`/`windows-gnu` tags.
+test "target: every supported triple's artifact tag is in triple_artifact_tags" ![pure] {
+    let triples: string[] = ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu", "x86_64-apple-darwin", "arm64-apple-darwin", "x86_64-pc-windows-msvc", "x86_64-w64-mingw32"];
+    let tags = triple_artifact_tags();
+    let mut i: int = 0;
+    loop {
+        if i >= triples.length { break; }
+        let tag = target_artifact_tag(triples[i]);
+        let mut found: boolean = false;
+        let mut ti: int = 0;
+        loop {
+            if ti >= tags.length { break; }
+            if tags[ti] == tag { found = true; }
+            ti += 1;
+        }
+        assert expect_eq_bool(found, true).ok;
+        i += 1;
+    }
 }
 
 // An unrecognized target collapses to a single bucket on purpose. The
