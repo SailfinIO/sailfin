@@ -103,7 +103,11 @@ jobs:
         run: |
           set -euo pipefail
           bash -n install.sh
-          curl --fail --silent --show-error --location --head \
+          # A release-download URL redirects to a presigned object URL signed
+          # for GET only, so HEAD gets a 401 there; a one-byte ranged GET asks
+          # the same existence question the way the URL is signed to answer
+          # it (SFN-798).
+          curl --fail --silent --show-error --location --request GET --range 0-0 -o /dev/null \
             "https://github.com/SailfinIO/sailfin/releases/download/${SEED_TAG}/${ASSET}"
 
       - name: Install the pinned release into an empty prefix
@@ -163,8 +167,13 @@ jobs:
             exit 1
           }
           $asset = "sailfin_$($env:SEED_VERSION)_windows_x86_64.tar.gz"
+          # A release-download URL redirects to a presigned object URL signed
+          # for GET only, so HEAD gets a 401 there; a one-byte ranged GET asks
+          # the same existence question the way the URL is signed to answer
+          # it (SFN-798).
           Invoke-WebRequest `
-            -Method Head `
+            -Method Get `
+            -Headers @{ Range = 'bytes=0-0' } `
             -Uri "https://github.com/SailfinIO/sailfin/releases/download/$($env:SEED_TAG)/$asset" `
             -UseBasicParsing
 

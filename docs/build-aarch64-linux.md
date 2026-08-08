@@ -29,7 +29,10 @@ per pinned seed (SFN-580):
 `scripts/select-aarch64-seed-mode.sh` decides which path a release leg takes
 for a given `SEED_VERSION` (the pin from `bootstrap.toml [seed].version`, or
 a workflow's `seed_version` override). It probes release `v$SEED_VERSION` for
-both arm64 assets and prints exactly one word to stdout:
+both arm64 assets with a one-byte ranged GET (a release-download URL
+redirects to a presigned object URL signed for GET only, so a `HEAD` probe
+gets rejected there and can't be used) and prints exactly one word to
+stdout:
 
 - `native` — both `sailfin-native-linux-arm64-<version>.tar.gz` and
   `sailfin_<version>_linux_arm64.tar.gz` are present.
@@ -55,6 +58,10 @@ Env:
 - `SAILFIN_SEED_ASSET_LIST` — test seam: a newline-delimited file of asset
   names consulted instead of the network. Exercises the full
   both/neither/partial/invalid decision matrix hermetically in
+  `compiler/tests/e2e/aarch64_seed_mode_test.sfn`.
+- `SAILFIN_SEED_PROBE_HTTP_CODE` — test seam: forces the HTTP status the
+  ranged-GET probe sees, bypassing the network, so the non-200/206/404
+  fail-closed branch is testable hermetically in
   `compiler/tests/e2e/aarch64_seed_mode_test.sfn`.
 
 The two release workflows run this probe in a `Select aarch64 seed mode`
