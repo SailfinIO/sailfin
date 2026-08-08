@@ -10,7 +10,7 @@ import { int_to_string } from "sfn/strings";
 // gate. capsule_resolver re-imports the public entry points.
 import { _atomic_rename_into_place, _mktemp_sibling_cmd } from "./build/fs";
 import { build_host_os } from "./build/target";
-import { validate_llvm_ir } from "./emit_helpers";
+import { validate_llvm_ir } from "./llvm_validation";
 import { substring } from "./string_utils";
 
 // Resolve the per-build job count for parallel subprocess emits.

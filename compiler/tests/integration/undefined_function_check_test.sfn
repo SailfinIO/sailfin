@@ -24,6 +24,8 @@
 // (`SAILFIN_EFFECT_ENFORCE` / `SAILFIN_USE_ARENA`) must stay unset so
 // the test exercises the shipped defaults deterministically instead of
 // inheriting an ambient shell setting.
+import { module_name_from_path } from "../../src/module_paths";
+
 fn _contains(haystack: string, needle: string) -> boolean {
     if needle.length == 0 { return true; }
     if needle.length > haystack.length { return false; }
@@ -109,4 +111,61 @@ test "SFN-544: workspace export missing from imports reports span and provider" 
     assert _contains(combined, "from \"main\"");
     assert ! _contains(combined, "internal compiler error");
     assert ! _contains(combined, "ice.md");
+}
+
+test "check resolver: a broken configured entry does not fail a healthy file" ![io] {
+    let dir = fs.mkdtemp("sfn-check-broken-entry-");
+    assert dir.length > 0;
+    let manifest = dir + "/capsule.toml";
+    let broken = dir + "/broken.sfn";
+    let healthy = dir + "/healthy.sfn";
+    fs.writeFile(manifest, "[capsule]\nname = \"broken-entry-fixture\"\nversion = \"0.1.0\"\n\n"
+        + "[build]\nentry = \"broken.sfn\"\nkind = \"binary\"\n");
+    fs.writeFile(broken, "fn broken( {\n");
+    fs.writeFile(healthy, "fn healthy() -> int { return 1; }\n");
+
+    let rc = process.run_capture(["build/bin/sfn", "check", healthy], []);
+    let combined = process.capture_take_stdout() + process.capture_take_stderr();
+    assert rc == 0;
+    assert ! _contains(combined, "failed to stage import-context");
+    assert ! _contains(combined, "broken.sfn");
+
+    fs.deleteFile(healthy);
+    fs.deleteFile(broken);
+    fs.deleteFile(manifest);
+}
+
+test "check resolver: a stale entry artifact is not provider inventory" ![io] {
+    let dir = fs.mkdtemp("sfn-check-stale-entry-");
+    assert dir.length > 0;
+    let manifest_path = dir + "/capsule.toml";
+    let entry = dir + "/entry.sfn";
+    let consumer = dir + "/consumer.sfn";
+    fs.writeFile(manifest_path, "[capsule]\nname = \"stale-entry-fixture\"\nversion = \"0.1.0\"\n\n"
+        + "[build]\nentry = \"entry.sfn\"\nkind = \"binary\"\n");
+    fs.writeFile(entry, "fn current_entry() -> int { return 1; }\n");
+    fs.writeFile(consumer, "fn consumer() -> int { return stale_export(); }\n");
+
+    let slug = module_name_from_path(entry);
+    let context_root = "build/compiler/import-context";
+    let artifact_dir = context_root + "/" + substring(slug, 0, slug.length - "entry".length);
+    fs.createDirectory(artifact_dir, true);
+    let artifact_base = context_root + "/" + slug;
+    fs.writeFile(artifact_base + ".sfn-asm", "; stale fixture\n.module " + slug
+        + "\n\n.fn stale_export() -> int\n.meta return int\n    ret 1\n.endfn\n");
+    fs.writeFile(artifact_base + ".layout-manifest", "");
+    fs.writeFile(artifact_base + ".srchash", "definitely-stale");
+
+    let rc = process.run_capture(["build/bin/sfn", "check", consumer], []);
+    let combined = process.capture_take_stdout() + process.capture_take_stderr();
+    assert rc != 0;
+    assert _contains(combined, "undefined function `stale_export`");
+    assert ! _contains(combined, "import { stale_export }");
+
+    fs.deleteFile(artifact_base + ".srchash");
+    fs.deleteFile(artifact_base + ".layout-manifest");
+    fs.deleteFile(artifact_base + ".sfn-asm");
+    fs.deleteFile(consumer);
+    fs.deleteFile(entry);
+    fs.deleteFile(manifest_path);
 }

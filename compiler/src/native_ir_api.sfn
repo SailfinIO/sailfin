@@ -118,13 +118,13 @@ fn parse_native_imports_for_import(text: string) -> NativeImport[] {
     // Import discovery fast-path: scan only top-level `.import`/`.export`
     // directives instead of routing through parse_native_artifact_impl, which
     // walks every `.struct`/`.interface`/`.enum` body via recursive helpers.
-    // The BFS in collect_imported_module_context_for_module calls this once per
-    // unique transitive module; skipping multi-line block parsing removes the
+    // The driver-owned import-context BFS calls this once per unique transitive
+    // module; skipping multi-line block parsing removes the
     // dominant per-module discovery cost. `.import`/`.export` are emitted only
     // as top-level statements (see emit_native.sfn:emit_statement_declarations),
     // so a flat line scan matches parse_native_artifact_impl's output for the
     // imports field. Diagnostics are intentionally dropped — the caller
-    // (llvm/imports.sfn) discards them.
+    // (`import_context.sfn`) discards them.
     let lines = split_lines(text);
     let mut imports: NativeImport[] = [];
     let mut index: int = 0;

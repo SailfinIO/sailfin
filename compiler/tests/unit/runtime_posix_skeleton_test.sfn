@@ -15,7 +15,7 @@
 // single-module lowering resolves every symbol it declares — including
 // the primitive-pointer out-parameters (`* i32`) and `* * u8` argv/envp
 // shapes the libc skeleton does not exercise.
-import { resolve_llvm_provider_context } from "../../src/build/llvm_provider_context";
+import { empty_llvm_import_context, resolve_llvm_provider_context } from "../../src/build/llvm_provider_context";
 import { emit_native_text_with_module_name } from "../../src/emit_native";
 import { lower_to_llvm_ir_from_text_with_provider_context } from "../../src/llvm/lowering/entrypoints";
 import { parse_program } from "../../src/parser/mod";
@@ -29,7 +29,7 @@ test "lowering: runtime/sfn/platform/posix.sfn emits a declare for every extern"
     let source = fs.readFile("runtime/sfn/platform/posix.sfn");
     let program = parse_program(source);
     let native = emit_native_text_with_module_name(program, "runtime/sfn/platform/posix");
-    let ir = lower_to_llvm_ir_from_text_with_provider_context(native, "runtime/sfn/platform/posix", resolve_llvm_provider_context());
+    let ir = lower_to_llvm_ir_from_text_with_provider_context(native, "runtime/sfn/platform/posix", empty_llvm_import_context(), resolve_llvm_provider_context());
 
     assert _contains(ir, "declare ");
     assert _contains(ir, "@posix_spawnp(");

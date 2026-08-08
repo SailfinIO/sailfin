@@ -26,10 +26,13 @@ import {
 import { emit_program } from "./emitter_sailfin";
 import { ice_enter_stage, ice_set_source } from "./ice";
 import {
+    import_context_root,
+    imported_module_context_from_loaded_data,
+    load_imported_module_context
+} from "./import_context";
+import {
     lower_native_lines_to_llvm_artifact_with_context_and_provider,
-    lower_native_lines_to_llvm_artifact_with_provider_context,
     lower_native_text_to_llvm_artifact_with_context_and_provider,
-    lower_native_text_to_llvm_artifact_with_provider_context,
     lower_to_llvm_ir_from_text_with_provider_context,
     lower_to_llvm_ir_with_provider_context,
     print_llvm_ir_from_text_with_provider_context
@@ -39,8 +42,8 @@ import { has_fatal_lowering_diagnostic, print_fatal_lowering_diagnostics } from 
 import { native_text_passes_lowering_gate } from "./llvm/lowering/lowering_core/file_emission";
 import { runtime_helper_call_names } from "./llvm/runtime_helpers/mod";
 import { LLVMArtifactResult } from "./llvm/types";
-import { LayoutManifest, NativeModule } from "./native_ir";
-import { parse_native_artifact } from "./native_ir_api";
+import { ImportedModuleContext, LayoutManifest, NativeModule } from "./native_ir";
+import { parse_native_artifact, parse_native_artifact_from_lines } from "./native_ir_api";
 import { lines_to_native_text, native_lines_have_text } from "./native_ir_utils_text";
 import { parse_program } from "./parser/mod";
 import { load_prelude_global_names } from "./prelude_globals";
@@ -87,6 +90,29 @@ fn _timing_line(module_name: string, phase: string, elapsed_ms: int) -> string {
     // Emitted to stderr via print.err by the caller.
     return "[timing] module=" + module_name + " phase=" + phase + " ms="
         + int_to_string(elapsed_ms);
+}
+
+fn _load_llvm_import_context(native_text: string, module_name: string, context_root: string) -> ImportedModuleContext ![io] {
+    if native_text.length == 0 {
+        return ImportedModuleContext {
+            manifests: [],
+            native_texts: [],
+            diagnostics: [],
+            module_aliases: []
+        };
+    }
+    let parsed = parse_native_artifact(native_text);
+    return load_imported_module_context(parsed.imports, module_name, context_root);
+}
+
+fn _llvm_import_context_from_loaded_data(native_text: string, module_name: string, context_root: string, imported_manifests: LayoutManifest[], imported_native_texts: string[], imported_diagnostics: string[]) -> ImportedModuleContext ![io] {
+    let parsed = parse_native_artifact(native_text);
+    return imported_module_context_from_loaded_data(parsed.imports, module_name, context_root, imported_manifests, imported_native_texts, imported_diagnostics);
+}
+
+fn _load_llvm_import_context_from_lines(native_lines: string[], module_name: string, context_root: string) -> ImportedModuleContext ![io] {
+    let parsed = parse_native_artifact_from_lines(native_lines);
+    return load_imported_module_context(parsed.imports, module_name, context_root);
 }
 
 // Refuse compilation when any `export { X };` in this module re-exports
@@ -367,7 +393,8 @@ fn compile_to_llvm(source: string) -> string ![io] {
         }
     }
     if native_text.length > 0 {
-        let ir = lower_to_llvm_ir_from_text_with_provider_context(native_text, "main", resolve_llvm_provider_context());
+        let import_context = _load_llvm_import_context(native_text, "main", import_context_root(""));
+        let ir = lower_to_llvm_ir_from_text_with_provider_context(native_text, "main", import_context, resolve_llvm_provider_context());
         if trace_emit {
             print.err("emit-llvm: llvm bytes=" + int_to_string(ir.length));
             if ir.length > 0 {
@@ -387,7 +414,9 @@ fn compile_to_llvm(source: string) -> string ![io] {
     // and `emit_llvm_with_retry` re-runs on each attempt — so the same note
     // legitimately appears once per compile pass under the debug gate.
     let native_result = emit_native_with_module_name(program, "main");
-    let ir = lower_to_llvm_ir_with_provider_context(native_result.module, resolve_llvm_provider_context());
+    let fallback_text = native_result.module.artifacts[0].contents;
+    let fallback_context = _load_llvm_import_context(fallback_text, "main", import_context_root(""));
+    let ir = lower_to_llvm_ir_with_provider_context(native_result.module, fallback_context, resolve_llvm_provider_context());
     if trace_emit {
         print.err("emit-llvm: llvm bytes=" + int_to_string(ir.length));
         if ir.length > 0 {
@@ -426,7 +455,8 @@ fn print_llvm_with_module(source: string, module_name: string) -> boolean ![io] 
     _report_emit_native_diags(emitted.diags, module_name);
     let native_text = lines_to_native_text(emitted.lines);
     if native_text.length == 0 { return false; }
-    return print_llvm_ir_from_text_with_provider_context(native_text, module_name, resolve_llvm_provider_context());
+    let import_context = _load_llvm_import_context(native_text, module_name, import_context_root(""));
+    return print_llvm_ir_from_text_with_provider_context(native_text, module_name, import_context, resolve_llvm_provider_context());
 }
 
 fn compile_to_llvm_with_module(source: string, module_name: string) -> string ![io] {
@@ -472,14 +502,17 @@ fn compile_to_llvm_with_module(source: string, module_name: string) -> string ![
     // The re-emits below carry the same diagnostics the primary emit above
     // already reported; re-reporting would duplicate them (SFN-608).
     if native_text.length > 0 {
-        ir = lower_to_llvm_ir_from_text_with_provider_context(native_text, module_name, resolve_llvm_provider_context());
+        let import_context = _load_llvm_import_context(native_text, module_name, import_context_root(""));
+        ir = lower_to_llvm_ir_from_text_with_provider_context(native_text, module_name, import_context, resolve_llvm_provider_context());
         if ir.length == 0 {
             let native_result = emit_native_with_module_name(program, module_name);
-            ir = lower_to_llvm_ir_with_provider_context(native_result.module, resolve_llvm_provider_context());
+            let fallback_context = _load_llvm_import_context(native_result.module.artifacts[0].contents, module_name, import_context_root(""));
+            ir = lower_to_llvm_ir_with_provider_context(native_result.module, fallback_context, resolve_llvm_provider_context());
         }
     } else {
         let native_result = emit_native_with_module_name(program, module_name);
-        ir = lower_to_llvm_ir_with_provider_context(native_result.module, resolve_llvm_provider_context());
+        let fallback_context = _load_llvm_import_context(native_result.module.artifacts[0].contents, module_name, import_context_root(""));
+        ir = lower_to_llvm_ir_with_provider_context(native_result.module, fallback_context, resolve_llvm_provider_context());
     }
     if trace_emit {
         print.err("emit-llvm: llvm bytes=" + int_to_string(ir.length));
@@ -560,11 +593,13 @@ fn compile_to_llvm_with_module_timed(source: string, module_name: string) -> str
     ice_enter_stage("lower_llvm");
     let mut ir = "";
     if native_text.length > 0 {
-        ir = lower_to_llvm_ir_from_text_with_provider_context(native_text, module_name, resolve_llvm_provider_context());
+        let import_context = _load_llvm_import_context(native_text, module_name, import_context_root(""));
+        ir = lower_to_llvm_ir_from_text_with_provider_context(native_text, module_name, import_context, resolve_llvm_provider_context());
     } else {
         // Already reported above; re-emitting is deterministic (SFN-608).
         let native_result = emit_native_with_module_name(program, module_name);
-        ir = lower_to_llvm_ir_with_provider_context(native_result.module, resolve_llvm_provider_context());
+        let fallback_context = _load_llvm_import_context(native_result.module.artifacts[0].contents, module_name, import_context_root(""));
+        ir = lower_to_llvm_ir_with_provider_context(native_result.module, fallback_context, resolve_llvm_provider_context());
     }
     if trace_emit {
         print.err("emit-llvm: llvm bytes=" + int_to_string(ir.length));
@@ -694,7 +729,8 @@ fn compile_tests_to_llvm_file_with_module_imports(source: string, module_name: s
     }
 
     let empty_diagnostics: string[] = [];
-    let generated = lower_llvm_for_tests_from_text_with_provider_context(native_text, module_name, imported_manifests, imported_native_texts, empty_diagnostics, resolve_llvm_provider_context());
+    let import_context = _llvm_import_context_from_loaded_data(native_text, module_name, import_context_root(""), imported_manifests, imported_native_texts, empty_diagnostics);
+    let generated = lower_llvm_for_tests_from_text_with_provider_context(native_text, module_name, import_context, resolve_llvm_provider_context());
     if !_publish_llvm_artifact(generated, out_path, "test llvm: wrote truncated IR to "
         + out_path) { return false; }
     if !fs.exists(out_path) { return false; }
@@ -826,7 +862,8 @@ fn write_native_text_file_with_module_gated(source: string, module_name: string,
     if !ok { return false; }
     if !run_gate { return true; }
     let native_text = fs.readFile(out_path);
-    if native_text_passes_lowering_gate(native_text, module_name, resolve_llvm_provider_context()) {
+    let import_context = _load_llvm_import_context(native_text, module_name, import_context_root(""));
+    if native_text_passes_lowering_gate(native_text, module_name, import_context, resolve_llvm_provider_context()) {
         return true;
     }
     if fs.exists(out_path) { fs.deleteFile(out_path); }
@@ -852,7 +889,8 @@ fn print_native_text_with_module_gated(source: string, module_name: string, run_
     // same sentinel.
     if native_text.length == 0 { return false; }
     if run_gate {
-        if !native_text_passes_lowering_gate(native_text, module_name, resolve_llvm_provider_context()) {
+        let import_context = _load_llvm_import_context(native_text, module_name, import_context_root(""));
+        if !native_text_passes_lowering_gate(native_text, module_name, import_context, resolve_llvm_provider_context()) {
             return false;
         }
     }
@@ -907,6 +945,10 @@ fn _publish_llvm_artifact(result: LLVMArtifactResult, out_path: string, publicat
 // (`compile_to_llvm_with_module_timed`, ad-hoc `sailfin emit llvm
 // <file>` with no `--import-context`) are unaffected.
 fn compile_to_llvm_file_with_module_imports(source: string, module_name: string, out_path: string, work_dir: string, import_asm_paths: string[]) -> boolean ![io] {
+    return compile_to_llvm_file_with_module_import_context_root(source, module_name, out_path, work_dir, import_asm_paths, import_context_root(work_dir));
+}
+
+fn compile_to_llvm_file_with_module_import_context_root(source: string, module_name: string, out_path: string, work_dir: string, import_asm_paths: string[], context_root: string) -> boolean ![io] {
     // Phase-scoped arena reclamation: enabled unless SAILFIN_ARENA_PHASE_REWIND=0.
     // The mark is taken here, before parse, so the rewind at the end of the
     // emit pass reclaims the entire AST/typecheck/emit region — letting
@@ -933,15 +975,9 @@ fn compile_to_llvm_file_with_module_imports(source: string, module_name: string,
     if _reject_parse_errors(program) { return false; }
     if _reject_reexport_violations(program) { return false; }
     let mut imports = empty_import_symbols();
-    // Staged direct-import `.sfn-asm` bodies (including the walk-excluded
-    // `-p` entry, #984). The loader returns these in the same pass that
-    // builds the E0402 effect table, so the read already happens — we
-    // keep the bodies instead of discarding them (#999).
-    let mut imported_native_texts: string[] = [];
     if import_asm_paths.length > 0 {
         let loaded = load_imported_interfaces_from_paths(import_asm_paths);
         imports = loaded.function_effects;
-        imported_native_texts = loaded.native_texts;
     }
     if validate_and_render_effects(program, source, module_name, imports) > 0 {
         return false;
@@ -975,22 +1011,14 @@ fn compile_to_llvm_file_with_module_imports(source: string, module_name: string,
     // boundary — nothing arena-allocated is read after the rewind, avoiding
     // the array-container UAF that afflicts a `string[]` copy approach
     // (the array struct itself is arena-backed and gone after rewind).
-    // `import_asm_paths` is a parameter allocated by the caller before the
-    // arena mark and survives natively; it is re-loaded post-rewind so the
-    // loaded native_texts (which are arena-backed) are fresh and valid.
     // Disabled when SAILFIN_ARENA_PHASE_REWIND=0.
     if phase_rewind {
         let heap_text: string = relocate_string_to_heap(lines_to_native_text(native_lines));
         sfn_arena_sfn_rewind(arena_mark);
         let mut ok: boolean = false;
-        if import_asm_paths.length > 0 {
-            let reloaded = load_imported_interfaces_from_paths(import_asm_paths);
-            let generated = lower_native_text_to_llvm_artifact_with_context_and_provider(heap_text, module_name, reloaded.native_texts, resolve_llvm_provider_context());
-            ok = _publish_llvm_artifact(generated, out_path, "");
-        } else {
-            let generated = lower_native_text_to_llvm_artifact_with_provider_context(heap_text, module_name, resolve_llvm_provider_context());
-            ok = _publish_llvm_artifact(generated, out_path, "");
-        }
+        let import_context = _load_llvm_import_context(heap_text, module_name, context_root);
+        let generated = lower_native_text_to_llvm_artifact_with_context_and_provider(heap_text, module_name, import_context, resolve_llvm_provider_context());
+        ok = _publish_llvm_artifact(generated, out_path, "");
         free_heap_string(heap_text);
         return ok;
     }
@@ -1000,11 +1028,8 @@ fn compile_to_llvm_file_with_module_imports(source: string, module_name: string,
     // function signatures (#999). The empty-import / in-process path
     // (`import_asm_paths.length == 0`) keeps routing through the direct
     // provider entrypoint.
-    if import_asm_paths.length > 0 {
-        let generated = lower_native_lines_to_llvm_artifact_with_context_and_provider(native_lines, module_name, imported_native_texts, resolve_llvm_provider_context());
-        return _publish_llvm_artifact(generated, out_path, "");
-    }
-    let generated = lower_native_lines_to_llvm_artifact_with_provider_context(native_lines, module_name, resolve_llvm_provider_context());
+    let import_context = _load_llvm_import_context_from_lines(native_lines, module_name, context_root);
+    let generated = lower_native_lines_to_llvm_artifact_with_context_and_provider(native_lines, module_name, import_context, resolve_llvm_provider_context());
     return _publish_llvm_artifact(generated, out_path, "");
 }
 

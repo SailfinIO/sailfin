@@ -249,3 +249,38 @@ peak RSS", so an RSS-only trigger is sufficient to force the split.
   extrapolate if `compiler/src/` has moved materially before the comparison.
 - Following the house convention in `docs/perf/runtime-performance.md`, append
   dated post-migration sections below rather than editing the frozen numbers.
+
+## 2026-08-08 — SFN-736 import-context ownership observation (Darwin arm64)
+
+This re-run covers the two workloads named by SFN-736 after import-context
+artifact discovery and reads moved from LLVM lowering into the compiler driver.
+It is an **observation, not a §3.3 5% adjudication**, because the frozen
+baseline host is Linux x86_64 and this development host is Darwin arm64. The
+same-host rule above forbids treating the deltas as an implementation effect.
+
+| Field | Value |
+|---|---|
+| Base commit plus working change | `68350cf538c0059ee8693e1be3d642d34ad86951` + SFN-736 |
+| Compiler under test | `build/bin/sfn` 0.9.1, self-hosted with `make compile` |
+| Seed / capsule version | 0.9.1 / 0.9.1 |
+| Compiler modules | 367 `.sfn` files under `compiler/src/` |
+| OS / kernel | Darwin 27.0.0, arm64 |
+| CPU / logical CPUs | Apple M2 Max / 12 |
+| RAM | 64 GiB |
+| clang | Homebrew clang 17.0.6 |
+| Memory cap | default 8 GiB `RLIMIT_AS` self-cap (not overridden) |
+| Captured | 2026-08-08T16:32Z |
+
+Procedure matched section A: one discarded warm-up followed by three runs per
+workload. GNU time was `/opt/homebrew/bin/gtime -f "%e %M"` because Darwin's
+`/usr/bin/time` does not support GNU `-f` formatting.
+
+| Workload | Files | Timed runs (wall s / peak KiB) | Wall median | Peak RSS median | RSS spread |
+|---|---:|---|---:|---:|---:|
+| `trivial` | 1 | `0.28 / 204240`, `0.28 / 204240`, `0.28 / 204192` | **0.28 s** | **199.5 MiB** | 0.02% |
+| `examples` | 15 | `0.14 / 111216`, `0.14 / 111216`, `0.14 / 111200` | **0.14 s** | **108.6 MiB** | 0.01% |
+
+Both commands exited 0 on every timed run. The measured check paths performed
+no LLVM lowering. A future Linux x86_64 run on the frozen baseline host remains
+required before these values can accept or reject the optional
+`sfn/module-interface` split under SFEP-0020 §3.3.

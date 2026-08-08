@@ -144,10 +144,9 @@ fn _append_effect_authority_exceptions(initial: AuthorityException[]) -> Authori
     out.push(_authority_exception("llvm/expression_lowering/native/runtime_call", "effect:io", 1, seam));
     out.push(_authority_exception("llvm/expression_lowering/native/statement", "effect:io", 2, seam));
     out.push(_authority_exception("llvm/expression_lowering/native/statement_assignment", "effect:io", 1, seam));
-    out.push(_authority_exception("llvm/imports", "effect:io", 6, seam));
     out.push(_authority_exception("llvm/lowering/emission", "effect:io", 1, seam));
     out.push(_authority_exception("llvm/lowering/emission_async", "effect:io", 1, seam));
-    out.push(_authority_exception("llvm/lowering/entrypoints", "effect:io", 13, seam));
+    out.push(_authority_exception("llvm/lowering/entrypoints", "effect:io", 11, seam));
     out.push(_authority_exception("llvm/lowering/entrypoints_tests", "effect:io", 1, seam));
     out.push(_authority_exception("llvm/lowering/entrypoints_tests_writer", "effect:io", 1, seam));
     out.push(_authority_exception("llvm/lowering/instructions", "effect:io", 1, seam));
@@ -162,10 +161,9 @@ fn _append_effect_authority_exceptions(initial: AuthorityException[]) -> Authori
     out.push(_authority_exception("llvm/lowering/instructions_routine", "effect:io", 1, seam));
     out.push(_authority_exception("llvm/lowering/instructions_try", "effect:io", 2, seam));
     out.push(_authority_exception("llvm/lowering/lowering_core/diagnostics", "effect:io", 1, seam));
-    out.push(_authority_exception("llvm/lowering/lowering_core/file_emission", "effect:io", 6, seam));
+    out.push(_authority_exception("llvm/lowering/lowering_core/file_emission", "effect:io", 4, seam));
     out.push(_authority_exception("llvm/lowering/lowering_core/mod", "effect:io", 1, seam));
     out.push(_authority_exception("llvm/lowering/lowering_core/test_harness", "effect:io", 1, seam));
-    out.push(_authority_exception("llvm/lowering/lowering_helpers", "effect:io", 1, seam));
     out.push(_authority_exception("llvm/lowering/lowering_helpers_mangling", "effect:io", 1, seam));
     out.push(_authority_exception("llvm/lowering/lowering_phase_functions", "effect:io", 1, seam));
     out.push(_authority_exception("llvm/lowering/lowering_phase_render", "effect:io", 1, seam));
@@ -280,7 +278,12 @@ fn _is_driver_module_id(id: string) -> boolean {
         || id == "emit_helpers"
         || id == "ice"
         || id == "lock"
+        || id == "llvm_validation"
         || id == "main"
+        || id == "import_context"
+        || id == "module_paths"
+        || id == "native_artifact_writer"
+        || id == "native_emit_subprocess"
         || id == "prelude_globals"
         || id == "release_trust"
         || id == "runtime_capsule_resolver"
@@ -791,6 +794,16 @@ fn _find_authority_exception(exceptions: AuthorityException[], module: string, t
     return -1;
 }
 
+fn _boundary_string_index(items: string[], needle: string) -> int {
+    let mut index: int = 0;
+    loop {
+        if index >= items.length { break; }
+        if items[index] == needle { return index; }
+        index += 1;
+    }
+    return -1;
+}
+
 fn _text_at(source: string, index: int, value: string) -> boolean {
     if index < 0 || index + value.length > source.length { return false; }
     return substring(source, index, index + value.length) == value;
@@ -1257,7 +1270,7 @@ test "capsule roles: classification survives physical compiler capsule moves" {
     assert _edge_module_id("sfn/codegen/emit_native") == "emit_native";
     assert _edge_module_id("sfn/codegen-llvm/lowering/mod") == "llvm/lowering/mod";
     assert _find_exception(moved_exceptions, _edge_module_id("sfn/codegen-llvm/types"), _edge_module_id("sfn/analyzer/diagnostic")) >= 0;
-    let moved_authority = _edge_module_id("compiler/capsules/codegen-llvm/src/imports.sfn");
+    let moved_authority = _edge_module_id("compiler/capsules/codegen-llvm/src/atomics.sfn");
     assert _find_authority_exception(_authority_exceptions(), moved_authority, "effect:io") >= 0;
     assert _role_from_internal_spec("sfn/compiler/build") == ROLE_DRIVER;
     assert _role_from_internal_spec("sfn/fs/private") == ROLE_AUTHORITY;
@@ -1575,6 +1588,39 @@ test "capsule boundaries: compiler imports obey the role graph and exact excepti
     assert driver_count > 50;
     assert import_count > 500;
     _report_boundary_failures(failures);
+}
+
+test "capsule boundaries: check multi-capsule staging excludes LLVM lowering" ![io] {
+    let mut queue: string[] = ["compiler/src/check/engine.sfn"];
+    let mut seen: string[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= queue.length { break; }
+        let path = queue[index];
+        index += 1;
+        if !fs.exists(path) { continue; }
+        if _boundary_string_index(seen, path) >= 0 { continue; }
+        seen.push(path);
+        let specs = _all_import_specs(fs.readFile(path));
+        let mut spec_index: int = 0;
+        loop {
+            if spec_index >= specs.length { break; }
+            let imported = _importee_path(path, specs[spec_index]);
+            spec_index += 1;
+            if starts_with(imported, "compiler/src/") {
+                queue.push(imported);
+            }
+        }
+    }
+    let mut closure_index: int = 0;
+    loop {
+        if closure_index >= seen.length { break; }
+        let module_path = seen[closure_index];
+        assert ! starts_with(module_path, "compiler/src/llvm/lowering/");
+        assert module_path != "compiler/src/main.sfn";
+        closure_index += 1;
+    }
+    assert seen.length > 20;
 }
 
 test "capsule boundaries: top-level standard-library capsules do not import compiler internals" ![io] {

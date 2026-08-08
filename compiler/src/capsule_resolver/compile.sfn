@@ -33,9 +33,9 @@ import { ParallelEmitTask, _cr_resolve_jobs, _cr_run_parallel_emit } from "../ca
 import { emit_subprocess_with_retry } from "../emit_helpers";
 import {
     compile_to_llvm_file_with_module,
-    compile_to_llvm_file_with_module_imports,
-    module_name_from_path
+    compile_to_llvm_file_with_module_imports
 } from "../main";
+import { module_name_from_path } from "../module_paths";
 import { resolve_compiler_version_for_cache } from "../version";
 import {
     _cr_dirname,

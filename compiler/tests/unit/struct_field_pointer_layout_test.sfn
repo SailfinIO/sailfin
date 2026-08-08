@@ -21,7 +21,7 @@
 // `lower_to_llvm_ir_from_text_with_provider_context` pass (type_context dominates) runs once for
 // every layout assertion — keeping the test within the per-file memory cap
 // the unit harness enforces.
-import { resolve_llvm_provider_context } from "../../src/build/llvm_provider_context";
+import { empty_llvm_import_context, resolve_llvm_provider_context } from "../../src/build/llvm_provider_context";
 import { emit_native_text_with_module_name } from "../../src/emit_native";
 import { lower_to_llvm_ir_from_text_with_provider_context } from "../../src/llvm/lowering/entrypoints";
 import { parse_program } from "../../src/parser/mod";
@@ -41,7 +41,7 @@ fn _emit_native(source: string) -> string ![io] {
 
 fn _emit_llvm(source: string) -> string ![io] {
     let native = _emit_native(source);
-    return lower_to_llvm_ir_from_text_with_provider_context(native, "struct_field_pointer_layout_test", resolve_llvm_provider_context());
+    return lower_to_llvm_ir_from_text_with_provider_context(native, "struct_field_pointer_layout_test", empty_llvm_import_context(), resolve_llvm_provider_context());
 }
 
 // ── Native-IR layout token survives the round-trip as one token ──────

@@ -321,6 +321,19 @@ here.
   `BuildReport` (#259); `sfn check --json` emits the `sailfin-check/1`
   envelope (`docs/reference/check-json-schema.md`), consumed by the MCP
   server.
+- **Driver-owned import-context loading (SFN-736, SFEP-0020 §§3.3, 3.5).**
+  `compiler/src/import_context.sfn` now owns staged-artifact root selection,
+  relative/module-alias resolution, transitive discovery, and every
+  `.layout-manifest`, `.sfn-asm`, and `.slugalias` read. LLVM lowering accepts
+  an explicit IR-owned `ImportedModuleContext`, including resolved alias-to-
+  provider mappings for pure symbol mangling; it has no process-global root
+  setter and performs no import-context filesystem access. The public lowering
+  surface exposes only context-carrying entry points, reducing the I/O-effect
+  ratchets from 13 to 11 in `entrypoints.sfn` and from 6 to 4 in
+  `lowering_core/file_emission.sfn`. Check-only capsule preparation and native
+  staging bypass `main.sfn` and the LLVM lowering subtree; the compiler capsule
+  boundary suite walks the multi-capsule check import closure to keep that
+  separation enforced.
 - **Pure analyzer boundary (SFN-713, SFEP-0020 §3.5.6).**
   `compiler/src/analyzer.sfn` exposes an authority-free
   `AnalyzerInput -> AnalyzerResult` contract over parsed syntax, imported

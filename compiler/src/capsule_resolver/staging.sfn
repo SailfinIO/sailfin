@@ -7,10 +7,9 @@
 //
 // Ordering is load-bearing and disk-mediated: this module WRITES the
 // import-context tree that `compile_capsule_modules` later READS, and
-// `stage_capsule_imports` sets the process-global import-context root via
-// `set_import_context_root` before any in-process lowering runs. Callers must
-// keep staging strictly before compilation; the data flow alone does not
-// express that constraint.
+// the driver later loads that same explicit root into an
+// `ImportedModuleContext`. Callers must keep staging strictly before
+// compilation; the data flow alone does not express that constraint.
 import { _atomic_rename_into_place, _mktemp_sibling_cmd } from "../build/fs";
 import { sha256_of_file } from "../build_cache";
 import { ParallelEmitTask, _cr_resolve_jobs, _cr_run_parallel_emit } from "../capsule_emit_parallel";
@@ -19,9 +18,9 @@ import {
     collect_relative_import_specs,
     collect_scoped_import_specs
 } from "../capsule_import_scan";
-import { emit_subprocess_with_retry } from "../emit_helpers";
-import { set_import_context_root } from "../llvm/mod";
-import { module_name_from_path, write_native_text_file_with_module } from "../main";
+import { module_name_from_path } from "../module_paths";
+import { write_staged_native_text_file } from "../native_artifact_writer";
+import { stage_native_text_with_retry } from "../native_emit_subprocess";
 import { substring } from "../string_utils";
 import {
     _cr_dirname,
@@ -39,8 +38,8 @@ import {
 import { CapsuleSource } from "./types";
 
 // Emit .sfn-asm + .layout-manifest for a single capsule source. The
-// compiler's normal import resolver (llvm/imports.sfn:_resolve_layout_manifest_path_for_slug)
-// looks in build/compiler/import-context/<slug>.* so that's where we write.
+// driver-owned import-context loader (`import_context.sfn`) looks in
+// build/compiler/import-context/<slug>.* so that's where we write.
 //
 // Cache invalidation contract: a staged `.sfn-asm` + `.layout-manifest`
 // pair is a valid cache hit only when a `.srchash` sidecar written next to
@@ -169,7 +168,7 @@ fn _cr_stage_one(src: CapsuleSource, sailfin_exe: string, work_dir: string) -> b
         // empty output", matching the prior single-attempt contract
         // on its success path. No import-context for the native stage
         // (`""`), and `trace=false` (this path has no `config`).
-        ok = emit_subprocess_with_retry(sailfin_exe, src.slug, src.source_path, asm_path, "native", "", 3, false, false);
+        ok = stage_native_text_with_retry(sailfin_exe, src.slug, src.source_path, asm_path, 3);
     } else {
         // #1333: publish the in-process `.sfn-asm` atomically, mirroring
         // the subprocess path (`emit_subprocess_with_retry`, #1011).
@@ -184,7 +183,7 @@ fn _cr_stage_one(src: CapsuleSource, sailfin_exe: string, work_dir: string) -> b
         let staged = _mktemp_sibling_cmd(asm_path);
         let mut emit_target: string = asm_path;
         if staged.length > 0 { emit_target = staged; }
-        ok = write_native_text_file_with_module(source, src.slug, emit_target);
+        ok = write_staged_native_text_file(source, src.slug, emit_target);
         if ok {
             if staged.length > 0 {
                 if !_atomic_rename_into_place(staged, asm_path) { ok = false; }
@@ -214,9 +213,8 @@ fn _cr_stage_one(src: CapsuleSource, sailfin_exe: string, work_dir: string) -> b
 // PATH-slug location mapping it to the canonical slug. A relative import
 // (`../src/mod`) into a workspace member's source tree resolves to that
 // path slug, which has no staged `.layout-manifest` (the module was
-// staged under its canonical `sfn/crypto/mod` slug); the lowering /
-// typecheck import resolver reads this sidecar
-// (`imports.sfn:resolve_import_artifact_slug`) and converges on the
+// staged under its canonical `sfn/crypto/mod` slug); the driver-owned
+// import-context loader reads this sidecar and converges on the
 // canonical slug so the call site mangles to the same symbol the capsule
 // object defines.
 //
@@ -303,12 +301,6 @@ fn _cr_extract_layout_manifest(asm_path: string, manifest_path: string) ![io] {
 // (`sfn test` today; `sfn check` threads its exe since #1246).
 fn stage_capsule_imports(sources: CapsuleSource[], sailfin_exe: string, work_dir: string) -> boolean ![io] {
     let context_root = _cr_import_context_root(work_dir);
-    // Route the in-process lowering reader to the same per-invocation
-    // import-context tree the writer below stages into, so a `--work-dir`
-    // build reads its OWN isolated interfaces rather than the shared default
-    // tree two concurrent builds can tear (SFN-167). Empty work_dir → the
-    // canonical default, so the default build path is unchanged.
-    set_import_context_root(context_root);
     if work_dir.length == 0 {
         _cr_ensure_dir("build");
         _cr_ensure_dir("build/native");

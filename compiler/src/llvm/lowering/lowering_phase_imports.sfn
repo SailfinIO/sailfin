@@ -34,8 +34,9 @@ import { flatten_struct_methods } from "./lowering_helpers_structs";
 // compile — structs, enums, interfaces, functions, and struct methods.
 // Consumed once by lowering_core/mod.sfn's orchestrator, which immediately
 // destructures into local variables.  Distinct from the unrelated
-// `ImportedModuleContext` in llvm/types.sfn (manifests/native_texts/
-// diagnostics); the two types serve different phases of the pipeline.
+// `ImportedModuleContext` in native_ir.sfn (manifests/native_texts/
+// diagnostics/module aliases); the two types serve different phases of the
+// pipeline.
 struct ImportedModuleSymbols {
     structs: NativeStruct[];
     enums: NativeEnum[];

@@ -10,7 +10,7 @@
 // lowering resolves every symbol it declares (the typecheck / fmt / link
 // halves are covered by `make compile` + the `fmt --check` CI gate + the
 // loopback e2e in `runtime_tls_https_client_test.sfn`).
-import { resolve_llvm_provider_context } from "../../src/build/llvm_provider_context";
+import { empty_llvm_import_context, resolve_llvm_provider_context } from "../../src/build/llvm_provider_context";
 import { emit_native_text_with_module_name } from "../../src/emit_native";
 import { lower_to_llvm_ir_from_text_with_provider_context } from "../../src/llvm/lowering/entrypoints";
 import { parse_program } from "../../src/parser/mod";
@@ -24,7 +24,7 @@ test "lowering: runtime/sfn/platform/tls.sfn emits a declare for every OpenSSL e
     let source = fs.readFile("runtime/sfn/platform/tls.sfn");
     let program = parse_program(source);
     let native = emit_native_text_with_module_name(program, "runtime/sfn/platform/tls");
-    let ir = lower_to_llvm_ir_from_text_with_provider_context(native, "runtime/sfn/platform/tls", resolve_llvm_provider_context());
+    let ir = lower_to_llvm_ir_from_text_with_provider_context(native, "runtime/sfn/platform/tls", empty_llvm_import_context(), resolve_llvm_provider_context());
 
     assert _contains(ir, "declare ");
     // Context / handshake surface.
@@ -54,7 +54,7 @@ test "lowering: runtime/sfn/platform/tls.sfn defines the exported client wrapper
     let source = fs.readFile("runtime/sfn/platform/tls.sfn");
     let program = parse_program(source);
     let native = emit_native_text_with_module_name(program, "runtime/sfn/platform/tls");
-    let ir = lower_to_llvm_ir_from_text_with_provider_context(native, "runtime/sfn/platform/tls", resolve_llvm_provider_context());
+    let ir = lower_to_llvm_ir_from_text_with_provider_context(native, "runtime/sfn/platform/tls", empty_llvm_import_context(), resolve_llvm_provider_context());
 
     assert _contains(ir, "@tls_client_ctx(");
     assert _contains(ir, "@tls_ctx_free(");
