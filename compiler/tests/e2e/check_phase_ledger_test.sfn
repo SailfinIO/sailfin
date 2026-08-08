@@ -1,26 +1,44 @@
-// End-to-end test for the seven-phase `make check` ledger (#1124, epic
-// #1056 Phase 2). Locks the `phases[]` array that
-// scripts/agent_report.sh composes into build/agent-report.check.json
-// when `make check` runs under the report gate (JSON=1 /
-// SAILFIN_AGENT_REPORT=1).
+// End-to-end test for the `make check` phase ledger (#1124, epic #1056
+// Phase 2). Locks the `phases[]` array that scripts/agent_report.sh
+// composes into build/agent-report.check.json when `make check` runs under
+// the report gate (JSON=1 / SAILFIN_AGENT_REPORT=1).
 //
-// Native (no-bash) replacement for the former
-// `test_check_phase_ledger.sh` (test-infra Phase 3, epic #842;
-// `.claude/rules/no-bash-e2e.md`). Rather than run the real ~20-min
-// `make check`, it drives agent_report.sh directly with a stub command
-// that echoes the human phase banners check-impl prints, then asserts the
-// derived ledger. The composer keys off exactly those banners (the same
-// marker set detect_check_phase uses), so a stub that prints them
-// exercises the real derivation deterministically in milliseconds.
+// Native (no-bash) replacement for the former `test_check_phase_ledger.sh`
+// (test-infra Phase 3, epic #842; `.claude/rules/no-bash-e2e.md`).
+//
+// WHY THIS TEST IS SHAPED THIS WAY (SFN-724). The previous version hardcoded
+// the 2026-06 banner text as `echo` stubs and asserted the ledger derived
+// from them. That validated a fossil of its own assumptions: when #1502 moved
+// the self-host stages out of Makefile shell into `sfn selfhost` — changing
+// every banner — the classifier stopped matching anything and reported every
+// `check` failure as a `compile` failure, while this test stayed green
+// because it still fed the classifier the old wording. A test that
+// manufactures its inputs cannot notice that its inputs are wrong.
+//
+// The fixtures are therefore no longer written here. They are READ from
+// scripts/agent_report.sh's `CHECK_PHASE_MARKERS` table, and the first
+// assertion is that every literal in that table still appears verbatim in the
+// producer that prints it — the `check-impl` target in `Makefile`, or
+// `sfn selfhost` in compiler/src/cli_selfhost.sfn. Rewording a banner in
+// either producer without re-syncing the table now fails here, which is the
+// alarm #1502 should have tripped. The behavioural cases then drive the real
+// classifier with those same extracted literals, so the stubs cannot drift
+// from the table either.
+//
+// Deliberately does NOT run a real `make check`: a 15-20 min pipeline does
+// not belong in a test. Static extraction + stub-driven derivation covers the
+// contract in milliseconds.
 //
 // Cases:
-//   - green: all seven banners + fixed-point match, exit 0 -> seven
-//            phases in order, top-level status "pass".
-//   - fail:  banners through seedcheck-tests then a test-failure, exit 1
-//            -> top-level status "fail", phase "seedcheck-tests", failure
-//            "test-failure".
-//   - warn:  all banners but `stage2 != stage3`, exit 0 -> top-level
-//            status "warn", failure "nondeterminism".
+//   - markers:  every table literal is verbatim in a producer.
+//   - warn marker: the nondeterminism literal is verbatim in cli_selfhost.sfn.
+//   - order:    the phase names match the documented pipeline order.
+//   - green:    every phase banner + fixed-point match, exit 0 -> phases in
+//               order, top-level status "pass".
+//   - fail:     every banner then a test failure, exit 1 -> status "fail",
+//               phase "seedcheck-tests", failure "test-failure".
+//   - warn:     every banner but `stage2 != stage3`, exit 0 -> status "warn",
+//               failure "nondeterminism".
 //
 // Schema: docs/reference/make-result-schema.md (`sailfin-make/1`, phases[]).
 //
@@ -33,14 +51,13 @@
 //
 // On matchers: per the jq-less path the bash test already supports, the
 // names-in-order check is an ORDERED-substring `contains` walk over the
-// seven `"name":"<phase>"` markers, and the top-level status/phase/failure
-// are read by FIRST-occurrence string matching (write_report_file emits
-// every top-level field before phases[], so first-occurrence is the
-// top-level value). Per-phase status asserts (jq-gated in the bash) are
-// intentionally not reproduced — the top-level + ordered-names path is the
-// jq-less contract the original falls back to. The `sfn/test` `expect_*`
-// matchers are `![pure]` and cannot be called from this `![io]` test.
-// (#842.)
+// `"name":"<phase>"` markers, and the top-level status/phase/failure are read
+// by FIRST-occurrence string matching (write_report_file emits every
+// top-level field before phases[], so first-occurrence is the top-level
+// value). Per-phase status asserts (jq-gated in the bash) are intentionally
+// not reproduced — the top-level + ordered-names path is the jq-less contract
+// the original falls back to. The `sfn/test` `expect_*` matchers are
+// `![pure]` and cannot be called from this `![io]` test. (#842.)
 import { find, contains, split } from "sfn/strings";
 
 // Absolute repo root. The vehicle `cd`s into the per-run subdir before
@@ -88,32 +105,98 @@ fn _scratch_base() -> string ![io] {
     return dir;
 }
 
-// Banner fragments matching check-impl's human output (Makefile
-// check-impl), copied verbatim from the .sh.
-fn _b_fptests() -> string {
-    return "echo \"[check] running test suite on first-pass binary (early gate)...\"";
+// ---- marker-table extraction ------------------------------------------------
+// Last index of `needle` in `s`, or -1. No `rfind` in sfn/strings.
+fn _rfind(s: string, needle: string) -> int {
+    let mut best = 0 - 1;
+    let mut pos = 0;
+    loop {
+        let at = find(s, needle, pos);
+        if at < 0 { break; }
+        best = at;
+        pos = at + 1;
+    }
+    return best;
 }
 
-fn _b_scbuild() -> string {
-    return "echo \"[check] first-pass tests passed — proceeding to seedcheck build...\"";
+// Strip a shell single-quoted array element (`\t'record'`) down to `record`.
+// Returns "" for a line carrying no quoted payload.
+fn _unquote_element(line: string) -> string {
+    let open = find(line, "'", 0);
+    if open < 0 { return ""; }
+    let close = _rfind(line, "'");
+    if close <= open { return ""; }
+    return substring(line, open + 1, close);
 }
 
-fn _b_scsmoke() -> string {
-    return "echo \"[check] validating seedcheck binary can run programs...\"";
+// The `CHECK_PHASE_MARKERS` records, verbatim, in declaration order. Each is
+// `<phase-name>[|<literal>...]`. Reads the wrapper rather than restating the
+// table, so the assertions below can never disagree with the shipped one.
+fn _marker_records() -> string[] ![io] {
+    let src = fs.readFile(_wrapper());
+    let lines = split(src, "\n");
+    let mut records: string[] = [];
+    let mut inside = false;
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        i = i + 1;
+        if !inside {
+            if contains(line, "CHECK_PHASE_MARKERS=(") { inside = true; }
+            continue;
+        }
+        if contains(line, ")") && !contains(line, "'") { break; }
+        let rec = _unquote_element(line);
+        if rec.length > 0 { records.push(rec); }
+    }
+    return records;
 }
 
-fn _b_sctests() -> string {
-    return "echo \"[check] running test suite with seedcheck binary (no fallbacks)...\"";
+// The `CHECK_MARKER_NONDETERMINISM` literal from the wrapper, or "".
+fn _nondeterminism_marker() -> string ![io] {
+    let src = fs.readFile(_wrapper());
+    let lines = split(src, "\n");
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        i = i + 1;
+        if find(line, "CHECK_MARKER_NONDETERMINISM=", 0) == 0 {
+            return _unquote_element(line);
+        }
+    }
+    return "";
 }
 
-fn _b_s3build() -> string {
-    return "echo \"[check] stage2 tests passed — building stage3 for fixed-point comparison...\"";
+fn _record_name(record: string) -> string {
+    let parts = split(record, "|");
+    if parts.length == 0 { return ""; }
+    return parts[0];
 }
 
-fn _b_fixed() -> string {
-    return "echo \"[check] comparing stage2 vs stage3 LLVM IR (fixed-point check)...\"";
+// The literals of a record (everything after the phase name). Empty for
+// `compile`, which is unconditionally reached and carries no banner.
+fn _record_literals(record: string) -> string[] {
+    let parts = split(record, "|");
+    let mut lits: string[] = [];
+    let mut i = 1;
+    loop {
+        if i >= parts.length { break; }
+        if parts[i].length > 0 { lits.push(parts[i]); }
+        i = i + 1;
+    }
+    return lits;
 }
 
+// The two producers that print the banners the table keys off.
+fn _producer_text() -> string ![io] {
+    let root = _repo_root();
+    return fs.readFile(root + "/Makefile") + "\n" + fs.readFile(root
+        + "/compiler/src/cli_selfhost.sfn");
+}
+
+// ---- stub driving -----------------------------------------------------------
 // Run agent_report.sh for `--target check` over a stub that prints the
 // `banners` script and exits with `rc`. Creates a fresh per-test subdir,
 // runs the wrapper inside it via a single `bash -c` vehicle (cd + env -u),
@@ -152,6 +235,27 @@ fn _run_check_stub(tag: string, banners: string, rc: int) -> string ![io] {
     return fs.readFile(report);
 }
 
+// One `echo "<literal>"` line per phase, built from the live marker table.
+// `swap_from`/`swap_to` substitutes one literal (used by the warn case to
+// emit the `stage2 != stage3` outcome instead of the matching one) — the
+// fixed-point record carries every outcome line, and its FIRST literal is
+// the matching one.
+fn _banners_from_table(records: string[], swap_from: string, swap_to: string) -> string {
+    let mut out = "";
+    let mut i = 0;
+    loop {
+        if i >= records.length { break; }
+        let lits = _record_literals(records[i]);
+        i = i + 1;
+        if lits.length == 0 { continue; }
+        let mut lit = lits[0];
+        if swap_from.length > 0 && lit == swap_from { lit = swap_to; }
+        if out.length > 0 { out = out + "\n"; }
+        out = out + "echo \"" + lit + "\"";
+    }
+    return out;
+}
+
 // Local int->decimal-string (no runtime builtin; mirrors the helper in
 // lowering_no_bare_runtime_emissions_test.sfn).
 fn int_to_string(n: int) -> string {
@@ -186,14 +290,13 @@ fn _json_str_field(json: string, field: string) -> string {
 }
 
 // Ordered-substring walk: each marker must appear after the previous one.
-// Mirrors the bash `grep -Eq '"name":"compile".*..."name":"fixed-point"'`.
-fn _names_in_order(json: string) -> boolean {
-    let names = ["compile", "first-pass-tests", "seedcheck-build", "seedcheck-smoke", "seedcheck-tests", "stage3-build", "fixed-point"];
+// Mirrors the bash `grep -Eq '"name":"compile".*..."name":"seedcheck-tests"'`.
+fn _names_in_order(json: string, records: string[]) -> boolean {
     let mut pos = 0;
     let mut i = 0;
     loop {
-        if i >= names.length { break; }
-        let marker = "\"name\":\"" + names[i] + "\"";
+        if i >= records.length { break; }
+        let marker = "\"name\":\"" + _record_name(records[i]) + "\"";
         let at = find(json, marker, pos);
         if at < 0 { return false; }
         pos = at + marker.length;
@@ -202,62 +305,100 @@ fn _names_in_order(json: string) -> boolean {
     return true;
 }
 
-// Green banner sequence: all seven banners + the fixed-point match line.
-fn _green_banners() -> string {
-    return _b_fptests() + "\n" + _b_scbuild() + "\n" + _b_scsmoke() + "\n"
-        + _b_sctests()
-        + "\n"
-        + _b_s3build()
-        + "\n"
-        + _b_fixed()
-        + "\n"
-        + "echo \"[check] stage2 == stage3: compiler is a fixed point\"";
+// ---- static contract: the table still describes the real pipeline -----------
+test "check ledger: every marker literal appears verbatim in a producer" ![io] {
+    let records = _marker_records();
+    // The table exists and was parsed (7 phases; `compile` plus six banners).
+    assert records.length == 7;
+    let producers = _producer_text();
+    assert producers.length > 0;
+
+    let mut i = 0;
+    let mut literal_count = 0;
+    loop {
+        if i >= records.length { break; }
+        let lits = _record_literals(records[i]);
+        let mut j = 0;
+        loop {
+            if j >= lits.length { break; }
+            // The alarm #1502 should have tripped: a banner reworded in
+            // Makefile / cli_selfhost.sfn without re-syncing the table.
+            assert contains(producers, lits[j]);
+            // Stub construction wraps each literal in double quotes inside a
+            // single-quoted `bash -c`, so a quote or `$` in a banner would
+            // silently corrupt the behavioural cases below.
+            assert ! contains(lits[j], "\"");
+            assert ! contains(lits[j], "'");
+            assert ! contains(lits[j], "$");
+            literal_count = literal_count + 1;
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    // `compile` carries none; every other phase carries at least one.
+    assert _record_literals(records[0]).length == 0;
+    assert literal_count >= 6;
 }
 
-// Fail banner sequence: through seedcheck-tests start, then a
-// test-failure marker; the seedcheck-smoke ok line sits before the
-// seedcheck-tests banner exactly as in the .sh.
-fn _fail_banners() -> string {
-    return _b_fptests() + "\n" + _b_scbuild() + "\n" + _b_scsmoke() + "\n"
-        + "echo \"[check] seedcheck binary runs hello-world.sfn OK\""
-        + "\n"
-        + _b_sctests()
-        + "\n"
-        + "echo \"═══ unit: 3/4 passed, 1 failed ═══\"";
+test "check ledger: nondeterminism marker appears verbatim in cli_selfhost" ![io] {
+    let marker = _nondeterminism_marker();
+    assert marker.length > 0;
+    let selfhost = fs.readFile(_repo_root() + "/compiler/src/cli_selfhost.sfn");
+    // `status:"warn"` / `failure:"nondeterminism"` is reachable only through
+    // this literal; if `sfn selfhost` rewords it the warn path goes dark and
+    // a fixed-point mismatch becomes invisible to agents (SFN-724).
+    assert contains(selfhost, marker);
 }
 
-// Warn banner sequence: all banners but the fixed-point WARN line.
-fn _warn_banners() -> string {
-    return _b_fptests() + "\n" + _b_scbuild() + "\n" + _b_scsmoke() + "\n"
-        + _b_sctests()
-        + "\n"
-        + _b_s3build()
-        + "\n"
-        + _b_fixed()
-        + "\n"
-        + "echo \"[check][WARN] stage2 != stage3: compiler output is not yet a fixed point\"";
+test "check ledger: phase names match the documented pipeline order" ![io] {
+    let records = _marker_records();
+    // Real order: `sfn selfhost` runs stage2 -> smoke -> stage3 -> fixed-point
+    // as one internal chain, and the seedcheck suite runs AFTER it.
+    let expected = ["compile", "pass1-smoke", "seedcheck-build", "seedcheck-smoke", "stage3-build", "fixed-point", "seedcheck-tests"];
+    assert records.length == expected.length;
+    let mut i = 0;
+    loop {
+        if i >= records.length { break; }
+        assert _record_name(records[i]) == expected[i];
+        i = i + 1;
+    }
 }
 
-test "check ledger green: seven phases in order, top-level status=pass" ![io] {
-    let report = _run_check_stub("green", _green_banners(), 0);
+// ---- behavioural contract: the classifier derives the right verdict ---------
+test "check ledger green: phases in order, top-level status=pass" ![io] {
+    let records = _marker_records();
+    let banners = _banners_from_table(records, "", "");
+    let report = _run_check_stub("green", banners, 0);
     assert report.length > 0;
-    assert _names_in_order(report);
+    assert _names_in_order(report, records);
     assert _json_str_field(report, "status") == "pass";
 }
 
 test "check ledger fail: seedcheck-tests fail, top-level fail/phase/failure" ![io] {
-    let report = _run_check_stub("fail", _fail_banners(), 1);
+    let records = _marker_records();
+    // Every phase banner, then a test-failure signature and a non-zero exit:
+    // the failure lands in the last phase reached, which is the seedcheck
+    // suite. Before SFN-724 this reported `compile` for any `check` failure.
+    let banners = _banners_from_table(records, "", "")
+        + "\necho \"unit: 3/4 passed, 1 failed\"";
+    let report = _run_check_stub("fail", banners, 1);
     assert report.length > 0;
-    assert _names_in_order(report);
+    assert _names_in_order(report, records);
     assert _json_str_field(report, "status") == "fail";
     assert _json_str_field(report, "phase") == "seedcheck-tests";
     assert _json_str_field(report, "failure") == "test-failure";
 }
 
 test "check ledger warn: nondeterminism, top-level warn/failure, exit 0" ![io] {
-    let report = _run_check_stub("warn", _warn_banners(), 0);
+    let records = _marker_records();
+    let matched = _record_literals(records[5])[0];
+    let mismatched = _nondeterminism_marker();
+    assert matched != mismatched;
+    let banners = _banners_from_table(records, matched, mismatched);
+    let report = _run_check_stub("warn", banners, 0);
     assert report.length > 0;
-    assert _names_in_order(report);
+    assert _names_in_order(report, records);
     assert _json_str_field(report, "status") == "warn";
     assert _json_str_field(report, "failure") == "nondeterminism";
+    assert _json_str_field(report, "phase") == "fixed-point";
 }
