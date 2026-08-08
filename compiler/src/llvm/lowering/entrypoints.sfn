@@ -131,11 +131,13 @@ import {
     _join_llvm_lines_linear,
     append_native_function,
     apply_module_symbol_mangling,
+    concat_native_functions
+} from "./lowering_helpers_mangling";
+import {
     build_trait_metadata,
-    concat_native_functions,
     empty_capability_manifest,
     flatten_struct_methods
-} from "./lowering_helpers_mangling";
+} from "./lowering_helpers_structs";
 import {
     append_string_lines,
     ensure_intrinsic_declarations,

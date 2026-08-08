@@ -1,0 +1,140 @@
+// compiler/tests/e2e/runtime_capsule_dependency_test.sfn
+//
+// SFN-773: proves a runtime module can import and call a symbol from an
+// ordinary `kind = "library"` capsule, end-to-end, against an out-of-tree
+// `SAILFIN_RUNTIME_ROOT`.
+//
+// This is the acceptance test for the runtime -> capsule dependency edge.
+// Before it, the runtime could not reach a capsule at all: the mangling pass
+// returned early for any `runtime/`-slugged module, skipping not just its own
+// definition mangling (correct — bare runtime names are a stable ABI) but also
+// the *imported call-site* rewriting. A runtime module's call stayed
+// `@int_to_string` while the capsule object defined
+// `@int_to_string__sfn__strings__mod`, and the link failed.
+//
+// Four separate mechanisms have to agree for this build to succeed, which is
+// why the assertion is a whole `sfn build` rather than a unit check:
+//
+//   1. `_rcr_artifacts_from_manifest` parses the runtime manifest's
+//      `[dependencies]` into `capsule_deps` (it was previously read by
+//      nothing).
+//   2. `_stage_runtime_sfn_import_context` stages the declared closure's
+//      sources at their canonical spec slugs, so the probe's emit can resolve
+//      the provider's signature.
+//   3. `_write_runtime_sfn_import_deps` resolves the bare spec `sfn/strings`
+//      to the staged entry module `sfn/strings/mod` — without that fallback
+//      the dep is dropped from the sidecar with NO diagnostic and the emit
+//      silently loses the signature.
+//   4. `apply_module_symbol_mangling` runs step 2 for the runtime module, so
+//      the call site is rewritten to the provider's mangled symbol.
+//
+// The runtime root is deliberately named `runtime-copy`, not `runtime`, so
+// this also keeps exercising the SFN-146 slug derivation that a private
+// out-of-tree root broke.
+//
+// NOTE: `sfn/test` `expect_*` matchers are `![pure]` and cannot be called from
+// an `![io]` test; assertions use plain `assert` per
+// `.claude/rules/no-bash-e2e.md`. Shape follows `runtime_identity_stamp_test.sfn`.
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+// `run_capture`'s empty-array env is the FULL empty environment, not
+// "inherit", so a nested build cannot reach clang or its linker without an
+// explicit PATH. SAILFIN_TEST_SCRATCH is pinned per call so a concurrent pool
+// peer cannot overwrite this build's `program.ll` (see
+// `.claude/rules/no-bash-e2e.md`).
+// env-safe (SFN-401): hand-built minimal child env — no raw process.environ() pool-key leak.
+fn _child_env(scratch: string) -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    e.push("SAILFIN_TEST_SCRATCH=" + scratch);
+    return e;
+}
+
+test "runtime capsule dep: a runtime module calls a capsule provider out-of-tree" ![io] {
+    let scratch = fs.mkdtemp("sfn-rtcapdep-");
+
+    // Private runtime tree. The name has no `runtime/` segment on purpose.
+    let runtime_copy = scratch + "/runtime-copy";
+    let cp_rt = process.run_capture(["cp", "-R", "runtime", runtime_copy], _child_env(scratch));
+    let _ = process.capture_take_stdout();
+    let _ = process.capture_take_stderr();
+    assert cp_rt == 0;
+
+    // `locate_runtime_dep_capsule_src` resolves a runtime dep at
+    // `<dirname(manifest_dir)>/capsules/<scope>/<name>/src`, so the capsule
+    // tree has to sit beside the runtime copy — the same shape an installed
+    // toolchain has (`<prefix>/runtime` + `<prefix>/capsules`).
+    let cp_caps = process.run_capture(["cp", "-R", "capsules", scratch
+        + "/capsules"], _child_env(scratch));
+    let _ = process.capture_take_stdout();
+    let _ = process.capture_take_stderr();
+    assert cp_caps == 0;
+
+    // Declare the dependency and add a probe module that actually calls into
+    // it. Both edits are required: the manifest entry drives staging, and the
+    // probe is what forces a mangled cross-capsule call site to be emitted
+    // into the runtime link set.
+    let manifest_path = runtime_copy + "/capsule.toml";
+    let manifest = fs.readFile(manifest_path);
+    assert manifest.length > 0;
+    let with_dep = manifest + "\n[dependencies]\n\"sfn/strings\" = \"*\"\n";
+    let seeded = _insert_probe_source(with_dep);
+    // The probe must be listed, or it is never emitted and the test proves
+    // nothing.
+    assert seeded.length > with_dep.length;
+    fs.writeFile(manifest_path, seeded);
+
+    fs.writeFile(runtime_copy + "/sfn/rtcapdep_probe.sfn", "import { int_to_string } from \"sfn/strings\";\n"
+        + "\n"
+        + "fn rtcapdep_probe_render(value: int) -> string {\n"
+        + "    return int_to_string(value);\n"
+        + "}\n");
+
+    // A trivial program: it never calls the probe. That is the point — the
+    // probe is an `sfn-source`, so its call into `sfn/strings` is emitted into
+    // EVERY binary, and `--gc-sections` runs after symbol resolution. If the
+    // provider's definitions are not in the link set this fails even though
+    // nothing reachable from `main` touches them.
+    let prog = scratch + "/prog.sfn";
+    fs.writeFile(prog, "fn main() -> int { return 0; }\n");
+
+    let mut build_env = _child_env(scratch);
+    build_env.push("SAILFIN_RUNTIME_ROOT=" + runtime_copy);
+    let out_bin = scratch + "/prog-out";
+    let build_exit = process.run_capture([_sfn_bin(), "build", prog, "-o", out_bin], build_env);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    if build_exit != 0 {
+        print("runtime capsule dep: build failed");
+        print(out);
+        print(err);
+    }
+    assert build_exit == 0;
+    assert fs.exists(out_bin);
+}
+
+// Prepend the probe to the manifest's `sfn-sources` array. Returns the input
+// unchanged when the anchor is absent, which the caller asserts against rather
+// than silently producing a runtime with no probe in it.
+fn _insert_probe_source(manifest: string) -> string {
+    let anchor = "sfn-sources = [";
+    let mut pos: int = 0;
+    loop {
+        if pos + anchor.length > manifest.length { return manifest; }
+        if substring(manifest, pos, pos + anchor.length) == anchor {
+            let head = substring(manifest, 0, pos + anchor.length);
+            let tail = substring(manifest, pos + anchor.length, manifest.length);
+            return head + "\n    \"sfn/rtcapdep_probe.sfn\"," + tail;
+        }
+        pos += 1;
+    }
+}

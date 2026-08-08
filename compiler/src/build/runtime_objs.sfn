@@ -20,6 +20,7 @@ import {
 } from "../build_cache";
 import { _env_flag } from "../build_flags";
 import { ParallelProcessTask, _cr_resolve_jobs, _cr_run_bounded_processes } from "../capsule_emit_parallel";
+import { locate_runtime_dep_capsule_src } from "../capsule_resolver/locate";
 import { resolve_import_module_slug_for_module } from "../llvm/imports";
 import { module_name_from_path } from "../main";
 import { parse_native_imports_for_import } from "../native_ir_api";
@@ -28,6 +29,7 @@ import { resolve_compiler_version } from "../version";
 import { llvm_assemble, llvm_assemble_argv } from "./clang_argv";
 import {
     _atomic_rename_into_place,
+    _collect_sfn_files_cmd,
     _mktemp_sibling_cmd,
     _sha256_of_file_cmd,
     _sha256_of_text_file,
@@ -1108,6 +1110,32 @@ fn _stage_one_runtime_sfn_import_context(self_path: string, src: string, slug: s
 // -> `./platform/posix` for nanosleep/clock_gettime). A module with
 // no such imports gets no sidecar at all — its child emit then
 // degrades to the exact pre-#1288 legacy path.
+// Resolve an import's slug against the staged import-context slugs, mirroring
+// `resolve_import_provider_module_name` (`llvm/lowering/lowering_helpers.sfn`):
+// exact match first, then the `<slug>/mod` entry-module fallback. A bare
+// capsule spec (`from "sfn/crypto"`) resolves to the slug `sfn/crypto` while
+// the capsule's entry module stages as `sfn/crypto/mod`. Without the fallback
+// the dep is dropped from the sidecar with no diagnostic and the emit loses
+// the provider's signatures — the sidecar and the mangler must agree on who
+// the provider is (SFN-773).
+fn _runtime_staged_slug_for_dep(dep_slug: string, staged_slugs: string[]) -> string {
+    if dep_slug.length == 0 { return ""; }
+    let mut si: int = 0;
+    loop {
+        if si >= staged_slugs.length { break; }
+        if staged_slugs[si] == dep_slug { return dep_slug; }
+        si += 1;
+    }
+    let mod_slug = dep_slug + "/mod";
+    let mut mi: int = 0;
+    loop {
+        if mi >= staged_slugs.length { break; }
+        if staged_slugs[mi] == mod_slug { return mod_slug; }
+        mi += 1;
+    }
+    return "";
+}
+
 fn _write_runtime_sfn_import_deps(asm_path: string, slug: string, ctx_root: string, staged_slugs: string[]) -> void ![io] {
     let deps_path = ctx_root + "/" + slug + ".import-deps";
     let asm_text = fs.readFile(asm_path);
@@ -1118,14 +1146,9 @@ fn _write_runtime_sfn_import_deps(asm_path: string, slug: string, ctx_root: stri
         if i >= entries.length { break; }
         if entries[i].kind == "import" {
             let dep_slug = resolve_import_module_slug_for_module(entries[i].module, slug);
-            let mut si: int = 0;
-            loop {
-                if si >= staged_slugs.length { break; }
-                if staged_slugs[si] == dep_slug {
-                    deps = deps + ctx_root + "/" + dep_slug + ".sfn-asm\n";
-                    break;
-                }
-                si += 1;
+            let staged = _runtime_staged_slug_for_dep(dep_slug, staged_slugs);
+            if staged.length > 0 {
+                deps = deps + ctx_root + "/" + staged + ".sfn-asm\n";
             }
         }
         i += 1;
@@ -1184,6 +1207,60 @@ fn _stage_runtime_sfn_import_context(self_path: string, runtime_capsules: Runtim
             si += 1;
         }
         i += 1;
+    }
+    // SFN-773: stage the runtime capsule's declared `[dependencies]` closure.
+    // A runtime module importing a capsule provider needs that provider's
+    // `.sfn-asm` in this context or its emit cannot resolve the callee's
+    // signature — the same reason siblings are staged above.
+    //
+    // Driven off `capsule_deps` rather than the project's resolved source
+    // set: that stages exactly the runtime's own closure by construction, so
+    // an unrelated project dependency never pays a staging emit. Transitive
+    // deps are deliberately NOT walked — `_stage_one_runtime_sfn_import_context`
+    // emits each module standalone under `--no-resolve-gate`, so staging
+    // `sfn/crypto` does not require `sfn/strings` staged for it.
+    //
+    // Fail-closed like every other staging step: a declared dep that cannot
+    // be located is a build error here, not a missing signature discovered
+    // later as the far less actionable "cannot resolve return type" fatal.
+    let mut ci: int = 0;
+    loop {
+        if ci >= runtime_capsules.length { break; }
+        let cap2 = runtime_capsules[ci];
+        ci += 1;
+        let mut dsi: int = 0;
+        loop {
+            if dsi >= cap2.capsule_deps.length { break; }
+            let spec = cap2.capsule_deps[dsi];
+            dsi += 1;
+            let located = locate_runtime_dep_capsule_src(cap2.manifest_dir, spec);
+            if located.src_dir.length == 0 {
+                print("sfn build: runtime capsule `" + cap2.capsule_name
+                    + "` declares dependency `"
+                    + spec
+                    + "` but its sources were not found next to "
+                    + cap2.manifest_dir);
+                return false;
+            }
+            let dep_files = _collect_sfn_files_cmd(located.src_dir, 16);
+            let prefix = located.src_dir + "/";
+            let mut fi: int = 0;
+            loop {
+                if fi >= dep_files.length { break; }
+                let dep_src = dep_files[fi];
+                fi += 1;
+                if dep_src.length <= prefix.length { continue; }
+                if substring(dep_src, 0, prefix.length) != prefix { continue; }
+                let rel = substring(dep_src, prefix.length, dep_src.length);
+                let dep_slug = spec + "/" + _strip_module_ext(rel);
+                if !_stage_one_runtime_sfn_import_context(self_path, dep_src, dep_slug, ctx_root, compiler_identity) {
+                    return false;
+                }
+                staged_slugs.push(dep_slug);
+                staged_asm_paths.push(ctx_root + "/" + dep_slug + ".sfn-asm");
+                staged_src_paths.push(dep_src);
+            }
+        }
     }
     // SFN-344: stage imported platform extern modules (all siblings are
     // staged above, so their `.import` entries are now readable). A
@@ -1465,7 +1542,7 @@ fn _condition_runtime_capsules(caps: RuntimeCapsuleArtifacts[], target_os: strin
         if i >= caps.length { break; }
         let c = caps[i];
         out.push(RuntimeCapsuleArtifacts {
-            capsule_name: c.capsule_name, manifest_dir: c.manifest_dir, c_sources: c.c_sources, ll_sources: c.ll_sources, sfn_sources: target_condition_runtime_sfn_sources(c.sfn_sources, target_os), include_dirs: c.include_dirs, link_libs: c.link_libs, prelude_entry: c.prelude_entry
+            capsule_name: c.capsule_name, manifest_dir: c.manifest_dir, c_sources: c.c_sources, ll_sources: c.ll_sources, sfn_sources: target_condition_runtime_sfn_sources(c.sfn_sources, target_os), include_dirs: c.include_dirs, link_libs: c.link_libs, prelude_entry: c.prelude_entry, capsule_deps: c.capsule_deps
         });
         i += 1;
     }

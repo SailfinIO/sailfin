@@ -33,6 +33,7 @@ import { contains_string, strip_prefix, substring } from "./string_utils";
 import {
     toml_get_build_kind,
     toml_get_c_sources,
+    toml_get_dependencies,
     toml_get_include_dirs,
     toml_get_link_libs,
     toml_get_ll_sources,
@@ -68,6 +69,15 @@ struct RuntimeCapsuleArtifacts {
     include_dirs: string[];
     link_libs: string[];
     prelude_entry: string;
+    // Ordinary `kind = "library"` capsules this runtime capsule declares in
+    // `[dependencies]`. Spec names only (`["sfn/crypto"]`); the declared
+    // version is deliberately dropped, because a runtime capsule's dep is
+    // located by path off the runtime manifest dir rather than by version —
+    // it ships with the toolchain, same provenance as the runtime itself
+    // (SFN-773, design note `sfn-341-native-tls-runtime-swap.md` §3.1.4).
+    // Reintroducing versioned runtime deps is a deliberate future change,
+    // not an oversight.
+    capsule_deps: string[];
 }
 
 fn empty_runtime_capsule_artifacts() -> RuntimeCapsuleArtifacts {
@@ -76,6 +86,7 @@ fn empty_runtime_capsule_artifacts() -> RuntimeCapsuleArtifacts {
     let empty3: string[] = [];
     let empty4: string[] = [];
     let empty5: string[] = [];
+    let empty6: string[] = [];
     return RuntimeCapsuleArtifacts {
         capsule_name: "",
         manifest_dir: "",
@@ -84,7 +95,8 @@ fn empty_runtime_capsule_artifacts() -> RuntimeCapsuleArtifacts {
         sfn_sources: empty5,
         include_dirs: empty3,
         link_libs: empty4,
-        prelude_entry: ""
+        prelude_entry: "",
+        capsule_deps: empty6
     };
 }
 
@@ -428,6 +440,35 @@ fn _rcr_is_safe_member_path(path: string) -> boolean {
 // its on-disk member path (relative to workspace root). Returns
 // the empty artifact if the manifest doesn't declare
 // `kind = "runtime"` — caller filters those out.
+// Split `toml_get_dependencies`' newline-joined `<capsule>=<version>` records
+// into bare spec names. `capsule_resolver/discovery.sfn::_cr_parse_deps` does
+// the same job for ordinary capsules but is module-private, and this path
+// needs only the spec.
+fn _rcr_parse_dep_specs(deps_text: string) -> string[] {
+    let mut out: string[] = [];
+    let records = _rcr_split_newlines(deps_text);
+    let mut i: int = 0;
+    loop {
+        if i >= records.length { break; }
+        let record = records[i];
+        i += 1;
+        let mut scan: int = 0;
+        let mut eq: int = -1;
+        loop {
+            if scan >= record.length { break; }
+            if substring(record, scan, scan + 1) == "=" {
+                eq = scan;
+                break;
+            }
+            scan += 1;
+        }
+        let mut spec = record;
+        if eq > 0 { spec = substring(record, 0, eq); }
+        if spec.length > 0 { out.push(spec); }
+    }
+    return out;
+}
+
 fn _rcr_artifacts_from_manifest(workspace_root: string, member_path: string, manifest_text: string) -> RuntimeCapsuleArtifacts {
     let kind = toml_get_build_kind(manifest_text);
     if kind != "runtime" { return empty_runtime_capsule_artifacts(); }
@@ -452,6 +493,7 @@ fn _rcr_artifacts_from_manifest(workspace_root: string, member_path: string, man
     let sfn_sources_rel = toml_get_sfn_sources(manifest_text);
     let include_dirs_rel = toml_get_include_dirs(manifest_text);
     let link_libs = toml_get_link_libs(manifest_text);
+    let capsule_deps = _rcr_parse_dep_specs(toml_get_dependencies(manifest_text));
     let prelude_entry_rel = toml_get_prelude_entry(manifest_text);
     let mut prelude_entry: string = "";
     if prelude_entry_rel.length > 0 {
@@ -465,7 +507,8 @@ fn _rcr_artifacts_from_manifest(workspace_root: string, member_path: string, man
         sfn_sources: _rcr_resolve_paths(manifest_dir, sfn_sources_rel),
         include_dirs: _rcr_resolve_paths(manifest_dir, include_dirs_rel),
         link_libs: link_libs,
-        prelude_entry: prelude_entry
+        prelude_entry: prelude_entry,
+        capsule_deps: capsule_deps
     };
 }
 

@@ -81,6 +81,16 @@ struct ResolverConsumer {
     name: string;
     walk_project_src: boolean;
     include_host_as_dep: boolean;
+    // Runtime capsule manifest dir, or "" to opt out. When set, the
+    // resolver unions the runtime capsule's own `[dependencies]` closure
+    // into this project's resolved sources, so a runtime module that
+    // imports a capsule provider links in every binary rather than only
+    // where the project happens to declare the same dep. Build / run /
+    // test-link set it; `sfn check` leaves it empty, since no user-source
+    // symbol resolution depends on the runtime's private deps — only the
+    // link does (SFN-773, design note
+    // `sfn-341-native-tls-runtime-swap.md` §3.1.3).
+    runtime_root: string;
 }
 
 fn empty_resolver_consumer() -> ResolverConsumer {
@@ -88,7 +98,8 @@ fn empty_resolver_consumer() -> ResolverConsumer {
         scope: "",
         name: "",
         walk_project_src: false,
-        include_host_as_dep: false
+        include_host_as_dep: false,
+        runtime_root: ""
     };
 }
 

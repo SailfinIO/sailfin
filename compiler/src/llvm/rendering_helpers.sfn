@@ -324,7 +324,7 @@ fn collect_parameter_types(context: TypeContext, parameters: NativeParameter[], 
         let mut llvm_type = map_parameter_type(context, parameter.type_annotation);
 
         // Method receiver type inference: the self parameter type is set by
-        // flatten_struct_methods in lowering_helpers_mangling.sfn. This block
+        // flatten_struct_methods in lowering_helpers_structs.sfn. This block
         // is a no-op fallback kept for safety — fused method names (e.g.
         // Counteris_zero) cannot be split back into struct + method.
         if parameter.type_annotation.length == 0 {

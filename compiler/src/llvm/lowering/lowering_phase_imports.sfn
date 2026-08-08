@@ -28,7 +28,7 @@ import {
     extend_native_interfaces,
     extend_native_structs
 } from "./lowering_helpers";
-import { flatten_struct_methods } from "./lowering_helpers_mangling";
+import { flatten_struct_methods } from "./lowering_helpers_structs";
 
 // Flat-array bundle of everything the imported modules contribute to the
 // compile — structs, enums, interfaces, functions, and struct methods.

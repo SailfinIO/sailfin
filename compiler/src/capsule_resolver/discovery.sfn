@@ -15,7 +15,7 @@ import { _collect_sfn_files_cmd } from "../build/fs";
 import { is_safe_scope_name, parse_scope_name } from "../capsule_artifact";
 import { _display_capsule_name_cmd } from "../capsule_names";
 import { lock_get_versions } from "../lock";
-import { enumerate_runtime_capsule_artifacts } from "../runtime_capsule_resolver";
+import { enumerate_runtime_capsule_artifacts, runtime_capsule_from_root } from "../runtime_capsule_resolver";
 import {
     SemVer,
     semver_compare,
@@ -25,6 +25,7 @@ import {
 import { contains_string, substring } from "../string_utils";
 import { toml_get_dependencies, toml_get_name } from "../toml_parser";
 import { workspace_member_for_spec } from "./capability";
+import { locate_capsule_src } from "./locate";
 import {
     _cr_dirname,
     _cr_ends_with,
@@ -40,7 +41,7 @@ import {
     capsule_origin_workspace,
     capsule_provenance_rejects
 } from "./provenance";
-import { CapsuleLocation, CapsuleSource, WorkspaceMember } from "./types";
+import { CapsuleSource, WorkspaceMember } from "./types";
 import { discover_workspace_root, load_workspace_members } from "./workspace";
 
 // Parse "name=version\n" lines from toml_get_dependencies output, skipping
@@ -117,56 +118,6 @@ fn _cr_lookup_locked_version(lock_entries: _CrDepEntry[], spec: string) -> strin
         }
     }
     return "";
-}
-
-// Locate the src/ directory for a capsule dep. Checks the in-tree
-// capsules/<scope>/<name>/src/ first (compiler self-build and ecosystem
-// development) and falls back to ~/.sfn/cache/capsules/<scope>/<name>/<version>/src/
-// (end-user builds after `sfn add`).
-//
-// Returns the provenance alongside the path (SFN-715): the two branches differ
-// in trust, and only the caller that knows which one matched can apply the
-// private-capsule gate. A miss reports the least-trusted origin so a caller
-// that ignores the empty `src_dir` cannot accidentally treat a miss as local.
-fn _cr_locate_capsule_src(project_root: string, spec: string, version: string) -> CapsuleLocation ![io] {
-    let missing = CapsuleLocation {
-        src_dir: "",
-        origin: capsule_origin_cache()
-    };
-    let slash = _cr_find_char(spec, "/", 0);
-    if slash <= 0 { return missing; }
-    let slash2 = _cr_find_char(substring(spec, slash + 1, spec.length), "/", 0);
-    if slash2 >= 0 { return missing; }
-    let scope = substring(spec, 0, slash);
-    let name = substring(spec, slash + 1, spec.length);
-    if !_cr_is_safe_segment(scope) { return missing; }
-    if !_cr_is_safe_segment(name) { return missing; }
-
-    // Prefer in-tree source if we're inside a sailfin repo checkout.
-    let in_tree = _cr_path_join(project_root, "capsules/" + scope + "/" + name
-        + "/src");
-    if fs.exists(in_tree) {
-        return CapsuleLocation {
-            src_dir: in_tree,
-            origin: capsule_origin_workspace()
-        };
-    }
-
-    // Fall back to the user cache populated by `sfn add`.
-    if version.length == 0 { return missing; }
-    if !_cr_is_safe_version(version) { return missing; }
-    let home = _cr_get_home();
-    if home.length == 0 { return missing; }
-    let cached = home + "/.sfn/cache/capsules/" + scope + "/" + name + "/"
-        + version
-        + "/src";
-    if fs.exists(cached) {
-        return CapsuleLocation {
-            src_dir: cached,
-            origin: capsule_origin_cache()
-        };
-    }
-    return missing;
 }
 
 // Locate the src/ dir for a scoped capsule in the user cache
@@ -353,10 +304,10 @@ fn _cr_enumerate_host_capsule_sources(project_root: string) -> CapsuleSource[] !
 // runtime capsule resolver picks them up separately via
 // `enumerate_runtime_capsule_artifacts`. We discover them
 // up-front via workspace.toml so the legacy
-// `_cr_locate_capsule_src` lookup below doesn't false-positive
+// `locate_capsule_src` lookup below doesn't false-positive
 // on a runtime capsule name and emit a "could not locate source"
 // diagnostic.
-fn enumerate_capsule_sources(project_root: string) -> CapsuleSource[] ![io] {
+fn enumerate_capsule_sources(project_root: string, runtime_root: string) -> CapsuleSource[] ![io] {
     let mut sources: CapsuleSource[] = [];
     if project_root.length == 0 { return sources; }
     let manifest = _cr_path_join(project_root, "capsule.toml");
@@ -394,7 +345,7 @@ fn enumerate_capsule_sources(project_root: string) -> CapsuleSource[] ![io] {
     // Workspace member map (e.g. "sfn/strings" -> capsules/sfn/strings/src).
     // Empty outside a workspace, which keeps end-user `sfn build`/`sfn add`
     // flows byte-identical. Inside a workspace it is the authoritative
-    // resolver for a *declared* sibling-capsule dep: `_cr_locate_capsule_src`
+    // resolver for a *declared* sibling-capsule dep: `locate_capsule_src`
     // below only checks `<project_root>/capsules/...` and `~/.sfn/cache`,
     // neither of which finds a workspace sibling, so a declared
     // capsule→capsule dep (the first real case being `sfn/test` →
@@ -446,6 +397,39 @@ fn enumerate_capsule_sources(project_root: string) -> CapsuleSource[] ![io] {
         queue_versions.push(entries[qseed].version);
         queue_direct.push(true);
         qseed += 1;
+    }
+    // SFN-773 (design note `sfn-341-native-tls-runtime-swap.md` §3.1.3):
+    // union the runtime capsule's own `[dependencies]` closure into this
+    // project's resolution. The runtime's `sfn-sources` land in EVERY binary,
+    // so a runtime module importing a capsule provider emits that call
+    // everywhere — and `--gc-sections` runs after symbol resolution, so a
+    // hello-world that never mentions TLS still fails to link unless the
+    // provider's definitions are present.
+    //
+    // Appended AFTER the project's own seeds and marked non-direct: a project
+    // pinning its own version of the same capsule wins the `visited` race, and
+    // no "absent from capsule.lock" hint fires for a dep the user never named.
+    // Dedup and the transitive walk below are inherited for free, so
+    // `sfn/crypto` pulling `sfn/strings` needs no special handling here.
+    //
+    // Gated on `runtime_root` so `sfn check` opts out: no user-source symbol
+    // resolution depends on the runtime's private deps, only the link does.
+    if runtime_root.length > 0 {
+        let rt_caps = runtime_capsule_from_root(runtime_root);
+        let mut rci2: int = 0;
+        loop {
+            if rci2 >= rt_caps.length { break; }
+            let rt_deps = rt_caps[rci2].capsule_deps;
+            let mut rdi: int = 0;
+            loop {
+                if rdi >= rt_deps.length { break; }
+                queue_specs.push(rt_deps[rdi]);
+                queue_versions.push("");
+                queue_direct.push(false);
+                rdi += 1;
+            }
+            rci2 += 1;
+        }
     }
     let mut visited: string[] = [];
     let mut qi: int = 0;
@@ -513,7 +497,7 @@ fn enumerate_capsule_sources(project_root: string) -> CapsuleSource[] ![io] {
                         + "` to lock it");
                 }
             }
-            let located = _cr_locate_capsule_src(project_root, spec, effective_version);
+            let located = locate_capsule_src(project_root, spec, effective_version);
             src_dir = located.src_dir;
             origin = located.origin;
         }
