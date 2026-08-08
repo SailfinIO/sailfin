@@ -63,6 +63,33 @@ fn _run_once(marker: string, asset_list: string, seed_version: string) -> int ![
     return exit;
 }
 
+// Child env for the curl-branch probe: `SAILFIN_SEED_ASSET_LIST` is left
+// unset so the script falls through to `_asset_present`, and
+// `SAILFIN_SEED_PROBE_HTTP_CODE` short-circuits that function before curl
+// ever runs, so this stays hermetic.
+fn _child_env_probe(probe_code: string, seed_version: string) -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    e.push("SAILFIN_SEED_PROBE_HTTP_CODE=" + probe_code);
+    if seed_version.length > 0 { e.push("SEED_VERSION=" + seed_version); }
+    return e;
+}
+
+// One script invocation through the curl-branch probe seam, capturing
+// stdout and stderr to markers outside the fixture dir so they survive
+// teardown, and returning the exit code.
+fn _run_once_probe(marker: string, err_marker: string, probe_code: string, seed_version: string) -> int ![io] {
+    let exit = process.run_capture(["bash", _script()], _child_env_probe(probe_code, seed_version));
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    fs.writeFile(marker, out);
+    fs.writeFile(err_marker, err);
+    return exit;
+}
+
 test "aarch64 seed mode: a pinned release with both arm64 assets selects native" ![io] {
     let marker = _scratch_marker("t1");
     let exit = with_tmp_dir(fn (dir: string) -> int {
@@ -151,4 +178,76 @@ test "aarch64 seed mode: release legs fall back when the probe is absent" ![io] 
     let branches_workflow = fs.readFile(".github/workflows/release-branches.yml");
     assert contains(branches_workflow, "absent from this checkout");
     assert contains(branches_workflow, "mode=qemu");
+}
+
+test "aarch64 seed mode: a ranged-GET partial-content probe counts an asset as present" ![io] {
+    let marker = _scratch_marker("t7");
+    let err_marker = _scratch_marker("t7-err");
+    let exit = with_tmp_dir(fn (dir: string) -> int {
+        return _run_once_probe(marker, err_marker, "206", "9.9.9");
+    });
+    assert exit == 0;
+
+    let out = fs.readFile(marker);
+    fs.deleteFile(marker);
+    fs.deleteFile(err_marker);
+    assert trim(out) == "native";
+}
+
+test "aarch64 seed mode: a full-content probe counts an asset as present" ![io] {
+    let marker = _scratch_marker("t8");
+    let err_marker = _scratch_marker("t8-err");
+    let exit = with_tmp_dir(fn (dir: string) -> int {
+        return _run_once_probe(marker, err_marker, "200", "9.9.9");
+    });
+    assert exit == 0;
+
+    let out = fs.readFile(marker);
+    fs.deleteFile(marker);
+    fs.deleteFile(err_marker);
+    assert trim(out) == "native";
+}
+
+test "aarch64 seed mode: a not-found probe counts an asset as absent" ![io] {
+    let marker = _scratch_marker("t9");
+    let err_marker = _scratch_marker("t9-err");
+    let exit = with_tmp_dir(fn (dir: string) -> int {
+        return _run_once_probe(marker, err_marker, "404", "9.9.9");
+    });
+    assert exit == 0;
+
+    let out = fs.readFile(marker);
+    fs.deleteFile(marker);
+    fs.deleteFile(err_marker);
+    assert trim(out) == "qemu";
+}
+
+test "aarch64 seed mode: an unresolvable probe status fails closed" ![io] {
+    let marker = _scratch_marker("t10");
+    let err_marker = _scratch_marker("t10-err");
+    let exit = with_tmp_dir(fn (dir: string) -> int {
+        return _run_once_probe(marker, err_marker, "401", "9.9.9");
+    });
+    assert exit != 0;
+
+    let err = fs.readFile(err_marker);
+    fs.deleteFile(marker);
+    fs.deleteFile(err_marker);
+    assert contains(err, "refusing to guess");
+}
+
+test "aarch64 seed mode: the probe never asks for an asset with HEAD" ![io] {
+    let script = fs.readFile(_script());
+    assert ! contains(script, "--request HEAD");
+    assert ! contains(script, "-X HEAD");
+    assert ! contains(script, "--head ");
+    assert contains(script, "--range 0-0");
+}
+
+test "aarch64 seed mode: the installer smoke probes never use HEAD" ![io] {
+    let workflow = fs.readFile(".github/workflows/installer-smoke.yml");
+    assert contains(workflow, "--range 0-0");
+    assert contains(workflow, "Range = 'bytes=0-0'");
+    assert ! contains(workflow, "-Method Head");
+    assert ! contains(workflow, "--head ");
 }

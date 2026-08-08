@@ -46,7 +46,6 @@ else
     _asset_present() {
         local asset="$1"
         local url="https://github.com/${SEED_REPO}/releases/download/v${SEED_VERSION}/${asset}"
-        local code
         # Only a 404 means "absent". Collapsing every non-2xx into absent
         # would silently downgrade a native-capable pin to the emulated
         # path (an expired token's 401 is indistinguishable from a missing
@@ -59,12 +58,38 @@ else
         # `-w` already prints 000 when curl never got a response, so the
         # non-zero exit only needs swallowing under `set -e`, not a second
         # sentinel — appending one reports a nonsense "HTTP 000000".
-        code="$(curl --silent --location --head \
-            --retry 3 --retry-all-errors --max-time 30 \
-            -o /dev/null -w '%{http_code}' \
-            ${auth[@]+"${auth[@]}"} "${url}" || true)"
+        # A release-download URL 302s to a presigned objects.githubusercontent.com
+        # URL that is signed for GET only, so HEAD gets rejected there (401)
+        # and can never be a reliable existence probe. A one-byte ranged GET
+        # asks the same question the way the URL is actually signed to
+        # answer it (SFN-798).
+        local code
+        if [ -n "${SAILFIN_SEED_PROBE_HTTP_CODE:-}" ]; then
+            # Test seam: forces the branch below without any network access,
+            # so the non-200/404 fail-closed path is testable hermetically
+            # (compiler/tests/e2e/aarch64_seed_mode_test.sfn). Guarded by a
+            # three-digit-status shape check because, unlike its sibling seam
+            # SAILFIN_SEED_ASSET_LIST (self-guarding on a readable-file
+            # check), a bare hand-typed "200" or "206" here would silently
+            # bypass the network and print a confident wrong answer for a
+            # seed with no arm64 assets.
+            case "${SAILFIN_SEED_PROBE_HTTP_CODE}" in
+                [0-9][0-9][0-9]) ;;
+                *)
+                    echo "[arm-seed][error] SAILFIN_SEED_PROBE_HTTP_CODE must be a three-digit HTTP status, got: ${SAILFIN_SEED_PROBE_HTTP_CODE}" >&2
+                    exit 1
+                    ;;
+            esac
+            echo "[arm-seed][warn] probe seam active (SAILFIN_SEED_PROBE_HTTP_CODE=${SAILFIN_SEED_PROBE_HTTP_CODE}): no network probe performed" >&2
+            code="${SAILFIN_SEED_PROBE_HTTP_CODE}"
+        else
+            code="$(curl --silent --location --range 0-0 \
+                --retry 3 --retry-all-errors --max-time 30 \
+                -o /dev/null -w '%{http_code}' \
+                ${auth[@]+"${auth[@]}"} "${url}" || true)"
+        fi
         case "${code}" in
-            200) return 0 ;;
+            200 | 206) return 0 ;;
             404) return 1 ;;
             *)
                 echo "[arm-seed][error] probing ${asset} returned HTTP ${code}; refusing to guess whether the asset exists" >&2
