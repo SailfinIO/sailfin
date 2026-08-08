@@ -1077,6 +1077,32 @@ fn _stage_one_runtime_sfn_import_context(self_path: string, src: string, slug: s
 // -> `./platform/posix` for nanosleep/clock_gettime). A module with
 // no such imports gets no sidecar at all — its child emit then
 // degrades to the exact pre-#1288 legacy path.
+// Resolve an import's slug against the staged import-context slugs, mirroring
+// `resolve_import_provider_module_name` (`llvm/lowering/lowering_helpers.sfn`):
+// exact match first, then the `<slug>/mod` entry-module fallback. A bare
+// capsule spec (`from "sfn/crypto"`) resolves to the slug `sfn/crypto` while
+// the capsule's entry module stages as `sfn/crypto/mod`. Without the fallback
+// the dep is dropped from the sidecar with no diagnostic and the emit loses
+// the provider's signatures — the sidecar and the mangler must agree on who
+// the provider is (SFN-773).
+fn _runtime_staged_slug_for_dep(dep_slug: string, staged_slugs: string[]) -> string {
+    if dep_slug.length == 0 { return ""; }
+    let mut si: int = 0;
+    loop {
+        if si >= staged_slugs.length { break; }
+        if staged_slugs[si] == dep_slug { return dep_slug; }
+        si += 1;
+    }
+    let mod_slug = dep_slug + "/mod";
+    let mut mi: int = 0;
+    loop {
+        if mi >= staged_slugs.length { break; }
+        if staged_slugs[mi] == mod_slug { return mod_slug; }
+        mi += 1;
+    }
+    return "";
+}
+
 fn _write_runtime_sfn_import_deps(asm_path: string, slug: string, ctx_root: string, staged_slugs: string[]) -> void ![io] {
     let deps_path = ctx_root + "/" + slug + ".import-deps";
     let asm_text = fs.readFile(asm_path);
@@ -1087,14 +1113,9 @@ fn _write_runtime_sfn_import_deps(asm_path: string, slug: string, ctx_root: stri
         if i >= entries.length { break; }
         if entries[i].kind == "import" {
             let dep_slug = resolve_import_module_slug_for_module(entries[i].module, slug);
-            let mut si: int = 0;
-            loop {
-                if si >= staged_slugs.length { break; }
-                if staged_slugs[si] == dep_slug {
-                    deps = deps + ctx_root + "/" + dep_slug + ".sfn-asm\n";
-                    break;
-                }
-                si += 1;
+            let staged = _runtime_staged_slug_for_dep(dep_slug, staged_slugs);
+            if staged.length > 0 {
+                deps = deps + ctx_root + "/" + staged + ".sfn-asm\n";
             }
         }
         i += 1;
@@ -1434,7 +1455,7 @@ fn _condition_runtime_capsules(caps: RuntimeCapsuleArtifacts[], target_os: strin
         if i >= caps.length { break; }
         let c = caps[i];
         out.push(RuntimeCapsuleArtifacts {
-            capsule_name: c.capsule_name, manifest_dir: c.manifest_dir, c_sources: c.c_sources, ll_sources: c.ll_sources, sfn_sources: target_condition_runtime_sfn_sources(c.sfn_sources, target_os), include_dirs: c.include_dirs, link_libs: c.link_libs, prelude_entry: c.prelude_entry
+            capsule_name: c.capsule_name, manifest_dir: c.manifest_dir, c_sources: c.c_sources, ll_sources: c.ll_sources, sfn_sources: target_condition_runtime_sfn_sources(c.sfn_sources, target_os), include_dirs: c.include_dirs, link_libs: c.link_libs, prelude_entry: c.prelude_entry, capsule_deps: c.capsule_deps
         });
         i += 1;
     }
