@@ -25,6 +25,9 @@
 #     also captured for best-effort classification.
 #   - A `trap ... EXIT` guarantees the verdict block is emitted last even if
 #     a phase aborts or the wrapper itself is interrupted.
+#   - An interrupted run is never reported as a pass. If the wrapper is
+#     terminated before the wrapped command finishes, the verdict is
+#     `status:"fail"` / `failure:"timeout"` (see the abort-detection block).
 #   - SAILFIN_INNER guard: a nested invocation (e.g. `make check`'s inner
 #     `make test`) runs transparently and emits NO sentinel — only the outer
 #     target's verdict is printed. This wrapper sets SAILFIN_INNER=1 for the
@@ -98,6 +101,34 @@ fi
 OUTFILE="$(mktemp "${TMPDIR:-/tmp}/sailfin-agent-report.XXXXXX" 2>/dev/null || echo /dev/null)"
 RC=0
 
+# --- abort detection (#2817) -----------------------------------------------
+# RC is assigned only AFTER the wrapped pipeline returns. If a terminating
+# signal lands before that — CI job cancellation, a runner/VM shutdown, an
+# external `timeout`, or a developer's Ctrl-C — bash runs the EXIT trap with
+# `$?` still 0, so the wrapper emitted `"status":"pass"` for a target that
+# never finished. That false green is the one failure this contract must not
+# have: an agent (and `build-quality.yml`'s own triage path) reads the tail
+# block and concludes the suite passed while the log shows it stopped a tenth
+# of the way in.
+#
+# COMMAND_COMPLETED flips to 1 only once PIPESTATUS has been read, so
+# emit_verdict can distinguish "finished with rc 0" from "was killed before
+# finishing" no matter which path aborted the run. SIGNAL_RC records the
+# signal's 128+signo code when we caught the signal ourselves.
+COMMAND_COMPLETED=0
+SIGNAL_RC=0
+ABORTED=0
+
+on_terminating_signal() {
+	# Exit with the shell's own 128+signo convention; the EXIT trap below turns
+	# that into a fail verdict.
+	SIGNAL_RC="$1"
+	exit "$SIGNAL_RC"
+}
+trap 'on_terminating_signal 129' HUP
+trap 'on_terminating_signal 130' INT
+trap 'on_terminating_signal 143' TERM
+
 cleanup_outfile() {
 	# Only remove a real temp file — never the /dev/null fallback. Guarding on
 	# a regular file also keeps any rm error off the stream after the verdict.
@@ -142,6 +173,30 @@ detect_first_error() {
 }
 
 classify() {
+	# An aborted run outranks every output-derived class. The wrapped command
+	# did not finish, so whatever the captured text says — a passing tally so
+	# far, a fixed-point warning, a stray `error:` — describes a prefix of a run
+	# that no longer has a verdict of its own. `timeout` is the class because
+	# the operator action is identical to a wall-clock kill: re-run, or escalate
+	# if it repeats.
+	if [ "$ABORTED" -eq 1 ]; then
+		STATUS="fail"
+		FAILURE="timeout"
+		if [ "$TARGET" = "check" ]; then
+			PHASE="$(detect_check_phase)"
+		else
+			PHASE="$TARGET"
+		fi
+		local fe
+		fe="$(detect_first_error)"
+		if [ -n "$fe" ]; then
+			FIRST_ERROR="$fe"
+		else
+			FIRST_ERROR="$PHASE"
+		fi
+		return
+	fi
+
 	# Nondeterminism is a non-fatal WARN even though `make check` exits 0.
 	# Surface it without flipping the exit code.
 	if out_has '\[check\]\[WARN\] stage2 != stage3'; then
@@ -189,7 +244,7 @@ classify() {
 	# the `child terminated by signal` line) stays a `test-failure`.
 	elif out_has 'child terminated by signal' && ! out_has 'assertion failed|test failed:'; then
 		FAILURE="crash"
-	elif [ "$RC" -eq 124 ] || [ "$RC" -eq 137 ]; then
+	elif [ "$RC" -eq 124 ] || [ "$RC" -eq 137 ] || [ "$RC" -eq 143 ]; then
 		FAILURE="timeout"
 	elif out_has "missing seed compiler|is not invokable|SEED_VERSION is empty|\[fetch-seed\]\[error\]|(seed|bootstrap\.toml|fetch-seed|SEED=)[^[:cntrl:]]*No such file or directory|run: make compile|run 'make compile'|GITHUB_TOKEN"; then
 		FAILURE="setup-error"
@@ -484,8 +539,23 @@ emit_verdict() {
 	# Fired via trap on EXIT so the block is always the final output, even if
 	# the command aborts a phase or the wrapper is interrupted.
 	trap - EXIT
-	if [ "$RC" -eq 0 ] && [ "$trap_rc" -ne 0 ]; then
+	if [ "$SIGNAL_RC" -ne 0 ]; then
+		# We caught the terminating signal ourselves: its 128+signo code is the
+		# most accurate thing we know about this run.
+		RC="$SIGNAL_RC"
+	elif [ "$RC" -eq 0 ] && [ "$trap_rc" -ne 0 ]; then
 		RC="$trap_rc"
+	fi
+	# Backstop for every abort path that leaves no non-zero code behind — an
+	# uncaught fatal signal, or bash tearing down mid-pipeline. The wrapped
+	# command never reached its PIPESTATUS read, so a zero RC here means "was
+	# killed", not "passed". Report the SIGTERM code rather than a pass the
+	# target never earned.
+	if [ "$COMMAND_COMPLETED" -eq 0 ] && [ "$RC" -eq 0 ]; then
+		RC=143
+	fi
+	if [ "$COMMAND_COMPLETED" -eq 0 ]; then
+		ABORTED=1
 	fi
 	classify
 	# Report-file field: the per-target path when gated, else null. Write the
@@ -522,6 +592,7 @@ trap emit_verdict EXIT
 # classification. PIPESTATUS[0] is the command's real exit code.
 "$@" 2>&1 | tee "$OUTFILE"
 RC="${PIPESTATUS[0]}"
+COMMAND_COMPLETED=1
 
 # trap emit_verdict fires here on normal exit.
 exit "$RC"

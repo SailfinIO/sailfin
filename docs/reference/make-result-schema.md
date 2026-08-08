@@ -106,10 +106,18 @@ string.
 | `nondeterminism` | stage2 ≠ stage3 fixed-point mismatch (`make check`). | Pairs with `status:"warn"`, exit `0`. Re-run once; if it persists, escalate to `seed-stabilizer`. |
 | `setup-error` | Bad path, missing seed, staging/env failure. A bare `No such file or directory` only counts here when it carries a seed/staging context (`seed`, `bootstrap.toml`, `fetch-seed`, `SEED=`); a post-crash artifact-not-found does **not** masquerade as setup. | Fix the invocation/env, not the source. |
 | `oom` | Hit the compiler's self-applied 8 GiB memory budget (`RLIMIT_AS`, #1291). | Escalate (memory regression) — do **not** blind-retry. |
-| `timeout` | Wall-clock `timeout` tripped (exit 124, or a bare SIGKILL 137 with no crash signature). | Re-run or escalate per phase. |
+| `timeout` | The target did not finish. Either a wall-clock `timeout` tripped (exit 124, or a bare SIGKILL 137 with no crash signature), or **the wrapper itself was terminated before the wrapped command completed** — SIGHUP/SIGINT/SIGTERM (exit `129`/`130`/`143`), i.e. a CI job cancellation, a runner/VM shutdown, an external `timeout`, or a developer's Ctrl-C. | Re-run or escalate per phase. |
 
 `nondeterminism` is the only class that pairs with `status:"warn"`; every other
 class pairs with `status:"fail"`.
+
+An aborted run outranks **every** class above, including `nondeterminism`. When
+the wrapper is signalled before the wrapped command completes, the captured
+output only describes a prefix of the run, so no verdict can be derived from it
+— a partial suite that had passed 250 of 711 files is not a pass, and a
+fixed-point warning printed before the kill is not the run's outcome. The
+wrapper reports `status:"fail"` / `failure:"timeout"` in that case. It never
+emits `status:"pass"` for a run it did not watch finish (#2817).
 
 Ordering note: `crash` is classified **above** `timeout` and `setup-error`. A
 signal-killed child carries a fault exit code (e.g. `139`) and/or a `child
