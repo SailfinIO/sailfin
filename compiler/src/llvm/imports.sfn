@@ -91,6 +91,13 @@ fn collect_imported_module_context_for_module(imports: NativeImport[], current_m
     loop {
         if queue_index >= queue_paths.length {
             if seen_at_round_depth == 0 { break; }
+            // Guard counter: discovery is gated on `depth <
+            // max_transitive_depth`, so nothing is ever queued deeper than
+            // `max_transitive_depth` and the round after it is always empty.
+            // Reaching here past that bound would mean a push site emitted a
+            // depth below `round_depth`, which strands entries forever —
+            // break rather than spin.
+            if round_depth > max_transitive_depth { break; }
             round_depth += 1;
             queue_index = 0;
             seen_at_round_depth = 0;
@@ -108,16 +115,22 @@ fn collect_imported_module_context_for_module(imports: NativeImport[], current_m
             }
         }
 
+        // Depth is read before the two string reads so entries belonging to
+        // another round cost only an integer compare on each rescan.
+        let depth = queue_depths[queue_index];
+        if depth != round_depth {
+            // Skips entries from any other round, deeper ones not yet reached
+            // and shallower ones already drained alike.
+            queue_index += 1;
+            continue;
+        }
+        // Counted before the dedup below so a round in which every entry is
+        // already `seen` still advances instead of ending the drain early.
+        seen_at_round_depth += 1;
+
         let module_path = queue_paths[queue_index];
         let parent_slug = queue_parent_slugs[queue_index];
-        let depth = queue_depths[queue_index];
         queue_index += 1;
-
-        // Defer entries belonging to a deeper round; they are revisited
-        // when `round_depth` reaches them. Counted before the dedup so an
-        // all-deduped round still advances instead of ending the drain.
-        if depth != round_depth { continue; }
-        seen_at_round_depth += 1;
 
         let base_slug = resolve_import_module_slug_for_module(module_path, parent_slug);
         let slug = resolve_import_artifact_slug(base_slug);
