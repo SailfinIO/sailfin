@@ -369,17 +369,26 @@ jobs:
     # within each) kept tipping past the cap and leaving the cache unsaved,
     # so the next run paid the cold cost again (SFN-394).
     #
-    # `timeout-minutes` stays at 90 as a hung-pool backstop, NOT the suite's
-    # wall-time budget. The incremental warmer should finish in minutes on a
-    # typical merge, but the first warm after a compiler-source change (which
-    # rolls the content-addressed test-bin key and forces a broader recompile)
-    # still approaches the historical cold ceiling — the 4-core `ubuntu-24.04`
-    # cold full suite was observed at 56-58 min (killed mid-e2e under the old
-    # 60-min cap before PR #2492 raised it to 90). Keep the headroom for that
-    # path plus the retry-once flake path (#892); revisit lowering it once a
-    # warm run has been measured in the run logs (SFN-431 Scope). See
-    # docs/proposals/0011-ci-test-speed.md.
-    timeout-minutes: 90
+    # `timeout-minutes` is a hung-pool backstop, NOT the suite's wall-time
+    # budget. The incremental warmer should finish in minutes on a typical
+    # merge, but the first warm after a compiler-source change (which rolls the
+    # content-addressed test-bin key and forces a broader recompile) still
+    # approaches the cold ceiling — the 4-core `ubuntu-24.04` cold full suite
+    # was observed at 56-58 min (killed mid-e2e under the old 60-min cap before
+    # PR #2492 raised it to 90), and a green warm run on 2026-08-08 took 67 min.
+    #
+    # Raised 90 -> 180 as a follow-on to SFN-781, which corrected the test-pool
+    # RAM budget (3 GiB/job out of `80% RAM - 5 GiB`) after the old reserve had
+    # this runner class taking 4 jobs and losing the VM outright ~3.5 min into
+    # the suite (GitHub issue #2817). That fix is right, and it resolves this
+    # class to 2 jobs — but halving the pool also roughly doubles wall time,
+    # and the 67 min above was measured AT 4 jobs. A 90-minute cap is not a
+    # safe backstop for the same suite at 2, so without this the budget fix
+    # would trade a VM kill for a timeout. Revisit together with the parent
+    # runner's prewarm arena (`_prewarm_test_dep_closures` holds its closure
+    # for the whole run), which is what would let the job count go back up.
+    # See docs/proposals/0011-ci-test-speed.md.
+    timeout-minutes: 180
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7

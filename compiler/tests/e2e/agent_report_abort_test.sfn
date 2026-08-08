@@ -1,0 +1,185 @@
+// End-to-end test for the abort path of the agent-tail verdict contract
+// (`scripts/agent_report.sh`, schema `sailfin-make/1`).
+//
+// The wrapper assigns RC only AFTER the wrapped pipeline returns. A
+// terminating signal that lands before that used to run the EXIT trap with
+// `$?` still 0, so the verdict block certified `"status":"pass"` for a target
+// that never finished. Every `build-quality.yml` test-bin-warmer failure since
+// 2026-08-06 hit exactly this: a suite killed a tenth of the way in, no
+// per-suite banners, and a tail block reading `{"target":"test",
+// "status":"pass"}` directly above `make: *** Terminated` and exit 143
+// (GitHub issue #2817). Anything consuming the documented tail contract read
+// that killed run as a clean suite.
+//
+// A false green is the one failure this contract must not have, so it gets a
+// regression test rather than living on the strength of the wrapper's own
+// control flow.
+//
+// Cases:
+//   - abort:   the wrapper's process GROUP is SIGTERM'd mid-run -> the report
+//              reads status "fail" / failure "timeout", never "pass".
+//   - control: the same harness with no signal and a stub that exits 0 ->
+//              status "pass". Without this, an always-failing vehicle (bad
+//              path, missing wrapper) would satisfy the abort case vacuously.
+//
+// Schema: docs/reference/make-result-schema.md (`sailfin-make/1`).
+//
+// PLUMBING — same shape and the same reasons as
+// compiler/tests/e2e/check_phase_ledger_test.sfn: agent_report.sh writes its
+// report relative to cwd and `process.run_capture` cannot cd, so a single
+// `bash -c` vehicle does the cd and the `env -u` itself. The abort case
+// backgrounds the wrapper and signals `$!` — its exact pid — so the SIGTERM
+// cannot reach the test runner that spawned it. A process-GROUP kill would
+// need `setsid`, which is util-linux and absent on the macOS leg of this
+// shard. Matching on a process name instead would be a trap: the vehicle's
+// own command line contains the wrapper's name, so a `pgrep -f` would select
+// the signaller as readily as its target.
+import { find, contains } from "sfn/strings";
+
+// Absolute repo root — the vehicle `cd`s into the per-run subdir, so a
+// relative wrapper path would not resolve.
+fn _repo_root() -> string ![io] {
+    let root = env.get("SAILFIN_REPO_ROOT");
+    if root.length > 0 && substring(root, 0, 1) == "/" { return root; }
+    let exit = process.run_capture(["pwd"], _child_env());
+    let out = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit == 0 {
+        let nl = find(out, "\n", 0);
+        if nl > 0 { return substring(out, 0, nl); }
+    }
+    if root.length > 0 { return root; }
+    return ".";
+}
+
+fn _wrapper() -> string ![io] {
+    return _repo_root() + "/scripts/agent_report.sh";
+}
+
+// Child env for the `bash -c` vehicle. SAILFIN_INNER / SAILFIN_AGENT_REPORT
+// are deliberately omitted here AND cleared inside the vehicle via `env -u`
+// (the wrapper sets SAILFIN_AGENT_REPORT=1 itself for the run).
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+fn _scratch_base() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    dir = dir + "/sfn-agent-report-abort";
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// Per-run subdir, absolute (the runner-managed SAILFIN_TEST_SCRATCH can be a
+// relative path such as `build/sailfin/...`).
+fn _run_dir(tag: string) -> string ![io] {
+    let mut sub = _scratch_base() + "/run-" + tag;
+    if sub.length > 0 && substring(sub, 0, 1) != "/" {
+        sub = _repo_root() + "/" + sub;
+    }
+    fs.createDirectory(sub, true);
+    return sub;
+}
+
+// Read the composed report file for a finished run, or "" when absent.
+fn _read_report(sub: string) -> string ![io] {
+    let report = sub + "/build/agent-report.test.json";
+    if !fs.exists(report) { return ""; }
+    return fs.readFile(report);
+}
+
+// jq-less first-occurrence read of `"field":"value"` -> value, or "".
+// write_report_file emits every top-level field before phases[], so
+// first-occurrence is the top-level value.
+fn _json_str_field(json: string, field: string) -> string {
+    let key = "\"" + field + "\":\"";
+    let at = find(json, key, 0);
+    if at < 0 { return ""; }
+    let value_start = at + key.length;
+    let close = find(json, "\"", value_start);
+    if close < 0 { return ""; }
+    return substring(json, value_start, close);
+}
+
+// Drive the wrapper over a stub that sleeps, then SIGTERM the wrapper mid-run
+// — the CI failure mode reproduced exactly.
+fn _run_aborted() -> string ![io] {
+    let sub = _run_dir("abort");
+    fs.writeFile(sub + "/stub.sh", "#!/usr/bin/env bash\necho 'stub: started'\nsleep 8\necho 'stub: finished'\n");
+
+    // `$!` is the wrapper's own pid — `env` execs `bash`, and exec preserves
+    // the pid — so the SIGTERM lands on the process under test and nothing
+    // else. Deliberately a single-pid kill rather than a process-group one: a
+    // group kill needs `setsid`, which is util-linux and absent on macOS,
+    // where this shard also runs. Signalling the wrapper alone is what the
+    // regression is about anyway.
+    //
+    // The stub must outlive the delay before the kill but stay short. Bash
+    // defers a trap while a foreground command runs, so the wrapper does not
+    // act on the signal until the stub exits; `wait` then blocks until the
+    // verdict has actually been written, which is what makes this
+    // deterministic rather than a race against a fixed sleep.
+    //
+    // Each step is its own statement. `cd X && ... &` backgrounds the WHOLE
+    // `&&` chain, cd included, stranding the signalling half in the original
+    // directory — the kill then misses, the wrapper runs to completion, and
+    // the case passes on the very verdict it exists to forbid.
+    let vehicle = "cd '" + sub + "' || exit 1\n" + "chmod +x stub.sh\n"
+        + "env -u SAILFIN_INNER SAILFIN_AGENT_REPORT=1 bash '"
+        + _wrapper()
+        + "' --target test -- ./stub.sh >/dev/null 2>&1 </dev/null &\n"
+        + "bg=$!\n"
+        + "sleep 2\n"
+        + "kill -TERM \"$bg\" 2>/dev/null || true\n"
+        + "wait \"$bg\" 2>/dev/null || true\n"
+        + "true\n";
+
+    let _exit = process.run_capture(["bash", "-c", vehicle], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    return _read_report(sub);
+}
+
+// Same harness, no signal, stub exits 0 — proves the vehicle can produce a
+// pass, so the abort assertions above are not vacuous.
+fn _run_control() -> string ![io] {
+    let sub = _run_dir("control");
+    fs.writeFile(sub + "/stub.sh", "#!/usr/bin/env bash\necho 'stub: started'\nexit 0\n");
+
+    let vehicle = "cd '" + sub + "' && chmod +x stub.sh && "
+        + "env -u SAILFIN_INNER SAILFIN_AGENT_REPORT=1 "
+        + "bash '"
+        + _wrapper()
+        + "' --target test -- ./stub.sh >/dev/null 2>&1 || true";
+
+    let _exit = process.run_capture(["bash", "-c", vehicle], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    return _read_report(sub);
+}
+
+test "agent report: a signalled run is never reported as a pass" ![io] {
+    let report = _run_aborted();
+    assert report.length > 0;
+    assert _json_str_field(report, "status") == "fail";
+    assert _json_str_field(report, "failure") == "timeout";
+    // The specific regression: the wrapper used to emit this for a killed run.
+    assert ! contains(report, "\"status\":\"pass\"");
+}
+
+test "agent report: an unsignalled run still passes" ![io] {
+    let report = _run_control();
+    assert report.length > 0;
+    assert _json_str_field(report, "status") == "pass";
+    assert _json_str_field(report, "failure") == "";
+}
