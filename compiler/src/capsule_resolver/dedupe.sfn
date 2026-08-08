@@ -222,7 +222,7 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer, bun
             // that's the right call for projects mid-migration.
             capabilities_required = toml_get_capabilities_required(manifest_text);
         }
-        let dep_sources = enumerate_capsule_sources(project_root);
+        let dep_sources = enumerate_capsule_sources(project_root, consumer.runtime_root);
         let mut di: int = 0;
         loop {
             if di >= dep_sources.length { break; }

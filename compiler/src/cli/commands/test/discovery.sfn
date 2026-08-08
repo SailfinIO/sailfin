@@ -152,6 +152,12 @@ fn _test_group_key(file_path: string) -> string ![io] {
 // without a name, so the resolver falls back to the legacy
 // relative-import / workspace-implicit walks the test runner has
 // always relied on.
+// `runtime_root` is empty at every site below: this builder takes only a
+// file path, and threading the runtime root here would change its signature
+// and every caller's. It is inert today — nothing declares a runtime
+// `[dependencies]` entry yet — and the test-link path wires it in the slice
+// that adds the first one (SFN-341). Until then `sfn test` resolves exactly
+// as it does now.
 fn _test_resolver_consumer_for_group(file_path: string) -> ResolverConsumer ![io] {
     let dir = _dirname_cmd(file_path);
     let project_root = discover_project_root(dir);
@@ -160,7 +166,8 @@ fn _test_resolver_consumer_for_group(file_path: string) -> ResolverConsumer ![io
             scope: "",
             name: "",
             walk_project_src: false,
-            include_host_as_dep: true
+            include_host_as_dep: true,
+            runtime_root: ""
         };
     }
     let manifest_path = _path_join_cmd(project_root, "capsule.toml");
@@ -169,7 +176,8 @@ fn _test_resolver_consumer_for_group(file_path: string) -> ResolverConsumer ![io
             scope: "",
             name: "",
             walk_project_src: false,
-            include_host_as_dep: true
+            include_host_as_dep: true,
+            runtime_root: ""
         };
     }
     let manifest_text = fs.readFile(manifest_path);
@@ -179,7 +187,8 @@ fn _test_resolver_consumer_for_group(file_path: string) -> ResolverConsumer ![io
             scope: "",
             name: "",
             walk_project_src: false,
-            include_host_as_dep: true
+            include_host_as_dep: true,
+            runtime_root: ""
         };
     }
     let parts = parse_scope_name(capsule_name);
@@ -191,14 +200,16 @@ fn _test_resolver_consumer_for_group(file_path: string) -> ResolverConsumer ![io
             scope: "",
             name: "",
             walk_project_src: false,
-            include_host_as_dep: true
+            include_host_as_dep: true,
+            runtime_root: ""
         };
     }
     return ResolverConsumer {
         scope: parts.scope,
         name: parts.name,
         walk_project_src: false,
-        include_host_as_dep: true
+        include_host_as_dep: true,
+        runtime_root: ""
     };
 }
 

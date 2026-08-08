@@ -265,7 +265,8 @@ fn _run_single_build(capsule_path: string, input_path_arg: string, out_path_arg:
         scope: "",
         name: "",
         walk_project_src: walk_src,
-        include_host_as_dep: false
+        include_host_as_dep: false,
+        runtime_root: runtime_root
     };
     if cap_capsule_name.length > 0 {
         let parts0 = parse_scope_name(cap_capsule_name);
@@ -274,7 +275,8 @@ fn _run_single_build(capsule_path: string, input_path_arg: string, out_path_arg:
                 scope: parts0.scope,
                 name: parts0.name,
                 walk_project_src: walk_src,
-                include_host_as_dep: false
+                include_host_as_dep: false,
+                runtime_root: runtime_root
             };
         }
     }
