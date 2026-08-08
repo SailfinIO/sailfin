@@ -1,18 +1,18 @@
 ---
-sfep: TBD
+sfep: 69
 title: Non-Elidable Zeroization for Uniquely Owned Secret Buffers
-status: Draft
+status: Accepted
 type: runtime
 created: 2026-08-08
 updated: 2026-08-08
-author: "agent:compiler-architect"
+author: "agent:compiler-architect; human review"
 tracking: SFN-703, SFN-782, SFN-783, SFN-784, SFN-785, SFN-786, SFN-787, SFN-788, SFN-789, SFN-790, SFN-791
 supersedes:
 superseded-by:
 graduates-to: reference/preview/ownership-enforcement.md
 ---
 
-# SFEP-XXXX — Non-Elidable Zeroization for Uniquely Owned Secret Buffers
+# SFEP-0069 — Non-Elidable Zeroization for Uniquely Owned Secret Buffers
 
 ## 1. Summary
 
@@ -547,8 +547,9 @@ marketing a stronger guarantee than the backend can prove.
 - [ ] `sfn fmt --check` clean.
 - [ ] Documented in `docs/status.md` and the preview/spec once shipped.
 
-All implementation boxes remain open while this proposal is Draft. The design
-document and issue fan-out do not make the feature Implemented.
+All implementation boxes remain open after acceptance. The approved design and
+issue fan-out authorize implementation; they do not make the feature
+Implemented.
 
 ## 8. Test plan
 
