@@ -101,6 +101,22 @@ struct ResolverDedupeResult {
 // §4.4). Construction sites emit `ll_path = ""`; the layout
 // decision is centralized here so both manifest deps and
 // relative-imports route through the same policy.
+// SFN-341: two enumerators can surface the SAME file under different
+// spellings. Testing a capsule that the runtime also depends on is the
+// case that bites: the host-capsule walk roots at `./capsules/<scope>/
+// <name>` while the runtime-dependency union resolves the identical tree
+// as `capsules/<scope>/<name>`. Compared verbatim those look like two
+// providers of one slug and trip the collision diagnostic, so strip a
+// leading `./` before comparing and let the duplicate collapse. This only
+// ever makes two spellings of one path compare equal — a genuine collision
+// between distinct files still fails closed.
+fn _cr_strip_leading_dot_slash(path: string) -> string {
+    if path.length >= 2 && substring(path, 0, 2) == "./" {
+        return substring(path, 2, path.length);
+    }
+    return path;
+}
+
 fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer, bundled_workspace_start: string) -> ResolverDedupeResult ![io] {
     let mut sources: CapsuleSource[] = [];
     let empty_sources: CapsuleSource[] = [];
@@ -390,7 +406,7 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer, bun
         loop {
             if sj >= seen_slugs.length { break; }
             if strings_equal(seen_slugs[sj], candidate.slug) {
-                if !strings_equal(seen_paths[sj], candidate.source_path) {
+                if !strings_equal(_cr_strip_leading_dot_slash(seen_paths[sj]), _cr_strip_leading_dot_slash(candidate.source_path)) {
                     print.err("capsule-resolver: slug collision for \""
                         + candidate.slug
                         + "\":\n  "
