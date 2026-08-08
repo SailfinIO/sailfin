@@ -91,12 +91,8 @@ import {
     extend_native_structs,
     is_test_module_slug
 } from "./lowering_helpers";
-import {
-    _join_llvm_lines_linear,
-    concat_native_functions,
-    empty_capability_manifest,
-    flatten_struct_methods
-} from "./lowering_helpers_mangling";
+import { _join_llvm_lines_linear, concat_native_functions } from "./lowering_helpers_mangling";
+import { empty_capability_manifest, flatten_struct_methods } from "./lowering_helpers_structs";
 import {
     ensure_intrinsic_declarations,
     extend_string_lines,
