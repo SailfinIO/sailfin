@@ -67,6 +67,7 @@ import { arena_command_def, arena_run } from "./dev_arena";
 import { clean_command_def, clean_run } from "./dev_clean";
 import { det_sweep_command_def, det_sweep_run } from "./dev_det_sweep";
 import { shard_command_def, shard_run } from "./dev_shard";
+import { verify_command_def, verify_run } from "./dev_verify";
 import { toolchain_install_to_base } from "./toolchain";
 
 // Where a bootstrap-triggered fetch stages its download: the per-invocation
@@ -594,6 +595,7 @@ fn command_def() -> Command {
     dev = with_subcommand(dev, arena_command_def());
     dev = with_subcommand(dev, det_sweep_command_def());
     dev = with_subcommand(dev, clean_command_def());
+    dev = with_subcommand(dev, verify_command_def());
     return dev;
 }
 
@@ -627,6 +629,13 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     // taken for the `bootstrap` leaf of the same name dispatched below.
     if path.length >= 2 && strings_equal(path[1], "clean") {
         return clean_run(matches, ctx);
+    }
+    // `sfn dev verify [--fast] [--full-pass1] [--json] [--strict] [--jobs N]
+    // [--test-timeout SECS]` routes to the native pipeline supervisor
+    // (SFN-725); the descent path's second element (`["dev", "verify"]`)
+    // keeps it clear of the `bootstrap` leaves dispatched below.
+    if path.length >= 2 && strings_equal(path[1], "verify") {
+        return verify_run(matches, ctx);
     }
     let sub: string = subcommand(matches);
     if strings_equal(sub, "fetch") { return _dev_bootstrap_fetch(); }

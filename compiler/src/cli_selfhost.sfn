@@ -104,6 +104,136 @@ fn _selfhost_default_config() -> SelfhostConfig ![io] {
     };
 }
 
+// -------------------------------------------------------------------
+// `--json` sub-envelope (SFEP-0014 §3.5, SFN-725)
+// -------------------------------------------------------------------
+//
+// Before SFN-725 `--json` printed only `determinism_diff_to_json`, and
+// every phase banner was `!cfg.json` guarded — so JSON mode reported
+// LESS structure than human mode, and an early exit (a stage2 build
+// failure, a dead smoke gate) emitted nothing at all.
+//
+// `sfn dev verify` supervises this command and must attribute a failure
+// to the sub-phase that produced it, so every post-arg-parse exit path
+// funnels through `_selfhost_finish`, which emits exactly one
+// `sailfin-selfhost/1` line on stdout in JSON mode.
+//
+// The supervisor splices that line into its own report verbatim and
+// scrapes three scalars from it (`failed_phase`, `fixed_point_checked`,
+// `fixed_point`). `compiler/src` has no JSON parser and cannot import
+// the `sfn/json` capsule (build cycle), so the fields a consumer must
+// read are deliberately flat scalars rather than nested structure.
+//
+// Arg-parse errors deliberately emit NO envelope, matching the
+// `sfn bench` precedent recorded in SFEP-0003 §3.3: a `--json` consumer
+// treats empty-stdout-with-nonzero-exit as a setup error.
+struct SelfhostPhase {
+    name: string;
+    status: string;
+    exit_code: int;
+}
+
+struct SelfhostLedger {
+    phases: SelfhostPhase[];
+    // First phase to fail, or "" when none did. `verify` reads this
+    // rather than scanning `phases[]`, which would need a real parser.
+    failed_phase: string;
+    fixed_point_checked: boolean;
+    fixed_point: boolean;
+    binary_match: boolean;
+    // The `determinism_diff_to_json` document, spliced in raw, or "" when
+    // the run never reached the diff.
+    determinism_json: string;
+}
+
+fn _selfhost_new_ledger() -> SelfhostLedger {
+    let empty: SelfhostPhase[] = [];
+    return SelfhostLedger {
+        phases: empty,
+        failed_phase: "",
+        fixed_point_checked: false,
+        fixed_point: false,
+        binary_match: false,
+        determinism_json: ""
+    };
+}
+
+fn _sh_json_escape(s: string) -> string {
+    let mut out: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= s.length { break; }
+        let ch = substring(s, i, i + 1);
+        if ch == "\"" { out = out + "\\\""; } else if ch == "\\" {
+            out = out + "\\\\";
+        } else if ch == "\n" { out = out + "\\n"; } else if ch == "\r" {
+            out = out + "\\r";
+        } else if ch == "\t" { out = out + "\\t"; } else { out = out + ch; }
+        i += 1;
+    }
+    return out;
+}
+
+fn _sh_json_quote(s: string) -> string {
+    return "\"" + _sh_json_escape(s) + "\"";
+}
+
+fn _sh_json_bool(value: boolean) -> string {
+    if value { return "true"; }
+    return "false";
+}
+
+fn _selfhost_envelope_json(led: SelfhostLedger, exit_code: int, strict: boolean) -> string {
+    let mut phases: string = "[";
+    let mut i: int = 0;
+    loop {
+        if i >= led.phases.length { break; }
+        if i > 0 { phases = phases + ","; }
+        let p = led.phases[i];
+        phases = phases + "{\"name\":" + _sh_json_quote(p.name) + ",\"status\":"
+            + _sh_json_quote(p.status)
+            + ",\"exit_code\":"
+            + int_to_string(p.exit_code)
+            + "}";
+        i += 1;
+    }
+    phases = phases + "]";
+
+    let mut failed: string = "null";
+    if led.failed_phase.length > 0 {
+        failed = _sh_json_quote(led.failed_phase);
+    }
+    let mut det: string = "null";
+    if led.determinism_json.length > 0 { det = led.determinism_json; }
+
+    return "{\"schema_version\":\"sailfin-selfhost/1\",\"command\":\"selfhost\",\"exit_code\":"
+        + int_to_string(exit_code)
+        + ",\"strict\":"
+        + _sh_json_bool(strict)
+        + ",\"failed_phase\":"
+        + failed
+        + ",\"fixed_point_checked\":"
+        + _sh_json_bool(led.fixed_point_checked)
+        + ",\"fixed_point\":"
+        + _sh_json_bool(led.fixed_point)
+        + ",\"binary_match\":"
+        + _sh_json_bool(led.binary_match)
+        + ",\"phases\":"
+        + phases
+        + ",\"determinism\":"
+        + det
+        + "}";
+}
+
+// Single exit funnel: emits the envelope in JSON mode and passes the
+// exit code through unchanged. Human mode is byte-identical to before.
+fn _selfhost_finish(cfg: SelfhostConfig, led: SelfhostLedger, exit_code: int) -> int ![io] {
+    if cfg.json {
+        print(_selfhost_envelope_json(led, exit_code, cfg.strict));
+    }
+    return exit_code;
+}
+
 fn _selfhost_usage() -> string {
     return "usage: sfn selfhost [--work-dir DIR] [--first-pass BIN]\n"
         + "                    [--seedcheck-out BIN] [--stage3-out BIN]\n"
@@ -470,6 +600,7 @@ fn _selfhost_smoke(seedcheck_bin: string) -> boolean ![io] {
 
 fn handle_selfhost_command(args: string[], binary_dir: string) -> int ![io] {
     let mut cfg = _selfhost_default_config();
+    let mut led = _selfhost_new_ledger();
 
     let mut argi: int = 1;
     loop {
@@ -572,7 +703,11 @@ fn handle_selfhost_command(args: string[], binary_dir: string) -> int ![io] {
     if !fs.exists(cfg.first_pass) {
         print.err("[selfhost] first-pass binary missing: " + cfg.first_pass
             + " (run: make compile)");
-        return 1;
+        led.phases.push(SelfhostPhase {
+            name: "preflight", status: "fail", exit_code: 1
+        });
+        led.failed_phase = "preflight";
+        return _selfhost_finish(cfg, led, 1);
     }
 
     // ---- stage2 (seedcheck): built by the first-pass binary ----
@@ -582,7 +717,11 @@ fn handle_selfhost_command(args: string[], binary_dir: string) -> int ![io] {
     if s2_rc != 0 {
         print.err("[selfhost] stage2 build failed (exit=" + int_to_string(s2_rc)
             + ")");
-        return s2_rc;
+        led.phases.push(SelfhostPhase {
+            name: "stage2", status: "fail", exit_code: s2_rc
+        });
+        led.failed_phase = "stage2";
+        return _selfhost_finish(cfg, led, s2_rc);
     }
     // `_selfhost_build_stage` only ensures `work_subdir` exists; the copy
     // destination's parent is a caller-supplied path (`--seedcheck-out`)
@@ -591,7 +730,11 @@ fn handle_selfhost_command(args: string[], binary_dir: string) -> int ![io] {
     _ensure_dir_recursive_cmd(_dirname_cmd(cfg.seedcheck_out));
     if !_selfhost_promote_binary(s2_linked_bin, cfg.seedcheck_out) {
         print.err("[selfhost] failed to copy stage2 binary → " + cfg.seedcheck_out);
-        return 1;
+        led.phases.push(SelfhostPhase {
+            name: "stage2", status: "fail", exit_code: 1
+        });
+        led.failed_phase = "stage2";
+        return _selfhost_finish(cfg, led, 1);
     }
     // A stage that contributes zero `.ll` files from its sailfin cache dir
     // silently drops that coverage from the fixed-point diff below without
@@ -606,6 +749,10 @@ fn handle_selfhost_command(args: string[], binary_dir: string) -> int ![io] {
             + "fixed-point diff is not effective");
     }
 
+    led.phases.push(SelfhostPhase {
+        name: "stage2", status: "pass", exit_code: 0
+    });
+
     // ---- smoke gate: seedcheck binary runs a real program ----
     if !cfg.json {
         print("[selfhost] validating seedcheck binary runs hello-world...");
@@ -614,8 +761,16 @@ fn handle_selfhost_command(args: string[], binary_dir: string) -> int ![io] {
         print.err("[selfhost] seedcheck binary cannot run hello-world.sfn"
             + " (expected 'Hello, Sailfin!')");
         print.err("[selfhost] the seedcheck compiler is NOT viable — fix the compiler");
-        return 1;
+        led.phases.push(SelfhostPhase {
+            name: "seedcheck-smoke", status: "fail", exit_code: 1
+        });
+        led.failed_phase = "seedcheck-smoke";
+        return _selfhost_finish(cfg, led, 1);
     }
+
+    led.phases.push(SelfhostPhase {
+        name: "seedcheck-smoke", status: "pass", exit_code: 0
+    });
 
     // ---- stage3: built by the stage2 (seedcheck) binary ----
     if !cfg.json {
@@ -626,12 +781,20 @@ fn handle_selfhost_command(args: string[], binary_dir: string) -> int ![io] {
     if s3_rc != 0 {
         print.err("[selfhost] stage3 build failed (exit=" + int_to_string(s3_rc)
             + ")");
-        return s3_rc;
+        led.phases.push(SelfhostPhase {
+            name: "stage3", status: "fail", exit_code: s3_rc
+        });
+        led.failed_phase = "stage3";
+        return _selfhost_finish(cfg, led, s3_rc);
     }
     _ensure_dir_recursive_cmd(_dirname_cmd(cfg.stage3_out));
     if !_selfhost_promote_binary(s3_linked_bin, cfg.stage3_out) {
         print.err("[selfhost] failed to copy stage3 binary → " + cfg.stage3_out);
-        return 1;
+        led.phases.push(SelfhostPhase {
+            name: "stage3", status: "fail", exit_code: 1
+        });
+        led.failed_phase = "stage3";
+        return _selfhost_finish(cfg, led, 1);
     }
     if _selfhost_collect_ll_files(s3_runtime).length == 0 {
         print.err("[selfhost] WARNING: stage3 contributed zero .ll modules from its "
@@ -660,7 +823,28 @@ fn handle_selfhost_command(args: string[], binary_dir: string) -> int ![io] {
     // reads as "not yet a fixed point".
     let ir_matched = diff.module_diffs.length == 0;
 
-    if cfg.json { print(determinism_diff_to_json(diff)); } else {
+    led.phases.push(SelfhostPhase {
+        name: "stage3", status: "pass", exit_code: 0
+    });
+    led.fixed_point_checked = true;
+    led.fixed_point = ir_matched;
+    led.binary_match = diff.binary_match;
+    led.determinism_json = determinism_diff_to_json(diff);
+    if ir_matched {
+        led.phases.push(SelfhostPhase {
+            name: "fixed-point", status: "pass", exit_code: 0
+        });
+    } else {
+        // Recorded as a phase failure so the supervisor can name it; the
+        // process exit code stays 0 unless `--strict`, matching the
+        // warn-by-default policy below.
+        led.phases.push(SelfhostPhase {
+            name: "fixed-point", status: "fail", exit_code: 0
+        });
+        led.failed_phase = "fixed-point";
+    }
+
+    if !cfg.json {
         if diff.matched {
             print("[selfhost] stage2 == stage3: compiler is a fixed point");
         } else if ir_matched {
@@ -686,21 +870,29 @@ fn handle_selfhost_command(args: string[], binary_dir: string) -> int ![io] {
     // is never fatal, even under --strict — see the WARNING above.
     if !ir_matched && cfg.strict {
         print.err("[selfhost] --strict: fixed-point mismatch is fatal");
-        return 1;
+        return _selfhost_finish(cfg, led, 1);
     }
 
     if !cfg.no_promote {
         _ensure_dir_recursive_cmd(_dirname_cmd(cfg.promote_to));
         if !_selfhost_promote_binary(cfg.seedcheck_out, cfg.promote_to) {
             print.err("[selfhost] failed to promote seedcheck → " + cfg.promote_to);
-            return 1;
+            led.phases.push(SelfhostPhase {
+                name: "promote", status: "fail", exit_code: 1
+            });
+            // First failure wins. A non-fatal `fixed-point` mismatch
+            // records itself and deliberately CONTINUES into promotion, so
+            // this is the one site that can overwrite an already-recorded
+            // failure — and the mismatch is the more diagnostic of the two.
+            if led.failed_phase.length == 0 { led.failed_phase = "promote"; }
+            return _selfhost_finish(cfg, led, 1);
         }
         if !cfg.json {
             print("[selfhost] promoted seedcheck → " + cfg.promote_to);
         }
     }
 
-    return 0;
+    return _selfhost_finish(cfg, led, 0);
 }
 
 export {
