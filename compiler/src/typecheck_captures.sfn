@@ -29,6 +29,8 @@
 //     declared type, mutability, and span — the metadata stage A2
 //     needs to size the env struct and pick by-value-vs-pointer
 //     copy semantics.
+import { ends_with, strings_equal, substring } from "sfn/strings";
+
 import {
     Block,
     Capture,
@@ -42,7 +44,6 @@ import {
     Statement,
     TypeAnnotation
 } from "./ast";
-import { ends_with, strings_equal } from "./string_utils";
 
 // One scope-visible binding the walk has accumulated so far.
 // Mirrors the data the unit tests need to verify (`type_text`,

@@ -2,16 +2,17 @@
 //
 // Bare fn-type / malformed-array / unknown-type annotation shape checks.
 // Extracted from typecheck_types.sfn (SFN-625).
-import { SourceSpan, TypeAnnotation, TypeParameter } from "../ast";
-import { FixSuggestion } from "../diagnostic";
 import {
-    char_code_at_text,
+    char_code_at,
     ends_with,
-    index_of,
+    find,
     starts_with,
     strings_equal,
     substring
-} from "../string_utils";
+} from "sfn/strings";
+
+import { SourceSpan, TypeAnnotation, TypeParameter } from "../ast";
+import { FixSuggestion } from "../diagnostic";
 import { Token } from "../token";
 import { Diagnostic } from "../typecheck_types";
 import { slice_text, token_from_name, trim_text } from "./text_utils";
@@ -196,7 +197,7 @@ fn _is_plain_identifier(text: string) -> boolean {
     let mut i: int = 0;
     loop {
         if i >= text.length { break; }
-        let code = char_code_at_text(text, i);
+        let code = char_code_at(text, i);
         let mut ok: boolean = false;
         if code == 95 { ok = true; }
         if code >= 48 {
@@ -261,7 +262,7 @@ fn _first_unknown_type_name(text: string, known: string[], type_params: string[]
     if starts_with(trimmed, "Linear<") { _wrapped = true; }
     if _wrapped {
         if ends_with(trimmed, ">") {
-            let open = index_of(trimmed, "<");
+            let open = find(trimmed, "<", 0);
             return _first_unknown_type_name(slice_text(trimmed, open + 1, trimmed.length - 1), known, type_params);
         }
         return "";
@@ -288,14 +289,14 @@ fn _first_unknown_type_name(text: string, known: string[], type_params: string[]
     // Function types, intersections, module-qualified names, and any spaced
     // spelling are not modelled — E0826 owns the bare `(...) -> R` reject, and
     // a qualified name resolves through an import this checker cannot see.
-    if index_of(trimmed, "(") >= 0 { return ""; }
-    if index_of(trimmed, "&") >= 0 { return ""; }
-    if index_of(trimmed, ".") >= 0 { return ""; }
-    if index_of(trimmed, " ") >= 0 { return ""; }
+    if find(trimmed, "(", 0) >= 0 { return ""; }
+    if find(trimmed, "&", 0) >= 0 { return ""; }
+    if find(trimmed, ".", 0) >= 0 { return ""; }
+    if find(trimmed, " ", 0) >= 0 { return ""; }
 
     // Generic instantiation `Base<Args>`: judge the base, then each argument.
     if ends_with(trimmed, ">") {
-        let open = index_of(trimmed, "<");
+        let open = find(trimmed, "<", 0);
         if open <= 0 { return ""; }
         let base = trim_text(slice_text(trimmed, 0, open));
         if !_is_plain_identifier(base) { return ""; }

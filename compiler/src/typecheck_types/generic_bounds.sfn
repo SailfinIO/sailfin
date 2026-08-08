@@ -2,13 +2,14 @@
 //
 // SFEP-0038 generic bound declaration/satisfaction checks.
 // Extracted from typecheck_types.sfn (SFN-625).
+import { contains_string, strings_equal, substring } from "sfn/strings";
+
 import {
     SourceSpan,
     Statement,
     TypeAnnotation,
     TypeParameter
 } from "../ast";
-import { contains_string, strings_equal, substring } from "../string_utils";
 import { Diagnostic } from "../typecheck_types";
 import {
     format_interface_signature,

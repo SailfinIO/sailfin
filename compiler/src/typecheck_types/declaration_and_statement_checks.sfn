@@ -2,6 +2,8 @@
 //
 // Struct/enum/interface/function-signature/extern declaration checks and misc statement-level diagnostics.
 // Extracted from typecheck_types.sfn (SFN-625).
+import { contains_string, starts_with, strings_equal } from "sfn/strings";
+
 import {
     EnumVariant,
     FieldDeclaration,
@@ -11,7 +13,6 @@ import {
     Statement,
     TypeAnnotation
 } from "../ast";
-import { contains_string, starts_with, strings_equal } from "../string_utils";
 import { Token } from "../token";
 import { Diagnostic } from "../typecheck_types";
 import {

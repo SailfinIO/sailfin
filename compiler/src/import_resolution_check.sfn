@@ -15,8 +15,9 @@
 // are checked. Scoped/capsule imports (`sfn/...`), runtime imports
 // (`runtime/...`), and bare names resolve through other mechanisms and are
 // skipped entirely, so they can never false-positive here.
+import { strings_equal, substring } from "sfn/strings";
+
 import { Program } from "./ast";
-import { strings_equal, substring } from "./string_utils";
 import { Diagnostic } from "./typecheck_types";
 import {
     make_cannot_find_module_diagnostic,
