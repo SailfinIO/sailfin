@@ -91,6 +91,7 @@ The next number is `max + 1`. Add a row in the same PR that introduces an SFEP.
 | [0066](./0066-codegen-provider-ownership.md) | Codegen Provider Ownership — Which Toolchain Roles Sailfin Owns | Draft | tooling |
 | [0067](./0067-platform-access-ownership.md) | Platform Access Ownership — the `-nostdlib` Program | Draft | runtime |
 | [0068](./0068-native-cross-target-build.md) | Native Cross-Target Builds (`sfn build --target=<triple>`) | Accepted | tooling |
+| [0069](./0069-secret-buffer-zeroization.md) | Non-Elidable Zeroization for Uniquely Owned Secret Buffers | Accepted | runtime |
 
 ## Drafts under review (numbers assigned at merge)
 

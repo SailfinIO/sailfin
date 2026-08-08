@@ -86,3 +86,28 @@ Still to come: `&T`/`&mut T` borrow exclusivity and lifetime enforcement on
 operating over the aggregate end-state) is gated on M1.A.2. `Slice` is
 deliberately concrete over bytes; a generic `Slice<T>` is deferred until generic
 struct bodies lower.
+
+## Planned: non-elidable secret-buffer zeroization (SFEP-0069)
+
+Accepted
+[SFEP-0069](https://github.com/SailfinIO/sailfin/blob/main/docs/proposals/0069-secret-buffer-zeroization.md)
+proposes a distinct move-only `SecretBuf` for cryptographic key material. Its
+contract is stronger than `OwnedBuf`: libc-backed storage is wiped across its
+full capacity before free, and the compiler retains that wipe as volatile LLVM
+byte stores through the optimized pipeline.
+
+The planned guarantee covers normal scope exit, early return, `?` propagation,
+and `try`/`throw` through an exception-aware cleanup registry. It prevents safe
+aliases, use after zeroize, implicit formatting/logging, secret-to-`string`
+conversion, and cross-thread movement until cleanup-record transfer is defined.
+The representation is sealed from safe source, and fixed-layout structs/enums
+that contain a `SecretBuf` become transitively move-only; variable-length secret
+containers remain prohibited in v1.
+Implementation slices stay module-private until the public type and complete
+conformance gate can be activated atomically.
+It does not claim to erase registers, optimizer spills, unsafe/FFI copies,
+ordinary arrays, swap, core dumps, or live-process memory.
+
+This surface is **not implemented**. Accepted status authorizes the staged
+implementation; it does not mean the safety contract has shipped. Existing
+crypto APIs still use ordinary `int[]` values and make no secure-erasure claim.
