@@ -1,8 +1,10 @@
 // #1236 / SFN-91: unit coverage for the explicit jobs parser and the pure
 // RAM+CPU budget behind the native default. SFN-547 introduced the
 // reconciled per-job reserve (originally 3 GiB) and the nested-fan-out pin
-// in `_pool_child_env`; SFN-626 re-sized the reserve to the current 2.5 GiB
-// after re-measuring the worst emit worker.
+// in `_pool_child_env`; SFN-626 re-sized it to 2.5 GiB after re-measuring the
+// worst emit worker. The reserve is now 4 GiB — measured from the pooled test
+// child itself rather than from the emit worker it can spawn (GitHub issue
+// #2817); see `_test_jobs_budget`'s header for the RSS data.
 import { _parse_jobs_value, _test_jobs_budget } from "../../src/cli/commands/test/arg_and_jobs";
 import { _pool_child_env } from "../../src/cli/commands/test/pool";
 
@@ -43,24 +45,28 @@ test "jobs: leading whitespace rejected" {
 }
 
 test "jobs: auto budget is bounded by CPU and memory (SFN-91)" {
-    // 16 GiB * 66% = 10.56 GiB / 2.5 GiB = 4, below the 8-core ceiling.
-    assert _test_jobs_budget(17179869184, 8, false) == 4;
+    // 16 GiB * 66% = 10.56 GiB / 4 GiB = 2, below the 8-core ceiling. This is
+    // the CI runner class that was taking 4 jobs and losing the VM.
+    assert _test_jobs_budget(17179869184, 8, false) == 2;
     // 1.5 GiB is under a single job's reserve — floors to serial.
     assert _test_jobs_budget(1610612736, 8, false) == 1;
-    // CPU-bound: 64 GiB affords 16 jobs, 2 cores allows 2.
+    // CPU-bound: 64 GiB affords 10 jobs, 2 cores allows 2.
     assert _test_jobs_budget(68719476736, 2, false) == 2;
 }
 
-// SFN-547: the reserve matches the emit fan-out (`_cr_ram_budget_jobs`) —
-// SFN-626 moved both to 2.5 GiB/job out of a 66% slice. The 14 GiB host in
-// the report resolved to 16 jobs under the old 384 MiB reserve and killed
-// itself; it still resolves to 3 here.
-test "jobs: auto budget reserves 2.5 GiB per job out of 66% of RAM (SFN-547)" {
-    assert _test_jobs_budget(15032385536, 16, false) == 3;
-    // 8 GiB * 66% = 5.28 GiB — two jobs' reserve fits, a third does not.
-    assert _test_jobs_budget(8589934592, 8, false) == 2;
-    // 32 GiB * 66% = 21.12 GiB / 2.5 GiB = 8.
-    assert _test_jobs_budget(34359738368, 16, false) == 8;
+// The reserve deliberately no longer matches the emit fan-out
+// (`_cr_ram_budget_jobs`, still 2.5 GiB): a pooled test child compiles the
+// compiler dep closure in-process and peaks at 3.2-4.1 GiB, where the emit
+// worker SFN-626 measured peaks at 1.55 GiB. Sizing the pool off the emit
+// worker over-subscribed every 8-16 GiB host. The 14 GiB host from the
+// SFN-547 report resolved to 16 jobs under the original 384 MiB reserve and
+// killed itself; it resolves to 2 here.
+test "jobs: auto budget reserves 4 GiB per job out of 66% of RAM" {
+    assert _test_jobs_budget(15032385536, 16, false) == 2;
+    // 8 GiB * 66% = 5.28 GiB — one job's reserve fits, a second does not.
+    assert _test_jobs_budget(8589934592, 8, false) == 1;
+    // 32 GiB * 66% = 21.12 GiB / 4 GiB = 5.
+    assert _test_jobs_budget(34359738368, 16, false) == 5;
 }
 
 test "jobs: auto budget floors small and unknown hosts to serial (SFN-91)" {
@@ -69,7 +75,7 @@ test "jobs: auto budget floors small and unknown hosts to serial (SFN-91)" {
 }
 
 test "jobs: auto budget applies global and Darwin caps (SFN-91)" {
-    // 1 TiB * 66% = 675.8 GiB / 2.5 GiB = 270, clamped to the global cap of 16.
+    // 1 TiB * 66% = 675.8 GiB / 4 GiB = 168, clamped to the global cap of 16.
     assert _test_jobs_budget(1099511627776, 64, false) == 16;
     assert _test_jobs_budget(1099511627776, 64, true) == 2;
 }

@@ -38,16 +38,32 @@ fn _parse_jobs_value(text: string) -> int {
 // `_cr_ram_budget_jobs`, which would rather over-fan than starve a build on
 // a host it cannot measure.
 //
-// SFN-547: the reserve and the 66% usable slice are now the same figures the
-// emit fan-out reserves (`_cr_ram_budget_jobs`,
-// `compiler/src/capsule_emit_parallel.sfn`), because a pooled test child can
-// spawn exactly that emit — the previous 384 MiB reserve was sized for the
-// light unit-test majority and under-counted the build-and-run class by ~8x,
-// handing a 14 GiB host 16 jobs and OOMing it outright. `RLIMIT_AS` bounds
-// each process, not the fleet: N children multiply the 8 GiB cap, so this
+// SFN-547: the reserve was raised from 384 MiB — sized for the light
+// unit-test majority, which under-counted the build-and-run class by ~8x and
+// handed a 14 GiB host 16 jobs, OOMing it outright. `RLIMIT_AS` bounds each
+// process, not the fleet: N children multiply the 8 GiB cap, so this
 // arithmetic is the only thing standing between the pool and the host's RAM.
 // `_pool_child_env` pins each child's own emit fan-out to serial, which is
 // what makes `jobs * per_job_reserve` an honest bound rather than a floor.
+//
+// The reserve is NOT the emit fan-out's figure, and must not be re-unified
+// with it. SFN-547 set both to 2.5 GiB on the reasoning that a pooled test
+// child can spawn exactly the emit `_cr_ram_budget_jobs`
+// (`compiler/src/capsule_emit_parallel.sfn`) budgets for, so the two should
+// match. That is the modelling error: a test child does not merely *spawn* an
+// emit, it compiles the whole compiler dep closure in-process first. Measured
+// cold peaks for the pooled class are 3.2-4.1 GiB (`atomic_fence` 3,228 MB,
+// `backend_failure_banner` 3,604 MB, `dev_det_sweep` 4,142 MB in-pool)
+// against the 1.55 GiB emit worker SFN-626 sized 2.5 GiB from — 49 of 283
+// unit tests import the backend lowering closure, so cold, most of them land
+// in that class. At 2.5 GiB a 16 GB runner resolved 4 jobs and demanded
+// `4.9 + 4 x 3.9 = 20.5 GiB` of a 15.7 GiB host; it died with no OOM line
+// because the runner agent stops heartbeating and the VM is reclaimed
+// (GitHub issue #2817). At 4 GiB the same host resolves 2 jobs — measured
+// peak 11.7 GiB, surviving with headroom.
+//
+// `_cr_ram_budget_jobs` keeps 2.5 GiB and must be left alone: emit workers
+// really are 1.55 GiB. The two budgets model different workloads.
 //
 // `scripts/detect_test_jobs.sh` reimplements this policy in bash for the
 // Makefile's `TEST_JOBS ?=` default (which passes an explicit `--jobs N`, so
@@ -56,11 +72,10 @@ fn _test_jobs_budget(memsize_bytes: int, nproc: int, is_darwin: boolean) -> int 
     if memsize_bytes <= 0 { return 1; }
     let mut cores = nproc;
     if cores < 1 { cores = 1; }
-    // 2.5 GiB — kept identical to the emit fan-out's `per_job_reserve`
-    // (`_cr_ram_budget_jobs`), which SFN-626 sized from the heaviest emit
-    // worker in the tree, the former `llvm/runtime_helpers.sfn` at 1.55 GiB. See that
-    // function for the margin rationale and its 2.31 GiB floor.
-    let per_job_bytes: int = 2684354560;
+    // 4 GiB — the measured cold peak of a pooled test child (3.2-4.1 GiB),
+    // not the emit worker's 1.55 GiB. See the header for the measurements and
+    // why this deliberately no longer tracks `_cr_ram_budget_jobs`.
+    let per_job_bytes: int = 4294967296;
     // 66% slice of physical RAM: headroom for the parent runner, the
     // `clang`/`llvm-link` grandchildren, and the OS.
     let usable: int = memsize_bytes * 66 / 100;

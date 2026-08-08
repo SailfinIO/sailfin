@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # detect_test_jobs.sh — Pick a sensible TEST_JOBS default for the current host.
 #
-# Heuristic: min(cores, (mem_mb * 66%) / 2560), floor 1, cap 16; macOS
+# Heuristic: min(cores, (mem_mb * 66%) / 4096), floor 1, cap 16; macOS
 # caps at 2.
 #
 # SFN-547: the budget is sized for the HEAVIEST test child, not the common
@@ -18,13 +18,21 @@
 # The compiler's 8 GB RLIMIT_AS self-cap does NOT bound this: it caps each
 # process, so N children multiply it. See .claude/rules/compiler-safety.md.
 #
-# 2560 MB/job and the 66% usable slice (headroom for the parent runner, the
-# clang/llvm-link grandchildren, and the OS) are exactly the figures the
-# emit fan-out reserves — `_cr_ram_budget_jobs` in
-# compiler/src/capsule_emit_parallel.sfn — because a test child can spawn
-# exactly that emit. `_test_jobs_budget` in
-# compiler/src/cli/commands/test/arg_and_jobs.sfn is the native twin of this
-# script and carries the identical constants; keep the two in lockstep.
+# 4096 MB/job is the measured cold peak of a pooled test child (3.2-4.1 GB),
+# NOT the emit fan-out's figure. The reserve was 2560 MB, matched to
+# `_cr_ram_budget_jobs` in compiler/src/capsule_emit_parallel.sfn on the
+# reasoning that a test child can spawn exactly that emit. It can — but it
+# also compiles the whole compiler dep closure in-process first, which the
+# emit worker never does. Measured: `backend_failure_banner` 3,604 MB,
+# `dev_det_sweep` 4,142 MB in-pool, against the 1.55 GB emit worker SFN-626
+# sized 2560 from. At 2560 a 16 GB CI runner took 4 jobs and demanded
+# ~20.5 GB of a 15.7 GB host, losing the VM with no OOM line (GitHub issue
+# #2817); at 4096 it takes 2, measured peak 11.7 GB.
+#
+# Leave `_cr_ram_budget_jobs` at 2.5 GB — emit workers really are 1.55 GB.
+# The twin to keep in lockstep is `_test_jobs_budget` in
+# compiler/src/cli/commands/test/arg_and_jobs.sfn, which models the same
+# workload as this script and carries the identical constants.
 #
 # macOS additionally caps at 2 jobs, mirroring detect_build_jobs.sh. On the
 # memory-constrained macOS runner (~7 GB) the memory budget alone let enough
@@ -72,10 +80,10 @@ esac
 [ "$cores" -gt 0 ] 2>/dev/null || cores=1
 [ "$mem_mb" -gt 0 ] 2>/dev/null || mem_mb=1536
 
-# Apply the per-job memory budget: 2560 MB per job out of a 66% slice of
+# Apply the per-job memory budget: 4096 MB per job out of a 66% slice of
 # physical RAM. See the header comment for the RSS data these are sized
 # against and for the native twin they must stay in lockstep with.
-by_mem=$(((mem_mb * 66 / 100) / 2560))
+by_mem=$(((mem_mb * 66 / 100) / 4096))
 [ "$by_mem" -lt 1 ] && by_mem=1
 
 jobs=$cores
