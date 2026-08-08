@@ -25,7 +25,7 @@ import {
 import { contains_string, substring } from "../string_utils";
 import { toml_get_dependencies, toml_get_name } from "../toml_parser";
 import { workspace_member_for_spec } from "./capability";
-import { locate_capsule_src } from "./locate";
+import { locate_capsule_src, locate_runtime_dep_capsule_src } from "./locate";
 import {
     _cr_dirname,
     _cr_ends_with,
@@ -309,12 +309,22 @@ fn _cr_enumerate_host_capsule_sources(project_root: string) -> CapsuleSource[] !
 // diagnostic.
 fn enumerate_capsule_sources(project_root: string, runtime_root: string) -> CapsuleSource[] ![io] {
     let mut sources: CapsuleSource[] = [];
-    if project_root.length == 0 { return sources; }
+    // SFN-341: a manifest-less build (`sfn build prog.sfn`) must still reach
+    // the runtime `[dependencies]` union below. The runtime's `sfn-sources`
+    // land in EVERY binary, so their calls into a capsule provider are emitted
+    // even for a program that has no manifest of its own — and returning early
+    // here left those definitions out of the link set entirely. The project's
+    // own dep parsing stays gated on an actual manifest; only the runtime
+    // union survives a manifest-less build.
     let manifest = _cr_path_join(project_root, "capsule.toml");
-    if !fs.exists(manifest) { return sources; }
-    let text = fs.readFile(manifest);
-    let deps = toml_get_dependencies(text);
-    let entries = _cr_parse_deps(deps);
+    let has_project_manifest = project_root.length > 0 && fs.exists(manifest);
+    if !has_project_manifest && runtime_root.length == 0 { return sources; }
+    let mut entries: _CrDepEntry[] = [];
+    if has_project_manifest {
+        let text = fs.readFile(manifest);
+        let deps = toml_get_dependencies(text);
+        entries = _cr_parse_deps(deps);
+    }
 
     // Lockfile precedence (#1048): the designed resolution order is
     // workspace → lockfile → cache → registry. When a capsule.lock is
@@ -328,7 +338,7 @@ fn enumerate_capsule_sources(project_root: string, runtime_root: string) -> Caps
     let lock_path = _cr_path_join(project_root, "capsule.lock");
     let mut has_lock: boolean = false;
     let mut lock_entries: _CrDepEntry[] = [];
-    if fs.exists(lock_path) {
+    if has_project_manifest && fs.exists(lock_path) {
         let lock_text = fs.readFile(lock_path);
         lock_entries = _cr_parse_deps(lock_get_versions(lock_text));
         has_lock = true;
@@ -339,7 +349,10 @@ fn enumerate_capsule_sources(project_root: string, runtime_root: string) -> Caps
     // the project sits outside any workspace, which is the
     // common case for end-user `sfn build` invocations and
     // matches the pre-Stage-D behaviour exactly.
-    let workspace_root = discover_workspace_root(project_root);
+    let mut workspace_root: string = "";
+    if project_root.length > 0 {
+        workspace_root = discover_workspace_root(project_root);
+    }
     let empty_specs: string[] = [];
     let mut runtime_cap_names: string[] = [];
     // Workspace member map (e.g. "sfn/strings" -> capsules/sfn/strings/src).
@@ -414,11 +427,18 @@ fn enumerate_capsule_sources(project_root: string, runtime_root: string) -> Caps
     //
     // Gated on `runtime_root` so `sfn check` opts out: no user-source symbol
     // resolution depends on the runtime's private deps, only the link does.
+    // SFN-341: the runtime capsules' manifest dirs, retained so a spec seeded
+    // by the union below can be located next to the runtime bundle. On a
+    // manifest-less build outside a workspace neither the member map nor the
+    // project-relative locator can find it, and `<prefix>/capsules/...` beside
+    // the runtime is exactly where `sfn package` installs a runtime dep.
+    let mut rt_manifest_dirs: string[] = [];
     if runtime_root.length > 0 {
         let rt_caps = runtime_capsule_from_root(runtime_root);
         let mut rci2: int = 0;
         loop {
             if rci2 >= rt_caps.length { break; }
+            rt_manifest_dirs.push(rt_caps[rci2].manifest_dir);
             let rt_deps = rt_caps[rci2].capsule_deps;
             let mut rdi: int = 0;
             loop {
@@ -500,6 +520,22 @@ fn enumerate_capsule_sources(project_root: string, runtime_root: string) -> Caps
             let located = locate_capsule_src(project_root, spec, effective_version);
             src_dir = located.src_dir;
             origin = located.origin;
+            // SFN-341: last resort — resolve beside the runtime bundle. Only
+            // reached once the member map and the project-relative locator
+            // have both missed, so a project pinning its own copy still wins.
+            if src_dir.length == 0 {
+                let mut rmi: int = 0;
+                loop {
+                    if rmi >= rt_manifest_dirs.length { break; }
+                    let rt_located = locate_runtime_dep_capsule_src(rt_manifest_dirs[rmi], spec);
+                    rmi += 1;
+                    if rt_located.src_dir.length > 0 {
+                        src_dir = rt_located.src_dir;
+                        origin = rt_located.origin;
+                        break;
+                    }
+                }
+            }
         }
         if src_dir.length > 0 {
             // Read the dep's manifest once, before collecting any source: the

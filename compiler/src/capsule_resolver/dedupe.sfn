@@ -285,6 +285,23 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer, bun
                 }
             }
         }
+    } else if consumer.runtime_root.length > 0 {
+        // SFN-341: a manifest-less build (`sfn build prog.sfn`) never enters
+        // the branch above, but the runtime's own `[dependencies]` still have
+        // to reach the link set — the runtime's `sfn-sources` are in every
+        // binary, so their calls into a capsule provider are emitted even for
+        // a program that declares nothing. `enumerate_capsule_sources`
+        // resolves only the runtime union when the project root is empty.
+        // Kept as a separate branch rather than widening the gate above: the
+        // host-capsule and lockfile logic there reads `<project_root>/…`
+        // paths that would resolve cwd-relative under an empty root.
+        let rt_dep_sources = enumerate_capsule_sources("", consumer.runtime_root);
+        let mut rdsi: int = 0;
+        loop {
+            if rdsi >= rt_dep_sources.length { break; }
+            sources.push(rt_dep_sources[rdsi]);
+            rdsi += 1;
+        }
     }
 
     if workspace_root.length > 0 {
