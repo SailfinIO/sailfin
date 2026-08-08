@@ -35,7 +35,9 @@ import { int_to_string } from "sfn/strings";
 import { _sha256_of_file_cmd, _shell_read_cmd, _shell_single_quote_arg } from "../../build/fs";
 import { host_exe_name } from "../../build/target";
 import { is_safe_scope_name, parse_scope_name } from "../../capsule_artifact";
+import { locate_runtime_dep_capsule_src } from "../../capsule_resolver/locate";
 import { DistManifest, dist_manifest_to_json, empty_dist_manifest } from "../../dist_manifest";
+import { runtime_capsule_from_root } from "../../runtime_capsule_resolver";
 import { substring } from "../../string_utils";
 import { toml_get_name, toml_get_version } from "../../toml_parser";
 import { CliContext } from "../context";
@@ -397,6 +399,59 @@ fn _package_installer(target: string, out_dir: string, compiler_bin: string) -> 
         print("sfn package: failed to copy runtime/sfn sources");
         process.run(["rm", "-rf", staging]);
         return 1;
+    }
+
+    // SFN-773: bundle the runtime capsule's declared `[dependencies]`
+    // closure. `_cr_locate_capsule_src` resolves a spec from the user's own
+    // project root or from a version-keyed `~/.sfn/cache`, and a runtime dep
+    // carries `"*"` — so neither leg finds it off-repo. Without these sources
+    // an installed toolchain cannot locate the dependency and link-fails
+    // EVERY user program, not merely ones that touch it.
+    //
+    // Derived from the manifest rather than a hardcoded name list, so the
+    // bundle stays correct as the closure changes. Layout mirrors the repo
+    // (`<prefix>/capsules/<scope>/<name>/src`), which is the single path
+    // shape `locate_runtime_dep_capsule_src` resolves for both in-repo and
+    // installed trees. REQUIRED, same class as the `runtime/sfn` copy above.
+    let pkg_runtime_caps = runtime_capsule_from_root("runtime");
+    let mut prci: int = 0;
+    loop {
+        if prci >= pkg_runtime_caps.length { break; }
+        let prcap = pkg_runtime_caps[prci];
+        prci += 1;
+        let mut pdi: int = 0;
+        loop {
+            if pdi >= prcap.capsule_deps.length { break; }
+            let dep_spec = prcap.capsule_deps[pdi];
+            pdi += 1;
+            let dep_parts = parse_scope_name(dep_spec);
+            if !is_safe_scope_name(dep_parts.scope, dep_parts.name) {
+                print("sfn package: runtime dependency `" + dep_spec
+                    + "` is not a safe scope/name");
+                process.run(["rm", "-rf", staging]);
+                return 1;
+            }
+            let dep_loc = locate_runtime_dep_capsule_src(prcap.manifest_dir, dep_spec);
+            if dep_loc.src_dir.length == 0 {
+                print("sfn package: cannot locate sources for runtime dependency `"
+                    + dep_spec
+                    + "` (was the build run from the repo root?)");
+                process.run(["rm", "-rf", staging]);
+                return 1;
+            }
+            let dep_dest_dir = staging + "/capsules/" + dep_parts.scope + "/"
+                + dep_parts.name;
+            process.run(["mkdir", "-p", dep_dest_dir]);
+            let cp_dep = process.run(["cp", "-R", dep_loc.src_dir, dep_dest_dir
+                + "/src"]);
+            if cp_dep != 0 {
+                print("sfn package: failed to bundle runtime dependency `"
+                    + dep_spec
+                    + "` sources");
+                process.run(["rm", "-rf", staging]);
+                return 1;
+            }
+        }
     }
 
     // Staged import-context — only present after a self-host
