@@ -31,8 +31,7 @@ import { active_build_target } from "./target_state";
 
 // The resolved build HOST OS — the OS the compile is running on, as
 // opposed to the artifact target (`build_target_os`). Host-parallelism
-// helpers (`_mktemp_sibling_cmd`, `_cr_resolve_jobs`) and the host link
-// probes (`_openssl_link_search_flags`) gate on this so a
+// helpers (`_mktemp_sibling_cmd`, `_cr_resolve_jobs`) gate on this so a
 // Linux-host→Windows-target cross-build keeps host behaviour.
 //
 // The `SAILFIN_HOST_OS` override wins (a test seam mirroring
@@ -321,16 +320,12 @@ fn target_uses_gnu_link_gc(triple: string) -> boolean {
     return triple_abi(triple) != "msvc";
 }
 
-// Drop POSIX-only link libraries for the msvc ABI (UCRT):
-// `-lm`/`-lpthread` are POSIX, and `-lssl`/`-lcrypto` have no Windows host
-// package to link against (`platform/openssl_absent_windows.sfn` swaps
-// out `tls.sfn`'s OpenSSL externs entirely for a Windows target — see
-// `target_condition_runtime_sfn_sources` below — rather than relying on
-// a linked-but-stubbed library), so none are passed to the MSVC link
-// (`ws2_32`/`kernel32` are auto-linked by clang). The windows-gnu ABI
-// links against mingw-w64's POSIX-compatible CRT, so it KEEPS `-lm`/
-// `-lpthread` (SFEP-0068 §3.1) — only msvc filters. Every other target
-// returns the list unchanged (identity → byte-identical link).
+// Drop POSIX-only link libraries for the msvc ABI (UCRT): `-lm`/
+// `-lpthread` have no MSVC equivalent (`ws2_32`/`kernel32` are
+// auto-linked by clang). The windows-gnu ABI links against mingw-w64's
+// POSIX-compatible CRT, so it KEEPS `-lm`/`-lpthread` (SFEP-0068 §3.1) —
+// only msvc filters. Every other target returns the list unchanged
+// (identity → byte-identical link).
 fn target_filter_link_libs(libs: string[], triple: string) -> string[] {
     if triple_abi(triple) != "msvc" { return libs; }
     let mut kept: string[] = [];
@@ -338,7 +333,7 @@ fn target_filter_link_libs(libs: string[], triple: string) -> string[] {
     loop {
         if i >= libs.length { break; }
         let lib = libs[i];
-        let posix = lib == "-lm" || lib == "-lpthread" || lib == "-lssl" || lib == "-lcrypto";
+        let posix = lib == "-lm" || lib == "-lpthread";
         if !posix { kept.push(lib); }
         i += 1;
     }

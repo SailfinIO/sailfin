@@ -1,334 +1,1423 @@
 // runtime/sfn/platform/tls.sfn
 //
-// TLS extern surface + outbound (client) wrappers for the native
-// runtime (SFEP-0036, gap B1 of epic #1540). This is the first slice:
-// link OpenSSL (`-lssl -lcrypto`, declared in `runtime/capsule.toml`)
-// and expose a minimal, callback-free `SSL_CTX_*`/`SSL_*` surface over
-// an already-connected socket `fd`, wrapped by a small set of Sailfin
-// helpers the HTTP client (`../adapters/http.sfn`) uses for its
-// `https://` path. Inbound TLS termination in `serve` is a follow-up
-// (#2). Verification is on: the peer chain is verified (SSL_VERIFY_PEER,
-// result polled) AND the hostname is checked (SSL_set1_host, RFC 6125), so
-// an `https://` GET both round-trips and rejects a wrong-host cert. The
-// client also loads the canonical system CA bundle
-// (`/etc/ssl/certs/ca-certificates.crt`) as a discovery fallback so a
-// trust-anchored server stays reachable when OpenSSL's default paths are
-// empty (#1784). macOS/Windows CA-store paths are not yet implemented.
+// The TLS I/O driver: the socket-facing half of the native TLS 1.3 stack
+// (SFEP-0048 Phase D, SFN-341; design
+// `docs/proposals/design-notes/sfn-341-native-tls-runtime-swap.md` §3.2).
+// This module replaced the OpenSSL `SSL_*` wrapper surface wholesale — no
+// `-lssl`/`-lcrypto` reaches the link any more, and every byte of TLS
+// traffic now passes through Sailfin-owned `recv`/`send`, which is the
+// precondition SFEP-0016's seal was waiting on.
 //
-// Callback-free by construction (SFEP-0036 §3.2): the verify callback
-// arg to `SSL_CTX_set_verify` is always `null` and the result is polled
-// imperatively with `SSL_get_verify_result` after the handshake, so no
-// Sailfin fn is ever address-taken for OpenSSL (the #1088 callback gap
-// is avoided entirely). OpenSSL drives blocking `read(2)`/`write(2)` on
-// our already-connected, already-timeout-armed (`SO_RCVTIMEO` /
-// `SO_SNDTIMEO`, #1581) fd via the default socket BIO (`SSL_set_fd`) —
-// no custom `BIO_METHOD` table (which would need C function pointers).
+// What lives where. The cold path — key schedule, X25519, X.509 parse and
+// chain verification, both handshake state machines — is the `sfn/crypto`
+// capsule's `int[]` code, reached by the `[dependencies]` edge declared in
+// `runtime/capsule.toml` (the capability landed in SFN-773). It runs once
+// per connection and its idiom cost does not matter. The hot path — the
+// per-byte record layer — is `sfn/platform/tls_record.sfn`'s `* u8`
+// re-expression (SFN-768). This module owns everything OpenSSL was
+// silently supplying between the two: session allocation, receive
+// buffering, plaintext record framing, handshake defragmentation,
+// rekeying, alerts, and blocking socket I/O.
 //
-// Opaque-handle policy: every `SSL_CTX*` / `SSL*` is spelled `* u8`,
-// mirroring the socket-extern pattern in `../adapters/http.sfn` /
-// `../platform/net.sfn` (family-specific structs cast through `* u8` at
-// the boundary — no struct-by-value at the extern edge). Extern fns
-// carry no effect surface (E0804); enforcement rides the enclosing
-// `![net]` Sailfin fns, exactly as the socket externs do.
+// Import shape, and why it is not the capsule's public surface. The
+// imports below reach individual `sfn/crypto/<module>` files rather than
+// the capsule's `sfn/crypto` entry module. That is a workaround, not a
+// preference: the runtime->capsule signature staging resolves a symbol
+// defined *in* the entry module but drops symbols surfaced through an
+// `export { ... } from "./sibling"` re-export chain, which is how
+// `crypto/mod.sfn` publishes all of this (E1007, "callee signature is not
+// known to the compiler"). Removal condition: SFN-800 — when that lands in
+// the pinned seed, collapse every import below to `from "sfn/crypto"`.
 //
-// Symbols confirmed exported by `libssl.so.3` (`nm -D`). OpenSSL >= 1.1
-// auto-initializes the library on first `SSL_CTX_new`, so no explicit
-// `OPENSSL_init_ssl` call is needed. `SSL_set_tlsext_host_name` (SNI) is
-// a header macro that resolves to `SSL_ctrl(ssl, 55 /*SET_TLSEXT_
-// HOSTNAME*/, 0 /*host_name*/, name)` at the ABI — declared here as the
-// real `SSL_ctrl` symbol.
+// Handle policy. `tls_client_ctx`/`tls_server_ctx` return a malloc'd
+// `TlsContext *` and `tls_connect_fd`/`tls_accept_fd` a malloc'd
+// `TlsSession *`, both spelled `* u8` at the boundary so the consumer ABI
+// (`../adapters/http.sfn`, `../concurrency/serve.sfn`,
+// `../adapters/websocket.sfn`) is byte-identical to the OpenSSL era: the
+// eight wrapper names, parameter types and return types are unchanged, so
+// no caller and no hand-written C stub needed editing.
 //
-// Decimal constants used below:
-//   SSL_VERIFY_PEER            = 1
-//   SSL_CTRL_SET_TLSEXT_HOSTNAME = 55, TLSEXT_NAMETYPE_host_name = 0
-//   X509_V_OK                  = 0   (SSL_get_verify_result success)
-//   SSL_ERROR_ZERO_RETURN      = 6   (clean close_notify)
-//   SSL_ERROR_SYSCALL          = 5   (peer TCP close w/o close_notify)
-// ── OpenSSL extern surface (libssl / libcrypto) ───────────────────
-extern fn TLS_client_method() -> *u8;
+// Session layout is scalar-only by construction, following the malloc'd
+// struct precedent in `../concurrency/scheduler.sfn`. Sailfin `int[]`
+// values are owned by the runtime allocator and must never be stored in a
+// malloc'd struct, so every `int[]` the handshake produces lives only
+// inside `tls_connect_fd`/`tls_accept_fd`'s own scope; on reaching the
+// connected state the four traffic key/IV arrays are copied out into
+// malloc'd byte buffers and steady state is pointer-only.
+import { ed25519_seed_from_pkcs8_pem } from "sfn/crypto/ed25519_sign";
+import { pem_certificates_to_der } from "sfn/crypto/pem";
+import { random_bytes } from "sfn/crypto/rand";
+import {
+    ClientHandshake,
+    hs_client_finished_message,
+    hs_client_hello,
+    hs_client_new,
+    hs_client_recv_certificate,
+    hs_client_recv_certificate_verify,
+    hs_client_recv_encrypted_extensions,
+    hs_client_recv_finished,
+    hs_client_recv_server_hello,
+    hs_client_send_hello,
+    hs_client_verify_peer,
+    hs_state_connected,
+    tls13_traffic_iv,
+    tls13_traffic_key
+} from "sfn/crypto/tls13_handshake";
+import { hs_type_finished, hs_type_server_hello } from "sfn/crypto/tls13_handshake_codec";
+import { tls13_open_record, tls13_seal_record } from "sfn/crypto/tls13_record";
+import { TlsRecordPlaintext } from "sfn/crypto/tls13_record";
+import {
+    ServerHandshake,
+    hs_server_certificate_message,
+    hs_server_certificate_verify_message,
+    hs_server_encrypted_extensions_message,
+    hs_server_finished_message,
+    hs_server_hello,
+    hs_server_new,
+    hs_server_recv_client_hello,
+    hs_server_recv_finished,
+    hs_server_send_certificate,
+    hs_server_send_certificate_verify,
+    hs_server_send_encrypted_extensions,
+    hs_server_send_finished,
+    hs_server_send_hello,
+    hs_server_state_connected
+} from "sfn/crypto/tls13_server_handshake";
+import { TrustStore, trust_store_load } from "sfn/crypto/trust_store";
+import { X509Certificate } from "sfn/crypto/x509";
+import { X509ChainResult } from "sfn/crypto/x509_verify";
 
-extern fn SSL_CTX_new(method: *u8) -> *u8;
+// ── libc + sibling-runtime externs ───────────────────────────────
+// Runtime modules forward-declare cross-module runtime symbols rather
+// than importing them (the SFN-635 convention `../adapters/http.sfn`
+// follows); the linker resolves them against the sibling object.
+extern fn malloc(size: usize) -> *u8;
 
-extern fn SSL_CTX_free(ctx: *u8) -> void;
+extern fn free(ptr: *u8) -> void;
 
-extern fn SSL_CTX_set_verify(ctx: *u8, mode: i32, cb: *u8) -> void;
+extern fn memcpy(dst: *u8, src: *u8, n: usize) -> *u8;
 
-extern fn SSL_CTX_set_default_verify_paths(ctx: *u8) -> i32;
+extern fn memset(dst: *u8, byte: i32, n: usize) -> *u8;
 
-extern fn SSL_CTX_load_verify_locations(ctx: *u8, cafile: *u8, capath: *u8) -> i32;
+extern fn recv(sockfd: i32, buf: *u8, len: i64, flags: i32) -> i64;
 
-extern fn SSL_new(ctx: *u8) -> *u8;
+extern fn send(sockfd: i32, buf: *u8, len: i64, flags: i32) -> i64;
 
-extern fn SSL_free(ssl: *u8) -> void;
+extern fn load_byte(p: *u8, off: i64) -> i64;
 
-extern fn SSL_set_fd(ssl: *u8, fd: i32) -> i32;
+extern fn sfn_tls_record_seal(key: *u8, key_len: i64, iv: *u8, iv_len: i64, seq: i64, content_type: i64, content: *u8, content_len: i64, padding: i64, out: *u8) -> i64;
 
-// `SSL_ctrl` — the ABI symbol behind the `SSL_set_tlsext_host_name`
-// (SNI) macro. `long SSL_ctrl(SSL *, int cmd, long larg, void *parg)`.
-extern fn SSL_ctrl(ssl: *u8, cmd: i32, larg: i64, parg: *u8) -> i64;
+extern fn sfn_tls_record_open(key: *u8, key_len: i64, iv: *u8, iv_len: i64, seq: i64, record: *u8, record_len: i64) -> i64;
 
-// `SSL_set1_host` — set the expected DNS hostname for OpenSSL's built-in
-// certificate hostname verification (RFC 6125). A real exported symbol
-// (not a macro), callback-free. `int SSL_set1_host(SSL *, const char *)`
-// returns 1 on success. Once set, `SSL_VERIFY_PEER` makes the handshake
-// fail on a hostname mismatch, so no Sailfin fn is address-taken.
-extern fn SSL_set1_host(ssl: *u8, host: *u8) -> i32;
+extern fn sfn_str_sfn_from_cstr(s: *u8) -> *u8;
 
-extern fn SSL_connect(ssl: *u8) -> i32;
+extern fn sfn_fs_read_file(path: *u8) -> *u8;
 
-extern fn SSL_read(ssl: *u8, buf: *u8, num: i32) -> i32;
+extern fn sfn_clock_unix_millis(out_millis: *i64) -> i32;
 
-extern fn SSL_write(ssl: *u8, buf: *u8, num: i32) -> i32;
+// Adopt a NUL-terminated C string as a Sailfin string.
+fn _tls_cstr(p: *u8) -> string {
+    if p as i64 == 0 { return ""; }
+    // A Sailfin `string` is a `* u8`-backed value, and `extern fn` cannot
+    // declare a `string` return (E0801 — not C-ABI-compatible), so the
+    // sibling helper is declared as `* u8` and adopted here.
+    let adopted: string = sfn_str_sfn_from_cstr(p) as string;
+    return adopted;
+}
 
-extern fn SSL_shutdown(ssl: *u8) -> i32;
+// Wall-clock milliseconds for certificate validity windows. The
+// underlying primitive reports failure by returning 0 rather than
+// writing, and a zero `now` makes every certificate "not yet valid",
+// which fails closed — the correct direction for a trust decision.
+fn _tls_now_ms() -> i64 {
+    let mut millis: i64 = 0;
+    let slot: *i64 = & millis;
+    let ok: i32 = sfn_clock_unix_millis(slot);
+    if ok == 0 { return 0; }
+    return millis;
+}
 
-extern fn SSL_get_error(ssl: *u8, ret: i32) -> i32;
+// ── Protocol constants (RFC 8446 §5, §6) ─────────────────────────
+// Outer/inner ContentType values the driver frames directly. The record
+// layer's own `application_data` constant is not reachable from here
+// (it is a sibling runtime module, not an import), so the three the
+// driver needs are restated.
+fn _tls_ct_change_cipher_spec() -> i64 { return 20; }
 
-extern fn SSL_get_verify_result(ssl: *u8) -> i64;
+fn _tls_ct_alert() -> i64 { return 21; }
 
-// ── libc helpers (optional extra CA bundle) ───────────────────────
-// Declared inline (redeclaring a C symbol across runtime modules is
-// safe — each emits its own LLVM `declare` and the linker resolves both
-// to the single libc entrypoint; see the `http.sfn` symbol note).
-extern fn getenv(name: *u8) -> *u8;
+fn _tls_ct_handshake() -> i64 { return 22; }
 
-extern fn strlen(s: *u8) -> usize;
+fn _tls_ct_application_data() -> i64 { return 23; }
 
-// `tls_client_ctx()` — build a client `SSL_CTX` with the system trust
-// store loaded (`SSL_CTX_set_default_verify_paths`, e.g.
-// `/etc/ssl/certs`) plus an optional extra CA bundle from the
-// `SAILFIN_TLS_CAFILE` environment variable (loaded additively —
-// analogous to `curl`'s `CURL_CA_BUNDLE` / Node's `NODE_EXTRA_CA_CERTS`;
-// used by the loopback e2e to trust a generated self-signed cert).
-// Verification is turned ON (`SSL_VERIFY_PEER`, callback arg `null`); the
-// result is polled after the handshake in `tls_connect_fd`, and the
-// hostname is bound there via SSL_set1_host. Returns null on allocation
-// failure. The canonical system CA bundle is loaded as a discovery
-// fallback below (#1784); macOS/Windows CA-store paths are not yet built.
-fn tls_client_ctx() -> *u8 {
-    let method: *u8 = TLS_client_method();
-    if method as i64 == 0 { return null; }
-    let ctx: *u8 = SSL_CTX_new(method);
-    if ctx as i64 == 0 { return null; }
-    // System default trust store (OpenSSL's compiled-in dir, e.g.
-    // /etc/ssl/certs). Its return tells us the lookup method was set, not
-    // that the store is non-empty, so we cannot rely on it to decide
-    // whether the standard bundle is reachable.
-    SSL_CTX_set_default_verify_paths(ctx);
-    // Trust-store discovery fallback (SFEP-0036 §3.6): additively load the
-    // canonical Debian/Ubuntu CA bundle. On a host whose OpenSSL default
-    // dir is empty or misconfigured, the compiled-in paths above load no
-    // anchors and every real cert would fail to verify; loading the
-    // well-known bundle here keeps a trust-anchored server reachable.
-    // Additive and de-duped by OpenSSL, so it is harmless where the default
-    // paths already cover it, and ignored (return not checked, like the
-    // CAFILE load below) when the file is absent. macOS/Windows CA-store
-    // discovery differs and is not yet implemented.
-    let ca_bundle: string = "/etc/ssl/certs/ca-certificates.crt";
-    SSL_CTX_load_verify_locations(ctx, ca_bundle as *u8, null);
-    // Optional additional CA bundle (custom / test trust).
-    let ca_env: string = "SAILFIN_TLS_CAFILE";
-    let ca: *u8 = getenv(ca_env as *u8);
-    if ca as i64 != 0 {
-        if (strlen(ca) as i64) > 0 {
-            SSL_CTX_load_verify_locations(ctx, ca, null);
+// AlertDescription close_notify(0) — the only warning-level alert the
+// driver treats as a clean stream end (§6.1).
+fn _tls_alert_close_notify() -> i64 { return 0; }
+
+// AlertLevel fatal(2).
+fn _tls_alert_level_fatal() -> i64 { return 2; }
+
+// Maximum TLSCiphertext.encrypted_record, 2^14 + 256 (§5.2), plus the
+// 5-byte header — the largest wire record the driver will buffer.
+fn _tls_max_record_wire() -> i64 { return 16645; }
+
+// Session roles.
+fn _tls_role_client() -> i64 { return 0; }
+
+fn _tls_role_server() -> i64 { return 1; }
+
+// Session states.
+fn _tls_state_connected() -> i64 { return 1; }
+
+fn _tls_state_closed() -> i64 { return 2; }
+
+// ── Session object ───────────────────────────────────────────────
+// Scalar-only, malloc'd, addressed through a typed pointer — the
+// `scheduler.sfn` precedent. Eighteen i64 slots = 144 bytes.
+//
+// `rx_*` holds bytes read from the socket that do not yet form a
+// complete record. `pt_*` holds decrypted application data not yet
+// returned to the caller, with `pt_off` the read cursor into it.
+// `tls_read` drains `pt_*` before it touches the socket, which is what
+// preserves the `recv`-identical contract every caller depends on.
+struct TlsSession {
+    fd: i64;
+    role: i64;
+    state: i64;
+    read_key_addr: i64;
+    read_iv_addr: i64;
+    read_seq: i64;
+    write_key_addr: i64;
+    write_iv_addr: i64;
+    write_seq: i64;
+    rx_addr: i64;
+    rx_cap: i64;
+    rx_len: i64;
+    pt_addr: i64;
+    pt_cap: i64;
+    pt_len: i64;
+    pt_off: i64;
+    eof: i64;
+    failed: i64;
+}
+
+fn _tls_session_bytes() -> i64 { return 144; }
+
+// A server context carries the certificate chain and signing seed the
+// handshake needs; a client context carries nothing but its role. Both
+// are malloc'd scalar-only structs, so the `* u8` handle ABI is
+// unchanged from the OpenSSL era.
+//
+// The chain cannot be held as `int[][]` (see the trust-store note), so
+// `tls_server_ctx` — which is the `![io]` half — parses the PEM once and
+// flattens the DER to a malloc'd blob laid out as
+// `uint32 count ‖ (uint32 len ‖ len bytes)*`. `tls_accept_fd` rebuilds
+// the `int[][]` from that blob per connection, which keeps the file read
+// and the PEM parse off the per-connection path.
+struct TlsContext {
+    role: i64;
+    chain_addr: i64;
+    chain_len: i64;
+    seed_addr: i64;
+    seed_len: i64;
+    ok: i64;
+}
+
+fn _tls_context_bytes() -> i64 { return 48; }
+
+// ── Byte-buffer helpers ──────────────────────────────────────────
+fn _tls_ptr_off(p: *u8, off: i64) -> *u8 {
+    let base: i64 = p as i64;
+    return (base + off) as *u8;
+}
+
+fn _tls_put(dst: *u8, off: i64, b: i64) -> void {
+    memset(_tls_ptr_off(dst, off), (b & 255) as i32, 1 as usize);
+}
+
+fn _tls_at(p: *u8, off: i64) -> i64 { return load_byte(p, off); }
+
+// Copy a Sailfin `int[]` into a malloc'd byte buffer. Returns null on
+// allocation failure; the caller owns the result.
+fn _tls_bytes_to_buf(src: int[]) -> *u8 {
+    let n: i64 = src.length;
+    let alloc: i64 = n;
+    let mut want: i64 = alloc;
+    if want <= 0 { want = 1; }
+    let buf: *u8 = malloc(want as usize);
+    if buf as i64 == 0 { return buf; }
+    let mut i: i64 = 0;
+    loop {
+        if i >= n { break; }
+        _tls_put(buf, i, src[i]);
+        i = i + 1;
+    }
+    return buf;
+}
+
+// Copy `n` bytes out of a raw buffer into a Sailfin `int[]`.
+fn _tls_buf_to_bytes(src: *u8, off: i64, n: i64) -> int[] {
+    let mut out: int[] = [];
+    let mut i: i64 = 0;
+    loop {
+        if i >= n { break; }
+        out.push(_tls_at(src, off + i));
+        i = i + 1;
+    }
+    return out;
+}
+
+// ── Socket I/O ───────────────────────────────────────────────────
+// Write every byte of `buf[0..n)` to the socket. Returns false on any
+// short/failed write, which the caller turns into a failed session —
+// a partial record on the wire is unrecoverable.
+fn _tls_send_all(fd: i64, buf: *u8, n: i64) -> bool ![net] {
+    let mut off: i64 = 0;
+    let mut guard: i64 = 0;
+    loop {
+        if off >= n { break; }
+        // Input-driven loop guard (style rule): a peer that accepts zero
+        // bytes forever must not spin.
+        guard = guard + 1;
+        if guard > 1048576 { return false; }
+        let wrote: i64 = send(fd as i32, _tls_ptr_off(buf, off), n - off, 0);
+        if wrote <= 0 { return false; }
+        off = off + wrote;
+    }
+    return true;
+}
+
+// Grow the session's rx buffer to at least `need` bytes.
+fn _tls_rx_reserve(s: *TlsSession, need: i64) -> bool {
+    if s.rx_cap >= need { return true; }
+    let mut cap: i64 = s.rx_cap;
+    if cap <= 0 { cap = 4096; }
+    let mut guard: i64 = 0;
+    loop {
+        if cap >= need { break; }
+        guard = guard + 1;
+        if guard > 64 { return false; }
+        cap = cap * 2;
+    }
+    let grown: *u8 = malloc(cap as usize);
+    if grown as i64 == 0 { return false; }
+    if s.rx_len > 0 {
+        memcpy(grown, s.rx_addr as *u8, s.rx_len as usize);
+    }
+    if s.rx_addr != 0 { free(s.rx_addr as *u8); }
+    s.rx_addr = grown as i64;
+    s.rx_cap = cap;
+    return true;
+}
+
+// Read from the socket until the rx buffer holds at least `need` bytes.
+// Returns 1 on success, 0 on a clean peer close before `need` was
+// reached, and -1 on error (including a `recv` timeout — see
+// `tls_read`'s contract note).
+fn _tls_rx_fill(s: *TlsSession, need: i64) -> i64 ![net] {
+    if !_tls_rx_reserve(s, need) { return 0 - 1; }
+    let mut guard: i64 = 0;
+    loop {
+        if s.rx_len >= need { break; }
+        guard = guard + 1;
+        if guard > 1048576 { return 0 - 1; }
+        let space: i64 = s.rx_cap - s.rx_len;
+        let got: i64 = recv(s.fd as i32, _tls_ptr_off(s.rx_addr as *u8, s.rx_len), space, 0);
+        if got == 0 {
+            s.eof = 1;
+            return 0;
         }
+        if got < 0 { return 0 - 1; }
+        s.rx_len = s.rx_len + got;
     }
-    // Verify the peer chain; result polled via SSL_get_verify_result.
-    // The callback arg is null — no Sailfin fn is address-taken.
-    SSL_CTX_set_verify(ctx, 1, null);
-    return ctx;
+    return 1;
 }
 
-// `tls_ctx_free(ctx)` — free a client ctx (no-op on null).
-fn tls_ctx_free(ctx: *u8) -> void {
-    if ctx as i64 != 0 { SSL_CTX_free(ctx); }
+// Drop the first `n` bytes of the rx buffer, sliding the remainder down.
+fn _tls_rx_consume(s: *TlsSession, n: i64) -> void {
+    if n <= 0 { return; }
+    let rest: i64 = s.rx_len - n;
+    if rest > 0 {
+        memcpy(s.rx_addr as *u8, _tls_ptr_off(s.rx_addr as *u8, n), rest as usize);
+    }
+    if rest < 0 {
+        s.rx_len = 0;
+        return;
+    }
+    s.rx_len = rest;
 }
 
-// `tls_connect_fd(ctx, fd, host)` — wrap an already-connected socket
-// `fd` into a client `SSL*`: attach the fd (blocking BIO), set the SNI
-// host name, drive the blocking handshake, and poll the verification
-// result. Returns the handshaken `SSL*`, or null on any failure (freeing
-// the partial `SSL*` first) so the caller surfaces a typed failure — a
-// failed verify is never a silent downgrade. `host` (a C string) is used
-// for BOTH the SNI extension and the RFC-6125 hostname check
-// (SSL_set1_host); it must be the bare host (no port). An IP-literal host
-// is checked as a DNS name (IP-SAN certs are uncommon) — real hostnames
-// are the supported outbound case.
-fn tls_connect_fd(ctx: *u8, fd: i32, host: *u8) -> *u8 ![net] {
-    if ctx as i64 == 0 { return null; }
-    let ssl: *u8 = SSL_new(ctx);
-    if ssl as i64 == 0 { return null; }
-    // Attach the connected, timeout-armed socket.
-    if SSL_set_fd(ssl, fd) != 1 {
-        SSL_free(ssl);
-        return null;
-    }
-    if host as i64 != 0 {
-        // SNI: SSL_set_tlsext_host_name(ssl, host) -> SSL_ctrl(ssl, 55, 0,
-        // host). Returns 1 on success; a failure (e.g. OOM) means we would
-        // hand-shake against the wrong / a default vhost, so fail hard.
-        if SSL_ctrl(ssl, 55, 0, host) != 1 {
-            SSL_free(ssl);
-            return null;
-        }
-        // Hostname verification: bind the expected DNS name so
-        // SSL_VERIFY_PEER enforces cert<->host matching during the
-        // handshake (RFC 6125). Without this, a valid cert for ANY host
-        // would pass chain verification — an MITM hole. Callback-free.
-        if SSL_set1_host(ssl, host) != 1 {
-            SSL_free(ssl);
-            return null;
-        }
-    }
-    // Blocking handshake (bounded by the socket's SO_*TIMEO). With
-    // SSL_set1_host + SSL_VERIFY_PEER, a chain OR hostname mismatch fails
-    // the handshake here.
-    if SSL_connect(ssl) != 1 {
-        SSL_free(ssl);
-        return null;
-    }
-    // Belt-and-suspenders: poll the verification result (X509_V_OK == 0).
-    // A hostname mismatch surfaces here as X509_V_ERR_HOSTNAME_MISMATCH.
-    if SSL_get_verify_result(ssl) != 0 {
-        SSL_free(ssl);
-        return null;
-    }
-    return ssl;
+// Pull exactly one complete wire record into the rx buffer. On success
+// the record occupies `rx[0 .. 5 + length)` and the total is returned.
+// Returns 0 on a clean close with no partial record, -1 on error.
+fn _tls_next_record(s: *TlsSession) -> i64 ![net] {
+    let header: i64 = _tls_rx_fill(s, 5);
+    if header <= 0 { return header; }
+    let base: *u8 = s.rx_addr as *u8;
+    let declared: i64 = (_tls_at(base, 3) << 8) | _tls_at(base, 4);
+    let total: i64 = 5 + declared;
+    if total > _tls_max_record_wire() { return 0 - 1; }
+    let body: i64 = _tls_rx_fill(s, total);
+    // A close mid-record is a truncation, not a clean end.
+    if body == 0 { return 0 - 1; }
+    if body < 0 { return 0 - 1; }
+    return total;
 }
 
-// `tls_write(ssl, buf, n)` — write up to `n` bytes; returns the count
-// written (> 0), or <= 0 on failure. Mirrors `send`'s contract so the
-// `_send_all` retry loop treats it identically. `n` is bounded by the
-// caller's request size (< 2 GiB), so the i32 cast is safe.
-fn tls_write(ssl: *u8, buf: *u8, n: i64) -> i64 ![net] {
-    if ssl as i64 == 0 { return 0 - 1; }
-    let r: i32 = SSL_write(ssl, buf, n as i32);
-    return r as i64;
+// ── Plaintext record framing ─────────────────────────────────────
+// `tls13_record.sfn` is TLSCiphertext-only and hardcodes
+// `opaque_type = 23`, so the cleartext ClientHello/ServerHello exchange
+// and the `change_cipher_spec` records real peers interleave for
+// middlebox compatibility (§5.1, §D.4) have no encoder or decoder
+// anywhere. The driver owns both.
+fn _tls_write_plaintext(s: *TlsSession, content_type: i64, body: int[]) -> bool ![net] {
+    let n: i64 = body.length;
+    let wire: *u8 = malloc((5 + n) as usize);
+    if wire as i64 == 0 { return false; }
+    _tls_put(wire, 0, content_type);
+    // legacy_record_version is 0x0303 on every record after the first
+    // ClientHello, and accepted there too (§5.1).
+    _tls_put(wire, 1, 3);
+    _tls_put(wire, 2, 3);
+    _tls_put(wire, 3, (n >> 8) & 255);
+    _tls_put(wire, 4, n & 255);
+    let mut i: i64 = 0;
+    loop {
+        if i >= n { break; }
+        _tls_put(wire, 5 + i, body[i]);
+        i = i + 1;
+    }
+    let ok: bool = _tls_send_all(s.fd, wire, 5 + n);
+    free(wire);
+    return ok;
 }
 
-// `tls_read(ssl, buf, n)` — read up to `n` bytes; returns the count read
-// (> 0), 0 at end-of-stream, or -1 on a genuine error. Mirrors `recv`'s
-// contract so `_recv_all` treats it identically. On a non-positive
-// `SSL_read`, the error is classified: ZERO_RETURN (clean close_notify)
-// and SYSCALL-with-0 (peer TCP close without close_notify, common for
-// `Connection: close` servers and `openssl s_server`) are both EOF;
-// anything else is a real error.
-fn tls_read(ssl: *u8, buf: *u8, n: i64) -> i64 ![net] {
-    if ssl as i64 == 0 { return 0 - 1; }
-    let r: i32 = SSL_read(ssl, buf, n as i32);
-    if r > 0 { return r as i64; }
-    let err: i32 = SSL_get_error(ssl, r);
-    // ZERO_RETURN (6) is a clean close_notify. SYSCALL (5) is EOF ONLY when
-    // `SSL_read` returned 0 (peer TCP close without close_notify). A SYSCALL
-    // with `r < 0` is EAGAIN / a recv timeout (`SO_RCVTIMEO`, #1581) / reset
-    // — a genuine error that must fail to -1, NOT a truncated body reported
-    // as a clean EOF. This keeps the TLS read contract identical to the raw
-    // `recv` path (which returns -1 on the same timeout).
-    if err == 6 { return 0; }
-    if err == 5 && r == 0 { return 0; }
+// ── Alerts ───────────────────────────────────────────────────────
+// Inner content type 21 has no codec anywhere in the stack. Classifying
+// it here is what makes the OpenSSL-era `tls_read` contract
+// reproducible: close_notify -> 0, any fatal alert -> -1, and a `recv`
+// timeout or reset with no alert -> -1. Collapsing the last case into a
+// clean EOF would report a truncated body as a complete one, so the
+// distinction is a correctness requirement rather than a nicety.
+fn _tls_classify_alert(body: int[]) -> i64 {
+    if body.length < 2 { return 0 - 1; }
+    let level: i64 = body[0];
+    let desc: i64 = body[1];
+    if desc == _tls_alert_close_notify() {
+        if level != _tls_alert_level_fatal() { return 0; }
+        return 0;
+    }
     return 0 - 1;
 }
 
-// `tls_shutdown_free(ssl)` — best-effort `SSL_shutdown` (sends
-// close_notify over the fd) then `SSL_free`. No-op on null. Must run
-// before the caller `close`s the underlying fd. Direction-agnostic: the
-// server accept loop (`../concurrency/serve.sfn`) reuses it exactly as the
-// client does, since an `SSL*` teardown is identical either way.
+// Send a fatal alert, best-effort. Teardown never fails on this.
+fn _tls_send_alert(s: *TlsSession, desc: i64) -> void ![net] {
+    let mut body: int[] = [];
+    body.push(_tls_alert_level_fatal());
+    body.push(desc);
+    if s.read_key_addr == 0 {
+        let _ = _tls_write_plaintext(s, _tls_ct_alert(), body);
+        return;
+    }
+    let _ = _tls_write_encrypted(s, _tls_ct_alert(), body);
+}
+
+// ── Encrypted record I/O over the pointer record layer ───────────
+// Steady state: keys and IVs are malloc'd byte buffers, so seal/open go
+// straight through `tls_record.sfn` with no `int[]` materialisation.
+fn _tls_write_encrypted(s: *TlsSession, content_type: i64, body: int[]) -> bool ![net] {
+    let n: i64 = body.length;
+    let content: *u8 = _tls_bytes_to_buf(body);
+    if content as i64 == 0 { return false; }
+    let out: *u8 = malloc((5 + n + 1 + 16) as usize);
+    if out as i64 == 0 {
+        free(content);
+        return false;
+    }
+    let wrote: i64 = sfn_tls_record_seal(s.write_key_addr as *u8, 32, s.write_iv_addr as *u8, 12, s.write_seq, content_type, content, n, 0, out);
+    free(content);
+    if wrote < 0 {
+        free(out);
+        return false;
+    }
+    s.write_seq = s.write_seq + 1;
+    let ok: bool = _tls_send_all(s.fd, out, wrote);
+    free(out);
+    return ok;
+}
+
+// ── Rekeying ─────────────────────────────────────────────────────
+// Three transitions, each deriving key/iv from a traffic secret and
+// resetting that direction's sequence number to zero (§7.2): cleartext
+// -> handshake keys after ServerHello, and handshake -> application
+// keys after Finished, per direction.
+fn _tls_install_read_key(s: *TlsSession, secret: int[], suite: i64) -> bool {
+    let key: int[] = tls13_traffic_key(secret, suite);
+    let iv: int[] = tls13_traffic_iv(secret);
+    if key.length != 32 { return false; }
+    if iv.length != 12 { return false; }
+    if s.read_key_addr != 0 { free(s.read_key_addr as *u8); }
+    if s.read_iv_addr != 0 { free(s.read_iv_addr as *u8); }
+    let kb: *u8 = _tls_bytes_to_buf(key);
+    if kb as i64 == 0 { return false; }
+    let ib: *u8 = _tls_bytes_to_buf(iv);
+    if ib as i64 == 0 {
+        free(kb);
+        return false;
+    }
+    s.read_key_addr = kb as i64;
+    s.read_iv_addr = ib as i64;
+    s.read_seq = 0;
+    return true;
+}
+
+fn _tls_install_write_key(s: *TlsSession, secret: int[], suite: i64) -> bool {
+    let key: int[] = tls13_traffic_key(secret, suite);
+    let iv: int[] = tls13_traffic_iv(secret);
+    if key.length != 32 { return false; }
+    if iv.length != 12 { return false; }
+    if s.write_key_addr != 0 { free(s.write_key_addr as *u8); }
+    if s.write_iv_addr != 0 { free(s.write_iv_addr as *u8); }
+    let kb: *u8 = _tls_bytes_to_buf(key);
+    if kb as i64 == 0 { return false; }
+    let ib: *u8 = _tls_bytes_to_buf(iv);
+    if ib as i64 == 0 {
+        free(kb);
+        return false;
+    }
+    s.write_key_addr = kb as i64;
+    s.write_iv_addr = ib as i64;
+    s.write_seq = 0;
+    return true;
+}
+
+// ── Session lifecycle ────────────────────────────────────────────
+fn _tls_session_new(fd: i64, role: i64) -> *TlsSession {
+    let raw: *u8 = malloc(_tls_session_bytes() as usize);
+    if raw as i64 == 0 { return raw as *TlsSession; }
+    // The malloc'd bytes are garbage; zeroing first is load-bearing,
+    // since every teardown path frees on a non-zero address.
+    memset(raw, 0, _tls_session_bytes() as usize);
+    let s: *TlsSession = raw as *TlsSession;
+    s.fd = fd;
+    s.role = role;
+    s.state = 0;
+    return s;
+}
+
+fn _tls_session_free(s: *TlsSession) -> void {
+    if s as i64 == 0 { return; }
+    if s.read_key_addr != 0 { free(s.read_key_addr as *u8); }
+    if s.read_iv_addr != 0 { free(s.read_iv_addr as *u8); }
+    if s.write_key_addr != 0 { free(s.write_key_addr as *u8); }
+    if s.write_iv_addr != 0 { free(s.write_iv_addr as *u8); }
+    if s.rx_addr != 0 { free(s.rx_addr as *u8); }
+    if s.pt_addr != 0 { free(s.pt_addr as *u8); }
+    free(s as *u8);
+}
+
+// ── Trust store ──────────────────────────────────────────────────
+// `trust_store_load()` base64-decodes and X.509-parses the whole system
+// bundle (~150 anchors), and `../adapters/http.sfn` calls
+// `tls_client_ctx()` once per request. OpenSSL loaded anchors lazily by
+// subject hash, so this is a cost the native stack adds.
+//
+// The design note's remedy — cache the parsed `TrustStore` in a
+// process-global — is not expressible: a global (`extern var`) holds a
+// scalar, and the anchors are `X509Certificate[]`, an `int[]`-bearing
+// Sailfin value the runtime allocator owns and which therefore cannot be
+// stored in a malloc'd struct or a global slot (the same constraint that
+// makes `TlsSession` scalar-only). Caching would mean flattening ~150
+// parsed certificates back to DER and re-parsing per handshake, which
+// buys nothing over re-reading the bundle.
+//
+// So the bundle is parsed once per handshake, and the per-request cost
+// is real and measured rather than hidden. Removal condition: SFN-801,
+// which is where a real anchor cache belongs (a DER-blob global plus a
+// parsed-anchor arena), not here.
+fn _tls_anchors() -> X509Certificate[] ![io] {
+    let store: TrustStore = trust_store_load();
+    let empty: X509Certificate[] = [];
+    if !store.ok { return empty; }
+    return store.anchors;
+}
+
+// ── Client ───────────────────────────────────────────────────────
+// `tls_client_ctx()` — build a client context. Gains `![io]` relative to
+// the OpenSSL era: it now reads the trust bundle off disk, where OpenSSL
+// did that behind an effect-free extern. `SAILFIN_TLS_CAFILE` keeps
+// working unchanged — `trust_store_load()` consults it before
+// `SSL_CERT_FILE` and before the default paths, deliberately, for this
+// transition.
+fn tls_client_ctx() -> *u8 ![io] {
+    let raw: *u8 = malloc(_tls_context_bytes() as usize);
+    if raw as i64 == 0 { return raw; }
+    memset(raw, 0, _tls_context_bytes() as usize);
+    let ctx: *TlsContext = raw as *TlsContext;
+    ctx.role = _tls_role_client();
+    ctx.ok = 1;
+    return raw;
+}
+
+// `tls_ctx_free(ctx)` — free a context (no-op on null).
+fn tls_ctx_free(ctx: *u8) -> void {
+    if ctx as i64 == 0 { return; }
+    let c: *TlsContext = ctx as *TlsContext;
+    if c.chain_addr != 0 { free(c.chain_addr as *u8); }
+    if c.seed_addr != 0 { free(c.seed_addr as *u8); }
+    free(ctx);
+}
+
+// Read one handshake message from the encrypted flight into `acc`,
+// returning the number of bytes appended, 0 on clean close, -1 on error.
+// Records may carry several coalesced handshake messages and a single
+// message may span records, so the caller accumulates and re-parses.
+fn _tls_pump_handshake(s: *TlsSession, acc: int[]) -> int[] ![net] {
+    let total: i64 = _tls_next_record(s);
+    let mut out: int[] = acc;
+    if total <= 0 {
+        s.failed = 1;
+        return out;
+    }
+    let base: *u8 = s.rx_addr as *u8;
+    let outer: i64 = _tls_at(base, 0);
+    // A peer may interleave change_cipher_spec for middlebox
+    // compatibility at any point before its Finished; it carries no
+    // meaning in TLS 1.3 and is dropped (§D.4).
+    if outer == _tls_ct_change_cipher_spec() {
+        _tls_rx_consume(s, total);
+        return out;
+    }
+    if outer == _tls_ct_handshake() {
+        // Cleartext handshake record (ServerHello / HelloRetryRequest).
+        let body: int[] = _tls_buf_to_bytes(base, 5, total - 5);
+        let mut i: i64 = 0;
+        loop {
+            if i >= body.length { break; }
+            out.push(body[i]);
+            i = i + 1;
+        }
+        _tls_rx_consume(s, total);
+        return out;
+    }
+    if outer != _tls_ct_application_data() {
+        s.failed = 1;
+        _tls_rx_consume(s, total);
+        return out;
+    }
+    // Encrypted record: decrypt in place through the pointer layer.
+    let opened: i64 = sfn_tls_record_open(s.read_key_addr as *u8, 32, s.read_iv_addr as *u8, 12, s.read_seq, base, total);
+    if opened < 0 {
+        s.failed = 1;
+        _tls_rx_consume(s, total);
+        return out;
+    }
+    s.read_seq = s.read_seq + 1;
+    let inner_type: i64 = opened >> 32;
+    let inner_len: i64 = opened & 4294967295;
+    if inner_type == _tls_ct_alert() {
+        let alert: int[] = _tls_buf_to_bytes(base, 5, inner_len);
+        let verdict: i64 = _tls_classify_alert(alert);
+        if verdict == 0 { s.eof = 1; }
+        if verdict != 0 { s.failed = 1; }
+        _tls_rx_consume(s, total);
+        return out;
+    }
+    if inner_type != _tls_ct_handshake() {
+        s.failed = 1;
+        _tls_rx_consume(s, total);
+        return out;
+    }
+    let body: int[] = _tls_buf_to_bytes(base, 5, inner_len);
+    let mut j: i64 = 0;
+    loop {
+        if j >= body.length { break; }
+        out.push(body[j]);
+        j = j + 1;
+    }
+    _tls_rx_consume(s, total);
+    return out;
+}
+
+// Is a complete handshake message available at `acc[off..]`? Each
+// message is a 1-byte type plus a uint24 length, so the check is exact
+// rather than relying on a parse failure (which cannot distinguish
+// "incomplete" from "malformed").
+fn _tls_hs_message_ready(acc: int[], off: i64) -> i64 {
+    if acc.length - off < 4 { return 0 - 1; }
+    let len: i64 = (acc[off + 1] << 16) | (acc[off + 2] << 8) | acc[off + 3];
+    let total: i64 = 4 + len;
+    if acc.length - off < total { return 0 - 1; }
+    return total;
+}
+
+fn _tls_slice(acc: int[], off: i64, n: i64) -> int[] {
+    let mut out: int[] = [];
+    let mut i: i64 = 0;
+    loop {
+        if i >= n { break; }
+        out.push(acc[off + i]);
+        i = i + 1;
+    }
+    return out;
+}
+
+// `tls_connect_fd(ctx, fd, host)` — drive a full TLS 1.3 client
+// handshake over an already-connected socket and return a connected
+// session, or null on any failure (a failed verify is never a silent
+// downgrade). `host` is the bare host, used for SNI and for the RFC 6125
+// hostname check.
+fn tls_connect_fd(ctx: *u8, fd: i32, host: *u8) -> *u8 ![io, net, rand] {
+    if ctx as i64 == 0 { return null; }
+    let s: *TlsSession = _tls_session_new(fd as i64, _tls_role_client());
+    if s as i64 == 0 { return null; }
+
+    let hostname: string = _tls_cstr(host);
+    let priv: int[] = random_bytes(32);
+    let rnd: int[] = random_bytes(32);
+    if priv.length != 32 {
+        _tls_session_free(s);
+        return null;
+    }
+
+    let mut hs: ClientHandshake = ClientHandshake {
+        state: 0,
+        transcript: [],
+        client_private: [],
+        client_public: [],
+        offered_cipher_suites: [],
+        sent_legacy_session_id: [],
+        cipher_suite: 0,
+        group: 0,
+        shared_secret: [],
+        early_secret: [],
+        handshake_secret: [],
+        master_secret: [],
+        client_handshake_traffic_secret: [],
+        server_handshake_traffic_secret: [],
+        client_application_traffic_secret: [],
+        server_application_traffic_secret: [],
+        server_leaf_certificate: [],
+        server_certificate_chain: [],
+        server_certificate_verified: false
+    };
+    let made: Result<ClientHandshake, string> = hs_client_new(priv);
+    match made {
+        Result.Err { error } => {
+            _tls_session_free(s);
+            return null;
+        },
+        Result.Ok { value } => { hs = value; }
+    }
+
+    let ch: int[] = hs_client_hello(hs, rnd, [], hostname);
+    if ch.length == 0 {
+        _tls_session_free(s);
+        return null;
+    }
+    let sent: Result<ClientHandshake, string> = hs_client_send_hello(hs, ch);
+    match sent {
+        Result.Err { error } => {
+            _tls_session_free(s);
+            return null;
+        },
+        Result.Ok { value } => { hs = value; }
+    }
+    if !_tls_write_plaintext(s, _tls_ct_handshake(), ch) {
+        _tls_session_free(s);
+        return null;
+    }
+
+    // ServerHello arrives in the clear; everything after it is encrypted
+    // under the handshake traffic keys.
+    let mut acc: int[] = [];
+    let mut guard: i64 = 0;
+    loop {
+        let ready: i64 = _tls_hs_message_ready(acc, 0);
+        if ready > 0 { break; }
+        guard = guard + 1;
+        if guard > 4096 {
+            _tls_session_free(s);
+            return null;
+        }
+        acc = _tls_pump_handshake(s, acc);
+        if s.failed != 0 {
+            _tls_session_free(s);
+            return null;
+        }
+        if s.eof != 0 {
+            _tls_session_free(s);
+            return null;
+        }
+    }
+    let sh_len: i64 = _tls_hs_message_ready(acc, 0);
+    let sh: int[] = _tls_slice(acc, 0, sh_len);
+    if sh[0] != hs_type_server_hello() {
+        _tls_session_free(s);
+        return null;
+    }
+    let got_sh: Result<ClientHandshake, string> = hs_client_recv_server_hello(hs, sh);
+    match got_sh {
+        Result.Err { error } => {
+            _tls_session_free(s);
+            return null;
+        },
+        Result.Ok { value } => { hs = value; }
+    }
+    acc = _tls_slice(acc, sh_len, acc.length - sh_len);
+
+    // Rekey to handshake traffic keys in both directions.
+    if !_tls_install_read_key(s, hs.server_handshake_traffic_secret, hs.cipher_suite) {
+        _tls_session_free(s);
+        return null;
+    }
+    if !_tls_install_write_key(s, hs.client_handshake_traffic_secret, hs.cipher_suite) {
+        _tls_session_free(s);
+        return null;
+    }
+
+    // EncryptedExtensions, Certificate, CertificateVerify, Finished —
+    // routinely coalesced into one record by real servers, so the flight
+    // is driven off the accumulator rather than off record boundaries.
+    let mut step: i64 = 0;
+    let mut flight_guard: i64 = 0;
+    loop {
+        if step >= 4 { break; }
+        flight_guard = flight_guard + 1;
+        if flight_guard > 8192 {
+            _tls_session_free(s);
+            return null;
+        }
+        let avail: i64 = _tls_hs_message_ready(acc, 0);
+        if avail < 0 {
+            acc = _tls_pump_handshake(s, acc);
+            if s.failed != 0 {
+                _tls_session_free(s);
+                return null;
+            }
+            if s.eof != 0 {
+                _tls_session_free(s);
+                return null;
+            }
+            continue;
+        }
+        let msg: int[] = _tls_slice(acc, 0, avail);
+        acc = _tls_slice(acc, avail, acc.length - avail);
+        let mut advanced: bool = true;
+        if step == 0 {
+            let r: Result<ClientHandshake, string> = hs_client_recv_encrypted_extensions(hs, msg);
+            match r {
+                Result.Err { error } => { advanced = false; },
+                Result.Ok { value } => { hs = value; }
+            }
+        }
+        if step == 1 {
+            let r: Result<ClientHandshake, string> = hs_client_recv_certificate(hs, msg);
+            match r {
+                Result.Err { error } => { advanced = false; },
+                Result.Ok { value } => { hs = value; }
+            }
+        }
+        if step == 2 {
+            let r: Result<ClientHandshake, string> = hs_client_recv_certificate_verify(hs, msg);
+            match r {
+                Result.Err { error } => { advanced = false; },
+                Result.Ok { value } => { hs = value; }
+            }
+        }
+        if step == 3 {
+            let r: Result<ClientHandshake, string> = hs_client_recv_finished(hs, msg);
+            match r {
+                Result.Err { error } => { advanced = false; },
+                Result.Ok { value } => { hs = value; }
+            }
+        }
+        if !advanced {
+            _tls_session_free(s);
+            return null;
+        }
+        step = step + 1;
+    }
+
+    // Authenticate the peer: chain to a system anchor and match the
+    // hostname. This is the step that makes the swap a real replacement
+    // rather than a downgrade.
+    let verdict: X509ChainResult = _tls_verify_peer(hs, hostname);
+    if !verdict.ok {
+        _tls_send_alert(s, 48);
+        _tls_session_free(s);
+        return null;
+    }
+
+    // Client Finished, still under the handshake write key.
+    let fin: Result<int[], string> = hs_client_finished_message(hs);
+    let mut fin_bytes: int[] = [];
+    match fin {
+        Result.Err { error } => {
+            _tls_session_free(s);
+            return null;
+        },
+        Result.Ok { value } => { fin_bytes = value; }
+    }
+    if !_tls_write_encrypted(s, _tls_ct_handshake(), fin_bytes) {
+        _tls_session_free(s);
+        return null;
+    }
+
+    // Rekey to application traffic keys.
+    if !_tls_install_read_key(s, hs.server_application_traffic_secret, hs.cipher_suite) {
+        _tls_session_free(s);
+        return null;
+    }
+    if !_tls_install_write_key(s, hs.client_application_traffic_secret, hs.cipher_suite) {
+        _tls_session_free(s);
+        return null;
+    }
+    s.state = _tls_state_connected();
+    return s as *u8;
+}
+
+// Peer authentication is split out so the `![io]` trust-store load is
+// the only effectful step in the client path.
+fn _tls_verify_peer(hs: ClientHandshake, hostname: string) -> X509ChainResult ![io] {
+    let anchors: X509Certificate[] = _tls_anchors();
+    return hs_client_verify_peer(hs, hostname, anchors, _tls_now_ms());
+}
+
+// ── Server ───────────────────────────────────────────────────────
+// `tls_server_ctx(cert_path, key_path)` — load a server certificate
+// chain and its signing key.
+//
+// Narrowing, deliberate and user-visible (SFN-341): the native server
+// signs CertificateVerify with Ed25519 only, so this accepts an Ed25519
+// certificate where OpenSSL accepted anything it could load. RSA and
+// ECDSA *signing* are out of SFEP-0048 §6.3 scope; ECDSA-P256 signing
+// (RFC 6979 deterministic `k` over the existing `p256.sfn` group layer)
+// is the follow-on that closes it.
+fn tls_server_ctx(cert_path: *u8, key_path: *u8) -> *u8 ![io] {
+    let cert_c: *u8 = sfn_fs_read_file(cert_path);
+    if cert_c as i64 == 0 { return null; }
+    let key_c: *u8 = sfn_fs_read_file(key_path);
+    if key_c as i64 == 0 { return null; }
+    let chain: int[][] = pem_certificates_to_der(_tls_cstr(cert_c));
+    let seed: int[] = ed25519_seed_from_pkcs8_pem(_tls_cstr(key_c));
+    if chain.length == 0 { return null; }
+    // Ed25519-only, deliberately: `hs_server_certificate_verify_message`
+    // signs with `ed25519_sign` and nothing else.
+    if seed.length != 32 { return null; }
+
+    let blob: *u8 = _tls_flatten_chain(chain);
+    if blob as i64 == 0 { return null; }
+    let seed_buf: *u8 = _tls_bytes_to_buf(seed);
+    if seed_buf as i64 == 0 {
+        free(blob);
+        return null;
+    }
+    let raw: *u8 = malloc(_tls_context_bytes() as usize);
+    if raw as i64 == 0 {
+        free(blob);
+        free(seed_buf);
+        return raw;
+    }
+    memset(raw, 0, _tls_context_bytes() as usize);
+    let ctx: *TlsContext = raw as *TlsContext;
+    ctx.role = _tls_role_server();
+    ctx.chain_addr = blob as i64;
+    ctx.chain_len = _tls_chain_blob_bytes(chain);
+    ctx.seed_addr = seed_buf as i64;
+    ctx.seed_len = 32;
+    ctx.ok = 1;
+    return raw;
+}
+
+// Total size of the flattened chain blob: a uint32 count, then a uint32
+// length and payload per entry.
+fn _tls_chain_blob_bytes(chain: int[][]) -> i64 {
+    let mut total: i64 = 4;
+    let mut i: i64 = 0;
+    loop {
+        if i >= chain.length { break; }
+        total = total + 4 + chain[i].length;
+        i = i + 1;
+    }
+    return total;
+}
+
+fn _tls_put_u32(dst: *u8, off: i64, v: i64) -> void {
+    _tls_put(dst, off, (v >> 24) & 255);
+    _tls_put(dst, off + 1, (v >> 16) & 255);
+    _tls_put(dst, off + 2, (v >> 8) & 255);
+    _tls_put(dst, off + 3, v & 255);
+}
+
+fn _tls_get_u32(src: *u8, off: i64) -> i64 {
+    return (_tls_at(src, off) << 24) | (_tls_at(src, off + 1) << 16) | (_tls_at(src, off
+        + 2) << 8) | _tls_at(src, off
+        + 3);
+}
+
+fn _tls_flatten_chain(chain: int[][]) -> *u8 {
+    let total: i64 = _tls_chain_blob_bytes(chain);
+    let blob: *u8 = malloc(total as usize);
+    if blob as i64 == 0 { return blob; }
+    _tls_put_u32(blob, 0, chain.length);
+    let mut off: i64 = 4;
+    let mut i: i64 = 0;
+    loop {
+        if i >= chain.length { break; }
+        let entry: int[] = chain[i];
+        _tls_put_u32(blob, off, entry.length);
+        off = off + 4;
+        let mut j: i64 = 0;
+        loop {
+            if j >= entry.length { break; }
+            _tls_put(blob, off + j, entry[j]);
+            j = j + 1;
+        }
+        off = off + entry.length;
+        i = i + 1;
+    }
+    return blob;
+}
+
+fn _tls_unflatten_chain(blob: *u8) -> int[][] {
+    let count: i64 = _tls_get_u32(blob, 0);
+    let mut out: int[][] = [];
+    let mut off: i64 = 4;
+    let mut i: i64 = 0;
+    loop {
+        if i >= count { break; }
+        let len: i64 = _tls_get_u32(blob, off);
+        off = off + 4;
+        out.push(_tls_buf_to_bytes(blob, off, len));
+        off = off + len;
+        i = i + 1;
+    }
+    return out;
+}
+
+// Build, send and commit the server's encrypted flight —
+// EncryptedExtensions, Certificate, CertificateVerify, Finished. The
+// capsule splits every outbound message into a build step (returns bytes,
+// does not touch state) and a commit step (re-parses those exact bytes and
+// advances state + transcript), so the two must interleave per message
+// rather than run as two passes.
+fn _tls_server_flight(s: *TlsSession, start: ServerHandshake) -> Result<ServerHandshake, string> ![net] {
+    let mut hs: ServerHandshake = start;
+
+    let ee: Result<int[], string> = hs_server_encrypted_extensions_message(hs);
+    let mut ee_bytes: int[] = [];
+    match ee {
+        Result.Err { error } => {
+            return Result.Err { error: error };
+        },
+        Result.Ok { value } => { ee_bytes = value; }
+    }
+    if !_tls_write_encrypted(s, _tls_ct_handshake(), ee_bytes) {
+        return Result.Err { error: "tls: encrypted_extensions write failed" };
+    }
+    let ee_c: Result<ServerHandshake, string> = hs_server_send_encrypted_extensions(hs, ee_bytes);
+    match ee_c {
+        Result.Err { error } => {
+            return Result.Err { error: error };
+        },
+        Result.Ok { value } => { hs = value; }
+    }
+
+    let ct: Result<int[], string> = hs_server_certificate_message(hs);
+    let mut ct_bytes: int[] = [];
+    match ct {
+        Result.Err { error } => {
+            return Result.Err { error: error };
+        },
+        Result.Ok { value } => { ct_bytes = value; }
+    }
+    if !_tls_write_encrypted(s, _tls_ct_handshake(), ct_bytes) {
+        return Result.Err { error: "tls: certificate write failed" };
+    }
+    let ct_c: Result<ServerHandshake, string> = hs_server_send_certificate(hs, ct_bytes);
+    match ct_c {
+        Result.Err { error } => {
+            return Result.Err { error: error };
+        },
+        Result.Ok { value } => { hs = value; }
+    }
+
+    let cv: Result<int[], string> = hs_server_certificate_verify_message(hs);
+    let mut cv_bytes: int[] = [];
+    match cv {
+        Result.Err { error } => {
+            return Result.Err { error: error };
+        },
+        Result.Ok { value } => { cv_bytes = value; }
+    }
+    if !_tls_write_encrypted(s, _tls_ct_handshake(), cv_bytes) {
+        return Result.Err { error: "tls: certificate_verify write failed" };
+    }
+    let cv_c: Result<ServerHandshake, string> = hs_server_send_certificate_verify(hs, cv_bytes);
+    match cv_c {
+        Result.Err { error } => {
+            return Result.Err { error: error };
+        },
+        Result.Ok { value } => { hs = value; }
+    }
+
+    let fin: Result<int[], string> = hs_server_finished_message(hs);
+    let mut fin_bytes: int[] = [];
+    match fin {
+        Result.Err { error } => {
+            return Result.Err { error: error };
+        },
+        Result.Ok { value } => { fin_bytes = value; }
+    }
+    if !_tls_write_encrypted(s, _tls_ct_handshake(), fin_bytes) {
+        return Result.Err { error: "tls: finished write failed" };
+    }
+    let fin_c: Result<ServerHandshake, string> = hs_server_send_finished(hs, fin_bytes);
+    match fin_c {
+        Result.Err { error } => {
+            return Result.Err { error: error };
+        },
+        Result.Ok { value } => { hs = value; }
+    }
+    return Result.Ok { value: hs };
+}
+
+// `tls_accept_fd(ctx, fd)` — drive a full TLS 1.3 server handshake over
+// an accepted socket. Returns the connected session or null.
+fn tls_accept_fd(ctx: *u8, fd: i32) -> *u8 ![net, rand] {
+    if ctx as i64 == 0 { return null; }
+    let c: *TlsContext = ctx as *TlsContext;
+    if c.ok == 0 { return null; }
+    let s: *TlsSession = _tls_session_new(fd as i64, _tls_role_server());
+    if s as i64 == 0 { return null; }
+
+    let chain: int[][] = _tls_unflatten_chain(c.chain_addr as *u8);
+    let seed: int[] = _tls_buf_to_bytes(c.seed_addr as *u8, 0, c.seed_len);
+    if chain.length == 0 {
+        _tls_session_free(s);
+        return null;
+    }
+    if seed.length != 32 {
+        _tls_session_free(s);
+        return null;
+    }
+    let priv: int[] = random_bytes(32);
+    let rnd: int[] = random_bytes(32);
+
+    let mut hs: ServerHandshake = ServerHandshake {
+        state: 0,
+        transcript: [],
+        server_private: [],
+        server_public: [],
+        certificate_chain: [],
+        signing_seed: [],
+        client_random: [],
+        client_legacy_session_id: [],
+        client_key_exchange: [],
+        client_offered_cipher_suites: [],
+        client_offers_ed25519_sigalg: false,
+        cipher_suite: 0,
+        group: 0,
+        shared_secret: [],
+        early_secret: [],
+        handshake_secret: [],
+        master_secret: [],
+        client_handshake_traffic_secret: [],
+        server_handshake_traffic_secret: [],
+        client_application_traffic_secret: [],
+        server_application_traffic_secret: [],
+        client_finished_verified: false
+    };
+    let made: Result<ServerHandshake, string> = hs_server_new(priv, chain, seed);
+    match made {
+        Result.Err { error } => {
+            _tls_session_free(s);
+            return null;
+        },
+        Result.Ok { value } => { hs = value; }
+    }
+
+    // ClientHello, in the clear.
+    let mut acc: int[] = [];
+    let mut guard: i64 = 0;
+    loop {
+        let ready: i64 = _tls_hs_message_ready(acc, 0);
+        if ready > 0 { break; }
+        guard = guard + 1;
+        if guard > 4096 {
+            _tls_session_free(s);
+            return null;
+        }
+        acc = _tls_pump_handshake(s, acc);
+        if s.failed != 0 {
+            _tls_session_free(s);
+            return null;
+        }
+        if s.eof != 0 {
+            _tls_session_free(s);
+            return null;
+        }
+    }
+    let ch_len: i64 = _tls_hs_message_ready(acc, 0);
+    let ch: int[] = _tls_slice(acc, 0, ch_len);
+    acc = _tls_slice(acc, ch_len, acc.length - ch_len);
+    let got_ch: Result<ServerHandshake, string> = hs_server_recv_client_hello(hs, ch);
+    match got_ch {
+        Result.Err { error } => {
+            _tls_session_free(s);
+            return null;
+        },
+        Result.Ok { value } => { hs = value; }
+    }
+
+    // ServerHello in the clear, then rekey and send the encrypted flight.
+    let sh: int[] = hs_server_hello(hs, rnd);
+    if sh.length == 0 {
+        _tls_session_free(s);
+        return null;
+    }
+    let sent_sh: Result<ServerHandshake, string> = hs_server_send_hello(hs, sh);
+    match sent_sh {
+        Result.Err { error } => {
+            _tls_session_free(s);
+            return null;
+        },
+        Result.Ok { value } => { hs = value; }
+    }
+    if !_tls_write_plaintext(s, _tls_ct_handshake(), sh) {
+        _tls_session_free(s);
+        return null;
+    }
+    if !_tls_install_write_key(s, hs.server_handshake_traffic_secret, hs.cipher_suite) {
+        _tls_session_free(s);
+        return null;
+    }
+    if !_tls_install_read_key(s, hs.client_handshake_traffic_secret, hs.cipher_suite) {
+        _tls_session_free(s);
+        return null;
+    }
+
+    let flight: Result<ServerHandshake, string> = _tls_server_flight(s, hs);
+    match flight {
+        Result.Err { error } => {
+            _tls_session_free(s);
+            return null;
+        },
+        Result.Ok { value } => { hs = value; }
+    }
+
+    // Client Finished, under the client handshake key.
+    let mut fin_guard: i64 = 0;
+    loop {
+        let ready: i64 = _tls_hs_message_ready(acc, 0);
+        if ready > 0 { break; }
+        fin_guard = fin_guard + 1;
+        if fin_guard > 4096 {
+            _tls_session_free(s);
+            return null;
+        }
+        acc = _tls_pump_handshake(s, acc);
+        if s.failed != 0 {
+            _tls_session_free(s);
+            return null;
+        }
+        if s.eof != 0 {
+            _tls_session_free(s);
+            return null;
+        }
+    }
+    let cf_len: i64 = _tls_hs_message_ready(acc, 0);
+    let cf: int[] = _tls_slice(acc, 0, cf_len);
+    if cf[0] != hs_type_finished() {
+        _tls_session_free(s);
+        return null;
+    }
+    let got_cf: Result<ServerHandshake, string> = hs_server_recv_finished(hs, cf);
+    match got_cf {
+        Result.Err { error } => {
+            _tls_session_free(s);
+            return null;
+        },
+        Result.Ok { value } => { hs = value; }
+    }
+
+    if !_tls_install_read_key(s, hs.client_application_traffic_secret, hs.cipher_suite) {
+        _tls_session_free(s);
+        return null;
+    }
+    if !_tls_install_write_key(s, hs.server_application_traffic_secret, hs.cipher_suite) {
+        _tls_session_free(s);
+        return null;
+    }
+    s.state = _tls_state_connected();
+    return s as *u8;
+}
+
+// ── Application data ─────────────────────────────────────────────
+// `tls_write(ssl, buf, n)` — encrypt and send. Returns bytes accepted or
+// -1, matching the raw `send` contract.
+fn tls_write(ssl: *u8, buf: *u8, n: i64) -> i64 ![net] {
+    if ssl as i64 == 0 { return 0 - 1; }
+    let s: *TlsSession = ssl as *TlsSession;
+    if s.state != _tls_state_connected() { return 0 - 1; }
+    if n <= 0 { return 0; }
+    let out: *u8 = malloc((5 + n + 1 + 16) as usize);
+    if out as i64 == 0 { return 0 - 1; }
+    let wrote: i64 = sfn_tls_record_seal(s.write_key_addr as *u8, 32, s.write_iv_addr as *u8, 12, s.write_seq, _tls_ct_application_data(), buf, n, 0, out);
+    if wrote < 0 {
+        free(out);
+        return 0 - 1;
+    }
+    s.write_seq = s.write_seq + 1;
+    let ok: bool = _tls_send_all(s.fd, out, wrote);
+    free(out);
+    if !ok { return 0 - 1; }
+    return n;
+}
+
+// `tls_read(ssl, buf, n)` — return up to `n` decrypted bytes.
+//
+// The return contract is `recv`-identical and every caller depends on it
+// (`../adapters/http.sfn`'s length tracking, `../concurrency/serve.sfn`'s
+// request loop): >0 bytes, 0 for a clean stream end (close_notify), -1
+// for any error. A `recv` timeout or reset with no alert is -1, NOT 0 —
+// collapsing that into a clean EOF reports a truncated body as complete.
+fn tls_read(ssl: *u8, buf: *u8, n: i64) -> i64 ![net] {
+    if ssl as i64 == 0 { return 0 - 1; }
+    let s: *TlsSession = ssl as *TlsSession;
+    if n <= 0 { return 0; }
+
+    // Drain undelivered plaintext first; only touch the socket when the
+    // buffer is empty.
+    if s.pt_len > s.pt_off {
+        let avail: i64 = s.pt_len - s.pt_off;
+        let mut take: i64 = avail;
+        if take > n { take = n; }
+        memcpy(buf, _tls_ptr_off(s.pt_addr as *u8, s.pt_off), take as usize);
+        s.pt_off = s.pt_off + take;
+        return take;
+    }
+    if s.eof != 0 { return 0; }
+    if s.failed != 0 { return 0 - 1; }
+    if s.state != _tls_state_connected() { return 0 - 1; }
+
+    let mut guard: i64 = 0;
+    loop {
+        guard = guard + 1;
+        if guard > 4096 { return 0 - 1; }
+        let total: i64 = _tls_next_record(s);
+        if total == 0 {
+            // Peer closed the TCP stream with no close_notify. That is a
+            // truncation, not a clean end.
+            s.failed = 1;
+            return 0 - 1;
+        }
+        if total < 0 { return 0 - 1; }
+        let base: *u8 = s.rx_addr as *u8;
+        let outer: i64 = _tls_at(base, 0);
+        if outer == _tls_ct_change_cipher_spec() {
+            _tls_rx_consume(s, total);
+            continue;
+        }
+        if outer != _tls_ct_application_data() {
+            _tls_rx_consume(s, total);
+            return 0 - 1;
+        }
+        let opened: i64 = sfn_tls_record_open(s.read_key_addr as *u8, 32, s.read_iv_addr as *u8, 12, s.read_seq, base, total);
+        if opened < 0 {
+            _tls_rx_consume(s, total);
+            s.failed = 1;
+            return 0 - 1;
+        }
+        s.read_seq = s.read_seq + 1;
+        let inner_type: i64 = opened >> 32;
+        let inner_len: i64 = opened & 4294967295;
+        if inner_type == _tls_ct_alert() {
+            let alert: int[] = _tls_buf_to_bytes(base, 5, inner_len);
+            let verdict: i64 = _tls_classify_alert(alert);
+            _tls_rx_consume(s, total);
+            if verdict == 0 {
+                s.eof = 1;
+                return 0;
+            }
+            s.failed = 1;
+            return 0 - 1;
+        }
+        // Post-handshake NewSessionTicket and friends are consumed and
+        // ignored; they must not surface as application bytes.
+        if inner_type == _tls_ct_handshake() {
+            _tls_rx_consume(s, total);
+            continue;
+        }
+        if inner_type != _tls_ct_application_data() {
+            _tls_rx_consume(s, total);
+            return 0 - 1;
+        }
+        if inner_len == 0 {
+            _tls_rx_consume(s, total);
+            continue;
+        }
+        // Stage the plaintext so a short caller buffer does not lose the
+        // remainder of the record.
+        if !_tls_pt_stage(s, base, inner_len) {
+            _tls_rx_consume(s, total);
+            return 0 - 1;
+        }
+        _tls_rx_consume(s, total);
+        let avail: i64 = s.pt_len - s.pt_off;
+        let mut take: i64 = avail;
+        if take > n { take = n; }
+        memcpy(buf, _tls_ptr_off(s.pt_addr as *u8, s.pt_off), take as usize);
+        s.pt_off = s.pt_off + take;
+        return take;
+    }
+}
+
+// Copy a decrypted record's content into the session's plaintext buffer.
+fn _tls_pt_stage(s: *TlsSession, record: *u8, n: i64) -> bool {
+    if s.pt_cap < n {
+        if s.pt_addr != 0 { free(s.pt_addr as *u8); }
+        let grown: *u8 = malloc(n as usize);
+        if grown as i64 == 0 {
+            s.pt_addr = 0;
+            s.pt_cap = 0;
+            s.pt_len = 0;
+            s.pt_off = 0;
+            return false;
+        }
+        s.pt_addr = grown as i64;
+        s.pt_cap = n;
+    }
+    memcpy(s.pt_addr as *u8, _tls_ptr_off(record, 5), n as usize);
+    s.pt_len = n;
+    s.pt_off = 0;
+    return true;
+}
+
+// `tls_shutdown_free(ssl)` — send close_notify best-effort and release
+// the session. Must run before the caller closes the fd, since the alert
+// is written over the still-open socket.
 fn tls_shutdown_free(ssl: *u8) -> void ![net] {
     if ssl as i64 == 0 { return; }
-    SSL_shutdown(ssl);
-    SSL_free(ssl);
+    let s: *TlsSession = ssl as *TlsSession;
+    if s.state == _tls_state_connected() {
+        let mut body: int[] = [];
+        body.push(1);
+        body.push(_tls_alert_close_notify());
+        let _ = _tls_write_encrypted(s, _tls_ct_alert(), body);
+    }
+    s.state = _tls_state_closed();
+    _tls_session_free(s);
 }
 
-// ── Inbound (server) surface (SFEP-0036 §3.5) ─────────────────────
-// Server-side TLS termination for the `serve` accept loop
-// (`../concurrency/serve.sfn`). Symmetric to the client surface above: a
-// server `SSL_CTX` loads the cert chain + private key, and each accepted
-// fd is wrapped into an `SSL*` via the server handshake (`SSL_accept`
-// instead of `SSL_connect`). No client-certificate (mTLS) request — the
-// server does not verify a peer cert in v0 (deferred post-1.0), so no
-// `SSL_CTX_set_verify` is set on the server ctx and no callback is ever
-// address-taken (the same callback-free property as the client, §3.2).
-// Reuses `SSL_CTX_new` / `SSL_CTX_free` / `SSL_new` / `SSL_free` /
-// `SSL_set_fd` and the `tls_read` / `tls_write` / `tls_shutdown_free`
-// helpers already declared above.
-extern fn TLS_server_method() -> *u8;
-
-// `int SSL_CTX_use_certificate_chain_file(SSL_CTX *, const char *file)` —
-// load the server's PEM certificate chain. Returns 1 on success.
-extern fn SSL_CTX_use_certificate_chain_file(ctx: *u8, file: *u8) -> i32;
-
-// `int SSL_CTX_use_PrivateKey_file(SSL_CTX *, const char *file, int type)`
-// — load the server's PEM private key (`type` = SSL_FILETYPE_PEM = 1).
-// Returns 1 on success; a load failure (missing / mismatched key) means we
-// cannot serve TLS.
-extern fn SSL_CTX_use_PrivateKey_file(ctx: *u8, file: *u8, ty: i32) -> i32;
-
-// `int SSL_accept(SSL *)` — drive the blocking server-side handshake over
-// the attached fd. Returns 1 on success. Callback-free (blocking BIO).
-extern fn SSL_accept(ssl: *u8) -> i32;
-
-// `int SSL_CTX_check_private_key(const SSL_CTX *)` — verify the loaded
-// private key matches the loaded certificate. `SSL_CTX_use_PrivateKey_file`
-// only validates the key's own internal consistency, not that it pairs with
-// the cert, so a mismatched keypair would otherwise pass ctx build and fail
-// every handshake at runtime. Returns 1 when the pair is consistent.
-extern fn SSL_CTX_check_private_key(ctx: *u8) -> i32;
-
-// `tls_server_ctx(cert_path, key_path)` — build a server `SSL_CTX` with the
-// certificate chain + private key loaded (PEM) for the server's lifetime
-// (SFEP-0036 §3.5/§3.7). No peer (client-cert) verification is configured
-// — mTLS is out of scope for 1.0 (§3.6). Returns the ctx, or null on any
-// failure (freeing a partially-built ctx first) so the caller fails closed
-// rather than binding a mode that cannot complete a handshake. `cert_path`
-// and `key_path` are NUL-terminated C strings (bare filesystem paths).
-fn tls_server_ctx(cert_path: *u8, key_path: *u8) -> *u8 {
-    if cert_path as i64 == 0 { return null; }
-    if key_path as i64 == 0 { return null; }
-    let method: *u8 = TLS_server_method();
-    if method as i64 == 0 { return null; }
-    let ctx: *u8 = SSL_CTX_new(method);
-    if ctx as i64 == 0 { return null; }
-    // SSL_FILETYPE_PEM = 1.
-    if SSL_CTX_use_certificate_chain_file(ctx, cert_path) != 1 {
-        SSL_CTX_free(ctx);
-        return null;
-    }
-    if SSL_CTX_use_PrivateKey_file(ctx, key_path, 1) != 1 {
-        SSL_CTX_free(ctx);
-        return null;
-    }
-    // Fail closed at ctx-build time if the key does not pair with the cert,
-    // rather than deferring the failure to every per-connection handshake.
-    if SSL_CTX_check_private_key(ctx) != 1 {
-        SSL_CTX_free(ctx);
-        return null;
-    }
-    return ctx;
-}
-
-// `tls_accept_fd(ctx, fd)` — wrap an already-accepted socket `fd` into a
-// server `SSL*`: attach the fd (blocking BIO), then drive the blocking
-// server handshake (`SSL_accept`). Returns the handshaken `SSL*`, or null
-// on any failure (freeing the partial `SSL*` first) so the caller drops the
-// connection rather than reading plaintext off a half-open TLS socket. The
-// `SSL_CTX` is shared read-only across pool workers — OpenSSL `SSL_CTX` is
-// reference-counted and thread-safe for `SSL_new`, so no per-worker ctx is
-// needed. The caller MUST arm the fd's `SO_RCVTIMEO`/`SO_SNDTIMEO` (#1581)
-// BEFORE this call so the blocking `SSL_accept` handshake is bounded — a
-// stalled/slow-loris handshake must not pin a pool worker indefinitely.
-fn tls_accept_fd(ctx: *u8, fd: i32) -> *u8 ![net] {
-    if ctx as i64 == 0 { return null; }
-    let ssl: *u8 = SSL_new(ctx);
-    if ssl as i64 == 0 { return null; }
-    if SSL_set_fd(ssl, fd) != 1 {
-        SSL_free(ssl);
-        return null;
-    }
-    if SSL_accept(ssl) != 1 {
-        SSL_free(ssl);
-        return null;
-    }
-    return ssl;
-}
+export {
+    tls_accept_fd,
+    tls_client_ctx,
+    tls_connect_fd,
+    tls_ctx_free,
+    tls_read,
+    tls_server_ctx,
+    tls_shutdown_free,
+    tls_write
+};

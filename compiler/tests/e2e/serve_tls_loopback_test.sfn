@@ -72,7 +72,10 @@ fn _scratch_dir() -> string ![io] {
 // `openssl s_client` does not verify by default, so no SAN is needed for
 // this handshake-and-respond pin (cert-verification enforcement is #3/#4).
 fn _gen_cert(cert: string, key: string) -> bool ![io] {
-    let exit = process.run_capture(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-keyout", key, "-out", cert, "-days", "2", "-nodes", "-subj", "/CN=127.0.0.1"], _child_env());
+    // Native TLS server signs CertificateVerify with Ed25519 only (RSA/ECDSA
+    // signing is out of SFEP-0048 §6.3 scope), so `sfn_serve_tls` accepts an
+    // Ed25519 certificate only (SFN-341).
+    let exit = process.run_capture(["openssl", "req", "-x509", "-newkey", "ed25519", "-keyout", key, "-out", cert, "-days", "2", "-nodes", "-subj", "/CN=127.0.0.1"], _child_env());
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     return exit == 0;

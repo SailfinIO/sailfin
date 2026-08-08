@@ -162,7 +162,10 @@ fn _scratch_root() -> string ![io] {
 // modern OpenSSL checks the SAN (not the CN) when a SAN is present.
 // Returns true on success.
 fn _gen_cert(dir: string, san_host: string) -> boolean ![io] {
-    let exit = process.run_capture(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-keyout", dir
+    // Native TLS server signs CertificateVerify with Ed25519 only (RSA/ECDSA
+    // signing is out of SFEP-0048 §6.3 scope), so `sfn_serve_tls` accepts an
+    // Ed25519 certificate only (SFN-341).
+    let exit = process.run_capture(["openssl", "req", "-x509", "-newkey", "ed25519", "-keyout", dir
         + "/key.pem", "-out", dir
         + "/cert.pem", "-days", "1", "-nodes", "-subj", "/CN="
         + san_host, "-addext", "subjectAltName=DNS:"

@@ -76,10 +76,13 @@ test "cross-windows RUNTIME_MODS / manifest per-module contracts" ![io] {
     assert contains(manifest, "\"sfn/platform/rand.sfn\"");
     assert ! contains(makefile, "runtime/sfn/platform/rand.sfn");
 
-    // tls.sfn (#1782): in the manifest, excluded from RUNTIME_MODS — it
-    // pulls the OpenSSL externs, which cannot resolve in a static mingw
-    // link (Windows TLS is #1485 M10). http.sfn forward-declares its
-    // @tls_* symbols, resolved to the windows_stubs.ll no-op stubs.
+    // tls.sfn: in the manifest, excluded from RUNTIME_MODS. SFN-341 swapped
+    // the OpenSSL-backed implementation for a native TLS stack, so the
+    // module no longer pulls OpenSSL externs — but Windows TLS itself
+    // remains unimplemented (Windows TLS is #1485 M10), so it is still left
+    // out of the mingw bridge rather than joined to it. http.sfn
+    // forward-declares its @tls_* symbols, resolved to the windows_stubs.ll
+    // no-op stubs.
     assert contains(manifest, "\"sfn/platform/tls.sfn\"");
     assert ! contains(makefile, "runtime/sfn/platform/tls.sfn");
 

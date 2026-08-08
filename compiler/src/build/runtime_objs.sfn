@@ -32,8 +32,7 @@ import {
     _collect_sfn_files_cmd,
     _mktemp_sibling_cmd,
     _sha256_of_file_cmd,
-    _sha256_of_text_file,
-    _shell_read_cmd
+    _sha256_of_text_file
 } from "./fs";
 import { sha256_hex_of_string } from "./hash";
 import {
@@ -56,7 +55,6 @@ import {
 // duplicated the real Sailfin modules the native source set already
 // carries, so a native MSVC link failed with `LNK2005`.
 import {
-    build_host_os,
     build_target_os,
     build_target_triple,
     target_artifact_tag,
@@ -1472,60 +1470,6 @@ fn _compile_runtime_sfn_sources(runtime_capsules: RuntimeCapsuleArtifacts[], out
 // (`cli_commands.sfn::_clang_link_test_cmd_with_deps`, which imports
 // this through the `cli_main <-> cli_commands` cycle) so the two
 // paths resolve the runtime identically.
-// OpenSSL link-search path (Darwin only, #1782 / SFEP-0036). The native
-// runtime links `-lssl -lcrypto` (TLS), so every Sailfin binary — incl.
-// the compiler — pulls OpenSSL at link. On Linux `libssl-dev` sits on
-// clang's default search path; on macOS Homebrew's `openssl@3` is
-// keg-only (not symlinked into a default `-l` dir), so the link fails
-// with `ld: library 'ssl' not found`. The build driver adds the keg's
-// lib dir itself — rather than relying on a caller's `LIBRARY_PATH` — so
-// EVERY link path resolves `-lssl`: `sfn build`/`run` (the program link)
-// AND `sfn test`'s per-binary link (a separate argv builder that emits
-// `plan.libs` but NOT `link_flags`), for the compiler self-host, nested
-// test builds spawned with a curated env, and real user builds alike.
-// Injected into the shared runtime `link_libs` (consumed by both argv
-// builders as `plan.libs`) so it can't be missed by one path. The `-L`
-// precedes `-lssl`/`-lcrypto`, so it applies. Candidate order (first hit
-// wins, so exactly one `-L` is ever emitted): `SAILFIN_OPENSSL_PREFIX`
-// (supported public override — a valid prefix surfaces `-L<prefix>/lib`),
-// then the standard arm64 / Intel keg dirs, then `brew --prefix
-// openssl@3`, and finally a `pkg-config --libs-only-L openssl` fallback
-// for a non-Homebrew / system-registered OpenSSL (SFEP-0036 §3.1, #1821).
-// Emits nothing on Linux (default path). Darwin-gated via the non-shelling
-// `build_host_os()` host probe (this is a host concern — where the linking
-// host's OpenSSL keg lives — so it honors `SAILFIN_HOST_OS`, not the target
-// override), so Linux argv stays byte-identical (#1112) and a Windows host
-// returns [] with no subprocess.
-fn _openssl_link_search_flags() -> string[] ![io] {
-    let os = build_host_os();
-    if !strings_equal(os, "Darwin") { return []; }
-    // Try the instant `[ -d ]` checks (env override, then the standard
-    // arm64 / Intel keg dirs) FIRST, and only shell out to `brew --prefix`
-    // when none exist — command substitution in a `for` list would run
-    // `brew` unconditionally (~100-300ms), and this probe fires on every
-    // link (incl. each `sfn test` per-binary link). The override is guarded
-    // by `[ -n "$P" ]` so an UNSET `SAILFIN_OPENSSL_PREFIX` does not expand
-    // to the bare `/lib` candidate (which would wrongly short-circuit the
-    // keg/brew/pkg-config search on a host that happens to have a `/lib`
-    // dir); it only participates when explicitly set. The `pkg-config`
-    // fallback runs LAST and only when every `[ -d ]` keg check AND
-    // `brew --prefix` miss; it is guarded by `command -v pkg-config` so a
-    // host without `pkg-config` (or without a registered `openssl.pc`)
-    // yields empty output and the function returns `[]` exactly as before
-    // (#1112 keeps the fast keg-hit path free of any `brew`/`pkg-config`
-    // subshell). Homebrew's `openssl@3` is keg-only, so its `.pc` is
-    // generally off the default `pkg-config` path — this fallback targets
-    // system/registered OpenSSL, not the Homebrew case the keg/brew
-    // candidates already cover.
-    let probe = "d=\"\"; P=\"$"
-        + "{SAILFIN_OPENSSL_PREFIX:-}\"; [ -n \"$P\" ] && [ -d \"$P/lib\" ] && d=\"$P/lib\"; [ -z \"$d\" ] && { for c in /opt/homebrew/opt/openssl@3/lib /usr/local/opt/openssl@3/lib; do [ -d \"$c\" ] && { d=\"$c\"; break; }; done; }; [ -z \"$d\" ] && { p=\"$(brew --prefix openssl@3 2>/dev/null)\"; [ -n \"$p\" ] && [ -d \"$p/lib\" ] && d=\"$p/lib\"; }; [ -z \"$d\" ] && command -v pkg-config >/dev/null 2>&1 && { L=\"$(pkg-config --libs-only-L openssl 2>/dev/null)\"; L=\"$"
-        + "{L%% *}\"; c=\"$"
-        + "{L#-L}\"; [ -n \"$c\" ] && [ -d \"$c\" ] && d=\"$c\"; }; printf %s \"$d\"";
-    let dir = _shell_read_cmd(probe);
-    if dir.length == 0 { return []; }
-    return ["-L" + dir];
-}
-
 // Rewrite the runtime capsule set for `target_os` (SFN-52). Only the
 // `sfn_sources` list is target-conditioned here (the POSIX↔Windows process
 // swap + rlimit drop); the `link_libs` POSIX filter is applied once at the
@@ -1566,9 +1510,7 @@ fn assemble_runtime_capsule_link_inputs(runtime_capsules: RuntimeCapsuleArtifact
     let inputs = _clang_compile_runtime_capsule_objects(capsules, out_dir, opt_flag, shared_cache_root, jobs, target_triple);
     if !inputs.success { return _failed_runtime_link_inputs(); }
     let mut objects: string[] = inputs.object_paths;
-    // Prepend the Darwin OpenSSL keg `-L` (if any) so `-lssl`/`-lcrypto`
-    // resolve on macOS across every link path (#1782). No-op on Linux.
-    let mut link_libs: string[] = _openssl_link_search_flags();
+    let mut link_libs: string[] = [];
     let mut lli: int = 0;
     loop {
         if lli >= inputs.link_libs.length { break; }
@@ -1774,7 +1716,6 @@ export {
     runtime_stamp_identity,
     write_runtime_identity_stamp,
     _runtime_bundle_exists,
-    _openssl_link_search_flags,
     _runtime_obj_stem,
     _runtime_obj_key_with_target
 };

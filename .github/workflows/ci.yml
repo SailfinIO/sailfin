@@ -649,7 +649,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             binutils-aarch64-linux-gnu clang-18 gcc-14-aarch64-linux-gnu \
-            libc6-dev:arm64 libssl-dev:arm64 lld llvm-18
+            libc6-dev:arm64 lld llvm-18
           # The direct-link probe deliberately ignores /usr/lib/gcc-cross.
           # Expose the matching target CRT under the native multiarch layout
           # so pass-1 and the native rebuild use the same ld.lld contract.
@@ -736,7 +736,7 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            binutils clang-18 lld llvm-18 libssl-dev
+            binutils clang-18 lld llvm-18
 
       - name: Download cross-emitted compiler
         uses: actions/download-artifact@v8
@@ -860,7 +860,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends clang-18 lld llvm-18 libssl-dev
+          sudo apt-get install -y --no-install-recommends clang-18 lld llvm-18
 
       - name: Download native compiler passes
         uses: actions/download-artifact@v8

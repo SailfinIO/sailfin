@@ -73,7 +73,7 @@ each role." Measured against the tree on 2026-08-05:
 | Link | **Sailfin on Linux x86-64/aarch64**, clang elsewhere | `compiler/src/build/direct_link.sfn` (339) |
 | Raw syscall emission | **Sailfin primitive, no consumer** | `compiler/src/llvm/syscall.sfn` (156) |
 | Platform access | **libc/POSIX via `extern fn`** | 528 `extern fn` under `runtime/` |
-| TLS / crypto | **OpenSSL, linked into every binary** | `runtime/capsule.toml:88` |
+| TLS / crypto | **Sailfin (native TLS 1.3, SFEP-0036/SFEP-0048, SFN-341)** | `runtime/sfn/platform/tls_record.sfn` |
 
 Three entries in that table are routinely misread, so they are stated plainly:
 

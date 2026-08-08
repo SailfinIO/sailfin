@@ -19,7 +19,6 @@
 // through to real behaviour. Both branches keep the normal suite green.
 import { _macos_sdk_link_flags } from "../../src/backend";
 import { _mktemp_sibling_cmd, _sha256_of_file_cmd } from "../../src/build/fs";
-import { _openssl_link_search_flags } from "../../src/build/runtime_objs";
 import { build_target_os, host_is_windows } from "../../src/build/target";
 import { CacheKey, cache_touch_entry } from "../../src/build_cache";
 import { _cr_jobs_from_probe, _cr_resolve_jobs } from "../../src/capsule_emit_parallel";
@@ -64,8 +63,6 @@ test "windows-deshell: leaf helpers degrade without a POSIX subprocess" ![io] {
         // green on a Linux suite run; recompute it whenever the reserve
         // moves.
         assert _cr_jobs_from_probe(4, 17179869184) == 4;
-        // OpenSSL keg search is Darwin-only; a Windows host yields no `-L`.
-        assert _openssl_link_search_flags().length == 0;
     } else {
         // POSIX host (the default suite): the guards take the else-branch,
         // so the seam is wired and job sizing is a real positive count —
