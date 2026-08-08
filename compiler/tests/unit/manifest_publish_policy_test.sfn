@@ -44,6 +44,10 @@ test "manifest publish: explicit false resolves" {
     _assert_publish_value("[capsule]\nname = \"private\"\npublish = false\n", false, true);
 }
 
+test "manifest publish: compiler capsule is private" ![io] {
+    _assert_publish_value(fs.readFile("compiler/capsule.toml"), false, true);
+}
+
 test "manifest publish: inline comments preserve boolean type" {
     _assert_publish_value("[capsule]\nname = \"private\"\npublish = false # workspace-only\n", false, true);
 }

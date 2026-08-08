@@ -30,6 +30,8 @@ here.
   refusal is `E0612`, names the capsule, and exits 1. The gate reads the
   manifest already loaded for name/version, so an explicit `[path]`,
   current-directory discovery, and an `SFN_REGISTRY` override all reach it.
+  The compiler's own `compiler/capsule.toml` declares `publish = false`, so
+  `sfn publish compiler` is covered by the same refusal path (SFN-734).
 - **Private-capsule manifest policy — resolver provenance** (SFEP-0020 §3.6,
   SFN-715). Every `CapsuleSource` carries an `origin` stamped by the locator
   that resolved it — `local` (relative imports, the entry module, the project's
