@@ -18,8 +18,8 @@
 import { analyze_program } from "../analyzer";
 import { Statement } from "../ast";
 import { _collect_sfn_files_cmd, _dirname_cmd, _path_join_cmd } from "../build/fs";
-import { prepare_project_capsules_for_check } from "../capsule_resolver";
 import { workspace_capability_gate } from "../capsule_resolver/capability";
+import { prepare_project_capsules_for_check } from "../capsule_resolver/check";
 import { discover_project_root } from "../capsule_resolver/paths";
 import { CheckCapsuleResolution, empty_resolver_consumer } from "../capsule_resolver/types";
 import { discover_workspace_root } from "../capsule_resolver/workspace";

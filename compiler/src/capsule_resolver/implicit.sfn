@@ -12,7 +12,7 @@
 import { int_to_string } from "sfn/strings";
 
 import { _cr_source_imports_host, collect_scoped_import_specs } from "../capsule_import_scan";
-import { module_name_from_path } from "../main";
+import { module_name_from_path } from "../module_paths";
 import { substring } from "../string_utils";
 import { toml_get_dependencies } from "../toml_parser";
 import { workspace_member_for_spec } from "./capability";

@@ -15,12 +15,10 @@
 //
 // Strategy: ONE `lower_to_llvm_ir_from_text_with_provider_context` call over the REAL `io.sfn`
 // (read via `fs.readFile`). Unlike the `platform/*` skeletons, `io.sfn`
-// imports `write` from `./platform/libc`; `lower_to_llvm_ir_from_text_with_provider_context`
-// resolves imported `extern` signatures through
-// `collect_imported_module_context_for_module` (the same path the `sfn
-// emit llvm` driver uses), so the cross-module `write` call lowers to a
-// `declare` + `call` exactly as the `.sh` asserted.
-import { resolve_llvm_provider_context } from "../../src/build/llvm_provider_context";
+// imports `write` from `./platform/libc`. This test deliberately supplies an
+// explicit empty import context; the runtime-helper registry still lowers the
+// cross-module `write` call to the expected `declare` + `call`.
+import { empty_llvm_import_context, resolve_llvm_provider_context } from "../../src/build/llvm_provider_context";
 import { emit_native_text_with_module_name } from "../../src/emit_native";
 import { lower_to_llvm_ir_from_text_with_provider_context } from "../../src/llvm/lowering/entrypoints";
 import { parse_program } from "../../src/parser/mod";
@@ -34,7 +32,7 @@ test "lowering: runtime/sfn/io.sfn lowers the imported libc write call" ![io] {
     let source = fs.readFile("runtime/sfn/io.sfn");
     let program = parse_program(source);
     let native = emit_native_text_with_module_name(program, "runtime/sfn/io");
-    let ir = lower_to_llvm_ir_from_text_with_provider_context(native, "runtime/sfn/io", resolve_llvm_provider_context());
+    let ir = lower_to_llvm_ir_from_text_with_provider_context(native, "runtime/sfn/io", empty_llvm_import_context(), resolve_llvm_provider_context());
 
     // The inlined extern is declared and called against.
     assert _contains(ir, "declare i64 @write(");
@@ -54,7 +52,7 @@ test "lowering: io.sfn defines the bare native sfn_print* family" ![io] {
     let source = fs.readFile("runtime/sfn/io.sfn");
     let program = parse_program(source);
     let native = emit_native_text_with_module_name(program, "runtime/sfn/io");
-    let ir = lower_to_llvm_ir_from_text_with_provider_context(native, "runtime/sfn/io", resolve_llvm_provider_context());
+    let ir = lower_to_llvm_ir_from_text_with_provider_context(native, "runtime/sfn/io", empty_llvm_import_context(), resolve_llvm_provider_context());
 
     // Bare canonical printers — now Sailfin-defined.
     assert _contains(ir, "define void @sfn_print(");
@@ -71,7 +69,7 @@ test "lowering: io.sfn defines the bare native env readers (C7/R7 flipped)" ![io
     let source = fs.readFile("runtime/sfn/io.sfn");
     let program = parse_program(source);
     let native = emit_native_text_with_module_name(program, "runtime/sfn/io");
-    let ir = lower_to_llvm_ir_from_text_with_provider_context(native, "runtime/sfn/io", resolve_llvm_provider_context());
+    let ir = lower_to_llvm_ir_from_text_with_provider_context(native, "runtime/sfn/io", empty_llvm_import_context(), resolve_llvm_provider_context());
 
     // C7/R7 of #1308 (issue #1312): `env.get` / `env.home` are now real
     // Sailfin bodies. io.sfn defines the bare canonical `sfn_getenv` /
@@ -93,7 +91,7 @@ test "lowering: io.sfn immediate-codepoint guard decodes natively (no C printers
     let source = fs.readFile("runtime/sfn/io.sfn");
     let program = parse_program(source);
     let native = emit_native_text_with_module_name(program, "runtime/sfn/io");
-    let ir = lower_to_llvm_ir_from_text_with_provider_context(native, "runtime/sfn/io", resolve_llvm_provider_context());
+    let ir = lower_to_llvm_ir_from_text_with_provider_context(native, "runtime/sfn/io", empty_llvm_import_context(), resolve_llvm_provider_context());
 
     // #1308: tagged immediate-codepoint pointers (pre-M1.A.2) are now decoded
     // in pure Sailfin (`_sfn_print_immediate` → the native
@@ -112,7 +110,7 @@ test "lowering: io.sfn immediate-codepoint guard decodes natively (no C printers
 test "lowering: print.info user call routes to @sfn_print_info" ![io] {
     let program = parse_program("fn main() -> void ![io] { print.info(\"x\"); }");
     let native = emit_native_text_with_module_name(program, "io_probe");
-    let ir = lower_to_llvm_ir_from_text_with_provider_context(native, "io_probe", resolve_llvm_provider_context());
+    let ir = lower_to_llvm_ir_from_text_with_provider_context(native, "io_probe", empty_llvm_import_context(), resolve_llvm_provider_context());
 
     assert _contains(ir, "call void @sfn_print_info({i8*, i64}");
 }

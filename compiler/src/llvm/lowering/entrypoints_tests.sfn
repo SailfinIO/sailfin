@@ -6,6 +6,7 @@
 // Imports are preserved — the seed linker needs the full import graph
 // for correct cross-module symbol resolution.
 import {
+    ImportedModuleContext,
     LayoutManifest,
     NativeArtifact,
     NativeEnum,
@@ -34,10 +35,7 @@ import {
     find_function_effect_entry,
     propagate_function_effects
 } from "../effects";
-import {
-    apply_layout_manifest_to_module,
-    collect_imported_module_context_for_module
-} from "../imports";
+import { apply_layout_manifest_to_module } from "../imports";
 import { LLVMProviderContext, install_llvm_provider_context } from "../lowering_debug_state";
 import {
     render_enum_type_definitions,
@@ -99,7 +97,7 @@ import { lower_module_bindings_to_globals } from "./module_globals";
 
 // Native-module test entrypoint retained for callers that already hold the
 // structured artifact instead of its serialized text.
-fn lower_to_llvm_for_tests(native_module: NativeModule, provider_context: LLVMProviderContext) -> LoweredLLVMResult ![io] {
+fn lower_to_llvm_for_tests(native_module: NativeModule, import_context: ImportedModuleContext, provider_context: LLVMProviderContext) -> LoweredLLVMResult ![io] {
     install_llvm_provider_context(provider_context);
     let artifact = select_text_artifact(native_module.artifacts);
     if artifact == null {
@@ -114,7 +112,6 @@ fn lower_to_llvm_for_tests(native_module: NativeModule, provider_context: LLVMPr
         };
     }
     let parse = parse_native_artifact(artifact.contents);
-    let import_context = collect_imported_module_context_for_module(parse.imports, native_module.module_name);
-    let base = lower_to_llvm_with_parsed_context(native_module, parse, import_context.manifests, import_context.native_texts, import_context.diagnostics);
+    let base = lower_to_llvm_with_parsed_context(native_module, parse, import_context);
     return base;
 }

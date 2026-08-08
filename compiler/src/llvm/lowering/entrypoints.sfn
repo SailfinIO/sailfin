@@ -2,6 +2,7 @@
 //
 // LLVM IR lowering entrypoints — public API surface.
 import {
+    ImportedModuleContext,
     LayoutManifest,
     NativeArtifact,
     NativeBinding,
@@ -47,8 +48,6 @@ import {
 } from "../effects";
 import {
     apply_layout_manifest_to_module,
-    collect_imported_module_context_for_module,
-    resolve_import_artifact_slug,
     resolve_import_module_slug_for_module
 } from "../imports";
 import { LLVMProviderContext, install_llvm_provider_context } from "../lowering_debug_state";
@@ -79,7 +78,6 @@ import {
     EnumTypeInfo,
     EnumVariantInfo,
     FunctionEffectEntry,
-    ImportedModuleContext,
     LLVMArtifactResult,
     LifetimeRegionMetadata,
     LoweredLLVMLinesResult,
@@ -104,9 +102,7 @@ import { emit_llvm_function } from "./emission";
 import { lower_to_llvm_lines_with_parsed_context } from "./lowering_core";
 import { has_fatal_lowering_diagnostic, print_fatal_lowering_diagnostics } from "./lowering_core/diagnostics";
 import {
-    generate_llvm_artifact_from_native_lines,
     generate_llvm_artifact_from_native_lines_with_context,
-    generate_llvm_artifact_from_native_text,
     generate_llvm_artifact_from_native_text_with_context
 } from "./lowering_core/file_emission";
 import { lower_to_llvm_lines_with_parsed_context_for_tests } from "./lowering_core/test_harness";
@@ -124,7 +120,6 @@ import {
     insert_before_llvm_footer,
     is_test_module_slug,
     render_function_shim,
-    resolve_import_provider_module_name,
     sanitize_collection_length
 } from "./lowering_helpers";
 import {
@@ -149,22 +144,30 @@ import {
 import { recover_functions_for_lowering } from "./lowering_recovery";
 import { lower_module_bindings_to_globals } from "./module_globals";
 
-fn lower_to_llvm_with_provider_context(native_module: NativeModule, provider_context: LLVMProviderContext) -> LoweredLLVMResult ![io] {
+fn _empty_import_context() -> ImportedModuleContext {
+    return ImportedModuleContext {
+        manifests: [],
+        native_texts: [],
+        diagnostics: [],
+        module_aliases: []
+    };
+}
+
+fn lower_to_llvm_with_provider_context(native_module: NativeModule, import_context: ImportedModuleContext, provider_context: LLVMProviderContext) -> LoweredLLVMResult ![io] {
     install_llvm_provider_context(provider_context);
     let artifact = select_text_artifact(native_module.artifacts);
     let mut _if206: boolean = false;
     if artifact == null { _if206 = true; }
     if artifact.contents.length == 0 { _if206 = true; }
     if _if206 {
-        return lower_to_llvm_with_context(native_module, [], [], []);
+        return lower_to_llvm_with_context(native_module, _empty_import_context());
     }
     let parse = parse_native_artifact(artifact.contents);
-    let import_context = collect_imported_module_context_for_module(parse.imports, native_module.module_name);
-    return lower_to_llvm_with_parsed_context(native_module, parse, import_context.manifests, import_context.native_texts, import_context.diagnostics);
+    return lower_to_llvm_with_parsed_context(native_module, parse, import_context);
 }
 
-fn lower_to_llvm_lines(native_module: NativeModule, provider_context: LLVMProviderContext) -> LoweredLLVMLinesResult ![io] {
-    let ir = lower_to_llvm_ir_with_provider_context(native_module, provider_context);
+fn lower_to_llvm_lines(native_module: NativeModule, import_context: ImportedModuleContext, provider_context: LLVMProviderContext) -> LoweredLLVMLinesResult ![io] {
+    let ir = lower_to_llvm_ir_with_provider_context(native_module, import_context, provider_context);
     let mut _if207: boolean = false;
     if ir == null { _if207 = true; }
     if ir.length == 0 { _if207 = true; }
@@ -193,8 +196,8 @@ fn lower_to_llvm_lines(native_module: NativeModule, provider_context: LLVMProvid
     };
 }
 
-fn lower_to_llvm_lines_only(native_module: NativeModule, provider_context: LLVMProviderContext) -> string[] ![io] {
-    let ir = lower_to_llvm_ir_with_provider_context(native_module, provider_context);
+fn lower_to_llvm_lines_only(native_module: NativeModule, import_context: ImportedModuleContext, provider_context: LLVMProviderContext) -> string[] ![io] {
+    let ir = lower_to_llvm_ir_with_provider_context(native_module, import_context, provider_context);
     let mut _if208: boolean = false;
     if ir == null { _if208 = true; }
     if ir.length == 0 { _if208 = true; }
@@ -206,29 +209,27 @@ fn lower_to_llvm_lines_only(native_module: NativeModule, provider_context: LLVMP
 // LLVM text. Returning a plain string avoids carrying the full `LoweredLLVMResult`
 // struct across compilation boundaries (stage1 Python + stage2 native), which
 // has historically caused layout/ABI mismatches and nondeterministic output.
-fn lower_to_llvm_ir_with_provider_context(native_module: NativeModule, provider_context: LLVMProviderContext) -> string ![io] {
+fn lower_to_llvm_ir_with_provider_context(native_module: NativeModule, import_context: ImportedModuleContext, provider_context: LLVMProviderContext) -> string ![io] {
     install_llvm_provider_context(provider_context);
     let artifact = select_text_artifact(native_module.artifacts);
     let mut _if209: boolean = false;
     if artifact == null { _if209 = true; }
     if artifact.contents.length == 0 { _if209 = true; }
     if _if209 {
-        let lowered = lower_to_llvm_with_context(native_module, [], [], []);
+        let lowered = lower_to_llvm_with_context(native_module, _empty_import_context());
         return lowered.ir;
     }
     // Parse once and reuse throughout lowering; parsing the native artifact is expensive.
     let parse = parse_native_artifact(artifact.contents);
-    let import_context = collect_imported_module_context_for_module(parse.imports, native_module.module_name);
-    let lowered = lower_to_llvm_with_parsed_context(native_module, parse, import_context.manifests, import_context.native_texts, import_context.diagnostics);
+    let lowered = lower_to_llvm_with_parsed_context(native_module, parse, import_context);
     return lowered.ir;
 }
 
 // Build LLVM IR from raw native text (non-test path), avoiding NativeModule ABI issues.
-fn lower_to_llvm_ir_from_text_with_provider_context(native_text: string, module_name: string, provider_context: LLVMProviderContext) -> string ![io] {
+fn lower_to_llvm_ir_from_text_with_provider_context(native_text: string, module_name: string, import_context: ImportedModuleContext, provider_context: LLVMProviderContext) -> string ![io] {
     install_llvm_provider_context(provider_context);
     if native_text.length == 0 { return ""; }
     let parse = parse_native_artifact(native_text);
-    let import_context = collect_imported_module_context_for_module(parse.imports, module_name);
     let dummy_module = NativeModule {
         module_name: module_name,
         artifacts: [NativeArtifact {
@@ -237,7 +238,7 @@ fn lower_to_llvm_ir_from_text_with_provider_context(native_text: string, module_
         entry_points: [],
         symbol_count: 0
     };
-    let lowered_lines = lower_to_llvm_lines_with_parsed_context(dummy_module, parse, import_context.manifests, import_context.native_texts, import_context.diagnostics, true, native_text);
+    let lowered_lines = lower_to_llvm_lines_with_parsed_context(dummy_module, parse, import_context, true, native_text);
     let mut _if219: boolean = false;
     if lowered_lines.lines == null { _if219 = true; }
     if lowered_lines.lines.length == 0 { _if219 = true; }
@@ -265,11 +266,10 @@ fn lower_to_llvm_ir_from_text_with_provider_context(native_text: string, module_
 // expression could have been silently dropped (e.g. a capturing lambda with
 // a mutable capture, issue #687) and printing the partial output would
 // silently miscompile.
-fn print_llvm_ir_from_text_with_provider_context(native_text: string, module_name: string, provider_context: LLVMProviderContext) -> boolean ![io] {
+fn print_llvm_ir_from_text_with_provider_context(native_text: string, module_name: string, import_context: ImportedModuleContext, provider_context: LLVMProviderContext) -> boolean ![io] {
     install_llvm_provider_context(provider_context);
     if native_text.length == 0 { return false; }
     let parse = parse_native_artifact(native_text);
-    let import_context = collect_imported_module_context_for_module(parse.imports, module_name);
     let dummy_module = NativeModule {
         module_name: module_name,
         artifacts: [NativeArtifact {
@@ -278,7 +278,7 @@ fn print_llvm_ir_from_text_with_provider_context(native_text: string, module_nam
         entry_points: [],
         symbol_count: 0
     };
-    let lowered_lines = lower_to_llvm_lines_with_parsed_context(dummy_module, parse, import_context.manifests, import_context.native_texts, import_context.diagnostics, true, native_text);
+    let lowered_lines = lower_to_llvm_lines_with_parsed_context(dummy_module, parse, import_context, true, native_text);
     let mut _if_empty: boolean = false;
     if lowered_lines.lines == null { _if_empty = true; }
     if lowered_lines.lines.length == 0 { _if_empty = true; }
@@ -311,43 +311,28 @@ fn print_llvm_ir_from_text_with_provider_context(native_text: string, module_nam
 // Provider-facing artifact generation. Destination paths and persistence stay
 // in the compiler driver; these functions return identity, lines, and
 // diagnostics only.
-fn lower_native_text_to_llvm_artifact_with_provider_context(native_text: string, module_name: string, provider_context: LLVMProviderContext) -> LLVMArtifactResult ![io] {
+// Import-context-carrying provider entrypoint for the `-p` per-module build
+// path (#999). The driver has already resolved and loaded the module's staged
+// manifests and native texts, including the walk-excluded entry's exported
+// signatures, so lowering performs no artifact discovery or filesystem reads.
+fn lower_native_text_to_llvm_artifact_with_context_and_provider(native_text: string, module_name: string, import_context: ImportedModuleContext, provider_context: LLVMProviderContext) -> LLVMArtifactResult ![io] {
     install_llvm_provider_context(provider_context);
-    return generate_llvm_artifact_from_native_text(native_text, module_name);
-}
-
-// Import-context-carrying provider entrypoint for the
-// `-p` per-module build path (#999). Threads the staged direct-import
-// `.sfn-asm` bodies (from `load_imported_interfaces_from_paths`, e.g. the
-// walk-excluded entry's exported signatures) into lowering so a sibling
-// module's call sites resolve cross-module callee return types instead of
-// hitting the `[fatal]` unresolved-callee gate. The underlying
-// `generate_llvm_artifact_from_native_text_with_context` UNIONS these texts with
-// the module's embedded-import context — mirrors the tests path
-// (`lower_llvm_for_tests_from_text_with_provider_context`).
-fn lower_native_text_to_llvm_artifact_with_context_and_provider(native_text: string, module_name: string, imported_native_texts: string[], provider_context: LLVMProviderContext) -> LLVMArtifactResult ![io] {
-    install_llvm_provider_context(provider_context);
-    return generate_llvm_artifact_from_native_text_with_context(native_text, module_name, imported_native_texts);
+    return generate_llvm_artifact_from_native_text_with_context(native_text, module_name, import_context);
 }
 
 // Lines-array counterparts (#1817): the per-module build driver passes the
 // emitter's line array straight through instead of joining to one string
 // that lowering would immediately re-split.
-fn lower_native_lines_to_llvm_artifact_with_provider_context(native_lines: string[], module_name: string, provider_context: LLVMProviderContext) -> LLVMArtifactResult ![io] {
+fn lower_native_lines_to_llvm_artifact_with_context_and_provider(native_lines: string[], module_name: string, import_context: ImportedModuleContext, provider_context: LLVMProviderContext) -> LLVMArtifactResult ![io] {
     install_llvm_provider_context(provider_context);
-    return generate_llvm_artifact_from_native_lines(native_lines, module_name);
+    return generate_llvm_artifact_from_native_lines_with_context(native_lines, module_name, import_context);
 }
 
-fn lower_native_lines_to_llvm_artifact_with_context_and_provider(native_lines: string[], module_name: string, imported_native_texts: string[], provider_context: LLVMProviderContext) -> LLVMArtifactResult ![io] {
-    install_llvm_provider_context(provider_context);
-    return generate_llvm_artifact_from_native_lines_with_context(native_lines, module_name, imported_native_texts);
-}
-
-fn lower_to_llvm_with_parsed_context(native_module: NativeModule, parse: ParseNativeResult, imported_manifests: LayoutManifest[], imported_native_texts: string[], imported_diagnostics: string[]) -> LoweredLLVMResult ![io] {
+fn lower_to_llvm_with_parsed_context(native_module: NativeModule, parse: ParseNativeResult, import_context: ImportedModuleContext) -> LoweredLLVMResult ![io] {
     let _art = select_text_artifact(native_module.artifacts);
     let mut _native_text: string = "";
     if _art != null { _native_text = _art.contents; }
-    let lowered = lower_to_llvm_lines_with_parsed_context(native_module, parse, imported_manifests, imported_native_texts, imported_diagnostics, true, _native_text);
+    let lowered = lower_to_llvm_lines_with_parsed_context(native_module, parse, import_context, true, _native_text);
     if lowered.lines == null {
         return LoweredLLVMResult {
             ir: "",
@@ -373,8 +358,8 @@ fn lower_to_llvm_with_parsed_context(native_module: NativeModule, parse: ParseNa
     };
 }
 
-fn lower_to_llvm_with_context(native_module: NativeModule, imported_manifests: LayoutManifest[], imported_native_texts: string[], imported_diagnostics: string[]) -> LoweredLLVMResult ![io] {
-    let lowered = lower_to_llvm_lines_with_context(native_module, imported_manifests, imported_native_texts, imported_diagnostics);
+fn lower_to_llvm_with_context(native_module: NativeModule, import_context: ImportedModuleContext) -> LoweredLLVMResult ![io] {
+    let lowered = lower_to_llvm_lines_with_context(native_module, import_context);
     let ir = _join_llvm_lines_linear(lowered.lines);
     let mut output: string = ir;
     if output.length > 0 { output = output + "\n"; }
@@ -389,13 +374,13 @@ fn lower_to_llvm_with_context(native_module: NativeModule, imported_manifests: L
     };
 }
 
-fn lower_to_llvm_lines_with_context(native_module: NativeModule, imported_manifests: LayoutManifest[], imported_native_texts: string[], imported_diagnostics: string[]) -> LoweredLLVMLinesResult ![io] {
+fn lower_to_llvm_lines_with_context(native_module: NativeModule, import_context: ImportedModuleContext) -> LoweredLLVMLinesResult ![io] {
     let mut diagnostics: string[] = [];
-    if imported_diagnostics.length > 0 {
+    if import_context.diagnostics.length > 0 {
         let mut _ci0: int = 0;
         loop {
-            if _ci0 >= imported_diagnostics.length { break; }
-            diagnostics.push(imported_diagnostics[_ci0]);
+            if _ci0 >= import_context.diagnostics.length { break; }
+            diagnostics.push(import_context.diagnostics[_ci0]);
             _ci0 += 1;
         }
     }
@@ -416,5 +401,7 @@ fn lower_to_llvm_lines_with_context(native_module: NativeModule, imported_manife
     }
 
     let parse = parse_native_artifact(artifact.contents);
-    return lower_to_llvm_lines_with_parsed_context(native_module, parse, imported_manifests, imported_native_texts, diagnostics, true, artifact.contents);
+    let mut context = import_context;
+    context.diagnostics = diagnostics;
+    return lower_to_llvm_lines_with_parsed_context(native_module, parse, context, true, artifact.contents);
 }

@@ -1003,8 +1003,8 @@ fn _runtime_sfn_object_tasks(plans: RuntimeSfnObjectPlan[]) -> ParallelProcessTa
 //
 // Deliberately NOT the shared cwd-relative
 // `build/compiler/import-context/` tree: artifacts staged there are
-// consulted by `collect_imported_module_context_for_module`'s
-// on-disk lookup during EVERY emit in that cwd. The prelude imports
+// consulted by the driver-owned import-context loader during EVERY emit in
+// that cwd. The prelude imports
 // the runtime modules (`runtime/prelude.sfn` → `./sfn/array`,
 // `./sfn/string`, …), so publishing runtime `.sfn-asm` into the
 // shared tree makes the prelude's lowering load those entries and
@@ -1111,7 +1111,8 @@ fn _stage_one_runtime_sfn_import_context(self_path: string, src: string, slug: s
 // no such imports gets no sidecar at all — its child emit then
 // degrades to the exact pre-#1288 legacy path.
 // Resolve an import's slug against the staged import-context slugs, mirroring
-// `resolve_import_provider_module_name` (`llvm/lowering/lowering_helpers.sfn`):
+// `resolve_import_provider_module_name`
+// (`llvm/lowering/lowering_helpers_mangling.sfn`):
 // exact match first, then the `<slug>/mod` entry-module fallback. A bare
 // capsule spec (`from "sfn/crypto"`) resolves to the slug `sfn/crypto` while
 // the capsule's entry module stages as `sfn/crypto/mod`. Without the fallback

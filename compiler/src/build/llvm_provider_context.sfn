@@ -5,6 +5,7 @@
 // receives the resolved snapshot and owns only pure lowering decisions.
 import { _env_flag, _get_env_cmd, _legacy_flag_file } from "../build_flags";
 import { LLVMProviderContext } from "../llvm/lowering_debug_state";
+import { ImportedModuleContext } from "../native_ir";
 import { test_runner_active, test_runner_trace } from "../test_runner_state";
 import { build_target_os } from "./target";
 
@@ -29,4 +30,13 @@ fn resolve_llvm_provider_context() -> LLVMProviderContext ![io] {
     };
 }
 
-export { resolve_llvm_provider_context };
+fn empty_llvm_import_context() -> ImportedModuleContext {
+    return ImportedModuleContext {
+        manifests: [],
+        native_texts: [],
+        diagnostics: [],
+        module_aliases: []
+    };
+}
+
+export { empty_llvm_import_context, resolve_llvm_provider_context };

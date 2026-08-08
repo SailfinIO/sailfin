@@ -69,7 +69,6 @@ export {
     LoopContext,
 
     // Import types
-    ImportedModuleContext,
     LayoutManifestApplication
 } from "./types";
 
@@ -145,13 +144,7 @@ export {
 } from "./type_context_queries";
 
 // Re-export import handling functions
-export {
-    load_imported_layout_manifests,
-    collect_imported_module_context,
-    resolve_import_module_slug,
-    apply_layout_manifest_to_module,
-    set_import_context_root
-} from "./imports";
+export { resolve_import_module_slug, apply_layout_manifest_to_module } from "./imports";
 
 // Re-export rendering functions
 export {

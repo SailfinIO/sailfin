@@ -4,6 +4,7 @@
 // collection helpers.  Split from lowering_helpers.sfn to keep both
 // files under 1000 lines.
 import {
+    ImportModuleAlias,
     NativeFunction,
     NativeImport,
     NativeImportSpecifier,
@@ -12,6 +13,7 @@ import {
     NativeStruct
 } from "../../native_ir";
 import { substring } from "../../string_utils";
+import { resolve_import_module_slug_for_module } from "../imports";
 import { trace_lowering } from "../lowering_debug_state";
 import {
     CapabilityManifest,
@@ -44,10 +46,28 @@ import {
     insert_before_llvm_footer,
     pretrim_lines,
     render_function_shim,
-    resolve_import_provider_module_name,
     sanitize_module_suffix,
     should_keep_unmangled_abi_symbol
 } from "./lowering_helpers";
+
+fn resolve_import_provider_module_name(import_path: string, current_module_slug: string, available_module_names: string[], module_aliases: ImportModuleAlias[]) -> string {
+    let base = resolve_import_module_slug_for_module(import_path, current_module_slug);
+    if base.length == 0 { return base; }
+    let mut alias_index: int = 0;
+    loop {
+        if alias_index >= module_aliases.length { break; }
+        if module_aliases[alias_index].import_slug == base {
+            return module_aliases[alias_index].provider_slug;
+        }
+        alias_index += 1;
+    }
+    if string_array_contains(available_module_names, base) { return base; }
+    let mod_slug = base + "/mod";
+    if string_array_contains(available_module_names, mod_slug) {
+        return mod_slug;
+    }
+    return base;
+}
 
 // #960: scan a `.sfn-asm` native text for struct-method symbols.
 // `flatten_struct_methods` names each method `<StructName><MethodName>`, so a
@@ -125,7 +145,7 @@ fn _collect_struct_method_symbols(native_text: string) -> string[] {
     return result;
 }
 
-fn apply_module_symbol_mangling(lines: string[], imports: NativeImport[], current_module_slug: string, imported_native_texts: string[], native_text_path: string) -> MangledModuleResult ![io] {
+fn apply_module_symbol_mangling(lines: string[], imports: NativeImport[], current_module_slug: string, imported_native_texts: string[], module_aliases: ImportModuleAlias[], native_text_path: string) -> MangledModuleResult ![io] {
     let mut diagnostics: string[] = [];
     let debug_lowering = trace_lowering();
     if debug_lowering {
@@ -257,7 +277,7 @@ fn apply_module_symbol_mangling(lines: string[], imports: NativeImport[], curren
             let import_module = substring(after_q1, 0, q2);
             if import_module.length == 0 { continue; }
 
-            let provider_module = resolve_import_provider_module_name(import_module, current_module_slug, available_modules);
+            let provider_module = resolve_import_provider_module_name(import_module, current_module_slug, available_modules, module_aliases);
             let provider_is_runtime = starts_with(provider_module, "runtime/");
             let provider_suffix = sanitize_module_suffix(provider_module);
 

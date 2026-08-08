@@ -40,8 +40,10 @@ import { int_to_string } from "sfn/strings";
 // that can't mutate their own environment.
 import { _atomic_rename_into_place, _mktemp_sibling_cmd } from "./build/fs";
 import { host_is_windows } from "./build/target";
+import { validate_llvm_ir } from "./llvm_validation";
 import {
     compile_to_llvm_file_with_module,
+    compile_to_llvm_file_with_module_import_context_root,
     compile_to_llvm_file_with_module_imports
 } from "./main";
 import { substring } from "./string_utils";
@@ -135,65 +137,6 @@ fn _eh_trace(trace: boolean, module_name: string, attempt: int, max_attempts: in
         + reason);
 }
 
-// The argv for one validator candidate. The `llvm-as` family parses
-// the `.ll` and writes bitcode; the `clang` family round-trips it
-// through `-x ir`. Both take the input as a plain argv element, so a
-// path containing spaces needs no quoting (the `sh -c` cascade this
-// replaced had to double-quote every leg).
-fn _validator_argv(tool: string, ll_path: string, out_path: string) -> string[] {
-    if tool == "llvm-as" || tool == "llvm-as-18" {
-        return [tool, ll_path, "-o", out_path];
-    }
-    return [tool, "-c", "-emit-llvm", "-x", "ir", ll_path, "-o", out_path];
-}
-
-// The validator cascade. Returns true iff some available LLVM tool
-// accepts the IR at `ll_path`. Tries `llvm-as` (cheapest — no
-// codegen), then the versioned `llvm-as-18` (CI's `llvm-18` ships
-// `/usr/bin/llvm-as-18` with no unversioned symlink), then
-// `clang -c -emit-llvm -x ir`, then `clang-18`. A `--version` probe
-// distinguishes "tool missing" (advance to the next candidate) from
-// "tool ran and rejected the IR" (also advances, matching the shell
-// cascade's `||`); with NONE of the four present the result is false,
-// which the caller treats as a validation failure — acceptable because
-// every build/link environment that reaches an emit already requires
-// clang, and the single-shot `sfn emit` callers opt into validation
-// explicitly via `--validate`.
-//
-// Runs as plain argv spawns rather than one `sh -c` string (SFN-487):
-// this fires once per module of every self-host — the build's
-// highest-frequency shell dependency — and `sh`, `command -v`, and
-// `/dev/null` are all absent on a native Windows host.
-fn validate_llvm_ir(ll_path: string) -> boolean ![io] {
-    let candidates: string[] = ["llvm-as", "llvm-as-18", "clang", "clang-18"];
-    let child_env = process.environ();
-    // Replaces the cascade's `-o /dev/null` (Windows spells that `NUL`,
-    // and the stdin-redirect legs have no argv spelling): a sink beside
-    // the module's own `.ll`, unique per module, removed after probing.
-    let sink = ll_path + ".validate.bc";
-    let mut ok: boolean = false;
-    let mut i: int = 0;
-    loop {
-        if i >= candidates.length { break; }
-        let tool = candidates[i];
-        let probe_rc = process.run_capture([tool, "--version"], child_env);
-        let _probe_out = process.capture_take_stdout();
-        let _probe_err = process.capture_take_stderr();
-        if probe_rc == 0 {
-            let rc = process.run_capture(_validator_argv(tool, ll_path, sink), child_env);
-            let _out = process.capture_take_stdout();
-            let _err = process.capture_take_stderr();
-            if rc == 0 {
-                ok = true;
-                break;
-            }
-        }
-        i += 1;
-    }
-    if fs.exists(sink) { fs.deleteFile(sink); }
-    return ok;
-}
-
 // In-process LLVM emit with retry + validation. `import_asm_paths`
 // selects the cross-module effect table (#957): empty → the legacy
 // in-module-only gate (`compile_to_llvm_file_with_module`), non-empty
@@ -205,8 +148,8 @@ fn validate_llvm_ir(ll_path: string) -> boolean ![io] {
 // subprocess path). Its value on this path is (a) catching invalid IR
 // before it escapes into a downstream `.o` compile, and (b) a
 // fault-injection seam for the retry regression test.
-fn emit_llvm_with_retry(source_path: string, module_name: string, out_path: string, import_asm_paths: string[], max_attempts: int, validate: boolean, trace: boolean) -> boolean ![io] {
-    return emit_llvm_with_retry_injected(source_path, module_name, out_path, import_asm_paths, max_attempts, validate, trace, _eh_resolve_inject());
+fn emit_llvm_with_retry(source_path: string, module_name: string, out_path: string, import_asm_paths: string[], import_context_root: string, max_attempts: int, validate: boolean, trace: boolean) -> boolean ![io] {
+    return emit_llvm_with_retry_injected(source_path, module_name, out_path, import_asm_paths, import_context_root, max_attempts, validate, trace, _eh_resolve_inject());
 }
 
 // Explicit-injection variant. `inject_faults` simulates that many
@@ -215,7 +158,7 @@ fn emit_llvm_with_retry(source_path: string, module_name: string, out_path: stri
 // `emit_llvm_with_retry` (which resolves the count from the
 // environment); tests call this directly because the runtime has no
 // `setenv` to stage the env var from inside a `.sfn` test process.
-fn emit_llvm_with_retry_injected(source_path: string, module_name: string, out_path: string, import_asm_paths: string[], max_attempts: int, validate: boolean, trace: boolean, inject_faults: int) -> boolean ![io] {
+fn emit_llvm_with_retry_injected(source_path: string, module_name: string, out_path: string, import_asm_paths: string[], import_context_root: string, max_attempts: int, validate: boolean, trace: boolean, inject_faults: int) -> boolean ![io] {
     let mut ok: boolean = false;
     let mut attempt: int = 0;
     loop {
@@ -224,7 +167,9 @@ fn emit_llvm_with_retry_injected(source_path: string, module_name: string, out_p
         attempt += 1;
         let source = fs.readFile(source_path);
         let mut emitted: boolean = false;
-        if import_asm_paths.length > 0 {
+        if import_context_root.length > 0 {
+            emitted = compile_to_llvm_file_with_module_import_context_root(source, module_name, out_path, "", import_asm_paths, import_context_root);
+        } else if import_asm_paths.length > 0 {
             emitted = compile_to_llvm_file_with_module_imports(source, module_name, out_path, "", import_asm_paths);
         } else {
             emitted = compile_to_llvm_file_with_module(source, module_name, out_path, "");

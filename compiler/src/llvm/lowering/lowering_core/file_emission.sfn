@@ -1,13 +1,16 @@
 // compiler/src/llvm/lowering/lowering_core/file_emission.sfn
 //
 // Native-text and native-lines LLVM file entry points.
-import { NativeArtifact, NativeModule, ParseNativeResult } from "../../../native_ir";
+import {
+    ImportedModuleContext,
+    NativeArtifact,
+    NativeModule,
+    ParseNativeResult
+} from "../../../native_ir";
 import { parse_native_artifact, parse_native_artifact_from_lines } from "../../../native_ir_api";
 import { lines_to_native_text, native_lines_have_text } from "../../../native_ir_utils_text";
-import { collect_imported_module_context_for_module } from "../../imports";
 import { LLVMProviderContext, install_llvm_provider_context } from "../../lowering_debug_state";
 import { LLVMArtifactResult, LoweredLLVMLinesResult } from "../../types";
-import { string_array_contains } from "../../utils";
 import { collect_defined_function_symbols } from "../lowering_helpers";
 import { has_fatal_lowering_diagnostic, print_fatal_lowering_diagnostics } from "./diagnostics";
 import { lower_to_llvm_lines_with_parsed_context } from "./mod";
@@ -23,38 +26,17 @@ fn make_native_module_for_emit(module_name: string, native_text: string) -> Nati
     };
 }
 
-fn generate_llvm_artifact_from_native_text(native_text: string, module_name: string) -> LLVMArtifactResult ![io] {
-    let no_texts: string[] = [];
-    return generate_llvm_artifact_from_native_text_with_context(native_text, module_name, no_texts);
-}
-
-// Lines-array counterpart of `generate_llvm_artifact_from_native_text` (#1817).
-fn generate_llvm_artifact_from_native_lines(native_lines: string[], module_name: string) -> LLVMArtifactResult ![io] {
-    let no_texts: string[] = [];
-    return generate_llvm_artifact_from_native_lines_with_context(native_lines, module_name, no_texts);
-}
-
-// Context-carrying variant for the `-p` per-module build path (#999).
-// The build driver stages each module's direct-import `.sfn-asm` bodies
-// — including the walk-excluded entry (#984) — and loads them via
-// `load_imported_interfaces_from_paths`. The plain
-// `generate_llvm_artifact_from_native_text` re-derives import context solely
-// from this module's own embedded `import` directives, so a sibling
-// that imports a value-returning fn from the walk-excluded entry could
-// not resolve the callee's return type and hit the `[fatal]`
-// unresolved-callee gate (`core_call_emission/dispatch.sfn`). This variant
-// UNIONS the staged `imported_native_texts` with the
-// embedded-import-derived `collect_imported_module_context_for_module`
-// texts (the module's own imports AND the staged bodies are both
-// needed) so cross-module callee signatures resolve. The `[fatal]` gate
-// is preserved unchanged — this supplies the missing input, it does not
-// weaken the gate (#306).
-fn generate_llvm_artifact_from_native_text_with_context(native_text: string, module_name: string, imported_native_texts: string[]) -> LLVMArtifactResult ![io] {
+// Context-carrying variant for the `-p` per-module build path (#999). The
+// driver supplies every staged manifest, native text, and discovery diagnostic
+// through `import_context`; lowering remains a pure consumer of that artifact
+// data. The `[fatal]` unresolved-callee gate is preserved unchanged — this
+// supplies its input explicitly rather than weakening it (#306).
+fn generate_llvm_artifact_from_native_text_with_context(native_text: string, module_name: string, import_context: ImportedModuleContext) -> LLVMArtifactResult ![io] {
     if native_text.length == 0 {
         return _failed_llvm_artifact("emit-llvm: empty native text for module "
             + module_name);
     }
-    return _lower_parsed_native_to_llvm_artifact(parse_native_artifact(native_text), native_text, module_name, imported_native_texts);
+    return _lower_parsed_native_to_llvm_artifact(parse_native_artifact(native_text), native_text, module_name, import_context);
 }
 
 // Lines-array counterpart of `generate_llvm_artifact_from_native_text_with_context`
@@ -65,13 +47,13 @@ fn generate_llvm_artifact_from_native_text_with_context(native_text: string, mod
 // `make_native_module_for_emit` carries it as the fallback). `recovery_text`
 // is byte-identical to the old `native_text`, so output is unchanged; the
 // win is skipping the primary `parse_native_artifact` re-split.
-fn generate_llvm_artifact_from_native_lines_with_context(native_lines: string[], module_name: string, imported_native_texts: string[]) -> LLVMArtifactResult ![io] {
+fn generate_llvm_artifact_from_native_lines_with_context(native_lines: string[], module_name: string, import_context: ImportedModuleContext) -> LLVMArtifactResult ![io] {
     if !native_lines_have_text(native_lines) {
         return _failed_llvm_artifact("emit-llvm: empty native text for module "
             + module_name);
     }
     let recovery_text = lines_to_native_text(native_lines);
-    return _lower_parsed_native_to_llvm_artifact(parse_native_artifact_from_lines(native_lines), recovery_text, module_name, imported_native_texts);
+    return _lower_parsed_native_to_llvm_artifact(parse_native_artifact_from_lines(native_lines), recovery_text, module_name, import_context);
 }
 
 fn _failed_llvm_artifact(failure_message: string) -> LLVMArtifactResult {
@@ -96,22 +78,9 @@ fn _failed_llvm_artifact_from_lowering(failure_message: string, lowered: Lowered
 // Shared lowering tail for the text and lines entry points above. The provider
 // returns identity, lines, and diagnostics; the compiler driver owns path
 // selection, atomic publication, stale-artifact policy, and cache updates.
-fn _lower_parsed_native_to_llvm_artifact(parse: ParseNativeResult, native_text: string, module_name: string, imported_native_texts: string[]) -> LLVMArtifactResult ![io] {
-    let import_context = collect_imported_module_context_for_module(parse.imports, module_name);
-    let mut combined_texts: string[] = import_context.native_texts;
-    let mut _it: int = 0;
-    loop {
-        if _it >= imported_native_texts.length { break; }
-        let staged = imported_native_texts[_it];
-        if staged.length > 0 {
-            if !string_array_contains(combined_texts, staged) {
-                combined_texts.push(staged);
-            }
-        }
-        _it += 1;
-    }
+fn _lower_parsed_native_to_llvm_artifact(parse: ParseNativeResult, native_text: string, module_name: string, import_context: ImportedModuleContext) -> LLVMArtifactResult ![io] {
     let dummy_module = make_native_module_for_emit(module_name, native_text);
-    let lowered_lines = lower_to_llvm_lines_with_parsed_context(dummy_module, parse, import_context.manifests, combined_texts, import_context.diagnostics, true, native_text);
+    let lowered_lines = lower_to_llvm_lines_with_parsed_context(dummy_module, parse, import_context, true, native_text);
     if lowered_lines.lines == null {
         return _failed_llvm_artifact_from_lowering("emit-llvm: lowered lines null", lowered_lines);
     }
@@ -169,7 +138,7 @@ fn _lower_parsed_native_to_llvm_artifact(parse: ParseNativeResult, native_text: 
 // directly and never invokes this gate, so adding it cannot break
 // self-hosting (cross-module signature resolution still happens later at
 // the LLVM stage as before).
-fn native_text_passes_lowering_gate(native_text: string, module_name: string, provider_context: LLVMProviderContext) -> boolean ![io] {
+fn native_text_passes_lowering_gate(native_text: string, module_name: string, import_context: ImportedModuleContext, provider_context: LLVMProviderContext) -> boolean ![io] {
     install_llvm_provider_context(provider_context);
     if native_text.length == 0 {
         // No text to gate: the native emitter already failed upstream
@@ -177,9 +146,8 @@ fn native_text_passes_lowering_gate(native_text: string, module_name: string, pr
         return false;
     }
     let parse = parse_native_artifact(native_text);
-    let import_context = collect_imported_module_context_for_module(parse.imports, module_name);
     let dummy_module = make_native_module_for_emit(module_name, native_text);
-    let lowered_lines = lower_to_llvm_lines_with_parsed_context(dummy_module, parse, import_context.manifests, import_context.native_texts, import_context.diagnostics, true, native_text);
+    let lowered_lines = lower_to_llvm_lines_with_parsed_context(dummy_module, parse, import_context, true, native_text);
     if lowered_lines.lines == null {
         print.err("emit-native: lowered lines null");
         return false;
