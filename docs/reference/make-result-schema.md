@@ -254,7 +254,19 @@ pairs with top-level `status:"warn"` / `failure:"nondeterminism"` and **exit
 last-reached phase, because `sfn selfhost` prints the mismatch and continues —
 the seedcheck suite still runs, and passes, after it. Under
 `make check-strict` (`sfn selfhost --strict`) the same mismatch is fatal, so
-that run is a `fail` with a non-zero exit, never a `warn`.
+that run is a `fail` with a non-zero exit, never a `warn` — it classifies as
+`compile-error` (the closed set has no fixed-point class) at
+`phase:"fixed-point"`. `check-strict` delegates to `check`, so its verdict
+reports `"target":"check"`; nothing in the block distinguishes a strict run
+from a default one.
+
+A failure in any phase after the pass1 gate is classified from the log text,
+and the pass1 leg always prints a **passing** `═══ <suite>: N/M passed, 0
+failed ═══` banner on a plain (non-`JSON=1`) run. The `test-failure` patterns
+therefore anchor the count non-zero; without that anchor every post-pass1
+failure — a stage2/stage3 build break, a seedcheck-smoke failure, a strict
+fixed-point abort — matched that passing banner and reported `test-failure`,
+sending a consumer to read test output that does not exist (SFN-724).
 
 ```json
 {"schema_version":"sailfin-make/1","target":"check","status":"warn","failure":"nondeterminism","phase":"fixed-point","first_error":null,"report":"build/agent-report.check.json","phases":[{"name":"compile","status":"pass"},{"name":"pass1-smoke","status":"pass"},{"name":"seedcheck-build","status":"pass"},{"name":"seedcheck-smoke","status":"pass"},{"name":"stage3-build","status":"pass"},{"name":"fixed-point","status":"warn"},{"name":"seedcheck-tests","status":"pass"}]}

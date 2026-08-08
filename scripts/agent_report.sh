@@ -217,7 +217,12 @@ classify() {
 	# `make check-strict` passes `--strict` to `sfn selfhost`, where the very
 	# same mismatch line is followed by a fatal exit — that run is a `fail`
 	# with a real failure class, not a `warn`.
-	if [ "$RC" -eq 0 ] && out_has_fixed "$CHECK_MARKER_NONDETERMINISM"; then
+	# Scoped to `check` because `fixed-point` is a check-only phase name: every
+	# other classification path routes non-check targets through PHASE=$TARGET,
+	# so an unscoped match here could report `"target":"test"` with a phase
+	# that target does not have.
+	if [ "$TARGET" = "check" ] && [ "$RC" -eq 0 ] \
+		&& out_has_fixed "$CHECK_MARKER_NONDETERMINISM"; then
 		STATUS="warn"
 		FAILURE="nondeterminism"
 		PHASE="fixed-point"
@@ -266,7 +271,14 @@ classify() {
 		FAILURE="timeout"
 	elif out_has "missing seed compiler|is not invokable|SEED_VERSION is empty|\[fetch-seed\]\[error\]|(seed|bootstrap\.toml|fetch-seed|SEED=)[^[:cntrl:]]*No such file or directory|run: make compile|run 'make compile'|GITHUB_TOKEN"; then
 		FAILURE="setup-error"
-	elif out_has 'passed, [1-9][0-9]* failed|\[check\]\[FAIL\]|assertion failed|[0-9]+ failed ═══'; then
+	# The `═══ <suite>: N/M passed, K failed ═══` banner is printed for EVERY
+	# suite regardless of outcome (cli/commands/test/reporting.sfn), so the
+	# count must be anchored non-zero here exactly as in the first alternative.
+	# With `[0-9]+` a plain `make check` matched its own passing pass1 banner,
+	# and every later failure — stage2/stage3 build, seedcheck smoke, a strict
+	# fixed-point abort — classified as `test-failure`, sending the agent to
+	# hunt a test that never failed (SFN-724).
+	elif out_has 'passed, [1-9][0-9]* failed|\[check\]\[FAIL\]|assertion failed|[1-9][0-9]* failed ═══'; then
 		FAILURE="test-failure"
 	elif out_has 'error:|\[rebuild\]\[error\]|sfn build failed|cannot resolve|lowering error|parse error|type error|effect error'; then
 		FAILURE="compile-error"

@@ -37,6 +37,8 @@
 //               order, top-level status "pass".
 //   - fail:     every banner then a test failure, exit 1 -> status "fail",
 //               phase "seedcheck-tests", failure "test-failure".
+//   - pass1 banner: a PASSING `0 failed` suite banner from the pass1 leg must
+//               not classify a later build failure as "test-failure".
 //   - warn:     every banner but `stage2 != stage3`, exit 0 -> status "warn",
 //               failure "nondeterminism".
 //
@@ -143,7 +145,9 @@ fn _marker_records() -> string[] ![io] {
         let line = lines[i];
         i = i + 1;
         if !inside {
-            if contains(line, "CHECK_PHASE_MARKERS=(") { inside = true; }
+            // Line-start match, like _nondeterminism_marker below: a comment
+            // mentioning the table by name must not hijack the scan.
+            if find(line, "CHECK_PHASE_MARKERS=(", 0) == 0 { inside = true; }
             continue;
         }
         if contains(line, ")") && !contains(line, "'") { break; }
@@ -165,6 +169,18 @@ fn _nondeterminism_marker() -> string ![io] {
         if find(line, "CHECK_MARKER_NONDETERMINISM=", 0) == 0 {
             return _unquote_element(line);
         }
+    }
+    return "";
+}
+
+// The record for `name`, or "" when absent. Preferred over indexing by
+// position: an out-of-range index panics rather than failing an assertion.
+fn _record_for(records: string[], name: string) -> string {
+    let mut i = 0;
+    loop {
+        if i >= records.length { break; }
+        if _record_name(records[i]) == name { return records[i]; }
+        i = i + 1;
     }
     return "";
 }
@@ -208,7 +224,8 @@ fn _run_check_stub(tag: string, banners: string, rc: int) -> string ![io] {
     if sub.length > 0 && substring(sub, 0, 1) != "/" {
         sub = _repo_root() + "/" + sub;
     }
-    // Fresh subdir each run.
+    // Per-tag subdir; the stale report is cleared so a wrapper that writes
+    // nothing reads as "" rather than as the previous run's verdict.
     fs.createDirectory(sub, true);
     let report = sub + "/build/agent-report.check.json";
     if fs.exists(report) { fs.deleteFile(report); }
@@ -218,7 +235,7 @@ fn _run_check_stub(tag: string, banners: string, rc: int) -> string ![io] {
     // report-file gate on; SAILFIN_INNER is cleared so it is the outer
     // target). The whole thing is composed as a single `bash -c` so the cd
     // + env -u happen in-shell, faithful to the original.
-    let inner = banners + "\nexit " + int_to_string(rc);
+    let inner = banners + "\nexit " + _int_to_string(rc);
     let vehicle = "cd '" + sub
         + "' && env -u SAILFIN_INNER SAILFIN_AGENT_REPORT=1 "
         + "bash '"
@@ -256,9 +273,28 @@ fn _banners_from_table(records: string[], swap_from: string, swap_to: string) ->
     return out;
 }
 
+// Banners for every phase up to and including `stop_after`, so a stub can
+// fail partway through the pipeline.
+fn _banners_upto(records: string[], stop_after: string) -> string {
+    let mut out = "";
+    let mut i = 0;
+    loop {
+        if i >= records.length { break; }
+        let name = _record_name(records[i]);
+        let lits = _record_literals(records[i]);
+        if lits.length > 0 {
+            if out.length > 0 { out = out + "\n"; }
+            out = out + "echo \"" + lits[0] + "\"";
+        }
+        if name == stop_after { break; }
+        i = i + 1;
+    }
+    return out;
+}
+
 // Local int->decimal-string (no runtime builtin; mirrors the helper in
 // lowering_no_bare_runtime_emissions_test.sfn).
-fn int_to_string(n: int) -> string {
+fn _int_to_string(n: int) -> string {
     if n == 0 { return "0"; }
     let mut v = n;
     let mut neg = false;
@@ -325,9 +361,12 @@ test "check ledger: every marker literal appears verbatim in a producer" ![io] {
             // Makefile / cli_selfhost.sfn without re-syncing the table.
             assert contains(producers, lits[j]);
             // Stub construction wraps each literal in double quotes inside a
-            // single-quoted `bash -c`, so a quote or `$` in a banner would
-            // silently corrupt the behavioural cases below.
+            // single-quoted `bash -c`, so anything the shell interprets there
+            // — quotes, `$`, command substitution, escapes — would silently
+            // corrupt the behavioural cases below.
             assert ! contains(lits[j], "\"");
+            assert ! contains(lits[j], "`");
+            assert ! contains(lits[j], "\\");
             assert ! contains(lits[j], "'");
             assert ! contains(lits[j], "$");
             literal_count = literal_count + 1;
@@ -389,9 +428,33 @@ test "check ledger fail: seedcheck-tests fail, top-level fail/phase/failure" ![i
     assert _json_str_field(report, "failure") == "test-failure";
 }
 
+test "check ledger: a passing pass1 suite banner does not mask a build failure" ![io] {
+    let records = _marker_records();
+    // `sfn test` prints `═══ <suite>: N/M passed, K failed ═══` for EVERY
+    // suite, pass or fail, so a plain `make check` always carries a `0
+    // failed` banner from its pass1 leg. A `failed` count matched without a
+    // non-zero anchor made that banner classify every LATER failure as
+    // `test-failure` — a stage2 build break reported as a failing test, with
+    // the agent sent to read test output that does not exist.
+    let banners = _banners_upto(records, "seedcheck-build")
+        + "\necho \"═══ sfn/test: 5/5 passed, 0 failed ═══\""
+        + "\necho \"[selfhost] stage2 build failed (exit=1)\"";
+    let report = _run_check_stub("pass1-banner", banners, 1);
+    assert report.length > 0;
+    assert _json_str_field(report, "status") == "fail";
+    assert _json_str_field(report, "phase") == "seedcheck-build";
+    assert _json_str_field(report, "failure") != "test-failure";
+}
+
 test "check ledger warn: nondeterminism, top-level warn/failure, exit 0" ![io] {
     let records = _marker_records();
-    let matched = _record_literals(records[5])[0];
+    let fixed_point = _record_for(records, "fixed-point");
+    assert fixed_point.length > 0;
+    let fp_lits = _record_literals(fixed_point);
+    assert fp_lits.length > 0;
+    // The record's FIRST literal is the matching outcome; swap in the
+    // mismatch line to drive the warn path.
+    let matched = fp_lits[0];
     let mismatched = _nondeterminism_marker();
     assert matched != mismatched;
     let banners = _banners_from_table(records, matched, mismatched);
