@@ -377,16 +377,17 @@ jobs:
     # was observed at 56-58 min (killed mid-e2e under the old 60-min cap before
     # PR #2492 raised it to 90), and a green warm run on 2026-08-08 took 67 min.
     #
-    # Raised 90 -> 180 alongside the per-job RAM reserve correction
-    # (`scripts/detect_test_jobs.sh`, `_test_jobs_budget`). That reserve was
-    # under-counting the pooled test child by ~1.6x, so this runner class was
-    # taking 4 jobs and losing the VM outright ~3.5 min in (GitHub issue
-    # #2817). The corrected reserve resolves 2 jobs here, which is the whole
-    # point — but it also roughly doubles wall time, and 67 min at 4 jobs would
-    # sail past a 90-minute cap at 2. Without this the fix would trade a VM
-    # kill for a timeout. Revisit once the parent runner's prewarm arena is
-    # bounded and the job count can go back up. See
-    # docs/proposals/0011-ci-test-speed.md.
+    # Raised 90 -> 180 as a follow-on to SFN-781, which corrected the test-pool
+    # RAM budget (3 GiB/job out of `80% RAM - 5 GiB`) after the old reserve had
+    # this runner class taking 4 jobs and losing the VM outright ~3.5 min into
+    # the suite (GitHub issue #2817). That fix is right, and it resolves this
+    # class to 2 jobs — but halving the pool also roughly doubles wall time,
+    # and the 67 min above was measured AT 4 jobs. A 90-minute cap is not a
+    # safe backstop for the same suite at 2, so without this the budget fix
+    # would trade a VM kill for a timeout. Revisit together with the parent
+    # runner's prewarm arena (`_prewarm_test_dep_closures` holds its closure
+    # for the whole run), which is what would let the job count go back up.
+    # See docs/proposals/0011-ci-test-speed.md.
     timeout-minutes: 180
     steps:
       - name: Checkout repository
