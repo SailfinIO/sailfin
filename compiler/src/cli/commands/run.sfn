@@ -46,7 +46,7 @@ import { _runtime_bundle_exists } from "../../build/runtime_objs";
 import { build_target_os, target_exe_name } from "../../build/target";
 import { cache_root, merge_cache_stats, resolve_build_cache_config } from "../../build_cache";
 import { prepare_project_capsules } from "../../capsule_resolver";
-import { empty_resolver_consumer } from "../../capsule_resolver/types";
+import { ResolverConsumer } from "../../capsule_resolver/types";
 import { format_backend_failure_banner } from "../../ice";
 import { compile_to_llvm_file_with_module, module_name_from_path } from "../../main";
 import { runtime_capsule_from_root } from "../../runtime_capsule_resolver";
@@ -128,12 +128,28 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     // (`--no-cache` / `--clean` / `--cache-trace`) layer on top of env-var
     // defaults (`SAILFIN_NO_CACHE` / `SAILFIN_CACHE_TRACE`).
     let run_cache_config = resolve_build_cache_config(no_cache_flag, cache_trace_flag, clean_flag);
-    // `sfn run` has no `-p` plumbing yet, so the consumer is always empty:
+    // `sfn run` has no `-p` plumbing yet, so scope/name stay empty:
     // relative-import `.ll`s take the legacy flat layout. `sailfin_exe` /
     // `work_dir` stay empty; threading `binary_dir` lets
     // `prepare_project_capsules` upgrade to subprocess isolation only when
     // the resolved closure is large enough to otherwise OOM.
-    let run_capsule_result = prepare_project_capsules(input_path, run_cache_config, empty_resolver_consumer(), "", "", binary_dir);
+    //
+    // SFN-341: `runtime_root` IS threaded, unlike the rest of the consumer.
+    // `sfn run` links, so it needs the runtime capsule's own `[dependencies]`
+    // resolved exactly as `sfn build` does — the runtime's `sfn-sources` are
+    // in every binary, so their calls into a capsule provider are emitted
+    // here too. The resolver gates that union on `runtime_root`, so passing
+    // `empty_resolver_consumer()` silently dropped those definitions from the
+    // link set. (`sfn check` keeps the empty consumer on purpose: it never
+    // links, so no symbol resolution depends on the runtime's private deps.)
+    let run_consumer = ResolverConsumer {
+        scope: "",
+        name: "",
+        walk_project_src: false,
+        include_host_as_dep: false,
+        runtime_root: runtime_root
+    };
+    let run_capsule_result = prepare_project_capsules(input_path, run_cache_config, run_consumer, "", "", binary_dir);
     let capsule_lls = run_capsule_result.ll_paths;
 
     let source = fs.readFile(input_path);
