@@ -103,8 +103,6 @@ extern fn recv(sockfd: i32, buf: *u8, len: i64, flags: i32) -> i64;
 
 extern fn send(sockfd: i32, buf: *u8, len: i64, flags: i32) -> i64;
 
-extern fn load_byte(p: *u8, off: i64) -> i64;
-
 extern fn sfn_tls_record_seal(key: *u8, key_len: i64, iv: *u8, iv_len: i64, seq: i64, content_type: i64, content: *u8, content_len: i64, padding: i64, out: *u8) -> i64;
 
 extern fn sfn_tls_record_open(key: *u8, key_len: i64, iv: *u8, iv_len: i64, seq: i64, record: *u8, record_len: i64) -> i64;
@@ -235,7 +233,9 @@ fn _tls_put(dst: *u8, off: i64, b: i64) -> void {
     memset(_tls_ptr_off(dst, off), (b & 255) as i32, 1 as usize);
 }
 
-fn _tls_at(p: *u8, off: i64) -> i64 { return load_byte(p, off); }
+fn _tls_at(p: *u8, off: i64) -> i64 {
+    return load_byte((p as i64) + off) & 255;
+}
 
 // Copy a Sailfin `int[]` into a malloc'd byte buffer. Returns null on
 // allocation failure; the caller owns the result.
