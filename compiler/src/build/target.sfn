@@ -24,6 +24,10 @@
 import { _get_env_cmd } from "../build_flags";
 import { ends_with } from "../string_utils";
 import { _dirname, _path_basename, _path_join } from "./paths";
+// SFN-774 / SFEP-0068 §3.2: the `--target` process cell. `build_target_triple`
+// below checks it FIRST, ahead of the env-var/host-probe fallbacks, so an
+// explicit flag always wins for the running invocation.
+import { active_build_target } from "./target_state";
 
 // The resolved build HOST OS — the OS the compile is running on, as
 // opposed to the artifact target (`build_target_os`). Host-parallelism
@@ -74,6 +78,116 @@ fn target_os_is_windows(target_os: string) -> boolean {
     return target_os == "Windows";
 }
 
+// ----------------------------------------------------------------
+// The triple axis (SFN-774 / SFEP-0068 §3.1)
+// ----------------------------------------------------------------
+//
+// A closed set of `sfn build --target=<triple>` values. Unknown triples are
+// REJECTED at the flag (`cli/commands/build.sfn`), never coerced — a typo'd
+// triple must fail loudly rather than silently fall back to a host default.
+// `target_os_is_windows` above and `target_condition_runtime_sfn_sources`
+// below stay keyed on the OS component: both Windows triples need the
+// identical POSIX->Win32 runtime-module swap and the identical `.exe`
+// naming. The ABI component (`triple_abi`) keys only the four link
+// decisions that genuinely diverge between the two Windows ABIs —
+// `target_clang_triple`, `target_forced_linker_flag`,
+// `target_uses_gnu_link_gc`, `target_filter_link_libs` /
+// `target_extra_link_libs` below.
+fn triple_is_supported(triple: string) -> boolean {
+    if triple == "x86_64-unknown-linux-gnu" { return true; }
+    if triple == "aarch64-unknown-linux-gnu" { return true; }
+    if triple == "x86_64-apple-darwin" { return true; }
+    if triple == "arm64-apple-darwin" { return true; }
+    if triple == "x86_64-pc-windows-msvc" { return true; }
+    if triple == "x86_64-w64-mingw32" { return true; }
+    return false;
+}
+
+// The `build_target_os()`-shaped OS component of a triple ("Linux" |
+// "Darwin" | "Windows"), or "" for a triple outside the closed set.
+fn triple_target_os(triple: string) -> string {
+    if triple == "x86_64-unknown-linux-gnu" { return "Linux"; }
+    if triple == "aarch64-unknown-linux-gnu" { return "Linux"; }
+    if triple == "x86_64-apple-darwin" { return "Darwin"; }
+    if triple == "arm64-apple-darwin" { return "Darwin"; }
+    if triple == "x86_64-pc-windows-msvc" { return "Windows"; }
+    if triple == "x86_64-w64-mingw32" { return "Windows"; }
+    return "";
+}
+
+// The ABI component of a triple ("gnu" | "mach" | "msvc"), or "" for a
+// triple outside the closed set. Only the two Windows triples diverge on
+// ABI (`msvc` vs `gnu`) — every other target has exactly one ABI in this
+// table, so this exists to key the link decisions in SFEP-0068 §3.1's
+// table, not to express a general multi-ABI-per-OS model.
+fn triple_abi(triple: string) -> string {
+    if triple == "x86_64-pc-windows-msvc" { return "msvc"; }
+    if triple == "x86_64-w64-mingw32" { return "gnu"; }
+    if triple == "x86_64-unknown-linux-gnu" { return "gnu"; }
+    if triple == "aarch64-unknown-linux-gnu" { return "gnu"; }
+    if triple == "x86_64-apple-darwin" { return "mach"; }
+    if triple == "arm64-apple-darwin" { return "mach"; }
+    return "";
+}
+
+// The path-safe on-disk artifact tag for a triple (SFEP-0068 §3.1's
+// "Artifact tag" column). Unlike the OS-only `target_artifact_tag` this
+// replaces, `windows-msvc` and `windows-gnu` are DISTINCT tags — the
+// non-optional half of §3.6's cache-key correctness fix: without separate
+// tags an msvc build and a mingw build would overwrite each other's
+// runtime objects on disk even after their cache keys stopped colliding.
+// Unknown triples collapse to `"other"`, deliberately: correctness comes
+// from the cache key (`_runtime_obj_key_with_target`), which carries the
+// raw triple, so two unknown triples sharing a filename still mismatch on
+// key and recompile rather than cross-link.
+fn triple_artifact_tag(triple: string) -> string {
+    if triple == "x86_64-unknown-linux-gnu" { return "linux-x86_64"; }
+    if triple == "aarch64-unknown-linux-gnu" { return "linux-aarch64"; }
+    if triple == "x86_64-apple-darwin" { return "darwin-x86_64"; }
+    if triple == "arm64-apple-darwin" { return "darwin-arm64"; }
+    if triple == "x86_64-pc-windows-msvc" { return "windows-msvc"; }
+    if triple == "x86_64-w64-mingw32" { return "windows-gnu"; }
+    return "other";
+}
+
+// Map a `build_host_os()`-shaped OS string to its default triple in the
+// closed set, assuming the x86_64 architecture — except on a Linux host,
+// which additionally probes for aarch64 the same non-shelling way
+// `build/llvm_provider_context.sfn:_resolve_llvm_target_arch` does, so a
+// build with no explicit target on an aarch64 Linux box still resolves its
+// own host triple rather than x86_64's. Shared by the `SAILFIN_TARGET_OS`
+// legacy alias and the final host-probe fallback in `build_target_triple`
+// below, so both spell a Linux/Darwin/Windows OS string the same triple.
+fn _host_default_triple(os: string) -> string ![io] {
+    if os == "Windows" { return "x86_64-pc-windows-msvc"; }
+    if os == "Darwin" { return "x86_64-apple-darwin"; }
+    if fs.exists("/lib/ld-linux-aarch64.so.1") {
+        return "aarch64-unknown-linux-gnu";
+    }
+    return "x86_64-unknown-linux-gnu";
+}
+
+// The resolved build target TRIPLE (SFN-774 / SFEP-0068 §3.2). Resolution
+// order: the explicit `--target` process cell (`set_build_target`,
+// `./target_state`) wins first, then the `SAILFIN_TARGET_TRIPLE` override,
+// then `SAILFIN_TARGET_OS` as a legacy alias (so every existing
+// `SAILFIN_TARGET_OS=Windows` e2e seam keeps resolving to the msvc triple
+// unchanged), then a non-shelling host probe. This is the primary target
+// resolver for every ABI-conditioned decision (`target_clang_triple`,
+// `target_forced_linker_flag`, `target_uses_gnu_link_gc`,
+// `target_filter_link_libs`/`target_extra_link_libs`, `target_artifact_tag`);
+// `build_target_os()` above remains the OS-only resolver for the decisions
+// that stay OS-keyed (`target_exe_name`, `target_condition_runtime_sfn_sources`).
+fn build_target_triple() -> string ![io] {
+    let active = active_build_target();
+    if active.length > 0 { return active; }
+    let triple_override = _get_env_cmd("SAILFIN_TARGET_TRIPLE");
+    if triple_override.length > 0 { return triple_override; }
+    let os_override = _get_env_cmd("SAILFIN_TARGET_OS");
+    if os_override.length > 0 { return _host_default_triple(os_override); }
+    return _host_default_triple(build_host_os());
+}
+
 // Appends `.exe` to a COMPILER-DERIVED executable name when `target_os` is
 // Windows; every other target returns `name` unchanged. This applies only
 // to names the compiler itself derives (`build/sailfin/program`, a
@@ -107,55 +221,77 @@ fn host_exe_name(name: string) -> string ![io] {
     return target_exe_name(name, build_host_os());
 }
 
-// The clang `-target` triple for `target_os`, or "" to use clang's host
-// default. Only Windows diverges (the MSVC ABI: `x86_64-pc-windows-msvc`,
-// linking `lld-link` + the UCRT); every other target keeps the host
-// default so no `-target` flag is added at all.
-fn target_clang_triple(target_os: string) -> string {
-    if target_os_is_windows(target_os) { return "x86_64-pc-windows-msvc"; }
+// The clang `-target` triple to pass for `triple`, or "" to use clang's
+// host default. Only the two Windows triples diverge: `x86_64-pc-windows-
+// msvc` and `x86_64-w64-mingw32` are each returned verbatim (linking
+// `lld-link`+UCRT and mingw-w64+MinGW CRT respectively); every other
+// target keeps the host default so no `-target` flag is added at all.
+//
+// Deliberate scope limit (SFN-774, Slice A1): a non-Windows CROSS triple
+// (e.g. an aarch64-linux-gnu build run on an x86_64-linux-gnu host) still
+// resolves "" here — `triple_target_os`/`triple_abi` decompose the triple,
+// but this function only branches on "is this triple Windows", so a
+// non-Windows cross build gets no `-target` flag and silently compiles for
+// the HOST arch/OS instead of the requested one. Wiring an actual
+// non-Windows `-target` is a follow-up (SFN-775 / a later SFEP-0068
+// slice), not part of promoting the axis itself.
+fn target_clang_triple(triple: string) -> string {
+    if triple_target_os(triple) == "Windows" { return triple; }
     return "";
 }
 
-// The `-target <triple>` clang flag pair for `target_os`, or [] when the
-// host default is used (non-Windows). Pure — callers resolve `target_os`
-// via `build_target_os()` in an `![io]` context and pass it in.
-fn target_clang_flags(target_os: string) -> string[] {
-    let triple = target_clang_triple(target_os);
-    if triple.length == 0 { return []; }
-    return ["-target", triple];
+// The `-target <triple>` clang flag pair for `triple`, or [] when the host
+// default is used (non-Windows). Pure — callers resolve `triple` via
+// `build_target_triple()` in an `![io]` context and pass it in.
+fn target_clang_flags(triple: string) -> string[] {
+    let clang_triple = target_clang_triple(triple);
+    if clang_triple.length == 0 { return []; }
+    return ["-target", clang_triple];
 }
 
 // The `-fuse-ld=` flag a target forces regardless of host auto-detection.
-// A Windows (MSVC) target links with `lld-link` via `-fuse-ld=lld`; every
-// other target returns "" so the driver's existing Linux-only mold/lld
-// auto-detect (and the `SAILFIN_LINKER` override) is unchanged.
-fn target_forced_linker_flag(target_os: string) -> string {
-    if target_os_is_windows(target_os) { return "-fuse-ld=lld"; }
+// A Windows MSVC-ABI triple links with `lld-link` via `-fuse-ld=lld`;
+// every other target returns "" so the driver's existing Linux-only
+// mold/lld auto-detect (and the `SAILFIN_LINKER` override) is unchanged.
+//
+// The windows-gnu ABI (`x86_64-w64-mingw32`) needs its OWN linker driver
+// (`x86_64-w64-mingw32-gcc -static`), not a `-fuse-ld=` flag on clang, so
+// it cannot be expressed by this function's return shape. The branch is
+// structured on ABI here so SFN-775 (A2) only has to fill the `gnu` arm
+// in; deliberately still `""` (no forced flag) until that lands — do not
+// invent the mingw link path in this slice.
+fn target_forced_linker_flag(triple: string) -> string {
+    let abi = triple_abi(triple);
+    if abi == "msvc" { return "-fuse-ld=lld"; }
     return "";
 }
 
 // True when a target's linker rejects the GNU-style section-GC and
 // force-undefined flags (`-Wl,--gc-sections`, `-Wl,-u,<sym>`) the POSIX
 // link path emits. `lld-link` (the MSVC linker) uses `/OPT:REF` /
-// `/INCLUDE:` instead, so for a Windows target the driver skips the GNU
+// `/INCLUDE:` instead, so for the msvc ABI the driver skips the GNU
 // dead-strip + retain-root flags rather than emit inputs `lld-link` would
 // reject. (The MSVC-native equivalents are tuned against a real link in
-// SFEP-0021 M7; here the point is a clean lld-link invocation.) Every
-// non-Windows target keeps the GNU flags → byte-identical link.
-fn target_uses_gnu_link_gc(target_os: string) -> boolean {
-    return !target_os_is_windows(target_os);
+// SFEP-0021 M7; here the point is a clean lld-link invocation.) The
+// windows-gnu ABI links with a GNU `ld`-family linker via mingw, which
+// DOES accept the GNU flags, so it stays on (SFEP-0068 §3.1). Every other
+// target keeps the GNU flags too → byte-identical link (#1112).
+fn target_uses_gnu_link_gc(triple: string) -> boolean {
+    return triple_abi(triple) != "msvc";
 }
 
-// Drop POSIX-only link libraries for a Windows (MSVC/UCRT) target:
+// Drop POSIX-only link libraries for the msvc ABI (UCRT):
 // `-lm`/`-lpthread` are POSIX, and `-lssl`/`-lcrypto` have no Windows host
 // package to link against (`platform/openssl_absent_windows.sfn` swaps
-// out `tls.sfn`'s OpenSSL externs entirely for that target — see
+// out `tls.sfn`'s OpenSSL externs entirely for a Windows target — see
 // `target_condition_runtime_sfn_sources` below — rather than relying on
 // a linked-but-stubbed library), so none are passed to the MSVC link
-// (`ws2_32`/`kernel32` are auto-linked by clang). Every other target
+// (`ws2_32`/`kernel32` are auto-linked by clang). The windows-gnu ABI
+// links against mingw-w64's POSIX-compatible CRT, so it KEEPS `-lm`/
+// `-lpthread` (SFEP-0068 §3.1) — only msvc filters. Every other target
 // returns the list unchanged (identity → byte-identical link).
-fn target_filter_link_libs(libs: string[], target_os: string) -> string[] {
-    if !target_os_is_windows(target_os) { return libs; }
+fn target_filter_link_libs(libs: string[], triple: string) -> string[] {
+    if triple_abi(triple) != "msvc" { return libs; }
     let mut kept: string[] = [];
     let mut i: int = 0;
     loop {
@@ -188,10 +324,18 @@ fn target_filter_link_libs(libs: string[], target_os: string) -> string[] {
 //                 net/websocket runtime modules are always linked in
 //                 (SFN-649).
 //
+// `-lws2_32` is needed by BOTH Windows ABIs (Winsock2 is the same DLL
+// either way); `-lbcrypt` is msvc-only — the windows-gnu ABI's mingw-w64
+// CRT resolves `BCryptGenRandom` through its own import libs, so adding it
+// there would be a redundant (harmless but incorrect-by-omission) flag.
 // No other target links either, so every non-Windows target returns `[]`
 // (identity → byte-identical link, #1112).
-fn target_extra_link_libs(target_os: string) -> string[] {
-    if target_os_is_windows(target_os) { return ["-lbcrypt", "-lws2_32"]; }
+fn target_extra_link_libs(triple: string) -> string[] {
+    let abi = triple_abi(triple);
+    if abi == "msvc" { return ["-lbcrypt", "-lws2_32"]; }
+    if abi == "gnu" && triple_target_os(triple) == "Windows" {
+        return ["-lws2_32"];
+    }
     return [];
 }
 
@@ -322,31 +466,27 @@ fn target_condition_runtime_sfn_sources(sources: string[], target_os: string) ->
     return out;
 }
 
-// A path-safe token for `target_os`, for use in cache-artifact filenames
-// (SFN-617). `SAILFIN_TARGET_OS` is an unvalidated environment string, so
-// it must never be interpolated into a filesystem path directly; this maps
-// it to a closed set of path-safe tokens. Unknown targets collapse to
-// `"other"` deliberately — correctness comes from the cache key (the
-// runtime-object key fold in `build/runtime_objs.sfn`), which carries the
-// raw target, so two unknown targets sharing a filename still mismatch on
-// key and recompile rather than cross-link. Note what that means on disk:
-// unknown targets SHARE a path and overwrite each other, trading the
-// coexistence known targets get for a recompile on every switch. That is
-// only sound while `target_clang_triple` returns "" for every non-Windows
-// target, which makes their objects byte-identical anyway; the day an
-// unknown target contributes clang flags, this bucket needs splitting
-// rather than documenting.
-fn target_artifact_tag(target_os: string) -> string {
-    if target_os == "Windows" { return "windows"; }
-    if target_os == "Darwin" { return "darwin"; }
-    if target_os == "Linux" { return "linux"; }
-    return "other";
+// A path-safe token for a build TRIPLE, for use in cache-artifact
+// filenames (SFN-617, promoted to the triple axis by SFN-774 /
+// SFEP-0068 §3.6). A resolved triple may originate from
+// `SAILFIN_TARGET_TRIPLE`/`SAILFIN_TARGET_OS` — unvalidated environment
+// strings — so it must never be interpolated into a filesystem path
+// directly; this delegates to `triple_artifact_tag`'s closed set of
+// path-safe tokens. `windows-msvc` and `windows-gnu` are now DISTINCT
+// tags, which is the on-disk half of the §3.6 correctness fix: before
+// this, both Windows ABIs shared the single `"windows"` tag and could
+// overwrite each other's cached runtime objects even after the cache-key
+// fold below stopped colliding them. See `triple_artifact_tag` for the
+// unknown-triple fallback rationale.
+fn target_artifact_tag(triple: string) -> string {
+    return triple_artifact_tag(triple);
 }
 
 export {
     build_host_os,
     host_is_windows,
     build_target_os,
+    build_target_triple,
     target_os_is_windows,
     target_exe_name,
     host_exe_name,
@@ -357,5 +497,9 @@ export {
     target_filter_link_libs,
     target_extra_link_libs,
     target_condition_runtime_sfn_sources,
-    target_artifact_tag
+    target_artifact_tag,
+    triple_abi,
+    triple_artifact_tag,
+    triple_is_supported,
+    triple_target_os
 };

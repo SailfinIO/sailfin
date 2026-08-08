@@ -3,7 +3,7 @@ import { int_to_string } from "sfn/strings";
 import { Program } from "../../../ast";
 import { _ensure_dir_cmd, _sanitize_filename_cmd } from "../../../build/fs";
 import { assemble_runtime_capsule_link_inputs, write_runtime_identity_stamp } from "../../../build/runtime_objs";
-import { build_target_os } from "../../../build/target";
+import { build_target_triple } from "../../../build/target";
 import { parse_program } from "../../../parser/mod";
 import { runtime_capsule_from_root } from "../../../runtime_capsule_resolver";
 import { collect_test_entries, render_start_event, render_summary_event } from "../../../test_runner_json";
@@ -102,7 +102,7 @@ fn _run_multi_file(test_files: string[], file_suite_index: int[], suites_in: Tes
             let candidate_nonce = _sanitize_filename_cmd(sub_root) + "-"
                 + int_to_string(monotonic_millis());
             let warm_identity = _test_bin_runtime_identity(runtime_root, _sanitize_filename_cmd(sub_root));
-            if write_runtime_identity_stamp(warm_caps, sub_root, "-O0", binary_dir, candidate_nonce, warm_identity, build_target_os()) {
+            if write_runtime_identity_stamp(warm_caps, sub_root, "-O0", binary_dir, candidate_nonce, warm_identity, build_target_triple()) {
                 stamp_nonce = candidate_nonce;
             }
         }

@@ -13,10 +13,16 @@ import { assemble_link_inputs } from "./clang_argv";
 import { _shell_read_cmd, _shell_single_quote_arg } from "./fs";
 import { _ensure_dir, _find_substring_from } from "./paths";
 import { RuntimeLinkInputs, assemble_runtime_capsule_link_inputs } from "./runtime_objs";
-// Target conditioning (SFN-52, SFEP-0021 §4.2(A)): a Windows (MSVC) target
-// forces `-fuse-ld=lld` and skips the GNU-only dead-strip / retain-root
-// flags `lld-link` rejects. All no-ops off Windows.
-import { build_target_os, target_forced_linker_flag, target_uses_gnu_link_gc } from "./target";
+// Target conditioning (SFN-52, SFEP-0021 §4.2(A); promoted to the triple
+// axis by SFN-774 / SFEP-0068 §3.1): the msvc ABI forces `-fuse-ld=lld`
+// and skips the GNU-only dead-strip / retain-root flags `lld-link`
+// rejects. All no-ops off Windows.
+import {
+    build_target_os,
+    build_target_triple,
+    target_forced_linker_flag,
+    target_uses_gnu_link_gc
+} from "./target";
 
 // True when `name` resolves to an executable on PATH. `command -v` is
 // POSIX and emits the resolved path (non-empty) on success, nothing on
@@ -81,9 +87,10 @@ fn _resolve_linker() -> string ![io] {
     // Windows has none). On a Linux/macOS host with no override it returns
     // exactly what `uname -s` did, so the auto-detect below is unchanged.
     let os = build_target_os();
-    // A Windows (MSVC) target links with `lld-link`, forced ahead of the
-    // Linux-only auto-detect (`SAILFIN_LINKER` still wins, handled above).
-    let forced = target_forced_linker_flag(os);
+    // The msvc ABI links with `lld-link`, forced ahead of the Linux-only
+    // auto-detect (`SAILFIN_LINKER` still wins, handled above). Resolved
+    // from the triple (SFN-774), independently of the OS-only `os` above.
+    let forced = target_forced_linker_flag(build_target_triple());
     if forced.length > 0 {
         _trace_linker_choice("lld (MSVC target default)");
         return forced;
@@ -289,13 +296,14 @@ fn _clang_link_multi_with_opt(ll_paths: string[], out_path: string, runtime_root
     // With runtime objects present the enumeration always finds the
     // `sfn_*` family, so the happy path is unaffected.
     // The dead-strip + retain-root flags are GNU/Mach-O linker inputs
-    // (`-Wl,--gc-sections` / `-Wl,-dead_strip` / `-Wl,-u,<sym>`); a Windows
-    // (MSVC) target links with `lld-link`, which rejects them (it uses
-    // `/OPT:REF` / `/INCLUDE:`). Skip them for a Windows target — a clean
-    // lld-link invocation, at the cost of an unstripped binary until the
+    // (`-Wl,--gc-sections` / `-Wl,-dead_strip` / `-Wl,-u,<sym>`); the msvc
+    // ABI links with `lld-link`, which rejects them (it uses `/OPT:REF` /
+    // `/INCLUDE:`). Skip them for an msvc target — a clean lld-link
+    // invocation, at the cost of an unstripped binary until the
     // MSVC-native GC flags are tuned against a real link (SFEP-0021 M7).
-    // Every non-Windows target runs this block exactly as before (SFN-52).
-    if target_uses_gnu_link_gc(build_target_os()) {
+    // Every other target (incl. windows-gnu, whose mingw linker accepts
+    // the GNU flags) runs this block exactly as before (SFN-52 / SFN-774).
+    if target_uses_gnu_link_gc(build_target_triple()) {
         let retain_flags = _runtime_retain_root_flags(runtime_objs);
         let strip_safe = runtime_objs.length == 0 || retain_flags.length > 0;
         if strip_safe { link_flags.push(_dead_strip_link_flag()); } else {
