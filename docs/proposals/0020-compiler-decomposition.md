@@ -4,9 +4,9 @@ title: Role-Oriented Compiler Capsules
 status: Accepted
 type: tooling
 created: 2026-06-22
-updated: 2026-08-06
-author: "agent:compiler-architect; project owner (direction + naming); agent:Codex (2026-08-03 amendment); agent:implementer (2026-08-05 provider slot); agent:Sailbot (2026-08-06 narrow-stdlib matrix amendment; 2026-08-06 §3.5 correction 7 prelude-slug extension)"
-tracking: "#345 (historical epic); Linear project Role-Oriented Compiler Capsules. §3.7 steps 1-2 (landed): SFN-705, SFN-706, SFN-707, SFN-708, SFN-709, SFN-710, SFN-711, SFN-712, SFN-713, SFN-714, SFN-715, SFN-717, SFN-718. §3.7 steps 3-8 (groomed 2026-08-06): SFN-734 through SFN-751."
+updated: 2026-08-08
+author: "agent:compiler-architect; project owner (direction + naming); agent:Codex (2026-08-03 amendment; 2026-08-08 §3.5 corrections 1–2 status); agent:implementer (2026-08-05 provider slot); agent:Sailbot (2026-08-06 narrow-stdlib matrix amendment; 2026-08-06 §3.5 correction 7 prelude-slug extension)"
+tracking: "#345 (historical epic); Linear project Role-Oriented Compiler Capsules. §3.7 steps 1-2 (landed): SFN-705, SFN-706, SFN-707, SFN-708, SFN-709, SFN-710, SFN-711, SFN-712, SFN-713, SFN-714, SFN-715, SFN-717, SFN-718, SFN-734. §3.7 steps 3-8 (groomed 2026-08-06): SFN-735 through SFN-751."
 supersedes:
 superseded-by:
 graduates-to:
@@ -228,14 +228,14 @@ The current import graph contains historical shortcuts. They are not reasons to
 reintroduce a `common` capsule. The migration first fixes these seams inside the
 monolith, then moves files:
 
-1. **Syntax must be syntax-only.** `parser/expressions/prefix.sfn` currently
-   imports `spawn_future_kind` from type-checking code. The parser should retain
-   the source type annotation; the analyzer assigns the resolved future kind.
-2. **IR owns its interchange types.** `native_ir_api.sfn` currently imports
-   `NativeArtifact` from `emit_native_layout.sfn`. Move the artifact and layout
-   interchange shapes into `sfn/ir`, leaving construction in `sfn/codegen`.
-   Analyzer import-context loading may depend on `sfn/ir`; IR must not depend
-   back on analyzer.
+1. **Landed (SFN-734): syntax is syntax-only at this seam.**
+   `parser/expressions/prefix.sfn` no longer imports `spawn_future_kind`; the
+   symbol lives only in analyzer-side type rules. The parser retains the source
+   type annotation, and the analyzer assigns the resolved future kind.
+2. **Landed (SFN-734): IR owns its interchange types.** `NativeArtifact` is
+   defined in `native_ir.sfn`, and `emit_native_layout.sfn` imports it from IR.
+   Construction remains in codegen, so the edge points from codegen to IR and
+   IR does not depend back on codegen or analyzer.
 3. **Intrinsic semantics are not LLVM semantics.** Effect analysis currently
    reaches into `llvm/runtime_helpers`. Move target-neutral intrinsic identity
    and effect metadata into IR/analyzer-owned contracts. LLVM keeps only symbol
