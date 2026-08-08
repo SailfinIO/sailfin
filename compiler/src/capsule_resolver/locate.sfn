@@ -1,18 +1,16 @@
 // compiler/src/capsule_resolver/locate.sfn
 //
-// Capsule source locators: given a declared dep spec (and, for the
-// manifest-driven path, a version), find the on-disk `src/` directory that
-// holds its `.sfn` sources.
+// The manifest-driven capsule source locator: given a declared dep spec and
+// version, find the on-disk `src/` directory that holds its `.sfn` sources.
 //
 // This lives in its own module rather than `paths.sfn` — which already holds
-// every helper these locators use — because `paths.sfn` is not usable for it:
+// every helper this locator uses — because `paths.sfn` is not usable for it:
 // `paths.sfn` imports `./types`, and `types.sfn` imports
 // `../runtime_capsule_resolver`. Hosting a locator consumed from outside the
 // resolver (SFN-773) in `paths.sfn` would create a cycle for that consumer.
 // `locate.sfn` imports from `paths`/`provenance`/`types` but is imported BY
 // `discovery.sfn`, so it stays cycle-free. Do not merge this back into
 // `paths.sfn`.
-import { semver_compare, semver_is_valid, semver_parse } from "../semver";
 import { substring } from "../string_utils";
 import {
     _cr_find_char,
@@ -72,57 +70,4 @@ export fn locate_capsule_src(project_root: string, spec: string, version: string
         };
     }
     return missing;
-}
-
-// Locate the src/ dir for a scoped capsule in the user cache
-// (~/.sfn/cache/capsules/<scope>/<name>/<version>/src), choosing the
-// highest semver version present. Used by the manifest-less, workspace-
-// less bare-build path (SFN-216): a bare `sfn build main.sfn` has no
-// capsule.toml or capsule.lock to pin a version, so the newest cached
-// version is selected. Returns "" if the capsule is not cached or no
-// cached version has a src/ dir.
-fn _cr_locate_cached_capsule_src_latest(spec: string) -> string ![io] {
-    let slash = _cr_find_char(spec, "/", 0);
-    if slash <= 0 { return ""; }
-    let slash2 = _cr_find_char(substring(spec, slash + 1, spec.length), "/", 0);
-    if slash2 >= 0 { return ""; }
-    let scope = substring(spec, 0, slash);
-    let name = substring(spec, slash + 1, spec.length);
-    if !_cr_is_safe_segment(scope) { return ""; }
-    if !_cr_is_safe_segment(name) { return ""; }
-    let home = _cr_get_home();
-    if home.length == 0 { return ""; }
-    let base = home + "/.sfn/cache/capsules/" + scope + "/" + name;
-    if !fs.exists(base) { return ""; }
-    let entries = fs.listDirectory(base);
-    let mut best_version: string = "";
-    let mut has_best: boolean = false;
-    // `best_parsed` is only read when `has_best` is true; the placeholder
-    // seed keeps the type inferred as SemVer without importing the name.
-    let mut best_parsed = semver_parse("0.0.0");
-    let guard: int = 4096;
-    let mut i: int = 0;
-    loop {
-        if i >= entries.length { break; }
-        if i >= guard { break; }
-        let ver = entries[i];
-        i += 1;
-        if ver.length == 0 { continue; }
-        if ver[0] == "." { continue; }
-        if !_cr_is_safe_version(ver) { continue; }
-        let parsed = semver_parse(ver);
-        if !semver_is_valid(parsed) { continue; }
-        let src = base + "/" + ver + "/src";
-        if !fs.exists(src) { continue; }
-        if !has_best {
-            has_best = true;
-            best_parsed = parsed;
-            best_version = ver;
-        } else if semver_compare(parsed, best_parsed) > 0 {
-            best_parsed = parsed;
-            best_version = ver;
-        }
-    }
-    if !has_best { return ""; }
-    return base + "/" + best_version + "/src";
 }
