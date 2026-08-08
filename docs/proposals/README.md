@@ -109,6 +109,7 @@ Index row. Two slates are in review.
 | [`draft-nullable-access-operators`](./draft-nullable-access-operators.md) | Nullable Access Operators (`?.` and `??`) | language |
 | [`draft-import-surface-compaction`](./draft-import-surface-compaction.md) | Import-surface compaction across the phase rewind to cut emit peak RSS | runtime |
 | [`draft-concurrency-cancellation`](./draft-concurrency-cancellation.md) | Concurrency runtime maturity — cancel-on-fault and async I/O | runtime |
+| [`draft-secret-buffer-zeroization`](./draft-secret-buffer-zeroization.md) | Non-Elidable Zeroization for Uniquely Owned Secret Buffers | runtime |
 
 The **capability-seal critical path** designs graduated out of this slate on
 2026-07-25 and now hold Index rows: SFEP-0059 (typed SSA activation) and
