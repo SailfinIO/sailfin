@@ -1214,19 +1214,32 @@ fn lower_enum_literal(parse: EnumLiteralParse, bindings: ParameterBinding[], loc
                     // aggregate (`{i8*, i64}`) is narrowed to its `i8*` data
                     // pointer so it fits the pointer-width payload slot and
                     // matches the match-arm read (which maps `string` -> i8*).
-                    if field_is_generic {
-                        let operand_type = trim_text(field_operand.llvm_type);
-                        if operand_type == "{i8*, i64}" {
-                            field_llvm_type = "i8*";
-                        } else if operand_type.length > 0 {
-                            field_llvm_type = operand_type;
-                        }
-                    }
+                    // Shared with the adoption block below (`field_operand` is
+                    // not reassigned between them) — two drifting copies of this
+                    // test are how SFN-770 reached the store unboxed.
                     let trimmed_field_type = trim_text(field_operand.llvm_type);
                     let mut _let69: boolean = false;
                     if starts_with(trimmed_field_type, "%") { _let69 = true; }
                     if starts_with(trimmed_field_type, "{") { _let69 = true; }
                     let field_is_aggregate = _let69;
+                    if field_is_generic {
+                        if trimmed_field_type == "{i8*, i64}" {
+                            field_llvm_type = "i8*";
+                        } else if trimmed_field_type.length > 0 {
+                            // SFN-770: the payload slot is pointer-width and the
+                            // match arm reads a struct/enum/interface payload as
+                            // `%T*`, so an aggregate in value form is adopted as a
+                            // pointer for the boxing branch below to box it. Why,
+                            // and the `{i8*, i8*}` gap left open as SFN-771:
+                            // `compiler/tests/unit/enum_payload_struct_local_test.sfn`.
+                            field_llvm_type = trimmed_field_type;
+                            if field_is_aggregate {
+                                if !ends_with_pointer_suffix(trimmed_field_type) {
+                                    field_llvm_type = trimmed_field_type + "*";
+                                }
+                            }
+                        }
+                    }
                     if ends_with_pointer_suffix(field_llvm_type) {
                         if !ends_with_pointer_suffix(field_operand.llvm_type) {
                             if field_is_aggregate {

@@ -64,7 +64,12 @@ fn _count_newlines(source: string) -> int {
 fn _grandfathered_ceiling(name: string) -> int {
     if name == "core_concurrency_lowering.sfn" { return 1608; }
     if name == "core_ops_lowering.sfn" { return 1581; }
-    if name == "core_literals_lowering.sfn" { return 1447; }
+    // 1447 -> 1460: SFN-770, a miscompile that stored a struct-typed local
+    // into a pointer-width enum payload slot by value. The fix needs real
+    // lines in this file and no net-zero form of it exists, so the raise is
+    // deliberate rather than a reflex — pinned to the exact new length so the
+    // ratchet keeps holding. Splitting this module stays SFN-639's job.
+    if name == "core_literals_lowering.sfn" { return 1460; }
     if name == "core_member_lowering.sfn" { return 1212; }
     if name == "core_parse.sfn" { return 1137; }
     if name == "core_parsing.sfn" { return 1053; }
