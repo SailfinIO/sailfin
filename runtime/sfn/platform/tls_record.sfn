@@ -1,0 +1,672 @@
+// runtime/sfn/platform/tls_record.sfn
+//
+// TLS 1.3 record layer (RFC 8446 §5) in the runtime's `* u8` pointer idiom —
+// the per-byte hot path of the native TLS stack (SFEP-0048 Phase D, SFN-768;
+// design `docs/proposals/design-notes/sfn-341-native-tls-runtime-swap.md`
+// §3.3).
+//
+// Why a second implementation. `runtime/sfn/crypto/tls13_record.sfn` (and its
+// `capsules/sfn/crypto` original) express the same record layer over `int[]`.
+// That idiom stores one byte per i64 array slot behind a bounds check — an 8x
+// memory-traffic penalty before any arithmetic — and `tls13_open_record`
+// additionally makes four full copies of every record's bytes. The handshake
+// pays that cost once per connection and does not care; the record layer pays
+// it per byte and does. Everything else in the native stack — key schedule,
+// X25519, X.509, both handshake state machines — deliberately stays
+// `int[]`-vendored.
+//
+// The `int[]` implementation stays the byte-exact differential oracle for this
+// file: `compiler/tests/e2e/tls_record_pointer_differential_test.sfn` sweeps
+// both against each other and against the RFC 8439 §2.8.2 AEAD vector.
+//
+// Idiom notes (the SFN-338 precedent, `runtime/sfn/adapters/websocket.sfn`):
+//   * Sailfin exposes no pointer-store intrinsic, so every byte store is a
+//     `memset(p, b, 1)` libc call. At `-O2` LLVM's InstCombine folds a
+//     constant-length-1 `memset` into a single `store i8`; at `-O0` it stays a
+//     real call, which is the dominant term in the `-O0` throughput figure.
+//   * Byte loads use the `load_byte` builtin (a true `load i8` + `zext`,
+//     `compiler/src/llvm/byte_load.sfn`) rather than the word-load
+//     `sailfin_intrinsic_pointer_read_i32` the WebSocket helpers use. A true
+//     i8 load is sound at any alignment and never reads past the buffer, so
+//     callers owe this module no tail-slack over-allocation.
+//   * File-local runtime helpers get external linkage, so every helper here
+//     carries the `_tlsrec_` prefix to keep its symbol unique.
+//   * This module is self-contained (its own `extern fn` declarations, no
+//     cross-module import) per the SFN-635 runtime convention.
+//
+// Integer discipline: all arithmetic is on signed i64. 32-bit words are kept
+// masked to `[0, 2^32)` and Poly1305 limbs to `[0, 2^26)`, so every `>>` acts
+// as a logical shift and no intermediate product exceeds 2^59. There is
+// exactly one deliberate exception — the `g4 >> 63` sign test in
+// `_tlsrec_poly1305_tag`'s final reduction, whose operand may be negative;
+// it is written so that it holds under either `ashr` or `lshr` (see the
+// comment there).
+extern fn malloc(size: usize) -> *u8;
+
+extern fn free(ptr: *u8) -> void;
+
+extern fn memcpy(dst: *u8, src: *u8, n: usize) -> *u8;
+
+extern fn memset(ptr: *u8, value: i32, n: usize) -> *u8;
+
+// ── Fail-closed result codes ─────────────────────────────────────
+// Every code maps 1:1 onto a guard in the `int[]` oracle, so a differential
+// test can assert that both implementations reject the same input at the same
+// point. Seal returns `[]` for its guards; open returns a `Result.Err` whose
+// message is quoted beside each code below.
+//
+//   -1  bad key length                      (seal + open)
+//   -2  bad iv length                       (seal + open)
+//   -3  negative padding                    (seal)
+//   -4  content length out of range        (seal: content > 2^14, or negative
+//                                          — a caller bug with no oracle
+//                                          analogue, since `int[].length`
+//                                          cannot be negative; open:
+//                                          recovered content > 2^14)
+//   -5  record overflow                     (encrypted_record > 2^14 + 256)
+//   -6  short record header                 (open)
+//   -7  unexpected outer content type       (open)
+//   -8  length mismatch                     (open)
+//   -9  encrypted_record shorter than tag   (open)
+//   -10 authentication failed               (open)
+//   -11 no content type (all-zero plaintext) (open)
+//   -12 out of memory                       (no oracle analogue)
+fn sfn_tls_record_err_bad_key_length() -> i64 { return 0 - 1; }
+
+fn sfn_tls_record_err_bad_iv_length() -> i64 { return 0 - 2; }
+
+fn sfn_tls_record_err_negative_padding() -> i64 { return 0 - 3; }
+
+fn sfn_tls_record_err_content_overflow() -> i64 { return 0 - 4; }
+
+fn sfn_tls_record_err_record_overflow() -> i64 { return 0 - 5; }
+
+fn sfn_tls_record_err_short_header() -> i64 { return 0 - 6; }
+
+fn sfn_tls_record_err_unexpected_type() -> i64 { return 0 - 7; }
+
+fn sfn_tls_record_err_length_mismatch() -> i64 { return 0 - 8; }
+
+fn sfn_tls_record_err_short_encrypted_record() -> i64 { return 0 - 9; }
+
+fn sfn_tls_record_err_auth_failed() -> i64 { return 0 - 10; }
+
+fn sfn_tls_record_err_no_content_type() -> i64 { return 0 - 11; }
+
+fn sfn_tls_record_err_oom() -> i64 { return 0 - 12; }
+
+// ── Constants (RFC 8446 §5) ──────────────────────────────────────
+// ContentType application_data(23): the outer opaque_type of every TLS 1.3
+// TLSCiphertext. The real content type travels inside the encrypted
+// TLSInnerPlaintext.
+fn sfn_tls_record_application_data() -> i64 { return 23; }
+
+// Poly1305 tag length appended by the AEAD (RFC 8439 §2.8).
+fn sfn_tls_record_tag_len() -> i64 { return 16; }
+
+// Maximum TLSPlaintext.fragment / decrypted content length, 2^14 (§5.1).
+fn sfn_tls_record_max_plaintext() -> i64 { return 16384; }
+
+// Maximum TLSCiphertext.encrypted_record length, 2^14 + 256 (§5.2).
+fn sfn_tls_record_max_encrypted() -> i64 { return 16640; }
+
+// ── Byte-level helpers ───────────────────────────────────────────
+// Byte-stride pointer arithmetic for a variable offset.
+fn _tlsrec_ptr_off(p: *u8, off: i64) -> *u8 {
+    let addr: i64 = (p as i64) + off;
+    return addr as *u8;
+}
+
+// Read the byte at `base + off` as 0..255 via a true i8 load.
+fn _tlsrec_at(base: *u8, off: i64) -> i64 {
+    return load_byte((base as i64) + off) & 255;
+}
+
+// Store the low byte of `b` at `dst + off`. The only pointer-store primitive
+// Sailfin exposes is `memset`; length 1 folds to `store i8` at `-O2`.
+fn _tlsrec_put(dst: *u8, off: i64, b: i64) -> void {
+    memset(_tlsrec_ptr_off(dst, off), (b & 255) as i32, 1 as usize);
+}
+
+// Load a little-endian 32-bit word from `p + off`.
+fn _tlsrec_le32(p: *u8, off: i64) -> i64 {
+    return (_tlsrec_at(p, off) | (_tlsrec_at(p, off + 1) << 8) | (_tlsrec_at(p, off
+        + 2) << 16) | (_tlsrec_at(p, off
+        + 3) << 24)) & 4294967295;
+}
+
+// Store the low 32 bits of `w` little-endian at `dst + off`.
+fn _tlsrec_put_le32(dst: *u8, off: i64, w: i64) -> void {
+    _tlsrec_put(dst, off, w);
+    _tlsrec_put(dst, off + 1, w >> 8);
+    _tlsrec_put(dst, off + 2, w >> 16);
+    _tlsrec_put(dst, off + 3, w >> 24);
+}
+
+// Store `n` little-endian in 8 bytes at `dst + off` (the AEAD length trailer).
+fn _tlsrec_put_le64(dst: *u8, off: i64, n: i64) -> void {
+    let mut i: i64 = 0;
+    loop {
+        if i >= 8 { break; }
+        _tlsrec_put(dst, off + i, (n >> (8 * i)) & 255);
+        i = i + 1;
+    }
+}
+
+// Rotate the low 32 bits of `x` left by `n` (0 < n < 32).
+fn _tlsrec_rotl32(x: i64, n: i64) -> i64 {
+    let v: i64 = x & 4294967295;
+    return ((v << n) | (v >> (32 - n))) & 4294967295;
+}
+
+// Constant-time equality over 16 bytes: fold every difference into one
+// accumulator so the comparison never short-circuits on the first mismatch.
+fn _tlsrec_ct_eq16(a: *u8, a_off: i64, b: *u8, b_off: i64) -> bool {
+    let mut diff: i64 = 0;
+    let mut i: i64 = 0;
+    loop {
+        if i >= 16 { break; }
+        diff = diff | (_tlsrec_at(a, a_off + i) ^ _tlsrec_at(b, b_off + i));
+        i = i + 1;
+    }
+    return diff == 0;
+}
+
+// ── ChaCha20 (RFC 8439 §2.3) ─────────────────────────────────────
+// XOR four keystream bytes — the little-endian bytes of the 32-bit word `w` —
+// into `dst[off .. off+4)` from `src[off .. off+4)`, stopping at `len`. This
+// is the sole per-byte store in the cipher: the 16 state words stay in
+// registers for the whole 20-round core and are consumed 4 bytes at a time
+// here, so no 64-byte keystream buffer is ever materialized.
+fn _tlsrec_xor4(src: *u8, dst: *u8, off: i64, len: i64, w: i64) -> void {
+    let mut j: i64 = 0;
+    loop {
+        if j >= 4 { break; }
+        let o: i64 = off + j;
+        if o >= len { break; }
+        _tlsrec_put(dst, o, _tlsrec_at(src, o) ^ ((w >> (8 * j)) & 255));
+        j = j + 1;
+    }
+}
+
+// ChaCha20-XOR `len` bytes of `src` into `dst` under the 32-byte `key` and
+// 12-byte `nonce`, starting at block counter `counter0`. `src` and `dst` may
+// be the same pointer (the in-place decrypt path). Keystream generation is
+// register-resident: 16 `i64` locals hold the working state across all 10
+// double rounds, which is what keeps the `int[]` idiom's ~15 bounds-checked
+// array operations per byte off the hot path entirely.
+fn _tlsrec_chacha_apply(key: *u8, nonce: *u8, counter0: i64, src: *u8, dst: *u8, len: i64) -> void {
+    let m: i64 = 4294967295;
+    // "expand 32-byte k" as four little-endian words.
+    let c0: i64 = 1634760805;
+    let c1: i64 = 857760878;
+    let c2: i64 = 2036477234;
+    let c3: i64 = 1797285236;
+    let k0: i64 = _tlsrec_le32(key, 0);
+    let k1: i64 = _tlsrec_le32(key, 4);
+    let k2: i64 = _tlsrec_le32(key, 8);
+    let k3: i64 = _tlsrec_le32(key, 12);
+    let k4: i64 = _tlsrec_le32(key, 16);
+    let k5: i64 = _tlsrec_le32(key, 20);
+    let k6: i64 = _tlsrec_le32(key, 24);
+    let k7: i64 = _tlsrec_le32(key, 28);
+    let n0: i64 = _tlsrec_le32(nonce, 0);
+    let n1: i64 = _tlsrec_le32(nonce, 4);
+    let n2: i64 = _tlsrec_le32(nonce, 8);
+    let mut ctr: i64 = counter0 & m;
+    let mut off: i64 = 0;
+    loop {
+        if off >= len { break; }
+        let mut x0: i64 = c0;
+        let mut x1: i64 = c1;
+        let mut x2: i64 = c2;
+        let mut x3: i64 = c3;
+        let mut x4: i64 = k0;
+        let mut x5: i64 = k1;
+        let mut x6: i64 = k2;
+        let mut x7: i64 = k3;
+        let mut x8: i64 = k4;
+        let mut x9: i64 = k5;
+        let mut x10: i64 = k6;
+        let mut x11: i64 = k7;
+        let mut x12: i64 = ctr;
+        let mut x13: i64 = n0;
+        let mut x14: i64 = n1;
+        let mut x15: i64 = n2;
+        let mut r: i64 = 0;
+        loop {
+            if r >= 10 { break; }
+            // Column round: QR(0,4,8,12) QR(1,5,9,13) QR(2,6,10,14) QR(3,7,11,15)
+            x0 = (x0 + x4) & m;
+            x12 = _tlsrec_rotl32(x12 ^ x0, 16);
+            x8 = (x8 + x12) & m;
+            x4 = _tlsrec_rotl32(x4 ^ x8, 12);
+            x0 = (x0 + x4) & m;
+            x12 = _tlsrec_rotl32(x12 ^ x0, 8);
+            x8 = (x8 + x12) & m;
+            x4 = _tlsrec_rotl32(x4 ^ x8, 7);
+
+            x1 = (x1 + x5) & m;
+            x13 = _tlsrec_rotl32(x13 ^ x1, 16);
+            x9 = (x9 + x13) & m;
+            x5 = _tlsrec_rotl32(x5 ^ x9, 12);
+            x1 = (x1 + x5) & m;
+            x13 = _tlsrec_rotl32(x13 ^ x1, 8);
+            x9 = (x9 + x13) & m;
+            x5 = _tlsrec_rotl32(x5 ^ x9, 7);
+
+            x2 = (x2 + x6) & m;
+            x14 = _tlsrec_rotl32(x14 ^ x2, 16);
+            x10 = (x10 + x14) & m;
+            x6 = _tlsrec_rotl32(x6 ^ x10, 12);
+            x2 = (x2 + x6) & m;
+            x14 = _tlsrec_rotl32(x14 ^ x2, 8);
+            x10 = (x10 + x14) & m;
+            x6 = _tlsrec_rotl32(x6 ^ x10, 7);
+
+            x3 = (x3 + x7) & m;
+            x15 = _tlsrec_rotl32(x15 ^ x3, 16);
+            x11 = (x11 + x15) & m;
+            x7 = _tlsrec_rotl32(x7 ^ x11, 12);
+            x3 = (x3 + x7) & m;
+            x15 = _tlsrec_rotl32(x15 ^ x3, 8);
+            x11 = (x11 + x15) & m;
+            x7 = _tlsrec_rotl32(x7 ^ x11, 7);
+
+            // Diagonal round: QR(0,5,10,15) QR(1,6,11,12) QR(2,7,8,13) QR(3,4,9,14)
+            x0 = (x0 + x5) & m;
+            x15 = _tlsrec_rotl32(x15 ^ x0, 16);
+            x10 = (x10 + x15) & m;
+            x5 = _tlsrec_rotl32(x5 ^ x10, 12);
+            x0 = (x0 + x5) & m;
+            x15 = _tlsrec_rotl32(x15 ^ x0, 8);
+            x10 = (x10 + x15) & m;
+            x5 = _tlsrec_rotl32(x5 ^ x10, 7);
+
+            x1 = (x1 + x6) & m;
+            x12 = _tlsrec_rotl32(x12 ^ x1, 16);
+            x11 = (x11 + x12) & m;
+            x6 = _tlsrec_rotl32(x6 ^ x11, 12);
+            x1 = (x1 + x6) & m;
+            x12 = _tlsrec_rotl32(x12 ^ x1, 8);
+            x11 = (x11 + x12) & m;
+            x6 = _tlsrec_rotl32(x6 ^ x11, 7);
+
+            x2 = (x2 + x7) & m;
+            x13 = _tlsrec_rotl32(x13 ^ x2, 16);
+            x8 = (x8 + x13) & m;
+            x7 = _tlsrec_rotl32(x7 ^ x8, 12);
+            x2 = (x2 + x7) & m;
+            x13 = _tlsrec_rotl32(x13 ^ x2, 8);
+            x8 = (x8 + x13) & m;
+            x7 = _tlsrec_rotl32(x7 ^ x8, 7);
+
+            x3 = (x3 + x4) & m;
+            x14 = _tlsrec_rotl32(x14 ^ x3, 16);
+            x9 = (x9 + x14) & m;
+            x4 = _tlsrec_rotl32(x4 ^ x9, 12);
+            x3 = (x3 + x4) & m;
+            x14 = _tlsrec_rotl32(x14 ^ x3, 8);
+            x9 = (x9 + x14) & m;
+            x4 = _tlsrec_rotl32(x4 ^ x9, 7);
+            r = r + 1;
+        }
+        _tlsrec_xor4(src, dst, off, len, (x0 + c0) & m);
+        _tlsrec_xor4(src, dst, off + 4, len, (x1 + c1) & m);
+        _tlsrec_xor4(src, dst, off + 8, len, (x2 + c2) & m);
+        _tlsrec_xor4(src, dst, off + 12, len, (x3 + c3) & m);
+        _tlsrec_xor4(src, dst, off + 16, len, (x4 + k0) & m);
+        _tlsrec_xor4(src, dst, off + 20, len, (x5 + k1) & m);
+        _tlsrec_xor4(src, dst, off + 24, len, (x6 + k2) & m);
+        _tlsrec_xor4(src, dst, off + 28, len, (x7 + k3) & m);
+        _tlsrec_xor4(src, dst, off + 32, len, (x8 + k4) & m);
+        _tlsrec_xor4(src, dst, off + 36, len, (x9 + k5) & m);
+        _tlsrec_xor4(src, dst, off + 40, len, (x10 + k6) & m);
+        _tlsrec_xor4(src, dst, off + 44, len, (x11 + k7) & m);
+        _tlsrec_xor4(src, dst, off + 48, len, (x12 + ctr) & m);
+        _tlsrec_xor4(src, dst, off + 52, len, (x13 + n0) & m);
+        _tlsrec_xor4(src, dst, off + 56, len, (x14 + n1) & m);
+        _tlsrec_xor4(src, dst, off + 60, len, (x15 + n2) & m);
+        off = off + 64;
+        ctr = (ctr + 1) & m;
+    }
+}
+
+// ── Poly1305 (RFC 8439 §2.5) over the AEAD construction (§2.8) ────
+// Compute the 16-byte tag of `aad ‖ pad16(aad) ‖ ct ‖ pad16(ct) ‖ le64(|aad|)
+// ‖ le64(|ct|)` under the 32-byte one-time key `otk`, writing it to
+// `tag_out[0..16)`.
+//
+// The padded construction is a whole number of 16-byte blocks by definition,
+// so every block is a "full" block and the 2^128 bit always lands as `+2^24`
+// in limb 4 — the `int[]` oracle's general `bit_pos / 26` case collapses away.
+// That lets the bulk of the message stream straight off the `ct` pointer with
+// no concatenation buffer: only the two short region tails and the length
+// trailer are staged, in the caller-owned 48-byte `scratch`.
+//
+// `scratch` layout: [0,16) padded aad tail, [16,32) padded ct tail,
+// [32,48) the le64 length trailer.
+//
+// Limb magnitudes: h_i < 2^27 after a block add and r_i < 2^26 after clamping,
+// so each of the five products d_i sums to under 5 * 2^27 * 2^29 < 2^59 and
+// stays well inside i64.
+fn _tlsrec_poly1305_tag(otk: *u8, aad: *u8, aad_len: i64, ct: *u8, ct_len: i64, scratch: *u8, tag_out: *u8) -> void {
+    let mask: i64 = 67108863;  // 2^26 - 1, the limb mask
+    memset(scratch, 0, 48 as usize);
+    let aad_full: i64 = aad_len / 16;
+    let aad_rem: i64 = aad_len - aad_full * 16;
+    if aad_rem > 0 {
+        memcpy(scratch, _tlsrec_ptr_off(aad, aad_full * 16), aad_rem as usize);
+    }
+    let ct_full: i64 = ct_len / 16;
+    let ct_rem: i64 = ct_len - ct_full * 16;
+    if ct_rem > 0 {
+        memcpy(_tlsrec_ptr_off(scratch, 16), _tlsrec_ptr_off(ct, ct_full * 16), ct_rem as usize);
+    }
+    _tlsrec_put_le64(scratch, 32, aad_len);
+    _tlsrec_put_le64(scratch, 40, ct_len);
+
+    // Clamp r per RFC 8439 §2.5.1, then split the clamped words into limbs.
+    let t0: i64 = _tlsrec_le32(otk, 0) & 268435455;
+    let t1: i64 = _tlsrec_le32(otk, 4) & 268435452;
+    let t2: i64 = _tlsrec_le32(otk, 8) & 268435452;
+    let t3: i64 = _tlsrec_le32(otk, 12) & 268435452;
+    let r0: i64 = t0 & mask;
+    let r1: i64 = ((t0 >> 26) | (t1 << 6)) & mask;
+    let r2: i64 = ((t1 >> 20) | (t2 << 12)) & mask;
+    let r3: i64 = ((t2 >> 14) | (t3 << 18)) & mask;
+    let r4: i64 = (t3 >> 8) & mask;
+    let v1: i64 = r1 * 5;
+    let v2: i64 = r2 * 5;
+    let v3: i64 = r3 * 5;
+    let v4: i64 = r4 * 5;
+
+    let mut h0: i64 = 0;
+    let mut h1: i64 = 0;
+    let mut h2: i64 = 0;
+    let mut h3: i64 = 0;
+    let mut h4: i64 = 0;
+
+    // Five regions, in AEAD order. Each contributes whole 16-byte blocks, so
+    // the accumulate below is written exactly once.
+    let mut region: i64 = 0;
+    loop {
+        if region >= 5 { break; }
+        let mut rp: i64 = 0;
+        let mut rn: i64 = 0;
+        if region == 0 {
+            rp = aad as i64;
+            rn = aad_full;
+        } else if region == 1 {
+            rp = scratch as i64;
+            if aad_rem > 0 { rn = 1; }
+        } else if region == 2 {
+            rp = ct as i64;
+            rn = ct_full;
+        } else if region == 3 {
+            rp = (scratch as i64) + 16;
+            if ct_rem > 0 { rn = 1; }
+        } else {
+            rp = (scratch as i64) + 32;
+            rn = 1;
+        }
+        let base: *u8 = rp as *u8;
+        let mut b: i64 = 0;
+        loop {
+            if b >= rn { break; }
+            let o: i64 = b * 16;
+            let w0: i64 = _tlsrec_le32(base, o);
+            let w1: i64 = _tlsrec_le32(base, o + 4);
+            let w2: i64 = _tlsrec_le32(base, o + 8);
+            let w3: i64 = _tlsrec_le32(base, o + 12);
+            // Add the block, with the 2^128 bit as +2^24 in limb 4.
+            h0 = h0 + (w0 & mask);
+            h1 = h1 + (((w0 >> 26) | (w1 << 6)) & mask);
+            h2 = h2 + (((w1 >> 20) | (w2 << 12)) & mask);
+            h3 = h3 + (((w2 >> 14) | (w3 << 18)) & mask);
+            h4 = h4 + ((w3 >> 8) & mask) + 16777216;
+            // h = (h * r) mod (2^130 - 5)
+            let d0: i64 = h0 * r0 + h1 * v4 + h2 * v3 + h3 * v2 + h4 * v1;
+            let d1: i64 = h0 * r1 + h1 * r0 + h2 * v4 + h3 * v3 + h4 * v2;
+            let d2: i64 = h0 * r2 + h1 * r1 + h2 * r0 + h3 * v4 + h4 * v3;
+            let d3: i64 = h0 * r3 + h1 * r2 + h2 * r1 + h3 * r0 + h4 * v4;
+            let d4: i64 = h0 * r4 + h1 * r3 + h2 * r2 + h3 * r1 + h4 * r0;
+            let mut c: i64 = d0 >> 26;
+            h0 = d0 & mask;
+            let e1: i64 = d1 + c;
+            c = e1 >> 26;
+            h1 = e1 & mask;
+            let e2: i64 = d2 + c;
+            c = e2 >> 26;
+            h2 = e2 & mask;
+            let e3: i64 = d3 + c;
+            c = e3 >> 26;
+            h3 = e3 & mask;
+            let e4: i64 = d4 + c;
+            c = e4 >> 26;
+            h4 = e4 & mask;
+            h0 = h0 + c * 5;
+            c = h0 >> 26;
+            h0 = h0 & mask;
+            h1 = h1 + c;
+            b = b + 1;
+        }
+        region = region + 1;
+    }
+
+    // Fully carry h.
+    let mut c: i64 = h1 >> 26;
+    h1 = h1 & mask;
+    h2 = h2 + c;
+    c = h2 >> 26;
+    h2 = h2 & mask;
+    h3 = h3 + c;
+    c = h3 >> 26;
+    h3 = h3 & mask;
+    h4 = h4 + c;
+    c = h4 >> 26;
+    h4 = h4 & mask;
+    h0 = h0 + c * 5;
+    c = h0 >> 26;
+    h0 = h0 & mask;
+    h1 = h1 + c;
+
+    // g = h + 5; if g overflows 2^130 then h >= p and g is the reduced value.
+    let g0: i64 = h0 + 5;
+    let mut gc: i64 = g0 >> 26;
+    let g0m: i64 = g0 & mask;
+    let g1: i64 = h1 + gc;
+    gc = g1 >> 26;
+    let g1m: i64 = g1 & mask;
+    let g2: i64 = h2 + gc;
+    gc = g2 >> 26;
+    let g2m: i64 = g2 & mask;
+    let g3: i64 = h3 + gc;
+    gc = g3 >> 26;
+    let g3m: i64 = g3 & mask;
+    let g4: i64 = h4 + gc - 67108864;
+
+    // Branch-free select: `g4 < 0` means h < p, so keep h; otherwise take g.
+    // `g4` is the one value in this file that reaches a `>>` while possibly
+    // negative, so the sign bit is extracted with `& 1` and re-expanded into a
+    // mask. That spelling is correct whether `>>` lowers to `ashr` or `lshr`,
+    // matching the oracle's rationale in `poly1305.sfn`. This branch is taken
+    // only when the accumulator lands in [2^130 - 5, 2^130), which no test can
+    // reach, so it must be right by construction rather than by coverage.
+    let keep_h: i64 = 0 - ((g4 >> 63) & 1);
+    let take_g: i64 = 0 - 1 - keep_h;
+    h0 = (h0 & keep_h) | (g0m & take_g);
+    h1 = (h1 & keep_h) | (g1m & take_g);
+    h2 = (h2 & keep_h) | (g2m & take_g);
+    h3 = (h3 & keep_h) | (g3m & take_g);
+    h4 = (h4 & keep_h) | ((g4 & mask) & take_g);
+
+    // Repack the limbs into four 32-bit words, then add s and serialize.
+    let w32: i64 = 4294967295;
+    let p0: i64 = (h0 | (h1 << 26)) & w32;
+    let p1: i64 = ((h1 >> 6) | (h2 << 20)) & w32;
+    let p2: i64 = ((h2 >> 12) | (h3 << 14)) & w32;
+    let p3: i64 = ((h3 >> 18) | (h4 << 8)) & w32;
+    let mut f: i64 = p0 + _tlsrec_le32(otk, 16);
+    _tlsrec_put_le32(tag_out, 0, f & w32);
+    f = p1 + _tlsrec_le32(otk, 20) + (f >> 32);
+    _tlsrec_put_le32(tag_out, 4, f & w32);
+    f = p2 + _tlsrec_le32(otk, 24) + (f >> 32);
+    _tlsrec_put_le32(tag_out, 8, f & w32);
+    f = p3 + _tlsrec_le32(otk, 28) + (f >> 32);
+    _tlsrec_put_le32(tag_out, 12, f & w32);
+}
+
+// ── Per-record scratch ───────────────────────────────────────────
+// One allocation per record, never per byte. Layout:
+//   [0,32)    32 zero bytes — the XOR source that turns `_tlsrec_chacha_apply`
+//             into a plain keystream generator for the Poly1305 one-time key
+//   [32,64)   the Poly1305 one-time key (ChaCha20 block 0)
+//   [64,112)  `_tlsrec_poly1305_tag`'s 48-byte region scratch
+//   [112,128) unused guard gap — `open` reads the nonce *after* computing the
+//             tag, so an overrun of the region above would otherwise corrupt
+//             the decryption nonce silently instead of faulting
+//   [128,140) the per-record AEAD nonce
+//   [140,156) the recomputed tag (open only)
+fn _tlsrec_scratch_bytes() -> i64 { return 160; }
+
+// Derive the per-record nonce (RFC 8446 §5.3) into `scratch[128..140)`: the
+// 64-bit sequence number big-endian, left-padded with zeros to the 12-byte IV
+// length, XORed with the static write_iv.
+fn _tlsrec_derive_nonce(scratch: *u8, iv: *u8, seq: i64) -> void {
+    let mut i: i64 = 0;
+    loop {
+        if i >= 12 { break; }
+        let mut sb: i64 = 0;
+        if i >= 4 { sb = (seq >> (8 * (11 - i))) & 255; }
+        _tlsrec_put(scratch, 128 + i, _tlsrec_at(iv, i) ^ sb);
+        i = i + 1;
+    }
+}
+
+// ── Seal / open ──────────────────────────────────────────────────
+// Seal `content` (of true type `content_type`, `content_len` bytes) into a TLS
+// 1.3 wire record written to `out`, appending `padding` zero bytes to the
+// TLSInnerPlaintext. `out` receives the full TLSCiphertext: a 5-byte header
+// (opaque_type=23 ‖ 0x0303 ‖ uint16 length) ‖ ciphertext ‖ 16-byte tag, and
+// must be at least `5 + content_len + 1 + padding + 16` bytes. Encryption runs
+// in place in `out`, so `content` may itself be `out + 5` (the zero-copy path);
+// otherwise the content is copied in once with `memcpy`.
+//
+// Returns the number of bytes written to `out`, or a negative
+// `tls_record_err_*` code. Every guard mirrors `tls13_seal_record`, which
+// fails closed by returning `[]`.
+fn sfn_tls_record_seal(key: *u8, key_len: i64, iv: *u8, iv_len: i64, seq: i64, content_type: i64, content: *u8, content_len: i64, padding: i64, out: *u8) -> i64 {
+    if key_len != 32 { return sfn_tls_record_err_bad_key_length(); }
+    if iv_len != 12 { return sfn_tls_record_err_bad_iv_length(); }
+    if padding < 0 { return sfn_tls_record_err_negative_padding(); }
+    // A negative `content_len` has no oracle analogue — `int[].length` is
+    // non-negative by construction — so the differential can never reach it.
+    // Unguarded it passes every size check (`inner_len` and `enc_len` go
+    // negative) and then writes the content-type byte and the tag at negative
+    // offsets, corrupting the heap before the caller's buffer.
+    if content_len < 0 { return sfn_tls_record_err_content_overflow(); }
+    if content_len > sfn_tls_record_max_plaintext() {
+        return sfn_tls_record_err_content_overflow();
+    }
+    let inner_len: i64 = content_len + 1 + padding;
+    let enc_len: i64 = inner_len + sfn_tls_record_tag_len();
+    if enc_len > sfn_tls_record_max_encrypted() {
+        return sfn_tls_record_err_record_overflow();
+    }
+
+    let scratch: *u8 = malloc(_tlsrec_scratch_bytes() as usize);
+    if scratch as i64 == 0 { return sfn_tls_record_err_oom(); }
+    memset(scratch, 0, _tlsrec_scratch_bytes() as usize);
+    _tlsrec_derive_nonce(scratch, iv, seq);
+
+    // The 5-byte header doubles as the AEAD's additional authenticated data.
+    _tlsrec_put(out, 0, sfn_tls_record_application_data());
+    _tlsrec_put(out, 1, 3);  // legacy_record_version 0x0303 (TLS 1.2), high byte
+    _tlsrec_put(out, 2, 3);  // low byte
+    _tlsrec_put(out, 3, (enc_len >> 8) & 255);
+    _tlsrec_put(out, 4, enc_len & 255);
+
+    // TLSInnerPlaintext = content ‖ ContentType ‖ zeros[padding], framed in
+    // place at `out + 5`.
+    let body: *u8 = _tlsrec_ptr_off(out, 5);
+    if content_len > 0 && (content as i64) != (body as i64) {
+        memcpy(body, content, content_len as usize);
+    }
+    _tlsrec_put(body, content_len, content_type);
+    if padding > 0 {
+        memset(_tlsrec_ptr_off(body, content_len + 1), 0, padding as usize);
+    }
+
+    let otk: *u8 = _tlsrec_ptr_off(scratch, 32);
+    let nonce: *u8 = _tlsrec_ptr_off(scratch, 128);
+    _tlsrec_chacha_apply(key, nonce, 0, scratch, otk, 32);
+    _tlsrec_chacha_apply(key, nonce, 1, body, body, inner_len);
+    _tlsrec_poly1305_tag(otk, out, 5, body, inner_len, _tlsrec_ptr_off(scratch, 64), _tlsrec_ptr_off(body, inner_len));
+    free(scratch);
+    return 5 + enc_len;
+}
+
+// Open a TLS 1.3 wire record (`record` = 5-byte header ‖ encrypted_record,
+// `record_len` bytes total) under `key` / `iv` at sequence number `seq`.
+//
+// Decryption is in place: on success the recovered content occupies
+// `record[5 .. 5 + content_len)` and the trailing content-type byte, padding,
+// and tag are left as spent bytes. Returns `(content_type << 32) | content_len`
+// — always non-negative, since the all-zero-plaintext guard rules out a zero
+// content type — or a negative `tls_record_err_*` code.
+//
+// The guards run in the same order as `tls13_open_record`, so a malformed
+// record is rejected at the same point by both implementations, and all of
+// them run before any decryption: the work done is bounded by the record
+// length. The tag is verified before the plaintext is produced.
+fn sfn_tls_record_open(key: *u8, key_len: i64, iv: *u8, iv_len: i64, seq: i64, record: *u8, record_len: i64) -> i64 {
+    if key_len != 32 { return sfn_tls_record_err_bad_key_length(); }
+    if iv_len != 12 { return sfn_tls_record_err_bad_iv_length(); }
+    if record_len < 5 { return sfn_tls_record_err_short_header(); }
+    if _tlsrec_at(record, 0) != sfn_tls_record_application_data() {
+        return sfn_tls_record_err_unexpected_type();
+    }
+    let declared: i64 = (_tlsrec_at(record, 3) << 8) | _tlsrec_at(record, 4);
+    if declared != record_len - 5 {
+        return sfn_tls_record_err_length_mismatch();
+    }
+    if declared > sfn_tls_record_max_encrypted() {
+        return sfn_tls_record_err_record_overflow();
+    }
+    if declared < sfn_tls_record_tag_len() {
+        return sfn_tls_record_err_short_encrypted_record();
+    }
+    let ct_len: i64 = declared - sfn_tls_record_tag_len();
+
+    let scratch: *u8 = malloc(_tlsrec_scratch_bytes() as usize);
+    if scratch as i64 == 0 { return sfn_tls_record_err_oom(); }
+    memset(scratch, 0, _tlsrec_scratch_bytes() as usize);
+    _tlsrec_derive_nonce(scratch, iv, seq);
+
+    let otk: *u8 = _tlsrec_ptr_off(scratch, 32);
+    let nonce: *u8 = _tlsrec_ptr_off(scratch, 128);
+    let body: *u8 = _tlsrec_ptr_off(record, 5);
+    _tlsrec_chacha_apply(key, nonce, 0, scratch, otk, 32);
+    _tlsrec_poly1305_tag(otk, record, 5, body, ct_len, _tlsrec_ptr_off(scratch, 64), _tlsrec_ptr_off(scratch, 140));
+    if !_tlsrec_ct_eq16(scratch, 140, body, ct_len) {
+        free(scratch);
+        return sfn_tls_record_err_auth_failed();
+    }
+    _tlsrec_chacha_apply(key, nonce, 1, body, body, ct_len);
+    free(scratch);
+
+    // Recover the content type by scanning back for the last non-zero octet
+    // (RFC 8446 §5.2/§5.4); an all-zero plaintext carries no content type.
+    let mut idx: i64 = ct_len - 1;
+    loop {
+        if idx < 0 { break; }
+        if _tlsrec_at(body, idx) != 0 { break; }
+        idx = idx - 1;
+    }
+    if idx < 0 { return sfn_tls_record_err_no_content_type(); }
+    if idx > sfn_tls_record_max_plaintext() {
+        return sfn_tls_record_err_content_overflow();
+    }
+    return (_tlsrec_at(body, idx) << 32) | idx;
+}
