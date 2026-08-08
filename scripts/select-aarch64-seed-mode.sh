@@ -67,10 +67,23 @@ else
         if [ -n "${SAILFIN_SEED_PROBE_HTTP_CODE:-}" ]; then
             # Test seam: forces the branch below without any network access,
             # so the non-200/404 fail-closed path is testable hermetically
-            # (compiler/tests/e2e/aarch64_seed_mode_test.sfn).
+            # (compiler/tests/e2e/aarch64_seed_mode_test.sfn). Guarded by a
+            # three-digit-status shape check because, unlike its sibling seam
+            # SAILFIN_SEED_ASSET_LIST (self-guarding on a readable-file
+            # check), a bare hand-typed "200" or "206" here would silently
+            # bypass the network and print a confident wrong answer for a
+            # seed with no arm64 assets.
+            case "${SAILFIN_SEED_PROBE_HTTP_CODE}" in
+                [0-9][0-9][0-9]) ;;
+                *)
+                    echo "[arm-seed][error] SAILFIN_SEED_PROBE_HTTP_CODE must be a three-digit HTTP status, got: ${SAILFIN_SEED_PROBE_HTTP_CODE}" >&2
+                    exit 1
+                    ;;
+            esac
+            echo "[arm-seed][warn] probe seam active (SAILFIN_SEED_PROBE_HTTP_CODE=${SAILFIN_SEED_PROBE_HTTP_CODE}): no network probe performed" >&2
             code="${SAILFIN_SEED_PROBE_HTTP_CODE}"
         else
-            code="$(curl --silent --location --request GET --range 0-0 \
+            code="$(curl --silent --location --range 0-0 \
                 --retry 3 --retry-all-errors --max-time 30 \
                 -o /dev/null -w '%{http_code}' \
                 ${auth[@]+"${auth[@]}"} "${url}" || true)"

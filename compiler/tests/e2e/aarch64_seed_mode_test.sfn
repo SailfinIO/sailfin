@@ -238,6 +238,16 @@ test "aarch64 seed mode: an unresolvable probe status fails closed" ![io] {
 
 test "aarch64 seed mode: the probe never asks for an asset with HEAD" ![io] {
     let script = fs.readFile(_script());
-    assert ! contains(script, "--head");
+    assert ! contains(script, "--request HEAD");
+    assert ! contains(script, "-X HEAD");
+    assert ! contains(script, "--head ");
     assert contains(script, "--range 0-0");
+}
+
+test "aarch64 seed mode: the installer smoke probes never use HEAD" ![io] {
+    let workflow = fs.readFile(".github/workflows/installer-smoke.yml");
+    assert contains(workflow, "--range 0-0");
+    assert contains(workflow, "Range = 'bytes=0-0'");
+    assert ! contains(workflow, "-Method Head");
+    assert ! contains(workflow, "--head ");
 }

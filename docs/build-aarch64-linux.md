@@ -36,7 +36,10 @@ stdout:
 
 - `native` — both `sailfin-native-linux-arm64-<version>.tar.gz` and
   `sailfin_<version>_linux_arm64.tar.gz` are present.
-- `qemu` — neither asset is present (the pin predates arm64 release assets).
+- `qemu` — neither asset is present. Usually the pin predates arm64 release
+  assets, but it can also mean a pinned release failed to publish its arm64
+  payloads (v0.9.2 did exactly this) — which is a defect to investigate,
+  not an expected case.
 
 Any other combination — one asset present, the other missing — is a
 corrupted release, not a mode choice, since `release-tag.yml` refuses to
@@ -62,7 +65,9 @@ Env:
 - `SAILFIN_SEED_PROBE_HTTP_CODE` — test seam: forces the HTTP status the
   ranged-GET probe sees, bypassing the network, so the non-200/206/404
   fail-closed branch is testable hermetically in
-  `compiler/tests/e2e/aarch64_seed_mode_test.sfn`.
+  `compiler/tests/e2e/aarch64_seed_mode_test.sfn`. Never leave that one
+  exported: it makes the script report a seed's assets present without ever
+  checking.
 
 The two release workflows run this probe in a `Select aarch64 seed mode`
 step and feed its output into `.github/actions/sailfin-build/action.yml`'s

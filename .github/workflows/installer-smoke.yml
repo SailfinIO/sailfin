@@ -107,7 +107,7 @@ jobs:
           # for GET only, so HEAD gets a 401 there; a one-byte ranged GET asks
           # the same existence question the way the URL is signed to answer
           # it (SFN-798).
-          curl --fail --silent --show-error --location --request GET --range 0-0 -o /dev/null \
+          curl --fail --silent --show-error --location --range 0-0 -o /dev/null \
             "https://github.com/SailfinIO/sailfin/releases/download/${SEED_TAG}/${ASSET}"
 
       - name: Install the pinned release into an empty prefix
@@ -170,7 +170,9 @@ jobs:
           # A release-download URL redirects to a presigned object URL signed
           # for GET only, so HEAD gets a 401 there; a one-byte ranged GET asks
           # the same existence question the way the URL is signed to answer
-          # it (SFN-798).
+          # it (SFN-798). Range is a restricted header under HttpWebRequest,
+          # so this only works because this step is `shell: pwsh` (PowerShell
+          # 7 / HttpClient) — it throws under Windows PowerShell 5.1.
           Invoke-WebRequest `
             -Method Get `
             -Headers @{ Range = 'bytes=0-0' } `
