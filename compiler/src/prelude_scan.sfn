@@ -11,7 +11,7 @@
 // everything at column 0 and uses only `//` line comments, so a leading
 // `fn ` / `let ` / `extern fn ` / `unsafe extern fn ` uniquely marks a
 // top-level declaration.
-import { substring } from "./string_utils";
+import { substring } from "sfn/strings";
 
 // Keep source segmentation with the pure scanner rather than borrowing the
 // driver renderer's presentation helper. Runtime sources may use LF, CRLF, or

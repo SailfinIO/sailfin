@@ -2,6 +2,8 @@
 //
 // Value-position arithmetic, intersection-type, and object-literal checks.
 // Extracted from typecheck_types.sfn (SFN-625).
+import { strings_equal, substring } from "sfn/strings";
+
 import {
     Expression,
     InterfaceFieldMember,
@@ -9,7 +11,6 @@ import {
     TypeAnnotation
 } from "../ast";
 import { FixSuggestion } from "../diagnostic";
-import { strings_equal, substring } from "../string_utils";
 import { Token } from "../token";
 import { Diagnostic } from "../typecheck_types";
 import { SymbolEntry, find_symbol } from "./symbol_table_and_raw_exprs";

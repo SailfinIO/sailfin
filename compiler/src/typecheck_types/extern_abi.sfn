@@ -2,7 +2,8 @@
 //
 // extern fn/var C-ABI validation (E0801-E0805).
 // Extracted from typecheck_types.sfn (SFN-625).
-import { starts_with, strings_equal, strip_prefix } from "../string_utils";
+import { starts_with, strings_equal, strip_prefix } from "sfn/strings";
+
 import { Diagnostic } from "../typecheck_types";
 import {
     find_matching_paren,

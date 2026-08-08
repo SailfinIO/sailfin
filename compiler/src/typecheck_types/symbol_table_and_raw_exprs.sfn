@@ -2,17 +2,18 @@
 //
 // Symbol-table bookkeeping and Raw-expression (#1627) classification.
 // Extracted from typecheck_types.sfn (SFN-625).
-import { FunctionSignature, SourceSpan } from "../ast";
-import { FixSuggestion } from "../diagnostic";
 import {
-    char_code_at_text,
+    char_code_at,
     ends_with,
-    index_of,
+    find,
     starts_with,
     strings_equal,
     strip_prefix,
     substring
-} from "../string_utils";
+} from "sfn/strings";
+
+import { FunctionSignature, SourceSpan } from "../ast";
+import { FixSuggestion } from "../diagnostic";
 import { Token } from "../token";
 import { Diagnostic } from "../typecheck_types";
 import { classify_declared_primitive } from "./annotation_shape_checks";
@@ -264,7 +265,7 @@ fn _leading_identifier(text: string) -> string {
     let mut head: string = "";
     loop {
         if _ci >= text.length { break; }
-        let code = char_code_at_text(text, _ci);
+        let code = char_code_at(text, _ci);
         if !_is_identifier_code(code, _ci == 0) { break; }
         head = head + substring(text, _ci, _ci + 1);
         _ci += 1;
@@ -398,7 +399,7 @@ fn check_fn_reference_raw(text: string, symbols: SymbolEntry[], span: SourceSpan
     // effectively
     // dead for normal source. Delegates to `classify_fn_cast` for identical
     // behavior with the structured path.
-    let as_pos = index_of(trimmed, " as ");
+    let as_pos = find(trimmed, " as ", 0);
     if as_pos < 0 { return []; }
     let left = _strip_outer_parens(trim_text(substring(trimmed, 0, as_pos)));
     let head = _leading_identifier(left);
@@ -522,7 +523,7 @@ fn _match_close_brace(text: string, open: int) -> int {
 // { <else> }` (a partial `if`, missing `else`, or unbalanced braces) — the
 // caller then falls back to a generic-but-valid fix message.
 fn _extract_value_if_ternary(trimmed: string) -> string {
-    let brace1 = index_of(trimmed, "{");
+    let brace1 = find(trimmed, "{", 0);
     if brace1 < 0 { return ""; }
     let cond = trim_text(substring(trimmed, 2, brace1));
     if cond.length == 0 { return ""; }
@@ -532,7 +533,7 @@ fn _extract_value_if_ternary(trimmed: string) -> string {
     if then_body.length == 0 { return ""; }
     let after = trim_text(substring(trimmed, close1 + 1, trimmed.length));
     if !starts_with(after, "else") { return ""; }
-    let brace2 = index_of(after, "{");
+    let brace2 = find(after, "{", 0);
     if brace2 < 0 { return ""; }
     let close2 = _match_close_brace(after, brace2);
     if close2 < 0 { return ""; }
@@ -552,7 +553,7 @@ fn _extract_value_if_ternary(trimmed: string) -> string {
 fn check_value_if_raw(text: string, span: SourceSpan?) -> Diagnostic[] {
     let trimmed = trim_text(text);
     if !_leading_if_token(trimmed) { return []; }
-    if index_of(trimmed, "{") < 0 { return []; }
+    if find(trimmed, "{", 0) < 0 { return []; }
     let rewrite = _extract_value_if_ternary(trimmed);
     return [make_value_if_diagnostic(rewrite, span)];
 }
@@ -608,7 +609,7 @@ fn _narrow_span(span: SourceSpan?, off: int, width: int) -> SourceSpan? {
 // outside string literals, which never degrade to this arm).
 fn check_char_literal_raw(text: string, span: SourceSpan?) -> Diagnostic[] {
     let trimmed = trim_text(text);
-    let open = index_of(trimmed, "'");
+    let open = find(trimmed, "'", 0);
     if open < 0 { return []; }
     let close = open + 2;
     if close >= trimmed.length { return []; }
@@ -624,7 +625,7 @@ fn check_char_literal_raw(text: string, span: SourceSpan?) -> Diagnostic[] {
     // Narrow against the original `text`: `open` indexes `trimmed`, but the span
     // anchors the untrimmed text, so locate the same opening quote in `text`
     // (there is a single quote-region) for a caret aligned to the span origin.
-    let text_open = index_of(text, "'");
+    let text_open = find(text, "'", 0);
     let narrowed = _narrow_span(span, text_open, 3);
     return [make_char_literal_diagnostic(literal, byte, rewrite, narrowed)];
 }
