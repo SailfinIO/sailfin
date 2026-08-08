@@ -20,6 +20,7 @@ import { capsule_artifact_manifest_path, is_safe_scope_name, parse_scope_name } 
 import { _sha256_of_file_cmd } from "./fs";
 import { _find_substring_from, _resolve_self_path } from "./paths";
 import { build_target_os, target_exe_name } from "./target";
+import { active_build_target } from "./target_state";
 
 // -------------------------------------------------------------------
 // Determinism check (issue #779)
@@ -170,6 +171,13 @@ fn _pass2_out_path(pass2_work_dir: string, is_library: boolean, target_os: strin
 // sibling of pass 1's; never propagates `-o` (pass 2 derives from
 // its own work-dir).
 //
+// SFN-774 (M1): forwards `--target <triple>` from `active_build_target()`
+// when pass 1 was given one. The `--target` process cell is process-local
+// (`./target_state`), so without this pass 2 — a fresh subprocess — would
+// silently resolve the HOST triple instead of the requested one, comparing
+// a cross build against a host build rather than two passes of the same
+// build.
+//
 // In `--json` mode pass 2's stdout/stderr are captured and dropped so
 // the orchestrator's determinism-diff JSON line stays the sole
 // structured output on stdout (alongside pass 1's BuildReport JSON
@@ -194,6 +202,11 @@ fn _determinism_pass2_argv(self_exe: string, capsule_path: string, input_path: s
     args.push(pass2_work_dir);
     if cache_trace_flag { args.push("--cache-trace"); }
     if json_flag { args.push("--json"); }
+    let target = active_build_target();
+    if target.length > 0 {
+        args.push("--target");
+        args.push(target);
+    }
     if capsule_path.length > 0 {
         args.push("-p");
         args.push(capsule_path);

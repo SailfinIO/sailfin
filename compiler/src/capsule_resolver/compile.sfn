@@ -14,7 +14,7 @@
 //
 // Ordering: the import-context tree this reads is written by
 // `./staging`, which must run first (see that module's header).
-import { build_target_os } from "../build/target";
+import { build_target_triple } from "../build/target";
 import {
     BuildCacheConfig,
     CacheKey,
@@ -79,7 +79,7 @@ import {
 // don't yet have `binary_dir` plumbed) keep their existing path;
 // their typical capsule dep counts are well under the in-process
 // budget.
-fn _cr_compile_one(src: CapsuleSource, dep_slugs: string[], dep_manifests: string[], cache_root_path: string, config: BuildCacheConfig, compiler_version: string, flags_canonical: string, sailfin_exe: string, work_dir: string, target_os: string) -> ModuleCacheEvent ![io] {
+fn _cr_compile_one(src: CapsuleSource, dep_slugs: string[], dep_manifests: string[], cache_root_path: string, config: BuildCacheConfig, compiler_version: string, flags_canonical: string, sailfin_exe: string, work_dir: string, target_triple: string) -> ModuleCacheEvent ![io] {
     if !fs.exists(src.source_path) {
         print.err("capsule-resolver: missing source file: " + src.source_path);
         return _cr_module_cache_event_failure(src.slug);
@@ -98,7 +98,7 @@ fn _cr_compile_one(src: CapsuleSource, dep_slugs: string[], dep_manifests: strin
     let mut lookup_attempted: boolean = false;
     if config.enabled {
         lookup_attempted = true;
-        cache_key = cache_key_for(src.source_path, dep_slugs, dep_manifests, compiler_version, flags_canonical, src.slug, target_os);
+        cache_key = cache_key_for(src.source_path, dep_slugs, dep_manifests, compiler_version, flags_canonical, src.slug, target_triple);
         if cache_lookup_artifact(cache_root_path, cache_key, "ll") {
             if cache_copy_artifact_to(cache_root_path, cache_key, "ll", src.ll_path) {
                 if config.trace { print.err("[cache hit] " + src.slug); }
@@ -318,7 +318,7 @@ fn compile_capsule_modules(sources: CapsuleSource[], slug_universe_extra: Capsul
     // `_host_os`) delegates to `build_host_os`, so both sides read one
     // resolver and a `SAILFIN_HOST_OS` override steers the key and the
     // emitted platform legs together (SFN-682).
-    let target_os = build_target_os();
+    let target_triple = build_target_triple();
     let mut out: string[] = [];
     let mut stats = empty_cache_stats();
     let mut events: ModuleCacheEvent[] = [];
@@ -379,7 +379,7 @@ fn compile_capsule_modules(sources: CapsuleSource[], slug_universe_extra: Capsul
             let mut lookup_attempted: boolean = false;
             if config.enabled {
                 lookup_attempted = true;
-                cache_key = cache_key_for(src.source_path, per_source_dep_slugs[pi], per_source_dep_manifests[pi], compiler_version, flags_canonical, src.slug, target_os);
+                cache_key = cache_key_for(src.source_path, per_source_dep_slugs[pi], per_source_dep_manifests[pi], compiler_version, flags_canonical, src.slug, target_triple);
                 if cache_lookup_artifact(cache_root_path, cache_key, "ll") {
                     if cache_copy_artifact_to(cache_root_path, cache_key, "ll", src.ll_path) {
                         if config.trace {
@@ -497,7 +497,7 @@ fn compile_capsule_modules(sources: CapsuleSource[], slug_universe_extra: Capsul
     let mut i: int = 0;
     loop {
         if i >= sources.length { break; }
-        let evt = _cr_compile_one(sources[i], per_source_dep_slugs[i], per_source_dep_manifests[i], cache_root_path, config, compiler_version, flags_canonical, sailfin_exe, work_dir, target_os);
+        let evt = _cr_compile_one(sources[i], per_source_dep_slugs[i], per_source_dep_manifests[i], cache_root_path, config, compiler_version, flags_canonical, sailfin_exe, work_dir, target_triple);
         if !evt.success {
             // Stage C2c: even on the bail path we surface the
             // events accumulated so far. Sidecar emission is

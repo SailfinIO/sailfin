@@ -49,7 +49,8 @@ import { _do_determinism_check } from "../../build/determinism";
 import { _clang_link_multi } from "../../build/link";
 import { _dirname, _ensure_dir, _resolve_self_path } from "../../build/paths";
 import { _runtime_bundle_exists, clean_runtime_object_cache } from "../../build/runtime_objs";
-import { build_target_os, target_exe_name } from "../../build/target";
+import { build_target_os, target_exe_name, triple_is_supported } from "../../build/target";
+import { clear_build_target, set_build_target } from "../../build/target_state";
 import { cache_root, merge_cache_stats, resolve_build_cache_config } from "../../build_cache";
 import { emit_compiler_build_stamp_if_applicable } from "../../build_stamp";
 import {
@@ -64,9 +65,11 @@ import { prepare_project_capsules } from "../../capsule_resolver";
 import { workspace_capability_gate } from "../../capsule_resolver/capability";
 import { ResolverConsumer } from "../../capsule_resolver/types";
 import { discover_workspace_root, load_workspace_default_members } from "../../capsule_resolver/workspace";
+import { render_diagnostic } from "../../diagnostics_render";
 import { format_backend_failure_banner } from "../../ice";
 import { compile_to_llvm_file_with_module, module_name_from_path } from "../../main";
 import { runtime_capsule_from_root } from "../../runtime_capsule_resolver";
+import { Diagnostic, diagnostic_to_diag } from "../../typecheck_types";
 import { CliContext } from "../context";
 import { bootstrap_gate_or_dispatch } from "./dev";
 import { toolchain_gate_or_dispatch } from "./toolchain";
@@ -87,13 +90,40 @@ fn command_def() -> Command {
     cmd = with_flag(cmd, flag_value("work-dir", "Virtualize intermediate build artifacts under this directory"));
     cmd = with_flag(cmd, flag("check-determinism", "Build twice and compare cache keys + binary sha256"));
     cmd = with_flag(cmd, flag("skip-toolchain-check", "Bypass the [toolchain] pin check for this invocation"));
+    // SFN-774 / SFEP-0068 §3.1-§3.2: a closed set of `--target=<triple>`
+    // values (`triple_is_supported`, `build/target.sfn`). Note the naming
+    // split from `sfn package --target` (SFEP-0068 §3.7): that flag takes a
+    // packaging PLATFORM LABEL (`linux-x86_64`), not a compilation triple —
+    // the two are deliberately not unified.
+    cmd = with_flag(cmd, flag_value("target", "Cross-compile for this triple (e.g. x86_64-w64-mingw32)"));
     cmd = with_arg(cmd, arg_variadic("path", "Source file to build (omit at a workspace root to build default members)"));
     return cmd;
 }
 
 fn _print_build_usage() ![io] {
-    print("usage: sfn build [-o OUTPUT] [-p PATH] [--no-cache] [--clean] [--cache-trace] [--json] [--work-dir DIR] [--check-determinism] [<file.sfn> | -p <capsule-path>]");
+    print("usage: sfn build [-o OUTPUT] [-p PATH] [--no-cache] [--clean] [--cache-trace] [--json] [--work-dir DIR] [--check-determinism] [--target TRIPLE] [<file.sfn> | -p <capsule-path>]");
     print("       with no target at a workspace root, builds [workspace].default-members (or all members)");
+    print("       --target takes a compilation triple (x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu,");
+    print("       x86_64-apple-darwin, arm64-apple-darwin, x86_64-pc-windows-msvc, x86_64-w64-mingw32) —");
+    print("       distinct from `sfn package --target`, which takes a platform label.");
+}
+
+// E0614: an `sfn build --target=<triple>` value outside the closed
+// SFEP-0068 §3.1 set. No source span — the flag is not part of any
+// `.sfn` file — so `primary` is null, matching the location-only
+// rendering the E0600 re-export diagnostics already use.
+fn _unsupported_target_diagnostic(triple: string) -> Diagnostic {
+    return Diagnostic {
+        code: "E0614",
+        severity: "error",
+        message: "unsupported --target triple: \"" + triple
+            + "\" (supported: x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu, "
+            + "x86_64-apple-darwin, arm64-apple-darwin, x86_64-pc-windows-msvc, "
+            + "x86_64-w64-mingw32)",
+        file_path: "",
+        primary: null,
+        suggestion: null
+    };
 }
 
 // Reproduce the legacy `_legacy_dispatch_build` body against typed matches.
@@ -109,10 +139,27 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     let json_flag: boolean = has_flag(matches, "json");
     let work_dir: string = get_or(matches, "work-dir", "");
     let check_determinism_flag: boolean = has_flag(matches, "check-determinism");
+    // SFN-774 / SFEP-0068 §3.2: seed the `--target` process cell once, at
+    // the very top of `run`, so every ambient `build_target_triple()` read
+    // downstream (backend.sfn, build/*, build_cache.sfn,
+    // capsule_resolver/compile.sfn) resolves the SAME triple for this
+    // whole invocation. An empty flag seeds the cell with "" — the cell's
+    // own default — so host behaviour with no `--target` is unchanged.
+    // Cleared on EVERY return path below, including the validation-failure
+    // one immediately following.
+    let target_flag: string = get_or(matches, "target", "");
+    set_build_target(target_flag);
+    if target_flag.length > 0 && !triple_is_supported(target_flag) {
+        let empty_lines: string[] = [];
+        print.err(render_diagnostic(diagnostic_to_diag(_unsupported_target_diagnostic(target_flag), "build"), empty_lines, "build"));
+        clear_build_target();
+        return 2;
+    }
     let _build_positionals: string[] = positionals(matches, "path");
     let mut input_path: string = "";
     if _build_positionals.length > 1 {
         _print_build_usage();
+        clear_build_target();
         return 2;
     }
     if _build_positionals.length == 1 { input_path = _build_positionals[0]; }
@@ -121,12 +168,16 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     if _tc_hint.length == 0 { _tc_hint = input_path; }
     if _tc_hint.length == 0 { _tc_hint = "."; }
     let _tc = toolchain_gate_or_dispatch(_tc_hint, ctx, has_flag(matches, "skip-toolchain-check"));
-    if _tc != 0 { return _tc; }
+    if _tc != 0 {
+        clear_build_target();
+        return _tc;
+    }
 
     if capsule_path.length == 0 && input_path.length == 0 {
         let workspace_root = discover_workspace_root(".");
         if workspace_root.length == 0 {
             _print_build_usage();
+            clear_build_target();
             return 2;
         }
         let members = load_workspace_default_members(workspace_root);
@@ -141,10 +192,13 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
             if member_rc != 0 && aggregate_rc == 0 { aggregate_rc = member_rc; }
             mi += 1;
         }
+        clear_build_target();
         return aggregate_rc;
     }
 
-    return _run_single_build(capsule_path, input_path, out_path, no_cache_flag, clean_flag, cache_trace_flag, json_flag, work_dir, check_determinism_flag, ctx);
+    let rc = _run_single_build(capsule_path, input_path, out_path, no_cache_flag, clean_flag, cache_trace_flag, json_flag, work_dir, check_determinism_flag, ctx);
+    clear_build_target();
+    return rc;
 }
 
 // Run the established single-file / single-capsule build pipeline once. Bare

@@ -62,6 +62,7 @@ import { link_argv_or_response_file } from "./build/link_response";
 // filtering through both link layouts. All identity/empty on Linux/macOS.
 import {
     build_target_os,
+    build_target_triple,
     target_clang_flags,
     target_extra_link_libs,
     target_filter_link_libs
@@ -313,17 +314,18 @@ fn _concat_driver_flags(a: string[], b: string[]) -> string[] {
 }
 
 // Return a copy of `plan` with `libs` filtered, then extended, for
-// `target_os` (SFN-52). On Windows the POSIX/OpenSSL libs are dropped
-// (MSVC/UCRT auto-links its CRT) and `-lbcrypt` is added
-// (`platform/rand_windows.sfn`'s `BCryptGenRandom`, SFN-549); on every
-// other target both `target_filter_link_libs` and `target_extra_link_libs`
-// are the identity/empty, so the returned plan is structurally equal and
-// the link argv stays byte-identical (#1112). A free function so the
-// LinkPlan literal is not constructed inside a struct-method body
-// (file-header self-host note).
-fn _target_conditioned_plan(plan: LinkPlan, target_os: string) -> LinkPlan {
-    let mut libs = target_filter_link_libs(plan.libs, target_os);
-    let extra = target_extra_link_libs(target_os);
+// `triple` (SFN-52, promoted to the triple axis by SFN-774). On the msvc
+// ABI the POSIX/OpenSSL libs are dropped (MSVC/UCRT auto-links its CRT)
+// and `-lbcrypt` is added (`platform/rand_windows.sfn`'s
+// `BCryptGenRandom`, SFN-549); on every other target both
+// `target_filter_link_libs` and `target_extra_link_libs` are the
+// identity/empty, so the returned plan is structurally equal and the link
+// argv stays byte-identical (#1112). A free function so the LinkPlan
+// literal is not constructed inside a struct-method body (file-header
+// self-host note).
+fn _target_conditioned_plan(plan: LinkPlan, triple: string) -> LinkPlan {
+    let mut libs = target_filter_link_libs(plan.libs, triple);
+    let extra = target_extra_link_libs(triple);
     let mut i: int = 0;
     loop {
         if i >= extra.length { break; }
@@ -345,17 +347,21 @@ fn _target_conditioned_plan(plan: LinkPlan, target_os: string) -> LinkPlan {
 // free functions above (see the self-host note in the file header).
 struct LlvmTextBackend {
     fn assemble(self, src: string, out: string, opt_flag: string, include_flags: string[]) -> int ![io] {
-        let target_flags = target_clang_flags(build_target_os());
+        let target_flags = target_clang_flags(build_target_triple());
         return process.run(_llvm_text_assemble_argv(src, out, opt_flag, include_flags, target_flags));
     }
 
     fn link(self, plan: LinkPlan) -> int ![io] {
-        // Resolve the build target once (SFN-52): prefix the `-target`
-        // triple ahead of the macOS SDK flags and filter POSIX libs. All
-        // no-ops off Windows, so Linux/macOS argv is byte-identical.
+        // Resolve the build target once (SFN-52, promoted to the triple
+        // axis by SFN-774): prefix the `-target` triple ahead of the
+        // macOS SDK flags and filter POSIX libs. All no-ops off Windows,
+        // so Linux/macOS argv is byte-identical. `resolve_direct_ld_lld`
+        // below stays OS-keyed (Linux-only path selection), so both
+        // resolutions are threaded independently.
         let target_os = build_target_os();
-        let driver_flags = _concat_driver_flags(target_clang_flags(target_os), _macos_sdk_link_flags());
-        let eff_plan = _target_conditioned_plan(plan, target_os);
+        let triple = build_target_triple();
+        let driver_flags = _concat_driver_flags(target_clang_flags(triple), _macos_sdk_link_flags());
+        let eff_plan = _target_conditioned_plan(plan, triple);
         // Sailfin owns Link on Linux x86-64 (SFEP-0066 §3.1 role table):
         // take the direct `ld.lld` path when the link contract resolves,
         // for both the program and test layouts (test mode carries empty

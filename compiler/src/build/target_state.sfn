@@ -1,0 +1,48 @@
+// compiler/src/build/target_state.sfn
+//
+// In-process cell carrying the `sfn build --target=<triple>` selection
+// (SFN-774, SFEP-0068 §3.2). `build_target_triple()` (`./target`) is read
+// AMBIENTLY from roughly a dozen call sites across the driver
+// (`backend.sfn`, `build/clang_argv.sfn`, `build/link.sfn`,
+// `build/runtime_objs.sfn`, `build_cache.sfn`, `capsule_resolver/compile.sfn`,
+// `cli/commands/build.sfn`), so an explicit `--target` flag needs a way to
+// override that resolution for the rest of the invocation without a
+// parameter threaded through every one of those sites.
+//
+// Writing the env var instead is not an option: the Sailfin runtime has no
+// `setenv` (`compiler/src/build_cache.sfn:279`, `runtime/sfn/process.sfn:1941`),
+// so a flag cannot seed the ambient resolvers the way `SAILFIN_TARGET_OS`/
+// `SAILFIN_TARGET_TRIPLE` do from outside the process. Threading a
+// `BuildTarget` parameter through every ambient call site is a large,
+// correctness-sensitive refactor with no payoff beyond this one feature
+// (SFEP-0068 §3.2, "Alternatives considered").
+//
+// So this mirrors `compiler/src/test_runner_state.sfn` — the same shape
+// already solved the identical problem for `sfn test` mode: a set-once
+// process-local cell, seeded once by the owning command and read as a pure
+// probe everywhere else.
+//
+// Lifetime contract:
+//
+//   `set_build_target(triple)` — called once at the top of
+//   `cli/commands/build.sfn:run`, after `--target` is parsed and validated.
+//
+//   `clear_build_target()` — called on EVERY return path of that `run`,
+//   including early usage-error and validation-failure exits. Idempotent:
+//   safe to call when the cell is already clear.
+//
+//   `active_build_target()` — a pure read, no effect. Empty means "no
+//   explicit `--target` was given this invocation" — callers fall through
+//   to the env-var / host-probe resolution in `build_target_triple()`.
+let mut _triple: string = "";
+
+// Record the resolved `--target` triple for the running build invocation.
+fn set_build_target(triple: string) { _triple = triple; }
+
+// Clear the cell. Called from every return path of `cli/commands/build.sfn:run`.
+fn clear_build_target() { _triple = ""; }
+
+// The active `--target` triple, or "" when no explicit flag is in effect.
+fn active_build_target() -> string { return _triple; }
+
+export { active_build_target, clear_build_target, set_build_target };

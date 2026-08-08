@@ -56,9 +56,11 @@ import {
 import {
     build_host_os,
     build_target_os,
+    build_target_triple,
     target_artifact_tag,
     target_condition_runtime_sfn_sources,
-    target_os_is_windows
+    target_os_is_windows,
+    triple_artifact_tags
 } from "./target";
 
 // Issue #940: validate the declarative runtime bundle by the
@@ -281,8 +283,8 @@ struct PendingRuntimeObjectAssembly {
 // without a runtime dep, the caller falls through to the legacy
 // `_clang_compile_runtime_objects` helper that uses the
 // hardcoded `runtime_root/native/...` layout.
-fn _clang_compile_runtime_capsule_objects(runtime_capsules: RuntimeCapsuleArtifacts[], out_dir: string, opt_flag: string, shared_cache_root: string, jobs: int, target_os: string) -> RuntimeLinkInputs ![io] {
-    let target_tag = target_artifact_tag(target_os);
+fn _clang_compile_runtime_capsule_objects(runtime_capsules: RuntimeCapsuleArtifacts[], out_dir: string, opt_flag: string, shared_cache_root: string, jobs: int, target_triple: string) -> RuntimeLinkInputs ![io] {
+    let target_tag = target_artifact_tag(target_triple);
     let mut objects: string[] = [];
     let mut link_libs: string[] = [];
     let mut pending: PendingRuntimeObjectAssembly[] = [];
@@ -327,7 +329,7 @@ fn _clang_compile_runtime_capsule_objects(runtime_capsules: RuntimeCapsuleArtifa
             let src = cap.c_sources[ci];
             let base = _runtime_obj_stem(cap_prefix, src, opt_flag, target_tag);
             let obj = _path_join(out_dir, base + ".o");
-            let key = _runtime_obj_key_with_target(runtime_object_cache_key(src, opt_flag), target_os);
+            let key = _runtime_obj_key_with_target(runtime_object_cache_key(src, opt_flag), target_triple);
             if key.length == 0 {
                 stats.invalid_keys = stats.invalid_keys + 1;
             }
@@ -374,7 +376,7 @@ fn _clang_compile_runtime_capsule_objects(runtime_capsules: RuntimeCapsuleArtifa
             let src = cap.ll_sources[li];
             let base = _runtime_obj_stem(cap_prefix, src, opt_flag, target_tag);
             let obj = _path_join(out_dir, base + ".o");
-            let key = _runtime_obj_key_with_target(runtime_object_cache_key(src, opt_flag), target_os);
+            let key = _runtime_obj_key_with_target(runtime_object_cache_key(src, opt_flag), target_triple);
             if key.length == 0 {
                 stats.invalid_keys = stats.invalid_keys + 1;
             }
@@ -561,13 +563,13 @@ fn runtime_stamp_identity(objdir: string) -> string ![io] {
 // invocation in the parent (page-cache-hot, in-process) — the point is
 // that the ~34-source derivation stops running once per CHILD.
 // An entry with an unhashable ("") key is simply omitted.
-fn write_runtime_identity_stamp(runtime_capsules: RuntimeCapsuleArtifacts[], out_dir: string, opt_flag: string, binary_dir: string, nonce: string, runtime_identity: string, target_os: string) -> boolean ![io] {
+fn write_runtime_identity_stamp(runtime_capsules: RuntimeCapsuleArtifacts[], out_dir: string, opt_flag: string, binary_dir: string, nonce: string, runtime_identity: string, target_triple: string) -> boolean ![io] {
     if nonce.length == 0 { return false; }
     let self_path = _resolve_self_path(binary_dir);
     if self_path.length == 0 { return false; }
     let compiler_identity = cache_compiler_identity(resolve_compiler_version(""), self_path);
     let ctx_root = _runtime_sfn_ctx_root(out_dir);
-    let target_tag = target_artifact_tag(target_os);
+    let target_tag = target_artifact_tag(target_triple);
     let mut text: string = "v1\ninvocation=" + nonce + "\n";
     if runtime_identity.length > 0 {
         text = text + "identity=" + runtime_identity + "\n";
@@ -592,7 +594,7 @@ fn write_runtime_identity_stamp(runtime_capsules: RuntimeCapsuleArtifacts[], out
             let slug = _runtime_module_slug(cap.manifest_dir, src);
             let obj_base = _runtime_obj_stem(cap_prefix, src, opt_flag, target_tag)
                 + ".o";
-            let obj_key = _runtime_obj_key_with_target(_runtime_obj_key_with_sibling_deps(runtime_object_cache_key_with_identity(src, opt_flag, compiler_identity), ctx_root, slug), target_os);
+            let obj_key = _runtime_obj_key_with_target(_runtime_obj_key_with_sibling_deps(runtime_object_cache_key_with_identity(src, opt_flag, compiler_identity), ctx_root, slug), target_triple);
             if obj_key.length > 0 {
                 text = text + "obj/" + obj_base + "=" + sha256_hex_of_string(obj_key)
                     + "\n";
@@ -672,26 +674,37 @@ fn _runtime_obj_key_with_sibling_deps(base_key: string, ctx_root: string, slug: 
 // (#1197) — this is the same defect class: an object compiled for one
 // target (e.g. Windows COFF) was served to a link for a different target
 // (e.g. Linux ELF) because nothing in its identity recorded which target
-// produced it. `tgt1:` is a bumpable scheme tag in the spirit of
-// `secsplit1-strabi1`. Empty base propagates empty, mirroring
+// produced it. Empty base propagates empty, mirroring
 // `_runtime_obj_key_with_sibling_deps`'s always-recompile fallback.
 //
-// SFN-677: `target_os` goes LAST and nothing follows it. It is an
-// unvalidated `SAILFIN_TARGET_OS` env string, so anything appended after
-// it can be spelled by a crafted value instead. This originally also
-// folded `target_clang_flags(target_os)` space-joined behind it, which
-// made `"Windows"` and the literal `"Windows -target
-// x86_64-pc-windows-msvc"` produce the same key while compiling to
+// SFN-774 / SFEP-0068 §3.6: the fold moved from `target_os` to the
+// TRIPLE, and the marker bumped `tgt1:` -> `tgt2:` so a pre-SFN-774 entry
+// (keyed on the coarser OS string) can never collide with a post-SFN-774
+// one — a stale entry is orphaned, never mismatched, matching the
+// no-bump precedent SFN-677 itself set. The OS-only key could not tell
+// an msvc runtime object from a mingw one (both fold to `"Windows"`),
+// so a build alternating `--target=x86_64-pc-windows-msvc` and
+// `--target=x86_64-w64-mingw32` would silently reuse one ABI's object
+// for the other's link — the very defect this fold exists to stop, now
+// one axis wider.
+//
+// SFN-677: `target_triple` goes LAST and nothing follows it. It may
+// originate from an unvalidated `SAILFIN_TARGET_TRIPLE`/`SAILFIN_TARGET_OS`
+// env string, so anything appended after it can be spelled by a crafted
+// value instead. This originally also folded `target_clang_flags(target_os)`
+// space-joined behind it, which made `"Windows"` and the literal `"Windows
+// -target x86_64-pc-windows-msvc"` produce the same key while compiling to
 // different objects — the very cross-target reuse this exists to stop.
-// Those flags never added anything: `target_clang_flags` is a total
-// function of `target_os`, so appending `f(x)` after `x` cannot separate
-// tuples that `x` does not. Every caller composes this fold OUTERMOST,
-// which is what keeps `target_os` last; keep it that way. Should
-// `target_clang_flags` ever take an input not derived from `target_os`,
-// that input must be folded in on its own.
-fn _runtime_obj_key_with_target(base_key: string, target_os: string) -> string {
+// Those flags never added anything beyond what the triple itself already
+// determines: `target_clang_flags` is a total function of the triple, so
+// appending `f(x)` after `x` cannot separate tuples that `x` does not.
+// Every caller composes this fold OUTERMOST, which is what keeps
+// `target_triple` last; keep it that way. Should a target-derived input
+// ever depend on something NOT derived from the triple, that input must
+// be folded in on its own.
+fn _runtime_obj_key_with_target(base_key: string, target_triple: string) -> string {
     if base_key.length == 0 { return ""; }
-    return base_key + "\ntgt1:" + target_os;
+    return base_key + "\ntgt2:" + target_triple;
 }
 
 // SFN-50: the child compiler's environment for a runtime sfn-source
@@ -710,6 +723,22 @@ fn _runtime_obj_key_with_target(base_key: string, target_os: string) -> string {
 // unset and an empty var as false, and dropping avoids a duplicate
 // `KEY=` pair that POSIX `getenv` (first-match) would otherwise let the
 // inherited value shadow.
+//
+// SFN-774 / SFEP-0068 §3.2: re-externalize the resolved `--target` cell
+// for the child. The cell (`build/target_state.sfn`) is process-local
+// state, so a child spawned via `run_capture` — which starts a fresh
+// process with the explicit env below, not the parent's cell — would
+// otherwise resolve the plain host default regardless of what `--target`
+// the parent build was given. `SAILFIN_TARGET_TRIPLE` closes that gap:
+// the child's OWN `build_target_triple()` reads it ahead of a host probe.
+// This is the like-for-like driver-native replacement for the Makefile's
+// per-module `SAILFIN_TARGET_OS=Windows` re-emit override
+// (`ci-cross-windows`, `Makefile:1249`) — that recipe re-exported the
+// target on exactly three modules; here every runtime sfn-source emit
+// gets it uniformly. `SAILFIN_TARGET_OS` is ALSO kept in the child env
+// (not cleared, unlike the four toggles above) so a version-skewed child
+// binary that only understands the legacy alias still resolves the
+// correct target.
 fn _runtime_emit_child_env() -> string[] ![io] {
     let base = process.environ();
     let mut child_env: string[] = [];
@@ -720,12 +749,14 @@ fn _runtime_emit_child_env() -> string[] ![io] {
         if !_runtime_env_entry_has_key(entry, "SAILFIN_TRACE_EMIT") && !_runtime_env_entry_has_key(entry, "SAILFIN_SKIP_TYPECHECK")
             && !_runtime_env_entry_has_key(entry, "SAILFIN_TRACE_TEST_RUNNER")
             && !_runtime_env_entry_has_key(entry, "SAILFIN_DUMP_TEST_SOURCES")
-            && !_runtime_env_entry_has_key(entry, "SAILFIN_NO_LEGACY_PROBE") {
+            && !_runtime_env_entry_has_key(entry, "SAILFIN_NO_LEGACY_PROBE")
+            && !_runtime_env_entry_has_key(entry, "SAILFIN_TARGET_TRIPLE") {
             child_env.push(entry);
         }
         i += 1;
     }
     child_env.push("SAILFIN_NO_LEGACY_PROBE=1");
+    child_env.push("SAILFIN_TARGET_TRIPLE=" + build_target_triple());
     return child_env;
 }
 
@@ -758,10 +789,10 @@ fn _runtime_emit_captured_stream(text: string, to_stderr: boolean) -> void ![io]
     if to_stderr { print.err(out); } else { print(out); }
 }
 
-fn _prepare_runtime_sfn_object(self_path: string, cap_prefix: string, src: string, out_dir: string, opt_flag: string, shared_cache_root: string, ctx_root: string, compiler_identity: string, manifest_dir: string, target_os: string) -> RuntimeSfnObjectPlan ![io] {
+fn _prepare_runtime_sfn_object(self_path: string, cap_prefix: string, src: string, out_dir: string, opt_flag: string, shared_cache_root: string, ctx_root: string, compiler_identity: string, manifest_dir: string, target_triple: string) -> RuntimeSfnObjectPlan ![io] {
     let mut stats = empty_cache_stats();
     let slug = _runtime_module_slug(manifest_dir, src);
-    let target_tag = target_artifact_tag(target_os);
+    let target_tag = target_artifact_tag(target_triple);
     let stem = _runtime_obj_stem(cap_prefix, src, opt_flag, target_tag);
     let ll_path = _path_join(out_dir, stem + ".ll");
     let obj_path = _path_join(out_dir, stem + ".o");
@@ -792,7 +823,7 @@ fn _prepare_runtime_sfn_object(self_path: string, cap_prefix: string, src: strin
     // `runtime_object_cache_key_with_identity`.
     // SFN-617: the target fold wraps OUTSIDE the sibling-deps fold, same
     // ordering `write_runtime_identity_stamp` uses for its stamped entry.
-    let key = _runtime_obj_key_with_target(_runtime_obj_key_with_sibling_deps(runtime_object_cache_key_with_identity(src, opt_flag, compiler_identity), ctx_root, slug), target_os);
+    let key = _runtime_obj_key_with_target(_runtime_obj_key_with_sibling_deps(runtime_object_cache_key_with_identity(src, opt_flag, compiler_identity), ctx_root, slug), target_triple);
     if key.length == 0 { stats.invalid_keys = stats.invalid_keys + 1; }
     let shared_suffix = stem;
     if _runtime_obj_cache_hit(obj_path, key) {
@@ -1275,7 +1306,7 @@ fn _has_prefix(s: string, prefix: string) -> boolean {
     return substring(s, 0, prefix.length) == prefix;
 }
 
-fn _compile_runtime_sfn_sources(runtime_capsules: RuntimeCapsuleArtifacts[], out_dir: string, opt_flag: string, binary_dir: string, shared_cache_root: string, jobs: int, target_os: string) -> RuntimeLinkInputs ![io] {
+fn _compile_runtime_sfn_sources(runtime_capsules: RuntimeCapsuleArtifacts[], out_dir: string, opt_flag: string, binary_dir: string, shared_cache_root: string, jobs: int, target_triple: string) -> RuntimeLinkInputs ![io] {
     let mut objects: string[] = [];
     let empty_libs: string[] = [];
     let mut stats = empty_cache_stats();
@@ -1341,7 +1372,7 @@ fn _compile_runtime_sfn_sources(runtime_capsules: RuntimeCapsuleArtifacts[], out
         loop {
             if si >= cap.sfn_sources.length { break; }
             let src = cap.sfn_sources[si];
-            let plan = _prepare_runtime_sfn_object(self_path, cap_prefix, src, out_dir, opt_flag, shared_cache_root, ctx_root, compiler_identity, cap.manifest_dir, target_os);
+            let plan = _prepare_runtime_sfn_object(self_path, cap_prefix, src, out_dir, opt_flag, shared_cache_root, ctx_root, compiler_identity, cap.manifest_dir, target_triple);
             if plan.obj_path.length == 0 {
                 _delete_runtime_sfn_object_staging(plans);
                 return _failed_runtime_link_inputs();
@@ -1446,12 +1477,16 @@ fn assemble_runtime_capsule_link_inputs(runtime_capsules: RuntimeCapsuleArtifact
     // the build target before any compile iterates it — Windows swaps
     // process.sfn→process_windows.sfn and drops the Linux-only rlimit.sfn.
     // Identity off Windows, so Linux/macOS link inputs are byte-identical.
+    // Kept OS-keyed (both Windows triples need this identically);
+    // `target_triple` below feeds only the tag / cache-key folds that
+    // genuinely diverge by ABI (SFN-774).
     let target_os = build_target_os();
+    let target_triple = build_target_triple();
     let capsules = _condition_runtime_capsules(runtime_capsules, target_os);
     // One resolution feeds every clang phase, preserving the emit pool's
     // CPU/RAM ceiling and the SAILFIN_BUILD_JOBS=1 bisect path (SFN-612).
     let jobs = _cr_resolve_jobs();
-    let inputs = _clang_compile_runtime_capsule_objects(capsules, out_dir, opt_flag, shared_cache_root, jobs, target_os);
+    let inputs = _clang_compile_runtime_capsule_objects(capsules, out_dir, opt_flag, shared_cache_root, jobs, target_triple);
     if !inputs.success { return _failed_runtime_link_inputs(); }
     let mut objects: string[] = inputs.object_paths;
     // Prepend the Darwin OpenSSL keg `-L` (if any) so `-lssl`/`-lcrypto`
@@ -1468,7 +1503,7 @@ fn assemble_runtime_capsule_link_inputs(runtime_capsules: RuntimeCapsuleArtifact
     let mut stats = inputs.stats;
     // `sfn-sources` + `prelude-entry` are materialized here (the
     // prelude rides the same emit path as of #940).
-    let sfn_inputs = _compile_runtime_sfn_sources(capsules, out_dir, opt_flag, binary_dir, shared_cache_root, jobs, target_os);
+    let sfn_inputs = _compile_runtime_sfn_sources(capsules, out_dir, opt_flag, binary_dir, shared_cache_root, jobs, target_triple);
     if !sfn_inputs.success { return _failed_runtime_link_inputs(); }
     stats = merge_cache_stats(stats, sfn_inputs.stats);
     let mut soi: int = 0;
@@ -1521,7 +1556,7 @@ fn assemble_runtime_capsule_link_inputs(runtime_capsules: RuntimeCapsuleArtifact
                 // `.import-deps` sidecar — the threaded context root
                 // is inert here and the prelude keeps its legacy
                 // descriptor-based emit byte-for-byte (#940 Risk R2).
-                let prelude_plan = _prepare_runtime_sfn_object(self_path, cap_prefix, cap.prelude_entry, out_dir, opt_flag, shared_cache_root, _runtime_sfn_ctx_root(out_dir), compiler_identity, cap.manifest_dir, target_os);
+                let prelude_plan = _prepare_runtime_sfn_object(self_path, cap_prefix, cap.prelude_entry, out_dir, opt_flag, shared_cache_root, _runtime_sfn_ctx_root(out_dir), compiler_identity, cap.manifest_dir, target_triple);
                 if prelude_plan.obj_path.length == 0 {
                     _delete_runtime_sfn_object_staging(prelude_plans);
                     return _failed_runtime_link_inputs();
@@ -1579,8 +1614,12 @@ fn _push_if_present(argv: string[], path: string) ![io] {
 // the single stem composer every compile path now shares; keep the two in
 // sync. SFN-617: the stem is now target-tagged, so cleaning only the
 // active target's stem would leave a stale other-target object behind;
-// the sweep therefore covers the closed tag set (`target_artifact_tag`'s
-// range) rather than just the resolved build target.
+// the sweep therefore covers `triple_artifact_tags()` (`./target.sfn`) —
+// the single source of truth for the closed tag set `target_artifact_tag`
+// can produce — rather than a hand-maintained literal that can drift out
+// of sync with it (SFN-774: a stale `["linux", "darwin", "windows",
+// "other"]` literal silently stopped matching once `target_artifact_tag`
+// grew per-arch/per-ABI tags, resurrecting SFN-14).
 //
 // The sweep is complete on the TARGET axis only. It resolves stems from
 // the capsule set as handed in, which the `--clean` call site
@@ -1595,7 +1634,7 @@ fn _push_if_present(argv: string[], path: string) ![io] {
 // freshly-computed object paths and every reuse is content-key gated).
 // `rm -f` is idempotent, so an unpopulated cache is a clean no-op.
 fn clean_runtime_object_cache(runtime_capsules: RuntimeCapsuleArtifacts[], out_dir: string, opt_flag: string) ![io] {
-    let tags: string[] = ["linux", "darwin", "windows", "other"];
+    let tags = triple_artifact_tags();
     let mut argv: string[] = ["rm", "-f"];
     let mut i: int = 0;
     loop {

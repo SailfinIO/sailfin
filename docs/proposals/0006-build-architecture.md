@@ -1,10 +1,10 @@
 ---
 sfep: 6
 title: Unified Build Architecture
-status: Implemented
+status: Accepted
 type: tooling
 created: 2026-04-17
-updated: 2026-04-28
+updated: 2026-08-08
 author: "agent:compiler-architect"
 tracking:
 supersedes:
@@ -1536,6 +1536,20 @@ PR7 / #383; Makefile retirement deferred to a later PR). Fresh-clone
 bootstrap works with `install.sh && sfn build -p compiler`.
 `compile_to_llvm_file_with_module`'s fallback paths are gone — the
 structured pipeline either succeeds or fails.
+
+### Stage D — remaining
+
+Two Stage D exit-criteria items are still open:
+
+- **`sfn build --target=<triple>` is not implemented.** The target model in
+  `compiler/src/build/target.sfn` is keyed on target *OS*, not triple —
+  `target_clang_triple` (line 115) returns `x86_64-pc-windows-msvc`
+  unconditionally for Windows and `""` (host default) otherwise. The
+  `[targets.<triple>]` manifest seam is parsed
+  (`compiler/src/toml_parser.sfn:549`, `toml_get_target_triples`) but has no
+  production consumer. Design: SFEP-0068 (`docs/proposals/0068-native-cross-target-build.md`).
+- **Root `Makefile` deletion has not happened.** The file is still 1,269
+  lines across 48 targets. Tracked by Linear SFN-60.
 
 **Install + fingerprint policy is now native (SFN-679).** `sfn dev
 bootstrap build` owns the install-to-`build/bin/sfn` and

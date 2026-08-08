@@ -38,7 +38,7 @@
 // cannot be called from an `![io]` test (#842).
 import { contains } from "sfn/strings";
 
-import { build_target_os, target_artifact_tag } from "../../src/build/target";
+import { build_target_triple, target_artifact_tag } from "../../src/build/target";
 
 fn _sfn_bin() -> string ![io] {
     let configured = env.get("SAILFIN_BIN");
@@ -183,25 +183,25 @@ fn _setup_workspace(ws: string, marker_second_fn: boolean) ![io] {
 // `darwin` on macOS).
 fn _marker_obj(build_dir: string) -> string ![io] {
     return build_dir + "/sailfin/sfn__runtime-native__test_marker.sfn-"
-        + target_artifact_tag(build_target_os())
+        + target_artifact_tag(build_target_triple())
         + "-O2.o";
 }
 
 fn _marker_ll(build_dir: string) -> string ![io] {
     return build_dir + "/sailfin/sfn__runtime-native__test_marker.sfn-"
-        + target_artifact_tag(build_target_os())
+        + target_artifact_tag(build_target_triple())
         + "-O2.ll";
 }
 
 fn _clock_obj(build_dir: string) -> string ![io] {
     return build_dir + "/sailfin/sfn__runtime-native__clock.sfn-"
-        + target_artifact_tag(build_target_os())
+        + target_artifact_tag(build_target_triple())
         + "-O2.o";
 }
 
 fn _clock_ll(build_dir: string) -> string ![io] {
     return build_dir + "/sailfin/sfn__runtime-native__clock.sfn-"
-        + target_artifact_tag(build_target_os())
+        + target_artifact_tag(build_target_triple())
         + "-O2.ll";
 }
 

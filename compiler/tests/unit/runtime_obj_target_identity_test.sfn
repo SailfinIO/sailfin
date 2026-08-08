@@ -29,6 +29,7 @@ import { contains } from "sfn/strings";
 import { expect_eq_bool, expect_eq_str } from "sfn/test";
 
 import { _runtime_obj_key_with_target, _runtime_obj_stem } from "../../src/build/runtime_objs";
+import { target_artifact_tag } from "../../src/build/target";
 
 // ---- The stem: filename isolation ----
 test "runtime-obj identity: stem places the target tag between basename and opt flag" ![pure] {
@@ -61,18 +62,21 @@ test "runtime-obj identity: key folds the raw target under a scheme tag" ![pure]
     // A host target contributes no clang flags, so the fold is exactly the
     // scheme tag plus the raw target string. Pinning the literal keeps the
     // scheme greppable and makes an accidental format change loud.
-    assert expect_eq_str(_runtime_obj_key_with_target("BASE", "Linux"), "BASE\ntgt1:Linux").ok;
+    // SFN-774 / SFEP-0068 §3.6: the marker bumped `tgt1:` -> `tgt2:` when
+    // the fold input moved from `target_os` to the triple, so a
+    // pre-promotion entry can never collide with a post-promotion one.
+    assert expect_eq_str(_runtime_obj_key_with_target("BASE", "Linux"), "BASE\ntgt2:Linux").ok;
 }
 
 test "runtime-obj identity: key folds the raw target and nothing after it" ![pure] {
     // The fold is exactly the scheme tag plus the raw target string,
     // for every target including Windows. It deliberately does NOT
     // append `target_clang_flags`: those are a total function of
-    // `target_os`, so they add no distinguishing power, and appending
+    // the triple, so they add no distinguishing power, and appending
     // them let a crafted target spell the same key (see the absorption
     // test below). Pinning the literal keeps the scheme greppable and
     // makes an accidental format change loud.
-    assert expect_eq_str(_runtime_obj_key_with_target("BASE", "Windows"), "BASE\ntgt1:Windows").ok;
+    assert expect_eq_str(_runtime_obj_key_with_target("BASE", "Windows"), "BASE\ntgt2:Windows").ok;
 }
 
 test "runtime-obj identity: a crafted target cannot absorb a following component" ![pure] {
@@ -123,6 +127,33 @@ test "runtime-obj identity: key composition is stable across calls" ![pure] {
     let first = _runtime_obj_key_with_target("BASE", "Windows");
     let second = _runtime_obj_key_with_target("BASE", "Windows");
     assert expect_eq_str(first, second).ok;
+}
+
+// ---- SFN-774 / SFEP-0068 §3.6: the two Windows ABIs must not collide ----
+test "runtime-obj identity: msvc and mingw triples yield different cache keys" ![pure] {
+    // Before the triple axis, both Windows triples folded to the OS string
+    // `"Windows"` and would have shared this key despite compiling to
+    // different objects — an msvc build and a mingw build cross-linking
+    // silently. The key must now carry the full triple.
+    let msvc = _runtime_obj_key_with_target("SAME-BASE", "x86_64-pc-windows-msvc");
+    let mingw = _runtime_obj_key_with_target("SAME-BASE", "x86_64-w64-mingw32");
+    assert expect_eq_bool(msvc == mingw, false).ok;
+}
+
+test "runtime-obj identity: msvc and mingw triples yield different artifact tags" ![pure] {
+    // The on-disk half of the same fix: distinct tags so the two ABIs'
+    // cached runtime objects land at distinct paths instead of
+    // overwriting each other.
+    let msvc_tag = target_artifact_tag("x86_64-pc-windows-msvc");
+    let mingw_tag = target_artifact_tag("x86_64-w64-mingw32");
+    assert expect_eq_bool(msvc_tag == mingw_tag, false).ok;
+}
+
+test "runtime-obj identity: msvc and mingw triples yield distinct stems for one source" ![pure] {
+    let src = "/rt/sfn/prelude.sfn";
+    let msvc_stem = _runtime_obj_stem("sfn__runtime-native__", src, "-O2", target_artifact_tag("x86_64-pc-windows-msvc"));
+    let mingw_stem = _runtime_obj_stem("sfn__runtime-native__", src, "-O2", target_artifact_tag("x86_64-w64-mingw32"));
+    assert expect_eq_bool(msvc_stem == mingw_stem, false).ok;
 }
 
 // ---- Both halves together ----
