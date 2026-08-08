@@ -123,7 +123,7 @@ COMPILER_SOURCE_FINGERPRINT_CMD := $(NATIVE_BIN) dev bootstrap fingerprint
 
 .PHONY: help install fetch-seed test test-unit test-integration test-e2e test-capsules compile check check-strict check-fast package clean bench bench-runtime test-arena
 
-.PHONY: ci-prepare-test-artifacts ci-package ci-package-installer
+.PHONY: ci-prepare-test-artifacts ci-package
 
 .PHONY: rebuild mcp-server
 
@@ -550,29 +550,17 @@ test-arena:
 # to deleting the seed store.
 KEEP_SEED ?= 1
 
-# Pick the first `sfn` that actually implements `dev clean` (SFN-680). A binary
-# predating it exits 2 with `unknown subcommand 'clean'`, so probing with
-# `--dry-run` — which enumerates but removes nothing — is both the capability
-# test and a rehearsal of the real call. $(NATIVE_BIN) comes first: it is the
-# freshly self-hosted compiler, so it carries the command well before any
-# pinned seed does.
-#
-# The probe (and the transitional shell paths it guards) is removable once
-# bootstrap.toml's pinned seed carries `sfn dev clean`; the Makefile's own
-# retirement is SFN-60.
-CLEAN_PROBE = for b in "$(NATIVE_BIN)" "$(SEED)"; do \
-		if [ -x "$$b" ] && "$$b" dev clean $(1) --dry-run >/dev/null 2>&1; then \
-			bin="$$b"; break; \
-		fi; \
-	done
-
 # Remove the packaged-release output directory. Thin delegation: `sfn dev
 # clean dist` owns the behaviour. `dist/` has no preserve policy of its own,
 # so the pre-SFN-680 fallback is a plain `rm -rf` and re-owns nothing.
 clean:
-	@bin=""; $(call CLEAN_PROBE,dist); \
-	if [ -n "$$bin" ]; then exec "$$bin" dev clean dist; fi; \
-	rm -rf dist
+	@if [ -x "$(NATIVE_BIN)" ]; then bin="$(NATIVE_BIN)"; \
+	elif [ -x "$(SEED)" ]; then bin="$(SEED)"; \
+	else \
+		echo "[clean][error] no executable sfn found at '$(NATIVE_BIN)' or '$(SEED)'; run 'make fetch-seed' first" >&2; \
+		exit 1; \
+	fi; \
+	exec "$$bin" dev clean dist
 
 # Build the Sailfin MCP server so agentic clients (Claude Code, Claude Desktop,
 # Inspector) can reach the compiler as tool calls. `.mcp.json` at the repo root
@@ -583,28 +571,15 @@ mcp-server:
 # Remove local build artifacts. Thin delegation: `sfn dev clean build` owns
 # the keep-the-seed-toolchain-store policy (SFN-680), so this recipe decides
 # nothing and only forwards the opt-out under its namespaced name.
-#
-# The shell path below is transitional and runs only when no available `sfn`
-# implements `dev clean` — a fresh clone whose seed predates SFN-680, where a
-# hard failure would break `make clean-build` for the validation ladder that
-# depends on it (.claude/rules/selfhost-invariant.md). It reproduces the
-# retired recipe rather than being a second implementation to maintain, and is
-# deleted when the pinned seed carries the command. One known divergence: this
-# glob skips dotfiles, so it leaves `build/.seed-resolved` behind where the
-# native path removes it.
 .PHONY: clean-build clean-all
 clean-build:
-	@bin=""; $(call CLEAN_PROBE,build); \
-	if [ -n "$$bin" ]; then exec env SAILFIN_CLEAN_KEEP_SEED="$(KEEP_SEED)" "$$bin" dev clean build; fi; \
-	echo "[clean-build] this sfn predates 'sfn dev clean' (SFN-680); using the transitional shell path"; \
-	mkdir -p build; \
-	for d in build/*; do \
-		base="$$(basename "$$d")"; \
-		if [ "$$base" = "toolchains" ] && [ "$(KEEP_SEED)" != "0" ]; then \
-			continue; \
-		fi; \
-		rm -rf "$$d"; \
-	done
+	@if [ -x "$(NATIVE_BIN)" ]; then bin="$(NATIVE_BIN)"; \
+	elif [ -x "$(SEED)" ]; then bin="$(SEED)"; \
+	else \
+		echo "[clean-build][error] no executable sfn found at '$(NATIVE_BIN)' or '$(SEED)'; run 'make fetch-seed' first" >&2; \
+		exit 1; \
+	fi; \
+	exec env SAILFIN_CLEAN_KEEP_SEED="$(KEEP_SEED)" "$$bin" dev clean build
 
 # Full cleanup for a CI-like fresh start.
 clean-all: clean clean-build
@@ -840,20 +815,6 @@ ci-package:
 		exit 1; \
 	fi
 	@$(NATIVE_BIN) package --target "$(TARGET)" --out dist --compiler-bin "$(NATIVE_BIN)"
-	@$(NATIVE_BIN) package --installer --target "$(TARGET)" --out dist --compiler-bin "$(NATIVE_BIN)"
-
-# Create an installer payload (compiler + runtime bits) for a given target label.
-# Stage C4 migration: now delegates to `sfn package --installer`.
-# Produces: dist/installer-$(TARGET).tar.gz (+.sha256, +.manifest.json)
-ci-package-installer:
-	@if [ -z "$(TARGET)" ]; then \
-		echo "[ci-package-installer][error] missing TARGET (e.g. linux-x86_64, macos-arm64)" >&2; \
-		exit 1; \
-	fi
-	@if [ ! -x "$(NATIVE_BIN)" ]; then \
-		echo "[ci-package-installer][error] missing native compiler '$(NATIVE_BIN)'; run 'make rebuild' or 'make compile' first" >&2; \
-		exit 1; \
-	fi
 	@$(NATIVE_BIN) package --installer --target "$(TARGET)" --out dist --compiler-bin "$(NATIVE_BIN)"
 
 # Usage:

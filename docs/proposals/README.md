@@ -28,7 +28,7 @@ The next number is `max + 1`. Add a row in the same PR that introduces an SFEP.
 | [0003](./0003-tooling.md) | The Toolchain Surface and Its Output Contracts | Accepted | tooling |
 | [0004](./0004-check-architecture.md) | `sfn check` — Fast Analysis Without Codegen | Implemented | tooling |
 | [0005](./0005-colon-type-annotations.md) | Colon Type Annotations | Implemented | language |
-| [0006](./0006-build-architecture.md) | Unified Build Architecture | Implemented | tooling |
+| [0006](./0006-build-architecture.md) | Unified Build Architecture | Accepted | tooling |
 | [0007](./0007-fmt-architecture.md) | `sfn fmt` — Canonical Formatter | Implemented | tooling |
 | [0008](./0008-effect-validation.md) | Effect Validation as Build Gate | Implemented | language |
 | [0009](./0009-cli-modularization-epic.md) | CLI Modularization | Superseded | tooling |
@@ -90,6 +90,7 @@ The next number is `max + 1`. Add a row in the same PR that introduces an SFEP.
 | [0065](./0065-sync-capsule-api.md) | `sfn/sync` — public API surface and semantics | Draft | language |
 | [0066](./0066-codegen-provider-ownership.md) | Codegen Provider Ownership — Which Toolchain Roles Sailfin Owns | Draft | tooling |
 | [0067](./0067-platform-access-ownership.md) | Platform Access Ownership — the `-nostdlib` Program | Draft | runtime |
+| [0068](./0068-native-cross-target-build.md) | Native Cross-Target Builds (`sfn build --target=<triple>`) | Accepted | tooling |
 
 ## Drafts under review (numbers assigned at merge)
 
