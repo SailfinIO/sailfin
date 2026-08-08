@@ -2,6 +2,8 @@
 //
 // Parser for textual `.sfn-asm` artifacts. Type definitions live in
 // native_ir.sfn; utilities and layout parsers in native_ir_utils.sfn.
+import { substring } from "sfn/strings";
+
 import {
     NativeBinding,
     NativeEnum,
@@ -41,7 +43,6 @@ import {
     strip_quotes,
     trim_text
 } from "./native_ir_utils_text";
-import { char_code, substring } from "./string_utils";
 
 fn parse_native_artifact_impl(text: string, include_instructions: boolean, include_top_level_bindings: boolean) -> ParseNativeResult {
     return parse_native_artifact_impl_from_lines(split_lines(text), include_instructions, include_top_level_bindings);

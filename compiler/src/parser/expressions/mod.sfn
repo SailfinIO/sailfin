@@ -2,8 +2,9 @@
 //
 // Expression parsing - Pratt parser implementation for expressions including
 // literals, binary/unary operators, member access, calls, lambdas, and more.
+import { char_at_index } from "sfn/strings";
+
 import { Expression } from "../../ast";
-import { char_at, normalize_number_literal_value, strings_equal } from "../../string_utils";
 import { Token } from "../../token";
 import {
     append_token,
@@ -21,7 +22,7 @@ import {
     ExpressionTokens,
     ExpressionTypeSeparatorParseResult
 } from "../types";
-import { string_array_contains, trim_text } from "../utils";
+import { normalize_number_literal_value, string_array_contains, trim_text } from "../utils";
 import {
     binary_precedence,
     looks_like_number_expr,
@@ -545,8 +546,8 @@ fn normalize_expression(tokens: Token[], expr: Expression) -> Expression {
         }
         let raw_text = trim_text(expr.text);
         if raw_text.length >= 2 {
-            if char_at(raw_text, 0) == "\"" {
-                if char_at(raw_text, raw_text.length - 1) == "\"" {
+            if char_at_index(raw_text, 0) == "\"" {
+                if char_at_index(raw_text, raw_text.length - 1) == "\"" {
                     let literal = strip_surrounding_quotes_expr(raw_text);
                     return Expression.StringLiteral {
                         value: literal,

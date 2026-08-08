@@ -8,7 +8,6 @@ import {
     Parameter,
     TypeAnnotation
 } from "../../ast";
-import { strings_equal } from "../../string_utils";
 import { Token, TokenKind } from "../../token";
 import { parse_block } from "../statements";
 import {

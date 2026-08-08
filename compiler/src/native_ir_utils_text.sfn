@@ -2,7 +2,7 @@
 //
 // Pure string utility functions used across the native IR parser modules.
 // No dependencies on native_ir types.
-import { substring } from "./string_utils";
+import { substring } from "sfn/strings";
 
 // Parsed native-IR function type used by codegen lambda normalization and LLVM
 // call lowering. Keeping this textual interchange shape in IR prevents either

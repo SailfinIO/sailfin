@@ -2,6 +2,8 @@
 //
 // Instruction parsing helpers extracted from native_ir_parser.sfn to keep
 // the module under the seed compiler's OOM threshold.
+import { substring } from "sfn/strings";
+
 import {
     InstructionDepthState,
     InstructionGatherResult,
@@ -23,7 +25,6 @@ import {
     trim_text,
     trim_trailing_delimiters
 } from "./native_ir_utils_text";
-import { substring } from "./string_utils";
 
 fn initial_instruction_depth_state() -> InstructionDepthState {
     return InstructionDepthState {

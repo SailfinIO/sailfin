@@ -1,6 +1,8 @@
 // compiler/src/parser/declarations/enums.sfn
 //
 // Enum declaration parsing.
+import { char_at_index, substring } from "sfn/strings";
+
 import {
     Decorator,
     EnumVariant,
@@ -8,7 +10,6 @@ import {
     Statement,
     TypeAnnotation
 } from "../../ast";
-import { char_at, substring } from "../../string_utils";
 import {
     advance_to_symbol,
     collect_type_annotation_until,
@@ -204,7 +205,7 @@ fn parse_enum_variant_field(parser: Parser) -> StructFieldParseResult {
     let mut type_text = trim_text(tokens_to_text(capture.tokens));
     loop {
         if type_text.length == 0 { break; }
-        let last = char_at(type_text, type_text.length - 1);
+        let last = char_at_index(type_text, type_text.length - 1);
         if last != ";" { break; }
         let trimmed = substring(type_text, 0, type_text.length - 1);
         type_text = trim_text(trimmed);
