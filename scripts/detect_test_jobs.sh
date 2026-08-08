@@ -1,38 +1,57 @@
 #!/usr/bin/env bash
 # detect_test_jobs.sh — Pick a sensible TEST_JOBS default for the current host.
 #
-# Heuristic: min(cores, (mem_mb * 66%) / 4096), floor 1, cap 16; macOS
-# caps at 2.
+# Heuristic: min(cores, ((mem_mb * 80%) - 5120) / 3072), floor 1, cap 16;
+# macOS caps at 2.
 #
 # SFN-547: the budget is sized for the HEAVIEST test child, not the common
 # one. The previous 384 MB-per-job divisor was sized for the light majority
 # (a typical unit/integration child is ~50–80 MB RSS), which is true and
-# irrelevant: the pool's peak is set by the build-and-run class, where a
-# child spawning a nested `sfn build`/`sfn run`/`sfn emit` reaches the same
-# weight as a compiler-module emit — the heaviest, `llvm/runtime_helpers.sfn`,
-# peaks at 1.55 GB RSS (SFN-626; docs/baselines/compile-0.8.4-linux-x86_64.csv).
-# Budgeting the light majority handed a 14 GB host 16 jobs and killed it
-# outright. Sizing for the heavy tail costs parallelism on small hosts and
-# is the only setting that cannot OOM them.
+# irrelevant: the pool's peak is set by the build-and-run class. Budgeting
+# the light majority handed a 14 GB host 16 jobs and killed it outright.
+# Sizing for the heavy tail costs parallelism on small hosts and is the only
+# setting that cannot OOM them.
 #
 # The compiler's 8 GB RLIMIT_AS self-cap does NOT bound this: it caps each
 # process, so N children multiply it. See .claude/rules/compiler-safety.md.
 #
-# 4096 MB/job is the measured cold peak of a pooled test child (3.2-4.1 GB),
-# NOT the emit fan-out's figure. The reserve was 2560 MB, matched to
-# `_cr_ram_budget_jobs` in compiler/src/capsule_emit_parallel.sfn on the
-# reasoning that a test child can spawn exactly that emit. It can — but it
-# also compiles the whole compiler dep closure in-process first, which the
-# emit worker never does. Measured: `backend_failure_banner` 3,604 MB,
-# `dev_det_sweep` 4,142 MB in-pool, against the 1.55 GB emit worker SFN-626
-# sized 2560 from. At 2560 a 16 GB CI runner took 4 jobs and demanded
-# ~20.5 GB of a 15.7 GB host, losing the VM with no OOM line (GitHub issue
-# #2817); at 4096 it takes 2, measured peak 11.7 GB.
+# SFN-781 fixed two defects in the previous "2560 MB out of a 66% slice"
+# form, which prescribed 4 jobs on a 16 GB / 4-core host and peaked at
+# 17.26 GB tree RSS before the OOM killer took the parent:
 #
-# Leave `_cr_ram_budget_jobs` at 2.5 GB — emit workers really are 1.55 GB.
-# The twin to keep in lockstep is `_test_jobs_budget` in
-# compiler/src/cli/commands/test/arg_and_jobs.sfn, which models the same
-# workload as this script and carries the identical constants.
+#   1. 2560 MB/job was borrowed from the emit fan-out (`_cr_ram_budget_jobs`,
+#      compiler/src/capsule_emit_parallel.sfn) on the theory that a test
+#      child's peak is the nested emit it spawns. It is not — a pooled
+#      `--no-test-cache` test child measures 2.63–3.08 GB steady-state
+#      against the 1.55 GB emit worker SFN-626 sized that figure from.
+#      The divisor is now 3072 MB, the top of the measured band.
+#   2. The parent runner was not a term at all — only implicitly covered by
+#      the 34% remainder, which also had to absorb clang/llvm-link and the
+#      OS. It is the largest single process in the tree (3.65–4.85 GB) and
+#      so always the OOM victim: `_run_multi_file` compiles the whole
+#      dependency closure in-process before fanning out. It is now an
+#      explicit 5120 MB subtrahend.
+#
+# The slice rose 66% -> 80% *because* the parent became explicit; keeping 66%
+# would double-count it and prescribe serial on a host that comfortably runs
+# two jobs. The remaining 20% covers the grandchildren, the OS, and page
+# cache.
+#
+# These constants are therefore deliberately NO LONGER equal to the emit
+# fan-out's, and must not be re-unified — they are sized against different
+# workloads, and SFN-781 scoped `_cr_ram_budget_jobs` explicitly out.
+# `_test_jobs_budget` in compiler/src/cli/commands/test/arg_and_jobs.sfn is
+# the native twin of this script and carries the identical constants; keep
+# the two in lockstep.
+#
+# That lockstep is exact only because of how these particular constants land.
+# The native twin divides bytes; this script divides whole MB, so the two
+# agree at every input only while both reserves are whole MiB *and* the slice
+# maps them onto whole-MiB thresholds — at 80%, the job-N threshold is
+# (6400 + 3840N) MiB exactly, so this script's truncation loses nothing.
+# Change the slice to 75%, or a reserve to 4.5 GiB, and the two forms
+# separate, silently disagreeing by one job in narrow RAM windows.
+# Re-derive that boundary before editing either constant.
 #
 # macOS additionally caps at 2 jobs, mirroring detect_build_jobs.sh. On the
 # memory-constrained macOS runner (~7 GB) the memory budget alone let enough
@@ -75,15 +94,25 @@ case "$uname_s" in
 esac
 
 # Sanitize: a non-numeric or zero result falls back to safe defaults. The
-# 1536 MB assumption is below one job's reserve, so an unmeasurable host
-# floors to serial — matching `_test_jobs_budget`'s fail-closed branch.
+# 1536 MB assumption is below the parent runner's own reserve, so an
+# unmeasurable host floors to serial — matching `_test_jobs_budget`'s
+# fail-closed branch.
 [ "$cores" -gt 0 ] 2>/dev/null || cores=1
 [ "$mem_mb" -gt 0 ] 2>/dev/null || mem_mb=1536
 
-# Apply the per-job memory budget: 4096 MB per job out of a 66% slice of
-# physical RAM. See the header comment for the RSS data these are sized
-# against and for the native twin they must stay in lockstep with.
-by_mem=$(((mem_mb * 66 / 100) / 4096))
+# Apply the memory budget: reserve the parent runner off the top of an 80%
+# slice of physical RAM, then divide what is left at 3072 MB per pooled
+# child. See the header comment for the RSS data these are sized against and
+# for the native twin they must stay in lockstep with.
+usable=$((mem_mb * 80 / 100))
+parent_reserve=5120
+# A host that cannot seat the parent alone has no budget to divide. Mirrors
+# `_test_jobs_budget`'s early return so the twins agree on small hosts.
+if [ "$usable" -le "$parent_reserve" ]; then
+    by_mem=1
+else
+    by_mem=$(((usable - parent_reserve) / 3072))
+fi
 [ "$by_mem" -lt 1 ] && by_mem=1
 
 jobs=$cores

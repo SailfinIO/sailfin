@@ -604,3 +604,23 @@ test "publish: invalid publish value is a manifest error" ![io] {
     assert ! contains(all, "packaging");
     assert ! fs.exists(captured);
 }
+
+// ---- Test 21: the compiler's own manifest reaches the private gate ----
+test "publish: compiler capsule is rejected before credential discovery" ![io] {
+    let root = _test_root("t21");
+    let home = root + "/home";
+    fs.createDirectory(home, true);
+    // The real compiler manifest must reach E0612 before an empty HOME can
+    // trigger credential discovery or packaging.
+    let e = _env_for(home, "", []);
+    let _exit = process.run_capture([_sfn_bin(), "publish", "compiler"], e);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    let all = out + err;
+    assert _exit != 0;
+    assert contains(all, "sailfin");
+    assert contains(all, "is private and cannot be published");
+    assert contains(all, "E0612");
+    assert ! contains(all, "no auth token found");
+    assert ! contains(all, "packaging");
+}

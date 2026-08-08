@@ -163,10 +163,13 @@ TEST_BIN_CACHE_FLAGS ?=
 # `$(NATIVE_BIN) test ...` invocation below threads this knob.
 #
 # Default: auto-detected from CPU count and total RAM via
-# scripts/detect_test_jobs.sh, budgeting 2.5 GB per job out of a 66% slice of
-# RAM — the same reserve the emit fan-out uses, because an e2e build-spawner
-# test forks exactly that compiler+clang tree (SFN-547; the old 384 MB budget
-# was sized for the light unit-test majority and OOMed a 14 GB host).
+# scripts/detect_test_jobs.sh, which reserves the parent runner off the top of
+# an 80% slice of RAM and then budgets 3 GB per pooled child (SFN-781). That
+# reserve is deliberately NOT the emit fan-out's: SFN-781 measured a pooled
+# test child at 2.63-3.08 GB against the 1.55 GB emit worker the shared 2.5 GB
+# figure was sized from, and the parent runner — the largest process in the
+# tree — was not budgeted at all (SFN-547; the older 384 MB budget was sized
+# for the light unit-test majority and OOMed a 14 GB host).
 # Override with `TEST_JOBS=N` on the command line or in the environment;
 # an explicit value always wins. CI sharding (`make test-shard`) is
 # unaffected — `sfn dev shard run` reads SAILFIN_TEST_JOBS directly (SFN-200).

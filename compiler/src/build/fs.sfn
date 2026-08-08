@@ -628,9 +628,10 @@ fn _read_file_bytes(file_path: string) -> FileBytes ![io] {
 
     // 512 MiB. Geometric growth means the transient peak is ~2x the
     // buffer (and ~3x briefly, while `realloc` holds both blocks), so
-    // this bounds one read near 1.5 GiB — deliberately under the
-    // 2.5 GiB/job the parallel fan-outs reserve
-    // (`.claude/rules/compiler-safety.md`). Anything larger keeps the
+    // this bounds one read near 1.5 GiB — deliberately under the smallest
+    // per-job reserve any parallel fan-out budgets, the emit fan-out's
+    // 2.5 GiB (`.claude/rules/compiler-safety.md`; the test pool reserves
+    // 3 GiB since SFN-781). Anything larger keeps the
     // subprocess hasher rather than risking a host kill.
     let max_bytes: i64 = 536870912;
     // Backstop only: at a full 64 KiB chunk per read `max_bytes` trips

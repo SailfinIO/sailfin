@@ -883,6 +883,14 @@ jobs:
           file build/bin/sfn
           build/bin/sfn version
 
+      # TEST_JOBS is deliberately NOT pinned here. This runner is 4 vCPU /
+      # 16 GB and this is the one lane that runs a cold `--no-test-cache`
+      # full suite — exactly the host, workload, and (former) job count that
+      # SFN-781 measured at 17.26 GiB tree RSS and got OOM-killed. An
+      # explicit TEST_JOBS outranks the auto-budget, so the pin defeated the
+      # very policy that protects this lane. Letting
+      # `scripts/detect_test_jobs.sh` choose yields 2 here. Do not re-pin it
+      # without re-measuring tree RSS on an arm64 runner.
       - name: Run full Sailfin test suite
         shell: bash
         run: |
@@ -890,8 +898,7 @@ jobs:
           make test \
             NATIVE_BIN=build/bin/sfn \
             SAILFIN_CC=/usr/bin/clang-18 \
-            TEST_BIN_CACHE_FLAGS=--no-test-cache \
-            TEST_JOBS=4
+            TEST_BIN_CACHE_FLAGS=--no-test-cache
 
   # The PR test suite is ~90% of CI wall time and runs serially, so we
   # fan it across per-OS shard legs that run concurrently (Phase 1 of

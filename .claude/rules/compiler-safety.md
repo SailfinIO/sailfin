@@ -21,24 +21,16 @@ safe.** `N` concurrent `sfn` children each self-apply their own 8 GiB cap, so
 the aggregate ceiling is `N x 8 GiB`, and nothing enforces it. Any fan-out must
 budget host RAM itself: `_test_jobs_budget`
 (`compiler/src/cli/commands/test/arg_and_jobs.sfn`) and its bash twin
-`scripts/detect_test_jobs.sh` for the test pool, `_cr_ram_budget_jobs`
-(`compiler/src/capsule_emit_parallel.sfn`) for per-module emit. All three take
-**66% of RAM** as the usable slice, but the per-job reserve differs by workload
-and **must not be re-unified**:
-
-| fan-out | reserve | measured peak |
-|---|---|---|
-| test pool (`_test_jobs_budget` + `scripts/detect_test_jobs.sh`) | **4 GiB/job** | 3.2–4.1 GiB — a pooled child compiles the compiler dep closure in-process |
-| per-module emit (`_cr_ram_budget_jobs`) | **2.5 GiB/job** | 1.55 GiB (SFN-626) |
-
-SFN-547 set both to 2.5 GiB on the reasoning that a test child can *spawn* an
-emit worker. It can — but it also does far more first, and sizing the pool off
-the emit worker over-subscribed every 8–16 GiB host: a 16 GB CI runner took 4
-jobs and demanded ~20.5 GiB, losing the VM with no OOM line in the log (GitHub
-issue #2817). Pooled test children stay pinned to `SAILFIN_BUILD_JOBS=1` so the
-two fan-outs cannot nest and multiply (SFN-547). Never raise a job count past
-those budgets on the theory that the self-cap will catch it; it will not, and
-the failure mode is a hard host kill, not an `sfn` error.
+`scripts/detect_test_jobs.sh` reserve **3 GiB/job out of (80% of RAM - 5 GiB)**
+for the test pool — 3 GiB matches a measured pooled test child, and the 5 GiB
+term reserves the parent runner itself (SFN-781). `_cr_ram_budget_jobs`
+(`compiler/src/capsule_emit_parallel.sfn`) sizes the per-module emit fan-out
+separately and unchanged, still **2.5 GiB/job out of 66% of RAM** (SFN-626) —
+the two fan-outs are deliberately sized against different workloads. Pooled
+test children are pinned to `SAILFIN_BUILD_JOBS=1` so the two fan-outs cannot
+nest and multiply (SFN-547). Never raise a job count past those budgets on the
+theory that the self-cap will catch it; it will not, and the failure mode is a
+hard host kill, not an `sfn` error.
 
 **Timeouts still apply** — the memory budget does not guard against hangs. Wrap
 single-file invocations with `timeout 60`; `make` targets handle their own.

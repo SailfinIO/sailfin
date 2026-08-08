@@ -18,7 +18,7 @@ Two independent partitioning mechanisms exist, at different layers:
 
 - **`sfn test --shard I/N`** — a generic, stable-stride partition available
   on any `sfn test` invocation. `_parse_shard_field_at` and
-  `_shard_keeps_index` (`compiler/src/cli/commands/test/arg_and_jobs.sfn:157-219`)
+  `_shard_keeps_index` (`compiler/src/cli/commands/test/arg_and_jobs.sfn:184-246`)
   implement the rule: a 0-based file index belongs to shard `I` of `N` when
   `item_index % N == I - 1`. Deterministic and stable across runs for a
   fixed sorted file list.
@@ -66,16 +66,20 @@ together:
 1. **Across-leg sharding** — the eight named CI shards, run as separate
    jobs (see below).
 2. **Per-file parallelism within a leg** — `_test_jobs_budget(memsize_bytes,
-   nproc, is_darwin)` (`compiler/src/cli/commands/test/arg_and_jobs.sfn:55-75`):
-   `min(cores, usable_RAM / 2.5GiB)`, floored at 1, capped at 16, and capped
-   at 2 on Darwin. `usable` is 66% of total RAM. Resolution precedence in
-   `_resolve_test_jobs` (`:124-133`): an explicit `--jobs` flag beats
+   nproc, is_darwin)` (`compiler/src/cli/commands/test/arg_and_jobs.sfn:71-102`):
+   `min(cores, (usable_RAM - 5 GiB) / 3 GiB)`, floored at 1, capped at 16,
+   and capped at 2 on Darwin, where `usable_RAM` is 80% of total RAM (the
+   same name the code gives the pre-subtraction slice) and the 5 GiB
+   subtrahend reserves the parent runner (SFN-781). Resolution precedence in
+   `_resolve_test_jobs` (`:151-160`): an explicit `--jobs` flag beats
    `SAILFIN_TEST_JOBS`, which beats the native host probe.
    `scripts/detect_test_jobs.sh` reimplements the identical policy in bash
    for the Makefile's `TEST_JOBS ?=` default; the comment at
-   `arg_and_jobs.sfn:52-54` states the two must stay in lockstep — there is
+   `arg_and_jobs.sfn:68-70` states the two must stay in lockstep — there is
    no shared source for the policy across the two languages, so a change to
-   one budget function requires the mirrored edit in the other.
+   one budget function requires the mirrored edit in the other. Nothing
+   automatically cross-checks them: no test asserts the bash script's output
+   against the native budget, so drift is caught only by review.
 
 Pooled test children are pinned to `SAILFIN_BUILD_JOBS=1`
 (`compiler/src/cli/commands/test/pool.sfn:219-221`) so a pooled child that
@@ -88,12 +92,17 @@ the per-file parallelism *within* each shard leg, on top of the across-leg
 sharding — 8 shards × 2 OS = 16 legs, each internally running up to 3 test
 files concurrently.
 
-The one durable finding worth keeping (from a since-superseded 2026-07-01
-measurement sweep): tree-wide peak RSS stays flat or drops as test-suite
-`--jobs` rises, because test-fixture emits are far lighter than a heavy
-compiler-module emit. Memory was never the binding constraint for the test
-surface — which is why the test pool budgets separately from the emit
-fan-out rather than sharing its policy outright.
+A 2026-07-01 measurement sweep concluded that tree-wide peak RSS stays flat
+or drops as test-suite `--jobs` rises, because test-fixture emits are far
+lighter than a heavy compiler-module emit, and that memory was therefore
+never the binding constraint for the test surface. **SFN-781 retracted that
+finding.** It held only for cached runs, where most children never compile:
+a cold `--no-test-cache` full suite at `--jobs 4` on a 16 GiB / 4-core host
+peaked at 17.26 GiB tree RSS and was OOM-killed. Memory is the binding
+constraint on the cold path, the parent runner is the largest single process
+in the tree, and that is why the test pool now budgets a parent term plus a
+separately-measured per-child reserve rather than sharing the emit
+fan-out's policy.
 
 ## Test-artifact cache (operational)
 
