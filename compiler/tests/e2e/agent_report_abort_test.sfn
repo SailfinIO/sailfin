@@ -27,13 +27,13 @@
 // PLUMBING — same shape and the same reasons as
 // compiler/tests/e2e/check_phase_ledger_test.sfn: agent_report.sh writes its
 // report relative to cwd and `process.run_capture` cannot cd, so a single
-// `bash -c` vehicle does the cd and the `env -u` itself. The abort case adds
-// `setsid`, which puts the wrapper in a process group of its own so the
-// SIGTERM reaches the wrapper and its children WITHOUT touching the test
-// runner that spawned them — the vehicle records the new group's id and
-// signals that id explicitly. Matching on a process name instead would be a
-// trap: the vehicle's own command line contains the wrapper's name, so a
-// `pgrep -f` would select the signaller as readily as its target.
+// `bash -c` vehicle does the cd and the `env -u` itself. The abort case
+// backgrounds the wrapper and signals `$!` — its exact pid — so the SIGTERM
+// cannot reach the test runner that spawned it. A process-GROUP kill would
+// need `setsid`, which is util-linux and absent on the macOS leg of this
+// shard. Matching on a process name instead would be a trap: the vehicle's
+// own command line contains the wrapper's name, so a `pgrep -f` would select
+// the signaller as readily as its target.
 import { find, contains } from "sfn/strings";
 
 // Absolute repo root — the vehicle `cd`s into the per-run subdir, so a
@@ -111,36 +111,37 @@ fn _json_str_field(json: string, field: string) -> string {
     return substring(json, value_start, close);
 }
 
-// Drive the wrapper over a stub that sleeps, then SIGTERM the wrapper's own
-// process group mid-run — the CI failure mode reproduced exactly.
+// Drive the wrapper over a stub that sleeps, then SIGTERM the wrapper mid-run
+// — the CI failure mode reproduced exactly.
 fn _run_aborted() -> string ![io] {
     let sub = _run_dir("abort");
-    fs.writeFile(sub + "/stub.sh", "#!/usr/bin/env bash\necho 'stub: started'\nsleep 30\necho 'stub: finished'\n");
+    fs.writeFile(sub + "/stub.sh", "#!/usr/bin/env bash\necho 'stub: started'\nsleep 8\necho 'stub: finished'\n");
 
-    // `setsid` gives the wrapper a fresh session, so its pid is its process
-    // group id; the inner shell records that id before `exec`ing the wrapper
-    // (exec preserves the pid). Signalling `-<pgid>` then reaches the wrapper
-    // and every child it spawned, and nothing outside.
+    // `$!` is the wrapper's own pid — `env` execs `bash`, and exec preserves
+    // the pid — so the SIGTERM lands on the process under test and nothing
+    // else. Deliberately a single-pid kill rather than a process-group one: a
+    // group kill needs `setsid`, which is util-linux and absent on macOS,
+    // where this shard also runs. Signalling the wrapper alone is what the
+    // regression is about anyway.
     //
-    // Each step is its own statement, and the pid file is absolute. `cd X &&
-    // setsid ... &` would background the WHOLE `&&` chain — the cd included —
-    // leaving the signalling half in the original directory, where the pid
-    // file does not resolve and the kill silently no-ops. The wrapper then
-    // runs to completion and reports the pass this test exists to forbid.
-    let pidfile = sub + "/agent.pid";
+    // The stub must outlive the delay before the kill but stay short. Bash
+    // defers a trap while a foreground command runs, so the wrapper does not
+    // act on the signal until the stub exits; `wait` then blocks until the
+    // verdict has actually been written, which is what makes this
+    // deterministic rather than a race against a fixed sleep.
+    //
+    // Each step is its own statement. `cd X && ... &` backgrounds the WHOLE
+    // `&&` chain, cd included, stranding the signalling half in the original
+    // directory — the kill then misses, the wrapper runs to completion, and
+    // the case passes on the very verdict it exists to forbid.
     let vehicle = "cd '" + sub + "' || exit 1\n" + "chmod +x stub.sh\n"
-        + "setsid bash -c 'echo $$ > \"$1\"; "
-        + "exec env -u SAILFIN_INNER SAILFIN_AGENT_REPORT=1 "
-        + "bash \"$0\" --target test -- ./stub.sh' '"
+        + "env -u SAILFIN_INNER SAILFIN_AGENT_REPORT=1 bash '"
         + _wrapper()
-        + "' '"
-        + pidfile
-        + "' >/dev/null 2>&1 </dev/null &\n"
-        + "sleep 3\n"
-        + "kill -TERM -\"$(cat '"
-        + pidfile
-        + "')\" 2>/dev/null || true\n"
-        + "sleep 3\n"
+        + "' --target test -- ./stub.sh >/dev/null 2>&1 </dev/null &\n"
+        + "bg=$!\n"
+        + "sleep 2\n"
+        + "kill -TERM \"$bg\" 2>/dev/null || true\n"
+        + "wait \"$bg\" 2>/dev/null || true\n"
         + "true\n";
 
     let _exit = process.run_capture(["bash", "-c", vehicle], _child_env());
