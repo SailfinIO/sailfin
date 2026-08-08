@@ -30,41 +30,80 @@ fn _parse_jobs_value(text: string) -> int {
 }
 
 // SFN-91: pure half of the native test-worker budget —
-// `min(cores, usable_RAM / per_job_reserve)` with a floor of 1, a global
-// cap of 16, and a Darwin cap of 2 for nested cold-build tests. Unknown RAM
-// is deliberately fail-closed to serial: the test pool has no shared
-// RLIMIT_AS backstop, so CPU-only fan-out can OOM a small host. That is the
-// one place this policy still diverges from the emit fan-out's fail-open
-// `_cr_ram_budget_jobs`, which would rather over-fan than starve a build on
-// a host it cannot measure.
+// `min(cores, (usable_RAM - parent_reserve) / per_job_reserve)` with a floor
+// of 1, a global cap of 16, and a Darwin cap of 2 for nested cold-build
+// tests. Unknown RAM is deliberately fail-closed to serial: the test pool has
+// no shared RLIMIT_AS backstop, so CPU-only fan-out can OOM a small host.
+// The emit fan-out's `_cr_ram_budget_jobs` is fail-open by contrast, and
+// would rather over-fan than starve a build on a host it cannot measure.
+// That is one of four deliberate divergences between the two policies; see
+// the SFN-781 note below for the other three.
 //
-// SFN-547: the reserve and the 66% usable slice are now the same figures the
-// emit fan-out reserves (`_cr_ram_budget_jobs`,
-// `compiler/src/capsule_emit_parallel.sfn`), because a pooled test child can
-// spawn exactly that emit — the previous 384 MiB reserve was sized for the
-// light unit-test majority and under-counted the build-and-run class by ~8x,
-// handing a 14 GiB host 16 jobs and OOMing it outright. `RLIMIT_AS` bounds
-// each process, not the fleet: N children multiply the 8 GiB cap, so this
-// arithmetic is the only thing standing between the pool and the host's RAM.
-// `_pool_child_env` pins each child's own emit fan-out to serial, which is
-// what makes `jobs * per_job_reserve` an honest bound rather than a floor.
+// SFN-547 established that the reserve must be sized for the heaviest child
+// rather than the light unit-test majority: the previous 384 MiB figure
+// under-counted the build-and-run class by ~8x, handed a 14 GiB host 16 jobs,
+// and OOMed it outright. `RLIMIT_AS` bounds each process, not the fleet — N
+// children multiply the 8 GiB cap — so this arithmetic is the only thing
+// standing between the pool and the host's RAM. `_pool_child_env` pins each
+// child's own emit fan-out to serial, which is what makes
+// `jobs * per_job_reserve` an honest bound rather than a floor.
+//
+// SFN-781 corrected two defects in that sizing. The reserve had been borrowed
+// verbatim from the emit fan-out (`_cr_ram_budget_jobs`,
+// `compiler/src/capsule_emit_parallel.sfn`) on the theory that a test child's
+// peak is the nested emit it spawns. It is not: a pooled `--no-test-cache`
+// test child was measured at 2.63-3.08 GiB steady-state against the 1.55 GiB
+// emit worker SFN-626 sized that figure from. And the parent runner was not a
+// term at all, despite being the largest single process in the tree
+// (3.65-4.85 GiB measured) and therefore always the OOM victim — it is not a
+// thin orchestrator, since `_run_multi_file` compiles the whole dependency
+// closure in-process via `_prewarm_test_dep_closures` before fanning out.
+// Together those two omissions prescribed `--jobs 4` on a 16 GiB / 4-core
+// host, which peaked at 17.26 GiB tree RSS and was SIGKILLed.
+//
+// The two reserves are therefore deliberately no longer equal, and must not
+// be re-unified: they are sized against different workloads. SFN-781 scoped
+// `_cr_ram_budget_jobs` explicitly out, so the emit fan-out keeps 2.5 GiB out
+// of 66%.
 //
 // `scripts/detect_test_jobs.sh` reimplements this policy in bash for the
 // Makefile's `TEST_JOBS ?=` default (which passes an explicit `--jobs N`, so
 // it reaches the pool ahead of this function). The two must stay in lockstep.
+//
+// That lockstep is exact only because of how these particular constants land.
+// This function divides bytes; the bash twin divides whole MiB, so the two
+// agree at every input only while both reserves are whole MiB *and* the slice
+// maps them onto whole-MiB thresholds — at 80%, the job-`n` threshold is
+// `(6400 + 3840n)` MiB exactly, so the bash truncation loses nothing. Change
+// the slice to 75%, or a reserve to 4.5 GiB, and the byte-form and MiB-form
+// thresholds separate, silently disagreeing by one job in narrow RAM windows.
+// Re-derive that boundary before editing either constant.
 fn _test_jobs_budget(memsize_bytes: int, nproc: int, is_darwin: boolean) -> int {
     if memsize_bytes <= 0 { return 1; }
     let mut cores = nproc;
     if cores < 1 { cores = 1; }
-    // 2.5 GiB — kept identical to the emit fan-out's `per_job_reserve`
-    // (`_cr_ram_budget_jobs`), which SFN-626 sized from the heaviest emit
-    // worker in the tree, the former `llvm/runtime_helpers.sfn` at 1.55 GiB. See that
-    // function for the margin rationale and its 2.31 GiB floor.
-    let per_job_bytes: int = 2684354560;
-    // 66% slice of physical RAM: headroom for the parent runner, the
-    // `clang`/`llvm-link` grandchildren, and the OS.
-    let usable: int = memsize_bytes * 66 / 100;
-    let mut by_mem = usable / per_job_bytes;
+    // 3 GiB per pooled child — the 2.63-3.08 GiB steady-state band measured
+    // across a full `--no-test-cache` run (SFN-781), rounded to a whole GiB.
+    // That rounds ~80 MiB/job *below* the band's maximum rather than above it;
+    // the shortfall is absorbed by the 20% non-reserved remainder. Deliberately
+    // not the emit fan-out's 2.5 GiB: that was sized from a 1.55 GiB emit
+    // worker, which is the wrong workload for this pool.
+    let per_job_bytes: int = 3221225472;
+    // 5 GiB for the parent runner, which prewarms the dependency closure
+    // in-process before fanning out. Sized just above the top of the
+    // 3.65-4.85 GiB measured range, per this file's standing "budget the
+    // heaviest, not the common" rule (SFN-547).
+    let parent_reserve_bytes: int = 5368709120;
+    // 80% slice of physical RAM. This is deliberately larger than the emit
+    // fan-out's 66%: that 34% remainder was absorbing the parent runner as
+    // well as the `clang`/`llvm-link` grandchildren and the OS. Now that the
+    // parent is an explicit term, keeping 66% would double-count it and
+    // prescribe serial on a host that comfortably runs two jobs. The
+    // remaining 20% covers the grandchildren, the OS, and page cache.
+    let usable: int = memsize_bytes * 80 / 100;
+    // A host that cannot seat the parent alone has no budget to divide.
+    if usable <= parent_reserve_bytes { return 1; }
+    let mut by_mem = (usable - parent_reserve_bytes) / per_job_bytes;
     if by_mem < 1 { by_mem = 1; }
     let mut jobs = cores;
     if by_mem < jobs { jobs = by_mem; }

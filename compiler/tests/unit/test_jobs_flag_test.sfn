@@ -1,8 +1,10 @@
 // #1236 / SFN-91: unit coverage for the explicit jobs parser and the pure
 // RAM+CPU budget behind the native default. SFN-547 introduced the
 // reconciled per-job reserve (originally 3 GiB) and the nested-fan-out pin
-// in `_pool_child_env`; SFN-626 re-sized the reserve to the current 2.5 GiB
-// after re-measuring the worst emit worker.
+// in `_pool_child_env`; SFN-626 re-sized it to 2.5 GiB after re-measuring
+// the worst emit worker. SFN-781 stopped borrowing the emit worker's figure
+// altogether — a pooled test child is a different workload — and made the
+// parent runner an explicit term, so every expectation below moved.
 import { _parse_jobs_value, _test_jobs_budget } from "../../src/cli/commands/test/arg_and_jobs";
 import { _pool_child_env } from "../../src/cli/commands/test/pool";
 
@@ -43,24 +45,36 @@ test "jobs: leading whitespace rejected" {
 }
 
 test "jobs: auto budget is bounded by CPU and memory (SFN-91)" {
-    // 16 GiB * 66% = 10.56 GiB / 2.5 GiB = 4, below the 8-core ceiling.
-    assert _test_jobs_budget(17179869184, 8, false) == 4;
-    // 1.5 GiB is under a single job's reserve — floors to serial.
+    // 16 GiB * 80% = 12.8 GiB, less the 5 GiB parent = 7.8 GiB / 3 GiB = 2,
+    // below the 8-core ceiling.
+    assert _test_jobs_budget(17179869184, 8, false) == 2;
+    // 1.5 GiB cannot seat the parent runner alone — floors to serial.
     assert _test_jobs_budget(1610612736, 8, false) == 1;
-    // CPU-bound: 64 GiB affords 16 jobs, 2 cores allows 2.
+    // CPU-bound: 64 GiB affords 15 jobs, 2 cores allows 2.
     assert _test_jobs_budget(68719476736, 2, false) == 2;
 }
 
-// SFN-547: the reserve matches the emit fan-out (`_cr_ram_budget_jobs`) —
-// SFN-626 moved both to 2.5 GiB/job out of a 66% slice. The 14 GiB host in
-// the report resolved to 16 jobs under the old 384 MiB reserve and killed
-// itself; it still resolves to 3 here.
-test "jobs: auto budget reserves 2.5 GiB per job out of 66% of RAM (SFN-547)" {
-    assert _test_jobs_budget(15032385536, 16, false) == 3;
-    // 8 GiB * 66% = 5.28 GiB — two jobs' reserve fits, a third does not.
-    assert _test_jobs_budget(8589934592, 8, false) == 2;
-    // 32 GiB * 66% = 21.12 GiB / 2.5 GiB = 8.
-    assert _test_jobs_budget(34359738368, 16, false) == 8;
+// SFN-781: the reserve no longer matches the emit fan-out
+// (`_cr_ram_budget_jobs` keeps 2.5 GiB out of 66%). A pooled
+// `--no-test-cache` test child measures 2.63-3.08 GiB against the 1.55 GiB
+// emit worker that figure was sized from, and the parent runner — the
+// largest process in the tree at 3.65-4.85 GiB — is now subtracted off the
+// top instead of being left to an implicit remainder.
+test "jobs: auto budget reserves the parent runner plus 3 GiB per job (SFN-781)" {
+    // 14 GiB * 80% = 11.2 GiB - 5 GiB = 6.2 GiB / 3 GiB = 2.
+    assert _test_jobs_budget(15032385536, 16, false) == 2;
+    // 8 GiB * 80% = 6.4 GiB seats the parent but leaves 1.4 GiB — under one
+    // job's reserve, so the pool floors to serial rather than over-fanning.
+    assert _test_jobs_budget(8589934592, 8, false) == 1;
+    // 32 GiB * 80% = 25.6 GiB - 5 GiB = 20.6 GiB / 3 GiB = 6.
+    assert _test_jobs_budget(34359738368, 16, false) == 6;
+}
+
+// The exact host from the SFN-781 report: MemTotal 16461004 kB, 4 cores, no
+// swap. The old policy prescribed 4 jobs here and was SIGKILLed at 17.26 GiB
+// tree RSS; 2 jobs completes at a 10.4 GiB peak.
+test "jobs: the reported 16 GiB / 4-core host resolves to 2 (SFN-781)" {
+    assert _test_jobs_budget(16856068096, 4, false) == 2;
 }
 
 test "jobs: auto budget floors small and unknown hosts to serial (SFN-91)" {
@@ -69,7 +83,8 @@ test "jobs: auto budget floors small and unknown hosts to serial (SFN-91)" {
 }
 
 test "jobs: auto budget applies global and Darwin caps (SFN-91)" {
-    // 1 TiB * 66% = 675.8 GiB / 2.5 GiB = 270, clamped to the global cap of 16.
+    // 1 TiB * 80% = 819.2 GiB, less the parent, / 3 GiB = 271 — so memory
+    // does not bind; 64 cores does, and the global cap then clamps to 16.
     assert _test_jobs_budget(1099511627776, 64, false) == 16;
     assert _test_jobs_budget(1099511627776, 64, true) == 2;
 }
