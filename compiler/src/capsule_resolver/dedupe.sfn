@@ -117,6 +117,35 @@ fn _cr_strip_leading_dot_slash(path: string) -> string {
     return path;
 }
 
+// SFN-341: the spec set the manifest-dep / runtime-union enumerators have
+// already supplied IN FULL, for the workspace-implicit walk to skip.
+// `base` is the project's declared `[dependencies]`; `provided` is what
+// `enumerate_capsule_sources` actually returned, which is strictly larger —
+// it adds the transitive closure and the runtime capsule's own dependency
+// union. Returns a fresh array so the caller's `covered_specs` (surfaced as
+// `manifest_dep_specs`) is never mutated.
+fn _cr_specs_union(base: string[], provided: CapsuleSource[]) -> string[] {
+    let mut out: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= base.length { break; }
+        if !_cr_string_array_contains(out, base[i]) {
+            out.push(base[i]);
+        }
+        i += 1;
+    }
+    let mut j: int = 0;
+    loop {
+        if j >= provided.length { break; }
+        let spec = provided[j].spec;
+        if spec.length > 0 {
+            if !_cr_string_array_contains(out, spec) { out.push(spec); }
+        }
+        j += 1;
+    }
+    return out;
+}
+
 fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer, bundled_workspace_start: string) -> ResolverDedupeResult ![io] {
     let mut sources: CapsuleSource[] = [];
     let empty_sources: CapsuleSource[] = [];
@@ -224,6 +253,24 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer, bun
     }
     let mut covered_specs: string[] = [];
     let mut capabilities_required: string[] = [];
+    // SFN-341: the exclusion set for the workspace-implicit walk (3). It is
+    // NOT `covered_specs`: the declared-dep list omits both the transitive
+    // closure and the runtime `[dependencies]` union, so a capsule the dep
+    // enumerator already returned in full was enumerated a second time here.
+    // That second provider is not benign — the two legs anchor their paths
+    // differently (the dep leg on the project root or the runtime bundle, the
+    // implicit leg on the discovered workspace root, which is ABSOLUTE
+    // whenever it came from the driver's `binary_dir` rather than the entry),
+    // so one file arrives under two spellings and the slug dedupe below reads
+    // that as two providers of one slug. The resulting false collision fails
+    // the whole resolution and drops EVERY capsule source from the link.
+    // Excluding by spec is what the cache-implicit leg (4) already does, and
+    // it costs no coverage: both legs enumerate a capsule's entire `src/`
+    // tree, so whichever one runs first is complete on its own. Sources the
+    // RELATIVE walk contributed are deliberately not excluded — that walk
+    // only reaches what the entry transitively imports, so its spec tag does
+    // not imply whole-capsule coverage.
+    let mut implicit_excluded: string[] = [];
     if project_root.length > 0 {
         let manifest_path = _cr_path_join(project_root, "capsule.toml");
         if fs.exists(manifest_path) {
@@ -245,6 +292,7 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer, bun
             sources.push(dep_sources[di]);
             di += 1;
         }
+        implicit_excluded = _cr_specs_union(covered_specs, dep_sources);
         // P1 (#363): when `consumer.include_host_as_dep` is set
         // (currently `sfn test`) AND at least one test entry
         // imports the host capsule by its `[capsule].name`,
@@ -318,6 +366,7 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer, bun
             sources.push(rt_dep_sources[rdsi]);
             rdsi += 1;
         }
+        implicit_excluded = _cr_specs_union(covered_specs, rt_dep_sources);
     }
 
     if workspace_root.length > 0 {
@@ -330,7 +379,7 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer, bun
         let mut wi_entry: int = 0;
         loop {
             if wi_entry >= entry_paths.length { break; }
-            let implicit = enumerate_workspace_implicit_sources(entry_paths[wi_entry], members, covered_specs);
+            let implicit = enumerate_workspace_implicit_sources(entry_paths[wi_entry], members, implicit_excluded);
             let mut wi: int = 0;
             loop {
                 if wi >= implicit.length { break; }
