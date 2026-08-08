@@ -1,0 +1,814 @@
+// compiler/src/cli/commands/dev_verify.sfn
+//
+// `sfn dev verify` — the native multi-phase pipeline supervisor that
+// sequences compile → smoke → tests → selfhost → tests and emits the
+// agent verdict block itself (SFN-725, SFEP-0014 Phase 6 §3.5/§3.7/§3.8).
+//
+// This is the first NATIVE producer of the `===SAILFIN-RESULT===`
+// verdict. Until SFEP-0014 Phase 7 (SFN-726) retires it, the bash
+// `scripts/agent_report.sh` remains the producer for the nine wrapped
+// `make` targets; the two coexist and emit the same `sailfin-make/1`
+// envelope, this one under the new target name `verify`.
+//
+// Why native. `agent_report.sh` infers which phase failed by grepping the
+// child's log for banner literals (`CHECK_PHASE_MARKERS`). That coupling
+// broke silently when #1502 moved the stage banners into `sfn selfhost`,
+// and SFN-724 had to re-sync it by hand. Here the phase ledger is
+// STRUCTURAL: this verb dispatches each phase, so it knows which one is
+// running without reading anything. A renamed banner cannot desynchronize
+// a ledger that never read the banner.
+//
+// Composition only (SFEP-0014 §3.5, `.claude/rules/selfhost-invariant.md`).
+// Every phase is an existing command spawned as a child. This file adds no
+// compilation logic and post-processes no build artifact; a supervisor that
+// starts "fixing up" a phase has become the build-driver fixup the
+// self-hosting invariant forbids. Behaviour changes belong in the phase's
+// own command — in particular, seedcheck → `build/bin/sfn` promotion stays
+// in `sfn selfhost` and is deliberately NOT re-implemented here.
+//
+// Classification is producer-emitted (§3.7): every failure class is read
+// off a child's exit status or a struct field, never a regex over a log.
+// The one non-exit-code input is `sfn selfhost --json`'s `fixed_point`
+// scalar, because a fixed-point mismatch deliberately exits 0.
+//
+// Durability (§3.8): `build/agent-report.verify.json` is rewritten through
+// an atomic rename after every phase completes, carrying `"complete":
+// false` and the in-flight phase name until the verdict lands. A SIGKILL
+// of this supervisor therefore still leaves the last completed phase
+// readable — today's `write_report_file` runs only from the bash `EXIT`
+// trap, so a hard kill loses the verdict and the report together.
+//
+// Seed-gated, and it bundles. Like `sfn dev bootstrap install` (SFN-679)
+// and `sfn dev clean` (SFN-680), this verb is executed BY the pinned seed,
+// so it is only exercisable once a seed carrying it is pinned. Its
+// consumer is in the same tree, so per `.claude/rules/seed-dependency.md`
+// it bundles rather than forcing an off-cadence seed cut.
+import {
+    Command,
+    Matches,
+    command,
+    flag,
+    flag_int,
+    get_int,
+    has,
+    has_flag,
+    with_flag
+} from "sfn/cli";
+import { int_to_string } from "sfn/strings";
+
+import {
+    _atomic_rename_into_place,
+    _ensure_dir_recursive_cmd,
+    _mktemp_sibling_cmd
+} from "../../build/fs";
+import { host_exe_name } from "../../build/target";
+import {
+    char_code_at_text,
+    index_of,
+    strings_equal,
+    substring
+} from "../../string_utils";
+import { CliContext } from "../context";
+import { _emit_captured_stream } from "./test/exec";
+import { _resolve_test_self_path } from "./test/pool";
+
+// The report file. Fixed rather than `--out`-configurable: an agent that
+// gets no sentinel has to know where to look without having seen the
+// invocation.
+let _DV_REPORT_PATH: string = "build/agent-report.verify.json";
+
+// Wall-clock bound for the pass1 hello-world smoke gate, in milliseconds.
+// Replaces `check-impl`'s `timeout 60` / `gtimeout 60` shell prefix, which
+// native Windows has neither of. Only this phase is deadline-bounded: the
+// test phases carry their own per-file deadline through
+// `SAILFIN_TEST_TIMEOUT`, and the build/selfhost phases were never bounded.
+let _DV_SMOKE_DEADLINE_MS: int = 60000;
+
+// Per-test-file deadline for the two full-suite phases, in seconds. This is
+// `check-impl`'s `CHECK_TEST_TIMEOUT` (`Makefile:202`, applied to both
+// full-suite legs at `Makefile:662,710`) rather than the test runner's own
+// 900s default, and the difference is load-bearing: `work_dir_parity_test`
+// runs two cold `sfn build -p compiler` builds serially inside one pooled
+// child, which exceeds 900s under `--no-test-cache` plus pool CPU
+// contention on a small runner. Dropping it would make `sfn dev verify`
+// report a `test-failure` on a tree `make check` calls green — precisely
+// the misattribution SFN-724 existed to remove.
+let _DV_TEST_TIMEOUT_S: int = 1800;
+
+// The four test-suite roots `make test` drives, in its order.
+fn _dv_test_roots() -> string[] {
+    return ["compiler/tests/unit", "compiler/tests/integration", "compiler/tests/e2e", "capsules"];
+}
+
+struct VerifyConfig {
+    fast: boolean;
+    full_pass1: boolean;
+    json: boolean;
+    strict: boolean;
+    // 0 == let `sfn test` apply its own RAM-derived default.
+    jobs: int;
+    // 0 == no `SAILFIN_TEST_TIMEOUT` override.
+    test_timeout_s: int;
+}
+
+// One ledger entry. `envelope` holds a child's own `--json` document
+// spliced in RAW — this file has no JSON parser (see `_dv_scrape_*`), so a
+// sub-envelope is carried verbatim rather than re-derived.
+struct VerifyPhase {
+    name: string;
+    status: string;
+    exit_code: int;
+    failure: string;
+    detail: string;
+    report: string;
+    envelope: string;
+}
+
+struct VerifyRun {
+    rc: int;
+    stdout: string;
+    stderr: string;
+}
+
+// -------------------------------------------------------------------
+// JSON emission
+// -------------------------------------------------------------------
+//
+// Hand-rolled, like every other JSON emitter under `compiler/src`
+// (`diagnostics_json.sfn`, `build_report.sfn`, `bench_json.sfn`): the
+// compiler cannot import its own stdlib capsules without a build cycle.
+fn _dv_json_escape(s: string) -> string {
+    let mut out: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= s.length { break; }
+        let ch = substring(s, i, i + 1);
+        if ch == "\"" { out = out + "\\\""; } else if ch == "\\" {
+            out = out + "\\\\";
+        } else if ch == "\n" { out = out + "\\n"; } else if ch == "\r" {
+            out = out + "\\r";
+        } else if ch == "\t" { out = out + "\\t"; } else { out = out + ch; }
+        i += 1;
+    }
+    return out;
+}
+
+fn _dv_json_quote(s: string) -> string {
+    return "\"" + _dv_json_escape(s) + "\"";
+}
+
+// A string field that renders as JSON `null` when empty. Every nullable
+// field in the `sailfin-make/1` envelope uses "" as its null sentinel,
+// because Sailfin has no option type in this dialect.
+fn _dv_json_or_null(s: string) -> string {
+    if s.length == 0 { return "null"; }
+    return _dv_json_quote(s);
+}
+
+fn _dv_phase_json(p: VerifyPhase) -> string {
+    let mut env_field: string = "null";
+    if p.envelope.length > 0 { env_field = p.envelope; }
+    return "{\"name\":" + _dv_json_quote(p.name) + ",\"status\":"
+        + _dv_json_quote(p.status)
+        + ",\"exit_code\":"
+        + int_to_string(p.exit_code)
+        + ",\"failure\":"
+        + _dv_json_or_null(p.failure)
+        + ",\"detail\":"
+        + _dv_json_or_null(p.detail)
+        + ",\"report\":"
+        + _dv_json_or_null(p.report)
+        + ",\"envelope\":"
+        + env_field
+        + "}";
+}
+
+// -------------------------------------------------------------------
+// JSON scraping
+// -------------------------------------------------------------------
+//
+// `compiler/src` has no JSON parser and cannot import the `sfn/json`
+// capsule (build cycle), so reading a scalar back out of a child envelope
+// is a targeted substring scrape — the same technique
+// `test/pool.sfn::_extract_json_uint_after` uses on the runner's summary
+// line. This is why `sfn selfhost --json`'s envelope keeps the fields a
+// consumer must read as FLAT top-level scalars: nothing here can walk a
+// nested object, and nothing here should have to.
+//
+// Returns "" when the key is absent, so a missing field is never mistaken
+// for a present false.
+// `_dv_scrape_scalar` returns bare literals verbatim, so a present-but-null
+// key comes back as the 4-character string "null". Map it onto the ""
+// sentinel this file uses everywhere else, so a clean run does not write a
+// JSON *string* `"null"` into a field every other producer renders as JSON
+// `null`.
+fn _dv_scrape_or_empty(text: string, key: string) -> string {
+    let raw = _dv_scrape_scalar(text, key);
+    if strings_equal(raw, "null") { return ""; }
+    return raw;
+}
+
+fn _dv_scrape_scalar(text: string, key: string) -> string {
+    let needle = "\"" + key + "\":";
+    let idx = index_of(text, needle);
+    if idx < 0 { return ""; }
+    let mut i: int = idx + needle.length;
+    if i >= text.length { return ""; }
+    if substring(text, i, i + 1) == "\"" {
+        // Quoted string value. No escape handling: every value scraped
+        // here is a phase name emitted by this toolchain from a closed
+        // set, none of which can contain a quote or backslash.
+        i += 1;
+        let mut out: string = "";
+        loop {
+            if i >= text.length { break; }
+            let ch = substring(text, i, i + 1);
+            if ch == "\"" { break; }
+            out = out + ch;
+            i += 1;
+        }
+        return out;
+    }
+    // Bare literal: true / false / null / number.
+    let mut out: string = "";
+    loop {
+        if i >= text.length { break; }
+        let c = char_code_at_text(text, i);
+        // Stop at `,` (44), `}` (125), `]` (93) or any whitespace.
+        if c == 44 { break; }
+        if c == 125 { break; }
+        if c == 93 { break; }
+        if c <= 32 { break; }
+        out = out + substring(text, i, i + 1);
+        i += 1;
+    }
+    return out;
+}
+
+// The LAST line of `text` that contains `marker`, or "". A child's
+// envelope is its final output, but banners and warnings can precede it,
+// and a `--json` document is one line by contract.
+fn _dv_last_line_containing(text: string, marker: string) -> string {
+    let mut found: string = "";
+    let mut start: int = 0;
+    loop {
+        if start >= text.length { break; }
+        let nl = index_of(substring(text, start, text.length), "\n");
+        let mut end: int = text.length;
+        if nl >= 0 { end = start + nl; }
+        let line = substring(text, start, end);
+        if index_of(line, marker) >= 0 { found = line; }
+        if nl < 0 { break; }
+        start = end + 1;
+    }
+    return found;
+}
+
+// -------------------------------------------------------------------
+// Classification (SFEP-0014 §3.7)
+// -------------------------------------------------------------------
+//
+// Every class is read off the child's exit status. The two exit codes
+// worth stating explicitly:
+//
+//   124 — a deadline this supervisor owns. `_dv_run_bounded` remaps its
+//         own SIGKILL (137) to 124 before returning, exactly as
+//         `test/pool.sfn::_reap_test_child` does, so a timeout is never
+//         reported as an OOM.
+//   137 — therefore a SIGKILL this supervisor did NOT send: the 8 GiB
+//         `RLIMIT_AS` self-cap (or the host OOM killer). Classified `oom`.
+//
+// 134 (SIGABRT) is deliberately absent from the crash set: a clean
+// `assert` also aborts 134, so it stays a `test-failure`.
+//
+// `kind` is the phase's own nature ("build" or "test"), which is
+// structural here — the supervisor dispatched it — rather than inferred
+// from the target name the way `agent_report.sh` has to.
+fn _dv_classify(rc: int, kind: string) -> string {
+    if rc == 0 { return ""; }
+    if rc == 2 { return "setup-error"; }
+    if rc == 124 { return "timeout"; }
+    if rc == 137 { return "oom"; }
+    if rc == 139 { return "crash"; }
+    if rc == 135 { return "crash"; }
+    if rc == 136 { return "crash"; }
+    if rc == 132 { return "crash"; }
+    // A spawn that never produced a process: `run_capture` reports -1,
+    // the handle API reports a 0 handle which `_dv_run_bounded` maps to
+    // 127. Neither is the tool disagreeing with you; both mean it never
+    // ran.
+    if rc < 0 { return "setup-error"; }
+    if rc == 127 { return "setup-error"; }
+    if strings_equal(kind, "test") { return "test-failure"; }
+    return "compile-error";
+}
+
+// -------------------------------------------------------------------
+// Child environment
+// -------------------------------------------------------------------
+fn _dv_env_entry_has_key(entry: string, key: string) -> boolean {
+    if entry == key { return true; }
+    if entry.length <= key.length { return false; }
+    if substring(entry, 0, key.length) != key { return false; }
+    return substring(entry, key.length, key.length + 1) == "=";
+}
+
+fn _dv_env_has_key(src: string[], key: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= src.length { break; }
+        if _dv_env_entry_has_key(src[i], key) { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+fn _dv_env_without(src: string[], key: string) -> string[] {
+    let mut out: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= src.length { break; }
+        if !_dv_env_entry_has_key(src[i], key) { out.push(src[i]); }
+        i += 1;
+    }
+    return out;
+}
+
+// The environment for every phase child. `run_capture`/`spawn_with_env`
+// never inherit — an empty array is the EMPTY environment, not the
+// parent's — so the parent env is copied through explicitly.
+//
+// `SAILFIN_INNER=1` is the native carry of the bash nested-invocation
+// guard: if a phase child ever reaches a wrapped `make` target,
+// `agent_report.sh` sees the key and runs transparently rather than
+// emitting a second, inner verdict that would race this one for the
+// "last block in the log" position a consumer reads.
+fn _dv_child_env(cfg: VerifyConfig) -> string[] ![io] {
+    let mut e: string[] = _dv_env_without(process.environ(), "SAILFIN_INNER");
+    e.push("SAILFIN_INNER=1");
+    if cfg.test_timeout_s > 0 {
+        e = _dv_env_without(e, "SAILFIN_TEST_TIMEOUT");
+        e.push("SAILFIN_TEST_TIMEOUT=" + int_to_string(cfg.test_timeout_s));
+    } else if !_dv_env_has_key(e, "SAILFIN_TEST_TIMEOUT") {
+        // No explicit `--test-timeout` and nothing inherited: apply
+        // `check-impl`'s value rather than letting the runner fall back to
+        // its own shorter default. An inherited binding always wins, so a
+        // caller can still tighten or loosen it from the environment.
+        e.push("SAILFIN_TEST_TIMEOUT=" + int_to_string(_DV_TEST_TIMEOUT_S));
+    }
+    return e;
+}
+
+// -------------------------------------------------------------------
+// Phase execution
+// -------------------------------------------------------------------
+//
+// Unbounded spawn + capture. Output is re-emitted after the child exits
+// (stdout then stderr, never interleaved), matching what
+// `cli_selfhost.sfn::_selfhost_build_stage` already does for stage builds.
+fn _dv_run(argv: string[], env: string[]) -> VerifyRun ![io] {
+    let rc = process.run_capture(argv, env);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    _emit_captured_stream(out, false);
+    _emit_captured_stream(err, true);
+    return VerifyRun { rc: rc, stdout: out, stderr: err };
+}
+
+// Deadline-bounded spawn, for the pass1 smoke gate only (groom delta 5:
+// `timeout 60` / `gtimeout 60` do not exist on native Windows, and this
+// verb is meant to outlive the Makefile on every platform).
+//
+// Mirrors `test/pool.sfn::_reap_test_child`: poll both fds, kill on
+// deadline, and remap the resulting 137 to 124 so a timeout is never
+// misread as an OOM. `handle_wait` is the sole reaper — it must run even
+// after `handle_kill`, or the child is left a zombie.
+fn _dv_run_bounded(argv: string[], env: string[], deadline_ms: int) -> VerifyRun ![clock, io] {
+    let handle = process.spawn_with_env(argv, env);
+    if handle == 0 {
+        return VerifyRun { rc: 127, stdout: "", stderr: "" };
+    }
+    let mut out_buf: string = "";
+    let mut err_buf: string = "";
+    let mut killed: boolean = false;
+    let start_ms = monotonic_millis();
+    loop {
+        if process.handle_stdout_at_eof(handle) && process.handle_stderr_at_eof(handle) {
+            break;
+        }
+        let remaining: int = deadline_ms - ((monotonic_millis() - start_ms) as int);
+        if remaining <= 0 {
+            process.handle_kill(handle);
+            killed = true;
+            break;
+        }
+        let out_fd = process.handle_stdout_fd(handle);
+        let err_fd = process.handle_stderr_fd(handle);
+        let mut fds: int[] = [];
+        if out_fd >= 0 { fds.push(out_fd); }
+        if err_fd >= 0 { fds.push(err_fd); }
+        let mut read_out: boolean = false;
+        let mut read_err: boolean = false;
+        if fds.length == 0 {
+            // Windows: the fd accessors are -1 by design and `io.poll_any`
+            // is a -1 stub (#1540). Drive the framed reads directly; each
+            // pumps both pipes, so neither stream can wedge the other.
+            read_out = !process.handle_stdout_at_eof(handle);
+            read_err = !process.handle_stderr_at_eof(handle);
+        } else {
+            let ready = io.poll_any(fds, remaining);
+            if ready < 0 {
+                if ((monotonic_millis() - start_ms) as int) >= deadline_ms {
+                    process.handle_kill(handle);
+                    killed = true;
+                    break;
+                }
+                continue;
+            }
+            read_out = ready == out_fd;
+            read_err = ready == err_fd;
+        }
+        if read_out {
+            let chunk = process.handle_read_bytes_stdout(handle, 65536);
+            if chunk.length > 0 { out_buf = out_buf + chunk; }
+        }
+        if read_err {
+            let chunk = process.handle_read_bytes_stderr(handle, 65536);
+            if chunk.length > 0 { err_buf = err_buf + chunk; }
+        }
+    }
+    let rc0 = process.handle_wait(handle);
+    let mut rc = rc0;
+    if killed { rc = 124; }
+    _emit_captured_stream(out_buf, false);
+    _emit_captured_stream(err_buf, true);
+    return VerifyRun { rc: rc, stdout: out_buf, stderr: err_buf };
+}
+
+fn _dv_phase(name: string, status: string, rc: int, failure: string, detail: string) -> VerifyPhase {
+    return VerifyPhase {
+        name: name,
+        status: status,
+        exit_code: rc,
+        failure: failure,
+        detail: detail,
+        report: "",
+        envelope: ""
+    };
+}
+
+// -------------------------------------------------------------------
+// Report file (SFEP-0014 §3.8)
+// -------------------------------------------------------------------
+//
+// Rewritten in full after every phase, through a temp file plus atomic
+// rename so a concurrent reader never sees a torn document. `complete` is
+// false and `in_flight` names the phase now running until the verdict
+// lands; an agent that gets no sentinel reads this file and sees exactly
+// how far the run got.
+//
+// `status` stays inside its closed `pass|warn|fail` enum mid-run — it
+// reports what is known SO FAR, and `complete: false` is what marks it
+// provisional. Adding a "running" state would break every consumer that
+// hard-fails on an unknown enum value.
+fn _dv_write_report(phases: VerifyPhase[], status: string, failure: string, phase: string, first_error: string, in_flight: string, complete: boolean) -> void ![io] {
+    let mut arr: string = "[";
+    let mut i: int = 0;
+    loop {
+        if i >= phases.length { break; }
+        if i > 0 { arr = arr + ","; }
+        arr = arr + _dv_phase_json(phases[i]);
+        i += 1;
+    }
+    arr = arr + "]";
+
+    let mut complete_lit: string = "false";
+    if complete { complete_lit = "true"; }
+
+    let doc = "{\"schema_version\":\"sailfin-make/1\",\"target\":\"verify\",\"status\":"
+        + _dv_json_quote(status)
+        + ",\"failure\":"
+        + _dv_json_or_null(failure)
+        + ",\"phase\":"
+        + _dv_json_or_null(phase)
+        + ",\"first_error\":"
+        + _dv_json_or_null(first_error)
+        + ",\"report\":"
+        + _dv_json_quote(_DV_REPORT_PATH)
+        + ",\"complete\":"
+        + complete_lit
+        + ",\"in_flight\":"
+        + _dv_json_or_null(in_flight)
+        + ",\"phases\":"
+        + arr
+        + "}\n";
+
+    _ensure_dir_recursive_cmd("build");
+    let tmp = _mktemp_sibling_cmd(_DV_REPORT_PATH);
+    if tmp.length == 0 {
+        // Best-effort: a report we cannot stage is not a reason to fail
+        // the pipeline. The verdict block still reaches stdout.
+        return;
+    }
+    fs.writeFile(tmp, doc);
+    _atomic_rename_into_place(tmp, _DV_REPORT_PATH);
+}
+
+// -------------------------------------------------------------------
+// Verdict block
+// -------------------------------------------------------------------
+//
+// Deliberately additive rather than `--json`-exclusive (SFEP-0014 §3.9):
+// it is a framed trailer, not the primary output document, and its whole
+// value is surviving a truncated tail — which requires it to be present in
+// human mode too, the mode an agent actually gets when a phase fails
+// noisily. Consumers read the LAST occurrence of the sentinel.
+fn _dv_emit_verdict(status: string, failure: string, phase: string, first_error: string) -> void ![io] {
+    print("===SAILFIN-RESULT===");
+    print("{\"schema_version\":\"sailfin-make/1\",\"target\":\"verify\",\"status\":"
+        + _dv_json_quote(status)
+        + ",\"failure\":"
+        + _dv_json_or_null(failure)
+        + ",\"phase\":"
+        + _dv_json_or_null(phase)
+        + ",\"first_error\":"
+        + _dv_json_or_null(first_error)
+        + ",\"report\":"
+        + _dv_json_quote(_DV_REPORT_PATH)
+        + "}");
+    print("===END-SAILFIN-RESULT===");
+}
+
+// -------------------------------------------------------------------
+// Argv builders
+// -------------------------------------------------------------------
+fn _dv_jobs_argv(jobs: int) -> string[] {
+    let mut out: string[] = [];
+    if jobs > 0 {
+        out.push("--jobs");
+        out.push(int_to_string(jobs));
+    }
+    return out;
+}
+
+fn _dv_push_all(dst: string[], src: string[]) -> string[] {
+    let mut out = dst;
+    let mut i: int = 0;
+    loop {
+        if i >= src.length { break; }
+        out.push(src[i]);
+        i += 1;
+    }
+    return out;
+}
+
+// A full-suite `sfn test` run against `bin`. `--no-test-cache` is always
+// on: both full-suite phases exist as COLD backstops (`check-impl` hard-codes
+// `TEST_BIN_CACHE_FLAGS=--no-test-cache` for exactly this reason), so a
+// warm per-test binary cache would defeat the point of running them.
+fn _dv_test_argv(bin: string, jobs: int, json: boolean) -> string[] {
+    let mut argv: string[] = [bin, "test"];
+    argv = _dv_push_all(argv, _dv_test_roots());
+    argv.push("--no-test-cache");
+    argv = _dv_push_all(argv, _dv_jobs_argv(jobs));
+    // `--json` is gated exactly as `check-impl` gates it on
+    // `SAILFIN_AGENT_REPORT=1`: the human rendering stays the default so
+    // this verb does not silently replace a maintainer's test output with
+    // an event stream. Classification does not depend on it — a failing
+    // `sfn test` exits non-zero, which is already structured data.
+    if json { argv.push("--json"); }
+    return argv;
+}
+
+// -------------------------------------------------------------------
+// Command
+// -------------------------------------------------------------------
+fn verify_command_def() -> Command {
+    let mut verify: Command = command("verify", "Run the full self-host validation pipeline and emit an agent verdict");
+    verify = with_flag(verify, flag("fast", "Typecheck-only pipeline (compiler/src + runtime), no build or self-host"));
+    verify = with_flag(verify, flag("full-pass1", "Run the full test suite against the first-pass binary, not just the smoke gate"));
+    verify = with_flag(verify, flag("json", "Emit machine-readable phase output"));
+    verify = with_flag(verify, flag("strict", "Treat a fixed-point mismatch as fatal (passed through to sfn selfhost)"));
+    verify = with_flag(verify, flag_int("jobs", "Parallel test jobs; defaults to the RAM-derived budget"));
+    verify = with_flag(verify, flag_int("test-timeout", "Per-test-file deadline in seconds (SAILFIN_TEST_TIMEOUT)"));
+    return verify;
+}
+
+// `--fast`: today's `check-fast` — `sfn check compiler/src/ runtime/`, no
+// build and no self-host, reported as a single-phase ledger.
+fn _dv_run_fast(cfg: VerifyConfig, self_exe: string) -> int ![io] {
+    let env = _dv_child_env(cfg);
+    let mut phases: VerifyPhase[] = [];
+    _dv_write_report(phases, "pass", "", "", "", "check", false);
+
+    let mut argv: string[] = [self_exe, "check", "compiler/src/", "runtime/"];
+    // Under `--json` the child's own `sailfin-check/1` document is what
+    // carries the diagnostics, so it is threaded through and spliced into
+    // the ledger exactly as the `selfhost` phase carries its sub-envelope.
+    if cfg.json { argv.push("--json"); }
+    let run = _dv_run(argv, env);
+    let failure = _dv_classify(run.rc, "build");
+
+    let mut status: string = "pass";
+    if failure.length > 0 { status = "fail"; }
+    let mut ph = _dv_phase("check", status, run.rc, failure, "");
+    if cfg.json {
+        ph.envelope = _dv_last_line_containing(run.stdout, "\"schema_version\":\"sailfin-check/1\"");
+    }
+    phases.push(ph);
+
+    let mut verdict_phase: string = "";
+    if failure.length > 0 { verdict_phase = "check"; }
+    _dv_write_report(phases, status, failure, verdict_phase, verdict_phase, "", true);
+    _dv_emit_verdict(status, failure, verdict_phase, verdict_phase);
+    return run.rc;
+}
+
+fn verify_run(matches: Matches, ctx: CliContext) -> int ![clock, io] {
+    let mut cfg = VerifyConfig {
+        fast: has_flag(matches, "fast"),
+        full_pass1: has_flag(matches, "full-pass1"),
+        json: has_flag(matches, "json"),
+        strict: has_flag(matches, "strict"),
+        jobs: 0,
+        test_timeout_s: 0
+    };
+    if has(matches, "jobs") {
+        cfg.jobs = get_int(matches, "jobs");
+        if cfg.jobs < 1 {
+            print.err("[verify] --jobs must be >= 1");
+            return 2;
+        }
+    }
+    if has(matches, "test-timeout") {
+        cfg.test_timeout_s = get_int(matches, "test-timeout");
+        if cfg.test_timeout_s < 1 {
+            print.err("[verify] --test-timeout must be >= 1 (seconds)");
+            return 2;
+        }
+    }
+
+    let self_exe = _resolve_test_self_path(ctx.binary_dir);
+    if self_exe.length == 0 {
+        print.err("[verify] cannot resolve the running compiler path");
+        return 2;
+    }
+    if cfg.fast { return _dv_run_fast(cfg, self_exe); }
+
+    let env = _dv_child_env(cfg);
+    let first_pass = host_exe_name("build/bin/sfn");
+    let seedcheck = host_exe_name("build/bin/sfn-seedcheck");
+    let mut phases: VerifyPhase[] = [];
+    // What the ledger says SO FAR. Every failing phase returns immediately,
+    // so the only state that survives into a later phase is the non-fatal
+    // `nondeterminism` warn — and a supervisor killed after that point must
+    // leave a report that still says `warn`, not one that has silently
+    // relaxed to `pass`. That durability is the whole reason the report is
+    // written incrementally (SFEP-0014 §3.8).
+    let mut run_status: string = "pass";
+    let mut run_failure: string = "";
+    let mut run_phase: string = "";
+
+    // ---- phase 1: compile ----
+    _dv_write_report(phases, run_status, run_failure, run_phase, run_phase, "compile", false);
+    if !cfg.json {
+        print("[verify] compile: building the first-pass compiler...");
+    }
+    let compile_run = _dv_run([self_exe, "dev", "bootstrap", "build"], env);
+    let compile_failure = _dv_classify(compile_run.rc, "build");
+    if compile_failure.length > 0 {
+        phases.push(_dv_phase("compile", "fail", compile_run.rc, compile_failure, ""));
+        _dv_write_report(phases, "fail", compile_failure, "compile", "compile", "", true);
+        _dv_emit_verdict("fail", compile_failure, "compile", "compile");
+        return compile_run.rc;
+    }
+    phases.push(_dv_phase("compile", "pass", 0, "", ""));
+
+    // ---- phase 2: smoke-pass1 ----
+    // hello-world under a supervisor-owned deadline, then the `sfn/test`
+    // capsule gate. Both must pass for the first-pass binary to be worth
+    // self-hosting with.
+    _dv_write_report(phases, run_status, run_failure, run_phase, run_phase, "smoke-pass1", false);
+    if !cfg.json {
+        print("[verify] smoke-pass1: hello-world + sfn/test capsule tests...");
+    }
+    let hello = _dv_run_bounded([first_pass, "run", "examples/basics/hello-world.sfn"], env, _DV_SMOKE_DEADLINE_MS);
+    let mut smoke_failure = _dv_classify(hello.rc, "build");
+    let mut smoke_rc = hello.rc;
+    if smoke_failure.length == 0 {
+        let mut gate: string[] = [first_pass, "test", "capsules/sfn/test/tests"];
+        gate = _dv_push_all(gate, _dv_jobs_argv(cfg.jobs));
+        if cfg.json { gate.push("--json"); }
+        let gate_run = _dv_run(gate, env);
+        smoke_rc = gate_run.rc;
+        smoke_failure = _dv_classify(gate_run.rc, "test");
+    }
+    if smoke_failure.length > 0 {
+        phases.push(_dv_phase("smoke-pass1", "fail", smoke_rc, smoke_failure, ""));
+        _dv_write_report(phases, "fail", smoke_failure, "smoke-pass1", "smoke-pass1", "", true);
+        _dv_emit_verdict("fail", smoke_failure, "smoke-pass1", "smoke-pass1");
+        return smoke_rc;
+    }
+    phases.push(_dv_phase("smoke-pass1", "pass", 0, "", ""));
+
+    // ---- phase 3: tests-pass1 (skipped unless --full-pass1) ----
+    if cfg.full_pass1 {
+        _dv_write_report(phases, run_status, run_failure, run_phase, run_phase, "tests-pass1", false);
+        if !cfg.json {
+            print("[verify] tests-pass1: full suite against the first-pass binary...");
+        }
+        let t1 = _dv_run(_dv_test_argv(first_pass, cfg.jobs, cfg.json), env);
+        let t1_failure = _dv_classify(t1.rc, "test");
+        if t1_failure.length > 0 {
+            phases.push(_dv_phase("tests-pass1", "fail", t1.rc, t1_failure, ""));
+            _dv_write_report(phases, "fail", t1_failure, "tests-pass1", "tests-pass1", "", true);
+            _dv_emit_verdict("fail", t1_failure, "tests-pass1", "tests-pass1");
+            return t1.rc;
+        }
+        phases.push(_dv_phase("tests-pass1", "pass", 0, "", ""));
+    } else {
+        phases.push(_dv_phase("tests-pass1", "skipped", 0, "", "pass --full-pass1 to run"));
+    }
+
+    // ---- phase 4: selfhost ----
+    // The sub-envelope is spliced verbatim; only `failed_phase` and
+    // `fixed_point` are scraped. A fixed-point mismatch is the one class
+    // that does NOT show up as a non-zero exit — `sfn selfhost` warns and
+    // exits 0 by default — so it is read off the envelope, which is the
+    // point of §3.7's "a return value, not a banner".
+    _dv_write_report(phases, run_status, run_failure, run_phase, run_phase, "selfhost", false);
+    if !cfg.json {
+        print("[verify] selfhost: stage2/stage3 fixed-point validation...");
+    }
+    let mut sh_argv: string[] = [first_pass, "selfhost", "--work-dir", "build/selfhost", "--first-pass", first_pass, "--seedcheck-out", seedcheck, "--stage3-out", host_exe_name("build/bin/sfn-stage3"), "--promote-to", first_pass, "--json"];
+    if cfg.strict { sh_argv.push("--strict"); }
+    let sh = _dv_run(sh_argv, env);
+    let sh_envelope = _dv_last_line_containing(sh.stdout, "\"schema_version\":\"sailfin-selfhost/1\"");
+    let sh_sub = _dv_scrape_or_empty(sh_envelope, "failed_phase");
+    let sh_fp_checked = _dv_scrape_scalar(sh_envelope, "fixed_point_checked");
+    let sh_fp = _dv_scrape_scalar(sh_envelope, "fixed_point");
+    let sh_failure = _dv_classify(sh.rc, "build");
+
+    if sh_failure.length > 0 {
+        let mut p = _dv_phase("selfhost", "fail", sh.rc, sh_failure, sh_sub);
+        p.envelope = sh_envelope;
+        phases.push(p);
+        let mut fe: string = "selfhost";
+        if sh_sub.length > 0 { fe = "selfhost/" + sh_sub; }
+        _dv_write_report(phases, "fail", sh_failure, "selfhost", fe, "", true);
+        _dv_emit_verdict("fail", sh_failure, "selfhost", fe);
+        return sh.rc;
+    }
+
+    // Fixed-point mismatch: `warn`, exit 0. The sole class that does not
+    // flip the exit code (§3.7) — the pipeline deliberately does not treat
+    // stage2 != stage3 as fatal unless `--strict`, which would have
+    // surfaced above as a non-zero exit instead.
+    let nondeterministic = strings_equal(sh_fp_checked, "true") && strings_equal(sh_fp, "false");
+    let mut sh_phase = _dv_phase("selfhost", "pass", 0, "", sh_sub);
+    if nondeterministic {
+        sh_phase = _dv_phase("selfhost", "warn", 0, "nondeterminism", "fixed-point");
+        run_status = "warn";
+        run_failure = "nondeterminism";
+        run_phase = "selfhost";
+    }
+    sh_phase.envelope = sh_envelope;
+    phases.push(sh_phase);
+
+    // ---- phase 5: tests-seedcheck ----
+    _dv_write_report(phases, run_status, run_failure, run_phase, run_phase, "tests-seedcheck", false);
+    if !cfg.json {
+        print("[verify] tests-seedcheck: cold full suite against the seedcheck binary...");
+    }
+    let t2 = _dv_run(_dv_test_argv(seedcheck, cfg.jobs, cfg.json), env);
+    let t2_failure = _dv_classify(t2.rc, "test");
+    if t2_failure.length > 0 {
+        phases.push(_dv_phase("tests-seedcheck", "fail", t2.rc, t2_failure, ""));
+        _dv_write_report(phases, "fail", t2_failure, "tests-seedcheck", "tests-seedcheck", "", true);
+        _dv_emit_verdict("fail", t2_failure, "tests-seedcheck", "tests-seedcheck");
+        return t2.rc;
+    }
+    phases.push(_dv_phase("tests-seedcheck", "pass", 0, "", ""));
+
+    // ---- verdict ----
+    if nondeterministic {
+        _dv_write_report(phases, "warn", "nondeterminism", "selfhost", "selfhost/fixed-point", "", true);
+        _dv_emit_verdict("warn", "nondeterminism", "selfhost", "selfhost/fixed-point");
+        return 0;
+    }
+    _dv_write_report(phases, "pass", "", "", "", "", true);
+    _dv_emit_verdict("pass", "", "", "");
+    return 0;
+}
+
+export {
+    verify_command_def,
+    verify_run,
+    // Exported for regression coverage (compiler/tests/{unit,e2e}).
+    _dv_classify,
+    _dv_env_without,
+    _dv_json_or_null,
+    _dv_last_line_containing,
+    _dv_scrape_scalar,
+    _dv_test_argv
+};

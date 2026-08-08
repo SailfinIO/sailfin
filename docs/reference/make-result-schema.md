@@ -57,6 +57,24 @@ test` invokes `make compile`. Only the **outer** target's verdict is printed:
 wrapped target reached with `SAILFIN_INNER` already set runs transparently and
 emits **no** sentinel.
 
+### `sfn dev verify` — a second, native producer
+
+SFEP-0014 Phase 6 (SFN-725) adds `sfn dev verify`, a native pipeline
+supervisor that emits the same `sailfin-make/1` envelope described above
+without going through `agent_report.sh` at all — it sequences the pipeline
+itself and produces the verdict from child exit status and envelopes
+in-process. It sets `target: "verify"`, a value distinct from the nine
+Makefile targets listed above. Its report file, `build/agent-report.verify.json`,
+is written incrementally: each phase's completion rewrites the file via
+atomic rename, carrying `"complete": false` until the verdict lands, rather
+than being written only from the `agent_report.sh` `EXIT` trap as the
+Makefile-wrapped targets are. `sfn dev verify` is a seed-run command (like
+`sfn dev bootstrap`/`sfn dev clean`), so it is only exercisable once a seed
+carrying it is pinned. The `sailfin-run/2` rename that eventually
+consolidates both producers under one schema is SFEP-0014 Phase 7
+(SFN-726) and has not landed — this document, the Makefile targets, and
+`agent_report.sh` are still current.
+
 ## Delimiters
 
 | Delimiter | Meaning |

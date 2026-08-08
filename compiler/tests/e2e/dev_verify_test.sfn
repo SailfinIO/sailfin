@@ -1,0 +1,225 @@
+// End-to-end coverage for `sfn dev verify` (SFN-725, SFEP-0014 Phase 6)
+// and for the `sfn selfhost --json` sub-envelope it composes with.
+//
+// Native, per `.claude/rules/no-bash-e2e.md` — there is no `.sh` surface.
+//
+// WHAT THIS CAN AND CANNOT DRIVE. A real `sfn dev verify` is a 15–20
+// minute triple-pass self-host; running one per test is unaffordable, and
+// SFEP-0014 §5 records why the alternative (replaying a recorded
+// transcript) just becomes the next fossil — that is exactly how the
+// `#1502` ledger regression survived CI. So this file drives the phases
+// that fail CHEAPLY and for real:
+//
+//   - the `compile` phase, failed by running the whole verb in a scratch
+//     cwd with no `bootstrap.toml`, which makes `sfn dev bootstrap build`
+//     exit non-zero before it can start a build. That is a genuine
+//     injected failure in phase 1, not a banner replay, and it exercises
+//     the verdict block, the phase attribution, and the report file
+//     together.
+//   - the `selfhost` sub-envelope's early-exit path, failed by pointing
+//     `--first-pass` at a nonexistent binary. Before SFN-725 this path
+//     emitted NOTHING in `--json` mode; that it now emits a structured
+//     envelope naming the sub-phase is the whole of groom delta 1.
+//
+// The remaining four phases each require a successful compile ahead of
+// them, so their attribution is covered where the decision actually lives
+// — `_dv_classify` and the sub-envelope scrape — in
+// `compiler/tests/unit/dev_verify_test.sfn`.
+//
+// ENV HYGIENE. Every nested `sfn` here goes through `clean_runner_env` +
+// `nested_runner_scratch` (SFN-401): threading raw `process.environ()`
+// would bind the child to the parent pool's orchestration keys and to the
+// parent's private build cache, which passes a serial local run and fails
+// under CI's parallel `--jobs N`.
+import { contains, find, split } from "sfn/strings";
+import { clean_runner_env, nested_runner_scratch } from "sfn/test";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+fn _child_env(label: string) -> string[] ![io] {
+    return clean_runner_env(nested_runner_scratch(label));
+}
+
+fn _scratch(label: string) -> string ![io] {
+    let dir = nested_runner_scratch(label);
+    process.run(["rm", "-rf", dir]);
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// Index of the LAST line containing `marker`, or -1.
+fn _last_marker_line(lines: string[], marker: string) -> int {
+    let mut idx = 0 - 1;
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        if contains(lines[i], marker) { idx = i; }
+        i = i + 1;
+    }
+    return idx;
+}
+
+// The verdict JSON line: the single line after the LAST start marker.
+// Consumers read the LAST occurrence by contract (SFEP-0014 §3.9).
+fn _verdict_json(output: string) -> string {
+    let lines = split(output, "\n");
+    let start = _last_marker_line(lines, "===SAILFIN-RESULT===");
+    if start < 0 { return ""; }
+    let next = start + 1;
+    if next >= lines.length { return ""; }
+    return lines[next];
+}
+
+// `"field":"value"` -> value, or "" if absent. The `sfn/test` `expect_*`
+// matchers are `![pure]` and cannot be called from an `![io]` test, so
+// assertions here go through `sfn/strings` predicates (#842).
+fn _json_str_field(json: string, field: string) -> string {
+    let key = "\"" + field + "\":\"";
+    let at = find(json, key, 0);
+    if at < 0 { return ""; }
+    let value_start = at + key.length;
+    let close = find(json, "\"", value_start);
+    if close < 0 { return ""; }
+    return substring(json, value_start, close);
+}
+
+// ------------------------------------------------------------------
+// Registration + argument contract
+// ------------------------------------------------------------------
+test "dev verify: the leaf is registered and owns its own flag parsing" ![io] {
+    // Reaching `verify`'s OWN validation message proves three things at
+    // once: the leaf is registered on the `dev` command tree, `dev.sfn`
+    // dispatches it on `path[1]` rather than falling through to the
+    // `bootstrap` group, and it parses its own flags.
+    //
+    // `sfn dev verify --help` is deliberately NOT asserted here: every
+    // `dev` leaf (`clean`, `arena`, `determinism-sweep`) falls through to
+    // the `bootstrap` usage string on `--help`, so a help assertion would
+    // encode a pre-existing dispatch gap rather than this verb's contract.
+    let rc = process.run_capture([_sfn_bin(), "dev", "verify", "--test-timeout", "0"],
+        _child_env("dv-registered"));
+    let out = process.capture_take_stdout() + process.capture_take_stderr();
+    assert rc == 2;
+    assert contains(out, "[verify] --test-timeout must be >= 1");
+}
+
+test "dev verify: stays out of the public sfn --help" ![io] {
+    // Maintainer-only, like `dev clean` and `sfn selfhost`: reachable for
+    // anyone who types it, simply undocumented in the user-facing help.
+    let rc = process.run_capture([_sfn_bin(), "--help"], _child_env("dv-roothelp"));
+    let out = process.capture_take_stdout() + process.capture_take_stderr();
+    assert rc == 0;
+    assert !contains(out, "dev verify");
+}
+
+test "dev verify: a bad --jobs is a setup error before any phase runs" ![io] {
+    let rc = process.run_capture([_sfn_bin(), "dev", "verify", "--jobs", "0"],
+        _child_env("dv-jobs"));
+    let out = process.capture_take_stdout() + process.capture_take_stderr();
+    // Exit 2 is the SFEP-0003 §3.3 point 6 "the tool never ran" code, and a
+    // pre-flight arg error deliberately emits NO verdict envelope — the
+    // same contract `sfn bench` and `sfn selfhost` already keep.
+    assert rc == 2;
+    assert contains(out, "--jobs must be >= 1");
+    assert !contains(out, "===SAILFIN-RESULT===");
+}
+
+// ------------------------------------------------------------------
+// `sfn selfhost --json` sub-envelope (groom delta 1)
+// ------------------------------------------------------------------
+test "selfhost json: an early exit emits a structured envelope naming the sub-phase" ![io] {
+    // Regression for the gap SFN-725 closed: before it, `--json` printed
+    // only the determinism diff, every phase banner was `!cfg.json`
+    // guarded, and an exit before the diff emitted NOTHING AT ALL — so a
+    // supervisor had no way to learn which sub-phase died.
+    let dir = _scratch("dv-selfhost-json");
+    let missing = dir + "/definitely-not-a-compiler";
+    let rc = process.run_capture(
+        [_sfn_bin(), "selfhost", "--json", "--no-promote", "--first-pass", missing],
+        _child_env("dv-selfhost-json"));
+    let out = process.capture_take_stdout();
+    assert rc == 1;
+    assert contains(out, "\"schema_version\":\"sailfin-selfhost/1\"");
+    assert contains(out, "\"failed_phase\":\"preflight\"");
+    // The diff never ran, so `fixed_point_checked` must be false — a
+    // consumer that read `fixed_point:false` alone would misreport this
+    // as nondeterminism.
+    assert contains(out, "\"fixed_point_checked\":false");
+    assert contains(out, "\"determinism\":null");
+}
+
+test "selfhost json: human mode emits no envelope" ![io] {
+    // The envelope is `--json`-only; the human rendering is unchanged
+    // byte-for-byte by SFN-725.
+    let dir = _scratch("dv-selfhost-human");
+    let missing = dir + "/definitely-not-a-compiler";
+    let rc = process.run_capture(
+        [_sfn_bin(), "selfhost", "--no-promote", "--first-pass", missing],
+        _child_env("dv-selfhost-human"));
+    let out = process.capture_take_stdout() + process.capture_take_stderr();
+    assert rc == 1;
+    assert !contains(out, "sailfin-selfhost/1");
+    assert contains(out, "first-pass binary missing");
+}
+
+// ------------------------------------------------------------------
+// Full-verb verdict + report, via a real phase-1 failure
+// ------------------------------------------------------------------
+test "dev verify: a failing compile phase names itself in the verdict block" ![io] {
+    // Run the whole verb in a scratch cwd with no `bootstrap.toml`. The
+    // `compile` phase spawns `sfn dev bootstrap build`, which fails
+    // closed on the missing manifest before starting any build — a real
+    // injected phase-1 failure that costs milliseconds.
+    let dir = _scratch("dv-compile-fail");
+    let bin = dir + "/sfn";
+    let copied = process.run(["cp", _sfn_bin(), bin]);
+    assert copied == 0;
+
+    let rc = process.run_capture_cwd([bin, "dev", "verify"], _child_env("dv-compile-fail"), dir);
+    let out = process.capture_take_stdout() + process.capture_take_stderr();
+
+    // The verdict block is emitted on failure, and it is the phase the
+    // supervisor DISPATCHED — not a phase inferred from a banner.
+    assert contains(out, "===SAILFIN-RESULT===");
+    assert contains(out, "===END-SAILFIN-RESULT===");
+    let json = _verdict_json(out);
+    assert json.length > 0;
+    assert _json_str_field(json, "schema_version") == "sailfin-make/1";
+    assert _json_str_field(json, "target") == "verify";
+    assert _json_str_field(json, "status") == "fail";
+    assert _json_str_field(json, "phase") == "compile";
+    assert _json_str_field(json, "report") == "build/agent-report.verify.json";
+    assert rc != 0;
+}
+
+test "dev verify: the report file is written and names the phase ledger" ![io] {
+    // SFEP-0014 §3.8: the report is the durable record — written through an
+    // atomic rename after every phase, so it survives a supervisor that
+    // never reaches its own verdict. Here we assert the completed shape;
+    // the mid-run shape differs only in `complete`/`in_flight`.
+    let dir = _scratch("dv-report");
+    let bin = dir + "/sfn";
+    let copied = process.run(["cp", _sfn_bin(), bin]);
+    assert copied == 0;
+
+    let _rc = process.run_capture_cwd([bin, "dev", "verify"], _child_env("dv-report"), dir);
+    let _out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+
+    let report_path = dir + "/build/agent-report.verify.json";
+    assert fs.exists(report_path);
+    let report = fs.readFile(report_path);
+    assert contains(report, "\"schema_version\":\"sailfin-make/1\"");
+    assert contains(report, "\"target\":\"verify\"");
+    // The run terminated at its own verdict, so the record is complete and
+    // nothing is in flight.
+    assert contains(report, "\"complete\":true");
+    assert contains(report, "\"in_flight\":null");
+    // The ledger names the phase that actually ran.
+    assert contains(report, "\"name\":\"compile\"");
+    assert contains(report, "\"phase\":\"compile\"");
+}
