@@ -143,11 +143,16 @@ fn apply_module_symbol_mangling(lines: string[], imports: NativeImport[], curren
         }
     }
 
-    // Keep runtime modules unmangled: they can be referenced implicitly
-    // (without explicit imports) and effectively act as a stable ABI.
-    if starts_with(current_module_slug, "runtime/") {
-        return MangledModuleResult { lines: lines, diagnostics: diagnostics };
-    }
+    // Runtime modules keep their OWN definitions unmangled: they are
+    // referenced implicitly — from `runtime/ir/*.ll`, from `extern fn`
+    // declarations in sibling runtime modules, and from the Windows bridge
+    // stub file — so their bare names are a stable ABI. That argument covers
+    // step 1 and nothing else. Steps 2 and 2b rewrite this module's *imported*
+    // call sites and touch no symbol it exports, so a runtime module runs them
+    // too; suppressing them is what previously made it impossible for the
+    // runtime to call a mangled capsule provider at all (SFN-773, design note
+    // `sfn-341-native-tls-runtime-swap.md` §3.1.1).
+    let is_runtime_module = starts_with(current_module_slug, "runtime/");
 
     let module_suffix = sanitize_module_suffix(current_module_slug);
 
@@ -165,6 +170,9 @@ fn apply_module_symbol_mangling(lines: string[], imports: NativeImport[], curren
     let mut local_news: string[] = [];
     let mut def_index: int = 0;
     loop {
+        // Step 1 only. A runtime module leaves `local_olds`/`local_news` empty
+        // so the substitution below is an identity and its symbols stay bare.
+        if is_runtime_module { break; }
         if def_index >= defined.length { break; }
         let sym = defined[def_index];
         if should_keep_unmangled_abi_symbol(sym) {
@@ -306,11 +314,16 @@ fn apply_module_symbol_mangling(lines: string[], imports: NativeImport[], curren
                 import_news.push(target_symbol);
 
                 // Re-export shim: provide `local_symbol__<this_module>` as a thin
-                // wrapper forwarding to the provider's symbol.
-                let export_sym = local_symbol + "__" + module_suffix;
-                if !string_array_contains(shim_exports, export_sym) {
-                    shim_exports.push(export_sym);
-                    shim_targets.push(target_symbol);
+                // wrapper forwarding to the provider's symbol. A runtime module
+                // needs none — every importer of a runtime module targets the
+                // bare name (`provider_is_runtime` above keeps `target_symbol`
+                // unmangled), so the shim would be dead on arrival.
+                if !is_runtime_module {
+                    let export_sym = local_symbol + "__" + module_suffix;
+                    if !string_array_contains(shim_exports, export_sym) {
+                        shim_exports.push(export_sym);
+                        shim_targets.push(target_symbol);
+                    }
                 }
             }
         }
