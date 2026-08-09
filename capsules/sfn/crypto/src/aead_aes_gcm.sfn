@@ -1,0 +1,169 @@
+// aead_aes_gcm.sfn
+//
+// AES-128-GCM and AES-256-GCM seal/open (SP 800-38D), built on the bitsliced
+// cipher in aes.sfn and the table-free GHASH in ghash.sfn. Per the SFN-339
+// design gate (docs/proposals/design-notes/sfn-339-aes-gcm-strategy.md).
+//
+// Only 96-bit nonces are accepted. That is what TLS 1.3 uses (RFC 8446
+// section 5.3) and it is the case where J0 is the nonce with a counter
+// appended; a general-length IV would require hashing the IV through GHASH,
+// which nothing in this tree needs. Other lengths fail closed.
+//
+// The tag is always the full 16 bytes and is compared with bits::ct_eq_bytes
+// before any decryption happens, mirroring aead_chacha20poly1305.sfn.
+import {
+    aes_bs_keys,
+    aes_ctr_xor_bs,
+    aes_encrypt_block_bs,
+    aes_key_expand
+} from "./aes";
+import { ct_eq_bytes, store_u32_be } from "./bits";
+import { ghash } from "./ghash";
+
+fn _zero16() -> int[] {
+    return [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,];
+}
+
+fn _append_bytes(out: int[], src: int[]) -> void {
+    let mut i: int = 0;
+    while i < src.length {
+        out.push(src[i] & 255);
+        i += 1;
+    }
+}
+
+// Zero-pad to the next 16-byte boundary. `n` is a public length.
+fn _append_pad16(out: int[], n: int) -> void {
+    let r: int = n % 16;
+    if r == 0 { return; }
+    let mut i: int = r;
+    while i < 16 {
+        out.push(0);
+        i += 1;
+    }
+}
+
+// Append a bit length as a 64-bit big-endian field. Split across two 32-bit
+// stores because store_u32_be is the widest primitive bits.sfn offers.
+fn _append_be64_bitlen(out: int[], byte_len: int) -> void {
+    let bits: int = byte_len * 8;
+    store_u32_be(out, (bits >> 32) & 4294967295);
+    store_u32_be(out, bits & 4294967295);
+}
+
+// The GHASH input: A || pad || C || pad || [len(A)]_64 || [len(C)]_64, lengths
+// in bits (SP 800-38D section 7.1 step 5).
+fn _ghash_input(aad: int[], ct: int[]) -> int[] {
+    let mut d: int[] = [];
+    _append_bytes(d, aad);
+    _append_pad16(d, aad.length);
+    _append_bytes(d, ct);
+    _append_pad16(d, ct.length);
+    _append_be64_bitlen(d, aad.length);
+    _append_be64_bitlen(d, ct.length);
+    return d;
+}
+
+// J0 for a 96-bit nonce is nonce || 0x00000001, and CTR encryption starts at
+// inc32(J0) = nonce || 0x00000002. `last` selects which of the two.
+fn _counter_block(nonce: int[], last: int) -> int[] {
+    let mut c: int[] = [];
+    let mut i: int = 0;
+    while i < 12 {
+        c.push(nonce[i] & 255);
+        i += 1;
+    }
+    c.push(0);
+    c.push(0);
+    c.push(0);
+    c.push(last);
+    return c;
+}
+
+fn _bad_lengths(key: int[], nonce: int[]) -> bool {
+    if key.length != 16 && key.length != 32 { return true; }
+    if nonce.length != 12 { return true; }
+    return false;
+}
+
+// Seal: returns ciphertext followed by the 16-byte tag, or [] if the key is
+// not 16 or 32 bytes or the nonce is not 12 (fail-closed, matching
+// chacha20poly1305_seal).
+fn aes_gcm_seal(key: int[], nonce: int[], aad: int[], plaintext: int[]) -> int[] {
+    let empty: int[] = [];
+    if _bad_lengths(key, nonce) { return empty; }
+
+    let ek: int[] = aes_key_expand(key);
+    if ek.length == 0 { return empty; }
+    let bk: int[] = aes_bs_keys(ek);
+
+    let h: int[] = aes_encrypt_block_bs(bk, _zero16());
+    let ekj0: int[] = aes_encrypt_block_bs(bk, _counter_block(nonce, 1));
+
+    let ct: int[] = aes_ctr_xor_bs(bk, _counter_block(nonce, 2), plaintext);
+    let s: int[] = ghash(h, _ghash_input(aad, ct));
+
+    let mut out: int[] = [];
+    _append_bytes(out, ct);
+    let mut i: int = 0;
+    while i < 16 {
+        out.push(ekj0[i] ^ s[i]);
+        i += 1;
+    }
+    return out;
+}
+
+// Open: verifies the trailing 16-byte tag with a constant-time compare before
+// decrypting, then returns the plaintext. Every rejection names its own check
+// so a caller can tell a malformed input from a forged one.
+fn aes_gcm_open(key: int[], nonce: int[], aad: int[], ciphertext_with_tag: int[]) -> Result<int[], string> {
+    if key.length != 16 && key.length != 32 {
+        return Result.Err { error: "aes_gcm_open: bad key length" };
+    }
+    if nonce.length != 12 {
+        return Result.Err { error: "aes_gcm_open: bad nonce length" };
+    }
+    if ciphertext_with_tag.length < 16 {
+        return Result.Err { error: "aes_gcm_open: input shorter than the tag" };
+    }
+
+    let ct_len: int = ciphertext_with_tag.length - 16;
+    let mut ct: int[] = [];
+    let mut i: int = 0;
+    while i < ct_len {
+        ct.push(ciphertext_with_tag[i] & 255);
+        i += 1;
+    }
+    let mut received_tag: int[] = [];
+    i = 0;
+    while i < 16 {
+        received_tag.push(ciphertext_with_tag[ct_len + i] & 255);
+        i += 1;
+    }
+
+    let ek: int[] = aes_key_expand(key);
+    if ek.length == 0 {
+        return Result.Err { error: "aes_gcm_open: bad key length" };
+    }
+    let bk: int[] = aes_bs_keys(ek);
+
+    let h: int[] = aes_encrypt_block_bs(bk, _zero16());
+    let ekj0: int[] = aes_encrypt_block_bs(bk, _counter_block(nonce, 1));
+    let s: int[] = ghash(h, _ghash_input(aad, ct));
+
+    let mut expected_tag: int[] = [];
+    i = 0;
+    while i < 16 {
+        expected_tag.push(ekj0[i] ^ s[i]);
+        i += 1;
+    }
+
+    if !ct_eq_bytes(expected_tag, received_tag) {
+        return Result.Err { error: "aes_gcm_open: authentication failed" };
+    }
+
+    let pt: int[] = aes_ctr_xor_bs(bk, _counter_block(nonce, 2), ct);
+    return Result.Ok { value: pt };
+}
+
+export { aes_gcm_seal, aes_gcm_open };

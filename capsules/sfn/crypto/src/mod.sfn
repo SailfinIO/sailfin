@@ -226,6 +226,32 @@ export { random_bytes } from "./rand";
 
 export { chacha20poly1305_seal, chacha20poly1305_open } from "./aead_chacha20poly1305";
 
+// AES-128/AES-256-GCM (SP 800-38D) — a bitsliced, table-free AES plus a
+// carryless-multiply GHASH, so the AEAD axis is no longer ChaCha20-only
+// (SFEP-0048 §6.3 as amended by the SFN-339 design gate).
+// aes_key_expand and ghash are deliberately not re-exported. GHASH is not a
+// MAC — it is a keyed universal hash, secure only inside GCM's
+// E(K, J0) ^ GHASH envelope, and one standalone query leaks the subkey H. And
+// a public aes_key_expand would hand out expanded secret key material with no
+// public consumer for it.
+export { aes_encrypt_block, aes_ctr_xor } from "./aes";
+
+export { aes_gcm_seal, aes_gcm_open } from "./aead_aes_gcm";
+
+// AEAD dispatch, so a record layer selects a construction by identifier
+// instead of hardcoding one (SFN-339).
+export {
+    aead_chacha20_poly1305,
+    aead_aes_128_gcm,
+    aead_aes_256_gcm,
+    aead_key_len,
+    aead_nonce_len,
+    aead_tag_len,
+    aead_supported,
+    aead_seal,
+    aead_open
+} from "./aead";
+
 // TLS 1.3 record layer (RFC 8446 §5) — TLSCiphertext framing, per-record nonce
 // derivation, and AEAD seal/open with the record header as AAD (SFEP-0048
 // Phase B).

@@ -1,0 +1,112 @@
+// aead.sfn
+//
+// A dispatch layer over the capsule's AEAD constructions, so a record layer
+// selects an algorithm by identifier instead of hardcoding one. Added with
+// AES-GCM (SFN-339) because ChaCha20-Poly1305 was previously the only option
+// and callers reached for it directly.
+//
+// The identifiers here are local to this registry — they are deliberately not
+// TLS cipher-suite wire values. Mapping a negotiated suite onto one of these
+// belongs to the TLS layer, not to the crypto capsule.
+//
+// Every parameter of the dispatch is public: the algorithm identifier comes
+// from a completed negotiation, and the key, nonce and tag lengths are
+// properties of the algorithm. Nothing here branches on secret material.
+import { aes_gcm_open, aes_gcm_seal } from "./aead_aes_gcm";
+import { chacha20poly1305_open, chacha20poly1305_seal } from "./aead_chacha20poly1305";
+
+fn aead_chacha20_poly1305() -> int { return 1; }
+
+fn aead_aes_128_gcm() -> int { return 2; }
+
+fn aead_aes_256_gcm() -> int { return 3; }
+
+// Key length in bytes for an algorithm, or 0 if the identifier is unknown.
+fn aead_key_len(alg: int) -> int {
+    if alg == aead_chacha20_poly1305() { return 32; }
+    if alg == aead_aes_128_gcm() { return 16; }
+    if alg == aead_aes_256_gcm() { return 32; }
+    return 0;
+}
+
+// Nonce length in bytes, or 0 if the identifier is unknown. All three
+// constructions take a 96-bit nonce.
+fn aead_nonce_len(alg: int) -> int {
+    if aead_key_len(alg) == 0 { return 0; }
+    return 12;
+}
+
+// Authentication tag length in bytes, or 0 if the identifier is unknown. All
+// three constructions produce a full 16-byte tag.
+fn aead_tag_len(alg: int) -> int {
+    if aead_key_len(alg) == 0 { return 0; }
+    return 16;
+}
+
+// True if this build can seal and open with the given algorithm.
+fn aead_supported(alg: int) -> bool { return aead_key_len(alg) != 0; }
+
+// True if the key and nonce match what the algorithm requires. This check is
+// the registry's whole point: aes_gcm_seal accepts both 16- and 32-byte keys,
+// so without it aead_seal(aead_aes_128_gcm(), <32-byte key>) would quietly
+// perform AES-256 and produce records the peer cannot decrypt — a failure that
+// surfaces at the peer as "authentication failed" rather than here.
+fn _params_match(alg: int, key: int[], nonce: int[]) -> bool {
+    if key.length != aead_key_len(alg) { return false; }
+    if nonce.length != aead_nonce_len(alg) { return false; }
+    return true;
+}
+
+// Seal under the selected algorithm, returning ciphertext followed by the tag.
+// Returns [] for an unknown algorithm or a key/nonce that does not match it,
+// and otherwise whatever the underlying construction's fail-closed behaviour
+// produces.
+fn aead_seal(alg: int, key: int[], nonce: int[], aad: int[], plaintext: int[]) -> int[] {
+    let empty: int[] = [];
+    if !_params_match(alg, key, nonce) { return empty; }
+    if alg == aead_chacha20_poly1305() {
+        return chacha20poly1305_seal(key, nonce, aad, plaintext);
+    }
+    if alg == aead_aes_128_gcm() || alg == aead_aes_256_gcm() {
+        return aes_gcm_seal(key, nonce, aad, plaintext);
+    }
+    return empty;
+}
+
+// Open under the selected algorithm. An unknown algorithm is an error rather
+// than a silent failure, so a misconfigured record layer is distinguishable
+// from a forged record.
+fn aead_open(alg: int, key: int[], nonce: int[], aad: int[], ciphertext_with_tag: int[]) -> Result<int[], string> {
+    if !aead_supported(alg) {
+        return Result.Err { error: "aead_open: unsupported algorithm" };
+    }
+    if key.length != aead_key_len(alg) {
+        return Result.Err {
+            error: "aead_open: key length does not match the algorithm"
+        };
+    }
+    if nonce.length != aead_nonce_len(alg) {
+        return Result.Err {
+            error: "aead_open: nonce length does not match the algorithm"
+        };
+    }
+    if alg == aead_chacha20_poly1305() {
+        return chacha20poly1305_open(key, nonce, aad, ciphertext_with_tag);
+    }
+    if alg == aead_aes_128_gcm() || alg == aead_aes_256_gcm() {
+        return aes_gcm_open(key, nonce, aad, ciphertext_with_tag);
+    }
+    return Result.Err { error: "aead_open: unsupported algorithm" };
+}
+
+export {
+    aead_chacha20_poly1305,
+    aead_aes_128_gcm,
+    aead_aes_256_gcm,
+    aead_key_len,
+    aead_nonce_len,
+    aead_tag_len,
+    aead_supported,
+    aead_seal,
+    aead_open
+};

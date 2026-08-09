@@ -1,0 +1,136 @@
+import { bs_slice, bs_unslice, sbox_bytes } from "../src/aes_sbox";
+import { eq_bytes, hexb } from "./support/hex";
+
+test "aes_sbox: bitslice round-trips 32 bytes" {
+    let input: int[] = hexb("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f");
+    let w: int[] = bs_slice(input, 0, 32);
+    let mut out: int[] = [];
+    bs_unslice(w, out, 32);
+    assert eq_bytes(out, input);
+}
+
+test "aes_sbox: FIPS-197 S-box rows 0 and 1" {
+    let input: int[] = hexb("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f");
+    let got: int[] = sbox_bytes(input);
+    assert eq_bytes(got, hexb("637c777bf26b6fc53001672bfed7ab76ca82c97dfa5947f0add4a2af9ca472c0"));
+}
+
+test "aes_sbox: FIPS-197 section 5.1.1 worked example sbox(0x53) = 0xed" {
+    let got: int[] = sbox_bytes(hexb("53"));
+    assert eq_bytes(got, hexb("ed"));
+}
+
+test "aes_sbox: sbox(0x00) = 0x63 with no special case for the zero inverse" {
+    let got: int[] = sbox_bytes(hexb("00"));
+    assert eq_bytes(got, hexb("63"));
+}
+
+test "aes_sbox: sbox(0xff) = 0x16" {
+    let got: int[] = sbox_bytes(hexb("ff"));
+    assert eq_bytes(got, hexb("16"));
+}
+
+test "aes_sbox: rejects more than 32 bytes" {
+    let input: int[] = hexb("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20");
+    assert sbox_bytes(input).length == 0;
+}
+
+// An independent scalar reference for the S-box, used as a differential oracle
+// so the one nonlinear component of the cipher is verified over its whole
+// 256-value domain rather than on spot checks. It is deliberately written by a
+// different route than the implementation at every step: a branching
+// shift-and-xor GF(2^8) multiply instead of a bitsliced schoolbook one,
+// square-and-multiply over the bits of 254 instead of an addition chain, and
+// scalar bit extraction for the affine map instead of eight word XOR chains.
+// Being table-free and branch-free is not a goal here — this is test-only code
+// and never touches a real key.
+fn _ref_gf_mul(a: int, b: int) -> int {
+    let mut r: int = 0;
+    let mut x: int = a & 255;
+    let mut y: int = b & 255;
+    let mut i: int = 0;
+    while i < 8 {
+        if (y & 1) == 1 { r = r ^ x; }
+        let hi: int = (x >> 7) & 1;
+        x = ((x << 1) & 255) ^ (27 * hi);
+        y = y >> 1;
+        i += 1;
+    }
+    return r & 255;
+}
+
+fn _ref_inv(a: int) -> int {
+    let mut r: int = 1;
+    let mut base: int = a & 255;
+    let mut e: int = 254;
+    while e > 0 {
+        if (e & 1) == 1 { r = _ref_gf_mul(r, base); }
+        base = _ref_gf_mul(base, base);
+        e = e >> 1;
+    }
+    return r;
+}
+
+fn _ref_sbox(a: int) -> int {
+    let b: int = _ref_inv(a);
+    let mut s: int = 0;
+    let mut i: int = 0;
+    while i < 8 {
+        let bit: int = ((b >> i) & 1) ^ ((b >> ((i + 4) % 8)) & 1) ^ ((b >> ((i
+            + 5) % 8)) & 1) ^ ((b >> ((i
+            + 6) % 8)) & 1) ^ ((b >> ((i
+            + 7) % 8)) & 1) ^ ((99 >> i) & 1);
+        s = s | (bit << i);
+        i += 1;
+    }
+    return s;
+}
+
+fn _group(g: int) -> int[] {
+    let mut chunk: int[] = [];
+    let mut k: int = 0;
+    while k < 32 {
+        chunk.push(g * 32 + k);
+        k += 1;
+    }
+    return chunk;
+}
+
+test "aes_sbox: matches an independent scalar reference on all 256 inputs" {
+    let mut g: int = 0;
+    while g < 8 {
+        let chunk: int[] = _group(g);
+        let got: int[] = sbox_bytes(chunk);
+        assert got.length == 32;
+        let mut j: int = 0;
+        while j < 32 {
+            assert got[j] == _ref_sbox(chunk[j]);
+            j += 1;
+        }
+        g += 1;
+    }
+}
+
+test "aes_sbox: is a permutation of the 256 byte values" {
+    let mut seen: int[] = [];
+    let mut i: int = 0;
+    while i < 256 {
+        seen.push(0);
+        i += 1;
+    }
+    let mut g: int = 0;
+    while g < 8 {
+        let got: int[] = sbox_bytes(_group(g));
+        let mut j: int = 0;
+        while j < 32 {
+            seen[got[j]] = seen[got[j]] + 1;
+            j += 1;
+        }
+        g += 1;
+    }
+    let mut n: int = 0;
+    while n < 256 {
+        assert seen[n] == 1;
+        n += 1;
+    }
+}
