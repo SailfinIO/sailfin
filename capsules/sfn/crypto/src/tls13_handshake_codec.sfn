@@ -348,8 +348,16 @@ fn encode_client_hello(random: int[], legacy_session_id: int[], key_share_public
     body.push(legacy_session_id.length & 255);
     _append(body, legacy_session_id);
 
-    _push_u16(body, 2);
+    // Both SHA-256 suites, ChaCha20-Poly1305 first. RFC 8446 §9.1 makes
+    // TLS_AES_128_GCM_SHA256 mandatory, and offering only ChaCha20 left the
+    // client unable to reach an AES-GCM-only server at all (SFN-814).
+    // The order inverts the usual AES-NI-era preference on purpose: this
+    // stack has no AES-NI, and its AES-GCM record path measures ~1 MB/s
+    // against ChaCha20-Poly1305's ~233 MB/s, so AES-GCM is the fallback
+    // rather than the preference until SFN-817 ports it to the pointer idiom.
+    _push_u16(body, 4);
     _push_u16(body, tls_cipher_chacha20_poly1305_sha256());
+    _push_u16(body, tls_cipher_aes_128_gcm_sha256());
 
     body.push(1);  // legacy_compression_methods length
     body.push(0);  // null compression
