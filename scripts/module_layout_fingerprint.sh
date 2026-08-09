@@ -41,7 +41,7 @@ else
 fi
 
 # Default roots = every tree whose module layout `sfn build -p compiler`
-# compiles. That is NOT just `compiler/src` + `runtime`: the compiler capsule
+# compiles. That is NOT just `compiler/src` + `compiler/capsules` + `runtime`: the compiler capsule
 # declares `sfn/cli`, `sfn/strings`, and `sfn/crypto` dependencies
 # (`compiler/capsule.toml`) whose sources live under `capsules/<scope>/<name>/src`.
 # A split there re-mangles its dependents' call sites exactly as the
@@ -53,7 +53,7 @@ fi
 # key and the restore prefix would strand PR CI on a permanently cold
 # cache, which is worse than the bug this guards.
 if [ "$#" -eq 0 ]; then
-    set -- compiler/src runtime
+    set -- compiler/src compiler/capsules runtime
     for capsule_src in capsules/*/*/src; do
         if [ -d "$capsule_src" ]; then
             set -- "$@" "$capsule_src"

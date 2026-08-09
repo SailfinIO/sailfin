@@ -4,7 +4,8 @@
 // deliberately narrow bridge to the structural TypeId work: it judges only
 // literal/annotated/local-call shapes whose primitive kind is certain, and
 // returns the unknown sentinel "" for every compound or unresolved shape.
-import { Expression, SourceSpan, TypeAnnotation } from "../ast";
+import { Expression, SourceSpan, TypeAnnotation } from "sfn/syntax";
+
 import { Diagnostic } from "../typecheck_types";
 import { classify_declared_primitive } from "../typecheck_types/annotation_shape_checks";
 import { SymbolEntry, find_value_symbol } from "../typecheck_types/symbol_table_and_raw_exprs";

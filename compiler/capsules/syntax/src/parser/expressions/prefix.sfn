@@ -1,0 +1,363 @@
+// compiler/capsules/syntax/src/parser/expressions/prefix.sfn
+//
+// Prefix and primary expression parsing.
+import { Expression, TypeAnnotation } from "../../ast";
+import {
+    identifier_matches,
+    identifier_text,
+    source_span_from_tokens,
+    string_literal_value,
+    symbol_matches
+} from "../token_utils";
+import { ExpressionParseResult, ExpressionTokens } from "../types";
+import { normalize_number_literal_value } from "../utils";
+import {
+    parse_channel_expression,
+    parse_parallel_expression,
+    parse_serve_expression
+} from "./concurrency";
+import { parse_lambda_expression } from "./lambdas";
+import { parse_array_literal, parse_object_literal } from "./literals";
+import {
+    expression_parse_failure,
+    expression_tokens_advance,
+    expression_tokens_is_at_end,
+    expression_tokens_peek,
+    parse_expression_bp
+} from "./mod";
+import { unary_precedence } from "./normalize";
+import { parse_postfix_chain } from "./postfix";
+
+fn parse_prefix_expression(state: ExpressionTokens) -> ExpressionParseResult {
+    if expression_tokens_is_at_end(state) {
+        return expression_parse_failure(state);
+    }
+
+    let token = expression_tokens_peek(state);
+    if token.kind.variant == "Symbol" {
+        let sym = token.lexeme;
+        let mut _if403: boolean = false;
+        if strings_equal(sym, "-") { _if403 = true; }
+        if strings_equal(sym, "!") { _if403 = true; }
+        // Prefix `*` (deref) and `&` (address-of) — #1627 Part B. Before this
+        // they had no prefix parse and fell through to `Raw`, so `*ioCall()` /
+        // `&print.info(x)` reached codegen effect-blind. Structuring them into
+        // `Unary` lets the effect checker's `Unary` arm walk the operand (the
+        // effectful surface) and routes `&fn` through the typecheck `Unary` →
+        // `Identifier` arm (E0808). The binary `*`/`&` handlers are infix-only
+        // (the climb never calls this in infix position), so they are
+        // unaffected. The formatter emits `*operand` / `&operand` verbatim —
+        // the exact text the shadow lowering deref/borrow parsers already lower.
+        if strings_equal(sym, "*") { _if403 = true; }
+        if strings_equal(sym, "&") { _if403 = true; }
+        if _if403 {
+            let advanced = expression_tokens_advance(state);
+            let operand_result = parse_expression_bp(advanced, unary_precedence());
+            if !operand_result.success { return operand_result; }
+            return ExpressionParseResult {
+                state: operand_result.state,
+                expression: Expression.Unary {
+                    operator: sym,
+                    operand: operand_result.expression
+                },
+                success: true
+            };
+        }
+    }
+
+    if token.kind.variant == "Identifier" {
+        if identifier_matches(token, "fn") {
+            let lambda_result = parse_lambda_expression(state);
+            // Run the postfix chain so an immediately-invoked lambda
+            // (`fn() { ... }()`), and any trailing call/index/member
+            // chain, parses into a structured `Call`/`Index`/`Member`
+            // over the `Lambda` instead of dropping to `Raw`. The
+            // parent precedence-climbing loop then folds in any binary
+            // operator that follows (issue #522).
+            if lambda_result.success {
+                return parse_postfix_chain(lambda_result.state, lambda_result.expression);
+            }
+        }
+    }
+
+    // Concurrency-frontend prefix operators (M4.0, epic #965, issue
+    // #1080). `spawn`/`await` are soft keywords that lex as `Identifier`
+    // (Sailfin has no keyword tokens) and bind like the symbol unaries
+    // above: the operand is parsed at `unary_precedence()` so a trailing
+    // binary operator folds into the parent precedence-climbing loop
+    // (`await a + b` parses as `(await a) + b`, matching `-a + b`). Type
+    // rules, effect-checking, and lowering land in follow-up issues; the
+    // `Await` node is bridged back to the existing text-based lowering
+    // via the `Await` arm in `emit_native_format.sfn` so the legacy
+    // `async`/`await` integration tests keep working unchanged.
+    if token.kind.variant == "Identifier" {
+        if identifier_matches(token, "spawn") {
+            let advanced = expression_tokens_advance(state);
+            // `spawn:<type>` is internal native-IR notation (like `channel:`),
+            // not user surface syntax — the future kind is always inferred
+            // from the operand, so there is no `spawn:` grammar (issue #1531).
+            // Committing to the spawn operator and then seeing `:` is a
+            // fail-closed parse error. Emit a `ParseError` node (the parser's
+            // diagnostic channel) rather than a `success: false` that
+            // `expression_from_tokens` would silently swallow into `Raw`,
+            // dropping the whole `spawn … await` statement. This fires ONLY
+            // here, in the spawn prefix-operator context — `spawn` as an
+            // ordinary identifier (`{ spawn: 1 }`, `let spawn: int = 5;`) is
+            // parsed elsewhere and is unaffected. The remaining tokens are
+            // consumed so no leftover degrades the node back to `Raw`.
+            if !expression_tokens_is_at_end(advanced) {
+                if symbol_matches(expression_tokens_peek(advanced), ":") {
+                    let head = "the `spawn:<type>` operator form is not";
+                    let mid = " supported syntax — it is internal native-IR"
+                        + " notation, not user surface syntax. Use bare"
+                        + " `spawn <expr>`; the future kind is inferred from"
+                        + " the operand's return type.";
+                    return ExpressionParseResult {
+                        state: ExpressionTokens {
+                            tokens: advanced.tokens,
+                            index: advanced.tokens.length
+                        },
+                        expression: Expression.ParseError {
+                            message: head + mid,
+                            span: source_span_from_tokens([token])
+                        },
+                        success: true
+                    };
+                }
+            }
+            let operand_result = parse_expression_bp(advanced, unary_precedence());
+            if !operand_result.success { return operand_result; }
+            // Preserve the lambda's source return annotation for analysis.
+            // The parser deliberately leaves the semantic future kind empty;
+            // resolving it belongs to typecheck (SFN-708 / SFEP-0020 §3.5).
+            let mut spawn_return: TypeAnnotation? = null;
+            let spawn_operand = operand_result.expression;
+            if spawn_operand.variant == "Lambda" {
+                spawn_return = spawn_operand.return_type;
+            }
+            return ExpressionParseResult {
+                state: operand_result.state,
+                expression: Expression.Spawn {
+                    operand: operand_result.expression,
+                    span: source_span_from_tokens([token]),
+                    kind: "",
+                    return_type: spawn_return
+                },
+                success: true
+            };
+        }
+        if identifier_matches(token, "await") {
+            let advanced = expression_tokens_advance(state);
+            let operand_result = parse_expression_bp(advanced, unary_precedence());
+            if !operand_result.success { return operand_result; }
+            return ExpressionParseResult {
+                state: operand_result.state,
+                expression: Expression.Await {
+                    operand: operand_result.expression,
+                    span: source_span_from_tokens([token]),
+                    kind: ""
+                },
+                success: true
+            };
+        }
+        // `channel(capacity?)` constructs a channel value. Commit to the
+        // constructor as soon as `channel` is immediately followed by `(`:
+        // a bare `channel` (no paren) is an ordinary identifier and falls
+        // through to `parse_primary_expression`, but once the `(` is seen
+        // the construct is unambiguous, so a malformed argument list is a
+        // hard parse failure rather than a silent re-interpretation as an
+        // identifier call (which would diverge the fail-closed diagnostic
+        // by arity, e.g. `channel(1, 2)`). The generic `channel<T>(...)`
+        // element-type form is deferred to a follow-up.
+        if identifier_matches(token, "channel") {
+            let after_channel = expression_tokens_advance(state);
+            let mut channel_followed_by_paren: boolean = false;
+            if !expression_tokens_is_at_end(after_channel) {
+                if symbol_matches(expression_tokens_peek(after_channel), "(") {
+                    channel_followed_by_paren = true;
+                } else if symbol_matches(expression_tokens_peek(after_channel), ":") {
+                    // Typed form `channel:<Type>(...)`. Commit only when a
+                    // type identifier and an opening paren follow, so a bare
+                    // `channel` used as an identifier in a labelled position
+                    // (`channel: foo`) is not misread as a constructor. The
+                    // kind is the bare type name the native lowering slices
+                    // between `channel:` and `(` (core.sfn).
+                    let after_typed_colon = expression_tokens_advance(after_channel);
+                    if !expression_tokens_is_at_end(after_typed_colon) {
+                        if expression_tokens_peek(after_typed_colon).kind.variant == "Identifier" {
+                            let after_typed_name = expression_tokens_advance(after_typed_colon);
+                            if !expression_tokens_is_at_end(after_typed_name) {
+                                if symbol_matches(expression_tokens_peek(after_typed_name), "(") {
+                                    channel_followed_by_paren = true;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if channel_followed_by_paren {
+                let channel_result = parse_channel_expression(state);
+                if channel_result.success {
+                    return parse_postfix_chain(channel_result.state, channel_result.expression);
+                }
+                return channel_result;
+            }
+        }
+        // `parallel [t1, t2, ...]` fans tasks out (M4.0, issue #1081).
+        // Commit to the construct the moment `parallel` is immediately
+        // followed by `[`; a bare `parallel` (or `parallel.foo`) is an
+        // ordinary identifier and falls through to the primary path. Once
+        // committed, a malformed task list is a hard parse failure rather
+        // than a silent re-read as an identifier indexed by an array
+        // literal. The task list reuses the array-literal grammar, so each
+        // element is a full expression (typically a `spawn`).
+        if identifier_matches(token, "parallel") {
+            let after_parallel = expression_tokens_advance(state);
+            let mut parallel_followed_by_bracket: boolean = false;
+            if !expression_tokens_is_at_end(after_parallel) {
+                if symbol_matches(expression_tokens_peek(after_parallel), "[") {
+                    parallel_followed_by_bracket = true;
+                }
+            }
+            if parallel_followed_by_bracket {
+                let parallel_result = parse_parallel_expression(state);
+                if parallel_result.success {
+                    return parse_postfix_chain(parallel_result.state, parallel_result.expression);
+                }
+                return parallel_result;
+            }
+        }
+        // `serve(handler, port?)` runs the accept loop (M4.0, issue #1081).
+        // Same soft-keyword commit rule as `channel`: commit on the `(`
+        // that immediately follows `serve`. `handler` is required by the
+        // AST shape, so a zero-argument `serve()` is a hard parse failure;
+        // any extra argument beyond `handler`/`port` is a typecheck-layer
+        // arity concern (deferred — this issue is parse-only).
+        if identifier_matches(token, "serve") {
+            let after_serve = expression_tokens_advance(state);
+            let mut serve_followed_by_paren: boolean = false;
+            if !expression_tokens_is_at_end(after_serve) {
+                if symbol_matches(expression_tokens_peek(after_serve), "(") {
+                    serve_followed_by_paren = true;
+                }
+            }
+            if serve_followed_by_paren {
+                let serve_result = parse_serve_expression(state);
+                if serve_result.success {
+                    return parse_postfix_chain(serve_result.state, serve_result.expression);
+                }
+                return serve_result;
+            }
+        }
+    }
+
+    let primary_result = parse_primary_expression(state);
+    if !primary_result.success { return primary_result; }
+    return parse_postfix_chain(primary_result.state, primary_result.expression);
+}
+
+fn parse_primary_expression(state: ExpressionTokens) -> ExpressionParseResult {
+    if expression_tokens_is_at_end(state) {
+        return expression_parse_failure(state);
+    }
+
+    let token = expression_tokens_peek(state);
+    if token.kind.variant == "NumberLiteral" {
+        return ExpressionParseResult {
+            state: expression_tokens_advance(state),
+            expression: Expression.NumberLiteral {
+                value: normalize_number_literal_value(token.lexeme)
+            },
+            success: true
+        };
+    }
+    if token.kind.variant == "BooleanLiteral" {
+        return ExpressionParseResult {
+            state: expression_tokens_advance(state),
+            expression: Expression.BooleanLiteral { value: token.lexeme },
+            success: true
+        };
+    }
+    if token.kind.variant == "StringLiteral" {
+        return ExpressionParseResult {
+            state: expression_tokens_advance(state),
+            expression: Expression.StringLiteral {
+                value: string_literal_value(token),
+                lexeme: token.lexeme
+            },
+            success: true
+        };
+    }
+    if token.kind.variant == "Identifier" {
+        let name = identifier_text(token);
+        if strings_equal(name, "true") {
+            return ExpressionParseResult {
+                state: expression_tokens_advance(state),
+                expression: Expression.BooleanLiteral { value: "true" },
+                success: true
+            };
+        }
+        if strings_equal(name, "false") {
+            return ExpressionParseResult {
+                state: expression_tokens_advance(state),
+                expression: Expression.BooleanLiteral { value: "false" },
+                success: true
+            };
+        }
+        if strings_equal(name, "null") {
+            return ExpressionParseResult {
+                state: expression_tokens_advance(state),
+                expression: Expression.NullLiteral(),
+                success: true
+            };
+        }
+        return ExpressionParseResult {
+            state: expression_tokens_advance(state),
+            expression: Expression.Identifier {
+                name: name,
+                span: source_span_from_tokens([token])
+            },
+            success: true
+        };
+    }
+    if symbol_matches(token, "(") {
+        let inner_state = expression_tokens_advance(state);
+        let inner_result = parse_expression_bp(inner_state, 0);
+        if !inner_result.success { return inner_result; }
+        let after_inner = inner_result.state;
+        if expression_tokens_is_at_end(after_inner) {
+            return expression_parse_failure(state);
+        }
+        let closing = expression_tokens_peek(after_inner);
+        if !symbol_matches(closing, ")") {
+            return expression_parse_failure(state);
+        }
+        return ExpressionParseResult {
+            state: expression_tokens_advance(after_inner),
+            expression: inner_result.expression,
+            success: true
+        };
+    }
+
+    if symbol_matches(token, "[") {
+        let array_result = parse_array_literal(expression_tokens_advance(state));
+        if !array_result.success { return expression_parse_failure(state); }
+        return ExpressionParseResult {
+            state: array_result.state,
+            expression: Expression.Array { elements: array_result.elements },
+            success: true
+        };
+    }
+
+    if symbol_matches(token, "{") {
+        let object_result = parse_object_literal(expression_tokens_advance(state));
+        if !object_result.success { return expression_parse_failure(state); }
+        return ExpressionParseResult {
+            state: object_result.state,
+            expression: Expression.Object { fields: object_result.fields },
+            success: true
+        };
+    }
+
+    return expression_parse_failure(state);
+}

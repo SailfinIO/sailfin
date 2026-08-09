@@ -271,7 +271,7 @@ jobs:
   # source-touching PRs, so branch protection sees this as part of the
   # aggregate required check rather than as a standalone required job.
   check-fast:
-    name: Fast static check (sfn check compiler/src/)
+    name: Fast static check (compiler driver + capsules)
     needs: ci-scope
     if: ${{ needs.ci-scope.outputs.source == 'true' }}
     runs-on: ubuntu-24.04
@@ -310,7 +310,7 @@ jobs:
           make fetch-seed SEED_VERSION="$SEED_VERSION"
           build/toolchains/seed/bin/sfn version
 
-      - name: sfn check compiler/src/ (parse + typecheck + effect-check)
+      - name: sfn check compiler sources (parse + typecheck + effect-check)
         shell: bash
         run: |
           set -euo pipefail
@@ -325,7 +325,7 @@ jobs:
           # runner VM and killing the runner agent (the #1243 failure
           # mode). time -v records the peak RSS either way.
           SAILFIN_USE_ARENA=1 /usr/bin/time -v \
-            build/toolchains/seed/bin/sfn check compiler/src/
+            build/toolchains/seed/bin/sfn check compiler/src/ compiler/capsules/
 
   # One compiler build per OS, shared by every shard leg below (#1234,
   # "Lever 1 step 1b" of docs/proposals/0011-ci-test-speed.md §6 step 2).
@@ -1153,10 +1153,10 @@ jobs:
               echo "[fmt] needs formatting: $f"
               fail=$((fail + 1))
             fi
-          done < <(find compiler/src runtime -name '*.sfn' -print | sort)
+          done < <(find compiler/src compiler/capsules runtime -name '*.sfn' -print | sort)
           if [ "$fail" -gt 0 ]; then
             echo ""
-            echo "[fmt] $fail file(s) need formatting. Run: sfn fmt --write compiler/src/ runtime/"
+            echo "[fmt] $fail file(s) need formatting. Run: sfn fmt --write compiler/src/ compiler/capsules/ runtime/"
             exit 1
           fi
           echo "[fmt] all files formatted"
@@ -1221,7 +1221,7 @@ jobs:
         shell: bash {0}
         run: |
           set -euo pipefail
-          build/bin/sfn check compiler/src runtime
+          build/bin/sfn check compiler/src compiler/capsules runtime
 
       - name: Fixed-point rebuild check (linux-x86_64)
         if: >-
@@ -1540,10 +1540,10 @@ jobs:
               echo "[fmt] needs formatting: $f"
               fail=$((fail + 1))
             fi
-          done < <(find compiler/src runtime -name '*.sfn' -print | sort)
+          done < <(find compiler/src compiler/capsules runtime -name '*.sfn' -print | sort)
           if [ "$fail" -gt 0 ]; then
             echo ""
-            echo "[fmt] $fail file(s) need formatting. Run: sfn fmt --write compiler/src/ runtime/"
+            echo "[fmt] $fail file(s) need formatting. Run: sfn fmt --write compiler/src/ compiler/capsules/ runtime/"
             exit 1
           fi
           echo "[fmt] all files formatted"
@@ -1596,7 +1596,7 @@ jobs:
         shell: bash {0}
         run: |
           set -euo pipefail
-          build/bin/sfn check compiler/src runtime
+          build/bin/sfn check compiler/src compiler/capsules runtime
 
       - name: Enable test runner trace (macOS)
         if: ${{ matrix.primary }}
@@ -1831,7 +1831,7 @@ jobs:
           fi
 
           if [ "${SOURCE_CI:-}" = "true" ]; then
-            check "Fast static check (sfn check compiler/src/)" "$CHECK_FAST"
+            check "Fast static check (compiler driver + capsules)" "$CHECK_FAST"
             check "Build compiler [linux-x86_64]" "$BUILD_COMPILER_LINUX"
             check "Build compiler [macos-arm64]" "$BUILD_COMPILER_MACOS"
             check "Shard-cover lint" "$SHARD_COVER"

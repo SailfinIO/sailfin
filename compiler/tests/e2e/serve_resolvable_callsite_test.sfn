@@ -4,7 +4,7 @@
 // keeps its permissive path.
 //
 // The parser always commits a `serve(` token sequence to `Expression.Serve`
-// (`compiler/src/parser/expressions/prefix.sfn`), so the builtin-vs-resolvable
+// (`compiler/capsules/syntax/src/parser/expressions/prefix.sfn`), so the builtin-vs-resolvable
 // distinction is made downstream — in typecheck and the effect checker —
 // mirroring the lowering gate in
 // `compiler/src/llvm/expression_lowering/native/core_expression.sfn`, which only lowers

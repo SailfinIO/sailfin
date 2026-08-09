@@ -34,7 +34,7 @@ function values); using a nested `fn`'s bare name as a first-class value reuses
 ## 2. Motivation
 
 Today, statement-position `fn name(...)` does not parse. `parse_block_statement`
-(`compiler/src/parser/statements/block.sfn`) has arms for `let`, `for`, `loop`,
+(`compiler/capsules/syntax/src/parser/statements/block.sfn`) has arms for `let`, `for`, `loop`,
 `routine`, `if`, `match`, `with`, `unsafe`, `return`, `throw`, `try`, `assert`,
 and a `while` reserved-guard — but **no `fn` arm**. A `fn helper() { ... }`
 inside a function body therefore falls through to `parse_expression_statement`
@@ -159,7 +159,7 @@ fn bump_ok(base: int) -> int {
 
 ### 3.2 Pipeline stages
 
-#### S1 — Parser (`compiler/src/parser/statements/block.sfn`)
+#### S1 — Parser (`compiler/capsules/syntax/src/parser/statements/block.sfn`)
 
 Add an `fn`-name dispatch arm to `parse_block_statement`, placed before the
 `parse_expression_statement` fallthrough in `statements/block.sfn`. Detect
@@ -167,7 +167,7 @@ the arm with two-token lookahead: `identifier_matches(token, "fn")` **and** the
 next non-trivia token is an identifier (a *name*), which distinguishes a nested
 declaration from an anonymous lambda expression `fn(` (whose next token is `(`).
 When matched, delegate to the existing `parse_function` machinery
-(`compiler/src/parser/declarations/functions.sfn`) so the parsed `FunctionSignature` +
+(`compiler/capsules/syntax/src/parser/declarations/functions.sfn`) so the parsed `FunctionSignature` +
 body is byte-for-byte the top-level shape, and wrap the result in
 `Statement.FunctionDeclaration` (`ast.sfn:351`) — the same node the top-level
 dispatch and the lambda-lift pass already produce. **No new AST node is

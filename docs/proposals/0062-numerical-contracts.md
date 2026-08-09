@@ -91,8 +91,8 @@ only restriction is that you may not claim more than your program earns.
 ### 3.2 Surface syntax
 
 The existing decorator grammar already parses named arguments
-(`compiler/src/parser/declarations/syntax.sfn`; `Decorator` /
-`DecoratorArgument` in `compiler/src/ast.sfn:302-310`). A contract attaches
+(`compiler/capsules/syntax/src/parser/declarations/syntax.sfn`; `Decorator` /
+`DecoratorArgument` in `compiler/capsules/syntax/src/ast.sfn:302-310`). A contract attaches
 there:
 
 ```sfn
@@ -718,7 +718,7 @@ accumulator cases. No GPU is required at any phase's gate.
   fail-closed emission must not reproduce (brief §7.1).
 - `compiler/src/typecheck_types.sfn:1096-1139`, `compiler/src/tensor_ir.sfn:8-20`,
   `compiler/src/capsule_artifact.sfn:246`,
-  `compiler/src/parser/declarations/syntax.sfn`,
+  `compiler/capsules/syntax/src/parser/declarations/syntax.sfn`,
   `compiler/src/effect_taxonomy.sfn:57`, `docs/status.md` (tensor IR /
   low-precision rows) — the in-tree reality this design is measured against.
 - Higham, *Accuracy and Stability of Numerical Algorithms* (2nd ed.), §3.1 —

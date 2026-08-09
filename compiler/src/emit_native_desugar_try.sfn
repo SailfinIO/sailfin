@@ -35,7 +35,8 @@ import {
     ObjectField,
     Statement,
     WithClause
-} from "./ast";
+} from "sfn/syntax";
+
 import { number_to_string } from "./emit_native_state";
 
 // Result of replacing the leftmost TryOperator in an expression tree.

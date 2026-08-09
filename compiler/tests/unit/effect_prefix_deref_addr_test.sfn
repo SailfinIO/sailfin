@@ -11,11 +11,12 @@
 // It also pins the `& <fn>` -> E0808 path now that `&` structures into `Unary`
 // (the typecheck `Unary` arm recurses into the operand `Identifier`, which the
 // `Identifier` arm flags as a function used in value position).
-import { Expression } from "../../src/ast";
+import { Expression } from "sfn/syntax";
+import { parse_program } from "sfn/syntax";
+
 import { collect_effects_from_expression } from "../../src/effect_checker";
 import { EffectRequirement } from "../../src/effect_checker/types";
 import { empty_import_symbols } from "../../src/effect_imports";
-import { parse_program } from "../../src/parser/mod";
 import { typecheck_diagnostics } from "../../src/typecheck";
 
 fn _probe_expr(snippet: string) -> Expression ![io] {

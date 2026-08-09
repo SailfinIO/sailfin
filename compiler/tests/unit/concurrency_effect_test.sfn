@@ -21,7 +21,8 @@ import {
     SourceSpan,
     Statement,
     TypeAnnotation
-} from "../../src/ast";
+} from "sfn/syntax";
+
 import { validate_effects } from "../../src/effect_checker";
 import { EffectViolation } from "../../src/effect_checker/types";
 

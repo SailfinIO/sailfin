@@ -8,8 +8,8 @@
 // reached inside a `match { }` body. These tests pin that a function
 // containing BOTH constructs parses each correctly — the `=>` overload
 // does not cross-contaminate.
-import { Expression, Statement } from "../../src/ast";
-import { parse_program } from "../../src/parser/mod";
+import { Expression, Statement } from "sfn/syntax";
+import { parse_program } from "sfn/syntax";
 
 // The body statements of the first top-level function declaration.
 fn first_fn_body_statements(source: string) -> Statement[] ![io] {

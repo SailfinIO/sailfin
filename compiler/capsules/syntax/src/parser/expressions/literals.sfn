@@ -1,0 +1,352 @@
+// compiler/capsules/syntax/src/parser/expressions/literals.sfn
+//
+// Call arguments and collection, object, and struct literal parsing.
+import { Expression, ObjectField } from "../../ast";
+import { identifier_text, symbol_matches } from "../token_utils";
+import {
+    ArrayLiteralParseResult,
+    CallArgumentsParseResult,
+    ExpressionParseResult,
+    ExpressionTokens,
+    ObjectLiteralParseResult,
+    StructTypeNameResult
+} from "../types";
+import {
+    expression_parse_failure,
+    expression_tokens_advance,
+    expression_tokens_is_at_end,
+    expression_tokens_peek,
+    parse_expression_bp
+} from "./mod";
+import { append_expression, append_object_field, append_string_local } from "./normalize";
+
+// ============================================================================
+// Call Arguments
+// ============================================================================
+fn parse_call_arguments(state: ExpressionTokens) -> CallArgumentsParseResult {
+    let mut current = expression_tokens_advance(state);
+    let mut arguments: Expression[] = [];
+
+    if expression_tokens_is_at_end(current) {
+        return CallArgumentsParseResult {
+            state: state,
+            arguments: [],
+            success: false
+        };
+    }
+
+    let closing_token = expression_tokens_peek(current);
+    if closing_token.kind.variant == "Symbol" {
+        if symbol_matches(closing_token, ")") {
+            current = expression_tokens_advance(current);
+            return CallArgumentsParseResult {
+                state: current,
+                arguments: arguments,
+                success: true
+            };
+        }
+    }
+
+    loop {
+        let argument_result = parse_expression_bp(current, 0);
+        if !argument_result.success {
+            return CallArgumentsParseResult {
+                state: state,
+                arguments: [],
+                success: false
+            };
+        }
+        arguments = append_expression(arguments, argument_result.expression);
+        current = argument_result.state;
+        if expression_tokens_is_at_end(current) {
+            return CallArgumentsParseResult {
+                state: state,
+                arguments: [],
+                success: false
+            };
+        }
+        let separator = expression_tokens_peek(current);
+        if symbol_matches(separator, ",") {
+            current = expression_tokens_advance(current);
+            if expression_tokens_is_at_end(current) {
+                return CallArgumentsParseResult {
+                    state: state,
+                    arguments: [],
+                    success: false
+                };
+            }
+            // Allow a trailing comma: `f(a, b,)` ends the argument list at
+            // the `)` following the separator rather than parsing a bogus
+            // empty argument (which silently miscompiled — see #1357).
+            let after_comma = expression_tokens_peek(current);
+            if symbol_matches(after_comma, ")") {
+                current = expression_tokens_advance(current);
+                break;
+            }
+            continue;
+        }
+        if symbol_matches(separator, ")") {
+            current = expression_tokens_advance(current);
+            break;
+        }
+        return CallArgumentsParseResult {
+            state: state,
+            arguments: [],
+            success: false
+        };
+    }
+
+    return CallArgumentsParseResult {
+        state: current,
+        arguments: arguments,
+        success: true
+    };
+}
+
+// ============================================================================
+// Array Literals
+// ============================================================================
+fn parse_array_literal(state: ExpressionTokens) -> ArrayLiteralParseResult {
+    let mut current = state;
+    let mut elements: Expression[] = [];
+
+    if expression_tokens_is_at_end(current) {
+        return ArrayLiteralParseResult {
+            state: state,
+            elements: [],
+            success: false
+        };
+    }
+
+    let closing_bracket = expression_tokens_peek(current);
+    if closing_bracket.kind.variant == "Symbol" {
+        if symbol_matches(closing_bracket, "]") {
+            current = expression_tokens_advance(current);
+            return ArrayLiteralParseResult {
+                state: current,
+                elements: elements,
+                success: true
+            };
+        }
+    }
+
+    loop {
+        let element_result = parse_expression_bp(current, 0);
+        if !element_result.success {
+            return ArrayLiteralParseResult {
+                state: state,
+                elements: [],
+                success: false
+            };
+        }
+        elements = append_expression(elements, element_result.expression);
+        current = element_result.state;
+
+        if expression_tokens_is_at_end(current) {
+            return ArrayLiteralParseResult {
+                state: state,
+                elements: [],
+                success: false
+            };
+        }
+
+        let separator = expression_tokens_peek(current);
+        if symbol_matches(separator, ",") {
+            current = expression_tokens_advance(current);
+            if expression_tokens_is_at_end(current) {
+                return ArrayLiteralParseResult {
+                    state: state,
+                    elements: [],
+                    success: false
+                };
+            }
+            let maybe_end = expression_tokens_peek(current);
+            if symbol_matches(maybe_end, "]") {
+                current = expression_tokens_advance(current);
+                break;
+            }
+            continue;
+        }
+        if symbol_matches(separator, "]") {
+            current = expression_tokens_advance(current);
+            break;
+        }
+        return ArrayLiteralParseResult {
+            state: state,
+            elements: [],
+            success: false
+        };
+    }
+
+    return ArrayLiteralParseResult {
+        state: current,
+        elements: elements,
+        success: true
+    };
+}
+
+// ============================================================================
+// Object Literals
+// ============================================================================
+fn parse_object_literal(state: ExpressionTokens) -> ObjectLiteralParseResult {
+    let mut current = state;
+    let mut fields: ObjectField[] = [];
+
+    if expression_tokens_is_at_end(current) {
+        return ObjectLiteralParseResult {
+            state: state,
+            fields: [],
+            success: false
+        };
+    }
+
+    let closing_brace = expression_tokens_peek(current);
+    if closing_brace.kind.variant == "Symbol" {
+        if symbol_matches(closing_brace, "}") {
+            current = expression_tokens_advance(current);
+            return ObjectLiteralParseResult {
+                state: current,
+                fields: fields,
+                success: true
+            };
+        }
+    }
+
+    loop {
+        if expression_tokens_is_at_end(current) {
+            return ObjectLiteralParseResult {
+                state: state,
+                fields: [],
+                success: false
+            };
+        }
+        let name_token = expression_tokens_peek(current);
+        if name_token.kind.variant != "Identifier" {
+            return ObjectLiteralParseResult {
+                state: state,
+                fields: [],
+                success: false
+            };
+        }
+        let field_name = identifier_text(name_token);
+        current = expression_tokens_advance(current);
+
+        if expression_tokens_is_at_end(current) {
+            return ObjectLiteralParseResult {
+                state: state,
+                fields: [],
+                success: false
+            };
+        }
+        let colon = expression_tokens_peek(current);
+        if !symbol_matches(colon, ":") {
+            return ObjectLiteralParseResult {
+                state: state,
+                fields: [],
+                success: false
+            };
+        }
+        current = expression_tokens_advance(current);
+
+        let value_result = parse_expression_bp(current, 0);
+        if !value_result.success {
+            return ObjectLiteralParseResult {
+                state: state,
+                fields: [],
+                success: false
+            };
+        }
+        current = value_result.state;
+        fields = append_object_field(fields, ObjectField {
+            name: field_name, value: value_result.expression
+        });
+
+        if expression_tokens_is_at_end(current) {
+            return ObjectLiteralParseResult {
+                state: state,
+                fields: [],
+                success: false
+            };
+        }
+        let separator = expression_tokens_peek(current);
+        if symbol_matches(separator, ",") {
+            current = expression_tokens_advance(current);
+            if expression_tokens_is_at_end(current) {
+                return ObjectLiteralParseResult {
+                    state: state,
+                    fields: [],
+                    success: false
+                };
+            }
+            let maybe_end = expression_tokens_peek(current);
+            if symbol_matches(maybe_end, "}") {
+                current = expression_tokens_advance(current);
+                break;
+            }
+            continue;
+        }
+        if symbol_matches(separator, "}") {
+            current = expression_tokens_advance(current);
+            break;
+        }
+        return ObjectLiteralParseResult {
+            state: state,
+            fields: [],
+            success: false
+        };
+    }
+
+    return ObjectLiteralParseResult {
+        state: current,
+        fields: fields,
+        success: true
+    };
+}
+
+// ============================================================================
+// Struct Literals
+// ============================================================================
+fn parse_struct_literal(state: ExpressionTokens, target: Expression) -> ExpressionParseResult {
+    let type_result = collect_struct_type_name(target);
+    if !type_result.success { return expression_parse_failure(state); }
+
+    let fields_result = parse_object_literal(state);
+    if !fields_result.success { return expression_parse_failure(state); }
+
+    return ExpressionParseResult {
+        state: fields_result.state,
+        expression: Expression.Struct {
+            type_name: type_result.parts,
+            fields: fields_result.fields
+        },
+        success: true
+    };
+}
+
+fn expression_is_struct_target(expression: Expression) -> boolean {
+    if expression.variant == "Identifier" { return true; }
+    if expression.variant == "Member" {
+        return expression_is_struct_target(expression.object);
+    }
+    return false;
+}
+
+fn collect_struct_type_name(expression: Expression) -> StructTypeNameResult {
+    if expression.variant == "Identifier" {
+        return StructTypeNameResult {
+            parts: [expression.name],
+            success: true
+        };
+    }
+    if expression.variant == "Member" {
+        let inner = collect_struct_type_name(expression.object);
+        if !inner.success {
+            return StructTypeNameResult { parts: [], success: false };
+        }
+        return StructTypeNameResult {
+            parts: append_string_local(inner.parts, expression.member),
+            success: true
+        };
+    }
+    return StructTypeNameResult { parts: [], success: false };
+}

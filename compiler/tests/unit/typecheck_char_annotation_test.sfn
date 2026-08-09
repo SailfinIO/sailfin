@@ -19,7 +19,8 @@
 // restore the opaque-pointer path with no test objecting. These tests are that
 // pin, and they are deliberately about `char` specifically rather than unknown
 // types in general (typecheck_unknown_type_annotation_test.sfn owns the latter).
-import { parse_program } from "../../src/parser/mod";
+import { parse_program } from "sfn/syntax";
+
 import { typecheck_diagnostics } from "../../src/typecheck";
 import { Diagnostic } from "../../src/typecheck_types";
 

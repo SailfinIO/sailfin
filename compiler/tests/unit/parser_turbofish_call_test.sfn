@@ -8,8 +8,8 @@
 // balanced `< ... >` type-argument list and commits to a `Call` — carrying
 // the explicit `type_arguments` — only when `(` immediately follows the
 // closing `>`. A `<` that does not fit that shape stays a comparison.
-import { Expression } from "../../src/ast";
-import { parse_program } from "../../src/parser/mod";
+import { Expression } from "sfn/syntax";
+import { parse_program } from "sfn/syntax";
 
 // Initializer of the first top-level `let` in `source`.
 fn first_initializer(source: string) -> Expression ![io] {

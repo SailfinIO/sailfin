@@ -33,7 +33,7 @@ Sailfin's diagnostics include source spans and fix-it hints. For every diagnosti
 Check diagnostics in:
 - `compiler/src/effect_checker.sfn` — Effect mismatch messages
 - `compiler/src/typecheck/` — Type error messages
-- `compiler/src/parser.sfn` — Parse error recovery and messages
+- `compiler/capsules/syntax/src/parser/mod.sfn` — Parse error recovery and messages
 
 ## Syntax & API Ergonomics
 

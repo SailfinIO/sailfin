@@ -3,15 +3,15 @@
 // Value-position arithmetic, intersection-type, and object-literal checks.
 // Extracted from typecheck_types.sfn (SFN-625).
 import { strings_equal, substring } from "sfn/strings";
-
 import {
     Expression,
     InterfaceFieldMember,
     SourceSpan,
     TypeAnnotation
-} from "../ast";
+} from "sfn/syntax";
+import { Token } from "sfn/syntax";
+
 import { FixSuggestion } from "../diagnostic";
-import { Token } from "../token";
 import { Diagnostic } from "../typecheck_types";
 import { SymbolEntry, find_symbol } from "./symbol_table_and_raw_exprs";
 import { split_top_level_ampersand, token_from_name, trim_text } from "./text_utils";

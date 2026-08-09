@@ -2,9 +2,11 @@
 //
 // Sailfin compiler main module and compilation entry points.
 import { int_to_string } from "sfn/strings";
+import { Program, Statement } from "sfn/syntax";
+import { parse_program } from "sfn/syntax";
+import { Token } from "sfn/syntax";
 
 import { free_heap_string, relocate_string_to_heap } from "./arena_relocate";
-import { Program, Statement } from "./ast";
 import { _publish_lines_atomic } from "./build/fs";
 import { resolve_llvm_provider_context } from "./build/llvm_provider_context";
 import { _env_flag, _legacy_flag_file } from "./build_flags";
@@ -45,12 +47,10 @@ import { LLVMArtifactResult } from "./llvm/types";
 import { ImportedModuleContext, LayoutManifest, NativeModule } from "./native_ir";
 import { parse_native_artifact, parse_native_artifact_from_lines } from "./native_ir_api";
 import { lines_to_native_text, native_lines_have_text } from "./native_ir_utils_text";
-import { parse_program } from "./parser/mod";
 import { load_prelude_global_names } from "./prelude_globals";
 import { collect_reexport_violations } from "./reexport_check";
 import { substring } from "./string_utils";
 import { test_decl_matches_filters, test_filters_active, test_runner_trace } from "./test_runner_state";
-import { Token } from "./token";
 import { toml_get_dependencies } from "./toml_parser";
 import {
     typecheck_diagnostics,
@@ -248,8 +248,42 @@ fn module_name_from_path(source_path: string) -> string {
         normalized = substring(normalized, 2, normalized.length);
     }
 
-    // Prefer stable module names rooted at compiler/src or runtime.
-    // - .../compiler/src/parser/mod.sfn -> parser/mod
+    // Canonicalize a physical compiler implementation capsule path to the
+    // workspace identity used by the resolver (`sfn/<role>/<module>`). Direct
+    // emit/check/bench commands must mangle the same symbols as `sfn build`.
+    let compiler_capsule_prefix = "compiler/capsules/";
+    let mut last_capsule: int = -1;
+    let capsule_search_limit = normalized.length - compiler_capsule_prefix.length;
+    index = 0;
+    loop {
+        if index > capsule_search_limit { break; }
+        if substring(normalized, index, index + compiler_capsule_prefix.length) == compiler_capsule_prefix {
+            last_capsule = index;
+        }
+        index += 1;
+    }
+    if last_capsule >= 0 {
+        let role_start = last_capsule + compiler_capsule_prefix.length;
+        let src_separator = "/src/";
+        let mut separator: int = -1;
+        index = role_start;
+        loop {
+            if index + src_separator.length > normalized.length { break; }
+            if substring(normalized, index, index + src_separator.length) == src_separator {
+                separator = index;
+                break;
+            }
+            index += 1;
+        }
+        if separator > role_start {
+            let role = substring(normalized, role_start, separator);
+            let tail = substring(normalized, separator + src_separator.length, normalized.length);
+            normalized = "sfn/" + role + "/" + tail;
+        }
+    }
+
+    // Prefer stable module names rooted at compiler/src, compiler/capsules, or runtime.
+    // - .../compiler/capsules/syntax/src/parser/mod.sfn -> sfn/syntax/parser/mod
     // - .../runtime/prelude.sfn         -> runtime/prelude
     let compiler_prefix = "compiler/src/";
     let runtime_prefix = "runtime/";

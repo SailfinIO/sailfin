@@ -24,7 +24,8 @@ import {
     SourceSpan,
     Statement,
     TypeAnnotation
-} from "./ast";
+} from "sfn/syntax";
+
 import { Diag, Span } from "./diagnostic";
 import { block_contains_try, desugar_try_in_block } from "./emit_native_desugar_try";
 import {

@@ -3,8 +3,8 @@ name: Release
 # Manually-triggered release workflow.  Replaces python-semantic-release.
 #
 # Reads the current version from compiler/capsule.toml, computes the next
-# version based on `channel` and `bump` inputs, updates capsule.toml +
-# version.sfn, commits, tags, pushes, creates a GitHub Release, then calls
+# version based on `channel` and `bump` inputs, updates the compiler and
+# implementation-capsule manifests plus version.sfn, commits, tags, pushes, creates a GitHub Release, then calls
 # release-tag.yml to build and upload platform assets.
 #
 # Channel semantics:
@@ -205,13 +205,38 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Update capsule.toml (whitespace-tolerant around = and quotes)
+          # Update the compiler manifest (whitespace-tolerant around = and quotes).
           capsule_matches=$(grep -c '^version *=' compiler/capsule.toml || true)
           if [ "$capsule_matches" -ne 1 ]; then
             echo "::error::Expected exactly 1 'version =' line in capsule.toml, found $capsule_matches"
             exit 1
           fi
+          current_compiler_version="$(sed -n 's/^version *= *"\([^"]*\)"/\1/p' compiler/capsule.toml)"
           sed -i "s/^version *= *\"[^\"]*\"/version = \"${NEXT}\"/" compiler/capsule.toml
+
+          # SFEP-0020: private compiler implementation capsules share the
+          # compiler release version. Refuse pre-existing drift, then bump the
+          # complete physical capsule set atomically with the root manifest.
+          mapfile -t internal_manifests < <(
+            find compiler/capsules -mindepth 2 -maxdepth 2 -name capsule.toml -print | sort
+          )
+          if [ "${#internal_manifests[@]}" -eq 0 ]; then
+            echo "::error::No compiler implementation capsule manifests found"
+            exit 1
+          fi
+          for manifest in "${internal_manifests[@]}"; do
+            manifest_matches=$(grep -c '^version *=' "$manifest" || true)
+            if [ "$manifest_matches" -ne 1 ]; then
+              echo "::error::Expected exactly 1 'version =' line in $manifest, found $manifest_matches"
+              exit 1
+            fi
+            manifest_version="$(sed -n 's/^version *= *"\([^"]*\)"/\1/p' "$manifest")"
+            if [ "$manifest_version" != "$current_compiler_version" ]; then
+              echo "::error::$manifest is at $manifest_version, not compiler version $current_compiler_version"
+              exit 1
+            fi
+            sed -i "s/^version *= *\"[^\"]*\"/version = \"${NEXT}\"/" "$manifest"
+          done
 
           # Update version.sfn fallback (whitespace-tolerant around = and quotes).
           # The compiler reads its version from capsule.toml at runtime, but
@@ -227,6 +252,11 @@ jobs:
           # Verify the replacements took effect
           echo "--- compiler/capsule.toml ---"
           grep '^version' compiler/capsule.toml
+          echo "--- compiler implementation capsules ---"
+          for manifest in "${internal_manifests[@]}"; do
+            printf '%s: ' "$manifest"
+            grep '^version' "$manifest"
+          done
           echo "--- compiler/src/version.sfn ---"
           grep '__version_fallback__' compiler/src/version.sfn
 
@@ -247,7 +277,7 @@ jobs:
           echo "--- llms.txt ---"
           grep '^> Version:' llms.txt
 
-          # Final sanity check: the new version must appear in all three files
+          # Final sanity check: the new version must appear in every version file.
           if ! grep -q "\"${NEXT}\"" compiler/capsule.toml; then
             echo "::error::capsule.toml was not updated to version ${NEXT}"
             exit 1
@@ -256,6 +286,12 @@ jobs:
             echo "::error::version.sfn was not updated to version ${NEXT}"
             exit 1
           fi
+          for manifest in "${internal_manifests[@]}"; do
+            if ! grep -q "^version *= *\"${NEXT}\"" "$manifest"; then
+              echo "::error::$manifest was not updated to version ${NEXT}"
+              exit 1
+            fi
+          done
           if ! grep -q "^> Version: ${NEXT} " llms.txt; then
             echo "::error::llms.txt was not updated to version ${NEXT}"
             exit 1
@@ -267,7 +303,7 @@ jobs:
           TAG: ${{ steps.bump.outputs.tag }}
         run: |
           set -euo pipefail
-          git add compiler/capsule.toml compiler/src/version.sfn llms.txt
+          git add compiler/capsule.toml compiler/capsules/*/capsule.toml compiler/src/version.sfn llms.txt
           git commit -m "chore(release): ${TAG#v}"
 
       - name: Rebase, tag & push
@@ -292,10 +328,10 @@ jobs:
             # train evaluated — and refuse to tag if it moved onto a compiler /
             # runtime / seed change the nightly never saw; the next nightly must
             # re-verify first. Diffed BEFORE our own bump commit, so the bump's
-            # version.sfn/capsule.toml edits never trip it. Empty on manual/override
+            # compiler manifest/version edits never trip it. Empty on manual/override
             # cuts (the operator owns the risk).
             if [ -n "$VERIFIED_SHA" ]; then
-              unverified="$(git diff --name-only "${VERIFIED_SHA}..origin/main" -- compiler/src runtime bootstrap.toml)"
+              unverified="$(git diff --name-only "${VERIFIED_SHA}..origin/main" -- compiler/src compiler/capsules runtime bootstrap.toml)"
               if [ -n "$unverified" ]; then
                 echo "::error::origin/main advanced onto self-host-relevant changes not covered by verified nightly ${VERIFIED_SHA}; refusing to cut an unverified compiler. Re-run after the next green nightly. Files:"
                 echo "$unverified"

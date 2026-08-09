@@ -5,7 +5,8 @@
 // `parse_extern_var`, producing a `Statement.ExternVarDeclaration`. These
 // tests pin the dispatch (including the `unsafe extern var` form), the
 // node shape, and that the sibling `extern fn` path is untouched.
-import { parse_program } from "../../src/parser/mod";
+import { parse_program } from "sfn/syntax";
+
 import { index_of } from "../../src/string_utils";
 
 fn _contains(haystack: string, needle: string) -> boolean {

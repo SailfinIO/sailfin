@@ -19,8 +19,7 @@
 //
 // See docs/rca/2026-04-18-reexport-diagnostic-gep.md.
 import { contains_string, substring } from "sfn/strings";
-
-import { Program } from "./ast";
+import { Program } from "sfn/syntax";
 
 export {
     collect_reexport_violations,

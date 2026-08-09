@@ -89,7 +89,6 @@
 //
 // Proposal §3.2 / §3.3 / §4; epic #1209; this issue: #1216.
 import { int_to_string } from "sfn/strings";
-
 import {
     Block,
     Expression,
@@ -97,7 +96,9 @@ import {
     Program,
     SourceSpan,
     Statement
-} from "./ast";
+} from "sfn/syntax";
+import { Token, TokenKind } from "sfn/syntax";
+
 import { ImportSymbolTable, empty_import_symbols } from "./effect_imports";
 import {
     block_proves_fresh_channel_returns,
@@ -113,7 +114,6 @@ import {
     task_method_key,
     task_type_is_bearing
 } from "./ownership_task_provenance";
-import { Token, TokenKind } from "./token";
 import { LocalBinding, analyze_lambda } from "./typecheck_captures";
 import { is_linear_type, is_owned_type, is_task_type } from "./typecheck_types/expr_type_rules";
 import { is_identifier_char, trim_text } from "./typecheck_types/text_utils";

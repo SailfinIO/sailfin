@@ -1,7 +1,9 @@
 // Driver-owned native-text validation and publication used by capsule staging.
 // LLVM lowering and the compiler entry module are deliberately absent from
 // this module's import closure.
-import { Program } from "./ast";
+import { Program } from "sfn/syntax";
+import { parse_program } from "sfn/syntax";
+
 import { _publish_lines_atomic } from "./build/fs";
 import { _env_flag } from "./build_flags";
 import { run_ownership_checker } from "./check/ownership";
@@ -16,7 +18,6 @@ import {
 } from "./emit_native";
 import { runtime_helper_call_names } from "./llvm/runtime_helpers/mod";
 import { native_lines_have_text } from "./native_ir_utils_text";
-import { parse_program } from "./parser/mod";
 import { load_prelude_global_names } from "./prelude_globals";
 import { collect_reexport_violations } from "./reexport_check";
 import { typecheck_diagnostics_with_prelude, typecheck_has_errors_with_prelude } from "./typecheck";

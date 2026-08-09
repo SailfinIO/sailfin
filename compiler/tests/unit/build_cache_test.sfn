@@ -645,7 +645,7 @@ test "build_cache: cache_store returns false on invalid digest without polluting
 // --------------------------------------------------------------
 test "build_cache: canonicalize_flags escapes JSON control characters" {
     // Tab, newline, CR — the three control escapes Sailfin's
-    // string-literal decoder recognises (`compiler/src/parser/utils.sfn`).
+    // string-literal decoder recognises (`compiler/capsules/syntax/src/parser/utils.sfn`).
     // `\b` / `\f` are intentionally not covered: Sailfin source cannot
     // produce them in a literal, so they cannot reach the encoder
     // through any in-language path.

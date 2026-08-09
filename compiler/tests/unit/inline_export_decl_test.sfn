@@ -17,8 +17,8 @@
 // These tests assert the parser emits BOTH the declaration statement and a
 // matching `ExportDeclaration`. Cross-module build+run is covered by
 // `compiler/tests/e2e/inline_export_cross_module_test.sfn`.
-import { Program, Statement } from "../../src/ast";
-import { parse_program } from "../../src/parser/mod";
+import { Program, Statement } from "sfn/syntax";
+import { parse_program } from "sfn/syntax";
 
 // True when the program contains an `ExportDeclaration` whose specifier list
 // names `symbol` with no `from` source (an inline / local export).

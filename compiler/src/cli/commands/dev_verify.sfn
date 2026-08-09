@@ -585,7 +585,7 @@ fn _dv_test_argv(bin: string, jobs: int, json: boolean) -> string[] {
 // -------------------------------------------------------------------
 fn verify_command_def() -> Command {
     let mut verify: Command = command("verify", "Run the full self-host validation pipeline and emit an agent verdict");
-    verify = with_flag(verify, flag("fast", "Typecheck-only pipeline (compiler/src + runtime), no build or self-host"));
+    verify = with_flag(verify, flag("fast", "Typecheck-only pipeline (compiler/src + compiler/capsules + runtime), no build or self-host"));
     verify = with_flag(verify, flag("full-pass1", "Run the full test suite against the first-pass binary, not just the smoke gate"));
     verify = with_flag(verify, flag("json", "Emit machine-readable phase output"));
     verify = with_flag(verify, flag("strict", "Treat a fixed-point mismatch as fatal (passed through to sfn selfhost)"));
@@ -594,14 +594,15 @@ fn verify_command_def() -> Command {
     return verify;
 }
 
-// `--fast`: today's `check-fast` — `sfn check compiler/src/ runtime/`, no
+// `--fast`: today's `check-fast` — compiler driver, implementation capsules,
+// and runtime, with no
 // build and no self-host, reported as a single-phase ledger.
 fn _dv_run_fast(cfg: VerifyConfig, self_exe: string) -> int ![io] {
     let env = _dv_child_env(cfg);
     let mut phases: VerifyPhase[] = [];
     _dv_write_report(phases, "pass", "", "", "", "check", false);
 
-    let mut argv: string[] = [self_exe, "check", "compiler/src/", "runtime/"];
+    let mut argv: string[] = [self_exe, "check", "compiler/src/", "compiler/capsules/", "runtime/"];
     // Under `--json` the child's own `sailfin-check/1` document is what
     // carries the diagnostics, so it is threaded through and spliced into
     // the ledger exactly as the `selfhost` phase carries its sub-envelope.

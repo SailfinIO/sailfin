@@ -21,8 +21,8 @@
 // runs the whole compiler pipeline against a fixture, which this
 // unit test deliberately does not, to keep parser regressions
 // independent of LLVM lowering.
-import { Program, Statement } from "../../src/ast";
-import { parse_program } from "../../src/parser/mod";
+import { Program, Statement } from "sfn/syntax";
+import { parse_program } from "sfn/syntax";
 
 fn _find_variable(program: Program, name: string) -> Statement {
     let mut index: int = 0;

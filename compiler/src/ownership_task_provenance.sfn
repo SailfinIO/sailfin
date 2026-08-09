@@ -3,13 +3,13 @@
 // ownership walk from conflating a declared handle result with proof that a
 // helper creates a nursery-bound handle.
 import { find, starts_with, substring } from "sfn/strings";
-
 import {
     Block,
     Expression,
     Program,
     Statement
-} from "./ast";
+} from "sfn/syntax";
+
 import { ImportSymbolTable, localize_import_symbols_for_program } from "./effect_imports";
 import { is_task_type } from "./typecheck_types/expr_type_rules";
 import {

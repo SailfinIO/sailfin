@@ -469,7 +469,7 @@ working (if incomplete) formatter that can be tested independently.
   file collection
 - Verify `make compile` succeeds (self-hosting invariant)
 
-**Test:** `sfn fmt compiler/src/token.sfn` prints the file to stdout.
+**Test:** `sfn fmt compiler/capsules/syntax/src/token.sfn` prints the file to stdout.
 
 **Deliverable:** Working CLI plumbing; format logic is a no-op.
 
@@ -809,8 +809,8 @@ stays on one line with no space inside.
 
 | Dependency | Status | Notes |
 |---|---|---|
-| `compiler/src/lexer.sfn` | Stable | `lex()` function |
-| `compiler/src/token.sfn` | Stable | `Token`, `TokenKind` types |
+| `compiler/capsules/syntax/src/lexer.sfn` | Stable | `lex()` function |
+| `compiler/capsules/syntax/src/token.sfn` | Stable | `Token`, `TokenKind` types |
 | `compiler/src/cli_main.sfn` | Stable | Subcommand dispatch |
 | `compiler/src/cli_commands.sfn` | Stable | Command handler pattern |
 | `compiler/src/cli_commands_utils.sfn` | Stable | `_collect_sfn_files_cmd()`, file I/O helpers |

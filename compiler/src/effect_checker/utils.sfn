@@ -1,9 +1,10 @@
 // compiler/src/effect_checker/utils.sfn
 //
 // Small value and collection helpers shared by the checker passes.
-import { SourceSpan } from "../ast";
+import { SourceSpan } from "sfn/syntax";
+import { Token, TokenKind } from "sfn/syntax";
+
 import { effect_subsumes } from "../effect_taxonomy";
-import { Token, TokenKind } from "../token";
 import { EffectRequirement, EffectViolation } from "./types";
 
 fn _token_from_signature(span: SourceSpan?, name: string) -> Token? {

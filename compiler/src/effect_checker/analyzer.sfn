@@ -7,7 +7,9 @@ import {
     FunctionSignature,
     Program,
     Statement
-} from "../ast";
+} from "sfn/syntax";
+import { Token } from "sfn/syntax";
+
 import { ResolvedDecorator, resolve_routine_decorators } from "../decorator_resolver";
 import {
     ImportSymbolTable,
@@ -15,7 +17,6 @@ import {
     localize_import_symbols_for_program
 } from "../effect_imports";
 import { is_universally_allowed_effect } from "../effect_taxonomy";
-import { Token } from "../token";
 import { collect_effects_from_block } from "./collector";
 import {
     _collect_nested_fns_in_block,

@@ -29,7 +29,8 @@
 // global table down to just-this-program's imports (and apply alias
 // rewrites). That keeps cross-module name collisions from emitting
 // spurious `E0402` against a same-named in-module function.
-import { Program } from "./ast";
+import { Program } from "sfn/syntax";
+
 import { IntrinsicEffectTable, empty_intrinsic_effects } from "./intrinsic_effects";
 
 // One callable signature exposed to a downstream caller. `name` is

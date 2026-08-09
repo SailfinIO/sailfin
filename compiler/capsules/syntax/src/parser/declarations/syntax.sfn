@@ -1,0 +1,586 @@
+// compiler/capsules/syntax/src/parser/declarations/syntax.sfn
+//
+// Shared declaration syntax - decorators, effects, generics, and parameters.
+import { char_at_index } from "sfn/strings";
+
+import {
+    Decorator,
+    DecoratorArgument,
+    Expression,
+    Parameter,
+    TypeAnnotation,
+    TypeParameter
+} from "../../ast";
+import { Token, TokenKind } from "../../token";
+import { expression_from_tokens, normalize_expression } from "../expressions";
+import {
+    append_token,
+    collect_parenthesized,
+    collect_type_annotation_until,
+    collect_until,
+    consume_keyword,
+    consume_symbol,
+    find_top_level_colon,
+    find_top_level_symbol,
+    identifier_matches,
+    identifier_text,
+    parser_advance_raw,
+    parser_peek_raw,
+    skip_trivia,
+    source_span_from_tokens,
+    split_token_slices_by_comma,
+    split_tokens_by_comma,
+    symbol_matches,
+    token_slice,
+    tokens_to_text,
+    trim_token_edges
+} from "../token_utils";
+import {
+    DecoratorParseResult,
+    EffectParseResult,
+    ImplementsParseResult,
+    ParameterListParseResult,
+    ParameterParseResult,
+    Parser,
+    TypeParameterParseResult,
+    TypeSeparatorParseResult
+} from "../types";
+import {
+    looks_like_number,
+    normalize_number_literal_value,
+    strip_surrounding_quotes,
+    trim_text
+} from "../utils";
+import {
+    append_decorator,
+    append_decorator_argument,
+    append_parameter,
+    append_type_annotation
+} from "./collections";
+
+// ============================================================================
+// Type Separator
+// ============================================================================
+fn consume_annotation_separator(parser: Parser) -> TypeSeparatorParseResult {
+    let token = parser_peek_raw(parser);
+    if symbol_matches(token, ":") {
+        return TypeSeparatorParseResult {
+            parser: parser_advance_raw(parser),
+            found: true
+        };
+    }
+    return TypeSeparatorParseResult { parser: parser, found: false };
+}
+
+fn consume_return_type_separator(parser: Parser) -> TypeSeparatorParseResult {
+    let token = parser_peek_raw(parser);
+    if symbol_matches(token, "->") {
+        return TypeSeparatorParseResult {
+            parser: parser_advance_raw(parser),
+            found: true
+        };
+    }
+    // Tolerate a lexer/runtime bug where `->` is split into `-` and `>`.
+    if symbol_matches(token, "-") {
+        let mut current = parser_advance_raw(parser);
+        let maybe_gt = parser_peek_raw(current);
+        if symbol_matches(maybe_gt, ">") {
+            current = parser_advance_raw(current);
+        }
+        return TypeSeparatorParseResult { parser: current, found: true };
+    }
+    return TypeSeparatorParseResult { parser: parser, found: false };
+}
+
+// ============================================================================
+// Decorator Parsing
+// ============================================================================
+fn parse_decorators(parser: Parser) -> DecoratorParseResult {
+    let mut current = parser;
+    let mut decorators: Decorator[] = [];
+
+    loop {
+        current = skip_trivia(current);
+        let token = parser_peek_raw(current);
+        if !symbol_matches(token, "@") { break; }
+
+        let decorator_start = current;
+        current = parser_advance_raw(current);
+        current = skip_trivia(current);
+
+        let name_token = parser_peek_raw(current);
+        if name_token.kind.variant != "Identifier" {
+            current = decorator_start;
+            break;
+        }
+
+        let name = identifier_text(name_token);
+        current = parser_advance_raw(current);
+        current = skip_trivia(current);
+
+        let mut decorator_arguments: DecoratorArgument[] = [];
+        let after = parser_peek_raw(current);
+        if symbol_matches(after, "(") {
+            let paren_result = collect_parenthesized(current);
+            if paren_result.success {
+                let mut segment_tokens: Token[] = [];
+                let mut angle: int = 0;
+                let mut paren: int = 0;
+                let mut brace: int = 0;
+                let mut bracket: int = 0;
+
+                let mut index: int = 0;
+                loop {
+                    if index >= paren_result.tokens.length { break; }
+                    let tok = paren_result.tokens[index];
+                    if tok.kind.variant == "Symbol" {
+                        let sym = tok.lexeme;
+                        if strings_equal(sym, "<") { angle += 1; } else if strings_equal(sym, ">") {
+                            if angle > 0 { angle -= 1; }
+                        } else if strings_equal(sym, "(") { paren += 1; } else if strings_equal(sym, ")") {
+                            if paren > 0 { paren -= 1; }
+                        } else if strings_equal(sym, "{") { brace += 1; } else if strings_equal(sym, "}") {
+                            if brace > 0 { brace -= 1; }
+                        } else if strings_equal(sym, "[") { bracket += 1; } else if strings_equal(sym, "]") {
+                            if bracket > 0 { bracket -= 1; }
+                        }
+
+                        let mut _let397: boolean = false;
+                        if angle == 0 {
+                            if paren == 0 {
+                                if brace == 0 {
+                                    if bracket == 0 { _let397 = true; }
+                                }
+                            }
+                        }
+                        let at_top_level = _let397;
+                        if strings_equal(sym, ",") {
+                            if at_top_level {
+                                let trimmed_tokens = trim_token_edges(segment_tokens);
+                                let argument = parse_decorator_argument(trimmed_tokens);
+                                if argument != null {
+                                    decorator_arguments = append_decorator_argument(decorator_arguments, argument);
+                                }
+                                segment_tokens = [];
+                                index += 1;
+                                continue;
+                            }
+                        }
+                    }
+                    segment_tokens = append_token(segment_tokens, tok);
+                    index += 1;
+                }
+
+                let final_tokens = trim_token_edges(segment_tokens);
+                let trailing_argument = parse_decorator_argument(final_tokens);
+                if trailing_argument != null {
+                    decorator_arguments = append_decorator_argument(decorator_arguments, trailing_argument);
+                }
+                current = paren_result.parser;
+            } else {
+                current = decorator_start;
+                break;
+            }
+        }
+
+        decorators = append_decorator(decorators, Decorator {
+            name: name, arguments: decorator_arguments
+        });
+    }
+
+    return DecoratorParseResult { parser: current, decorators: decorators };
+}
+
+fn parse_decorator_argument(tokens: Token[]) -> DecoratorArgument? {
+    if tokens.length == 0 { return null; }
+
+    let colon_index = find_top_level_colon(tokens);
+    if colon_index == -1 {
+        let trimmed_tokens = trim_token_edges(tokens);
+        if trimmed_tokens.length == 0 { return null; }
+        let expr = normalize_expression(trimmed_tokens, expression_from_tokens(trimmed_tokens));
+        return DecoratorArgument { name: null, expression: expr };
+    }
+
+    let name_tokens = trim_token_edges(token_slice(tokens, 0, colon_index));
+    let value_tokens = trim_token_edges(token_slice(tokens, colon_index + 1, tokens.length));
+
+    if value_tokens.length == 0 { return null; }
+
+    let name_text = trim_text(tokens_to_text(name_tokens));
+    if name_text.length == 0 { return null; }
+
+    let mut expr = normalize_expression(value_tokens, expression_from_tokens(value_tokens));
+    if expr.variant == "Raw" {
+        let raw_text = trim_text(tokens_to_text(value_tokens));
+        let mut _if398: boolean = false;
+        if raw_text.length >= 2 {
+            if char_at_index(raw_text, 0) == "\"" {
+                if char_at_index(raw_text, raw_text.length - 1) == "\"" {
+                    _if398 = true;
+                }
+            }
+        }
+        if _if398 {
+            let literal = strip_surrounding_quotes(raw_text);
+            expr = Expression.StringLiteral {
+                value: literal,
+                lexeme: raw_text
+            };
+        } else if raw_text == "true" {
+            expr = Expression.BooleanLiteral { value: "true" };
+        } else if raw_text == "false" {
+            expr = Expression.BooleanLiteral { value: "false" };
+        } else if looks_like_number(raw_text) {
+            expr = Expression.NumberLiteral {
+                value: normalize_number_literal_value(raw_text)
+            };
+        }
+    }
+    return DecoratorArgument { name: name_text, expression: expr };
+}
+
+// ============================================================================
+// Effect List Parsing
+// ============================================================================
+fn parse_effect_list(initial_parser: Parser) -> EffectParseResult {
+    let mut parser: Parser = initial_parser;
+    parser = skip_trivia(parser);
+    let token = parser_peek_raw(parser);
+    if !symbol_matches(token, "!") {
+        return EffectParseResult { parser: parser, effects: [] };
+    }
+
+    parser = parser_advance_raw(parser);
+    parser = skip_trivia(parser);
+    parser = consume_symbol(parser, "[");
+
+    let mut effects: string[] = [];
+    parser = skip_trivia(parser);
+    loop {
+        let current = parser_peek_raw(parser);
+        if symbol_matches(current, "]") {
+            parser = parser_advance_raw(parser);
+            break;
+        }
+        if current.kind.variant == "Identifier" {
+            let mut effect = identifier_text(current);
+            parser = parser_advance_raw(parser);
+            // Accumulate a dotted sub-effect name (`io.fs`, `io.fs.read`)
+            // into ONE effect string (SFEP-0017 D1). A dotted name is
+            // contiguous — `io` `.` `fs` with no intervening trivia — so
+            // peek raw for the `.` before skipping trivia. Prior behaviour
+            // let the generic fallback discard the `.` and split `io.fs`
+            // into two atoms `["io","fs"]`; the E0404 root-recognition
+            // pass now depends on the whole dotted string reaching it.
+            loop {
+                let dot = parser_peek_raw(parser);
+                if !symbol_matches(dot, ".") { break; }
+                let after_dot = parser_advance_raw(parser);
+                let segment = parser_peek_raw(after_dot);
+                if segment.kind.variant != "Identifier" {
+                    // Malformed `io.` with no trailing segment: stop
+                    // accumulating past the `.` and let the outer loop
+                    // resync on the next `]`/`,` terminator.
+                    parser = after_dot;
+                    break;
+                }
+                effect = effect + "." + identifier_text(segment);
+                parser = parser_advance_raw(after_dot);
+            }
+            effects.push(effect);
+            parser = skip_trivia(parser);
+            let separator = parser_peek_raw(parser);
+            if symbol_matches(separator, ",") {
+                parser = parser_advance_raw(parser);
+                parser = skip_trivia(parser);
+                continue;
+            }
+            continue;
+        }
+        parser = parser_advance_raw(parser);
+        parser = skip_trivia(parser);
+    }
+
+    return EffectParseResult { parser: parser, effects: effects };
+}
+
+// ============================================================================
+// Type Parameter Clause
+// ============================================================================
+// True when `sym` is a run of one or more `>` characters (`>`, `>>`, `>>>`) —
+// the lexer glues adjacent closing angle brackets into a single shift token.
+fn _is_gt_run(sym: string) -> boolean {
+    if sym.length == 0 { return false; }
+    let mut i: int = 0;
+    loop {
+        if i >= sym.length { break; }
+        if sym[i] != ">" { return false; }
+        i += 1;
+    }
+    return true;
+}
+
+// A synthetic single `>` symbol token, positioned at `src`, used to unglue a
+// `>>` shift token back into the individual angle closes it represents.
+fn _gt_token(src: Token) -> Token {
+    return Token {
+        kind: TokenKind.Symbol(),
+        lexeme: ">",
+        line: src.line,
+        column: src.column
+    };
+}
+
+fn parse_type_parameter_clause(parser: Parser) -> TypeParameterParseResult {
+    let mut current = skip_trivia(parser);
+    let token = parser_peek_raw(current);
+    if !symbol_matches(token, "<") {
+        return TypeParameterParseResult { parser: parser, parameters: [] };
+    }
+
+    current = parser_advance_raw(current);
+    let mut collected: Token[] = [];
+    let mut depth: int = 1;
+
+    loop {
+        let tok = parser_peek_raw(current);
+        if tok.kind.variant == "EndOfFile" { break; }
+        if tok.kind.variant == "Symbol" {
+            let sym = tok.lexeme;
+            if strings_equal(sym, "<") {
+                depth += 1;
+                collected = append_token(collected, tok);
+                current = parser_advance_raw(current);
+                continue;
+            }
+            if _is_gt_run(sym) {
+                // A `>`-run token (`>`, `>>`, …) closes one angle level per
+                // `>`. The lexer glues the closing brackets of nested generic
+                // bounds like `From<int>>` into a single `>>` shift token; the
+                // inner `>` (closing `From<int>`) belongs in the collected
+                // bound text, while the `>` that returns depth to 0 closes the
+                // type-parameter clause and stops the scan. Ungluing it here
+                // keeps a valid `fn f<E: From<int>>(...)` from over-consuming
+                // into the parameter list (SFN-18).
+                let run = sym.length;
+                let mut gi: int = 0;
+                let mut clause_closed = false;
+                loop {
+                    if gi >= run { break; }
+                    depth -= 1;
+                    if depth == 0 {
+                        clause_closed = true;
+                        break;
+                    }
+                    collected = append_token(collected, _gt_token(tok));
+                    gi += 1;
+                }
+                current = parser_advance_raw(current);
+                if clause_closed { break; }
+                continue;
+            }
+        }
+        collected = append_token(collected, tok);
+        current = parser_advance_raw(current);
+    }
+
+    let slices = split_token_slices_by_comma(collected);
+    let mut parameters: TypeParameter[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= slices.length { break; }
+        let slice_tokens = trim_token_edges(slices[index]);
+        if slice_tokens.length > 0 {
+            let colon_index = find_top_level_symbol(slice_tokens, ":");
+            let mut name_tokens = slice_tokens;
+            let mut bound_tokens: Token[] = [];
+            if colon_index != -1 {
+                name_tokens = token_slice(slice_tokens, 0, colon_index);
+                bound_tokens = token_slice(slice_tokens, colon_index + 1, slice_tokens.length);
+            }
+
+            let name_text = trim_text(tokens_to_text(name_tokens));
+            if name_text.length > 0 {
+                let mut bound: TypeAnnotation? = null;
+                let bound_text = trim_text(tokens_to_text(bound_tokens));
+                if bound_tokens.length > 0 {
+                    if bound_text.length > 0 {
+                        bound = TypeAnnotation { text: bound_text };
+                    }
+                }
+                let name_span = source_span_from_tokens(name_tokens);
+                let parameter = TypeParameter {
+                    name: name_text,
+                    bound: bound,
+                    span: name_span
+                };
+                parameters.push(parameter);
+            }
+        }
+        index += 1;
+    }
+
+    return TypeParameterParseResult {
+        parser: current,
+        parameters: parameters
+    };
+}
+
+// ============================================================================
+// Implements Clause
+// ============================================================================
+fn parse_implements_clause(parser: Parser) -> ImplementsParseResult {
+    let mut current = skip_trivia(parser);
+    if !identifier_matches(parser_peek_raw(current), "implements") {
+        return ImplementsParseResult {
+            parser: parser,
+            types: [],
+            found: false
+        };
+    }
+
+    current = consume_keyword(current, "implements");
+    current = skip_trivia(current);
+
+    let capture = collect_until(current, ["{"]);
+    current = capture.parser;
+
+    let mut implements_types: TypeAnnotation[] = [];
+    let entries = split_tokens_by_comma(capture.tokens);
+    let mut index: int = 0;
+    loop {
+        if index >= entries.length { break; }
+        let text = trim_text(entries[index]);
+        if text.length > 0 {
+            implements_types = append_type_annotation(implements_types, TypeAnnotation {
+                text: text
+            });
+        }
+        index += 1;
+    }
+
+    return ImplementsParseResult {
+        parser: current,
+        types: implements_types,
+        found: true
+    };
+}
+
+// ============================================================================
+// Parameter Parsing
+// ============================================================================
+fn parse_parameter_list(initial_parser: Parser) -> ParameterListParseResult {
+    let mut parser: Parser = initial_parser;
+    parser = skip_trivia(parser);
+    let mut parameters: Parameter[] = [];
+    let mut closed: boolean = false;
+
+    let token = parser_peek_raw(parser);
+    if symbol_matches(token, ")") {
+        parser = parser_advance_raw(parser);
+        return ParameterListParseResult {
+            parser: parser,
+            parameters: parameters,
+            closed: true
+        };
+    }
+
+    loop {
+        let param_result = parse_single_parameter(parser);
+        parser = param_result.parser;
+        parameters = append_parameter(parameters, param_result.parameter);
+        parser = skip_trivia(parser);
+        let separator = parser_peek_raw(parser);
+        if symbol_matches(separator, ",") {
+            parser = parser_advance_raw(parser);
+            parser = skip_trivia(parser);
+            // A trailing comma before `)` closes the list (parity with call
+            // arguments and struct fields); otherwise `parse_single_parameter`
+            // would read `)` as a phantom parameter and the malformed-list
+            // guard below would mint a misleading E0501. SFN-18.
+            if symbol_matches(parser_peek_raw(parser), ")") {
+                parser = parser_advance_raw(parser);
+                closed = true;
+                break;
+            }
+            continue;
+        }
+        if symbol_matches(separator, ")") {
+            parser = parser_advance_raw(parser);
+            closed = true;
+            break;
+        }
+        // Any other separator — a stray token or EOF mid-list — means the
+        // list was never closed with `)`. Stop WITHOUT consuming the token so
+        // `parse_function` can resync at it and any independent declaration
+        // that follows still parses (`fn broken( {\nfn good() {}` must not
+        // swallow `fn good` as bogus parameters). SFN-18.
+        break;
+    }
+
+    return ParameterListParseResult {
+        parser: parser,
+        parameters: parameters,
+        closed: closed
+    };
+}
+
+fn parse_single_parameter(initial_parser: Parser) -> ParameterParseResult {
+    let mut parser: Parser = initial_parser;
+    parser = skip_trivia(parser);
+    let tokens_ref = parser.tokens;
+    let start_index = parser.index;
+
+    let mut is_mutable = false;
+    let token = parser_peek_raw(parser);
+    if identifier_matches(token, "mut") {
+        parser = parser_advance_raw(parser);
+        is_mutable = true;
+    }
+
+    parser = skip_trivia(parser);
+    let name_token = parser_peek_raw(parser);
+    let name = identifier_text(name_token);
+    parser = parser_advance_raw(parser);
+
+    let mut type_annotation: TypeAnnotation? = null;
+    parser = skip_trivia(parser);
+    let separator_result = consume_annotation_separator(parser);
+    if separator_result.found {
+        parser = separator_result.parser;
+        // Function parameter type annotation — angle-balanced so generic
+        // args like `Result<T, E>` capture as one type. The default-value
+        // capture below still uses plain `collect_until` because `<` /
+        // `>` are comparison operators in expression position.
+        let capture = collect_type_annotation_until(skip_trivia(parser), ["=", ",", ")"]);
+        parser = capture.parser;
+        let text = trim_text(tokens_to_text(capture.tokens));
+        if text.length > 0 {
+            type_annotation = TypeAnnotation { text: text };
+        }
+    }
+
+    let mut default_value: Expression? = null;
+    parser = skip_trivia(parser);
+    let assign = parser_peek_raw(parser);
+    if symbol_matches(assign, "=") {
+        parser = parser_advance_raw(parser);
+        let capture = collect_until(skip_trivia(parser), [",", ")"]);
+        parser = capture.parser;
+        default_value = expression_from_tokens(capture.tokens);
+    }
+
+    let end_index = parser.index;
+    let parameter_tokens = token_slice(tokens_ref, start_index, end_index);
+    let span = source_span_from_tokens(parameter_tokens);
+
+    let parameter = Parameter {
+        name: name,
+        type_annotation: type_annotation,
+        default_value: default_value,
+        mutable: is_mutable,
+        span: span
+    };
+    return ParameterParseResult { parser: parser, parameter: parameter };
+}

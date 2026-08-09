@@ -1,6 +1,7 @@
 import { int_to_string } from "sfn/strings";
+import { Program, Statement } from "sfn/syntax";
+import { parse_program } from "sfn/syntax";
 
-import { Program, Statement } from "../../../ast";
 import {
     _dirname_cmd,
     _ends_with_cmd,
@@ -13,7 +14,6 @@ import { discover_project_root } from "../../../capsule_resolver/paths";
 import { ResolverConsumer } from "../../../capsule_resolver/types";
 import { discover_workspace_root } from "../../../capsule_resolver/workspace";
 import { ImportSymbolTable, empty_import_symbols } from "../../../effect_imports";
-import { parse_program } from "../../../parser/mod";
 import { substring } from "../../../string_utils";
 import { test_decl_is_matching_test, test_decl_matches_filters } from "../../../test_runner_state";
 import { toml_get_name } from "../../../toml_parser";

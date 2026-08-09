@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-- `compiler/src/` carries the Sailfin-native compiler sources; the **self-hosted native compiler** (legacy internal path name: stage2) is the primary toolchain.
+- `compiler/src/` carries the compiler driver and orchestration sources, while `compiler/capsules/` carries role-oriented private implementation capsules; the **self-hosted native compiler** (legacy internal path name: stage2) is the primary toolchain.
 - `runtime/prelude.sfn` and `runtime/sfn/` host the Sailfin-native runtime. The former C runtime under `runtime/native/` has been deleted; do not add C runtime startup/linkage workarounds.
 - `docs/` has a navigation guide (`docs/README.md`), the canonical status matrix (`docs/status.md`), and engineering references. The language specification, grammar, and keyword references live on the docs site under `site/src/content/docs/docs/reference/` and are published at [sailfin.dev/docs/reference/](https://sailfin.dev/docs/reference/). Linear Initiatives/Projects/Cycles are the planning source of truth; [sailfin.dev/roadmap](https://sailfin.dev/roadmap) is the reviewed public projection governed by `docs/conventions/public-roadmap.md`. Update the status doc first whenever behaviour changes, then adjust the spec/roadmap accordingly.
 - `docs/proposals/` is the Sailfin Enhancement Proposal (SFEP) registry. Use `docs/proposals/0001-sfep-process.md` and `docs/proposals/template.md` for forward-looking language, runtime/ABI, toolchain, or roadmap-epic design work. Keep single-issue design notes in `docs/proposals/design-notes/`.
@@ -24,7 +24,7 @@
 
 - The compiler self-applies an 8 GiB Linux `RLIMIT_AS` at startup (`SAILFIN_MEM_LIMIT` overrides; `unlimited`/`off`/`0` disables it). Do **not** add caller-side `ulimit` guards or Codex/Claude pre-tool hooks for ordinary compiler runs.
 - Timeouts still matter: wrap direct single-file compiler invocations with `timeout 60`; `make` targets manage their own timeouts.
-- Before committing changes to `compiler/src/*.sfn`, run `make compile` (or `make check`) before test-only validation so targeted tests do not run against a stale compiler binary.
+- Before committing changes to `compiler/src/*.sfn` or `compiler/capsules/**/*.sfn`, run `make compile` (or `make check`) before test-only validation so targeted tests do not run against a stale compiler binary.
 - If a change is structural (file splits, module graph changes, renamed exports), run `make clean-build` before rebuilding.
 - Fix compiler failures in `compiler/src/*.sfn`; the build driver (`compiler/src/cli/` + `compiler/src/capsule_resolver.sfn`) is pure orchestration and must not grow fixups.
 
@@ -32,7 +32,7 @@
 
 - `docs/style-guide.md` is the single source of truth for coding conventions (naming, comments, effect-annotation style, error handling, file size budgets). Headline rules: effects spelled explicitly and listed alphabetically (`fn foo() -> Bar ![io, model]`); `snake_case` functions/locals, `PascalCase` types, `_underscore` private helpers; comments explain *why* and cite issues/SFEPs — never `TODO`s, commented-out code, or "this PR" language.
 - Align terminology with the language spec at `site/src/content/docs/docs/reference/spec/` (capsule, fleet, provenance card) and note currency or latency literals as comments until syntax support arrives.
-- Before committing touched `.sfn` files under `compiler/src/` or `runtime/`, run `sfn fmt --write <files>` and then `sfn fmt --check <files>` (or the equivalent `build/bin/sfn` commands).
+- Before committing touched `.sfn` files under `compiler/src/`, `compiler/capsules/`, or `runtime/`, run `sfn fmt --write <files>` and then `sfn fmt --check <files>` (or the equivalent `build/bin/sfn` commands).
 - Stage regression tests beside related coverage in `compiler/tests/`; prefer Sailfin-native tests and slim fixtures over recorded generated output. For issue verification, list the narrowest relevant `build/bin/sfn test <path>` / `-k <name>` command rather than a full-suite target unless the issue is explicitly a full-gate, release, determinism, or structural-change task.
 - When adding language surface or runtime behavior, extend coverage and update `docs/status.md` first, then the relevant spec/preview page and roadmap if needed.
 - For non-trivial design changes, create or update an SFEP under `docs/proposals/` rather than burying design in issues or PR prose. Do not mark an SFEP `Implemented` until the feature meets the Stage1 readiness bar end-to-end and self-hosts.

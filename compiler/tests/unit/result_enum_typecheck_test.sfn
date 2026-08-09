@@ -6,8 +6,9 @@
 // lowering consumption is #830 and out of scope here; these tests drive
 // the callable primitives directly, with the enum declared IN-FILE (not
 // in the prelude).
-import { Statement, TypeAnnotation } from "../../src/ast";
-import { parse_program } from "../../src/parser/mod";
+import { Statement, TypeAnnotation } from "sfn/syntax";
+import { parse_program } from "sfn/syntax";
+
 import { Diagnostic } from "../../src/typecheck_types";
 import {
     resolve_enum_variant_field_type_from_annotation,

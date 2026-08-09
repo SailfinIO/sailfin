@@ -1,7 +1,7 @@
 // compiler/src/tools/fmt/types.sfn
 //
 // Shared formatter token and emission-state records.
-import { Token } from "../../token";
+import { Token } from "sfn/syntax";
 
 struct FmtToken {
     token: Token;

@@ -138,12 +138,12 @@ This is the most consequential architectural decision in this proposal, so it
 is stated explicitly rather than left implicit.
 
 **Current state (verified by reading the source):** Sailfin's lexer
-(`compiler/src/lexer.sfn`, string-literal branch starting at the
+(`compiler/capsules/syntax/src/lexer.sfn`, string-literal branch starting at the
 `is_double_quote(ch)` check around line 140) treats a `"..."` literal as
 fully opaque — it scans forward to the matching unescaped `"` and emits one
 `TokenKind.StringLiteral` token carrying the *raw, unprocessed* lexeme. There
 is no interpolation awareness anywhere in the lexer, the parser
-(`compiler/src/parser/`), the AST (`compiler/src/ast.sfn` — confirmed no
+(`compiler/capsules/syntax/src/parser/`), the AST (`compiler/capsules/syntax/src/ast.sfn` — confirmed no
 `Interpolat*` node exists), or the type checker. Interpolation is recognized
 **only** during LLVM lowering, in
 `compiler/src/llvm/expression_lowering/native/core_cast_lowering.sfn`
@@ -258,7 +258,7 @@ language are unaffected.
 (`parse_interpolated_template`) and the interpolation-detection guard in
 `compiler/src/llvm/expression_lowering/native/core_cast_lowering.sfn`
 (`try_lower_interpolated_string_literal`, line 535). No changes to
-`compiler/src/lexer.sfn`, `compiler/src/parser/`, `compiler/src/ast.sfn`,
+`compiler/capsules/syntax/src/lexer.sfn`, `compiler/capsules/syntax/src/parser/`, `compiler/capsules/syntax/src/ast.sfn`,
 `compiler/src/typecheck.sfn`, or `compiler/src/effect_checker.sfn` — all of
 which already treat string literals as opaque and stay that way (§3.3).
 
@@ -514,7 +514,7 @@ scaffolding, since the feature stays a lowering-time concern per §3.3):
 - `site/src/content/docs/docs/reference/spec/09-strings.md` — the spec
   chapter this SFEP's `graduates-to` target rewrites once `${ }` ships as the
   sole form.
-- `compiler/src/lexer.sfn` (string-literal branch, ~line 140) — confirms
+- `compiler/capsules/syntax/src/lexer.sfn` (string-literal branch, ~line 140) — confirms
   string literals are lexed as opaque tokens today, with no interpolation
   awareness at the lexer stage.
 - `compiler/src/llvm/expression_lowering/native/core_text.sfn`

@@ -77,7 +77,7 @@ left in post-1.0 "Platform & Ecosystem" where it originally sat.
 ### 3.1 Tests and hooks are language syntax, not a library
 
 `test` is a first-class declaration with its own AST node (`TestDeclaration` in
-`compiler/src/ast.sfn`), carrying a string-literal name and an effect row parsed
+`compiler/capsules/syntax/src/ast.sfn`), carrying a string-literal name and an effect row parsed
 exactly like a function's. Hook blocks reuse the node with a `hook_kind`
 discriminant.
 

@@ -11,6 +11,8 @@
 // by the schema-lock e2e test (which runs `jq` over the actual
 // envelope). Keeping the unit-side string-literal volume tight
 // avoids the seed compiler's globals-phase memory ceiling.
+import { Token, TokenKind } from "sfn/syntax";
+
 import { FixSuggestion, TextEdit } from "../../src/diagnostic";
 import {
     CheckJsonEvent,
@@ -19,7 +21,6 @@ import {
     render_check_json_envelope
 } from "../../src/diagnostics_json";
 import { index_of } from "../../src/string_utils";
-import { Token, TokenKind } from "../../src/token";
 import { Diagnostic, diagnostic_to_diag } from "../../src/typecheck_types";
 
 // -------------------------------------------------------------------

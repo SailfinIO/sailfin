@@ -1,0 +1,278 @@
+// compiler/capsules/syntax/src/parser/types.sfn
+//
+// Parser type definitions - result structs for various parsing operations.
+// These types are used throughout the parser to return parse results along
+// with updated parser state.
+import {
+    Block,
+    Decorator,
+    DecoratorArgument,
+    ElseBranch,
+    EnumVariant,
+    ExportSpecifier,
+    Expression,
+    FieldDeclaration,
+    FunctionSignature,
+    ImportSpecifier,
+    MatchCase,
+    MethodDeclaration,
+    ObjectField,
+    Parameter,
+    SourceSpan,
+    Statement,
+    TypeAnnotation,
+    TypeParameter,
+    WithClause
+} from "../ast";
+import { Token } from "../token";
+
+// ============================================================================
+// Core Parser State
+// ============================================================================
+struct Parser {
+    tokens: Token[];
+    index: int;
+}
+
+// ============================================================================
+// Statement Parsing Results
+// ============================================================================
+struct StatementParseResult {
+    parser: Parser;
+    statement: Statement;
+}
+
+// A single top-level parse step that may yield more than one statement.
+// Used by the inline `export <declaration>` form (SFEP-0031), which emits
+// the declaration statement plus a synthesized `ExportDeclaration` naming
+// it. The ordinary path wraps its single statement in a one-element list.
+struct ProgramUnitResult {
+    parser: Parser;
+    statements: Statement[];
+}
+
+struct BlockStatementParseResult {
+    parser: Parser;
+    statement: Statement?;
+    success: boolean;
+}
+
+struct BlockParseResult {
+    parser: Parser;
+    block: Block;
+    // False when the block opened with `{` but never reached its closing `}`
+    // (source truncated mid-body, e.g. a provider returning a cut-off program).
+    // `parse_function` turns this into an `E0505` parse diagnostic so a
+    // truncated body cannot silently lose `main` and reach the linker as an ICE
+    // (SFN-384). True for a properly closed block and for the legitimate
+    // no-body case (`{` absent), so callers that don't gate on it are unchanged.
+    closed: boolean;
+}
+
+// ============================================================================
+// Declaration Parsing Results
+// ============================================================================
+struct ParameterParseResult {
+    parser: Parser;
+    parameter: Parameter;
+}
+
+struct ParameterListParseResult {
+    parser: Parser;
+    parameters: Parameter[];
+    // False when the list terminated without a closing `)` (malformed input
+    // such as `fn broken( {`); `parse_function` turns this into an `E0501`
+    // parse diagnostic (SFN-18). Callers that don't gate on it ignore it.
+    closed: boolean;
+}
+
+struct StructFieldParseResult {
+    parser: Parser;
+    field: FieldDeclaration?;
+    success: boolean;
+    // True when the member had a field prefix (`name:`) but the required
+    // type annotation was absent (`struct S { x: }`). Distinguishes a
+    // malformed field from a non-field member so `parse_struct` can mint an
+    // `E0503` parse diagnostic rather than silently dropping it (SFN-18).
+    missing_type: boolean;
+}
+
+struct MethodParseResult {
+    parser: Parser;
+    method: MethodDeclaration?;
+    success: boolean;
+}
+
+struct InterfaceMemberParseResult {
+    parser: Parser;
+    signature: FunctionSignature?;
+    success: boolean;
+}
+
+struct EnumVariantParseResult {
+    parser: Parser;
+    variant: EnumVariant?;
+    success: boolean;
+}
+
+struct TypeParameterParseResult {
+    parser: Parser;
+    parameters: TypeParameter[];
+}
+
+struct ImplementsParseResult {
+    parser: Parser;
+    types: TypeAnnotation[];
+    found: boolean;
+}
+
+struct DecoratorParseResult {
+    parser: Parser;
+    decorators: Decorator[];
+}
+
+struct EffectParseResult {
+    parser: Parser;
+    effects: string[];
+}
+
+struct TypeSeparatorParseResult {
+    parser: Parser;
+    found: boolean;
+}
+
+// ============================================================================
+// Import/Export Parsing Results
+// ============================================================================
+struct SpecifierListParseResult {
+    parser: Parser;
+    specifiers: NamedSpecifier[];
+}
+
+struct NamedSpecifier {
+    name: string;
+    alias: string?;
+}
+
+// ============================================================================
+// Token Collection Results
+// ============================================================================
+struct CaptureResult {
+    parser: Parser;
+    tokens: Token[];
+}
+
+struct ParenthesizedParseResult {
+    parser: Parser;
+    tokens: Token[];
+    success: boolean;
+}
+
+struct PatternCaptureResult {
+    parser: Parser;
+    tokens: Token[];
+    success: boolean;
+}
+
+// ============================================================================
+// Match Statement Results
+// ============================================================================
+struct MatchCasesParseResult {
+    parser: Parser;
+    cases: MatchCase[];
+    success: boolean;
+}
+
+struct MatchCaseParseResult {
+    parser: Parser;
+    case: MatchCase?;
+    success: boolean;
+}
+
+struct MatchCaseTokenSplit {
+    pattern_tokens: Token[];
+    guard_tokens: Token[];
+    has_guard: boolean;
+}
+
+// ============================================================================
+// Expression Parsing State and Results
+// ============================================================================
+struct ExpressionTokens {
+    tokens: Token[];
+    index: int;
+}
+
+struct ExpressionParseResult {
+    state: ExpressionTokens;
+    expression: Expression;
+    success: boolean;
+}
+
+struct ExpressionTypeSeparatorParseResult {
+    state: ExpressionTokens;
+    used_separator: string;
+    found: boolean;
+}
+
+// Result of `read_cast_target` — the parsed type-annotation text for an
+// `as <type>` cast target, consuming pointer prefixes, named types with
+// generic argument lists, and fn-pointer targets.
+struct CastTargetParseResult {
+    state: ExpressionTokens;
+    text: string;
+    success: boolean;
+}
+
+struct ExpressionCollectResult {
+    state: ExpressionTokens;
+    tokens: Token[];
+    success: boolean;
+}
+
+struct ExpressionBlockParseResult {
+    state: ExpressionTokens;
+    tokens: Token[];
+    success: boolean;
+}
+
+// ============================================================================
+// Lambda Parsing Results
+// ============================================================================
+struct LambdaParameterParseResult {
+    state: ExpressionTokens;
+    parameter: Parameter;
+    success: boolean;
+}
+
+struct LambdaParameterListParseResult {
+    state: ExpressionTokens;
+    parameters: Parameter[];
+    success: boolean;
+}
+
+// ============================================================================
+// Literal Parsing Results
+// ============================================================================
+struct CallArgumentsParseResult {
+    state: ExpressionTokens;
+    arguments: Expression[];
+    success: boolean;
+}
+
+struct ArrayLiteralParseResult {
+    state: ExpressionTokens;
+    elements: Expression[];
+    success: boolean;
+}
+
+struct ObjectLiteralParseResult {
+    state: ExpressionTokens;
+    fields: ObjectField[];
+    success: boolean;
+}
+
+struct StructTypeNameResult {
+    parts: string[];
+    success: boolean;
+}

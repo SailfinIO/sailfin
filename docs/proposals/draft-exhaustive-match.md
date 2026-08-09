@@ -198,7 +198,7 @@ for the common case:
    A pattern of `Expression.Struct { type_name, fields }`
    (`ast.sfn:77`) with `type_name.length == 2` — the `Enum.Variant { ... }`
    shorthand the parser already produces for `Response.Ok { value }`
-   (`compiler/src/parser/statements/match.sfn`, `expression_from_tokens`) —
+   (`compiler/capsules/syntax/src/parser/statements/match.sfn`, `expression_from_tokens`) —
    names its enum directly as `type_name[0]` and its variant as
    `type_name[1]`. If **every** non-wildcard, non-guarded case pattern in the
    `match` resolves to `Struct` patterns naming the *same* enum (found in the
@@ -575,7 +575,7 @@ in the same pass.
 - `site/src/content/docs/docs/reference/spec/03-declarations.md:109-112` —
   §3.4/§3.5 enum semantics; the "matched exhaustively" claim this SFEP makes
   true.
-- `compiler/src/ast.sfn:389-394` (`Statement.EnumDeclaration`), `:260-264`
+- `compiler/capsules/syntax/src/ast.sfn:389-394` (`Statement.EnumDeclaration`), `:260-264`
   (`EnumVariant`), `:412-416` (`Statement.MatchStatement`), `:241-245`
   (`MatchCase`), `:77` (`Expression.Struct`), `:62-64` (literal expressions).
 - `compiler/src/typecheck.sfn:569-588` (statement-position `MatchStatement`

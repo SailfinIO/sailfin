@@ -489,7 +489,7 @@ here.
 The original design cannot be built as written. It specified `///` doc comments
 parsed into a doc AST, and asked the lexer to "preserve `///` doc comments as
 tokens." But `.claude/rules/code-style.md` is unambiguous — "One syntax: `//` —
-there is no `///` doc-comment form" — and `compiler/src/lexer.sfn:74-109` matches
+there is no `///` doc-comment form" — and `compiler/capsules/syntax/src/lexer.sfn:74-109` matches
 `/` followed by `/` generically, so `//`, `///`, and `////` all produce an
 identical `TokenKind.Comment()`. There is no `DocComment` kind, no attachment to
 declarations, and `sfn fmt` treats `///` as an ordinary comment (`0007:353`). The
@@ -818,5 +818,5 @@ are absent. Absence is not a behaviour to pin.
 - `compiler/src/diagnostic.sfn:31` — `Diag`; `:8` — `TextEdit`
 - `compiler/src/diagnostics_json.sfn:164` — the reserved `secondary` slot
 - `compiler/src/tools/` — `check.sfn`, `fmt/`, `fmt_rules.sfn`
-- `compiler/src/lexer.sfn:74-109` — why `///` cannot be distinguished
+- `compiler/capsules/syntax/src/lexer.sfn:74-109` — why `///` cannot be distinguished
 - `tools/mcp-server/README.md` — the ten passthrough tools (`:11-22`, `:64-65`)

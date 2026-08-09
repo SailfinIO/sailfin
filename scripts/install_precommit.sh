@@ -2,11 +2,11 @@
 # install_precommit.sh — opt-in pre-commit hook for Sailfin contributors.
 #
 # Installs a Git pre-commit hook that runs `make check-fast` (a
-# `sfn check compiler/src/ runtime/` invocation, ~2 min) so contributors
+# `sfn check compiler/src/ compiler/capsules/ runtime/` invocation, ~2 min) so contributors
 # catch parser, typecheck, and effect-system breakage before pushing.
 #
 # This is opt-in by design — it adds ~2 min to every commit, which is a
-# fair trade for committers actively touching compiler/src/ but excessive
+# fair trade for committers actively touching compiler implementation sources but excessive
 # for docs-only or release-tooling work.
 #
 # Usage:
@@ -101,7 +101,7 @@ fi
 # includes deletions (D) — removing a source file can break the build
 # just as easily as editing one, so the gate must fire either way.
 changed=$(git diff --cached --name-only --diff-filter=ACMRD | \
-    grep -E '^(compiler/src/|runtime/)' || true)
+    grep -E '^(compiler/src/|compiler/capsules/|runtime/)' || true)
 if [ -z "$changed" ]; then
     exit 0
 fi
@@ -122,6 +122,6 @@ HOOK
 chmod +x "$HOOK_PATH"
 
 echo "[install-precommit] installed $HOOK_PATH"
-echo "[install-precommit] runs 'make check-fast' on commits touching compiler/src/ or runtime/"
+echo "[install-precommit] runs 'make check-fast' on commits touching compiler/src/, compiler/capsules/, or runtime/"
 echo "[install-precommit] skip with: SAILFIN_SKIP_PRECOMMIT=1 git commit ...   (or --no-verify)"
 echo "[install-precommit] uninstall with: bash scripts/install_precommit.sh --remove"

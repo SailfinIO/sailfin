@@ -10,8 +10,8 @@
 // a nested fn body still fires `E0420`, and two same-name nested fns in
 // one block still collide as `E0001`.
 import { find } from "sfn/strings";
+import { parse_program } from "sfn/syntax";
 
-import { parse_program } from "../../src/parser/mod";
 import { typecheck_diagnostics } from "../../src/typecheck";
 import { Diagnostic } from "../../src/typecheck_types";
 

@@ -32,7 +32,8 @@
 // severity (currently "error" post-Phase-D) so contributors who set
 // `=off` for emergency builds still see effect diagnostics when they
 // run `sfn check` explicitly.
-import { Program } from "./ast";
+import { Program } from "sfn/syntax";
+
 import {
     capability_violation_to_diagnostic,
     effect_violation_to_diagnostic,

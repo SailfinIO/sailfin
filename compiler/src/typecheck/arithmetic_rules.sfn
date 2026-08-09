@@ -2,7 +2,8 @@
 //
 // Arithmetic and primitive-method type rules: mixed-numeric, array, and
 // struct operand rejection, plus primitive method resolution.
-import { Expression, SourceSpan } from "../ast";
+import { Expression, SourceSpan } from "sfn/syntax";
+
 import { lookup_imported_function } from "../effect_imports";
 import { Diagnostic } from "../typecheck_types";
 import { element_kind_marks_array } from "../typecheck_types/annotation_shape_checks";

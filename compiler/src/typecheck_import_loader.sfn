@@ -27,7 +27,8 @@
 // fine, no interfaces declared" case prevents a silently-corrupt
 // artifact from looking like a benign module that just happened to
 // export only structs/functions.
-import { Statement } from "./ast";
+import { Statement } from "sfn/syntax";
+
 import {
     ImportSymbolTable,
     append_import_function_signature_from_module,

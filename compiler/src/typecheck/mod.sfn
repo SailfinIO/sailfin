@@ -18,7 +18,8 @@
 // `symbols_index.sfn` drops `_`-prefixed names before indexing, so they
 // never appear in `sfn symbols` — check the whole folder, not just the
 // defining module, before concluding one is unused.
-import { Program, Statement } from "../ast";
+import { Program, Statement } from "sfn/syntax";
+
 import {
     ImportSymbolTable,
     empty_import_symbols,

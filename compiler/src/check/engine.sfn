@@ -15,8 +15,11 @@
 // pathA pathB` invocations that span different capsules / workspaces
 // resolve each project independently rather than silently anchoring
 // on whichever path came first.
+import { Statement } from "sfn/syntax";
+import { parse_program } from "sfn/syntax";
+import { Token } from "sfn/syntax";
+
 import { analyze_program } from "../analyzer";
-import { Statement } from "../ast";
 import { _collect_sfn_files_cmd, _dirname_cmd, _path_join_cmd } from "../build/fs";
 import { workspace_capability_gate } from "../capsule_resolver/capability";
 import { prepare_project_capsules_for_check } from "../capsule_resolver/check";
@@ -32,8 +35,6 @@ import {
 import { render_diagnostic } from "../diagnostics_render";
 import { ImportSymbolTable, empty_import_symbols } from "../effect_imports";
 import { ClosureSymbolSet } from "../import_resolution_check";
-import { parse_program } from "../parser/mod";
-import { Token } from "../token";
 import {
     CheckResult,
     CheckSummary,

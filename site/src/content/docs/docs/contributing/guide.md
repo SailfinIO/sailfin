@@ -43,8 +43,8 @@ git checkout -b feature/my-feature main
 
 ### Adding a Language Feature
 
-1. Update the parser (`compiler/src/parser.sfn`)
-2. Add AST nodes (`compiler/src/ast.sfn`)
+1. Update the parser (`compiler/capsules/syntax/src/parser/mod.sfn`)
+2. Add AST nodes (`compiler/capsules/syntax/src/ast.sfn`)
 3. Update the emitter (`compiler/src/emit_native.sfn`)
 4. Extend LLVM lowering (`compiler/src/llvm/lowering/`)
 5. Add regression tests (`compiler/tests/`)

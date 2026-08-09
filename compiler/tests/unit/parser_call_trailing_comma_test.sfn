@@ -13,8 +13,8 @@
 // separator `,`, a following `)` ends the args. `add(2, 3,)` now parses
 // to a `Call` with exactly the two real arguments — identical to
 // `add(2, 3)`.
-import { Expression } from "../../src/ast";
-import { parse_program } from "../../src/parser/mod";
+import { Expression } from "sfn/syntax";
+import { parse_program } from "sfn/syntax";
 
 // Initializer of the first top-level `let` in `source`, asserted to be a
 // `Call` so a structural change fails here with a clear message.

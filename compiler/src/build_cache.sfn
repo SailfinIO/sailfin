@@ -1001,7 +1001,7 @@ fn _sort_strings(input: string[]) -> string[] {
 // JSON string escaper. Handles the characters that would otherwise
 // break the array shape (`"`, `\`) plus the three control-character
 // escapes Sailfin's string-literal decoder recognises (`\n`, `\r`,
-// `\t`, see `compiler/src/parser/utils.sfn::decode_string_literal_escapes`).
+// `\t`, see `compiler/capsules/syntax/src/parser/utils.sfn::decode_string_literal_escapes`).
 // Without this, a flag containing a newline would both produce
 // invalid JSON AND collide with the `\n` separator we use between
 // cache-key tuple fields, breaking the "separator prevents

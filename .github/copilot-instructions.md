@@ -4,7 +4,7 @@
 
 Sailfin is a compiled systems language with effect type annotations for capabilities. Every function declares what it can do (IO, network, clock, etc.); effect annotations are supported today, while full enforcement (compilation gating) is the top priority on the roadmap. The language targets LLVM, produces native single-binary executables, and is designed so that code capabilities are verifiable at compile time.
 
-**Primary toolchain:** The self-hosted native compiler (`compiler/src/`) targeting LLVM via a `.sfn-asm` intermediate representation. Release artifacts install as `sailfin`/`sfn`.
+**Primary toolchain:** The self-hosted native compiler (`compiler/src/` plus `compiler/capsules/`) targeting LLVM via a `.sfn-asm` intermediate representation. Release artifacts install as `sailfin`/`sfn`.
 
 > Note: the codebase may still contain historical `stage2` names in some internal paths; prefer "native compiler" terminology in new code and docs.
 
@@ -26,7 +26,7 @@ Deferred features (parsed but not enforced, post-1.0):
 
 | Path | Purpose |
 |---|---|
-| `compiler/src/` | Self-hosted native compiler sources (`.sfn`) |
+| `compiler/src/`, `compiler/capsules/` | Self-hosted native compiler sources (`.sfn`) |
 | `compiler/tests/` | Unit, integration, and e2e test suites |
 | `runtime/` | Runtime capsule root (manifest: `runtime/capsule.toml`; Sailfin sources: `runtime/sfn/`, `runtime/prelude.sfn`) |
 | `runtime/prelude.sfn` | Sailfin-native runtime (collections, strings, type checks) |
@@ -54,7 +54,7 @@ For debugging, place scripts in `/scratch`.
 
 ## Compiler Pipeline
 
-The compiler in `compiler/src/` follows this flow:
+The compiler in `compiler/src/` and `compiler/capsules/` follows this flow:
 
 1. **Lexer** (`lexer.sfn`) → tokens
 2. **Parser** (`parser.sfn`) → AST (`ast.sfn`)
@@ -66,7 +66,7 @@ The compiler in `compiler/src/` follows this flow:
 Critical files:
 
 - `compiler/src/main.sfn` — Entry point orchestrating all passes
-- `compiler/src/ast.sfn` — Canonical AST node definitions
+- `compiler/capsules/syntax/src/ast.sfn` — Canonical AST node definitions
 - `compiler/src/native_ir.sfn` — `.sfn-asm` intermediate representation
 
 ## Effect System
@@ -100,8 +100,8 @@ Effect checking walks nested blocks, lambdas, and `routine` scopes. Missing effe
 
 ## Adding a Language Feature
 
-1. Update `compiler/src/parser.sfn` to recognize new syntax
-2. Add AST node(s) to `compiler/src/ast.sfn`
+1. Update `compiler/capsules/syntax/src/parser/mod.sfn` to recognize new syntax
+2. Add AST node(s) to `compiler/capsules/syntax/src/ast.sfn`
 3. Update `compiler/src/emit_native.sfn` to emit `.sfn-asm`
 4. Extend `compiler/src/llvm/lowering/entrypoints.sfn` for LLVM
 5. Add regression tests to `compiler/tests/`
@@ -168,7 +168,7 @@ Update documents in this order when behaviour changes:
 
 **Self-hosting invariant:** the compiler must always compile itself. Breaking changes require:
 
-1. Implement in Sailfin (`compiler/src/*.sfn`)
+1. Implement in Sailfin (`compiler/src/` or `compiler/capsules/`)
 2. Verify selfhost build (`make compile`)
 3. Verify integration coverage (`make test-integration`)
 
