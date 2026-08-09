@@ -535,14 +535,15 @@ fn _tls_session_free(s: *TlsSession) -> void {
 // scalar, and the anchors are `X509Certificate[]`, an `int[]`-bearing
 // Sailfin value the runtime allocator owns and which therefore cannot be
 // stored in a malloc'd struct or a global slot (the same constraint that
-// makes `TlsSession` scalar-only). Caching would mean flattening ~150
-// parsed certificates back to DER and re-parsing per handshake, which
-// buys nothing over re-reading the bundle.
+// makes `TlsSession` scalar-only).
 //
-// So the bundle is parsed once per handshake, and the per-request cost
-// is real and measured rather than hidden. Removal condition: SFN-805,
-// which is where a real anchor cache belongs (a DER-blob global plus a
-// parsed-anchor arena), not here.
+// So the bundle is parsed once per handshake, at ~94 ms for a
+// 152-certificate bundle (measured under SFN-807, which removed a quadratic
+// base64 accumulation that had made it ~240 ms and leaked ~190 MB per load).
+// Of that ~94 ms the X.509 parse is ~57 ms, so re-parsing — not decoding — is
+// now the dominant term, and an anchor cache that avoids it is worth more
+// than one that only caches DER. Removal condition: SFN-805, which owns both
+// the call and the cache design, not here.
 fn _tls_anchors() -> X509Certificate[] ![io] {
     let store: TrustStore = trust_store_load();
     let empty: X509Certificate[] = [];

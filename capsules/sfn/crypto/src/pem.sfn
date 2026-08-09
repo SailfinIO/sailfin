@@ -1,7 +1,13 @@
 // capsules/sfn/crypto/src/pem.sfn
 //
-// Binary-safe PEM decoding for the TLS 1.3 server certificate chain
-// (SFN-654, SFEP-0048 Phase B). It exists separately from `mod.sfn`'s
+// Binary-safe PEM decoding, originally for the TLS 1.3 server certificate
+// chain (SFN-654, SFEP-0048 Phase B) and now also for the system CA trust
+// store (`trust_store.sfn`). The two callers differ by an order of magnitude
+// in legitimate block count, which is why the block bound is a parameter
+// rather than a module constant — applying the chain bound to a bundle
+// refused every real trust store (SFN-807).
+//
+// It exists separately from `mod.sfn`'s
 // `base64_decode` because that one returns a `string` and collapses to the
 // "" sentinel on any decoded 0x00 byte — and DER routinely contains them —
 // so it cannot represent a certificate chain.
@@ -10,15 +16,13 @@
 // mirroring `tls13_handshake_codec.sfn`'s wire-codec convention. Every
 // function here fails closed: malformed or truncated input returns `[]`
 // rather than a best-effort partial decode.
-// Map a single standard-alphabet base64 character to its 6-bit value, or -1
-// if `c` is not an alphabet character (`=` padding included).
-fn _pem_base64_sextet(c: string) -> int {
-    // Sailfin string indexing is byte-oriented, so `c` is a single byte and
-    // `char_code` yields 0-255; the mask documents that contract rather than
-    // narrowing anything, matching `bits.sfn::string_to_bytes`. A multi-byte
-    // UTF-8 character therefore arrives here one byte at a time, and every
-    // continuation byte is outside the alphabet, so it is rejected.
-    let code: int = char_code(c) & 255;
+// Map a single standard-alphabet base64 byte to its 6-bit value, or -1 if
+// `code` is not an alphabet character (`=` padding included).
+fn _pem_base64_sextet(code: int) -> int {
+    // Callers pass a single byte value, 0-255: Sailfin string indexing is
+    // byte-oriented, matching `bits.sfn::string_to_bytes`. A multi-byte UTF-8
+    // character therefore arrives one byte at a time, and every continuation
+    // byte is outside the alphabet, so it is rejected.
     if code >= 65 && code <= 90 { return code - 65; }
     if code >= 97 && code <= 122 { return code - 97 + 26; }
     if code >= 48 && code <= 57 { return code - 48 + 52; }
@@ -33,21 +37,33 @@ fn _pem_base64_sextet(c: string) -> int {
 // `_eds_base64_bytes` in `ed25519_sign.sfn`. The contrast is against
 // `mod.sfn::base64_decode`, which returns a `string` and cannot carry DER's
 // 0x00 bytes — this function returns binary-safe `int[]` instead.
-fn _pem_base64_bytes(encoded: string) -> int[] {
-    if encoded.length == 0 || (encoded.length & 3) != 0 { return []; }
+//
+// Takes the body as already-extracted byte values rather than a `string`
+// because building that string was quadratic: `+` on strings allocates and
+// copies the whole accumulated left side per character
+// (`runtime/sfn/string.sfn::sfn_str_concat`) out of an arena nothing rewinds
+// on this path, so a ~2.7 KB base64 body cost ~3.6 MB of copying and the same
+// again in unreclaimed arena. Across a 152-certificate system bundle that was
+// ~190 MB per load, measured — roughly 40 HTTPS handshakes under the 8 GiB
+// self-cap before the process died (SFN-807). An `int[]` push is amortised
+// O(1), so the scan is linear in the block and allocates once per growth.
+fn _pem_base64_bytes(codes: int[]) -> int[] {
+    if codes.length == 0 || (codes.length & 3) != 0 { return []; }
     let mut out: int[] = [];
     let mut i: int = 0;
     loop {
-        if i >= encoded.length { break; }
-        let d0: int = _pem_base64_sextet(encoded[i]);
-        let d1: int = _pem_base64_sextet(encoded[i + 1]);
+        if i >= codes.length { break; }
+        let d0: int = _pem_base64_sextet(codes[i]);
+        let d1: int = _pem_base64_sextet(codes[i + 1]);
         if d0 < 0 || d1 < 0 { return []; }
 
-        let c2: string = encoded[i + 2];
-        let c3: string = encoded[i + 3];
-        let pad2: bool = c2 == "=";
-        let pad3: bool = c3 == "=";
-        if (pad2 || pad3) && i + 4 != encoded.length { return []; }
+        // 61 is `=`; the alphabet check above already rejected every other
+        // non-alphabet byte.
+        let c2: int = codes[i + 2];
+        let c3: int = codes[i + 3];
+        let pad2: bool = c2 == 61;
+        let pad3: bool = c3 == 61;
+        if (pad2 || pad3) && i + 4 != codes.length { return []; }
         if pad2 && !pad3 { return []; }
         out.push(((d0 << 2) | (d1 >> 4)) & 255);
 
@@ -103,6 +119,13 @@ fn _pem_max_block_bytes() -> int { return 65535; }
 // `trust_store.sfn` rather than here.
 fn _pem_max_blocks() -> int { return 16; }
 
+// The ceiling no caller of `pem_decode_blocks_with_limits` can raise. The
+// per-block bound above is a default a caller may override; this one is the
+// module's own guard, so a consumer cannot pass a huge `max_blocks` and
+// remove it. Sized well above the largest legitimate caller (a trust store's
+// 512) and far below anything that would make the scan unbounded.
+fn _pem_absolute_max_blocks() -> int { return 4096; }
+
 // Extract every `-----BEGIN <label>-----` … `-----END <label>-----` block in
 // `pem`, in order, and base64-decode each to DER bytes. Text between blocks
 // (and before the first / after the last) is ignored — real chain files
@@ -121,6 +144,14 @@ fn _pem_max_blocks() -> int { return 16; }
 fn pem_decode_blocks_with_limits(pem: string, label: string, max_blocks: int) -> int[][] {
     let none: int[][] = [];
     if max_blocks < 1 { return none; }
+    // The bound is caller-supplied but not caller-removable: this is a public
+    // entry point, and a consumer passing a huge `max_blocks` would otherwise
+    // delete the guard the module documents above. Clamping keeps "the policy
+    // lives with the caller" without letting the caller opt out of a ceiling.
+    let mut bound: int = max_blocks;
+    if bound > _pem_absolute_max_blocks() {
+        bound = _pem_absolute_max_blocks();
+    }
     let header: string = "-----BEGIN " + label + "-----";
     let footer: string = "-----END " + label + "-----";
 
@@ -132,10 +163,10 @@ fn pem_decode_blocks_with_limits(pem: string, label: string, max_blocks: int) ->
             cursor += 1;
             continue;
         }
-        if blocks.length >= max_blocks { return none; }
+        if blocks.length >= bound { return none; }
 
         cursor += header.length;
-        let mut encoded: string = "";
+        let mut codes: int[] = [];
         let mut found_footer: bool = false;
         loop {
             if cursor >= pem.length { break; }
@@ -146,18 +177,19 @@ fn pem_decode_blocks_with_limits(pem: string, label: string, max_blocks: int) ->
             }
             if _pem_is_ascii_space(pem[cursor]) { cursor += 1; } else {
                 // A base64-encoded block this large decodes past
-                // `_pem_max_block_bytes()`; stop growing the string before
-                // that happens.
-                if encoded.length > (_pem_max_block_bytes() + 2) / 3 * 4 {
+                // `_pem_max_block_bytes()`; stop collecting before that
+                // happens, so the per-block work stays bounded too and not
+                // merely the block count.
+                if codes.length > (_pem_max_block_bytes() + 2) / 3 * 4 {
                     return none;
                 }
-                encoded = encoded + pem[cursor];
+                codes.push(char_code(pem[cursor]) & 255);
                 cursor += 1;
             }
         }
         if !found_footer { return none; }
 
-        let decoded: int[] = _pem_base64_bytes(encoded);
+        let decoded: int[] = _pem_base64_bytes(codes);
         if decoded.length < 1 || decoded.length > _pem_max_block_bytes() {
             return none;
         }

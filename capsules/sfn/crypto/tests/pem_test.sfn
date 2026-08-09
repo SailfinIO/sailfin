@@ -165,6 +165,39 @@ test "pem: pem_count_blocks counts headers a decode refuses" {
     assert blocks.length == 0;
 }
 
+// The upper side is pinned above (17 blocks under a 16 bound is rejected), but
+// nothing pinned that a bound of N *admits* N. A one-off in the conservative
+// direction would keep every other test green while silently capping a trust
+// store one anchor short — the same silent-cap failure mode as SFN-807 itself,
+// at a different threshold.
+test "pem: a limit of N admits exactly N blocks" {
+    let mut pem: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= 17 { break; }
+        pem = pem
+            + "-----BEGIN CERTIFICATE-----\nAA==\n-----END CERTIFICATE-----\n";
+        i += 1;
+    }
+    assert pem_decode_blocks_with_limits(pem, "CERTIFICATE", 17).length == 17;
+    assert pem_decode_blocks_with_limits(pem, "CERTIFICATE", 16).length == 0;
+}
+
+// A caller cannot raise the bound past the module's own ceiling
+// (`_pem_absolute_max_blocks`), so a huge `max_blocks` does not delete the
+// guard — it is clamped, and an over-ceiling file is still refused.
+test "pem: a max_blocks past the module ceiling is clamped, not honoured" {
+    let mut pem: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= 4097 { break; }
+        pem = pem
+            + "-----BEGIN CERTIFICATE-----\nAA==\n-----END CERTIFICATE-----\n";
+        i += 1;
+    }
+    assert pem_decode_blocks_with_limits(pem, "CERTIFICATE", 2147483647).length == 0;
+}
+
 test "pem: a max_blocks under 1 is refused" {
     let pem: string = "-----BEGIN CERTIFICATE-----\nAQIDBAU=\n-----END CERTIFICATE-----\n";
     let blocks: int[][] = pem_decode_blocks_with_limits(pem, "CERTIFICATE", 0);

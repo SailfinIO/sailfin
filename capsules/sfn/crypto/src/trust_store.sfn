@@ -94,9 +94,13 @@ fn trust_store_default_paths() -> string[] {
 // real trust store (SFN-807). The policy lives here, with the caller whose
 // input it describes, rather than in the generic PEM codec.
 //
-// 512 keeps a genuine DoS bound — a bundle is attacker-controlled only if an
-// attacker can write the CA file, but the parse is still work per block — with
-// ample headroom over anything seen in the wild.
+// 512 leaves ample headroom over anything seen in the wild. It bounds the
+// block *count*; the per-block work is bounded separately by
+// `pem.sfn::_pem_max_block_bytes()`, and `pem.sfn` clamps any caller-supplied
+// count against its own ceiling — raising this number cannot remove either
+// guard. Both halves matter: a count bound alone would have let a 32x-larger
+// worst case through, which is what made the quadratic body accumulation in
+// `pem.sfn` worth fixing alongside this (SFN-807).
 fn _trust_store_max_blocks() -> int { return 512; }
 
 // Parse a PEM CA bundle into trust anchors. Pure: this is the whole decode and
@@ -117,7 +121,10 @@ fn trust_store_from_pem(pem: string) -> TrustStore {
                 + int_to_string(_trust_store_max_blocks())
                 + "-block limit");
         }
-        return _store_err("trust_store: a CERTIFICATE block in bundle is malformed (PEM framing or base64)");
+        // Covers bad framing, a bad base64 body, an empty decode, and a block
+        // over `_pem_max_block_bytes()` — `pem.sfn` returns the same `[]` for
+        // all four, so the text names the set rather than guessing which.
+        return _store_err("trust_store: a CERTIFICATE block in bundle is malformed (PEM framing, base64, or a block over 65535 bytes)");
     }
 
     let mut anchors: X509Certificate[] = [];
