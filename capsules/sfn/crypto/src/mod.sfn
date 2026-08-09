@@ -81,16 +81,24 @@ export {
     rsa_pss_verify_sha384
 } from "./rsa";
 
-// ECDSA over NIST P-256 with SHA-256 (FIPS 186-4), verification only. The
-// digest entry point is the one an X.509 chain verifier wants, since it hashes
-// the tbsCertificate itself; the message entry point is the `ecdsa-with-SHA256`
-// profile.
+// ECDSA over NIST P-256 with SHA-256 and NIST P-384 with SHA-384 (FIPS 186-4),
+// verification only. The digest entry points are the ones an X.509 chain
+// verifier wants, since it hashes the tbsCertificate itself; the message entry
+// points are the `ecdsa-with-SHA256` and `ecdsa-with-SHA384` profiles. P-384
+// matters because a P-256 leaf under a P-384 intermediate is a common CA
+// topology, so without it a large share of real HTTPS chains cannot be
+// verified at all (SFN-811).
 //
-// The P-256 field, scalar, and point layer stays capsule-internal in
-// src/p256.sfn, for the same reason the bignum layer does: it is arithmetic
+// The field, scalar, and point layers stay capsule-internal in src/p256.sfn and
+// src/p384.sfn, for the same reason the bignum layer does: it is arithmetic
 // this capsule's verifiers share, not a surface to build on. Signing is absent
 // by design — see the src/ecdsa.sfn header.
-export { ecdsa_p256_verify_digest, ecdsa_p256_verify_sha256 } from "./ecdsa";
+export {
+    ecdsa_p256_verify_digest,
+    ecdsa_p256_verify_sha256,
+    ecdsa_p384_verify_digest,
+    ecdsa_p384_verify_sha384
+} from "./ecdsa";
 
 // Minimal DER/ASN.1 reader — definite-length TLV walk over the subset X.509
 // needs, with explicit nesting-depth and total-length guards against
@@ -181,7 +189,8 @@ export {
 
 // X.509 certification-path validation (SFEP-0048 Phase C, SFN-340) — the trust
 // decision the parse surface above withholds: chain building, signature
-// verification across Ed25519 / ECDSA-P256 / RSASSA-PKCS1-v1_5, and
+// verification across Ed25519 / ECDSA-P256 / ECDSA-P384 / RSASSA-PKCS1-v1_5,
+// and
 // basicConstraints / keyUsage / pathLenConstraint / validity-window
 // enforcement at every position. Fail-closed: a signature algorithm this
 // capsule cannot verify rejects the link rather than skipping it. Pure — the
