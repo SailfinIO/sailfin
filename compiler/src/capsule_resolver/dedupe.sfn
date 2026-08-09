@@ -165,10 +165,19 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer, bun
     // SFN-341: the guard above admits exactly one new shape past this
     // point — a runtime-dep-only resolution with no project entry
     // (`prepare_runtime_dep_capsules`, empty `entry_paths`, non-empty
-    // `runtime_root`). With no entry to anchor on, `project_root` stays
-    // `""` below, so control reaches the `else if
+    // `runtime_root`). Both anchored discoveries below are gated on
+    // having an entry rather than on `discover_*_root("")` returning
+    // empty: `discover_project_root` substitutes `"."` for an empty
+    // start dir (`paths.sfn`), so an ungated call would probe the
+    // PROCESS CWD and, whenever that directory happens to hold a
+    // `capsule.toml`, run the manifest branch against an unrelated
+    // project — folding its dep closure into a resolution that is
+    // supposed to cover the runtime's deps alone. Gating keeps
+    // `project_root` empty, so control reaches the `else if
     // consumer.runtime_root.length > 0` manifest-less runtime-union
-    // branch rather than the manifest branch above it.
+    // branch by construction, and leaves `workspace_root` to the
+    // SFN-352 `bundled_workspace_start` probe, which is the one anchor
+    // deliberately independent of the CWD.
     // (2) Manifest-declared capsule deps and (3) workspace-implicit
     // imports use the first entry's directory as the anchor. By
     // construction (callers group entries by `(project_root,
@@ -180,7 +189,10 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer, bun
     let mut anchor_dir: string = "";
     if entry_paths.length > 0 { anchor_dir = _cr_dirname(entry_paths[0]); }
 
-    let source_workspace_root = discover_workspace_root(anchor_dir);
+    let mut source_workspace_root: string = "";
+    if entry_paths.length > 0 {
+        source_workspace_root = discover_workspace_root(anchor_dir);
+    }
     let mut workspace_root = source_workspace_root;
     if workspace_root.length == 0 {
         // SFN-352: the compiler driver supplies an absolute binary directory,
@@ -231,7 +243,10 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer, bun
         ei += 1;
     }
 
-    let project_root = discover_project_root(anchor_dir);
+    let mut project_root: string = "";
+    if entry_paths.length > 0 {
+        project_root = discover_project_root(anchor_dir);
+    }
 
     // (1b) Stage D PR3: opt-in `<project_root>/src/**/*.sfn` walk
     // for `kind = "binary"` `-p` builds. The relative-import

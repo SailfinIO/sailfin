@@ -23,7 +23,7 @@ import { int_to_string } from "sfn/strings";
 // the actual link set catches both failure modes.
 import { capsule_artifact_ir_dir, is_safe_scope_name, parse_scope_name } from "../capsule_artifact";
 import { RuntimeCapsuleArtifacts } from "../runtime_capsule_resolver";
-import { index_of } from "../string_utils";
+import { contains_string, index_of } from "../string_utils";
 
 // Returns the distinct `[dependencies]` specs declared across
 // `runtime_capsules` whose per-capsule IR tree
@@ -48,7 +48,7 @@ fn missing_runtime_dep_specs(runtime_capsules: RuntimeCapsuleArtifacts[], ll_pat
         loop {
             if di >= deps.length { break; }
             let spec = deps[di];
-            if !_lc_string_in_array(seen, spec) {
+            if !contains_string(seen, spec) {
                 seen.push(spec);
                 let parts = parse_scope_name(spec);
                 if is_safe_scope_name(parts.scope, parts.name) {
@@ -66,16 +66,6 @@ fn missing_runtime_dep_specs(runtime_capsules: RuntimeCapsuleArtifacts[], ll_pat
     return missing;
 }
 
-fn _lc_string_in_array(values: string[], target: string) -> boolean {
-    let mut i: int = 0;
-    loop {
-        if i >= values.length { break; }
-        if values[i] == target { return true; }
-        i += 1;
-    }
-    return false;
-}
-
 fn _lc_ll_paths_cover(ll_paths: string[], needle: string) -> boolean {
     let mut i: int = 0;
     loop {
@@ -89,9 +79,13 @@ fn _lc_ll_paths_cover(ll_paths: string[], needle: string) -> boolean {
 // Renders the driver diagnostic for a non-empty `missing_runtime_dep_specs`
 // result. Pure — the caller is responsible for printing it.
 fn runtime_dep_link_failure_message(missing: string[]) -> string {
-    let mut message = "link error: the runtime capsule declares "
+    let mut entry_word = "entries";
+    if missing.length == 1 { entry_word = "entry"; }
+    let mut message = "link-contract: the runtime capsule declares "
         + int_to_string(missing.length)
-        + " [dependencies] entries with no compiled module reaching the link:\n";
+        + " [dependencies] "
+        + entry_word
+        + " with no compiled module reaching the link:\n";
     let mut i: int = 0;
     loop {
         if i >= missing.length { break; }

@@ -3,8 +3,9 @@
 // SFN-341: unit coverage for `missing_runtime_dep_specs`, the pure
 // invariant check backing the runtime-dependency link contract. See
 // `compiler/src/build/link_contract.sfn` for the rationale.
-import { missing_runtime_dep_specs } from "../../src/build/link_contract";
+import { missing_runtime_dep_specs, runtime_dep_link_failure_message } from "../../src/build/link_contract";
 import { RuntimeCapsuleArtifacts, empty_runtime_capsule_artifacts } from "../../src/runtime_capsule_resolver";
+import { index_of } from "../../src/string_utils";
 
 test "missing_runtime_dep_specs: a dep with a matching ir/ path is covered" {
     let mut artifacts = empty_runtime_capsule_artifacts();
@@ -51,4 +52,42 @@ test "missing_runtime_dep_specs: an absolute link path still matches by substrin
     let ll_paths = ["/work/build/capsules/sfn/crypto/ir/x.ll"];
     let missing = missing_runtime_dep_specs(runtime_capsules, ll_paths);
     assert missing.length == 0;
+}
+
+test "missing_runtime_dep_specs: a sibling capsule with a longer name does not cover a shorter one" {
+    let mut artifacts = empty_runtime_capsule_artifacts();
+    artifacts.capsule_deps = ["sfn/crypto"];
+    let runtime_capsules: RuntimeCapsuleArtifacts[] = [artifacts];
+    let ll_paths = ["build/capsules/sfn/crypto-extra/ir/x.ll"];
+    let missing = missing_runtime_dep_specs(runtime_capsules, ll_paths);
+    assert missing.length == 1;
+    assert missing[0] == "sfn/crypto";
+}
+
+test "missing_runtime_dep_specs: overlapping deps across capsules dedupe in first-seen order" {
+    let mut first = empty_runtime_capsule_artifacts();
+    first.capsule_deps = ["sfn/crypto"];
+    let mut second = empty_runtime_capsule_artifacts();
+    second.capsule_deps = ["sfn/crypto", "sfn/other"];
+    let runtime_capsules: RuntimeCapsuleArtifacts[] = [first, second];
+    let ll_paths: string[] = [];
+    let missing = missing_runtime_dep_specs(runtime_capsules, ll_paths);
+    assert missing.length == 2;
+    assert missing[0] == "sfn/crypto";
+    assert missing[1] == "sfn/other";
+}
+
+test "runtime_dep_link_failure_message: renders the singular case correctly" {
+    let missing = ["sfn/crypto"];
+    let message = runtime_dep_link_failure_message(missing);
+    assert index_of(message, "1 [dependencies] entry") >= 0;
+    assert index_of(message, "sfn/crypto") >= 0;
+}
+
+test "runtime_dep_link_failure_message: lists every missing spec for the plural case" {
+    let missing = ["sfn/crypto", "sfn/other"];
+    let message = runtime_dep_link_failure_message(missing);
+    assert index_of(message, "2 [dependencies] entries") >= 0;
+    assert index_of(message, "sfn/crypto") >= 0;
+    assert index_of(message, "sfn/other") >= 0;
 }
