@@ -1,9 +1,10 @@
 // compiler/src/llvm/lowering/instructions_if.sfn
 //
 // Control flow handlers: if/else instruction lowering.
+import { substring } from "sfn/strings";
+
 import { Diag } from "../../diagnostic";
 import { NativeFunction, NativeInstruction, NativeSourceSpan } from "../../native_ir";
-import { char_code, grapheme_at, substring } from "../../string_utils";
 import { lower_expression } from "../expression_lowering/native/core";
 import { format_scope_id, pop_scope_metadata, push_scope_metadata } from "../expression_lowering/native/core_scopes";
 import { find_local_binding, find_parameter_binding } from "../expressions_bindings";
@@ -141,10 +142,9 @@ fn collect_if_structure(instructions: NativeInstruction[], start_index: int, end
     };
 }
 
-// Flow-sensitive variant narrowing (enum member-access type resolution).
-// A guard of the exact shape `<base>.variant == "<V>"` narrows `<base>`
-// to variant `<V>` inside the then-branch so an enum field access resolves
-// against that variant — see `lower_enum_member_access`.
+// Flow-sensitive variant narrowing: `<base>.variant == "<V>"` narrows the
+// then-branch so enum field access resolves against `<V>`; see
+// `lower_enum_member_access`.
 struct _VariantGuard {
     matched: boolean;
     base: string;

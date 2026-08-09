@@ -3,7 +3,8 @@
 // String array operations and miscellaneous lowering utilities. Extracted
 // from the former flat lowering_core.sfn to reduce per-file memory footprint
 // during self-hosting compilation.
-import { substring } from "../../string_utils";
+import { substring } from "sfn/strings";
+
 import { LifetimeRegionMetadata, StringConstant } from "../types";
 import {
     index_of,

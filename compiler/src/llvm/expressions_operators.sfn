@@ -1,7 +1,8 @@
 // compiler/src/llvm/expressions_operators.sfn
 //
 // Top-level operator finding, binary operator detection, and separator scanning.
-import { char_at, substring } from "../string_utils";
+import { char_at_index as char_at, substring } from "sfn/strings";
+
 import { contains_text } from "./expressions_helpers";
 import { OperatorMatch } from "./types";
 import { is_identifier_part_char } from "./utils";

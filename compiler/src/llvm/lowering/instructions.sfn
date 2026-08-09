@@ -7,9 +7,10 @@
 // live in instructions_helpers.sfn so that
 // lower_instruction_range is at source position 1 — within the v0.1.1
 // seed's per-module streaming emission limit.
+import { char_code_at, substring } from "sfn/strings";
+
 import { Diag } from "../../diagnostic";
 import { NativeFunction, NativeInstruction } from "../../native_ir";
-import { substring } from "../../string_utils";
 import {
     decode_captures,
     emit_closure_env_load_prologue,
@@ -821,11 +822,11 @@ fn _parse_prologue_int(text: string, key: string) -> int {
     if raw.length == 0 { return 0; }
     let mut value: int = 0;
     let mut idx: int = 0;
-    let zero_code = char_code("0");
-    let nine_code = char_code("9");
+    let zero_code = char_code_at("0", 0);
+    let nine_code = char_code_at("9", 0);
     loop {
         if idx >= raw.length { break; }
-        let code = char_code(raw[idx]);
+        let code = char_code_at(raw, idx);
         if code < zero_code { break; }
         if code > nine_code { break; }
         value = value * 10 + (code - zero_code);

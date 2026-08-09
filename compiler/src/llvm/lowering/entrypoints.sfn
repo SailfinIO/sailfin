@@ -1,6 +1,8 @@
 // compiler/src/llvm/lowering/entrypoints.sfn
 //
 // LLVM IR lowering entrypoints — public API surface.
+import { substring } from "sfn/strings";
+
 import {
     ImportedModuleContext,
     LayoutManifest,
@@ -35,7 +37,6 @@ import {
     select_text_artifact
 } from "../../native_ir_api";
 import { split_lines } from "../../native_ir_utils_text";
-import { char_code, substring } from "../../string_utils";
 import {
     append_function_effect_entry,
     append_unique_effect,
@@ -72,6 +73,7 @@ import {
     merge_string_constants,
     render_string_constants
 } from "../strings";
+import { sanitize_symbol } from "../symbols";
 import { build_type_context, fixup_enum_layouts } from "../type_context";
 import {
     CapabilityManifest,
@@ -93,7 +95,6 @@ import {
     index_of,
     join_with_separator,
     number_to_string,
-    sanitize_symbol,
     starts_with,
     string_array_contains,
     trim_text

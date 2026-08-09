@@ -1,6 +1,8 @@
 // compiler/src/llvm/lowering/lowering_helpers.sfn
 //
 // Shared utility functions for LLVM IR lowering.
+import { substring } from "sfn/strings";
+
 import {
     LayoutManifest,
     NativeArtifact,
@@ -32,11 +34,11 @@ import {
     select_text_artifact
 } from "../../native_ir_api";
 import { split_lines } from "../../native_ir_utils_text";
-import { char_code, substring } from "../../string_utils";
 import { append_unique_effect } from "../effects";
 import { is_prelude_mirror_symbol } from "../prelude_mirror_signatures";
 import { find_function_by_name, should_internalize_function } from "../rendering";
 import { runtime_helper_descriptors } from "../runtime_helpers/mod";
+import { is_llvm_symbol_char, sanitize_symbol } from "../symbols";
 import {
     CapabilityManifest,
     EnumTypeInfo,
@@ -56,7 +58,6 @@ import {
     index_of,
     join_with_separator,
     number_to_string,
-    sanitize_symbol,
     starts_with,
     string_array_contains,
     trim_text
@@ -269,28 +270,6 @@ struct MangledModuleResult {
 struct DeclareSignature {
     return_type: string;
     param_types: string[];
-}
-
-fn is_llvm_symbol_char(ch: string) -> boolean {
-    if ch.length == 0 { return false; }
-    if ch == "_" { return true; }
-    let code = char_code(ch);
-    let lower_a = char_code("a");
-    let lower_z = char_code("z");
-    if code >= lower_a {
-        if code <= lower_z { return true; }
-    }
-    let upper_a = char_code("A");
-    let upper_z = char_code("Z");
-    if code >= upper_a {
-        if code <= upper_z { return true; }
-    }
-    let zero = char_code("0");
-    let nine = char_code("9");
-    if code >= zero {
-        if code <= nine { return true; }
-    }
-    return false;
 }
 
 fn sanitize_module_suffix(module_name: string) -> string {

@@ -2,17 +2,17 @@
 //
 // Function emission (wrapping, async spawning, and body lowering orchestration).
 //
-// NOTE: This module has a mutual import with emission_async.sfn:
-//   emission.sfn imports emit_async_function from emission_async.sfn
-//   emission_async.sfn imports emit_llvm_function + prepare_parameters_from_function from emission.sfn
+// This module and emission_async.sfn mutually import emit_async_function,
+// emit_llvm_function, and prepare_parameters_from_function.
 // The Sailfin compiler's import resolver handles mutual imports correctly —
 // each module is compiled independently and cross-module calls are resolved
 // at link time via symbol mangling. This cycle is intentional: async emission
 // needs the main emit_llvm_function for the inner body, while the main
 // emitter delegates async wrapper generation to the async module.
+import { substring } from "sfn/strings";
+
 import { Diag, diag_to_legacy_string } from "../../diagnostic";
 import { NativeFunction } from "../../native_ir";
-import { substring } from "../../string_utils";
 import { make_string_constant_name_for_module } from "../expression_lowering/native/core_text";
 import { emit_runtime_call, empty_runtime_call_overrides } from "../expression_lowering/native/runtime_call";
 import { default_return_literal } from "../expressions_helpers";
@@ -26,6 +26,7 @@ import {
     empty_string_constant_set,
     merge_string_constants
 } from "../strings";
+import { sanitize_symbol } from "../symbols";
 import { map_return_type } from "../type_mapping";
 import {
     LLVMOperand,
@@ -47,7 +48,6 @@ import {
     lowering_error_diag,
     matches_case_insensitive,
     number_to_string,
-    sanitize_symbol,
     starts_with,
     string_array_contains,
     trim_text
