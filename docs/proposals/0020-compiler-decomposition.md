@@ -264,10 +264,10 @@ monolith, then moves files:
    they take exactly three symbols — `char_code` (4 sites), `substring` (3),
    `char_at` (2) — which are `sfn/strings` material by the rule above, and
    reachable there from every holding capsule under §3.3's narrow-stdlib grant.
-   §3.3 permits `sfn/syntax`, `sfn/ir`, and `sfn/analyzer` to depend on the
-   runtime prelude, so this is not an invariant breach; it is the same
-   generic-helper cleanup, and doing it here removes the prelude from four of
-   the five library capsules' dependency sets for free.
+   §3.3 permits `sfn/syntax`, `sfn/ir`, and `sfn/compiler` to depend on the
+   runtime prelude, so imports from those roles are not invariant breaches;
+   they are the same generic-helper cleanup, and doing it here removes the
+   prelude from four of the five library capsules' dependency sets for free.
 
    What remains after that cleanup is a migration hazard rather than a
    boundary error, and it is **not this proposal's to fix.** `"runtime/prelude"`
