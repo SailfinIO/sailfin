@@ -2,30 +2,31 @@
 //
 // Function emission (wrapping, async spawning, and body lowering orchestration).
 //
-// NOTE: This module has a mutual import with emission_async.sfn:
-//   emission.sfn imports emit_async_function from emission_async.sfn
-//   emission_async.sfn imports emit_llvm_function + prepare_parameters_from_function from emission.sfn
+// This module and emission_async.sfn mutually import emit_async_function,
+// emit_llvm_function, and prepare_parameters_from_function.
 // The Sailfin compiler's import resolver handles mutual imports correctly —
 // each module is compiled independently and cross-module calls are resolved
 // at link time via symbol mangling. This cycle is intentional: async emission
 // needs the main emit_llvm_function for the inner body, while the main
 // emitter delegates async wrapper generation to the async module.
+import { substring } from "sfn/strings";
+
 import { Diag, diag_to_legacy_string } from "../../diagnostic";
 import { NativeFunction } from "../../native_ir";
-import { substring } from "../../string_utils";
 import { make_string_constant_name_for_module } from "../expression_lowering/native/core_text";
 import { emit_runtime_call, empty_runtime_call_overrides } from "../expression_lowering/native/runtime_call";
 import { default_return_literal } from "../expressions_helpers";
 import { format_root_scope_id } from "../lifetime";
 import { build_target_os, target_setjmp_call_line } from "../lowering_debug_state";
 import { test_runner_trace } from "../lowering_debug_state";
-import { trace_lowering } from "../lowering_debug_state";
+import { trace_log, trace_lowering } from "../lowering_debug_state";
 import { should_internalize_function } from "../rendering_helpers";
 import {
     append_string_constant,
     empty_string_constant_set,
     merge_string_constants
 } from "../strings";
+import { sanitize_symbol } from "../symbols";
 import { map_return_type } from "../type_mapping";
 import {
     LLVMOperand,
@@ -47,7 +48,6 @@ import {
     lowering_error_diag,
     matches_case_insensitive,
     number_to_string,
-    sanitize_symbol,
     starts_with,
     string_array_contains,
     trim_text
@@ -279,7 +279,7 @@ fn prepare_parameters_from_function(function: NativeFunction, context: TypeConte
     };
 }
 
-fn emit_llvm_function(function: NativeFunction, functions: NativeFunction[], effects: string[], context: TypeContext, module_name: string, entry_points: string[], exported_symbols: string[], imported_functions: NativeFunction[], module_globals: LocalBinding[], module_init_symbol: string, needs_module_init_call: boolean, imported_decorator_names: string[]) -> LoweredLLVMFunction ![io] {
+fn emit_llvm_function(function: NativeFunction, functions: NativeFunction[], effects: string[], context: TypeContext, module_name: string, entry_points: string[], exported_symbols: string[], imported_functions: NativeFunction[], module_globals: LocalBinding[], module_init_symbol: string, needs_module_init_call: boolean, imported_decorator_names: string[]) -> LoweredLLVMFunction {
     let mut diagnostics: string[] = [];
     let mut diags: Diag[] = [];
     let debug_lowering = trace_lowering();
@@ -305,7 +305,7 @@ fn emit_llvm_function(function: NativeFunction, functions: NativeFunction[], eff
     let mut emit_main_wrapper: boolean = false;
     let mut llvm_return = map_return_type(context, fn_return_type);
     if debug_lowering {
-        print.err("emit-llvm: emit_fn phase=ret_type name=" + fn_name
+        trace_log("emit-llvm: emit_fn phase=ret_type name=" + fn_name
             + " llvm_return="
             + llvm_return);
     }
@@ -317,7 +317,7 @@ fn emit_llvm_function(function: NativeFunction, functions: NativeFunction[], eff
     if sanitized == "parse_native_functions_from_text" { _if197 = true; }
     if _if197 {
         if debug_lowering {
-            print.err("emit-llvm: ret_type override parse_native fn=" + fn_name);
+            trace_log("emit-llvm: ret_type override parse_native fn=" + fn_name);
         }
         llvm_return = "i8*";
     }
@@ -325,7 +325,7 @@ fn emit_llvm_function(function: NativeFunction, functions: NativeFunction[], eff
     if debug_lowering {
         let mut safe_text = "false";
         if safe_check { safe_text = "true"; }
-        print.err("emit-llvm: ret_type safe_check=" + safe_text
+        trace_log("emit-llvm: ret_type safe_check=" + safe_text
             + " llvm_return="
             + llvm_return
             + " fn="
@@ -373,7 +373,7 @@ fn emit_llvm_function(function: NativeFunction, functions: NativeFunction[], eff
     let preparation = prepare_parameters_from_function(function, context);
     diagnostics = extend_string_array(diagnostics, preparation.diagnostics);
     if debug_lowering {
-        print.err("emit-llvm: emit_fn phase=prepare_params name=" + fn_name
+        trace_log("emit-llvm: emit_fn phase=prepare_params name=" + fn_name
             + " params="
             + number_to_string(preparation.bindings.length));
     }
@@ -396,7 +396,7 @@ fn emit_llvm_function(function: NativeFunction, functions: NativeFunction[], eff
 
     let trace = test_runner_trace();
     if trace {
-        print.err("test llvm: emit_llvm_function preview " + fn_name
+        trace_log("test llvm: emit_llvm_function preview " + fn_name
             + " instrs="
             + number_to_string(fn_instr_count));
     }
@@ -425,10 +425,10 @@ fn emit_llvm_function(function: NativeFunction, functions: NativeFunction[], eff
     if debug_lowering {
         let mut internalize_text = "false";
         if internalize { internalize_text = "true"; }
-        print.err("emit-llvm: emit_fn phase=internalize_check name=" + fn_name
+        trace_log("emit-llvm: emit_fn phase=internalize_check name=" + fn_name
             + " internal="
             + internalize_text);
-        print.err("emit-llvm: emit_fn phase=define_header name=" + fn_name);
+        trace_log("emit-llvm: emit_fn phase=define_header name=" + fn_name);
     }
     let mut define_header: string = build_define_header_line(linkage, llvm_return, sanitized, signature);
     // M5.3 (#471): attach `alwaysinline` to the user-main body so the
@@ -460,7 +460,7 @@ fn emit_llvm_function(function: NativeFunction, functions: NativeFunction[], eff
     // For now, `@logExecution` / `@trace` calls into the runtime hook with the function name.
     let mut decorator_string_constants: StringConstant[] = empty_string_constant_set();
     if debug_lowering {
-        print.err("emit-llvm: emit_fn phase=decorators name=" + fn_name
+        trace_log("emit-llvm: emit_fn phase=decorators name=" + fn_name
             + " count="
             + number_to_string(fn_decorator_count));
     }
@@ -576,7 +576,7 @@ fn emit_llvm_function(function: NativeFunction, functions: NativeFunction[], eff
     }
 
     if debug_lowering {
-        print.err("emit-llvm: emit_fn phase=pre_body name=" + fn_name
+        trace_log("emit-llvm: emit_fn phase=pre_body name=" + fn_name
             + " instrs="
             + number_to_string(fn_instr_count)
             + " fn_count="
@@ -591,7 +591,7 @@ fn emit_llvm_function(function: NativeFunction, functions: NativeFunction[], eff
     diags = extend_diag_array(diags, _eb_result.diags);
 
     if debug_lowering {
-        print.err("emit-llvm: emit_fn phase=body_done name=" + fn_name
+        trace_log("emit-llvm: emit_fn phase=body_done name=" + fn_name
             + " body_lines="
             + number_to_string(_eb_body_lines.length)
             + " allocas="

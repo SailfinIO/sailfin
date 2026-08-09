@@ -27,13 +27,14 @@
 // target name does not match a descriptor key populate `symbol`.
 //
 // Diagnostic-and-fallback path: when no descriptor exists *and* the
-// caller has not supplied a return-type override, the function emits
-// a `print.err` describing the missing dispatch metadata and returns
+// caller has not supplied a return-type override, the function records
+// an ordered provider event describing the missing dispatch metadata and returns
 // an `ExpressionResult` carrying the diagnostic. Migration call
 // sites that hit this path haven't populated overrides — surfacing
 // the gap keeps malformed IR from leaking into emission. See epic
 // #494 for the M1.7 architecture and migration sequencing.
 import { format_temp_name, format_typed_operand } from "../../expressions_helpers";
+import { trace_log } from "../../lowering_debug_state";
 import { find_runtime_helper } from "../../runtime_helpers/mod";
 import {
     ExpressionResult,
@@ -155,7 +156,7 @@ fn _resolve_call_parameter_types(overrides: RuntimeCallOverrides, descriptor: Ru
 
 // Single descriptor-driven entry point for runtime helper calls.
 // See file header for the resolution precedence and render shape.
-fn emit_runtime_call(target: string, operands: LLVMOperand[], overrides: RuntimeCallOverrides, temp_index: int, lines: string[]) -> ExpressionResult ![io] {
+fn emit_runtime_call(target: string, operands: LLVMOperand[], overrides: RuntimeCallOverrides, temp_index: int, lines: string[]) -> ExpressionResult {
     let descriptor = find_runtime_helper(target);
     let call_symbol = _resolve_call_symbol(overrides, descriptor, target);
     let return_type = _resolve_call_return_type(overrides, descriptor);
@@ -176,7 +177,7 @@ fn emit_runtime_call(target: string, operands: LLVMOperand[], overrides: Runtime
             let missing_diag = "llvm lowering [fatal]: emit_runtime_call: no descriptor for `"
                 + target
                 + "` and no return-type override supplied";
-            print.err(missing_diag);
+            trace_log(missing_diag);
             result_diagnostics.push(missing_diag);
             return ExpressionResult {
                 lines: result_lines,
@@ -253,7 +254,7 @@ fn emit_runtime_call(target: string, operands: LLVMOperand[], overrides: Runtime
         let unresolved = "llvm lowering [fatal]: emit_runtime_call: cannot resolve return type for call to `"
             + target
             + "`";
-        print.err(unresolved);
+        trace_log(unresolved);
         result_diagnostics.push(unresolved);
         return ExpressionResult {
             lines: result_lines,

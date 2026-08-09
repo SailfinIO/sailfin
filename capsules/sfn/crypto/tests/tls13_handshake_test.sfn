@@ -396,7 +396,7 @@ test "tls13_handshake: the encoded ClientHello matches the RFC 8446 wire format"
     }
     let session_id: int[] = [];
     let message: int[] = encode_client_hello(random, session_id, key_share, "example.com");
-    assert eq_bytes(message, hexb("010000860303000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f00000213030100005b00000010000e00000b6578616d706c652e636f6d000a00040002001d000d000a00080403080408050807002b0003020304003300260024001d0020fffefdfcfbfaf9f8f7f6f5f4f3f2f1f0efeeedecebeae9e8e7e6e5e4e3e2e1e0"));
+    assert eq_bytes(message, hexb("010000880303000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f000004130313010100005b00000010000e00000b6578616d706c652e636f6d000a00040002001d000d000a00080403080408050807002b0003020304003300260024001d0020fffefdfcfbfaf9f8f7f6f5f4f3f2f1f0efeeedecebeae9e8e7e6e5e4e3e2e1e0"));
 }
 
 // A ClientHello with no server_name must simply omit the extension rather
@@ -445,13 +445,16 @@ test "tls13_handshake: the encoded ClientHello frames and offers correctly" {
         Result.Err { error } => { assert error.length == 0; }
     }
 
-    // ...and must offer exactly the one suite the capsule can seal with.
+    // ...and must offer both sealable suites, ChaCha20-Poly1305 first. The
+    // order is load-bearing: a server honouring client preference picks the
+    // fast pointer-idiom record path (SFN-814).
     let body: int[] = _body_of(message);
     let suites: Result<int[], string> = parse_client_hello_cipher_suites(body);
     match suites {
         Result.Ok { value } => {
-            assert value.length == 1;
+            assert value.length == 2;
             assert value[0] == tls_cipher_chacha20_poly1305_sha256();
+            assert value[1] == tls_cipher_aes_128_gcm_sha256();
         },
         Result.Err { error } => { assert error.length == 0; }
     }
@@ -475,7 +478,7 @@ test "tls13_handshake: a ServerHello selecting an unoffered suite is rejected" {
         Result.Err { error } => { assert error.length == 0; }
     }
 
-    // Send a ClientHello offering only ChaCha20-Poly1305...
+    // Send a ClientHello offering both sealable suites...
     let random: int[] = hexb("cb34ecb1e78163ba1c38c6dacb196a6dffa21a8d9912ec18a2ef6283024dece7");
     let session_id: int[] = [];
     let message: int[] = hs_client_hello(hs, random, session_id, "server");
@@ -485,8 +488,19 @@ test "tls13_handshake: a ServerHello selecting an unoffered suite is rejected" {
         Result.Err { error } => { assert error.length == 0; }
     }
 
-    // ...then reply with RFC 8448's ServerHello, which selects AES-128-GCM.
-    let bad: Result<ClientHandshake, string> = hs_client_recv_server_hello(hs, v_server_hello());
+    // ...then reply with a ServerHello selecting TLS_AES_256_GCM_SHA384
+    // (0x1302), which this client never offers — it is a SHA-384 suite, and the
+    // handshake hardcodes a 32-byte transcript hash. RFC 8448's own ServerHello
+    // selects AES-128-GCM, which the client does offer since SFN-814, so it can
+    // no longer stand in for an unoffered suite.
+    let mut sh: int[] = v_server_hello();
+    // 4-byte handshake header + legacy_version(2) + random(32) +
+    // session_id_len(1) puts the cipher suite at 39..41. Asserted before
+    // patching so a change to the vector cannot silently move it.
+    assert sh[39] == 19;
+    assert sh[40] == 1;
+    sh[40] = 2;
+    let bad: Result<ClientHandshake, string> = hs_client_recv_server_hello(hs, sh);
     match bad {
         Result.Ok { value } => { assert false; },
         Result.Err { error } => { assert error.length > 0; }

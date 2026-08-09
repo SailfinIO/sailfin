@@ -14,13 +14,14 @@
 // — `flatten_struct_methods` appends each lowered method to the result list.
 // The dependency is one-directional by construction: the mangling pass
 // references `flatten_struct_methods` only in comments, never in code.
+import { substring } from "sfn/strings";
+
 import {
     NativeFunction,
     NativeInterface,
     NativeParameter,
     NativeStruct
 } from "../../native_ir";
-import { substring } from "../../string_utils";
 import {
     CapabilityManifest,
     TraitDescriptor,

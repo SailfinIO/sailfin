@@ -35,6 +35,7 @@ import { NativeFunction } from "../native_ir";
 // ↔ core_call_lowering.sfn).
 import { lower_expression } from "./expression_lowering/native/core";
 import { format_temp_name } from "./expressions_helpers";
+import { trace_log } from "./lowering_debug_state";
 import { merge_string_constants } from "./strings";
 import {
     ExpressionResult,
@@ -67,7 +68,7 @@ fn is_atomic_builtin(name: string) -> boolean {
 // `store atomic` instruction. Returns an `ExpressionResult` whose
 // `operand` is the loaded i64 (for `atomic_load`) or null (for
 // `atomic_store`'s void return).
-fn lower_atomic_builtin(name: string, arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult ![io] {
+fn lower_atomic_builtin(name: string, arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult {
     let trimmed = trim_text(name);
     if trimmed == "atomic_load" {
         return _lower_atomic_load(arguments, bindings, locals, temp_index, lines, functions, context);
@@ -100,7 +101,7 @@ fn lower_atomic_builtin(name: string, arguments: string[], bindings: ParameterBi
     let mut diagnostics: string[] = [];
     let diag = "llvm lowering [fatal]: atomic builtin `" + trimmed
         + "` is reserved but not yet implemented (tracking issue #323)";
-    print.err(diag);
+    trace_log(diag);
     diagnostics.push(diag);
     return ExpressionResult {
         lines: lines,
@@ -113,7 +114,7 @@ fn lower_atomic_builtin(name: string, arguments: string[], bindings: ParameterBi
 
 // `atomic_load(ptr: *int) -> int` →
 //     %tN = load atomic i64, i64* <ptr>, seq_cst, align 8
-fn _lower_atomic_load(arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult ![io] {
+fn _lower_atomic_load(arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult {
     let mut diagnostics: string[] = [];
     let mut current_lines = lines;
     let mut current_temp = temp_index;
@@ -122,13 +123,13 @@ fn _lower_atomic_load(arguments: string[], bindings: ParameterBinding[], locals:
     if arguments.length != 1 {
         // E0806 carries the `[fatal]` sentinel so the emit-level
         // artifact result gate refuses publication — matching the issue #306
-        // contract for
-        // unresolvable callees. `print.err` mirrors the diagnostic to
-        // stderr the same way `core_call_emission/dispatch.sfn` does, so the
-        // user sees the failure rather than a silently-empty IR file.
+        // contract for unresolvable callees. The ordered provider event
+        // mirrors the diagnostic the same way
+        // `core_call_emission/dispatch.sfn` does, so the user sees the
+        // failure rather than a silently-empty IR file.
         let diag1 = "llvm lowering [fatal] [E0806]: atomic_load expects exactly 1 argument (`*int`), got "
             + number_to_string(arguments.length);
-        print.err(diag1);
+        trace_log(diag1);
         diagnostics.push(diag1);
         return ExpressionResult {
             lines: current_lines,
@@ -163,7 +164,7 @@ fn _lower_atomic_load(arguments: string[], bindings: ParameterBinding[], locals:
         let diag2 = "llvm lowering [fatal] [E0806]: atomic_load expects argument 0 of type `*int` (i64*), got `"
             + ptr_type
             + "`";
-        print.err(diag2);
+        trace_log(diag2);
         diagnostics.push(diag2);
         return ExpressionResult {
             lines: current_lines,
@@ -191,7 +192,7 @@ fn _lower_atomic_load(arguments: string[], bindings: ParameterBinding[], locals:
 
 // `atomic_store(ptr: *int, value: int) -> void` →
 //     store atomic i64 <value>, i64* <ptr>, seq_cst, align 8
-fn _lower_atomic_store(arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult ![io] {
+fn _lower_atomic_store(arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult {
     let mut diagnostics: string[] = [];
     let mut current_lines = lines;
     let mut current_temp = temp_index;
@@ -200,7 +201,7 @@ fn _lower_atomic_store(arguments: string[], bindings: ParameterBinding[], locals
     if arguments.length != 2 {
         let diag1 = "llvm lowering [fatal] [E0806]: atomic_store expects exactly 2 arguments (`*int`, `int`), got "
             + number_to_string(arguments.length);
-        print.err(diag1);
+        trace_log(diag1);
         diagnostics.push(diag1);
         return ExpressionResult {
             lines: current_lines,
@@ -235,7 +236,7 @@ fn _lower_atomic_store(arguments: string[], bindings: ParameterBinding[], locals
         let diag2 = "llvm lowering [fatal] [E0806]: atomic_store expects argument 0 of type `*int` (i64*), got `"
             + ptr_type
             + "`";
-        print.err(diag2);
+        trace_log(diag2);
         diagnostics.push(diag2);
         return ExpressionResult {
             lines: current_lines,
@@ -270,7 +271,7 @@ fn _lower_atomic_store(arguments: string[], bindings: ParameterBinding[], locals
         let diag3 = "llvm lowering [fatal] [E0806]: atomic_store expects argument 1 of type `int` (i64), got `"
             + value_type
             + "`";
-        print.err(diag3);
+        trace_log(diag3);
         diagnostics.push(diag3);
         return ExpressionResult {
             lines: current_lines,
@@ -301,14 +302,14 @@ fn _lower_atomic_store(arguments: string[], bindings: ParameterBinding[], locals
 // E0806 (the same code M0-Atomics.1 reserved for atomic-arity /
 // type errors), extended with an "expected zero arguments"
 // message as the sub-issue contract specifies.
-fn _lower_atomic_fence(arguments: string[], temp_index: int, lines: string[]) -> ExpressionResult ![io] {
+fn _lower_atomic_fence(arguments: string[], temp_index: int, lines: string[]) -> ExpressionResult {
     let mut diagnostics: string[] = [];
     let mut current_lines = lines;
 
     if arguments.length != 0 {
         let diag = "llvm lowering [fatal] [E0806]: atomic_fence expects zero arguments, got "
             + number_to_string(arguments.length);
-        print.err(diag);
+        trace_log(diag);
         diagnostics.push(diag);
         return ExpressionResult {
             lines: current_lines,
@@ -347,7 +348,7 @@ fn _lower_atomic_fence(arguments: string[], temp_index: int, lines: string[]) ->
 // mnemonic (`add` vs `sub`) differs. `name` is threaded through to
 // the diagnostics so the user sees the Sailfin-level builtin name
 // (e.g. `atomic_sub`) rather than the LLVM op.
-fn _lower_atomic_rmw(op: string, name: string, arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult ![io] {
+fn _lower_atomic_rmw(op: string, name: string, arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult {
     let mut diagnostics: string[] = [];
     let mut current_lines = lines;
     let mut current_temp = temp_index;
@@ -357,7 +358,7 @@ fn _lower_atomic_rmw(op: string, name: string, arguments: string[], bindings: Pa
         let diag1 = "llvm lowering [fatal] [E0806]: " + name
             + " expects exactly 2 arguments (`*int`, `int`), got "
             + number_to_string(arguments.length);
-        print.err(diag1);
+        trace_log(diag1);
         diagnostics.push(diag1);
         return ExpressionResult {
             lines: current_lines,
@@ -394,7 +395,7 @@ fn _lower_atomic_rmw(op: string, name: string, arguments: string[], bindings: Pa
             + " expects argument 0 of type `*int` (i64*), got `"
             + ptr_type
             + "`";
-        print.err(diag2);
+        trace_log(diag2);
         diagnostics.push(diag2);
         return ExpressionResult {
             lines: current_lines,
@@ -431,7 +432,7 @@ fn _lower_atomic_rmw(op: string, name: string, arguments: string[], bindings: Pa
             + " expects argument 1 of type `int` (i64), got `"
             + delta_type
             + "`";
-        print.err(diag3);
+        trace_log(diag3);
         diagnostics.push(diag3);
         return ExpressionResult {
             lines: current_lines,
@@ -473,7 +474,7 @@ fn _lower_atomic_rmw(op: string, name: string, arguments: string[], bindings: Pa
 // Both memory orderings on `cmpxchg` are pinned to `seq_cst`
 // (success and failure). v0 also ships strong cmpxchg only — no
 // `cmpxchg weak` — matching the rest of the M0 atomics surface.
-fn _lower_atomic_cas(arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult ![io] {
+fn _lower_atomic_cas(arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult {
     let mut diagnostics: string[] = [];
     let mut current_lines = lines;
     let mut current_temp = temp_index;
@@ -482,7 +483,7 @@ fn _lower_atomic_cas(arguments: string[], bindings: ParameterBinding[], locals: 
     if arguments.length != 3 {
         let diag1 = "llvm lowering [fatal] [E0806]: atomic_cas expects exactly 3 arguments (`*int`, `int`, `int`), got "
             + number_to_string(arguments.length);
-        print.err(diag1);
+        trace_log(diag1);
         diagnostics.push(diag1);
         return ExpressionResult {
             lines: current_lines,
@@ -517,7 +518,7 @@ fn _lower_atomic_cas(arguments: string[], bindings: ParameterBinding[], locals: 
         let diag2 = "llvm lowering [fatal] [E0806]: atomic_cas expects argument 0 of type `*int` (i64*), got `"
             + ptr_type
             + "`";
-        print.err(diag2);
+        trace_log(diag2);
         diagnostics.push(diag2);
         return ExpressionResult {
             lines: current_lines,
@@ -552,7 +553,7 @@ fn _lower_atomic_cas(arguments: string[], bindings: ParameterBinding[], locals: 
         let diag3 = "llvm lowering [fatal] [E0806]: atomic_cas expects argument 1 of type `int` (i64), got `"
             + expected_type
             + "`";
-        print.err(diag3);
+        trace_log(diag3);
         diagnostics.push(diag3);
         return ExpressionResult {
             lines: current_lines,
@@ -587,7 +588,7 @@ fn _lower_atomic_cas(arguments: string[], bindings: ParameterBinding[], locals: 
         let diag4 = "llvm lowering [fatal] [E0806]: atomic_cas expects argument 2 of type `int` (i64), got `"
             + new_type
             + "`";
-        print.err(diag4);
+        trace_log(diag4);
         diagnostics.push(diag4);
         return ExpressionResult {
             lines: current_lines,

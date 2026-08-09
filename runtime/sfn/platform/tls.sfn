@@ -52,6 +52,7 @@
 // inside `tls_connect_fd`/`tls_accept_fd`'s own scope; on reaching the
 // connected state the four traffic key/IV arrays are copied out into
 // malloc'd byte buffers and steady state is pointer-only.
+import { aead_aes_128_gcm, aead_chacha20_poly1305 } from "sfn/crypto/aead";
 import { ed25519_seed_from_pkcs8_pem } from "sfn/crypto/ed25519_sign";
 import { pem_certificates_to_der } from "sfn/crypto/pem";
 import { random_bytes } from "sfn/crypto/rand";
@@ -71,8 +72,13 @@ import {
     tls13_traffic_iv,
     tls13_traffic_key
 } from "sfn/crypto/tls13_handshake";
-import { hs_type_finished, hs_type_server_hello } from "sfn/crypto/tls13_handshake_codec";
-import { tls13_open_record, tls13_seal_record } from "sfn/crypto/tls13_record";
+import {
+    hs_type_finished,
+    hs_type_server_hello,
+    tls_cipher_aes_128_gcm_sha256,
+    tls_cipher_chacha20_poly1305_sha256
+} from "sfn/crypto/tls13_handshake_codec";
+import { tls13_open_record_aead, tls13_seal_record_aead } from "sfn/crypto/tls13_record";
 import { TlsRecordPlaintext } from "sfn/crypto/tls13_record";
 import {
     ServerHandshake,
@@ -121,6 +127,28 @@ extern fn sfn_fs_read_file(path: *u8) -> *u8;
 
 extern fn sfn_clock_unix_millis(out_millis: *i64) -> i32;
 
+// Diagnostics only (SFN-816). `write` targets fd 2 and never the socket;
+// socket writes go through `send` above.
+extern fn getenv(name: *u8) -> *u8;
+
+extern fn strlen(s: *u8) -> usize;
+
+// This module already declares `memcpy`/`memset` above but not `memcmp`;
+// the trace gate's empty-string probe needs it.
+extern fn memcmp(a: *u8, b: *u8, n: usize) -> i32;
+
+// Defined in `runtime/sfn/string.sfn`; forward-declared here the same way
+// `runtime/sfn/array.sfn` declares this exact symbol.
+extern fn sfn_int_to_str(value: i64) -> *u8;
+
+extern fn write(fd: i32, buf: *u8, count: usize) -> i64;
+
+// `sfn_str_eq` is genuinely `(i8*, i8*)`, unlike the prelude
+// `strings_equal`, whose `{i8*, i64}` aggregate-string ABI would read
+// garbage length fields from a `* u8` call (#1372). Same reasoning as
+// `runtime/sfn/platform/rlimit.sfn`, which this trace surface mirrors.
+extern fn sfn_str_eq(a: *u8, b: *u8) -> bool;
+
 // Adopt a NUL-terminated C string as a Sailfin string.
 fn _tls_cstr(p: *u8) -> string {
     if p as i64 == 0 { return ""; }
@@ -163,6 +191,202 @@ fn _tls_alert_close_notify() -> i64 { return 0; }
 // AlertLevel fatal(2).
 fn _tls_alert_level_fatal() -> i64 { return 2; }
 
+// The AlertDescription values (RFC 8446 §6.2) the driver names. Only the
+// ones it either sends or reports are here — this is a diagnostic
+// vocabulary, not the full registry, and an unnamed description is
+// reported by number rather than being mapped to a wrong name.
+//
+// `handshake_failure` is the one worth calling out: it is what a server
+// sends when no offered cipher suite is acceptable, so it is the alert
+// that distinguishes "we cannot negotiate" from "the socket died"
+// (SFN-814, where the two were the same observation).
+fn _tls_alert_handshake_failure() -> i64 { return 40; }
+
+fn _tls_alert_bad_certificate() -> i64 { return 42; }
+
+fn _tls_alert_certificate_expired() -> i64 { return 45; }
+
+fn _tls_alert_unknown_ca() -> i64 { return 48; }
+
+fn _tls_alert_protocol_version() -> i64 { return 70; }
+
+// ── Failure reasons (SFN-816) ────────────────────────────────────
+//
+// Why a positive enum with 0 = none, rather than the negative codes
+// `tls_record.sfn::sfn_tls_record_err_*` uses: those are returned
+// *in band* alongside a non-negative success length, so they must be
+// negative to be distinguishable. These are read from a dedicated slot
+// that has no success value to collide with, so a plain ordinal reads
+// better and 0 is a natural "nothing recorded".
+fn _tls_err_none() -> i64 { return 0; }
+
+fn _tls_err_session_alloc() -> i64 { return 1; }
+
+fn _tls_err_handshake_init() -> i64 { return 2; }
+
+fn _tls_err_handshake_send() -> i64 { return 3; }
+
+fn _tls_err_handshake_recv() -> i64 { return 4; }
+
+// The peer sent a fatal alert. `tls_last_alert()` carries which one.
+fn _tls_err_peer_alert() -> i64 { return 5; }
+
+// The trust store could not be loaded at all — distinct from loading
+// cleanly and then finding no anchor for this chain, which is
+// `_tls_err_cert_verify` with a `no-anchor` verdict code.
+fn _tls_err_trust_store() -> i64 { return 6; }
+
+fn _tls_err_cert_verify() -> i64 { return 7; }
+
+fn _tls_err_record() -> i64 { return 8; }
+
+// ── Last-error slots ─────────────────────────────────────────────
+//
+// `tls_connect_fd` frees the session on every failure path and returns a
+// bare `null`, so a reason stored in `TlsSession` dies with it. These
+// process-global slots outlive the free, which is what lets a caller ask
+// *why* after the fact.
+//
+// Concurrency: process-global, last-writer-wins, deliberately
+// unsynchronised. A single client connect is sequential, so the slots are
+// accurate for the common case. Two concurrent handshakes in one process
+// are worse than lossy, and the honest statement is *misattribution*, not
+// loss: because `_tls_fail_if_unset` reads a shared slot, connection B can
+// see connection A's reason, suppress its own, and then report A's reason
+// as B's. Reachable today through `http.sfn`'s client under `spawn`.
+//
+// Clearing is likewise narrower than "cleared per connect".
+// `tls_connect_fd` clears both slots on entry, but it is not the only
+// writer: `tls_read` records through `_tls_classify_alert` in steady
+// state, and `tls_accept_fd` reaches the same path and never clears. So a
+// post-connect `tls_read` failure that is not a peer alert can leave the
+// connect-time value readable, and a server-only process (`serve.sfn`),
+// which never calls `tls_connect_fd`, latches whatever it last saw.
+//
+// All of which is acceptable for a diagnostic and is not acceptable for
+// control flow — nothing in the driver branches on these except
+// `_tls_fail_if_unset`, and callers must not either. A nursery-scoped slot
+// under structured concurrency is the real fix and is post-1.0.
+extern var sfn_tls_last_error: i64 = 0;
+
+extern var sfn_tls_last_alert: i64 = 0;
+
+// Record a failure reason. Effect-free: a global store is not a
+// capability, matching `http.sfn::_conn_tls_register`, which writes
+// `http_conn_tls_head` with no annotation. That is what lets the
+// `![net]`-only read path record reasons without acquiring `![io]` and
+// propagating it to every caller.
+fn _tls_note(reason: i64) -> void { sfn_tls_last_error = reason; }
+
+// The reason for the most recent driver failure in this process, or
+// `_tls_err_none()`. Cleared at the start of each `tls_connect_fd`.
+fn tls_last_error() -> i64 { return sfn_tls_last_error; }
+
+// The peer's AlertDescription byte when `tls_last_error()` is
+// `_tls_err_peer_alert()`.
+//
+// Not guaranteed 0 otherwise: a `tls_read` alert can set this slot and a
+// later non-alert failure can then set only the reason, so read it only
+// when the reason is `peer-alert` (compare via `tls_error_name`).
+fn tls_last_alert() -> i64 { return sfn_tls_last_alert; }
+
+// Human-readable form of a reason code, for a trace line or a test
+// assertion. Kept a total function: an unknown code is reported rather
+// than triggering a panic on a diagnostic path.
+fn tls_error_name(reason: i64) -> string {
+    if reason == _tls_err_none() { return "none"; }
+    if reason == _tls_err_session_alloc() { return "session-alloc"; }
+    if reason == _tls_err_handshake_init() { return "handshake-init"; }
+    if reason == _tls_err_handshake_send() { return "handshake-send"; }
+    if reason == _tls_err_handshake_recv() { return "handshake-recv"; }
+    if reason == _tls_err_peer_alert() { return "peer-alert"; }
+    if reason == _tls_err_trust_store() { return "trust-store"; }
+    if reason == _tls_err_cert_verify() { return "cert-verify"; }
+    if reason == _tls_err_record() { return "record"; }
+    return "unknown";
+}
+
+// Decimal form of an integer, for the unnamed-alert case.
+//
+// Forwards to the runtime's own `sfn_int_to_str` rather than reaching for
+// `sfn/strings::int_to_string`, which would add a second capsule edge to
+// `runtime/capsule.toml` for a diagnostic string. The sibling
+// forward-declare is the module header's stated convention and is already
+// used for this exact symbol in `runtime/sfn/array.sfn`. It handles
+// negatives and INT64_MIN, which a hand-rolled digit loop here did not.
+fn _tls_dec(v: i64) -> string { return _tls_cstr(sfn_int_to_str(v)); }
+
+// Human-readable form of an AlertDescription. Unnamed descriptions fall
+// through to "alert-<n>" rather than being guessed at.
+fn tls_alert_name(desc: i64) -> string {
+    if desc == _tls_alert_close_notify() { return "close_notify"; }
+    if desc == _tls_alert_handshake_failure() { return "handshake_failure"; }
+    if desc == _tls_alert_bad_certificate() { return "bad_certificate"; }
+    if desc == _tls_alert_certificate_expired() { return "certificate_expired"; }
+    if desc == _tls_alert_unknown_ca() { return "unknown_ca"; }
+    if desc == _tls_alert_protocol_version() { return "protocol_version"; }
+    return "alert-" + _tls_dec(desc);
+}
+
+// Which message of the server flight a failure was processing. The step
+// index is the loop's own state and is not recoverable from the handshake
+// error string, which describes the parse rather than the message.
+fn _tls_step_name(step: i64) -> string {
+    if step == 0 { return "EncryptedExtensions"; }
+    if step == 1 { return "Certificate"; }
+    if step == 2 { return "CertificateVerify"; }
+    if step == 3 { return "Finished"; }
+    return "step-" + _tls_dec(step);
+}
+
+// `SAILFIN_TRACE_TLS` gate: set, non-empty, and not `"0"`. Mirrors
+// `rlimit.sfn::_mem_limit_trace_enabled` exactly, including the `memcmp`
+// empty-string probe.
+fn _tls_trace_enabled() -> bool {
+    let s_env: string = "SAILFIN_TRACE_TLS";
+    let v: *u8 = getenv(s_env as *u8);
+    if v as i64 == 0 { return false; }
+    let s_empty: string = "";
+    if memcmp(v, s_empty as *u8, 1 as usize) == 0 { return false; }
+    let s_zero: string = "0";
+    if sfn_str_eq(v, s_zero as *u8) { return false; }
+    return true;
+}
+
+// Stderr trace line. `2` is the stderr fd, inline-numeric per the
+// module-header convention. Only ever called from a function that
+// already declares `![io]`, so this surface adds no effect anywhere.
+fn _tls_trace(msg: string) -> void ![io] {
+    if !_tls_trace_enabled() { return; }
+    let line: string = "[tls] " + msg + "\n";
+    let p: *u8 = line as *u8;
+    write(2, p, strlen(p));
+}
+
+// Record a reason and trace it in one step, for the `![io]` paths.
+fn _tls_fail(reason: i64, detail: string) -> void ![io] {
+    _tls_note(reason);
+    _tls_trace(tls_error_name(reason) + ": " + detail);
+}
+
+// Record only if nothing has been recorded yet — first reason wins.
+//
+// Load-bearing on the pump paths. `_tls_pump_handshake` reports failure
+// by setting `s.failed`, and when the cause was a peer alert
+// `_tls_classify_alert` has *already* recorded `peer_alert` plus the
+// description. A plain `_tls_fail` at the `s.failed` check would then
+// overwrite "peer sent handshake_failure" with the far less useful
+// "handshake-recv" — reintroducing, one layer up, exactly the erasure
+// this issue exists to remove. The specific cause is always nearer the
+// failure than the generic one, so the earlier write is the better one.
+fn _tls_fail_if_unset(reason: i64, detail: string) -> void ![io] {
+    if sfn_tls_last_error != _tls_err_none() {
+        _tls_trace("(also) " + tls_error_name(reason) + ": " + detail);
+        return;
+    }
+    _tls_fail(reason, detail);
+}
+
 // Maximum TLSCiphertext.encrypted_record, 2^14 + 256 (§5.2), plus the
 // 5-byte header — the largest wire record the driver will buffer.
 fn _tls_max_record_wire() -> i64 { return 16645; }
@@ -179,7 +403,7 @@ fn _tls_state_closed() -> i64 { return 2; }
 
 // ── Session object ───────────────────────────────────────────────
 // Scalar-only, malloc'd, addressed through a typed pointer — the
-// `scheduler.sfn` precedent. Eighteen i64 slots = 144 bytes.
+// `scheduler.sfn` precedent. Twenty-one i64 slots = 168 bytes.
 //
 // `rx_*` holds bytes read from the socket that do not yet form a
 // complete record. `pt_*` holds decrypted application data not yet
@@ -205,9 +429,24 @@ struct TlsSession {
     pt_off: i64;
     eof: i64;
     failed: i64;
+    // The negotiated cipher suite (RFC 8446 §B.4 code point), stored so the
+    // record path can pick the AEAD. Zero until the first key install, and
+    // zero dispatches to no AEAD at all — a session cannot seal or open
+    // before a suite is negotiated.
+    suite: i64;
+    // The byte length of the buffer at `read_key_addr` / `write_key_addr`,
+    // written by the same installer that allocates it. Deriving it from
+    // `suite` instead would couple a length to a different write than the
+    // allocation: if the two directions ever install different suites (a
+    // KeyUpdate path, a per-direction suite), a 32-byte read of a 16-byte
+    // AES key would feed heap bytes past the allocation into an AEAD key.
+    read_key_len: i64;
+    write_key_len: i64;
 }
 
-fn _tls_session_bytes() -> i64 { return 144; }
+// 21 i64 fields. Bump this with every field added, or the last one writes
+// past the allocation.
+fn _tls_session_bytes() -> i64 { return 168; }
 
 // A server context carries the certificate chain and signing seed the
 // handshake needs; a client context carries nothing but its role. Both
@@ -412,9 +651,25 @@ fn _tls_classify_alert(body: int[]) -> i64 {
     let level: i64 = body[0];
     let desc: i64 = body[1];
     if desc == _tls_alert_close_notify() {
-        if level != _tls_alert_level_fatal() { return 0; }
+        // The two arms here both returned 0, leaving `level` bound and
+        // unread. close_notify is a clean stream end at either level, so
+        // there is genuinely one outcome — the branch was dead, not a
+        // missing case, and collapsing it is the honest fix. `level` is
+        // not recorded: `tls_last_alert()` is contracted as the
+        // AlertDescription byte, and packing a level into it would make
+        // `tls_alert_name` render a composite as "alert-<n>".
+        sfn_tls_last_alert = desc;
         return 0;
     }
+    // Retain the description before collapsing to -1 (SFN-816). Every
+    // fatal alert used to return the same -1 as a `recv` timeout, so a
+    // server refusing our cipher suites (`handshake_failure`, 40) was
+    // indistinguishable from a dead socket — which is what made SFN-814
+    // need a loopback ciphersuite matrix to diagnose. Recording it is a
+    // global store, so this stays effect-free and the `![net]`-only read
+    // path does not acquire `![io]`.
+    sfn_tls_last_alert = desc;
+    _tls_note(_tls_err_peer_alert());
     return 0 - 1;
 }
 
@@ -430,9 +685,122 @@ fn _tls_send_alert(s: *TlsSession, desc: i64) -> void ![net] {
     let _ = _tls_write_encrypted(s, _tls_ct_alert(), body);
 }
 
-// ── Encrypted record I/O over the pointer record layer ───────────
-// Steady state: keys and IVs are malloc'd byte buffers, so seal/open go
-// straight through `tls_record.sfn` with no `int[]` materialisation.
+// ── Suite dispatch ───────────────────────────────────────────────
+// The AEAD identifier (`sfn/crypto/aead`) for a negotiated cipher suite, or 0
+// for one this stack cannot carry records under. Only the two SHA-256 suites
+// are mapped: TLS_AES_256_GCM_SHA384 needs a 48-byte hash threaded through the
+// handshake and is out of scope (SFN-814).
+fn _tls_suite_aead(suite: i64) -> int {
+    if suite == tls_cipher_chacha20_poly1305_sha256() {
+        return aead_chacha20_poly1305();
+    }
+    if suite == tls_cipher_aes_128_gcm_sha256() { return aead_aes_128_gcm(); }
+    return 0;
+}
+
+// The traffic-key length a suite derives, or 0 if unsupported. Kept next to the
+// AEAD mapping so the two cannot drift: a suite that maps to an AEAD must also
+// state its key length.
+fn _tls_suite_key_len(suite: i64) -> i64 {
+    if suite == tls_cipher_chacha20_poly1305_sha256() { return 32; }
+    if suite == tls_cipher_aes_128_gcm_sha256() { return 16; }
+    return 0;
+}
+
+// ── Encrypted record I/O ─────────────────────────────────────────
+// ChaCha20-Poly1305 goes straight through `tls_record.sfn`, the `*u8`
+// pointer-idiom record layer, with no `int[]` materialisation — that is the
+// ~233 MB/s path SFN-768 exists for.
+//
+// AES-GCM goes through the capsule's `int[]` record layer instead.
+// `tls_record.sfn` implements only ChaCha20 and Poly1305 and stays
+// deliberately self-contained, so a suite it cannot carry never reaches it:
+// its `key_len != 32` guard is left strict rather than loosened, which keeps
+// running the wrong cipher unrepresentable there instead of merely guarded
+// against. A 32-byte AES-256-GCM key would otherwise satisfy a length-only
+// check and be encrypted with ChaCha20 — a failure that surfaces at the peer
+// as a bad tag, not here.
+//
+// The cost is real, and stated as a bound rather than a measurement: the
+// capsule *primitive* measures ~1.0 MB/s at -O2 (SFN-339's
+// `aes_gcm_seal_bench`), and this path adds three `int[]` marshalling
+// passes plus record framing and a writeback loop on top, so ~1 MB/s is a
+// ceiling this path cannot exceed. The ~233 MB/s ChaCha20 figure *is* a
+// runtime-layer measurement, so the two are not directly comparable —
+// SFN-817 measures the AES path properly. That asymmetry is why
+// `encode_client_hello` offers
+// ChaCha20-Poly1305 first, inverting the usual AES-NI-era preference — this
+// stack has no AES-NI, so its AES is the slow option. SFN-817 ports AES-GCM to
+// the pointer idiom and retires this split.
+// Seal one record under the session's negotiated suite into `out`, returning
+// the wire byte count or -1 fail-closed. `out` must hold
+// `5 + content_len + 1 + tag`, which is what both callers allocate.
+fn _tls_seal_record(s: *TlsSession, content_type: i64, content: *u8, content_len: i64, out: *u8) -> i64 {
+    // Reject an oversized fragment before the AES branch materialises an
+    // `int[]` of it. The pointer path rejects at zero allocation cost, and
+    // `tls_write` caps nothing, so without this an AES-GCM session pays
+    // 8 bytes per content byte before failing closed — consequential
+    // against the 8 GiB RLIMIT_AS the toolchain self-applies.
+    if content_len < 0 { return 0 - 1; }
+    if content_len > 16384 { return 0 - 1; }
+    if s.suite == tls_cipher_chacha20_poly1305_sha256() {
+        return sfn_tls_record_seal(s.write_key_addr as *u8, 32, s.write_iv_addr as *u8, 12, s.write_seq, content_type, content, content_len, 0, out);
+    }
+    let alg: int = _tls_suite_aead(s.suite);
+    if alg == 0 { return 0 - 1; }
+    let key: int[] = _tls_buf_to_bytes(s.write_key_addr as *u8, 0, s.write_key_len);
+    let iv: int[] = _tls_buf_to_bytes(s.write_iv_addr as *u8, 0, 12);
+    let body: int[] = _tls_buf_to_bytes(content, 0, content_len);
+    let rec: int[] = tls13_seal_record_aead(alg, key, iv, s.write_seq, content_type, body, 0);
+    if rec.length == 0 { return 0 - 1; }
+    if rec.length > 5 + content_len + 1 + 16 { return 0 - 1; }
+    let mut i: i64 = 0;
+    loop {
+        if i >= rec.length { break; }
+        _tls_put(out, i, rec[i]);
+        i = i + 1;
+    }
+    return rec.length;
+}
+
+// Open the record at `base[0..total)` under the session's negotiated suite.
+// Matches `sfn_tls_record_open`'s contract exactly: the recovered plaintext is
+// written back in place at `base + 5`, and the return packs the inner content
+// type in the high 32 bits and its length in the low 32, or -1 fail-closed.
+fn _tls_open_record(s: *TlsSession, base: *u8, total: i64) -> i64 {
+    if s.suite == tls_cipher_chacha20_poly1305_sha256() {
+        return sfn_tls_record_open(s.read_key_addr as *u8, 32, s.read_iv_addr as *u8, 12, s.read_seq, base, total);
+    }
+    let alg: int = _tls_suite_aead(s.suite);
+    if alg == 0 { return 0 - 1; }
+    let key: int[] = _tls_buf_to_bytes(s.read_key_addr as *u8, 0, s.read_key_len);
+    let iv: int[] = _tls_buf_to_bytes(s.read_iv_addr as *u8, 0, 12);
+    let rec: int[] = _tls_buf_to_bytes(base, 0, total);
+    let opened: Result<TlsRecordPlaintext, string> = tls13_open_record_aead(alg, key, iv, s.read_seq, rec);
+    match opened {
+        Result.Err { error } => { return 0 - 1; },
+        Result.Ok { value } => {
+            return _tls_open_writeback(s, base, total, value);
+        }
+    }
+}
+
+// Write the recovered plaintext back to `base + 5` and pack the return value.
+// Split out of `_tls_open_record` because a `match` arm carrying trailing
+// control flow is miscompiled by the pinned seed (SFN-378) — the same reason
+// `sfn/crypto/tls13_record.sfn` splits its own open path.
+fn _tls_open_writeback(s: *TlsSession, base: *u8, total: i64, pt: TlsRecordPlaintext) -> i64 {
+    let n: i64 = pt.content.length;
+    if 5 + n > total { return 0 - 1; }
+    let mut i: i64 = 0;
+    loop {
+        if i >= n { break; }
+        _tls_put(base, 5 + i, pt.content[i]);
+        i = i + 1;
+    }
+    return (pt.content_type << 32) | n;
+}
+
 fn _tls_write_encrypted(s: *TlsSession, content_type: i64, body: int[]) -> bool ![net] {
     let n: i64 = body.length;
     let content: *u8 = _tls_bytes_to_buf(body);
@@ -442,7 +810,7 @@ fn _tls_write_encrypted(s: *TlsSession, content_type: i64, body: int[]) -> bool 
         free(content);
         return false;
     }
-    let wrote: i64 = sfn_tls_record_seal(s.write_key_addr as *u8, 32, s.write_iv_addr as *u8, 12, s.write_seq, content_type, content, n, 0, out);
+    let wrote: i64 = _tls_seal_record(s, content_type, content, n, out);
     free(content);
     if wrote < 0 {
         free(out);
@@ -460,10 +828,15 @@ fn _tls_write_encrypted(s: *TlsSession, content_type: i64, body: int[]) -> bool 
 // -> handshake keys after ServerHello, and handshake -> application
 // keys after Finished, per direction.
 fn _tls_install_read_key(s: *TlsSession, secret: int[], suite: i64) -> bool {
+    let want: i64 = _tls_suite_key_len(suite);
+    if want == 0 { return false; }
     let key: int[] = tls13_traffic_key(secret, suite);
     let iv: int[] = tls13_traffic_iv(secret);
-    if key.length != 32 { return false; }
+    if key.length != want { return false; }
     if iv.length != 12 { return false; }
+    s.suite = suite;
+    s.write_key_len = key.length;
+    s.read_key_len = key.length;
     if s.read_key_addr != 0 { free(s.read_key_addr as *u8); }
     if s.read_iv_addr != 0 { free(s.read_iv_addr as *u8); }
     let kb: *u8 = _tls_bytes_to_buf(key);
@@ -480,10 +853,13 @@ fn _tls_install_read_key(s: *TlsSession, secret: int[], suite: i64) -> bool {
 }
 
 fn _tls_install_write_key(s: *TlsSession, secret: int[], suite: i64) -> bool {
+    let want: i64 = _tls_suite_key_len(suite);
+    if want == 0 { return false; }
     let key: int[] = tls13_traffic_key(secret, suite);
     let iv: int[] = tls13_traffic_iv(secret);
-    if key.length != 32 { return false; }
+    if key.length != want { return false; }
     if iv.length != 12 { return false; }
+    s.suite = suite;
     if s.write_key_addr != 0 { free(s.write_key_addr as *u8); }
     if s.write_iv_addr != 0 { free(s.write_iv_addr as *u8); }
     let kb: *u8 = _tls_bytes_to_buf(key);
@@ -547,7 +923,26 @@ fn _tls_session_free(s: *TlsSession) -> void {
 fn _tls_anchors() -> X509Certificate[] ![io] {
     let store: TrustStore = trust_store_load();
     let empty: X509Certificate[] = [];
-    if !store.ok { return empty; }
+    if !store.ok {
+        // `store.error` names the cause precisely — no bundle found, a
+        // bundle over the block limit, or a malformed block — and used to
+        // be dropped here, leaving "the trust store failed to load"
+        // indistinguishable from "it loaded and had no matching anchor"
+        // (SFN-816). SFN-807 was erased at this line and again at the
+        // verify verdict below; either site alone would have shown it.
+        _tls_fail(_tls_err_trust_store(), store.error);
+        return empty;
+    }
+    if store.skipped > 0 {
+        // Not a failure: a bundle with one bad entry still yields a
+        // usable store, and dropping an anchor can only shrink what this
+        // process trusts. Worth a trace line because it silently narrows
+        // trust, so a chain that "should" verify and does not has a
+        // visible first thing to check.
+        _tls_trace("trust-store: " + _tls_dec(store.skipped as i64)
+            + " unparseable entr(y/ies) skipped from "
+            + store.source);
+    }
     return store.anchors;
 }
 
@@ -615,8 +1010,16 @@ fn _tls_pump_handshake(s: *TlsSession, acc: int[]) -> int[] ![net] {
         return out;
     }
     // Encrypted record: decrypt in place through the pointer layer.
-    let opened: i64 = sfn_tls_record_open(s.read_key_addr as *u8, 32, s.read_iv_addr as *u8, 12, s.read_seq, base, total);
+    let opened: i64 = _tls_open_record(s, base, total);
     if opened < 0 {
+        // Effect-free reason capture in a `![net]`-only function: a
+        // decrypt or framing failure from the record layer used to reach
+        // the caller as a bare `s.failed` (SFN-816). `tls_record.sfn`
+        // already distinguishes twelve causes via its
+        // `sfn_tls_record_err_*` codes and this call site reduced them to
+        // a sign; recording the bucket is the part reachable without
+        // acquiring `![io]` here.
+        _tls_note(_tls_err_record());
         s.failed = 1;
         _tls_rx_consume(s, total);
         return out;
@@ -677,14 +1080,27 @@ fn _tls_slice(acc: int[], off: i64, n: i64) -> int[] {
 // downgrade). `host` is the bare host, used for SNI and for the RFC 6125
 // hostname check.
 fn tls_connect_fd(ctx: *u8, fd: i32, host: *u8) -> *u8 ![io, net, rand] {
-    if ctx as i64 == 0 { return null; }
+    // Clear both slots on entry so a reason read after this call always
+    // belongs to this connect and never to a previous one (SFN-816).
+    sfn_tls_last_error = _tls_err_none();
+    sfn_tls_last_alert = 0;
+
+    if ctx as i64 == 0 {
+        _tls_fail(_tls_err_session_alloc(), "null client context");
+        return null;
+    }
     let s: *TlsSession = _tls_session_new(fd as i64, _tls_role_client());
-    if s as i64 == 0 { return null; }
+    if s as i64 == 0 {
+        _tls_fail(_tls_err_session_alloc(), "session allocation failed");
+        return null;
+    }
 
     let hostname: string = _tls_cstr(host);
+    _tls_trace("connect: " + hostname);
     let priv: int[] = random_bytes(32);
     let rnd: int[] = random_bytes(32);
     if priv.length != 32 {
+        _tls_fail(_tls_err_handshake_init(), "could not draw 32 random bytes");
         _tls_session_free(s);
         return null;
     }
@@ -713,6 +1129,12 @@ fn tls_connect_fd(ctx: *u8, fd: i32, host: *u8) -> *u8 ![io, net, rand] {
     let made: Result<ClientHandshake, string> = hs_client_new(priv);
     match made {
         Result.Err { error } => {
+            // `error` was bound and never read (SFN-816). Every such
+            // binding on the client connect path now reports; the server
+            // paths (`tls_accept_fd`, `tls_server_ctx`) still do not, and
+            // are named as out of scope on SFN-816 rather than left to look
+            // finished.
+            _tls_fail(_tls_err_handshake_init(), error);
             _tls_session_free(s);
             return null;
         },
@@ -721,18 +1143,21 @@ fn tls_connect_fd(ctx: *u8, fd: i32, host: *u8) -> *u8 ![io, net, rand] {
 
     let ch: int[] = hs_client_hello(hs, rnd, [], hostname);
     if ch.length == 0 {
+        _tls_fail(_tls_err_handshake_init(), "ClientHello encoding produced no bytes");
         _tls_session_free(s);
         return null;
     }
     let sent: Result<ClientHandshake, string> = hs_client_send_hello(hs, ch);
     match sent {
         Result.Err { error } => {
+            _tls_fail(_tls_err_handshake_send(), error);
             _tls_session_free(s);
             return null;
         },
         Result.Ok { value } => { hs = value; }
     }
     if !_tls_write_plaintext(s, _tls_ct_handshake(), ch) {
+        _tls_fail(_tls_err_handshake_send(), "socket write of ClientHello failed");
         _tls_session_free(s);
         return null;
     }
@@ -746,15 +1171,18 @@ fn tls_connect_fd(ctx: *u8, fd: i32, host: *u8) -> *u8 ![io, net, rand] {
         if ready > 0 { break; }
         guard = guard + 1;
         if guard > 4096 {
+            _tls_fail(_tls_err_handshake_recv(), "no complete ServerHello after 4096 reads");
             _tls_session_free(s);
             return null;
         }
         acc = _tls_pump_handshake(s, acc);
         if s.failed != 0 {
+            _tls_fail_if_unset(_tls_err_handshake_recv(), "connection failed awaiting ServerHello");
             _tls_session_free(s);
             return null;
         }
         if s.eof != 0 {
+            _tls_fail_if_unset(_tls_err_handshake_recv(), "peer closed before ServerHello");
             _tls_session_free(s);
             return null;
         }
@@ -762,12 +1190,15 @@ fn tls_connect_fd(ctx: *u8, fd: i32, host: *u8) -> *u8 ![io, net, rand] {
     let sh_len: i64 = _tls_hs_message_ready(acc, 0);
     let sh: int[] = _tls_slice(acc, 0, sh_len);
     if sh[0] != hs_type_server_hello() {
+        _tls_fail(_tls_err_handshake_recv(), "expected ServerHello, got handshake type "
+            + _tls_dec(sh[0] as i64));
         _tls_session_free(s);
         return null;
     }
     let got_sh: Result<ClientHandshake, string> = hs_client_recv_server_hello(hs, sh);
     match got_sh {
         Result.Err { error } => {
+            _tls_fail(_tls_err_handshake_recv(), error);
             _tls_session_free(s);
             return null;
         },
@@ -777,10 +1208,14 @@ fn tls_connect_fd(ctx: *u8, fd: i32, host: *u8) -> *u8 ![io, net, rand] {
 
     // Rekey to handshake traffic keys in both directions.
     if !_tls_install_read_key(s, hs.server_handshake_traffic_secret, hs.cipher_suite) {
+        _tls_fail(_tls_err_handshake_init(), "could not install handshake read key for suite "
+            + _tls_dec(hs.cipher_suite as i64));
         _tls_session_free(s);
         return null;
     }
     if !_tls_install_write_key(s, hs.client_handshake_traffic_secret, hs.cipher_suite) {
+        _tls_fail(_tls_err_handshake_init(), "could not install handshake write key for suite "
+            + _tls_dec(hs.cipher_suite as i64));
         _tls_session_free(s);
         return null;
     }
@@ -794,6 +1229,7 @@ fn tls_connect_fd(ctx: *u8, fd: i32, host: *u8) -> *u8 ![io, net, rand] {
         if step >= 4 { break; }
         flight_guard = flight_guard + 1;
         if flight_guard > 8192 {
+            _tls_fail(_tls_err_handshake_recv(), "server flight incomplete after 8192 reads");
             _tls_session_free(s);
             return null;
         }
@@ -801,10 +1237,12 @@ fn tls_connect_fd(ctx: *u8, fd: i32, host: *u8) -> *u8 ![io, net, rand] {
         if avail < 0 {
             acc = _tls_pump_handshake(s, acc);
             if s.failed != 0 {
+                _tls_fail_if_unset(_tls_err_handshake_recv(), "connection failed during server flight");
                 _tls_session_free(s);
                 return null;
             }
             if s.eof != 0 {
+                _tls_fail_if_unset(_tls_err_handshake_recv(), "peer closed during server flight");
                 _tls_session_free(s);
                 return null;
             }
@@ -813,35 +1251,58 @@ fn tls_connect_fd(ctx: *u8, fd: i32, host: *u8) -> *u8 ![io, net, rand] {
         let msg: int[] = _tls_slice(acc, 0, avail);
         acc = _tls_slice(acc, avail, acc.length - avail);
         let mut advanced: bool = true;
+        // Each step's `Err` message used to be bound and dropped, so the
+        // whole server flight failed as a bare `null` (SFN-816). Step 1 and
+        // step 2 are where a malformed or unsupported-algorithm server
+        // chain lands — the likeliest real handshake failure after
+        // certificate verification — and the discarded text is as specific
+        // as "leaf RSA public key did not parse". `_tls_step_name` supplies
+        // which message was being processed, since that is what the bare
+        // error string does not say.
+        let mut fail_detail: string = "";
         if step == 0 {
             let r: Result<ClientHandshake, string> = hs_client_recv_encrypted_extensions(hs, msg);
             match r {
-                Result.Err { error } => { advanced = false; },
+                Result.Err { error } => {
+                    advanced = false;
+                    fail_detail = error;
+                },
                 Result.Ok { value } => { hs = value; }
             }
         }
         if step == 1 {
             let r: Result<ClientHandshake, string> = hs_client_recv_certificate(hs, msg);
             match r {
-                Result.Err { error } => { advanced = false; },
+                Result.Err { error } => {
+                    advanced = false;
+                    fail_detail = error;
+                },
                 Result.Ok { value } => { hs = value; }
             }
         }
         if step == 2 {
             let r: Result<ClientHandshake, string> = hs_client_recv_certificate_verify(hs, msg);
             match r {
-                Result.Err { error } => { advanced = false; },
+                Result.Err { error } => {
+                    advanced = false;
+                    fail_detail = error;
+                },
                 Result.Ok { value } => { hs = value; }
             }
         }
         if step == 3 {
             let r: Result<ClientHandshake, string> = hs_client_recv_finished(hs, msg);
             match r {
-                Result.Err { error } => { advanced = false; },
+                Result.Err { error } => {
+                    advanced = false;
+                    fail_detail = error;
+                },
                 Result.Ok { value } => { hs = value; }
             }
         }
         if !advanced {
+            _tls_fail(_tls_err_handshake_recv(), _tls_step_name(step) + ": "
+                + fail_detail);
             _tls_session_free(s);
             return null;
         }
@@ -853,7 +1314,33 @@ fn tls_connect_fd(ctx: *u8, fd: i32, host: *u8) -> *u8 ![io, net, rand] {
     // rather than a downgrade.
     let verdict: X509ChainResult = _tls_verify_peer(hs, hostname);
     if !verdict.ok {
-        _tls_send_alert(s, 48);
+        // The richest failure in the stack: `.code` is a symbolic verdict
+        // (`no-anchor`, `hostname-mismatch`, `expired`, `bad-signature`,
+        // `bad-input`) and `.error` is human-readable. Both were discarded
+        // one line after being computed (SFN-816).
+        //
+        // `_tls_fail_if_unset`, not `_tls_fail`: this cause can be
+        // inherited rather than local. When the trust store failed to
+        // load, `_tls_anchors` has already recorded `trust_store` and
+        // `x509_verify_chain` then reports `no-anchor` for the empty anchor
+        // set — so overwriting here would report SFN-807 as a certificate
+        // problem and erase the very distinction `_tls_err_trust_store`
+        // exists to draw. A genuine no-anchor against a store that loaded
+        // cleanly still lands here, because nothing recorded a reason.
+        //
+        // `.depth` is deliberately not reported: `_chain_err` in
+        // `x509_verify.sfn` hardcodes `depth: 0` on every failure, so "at
+        // depth 0" would read as "the anchor issued the leaf" — a false
+        // specific claim rather than information. `.anchor_subject_cn` is
+        // "" on failure for the same reason and is likewise omitted.
+        //
+        // The alert stays `unknown_ca` regardless of verdict: RFC 8446
+        // §6.2 does not require the alert to disclose which check failed,
+        // and narrowing it per-verdict would tell a peer more about our
+        // trust configuration than it needs. The detail goes to our
+        // operator, not to the wire.
+        _tls_fail_if_unset(_tls_err_cert_verify(), verdict.code + ": " + verdict.error);
+        _tls_send_alert(s, _tls_alert_unknown_ca());
         _tls_session_free(s);
         return null;
     }
@@ -863,22 +1350,26 @@ fn tls_connect_fd(ctx: *u8, fd: i32, host: *u8) -> *u8 ![io, net, rand] {
     let mut fin_bytes: int[] = [];
     match fin {
         Result.Err { error } => {
+            _tls_fail(_tls_err_handshake_send(), "client Finished: " + error);
             _tls_session_free(s);
             return null;
         },
         Result.Ok { value } => { fin_bytes = value; }
     }
     if !_tls_write_encrypted(s, _tls_ct_handshake(), fin_bytes) {
+        _tls_fail(_tls_err_handshake_send(), "socket write of client Finished failed");
         _tls_session_free(s);
         return null;
     }
 
     // Rekey to application traffic keys.
     if !_tls_install_read_key(s, hs.server_application_traffic_secret, hs.cipher_suite) {
+        _tls_fail(_tls_err_handshake_init(), "could not install application read key");
         _tls_session_free(s);
         return null;
     }
     if !_tls_install_write_key(s, hs.client_application_traffic_secret, hs.cipher_suite) {
+        _tls_fail(_tls_err_handshake_init(), "could not install application write key");
         _tls_session_free(s);
         return null;
     }
@@ -1273,7 +1764,7 @@ fn tls_write(ssl: *u8, buf: *u8, n: i64) -> i64 ![net] {
     if n <= 0 { return 0; }
     let out: *u8 = malloc((5 + n + 1 + 16) as usize);
     if out as i64 == 0 { return 0 - 1; }
-    let wrote: i64 = sfn_tls_record_seal(s.write_key_addr as *u8, 32, s.write_iv_addr as *u8, 12, s.write_seq, _tls_ct_application_data(), buf, n, 0, out);
+    let wrote: i64 = _tls_seal_record(s, _tls_ct_application_data(), buf, n, out);
     if wrote < 0 {
         free(out);
         return 0 - 1;
@@ -1333,8 +1824,11 @@ fn tls_read(ssl: *u8, buf: *u8, n: i64) -> i64 ![net] {
             _tls_rx_consume(s, total);
             return 0 - 1;
         }
-        let opened: i64 = sfn_tls_record_open(s.read_key_addr as *u8, 32, s.read_iv_addr as *u8, 12, s.read_seq, base, total);
+        let opened: i64 = _tls_open_record(s, base, total);
         if opened < 0 {
+            // Same as the handshake pump: record the bucket without
+            // acquiring `![io]` in this `![net]`-only path (SFN-816).
+            _tls_note(_tls_err_record());
             _tls_rx_consume(s, total);
             s.failed = 1;
             return 0 - 1;
@@ -1420,11 +1914,22 @@ fn tls_shutdown_free(ssl: *u8) -> void ![net] {
     _tls_session_free(s);
 }
 
+// The `_tls_err_*` ordinals are deliberately NOT exported (SFN-816).
+// Callers read a reason through `tls_error_name`/`tls_alert_name`, which
+// keeps the numbering an implementation detail free to change, and keeps
+// assertions readable (`== "cert-verify"` rather than `== 7`). Publishing
+// the ordinals would commit this module to them as API with no caller
+// asking for it — the same call made for `pem.sfn`'s `_with_limits`
+// surface under SFN-807.
 export {
     tls_accept_fd,
+    tls_alert_name,
     tls_client_ctx,
     tls_connect_fd,
     tls_ctx_free,
+    tls_error_name,
+    tls_last_alert,
+    tls_last_error,
     tls_read,
     tls_server_ctx,
     tls_shutdown_free,

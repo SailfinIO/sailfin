@@ -1,8 +1,7 @@
 // compiler/src/llvm/lowering/lowering_recovery.sfn
 //
 // Light recovery parsers for NativeFunction, NativeImport, and NativeStruct.
-// The `recover_*_light` routines in this file work directly on .sfn-asm text
-// and bypass the structured parser (parse_native_artifact_impl) — they were
+// The `recover_*_light` routines bypass the structured parser and were
 // written for the v0.1.1 seed, which couldn't compile the structured parser's
 // deeply nested if/else chains. The structured path is now reliable under
 // seed 0.5.7+ (validated by every `.struct_info`/`.enum_info`/`.fn_*` removal
@@ -10,6 +9,8 @@
 // lowering_core.
 //
 // Extracted from lowering_core/mod.sfn to reduce per-file memory footprint.
+import { substring } from "sfn/strings";
+
 import {
     NativeEnum,
     NativeEnumLayout,
@@ -28,7 +29,7 @@ import {
     parse_native_function_count_from_text,
     parse_native_functions_from_text
 } from "../../native_ir_api";
-import { substring } from "../../string_utils";
+import { trace_log } from "../lowering_debug_state";
 import { index_of, number_to_string } from "../utils";
 import { sanitize_collection_length } from "./lowering_helpers";
 import { append_native_function } from "./lowering_helpers_mangling";
@@ -125,7 +126,6 @@ fn recover_native_functions_light(native_text: string) -> NativeFunction[] {
         let is_case_kw = starts_with_local(line, ".case ");
         let inline_arrow_idx = index_of(line, " => ");
         let is_inline_case = inline_arrow_idx > 0;
-
         // --- Pre-compute values needed by multiple branches ---
         let method_header = trim_text_local(substring(line, 8, line.length));
         let method_paren_idx = index_of(method_header, "(");
@@ -736,13 +736,13 @@ fn recover_native_structs_light(native_text: string) -> NativeStruct[] {
 }
 
 // ── Higher-level recovery ────────────────────────────────────────────
-fn recover_functions_for_lowering(current_functions: NativeFunction[], native_text_override_path: string, artifact_text: string, debug_lowering: boolean) -> NativeFunction[] ![io] {
+fn recover_functions_for_lowering(current_functions: NativeFunction[], native_text_override_path: string, artifact_text: string, debug_lowering: boolean) -> NativeFunction[] {
     let mut safe_functions = current_functions;
     if safe_functions == null { safe_functions = []; }
     let initial_function_count = sanitize_collection_length(safe_functions.length, 200000);
     if safe_functions.length != initial_function_count {
         if debug_lowering {
-            print.err("emit-llvm: invalid function list length; dropping current parsed functions");
+            trace_log("emit-llvm: invalid function list length; dropping current parsed functions");
         }
         safe_functions = [];
     }
@@ -829,7 +829,7 @@ fn recover_functions_for_lowering(current_functions: NativeFunction[], native_te
                         replacement_functions = light_functions;
                     }
                     if debug_lowering {
-                        print.err("emit-llvm: replacing suspicious parsed functions with stable function parse");
+                        trace_log("emit-llvm: replacing suspicious parsed functions with stable function parse");
                     }
                     safe_functions = replacement_functions;
                 }
@@ -848,7 +848,7 @@ fn recover_functions_for_lowering(current_functions: NativeFunction[], native_te
 
     let direct_count = parse_native_function_count_from_text(recovery_text);
     if debug_lowering {
-        print.err("emit-llvm: recovery source direct count=" + number_to_string(direct_count));
+        trace_log("emit-llvm: recovery source direct count=" + number_to_string(direct_count));
     }
 
     let parsed_recovery = parse_native_functions_from_text(recovery_text);
@@ -856,7 +856,7 @@ fn recover_functions_for_lowering(current_functions: NativeFunction[], native_te
     if parsed_recovery.length == recovered_count {
         if parsed_recovery.length > 0 {
             if debug_lowering {
-                print.err("emit-llvm: recovered functions via parse_native_functions_from_text="
+                trace_log("emit-llvm: recovered functions via parse_native_functions_from_text="
                     + number_to_string(parsed_recovery.length));
             }
             return parsed_recovery;
@@ -868,7 +868,7 @@ fn recover_functions_for_lowering(current_functions: NativeFunction[], native_te
     if light_recovery.length == light_recovered_count {
         if light_recovery.length > 0 {
             if debug_lowering {
-                print.err("emit-llvm: recovered functions via light parser="
+                trace_log("emit-llvm: recovered functions via light parser="
                     + number_to_string(light_recovery.length));
             }
             return light_recovery;

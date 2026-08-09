@@ -1,10 +1,11 @@
 // compiler/src/llvm/lowering/instructions_let.sfn
 //
 // Let binding instruction lowering.
+import { find, substring } from "sfn/strings";
+
 import { Diag, diag_to_legacy_string } from "../../diagnostic";
 import { NativeFunction, NativeInstruction, NativeSourceSpan } from "../../native_ir";
 import { parse_fn_type_text } from "../../native_ir_utils_text";
-import { index_of, substring } from "../../string_utils";
 import { array_pointer_element_type } from "../expression_lowering/arrays";
 import { analyze_value_ownership, detect_borrow_conflicts, lower_expression } from "../expression_lowering/native/core";
 import { coerce_null_literal_to_union_variant, coerce_operand_to_type } from "../expression_lowering/native/core_operands/dispatch";
@@ -24,7 +25,7 @@ import {
     infer_borrow_base_scope,
     make_lifetime_region_metadata
 } from "../lifetime";
-import { trace_lowering } from "../lowering_debug_state";
+import { trace_log, trace_lowering } from "../lowering_debug_state";
 import { find_function_by_name_or_import } from "../rendering_helpers";
 import { empty_string_constant_set, merge_string_constants } from "../strings";
 import {
@@ -56,9 +57,8 @@ import {
 } from "../utils";
 import { scope_id_inside_try_body } from "./instructions_helpers";
 
-// #537: true when a boolean (`i1`) initializer is being stored into a numeric
-// (`int`/`float`) binding — the silent `zext`/`uitofp` widening this slice
-// refuses. `bool ↔ bool` and `bool ↔ pointer/aggregate` are not flagged.
+// #537: true for boolean (`i1`) initializers stored into numeric bindings;
+// refuses silent `zext`/`uitofp` widening without flagging other pairings.
 fn _bool_into_numeric(from_type: string, to_type: string) -> boolean {
     if numeric_type_kind(from_type) != "bool" { return false; }
     let to_kind = numeric_type_kind(to_type);
@@ -156,21 +156,21 @@ fn _array_hof_result_base(expression: string) -> string {
 
 fn _array_hof_map_returns_int_array(expression: string) -> boolean {
     let trimmed = trim_text(expression);
-    let map_index = index_of(trimmed, ".map(");
+    let map_index = find(trimmed, ".map(", 0);
     if map_index < 0 { return false; }
     let head_start = map_index + 5;
     if head_start >= trimmed.length { return false; }
     let callback_text = substring(trimmed, head_start, trimmed.length);
-    let brace_index = index_of(callback_text, "{");
-    let arrow_index = index_of(callback_text, "=>");
+    let brace_index = find(callback_text, "{", 0);
+    let arrow_index = find(callback_text, "=>", 0);
     let mut head_end = callback_text.length;
     if brace_index >= 0 { head_end = brace_index; }
     if arrow_index >= 0 {
         if arrow_index < head_end { head_end = arrow_index; }
     }
     let callback_head = trim_text(substring(callback_text, 0, head_end));
-    if index_of(callback_head, "-> int[]") >= 0 { return true; }
-    if index_of(callback_head, "->int[]") >= 0 { return true; }
+    if find(callback_head, "-> int[]", 0) >= 0 { return true; }
+    if find(callback_head, "->int[]", 0) >= 0 { return true; }
     return false;
 }
 
@@ -277,7 +277,7 @@ fn _await_receive_channel_base(value: string) -> string {
     let trimmed = trim_text(value);
     if !starts_with(trimmed, "await ") { return ""; }
     let rest = trim_text(substring(trimmed, 6, trimmed.length));
-    let recv_pos = index_of(rest, ".receive()");
+    let recv_pos = find(rest, ".receive()", 0);
     if recv_pos < 0 { return ""; }
     if recv_pos + 10 != rest.length { return ""; }
     let base = trim_text(substring(rest, 0, recv_pos));
@@ -295,7 +295,7 @@ fn _await_receive_channel_base(value: string) -> string {
     return base;
 }
 
-fn lower_let_instruction(function: NativeFunction, instruction: NativeInstruction, bindings: ParameterBinding[], locals: LocalBinding[], allocas: string[], lines: string[], temp_index: int, next_local_id: int, next_region_id: int, functions: NativeFunction[], context: TypeContext, scope_id: string, scope_depth: int, current_label: string) -> LetLoweringResult ![io] {
+fn lower_let_instruction(function: NativeFunction, instruction: NativeInstruction, bindings: ParameterBinding[], locals: LocalBinding[], allocas: string[], lines: string[], temp_index: int, next_local_id: int, next_region_id: int, functions: NativeFunction[], context: TypeContext, scope_id: string, scope_depth: int, current_label: string) -> LetLoweringResult {
     let mut diagnostics: string[] = [];
     let mut diags: Diag[] = [];
     let mut current_lines: string[] = lines;
@@ -466,7 +466,7 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
             + "`");
     } else {
         if debug_lowering {
-            print.err("let-lowering: pre-lower_expression name=" + instruction.name
+            trace_log("let-lowering: pre-lower_expression name=" + instruction.name
                 + " value="
                 + instruction.value);
         }
@@ -486,10 +486,10 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
         }
         let lowered = lower_expression(instruction.value, current_bindings, current_locals, current_temp, current_lines, functions, context, init_expected_type);
         if debug_lowering {
-            print.err("let-lowering: post-lower_expression name=" + instruction.name);
+            trace_log("let-lowering: post-lower_expression name=" + instruction.name);
         }
         if debug_lowering {
-            print.err("let-lowering: accessing lowered.diagnostics");
+            trace_log("let-lowering: accessing lowered.diagnostics");
         }
         let mut _ci19: int = 0;
         loop {
@@ -498,20 +498,20 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
             _ci19 += 1;
         }
         if debug_lowering {
-            print.err("let-lowering: accessing lowered.lines");
+            trace_log("let-lowering: accessing lowered.lines");
         }
         current_lines = lowered.lines;
         if debug_lowering {
-            print.err("let-lowering: got lines, accessing temp_index");
+            trace_log("let-lowering: got lines, accessing temp_index");
         }
         current_temp = lowered.temp_index;
         if debug_lowering {
-            print.err("let-lowering: got temp_index=" + number_to_string(current_temp)
+            trace_log("let-lowering: got temp_index=" + number_to_string(current_temp)
                 + ", accessing operand");
         }
         operand = lowered.operand;
         if debug_lowering {
-            print.err("let-lowering: got operand, accessing string_constants");
+            trace_log("let-lowering: got operand, accessing string_constants");
         }
         // Use lowered.string_constants directly (covers enum variant
         // globals and any other constants the expression produced).
@@ -530,12 +530,12 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
     }
 
     if debug_lowering {
-        print.err("let-lowering: checking llvm_type len=" + number_to_string(llvm_type.length));
+        trace_log("let-lowering: checking llvm_type len=" + number_to_string(llvm_type.length));
     }
     if llvm_type.length == 0 {
         if operand != null {
             if debug_lowering {
-                print.err("let-lowering: operand not null, trimming type");
+                trace_log("let-lowering: operand not null, trimming type");
             }
             let operand_type = trim_text(operand.llvm_type);
             if operand_type.length > 0 { llvm_type = operand_type; }
@@ -697,7 +697,7 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
                 + "* "
                 + pointer);
             if debug_lowering {
-                print.err("let-lowering: identity coerce type=" + llvm_type
+                trace_log("let-lowering: identity coerce type=" + llvm_type
                     + " value="
                     + operand.value);
             }
@@ -707,9 +707,9 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
             // This path uses `allow_widen = true`, so it bypasses the
             // boundary diagnostic in `coerce_operand_to_type`; refuse the
             // silent widening here with the canonical `[fatal]` shape and
-            // store the default so lowering can continue and report. Print
-            // to stderr (like the `coerce_operand_to_type` boundary check)
-            // so the gate in `entrypoints_tests_writer` — which refuses
+            // store the default so lowering can continue and report. Record
+            // an ordered event like `coerce_operand_to_type` so the gate in
+            // `entrypoints_tests_writer` — which refuses
             // silently on a `[fatal]` diagnostic — still surfaces the cause.
             let message = "ABI primitive mismatch: binding `" + instruction.name
                 + "` expects `"
@@ -724,7 +724,7 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
             let diag = lowering_error_diag("E1009", message, initializer_span);
             diags.push(diag);
             let legacy_diag = diag_to_legacy_string(diag);
-            print.err(legacy_diag);
+            trace_log(legacy_diag);
             diagnostics.push(legacy_diag);
             current_lines.push("  store " + llvm_type + " "
                 + default_return_literal(llvm_type)
@@ -864,7 +864,7 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
                 // would mis-route later method-call resolution
                 // (`.diagnostics.concat`) and break the self-host build
                 // (test_work_dir_parity).
-                if index_of(inferred_callee.return_type, "<") >= 0 {
+                if find(inferred_callee.return_type, "<", 0) >= 0 {
                     local_type_annotation = inferred_callee.return_type;
                 }
             }
@@ -921,7 +921,7 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
                 // the pointer-sized monomorphized kinds. The kind is the
                 // text between "channel:" (8 chars) and "(". A bare
                 // `channel(N)` stays "channel" (the by-pointer/scalar path).
-                let paren_pos = index_of(trimmed_init, "(");
+                let paren_pos = find(trimmed_init, "(", 0);
                 if paren_pos > 8 {
                     let kind_text = trim_text(substring(trimmed_init, 8, paren_pos));
                     if kind_text.length > 0 {
@@ -945,7 +945,7 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
     mutations.push(mutation);
 
     if debug_lowering {
-        print.err("let-lowering: returning LetLoweringResult for name="
+        trace_log("let-lowering: returning LetLoweringResult for name="
             + instruction.name);
     }
     return LetLoweringResult {

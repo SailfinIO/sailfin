@@ -3,18 +3,19 @@
 // Text processing utilities and structured data parsers used by the
 // LLVM lowering recovery code.  Extracted from lowering_core/mod.sfn to
 // reduce per-file memory footprint during self-hosting compilation.
-import { char_code, substring } from "../../string_utils";
+import { char_code_at, substring } from "sfn/strings";
+
 import { StringConstant } from "../types";
 import { index_of } from "../utils";
 
 // ── Character / string utilities ─────────────────────────────────────
 fn is_trim_char_local(ch: string) -> boolean {
-    let code = char_code(ch);
+    let code = char_code_at(ch, 0);
     let mut _ret236: boolean = false;
-    if code == char_code(" ") { _ret236 = true; }
-    if code == char_code("\n") { _ret236 = true; }
-    if code == char_code("\r") { _ret236 = true; }
-    if code == char_code("\t") { _ret236 = true; }
+    if code == char_code_at(" ", 0) { _ret236 = true; }
+    if code == char_code_at("\n", 0) { _ret236 = true; }
+    if code == char_code_at("\r", 0) { _ret236 = true; }
+    if code == char_code_at("\t", 0) { _ret236 = true; }
     return _ret236;
 }
 
@@ -86,8 +87,8 @@ fn parse_number_local(text: string) -> int {
     loop {
         if i >= trimmed.length { break; }
         let ch = trimmed[i];
-        let code = char_code(ch);
-        let digit = code - char_code("0");
+        let code = char_code_at(ch, 0);
+        let digit = code - char_code_at("0", 0);
         let mut _if244: boolean = false;
         if digit < 0 { _if244 = true; }
         if digit > 9 { _if244 = true; }

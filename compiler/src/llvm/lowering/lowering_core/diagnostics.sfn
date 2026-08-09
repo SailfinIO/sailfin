@@ -46,27 +46,30 @@ fn has_fatal_lowering_diagnostic(diagnostics: string[]) -> boolean {
     return false;
 }
 
-// Render the typed sidecar while the legacy string array remains the
-// fail-closed gate. The canonical first line keeps existing grep-oriented
-// diagnostics stable; Set A adds a source location on the following line.
-fn print_fatal_lowering_diagnostics(diagnostics: string[], diags: Diag[]) -> void ![io.console] {
+// Render the typed sidecar into the provider's ordered event stream while the
+// legacy string array remains the fail-closed gate. The canonical first line
+// keeps existing grep-oriented diagnostics stable; Set A adds a source
+// location on the following line.
+fn fatal_lowering_diagnostic_lines(diagnostics: string[], diags: Diag[]) -> string[] {
+    let mut lines: string[] = [];
     let mut printed: boolean = false;
     let mut diag_index: int = 0;
     loop {
         if diag_index >= diags.length { break; }
         if diags[diag_index].severity == "error" {
-            print.err(render_lowering_error_diag(diags[diag_index]));
+            lines.push(render_lowering_error_diag(diags[diag_index]));
             printed = true;
         }
         diag_index += 1;
     }
-    if printed { return; }
+    if printed { return lines; }
     let mut legacy_index: int = 0;
     loop {
         if legacy_index >= diagnostics.length { break; }
         if index_of(diagnostics[legacy_index], "[fatal]") >= 0 {
-            print.err(diagnostics[legacy_index]);
+            lines.push(diagnostics[legacy_index]);
         }
         legacy_index += 1;
     }
+    return lines;
 }

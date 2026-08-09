@@ -1,0 +1,127 @@
+// SFN-743: LLVM traces and diagnostics share a provider-owned ordered buffer.
+// The driver drains it after every provider return, before it interprets a
+// success or failure, without giving LLVM console authority.
+import { find } from "sfn/strings";
+
+import {
+    LLVMProviderContext,
+    install_llvm_provider_context,
+    take_lowering_trace_buffer,
+    trace_log
+} from "../../src/llvm/lowering_debug_state";
+
+struct TraceRun {
+    exit_code: int;
+    stderr: string;
+}
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+fn _trace_source(name: string, source: string) -> string ![io] {
+    let mut root = env.get("SAILFIN_TEST_SCRATCH");
+    if root.length == 0 { root = "/tmp"; }
+    let dir = root + "/sfn-lowering-trace-sink";
+    fs.createDirectory(dir, true);
+    let path = dir + "/" + name;
+    fs.writeFile(path, source);
+    return path;
+}
+
+fn _run_emit_path(input: string, args: string[], child_env: string[]) -> TraceRun ![io] {
+    let mut command: string[] = [_sfn_bin(), "emit"];
+    let mut arg_index: int = 0;
+    loop {
+        if arg_index >= args.length { break; }
+        command.push(args[arg_index]);
+        arg_index += 1;
+    }
+    command.push(input);
+    let exit_code = process.run_capture(command, child_env);
+    let _stdout = process.capture_take_stdout();
+    let stderr = process.capture_take_stderr();
+    return TraceRun { exit_code: exit_code, stderr: stderr };
+}
+
+fn _run_emit(name: string, source: string, args: string[], child_env: string[]) -> TraceRun ![io] {
+    return _run_emit_path(_trace_source(name, source), args, child_env);
+}
+
+fn _emit_llvm(name: string, source: string) -> TraceRun ![io] {
+    let output = _trace_source(name + ".out", "");
+    return _run_emit(name, source, ["-o", output, "llvm"], ["SAILFIN_TRACE_LOWERING=1"]);
+}
+
+test "lowering trace buffer preserves exact lines and order" {
+    install_llvm_provider_context(LLVMProviderContext {
+        target_os: "Linux", target_arch: "x86_64", trace_lowering: true, trace_call_lowering: false, skip_module_globals: false, test_runner_active: false, test_runner_trace: false
+    });
+    trace_log("emit-llvm: phase=start");
+    trace_log("emit-llvm: phase=functions");
+    trace_log("emit-llvm: phase=end lines=7");
+    assert take_lowering_trace_buffer() == "emit-llvm: phase=start\n"
+        + "emit-llvm: phase=functions\n"
+        + "emit-llvm: phase=end lines=7";
+    assert take_lowering_trace_buffer() == "";
+}
+
+test "lowering ordered event buffer preserves diagnostic interleaving" {
+    trace_log("emit-llvm: phase=start");
+    trace_log("llvm lowering [fatal]: probe");
+    trace_log("emit-llvm: phase=end");
+    assert take_lowering_trace_buffer() == "emit-llvm: phase=start\n"
+        + "llvm lowering [fatal]: probe\n"
+        + "emit-llvm: phase=end";
+}
+
+test "lowering trace stderr exactly matches the pre-buffer stream" ![io] {
+    let output = _trace_source("exact.out", "");
+    let run = _run_emit_path("compiler/tests/unit/fixtures/lowering_trace_success.sfn", ["-o", output, "--module-name", "trace_fixture", "llvm"], ["SAILFIN_TRACE_LOWERING=1"]);
+    assert run.exit_code == 0;
+    let expected = fs.readFile("compiler/tests/unit/fixtures/lowering_trace_success.stderr");
+    assert run.stderr == expected;
+}
+
+test "lowering trace buffer drains before artifact failure diagnostics" ![io] {
+    let run = _emit_llvm("failure.sfn", "fn main() -> int {\n"
+        + "    let mut total: int = 0;\n"
+        + "    for i in 0..4..0 { total += i; }\n"
+        + "    return total;\n"
+        + "}\n");
+    assert run.exit_code != 0;
+    let start = find(run.stderr, "emit-llvm: phase=start", 0);
+    let functions = find(run.stderr, "emit-llvm: phase=functions", 0);
+    let fatal = find(run.stderr, "llvm lowering [fatal] [E1004]:", 0);
+    assert start >= 0;
+    assert functions > start;
+    assert fatal > functions;
+}
+
+test "lowering trace buffer preserves stdout diagnostic order" ![io] {
+    let run = _run_emit("stdout_failure.sfn", "fn main() -> int {\n"
+        + "    let mut total: int = 0;\n"
+        + "    for i in 0..4..0 { total += i; }\n"
+        + "    return total;\n"
+        + "}\n", ["llvm"], ["SAILFIN_TRACE_LOWERING=1"]);
+    assert run.exit_code != 0;
+    let start = find(run.stderr, "emit-llvm: phase=start", 0);
+    let fatal = find(run.stderr, "llvm lowering [fatal] [E1004]:", 0);
+    assert start >= 0;
+    assert fatal > start;
+}
+
+test "lowering trace buffer preserves native gate diagnostic order" ![io] {
+    let run = _run_emit("native_failure.sfn", "fn main() -> int {\n"
+        + "    let mut total: int = 0;\n"
+        + "    for i in 0..4..0 { total += i; }\n"
+        + "    return total;\n"
+        + "}\n", ["native"], ["SAILFIN_TRACE_LOWERING=1"]);
+    assert run.exit_code != 0;
+    let start = find(run.stderr, "emit-llvm: phase=start", 0);
+    let fatal = find(run.stderr, "llvm lowering [fatal] [E1004]:", 0);
+    assert start >= 0;
+    assert fatal > start;
+}

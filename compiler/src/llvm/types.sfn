@@ -233,7 +233,7 @@ struct ModuleGlobalLoweringResult {
     // each runtime-evaluated module global into its `@global.<name>` slot
     // (#1386). Null when no global needs runtime init. Lowered by the
     // orchestrator (`lowering_core/mod.sfn`) via `emit_llvm_function`, which has
-    // the `![io]` expression-lowering context this pure pass lacks.
+    // the full expression-lowering context this narrow pass lacks.
     init_function: NativeFunction?;
     locals: LocalBinding[];
     string_constants: StringConstant[];

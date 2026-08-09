@@ -3,6 +3,8 @@
 // Module symbol mangling, trait metadata construction, and function
 // collection helpers.  Split from lowering_helpers.sfn to keep both
 // files under 1000 lines.
+import { substring } from "sfn/strings";
+
 import {
     ImportModuleAlias,
     NativeFunction,
@@ -12,9 +14,9 @@ import {
     NativeParameter,
     NativeStruct
 } from "../../native_ir";
-import { substring } from "../../string_utils";
 import { resolve_import_module_slug_for_module } from "../imports";
-import { trace_lowering } from "../lowering_debug_state";
+import { trace_log, trace_lowering } from "../lowering_debug_state";
+import { sanitize_symbol } from "../symbols";
 import {
     CapabilityManifest,
     TraitDescriptor,
@@ -25,7 +27,6 @@ import {
     index_of,
     join_with_separator,
     number_to_string,
-    sanitize_symbol,
     starts_with,
     string_array_contains,
     trim_text
@@ -145,11 +146,11 @@ fn _collect_struct_method_symbols(native_text: string) -> string[] {
     return result;
 }
 
-fn apply_module_symbol_mangling(lines: string[], imports: NativeImport[], current_module_slug: string, imported_native_texts: string[], module_aliases: ImportModuleAlias[], native_text_path: string) -> MangledModuleResult ![io] {
+fn apply_module_symbol_mangling(lines: string[], imports: NativeImport[], current_module_slug: string, imported_native_texts: string[], module_aliases: ImportModuleAlias[], native_text_path: string) -> MangledModuleResult {
     let mut diagnostics: string[] = [];
     let debug_lowering = trace_lowering();
     if debug_lowering {
-        print.err("emit-llvm: mangle start module=" + current_module_slug);
+        trace_log("emit-llvm: mangle start module=" + current_module_slug);
     }
     let mut safe_imports = imports;
     if safe_imports == null { safe_imports = []; }
@@ -159,7 +160,7 @@ fn apply_module_symbol_mangling(lines: string[], imports: NativeImport[], curren
             + "`; refusing to emit incomplete symbol rewrites");
         safe_imports = [];
         if debug_lowering {
-            print.err("emit-llvm: mangle import list too large; dropping");
+            trace_log("emit-llvm: mangle import list too large; dropping");
         }
     }
 
@@ -178,13 +179,13 @@ fn apply_module_symbol_mangling(lines: string[], imports: NativeImport[], curren
 
     let available_modules = collect_available_import_module_names(imported_native_texts);
     if debug_lowering {
-        print.err("emit-llvm: mangle available_modules=" + number_to_string(available_modules.length));
+        trace_log("emit-llvm: mangle available_modules=" + number_to_string(available_modules.length));
     }
 
     // 1) Mangle every function defined in this module to a module-qualified symbol.
     let defined = collect_defined_function_symbols(lines);
     if debug_lowering {
-        print.err("emit-llvm: mangle defined_symbols=" + number_to_string(defined.length));
+        trace_log("emit-llvm: mangle defined_symbols=" + number_to_string(defined.length));
     }
     let mut local_olds: string[] = [];
     let mut local_news: string[] = [];
@@ -211,7 +212,7 @@ fn apply_module_symbol_mangling(lines: string[], imports: NativeImport[], curren
 
     let mut rewritten = apply_symbol_substitutions(lines, local_olds, local_news);
     if debug_lowering {
-        print.err("emit-llvm: mangle local_subs=" + number_to_string(local_olds.length));
+        trace_log("emit-llvm: mangle local_subs=" + number_to_string(local_olds.length));
     }
 
     // 2) Rewrite imported symbol references to the provider's qualified symbol,
@@ -409,7 +410,7 @@ fn apply_module_symbol_mangling(lines: string[], imports: NativeImport[], curren
 
     rewritten = apply_symbol_substitutions(rewritten, import_olds, import_news);
     if debug_lowering {
-        print.err("emit-llvm: mangle import_subs=" + number_to_string(import_olds.length));
+        trace_log("emit-llvm: mangle import_subs=" + number_to_string(import_olds.length));
     }
 
     // 3) Append shims before the LLVM footer (attributes/metadata).
@@ -478,7 +479,7 @@ fn apply_module_symbol_mangling(lines: string[], imports: NativeImport[], curren
     }
     rewritten = insert_before_llvm_footer(rewritten, shim_lines);
     if debug_lowering {
-        print.err("emit-llvm: mangle shims=" + number_to_string(shim_exports.length));
+        trace_log("emit-llvm: mangle shims=" + number_to_string(shim_exports.length));
     }
 
     return MangledModuleResult { lines: rewritten, diagnostics: diagnostics };

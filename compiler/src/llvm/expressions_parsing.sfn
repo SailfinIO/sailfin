@@ -2,7 +2,8 @@
 //
 // Expression parsing helpers: member access, index expressions, assignments,
 // inline let, ternary, cast, and raw address parsing.
-import { char_at, index_of, substring } from "../string_utils";
+import { char_at_index as char_at, find, substring } from "sfn/strings";
+
 import {
     AssignmentParseResult,
     CastParseResult,
@@ -421,7 +422,7 @@ fn parse_inline_let_expression(expression: string) -> InlineLetParseResult {
     let mut name: string = "";
     let mut type_annotation: string = "";
 
-    let arrow_index = index_of(lhs, "->");
+    let arrow_index = find(lhs, "->", 0);
     if arrow_index >= 0 {
         name = trim_text(substring(lhs, 0, arrow_index));
         type_annotation = trim_text(substring(lhs, arrow_index + 2, lhs.length));

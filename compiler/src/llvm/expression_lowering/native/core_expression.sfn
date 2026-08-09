@@ -4,7 +4,7 @@
 import { NativeFunction } from "../../../native_ir";
 import { char_at, substring } from "../../../string_utils";
 import { format_temp_name } from "../../expressions_helpers";
-import { trace_lowering } from "../../lowering_debug_state";
+import { trace_log, trace_lowering } from "../../lowering_debug_state";
 import { find_function_by_name_or_import } from "../../rendering_helpers";
 import { empty_string_constant_set } from "../../strings";
 import { ends_with_pointer_suffix, strip_pointer_suffix } from "../../type_mapping";
@@ -80,13 +80,13 @@ import {
     trim_text
 } from "./core_text";
 
-fn lower_expression(expression: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string) -> ExpressionResult ![io] {
+fn lower_expression(expression: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string) -> ExpressionResult {
     let trimmed = trim_text(expression);
     let mut diagnostics: string[] = [];
     let empty_constants = empty_string_constant_set();
     let dbg_expr = trace_lowering();
     if dbg_expr {
-        print.err("emit-llvm: lower_expression ENTER expr=" + trimmed
+        trace_log("emit-llvm: lower_expression ENTER expr=" + trimmed
             + " bindings_len="
             + number_to_string(bindings.length)
             + " expected="
@@ -461,7 +461,7 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
     if dbg_expr {
         let mut add_succ = "false";
         if additive.success { add_succ = "true"; }
-        print.err("emit-llvm: lower_expression additive_check expr=" + stripped
+        trace_log("emit-llvm: lower_expression additive_check expr=" + stripped
             + " success="
             + add_succ
             + " index="
@@ -471,7 +471,7 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
     }
     if additive.success {
         if dbg_expr {
-            print.err("emit-llvm: lower_expression DISPATCH binary_op expr="
+            trace_log("emit-llvm: lower_expression DISPATCH binary_op expr="
                 + stripped);
         }
         return lower_binary_operation(stripped, additive, bindings, locals, temp_index, lines, functions, context);

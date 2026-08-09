@@ -5,7 +5,7 @@
 import { NativeFunction } from "../../../../native_ir";
 import { substring } from "../../../../string_utils";
 import { format_temp_name, format_typed_operand } from "../../../expressions_helpers";
-import { trace_lowering } from "../../../lowering_debug_state";
+import { trace_log, trace_lowering } from "../../../lowering_debug_state";
 import { find_interface_info_by_name } from "../../../type_context_queries";
 import { ends_with_pointer_suffix } from "../../../type_mapping";
 import {
@@ -29,7 +29,7 @@ import { emit_platform_intrinsic } from "./platform_intrinsics";
 
 // Coerce operands to expected types and emit the final call instruction.
 // Handles array concat/push, trait dispatch, closure dispatch, and normal function calls.
-fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], operand_source_types: string[], expected_params: string[], llvm_return: string, is_trait_dispatch: boolean, is_closure_dispatch: boolean, is_array_concat: boolean, array_concat_element_type: string, is_array_push: boolean, array_push_element_type: string, method_operand: LLVMOperand?, helper_descriptor: RuntimeHelperDescriptor?, function_entry: NativeFunction?, current_temp: int, current_lines: string[], diagnostics: string[], collected_string_constants: StringConstant[], bindings: ParameterBinding[], locals: LocalBinding[], context: TypeContext) -> ExpressionResult ![io] {
+fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], operand_source_types: string[], expected_params: string[], llvm_return: string, is_trait_dispatch: boolean, is_closure_dispatch: boolean, is_array_concat: boolean, array_concat_element_type: string, is_array_push: boolean, array_push_element_type: string, method_operand: LLVMOperand?, helper_descriptor: RuntimeHelperDescriptor?, function_entry: NativeFunction?, current_temp: int, current_lines: string[], diagnostics: string[], collected_string_constants: StringConstant[], bindings: ParameterBinding[], locals: LocalBinding[], context: TypeContext) -> ExpressionResult {
     let mut result_lines = current_lines;
     let mut result_temp: int = current_temp;
     let mut result_diagnostics = diagnostics;
@@ -58,14 +58,14 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], operand
     }
 
     if _trace_ccl {
-        print.err("call_lowering: checkpoint-B fn_entry_null="
+        trace_log("call_lowering: checkpoint-B fn_entry_null="
             + number_to_string(0));
     }
     let mut _if56: boolean = false;
     if function_entry != null { _if56 = true; }
     if helper_descriptor != null { _if56 = true; }
     if _trace_ccl {
-        print.err("call_lowering: checkpoint-C _if56=" + number_to_string(0));
+        trace_log("call_lowering: checkpoint-C _if56=" + number_to_string(0));
     }
     if _if56 {
         if expected_params.length != final_operands.length {
@@ -77,22 +77,18 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], operand
         }
     }
 
-    if _trace_ccl {
-        print.err("call_lowering: checkpoint-D rendering args");
-    }
+    if _trace_ccl { trace_log("call_lowering: checkpoint-D rendering args"); }
     let mut rendered_args: string[] = [];
     index = 0;
     loop {
         if index >= final_operands.length { break; }
         if _trace_ccl {
-            print.err("call_lowering: render-arg idx=" + number_to_string(index));
+            trace_log("call_lowering: render-arg idx=" + number_to_string(index));
         }
         rendered_args.push(format_typed_operand(final_operands[index]));
         index += 1;
     }
-    if _trace_ccl {
-        print.err("call_lowering: checkpoint-E args rendered");
-    }
+    if _trace_ccl { trace_log("call_lowering: checkpoint-E args rendered"); }
     let argument_text = join_with_separator(rendered_args, ", ");
 
     // Hard-fail when the signature resolver could not determine the
@@ -111,7 +107,7 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], operand
         let unresolved_diag = "llvm lowering [fatal]: cannot resolve return type for call to `"
             + trimmed_target
             + "` — callee signature is not known to the compiler";
-        print.err(unresolved_diag);
+        trace_log(unresolved_diag);
         result_diagnostics.push(unresolved_diag);
         return ExpressionResult {
             lines: result_lines,
@@ -413,7 +409,7 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], operand
 
     // Standard function call
     if _trace_ccl {
-        print.err("call_lowering: checkpoint-F call_symbol target="
+        trace_log("call_lowering: checkpoint-F call_symbol target="
             + trimmed_target);
     }
     let mut call_symbol = sanitize_symbol(trimmed_target);
@@ -439,7 +435,7 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], operand
         if call_symbol == "concat" { call_symbol = "sailfin_runtime_concat"; }
     }
     if _trace_ccl {
-        print.err("call_lowering: checkpoint-G llvm_return=" + llvm_return
+        trace_log("call_lowering: checkpoint-G llvm_return=" + llvm_return
             + " call_symbol="
             + call_symbol);
     }
@@ -448,7 +444,7 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], operand
             + ")";
         result_lines.push(call_line);
         if _trace_ccl {
-            print.err("call_lowering: checkpoint-H void return");
+            trace_log("call_lowering: checkpoint-H void return");
         }
         return ExpressionResult {
             lines: result_lines,
@@ -461,7 +457,7 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], operand
 
     let temp_name = format_temp_name(result_temp);
     if _trace_ccl {
-        print.err("call_lowering: checkpoint-I temp_name=" + temp_name);
+        trace_log("call_lowering: checkpoint-I temp_name=" + temp_name);
     }
     // Issue #639: honor the descriptor's `c_abi_return_type` when it
     // differs from the caller-visible `return_type`. This mirrors the
@@ -498,7 +494,7 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], operand
         next_temp = coercion.temp_index;
         if coercion.operand != null { result_operand = coercion.operand; }
     }
-    if _trace_ccl { print.err("call_lowering: checkpoint-K returning"); }
+    if _trace_ccl { trace_log("call_lowering: checkpoint-K returning"); }
     return ExpressionResult {
         lines: result_lines,
         temp_index: next_temp,

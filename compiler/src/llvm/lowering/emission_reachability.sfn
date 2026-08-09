@@ -3,7 +3,8 @@
 // Lowering emits canonical LLVM branch operands as `label %<name>`. Walking
 // those edges answers whether the block receiving the mandatory fallback
 // return is reachable without duplicating source-level control-flow semantics.
-import { substring } from "../../string_utils";
+import { substring } from "sfn/strings";
+
 import {
     index_of,
     starts_with,

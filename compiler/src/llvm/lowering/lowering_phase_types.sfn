@@ -8,6 +8,8 @@
 //
 // Extracted from lowering_core/mod.sfn to reduce per-file memory footprint.
 import { NativeEnum, NativeInterface, NativeStruct } from "../../native_ir";
+import { trace_log } from "../lowering_debug_state";
+import { sanitize_symbol } from "../symbols";
 import { build_type_context } from "../type_context";
 import {
     EnumTypeInfo,
@@ -15,7 +17,7 @@ import {
     TypeContext,
     TypeContextBuildResult
 } from "../types";
-import { number_to_string, sanitize_symbol } from "../utils";
+import { number_to_string } from "../utils";
 import { get_enum_name_at } from "./lowering_native_helpers";
 
 // Build skeletal EnumTypeInfo[] directly from in-memory NativeEnum[].
@@ -80,19 +82,19 @@ fn build_enum_infos_inline(enums: NativeEnum[]) -> EnumTypeInfo[] {
 // orchestrator merges diagnostics in-memory. Previously wrote to
 // `build/sailfin/.phase_types_diagnostics` which was a source of
 // non-determinism when stale files persisted across test invocations.
-fn build_type_context_with_recovery(combined_structs: NativeStruct[], combined_enums: NativeEnum[], combined_interfaces: NativeInterface[], diagnostics: string[], _trace_enums: boolean, debug_lowering: boolean) -> TypeContextBuildResult ![io] {
+fn build_type_context_with_recovery(combined_structs: NativeStruct[], combined_enums: NativeEnum[], combined_interfaces: NativeInterface[], diagnostics: string[], _trace_enums: boolean, debug_lowering: boolean) -> TypeContextBuildResult {
     // Skip cross-module fixup_enum_layouts: the seed's struct-returning
     // cross-module ABI segfaults.  Pass enums through directly.
     let fixed_enums_list = combined_enums;
 
     // (No diagnostics from skipped fixup.)
     if debug_lowering {
-        print.err("emit-llvm: about to fixup_enum_layouts enums="
+        trace_log("emit-llvm: about to fixup_enum_layouts enums="
             + number_to_string(combined_enums.length));
     }
 
     if _trace_enums {
-        print.err("enum_trace: combined_enums=" + number_to_string(combined_enums.length)
+        trace_log("enum_trace: combined_enums=" + number_to_string(combined_enums.length)
             + " fixed_enums="
             + number_to_string(fixed_enums_list.length));
     }
@@ -129,7 +131,7 @@ fn build_type_context_with_recovery(combined_structs: NativeStruct[], combined_e
         let recovered = build_enum_infos_inline(fixed_enums_list);
         if recovered.length > 0 {
             if _trace_enums {
-                print.err("enum_trace: recovered " + number_to_string(recovered.length)
+                trace_log("enum_trace: recovered " + number_to_string(recovered.length)
                     + " enum(s) from in-memory fixed_enums_list");
             }
             type_context = TypeContext {
@@ -141,9 +143,9 @@ fn build_type_context_with_recovery(combined_structs: NativeStruct[], combined_e
         }
     }
     if _trace_enums {
-        print.err("enum_trace: type_context.enums=" + number_to_string(type_context.enums.length));
+        trace_log("enum_trace: type_context.enums=" + number_to_string(type_context.enums.length));
     }
-    if debug_lowering { print.err("emit-llvm: phase=type_context"); }
+    if debug_lowering { trace_log("emit-llvm: phase=type_context"); }
     return TypeContextBuildResult {
         context: type_context,
         diagnostics: _tc_diags_lines

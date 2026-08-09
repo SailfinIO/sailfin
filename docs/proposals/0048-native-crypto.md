@@ -4,9 +4,9 @@ title: Native crypto + TLS stack — removing the OpenSSL dependency
 status: Accepted
 type: runtime
 created: 2026-07-12
-updated: 2026-08-07
+updated: 2026-08-09
 author: "agent:compiler-architect; human review"
-tracking: SFN-333, SFN-335, SFN-336, SFN-337, SFN-340, SFN-341, SFN-504, SFN-654, SFN-655, SFN-656, SFN-657, SFN-658, SFN-659, SFN-660, SFN-699, SFN-766, SFN-767, SFN-768, SFN-769
+tracking: SFN-333, SFN-335, SFN-339, SFN-336, SFN-337, SFN-340, SFN-341, SFN-504, SFN-654, SFN-655, SFN-656, SFN-657, SFN-658, SFN-659, SFN-660, SFN-699, SFN-766, SFN-767, SFN-768, SFN-769, SFN-814
 supersedes:
 superseded-by:
 graduates-to:
@@ -633,8 +633,146 @@ plainly, since conflating them is a real interop bug: **RSASSA-PKCS1-v1_5**
 PKCS#1 v1.5 in CertificateVerify and mandates the `rsa_pss_rsae_*` schemes.
 Both share one modexp core.
 
-Still deferred/out of scope: RSA signing, RSA key generation, and AES-GCM
-(unchanged — the original AES reasoning above stands).
+**Amendment (2026-08-09) — AES-GCM is now IN scope; the original AES reasoning
+was wrong in a specific, identifiable way.** The cut above deferred AES-GCM on
+the grounds that "constant-time software AES needs either bitsliced AES (very
+large, error-prone) or hardware AES-NI intrinsics the backend does not expose."
+That sentence names two options, declares the tractable one unpleasant, and
+stops — the same failure mode the §6.4 X25519 amendment identified in itself:
+**the search §3.3 item 5 mandates was never run.** The deeper error is a
+conflation. "Very large" and "error-prone" are code-size and review-burden
+claims; whether a construction is *expressible* under Sailfin's `ashr`-only,
+unsigned-broken integer model is a different question, and it was answered by
+assumption.
+
+Run properly, the search terminates on the first rung — faster than X25519's did,
+because **bitsliced AES performs no arithmetic at all.** It is a Boolean circuit
+over 8 words masked to `[0, 2^32)`: `and`, `or`, `xor`, `not`, and lane-local
+shifts of at most 15 bits. The worst-case intermediate across the entire cipher,
+both key sizes, and any message length is
+
+    (2^32 - 1) << 15  <  2^47
+
+**15 bits of headroom below `2^62`, 16 below `2^63`, with no accumulation term at
+all** — so unlike X25519's `2^45.80`, the bound cannot drift with round count, key
+size, or message length. It needs no new compiler capability: no sized integers,
+no unsigned semantics, no `lshr`, no `64x64 -> 128` widening multiply.
+
+Two further facts the original reasoning did not weigh. **GCM needs AES
+encryption only** — it is CTR mode — so `InvSubBytes`, `InvMixColumns`, and the
+whole decryption path are absent, halving the size objection before anything
+else. And **"error-prone" is backwards for this primitive**: AES has the most
+comprehensive public known-answer vector set of anything in the capsule
+(FIPS-197 Appendix B/C, NIST SP 800-38A CTR, NIST CAVP GCM), so its correctness is
+*more* mechanically verifiable than Ed25519's or P-256's, both of which shipped.
+
+**The S-box is specified as a derivable construction rather than a published
+circuit**, which is a practical constraint worth recording because it is easy to
+get backwards. The literature's smallest S-box is Boyar-Peralta (2010), ~115
+gates — but that is a specific gate list with no internal redundancy, so adopting
+it requires the published circuit *in hand*; authoring it from recollection is not
+a defensible way to write a cipher, even with vectors to catch errors. The
+construction specified instead is derivable from the field axioms:
+`sbox(x) = affine(inv(x))` with `inv(x) = x^254` in GF(2^8), computed as
+`x^128 · x^64 · x^32 · x^16 · x^8 · x^4 · x^2`. It is affordable because
+**squaring in GF(2^8) is linear** (Frobenius, characteristic 2), so it is a bit
+permutation plus reduction XORs rather than a multiply: 7 cheap squarings and 6
+full bitsliced multiplies, ~34 gates/byte for SubBytes. `inv(0) = 0` falls out, so
+there is no special case and therefore no branch. Boyar-Peralta and fixslicing
+become *contingent optimizations* — drop-in replacements for one function with
+identical inputs, outputs, and KATs — worth taking only if the measured
+throughput warrants it. **The constant-time claim is unaffected**: neither
+construction contains a lookup table.
+
+The one place arithmetic does appear is GHASH's GF(2^128) multiply, and there the
+width search does real work. Masked-integer carryless multiplication on
+**32-bit** operands (four right-aligned classes, mask `286331153`) is exact: each
+class carries at most 8 set bits, so at most 8 pairs collide at any output
+position, a count of 8 occupies 4 bits, and the carry contaminates only the three
+positions the output mask removes. The maximum intermediate is
+`286331153^2 << 6 = 2^62.19` — 0.813 bits below `2^63`, non-negative throughout,
+exact and message-length-independent, because it is the magnitude of the answer
+itself (a carryless product of two 32-bit values has degree <= 62). **64-bit
+operands are not merely awkward, they are incorrect**: 16 set bits per class
+permits a count of 16, whose fifth bit lands at `p+4` — the same residue class —
+and survives the mask. 32 bits is the widest correct width, and `ashr`
+independently forbids 64-bit words anyway. A `_clmul32(4294967295, 4294967295)`
+known-answer test guards the bound; the conservative fallback is 16-bit operands
+at `2^30.19` (31.8 bits of headroom) and ~4x the cost.
+
+Full derivation, gate counts, and the throughput model:
+`docs/proposals/design-notes/sfn-339-aes-gcm-strategy.md`.
+
+**The escape hatch that un-deferred RSA verify does not apply here, and is not
+being used.** RSA verify carries no constant-time requirement because it operates
+entirely on public data. AES in TLS operates on a symmetric traffic key; the
+requirement is real and cannot be argued away. What transfers is the *motivating*
+argument. "Ed25519 + ECDSA-P256 alone verifies only known peers, not the general
+web, which makes the native stack a non-replacement for libssl rather than a
+drop-in" — substitute the AEAD axis for the signature axis and it is the same
+sentence. Confirmed hermetically on loopback, with only `openssl s_server`'s
+`-ciphersuites` flag differing: a ChaCha20-only server serves the native client
+3795 bytes; an AES-128-GCM-only server draws `handshake_failure` and the client
+gets nothing. The practical consequence is that the native stack **cannot fetch
+Sailfin's own release assets** from `objects.githubusercontent.com`, which breaks
+`sfn toolchain install`, seed auto-dispatch, and `sfn dev bootstrap fetch`. This
+is the same defect class as the ed25519-only `signature_algorithms` extension
+recorded in `docs/proposals/design-notes/sfn-341-native-tls-runtime-swap.md` §3.4
+— a one-item offer list no real peer can satisfy — on a second axis.
+
+**RFC 8446 §9.1 bounds the scope of the fix.** "A TLS-compliant application MUST
+implement the TLS_AES_128_GCM_SHA256 cipher suite." Offering
+`TLS_AES_128_GCM_SHA256` is therefore sufficient for universal TLS 1.3 interop by
+specification, and the client offers it *second*, after
+`TLS_CHACHA20_POLY1305_SHA256`, because ChaCha20-Poly1305 remains several times
+faster in this implementation. The AES-256-GCM **AEAD** ships too (a 32-byte key
+is ~60 extra lines of key schedule, and the capsule is a public library). The
+`TLS_AES_256_GCM_SHA384` **cipher suite** stays out of scope: it needs
+`hash_len = 48` threaded through `tls13_handshake.sfn`, whose `_hash_len()`
+returns a constant 32 by deliberate design, and there is no RFC 8448 SHA-384
+trace to check it against. §9.1 makes it unnecessary for interop.
+
+**AES-NI / ARMv8-Crypto intrinsics remain the right long-term performance answer,
+and are explicitly not on this path's critical line.** They are a
+`seed-blocker`-class compiler capability, and the seed analysis is stricter than
+it first appears: `compiler/capsule.toml` declares
+`[dependencies] "sfn/crypto" = "*"`, so `make compile` (= `<seed> build -p
+compiler`) has the **pinned seed** compile the working-tree
+`capsules/sfn/crypto/src/*.sfn`. The `.claude/rules/seed-dependency.md`
+runtime-source carve-out therefore generalises to *any source the pinned seed
+compiles*, which includes every capsule in the compiler's dependency closure — a
+new intrinsic called from `sfn/crypto` needs to be in the **seed**, not merely in
+the freshly built compiler, and bundling does not help. Adding one costs at least
+one queued cadence seed cut, needs CPUID dispatch, and needs a software fallback
+regardless for macOS arm64 and the Windows cross-build. It would be a pure
+optimization over an already-shipped software path, never the thing that unblocks
+interop. The pure-Sailfin path costs **zero** seed cuts.
+
+**The published claim.** The implementation is constant-time by construction — no
+lookup table exists anywhere in the AES or GHASH modules, including the key
+schedule, and no branch or array index depends on the key, plaintext, or GHASH
+subkey. That claim is scoped to the algorithm and the emitted LLVM IR; it is
+**not** a claim about host microarchitecture, Sailfin has no compiler barrier
+against a future optimizer introducing a data-dependent `select`, and no automated
+constant-time verification is run. `docs/status.md` states exactly that, with no
+softening. A T-table implementation was considered and rejected: for a TLS client
+on a host the user controls the cache-timing channel is arguably irrelevant, but
+`sfn/crypto` is a public library capsule with no way to scope such a caveat to
+that use, and — decisively — the constant-time construction is computed-feasible
+and clears the `sfn-341-native-tls-runtime-swap.md` §3.3 ~20 MB/s `-O2` bar. There
+was no tradeoff to make, and shipping a documented negative security property
+fails the restriction-vs-power test in `docs/strategy/decision-brief.md`.
+
+**Nomenclature note.** The `tls_features_required` identifier this section cites
+no longer exists anywhere in the tree; it was an SFEP-0036-era construct. The live
+record of the minimal surface the runtime actually exercises is the `sfn/crypto`
+and native-TLS rows of `docs/status.md`, plus `encode_client_hello`'s offered
+cipher-suite and signature-algorithm lists in
+`capsules/sfn/crypto/src/tls13_handshake_codec.sfn`.
+
+Still deferred/out of scope: RSA signing, RSA key generation, the
+`TLS_AES_256_GCM_SHA384` cipher suite (above), and AES-NI/ARMv8-Crypto intrinsics
+(above).
 
 ### 6.4 Pure-Sailfin X25519 in Phase A
 **Rejected for Phase A — recorded as a blocker (§7).** Curve25519 field
@@ -695,12 +833,29 @@ already uses — not by relocating the tested source of truth out of the capsule
   Ed25519-verify was the separate follow-on (§8 of the limb-strategy note); it
   shipped in pure Sailfin as SFN-655 after the field port and SHA-512 landed.
 
-- **AES-GCM AEAD — deliberately deferred (not a hard blocker for the chosen
-  cut).** Constant-time software AES needs either bitsliced AES (very large,
-  error-prone) or hardware AES-NI intrinsics the backend does not expose. The
-  rustls-style cut (§6.3) sidesteps this by shipping **ChaCha20-Poly1305 only**,
-  which Phase A fully delivers. Recorded so a future "AES-GCM parity" ask lands
-  on a known missing capability (SIMD/AES intrinsics), not a surprise.
+- **AES-GCM AEAD — WITHDRAWN (2026-08-09), no longer deferred.** Previously
+  recorded as deliberately deferred because "constant-time software AES needs
+  either bitsliced AES (very large, error-prone) or hardware AES-NI intrinsics
+  the backend does not expose," and filed so that a future "AES-GCM parity" ask
+  would land on a known missing capability (SIMD/AES intrinsics) rather than a
+  surprise. **There was no missing capability.** That evaluation conflated code
+  size with expressibility and never ran the §3.3 item 5 width search. Bitsliced
+  AES performs no arithmetic: it is a Boolean circuit over 8 words masked to
+  `[0, 2^32)` whose worst-case intermediate is `2^47`, 15 bits below `2^62`, with
+  no accumulation term — a wider margin than the X25519 `2^45.80` that was
+  accepted. GHASH's carryless multiply runs the search for real and lands at
+  32-bit masked-integer operands with a hard `2^62.19` bound. Neither needs sized
+  integers, unsigned semantics, `lshr`, a widening multiply, or any intrinsic.
+  Full analysis: `docs/proposals/design-notes/sfn-339-aes-gcm-strategy.md`; scope
+  and the published constant-time claim: the §6.3 amendment (2026-08-09). The
+  deferral had a measurable cost: with ChaCha20-Poly1305 as the only sealable
+  AEAD the native TLS client cannot negotiate with an AES-only server, which
+  includes being unable to fetch Sailfin's own release assets (SFN-814).
+  Tracking: SFN-339 (capsule AEAD), SFN-814 (TLS negotiation + runtime hot path).
+  AES-NI/ARMv8-Crypto intrinsics remain a genuine future *optimization*, and a
+  genuine `seed-blocker`-class capability — see the §6.3 amendment for why the
+  `.claude/rules/seed-dependency.md` carve-out reaches `sfn/crypto` and not only
+  `runtime/`.
 
 - **Pure-Sailfin HMAC-SHA-256 + Ed25519-verify — deferred to Phase D.** The
   shipped `hmac_sha256` (`mod.sfn`) and `ed25519_verify` (`ed25519.sfn`) are

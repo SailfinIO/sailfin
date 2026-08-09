@@ -2,10 +2,11 @@
 //
 // Typed indirect-call emission for closure-pair callees.
 import { format_temp_name } from "../../../expressions_helpers";
+import { trace_log } from "../../../lowering_debug_state";
 import { ExpressionResult, LLVMOperand, StringConstant } from "../../../types";
 import { join_with_separator, number_to_string } from "../../../utils";
 
-fn emit_closure_dispatch(trimmed_target: string, final_operands: LLVMOperand[], rendered_args: string[], expected_params: string[], llvm_return: string, current_temp: int, current_lines: string[], diagnostics: string[], collected_string_constants: StringConstant[]) -> ExpressionResult ![io] {
+fn emit_closure_dispatch(trimmed_target: string, final_operands: LLVMOperand[], rendered_args: string[], expected_params: string[], llvm_return: string, current_temp: int, current_lines: string[], diagnostics: string[], collected_string_constants: StringConstant[]) -> ExpressionResult {
     let mut result_lines = current_lines;
     let mut result_temp: int = current_temp;
     let mut result_diagnostics = diagnostics;
@@ -44,7 +45,7 @@ fn emit_closure_dispatch(trimmed_target: string, final_operands: LLVMOperand[], 
                 + number_to_string(expected_params.length - 1)
                 + " user argument(s), got "
                 + number_to_string(final_operands.length - 1);
-            print.err(arity_diag);
+            trace_log(arity_diag);
             result_diagnostics.push(arity_diag);
             return ExpressionResult {
                 lines: result_lines,

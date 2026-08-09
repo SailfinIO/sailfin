@@ -1,14 +1,11 @@
 // compiler/src/llvm/expressions_helpers.sfn
 //
 // Identifier helpers, string manipulation, type helpers, and LLVM operand formatting.
-import { char_at, substring } from "../string_utils";
+import { char_at_index as char_at, substring } from "sfn/strings";
+
+import { sanitize_symbol } from "./symbols";
 import { LLVMOperand } from "./types";
-import {
-    number_to_string,
-    sanitize_symbol,
-    starts_with,
-    trim_text
-} from "./utils";
+import { number_to_string, starts_with, trim_text } from "./utils";
 
 // =============================================================================
 // Identifier and Expression Helpers

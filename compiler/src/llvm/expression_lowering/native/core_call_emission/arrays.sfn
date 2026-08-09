@@ -14,7 +14,7 @@ import { coerce_operand_to_type } from "../core_operands/dispatch";
 import { parse_member_access } from "../core_parse";
 import { find_local_binding } from "../core_scopes";
 
-fn emit_array_call(trimmed_target: string, final_operands: LLVMOperand[], is_array_concat: boolean, array_concat_element_type: string, is_array_push: boolean, array_push_element_type: string, current_temp: int, current_lines: string[], diagnostics: string[], collected_string_constants: StringConstant[], locals: LocalBinding[]) -> ExpressionResult ![io] {
+fn emit_array_call(trimmed_target: string, final_operands: LLVMOperand[], is_array_concat: boolean, array_concat_element_type: string, is_array_push: boolean, array_push_element_type: string, current_temp: int, current_lines: string[], diagnostics: string[], collected_string_constants: StringConstant[], locals: LocalBinding[]) -> ExpressionResult {
     let mut result_lines = current_lines;
     let mut result_temp: int = current_temp;
     let mut result_diagnostics = diagnostics;

@@ -27,7 +27,7 @@ import {
 // function named `atomic_load` from shadowing the builtin (which
 // would otherwise be a hazard once the runtime starts depending on
 // these names).
-fn try_dispatch_atomic_builtin(trimmed_target: string, arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult? ![io] {
+fn try_dispatch_atomic_builtin(trimmed_target: string, arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult? {
     if !is_atomic_builtin(trimmed_target) { return null; }
     return lower_atomic_builtin(trimmed_target, arguments, bindings, locals, temp_index, lines, functions, context);
 }
@@ -40,12 +40,12 @@ fn try_dispatch_atomic_builtin(trimmed_target: string, arguments: string[], bind
 // `load i8` + `zext`) rather than a `call @symbol(...)`. Short-circuiting
 // here also prevents a future user-defined `load_byte` from shadowing
 // the primitive the string runtime depends on.
-fn try_dispatch_byte_load_builtin(trimmed_target: string, arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult? ![io] {
+fn try_dispatch_byte_load_builtin(trimmed_target: string, arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult? {
     if !is_byte_load_builtin(trimmed_target) { return null; }
     return lower_byte_load(trimmed_target, arguments, bindings, locals, temp_index, lines, functions, context);
 }
 
-fn try_dispatch_syscall_builtin(trimmed_target: string, arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult? ![io] {
+fn try_dispatch_syscall_builtin(trimmed_target: string, arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult? {
     if !is_syscall_builtin(trimmed_target) { return null; }
     return lower_syscall_builtin(trimmed_target, arguments, bindings, locals, temp_index, lines, functions, context);
 }

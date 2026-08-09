@@ -43,13 +43,14 @@
 //
 // Pinned by `compiler/tests/e2e/test_runtime_type_meta.sh`.
 import { target_uses_comdat } from "../lowering_debug_state";
+import { sanitize_symbol } from "../symbols";
 import {
     EnumTypeInfo,
     InterfaceTypeInfo,
     StructTypeInfo,
     TypeContext
 } from "../types";
-import { number_to_string, sanitize_symbol } from "../utils";
+import { number_to_string } from "../utils";
 import { fnv1a_64_hash, limbs_to_unsigned_decimal } from "./abi_hash";
 
 // Tag constants — must match `runtime/sfn/type_meta.sfn` header
@@ -254,7 +255,7 @@ fn _already_seen(seen: string[], name: string) -> boolean {
 // linkage handles cross-module duplicates at link time but
 // llvm-as still rejects within-module duplicates. We dedupe by
 // type name before emission so the IR is always self-consistent.
-fn emit_type_descriptors(type_context: TypeContext, module_name: string, skip_names: string[]) -> TypeDescriptorEmission ![io] {
+fn emit_type_descriptors(type_context: TypeContext, module_name: string, skip_names: string[]) -> TypeDescriptorEmission {
     // Resolved once per module compile — `_emit_one_type` runs once per
     // named type and must not re-probe the cached resolver on that hot
     // path (SFN-549).

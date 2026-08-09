@@ -220,7 +220,7 @@ fn _closure_pair_symbol(marker: string) -> string {
     return symbol;
 }
 
-fn try_resolve_closure_callee(target: string, bindings: ParameterBinding[], locals: LocalBinding[], functions: NativeFunction[], context: TypeContext, temp_index: int, lines: string[]) -> _ClosureCalleeInfo? ![io] {
+fn try_resolve_closure_callee(target: string, bindings: ParameterBinding[], locals: LocalBinding[], functions: NativeFunction[], context: TypeContext, temp_index: int, lines: string[]) -> _ClosureCalleeInfo? {
     let name = trim_text(target);
     if name.length == 0 { return null; }
 

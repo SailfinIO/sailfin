@@ -32,7 +32,7 @@ import { _is_primitive_receiver_type } from "./receiver_types";
 
 // Resolves method calls via parse_member_access (struct methods, interface dispatch,
 // runtime helpers, array concat/push).
-fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], result_temp: int, result_lines: string[], functions: NativeFunction[], context: TypeContext, result_diagnostics: string[], result_string_constants: StringConstant[], method_operand: LLVMOperand?, helper_descriptor: RuntimeHelperDescriptor?, injected_argument_count: int, is_array_concat: boolean, array_concat_element_type: string, is_array_push: boolean, array_push_element_type: string) -> CallTargetResolution ![io] {
+fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], result_temp: int, result_lines: string[], functions: NativeFunction[], context: TypeContext, result_diagnostics: string[], result_string_constants: StringConstant[], method_operand: LLVMOperand?, helper_descriptor: RuntimeHelperDescriptor?, injected_argument_count: int, is_array_concat: boolean, array_concat_element_type: string, is_array_push: boolean, array_push_element_type: string) -> CallTargetResolution {
     let mut r_target = result_target;
     let mut r_lines = result_lines;
     let mut r_temp: int = result_temp;

@@ -1,0 +1,62 @@
+// aes_gcm_throughput_test.sfn
+//
+// Records the -O0 AES-128-GCM seal throughput and guards it against a
+// catastrophic regression. `sfn test` links at -O0
+// (compiler/src/cli/commands/test/link.sfn), so the figure this prints is the
+// -O0 one; the -O2 figure comes from `sfn bench`
+// (benchmarks/runtime/aes_gcm_seal_bench.sfn), which builds via `sfn build`.
+// The SFN-339 design gate requires a measured number at both levels
+// (docs/proposals/design-notes/sfn-339-aes-gcm-strategy.md section 3).
+//
+// The floor is deliberately far below the measured value. This is a regression
+// tripwire, not a benchmark: the thing worth catching is the return of the
+// per-round int[] allocation that made the first cut of aes_sbox.sfn 5x slower
+// and gave it a 5.4 GB peak RSS, not a few percent of host variance.
+import { int_to_string } from "sfn/strings";
+
+import { aes_gcm_seal } from "../src/aead_aes_gcm";
+
+// Throughput in KB/s. bytes/ms is bytes-per-millisecond, which is 1000
+// bytes/s, so the quotient reads directly as KB/s. Callers must guard ms == 0.
+fn _kbps(bytes: int, ms: int) -> int { return bytes / ms; }
+
+fn _payload(n: int) -> int[] {
+    let mut buf: int[] = [];
+    let mut i: int = 0;
+    while i < n {
+        buf.push(i & 255);
+        i += 1;
+    }
+    return buf;
+}
+
+test "aes_gcm: seal throughput at -O0" ![clock, io] {
+    let key: int[] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,];
+    let nonce: int[] = [16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27,];
+    let aad: int[] = [1, 2, 3, 4, 5,];
+    let chunk: int[] = _payload(1024);
+
+    let chunks: int = 64;
+    let t0: int = monotonic_millis();
+    let mut n: int = 0;
+    let mut sealed_bytes: int = 0;
+    while n < chunks {
+        sealed_bytes = sealed_bytes + aes_gcm_seal(key, nonce, aad, chunk).length;
+        n += 1;
+    }
+    let t1: int = monotonic_millis();
+
+    let total: int = chunks * 1024;
+    let ms: int = t1 - t0;
+    assert sealed_bytes == total + chunks * 16;
+    print.info("aes_gcm_seal_bytes=" + int_to_string(total));
+    print.info("aes_gcm_seal_ms=" + int_to_string(ms));
+
+    // A zero elapsed measurement means the run outran millisecond granularity,
+    // not that throughput was bad, so the floor is skipped rather than
+    // dividing by zero.
+    if ms > 0 {
+        print.info("aes_gcm_seal_kbps=" + int_to_string(_kbps(total, ms)));
+        assert _kbps(total, ms) >= 100;
+    }
+}

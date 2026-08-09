@@ -1,0 +1,78 @@
+emit-llvm: phase=start
+emit-llvm: native artifacts=1
+emit-llvm: dbg-A parse_in assigned
+emit-llvm: dbg-B structured parse is authoritative (no override reparse) path_len=141
+emit-llvm: dbg-D after manifests sanitize
+emit-llvm: dbg-E after native_texts sanitize
+emit-llvm: dbg-F after diagnostics sanitize
+emit-llvm: dbg-G after entry_points sanitize
+emit-llvm: safe_imports.length=0
+emit-llvm: dbg-H after structs/enums/interfaces sanitize
+emit-llvm: dbg-H1 before parse.functions access
+emit-llvm: dbg-H2 after parse.functions access
+emit-llvm: dbg-H3 safe_functions.length=1
+emit-llvm: dbg-H4 after sanitize safe_functions.length=1
+emit-llvm: phase=recover_functions_start current=1
+emit-llvm: phase=recover_functions_done current=1
+emit-llvm: functions parsed=1 safe=1
+emit-llvm: phase=manifest
+emit-llvm: phase=imports
+emit-llvm: phase=trait_metadata
+emit-llvm: about to fixup_enum_layouts enums=1
+emit-llvm: phase=type_context
+emit-llvm: phase=struct_methods_start
+emit-llvm: phase=struct_methods_done
+emit-llvm: phase=local_functions
+emit-llvm: phase=context_functions
+emit-llvm: phase=helpers_start
+emit-llvm: phase=helpers_done
+emit-llvm: phase=effects
+emit-llvm: phase=module_globals
+emit-llvm: module bindings count=0
+emit-llvm: module bindings empty; skipping module globals
+emit-llvm: phase=functions
+emit-llvm: function-start main idx=0
+emit-llvm: emit_fn phase=ret_type name=main llvm_return=i64
+emit-llvm: ret_type safe_check=true llvm_return=i64 fn=main
+emit-llvm: emit_fn phase=prepare_params name=main params=0
+emit-llvm: emit_fn phase=internalize_check name=main internal=false
+emit-llvm: emit_fn phase=define_header name=main
+emit-llvm: emit_fn phase=decorators name=main count=0
+emit-llvm: emit_fn phase=pre_body name=main instrs=1 fn_count=1
+emit-llvm: lower_instruction_range name=main start=0 end=1 depth=0
+emit-llvm: lower_instruction_range bindings_len=0 current_bindings_len=0
+emit-llvm: lir guard=1 index=0 tag=0 fn=main depth=0
+emit-llvm: lower_return_instruction start fn=main llvm_return=i64
+emit-llvm: lower_return pre_suspension fn=main
+emit-llvm: lower_return post_suspension fn=main
+emit-llvm: lower_return pre_ownership fn=main
+emit-llvm: lower_return post_ownership fn=main
+emit-llvm: lower_return pre_lower_expr fn=main expr=1
+emit-llvm: lower_return bindings_len=0
+emit-llvm: lower_expression ENTER expr=1 bindings_len=0 expected=i64
+emit-llvm: lower_return post_lower_expr fn=main
+emit-llvm: lower_return operand_check fn=main has_operand=true
+emit-llvm: lower_return pre_coerce fn=main type=i64 value=1
+emit-llvm: lower_return pre_coerce_call fn=main
+emit-llvm: coerce_operand entry operand_type=i64 target=i64
+emit-llvm: lower_return post_coerce fn=main
+emit-llvm: emit_fn phase=body_done name=main body_lines=1 allocas=0
+emit-llvm: function-done main lines=33
+emit-llvm: phase=functions_done
+emit-llvm: phase=string_constants
+emit-llvm: phase=intrinsics
+emit-llvm: phase=render_traits
+emit-llvm: phase=render_structs
+emit-llvm: render_structs counts structs=1 enums=1 functions=1
+emit-llvm: phase=render_enums
+emit-llvm: phase=render_interfaces
+emit-llvm: phase=render_helpers
+emit-llvm: phase=render_imports
+emit-llvm: mangle start module=trace_fixture
+emit-llvm: mangle available_modules=0
+emit-llvm: mangle defined_symbols=3
+emit-llvm: mangle local_subs=1
+emit-llvm: mangle import_subs=0
+emit-llvm: mangle shims=0
+emit-llvm: phase=mangle
+emit-llvm: phase=end lines=229

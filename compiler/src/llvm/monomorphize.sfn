@@ -14,7 +14,8 @@
 // which is what preserves the self-hosting invariant. It reuses the #830
 // enum-payload substitution engine (`enum_inst_substitute_annotation`),
 // generalizing it from a single payload field to a whole function body.
-import { char_code, substring } from "../string_utils";
+import { char_code_at, substring } from "sfn/strings";
+
 import { enum_inst_substitute_annotation } from "./type_mapping";
 import {
     ends_with,
@@ -77,16 +78,16 @@ struct MonoBindings {
 
 fn _mono_is_ident_char(ch: string) -> boolean {
     if ch.length == 0 { return false; }
-    let code = char_code(ch);
+    let code = char_code_at(ch, 0);
     let mut ok: boolean = false;
-    if code >= char_code("a") {
-        if code <= char_code("z") { ok = true; }
+    if code >= char_code_at("a", 0) {
+        if code <= char_code_at("z", 0) { ok = true; }
     }
-    if code >= char_code("A") {
-        if code <= char_code("Z") { ok = true; }
+    if code >= char_code_at("A", 0) {
+        if code <= char_code_at("Z", 0) { ok = true; }
     }
-    if code >= char_code("0") {
-        if code <= char_code("9") { ok = true; }
+    if code >= char_code_at("0", 0) {
+        if code <= char_code_at("9", 0) { ok = true; }
     }
     if ch == "_" { ok = true; }
     return ok;
@@ -404,10 +405,10 @@ fn _mono_type_of_arg(arg: string, env_names: string[], env_types: string[], fns:
     if first == "\"" { return "string"; }
     if a == "true" { return "bool"; }
     if a == "false" { return "bool"; }
-    let code = char_code(first);
+    let code = char_code_at(first, 0);
     let mut is_num: boolean = false;
-    if code >= char_code("0") {
-        if code <= char_code("9") { is_num = true; }
+    if code >= char_code_at("0", 0) {
+        if code <= char_code_at("9", 0) { is_num = true; }
     }
     if first == "-" { is_num = true; }
     if is_num {

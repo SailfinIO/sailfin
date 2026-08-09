@@ -2,11 +2,12 @@
 //
 // Literal detection helpers: boolean, null, integer, number, string, character.
 import {
-    char_at,
-    char_code,
-    index_of,
+    char_at_index as char_at,
+    char_code_at,
+    find,
     substring
-} from "../string_utils";
+} from "sfn/strings";
+
 import { trim_text } from "./utils";
 
 // =============================================================================
@@ -17,8 +18,8 @@ fn matches_case_insensitive(text: string, target: string) -> boolean {
     let mut index: int = 0;
     loop {
         if index >= text.length { break; }
-        let ch = char_code(char_at(text, index));
-        let target_ch = char_code(char_at(target, index));
+        let ch = char_code_at(text, index);
+        let target_ch = char_code_at(target, index);
         let mut text_lower = ch;
         let mut target_lower = target_ch;
         if ch >= 65 {
@@ -50,9 +51,9 @@ fn is_null_literal(text: string) -> boolean {
 }
 
 fn is_digit_char(ch: string) -> boolean {
-    let code = char_code(ch);
-    let zero = char_code("0");
-    let nine = char_code("9");
+    let code = char_code_at(ch, 0);
+    let zero = char_code_at("0", 0);
+    let nine = char_code_at("9", 0);
     let mut _ret167: boolean = false;
     if code >= zero {
         if code <= nine { _ret167 = true; }
@@ -61,7 +62,7 @@ fn is_digit_char(ch: string) -> boolean {
 }
 
 fn char_code_at_text(text: string, index: int) -> int {
-    return char_code(char_at(text, index));
+    return char_code_at(text, index);
 }
 
 fn is_integer_literal(text: string) -> boolean {
@@ -159,7 +160,7 @@ fn is_number_literal(text: string) -> boolean {
 
 fn normalise_number_literal(text: string) -> string {
     let trimmed = trim_text(text);
-    if index_of(trimmed, ".") >= 0 { return trimmed; }
+    if find(trimmed, ".", 0) >= 0 { return trimmed; }
     return trimmed + ".0";
 }
 
@@ -218,19 +219,21 @@ fn get_character_literal_value(text: string) -> int {
     if inner.length == 2 {
         if substring(inner, 0, 1) == "\\" {
             let escape = char_at(inner, 1);
-            let escape_code = char_code(escape);
-            if escape_code == char_code("n") { return char_code("\n"); } else if escape_code == char_code("r") {
-                return char_code("\r");
-            } else if escape_code == char_code("t") {
-                return char_code("\t");
-            } else if escape_code == char_code("\"") {
-                return char_code("\"");
-            } else if escape_code == char_code("\\") {
-                return char_code("\\");
-            } else if escape_code == char_code("0") { return 0; }
+            let escape_code = char_code_at(escape, 0);
+            if escape_code == char_code_at("n", 0) {
+                return char_code_at("\n", 0);
+            } else if escape_code == char_code_at("r", 0) {
+                return char_code_at("\r", 0);
+            } else if escape_code == char_code_at("t", 0) {
+                return char_code_at("\t", 0);
+            } else if escape_code == char_code_at("\"", 0) {
+                return char_code_at("\"", 0);
+            } else if escape_code == char_code_at("\\", 0) {
+                return char_code_at("\\", 0);
+            } else if escape_code == char_code_at("0", 0) { return 0; }
             return escape_code;
         }
     }
     // Single character
-    return char_code(char_at(inner, 0));
+    return char_code_at(inner, 0);
 }

@@ -1,6 +1,8 @@
 // compiler/src/llvm/lowering/lowering_core/test_harness.sfn
 //
 // Recoverable LLVM test-harness synthesis.
+import { substring } from "sfn/strings";
+
 import {
     ImportedModuleContext,
     LayoutManifest,
@@ -8,7 +10,6 @@ import {
     NativeModule,
     ParseNativeResult
 } from "../../../native_ir";
-import { substring } from "../../../string_utils";
 import {
     build_target_os,
     target_setjmp_call_line,
@@ -16,8 +17,9 @@ import {
     target_setjmp_symbol
 } from "../../lowering_debug_state";
 import { escape_string_for_llvm } from "../../strings";
+import { sanitize_symbol } from "../../symbols";
 import { LoweredLLVMLinesResult } from "../../types";
-import { index_of, number_to_string, sanitize_symbol } from "../../utils";
+import { index_of, number_to_string } from "../../utils";
 import { sanitize_module_suffix } from "../lowering_helpers";
 import { extend_string_lines } from "../lowering_io";
 import { lower_to_llvm_lines_with_parsed_context } from "./mod";
@@ -125,7 +127,7 @@ fn _harness_print_marker(gvar: string, arr_len: string, byte_len: string, tp: st
         + ".agg1)"];
 }
 
-fn lower_to_llvm_lines_with_parsed_context_for_tests(native_module: NativeModule, parse: ParseNativeResult, import_context: ImportedModuleContext) -> LoweredLLVMLinesResult ![io] {
+fn lower_to_llvm_lines_with_parsed_context_for_tests(native_module: NativeModule, parse: ParseNativeResult, import_context: ImportedModuleContext) -> LoweredLLVMLinesResult {
     let mut native_text_for_recovery: string = "";
     if native_module.artifacts != null {
         if native_module.artifacts.length > 0 {

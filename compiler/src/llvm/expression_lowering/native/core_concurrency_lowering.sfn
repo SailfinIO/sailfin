@@ -90,7 +90,7 @@ fn _channel_kind_is_integer(kind: string) -> boolean {
 // seam yet — tracked with the worker-ctx ABI follow-up).
 // Returns null when the call is not a channel send/receive so the
 // caller falls through to the normal resolution pipeline.
-fn try_lower_channel_method(member_target: MemberAccessParse, argument_entries: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string) -> ExpressionResult? ![io] {
+fn try_lower_channel_method(member_target: MemberAccessParse, argument_entries: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string) -> ExpressionResult? {
     let field = member_target.field;
     let mut is_channel_op: boolean = false;
     if field == "send" { is_channel_op = true; }
@@ -446,7 +446,7 @@ fn try_lower_channel_method(member_target: MemberAccessParse, argument_entries: 
 // (struct / array / pointer-aggregate) receiver returns null so a
 // user-defined `toString` still routes through the struct-dispatch path
 // (and an absent one fails closed as before).
-fn try_lower_tostring_method(member_target: MemberAccessParse, argument_entries: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult? ![io] {
+fn try_lower_tostring_method(member_target: MemberAccessParse, argument_entries: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult? {
     if member_target.field != "toString" { return null; }
     // `toString()` takes no arguments; anything else is not this builtin.
     if argument_entries.length != 0 { return null; }
@@ -504,7 +504,7 @@ fn try_lower_tostring_method(member_target: MemberAccessParse, argument_entries:
 // `lower_expression` (peak-RSS scope split, issue context in CLAUDE.md) —
 // behaviour is identical; each `let` here lives in its own function scope
 // instead of accumulating into `lower_expression`'s 240+-local frame.
-fn lower_spawn_typed_expression(stripped: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult ![io] {
+fn lower_spawn_typed_expression(stripped: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult {
     let diagnostics: string[] = [];
     let colon_pos = index_of(stripped, ":");
     let space_pos = index_of(stripped, " ");
@@ -645,7 +645,7 @@ fn lower_spawn_typed_expression(stripped: string, bindings: ParameterBinding[], 
 
 // Untyped spawn: `spawn <operand>`. Uses the generic `spawn_task` adapter
 // (i8* → i8*). Extracted sibling of `lower_expression`.
-fn lower_spawn_expression(stripped: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult ![io] {
+fn lower_spawn_expression(stripped: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult {
     let diagnostics: string[] = [];
     let spawn_op_text = trim_text(substring(stripped, 6, stripped.length));
     let mut spawn2_lines: string[] = lines;
@@ -703,7 +703,7 @@ fn lower_spawn_expression(stripped: string, bindings: ParameterBinding[], locals
 // Bare channel: `channel(<capacity>)`. Lowers to `sfn_channel_create` with
 // pointer-sized (8-byte) monomorphized elements and `owned` = 0. Extracted
 // sibling of `lower_expression`.
-fn lower_channel_capacity_expression(stripped: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult ![io] {
+fn lower_channel_capacity_expression(stripped: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult {
     let diagnostics: string[] = [];
     let chan_inner = trim_text(substring(stripped, 8, stripped.length));
     // The end index is computed in a standalone statement (not a
@@ -754,7 +754,7 @@ fn lower_channel_capacity_expression(stripped: string, bindings: ParameterBindin
 // Typed channel: `channel:<kind>(<capacity>)`. Sizes the ring slot to the
 // aggregate width and sets `owned` = 1 only for `channel:OwnedBuf`.
 // Extracted sibling of `lower_expression`.
-fn lower_channel_typed_expression(stripped: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult ![io] {
+fn lower_channel_typed_expression(stripped: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult {
     let diagnostics: string[] = [];
     let paren_pos = index_of(stripped, "(");
     let empty_chantyped_constants: StringConstant[] = [];
@@ -849,7 +849,7 @@ fn lower_channel_typed_expression(stripped: string, bindings: ParameterBinding[]
 // Structured fan-out/join: `parallel [<task>, ...]` (#1474). Extracted
 // sibling of `lower_expression`. See the call-site comment for the full
 // runtime contract.
-fn lower_parallel_expression(stripped: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult ![io] {
+fn lower_parallel_expression(stripped: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult {
     let diagnostics: string[] = [];
     let list_start = index_of(stripped, "[");
     let list_end = find_last_index_of_char(stripped, "]");
@@ -1087,7 +1087,7 @@ fn _join_all_array_element_slot(llvm_type: string) -> string {
 // bitcasts the returned `SfnArray` to the concrete `T[]`. Runs concurrently
 // under the pool since the tasks were already spawned; the result array's
 // slot i is `await handles[i]`, in input order.
-fn lower_join_all_expression(stripped: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string) -> ExpressionResult ![io] {
+fn lower_join_all_expression(stripped: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string) -> ExpressionResult {
     let empty_constants: StringConstant[] = [];
     // Extract the single argument between `join_all(` and the final `)`.
     let open = index_of(stripped, "(");
@@ -1239,7 +1239,7 @@ fn lower_join_all_expression(stripped: string, bindings: ParameterBinding[], loc
 // Extracted sibling of `lower_expression`. The call-site guard ensures
 // only the *builtin* `serve` (no user/imported `serve` in scope) reaches
 // here (#1323).
-fn lower_serve_expression(stripped: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult ![io] {
+fn lower_serve_expression(stripped: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult {
     let diagnostics: string[] = [];
     let serve_inner_start = index_of(stripped, "(");
     let serve_inner_end = find_last_index_of_char(stripped, ")");
@@ -1343,7 +1343,7 @@ fn _is_channel_receive_remainder(remainder: string, bindings: ParameterBinding[]
 // Extracted sibling of `lower_expression` for the operand-present case
 // (the `await` prefix followed by space/tab/`(`); the no-operand and
 // fall-through cases stay inline at the call site.
-fn lower_await_expression(stripped: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string) -> ExpressionResult ![io] {
+fn lower_await_expression(stripped: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string) -> ExpressionResult {
     let mut diagnostics: string[] = [];
     let empty_constants = empty_string_constant_set();
     let remainder = trim_text(substring(stripped, 5, stripped.length));

@@ -6,6 +6,7 @@ import { default_return_literal } from "../expressions_helpers";
 import { is_string_literal, normalise_number_literal } from "../expressions_literals";
 import { format_root_scope_id } from "../lifetime";
 import { empty_string_constant_set } from "../strings";
+import { sanitize_symbol } from "../symbols";
 import { map_local_type } from "../type_mapping";
 import {
     BindingLoweringResult,
@@ -20,7 +21,6 @@ import {
     is_number_literal,
     matches_case_insensitive,
     number_to_string,
-    sanitize_symbol,
     starts_with,
     string_array_contains,
     trim_text

@@ -4,7 +4,14 @@
 // per-record nonce derivation (§5.3) against hand-computed known answers, the
 // seal→open round-trip (content + type recovered, padding stripped), and
 // fail-closed rejection of malformed / oversized / tampered records.
-import { tls13_open_record, tls13_record_nonce, tls13_seal_record } from "../src/tls13_record";
+import { aead_aes_128_gcm, aead_aes_256_gcm, aead_chacha20_poly1305 } from "../src/aead";
+import {
+    tls13_open_record,
+    tls13_open_record_aead,
+    tls13_record_nonce,
+    tls13_seal_record,
+    tls13_seal_record_aead
+} from "../src/tls13_record";
 import { eq_bytes } from "./support/hex";
 
 // A deterministic 32-byte key [0,1,...,31] and 12-byte write_iv
@@ -22,6 +29,18 @@ fn _key32() -> int[] {
 
 fn _iv12() -> int[] {
     return [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
+}
+
+// A deterministic 16-byte key [0,1,...,15], for the AES-128-GCM tests.
+fn _key16() -> int[] {
+    let mut k: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= 16 { break; }
+        k.push(i & 255);
+        i += 1;
+    }
+    return k;
 }
 
 // ── Per-record nonce (RFC 8446 §5.3) ─────────────────────────────
@@ -240,4 +259,144 @@ test "tls13_record: seal rejects content over the plaintext cap" {
     }
     let record: int[] = tls13_seal_record(_key32(), _iv12(), 0, 22, content, 0);
     assert record.length == 0;
+}
+
+// ── Suite-aware seal/open (aead.sfn algorithm selector) ──────────
+test "tls13_record_aead: AES-128-GCM seal then open recovers content and type" {
+    let content: int[] = [104, 101, 108, 108, 111];  // "hello"
+    let record: int[] = tls13_seal_record_aead(aead_aes_128_gcm(), _key16(), _iv12(), 0, 22, content, 0);
+    let opened: Result<TlsRecordPlaintext, string> = tls13_open_record_aead(aead_aes_128_gcm(), _key16(), _iv12(), 0, record);
+    match opened {
+        Result.Ok { value } => {
+            assert value.content_type == 22;
+            assert eq_bytes(value.content, content);
+        },
+        Result.Err { error } => { assert false; }
+    }
+}
+
+test "tls13_record_aead: AES-256-GCM seal then open recovers content and type" {
+    let content: int[] = [104, 101, 108, 108, 111, 33];  // "hello!"
+    let record: int[] = tls13_seal_record_aead(aead_aes_256_gcm(), _key32(), _iv12(), 0, 23, content, 0);
+    let opened: Result<TlsRecordPlaintext, string> = tls13_open_record_aead(aead_aes_256_gcm(), _key32(), _iv12(), 0, record);
+    match opened {
+        Result.Ok { value } => {
+            assert value.content_type == 23;
+            assert eq_bytes(value.content, content);
+        },
+        Result.Err { error } => { assert false; }
+    }
+}
+
+test "tls13_record_aead: AES-128-GCM produces the same outer header framing as ChaCha20" {
+    let content: int[] = [1, 2, 3, 4];
+    let record: int[] = tls13_seal_record_aead(aead_aes_128_gcm(), _key16(), _iv12(), 0, 22, content, 0);
+    assert record[0] == 23;  // application_data
+    assert record[1] == 3;  // legacy_record_version 0x0303
+    assert record[2] == 3;
+    let declared: int = ((record[3] & 255) << 8) | (record[4] & 255);
+    assert declared == record.length - 5;
+}
+
+test "tls13_record_aead: ciphertext differs by algorithm" {
+    // Pins that the algorithm selector is actually consulted rather than
+    // ignored: sealing identical content under two different algorithms must
+    // not produce the same encrypted body.
+    let content: int[] = [1, 2, 3, 4, 5];
+    let chacha_record: int[] = tls13_seal_record_aead(aead_chacha20_poly1305(), _key32(), _iv12(), 0, 22, content, 0);
+    let aes_record: int[] = tls13_seal_record_aead(aead_aes_128_gcm(), _key16(), _iv12(), 0, 22, content, 0);
+    assert ! eq_bytes(chacha_record, aes_record);
+}
+
+test "tls13_record_aead: opening under the wrong algorithm fails closed" {
+    // Sealed under ChaCha20-Poly1305 (32-byte key), then opened under
+    // AES-256-GCM with the same 32-byte key: the key length guard passes for
+    // both algorithms, so only the AEAD tag check can reject the mismatch.
+    // This is the silent-wrong-cipher case; it must be an error, not garbage
+    // plaintext.
+    let content: int[] = [9, 8, 7, 6];
+    let record: int[] = tls13_seal_record_aead(aead_chacha20_poly1305(), _key32(), _iv12(), 0, 22, content, 0);
+    let opened: Result<TlsRecordPlaintext, string> = tls13_open_record_aead(aead_aes_256_gcm(), _key32(), _iv12(), 0, record);
+    match opened {
+        Result.Ok { value } => { assert false; },
+        Result.Err { error } => { assert true; }
+    }
+}
+
+test "tls13_record_aead: seal and open reject a key length that does not match the algorithm (AES-128)" {
+    let sealed: int[] = tls13_seal_record_aead(aead_aes_128_gcm(), _key32(), _iv12(), 0, 22, [1, 2, 3], 0);
+    assert sealed.length == 0;
+
+    let record: int[] = tls13_seal_record_aead(aead_chacha20_poly1305(), _key32(), _iv12(), 0, 22, [1, 2, 3], 0);
+    let opened: Result<TlsRecordPlaintext, string> = tls13_open_record_aead(aead_aes_128_gcm(), _key32(), _iv12(), 0, record);
+    match opened {
+        Result.Ok { value } => { assert false; },
+        Result.Err { error } => { assert true; }
+    }
+}
+
+test "tls13_record_aead: seal and open reject a key length that does not match the algorithm (AES-256)" {
+    let sealed: int[] = tls13_seal_record_aead(aead_aes_256_gcm(), _key16(), _iv12(), 0, 22, [1, 2, 3], 0);
+    assert sealed.length == 0;
+
+    let record: int[] = tls13_seal_record_aead(aead_aes_128_gcm(), _key16(), _iv12(), 0, 22, [1, 2, 3], 0);
+    let opened: Result<TlsRecordPlaintext, string> = tls13_open_record_aead(aead_aes_256_gcm(), _key16(), _iv12(), 0, record);
+    match opened {
+        Result.Ok { value } => { assert false; },
+        Result.Err { error } => { assert true; }
+    }
+}
+
+test "tls13_record_aead: seal and open reject an unsupported algorithm id" {
+    let sealed_zero: int[] = tls13_seal_record_aead(0, _key32(), _iv12(), 0, 22, [1, 2, 3], 0);
+    assert sealed_zero.length == 0;
+    let sealed_99: int[] = tls13_seal_record_aead(99, _key32(), _iv12(), 0, 22, [1, 2, 3], 0);
+    assert sealed_99.length == 0;
+
+    let record: int[] = tls13_seal_record_aead(aead_chacha20_poly1305(), _key32(), _iv12(), 0, 22, [1, 2, 3], 0);
+    let opened_zero: Result<TlsRecordPlaintext, string> = tls13_open_record_aead(0, _key32(), _iv12(), 0, record);
+    match opened_zero {
+        Result.Ok { value } => { assert false; },
+        Result.Err { error } => { assert true; }
+    }
+    let opened_99: Result<TlsRecordPlaintext, string> = tls13_open_record_aead(99, _key32(), _iv12(), 0, record);
+    match opened_99 {
+        Result.Ok { value } => { assert false; },
+        Result.Err { error } => { assert true; }
+    }
+}
+
+test "tls13_record_aead: AES-GCM open rejects a flipped ciphertext byte" {
+    let content: int[] = [9, 8, 7];
+    let mut record: int[] = tls13_seal_record_aead(aead_aes_128_gcm(), _key16(), _iv12(), 0, 22, content, 0);
+    record[5] = record[5] ^ 1;  // first encrypted_record byte
+    let opened: Result<TlsRecordPlaintext, string> = tls13_open_record_aead(aead_aes_128_gcm(), _key16(), _iv12(), 0, record);
+    match opened {
+        Result.Ok { value } => { assert false; },
+        Result.Err { error } => { assert true; }
+    }
+}
+
+test "tls13_record_aead: AES-GCM open rejects a wrong sequence number" {
+    let content: int[] = [9, 8, 7];
+    let record: int[] = tls13_seal_record_aead(aead_aes_128_gcm(), _key16(), _iv12(), 0, 22, content, 0);
+    let opened: Result<TlsRecordPlaintext, string> = tls13_open_record_aead(aead_aes_128_gcm(), _key16(), _iv12(), 1, record);
+    match opened {
+        Result.Ok { value } => { assert false; },
+        Result.Err { error } => { assert true; }
+    }
+}
+
+test "tls13_record_aead: AES-GCM padding is stripped on open" {
+    let content: int[] = [1, 2, 3, 4];
+    // 17 bytes of zero padding after the content type.
+    let record: int[] = tls13_seal_record_aead(aead_aes_128_gcm(), _key16(), _iv12(), 3, 23, content, 17);
+    let opened: Result<TlsRecordPlaintext, string> = tls13_open_record_aead(aead_aes_128_gcm(), _key16(), _iv12(), 3, record);
+    match opened {
+        Result.Ok { value } => {
+            assert value.content_type == 23;
+            assert eq_bytes(value.content, content);
+        },
+        Result.Err { error } => { assert false; }
+    }
 }

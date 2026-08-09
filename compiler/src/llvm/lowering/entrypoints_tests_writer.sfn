@@ -11,6 +11,8 @@
 // `write_llvm_ir_for_tests_from_text`) were retired in Stage B PR2's
 // A4 deletion alongside `compile_tests_to_llvm_file_with_module` and
 // the textual import inliner.
+import { substring } from "sfn/strings";
+
 import {
     ImportedModuleContext,
     LayoutManifest,
@@ -29,7 +31,6 @@ import {
     parse_native_interfaces_for_import,
     parse_native_structs_for_import
 } from "../../native_ir_api";
-import { substring } from "../../string_utils";
 import {
     append_function_effect_entry,
     append_unique_effect,
@@ -60,6 +61,7 @@ import {
     merge_string_constants,
     render_string_constants
 } from "../strings";
+import { sanitize_symbol } from "../symbols";
 import { build_type_context, fixup_enum_layouts } from "../type_context";
 import {
     FunctionEffectEntry,
@@ -75,7 +77,6 @@ import {
     index_of,
     join_with_separator,
     number_to_string,
-    sanitize_symbol,
     string_array_contains
 } from "../utils";
 import { emit_llvm_function } from "./emission";
@@ -124,7 +125,7 @@ fn _failed_test_llvm_artifact_from_lowering(failure_message: string, lowered: Lo
 // `apply_module_symbol_mangling` rewrite import call sites in the
 // test source to the same mangled names the dependency `.ll` files
 // define.
-fn lower_llvm_for_tests_from_text_with_provider_context(native_text: string, module_name: string, import_context: ImportedModuleContext, provider_context: LLVMProviderContext) -> LLVMArtifactResult ![io] {
+fn lower_llvm_for_tests_from_text_with_provider_context(native_text: string, module_name: string, import_context: ImportedModuleContext, provider_context: LLVMProviderContext) -> LLVMArtifactResult {
     install_llvm_provider_context(provider_context);
     if native_text.length == 0 {
         return _failed_test_llvm_artifact("test llvm: empty native text");
@@ -152,7 +153,7 @@ fn lower_llvm_for_tests_from_text_with_provider_context(native_text: string, mod
     // already gate on this before returning a publishable artifact — the test
     // path bypassed the gate, so a `[fatal]`
     // ABI primitive mismatch at a call site (e.g. `number → int`
-    // coercion across an `await` boundary) was emitted to stderr but
+    // coercion across an `await` boundary) was recorded for presentation but
     // then the partial IR ran the corrupted call anyway.
     // The driver renders the cause before refusing publication (SFN-529).
     if has_fatal_lowering_diagnostic(lowered_lines.diagnostics) {

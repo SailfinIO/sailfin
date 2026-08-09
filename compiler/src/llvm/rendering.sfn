@@ -2,9 +2,10 @@
 //
 // LLVM IR rendering functions for declarations and metadata comments.
 // Handles trait metadata comments, runtime helper declarations, and function declarations.
+import { substring } from "sfn/strings";
+
 import { intrinsic_effect_table, intrinsic_effects_for_exact_target } from "../intrinsic_effects";
 import { NativeFunction, NativeParameter } from "../native_ir";
-import { substring } from "../string_utils";
 import { prelude_mirror_signatures } from "./prelude_mirror_signatures";
 import {
     collect_parameter_types,
@@ -16,6 +17,7 @@ import {
     is_async_runtime_target,
     runtime_helper_descriptors
 } from "./runtime_helpers/mod";
+import { sanitize_symbol } from "./symbols";
 import { map_parameter_type, map_return_type } from "./type_mapping";
 import { TraitMetadata, TypeContext } from "./types";
 import {
@@ -23,7 +25,6 @@ import {
     index_of,
     join_with_separator,
     number_to_string,
-    sanitize_symbol,
     string_array_contains,
     trim_text
 } from "./utils";

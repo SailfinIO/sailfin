@@ -21,55 +21,6 @@ fn char_at(value: string, index: int) -> string {
     return grapheme_at(value, index);
 }
 
-fn is_symbol_char(ch: string) -> boolean {
-    if ch.length == 0 { return false; }
-    if ch == "_" { return true; }
-    // `$` is a legal LLVM identifier character and is the monomorphization
-    // mangling separator (#1869, `id$int`); no Sailfin source identifier
-    // contains it, so admitting it changes only generated specialized names.
-    if ch == "$" { return true; }
-    let code = char_code(ch);
-    let lower_a = char_code("a");
-    let lower_z = char_code("z");
-    if code >= lower_a {
-        if code <= lower_z { return true; }
-    }
-    let upper_a = char_code("A");
-    let upper_z = char_code("Z");
-    if code >= upper_a {
-        if code <= upper_z { return true; }
-    }
-    let zero = char_code("0");
-    let nine = char_code("9");
-    if code >= zero {
-        if code <= nine { return true; }
-    }
-    return false;
-}
-
-fn sanitize_symbol(name: string) -> string {
-    let name_len = name.length;
-    if name_len == 0 { return "_"; }
-    let mut result: string = "";
-    let mut index: int = 0;
-    loop {
-        if index >= name_len { break; }
-        // index is already bounds-checked against name_len.
-        let ch = grapheme_at(name, index);
-        if is_symbol_char(ch) { result = result + ch; }
-        index += 1;
-    }
-    if result.length == 0 { return "_"; }
-    let first = char_at(result, 0);
-    let first_code = char_code(first);
-    let zero = char_code("0");
-    let nine = char_code("9");
-    if first_code >= zero {
-        if first_code <= nine { result = "_" + result; }
-    }
-    return result;
-}
-
 fn char_code_at_text(text: string, index: int) -> int {
     return char_code(char_at(text, index));
 }
@@ -180,7 +131,6 @@ export {
     char_code,
     char_at,
     char_code_at_text,
-    sanitize_symbol,
     strings_equal,
     index_of,
     find_last_index_of_char,

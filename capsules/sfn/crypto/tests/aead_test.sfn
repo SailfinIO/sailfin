@@ -1,0 +1,117 @@
+import {
+    aead_aes_128_gcm,
+    aead_aes_256_gcm,
+    aead_chacha20_poly1305,
+    aead_key_len,
+    aead_nonce_len,
+    aead_open,
+    aead_seal,
+    aead_supported,
+    aead_tag_len
+} from "../src/aead";
+import { eq_bytes, hexb } from "./support/hex";
+
+fn _k32() -> int[] {
+    return hexb("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f");
+}
+
+fn _k16() -> int[] { return hexb("000102030405060708090a0b0c0d0e0f"); }
+
+fn _nonce() -> int[] { return hexb("cafebabefacedbaddecaf888"); }
+
+fn _aad() -> int[] { return hexb("feedfacedeadbeef"); }
+
+fn _pt() -> int[] { return hexb("48656c6c6f2c205361696c66696e2100"); }
+
+test "aead: parameter lengths per algorithm" {
+    assert aead_key_len(aead_chacha20_poly1305()) == 32;
+    assert aead_key_len(aead_aes_128_gcm()) == 16;
+    assert aead_key_len(aead_aes_256_gcm()) == 32;
+    assert aead_nonce_len(aead_aes_128_gcm()) == 12;
+    assert aead_tag_len(aead_aes_128_gcm()) == 16;
+}
+
+test "aead: an unknown algorithm reports zero lengths and is unsupported" {
+    assert aead_key_len(0) == 0;
+    assert aead_nonce_len(99) == 0;
+    assert aead_tag_len(99) == 0;
+    assert ! aead_supported(99);
+    assert aead_supported(aead_aes_256_gcm());
+}
+
+test "aead: AES-128-GCM round-trips through the registry" {
+    let sealed: int[] = aead_seal(aead_aes_128_gcm(), _k16(), _nonce(), _aad(), _pt());
+    assert sealed.length == _pt().length + 16;
+    match aead_open(aead_aes_128_gcm(), _k16(), _nonce(), _aad(), sealed) {
+        Result.Ok { value } => { assert eq_bytes(value, _pt()); },
+        Result.Err { error } => { assert false; }
+    }
+}
+
+test "aead: AES-256-GCM round-trips through the registry" {
+    let sealed: int[] = aead_seal(aead_aes_256_gcm(), _k32(), _nonce(), _aad(), _pt());
+    match aead_open(aead_aes_256_gcm(), _k32(), _nonce(), _aad(), sealed) {
+        Result.Ok { value } => { assert eq_bytes(value, _pt()); },
+        Result.Err { error } => { assert false; }
+    }
+}
+
+test "aead: ChaCha20-Poly1305 round-trips through the registry" {
+    let sealed: int[] = aead_seal(aead_chacha20_poly1305(), _k32(), _nonce(), _aad(), _pt());
+    match aead_open(aead_chacha20_poly1305(), _k32(), _nonce(), _aad(), sealed) {
+        Result.Ok { value } => { assert eq_bytes(value, _pt()); },
+        Result.Err { error } => { assert false; }
+    }
+}
+
+test "aead: the two GCM key sizes produce different ciphertext" {
+    let a: int[] = aead_seal(aead_aes_128_gcm(), _k16(), _nonce(), _aad(), _pt());
+    let b: int[] = aead_seal(aead_aes_256_gcm(), _k32(), _nonce(), _aad(), _pt());
+    assert ! eq_bytes(a, b);
+}
+
+test "aead: an unknown algorithm fails closed on seal and names itself on open" {
+    let empty: int[] = [];
+    assert aead_seal(99, _k16(), _nonce(), _aad(), _pt()).length == 0;
+    match aead_open(99, _k16(), _nonce(), _aad(), hexb("00112233445566778899aabbccddeeff0011")) {
+        Result.Ok { value } => { assert false; },
+        Result.Err { error } => {
+            assert error == "aead_open: unsupported algorithm";
+        }
+    }
+}
+
+test "aead: opening AES-GCM output as ChaCha20-Poly1305 fails authentication" {
+    let sealed: int[] = aead_seal(aead_aes_256_gcm(), _k32(), _nonce(), _aad(), _pt());
+    match aead_open(aead_chacha20_poly1305(), _k32(), _nonce(), _aad(), sealed) {
+        Result.Ok { value } => { assert false; },
+        Result.Err { error } => { assert error.length > 0; }
+    }
+}
+
+test "aead: a key length that does not match the algorithm is refused, not substituted" {
+    // aes_gcm_seal accepts 16- and 32-byte keys, so without the registry's
+    // check these would silently run the other key size.
+    assert aead_seal(aead_aes_128_gcm(), _k32(), _nonce(), _aad(), _pt()).length == 0;
+    assert aead_seal(aead_aes_256_gcm(), _k16(), _nonce(), _aad(), _pt()).length == 0;
+    assert aead_seal(aead_chacha20_poly1305(), _k16(), _nonce(), _aad(), _pt()).length == 0;
+
+    let sealed: int[] = aead_seal(aead_aes_128_gcm(), _k16(), _nonce(), _aad(), _pt());
+    match aead_open(aead_aes_128_gcm(), _k32(), _nonce(), _aad(), sealed) {
+        Result.Ok { value } => { assert false; },
+        Result.Err { error } => {
+            assert error == "aead_open: key length does not match the algorithm";
+        }
+    }
+}
+
+test "aead: a nonce length that does not match the algorithm is refused" {
+    assert aead_seal(aead_aes_128_gcm(), _k16(), hexb("0011"), _aad(), _pt()).length == 0;
+    let sealed: int[] = aead_seal(aead_aes_128_gcm(), _k16(), _nonce(), _aad(), _pt());
+    match aead_open(aead_aes_128_gcm(), _k16(), hexb("0011"), _aad(), sealed) {
+        Result.Ok { value } => { assert false; },
+        Result.Err { error } => {
+            assert error == "aead_open: nonce length does not match the algorithm";
+        }
+    }
+}

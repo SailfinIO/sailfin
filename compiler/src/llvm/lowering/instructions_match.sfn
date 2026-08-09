@@ -1,9 +1,10 @@
 // compiler/src/llvm/lowering/instructions_match.sfn
 //
 // Control flow handler: match instruction lowering.
+import { find, substring } from "sfn/strings";
+
 import { Diag } from "../../diagnostic";
 import { NativeFunction, NativeInstruction, NativeSourceSpan } from "../../native_ir";
-import { index_of, substring } from "../../string_utils";
 import { lower_expression } from "../expression_lowering/native/core";
 import { append_match_arm_mutations } from "../expression_lowering/native/core_match_helpers";
 import { emit_boolean_and, emit_comparison_instruction } from "../expression_lowering/native/core_operands/comparisons";
@@ -75,9 +76,8 @@ import {
 import { lower_match_case_condition } from "./instructions_match_condition";
 import { emit_phi_merges_for_match, materialize_mutation_values_at_label } from "./phi";
 
-// Helper: build a LocalBinding for match arm payload extraction.
-// Kept as a separate function so loops never have inline struct literals at the loop
-// body top level — the v0.1.1 seed misidentifies `identifier {` as a loop-body closer.
+// Build a LocalBinding separately so loops never have inline struct literals
+// at body top level, which the v0.1.1 seed misidentifies as a loop closer.
 fn _match_make_local_binding(name: string, pointer: string, llvm_type: string, scope_id: string, scope_depth: int) -> LocalBinding {
     return LocalBinding {
         name: name,
@@ -164,7 +164,7 @@ fn resolve_match_subject_call_annotation(subject_expression: string, functions: 
     // return type (e.g. `SymbolCollectionResult`) as the subject annotation
     // would mis-route later member/method-call resolution and break the
     // self-host build (test_work_dir_parity).
-    if index_of(callee.return_type, "<") == -1 { return ""; }
+    if find(callee.return_type, "<", 0) == -1 { return ""; }
     return callee.return_type;
 }
 
@@ -269,7 +269,7 @@ fn is_default_pattern(pattern: string) -> boolean {
     return false;
 }
 
-fn lower_match_instruction(function: NativeFunction, start_index: int, llvm_return: string, bindings: ParameterBinding[], locals: LocalBinding[], allocas: string[], lines: string[], temp_index: int, block_counter: int, next_local_id: int, next_region_id: int, functions: NativeFunction[], loop_stack: LoopContext[], try_stack: TryFrameContext[], end: int, context: TypeContext, scope_id: string, scope_depth: int, current_label: string) -> BlockLoweringResult ![io] {
+fn lower_match_instruction(function: NativeFunction, start_index: int, llvm_return: string, bindings: ParameterBinding[], locals: LocalBinding[], allocas: string[], lines: string[], temp_index: int, block_counter: int, next_local_id: int, next_region_id: int, functions: NativeFunction[], loop_stack: LoopContext[], try_stack: TryFrameContext[], end: int, context: TypeContext, scope_id: string, scope_depth: int, current_label: string) -> BlockLoweringResult {
     let mut diagnostics: string[] = [];
     let mut diags: Diag[] = [];
     let mut current_lines: string[] = lines;
@@ -354,7 +354,7 @@ fn lower_match_instruction(function: NativeFunction, start_index: int, llvm_retu
     // block `unreachable` instead of leaving a fabricated function fallback.
     if subject_enum_info == null {
         let mut enum_name = trim_text(subject_type_annotation);
-        let generic_start = index_of(enum_name, "<");
+        let generic_start = find(enum_name, "<", 0);
         if generic_start > 0 {
             enum_name = trim_text(substring(enum_name, 0, generic_start));
         }

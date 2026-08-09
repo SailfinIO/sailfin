@@ -7,7 +7,7 @@
 //
 // Extracted from lowering_core/mod.sfn to reduce per-file memory footprint.
 import { NativeFunction } from "../../native_ir";
-import { target_uses_comdat } from "../lowering_debug_state";
+import { target_uses_comdat, trace_log } from "../lowering_debug_state";
 import {
     extract_declared_symbol_names,
     render_enum_type_definitions,
@@ -34,14 +34,14 @@ import { extend_string_lines, module_source_filename } from "./lowering_io";
 // function declarations, and libc declarations.
 //
 // Returns the preamble as a string[] of LLVM IR lines.
-fn render_llvm_preamble(module_name: string, type_context: TypeContext, trait_metadata: TraitMetadata, context_functions: NativeFunction[], local_functions: NativeFunction[], imported_functions: NativeFunction[], runtime_helpers: string[], module_defines_runtime: boolean, debug_lowering: boolean) -> string[] ![io] {
+fn render_llvm_preamble(module_name: string, type_context: TypeContext, trait_metadata: TraitMetadata, context_functions: NativeFunction[], local_functions: NativeFunction[], imported_functions: NativeFunction[], runtime_helpers: string[], module_defines_runtime: boolean, debug_lowering: boolean) -> string[] {
     let mut lines: string[] = [];
     lines.push("source_filename = \"" + module_source_filename(module_name)
         + "\"");
     lines.push("");
 
     // Trait metadata comments
-    if debug_lowering { print.err("emit-llvm: phase=render_traits"); }
+    if debug_lowering { trace_log("emit-llvm: phase=render_traits"); }
     let trait_lines = render_trait_metadata_comments(trait_metadata);
     if trait_lines.length > 0 {
         lines = extend_string_lines(lines, trait_lines);
@@ -50,8 +50,8 @@ fn render_llvm_preamble(module_name: string, type_context: TypeContext, trait_me
 
     // Struct type definitions
     if debug_lowering {
-        print.err("emit-llvm: phase=render_structs");
-        print.err("emit-llvm: render_structs counts structs=" + number_to_string(type_context.structs.length)
+        trace_log("emit-llvm: phase=render_structs");
+        trace_log("emit-llvm: render_structs counts structs=" + number_to_string(type_context.structs.length)
             + " enums="
             + number_to_string(type_context.enums.length)
             + " functions="
@@ -86,7 +86,7 @@ fn render_llvm_preamble(module_name: string, type_context: TypeContext, trait_me
     }
 
     // Enum type definitions
-    if debug_lowering { print.err("emit-llvm: phase=render_enums"); }
+    if debug_lowering { trace_log("emit-llvm: phase=render_enums"); }
     let enum_type_lines = render_enum_type_definitions(type_context);
     if enum_type_lines.length > 0 {
         lines = extend_string_lines(lines, enum_type_lines);
@@ -94,7 +94,7 @@ fn render_llvm_preamble(module_name: string, type_context: TypeContext, trait_me
     }
 
     // Interface type definitions
-    if debug_lowering { print.err("emit-llvm: phase=render_interfaces"); }
+    if debug_lowering { trace_log("emit-llvm: phase=render_interfaces"); }
     let interface_type_lines = render_interface_type_definitions(type_context);
     if interface_type_lines.length > 0 {
         lines = extend_string_lines(lines, interface_type_lines);
@@ -144,7 +144,7 @@ fn render_llvm_preamble(module_name: string, type_context: TypeContext, trait_me
     }
 
     // Runtime helper declarations
-    if debug_lowering { print.err("emit-llvm: phase=render_helpers"); }
+    if debug_lowering { trace_log("emit-llvm: phase=render_helpers"); }
     let helper_declarations = render_runtime_helper_declarations(runtime_helpers, local_functions, imported_functions, type_context);
     if helper_declarations != null {
         if helper_declarations.length > 0 {
@@ -154,7 +154,7 @@ fn render_llvm_preamble(module_name: string, type_context: TypeContext, trait_me
     }
 
     // Imported function declarations
-    if debug_lowering { print.err("emit-llvm: phase=render_imports"); }
+    if debug_lowering { trace_log("emit-llvm: phase=render_imports"); }
     // #1736: hand the imported-declare pass the symbols the typed
     // runtime-helper pass already declared, so it does not re-declare a
     // shared helper (e.g. `sfn_print` / `sfn_array_concat`) with the erased
