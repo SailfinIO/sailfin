@@ -23,6 +23,7 @@ import { _resolve_self_path } from "./build/paths";
 import { empty_build_cache_config } from "./build_cache";
 import { prepare_runtime_dep_capsules } from "./capsule_resolver/mod";
 import { lower_to_llvm_ir_from_text_with_provider_context } from "./llvm/lowering/entrypoints";
+import { take_lowering_trace_buffer } from "./llvm/lowering_debug_state";
 import { compile_to_native_text_with_module } from "./main";
 import { runtime_capsule_from_root } from "./runtime_capsule_resolver";
 import { index_of, substring } from "./string_utils";
@@ -243,6 +244,8 @@ fn build_tensor_matmul_kernel_binary(kernel_module: TensorModule, kernel_fn_name
         };
     }
     let ir = lower_to_llvm_ir_from_text_with_provider_context(spliced, "main", empty_llvm_import_context(), resolve_llvm_provider_context());
+    let lowering_traces = take_lowering_trace_buffer();
+    if lowering_traces.length > 0 { print.err(lowering_traces); }
     if ir.length == 0 {
         return TensorMatmulBuildResult {
             binary_path: "",

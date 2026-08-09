@@ -34,12 +34,12 @@ import {
     lower_native_lines_to_llvm_artifact_with_context_and_provider,
     lower_native_text_to_llvm_artifact_with_context_and_provider,
     lower_to_llvm_ir_from_text_with_provider_context,
-    lower_to_llvm_ir_with_provider_context,
-    print_llvm_ir_from_text_with_provider_context
+    lower_to_llvm_ir_with_provider_context
 } from "./llvm/lowering/entrypoints";
 import { lower_llvm_for_tests_from_text_with_provider_context } from "./llvm/lowering/entrypoints_tests_writer";
-import { has_fatal_lowering_diagnostic, print_fatal_lowering_diagnostics } from "./llvm/lowering/lowering_core/diagnostics";
+import { fatal_lowering_diagnostic_lines, has_fatal_lowering_diagnostic } from "./llvm/lowering/lowering_core/diagnostics";
 import { native_text_passes_lowering_gate } from "./llvm/lowering/lowering_core/file_emission";
+import { take_lowering_trace_buffer } from "./llvm/lowering_debug_state";
 import { runtime_helper_call_names } from "./llvm/runtime_helpers/mod";
 import { LLVMArtifactResult } from "./llvm/types";
 import { ImportedModuleContext, LayoutManifest, NativeModule } from "./native_ir";
@@ -90,6 +90,21 @@ fn _timing_line(module_name: string, phase: string, elapsed_ms: int) -> string {
     // Emitted to stderr via print.err by the caller.
     return "[timing] module=" + module_name + " phase=" + phase + " ms="
         + int_to_string(elapsed_ms);
+}
+
+fn _drain_llvm_lowering_traces() ![io] {
+    let buffered = take_lowering_trace_buffer();
+    if buffered.length > 0 { print.err(buffered); }
+}
+
+fn _print_fatal_lowering_diagnostics(diagnostics: string[], diags: Diag[]) ![io] {
+    let lines = fatal_lowering_diagnostic_lines(diagnostics, diags);
+    let mut index: int = 0;
+    loop {
+        if index >= lines.length { break; }
+        print.err(lines[index]);
+        index += 1;
+    }
 }
 
 fn _load_llvm_import_context(native_text: string, module_name: string, context_root: string) -> ImportedModuleContext ![io] {
@@ -395,6 +410,7 @@ fn compile_to_llvm(source: string) -> string ![io] {
     if native_text.length > 0 {
         let import_context = _load_llvm_import_context(native_text, "main", import_context_root(""));
         let ir = lower_to_llvm_ir_from_text_with_provider_context(native_text, "main", import_context, resolve_llvm_provider_context());
+        _drain_llvm_lowering_traces();
         if trace_emit {
             print.err("emit-llvm: llvm bytes=" + int_to_string(ir.length));
             if ir.length > 0 {
@@ -417,6 +433,7 @@ fn compile_to_llvm(source: string) -> string ![io] {
     let fallback_text = native_result.module.artifacts[0].contents;
     let fallback_context = _load_llvm_import_context(fallback_text, "main", import_context_root(""));
     let ir = lower_to_llvm_ir_with_provider_context(native_result.module, fallback_context, resolve_llvm_provider_context());
+    _drain_llvm_lowering_traces();
     if trace_emit {
         print.err("emit-llvm: llvm bytes=" + int_to_string(ir.length));
         if ir.length > 0 {
@@ -456,7 +473,23 @@ fn print_llvm_with_module(source: string, module_name: string) -> boolean ![io] 
     let native_text = lines_to_native_text(emitted.lines);
     if native_text.length == 0 { return false; }
     let import_context = _load_llvm_import_context(native_text, module_name, import_context_root(""));
-    return print_llvm_ir_from_text_with_provider_context(native_text, module_name, import_context, resolve_llvm_provider_context());
+    let generated = lower_native_text_to_llvm_artifact_with_context_and_provider(native_text, module_name, import_context, resolve_llvm_provider_context());
+    _drain_llvm_lowering_traces();
+    if !generated.ok {
+        if has_fatal_lowering_diagnostic(generated.diagnostics) {
+            _print_fatal_lowering_diagnostics(generated.diagnostics, generated.diags);
+        } else if generated.failure_message.length > 0 {
+            print.err(generated.failure_message);
+        }
+        return false;
+    }
+    let mut line_index: int = 0;
+    loop {
+        if line_index >= generated.lines.length { break; }
+        print(generated.lines[line_index]);
+        line_index += 1;
+    }
+    return true;
 }
 
 fn compile_to_llvm_with_module(source: string, module_name: string) -> string ![io] {
@@ -504,15 +537,18 @@ fn compile_to_llvm_with_module(source: string, module_name: string) -> string ![
     if native_text.length > 0 {
         let import_context = _load_llvm_import_context(native_text, module_name, import_context_root(""));
         ir = lower_to_llvm_ir_from_text_with_provider_context(native_text, module_name, import_context, resolve_llvm_provider_context());
+        _drain_llvm_lowering_traces();
         if ir.length == 0 {
             let native_result = emit_native_with_module_name(program, module_name);
             let fallback_context = _load_llvm_import_context(native_result.module.artifacts[0].contents, module_name, import_context_root(""));
             ir = lower_to_llvm_ir_with_provider_context(native_result.module, fallback_context, resolve_llvm_provider_context());
+            _drain_llvm_lowering_traces();
         }
     } else {
         let native_result = emit_native_with_module_name(program, module_name);
         let fallback_context = _load_llvm_import_context(native_result.module.artifacts[0].contents, module_name, import_context_root(""));
         ir = lower_to_llvm_ir_with_provider_context(native_result.module, fallback_context, resolve_llvm_provider_context());
+        _drain_llvm_lowering_traces();
     }
     if trace_emit {
         print.err("emit-llvm: llvm bytes=" + int_to_string(ir.length));
@@ -595,11 +631,13 @@ fn compile_to_llvm_with_module_timed(source: string, module_name: string) -> str
     if native_text.length > 0 {
         let import_context = _load_llvm_import_context(native_text, module_name, import_context_root(""));
         ir = lower_to_llvm_ir_from_text_with_provider_context(native_text, module_name, import_context, resolve_llvm_provider_context());
+        _drain_llvm_lowering_traces();
     } else {
         // Already reported above; re-emitting is deterministic (SFN-608).
         let native_result = emit_native_with_module_name(program, module_name);
         let fallback_context = _load_llvm_import_context(native_result.module.artifacts[0].contents, module_name, import_context_root(""));
         ir = lower_to_llvm_ir_with_provider_context(native_result.module, fallback_context, resolve_llvm_provider_context());
+        _drain_llvm_lowering_traces();
     }
     if trace_emit {
         print.err("emit-llvm: llvm bytes=" + int_to_string(ir.length));
@@ -731,6 +769,7 @@ fn compile_tests_to_llvm_file_with_module_imports(source: string, module_name: s
     let empty_diagnostics: string[] = [];
     let import_context = _llvm_import_context_from_loaded_data(native_text, module_name, import_context_root(""), imported_manifests, imported_native_texts, empty_diagnostics);
     let generated = lower_llvm_for_tests_from_text_with_provider_context(native_text, module_name, import_context, resolve_llvm_provider_context());
+    _drain_llvm_lowering_traces();
     if !_publish_llvm_artifact(generated, out_path, "test llvm: wrote truncated IR to "
         + out_path) { return false; }
     if !fs.exists(out_path) { return false; }
@@ -863,9 +902,9 @@ fn write_native_text_file_with_module_gated(source: string, module_name: string,
     if !run_gate { return true; }
     let native_text = fs.readFile(out_path);
     let import_context = _load_llvm_import_context(native_text, module_name, import_context_root(""));
-    if native_text_passes_lowering_gate(native_text, module_name, import_context, resolve_llvm_provider_context()) {
-        return true;
-    }
+    let passes_gate = native_text_passes_lowering_gate(native_text, module_name, import_context, resolve_llvm_provider_context());
+    _drain_llvm_lowering_traces();
+    if passes_gate { return true; }
     if fs.exists(out_path) { fs.deleteFile(out_path); }
     return false;
 }
@@ -890,9 +929,9 @@ fn print_native_text_with_module_gated(source: string, module_name: string, run_
     if native_text.length == 0 { return false; }
     if run_gate {
         let import_context = _load_llvm_import_context(native_text, module_name, import_context_root(""));
-        if !native_text_passes_lowering_gate(native_text, module_name, import_context, resolve_llvm_provider_context()) {
-            return false;
-        }
+        let passes_gate = native_text_passes_lowering_gate(native_text, module_name, import_context, resolve_llvm_provider_context());
+        _drain_llvm_lowering_traces();
+        if !passes_gate { return false; }
     }
     print(native_text);
     return true;
@@ -918,7 +957,7 @@ fn _publish_llvm_artifact(result: LLVMArtifactResult, out_path: string, publicat
     if !result.ok {
         let fatal = has_fatal_lowering_diagnostic(result.diagnostics);
         if fatal {
-            print_fatal_lowering_diagnostics(result.diagnostics, result.diags);
+            _print_fatal_lowering_diagnostics(result.diagnostics, result.diags);
             if fs.exists(out_path) { fs.deleteFile(out_path); }
         } else if result.failure_message.length > 0 {
             print.err(result.failure_message);
@@ -1018,6 +1057,7 @@ fn compile_to_llvm_file_with_module_import_context_root(source: string, module_n
         let mut ok: boolean = false;
         let import_context = _load_llvm_import_context(heap_text, module_name, context_root);
         let generated = lower_native_text_to_llvm_artifact_with_context_and_provider(heap_text, module_name, import_context, resolve_llvm_provider_context());
+        _drain_llvm_lowering_traces();
         ok = _publish_llvm_artifact(generated, out_path, "");
         free_heap_string(heap_text);
         return ok;
@@ -1030,6 +1070,7 @@ fn compile_to_llvm_file_with_module_import_context_root(source: string, module_n
     // provider entrypoint.
     let import_context = _load_llvm_import_context_from_lines(native_lines, module_name, context_root);
     let generated = lower_native_lines_to_llvm_artifact_with_context_and_provider(native_lines, module_name, import_context, resolve_llvm_provider_context());
+    _drain_llvm_lowering_traces();
     return _publish_llvm_artifact(generated, out_path, "");
 }
 

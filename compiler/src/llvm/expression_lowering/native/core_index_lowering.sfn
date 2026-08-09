@@ -25,7 +25,7 @@ import { lower_expression } from "./core";
 import { coerce_operand_to_type } from "./core_operands/dispatch";
 import { emit_runtime_call, empty_runtime_call_overrides } from "./runtime_call";
 
-fn lower_index_expression(parse: IndexExpressionParse, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult ![io] {
+fn lower_index_expression(parse: IndexExpressionParse, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult {
     // SFN-448: tensor-IR lowering can prove a static dense buffer's extent
     // before entering its generated loop nest. `.unchecked(<base>)[index]` is
     // an internal native-IR spelling for subsequent loads under that proof;

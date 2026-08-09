@@ -60,7 +60,7 @@ fn float_intrinsic_suffix(llvm_type: string) -> string {
 // wired (the `narrowed_variant` flow is enum-only), so shipping a boolean
 // without the narrowed use would be a half-feature. They are documented
 // fast-follows (SFEP-0034 §3.6).
-fn lower_is_expression(parse: CastParseResult, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult ![io] {
+fn lower_is_expression(parse: CastParseResult, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult {
     let mut diagnostics = parse.diagnostics;
     let empty_constants = empty_string_constant_set();
     if !parse.success {
@@ -186,7 +186,7 @@ fn lower_is_expression(parse: CastParseResult, bindings: ParameterBinding[], loc
     };
 }
 
-fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult ![io] {
+fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult {
     let mut diagnostics = parse.diagnostics;
     let empty_constants = empty_string_constant_set();
     if !parse.success {
@@ -706,7 +706,7 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
     };
 }
 
-fn try_lower_interpolated_string_literal(literal: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult? ![io] {
+fn try_lower_interpolated_string_literal(literal: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult? {
     // SFEP-0057: `${ }` is the sole interpolation form. The dispatch (opener
     // detection, raw-inner scan) lives in core_text.
     let parsed = resolve_interpolation_template(literal);

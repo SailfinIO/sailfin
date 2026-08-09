@@ -9,10 +9,10 @@ import {
 } from "../../../native_ir";
 import { parse_native_artifact, parse_native_artifact_from_lines } from "../../../native_ir_api";
 import { lines_to_native_text, native_lines_have_text } from "../../../native_ir_utils_text";
-import { LLVMProviderContext, install_llvm_provider_context } from "../../lowering_debug_state";
+import { LLVMProviderContext, install_llvm_provider_context, trace_log } from "../../lowering_debug_state";
 import { LLVMArtifactResult, LoweredLLVMLinesResult } from "../../types";
 import { collect_defined_function_symbols } from "../lowering_helpers";
-import { has_fatal_lowering_diagnostic, print_fatal_lowering_diagnostics } from "./diagnostics";
+import { fatal_lowering_diagnostic_lines, has_fatal_lowering_diagnostic } from "./diagnostics";
 import { lower_to_llvm_lines_with_parsed_context } from "./mod";
 
 fn make_native_module_for_emit(module_name: string, native_text: string) -> NativeModule {
@@ -31,7 +31,7 @@ fn make_native_module_for_emit(module_name: string, native_text: string) -> Nati
 // through `import_context`; lowering remains a pure consumer of that artifact
 // data. The `[fatal]` unresolved-callee gate is preserved unchanged — this
 // supplies its input explicitly rather than weakening it (#306).
-fn generate_llvm_artifact_from_native_text_with_context(native_text: string, module_name: string, import_context: ImportedModuleContext) -> LLVMArtifactResult ![io] {
+fn generate_llvm_artifact_from_native_text_with_context(native_text: string, module_name: string, import_context: ImportedModuleContext) -> LLVMArtifactResult {
     if native_text.length == 0 {
         return _failed_llvm_artifact("emit-llvm: empty native text for module "
             + module_name);
@@ -47,7 +47,7 @@ fn generate_llvm_artifact_from_native_text_with_context(native_text: string, mod
 // `make_native_module_for_emit` carries it as the fallback). `recovery_text`
 // is byte-identical to the old `native_text`, so output is unchanged; the
 // win is skipping the primary `parse_native_artifact` re-split.
-fn generate_llvm_artifact_from_native_lines_with_context(native_lines: string[], module_name: string, import_context: ImportedModuleContext) -> LLVMArtifactResult ![io] {
+fn generate_llvm_artifact_from_native_lines_with_context(native_lines: string[], module_name: string, import_context: ImportedModuleContext) -> LLVMArtifactResult {
     if !native_lines_have_text(native_lines) {
         return _failed_llvm_artifact("emit-llvm: empty native text for module "
             + module_name);
@@ -78,7 +78,7 @@ fn _failed_llvm_artifact_from_lowering(failure_message: string, lowered: Lowered
 // Shared lowering tail for the text and lines entry points above. The provider
 // returns identity, lines, and diagnostics; the compiler driver owns path
 // selection, atomic publication, stale-artifact policy, and cache updates.
-fn _lower_parsed_native_to_llvm_artifact(parse: ParseNativeResult, native_text: string, module_name: string, import_context: ImportedModuleContext) -> LLVMArtifactResult ![io] {
+fn _lower_parsed_native_to_llvm_artifact(parse: ParseNativeResult, native_text: string, module_name: string, import_context: ImportedModuleContext) -> LLVMArtifactResult {
     let dummy_module = make_native_module_for_emit(module_name, native_text);
     let lowered_lines = lower_to_llvm_lines_with_parsed_context(dummy_module, parse, import_context, true, native_text);
     if lowered_lines.lines == null {
@@ -90,7 +90,7 @@ fn _lower_parsed_native_to_llvm_artifact(parse: ParseNativeResult, native_text: 
     // `lower_expression`'s `<closure_pair_fatal_mutable ...>` handler
     // for capturing lambdas with mutable captures (issue #687). A
     // partial IR file with the side-effecting call silently dropped
-    // would be worse than no output at all. Print every fatal so the
+    // would be worse than no output at all. Return every fatal so the
     // driver receives the underlying cause before the build aborts.
     if has_fatal_lowering_diagnostic(lowered_lines.diagnostics) {
         return _failed_llvm_artifact_from_lowering("", lowered_lines);
@@ -138,7 +138,7 @@ fn _lower_parsed_native_to_llvm_artifact(parse: ParseNativeResult, native_text: 
 // directly and never invokes this gate, so adding it cannot break
 // self-hosting (cross-module signature resolution still happens later at
 // the LLVM stage as before).
-fn native_text_passes_lowering_gate(native_text: string, module_name: string, import_context: ImportedModuleContext, provider_context: LLVMProviderContext) -> boolean ![io] {
+fn native_text_passes_lowering_gate(native_text: string, module_name: string, import_context: ImportedModuleContext, provider_context: LLVMProviderContext) -> boolean {
     install_llvm_provider_context(provider_context);
     if native_text.length == 0 {
         // No text to gate: the native emitter already failed upstream
@@ -149,14 +149,20 @@ fn native_text_passes_lowering_gate(native_text: string, module_name: string, im
     let dummy_module = make_native_module_for_emit(module_name, native_text);
     let lowered_lines = lower_to_llvm_lines_with_parsed_context(dummy_module, parse, import_context, true, native_text);
     if lowered_lines.lines == null {
-        print.err("emit-native: lowered lines null");
+        trace_log("emit-native: lowered lines null");
         return false;
     }
     // Same fatal contract as `_lower_parsed_native_to_llvm_artifact` above:
-    // print every `[fatal]` so the user sees the underlying cause, then
+    // record every `[fatal]` so the user sees the underlying cause, then
     // refuse the emit.
     if has_fatal_lowering_diagnostic(lowered_lines.diagnostics) {
-        print_fatal_lowering_diagnostics(lowered_lines.diagnostics, lowered_lines.diags);
+        let fatal_lines = fatal_lowering_diagnostic_lines(lowered_lines.diagnostics, lowered_lines.diags);
+        let mut fatal_index: int = 0;
+        loop {
+            if fatal_index >= fatal_lines.length { break; }
+            trace_log(fatal_lines[fatal_index]);
+            fatal_index += 1;
+        }
         return false;
     }
     // Mirror the remaining non-fatal rejection conditions in
@@ -170,7 +176,7 @@ fn native_text_passes_lowering_gate(native_text: string, module_name: string, im
         if defined.length == 0 { return false; }
     }
     if lowered_lines.lines.length == 0 {
-        print.err("emit-native: lowering produced no output lines");
+        trace_log("emit-native: lowering produced no output lines");
         return false;
     }
     return true;

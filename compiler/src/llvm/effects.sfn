@@ -5,7 +5,7 @@
 import { char_at_index as char_at, substring } from "sfn/strings";
 
 import { NativeFunction, NativeInstruction } from "../native_ir";
-import { test_runner_trace } from "./lowering_debug_state";
+import { test_runner_trace, trace_log } from "./lowering_debug_state";
 import { find_runtime_helper } from "./runtime_helpers/mod";
 import {
     CapabilityManifest,
@@ -711,7 +711,7 @@ fn contains_dot_property(expression: string, name: string) -> boolean {
 // =============================================================================
 // Effect Propagation
 // =============================================================================
-fn propagate_function_effects(direct_effects: FunctionEffectEntry[], call_graph: FunctionCallEntry[]) -> FunctionEffectEntry[] ![io] {
+fn propagate_function_effects(direct_effects: FunctionEffectEntry[], call_graph: FunctionCallEntry[]) -> FunctionEffectEntry[] {
     let mut aggregated: FunctionEffectEntry[] = [];
     let mut index: int = 0;
     loop {
@@ -752,7 +752,7 @@ fn propagate_function_effects(direct_effects: FunctionEffectEntry[], call_graph:
         if !changed { break; }
         if iteration > max_iterations {
             if trace {
-                print.err("llvm effects: propagation cap reached (max="
+                trace_log("llvm effects: propagation cap reached (max="
                     + number_to_string(max_iterations)
                     + ")");
             }

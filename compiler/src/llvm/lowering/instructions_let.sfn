@@ -25,7 +25,7 @@ import {
     infer_borrow_base_scope,
     make_lifetime_region_metadata
 } from "../lifetime";
-import { trace_lowering } from "../lowering_debug_state";
+import { trace_log, trace_lowering } from "../lowering_debug_state";
 import { find_function_by_name_or_import } from "../rendering_helpers";
 import { empty_string_constant_set, merge_string_constants } from "../strings";
 import {
@@ -295,7 +295,7 @@ fn _await_receive_channel_base(value: string) -> string {
     return base;
 }
 
-fn lower_let_instruction(function: NativeFunction, instruction: NativeInstruction, bindings: ParameterBinding[], locals: LocalBinding[], allocas: string[], lines: string[], temp_index: int, next_local_id: int, next_region_id: int, functions: NativeFunction[], context: TypeContext, scope_id: string, scope_depth: int, current_label: string) -> LetLoweringResult ![io] {
+fn lower_let_instruction(function: NativeFunction, instruction: NativeInstruction, bindings: ParameterBinding[], locals: LocalBinding[], allocas: string[], lines: string[], temp_index: int, next_local_id: int, next_region_id: int, functions: NativeFunction[], context: TypeContext, scope_id: string, scope_depth: int, current_label: string) -> LetLoweringResult {
     let mut diagnostics: string[] = [];
     let mut diags: Diag[] = [];
     let mut current_lines: string[] = lines;
@@ -466,7 +466,7 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
             + "`");
     } else {
         if debug_lowering {
-            print.err("let-lowering: pre-lower_expression name=" + instruction.name
+            trace_log("let-lowering: pre-lower_expression name=" + instruction.name
                 + " value="
                 + instruction.value);
         }
@@ -486,10 +486,10 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
         }
         let lowered = lower_expression(instruction.value, current_bindings, current_locals, current_temp, current_lines, functions, context, init_expected_type);
         if debug_lowering {
-            print.err("let-lowering: post-lower_expression name=" + instruction.name);
+            trace_log("let-lowering: post-lower_expression name=" + instruction.name);
         }
         if debug_lowering {
-            print.err("let-lowering: accessing lowered.diagnostics");
+            trace_log("let-lowering: accessing lowered.diagnostics");
         }
         let mut _ci19: int = 0;
         loop {
@@ -498,20 +498,20 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
             _ci19 += 1;
         }
         if debug_lowering {
-            print.err("let-lowering: accessing lowered.lines");
+            trace_log("let-lowering: accessing lowered.lines");
         }
         current_lines = lowered.lines;
         if debug_lowering {
-            print.err("let-lowering: got lines, accessing temp_index");
+            trace_log("let-lowering: got lines, accessing temp_index");
         }
         current_temp = lowered.temp_index;
         if debug_lowering {
-            print.err("let-lowering: got temp_index=" + number_to_string(current_temp)
+            trace_log("let-lowering: got temp_index=" + number_to_string(current_temp)
                 + ", accessing operand");
         }
         operand = lowered.operand;
         if debug_lowering {
-            print.err("let-lowering: got operand, accessing string_constants");
+            trace_log("let-lowering: got operand, accessing string_constants");
         }
         // Use lowered.string_constants directly (covers enum variant
         // globals and any other constants the expression produced).
@@ -530,12 +530,12 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
     }
 
     if debug_lowering {
-        print.err("let-lowering: checking llvm_type len=" + number_to_string(llvm_type.length));
+        trace_log("let-lowering: checking llvm_type len=" + number_to_string(llvm_type.length));
     }
     if llvm_type.length == 0 {
         if operand != null {
             if debug_lowering {
-                print.err("let-lowering: operand not null, trimming type");
+                trace_log("let-lowering: operand not null, trimming type");
             }
             let operand_type = trim_text(operand.llvm_type);
             if operand_type.length > 0 { llvm_type = operand_type; }
@@ -697,7 +697,7 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
                 + "* "
                 + pointer);
             if debug_lowering {
-                print.err("let-lowering: identity coerce type=" + llvm_type
+                trace_log("let-lowering: identity coerce type=" + llvm_type
                     + " value="
                     + operand.value);
             }
@@ -707,9 +707,9 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
             // This path uses `allow_widen = true`, so it bypasses the
             // boundary diagnostic in `coerce_operand_to_type`; refuse the
             // silent widening here with the canonical `[fatal]` shape and
-            // store the default so lowering can continue and report. Print
-            // to stderr (like the `coerce_operand_to_type` boundary check)
-            // so the gate in `entrypoints_tests_writer` — which refuses
+            // store the default so lowering can continue and report. Record
+            // an ordered event like `coerce_operand_to_type` so the gate in
+            // `entrypoints_tests_writer` — which refuses
             // silently on a `[fatal]` diagnostic — still surfaces the cause.
             let message = "ABI primitive mismatch: binding `" + instruction.name
                 + "` expects `"
@@ -724,7 +724,7 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
             let diag = lowering_error_diag("E1009", message, initializer_span);
             diags.push(diag);
             let legacy_diag = diag_to_legacy_string(diag);
-            print.err(legacy_diag);
+            trace_log(legacy_diag);
             diagnostics.push(legacy_diag);
             current_lines.push("  store " + llvm_type + " "
                 + default_return_literal(llvm_type)
@@ -945,7 +945,7 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
     mutations.push(mutation);
 
     if debug_lowering {
-        print.err("let-lowering: returning LetLoweringResult for name="
+        trace_log("let-lowering: returning LetLoweringResult for name="
             + instruction.name);
     }
     return LetLoweringResult {

@@ -127,7 +127,7 @@ fn _harness_print_marker(gvar: string, arr_len: string, byte_len: string, tp: st
         + ".agg1)"];
 }
 
-fn lower_to_llvm_lines_with_parsed_context_for_tests(native_module: NativeModule, parse: ParseNativeResult, import_context: ImportedModuleContext) -> LoweredLLVMLinesResult ![io] {
+fn lower_to_llvm_lines_with_parsed_context_for_tests(native_module: NativeModule, parse: ParseNativeResult, import_context: ImportedModuleContext) -> LoweredLLVMLinesResult {
     let mut native_text_for_recovery: string = "";
     if native_module.artifacts != null {
         if native_module.artifacts.length > 0 {

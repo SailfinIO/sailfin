@@ -33,7 +33,7 @@ import { try_resolve_closure_callee } from "./closure_callee";
 import { resolve_parsed_method_dispatch } from "./parsed_method_dispatch";
 import { _is_primitive_receiver_type } from "./receiver_types";
 
-fn resolve_call_method_target(trimmed_target: string, arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], current_temp: int, current_lines: string[], functions: NativeFunction[], context: TypeContext, diagnostics: string[], collected_string_constants: StringConstant[]) -> CallTargetResolution ![io] {
+fn resolve_call_method_target(trimmed_target: string, arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], current_temp: int, current_lines: string[], functions: NativeFunction[], context: TypeContext, diagnostics: string[], collected_string_constants: StringConstant[]) -> CallTargetResolution {
     let mut result_target = trimmed_target;
     let mut result_lines = current_lines;
     let mut result_temp: int = current_temp;

@@ -6,7 +6,7 @@
 // (`harmonise_operands`, `dominant_type`) and the union-variant helpers.
 import { NativeSourceSpan } from "../../../../native_ir";
 import { format_temp_name } from "../../../expressions_helpers";
-import { trace_lowering } from "../../../lowering_debug_state";
+import { trace_log, trace_lowering } from "../../../lowering_debug_state";
 import {
     ends_with_pointer_suffix,
     integer_type_is_signed,
@@ -116,10 +116,10 @@ fn single_i8_union_variant_index(target: string) -> int {
 // via `dominant_type`. The symmetric extension of the boundary-mode
 // refusal rides on a future seed bump that flips the residual
 // double-ABI helper descriptors.
-fn coerce_operand_to_type(operand: LLVMOperand, target_type: string, temp_index: int, lines: string[], allow_widen: boolean, span: NativeSourceSpan?) -> CoercionResult ![io] {
+fn coerce_operand_to_type(operand: LLVMOperand, target_type: string, temp_index: int, lines: string[], allow_widen: boolean, span: NativeSourceSpan?) -> CoercionResult {
     let debug_coerce = trace_lowering();
     if debug_coerce {
-        print.err("emit-llvm: coerce_operand entry operand_type=" + operand.llvm_type
+        trace_log("emit-llvm: coerce_operand entry operand_type=" + operand.llvm_type
             + " target="
             + target_type);
     }
@@ -183,7 +183,7 @@ fn coerce_operand_to_type(operand: LLVMOperand, target_type: string, temp_index:
             }
             abi_diag = abi_diag
                 + " — add `as float` or `as int` to disambiguate";
-            print.err(abi_diag);
+            trace_log(abi_diag);
             diagnostics.push(abi_diag);
             return CoercionResult {
                 lines: current_lines,
@@ -219,7 +219,7 @@ fn coerce_operand_to_type(operand: LLVMOperand, target_type: string, temp_index:
             }
             bool_diag = bool_diag
                 + " — add `as int` or `as float` to disambiguate";
-            print.err(bool_diag);
+            trace_log(bool_diag);
             diagnostics.push(bool_diag);
             return CoercionResult {
                 lines: current_lines,
@@ -328,7 +328,7 @@ fn coerce_operand_to_type(operand: LLVMOperand, target_type: string, temp_index:
 // sites have no authoritative source annotation and keep using
 // `coerce_operand_to_type`; call arguments and call results use this seam
 // when resolution can prove the operand's source type.
-fn coerce_operand_to_type_with_source(operand: LLVMOperand, source_type: string, target_type: string, temp_index: int, lines: string[], allow_widen: boolean, span: NativeSourceSpan?) -> CoercionResult ![io] {
+fn coerce_operand_to_type_with_source(operand: LLVMOperand, source_type: string, target_type: string, temp_index: int, lines: string[], allow_widen: boolean, span: NativeSourceSpan?) -> CoercionResult {
     if source_type.length == 0 {
         return coerce_operand_to_type(operand, target_type, temp_index, lines, allow_widen, span);
     }
@@ -455,7 +455,7 @@ fn dominant_type(first: string, second: string) -> string {
     return first;
 }
 
-fn harmonise_operands(left: LLVMOperand, right: LLVMOperand, temp_index: int, lines: string[]) -> BinaryAlignmentResult ![io] {
+fn harmonise_operands(left: LLVMOperand, right: LLVMOperand, temp_index: int, lines: string[]) -> BinaryAlignmentResult {
     let mut diagnostics: string[] = [];
     let mut current_lines: string[] = lines;
     let mut current_temp: int = temp_index;

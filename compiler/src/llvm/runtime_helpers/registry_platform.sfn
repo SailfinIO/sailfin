@@ -21,7 +21,7 @@ fn _rh_descriptors_00(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
 
     // Prefixed print variants — print.err/print.warn/print.error write to
     // stderr; print.info writes to stdout with an [info] prefix.
-    // Compiler diagnostics should use print.err() so they do not pollute
+    // Compiler diagnostics are buffered as provider events so they do not pollute
     // stdout (LLVM IR output, program output, etc.).
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "print.info", symbol: "sfn_print_info", return_type: "void", parameter_types: ["{i8*, i64}"], native_signature: "sfn_print_info", c_abi_return_type: null

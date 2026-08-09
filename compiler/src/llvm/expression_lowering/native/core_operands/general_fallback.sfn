@@ -15,7 +15,7 @@ import {
 import { _coerce_union_target_fallback } from "./union_fallback";
 
 // General coercion fallbacks: boxing, union construction, pointer variance, null handling.
-fn coerce_general_fallback(operand: LLVMOperand, operand_type: string, target: string, temp_index: int, lines: string[]) -> CoercionResult? ![io] {
+fn coerce_general_fallback(operand: LLVMOperand, operand_type: string, target: string, temp_index: int, lines: string[]) -> CoercionResult? {
     let mut current_lines: string[] = lines;
     let mut diagnostics: string[] = [];
 

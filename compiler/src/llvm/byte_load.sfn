@@ -36,6 +36,7 @@ import { NativeFunction } from "../native_ir";
 // rely on — see `atomics.sfn`.
 import { lower_expression } from "./expression_lowering/native/core";
 import { format_temp_name } from "./expressions_helpers";
+import { trace_log } from "./lowering_debug_state";
 import { merge_string_constants } from "./strings";
 import {
     ExpressionResult,
@@ -62,7 +63,7 @@ fn is_byte_load_builtin(name: string) -> boolean {
 // through `lower_expression` (as `i64`), then emits the inttoptr +
 // single-byte load + zext triple. Returns an `ExpressionResult` whose
 // `operand` is the zero-extended i64 byte value.
-fn lower_byte_load(name: string, arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult ![io] {
+fn lower_byte_load(name: string, arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult {
     let mut diagnostics: string[] = [];
     let mut current_lines = lines;
     let mut current_temp = temp_index;
@@ -75,7 +76,7 @@ fn lower_byte_load(name: string, arguments: string[], bindings: ParameterBinding
         // the atomic-builtin arity gate (issue #306 contract).
         let diag1 = "llvm lowering [fatal] [E0806]: load_byte expects exactly 1 argument (`int` address), got "
             + number_to_string(arguments.length);
-        print.err(diag1);
+        trace_log(diag1);
         diagnostics.push(diag1);
         return ExpressionResult {
             lines: current_lines,
@@ -110,7 +111,7 @@ fn lower_byte_load(name: string, arguments: string[], bindings: ParameterBinding
         let diag2 = "llvm lowering [fatal] [E0806]: load_byte expects argument 0 of type `int` (i64), got `"
             + addr_type
             + "`";
-        print.err(diag2);
+        trace_log(diag2);
         diagnostics.push(diag2);
         return ExpressionResult {
             lines: current_lines,

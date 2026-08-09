@@ -35,7 +35,7 @@ import { emit_llvm_function } from "./emission";
 import { prepare_parameters_from_function } from "./emission";
 
 // Emit async wrapper + impl for an async function. Returns LoweredLLVMFunction.
-fn emit_async_function(function: NativeFunction, functions: NativeFunction[], effects: string[], context: TypeContext, module_name: string, entry_points: string[], exported_symbols: string[], imported_functions: NativeFunction[], module_globals: LocalBinding[], module_init_symbol: string, needs_module_init_call: boolean, imported_decorator_names: string[]) -> LoweredLLVMFunction ![io] {
+fn emit_async_function(function: NativeFunction, functions: NativeFunction[], effects: string[], context: TypeContext, module_name: string, entry_points: string[], exported_symbols: string[], imported_functions: NativeFunction[], module_globals: LocalBinding[], module_init_symbol: string, needs_module_init_call: boolean, imported_decorator_names: string[]) -> LoweredLLVMFunction {
     let mut diagnostics: string[] = [];
     let mut diags: Diag[] = [];
     let fn_name = function.name;

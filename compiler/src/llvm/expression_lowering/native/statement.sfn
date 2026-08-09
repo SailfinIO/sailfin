@@ -15,7 +15,7 @@ import { format_root_scope_id } from "../../lifetime";
 // helper walks the scope chain inner-to-outer and emits
 // `sfn_rc_release` calls for every owned RC local at scope close.
 import { emit_drops_for_scope_chain } from "../../lowering/instructions_helpers";
-import { test_runner_trace, trace_lowering } from "../../lowering_debug_state";
+import { test_runner_trace, trace_log, trace_lowering } from "../../lowering_debug_state";
 // Import string constant management
 import { empty_string_constant_set } from "../../strings";
 // Import types from modular structure
@@ -129,7 +129,7 @@ fn _ipc_make_local_binding(name: string, pointer: string, llvm_type: string, typ
 // ---------------------------------------------------------------------------
 // Core lowering functions
 // ---------------------------------------------------------------------------
-fn lower_expression_statement(function_name: string, instruction: NativeInstruction, expression: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], next_region_id: int, scope_id: string, scope_depth: int, functions: NativeFunction[], context: TypeContext, current_label: string) -> ExpressionStatementResult ![io] {
+fn lower_expression_statement(function_name: string, instruction: NativeInstruction, expression: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], next_region_id: int, scope_id: string, scope_depth: int, functions: NativeFunction[], context: TypeContext, current_label: string) -> ExpressionStatementResult {
     // Read bindings and locals from files written by instructions.sfn.
     // Use parameters directly instead of file IPC. The v0.1.1 seed ABI
     // corruption that required file-based binding/local reads is not present
@@ -138,7 +138,7 @@ fn lower_expression_statement(function_name: string, instruction: NativeInstruct
     let mut current_locals = locals;
     let debug_lowering = trace_lowering();
     if debug_lowering {
-        print.err("emit-llvm: lower_expression_statement start fn="
+        trace_log("emit-llvm: lower_expression_statement start fn="
             + function_name
             + " expr="
             + expression
@@ -182,7 +182,7 @@ fn lower_expression_statement(function_name: string, instruction: NativeInstruct
         let trimmed_assign_target = trim_text(parsed_assignment.target);
         let trimmed_assign_value = trim_text(parsed_assignment.value);
         if debug_lowering {
-            print.err("emit-llvm: lower_expr_stmt simple_assignment target='"
+            trace_log("emit-llvm: lower_expr_stmt simple_assignment target='"
                 + trimmed_assign_target
                 + "' value='"
                 + trimmed_assign_value
@@ -440,7 +440,7 @@ fn lower_expression_statement(function_name: string, instruction: NativeInstruct
     };
 }
 
-fn lower_return_instruction(function: NativeFunction, instruction: NativeInstruction, llvm_return: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], next_region_id: int, scope_id: string, scope_depth: int, functions: NativeFunction[], context: TypeContext, try_stack: TryFrameContext[]) -> ExpressionStatementResult ![io] {
+fn lower_return_instruction(function: NativeFunction, instruction: NativeInstruction, llvm_return: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], next_region_id: int, scope_id: string, scope_depth: int, functions: NativeFunction[], context: TypeContext, try_stack: TryFrameContext[]) -> ExpressionStatementResult {
     let mut diagnostics: string[] = [];
     let mut diags: Diag[] = [];
     let mut current_lines: string[] = lines;
@@ -456,7 +456,7 @@ fn lower_return_instruction(function: NativeFunction, instruction: NativeInstruc
     let safe_llvm_return = llvm_return;
 
     if debug_lowering {
-        print.err("emit-llvm: lower_return_instruction start fn=" + fn_name
+        trace_log("emit-llvm: lower_return_instruction start fn=" + fn_name
             + " llvm_return="
             + safe_llvm_return);
     }
@@ -467,7 +467,7 @@ fn lower_return_instruction(function: NativeFunction, instruction: NativeInstruc
     if trace {
         let mut expr_len: int = 0;
         if instr_expression != null { expr_len = instr_expression.length; }
-        print.err("test llvm: lower_return start " + fn_name + " expr_len="
+        trace_log("test llvm: lower_return start " + fn_name + " expr_len="
             + number_to_string(expr_len)
             + " lines_before="
             + number_to_string(current_lines.length));
@@ -530,7 +530,7 @@ fn lower_return_instruction(function: NativeFunction, instruction: NativeInstruc
                 + default_return_literal(safe_llvm_return));
         }
         if trace {
-            print.err("test llvm: lower_return empty_expr lines_after="
+            trace_log("test llvm: lower_return empty_expr lines_after="
                 + number_to_string(current_lines.length));
         }
         let empty_constants = empty_string_constant_set();
@@ -554,11 +554,11 @@ fn lower_return_instruction(function: NativeFunction, instruction: NativeInstruc
     let mut current_locals = locals;
 
     if debug_lowering {
-        print.err("emit-llvm: lower_return pre_suspension fn=" + fn_name);
+        trace_log("emit-llvm: lower_return pre_suspension fn=" + fn_name);
     }
     let suspension_diagnostics = detect_suspension_conflicts(instr_expression, current_locals, current_bindings, fn_name, null);
     if debug_lowering {
-        print.err("emit-llvm: lower_return post_suspension fn=" + fn_name);
+        trace_log("emit-llvm: lower_return post_suspension fn=" + fn_name);
     }
     let mut _ci16: int = 0;
     loop {
@@ -568,11 +568,11 @@ fn lower_return_instruction(function: NativeFunction, instruction: NativeInstruc
     }
 
     if debug_lowering {
-        print.err("emit-llvm: lower_return pre_ownership fn=" + fn_name);
+        trace_log("emit-llvm: lower_return pre_ownership fn=" + fn_name);
     }
     let ownership_analysis = analyze_value_ownership(instr_expression, null, current_locals, current_bindings);
     if debug_lowering {
-        print.err("emit-llvm: lower_return post_ownership fn=" + fn_name);
+        trace_log("emit-llvm: lower_return post_ownership fn=" + fn_name);
     }
     let mut _ci17: int = 0;
     loop {
@@ -583,14 +583,14 @@ fn lower_return_instruction(function: NativeFunction, instruction: NativeInstruc
     let consumption = ownership_analysis.consumption;
 
     if debug_lowering {
-        print.err("emit-llvm: lower_return pre_lower_expr fn=" + fn_name
+        trace_log("emit-llvm: lower_return pre_lower_expr fn=" + fn_name
             + " expr="
             + instr_expression);
-        print.err("emit-llvm: lower_return bindings_len=" + number_to_string(current_bindings.length));
+        trace_log("emit-llvm: lower_return bindings_len=" + number_to_string(current_bindings.length));
         let mut bind_i: int = 0;
         loop {
             if bind_i >= current_bindings.length { break; }
-            print.err("emit-llvm: lower_return binding[" + number_to_string(bind_i)
+            trace_log("emit-llvm: lower_return binding[" + number_to_string(bind_i)
                 + "] name="
                 + current_bindings[bind_i].name
                 + " llvm_name="
@@ -603,7 +603,7 @@ fn lower_return_instruction(function: NativeFunction, instruction: NativeInstruc
     current_temp = recover_temp_from_lines(current_lines, current_temp);
     let lowered = lower_expression(instr_expression, current_bindings, current_locals, current_temp, current_lines, functions, context, safe_llvm_return);
     if debug_lowering {
-        print.err("emit-llvm: lower_return post_lower_expr fn=" + fn_name);
+        trace_log("emit-llvm: lower_return post_lower_expr fn=" + fn_name);
     }
     let mut _ci18: int = 0;
     loop {
@@ -619,7 +619,7 @@ fn lower_return_instruction(function: NativeFunction, instruction: NativeInstruc
     if debug_lowering {
         let mut has_operand = "false";
         if lowered.operand != null { has_operand = "true"; }
-        print.err("emit-llvm: lower_return operand_check fn=" + fn_name
+        trace_log("emit-llvm: lower_return operand_check fn=" + fn_name
             + " has_operand="
             + has_operand);
     }
@@ -647,7 +647,7 @@ fn lower_return_instruction(function: NativeFunction, instruction: NativeInstruc
         current_lines.push("  ret " + safe_llvm_return + " "
             + default_return_literal(safe_llvm_return));
         if trace {
-            print.err("test llvm: lower_return no_operand lines_after="
+            trace_log("test llvm: lower_return no_operand lines_after="
                 + number_to_string(current_lines.length));
         }
         return ExpressionStatementResult {
@@ -667,7 +667,7 @@ fn lower_return_instruction(function: NativeFunction, instruction: NativeInstruc
 
     let operand = lowered.operand;
     if debug_lowering {
-        print.err("emit-llvm: lower_return pre_coerce fn=" + fn_name + " type="
+        trace_log("emit-llvm: lower_return pre_coerce fn=" + fn_name + " type="
             + operand.llvm_type
             + " value="
             + operand.value);
@@ -701,11 +701,11 @@ fn lower_return_instruction(function: NativeFunction, instruction: NativeInstruc
     }
 
     if debug_lowering {
-        print.err("emit-llvm: lower_return pre_coerce_call fn=" + fn_name);
+        trace_log("emit-llvm: lower_return pre_coerce_call fn=" + fn_name);
     }
     let coerced = coerce_operand_to_type(operand, safe_llvm_return, current_temp, current_lines, true, null);
     if debug_lowering {
-        print.err("emit-llvm: lower_return post_coerce fn=" + fn_name);
+        trace_log("emit-llvm: lower_return post_coerce fn=" + fn_name);
     }
     let mut _ci19: int = 0;
     loop {
@@ -743,7 +743,7 @@ fn lower_return_instruction(function: NativeFunction, instruction: NativeInstruc
                 + default_return_literal(safe_llvm_return));
         }
         if trace {
-            print.err("test llvm: lower_return no_coerce lines_after="
+            trace_log("test llvm: lower_return no_coerce lines_after="
                 + number_to_string(current_lines.length));
         }
         return ExpressionStatementResult {
@@ -862,7 +862,7 @@ fn lower_return_instruction(function: NativeFunction, instruction: NativeInstruc
     current_lines.push("  ret " + coerced_operand.llvm_type + " "
         + coerced_operand.value);
     if trace {
-        print.err("test llvm: lower_return ok lines_after=" + number_to_string(current_lines.length));
+        trace_log("test llvm: lower_return ok lines_after=" + number_to_string(current_lines.length));
     }
     return ExpressionStatementResult {
         lines: current_lines,
