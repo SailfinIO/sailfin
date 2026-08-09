@@ -18,7 +18,9 @@
 // cross-check outright rather than asserting "no effects" (SFN-764), so it
 // documents nothing on its own; the honest capability surface is the
 // per-function effect annotations and `docs/status.md`'s `sfn/crypto` row.
-import { pem_certificates_to_der } from "./pem";
+import { int_to_string } from "sfn/strings";
+
+import { pem_certificates_to_der_with_limits, pem_count_blocks } from "./pem";
 import { X509Certificate, x509_parse } from "./x509";
 
 struct TrustStore {
@@ -85,12 +87,37 @@ fn trust_store_default_paths() -> string[] {
     return ["/etc/ssl/certs/ca-certificates.crt", "/etc/pki/tls/certs/ca-bundle.crt", "/etc/ssl/ca-bundle.pem", "/etc/pki/tls/cacert.pem", "/etc/ssl/cert.pem", "/opt/homebrew/etc/openssl@3/cert.pem", "/usr/local/etc/openssl@3/cert.pem"];
 }
 
+// The largest number of PEM blocks a bundle may declare. `pem.sfn`'s own
+// default is a *chain* bound of 16, which is an order of magnitude too small
+// here: a system CA bundle is ~150 certificates and enterprise images
+// concatenate corporate anchors onto it, so that bound silently refused every
+// real trust store (SFN-807). The policy lives here, with the caller whose
+// input it describes, rather than in the generic PEM codec.
+//
+// 512 keeps a genuine DoS bound — a bundle is attacker-controlled only if an
+// attacker can write the CA file, but the parse is still work per block — with
+// ample headroom over anything seen in the wild.
+fn _trust_store_max_blocks() -> int { return 512; }
+
 // Parse a PEM CA bundle into trust anchors. Pure: this is the whole decode and
 // parse path, and it is what the tests exercise.
 fn trust_store_from_pem(pem: string) -> TrustStore {
-    let blocks: int[][] = pem_certificates_to_der(pem);
+    let blocks: int[][] = pem_certificates_to_der_with_limits(pem, _trust_store_max_blocks());
     if blocks.length == 0 {
-        return _store_err("trust_store: no CERTIFICATE blocks in bundle");
+        // `[]` is ambiguous, so report which cause it was. An over-limit
+        // bundle used to be reported as "no CERTIFICATE blocks", pointing
+        // diagnosis at the file instead of the bound (SFN-807).
+        let declared: int = pem_count_blocks(pem, "CERTIFICATE");
+        if declared == 0 {
+            return _store_err("trust_store: no CERTIFICATE blocks in bundle");
+        }
+        if declared > _trust_store_max_blocks() {
+            return _store_err("trust_store: bundle declares " + int_to_string(declared)
+                + " CERTIFICATE blocks, over the "
+                + int_to_string(_trust_store_max_blocks())
+                + "-block limit");
+        }
+        return _store_err("trust_store: a CERTIFICATE block in bundle is malformed (PEM framing or base64)");
     }
 
     let mut anchors: X509Certificate[] = [];

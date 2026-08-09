@@ -4,7 +4,12 @@
 // SFEP-0048 Phase B) in `pem.sfn`. Fixtures are short synthetic base64
 // strings computed by hand over small byte arrays — never a real
 // certificate.
-import { pem_certificates_to_der, pem_decode_blocks } from "../src/pem";
+import {
+    pem_certificates_to_der,
+    pem_count_blocks,
+    pem_decode_blocks,
+    pem_decode_blocks_with_limits
+} from "../src/pem";
 import { eq_bytes } from "./support/hex";
 
 test "pem: a two-block chain decodes to two DER blobs in order" {
@@ -131,4 +136,42 @@ test "pem: a non-ASCII character in a block body is rejected" {
     let pem: string = "-----BEGIN CERTIFICATE-----\nAŁB=\n-----END CERTIFICATE-----\n";
     let blocks: int[][] = pem_certificates_to_der(pem);
     assert blocks.length == 0;
+}
+
+test "pem: a 17-block PEM decodes when the limit is raised" {
+    let mut pem: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= 17 { break; }
+        pem = pem
+            + "-----BEGIN CERTIFICATE-----\nAA==\n-----END CERTIFICATE-----\n";
+        i += 1;
+    }
+    let blocks: int[][] = pem_decode_blocks_with_limits(pem, "CERTIFICATE", 32);
+    assert blocks.length == 17;
+}
+
+test "pem: pem_count_blocks counts headers a decode refuses" {
+    let mut pem: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= 17 { break; }
+        pem = pem
+            + "-----BEGIN CERTIFICATE-----\nAA==\n-----END CERTIFICATE-----\n";
+        i += 1;
+    }
+    assert pem_count_blocks(pem, "CERTIFICATE") == 17;
+    let blocks: int[][] = pem_decode_blocks(pem, "CERTIFICATE");
+    assert blocks.length == 0;
+}
+
+test "pem: a max_blocks under 1 is refused" {
+    let pem: string = "-----BEGIN CERTIFICATE-----\nAQIDBAU=\n-----END CERTIFICATE-----\n";
+    let blocks: int[][] = pem_decode_blocks_with_limits(pem, "CERTIFICATE", 0);
+    assert blocks.length == 0;
+}
+
+test "pem: pem_count_blocks ignores a non-matching label" {
+    let pem: string = "-----BEGIN CERTIFICATE-----\nAQIDBAU=\n-----END CERTIFICATE-----\n";
+    assert pem_count_blocks(pem, "PRIVATE KEY") == 0;
 }

@@ -540,7 +540,7 @@ fn _tls_session_free(s: *TlsSession) -> void {
 // buys nothing over re-reading the bundle.
 //
 // So the bundle is parsed once per handshake, and the per-request cost
-// is real and measured rather than hidden. Removal condition: SFN-801,
+// is real and measured rather than hidden. Removal condition: SFN-805,
 // which is where a real anchor cache belongs (a DER-blob global plus a
 // parsed-anchor arena), not here.
 fn _tls_anchors() -> X509Certificate[] ![io] {

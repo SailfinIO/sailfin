@@ -91,8 +91,16 @@ fn _pem_matches_at(input: string, start: int, expected: string) -> bool {
 // decode is an attacker-sized allocation.
 fn _pem_max_block_bytes() -> int { return 65535; }
 
-// The largest number of blocks a single PEM file may declare. Guards the
-// scan loop against an adversarial file with unbounded BEGIN/END pairs.
+// The largest number of blocks a *chain* PEM (the wire certificate chain,
+// SFN-654) may declare — the default this module applies through
+// `pem_decode_blocks`. Guards the scan loop against an adversarial file with
+// unbounded BEGIN/END pairs.
+//
+// This bound is a chain bound, not a universal one. A caller whose legitimate
+// input is larger passes its own through `pem_decode_blocks_with_limits`;
+// applying this one to a system CA bundle silently refused every real trust
+// store (SFN-807), so that policy now lives with its owner in
+// `trust_store.sfn` rather than here.
 fn _pem_max_blocks() -> int { return 16; }
 
 // Extract every `-----BEGIN <label>-----` … `-----END <label>-----` block in
@@ -103,10 +111,16 @@ fn _pem_max_blocks() -> int { return 16; }
 //
 // Returns `[]` (empty outer array) fail-closed if any block is malformed: a
 // BEGIN with no matching END, a base64 body with an invalid character or bad
-// padding, an empty decoded block, more than `_pem_max_blocks()` blocks, or
-// any single decoded block exceeding `_pem_max_block_bytes()`.
-fn pem_decode_blocks(pem: string, label: string) -> int[][] {
+// padding, an empty decoded block, more than `max_blocks` blocks, a
+// `max_blocks` below 1, or any single decoded block exceeding
+// `_pem_max_block_bytes()`.
+//
+// `[]` is therefore ambiguous across those causes. A caller that reports the
+// failure to a human wants `pem_count_blocks` to tell "none present" from
+// "more than the bound admits" (SFN-807).
+fn pem_decode_blocks_with_limits(pem: string, label: string, max_blocks: int) -> int[][] {
     let none: int[][] = [];
+    if max_blocks < 1 { return none; }
     let header: string = "-----BEGIN " + label + "-----";
     let footer: string = "-----END " + label + "-----";
 
@@ -118,7 +132,7 @@ fn pem_decode_blocks(pem: string, label: string) -> int[][] {
             cursor += 1;
             continue;
         }
-        if blocks.length >= _pem_max_blocks() { return none; }
+        if blocks.length >= max_blocks { return none; }
 
         cursor += header.length;
         let mut encoded: string = "";
@@ -153,10 +167,47 @@ fn pem_decode_blocks(pem: string, label: string) -> int[][] {
     return blocks;
 }
 
+// `pem_decode_blocks` under this module's chain bound — the shape every
+// pre-SFN-807 caller already had, unchanged.
+fn pem_decode_blocks(pem: string, label: string) -> int[][] {
+    return pem_decode_blocks_with_limits(pem, label, _pem_max_blocks());
+}
+
+// Count `-----BEGIN <label>-----` headers without decoding any body. A decode
+// returning `[]` is ambiguous — no blocks, a malformed block, and more blocks
+// than the bound admits all produce it — and a caller reporting the failure
+// needs to tell those apart (SFN-807).
+fn pem_count_blocks(pem: string, label: string) -> int {
+    let header: string = "-----BEGIN " + label + "-----";
+    let mut count: int = 0;
+    let mut cursor: int = 0;
+    loop {
+        if cursor >= pem.length { break; }
+        if _pem_matches_at(pem, cursor, header) {
+            count += 1;
+            cursor += header.length;
+        } else { cursor += 1; }
+    }
+    return count;
+}
+
 // Thin wrapper over `pem_decode_blocks` for the `CERTIFICATE` label — the
 // server certificate chain PEM format (RFC 7468 §5.1).
 fn pem_certificates_to_der(pem: string) -> int[][] {
     return pem_decode_blocks(pem, "CERTIFICATE");
 }
 
-export { pem_certificates_to_der, pem_decode_blocks };
+// `pem_certificates_to_der` under a caller-supplied block bound, for an input
+// legitimately larger than a wire chain — a system CA bundle is the motivating
+// case (SFN-807).
+fn pem_certificates_to_der_with_limits(pem: string, max_blocks: int) -> int[][] {
+    return pem_decode_blocks_with_limits(pem, "CERTIFICATE", max_blocks);
+}
+
+export {
+    pem_certificates_to_der,
+    pem_certificates_to_der_with_limits,
+    pem_count_blocks,
+    pem_decode_blocks,
+    pem_decode_blocks_with_limits
+};

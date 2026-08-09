@@ -17,7 +17,13 @@ export {
 // Binary-safe PEM decoding for a TLS 1.3 server certificate chain (SFN-654,
 // SFEP-0048 Phase B) — separate from `base64_decode` below, which cannot
 // represent a decoded 0x00 byte.
-export { pem_certificates_to_der, pem_decode_blocks } from "./pem";
+export {
+    pem_certificates_to_der,
+    pem_certificates_to_der_with_limits,
+    pem_count_blocks,
+    pem_decode_blocks,
+    pem_decode_blocks_with_limits
+} from "./pem";
 
 export { sha1_hex } from "./sha1";
 
