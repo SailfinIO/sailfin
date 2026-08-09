@@ -11,6 +11,7 @@ import { _env_flag, _get_env_cmd } from "../build_flags";
 import { RuntimeCapsuleArtifacts } from "../runtime_capsule_resolver";
 import { assemble_link_inputs } from "./clang_argv";
 import { _shell_read_cmd, _shell_single_quote_arg } from "./fs";
+import { missing_runtime_dep_specs, runtime_dep_link_failure_message } from "./link_contract";
 import { _ensure_dir, _find_substring_from } from "./paths";
 import { RuntimeLinkInputs, assemble_runtime_capsule_link_inputs } from "./runtime_objs";
 // Target conditioning (SFN-52, SFEP-0021 §4.2(A); promoted to the triple
@@ -244,6 +245,23 @@ fn _clang_link_multi_with_opt(ll_paths: string[], out_path: string, runtime_root
         print("     expected " + root_display
             + "/capsule.toml (kind = \"runtime\")");
         print("     hint: ensure the runtime bundle ships alongside the compiler binary");
+        return _failed_link_result();
+    }
+
+    // Pre-backend link-contract preflight (SFN-341): the runtime's
+    // `sfn-sources` land in every binary, so a call one of those modules
+    // makes into a `[dependencies]`-declared capsule provider is emitted
+    // for every consumer. If the resolver pass that produced `ll_paths`
+    // skipped one of those declared deps, the runtime's calls compile to
+    // unresolved `__sfn__<scope>__<name>__*` symbols that would otherwise
+    // surface only as an opaque clang link error, far from the missing-
+    // dependency root cause. `_failed_link_result()` carries
+    // `ran_backend: false` — this is a driver-side refusal before the
+    // backend ever runs, not a backend failure, so callers correctly skip
+    // the SFN-212 ICE banner for it.
+    let missing_deps = missing_runtime_dep_specs(runtime_capsules, ll_paths);
+    if missing_deps.length > 0 {
+        print(runtime_dep_link_failure_message(missing_deps));
         return _failed_link_result();
     }
     let inputs = assemble_runtime_capsule_link_inputs(runtime_capsules, cache_dir, opt_flag, binary_dir, shared_cache_root);
