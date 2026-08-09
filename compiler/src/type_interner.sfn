@@ -4,7 +4,7 @@
 // graph. Equality is fieldwise, hashes come from a private structural encoding,
 // and human-readable rendering is diagnostic output only. See SFN-588,
 // SFEP-0059 §10.2.1, and §3.5.
-import { int_to_string } from "sfn/strings";
+import { char_code_at, int_to_string } from "sfn/strings";
 
 import {
     DeclarationId,
@@ -24,7 +24,6 @@ import {
     TypeId,
     qualified_declaration_ids_equal
 } from "./type_id";
-import { char_code } from "runtime/prelude";
 
 struct TypeEffectSet {
     names: string[];
@@ -204,8 +203,8 @@ fn _string_less(left: string, right: string) -> boolean {
     loop {
         if index >= left.length { return right.length > left.length; }
         if index >= right.length { return false; }
-        let left_code = char_code(left[index]);
-        let right_code = char_code(right[index]);
+        let left_code = char_code_at(left, index);
+        let right_code = char_code_at(right, index);
         if left_code < right_code { return true; }
         if left_code > right_code { return false; }
         index += 1;
@@ -378,7 +377,7 @@ fn _fnv1a_32(value: string) -> int {
     let mut index: int = 0;
     loop {
         if index >= value.length { break; }
-        hash = hash ^ (char_code(value[index]) & 255);
+        hash = hash ^ (char_code_at(value, index) & 255);
         hash = (hash * 16777619) & 4294967295;
         index += 1;
     }
