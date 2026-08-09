@@ -260,7 +260,9 @@ export {
     tls_content_type_application_data,
     tls13_record_nonce,
     tls13_seal_record,
-    tls13_open_record
+    tls13_open_record,
+    tls13_seal_record_aead,
+    tls13_open_record_aead
 } from "./tls13_record";
 
 // TLS 1.3 client handshake (RFC 8446 §4) — the ClientHello -> ServerHello ->

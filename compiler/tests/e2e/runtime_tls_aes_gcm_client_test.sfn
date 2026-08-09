@@ -1,7 +1,8 @@
 // AES-GCM cipher-suite coverage for the native runtime's outbound TLS
 // client (SFN-814). `runtime_tls_https_client_test.sfn` proves a round-trip
 // happens; it never pins WHICH suite carried it, and this stack's
-// `encode_client_hello` offers ChaCha20-Poly1305 first (`tls.sfn`, SFN-768),
+// `encode_client_hello` offers ChaCha20-Poly1305 first
+// (`sfn/crypto/tls13_handshake_codec.sfn`, SFN-814),
 // so a change that broke AES-GCM specifically could still pass that test by
 // negotiating ChaCha20. This test forces the negotiated suite by pointing
 // `openssl s_server` at exactly one TLS 1.3 ciphersuite via `-ciphersuites`,

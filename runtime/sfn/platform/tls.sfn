@@ -403,7 +403,7 @@ fn _tls_state_closed() -> i64 { return 2; }
 
 // ── Session object ───────────────────────────────────────────────
 // Scalar-only, malloc'd, addressed through a typed pointer — the
-// `scheduler.sfn` precedent. Eighteen i64 slots = 144 bytes.
+// `scheduler.sfn` precedent. Twenty-one i64 slots = 168 bytes.
 //
 // `rx_*` holds bytes read from the socket that do not yet form a
 // complete record. `pt_*` holds decrypted application data not yet
@@ -434,11 +434,19 @@ struct TlsSession {
     // zero dispatches to no AEAD at all — a session cannot seal or open
     // before a suite is negotiated.
     suite: i64;
+    // The byte length of the buffer at `read_key_addr` / `write_key_addr`,
+    // written by the same installer that allocates it. Deriving it from
+    // `suite` instead would couple a length to a different write than the
+    // allocation: if the two directions ever install different suites (a
+    // KeyUpdate path, a per-direction suite), a 32-byte read of a 16-byte
+    // AES key would feed heap bytes past the allocation into an AEAD key.
+    read_key_len: i64;
+    write_key_len: i64;
 }
 
-// 19 i64 fields. Bump this with every field added, or the last one writes
+// 21 i64 fields. Bump this with every field added, or the last one writes
 // past the allocation.
-fn _tls_session_bytes() -> i64 { return 152; }
+fn _tls_session_bytes() -> i64 { return 168; }
 
 // A server context carries the certificate chain and signing seed the
 // handshake needs; a client context carries nothing but its role. Both
@@ -713,8 +721,14 @@ fn _tls_suite_key_len(suite: i64) -> i64 {
 // check and be encrypted with ChaCha20 — a failure that surfaces at the peer
 // as a bad tag, not here.
 //
-// The cost is real: the capsule path measures ~1 MB/s against the pointer
-// path's ~233 MB/s (SFN-339). That is why `encode_client_hello` offers
+// The cost is real, and stated as a bound rather than a measurement: the
+// capsule *primitive* measures ~1.0 MB/s at -O2 (SFN-339's
+// `aes_gcm_seal_bench`), and this path adds three `int[]` marshalling
+// passes plus record framing and a writeback loop on top, so ~1 MB/s is a
+// ceiling this path cannot exceed. The ~233 MB/s ChaCha20 figure *is* a
+// runtime-layer measurement, so the two are not directly comparable —
+// SFN-817 measures the AES path properly. That asymmetry is why
+// `encode_client_hello` offers
 // ChaCha20-Poly1305 first, inverting the usual AES-NI-era preference — this
 // stack has no AES-NI, so its AES is the slow option. SFN-817 ports AES-GCM to
 // the pointer idiom and retires this split.
@@ -722,13 +736,19 @@ fn _tls_suite_key_len(suite: i64) -> i64 {
 // the wire byte count or -1 fail-closed. `out` must hold
 // `5 + content_len + 1 + tag`, which is what both callers allocate.
 fn _tls_seal_record(s: *TlsSession, content_type: i64, content: *u8, content_len: i64, out: *u8) -> i64 {
+    // Reject an oversized fragment before the AES branch materialises an
+    // `int[]` of it. The pointer path rejects at zero allocation cost, and
+    // `tls_write` caps nothing, so without this an AES-GCM session pays
+    // 8 bytes per content byte before failing closed — consequential
+    // against the 8 GiB RLIMIT_AS the toolchain self-applies.
+    if content_len < 0 { return 0 - 1; }
+    if content_len > 16384 { return 0 - 1; }
     if s.suite == tls_cipher_chacha20_poly1305_sha256() {
         return sfn_tls_record_seal(s.write_key_addr as *u8, 32, s.write_iv_addr as *u8, 12, s.write_seq, content_type, content, content_len, 0, out);
     }
     let alg: int = _tls_suite_aead(s.suite);
     if alg == 0 { return 0 - 1; }
-    let klen: i64 = _tls_suite_key_len(s.suite);
-    let key: int[] = _tls_buf_to_bytes(s.write_key_addr as *u8, 0, klen);
+    let key: int[] = _tls_buf_to_bytes(s.write_key_addr as *u8, 0, s.write_key_len);
     let iv: int[] = _tls_buf_to_bytes(s.write_iv_addr as *u8, 0, 12);
     let body: int[] = _tls_buf_to_bytes(content, 0, content_len);
     let rec: int[] = tls13_seal_record_aead(alg, key, iv, s.write_seq, content_type, body, 0);
@@ -753,8 +773,7 @@ fn _tls_open_record(s: *TlsSession, base: *u8, total: i64) -> i64 {
     }
     let alg: int = _tls_suite_aead(s.suite);
     if alg == 0 { return 0 - 1; }
-    let klen: i64 = _tls_suite_key_len(s.suite);
-    let key: int[] = _tls_buf_to_bytes(s.read_key_addr as *u8, 0, klen);
+    let key: int[] = _tls_buf_to_bytes(s.read_key_addr as *u8, 0, s.read_key_len);
     let iv: int[] = _tls_buf_to_bytes(s.read_iv_addr as *u8, 0, 12);
     let rec: int[] = _tls_buf_to_bytes(base, 0, total);
     let opened: Result<TlsRecordPlaintext, string> = tls13_open_record_aead(alg, key, iv, s.read_seq, rec);
@@ -816,6 +835,8 @@ fn _tls_install_read_key(s: *TlsSession, secret: int[], suite: i64) -> bool {
     if key.length != want { return false; }
     if iv.length != 12 { return false; }
     s.suite = suite;
+    s.write_key_len = key.length;
+    s.read_key_len = key.length;
     if s.read_key_addr != 0 { free(s.read_key_addr as *u8); }
     if s.read_iv_addr != 0 { free(s.read_iv_addr as *u8); }
     let kb: *u8 = _tls_bytes_to_buf(key);
