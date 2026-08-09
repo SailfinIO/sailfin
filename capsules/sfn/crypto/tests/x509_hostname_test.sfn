@@ -6,34 +6,11 @@
 // commonName-is-not-a-hostname-source cut (RFC 6125 §6.4.4).
 import {
     X509Certificate,
-    x509_parse,
+    x509_dns_name_matches,
     x509_hostname_matches,
-    x509_dns_name_matches
+    x509_parse
 } from "../src/x509";
-
-fn hexb(s: string) -> int[] {
-    let mut out: int[] = [];
-    let mut i: int = 0;
-    loop {
-        if i >= s.length { break; }
-        let hi: int = _hexval(s[i]);
-        let lo: int = _hexval(s[i + 1]);
-        out.push(((hi << 4) | lo) & 255);
-        i += 2;
-    }
-    return out;
-}
-
-fn _hexval(c: string) -> int {
-    let code: int = char_code(c) & 255;
-    if code >= 48 && code <= 57 {
-        return code - 48;
-    }  // '0'-'9'
-    if code >= 97 && code <= 102 {
-        return code - 97 + 10;
-    }  // 'a'-'f'
-    return 0;
-}
+import { hexb } from "./support/hex";
 
 // Fixture A: an Ed25519 leaf certificate, CN=Sailfin Test Leaf, SAN
 // example.com / *.example.com / www.example.org. Duplicated from

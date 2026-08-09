@@ -1,0 +1,41 @@
+// capsules/sfn/crypto/tests/support_hex_test.sfn
+//
+// Contract coverage for the shared test helpers in tests/support/hex.sfn.
+// Before SFN-665 the `hexb`/`_hexval`/`eq_bytes` trio was copy-pasted across
+// 22 files in four mutually-incompatible variants (uppercase accepted or not,
+// invalid digits returning 0 or -1, odd-length input truncating or reading
+// past the end). The ed25519 tests still carry their own differently-named
+// decoders and are not covered here (SFN-665 scope).
+// These cases pin the single normalised contract so the next copy cannot
+// silently reintroduce a weaker one.
+import { eq_bytes, hexb } from "./support/hex";
+
+test "support/hex: decodes lowercase hex" {
+    assert eq_bytes(hexb("00ff10"), [0, 255, 16]);
+}
+
+test "support/hex: accepts uppercase and mixed case" {
+    assert eq_bytes(hexb("00FF10"), [0, 255, 16]);
+    assert eq_bytes(hexb("dEaDbEeF"), [222, 173, 190, 239]);
+}
+
+test "support/hex: rejects a non-hex character" {
+    assert eq_bytes(hexb("00zz10"), []);
+    assert eq_bytes(hexb("gg"), []);
+}
+
+test "support/hex: rejects odd-length input" {
+    assert eq_bytes(hexb("abc"), []);
+    assert eq_bytes(hexb("0"), []);
+}
+
+test "support/hex: empty input decodes to empty" {
+    assert eq_bytes(hexb(""), []);
+}
+
+test "support/hex: eq_bytes compares length and contents" {
+    assert eq_bytes([1, 2, 3], [1, 2, 3]);
+    assert ! eq_bytes([1, 2, 3], [1, 2]);
+    assert ! eq_bytes([1, 2, 3], [1, 2, 4]);
+    assert eq_bytes([], []);
+}

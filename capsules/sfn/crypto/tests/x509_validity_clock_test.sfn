@@ -21,26 +21,7 @@ import {
     x509_validity_not_yet_valid,
     x509_validity_unknown
 } from "../src/x509";
-
-fn hexb(s: string) -> int[] {
-    let mut out: int[] = [];
-    let mut i: int = 0;
-    loop {
-        if i >= s.length { break; }
-        let hi: int = _hexval(s[i]);
-        let lo: int = _hexval(s[i + 1]);
-        out.push(((hi << 4) | lo) & 255);
-        i += 2;
-    }
-    return out;
-}
-
-fn _hexval(c: string) -> int {
-    let code: int = char_code(c) & 255;
-    if code >= 48 && code <= 57 { return code - 48; }
-    if code >= 97 && code <= 102 { return code - 97 + 10; }
-    return 0;
-}
+import { hexb } from "./support/hex";
 
 // Ed25519 leaf, CN=Sailfin Test Leaf, UTCTime validity 2026-01-01 -> 2027-01-01.
 // Produced with `openssl req -new -x509 -key <ed25519> -set_serial 0x0102030405060708

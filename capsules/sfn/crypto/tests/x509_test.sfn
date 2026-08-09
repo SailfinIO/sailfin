@@ -27,41 +27,7 @@ import {
     x509_validity_not_yet_valid,
     x509_validity_unknown
 } from "../src/x509";
-
-fn hexb(s: string) -> int[] {
-    let mut out: int[] = [];
-    let mut i: int = 0;
-    loop {
-        if i >= s.length { break; }
-        let hi: int = _hexval(s[i]);
-        let lo: int = _hexval(s[i + 1]);
-        out.push(((hi << 4) | lo) & 255);
-        i += 2;
-    }
-    return out;
-}
-
-fn _hexval(c: string) -> int {
-    let code: int = char_code(c) & 255;
-    if code >= 48 && code <= 57 {
-        return code - 48;
-    }  // '0'-'9'
-    if code >= 97 && code <= 102 {
-        return code - 97 + 10;
-    }  // 'a'-'f'
-    return 0;
-}
-
-fn eq_bytes(a: int[], b: int[]) -> boolean {
-    if a.length != b.length { return false; }
-    let mut i: int = 0;
-    loop {
-        if i >= a.length { break; }
-        if a[i] != b[i] { return false; }
-        i += 1;
-    }
-    return true;
-}
+import { eq_bytes, hexb } from "./support/hex";
 
 fn eq_strings(a: string[], b: string[]) -> boolean {
     if a.length != b.length { return false; }

@@ -7,60 +7,26 @@
 import {
     DerLimits,
     DerTlv,
-    der_default_limits,
-    der_read_tlv,
-    der_expect_tlv,
-    der_check_structure,
-    der_integer_bytes,
-    der_integer_small,
-    der_boolean,
+    der_ascii_text,
     der_bit_string_bytes,
     der_bit_string_unused,
+    der_boolean,
+    der_check_structure,
+    der_days_from_civil,
+    der_default_limits,
+    der_expect_tlv,
+    der_first_child,
+    der_integer_bytes,
+    der_integer_small,
+    der_next_sibling,
     der_octet_string_bytes,
     der_oid_string,
-    der_ascii_text,
-    der_time_millis,
-    der_days_from_civil,
-    der_first_child,
-    der_next_sibling,
+    der_read_tlv,
+    der_tag_integer,
     der_tag_sequence,
-    der_tag_integer
+    der_time_millis
 } from "../src/der";
-
-fn hexb(s: string) -> int[] {
-    let mut out: int[] = [];
-    let mut i: int = 0;
-    loop {
-        if i >= s.length { break; }
-        let hi: int = _hexval(s[i]);
-        let lo: int = _hexval(s[i + 1]);
-        out.push(((hi << 4) | lo) & 255);
-        i += 2;
-    }
-    return out;
-}
-
-fn _hexval(c: string) -> int {
-    let code: int = char_code(c) & 255;
-    if code >= 48 && code <= 57 {
-        return code - 48;
-    }  // '0'-'9'
-    if code >= 97 && code <= 102 {
-        return code - 97 + 10;
-    }  // 'a'-'f'
-    return 0;
-}
-
-fn eq_bytes(a: int[], b: int[]) -> boolean {
-    if a.length != b.length { return false; }
-    let mut i: int = 0;
-    loop {
-        if i >= a.length { break; }
-        if a[i] != b[i] { return false; }
-        i += 1;
-    }
-    return true;
-}
+import { eq_bytes, hexb } from "./support/hex";
 
 // Encode `len` as a minimal DER length octet sequence: short form under 128,
 // otherwise the fewest big-endian long-form bytes.

@@ -76,45 +76,7 @@ import {
     hs_server_state_wait_client_finished,
     hs_server_transcript_hash
 } from "../src/tls13_server_handshake";
-
-// Parse an even-length lowercase hex string into an int[] of bytes.
-fn hexb(s: string) -> int[] {
-    let mut out: int[] = [];
-    let mut i: int = 0;
-    loop {
-        // `i + 1` rather than `i` so an odd-length literal returns what it
-        // parsed instead of indexing past the end and killing the runner —
-        // a mistyped vector should fail an assertion, not crash the suite.
-        if i + 1 >= s.length { break; }
-        let hi: int = _hexval(s[i]);
-        let lo: int = _hexval(s[i + 1]);
-        out.push(((hi << 4) | lo) & 255);
-        i += 2;
-    }
-    return out;
-}
-
-fn _hexval(c: string) -> int {
-    let code: int = char_code(c) & 255;
-    if code >= 48 && code <= 57 {
-        return code - 48;
-    }  // '0'-'9'
-    if code >= 97 && code <= 102 {
-        return code - 97 + 10;
-    }  // 'a'-'f'
-    return 0;
-}
-
-fn eq_bytes(a: int[], b: int[]) -> bool {
-    if a.length != b.length { return false; }
-    let mut i: int = 0;
-    loop {
-        if i >= a.length { break; }
-        if a[i] != b[i] { return false; }
-        i += 1;
-    }
-    return true;
-}
+import { eq_bytes, hexb } from "./support/hex";
 
 // ── RFC 8448 §3 vectors ──────────────────────────────────────────
 // The server's ephemeral X25519 key pair. The public half is what the trace's
