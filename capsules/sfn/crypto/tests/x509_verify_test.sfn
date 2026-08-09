@@ -11,6 +11,10 @@
 // an independent implementation. The generating commands are recorded above
 // the fixture block. There is no network dependency and no ambient clock: a
 // fixed Unix-millisecond snapshot is passed into every call.
+//
+// Exception: `fx_ov_leaf` and `fx_pm_leaf` are synthetic byte-level splices
+// of a real fixture, not independent OpenSSL output — see their own comment
+// blocks for the exact transformation (SFN-823).
 import { X509Certificate, x509_parse } from "../src/x509";
 import {
     X509ChainResult,
@@ -269,6 +273,51 @@ test "x509_verify: an unimplemented signature algorithm rejects the link" {
     let result: X509ChainResult = x509_verify_chain(leaf, intermediates, [cert(fx_us_root())], x509_verify_options(now_ms()));
     assert ! result.ok;
     assert result.code == x509_verify_err_unsupported_algorithm();
+    assert result.error == "x509_verify: unsupported certificate signature algorithm 1.2.840.10045.4.3.4";
+}
+
+test "x509_verify: an unsupported signature algorithm names its OID" {
+    // RSASSA-PSS certificate signatures are outside the chosen cut: the PSS
+    // verifier in rsa.sfn is wired to TLS CertificateVerify by SignatureScheme
+    // codepoint, never to the X.509 OID dispatch. The rejection must say so by
+    // OID rather than collapsing into a bare code (SFN-823).
+    let leaf: X509Certificate = cert(fx_pss_leaf());
+    assert leaf.ok;
+    assert leaf.signature_algorithm == "1.2.840.113549.1.1.10";
+
+    let intermediates: X509Certificate[] = [];
+    let result: X509ChainResult = x509_verify_chain(leaf, intermediates, [cert(fx_pss_root())], x509_verify_options(now_ms()));
+    assert ! result.ok;
+    assert result.code == x509_verify_err_unsupported_algorithm();
+    assert result.error == "x509_verify: unsupported certificate signature algorithm 1.2.840.113549.1.1.10";
+}
+
+test "x509_verify: a signature algorithm the issuer key cannot serve names both OIDs" {
+    // The signature OID is inside the chosen cut, but the issuer holds an
+    // Ed25519 key, so no dispatch arm can pair them. Naming only one side
+    // would leave the reader guessing which half was wrong (SFN-823).
+    let leaf: X509Certificate = cert(fx_pm_leaf());
+    assert leaf.ok;
+    assert leaf.signature_algorithm == "1.2.840.10045.4.3.2";
+
+    let result: X509ChainResult = x509_verify_chain(leaf, [cert(fx_ed_inter())], [cert(fx_ed_root())], x509_verify_options(now_ms()));
+    assert ! result.ok;
+    assert result.code == x509_verify_err_unsupported_algorithm();
+    assert result.error == "x509_verify: signature algorithm 1.2.840.10045.4.3.2 does not pair with issuer key algorithm 1.3.101.112";
+}
+
+test "x509_verify: an oversize signature-algorithm OID is truncated in the diagnostic" {
+    // A hostile 241-character OID must not render unbounded output: the
+    // rejection text is bounded to 64 source characters plus "..." (SFN-823).
+    let leaf: X509Certificate = cert(fx_ov_leaf());
+    assert leaf.ok;
+    assert leaf.signature_algorithm.length == 241;
+
+    let intermediates: X509Certificate[] = [];
+    let result: X509ChainResult = x509_verify_chain(leaf, intermediates, [cert(fx_us_root())], x509_verify_options(now_ms()));
+    assert ! result.ok;
+    assert result.code == x509_verify_err_unsupported_algorithm();
+    assert result.error == "x509_verify: unsupported certificate signature algorithm 2.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1....";
 }
 
 test "x509_verify: a leaf whose extendedKeyUsage excludes serverAuth is rejected" {
@@ -590,6 +639,98 @@ fn fx_us_root() -> string {
 
 fn fx_us_leaf() -> string {
     return "3082023e3082019fa00302010202020182300a06082a8648ce3d0403043021311f301d06035504030c165361696c66696e2054657374205035323120526f6f74301e170d3236303130313030303030305a170d3237303130313030303030305a30163114301206035504030c0b6578616d706c652e636f6d30819b301006072a8648ce3d020106052b810400230381860004010f3b20a46031c536de4f6b25d5a892dd0e1803d93f6a047417e86f452d5dcc8bbd1f26d7034ee6fad7c614a5467653a5698ff82db3a6f0d8105af9c927f0c1fc860190cead8de1496ac3b9140d2a81f33eb519e08fc9e0a39144588c85794b15482c8244932e2706027c3cbcfd3fae52b92c488abbcc0050461d371944e793a581037ca3818e30818b300c0603551d130101ff04023000300e0603551d0f0101ff04040302078030130603551d25040c300a06082b0601050507030130160603551d11040f300d820b6578616d706c652e636f6d301d0603551d0e04160414315d9c3d613f09c819b10527b5b0fc9e16468aa6301f0603551d23041830168014e0c3bff0f517f83e9e95f3c320ab9291e01eabb9300a06082a8648ce3d04030403818c00308188024200985bf380447296ebbb8b6d4fd2fa0d25b09800685b9048535bdfef8c2c230e789be8b58b7720f7370a3125ea7f7ca121da1ee7232f0823f479a3f3497987860118024200fa1631a26e92d5daa55fddc3cddaefb39a5e43bd71c9a764feacb144638551faf5254e4d5da2c069e7f336c21ba10f6c75cb0bf5d5e41b735d5be9c766ff7b0f74";
+}
+
+// ── SFN-823 oversize-OID fixture ──
+//
+// ov_leaf is `fx_us_leaf` (SFN-811's ecdsa-with-SHA512 fixture) with both the
+// tbsCertificate.signature and outer signatureAlgorithm OIDs replaced,
+// byte-for-byte identically, by a crafted-but-DER-valid 121-arc OID
+// (`2.1.1.1...1`, 241 dotted-decimal characters). It exists only to prove
+// `_oid_for_message`'s 64-character bound holds against a hostile OID; only
+// the signature-algorithm identifiers were replaced, not the signature
+// bytes, and those now-stale signature bytes are never verified, because
+// the chosen-cut dispatch falls through to unsupported-algorithm before any
+// signature arithmetic runs (SFN-823).
+//
+// The transformation, reproducible with any DER encoder: in `fx_us_leaf`,
+// replace the content of both OBJECT IDENTIFIER elements holding
+// `2a8648ce3d040304` (ecdsa-with-SHA512, 8 bytes) with the 120-byte string
+// `51` followed by 119 `01` octets — 0x51 encodes arcs 2.1 per X.690 8.19.4
+// and each 0x01 is a single-octet arc 1 — then re-encode every enclosing
+// length prefix. Both OIDs must change identically or `_verify_link` rejects
+// the inner/outer mismatch at x509_verify.sfn before reaching the dispatch.
+// No openssl invocation produces this; it is deliberately not a certificate
+// any issuer would sign.
+fn fx_ov_leaf() -> string {
+    return "3082031e3082020fa00302010202020182307a06785101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101013021311f301d06035504030c165361696c66696e2054657374205035323120526f6f74301e170d3236303130313030303030305a170d3237303130313030303030305a30163114301206035504030c0b6578616d706c652e636f6d30819b301006072a8648ce3d020106052b810400230381860004010f3b20a46031c536de4f6b25d5a892dd0e1803d93f6a047417e86f452d5dcc8bbd1f26d7034ee6fad7c614a5467653a5698ff82db3a6f0d8105af9c927f0c1fc860190cead8de1496ac3b9140d2a81f33eb519e08fc9e0a39144588c85794b15482c8244932e2706027c3cbcfd3fae52b92c488abbcc0050461d371944e793a581037ca3818e30818b300c0603551d130101ff04023000300e0603551d0f0101ff04040302078030130603551d25040c300a06082b0601050507030130160603551d11040f300d820b6578616d706c652e636f6d301d0603551d0e04160414315d9c3d613f09c819b10527b5b0fc9e16468aa6301f0603551d23041830168014e0c3bff0f517f83e9e95f3c320ab9291e01eabb9307a067851010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010103818c00308188024200985bf380447296ebbb8b6d4fd2fa0d25b09800685b9048535bdfef8c2c230e789be8b58b7720f7370a3125ea7f7ca121da1ee7232f0823f479a3f3497987860118024200fa1631a26e92d5daa55fddc3cddaefb39a5e43bd71c9a764feacb144638551faf5254e4d5da2c069e7f336c21ba10f6c75cb0bf5d5e41b735d5be9c766ff7b0f74";
+}
+
+// ── SFN-823 pair-mismatch fixture ──
+//
+// pm_leaf is `fx_ed_leaf` (SFN-340's Ed25519 leaf) with the tbsCertificate
+// and outer AlgorithmIdentifiers replaced, byte-for-byte identically, by
+// ecdsa-with-SHA256 (`2a8648ce3d040302`, 8 bytes) in place of the Ed25519
+// signature OID (`2b6570`, 3 bytes). It exists only to prove `_pair_detail`
+// names both OIDs when a supported signature algorithm cannot be paired
+// with the issuer's key algorithm; the now-stale Ed25519 signature bytes
+// are never verified, because `_verify_link` rejects on the algorithm
+// mismatch before any signature arithmetic runs (SFN-823).
+//
+// The transformation, reproducible with any DER encoder: in `fx_ed_leaf`,
+// replace the content of both OBJECT IDENTIFIER elements holding
+// `2b6570` (Ed25519, 3 bytes) — the tbsCertificate.signature AlgorithmIdentifier
+// and the outer Certificate.signatureAlgorithm AlgorithmIdentifier, but not
+// the subjectPublicKeyInfo's own Ed25519 OID, which is left unchanged — with
+// `2a8648ce3d040302` (ecdsa-with-SHA256, 8 bytes), then re-encode the two
+// enclosing SEQUENCE length prefixes (tbsCertificate and Certificate; each
+// grows by 5 bytes per replacement, and neither crosses the 127-byte
+// length-of-length boundary). Both OIDs must change identically or
+// `_verify_link` rejects the inner/outer mismatch before reaching the
+// dispatch. The chain is verified through `fx_ed_inter`, the immediate
+// issuer whose SPKI is checked by `_verify_link`; both `fx_ed_inter` and
+// `fx_ed_root` are unmodified, so their SPKI stays Ed25519 (`1.3.101.112`)
+// and the pairing failure is the only thing under test. No openssl
+// invocation produces this; it is deliberately not a certificate any issuer
+// would sign.
+fn fx_pm_leaf() -> string {
+    return "3082018a30820137a003020102020113300a06082a8648ce3d040302301d311b301906035504030c125361696c66696e2054657374204564204341301e170d3236303130313030303030305a170d3237303130313030303030305a30163114301206035504030c0b6578616d706c652e636f6d302a300506032b65700321007269d8384a31069150b30ae775d99433464e7956f4554d2bb7a6cf5335c7e6dda3819d30819a300c0603551d130101ff04023000300e0603551d0f0101ff04040302078030130603551d25040c300a06082b0601050507030130250603551d11041e301c820b6578616d706c652e636f6d820d2a2e6578616d706c652e636f6d301d0603551d0e041604147380118f809f57757dd55dbfb87943ec5aead34a301f0603551d23041830168014226768f6483d21e17344cd4338a7bb4b035b000f300a06082a8648ce3d040302034100d34e4d2e2d0cce5a5b164da3842a210917de63cfc7cdf169757537cf0aaec9d3325e504399f9a5c3c2b466265116004abf01d8a46be5eb9088d79f4333de8807";
+}
+
+// ── SFN-823 fixture ──
+//
+// pss_*  RSASSA-PSS certificate signature: a plain rsaEncryption root signs a
+//        leaf whose signature is RSASSA-PSS, so `signature_algorithm` parses
+//        as 1.2.840.113549.1.1.10 while the issuer's SPKI stays plain RSA.
+//        Nothing in the chosen cut dispatches on the PSS OID (rsa.sfn wires
+//        PSS to TLS CertificateVerify by SignatureScheme codepoint, never to
+//        this X.509 dispatch), so the rejection under test names the OID
+//        rather than collapsing into a bare code. Produced with OpenSSL 3.6.3:
+//
+//   openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out pss_root.key
+//   openssl req -x509 -new -key pss_root.key -sha256 -subj "/CN=Sailfin Test Pss Root" \
+//     -not_before 20260101000000Z -not_after 20360101000000Z \
+//     -extensions v3_ca -config <extfile with basicConstraints=critical,CA:TRUE;
+//       keyUsage=critical,keyCertSign,cRLSign; subjectKeyIdentifier=hash> \
+//     -out pss_root.pem
+//   openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out pss_leaf.key
+//   openssl req -new -key pss_leaf.key -subj "/CN=example.com" -out pss_leaf.csr
+//   openssl x509 -req -in pss_leaf.csr -CA pss_root.pem -CAkey pss_root.key -CAcreateserial \
+//     -sigopt rsa_padding_mode:pss -sigopt rsa_pss_saltlen:digest -sha256 \
+//     -not_before 20260101000000Z -not_after 20270101000000Z \
+//     -extfile <basicConstraints=critical,CA:FALSE; keyUsage=critical,digitalSignature;
+//       extendedKeyUsage=serverAuth; subjectAltName=DNS:example.com,DNS:*.example.com;
+//       subjectKeyIdentifier=hash; authorityKeyIdentifier=keyid> \
+//     -out pss_leaf.pem
+//
+// `openssl verify -CAfile pss_root.pem pss_leaf.pem` accepts the pair, so the
+// rejection under test is ours and not a malformed certificate.
+fn fx_pss_root() -> string {
+    return "30820310308201f8a003020102021422a6df1f6676425705d51b35f7f512448c079836300d06092a864886f70d01010b05003020311e301c06035504030c155361696c66696e20546573742050737320526f6f74301e170d3236303130313030303030305a170d3336303130313030303030305a3020311e301c06035504030c155361696c66696e20546573742050737320526f6f7430820122300d06092a864886f70d01010105000382010f003082010a0282010100bf2b8f243a795be1fd803d811c93080f3c76607b4b1b5f6757e9c9d34e93f224995c68c09b97d62a5db77d54f4684d8a257c7d16e4753934fbc3318a6a780229e563ed9ee6bf72ed8ce7bd596df6bbc4120cf0c2fac18be372ed6ff17c0b0f48231afa308bd6ec5a7ae3ef2292a6e2faa8799ed324475e5202dda70850324ce9a8e302c5ef1841298a712927b8b0820b04900f353c2b947287b9b47ca1cef19224244cae2bae37b4f177e18a677d9e602e3acf06efc563fe21b3a0de7596c9efc021075cef2c70668e0af7011b0e6bd07c7a0d06810f66b78daf2253858a358ac123dcf17bfdbd15055f9346be1f2d201220cbb9a0f4f4048bc7fbd1c6c7c5030203010001a3423040300f0603551d130101ff040530030101ff300e0603551d0f0101ff040403020106301d0603551d0e0416041413063a75fba60b624a3b85320561a666a64f1a07300d06092a864886f70d01010b05000382010100870ac035154334ab8fd51c460c1c33c8e33d7a8be83736e8bf27faf76a935ba5491675fdabda30d9935521c5248e3228d4e9a7f119a07c802358d91e8100caca075e7c27a8274998d0e3e2d520491e5222c19b6625d44dd9bbb8b3b63da3bec63f33fa61de159361fd528d39f9b58d18f66f13ec2465d42e033b58424d6368f8ac16118ff90d3201a02c8c05e94c9e623e5e48f2668b1ba4a2b87c9a51e733f8b3a8f59780bef124c806874e287664e87d54b73b048fbae500ac4c866dc3b8455b5870304392e37a120ab1af15509af3c04ff67bcc8988bcbd0f19b8d62d7a22124ae7e708d37269482248dc8cb37c886064eae964873ba4e47e40758f9240d7";
+}
+
+fn fx_pss_leaf() -> string {
+    return "308203ca3082027ea0030201020214057336b4a93387019d8ef2536bc2c6cddb17fbf2304106092a864886f70d01010a3034a00f300d06096086480165030402010500a11c301a06092a864886f70d010108300d06096086480165030402010500a2030201203020311e301c06035504030c155361696c66696e20546573742050737320526f6f74301e170d3236303130313030303030305a170d3237303130313030303030305a30163114301206035504030c0b6578616d706c652e636f6d30820122300d06092a864886f70d01010105000382010f003082010a0282010100db86977d2008f48685754cd0add379270f86b227e52657aab062aeec8f90986c4455cc01811ae8594c167560da72858ad1a2ee754222f7d0cc50187210b42a8de893fc647275366652cd96348a65c70b286996560671e2dec7558330989d47dff289c54e93424da842ba8308870d583fa70f0d114947e12e351a16e3bdf39b8516b89509b747b30c64e49ad7b292f6bf4fd510d805c49cfcbeca8c9617d76c9c69c4d304254b6d4f0a7f6ef8c6027f583556fa9ce0f378be6dcc8d6a5ad0489281b9bdd16d5a6c78da00f47e10635d4426a4d9c5dbe03e5d5929919275067e922a46b2894a44ebc865f7f7f1f474c826d4b7db8e5f40c10f6265932480b1d80b0203010001a3819d30819a300c0603551d130101ff04023000300e0603551d0f0101ff04040302078030130603551d25040c300a06082b0601050507030130250603551d11041e301c820b6578616d706c652e636f6d820d2a2e6578616d706c652e636f6d301d0603551d0e041604146aed482d5e1fc559fdc61a5d5e5e175575b189ca301f0603551d2304183016801413063a75fba60b624a3b85320561a666a64f1a07304106092a864886f70d01010a3034a00f300d06096086480165030402010500a11c301a06092a864886f70d010108300d06096086480165030402010500a20302012003820101008064023ec84bca987f64954644d453ff16d71832670b4d59bd85d4a6405385a1aecbc5cdb701f633c53d437f29347ffca8cec96f6b2e5d70050b91ed9c3f50641f21f927a8ee678a0dfca6562ff7d29fc26d0b69e5b0119ef7ecb8ee3eb1396b3456746816ad8b7a88da48665203e71738773560bb1e95ff6f400fd34d211d5e18b3782e4e959f3e6aafbcc18747438631a21d112c25d767d68408b8c74a274d5bac26d227124639ff9efcbc12a03af86e7b91d9f2bfc595dd5bb4d965bbdfc6ca73e5b2326f593b28f200d7012195dd4486f876949209722efaf73fa95e46d563bb41954eae257d6f791d4ea2c1a8681ced4d3e6fdd2741df335c1b39a3a787";
 }
 
 // ex_*  The live example.com chain, captured once with

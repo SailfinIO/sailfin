@@ -179,6 +179,54 @@ fn _chain_err(code: string, message: string) -> X509ChainResult {
     };
 }
 
+// Maximum characters of a certificate-supplied OID rendered into a
+// diagnostic. `der_oid_string` (der.sfn:399) builds the dotted form only from
+// decoded integers joined by ".", so it can never carry raw certificate bytes
+// — but its length is bounded only by the certificate size, so a crafted run
+// of single-byte arcs would otherwise render megabytes into an error string.
+// 64 characters holds every registered signature-algorithm OID with room over.
+fn _x509_verify_max_oid_text() -> int { return 64; }
+
+fn _is_oid_char(c: string) -> boolean {
+    if c == "." { return true; }
+    return c == "0" || c == "1" || c == "2" || c == "3" || c == "4" || c == "5"
+        || c == "6"
+        || c == "7"
+        || c == "8"
+        || c == "9";
+}
+
+// Render an untrusted OID for a diagnostic. The parser already guarantees
+// dotted decimal, so re-checking the character set is defence in depth: it
+// keeps a future parser change from turning this into a byte-echo path.
+// Bounded and total — never returns certificate-controlled length or bytes.
+fn _oid_for_message(oid: string) -> string {
+    if oid.length == 0 { return "(absent)"; }
+    let mut limit: int = oid.length;
+    let mut truncated: boolean = false;
+    if limit > _x509_verify_max_oid_text() {
+        limit = _x509_verify_max_oid_text();
+        truncated = true;
+    }
+    let mut i: int = 0;
+    loop {
+        if i >= limit { break; }
+        if !_is_oid_char(char_at(oid, i)) { return "(malformed)"; }
+        i += 1;
+    }
+    if truncated { return substring(oid, 0, limit) + "..."; }
+    return oid;
+}
+
+// Four dispatch arms accept a signature OID but cannot pair it with the
+// issuer's key algorithm. Both OIDs belong in the text: either one alone
+// leaves the reader guessing which side of the pair was the problem.
+fn _pair_detail(algorithm: string, issuer_spki_algorithm: string) -> string {
+    return "x509_verify: signature algorithm " + _oid_for_message(algorithm)
+        + " does not pair with issuer key algorithm "
+        + _oid_for_message(issuer_spki_algorithm);
+}
+
 fn _bytes_to_hex(bytes: int[]) -> string {
     let mut out: string = "";
     let mut i: int = 0;
@@ -319,61 +367,81 @@ fn x509_rsa_public_key_from_spki(spki_key: int[]) -> RsaPublicKey {
     };
 }
 
-// Verify `subject`'s signature under `issuer`'s public key. Returns "" when
-// the signature is good, otherwise the rejection code. The signed input is
-// always the subject's tbsCertificate TLV verbatim (RFC 5280 4.1.1.3).
-fn _verify_link(issuer: X509Certificate, subject: X509Certificate) -> string {
+// A link rejection plus, when the reason is algorithm-specific, the text that
+// names the algorithm. `detail` is "" whenever the generic chain message is
+// already the whole story.
+struct _LinkVerdict {
+    code: string;  // "" when the signature is good
+    detail: string;
+}
+
+fn _link_ok() -> _LinkVerdict {
+    return _LinkVerdict { code: "", detail: "" };
+}
+
+fn _link_err(code: string, detail: string) -> _LinkVerdict {
+    return _LinkVerdict { code: code, detail: detail };
+}
+
+// Verify `subject`'s signature under `issuer`'s public key. Returns a
+// `_LinkVerdict` whose `code` is "" when the signature is good, otherwise the
+// rejection code (and, for an algorithm-specific rejection, the OID detail).
+// The signed input is always the subject's tbsCertificate TLV verbatim (RFC
+// 5280 4.1.1.3).
+fn _verify_link(issuer: X509Certificate, subject: X509Certificate) -> _LinkVerdict {
     // RFC 5280 4.1.1.2: the outer signatureAlgorithm MUST equal the inner
     // tbsCertificate.signature. A mismatch is a signature-substitution
     // attempt, not a parse quirk.
     if subject.signature_algorithm != subject.signature_algorithm_outer {
-        return x509_verify_err_algorithm_mismatch();
+        return _link_err(x509_verify_err_algorithm_mismatch(), "");
     }
     if subject.tbs_der.length == 0 || subject.signature_value.length == 0 {
-        return x509_verify_err_bad_signature();
+        return _link_err(x509_verify_err_bad_signature(), "");
     }
 
     let algorithm: string = subject.signature_algorithm;
 
     if algorithm == x509_oid_ed25519() {
         if issuer.spki_algorithm != x509_oid_ed25519() {
-            return x509_verify_err_unsupported_algorithm();
+            return _link_err(x509_verify_err_unsupported_algorithm(), _pair_detail(algorithm, issuer.spki_algorithm));
         }
         if issuer.spki_key.length != 32 {
-            return x509_verify_err_bad_signature();
+            return _link_err(x509_verify_err_bad_signature(), "");
         }
         if subject.signature_value.length != 64 {
-            return x509_verify_err_bad_signature();
+            return _link_err(x509_verify_err_bad_signature(), "");
         }
         let ed_ok: boolean = ed25519_verify(_bytes_to_hex(issuer.spki_key), subject.tbs_der, _bytes_to_hex(subject.signature_value));
-        if ed_ok { return ""; }
-        return x509_verify_err_bad_signature();
+        if ed_ok { return _link_ok(); }
+        return _link_err(x509_verify_err_bad_signature(), "");
     }
 
     if algorithm == x509_oid_ecdsa_p256_sha256() {
         if issuer.spki_algorithm != x509_verify_oid_ec_public_key() {
-            return x509_verify_err_unsupported_algorithm();
+            return _link_err(x509_verify_err_unsupported_algorithm(), _pair_detail(algorithm, issuer.spki_algorithm));
         }
         let ec_ok: boolean = ecdsa_p256_verify_sha256(issuer.spki_key, subject.tbs_der, subject.signature_value);
-        if ec_ok { return ""; }
-        return x509_verify_err_bad_signature();
+        if ec_ok { return _link_ok(); }
+        return _link_err(x509_verify_err_bad_signature(), "");
     }
 
     if algorithm == x509_verify_oid_ecdsa_p384_sha384() {
         if issuer.spki_algorithm != x509_verify_oid_ec_public_key() {
-            return x509_verify_err_unsupported_algorithm();
+            return _link_err(x509_verify_err_unsupported_algorithm(), _pair_detail(algorithm, issuer.spki_algorithm));
         }
         let ec384_ok: boolean = ecdsa_p384_verify_sha384(issuer.spki_key, subject.tbs_der, subject.signature_value);
-        if ec384_ok { return ""; }
-        return x509_verify_err_bad_signature();
+        if ec384_ok { return _link_ok(); }
+        return _link_err(x509_verify_err_bad_signature(), "");
     }
 
     if algorithm == x509_verify_oid_sha256_rsa() || algorithm == x509_verify_oid_sha384_rsa() {
         if issuer.spki_algorithm != x509_oid_rsa_encryption() {
-            return x509_verify_err_unsupported_algorithm();
+            return _link_err(x509_verify_err_unsupported_algorithm(), _pair_detail(algorithm, issuer.spki_algorithm));
         }
         let key: RsaPublicKey = x509_rsa_public_key_from_spki(issuer.spki_key);
-        if !key.ok { return x509_verify_err_bad_signature(); }
+        if !key.ok {
+            return _link_err(x509_verify_err_bad_signature(), "");
+        }
 
         let mut rsa_ok: boolean = false;
         if algorithm == x509_verify_oid_sha256_rsa() {
@@ -381,15 +449,17 @@ fn _verify_link(issuer: X509Certificate, subject: X509Certificate) -> string {
         } else {
             rsa_ok = rsa_pkcs1_v1_5_verify_sha384(key.modulus, key.exponent, subject.tbs_der, subject.signature_value);
         }
-        if rsa_ok { return ""; }
-        return x509_verify_err_bad_signature();
+        if rsa_ok { return _link_ok(); }
+        return _link_err(x509_verify_err_bad_signature(), "");
     }
 
     // Everything else — RSASSA-PSS certificate signatures, ecdsa-with-SHA512
-    // and the P-521 curve it accompanies, sha1WithRSA, DSA — rejects the link.
-    // Skipping an unverifiable link is how a chain verifier silently becomes
-    // decorative.
-    return x509_verify_err_unsupported_algorithm();
+    // and the P-521 curve it accompanies, sha1WithRSA, DSA — rejects the link,
+    // naming the OID so the rejection is distinguishable from every other
+    // unsupported-algorithm case (SFN-823). Skipping an unverifiable link is
+    // how a chain verifier silently becomes decorative.
+    return _link_err(x509_verify_err_unsupported_algorithm(), "x509_verify: unsupported certificate signature algorithm "
+        + _oid_for_message(algorithm));
 }
 
 // "" when the certificate is inside its validity window at `now_ms`.
@@ -492,6 +562,7 @@ fn _has_server_auth_eku(cert: X509Certificate) -> boolean {
 struct _IssuerSearch {
     index: int;  // -1 when no candidate was accepted
     reason: string;  // "" when no candidate even matched by name
+    detail: string;  // "" unless `reason` carries algorithm-specific context
 }
 
 // Find a certificate in `candidates` that may issue `subject`, skipping any
@@ -502,6 +573,7 @@ struct _IssuerSearch {
 // what makes this greedy walk safe without backtracking.
 fn _find_issuer(candidates: X509Certificate[], used: boolean[], subject: X509Certificate, below: int, now_ms: int) -> _IssuerSearch {
     let mut reason: string = "";
+    let mut detail: string = "";
     let mut i: int = 0;
     loop {
         if i >= candidates.length { break; }
@@ -517,31 +589,43 @@ fn _find_issuer(candidates: X509Certificate[], used: boolean[], subject: X509Cer
 
         let critical: string = _critical_extensions_code(candidate);
         if critical != "" {
-            if reason == "" { reason = critical; }
+            if reason == "" {
+                reason = critical;
+                detail = "";
+            }
             i += 1;
             continue;
         }
         let ca: string = _ca_code(candidate, below);
         if ca != "" {
-            if reason == "" { reason = ca; }
+            if reason == "" {
+                reason = ca;
+                detail = "";
+            }
             i += 1;
             continue;
         }
         let window: string = _window_code(candidate, now_ms);
         if window != "" {
-            if reason == "" { reason = window; }
+            if reason == "" {
+                reason = window;
+                detail = "";
+            }
             i += 1;
             continue;
         }
-        let link: string = _verify_link(candidate, subject);
-        if link != "" {
-            if reason == "" { reason = link; }
+        let link: _LinkVerdict = _verify_link(candidate, subject);
+        if link.code != "" {
+            if reason == "" {
+                reason = link.code;
+                detail = link.detail;
+            }
             i += 1;
             continue;
         }
-        return _IssuerSearch { index: i, reason: "" };
+        return _IssuerSearch { index: i, reason: "", detail: "" };
     }
-    return _IssuerSearch { index: -1, reason: reason };
+    return _IssuerSearch { index: -1, reason: reason, detail: detail };
 }
 
 // Decide whether `leaf` chains to one of `anchors`, optionally through
@@ -622,9 +706,16 @@ fn x509_verify_chain(leaf: X509Certificate, intermediates: X509Certificate[], an
             // specific reason either search produced; a bare name miss in both
             // means the chain simply does not reach the trust store.
             let mut reason: string = anchor_hit.reason;
-            if reason == "" { reason = inter_hit.reason; }
+            let mut reason_detail: string = anchor_hit.detail;
+            if reason == "" {
+                reason = inter_hit.reason;
+                reason_detail = inter_hit.detail;
+            }
             if reason == "" {
                 return _chain_err(x509_verify_err_no_anchor(), "x509_verify: no path from the leaf to a trust anchor");
+            }
+            if reason_detail != "" {
+                return _chain_err(reason, reason_detail);
             }
             return _chain_err(reason, "x509_verify: certification path rejected");
         }
