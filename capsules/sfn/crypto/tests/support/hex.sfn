@@ -8,17 +8,21 @@
 //
 // This file does not end in `_test.sfn`, so the runner's target collector
 // (`_looks_like_test_file_cmd`, compiler/src/cli/commands/test/discovery.sfn)
-// skips it — it enters a build only when a test imports it. The pattern
-// follows `compiler/tests/e2e/fixtures/`; see
-// docs/conventions/unit-test-import-envelope.md (SFN-665).
+// skips it — it enters a build only when a test imports it. The convention is
+// docs/conventions/test-support-modules.md; keep this module's own imports
+// light, per docs/conventions/unit-test-import-envelope.md (SFN-665).
 // Map one hex digit to its 0-15 value, or -1 if the character is not hex.
 //
 // Contract:
 //   - accepts '0'-'9', 'a'-'f' and 'A'-'F'
 //   - returns -1 for every other character, never 0 — a silent 0 decodes
 //     garbage as a valid byte instead of signalling the typo.
+//
+// `char_code` is used unmasked on purpose: truncating it to a byte would fold
+// a future multi-byte codepoint onto an ASCII one (U+0430 -> 48 -> '0') and
+// hand back the 0 this contract promises never to return.
 fn _hexval(c: string) -> int {
-    let code: int = char_code(c) & 255;
+    let code: int = char_code(c);
     if code >= 48 && code <= 57 {
         return code - 48;
     }  // '0'-'9'

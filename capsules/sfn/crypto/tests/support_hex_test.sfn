@@ -1,12 +1,14 @@
 // capsules/sfn/crypto/tests/support_hex_test.sfn
 //
 // Contract coverage for the shared test helpers in tests/support/hex.sfn.
-// Before SFN-665 these helpers were copy-pasted across 22 files in four
-// mutually-incompatible variants (uppercase accepted or not, invalid digits
-// returning 0 or -1, odd-length input truncating or reading past the end).
+// Before SFN-665 the `hexb`/`_hexval`/`eq_bytes` trio was copy-pasted across
+// 22 files in four mutually-incompatible variants (uppercase accepted or not,
+// invalid digits returning 0 or -1, odd-length input truncating or reading
+// past the end). The ed25519 tests still carry their own differently-named
+// decoders and are not covered here (SFN-665 scope).
 // These cases pin the single normalised contract so the next copy cannot
 // silently reintroduce a weaker one.
-import { hexb, eq_bytes } from "./support/hex";
+import { eq_bytes, hexb } from "./support/hex";
 
 test "support/hex: decodes lowercase hex" {
     assert eq_bytes(hexb("00ff10"), [0, 255, 16]);
