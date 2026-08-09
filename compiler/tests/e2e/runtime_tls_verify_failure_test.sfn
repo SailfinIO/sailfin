@@ -32,7 +32,7 @@
 // Matchers note (#842): `sfn/test`'s `expect_*` matchers are `![pure]` and
 // cannot be called from an `![io]` test; assert on captured state with
 // direct comparisons instead.
-import { find } from "sfn/strings";
+import { contains, find } from "sfn/strings";
 
 // ── file-local raw loopback readiness probe ──────────────────────
 // Prefixed `_tvf_` so these never collide with the external-linkage
@@ -281,6 +281,39 @@ fn _client_downloads_retry(client_bin: string, run_env: string[], out_path: stri
     return false;
 }
 
+// ── SFN-816: the failure must NAME itself, not just fail ─────────
+//
+// The tests above prove the client *rejects* an unverifiable peer. They
+// cannot tell WHY it rejected, because until SFN-816 every cause — refused
+// connect, fatal alert, empty trust store, hostname mismatch — reached the
+// caller as the same absent file. That indistinguishability is what let
+// SFN-807 sit undetected for a full release cycle behind a test that was
+// already asserting the right thing.
+//
+// So these assert on the reason, via the `SAILFIN_TRACE_TLS=1` stderr
+// trace. The trace is the observable channel rather than
+// `tls_last_error()` because `runtime/sfn/platform/tls.sfn` is not
+// importable from user program source — the runtime is linked in, not
+// exposed as a module (the pre-existing `tls_client_ctx` export fails to
+// lower from user code identically, so this is not an SFN-816 limitation).
+// `run_env` plus the trace switch.
+fn _traced(run_env: string[]) -> string[] {
+    let mut e = run_env;
+    e.push("SAILFIN_TRACE_TLS=1");
+    return e;
+}
+
+// Run the client and return its captured stderr. Deliberately does not
+// assert on the exit code or the body: the subject here is the diagnostic,
+// and a caller that conflated "failed" with "failed for this reason" is the
+// bug being fixed.
+fn _client_stderr(client_bin: string, run_env: string[], out_path: string) -> string ![io] {
+    let _rm = process.run(["rm", "-f", out_path]);
+    let _exit = process.run_capture([client_bin], run_env);
+    let _co = process.capture_take_stdout();
+    return process.capture_take_stderr();
+}
+
 fn _skip_ready() -> boolean ![io] {
     if !_has_cmd("openssl") {
         print.info("[tls-verify] SKIP: openssl CLI not available");
@@ -366,6 +399,95 @@ test "runtime tls: a hostname/SAN mismatch is rejected (RFC-6125 enforced)" ![io
     // check, not to broken trust plumbing.
     let ok = _client_downloads(client_bin, _trusted_env(dir + "/cert.pem"), out_path);
     assert ok == false;
+
+    let _rmd = process.run(["rm", "-rf", dir]);
+}
+
+test "runtime tls: an untrusted peer reports cert-verify, not silence" ![io] {
+    if !_skip_ready() {
+        assert true;
+        return;
+    }
+    let tcmd = _timeout_cmd();
+    let port: i64 = 18798;
+    let port_str = "18798";
+
+    let dir = _scratch_root() + "/sfn-tls-reason-certverify";
+    fs.createDirectory(dir, true);
+    assert _gen_cert(dir, "localhost");
+
+    let out_path = dir + "/body.out";
+    let main_path = _write_client(dir, port_str, out_path);
+    let client_bin = _build_bin(main_path, dir + "/client-bin");
+    assert client_bin.length > 0;
+
+    let _handle = _spawn_server(dir, port_str, tcmd);
+    assert _await_listening(port);
+
+    let err = _client_stderr(client_bin, _traced(_untrusted_env()), out_path);
+
+    // The reason, and the verdict code that names which check failed. Both
+    // were in scope at `tls.sfn`'s verify seam and both were discarded.
+    assert contains(err, "[tls] ");
+    assert contains(err, "cert-verify");
+    assert contains(err, "no-anchor");
+
+    // Not "at depth 0": `_chain_err` hardcodes `depth: 0` on every failure,
+    // so reporting it would be a false specific claim. Pinned so a future
+    // change cannot reintroduce it (SFN-816).
+    assert ! contains(err, "at depth");
+
+    // The trace must stay off by default — it goes to stderr on a security
+    // path and discloses the CA-bundle path, so a default-on trace would be
+    // an unasked-for disclosure.
+    let quiet = _client_stderr(client_bin, _untrusted_env(), out_path);
+    assert ! contains(quiet, "[tls] ");
+
+    let _rmd = process.run(["rm", "-rf", dir]);
+}
+
+test "runtime tls: an unreadable trust store reports trust-store, not cert-verify" ![io] {
+    if !_skip_ready() {
+        assert true;
+        return;
+    }
+    let tcmd = _timeout_cmd();
+    let port: i64 = 18799;
+    let port_str = "18799";
+
+    let dir = _scratch_root() + "/sfn-tls-reason-truststore";
+    fs.createDirectory(dir, true);
+    assert _gen_cert(dir, "localhost");
+
+    let out_path = dir + "/body.out";
+    let main_path = _write_client(dir, port_str, out_path);
+    let client_bin = _build_bin(main_path, dir + "/client-bin");
+    assert client_bin.length > 0;
+
+    let _handle = _spawn_server(dir, port_str, tcmd);
+    assert _await_listening(port);
+
+    // CAFILE points at a path that cannot resolve. `trust_store_load`
+    // fails, so `_tls_anchors` records `trust_store`; `x509_verify_chain`
+    // then reports `no-anchor` for the empty anchor set.
+    //
+    // This is the SFN-807 shape, and it is the regression guard for the
+    // defect this change's own review caught: the verify seam used to
+    // OVERWRITE the trust-store reason with `cert-verify`, erasing the
+    // distinction and reporting a trust-store outage as a bad certificate.
+    // The primary reason must be `trust-store`, with the inherited verdict
+    // demoted to `(also)`.
+    let err = _client_stderr(client_bin, _traced(_trusted_env(dir
+        + "/does-not-exist.pem")), out_path);
+
+    assert contains(err, "trust-store");
+    assert contains(err, "(also) cert-verify");
+
+    // The ordering is the assertion: `trust-store` must appear before the
+    // demoted verdict. A plain `_tls_fail` at the verify seam would emit
+    // `cert-verify` un-demoted, which the `(also)` check above already
+    // catches, but pinning the order documents which reason is primary.
+    assert find(err, "trust-store", 0) < find(err, "(also) cert-verify", 0);
 
     let _rmd = process.run(["rm", "-rf", dir]);
 }
