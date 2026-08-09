@@ -1,7 +1,7 @@
 // compiler/src/llvm/expression_lowering/native/core_parsing.sfn
-//
 // Parsing helpers for expression lowering extracted from core.sfn.
-import { char_at, substring } from "../../../string_utils";
+import { char_at_index as char_at, substring } from "sfn/strings";
+
 import { array_struct_type_for_element } from "../../type_mapping";
 import { map_type_annotation } from "../../type_mapping";
 import {

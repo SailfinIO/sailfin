@@ -18,6 +18,7 @@ import { emit_drops_for_scope_chain } from "../../lowering/instructions_helpers"
 import { test_runner_trace, trace_log, trace_lowering } from "../../lowering_debug_state";
 // Import string constant management
 import { empty_string_constant_set } from "../../strings";
+import { sanitize_symbol } from "../../symbols";
 // Import types from modular structure
 import {
     ExpressionStatementResult,
@@ -38,7 +39,6 @@ import {
     append_parameter_binding,
     lowering_error_diag,
     number_to_string,
-    sanitize_symbol,
     starts_with,
     string_array_contains,
     trim_text

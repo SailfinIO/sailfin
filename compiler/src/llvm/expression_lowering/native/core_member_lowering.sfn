@@ -1,7 +1,7 @@
-// compiler/src/llvm/expression_lowering/native/core_member_lowering.sfn
-//
+// LLVM member-access lowering.
+import { substring } from "sfn/strings";
+
 import { NativeFunction } from "../../../native_ir";
-import { index_of, substring } from "../../../string_utils";
 import { find_local_binding, find_parameter_binding } from "../../expressions_bindings";
 import { default_return_literal, format_temp_name } from "../../expressions_helpers";
 import { trace_log } from "../../lowering_debug_state";
@@ -10,6 +10,7 @@ import {
     empty_string_constant_set,
     find_string_constant_by_name
 } from "../../strings";
+import { sanitize_symbol } from "../../symbols";
 import {
     find_enum_info_by_llvm_type,
     find_interface_info_by_name,
@@ -49,7 +50,6 @@ import {
 } from "../../utils";
 import { lower_expression } from "./core";
 import { lower_inline_gep_field_access } from "./core_member_helpers";
-import { sanitize_symbol } from "./core_text";
 import {
     RuntimeCallOverrides,
     emit_runtime_call,
