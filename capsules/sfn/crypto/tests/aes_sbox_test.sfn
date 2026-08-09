@@ -1,0 +1,36 @@
+import { bs_slice, bs_unslice, sbox_bytes } from "../src/aes_sbox";
+import { eq_bytes, hexb } from "./support/hex";
+
+test "aes_sbox: bitslice round-trips 32 bytes" {
+    let input: int[] = hexb("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f");
+    let w: int[] = bs_slice(input, 0, 32);
+    let mut out: int[] = [];
+    bs_unslice(w, out, 32);
+    assert eq_bytes(out, input);
+}
+
+test "aes_sbox: FIPS-197 S-box rows 0 and 1" {
+    let input: int[] = hexb("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f");
+    let got: int[] = sbox_bytes(input);
+    assert eq_bytes(got, hexb("637c777bf26b6fc53001672bfed7ab76ca82c97dfa5947f0add4a2af9ca472c0"));
+}
+
+test "aes_sbox: FIPS-197 section 5.1.1 worked example sbox(0x53) = 0xed" {
+    let got: int[] = sbox_bytes(hexb("53"));
+    assert eq_bytes(got, hexb("ed"));
+}
+
+test "aes_sbox: sbox(0x00) = 0x63 with no special case for the zero inverse" {
+    let got: int[] = sbox_bytes(hexb("00"));
+    assert eq_bytes(got, hexb("63"));
+}
+
+test "aes_sbox: sbox(0xff) = 0x16" {
+    let got: int[] = sbox_bytes(hexb("ff"));
+    assert eq_bytes(got, hexb("16"));
+}
+
+test "aes_sbox: rejects more than 32 bytes" {
+    let input: int[] = hexb("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20");
+    assert sbox_bytes(input).length == 0;
+}

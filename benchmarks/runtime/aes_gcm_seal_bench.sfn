@@ -1,0 +1,41 @@
+// benchmarks/runtime/aes_gcm_seal_bench.sfn
+//
+// Runtime-execution benchmark: AES-128-GCM seal throughput.
+//
+// This exists to satisfy the SFN-339 design gate's acceptance requirement that
+// the bitsliced AES land with a *measured* throughput figure rather than the
+// note's estimate (docs/proposals/design-notes/sfn-339-aes-gcm-strategy.md
+// section 3). The bar it is measured against is the ~20 MB/s at -O2 in
+// docs/proposals/design-notes/sfn-341-native-tls-runtime-swap.md section 3.3.
+//
+// One unit of work is one `aes_gcm_seal` over PAYLOAD bytes. PAYLOAD is 1000
+// so the harness's reported `ops_per_ms` reads directly as MB/s: seals/ms x
+// 1000 bytes/seal = 1000 x bytes/ms = x MB/s.
+//
+// The key and nonce are hoisted out of the body — a caller sealing many
+// records reuses them — but the key schedule is not, because `aes_gcm_seal`
+// expands the key per call. That makes this a lower bound on the streaming
+// figure rather than an optimistic one.
+import { benchmark_fixed, keep } from "sfn/bench";
+import { aes_gcm_seal } from "sfn/crypto";
+
+fn payload(n: int) -> int[] {
+    let mut buf: int[] = [];
+    let mut i: int = 0;
+    while i < n {
+        buf.push(i & 255);
+        i += 1;
+    }
+    return buf;
+}
+
+fn main() ![io, clock] {
+    let seals = 5000;
+    let key: int[] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,];
+    let nonce: int[] = [16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27,];
+    let aad: int[] = [1, 2, 3, 4, 5,];
+    let plaintext: int[] = payload(1000);
+    let _ = benchmark_fixed("aes_gcm_seal", seals, fn () -> int {
+        return keep(aes_gcm_seal(key, nonce, aad, plaintext).length);
+    });
+}

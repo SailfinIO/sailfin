@@ -1,0 +1,166 @@
+// ghash.sfn
+//
+// GHASH, the GCM authenticator (SP 800-38D section 6.4), over GF(2^128) with
+// the reduction polynomial x^128 + x^7 + x^2 + x + 1. Per the SFN-339 design
+// gate (docs/proposals/design-notes/sfn-339-aes-gcm-strategy.md section 4).
+//
+// There is no window table here. The standard 4-bit and 8-bit GHASH tables are
+// indexed by values derived from the subkey H, and recovering H yields tag
+// forgery — a worse outcome than the cipher-side leak a T-table would risk.
+// Multiplication instead uses masked-integer carryless multiplication on
+// 32-bit operands (clmul32 below), whose worst-case intermediate is 2^62.19,
+// 0.813 bits under the i64 ceiling. That bound is exact and independent of
+// message length, and clmul32's worst case is regression-covered by a KAT.
+//
+// Bit convention. SP 800-38D numbers a block's bits left to right, so the
+// coefficient of x^i is bit 7 - (i mod 8) of byte i / 8 — the most significant
+// bit of byte 0 is x^0. This module converts a block into four 32-bit words
+// with bit j of word k holding x^(32k + j), which makes multiplication an
+// ordinary carryless polynomial product. The conversion is a per-byte bit
+// reversal, done branch-free because H is secret.
+// Reverse the bits of a byte, branch-free and table-free.
+fn _rev8(b: int) -> int {
+    let mut x: int = b & 255;
+    x = ((x & 85) << 1) | ((x >> 1) & 85);
+    x = ((x & 51) << 2) | ((x >> 2) & 51);
+    x = ((x & 15) << 4) | ((x >> 4) & 15);
+    return x & 255;
+}
+
+// Carryless 32x32 -> 63-bit multiply by masked integer multiplication. Each
+// operand is split into the four classes of bit positions mod 4; a product of
+// two classes can carry at most 8 colliding pairs into any output position, so
+// the carry occupies 4 bits and contaminates only positions the output mask
+// discards. Carries therefore never reach a position of the same residue
+// class, which is what makes the result exact.
+//
+// 32 bits is the widest correct operand size: at 64 bits a class holds 16 set
+// bits, a count of 16 sets a fifth bit that lands in the same residue class,
+// and it survives the mask. The result has degree at most 62, so bit 63 is
+// provably zero and the residue-3 output mask can drop it — which it must,
+// since 0x8888888888888888 exceeds i64.
+//
+// The design note calls this _clmul32; it is exported unprefixed so its
+// worst-case bound can be asserted directly from a test.
+fn clmul32(x: int, y: int) -> int {
+    let x0: int = x & 286331153;
+    let x1: int = x & 572662306;
+    let x2: int = x & 1145324612;
+    let x3: int = x & 2290649224;
+    let y0: int = y & 286331153;
+    let y1: int = y & 572662306;
+    let y2: int = y & 1145324612;
+    let y3: int = y & 2290649224;
+
+    let z0: int = (x0 * y0) ^ (x1 * y3) ^ (x2 * y2) ^ (x3 * y1);
+    let z1: int = (x0 * y1) ^ (x1 * y0) ^ (x2 * y3) ^ (x3 * y2);
+    let z2: int = (x0 * y2) ^ (x1 * y1) ^ (x2 * y0) ^ (x3 * y3);
+    let z3: int = (x0 * y3) ^ (x1 * y2) ^ (x2 * y1) ^ (x3 * y0);
+
+    return (z0 & 1229782938247303441) | (z1 & 2459565876494606882) | (z2 & 4919131752989213764) | (z3 & 614891469123651720);
+}
+
+// Convert the 16 bytes at bytes[off..off+16] into four 32-bit words holding
+// the polynomial coefficients, bit j of word k being x^(32k + j).
+fn _to_words(bytes: int[], off: int) -> int[] {
+    let mut w: int[] = [0, 0, 0, 0,];
+    let mut k: int = 0;
+    while k < 4 {
+        let mut v: int = 0;
+        let mut m: int = 0;
+        while m < 4 {
+            v = v | (_rev8(bytes[off + 4 * k + m]) << (8 * m));
+            m += 1;
+        }
+        w[k] = v & 4294967295;
+        k += 1;
+    }
+    return w;
+}
+
+// Inverse of _to_words: append the 16 bytes of a coefficient-word block.
+fn _from_words(w: int[], out: int[]) -> void {
+    let mut k: int = 0;
+    while k < 4 {
+        let mut m: int = 0;
+        while m < 4 {
+            out.push(_rev8((w[k] >> (8 * m)) & 255));
+            m += 1;
+        }
+        k += 1;
+    }
+}
+
+// Shift a 128-bit value (4 words, low to high) left by n bits, 1 <= n <= 7.
+// Returns 5 words; word 4 holds the bits that left the 128-bit range and is
+// less than 2^n.
+fn _shl128(a: int[], n: int) -> int[] {
+    let m: int = 4294967295;
+    return [(a[0] << n) & m, ((a[1] << n) | (a[0] >> (32 - n))) & m, ((a[2] << n) | (a[1] >> (32 - n))) & m, ((a[3] << n) | (a[2] >> (32 - n))) & m, a[3] >> (32 - n),];
+}
+
+// Reduce a 256-bit carryless product (8 words) modulo
+// x^128 + x^7 + x^2 + x + 1. The high half H contributes
+// H * (x^7 + x^2 + x + 1); that product overruns 128 bits by at most 6
+// positions, and folding those back lands entirely inside word 0, so one
+// extra step suffices.
+fn _reduce(p: int[]) -> int[] {
+    let hi: int[] = [p[4], p[5], p[6], p[7],];
+    let s7: int[] = _shl128(hi, 7);
+    let s2: int[] = _shl128(hi, 2);
+    let s1: int[] = _shl128(hi, 1);
+
+    let mut r: int[] = [p[0] ^ s7[0] ^ s2[0] ^ s1[0] ^ hi[0], p[1] ^ s7[1] ^ s2[1] ^ s1[1] ^ hi[1], p[2] ^ s7[2] ^ s2[2] ^ s1[2] ^ hi[2], p[3] ^ s7[3] ^ s2[3] ^ s1[3] ^ hi[3],];
+
+    let o: int = s7[4] ^ s2[4] ^ s1[4];
+    r[0] = r[0] ^ (((o << 7) ^ (o << 2) ^ (o << 1) ^ o) & 4294967295);
+    return r;
+}
+
+// Multiply two field elements in coefficient-word form. 16 clmul32 calls
+// accumulated into 8 words, then reduced.
+fn _gf128_mul(u: int[], v: int[]) -> int[] {
+    let mut p: int[] = [0, 0, 0, 0, 0, 0, 0, 0,];
+    let mut i: int = 0;
+    while i < 4 {
+        let mut j: int = 0;
+        while j < 4 {
+            let c: int = clmul32(u[i], v[j]);
+            p[i + j] = p[i + j] ^ (c & 4294967295);
+            p[i + j + 1] = p[i + j + 1] ^ ((c >> 32) & 4294967295);
+            j += 1;
+        }
+        i += 1;
+    }
+    return _reduce(p);
+}
+
+// GHASH_H(data): fold each 16-byte block of `data` into the accumulator as
+// X = (X ^ block) * H. `data` must already be a whole number of blocks — GCM's
+// zero padding and length block are assembled by the caller. Returns the
+// 16-byte accumulator, or [] if h is not 16 bytes or data is not a multiple of
+// 16 (fail-closed; both lengths are public).
+fn ghash(h: int[], data: int[]) -> int[] {
+    let empty: int[] = [];
+    if h.length != 16 { return empty; }
+    if data.length % 16 != 0 { return empty; }
+
+    let hv: int[] = _to_words(h, 0);
+    let mut x: int[] = [0, 0, 0, 0,];
+    let mut pos: int = 0;
+    while pos < data.length {
+        let b: int[] = _to_words(data, pos);
+        x[0] = x[0] ^ b[0];
+        x[1] = x[1] ^ b[1];
+        x[2] = x[2] ^ b[2];
+        x[3] = x[3] ^ b[3];
+        x = _gf128_mul(x, hv);
+        pos += 16;
+    }
+
+    let mut out: int[] = [];
+    _from_words(x, out);
+    return out;
+}
+
+export { clmul32, ghash };

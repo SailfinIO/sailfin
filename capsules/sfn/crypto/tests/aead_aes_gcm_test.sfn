@@ -1,0 +1,147 @@
+import { aes_gcm_seal, aes_gcm_open } from "../src/aead_aes_gcm";
+import { eq_bytes, hexb } from "./support/hex";
+
+// The canonical GCM test vectors (McGrew-Viega, carried into NIST CAVP).
+fn _tc3_key() -> int[] { return hexb("feffe9928665731c6d6a8f9467308308"); }
+fn _tc16_key() -> int[] { return hexb("feffe9928665731c6d6a8f9467308308feffe9928665731c6d6a8f9467308308"); }
+fn _tc3_iv() -> int[] { return hexb("cafebabefacedbaddecaf888"); }
+fn _tc3_plaintext() -> int[] {
+    return hexb("d9313225f88406e5a55909c5aff5269a86a7a9531534f7da2e4c303d8a318a721c3c0c95956809532fcf0e2449a6b525b16aedf5aa0de657ba637b391aafd255");
+}
+fn _tc4_plaintext() -> int[] {
+    return hexb("d9313225f88406e5a55909c5aff5269a86a7a9531534f7da2e4c303d8a318a721c3c0c95956809532fcf0e2449a6b525b16aedf5aa0de657ba637b39");
+}
+fn _tc4_aad() -> int[] { return hexb("feedfacedeadbeeffeedfacedeadbeefabaddad2"); }
+
+test "aes_gcm: SP 800-38D test case 1 — empty plaintext, empty AAD, AES-128" {
+    let key: int[] = hexb("00000000000000000000000000000000");
+    let iv: int[] = hexb("000000000000000000000000");
+    let empty: int[] = [];
+    let got: int[] = aes_gcm_seal(key, iv, empty, empty);
+    assert eq_bytes(got, hexb("58e2fccefa7e3061367f1d57a4e7455a"));
+}
+
+test "aes_gcm: SP 800-38D test case 2 — one zero block, empty AAD, AES-128" {
+    let key: int[] = hexb("00000000000000000000000000000000");
+    let iv: int[] = hexb("000000000000000000000000");
+    let empty: int[] = [];
+    let pt: int[] = hexb("00000000000000000000000000000000");
+    let got: int[] = aes_gcm_seal(key, iv, empty, pt);
+    assert eq_bytes(got, hexb("0388dace60b6a392f328c2b971b2fe78ab6e47d42cec13bdf53a67b21257bddf"));
+}
+
+test "aes_gcm: SP 800-38D test case 3 — 64-byte plaintext, empty AAD, AES-128" {
+    let empty: int[] = [];
+    let got: int[] = aes_gcm_seal(_tc3_key(), _tc3_iv(), empty, _tc3_plaintext());
+    assert eq_bytes(got, hexb("42831ec2217774244b7221b784d0d49ce3aa212f2c02a4e035c17e2329aca12e21d514b25466931c7d8f6a5aac84aa051ba30b396a0aac973d58e091473f59854d5c2af327cd64a62cf35abd2ba6fab4"));
+}
+
+test "aes_gcm: SP 800-38D test case 4 — 60-byte plaintext with AAD, AES-128" {
+    let got: int[] = aes_gcm_seal(_tc3_key(), _tc3_iv(), _tc4_aad(), _tc4_plaintext());
+    assert eq_bytes(got, hexb("42831ec2217774244b7221b784d0d49ce3aa212f2c02a4e035c17e2329aca12e21d514b25466931c7d8f6a5aac84aa051ba30b396a0aac973d58e0915bc94fbc3221a5db94fae95ae7121a47"));
+}
+
+test "aes_gcm: SP 800-38D test case 13 — empty plaintext, empty AAD, AES-256" {
+    let key: int[] = hexb("0000000000000000000000000000000000000000000000000000000000000000");
+    let iv: int[] = hexb("000000000000000000000000");
+    let empty: int[] = [];
+    let got: int[] = aes_gcm_seal(key, iv, empty, empty);
+    assert eq_bytes(got, hexb("530f8afbc74536b9a963b4f1c4cb738b"));
+}
+
+test "aes_gcm: SP 800-38D test case 14 — one zero block, AES-256" {
+    let key: int[] = hexb("0000000000000000000000000000000000000000000000000000000000000000");
+    let iv: int[] = hexb("000000000000000000000000");
+    let empty: int[] = [];
+    let pt: int[] = hexb("00000000000000000000000000000000");
+    let got: int[] = aes_gcm_seal(key, iv, empty, pt);
+    assert eq_bytes(got, hexb("cea7403d4d606b6e074ec5d3baf39d18d0d1c8a799996bf0265b98b5d48ab919"));
+}
+
+test "aes_gcm: SP 800-38D test case 16 — 60-byte plaintext with AAD, AES-256" {
+    let got: int[] = aes_gcm_seal(_tc16_key(), _tc3_iv(), _tc4_aad(), _tc4_plaintext());
+    assert eq_bytes(got, hexb("522dc1f099567d07f47f37a32a84427d643a8cdcbfe5c0c97598a2bd2555d1aa8cb08e48590dbb3da7b08b1056828838c5f61e6393ba7a0abcc9f66276fc6ece0f4e1768cddf8853bb2d551b"));
+}
+
+test "aes_gcm: open recovers the AES-128 test case 4 plaintext" {
+    let sealed: int[] = aes_gcm_seal(_tc3_key(), _tc3_iv(), _tc4_aad(), _tc4_plaintext());
+    let opened: Result<int[], string> = aes_gcm_open(_tc3_key(), _tc3_iv(), _tc4_aad(), sealed);
+    match opened {
+        Result.Ok { value } => { assert eq_bytes(value, _tc4_plaintext()); },
+        Result.Err { error } => { assert false; }
+    }
+}
+
+test "aes_gcm: open recovers the AES-256 test case 16 plaintext" {
+    let sealed: int[] = aes_gcm_seal(_tc16_key(), _tc3_iv(), _tc4_aad(), _tc4_plaintext());
+    let opened: Result<int[], string> = aes_gcm_open(_tc16_key(), _tc3_iv(), _tc4_aad(), sealed);
+    match opened {
+        Result.Ok { value } => { assert eq_bytes(value, _tc4_plaintext()); },
+        Result.Err { error } => { assert false; }
+    }
+}
+
+test "aes_gcm: empty plaintext with AAD round-trips" {
+    let empty: int[] = [];
+    let sealed: int[] = aes_gcm_seal(_tc3_key(), _tc3_iv(), _tc4_aad(), empty);
+    assert sealed.length == 16;
+    let opened: Result<int[], string> = aes_gcm_open(_tc3_key(), _tc3_iv(), _tc4_aad(), sealed);
+    match opened {
+        Result.Ok { value } => { assert value.length == 0; },
+        Result.Err { error } => { assert false; }
+    }
+}
+
+test "aes_gcm: a flipped ciphertext byte fails authentication" {
+    let mut sealed: int[] = aes_gcm_seal(_tc3_key(), _tc3_iv(), _tc4_aad(), _tc4_plaintext());
+    sealed[0] = sealed[0] ^ 1;
+    let opened: Result<int[], string> = aes_gcm_open(_tc3_key(), _tc3_iv(), _tc4_aad(), sealed);
+    match opened {
+        Result.Ok { value } => { assert false; },
+        Result.Err { error } => { assert error == "aes_gcm_open: authentication failed"; }
+    }
+}
+
+test "aes_gcm: a flipped tag byte fails authentication" {
+    let mut sealed: int[] = aes_gcm_seal(_tc3_key(), _tc3_iv(), _tc4_aad(), _tc4_plaintext());
+    let last: int = sealed.length - 1;
+    sealed[last] = sealed[last] ^ 128;
+    let opened: Result<int[], string> = aes_gcm_open(_tc3_key(), _tc3_iv(), _tc4_aad(), sealed);
+    match opened {
+        Result.Ok { value } => { assert false; },
+        Result.Err { error } => { assert error == "aes_gcm_open: authentication failed"; }
+    }
+}
+
+test "aes_gcm: modified AAD fails authentication" {
+    let sealed: int[] = aes_gcm_seal(_tc3_key(), _tc3_iv(), _tc4_aad(), _tc4_plaintext());
+    let opened: Result<int[], string> = aes_gcm_open(_tc3_key(), _tc3_iv(), hexb("feedfacedeadbeeffeedfacedeadbeefabaddad3"), sealed);
+    match opened {
+        Result.Ok { value } => { assert false; },
+        Result.Err { error } => { assert error == "aes_gcm_open: authentication failed"; }
+    }
+}
+
+test "aes_gcm: seal fails closed on bad key and nonce lengths" {
+    let empty: int[] = [];
+    assert aes_gcm_seal(hexb("0011"), _tc3_iv(), empty, empty).length == 0;
+    assert aes_gcm_seal(_tc3_key(), hexb("0011"), empty, empty).length == 0;
+    assert aes_gcm_seal(hexb("000102030405060708090a0b0c0d0e0f1011121314151617"), _tc3_iv(), empty, empty).length == 0;
+}
+
+test "aes_gcm: open names the failing precondition" {
+    let empty: int[] = [];
+    let sealed: int[] = aes_gcm_seal(_tc3_key(), _tc3_iv(), empty, empty);
+    match aes_gcm_open(hexb("0011"), _tc3_iv(), empty, sealed) {
+        Result.Ok { value } => { assert false; },
+        Result.Err { error } => { assert error == "aes_gcm_open: bad key length"; }
+    }
+    match aes_gcm_open(_tc3_key(), hexb("0011"), empty, sealed) {
+        Result.Ok { value } => { assert false; },
+        Result.Err { error } => { assert error == "aes_gcm_open: bad nonce length"; }
+    }
+    match aes_gcm_open(_tc3_key(), _tc3_iv(), empty, hexb("00112233")) {
+        Result.Ok { value } => { assert false; },
+        Result.Err { error } => { assert error == "aes_gcm_open: input shorter than the tag"; }
+    }
+}

@@ -1,0 +1,35 @@
+// benchmarks/runtime/chacha20_poly1305_seal_bench.sfn
+//
+// Runtime-execution benchmark: ChaCha20-Poly1305 seal throughput.
+//
+// The companion to aes_gcm_seal_bench, added with it (SFN-339) so the AES
+// figure is read against a measured ChaCha20-Poly1305 number on the same host
+// rather than against the SFN-768 record-layer figure extrapolated in the
+// design note.
+//
+// Same shape as aes_gcm_seal_bench: one unit of work is one seal over 1000
+// bytes, so `ops_per_ms` reads directly as MB/s. The op count is higher
+// because this construction is the faster of the two.
+import { benchmark_fixed, keep } from "sfn/bench";
+import { chacha20poly1305_seal } from "sfn/crypto";
+
+fn payload(n: int) -> int[] {
+    let mut buf: int[] = [];
+    let mut i: int = 0;
+    while i < n {
+        buf.push(i & 255);
+        i += 1;
+    }
+    return buf;
+}
+
+fn main() ![io, clock] {
+    let seals = 30000;
+    let key: int[] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31,];
+    let nonce: int[] = [16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27,];
+    let aad: int[] = [1, 2, 3, 4, 5,];
+    let plaintext: int[] = payload(1000);
+    let _ = benchmark_fixed("chacha20_poly1305_seal", seals, fn () -> int {
+        return keep(chacha20poly1305_seal(key, nonce, aad, plaintext).length);
+    });
+}

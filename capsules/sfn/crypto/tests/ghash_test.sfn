@@ -1,0 +1,62 @@
+import { clmul32, ghash } from "../src/ghash";
+import { eq_bytes, hexb } from "./support/hex";
+
+test "ghash: clmul32 worst case sits exactly on the 62-bit bound" {
+    // The carryless square of the all-ones 32-bit word is sum x^(2i) for
+    // i in 0..31 — bits 0, 2, ..., 62 set — which is (4^32 - 1) / 3. This is
+    // the largest value clmul32 can return, so it is the regression guard on
+    // the 0.813-bit headroom the construction depends on. compiler/src/llvm/
+    // emits no nsw/nuw, so a bound violation wraps and fails here loudly
+    // rather than being undefined behaviour.
+    assert clmul32(4294967295, 4294967295) == 6148914691236517205;
+}
+
+test "ghash: clmul32 agrees with schoolbook carryless multiply on small inputs" {
+    assert clmul32(0, 4294967295) == 0;
+    assert clmul32(1, 12345) == 12345;
+    // x^1 * x^1 = x^2, and (x + 1)^2 = x^2 + 1 in characteristic 2.
+    assert clmul32(2, 2) == 4;
+    assert clmul32(3, 3) == 5;
+}
+
+test "ghash: multiplying by the field identity is the identity" {
+    // In SP 800-38D's bit order the coefficient of x^0 is the most
+    // significant bit of byte 0, so the multiplicative identity is
+    // 0x80 followed by 15 zero bytes.
+    let h: int[] = hexb("66e94bd4ef8a2c3b884cfa59ca342b2e");
+    let one: int[] = hexb("80000000000000000000000000000000");
+    assert eq_bytes(ghash(h, one), h);
+}
+
+test "ghash: reduction matches SP 800-38D's R constant" {
+    // x^127 times x is x^128, which reduces to x^7 + x^2 + x + 1. In this bit
+    // order that block is 0xe1 followed by zeros — exactly the R = 11100001 ||
+    // 0^120 that SP 800-38D section 6.3 shifts in.
+    let x1: int[] = hexb("40000000000000000000000000000000");
+    let x127: int[] = hexb("00000000000000000000000000000001");
+    assert eq_bytes(ghash(x1, x127), hexb("e1000000000000000000000000000000"));
+}
+
+test "ghash: a single block multiply is commutative" {
+    let a: int[] = hexb("66e94bd4ef8a2c3b884cfa59ca342b2e");
+    let b: int[] = hexb("0388dace60b6a392f328c2b971b2fe78");
+    assert eq_bytes(ghash(a, b), ghash(b, a));
+}
+
+test "ghash: the zero block annihilates" {
+    let h: int[] = hexb("66e94bd4ef8a2c3b884cfa59ca342b2e");
+    let z: int[] = hexb("00000000000000000000000000000000");
+    assert eq_bytes(ghash(h, z), z);
+}
+
+test "ghash: empty input hashes to zero" {
+    let h: int[] = hexb("66e94bd4ef8a2c3b884cfa59ca342b2e");
+    let empty: int[] = [];
+    assert eq_bytes(ghash(h, empty), hexb("00000000000000000000000000000000"));
+}
+
+test "ghash: rejects a bad subkey length or a partial block" {
+    let h: int[] = hexb("66e94bd4ef8a2c3b884cfa59ca342b2e");
+    assert ghash(hexb("0011"), hexb("80000000000000000000000000000000")).length == 0;
+    assert ghash(h, hexb("8000000000000000")).length == 0;
+}

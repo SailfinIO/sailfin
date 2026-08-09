@@ -1,0 +1,176 @@
+// aes_sbox.sfn
+//
+// The AES S-box as a table-free bitsliced circuit, per the SFN-339 design gate
+// (docs/proposals/design-notes/sfn-339-aes-gcm-strategy.md, section 3).
+//
+// There is deliberately no 256-entry table here, and no array index derived
+// from a secret byte: a table lookup on key or plaintext material leaks
+// through the data cache. Instead the S-box is computed as
+//
+//     sbox(x) = affine(inv(x)),  inv(x) = x^254 in GF(2^8)
+//
+// over the AES field polynomial x^8 + x^4 + x^3 + x + 1. inv(0) = 0 falls out
+// of 0^254 = 0, which is the S-box's defined behaviour at zero, so there is no
+// special case and therefore no branch.
+//
+// Bitsliced representation: a group of up to 32 bytes is held as 8 words, one
+// per bit position. Word j, bit k is bit j of byte k. Every operation below is
+// therefore lane-independent bitwise work on 32 independent bytes at once,
+// which is what makes an inversion-based S-box affordable — the design note
+// records ~24 gates/byte for SubBytes on this schedule.
+//
+// Words are masked 32-bit values, so `>>` (LLVM `ashr`) behaves as a logical
+// shift; see bits.sfn's rotl32/rotr32 precondition for the same requirement.
+// Reduce a 15-coefficient carryless product modulo the AES field polynomial
+// x^8 + x^4 + x^3 + x + 1. For k >= 8, x^k = x^(k-4) + x^(k-5) + x^(k-7) +
+// x^(k-8), applied from the top down so a coefficient pushed into another
+// position >= 8 is still reduced. `p` is consumed (mutated).
+fn _gf_reduce(p: int[]) -> int[] {
+    let mut k: int = 14;
+    while k >= 8 {
+        let h: int = p[k];
+        p[k - 4] = p[k - 4] ^ h;
+        p[k - 5] = p[k - 5] ^ h;
+        p[k - 7] = p[k - 7] ^ h;
+        p[k - 8] = p[k - 8] ^ h;
+        p[k] = 0;
+        k -= 1;
+    }
+    return [p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7],];
+}
+
+// Bitsliced GF(2^8) multiply: schoolbook carryless product of the two
+// bit-plane vectors followed by field reduction. 64 AND + 49 XOR + 28 XOR.
+fn _gf_mul(a: int[], b: int[]) -> int[] {
+    let mut p: int[] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,];
+    let mut i: int = 0;
+    while i < 8 {
+        let ai: int = a[i];
+        let mut j: int = 0;
+        while j < 8 {
+            p[i + j] = p[i + j] ^ (ai & b[j]);
+            j += 1;
+        }
+        i += 1;
+    }
+    return _gf_reduce(p);
+}
+
+// Bitsliced GF(2^8) squaring. In characteristic 2 squaring is linear
+// (Frobenius): (sum a_i x^i)^2 = sum a_i x^(2i), so the carryless product is
+// just the input spread over the even coefficients — a bit permutation, not a
+// multiply. Reduction is shared with _gf_mul. This is why 7 squarings in the
+// inversion chain are nearly free.
+fn _gf_sqr(a: int[]) -> int[] {
+    let z: int = 0;
+    let mut p: int[] = [a[0], z, a[1], z, a[2], z, a[3], z, a[4], z, a[5], z, a[6], z, a[7],];
+    return _gf_reduce(p);
+}
+
+// Multiplicative inverse in GF(2^8) as x^254, via an addition chain costing
+// 7 squarings and 4 multiplies:
+//
+//   x^2 -> x^3 -> x^12 -> x^14, x^15 -> x^240 -> x^254
+//
+// x^254 = x^(-1) for x != 0 because the multiplicative group has order 255,
+// and 0^254 = 0 supplies the S-box's value at zero with no branch.
+fn _gf_inv(a: int[]) -> int[] {
+    let x2: int[] = _gf_sqr(a);
+    let x3: int[] = _gf_mul(x2, a);
+    let x12: int[] = _gf_sqr(_gf_sqr(x3));
+    let x14: int[] = _gf_mul(x12, x2);
+    let x15: int[] = _gf_mul(x12, x3);
+    let x240: int[] = _gf_sqr(_gf_sqr(_gf_sqr(_gf_sqr(x15))));
+    return _gf_mul(x240, x14);
+}
+
+// The AES affine map (FIPS-197 section 5.1.1):
+//
+//   b'_i = b_i ^ b_(i+4) ^ b_(i+5) ^ b_(i+6) ^ b_(i+7) ^ c_i,  c = 0x63
+//
+// with the index sums taken mod 8. In the bitsliced representation this is
+// eight XOR chains across the eight words plus four complements (0x63 has
+// bits 0, 1, 5 and 6 set), so it costs nothing measurable.
+fn _gf_affine(b: int[]) -> int[] {
+    let ones: int = 4294967295;
+    let mut out: int[] = [0, 0, 0, 0, 0, 0, 0, 0,];
+    let mut i: int = 0;
+    while i < 8 {
+        out[i] = b[i] ^ b[(i + 4) % 8] ^ b[(i + 5) % 8] ^ b[(i + 6) % 8] ^ b[(i
+            + 7) % 8];
+        i += 1;
+    }
+    out[0] = out[0] ^ ones;
+    out[1] = out[1] ^ ones;
+    out[5] = out[5] ^ ones;
+    out[6] = out[6] ^ ones;
+    return out;
+}
+
+// Bitslice n bytes of `bytes` starting at `off` into 8 bit-plane words.
+// Caller guarantees n <= 32 and off + n <= bytes.length. Lanes at or above n
+// stay zero; they are never read back, so the garbage the S-box produces in
+// them (sbox(0) = 0x63) is harmless.
+fn bs_slice(bytes: int[], off: int, n: int) -> int[] {
+    let mut w: int[] = [0, 0, 0, 0, 0, 0, 0, 0,];
+    let mut k: int = 0;
+    while k < n {
+        let b: int = bytes[off + k] & 255;
+        let mut j: int = 0;
+        while j < 8 {
+            w[j] = w[j] | (((b >> j) & 1) << k);
+            j += 1;
+        }
+        k += 1;
+    }
+    return w;
+}
+
+// Inverse of bs_slice: append lanes 0..n-1 of the bit-plane words to `out` as
+// bytes. Caller guarantees n <= 32.
+fn bs_unslice(w: int[], out: int[], n: int) -> void {
+    let mut k: int = 0;
+    while k < n {
+        let mut b: int = 0;
+        let mut j: int = 0;
+        while j < 8 {
+            b = b | (((w[j] >> k) & 1) << j);
+            j += 1;
+        }
+        out.push(b);
+        k += 1;
+    }
+}
+
+// Apply the S-box to all 32 lanes of a bit-plane vector, in place.
+fn bs_sbox(w: int[]) -> void {
+    let a: int[] = [w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7],];
+    let s: int[] = _gf_affine(_gf_inv(a));
+    let mut j: int = 0;
+    while j < 8 {
+        w[j] = s[j];
+        j += 1;
+    }
+}
+
+// Byte-oriented convenience wrapper: apply the S-box to up to 32 bytes.
+// Returns [] if given more than 32 bytes (fail-closed). Used by the AES key
+// schedule's SubWord, which needs only 4 of the 32 lanes — wasting 28 lanes
+// costs a few thousand word operations once per connection, which is the
+// reason a table-free key schedule is affordable at all.
+fn sbox_bytes(bytes: int[]) -> int[] {
+    let empty: int[] = [];
+    if bytes.length > 32 { return empty; }
+    let mut w: int[] = bs_slice(bytes, 0, bytes.length);
+    bs_sbox(w);
+    let mut out: int[] = [];
+    bs_unslice(w, out, bytes.length);
+    return out;
+}
+
+export {
+    bs_slice,
+    bs_unslice,
+    bs_sbox,
+    sbox_bytes
+};
