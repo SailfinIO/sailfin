@@ -6,7 +6,8 @@
 // reference types, array types, union types, raw pointers, etc.) to their LLVM
 // IR type representations.  Used by statement lowering for return types,
 // parameter types, and local variable types.
-import { substring } from "../../../string_utils";
+import { substring } from "sfn/strings";
+
 import { find_interface_info_by_name, find_struct_info_by_name } from "../../type_context_queries";
 import {
     annotation_is_array,

@@ -1,8 +1,9 @@
 // compiler/src/llvm/expression_lowering/native/core_closure_lowering.sfn
 //
 // Closure-pair marker lowering and capture-environment materialization.
+import { char_code_at, find, substring } from "sfn/strings";
+
 import { NativeFunction, NativeLambdaCapture } from "../../../native_ir";
-import { char_code, index_of, substring } from "../../../string_utils";
 import {
     ClosureCaptureOperand,
     decode_captures,
@@ -308,12 +309,12 @@ fn _parse_marker_int_field(text: string, key: string) -> int {
     if raw.length == 0 { return 0; }
     let mut value: int = 0;
     let mut idx: int = 0;
-    let zero = char_code("0");
-    let nine = char_code("9");
+    let zero = char_code_at("0", 0);
+    let nine = char_code_at("9", 0);
     loop {
         if idx >= raw.length { break; }
         let ch = raw[idx];
-        let code = char_code(ch);
+        let code = char_code_at(ch, 0);
         if code < zero { break; }
         if code > nine { break; }
         value = value * 10 + (code - zero);
@@ -326,7 +327,7 @@ fn _parse_marker_int_field(text: string, key: string) -> int {
 // trailing `>` of the marker, or end-of-string. Returns the empty
 // string when the key is absent.
 fn _parse_marker_string_field(text: string, key: string) -> string {
-    let key_start = index_of(text, key);
+    let key_start = find(text, key, 0);
     if key_start < 0 { return ""; }
     let value_start = key_start + key.length;
     let mut cursor: int = value_start;

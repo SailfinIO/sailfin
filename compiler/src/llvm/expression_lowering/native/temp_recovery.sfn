@@ -2,7 +2,8 @@
 //
 // Shared SSA temp counter recovery for LLVM lowering paths that cross the
 // self-hosted compiler's module ABI boundary.
-import { char_at, char_code } from "../../../string_utils";
+import { char_code_at } from "sfn/strings";
+
 import { starts_with } from "../../utils";
 
 // Recover from seed ABI corruption: result temp_index fields can be stale when
@@ -20,7 +21,7 @@ fn recover_temp_from_lines(lines: string[], floor: int) -> int {
             let mut rvalid: boolean = false;
             loop {
                 if rj >= rl.length { break; }
-                let rc = char_code(char_at(rl, rj));
+                let rc = char_code_at(rl, rj);
                 if rc < 48 { break; }
                 if rc > 57 { break; }
                 rn = rn * 10 + (rc - 48);

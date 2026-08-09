@@ -1,7 +1,8 @@
 // compiler/src/llvm/expression_lowering/native/core_type_mapping.sfn
 //
 // Expression lowering type-mapping helpers extracted from core.sfn.
-import { substring } from "../../../string_utils";
+import { substring } from "sfn/strings";
+
 import { find_interface_info_by_name, find_struct_info_by_name } from "../../type_context_queries";
 import {
     annotation_is_array,

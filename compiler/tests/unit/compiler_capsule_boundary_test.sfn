@@ -64,17 +64,10 @@ fn _boundary_exceptions() -> BoundaryException[] {
         diagnostic_i += 1;
     }
 
-    // SFEP-0020 §3.5.7: generic monolith string helpers have not yet graduated
-    // to sfn/strings or a role-owned implementation. Keep every importer exact
-    // so moving any caller to its proper contract makes this inventory stale.
+    // SFEP-0020 §3.5.7: the remaining non-LLVM generic monolith string helpers
+    // have not yet graduated to sfn/strings or a role-owned implementation.
+    // Keep every importer exact so repairs make this inventory stale.
     let compat = "generic string helpers remain monolith-owned (SFEP-0020 §3.5.7)";
-    let compat_importers: string[] = ["llvm/expression_lowering/arrays", "llvm/expression_lowering/native/core_call_emission/dispatch", "llvm/expression_lowering/native/core_call_lowering", "llvm/expression_lowering/native/core_call_resolution/closure_callee", "llvm/expression_lowering/native/core_call_resolution/method_target", "llvm/expression_lowering/native/core_call_resolution/signature", "llvm/expression_lowering/native/core_calls", "llvm/expression_lowering/native/core_closure_lowering", "llvm/expression_lowering/native/core_concurrency_lowering", "llvm/expression_lowering/native/core_expression", "llvm/expression_lowering/native/core_expression_tail", "llvm/expression_lowering/native/core_helpers", "llvm/expression_lowering/native/core_index_lowering", "llvm/expression_lowering/native/core_literals_lowering", "llvm/expression_lowering/native/core_member_lowering", "llvm/expression_lowering/native/core_operators", "llvm/expression_lowering/native/core_ops_lowering", "llvm/expression_lowering/native/core_parse", "llvm/expression_lowering/native/core_parsing", "llvm/expression_lowering/native/core_scopes", "llvm/expression_lowering/native/core_text", "llvm/expression_lowering/native/core_type_mapping", "llvm/expression_lowering/native/statement_assignment", "llvm/expression_lowering/native/statement_parsing", "llvm/expression_lowering/native/statement_suspension", "llvm/expression_lowering/native/statement_type_mapping", "llvm/expression_lowering/native/temp_recovery", "llvm/expression_lowering/splitting"];
-    let mut compat_i: int = 0;
-    loop {
-        if compat_i >= compat_importers.length { break; }
-        out.push(_boundary_exception(compat_importers[compat_i], "string_utils", compat));
-        compat_i += 1;
-    }
     let remaining_compat_importers: string[] = ["emit_native", "emit_native_layout", "emit_native_state", "emitter_sailfin_utils"];
     let mut remaining_compat_i: int = 0;
     loop {
