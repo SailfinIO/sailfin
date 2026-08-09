@@ -53,7 +53,8 @@ import {
     Statement,
     TypeAnnotation,
     WithClause
-} from "./ast";
+} from "sfn/syntax";
+
 import { number_to_string } from "./emit_native_state";
 import {
     BindingEntry,

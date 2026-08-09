@@ -30,7 +30,6 @@
 //     needs to size the env struct and pick by-value-vs-pointer
 //     copy semantics.
 import { ends_with, strings_equal, substring } from "sfn/strings";
-
 import {
     Block,
     Capture,
@@ -43,7 +42,7 @@ import {
     SourceSpan,
     Statement,
     TypeAnnotation
-} from "./ast";
+} from "sfn/syntax";
 
 // One scope-visible binding the walk has accumulated so far.
 // Mirrors the data the unit tests need to verify (`type_text`,

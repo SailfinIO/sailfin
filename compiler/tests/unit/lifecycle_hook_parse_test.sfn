@@ -8,8 +8,8 @@
 // `compiler/tests/e2e/test_lifecycle_hook_ordering.sh`; this unit test
 // deliberately stays at the parser/AST surface, independent of LLVM
 // lowering.
-import { Program, Statement } from "../../src/ast";
-import { parse_program } from "../../src/parser/mod";
+import { Program, Statement } from "sfn/syntax";
+import { parse_program } from "sfn/syntax";
 
 fn _first_test(program: Program) -> Statement {
     let mut index: int = 0;

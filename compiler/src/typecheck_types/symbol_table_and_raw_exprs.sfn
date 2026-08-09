@@ -11,10 +11,10 @@ import {
     strip_prefix,
     substring
 } from "sfn/strings";
+import { FunctionSignature, SourceSpan } from "sfn/syntax";
+import { Token } from "sfn/syntax";
 
-import { FunctionSignature, SourceSpan } from "../ast";
 import { FixSuggestion } from "../diagnostic";
-import { Token } from "../token";
 import { Diagnostic } from "../typecheck_types";
 import { classify_declared_primitive } from "./annotation_shape_checks";
 import { is_c_abi_parameter_type, is_c_abi_return_type } from "./extern_abi";

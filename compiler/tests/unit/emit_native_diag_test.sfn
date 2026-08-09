@@ -8,6 +8,8 @@
 // primary lines path its own `EmitNativeLines` carrier, so both are covered
 // here; the CLI-level assertion lives in
 // `compiler/tests/e2e/emit_native_structured_diagnostic_test.sfn`.
+import { parse_program } from "sfn/syntax";
+
 import { empty_llvm_import_context, resolve_llvm_provider_context } from "../../src/build/llvm_provider_context";
 import { diag_is_error } from "../../src/diagnostic";
 import {
@@ -16,7 +18,6 @@ import {
     emit_native_with_module_name
 } from "../../src/emit_native";
 import { lower_native_lines_to_llvm_artifact_with_context_and_provider } from "../../src/llvm/lowering/entrypoints";
-import { parse_program } from "../../src/parser/mod";
 import { index_of } from "../../src/string_utils";
 
 fn _contains(haystack: string, needle: string) -> boolean {

@@ -5,7 +5,8 @@
 // `classify_extern_parameter_type`, so the same E0801–E0805 codes apply).
 // `* * u8` (for libc `environ`) is on the accept-list; non-C-ABI types and
 // `void` (a variable has storage; `void` has none) are rejected.
-import { parse_program } from "../../src/parser/mod";
+import { parse_program } from "sfn/syntax";
+
 import { typecheck_diagnostics } from "../../src/typecheck";
 import { Diagnostic } from "../../src/typecheck_types";
 

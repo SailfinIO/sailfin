@@ -112,9 +112,9 @@ tests and lower correctly through all stages:
 
 The AST already models everything a payload-carrying enum needs:
 `EnumVariant { name; fields: FieldDeclaration[]; name_span }`
-(`compiler/src/ast.sfn:146`), and `EnumDeclaration` already carries
-`type_parameters: TypeParameter[]` (`compiler/src/ast.sfn:257`,
-`TypeParameter` at `compiler/src/ast.sfn:16`). **The grammar and AST can
+(`compiler/capsules/syntax/src/ast.sfn:146`), and `EnumDeclaration` already carries
+`type_parameters: TypeParameter[]` (`compiler/capsules/syntax/src/ast.sfn:257`,
+`TypeParameter` at `compiler/capsules/syntax/src/ast.sfn:16`). **The grammar and AST can
 already represent `enum Result<T, E>`; what is unverified is whether the
 type checker and LLVM lowering monomorphise a *generic* payload-carrying
 enum.** They do not — no such enum has ever been compiled. This is hidden
@@ -156,13 +156,13 @@ cost is the crux of Q1.
 ### Where `?` would be parsed
 
 The postfix chain lives in `parse_postfix_chain`
-(`compiler/src/parser/expressions.sfn:495`). The loop already handles `as`
+(`compiler/capsules/syntax/src/parser/expressions.sfn:495`). The loop already handles `as`
 casts (line 521), `.` member access (line 543), `(` calls (line 564), `[`
 indexing (line 582), and `{` struct literals (line 603). A postfix `?`
 arm slots into this same loop. The token `?` currently appears in the
 grammar only as a *type-annotation suffix* (`TypeAnnotation?`,
 `VariableDeclaration.type_annotation: TypeAnnotation?` at
-`compiler/src/ast.sfn:212`), which is consumed by the **type parser**, not
+`compiler/capsules/syntax/src/ast.sfn:212`), which is consumed by the **type parser**, not
 the **expression** parser — so adding an expression-level postfix `?` does
 not collide (see Q's disambiguation note).
 
@@ -311,7 +311,7 @@ separate follow-up that gets its own `/groom`, not a milestone here.**
 Rationale (real count + self-hosting risk): the compiler's actual `try`
 usage is far smaller than the "~20" estimate in the epic. The AST has a
 single `TryStatement` node (`ast.sfn:302`) parsed by one function,
-`parse_try_statement` (`compiler/src/parser/statements/special.sfn`), and a
+`parse_try_statement` (`compiler/capsules/syntax/src/parser/statements/special.sfn`), and a
 grep for `try {` blocks in `compiler/src/` finds only **2** real
 occurrences (the rest of the "try" matches are substrings like `entry` /
 `retry` or comments). The `catch` keyword is consumed in exactly one place
@@ -377,7 +377,7 @@ richer error types use their own `E`.
 ### Grammar / parser
 
 Add a single arm to `parse_postfix_chain`
-(`compiler/src/parser/expressions.sfn:495`), in the existing postfix loop
+(`compiler/capsules/syntax/src/parser/expressions.sfn:495`), in the existing postfix loop
 alongside `.` / `(` / `[` / `as`. When the current token is the symbol `?`
 **and** the parser is in expression position (which `parse_postfix_chain`
 always is), wrap the current expression in a new `TryOperator` expression
@@ -400,7 +400,7 @@ statement-level `TryStatement` at `ast.sfn:302`; R.1 must implement exactly
 this name):
 
 ```sfn
-// compiler/src/ast.sfn — Expression enum
+// compiler/capsules/syntax/src/ast.sfn — Expression enum
 TryOperator { operand: Expression, span: SourceSpan? }
 ```
 
@@ -557,8 +557,8 @@ the file list is the implementation map for R.1–R.5.)
 | Stage | File | Change |
 |---|---|---|
 | Prelude | `runtime/prelude.sfn` | add `enum Result<T, E>`, `struct Error` (lands in **R.2**, not R.1 — needs generic-enum monomorphisation first) |
-| Parser | `compiler/src/parser/expressions.sfn` (~`:495`) | `?` postfix arm in `parse_postfix_chain` |
-| AST | `compiler/src/ast.sfn` | `Expression.TryOperator` variant |
+| Parser | `compiler/capsules/syntax/src/parser/expressions.sfn` (~`:495`) | `?` postfix arm in `parse_postfix_chain` |
+| AST | `compiler/capsules/syntax/src/ast.sfn` | `Expression.TryOperator` variant |
 | Type checker | `compiler/src/typecheck.sfn` | `?` rules + 3 diagnostics; generic-enum monomorphisation (R.2) |
 | Emitter | `compiler/src/emit_native.sfn` | `TryOperator` → `match` + `return Err` desugaring |
 | LLVM lowering | `compiler/src/llvm/lowering/lowering_phase_types.sfn`, `instructions_match.sfn` | per-instantiation `Result` layout (R.2); no change to `instructions_try.sfn` |
@@ -645,13 +645,13 @@ These representative inputs must behave as stated end-to-end.
 - Sibling: [#323](https://github.com/SailfinIO/sailfin/issues/323)
 - Union-match segfault superseded by `Result`: [#50](https://github.com/SailfinIO/sailfin/issues/50)
 - Migration sites:
-  - `compiler/src/parser/expressions.sfn:495` (`parse_postfix_chain` — `?` postfix arm)
+  - `compiler/capsules/syntax/src/parser/expressions.sfn:495` (`parse_postfix_chain` — `?` postfix arm)
   - `runtime/prelude.sfn` (new `Result` enum + default `Error`)
   - `docs/proposals/0025-native-runtime-architecture.md` (the `Result<SfnString, Error>`
     reference to make real)
-  - `compiler/src/ast.sfn:146` (`EnumVariant`), `:257` (`EnumDeclaration`
+  - `compiler/capsules/syntax/src/ast.sfn:146` (`EnumVariant`), `:257` (`EnumDeclaration`
     with `type_parameters`), `:16` (`TypeParameter`)
-  - `compiler/src/parser/statements/special.sfn` (`parse_try_statement` —
+  - `compiler/capsules/syntax/src/parser/statements/special.sfn` (`parse_try_statement` —
     the single parser entrypoint for `try`/`catch`; only 2 `try {` usage
     sites exist in `compiler/src/`, Q6)
 

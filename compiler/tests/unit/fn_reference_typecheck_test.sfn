@@ -21,7 +21,8 @@
 // yet) still flows through the `Raw`/`Identifier` arms. Driven here
 // end-to-end via parse + typecheck (no lowering import, per the #331 atomics
 // 180s-timeout precedent).
-import { parse_program } from "../../src/parser/mod";
+import { parse_program } from "sfn/syntax";
+
 import { typecheck_diagnostics } from "../../src/typecheck";
 
 fn _count_code(source: string, code: string) -> int ![io] {

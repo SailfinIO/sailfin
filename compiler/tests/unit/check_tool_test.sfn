@@ -35,9 +35,9 @@
 // Imports — real exported symbols (light closure via diagnostics_render)
 // -------------------------------------------------------------------
 import { int_to_string } from "sfn/strings";
+import { Program, Statement } from "sfn/syntax";
 
 import { AnalyzerInput, analyze_program } from "../../src/analyzer";
-import { Program, Statement } from "../../src/ast";
 import { code_for_missing_effect, join_effects } from "../../src/diagnostics_render";
 import { EffectRequirement } from "../../src/effect_checker/types";
 import { empty_import_symbols } from "../../src/effect_imports";

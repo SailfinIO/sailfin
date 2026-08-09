@@ -3,7 +3,8 @@
 // `TypeckCtx` — the immutable scope/binding context threaded through
 // every check, plus the constructors that derive a narrowed child
 // context (type parameters, block bindings, function bodies).
-import { Statement, TypeAnnotation } from "../ast";
+import { Statement, TypeAnnotation } from "sfn/syntax";
+
 import { ImportSymbolTable } from "../effect_imports";
 import { SymbolEntry } from "../typecheck_types/symbol_table_and_raw_exprs";
 

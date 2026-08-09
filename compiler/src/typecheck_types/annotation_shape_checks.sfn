@@ -10,10 +10,10 @@ import {
     strings_equal,
     substring
 } from "sfn/strings";
+import { SourceSpan, TypeAnnotation, TypeParameter } from "sfn/syntax";
+import { Token } from "sfn/syntax";
 
-import { SourceSpan, TypeAnnotation, TypeParameter } from "../ast";
 import { FixSuggestion } from "../diagnostic";
-import { Token } from "../token";
 import { Diagnostic } from "../typecheck_types";
 import { slice_text, token_from_name, trim_text } from "./text_utils";
 

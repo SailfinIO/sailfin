@@ -1,6 +1,6 @@
 // Regression coverage for the postfix `?` error-propagation operator
 // (R.1, epic #371; issue #828). `parse_postfix_chain` in
-// `compiler/src/parser/expressions/postfix.sfn` carries the `?` arm that wraps the
+// `compiler/capsules/syntax/src/parser/expressions/postfix.sfn` carries the `?` arm that wraps the
 // preceding expression in `Expression.TryOperator`. This is parse-only:
 // type rules (R.3) and emission (R.4) land later.
 //
@@ -13,8 +13,8 @@ import {
     Expression,
     Program,
     Statement
-} from "../../src/ast";
-import { parse_program } from "../../src/parser/mod";
+} from "sfn/syntax";
+import { parse_program } from "sfn/syntax";
 
 // -------------------------------------------------------------------
 // Helpers

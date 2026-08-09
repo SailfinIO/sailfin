@@ -15,9 +15,10 @@
 // contains no effect keyword still fires (no text scan, no effect-keyword
 // anchor); (d) match-arm shorthand patterns (which legitimately degrade to
 // `Raw`) are exempt.
-import { Expression, SourceSpan, Statement } from "../../src/ast";
+import { Expression, SourceSpan, Statement } from "sfn/syntax";
+import { parse_program } from "sfn/syntax";
+
 import { empty_import_symbols } from "../../src/effect_imports";
-import { parse_program } from "../../src/parser/mod";
 import { typecheck_diagnostics } from "../../src/typecheck";
 import { TypeckCtx, make_typeck_ctx } from "../../src/typecheck/context";
 import { walk_expression, walk_match_pattern } from "../../src/typecheck/expression_walk";

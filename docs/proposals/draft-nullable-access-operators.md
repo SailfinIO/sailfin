@@ -25,7 +25,7 @@ Sailfin already models absence with a `T?` nullable-type suffix (Kotlin/
 TypeScript style) baked into `TypeAnnotation.text`, used pervasively in the
 compiler's own AST (`TypeParameter.bound: TypeAnnotation?`, `ImportSpecifier`
 aliases, `Parameter.type_annotation: TypeAnnotation?`, and dozens more in
-`compiler/src/ast.sfn`), with `Expression.NullLiteral` as the literal
+`compiler/capsules/syntax/src/ast.sfn`), with `Expression.NullLiteral` as the literal
 (`ast.sfn:65`). What it lacks is *ergonomic access* to those values: there is
 no null-safe navigation `?.` and no null-coalescing `??`, so every use of a
 `T?` requires a hand-written `if x != null { ... }` guard. This SFEP adds two
@@ -44,7 +44,7 @@ two-char symbols, exactly as `..`, `&&`, and `<=` are today.
 ## 2. Motivation
 
 **Who hits it, how often.** Absence is everywhere in the compiler's own source.
-`compiler/src/ast.sfn` alone declares nullable fields on `TypeParameter.bound`,
+`compiler/capsules/syntax/src/ast.sfn` alone declares nullable fields on `TypeParameter.bound`,
 `SourceSpan?` on nearly every expression variant, `Parameter.type_annotation`,
 `Parameter.default_value`, `Channel.element_type`, `Channel.capacity`,
 `Serve.port`, `MatchCase.guard`, `ElseBranch.statement`/`body`, and many more.
@@ -167,7 +167,7 @@ does not match). The `??`/`?.` arms are new, separate productions.
 
 ### 3.3 Lexer
 
-`compiler/src/lexer.sfn` — add two arms to `is_two_char_symbol` (`lexer.sfn:446`):
+`compiler/capsules/syntax/src/lexer.sfn` — add two arms to `is_two_char_symbol` (`lexer.sfn:446`):
 
 ```sfn
 if value == "?." { return true; }
@@ -182,7 +182,7 @@ tokenization to build the new compiler.
 
 ### 3.4 Parser
 
-`compiler/src/parser/expressions.sfn` — two additions in `parse_postfix_chain`
+`compiler/capsules/syntax/src/parser/expressions.sfn` — two additions in `parse_postfix_chain`
 (`expressions.sfn:1177`), placed in the postfix `Symbol` loop alongside the
 existing `.` / `(` / `[` / `?` arms:
 
@@ -239,7 +239,7 @@ precedence-table entry that could perturb `||`/`&&` binding.
 
 ### 3.5 AST
 
-`compiler/src/ast.sfn` — four new `Expression` variants, modelled field-for-field
+`compiler/capsules/syntax/src/ast.sfn` — four new `Expression` variants, modelled field-for-field
 on their non-optional cousins so the field-name GEP-slot convention holds (see
 the `Assignment` field-name note at `ast.sfn:133-158`):
 
@@ -615,11 +615,11 @@ Regression coverage under `compiler/tests/{unit,integration,e2e}/`:
   adds access operators for); line 63 (`Result<T, E>` roadmap note).
 - `.claude/rules/seed-dependency.md` — the bundle decision (single consumer,
   additive, no seed cut).
-- Key source: `compiler/src/lexer.sfn:446` (`is_two_char_symbol`),
-  `:333` (maximal-munch symbol emit); `compiler/src/parser/expressions.sfn:1177`
+- Key source: `compiler/capsules/syntax/src/lexer.sfn:446` (`is_two_char_symbol`),
+  `:333` (maximal-munch symbol emit); `compiler/capsules/syntax/src/parser/expressions.sfn:1177`
   (`parse_postfix_chain`, `:1318` the `?` arm), `:370`/`:422` (ternary/assignment
   base-precedence seams — the `??` seam template), `:2209` (`binary_precedence`);
-  `compiler/src/ast.sfn:54` (`Expression` enum), `:65` (`NullLiteral`), `:68`
+  `compiler/capsules/syntax/src/ast.sfn:54` (`Expression` enum), `:65` (`NullLiteral`), `:68`
   (`Member`), `:74` (`Index`), `:69` (`Call`); `compiler/src/typecheck.sfn:1060`
   (`Cast`/`Is`/`TryOperator` walk arms); `compiler/src/effect_checker.sfn:888`
   (`Cast`/`Is`/`Conditional`/`TryOperator` effect arms);

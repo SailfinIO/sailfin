@@ -24,7 +24,7 @@
 // relies on it.
 //
 // See issue #1173 (epic #842 Phase 3, sub-issue 3.3) and §11 Testing.
-import { Program, Statement, Block } from "./ast";
+import { Program, Statement, Block } from "sfn/syntax";
 
 export { BareAssertFinding, collect_bare_assert_findings };
 

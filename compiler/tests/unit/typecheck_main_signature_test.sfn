@@ -8,7 +8,8 @@
 // validation that flags signatures the wrapper can't honour, so users
 // see a Sailfin diagnostic (E0010 / E0011) instead of an `lld` link
 // error after M5.3 emits the real argv-parsing prologue.
-import { parse_program } from "../../src/parser/mod";
+import { parse_program } from "sfn/syntax";
+
 import { typecheck_diagnostics } from "../../src/typecheck";
 import { Diagnostic } from "../../src/typecheck_types";
 

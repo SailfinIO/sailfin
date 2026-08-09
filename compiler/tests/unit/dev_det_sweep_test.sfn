@@ -13,11 +13,19 @@ import {
 } from "../../src/cli/commands/dev_det_sweep";
 
 test "det-sweep: slug strips compiler/src prefix" {
-    assert _det_slug_of("compiler/src/ast.sfn") == "ast";
+    assert _det_slug_of("compiler/src/analyzer.sfn") == "analyzer";
 }
 
 test "det-sweep: slug keeps nested compiler/src path" {
     assert _det_slug_of("compiler/src/llvm/lowering/entrypoints.sfn") == "llvm/lowering/entrypoints";
+}
+
+test "det-sweep: slug canonicalizes a compiler implementation capsule" {
+    assert _det_slug_of("compiler/capsules/syntax/src/ast.sfn") == "sfn/syntax/ast";
+}
+
+test "det-sweep: slug canonicalizes a nested compiler capsule module" {
+    assert _det_slug_of("compiler/capsules/syntax/src/parser/mod.sfn") == "sfn/syntax/parser/mod";
 }
 
 test "det-sweep: slug re-prefixes runtime for top-level runtime module" {

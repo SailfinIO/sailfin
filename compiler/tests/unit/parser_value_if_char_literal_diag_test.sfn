@@ -10,7 +10,8 @@
 // preserved. These tests drive `walk_expression` directly with the exact text
 // the parser produces on degradation, so they pin classification without a
 // full compile.
-import { Expression, SourceSpan, Statement } from "../../src/ast";
+import { Expression, SourceSpan, Statement } from "sfn/syntax";
+
 import { empty_import_symbols } from "../../src/effect_imports";
 import { TypeckCtx, make_typeck_ctx } from "../../src/typecheck/context";
 import { walk_expression } from "../../src/typecheck/expression_walk";

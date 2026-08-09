@@ -8,8 +8,9 @@
 // (`compiler/src/llvm/lowering/emission.sfn:332`); this test pins
 // the contract from the parser through the native-IR emitter so a
 // regression in either layer breaks here.
+import { parse_program } from "sfn/syntax";
+
 import { emit_native_text_with_module_name } from "../../src/emit_native";
-import { parse_program } from "../../src/parser/mod";
 import { index_of } from "../../src/string_utils";
 
 fn _contains(haystack: string, needle: string) -> boolean {

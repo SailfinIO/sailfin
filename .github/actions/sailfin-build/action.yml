@@ -217,7 +217,7 @@ runs:
       uses: actions/cache@v4
       with:
         path: build/cache
-        key: sailfin-buildcache-${{ inputs.target }}-${{ inputs.seed_version }}-${{ steps.layout.outputs.fp }}-${{ hashFiles('compiler/src/**/*.sfn', 'runtime/**/*.sfn', 'compiler/capsule.toml', 'bootstrap.toml') }}
+        key: sailfin-buildcache-${{ inputs.target }}-${{ inputs.seed_version }}-${{ steps.layout.outputs.fp }}-${{ hashFiles('compiler/src/**/*.sfn', 'compiler/capsules/**/*.sfn', 'runtime/**/*.sfn', 'compiler/capsule.toml', 'bootstrap.toml') }}
         restore-keys: |
           sailfin-buildcache-${{ inputs.target }}-${{ inputs.seed_version }}-${{ steps.layout.outputs.fp }}-
 
@@ -251,7 +251,7 @@ runs:
       uses: actions/cache@v4
       with:
         path: build/cache/test-bin
-        key: sailfin-testbin-${{ inputs.target }}-${{ inputs.seed_version }}-${{ hashFiles('compiler/src/**/*.sfn', 'runtime/**/*.sfn', 'runtime/capsule.toml', 'runtime/ir/**', 'compiler/capsule.toml', 'bootstrap.toml') }}
+        key: sailfin-testbin-${{ inputs.target }}-${{ inputs.seed_version }}-${{ hashFiles('compiler/src/**/*.sfn', 'compiler/capsules/**/*.sfn', 'runtime/**/*.sfn', 'runtime/capsule.toml', 'runtime/ir/**', 'compiler/capsule.toml', 'bootstrap.toml') }}
         restore-keys: |
           sailfin-testbin-${{ inputs.target }}-${{ inputs.seed_version }}-
           sailfin-testbin-${{ inputs.target }}-

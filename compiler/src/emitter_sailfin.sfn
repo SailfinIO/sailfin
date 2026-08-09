@@ -25,7 +25,9 @@ import {
     TypeAnnotation,
     TypeParameter,
     WithClause
-} from "./ast";
+} from "sfn/syntax";
+import { Token } from "sfn/syntax";
+
 import {
     format_expression,
     format_initializer,
@@ -46,7 +48,6 @@ import {
     tokens_to_source,
     trim_block_body
 } from "./emitter_sailfin_utils";
-import { Token } from "./token";
 
 fn is_import_like(statement: Statement) -> boolean {
     if statement.variant == "ImportDeclaration" { return true; }

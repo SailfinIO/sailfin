@@ -1,0 +1,32 @@
+// compiler/capsules/syntax/src/parser/statements/mod.sfn
+//
+// Statement parser facade. Implementations are grouped by statement kind so
+// each compiler module stays below the repository's line-count ceiling.
+export { parse_block, parse_block_statement } from "./block";
+
+export {
+    parse_for_statement,
+    parse_while_statement,
+    parse_loop_statement,
+    parse_routine_statement,
+    parse_break_statement,
+    parse_continue_statement,
+    parse_if_statement
+} from "./control_flow";
+
+export {
+    parse_match_statement,
+    parse_match_cases,
+    parse_match_case,
+    split_match_case_tokens
+} from "./match";
+
+export {
+    parse_with_statement,
+    parse_return_statement,
+    parse_throw_statement,
+    parse_try_statement,
+    parse_assert_statement
+} from "./special";
+
+export { parse_expression_statement, parse_unknown_statement } from "./expression_recovery";

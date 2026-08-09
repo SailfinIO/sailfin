@@ -104,7 +104,7 @@ signature churn.
 
 ## 3. The unified type
 
-`Token` (`compiler/src/token.sfn:17-22`) is the wrong span carrier: it is a
+`Token` (`compiler/capsules/syntax/src/token.sfn:17-22`) is the wrong span carrier: it is a
 *point*, the renderer ignores its `kind`, and the backend has no tokens.
 `SourceSpan` (`ast.sfn:28-33`) and `NativeSourceSpan` (`native_ir.sfn:59-64`)
 are already structurally identical — a fifth duplication — and carry start and

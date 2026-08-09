@@ -2,7 +2,7 @@
 // declarations must fail closed with a precise `E05xx` parse diagnostic
 // instead of falling through to a garbage AST node or an ICE at LLVM
 // lowering. Covers all three recovery sites
-// (`compiler/src/parser/declarations/`):
+// (`compiler/capsules/syntax/src/parser/declarations/`):
 //   - `fn broken( {`   -> E0501 (unclosed parameter list)
 //   - `let x = ;`      -> E0502 (missing initializer expression)
 //   - `struct S { x: }` -> E0503 (missing field type)

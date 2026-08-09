@@ -45,9 +45,10 @@ import {
     with_flag
 } from "sfn/cli";
 import { int_to_string } from "sfn/strings";
+import { Program, Statement } from "sfn/syntax";
+import { parse_program } from "sfn/syntax";
 
 import { AssertFailure, _empty_assert_failure } from "../../../assert_failure";
-import { Program, Statement } from "../../../ast";
 import { LinkPlan, LlvmTextBackend } from "../../../backend";
 import { assemble_link_inputs } from "../../../build/clang_argv";
 import {
@@ -86,7 +87,6 @@ import { ImportSymbolTable, empty_import_symbols } from "../../../effect_imports
 import { format_backend_failure_banner } from "../../../ice";
 import { compile_tests_to_llvm_file_with_module_imports, module_name_from_path } from "../../../main";
 import { LayoutManifest } from "../../../native_ir";
-import { parse_program } from "../../../parser/mod";
 import { runtime_capsule_from_root } from "../../../runtime_capsule_resolver";
 import { _has_prefix_cmd, _sort_strings_cmd } from "../../../string_cmd_utils";
 import {

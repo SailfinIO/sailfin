@@ -33,8 +33,8 @@ import {
     get,
     with_flag
 } from "sfn/cli";
+import { parse_program } from "sfn/syntax";
 
-import { parse_program } from "../../parser/mod";
 import { substring } from "../../string_utils";
 import {
     SymbolEntry,

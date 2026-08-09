@@ -62,7 +62,7 @@ Three independent instruments:
 3. **Bandwidth calibration** — a microbenchmark replaying the measured size
    distribution, to convert bytes-scanned into wall time.
 
-Workload: `sfn check compiler/src/parser/*.sfn` (7 files, 8,436 lines) — the
+Workload: `sfn check compiler/capsules/syntax/src/parser/*.sfn` (7 files, 8,436 lines) — the
 front end only (parse + typecheck + effect-check, no IR, no codegen).
 
 **Two artifacts are mixed.** All *dynamic* measurement is against the 0.8.4 seed
@@ -184,12 +184,12 @@ There are **two** mechanisms, not one. SFN-460 §4 described only the first.
 
 The chain is short and entirely mechanical:
 
-1. `compiler/src/lexer.sfn:10-11` — `struct LexerState { source: string; … }`.
+1. `compiler/capsules/syntax/src/lexer.sfn:10-11` — `struct LexerState { source: string; … }`.
 2. `compiler/src/llvm/type_mapping.sfn:619` — `map_struct_field_annotation`
    demotes string-typed **struct fields** to bare `i8*` (deliberately, to keep
    field byte offsets stable), while scalars stay `{i8*, i64}`
    (`map_type_annotation`, `type_mapping.sfn:559-561`).
-3. `compiler/src/lexer.sfn:422-439` — `slice(text: string, …)` and
+3. `compiler/capsules/syntax/src/lexer.sfn:422-439` — `slice(text: string, …)` and
    `byte_at(text: string, …)` take the source as a **scalar** `string`
    parameter.
 4. **24 call sites** in `lexer.sfn` pass `state.source` — the bare-`i8*` field
@@ -551,14 +551,14 @@ done | sort -rn | head -20
 # dynamic attribution: build the interposer in §11, then
 gcc -shared -fPIC -O2 -o /tmp/libcount.so /tmp/count_strnlen.c -ldl
 STRNLEN_STATS=/tmp/stats.txt LD_PRELOAD=/tmp/libcount.so \
-  build/toolchains/seed/bin/sfn check compiler/src/parser/*.sfn
+  build/toolchains/seed/bin/sfn check compiler/capsules/syntax/src/parser/*.sfn
 # resolve `CALLER ra=0x…` lines against `nm <binary>`, subtracting the
 # `BASE` load address the interposer records from /proc/self/maps.
 
 # exact instruction share
 SAILFIN_MEM_LIMIT=unlimited valgrind --tool=callgrind \
   --callgrind-out-file=cg.out \
-  build/toolchains/seed/bin/sfn check compiler/src/parser/expressions.sfn
+  build/toolchains/seed/bin/sfn check compiler/capsules/syntax/src/parser/expressions.sfn
 callgrind_annotate cg.out | grep -E 'PROGRAM TOTALS|strnlen|sfn_str_len'
 ```
 

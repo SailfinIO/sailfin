@@ -13,7 +13,8 @@
 // These tests pin both halves: the positives (lowercase primitive typos and
 // undefined capitalized user types, in `let` and cast position) and the
 // negatives (every genuinely resolvable annotation stays silent).
-import { parse_program } from "../../src/parser/mod";
+import { parse_program } from "sfn/syntax";
+
 import { typecheck_diagnostics } from "../../src/typecheck";
 import { Diagnostic } from "../../src/typecheck_types";
 

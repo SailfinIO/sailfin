@@ -16,8 +16,7 @@
 // through the `sfn/json` capsule, mirroring `diagnostics_json.sfn`: a fixed
 // manual field order keeps the schema-sensitive output byte-stable.
 import { char_code_at, substring } from "sfn/strings";
-
-import { FunctionSignature, Program } from "./ast";
+import { FunctionSignature, Program } from "sfn/syntax";
 
 // One public function in the index. `import_path` is "" for prelude
 // symbols (rendered as JSON null — no import needed) and the capsule

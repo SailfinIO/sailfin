@@ -1,6 +1,7 @@
 import { int_to_string } from "sfn/strings";
+import { Program, Statement } from "sfn/syntax";
+import { parse_program } from "sfn/syntax";
 
-import { Program, Statement } from "../../../ast";
 import { _sanitize_filename_cmd, _write_text_cmd } from "../../../build/fs";
 import { build_target_os, target_exe_name } from "../../../build/target";
 import {
@@ -19,7 +20,6 @@ import { empty_import_symbols } from "../../../effect_imports";
 import { format_backend_failure_banner } from "../../../ice";
 import { compile_tests_to_llvm_file_with_module_imports, module_name_from_path } from "../../../main";
 import { LayoutManifest } from "../../../native_ir";
-import { parse_program } from "../../../parser/mod";
 import {
     TestEntry,
     collect_test_entries,

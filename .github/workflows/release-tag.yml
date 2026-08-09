@@ -272,6 +272,13 @@ jobs:
             echo "[ci][error] compiler/capsule.toml has '$file_version', expected '$expected'" >&2
             exit 1
           fi
+          while IFS= read -r manifest; do
+            manifest_version="$(sed -n 's/^version *= *"\(.*\)"/\1/p' "$manifest")"
+            if [ "$manifest_version" != "$expected" ]; then
+              echo "[ci][error] $manifest has '$manifest_version', expected '$expected'" >&2
+              exit 1
+            fi
+          done < <(find compiler/capsules -mindepth 2 -maxdepth 2 -name capsule.toml -print | sort)
           actual="$(build/bin/sfn version | sed -n 's/.*sfn //p')"
           if [ "$actual" != "$expected" ]; then
             echo "[ci][error] built compiler reports '$actual', expected '$expected'" >&2

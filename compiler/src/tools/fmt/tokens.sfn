@@ -1,8 +1,9 @@
 // compiler/src/tools/fmt/tokens.sfn
 //
 // Token enrichment, lexical role classification, and comment attachment.
+import { Token } from "sfn/syntax";
+
 import { char_at, strings_equal } from "../../string_utils";
-import { Token } from "../../token";
 import { FmtToken } from "./types";
 
 fn _count_newlines(text: string) -> int {

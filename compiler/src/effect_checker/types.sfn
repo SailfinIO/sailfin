@@ -1,7 +1,7 @@
 // compiler/src/effect_checker/types.sfn
 //
 // Shared diagnostic and requirement data for effect validation.
-import { Token } from "../token";
+import { Token } from "sfn/syntax";
 
 struct EffectRequirement {
     effect: string;

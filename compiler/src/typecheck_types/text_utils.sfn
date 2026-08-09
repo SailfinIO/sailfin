@@ -2,8 +2,8 @@
 //
 // String/token scanning primitives shared across the typecheck-types submodules.
 // Extracted from typecheck_types.sfn (SFN-625).
-import { SourceSpan } from "../ast";
-import { Token, TokenKind } from "../token";
+import { SourceSpan } from "sfn/syntax";
+import { Token, TokenKind } from "sfn/syntax";
 
 // Split a type annotation on top-level `&`, respecting `(`/`)` and
 // `<`/`>` nesting so an intersection nested inside generic arguments

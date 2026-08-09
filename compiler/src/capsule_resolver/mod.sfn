@@ -1,4 +1,5 @@
 import { int_to_string } from "sfn/strings";
+import { parse_program } from "sfn/syntax";
 
 // compiler/src/capsule_resolver.sfn
 //
@@ -85,7 +86,6 @@ import {
     module_name_from_path,
     write_native_text_file_with_module
 } from "../main";
-import { parse_program } from "../parser/mod";
 import { RuntimeCapsuleArtifacts, enumerate_runtime_capsule_artifacts } from "../runtime_capsule_resolver";
 import {
     SemVer,

@@ -99,8 +99,6 @@ fn _append_effect_authority_exceptions(initial: AuthorityException[]) -> Authori
     let mut out = initial;
     let seam = "internal compiler roles still declare I/O effects before capability-free extraction (SFEP-0020 §4)";
     out.push(_authority_exception("emit_native", "effect:io", 1, seam));
-    out.push(_authority_exception("lexer", "effect:io", 1, seam));
-    out.push(_authority_exception("parser/mod", "effect:io", 2, seam));
     return out;
 }
 
@@ -233,9 +231,6 @@ fn _module_role(path: string) -> string {
     let id = _monolith_module_id(path);
     if id.length == 0 { return ""; }
 
-    if id == "ast" || id == "lexer" || id == "token" || starts_with(id, "parser/") {
-        return ROLE_SYNTAX;
-    }
     if _is_driver_module_id(id) { return ROLE_DRIVER; }
     if id == "analyzer" || starts_with(id, "typecheck/") || starts_with(id, "typecheck_types/")
         || starts_with(id, "effect_checker/")
@@ -1184,6 +1179,8 @@ test "capsule roles: encode every SFEP-0020 dependency invariant" {
 
 test "capsule roles: classification survives physical compiler capsule moves" {
     assert _module_role("compiler/capsules/syntax/src/parser/mod.sfn") == ROLE_SYNTAX;
+    assert _module_role("compiler/src/parser/mod.sfn") == "";
+    assert _module_role("compiler/src/ast.sfn") == "";
     assert _module_role("compiler/capsules/analyzer/src/mod.sfn") == ROLE_ANALYZER;
     assert _module_role("compiler/capsules/ir/src/native_ir.sfn") == ROLE_IR;
     assert _module_role("compiler/capsules/codegen/src/emit.sfn") == ROLE_CODEGEN;

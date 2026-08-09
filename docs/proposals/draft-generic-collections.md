@@ -22,7 +22,7 @@ graduates-to: reference/preview/collections.md
 
 Sailfin has exactly two aggregate literal shapes in the AST —
 `Expression.Array{elements}` and `Expression.Object{fields}` /
-`Expression.Struct{type_name, fields}` (`compiler/src/ast.sfn:75-77`) — and one
+`Expression.Struct{type_name, fields}` (`compiler/capsules/syntax/src/ast.sfn:75-77`) — and one
 hash-map data structure, the concrete non-generic string→string `StrMap`
 (`runtime/sfn/collections.sfn`; `docs/status.md:193`). There is **no** generic
 `Map<K, V>`, **no** `Set<T>`, and **no** tuple type anywhere in the tree. This
@@ -122,7 +122,7 @@ rule Rust and Swift use and matches "boring syntax wins."
 element types, positional access) or `Object`/`Struct` (no field names). Per the
 `ast.sfn` variant-slotting discipline (each field name occupies one union slot;
 appended fields keep positional GEP indexing stable — see the `Assignment`
-`rhs`-not-`value` note at `compiler/src/ast.sfn:159`), add a new expression
+`rhs`-not-`value` note at `compiler/capsules/syntax/src/ast.sfn:159`), add a new expression
 variant and a new member-access form:
 
 ```sfn
@@ -143,7 +143,7 @@ seed's name-keyed GEP model, use a fresh name (`tuple_elements`) — the
 implementer picks based on the `ast.sfn` slotting audit; the recommendation is
 to reuse `elements` (same type, no collision) and fall back to `tuple_elements`
 only if the audit shows a hazard. Tuple **types** ride the existing
-`TypeAnnotation { text }` (`compiler/src/ast.sfn:12-14`) — the annotation text
+`TypeAnnotation { text }` (`compiler/capsules/syntax/src/ast.sfn:12-14`) — the annotation text
 is `"(A, B)"` and the type checker parses tuple structure from that text, the
 same way it already parses `T[]` and generic `Foo<T>` from annotation text; no
 new type-AST node is required.
@@ -207,7 +207,7 @@ one — this SFEP does not re-specify HOF lowering.
 ### 3.3 Literal syntax for maps and sets — collision resolution
 
 The obvious `{ k: v, ... }` map literal **collides** with the existing
-`Expression.Object { fields }` (`compiler/src/ast.sfn:76`), which already owns
+`Expression.Object { fields }` (`compiler/capsules/syntax/src/ast.sfn:76`), which already owns
 `{ ... }` for anonymous-object / struct-shorthand literals. Overloading `{}` to
 mean "map when keys are expressions, object when keys are identifiers" is a
 context-sensitive parse that violates "boring syntax wins" and would make LLM
@@ -318,7 +318,7 @@ Passes touched, in pipeline order:
   the pinned seed (the standard capability-before-consumer discipline,
   `.claude/rules/seed-dependency.md`).
 - **AST** (`ast.sfn`): add `Tuple`, `TupleIndex`, `MapLiteral` variants,
-  appended per the GEP-stability convention (`compiler/src/ast.sfn:60`).
+  appended per the GEP-stability convention (`compiler/capsules/syntax/src/ast.sfn:60`).
 - **Typecheck** (`typecheck.sfn`): tuple structural typing + constant-index
   bounds checking; `Map`/`Set` generic-constraint solving (delegated to the
   `0038-generic-constraints.md` solver — this SFEP adds the `Hashable`/`Eq`
@@ -437,6 +437,6 @@ Unit (parser/typecheck) + e2e (`compiler/tests/{unit,integration,e2e}/`):
 - `docs/status.md:192-193` — "Generic type constraints (Planned)" and the
   `StrMap` "deprecated alias when generic `HashMap<K, V>` lands" note this
   SFEP fulfills.
-- `compiler/src/ast.sfn:75-77` — the existing `Array` / `Object` / `Struct`
+- `compiler/capsules/syntax/src/ast.sfn:75-77` — the existing `Array` / `Object` / `Struct`
   aggregate variants and (`:60`, `:159`) the variant field-slotting / GEP
   stability convention new nodes must follow.

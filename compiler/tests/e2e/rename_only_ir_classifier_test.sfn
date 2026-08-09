@@ -1,0 +1,77 @@
+// End-to-end coverage for the reusable compiler-capsule rename-only IR
+// classifier established by SFN-741.
+import { clean_runner_env, nested_runner_scratch } from "sfn/test";
+
+fn _script() -> string ![io] {
+    let mut root = env.get("SAILFIN_REPO_ROOT");
+    if root.length == 0 { root = "."; }
+    return root + "/scripts/classify_rename_only_ir.sh";
+}
+
+fn _fixture_root(name: string) -> string ![io] {
+    let root = nested_runner_scratch("rename-only-ir-" + name);
+    fs.createDirectory(root, true);
+    return root;
+}
+
+fn _classify(root: string) -> int ![io] {
+    let result = process.run_capture(["bash", _script(), root + "/before.ll", root
+        + "/after.ll", root
+        + "/map.tsv"], clean_runner_env(root));
+    let _out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    return result;
+}
+
+test "rename-only determinism classifier accepts explicit capsule mangling changes" ![io] {
+    let root = _fixture_root("pass");
+    fs.writeFile(root + "/before.ll", "define i64 @parse__parser__mod() {\n"
+        + "  %value = call i64 @lex__lexer()\n"
+        + "  ret i64 %value\n"
+        + "}\n");
+    fs.writeFile(root + "/after.ll", "define i64 @parse__sfn__syntax__parser__mod() {\n"
+        + "  %value = call i64 @lex__sfn__syntax__lexer()\n"
+        + "  ret i64 %value\n"
+        + "}\n");
+    fs.writeFile(root + "/map.tsv", "parser__mod\tsfn__syntax__parser__mod\n"
+        + "lexer\tsfn__syntax__lexer\n");
+    let result = _classify(root);
+    if result != 0 {
+        throw "rename-only classifier rejected explicit module renames";
+    }
+}
+
+test "rename-only determinism classifier rejects semantic IR drift" ![io] {
+    let root = _fixture_root("fail");
+    fs.writeFile(root + "/before.ll", "define i64 @parse__parser__mod() {\n"
+        + "  ret i64 1\n"
+        + "}\n");
+    fs.writeFile(root + "/after.ll", "define i64 @parse__sfn__syntax__parser__mod() {\n"
+        + "  ret i64 2\n"
+        + "}\n");
+    fs.writeFile(root + "/map.tsv", "parser__mod\tsfn__syntax__parser__mod\n");
+    let result = _classify(root);
+    if result != 1 { throw "rename-only classifier accepted semantic IR drift"; }
+}
+
+test "rename-only determinism classifier preserves final newline state" ![io] {
+    let root = _fixture_root("newline");
+    fs.writeFile(root + "/before.ll", "define i64 @parse__parser__mod() {");
+    fs.writeFile(root + "/after.ll", "define i64 @parse__sfn__syntax__parser__mod() {\n");
+    fs.writeFile(root + "/map.tsv", "parser__mod\tsfn__syntax__parser__mod\n");
+    let result = _classify(root);
+    if result != 1 {
+        throw "rename-only classifier ignored final-newline drift";
+    }
+}
+
+test "rename-only determinism classifier accepts a mapped rename at EOF without newline" ![io] {
+    let root = _fixture_root("rename-at-eof");
+    fs.writeFile(root + "/before.ll", "declare @parser__mod");
+    fs.writeFile(root + "/after.ll", "declare @sfn__syntax__parser__mod");
+    fs.writeFile(root + "/map.tsv", "parser__mod\tsfn__syntax__parser__mod\n");
+    let result = _classify(root);
+    if result != 0 {
+        throw "rename-only classifier rejected a mapped EOF rename";
+    }
+}

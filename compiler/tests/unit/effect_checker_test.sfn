@@ -22,7 +22,9 @@ import {
     Statement,
     TypeAnnotation,
     TypeParameter
-} from "../../src/ast";
+} from "sfn/syntax";
+import { Token, TokenKind } from "sfn/syntax";
+
 import { code_for_missing_effect } from "../../src/diagnostics_render";
 import {
     validate_effects,
@@ -33,7 +35,6 @@ import { EffectViolation } from "../../src/effect_checker/types";
 import { append_import_function, empty_import_symbols } from "../../src/effect_imports";
 import { canonical_effects, is_canonical_effect } from "../../src/effect_taxonomy";
 import { intrinsic_effects_for_target } from "../../src/intrinsic_effects";
-import { Token, TokenKind } from "../../src/token";
 
 // -------------------------------------------------------------------
 // Builder helpers

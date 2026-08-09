@@ -21,6 +21,41 @@ fn module_name_from_path(source_path: string) -> string {
         normalized = substring(normalized, 2, normalized.length);
     }
 
+    // Compiler implementation capsules use their workspace identity even when
+    // a direct check/emit names the physical source path. Workspace builds
+    // already canonicalize these through `_cr_capsule_slug_for_path`; doing it
+    // here keeps direct tooling and resolver-driven mangling identical.
+    let compiler_capsule_prefix = "compiler/capsules/";
+    let mut last_capsule: int = -1;
+    let capsule_search_limit = normalized.length - compiler_capsule_prefix.length;
+    index = 0;
+    loop {
+        if index > capsule_search_limit { break; }
+        if substring(normalized, index, index + compiler_capsule_prefix.length) == compiler_capsule_prefix {
+            last_capsule = index;
+        }
+        index += 1;
+    }
+    if last_capsule >= 0 {
+        let role_start = last_capsule + compiler_capsule_prefix.length;
+        let src_separator = "/src/";
+        let mut separator: int = -1;
+        index = role_start;
+        loop {
+            if index + src_separator.length > normalized.length { break; }
+            if substring(normalized, index, index + src_separator.length) == src_separator {
+                separator = index;
+                break;
+            }
+            index += 1;
+        }
+        if separator > role_start {
+            let role = substring(normalized, role_start, separator);
+            let tail = substring(normalized, separator + src_separator.length, normalized.length);
+            normalized = "sfn/" + role + "/" + tail;
+        }
+    }
+
     let compiler_prefix = "compiler/src/";
     let runtime_prefix = "runtime/";
     let mut start: int = 0;

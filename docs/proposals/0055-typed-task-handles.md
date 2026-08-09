@@ -21,7 +21,7 @@ task's result handle**. A `spawn fn() -> T { ... }` today produces an opaque
 future pointer that the compiler distinguishes only by a compile-time
 "future-kind" string tag (`void`/`number`/`int`/`bool`/`string`/`ptr`) carried
 on the `Spawn`/`Await` AST nodes — never a nameable, annotatable type
-(`compiler/src/ast.sfn:182-204`, `docs/status.md:468`). The immediate
+(`compiler/capsules/syntax/src/ast.sfn:182-204`, `docs/status.md:468`). The immediate
 consequence is that a program cannot annotate a collection of handles: `let mut
 hs = []` is an inferred-empty array whose element slot lowers as `double`, so
 pushing a future pointer through it corrupts the pointer, and SFN-386 correctly
@@ -530,7 +530,7 @@ alongside keeping the existing structured-concurrency suite green:
   binds the kind via annotation, as `Channel<T>` does).
 - **#1655** — the runtime-descriptor registry (`llvm/runtime_helpers.sfn`) the
   `join_all` builtin row follows.
-- `compiler/src/ast.sfn:182-204` — `Spawn`/`Await`/`Parallel`/`Channel` nodes and
+- `compiler/capsules/syntax/src/ast.sfn:182-204` — `Spawn`/`Await`/`Parallel`/`Channel` nodes and
   the `kind` tag.
 - `runtime/sfn/concurrency/{future,scheduler,nursery,parallel}.sfn` — the v0
   runtime surface (`sfn_spawn_<kind>`, `struct Task`, nursery join-all,

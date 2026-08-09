@@ -4,7 +4,7 @@
 // `![io.fs, net.http]` risked mis-parsing into `["io", "fs", "net",
 // "http"]`; this pins the correct `["io.fs", "net.http"]` shape straight
 // from real source through `parse_program`.
-import { parse_program } from "../../src/parser/mod";
+import { parse_program } from "sfn/syntax";
 
 test "parser: a dotted effect list parses as two single sub-effect strings" ![io] {
     let source = "fn f() ![io.fs, net.http] { }";

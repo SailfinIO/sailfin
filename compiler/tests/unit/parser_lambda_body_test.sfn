@@ -15,8 +15,8 @@
 // declaration's initializer (the same path the capture analysis relies
 // on). Block-scoped `let` is still parsed into an opaque statement and is
 // deliberately avoided here — its migration is tracked separately.
-import { Block, Expression } from "../../src/ast";
-import { parse_program } from "../../src/parser/mod";
+import { Block, Expression } from "sfn/syntax";
+import { parse_program } from "sfn/syntax";
 
 // Unwrap the body block of a lambda expression. The early-return null
 // guard narrows `expr` to a non-optional `Expression`; the variant

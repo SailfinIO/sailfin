@@ -34,7 +34,8 @@ import {
     Program,
     Statement,
     TypeAnnotation
-} from "./ast";
+} from "sfn/syntax";
+
 import { infer_expression_type } from "./emit_native_format";
 import {
     ends_with,

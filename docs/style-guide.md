@@ -317,7 +317,7 @@ budget (`compiler/tests/unit/cli_main_line_budget_test.sfn`).
 Use `mod.sfn` to re-export the public API of a folder:
 
 ```sfn
-// compiler/src/parser/mod.sfn
+// compiler/capsules/syntax/src/parser/mod.sfn
 export { parse_declaration } from "./declarations";
 export { parse_expression } from "./expressions";
 ```

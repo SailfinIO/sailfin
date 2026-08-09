@@ -7,8 +7,8 @@
 // (no `sfn check`/`sfn build` round trip) — see
 // `compiler/tests/e2e/parse_truncated_body_test.sfn` for the
 // diagnostics-envelope and build-side coverage.
-import { Block, Program, Statement } from "../../src/ast";
-import { parse_program } from "../../src/parser/mod";
+import { Block, Program, Statement } from "sfn/syntax";
+import { parse_program } from "sfn/syntax";
 
 test "parser truncated: cut-off function body yields Unknown E0505" ![io] {
     let program = parse_program("fn foo() {\n    let x = 1;\n");

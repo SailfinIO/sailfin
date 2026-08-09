@@ -15,6 +15,7 @@
 // integer oracle — see the design note
 // (`docs/proposals/design-notes/sfn-609-bf16-conversion-lowering.md`).
 import { contains } from "sfn/strings";
+import { parse_program } from "sfn/syntax";
 
 import { empty_llvm_import_context, resolve_llvm_provider_context } from "../../src/build/llvm_provider_context";
 import { emit_native_text_with_module_name } from "../../src/emit_native";
@@ -28,7 +29,6 @@ import {
 import { coerce_operand_to_string } from "../../src/llvm/expression_lowering/native/core_strings";
 import { lower_to_llvm_ir_from_text_with_provider_context } from "../../src/llvm/lowering/entrypoints";
 import { LLVMOperand } from "../../src/llvm/types";
-import { parse_program } from "../../src/parser/mod";
 
 test "bf16 lowering: widen to float allocates four temps and returns the last" {
     let seed: string[] = [];

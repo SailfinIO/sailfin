@@ -12,7 +12,8 @@
 // These parse a small `.sfn` source through `parse_program` and run
 // `typecheck_diagnostics` end-to-end, asserting on the `Diagnostic.code`
 // field, mirroring typecheck_bare_fn_type_test.sfn.
-import { parse_program } from "../../src/parser/mod";
+import { parse_program } from "sfn/syntax";
+
 import { typecheck_diagnostics } from "../../src/typecheck";
 import { Diagnostic } from "../../src/typecheck_types";
 

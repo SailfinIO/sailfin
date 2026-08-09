@@ -2,6 +2,8 @@
 // Rendering belongs to driver adapters; analyzer consumers can depend on this
 // module without pulling text presentation or authority-bearing code into the
 // semantic-analysis closure.
+import { Token } from "sfn/syntax";
+
 import { FixSuggestion, TextEdit } from "./diagnostic";
 import {
     CapabilityViolation,
@@ -10,7 +12,6 @@ import {
     UnrecognizedEffectViolation
 } from "./effect_checker/types";
 import { canonical_effects } from "./effect_taxonomy";
-import { Token } from "./token";
 import { Diagnostic } from "./typecheck_types";
 
 fn join_effects_data(effects: string[]) -> string {

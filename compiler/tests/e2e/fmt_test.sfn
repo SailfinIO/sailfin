@@ -120,7 +120,7 @@ test "fmt: idempotency on string_utils.sfn" ![io] {
 }
 
 test "fmt: idempotency on ast.sfn" ![io] {
-    assert _idempotent("idem_ast", fs.readFile("compiler/src/ast.sfn"));
+    assert _idempotent("idem_ast", fs.readFile("compiler/capsules/syntax/src/ast.sfn"));
 }
 
 test "fmt: idempotency on effect checker collector" ![io] {

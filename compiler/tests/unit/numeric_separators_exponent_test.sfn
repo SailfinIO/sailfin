@@ -8,8 +8,8 @@
 // `1.0e6`). Before the fix, a digit run that hit `_` ended the number token
 // and started an identifier (`1_000` -> `1`, `_000`), collapsing the RHS to
 // `Expression.Raw` — silently wrong.
-import { lex } from "../../src/lexer";
-import { normalize_number_literal_value } from "../../src/parser/utils";
+import { lex } from "sfn/syntax";
+import { normalize_number_literal_value } from "sfn/syntax";
 
 // ---- normalisation contract (the literal -> value path) ----
 test "numeric: underscores are stripped from integers" {

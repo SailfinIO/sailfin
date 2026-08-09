@@ -27,7 +27,7 @@ the final staging note.
 Trust these over the §"Root cause" line numbers below.
 
 - **`Expression.Raw` producers** — exactly two live escape paths, both in
-  `compiler/src/parser/expressions.sfn::expression_from_tokens`:
+  `compiler/capsules/syntax/src/parser/expressions.sfn::expression_from_tokens`:
   `parse_expression_bp` returns `success:false` (~:272-277) and leftover
   unconsumed tokens after a successful climb (~:279-284). The
   `expression_parse_failure` placeholder (~:74, `success:false`) never escapes
@@ -557,10 +557,10 @@ firstpass→seedcheck build, exactly like #957.
 
 ### Files affected (parts A–F), by pipeline stage
 
-- **Parser:** `compiler/src/parser/expressions.sfn` (cast-target reader A/C;
-  prefix `*`/`&` B; assignment seam D), `compiler/src/parser/statements/`
+- **Parser:** `compiler/capsules/syntax/src/parser/expressions.sfn` (cast-target reader A/C;
+  prefix `*`/`&` B; assignment seam D), `compiler/capsules/syntax/src/parser/statements/`
   (E0817 at `parse_unknown_statement` E).
-- **AST:** `compiler/src/ast.sfn` (`Assignment` node D).
+- **AST:** `compiler/capsules/syntax/src/ast.sfn` (`Assignment` node D).
 - **Typecheck:** `compiler/src/typecheck.sfn` (`Cast` arm classification A;
   `Unary` arm B; `Assignment` arm D), `compiler/src/typecheck_types.sfn`
   (`classify_fn_cast` split + `make_unparseable_statement_diagnostic` E0817 +
@@ -707,7 +707,7 @@ structural lift is wrong and breaks self-host: `Raw` is overloaded as the valid
 `grep "as \* " compiler/src runtime` excluding tests), `& fn` /
 `<fn> as *T` (`check_fn_reference_raw`, `typecheck_types.sfn:1785`), and
 member/index chains. There are only four `Expression.Raw` producers in the parser
-(`grep Expression.Raw compiler/src/parser`): `expressions.sfn:75` (the
+(`grep Expression.Raw compiler/capsules/syntax/src/parser`): `expressions.sfn:75` (the
 `success:false` placeholder, never a real node) and `:257,271,278` (the three
 `expression_from_tokens` failure paths). The valid casts flow through the *same*
 `:271`/`:278` paths as the junk, so **parser-site promotion or a pre-lift blanket
@@ -725,13 +725,13 @@ safe, so it is retained here for the record.
 
 ## Design — the structural lift
 
-### AST (`compiler/src/ast.sfn`)
+### AST (`compiler/capsules/syntax/src/ast.sfn`)
 
 - **`Cast`** already exists (`:95`): `Cast { operand: Expression, target_type: TypeAnnotation }`. No change needed; `target_type.text` is a free-form string that can hold `* i64` / `* fn(i64) -> i64`.
 - **Prefix `*` / `&`** reuse **`Unary`** (`:66`): `Unary { operator: string, operand: Expression }` with `operator ∈ {"*", "&"}`. The effect checker's `Unary` arm (`:870`) already walks the operand, and the formatter's `Unary` arm (`emit_native_format.sfn:108`) already serializes `<op>operand` text the shadow parser's prefix-`*` / borrow handlers consume. **Verify** the formatter emits `&`/`*` prefixes in the exact spelling `parse_borrow_expression` (`&x`) and the `*`-deref handler (`core.sfn:2281`) expect; if the existing `Unary` formatter only covers `-`/`!`, extend it to pass `&`/`*` through verbatim.
 - **Ternary** — no node exists. Add **`Conditional { condition: Expression, then_value: Expression, else_value: Expression, span: SourceSpan? }`**. The formatter serializes it as `(condition) ? (then) : (else)` to match the shadow `parse_ternary_expression` (`expressions_parsing.sfn:455`), which scans for top-level `?`/`:`. The effect checker walks all three children (merge). (Alternatively, if a smaller surface is preferred, ternary can stay deferred to #1180-a and #1627 ships casts + prefix `*`/`&` only — see Staging.)
 
-### Parser (`compiler/src/parser/expressions.sfn`)
+### Parser (`compiler/capsules/syntax/src/parser/expressions.sfn`)
 
 - **Cast target** (`:700-717`): replace the single-`Identifier`-only target read with a small type-target reader that accepts pointer (`* T`, `* fn(...) -> T`) and bare-identifier targets, capturing the full target text into `TypeAnnotation.text`. On success build `Expression.Cast`; only genuinely unparseable targets fall through to `expression_parse_failure`. Reuse the existing type-annotation parsing path (the same one that parses `let p: * i64`) so `* i64` / `* fn(...) -> T` spellings stay in lockstep with type-annotation grammar.
 - **Prefix `*` / `&`** (`parse_prefix_expression`, `:369-387`): extend the symbol set from `{-, !}` to `{-, !, *, &}`, building `Expression.Unary { operator: sym, operand: <parsed at unary_precedence()> }`. The binary `&`/`*` handlers (`binary_precedence` `:1566/:1586`) are unaffected — they only apply in infix position, which `parse_prefix_expression` is not.

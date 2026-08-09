@@ -60,11 +60,11 @@ struct Point {
 
 ### Parser enforces separator roles
 
-`consume_annotation_separator()` in `compiler/src/parser/declarations/syntax.sfn`
+`consume_annotation_separator()` in `compiler/capsules/syntax/src/parser/declarations/syntax.sfn`
 accepts only `:` for parameter, variable, and field annotations.
 `consume_return_type_separator()` in the same file accepts only `->` for
 function return types. `expression_tokens_consume_type_separator()` in
-`compiler/src/parser/expressions.sfn` uses boolean flags `accept_colon` and
+`compiler/capsules/syntax/src/parser/expressions.sfn` uses boolean flags `accept_colon` and
 `accept_arrow` to select the correct separator per context.
 
 The AST does not store which separator was parsed — it is discarded at parse

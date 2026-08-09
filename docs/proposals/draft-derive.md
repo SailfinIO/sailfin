@@ -22,7 +22,7 @@ compiler synthesizes the corresponding standard-library interface implementation
 directly from the type's fields (structs) or variants-and-payloads (enums) — so
 `@derive(Eq, Hash)` on a struct produces field-by-field `Eq` and `Hashable`
 method bodies without the author writing them. The mechanism reuses the existing
-`Decorator` AST node (`compiler/src/ast.sfn:284-292`), adds **no new syntax**, and
+`Decorator` AST node (`compiler/capsules/syntax/src/ast.sfn:284-292`), adds **no new syntax**, and
 is not a macro system: a fixed, closed set of five derivables is expanded by a
 dedicated post-typecheck pass into ordinary `MethodDeclaration`s before the
 emitter runs. This is the feature that lets user-defined types satisfy the
@@ -70,10 +70,10 @@ macro door.
 
 `@derive(...)` is applied to a `struct` or `enum` declaration using the grammar the
 parser already accepts for decorators-with-arguments
-(`compiler/src/parser/declarations/syntax.sfn`, applied by
+(`compiler/capsules/syntax/src/parser/declarations/syntax.sfn`, applied by
 `declarations/structs.sfn` and `declarations/enums.sfn`; the AST node
 is `StructDeclaration.decorators` / `EnumDeclaration.decorators`,
-`compiler/src/ast.sfn:373,394`):
+`compiler/capsules/syntax/src/ast.sfn:373,394`):
 
 ```sfn
 @derive(Eq, Hash, Debug, Clone)
@@ -158,7 +158,7 @@ Semantics are **structural**, computed from the declaration the decorator sits o
 
 The enum forms are **variant-aware**: they pattern-match on the receiver (and the
 argument, for binary operations) using the existing `MatchStatement` / `MatchCase`
-AST (`compiler/src/ast.sfn:412`). No new expression forms are introduced — the
+AST (`compiler/capsules/syntax/src/ast.sfn:412`). No new expression forms are introduced — the
 synthesized bodies are ordinary Sailfin the parser and typechecker already model.
 
 ### 3.3 Mechanism: a post-typecheck synthesis pass
@@ -178,7 +178,7 @@ The pass is mechanically simple and lives in a new module
 
 1. Walk every top-level `StructDeclaration` / `EnumDeclaration` in the `Program`.
 2. For each, scan `decorators` for a decorator named `derive`
-   (`decorator_names(...)`, `compiler/src/ast.sfn:294`). Skip declarations without
+   (`decorator_names(...)`, `compiler/capsules/syntax/src/ast.sfn:294`). Skip declarations without
    one.
 3. Parse the `@derive(...)` `arguments: DecoratorArgument[]` into a list of
    derivable identifiers. Validate each against the closed set (§3.1); emit
@@ -195,7 +195,7 @@ The pass is mechanically simple and lives in a new module
    pushing it onto the declaration's `methods` list, and add the target interface
    to `implements_types` if not already present so the vtable/conformance machinery
    picks it up. For enums (which have no `methods`/`implements_types` field today —
-   `EnumDeclaration`, `compiler/src/ast.sfn:389-395`), see §3.4.
+   `EnumDeclaration`, `compiler/capsules/syntax/src/ast.sfn:389-395`), see §3.4.
 
 After `derive_expand`, the rest of the pipeline sees **ordinary methods and an
 ordinary `implements` clause**. The emitter (`emit_native.sfn`), LLVM lowering
@@ -215,7 +215,7 @@ diagnostic instead of malformed IR.
 ### 3.4 Enums: methods and conformance
 
 `EnumDeclaration` today has no `methods` or `implements_types` fields
-(`compiler/src/ast.sfn:389-395`), whereas `StructDeclaration` has both
+(`compiler/capsules/syntax/src/ast.sfn:389-395`), whereas `StructDeclaration` has both
 (`ast.sfn:366-374`). Enums cannot currently carry method implementations or an
 `implements` clause. Two options:
 
@@ -466,7 +466,7 @@ they see synthesized methods as ordinary methods.
 
 ## 9. References
 
-- **AST / current state:** `compiler/src/ast.sfn:284-292` (`Decorator` /
+- **AST / current state:** `compiler/capsules/syntax/src/ast.sfn:284-292` (`Decorator` /
   `DecoratorArgument`), `:254-264` (`MethodDeclaration`, `EnumVariant`),
   `:366-395` (`StructDeclaration`, `EnumDeclaration`); `docs/status.md:212`
   (`@policy` "Parsed only, no compiler or runtime effect").

@@ -2,7 +2,8 @@
 //
 // Type rules for the `?` operator and conditional expressions —
 // result-type derivation and branch compatibility.
-import { Expression, SourceSpan } from "../ast";
+import { Expression, SourceSpan } from "sfn/syntax";
+
 import { Diagnostic } from "../typecheck_types";
 import {
     make_conditional_branch_mismatch_diagnostic,

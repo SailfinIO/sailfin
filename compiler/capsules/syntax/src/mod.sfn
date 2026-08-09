@@ -1,0 +1,41 @@
+// sfn/syntax — toolchain-internal syntax tree, lexer, and parser facade.
+//
+// Keep consumers on this contract rather than the capsule's physical module
+// layout. Parser implementation helpers remain private unless a compiler test
+// requires a narrow seam that is deliberately re-exported here.
+export {
+    Block,
+    Capture,
+    Decorator,
+    DecoratorArgument,
+    ElseBranch,
+    EnumVariant,
+    ExportSpecifier,
+    Expression,
+    FieldDeclaration,
+    ForClause,
+    FunctionSignature,
+    ImportSpecifier,
+    InterfaceFieldMember,
+    MatchCase,
+    MethodDeclaration,
+    ObjectField,
+    Parameter,
+    Program,
+    SourceSpan,
+    Statement,
+    TypeAnnotation,
+    TypeParameter,
+    WithClause,
+    decorator_marker_name,
+    has_decorator_marker
+} from "./ast";
+
+export { lex } from "./lexer";
+
+export { parse_program } from "./parser";
+
+// Parser regression coverage consumes the literal-normalization seam directly.
+export { normalize_number_literal_value } from "./parser/utils";
+
+export { Token, TokenKind, eof_token } from "./token";

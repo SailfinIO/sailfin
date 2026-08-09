@@ -33,7 +33,8 @@ import {
     Statement,
     TypeAnnotation,
     TypeParameter
-} from "./ast";
+} from "sfn/syntax";
+
 import { NativeInterface, NativeInterfaceSignature, NativeParameter } from "./native_ir";
 
 // -------------------------------------------------------------------

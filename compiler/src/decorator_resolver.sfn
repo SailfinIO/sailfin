@@ -28,7 +28,8 @@ import {
     Statement,
     decorator_marker_name,
     has_decorator_marker
-} from "./ast";
+} from "sfn/syntax";
+
 import { FixSuggestion } from "./diagnostic";
 import {
     ImportSymbolTable,
