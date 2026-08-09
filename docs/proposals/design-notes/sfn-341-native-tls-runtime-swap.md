@@ -406,6 +406,87 @@ import context (`.sfn-asm` only, content-keyed, ~28 modules, cached across
 builds). The crypto `.ll` compile itself is not new work — it is the work the
 compiler already does today.
 
+#### 3.1.6 Enforcing the union at the link boundary
+
+§3.1.3 put the union at the *resolver* layer, which is correct and stays.
+But a union computed by the resolver only protects links whose caller
+actually ran the resolver, and nothing required that. The gap was not
+theoretical: `tensor_ir_link_harness.sfn` linked a real binary through
+`_clang_link_multi` without ever calling a `prepare_project_capsules*`
+facade, and `tensor_matmul_exec_test` failed at both matmul sizes with ~20
+unresolved `__sfn__crypto__*` symbols referenced from `tls.sfn`'s object.
+
+**Link-layer commonality is not the guarantee.** The obvious reading — route
+every link through one function and the invariant follows — is wrong, and the
+harness is the proof: it already shared `_clang_link_multi` with `build` and
+`run`. The resolver is a separate, *skippable prerequisite*, not a parameter
+the shared function derives. Collapsing dispatchers would not have closed it.
+
+**Nor can the link derive the union itself.** `_clang_link_multi_with_opt`
+could call `enumerate_capsule_sources("", runtime_root)`, but only with an
+empty `ResolverConsumer`, so `capsule_artifact_layout_from_specs` would route
+the resulting `.ll`s differently from the ones `build.sfn` already resolved:
+two paths, one set of `__sfn__crypto__*` definitions, a duplicate-symbol link
+failure. It also cannot subtract the project's set, because on the `sfn test`
+path it never receives one. This is §3.1.3's rejected alternative in a new
+shape.
+
+**What the link can do is verify.** Every dispatcher already holds both halves:
+`RuntimeCapsuleArtifacts.capsule_deps` is the obligation, the resolved
+`ll_paths` are the discharge, and rule 1 of `ir_path_for_slug` maps between
+them deterministically. `missing_runtime_dep_specs`
+(`compiler/src/build/link_contract.sfn`) reports any declared spec with no
+compiled module in the link, and both dispatchers refuse pre-backend on a
+non-empty result. This needs no threading through `build`/`run`/`test`, and it
+checks the invariant rather than a claim about it — a "the resolver ran" flag
+would have read true through both resolver regressions that landed during this
+work, each of which ran the resolver and still dropped capsule sources.
+
+Deliberate asymmetry: a spec that is not safe `<scope>/<name>` form is
+skipped. Rule 1 only routes that shape, so failing a link over any other shape
+would be a false positive on a path the layout never produced. The needle is
+derived from `capsule_artifact_ir_dir`, not a copied literal, and matched by
+substring so absolute `ll_paths` still resolve. The residual risk is a false
+*positive*, from a dep reaching the link via a leg tagged `spec = ""` that
+routes through rule 2/3; it did not fire on any path exercised here, and that
+is the direction to look first if the contract ever refuses a healthy link.
+
+**This is not type safety, and should not be described as such.** Sailfin has
+no field-level privacy (`spec/02-modules.md`), `emit_struct` emits a `.struct`
+record for every struct with no export filter, and imports resolve
+closure-globally by name. A `LinkClosure` value constructible only by the
+resolver would be a naming convention, not a proof. The ceiling is a
+fail-closed runtime precondition plus a static census, and the code says so.
+
+**Two guards, neither sufficient alone.** The contract catches a link *caller*
+that assembled an incomplete plan — the harness failure mode — at link time.
+`link_dispatch_census_test.sfn` catches a third link *implementation* added
+without consulting the contract, at test time, by enumerating `compiler/src`
+for `backend.link(` rather than carrying a list. A hardcoded list cannot catch
+an unknown dispatcher, which is the whole threat model;
+`capsule_resolver_line_budget_test.sfn` demonstrates the failure today by
+guarding 12 of 15 modules while passing.
+
+**Deferred, with reasons.** Collapsing `_clang_link_multi_with_opt` and
+`_clang_link_test_cmd_with_deps` contributes nothing to this invariant and
+carries byte-level link-argv risk (opt level, `test_mode`, dead-strip and
+retain-root flags, object order, the runtime object-cache override) guarded by
+`direct_link_argv_test` and `backend_link_libs_parity_test`; `link_contract.sfn`
+is the shared seam that makes it a smaller job later. Threading
+`resolved_specs` through `ProjectCapsuleResult` is superseded by the
+path-derived predicate. The import-reachability filter on
+`_cr_collect_capsule_sources` remains the right answer to the ctor floor and to
+cold-build cost, and remains separate (§10).
+
+**One trap worth recording.** `prepare_runtime_dep_capsules` resolves with no
+project entry, and `discover_project_root` substitutes `"."` for an empty start
+dir. An ungated call therefore probes the *process CWD*, and any directory
+holding a `capsule.toml` — the ordinary shape for a user build — would run the
+manifest branch against an unrelated project. Both anchored discoveries are
+gated on having an entry rather than on `discover_*_root("")` returning empty,
+which also keeps the path from bypassing the SFN-352 `bundled_workspace_start`
+anchor, the one anchor deliberately independent of the CWD.
+
 ### 3.2 The missing I/O driver
 
 Neither handshake state machine nor `tls13_record.sfn` performs socket I/O,
