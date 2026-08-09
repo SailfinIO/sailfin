@@ -40,8 +40,9 @@ on:
   # merge_group (and the default); stated explicitly for clarity.
   merge_group:
     types: [checks_requested]
-  # Tier-3 aarch64-Linux soak. Scheduled runs are scoped below so they run
-  # only the advisory arm lane rather than duplicating the blocking PR matrix.
+  # Tier-3 aarch64-Linux cold soak. Scheduled runs are scoped below so they
+  # run the native fixed point plus one unsharded, cache-independent suite
+  # rather than duplicating the blocking PR matrix.
   schedule:
     - cron: "0 11 * * *"
   workflow_dispatch:
@@ -79,8 +80,8 @@ jobs:
           if [ "${GITHUB_EVENT_NAME}" = "schedule" ]; then
             source=false
             public_claims=false
-            reason="scheduled run reserved for the advisory aarch64-Linux lane"
-            public_claims_reason="scheduled advisory run has no public-claim scope"
+            reason="scheduled run reserved for the cold aarch64-Linux soak"
+            public_claims_reason="scheduled soak has no public-claim scope"
           elif [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
             source=false
             public_claims=false
@@ -348,7 +349,6 @@ jobs:
     if: >-
       github.event_name == 'schedule' ||
       needs.ci-scope.outputs.source == 'true'
-    continue-on-error: ${{ github.event_name == 'schedule' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     steps:
@@ -606,13 +606,12 @@ jobs:
   # in SFEP-0056 §3.4 keeps compiler work native while preserving the decisive
   # compiler A -> pass-1 -> pass-2 proof on the arm host.
   build-aarch64-cross-vehicle:
-    name: Cross-emit compiler [linux-arm64 / advisory]
+    name: Cross-emit compiler [linux-arm64]
     needs: [ci-scope, build-compiler-linux]
     if: >-
       (github.event_name == 'schedule' ||
        needs.ci-scope.outputs.source == 'true') &&
       needs.build-compiler-linux.result == 'success'
-    continue-on-error: true
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     outputs:
@@ -711,17 +710,16 @@ jobs:
         shell: bash
         run: echo "ready=true" >> "$GITHUB_OUTPUT"
 
-  # aarch64-Linux enters as Tier 3 (SFEP-0056 §3.5). Both arm jobs are
-  # intentionally advisory and intentionally absent from `required-ci`: a
-  # failure stays visible on the PR/nightly run without red-gating main.
+  # aarch64-Linux remains Tier 3 until SFN-476 promotes it (SFEP-0056 §3.5).
+  # The aggregate arm result below is intentionally absent from `required-ci`:
+  # failures stay visible without extending the merge-critical required gate.
   build-compiler-aarch64-linux:
-    name: Self-host compiler [linux-arm64 / advisory]
+    name: Self-host compiler [linux-arm64]
     needs: [ci-scope, build-aarch64-cross-vehicle]
     if: >-
       (github.event_name == 'schedule' ||
        needs.ci-scope.outputs.source == 'true') &&
       needs.build-aarch64-cross-vehicle.outputs.artifact_ready == 'true'
-    continue-on-error: true
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 60
     outputs:
@@ -842,13 +840,178 @@ jobs:
         run: echo "ready=true" >> "$GITHUB_OUTPUT"
 
   build-aarch64-linux:
-    name: Build + Test [linux-arm64 / advisory]
+    name: Build + Test [linux-arm64 / ${{ matrix.shard }}]
     needs: [ci-scope, build-compiler-aarch64-linux]
     if: >-
-      (github.event_name == 'schedule' ||
-       needs.ci-scope.outputs.source == 'true') &&
+      github.event_name != 'schedule' &&
+      needs.ci-scope.outputs.source == 'true' &&
       needs.build-compiler-aarch64-linux.outputs.artifact_ready == 'true'
-    continue-on-error: true
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [unit-a, unit-b, unit-c, int-caps, e2e-a, e2e-b, e2e-c, e2e-d]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Resolve seed version from bootstrap.toml
+        id: seed
+        shell: bash
+        run: |
+          set -euo pipefail
+          pin="$(awk '
+            /^\[[^]]+\]/ { section=$0 }
+            section == "[seed]" && /^version[[:space:]]*=/ { gsub(/"/, "", $3); print $3; exit }
+          ' bootstrap.toml)"
+          if [ -z "$pin" ]; then
+            echo "[seed-pin] bootstrap.toml [seed].version is empty or missing" >&2
+            exit 1
+          fi
+          echo "[seed-pin] using seed $pin"
+          echo "seed_version=$pin" >> "$GITHUB_OUTPUT"
+
+      - name: Install native LLVM toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang-18 lld llvm-18
+
+      - name: Download native compiler passes
+        uses: actions/download-artifact@v8
+        with:
+          name: ci-aarch64-bootstrap-compilers
+
+      - name: Extract native compiler passes
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/aarch64-bootstrap build/bin
+          tar -xzf aarch64-bootstrap-compilers.tar.gz -C build/aarch64-bootstrap
+          rm -f aarch64-bootstrap-compilers.tar.gz
+          cmp build/aarch64-bootstrap/pass-1/sfn build/aarch64-bootstrap/pass-2/sfn
+          install -m 755 build/aarch64-bootstrap/pass-2/sfn build/bin/sfn
+          mkdir -p build/compiler
+          cp -R build/aarch64-bootstrap/pass-2/compiler/import-context \
+            build/compiler/import-context
+          build/bin/sfn dev bootstrap fingerprint > build/.compiler-source-fingerprint
+          file build/bin/sfn
+          build/bin/sfn version
+
+      # Restore this target+shard archive first. The shared action then overlays
+      # any target-wide main baseline into the same content-addressed tree, as
+      # it does for Linux/macOS shards. The merged tree is safe because entry
+      # keys carry every correctness input; this outer action saves it back
+      # under the ARM shard key only after the complete job succeeds.
+      - name: Restore per-shard test-binary cache
+        uses: actions/cache@v6
+        with:
+          path: build/cache/test-bin
+          key: test-bin-linux-arm64-${{ matrix.shard }}-${{ github.sha }}
+          restore-keys: |
+            test-bin-linux-arm64-${{ matrix.shard }}-
+
+      - name: Test shard (via Makefile)
+        uses: ./.github/actions/sailfin-build
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          mode: skip-build
+          target: linux-arm64
+          clang: /usr/bin/clang-18
+          seed_version: ${{ steps.seed.outputs.seed_version }}
+          shard: ${{ matrix.shard }}
+          # Deliberately omit shard_test_jobs. The 4-vCPU/16-GiB runner's
+          # native CPU+RAM policy selects the safe in-leg concurrency; an
+          # explicit override would outrank the SFN-781 memory budget.
+          package: "false"
+
+      - name: Emit aarch64 test-leg metrics (SFN-826)
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          f=build/ci-metrics.env
+          if [ ! -f "$f" ]; then
+            echo "[ci-metrics] no metrics file ($f) — tests likely failed before measurement (shard ${{ matrix.shard }})"
+            exit 0
+          fi
+          set -a
+          # shellcheck source=/dev/null
+          source "$f"
+          set +a
+          shard="${ci_metrics_shard:-${{ matrix.shard }}}"
+          echo "[ci-metrics] target=${ci_metrics_target:-linux-arm64} phase=test shard=${shard} test_s=${test_seconds:-?} test_bin_hit_rate=${test_bin_hit_rate:-?}"
+          {
+            echo "### aarch64-Linux test leg metrics — shard ${shard} (SFN-826)"
+            echo ""
+            echo "| metric | value |"
+            echo "| --- | ---: |"
+            echo "| target | ${ci_metrics_target:-linux-arm64} |"
+            echo "| shard | ${shard} |"
+            echo "| test wall time (s) | ${test_seconds:-?} |"
+            echo "| cache.test_bin_hit_rate | ${test_bin_hit_rate:-?} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  aarch64-linux-result:
+    name: AArch64 Linux result [advisory]
+    needs:
+      - ci-scope
+      - build-aarch64-cross-vehicle
+      - build-compiler-aarch64-linux
+      - build-aarch64-linux
+      - shard-cover
+    if: ${{ always() && needs.ci-scope.outputs.source == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      CROSS_VEHICLE: ${{ needs.build-aarch64-cross-vehicle.result }}
+      CROSS_ARTIFACT: ${{ needs.build-aarch64-cross-vehicle.outputs.artifact_ready }}
+      NATIVE_COMPILER: ${{ needs.build-compiler-aarch64-linux.result }}
+      NATIVE_ARTIFACT: ${{ needs.build-compiler-aarch64-linux.outputs.artifact_ready }}
+      SHARD_COVER: ${{ needs.shard-cover.result }}
+      ARM_SHARDS: ${{ needs.build-aarch64-linux.result }}
+    steps:
+      - name: Summarize aarch64-Linux result
+        shell: bash
+        run: |
+          set -euo pipefail
+          fail=0
+          check() {
+            name="$1"
+            result="$2"
+            expected="$3"
+            echo "[aarch64-linux] $name: $result"
+            echo "| $name | $result |" >> "$GITHUB_STEP_SUMMARY"
+            if [ "$result" != "$expected" ]; then
+              fail=$((fail + 1))
+            fi
+          }
+          {
+            echo "### aarch64-Linux aggregate"
+            echo ""
+            echo "| check | result |"
+            echo "| --- | --- |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          check "Cross-emit compiler" "$CROSS_VEHICLE" "success"
+          check "Cross-emit artifact" "$CROSS_ARTIFACT" "true"
+          check "Native fixed point" "$NATIVE_COMPILER" "success"
+          check "Native compiler artifact" "$NATIVE_ARTIFACT" "true"
+          check "Shard-cover lint" "$SHARD_COVER" "success"
+          check "ARM test shards" "$ARM_SHARDS" "success"
+          if [ "$fail" -gt 0 ]; then
+            echo "[aarch64-linux] $fail ARM prerequisite or shard result(s) did not succeed." >&2
+            exit 1
+          fi
+
+  soak-aarch64-linux:
+    name: Scheduled cold soak [linux-arm64]
+    needs: [ci-scope, build-compiler-aarch64-linux]
+    if: >-
+      github.event_name == 'schedule' &&
+      needs.build-compiler-aarch64-linux.outputs.artifact_ready == 'true'
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 180
     steps:
@@ -883,15 +1046,11 @@ jobs:
           file build/bin/sfn
           build/bin/sfn version
 
-      # TEST_JOBS is deliberately NOT pinned here. This runner is 4 vCPU /
-      # 16 GB and this is the one lane that runs a cold `--no-test-cache`
-      # full suite — exactly the host, workload, and (former) job count that
-      # SFN-781 measured at 17.26 GiB tree RSS and got OOM-killed. An
-      # explicit TEST_JOBS outranks the auto-budget, so the pin defeated the
-      # very policy that protects this lane. Letting
-      # `scripts/detect_test_jobs.sh` choose yields 2 here. Do not re-pin it
-      # without re-measuring tree RSS on an arm64 runner.
-      - name: Run full Sailfin test suite
+      # This is the cache-independent backstop. Do not restore or save a
+      # test-bin cache here, and do not pin TEST_JOBS: on this 4-vCPU/16-GiB
+      # runner the native policy selects 2 after SFN-781 measured --jobs 4 at
+      # 17.26 GiB tree RSS and an OOM kill.
+      - name: Run cold unsharded Sailfin test suite
         shell: bash
         run: |
           set -euo pipefail

@@ -209,9 +209,9 @@ cross-emit path documented as the mechanism a future first-class `sfn build
 
 SFEP-0037 §3.10 defines Tier 1 = Linux x86_64 (CI-blocking), Tier 2 = macOS
 arm64 (builds+tests in CI), Tier 3 = best-effort (Windows enters here).
-aarch64-Linux **enters as Tier 3**: its first CI leg is **advisory**
-(`continue-on-error`, non-blocking) so a transient emulation flake or an
-aarch64-only miscompile does not red-gate `main`. It **earns promotion to Tier
+aarch64-Linux **enters as Tier 3**: its CI result is **advisory** (visible but
+excluded from `required-ci`) so a transient emulation flake or an aarch64-only
+miscompile does not red-gate `main`. It **earns promotion to Tier
 2** by written criteria — a full green cycle of build + suite + triple-pass
 self-host on `ubuntu-24.04-arm` — at which point the leg flips to blocking. The
 promotion is a discrete gated event (mirroring Windows' Tier-3→2 path), so it is
