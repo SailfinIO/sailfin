@@ -152,7 +152,7 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer, bun
     let empty_specs: string[] = [];
 
     let mut empty_caps: string[] = [];
-    if entry_paths.length == 0 {
+    if entry_paths.length == 0 && consumer.runtime_root.length == 0 {
         return ResolverDedupeResult {
             sources: empty_sources,
             has_collision: false,
@@ -162,6 +162,13 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer, bun
         };
     }
 
+    // SFN-341: the guard above admits exactly one new shape past this
+    // point — a runtime-dep-only resolution with no project entry
+    // (`prepare_runtime_dep_capsules`, empty `entry_paths`, non-empty
+    // `runtime_root`). With no entry to anchor on, `project_root` stays
+    // `""` below, so control reaches the `else if
+    // consumer.runtime_root.length > 0` manifest-less runtime-union
+    // branch rather than the manifest branch above it.
     // (2) Manifest-declared capsule deps and (3) workspace-implicit
     // imports use the first entry's directory as the anchor. By
     // construction (callers group entries by `(project_root,
@@ -170,7 +177,8 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer, bun
     // doesn't change the result. Computed up-front (#873) because the
     // relative walk now needs the workspace member set to canonicalize
     // a capsule source's slug to its spec slug.
-    let anchor_dir = _cr_dirname(entry_paths[0]);
+    let mut anchor_dir: string = "";
+    if entry_paths.length > 0 { anchor_dir = _cr_dirname(entry_paths[0]); }
 
     let source_workspace_root = discover_workspace_root(anchor_dir);
     let mut workspace_root = source_workspace_root;

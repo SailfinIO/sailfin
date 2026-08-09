@@ -1,0 +1,54 @@
+// compiler/tests/unit/runtime_dep_link_contract_test.sfn
+//
+// SFN-341: unit coverage for `missing_runtime_dep_specs`, the pure
+// invariant check backing the runtime-dependency link contract. See
+// `compiler/src/build/link_contract.sfn` for the rationale.
+import { missing_runtime_dep_specs } from "../../src/build/link_contract";
+import { RuntimeCapsuleArtifacts, empty_runtime_capsule_artifacts } from "../../src/runtime_capsule_resolver";
+
+test "missing_runtime_dep_specs: a dep with a matching ir/ path is covered" {
+    let mut artifacts = empty_runtime_capsule_artifacts();
+    artifacts.capsule_deps = ["sfn/crypto"];
+    let runtime_capsules: RuntimeCapsuleArtifacts[] = [artifacts];
+    let ll_paths = ["build/capsules/sfn/crypto/ir/aead.ll"];
+    let missing = missing_runtime_dep_specs(runtime_capsules, ll_paths);
+    assert missing.length == 0;
+}
+
+test "missing_runtime_dep_specs: a dep with no matching link path is reported" {
+    let mut artifacts = empty_runtime_capsule_artifacts();
+    artifacts.capsule_deps = ["sfn/crypto"];
+    let runtime_capsules: RuntimeCapsuleArtifacts[] = [artifacts];
+    let ll_paths = ["build/sailfin/program.ll"];
+    let missing = missing_runtime_dep_specs(runtime_capsules, ll_paths);
+    assert missing.length == 1;
+    assert missing[0] == "sfn/crypto";
+}
+
+test "missing_runtime_dep_specs: no declared deps is a vacuous pass" {
+    let mut artifacts = empty_runtime_capsule_artifacts();
+    let empty_deps: string[] = [];
+    artifacts.capsule_deps = empty_deps;
+    let runtime_capsules: RuntimeCapsuleArtifacts[] = [artifacts];
+    let ll_paths: string[] = [];
+    let missing = missing_runtime_dep_specs(runtime_capsules, ll_paths);
+    assert missing.length == 0;
+}
+
+test "missing_runtime_dep_specs: a single-segment spec fails open" {
+    let mut artifacts = empty_runtime_capsule_artifacts();
+    artifacts.capsule_deps = ["mycap"];
+    let runtime_capsules: RuntimeCapsuleArtifacts[] = [artifacts];
+    let ll_paths: string[] = [];
+    let missing = missing_runtime_dep_specs(runtime_capsules, ll_paths);
+    assert missing.length == 0;
+}
+
+test "missing_runtime_dep_specs: an absolute link path still matches by substring" {
+    let mut artifacts = empty_runtime_capsule_artifacts();
+    artifacts.capsule_deps = ["sfn/crypto"];
+    let runtime_capsules: RuntimeCapsuleArtifacts[] = [artifacts];
+    let ll_paths = ["/work/build/capsules/sfn/crypto/ir/x.ll"];
+    let missing = missing_runtime_dep_specs(runtime_capsules, ll_paths);
+    assert missing.length == 0;
+}

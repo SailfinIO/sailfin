@@ -1,0 +1,102 @@
+import { int_to_string } from "sfn/strings";
+
+// compiler/src/build/link_contract.sfn
+//
+// SFN-341: verifies the runtime-dependency link invariant.
+//
+// The runtime's `sfn-sources` land in every binary (they compile into the
+// prelude every program links against), so a call one of those modules
+// makes into a `[dependencies]`-declared capsule provider is emitted for
+// EVERY consumer, not just one that happens to import the capsule
+// directly. If the link path that assembled `ll_paths` skipped the
+// capsule-resolver pass for that dependency — e.g. a positional build, or
+// a resolver branch that forgot to fold in the runtime capsule's own
+// deps — the runtime module's calls compile to unresolved
+// `__sfn__<scope>__<name>__*` symbols that only surface as a link error,
+// far from the missing-dependency root cause.
+//
+// This checks the INVARIANT (every declared runtime dep's `.ll` tree
+// contributed at least one path to the link set), not a "the resolver
+// ran" flag. That distinction matters: a flag only proves the pass was
+// invoked, not that it did its job, so it would stay green through a
+// resolver regression that dropped sources while still running. Checking
+// the actual link set catches both failure modes.
+import { capsule_artifact_ir_dir, is_safe_scope_name, parse_scope_name } from "../capsule_artifact";
+import { RuntimeCapsuleArtifacts } from "../runtime_capsule_resolver";
+import { index_of } from "../string_utils";
+
+// Returns the distinct `[dependencies]` specs declared across
+// `runtime_capsules` whose per-capsule IR tree
+// (`build/capsules/<scope>/<name>/ir/`) contributed no entry to
+// `ll_paths`. Empty means the invariant holds — including vacuously when
+// no runtime capsule declares any dependency.
+//
+// A spec that doesn't parse into safe scope/name form (e.g. a
+// single-segment name) is skipped rather than reported: `ir_path_for_slug`
+// only ever routes safe scope/name specs into the per-capsule tree, so a
+// spec shaped outside that rule was never going to produce a matching
+// path regardless of whether the link is correct. Failing it here would
+// flag a shape the layout never produced, not an actual missing link.
+fn missing_runtime_dep_specs(runtime_capsules: RuntimeCapsuleArtifacts[], ll_paths: string[]) -> string[] {
+    let mut seen: string[] = [];
+    let mut missing: string[] = [];
+    let mut ci: int = 0;
+    loop {
+        if ci >= runtime_capsules.length { break; }
+        let deps = runtime_capsules[ci].capsule_deps;
+        let mut di: int = 0;
+        loop {
+            if di >= deps.length { break; }
+            let spec = deps[di];
+            if !_lc_string_in_array(seen, spec) {
+                seen.push(spec);
+                let parts = parse_scope_name(spec);
+                if is_safe_scope_name(parts.scope, parts.name) {
+                    let needle = capsule_artifact_ir_dir(parts.scope, parts.name)
+                        + "/";
+                    if !_lc_ll_paths_cover(ll_paths, needle) {
+                        missing.push(spec);
+                    }
+                }
+            }
+            di += 1;
+        }
+        ci += 1;
+    }
+    return missing;
+}
+
+fn _lc_string_in_array(values: string[], target: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= values.length { break; }
+        if values[i] == target { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+fn _lc_ll_paths_cover(ll_paths: string[], needle: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= ll_paths.length { break; }
+        if index_of(ll_paths[i], needle) >= 0 { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+// Renders the driver diagnostic for a non-empty `missing_runtime_dep_specs`
+// result. Pure — the caller is responsible for printing it.
+fn runtime_dep_link_failure_message(missing: string[]) -> string {
+    let mut message = "link error: the runtime capsule declares "
+        + int_to_string(missing.length)
+        + " [dependencies] entries with no compiled module reaching the link:\n";
+    let mut i: int = 0;
+    loop {
+        if i >= missing.length { break; }
+        message = message + "  - " + missing[i] + "\n";
+        i += 1;
+    }
+    return message;
+}
