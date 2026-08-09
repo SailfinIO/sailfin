@@ -67,7 +67,7 @@ fn _aarch64_contract() -> DirectLinkContract ![pure] {
 // interleaves (linker selection, section flags, dead-strip, retain roots).
 fn _program_argv() -> string[] ![pure] {
     let c = _contract();
-    return direct_ld_lld_argv(c, ["runtime.o", "main.o"], "a.out", ["-lssl", "-lcrypto", "-lm", "-lpthread"], ["-fuse-ld=lld", "-ffunction-sections", "-fdata-sections", "-Wl,--gc-sections", "-Wl,-u,sfn_provider_init"]);
+    return direct_ld_lld_argv(c, ["runtime.o", "main.o"], "a.out", ["-lm", "-lpthread"], ["-fuse-ld=lld", "-ffunction-sections", "-fdata-sections", "-Wl,--gc-sections", "-Wl,-u,sfn_provider_init"]);
 }
 
 test "direct-link: invokes ld.lld with PIE target-identity flags" ![pure] {
@@ -115,8 +115,6 @@ test "direct-link: consumes objects and libs, never .ll inputs" ![pure] {
     let argv = _program_argv();
     assert expect_eq_bool(_argv_contains(argv, "runtime.o"), true).ok;
     assert expect_eq_bool(_argv_contains(argv, "main.o"), true).ok;
-    assert expect_eq_bool(_argv_contains(argv, "-lssl"), true).ok;
-    assert expect_eq_bool(_argv_contains(argv, "-lcrypto"), true).ok;
     assert expect_eq_bool(_argv_contains(argv, "-lm"), true).ok;
     assert expect_eq_bool(_argv_contains(argv, "-lpthread"), true).ok;
     assert expect_eq_bool(_argv_contains(argv, "main.ll"), false).ok;

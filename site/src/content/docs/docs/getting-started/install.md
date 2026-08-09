@@ -293,7 +293,6 @@ Building from source is useful when:
 - `curl`, `tar`, `mktemp`, `uname`, `jq`
 - LLVM tools 17+ or 18+ (`llvm-link`, `llvm-as`)
 - `clang` and the platform linker
-- OpenSSL development libraries (`libssl-dev`, `openssl-devel`, or Homebrew `openssl@3`)
 - `shasum -a 256` or `sha256sum`
 
 See the
@@ -327,9 +326,8 @@ build/bin/sfn --version
 ```
 
 > **Note:** `make compile` routes through `<seed> build -p compiler` — the
-> Sailfin-native driver — and requires `bash`, `clang`, LLVM tools, `jq`, and
-> OpenSSL development libraries. The prior `scripts/build.sh` orchestrator is
-> no longer in-tree.
+> Sailfin-native driver — and requires `bash`, `clang`, LLVM tools, and `jq`.
+> The prior `scripts/build.sh` orchestrator is no longer in-tree.
 
 ---
 
@@ -413,31 +411,25 @@ The binary may not be marked executable. Fix it:
 chmod +x ~/.local/bin/sailfin ~/.local/bin/sfn
 ```
 
-### Missing LLVM, clang, or OpenSSL during a build
+### Missing LLVM or clang during a build
 
 Install the source-build dependencies for your platform:
 
 ```bash
 # Ubuntu / Debian
-sudo apt-get install clang-18 llvm-18 libssl-dev jq
+sudo apt-get install clang-18 llvm-18 jq
 
 # Fedora / RHEL
-sudo dnf install clang llvm llvm-devel openssl-devel jq
+sudo dnf install clang llvm llvm-devel jq
 
 # macOS (Homebrew)
-brew install jq llvm openssl@3
+brew install jq llvm
 ```
 
 If Homebrew LLVM is installed but `llvm-link` is not detected, put it on `PATH`:
 
 ```bash
 export PATH="$(brew --prefix llvm)/bin:$PATH"
-```
-
-If macOS cannot find OpenSSL at link time, set:
-
-```bash
-export SAILFIN_OPENSSL_PREFIX="$(brew --prefix openssl@3)"
 ```
 
 ### GitHub API rate limiting during install

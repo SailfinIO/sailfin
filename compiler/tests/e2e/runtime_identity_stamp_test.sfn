@@ -249,6 +249,26 @@ test "stamp: out-of-tree runtime root warms and observes a content change" ![io]
     let _ = process.capture_take_stderr();
     assert cp_exit == 0;
 
+    // The capsule tree has to come along. Since `runtime/capsule.toml` gained a
+    // `[dependencies]` entry (SFN-341), a bare `cp -R runtime` no longer yields
+    // a COMPLETE runtime: the runtime's `sfn-sources` call into `sfn/crypto`,
+    // which in turn declares `sfn/strings`, and none of it is inside
+    // `runtime/`. `locate_runtime_dep_capsule_src` resolves a runtime dep at
+    // `<dirname(runtime_root)>/capsules/<scope>/<name>/src` — the sibling
+    // layout this repo has and `sfn package` installs — so the closure must sit
+    // beside the copy. Without it the warm fails closed, correctly, with
+    // `link-contract: ... sfn/crypto`.
+    //
+    // Copied whole rather than closure-by-name on purpose: naming
+    // `crypto` + `strings` here would silently rot the moment that closure
+    // changes, which is the same brittleness that made this test's sibling
+    // assert a hardcoded dep count.
+    let caps_copy = scratch + "/capsules";
+    let cp_caps_exit = process.run_capture(["cp", "-R", "capsules", caps_copy], _child_env_with_scratch(scratch));
+    let _ = process.capture_take_stdout();
+    let _ = process.capture_take_stderr();
+    assert cp_caps_exit == 0;
+
     // First warm against the private copy. Pre-#2005 this failed at link
     // (`invalid redefinition of function sfn_type_register__<path-slug>`)
     // during the runtime warm; the fix keeps the slug `runtime/...`.

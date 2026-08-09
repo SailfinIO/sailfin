@@ -1,0 +1,123 @@
+// Census guard for the runtime-dep link contract (SFN-341).
+//
+// `compiler/src/build/link_contract.sfn` centralizes the check that a link
+// plan carries the LLVM IR modules a runtime capsule dependency needs
+// (`missing_runtime_dep_specs`). Two call sites consult it today —
+// `build/link.sfn` and `cli/commands/test/link.sfn` — after the tensor-harness
+// defect where a link *caller* built a plan that skipped the resolver and
+// silently dropped a runtime dependency.
+//
+// This file is a strictly different guard from the contract itself, and the
+// two are not substitutes for each other:
+//
+//   - The contract (enforced inside `missing_runtime_dep_specs`, called from
+//     each dispatcher) catches a link *caller* that assembles an incomplete
+//     plan — the tensor-harness failure mode. It fires at link time, for any
+//     caller of an already-wired dispatcher.
+//   - This census catches a *new link implementation* — a third place that
+//     calls `backend.link(` directly — that never wires the contract in at
+//     all. It fires at test time, by enumerating `compiler/src` rather than
+//     trusting a hardcoded list, so an unknown future dispatcher cannot slip
+//     past by omission.
+//
+// Neither mechanism alone is sufficient: the contract can't stop a dispatcher
+// that never calls it, and this census can't stop a wired dispatcher whose
+// caller still builds a bad plan.
+import { contains, ends_with, substring } from "sfn/strings";
+import { expect_eq_bool, expect_eq_str_array } from "sfn/test";
+
+// Mirrors `_collect_sfn_files` in `compiler_capsule_boundary_test.sfn`: a
+// directory is detected by a non-empty `fs.listDirectory` result, since this
+// tree has no other way to distinguish files from directories.
+fn _collect_sfn_files(root: string, acc: string[]) -> string[] ![io] {
+    let mut out = acc;
+    if !fs.exists(root) { return out; }
+    let entries = fs.listDirectory(root);
+    let mut i: int = 0;
+    loop {
+        if i >= entries.length { break; }
+        let name = entries[i];
+        i += 1;
+        if name == "." || name == ".." { continue; }
+        let full = root + "/" + name;
+        let children = fs.listDirectory(full);
+        if children.length > 0 { out = _collect_sfn_files(full, out); } else if ends_with(name, ".sfn") {
+            out.push(full);
+        }
+    }
+    return out;
+}
+
+// Strips the `compiler/src/` prefix and the `.sfn` suffix, e.g.
+// `compiler/src/build/link.sfn` -> `build/link`.
+fn _relative_module_path(full: string) -> string {
+    let prefix = "compiler/src/";
+    let without_prefix = substring(full, prefix.length, full.length);
+    return substring(without_prefix, 0, without_prefix.length - 4);
+}
+
+fn _find_link_dispatchers() -> string[] ![io] {
+    let files = _collect_sfn_files("compiler/src", []);
+    let mut out: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= files.length { break; }
+        let full = files[i];
+        i += 1;
+        let source = fs.readFile(full);
+        if contains(source, "backend.link(") {
+            out.push(_relative_module_path(full));
+        }
+    }
+    return out;
+}
+
+fn _sorted(values: string[]) -> string[] {
+    let mut out = values;
+    let mut i: int = 1;
+    loop {
+        if i >= out.length { break; }
+        let mut j = i;
+        loop {
+            if j <= 0 { break; }
+            if out[j - 1] <= out[j] { break; }
+            let tmp = out[j - 1];
+            out[j - 1] = out[j];
+            out[j] = tmp;
+            j -= 1;
+        }
+        i += 1;
+    }
+    return out;
+}
+
+test "link census: the dispatcher set is exactly the two known linkers" ![io] {
+    let discovered = _sorted(_find_link_dispatchers());
+    let expected = _sorted(["build/link", "cli/commands/test/link"]);
+    assert expect_eq_str_array(discovered, expected).ok;
+}
+
+test "link census: every link dispatcher consults the runtime-dep contract" ![io] {
+    let dispatchers = _find_link_dispatchers();
+    assert expect_eq_bool(dispatchers.length > 0, true).ok;
+    let mut i: int = 0;
+    loop {
+        if i >= dispatchers.length { break; }
+        let source = fs.readFile("compiler/src/" + dispatchers[i] + ".sfn");
+        // Match the call, not just the import — an unused import would keep
+        // the bare name in the source without the dispatcher ever consulting
+        // the contract, which is exactly the regression this guards against.
+        assert expect_eq_bool(contains(source, "missing_runtime_dep_specs("), true).ok;
+        i += 1;
+    }
+}
+
+// The resolver-free entry points were the exact footgun the contract closes:
+// a link path with no caller-supplied resolver, so nothing could populate a
+// runtime dependency spec for `missing_runtime_dep_specs` to check. They were
+// dead code and were deleted; they must stay deleted.
+test "link census: the resolver-free link entry points stay deleted" ![io] {
+    let source = fs.readFile("compiler/src/build/link.sfn");
+    assert expect_eq_bool(contains(source, "fn _clang_link("), false).ok;
+    assert expect_eq_bool(contains(source, "fn _clang_link_with_opt("), false).ok;
+}

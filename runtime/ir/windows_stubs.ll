@@ -69,19 +69,46 @@ define void @sailfin_assert_fail(i8* %file, i64 %line, i64 %col, i8* %msg) {
   unreachable
 }
 
-; TLS client wrappers (SFEP-0036, #1782). `runtime/sfn/platform/tls.sfn` is
-; excluded from RUNTIME_MODS — it pulls the OpenSSL (`libssl`/`libcrypto`)
-; externs, which do not resolve in a static mingw link (Windows native TLS
-; is deferred to #1485 M10, which reuses this same OS-independent extern
-; surface). `runtime/sfn/adapters/http.sfn`'s `https://` path forward-
-; declares these `@tls_*` symbols, so the standalone-emitted `http.o` needs
-; them defined at the Windows link. No-op stubs are the correct degraded
-; behavior: `tls_client_ctx` / `tls_connect_fd` return null → `_http_send`
-; surfaces a clean null (https unsupported on Windows for now, never a
-; silent downgrade); the read/write/free helpers are unreachable once the
-; ctx is null but are defined for completeness. Plaintext `http://` is
-; unaffected. Sync pinned by
-; compiler/tests/e2e/cross_windows_runtime_modules_test.sfn.
+; Native OS entropy primitive (SFN-123, SFEP-0048 Phase D).
+; `runtime/sfn/platform/rand.sfn` is excluded from RUNTIME_MODS — its
+; `getentropy(2)` / `/dev/urandom` (`open`/`read`/`close`) externs have no
+; static-mingw provider (the process.sfn / rlimit.sfn / tls.sfn exclusion
+; precedent). The compiler links `sfn/crypto`, whose `random_bytes` wrapper
+; references `@sfn_rand_fill`, so the standalone-emitted crypto IR needs it
+; defined at the Windows link. A fail-closed stub (return 0 = failure) is the
+; correct degraded behavior: `random_bytes` surfaces `[]`, never zeroed or
+; partial entropy. It is unreached during normal compiler operation (the
+; compiler does not call `random_bytes`, and the WebSocket adapter that consumes
+; it for real is itself excluded from RUNTIME_MODS);
+; native Windows entropy rides the same M10 OS-independent surface as TLS.
+; Sync pinned by compiler/tests/e2e/cross_windows_runtime_modules_test.sfn.
+define i32 @sfn_rand_fill(i8* %buf, i64 %n) {
+  ret i32 0
+}
+
+; TLS client wrappers. `runtime/sfn/platform/tls.sfn` is excluded from
+; RUNTIME_MODS, so the standalone-emitted `http.o` — whose `https://` path
+; forward-declares these `@tls_*` symbols — needs them defined at the
+; Windows link.
+;
+; SFN-341 retired OpenSSL, so the ORIGINAL reason for the exclusion (the
+; `libssl`/`libcrypto` externs could not resolve in a static mingw link) is
+; gone. The module still stays out of RUNTIME_MODS because it now depends on
+; the `sfn/crypto` capsule, which the hand-rolled cross-Windows loop
+; (`Makefile`) has no staging path for. So these stubs are a deliberate
+; one-release carry, exactly the fallback
+; `docs/proposals/design-notes/sfn-341-native-tls-runtime-swap.md` 3.6
+; sanctions — recorded, not quietly kept. Removal condition: these stubs
+; delete when the cross-Windows build learns to stage a capsule dependency
+; and `tls.sfn` joins RUNTIME_MODS, which is the same work as the Windows
+; certificate-store binding that design note 3.6 scopes out of SFN-341.
+;
+; No-op stubs remain the correct degraded behavior: `tls_client_ctx` /
+; `tls_connect_fd` return null so `_http_send` surfaces a clean null
+; (https unsupported on Windows for now, never a silent downgrade); the
+; read/write/free helpers are unreachable once the ctx is null but are
+; defined for completeness. Plaintext `http://` is unaffected. Sync pinned
+; by compiler/tests/e2e/cross_windows_runtime_modules_test.sfn.
 define i8* @tls_client_ctx() {
   ret i8* null
 }
@@ -99,21 +126,4 @@ define i64 @tls_write(i8* %ssl, i8* %buf, i64 %n) {
 }
 define void @tls_shutdown_free(i8* %ssl) {
   ret void
-}
-
-; Native OS entropy primitive (SFN-123, SFEP-0048 Phase D).
-; `runtime/sfn/platform/rand.sfn` is excluded from RUNTIME_MODS — its
-; `getentropy(2)` / `/dev/urandom` (`open`/`read`/`close`) externs have no
-; static-mingw provider (the process.sfn / rlimit.sfn / tls.sfn exclusion
-; precedent). The compiler links `sfn/crypto`, whose `random_bytes` wrapper
-; references `@sfn_rand_fill`, so the standalone-emitted crypto IR needs it
-; defined at the Windows link. A fail-closed stub (return 0 = failure) is the
-; correct degraded behavior: `random_bytes` surfaces `[]`, never zeroed or
-; partial entropy. It is unreached during normal compiler operation (the
-; compiler does not call `random_bytes`, and the WebSocket adapter that consumes
-; it for real is itself excluded from RUNTIME_MODS);
-; native Windows entropy rides the same M10 OS-independent surface as TLS.
-; Sync pinned by compiler/tests/e2e/cross_windows_runtime_modules_test.sfn.
-define i32 @sfn_rand_fill(i8* %buf, i64 %n) {
-  ret i32 0
 }

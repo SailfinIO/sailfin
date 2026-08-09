@@ -47,13 +47,31 @@ export fn locate_capsule_src(project_root: string, spec: string, version: string
     if !_cr_is_safe_segment(name) { return missing; }
 
     // Prefer in-tree source if we're inside a sailfin repo checkout.
-    let in_tree = _cr_path_join(project_root, "capsules/" + scope + "/" + name
-        + "/src");
-    if fs.exists(in_tree) {
-        return CapsuleLocation {
-            src_dir: in_tree,
-            origin: capsule_origin_workspace()
-        };
+    //
+    // SFN-341: the probe is anchored on `project_root`, so it is only a probe
+    // at all when there IS one. `_cr_path_join("", ...)` yields a bare
+    // `capsules/<scope>/<name>/src`, which `fs.exists` resolves against the
+    // PROCESS working directory — an anchor unrelated to the build. A
+    // manifest-less build resolving the runtime's `[dependencies]` union has
+    // `project_root == ""` by construction, and running it from a checkout
+    // root made the union spell a capsule `capsules/sfn/strings/src/...` while
+    // the workspace-implicit walk spelled the identical tree
+    // `<abs workspace root>/capsules/sfn/strings/src/...`. Two spellings of
+    // one file are two providers of one slug to the dedupe pass, which fails
+    // the resolution as a slug collision and drops EVERY capsule source from
+    // the link. Skipping the unanchored probe loses no resolution: the
+    // manifest-less path reaches the same tree through
+    // `locate_runtime_dep_capsule_src`, anchored on the runtime bundle.
+    if project_root.length > 0 {
+        let in_tree = _cr_path_join(project_root, "capsules/" + scope + "/"
+            + name
+            + "/src");
+        if fs.exists(in_tree) {
+            return CapsuleLocation {
+                src_dir: in_tree,
+                origin: capsule_origin_workspace()
+            };
+        }
     }
 
     // Fall back to the user cache populated by `sfn add`.

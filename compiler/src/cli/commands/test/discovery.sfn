@@ -152,13 +152,11 @@ fn _test_group_key(file_path: string) -> string ![io] {
 // without a name, so the resolver falls back to the legacy
 // relative-import / workspace-implicit walks the test runner has
 // always relied on.
-// `runtime_root` is empty at every site below: this builder takes only a
-// file path, and threading the runtime root here would change its signature
-// and every caller's. It is inert today — nothing declares a runtime
-// `[dependencies]` entry yet — and the test-link path wires it in the slice
-// that adds the first one (SFN-341). Until then `sfn test` resolves exactly
-// as it does now.
-fn _test_resolver_consumer_for_group(file_path: string) -> ResolverConsumer ![io] {
+// `runtime_root` is threaded through to every `ResolverConsumer` returned
+// below (SFN-341), so the resolver folds the runtime capsule's own
+// declared `[dependencies]` (e.g. `sfn/crypto`) into the test link set —
+// the same union `build`/`run` already get.
+fn _test_resolver_consumer_for_group(file_path: string, runtime_root: string) -> ResolverConsumer ![io] {
     let dir = _dirname_cmd(file_path);
     let project_root = discover_project_root(dir);
     if project_root.length == 0 {
@@ -167,7 +165,7 @@ fn _test_resolver_consumer_for_group(file_path: string) -> ResolverConsumer ![io
             name: "",
             walk_project_src: false,
             include_host_as_dep: true,
-            runtime_root: ""
+            runtime_root: runtime_root
         };
     }
     let manifest_path = _path_join_cmd(project_root, "capsule.toml");
@@ -177,7 +175,7 @@ fn _test_resolver_consumer_for_group(file_path: string) -> ResolverConsumer ![io
             name: "",
             walk_project_src: false,
             include_host_as_dep: true,
-            runtime_root: ""
+            runtime_root: runtime_root
         };
     }
     let manifest_text = fs.readFile(manifest_path);
@@ -188,7 +186,7 @@ fn _test_resolver_consumer_for_group(file_path: string) -> ResolverConsumer ![io
             name: "",
             walk_project_src: false,
             include_host_as_dep: true,
-            runtime_root: ""
+            runtime_root: runtime_root
         };
     }
     let parts = parse_scope_name(capsule_name);
@@ -201,7 +199,7 @@ fn _test_resolver_consumer_for_group(file_path: string) -> ResolverConsumer ![io
             name: "",
             walk_project_src: false,
             include_host_as_dep: true,
-            runtime_root: ""
+            runtime_root: runtime_root
         };
     }
     return ResolverConsumer {
@@ -209,7 +207,7 @@ fn _test_resolver_consumer_for_group(file_path: string) -> ResolverConsumer ![io
         name: parts.name,
         walk_project_src: false,
         include_host_as_dep: true,
-        runtime_root: ""
+        runtime_root: runtime_root
     };
 }
 
@@ -281,7 +279,7 @@ struct TestGroupResolution {
 // every relative-import + capsule-dep + workspace-implicit graph
 // the test compile + link needs. Between groups (e.g. running
 // tests from two different capsules in one invocation), each
-fn _resolve_test_groups(test_files: string[], binary_dir: string, trace_runner: boolean) -> TestGroupResolution ![io] {
+fn _resolve_test_groups(test_files: string[], runtime_root: string, binary_dir: string, trace_runner: boolean) -> TestGroupResolution ![io] {
     // project resolves independently.
     let mut groups: TestGroup[] = [];
     let mut file_group_index: int[] = [];
@@ -359,7 +357,7 @@ fn _resolve_test_groups(test_files: string[], binary_dir: string, trace_runner: 
         // resolver upgrades *only* those large-closure tests to
         // subprocess-per-module isolation (fresh arena per child); small
         // fixtures still take the in-process fast path.
-        let consumer = _test_resolver_consumer_for_group(groups[gi].entry_paths[0]);
+        let consumer = _test_resolver_consumer_for_group(groups[gi].entry_paths[0], runtime_root);
         let resolution = prepare_project_capsules_for_test(groups[gi].entry_paths, consumer, "", "", binary_dir);
         if resolution.staging_failed {
             // Resolver already emitted a structured error to stderr

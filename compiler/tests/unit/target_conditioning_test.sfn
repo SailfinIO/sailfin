@@ -186,17 +186,16 @@ test "target: GNU section-GC flags are skipped only for msvc" ![pure] {
 
 // ---- Link-lib filtering ----
 test "target: host link libs pass through unchanged" ![pure] {
-    let libs: string[] = ["-L/opt/homebrew/opt/openssl@3/lib", "-lssl", "-lcrypto", "-lm", "-lpthread"];
-    // Identity on Linux/macOS → the POSIX/OpenSSL libs are preserved.
+    let libs: string[] = ["-lm", "-lpthread"];
+    // Identity on Linux/macOS → the POSIX libs are preserved.
     assert expect_eq_str_array(target_filter_link_libs(libs, "x86_64-unknown-linux-gnu"), libs).ok;
     assert expect_eq_str_array(target_filter_link_libs(libs, "x86_64-apple-darwin"), libs).ok;
 }
 
-test "target: msvc drops POSIX and OpenSSL link libs, keeps others" ![pure] {
-    let libs: string[] = ["-L/some/dir", "-lssl", "-lcrypto", "-lm", "-lpthread", "-lcustom"];
-    // MSVC/UCRT auto-links its CRT; the crypto/tls libs resolve to
-    // windows_stubs.ll no-ops. Non-lib flags (`-L…`) and unrelated libs
-    // survive.
+test "target: msvc drops POSIX link libs, keeps others" ![pure] {
+    let libs: string[] = ["-L/some/dir", "-lm", "-lpthread", "-lcustom"];
+    // MSVC/UCRT auto-links its CRT. Non-lib flags (`-L…`) and unrelated
+    // libs survive.
     let expected: string[] = ["-L/some/dir", "-lcustom"];
     assert expect_eq_str_array(target_filter_link_libs(libs, "x86_64-pc-windows-msvc"), expected).ok;
 }
@@ -204,7 +203,7 @@ test "target: msvc drops POSIX and OpenSSL link libs, keeps others" ![pure] {
 test "target: windows-gnu keeps -lm/-lpthread, unlike msvc" ![pure] {
     // mingw-w64's CRT is POSIX-compatible, so windows-gnu keeps the POSIX
     // libs msvc drops (SFEP-0068 §3.1) — identity, same as a host target.
-    let libs: string[] = ["-L/some/dir", "-lssl", "-lcrypto", "-lm", "-lpthread", "-lcustom"];
+    let libs: string[] = ["-L/some/dir", "-lm", "-lpthread", "-lcustom"];
     assert expect_eq_str_array(target_filter_link_libs(libs, "x86_64-w64-mingw32"), libs).ok;
 }
 
@@ -215,22 +214,20 @@ test "target: host runtime module set is unchanged" ![pure] {
     assert expect_eq_str_array(target_condition_runtime_sfn_sources(sources, "Darwin"), sources).ok;
 }
 
-test "target: Windows swaps process.sfn, rlimit.sfn, rand.sfn, tls.sfn, and fs_exec_mode.sfn to their Win32 siblings, and appends the six anchor-less siblings" ![pure] {
+test "target: Windows swaps process.sfn, rlimit.sfn, rand.sfn, and fs_exec_mode.sfn to their Win32 siblings, leaves tls.sfn unconditioned, and appends the six anchor-less siblings" ![pure] {
     // SFN-549: rlimit.sfn used to be DROPPED here (a no-op stub in
     // windows_stubs.ll resolved apply_default_mem_limit for the mingw
     // bridge only); the native MSVC path no longer links that stub, so
     // rlimit.sfn now swaps to its own Win32 sibling instead of vanishing.
     // rand.sfn swaps the same way (BCryptGenRandom in place of
-    // getentropy/`/dev/urandom`). tls.sfn swaps to
-    // openssl_absent_windows.sfn — Windows has no OpenSSL to link, so the
-    // fail-closed native module replaces the OpenSSL surface outright
-    // rather than leaving `-lssl -lcrypto`'s externs unresolved.
-    // process.sfn → its existing Win32 sibling. fs_exec_mode.sfn swaps to
-    // fs_exec_mode_windows.sfn: POSIX X_OK (1) is not a legal UCRT
-    // `_access` mode, and passing it terminates the process via
-    // `_invalid_parameter_noinfo` -> `__fastfail` (0xC0000409) rather
-    // than returning an error, so the sibling supplies F_OK (SFN-649).
-    // The six anchor-less siblings (realpath_windows.sfn,
+    // getentropy/`/dev/urandom`). tls.sfn is no longer swapped (SFN-341
+    // deleted the OpenSSL link surface, so there is no OpenSSL-backed
+    // module left to replace). process.sfn → its existing Win32 sibling.
+    // fs_exec_mode.sfn swaps to fs_exec_mode_windows.sfn: POSIX X_OK (1)
+    // is not a legal UCRT `_access` mode, and passing it terminates the
+    // process via `_invalid_parameter_noinfo` -> `__fastfail` (0xC0000409)
+    // rather than returning an error, so the sibling supplies F_OK
+    // (SFN-649). The six anchor-less siblings (realpath_windows.sfn,
     // clock_windows.sfn, pthread_windows.sfn, popen_windows.sfn,
     // mkstemp_windows.sfn, strcasestr_windows.sfn) have no POSIX .sfn
     // counterpart to swap FROM (each backs a bare libc/pthreads symbol,
@@ -238,7 +235,7 @@ test "target: Windows swaps process.sfn, rlimit.sfn, rand.sfn, tls.sfn, and fs_e
     // replacing a matched basename. Every other module is preserved in
     // order.
     let sources: string[] = ["/rt/sfn/runtime_globals.sfn", "/rt/sfn/process.sfn", "/rt/sfn/platform/rlimit.sfn", "/rt/sfn/platform/rand.sfn", "/rt/sfn/platform/tls.sfn", "/rt/sfn/platform/fs_exec_mode.sfn", "/rt/sfn/io.sfn",];
-    let expected: string[] = ["/rt/sfn/runtime_globals.sfn", "/rt/sfn/platform/process_windows.sfn", "/rt/sfn/platform/rlimit_windows.sfn", "/rt/sfn/platform/rand_windows.sfn", "/rt/sfn/platform/openssl_absent_windows.sfn", "/rt/sfn/platform/fs_exec_mode_windows.sfn", "/rt/sfn/io.sfn", "/rt/sfn/platform/realpath_windows.sfn", "/rt/sfn/platform/clock_windows.sfn", "/rt/sfn/platform/pthread_windows.sfn", "/rt/sfn/platform/popen_windows.sfn", "/rt/sfn/platform/mkstemp_windows.sfn", "/rt/sfn/platform/strcasestr_windows.sfn",];
+    let expected: string[] = ["/rt/sfn/runtime_globals.sfn", "/rt/sfn/platform/process_windows.sfn", "/rt/sfn/platform/rlimit_windows.sfn", "/rt/sfn/platform/rand_windows.sfn", "/rt/sfn/platform/tls.sfn", "/rt/sfn/platform/fs_exec_mode_windows.sfn", "/rt/sfn/io.sfn", "/rt/sfn/platform/realpath_windows.sfn", "/rt/sfn/platform/clock_windows.sfn", "/rt/sfn/platform/pthread_windows.sfn", "/rt/sfn/platform/popen_windows.sfn", "/rt/sfn/platform/mkstemp_windows.sfn", "/rt/sfn/platform/strcasestr_windows.sfn",];
     assert expect_eq_str_array(target_condition_runtime_sfn_sources(sources, "Windows"), expected).ok;
 }
 

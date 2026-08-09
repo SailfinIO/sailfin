@@ -32,7 +32,6 @@ Install these before running `make compile`:
 | `jq` | GitHub release JSON parsing in `install.sh` / `make fetch-seed`. |
 | LLVM tools 17+ or 18+ | LLVM IR validation/linking tools such as `llvm-link` and `llvm-as`. |
 | `clang` | Assemble LLVM IR and link native executables. |
-| OpenSSL development libraries | The Sailfin-native runtime links TLS with `-lssl -lcrypto` for every binary. |
 | `shasum` or `sha256sum` | Seed/self-host hash checks. `shasum -a 256` is the portable default. |
 
 Optional tools:
@@ -40,7 +39,6 @@ Optional tools:
 | Tool | Why it is useful |
 |---|---|
 | GNU `timeout` (`timeout` / `gtimeout`) | Bounds direct compiler invocations and some Makefile validation paths. |
-| `pkg-config` | Fallback OpenSSL discovery on non-standard macOS installs. |
 | `npm` | Required only for `make mcp-server`. |
 | `x86_64-w64-mingw32-gcc` | Required only for `make ci-cross-windows` from Linux. |
 
@@ -51,8 +49,8 @@ Optional tools:
 ```bash
 sudo apt-get update
 sudo apt-get install -y \
-  bash build-essential clang-18 curl git jq libssl-dev lld make \
-  tar llvm-18 pkg-config
+  bash build-essential clang-18 curl git jq lld make \
+  tar llvm-18
 ```
 
 If your distribution does not package LLVM 18, LLVM 17 is acceptable:
@@ -68,18 +66,18 @@ compiler binary.
 
 ```bash
 sudo dnf install -y \
-  bash clang git jq llvm llvm-devel make openssl-devel pkg-config tar
+  bash clang git jq llvm llvm-devel make tar
 ```
 
 Package names vary across Fedora/RHEL releases. The important checks are that
-`clang`, `llvm-link`, `llvm-as`, `jq`, and OpenSSL headers/libs are available on
-`PATH` or the system library search path.
+`clang`, `llvm-link`, `llvm-as`, and `jq` are available on `PATH` or the system
+library search path.
 
 ### macOS
 
 ```bash
 xcode-select --install
-brew install jq llvm openssl@3 pkg-config
+brew install jq llvm
 ```
 
 Add Homebrew LLVM tools to your shell path so `llvm-link` and `llvm-as` are
@@ -94,12 +92,6 @@ The Makefile creates a local shim so the seed and built compiler use Apple's
 against the macOS SDK with the wrong defaults. Override with
 `SAILFIN_CC=/path/to/clang` only when you know the replacement can link system
 libraries.
-
-OpenSSL is keg-only under Homebrew. The compiler probes the standard
-`openssl@3` keg locations and `brew --prefix openssl@3`; set
-`SAILFIN_OPENSSL_PREFIX=/path/to/openssl-prefix` when using a custom OpenSSL
-install. See `docs/runbooks/openssl-build-dependency.md` for the full link
-discovery contract.
 
 ## Build and verify
 
@@ -244,7 +236,6 @@ Related compiler commands expose their own flags:
 |---|---|---|
 | `SAILFIN_MEM_LIMIT` | bytes, `unlimited`, `off`, `0` | Linux compiler invocations self-apply an 8 GiB virtual-memory cap by default. This overrides or disables it. |
 | `SAILFIN_TRACE_MEM_LIMIT` | `1` | Trace memory-limit setup. |
-| `SAILFIN_OPENSSL_PREFIX` | path prefix | macOS OpenSSL link override; expects libraries under `$prefix/lib`. |
 | `SAILFIN_RUNTIME_ROOT` | path | Override where `sfn` resolves bundled runtime sources. Usually only for packaging/debugging. |
 | `SAILFIN_TOOLCHAIN` | `auto`, `local`, `<version>`, `off`, `0` | Toolchain pin dispatch policy for user capsules. Use `off` only for seed-transition work. |
 | `SAILFIN_SKIP_TOOLCHAIN_CHECK` | `1` | Downgrade a user capsule `[toolchain]` mismatch to a warning. |
@@ -275,15 +266,6 @@ macOS with Homebrew:
 
 ```bash
 export PATH="$(brew --prefix llvm)/bin:$PATH"
-```
-
-### `ld: library 'ssl' not found` or `cannot find -lssl`
-
-Install OpenSSL development libraries. On Linux this is usually `libssl-dev` or
-`openssl-devel`. On macOS install `openssl@3` or set:
-
-```bash
-export SAILFIN_OPENSSL_PREFIX="$(brew --prefix openssl@3)"
 ```
 
 ### `make compile` says the compiler is up to date

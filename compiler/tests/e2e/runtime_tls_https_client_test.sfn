@@ -107,7 +107,7 @@ fn _sfn_bin() -> string ![io] {
 
 // Full parent environment for the build + server + client subprocesses
 // (`run_capture`/`spawn_with_env`'s empty env is EMPTY, not "inherit"):
-// the nested build links a binary (clang + ld, now also `-lssl -lcrypto`),
+// the nested build links a binary (clang + ld),
 // and SAILFIN_TEST_SCRATCH (already present) keeps the build cache
 // per-invocation under the parallel pool.
 fn _child_env() -> string[] ![io] { return process.environ(); }
@@ -147,7 +147,10 @@ fn _scratch_dir() -> string ![io] {
 // RFC-6125 hostname verification (SSL_set1_host), and modern OpenSSL checks
 // the SAN (not the CN) when a SAN is present. Returns true on success.
 fn _gen_cert(dir: string) -> boolean ![io] {
-    let exit = process.run_capture(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-keyout", dir
+    // Native TLS server signs CertificateVerify with Ed25519 only (RSA/ECDSA
+    // signing is out of SFEP-0048 §6.3 scope), so `sfn_serve_tls` accepts an
+    // Ed25519 certificate only (SFN-341).
+    let exit = process.run_capture(["openssl", "req", "-x509", "-newkey", "ed25519", "-keyout", dir
         + "/key.pem", "-out", dir
         + "/cert.pem", "-days", "1", "-nodes", "-subj", "/CN=localhost", "-addext", "subjectAltName=DNS:localhost"], _child_env());
     let _o = process.capture_take_stdout();
@@ -250,7 +253,7 @@ test "runtime tls: https GET round-trips against a local openssl s_server" ![io]
     let cert_ok = _gen_cert(dir);
     assert cert_ok;
 
-    // Build the client fixture up front (cold build once, links -lssl).
+    // Build the client fixture up front (cold build once).
     let out_path = dir + "/body.out";
     let _rm = process.run(["rm", "-f", out_path]);
     let main_path = _write_client(dir, out_path);

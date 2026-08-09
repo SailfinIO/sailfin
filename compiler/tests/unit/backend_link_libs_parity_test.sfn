@@ -2,7 +2,7 @@
 //
 // Regression guard for the #1782 macOS TLS link-path bug class
 // (SFEP-0036, `docs/proposals/0036-tls-runtime.md`, gap B1 of epic
-// #1540): the OpenSSL `-L`/`-lssl`/`-lcrypto` linker inputs ride into
+// #1540): the runtime capsule's `link-libs` and any `-L` inputs ride into
 // the final clang link via `LinkPlan.libs`, and BOTH backend link-argv
 // builders — the `sfn test` per-binary layout
 // (`_llvm_text_link_test_argv`) and the `sfn build`/`run` program layout
@@ -32,9 +32,8 @@ fn _argv_contains(argv: string[], needle: string) -> boolean ![pure] {
     return false;
 }
 
-// A representative link plan whose `libs` carry OpenSSL-shaped entries:
-// the Darwin `-L<dir>` search flag plus the `-l…` library flags the
-// runtime manifest (`runtime/capsule.toml` `link-libs`) contributes.
+// A representative link plan whose `libs` carry the POSIX library flags
+// the runtime manifest (`runtime/capsule.toml` `link-libs`) contributes.
 // `link_flags` is populated to mirror the program layout; the test
 // layout builder ignores it by design (the intentional asymmetry).
 fn _representative_plan() -> LinkPlan ![pure] {
@@ -43,7 +42,7 @@ fn _representative_plan() -> LinkPlan ![pure] {
         out_path: "a.out",
         opt_flag: "-O0",
         link_flags: ["-fuse-ld=mold", "-ffunction-sections"],
-        libs: ["-L/opt/homebrew/opt/openssl@3/lib", "-lssl", "-lcrypto", "-lm", "-lpthread"],
+        libs: ["-lm", "-lpthread"],
         test_mode: false
     };
 }

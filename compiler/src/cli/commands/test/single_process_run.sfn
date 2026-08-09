@@ -88,7 +88,7 @@ fn _run_single_process(test_files: string[], file_suite_index: int[], suites_in:
     let self_exe = ctx.compiler_path;
     let dump_sources = _env_flag("SAILFIN_DUMP_TEST_SOURCES")
         || _legacy_flag_file("build/sailfin/.dump_test_sources");
-    let grouping = _resolve_test_groups(test_files, binary_dir, trace_runner);
+    let grouping = _resolve_test_groups(test_files, runtime_root, binary_dir, trace_runner);
     if grouping.staging_failed {
         exit_test_runner_mode();
         _cleanup_test_scratch(scratch_owned, scratch_root, false);

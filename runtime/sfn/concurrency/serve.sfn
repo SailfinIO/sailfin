@@ -171,8 +171,8 @@ extern fn sfn_task_create_detached(fn_ptr: i64, ctx: i64) -> *u8;
 extern fn sfn_scheduler_create(queue: *u8) -> *u8;
 
 // ── TLS termination surface (SFEP-0036 §3.5, tls.sfn) ─────────────
-// Inbound TLS: `sfn_serve_tls` builds a server `SSL_CTX` once
-// (`tls_server_ctx`), wraps each accepted fd into an `SSL*`
+// Inbound TLS: `sfn_serve_tls` builds a server `TlsContext` once
+// (`tls_server_ctx`), wraps each accepted fd into a `TlsSession`
 // (`tls_accept_fd`), and runs the recv→dispatch→send loop through
 // `tls_read`/`tls_write` (same contract as `recv`/`send`) instead of the
 // raw socket. Declared here as externs — the linker resolves each `@tls_*`
@@ -469,9 +469,9 @@ fn _serve_keep_alive(buf: *u8) -> bool {
 // `ssl` selects the transport (SFEP-0036 §3.5): null → raw `recv(fd)`
 // (plaintext, unchanged); non-null → `tls_read(ssl)`. Both go through
 // `_serve_conn_recv`. The `SO_RCVTIMEO`/`SO_SNDTIMEO` arming stays keyed on
-// `fd` — OpenSSL rides the same fd, so the socket timeouts bound `tls_read`
-// identically (a TLS read timeout surfaces as `tls_read -> -1`, handled the
-// same as a raw `recv -> -1`).
+// `fd` — the native TLS session reads/writes over that same fd, so the
+// socket timeouts bound `tls_read` identically (a TLS read timeout surfaces
+// as `tls_read -> -1`, handled the same as a raw `recv -> -1`).
 fn _serve_recv_request(fd: i32, ssl: *u8) -> *u8 {
     // Bound recv/send so a slow-loris or dead client cannot pin this pool
     // worker forever (#1581). A recv timeout returns -1 below, which is
@@ -854,18 +854,19 @@ fn _serve_conn_worker_framed(ctx: *u8) -> *u8 {
 // (`_serve_recv_request` / `_serve_send_response` receive the non-null
 // `ssl`). The ctx is a 24-byte triple `[client_fd: i64][handler: i64]
 // [server_ctx: i64]` (the plaintext workers use a 16-byte pair; the third
-// slot carries the shared server `SSL_CTX*`).
+// slot carries the shared server `TlsContext*`).
 //
 // A failed handshake (`tls_accept_fd -> null`: a non-TLS client, a cert/SNI
 // mismatch, or a recv-timeout during the handshake) means there is no TLS
 // channel to send even a `500` over, so the worker closes the raw fd and
 // drops the connection — it never falls back to a plaintext error (that
 // would leak an unencrypted response on a port advertised as TLS).
-// `tls_shutdown_free` sends `close_notify` and frees the `SSL*` before the
-// underlying `close`, mirroring the client teardown discipline (§3.7). The
-// shared `server_ctx` is NOT freed here — it lives for the server's
-// lifetime and is used by every worker (OpenSSL `SSL_CTX` is refcounted and
-// thread-safe for `SSL_new`).
+// `tls_shutdown_free` sends `close_notify` and frees the TLS session before
+// the underlying `close`, mirroring the client teardown discipline (§3.7).
+// The shared `server_ctx` is NOT freed here — it lives for the server's
+// lifetime and is used by every worker (the `TlsContext` holds only the
+// cert chain and signing key and is never mutated after `tls_server_ctx`
+// builds it, so concurrent read-only use needs no refcounting or locking).
 fn _serve_conn_worker_tls(ctx: *u8) -> *u8 {
     if ctx as i64 == 0 { return null; }
     let base: i64 = ctx as i64;
@@ -877,7 +878,7 @@ fn _serve_conn_worker_tls(ctx: *u8) -> *u8 {
     let server_ctx: i64 = atomic_load(ctx_slot);
     free(ctx);
 
-    // Arm SO_RCVTIMEO/SO_SNDTIMEO (#1581) BEFORE the blocking `SSL_accept`
+    // Arm SO_RCVTIMEO/SO_SNDTIMEO (#1581) BEFORE the blocking `tls_accept_fd`
     // handshake so a stalled/slow-loris handshake cannot pin this pool worker
     // — the plaintext path arms inside the first `_serve_recv_request`, but
     // the TLS handshake runs first, so it must be armed here (the recv loop's
@@ -1174,10 +1175,11 @@ fn sfn_serve_framed_tls(handler: *u8, port: i32, cert_path: *u8, key_path: *u8) 
 // but terminates inbound TLS (SFEP-0036 §3.5): each accepted connection is
 // wrapped in a server-side handshake before the recv→dispatch→send cycle,
 // and the handler's returned bytes are framed as a bare `200 OK` (identical
-// framing to `sfn_serve`). The server `SSL_CTX` (cert chain + private key,
-// PEM) is built ONCE up front via `tls_server_ctx` and shared read-only
-// across the pool (OpenSSL `SSL_CTX` is thread-safe for `SSL_new`), living
-// for the server's lifetime. `cert_path` / `key_path` are NUL-terminated
+// framing to `sfn_serve`). The server `TlsContext` (cert chain + private
+// key, PEM) is built ONCE up front via `tls_server_ctx` and shared
+// read-only across the pool (it is never mutated after construction, so no
+// refcounting or locking is needed), living for the server's lifetime.
+// `cert_path` / `key_path` are NUL-terminated
 // filesystem paths. Fails closed: if the cert/key cannot be loaded the
 // server never binds (no plaintext downgrade on a TLS port). Does NOT
 // return (blocking accept loop). The plaintext `sfn_serve` /

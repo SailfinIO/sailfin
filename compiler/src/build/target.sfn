@@ -31,8 +31,7 @@ import { active_build_target } from "./target_state";
 
 // The resolved build HOST OS — the OS the compile is running on, as
 // opposed to the artifact target (`build_target_os`). Host-parallelism
-// helpers (`_mktemp_sibling_cmd`, `_cr_resolve_jobs`) and the host link
-// probes (`_openssl_link_search_flags`) gate on this so a
+// helpers (`_mktemp_sibling_cmd`, `_cr_resolve_jobs`) gate on this so a
 // Linux-host→Windows-target cross-build keeps host behaviour.
 //
 // The `SAILFIN_HOST_OS` override wins (a test seam mirroring
@@ -321,16 +320,12 @@ fn target_uses_gnu_link_gc(triple: string) -> boolean {
     return triple_abi(triple) != "msvc";
 }
 
-// Drop POSIX-only link libraries for the msvc ABI (UCRT):
-// `-lm`/`-lpthread` are POSIX, and `-lssl`/`-lcrypto` have no Windows host
-// package to link against (`platform/openssl_absent_windows.sfn` swaps
-// out `tls.sfn`'s OpenSSL externs entirely for a Windows target — see
-// `target_condition_runtime_sfn_sources` below — rather than relying on
-// a linked-but-stubbed library), so none are passed to the MSVC link
-// (`ws2_32`/`kernel32` are auto-linked by clang). The windows-gnu ABI
-// links against mingw-w64's POSIX-compatible CRT, so it KEEPS `-lm`/
-// `-lpthread` (SFEP-0068 §3.1) — only msvc filters. Every other target
-// returns the list unchanged (identity → byte-identical link).
+// Drop POSIX-only link libraries for the msvc ABI (UCRT): `-lm`/
+// `-lpthread` have no MSVC equivalent (`ws2_32`/`kernel32` are
+// auto-linked by clang). The windows-gnu ABI links against mingw-w64's
+// POSIX-compatible CRT, so it KEEPS `-lm`/`-lpthread` (SFEP-0068 §3.1) —
+// only msvc filters. Every other target returns the list unchanged
+// (identity → byte-identical link).
 fn target_filter_link_libs(libs: string[], triple: string) -> string[] {
     if triple_abi(triple) != "msvc" { return libs; }
     let mut kept: string[] = [];
@@ -338,7 +333,7 @@ fn target_filter_link_libs(libs: string[], triple: string) -> string[] {
     loop {
         if i >= libs.length { break; }
         let lib = libs[i];
-        let posix = lib == "-lm" || lib == "-lpthread" || lib == "-lssl" || lib == "-lcrypto";
+        let posix = lib == "-lm" || lib == "-lpthread";
         if !posix { kept.push(lib); }
         i += 1;
     }
@@ -381,18 +376,14 @@ fn target_extra_link_libs(triple: string) -> string[] {
 }
 
 // Rewrite the runtime capsule's `sfn-sources` list for `target_os`. On
-// Windows, seven POSIX-only modules are swapped for their Win32 siblings:
+// Windows, six POSIX-only modules are swapped for their Win32 siblings:
 // `process.sfn` (posix_spawnp/waitpid) for `platform/process_windows.sfn`,
 // `rlimit.sfn` (getrlimit/setrlimit) for `platform/rlimit_windows.sfn`
 // (SFN-549 — previously dropped outright, leaving
 // `apply_default_mem_limit` unresolved once `windows_stubs.ll` stopped
 // linking on the native path), `rand.sfn` (getentropy/`/dev/urandom`) for
-// `platform/rand_windows.sfn` (SFN-549, `BCryptGenRandom`), and `tls.sfn`
-// (the OpenSSL `SSL_*`/`TLS_*` surface) for
-// `platform/openssl_absent_windows.sfn` (SFN-549 — the Windows target has
-// no OpenSSL to link, so the fail-closed native module replaces it
-// rather than the link merely dropping `-lssl -lcrypto` and leaving the
-// externs unresolved), and `fs_exec_mode.sfn` (POSIX `X_OK`) for
+// `platform/rand_windows.sfn` (SFN-549, `BCryptGenRandom`), and
+// `fs_exec_mode.sfn` (POSIX `X_OK`) for
 // `platform/fs_exec_mode_windows.sfn` (SFN-649 — `X_OK` is not a legal
 // UCRT `_access` mode and terminates the process via
 // `_invalid_parameter_noinfo` -> `__fastfail` instead of returning an
@@ -413,7 +404,7 @@ fn target_extra_link_libs(triple: string) -> string[] {
 // basename so the manifest-root prefix is irrelevant, and rebuild the
 // swapped path from the source's own directory so it stays correctly
 // rooted (`<root>/sfn/process.sfn` → `<root>/sfn/platform/process_windows.sfn`).
-// `rlimit.sfn`/`rand.sfn`/`tls.sfn`/`fs_exec_mode.sfn`/`socket_ops.sfn`/
+// `rlimit.sfn`/`rand.sfn`/`fs_exec_mode.sfn`/`socket_ops.sfn`/
 // `rename_ops.sfn` already live in `platform/`, so their
 // siblings are joined directly onto that same directory rather than
 // appending another `platform/` segment.
@@ -443,11 +434,16 @@ fn target_condition_runtime_sfn_sources(sources: string[], target_os: string) ->
             platform_dir = _dirname(src);
             out.push(_path_join(platform_dir, "rand_windows.sfn"));
         } else if base == "tls.sfn" {
-            // Already in platform/ — same as rlimit.sfn/rand.sfn above.
+            // NOT swapped (SFN-341): the module's OpenSSL externs are gone,
+            // replaced by the native TLS 1.3 stack over `sfn/crypto`, so
+            // there is no OpenSSL-backed module left to fail closed for and
+            // `openssl_absent_windows.sfn` is deleted. It still anchors
+            // `platform_dir` for the append block below, and passes through
+            // to the emitted list unchanged.
             platform_dir = _dirname(src);
-            out.push(_path_join(platform_dir, "openssl_absent_windows.sfn"));
+            out.push(src);
         } else if base == "fs_exec_mode.sfn" {
-            // Already in platform/ — same as rlimit.sfn/rand.sfn/tls.sfn.
+            // Already in platform/ — same as rlimit.sfn/rand.sfn above.
             // POSIX `X_OK` (1) is not a legal UCRT `_access` mode and
             // fastfails the process rather than returning an error, so
             // the Windows sibling supplies `F_OK` (0) instead (SFN-649).

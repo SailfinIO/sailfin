@@ -724,7 +724,7 @@ The following filesystem helpers are planned for a future release and are not av
 
 The `http` module provides outbound HTTP client functionality. All operations require the `![net]` effect. The module is bound from `runtime.http` in the prelude.
 
-`https://` URLs are supported transparently (SFEP-0036): the client TLS-wraps the socket, verifies the server's certificate chain **and** hostname against the system CA trust store, and defaults to port 443. Verification is **on by default and fail-closed** — a certificate that does not validate closes the connection rather than being parsed and ignored. The trust store is discovered from OpenSSL's default verify paths plus the `/etc/ssl/certs/ca-certificates.crt` fallback; set `SAILFIN_TLS_CAFILE` to add an extra CA bundle (e.g. a private CA in tests). See the [OpenSSL build-host dependency runbook](https://github.com/SailfinIO/sailfin/blob/main/docs/runbooks/openssl-build-dependency.md) for the `libssl-dev` link precondition.
+`https://` URLs are supported transparently (SFEP-0036): the client TLS-wraps the socket, verifies the server's certificate chain **and** hostname against the system CA trust store, and defaults to port 443. Verification is **on by default and fail-closed** — a certificate that does not validate closes the connection rather than being parsed and ignored. TLS is provided by Sailfin's in-tree native TLS 1.3 stack (`runtime/sfn/platform/tls.sfn`, `sfn/crypto`) — no external C library dependency. The trust store is discovered by checking a set of well-known system CA bundle paths (e.g. `/etc/ssl/certs/ca-certificates.crt`); set `SAILFIN_TLS_CAFILE` to add an extra CA bundle (e.g. a private CA in tests).
 
 ---
 
@@ -963,7 +963,7 @@ The runtime also exposes `sfn_serve_tls(handler, port, cert, key)` for low-level
 extern fn sfn_serve_tls(handler: * u8, port: i32, cert: * u8, key: * u8) -> void;
 ```
 
-Out of scope for 1.0: mTLS / client-certificate request (the server terminates TLS but does not request client certs). Both the outbound `https://` client and this inbound path require OpenSSL on the link host — see the [OpenSSL build-host dependency runbook](https://github.com/SailfinIO/sailfin/blob/main/docs/runbooks/openssl-build-dependency.md).
+Out of scope for 1.0: mTLS / client-certificate request (the server terminates TLS but does not request client certs). Both the outbound `https://` client and this inbound path are backed by Sailfin's in-tree native TLS 1.3 stack (`runtime/sfn/platform/tls.sfn`, `sfn/crypto`) — there is no external C library dependency to install on the build host.
 
 ---
 

@@ -193,6 +193,7 @@ import { discover_workspace_root, load_workspace_members } from "./workspace";
 export {
     prepare_project_capsules,
     prepare_project_capsules_for_test,
+    prepare_runtime_dep_capsules,
     stage_capsule_imports_for_emit
 };
 
@@ -244,10 +245,42 @@ fn _cr_effective_isolation_exe(sailfin_exe: string, binary_dir: string, source_c
 }
 
 fn prepare_project_capsules(input_path: string, config: BuildCacheConfig, consumer: ResolverConsumer, sailfin_exe: string, work_dir: string, binary_dir: string) -> ProjectCapsuleResult ![io] {
+    let entry_paths: string[] = [input_path];
+    return _cr_prepare(entry_paths, config, consumer, sailfin_exe, work_dir, binary_dir);
+}
+
+// SFN-341: resolve a runtime capsule's own `[dependencies]` into a
+// `ProjectCapsuleResult` with no project entry. A runtime capsule's
+// `sfn-sources` land in every binary, so its declared deps must reach
+// the link the same way a project's do — this delegates to the shared
+// `_cr_prepare` tail with an empty `entry_paths` and
+// `walk_project_src: false`, so the entry-indexing branches in that
+// tail never fire.
+//
+// The returned `runtime_capsules` is always `[]`. The manifest-less
+// runtime-union branch never assigns `manifest_dep_specs`, so the
+// `enumerate_runtime_capsule_artifacts` call below is not reached. Only
+// `ll_paths` is meaningful here; a caller that needs the runtime
+// capsules themselves resolves them with `runtime_capsule_from_root`,
+// as `run.sfn` already does when the resolver surfaces none.
+fn prepare_runtime_dep_capsules(runtime_root: string, config: BuildCacheConfig, sailfin_exe: string, work_dir: string, binary_dir: string) -> ProjectCapsuleResult ![io] {
+    let empty_entry_paths: string[] = [];
+    let consumer = ResolverConsumer {
+        scope: "",
+        name: "",
+        walk_project_src: false,
+        include_host_as_dep: false,
+        runtime_root: runtime_root
+    };
+    return _cr_prepare(empty_entry_paths, config, consumer, sailfin_exe, work_dir, binary_dir);
+}
+
+// Shared tail of `prepare_project_capsules` / `prepare_runtime_dep_capsules`:
+// resolve + dedupe, surface declared runtime capsules, stage, and compile.
+fn _cr_prepare(entry_paths: string[], config: BuildCacheConfig, consumer: ResolverConsumer, sailfin_exe: string, work_dir: string, binary_dir: string) -> ProjectCapsuleResult ![io] {
     let empty_paths: string[] = [];
     let empty_events: ModuleCacheEvent[] = [];
     let empty_runtime_capsules: RuntimeCapsuleArtifacts[] = [];
-    let entry_paths: string[] = [input_path];
     let resolved = _cr_resolve_and_dedupe(entry_paths, consumer, binary_dir);
     if resolved.has_collision {
         // Slug collision is a setup error (already reported by
@@ -325,7 +358,12 @@ fn prepare_project_capsules(input_path: string, config: BuildCacheConfig, consum
     // walk-excluded (non-`-p` builds resolve the entry as a normal
     // source already).
     let mut slug_universe_extra: CapsuleSource[] = [];
-    if consumer.walk_project_src {
+    // The length guard is not redundant with `walk_project_src`: the two
+    // are independent, and the only thing keeping this index in range for
+    // an entry-less resolution is that `prepare_runtime_dep_capsules`
+    // happens to pass `walk_project_src: false`. Guard where the index is,
+    // not where the caller is.
+    if consumer.walk_project_src && entry_paths.length > 0 {
         let entry_path = entry_paths[0];
         if fs.exists(entry_path) {
             let entry_slug = module_name_from_path(entry_path);

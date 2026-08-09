@@ -34,7 +34,7 @@ fn _sfn_bin() -> string ![io] {
 }
 
 // Full parent environment for the build + client subprocesses. The build
-// LINKS a binary (clang + ld + `-lssl -lcrypto`), needing the toolchain
+// LINKS a binary (clang + ld), needing the toolchain
 // environment; `run_capture`'s empty env is the EMPTY environment, not
 // "inherit". `SAILFIN_TEST_SCRATCH` (set by the runner) rides along, keeping
 // the nested build cache per-invocation under the parallel pool.
@@ -72,7 +72,10 @@ fn _scratch_dir() -> string ![io] {
 // `openssl s_client` does not verify by default, so no SAN is needed for
 // this handshake-and-respond pin (cert-verification enforcement is #3/#4).
 fn _gen_cert(cert: string, key: string) -> bool ![io] {
-    let exit = process.run_capture(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-keyout", key, "-out", cert, "-days", "2", "-nodes", "-subj", "/CN=127.0.0.1"], _child_env());
+    // Native TLS server signs CertificateVerify with Ed25519 only (RSA/ECDSA
+    // signing is out of SFEP-0048 §6.3 scope), so `sfn_serve_tls` accepts an
+    // Ed25519 certificate only (SFN-341).
+    let exit = process.run_capture(["openssl", "req", "-x509", "-newkey", "ed25519", "-keyout", key, "-out", cert, "-days", "2", "-nodes", "-subj", "/CN=127.0.0.1"], _child_env());
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     return exit == 0;
@@ -123,7 +126,7 @@ fn _write_server(dir: string, cert: string, key: string) -> string ![io] {
 
 // Compile the fixture to a standalone binary up front (synchronous), so the
 // cold compile is NOT inside the readiness poll window. Threads the full
-// parent environment (the nested build links clang + `-lssl -lcrypto`).
+// parent environment (the nested build links via clang + ld).
 fn _build_bin(main_path: string, bin: string) -> string ![io] {
     let exit = process.run_capture([_sfn_bin(), "build", "-o", bin, main_path], _child_env());
     let _out = process.capture_take_stdout();

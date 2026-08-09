@@ -1,6 +1,7 @@
 import { LinkPlan, LlvmTextBackend } from "../../../backend";
 import { assemble_link_inputs } from "../../../build/clang_argv";
 import { _ensure_dir_cmd } from "../../../build/fs";
+import { missing_runtime_dep_specs, runtime_dep_link_failure_message } from "../../../build/link_contract";
 import { assemble_runtime_capsule_link_inputs } from "../../../build/runtime_objs";
 import { _get_env_cmd } from "../../../build_flags";
 import { runtime_capsule_from_root } from "../../../runtime_capsule_resolver";
@@ -93,6 +94,28 @@ fn _clang_link_test_cmd_with_deps(ll_path: string, out_path: string, runtime_roo
         // Pre-backend bailout: this preflight diagnostic stands alone; the
         // backend never ran, so the caller must not stack the ICE banner
         // (SFN-212).
+        return TestLinkResult { rc: 1, ran_backend: false };
+    }
+
+    // Pre-backend link-contract preflight (SFN-341), the twin of the one in
+    // `build/link.sfn`. The contract is a property of every link, not of one
+    // dispatcher, and this path does not go through
+    // `_clang_link_multi_with_opt` — it builds its own argv and dispatches
+    // straight to `LlvmTextBackend.link()` — so it needs its own call rather
+    // than inheriting one. `ll_path` is the test module's own `.ll`;
+    // `dep_ll_paths` is what `prepare_project_capsules_for_test` resolved for
+    // it. `ran_backend: false` keeps this out of the SFN-212 ICE banner, the
+    // same as the two preflight bailouts around it.
+    let mut contract_lls: string[] = [ll_path];
+    let mut cli: int = 0;
+    loop {
+        if cli >= dep_ll_paths.length { break; }
+        contract_lls.push(dep_ll_paths[cli]);
+        cli += 1;
+    }
+    let missing_deps = missing_runtime_dep_specs(runtime_caps, contract_lls);
+    if missing_deps.length > 0 {
+        print.err(runtime_dep_link_failure_message(missing_deps));
         return TestLinkResult { rc: 1, ran_backend: false };
     }
     _ensure_dir_cmd(rt_cache_dir);

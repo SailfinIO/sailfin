@@ -78,15 +78,13 @@ sfn-sources = [
     "sfn/concurrency/serve.sfn",
 ]
 include-dirs = []
-# `-lssl -lcrypto`: OpenSSL, linked into every Sailfin binary for the
-# native runtime's TLS surface (`sfn/platform/tls.sfn`, SFEP-0036). The
-# runtime capsule is the only `kind` whose `link-libs` reaches the link
-# (SFEP-0036 §3.2), so the TLS body must live here. Build/CI hosts must
-# have `libssl`-dev available. `--gc-sections` (link.sfn) dead-strips the
-# unreferenced `SSL_*` symbols from binaries that never call TLS (e.g. the
-# compiler), but the libraries are still linked, so their presence on the
-# link host is mandatory — same dependency class as `-lm` / `-lpthread`.
-link-libs = ["-lm", "-lpthread", "-lssl", "-lcrypto"]
+# The native TLS 1.3 stack (SFN-341) retired the OpenSSL link
+# dependency: TLS is now pure Sailfin (`sfn/platform/tls.sfn` +
+# `sfn/platform/tls_record.sfn` over the `sfn/crypto` capsule), so no
+# `-lssl`/`-lcrypto` reaches the link and build hosts need no OpenSSL
+# development package. The runtime capsule is still the only `kind`
+# whose `link-libs` reaches the link (SFEP-0036 3.2).
+link-libs = ["-lm", "-lpthread"]
 
 # The prelude (`runtime/prelude.sfn`) is emitted from source on the same
 # child-compiler path as `sfn-sources` and linked into every compiler
@@ -95,3 +93,13 @@ link-libs = ["-lm", "-lpthread", "-lssl", "-lcrypto"]
 # workspace library (Stage F) this field retires in favour of the
 # workspace-implicit resolver path.
 prelude-entry = "prelude.sfn"
+
+# The native TLS stack's cold path (key schedule, X25519, X.509, both
+# handshake state machines) lives in the `sfn/crypto` library capsule and
+# is reached by a real dependency edge rather than vendored, per SFEP-0048
+# Phase D. The capability that makes a runtime module able to call a
+# capsule landed in SFN-773 and is present in the pinned seed; this
+# declaration is deliberately held back from that PR so the per-binary
+# ctor floor is paid where the benefit lands (SFN-341).
+[dependencies]
+"sfn/crypto" = "*"

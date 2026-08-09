@@ -101,7 +101,7 @@ Use Ubuntu 24.04 arm64 (a physical host, VM, or native arm runner) with:
   through `update-binfmts` when passwordless privilege is available);
 - `clang`, `lld`, `readelf`, and `sha256sum`;
 - an x86_64 glibc development sysroot and the x86_64 development libraries
-  needed by the compiler link (`libc`, pthread, math, OpenSSL, and crypto),
+  needed by the compiler link (`libc`, pthread, and math),
   **including the x86_64 GCC runtime** (`libgcc-*-dev:amd64`). Stage 1 links
   through `clang --target=x86_64-linux-gnu`, which needs `crtbeginS.o`,
   `crtendS.o`, and `libgcc` for that target; `libc6-dev:amd64` alone supplies

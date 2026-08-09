@@ -19,6 +19,9 @@ import { int_to_string } from "sfn/strings";
 
 import { _clang_link_multi } from "./build/link";
 import { empty_llvm_import_context, resolve_llvm_provider_context } from "./build/llvm_provider_context";
+import { _resolve_self_path } from "./build/paths";
+import { empty_build_cache_config } from "./build_cache";
+import { prepare_runtime_dep_capsules } from "./capsule_resolver/mod";
 import { lower_to_llvm_ir_from_text_with_provider_context } from "./llvm/lowering/entrypoints";
 import { compile_to_native_text_with_module } from "./main";
 import { runtime_capsule_from_root } from "./runtime_capsule_resolver";
@@ -249,8 +252,41 @@ fn build_tensor_matmul_kernel_binary(kernel_module: TensorModule, kernel_fn_name
     }
     let ll_path = out_dir + "/tensor_matmul.ll";
     fs.writeFile(ll_path, ir);
-    let caps = runtime_capsule_from_root(runtime_root);
-    let link = _clang_link_multi([ll_path], out_binary, runtime_root, caps, binary_dir, out_dir, "");
+
+    // The runtime's `sfn-sources` (e.g. tls.sfn) call into `[dependencies]`-
+    // declared capsules like `sfn/crypto` on every binary this harness
+    // links, not just ones that import them directly. Linking `[ll_path]`
+    // alone (as this used to) never ran the capsule resolver, so those
+    // capsules' `.ll` never reached the link and left ~20 unresolved
+    // `__sfn__crypto__*` symbols. Route through the resolver the same way
+    // `sfn build` / `sfn run` do.
+    let cache_config = empty_build_cache_config();
+    let sailfin_exe = _resolve_self_path(binary_dir);
+    let dep_result = prepare_runtime_dep_capsules(runtime_root, cache_config, sailfin_exe, out_dir, binary_dir);
+    if !dep_result.success {
+        return TensorMatmulBuildResult {
+            binary_path: "",
+            success: false,
+            diagnostics: ["runtime dependency capsule resolution failed"]
+        };
+    }
+    let mut link_lls: string[] = [ll_path];
+    let mut dli: int = 0;
+    loop {
+        if dli >= dep_result.ll_paths.length { break; }
+        link_lls.push(dep_result.ll_paths[dli]);
+        dli += 1;
+    }
+    // `prepare_runtime_dep_capsules` always returns an empty
+    // `runtime_capsules` BY CONSTRUCTION (see its doc comment in
+    // capsule_resolver/mod.sfn): the manifest-less runtime-union branch
+    // never assigns `manifest_dep_specs`, so the enumeration that would
+    // populate it is never reached. This fallback therefore ALWAYS fires —
+    // it is the intended path here, not a rare edge case, and mirrors
+    // `run.sfn`'s identical fallback. Do not "simplify" it away.
+    let mut caps = dep_result.runtime_capsules;
+    if caps.length == 0 { caps = runtime_capsule_from_root(runtime_root); }
+    let link = _clang_link_multi(link_lls, out_binary, runtime_root, caps, binary_dir, out_dir, "");
     if link.rc != 0 {
         return TensorMatmulBuildResult {
             binary_path: "",

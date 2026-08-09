@@ -66,9 +66,9 @@ extern fn memcmp(a: *u8, b: *u8, n: usize) -> i32;
 
 extern fn strtoll(s: *u8, end: *u8, base: i32) -> i64;
 
-// `write(2, ...)` for the trace line. The UCRT exports this POSIX shim, and
-// `platform/openssl_absent_windows.sfn` already declares and uses it the same
-// way for its stderr warnings.
+// `write(2, ...)` for the trace line. The UCRT exports this POSIX shim, which
+// is why the trace path can use it directly rather than routing through
+// `WriteFile` on a `GetStdHandle(STD_ERROR_HANDLE)`.
 extern fn write(fd: i32, buf: *u8, count: usize) -> i64;
 
 extern fn sfn_str_eq(a: *u8, b: *u8) -> bool;
