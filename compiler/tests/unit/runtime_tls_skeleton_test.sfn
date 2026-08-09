@@ -1,15 +1,22 @@
-// Golden-IR test for the `runtime/sfn/platform/tls.sfn` OpenSSL surface —
-// the client-side TLS externs + wrappers behind the HTTP client's
-// `https://` path (SFEP-0036 gap B1, #1782). Mirrors
-// `runtime_net_skeleton_test.sfn`: pins the `declare` emitted for every
-// `SSL_*` extern (so the callback-free opaque-`* u8`-handle surface stays
-// lowerable) plus a `define` for the exported client wrappers.
+// Golden-IR test for the `runtime/sfn/platform/tls.sfn` extern surface —
+// the syscall/runtime primitives the native TLS 1.3 stack drives, and the
+// `tls_*` wrappers behind the HTTP client's `https://` path (SFEP-0036 gap
+// B1, #1782; retargeted from OpenSSL to the native stack by SFN-341).
+// Mirrors `runtime_net_skeleton_test.sfn`: pins the `declare` emitted for
+// every extern (so the opaque-`*u8`-handle surface stays lowerable) plus a
+// `define` for the exported wrappers, and pins the OpenSSL surface as gone.
 //
-// Strategy: ONE `lower_to_llvm_ir_from_text_with_provider_context` call over the REAL module
-// (read via `fs.readFile`). `tls.sfn` has no imports, so single-module
-// lowering resolves every symbol it declares (the typecheck / fmt / link
-// halves are covered by `make compile` + the `fmt --check` CI gate + the
-// loopback e2e in `runtime_tls_https_client_test.sfn`).
+// Strategy: ONE `lower_to_llvm_ir_from_text_with_provider_context` call over
+// the REAL module (read via `fs.readFile`). Unlike the sibling skeletons,
+// `tls.sfn` imports `sfn/crypto`, and single-module lowering cannot see
+// those signatures — it prints a `cannot resolve return type` fatal per
+// `hs_*`/`random_bytes` callee on stderr. That noise is expected here and
+// does not affect what this test pins: the extern `declare`s and the
+// wrapper `define`s are emitted from `tls.sfn`'s own text, which is
+// resolvable on its own. The halves this cannot cover — that the crypto
+// calls actually typecheck, format, and link — are covered by
+// `make compile`, the `fmt --check` CI gate, and the loopback e2e in
+// `runtime_tls_https_client_test.sfn`.
 import { empty_llvm_import_context, resolve_llvm_provider_context } from "../../src/build/llvm_provider_context";
 import { emit_native_text_with_module_name } from "../../src/emit_native";
 import { lower_to_llvm_ir_from_text_with_provider_context } from "../../src/llvm/lowering/entrypoints";
@@ -20,46 +27,63 @@ fn _contains(haystack: string, needle: string) -> boolean {
     return index_of(haystack, needle) >= 0;
 }
 
-test "lowering: runtime/sfn/platform/tls.sfn emits a declare for every OpenSSL extern" ![io] {
+fn _tls_ir() -> string ![io] {
     let source = fs.readFile("runtime/sfn/platform/tls.sfn");
     let program = parse_program(source);
     let native = emit_native_text_with_module_name(program, "runtime/sfn/platform/tls");
-    let ir = lower_to_llvm_ir_from_text_with_provider_context(native, "runtime/sfn/platform/tls", empty_llvm_import_context(), resolve_llvm_provider_context());
-
-    assert _contains(ir, "declare ");
-    // Context / handshake surface.
-    assert _contains(ir, "@TLS_client_method(");
-    assert _contains(ir, "@SSL_CTX_new(");
-    assert _contains(ir, "@SSL_CTX_free(");
-    assert _contains(ir, "@SSL_CTX_set_verify(");
-    assert _contains(ir, "@SSL_CTX_set_default_verify_paths(");
-    assert _contains(ir, "@SSL_CTX_load_verify_locations(");
-    assert _contains(ir, "@SSL_new(");
-    assert _contains(ir, "@SSL_free(");
-    assert _contains(ir, "@SSL_set_fd(");
-    // SNI rides the SSL_ctrl ABI symbol (the set_tlsext_host_name macro);
-    // SSL_set1_host binds the RFC-6125 hostname check.
-    assert _contains(ir, "@SSL_ctrl(");
-    assert _contains(ir, "@SSL_set1_host(");
-    assert _contains(ir, "@SSL_connect(");
-    // I/O + verify-poll + teardown surface.
-    assert _contains(ir, "@SSL_read(");
-    assert _contains(ir, "@SSL_write(");
-    assert _contains(ir, "@SSL_shutdown(");
-    assert _contains(ir, "@SSL_get_error(");
-    assert _contains(ir, "@SSL_get_verify_result(");
+    return lower_to_llvm_ir_from_text_with_provider_context(native, "runtime/sfn/platform/tls", empty_llvm_import_context(), resolve_llvm_provider_context());
 }
 
-test "lowering: runtime/sfn/platform/tls.sfn defines the exported client wrappers" ![io] {
-    let source = fs.readFile("runtime/sfn/platform/tls.sfn");
-    let program = parse_program(source);
-    let native = emit_native_text_with_module_name(program, "runtime/sfn/platform/tls");
-    let ir = lower_to_llvm_ir_from_text_with_provider_context(native, "runtime/sfn/platform/tls", empty_llvm_import_context(), resolve_llvm_provider_context());
+test "lowering: runtime/sfn/platform/tls.sfn emits a declare for every extern" ![io] {
+    let ir = _tls_ir();
 
+    assert _contains(ir, "declare ");
+    // Record buffers are raw allocations, not Sailfin arrays: a TLS record
+    // is length-prefixed on the wire and read in two `recv` halves, so the
+    // buffer outlives any single call frame.
+    assert _contains(ir, "@malloc(");
+    assert _contains(ir, "@free(");
+    assert _contains(ir, "@memcpy(");
+    assert _contains(ir, "@memset(");
+    // Socket I/O. The driver owns the fd directly rather than going through
+    // `io.sfn`, so the record layer can see short reads.
+    assert _contains(ir, "@recv(");
+    assert _contains(ir, "@send(");
+    // AEAD record seal/open — the one hot path that stays out of Sailfin.
+    assert _contains(ir, "@sfn_tls_record_seal(");
+    assert _contains(ir, "@sfn_tls_record_open(");
+    // Trust-store and certificate-validity support.
+    assert _contains(ir, "@sfn_str_sfn_from_cstr(");
+    assert _contains(ir, "@sfn_fs_read_file(");
+    assert _contains(ir, "@sfn_clock_unix_millis(");
+}
+
+test "lowering: runtime/sfn/platform/tls.sfn declares no OpenSSL symbol" ![io] {
+    // SFN-341 deleted the OpenSSL surface outright (SFEP-0048 Phase D). The
+    // regression this pins is a partial revert: an `SSL_*` extern creeping
+    // back would reintroduce the `-lssl -lcrypto` link edge the seal
+    // (SFEP-0016) cannot attest, and would do so without failing any link
+    // on a host that happens to have OpenSSL installed.
+    let ir = _tls_ir();
+
+    assert ! _contains(ir, "@SSL_");
+    assert ! _contains(ir, "@TLS_client_method(");
+    assert ! _contains(ir, "@X509_");
+    assert ! _contains(ir, "@EVP_");
+}
+
+test "lowering: runtime/sfn/platform/tls.sfn defines the exported wrappers" ![io] {
+    let ir = _tls_ir();
+
+    // Client half.
     assert _contains(ir, "@tls_client_ctx(");
     assert _contains(ir, "@tls_ctx_free(");
     assert _contains(ir, "@tls_connect_fd(");
     assert _contains(ir, "@tls_read(");
     assert _contains(ir, "@tls_write(");
     assert _contains(ir, "@tls_shutdown_free(");
+    // Server half (SFN-341): the native stack lit these up, so the skeleton
+    // pins them alongside the client wrappers rather than in a second file.
+    assert _contains(ir, "@tls_server_ctx(");
+    assert _contains(ir, "@tls_accept_fd(");
 }

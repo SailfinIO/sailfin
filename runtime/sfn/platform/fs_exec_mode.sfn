@@ -4,8 +4,7 @@
 // (`adapters/filesystem.sfn`) tests with. Swapped for
 // `fs_exec_mode_windows.sfn` on a Windows target by
 // `target_condition_runtime_sfn_sources` (`compiler/src/build/target.sfn`),
-// the same mechanism that swaps `tls.sfn` for
-// `openssl_absent_windows.sfn`.
+// the same mechanism that swaps `rand.sfn` for `rand_windows.sfn`.
 //
 // Why this is a module and not a literal at the call site (SFN-649):
 // `access` resolves on every target, so the call site looked portable

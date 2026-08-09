@@ -171,8 +171,8 @@ extern fn sfn_task_create_detached(fn_ptr: i64, ctx: i64) -> *u8;
 extern fn sfn_scheduler_create(queue: *u8) -> *u8;
 
 // ── TLS termination surface (SFEP-0036 §3.5, tls.sfn) ─────────────
-// Inbound TLS: `sfn_serve_tls` builds a server `SSL_CTX` once
-// (`tls_server_ctx`), wraps each accepted fd into an `SSL*`
+// Inbound TLS: `sfn_serve_tls` builds a server `TlsContext` once
+// (`tls_server_ctx`), wraps each accepted fd into a `TlsSession`
 // (`tls_accept_fd`), and runs the recv→dispatch→send loop through
 // `tls_read`/`tls_write` (same contract as `recv`/`send`) instead of the
 // raw socket. Declared here as externs — the linker resolves each `@tls_*`

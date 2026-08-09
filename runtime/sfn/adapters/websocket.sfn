@@ -106,8 +106,8 @@ extern fn freeaddrinfo(res: *u8) -> void;
 // The RFC 6455 handshake accept-value (`SHA1(key ‖ GUID)` then base64) and the
 // client `Sec-WebSocket-Key` base64 are computed by the file-local native
 // SHA-1 + base64 helpers below (`_ws_sha1` / `_ws_base64`) — no libcrypto
-// extern. The `-lcrypto` link stays only for the TLS externs until the Phase D
-// swap (SFEP-0048, SFN-341).
+// extern. Nothing here links OpenSSL: SFN-341 retired the last `-lcrypto`
+// consumer when TLS moved to the native stack (SFEP-0048 Phase D).
 // ── Native entropy (platform/rand.sfn) ────────────────────────
 // `sfn_rand_fill(buf, n)` fills `n` cryptographically secure random bytes and
 // returns 1 on success, 0 on failure (fail-closed). Replaces OpenSSL

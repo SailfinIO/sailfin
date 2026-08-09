@@ -101,7 +101,7 @@ fn _sfn_bin() -> string ![io] {
 
 // Full parent environment for the build + server subprocesses
 // (`run_capture`/`spawn_with_env`'s empty env is EMPTY, not "inherit"):
-// the nested build links a binary (clang + ld + `-lssl -lcrypto`), and
+// the nested build links a binary (clang + ld), and
 // SAILFIN_TEST_SCRATCH keeps the build cache per-invocation under the pool.
 fn _child_env() -> string[] ![io] { return process.environ(); }
 

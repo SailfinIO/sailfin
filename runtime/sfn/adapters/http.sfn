@@ -121,7 +121,8 @@ extern fn tls_write(ssl: *u8, buf: *u8, n: i64) -> i64;
 extern fn tls_shutdown_free(ssl: *u8) -> void;
 
 // Keep-alive TLS registry head. Plain HTTP handles remain the raw fd; HTTPS
-// handles are the same fd plus a registry row that owns SSL*/SSL_CTX*.
+// handles are the same fd plus a registry row that owns the `TlsSession` and
+// its `TlsContext` (`platform/tls.sfn`).
 extern var http_conn_tls_head: *u8 = null;
 
 // ── libc memory + string helpers ──────────────────────────────
@@ -753,8 +754,8 @@ fn _extract_body(resp: *u8, total_len: i64, body_len_slot: *i64) -> *u8 {
     return body;
 }
 
-// `_tls_teardown(ssl, ctx)` — shut down and free a client `SSL*` handle
-// and its `SSL_CTX*`. Both may be null (the plaintext-http path), making
+// `_tls_teardown(ssl, ctx)` — shut down and free a client `TlsSession`
+// handle and its `TlsContext`. Both may be null (the plaintext-http path), making
 // this a no-op there, so it can be called unconditionally on every
 // post-handshake exit of a TLS-capable request. `tls_shutdown_free`
 // writes a close_notify over the fd, so this must run before `sfn_socket_close(fd)`.
@@ -1451,7 +1452,7 @@ fn _recv_one_response(fd: i32, ssl: *u8, len_slot: *i64) -> *u8 ![net] {
 }
 
 // Keep-alive TLS registry row layout (32 bytes):
-//   +0 fd (i64), +8 SSL* (i64), +16 SSL_CTX* (i64), +24 next row (i64).
+//   +0 fd (i64), +8 TlsSession* (i64), +16 TlsContext* (i64), +24 next (i64).
 // The public keep-alive ABI stays a single `i64` handle by returning the fd
 // and associating TLS state in this process-local list. The list is tiny in
 // normal use and scoped to explicit `sfn_http_conn_close` cleanup.
@@ -1506,8 +1507,9 @@ fn _conn_tls_remove(fd: i64) -> void ![net] {
 // `sfn_http_conn_open(url)` — open a keep-alive TCP connection to the
 // authority in `url`. Returns the connected fd as an i64 (>= 0), or -1 on a
 // null url, an authority parse failure, a connect failure, or an HTTPS TLS
-// verification failure. HTTPS connections keep their SSL*/SSL_CTX* in the
-// process-local registry above so the public handle remains the fd.
+// verification failure. HTTPS connections keep their `TlsSession` and
+// `TlsContext` in the process-local registry above so the public handle
+// remains the fd.
 fn sfn_http_conn_open(url: *u8) -> i64 ![net] {
     if url as i64 == 0 { return 0 - 1; }
     let https: string = "https://";

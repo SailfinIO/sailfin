@@ -2,7 +2,7 @@
 //
 // Regression guard for the #1782 macOS TLS link-path bug class
 // (SFEP-0036, `docs/proposals/0036-tls-runtime.md`, gap B1 of epic
-// #1540): the OpenSSL `-L`/`-lssl`/`-lcrypto` linker inputs ride into
+// #1540): the runtime capsule's `link-libs` and any `-L` inputs ride into
 // the final clang link via `LinkPlan.libs`, and BOTH backend link-argv
 // builders — the `sfn test` per-binary layout
 // (`_llvm_text_link_test_argv`) and the `sfn build`/`run` program layout
