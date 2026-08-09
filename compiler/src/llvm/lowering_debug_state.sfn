@@ -22,6 +22,7 @@ let mut _trace_call_lowering: boolean = false;
 let mut _skip_module_globals: boolean = false;
 let mut _test_runner_active: boolean = false;
 let mut _test_runner_trace: boolean = false;
+let mut _lowering_trace_buffer: string = "";
 
 fn install_llvm_provider_context(context: LLVMProviderContext) {
     _target_os = context.target_os;
@@ -31,6 +32,7 @@ fn install_llvm_provider_context(context: LLVMProviderContext) {
     _skip_module_globals = context.skip_module_globals;
     _test_runner_active = context.test_runner_active;
     _test_runner_trace = context.test_runner_trace;
+    _lowering_trace_buffer = "";
 }
 
 fn build_target_os() -> string { return _target_os; }
@@ -48,6 +50,22 @@ fn test_runner_active() -> boolean { return _test_runner_active; }
 fn test_runner_trace() -> boolean {
     if !_test_runner_active { return false; }
     return _test_runner_trace;
+}
+
+// Traces and provider diagnostics share one ordered, authority-free event
+// buffer. The driver drains it after the provider returns and before handling
+// the returned status, preserving the provider's original stderr order.
+fn trace_log(line: string) {
+    if _lowering_trace_buffer.length > 0 {
+        _lowering_trace_buffer = _lowering_trace_buffer + "\n";
+    }
+    _lowering_trace_buffer = _lowering_trace_buffer + line;
+}
+
+fn take_lowering_trace_buffer() -> string {
+    let buffered = _lowering_trace_buffer;
+    _lowering_trace_buffer = "";
+    return buffered;
 }
 
 // Provider-owned target decisions. The driver supplies the resolved target;
@@ -123,6 +141,8 @@ export {
     skip_module_globals,
     test_runner_active,
     test_runner_trace,
+    trace_log,
+    take_lowering_trace_buffer,
     errno_locator_symbol,
     clock_monotonic_id_value,
     sc_nprocessors_onln_value,

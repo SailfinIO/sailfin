@@ -4,7 +4,7 @@
 import { NativeFunction } from "../../../native_ir";
 import { substring } from "../../../string_utils";
 import { format_temp_name, is_simple_identifier } from "../../expressions_helpers";
-import { trace_lowering } from "../../lowering_debug_state";
+import { trace_log, trace_lowering } from "../../lowering_debug_state";
 import { find_function_by_name_or_import } from "../../rendering_helpers";
 import { empty_string_constant_set } from "../../strings";
 import {
@@ -39,7 +39,7 @@ import {
 import { find_local_binding } from "./core_scopes";
 import { trim_text } from "./core_text";
 
-fn lower_postfix_expression(expression: string, stripped: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string) -> ExpressionResult ![io] {
+fn lower_postfix_expression(expression: string, stripped: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string) -> ExpressionResult {
     let mut diagnostics: string[] = [];
     let empty_constants = empty_string_constant_set();
     let dbg_expr = trace_lowering();
@@ -317,7 +317,7 @@ fn lower_postfix_expression(expression: string, stripped: string, bindings: Para
         if parameter != null {
             param_found = parameter.name + " -> " + parameter.llvm_name;
         }
-        print.err("emit-llvm: lower_expression param_lookup stripped="
+        trace_log("emit-llvm: lower_expression param_lookup stripped="
             + stripped
             + " result="
             + param_found);
@@ -378,7 +378,7 @@ fn lower_postfix_expression(expression: string, stripped: string, bindings: Para
     }
 
     if dbg_expr {
-        print.err("emit-llvm: lower_expression FALLTHROUGH expr=" + stripped
+        trace_log("emit-llvm: lower_expression FALLTHROUGH expr=" + stripped
             + " (unhandled)");
     }
     diagnostics.push("llvm lowering: unable to lower expression `" + expression

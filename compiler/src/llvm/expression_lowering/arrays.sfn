@@ -32,13 +32,13 @@ fn _has_fatal_runtime_call_diagnostic(diagnostics: string[]) -> boolean {
     return false;
 }
 
-fn lower_struct_array_concat(lhs: LLVMOperand, rhs: LLVMOperand, element_type: string, lines: string[], temp_index: int) -> ExpressionResult ![io] {
+fn lower_struct_array_concat(lhs: LLVMOperand, rhs: LLVMOperand, element_type: string, lines: string[], temp_index: int) -> ExpressionResult {
     return lower_struct_array_concat_with_alloc_target(lhs, rhs, element_type, lines, temp_index, "alloc_struct");
 }
 
 // The explicit target is a narrow test seam for exercising dispatch failure;
 // production concat lowering always enters through `lower_struct_array_concat`.
-fn lower_struct_array_concat_with_alloc_target(lhs: LLVMOperand, rhs: LLVMOperand, element_type: string, lines: string[], temp_index: int, alloc_target: string) -> ExpressionResult ![io] {
+fn lower_struct_array_concat_with_alloc_target(lhs: LLVMOperand, rhs: LLVMOperand, element_type: string, lines: string[], temp_index: int, alloc_target: string) -> ExpressionResult {
     let mut current_lines = lines;
     let mut current_temp = temp_index;
     let mut diagnostics: string[] = [];

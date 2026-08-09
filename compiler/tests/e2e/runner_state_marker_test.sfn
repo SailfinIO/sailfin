@@ -11,7 +11,7 @@
 //      behaviour the file probes used to gate).
 //   3. `sfn emit llvm` from a clean shell keeps is_test_module=false:
 //      the mangling pass observes the import (import_subs >= 1) and the
-//      test-runner timing prints stay off.
+//      test-runner progress events stay off.
 //
 // Each spawned compile gets its own fresh SAILFIN_TEST_SCRATCH so the
 // program.ll / runtime caches never collide under the parallel pool.
@@ -111,6 +111,8 @@ test "runner state: SAILFIN_TRACE_TEST_RUNNER=1 propagates to lowering" ![io] {
     // LLVM-lowering-side trace (lowering_core/mod.sfn): proves the in-process
     // flag set by the orchestrator was observed on the lowering hot path.
     assert find(r.log, "test llvm:", 0) >= 0;
+    // SFN-743: timing is driver-owned; the provider must not read the clock.
+    assert find(r.log, "test llvm: phase=", 0) < 0;
 }
 
 // ---- Contract 3: outside `sfn test`, in-process flag stays false ----
@@ -119,7 +121,7 @@ test "runner state: SAILFIN_TRACE_TEST_RUNNER=1 propagates to lowering" ![io] {
 // imports a sibling helper, we assert the mangling pass observed the
 // import (`import_subs >= 1`) — if the flag had defaulted to true,
 // safe_imports would be cleared and import_subs would be 0. We also
-// assert the test-runner timing prints (`test llvm: phase=`) stay off.
+// assert the provider's test-runner progress events stay off.
 //
 // `sfn emit llvm` is allowed to exit non-zero here: the standalone-emit
 // path doesn't pre-stage imported function signatures, so #306's fatal
@@ -148,7 +150,7 @@ test "runner state: in-process flag defaults to false outside sfn test" ![io] {
     assert find(r.log, "mangle import_subs=", 0) >= 0;
     assert find(r.log, "mangle import_subs=0", 0) < 0;
 
-    // Belt-and-suspenders: the test-runner-active timing prints (gated on
-    // the in-process flag, not on SAILFIN_TRACE_LOWERING) stay quiet.
-    assert find(r.log, "test llvm: phase=", 0) < 0;
+    // Belt-and-suspenders: test-runner progress events (gated on the
+    // in-process flag, not on SAILFIN_TRACE_LOWERING) stay quiet.
+    assert find(r.log, "test llvm:", 0) < 0;
 }

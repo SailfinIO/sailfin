@@ -15,7 +15,7 @@ import {
 } from "./core_text";
 import { emit_runtime_call, empty_runtime_call_overrides } from "./runtime_call";
 
-fn lower_string_literal(literal: string, temp_index: int, lines: string[]) -> ExpressionResult ![io] {
+fn lower_string_literal(literal: string, temp_index: int, lines: string[]) -> ExpressionResult {
     // M1.A — String literal lowering to {i8*, i64} aggregate.
     //
     // The literal materializes in three layers:
@@ -104,7 +104,7 @@ fn lower_string_literal(literal: string, temp_index: int, lines: string[]) -> Ex
     };
 }
 
-fn emit_string_concat(left: LLVMOperand, right: LLVMOperand, temp_index: int, lines: string[]) -> ExpressionResult ![io] {
+fn emit_string_concat(left: LLVMOperand, right: LLVMOperand, temp_index: int, lines: string[]) -> ExpressionResult {
     let harmonised = harmonise_operands(left, right, temp_index, lines);
     let mut _if121: boolean = false;
     if harmonised.left == null { _if121 = true; }
@@ -194,7 +194,7 @@ fn emit_string_concat(left: LLVMOperand, right: LLVMOperand, temp_index: int, li
     };
 }
 
-fn coerce_string_operand_to_aggregate(operand: LLVMOperand, temp_index: int, lines: string[]) -> ExpressionResult ![io] {
+fn coerce_string_operand_to_aggregate(operand: LLVMOperand, temp_index: int, lines: string[]) -> ExpressionResult {
     let coerced = coerce_operand_to_type(operand, "{i8*, i64}", temp_index, lines, true, null);
     return ExpressionResult {
         lines: coerced.lines,
@@ -205,7 +205,7 @@ fn coerce_string_operand_to_aggregate(operand: LLVMOperand, temp_index: int, lin
     };
 }
 
-fn select_string_aggregate(condition: LLVMOperand, when_true: LLVMOperand, when_false: LLVMOperand, temp_index: int, lines: string[]) -> ExpressionResult ![io] {
+fn select_string_aggregate(condition: LLVMOperand, when_true: LLVMOperand, when_false: LLVMOperand, temp_index: int, lines: string[]) -> ExpressionResult {
     let mut diagnostics: string[] = [];
     let true_aggregate = coerce_string_operand_to_aggregate(when_true, temp_index, lines);
     let mut _ci_union_true: int = 0;
@@ -296,7 +296,7 @@ fn select_string_aggregate(condition: LLVMOperand, when_true: LLVMOperand, when_
     };
 }
 
-fn select_i8_pointer_string_aggregate(condition: LLVMOperand, when_true: LLVMOperand, when_false: LLVMOperand, temp_index: int, lines: string[]) -> ExpressionResult ![io] {
+fn select_i8_pointer_string_aggregate(condition: LLVMOperand, when_true: LLVMOperand, when_false: LLVMOperand, temp_index: int, lines: string[]) -> ExpressionResult {
     let mut diagnostics: string[] = [];
     let false_aggregate = coerce_string_operand_to_aggregate(when_false, temp_index, lines);
     let mut _ci_false: int = 0;
@@ -365,7 +365,7 @@ fn select_i8_pointer_string_aggregate(condition: LLVMOperand, when_true: LLVMOpe
     };
 }
 
-fn coerce_union_operand_to_string(operand: LLVMOperand, temp_index: int, lines: string[]) -> ExpressionResult ![io] {
+fn coerce_union_operand_to_string(operand: LLVMOperand, temp_index: int, lines: string[]) -> ExpressionResult {
     let variants = parse_union_payload_types(operand.llvm_type);
     let mut diagnostics: string[] = [];
     if variants.length == 0 {
@@ -531,7 +531,7 @@ fn coerce_union_operand_to_string(operand: LLVMOperand, temp_index: int, lines: 
     };
 }
 
-fn coerce_operand_to_string(operand: LLVMOperand, temp_index: int, lines: string[]) -> ExpressionResult ![io] {
+fn coerce_operand_to_string(operand: LLVMOperand, temp_index: int, lines: string[]) -> ExpressionResult {
     let empty_constants = empty_string_constant_set();
     if operand.llvm_type == "i8*" {
         return ExpressionResult {

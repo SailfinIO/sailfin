@@ -5,7 +5,7 @@ import { NativeFunction } from "../../../native_ir";
 import { index_of, substring } from "../../../string_utils";
 import { format_temp_name, format_typed_operand } from "../../expressions_helpers";
 import { is_simple_identifier } from "../../expressions_helpers";
-import { trace_call_lowering } from "../../lowering_debug_state";
+import { trace_call_lowering, trace_log } from "../../lowering_debug_state";
 import { find_runtime_helper, make_concat_descriptor } from "../../runtime_helpers/mod";
 import { empty_string_constant_set, merge_string_constants } from "../../strings";
 import { resolve_enum_info_for_literal, resolve_enum_variant_info } from "../../type_context_queries";
@@ -89,7 +89,7 @@ fn _strip_leading_star_fn(annotation: string) -> string {
 // non-LLVM backend has one lowering site to retarget. Returns null when
 // the target is not a plain-fn-pointer binding, so the caller falls
 // through to the normal resolution pipeline.
-fn try_lower_plain_fn_ptr_call(target: string, arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult? ![io] {
+fn try_lower_plain_fn_ptr_call(target: string, arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult? {
     let name = trim_text(target);
     if name.length == 0 { return null; }
     if !is_simple_identifier(name) { return null; }
@@ -227,7 +227,7 @@ fn try_lower_plain_fn_ptr_call(target: string, arguments: string[], bindings: Pa
     };
 }
 
-fn lower_call_expression(target: string, arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string) -> ExpressionResult ![io] {
+fn lower_call_expression(target: string, arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string) -> ExpressionResult {
     let mut diagnostics: string[] = [];
     let mut collected_string_constants: StringConstant[] = empty_string_constant_set();
     let empty_constants = empty_string_constant_set();
@@ -272,7 +272,7 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
     let dot_index = index_of(trimmed_target, ".");
     let trace_calls = trace_call_lowering();
     if trace_calls {
-        print.err("call_lowering: target='" + trimmed_target + "' dot_index="
+        trace_log("call_lowering: target='" + trimmed_target + "' dot_index="
             + number_to_string(dot_index)
             + " enums="
             + number_to_string(context.enums.length));
@@ -285,7 +285,7 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
         if trace_calls {
             let mut found_text: string = "null";
             if enum_info != null { found_text = "found"; }
-            print.err("call_lowering: enum_name='" + enum_name + "' variant='"
+            trace_log("call_lowering: enum_name='" + enum_name + "' variant='"
                 + variant_name
                 + "' resolved="
                 + found_text);

@@ -12,7 +12,7 @@ import { expect_contains_str, expect_eq_bool } from "sfn/test";
 
 import { empty_llvm_import_context, resolve_llvm_provider_context } from "../../src/build/llvm_provider_context";
 import { parse_range_iterable } from "../../src/llvm/expression_lowering/native/core_parse";
-import { print_llvm_ir_from_text_with_provider_context } from "../../src/llvm/lowering/entrypoints";
+import { lower_native_text_to_llvm_artifact_with_context_and_provider } from "../../src/llvm/lowering/entrypoints";
 
 fn _sfn_bin() -> string ![io] {
     let configured = env.get("SAILFIN_BIN");
@@ -83,7 +83,8 @@ test "range for: missing start surfaces the range parse diagnostic" ![io] {
         + "    .endfor\n"
         + "    ret 0\n"
         + ".endfn\n";
-    let lowering_result = expect_eq_bool(print_llvm_ir_from_text_with_provider_context(native, "sfn533_missing_start", empty_llvm_import_context(), resolve_llvm_provider_context()), false);
+    let lowered = lower_native_text_to_llvm_artifact_with_context_and_provider(native, "sfn533_missing_start", empty_llvm_import_context(), resolve_llvm_provider_context());
+    let lowering_result = expect_eq_bool(lowered.ok, false);
     if !lowering_result.ok { throw lowering_result.message; }
 }
 
@@ -104,7 +105,8 @@ test "range for: missing end surfaces the range parse diagnostic" ![io] {
         + "    .endfor\n"
         + "    ret 0\n"
         + ".endfn\n";
-    let lowering_result = expect_eq_bool(print_llvm_ir_from_text_with_provider_context(native, "sfn533_missing_end", empty_llvm_import_context(), resolve_llvm_provider_context()), false);
+    let lowered = lower_native_text_to_llvm_artifact_with_context_and_provider(native, "sfn533_missing_end", empty_llvm_import_context(), resolve_llvm_provider_context());
+    let lowering_result = expect_eq_bool(lowered.ok, false);
     if !lowering_result.ok { throw lowering_result.message; }
 }
 

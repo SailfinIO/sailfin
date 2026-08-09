@@ -143,7 +143,7 @@ fn collect_try_structure(instructions: NativeInstruction[], start_index: int, en
     };
 }
 
-fn lower_throw_instruction(function_name: string, instruction: NativeInstruction, llvm_return: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ThrowLoweringResult ![io] {
+fn lower_throw_instruction(function_name: string, instruction: NativeInstruction, llvm_return: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ThrowLoweringResult {
     let mut diagnostics: string[] = [];
     let mut current_lines: string[] = lines;
     let mut current_temp: int = temp_index;
@@ -231,7 +231,7 @@ fn lower_throw_instruction(function_name: string, instruction: NativeInstruction
     };
 }
 
-fn lower_try_instruction(function: NativeFunction, start_index: int, llvm_return: string, bindings: ParameterBinding[], locals: LocalBinding[], allocas: string[], lines: string[], temp_index: int, block_counter: int, next_local_id: int, next_region_id: int, functions: NativeFunction[], loop_stack: LoopContext[], try_stack: TryFrameContext[], end: int, context: TypeContext, scope_id: string, scope_depth: int, current_label: string) -> BlockLoweringResult ![io] {
+fn lower_try_instruction(function: NativeFunction, start_index: int, llvm_return: string, bindings: ParameterBinding[], locals: LocalBinding[], allocas: string[], lines: string[], temp_index: int, block_counter: int, next_local_id: int, next_region_id: int, functions: NativeFunction[], loop_stack: LoopContext[], try_stack: TryFrameContext[], end: int, context: TypeContext, scope_id: string, scope_depth: int, current_label: string) -> BlockLoweringResult {
     let mut diagnostics: string[] = [];
     let mut diags: Diag[] = [];
     let structure = collect_try_structure(function.instructions, start_index, end, function.name);

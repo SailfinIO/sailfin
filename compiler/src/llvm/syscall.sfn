@@ -4,7 +4,7 @@
 import { NativeFunction } from "../native_ir";
 import { lower_expression } from "./expression_lowering/native/core";
 import { format_temp_name, format_typed_operand } from "./expressions_helpers";
-import { build_target_os, target_arch_for_lowering } from "./lowering_debug_state";
+import { build_target_os, target_arch_for_lowering, trace_log } from "./lowering_debug_state";
 import { merge_string_constants } from "./strings";
 import {
     ExpressionResult,
@@ -63,9 +63,9 @@ fn syscall_contract_error(name: string, argument_count: int, module_name: string
     return "";
 }
 
-fn _failure(message: string, lines: string[], temp_index: int, strings: StringConstant[]) -> ExpressionResult ![io] {
+fn _failure(message: string, lines: string[], temp_index: int, strings: StringConstant[]) -> ExpressionResult {
     let diag = "llvm lowering [fatal] [E1019]: " + message;
-    print.err(diag);
+    trace_log(diag);
     return ExpressionResult {
         lines: lines,
         temp_index: temp_index,
@@ -90,7 +90,7 @@ fn render_syscall_constraints(argument_count: int) -> string {
     return join_with_separator(constraints, ",");
 }
 
-fn lower_syscall_builtin(name: string, arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult ![io] {
+fn lower_syscall_builtin(name: string, arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult {
     let builtin = trim_text(name);
     let contract_error = syscall_contract_error(builtin, arguments.length, _syscall_module_name, build_target_os(), target_arch_for_lowering());
     if contract_error.length > 0 {

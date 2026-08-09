@@ -98,7 +98,7 @@ import { lower_module_bindings_to_globals } from "./module_globals";
 
 // Native-module test entrypoint retained for callers that already hold the
 // structured artifact instead of its serialized text.
-fn lower_to_llvm_for_tests(native_module: NativeModule, import_context: ImportedModuleContext, provider_context: LLVMProviderContext) -> LoweredLLVMResult ![io] {
+fn lower_to_llvm_for_tests(native_module: NativeModule, import_context: ImportedModuleContext, provider_context: LLVMProviderContext) -> LoweredLLVMResult {
     install_llvm_provider_context(provider_context);
     let artifact = select_text_artifact(native_module.artifacts);
     if artifact == null {

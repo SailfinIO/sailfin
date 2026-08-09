@@ -334,6 +334,20 @@ here.
   staging bypass `main.sfn` and the LLVM lowering subtree; the compiler capsule
   boundary suite walks the multi-capsule check import closure to keep that
   separation enforced.
+- **Driver-drained LLVM lowering events (SFN-743, SFEP-0020 §4).** Flag-gated
+  lowering and test-runner traces append to a provider-owned ordered buffer
+  beside the resolved LLVM debug state instead of writing stderr from the
+  provider. Provider diagnostics use the same stream, preserving their exact
+  order relative to traces. The driver drains after every provider return and
+  before interpreting success or failure, so events emitted before a returned
+  lowering failure survive. No callback or sink parameter enters the lowering
+  call graph, and the LLVM authority ratchet has no remaining I/O exceptions.
+  Provider-side `test llvm: phase=… ms=…` timing was retired because it read
+  the clock inside the capability-free library (including one unconditional
+  read on ordinary lowering); driver `--timing` is the canonical timing
+  surface, while `SAILFIN_TRACE_TEST_RUNNER` retains ordered progress events.
+  Asynchronous process-crash telemetry remains a separate runtime concern; the
+  provider buffer does not claim signal- or abort-safe delivery.
 - **Pure analyzer boundary (SFN-713, SFEP-0020 §3.5.6).**
   `compiler/src/analyzer.sfn` exposes an authority-free
   `AnalyzerInput -> AnalyzerResult` contract over parsed syntax, imported

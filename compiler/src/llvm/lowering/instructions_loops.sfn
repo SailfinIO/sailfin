@@ -9,7 +9,7 @@ import { lower_expression } from "../expression_lowering/native/core";
 import { find_local_binding } from "../expressions_bindings";
 import { format_temp_name } from "../expressions_helpers";
 import { is_scope_descendant, make_child_scope_id } from "../lifetime";
-import { trace_lowering } from "../lowering_debug_state";
+import { trace_log, trace_lowering } from "../lowering_debug_state";
 import { empty_string_constant_set, merge_string_constants } from "../strings";
 import {
     BlockLoweringResult,
@@ -130,7 +130,7 @@ fn last_loop_context(values: LoopContext[]) -> LoopContext {
     return values[index];
 }
 
-fn lower_loop_instruction(function: NativeFunction, start_index: int, llvm_return: string, bindings: ParameterBinding[], locals: LocalBinding[], allocas: string[], lines: string[], temp_index: int, block_counter: int, next_local_id: int, next_region_id: int, functions: NativeFunction[], loop_stack: LoopContext[], try_stack: TryFrameContext[], end: int, context: TypeContext, scope_id: string, scope_depth: int, current_label: string) -> BlockLoweringResult ![io] {
+fn lower_loop_instruction(function: NativeFunction, start_index: int, llvm_return: string, bindings: ParameterBinding[], locals: LocalBinding[], allocas: string[], lines: string[], temp_index: int, block_counter: int, next_local_id: int, next_region_id: int, functions: NativeFunction[], loop_stack: LoopContext[], try_stack: TryFrameContext[], end: int, context: TypeContext, scope_id: string, scope_depth: int, current_label: string) -> BlockLoweringResult {
     let mut diagnostics: string[] = [];
     let mut diags: Diag[] = [];
     let mut current_lines: string[] = lines;
@@ -148,7 +148,7 @@ fn lower_loop_instruction(function: NativeFunction, start_index: int, llvm_retur
 
     let debug_loop = trace_lowering();
     if debug_loop {
-        print.err("emit-llvm: lower_loop start fn=" + function.name
+        trace_log("emit-llvm: lower_loop start fn=" + function.name
             + " start_index="
             + number_to_string(start_index)
             + " end="
@@ -156,7 +156,7 @@ fn lower_loop_instruction(function: NativeFunction, start_index: int, llvm_retur
     }
     let structure = collect_loop_structure(function.instructions, start_index, end, function.name);
     if debug_loop {
-        print.err("emit-llvm: lower_loop after_collect body_start="
+        trace_log("emit-llvm: lower_loop after_collect body_start="
             + number_to_string(structure.body_start)
             + " body_end="
             + number_to_string(structure.body_end));
@@ -179,7 +179,7 @@ fn lower_loop_instruction(function: NativeFunction, start_index: int, llvm_retur
                     if raw_exit_cond.length > 0 {
                         loop_exit_condition = sanitize_if_condition_text(raw_exit_cond);
                         if debug_loop {
-                            print.err("emit-llvm: lower_loop detected exit condition: "
+                            trace_log("emit-llvm: lower_loop detected exit condition: "
                                 + loop_exit_condition);
                         }
                     }
@@ -269,7 +269,7 @@ fn lower_loop_instruction(function: NativeFunction, start_index: int, llvm_retur
     // Lower the body to discover mutations
     let body_scope_id = make_child_scope_id(scope_id, body_label);
     if debug_loop {
-        print.err("emit-llvm: lower_loop pre_body_lir fn=" + function.name
+        trace_log("emit-llvm: lower_loop pre_body_lir fn=" + function.name
             + " body_start="
             + number_to_string(body_start_effective)
             + " body_end="
@@ -279,7 +279,7 @@ fn lower_loop_instruction(function: NativeFunction, start_index: int, llvm_retur
     let body_result = lower_instruction_range(function, body_start_effective, structure.body_end, llvm_return, current_bindings, base_locals, base_allocas, [], current_temp, current_block_counter, base_local_id, current_next_region, functions, stacked, try_stack, context, body_scope_id, scope_depth
         + 1, body_label);
     if debug_loop {
-        print.err("emit-llvm: lower_loop post_body_lir fn=" + function.name
+        trace_log("emit-llvm: lower_loop post_body_lir fn=" + function.name
             + " body_lines="
             + number_to_string(body_result.lines.length));
     }

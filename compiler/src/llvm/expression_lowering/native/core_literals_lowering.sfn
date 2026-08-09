@@ -73,7 +73,7 @@ fn pick_agg_cast_shim_target(operand_type: string, target_type: string) -> strin
     return target_type;
 }
 
-fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string) -> ExpressionResult ![io] {
+fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string) -> ExpressionResult {
     let mut diagnostics: string[] = [];
     let mut current_lines: string[] = lines;
     let mut current_temp: int = temp_index;
@@ -723,7 +723,7 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
 // `line:col` instead of firing bare. Pre-#540 callers (every `lower_expression`
 // fan-out) thread `null` until they pick up an enclosing span — see the
 // issue's `Out:` section for the deferred plumbing.
-fn lower_struct_literal(parse: StructLiteralParse, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string, span: NativeSourceSpan?) -> ExpressionResult ![io] {
+fn lower_struct_literal(parse: StructLiteralParse, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string, span: NativeSourceSpan?) -> ExpressionResult {
     let mut diagnostics: string[] = parse.diagnostics;
     let mut current_lines: string[] = lines;
     let mut current_temp: int = temp_index;
@@ -831,13 +831,9 @@ fn lower_struct_literal(parse: StructLiteralParse, bindings: ParameterBinding[],
                     // is a fabrication either way, so the severity does not
                     // depend on which coercion rule rejected the value.
                     let _lit_diag_prefix: string = "llvm lowering [fatal] [E1002]: ";
-                    // Note: not stderr-flushed because `lower_struct_literal`
-                    // doesn't carry `![io]` and propagating it would touch
-                    // every caller. The detail (caller/callee types + kinds)
-                    // is already on stderr from `coerce_operand_to_type` —
-                    // this push enriches the diagnostic stream for future
-                    // renderers that surface non-fatal-yet-fatal-tagged
-                    // entries in the build report.
+                    // The coercion detail and this enriched diagnostic travel
+                    // through the same ordered provider event stream; the
+                    // driver renders them after lowering returns.
                     // Slice E.2 follow-up (#540): when the caller threaded a
                     // span, attach the same `line:col` here so the follow-up
                     // diagnostic colocates with the bare mismatch detail.
@@ -983,7 +979,7 @@ fn lower_struct_literal(parse: StructLiteralParse, bindings: ParameterBinding[],
     };
 }
 
-fn box_aggregate_operand(operand: LLVMOperand, expected_pointer_type: string, temp_index: int, lines: string[], context: TypeContext) -> HeapBoxResult ![io] {
+fn box_aggregate_operand(operand: LLVMOperand, expected_pointer_type: string, temp_index: int, lines: string[], context: TypeContext) -> HeapBoxResult {
     let mut diagnostics: string[] = [];
     let mut current_lines: string[] = lines;
     let mut current_temp: int = temp_index;
@@ -1080,7 +1076,7 @@ fn box_aggregate_operand(operand: LLVMOperand, expected_pointer_type: string, te
 
 // Slice E.2 follow-up (#540): `span` mirrors the threading in
 // `lower_struct_literal`. Pre-#540 callers pass `null`.
-fn lower_enum_literal(parse: EnumLiteralParse, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string, span: NativeSourceSpan?) -> ExpressionResult ![io] {
+fn lower_enum_literal(parse: EnumLiteralParse, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string, span: NativeSourceSpan?) -> ExpressionResult {
     let mut diagnostics: string[] = parse.diagnostics;
     let mut current_lines: string[] = lines;
     let mut current_temp: int = temp_index;
@@ -1303,11 +1299,8 @@ fn lower_enum_literal(parse: EnumLiteralParse, bindings: ParameterBinding[], loc
                         if _abi_match {
                             _payload_diag_prefix = "llvm lowering [fatal]: ";
                         }
-                        // Same caveat as the struct-literal branch above:
-                        // `lower_enum_literal` lacks `![io]` so this enriches
-                        // the diagnostic stream rather than stderr. The
-                        // ABI-shape detail itself is already on stderr from
-                        // `coerce_operand_to_type`.
+                        // As in the struct-literal branch, both the ABI detail
+                        // and this enrichment remain ordered provider events.
                         let mut _payload_diag = _payload_diag_prefix
                             + "unable to coerce value (got `"
                             + field_operand.llvm_type
