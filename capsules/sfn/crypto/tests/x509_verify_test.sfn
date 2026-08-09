@@ -32,6 +32,7 @@ import {
     x509_verify_ok,
     x509_verify_options
 } from "../src/x509_verify";
+import { hexb } from "./support/hex";
 
 // 2026-06-01T00:00:00Z — inside every fixture window except xp_inter, which
 // expires 2026-02-01.
@@ -42,24 +43,6 @@ fn before_ms() -> int { return 1748736000000; }
 
 // 2028-01-01T00:00:00Z — after every leaf's notAfter.
 fn after_ms() -> int { return 1830297600000; }
-
-fn hexb(s: string) -> int[] {
-    let mut out: int[] = [];
-    let mut i: int = 0;
-    loop {
-        if i >= s.length { break; }
-        out.push(((_hexval(s[i]) << 4) | _hexval(s[i + 1])) & 255);
-        i += 2;
-    }
-    return out;
-}
-
-fn _hexval(c: string) -> int {
-    let code: int = char_code(c) & 255;
-    if code >= 48 && code <= 57 { return code - 48; }
-    if code >= 97 && code <= 102 { return code - 97 + 10; }
-    return 0;
-}
 
 fn cert(hex: string) -> X509Certificate { return x509_parse(hexb(hex)); }
 

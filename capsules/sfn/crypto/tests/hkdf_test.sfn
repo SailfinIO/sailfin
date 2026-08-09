@@ -4,44 +4,8 @@
 // HMAC-SHA-256: RFC 4231 test case 1 cross-checks the HMAC, and RFC 5869
 // test cases 1 and 3 cover extract/expand, including empty salt/info and
 // out-of-range length rejection.
-import { hmac_sha256_bytes, hkdf_sha256_extract, hkdf_sha256_expand } from "../src/hkdf";
-
-// Parse an even-length lowercase hex string into an int[] of bytes.
-fn hexb(s: string) -> int[] {
-    let digits: string = "0123456789abcdef";
-    let mut out: int[] = [];
-    let mut i: int = 0;
-    loop {
-        if i >= s.length { break; }
-        let hi: int = _hexval(s[i]);
-        let lo: int = _hexval(s[i + 1]);
-        out.push(((hi << 4) | lo) & 255);
-        i += 2;
-    }
-    return out;
-}
-
-fn _hexval(c: string) -> int {
-    let code: int = char_code(c) & 255;
-    if code >= 48 && code <= 57 {
-        return code - 48;
-    }  // '0'-'9'
-    if code >= 97 && code <= 102 {
-        return code - 97 + 10;
-    }  // 'a'-'f'
-    return 0;
-}
-
-fn eq_bytes(a: int[], b: int[]) -> bool {
-    if a.length != b.length { return false; }
-    let mut i: int = 0;
-    loop {
-        if i >= a.length { break; }
-        if a[i] != b[i] { return false; }
-        i += 1;
-    }
-    return true;
-}
+import { hkdf_sha256_expand, hkdf_sha256_extract, hmac_sha256_bytes } from "../src/hkdf";
+import { eq_bytes, hexb } from "./support/hex";
 
 // RFC 4231 test case 1 cross-checks the internal pure HMAC-SHA-256.
 test "hmac_sha256_bytes: RFC 4231 test case 1" {

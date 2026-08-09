@@ -88,6 +88,13 @@ closure.
 
 ---
 
+## Where shared helpers live
+
+When two or more test files need the same helper, extract it to a support
+module rather than mirroring it in each file — see
+[`test-support-modules.md`](./test-support-modules.md). Mirroring is only for
+symbols whose home module has a heavy closure, per the table above.
+
 ## Struct-literal caveat
 
 When a real signature takes struct arguments, build **flat,

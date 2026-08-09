@@ -5,17 +5,7 @@
 // strings computed by hand over small byte arrays — never a real
 // certificate.
 import { pem_certificates_to_der, pem_decode_blocks } from "../src/pem";
-
-fn eq_bytes(a: int[], b: int[]) -> bool {
-    if a.length != b.length { return false; }
-    let mut i: int = 0;
-    loop {
-        if i >= a.length { break; }
-        if a[i] != b[i] { return false; }
-        i += 1;
-    }
-    return true;
-}
+import { eq_bytes } from "./support/hex";
 
 test "pem: a two-block chain decodes to two DER blobs in order" {
     // block1 = [1,2,3,4,5] -> "AQIDBAU="; block2 = [9,8,7] -> "CQgH"

@@ -1,0 +1,71 @@
+// capsules/sfn/crypto/tests/support/hex.sfn
+//
+// Shared assertion helpers for the sfn/crypto test suite: hex-literal decoding
+// and plain byte-array equality. These are test support only — they are never
+// linked into shipped code, and `eq_bytes` is deliberately NOT constant-time.
+// Production code compares secrets with `ct_eq_bytes` from `src/bits.sfn`;
+// using this one on a secret would leak timing.
+//
+// This file does not end in `_test.sfn`, so the runner's target collector
+// (`_looks_like_test_file_cmd`, compiler/src/cli/commands/test/discovery.sfn)
+// skips it — it enters a build only when a test imports it. The pattern
+// follows `compiler/tests/e2e/fixtures/`; see
+// docs/conventions/unit-test-import-envelope.md (SFN-665).
+// Map one hex digit to its 0-15 value, or -1 if the character is not hex.
+//
+// Contract:
+//   - accepts '0'-'9', 'a'-'f' and 'A'-'F'
+//   - returns -1 for every other character, never 0 — a silent 0 decodes
+//     garbage as a valid byte instead of signalling the typo.
+fn _hexval(c: string) -> int {
+    let code: int = char_code(c) & 255;
+    if code >= 48 && code <= 57 {
+        return code - 48;
+    }  // '0'-'9'
+    if code >= 97 && code <= 102 {
+        return code - 97 + 10;
+    }  // 'a'-'f'
+    if code >= 65 && code <= 70 {
+        return code - 65 + 10;
+    }  // 'A'-'F'
+    return -1;
+}
+
+// Decode a hex string into an int[] of bytes.
+//
+// Contract — fail closed, and return rather than trap:
+//   - accepts upper- and lower-case hex digits
+//   - odd-length input returns [] (it is a mistyped vector, not a short read);
+//     the loop never indexes past the end of `s`
+//   - any non-hex character returns []
+//
+// Returning [] instead of panicking keeps a bad literal an assertion failure
+// in one test rather than a crashed runner taking the whole suite with it.
+fn hexb(s: string) -> int[] {
+    if s.length % 2 != 0 { return []; }
+    let mut out: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= s.length { break; }
+        let hi: int = _hexval(s[i]);
+        let lo: int = _hexval(s[i + 1]);
+        if hi < 0 || lo < 0 { return []; }
+        out.push(((hi << 4) | lo) & 255);
+        i += 2;
+    }
+    return out;
+}
+
+// Plain (non-constant-time) byte-array equality for test assertions.
+fn eq_bytes(a: int[], b: int[]) -> boolean {
+    if a.length != b.length { return false; }
+    let mut i: int = 0;
+    loop {
+        if i >= a.length { break; }
+        if a[i] != b[i] { return false; }
+        i += 1;
+    }
+    return true;
+}
+
+export { hexb, eq_bytes };

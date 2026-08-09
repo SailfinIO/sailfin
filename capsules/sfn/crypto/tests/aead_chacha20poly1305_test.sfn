@@ -4,42 +4,8 @@
 // RFC 8439 §2.8.2 seal known-answer vector, the matching open round-trip, and
 // tamper-detection (a flipped ciphertext byte, a flipped AAD byte, and a
 // truncated input must all fail closed).
-import { chacha20poly1305_seal, chacha20poly1305_open } from "../src/aead_chacha20poly1305";
-
-fn hexb(s: string) -> int[] {
-    let mut out: int[] = [];
-    let mut i: int = 0;
-    loop {
-        if i >= s.length { break; }
-        let hi: int = _hexval(s[i]);
-        let lo: int = _hexval(s[i + 1]);
-        out.push(((hi << 4) | lo) & 255);
-        i += 2;
-    }
-    return out;
-}
-
-fn _hexval(c: string) -> int {
-    let code: int = char_code(c) & 255;
-    if code >= 48 && code <= 57 {
-        return code - 48;
-    }  // '0'-'9'
-    if code >= 97 && code <= 102 {
-        return code - 97 + 10;
-    }  // 'a'-'f'
-    return 0;
-}
-
-fn eq_bytes(a: int[], b: int[]) -> bool {
-    if a.length != b.length { return false; }
-    let mut i: int = 0;
-    loop {
-        if i >= a.length { break; }
-        if a[i] != b[i] { return false; }
-        i += 1;
-    }
-    return true;
-}
+import { chacha20poly1305_open, chacha20poly1305_seal } from "../src/aead_chacha20poly1305";
+import { eq_bytes, hexb } from "./support/hex";
 
 // The RFC 8439 §2.8.2 test-vector inputs, shared across the seal/open tests.
 fn _rfc_key() -> int[] {

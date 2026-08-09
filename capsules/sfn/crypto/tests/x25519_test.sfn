@@ -5,41 +5,7 @@
 // round trip (both base-point derivations and both shared-secret
 // directions), fail-closed length checks, and x25519_is_zero behavior.
 import { x25519, x25519_base, x25519_is_zero } from "../src/x25519";
-
-fn hexb(s: string) -> int[] {
-    let mut out: int[] = [];
-    let mut i: int = 0;
-    loop {
-        if i >= s.length { break; }
-        let hi: int = _hexval(s[i]);
-        let lo: int = _hexval(s[i + 1]);
-        out.push(((hi << 4) | lo) & 255);
-        i += 2;
-    }
-    return out;
-}
-
-fn _hexval(c: string) -> int {
-    let code: int = char_code(c) & 255;
-    if code >= 48 && code <= 57 {
-        return code - 48;
-    }  // '0'-'9'
-    if code >= 97 && code <= 102 {
-        return code - 97 + 10;
-    }  // 'a'-'f'
-    return 0;
-}
-
-fn eq_bytes(a: int[], b: int[]) -> bool {
-    if a.length != b.length { return false; }
-    let mut i: int = 0;
-    loop {
-        if i >= a.length { break; }
-        if a[i] != b[i] { return false; }
-        i += 1;
-    }
-    return true;
-}
+import { eq_bytes, hexb } from "./support/hex";
 
 test "x25519: RFC 7748 §5.2 vector 1" {
     let scalar: int[] = hexb("a546e36bf0527c9d3b16154b82465edd62144c0ac1fc5a18506a2244ba449ac4");

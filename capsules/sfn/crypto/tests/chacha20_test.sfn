@@ -3,47 +3,7 @@
 // Known-answer coverage for sfn/crypto ChaCha20 (RFC 8439 §2.3.2 block
 // function, §2.4.2 encryption) plus a fail-closed bad-key-length check.
 import { chacha20_block, chacha20_xor } from "../src/chacha20";
-
-// Map a single hex digit character to its 0-15 value, or -1 if not hex.
-fn _hexval(c: string) -> int {
-    let code: int = char_code(c) & 255;
-    if code >= 48 && code <= 57 {
-        return code - 48;
-    }  // '0'..'9'
-    if code >= 97 && code <= 102 {
-        return code - 97 + 10;
-    }  // 'a'..'f'
-    if code >= 65 && code <= 70 {
-        return code - 65 + 10;
-    }  // 'A'..'F'
-    return -1;
-}
-
-// Decode a lowercase/uppercase hex string into an int[] of bytes.
-fn hexb(s: string) -> int[] {
-    let mut out: int[] = [];
-    let mut i: int = 0;
-    loop {
-        if i + 1 >= s.length { break; }
-        let hi: int = _hexval(s[i]);
-        let lo: int = _hexval(s[i + 1]);
-        out.push(((hi << 4) | lo) & 255);
-        i += 2;
-    }
-    return out;
-}
-
-// Plain (non-constant-time) byte-array equality for test assertions.
-fn eq_bytes(a: int[], b: int[]) -> bool {
-    if a.length != b.length { return false; }
-    let mut i: int = 0;
-    loop {
-        if i >= a.length { break; }
-        if a[i] != b[i] { return false; }
-        i += 1;
-    }
-    return true;
-}
+import { eq_bytes, hexb } from "./support/hex";
 
 test "chacha20_block: RFC 8439 §2.3.2 keystream block" {
     // key = 00 01 02 ... 1f, counter = 1, nonce = 00 00 00 09 00 00 00 4a 00 00 00 00

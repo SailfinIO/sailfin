@@ -4,18 +4,8 @@
 // per-record nonce derivation (§5.3) against hand-computed known answers, the
 // seal→open round-trip (content + type recovered, padding stripped), and
 // fail-closed rejection of malformed / oversized / tampered records.
-import { tls13_record_nonce, tls13_seal_record, tls13_open_record } from "../src/tls13_record";
-
-fn eq_bytes(a: int[], b: int[]) -> bool {
-    if a.length != b.length { return false; }
-    let mut i: int = 0;
-    loop {
-        if i >= a.length { break; }
-        if a[i] != b[i] { return false; }
-        i += 1;
-    }
-    return true;
-}
+import { tls13_open_record, tls13_record_nonce, tls13_seal_record } from "../src/tls13_record";
+import { eq_bytes } from "./support/hex";
 
 // A deterministic 32-byte key [0,1,...,31] and 12-byte write_iv
 // [0,1,...,11] shared across the round-trip tests.
