@@ -3,6 +3,8 @@
 // Module symbol mangling, trait metadata construction, and function
 // collection helpers.  Split from lowering_helpers.sfn to keep both
 // files under 1000 lines.
+import { substring } from "sfn/strings";
+
 import {
     ImportModuleAlias,
     NativeFunction,
@@ -12,9 +14,9 @@ import {
     NativeParameter,
     NativeStruct
 } from "../../native_ir";
-import { substring } from "../../string_utils";
 import { resolve_import_module_slug_for_module } from "../imports";
 import { trace_lowering } from "../lowering_debug_state";
+import { sanitize_symbol } from "../symbols";
 import {
     CapabilityManifest,
     TraitDescriptor,
@@ -25,7 +27,6 @@ import {
     index_of,
     join_with_separator,
     number_to_string,
-    sanitize_symbol,
     starts_with,
     string_array_contains,
     trim_text

@@ -5,7 +5,8 @@
 //
 // Module Structure:
 //   - types.sfn:          Struct definitions (TypeContext, LocalBinding, etc.)
-//   - utils.sfn:          Basic utilities (trim_text, sanitize_symbol, etc.)
+//   - utils.sfn:          Basic parsing and collection utilities
+//   - symbols.sfn:        LLVM symbol classification and sanitization
 //   - strings.sfn:        String constant management
 //   - effects.sfn:        Effect system analysis and propagation
 //   - runtime_helpers.sfn: Runtime helper descriptors
@@ -81,7 +82,6 @@ export {
     append_string,
     join_with_separator,
     string_array_contains,
-    sanitize_symbol,
     number_to_string,
     index_of,
     is_identifier_start_char,
@@ -89,6 +89,8 @@ export {
     find_parameter_binding as find_parameter_binding_util,
     merge_parameter_bindings
 } from "./utils";
+
+export { sanitize_symbol } from "./symbols";
 
 // Re-export string constant management
 export {

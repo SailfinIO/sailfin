@@ -8,6 +8,7 @@
 //
 // Extracted from lowering_core/mod.sfn to reduce per-file memory footprint.
 import { NativeEnum, NativeInterface, NativeStruct } from "../../native_ir";
+import { sanitize_symbol } from "../symbols";
 import { build_type_context } from "../type_context";
 import {
     EnumTypeInfo,
@@ -15,7 +16,7 @@ import {
     TypeContext,
     TypeContextBuildResult
 } from "../types";
-import { number_to_string, sanitize_symbol } from "../utils";
+import { number_to_string } from "../utils";
 import { get_enum_name_at } from "./lowering_native_helpers";
 
 // Build skeletal EnumTypeInfo[] directly from in-memory NativeEnum[].

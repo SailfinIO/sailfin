@@ -2,9 +2,11 @@
 //
 // General utility functions for the LLVM lowering pass. These are basic
 // string manipulation, array helpers, and parsing utilities.
+import { char_code_at, substring } from "sfn/strings";
+
 import { Diag, Span, diag_to_legacy_string } from "../diagnostic";
 import { NativeSourceSpan } from "../native_ir";
-import { char_code, substring } from "../string_utils";
+import { sanitize_symbol } from "./symbols";
 import { ParameterBinding } from "./types";
 
 // =============================================================================
@@ -193,12 +195,12 @@ fn char_at(value: string, index: int) -> string {
 }
 
 fn is_trim_char(ch: string) -> boolean {
-    let code = char_code(ch);
+    let code = char_code_at(ch, 0);
     let mut _ret333: boolean = false;
-    if code == char_code(" ") { _ret333 = true; }
-    if code == char_code("\n") { _ret333 = true; }
-    if code == char_code("\r") { _ret333 = true; }
-    if code == char_code("\t") { _ret333 = true; }
+    if code == char_code_at(" ", 0) { _ret333 = true; }
+    if code == char_code_at("\n", 0) { _ret333 = true; }
+    if code == char_code_at("\r", 0) { _ret333 = true; }
+    if code == char_code_at("\t", 0) { _ret333 = true; }
     return _ret333;
 }
 
@@ -261,7 +263,7 @@ fn find_last_index_of_char(value: string, target: string) -> int {
 }
 
 fn char_code_at_text(text: string, index: int) -> int {
-    return char_code(char_at(text, index));
+    return char_code_at(text, index);
 }
 
 fn strip_mut_prefix(value: string) -> string {
@@ -315,11 +317,11 @@ fn number_to_string(value: int) -> string {
 }
 
 fn lower_char_code(code: int) -> int {
-    let upper_a = char_code("A");
-    let upper_z = char_code("Z");
+    let upper_a = char_code_at("A", 0);
+    let upper_z = char_code_at("Z", 0);
     if code >= upper_a {
         if code <= upper_z {
-            let lower_a = char_code("a");
+            let lower_a = char_code_at("a", 0);
             return code + (lower_a - upper_a);
         }
     }
@@ -333,8 +335,8 @@ fn matches_case_insensitive(value: string, expected: string) -> boolean {
         if index >= value.length { break; }
         let value_ch = substring(value, index, index + 1);
         let expected_ch = substring(expected, index, index + 1);
-        let value_code = lower_char_code(char_code(value_ch));
-        let expected_code = lower_char_code(char_code(expected_ch));
+        let value_code = lower_char_code(char_code_at(value_ch, 0));
+        let expected_code = lower_char_code(char_code_at(expected_ch, 0));
         if value_code != expected_code { return false; }
         index += 1;
     }
@@ -445,9 +447,9 @@ fn is_number_literal(text: string) -> boolean {
 }
 
 fn is_digit_char(ch: string) -> boolean {
-    let code = char_code(ch);
-    let zero = char_code("0");
-    let nine = char_code("9");
+    let code = char_code_at(ch, 0);
+    let zero = char_code_at("0", 0);
+    let nine = char_code_at("9", 0);
     let mut _ret337: boolean = false;
     if code >= zero {
         if code <= nine { _ret337 = true; }
@@ -518,56 +520,6 @@ fn is_effect_delimiter(ch: string) -> boolean {
     if ch == "}" { _ret339 = true; }
     if ch == "=" { _ret339 = true; }
     return _ret339;
-}
-
-// =============================================================================
-// Symbol sanitization
-// =============================================================================
-// Duplicated from string_utils to avoid cross-module function call issues in Stage2
-fn is_symbol_char(ch: string) -> boolean {
-    if ch.length == 0 { return false; }
-    if ch == "_" { return true; }
-    // `$` is a legal LLVM identifier character and the monomorphization
-    // mangling separator (#1869); admitting it changes only specialized names.
-    if ch == "$" { return true; }
-    let code = char_code(ch);
-    let lower_a = char_code("a");
-    let lower_z = char_code("z");
-    if code >= lower_a {
-        if code <= lower_z { return true; }
-    }
-    let upper_a = char_code("A");
-    let upper_z = char_code("Z");
-    if code >= upper_a {
-        if code <= upper_z { return true; }
-    }
-    let zero = char_code("0");
-    let nine = char_code("9");
-    if code >= zero {
-        if code <= nine { return true; }
-    }
-    return false;
-}
-
-fn sanitize_symbol(name: string) -> string {
-    if name.length == 0 { return "_"; }
-    let mut result: string = "";
-    let mut index: int = 0;
-    loop {
-        if index >= name.length { break; }
-        let ch = substring(name, index, index + 1);
-        if is_symbol_char(ch) { result = result + ch; }
-        index += 1;
-    }
-    if result.length == 0 { return "_"; }
-    let first = substring(result, 0, 1);
-    let first_code = char_code(first);
-    let zero = char_code("0");
-    let nine = char_code("9");
-    if first_code >= zero {
-        if first_code <= nine { result = "_" + result; }
-    }
-    return result;
 }
 
 // =============================================================================

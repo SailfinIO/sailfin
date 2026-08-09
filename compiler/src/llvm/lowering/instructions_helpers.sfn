@@ -1,14 +1,14 @@
 // compiler/src/llvm/lowering/instructions_helpers.sfn
 //
-// Shared helper utilities extracted from instructions.sfn so that
-// lower_instruction_range occupies position 1 in its module -- within
-// the v0.1.1 seed's per-module streaming emission limit.
+// Shared helpers extracted so lower_instruction_range occupies position 1 in
+// instructions.sfn, within the v0.1.1 seed's streaming emission limit.
 import {
-    char_at,
-    char_code,
-    grapheme_at,
+    char_at_index as char_at,
+    char_at_index as grapheme_at,
+    char_code_at,
     substring
-} from "../../string_utils";
+} from "sfn/strings";
+
 import { is_heap_type } from "../expression_lowering/native/core_type_mapping";
 import { find_local_binding } from "../expressions_bindings";
 import { is_scope_descendant } from "../lifetime";
@@ -735,7 +735,7 @@ fn _segment_is_try_label(text: string, from: int, to: int) -> boolean {
     loop {
         if i >= to { break; }
         let ch = grapheme_at(text, i);
-        let code = char_code(ch);
+        let code = char_code_at(ch, 0);
         if code < 48 { return false; }
         if code > 57 { return false; }
         i += 1;
@@ -749,7 +749,7 @@ fn _segment_is_try_label(text: string, from: int, to: int) -> boolean {
 // "" when `scope_id` has no `__` separator (e.g. the function root,
 // which is `fn:<sanitized_name>` and never contains `__` in practice).
 //
-// Separator caveat: `sanitize_symbol` (compiler/src/llvm/utils.sfn)
+// Separator caveat: `sanitize_symbol` (compiler/src/llvm/symbols.sfn)
 // preserves `_` and *drops* every non-`[A-Za-z0-9_]` character, so it
 // does NOT canonicalize multi-underscore runs. In principle a child
 // segment containing `__` could appear inside a sanitized scope id and
@@ -838,7 +838,7 @@ fn _parse_int_from_string(text: string) -> int {
         if i >= len { break; }
         let ch = grapheme_at(text, i);
         if ch == "." { break; }
-        let code = char_code(ch);
+        let code = char_code_at(ch, 0);
         if code >= 48 {
             if code <= 57 { result = result * 10 + (code - 48); }
         }

@@ -1,0 +1,20 @@
+// compiler/tests/unit/llvm_symbol_sanitization_test.sfn
+//
+// Pins the LLVM-owned symbol sanitizer and its two character classifications.
+import { is_llvm_symbol_char, is_symbol_char, sanitize_symbol } from "../../src/llvm/symbols";
+
+test "mangling: LLVM symbol sanitizer preserves historical spellings" {
+    assert sanitize_symbol("") == "_";
+    assert sanitize_symbol("---") == "_";
+    assert sanitize_symbol("42value") == "_42value";
+    assert sanitize_symbol("alpha-beta") == "alphabeta";
+    assert sanitize_symbol("id$int") == "id$int";
+}
+
+test "mangling: scanner classification excludes the specialization separator" {
+    assert is_symbol_char("$");
+    assert ! is_llvm_symbol_char("$");
+    assert is_llvm_symbol_char("_");
+    assert is_llvm_symbol_char("A");
+    assert is_llvm_symbol_char("9");
+}

@@ -2,12 +2,13 @@
 //
 // Type annotation mapping for LLVM lowering. Converts Sailfin type annotations
 // to their corresponding LLVM IR types.
-import { char_at, char_code, substring } from "../string_utils";
+import { char_at_index as char_at, char_code_at, substring } from "sfn/strings";
+
+import { sanitize_symbol } from "./symbols";
 import { TypeAllocationInfo, TypeContext } from "./types";
 import {
     ends_with,
     index_of,
-    sanitize_symbol,
     starts_with,
     trim_text
 } from "./utils";
@@ -17,10 +18,10 @@ import {
 // =============================================================================
 fn is_ascii_uppercase(ch: string) -> boolean {
     if ch.length == 0 { return false; }
-    let code = char_code(ch);
+    let code = char_code_at(ch, 0);
     let mut _ret302: boolean = false;
-    if code >= char_code("A") {
-        if code <= char_code("Z") { _ret302 = true; }
+    if code >= char_code_at("A", 0) {
+        if code <= char_code_at("Z", 0) { _ret302 = true; }
     }
     return _ret302;
 }
@@ -145,16 +146,16 @@ fn looks_like_user_type(annotation: string) -> boolean {
 // generic clause, so every entry point below is an inert no-op for them.
 fn enum_inst_is_ident_char(ch: string) -> boolean {
     if ch.length == 0 { return false; }
-    let code = char_code(ch);
+    let code = char_code_at(ch, 0);
     let mut ok: boolean = false;
-    if code >= char_code("a") {
-        if code <= char_code("z") { ok = true; }
+    if code >= char_code_at("a", 0) {
+        if code <= char_code_at("z", 0) { ok = true; }
     }
-    if code >= char_code("A") {
-        if code <= char_code("Z") { ok = true; }
+    if code >= char_code_at("A", 0) {
+        if code <= char_code_at("Z", 0) { ok = true; }
     }
-    if code >= char_code("0") {
-        if code <= char_code("9") { ok = true; }
+    if code >= char_code_at("0", 0) {
+        if code <= char_code_at("9", 0) { ok = true; }
     }
     if ch == "_" { ok = true; }
     return ok;

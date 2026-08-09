@@ -1,9 +1,10 @@
 // compiler/src/llvm/lowering/instructions_for.sfn
 //
 // Control flow handler: for-loop instruction lowering (range and array iteration).
+import { substring } from "sfn/strings";
+
 import { Diag } from "../../diagnostic";
 import { NativeFunction, NativeInstruction, NativeSourceSpan } from "../../native_ir";
-import { char_code, grapheme_at, substring } from "../../string_utils";
 import { array_pointer_element_type } from "../expression_lowering/arrays";
 import { lower_expression } from "../expression_lowering/native/core";
 import { emit_comparison_instruction, load_local_operand } from "../expression_lowering/native/core_operands/comparisons";

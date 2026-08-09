@@ -1,8 +1,7 @@
 // compiler/src/llvm/lowering/lowering_recovery.sfn
 //
 // Light recovery parsers for NativeFunction, NativeImport, and NativeStruct.
-// The `recover_*_light` routines in this file work directly on .sfn-asm text
-// and bypass the structured parser (parse_native_artifact_impl) — they were
+// The `recover_*_light` routines bypass the structured parser and were
 // written for the v0.1.1 seed, which couldn't compile the structured parser's
 // deeply nested if/else chains. The structured path is now reliable under
 // seed 0.5.7+ (validated by every `.struct_info`/`.enum_info`/`.fn_*` removal
@@ -10,6 +9,8 @@
 // lowering_core.
 //
 // Extracted from lowering_core/mod.sfn to reduce per-file memory footprint.
+import { substring } from "sfn/strings";
+
 import {
     NativeEnum,
     NativeEnumLayout,
@@ -28,7 +29,6 @@ import {
     parse_native_function_count_from_text,
     parse_native_functions_from_text
 } from "../../native_ir_api";
-import { substring } from "../../string_utils";
 import { index_of, number_to_string } from "../utils";
 import { sanitize_collection_length } from "./lowering_helpers";
 import { append_native_function } from "./lowering_helpers_mangling";
