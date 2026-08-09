@@ -43,7 +43,7 @@ import {
     der_read_tlv,
     der_tag_sequence
 } from "./der";
-import { ecdsa_p256_verify_sha256 } from "./ecdsa";
+import { ecdsa_p256_verify_sha256, ecdsa_p384_verify_sha384 } from "./ecdsa";
 import { ed25519_verify } from "./ed25519";
 import { rsa_pkcs1_v1_5_verify_sha256, rsa_pkcs1_v1_5_verify_sha384 } from "./rsa";
 import {
@@ -71,21 +71,36 @@ fn x509_verify_oid_sha256_rsa() -> string { return "1.2.840.113549.1.1.11"; }
 
 fn x509_verify_oid_sha384_rsa() -> string { return "1.2.840.113549.1.1.12"; }
 
+// ecdsa-with-SHA384 (RFC 5758 §3.2). It lives here rather than in x509.sfn for
+// the same reason the RSA signature OIDs do: x509.sfn only needed the
+// key-algorithm OID, and this one is dispatched on nowhere else.
+fn x509_verify_oid_ecdsa_p384_sha384() -> string {
+    return "1.2.840.10045.4.3.3";
+}
+
 // id-ecPublicKey. Note this OID identifies the key *type* only: P-256 and
 // P-384 keys carry the same one and differ solely in the algorithm
 // parameters, which x509.sfn does not expose. Curve agreement is therefore
 // enforced downstream, and by more than one mechanism — worth spelling out,
 // because the obvious argument is not the complete one:
 //
-//   * a differently-sized curve (P-384) fails `_p256_point_decode`'s exact
-//     65/33-byte SEC1 length check (`p256.sfn:410,433`), and its
-//     `ecdsa-with-SHA384` signature OID is refused as unsupported anyway;
-//   * a SAME-SIZED foreign curve (secp256k1, brainpoolP256r1 — both 65 bytes
-//     uncompressed) passes that length check, and is rejected instead by
-//     `_p256_is_on_curve` and the `x >= p` coordinate check.
+//   * a MISMATCHED NIST curve is caught by the SEC1 length check of whichever
+//     verifier the signature OID selected: `ecdsa-with-SHA256` routes to
+//     `_p256_point_decode`, which requires exactly 65/33 bytes, and
+//     `ecdsa-with-SHA384` routes to `_p384_point_decode`, which requires
+//     exactly 97/49 bytes. A P-384 key under a SHA-256 signature and a P-256
+//     key under a SHA-384 signature therefore both fail on width;
+//   * a SAME-SIZED foreign curve (secp256k1 or brainpoolP256r1 against P-256,
+//     brainpoolP384r1 against P-384) passes that length check, and is rejected
+//     instead by the on-curve test and the `x >= p` coordinate check in the
+//     selected curve's decoder.
 //
 // The length check alone would not be sufficient, so do not simplify this to
-// "the length check handles it".
+// "the length check handles it". Note also what this does NOT check: the
+// namedCurve OID in the SPKI parameters is still not parsed, so the signature
+// algorithm alone selects the arithmetic. That is sound only because the two
+// mechanisms above reject every disagreement; it is not a claim that the
+// certificate's declared curve was honoured (SFN-811).
 fn x509_verify_oid_ec_public_key() -> string { return "1.2.840.10045.2.1"; }
 
 // ── Outcome codes. Stable strings so a caller (and a test) can distinguish
@@ -344,6 +359,15 @@ fn _verify_link(issuer: X509Certificate, subject: X509Certificate) -> string {
         return x509_verify_err_bad_signature();
     }
 
+    if algorithm == x509_verify_oid_ecdsa_p384_sha384() {
+        if issuer.spki_algorithm != x509_verify_oid_ec_public_key() {
+            return x509_verify_err_unsupported_algorithm();
+        }
+        let ec384_ok: boolean = ecdsa_p384_verify_sha384(issuer.spki_key, subject.tbs_der, subject.signature_value);
+        if ec384_ok { return ""; }
+        return x509_verify_err_bad_signature();
+    }
+
     if algorithm == x509_verify_oid_sha256_rsa() || algorithm == x509_verify_oid_sha384_rsa() {
         if issuer.spki_algorithm != x509_oid_rsa_encryption() {
             return x509_verify_err_unsupported_algorithm();
@@ -361,9 +385,10 @@ fn _verify_link(issuer: X509Certificate, subject: X509Certificate) -> string {
         return x509_verify_err_bad_signature();
     }
 
-    // Everything else — RSASSA-PSS certificate signatures, ecdsa-with-SHA384,
-    // sha1WithRSA, DSA — rejects the link. Skipping an unverifiable link is
-    // how a chain verifier silently becomes decorative.
+    // Everything else — RSASSA-PSS certificate signatures, ecdsa-with-SHA512
+    // and the P-521 curve it accompanies, sha1WithRSA, DSA — rejects the link.
+    // Skipping an unverifiable link is how a chain verifier silently becomes
+    // decorative.
     return x509_verify_err_unsupported_algorithm();
 }
 
@@ -632,6 +657,7 @@ export {
     x509_verify_err_unrecognized_critical_extension,
     x509_verify_oid_sha256_rsa,
     x509_verify_oid_sha384_rsa,
+    x509_verify_oid_ecdsa_p384_sha384,
     x509_verify_oid_ec_public_key,
     x509_rsa_public_key_from_spki,
     x509_verify_err_hostname_mismatch
