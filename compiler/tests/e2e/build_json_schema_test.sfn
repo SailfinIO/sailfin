@@ -160,14 +160,28 @@ test "build json: cold hit_rate is 0.0" ![io] {
 }
 
 // ---- Test 5: deps shape — count and ll_paths present, ends in .ll ----
+//
+// `count` is `dep_ll_paths.length` (`build_report.sfn`), i.e. dependency
+// MODULES reaching the link, not declared `[dependencies]` specs. It stopped
+// equalling the fixture's single declared dep once `runtime/capsule.toml`
+// declared its own dependency: the runtime's `sfn-sources` land in every
+// binary, so the resolver folds the runtime's dep closure into every project's
+// resolution (SFN-773, design note `sfn-341-native-tls-runtime-swap.md`
+// §3.1.3). The report is correct — that closure really is in the binary.
+//
+// So this pins the SHAPE the test name promises, and the one property that
+// carries meaning: the project's own declared dep reaches the link under its
+// per-capsule artifact tree. A hardcoded total would only re-break whenever
+// the runtime's closure changes size, which is not what this test is for.
 test "build json: deps.count and ll_paths present" ![io] {
     let root = _fixture("deps");
     let r = _build(root, _fresh_iso(), "prog", []);
     assert r.exit == 0;
     assert contains(r.out, "\"deps\":");
-    assert contains(r.out, "\"count\":1");
+    assert contains(r.out, "\"count\":");
     assert contains(r.out, "\"ll_paths\":[");
     assert contains(r.out, ".ll\"");
+    assert contains(r.out, "capsules/sfn/math/ir/");
 }
 
 // ---- Test 6: diagnostics is an empty array (reserved slot) ----
