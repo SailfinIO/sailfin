@@ -3,8 +3,8 @@
 // TLS 1.3 record layer (RFC 8446 §5) for the sfn/crypto capsule (SFEP-0048,
 // Phase B). Frames/deframes the `TLSCiphertext` wire record, builds and strips
 // the `TLSInnerPlaintext` (content ‖ type ‖ zero padding), derives the
-// per-record AEAD nonce (§5.3), and seals/opens records through the
-// ChaCha20-Poly1305 AEAD (RFC 8439 §2.8) with the record header as the AAD.
+// per-record AEAD nonce (§5.3), and seals/opens records through the AEAD
+// selected by the negotiated cipher suite, with the record header as the AAD.
 //
 // The handshake that establishes the traffic keys/IVs is a separate concern
 // (the key schedule lives in `tls13_schedule.sfn`); this module takes the
@@ -16,16 +16,21 @@
 // cannot represent (SFEP-0048 §3.3 item 6). Length arithmetic is on plain
 // signed `int`; record lengths and the sequence number are non-negative and
 // far below 2^31, so `>>` (LLVM `ashr`) stays logical.
-import { chacha20poly1305_seal, chacha20poly1305_open } from "./aead_chacha20poly1305";
+import {
+    aead_chacha20_poly1305,
+    aead_key_len,
+    aead_nonce_len,
+    aead_open,
+    aead_seal,
+    aead_supported,
+    aead_tag_len
+} from "./aead";
 
 // ── Constants (RFC 8446 §5) ──────────────────────────────────────
 // ContentType application_data(23) — the outer opaque_type of every TLS 1.3
 // TLSCiphertext record. The real content type is carried inside the encrypted
 // TLSInnerPlaintext.
 fn tls_content_type_application_data() -> int { return 23; }
-
-// The Poly1305 authentication tag length appended by the AEAD (RFC 8439 §2.8).
-fn _tag_len() -> int { return 16; }
 
 // Maximum TLSPlaintext.fragment / decrypted content length: 2^14 (RFC 8446
 // §5.1). A larger plaintext fails closed rather than being framed.
@@ -141,16 +146,17 @@ fn _decode_inner_plaintext(inner: int[]) -> Result<TlsRecordPlaintext, string> {
 // 5-byte header is the AEAD's additional authenticated data (§5.2). Returns []
 // on any bad length (fail-closed): bad key/IV length, negative padding, or a
 // content/record that exceeds the RFC size caps.
-fn tls13_seal_record(write_key: int[], write_iv: int[], seq: int, content_type: int, content: int[], padding: int) -> int[] {
+fn tls13_seal_record_aead(alg: int, write_key: int[], write_iv: int[], seq: int, content_type: int, content: int[], padding: int) -> int[] {
     let empty: int[] = [];
-    if write_key.length != 32 { return empty; }
-    if write_iv.length != 12 { return empty; }
+    if !aead_supported(alg) { return empty; }
+    if write_key.length != aead_key_len(alg) { return empty; }
+    if write_iv.length != aead_nonce_len(alg) { return empty; }
     if padding < 0 { return empty; }
     if content.length > _max_plaintext() { return empty; }
 
     let inner: int[] = _encode_inner_plaintext(content, content_type, padding);
     // encrypted_record = AEAD ciphertext (inner.length bytes) ‖ tag.
-    let enc_len: int = inner.length + _tag_len();
+    let enc_len: int = inner.length + aead_tag_len(alg);
     if enc_len > _max_encrypted_record() { return empty; }
 
     // AAD = the 5-byte TLSCiphertext header (RFC 8446 §5.2).
@@ -162,9 +168,9 @@ fn tls13_seal_record(write_key: int[], write_iv: int[], seq: int, content_type: 
     header.push(enc_len & 255);
 
     let nonce: int[] = tls13_record_nonce(write_iv, seq);
-    if nonce.length != 12 { return empty; }
+    if nonce.length != aead_nonce_len(alg) { return empty; }
 
-    let sealed: int[] = chacha20poly1305_seal(write_key, nonce, header, inner);
+    let sealed: int[] = aead_seal(alg, write_key, nonce, header, inner);
     if sealed.length != enc_len {
         return empty;
     }  // AEAD failed closed
@@ -183,11 +189,14 @@ fn tls13_seal_record(write_key: int[], write_iv: int[], seq: int, content_type: 
 // and its true type. Fail-closed with `Err` on any malformed/oversized record,
 // a tag mismatch, or an all-zero plaintext. The work done is bounded by the
 // record length (all guards run before decryption).
-fn tls13_open_record(read_key: int[], read_iv: int[], seq: int, record: int[]) -> Result<TlsRecordPlaintext, string> {
-    if read_key.length != 32 {
+fn tls13_open_record_aead(alg: int, read_key: int[], read_iv: int[], seq: int, record: int[]) -> Result<TlsRecordPlaintext, string> {
+    if !aead_supported(alg) {
+        return Result.Err { error: "tls13_open_record: unsupported algorithm" };
+    }
+    if read_key.length != aead_key_len(alg) {
         return Result.Err { error: "tls13_open_record: bad key length" };
     }
-    if read_iv.length != 12 {
+    if read_iv.length != aead_nonce_len(alg) {
         return Result.Err { error: "tls13_open_record: bad iv length" };
     }
     if record.length < 5 {
@@ -209,7 +218,7 @@ fn tls13_open_record(read_key: int[], read_iv: int[], seq: int, record: int[]) -
     if declared > _max_encrypted_record() {
         return Result.Err { error: "tls13_open_record: record overflow" };
     }
-    if declared < _tag_len() {
+    if declared < aead_tag_len(alg) {
         return Result.Err {
             error: "tls13_open_record: encrypted_record shorter than tag"
         };
@@ -234,11 +243,11 @@ fn tls13_open_record(read_key: int[], read_iv: int[], seq: int, record: int[]) -
     }
 
     let nonce: int[] = tls13_record_nonce(read_iv, seq);
-    if nonce.length != 12 {
+    if nonce.length != aead_nonce_len(alg) {
         return Result.Err { error: "tls13_open_record: bad iv length" };
     }
 
-    let opened: Result<int[], string> = chacha20poly1305_open(read_key, nonce, aad, enc);
+    let opened: Result<int[], string> = aead_open(alg, read_key, nonce, aad, enc);
     match opened {
         Result.Err { error } => {
             return Result.Err { error: error };
@@ -275,10 +284,26 @@ fn _open_check_length(plaintext: TlsRecordPlaintext) -> Result<TlsRecordPlaintex
     return Result.Ok { value: plaintext };
 }
 
+// Seal under ChaCha20-Poly1305 — the suite-independent form kept for the
+// RFC 8439 §2.8 / RFC 8448 §3 known-answer vectors and as the differential
+// oracle for the pointer-idiom record layer (SFN-768). A suite-aware caller
+// wants `tls13_seal_record_aead`.
+fn tls13_seal_record(write_key: int[], write_iv: int[], seq: int, content_type: int, content: int[], padding: int) -> int[] {
+    return tls13_seal_record_aead(aead_chacha20_poly1305(), write_key, write_iv, seq, content_type, content, padding);
+}
+
+// Open under ChaCha20-Poly1305. See `tls13_seal_record` for why this fixed-suite
+// form is retained alongside `tls13_open_record_aead`.
+fn tls13_open_record(read_key: int[], read_iv: int[], seq: int, record: int[]) -> Result<TlsRecordPlaintext, string> {
+    return tls13_open_record_aead(aead_chacha20_poly1305(), read_key, read_iv, seq, record);
+}
+
 export {
     TlsRecordPlaintext,
     tls_content_type_application_data,
     tls13_record_nonce,
     tls13_seal_record,
-    tls13_open_record
+    tls13_open_record,
+    tls13_seal_record_aead,
+    tls13_open_record_aead
 };

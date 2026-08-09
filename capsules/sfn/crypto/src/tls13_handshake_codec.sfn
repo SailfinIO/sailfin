@@ -29,16 +29,19 @@ fn hs_type_certificate_verify() -> int { return 15; }
 fn hs_type_finished() -> int { return 20; }
 
 // ── Cipher suite / group / signature scheme (RFC 8446 §B.3, §B.4) ─
-// TLS_CHACHA20_POLY1305_SHA256 (0x1303) — the one suite the capsule can
-// actually seal records with (SFEP-0048 §6.3 defers AES-GCM), and therefore
-// the only one `encode_client_hello` offers.
+// TLS_CHACHA20_POLY1305_SHA256 (0x1303) — the suite `encode_client_hello`
+// offers *first*, because it is the one the runtime carries on the `*u8`
+// pointer-idiom record layer. It is no longer the only offer: SFEP-0048
+// §6.3's AES-GCM deferral was withdrawn by SFN-339's design gate.
 fn tls_cipher_chacha20_poly1305_sha256() -> int { return 4867; }
 
-// TLS_AES_128_GCM_SHA256 (0x1301). Named but never offered: the capsule has
-// no AES-GCM AEAD. It exists because it shares SHA-256 with 0x1303, so its
-// transcript hash and key schedule are bit-identical, which is what lets the
-// handshake state machine be checked against RFC 8448 §3 — that trace
-// negotiates 0x1301.
+// TLS_AES_128_GCM_SHA256 (0x1301) — offered second since SFN-814, and
+// mandatory to implement per RFC 8446 §9.1. Do not remove it from
+// `encode_client_hello`'s offer: without it the client cannot handshake
+// with an AES-GCM-only server at all, which is the gap SFN-814 closed.
+// It shares SHA-256 with 0x1303, so its transcript hash and key schedule
+// are bit-identical, which is what lets the handshake state machine be
+// checked against RFC 8448 §3 — that trace negotiates 0x1301.
 fn tls_cipher_aes_128_gcm_sha256() -> int { return 4865; }
 
 // x25519 (0x001d).
@@ -348,8 +351,16 @@ fn encode_client_hello(random: int[], legacy_session_id: int[], key_share_public
     body.push(legacy_session_id.length & 255);
     _append(body, legacy_session_id);
 
-    _push_u16(body, 2);
+    // Both SHA-256 suites, ChaCha20-Poly1305 first. RFC 8446 §9.1 makes
+    // TLS_AES_128_GCM_SHA256 mandatory, and offering only ChaCha20 left the
+    // client unable to reach an AES-GCM-only server at all (SFN-814).
+    // The order inverts the usual AES-NI-era preference on purpose: this
+    // stack has no AES-NI, and its AES-GCM record path measures ~1 MB/s
+    // against ChaCha20-Poly1305's ~233 MB/s, so AES-GCM is the fallback
+    // rather than the preference until SFN-817 ports it to the pointer idiom.
+    _push_u16(body, 4);
     _push_u16(body, tls_cipher_chacha20_poly1305_sha256());
+    _push_u16(body, tls_cipher_aes_128_gcm_sha256());
 
     body.push(1);  // legacy_compression_methods length
     body.push(0);  // null compression
