@@ -22,12 +22,20 @@
 // Import shape, and why it is not the capsule's public surface. The
 // imports below reach individual `sfn/crypto/<module>` files rather than
 // the capsule's `sfn/crypto` entry module. That is a workaround, not a
-// preference: the runtime->capsule signature staging resolves a symbol
-// defined *in* the entry module but drops symbols surfaced through an
-// `export { ... } from "./sibling"` re-export chain, which is how
-// `crypto/mod.sfn` publishes all of this (E1007, "callee signature is not
-// known to the compiler"). Removal condition: SFN-800 — when that lands in
-// the pinned seed, collapse every import below to `from "sfn/crypto"`.
+// preference, and the reason is stale objects rather than unresolved
+// symbols. `crypto/mod.sfn` publishes all of this through an
+// `export { ... } from "./sibling"` chain, and a bare-spec import records
+// a `.import-deps` dependency on `mod.sfn-asm` alone — text that does not
+// change when the *defining* submodule's signature does. The consumer's
+// object cache key then stays constant across an ABI change and the link
+// reuses a stale-ABI object. SFN-800 fixed that by walking the re-export
+// closure (`_runtime_reexport_closure`, `build/runtime_objs.sfn`).
+//
+// Why the fix is not enough yet: it lives in the compiler, but the PINNED
+// SEED compiles this file, not the freshly built compiler
+// (`.claude/rules/seed-dependency.md`, the runtime-source carve-out), and
+// seed 0.9.3 predates it. Removal condition: collapse every import below
+// to `from "sfn/crypto"` once a seed carrying SFN-800 is pinned.
 //
 // Handle policy. `tls_client_ctx`/`tls_server_ctx` return a malloc'd
 // `TlsContext *` and `tls_connect_fd`/`tls_accept_fd` a malloc'd
