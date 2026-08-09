@@ -143,9 +143,11 @@ every test. Two paths pass it, and being precise about which matters:
 
 - **`make check`** — the full-suite triple-pass gate, run nightly and before a
   release cut. This is the authoritative cold path.
-- **The advisory aarch64-Linux lane** — runs a cold full suite on every PR, but
-  is `continue-on-error` and excluded from the merge gate, so it *observes* a
-  discrepancy without blocking on one.
+- **The scheduled aarch64-Linux soak** — runs one cold, unsharded full suite
+  daily and gates that scheduled workflow. Source PR and merge-queue ARM lanes
+  use the same named shards and per-shard test-bin cache topology as the other
+  native targets (SFN-826), so the soak is their cache-independent audit rather
+  than an unsharded duplicate on every change.
 
 This is defence in depth with an explicit threat model: §3.1 and §3.2 argue the
 key is complete, and §3.2 is the record of that argument having been wrong twice.
@@ -154,7 +156,7 @@ surfaces there rather than at a release. A cache whose soundness cannot be
 independently re-checked is a cache that must be trusted; one with a cold path is
 a cache that can be *audited*.
 
-The honest limit of this: because the blocking gate is nightly rather than
+The honest limit of this: because the cold blocking gate is daily rather than
 per-merge, a false hit can live on `main` for up to a day. That is a deliberate
 cost — a per-PR blocking cold suite would forfeit most of the cache's value —
 but it is a cost, not an absence of one.
