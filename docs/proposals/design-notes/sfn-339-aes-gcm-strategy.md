@@ -20,6 +20,11 @@ bit `i` of each of the 32 state bytes (16 bytes × 2 blocks). GHASH multiplies v
 **masked-integer carryless multiplication on 32-bit operands**. Neither needs
 anything the seed lacks, so **zero seed cuts**.
 
+> **This verdict held on implementation; §3's throughput estimate did not.**
+> Measured at 1.0 MB/s `-O2` rather than the estimated ~36, because that estimate
+> was scaled from a runtime pointer-idiom baseline rather than a capsule `int[]`
+> one. See §3.2 before quoting any number from §3.
+
 **Why §6.3 got this wrong.** It deferred AES-GCM because "constant-time software
 AES needs either bitsliced AES (very large, error-prone) or hardware AES-NI
 intrinsics the backend does not expose." That names two options, calls the
@@ -126,8 +131,9 @@ gates/byte) this is roughly 9× more expensive *for the S-box*, but SubBytes is
 not the whole cipher — with the linear layer included, total AES cost lands near
 **~140 ops/byte** rather than the ~72 the sourced circuit would give.
 
-**Estimated throughput**, extrapolating the SFN-768 *measured* pointer-layer
-figures (`docs/status.md`: 233–235 MB/s at `-O2`, 42–43 MB/s at `-O0`):
+**Estimated throughput** — *this estimate was wrong; see the amendment below.*
+Extrapolating the SFN-768 *measured* pointer-layer figures (`docs/status.md`:
+233–235 MB/s at `-O2`, 42–43 MB/s at `-O0`):
 
 | | ops/byte | est. `-O2` |
 |---|---|---|
@@ -141,6 +147,58 @@ These are estimates; per the SFN-768 precedent the implementing issue's
 acceptance must carry a **measured** figure at both `-O0` and `-O2`, and if
 `-O2` misses the bar the honest outcome is a documented ceiling in
 `docs/status.md`, not an omitted number.
+
+### 3.2 Amendment 2026-08-09 — measured, and the estimate above used the wrong baseline
+
+SFN-339 shipped the construction and measured it. The **ops/byte model was
+right; the baseline it was multiplied against was not.**
+
+| | measured |
+|---|---|
+| AES-128-GCM seal, `capsules/sfn/crypto` | **0.37 MB/s at `-O0`, 1.0 MB/s at `-O2`** |
+| ChaCha20-Poly1305 seal, same capsule, same host | **6.4 MB/s at `-O2`** |
+| ratio | **6.4×**, against ~193/~30 ops/byte predicted = 6.4× |
+
+The relative prediction is exact. The absolute one was out by ~36×, because the
+table above took ChaCha20-Poly1305's baseline to be **233–235 MB/s** — which is
+`runtime/sfn/platform/tls_record.sfn`, the `*u8` pointer-idiom record layer
+SFN-768 built. The thing being estimated was a **capsule `int[]` module**, whose
+ChaCha20 counterpart is the *oracle* in that same `docs/status.md` entry, at
+~5 MB/s `-O2` / ~3.7 MB/s `-O0`. Scaling a capsule implementation from a runtime
+pointer-idiom figure compared two different representations, one of which exists
+precisely because the other is ~47× slower.
+
+Measured against the right baseline the note's own numbers predict
+6.4 × 30/193 ≈ 1.0 MB/s, which is what shipped.
+
+**Consequences.** §1's verdict stands on everything except throughput: the
+construction is correct against FIPS-197, SP 800-38A and the SP 800-38D vectors,
+is table-free and constant-time by construction, and needed zero seed cuts. What
+does *not* follow is the implication that the capsule AEAD alone carries the TLS
+hot path. It does not, and neither does the capsule ChaCha20 — both sit an order
+of magnitude under the §3.3 bar, which is a statement about the **runtime record
+layer**, not about a capsule module. Reaching that bar for AES-GCM needs the same
+`*u8` port ChaCha20 received in SFN-768, and that is the substantive part of the
+follow-on work rather than negotiation plumbing.
+
+1.0 MB/s is enough to make `TLS_AES_128_GCM_SHA256` **negotiable**, which is the
+interop blocker this issue exists to clear (RFC 8446 §9.1); it is not enough for
+bulk transfer. `docs/status.md` carries that ceiling.
+
+**One correction the other way.** §3's gate budget assumed a six-multiply
+inversion chain. Four suffice — `x^14` and `x^15` share the `x^12` prefix — so
+SubBytes costs ~24 gates/byte rather than ~34. That improvement is in the
+shipped code and is already inside the measured figure above.
+
+**A second finding, not predicted here at all.** The first implementation
+returned a fresh `int[]` from every step of the inversion chain, ~300 allocations
+per two-block call, which measured 0.2 MB/s with a **5.4 GB peak RSS** on a 5 MB
+workload — allocation-bound, and close enough to the 8 GiB toolchain cap to be a
+robustness bug rather than only a slow path. Threading one caller-owned
+workspace instead took it to 1.0 MB/s and 743 MB. A gate-count model says
+nothing about allocation; on the `int[]` representation that turned out to be
+the larger term of the two, and any future primitive designed this way should
+budget it explicitly.
 
 **Boyar–Peralta therefore becomes a contingent optimization**, not the v1: it is
 a drop-in replacement for one function with identical inputs, outputs, and KATs,

@@ -40,9 +40,10 @@ fn _rev8(b: int) -> int {
 // provably zero and the residue-3 output mask can drop it — which it must,
 // since 0x8888888888888888 exceeds i64.
 //
-// The design note calls this _clmul32; it is exported unprefixed so its
-// worst-case bound can be asserted directly from a test.
-fn clmul32(x: int, y: int) -> int {
+// Module-private, and exported anyway so a test can assert the worst-case
+// bound directly — the same arrangement bignum.sfn's _modexp_public has with
+// rsa_pkcs1_test.sfn.
+fn _clmul32(x: int, y: int) -> int {
     let x0: int = x & 286331153;
     let x1: int = x & 572662306;
     let x2: int = x & 1145324612;
@@ -125,7 +126,7 @@ fn _gf128_mul(u: int[], v: int[]) -> int[] {
     while i < 4 {
         let mut j: int = 0;
         while j < 4 {
-            let c: int = clmul32(u[i], v[j]);
+            let c: int = _clmul32(u[i], v[j]);
             p[i + j] = p[i + j] ^ (c & 4294967295);
             p[i + j + 1] = p[i + j + 1] ^ ((c >> 32) & 4294967295);
             j += 1;
@@ -163,4 +164,4 @@ fn ghash(h: int[], data: int[]) -> int[] {
     return out;
 }
 
-export { clmul32, ghash };
+export { _clmul32, ghash };

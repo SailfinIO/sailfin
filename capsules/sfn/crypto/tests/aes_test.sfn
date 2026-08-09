@@ -1,4 +1,11 @@
-import { aes_key_expand, aes_encrypt_block, aes_ctr_xor } from "../src/aes";
+import {
+    aes_bs_keys,
+    aes_ctr_xor,
+    aes_ctr_xor_bs,
+    aes_encrypt_block,
+    aes_encrypt_block_bs,
+    aes_key_expand
+} from "../src/aes";
 import { eq_bytes, hexb } from "./support/hex";
 
 fn _ctr_plaintext() -> int[] {
@@ -90,4 +97,25 @@ test "aes: CTR handles a partial trailing block" {
         i += 1;
     }
     assert eq_bytes(got, want);
+}
+
+test "aes: a failed key expansion cannot become a valid round-key set" {
+    // aes_key_expand fails closed to []; 0 % 16 == 0, so a modulo check would
+    // have let [] through and produced a -1 round count downstream.
+    let bad: int[] = aes_key_expand(hexb("0001020304"));
+    assert bad.length == 0;
+    assert aes_bs_keys(bad).length == 0;
+    assert aes_bs_keys(hexb("00112233445566778899aabbccddeeff")).length == 0;
+}
+
+test "aes: the bitsliced entry points reject a malformed round-key set" {
+    let empty: int[] = [];
+    let block: int[] = hexb("00112233445566778899aabbccddeeff");
+    assert aes_encrypt_block_bs(empty, block).length == 0;
+    assert aes_ctr_xor_bs(empty, block, hexb("00112233")).length == 0;
+    assert aes_encrypt_block_bs(hexb("0011"), block).length == 0;
+
+    let good: int[] = aes_bs_keys(aes_key_expand(hexb("000102030405060708090a0b0c0d0e0f")));
+    assert good.length == 88;
+    assert aes_encrypt_block_bs(good, block).length == 16;
 }

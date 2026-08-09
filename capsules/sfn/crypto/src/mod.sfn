@@ -229,9 +229,12 @@ export { chacha20poly1305_seal, chacha20poly1305_open } from "./aead_chacha20pol
 // AES-128/AES-256-GCM (SP 800-38D) — a bitsliced, table-free AES plus a
 // carryless-multiply GHASH, so the AEAD axis is no longer ChaCha20-only
 // (SFEP-0048 §6.3 as amended by the SFN-339 design gate).
-export { aes_key_expand, aes_encrypt_block, aes_ctr_xor } from "./aes";
-
-export { ghash } from "./ghash";
+// aes_key_expand and ghash are deliberately not re-exported. GHASH is not a
+// MAC — it is a keyed universal hash, secure only inside GCM's
+// E(K, J0) ^ GHASH envelope, and one standalone query leaks the subkey H. And
+// a public aes_key_expand would hand out expanded secret key material with no
+// public consumer for it.
+export { aes_encrypt_block, aes_ctr_xor } from "./aes";
 
 export { aes_gcm_seal, aes_gcm_open } from "./aead_aes_gcm";
 

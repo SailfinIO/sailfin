@@ -14,13 +14,16 @@
 // aes_sbox.sfn affordable. Linear byte index i is state row i % 4, column
 // i / 4, matching FIPS-197's column-major input mapping.
 //
-// Nothing here indexes an array by a key or plaintext byte. The only
-// data-dependent-looking value is the round count, which is a function of the
-// public key length.
+// Nothing here indexes an array by a key or plaintext byte. Two values do
+// reach a condition, and both are public: the round count, a function of the
+// public key length, and the CTR counter in _inc32 — see the constraint
+// recorded on that function, which is load-bearing on the design note's
+// section 8 claim.
 import {
     bs_slice,
     bs_unslice,
-    bs_sbox,
+    bs_sbox_with,
+    sbox_work,
     sbox_bytes
 } from "./aes_sbox";
 
@@ -82,30 +85,25 @@ fn _rot_col2(v: int) -> int {
 // s_r ^ s_(r+1), used both as the xtime operand and as the first step of the
 // column XOR.
 fn _mix_columns(w: int[]) -> void {
-    let mut a: int[] = [0, 0, 0, 0, 0, 0, 0, 0,];
-    let mut t: int[] = [0, 0, 0, 0, 0, 0, 0, 0,];
-    let mut j: int = 0;
-    while j < 8 {
-        a[j] = w[j] ^ _rot_col1(w[j]);
-        j += 1;
-    }
-    j = 0;
-    while j < 8 {
-        t[j] = a[j] ^ _rot_col2(a[j]);
-        j += 1;
-    }
+    let a0: int = w[0] ^ _rot_col1(w[0]);
+    let a1: int = w[1] ^ _rot_col1(w[1]);
+    let a2: int = w[2] ^ _rot_col1(w[2]);
+    let a3: int = w[3] ^ _rot_col1(w[3]);
+    let a4: int = w[4] ^ _rot_col1(w[4]);
+    let a5: int = w[5] ^ _rot_col1(w[5]);
+    let a6: int = w[6] ^ _rot_col1(w[6]);
+    let a7: int = w[7] ^ _rot_col1(w[7]);
 
-    // xtime on the bit-plane vector `a`: a left shift in GF(2^8) with the
-    // conditional reduction by 0x1b folded in, which in bitsliced form is
-    // just where bit 7 fans out.
-    let a7: int = a[7];
-    let mut x: int[] = [a7, a[0] ^ a7, a[1], a[2] ^ a7, a[3] ^ a7, a[4], a[5], a[6],];
-
-    j = 0;
-    while j < 8 {
-        w[j] = w[j] ^ t[j] ^ x[j];
-        j += 1;
-    }
+    // xtime(a) folded in directly: a left shift in GF(2^8) with the
+    // conditional reduction by 0x1b expressed as where bit 7 fans out.
+    w[0] = w[0] ^ (a0 ^ _rot_col2(a0)) ^ a7;
+    w[1] = w[1] ^ (a1 ^ _rot_col2(a1)) ^ (a0 ^ a7);
+    w[2] = w[2] ^ (a2 ^ _rot_col2(a2)) ^ a1;
+    w[3] = w[3] ^ (a3 ^ _rot_col2(a3)) ^ (a2 ^ a7);
+    w[4] = w[4] ^ (a4 ^ _rot_col2(a4)) ^ (a3 ^ a7);
+    w[5] = w[5] ^ (a5 ^ _rot_col2(a5)) ^ a4;
+    w[6] = w[6] ^ (a6 ^ _rot_col2(a6)) ^ a5;
+    w[7] = w[7] ^ (a7 ^ _rot_col2(a7)) ^ a6;
 }
 
 // Round constant for key-schedule word i / Nk: x^(n-1) in GF(2^8). Computed
@@ -171,7 +169,10 @@ fn aes_key_expand(key: int[]) -> int[] {
 // eight XORs rather than a re-slice.
 fn aes_bs_keys(ek: int[]) -> int[] {
     let empty: int[] = [];
-    if ek.length % 16 != 0 { return empty; }
+    // Only the two lengths aes_key_expand can produce. A modulo-16 check would
+    // admit [] — which aes_key_expand returns on a bad key — and turn a
+    // fail-closed expansion into a -1 round count downstream.
+    if ek.length != 176 && ek.length != 240 { return empty; }
 
     let rounds: int = ek.length / 16;
     let mut out: int[] = [];
@@ -200,6 +201,12 @@ fn aes_bs_keys(ek: int[]) -> int[] {
     return out;
 }
 
+// The two valid bitsliced round-key lengths: 8 words per round, 11 rounds for
+// AES-128 and 15 for AES-256.
+fn _bad_bs_keys(bk: int[]) -> bool {
+    return bk.length != 88 && bk.length != 120;
+}
+
 fn _add_round_key(w: int[], bk: int[], r: int) -> void {
     let off: int = r * 8;
     let mut j: int = 0;
@@ -214,17 +221,18 @@ fn _add_round_key(w: int[], bk: int[], r: int) -> void {
 fn _aes_encrypt2(bk: int[], blocks: int[]) -> int[] {
     let nr: int = bk.length / 8 - 1;
     let mut w: int[] = bs_slice(blocks, 0, 32);
+    let work: int[] = sbox_work();
 
     _add_round_key(w, bk, 0);
     let mut r: int = 1;
     while r < nr {
-        bs_sbox(w);
+        bs_sbox_with(w, work);
         _shift_rows(w);
         _mix_columns(w);
         _add_round_key(w, bk, r);
         r += 1;
     }
-    bs_sbox(w);
+    bs_sbox_with(w, work);
     _shift_rows(w);
     _add_round_key(w, bk, nr);
 
@@ -240,6 +248,7 @@ fn _aes_encrypt2(bk: int[], blocks: int[]) -> int[] {
 fn aes_encrypt_block_bs(bk: int[], block: int[]) -> int[] {
     let empty: int[] = [];
     if block.length != 16 { return empty; }
+    if _bad_bs_keys(bk) { return empty; }
 
     let mut dup: int[] = [];
     let mut i: int = 0;
@@ -265,6 +274,14 @@ fn aes_encrypt_block_bs(bk: int[], block: int[]) -> int[] {
 
 // Increment the low 32 bits of a 16-byte counter block in place, big-endian,
 // wrapping at 2^32 (the GCM inc32 function, SP 800-38D section 6.2).
+//
+// The early return makes this function's iteration count depend on the
+// counter's bytes. That is sound only because the counter is public, which in
+// turn holds only because aead_aes_gcm.sfn accepts 96-bit nonces exclusively,
+// making J0 = nonce || 1. General-IV GCM derives J0 = GHASH_H(IV), which is
+// secret — adding that support would turn this into a secret-dependent branch
+// without touching this file, so the restriction and this branch travel
+// together.
 fn _inc32(c: int[]) -> void {
     let mut i: int = 15;
     while i >= 12 {
@@ -277,10 +294,18 @@ fn _inc32(c: int[]) -> void {
 
 // CTR-mode XOR under pre-bitsliced round keys, starting from counter block
 // `ctr` and applying inc32 per block. Returns data.length bytes. Returns []
-// if ctr is not 16 bytes (fail-closed).
+// if ctr is not 16 bytes or bk is not a valid round-key set (fail-closed).
+//
+// Single-shot: `ctr` is copied and never written back, so a caller streaming
+// in pieces must advance its own counter by ceil(data.length / 16) blocks
+// mod 2^32 between calls. Blocks are produced two at a time because the
+// cipher core is 2-way, so the counter advances by two per chunk even when a
+// partial tail consumes only part of the second block; that is unobservable
+// through this API, which is why it is left as is.
 fn aes_ctr_xor_bs(bk: int[], ctr: int[], data: int[]) -> int[] {
     let empty: int[] = [];
     if ctr.length != 16 { return empty; }
+    if _bad_bs_keys(bk) { return empty; }
 
     let mut c: int[] = [];
     let mut i: int = 0;
@@ -316,9 +341,10 @@ fn aes_ctr_xor_bs(bk: int[], ctr: int[], data: int[]) -> int[] {
     return out;
 }
 
-// Encrypt one block under a raw 16- or 32-byte key. Convenience wrapper;
-// callers encrypting more than a couple of blocks should hoist
-// aes_key_expand + aes_bs_keys themselves.
+// Encrypt one block under a raw 16- or 32-byte key. Convenience wrapper; an
+// in-capsule caller encrypting more than a couple of blocks should hoist
+// aes_key_expand + aes_bs_keys itself, as aead_aes_gcm.sfn does. Neither is
+// part of the capsule's public surface.
 fn aes_encrypt_block(key: int[], block: int[]) -> int[] {
     let empty: int[] = [];
     let ek: int[] = aes_key_expand(key);

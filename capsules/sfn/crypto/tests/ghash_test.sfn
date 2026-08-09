@@ -1,4 +1,4 @@
-import { clmul32, ghash } from "../src/ghash";
+import { _clmul32, ghash } from "../src/ghash";
 import { eq_bytes, hexb } from "./support/hex";
 
 test "ghash: clmul32 worst case sits exactly on the 62-bit bound" {
@@ -8,15 +8,15 @@ test "ghash: clmul32 worst case sits exactly on the 62-bit bound" {
     // the 0.813-bit headroom the construction depends on. compiler/src/llvm/
     // emits no nsw/nuw, so a bound violation wraps and fails here loudly
     // rather than being undefined behaviour.
-    assert clmul32(4294967295, 4294967295) == 6148914691236517205;
+    assert _clmul32(4294967295, 4294967295) == 6148914691236517205;
 }
 
 test "ghash: clmul32 agrees with schoolbook carryless multiply on small inputs" {
-    assert clmul32(0, 4294967295) == 0;
-    assert clmul32(1, 12345) == 12345;
+    assert _clmul32(0, 4294967295) == 0;
+    assert _clmul32(1, 12345) == 12345;
     // x^1 * x^1 = x^2, and (x + 1)^2 = x^2 + 1 in characteristic 2.
-    assert clmul32(2, 2) == 4;
-    assert clmul32(3, 3) == 5;
+    assert _clmul32(2, 2) == 4;
+    assert _clmul32(3, 3) == 5;
 }
 
 test "ghash: multiplying by the field identity is the identity" {

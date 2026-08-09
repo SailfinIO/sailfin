@@ -46,11 +46,24 @@ fn aead_tag_len(alg: int) -> int {
 // True if this build can seal and open with the given algorithm.
 fn aead_supported(alg: int) -> bool { return aead_key_len(alg) != 0; }
 
+// True if the key and nonce match what the algorithm requires. This check is
+// the registry's whole point: aes_gcm_seal accepts both 16- and 32-byte keys,
+// so without it aead_seal(aead_aes_128_gcm(), <32-byte key>) would quietly
+// perform AES-256 and produce records the peer cannot decrypt — a failure that
+// surfaces at the peer as "authentication failed" rather than here.
+fn _params_match(alg: int, key: int[], nonce: int[]) -> bool {
+    if key.length != aead_key_len(alg) { return false; }
+    if nonce.length != aead_nonce_len(alg) { return false; }
+    return true;
+}
+
 // Seal under the selected algorithm, returning ciphertext followed by the tag.
-// Returns [] for an unknown algorithm, and otherwise whatever the underlying
-// construction's fail-closed behaviour produces.
+// Returns [] for an unknown algorithm or a key/nonce that does not match it,
+// and otherwise whatever the underlying construction's fail-closed behaviour
+// produces.
 fn aead_seal(alg: int, key: int[], nonce: int[], aad: int[], plaintext: int[]) -> int[] {
     let empty: int[] = [];
+    if !_params_match(alg, key, nonce) { return empty; }
     if alg == aead_chacha20_poly1305() {
         return chacha20poly1305_seal(key, nonce, aad, plaintext);
     }
@@ -64,6 +77,19 @@ fn aead_seal(alg: int, key: int[], nonce: int[], aad: int[], plaintext: int[]) -
 // than a silent failure, so a misconfigured record layer is distinguishable
 // from a forged record.
 fn aead_open(alg: int, key: int[], nonce: int[], aad: int[], ciphertext_with_tag: int[]) -> Result<int[], string> {
+    if !aead_supported(alg) {
+        return Result.Err { error: "aead_open: unsupported algorithm" };
+    }
+    if key.length != aead_key_len(alg) {
+        return Result.Err {
+            error: "aead_open: key length does not match the algorithm"
+        };
+    }
+    if nonce.length != aead_nonce_len(alg) {
+        return Result.Err {
+            error: "aead_open: nonce length does not match the algorithm"
+        };
+    }
     if alg == aead_chacha20_poly1305() {
         return chacha20poly1305_open(key, nonce, aad, ciphertext_with_tag);
     }
