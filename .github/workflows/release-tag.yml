@@ -25,6 +25,11 @@ on:
         required: false
         type: string
         default: ""
+      previous_tag:
+        description: "Optional previous release tag used as the generated-notes start point."
+        required: false
+        type: string
+        default: ""
   workflow_dispatch:
     inputs:
       tag:
@@ -32,6 +37,10 @@ on:
         required: true
       seed_version:
         description: "Optional seed-version override (blank → read bootstrap.toml [seed].version from the tag checkout). Required for tags older than `bootstrap.toml`."
+        required: false
+        default: ""
+      previous_tag:
+        description: "Optional previous release tag used as the generated-notes start point."
         required: false
         default: ""
 
@@ -46,12 +55,9 @@ jobs:
     permissions:
       contents: read
     timeout-minutes: ${{ matrix.timeout_minutes }}
-    # `upload` needs this job, so a red leg used to withhold every platform's
-    # assets — the first linux-arm64 run took a green x86_64 and macOS build
-    # down with it and published v0.8.3 with no downloads at all. An advisory
-    # leg reports its failure without gating the others; `upload` re-checks
-    # which payloads actually arrived and fails on a missing required one.
-    continue-on-error: ${{ matrix.advisory }}
+    # Every platform produces a supported release payload, so every matrix leg
+    # is required. A failed linux-arm64 build must withhold publication rather
+    # than producing another release with an incomplete platform set (SFN-799).
     strategy:
       fail-fast: false
       matrix:
@@ -72,26 +78,18 @@ jobs:
             # cap; see the test_jobs input in actions/sailfin-build).
             test_jobs: 2
             timeout_minutes: 120
-            advisory: false
           - os: ubuntu-24.04
             package_label: linux-x86_64
             clang: clang-18
             # 4-vCPU / 16GB hosted runner.
             test_jobs: 4
             timeout_minutes: 120
-            advisory: false
           - os: ubuntu-24.04-arm
             package_label: linux-arm64
             clang: clang-18
             # The first-native qemu bootstrap builds three compiler passes.
             test_jobs: 4
             timeout_minutes: 240
-            # Advisory while the emulated first-native bootstrap earns its
-            # keep: this leg is the youngest of the four (SFEP-0056) and the
-            # only one whose build runs two of its three passes under qemu.
-            # Promote it to required once it has cut releases without
-            # intervention.
-            advisory: true
 
     steps:
       - name: Checkout repository (tag)
@@ -385,11 +383,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    outputs:
-      # Names the platform an advisory leg failed to deliver, so the success
-      # notification can say so — a degraded release must not read as clean.
-      degraded: ${{ steps.payloads.outputs.degraded }}
-
     steps:
       - name: Checkout (signing script + committed public key)
         uses: actions/checkout@v7
@@ -399,6 +392,18 @@ jobs:
           # (the build job checks out this ref too) — matters for retroactive
           # rebuilds and key-rotation windows.
           ref: ${{ env.RELEASE_TAG }}
+
+      # Retroactive tags predate SFN-799's fail-closed payload verifier. Keep
+      # their signing code and public key pinned above, but apply the current
+      # publication invariant so a legacy QEMU rebuild can still produce a
+      # complete ARM64 pair without depending on a script absent from the tag.
+      - name: Checkout current release payload gate
+        uses: actions/checkout@v7
+        with:
+          ref: main
+          path: .release-gates
+          sparse-checkout: scripts/verify-release-payloads.sh
+          sparse-checkout-cone-mode: false
 
       - name: Download build artifacts
         uses: actions/download-artifact@v8
@@ -416,51 +421,6 @@ jobs:
           find . -maxdepth 3 -type f -name 'sailfin-native-*.tar.gz.sha256' -exec mv -f {} dist/ \;
           find . -maxdepth 3 -type f -name 'sailfin-native-*.manifest.json' -exec mv -f {} dist/ \;
           find . -maxdepth 3 -type f -name 'installer-*.tar.gz' -exec mv -f {} dist/ \;
-
-      # `build` legs marked advisory report success even when they fail, so the
-      # only honest place to decide whether a release is publishable is here,
-      # against the payloads that actually arrived. Runs before `Prepare
-      # installer assets`, so installer payloads still carry their
-      # `installer-<label>` names. Windows is cross-compiled by the
-      # linux-x86_64 leg and ships an installer payload only — there is no
-      # `sailfin-native-windows-*` tarball to look for.
-      - name: Verify expected platform payloads
-        id: payloads
-        shell: bash
-        run: |
-          set -euo pipefail
-          have() { compgen -G "$1" >/dev/null; }
-
-          missing=""
-          for label in linux-x86_64 macos-arm64; do
-            have "dist/sailfin-native-${label}-*.tar.gz" || missing="$missing sailfin-native-${label}"
-            have "dist/installer-${label}.tar.gz" || missing="$missing installer-${label}"
-          done
-          have "dist/installer-windows-x86_64.tar.gz" || missing="$missing installer-windows-x86_64"
-
-          arm64_native=0
-          arm64_installer=0
-          if have "dist/sailfin-native-linux-arm64-*.tar.gz"; then arm64_native=1; fi
-          if have "dist/installer-linux-arm64.tar.gz"; then arm64_installer=1; fi
-
-          # `install.sh` serves the installer payload, so shipping one half of
-          # the arm64 set hands arm64 users a 404 with nothing else amiss.
-          # Both or neither.
-          if [ "$arm64_native" != "$arm64_installer" ]; then
-            echo "::error::linux-arm64 produced a partial payload set (native=$arm64_native installer=$arm64_installer); refusing to publish an inconsistent release" >&2
-            exit 1
-          fi
-          if [ "$arm64_native" = "0" ]; then
-            echo "::warning::linux-arm64 is advisory and produced no payload; ${RELEASE_TAG} ships without it"
-            echo "- :warning: \`linux-arm64\` payload missing (advisory leg did not succeed)" \
-              >> "$GITHUB_STEP_SUMMARY"
-            echo "degraded=linux-arm64" >> "$GITHUB_OUTPUT"
-          fi
-
-          if [ -n "$missing" ]; then
-            echo "::error::required release payloads missing:$missing" >&2
-            exit 1
-          fi
 
       - name: Prepare installer assets
         shell: bash
@@ -500,6 +460,15 @@ jobs:
             fi
           done < <(find dist -maxdepth 1 -type f -name 'installer-*.tar.gz' -print0)
 
+      # Validate the exact final filenames before signing or uploading. This
+      # independently guards against artifact-layout drift even though every
+      # build matrix leg is required (SFN-799).
+      - name: Verify expected platform payloads
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash .release-gates/scripts/verify-release-payloads.sh dist "${RELEASE_TAG#v}"
+
       # Supply-chain root: publish a signed SHA256SUMS manifest over the release
       # assets so `sfn` can verify a fetched toolchain against the public key
       # embedded in the binary. Trust model: docs/release-signing.md, SFEP-0046 §3.5.
@@ -513,28 +482,27 @@ jobs:
           set -euo pipefail
           bash scripts/sign-release-manifest.sh dist
 
-      - name: Remove existing assets (repair runs)
+      # `gh release create <tag> <files...>` creates a draft internally,
+      # uploads every asset, and publishes only after every upload succeeds.
+      # This ordering is the publication invariant: a failed ARM64 build,
+      # payload gate, signing step, or upload cannot expose a new incomplete
+      # release (SFN-799). Repair runs move an existing public release back to
+      # draft before replacing assets; any failed upload therefore leaves an
+      # unpublished draft rather than a public partial payload set.
+      - name: Publish complete release atomically
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
+          PREVIOUS_TAG: ${{ inputs.previous_tag }}
         run: |
           set -euo pipefail
           if ! command -v gh >/dev/null 2>&1; then
             echo "[ci][error] gh CLI not available on runner" >&2
             exit 1
           fi
-          for f in dist/*; do
-            name="$(basename "$f")"
-            gh release delete-asset "${RELEASE_TAG}" "${name}" -y >/dev/null 2>&1 || true
-          done
 
-      - name: Upload release assets
-        uses: softprops/action-gh-release@v3
-        with:
-          tag_name: ${{ env.RELEASE_TAG }}
-          prerelease: ${{ contains(env.RELEASE_TAG, '-') }}
-          make_latest: ${{ !contains(env.RELEASE_TAG, '-') }}
-          files: |
+          shopt -s nullglob
+          files=(
             dist/sailfin-native-*.tar.gz
             dist/sailfin-native-*.tar.gz.sha256
             dist/sailfin-native-*.manifest.json
@@ -542,9 +510,37 @@ jobs:
             dist/sailfin_*.tar.gz.sha256
             dist/SHA256SUMS
             dist/SHA256SUMS.sig
-        env:
-          GITHUB_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
+          )
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "[ci][error] no release assets found after payload verification" >&2
+            exit 1
+          fi
 
+          prerelease_args=(--latest)
+          if [[ "${RELEASE_TAG}" == *-* ]]; then
+            prerelease_args=(--prerelease --latest=false)
+          fi
+
+          notes_start_args=()
+          if [ -n "${PREVIOUS_TAG}" ]; then
+            notes_start_args=(--notes-start-tag "${PREVIOUS_TAG}")
+          fi
+
+          if is_draft="$(gh release view "${RELEASE_TAG}" --json isDraft --jq '.isDraft' 2>/dev/null)"; then
+            if [ "${is_draft}" = "false" ]; then
+              gh release edit "${RELEASE_TAG}" --draft=true
+            fi
+            gh release upload "${RELEASE_TAG}" "${files[@]}" --clobber
+            gh release edit "${RELEASE_TAG}" --draft=false "${prerelease_args[@]}"
+          else
+            version="${RELEASE_TAG#v}"
+            gh release create "${RELEASE_TAG}" "${files[@]}" \
+              --verify-tag \
+              --title "Sailfin ${version}" \
+              --generate-notes \
+              "${notes_start_args[@]}" \
+              "${prerelease_args[@]}"
+          fi
   notify-slack-failure:
     name: Notify Slack on release asset failure
     needs: [build, upload]
@@ -587,7 +583,6 @@ jobs:
         env:
           SLACK_RELEASE_WEBHOOK_URL: ${{ secrets.SLACK_RELEASE_WEBHOOK_URL }}
           IS_PRERELEASE: ${{ contains(env.RELEASE_TAG, '-') }}
-          DEGRADED: ${{ needs.upload.outputs.degraded }}
         run: |
           set -euo pipefail
           if [ -z "${SLACK_RELEASE_WEBHOOK_URL:-}" ]; then
@@ -598,18 +593,12 @@ jobs:
           import os
           tag = os.environ["RELEASE_TAG"]
           prerelease = os.environ.get("IS_PRERELEASE", "false") == "true"
-          degraded = os.environ.get("DEGRADED", "").strip()
           repo = os.environ["GITHUB_REPOSITORY"]
           rel_url = f"{os.environ['GITHUB_SERVER_URL']}/{repo}/releases/tag/{tag}"
           if prerelease:
               text = f":package: Sailfin prerelease {tag} published with assets.\nRelease: {rel_url}"
           else:
               text = f":tada: Sailfin STABLE {tag} published with assets.\nRelease: {rel_url}"
-          if degraded:
-              text = (
-                  f":warning: Sailfin {tag} published WITHOUT {degraded} assets "
-                  f"(advisory leg did not succeed).\nRelease: {rel_url}"
-              )
           print(json.dumps({"text": text}))
           PY
           curl -fsS -X POST \

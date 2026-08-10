@@ -1,6 +1,6 @@
-// E2E test for `scripts/select-aarch64-seed-mode.sh` (SFN-580): the aarch64
-// release legs' decision between the native linux-arm64 seed fast path and
-// the SFN-472 x86_64-under-qemu fallback.
+// E2E coverage for the aarch64 release and seed gates (SFN-580, SFN-799):
+// native-seed selection, required release payloads, and fail-closed cadence
+// pinning of the published native+installer ARM64 pair.
 //
 // The script's `SAILFIN_SEED_ASSET_LIST` seam lets these cases run
 // hermetically against a fixture file instead of probing the network.
@@ -8,7 +8,7 @@
 // NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]` and so
 // cannot be called from an `![io]` test like this. Assert on captured stdout
 // with `sfn/strings::contains`/`trim` instead.
-import { contains, trim } from "sfn/strings";
+import { contains, find, trim } from "sfn/strings";
 import { with_tmp_dir } from "sfn/test";
 
 // Marker files live under `SAILFIN_TEST_SCRATCH` (or `/tmp`), not inside the
@@ -51,6 +51,36 @@ fn _write_asset_list(dir: string, assets: string[]) -> string ![io] {
     for asset in assets { body = body + asset + "\n"; }
     fs.writeFile(path, body);
     return path;
+}
+
+fn _touch_assets(dir: string, assets: string[]) ![io] {
+    for asset in assets { fs.writeFile(dir + "/" + asset, ""); }
+}
+
+fn _release_payload_gate() -> string ![io] {
+    let configured = env.get("SAILFIN_RELEASE_PAYLOAD_GATE_SCRIPT");
+    if configured.length > 0 { return configured; }
+    return "scripts/verify-release-payloads.sh";
+}
+
+fn _seed_pin_asset_gate() -> string ![io] {
+    let configured = env.get("SAILFIN_SEED_PIN_ASSET_GATE_SCRIPT");
+    if configured.length > 0 { return configured; }
+    return "scripts/verify-arm64-release-assets.sh";
+}
+
+fn _run_release_payload_gate(dir: string, version: string) -> int ![io] {
+    let exit = process.run_capture(["bash", _release_payload_gate(), dir, version], _child_env("", ""));
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    return exit;
+}
+
+fn _run_seed_pin_asset_gate(asset_list: string, version: string) -> int ![io] {
+    let exit = process.run_capture(["bash", _seed_pin_asset_gate(), version, asset_list], _child_env("", ""));
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    return exit;
 }
 
 // One script invocation, capturing stdout to `marker` (outside the fixture
@@ -250,4 +280,96 @@ test "aarch64 seed mode: the installer smoke probes never use HEAD" ![io] {
     assert contains(workflow, "Range = 'bytes=0-0'");
     assert ! contains(workflow, "-Method Head");
     assert ! contains(workflow, "--head ");
+}
+
+test "release payloads: v0.9.2 shape without ARM64 payloads fails closed" ![io] {
+    let exit = with_tmp_dir(fn (dir: string) -> int {
+        _touch_assets(dir, ["sailfin-native-linux-x86_64-0.9.2.tar.gz", "sailfin_0.9.2_linux_x86_64.tar.gz", "sailfin-native-macos-arm64-0.9.2.tar.gz", "sailfin_0.9.2_macos_arm64.tar.gz", "sailfin_0.9.2_windows_x86_64.tar.gz",]);
+        return _run_release_payload_gate(dir, "0.9.2");
+    });
+    assert exit != 0;
+}
+
+test "release payloads: a partial ARM64 payload pair fails closed" ![io] {
+    let exit = with_tmp_dir(fn (dir: string) -> int {
+        _touch_assets(dir, ["sailfin-native-linux-x86_64-9.9.9.tar.gz", "sailfin_9.9.9_linux_x86_64.tar.gz", "sailfin-native-linux-arm64-9.9.9.tar.gz", "sailfin-native-macos-arm64-9.9.9.tar.gz", "sailfin_9.9.9_macos_arm64.tar.gz", "sailfin_9.9.9_windows_x86_64.tar.gz",]);
+        return _run_release_payload_gate(dir, "9.9.9");
+    });
+    assert exit != 0;
+}
+
+test "release payloads: v0.9.3 complete ARM64 pair is publishable" ![io] {
+    let exit = with_tmp_dir(fn (dir: string) -> int {
+        _touch_assets(dir, ["sailfin-native-linux-x86_64-0.9.3.tar.gz", "sailfin_0.9.3_linux_x86_64.tar.gz", "sailfin-native-linux-arm64-0.9.3.tar.gz", "sailfin_0.9.3_linux_arm64.tar.gz", "sailfin-native-macos-arm64-0.9.3.tar.gz", "sailfin_0.9.3_macos_arm64.tar.gz", "sailfin_0.9.3_windows_x86_64.tar.gz",]);
+        return _run_release_payload_gate(dir, "0.9.3");
+    });
+    assert exit == 0;
+}
+
+test "seed pin assets: unrelated v0.9.2 assets cannot satisfy the ARM64 gate" ![io] {
+    let exit = with_tmp_dir(fn (dir: string) -> int {
+        let list = _write_asset_list(dir, ["sailfin-native-linux-x86_64-0.9.2.tar.gz", "sailfin_0.9.2_linux_x86_64.tar.gz", "SHA256SUMS",]);
+        return _run_seed_pin_asset_gate(list, "0.9.2");
+    });
+    assert exit != 0;
+}
+
+test "seed pin assets: a partial published ARM64 pair fails closed" ![io] {
+    let exit = with_tmp_dir(fn (dir: string) -> int {
+        let list = _write_asset_list(dir, ["sailfin_9.9.9_linux_arm64.tar.gz",]);
+        return _run_seed_pin_asset_gate(list, "9.9.9");
+    });
+    assert exit != 0;
+}
+
+test "seed pin assets: v0.9.3 complete ARM64 pair may advance" ![io] {
+    let exit = with_tmp_dir(fn (dir: string) -> int {
+        let list = _write_asset_list(dir, ["sailfin-native-linux-arm64-0.9.3.tar.gz", "sailfin_0.9.3_linux_arm64.tar.gz",]);
+        return _run_seed_pin_asset_gate(list, "0.9.3");
+    });
+    assert exit == 0;
+}
+
+test "release workflows: ARM64 is required before publish and cadence pin" ![io] {
+    let release_workflow = fs.readFile(".github/workflows/release.yml");
+    assert ! contains(release_workflow, "gh release create");
+
+    let tag_workflow = fs.readFile(".github/workflows/release-tag.yml");
+    assert ! contains(tag_workflow, "continue-on-error:");
+    assert contains(tag_workflow, ".release-gates/scripts/verify-release-payloads.sh");
+    let gate_pos = find(tag_workflow, "bash .release-gates/scripts/verify-release-payloads.sh", 0);
+    let atomic_publish_needle = "gh release create \"" + "$"
+        + "{RELEASE_TAG}\" \""
+        + "$"
+        + "{files[@]}\"";
+    let publish_pos = find(tag_workflow, atomic_publish_needle, 0);
+    assert gate_pos >= 0;
+    assert publish_pos > gate_pos;
+    let repair_draft_pos = find(tag_workflow, "--draft=true", 0);
+    let repair_upload_pos = find(tag_workflow, "gh release upload", 0);
+    assert repair_draft_pos > gate_pos;
+    assert repair_upload_pos > repair_draft_pos;
+
+    let cadence_workflow = fs.readFile(".github/workflows/cadence-seed-pin.yml");
+    assert contains(cadence_workflow, "--json assets,isDraft");
+    assert contains(cadence_workflow, "is still a draft; refusing to pin an unpublished toolchain");
+    assert contains(cadence_workflow, "scripts/verify-arm64-release-assets.sh");
+    assert contains(cadence_workflow, "resuming smoke gate for existing PR");
+    assert contains(cadence_workflow, "reusing validated remote branch");
+    assert contains(cadence_workflow, "does not carry the expected");
+    assert ! contains(cadence_workflow, "an open PR already exists for $branch; skipping");
+    let arm_smoke_pos = find(cadence_workflow, "arm_smoke_name=\"install (ubuntu-24.04-arm)\"", 0);
+    let auto_merge_pos = find(cadence_workflow, "gh pr merge \"$pr_url\" --auto --squash", 0);
+    assert arm_smoke_pos >= 0;
+    assert auto_merge_pos > arm_smoke_pos;
+}
+
+test "seed pin workflow: bootstrap changes run the native ARM installer self-host smoke" ![io] {
+    let workflow = fs.readFile(".github/workflows/installer-smoke.yml");
+    assert contains(workflow, "- \"bootstrap.toml\"");
+    assert contains(workflow, "slug: linux_arm64");
+    assert contains(workflow, "Verify pinned native ARM seed self-host");
+    assert contains(workflow, "make fetch-seed");
+    assert contains(workflow, "ELF 64-bit.*ARM aarch64");
+    assert contains(workflow, "make compile");
 }

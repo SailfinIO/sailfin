@@ -24,6 +24,7 @@ on:
       - "README.md"
       - "docs/status.md"
       - "site/**"
+      - "bootstrap.toml"
       - ".github/workflows/installer-smoke.yml"
   workflow_dispatch:
     inputs: {}

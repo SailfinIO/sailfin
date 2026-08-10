@@ -4,8 +4,9 @@ name: Release
 #
 # Reads the current version from compiler/capsule.toml, computes the next
 # version based on `channel` and `bump` inputs, updates the compiler and
-# implementation-capsule manifests plus version.sfn, commits, tags, pushes, creates a GitHub Release, then calls
-# release-tag.yml to build and upload platform assets.
+# implementation-capsule manifests plus version.sfn, commits, tags, and pushes.
+# release-tag.yml then verifies every required payload and atomically creates
+# the public GitHub Release with those assets.
 #
 # Channel semantics:
 #   alpha       → v0.5.0-alpha.23   (prerelease on main)
@@ -355,39 +356,6 @@ jobs:
           echo "::error::Failed to push release commit + tag after 5 attempts."
           exit 1
 
-      - name: Create GitHub Release
-        if: inputs.dry_run != true
-        env:
-          GH_TOKEN: ${{ secrets.RELEASE_PAT }}
-          TAG: ${{ steps.bump.outputs.tag }}
-          VERSION: ${{ steps.bump.outputs.version }}
-          CHANNEL: ${{ inputs.channel }}
-          PREV_TAG: ${{ steps.bump.outputs.prev_tag }}
-        run: |
-          set -euo pipefail
-          prerelease_args=()
-          if [ "$CHANNEL" != "stable" ]; then
-            prerelease_args=(--prerelease)
-          fi
-
-          latest_args=()
-          if [ "$CHANNEL" = "stable" ]; then
-            latest_args=(--latest)
-          fi
-
-          # Only pass --notes-start-tag if the previous tag actually exists
-          notes_start_args=()
-          if git rev-parse "$PREV_TAG" >/dev/null 2>&1; then
-            notes_start_args=(--notes-start-tag "$PREV_TAG")
-          fi
-
-          gh release create "$TAG" \
-            --title "Sailfin $VERSION" \
-            --generate-notes \
-            "${notes_start_args[@]}" \
-            "${prerelease_args[@]}" \
-            "${latest_args[@]}"
-
       - name: Dry run summary
         if: inputs.dry_run == true
         run: |
@@ -413,6 +381,7 @@ jobs:
     uses: ./.github/workflows/release-tag.yml
     with:
       tag: ${{ needs.release.outputs.tag }}
+      previous_tag: ${{ needs.release.outputs.prev_tag }}
     secrets: inherit
 
   notify-slack-failure:

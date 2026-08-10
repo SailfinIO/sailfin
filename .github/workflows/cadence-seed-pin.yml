@@ -19,6 +19,7 @@ on:
         required: true
 
 permissions:
+  checks: read
   contents: write
   pull-requests: write
 
@@ -31,6 +32,7 @@ jobs:
     name: Open seed-pin PR
     if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     env:
       GH_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
       SLACK_RELEASE_WEBHOOK_URL: ${{ secrets.SLACK_RELEASE_WEBHOOK_URL }}
@@ -63,7 +65,7 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
-      - name: Open draft PR for cadence seed bump
+      - name: Open PR for cadence seed bump
         shell: bash
         env:
           VERSION: ${{ steps.version.outputs.version }}
@@ -91,15 +93,22 @@ jobs:
             exit 1
           fi
 
-          if ! gh release view "$TAG" --json assets --jq '.assets | length' >/tmp/asset-count; then
+          if ! gh release view "$TAG" --json assets,isDraft >/tmp/release.json; then
             echo "::error::Release $TAG is not visible yet"
             exit 1
           fi
-          assets="$(cat /tmp/asset-count)"
+          is_draft="$(jq -r '.isDraft' /tmp/release.json)"
+          if [ "$is_draft" != "false" ]; then
+            echo "::error::Release $TAG is still a draft; refusing to pin an unpublished toolchain."
+            exit 1
+          fi
+          jq -r '.assets[].name' /tmp/release.json >/tmp/release-assets
+          assets="$(wc -l < /tmp/release-assets | tr -d ' ')"
           if [ "$assets" -eq 0 ]; then
             echo "::error::Release $TAG has no uploaded assets yet; retry after release-tag completes."
             exit 1
           fi
+          bash scripts/verify-arm64-release-assets.sh "$VERSION" /tmp/release-assets
 
           current="$(awk '
             /^\[[^]]+\]/ { section=$0 }
@@ -113,61 +122,96 @@ jobs:
           fi
 
           branch="bot/cadence-seed-pin-v${VERSION}"
-          if [ "$(gh pr list --head "$branch" --state open --json number --jq 'length')" != "0" ]; then
-            echo "[seed-pin] an open PR already exists for $branch; skipping."
-            exit 0
-          fi
+          pr_url="$(gh pr list --head "$branch" --state open --json url --jq '.[0].url // ""')"
+          if [ -n "$pr_url" ]; then
+            echo "[seed-pin] resuming smoke gate for existing PR: ${pr_url}"
+          else
+            remote_branch_sha="$(git ls-remote --heads origin "refs/heads/${branch}" | awk 'NR == 1 { print $1 }')"
+            if [ -n "$remote_branch_sha" ]; then
+              git fetch origin "refs/heads/${branch}:refs/remotes/origin/${branch}"
+              changed="$(git diff --name-only "origin/main...origin/${branch}" | sort)"
+              expected_changed="$(printf '%s\n' bootstrap.toml compiler/capsule.toml workspace.toml | sort)"
+              if [ "$changed" != "$expected_changed" ]; then
+                echo "::error::Existing ${branch} changes unexpected files; refusing to reuse it."
+                printf '%s\n' "$changed"
+                exit 1
+              fi
 
-          git config user.name "Sailfin Release Bot"
-          git config user.email "releases@sailfin.io"
-          git checkout -b "$branch"
+              read_remote_value() {
+                file="$1"
+                wanted_section="$2"
+                wanted_key="$3"
+                git show "origin/${branch}:${file}" | awk \
+                  -v wanted_section="$wanted_section" \
+                  -v wanted_key="$wanted_key" '
+                    /^\[[^]]+\]/ { section=$0 }
+                    section == wanted_section && $1 == wanted_key {
+                      gsub(/"/, "", $3); print $3; exit
+                    }
+                  '
+              }
+              remote_seed="$(read_remote_value bootstrap.toml '[seed]' version)"
+              remote_compiler_floor="$(read_remote_value compiler/capsule.toml '[toolchain]' sfn)"
+              remote_workspace_floor="$(read_remote_value workspace.toml '[toolchain]' sfn)"
+              if [ "$remote_seed" != "$VERSION" ] \
+                || [ "$remote_compiler_floor" != "$VERSION" ] \
+                || [ "$remote_workspace_floor" != "$VERSION" ]; then
+                echo "::error::Existing ${branch} does not carry the expected ${VERSION} pin in all three manifests."
+                exit 1
+              fi
+              echo "[seed-pin] reusing validated remote branch ${branch} at ${remote_branch_sha}"
+            else
+              git config user.name "Sailfin Release Bot"
+              git config user.email "releases@sailfin.io"
+              git checkout -b "$branch"
 
-          tmp="$(mktemp)"
-          awk -v v="$VERSION" '
-            /^\[[^]]+\]/ { section=$0 }
-            section == "[seed]" && /^version[[:space:]]*=/ {
-              sub(/"[^"]*"/, "\"" v "\"")
-            }
-            { print }
-          ' bootstrap.toml > "$tmp"
-          mv "$tmp" bootstrap.toml
+              tmp="$(mktemp)"
+              awk -v v="$VERSION" '
+                /^\[[^]]+\]/ { section=$0 }
+                section == "[seed]" && /^version[[:space:]]*=/ {
+                  sub(/"[^"]*"/, "\"" v "\"")
+                }
+                { print }
+              ' bootstrap.toml > "$tmp"
+              mv "$tmp" bootstrap.toml
 
-          tmp="$(mktemp)"
-          awk -v v="$VERSION" '
-            /^\[[^]]+\]/ { section=$0 }
-            section == "[toolchain]" && /^sfn[[:space:]]*=/ {
-              sub(/"[^"]*"/, "\"" v "\"")
-            }
-            { print }
-          ' compiler/capsule.toml > "$tmp"
-          mv "$tmp" compiler/capsule.toml
+              tmp="$(mktemp)"
+              awk -v v="$VERSION" '
+                /^\[[^]]+\]/ { section=$0 }
+                section == "[toolchain]" && /^sfn[[:space:]]*=/ {
+                  sub(/"[^"]*"/, "\"" v "\"")
+                }
+                { print }
+              ' compiler/capsule.toml > "$tmp"
+              mv "$tmp" compiler/capsule.toml
 
-          # Keep the workspace-wide toolchain floor in lockstep with the
-          # compiler member's floor. `workspace.toml [toolchain].sfn` (SFN-414)
-          # is the default floor every member inherits; leaving it behind drifts
-          # it from the adopted seed. Same rewrite as capsule.toml; `channel`
-          # (a sibling key in the same section) is untouched.
-          tmp="$(mktemp)"
-          awk -v v="$VERSION" '
-            /^\[[^]]+\]/ { section=$0 }
-            section == "[toolchain]" && /^sfn[[:space:]]*=/ {
-              sub(/"[^"]*"/, "\"" v "\"")
-            }
-            { print }
-          ' workspace.toml > "$tmp"
-          mv "$tmp" workspace.toml
+              # Keep the workspace-wide toolchain floor in lockstep with the
+              # compiler member's floor. `workspace.toml [toolchain].sfn` (SFN-414)
+              # is the default floor every member inherits; leaving it behind drifts
+              # it from the adopted seed. Same rewrite as capsule.toml; `channel`
+              # (a sibling key in the same section) is untouched.
+              tmp="$(mktemp)"
+              awk -v v="$VERSION" '
+                /^\[[^]]+\]/ { section=$0 }
+                section == "[toolchain]" && /^sfn[[:space:]]*=/ {
+                  sub(/"[^"]*"/, "\"" v "\"")
+                }
+                { print }
+              ' workspace.toml > "$tmp"
+              mv "$tmp" workspace.toml
 
-          git add bootstrap.toml compiler/capsule.toml workspace.toml
-          if git diff --cached --quiet; then
-            echo "[seed-pin] no changes after rewrite; skipping."
-            exit 0
-          fi
+              git add bootstrap.toml compiler/capsule.toml workspace.toml
+              if git diff --cached --quiet; then
+                echo "[seed-pin] no changes after rewrite; skipping."
+                exit 0
+              fi
 
-          git commit -m "chore(seed): pin cadence seed to ${VERSION}"
-          git push -u origin "$branch"
+              git commit -m "chore(seed): pin cadence seed to ${VERSION}"
+              git push -u origin "$branch"
+            fi
 
-          body="$(mktemp)"
-          cat > "$body" <<EOF
+            body="$(mktemp)"
+            cat > "$body" <<EOF
           ## Summary
 
           Pins the compiler checkout seed from \`${current}\` to \`${VERSION}\` after the cadence alpha \`${TAG}\` published release assets.
@@ -180,23 +224,61 @@ jobs:
 
           ## Verification
 
-          - \`gh release view ${TAG} --json assets\` returned ${assets} asset(s).
+          - \`gh release view ${TAG} --json assets,isDraft\` confirmed a published release with ${assets} asset(s).
+          - \`scripts/verify-arm64-release-assets.sh ${VERSION} /tmp/release-assets\` confirmed the required native and installer ARM64 pair.
           EOF
 
-          pr_url="$(gh pr create \
-            --base main \
-            --head "$branch" \
-            --title "chore(seed): pin cadence seed to ${VERSION}" \
-            --body-file "$body")"
-          echo "$pr_url"
+            pr_url="$(gh pr create \
+              --base main \
+              --head "$branch" \
+              --title "chore(seed): pin cadence seed to ${VERSION}" \
+              --body-file "$body")"
+            echo "$pr_url"
+          fi
 
-          # Auto-merge once the pin PR's own CI is green — the seed must advance
-          # without a manual merge, but pinning a seed that cannot build main is
-          # exactly what CI on this PR guards against. If the repo does not allow
-          # auto-merge the PR is left open for manual merge (never silently lost).
+          # Installer smoke is a path-filtered workflow rather than a branch-rule
+          # requirement. Wait for its native ARM job explicitly before enabling
+          # auto-merge, so the required CI aggregate cannot merge a pin while the
+          # published installer/native-seed self-host is pending or red (SFN-799).
+          arm_smoke_name="install (ubuntu-24.04-arm)"
+          arm_smoke_buckets=""
+          head_sha="$(gh pr view "$pr_url" --json headRefOid --jq '.headRefOid')"
+          for attempt in $(seq 1 180); do
+            arm_smoke_buckets="$(gh api --method GET \
+              "repos/${GITHUB_REPOSITORY}/commits/${head_sha}/check-runs" \
+              -f per_page=100 \
+              -f filter=latest \
+              --jq '[.check_runs[] | select(.name == "install (ubuntu-24.04-arm)") | if .status != "completed" then "pending" elif .conclusion == "success" then "pass" elif .conclusion == "cancelled" then "cancel" elif .conclusion == "skipped" then "skipping" else "fail" end] | unique | join(",")')"
+            case "$arm_smoke_buckets" in
+              *fail* | *cancel* | *skipping*)
+                echo "::error::${arm_smoke_name} did not pass (bucket=${arm_smoke_buckets})."
+                exit 1
+                ;;
+              *pending* | "")
+                echo "[seed-pin] waiting for ${arm_smoke_name} (${attempt}/180; bucket=${arm_smoke_buckets:-not registered})"
+                sleep 10
+                ;;
+              pass)
+                echo "[seed-pin] ${arm_smoke_name} passed."
+                break
+                ;;
+              *)
+                echo "::error::${arm_smoke_name} returned unexpected bucket set: ${arm_smoke_buckets}"
+                exit 1
+                ;;
+            esac
+          done
+          if [ "$arm_smoke_buckets" != "pass" ]; then
+            echo "::error::Timed out waiting for ${arm_smoke_name}."
+            exit 1
+          fi
+
+          # Required CI may still be running; GitHub auto-merge waits for that
+          # branch-rule gate after the independent ARM installer smoke is green.
+          # If auto-merge is unavailable, leave the PR open for manual merge.
           if gh pr merge "$pr_url" --auto --squash; then
-            echo "[seed-pin] auto-merge enabled for ${pr_url}."
-            post_slack ":seedling: Sailfin seed-pin PR opened for ${VERSION} (auto-merge on green CI).\nPR: ${pr_url}\nRelease: https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}"
+            echo "[seed-pin] ARM smoke passed; auto-merge enabled for ${pr_url}."
+            post_slack ":seedling: Sailfin seed-pin PR opened for ${VERSION} (ARM installer smoke green; auto-merge on required CI).\nPR: ${pr_url}\nRelease: https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}"
           else
             echo "::warning::Could not enable auto-merge for ${pr_url}; leaving it open for manual merge."
             post_slack ":seedling: Sailfin seed-pin PR opened for ${VERSION} — auto-merge unavailable, needs a manual merge.\nPR: ${pr_url}\nRelease: https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}"
