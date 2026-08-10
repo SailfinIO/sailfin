@@ -1,10 +1,10 @@
 // compiler/src/llvm/lowering/instructions_loops.sfn
 //
 // Control flow handler: loop instruction lowering (infinite loops with break/continue).
+import { Diag } from "sfn/analyzer/diagnostic";
 import { NativeFunction, NativeInstruction, NativeSourceSpan } from "sfn/ir";
 import { substring } from "sfn/strings";
 
-import { Diag } from "../../diagnostic";
 import { lower_expression } from "../expression_lowering/native/core";
 import { find_local_binding } from "../expressions_bindings";
 import { format_temp_name } from "../expressions_helpers";

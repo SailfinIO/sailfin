@@ -184,7 +184,7 @@ the Reach pillar rather than a hole in it — a test cannot be the place where a
 undeclared capability leaks in.
 
 **The framework motivated an explicit non-entry.** `pure` is recognized by
-`compiler/src/effect_taxonomy.sfn` as a sentinel meaning "declares no effects" —
+`compiler/capsules/analyzer/src/effect_taxonomy.sfn` as a sentinel meaning "declares no effects" —
 deliberately *outside* the canonical taxonomy, because it is not a capability a
 manifest can grant or deny, and folding it into `canonical_effects()` would
 conflate the two concepts. That file cites this proposal's interim-tier rationale

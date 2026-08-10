@@ -7,12 +7,12 @@
 // way `result_question_typecheck_test.sfn` drives the `?`-operator rules, and
 // the end-to-end tests confirm the `walk_expression` `Conditional` arm fires
 // the same diagnostics through `typecheck_diagnostics`.
+import { typecheck_diagnostics } from "sfn/analyzer/typecheck";
+import { check_conditional_types, conditional_result_type } from "sfn/analyzer/typecheck/try_and_conditional";
+import { Diagnostic } from "sfn/analyzer/typecheck_types";
 import { parse_program } from "sfn/syntax";
 
 import { index_of } from "../../src/string_utils";
-import { typecheck_diagnostics } from "../../src/typecheck";
-import { check_conditional_types, conditional_result_type } from "../../src/typecheck/try_and_conditional";
-import { Diagnostic } from "../../src/typecheck_types";
 
 fn _count_code(diagnostics: Diagnostic[], code: string) -> int {
     let mut count: int = 0;

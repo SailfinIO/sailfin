@@ -1,0 +1,1023 @@
+// compiler/capsules/analyzer/src/typecheck_captures.sfn
+//
+// Free-variable / capture-set inference for `Expression.Lambda`
+// nodes (issue #458; A1 of #450 M1.5 closures-with-capture). This
+// module is stage 1 of three: it produces deterministic, ordered
+// capture records the AST can carry forward; later stages emit
+// env structs (#A2) and call-site dispatch (#A3).
+//
+// The walk is purely analytical — it never mutates AST nodes. It
+// returns one `LambdaCaptureRecord` per `Expression.Lambda`
+// discovered, in pre-order (outer lambdas appear before nested
+// ones). Records are keyed by the lambda's parameter shape, which
+// is stable across the seed compiler's positional layout.
+//
+// Algorithm sketch:
+//   * `walk_block(scope, block)` walks statements left-to-right,
+//     collecting let-declared locals as it goes. Free names from
+//     each statement are subtracted by the locals already declared
+//     in the block before the statement.
+//   * `walk_expression(scope, expr)` returns the set of
+//     identifiers referenced in the expression that are NOT bound
+//     anywhere within the expression itself.
+//   * Hitting `Expression.Lambda` recurses via `analyze_lambda`,
+//     which walks the body with the lambda's parameters added to
+//     the inner scope, subtracts those parameters from the body's
+//     free names, and intersects with the outer scope to derive
+//     captures. Each free name resolved against the outer scope
+//     produces one `Capture` carrying the enclosing binding's
+//     declared type, mutability, and span — the metadata stage A2
+//     needs to size the env struct and pick by-value-vs-pointer
+//     copy semantics.
+import { ends_with, strings_equal, substring } from "sfn/strings";
+import {
+    Block,
+    Capture,
+    ElseBranch,
+    Expression,
+    MatchCase,
+    MethodDeclaration,
+    Parameter,
+    Program,
+    SourceSpan,
+    Statement,
+    TypeAnnotation
+} from "sfn/syntax";
+
+// One scope-visible binding the walk has accumulated so far.
+// Mirrors the data the unit tests need to verify (`type_text`,
+// `mutable`) plus the by-value/by-pointer hint stage A2 will pick
+// up. `span` is the binding-site span — the parameter slot or the
+// `let`/`let mut` keyword location — and is propagated into the
+// final `Capture` so future diagnostics can underline the source
+// of the capture rather than the use site.
+struct LocalBinding {
+    name: string;
+    type_text: string;
+    by_value: boolean;
+    mutable: boolean;
+    span: SourceSpan?;
+}
+
+// One record per `Expression.Lambda` discovered during the walk.
+// Records are emitted in pre-order so a nested-lambda assertion
+// can index by `[0]` for the outer and `[1]` for the inner.
+//
+// Identification — `body_start_line` and `body_start_column` are
+// taken from the lambda body's opening `{` token. Two lambdas with
+// identical parameter shapes still differ on body start, so stage
+// A2 / A3 can map an `Expression.Lambda` AST node back to its
+// record by computing the same `(line, column)` from its
+// `body.tokens[0]`. `parameter_names` is kept alongside as a
+// human-readable hint for diagnostics and for tests to assert
+// against without depending on exact line/column numbers in source
+// fixtures.
+struct LambdaCaptureRecord {
+    parameter_names: string[];
+    captures: Capture[];
+    body_start_line: int;
+    body_start_column: int;
+}
+
+// Internal walk result. `free` is the set of identifier names
+// referenced in the walked subtree that are NOT bound by lets
+// inside the subtree. The caller subtracts its own bindings before
+// passing the result up, so by the time `free` reaches a lambda
+// boundary it reflects only names the lambda actually needs from
+// outside.
+struct CaptureWalkResult {
+    free: string[];
+    records: LambdaCaptureRecord[];
+}
+
+// Public entry point: walks every top-level statement in the
+// program and returns the inferred capture set for every lambda
+// reachable from the AST. Top-level `let` bindings are added to
+// the running scope so a lambda declared mid-file sees the
+// preceding bindings as candidates for capture.
+fn analyze_lambda_captures(program: Program) -> LambdaCaptureRecord[] {
+    let mut scope: LocalBinding[] = [];
+    let mut records: LambdaCaptureRecord[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= program.statements.length { break; }
+        let stmt = program.statements[i];
+        let result = walk_top_statement(scope, stmt);
+        records = append_records(records, result.records);
+        if stmt.variant == "VariableDeclaration" {
+            scope = append_binding(scope, binding_from_let(scope, stmt));
+        }
+        i += 1;
+    }
+    return records;
+}
+
+fn walk_top_statement(scope: LocalBinding[], stmt: Statement) -> CaptureWalkResult {
+    if stmt.variant == "FunctionDeclaration" {
+        let inner_scope = extend_with_parameters(scope, stmt.signature.parameters);
+        return walk_block(inner_scope, stmt.body);
+    }
+    if stmt.variant == "TestDeclaration" {
+        return walk_block(scope, stmt.body);
+    }
+    if stmt.variant == "VariableDeclaration" {
+        if stmt.initializer == null { return empty_walk_result(); }
+        return walk_expression(scope, stmt.initializer);
+    }
+    if stmt.variant == "StructDeclaration" {
+        let mut records: LambdaCaptureRecord[] = [];
+        let mut i: int = 0;
+        loop {
+            if i >= stmt.methods.length { break; }
+            let method = stmt.methods[i];
+            let inner_scope = extend_with_parameters(scope, method.signature.parameters);
+            let result = walk_block(inner_scope, method.body);
+            records = append_records(records, result.records);
+            i += 1;
+        }
+        return CaptureWalkResult { free: [], records: records };
+    }
+    return empty_walk_result();
+}
+
+// Walk the statements of a block, threading lets into a local
+// scope as they appear so subsequent statements (and their
+// expressions) see them. The block subtracts its own locals from
+// the free-name set bubbling up — names a let inside the block
+// satisfies are not free at the block boundary.
+fn walk_block(scope: LocalBinding[], block: Block) -> CaptureWalkResult {
+    let mut free: string[] = [];
+    let mut local: LocalBinding[] = [];
+    let mut records: LambdaCaptureRecord[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= block.statements.length { break; }
+        let stmt = block.statements[i];
+        let inner_scope = concat_bindings(scope, local);
+        let result = walk_statement(inner_scope, stmt);
+        let local_names = binding_names(local);
+        let stmt_free = subtract_names(result.free, local_names);
+        free = union_names(free, stmt_free);
+        records = append_records(records, result.records);
+        if stmt.variant == "VariableDeclaration" {
+            local = append_binding(local, binding_from_let(inner_scope, stmt));
+        }
+        i += 1;
+    }
+    return CaptureWalkResult { free: free, records: records };
+}
+
+fn walk_statement(scope: LocalBinding[], stmt: Statement) -> CaptureWalkResult {
+    if stmt.variant == "VariableDeclaration" {
+        if stmt.initializer == null { return empty_walk_result(); }
+        return walk_expression(scope, stmt.initializer);
+    }
+    if stmt.variant == "ExpressionStatement" {
+        return walk_expression(scope, stmt.expression);
+    }
+    if stmt.variant == "ReturnStatement" {
+        if stmt.expression == null { return empty_walk_result(); }
+        return walk_expression(scope, stmt.expression);
+    }
+    if stmt.variant == "ThrowStatement" {
+        return walk_expression(scope, stmt.expression);
+    }
+    if stmt.variant == "BlockStatement" {
+        return walk_block(scope, stmt.body);
+    }
+    if stmt.variant == "IfStatement" {
+        let mut result = walk_expression(scope, stmt.condition);
+        result = merge_results(result, walk_block(scope, stmt.then_block));
+        if stmt.else_branch != null {
+            let branch = stmt.else_branch;
+            if branch.body != null {
+                result = merge_results(result, walk_block(scope, branch.body));
+            }
+            if branch.statement != null {
+                result = merge_results(result, walk_statement(scope, branch.statement));
+            }
+        }
+        return result;
+    }
+    if stmt.variant == "ForStatement" {
+        let mut result = walk_expression(scope, stmt.clause.iterable);
+        result = merge_results(result, walk_expression(scope, stmt.clause.target));
+        let inner_scope = extend_with_for_target(scope, stmt.clause.target, stmt.clause.iterable);
+        result = merge_results(result, walk_block(inner_scope, stmt.body));
+        // The for-target binding is local to the loop body; subtract
+        // its name from the bubbled-up free set so the enclosing
+        // scope doesn't see it as a capture candidate.
+        let target_name = for_target_name(stmt.clause.target);
+        if target_name.length > 0 {
+            let mut excluded: string[] = [target_name];
+            return CaptureWalkResult {
+                free: subtract_names(result.free, excluded),
+                records: result.records
+            };
+        }
+        return result;
+    }
+    if stmt.variant == "LoopStatement" {
+        return walk_block(scope, stmt.body);
+    }
+    if stmt.variant == "RoutineStatement" {
+        // Descend into `routine { }` bodies so lambdas spawned inside a
+        // nursery get capture records and are lifted (#1181) — without
+        // this the lambda-lifting pass treats them as capturing and
+        // emits a bare `<lambda>`. Shaped like LoopStatement.
+        return walk_block(scope, stmt.body);
+    }
+    if stmt.variant == "MatchStatement" {
+        let mut result = walk_expression(scope, stmt.expression);
+        let mut i: int = 0;
+        loop {
+            if i >= stmt.cases.length { break; }
+            let case = stmt.cases[i];
+            result = merge_results(result, walk_expression(scope, case.pattern));
+            if case.guard != null {
+                result = merge_results(result, walk_expression(scope, case.guard));
+            }
+            result = merge_results(result, walk_block(scope, case.body));
+            i += 1;
+        }
+        return result;
+    }
+    if stmt.variant == "WithStatement" {
+        let mut result = walk_block(scope, stmt.body);
+        let mut i: int = 0;
+        loop {
+            if i >= stmt.clauses.length { break; }
+            result = merge_results(result, walk_expression(scope, stmt.clauses[i].expression));
+            i += 1;
+        }
+        return result;
+    }
+    if stmt.variant == "TryStatement" {
+        let mut result = walk_block(scope, stmt.try_block);
+        if stmt.catch_block != null {
+            // The `catch (name)` identifier is a fresh local binding
+            // visible only inside the catch block, so extend the
+            // scope with it and subtract its name from the bubbled
+            // free set — otherwise a lambda nested inside the catch
+            // would capture the catch variable as if it were an
+            // enclosing let-binding.
+            let catch_scope = extend_with_catch_name(scope, stmt.catch_name);
+            let catch_result = walk_block(catch_scope, stmt.catch_block);
+            let catch_local: string[] = catch_name_as_list(stmt.catch_name);
+            let catch_free = subtract_names(catch_result.free, catch_local);
+            result = merge_results(result, CaptureWalkResult {
+                free: catch_free, records: catch_result.records
+            });
+        }
+        if stmt.finally_block != null {
+            result = merge_results(result, walk_block(scope, stmt.finally_block));
+        }
+        return result;
+    }
+    if stmt.variant == "FunctionDeclaration" {
+        let inner_scope = extend_with_parameters(scope, stmt.signature.parameters);
+        return walk_block(inner_scope, stmt.body);
+    }
+    return empty_walk_result();
+}
+
+fn walk_expression(scope: LocalBinding[], expression: Expression?) -> CaptureWalkResult {
+    if expression == null { return empty_walk_result(); }
+    if expression.variant == "Identifier" {
+        let mut names: string[] = [];
+        names.push(expression.name);
+        return CaptureWalkResult { free: names, records: [] };
+    }
+    if expression.variant == "NumberLiteral" { return empty_walk_result(); }
+    if expression.variant == "StringLiteral" { return empty_walk_result(); }
+    if expression.variant == "BooleanLiteral" { return empty_walk_result(); }
+    if expression.variant == "NullLiteral" { return empty_walk_result(); }
+    if expression.variant == "Raw" { return empty_walk_result(); }
+    if expression.variant == "Unary" {
+        return walk_expression(scope, expression.operand);
+    }
+    if expression.variant == "Binary" {
+        let left = walk_expression(scope, expression.left);
+        let right = walk_expression(scope, expression.right);
+        return merge_results(left, right);
+    }
+    if expression.variant == "Member" {
+        return walk_expression(scope, expression.object);
+    }
+    if expression.variant == "Index" {
+        let seq = walk_expression(scope, expression.sequence);
+        let idx = walk_expression(scope, expression.index);
+        return merge_results(seq, idx);
+    }
+    if expression.variant == "Range" {
+        let start = walk_expression(scope, expression.start);
+        let end = walk_expression(scope, expression.end);
+        return merge_results(start, end);
+    }
+    if expression.variant == "Cast" {
+        return walk_expression(scope, expression.operand);
+    }
+    if expression.variant == "TryOperator" {
+        return walk_expression(scope, expression.operand);
+    }
+    if expression.variant == "Conditional" {
+        // Ternary `cond ? then : else` (#1690) — a capture can live in any
+        // branch (`fn() { return flag ? captured_a : captured_b; }`), so
+        // walk all three children and union the discovered captures.
+        let cond = walk_expression(scope, expression.condition);
+        let then_value = walk_expression(scope, expression.then_value);
+        let else_value = walk_expression(scope, expression.else_value);
+        return merge_results(merge_results(cond, then_value), else_value);
+    }
+    if expression.variant == "Assignment" {
+        let target = walk_expression(scope, expression.target);
+        let rhs = walk_expression(scope, expression.rhs);
+        return merge_results(target, rhs);
+    }
+    if expression.variant == "Call" {
+        // SFN-396: for an array/range HOF call whose callback is an
+        // un-annotated lambda (`xs.map(fn (x) -> int { ... })`), seed the
+        // callback parameters' `type_text` from the receiver's element type so
+        // a NESTED lambda that captures such a parameter lays out the real
+        // scalar env field instead of the conservative `i8*` fallback.
+        let inferred = _hof_callback_param_types(scope, expression);
+        let mut result = walk_expression(scope, expression.callee);
+        let mut i: int = 0;
+        loop {
+            if i >= expression.arguments.length { break; }
+            let arg = expression.arguments[i];
+            if arg.variant == "Lambda" {
+                if inferred.length > 0 {
+                    result = merge_results(result, analyze_lambda_typed(scope, arg, inferred));
+                } else {
+                    result = merge_results(result, walk_expression(scope, arg));
+                }
+            } else {
+                result = merge_results(result, walk_expression(scope, arg));
+            }
+            i += 1;
+        }
+        return result;
+    }
+    if expression.variant == "Array" {
+        let mut result = empty_walk_result();
+        let mut i: int = 0;
+        loop {
+            if i >= expression.elements.length { break; }
+            result = merge_results(result, walk_expression(scope, expression.elements[i]));
+            i += 1;
+        }
+        return result;
+    }
+    if expression.variant == "Object" {
+        let mut result = empty_walk_result();
+        let mut i: int = 0;
+        loop {
+            if i >= expression.fields.length { break; }
+            result = merge_results(result, walk_expression(scope, expression.fields[i].value));
+            i += 1;
+        }
+        return result;
+    }
+    if expression.variant == "Struct" {
+        let mut result = empty_walk_result();
+        let mut i: int = 0;
+        loop {
+            if i >= expression.fields.length { break; }
+            result = merge_results(result, walk_expression(scope, expression.fields[i].value));
+            i += 1;
+        }
+        return result;
+    }
+    if expression.variant == "Lambda" {
+        return analyze_lambda(scope, expression);
+    }
+    // Concurrency frontend nodes (epic #965, issues #1079-#1082). Descend into
+    // operands/children so captures inside a spawned/parallel/served lambda
+    // (e.g. `spawn () -> int { uses_outer }`) reach `analyze_lambda` instead of
+    // being silently dropped.
+    if expression.variant == "Spawn" {
+        return walk_expression(scope, expression.operand);
+    }
+    if expression.variant == "Await" {
+        return walk_expression(scope, expression.operand);
+    }
+    if expression.variant == "Channel" {
+        if expression.capacity == null { return empty_walk_result(); }
+        return walk_expression(scope, expression.capacity);
+    }
+    if expression.variant == "Parallel" {
+        let mut result = empty_walk_result();
+        let mut i: int = 0;
+        loop {
+            if i >= expression.tasks.length { break; }
+            result = merge_results(result, walk_expression(scope, expression.tasks[i]));
+            i += 1;
+        }
+        return result;
+    }
+    if expression.variant == "Serve" {
+        let mut result = walk_expression(scope, expression.handler);
+        if expression.port != null {
+            result = merge_results(result, walk_expression(scope, expression.port));
+        }
+        return result;
+    }
+    return empty_walk_result();
+}
+
+// Compute one lambda's capture set and return the lambda's own
+// free-name contribution to the enclosing scope. The lambda's
+// record is appended ahead of any nested-lambda records so the
+// pre-order property holds.
+//
+// Lambda bodies now arrive fully parsed: the expression-side lambda
+// parser delegates to the structured `parse_block` in statements/block.sfn
+// (issue #520), so `body.statements` is populated and we walk it
+// directly — no re-parse of `body.tokens` is needed.
+fn analyze_lambda(outer_scope: LocalBinding[], lambda: Expression) -> CaptureWalkResult {
+    let no_types: string[] = [];
+    return analyze_lambda_typed(outer_scope, lambda, no_types);
+}
+
+// As `analyze_lambda`, but seeds un-annotated parameters with inferred
+// `type_text` (SFN-396). `inferred_param_types` is positional to the lambda's
+// parameters (empty string = no inference for that position); an explicit
+// annotation always wins over an inferred type.
+fn analyze_lambda_typed(outer_scope: LocalBinding[], lambda: Expression, inferred_param_types: string[]) -> CaptureWalkResult {
+    let inner_scope = extend_with_parameters_typed(outer_scope, lambda.parameters, inferred_param_types);
+    let body_result = walk_block(inner_scope, lambda.body);
+
+    let param_names = parameter_names(lambda.parameters);
+    let lambda_free = subtract_names(body_result.free, param_names);
+    let captures = build_captures(outer_scope, lambda_free);
+    let body_line = body_start_line(lambda.body);
+    let body_column = body_start_column(lambda.body);
+
+    let mut records: LambdaCaptureRecord[] = [];
+    records.push(LambdaCaptureRecord {
+        parameter_names: param_names, captures: captures, body_start_line: body_line, body_start_column: body_column
+    });
+    records = append_records(records, body_result.records);
+    return CaptureWalkResult { free: lambda_free, records: records };
+}
+
+fn body_start_line(body: Block) -> int {
+    if body.tokens.length == 0 { return 0; }
+    return body.tokens[0].line;
+}
+
+fn body_start_column(body: Block) -> int {
+    if body.tokens.length == 0 { return 0; }
+    return body.tokens[0].column;
+}
+
+fn extend_with_catch_name(scope: LocalBinding[], catch_name: string?) -> LocalBinding[] {
+    let mut out: LocalBinding[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= scope.length { break; }
+        out.push(scope[i]);
+        i += 1;
+    }
+    if catch_name != null {
+        if catch_name.length > 0 {
+            out.push(LocalBinding {
+                name: catch_name, type_text: "", by_value: false, mutable: false, span: null
+            });
+        }
+    }
+    return out;
+}
+
+fn catch_name_as_list(catch_name: string?) -> string[] {
+    let mut out: string[] = [];
+    if catch_name != null {
+        if catch_name.length > 0 { out.push(catch_name); }
+    }
+    return out;
+}
+
+// ----- Capture construction & scope helpers -----
+fn build_captures(outer_scope: LocalBinding[], free_names: string[]) -> Capture[] {
+    let mut captures: Capture[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= free_names.length { break; }
+        let name = free_names[i];
+        let binding = find_binding(outer_scope, name);
+        if binding != null {
+            let mut capture_by_value = binding.by_value;
+            if binding.mutable { capture_by_value = false; }
+            captures.push(Capture {
+                name: binding.name, type_text: binding.type_text, by_value: capture_by_value, mutable: binding.mutable, span: binding.span
+            });
+        }
+        i += 1;
+    }
+    return captures;
+}
+
+fn find_binding(scope: LocalBinding[], name: string) -> LocalBinding? {
+    let mut found: LocalBinding? = null;
+    let mut i: int = 0;
+    loop {
+        if i >= scope.length { break; }
+        if strings_equal(scope[i].name, name) { found = scope[i]; }
+        i += 1;
+    }
+    return found;
+}
+
+fn binding_from_let(scope: LocalBinding[], stmt: Statement) -> LocalBinding {
+    let mut type_text = type_annotation_text(stmt.type_annotation);
+    // #1610: an un-annotated `let base = 100` carries no `type_annotation`,
+    // so `type_text` is empty and `closure_field_llvm_type` falls back to the
+    // opaque `i8*` env slot — but the captured value is an `i64`, so the
+    // env-store emits `store i8* %v, i8** ...` (invalid IR that fails at
+    // link). Recover the type from a literal initializer so an un-annotated
+    // capture lays out the same `i64`/`i1`/`i8*` field its annotated form
+    // (`let base: int = 100`) already does. Non-literal initializers stay
+    // empty (full type inference is out of scope) and keep the conservative
+    // i8* fallback. `scope` lets the recovery resolve identifier / index
+    // initializers against the bindings visible where the `let` appears
+    // (#1839).
+    if type_text.length == 0 {
+        type_text = infer_let_initializer_type(scope, stmt.initializer);
+    }
+    return LocalBinding {
+        name: stmt.name,
+        type_text: type_text,
+        by_value: is_primitive_type(type_text),
+        mutable: stmt.mutable,
+        span: stmt.span
+    };
+}
+
+// Infer a capture's `type_text` from a literal `let` initializer when no
+// explicit annotation is present (#1610). Mirrors `_number_literal_kind` /
+// `infer_expression_type` in `emit_native_format.sfn`, kept local to avoid
+// a typecheck -> emit module dependency. Only the literal forms are handled
+// (the cases that otherwise mis-lay-out a closure env field); anything else
+// returns the empty string and preserves the prior conservative behaviour.
+fn infer_let_initializer_type(scope: LocalBinding[], initializer: Expression?) -> string {
+    if initializer == null { return ""; }
+    if initializer.variant == "NumberLiteral" {
+        return number_literal_kind(initializer.value);
+    }
+    if initializer.variant == "BooleanLiteral" { return "boolean"; }
+    if initializer.variant == "StringLiteral" { return "string"; }
+    if initializer.variant == "Unary" {
+        // Signed numeric literals parse as `Unary { -, NumberLiteral }`;
+        // the sign does not change the numeric kind.
+        if initializer.operand != null {
+            if initializer.operand.variant == "NumberLiteral" {
+                return number_literal_kind(initializer.operand.value);
+            }
+        }
+    }
+    // #1839: an un-annotated `let nums = [10, 7, 8]` gives `nums` a primitive
+    // array type so a later `nums[i]` capture (below) can resolve its element
+    // type — otherwise an un-annotated array literal bound to a `let` leaves
+    // the index base untyped and the capture falls back to `i8*`.
+    if initializer.variant == "Array" {
+        let arr_type = _capture_array_literal_type(scope, initializer);
+        if arr_type.length > 0 { return arr_type; }
+    }
+    // #1839: an un-annotated `let pivot = arr[0]` captured by a closure (e.g.
+    // functional quicksort's `arr.filter(fn(x) => x < pivot)`) needs the
+    // element type so its env field lays out the same scalar its annotated
+    // form (`let pivot: int = arr[0]`) already does. Without it the field
+    // falls back to `i8*` while the stored value is an `i64`, emitting
+    // `store i8* %v, i8** ...` — invalid IR that fails at link. Resolve the
+    // indexed array's element type from scope, restricted to primitive
+    // elements (aggregate captures already lay out correctly on the existing
+    // path, so the conservative `i8*` fallback still covers them).
+    if initializer.variant == "Index" {
+        let elem = _capture_indexed_element_type(scope, initializer);
+        if elem.length > 0 { return elem; }
+    }
+    // SFN-396: an un-annotated `let colsA = a[0].length` captured by a nested
+    // lambda needs `int` — `.length`/`.len` on an array or string lowers to an
+    // `i64` extractvalue (`core_member_lowering.sfn`), so without this the env
+    // field falls back to `i8*` while the stored value is an `i64` (the same
+    // `store i8* %v, i8** ...` invalid-IR failure #1839 fixed for `arr[i]`).
+    if initializer.variant == "Member" {
+        let len_type = _capture_length_member_type(scope, initializer);
+        if len_type.length > 0 { return len_type; }
+    }
+    // #1839: an un-annotated `let p = q` inherits `q`'s known primitive type
+    // for the same reason — a scalar capture must not fall through to `i8*`.
+    if initializer.variant == "Identifier" {
+        let inherited = _capture_scope_primitive_type(scope, initializer.name);
+        if inherited.length > 0 { return inherited; }
+    }
+    return "";
+}
+
+// Resolve `arr[i]`'s element type when `arr` is an identifier bound to a
+// primitive array (`T[]`) in scope. Returns "" for non-identifier bases,
+// unknown bindings, non-array types, or non-primitive elements — every case
+// the closure-env layout already handles without this hint (#1839).
+fn _capture_indexed_element_type(scope: LocalBinding[], index_expr: Expression) -> string {
+    let base = index_expr.sequence;
+    if base == null { return ""; }
+    if base.variant != "Identifier" { return ""; }
+    let binding = find_binding(scope, base.name);
+    if binding == null { return ""; }
+    return _primitive_array_element_type(binding.type_text);
+}
+
+// Look up a scope binding's `type_text`, returning it only when it names a
+// primitive — the scalar-capture case this hint exists for (#1839).
+fn _capture_scope_primitive_type(scope: LocalBinding[], name: string) -> string {
+    let binding = find_binding(scope, name);
+    if binding == null { return ""; }
+    if is_primitive_type(binding.type_text) { return binding.type_text; }
+    return "";
+}
+
+// Infer a primitive array type (`int[]`) from a non-empty array literal by
+// recovering a single primitive element type shared by EVERY element. Mixed,
+// empty, or non-primitive literals return "" so the conservative `i8*`
+// fallback still applies. Checking all elements (not just the first) mirrors
+// `emit_native_format.sfn::infer_array_element_type` so a heterogeneous
+// literal never yields a `type_text` hint that disagrees with the array's
+// real element layout (#1839).
+fn _capture_array_literal_type(scope: LocalBinding[], array_expr: Expression) -> string {
+    if array_expr.elements.length == 0 { return ""; }
+    let mut candidate: string = "";
+    let mut index: int = 0;
+    loop {
+        if index >= array_expr.elements.length { break; }
+        let elem = infer_let_initializer_type(scope, array_expr.elements[index]);
+        if !is_primitive_type(elem) { return ""; }
+        if candidate.length == 0 { candidate = elem; } else if !strings_equal(candidate, elem) {
+            return "";
+        }
+        index += 1;
+    }
+    return candidate + "[]";
+}
+
+// Map a primitive array annotation (`int[]`) to its element type (`int`).
+// Restricted to the `is_primitive_type` set so the caller only recovers the
+// scalar captures the `i8*` fallback mis-lays-out; anything else returns ""
+// (#1839).
+fn _primitive_array_element_type(type_text: string) -> string {
+    if strings_equal(type_text, "int[]") { return "int"; }
+    if strings_equal(type_text, "float[]") { return "float"; }
+    if strings_equal(type_text, "number[]") { return "number"; }
+    if strings_equal(type_text, "boolean[]") { return "boolean"; }
+    if strings_equal(type_text, "string[]") { return "string"; }
+    return "";
+}
+
+// "int" when `member_expr` is `<array|string>.length` — an array/string
+// `.length` lowers to an `i64` extractvalue (`core_member_lowering.sfn`), so
+// the capture must lay out an `i64` env field, not the `i8*` fallback
+// (SFN-396). Restricted to array/string receivers so a user struct field
+// literally named `length` keeps the conservative fallback rather than being
+// mis-typed as `int`. Only `.length` is an array/string accessor (`.len` on a
+// struct is an ordinary field of arbitrary type, excluded by the receiver
+// gate), so it is not accepted here.
+fn _capture_length_member_type(scope: LocalBinding[], member_expr: Expression) -> string {
+    if !strings_equal(member_expr.member, "length") { return ""; }
+    let receiver_type = _capture_receiver_type_text(scope, member_expr.object);
+    if receiver_type.length == 0 { return ""; }
+    if strings_equal(receiver_type, "string") { return "int"; }
+    if ends_with(receiver_type, "[]") { return "int"; }
+    return "";
+}
+
+// Best-effort declared type text of a receiver expression, for `.length`
+// recovery (SFN-396). Handles the shapes that reach a captured length: an
+// identifier bound in scope (`xs.length`), one index level (`a[0].length`,
+// where the element type is the base type minus a trailing `[]`), and a direct
+// array literal (`[1, 2].length`). Returns "" for anything else.
+fn _capture_receiver_type_text(scope: LocalBinding[], expr: Expression?) -> string {
+    if expr == null { return ""; }
+    if expr.variant == "Identifier" {
+        let binding = find_binding(scope, expr.name);
+        if binding == null { return ""; }
+        return binding.type_text;
+    }
+    if expr.variant == "Index" {
+        let base = expr.sequence;
+        if base == null { return ""; }
+        if base.variant != "Identifier" { return ""; }
+        let binding = find_binding(scope, base.name);
+        if binding == null { return ""; }
+        let base_type = binding.type_text;
+        if ends_with(base_type, "[]") {
+            return substring(base_type, 0, base_type.length - 2);
+        }
+        return "";
+    }
+    if expr.variant == "Array" {
+        return _capture_array_literal_type(scope, expr);
+    }
+    return "";
+}
+
+// `digits` -> `int`, `digits.digits` -> `float`. The lexer emits no
+// scientific / hex / octal forms, so the presence of `.` is sufficient
+// (matches `_number_literal_kind` in `emit_native_format.sfn`).
+fn number_literal_kind(value: string) -> string {
+    let mut i: int = 0;
+    loop {
+        if i >= value.length { break; }
+        if value[i] == "." { return "float"; }
+        i += 1;
+    }
+    return "int";
+}
+
+// SFN-396: infer the `type_text` of an un-annotated array/range HOF callback
+// parameter so a capture of that parameter by a NESTED lambda lays out the real
+// scalar env field instead of the `i8*` fallback. Without it,
+// `cols.map(fn (col) -> int { ks.reduce(0, fn (acc, k) -> int { ...col... }) })`
+// captures `col` (the outer callback's un-annotated param) into the inner
+// lambda with an empty `type_text`; `closure_field_llvm_type` then lays it out
+// as `i8*` while the stored value is the `i64` element, emitting
+// `store i8* %col, i8** ...` — invalid IR rejected at link.
+//
+// Mirrors the emitter's `array_builtin_expected_fn_type` / `receiver_element_type`
+// (`lambda_param_inference.sfn`), kept local to
+// avoid a typecheck -> emit module dependency (as the #1610 literal recovery
+// does). The shipped array/range HOF mapper bodies are `int`-element only, so
+// inference is `int`-gated and agrees with the param type the emitter assigns
+// the lifted callback. Returns one entry per callback parameter position (empty
+// string = no inference); an empty result means "not an applicable HOF call".
+fn _hof_callback_param_types(scope: LocalBinding[], call: Expression) -> string[] {
+    let empty: string[] = [];
+    let callee = call.callee;
+    if callee == null { return empty; }
+    if callee.variant != "Member" { return empty; }
+    if _hof_receiver_int_element(scope, callee.object) != "int" { return empty; }
+    let method = callee.member;
+    if method == "map" {
+        let out: string[] = ["int"];
+        return out;
+    }
+    if method == "filter" {
+        let out: string[] = ["int"];
+        return out;
+    }
+    if method == "reduce" {
+        // `reduce(init, fn(acc, elem) -> acc)` — for an int-element receiver
+        // both callback params are `int` (mirrors `fn(int, int) -> int`).
+        let out: string[] = ["int", "int"];
+        return out;
+    }
+    return empty;
+}
+
+// "int" when `receiver` is an int-element array — an identifier bound to
+// `int[]`, an all-int-literal array literal, or a range (`(a..b)` materializes
+// to `int[]`) — else "". Mirrors the emitter's `receiver_element_type`,
+// restricted to the `int` element the shipped HOF mapper bodies support
+// (SFN-396).
+fn _hof_receiver_int_element(scope: LocalBinding[], receiver: Expression?) -> string {
+    if receiver == null { return ""; }
+    if receiver.variant == "Identifier" {
+        let binding = find_binding(scope, receiver.name);
+        if binding == null { return ""; }
+        if _primitive_array_element_type(binding.type_text) == "int" {
+            return "int";
+        }
+        return "";
+    }
+    if receiver.variant == "Array" {
+        if strings_equal(_capture_array_literal_type(scope, receiver), "int[]") {
+            return "int";
+        }
+        return "";
+    }
+    if receiver.variant == "Range" { return "int"; }
+    return "";
+}
+
+fn extend_with_parameters(scope: LocalBinding[], parameters: Parameter[]) -> LocalBinding[] {
+    let no_types: string[] = [];
+    return extend_with_parameters_typed(scope, parameters, no_types);
+}
+
+// As `extend_with_parameters`, but backfills each un-annotated parameter's
+// `type_text` from `inferred` (positional; empty string = leave empty). An
+// explicit annotation always wins (SFN-396).
+fn extend_with_parameters_typed(scope: LocalBinding[], parameters: Parameter[], inferred: string[]) -> LocalBinding[] {
+    let mut out: LocalBinding[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= scope.length { break; }
+        out.push(scope[i]);
+        i += 1;
+    }
+    let mut j: int = 0;
+    loop {
+        if j >= parameters.length { break; }
+        out.push(_param_binding_with_inferred(parameters[j], inferred, j));
+        j += 1;
+    }
+    return out;
+}
+
+fn _param_binding_with_inferred(p: Parameter, inferred: string[], index: int) -> LocalBinding {
+    let mut type_text = type_annotation_text(p.type_annotation);
+    if type_text.length == 0 {
+        if index < inferred.length {
+            if inferred[index].length > 0 { type_text = inferred[index]; }
+        }
+    }
+    return LocalBinding {
+        name: p.name,
+        type_text: type_text,
+        by_value: is_primitive_type(type_text),
+        mutable: p.mutable,
+        span: p.span
+    };
+}
+
+fn extend_with_for_target(scope: LocalBinding[], target: Expression, iterable: Expression) -> LocalBinding[] {
+    let mut out: LocalBinding[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= scope.length { break; }
+        out.push(scope[i]);
+        i += 1;
+    }
+    let target_name = for_target_name(target);
+    if target_name.length > 0 {
+        // SFN-456: a `for id in ids` iteration variable captured DIRECTLY into
+        // a `spawn`/lambda closure needs its element type, or the closure-env
+        // field falls back to the opaque `i8*` while the captured value is an
+        // `i64` — emitting `store i8* %v, i8** ...` (invalid IR that fails at
+        // link). Recover the element type from the iterable's primitive-array
+        // binding, mirroring the un-annotated `let`/index recovery (#1839).
+        // A non-identifier or non-primitive-array iterable keeps the prior
+        // conservative empty fallback.
+        let type_text = _for_target_element_type(scope, iterable);
+        out.push(LocalBinding {
+            name: target_name, type_text: type_text, by_value: is_primitive_type(type_text), mutable: false, span: null
+        });
+    }
+    return out;
+}
+
+// Resolve a `for … in <iterable>` target's element type when `iterable` is an
+// identifier bound to a primitive array (`T[]`) in scope. Mirrors
+// `_capture_indexed_element_type`: non-identifier bases, unknown bindings,
+// non-array or non-primitive-element types all return "" so the closure-env
+// layout keeps its existing conservative `i8*` behaviour (SFN-456).
+fn _for_target_element_type(scope: LocalBinding[], iterable: Expression) -> string {
+    if iterable.variant != "Identifier" { return ""; }
+    let binding = find_binding(scope, iterable.name);
+    if binding == null { return ""; }
+    return _primitive_array_element_type(binding.type_text);
+}
+
+fn for_target_name(target: Expression) -> string {
+    if target.variant == "Identifier" { return target.name; }
+    return "";
+}
+
+fn append_binding(scope: LocalBinding[], binding: LocalBinding) -> LocalBinding[] {
+    let mut out: LocalBinding[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= scope.length { break; }
+        out.push(scope[i]);
+        i += 1;
+    }
+    out.push(binding);
+    return out;
+}
+
+fn concat_bindings(a: LocalBinding[], b: LocalBinding[]) -> LocalBinding[] {
+    let mut out: LocalBinding[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= a.length { break; }
+        out.push(a[i]);
+        i += 1;
+    }
+    let mut j: int = 0;
+    loop {
+        if j >= b.length { break; }
+        out.push(b[j]);
+        j += 1;
+    }
+    return out;
+}
+
+fn binding_names(bindings: LocalBinding[]) -> string[] {
+    let mut out: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= bindings.length { break; }
+        out.push(bindings[i].name);
+        i += 1;
+    }
+    return out;
+}
+
+fn parameter_names(parameters: Parameter[]) -> string[] {
+    let mut out: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= parameters.length { break; }
+        out.push(parameters[i].name);
+        i += 1;
+    }
+    return out;
+}
+
+fn type_annotation_text(annotation: TypeAnnotation?) -> string {
+    if annotation == null { return ""; }
+    return annotation.text;
+}
+
+// Stage 1 heuristic for `by_value`: types we know are primitive
+// (and therefore safe to copy) emit `by_value: true`; everything
+// else (arrays, struct types, function types, unknowns) emits
+// `by_value: false` so stage A2 will reach for a heap-pointer
+// slot. The list deliberately includes `string` even though it
+// allocates — stage A2 will treat it as a copy-on-capture
+// reference; the unit test pinning the heuristic should be
+// updated alongside this list when stage A2 lands.
+fn is_primitive_type(type_text: string) -> boolean {
+    if strings_equal(type_text, "number") { return true; }
+    if strings_equal(type_text, "boolean") { return true; }
+    if strings_equal(type_text, "int") { return true; }
+    if strings_equal(type_text, "float") { return true; }
+    if strings_equal(type_text, "string") { return true; }
+    return false;
+}
+
+// ----- list / set helpers -----
+fn empty_walk_result() -> CaptureWalkResult {
+    return CaptureWalkResult { free: [], records: [] };
+}
+
+fn merge_results(a: CaptureWalkResult, b: CaptureWalkResult) -> CaptureWalkResult {
+    return CaptureWalkResult {
+        free: union_names(a.free, b.free),
+        records: append_records(a.records, b.records)
+    };
+}
+
+fn union_names(a: string[], b: string[]) -> string[] {
+    let mut out: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= a.length { break; }
+        out.push(a[i]);
+        i += 1;
+    }
+    let mut j: int = 0;
+    loop {
+        if j >= b.length { break; }
+        if !contains_name(out, b[j]) { out.push(b[j]); }
+        j += 1;
+    }
+    return out;
+}
+
+fn subtract_names(names: string[], exclude: string[]) -> string[] {
+    let mut out: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= names.length { break; }
+        if !contains_name(exclude, names[i]) { out.push(names[i]); }
+        i += 1;
+    }
+    return out;
+}
+
+fn contains_name(names: string[], name: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= names.length { break; }
+        if strings_equal(names[i], name) { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+fn append_records(a: LambdaCaptureRecord[], b: LambdaCaptureRecord[]) -> LambdaCaptureRecord[] {
+    let mut out: LambdaCaptureRecord[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= a.length { break; }
+        out.push(a[i]);
+        i += 1;
+    }
+    let mut j: int = 0;
+    loop {
+        if j >= b.length { break; }
+        out.push(b[j]);
+        j += 1;
+    }
+    return out;
+}

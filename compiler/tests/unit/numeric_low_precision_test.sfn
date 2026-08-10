@@ -3,10 +3,9 @@
 // "float" kind (same as `f32`/`f64`), lower to LLVM `half`/`bfloat`, and
 // support explicit `as` conversions to/from `f32`/`f64` plus expected-type
 // literal binding; distinct type-kind enforcement is out of scope.
+import { typecheck_diagnostics } from "sfn/analyzer/typecheck";
+import { Diagnostic } from "sfn/analyzer/typecheck_types";
 import { parse_program } from "sfn/syntax";
-
-import { typecheck_diagnostics } from "../../src/typecheck";
-import { Diagnostic } from "../../src/typecheck_types";
 
 fn _diagnostics(source: string) -> Diagnostic[] ![io] {
     let program = parse_program(source);

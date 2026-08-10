@@ -1,0 +1,167 @@
+// compiler/capsules/analyzer/src/prelude_scan.sfn
+//
+// #812 — pure column-0 declaration-name scanner for runtime source
+// buffers. Split out from `prelude_globals.sfn` so unit tests can
+// exercise the scanner without linking the runtime-root externs
+// (`exe_path` / `resolve_runtime_root`) that the IO loader references —
+// those symbols live in the compiler binary's link line but not a
+// standalone unit-test executable's.
+//
+// The runtime (`runtime/prelude.sfn` plus `runtime/sfn/**`) declares
+// everything at column 0 and uses only `//` line comments, so a leading
+// `fn ` / `let ` / `extern fn ` / `unsafe extern fn ` uniquely marks a
+// top-level declaration.
+import { substring } from "sfn/strings";
+
+// Keep source segmentation with the pure scanner rather than borrowing the
+// driver renderer's presentation helper. Runtime sources may use LF, CRLF, or
+// CR line endings, and a trailing terminator preserves the final empty line.
+fn _ps_split_source_lines(source: string) -> string[] {
+    let mut lines: string[] = [];
+    let mut current: string = "";
+    let mut index: int = 0;
+    loop {
+        if index >= source.length { break; }
+        let next_index = index + 1;
+        let ch = substring(source, index, next_index);
+        if ch == "\r" {
+            lines.push(current);
+            current = "";
+            if next_index < source.length {
+                let after_next = index + 2;
+                if substring(source, next_index, after_next) == "\n" {
+                    index += 2;
+                    continue;
+                }
+            }
+            index += 1;
+            continue;
+        }
+        if ch == "\n" {
+            lines.push(current);
+            current = "";
+            index += 1;
+            continue;
+        }
+        current = current + ch;
+        index += 1;
+    }
+    lines.push(current);
+    return lines;
+}
+
+fn _ps_is_ident_char(ch: string) -> boolean {
+    if ch.length == 0 { return false; }
+    let allowed = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_";
+    let mut i: int = 0;
+    loop {
+        if i >= allowed.length { break; }
+        if substring(allowed, i, i + 1) == ch { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+fn _ps_extract_ident(line: string, start: int) -> string {
+    let mut end = start;
+    loop {
+        if end >= line.length { break; }
+        let ch = substring(line, end, end + 1);
+        if !_ps_is_ident_char(ch) { break; }
+        end += 1;
+    }
+    if end <= start { return ""; }
+    return substring(line, start, end);
+}
+
+// If `line` begins (column 0) with `prefix`, return the identifier that
+// follows it; otherwise "".
+fn _ps_name_after_prefix(line: string, prefix: string) -> string {
+    if line.length < prefix.length { return ""; }
+    if substring(line, 0, prefix.length) != prefix { return ""; }
+    return _ps_extract_ident(line, prefix.length);
+}
+
+// Pure: collect the names of every top-level `fn` / `let` / `extern fn`
+// / `unsafe extern fn` declaration in a runtime source buffer, plus every
+// top-level `struct` / `enum` / `interface` / `type` name.
+// Resolution-only — duplicates and private helpers are harmless (extra
+// names only make MORE names resolve, never fewer), so no de-dup or
+// export filtering is applied.
+//
+// Type names join the same list rather than a parallel one because the
+// caller's tree walk (`_pg_scan_sfn_tree`) cannot be memoized — a
+// module-level array cache makes the seed emit an undefined module-init
+// call (see the NOTE in prelude_globals.sfn) — so a second walk would
+// double an FS scan that already runs on every compile. Merging costs
+// only precision the consumers can absorb: the unknown-type check
+// (E0013, SFN-555) will also accept a prelude *function* name in type
+// position, and the undefined-call check (E0420) a prelude *type* name in
+// call position. Both directions fail open, which is the safe direction
+// for each.
+fn prelude_global_names_from_source(source: string) -> string[] {
+    let mut names: string[] = [];
+    let lines = _ps_split_source_lines(source);
+    let mut i: int = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        i += 1;
+        if line.length < 4 { continue; }
+        let fn_name = _ps_name_after_prefix(line, "fn ");
+        if fn_name.length > 0 {
+            names.push(fn_name);
+            continue;
+        }
+        let extern_name = _ps_name_after_prefix(line, "extern fn ");
+        if extern_name.length > 0 {
+            names.push(extern_name);
+            continue;
+        }
+        let unsafe_extern_name = _ps_name_after_prefix(line, "unsafe extern fn ");
+        if unsafe_extern_name.length > 0 {
+            names.push(unsafe_extern_name);
+            continue;
+        }
+        let extern_var_name = _ps_name_after_prefix(line, "extern var ");
+        if extern_var_name.length > 0 {
+            names.push(extern_var_name);
+            continue;
+        }
+        // Type declarations. `_ps_extract_ident` stops at the first
+        // non-identifier character, so a generic head (`enum Result<T, E> {`)
+        // yields the bare name.
+        let struct_name = _ps_name_after_prefix(line, "struct ");
+        if struct_name.length > 0 {
+            names.push(struct_name);
+            continue;
+        }
+        let enum_name = _ps_name_after_prefix(line, "enum ");
+        if enum_name.length > 0 {
+            names.push(enum_name);
+            continue;
+        }
+        let interface_name = _ps_name_after_prefix(line, "interface ");
+        if interface_name.length > 0 {
+            names.push(interface_name);
+            continue;
+        }
+        let alias_name = _ps_name_after_prefix(line, "type ");
+        if alias_name.length > 0 {
+            names.push(alias_name);
+            continue;
+        }
+        if substring(line, 0, 4) == "let " {
+            let mut start = 4;
+            // `let mut <name>` — skip the qualifier so the bound name is
+            // captured, not the `mut` keyword.
+            if line.length >= 8 {
+                if substring(line, 4, 8) == "mut " { start = 8; }
+            }
+            let name = _ps_extract_ident(line, start);
+            if name.length > 0 { names.push(name); }
+            continue;
+        }
+    }
+    return names;
+}

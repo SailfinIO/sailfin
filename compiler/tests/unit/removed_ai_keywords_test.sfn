@@ -10,7 +10,7 @@
 // runner cannot link the string_utils → runtime chain.
 //
 // The helpers below mirror the logic in
-// compiler/src/typecheck_types/declaration_and_statement_checks.sfn::detect_removed_ai_keyword and
+// compiler/capsules/analyzer/src/typecheck_types/declaration_and_statement_checks.sfn::detect_removed_ai_keyword and
 // ::make_removed_keyword_diagnostic — keep
 // them in sync when that file changes.
 // -------------------------------------------------------------------

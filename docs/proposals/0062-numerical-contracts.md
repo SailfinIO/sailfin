@@ -129,7 +129,7 @@ Three deliberate choices:
   narrows it; it may not widen it (`E1104`).
 
 `@contract` is a compiler-recognized builtin decorator name, registered
-alongside the existing built-ins in `compiler/src/decorator_resolver.sfn:83-90`.
+alongside the existing built-ins in `compiler/capsules/analyzer/src/decorator_resolver.sfn:83-90`.
 It contributes **no effect** (§4).
 
 ### 3.3 Contract fields
@@ -483,7 +483,7 @@ system load-bearing for a numerical claim.** `determinism: bitwise` is
 discharged by proving the function's transitive effect row excludes `clock`,
 `rand`, `net`, `io`, `gpu`, and `model`, and that it contains no concurrency
 primitive (SFEP-0049 leaves: `spawn`, `parallel`, channel send/receive). The
-existing `![pure]` marker (`compiler/src/effect_taxonomy.sfn:57`) is the
+existing `![pure]` marker (`compiler/capsules/analyzer/src/effect_taxonomy.sfn:57`) is the
 strongest form of that proof and discharges it immediately.
 
 That composition is Pillar 1 × Pillar 2, and it is the one move in this design
@@ -719,7 +719,7 @@ accumulator cases. No GPU is required at any phase's gate.
 - `compiler/src/typecheck_types.sfn:1096-1139`, `compiler/capsules/ir/src/tensor_ir.sfn:8-20`,
   `compiler/src/capsule_artifact.sfn:246`,
   `compiler/capsules/syntax/src/parser/declarations/syntax.sfn`,
-  `compiler/src/effect_taxonomy.sfn:57`, `docs/status.md` (tensor IR /
+  `compiler/capsules/analyzer/src/effect_taxonomy.sfn:57`, `docs/status.md` (tensor IR /
   low-precision rows) — the in-tree reality this design is measured against.
 - Higham, *Accuracy and Stability of Numerical Algorithms* (2nd ed.), §3.1 —
   the `gamma(n)` dot-product backward-error bound `formula_id`

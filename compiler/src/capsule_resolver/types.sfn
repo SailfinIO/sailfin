@@ -6,9 +6,10 @@
 // `ProjectCapsuleResult` and `CompileCapsuleResult` both embed
 // `module_events: ModuleCacheEvent[]`, so this module owns `ModuleCacheEvent`
 // too to avoid a cycle with the compile cluster.
+import { Diagnostic } from "sfn/analyzer/typecheck_types";
+
 import { CacheStats } from "../build_cache";
 import { RuntimeCapsuleArtifacts } from "../runtime_capsule_resolver";
-import { Diagnostic } from "../typecheck_types";
 
 struct CapsuleSource {
     spec: string;  // e.g. "sfn/cli" — the dep key from capsule.toml

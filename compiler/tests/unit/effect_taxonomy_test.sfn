@@ -1,9 +1,9 @@
-// Unit tests for compiler/src/effect_taxonomy.sfn's SFEP-0017 D1/D2
+// Unit tests for compiler/capsules/analyzer/src/effect_taxonomy.sfn's SFEP-0017 D1/D2
 // additions: dotted sub-effect recognition (`effect_root`,
 // `is_recognized_effect`) and lattice subsumption (`effect_subsumes`).
 // See docs/proposals/0017-hierarchical-effects.md §3.3 (subsumption
 // truth table) and §4 (manifest examples).
-import { effect_root, effect_subsumes, is_recognized_effect } from "../../src/effect_taxonomy";
+import { effect_root, effect_subsumes, is_recognized_effect } from "sfn/analyzer/effect_taxonomy";
 
 // -------------------------------------------------------------------
 // effect_root: the segment before the first `.`

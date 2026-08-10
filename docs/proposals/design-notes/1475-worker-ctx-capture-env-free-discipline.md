@@ -455,7 +455,7 @@ correctness, so coverage exists even where ASAN can't start.
   `owned_env=1` on the spawn-target closure marker (inc. 2, Option A).
 
 **Ownership (already wired — tests only):**
-- `compiler/src/ownership_checker.sfn` — only if increment 4 surfaces a real
+- `compiler/capsules/analyzer/src/ownership_checker.sfn` — only if increment 4 surfaces a real
   capture-set gap in `_consume_spawn_captures`.
 
 **Tests / docs:**

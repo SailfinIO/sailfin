@@ -136,10 +136,10 @@ struct Mutex {
 Three properties fall out of this shape, and all three are load-bearing.
 
 **Sharing already works, with zero diagnostics.** `Mutex` is an ordinary
-struct, so `is_owned_type` (`compiler/src/typecheck_types/expr_type_rules.sfn:232-239`)
+struct, so `is_owned_type` (`compiler/capsules/analyzer/src/typecheck_types/expr_type_rules.sfn:232-239`)
 is false for it — it matches only `OwnedBuf`, `OwnedBuf<`, `Affine<`, and
 `Linear<`. `_consume_identifier` therefore returns immediately at its
-`if !binding.is_owned` gate (`compiler/src/ownership_checker.sfn:373`), and two
+`if !binding.is_owned` gate (`compiler/capsules/analyzer/src/ownership_checker.sfn:373`), and two
 `spawn` closures capturing the same `Mutex` compile with no move recorded. This
 proposal introduces **no carrier type** and requests **no ownership-checker
 exemption**; SFEP-0063 §3.1 settled that there is no sharing problem to solve.
@@ -622,7 +622,7 @@ the capsule's eventual first diagnostic (§4).
 > enforcement, not documentation, is required before Phase 2 reclamation
 > ships.** Channels avoid exactly the hang-turned-use-after-free this
 > paragraph describes via `E0838`
-> (`compiler/src/ownership_checker.sfn:515-538`), which raises "channel handle
+> (`compiler/capsules/analyzer/src/ownership_checker.sfn:515-538`), which raises "channel handle
 > `<name>` escapes its `routine` nursery" when a channel binding (or an alias
 > of it) is assigned to a destination outside the creating nursery. But
 > `_make_nursery_finding`'s `E0838` path is keyed on a compiler-known
@@ -1009,8 +1009,8 @@ changes — but is run once per phase to confirm that claim rather than assume i
 - `compiler/src/llvm/atomics.sfn:1-30,49-62` — the six atomic builtins, their
   `seq_cst` lowering, the old-value return contract, `E0806`, and the
   `is_atomic_builtin` short-circuit that decides §3.5.
-- `compiler/src/ownership_checker.sfn:373` and
-  `compiler/src/typecheck_types/expr_type_rules.sfn:232-239` — the `is_owned`
+- `compiler/capsules/analyzer/src/ownership_checker.sfn:373` and
+  `compiler/capsules/analyzer/src/typecheck_types/expr_type_rules.sfn:232-239` — the `is_owned`
   gate and the four owned/affine spellings; the reason §3.1 needs no carrier.
 - `runtime/sfn/concurrency/channel.sfn` — the in-tree existence proof: a
   heap-allocated `pthread_mutex_t` + two `pthread_cond_t` object shared across

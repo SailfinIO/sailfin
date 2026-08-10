@@ -11,11 +11,10 @@
 // inference lands (the rule `check_generic_instantiation` is already
 // call-ready). Declaration-time bound validation (E0821/E0822) is the
 // #1868 sibling, covered in `generic_bound_declaration_test.sfn`.
+import { typecheck_diagnostics } from "sfn/analyzer/typecheck";
+import { Diagnostic } from "sfn/analyzer/typecheck_types";
 import { find } from "sfn/strings";
 import { parse_program } from "sfn/syntax";
-
-import { typecheck_diagnostics } from "../../src/typecheck";
-import { Diagnostic } from "../../src/typecheck_types";
 
 fn _codes_for(source: string, code: string) -> int ![io] {
     let program = parse_program(source);

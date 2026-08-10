@@ -15,6 +15,7 @@ sfn = "0.9.3"
 [dependencies]
 "sfn/syntax" = "*"
 "sfn/ir" = "*"
+"sfn/analyzer" = "*"
 # Stage D PR2: declare the C runtime as an explicit dependency so
 # `sfn build -p compiler` finds it through the workspace's
 # `kind = "runtime"` capsule discovery

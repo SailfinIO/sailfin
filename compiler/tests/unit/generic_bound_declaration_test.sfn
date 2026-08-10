@@ -5,10 +5,9 @@
 // prelude/imported interfaces not visible in a single-file check).
 // Instantiation-site satisfaction (E0820) and monomorphization are separate
 // slices, not covered here.
+import { typecheck_diagnostics } from "sfn/analyzer/typecheck";
+import { Diagnostic } from "sfn/analyzer/typecheck_types";
 import { parse_program } from "sfn/syntax";
-
-import { typecheck_diagnostics } from "../../src/typecheck";
-import { Diagnostic } from "../../src/typecheck_types";
 
 fn _codes_for(source: string, code: string) -> int ![io] {
     let program = parse_program(source);

@@ -1,0 +1,367 @@
+// compiler/capsules/analyzer/src/typecheck/function_scopes.sfn
+//
+// Function and block scope construction: parameter seeding, nested-fn
+// hoisting and capture rules, and `main` signature validation.
+import { Block, FunctionSignature, Statement } from "sfn/syntax";
+
+import { Diagnostic } from "../typecheck_types";
+import {
+    classify_declared_primitive,
+    declared_array_marker,
+    type_parameter_names
+} from "../typecheck_types/annotation_shape_checks";
+import {
+    make_main_signature_param_count_diagnostic,
+    make_main_signature_param_type_diagnostic
+} from "../typecheck_types/declaration_and_statement_checks";
+import {
+    ScopeResult,
+    SymbolEntry,
+    clone_bindings,
+    has_symbol,
+    is_function_kind,
+    register_local_function_symbol,
+    register_local_symbol
+} from "../typecheck_types/symbol_table_and_raw_exprs";
+import { check_object_literal_target } from "../typecheck_types/value_and_object_checks";
+import {
+    TypeckCtx,
+    ctx_enter_body,
+    ctx_with_bindings,
+    ctx_with_type_params
+} from "./context";
+import { walk_expression } from "./expression_walk";
+import { check_expected_primitive_type } from "./primitive_rules";
+import { check_statement } from "./statement_checks";
+import { _decl_type_params, _declared_struct_annotation } from "./symbols";
+
+fn check_function_body(signature: FunctionSignature, body: Block, ctx: TypeckCtx) -> Diagnostic[] {
+    let generic_ctx = ctx_with_type_params(ctx, type_parameter_names(signature.type_parameters));
+    let parameter_scope = seed_parameter_scope(signature, generic_ctx);
+    let body_ctx = ctx_enter_body(generic_ctx, parameter_scope.bindings, signature.return_type);
+    let body_diagnostics = check_block(body, body_ctx);
+    let mut _result = parameter_scope.diagnostics;
+    let mut _ci: int = 0;
+    loop {
+        if _ci >= body_diagnostics.length { break; }
+        _result.push(body_diagnostics[_ci]);
+        _ci += 1;
+    }
+    return _result;
+}
+
+// `top_level` (#812) seeds the body scope with the resolution-only set
+// of top-level declarations + import-specifier names. Parameters are
+// registered starting at `param_scope_start` (past the seeded entries)
+// so a parameter may legally shadow a top-level name without tripping
+// E0001, while parameter-vs-parameter duplicates are still caught.
+fn seed_parameter_scope(signature: FunctionSignature, ctx: TypeckCtx) -> ScopeResult {
+    let mut bindings: SymbolEntry[] = clone_bindings(ctx.top_level);
+    let param_scope_start = bindings.length;
+    let mut diagnostics: Diagnostic[] = [];
+
+    for parameter in signature.parameters {
+        let mut param_prim: string = "";
+        let mut param_array: string = "";
+        if parameter.type_annotation != null {
+            param_prim = classify_declared_primitive(parameter.type_annotation.text);
+            param_array = declared_array_marker(parameter.type_annotation.text);
+        }
+        let declared_struct = _declared_struct_annotation(parameter.type_annotation, ctx.top_level, ctx.type_params);
+        let registration = register_local_symbol(bindings, parameter.name, "parameter", parameter.span, param_scope_start, false, false, param_array, param_prim, declared_struct);
+        bindings = registration.bindings;
+        let mut _ci: int = 0;
+        loop {
+            if _ci >= registration.diagnostics.length { break; }
+            diagnostics.push(registration.diagnostics[_ci]);
+            _ci += 1;
+        }
+        let default_diags = check_object_literal_target(parameter.default_value, parameter.type_annotation, parameter.name, parameter.span, ctx.top_level);
+        let mut _di: int = 0;
+        loop {
+            if _di >= default_diags.length { break; }
+            diagnostics.push(default_diags[_di]);
+            _di += 1;
+        }
+        // Defaults lower at the call site, outside the callee's parameter
+        // frame. Validate them against module scope, never against the
+        // parameter currently being declared or an earlier parameter.
+        let default_ctx = ctx_with_bindings(ctx, ctx.top_level, 0);
+        let value_diags = walk_expression(parameter.default_value, default_ctx);
+        let mut _vi: int = 0;
+        loop {
+            if _vi >= value_diags.length { break; }
+            diagnostics.push(value_diags[_vi]);
+            _vi += 1;
+        }
+        let primitive_diags = check_expected_primitive_type(parameter.default_value, parameter.type_annotation, ctx.top_level, "default for `"
+            + parameter.name
+            + "`", parameter.name, parameter.span);
+        let mut _pi: int = 0;
+        loop {
+            if _pi >= primitive_diags.length { break; }
+            diagnostics.push(primitive_diags[_pi]);
+            _pi += 1;
+        }
+    }
+
+    return ScopeResult { bindings: bindings, diagnostics: diagnostics };
+}
+
+// Block-hoist nested `fn` names (SFEP-0042): register every statement-position
+// `FunctionDeclaration` in a block into the block scope *before* any statement
+// body is walked, so siblings mutually recurse and a nested fn is visible in
+// its own body (self-recursion), regardless of declaration order — the item
+// rule, in deliberate contrast to the sequential `let` registration. Two
+// same-name nested fns in one block collide here (`E0001`). Called by both the
+// checking (`check_block`) and the resolution (`walk_block_expressions`) block
+// walkers so the hoist is identical for plain-function and lambda bodies.
+fn _hoist_nested_fn_names(statements: Statement[], bindings: SymbolEntry[], scope_start: int) -> ScopeResult {
+    let mut scope = bindings;
+    let mut diagnostics: Diagnostic[] = [];
+    let mut _i: int = 0;
+    loop {
+        if _i >= statements.length { break; }
+        let statement = statements[_i];
+        if statement.variant == "FunctionDeclaration" {
+            let registration = register_local_function_symbol(scope, statement.signature, "function", scope_start);
+            scope = registration.bindings;
+            let mut _ci: int = 0;
+            loop {
+                if _ci >= registration.diagnostics.length { break; }
+                diagnostics.push(registration.diagnostics[_ci]);
+                _ci += 1;
+            }
+        }
+        _i += 1;
+    }
+    return ScopeResult { bindings: scope, diagnostics: diagnostics };
+}
+
+// Build the resolution scope for a nested / local `fn` body (SFEP-0042). A
+// nested fn is a non-capturing static item, so its body resolves against only:
+// module-level items (`ctx.top_level`), sibling / enclosing nested `fn` names
+// (the block-hoisted function-kind entries in the enclosing scope), and its
+// own parameters. Enclosing data locals/parameters are appended tagged
+// `"outer_local"` (lowest priority) so a reference that resolves to one is
+// reported as an E0421 capture rather than silently accepted. `find_symbol`
+// returns the highest-index match, so priority is params > siblings >
+// top_level > outer_local (a same-named parameter legally shadows a capture).
+fn _build_nested_fn_scope(signature: FunctionSignature, ctx: TypeckCtx) -> ScopeResult {
+    let mut scope: SymbolEntry[] = [];
+    // (1) enclosing data locals/params — forbidden, tagged lowest priority.
+    let mut _oi: int = 0;
+    loop {
+        if _oi >= ctx.bindings.length { break; }
+        let entry = ctx.bindings[_oi];
+        if !has_symbol(ctx.top_level, entry.name) {
+            if !is_function_kind(entry.kind) {
+                scope.push(SymbolEntry {
+                    name: entry.name, kind: "outer_local", span: entry.span, is_generic: false, is_c_abi: false, element_kind: "", declared_prim: "", declared_struct: ""
+                });
+            }
+        }
+        _oi += 1;
+    }
+    // (2) module-level items.
+    let mut _ti: int = 0;
+    loop {
+        if _ti >= ctx.top_level.length { break; }
+        scope.push(ctx.top_level[_ti]);
+        _ti += 1;
+    }
+    // (3) sibling / enclosing nested fn names (function-kind). Added AFTER the
+    // module-level items (higher index) so a nested `fn` that shares a name with
+    // a top-level function shadows it — `find_symbol` returns the highest-index
+    // match. This keeps typecheck resolution consistent with the emit-side
+    // rename (which also rewrites the call to the lifted nested symbol) and
+    // preserves self/sibling recursion when a nested fn shadows a module name.
+    let mut _si: int = 0;
+    loop {
+        if _si >= ctx.bindings.length { break; }
+        let entry = ctx.bindings[_si];
+        if is_function_kind(entry.kind) { scope.push(entry); }
+        _si += 1;
+    }
+    // (4) own parameters — highest priority; may shadow any of the above.
+    let param_scope_start = scope.length;
+    let default_bindings = clone_bindings(scope);
+    let mut diagnostics: Diagnostic[] = [];
+    let param_type_params = _decl_type_params(ctx, signature.type_parameters);
+    for parameter in signature.parameters {
+        let mut nparam_prim: string = "";
+        let mut nparam_array: string = "";
+        if parameter.type_annotation != null {
+            nparam_prim = classify_declared_primitive(parameter.type_annotation.text);
+            nparam_array = declared_array_marker(parameter.type_annotation.text);
+        }
+        let declared_struct = _declared_struct_annotation(parameter.type_annotation, scope, param_type_params);
+        let registration = register_local_symbol(scope, parameter.name, "parameter", parameter.span, param_scope_start, false, false, nparam_array, nparam_prim, declared_struct);
+        scope = registration.bindings;
+        let mut _ci: int = 0;
+        loop {
+            if _ci >= registration.diagnostics.length { break; }
+            diagnostics.push(registration.diagnostics[_ci]);
+            _ci += 1;
+        }
+        // A nested function is non-capturing, and defaults lower before its
+        // parameter frame exists. Keep module/sibling resolution and E0421
+        // outer-local sentinels, but exclude every own parameter.
+        let default_ctx = ctx_with_bindings(ctx, default_bindings, param_scope_start);
+        diagnostics = diagnostics.concat(walk_expression(parameter.default_value, default_ctx));
+        diagnostics = diagnostics.concat(check_expected_primitive_type(parameter.default_value, parameter.type_annotation, default_bindings, "default for `"
+            + parameter.name
+            + "`", parameter.name, parameter.span));
+        diagnostics = diagnostics.concat(check_object_literal_target(parameter.default_value, parameter.type_annotation, parameter.name, parameter.span, default_bindings));
+    }
+    return ScopeResult { bindings: scope, diagnostics: diagnostics };
+}
+
+// Check a nested / local `fn` body under its non-capturing scope (SFEP-0042).
+// The name is already block-hoisted by the enclosing block walk, so this only
+// re-scopes the body so a capture surfaces as E0421 (via `walk_expression`).
+fn check_nested_function_body(signature: FunctionSignature, body: Block, ctx: TypeckCtx) -> Diagnostic[] {
+    let scoped = _build_nested_fn_scope(signature, ctx);
+    let generic_ctx = ctx_with_type_params(ctx, type_parameter_names(signature.type_parameters));
+    let body_ctx = ctx_enter_body(generic_ctx, scoped.bindings, signature.return_type);
+    let body_diagnostics = check_block(body, body_ctx);
+    let mut _result = scoped.diagnostics;
+    let mut _ci: int = 0;
+    loop {
+        if _ci >= body_diagnostics.length { break; }
+        _result.push(body_diagnostics[_ci]);
+        _ci += 1;
+    }
+    return _result;
+}
+
+fn check_block(block: Block, ctx: TypeckCtx) -> Diagnostic[] {
+    let mut bindings = clone_bindings(ctx.bindings);
+    let scope_start = bindings.length;
+    let mut diagnostics: Diagnostic[] = [];
+
+    // Block-hoist nested `fn` names before walking any body (SFEP-0042), so a
+    // sibling declared later and a nested fn's own name resolve. The per-
+    // statement `FunctionDeclaration` arm below does not re-register (it sees
+    // `in_function_body`), so this is the sole registrar inside a body.
+    let hoisted = _hoist_nested_fn_names(block.statements, bindings, scope_start);
+    bindings = hoisted.bindings;
+    let mut _hi: int = 0;
+    loop {
+        if _hi >= hoisted.diagnostics.length { break; }
+        diagnostics.push(hoisted.diagnostics[_hi]);
+        _hi += 1;
+    }
+
+    for statement in block.statements {
+        let result = check_statement(statement, ctx_with_bindings(ctx, bindings, scope_start));
+        bindings = result.bindings;
+        let mut _ci: int = 0;
+        loop {
+            if _ci >= result.diagnostics.length { break; }
+            diagnostics.push(result.diagnostics[_ci]);
+            _ci += 1;
+        }
+    }
+
+    return diagnostics;
+}
+
+// `fn main` is the program entry point: the lowering pass at
+// `compiler/src/llvm/lowering/emission.sfn:319` already detects
+// `fn_name == "main"` and emits a C-compatible `main(argc, argv)`
+// wrapper. This validator pins the signature shape the wrapper expects
+// so users get a Sailfin diagnostic — not an `lld` link error — when
+// they declare an entry point with the wrong parameter shape.
+//
+// Accepted signatures:
+//
+//   - `fn main()` — wrapper-only, argv is discarded
+//   - `fn main(argv: string[])` — argv is forwarded as a Sailfin slice
+//
+// Trailing return type and effect set are intentionally not validated
+// here. Existing examples and tests use a mix (`-> number`, `-> void`,  // alias-coverage: doc string references legacy `-> number` as accepted main-signature return type (see typecheck_main_signature_test.sfn)
+// no return type, `![io]`, `![net]`, `![unsafe, io]`, …) and the
+// effect-checker already gates body operations against the declared
+// set. Restricting the return type or the effect taxonomy here would
+// break working code without a corresponding lowering benefit until the
+// M5.3 argv-parsing prologue lands.
+//
+// Caller-side duplicate detection (two top-level `fn main`s in the
+// same program) is already covered by `register_top_level_symbol`,
+// which routes through `register_symbol` and emits the `E0001`
+// duplicate-symbol diagnostic. Cross-module duplicate detection waits
+// for the import loader to surface non-interface symbols (no test in
+// the queue exercises that yet).
+fn _validate_main_signature(signature: FunctionSignature) -> Diagnostic[] {
+    if signature.name != "main" { return []; }
+    let mut diagnostics: Diagnostic[] = [];
+
+    let parameter_count = signature.parameters.length;
+    if parameter_count > 1 {
+        // Caret at the first extra parameter so the user can see exactly
+        // which slot to delete. The wrapper passes argv as the sole
+        // forwarded argument; everything beyond slot 0 is silently
+        // discarded today and will mismatch at link time post-M5.3.
+        let extra = signature.parameters[1];
+        diagnostics.push(make_main_signature_param_count_diagnostic(parameter_count, extra.name, extra.span));
+    }
+
+    if parameter_count >= 1 {
+        let argv = signature.parameters[0];
+        let mut text: string = "";
+        if argv.type_annotation != null {
+            text = _trim_main_type_text(argv.type_annotation.text);
+        }
+        if text != "string[]" {
+            diagnostics.push(make_main_signature_param_type_diagnostic(argv.name, text, argv.span));
+        }
+    }
+
+    return diagnostics;
+}
+
+// Trim leading/trailing ASCII whitespace from a parameter-type
+// annotation. The parser already calls `trim_text` on captured type
+// tokens, but tests construct `TypeAnnotation { text: ... }` literals
+// directly and synthesized routines (parser-recovery, fixtures) can
+// land non-trimmed strings here. Keep the trim local so this module
+// doesn't need a `string_utils` round-trip — `trim_text` is module-
+// private across the compiler today.
+fn _trim_main_type_text(text: string) -> string {
+    let mut start: int = 0;
+    let mut end = text.length;
+    loop {
+        if start >= end { break; }
+        let ch = text[start];
+        let mut is_space: boolean = false;
+        if ch == " " { is_space = true; }
+        if ch == "\t" { is_space = true; }
+        if ch == "\n" { is_space = true; }
+        if ch == "\r" { is_space = true; }
+        if !is_space { break; }
+        start += 1;
+    }
+    loop {
+        if end <= start { break; }
+        let ch = text[end - 1];
+        let mut is_space: boolean = false;
+        if ch == " " { is_space = true; }
+        if ch == "\t" { is_space = true; }
+        if ch == "\n" { is_space = true; }
+        if ch == "\r" { is_space = true; }
+        if !is_space { break; }
+        end -= 1;
+    }
+    if start == 0 {
+        if end == text.length { return text; }
+    }
+    let mut result: string = "";
+    let mut i = start;
+    loop {
+        if i >= end { break; }
+        result = result + text[i];
+        i += 1;
+    }
+    return result;
+}

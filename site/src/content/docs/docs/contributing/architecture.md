@@ -29,8 +29,8 @@ Source (.sfn)
 | `compiler/capsules/syntax/src/lexer.sfn` | Tokenizer |
 | `compiler/capsules/syntax/src/parser/mod.sfn` | Parser → AST |
 | `compiler/capsules/syntax/src/ast.sfn` | AST node definitions |
-| `compiler/src/typecheck/` | Type checking, interface conformance |
-| `compiler/src/effect_checker/` | Effect validation, scope tracking, and capability checks |
+| `compiler/capsules/analyzer/src/typecheck/` | Type checking, interface conformance |
+| `compiler/capsules/analyzer/src/effect_checker/` | Effect validation, scope tracking, and capability checks |
 | `compiler/src/emit_native.sfn` | Emit `.sfn-asm` IR |
 | `compiler/capsules/ir/src/native_ir.sfn` | IR representation |
 | `compiler/src/llvm/lowering/entrypoints.sfn` | LLVM IR generation |

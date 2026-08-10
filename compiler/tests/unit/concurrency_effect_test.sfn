@@ -12,6 +12,8 @@
 // Member-callee calls (`chan.send(v)` / `chan.receive()`) — there are
 // no dedicated AST nodes for them; the checker detects them by
 // inspecting the callee member name.
+import { validate_effects } from "sfn/analyzer/effect_checker";
+import { EffectViolation } from "sfn/analyzer/effect_checker/types";
 import {
     Block,
     Decorator,
@@ -22,9 +24,6 @@ import {
     Statement,
     TypeAnnotation
 } from "sfn/syntax";
-
-import { validate_effects } from "../../src/effect_checker";
-import { EffectViolation } from "../../src/effect_checker/types";
 
 // -------------------------------------------------------------------
 // Builder helpers

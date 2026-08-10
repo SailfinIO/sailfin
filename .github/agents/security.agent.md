@@ -26,7 +26,7 @@ Sailfin's security is built on three pillars:
 
 ### 1. Effect System
 Functions must declare their capabilities. A function without `![net]` must not be able to make network calls. Verify:
-- Effect checker (`compiler/src/effect_checker.sfn`) correctly propagates effects through call chains
+- Effect checker (`compiler/capsules/analyzer/src/effect_checker/`) correctly propagates effects through call chains
 - Nested blocks, lambdas, and `routine` scopes are all checked
 - No code path allows effectful operations without the corresponding annotation
 
@@ -56,7 +56,7 @@ Move-by-default semantics prevent use-after-free and data races. Verify:
 - Stack allocations must be bounded
 - No implicit casts that widen permissions
 
-### Effect Checker (`compiler/src/effect_checker.sfn`)
+### Effect Checker (`compiler/capsules/analyzer/src/effect_checker/`)
 - Complete coverage of effectful operations
 - No bypass through indirect calls or type erasure
 - Diagnostics include source spans (don't silently pass)

@@ -1,7 +1,8 @@
 // compiler/src/llvm/lowering/lowering_core/diagnostics.sfn
 //
 // Fail-closed lowering diagnostic gate and rendering.
-import { Diag } from "../../../diagnostic";
+import { Diag } from "sfn/analyzer/diagnostic";
+
 import { index_of, render_lowering_error_diag } from "../../utils";
 
 // Returns true if any diagnostic in the list carries the `[fatal]`

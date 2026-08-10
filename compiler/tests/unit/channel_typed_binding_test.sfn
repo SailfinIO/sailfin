@@ -10,10 +10,9 @@
 // dependent sends (identifier / lambda arguments) stay silent — the checker has
 // no expression-type inferencer (#829), so the send check is deliberately
 // conservative to avoid false positives.
+import { typecheck_diagnostics } from "sfn/analyzer/typecheck";
+import { channel_element_kind } from "sfn/analyzer/typecheck_types/expr_type_rules";
 import { parse_program } from "sfn/syntax";
-
-import { typecheck_diagnostics } from "../../src/typecheck";
-import { channel_element_kind } from "../../src/typecheck_types/expr_type_rules";
 
 // Collapse the not-a-channel case so the assert sites stay free of optional
 // narrowing.

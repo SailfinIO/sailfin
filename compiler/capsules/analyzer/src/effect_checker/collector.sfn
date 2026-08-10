@@ -1,0 +1,633 @@
+// compiler/capsules/analyzer/src/effect_checker/collector.sfn
+//
+// AST traversal that collects effect requirements from statements and expressions.
+import { intrinsic_effects_for_callee_target } from "sfn/ir";
+import {
+    Block,
+    ElseBranch,
+    Expression,
+    MatchCase,
+    Statement
+} from "sfn/syntax";
+import { Token } from "sfn/syntax";
+
+import {
+    ImportSymbolTable,
+    ImportedFunctionSignature,
+    append_local_function,
+    lookup_imported_function
+} from "../effect_imports";
+import { is_universally_allowed_effect } from "../effect_taxonomy";
+import {
+    _copy_effect_table,
+    _hoist_block_local_fns,
+    _suppress_shadowing_params
+} from "./scope";
+import { EffectRequirement } from "./types";
+import { _token_from_span, append_requirement, merge_requirements } from "./utils";
+
+fn collect_effects_from_block(block: Block, imports: ImportSymbolTable) -> EffectRequirement[] {
+    let mut scoped = _hoist_block_local_fns(imports, block);
+    let mut shadow_copied: boolean = false;
+    let mut required: EffectRequirement[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= block.statements.length { break; }
+        let statement = block.statements[index];
+        required = merge_requirements(required, collect_effects_from_statement(statement, scoped));
+        // Value-binding shadow (SFEP-0042 §3.4 gap (b), #1950): once a `let`
+        // binds a name that currently resolves to an in-scope `fn`, a call to
+        // that name goes to the binding, not the fn — so suppress the fn's
+        // effect row for the REST of this block. Position-sensitive by design:
+        // a call before the `let` still sees the (block-hoisted) fn. The value's
+        // own effects are a first-class-fn-value concern (#1609), not modeled.
+        // Copy-on-write so a table shared with an enclosing scope is never
+        // mutated (`_hoist_block_local_fns` returns the shared table unchanged
+        // when the block declares no direct fn).
+        if statement.variant == "VariableDeclaration" {
+            if lookup_imported_function(scoped, statement.name) != null {
+                if !shadow_copied {
+                    scoped = _copy_effect_table(scoped);
+                    shadow_copied = true;
+                }
+                scoped = append_local_function(scoped, statement.name, []);
+            }
+        }
+        index += 1;
+    }
+    return required;
+}
+
+fn collect_effects_from_optional_block(block: Block?, imports: ImportSymbolTable) -> EffectRequirement[] {
+    if block == null { return []; }
+    return collect_effects_from_block(block, imports);
+}
+
+fn collect_effects_from_optional_statement(statement: Statement?, imports: ImportSymbolTable) -> EffectRequirement[] {
+    if statement == null { return []; }
+    return collect_effects_from_statement(statement, imports);
+}
+
+fn collect_effects_from_statement(statement: Statement, imports: ImportSymbolTable) -> EffectRequirement[] {
+    if statement.variant == "WithStatement" {
+        let mut required = collect_effects_from_block(statement.body, imports);
+        let mut clause_index: int = 0;
+        loop {
+            if clause_index >= statement.clauses.length { break; }
+            let clause = statement.clauses[clause_index];
+            required = merge_requirements(required, collect_effects_from_expression(clause.expression, imports));
+            clause_index += 1;
+        }
+        return required;
+    }
+    if statement.variant == "ForStatement" {
+        let mut required = collect_effects_from_block(statement.body, imports);
+        required = merge_requirements(required, collect_effects_from_expression(statement.clause.target, imports));
+        required = merge_requirements(required, collect_effects_from_expression(statement.clause.iterable, imports));
+        return required;
+    }
+    if statement.variant == "LoopStatement" {
+        return collect_effects_from_block(statement.body, imports);
+    }
+    if statement.variant == "RoutineStatement" {
+        // A `routine { }` body runs in the enclosing function's capability
+        // context (it lowers to a nursery scope, #1181), so its effects must
+        // be collected transitively — an effectful call inside a routine is
+        // not a capability escape hatch. Shaped like LoopStatement.
+        return collect_effects_from_block(statement.body, imports);
+    }
+    if statement.variant == "MatchStatement" {
+        let mut required = collect_effects_from_expression(statement.expression, imports);
+        let mut case_index: int = 0;
+        loop {
+            if case_index >= statement.cases.length { break; }
+            required = merge_requirements(required, collect_effects_from_match_case(statement.cases[case_index], imports));
+            case_index += 1;
+        }
+        return required;
+    }
+    if statement.variant == "IfStatement" {
+        let mut required = collect_effects_from_expression(statement.condition, imports);
+        required = merge_requirements(required, collect_effects_from_block(statement.then_block, imports));
+        let else_branch = statement.else_branch;
+        if else_branch == null { return required; }
+        required = merge_requirements(required, collect_effects_from_else_branch(else_branch, imports));
+        return required;
+    }
+    if statement.variant == "TryStatement" {
+        // `try`/`catch`/`finally` is ordinary control flow — every branch runs
+        // in the enclosing function's capability context, so an effectful call
+        // inside any of them must be collected transitively. Wrapping a call in
+        // `try` is not a capability escape hatch.
+        let mut required = collect_effects_from_block(statement.try_block, imports);
+        required = merge_requirements(required, collect_effects_from_optional_block(statement.catch_block, imports));
+        required = merge_requirements(required, collect_effects_from_optional_block(statement.finally_block, imports));
+        return required;
+    }
+    if statement.variant == "ThrowStatement" {
+        return collect_effects_from_expression(statement.expression, imports);
+    }
+    if statement.variant == "BlockStatement" {
+        // A bare `{ }` (or `unsafe { }`) block runs in the enclosing
+        // capability context. `unsafe` relaxes memory-safety checks, not
+        // capability enforcement, so its effects are still required.
+        return collect_effects_from_block(statement.body, imports);
+    }
+    if statement.variant == "ReturnStatement" {
+        return collect_effects_from_expression(statement.expression, imports);
+    }
+    if statement.variant == "ExpressionStatement" {
+        return collect_effects_from_expression(statement.expression, imports);
+    }
+    if statement.variant == "VariableDeclaration" {
+        return collect_effects_from_expression(statement.initializer, imports);
+    }
+    if statement.variant == "FunctionDeclaration" {
+        // A nested / local `fn` *declaration* contributes no effect to its
+        // enclosing block (SFEP-0042). Its body is effect-checked as its own
+        // deferred routine (`analyze_routine` via `_analyze_routine_with_nested`),
+        // and a *call* to it requires the callee's effects transitively — the
+        // nested signature is registered in the routine-local effect table and
+        // resolved per block by `_hoist_block_local_fns`. Inlining the body's
+        // effects here — the prior behavior — wrongly forced a declared-but-
+        // uncalled nested `fn foo() ![io]` to require `![io]` of its parent.
+        return [];
+    }
+    if statement.variant == "TestDeclaration" {
+        return collect_effects_from_block(statement.body, imports);
+    }
+    if statement.variant == "StructDeclaration" {
+        let mut required: EffectRequirement[] = [];
+        let mut method_index: int = 0;
+        loop {
+            if method_index >= statement.methods.length { break; }
+            required = merge_requirements(required, collect_effects_from_block(statement.methods[method_index].body, imports));
+            method_index += 1;
+        }
+        return required;
+    }
+    if statement.variant == "Unknown" {
+        // An unparseable statement contributes no analyzable effect. The
+        // E0819 parse diagnostic (typecheck) already fails the build for a
+        // nested `Unknown`, so this arm intentionally returns no requirement
+        // rather than minting a second diagnostic on the same node (#1691).
+        return [];
+    }
+    return [];
+}
+
+fn collect_effects_from_else_branch(branch: ElseBranch, imports: ImportSymbolTable) -> EffectRequirement[] {
+    let mut required: EffectRequirement[] = [];
+    required = merge_requirements(required, collect_effects_from_optional_block(branch.body, imports));
+    required = merge_requirements(required, collect_effects_from_optional_statement(branch.statement, imports));
+    return required;
+}
+
+fn collect_effects_from_match_case(case: MatchCase, imports: ImportSymbolTable) -> EffectRequirement[] {
+    let mut required = collect_effects_from_expression(case.pattern, imports);
+    required = merge_requirements(required, collect_effects_from_expression(case.guard, imports));
+    required = merge_requirements(required, collect_effects_from_block(case.body, imports));
+    return required;
+}
+
+// Phase E helper: append one requirement per declared effect on the
+// imported callee. The description prefix `imported \`<name>\``
+// is what `diagnostics_render.code_for_missing_effect` keys on to
+// promote the diagnostic from the in-module `E0400` to the
+// cross-module `E0402`. Each effect produces its own requirement so
+// missing-effect rendering preserves the per-effect "required by"
+// breakdown the user sees in the caret diagnostic.
+fn _propagate_imported_callee_effects(name: string, imports: ImportSymbolTable, base: EffectRequirement[], callee_trigger: Token?) -> EffectRequirement[] {
+    let entry_opt = lookup_imported_function(imports, name);
+    if entry_opt == null { return base; }
+    let entry: ImportedFunctionSignature? = entry_opt;
+    if entry.effects.length == 0 { return base; }
+    // G1b (#1184): the description prefix selects the diagnostic code in
+    // `diagnostics_render.code_for_missing_effect` — a description that
+    // starts with `imported \`` renders `E0402` (cross-module), anything
+    // else renders the in-module `E0400`. A same-module local `fn`
+    // (`origin == "local"`) therefore uses a `local \`…\`` prefix so its
+    // missing-effect diagnostic stays in-module.
+    let mut prefix = "imported `" + name + "` declares ![";
+    if entry.origin == "local" { prefix = "local `" + name + "` declares !["; }
+    let mut required = base;
+    let mut e: int = 0;
+    loop {
+        if e >= entry.effects.length { break; }
+        let effect = entry.effects[e];
+        // `pure` is a no-op marker, not a capability (effect_taxonomy.sfn):
+        // it "never satisfies a real effect requirement", so it must never
+        // *be* propagated as one — otherwise an effectful caller of an
+        // imported `![pure]` function (e.g. the SFN-167 toolchain gate
+        // calling `semver_parse`) is spuriously flagged E0402 for a `pure`
+        // it can never legally declare (`![io, pure]` is contradictory).
+        if is_universally_allowed_effect(effect) {
+            e += 1;
+            continue;
+        }
+        required = append_requirement(required, EffectRequirement {
+            effect: effect, description: prefix + effect + "]", trigger: callee_trigger
+        });
+        e += 1;
+    }
+    return required;
+}
+
+// G1b (#1184): resolve a member callee `mod.fn()` against the
+// cross-module import table. The member name (`fn`) is looked up
+// directly — the object (`mod`) is a namespace binding the checker does
+// not type-resolve at 1.0, mirroring the conservative member-name policy
+// already used for channel `.send()/.receive()` and builtin `fs.*`.
+// Only `origin == "import"` entries fire here: a same-module top-level
+// `fn` reached as `obj.fn()` is a coincidental name match, not a real
+// call to that function, so locals are excluded. Imports always render
+// `E0402`, carated at the member expression.
+//
+// Scope caveat (wider than the `.send()/.receive()` allowlist): the
+// matched member-name set is NOT a fixed list — it is every effectful
+// function the enclosing module imports. So any `obj.<name>()` whose
+// `<name>` collides with an imported effectful free function would also
+// fire, regardless of `obj`. Two things keep this conservative-and-safe
+// rather than noisy: (1) the localized table only holds symbols this
+// module explicitly imports (`localize_import_symbols_for_program`), and
+// (2) the `effects.length == 0` guard means a colliding-but-pure import
+// contributes nothing. The compiler tree self-hosts clean under this
+// policy; the false-positive surface is pinned by regression tests in
+// `effect_imports_test.sfn`. Narrowing to a resolved namespace binding
+// is tracked for the type-directed pass (proposal §4.4 / G3).
+fn _propagate_imported_member_effects(member: string, imports: ImportSymbolTable, base: EffectRequirement[], member_trigger: Token?) -> EffectRequirement[] {
+    let entry_opt = lookup_imported_function(imports, member);
+    if entry_opt == null { return base; }
+    let entry: ImportedFunctionSignature? = entry_opt;
+    if entry.origin != "import" { return base; }
+    if entry.effects.length == 0 { return base; }
+    let prefix = "imported `" + member + "` declares ![";
+    let mut required = base;
+    let mut e: int = 0;
+    loop {
+        if e >= entry.effects.length { break; }
+        let effect = entry.effects[e];
+        // `pure` is a no-op marker, never a real requirement (see the
+        // matching guard in `_propagate_imported_callee_effects`).
+        if is_universally_allowed_effect(effect) {
+            e += 1;
+            continue;
+        }
+        required = append_requirement(required, EffectRequirement {
+            effect: effect, description: prefix + effect + "]", trigger: member_trigger
+        });
+        e += 1;
+    }
+    return required;
+}
+
+// G1 (#1183): append one EffectRequirement per capability the builtin
+// callee `target` requires, sourced from the target-neutral intrinsic table.
+// This semantic pass stays free of LLVM imports and hardcoded name->effect
+// chains: a contract-row change flows through here with zero edits.
+// `trigger` carets the diagnostic at the call/namespace token.
+fn _append_builtin_effects(base: EffectRequirement[], target: string, trigger: Token?, imports: ImportSymbolTable) -> EffectRequirement[] {
+    let effects = intrinsic_effects_for_callee_target(imports.intrinsic_effects, target);
+    let mut required = base;
+    let mut index: int = 0;
+    loop {
+        if index >= effects.length { break; }
+        required = append_requirement(required, EffectRequirement {
+            effect: effects[index], description: "builtin `" + target
+                + "` usage", trigger: trigger
+        });
+        index += 1;
+    }
+    return required;
+}
+
+fn collect_effects_from_expression(expression: Expression?, imports: ImportSymbolTable) -> EffectRequirement[] {
+    if expression == null { return []; }
+    if expression.variant == "Call" {
+        let mut required = collect_effects_from_expression(expression.callee, imports);
+
+        // Capture runtime helpers that imply effects.
+        if expression.callee.variant == "Identifier" {
+            let name = expression.callee.name;
+            // B1: caret the diagnostic at the callee identifier
+            // (the offending call site). `expression.callee.span`
+            // is populated by the parser; null only for synthesized
+            // call expressions (e.g. the runtime fail-call wrapper).
+            let callee_trigger = _token_from_span(expression.callee.span, name);
+            if name == "spawn" {
+                // Registry-driven (#1655): derive the primitive's own effect
+                // from the target-neutral `spawn_task` identity.
+                // Effect-transparent (SFEP-0049): it has no semantic row, so
+                // this appends nothing and the requirement is exactly the
+                // spawned body's effects collected above. The lookup stays so
+                // a future scheduler-level effect flows through with no arm
+                // edit.
+                required = _append_builtin_effects(required, "spawn_task", callee_trigger, imports);
+            }
+            // Registry-driven bare builtins: `print(...)` / `console(...)`
+            // (the Call-form analog of the Member-form `print.info(...)`
+            // paths in the "Member" branch — closes #614), `sleep(...)`
+            // (clock), and the Call-form `serve(...)` (-> io, net via the
+            // target-neutral `serve` semantic row, #1601). Effects come from
+            // the intrinsic registry (#1183/#1601); this replaces the former
+            // hardcoded `if name == "serve"` net-only check.
+            //
+            // The NAME set stays explicit because bare identifiers are not
+            // yet scope-resolved (G1b, #1184): a registry lookup over
+            // *every* bare target would also flag internal lowering names
+            // (`monotonic_millis`, `runtime_serve_fn`, …) that in-tree
+            // callers invoke without the matching effect, breaking
+            // self-host. #1184 lands that resolution with the in-tree
+            // annotation fixups it forces, after which this allowlist can
+            // be removed. The process-footprint sentinel is source-visible,
+            // so it is included here to enforce its registry-declared
+            // `![io]` effect (SFN-607). (Real `serve(...)` source commits to
+            // the `Serve` AST node in the parser, so this Call-arm path is
+            // the latent/synthesized-callee form — the live `serve(...)`
+            // enforcement lives in the `Serve` node arm below.)
+            let mut _bare_builtin: boolean = false;
+            if name == "print" { _bare_builtin = true; }
+            if name == "console" { _bare_builtin = true; }
+            if name == "sleep" { _bare_builtin = true; }
+            if name == "serve" { _bare_builtin = true; }
+            if name == "runtime_sleep_fn" { _bare_builtin = true; }
+            if name == "runtime_monotonic_millis_fn" { _bare_builtin = true; }
+            if name == "runtime_unix_millis_fn" { _bare_builtin = true; }
+            if name == "sailfin_intrinsic_mem_footprint" {
+                _bare_builtin = true;
+            }
+            if _bare_builtin {
+                required = _append_builtin_effects(required, name, callee_trigger, imports);
+            }
+            // Phase E: cross-module call resolution. The imports
+            // table is per-program-localized (alias-rewritten,
+            // scope-filtered) so a direct `Identifier` lookup is
+            // both correct and fast. Member-callee resolution
+            // (`mod.fn()`) and decorator-implied transitives are
+            // out of scope for E1; see proposal §5 (Phase E).
+            required = _propagate_imported_callee_effects(name, imports, required, callee_trigger);
+        }
+
+        // Channel send/receive: `channel_var.send(value)` and
+        // `channel_var.receive()` are in-process concurrency operations that
+        // are effect-transparent (SFEP-0049) — the primitive requires no
+        // effect of its own; the effect is whatever flows through the
+        // argument. These are expressed as Member-callee calls (not dedicated
+        // AST nodes), so we check the callee's member name here. The object
+        // name is not checked — any `.send()`/`.receive()` call site is
+        // treated as a channel operation. The trigger carets the method token
+        // so a diagnostic (from an effectful argument) points at the operation.
+        if expression.callee.variant == "Member" {
+            let method = expression.callee.member;
+            let mut _is_channel_op: boolean = false;
+            if method == "send" { _is_channel_op = true; }
+            if method == "receive" { _is_channel_op = true; }
+            if _is_channel_op {
+                let callee_trigger = _token_from_span(expression.callee.span, method);
+                // Registry-driven (#1655): map the bare member name to its
+                // target-neutral identity (`send` -> `channel_send`,
+                // `receive` -> `channel_receive`). Effect-transparent
+                // (SFEP-0049): neither identity has a semantic row, so lookup
+                // contributes nothing; any effect comes from the argument
+                // walk. Keeping the identity mapping lets a future semantic
+                // row flow through without changing this arm.
+                let channel_target = "channel_" + method;
+                required = _append_builtin_effects(required, channel_target, callee_trigger, imports);
+            }
+        }
+        // Member-callee effects (e.g. `fs.exists(...)`) are already
+        // captured by the unconditional `collect_effects_from_expression(
+        // expression.callee, imports)` at the top of this branch — the
+        // Member case in that recursive call walks the object identifier
+        // and emits the right requirement (`fs` → io, `http` → net,
+        // etc.). Don't re-analyze the callee here; doing so would
+        // double-count every Member-callee effect.
+        let mut argument_index: int = 0;
+        loop {
+            if argument_index >= expression.arguments.length { break; }
+            required = merge_requirements(required, collect_effects_from_expression(expression.arguments[argument_index], imports));
+            argument_index += 1;
+        }
+        return required;
+    }
+    if expression.variant == "Member" {
+        let mut required = collect_effects_from_expression(expression.object, imports);
+        if expression.object.variant == "Identifier" {
+            let root = expression.object.name;
+            // B1: caret the diagnostic at the namespace identifier
+            // (`fs` in `fs.exists(...)`, `print` in `print.info(...)`)
+            // — the user-visible cue that flags the operation as
+            // effectful. The Member-token span lives on
+            // `expression.span`; the namespace span lives on
+            // `expression.object.span`. Use the object span because
+            // the namespace identifier is the user-visible cue the
+            // diagnostic carets (e.g. `fs` in `fs.exists(...)`).
+            let object_trigger = _token_from_span(expression.object.span, root);
+            // Metadata-driven builtin effect resolution (#1183): the analyzer
+            // receives the authoritative `target -> effects` contract.
+            // Exact identity first (`fs.exists`, `http.get`,
+            // `http.download` -> `[net, io]`), namespace-union fallback
+            // for members with no exact row (`fs.read` inherits `fs.*`
+            // -> io) so conservative capability coverage is never
+            // dropped. A contract-row change is picked up here
+            // with zero edits. Covers `fs.*`, `print.*`, `console.*`,
+            // `http.*` — the literal-name `if` chains they replaced.
+            // As of #1601 this covers `websocket.*` too: the
+            // `websocket.<op>` metadata rows in that table
+            // resolve to `["net"]` here (exact row or namespace-union),
+            // so the former explicit `if root == "websocket"` net check
+            // is gone — `websocket.*` is now registry-derived like
+            // `fs.*` / `http.*`.
+            required = _append_builtin_effects(required, root + "." + expression.member, object_trigger, imports);
+            // G1b (#1184): cross-module member callee `mod.fetch()`. When
+            // the member name resolves to an imported function with
+            // declared effects, require them of the caller (`E0402`),
+            // carated at the member expression (`.fetch`). The builtin
+            // registry above keys on `root.member` (e.g. `fs.exists`);
+            // this keys on the bare member, so the two are disjoint for
+            // real builtins. Object-name agnostic by design — see
+            // `_propagate_imported_member_effects`.
+            let member_trigger = _token_from_span(expression.span, expression.member);
+            required = _propagate_imported_member_effects(expression.member, imports, required, member_trigger);
+        }
+        return required;
+    }
+    if expression.variant == "Unary" {
+        return collect_effects_from_expression(expression.operand, imports);
+    }
+    if expression.variant == "Cast" {
+        // A cast's operand is the effectful surface: `fs.read(p) as * u8`
+        // performs the io of `fs.read` before the (zero-cost) reinterpret.
+        // Before #1627 a pointer/fn-typed cast target degraded the whole
+        // expression to `Raw` (effect-blind) and an identifier-typed cast
+        // (`... as int`) parsed as a structured `Cast` the checker never
+        // walked — both silently dropped the operand's effects. Walk the
+        // operand so the requirement surfaces; the target type carries no
+        // effect of its own.
+        return collect_effects_from_expression(expression.operand, imports);
+    }
+    if expression.variant == "Is" {
+        // A type-guard's operand is the effectful surface: `readFile() is T`
+        // performs the io of `readFile` before the (effect-free) type test.
+        // Before #1753 the guard degraded to `Raw` (effect-blind) — walk the
+        // operand so the requirement surfaces; the target type carries none.
+        return collect_effects_from_expression(expression.operand, imports);
+    }
+    if expression.variant == "Binary" {
+        let mut required = collect_effects_from_expression(expression.left, imports);
+        required = merge_requirements(required, collect_effects_from_expression(expression.right, imports));
+        return required;
+    }
+    if expression.variant == "Conditional" {
+        // Ternary `cond ? then : else` (#1690). Either branch may run, and
+        // the condition always does, so the requirement is the union of all
+        // three children's effects: `cond ? readFile() : x` requires `![io]`.
+        // Before #1690 the whole ternary degraded to an effect-blind `Raw`,
+        // letting an effectful branch reach codegen with no declared
+        // capability — a fail-open hole in the effects pillar.
+        let mut required = collect_effects_from_expression(expression.condition, imports);
+        required = merge_requirements(required, collect_effects_from_expression(expression.then_value, imports));
+        required = merge_requirements(required, collect_effects_from_expression(expression.else_value, imports));
+        return required;
+    }
+    if expression.variant == "Assignment" {
+        // Assignment `target <op> rhs` (#1627 Part D). Both sides can be
+        // effectful — `arr[compute_io()] = x` (effect in the lvalue) and
+        // `a = readFile()` (effect in the rhs) — so the requirement is the
+        // union of the target's and rhs's effects. Before #1627 the whole
+        // assignment degraded to an effect-blind `Raw`, dropping both.
+        let mut required = collect_effects_from_expression(expression.target, imports);
+        required = merge_requirements(required, collect_effects_from_expression(expression.rhs, imports));
+        return required;
+    }
+    if expression.variant == "Array" {
+        let mut required: EffectRequirement[] = [];
+        let mut element_index: int = 0;
+        loop {
+            if element_index >= expression.elements.length { break; }
+            required = merge_requirements(required, collect_effects_from_expression(expression.elements[element_index], imports));
+            element_index += 1;
+        }
+        return required;
+    }
+    if expression.variant == "Object" {
+        let mut required: EffectRequirement[] = [];
+        let mut field_index: int = 0;
+        loop {
+            if field_index >= expression.fields.length { break; }
+            required = merge_requirements(required, collect_effects_from_expression(expression.fields[field_index].value, imports));
+            field_index += 1;
+        }
+        return required;
+    }
+    if expression.variant == "Struct" {
+        let mut required: EffectRequirement[] = [];
+        let mut field_index: int = 0;
+        loop {
+            if field_index >= expression.fields.length { break; }
+            required = merge_requirements(required, collect_effects_from_expression(expression.fields[field_index].value, imports));
+            field_index += 1;
+        }
+        return required;
+    }
+    if expression.variant == "Lambda" {
+        // Suppress any fn-table row shadowed by a same-named lambda parameter
+        // (SFEP-0042 §3.4 gap (b), #1950) before walking the lambda body.
+        return collect_effects_from_block(expression.body, _suppress_shadowing_params(imports, expression.parameters));
+    }
+    if expression.variant == "Index" {
+        let mut required = collect_effects_from_expression(expression.sequence, imports);
+        required = merge_requirements(required, collect_effects_from_expression(expression.index, imports));
+        return required;
+    }
+    if expression.variant == "Range" {
+        let mut required = collect_effects_from_expression(expression.start, imports);
+        required = merge_requirements(required, collect_effects_from_expression(expression.end, imports));
+        return required;
+    }
+    if expression.variant == "TryOperator" {
+        // Pass-through: `?` is control flow, contributing no effect of
+        // its own, but its operand (e.g. `fs.read()?`) must still be
+        // walked so effectful calls inside it surface. Type rules (R.3)
+        // and lowering (R.4) stay deferred; this is non-regression only.
+        return collect_effects_from_expression(expression.operand, imports);
+    }
+    // Concurrency frontend nodes (epic #965, issues #1079-#1082). Mirror the
+    // Call-form name handlers above. `serve` → [io, net]; `spawn`/`parallel`
+    // are effect-transparent (SFEP-0049) — they contribute no effect of their
+    // own. Each arm recurses into its operands/children so effectful calls
+    // nested inside a `spawn <expr>` / `await <expr>` / `channel(...)` /
+    // `parallel [...]` / `serve(...)` are discovered and propagate (the old
+    // `"spawn("` text heuristic does not match the prefix `spawn <expr>`
+    // form). `await`/`channel` likewise contribute no effect of their own —
+    // they only recurse.
+    if expression.variant == "Spawn" {
+        let spawn_trigger = _token_from_span(expression.span, "spawn");
+        let mut required = collect_effects_from_expression(expression.operand, imports);
+        // Registry-driven (#1655): query the target-neutral `spawn_task`
+        // identity. Effect-transparent (SFEP-0049): it has no semantic row, so
+        // `required` is exactly the operand's effects collected above. The
+        // lookup stays so a future scheduler-level effect flows through with
+        // no arm edit.
+        required = _append_builtin_effects(required, "spawn_task", spawn_trigger, imports);
+        return required;
+    }
+    if expression.variant == "Await" {
+        return collect_effects_from_expression(expression.operand, imports);
+    }
+    if expression.variant == "Channel" {
+        if expression.capacity == null { return []; }
+        return collect_effects_from_expression(expression.capacity, imports);
+    }
+    if expression.variant == "Parallel" {
+        let parallel_trigger = _token_from_span(expression.span, "parallel");
+        let mut required: EffectRequirement[] = [];
+        let mut task_index: int = 0;
+        loop {
+            if task_index >= expression.tasks.length { break; }
+            required = merge_requirements(required, collect_effects_from_expression(expression.tasks[task_index], imports));
+            task_index += 1;
+        }
+        // Registry-driven (#1655): parallel is fan-out of spawns, so it queries
+        // the target-neutral `spawn_task` identity. Effect-transparent
+        // (SFEP-0049): that identity has no semantic row, so `required` is
+        // exactly the union of the task bodies' effects merged above. There is
+        // also no dedicated `parallel` lowering descriptor: the paren-call
+        // `parallel(...)` of the unimplemented `sfn/sync` surface must stay
+        // fail-closed in lowering, which such a descriptor would break.
+        required = _append_builtin_effects(required, "spawn_task", parallel_trigger, imports);
+        return required;
+    }
+    if expression.variant == "Serve" {
+        let serve_trigger = _token_from_span(expression.span, "serve");
+        let mut required = collect_effects_from_expression(expression.handler, imports);
+        if expression.port != null {
+            required = merge_requirements(required, collect_effects_from_expression(expression.port, imports));
+        }
+        // SFN-29 (#1329): a `serve` that resolves to a user-defined or
+        // imported function carries THAT function's declared effects
+        // (in-module `E0400` for a same-module `fn serve`, cross-module
+        // `E0402` for an imported one) rather than the builtin serve's
+        // fixed requirement — matching the lowering gate in
+        // `llvm/expression_lowering/native/core.sfn`, which only lowers
+        // builtin serve when no resolvable `serve` is in scope. The
+        // per-program table (`_merge_local_functions` +
+        // `localize_import_symbols_for_program`) holds this unit's own
+        // top-level `fn serve` and its imports, never the implicit prelude,
+        // so a bare builtin serve falls through to the registry-driven
+        // ![io, net] requirement (#1601, #1629). Carets at the `serve` token.
+        if lookup_imported_function(imports, "serve") != null {
+            required = _propagate_imported_callee_effects("serve", imports, required, serve_trigger);
+        } else {
+            required = _append_builtin_effects(required, "serve", serve_trigger, imports);
+        }
+        return required;
+    }
+    return [];
+}
+
+fn collect_effects_from_expression_api(expression: Expression?, imports: ImportSymbolTable) -> EffectRequirement[] {
+    return collect_effects_from_expression(expression, imports);
+}
+
+export { collect_effects_from_block, collect_effects_from_expression_api };

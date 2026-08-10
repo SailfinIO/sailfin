@@ -1,0 +1,123 @@
+// compiler/capsules/analyzer/src/typecheck/patterns.sfn
+//
+// Match- and raw-pattern binding registration: the bindings a pattern
+// introduces into the enclosing scope.
+import { Expression } from "sfn/syntax";
+
+import { SymbolEntry, append_symbol } from "../typecheck_types/symbol_table_and_raw_exprs";
+import { is_identifier_char } from "../typecheck_types/text_utils";
+
+// Expression walker — issue #809 (#616 sub-issue 1), extended in
+// issue #811 (sub-issue 3) to thread the `ImportSymbolTable` through and
+// in issue #812 (sub-issue 4) to emit the undefined-callee diagnostic.
+//
+// The typechecker historically only visited statements; expression
+// positions (call arguments, return values, let-initializers, match
+// patterns, …) were invisible to it. This walker mirrors the structure
+// of `collect_effects_from_expression` in `effect_checker.sfn`.
+//
+// Enforcement (#812): a `Call` whose callee is a bare `Identifier` that
+// resolves against neither `bindings` (parameters / locals / the seeded
+// top-level + import scope), the builtin envelope, nor the localized
+// import table produces `error[E0420]: undefined function \`name\``.
+// SFN-675 later added argument primitive checking and undefined value
+// resolution; the binding helpers below keep pattern/loop names visible to
+// those checks. Member/method resolution remains outside this module.
+// Extract enum-destructure field-binding NAMES from a match-arm
+// pattern and append them to a fresh copy of `bindings` as
+// "variable"-kind symbols so the arm body can reference them. TYPE
+// resolution is deferred to lowering (#830); these match-pattern entries
+// carry names only and do not populate `SymbolEntry.declared_struct`. A
+// bare-identifier pattern (catch-all) binds that single name unless it is
+// the wildcard `_`. Literal patterns add nothing. `append_symbol` clones,
+// so the parent scope is never mutated and arm bindings stay arm-scoped.
+//
+// Shorthand destructures (`Shape.Circle { radius }`) parse to
+// `Expression.Raw`, not `Expression.Struct`, because `parse_object_literal`
+// requires `field: value` and bails on the colon-less form, leaving the
+// brace block unconsumed. The names then live only in the raw text, so the
+// `Raw` branch recovers them. The structured `field: value` form is a
+// constraint and deliberately introduces no binding.
+fn register_match_pattern_bindings(pattern: Expression?, bindings: SymbolEntry[]) -> SymbolEntry[] {
+    if pattern == null { return bindings; }
+    if pattern.variant == "Struct" {
+        // A structurally parsed field has an explicit value (`Box { value:
+        // 1 }`) and is a match constraint, not a binding. Shorthand binding
+        // fields (`Box { value }`) remain Raw and are recovered below.
+        return bindings;
+    }
+    if pattern.variant == "Raw" {
+        return register_raw_pattern_bindings(pattern.text, bindings);
+    }
+    if pattern.variant == "Identifier" {
+        if pattern.name == "_" { return bindings; }
+        return append_symbol(bindings, pattern.name, "variable", null);
+    }
+    return bindings;
+}
+
+// Collect each identifier token inside the `{ ... }` block of a raw
+// destructure pattern as a "variable" binding. A raw pattern reaches here
+// only for the colon-less shorthand form, so the brace block holds bare
+// field names separated by commas — every identifier run is a binding.
+fn register_raw_pattern_bindings(text: string, bindings: SymbolEntry[]) -> SymbolEntry[] {
+    let mut result: SymbolEntry[] = bindings;
+    let mut in_block: boolean = false;
+    let mut token: string = "";
+    let mut index: int = 0;
+    loop {
+        if index >= text.length { break; }
+        let ch = text[index];
+        if !in_block {
+            if ch == "{" { in_block = true; }
+            index += 1;
+            continue;
+        }
+        if ch == "}" {
+            if token.length > 0 {
+                result = append_symbol(result, token, "variable", null);
+                token = "";
+            }
+            break;
+        }
+        if is_identifier_char(ch) { token = token + ch; } else {
+            if token.length > 0 {
+                result = append_symbol(result, token, "variable", null);
+                token = "";
+            }
+        }
+        index += 1;
+    }
+    return result;
+}
+
+// SFN-29 (#1329): whether a `serve` name resolves to a user-defined or
+// imported function, in which case a `serve(...)` call site is validated
+// like an ordinary call rather than as the builtin concurrency `serve`.
+// A `function` (top-level `fn serve`) or `import` (import-specifier)
+// binding named `serve` is resolvable; the implicit prelude `serve`
+// (kind `"prelude"`) is not — matching the lowering gate, which resolves
+// against this unit's own functions/imports and never the implicit
+// prelude (`llvm/rendering_helpers.sfn::find_function_by_name_or_import`).
+//
+// `extern function` is deliberately EXCLUDED so this predicate agrees with
+// the effect checker's discriminator: `effect_checker._merge_local_functions`
+// registers only `FunctionDeclaration`s in the per-program effect table, not
+// `ExternFunctionDeclaration`s, so an `extern fn serve` takes the builtin
+// path there. Excluding it here keeps both frontend passes consistent —
+// both treat `extern fn serve` as the builtin (conservative, fail-closed).
+// Aligning `extern fn serve` as fully resolvable would require registering
+// every extern in the effect table, a broad blast radius out of scope here.
+fn _serve_resolves_to_user_fn(bindings: SymbolEntry[]) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= bindings.length { break; }
+        let entry = bindings[i];
+        if entry.name == "serve" {
+            if strings_equal(entry.kind, "function") { return true; }
+            if strings_equal(entry.kind, "import") { return true; }
+        }
+        i += 1;
+    }
+    return false;
+}

@@ -1,10 +1,10 @@
 // compiler/src/llvm/lowering/instructions_match.sfn
 //
 // Control flow handler: match instruction lowering.
+import { Diag } from "sfn/analyzer/diagnostic";
 import { NativeFunction, NativeInstruction, NativeSourceSpan } from "sfn/ir";
 import { find, substring } from "sfn/strings";
 
-import { Diag } from "../../diagnostic";
 import { lower_expression } from "../expression_lowering/native/core";
 import { append_match_arm_mutations } from "../expression_lowering/native/core_match_helpers";
 import { emit_boolean_and, emit_comparison_instruction } from "../expression_lowering/native/core_operands/comparisons";

@@ -38,6 +38,7 @@
 // `FunctionDeclaration` (in synthesis order). The counter starts at
 // zero per module — LLVM `internal` linkage on synthesised fns
 // keeps cross-module name collisions impossible.
+import { LambdaCaptureRecord, analyze_lambda_captures } from "sfn/analyzer/typecheck_captures";
 import { percent_escape_capture_text } from "sfn/ir";
 import {
     Block,
@@ -65,7 +66,6 @@ import {
     build_binding_table,
     build_fn_signature_table
 } from "./lambda_param_inference";
-import { LambdaCaptureRecord, analyze_lambda_captures } from "./typecheck_captures";
 
 // Mutable walker state threaded through every rewrite call. The
 // counter is module-monotonic and is the source of truth for both

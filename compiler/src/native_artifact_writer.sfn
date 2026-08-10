@@ -1,6 +1,11 @@
 // Driver-owned native-text validation and publication used by capsule staging.
 // LLVM lowering and the compiler entry module are deliberately absent from
 // this module's import closure.
+import { Diag } from "sfn/analyzer/diagnostic";
+import { empty_import_symbols } from "sfn/analyzer/effect_imports";
+import { collect_reexport_violations } from "sfn/analyzer/reexport_check";
+import { typecheck_diagnostics_with_prelude, typecheck_has_errors_with_prelude } from "sfn/analyzer/typecheck";
+import { Diagnostic, diagnostic_to_diag } from "sfn/analyzer/typecheck_types";
 import { native_lines_have_text } from "sfn/ir";
 import { Program } from "sfn/syntax";
 import { parse_program } from "sfn/syntax";
@@ -8,10 +13,8 @@ import { parse_program } from "sfn/syntax";
 import { _publish_lines_atomic } from "./build/fs";
 import { _env_flag } from "./build_flags";
 import { run_ownership_checker } from "./check/ownership";
-import { Diag } from "./diagnostic";
 import { render_diagnostic, split_source_lines } from "./diagnostics_render";
 import { validate_and_render_effects } from "./effect_gate";
-import { empty_import_symbols } from "./effect_imports";
 import {
     emit_native_diag_lines,
     emit_native_lines_with_module_name,
@@ -19,9 +22,6 @@ import {
 } from "./emit_native";
 import { runtime_helper_call_names } from "./llvm/runtime_helpers/mod";
 import { load_prelude_global_names } from "./prelude_globals";
-import { collect_reexport_violations } from "./reexport_check";
-import { typecheck_diagnostics_with_prelude, typecheck_has_errors_with_prelude } from "./typecheck";
-import { Diagnostic, diagnostic_to_diag } from "./typecheck_types";
 
 fn _staging_emit_typecheck_diagnostics(entries: Diagnostic[], source: string, file_path: string) ![io] {
     let lines = split_source_lines(source);

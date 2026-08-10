@@ -564,11 +564,11 @@ firstpass→seedcheck build, exactly like #957.
 - **Typecheck:** `compiler/src/typecheck.sfn` (`Cast` arm classification A;
   `Unary` arm B; `Assignment` arm D), `compiler/src/typecheck_types.sfn`
   (`classify_fn_cast` split + `make_unparseable_statement_diagnostic` E0817 +
-  `make_effectful_raw_diagnostic` E0818), `compiler/src/typecheck_captures.sfn`
+  `make_effectful_raw_diagnostic` E0818), `compiler/capsules/analyzer/src/typecheck_captures.sfn`
   (`Assignment` arm D).
 - **Effect checker:** `compiler/src/effect_checker.sfn` (`Assignment` arm D;
   `Unknown` defensive arm E; **E0818 `Raw` flip F**).
-- **Ownership:** `compiler/src/ownership_checker.sfn` (`Assignment` arm D).
+- **Ownership:** `compiler/capsules/analyzer/src/ownership_checker.sfn` (`Assignment` arm D).
 - **Emit / format:** `compiler/src/emit_native_format.sfn` (`Assignment` arm D),
   `compiler/src/emitter_sailfin_expr.sfn` (`Assignment` arm D).
 - **Lowering:** `compiler/src/lambda_lowering.sfn`

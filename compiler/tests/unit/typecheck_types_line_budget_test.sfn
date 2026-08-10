@@ -1,4 +1,4 @@
-// Line-budget sentinel for the `compiler/src/typecheck_types/` modules.
+// Line-budget sentinel for the `compiler/capsules/analyzer/src/typecheck_types/` modules.
 //
 // `typecheck_types.sfn` reached 3,795 lines — the longest module in the
 // tree, and more than twice the ~1,500-line soft budget in
@@ -21,7 +21,7 @@
 // the then-flat `llvm/expression_lowering/native/core_operands.sfn` cost
 // 1,989,504 KB at 3,119 lines, both above the 1,768,644 KB this file cost
 // at 3,795. `typecheck.sfn` has since been split into
-// `compiler/src/typecheck/` (SFN-634), taking its heaviest module to
+// `compiler/capsules/analyzer/src/typecheck/` (SFN-634), taking its heaviest module to
 // 671,088 KB; `core_operands.sfn` has since been decomposed too, taking its
 // heaviest submodule to 1,118,456 KB.
 // Line count does not predict cross-module RSS; the super-linear
@@ -58,7 +58,9 @@ fn _count_newlines(source: string) -> int {
 }
 
 fn _module_lines(name: string) -> int ![io] {
-    let source = fs.readFile("compiler/src/typecheck_types/" + name + ".sfn");
+    let source = fs.readFile("compiler/capsules/analyzer/src/typecheck_types/"
+        + name
+        + ".sfn");
     // A non-empty read is a precondition — guards against a path typo
     // silently passing the budget check on an empty string.
     assert source.length > 0;
@@ -83,6 +85,6 @@ test "typecheck types: every submodule stays under the line budget" ![io] {
 // `./typecheck_types` import and silently revert this decomposition while
 // still compiling green — the exact failure this split had to avoid.
 test "typecheck types: the flat module does not shadow the folder" ![io] {
-    assert ! fs.exists("compiler/src/typecheck_types.sfn");
-    assert fs.exists("compiler/src/typecheck_types/mod.sfn");
+    assert ! fs.exists("compiler/capsules/analyzer/src/typecheck_types.sfn");
+    assert fs.exists("compiler/capsules/analyzer/src/typecheck_types/mod.sfn");
 }

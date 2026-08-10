@@ -1,0 +1,235 @@
+// compiler/capsules/analyzer/src/typecheck/block_walk.sfn
+//
+// Block- and statement-level expression walking: the traversal that
+// reaches every expression nested inside a block's statements.
+import { Block, Statement } from "sfn/syntax";
+
+import { Diagnostic } from "../typecheck_types";
+import {
+    check_bare_fn_type_annotation,
+    check_malformed_array_annotation,
+    check_unknown_type_annotation,
+    classify_declared_primitive,
+    declared_array_marker,
+    type_parameter_names
+} from "../typecheck_types/annotation_shape_checks";
+import {
+    channel_element_kind,
+    check_uninferable_generic_constructor,
+    make_task_array_element_marker,
+    task_array_element_kind
+} from "../typecheck_types/expr_type_rules";
+import {
+    SymbolEntry,
+    append_symbol,
+    clone_bindings,
+    register_local_symbol
+} from "../typecheck_types/symbol_table_and_raw_exprs";
+import { check_intersection_value_type_annotation, check_object_literal_target } from "../typecheck_types/value_and_object_checks";
+import { await_receive_result_kind } from "./concurrency_rules";
+import {
+    TypeckCtx,
+    ctx_enter_body,
+    ctx_with_bindings,
+    ctx_with_type_params
+} from "./context";
+import { walk_expression, walk_match_pattern } from "./expression_walk";
+import { _build_nested_fn_scope, _hoist_nested_fn_names } from "./function_scopes";
+import { register_match_pattern_bindings } from "./patterns";
+import { check_expected_primitive_type } from "./primitive_rules";
+import { _declared_struct_annotation } from "./symbols";
+
+// Walks expressions inside a block — used by `walk_expression`'s Lambda
+// branch so expression positions inside lambda bodies are visited too.
+// Top-level statement traversal still flows through `check_block` →
+// `check_statement`; this helper is only the expression-positions
+// recursion for lambda bodies (which `check_block` never descends into).
+fn walk_block_expressions(block: Block, ctx: TypeckCtx) -> Diagnostic[] {
+    let mut diagnostics: Diagnostic[] = [];
+    // Thread a growing binding scope through the block so a body-local `let`
+    // declared earlier is visible to later statements as a call target (else
+    // it falsely trips E0420, #1921 — the #1917 parameter-scope sibling gap).
+    // A fresh clone + `scope_start` per block confines each nested block's own
+    // `let`s to that block, mirroring `check_block`'s discipline. Variable
+    // registration never dedups (`register_local_symbol` skips the duplicate
+    // check for the `variable` kind), so it yields no diagnostics to surface;
+    // lambda-body E0001 handling is out of this scope.
+    let mut bindings: SymbolEntry[] = clone_bindings(ctx.bindings);
+    let scope_start: int = bindings.length;
+    // Block-hoist nested `fn` names before the walk (SFEP-0042), symmetric with
+    // `check_block`, so a nested fn call resolves in a lambda body regardless of
+    // declaration order and E0421 capture rejection sees the sibling scope.
+    let hoisted = _hoist_nested_fn_names(block.statements, bindings, scope_start);
+    bindings = hoisted.bindings;
+    diagnostics = diagnostics.concat(hoisted.diagnostics);
+    let mut index: int = 0;
+    loop {
+        if index >= block.statements.length { break; }
+        let statement = block.statements[index];
+        diagnostics = diagnostics.concat(walk_statement_expressions(statement, ctx_with_bindings(ctx, bindings, scope_start)));
+        if statement.variant == "VariableDeclaration" {
+            // A `let x: Channel<T> = ...` binding records its element kind so
+            // `check_channel_send` can enforce element-type on a later
+            // `x.send(v)` (#1942). Every other binding records "".
+            let mut elem_kind: string = "";
+            let mut decl_prim: string = "";
+            if statement.type_annotation != null {
+                decl_prim = classify_declared_primitive(statement.type_annotation.text);
+                let resolved = channel_element_kind(statement.type_annotation.text);
+                if resolved != null { elem_kind = resolved; }
+                // `Task<T>[]` handle-array marker (SFEP-0055) — see the primary
+                // `check_statement` path for the rationale.
+                if elem_kind.length == 0 {
+                    let task_kind = task_array_element_kind(statement.type_annotation.text);
+                    if task_kind != null {
+                        elem_kind = make_task_array_element_marker(task_kind);
+                    }
+                }
+                if elem_kind.length == 0 {
+                    elem_kind = declared_array_marker(statement.type_annotation.text);
+                }
+            }
+            if elem_kind.length == 0 {
+                let awaited = await_receive_result_kind(statement.initializer, bindings);
+                if awaited != null { elem_kind = awaited; }
+            }
+            // An unannotated `let mut hs = []` bakes the array's LLVM element
+            // type as `double` (empty literal, no inference target); tag it
+            // "empty_array" so `push_spawn_handle_diagnostics` can reject a
+            // later `.push(spawn ...)` before a future pointer is stored
+            // through that double slot (E0823, SFN-386).
+            if elem_kind.length == 0 {
+                if statement.type_annotation == null {
+                    let init = statement.initializer;
+                    if init != null && strings_equal(init.variant, "Array") {
+                        if init.elements.length == 0 {
+                            elem_kind = "empty_array";
+                        } else { elem_kind = "array"; }
+                    }
+                }
+            }
+            let declared_struct = _declared_struct_annotation(statement.type_annotation, bindings, ctx.type_params);
+            let registration = register_local_symbol(bindings, statement.name, "variable", statement.span, scope_start, false, false, elem_kind, decl_prim, declared_struct);
+            bindings = registration.bindings;
+        }
+        index += 1;
+    }
+    return diagnostics;
+}
+
+fn walk_statement_expressions(statement: Statement, ctx: TypeckCtx) -> Diagnostic[] {
+    if statement.variant == "ExpressionStatement" {
+        return walk_expression(statement.expression, ctx);
+    }
+    if statement.variant == "ReturnStatement" {
+        let return_diags = walk_expression(statement.expression, ctx);
+        // A lambda-body `return { ... }` is classified against the lambda's
+        // declared return type (installed as `ctx.enclosing_return_type` by
+        // the `Lambda` branch's `ctx_enter_body`) — the #1905 lambda-return
+        // twin of the #1904 function-return check.
+        let object_literal_diags = check_object_literal_target(statement.expression, ctx.enclosing_return_type, "return", statement.span, ctx.top_level);
+        let primitive_diags = check_expected_primitive_type(statement.expression, ctx.enclosing_return_type, ctx.bindings, "return value", "return", statement.span);
+        return return_diags.concat(object_literal_diags).concat(primitive_diags);
+    }
+    if statement.variant == "ThrowStatement" {
+        return walk_expression(statement.expression, ctx);
+    }
+    if statement.variant == "VariableDeclaration" {
+        let init_diags = walk_expression(statement.initializer, ctx);
+        let annotation_diags = check_bare_fn_type_annotation(statement.type_annotation, statement.name, statement.span);
+        let array_diags2 = check_malformed_array_annotation(statement.type_annotation, statement.name, statement.span);
+        let unknown_diags2 = check_unknown_type_annotation(statement.type_annotation, statement.name, statement.span, ctx.known_types, ctx.type_params);
+        let intersection_diags = check_intersection_value_type_annotation(statement.type_annotation, statement.name, statement.span);
+        // The lambda-body `let` twin of the primary let-site E0828 (#1905):
+        // classify a bare object-literal initializer against its annotation.
+        let object_literal_diags = check_object_literal_target(statement.initializer, statement.type_annotation, statement.name, statement.span, ctx.top_level);
+        let uninferable_ctor_diags = check_uninferable_generic_constructor(statement, ctx.generic_struct_names);
+        let primitive_diags = check_expected_primitive_type(statement.initializer, statement.type_annotation, ctx.bindings, "initializer for `"
+            + statement.name
+            + "`", statement.name, statement.initializer_span);
+        return init_diags.concat(annotation_diags).concat(array_diags2).concat(unknown_diags2).concat(intersection_diags).concat(object_literal_diags).concat(uninferable_ctor_diags).concat(primitive_diags);
+    }
+    if statement.variant == "IfStatement" {
+        let mut diagnostics = walk_expression(statement.condition, ctx);
+        diagnostics = diagnostics.concat(walk_block_expressions(statement.then_block, ctx));
+        if statement.else_branch != null {
+            let branch = statement.else_branch;
+            if branch.body != null {
+                diagnostics = diagnostics.concat(walk_block_expressions(branch.body, ctx));
+            }
+            if branch.statement != null {
+                diagnostics = diagnostics.concat(walk_statement_expressions(branch.statement, ctx));
+            }
+        }
+        return diagnostics;
+    }
+    if statement.variant == "ForStatement" {
+        let mut diagnostics = walk_expression(statement.clause.iterable, ctx);
+        let loop_bindings = register_match_pattern_bindings(statement.clause.target, ctx.bindings);
+        diagnostics = diagnostics.concat(walk_block_expressions(statement.body, ctx_with_bindings(ctx, loop_bindings, ctx.scope_start)));
+        return diagnostics;
+    }
+    if statement.variant == "MatchStatement" {
+        let mut diagnostics = walk_expression(statement.expression, ctx);
+        let mut index: int = 0;
+        loop {
+            if index >= statement.cases.length { break; }
+            let case = statement.cases[index];
+            diagnostics = diagnostics.concat(walk_match_pattern(case.pattern, ctx));
+            let arm_bindings = register_match_pattern_bindings(case.pattern, ctx.bindings);
+            let arm_ctx = ctx_with_bindings(ctx, arm_bindings, ctx.scope_start);
+            diagnostics = diagnostics.concat(walk_expression(case.guard, arm_ctx));
+            diagnostics = diagnostics.concat(walk_block_expressions(case.body, arm_ctx));
+            index += 1;
+        }
+        return diagnostics;
+    }
+    if statement.variant == "WithStatement" {
+        let mut diagnostics: Diagnostic[] = [];
+        let mut clause_index: int = 0;
+        loop {
+            if clause_index >= statement.clauses.length { break; }
+            diagnostics = diagnostics.concat(walk_expression(statement.clauses[clause_index].expression, ctx));
+            clause_index += 1;
+        }
+        diagnostics = diagnostics.concat(walk_block_expressions(statement.body, ctx));
+        return diagnostics;
+    }
+    if statement.variant == "LoopStatement" {
+        return walk_block_expressions(statement.body, ctx);
+    }
+    if statement.variant == "BlockStatement" {
+        return walk_block_expressions(statement.body, ctx);
+    }
+    // A `routine { ... }` nested in a lambda body — the twin of the
+    // `check_statement` RoutineStatement arm (E0823, SFN-386).
+    if statement.variant == "RoutineStatement" {
+        return walk_block_expressions(statement.body, ctx);
+    }
+    if statement.variant == "TryStatement" {
+        let mut diagnostics = walk_block_expressions(statement.try_block, ctx);
+        if statement.catch_block != null {
+            let mut catch_bindings = ctx.bindings;
+            if statement.catch_name != null {
+                catch_bindings = append_symbol(catch_bindings, statement.catch_name, "variable", null);
+            }
+            diagnostics = diagnostics.concat(walk_block_expressions(statement.catch_block, ctx_with_bindings(ctx, catch_bindings, ctx.scope_start)));
+        }
+        if statement.finally_block != null {
+            diagnostics = diagnostics.concat(walk_block_expressions(statement.finally_block, ctx));
+        }
+        return diagnostics;
+    }
+    if statement.variant == "FunctionDeclaration" {
+        // Nested / local fn inside a lambda body (SFEP-0042). Its name was
+        // block-hoisted by `walk_block_expressions`; walk its body under the
+        // non-capturing nested scope so calls to siblings/self resolve and a
+        // reference to an enclosing local (including a lambda parameter) trips
+        // E0421. Without this arm the body was never resolution-walked.
+        let scoped = _build_nested_fn_scope(statement.signature, ctx);
+        let generic_ctx = ctx_with_type_params(ctx, type_parameter_names(statement.signature.type_parameters));
+        let body_ctx = ctx_enter_body(generic_ctx, scoped.bindings, statement.signature.return_type);
+        return scoped.diagnostics.concat(walk_block_expressions(statement.body, body_ctx));
+    }
+    return [];
+}

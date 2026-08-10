@@ -6,7 +6,7 @@
 // file for the long-form rationale (type discipline, `unsafe`
 // policy, formatter pointer spelling, opaque-pointee rule). All
 // declarations here obey the v0 C-ABI accept-list enforced by
-// `check_extern_signature` in `compiler/src/typecheck_types/declaration_and_statement_checks.sfn`
+// `check_extern_signature` in `compiler/capsules/analyzer/src/typecheck_types/declaration_and_statement_checks.sfn`
 // (E0801–E0805).
 //
 // Status: typecheck smoke test. Not imported anywhere yet; the

@@ -1,0 +1,547 @@
+// compiler/capsules/analyzer/src/typecheck_types/extern_abi.sfn
+//
+// extern fn/var C-ABI validation (E0801-E0805).
+// Extracted from typecheck_types.sfn (SFN-625).
+import { starts_with, strings_equal, strip_prefix } from "sfn/strings";
+
+import { Diagnostic } from "../typecheck_types";
+import {
+    find_matching_paren,
+    is_ascii_upper,
+    is_identifier_char,
+    join_with_separator,
+    slice_text,
+    split_top_level_commas,
+    trim_text
+} from "./text_utils";
+
+// Whether `text` is one of the v0 accepted C-ABI extern types when
+// used as a *parameter*. Distinct from `is_c_abi_return_type` only
+// in that bare `void` is rejected here (`void` is valid only as a
+// return type — see `check_extern_signature`).
+//
+// Accepted forms:
+//   - Primitive scalars accepted by `compiler/src/llvm/type_mapping.sfn:
+//     map_primitive_type` today: i8, i32, i64, u8, usize, bool.
+//   - Raw pointers:       *T, *const T, *mut T, **T (recursive — pointee
+//                         must itself be c-abi or an opaque struct name).
+//                         `*void` is permitted as the canonical
+//                         "untyped pointer" alias for `*opaque`.
+//   - Function pointers:  fn(A, B) -> C where each of A, B is a
+//                         c-abi *parameter* type and C is a c-abi
+//                         *return* type.
+//
+// Intentionally NOT yet on the accept-list:
+//   - i16, u16, u32, u64, isize, f32, f64.
+//
+// The original blocker — no entries in the LLVM type mapper — is gone:
+// every copy of `map_primitive_type` maps all of these (floats since
+// #1372, the integer widths since SFN-571). What remains is the extern
+// C-ABI decision itself, which is a separate call from what the mapper
+// can lower; widening this accept-list is a deliberate change to the
+// extern surface, not a mechanical follow-on.
+//
+// Notably rejected:
+//   - `number` (legacy f64 alias) — externs must commit to i64 today.
+//   - `string` — see `extern_type_uses_string`; produces E0801, not E0805.
+//   - `T[]`     — see `extern_type_contains_array_brackets`; E0802.
+//   - User-defined struct/enum names other than as opaque pointer
+//     pointees (e.g. `*PthreadMutex` is fine, `PthreadMutex` is not).
+fn is_c_abi_parameter_type(text: string) -> boolean {
+    let normalized = trim_text(text);
+    if normalized.length == 0 { return true; }
+    if strings_equal(normalized, "void") { return false; }
+    return _is_c_abi_type_inner(normalized, false);
+}
+
+// Same as `is_c_abi_parameter_type` but `void` is permitted (the
+// canonical "no return value" form).
+fn is_c_abi_return_type(text: string) -> boolean {
+    let normalized = trim_text(text);
+    if normalized.length == 0 { return true; }
+    return _is_c_abi_type_inner(normalized, true);
+}
+
+// Shared core. `allow_bare_void` controls whether a top-level
+// `void` token is accepted (return position only). `void` as a
+// *pointee* (`*void` ≡ `*opaque`) is always allowed; the rule is
+// only about bare `void`.
+fn _is_c_abi_type_inner(normalized: string, allow_bare_void: boolean) -> boolean {
+    if normalized.length == 0 { return true; }
+    if strings_equal(normalized, "void") { return allow_bare_void; }
+    if is_extern_primitive_type(normalized) { return true; }
+    if starts_with(normalized, "*") {
+        let pointee = trim_text(strip_prefix(normalized, "*"));
+        if starts_with(pointee, "const ") {
+            return _is_c_abi_type_inner(strip_prefix(pointee, "const "), true);
+        }
+        if starts_with(pointee, "mut ") {
+            return _is_c_abi_type_inner(strip_prefix(pointee, "mut "), true);
+        }
+        if pointee.length == 0 { return false; }
+        // Inside a pointer, `void` is the canonical "untyped"
+        // pointer form (`*void` ≡ `*opaque`). Always allowed.
+        if _is_c_abi_type_inner(pointee, true) { return true; }
+        // Opaque-struct pointees: an UpperCamelCase identifier is
+        // accepted as an opaque platform handle (`*File`,
+        // `*PthreadMutex`). We cannot fully validate it here without
+        // a real type system; the v0 rule is "if it looks like an
+        // identifier and is uppercase, accept it as opaque."
+        return is_extern_opaque_pointee(pointee);
+    }
+    if starts_with(normalized, "fn(") {
+        return is_c_abi_function_pointer(normalized);
+    }
+    return false;
+}
+
+// Pure: primitives that v0 externs may use directly (no leading `*`).
+//
+// The accept-list is deliberately the intersection of "what C calls
+// produce sensible LLVM IR" and "what `compiler/src/llvm/type_mapping.sfn:
+// map_primitive_type` actually maps today." Adding a primitive here
+// without a corresponding `map_primitive_type` entry would let it
+// pass typecheck and then silently lower to `i8*` (or fall through
+// to the user-type branch and produce broken IR).
+//
+// `int` and `float` are accepted as the canonical Sailfin spelling
+// for sized integer (i64) and floating-point (double) values
+// respectively — see `docs/proposals/0025-native-runtime-architecture.md` §3.7 (`#396-numeric-types-int--float`).
+// They lower through `map_primitive_type` to `i64` / `double` so a
+// `declare` directive emitted from this surface is well-formed.
+//
+// Slice C (2026-05-02) admitted `i16`, `u16`, `u32`, `u64`, `isize`,
+// and `f32` after teaching `map_primitive_type` to lower them. The
+// accept-list now spans the practical libc surface (e.g. `i32` for
+// `int` / `errno_t`, `u32` for `uid_t`/`mode_t`, `u64` for `dev_t`,
+// `isize` for `ssize_t`, `i16` for `short`). Comparison operators
+// and `dominant_type` only have explicit branches for i8/i32/i64
+// today; mixing wider widths in user-level Sailfin code can still
+// fall through to the silent-coercion footgun (L2/L3 in §3.7).
+// For extern *signatures* (the v0 use case), the boundary is
+// declarative — no comparisons happen at the boundary itself —
+// so the existing gap doesn't bite the libc skeleton.
+//
+// `void` is intentionally excluded; the parameter/return distinction
+// is enforced by the callers (`is_c_abi_parameter_type` rejects bare
+// `void`, `_is_c_abi_type_inner` accepts it when `allow_bare_void`).
+fn is_extern_primitive_type(text: string) -> boolean {
+    let mut _ret: boolean = false;
+    if strings_equal(text, "i8") { _ret = true; }
+    if strings_equal(text, "i16") { _ret = true; }
+    if strings_equal(text, "i32") { _ret = true; }
+    if strings_equal(text, "i64") { _ret = true; }
+    if strings_equal(text, "u8") { _ret = true; }
+    if strings_equal(text, "u16") { _ret = true; }
+    if strings_equal(text, "u32") { _ret = true; }
+    if strings_equal(text, "u64") { _ret = true; }
+    if strings_equal(text, "usize") { _ret = true; }
+    if strings_equal(text, "isize") { _ret = true; }
+    if strings_equal(text, "f32") { _ret = true; }
+    if strings_equal(text, "f64") { _ret = true; }
+    if strings_equal(text, "f16") { _ret = true; }
+    if strings_equal(text, "bf16") { _ret = true; }
+    if strings_equal(text, "bool") { _ret = true; }
+    if strings_equal(text, "int") { _ret = true; }
+    if strings_equal(text, "float") { _ret = true; }
+    return _ret;
+}
+
+// Pure: identifier-form call names that the typechecker's expression
+// walker treats as "no resolution required" — the auto-injection
+// envelope for the #616 decomposition (Issue B). When walker
+// resolution lights up in Issue D (#616 sub-issue 4), any
+// `Call.callee.variant == "Identifier"` whose name returns `true`
+// here short-circuits unknown-identifier diagnostic emission so the
+// 50 examples (per #549) keep compiling clean. The accept-list
+// discipline mirrors `is_extern_primitive_type` above: each member
+// documented inline so the rationale travels with the code.
+//
+// Issue B intentionally introduces the helper without rewiring
+// effect_checker.sfn:623-652 to consume it (see Issue B `Out:`); the
+// inline checks there continue to drive effect injection until a
+// future dedup pass lands.
+//
+// Members of the envelope:
+//   `print`    — bare-form I/O builtin. Member-form `print.info`/
+//                `print.error`/… emits via the effect_checker Member
+//                branch; the bare Call-form is the README first
+//                example and `examples/basics/hello-world.sfn`.
+//                effect_checker.sfn:646 already injects `![io]`.
+//   `console`  — bare-form I/O builtin paired with `print` in the
+//                README envelope. effect_checker.sfn:647 injects `![io]`.
+//   `assert`   — test-and-spec assertion builtin. Surfaces in every
+//                unit/integration test under `compiler/tests/` and in
+//                `examples/` cookbook entries; never a user-defined
+//                function. Audit note (#616): missing from the
+//                pre-existing effect_checker inline list — Issue D will
+//                consume this envelope to keep `assert` calls clean.
+//   `spawn`    — planned concurrency keyword (keywords.md `### spawn`,
+//                "Planned (language keyword)"); the prelude historically
+//                exposed `spawn(task, name)` as a free function. Bare
+//                Call-form exercised by `effect_checker_test.sfn:450`
+//                ("bare spawn() Call carets at the callee identifier")
+//                and `tests/e2e/test_sync_rejects_unimplemented_concurrency.sh`.
+//                effect_checker.sfn:623 already injects `![io]`.
+//   `sleep`    — clock primitive. Bare Call-form in `examples/concurrency/
+//                producer-consumer.sfn:13`, `examples/advanced/
+//                multithreaded-task.sfn:7`, and `effect_checker_test.sfn:466`.
+//                effect_checker.sfn:628 injects `![clock]`.
+//   `serve`    — net primitive. Bare Call-form in `examples/web/
+//                http-server.sfn:6`, `rest-api.sfn:14`, and `examples/
+//                advanced/web-server-with-concurrency.sfn:23`.
+//                effect_checker.sfn:633 injects `![net]`.
+//   `channel`  — channel constructor. Bare Call-form in `examples/
+//                concurrency/channels.sfn:6`, `producer-consumer.sfn:7`,
+//                `dynamic-task-scheduling.sfn:6`, and rejected by
+//                `tests/e2e/test_sync_rejects_unimplemented_concurrency.sh`
+//                pending the structured-concurrency runtime.
+//   `send`     — Channel.send. Today only appears as Member-form
+//                (`buffer.send(...)`, `examples/concurrency/channels.sfn:9`).
+//                Included defensively in the identifier-call allowlist
+//                because the typechecker walker runs before keyword/method
+//                disambiguation — if a user writes `send(buffer, value)`
+//                thinking it's a free function (the same misuse caught
+//                by `test_sync_rejects_unimplemented_concurrency.sh`),
+//                the rejection diagnostic must come from the
+//                concurrency-unimplemented gate, not a spurious
+//                unknown-identifier error from Issue D.
+//   `receive`  — Channel.receive. Same shape as `send`: today only
+//                Member-form (`messages.receive()` in `channels.sfn:12`,
+//                `producer-consumer.sfn:19`, `dynamic-task-scheduling.sfn:11`).
+//                Included for the same defensive reason.
+//   `await`    — unary prefix operator in the grammar (grammar.md L233:
+//                `Unary = ("!" | "-" | "+" | "await") Unary`). Today
+//                used as `await messages.receive()` in `examples/
+//                concurrency/channels.sfn:12`, not as `await(...)`.
+//                Included in the identifier-call allowlist defensively:
+//                until the lexer reserves `await` as a keyword token,
+//                the parser may construct `Call(callee=Identifier(
+//                "await"), …)` from `await(expr)`-style input, and the
+//                walker should not surface unknown-identifier there
+//                while concurrency remains under construction.
+//
+// Intentionally NOT in the envelope (Issue D will surface these as
+// unknown-identifier diagnostics so user code can shadow them):
+//   `len`, `panic` — audit (#616) flagged these as inline gaps in
+//   effect_checker today, but they are library/runtime functions, not
+//   language-level builtins. Resolution should go through the import
+//   table once Issue C threads it in.
+//   Member-form builtins (`string.concat`, `array.push`, `fs.exists`,
+//   …) — out of #616 Issue B scope. Member resolution is handled
+//   through the Member branch of the walker, not this Call-identifier
+//   shortcut.
+//
+// Atomic intrinsics (`atomic_load`/`atomic_store`/`atomic_add`/
+// `atomic_sub`/`atomic_cas`/`atomic_fence`): these are call-form
+// language intrinsics the lowering recognizes by name and emits as LLVM
+// `atomicrmw`/`cmpxchg`/`fence` (canonical recognizer `is_atomic_builtin`,
+// compiler/src/llvm/atomics.sfn:53). They resolve to no source-level
+// declaration, so #812's walker must treat them as builtins or every
+// `atomic_*` call would false-positive E0420. The set is the fixed LLVM
+// atomic op surface; keep it in sync with `is_atomic_builtin`.
+fn is_builtin_call_name(name: string) -> boolean {
+    let mut _ret: boolean = false;
+    if strings_equal(name, "print") { _ret = true; }
+    if strings_equal(name, "console") { _ret = true; }
+    if strings_equal(name, "assert") { _ret = true; }
+    if strings_equal(name, "spawn") { _ret = true; }
+    if strings_equal(name, "sleep") { _ret = true; }
+    if strings_equal(name, "serve") { _ret = true; }
+    if strings_equal(name, "channel") { _ret = true; }
+    if strings_equal(name, "send") { _ret = true; }
+    if strings_equal(name, "receive") { _ret = true; }
+    if strings_equal(name, "await") { _ret = true; }
+    // `join_all(handles)` — ordered multi-await builtin (SFEP-0055). A free
+    // call, not a keyword, so it must be named here or the undefined-call
+    // walker false-positives E0420. Lowered to `sfn_join_all` in
+    // `core_concurrency_lowering.sfn`; only the builtin (no user/imported
+    // `join_all` in scope) takes that path.
+    if strings_equal(name, "join_all") { _ret = true; }
+    if strings_equal(name, "atomic_load") { _ret = true; }
+    if strings_equal(name, "atomic_store") { _ret = true; }
+    if strings_equal(name, "atomic_add") { _ret = true; }
+    if strings_equal(name, "atomic_sub") { _ret = true; }
+    if strings_equal(name, "atomic_cas") { _ret = true; }
+    if strings_equal(name, "atomic_fence") { _ret = true; }
+    // `load_byte(addr: int) -> int` is a call-form lowering primitive
+    // (#1308): a single-byte `load i8` + `zext`, recognized by name and
+    // emitted inline (compiler/src/llvm/byte_load.sfn). It resolves to
+    // no source-level declaration, so the #812 walker must treat it as a
+    // builtin or every `load_byte` call false-positives E0420.
+    if strings_equal(name, "load_byte") { _ret = true; }
+    // `secure_zero(addr: int, len: int) -> void` is a call-form lowering
+    // primitive (SFN-782, design SFEP-0069 §3.6): a guarded loop of
+    // volatile byte stores the optimizer may not elide, emitted inline
+    // (compiler/src/llvm/secure_zero.sfn). It resolves to no source-level
+    // declaration, so the #812 walker must treat it as a builtin or every
+    // `secure_zero` call false-positives E0420.
+    if strings_equal(name, "secure_zero") { _ret = true; }
+    if strings_equal(name, "syscall1") { _ret = true; }
+    if strings_equal(name, "syscall2") { _ret = true; }
+    if strings_equal(name, "syscall3") { _ret = true; }
+    if strings_equal(name, "syscall4") { _ret = true; }
+    if strings_equal(name, "syscall5") { _ret = true; }
+    if strings_equal(name, "syscall6") { _ret = true; }
+    return _ret;
+}
+
+// Namespace roots backed by the runtime-helper registry. These names are
+// valid only as the receiver of a member access (`fs.exists`, `process.run`,
+// `string.concat`, ...); they are not ordinary value bindings and therefore
+// do not appear in the typecheck symbol table. Keep this set aligned with the
+// descriptor target roots under `llvm/runtime_helpers/registry_*.sfn`.
+fn is_builtin_member_root(name: string) -> boolean {
+    let mut _ret: boolean = false;
+    if strings_equal(name, "array") { _ret = true; }
+    if strings_equal(name, "base64") { _ret = true; }
+    if strings_equal(name, "console") { _ret = true; }
+    if strings_equal(name, "crypto") { _ret = true; }
+    if strings_equal(name, "env") { _ret = true; }
+    if strings_equal(name, "fs") { _ret = true; }
+    if strings_equal(name, "http") { _ret = true; }
+    if strings_equal(name, "intrinsic") { _ret = true; }
+    if strings_equal(name, "io") { _ret = true; }
+    if strings_equal(name, "number") { _ret = true; }
+    if strings_equal(name, "print") { _ret = true; }
+    if strings_equal(name, "process") { _ret = true; }
+    if strings_equal(name, "rc") { _ret = true; }
+    if strings_equal(name, "runtime") { _ret = true; }
+    if strings_equal(name, "string") { _ret = true; }
+    if strings_equal(name, "websocket") { _ret = true; }
+    return _ret;
+}
+
+// Pure: identifiers that v0 accepts as opaque-pointer pointees behind
+// a leading `*`. The v0 rule is "starts with an uppercase ASCII letter
+// and contains only identifier characters." This is intentionally
+// permissive — when the typechecker grows real type resolution, this
+// helper tightens to "is this name actually declared as an opaque
+// struct?". Today the extern surface is runtime-internal, so the
+// looser rule is acceptable.
+fn is_extern_opaque_pointee(text: string) -> boolean {
+    if text.length == 0 { return false; }
+    let first = text[0];
+    if !is_ascii_upper(first) { return false; }
+    let mut _i: int = 0;
+    loop {
+        if _i >= text.length { break; }
+        let ch = text[_i];
+        if !is_identifier_char(ch) { return false; }
+        _i += 1;
+    }
+    return true;
+}
+
+// Validate `fn(A, B) -> C` style function-pointer types. Each
+// argument must be a valid c-abi *parameter* type (so bare `void`
+// is rejected); the return type must be a valid c-abi *return*
+// type (so `void` is allowed). Implicit `void` return when the
+// `-> T` clause is omitted matches C convention.
+fn is_c_abi_function_pointer(text: string) -> boolean {
+    if !starts_with(text, "fn(") { return false; }
+    let after_open = strip_prefix(text, "fn(");
+    let close_index = find_matching_paren(after_open);
+    if close_index < 0 { return false; }
+    let args_block = slice_text(after_open, 0, close_index);
+    let mut tail = trim_text(slice_text(after_open, close_index + 1, after_open.length));
+    let mut return_text: string = "void";
+    if tail.length > 0 {
+        if !starts_with(tail, "->") { return false; }
+        return_text = trim_text(strip_prefix(tail, "->"));
+    }
+    if !is_c_abi_return_type(return_text) { return false; }
+    let args = split_top_level_commas(args_block);
+    let mut _i: int = 0;
+    loop {
+        if _i >= args.length { break; }
+        let arg_text = trim_text(args[_i]);
+        if arg_text.length > 0 {
+            if !is_c_abi_parameter_type(arg_text) { return false; }
+        }
+        _i += 1;
+    }
+    return true;
+}
+
+// Pure: does the type text contain `[]` at the top level (i.e. it is
+// a Sailfin array type)? Detects both `i32[]` and `string[]` shapes.
+fn extern_type_contains_array_brackets(text: string) -> boolean {
+    let mut index: int = 0;
+    let mut depth: int = 0;
+    loop {
+        if index >= text.length { break; }
+        let ch = text[index];
+        if ch == "<" { depth += 1; } else if ch == ">" {
+            if depth > 0 { depth -= 1; }
+        } else if ch == "[" {
+            if depth == 0 { return true; }
+        }
+        index += 1;
+    }
+    return false;
+}
+
+// Pure: does the type text mention the Sailfin `string` aggregate at
+// the top level? Includes plain `string` and obvious decorations like
+// `string?`. Pointer pointees (`*string`) also fail — externs must
+// pass `*u8` for raw bytes, not Sailfin string aggregates.
+fn extern_type_uses_string(text: string) -> boolean {
+    let trimmed = trim_text(text);
+    if strings_equal(trimmed, "string") { return true; }
+    if strings_equal(trimmed, "string?") { return true; }
+    if starts_with(trimmed, "*") {
+        let inner = trim_text(strip_prefix(trimmed, "*"));
+        if extern_type_uses_string(inner) { return true; }
+    }
+    if starts_with(trimmed, "const ") {
+        return extern_type_uses_string(strip_prefix(trimmed, "const "));
+    }
+    if starts_with(trimmed, "mut ") {
+        return extern_type_uses_string(strip_prefix(trimmed, "mut "));
+    }
+    return false;
+}
+
+fn make_extern_type_parameters_diagnostic(name: string) -> Diagnostic {
+    return Diagnostic {
+        code: "E0803",
+        severity: "error",
+        message: "extern fn `" + name + "` must not declare type parameters;"
+            + " only concrete C-ABI types are allowed across the extern boundary."
+            + " Remove the `<...>` clause and write a separate Sailfin wrapper if"
+            + " a generic surface is needed.",
+        file_path: "",
+        primary: null,
+        suggestion: null
+    };
+}
+
+fn make_extern_effects_diagnostic(name: string, effects: string[]) -> Diagnostic {
+    let effect_text = join_with_separator(effects, ", ");
+    return Diagnostic {
+        code: "E0804",
+        severity: "error",
+        message: "extern fn `" + name + "` must not declare effects (`!["
+            + effect_text
+            + "]`); effects are enforced on the wrapping adapter, not the raw"
+            + " extern. Move the `![...]` clause onto the function that calls"
+            + " this extern.",
+        file_path: "",
+        primary: null,
+        suggestion: null
+    };
+}
+
+fn make_extern_parameter_missing_type_diagnostic(fn_name: string, parameter_name: string) -> Diagnostic {
+    return Diagnostic {
+        code: "E0805",
+        severity: "error",
+        message: "extern fn `" + fn_name + "` parameter `" + parameter_name
+            + "` is missing a type annotation. Extern declarations have"
+            + " no body for inference; every parameter must commit to a"
+            + " concrete C-ABI type (e.g. `i64`, `*u8`, `bool`).",
+        file_path: "",
+        primary: null,
+        suggestion: null
+    };
+}
+
+fn make_extern_parameter_type_diagnostic(fn_name: string, parameter_name: string, type_text: string, kind: string) -> Diagnostic {
+    let code = extern_diagnostic_code_for(kind);
+    let hint = extern_type_hint_for(kind, type_text);
+    return Diagnostic {
+        code: code,
+        severity: "error",
+        message: "extern fn `" + fn_name + "` parameter `" + parameter_name
+            + "` type `"
+            + type_text
+            + "` is not C-ABI-compatible. "
+            + hint,
+        file_path: "",
+        primary: null,
+        suggestion: null
+    };
+}
+
+fn make_extern_var_missing_type_diagnostic(name: string) -> Diagnostic {
+    return Diagnostic {
+        code: "E0805",
+        severity: "error",
+        message: "extern var `" + name + "` is missing a type annotation."
+            + " Extern globals have no initializer for inference; the"
+            + " declaration must commit to a concrete C-ABI type"
+            + " (e.g. `* * u8` for libc `environ`).",
+        file_path: "",
+        primary: null,
+        suggestion: null
+    };
+}
+
+fn make_extern_var_type_diagnostic(name: string, type_text: string, kind: string) -> Diagnostic {
+    let code = extern_diagnostic_code_for(kind);
+    let hint = extern_type_hint_for(kind, type_text);
+    return Diagnostic {
+        code: code,
+        severity: "error",
+        message: "extern var `" + name + "` type `" + type_text
+            + "` is not C-ABI-compatible. "
+            + hint,
+        file_path: "",
+        primary: null,
+        suggestion: null
+    };
+}
+
+fn make_extern_return_type_diagnostic(fn_name: string, type_text: string, kind: string) -> Diagnostic {
+    let code = extern_diagnostic_code_for(kind);
+    let hint = extern_type_hint_for(kind, type_text);
+    return Diagnostic {
+        code: code,
+        severity: "error",
+        message: "extern fn `" + fn_name + "` return type `" + type_text
+            + "` is not C-ABI-compatible. "
+            + hint,
+        file_path: "",
+        primary: null,
+        suggestion: null
+    };
+}
+
+fn extern_diagnostic_code_for(kind: string) -> string {
+    if strings_equal(kind, "string") { return "E0801"; }
+    if strings_equal(kind, "array") { return "E0802"; }
+    return "E0805";
+}
+
+fn extern_type_hint_for(kind: string, type_text: string) -> string {
+    if strings_equal(kind, "string") {
+        return "Use `*u8` for raw byte buffers. Adapters that need to"
+            + " hand a Sailfin `string` to a C function must allocate a"
+            + " NUL-terminated copy (typically arena-backed) and pass"
+            + " its `*u8` pointer across the boundary.";
+    }
+    if strings_equal(kind, "array") {
+        return "Use `*T` (raw pointer) plus a separate length parameter."
+            + " Sailfin arrays carry runtime metadata that does not cross"
+            + " the C-ABI boundary.";
+    }
+    if strings_equal(kind, "void") {
+        return "`void` is valid only as a return type (or as a pointee:"
+            + " `*void`). For a parameter that ignores its value, use"
+            + " a concrete primitive (`i64`, `bool`) or a pointer.";
+    }
+    if strings_equal(type_text, "number") {
+        return "The legacy `number` alias is rejected on extern signatures."
+            + " Use `int` (or `i64`) for integer values, or `float`"
+            + " (or the lower-level `f32` for single-precision) for"
+            + " floating-point.";
+    }
+    return "Externs accept the LLVM-mapped Sailfin primitives (`int`"
+        + " — lowers to i64, `float` / `f64` — lower to double,"
+        + " `f32` — lowers to single-precision float, `i8`/`i16`/"
+        + "`i32`/`i64`, `u8`/`u16`/`u32`/`u64`, `usize`/`isize` —"
+        + " both pointer-sized, `bool`), `void` (return only),"
+        + " raw pointers (`*T`, `**T`, `*OpaqueStruct`), and function"
+        + " pointers (`fn(A) -> B`).";
+}

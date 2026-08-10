@@ -1,4 +1,4 @@
-// Line-budget sentinel for the `compiler/src/typecheck/` modules.
+// Line-budget sentinel for the `compiler/capsules/analyzer/src/typecheck/` modules.
 //
 // `typecheck.sfn` reached 2,806 lines — nearly twice the ~1,500-line
 // soft budget in `.claude/rules/code-style.md`, and the heaviest module
@@ -59,7 +59,8 @@ fn _count_newlines(source: string) -> int {
 // The module list is hardcoded, so a module added to the folder later is
 // not covered until it is added here too.
 fn _module_lines(name: string) -> int ![io] {
-    let source = fs.readFile("compiler/src/typecheck/" + name + ".sfn");
+    let source = fs.readFile("compiler/capsules/analyzer/src/typecheck/" + name
+        + ".sfn");
     // A non-empty read is a precondition — guards against a path typo
     // silently passing the budget check on an empty string.
     assert source.length > 0;
@@ -84,6 +85,6 @@ test "typecheck: each listed submodule stays under the line budget" ![io] {
 // and silently revert this decomposition while still compiling green —
 // the exact failure this split had to avoid.
 test "typecheck: the flat module does not shadow the folder" ![io] {
-    assert ! fs.exists("compiler/src/typecheck.sfn");
-    assert fs.exists("compiler/src/typecheck/mod.sfn");
+    assert ! fs.exists("compiler/capsules/analyzer/src/typecheck.sfn");
+    assert fs.exists("compiler/capsules/analyzer/src/typecheck/mod.sfn");
 }

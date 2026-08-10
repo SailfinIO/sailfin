@@ -415,7 +415,7 @@ from a pure spawn/parallel/channel op, which is what would have forced an edit.)
   rows and `effects_for_callee_target`.
 - `compiler/src/effect_checker.sfn` (~1289, 1334–1360, 1527–1558, 1261) — the
   spawn/parallel/channel arms and `_append_builtin_effects`.
-- `compiler/src/effect_taxonomy.sfn` (29–31) — the canonical-six lock.
+- `compiler/capsules/analyzer/src/effect_taxonomy.sfn` (29–31) — the canonical-six lock.
 - `runtime/sfn/concurrency/{channel,nursery,parallel,scheduler}.sfn` — the pure
   pthread primitives that are the factual basis for "the primitive contributes no
   effect."

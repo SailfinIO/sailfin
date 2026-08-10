@@ -4,22 +4,22 @@
 // authority-bearing check inputs (runtime globals, environment policy, and
 // relative-module resolution), then converts diagnostic data into the legacy
 // human-rendered `CheckResult` shape. Semantic analysis lives in
-// `compiler/src/analyzer.sfn`; JSON envelope rendering stays in
+// `compiler/capsules/analyzer/src/analyzer.sfn`; JSON envelope rendering stays in
 // `check/engine.sfn`.
+import { AnalyzerInput, AnalyzerResult, analyze_program } from "sfn/analyzer";
+import { ImportSymbolTable, empty_import_symbols } from "sfn/analyzer/effect_imports";
+import { ClosureSymbolSet } from "sfn/analyzer/import_resolution_check";
+import { Diagnostic, diagnostic_to_diag } from "sfn/analyzer/typecheck_types";
 import { intrinsic_effect_table } from "sfn/ir";
 import { int_to_string } from "sfn/strings";
 import { Program, Statement } from "sfn/syntax";
 import { parse_program } from "sfn/syntax";
 
-import { AnalyzerInput, AnalyzerResult, analyze_program } from "../analyzer";
 import { resolve_import_context } from "../check/import_resolution";
 import { render_diagnostic, split_source_lines } from "../diagnostics_render";
 import { read_effect_enforcement_env, resolve_effect_enforcement } from "../effect_gate";
-import { ImportSymbolTable, empty_import_symbols } from "../effect_imports";
-import { ClosureSymbolSet } from "../import_resolution_check";
 import { runtime_helper_call_names } from "../llvm/runtime_helpers/mod";
 import { load_prelude_global_names } from "../prelude_globals";
-import { Diagnostic, diagnostic_to_diag } from "../typecheck_types";
 
 struct CheckResult {
     file_path: string;

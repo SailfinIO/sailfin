@@ -26,7 +26,8 @@ import {
     FixSuggestion,
     Span,
     TextEdit
-} from "./diagnostic";
+} from "sfn/analyzer/diagnostic";
+
 import { substring } from "./string_utils";
 
 // Per-file/per-producer event in the envelope. `kind` discriminates

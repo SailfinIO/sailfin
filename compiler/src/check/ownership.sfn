@@ -1,12 +1,12 @@
 // Driver adapter for the pure ownership analysis pass. This module owns
 // presentation and stderr authority so analyzer consumers never pull them into
 // the semantic dependency closure.
+import { ImportSymbolTable, empty_import_symbols } from "sfn/analyzer/effect_imports";
+import { analyze_program_ownership_with_imports } from "sfn/analyzer/ownership_checker";
+import { Diagnostic, diagnostic_to_diag } from "sfn/analyzer/typecheck_types";
 import { Program } from "sfn/syntax";
 
 import { render_diagnostic } from "../diagnostics_render";
-import { ImportSymbolTable, empty_import_symbols } from "../effect_imports";
-import { analyze_program_ownership_with_imports } from "../ownership_checker";
-import { Diagnostic, diagnostic_to_diag } from "../typecheck_types";
 
 fn run_ownership_checker(program: Program) -> int ![io] {
     return run_ownership_checker_with_imports(program, empty_import_symbols());

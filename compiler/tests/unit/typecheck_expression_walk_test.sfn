@@ -12,10 +12,9 @@
 // asserting the E0420 diagnostic fires for an undefined callee placed
 // there. (Pre-#812 these asserted zero diagnostics; the count flip is
 // the proof the position is actually visited.)
+import { typecheck_diagnostics } from "sfn/analyzer/typecheck";
+import { Diagnostic } from "sfn/analyzer/typecheck_types";
 import { parse_program } from "sfn/syntax";
-
-import { typecheck_diagnostics } from "../../src/typecheck";
-import { Diagnostic } from "../../src/typecheck_types";
 
 fn _count_e0420(diagnostics: Diagnostic[]) -> int {
     let mut count: int = 0;

@@ -544,7 +544,7 @@ The validator only fires for imports whose source path starts with `./` or `../`
 
 ### Where it lives
 
-- `compiler/src/reexport_check.sfn:collect_reexport_violations` — the validator (extracted from `emit_native.sfn` so the emit-free `sfn check` path can run it too).
+- `compiler/capsules/analyzer/src/reexport_check.sfn:collect_reexport_violations` — the validator (extracted from `emit_native.sfn` so the emit-free `sfn check` path can run it too).
 - `compiler/src/main.sfn:_reject_reexport_violations` — the IO-effect reporter (build path), called from every `compile_to_llvm*` and `compile_to_native_text*` path right after typecheck.
 - `compiler/src/tools/check.sfn` — runs the same validator in the `sfn check` fast path, minting an `E0600` diagnostic (`reexport` producer) so PR authors see the failure in seconds rather than waiting for the ~13-minute self-host build. The CI step (`.github/workflows/ci.yml`) runs `sfn check compiler/src runtime` via the freshly-built native binary. This replaced the former `scripts/lint_no_implicit_reexports.py` Python lint (deleted — the duplicate textual implementation could drift from the compiler's own check).
 - `compiler/tests/e2e/test_reexport.sh` — the regression gate.  It tries to compile `fixtures/reexport/middle.sfn` (which has the bare bug shape) directly; the test passes when the emitter refuses with the expected diagnostic.
