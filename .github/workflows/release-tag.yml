@@ -298,6 +298,19 @@ jobs:
             exit 1
           fi
 
+      # `sfn package --installer` stages the runtime capsule's dependency
+      # closure (declared in runtime/capsule.toml [dependencies]) into the
+      # tarball at <prefix>/capsules/<scope>/<name>/src -- the layout
+      # locate_runtime_dep_capsule_src resolves at install time. A payload
+      # missing part of that closure link-fails *every* user program on a
+      # fresh install, so this asserts payload completeness before release
+      # assets are published.
+      - name: Verify installer payload dependency closure
+        shell: bash {0}
+        run: |
+          set -euo pipefail
+          bash scripts/verify-payload-dep-closure.sh "dist/installer-${{ matrix.package_label }}.tar.gz"
+
       # --- Cross-compile Windows binary from Linux LLVM IR ---
       - name: Cache MinGW-w64 apt packages
         if: matrix.package_label == 'linux-x86_64'
@@ -352,6 +365,16 @@ jobs:
           set -euo pipefail
           make ci-cross-windows
 
+      # Windows is cross-built inside this linux-x86_64 leg rather than
+      # having its own matrix entry, so the per-leg dependency closure check
+      # above never inspects its tarball -- verify it here instead.
+      - name: Verify Windows installer payload dependency closure
+        if: matrix.package_label == 'linux-x86_64'
+        shell: bash {0}
+        run: |
+          set -euo pipefail
+          bash scripts/verify-payload-dep-closure.sh "dist/installer-windows-x86_64.tar.gz"
+
       - name: Upload native artifacts
         uses: actions/upload-artifact@v7
         with:
@@ -402,7 +425,9 @@ jobs:
         with:
           ref: main
           path: .release-gates
-          sparse-checkout: scripts/verify-release-payloads.sh
+          sparse-checkout: |
+            scripts/verify-release-payloads.sh
+            scripts/verify-payload-dep-closure.sh
           sparse-checkout-cone-mode: false
 
       - name: Download build artifacts
