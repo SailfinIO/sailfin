@@ -121,6 +121,15 @@ struct X509Certificate {
     serial: int[];  // INTEGER content bytes, big-endian, opaque
     signature_algorithm: string;  // tbsCertificate.signature algorithm OID
     signature_algorithm_outer: string;  // Certificate.signatureAlgorithm OID
+    // The AlgorithmIdentifier `parameters` field of each of the two signature
+    // AlgorithmIdentifiers, verbatim (identifier and length octets included),
+    // empty when the field is absent. RSASSA-PSS carries its hash, mask-gen
+    // function and salt length here (RFC 4055 3.1), so a verifier that reads
+    // only the OID cannot know which profile it is being asked to check —
+    // hence both are retained rather than stepped over (SFN-824). Opaque to
+    // this module: parsed, never interpreted here.
+    signature_algorithm_params: int[];
+    signature_algorithm_params_outer: int[];
     // tbsCertificate TLV verbatim, identifier and length octets included: the
     // exact byte range a certificate signature is computed over (RFC 5280
     // 4.1.1.3). Exposed, never checked here.
@@ -156,6 +165,8 @@ fn _failed(message: string) -> X509Certificate {
         serial: [],
         signature_algorithm: "",
         signature_algorithm_outer: "",
+        signature_algorithm_params: [],
+        signature_algorithm_params_outer: [],
         tbs_der: [],
         signature_value: [],
         issuer_der: [],
@@ -314,6 +325,7 @@ fn x509_parse_with_limits(der: int[], limits: DerLimits) -> X509Certificate {
     let outer_alg_res = der_oid_string(der, outer_alg_oid_tlv);
     if !outer_alg_res.ok { return _failed(outer_alg_res.error); }
     let signature_algorithm_outer: string = outer_alg_res.value;
+    let signature_algorithm_params_outer: int[] = _slice(der, outer_alg_oid_tlv.end_off, sig_alg_outer.end_off - outer_alg_oid_tlv.end_off);
 
     let tbs_der: int[] = _slice(der, outer.content_off, tbs.end_off - outer.content_off);
 
@@ -372,6 +384,7 @@ fn x509_parse_with_limits(der: int[], limits: DerLimits) -> X509Certificate {
     let sig_oid_res = der_oid_string(der, sig_oid_tlv);
     if !sig_oid_res.ok { return _failed(sig_oid_res.error); }
     let signature_algorithm: string = sig_oid_res.value;
+    let signature_algorithm_params: int[] = _slice(der, sig_oid_tlv.end_off, peek.end_off - sig_oid_tlv.end_off);
     cur = peek.end_off;
 
     // issuer Name
@@ -726,6 +739,8 @@ fn x509_parse_with_limits(der: int[], limits: DerLimits) -> X509Certificate {
         serial: serial,
         signature_algorithm: signature_algorithm,
         signature_algorithm_outer: signature_algorithm_outer,
+        signature_algorithm_params: signature_algorithm_params,
+        signature_algorithm_params_outer: signature_algorithm_params_outer,
         tbs_der: tbs_der,
         signature_value: signature_value,
         issuer_der: issuer_der,
