@@ -193,6 +193,42 @@ test "trust_store: a missing bundle path fails closed" ![io] {
     assert store.anchors.length == 0;
 }
 
+test "trust_store: a bundle larger than the chain block cap loads every anchor" {
+    // 20 is over the old 16-block chain cap; a real system CA bundle is
+    // ~150 certificates, so this is the regression that catches SFN-807.
+    let mut pem: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= 20 { break; }
+        pem = pem + pem_ed_root();
+        i += 1;
+    }
+    let store: TrustStore = trust_store_from_pem(pem);
+    assert store.ok;
+    assert store.anchors.length == 20;
+}
+
+// 513 and 512 are written out rather than derived from
+// `_trust_store_max_blocks()`, which is module-private: the point of the test
+// is that the *message* names the bound, so pinning the exact text is the
+// assertion. Raising the bound is meant to fail here and be updated
+// deliberately. The middle assertion is the real SFN-807 guard — an over-limit
+// bundle must never again be reported as an empty one.
+test "trust_store: a bundle over the block limit reports the limit, not an empty bundle" {
+    let mut pem: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= 513 { break; }
+        pem = pem
+            + "-----BEGIN CERTIFICATE-----\nAA==\n-----END CERTIFICATE-----\n";
+        i += 1;
+    }
+    let store: TrustStore = trust_store_from_pem(pem);
+    assert ! store.ok;
+    assert store.error != "trust_store: no CERTIFICATE blocks in bundle";
+    assert store.error == "trust_store: bundle declares 513 CERTIFICATE blocks, over the 512-block limit";
+}
+
 // ── Fixtures ──
 //
 // `pem_*` are the PEM encodings of the ed25519 and ecdsa-p256 roots from

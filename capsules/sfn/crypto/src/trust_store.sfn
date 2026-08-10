@@ -18,8 +18,10 @@
 // cross-check outright rather than asserting "no effects" (SFN-764), so it
 // documents nothing on its own; the honest capability surface is the
 // per-function effect annotations and `docs/status.md`'s `sfn/crypto` row.
+import { int_to_string } from "sfn/strings";
+
 import { ptr_off } from "./bits";
-import { pem_certificates_to_der } from "./pem";
+import { pem_certificates_to_der_with_limits, pem_count_blocks } from "./pem";
 import { X509Certificate, x509_parse } from "./x509";
 
 struct TrustStore {
@@ -86,6 +88,22 @@ fn trust_store_default_paths() -> string[] {
     return ["/etc/ssl/certs/ca-certificates.crt", "/etc/pki/tls/certs/ca-bundle.crt", "/etc/ssl/ca-bundle.pem", "/etc/pki/tls/cacert.pem", "/etc/ssl/cert.pem", "/opt/homebrew/etc/openssl@3/cert.pem", "/usr/local/etc/openssl@3/cert.pem"];
 }
 
+// The largest number of PEM blocks a bundle may declare. `pem.sfn`'s own
+// default is a *chain* bound of 16, which is an order of magnitude too small
+// here: a system CA bundle is ~150 certificates and enterprise images
+// concatenate corporate anchors onto it, so that bound silently refused every
+// real trust store (SFN-807). The policy lives here, with the caller whose
+// input it describes, rather than in the generic PEM codec.
+//
+// 512 leaves ample headroom over anything seen in the wild. It bounds the
+// block *count*; the per-block work is bounded separately by
+// `pem.sfn::_pem_max_block_bytes()`, and `pem.sfn` clamps any caller-supplied
+// count against its own ceiling — raising this number cannot remove either
+// guard. Both halves matter: a count bound alone would have let a 32x-larger
+// worst case through, which is what made the quadratic body accumulation in
+// `pem.sfn` worth fixing alongside this (SFN-807).
+fn _trust_store_max_blocks() -> int { return 512; }
+
 // Parse raw DER certificate blobs into trust anchors. Pure: this is the whole
 // parse-and-account path, shared by every producer of anchors in this module,
 // and it is what the tests exercise.
@@ -98,7 +116,13 @@ fn trust_store_default_paths() -> string[] {
 // a second inlined copy of this loop would be free to drift.
 fn trust_store_from_der_blocks(blocks: int[][]) -> TrustStore {
     if blocks.length == 0 {
-        return _store_err("trust_store: no CERTIFICATE blocks in bundle");
+        // Deliberately not "no CERTIFICATE blocks in bundle": this tail now
+        // also serves the platform store (SFN-808), where there is no bundle
+        // and no PEM to have blocks in. The PEM front-end diagnoses its own
+        // empty decode before delegating here, so a cause named at this level
+        // could only ever be the wrong one — which is the misattribution
+        // SFN-807 removed.
+        return _store_err("trust_store: no certificate blocks to parse");
     }
 
     let mut anchors: X509Certificate[] = [];
@@ -124,10 +148,31 @@ fn trust_store_from_der_blocks(blocks: int[][]) -> TrustStore {
     };
 }
 
-// Parse a PEM CA bundle into trust anchors. Pure: PEM decode, then the shared
-// DER tail above.
+// Parse a PEM CA bundle into trust anchors. Pure: PEM decode under this
+// module's own block bound, then the shared DER tail above.
 fn trust_store_from_pem(pem: string) -> TrustStore {
-    return trust_store_from_der_blocks(pem_certificates_to_der(pem));
+    let blocks: int[][] = pem_certificates_to_der_with_limits(pem, _trust_store_max_blocks());
+    if blocks.length == 0 {
+        // `[]` is ambiguous, so report which cause it was. An over-limit
+        // bundle used to be reported as "no CERTIFICATE blocks", pointing
+        // diagnosis at the file instead of the bound (SFN-807).
+        let declared: int = pem_count_blocks(pem, "CERTIFICATE");
+        if declared == 0 {
+            return _store_err("trust_store: no CERTIFICATE blocks in bundle");
+        }
+        if declared > _trust_store_max_blocks() {
+            return _store_err("trust_store: bundle declares " + int_to_string(declared)
+                + " CERTIFICATE blocks, over the "
+                + int_to_string(_trust_store_max_blocks())
+                + "-block limit");
+        }
+        // Covers bad framing, a bad base64 body, an empty decode, and a block
+        // over `_pem_max_block_bytes()` — `pem.sfn` returns the same `[]` for
+        // all four, so the text names the set rather than guessing which.
+        return _store_err("trust_store: a CERTIFICATE block in bundle is malformed (PEM framing, base64, or a block over 65535 bytes)");
+    }
+
+    return trust_store_from_der_blocks(blocks);
 }
 
 // ── Platform trust store (SFN-808) ─────────────────────────────────────────

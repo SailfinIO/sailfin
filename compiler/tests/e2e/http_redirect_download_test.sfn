@@ -12,7 +12,136 @@
 // connectivity does it require the *redirecting* release URL to yield the real
 // manifest — so a regression of redirect following fails the test rather than
 // silently skipping. A per-run `mkdtemp` dir keeps it race-free and hermetic.
-import { find } from "sfn/strings";
+//
+// SFN-816: when the online path fails, the bare `assert dest_exists` below
+// used to give zero diagnostic — no TLS error, no HTTP status. The second
+// hop (following the redirect to the CDN) is a fresh TLS handshake, and
+// `runtime/sfn/platform/tls.sfn`'s `tls_last_error`/`tls_last_alert` are not
+// importable from user program source (the runtime is linked in, not
+// exposed as a module), so the only reachable channel is the
+// `SAILFIN_TRACE_TLS=1` stderr trace, and only a fresh process picks up an
+// env var — this in-process test cannot set one for itself (no `env.set`).
+// `_emit_redirect_tls_diagnostic` therefore builds and runs a throwaway
+// subprocess that repeats the same `http.download` with tracing on and
+// surfaces its stderr, mirroring `runtime_tls_verify_failure_test.sfn`'s
+// `_traced`/subprocess pattern. It runs only when the online download
+// already failed, and never changes the verdict — the original assertions
+// below still fail exactly as before.
+import { find, split } from "sfn/strings";
+import { clean_runner_env, nested_runner_scratch } from "sfn/test";
+
+fn _redirect_sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+fn _redirect_has_cmd(name: string) -> boolean ![io] {
+    let probe = process.run(["sh", "-c", "command -v " + name
+        + " >/dev/null 2>&1"]);
+    return probe == 0;
+}
+
+// Resolve a wall-clock timeout command so a stalled second-hop handshake
+// cannot hang CI. Empty when neither is available — the diagnostic step
+// then skips its subprocess run (the test's own assertions still run and
+// fail normally; only the extra diagnostic is foregone).
+fn _redirect_timeout_cmd() -> string ![io] {
+    if _redirect_has_cmd("timeout") { return "timeout"; }
+    if _redirect_has_cmd("gtimeout") { return "gtimeout"; }
+    return "";
+}
+
+// Write a throwaway capsule whose `main` repeats the same
+// `http.download(url, out_path)` the test performs in-process, so running
+// it as a subprocess with `SAILFIN_TRACE_TLS=1` names which TLS phase the
+// second-hop handshake failed at.
+fn _redirect_write_diag_client(root: string, url: string, out_path: string) -> string ![io] {
+    fs.createDirectory(root + "/src", true);
+    fs.writeFile(root + "/capsule.toml", "[capsule]\n"
+        + "name = \"sfn/http-redirect-diag-client\"\n"
+        + "version = \"0.0.1\"\n"
+        + "description = \"http redirect tls diagnostic client\"\n"
+        + "\n"
+        + "[capabilities]\n"
+        + "required = [\"io\", \"net\"]\n"
+        + "\n"
+        + "[build]\n"
+        + "entry = \"src/main.sfn\"\n"
+        + "kind = \"library\"\n");
+    fs.writeFile(root + "/src/main.sfn", "fn main() -> int ![net, io] {\n"
+        + "    let _ = http.download(\""
+        + url
+        + "\", \""
+        + out_path
+        + "\");\n"
+        + "    return 0;\n"
+        + "}\n");
+    return root + "/src/main.sfn";
+}
+
+fn _redirect_build_diag_bin(main_path: string, bin: string, build_env: string[]) -> string ![io] {
+    let exit = process.run_capture([_redirect_sfn_bin(), "build", "-o", bin, main_path], build_env);
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return ""; }
+    return bin;
+}
+
+// Emit each non-empty line of `stderr` as its own `print.info`, prefixed
+// for grep-ability in CI logs. An empty trace is itself a finding (the
+// subprocess never reached the TLS layer, or tracing produced nothing) so
+// it is reported explicitly rather than silently producing no output.
+fn _redirect_emit_trace(stderr: string) ![io] {
+    if stderr.length == 0 {
+        print.info("[http-redirect] no tls trace emitted");
+        return;
+    }
+    let lines = split(stderr, "\n");
+    let mut i: int = 0;
+    loop {
+        if i >= lines.length { break; }
+        if lines[i].length > 0 {
+            print.info("[http-redirect] tls trace: " + lines[i]);
+        }
+        i += 1;
+    }
+}
+
+// Build and run a subprocess that repeats the failed download with
+// `SAILFIN_TRACE_TLS=1`, and report its stderr trace plus exit status. Best
+// effort only: any failure to build/spawn the diagnostic subprocess is
+// itself reported and swallowed rather than propagated, so a diagnostic
+// mishap can never mask (or substitute for) the real assertion failure that
+// follows this call.
+fn _emit_redirect_tls_diagnostic(url: string) ![io] {
+    print.info("[http-redirect] online download failed; capturing a traced retry for diagnosis");
+    let scratch = nested_runner_scratch("http-redirect-diag");
+    fs.createDirectory(scratch, true);
+    let out_path = scratch + "/diag-body.out";
+    let main_path = _redirect_write_diag_client(scratch, url, out_path);
+    let build_env = clean_runner_env(nested_runner_scratch("http-redirect-diag-build"));
+    let client_bin = _redirect_build_diag_bin(main_path, scratch
+        + "/diag-client-bin", build_env);
+    if client_bin.length == 0 {
+        print.info("[http-redirect] could not build the diagnostic client; skipping traced retry");
+        return;
+    }
+
+    let tcmd = _redirect_timeout_cmd();
+    if tcmd.length == 0 {
+        print.info("[http-redirect] no timeout/gtimeout available; skipping traced retry");
+        return;
+    }
+
+    let mut run_env = clean_runner_env(nested_runner_scratch("http-redirect-diag-run"));
+    run_env.push("SAILFIN_TRACE_TLS=1");
+    let exit = process.run_capture([tcmd, "30", client_bin], run_env);
+    let _out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    print.info("[http-redirect] diagnostic subprocess exit status: " + exit.toString());
+    _redirect_emit_trace(err);
+}
 
 test "http: follows 3xx redirects when downloading a github release asset" ![io, net] {
     let dir = fs.mkdtemp("sfn-http-redirect-");
@@ -35,13 +164,21 @@ test "http: follows 3xx redirects when downloading a github release asset" ![io,
 
     // Online: the release manifest URL 302-redirects to a CDN. With redirect
     // following it must return the real, non-empty manifest naming the assets.
+    let release_url = "https://github.com/SailfinIO/sailfin/releases/download/v0.8.0-alpha.4/SHA256SUMS";
     let dest = dir + "/sums";
-    let _d = http.download("https://github.com/SailfinIO/sailfin/releases/download/v0.8.0-alpha.4/SHA256SUMS", dest);
+    let _d = http.download(release_url, dest);
     let dest_exists = fs.exists(dest);
     let mut content = "";
     if dest_exists { content = fs.readFile(dest); }
     let ok_len = content.length > 100;
     let ok_marker = find(content, "sailfin_0.8.0-alpha.4", 0) >= 0;
+
+    // SFN-816: name the cause before failing. This runs only on the failure
+    // path and never influences `dest_exists`/`ok_len`/`ok_marker` above —
+    // it is pure diagnostic output ahead of the unchanged assertions below.
+    if !dest_exists || !ok_len || !ok_marker {
+        _emit_redirect_tls_diagnostic(release_url);
+    }
 
     // Clean up before asserting so the suite stays hermetic regardless of the
     // outcome.
