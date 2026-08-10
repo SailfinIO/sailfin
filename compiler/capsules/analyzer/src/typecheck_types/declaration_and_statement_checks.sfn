@@ -36,7 +36,7 @@ import {
 } from "./extern_abi";
 import { check_type_parameters } from "./generic_bounds";
 import { SymbolEntry, make_duplicate_symbol_diagnostic } from "./symbol_table_and_raw_exprs";
-import { number_to_string, token_from_name, trim_text } from "./text_utils";
+import { token_from_name, trim_text, typecheck_int_to_string } from "./text_utils";
 import { check_intersection_value_type_annotation } from "./value_and_object_checks";
 
 fn check_struct_fields(fields: FieldDeclaration[], known: string[], type_params: string[]) -> Diagnostic[] {
@@ -466,7 +466,7 @@ fn make_main_signature_param_count_diagnostic(param_count: int, parameter_name: 
         severity: "error",
         message: "`fn main` accepts at most one parameter (`argv: string[]`),"
             + " got "
-            + number_to_string(param_count)
+            + typecheck_int_to_string(param_count)
             + ". Drop the extra parameters; values that vary per-run live in"
             + " environment variables, configuration files, or argv itself.",
         file_path: "",

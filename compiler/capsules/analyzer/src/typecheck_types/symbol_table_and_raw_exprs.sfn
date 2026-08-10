@@ -18,7 +18,7 @@ import { FixSuggestion } from "../diagnostic";
 import { Diagnostic } from "../typecheck_types";
 import { classify_declared_primitive } from "./annotation_shape_checks";
 import { is_c_abi_parameter_type, is_c_abi_return_type } from "./extern_abi";
-import { number_to_string, token_from_name, trim_text } from "./text_utils";
+import { token_from_name, trim_text, typecheck_int_to_string } from "./text_utils";
 
 struct SymbolEntry {
     name: string;
@@ -563,7 +563,7 @@ fn check_value_if_raw(text: string, span: SourceSpan?) -> Diagnostic[] {
 // must use the byte value. State the literal's byte value and the integer
 // rewrite. `span` is narrowed to the literal itself by the caller.
 fn make_char_literal_diagnostic(literal: string, byte: int, rewrite: string, span: SourceSpan?) -> Diagnostic {
-    let byte_str = number_to_string(byte);
+    let byte_str = typecheck_int_to_string(byte);
     let mut fix_message: string = "replace `" + literal + "` with its byte"
         + " value `"
         + byte_str
@@ -619,7 +619,7 @@ fn check_char_literal_raw(text: string, span: SourceSpan?) -> Diagnostic[] {
     let byte = char_code(inner);
     if byte < 0 { return []; }
     let literal = substring(trimmed, open, close + 1);
-    let rewrite = substring(trimmed, 0, open) + number_to_string(byte)
+    let rewrite = substring(trimmed, 0, open) + typecheck_int_to_string(byte)
         + substring(trimmed, close
         + 1, trimmed.length);
     // Narrow against the original `text`: `open` indexes `trimmed`, but the span

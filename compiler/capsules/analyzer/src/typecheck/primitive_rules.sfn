@@ -9,7 +9,7 @@ import { Expression, SourceSpan, TypeAnnotation } from "sfn/syntax";
 import { Diagnostic } from "../typecheck_types";
 import { classify_declared_primitive } from "../typecheck_types/annotation_shape_checks";
 import { SymbolEntry, find_value_symbol } from "../typecheck_types/symbol_table_and_raw_exprs";
-import { number_to_string, token_from_name } from "../typecheck_types/text_utils";
+import { token_from_name, typecheck_int_to_string } from "../typecheck_types/text_utils";
 
 fn _expression_primitive_type(expression: Expression?, bindings: SymbolEntry[]) -> string {
     if expression == null { return ""; }
@@ -84,7 +84,8 @@ fn call_argument_type_diagnostics(expression: Expression, bindings: SymbolEntry[
             index += 1;
             continue;
         }
-        let position = "argument " + number_to_string(index + 1) + " to `"
+        let position = "argument " + typecheck_int_to_string(index + 1)
+            + " to `"
             + expression.callee.name
             + "`";
         let next = _check_expected_primitive_kind(expression.arguments[index], expected, bindings, position, expression.callee.name, expression.callee.span);

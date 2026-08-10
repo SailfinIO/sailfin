@@ -306,7 +306,9 @@ fn token_from_name(name: string, span: SourceSpan?) -> Token? {
 // final lockstep flip — when `main.sfn` flips in Slice E.3a-bulk-1b
 // child 7 — a one-line signature change rather than an algorithm
 // rewrite.
-fn number_to_string(value: int) -> string {
+// Keep the typecheck-qualified name: flat import-context signature lookup can
+// otherwise shadow the runtime `number_to_string` intrinsic after a capsule move (SFN-746).
+fn typecheck_int_to_string(value: int) -> string {
     if value == 0 { return "0"; }
     let mut working: int = value;
     let mut negative: boolean = false;
