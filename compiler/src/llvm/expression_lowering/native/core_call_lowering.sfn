@@ -40,6 +40,7 @@ import { coerce_and_emit_call } from "./core_call_emission/dispatch";
 import {
     try_dispatch_atomic_builtin,
     try_dispatch_byte_load_builtin,
+    try_dispatch_secure_zero_builtin,
     try_dispatch_syscall_builtin
 } from "./core_call_resolution/builtin_dispatch";
 import { _ClosureSignatureParse, _parse_fn_pointer_annotation } from "./core_call_resolution/closure_callee";
@@ -257,6 +258,12 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
     // of the call pipeline.
     let byte_load_dispatch = try_dispatch_byte_load_builtin(trimmed_target, arguments, bindings, locals, temp_index, lines, functions, context);
     if byte_load_dispatch != null { return byte_load_dispatch; }
+
+    // Pre-resolution dispatch for the `secure_zero` builtin (SFN-782).
+    // Lowers to a guarded loop of volatile byte stores, so it cannot go
+    // through the straight-line call template at all.
+    let secure_zero_dispatch = try_dispatch_secure_zero_builtin(trimmed_target, arguments, bindings, locals, temp_index, lines, functions, context);
+    if secure_zero_dispatch != null { return secure_zero_dispatch; }
 
     let syscall_dispatch = try_dispatch_syscall_builtin(trimmed_target, arguments, bindings, locals, temp_index, lines, functions, context);
     if syscall_dispatch != null { return syscall_dispatch; }

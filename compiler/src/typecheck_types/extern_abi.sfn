@@ -270,6 +270,13 @@ fn is_builtin_call_name(name: string) -> boolean {
     // no source-level declaration, so the #812 walker must treat it as a
     // builtin or every `load_byte` call false-positives E0420.
     if strings_equal(name, "load_byte") { _ret = true; }
+    // `secure_zero(addr: int, len: int) -> void` is a call-form lowering
+    // primitive (SFN-782, design SFEP-0069 §3.6): a guarded loop of
+    // volatile byte stores the optimizer may not elide, emitted inline
+    // (compiler/src/llvm/secure_zero.sfn). It resolves to no source-level
+    // declaration, so the #812 walker must treat it as a builtin or every
+    // `secure_zero` call false-positives E0420.
+    if strings_equal(name, "secure_zero") { _ret = true; }
     if strings_equal(name, "syscall1") { _ret = true; }
     if strings_equal(name, "syscall2") { _ret = true; }
     if strings_equal(name, "syscall3") { _ret = true; }
