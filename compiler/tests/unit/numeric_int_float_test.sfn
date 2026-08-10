@@ -11,12 +11,12 @@
 // `+` became `string_concat`. The LLVM-level assertions for that
 // fix live in `compiler/tests/e2e/test_numeric_int_float.sh`; this
 // file pins the front-end shape (parse → typecheck → native IR).
+import { typecheck_diagnostics } from "sfn/analyzer/typecheck";
+import { Diagnostic } from "sfn/analyzer/typecheck_types";
 import { parse_program } from "sfn/syntax";
 
 import { emit_native_text_with_module_name } from "../../src/emit_native";
 import { index_of } from "../../src/string_utils";
-import { typecheck_diagnostics } from "../../src/typecheck";
-import { Diagnostic } from "../../src/typecheck_types";
 
 fn _emit(source: string) -> string ![io] {
     let program = parse_program(source);

@@ -12,10 +12,9 @@
 // The `let` initializer is inspected at top level, matching the
 // convention in `parser_iife_postfix_test.sfn` (the block-scoped `let`
 // initializer path is opaque, tracked separately).
+import { typecheck_diagnostics } from "sfn/analyzer/typecheck";
 import { Block, Expression } from "sfn/syntax";
 import { parse_program } from "sfn/syntax";
-
-import { typecheck_diagnostics } from "../../src/typecheck";
 
 // True if typechecking `source` produces a diagnostic with `code`.
 fn _produces_diagnostic(source: string, code: string) -> boolean ![io] {

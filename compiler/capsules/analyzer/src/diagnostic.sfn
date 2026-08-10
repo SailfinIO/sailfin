@@ -1,0 +1,102 @@
+// compiler/capsules/analyzer/src/diagnostic.sfn
+//
+// Unified diagnostic representation shared by frontend and backend sinks.
+// This is deliberately a leaf module: backend producers can adopt `Diag`
+// without importing the frontend AST or token graph.
+// One concrete, machine-applicable source edit. Coordinates are inclusive
+// and 1-based; an insertion has identical start and end coordinates.
+struct TextEdit {
+    start_line: int;
+    start_column: int;
+    end_line: int;
+    end_column: int;
+    replacement: string;
+}
+
+// One cohesive fix-it with the edits a tool applies atomically.
+struct FixSuggestion {
+    message: string;
+    edits: TextEdit[];
+}
+
+// A 1-based, end-exclusive source range independent of frontend tokens.
+struct Span {
+    start_line: int;
+    start_column: int;
+    end_line: int;
+    end_column: int;
+}
+
+// One coded, severity-bearing diagnostic emitted by any compiler stage.
+struct Diag {
+    code: string;
+    severity: string;
+    message: string;
+    file_path: string;
+    span: Span?;
+    stage: string;
+    suggestion: FixSuggestion?;
+}
+
+// Primitive frontend adapter kept here rather than importing `Diagnostic`.
+// The typed wrapper in `typecheck_types/mod.sfn` decomposes its optional Token,
+// preserving this module's backend-safe dependency direction.
+fn diag_from_typecheck(code: string, severity: string, message: string, file_path: string, primary_line: int, primary_column: int, primary_lexeme_length: int, has_primary: boolean, stage: string, suggestion: FixSuggestion?) -> Diag {
+    let mut span: Span? = null;
+    if has_primary {
+        span = Span {
+            start_line: primary_line,
+            start_column: primary_column,
+            end_line: primary_line,
+            end_column: primary_column + primary_lexeme_length
+        };
+    }
+    return Diag {
+        code: code,
+        severity: severity,
+        message: message,
+        file_path: file_path,
+        span: span,
+        stage: stage,
+        suggestion: suggestion
+    };
+}
+
+// Return whether this diagnostic must fail the current compilation.
+fn diag_is_error(diag: Diag) -> boolean { return diag.severity == "error"; }
+
+// Fill an instruction span onto diagnostics that do not already carry one.
+// Existing producer-provided spans always win.
+fn stamp_spans(diags: Diag[], span: Span) -> Diag[] {
+    let mut index: int = 0;
+    loop {
+        if index >= diags.length { break; }
+        if diags[index].span == null { diags[index].span = span; }
+        index += 1;
+    }
+    return diags;
+}
+
+// Compatibility shim for backend carriers that still transport strings.
+// Lowering historically spells its stage as "llvm lowering"; all other
+// stages use their canonical `Diag.stage` value directly.
+fn diag_to_legacy_string(diag: Diag) -> string {
+    let mut prefix = diag.stage;
+    if prefix == "lowering" { prefix = "llvm lowering"; }
+    if diag_is_error(diag) {
+        prefix = prefix + " [fatal]";
+        if diag.code.length > 0 { prefix = prefix + " [" + diag.code + "]"; }
+    }
+    return prefix + ": " + diag.message;
+}
+
+export {
+    Diag,
+    FixSuggestion,
+    Span,
+    TextEdit,
+    diag_from_typecheck,
+    diag_is_error,
+    diag_to_legacy_string,
+    stamp_spans
+};

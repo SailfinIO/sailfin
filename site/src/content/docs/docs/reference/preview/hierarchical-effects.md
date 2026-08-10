@@ -8,7 +8,7 @@ sidebar:
 Shipped: `io.fs`, `io.console`, `net.http`, `net.ws` — sub-effects that are
 **refinements within the canonical six** (`io`, `net`, `clock`, `gpu`, `model`,
 `rand`), not new top-level effects. `io.fs` refines `io` (`io.fs ⊑ io`); the
-taxonomy stays locked at six atoms (`compiler/src/effect_taxonomy.sfn`).
+taxonomy stays locked at six atoms (`compiler/capsules/analyzer/src/effect_taxonomy.sfn`).
 
 The target-neutral intrinsic registry detects effectful builtin calls and
 attributes the narrow sub-effect: `fs.*` calls require `io.fs`, `print.*` /

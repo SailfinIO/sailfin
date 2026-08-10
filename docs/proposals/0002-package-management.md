@@ -61,8 +61,8 @@ restriction (`docs/strategy/decision-brief.md` §3). The compiler holds up its
 end: `[capabilities] required` is parsed
 (`compiler/src/toml_parser.sfn:636-653`), cross-checked against every function's
 declared effects by `validate_capsule_capabilities`
-(`compiler/src/effect_checker/validations.sfn:16`), and enforced as **E0403** — emitted at
-`compiler/src/effect_diagnostics.sfn:147`, rendered via
+(`compiler/capsules/analyzer/src/effect_checker/validations.sfn:16`), and enforced as **E0403** — emitted at
+`compiler/capsules/analyzer/src/effect_diagnostics.sfn:147`, rendered via
 `compiler/src/diagnostics_render.sfn:84` — through the build gate
 (`compiler/src/effect_gate.sfn:152-166`).
 
@@ -610,8 +610,8 @@ populated cache makes **no** network call, so Phases 1–2 cannot affect
   (`toml_get_string` `:782`, `toml_get_string_array` `:589`) serves arbitrary
   sections including `[registry]` and `[workspace.capabilities]`, so the typed
   ladder is not the complete recognized surface.
-- `compiler/src/effect_checker/validations.sfn:16`
-  (`validate_capsule_capabilities`), `compiler/src/effect_diagnostics.sfn:147`
+- `compiler/capsules/analyzer/src/effect_checker/validations.sfn:16`
+  (`validate_capsule_capabilities`), `compiler/capsules/analyzer/src/effect_diagnostics.sfn:147`
   (E0403 literal), `compiler/src/diagnostics_render.sfn:84`,
   `compiler/src/effect_gate.sfn:152-166`
 - `compiler/capsules/ir/src/intrinsic_effects.sfn:56-57`, `:125-127` and

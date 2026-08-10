@@ -13,7 +13,7 @@ existing CPU-only capsule.
 
 ## 2. Current state (verified 2026-07-24)
 
-- `gpu` is in `canonical_effects()` (`compiler/src/effect_taxonomy.sfn:30`) and
+- `gpu` is in `canonical_effects()` (`compiler/capsules/analyzer/src/effect_taxonomy.sfn:30`) and
   flows through `is_canonical_effect` / `effect_root` / `is_recognized_effect` /
   `effect_subsumes`. It has **zero** other mentions in `compiler/src` or
   `runtime/` — no special-casing, no suppression.
@@ -24,7 +24,7 @@ existing CPU-only capsule.
   (`compiler/src/effect_checker.sfn:1480-1521`) feeds `root + "." + member` into
   it, so a `ns.method()` builtin needs no `effect_checker.sfn` edit.
 - Cross-module propagation is signature-driven
-  (`compiler/src/effect_imports.sfn`, `_propagate_imported_callee_effects` at
+  (`compiler/capsules/analyzer/src/effect_imports.sfn`, `_propagate_imported_callee_effects` at
   `effect_checker.sfn:1272`); `E0400` in-module, `E0402` cross-module, `E0403`
   manifest, `E0404` unrecognized root. The structured fix-it
   (`_suggestion_for_missing_effect`, `diagnostics_render.sfn:154-169`) and the

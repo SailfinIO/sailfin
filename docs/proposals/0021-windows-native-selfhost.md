@@ -474,12 +474,12 @@ Linux+macOS before merge.
    value": never give a by-value aggregate a C prototype on either side.** And
    for `extern fn` that invariant is already **mechanically enforced**, not left
    to vigilance: `_is_c_abi_type_inner`
-   (`compiler/src/typecheck_types/extern_abi.sfn:49-95`) accepts only primitives, raw pointers and function
+   (`compiler/capsules/analyzer/src/typecheck_types/extern_abi.sfn:49-95`) accepts only primitives, raw pointers and function
    pointers, so a bare struct name or an aggregate spelling on an `extern fn`
    signature is rejected with an **E0801-E0805** diagnostic (the code varies by
    spelling: E0801 for `string`, E0802 for `T[]`, E0805 for a bare struct name)
    by `check_extern_signature`
-   (`compiler/src/typecheck_types/declaration_and_statement_checks.sfn:198-242`).
+   (`compiler/capsules/analyzer/src/typecheck_types/declaration_and_statement_checks.sfn:198-242`).
    There is no path today for an `extern fn` to declare `{i8*, i64}` at all.
 
    The residual exposure is precisely the surface the typechecker does **not**

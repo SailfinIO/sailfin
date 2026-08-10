@@ -16,11 +16,7 @@
 //   - E5: use-after-move (`E0901`) and second-live-binding (`E0904`)
 //     diagnostics with both spans, plus a clean move-and-consume
 //     negative case
-import { contains } from "sfn/strings";
-import { parse_program } from "sfn/syntax";
-
-import { run_ownership_checker } from "../../src/check/ownership";
-import { append_import_function_signature_from_module, empty_import_symbols } from "../../src/effect_imports";
+import { append_import_function_signature_from_module, empty_import_symbols } from "sfn/analyzer/effect_imports";
 import {
     OwnershipBinding,
     analyze_program_ownership,
@@ -28,7 +24,11 @@ import {
     check_ownership,
     check_ownership_with_imports,
     mark_binding_moved
-} from "../../src/ownership_checker";
+} from "sfn/analyzer/ownership_checker";
+import { contains } from "sfn/strings";
+import { parse_program } from "sfn/syntax";
+
+import { run_ownership_checker } from "../../src/check/ownership";
 
 test "ownership: dormant pass emits no warnings" ![io] {
     let source = "fn main() ![io] {\n    let x = 1;\n    let y = x;\n    print.info(\"hi\");\n}\n";

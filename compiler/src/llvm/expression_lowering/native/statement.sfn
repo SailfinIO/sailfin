@@ -5,9 +5,9 @@
 // Implements `lower_expression_statement`, `lower_return_instruction`, and
 // `prepare_parameters`.  Type mapping, suspension detection, async ABI helpers,
 // and expression parsing live in sibling submodules.
+import { Diag, diag_to_legacy_string } from "sfn/analyzer/diagnostic";
 import { NativeFunction, NativeInstruction, NativeSourceSpan } from "sfn/ir";
 
-import { Diag, diag_to_legacy_string } from "../../../diagnostic";
 import { default_return_literal, is_simple_identifier } from "../../expressions_helpers";
 // `format_root_scope_id` lives in the lifetime utilities module; the
 // `core_scopes` re-export points to the same canonical implementation.

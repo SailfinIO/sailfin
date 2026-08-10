@@ -47,7 +47,7 @@ contract: a dead-store pass may delete it after proving the bytes are never read
 again.
 
 The prerequisite ownership substrate now exists. `OwnedBuf`, `Affine<T>`, and
-`Linear<T>` are move-tracked by `compiler/src/ownership_checker.sfn`; the
+`Linear<T>` are move-tracked by `compiler/capsules/analyzer/src/ownership_checker.sfn`; the
 memory/string core uses the consume-and-return `OwnedBuf` API; and concurrency
 captures move owned values. What does not exist is the stronger secrecy
 contract:
@@ -601,7 +601,7 @@ is not a valid assertion strategy.
 - SFEP-0018 — ownership lattice and `OwnedBuf` family.
 - SFEP-0064 — draft generic reclamation seam; subordinate to this proposal's
   stronger wipe contract if the designs later converge.
-- `compiler/src/ownership_checker.sfn` — shipped move/UAF enforcement.
+- `compiler/capsules/analyzer/src/ownership_checker.sfn` — shipped move/UAF enforcement.
 - `compiler/src/llvm/lowering/instructions_try.sfn` and
   `runtime/sfn/exception.sfn` — current `setjmp`/`longjmp` exception path.
 - [LLVM Language Reference: volatile memory accesses](https://llvm.org/docs/LangRef.html#volatile-memory-accesses)

@@ -43,7 +43,7 @@ graduates-to:
 
 > **Addendum (2026-08-02) — a structural review found a real capability
 > hole, not a false premise this time.** `classify_fn_cast`
-> (`compiler/src/typecheck_types/symbol_table_and_raw_exprs.sfn:271-284`)
+> (`compiler/capsules/analyzer/src/typecheck_types/symbol_table_and_raw_exprs.sfn:271-284`)
 > accepts `<fn> as * u8` and `<fn> as *fn (…)` for any non-generic function —
 > it checks only `entry.is_generic`, never the function's effect row — and
 > §3.3's registration path erases the resulting pointer to `*u8` before it
@@ -147,7 +147,7 @@ already works.
 of a concrete, non-generic, C-ABI function; misuse is diagnosed by `E0808`
 (function used as a value in an unsupported position) and `E0809` (address of a
 generic function), both in
-`compiler/src/typecheck_types/symbol_table_and_raw_exprs.sfn:214-283`.
+`compiler/capsules/analyzer/src/typecheck_types/symbol_table_and_raw_exprs.sfn:214-283`.
 `runtime/sfn/concurrency/scheduler.sfn:187-193` already uses it to hand
 `sfn_scheduler_worker`'s address to `pthread_create`.
 
@@ -196,7 +196,7 @@ the seam below, and — per §5 — do not force a seed cut:
   with the call site casting to `*fn (…)` at the use site rather than at the
   field declaration.
 - **Extern-parameter position.** `is_c_abi_function_pointer`
-  (`compiler/src/typecheck_types/extern_abi.sfn:307`) still requires a literal
+  (`compiler/capsules/analyzer/src/typecheck_types/extern_abi.sfn:307`) still requires a literal
   `fn(` prefix and knows nothing of the `*fn (…)` spelling, so a typed
   `extern fn` parameter is still spelled `* u8` and cast at the call site
   (`runtime/sfn/platform/pthread.sfn:19-32`).
@@ -440,7 +440,7 @@ address-of diagnostics, not a new type or new code (§8).
 
 **Prerequisite (blocking, not v0 polish): effect-safe callback materialization
 must land before §3.3's registration path ships.** As verified against source,
-`classify_fn_cast` (`compiler/src/typecheck_types/symbol_table_and_raw_exprs.sfn:271-284`)
+`classify_fn_cast` (`compiler/capsules/analyzer/src/typecheck_types/symbol_table_and_raw_exprs.sfn:271-284`)
 today checks only `entry.is_generic`; it has no effect-row check at all, so the
 rejection this section describes does not exist yet. Registering a reclaimer
 that erases an effectful function's address is a hole in the Reach pillar —
@@ -746,9 +746,9 @@ duplicating an ad hoc check.
 - `compiler/tests/e2e/plain_fn_ptr_call_test.sfn`,
   `compiler/tests/e2e/fixtures/plain_fn_ptr_call.sfn` — regression coverage for
   the shipped capability
-- `compiler/src/typecheck_types/extern_abi.sfn:302-317` —
+- `compiler/capsules/analyzer/src/typecheck_types/extern_abi.sfn:302-317` —
   `is_c_abi_function_pointer`, the site the §3.2 extern-parameter gap touches
-- `compiler/src/typecheck_types/symbol_table_and_raw_exprs.sfn:214-283` —
+- `compiler/capsules/analyzer/src/typecheck_types/symbol_table_and_raw_exprs.sfn:214-283` —
   `E0808` / `E0809`, the shipped address-of primitive
 - `compiler/src/llvm/expression_lowering/native/core_call_lowering.sfn:65-92,268` —
   `try_lower_plain_fn_ptr_call` and its dispatch order

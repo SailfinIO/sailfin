@@ -9,10 +9,10 @@
 // at link time via symbol mangling. This cycle is intentional: async emission
 // needs the main emit_llvm_function for the inner body, while the main
 // emitter delegates async wrapper generation to the async module.
+import { Diag, diag_to_legacy_string } from "sfn/analyzer/diagnostic";
 import { NativeFunction } from "sfn/ir";
 import { substring } from "sfn/strings";
 
-import { Diag, diag_to_legacy_string } from "../../diagnostic";
 import { make_string_constant_name_for_module } from "../expression_lowering/native/core_text";
 import { emit_runtime_call, empty_runtime_call_overrides } from "../expression_lowering/native/runtime_call";
 import { default_return_literal } from "../expressions_helpers";

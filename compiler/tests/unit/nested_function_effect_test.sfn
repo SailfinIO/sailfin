@@ -6,10 +6,9 @@
 // edge, transitively, exactly like top-level functions. A nested fn
 // whose body uses an effect it does not itself declare is flagged
 // `E0400` on the nested fn (not silently absorbed by the parent).
+import { validate_effects } from "sfn/analyzer/effect_checker";
+import { EffectViolation } from "sfn/analyzer/effect_checker/types";
 import { parse_program } from "sfn/syntax";
-
-import { validate_effects } from "../../src/effect_checker";
-import { EffectViolation } from "../../src/effect_checker/types";
 
 fn _has_violation_for(violations: EffectViolation[], routine_name: string) -> boolean {
     let mut i: int = 0;

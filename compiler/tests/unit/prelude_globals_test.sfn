@@ -11,7 +11,7 @@
 // The scanner lives in `prelude_scan` (pure) rather than
 // `prelude_globals` (which references the runtime-root externs) so this
 // test links without the compiler binary's runtime exec object.
-import { prelude_global_names_from_source } from "../../src/prelude_scan";
+import { prelude_global_names_from_source } from "sfn/analyzer/prelude_scan";
 
 fn _contains_name(names: string[], target: string) -> boolean {
     let mut i: int = 0;

@@ -1,5 +1,5 @@
 // Regression coverage for W0210 bare-assert soft-deprecation
-// (compiler/src/bare_assert_check.sfn, issue #1173, epic #842 Phase 3).
+// (compiler/capsules/analyzer/src/bare_assert_check.sfn, issue #1173, epic #842 Phase 3).
 //
 // `collect_bare_assert_findings` walks every top-level `test { ... }`
 // block and returns one finding per bare `assert` in its body
@@ -7,9 +7,8 @@
 // into an `IfStatement` calling `runtime_assert_fail_fn`, so the collector
 // recognizes that desugared shape. `assert` outside a `test` block is
 // never visited.
+import { collect_bare_assert_findings } from "sfn/analyzer/bare_assert_check";
 import { parse_program } from "sfn/syntax";
-
-import { collect_bare_assert_findings } from "../../src/bare_assert_check";
 
 test "w0210: flags a bare assert inside a test block" ![io] {
     let program = parse_program("test \"t\" { assert 1 == 1; }");

@@ -25,6 +25,12 @@
 // only what its `mod.sfn` declares directly (documented limitation in
 // docs/reference/symbols-json-schema.md).
 import {
+    SymbolEntry,
+    encode_symbols_error_json,
+    encode_symbols_json,
+    symbols_from_program
+} from "sfn/analyzer/symbols_index";
+import {
     Command,
     Matches,
     command,
@@ -36,12 +42,6 @@ import {
 import { parse_program } from "sfn/syntax";
 
 import { substring } from "../../string_utils";
-import {
-    SymbolEntry,
-    encode_symbols_error_json,
-    encode_symbols_json,
-    symbols_from_program
-} from "../../symbols_index";
 import { toml_get_name } from "../../toml_parser";
 import { resolve_compiler_version } from "../../version";
 import { CliContext } from "../context";

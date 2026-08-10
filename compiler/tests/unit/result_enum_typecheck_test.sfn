@@ -6,14 +6,13 @@
 // lowering consumption is #830 and out of scope here; these tests drive
 // the callable primitives directly, with the enum declared IN-FILE (not
 // in the prelude).
-import { Statement, TypeAnnotation } from "sfn/syntax";
-import { parse_program } from "sfn/syntax";
-
-import { Diagnostic } from "../../src/typecheck_types";
+import { Diagnostic } from "sfn/analyzer/typecheck_types";
 import {
     resolve_enum_variant_field_type_from_annotation,
     validate_enum_annotation
-} from "../../src/typecheck_types/interface_and_generics";
+} from "sfn/analyzer/typecheck_types/interface_and_generics";
+import { Statement, TypeAnnotation } from "sfn/syntax";
+import { parse_program } from "sfn/syntax";
 
 fn _enum_decl(source: string, name: string) -> Statement? ![io] {
     let program = parse_program(source);

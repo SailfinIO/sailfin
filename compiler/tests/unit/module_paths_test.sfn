@@ -3,11 +3,15 @@ import { expect_eq_str } from "sfn/test";
 import { module_name_from_path } from "../../src/module_paths";
 
 test "module paths: compiler driver source keeps its historical slug" {
-    assert expect_eq_str(module_name_from_path("compiler/src/analyzer.sfn"), "analyzer").ok;
+    assert expect_eq_str(module_name_from_path("compiler/src/main.sfn"), "main").ok;
 }
 
 test "module paths: compiler capsule source uses its workspace identity" {
     assert expect_eq_str(module_name_from_path("compiler/capsules/syntax/src/ast.sfn"), "sfn/syntax/ast").ok;
+}
+
+test "module paths: analyzer capsule uses its workspace identity" {
+    assert expect_eq_str(module_name_from_path("compiler/capsules/analyzer/src/analyzer.sfn"), "sfn/analyzer/analyzer").ok;
 }
 
 test "module paths: absolute compiler capsule path uses its workspace identity" {

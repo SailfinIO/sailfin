@@ -1,0 +1,390 @@
+// compiler/capsules/analyzer/src/effect_checker/analyzer.sfn
+//
+// Routine orchestration, missing-effect analysis, and public-surface inference.
+import {
+    Block,
+    Decorator,
+    FunctionSignature,
+    Program,
+    Statement
+} from "sfn/syntax";
+import { Token } from "sfn/syntax";
+
+import { ResolvedDecorator, resolve_routine_decorators } from "../decorator_resolver";
+import {
+    ImportSymbolTable,
+    empty_import_symbols,
+    localize_import_symbols_for_program
+} from "../effect_imports";
+import { is_universally_allowed_effect } from "../effect_taxonomy";
+import { collect_effects_from_block } from "./collector";
+import {
+    _collect_nested_fns_in_block,
+    _local_effect_table,
+    _merge_local_functions,
+    _suppress_shadowing_params
+} from "./scope";
+import { EffectRequirement, EffectViolation } from "./types";
+import {
+    _any_subsumes,
+    _token_from_signature,
+    append_requirement,
+    append_unique_effect,
+    append_violation,
+    append_violations,
+    contains_requirement_for_effect
+} from "./utils";
+
+fn validate_effects(program: Program) -> EffectViolation[] {
+    return validate_effects_with_imports(program, empty_import_symbols());
+}
+
+// Phase E entry — accepts the global symbol table the loader
+// produced from the imported `.sfn-asm` artifacts. `localize_…`
+// filters the table down to just-this-program's imports and applies
+// alias rewrites, so the per-`Call` lookup in
+// `collect_effects_from_expression` keys directly off the local
+// identifier name.
+fn validate_effects_with_imports(program: Program, imports: ImportSymbolTable) -> EffectViolation[] {
+    // G1b (#1184): the threaded table carries BOTH cross-module imports
+    // (localized + alias-rewritten) and same-module top-level `fn`s. The
+    // checker resolves an `Identifier` callee against this one table; the
+    // entry's `origin` decides whether a missing effect renders `E0402`
+    // (import) or `E0400` (local). Imports are localized first so a local
+    // `fn` shadowing an import wins (last-write-wins in `append_local_*`),
+    // matching the duplicate-symbol resolution the typechecker would apply.
+    let local_imports = _merge_local_functions(program, localize_import_symbols_for_program(program, imports));
+    let mut violations: EffectViolation[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= program.statements.length { break; }
+        violations = append_violations(violations, analyze_statement(program.statements[index], local_imports));
+        index += 1;
+    }
+    return violations;
+}
+
+fn _analyze_routine_with_nested(signature: FunctionSignature, body: Block, decorators: Decorator[], name: string, imports: ImportSymbolTable) -> EffectViolation[] {
+    let scoped_nested = _collect_nested_fns_in_block(body, imports);
+    // Flat routine-wide table for the ENCLOSING routine's own body walk. #1940's
+    // per-block hoisting (`_hoist_block_local_fns` inside `collect_effects_from_block`)
+    // refines resolution to the nearest-enclosing declaration during that walk,
+    // so the flat seed is only a starting point and its cross-scope name
+    // collisions do not affect the enclosing routine's own diagnostics.
+    let mut flat: Statement[] = [];
+    let mut fi: int = 0;
+    loop {
+        if fi >= scoped_nested.length { break; }
+        flat.push(scoped_nested[fi].decl);
+        fi += 1;
+    }
+    let local = _local_effect_table(imports, flat);
+    let mut issues = analyze_routine(signature, body, decorators, name, local);
+    let mut ni: int = 0;
+    loop {
+        if ni >= scoped_nested.length { break; }
+        let sn = scoped_nested[ni];
+        // Deferred nested-fn analysis: seed each nested fn's body with the effect
+        // table of its LEXICALLY ENCLOSING scope (its siblings), not the flat
+        // routine-wide table — so a call to a sibling resolves by scope, closing
+        // the cross-scope same-name collision (SFEP-0042 §3.4 gap (a), #1950).
+        issues = append_violations(issues, analyze_routine(sn.decl.signature, sn.decl.body, sn.decl.decorators, sn.decl.signature.name, sn.enclosing));
+        ni += 1;
+    }
+    return issues;
+}
+
+// Zero the effect row of any in-scope `fn` shadowed by a same-named parameter
+// (SFEP-0042 §3.4 gap (b), #1950): inside the body, a call to the parameter
+// goes to the passed value, not the shadowed fn, so the fn's effects must not
+// be required of the body. Copy-on-write so a table shared with an enclosing
+// scope is never mutated. The value's own effects are a first-class-fn-value
+fn analyze_statement(statement: Statement, imports: ImportSymbolTable) -> EffectViolation[] {
+    if statement.variant == "FunctionDeclaration" {
+        // Analyze the routine and each nested / local `fn` it declares, all
+        // under a routine-local effect table (SFEP-0042). A nested declaration
+        // no longer inlines its effects into the enclosing block
+        // (`collect_effects_from_statement`); instead a *call* to it requires
+        // its effects via the local table, and its body is checked as its own
+        // deferred routine.
+        return _analyze_routine_with_nested(statement.signature, statement.body, statement.decorators, statement.signature.name, imports);
+    }
+    if statement.variant == "TestDeclaration" {
+        let signature = FunctionSignature {
+            name: statement.name,
+            is_async: false,
+            parameters: [],
+            return_type: null,
+            effects: statement.effects,
+            type_parameters: [],
+            name_span: statement.name_span
+        };
+        let qualified = "test " + statement.name;
+        return _analyze_routine_with_nested(signature, statement.body, statement.decorators, qualified, imports);
+    }
+    if statement.variant == "StructDeclaration" {
+        let mut issues: EffectViolation[] = [];
+        let mut index: int = 0;
+        loop {
+            if index >= statement.methods.length { break; }
+            let method = statement.methods[index];
+            let qualified = statement.name + "." + method.signature.name;
+            issues = append_violations(issues, _analyze_routine_with_nested(method.signature, method.body, method.decorators, qualified, imports));
+            index += 1;
+        }
+        return issues;
+    }
+    return [];
+}
+
+// `fn main` is the program entry point: the lowering pass at
+// `compiler/src/llvm/lowering/emission.sfn:319` emits a C-compatible
+// `main(argc, argv)` wrapper, so there is no Sailfin caller demanding
+// effects from main. The effect-checker treats main's declared effect
+// set as ambient: whatever the user writes on `![…]` is granted to the
+// body, and the body's used-vs-declared check still gates operations
+// (i.e. `fn main()` with no `![io]` cannot call `print.info`).
+//
+// The implementation needs no special-case branch — `analyze_routine`
+// already reads the declared set from `signature.effects` and accepts
+// any effect listed there. This predicate exists to document the
+// invariant and to give future capability-cross-check code (E0403) a
+// hook for the "main is the program boundary" exemption if it ever
+// needs one.
+fn is_program_entry_point(signature: FunctionSignature) -> boolean {
+    return signature.name == "main";
+}
+
+// Turn each resolved decorator on a routine into one requirement per declared
+// effect (SFEP-0023 §4.3). The `imported \`<name>\`` description prefix routes a
+// missing one through the cross-module `E0402` path in
+// `diagnostics_render.code_for_missing_effect` — a decorator is just an implicit
+// call, so it reuses the imported-effect diagnostic family rather than inventing
+// one. Decorator applications carry no source span (`Decorator` has no span
+// field), so `trigger` stays null and the violation falls back to the signature
+// token (`analyze_routine`). `pure` is skipped: it never satisfies a real
+// requirement (`effect_taxonomy.sfn`), so it must never be required either —
+// mirroring `_propagate_imported_callee_effects`. The built-in-fallback path
+// (`@logExecution`/`@trace` used un-imported) also renders as `imported
+// \`<name>\`` here so it routes through E0402; the wording is a migration-only
+// artifact that retires with the built-in seam (SFEP-0023 §4.5).
+fn _append_decorator_requirements(base: EffectRequirement[], decorators: ResolvedDecorator[]) -> EffectRequirement[] {
+    let mut required = base;
+    let mut d: int = 0;
+    loop {
+        if d >= decorators.length { break; }
+        let decorator = decorators[d];
+        let prefix = "imported `" + decorator.local_name + "` declares ![";
+        let mut e: int = 0;
+        loop {
+            if e >= decorator.effects.length { break; }
+            let effect = decorator.effects[e];
+            if is_universally_allowed_effect(effect) {
+                e += 1;
+                continue;
+            }
+            required = append_requirement(required, EffectRequirement {
+                effect: effect, description: prefix + effect + "]", trigger: null
+            });
+            e += 1;
+        }
+        d += 1;
+    }
+    return required;
+}
+
+fn analyze_routine(signature: FunctionSignature, body: Block, decorators: Decorator[], name: string, imports: ImportSymbolTable) -> EffectViolation[] {
+    let mut declared: string[] = [];
+    let mut declared_index: int = 0;
+    loop {
+        if declared_index >= signature.effects.length { break; }
+        declared = append_unique_effect(declared, signature.effects[declared_index]);
+        declared_index += 1;
+    }
+    // Suppress any fn-table row shadowed by a same-named parameter of this
+    // routine (SFEP-0042 §3.4 gap (b), #1950) before walking the body.
+    let mut required = required_effects(body, _suppress_shadowing_params(imports, signature.parameters));
+    // A decorator applied to this routine is an implicit call to the decorator
+    // function at entry (SFEP-0023 §4.3), so its declared effects become
+    // requirements this routine must itself satisfy — reconciled against
+    // `declared` by the same loop that gates imported-callee effects, and
+    // rendered `E0402` via the `imported \`<name>\`` description prefix. This
+    // replaces the former hardcoded `io` injection for `@trace`/`@logExecution`;
+    // the built-in-name fallback now lives in `resolve_routine_decorators`
+    // (migration seam, SFEP-0023 §4.2).
+    required = _append_decorator_requirements(required, resolve_routine_decorators(decorators, imports));
+    let mut missing: string[] = [];
+    let mut missing_requirements: EffectRequirement[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= required.length { break; }
+        let requirement = required[index];
+        let effect = requirement.effect;
+        if _any_subsumes(declared, effect) {
+            index += 1;
+            continue;
+        }
+        missing = append_unique_effect(missing, effect);
+        if !contains_requirement_for_effect(missing_requirements, effect) {
+            missing_requirements = append_requirement(missing_requirements, requirement);
+        }
+        index += 1;
+    }
+    if missing.length == 0 { return []; }
+    // Synthesize a Token from the routine's signature span so the
+    // diagnostic always has at least the declaration site to fall
+    // back to. B1 promotes `trigger` to the first per-requirement
+    // call-site token captured during the body walk — that's where
+    // the offending operation actually lives, so the caret lands on
+    // the user-actionable line. When no per-requirement trigger
+    // exists (decorator-implied effects, synthesized expressions),
+    // the trigger falls back to signature_token so diagnostics never
+    // lose source attribution.
+    //
+    // Use `signature.name` (the bare identifier) for the
+    // signature_token's lexeme so the fallback caret has the right
+    // width — `name` here can be a qualified display string like
+    // `Struct.method` or `test "<name>"` that we use for the user-
+    // facing message but that doesn't match the actual identifier
+    // token at the source location.
+    let sig_token = _token_from_signature(signature.name_span, signature.name);
+    let trigger_token = _first_requirement_trigger(missing_requirements, sig_token);
+    // B3 stage 2: capture the body's opening `{` token so the
+    // renderer can splice `![effects] ` in at exactly that column.
+    // `parse_block` lays the block out as `[ '{', ..., '}' ]` and
+    // `trim_block_tokens_local` preserves both braces, so
+    // `body.tokens[0]` is the opening brace whenever it exists.
+    // Synthesized routines (no parser path) leave `tokens` empty;
+    // this stays null for them and the renderer keeps
+    // `Diagnostic.suggestion` null.
+    let mut body_brace: Token? = null;
+    if body.tokens.length > 0 { body_brace = body.tokens[0]; }
+    let mut result: EffectViolation[] = [];
+    result = append_violation(result, EffectViolation {
+        routine_name: name, missing_effects: missing, requirements: missing_requirements, signature_token: sig_token, trigger: trigger_token, severity: "error", body_open_token: body_brace
+    });
+    return result;
+}
+
+// B1: pick the first per-requirement trigger token captured by the
+// body walker; fall back to the signature token if every requirement
+// came from a non-AST path (decorator-implied effects, synthesized
+// expressions). The caller passes signature_token as the fallback so
+// the violation always carries a source location.
+fn _first_requirement_trigger(missing_requirements: EffectRequirement[], fallback: Token?) -> Token? {
+    let mut i: int = 0;
+    loop {
+        if i >= missing_requirements.length { break; }
+        let req = missing_requirements[i];
+        if req.trigger != null { return req.trigger; }
+        i += 1;
+    }
+    return fallback;
+}
+
+fn required_effects(body: Block, imports: ImportSymbolTable) -> EffectRequirement[] {
+    return collect_effects_from_block(body, imports);
+}
+
+// SFEP-0051 Phase 4b (SFN-418): the inferred effect surface of a module's
+// PUBLIC API, for the workspace-tier capability audit. Returns the deduped
+// union, across every function the module locally exports, of the effects the
+// checker infers its body requires (`required_effects`) together with the
+// effects its signature declares. A member whose `capsule.toml [capabilities]
+// required` under-reports this surface drifts under Phase 4b even when the
+// declared surface (Phase 4a) passed. It consumes the checker's existing
+// per-function inference rather than re-deriving effect semantics; `pure`
+// (universally allowed) is never a capability requirement, so it is excluded.
+fn inferred_public_effects(program: Program, imports: ImportSymbolTable) -> string[] {
+    let exported = _collect_local_export_names(program);
+    let local_imports = _merge_local_functions(program, localize_import_symbols_for_program(program, imports));
+    let mut effects: string[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= program.statements.length { break; }
+        let statement = program.statements[index];
+        index += 1;
+        if statement.variant != "FunctionDeclaration" { continue; }
+        if !_str_list_contains(exported, statement.signature.name) { continue; }
+        // Effects declared on the public signature.
+        let mut si: int = 0;
+        loop {
+            if si >= statement.signature.effects.length { break; }
+            let declared = statement.signature.effects[si];
+            si += 1;
+            if is_universally_allowed_effect(declared) { continue; }
+            effects = append_unique_effect(effects, declared);
+        }
+        // Effects the checker infers from the body — robust to a signature that
+        // reaches an effect through a same-module helper.
+        let requirements = required_effects(statement.body, _suppress_shadowing_params(local_imports, statement.signature.parameters));
+        let mut ri: int = 0;
+        loop {
+            if ri >= requirements.length { break; }
+            let inferred = requirements[ri].effect;
+            ri += 1;
+            if is_universally_allowed_effect(inferred) { continue; }
+            effects = append_unique_effect(effects, inferred);
+        }
+    }
+    return effects;
+}
+
+// The names a module exports from its own definitions (a local `export { … }`
+// with no `from` source) — the public surface `inferred_public_effects`
+// restricts to. Re-exports (`export { … } from "…"`) name another module's
+// surface and are skipped.
+fn _collect_local_export_names(program: Program) -> string[] {
+    let mut names: string[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= program.statements.length { break; }
+        let statement = program.statements[index];
+        index += 1;
+        if statement.variant != "ExportDeclaration" { continue; }
+        if statement.source.length != 0 { continue; }
+        let mut si: int = 0;
+        loop {
+            if si >= statement.export_specifiers.length { break; }
+            let spec = statement.export_specifiers[si];
+            si += 1;
+            if !_str_list_contains(names, spec.name) {
+                names.push(spec.name);
+            }
+        }
+    }
+    return names;
+}
+
+fn _str_list_contains(values: string[], value: string) -> boolean {
+    let mut index: int = 0;
+    loop {
+        if index >= values.length { break; }
+        if values[index] == value { return true; }
+        index += 1;
+    }
+    return false;
+}
+
+fn validate_effects_api(program: Program) -> EffectViolation[] {
+    return validate_effects(program);
+}
+
+fn validate_effects_with_imports_api(program: Program, imports: ImportSymbolTable) -> EffectViolation[] {
+    return validate_effects_with_imports(program, imports);
+}
+
+fn inferred_public_effects_api(program: Program, imports: ImportSymbolTable) -> string[] {
+    return inferred_public_effects(program, imports);
+}
+
+fn is_program_entry_point_api(signature: FunctionSignature) -> boolean {
+    return is_program_entry_point(signature);
+}
+
+export {
+    inferred_public_effects_api,
+    is_program_entry_point_api,
+    validate_effects_api,
+    validate_effects_with_imports_api
+};

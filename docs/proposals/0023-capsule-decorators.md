@@ -37,7 +37,7 @@ in three passes:
 
 | Pass | Location | Behavior |
 |---|---|---|
-| Effect inference (parse-time) | `compiler/src/decorator_semantics.sfn:19-21` (`infer_effects`) | name `== "trace"`/`"logExecution"`/`"logexecution"` → force `![io]` into the signature |
+| Effect inference (parse-time) | `compiler/capsules/analyzer/src/decorator_semantics.sfn:19-21` (`infer_effects`) | name `== "trace"`/`"logExecution"`/`"logexecution"` → force `![io]` into the signature |
 | Effect checking | `compiler/src/effect_checker.sfn:387-398` (`analyze_routine`) | same string match → treat `io` as satisfied |
 | Helper-use marking | `compiler/src/llvm/effects.sfn:473-481` | mark `runtime_log_execution_fn` used |
 | Lowering | `compiler/src/llvm/lowering/emission.sfn:473-517` | emit `emit_runtime_call("runtime_log_execution_fn", [fn_name])` at function entry |
@@ -73,7 +73,7 @@ This removes the hardest self-hosting risk up front.
 
 There is already a clean precedent for the cross-module effect plumbing we need:
 `ImportSymbolTable` / `ImportedFunctionSignature`
-(`compiler/src/effect_imports.sfn:44-123`) carries `(name, effects)` for every
+(`compiler/capsules/analyzer/src/effect_imports.sfn:44-123`) carries `(name, effects)` for every
 imported function, localized per-program with alias rewrite
 (`localize_import_symbols_for_program`). The effect checker already looks up
 imported call targets there. Decorator-implied effects can ride the **same
@@ -330,16 +330,16 @@ runtime symbols.
   `compiler/capsules/syntax/src/parser/declarations/structs.sfn` — stop calling
   `infer_effects` for decorator-implied effects at parse time (step B); the
   parser still records decorator names.
-- `compiler/src/decorator_semantics.sfn` — `infer_effects` drops the
+- `compiler/capsules/analyzer/src/decorator_semantics.sfn` — `infer_effects` drops the
   `trace`/`logExecution` string match (kept only as fallback through migration,
   deleted in step F).
 
 **Resolution / capsule**
-- New module (e.g. `compiler/src/decorator_resolver.sfn`) — the `ResolvedDecorator`
+- New module (e.g. `compiler/capsules/analyzer/src/decorator_resolver.sfn`) — the `ResolvedDecorator`
   sidecar + resolution pass (mirrors `effect_imports.sfn`).
 - `compiler/src/capsule_resolver.sfn` — carry `is_decorator` + shape in resolved
   exports.
-- `compiler/src/effect_imports.sfn` — extend `ImportedFunctionSignature` (or a
+- `compiler/capsules/analyzer/src/effect_imports.sfn` — extend `ImportedFunctionSignature` (or a
   parallel decorator table) with the decorator marker bit; reuse
   `localize_import_symbols_for_program`.
 

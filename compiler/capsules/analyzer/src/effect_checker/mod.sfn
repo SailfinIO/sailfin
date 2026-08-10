@@ -1,0 +1,59 @@
+// compiler/capsules/analyzer/src/effect_checker/mod.sfn
+//
+// Stable effect-checker facade. Implementation is partitioned by concern so
+// each compiler module stays below the source-file line budget.
+import { intrinsic_effect_table } from "sfn/ir";
+import { Expression, FunctionSignature, Program } from "sfn/syntax";
+
+import { ImportSymbolTable, empty_import_symbols, with_intrinsic_effects } from "../effect_imports";
+import {
+    inferred_public_effects_api,
+    is_program_entry_point_api,
+    validate_effects_with_imports_api
+} from "./analyzer";
+import { collect_effects_from_expression_api } from "./collector";
+import {
+    CapabilityViolation,
+    EffectRequirement,
+    EffectViolation,
+    UnrecognizedEffectViolation
+} from "./types";
+import { validate_capsule_capabilities_api, validate_recognized_effects_api } from "./validations";
+
+fn validate_effects(program: Program) -> EffectViolation[] {
+    return validate_effects_with_imports_api(program, with_intrinsic_effects(empty_import_symbols(), intrinsic_effect_table()));
+}
+
+fn validate_effects_with_imports(program: Program, imports: ImportSymbolTable) -> EffectViolation[] {
+    return validate_effects_with_imports_api(program, with_intrinsic_effects(imports, intrinsic_effect_table()));
+}
+
+fn validate_capsule_capabilities(program: Program, capabilities_required: string[]) -> CapabilityViolation[] {
+    return validate_capsule_capabilities_api(program, capabilities_required);
+}
+
+fn validate_recognized_effects(program: Program) -> UnrecognizedEffectViolation[] {
+    return validate_recognized_effects_api(program);
+}
+
+fn inferred_public_effects(program: Program, imports: ImportSymbolTable) -> string[] {
+    return inferred_public_effects_api(program, with_intrinsic_effects(imports, intrinsic_effect_table()));
+}
+
+fn collect_effects_from_expression(expression: Expression?, imports: ImportSymbolTable) -> EffectRequirement[] {
+    return collect_effects_from_expression_api(expression, with_intrinsic_effects(imports, intrinsic_effect_table()));
+}
+
+fn is_program_entry_point(signature: FunctionSignature) -> boolean {
+    return is_program_entry_point_api(signature);
+}
+
+export {
+    collect_effects_from_expression,
+    inferred_public_effects,
+    is_program_entry_point,
+    validate_capsule_capabilities,
+    validate_effects,
+    validate_effects_with_imports,
+    validate_recognized_effects
+};

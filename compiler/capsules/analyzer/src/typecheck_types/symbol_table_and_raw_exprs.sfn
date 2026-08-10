@@ -1,0 +1,631 @@
+// compiler/capsules/analyzer/src/typecheck_types/symbol_table_and_raw_exprs.sfn
+//
+// Symbol-table bookkeeping and Raw-expression (#1627) classification.
+// Extracted from typecheck_types.sfn (SFN-625).
+import {
+    char_code_at,
+    ends_with,
+    find,
+    starts_with,
+    strings_equal,
+    strip_prefix,
+    substring
+} from "sfn/strings";
+import { FunctionSignature, SourceSpan } from "sfn/syntax";
+import { Token } from "sfn/syntax";
+
+import { FixSuggestion } from "../diagnostic";
+import { Diagnostic } from "../typecheck_types";
+import { classify_declared_primitive } from "./annotation_shape_checks";
+import { is_c_abi_parameter_type, is_c_abi_return_type } from "./extern_abi";
+import { number_to_string, token_from_name, trim_text } from "./text_utils";
+
+struct SymbolEntry {
+    name: string;
+    kind: string;
+    span: SourceSpan?;
+    // For `kind == "function"` / `"extern function"`: whether the
+    // function is generic (has type parameters) and whether its
+    // signature is C-ABI-compatible. These drive the #1147
+    // function-reference-as-value diagnostics (E0808/E0809) — taking
+    // a function's address (`<fn> as * u8`) is only valid for a
+    // concrete, C-ABI function. Always `false` for non-function kinds.
+    is_generic: boolean;
+    is_c_abi: boolean;
+    // For a `variable` bound with a `Channel<T>` type annotation: the
+    // monomorphized element kind `T` resolves to (one of the six kinds
+    // `spawn_future_kind` produces), so `check_channel_send` can enforce
+    // element-type on `ch.send(v)` (#1942). Function entries use the otherwise
+    // disjoint `fnprim:<return-code><parameter-codes>` marker added by SFN-675
+    // so local call contracts do not require a SymbolEntry layout change.
+    element_kind: string;
+    // For a `variable`/`parameter` bound with an explicit primitive type
+    // annotation: the normalized closed primitive kind ("string" | "int" |
+    // "float" | "boolean"), or "" for anything compound/unannotated/user-typed.
+    // Fail-open sentinel "" — a use-site check must stay silent on "" (SFN-385).
+    declared_prim: string;
+    // The exact explicit type annotation when it resolved to a struct in the
+    // binding's declaration scope, or "" otherwise. This is proof metadata,
+    // not inferred type state; use-site checks stay silent on "" (SFN-584).
+    declared_struct: string;
+}
+
+struct SymbolCollectionResult {
+    symbols: SymbolEntry[];
+    diagnostics: Diagnostic[];
+}
+
+struct ScopeResult {
+    bindings: SymbolEntry[];
+    diagnostics: Diagnostic[];
+}
+
+// `scope_start` lets a block-scope caller restrict duplicate detection to the
+// portion of `bindings` it added itself, so inner-block `let` declarations can
+// shadow enclosing-scope bindings without tripping E0001. Top-level and
+// parameter callers pass 0 to preserve strict global checking.
+//
+// Variable bindings are exempt from same-scope duplicate checks: `let`
+// rebinding within a single scope is a deliberate Sailfin idiom (the
+// compiler's own LLVM lowering uses the pattern e.g.
+// `compiler/src/llvm/lowering/instructions_loops.sfn:492,597`). Other kinds
+// (function/struct/enum/interface/type/test) keep the duplicate diagnostic.
+fn register_local_symbol(bindings: SymbolEntry[], name: string, kind: string, span: SourceSpan?, scope_start: int, is_generic: boolean = false, is_c_abi: boolean = false, element_kind: string = "", declared_prim: string = "", declared_struct: string = "") -> ScopeResult {
+    if !strings_equal(kind, "variable") {
+        if has_symbol_in_range(bindings, name, scope_start) {
+            return ScopeResult {
+                bindings: bindings,
+                diagnostics: [make_duplicate_symbol_diagnostic(name, kind, token_from_name(name, span))]
+            };
+        }
+    }
+
+    let updated = append_symbol(bindings, name, kind, span, is_generic, is_c_abi, element_kind, declared_prim, declared_struct);
+    return ScopeResult { bindings: updated, diagnostics: [] };
+}
+
+fn register_symbol(name: string, kind: string, span: SourceSpan?, existing: SymbolEntry[], is_generic: boolean = false, is_c_abi: boolean = false) -> SymbolCollectionResult {
+    if has_symbol(existing, name) {
+        return SymbolCollectionResult {
+            symbols: existing,
+            diagnostics: [make_duplicate_symbol_diagnostic(name, kind, token_from_name(name, span))]
+        };
+    }
+
+    return SymbolCollectionResult {
+        symbols: append_symbol(existing, name, kind, span, is_generic, is_c_abi),
+        diagnostics: []
+    };
+}
+
+fn append_symbol(symbols: SymbolEntry[], name: string, kind: string, span: SourceSpan?, is_generic: boolean = false, is_c_abi: boolean = false, element_kind: string = "", declared_prim: string = "", declared_struct: string = "") -> SymbolEntry[] {
+    let mut updated: SymbolEntry[] = clone_bindings(symbols);
+    updated.push(SymbolEntry {
+        name: name, kind: kind, span: span, is_generic: is_generic, is_c_abi: is_c_abi, element_kind: element_kind, declared_prim: declared_prim, declared_struct: declared_struct
+    });
+    return updated;
+}
+
+// Attach the primitive proof slice of a function signature to the symbol entry
+// created by the ordinary duplicate-aware registrars. Keeping this metadata on
+// the semantic symbol lets every expression walk resolve local calls without a
+// second AST scan. Unknown/compound types are recorded as "" and never reject.
+fn register_local_function_symbol(bindings: SymbolEntry[], signature: FunctionSignature, kind: string, scope_start: int) -> ScopeResult {
+    let registration = register_local_symbol(bindings, signature.name, kind, signature.name_span, scope_start, signature_is_generic(signature), signature_is_c_abi(signature));
+    if registration.diagnostics.length > 0 { return registration; }
+    let mut updated = registration.bindings;
+    let index = updated.length - 1;
+    updated[index].element_kind = _function_primitive_marker(signature);
+    return ScopeResult {
+        bindings: updated,
+        diagnostics: registration.diagnostics
+    };
+}
+
+fn register_function_symbol(signature: FunctionSignature, kind: string, existing: SymbolEntry[]) -> SymbolCollectionResult {
+    let registration = register_symbol(signature.name, kind, signature.name_span, existing, signature_is_generic(signature), signature_is_c_abi(signature));
+    if registration.diagnostics.length > 0 { return registration; }
+    let mut updated = registration.symbols;
+    let index = updated.length - 1;
+    updated[index].element_kind = _function_primitive_marker(signature);
+    return SymbolCollectionResult {
+        symbols: updated,
+        diagnostics: registration.diagnostics
+    };
+}
+
+fn _function_primitive_marker(signature: FunctionSignature) -> string {
+    let mut marker = "fnprim:" + _primitive_kind_code(_signature_return_prim(signature));
+    let mut index: int = 0;
+    loop {
+        if index >= signature.parameters.length { break; }
+        let parameter = signature.parameters[index];
+        let mut kind: string = "";
+        if parameter.type_annotation != null {
+            kind = classify_declared_primitive(parameter.type_annotation.text);
+        }
+        marker = marker + _primitive_kind_code(kind);
+        index += 1;
+    }
+    return marker;
+}
+
+fn _signature_return_prim(signature: FunctionSignature) -> string {
+    if signature.return_type == null { return ""; }
+    return classify_declared_primitive(signature.return_type.text);
+}
+
+fn _primitive_kind_code(kind: string) -> string {
+    if strings_equal(kind, "int") { return "i"; }
+    if strings_equal(kind, "float") { return "f"; }
+    if strings_equal(kind, "string") { return "s"; }
+    if strings_equal(kind, "boolean") { return "b"; }
+    return "u";
+}
+
+fn clone_bindings(source: SymbolEntry[]) -> SymbolEntry[] {
+    let mut copy: SymbolEntry[] = [];
+    let mut _ci: int = 0;
+    loop {
+        if _ci >= source.length { break; }
+        copy.push(source[_ci]);
+        _ci += 1;
+    }
+    return copy;
+}
+
+fn has_symbol(symbols: SymbolEntry[], name: string) -> boolean {
+    let mut _si: int = 0;
+    loop {
+        if _si >= symbols.length { break; }
+        if symbols[_si].name == name { return true; }
+        _si += 1;
+    }
+    return false;
+}
+
+// Look up a symbol by name, innermost-first. Walk in reverse so a
+// locally-registered binding (e.g. a `variable` that shadows a
+// top-level function of the same name) wins over the outer one,
+// matching lexical scoping. Returns null when unbound.
+fn find_symbol(symbols: SymbolEntry[], name: string) -> SymbolEntry? {
+    let mut _si: int = symbols.length - 1;
+    loop {
+        if _si < 0 { break; }
+        if symbols[_si].name == name { return symbols[_si]; }
+        _si -= 1;
+    }
+    return null;
+}
+
+// Value resolution uses the same innermost-first ordering as `find_symbol`,
+// except that resolution-only import/prelude placeholders must not hide a real
+// source binding of the same name. Keep the nearest placeholder as a fallback
+// so genuinely imported/prelude values still resolve when no source binding
+// exists.
+fn find_value_symbol(symbols: SymbolEntry[], name: string) -> SymbolEntry? {
+    let mut fallback: SymbolEntry? = null;
+    let mut index = symbols.length - 1;
+    loop {
+        if index < 0 { break; }
+        let entry = symbols[index];
+        if strings_equal(entry.name, name) {
+            if strings_equal(entry.kind, "import") || strings_equal(entry.kind, "prelude") {
+                if fallback == null { fallback = entry; }
+            } else { return entry; }
+        }
+        index -= 1;
+    }
+    return fallback;
+}
+
+// Whether a symbol kind denotes a callable function (defined or
+// extern). Used by the #1147 function-reference-as-value checks.
+fn is_function_kind(kind: string) -> boolean {
+    if strings_equal(kind, "function") { return true; }
+    if strings_equal(kind, "extern function") { return true; }
+    return false;
+}
+
+// A signature is generic iff it declares type parameters. Taking the
+// address of a generic function is rejected (E0809): there is no single
+// emitted symbol — generics are monomorphized per instantiation.
+fn signature_is_generic(signature: FunctionSignature) -> boolean {
+    return signature.type_parameters.length > 0;
+}
+
+// Whether every parameter and the return type of `signature` is
+// C-ABI-compatible (the same accept-list `check_extern_signature`
+// enforces). Only such functions have a well-formed raw code-pointer
+// address to hand across the C ABI; others are rejected (E0809).
+fn signature_is_c_abi(signature: FunctionSignature) -> boolean {
+    let mut _pi: int = 0;
+    loop {
+        if _pi >= signature.parameters.length { break; }
+        let param = signature.parameters[_pi];
+        let mut param_text: string = "";
+        let annotation = param.type_annotation;
+        if annotation != null { param_text = annotation.text; }
+        if !is_c_abi_parameter_type(param_text) { return false; }
+        _pi += 1;
+    }
+    let mut return_text: string = "";
+    let return_annotation = signature.return_type;
+    if return_annotation != null { return_text = return_annotation.text; }
+    if !is_c_abi_return_type(return_text) { return false; }
+    return true;
+}
+
+// Extract the leading identifier of `text` (already trimmed). Returns
+// the run of identifier characters at the head, or "" if `text` does
+// not start with an identifier character. Used to find the referenced
+// function name in a `Raw`-degraded `<fn> as <type>` / `& <fn>` form.
+fn _leading_identifier(text: string) -> string {
+    let mut _ci: int = 0;
+    let mut head: string = "";
+    loop {
+        if _ci >= text.length { break; }
+        let code = char_code_at(text, _ci);
+        if !_is_identifier_code(code, _ci == 0) { break; }
+        head = head + substring(text, _ci, _ci + 1);
+        _ci += 1;
+    }
+    return head;
+}
+
+// Whether the character code is valid in an identifier. `first`
+// toggles the leading-character rule (no digits at position 0).
+// Codes: '_' = 95, 'a'..'z' = 97..122, 'A'..'Z' = 65..90,
+// '0'..'9' = 48..57.
+fn _is_identifier_code(code: int, first: boolean) -> boolean {
+    if code == 95 { return true; }
+    if code >= 97 {
+        if code <= 122 { return true; }
+    }
+    if code >= 65 {
+        if code <= 90 { return true; }
+    }
+    if !first {
+        if code >= 48 {
+            if code <= 57 { return true; }
+        }
+    }
+    return false;
+}
+
+// E0808 — a function used as a value in an unsupported position: a bare
+// function name (not a call), `& fn`, or `<fn> as <non-pointer>`. The
+// only supported way to materialize a function's address is
+// `<fn> as * u8` for a concrete C-ABI function (see #1146).
+fn make_fn_value_position_diagnostic(name: string, span: SourceSpan?) -> Diagnostic {
+    return Diagnostic {
+        code: "E0808",
+        severity: "error",
+        message: "function `" + name
+            + "` cannot be used as a value here; take its address with `"
+            + name
+            + " as * u8` to pass it across the C ABI (for example a `pthread_create` start routine)",
+        file_path: "",
+        primary: token_from_name(name, span),
+        suggestion: null
+    };
+}
+
+// E0809 — `<fn> as * u8` where the function cannot be reduced to a
+// single C-ABI code pointer: a generic function (no monomorphized
+// symbol exists) or one whose signature is not C-ABI-compatible.
+fn make_fn_address_unsupported_diagnostic(name: string, reason: string, span: SourceSpan?) -> Diagnostic {
+    return Diagnostic {
+        code: "E0809",
+        severity: "error",
+        message: "cannot take the address of function `" + name + "` because "
+            + reason
+            + "; only a concrete, C-ABI function can be referenced as `* u8`",
+        file_path: "",
+        primary: token_from_name(name, span),
+        suggestion: null
+    };
+}
+
+// Strip one balanced layer of surrounding parentheses from a trimmed
+// string: `(worker)` -> `worker`. Returns the input unchanged when it is
+// not wrapped. Lets the classifier see through `(worker) as * u8` —
+// otherwise the leading `(` hides the function head and the reference
+// slips past the diagnostic.
+fn _strip_outer_parens(text: string) -> string {
+    if !starts_with(text, "(") { return text; }
+    if !ends_with(text, ")") { return text; }
+    let inner = substring(text, 1, text.length - 1);
+    return trim_text(inner);
+}
+
+// Classify a `<fn> as <target>` cast where `head` resolves to function `entry`.
+// E0808 = fn used as value (unsupported target); E0809 = fn address unsupported.
+//
+// Function addresses are allowed for concrete functions when the target is
+// either erased (`* u8`) or a typed Sailfin function pointer (`* fn (...)`).
+// Only generic functions are rejected here because they have no single code
+// symbol. The call site that consumes the pointer owns ABI compatibility:
+// erased pointers may cross extern/runtime boundaries, while typed function
+// pointers are used by Sailfin capsule surfaces such as `sfn/http`
+// `serve_tls(handler: * fn (Request) -> Response, ...)` where the signature
+// intentionally is not C-ABI-compatible.
+fn classify_fn_cast(head: string, target_text: string, entry: SymbolEntry, span: SourceSpan?) -> Diagnostic[] {
+    let target = trim_text(target_text);
+    if starts_with(target, "*") {
+        let pointee = trim_text(strip_prefix(target, "*"));
+        let is_typed_fn_ptr = starts_with(pointee, "fn ") || starts_with(pointee, "fn(");
+        if strings_equal(pointee, "u8") || is_typed_fn_ptr {
+            if entry.is_generic {
+                return [make_fn_address_unsupported_diagnostic(head, "it is generic", span)];
+            }
+            return [];
+        }
+    }
+    return [make_fn_value_position_diagnostic(head, span)];
+}
+
+// Classify a `Raw`-degraded expression that may be a function-reference
+// form the parser could not structure: `& <fn>` (the `&` prefix has no
+// unary parse). The `<fn> as <type>` cast half is now dead for structured
+// casts (Part A lifts all casts; the cast half is kept for defensive
+// back-compat with any residual Raw that still contains ` as `, delegating
+// to `classify_fn_cast` for identical behavior). Emits E0808/E0809 only
+// when the head identifier resolves to a function in `symbols` — this
+// gate is load-bearing for self-host: `<value> as * u8` casts on
+// non-function operands (e.g. `label as * u8` in the driver) must stay
+// clean. `span` is the enclosing `Raw` node's span (the parser populates
+// it on degradation), used to caret the diagnostic. Returns [] for
+// anything that is not a bare function reference.
+fn check_fn_reference_raw(text: string, symbols: SymbolEntry[], span: SourceSpan?) -> Diagnostic[] {
+    let trimmed = trim_text(text);
+    if trimmed.length == 0 { return []; }
+
+    // Address-of form: `& <fn>` — unsupported regardless of target.
+    if starts_with(trimmed, "&") {
+        let rest = _strip_outer_parens(trim_text(strip_prefix(trimmed, "&")));
+        let head = _leading_identifier(rest);
+        if head.length == 0 { return []; }
+        if !strings_equal(head, rest) { return []; }
+        let amp_entry = find_symbol(symbols, head);
+        if amp_entry == null { return []; }
+        if !is_function_kind(amp_entry.kind) { return []; }
+        return [make_fn_value_position_diagnostic(head, span)];
+    }
+
+    // Cast form: `<fn> as <type>` — kept for defensive back-compat with any
+    // residual Raw still containing ` as `. After Part A all structured casts
+    // reach `typecheck/expression_walk.sfn`'s Cast arm instead, so this half is
+    // effectively
+    // dead for normal source. Delegates to `classify_fn_cast` for identical
+    // behavior with the structured path.
+    let as_pos = find(trimmed, " as ", 0);
+    if as_pos < 0 { return []; }
+    let left = _strip_outer_parens(trim_text(substring(trimmed, 0, as_pos)));
+    let head = _leading_identifier(left);
+    if head.length == 0 { return []; }
+    // Only fire when the left side is exactly the bare identifier (after
+    // stripping any wrapping parens) — not `foo()` / `a + b` / a member
+    // access — so we target genuine function references, not arbitrary casts.
+    if !strings_equal(head, left) { return []; }
+    let cast_entry = find_symbol(symbols, head);
+    if cast_entry == null { return []; }
+    if !is_function_kind(cast_entry.kind) { return []; }
+    let target_str = trim_text(substring(trimmed, as_pos + 4, trimmed.length));
+    return classify_fn_cast(head, target_str, cast_entry, span);
+}
+
+fn has_symbol_in_range(symbols: SymbolEntry[], name: string, start: int) -> boolean {
+    let mut _si: int = start;
+    loop {
+        if _si >= symbols.length { break; }
+        if symbols[_si].name == name { return true; }
+        _si += 1;
+    }
+    return false;
+}
+
+fn make_duplicate_symbol_diagnostic(name: string, kind: string, token: Token?) -> Diagnostic {
+    return Diagnostic {
+        code: "E0001",
+        severity: "error",
+        message: "duplicate " + kind + " `" + name + "` declared",
+        file_path: "",
+        primary: token,
+        suggestion: null
+    };
+}
+
+// E0818 — the blanket fail-closed backstop for effect-opaque
+// `Expression.Raw` nodes (#1627 Part F / #1743). Once every valid construct
+// has been structured (casts, prefix `*`/`&`, assignment-as-expression, typed
+// `channel:Type`), a non-empty `Raw` reaching the typecheck expression walk is
+// genuinely unanalyzable — the compiler cannot parse it, so it must not slip
+// to codegen effect-blind. This completes #1627's "no valid effectful
+// construct reaches codegen through an effect-opaque node" criterion. The
+// diagnostic fires on node *shape* (`variant == "Raw"`), never on text
+// content: there is no text scan and no effect-keyword anchor.
+fn make_unanalyzable_raw_diagnostic(text: string, span: SourceSpan?) -> Diagnostic {
+    return Diagnostic {
+        code: "E0818",
+        severity: "error",
+        message: "unstructured expression cannot be analyzed; rewrite so the"
+            + " compiler can parse it",
+        file_path: "",
+        primary: token_from_name(trim_text(text), span),
+        suggestion: null
+    };
+}
+
+// The Raw decision invoked by the typecheck `Raw` arm after
+// `check_fn_reference_raw` has had its chance at the residual `& fn` /
+// `<fn> as <type>` spellings. An empty `Raw{text:""}` (the never-escapes
+// placeholder shape, plus whitespace-only text) carries no meaning and is
+// clean; any non-empty Raw fails closed with E0818. Match-arm patterns are
+// exempted upstream — they never reach this arm (see `walk_match_pattern`).
+fn check_unanalyzable_raw(text: string, span: SourceSpan?) -> Diagnostic[] {
+    if trim_text(text).length == 0 { return []; }
+    return [make_unanalyzable_raw_diagnostic(text, span)];
+}
+
+// E0834 — a value-position `if` (SFN-442). Sailfin `if` is a statement, not an
+// expression, so `let n = if c { a } else { b };` degrades the whole
+// initializer to `Raw`. Classify it ahead of the E0818 backstop and steer to
+// the `?:` conditional expression (`Expression.Conditional`, #1690) or a
+// statement `if` that assigns in each branch. `span` is the enclosing `Raw`
+// span, which already begins at the `if` keyword.
+fn make_value_if_diagnostic(rewrite: string, span: SourceSpan?) -> Diagnostic {
+    let mut fix_message: string = "Sailfin `if` is a statement, not an"
+        + " expression; use a `?:` conditional expression, or assign in each"
+        + " branch of a statement `if`";
+    if rewrite.length > 0 {
+        fix_message = "rewrite as a conditional expression `" + rewrite + "`";
+    }
+    let fix = FixSuggestion { message: fix_message, edits: [] };
+    return Diagnostic {
+        code: "E0834",
+        severity: "error",
+        message: "`if` cannot be used as a value expression here; Sailfin `if`"
+            + " is a statement, not an expression",
+        file_path: "",
+        primary: token_from_name("if", span),
+        suggestion: fix
+    };
+}
+
+// True when `trimmed` opens with the `if` keyword as a token (`if ` / `if(`),
+// not merely an identifier that starts with the letters "if".
+fn _leading_if_token(trimmed: string) -> boolean {
+    if starts_with(trimmed, "if ") { return true; }
+    if starts_with(trimmed, "if(") { return true; }
+    return false;
+}
+
+// Index of the `}` matching the `{` at `open` (depth-balanced), or -1.
+fn _match_close_brace(text: string, open: int) -> int {
+    let mut depth: int = 0;
+    let mut i: int = open;
+    loop {
+        if i >= text.length { break; }
+        let ch = text[i];
+        if ch == "{" { depth += 1; }
+        if ch == "}" {
+            depth -= 1;
+            if depth == 0 { return i; }
+        }
+        i += 1;
+    }
+    return -1;
+}
+
+// Reconstruct a `cond ? then : else` ternary from a block-form value `if`.
+// Returns "" when the shape is not a clean `if <cond> { <then> } else
+// { <else> }` (a partial `if`, missing `else`, or unbalanced braces) — the
+// caller then falls back to a generic-but-valid fix message.
+fn _extract_value_if_ternary(trimmed: string) -> string {
+    let brace1 = find(trimmed, "{", 0);
+    if brace1 < 0 { return ""; }
+    let cond = trim_text(substring(trimmed, 2, brace1));
+    if cond.length == 0 { return ""; }
+    let close1 = _match_close_brace(trimmed, brace1);
+    if close1 < 0 { return ""; }
+    let then_body = trim_text(substring(trimmed, brace1 + 1, close1));
+    if then_body.length == 0 { return ""; }
+    let after = trim_text(substring(trimmed, close1 + 1, trimmed.length));
+    if !starts_with(after, "else") { return ""; }
+    let brace2 = find(after, "{", 0);
+    if brace2 < 0 { return ""; }
+    let close2 = _match_close_brace(after, brace2);
+    if close2 < 0 { return ""; }
+    // Residual text after the matched `else` block means an `else if` chain (or
+    // other trailing structure) a single ternary cannot faithfully represent —
+    // fall back to the generic fix message rather than emit a misleading rewrite.
+    let tail = trim_text(substring(after, close2 + 1, after.length));
+    if tail.length > 0 { return ""; }
+    let else_body = trim_text(substring(after, brace2 + 1, close2));
+    if else_body.length == 0 { return ""; }
+    return cond + " ? " + then_body + " : " + else_body;
+}
+
+// Classify a `Raw` whose text is a value-position `if`, ahead of the E0818
+// backstop. Fires only for a block-form `if` (leading `if` token + a `{`), so
+// it cannot flag arbitrary unstructured text.
+fn check_value_if_raw(text: string, span: SourceSpan?) -> Diagnostic[] {
+    let trimmed = trim_text(text);
+    if !_leading_if_token(trimmed) { return []; }
+    if find(trimmed, "{", 0) < 0 { return []; }
+    let rewrite = _extract_value_if_ternary(trimmed);
+    return [make_value_if_diagnostic(rewrite, span)];
+}
+
+// E0835 — an unsupported character literal (`'x'`) (SFN-442). Sailfin has no
+// character type; string indexing yields the integer byte, so a comparison
+// must use the byte value. State the literal's byte value and the integer
+// rewrite. `span` is narrowed to the literal itself by the caller.
+fn make_char_literal_diagnostic(literal: string, byte: int, rewrite: string, span: SourceSpan?) -> Diagnostic {
+    let byte_str = number_to_string(byte);
+    let mut fix_message: string = "replace `" + literal + "` with its byte"
+        + " value `"
+        + byte_str
+        + "`";
+    if rewrite.length > 0 {
+        fix_message = "compare against the byte value, e.g. `" + rewrite + "`";
+    }
+    let fix = FixSuggestion { message: fix_message, edits: [] };
+    return Diagnostic {
+        code: "E0835",
+        severity: "error",
+        message: "character literal `" + literal + "` is not supported; it is"
+            + " byte value "
+            + byte_str
+            + " — Sailfin string indexing yields an integer byte",
+        file_path: "",
+        primary: token_from_name(literal, span),
+        suggestion: fix
+    };
+}
+
+// Narrow `span` to a `[start, start + width)` sub-range at character offset
+// `off` within the ORIGINAL (untrimmed) Raw text — `off` must be measured
+// against the same text `span.start_column` anchors, not the trimmed copy, so
+// the caret stays correct when the Raw text carries leading whitespace.
+// Returns the span unchanged for a null or multi-line span (the column offset
+// only holds within a single line).
+fn _narrow_span(span: SourceSpan?, off: int, width: int) -> SourceSpan? {
+    if span == null { return span; }
+    if span.start_line != span.end_line { return span; }
+    let col = span.start_column + off;
+    return SourceSpan {
+        start_line: span.start_line,
+        start_column: col,
+        end_line: span.start_line,
+        end_column: col + width
+    };
+}
+
+// Classify a `Raw` containing an unsupported single-character literal (`'x'`),
+// ahead of the E0818 backstop. Matches only a `'`,<char>,`'` triple, so it
+// cannot flag arbitrary unstructured text (valid Sailfin source has no `'`
+// outside string literals, which never degrade to this arm).
+fn check_char_literal_raw(text: string, span: SourceSpan?) -> Diagnostic[] {
+    let trimmed = trim_text(text);
+    let open = find(trimmed, "'", 0);
+    if open < 0 { return []; }
+    let close = open + 2;
+    if close >= trimmed.length { return []; }
+    if trimmed[close] != "'" { return []; }
+    let inner = substring(trimmed, open + 1, close);
+    if inner.length == 0 { return []; }
+    let byte = char_code(inner);
+    if byte < 0 { return []; }
+    let literal = substring(trimmed, open, close + 1);
+    let rewrite = substring(trimmed, 0, open) + number_to_string(byte)
+        + substring(trimmed, close
+        + 1, trimmed.length);
+    // Narrow against the original `text`: `open` indexes `trimmed`, but the span
+    // anchors the untrimmed text, so locate the same opening quote in `text`
+    // (there is a single quote-region) for a caret aligned to the span origin.
+    let text_open = find(text, "'", 0);
+    let narrowed = _narrow_span(span, text_open, 3);
+    return [make_char_literal_diagnostic(literal, byte, rewrite, narrowed)];
+}

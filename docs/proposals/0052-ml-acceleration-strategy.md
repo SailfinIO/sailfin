@@ -304,7 +304,7 @@ scalar path stays a trustworthy oracle. All native `*_test.sfn` (no bash e2e).
 
 - Survey ground truth (2026-07-19): `compiler/src/build/target.sfn:55`,
   `compiler/capsules/ir/src/native_ir.sfn`, `compiler/src/typecheck_types.sfn:1747`,
-  `compiler/src/effect_taxonomy.sfn:29`, `compiler/src/effect_checker.sfn`,
+  `compiler/capsules/analyzer/src/effect_taxonomy.sfn:29`, `compiler/src/effect_checker.sfn`,
   `capsules/sfn/{tensor,nn,layers,losses}/src/mod.sfn`, `docs/status.md`.
 - SFEP-0038 — Generic Constraints and Monomorphization (`Implemented`; the
   unblocking foundation for typed tensors).

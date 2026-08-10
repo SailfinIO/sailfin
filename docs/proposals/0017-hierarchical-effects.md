@@ -28,7 +28,7 @@ Closes: #1182
 
 Sailfin's canonical effect taxonomy is **locked at 1.0** to exactly six atoms —
 `clock`, `gpu`, `io`, `model`, `net`, `rand` — in
-[`compiler/src/effect_taxonomy.sfn:18-22`](../../compiler/src/effect_taxonomy.sfn#L18-L22):
+[`compiler/capsules/analyzer/src/effect_taxonomy.sfn:18-22`](../../compiler/capsules/analyzer/src/effect_taxonomy.sfn#L18-L22):
 
 > "Adding a seventh effect post-1.0 means breaking the lock — do not extend
 > without an explicit RFC."
@@ -65,7 +65,7 @@ design that unblocks G6/G7.
 
 ## The Taxonomy Lock (why this RFC is required)
 
-`compiler/src/effect_taxonomy.sfn` is the single source of truth for which
+`compiler/capsules/analyzer/src/effect_taxonomy.sfn` is the single source of truth for which
 effect strings the checker, diagnostic renderer, and capability cross-check
 recognize:
 
@@ -397,7 +397,7 @@ The repo owner reviewed this proposal (via `/pickup #1182`) and signed off on:
 - **D5 — Gating.** Ships **pre-1.0** as gates G6 (sub-effect parsing +
   subsumption ordering) and G7 (detection + manifest cross-check). This does
   **not** break the 1.0 taxonomy lock
-  (`compiler/src/effect_taxonomy.sfn:18-22`) because it adds refinements *within*
+  (`compiler/capsules/analyzer/src/effect_taxonomy.sfn:18-22`) because it adds refinements *within*
   the six, not a seventh atom.
 
 This RFC is the sign-off gate referenced by gates G6 and G7. With these

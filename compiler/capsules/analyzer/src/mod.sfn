@@ -1,0 +1,11 @@
+// sfn/analyzer — toolchain-internal semantic-analysis facade.
+//
+// Driver and tooling consumers call this analyzed-program contract. Narrow
+// legacy consumers use explicit analyzer submodules until their owning
+// capsules expose smaller phase contracts.
+export {
+    AnalyzedProgram,
+    AnalyzerInput,
+    AnalyzerResult,
+    analyze_program
+} from "./analyzer";

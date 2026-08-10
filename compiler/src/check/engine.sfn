@@ -15,11 +15,14 @@
 // pathA pathB` invocations that span different capsules / workspaces
 // resolve each project independently rather than silently anchoring
 // on whichever path came first.
+import { analyze_program } from "sfn/analyzer";
+import { ImportSymbolTable, empty_import_symbols } from "sfn/analyzer/effect_imports";
+import { ClosureSymbolSet } from "sfn/analyzer/import_resolution_check";
+import { Diagnostic, diagnostic_to_diag } from "sfn/analyzer/typecheck_types";
 import { Statement } from "sfn/syntax";
 import { parse_program } from "sfn/syntax";
 import { Token } from "sfn/syntax";
 
-import { analyze_program } from "../analyzer";
 import { _collect_sfn_files_cmd, _dirname_cmd, _path_join_cmd } from "../build/fs";
 import { workspace_capability_gate } from "../capsule_resolver/capability";
 import { prepare_project_capsules_for_check } from "../capsule_resolver/check";
@@ -33,8 +36,6 @@ import {
     render_check_json_envelope
 } from "../diagnostics_json";
 import { render_diagnostic } from "../diagnostics_render";
-import { ImportSymbolTable, empty_import_symbols } from "../effect_imports";
-import { ClosureSymbolSet } from "../import_resolution_check";
 import {
     CheckResult,
     CheckSummary,
@@ -48,7 +49,6 @@ import {
     build_closure_symbol_set,
     load_imported_interfaces_from_paths
 } from "../typecheck_import_loader";
-import { Diagnostic, diagnostic_to_diag } from "../typecheck_types";
 
 // One distinct `(project_root, workspace_root)` resolution group. Every
 // file in `entry_paths` shares those roots, so `prepare_project_capsules_for_check`

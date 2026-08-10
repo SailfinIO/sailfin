@@ -36,7 +36,7 @@ the unified resolver introduced in Stage B PR1 of the build architecture
 sub-PRs:
 
 - **A1 — typechecker hookup (shipped April 25, 2026).**
-  New leaf module `compiler/src/typecheck_imports.sfn` converts
+  New leaf module `compiler/capsules/analyzer/src/typecheck_imports.sfn` converts
   `NativeInterface` descriptors (extracted from `.sfn-asm` import-context
   artifacts) into `Statement.InterfaceDeclaration` values the typechecker
   understands. New entry point `typecheck_diagnostics_with_imports(program,

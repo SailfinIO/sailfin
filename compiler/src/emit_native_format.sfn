@@ -3,6 +3,7 @@
 // Formatting helpers for the native emitter: expression rendering, type
 // inference, function-signature formatting, and specifier rendering.
 // Extracted from emit_native.sfn to reduce per-file memory footprint.
+import { analyze_spawn_expression } from "sfn/analyzer/typecheck/concurrency_rules";
 import {
     Decorator,
     EnumVariant,
@@ -25,7 +26,6 @@ import {
     quote_string,
     trim_text
 } from "./emit_native_state";
-import { analyze_spawn_expression } from "./typecheck/concurrency_rules";
 
 // ── Expression formatting ────────────────────────────────────────────
 // Render an operand that's about to appear inside a Binary expression.

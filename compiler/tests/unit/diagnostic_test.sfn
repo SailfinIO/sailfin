@@ -6,7 +6,8 @@ import {
     diag_is_error,
     diag_to_legacy_string,
     stamp_spans
-} from "../../src/diagnostic";
+} from "sfn/analyzer/diagnostic";
+
 import { append_missing_legacy_lowering_diags, diag_from_legacy_lowering_error } from "../../src/llvm/utils";
 
 fn _diag(severity: string, span: Span?) -> Diag {

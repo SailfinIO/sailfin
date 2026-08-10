@@ -18,7 +18,7 @@ import {
     qualified_declaration_ids_equal,
     resolved_type_slot,
     type_ids_equal
-} from "../../src/type_id";
+} from "sfn/analyzer/type_id";
 import {
     ConstructorInternResult,
     EffectSetInternResult,
@@ -51,7 +51,7 @@ import {
     structural_type,
     structural_type_hash,
     type_interner_len
-} from "../../src/type_interner";
+} from "sfn/analyzer/type_interner";
 
 fn _module_identity(capsule: string, module: string) -> ModuleIdentity {
     return ModuleIdentity { capsule: capsule, module: module };

@@ -124,7 +124,7 @@ test "fmt: idempotency on ast.sfn" ![io] {
 }
 
 test "fmt: idempotency on effect checker collector" ![io] {
-    assert _idempotent("idem_effect_checker", fs.readFile("compiler/src/effect_checker/collector.sfn"));
+    assert _idempotent("idem_effect_checker", fs.readFile("compiler/capsules/analyzer/src/effect_checker/collector.sfn"));
 }
 
 test "fmt: --check detects unformatted file" ![io] {

@@ -1,3 +1,7 @@
+import { inferred_public_effects } from "sfn/analyzer/effect_checker";
+import { empty_import_symbols } from "sfn/analyzer/effect_imports";
+import { effect_subsumes, is_canonical_effect } from "sfn/analyzer/effect_taxonomy";
+import { Diagnostic, diagnostic_to_diag } from "sfn/analyzer/typecheck_types";
 import { int_to_string } from "sfn/strings";
 import { parse_program } from "sfn/syntax";
 
@@ -75,9 +79,6 @@ import {
 } from "../capsule_import_scan";
 import { _display_capsule_name_cmd } from "../capsule_names";
 import { render_diagnostic } from "../diagnostics_render";
-import { inferred_public_effects } from "../effect_checker";
-import { empty_import_symbols } from "../effect_imports";
-import { effect_subsumes, is_canonical_effect } from "../effect_taxonomy";
 import { emit_subprocess_with_retry } from "../emit_helpers";
 import { _LockEntry, lock_get_versions } from "../lock";
 import {
@@ -113,7 +114,6 @@ import {
     toml_get_workspace_package_version,
     toml_value_is_workspace_inherit
 } from "../toml_parser";
-import { Diagnostic, diagnostic_to_diag } from "../typecheck_types";
 import { resolve_compiler_version, resolve_compiler_version_for_cache } from "../version";
 import { workspace_member_for_spec } from "./capability";
 import { compile_capsule_modules } from "./compile";

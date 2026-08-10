@@ -361,7 +361,7 @@ Rationale for a *separate* pass rather than folding into typecheck:
   on `runtime/sfn/**` first without perturbing user compilation. Folding into
   typecheck would make every `sfn check` carry the analysis from day one.
 
-New file: `compiler/src/ownership_checker.sfn`, invoked from
+New file: `compiler/capsules/analyzer/src/ownership_checker.sfn`, invoked from
 `compiler/src/main.sfn` between the effect-check and emit stages.
 
 ### 3.2 What it proves (the dataflow lattice)
@@ -796,7 +796,7 @@ blocker, satisfied by Phase R1" and must precede #822 per D4.
   `compiler/src/llvm/lowering/type_descriptors.sfn`.
 - Effect checker (pass to mirror): `compiler/src/effect_checker.sfn`.
 - Effect taxonomy lock (six atoms; ownership must not add a seventh):
-  `compiler/src/effect_taxonomy.sfn:18-22`.
+  `compiler/capsules/analyzer/src/effect_taxonomy.sfn:18-22`.
 - Extern-ABI diagnostic family `E0801`–`E0806` (numbering precedent for `E09xx`):
   `compiler/src/typecheck_types.sfn:check_extern_signature`.
 - Runtime prerequisites + M1.5 drop emission: Runtime Migration table in `docs/status.md`

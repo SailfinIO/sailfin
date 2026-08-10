@@ -1,6 +1,19 @@
 // compiler/src/main.sfn
 //
 // Sailfin compiler main module and compilation entry points.
+import { Diag } from "sfn/analyzer/diagnostic";
+import { ImportSymbolTable, empty_import_symbols } from "sfn/analyzer/effect_imports";
+import { collect_reexport_violations } from "sfn/analyzer/reexport_check";
+import {
+    typecheck_diagnostics,
+    typecheck_diagnostics_with_import_symbols,
+    typecheck_diagnostics_with_import_symbols_prelude,
+    typecheck_diagnostics_with_imports,
+    typecheck_diagnostics_with_prelude,
+    typecheck_has_errors,
+    typecheck_has_errors_with_prelude
+} from "sfn/analyzer/typecheck";
+import { Diagnostic, diagnostic_to_diag } from "sfn/analyzer/typecheck_types";
 import { ImportedModuleContext, LayoutManifest, NativeModule } from "sfn/ir";
 import { parse_native_artifact, parse_native_artifact_from_lines } from "sfn/ir";
 import { lines_to_native_text, native_lines_have_text } from "sfn/ir";
@@ -15,13 +28,11 @@ import { _publish_lines_atomic } from "./build/fs";
 import { resolve_llvm_provider_context } from "./build/llvm_provider_context";
 import { _env_flag, _legacy_flag_file } from "./build_flags";
 import { run_ownership_checker, run_ownership_checker_with_imports } from "./check/ownership";
-import { Diag } from "./diagnostic";
 import { render_diagnostic, split_source_lines } from "./diagnostics_render";
 import {
     validate_and_render_effects,
     validate_and_render_effects_with_capabilities
 } from "./effect_gate";
-import { ImportSymbolTable, empty_import_symbols } from "./effect_imports";
 import {
     emit_native,
     emit_native_diag_lines,
@@ -49,21 +60,10 @@ import { take_lowering_trace_buffer } from "./llvm/lowering_debug_state";
 import { runtime_helper_call_names } from "./llvm/runtime_helpers/mod";
 import { LLVMArtifactResult } from "./llvm/types";
 import { load_prelude_global_names } from "./prelude_globals";
-import { collect_reexport_violations } from "./reexport_check";
 import { substring } from "./string_utils";
 import { test_decl_matches_filters, test_filters_active, test_runner_trace } from "./test_runner_state";
 import { toml_get_dependencies } from "./toml_parser";
-import {
-    typecheck_diagnostics,
-    typecheck_diagnostics_with_import_symbols,
-    typecheck_diagnostics_with_import_symbols_prelude,
-    typecheck_diagnostics_with_imports,
-    typecheck_diagnostics_with_prelude,
-    typecheck_has_errors,
-    typecheck_has_errors_with_prelude
-} from "./typecheck";
 import { load_imported_interfaces_from_paths } from "./typecheck_import_loader";
-import { Diagnostic, diagnostic_to_diag } from "./typecheck_types";
 import { TypedSsaProduceResult, produce_typed_ssa_declarations } from "./typed_ssa_produce";
 
 // Phase-scoped arena reclamation (SFEP-0043). The arena mark/rewind pair

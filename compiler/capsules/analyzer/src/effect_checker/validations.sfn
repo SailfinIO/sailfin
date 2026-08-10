@@ -1,0 +1,248 @@
+// compiler/capsules/analyzer/src/effect_checker/validations.sfn
+//
+// Declared-effect recognition and capsule capability validation.
+import {
+    Block,
+    FunctionSignature,
+    Program,
+    Statement
+} from "sfn/syntax";
+
+import { empty_import_symbols } from "../effect_imports";
+import { is_recognized_effect, is_universally_allowed_effect } from "../effect_taxonomy";
+import { _collect_nested_fns_in_block } from "./scope";
+import { CapabilityViolation, UnrecognizedEffectViolation } from "./types";
+import { _any_subsumes, _token_from_signature, append_unique_effect } from "./utils";
+
+fn validate_capsule_capabilities(program: Program, capabilities_required: string[]) -> CapabilityViolation[] {
+    let mut violations: CapabilityViolation[] = [];
+    if capabilities_required.length == 0 { return violations; }
+    let mut index: int = 0;
+    loop {
+        if index >= program.statements.length { break; }
+        violations = _append_capability_violations(violations, _analyze_statement_capabilities(program.statements[index], capabilities_required));
+        index += 1;
+    }
+    return violations;
+}
+
+fn _analyze_statement_capabilities(statement: Statement, capabilities: string[]) -> CapabilityViolation[] {
+    if statement.variant == "FunctionDeclaration" {
+        return _analyze_routine_capabilities(statement.signature, statement.signature.name, capabilities);
+    }
+    if statement.variant == "TestDeclaration" {
+        // Tests carry their own `effects` list (no full
+        // FunctionSignature), so synthesize a minimal one that
+        // `_analyze_routine_capabilities` can read. Mirrors the
+        // shape `analyze_statement` constructs for the
+        // missing-effect path.
+        let signature = FunctionSignature {
+            name: statement.name,
+            is_async: false,
+            parameters: [],
+            return_type: null,
+            effects: statement.effects,
+            type_parameters: [],
+            name_span: statement.name_span
+        };
+        let qualified = "test " + statement.name;
+        return _analyze_routine_capabilities(signature, qualified, capabilities);
+    }
+    if statement.variant == "StructDeclaration" {
+        let mut issues: CapabilityViolation[] = [];
+        let mut method_index: int = 0;
+        loop {
+            if method_index >= statement.methods.length { break; }
+            let method = statement.methods[method_index];
+            let qualified = statement.name + "." + method.signature.name;
+            issues = _append_capability_violations(issues, _analyze_routine_capabilities(method.signature, qualified, capabilities));
+            method_index += 1;
+        }
+        return issues;
+    }
+    return [];
+}
+
+fn _analyze_routine_capabilities(signature: FunctionSignature, name: string, capabilities: string[]) -> CapabilityViolation[] {
+    if signature.effects.length == 0 { return []; }
+    // `pure` is the only universally allowed effect, but only when it
+    // stands alone. `![pure, io]` is semantically contradictory — `pure`
+    // declares "no effects", so mixing it with concrete effects is a
+    // user error. We detect that here so the excess check below can let
+    // `pure` fall through (it's never in the capsule capability
+    // surface) and flag the contradiction with the existing E0403
+    // diagnostic.
+    let mut has_concrete_effect: boolean = false;
+    let mut probe: int = 0;
+    loop {
+        if probe >= signature.effects.length { break; }
+        if !is_universally_allowed_effect(signature.effects[probe]) {
+            has_concrete_effect = true;
+            break;
+        }
+        probe += 1;
+    }
+    let mut excess: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= signature.effects.length { break; }
+        let effect = signature.effects[i];
+        // `pure` standing alone (no concrete-effect peer) is the empty
+        // effect set; allow it regardless of the capability surface.
+        // `pure` mixed with concrete effects falls through and gets
+        // flagged as excess below.
+        if is_universally_allowed_effect(effect) {
+            if !has_concrete_effect {
+                i += 1;
+                continue;
+            }
+        }
+        // SFEP-0017 Part 4: manifest `required = [...]` entries are grants;
+        // a function's declared effect is authorized iff some grant subsumes
+        // it. `required=["io"]` authorizes `![io.fs]`; `required=["io.fs"]`
+        // tightens the capsule and rejects `![io]` / `![io.console]`.
+        if !_any_subsumes(capabilities, effect) {
+            excess = append_unique_effect(excess, effect);
+        }
+        i += 1;
+    }
+    if excess.length == 0 { return []; }
+    let sig_token = _token_from_signature(signature.name_span, signature.name);
+    let mut result: CapabilityViolation[] = [];
+    result.push(CapabilityViolation {
+        routine_name: name, excess_effects: excess, capabilities_required: capabilities, signature_token: sig_token, trigger: sig_token, severity: "error"
+    });
+    return result;
+}
+
+fn _append_capability_violations(violations: CapabilityViolation[], new_violations: CapabilityViolation[]) -> CapabilityViolation[] {
+    let mut result = violations;
+    let mut i: int = 0;
+    loop {
+        if i >= new_violations.length { break; }
+        result.push(new_violations[i]);
+        i += 1;
+    }
+    return result;
+}
+
+// Gate G6 entry (SFEP-0017 D1): cross-check every routine's *declared*
+// effects against the recognized-effect predicate. Any effect string
+// whose refinement root is not one of the canonical six (and is not
+// `pure`) produces an `UnrecognizedEffectViolation`, rendered as `E0404`.
+// Unlike the capability cross-check this needs no manifest surface — a
+// mis-rooted effect (`![disk]`, or a `fs` atom orphaned by the old
+// `io.fs` mis-parse) is always an error regardless of the capsule.
+fn validate_recognized_effects(program: Program) -> UnrecognizedEffectViolation[] {
+    let mut violations: UnrecognizedEffectViolation[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= program.statements.length { break; }
+        violations = _append_unrecognized_violations(violations, _analyze_statement_recognition(program.statements[index]));
+        index += 1;
+    }
+    return violations;
+}
+
+fn _analyze_statement_recognition(statement: Statement) -> UnrecognizedEffectViolation[] {
+    if statement.variant == "FunctionDeclaration" {
+        let mut issues = _analyze_routine_recognition(statement.signature, statement.signature.name);
+        issues = _append_unrecognized_violations(issues, _collect_body_recognition(statement.body));
+        return issues;
+    }
+    if statement.variant == "TestDeclaration" {
+        // Tests carry a bare `effects` list, not a full signature —
+        // synthesize the minimal shape `_analyze_routine_recognition`
+        // reads, mirroring `_analyze_statement_capabilities`.
+        let signature = FunctionSignature {
+            name: statement.name,
+            is_async: false,
+            parameters: [],
+            return_type: null,
+            effects: statement.effects,
+            type_parameters: [],
+            name_span: statement.name_span
+        };
+        let qualified = "test " + statement.name;
+        let mut issues = _analyze_routine_recognition(signature, qualified);
+        issues = _append_unrecognized_violations(issues, _collect_body_recognition(statement.body));
+        return issues;
+    }
+    if statement.variant == "StructDeclaration" {
+        let mut issues: UnrecognizedEffectViolation[] = [];
+        let mut method_index: int = 0;
+        loop {
+            if method_index >= statement.methods.length { break; }
+            let method = statement.methods[method_index];
+            let qualified = statement.name + "." + method.signature.name;
+            issues = _append_unrecognized_violations(issues, _analyze_routine_recognition(method.signature, qualified));
+            issues = _append_unrecognized_violations(issues, _collect_body_recognition(method.body));
+            method_index += 1;
+        }
+        return issues;
+    }
+    return [];
+}
+
+// SFEP-0042: nested/local `fn` declarations inside a routine body carry
+// their own `![...]` clauses, so recognition must descend into them too.
+// The missing-effect path already analyzes nested fns
+// (`_analyze_routine_with_nested`); without this, a nested
+// `fn g() ![disk] { }` would bypass E0404 while its siblings at top level
+// are checked. Reuses the same nested-fn enumeration; the effect table is
+// irrelevant to recognition (it inspects only declared effect strings), so
+// an empty table is passed.
+fn _collect_body_recognition(body: Block) -> UnrecognizedEffectViolation[] {
+    let mut issues: UnrecognizedEffectViolation[] = [];
+    let nested = _collect_nested_fns_in_block(body, empty_import_symbols());
+    let mut i: int = 0;
+    loop {
+        if i >= nested.length { break; }
+        let decl = nested[i].decl;
+        issues = _append_unrecognized_violations(issues, _analyze_routine_recognition(decl.signature, decl.signature.name));
+        i += 1;
+    }
+    return issues;
+}
+
+fn _analyze_routine_recognition(signature: FunctionSignature, name: string) -> UnrecognizedEffectViolation[] {
+    if signature.effects.length == 0 { return []; }
+    let mut unrecognized: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= signature.effects.length { break; }
+        let effect = signature.effects[i];
+        if !is_recognized_effect(effect) {
+            unrecognized = append_unique_effect(unrecognized, effect);
+        }
+        i += 1;
+    }
+    if unrecognized.length == 0 { return []; }
+    let sig_token = _token_from_signature(signature.name_span, signature.name);
+    let mut result: UnrecognizedEffectViolation[] = [];
+    result.push(UnrecognizedEffectViolation {
+        routine_name: name, unrecognized_effects: unrecognized, signature_token: sig_token, trigger: sig_token, severity: "error"
+    });
+    return result;
+}
+
+fn _append_unrecognized_violations(violations: UnrecognizedEffectViolation[], new_violations: UnrecognizedEffectViolation[]) -> UnrecognizedEffectViolation[] {
+    let mut result = violations;
+    let mut i: int = 0;
+    loop {
+        if i >= new_violations.length { break; }
+        result.push(new_violations[i]);
+        i += 1;
+    }
+    return result;
+}
+
+fn validate_capsule_capabilities_api(program: Program, capabilities_required: string[]) -> CapabilityViolation[] {
+    return validate_capsule_capabilities(program, capabilities_required);
+}
+
+fn validate_recognized_effects_api(program: Program) -> UnrecognizedEffectViolation[] {
+    return validate_recognized_effects(program);
+}
+
+export { validate_capsule_capabilities_api, validate_recognized_effects_api };

@@ -87,7 +87,7 @@ polymorphism + name-resolution-driven detection) is post-1.0.
   in `compiler/src/tools/check.sfn`.
 - `NativeFunction` in `compiler/capsules/ir/src/native_ir.sfn` already carries an
   `effects: string[]` field, copied through
-  `compiler/src/typecheck_imports.sfn`. The wire format already supports
+  `compiler/capsules/analyzer/src/typecheck_imports.sfn`. The wire format already supports
   cross-module effect propagation; the checker just doesn't read it.
 
 **What does not exist today:**
@@ -214,7 +214,7 @@ struct NativeFunction {
 }
 ```
 
-The interface converter in `compiler/src/typecheck_imports.sfn` copies
+The interface converter in `compiler/capsules/analyzer/src/typecheck_imports.sfn` copies
 `native.effects` through when reconstructing
 `Statement.InterfaceDeclaration` from staged `.sfn-asm`.
 This means **the .sfn-asm artifact format already records and round-trips
@@ -432,7 +432,7 @@ Effect violations have three flavors:
 ### 3.7 One source of truth for effects
 
 The canonical effect list lives in **one** file:
-`compiler/src/effect_taxonomy.sfn` (new in Phase A). Spec §7 references it.
+`compiler/capsules/analyzer/src/effect_taxonomy.sfn` (new in Phase A). Spec §7 references it.
 `docs/status.md` references it. The checker imports it. Adding or removing
 an effect requires updating exactly one file plus its tests.
 
@@ -670,7 +670,7 @@ the caret at the trigger and offers a fix-it at the signature.
 When the typechecker resolves a call to an imported function, it reads
 the imported function's effects from `Statement.InterfaceDeclaration`
 (already populated by the interface converter in
-`compiler/src/typecheck_imports.sfn`). The effect checker's
+`compiler/capsules/analyzer/src/typecheck_imports.sfn`). The effect checker's
 `collect_effects_from_block` is extended to walk call expressions and look
 up resolved callees in the symbol table.
 
@@ -724,7 +724,7 @@ file:line:column and a caret pointer, matching typecheck diagnostics.
     form and emit `(EffectRequirement, Token)` pairs (currently a flat
     array of requirements with no spans). The trigger token is the first
     AST node matching the body-pattern check.
-- `compiler/src/effect_taxonomy.sfn` (NEW)
+- `compiler/capsules/analyzer/src/effect_taxonomy.sfn` (NEW)
   - Define `CANONICAL_EFFECTS: string[] = ["clock", "gpu", "io", "model",
     "net", "rand"]`.
   - Define `is_canonical_effect(name) -> boolean`.
@@ -1000,7 +1000,7 @@ capsule must declare the imported callee's effects. Diagnostic code
     - If found and `callee.effects.length > 0`, emit a requirement with
       the call-site token and a description "imported `<callee>` requires
       `<effect>`".
-- `compiler/src/typecheck_imports.sfn`
+- `compiler/capsules/analyzer/src/typecheck_imports.sfn`
   - Already populates `effects` on import-derived `Statement.InterfaceDeclaration`
     (line 114). Verify the propagation is complete (no field drops in
     the conversion).
@@ -1571,7 +1571,7 @@ ulimit -v 8388608 && timeout 30 build/bin/sfn check /tmp/cap_test/
 - [`compiler/capsules/ir/src/native_ir.sfn`](../../compiler/capsules/ir/src/native_ir.sfn) — wire
   format for `.sfn-asm`; already carries `effects: string[]` (Phase E
   reuses).
-- [`compiler/src/typecheck_imports.sfn`](../../compiler/src/typecheck_imports.sfn)
+- [`compiler/capsules/analyzer/src/typecheck_imports.sfn`](../../compiler/capsules/analyzer/src/typecheck_imports.sfn)
   — already propagates `effects` through import-derived interface
   declarations (Phase E reuses).
 - [`compiler/capsule.toml`](../../compiler/capsule.toml) — example of the

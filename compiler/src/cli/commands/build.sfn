@@ -22,6 +22,7 @@
 // deliberately does NOT apply it, so it lives here. `binary_dir` is
 // threaded from the driver-parsed `CliContext`, replacing the legacy
 // handler's extra param.
+import { Diagnostic, diagnostic_to_diag } from "sfn/analyzer/typecheck_types";
 import {
     Command,
     Matches,
@@ -69,7 +70,6 @@ import { render_diagnostic } from "../../diagnostics_render";
 import { format_backend_failure_banner } from "../../ice";
 import { compile_to_llvm_file_with_module, module_name_from_path } from "../../main";
 import { runtime_capsule_from_root } from "../../runtime_capsule_resolver";
-import { Diagnostic, diagnostic_to_diag } from "../../typecheck_types";
 import { CliContext } from "../context";
 import { bootstrap_gate_or_dispatch } from "./dev";
 import { toolchain_gate_or_dispatch } from "./toolchain";

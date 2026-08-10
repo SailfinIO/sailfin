@@ -182,7 +182,7 @@ always carrying design documents in disguise.
 - **Spell effects explicitly**: `fn fetch(id: Id) -> Order ![io, net]`.
 - **Order effect lists alphabetically.** This matches the canonical taxonomy
   order the compiler itself uses for rendered diagnostics
-  (`compiler/src/effect_taxonomy.sfn::canonical_effects()`:
+  (`compiler/capsules/analyzer/src/effect_taxonomy.sfn::canonical_effects()`:
   `clock, gpu, io, model, net, rand`). Write `![io, net]`, not `![net, io]`.
   Alphabetical is deterministic and needs no judgment call — the previous
   "most impactful first" rule required one, and practice diverged.
