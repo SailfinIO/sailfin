@@ -2,9 +2,9 @@
 //
 // Lifetime tracking, borrow checking, and ownership analysis for LLVM lowering.
 // Handles borrow expression parsing, lifetime region management, and conflict detection.
+import { NativeFunction, NativeSourceSpan } from "sfn/ir";
 import { find as find_char, substring } from "sfn/strings";
 
-import { NativeFunction, NativeSourceSpan } from "../native_ir";
 import { find_local_binding, find_parameter_binding } from "./expressions_bindings";
 import {
     is_copy_type,

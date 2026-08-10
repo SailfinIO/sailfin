@@ -38,6 +38,7 @@
 // `FunctionDeclaration` (in synthesis order). The counter starts at
 // zero per module — LLVM `internal` linkage on synthesised fns
 // keeps cross-module name collisions impossible.
+import { percent_escape_capture_text } from "sfn/ir";
 import {
     Block,
     Capture,
@@ -64,7 +65,6 @@ import {
     build_binding_table,
     build_fn_signature_table
 } from "./lambda_param_inference";
-import { percent_escape_capture_text } from "./native_ir_utils_text";
 import { LambdaCaptureRecord, analyze_lambda_captures } from "./typecheck_captures";
 
 // Mutable walker state threaded through every rewrite call. The

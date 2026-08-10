@@ -59,7 +59,7 @@ than the scalar tier does**:
 
 | Derivation input | Where it already lives, exactly |
 |---|---|
-| dtype identity | `TensorDType` enum, `compiler/src/tensor_ir.sfn:8-20` — a closed enum, not a coarse string |
+| dtype identity | `TensorDType` enum, `compiler/capsules/ir/src/tensor_ir.sfn:8-20` — a closed enum, not a coarse string |
 | static op count | `TensorType.shape`, `tensor_shape_product` (`tensor_ir.sfn:145`) — static per SFEP-0053 §3.2 |
 | reduction order | SFEP-0053 §3.5: fusion "does not reassociate floating-point operations"; the scalar exit is strictly ordered |
 | no fast math | verified: no `-ffast-math`, `nnan`, `ninf`, `reassoc`, or `contract` flag is emitted anywhere in `compiler/src/` or `runtime/`; link uses plain `-O2` (`compiler/src/build/link.sfn:357`) |
@@ -716,7 +716,7 @@ accumulator cases. No GPU is required at any phase's gate.
   emitted, audited artifact with a CLI surface.
 - SFN-526 fatal-gate family — the fail-open lowering defect that `E11xx`
   fail-closed emission must not reproduce (brief §7.1).
-- `compiler/src/typecheck_types.sfn:1096-1139`, `compiler/src/tensor_ir.sfn:8-20`,
+- `compiler/src/typecheck_types.sfn:1096-1139`, `compiler/capsules/ir/src/tensor_ir.sfn:8-20`,
   `compiler/src/capsule_artifact.sfn:246`,
   `compiler/capsules/syntax/src/parser/declarations/syntax.sfn`,
   `compiler/src/effect_taxonomy.sfn:57`, `docs/status.md` (tensor IR /

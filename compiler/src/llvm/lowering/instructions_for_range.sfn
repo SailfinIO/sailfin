@@ -1,8 +1,9 @@
 // compiler/src/llvm/lowering/instructions_for_range.sfn
 //
 // Control flow handler: range-based for-loop instruction lowering.
+import { NativeFunction, NativeInstruction, NativeSourceSpan } from "sfn/ir";
+
 import { Diag } from "../../diagnostic";
-import { NativeFunction, NativeInstruction, NativeSourceSpan } from "../../native_ir";
 import { lower_expression } from "../expression_lowering/native/core";
 import { emit_comparison_instruction, load_local_operand } from "../expression_lowering/native/core_operands/comparisons";
 import { coerce_operand_to_type } from "../expression_lowering/native/core_operands/dispatch";

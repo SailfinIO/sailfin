@@ -30,7 +30,7 @@
 // NOT be seen and would emit no declare. None of the six is a first-class value
 // today. If one ever becomes one, extend that scan (or reinstate an
 // unconditional declare) rather than assuming a call site exists.
-import { NativeFunction, NativeParameter } from "../native_ir";
+import { NativeFunction, NativeParameter } from "sfn/ir";
 
 // The enumerated mirror names. A fast membership check (no allocation) for the
 // per-call-site and per-line scan paths.

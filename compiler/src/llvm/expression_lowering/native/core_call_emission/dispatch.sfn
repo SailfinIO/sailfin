@@ -2,9 +2,9 @@
 //
 // Call emission extracted from core_call_lowering.sfn to keep
 // each function under ~500 .sfn-asm instructions (avoids seed OOM).
+import { NativeFunction } from "sfn/ir";
 import { substring } from "sfn/strings";
 
-import { NativeFunction } from "../../../../native_ir";
 import { format_temp_name, format_typed_operand } from "../../../expressions_helpers";
 import { trace_log, trace_lowering } from "../../../lowering_debug_state";
 import { sanitize_symbol } from "../../../symbols";

@@ -85,7 +85,7 @@ polymorphism + name-resolution-driven detection) is post-1.0.
   unused.
 - Single call site in the compiler is inside `check_source_with_imports`
   in `compiler/src/tools/check.sfn`.
-- `NativeFunction` in `compiler/src/native_ir.sfn` already carries an
+- `NativeFunction` in `compiler/capsules/ir/src/native_ir.sfn` already carries an
   `effects: string[]` field, copied through
   `compiler/src/typecheck_imports.sfn`. The wire format already supports
   cross-module effect propagation; the checker just doesn't read it.
@@ -202,7 +202,7 @@ intrinsics. False-negatives are common; false-positives also exist
 
 ### 1.4 What the wire format already supports
 
-`compiler/src/native_ir.sfn` defines:
+`compiler/capsules/ir/src/native_ir.sfn` defines:
 
 ```
 struct NativeFunction {
@@ -1568,7 +1568,7 @@ ulimit -v 8388608 && timeout 30 build/bin/sfn check /tmp/cap_test/
   why "now" — selfhost is fast enough that the audit work is tractable.
 - [`compiler/src/effect_checker.sfn`](../../compiler/src/effect_checker.sfn)
   — current checker source; modified by every pre-1.0 phase.
-- [`compiler/src/native_ir.sfn`](../../compiler/src/native_ir.sfn) — wire
+- [`compiler/capsules/ir/src/native_ir.sfn`](../../compiler/capsules/ir/src/native_ir.sfn) — wire
   format for `.sfn-asm`; already carries `effects: string[]` (Phase E
   reuses).
 - [`compiler/src/typecheck_imports.sfn`](../../compiler/src/typecheck_imports.sfn)

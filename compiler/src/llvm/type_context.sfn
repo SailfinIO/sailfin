@@ -3,8 +3,6 @@
 // TypeContext building functions. Constructs type metadata from
 // NativeStruct/NativeEnum/NativeInterface definitions. Lookup and
 // query functions live in type_context_queries.sfn.
-import { substring } from "sfn/strings";
-
 import {
     NativeEnum,
     NativeEnumLayout,
@@ -13,7 +11,9 @@ import {
     NativeInterface,
     NativeInterfaceSignature,
     NativeStruct
-} from "../native_ir";
+} from "sfn/ir";
+import { substring } from "sfn/strings";
+
 import { sanitize_symbol } from "./symbols";
 import {
     join_with_separator,

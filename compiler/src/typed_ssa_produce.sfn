@@ -4,8 +4,8 @@
 // declarations. SFEP-0059 §3.2 deliberately excludes bodies from this slice:
 // every NativeFunction becomes a declaration carrying only its signature,
 // linkage, and effect summary.
-import { NativeFunction, NativeImport, ParseNativeResult } from "./native_ir";
-import { starts_with, strip_prefix, trim_text } from "./native_ir_utils_text";
+import { NativeFunction, NativeImport, ParseNativeResult } from "sfn/ir";
+import { starts_with, strip_prefix, trim_text } from "sfn/ir";
 import {
     EffectAtom,
     Linkage,
@@ -20,8 +20,8 @@ import {
     intern_symbol,
     intern_unit,
     new_module
-} from "./typed_ssa";
-import { TssaDiagnostic, verify_module } from "./typed_ssa_verify";
+} from "sfn/ir";
+import { TssaDiagnostic, verify_module } from "sfn/ir";
 
 struct TypedSsaProduceResult {
     ok: boolean;

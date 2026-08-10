@@ -2,9 +2,9 @@
 //
 // Effect system analysis for LLVM lowering. Collects and propagates effects
 // through the function call graph to build capability manifests.
+import { NativeFunction, NativeInstruction } from "sfn/ir";
 import { char_at_index as char_at, substring } from "sfn/strings";
 
-import { NativeFunction, NativeInstruction } from "../native_ir";
 import { test_runner_trace, trace_log } from "./lowering_debug_state";
 import { find_runtime_helper } from "./runtime_helpers/mod";
 import {

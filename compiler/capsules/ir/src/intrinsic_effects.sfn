@@ -1,4 +1,4 @@
-// compiler/src/intrinsic_effects.sfn
+// compiler/capsules/ir/src/intrinsic_effects.sfn
 //
 // Target-neutral intrinsic identity and effect metadata consumed by semantic
 // analysis and target providers. LLVM descriptors keep symbol/type/ABI data

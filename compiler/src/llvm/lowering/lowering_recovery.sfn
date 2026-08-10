@@ -9,8 +9,6 @@
 // lowering_core.
 //
 // Extracted from lowering_core/mod.sfn to reduce per-file memory footprint.
-import { substring } from "sfn/strings";
-
 import {
     NativeEnum,
     NativeEnumLayout,
@@ -24,11 +22,13 @@ import {
     NativeStructField,
     NativeStructLayout,
     NativeStructLayoutField
-} from "../../native_ir";
+} from "sfn/ir";
 import {
     parse_native_function_count_from_text,
     parse_native_functions_from_text
-} from "../../native_ir_api";
+} from "sfn/ir";
+import { substring } from "sfn/strings";
+
 import { trace_log } from "../lowering_debug_state";
 import { index_of, number_to_string } from "../utils";
 import { sanitize_collection_length } from "./lowering_helpers";

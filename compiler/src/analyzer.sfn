@@ -6,6 +6,7 @@
 // diagnostic passes without filesystem, network, clock, process, or CLI
 // authority. Presentation is deliberately absent: driver adapters render the
 // returned diagnostic data as human text or protocol envelopes.
+import { IntrinsicEffectTable } from "sfn/ir";
 import { Program, Statement } from "sfn/syntax";
 import { Token, TokenKind } from "sfn/syntax";
 
@@ -20,7 +21,6 @@ import {
 } from "./effect_diagnostics";
 import { ImportSymbolTable, with_intrinsic_effects } from "./effect_imports";
 import { ImportResolutionContext, collect_import_resolution_findings } from "./import_resolution_check";
-import { IntrinsicEffectTable } from "./intrinsic_effects";
 import { check_ownership_with_imports } from "./ownership_checker";
 import { collect_reexport_violations } from "./reexport_check";
 import {

@@ -1,9 +1,10 @@
-// compiler/src/typed_ssa_render.sfn
+// compiler/capsules/ir/src/typed_ssa_render.sfn
 //
-// Deterministic text renderer for the typed SSA v0 IR (compiler/src/
-// typed_ssa.sfn). The output is a canonical, human-readable debug dump used
-// by tests and diagnostics; it is not a parseable surface. Format is
-// normative in SFEP-0059 §10.7 (docs/proposals/0059-typed-ssa-activation.md).
+// Deterministic text renderer for the typed SSA v0 IR
+// (compiler/capsules/ir/src/typed_ssa.sfn). The output is a canonical,
+// human-readable debug dump used by tests and diagnostics; it is not a
+// parseable surface. Format is normative in SFEP-0059 §10.7
+// (docs/proposals/0059-typed-ssa-activation.md).
 import { int_to_string } from "sfn/strings";
 
 import {

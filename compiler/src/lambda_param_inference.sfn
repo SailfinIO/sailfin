@@ -27,6 +27,12 @@
 // as today and the existing "callee signature is not known" diagnostic still
 // fires. Never a silent miscompile.
 import {
+    ends_with,
+    index_of,
+    parse_fn_type_text,
+    trim_text
+} from "sfn/ir";
+import {
     Block,
     Expression,
     FunctionSignature,
@@ -37,12 +43,6 @@ import {
 } from "sfn/syntax";
 
 import { infer_expression_type } from "./emit_native_format";
-import {
-    ends_with,
-    index_of,
-    parse_fn_type_text,
-    trim_text
-} from "./native_ir_utils_text";
 
 // Strip a leading `name:` from a function-type parameter segment so a named
 // fn-type param (`fn(x: int) -> int`) yields the bare type `int`, matching the

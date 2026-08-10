@@ -14,10 +14,6 @@
 // The build+link runs in-process; `with_tmp_dir` gives each test an isolated
 // scratch dir (the harness routes both the emitted `.ll` and the link cache
 // there), so the parallel int-e2e-caps pool never collides (no-bash-e2e.md).
-import { find } from "sfn/strings";
-import { with_tmp_dir } from "sfn/test";
-
-import { _dirname } from "../../src/build/paths";
 import {
     TensorFunction,
     TensorModule,
@@ -26,8 +22,12 @@ import {
     dense_f64_type,
     tensor_matmul_2d,
     tensor_parameter
-} from "../../src/tensor_ir";
-import { build_tensor_matmul_kernel_binary } from "../../src/tensor_ir_link_harness";
+} from "sfn/ir";
+import { find } from "sfn/strings";
+import { with_tmp_dir } from "sfn/test";
+
+import { _dirname } from "../../src/build/paths";
+import { build_tensor_matmul_kernel_binary } from "../../src/build/tensor_ir_link_harness";
 
 // Full inherited environment for the spawned matmul binary. `process.environ()`
 // carries PATH/HOME/TMPDIR so the statically-linked binary starts cleanly; the

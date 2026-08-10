@@ -34,6 +34,11 @@
 // -------------------------------------------------------------------
 // Imports — real exported symbols (light closure via diagnostics_render)
 // -------------------------------------------------------------------
+import {
+    append_intrinsic_effects,
+    empty_intrinsic_effects,
+    intrinsic_effects_for_callee_target
+} from "sfn/ir";
 import { int_to_string } from "sfn/strings";
 import { Program, Statement } from "sfn/syntax";
 
@@ -42,11 +47,6 @@ import { code_for_missing_effect, join_effects } from "../../src/diagnostics_ren
 import { EffectRequirement } from "../../src/effect_checker/types";
 import { empty_import_symbols } from "../../src/effect_imports";
 import { ClosureSymbolSet, ImportResolutionContext } from "../../src/import_resolution_check";
-import {
-    append_intrinsic_effects,
-    empty_intrinsic_effects,
-    intrinsic_effects_for_callee_target
-} from "../../src/intrinsic_effects";
 import { CheckSummary, render_summary } from "../../src/tools/check";
 
 // -------------------------------------------------------------------

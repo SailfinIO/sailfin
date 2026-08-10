@@ -25,6 +25,7 @@
 // See docs/proposals/0004-check-architecture.md and
 // docs/proposals/0006-build-architecture.md (Stage B PR2) for the design
 // rationale.
+import { NativeInterface, NativeInterfaceSignature, NativeParameter } from "sfn/ir";
 import {
     Decorator,
     FunctionSignature,
@@ -34,8 +35,6 @@ import {
     TypeAnnotation,
     TypeParameter
 } from "sfn/syntax";
-
-import { NativeInterface, NativeInterfaceSignature, NativeParameter } from "./native_ir";
 
 // -------------------------------------------------------------------
 // Field-level converters

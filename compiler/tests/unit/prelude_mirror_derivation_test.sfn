@@ -13,9 +13,10 @@
 // via `sfn emit llvm`), most importantly `char_from_code`, which now
 // derives `{i8*, i64}` — correcting the old hand-typed registry row's
 // `i8*` (a pre-existing latent ABI drift, SFEP-0035 §2.1).
+import { NativeFunction } from "sfn/ir";
+
 import { render_runtime_helper_declarations } from "../../src/llvm/rendering";
 import { TypeContext } from "../../src/llvm/types";
-import { NativeFunction } from "../../src/native_ir";
 
 fn _empty_context() -> TypeContext {
     return TypeContext {

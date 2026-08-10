@@ -1,15 +1,15 @@
 // compiler/src/llvm/lowering/lowering_core/test_harness.sfn
 //
 // Recoverable LLVM test-harness synthesis.
-import { substring } from "sfn/strings";
-
 import {
     ImportedModuleContext,
     LayoutManifest,
     NativeFunction,
     NativeModule,
     ParseNativeResult
-} from "../../../native_ir";
+} from "sfn/ir";
+import { substring } from "sfn/strings";
+
 import {
     build_target_os,
     target_setjmp_call_line,

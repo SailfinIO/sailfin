@@ -1,6 +1,10 @@
 // compiler/src/main.sfn
 //
 // Sailfin compiler main module and compilation entry points.
+import { ImportedModuleContext, LayoutManifest, NativeModule } from "sfn/ir";
+import { parse_native_artifact, parse_native_artifact_from_lines } from "sfn/ir";
+import { lines_to_native_text, native_lines_have_text } from "sfn/ir";
+import { render_module } from "sfn/ir";
 import { int_to_string } from "sfn/strings";
 import { Program, Statement } from "sfn/syntax";
 import { parse_program } from "sfn/syntax";
@@ -44,9 +48,6 @@ import { native_text_passes_lowering_gate } from "./llvm/lowering/lowering_core/
 import { take_lowering_trace_buffer } from "./llvm/lowering_debug_state";
 import { runtime_helper_call_names } from "./llvm/runtime_helpers/mod";
 import { LLVMArtifactResult } from "./llvm/types";
-import { ImportedModuleContext, LayoutManifest, NativeModule } from "./native_ir";
-import { parse_native_artifact, parse_native_artifact_from_lines } from "./native_ir_api";
-import { lines_to_native_text, native_lines_have_text } from "./native_ir_utils_text";
 import { load_prelude_global_names } from "./prelude_globals";
 import { collect_reexport_violations } from "./reexport_check";
 import { substring } from "./string_utils";
@@ -64,7 +65,6 @@ import {
 import { load_imported_interfaces_from_paths } from "./typecheck_import_loader";
 import { Diagnostic, diagnostic_to_diag } from "./typecheck_types";
 import { TypedSsaProduceResult, produce_typed_ssa_declarations } from "./typed_ssa_produce";
-import { render_module } from "./typed_ssa_render";
 
 // Phase-scoped arena reclamation (SFEP-0043). The arena mark/rewind pair
 // snapshots and restores the arena bump pointer so the AST/typecheck/emit
@@ -481,7 +481,8 @@ fn compile_to_llvm(source: string) -> string ![io] {
 // Compile source to LLVM IR and print it line-by-line to stdout.
 // Returns true on success. Used by `sfn emit llvm <file>` (no -o flag) to
 // avoid the large-string cross-module return in `compile_to_llvm_with_module`,
-// which segfaulted on large modules like `compiler/src/native_ir_api.sfn`
+// which segfaulted on large modules like
+// `compiler/capsules/ir/src/native_ir_api.sfn`
 // when the big joined IR string was returned and then printed.
 fn print_llvm_with_module(source: string, module_name: string) -> boolean ![io] {
     let program: Program = parse_program(source);

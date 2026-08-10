@@ -6,7 +6,8 @@
 // and libc declarations.
 //
 // Extracted from lowering_core/mod.sfn to reduce per-file memory footprint.
-import { NativeFunction } from "../../native_ir";
+import { NativeFunction } from "sfn/ir";
+
 import { target_uses_comdat, trace_log } from "../lowering_debug_state";
 import {
     extract_declared_symbol_names,

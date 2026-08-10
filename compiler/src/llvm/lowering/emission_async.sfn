@@ -4,8 +4,9 @@
 // emit_llvm_function under ~500 .sfn-asm instructions (avoids seed OOM).
 //
 // NOTE: Mutual import with emission.sfn — see comment there for rationale.
+import { NativeFunction } from "sfn/ir";
+
 import { Diag } from "../../diagnostic";
-import { NativeFunction } from "../../native_ir";
 import {
     future_pointer_type_for_return_type,
     spawn_ctx_symbol_for_return_type,

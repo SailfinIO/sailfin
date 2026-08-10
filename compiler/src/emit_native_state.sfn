@@ -3,10 +3,10 @@
 // State management, text builder, and shared utility functions for the
 // native emitter.  Extracted from emit_native.sfn to reduce per-file
 // memory footprint during self-hosting compilation.
+import { lines_to_native_text } from "sfn/ir";
 import { TypeAnnotation } from "sfn/syntax";
 
 import { Diag, Span } from "./diagnostic";
-import { lines_to_native_text } from "./native_ir_utils_text";
 import { contains_string, ends_with, substring } from "./string_utils";
 
 // ── Data structures ──────────────────────────────────────────────────

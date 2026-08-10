@@ -30,7 +30,8 @@
 // `zext` (not `sext`): the byte is unsigned (0..255), matching the C
 // `(int64_t)(unsigned char)s[idx]`. A `sext` would make bytes >= 0x80
 // negative and corrupt every UTF-8 comparison on the self-host path.
-import { NativeFunction } from "../native_ir";
+import { NativeFunction } from "sfn/ir";
+
 // Mutually recursive with `lower_expression` (which dispatches calls
 // back through the byte-load hook): the same cycle the atomic builtins
 // rely on — see `atomics.sfn`.

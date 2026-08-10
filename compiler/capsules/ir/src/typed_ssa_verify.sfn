@@ -1,4 +1,4 @@
-// compiler/src/typed_ssa_verify.sfn
+// compiler/capsules/ir/src/typed_ssa_verify.sfn
 //
 // Fail-closed, side-effect-free verifier for the typed SSA v0 IR (SFEP-0059
 // §10.6). It runs before any backend and rejects a module unless every

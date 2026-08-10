@@ -1,7 +1,7 @@
 // LLVM member-access lowering.
+import { NativeFunction } from "sfn/ir";
 import { substring } from "sfn/strings";
 
-import { NativeFunction } from "../../../native_ir";
 import { find_local_binding, find_parameter_binding } from "../../expressions_bindings";
 import { default_return_literal, format_temp_name } from "../../expressions_helpers";
 import { trace_log } from "../../lowering_debug_state";

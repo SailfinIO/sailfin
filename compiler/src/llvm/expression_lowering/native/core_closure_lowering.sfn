@@ -1,9 +1,9 @@
 // compiler/src/llvm/expression_lowering/native/core_closure_lowering.sfn
 //
 // Closure-pair marker lowering and capture-environment materialization.
+import { NativeFunction, NativeLambdaCapture } from "sfn/ir";
 import { char_code_at, find, substring } from "sfn/strings";
 
-import { NativeFunction, NativeLambdaCapture } from "../../../native_ir";
 import {
     ClosureCaptureOperand,
     decode_captures,

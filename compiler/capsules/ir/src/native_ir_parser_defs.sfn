@@ -1,4 +1,4 @@
-// compiler/src/native_ir_parser_defs.sfn
+// compiler/capsules/ir/src/native_ir_parser_defs.sfn
 //
 // Struct and enum definition parsing, extracted from native_ir_parser.sfn
 // to keep the module under the seed compiler's OOM threshold.

@@ -7,10 +7,10 @@
 // live in instructions_helpers.sfn so that
 // lower_instruction_range is at source position 1 — within the v0.1.1
 // seed's per-module streaming emission limit.
+import { NativeFunction, NativeInstruction } from "sfn/ir";
 import { char_code_at, substring } from "sfn/strings";
 
 import { Diag } from "../../diagnostic";
-import { NativeFunction, NativeInstruction } from "../../native_ir";
 import {
     decode_captures,
     emit_closure_env_load_prologue,

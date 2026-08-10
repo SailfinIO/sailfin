@@ -209,7 +209,6 @@ fn _is_driver_module_id(id: string) -> boolean {
         || id == "semver"
         || id == "string_cmd_utils"
         || id == "string_utils"
-        || id == "tensor_ir_link_harness"
         || id == "test_results"
         || id == "test_runner_json"
         || id == "test_runner_state"
@@ -239,12 +238,6 @@ fn _module_role(path: string) -> string {
         || id == "type_id"
         || id == "type_interner"
         || id == "diagnostic" { return ROLE_ANALYZER; }
-    if starts_with(id, "native_ir") || id == "intrinsic_effects" || id == "typed_ssa"
-        || id == "typed_ssa_render"
-        || id == "typed_ssa_verify"
-        || id == "tensor_ir"
-        || id == "tensor_ir_fusion"
-        || id == "tensor_ir_verify" { return ROLE_IR; }
     if starts_with(id, "emit_native") || starts_with(id, "emitter_sailfin")
         || id == "lambda_lowering"
         || id == "lambda_param_inference"
@@ -1176,6 +1169,8 @@ test "capsule roles: classification survives physical compiler capsule moves" {
     assert _module_role("compiler/src/ast.sfn") == "";
     assert _module_role("compiler/capsules/analyzer/src/mod.sfn") == ROLE_ANALYZER;
     assert _module_role("compiler/capsules/ir/src/native_ir.sfn") == ROLE_IR;
+    assert _module_role("compiler/src/native_ir.sfn") == "";
+    assert _module_role("compiler/src/intrinsic_effects.sfn") == "";
     assert _module_role("compiler/capsules/codegen/src/emit.sfn") == ROLE_CODEGEN;
     assert _module_role("compiler/capsules/codegen-llvm/src/lowering/mod.sfn") == ROLE_LLVM;
     assert _edge_module_id("compiler/capsules/analyzer/src/type_interner.sfn") == "type_interner";
@@ -1206,6 +1201,7 @@ test "compiler driver: workspace, process, assembly, and final-link owners class
     assert _module_role("compiler/src/backend.sfn") == ROLE_DRIVER;
     assert _module_role("compiler/src/build/link.sfn") == ROLE_DRIVER;
     assert _module_role("compiler/src/build/direct_link.sfn") == ROLE_DRIVER;
+    assert _module_role("compiler/src/build/tensor_ir_link_harness.sfn") == ROLE_DRIVER;
     assert _module_role("compiler/src/cli/commands/build.sfn") == ROLE_DRIVER;
     assert _module_role("compiler/src/typecheck_import_loader.sfn") == ROLE_DRIVER;
     assert _module_role("compiler/src/emit_helpers.sfn") == ROLE_DRIVER;

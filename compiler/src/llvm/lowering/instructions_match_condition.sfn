@@ -1,7 +1,8 @@
 // compiler/src/llvm/lowering/instructions_match_condition.sfn
 //
 // Match case condition lowering (split from instructions_match.sfn).
-import { NativeFunction } from "../../native_ir";
+import { NativeFunction } from "sfn/ir";
+
 import { lower_expression } from "../expression_lowering/native/core";
 import { emit_boolean_and, emit_comparison_instruction } from "../expression_lowering/native/core_operands/comparisons";
 import { harmonise_operands, single_i8_union_variant_index } from "../expression_lowering/native/core_operands/dispatch";

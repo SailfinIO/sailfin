@@ -1,4 +1,4 @@
-// compiler/src/native_ir_utils_parse.sfn
+// compiler/capsules/ir/src/native_ir_utils_parse.sfn
 //
 // IR definition and instruction parsing utilities: imports, cases, decorators,
 // interfaces, structs, enums, bindings, parameters, and effects.

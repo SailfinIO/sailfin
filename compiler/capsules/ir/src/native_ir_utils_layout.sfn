@@ -1,4 +1,4 @@
-// compiler/src/native_ir_utils_layout.sfn
+// compiler/capsules/ir/src/native_ir_utils_layout.sfn
 //
 // Layout parsing utilities for struct and enum layout sections in .sfn-asm IR.
 import { substring } from "sfn/strings";

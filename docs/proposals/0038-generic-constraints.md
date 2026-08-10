@@ -66,7 +66,7 @@ splits each slice on a top-level `:`, keeps the left as `name` and the right as
 declarations (nine call sites in that file), so `T: Comparable` attaches
 uniformly wherever a `<...>` clause is legal. The native IR even *parses past*
 the bound already: `parse_enum_header_type_parameters`
-([`compiler/src/native_ir_parser_defs.sfn:503-528`](../../compiler/src/native_ir_parser_defs.sfn#L503-L528))
+([`compiler/capsules/ir/src/native_ir_parser_defs.sfn:503-528`](../../compiler/capsules/ir/src/native_ir_parser_defs.sfn#L503-L528))
 explicitly strips `: Display` off `Foo<T : Display, E>` to recover the bare
 name.
 
@@ -265,7 +265,7 @@ direct call, not a vtable dispatch).
 **Generalize #830, don't reinvent it.** The enum-payload path already does the
 hard part — recover declared type parameters from a header
 (`parse_enum_header_type_parameters`,
-[`native_ir_parser_defs.sfn:503-528`](../../compiler/src/native_ir_parser_defs.sfn#L503-L528)),
+[`native_ir_parser_defs.sfn:503-528`](../../compiler/capsules/ir/src/native_ir_parser_defs.sfn#L503-L528)),
 parse a concrete argument list angle-bracket-aware (`enum_inst_parse_args`,
 [`llvm/type_mapping.sfn:164-203`](../../compiler/src/llvm/type_mapping.sfn#L164-L203)),
 detect which fields reference a parameter
@@ -525,7 +525,7 @@ generalized substitution engine must not change enum-payload behavior.
   `compiler/src/typecheck_types.sfn:1556-1572` (`check_type_parameters`,
   duplicate-name only) and `:95-149` / `:169-188` (conformance + arity machinery
   to reuse); `compiler/capsules/syntax/src/parser/declarations/syntax.sfn` (shared bound parse);
-  `compiler/src/native_ir_parser_defs.sfn:503-528` and
+  `compiler/capsules/ir/src/native_ir_parser_defs.sfn:503-528` and
   `compiler/src/llvm/type_mapping.sfn:139-203+` (the #830 substitution
   primitives to generalize).
 - **Status:** `docs/status.md` lines 168 (enum-payload monomorphization, #830),

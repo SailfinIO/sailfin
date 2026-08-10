@@ -7,7 +7,8 @@
 // enums to arrive empty or with empty names.
 //
 // Extracted from lowering_core/mod.sfn to reduce per-file memory footprint.
-import { NativeEnum, NativeInterface, NativeStruct } from "../../native_ir";
+import { NativeEnum, NativeInterface, NativeStruct } from "sfn/ir";
+
 import { trace_log } from "../lowering_debug_state";
 import { sanitize_symbol } from "../symbols";
 import { build_type_context } from "../type_context";
