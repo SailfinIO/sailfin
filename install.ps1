@@ -21,6 +21,10 @@
       INSTALL_BASE   (default: $env:LOCALAPPDATA\sailfin\versions)
       GLOBAL_BIN_DIR (default: $env:LOCALAPPDATA\sailfin\bin)
       GITHUB_TOKEN   (optional; increases API rate limits)
+      SAILFIN_LOCAL_ARCHIVE
+                     (optional; install a tarball already on disk instead
+                      of a published release. Requires an explicit VERSION
+                      and SKIPS signature/digest verification.)
 
     Assets are expected to be named:
       sailfin_<version>_windows_<arch>.tar.gz
@@ -82,6 +86,27 @@ if ($Token) {
     $Headers["Authorization"] = "token $Token"
 }
 
+# --- Offline / local-archive install ------------------------------------------
+# Points the installer at a tarball already on disk instead of a published
+# GitHub release.
+#
+# This is the only way to install an archive that has not been published, so
+# it is also what lets CI smoke-test a freshly built payload through the real
+# installer rather than a hand-rolled copy of its steps. An unpublished
+# archive has no signed manifest, so this path necessarily SKIPS release
+# signature and digest verification -- it therefore demands an explicit
+# VERSION and says plainly that verification was skipped.
+$LocalArchive = $env:SAILFIN_LOCAL_ARCHIVE
+if ($LocalArchive) {
+    if (-not (Test-Path -LiteralPath $LocalArchive -PathType Leaf)) {
+        Die "SAILFIN_LOCAL_ARCHIVE='$LocalArchive' is not a readable file."
+    }
+    $LocalArchive = (Resolve-Path -LiteralPath $LocalArchive).Path
+    if (-not $Version -or $Version -eq "latest") {
+        Die "SAILFIN_LOCAL_ARCHIVE requires an explicit VERSION (e.g. VERSION=0.9.5); 'latest' cannot be resolved offline."
+    }
+}
+
 # --- Resolve version and asset -----------------------------------------------
 
 $Tag   = ""
@@ -123,20 +148,8 @@ Log "Expected asset: $Asset"
 
 # --- Download asset ----------------------------------------------------------
 
-$ReleaseUrl  = "https://api.github.com/repos/$Repo/releases/tags/$Tag"
-$ReleaseJson = Invoke-RestMethod -Uri $ReleaseUrl -Headers $Headers
-
-$AssetObj = $ReleaseJson.assets | Where-Object { $_.name -eq $Asset } | Select-Object -First 1
-if (-not $AssetObj) {
-    Die "Could not find asset '$Asset' in release '$Tag'."
-}
-
-$AssetId = $AssetObj.id
-$TmpDir  = Join-Path ([System.IO.Path]::GetTempPath()) "sailfin-install-$([guid]::NewGuid().ToString('N'))"
+$TmpDir = Join-Path ([System.IO.Path]::GetTempPath()) "sailfin-install-$([guid]::NewGuid().ToString('N'))"
 New-Item -ItemType Directory -Path $TmpDir -Force | Out-Null
-
-$ArchivePath = Join-Path $TmpDir $Asset
-Log "Downloading asset via GitHub API (id=$AssetId)..."
 
 $DownloadHeaders = @{
     "Accept" = "application/octet-stream"
@@ -144,8 +157,27 @@ $DownloadHeaders = @{
 if ($Token) {
     $DownloadHeaders["Authorization"] = "token $Token"
 }
-$DownloadUrl = "https://api.github.com/repos/$Repo/releases/assets/$AssetId"
-Invoke-WebRequest -Uri $DownloadUrl -Headers $DownloadHeaders -OutFile $ArchivePath
+
+if ($LocalArchive) {
+    Log "Installing from local archive: $LocalArchive"
+    $Asset = Split-Path -Leaf $LocalArchive
+    $ArchivePath = $LocalArchive
+} else {
+    $ReleaseUrl  = "https://api.github.com/repos/$Repo/releases/tags/$Tag"
+    $ReleaseJson = Invoke-RestMethod -Uri $ReleaseUrl -Headers $Headers
+
+    $AssetObj = $ReleaseJson.assets | Where-Object { $_.name -eq $Asset } | Select-Object -First 1
+    if (-not $AssetObj) {
+        Die "Could not find asset '$Asset' in release '$Tag'."
+    }
+
+    $AssetId = $AssetObj.id
+    $ArchivePath = Join-Path $TmpDir $Asset
+    Log "Downloading asset via GitHub API (id=$AssetId)..."
+
+    $DownloadUrl = "https://api.github.com/repos/$Repo/releases/assets/$AssetId"
+    Invoke-WebRequest -Uri $DownloadUrl -Headers $DownloadHeaders -OutFile $ArchivePath
+}
 
 # --- Verify signed release manifest -----------------------------------------
 
@@ -223,8 +255,14 @@ function Verify-ReleaseArchive {
 
 # Verification runs before extraction or creation of an install destination, so
 # detected tampering cannot leave an installed binary behind.
-Verify-ReleaseArchive -RepoName $Repo -ReleaseTag $Tag -AssetName $Asset `
-    -Archive $ArchivePath -WorkDir $TmpDir -RequestHeaders $DownloadHeaders
+if ($LocalArchive) {
+    # A locally built archive has no signed release manifest to check against.
+    # Say so rather than letting a silent skip read as a passed verification.
+    Log "Warning: local archive install -- release signature and digest verification are SKIPPED."
+} else {
+    Verify-ReleaseArchive -RepoName $Repo -ReleaseTag $Tag -AssetName $Asset `
+        -Archive $ArchivePath -WorkDir $TmpDir -RequestHeaders $DownloadHeaders
+}
 
 # --- Extract archive ---------------------------------------------------------
 

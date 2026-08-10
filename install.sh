@@ -15,6 +15,9 @@ set -euo pipefail
 #   INSTALL_BASE=...         (default: ~/.local/share/sailfin/versions)
 #   GLOBAL_BIN_DIR=...       (default: ~/.local/bin)
 #   GITHUB_TOKEN=...         (optional; increases API rate limits)
+#   SAILFIN_LOCAL_ARCHIVE=... (install a tarball already on disk instead of
+#                            a published release; requires an explicit
+#                            VERSION and SKIPS signature/digest verification)
 #
 # Assets are expected to be named:
 #   sailfin_<version>_<os>_<arch>.tar.gz
@@ -97,6 +100,28 @@ api() {
     "$1"
 }
 
+# Offline / local-archive install. Points the installer at a tarball already
+# on disk instead of a published GitHub release.
+#
+# This is the only way to install an archive that has not been published, so
+# it is also what lets CI smoke-test a freshly built payload through the real
+# installer rather than a hand-rolled copy of its steps. An unpublished
+# archive has no signed manifest, so this path necessarily SKIPS release
+# signature and digest verification -- it therefore demands an explicit
+# VERSION and says plainly that verification was skipped.
+LOCAL_ARCHIVE="${SAILFIN_LOCAL_ARCHIVE:-}"
+if [ -n "$LOCAL_ARCHIVE" ]; then
+  [ -f "$LOCAL_ARCHIVE" ] \
+    || die "SAILFIN_LOCAL_ARCHIVE='${LOCAL_ARCHIVE}' is not a readable file."
+  case "$LOCAL_ARCHIVE" in
+    /*) : ;;
+    *) LOCAL_ARCHIVE="$(cd "$(dirname "$LOCAL_ARCHIVE")" && pwd)/$(basename "$LOCAL_ARCHIVE")" ;;
+  esac
+  if [ -z "$VERSION" ] || [ "$VERSION" = "latest" ]; then
+    die "SAILFIN_LOCAL_ARCHIVE requires an explicit VERSION (e.g. VERSION=0.9.5); 'latest' cannot be resolved offline."
+  fi
+fi
+
 TAG=""
 ASSET=""
 if [ -z "$VERSION" ] || [ "$VERSION" = "latest" ]; then
@@ -145,7 +170,10 @@ log "Expected asset: ${ASSET}"
 # known (for a pinned version they are constructed without the API), so a
 # failure here just routes us to the public release-download URL below,
 # which consumes no API quota. `|| true` keeps `set -e` from aborting.
-release_json="$(api "https://api.github.com/repos/${REPO}/releases/tags/${TAG}" 2>/dev/null || true)"
+release_json=""
+if [ -z "$LOCAL_ARCHIVE" ]; then
+  release_json="$(api "https://api.github.com/repos/${REPO}/releases/tags/${TAG}" 2>/dev/null || true)"
+fi
 asset_id=""
 if [ -n "$release_json" ]; then
   asset_id="$(printf '%s' "$release_json" | jq -r '.assets[]? | select(.name=="'"$ASSET"'") | .id' 2>/dev/null | head -n 1)"
@@ -158,6 +186,10 @@ cleanup() {
 trap cleanup EXIT
 
 ARCHIVE_PATH="${TMPDIR}/${ASSET}"
+if [ -n "$LOCAL_ARCHIVE" ]; then
+  ASSET="$(basename "$LOCAL_ARCHIVE")"
+  ARCHIVE_PATH="$LOCAL_ARCHIVE"
+fi
 
 # Auth header shared by both download paths (optional; raises API rate
 # limits and enables private-repo asset access).
@@ -190,7 +222,9 @@ download_via_direct() {
     -o "$ARCHIVE_PATH"
 }
 
-if ! download_via_api; then
+if [ -n "$LOCAL_ARCHIVE" ]; then
+  log "Installing from local archive: ${LOCAL_ARCHIVE}"
+elif ! download_via_api; then
   if [ -n "$asset_id" ] && [ "$asset_id" != "null" ]; then
     log "GitHub API asset download failed; falling back to the public release URL."
   else
@@ -276,7 +310,13 @@ verify_release_archive() {
   fi
 }
 
-verify_release_archive
+if [ -n "$LOCAL_ARCHIVE" ]; then
+  # A locally built archive has no signed release manifest to check against.
+  # Say so rather than letting a silent skip read as a passed verification.
+  log "Warning: local archive install — release signature and digest verification are SKIPPED."
+else
+  verify_release_archive
+fi
 
 # Validate archive
 if ! tar -tzf "$ARCHIVE_PATH" >/dev/null 2>&1; then
