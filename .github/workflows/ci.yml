@@ -1335,12 +1335,12 @@ jobs:
           set -euo pipefail
           mkdir -p build/sailfin
           canary_files=(
-            compiler/src/native_ir_api.sfn
-            compiler/src/native_ir_parser.sfn
-            compiler/src/native_ir_parser_defs.sfn
-            compiler/src/native_ir_parser_instructions.sfn
-            compiler/src/native_ir_utils_layout.sfn
-            compiler/src/native_ir_utils_parse.sfn
+            compiler/capsules/ir/src/native_ir_api.sfn
+            compiler/capsules/ir/src/native_ir_parser.sfn
+            compiler/capsules/ir/src/native_ir_parser_defs.sfn
+            compiler/capsules/ir/src/native_ir_parser_instructions.sfn
+            compiler/capsules/ir/src/native_ir_utils_layout.sfn
+            compiler/capsules/ir/src/native_ir_utils_parse.sfn
           )
           fail=0
           for f in "${canary_files[@]}"; do
@@ -1716,12 +1716,12 @@ jobs:
           set -euo pipefail
           mkdir -p build/sailfin
           canary_files=(
-            compiler/src/native_ir_api.sfn
-            compiler/src/native_ir_parser.sfn
-            compiler/src/native_ir_parser_defs.sfn
-            compiler/src/native_ir_parser_instructions.sfn
-            compiler/src/native_ir_utils_layout.sfn
-            compiler/src/native_ir_utils_parse.sfn
+            compiler/capsules/ir/src/native_ir_api.sfn
+            compiler/capsules/ir/src/native_ir_parser.sfn
+            compiler/capsules/ir/src/native_ir_parser_defs.sfn
+            compiler/capsules/ir/src/native_ir_parser_instructions.sfn
+            compiler/capsules/ir/src/native_ir_utils_layout.sfn
+            compiler/capsules/ir/src/native_ir_utils_parse.sfn
           )
           fail=0
           for f in "${canary_files[@]}"; do
