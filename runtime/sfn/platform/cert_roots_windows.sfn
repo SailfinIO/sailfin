@@ -1,0 +1,217 @@
+// runtime/sfn/platform/cert_roots_windows.sfn
+//
+// Windows sibling of `runtime/sfn/platform/cert_roots.sfn` (SFN-808), swapped
+// in by `target_condition_runtime_sfn_sources`
+// (`compiler/src/build/target.sfn`) for a Windows target. Enumerates the
+// system `ROOT` certificate store through Crypt32 and hands the raw DER back
+// to `capsules/sfn/crypto/src/trust_store.sfn`.
+//
+// Why this module has to exist at all: none of the seven CA-bundle paths in
+// `trust_store_default_paths()` exists on Windows, so before this every
+// outbound HTTPS call on a Windows host failed closed with "no readable CA
+// bundle in any known location". Windows has no CA-bundle file to point at —
+// the trust store is a live OS object, fed by Windows Update and enterprise
+// policy — so the only correct source is the store itself. Appending a
+// Git-for-Windows or vcpkg bundle path instead was rejected: such a file sees
+// neither the revocation feed nor policy-pushed roots, so it is a stale
+// snapshot wearing a trust store's name.
+//
+// The Crypt32 externs live HERE and not in the crypto capsule on purpose.
+// COFF and ELF both resolve every external reference before dead-stripping
+// (the reason `-lws2_32` is mandatory even for a program that opens no
+// socket, SFN-649), so an unconditional `extern fn CertOpenSystemStoreA` in a
+// capsule module would fail every Linux and macOS link. The capsule reaches
+// this module by bare symbol name instead — `sfn_rand_fill`'s exact pattern
+// (`capsules/sfn/crypto/src/rand.sfn`) — and the POSIX leg always supplies the
+// symbol on hosts where this file is not compiled.
+//
+// ── The blob ABI ────────────────────────────────────────────────────────────
+//
+// One malloc'd, self-describing buffer, freed by the caller with plain `free`.
+// A conventional `(out_count, out_lengths)` signature is not available:
+// Sailfin exposes only READ pointer intrinsics
+// (`sailfin_intrinsic_pointer_read_i32`/`_i64`/`_f64`), so a POSIX stub could
+// not populate an out-parameter even to say "nothing here".
+//
+//    0 : i64 count        number of records that follow
+//    8 : i64 total_bytes  size of THIS allocation, header and slack included
+//   16 : records          { i64 der_len, der_len bytes, zero pad to 8 }
+//
+// Every length field is `i64` and every record is padded to an 8-byte
+// boundary so each one stays aligned for `pointer_read_i64` (and for the
+// `atomic_store` writes below, which require `align 8`).
+//
+// The allocation carries 8 bytes of zeroed trailing slack past the last
+// record. The decoder reads each payload byte with a 4-byte
+// `pointer_read_i32` load and masks it — Sailfin has no byte-width load — so
+// the final byte of the final record needs three readable bytes after it. The
+// same over-allocation invariant `random_bytes` holds for its entropy buffer.
+//
+// `count == 0` with a non-null return is meaningful and is NOT the same as
+// returning null: it says "this host has a platform trust store and it gave
+// us nothing", which the consumer turns into a loud fail-closed diagnostic.
+// Null from this module means allocation failure only; the POSIX leg's null
+// means "no such store on this platform". See `cert_roots.sfn`.
+// ── Crypt32 (crypt32.dll; `-lcrypt32` on both Windows ABIs). ────────────────
+//
+// `CertOpenSystemStoreA(NULL, "ROOT")` opens the current user's view of the
+// system root store — the union of machine and user roots, which is the same
+// set the OS itself trusts. Returns a null HCERTSTORE on failure.
+extern fn CertOpenSystemStoreA(prov: i64, subsystem: *u8) -> i64;
+
+// `CertEnumCertificatesInStore(store, prev)` — pass null for `prev` to get the
+// first certificate, then feed it each returned context to get the next.
+// Returns null when the store is exhausted.
+//
+// THE OWNERSHIP RULE THAT MAKES THE TWO-PASS WALK BELOW LEAK-FREE, spelled out
+// because the code reads like a leak: this function FREES the context it is
+// handed and returns a fresh one. So a walk that runs to exhaustion has freed
+// every context it ever saw, and running two full walks back to back is safe
+// and leaks nothing. Only a walk that stops EARLY still owns a context, and
+// must hand it to `CertFreeCertificateContext` — which is why every early
+// `break` below does exactly that.
+extern fn CertEnumCertificatesInStore(store: i64, prev: *u8) -> *u8;
+
+extern fn CertFreeCertificateContext(ctx: *u8) -> i32;
+
+extern fn CertCloseStore(store: i64, flags: i32) -> i32;
+
+extern fn malloc(size: usize) -> *u8;
+
+extern fn memset(ptr: *u8, value: i32, n: usize) -> *u8;
+
+extern fn memcpy(dst: *u8, src: *u8, n: usize) -> *u8;
+
+// Materializes a NUL-terminated C string for the `A`-suffixed Win32 call
+// above, same as every other Windows platform module.
+extern fn sfn_str_to_cstr(s_data: *u8, s_len: i64, arena_slot: *u8) -> *u8;
+
+fn _cr_ptr_off(p: *u8, off: i64) -> *u8 {
+    let addr: i64 = (p as i64) + off;
+    return addr as *u8;
+}
+
+// Bytes of zero padding needed after an `n`-byte record body to land the next
+// record's `i64` length field back on an 8-byte boundary.
+fn _cr_pad8(n: i64) -> i64 {
+    let rem: i64 = n % 8;
+    if rem == 0 { return 0; }
+    return 8 - rem;
+}
+
+// Guard bounds for the enumeration, which walks OS-owned state of unknown
+// size. A stock Windows root store holds on the order of 50 certificates and
+// an enterprise-managed one a few hundred; 4096 is far above any real store
+// and exists so a corrupt or hostile store cannot spin the loop forever.
+fn _cr_max_certs() -> i64 { return 4096; }
+
+// A DER certificate above 64 KiB is not a certificate. This also rejects a
+// `cbCertEncoded` whose DWORD reinterprets negative through the signed
+// `pointer_read_i32` load.
+fn _cr_max_der() -> i64 { return 65536; }
+
+// CERT_CONTEXT field offsets, x86-64:
+//
+//   0  DWORD      dwCertEncodingType
+//   8  BYTE      *pbCertEncoded      (4 bytes of padding precede it)
+//  16  DWORD      cbCertEncoded
+//  24  PCERT_INFO pCertInfo
+//  32  HCERTSTORE hCertStore
+fn _cr_ctx_der_ptr(ctx: *u8) -> i64 {
+    return sailfin_intrinsic_pointer_read_i64(_cr_ptr_off(ctx, 8));
+}
+
+fn _cr_ctx_der_len(ctx: *u8) -> i64 {
+    return sailfin_intrinsic_pointer_read_i32(_cr_ptr_off(ctx, 16)) as i64;
+}
+
+// A well-formed blob describing zero certificates: header plus the 8 bytes of
+// decoder slack, nothing between them. Returned when the store cannot be
+// opened or yields nothing usable, so the consumer can tell that case apart
+// from a host that has no platform store at all (which returns null).
+fn _cr_empty_blob() -> *u8 {
+    let total: i64 = 24;
+    let blob: *u8 = malloc(total as usize);
+    if blob as i64 == 0 { return null; }
+    let _z = memset(blob, 0, total as usize);
+    atomic_store(_cr_ptr_off(blob, 8) as *i64, total);
+    return blob;
+}
+
+// sfn_cert_roots_blob() — enumerate the Windows system `ROOT` store into one
+// malloc'd blob in the layout documented above. See `cert_roots.sfn` for the
+// contract this shares with the POSIX leg.
+fn sfn_cert_roots_blob() -> *u8 ![io] {
+    let store_name: string = "ROOT";
+    let store_name_c: *u8 = sfn_str_to_cstr(store_name as *u8, store_name.length, null);
+    let store: i64 = CertOpenSystemStoreA(0, store_name_c);
+    if store == 0 { return _cr_empty_blob(); }
+
+    // Pass 1 — size the allocation. Sailfin has no realloc-backed byte buffer
+    // here, and the store is small, so two walks are cheaper than growing.
+    let mut count: i64 = 0;
+    let mut payload: i64 = 0;
+    let mut ctx: *u8 = CertEnumCertificatesInStore(store, null);
+    loop {
+        if ctx as i64 == 0 { break; }
+        if count >= _cr_max_certs() {
+            let _f = CertFreeCertificateContext(ctx);
+            break;
+        }
+        let der_len: i64 = _cr_ctx_der_len(ctx);
+        if der_len > 0 && der_len <= _cr_max_der() {
+            count += 1;
+            payload += 8 + der_len + _cr_pad8(der_len);
+        }
+        ctx = CertEnumCertificatesInStore(store, ctx);
+    }
+
+    if count == 0 {
+        let _c = CertCloseStore(store, 0);
+        return _cr_empty_blob();
+    }
+
+    let total: i64 = 16 + payload + 8;
+    let blob: *u8 = malloc(total as usize);
+    if blob as i64 == 0 {
+        let _c = CertCloseStore(store, 0);
+        return null;
+    }
+    let _z = memset(blob, 0, total as usize);
+
+    // Pass 2 — copy. Every record is bounds-checked against the ALLOCATION
+    // rather than against pass 1's tally: a certificate store is shared,
+    // mutable OS state that an administrator or Windows Update can change
+    // between the two walks, so the capacity check is what makes the copy
+    // memory-safe. `written` — not `count` — is what the header records, so a
+    // store that shrank underneath us yields a short blob rather than a
+    // trailing run of zeroed records.
+    let mut written: i64 = 0;
+    let mut off: i64 = 16;
+    ctx = CertEnumCertificatesInStore(store, null);
+    loop {
+        if ctx as i64 == 0 { break; }
+        if written >= count {
+            let _f = CertFreeCertificateContext(ctx);
+            break;
+        }
+        let der_len: i64 = _cr_ctx_der_len(ctx);
+        if der_len > 0 && der_len <= _cr_max_der() {
+            let der_ptr: i64 = _cr_ctx_der_ptr(ctx);
+            // The trailing `+ 8` keeps the decoder's slack inside the
+            // allocation even when this record is the last one written.
+            if der_ptr != 0 && off + 8 + der_len + _cr_pad8(der_len) + 8 <= total {
+                atomic_store(_cr_ptr_off(blob, off) as *i64, der_len);
+                let _m = memcpy(_cr_ptr_off(blob, off + 8), der_ptr as *u8, der_len as usize);
+                off = off + 8 + der_len + _cr_pad8(der_len);
+                written += 1;
+            }
+        }
+        ctx = CertEnumCertificatesInStore(store, ctx);
+    }
+    let _c = CertCloseStore(store, 0);
+
+    atomic_store(blob as *i64, written);
+    atomic_store(_cr_ptr_off(blob, 8) as *i64, total);
+    return blob;
+}

@@ -86,6 +86,20 @@ define i32 @sfn_rand_fill(i8* %buf, i64 %n) {
   ret i32 0
 }
 
+; Platform trust-store enumeration (SFN-808). `runtime/sfn/platform/
+; cert_roots.sfn` is excluded from RUNTIME_MODS, the same hand-rolled
+; mingw bridge exclusion as `sfn_rand_fill` directly above. The compiler
+; links `sfn/crypto`, whose `trust_store_load` references
+; `@sfn_cert_roots_blob`, so the standalone-emitted crypto IR needs the
+; symbol defined at the Windows link. Null is the correct degraded value:
+; it means "this host has no enumerable platform trust store", which
+; routes `trust_store_load` to its existing environment-override /
+; CA-bundle-path probe rather than fabricating either trust or a failure.
+; Sync pinned by compiler/tests/e2e/cross_windows_runtime_modules_test.sfn.
+define i8* @sfn_cert_roots_blob() {
+  ret i8* null
+}
+
 ; TLS client wrappers. `runtime/sfn/platform/tls.sfn` is excluded from
 ; RUNTIME_MODS, so the standalone-emitted `http.o` — whose `https://` path
 ; forward-declares these `@tls_*` symbols — needs them defined at the

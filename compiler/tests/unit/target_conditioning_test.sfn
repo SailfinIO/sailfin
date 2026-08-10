@@ -214,7 +214,7 @@ test "target: host runtime module set is unchanged" ![pure] {
     assert expect_eq_str_array(target_condition_runtime_sfn_sources(sources, "Darwin"), sources).ok;
 }
 
-test "target: Windows swaps process.sfn, rlimit.sfn, rand.sfn, and fs_exec_mode.sfn to their Win32 siblings, leaves tls.sfn unconditioned, and appends the six anchor-less siblings" ![pure] {
+test "target: Windows swaps process.sfn, rlimit.sfn, rand.sfn, fs_exec_mode.sfn, and cert_roots.sfn to their Win32 siblings, leaves tls.sfn unconditioned, and appends the six anchor-less siblings" ![pure] {
     // SFN-549: rlimit.sfn used to be DROPPED here (a no-op stub in
     // windows_stubs.ll resolved apply_default_mem_limit for the mingw
     // bridge only); the native MSVC path no longer links that stub, so
@@ -227,15 +227,18 @@ test "target: Windows swaps process.sfn, rlimit.sfn, rand.sfn, and fs_exec_mode.
     // is not a legal UCRT `_access` mode, and passing it terminates the
     // process via `_invalid_parameter_noinfo` -> `__fastfail` (0xC0000409)
     // rather than returning an error, so the sibling supplies F_OK
-    // (SFN-649). The six anchor-less siblings (realpath_windows.sfn,
+    // (SFN-649). cert_roots.sfn swaps to cert_roots_windows.sfn: Windows
+    // has no CA-bundle file anywhere, so the system `ROOT` certificate
+    // store reached through Crypt32 is the only trust source there
+    // (SFN-808). The six anchor-less siblings (realpath_windows.sfn,
     // clock_windows.sfn, pthread_windows.sfn, popen_windows.sfn,
     // mkstemp_windows.sfn, strcasestr_windows.sfn) have no POSIX .sfn
     // counterpart to swap FROM (each backs a bare libc/pthreads symbol,
     // not a Sailfin module), so they are APPENDED at the end rather than
     // replacing a matched basename. Every other module is preserved in
     // order.
-    let sources: string[] = ["/rt/sfn/runtime_globals.sfn", "/rt/sfn/process.sfn", "/rt/sfn/platform/rlimit.sfn", "/rt/sfn/platform/rand.sfn", "/rt/sfn/platform/tls.sfn", "/rt/sfn/platform/fs_exec_mode.sfn", "/rt/sfn/io.sfn",];
-    let expected: string[] = ["/rt/sfn/runtime_globals.sfn", "/rt/sfn/platform/process_windows.sfn", "/rt/sfn/platform/rlimit_windows.sfn", "/rt/sfn/platform/rand_windows.sfn", "/rt/sfn/platform/tls.sfn", "/rt/sfn/platform/fs_exec_mode_windows.sfn", "/rt/sfn/io.sfn", "/rt/sfn/platform/realpath_windows.sfn", "/rt/sfn/platform/clock_windows.sfn", "/rt/sfn/platform/pthread_windows.sfn", "/rt/sfn/platform/popen_windows.sfn", "/rt/sfn/platform/mkstemp_windows.sfn", "/rt/sfn/platform/strcasestr_windows.sfn",];
+    let sources: string[] = ["/rt/sfn/runtime_globals.sfn", "/rt/sfn/process.sfn", "/rt/sfn/platform/rlimit.sfn", "/rt/sfn/platform/rand.sfn", "/rt/sfn/platform/tls.sfn", "/rt/sfn/platform/fs_exec_mode.sfn", "/rt/sfn/platform/cert_roots.sfn", "/rt/sfn/io.sfn",];
+    let expected: string[] = ["/rt/sfn/runtime_globals.sfn", "/rt/sfn/platform/process_windows.sfn", "/rt/sfn/platform/rlimit_windows.sfn", "/rt/sfn/platform/rand_windows.sfn", "/rt/sfn/platform/tls.sfn", "/rt/sfn/platform/fs_exec_mode_windows.sfn", "/rt/sfn/platform/cert_roots_windows.sfn", "/rt/sfn/io.sfn", "/rt/sfn/platform/realpath_windows.sfn", "/rt/sfn/platform/clock_windows.sfn", "/rt/sfn/platform/pthread_windows.sfn", "/rt/sfn/platform/popen_windows.sfn", "/rt/sfn/platform/mkstemp_windows.sfn", "/rt/sfn/platform/strcasestr_windows.sfn",];
     assert expect_eq_str_array(target_condition_runtime_sfn_sources(sources, "Windows"), expected).ok;
 }
 
@@ -273,19 +276,25 @@ test "target: Windows skips the anchor-less appends with no platform/ anchor pre
     assert expect_eq_str_array(target_condition_runtime_sfn_sources(sources, "Windows"), sources).ok;
 }
 
-test "target: extra link libs — msvc needs bcrypt and ws2_32, windows-gnu needs only ws2_32" ![pure] {
+test "target: extra link libs — msvc needs bcrypt, crypt32, and ws2_32; windows-gnu needs crypt32 and ws2_32" ![pure] {
     // `-lbcrypt` backs BCryptGenRandom in platform/rand_windows.sfn
     // (SFN-549) — msvc-only, since windows-gnu resolves it through its
-    // own mingw-w64 import libs. `-lws2_32` backs the 11 socket symbols
-    // the net and websocket adapters declare as bare externs — free from
-    // libc on POSIX, exported from ws2_32.dll on BOTH Windows ABIs
-    // (SFN-649). Both are required even for a program that opens no
-    // socket: COFF resolves every external reference before
-    // dead-stripping, and those runtime modules are always linked.
-    // Every host target keeps the identity/empty result (#1112).
-    let expected_msvc: string[] = ["-lbcrypt", "-lws2_32"];
+    // own mingw-w64 import libs. `-lcrypt32` backs
+    // CertOpenSystemStoreA/CertEnumCertificatesInStore/
+    // CertFreeCertificateContext/CertCloseStore in
+    // platform/cert_roots_windows.sfn (SFN-808) — required on BOTH
+    // Windows ABIs, unlike bcrypt, because crypt32 is not in mingw-w64's
+    // default auto-linked import-lib set. `-lws2_32` backs the 11 socket
+    // symbols the net and websocket adapters declare as bare externs —
+    // free from libc on POSIX, exported from ws2_32.dll on BOTH Windows
+    // ABIs (SFN-649). ws2_32 and crypt32 are required even for a program
+    // that opens no socket and loads no certificate: COFF resolves every
+    // external reference before dead-stripping, and those runtime
+    // modules are always linked. Every host target keeps the
+    // identity/empty result (#1112).
+    let expected_msvc: string[] = ["-lbcrypt", "-lcrypt32", "-lws2_32"];
     assert expect_eq_str_array(target_extra_link_libs("x86_64-pc-windows-msvc"), expected_msvc).ok;
-    let expected_gnu: string[] = ["-lws2_32"];
+    let expected_gnu: string[] = ["-lcrypt32", "-lws2_32"];
     assert expect_eq_str_array(target_extra_link_libs("x86_64-w64-mingw32"), expected_gnu).ok;
     let none: string[] = [];
     assert expect_eq_str_array(target_extra_link_libs("x86_64-unknown-linux-gnu"), none).ok;
@@ -311,6 +320,16 @@ test "target: Windows socket_ops swap survives without the other platform anchor
     let sources: string[] = ["/rt/sfn/platform/socket_ops.sfn"];
     let out = target_condition_runtime_sfn_sources(sources, "Windows");
     assert expect_eq_str(out[0], "/rt/sfn/platform/socket_ops_windows.sfn").ok;
+    assert expect_eq_bool(out.length > 1, true).ok;
+}
+
+test "target: Windows cert_roots swap survives without the other platform anchors" ![pure] {
+    // cert_roots.sfn is itself a platform/ anchor, so the swap must fire
+    // with rlimit/rand/tls/exec all absent — same coupling guard as the
+    // fs_exec_mode test above (SFN-808).
+    let sources: string[] = ["/rt/sfn/platform/cert_roots.sfn"];
+    let out = target_condition_runtime_sfn_sources(sources, "Windows");
+    assert expect_eq_str(out[0], "/rt/sfn/platform/cert_roots_windows.sfn").ok;
     assert expect_eq_bool(out.length > 1, true).ok;
 }
 

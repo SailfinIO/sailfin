@@ -1,0 +1,32 @@
+// runtime/sfn/platform/cert_roots.sfn
+//
+// Platform trust-root enumeration primitive (SFN-808): the POSIX leg, which
+// has nothing to enumerate. `sfn_cert_roots_blob()` returns null here, and
+// null is a first-class answer rather than a failure — it means "this host has
+// no enumerable platform trust store", which is exactly true of Linux, macOS,
+// and the BSDs. On those hosts the trust store IS a file, and
+// `capsules/sfn/crypto/src/trust_store.sfn`'s `trust_store_default_paths()`
+// probe is the real mechanism; a null blob is what routes the caller there.
+//
+// Distinguishing "no platform store" from "platform store that failed" is the
+// entire reason this returns a pointer rather than an empty buffer. The
+// Windows sibling returns a NON-null blob with a zero count when the `ROOT`
+// store cannot be opened or enumerates nothing, so the consumer can fail
+// closed loudly on a host that is supposed to have a store, while still
+// falling through to the path probe on a host that never had one. Collapsing
+// both cases onto null would either break POSIX or make a broken Windows
+// store silently indistinguishable from a working POSIX one.
+//
+// The Windows sibling (`cert_roots_windows.sfn`) is swapped in by
+// `target_condition_runtime_sfn_sources` (`compiler/src/build/target.sfn`),
+// the same basename swap `rand.sfn` uses. Exactly one of the two is compiled
+// into a given binary, so the two modules never link together and need no
+// layout parity beyond this signature and the blob format the Windows side
+// documents.
+//
+// `![io]` mirrors the sibling's contract, which reads OS state for real. The
+// effect cannot sit on the capsule-side `extern` that consumes this (E0804),
+// so the gate lives on `trust_store_load`, which already declares `![io]`.
+// sfn_cert_roots_blob() — see `cert_roots_windows.sfn` for the blob layout
+// this contract shares. Null means "no enumerable platform trust store".
+fn sfn_cert_roots_blob() -> *u8 ![io] { return null; }
