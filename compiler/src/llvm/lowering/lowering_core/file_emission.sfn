@@ -6,9 +6,10 @@ import {
     NativeArtifact,
     NativeModule,
     ParseNativeResult
-} from "../../../native_ir";
-import { parse_native_artifact, parse_native_artifact_from_lines } from "../../../native_ir_api";
-import { lines_to_native_text, native_lines_have_text } from "../../../native_ir_utils_text";
+} from "sfn/ir";
+import { parse_native_artifact, parse_native_artifact_from_lines } from "sfn/ir";
+import { lines_to_native_text, native_lines_have_text } from "sfn/ir";
+
 import { LLVMProviderContext, install_llvm_provider_context, trace_log } from "../../lowering_debug_state";
 import { LLVMArtifactResult, LoweredLLVMLinesResult } from "../../types";
 import { collect_defined_function_symbols } from "../lowering_helpers";

@@ -1,13 +1,16 @@
 // compiler/src/effect_checker/collector.sfn
 //
 // AST traversal that collects effect requirements from statements and expressions.
+import { intrinsic_effects_for_callee_target } from "sfn/ir";
 import {
     Block,
     ElseBranch,
     Expression,
     MatchCase,
     Statement
-} from "../ast";
+} from "sfn/syntax";
+import { Token } from "sfn/syntax";
+
 import {
     ImportSymbolTable,
     ImportedFunctionSignature,
@@ -15,8 +18,6 @@ import {
     lookup_imported_function
 } from "../effect_imports";
 import { is_universally_allowed_effect } from "../effect_taxonomy";
-import { intrinsic_effects_for_callee_target } from "../intrinsic_effects";
-import { Token } from "../token";
 import {
     _copy_effect_table,
     _hoist_block_local_fns,

@@ -1,7 +1,8 @@
 // compiler/src/llvm/expression_lowering/native/core_calls.sfn
 //
 // Call parsing helpers for expression lowering.
-import { char_at } from "../../../string_utils";
+import { char_at_index as char_at } from "sfn/strings";
+
 import { append_string, trim_text } from "../../utils";
 
 fn find_call_site(expression: string) -> int {

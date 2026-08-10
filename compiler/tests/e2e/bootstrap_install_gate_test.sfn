@@ -13,17 +13,18 @@
 //      re-invoke the seed.
 //   3. editing a source file under a fingerprinted root invalidates the
 //      short-circuit and re-invokes the seed.
-//   4. `--force` re-invokes the seed even on an unchanged tree.
-//   5. `install --from <path>` publishes an arbitrary file directly.
-//   6. a `.pending` fingerprint that does not match the current tree
+//   4. editing only a compiler implementation-capsule source does likewise.
+//   5. `--force` re-invokes the seed even on an unchanged tree.
+//   6. `install --from <path>` publishes an arbitrary file directly.
+//   7. a `.pending` fingerprint that does not match the current tree
 //      (a well-formed but wrong digest) makes `install` refuse to publish,
 //      leaving the previously installed binary untouched.
 //
 // Two further, independent scenarios (each in its own synthetic repo):
-//   7. a malformed `.pending` (pre-SFN-679 usage text, not a digest) is
+//   8. a malformed `.pending` (pre-SFN-679 usage text, not a digest) is
 //      treated as "no snapshot" — `install` still succeeds, but does not
 //      record a freshness claim nobody checked.
-//   8. a build whose seed fails outright, or whose seed "succeeds" but
+//   9. a build whose seed fails outright, or whose seed "succeeds" but
 //      produces a binary that does not run, leaves any previously
 //      installed binary and stored fingerprint untouched.
 import { find, split } from "sfn/strings";
@@ -70,6 +71,15 @@ fn _scratch_repo(name: string) -> string ![io] {
     let mut dir = env.get("SAILFIN_TEST_SCRATCH");
     if dir.length == 0 { dir = "/tmp"; }
     return dir + "/" + name;
+}
+
+// Mirror every source population required by `default_fingerprint_roots`.
+// The directories may be empty in a scenario that exercises install failure
+// handling, but a missing root deliberately makes fingerprinting fail closed.
+fn _create_fingerprint_roots(repo: string) -> void ![io] {
+    fs.createDirectory(repo + "/compiler/src", true);
+    fs.createDirectory(repo + "/compiler/capsules", true);
+    fs.createDirectory(repo + "/runtime", true);
 }
 
 // Count non-empty lines in the marker file — the number of times the stub
@@ -166,13 +176,14 @@ test "bootstrap install gate: build installs, short-circuits, and refuses a stal
     let repo = _repo_root();
     process.run(["rm", "-rf", repo]);
     fs.createDirectory(repo, true);
-    fs.createDirectory(repo + "/compiler/src", true);
-    fs.createDirectory(repo + "/runtime", true);
+    _create_fingerprint_roots(repo);
+    fs.createDirectory(repo + "/compiler/capsules/syntax/src", true);
 
     let marker = repo + "/seed-invocations.marker";
     _write_bootstrap_toml(repo);
     _seed_stub(repo, marker);
     fs.writeFile(repo + "/compiler/src/a.sfn", "fn a_value() -> int { return 1; }\n");
+    fs.writeFile(repo + "/compiler/capsules/syntax/src/mod.sfn", "fn syntax_value() -> int { return 3; }\n");
     fs.writeFile(repo + "/runtime/b.sfn", "fn b_value() -> int { return 2; }\n");
 
     let sfn = _sfn_bin_abs();
@@ -207,14 +218,24 @@ test "bootstrap install gate: build installs, short-circuits, and refuses a stal
     assert _marker_count(marker) == 2;
     assert find(third_out + third_err, "is up to date", 0) < 0;
 
-    // 4. --force re-invokes the seed even on an unchanged tree.
+    // 4. Edit only an implementation-capsule source: it is equally part of
+    // the compiler fingerprint and must invalidate the short-circuit.
+    fs.writeFile(repo + "/compiler/capsules/syntax/src/mod.sfn", "fn syntax_value() -> int { return 4; }\n");
+    let capsule_exit = process.run_capture_cwd([sfn, "dev", "bootstrap", "build"], child_env, repo);
+    let capsule_out = process.capture_take_stdout();
+    let capsule_err = process.capture_take_stderr();
+    assert capsule_exit == 0;
+    assert _marker_count(marker) == 3;
+    assert find(capsule_out + capsule_err, "is up to date", 0) < 0;
+
+    // 5. --force re-invokes the seed even on an unchanged tree.
     let fourth_exit = process.run_capture_cwd([sfn, "dev", "bootstrap", "build", "--force"], child_env, repo);
     let _fourth_out = process.capture_take_stdout();
     let _fourth_err = process.capture_take_stderr();
     assert fourth_exit == 0;
-    assert _marker_count(marker) == 3;
+    assert _marker_count(marker) == 4;
 
-    // 5. install --from publishes an arbitrary file directly. It must be a
+    // 6. install --from publishes an arbitrary file directly. It must be a
     // genuinely runnable script — fix 3's smoke-verify runs `<binary>
     // version` against it before recording a freshness claim.
     let fresh = repo + "/fresh-binary.bin";
@@ -228,7 +249,7 @@ test "bootstrap install gate: build installs, short-circuits, and refuses a stal
     assert installed_after_fifth == fs.readFile(fresh);
     assert fs.is_executable(repo + "/build/bin/sfn");
 
-    // 6. A well-formed but stale `.pending` digest makes `install` refuse to
+    // 7. A well-formed but stale `.pending` digest makes `install` refuse to
     // publish, leaving the previously installed binary untouched. Contents
     // must be a well-formed 64-char lowercase hex digest (a malformed
     // pending file is treated as "no pre-build snapshot," not a race).
@@ -248,8 +269,7 @@ test "bootstrap install gate: a malformed .pending is treated as no snapshot, no
     let repo = _scratch_repo("bootstrap-install-gate-repo-malformed-pending");
     process.run(["rm", "-rf", repo]);
     fs.createDirectory(repo, true);
-    fs.createDirectory(repo + "/compiler/src", true);
-    fs.createDirectory(repo + "/runtime", true);
+    _create_fingerprint_roots(repo);
     fs.writeFile(repo + "/compiler/src/a.sfn", "fn a_value() -> int { return 1; }\n");
     fs.writeFile(repo + "/runtime/b.sfn", "fn b_value() -> int { return 2; }\n");
 
@@ -280,8 +300,7 @@ test "bootstrap install gate: a failed build leaves the installed binary and fin
     let repo = _scratch_repo("bootstrap-install-gate-repo-failed-build");
     process.run(["rm", "-rf", repo]);
     fs.createDirectory(repo, true);
-    fs.createDirectory(repo + "/compiler/src", true);
-    fs.createDirectory(repo + "/runtime", true);
+    _create_fingerprint_roots(repo);
 
     let marker = repo + "/seed-invocations.marker";
     _write_bootstrap_toml(repo);
@@ -322,8 +341,7 @@ test "bootstrap install gate: a seed that produces an unrunnable binary leaves t
     let repo = _scratch_repo("bootstrap-install-gate-repo-unrunnable");
     process.run(["rm", "-rf", repo]);
     fs.createDirectory(repo, true);
-    fs.createDirectory(repo + "/compiler/src", true);
-    fs.createDirectory(repo + "/runtime", true);
+    _create_fingerprint_roots(repo);
 
     let marker = repo + "/seed-invocations.marker";
     _write_bootstrap_toml(repo);

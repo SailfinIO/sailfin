@@ -2,7 +2,8 @@
 //
 // Function and block scope construction: parameter seeding, nested-fn
 // hoisting and capture rules, and `main` signature validation.
-import { Block, FunctionSignature, Statement } from "../ast";
+import { Block, FunctionSignature, Statement } from "sfn/syntax";
+
 import { Diagnostic } from "../typecheck_types";
 import {
     classify_declared_primitive,

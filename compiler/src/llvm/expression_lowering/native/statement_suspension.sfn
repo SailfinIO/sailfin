@@ -4,8 +4,9 @@
 //
 // Detects when mutable borrows remain active across `await`/`yield` suspension
 // points, and provides future type / spawn symbol mapping for the async runtime.
-import { NativeSourceSpan } from "../../../native_ir";
-import { substring } from "../../../string_utils";
+import { NativeSourceSpan } from "sfn/ir";
+import { substring } from "sfn/strings";
+
 import { LocalBinding, ParameterBinding } from "../../types";
 import {
     is_identifier_part_char,

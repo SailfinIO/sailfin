@@ -1,7 +1,8 @@
 // compiler/src/llvm/expression_lowering/native/core.sfn
 //
 // Compatibility facade for the stable native expression-lowering surface.
-import { NativeSourceSpan } from "../../../native_ir";
+import { NativeSourceSpan } from "sfn/ir";
+
 import {
     LocalBinding,
     OwnershipAnalysis,

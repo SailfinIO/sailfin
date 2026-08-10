@@ -10,7 +10,8 @@
 // dependent sends (identifier / lambda arguments) stay silent — the checker has
 // no expression-type inferencer (#829), so the send check is deliberately
 // conservative to avoid false positives.
-import { parse_program } from "../../src/parser/mod";
+import { parse_program } from "sfn/syntax";
+
 import { typecheck_diagnostics } from "../../src/typecheck";
 import { channel_element_kind } from "../../src/typecheck_types/expr_type_rules";
 

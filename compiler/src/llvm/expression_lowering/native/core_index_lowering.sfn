@@ -1,8 +1,9 @@
 // compiler/src/llvm/expression_lowering/native/core_index_lowering.sfn
 //
 // Indexing expression lowering extracted from core.sfn.
-import { NativeFunction } from "../../../native_ir";
-import { substring } from "../../../string_utils";
+import { NativeFunction } from "sfn/ir";
+import { substring } from "sfn/strings";
+
 import { format_temp_name } from "../../expressions_helpers";
 import { merge_string_constants } from "../../strings";
 import { ends_with_pointer_suffix, strip_pointer_suffix } from "../../type_mapping";

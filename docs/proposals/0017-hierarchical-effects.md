@@ -116,7 +116,7 @@ Rationale for dotted strings over structured `{root, refinement}` pairs:
   structured representation would invent a new surface form for zero
   expressiveness gain.
 - **Minimal wire-format churn.** `NativeFunction.effects: string[]` in
-  `compiler/src/native_ir.sfn` already round-trips effect *strings* across
+  `compiler/capsules/ir/src/native_ir.sfn` already round-trips effect *strings* across
   capsule boundaries (see `effect-validation.md` §1.4). Dotted names ride that
   channel with **no `.sfn-asm` format change** — a sub-effect is just a longer
   string. A structured pair would require a new field and a migration of every

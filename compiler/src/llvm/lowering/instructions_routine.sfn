@@ -20,8 +20,9 @@
 // leaking unjoined tasks. Failing closed with a diagnostic is the v0
 // stance (issue #1181); lifting the restriction (emitting the join on
 // every exit edge) is a follow-up.
+import { NativeFunction, NativeInstruction } from "sfn/ir";
+
 import { Diag, diag_to_legacy_string } from "../../diagnostic";
-import { NativeFunction, NativeInstruction } from "../../native_ir";
 import { format_temp_name } from "../expressions_helpers";
 import { make_child_scope_id } from "../lifetime";
 import { empty_string_constant_set, merge_string_constants } from "../strings";

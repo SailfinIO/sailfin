@@ -38,7 +38,7 @@ existing CPU-only capsule.
   `compiler/tests/e2e/rand_effect_gate_test.sfn`. `docs/status.md:504` documents
   the honest scope ("only `random_bytes` carries the effect — there is still no
   auto call-name detector").
-- Tensor IR (`compiler/src/tensor_ir.sfn`, SFN-427) exists but is **unreachable
+- Tensor IR (`compiler/capsules/ir/src/tensor_ir.sfn`, SFN-427) exists but is **unreachable
   from the pipeline**: `main.sfn` never imports it, `typed_ssa.sfn` only mentions
   it in comments, and `tensor_ir_link_harness.sfn` is test-only. No AST construct
   produces a `TensorFunction`.

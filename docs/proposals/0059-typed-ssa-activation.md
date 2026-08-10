@@ -17,7 +17,7 @@ graduates-to:
 ## 1. Summary
 
 §10 below is the normative Typed SSA v0 contract; SFN-454 landed its
-data model, verifier, and canonical renderer (`compiler/src/typed_ssa.sfn`,
+data model, verifier, and canonical renderer (`compiler/capsules/ir/src/typed_ssa.sfn`,
 `typed_ssa_verify.sfn`, `typed_ssa_render.sfn`, ~2,360 lines). **Nothing
 produces a typed-SSA module and nothing consumes one.** The subtree is not
 imported from `compiler/src/main.sfn`, so it is `sfn check`-clean and
@@ -101,7 +101,7 @@ The three consumers, in order of increasing authority:
 | **L3** | typed SSA → `.sfn-asm` round-trip, spliced and built through the existing lowering | Producer fidelity proven by *executed behaviour*, not by inspection | Real: a shipped binary's code came from typed SSA |
 
 **Why L3 renders back to `.sfn-asm` rather than to LLVM text.** The repo
-already proves this pattern: `compiler/src/tensor_ir_link_harness.sfn` lowers
+already proves this pattern: `compiler/src/build/tensor_ir_link_harness.sfn` lowers
 a shape-typed tensor-IR module to a `.fn … .endfn` native-IR block, splices it
 into a driver program's native text, and reuses `lower_to_llvm_ir_from_text`
 plus the ordinary runtime-capsule link to produce a runnable, timeable binary.
@@ -551,7 +551,7 @@ with the explicit entry condition in §3.1.
 - SFEP-0030 §3.5 / §4 (function-value effect-row identity and closure ABI).
 - SFN-452 (contract), SFN-454 (core + verifier + renderer).
 - SFN-434 / PR #2681 (formatter spelling changed typed-channel lowering).
-- `compiler/src/tensor_ir_link_harness.sfn` — prior art for making a partial IR
+- `compiler/src/build/tensor_ir_link_harness.sfn` — prior art for making a partial IR
   execute through the existing lowering path.
 - `.claude/rules/seed-dependency.md` — why this arc's ordering is not seed-gated.
 

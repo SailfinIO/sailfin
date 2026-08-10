@@ -28,8 +28,8 @@ import {
     term_cond_branch,
     term_return_value,
     term_return_void
-} from "../../src/typed_ssa";
-import { TssaDiagnostic, VerifyResult, verify_module } from "../../src/typed_ssa_verify";
+} from "sfn/ir";
+import { TssaDiagnostic, VerifyResult, verify_module } from "sfn/ir";
 
 fn _has_code(result: VerifyResult, code: string) -> boolean {
     let mut i: int = 0;

@@ -1,0 +1,78 @@
+// Release-version lockstep guard for private compiler implementation capsules
+// (SFEP-0020, established with sfn/syntax in SFN-741).
+import {
+    contains,
+    find,
+    split,
+    starts_with,
+    substring,
+    trim
+} from "sfn/strings";
+
+fn _lockstep_repo_root() -> string ![io] {
+    let root = env.get("SAILFIN_REPO_ROOT");
+    if root.length > 0 { return root; }
+    return ".";
+}
+
+fn _manifest_version(text: string) -> string {
+    let lines = split(text, "\n");
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = trim(lines[i]);
+        i += 1;
+        if !starts_with(line, "version") { continue; }
+        let first_quote = find(line, "\"", 0);
+        if first_quote < 0 { return ""; }
+        let second_quote = find(line, "\"", first_quote + 1);
+        if second_quote <= first_quote { return ""; }
+        return substring(line, first_quote + 1, second_quote);
+    }
+    return "";
+}
+
+test "compiler capsule release: every private manifest matches the compiler version" ![io] {
+    let root = _lockstep_repo_root();
+    let compiler_version = _manifest_version(fs.readFile(root
+        + "/compiler/capsule.toml"));
+    if compiler_version.length == 0 {
+        throw "compiler manifest version is missing";
+    }
+
+    let capsule_root = root + "/compiler/capsules";
+    let roles = fs.listDirectory(capsule_root);
+    if roles.length == 0 {
+        throw "compiler/capsules contains no implementation roles";
+    }
+    let mut checked = 0;
+    let mut i = 0;
+    loop {
+        if i >= roles.length { break; }
+        let role = roles[i];
+        i += 1;
+        if role == "." || role == ".." { continue; }
+        let manifest = capsule_root + "/" + role + "/capsule.toml";
+        if !fs.exists(manifest) { continue; }
+        let version = _manifest_version(fs.readFile(manifest));
+        if version != compiler_version {
+            throw manifest + " version " + version + " does not match compiler "
+                + compiler_version;
+        }
+        checked += 1;
+    }
+    if checked == 0 {
+        throw "no private compiler capsule manifests were checked";
+    }
+}
+
+test "compiler capsule release: automation bumps and stages private manifests" ![io] {
+    let workflow = fs.readFile(_lockstep_repo_root()
+        + "/.github/workflows/release.yml");
+    if !contains(workflow, "find compiler/capsules -mindepth 2 -maxdepth 2 -name capsule.toml") {
+        throw "release.yml does not enumerate compiler capsule manifests";
+    }
+    if !contains(workflow, "git add compiler/capsule.toml compiler/capsules/*/capsule.toml") {
+        throw "release.yml does not stage compiler capsule manifests";
+    }
+}

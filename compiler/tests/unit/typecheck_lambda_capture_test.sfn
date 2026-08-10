@@ -14,7 +14,8 @@
 // automatically once the parser lifts block-`let` to
 // `VariableDeclaration`. Don't rely on block-let in these tests
 // until that lands.
-import { parse_program } from "../../src/parser/mod";
+import { parse_program } from "sfn/syntax";
+
 import { LambdaCaptureRecord, analyze_lambda_captures } from "../../src/typecheck_captures";
 
 fn _has_capture(record: LambdaCaptureRecord, name: string) -> boolean {

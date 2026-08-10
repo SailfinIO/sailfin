@@ -22,7 +22,8 @@ import {
     Program,
     SourceSpan,
     Statement
-} from "../../src/ast";
+} from "sfn/syntax";
+
 import { validate_effects_with_imports } from "../../src/effect_checker";
 import { EffectViolation } from "../../src/effect_checker/types";
 import {

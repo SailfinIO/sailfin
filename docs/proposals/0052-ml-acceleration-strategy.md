@@ -303,7 +303,7 @@ scalar path stays a trustworthy oracle. All native `*_test.sfn` (no bash e2e).
 ## 9. References
 
 - Survey ground truth (2026-07-19): `compiler/src/build/target.sfn:55`,
-  `compiler/src/native_ir.sfn`, `compiler/src/typecheck_types.sfn:1747`,
+  `compiler/capsules/ir/src/native_ir.sfn`, `compiler/src/typecheck_types.sfn:1747`,
   `compiler/src/effect_taxonomy.sfn:29`, `compiler/src/effect_checker.sfn`,
   `capsules/sfn/{tensor,nn,layers,losses}/src/mod.sfn`, `docs/status.md`.
 - SFEP-0038 — Generic Constraints and Monomorphization (`Implemented`; the

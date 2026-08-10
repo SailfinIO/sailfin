@@ -10,6 +10,8 @@
 //   emit_native_state.sfn  — TextBuilder, NativeState, shared utilities
 //   emit_native_format.sfn — expression/signature/specifier formatting
 //   emit_native_layout.sfn — struct/enum layout computation & manifest
+import { NativeArtifact, NativeModule } from "sfn/ir";
+import { lines_to_native_text } from "sfn/ir";
 import {
     Block,
     Decorator,
@@ -24,7 +26,8 @@ import {
     SourceSpan,
     Statement,
     TypeAnnotation
-} from "./ast";
+} from "sfn/syntax";
+
 import { Diag, Span } from "./diagnostic";
 import { block_contains_try, desugar_try_in_block } from "./emit_native_desugar_try";
 import {
@@ -81,8 +84,6 @@ import {
 // `mod.sfn` barrel audit lands, any *new* import from this
 // subtree should likewise target the leaf file directly.
 import { lift_non_capturing_lambdas } from "./lambda_lowering";
-import { NativeArtifact, NativeModule } from "./native_ir";
-import { lines_to_native_text } from "./native_ir_utils_text";
 import { char_code } from "./string_utils";
 
 // ── Public data structures ───────────────────────────────────────────
@@ -177,7 +178,7 @@ fn emit_native_with_module_name(program: Program, module_name: string) -> EmitNa
 // The constraint this shape honours is a SIZE rule, not a struct-return one:
 // no joined `.sfn-asm` text may travel inside a returned struct. Returning
 // the whole joined IR string across a module boundary is what segfaulted on
-// large modules like `compiler/src/native_ir_api.sfn` (`main.sfn`,
+// large modules like `compiler/capsules/ir/src/native_ir_api.sfn` (`main.sfn`,
 // `compile_to_llvm_with_module`). Struct-by-value returns themselves are
 // routine and on the hot path — `lift_non_capturing_lambdas -> LiftResult`
 // runs first thing in both emit entry points, and `EmitNativeResult` already

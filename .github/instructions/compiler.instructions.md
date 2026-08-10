@@ -6,7 +6,7 @@ applyTo: "compiler/**"
 
 When working in the compiler directory:
 
-- The compiler is self-hosted in Sailfin (`.sfn`). All source lives in `compiler/src/`.
+- The compiler is self-hosted in Sailfin (`.sfn`). Driver sources live in `compiler/src/`; role-oriented implementation capsules live in `compiler/capsules/`.
 - Follow the pipeline order: lexer → parser → AST → type check → effect check → emit → LLVM lowering.
 - Every change must preserve self-hosting: `make compile` must succeed after your edits.
 - Add regression tests in `compiler/tests/` for every change.

@@ -279,8 +279,8 @@ capability surface changes.
 
 ## 5. Self-hosting impact
 
-**Passes changed:** parser only (`compiler/src/parser/declarations/`,
-`compiler/src/parser/mod.sfn`). AST (`ast.sfn`) is **unchanged** under the
+**Passes changed:** parser only (`compiler/capsules/syntax/src/parser/declarations/`,
+`compiler/capsules/syntax/src/parser/mod.sfn`). AST (`ast.sfn`) is **unchanged** under the
 recommended synthesized-pair design. Typecheck, effect checker, native emitter,
 and LLVM lowering are unchanged — they already consume `Statement.ExportDeclaration`
 and the declaration nodes the inline form produces.
@@ -394,8 +394,8 @@ after the change. Thread `PATH` + `SAILFIN_TEST_SCRATCH` into the nested build p
   struct/`int[]` API was flattened by the workaround).
 - Spec `site/src/content/docs/docs/reference/spec/02-modules.md` — current
   block-only export documentation (to be extended).
-- `compiler/src/parser/declarations/imports_exports.sfn` (`parse_export`),
-  `compiler/src/parser/mod.sfn:110-112` (dispatch),
+- `compiler/capsules/syntax/src/parser/declarations/imports_exports.sfn` (`parse_export`),
+  `compiler/capsules/syntax/src/parser/mod.sfn:110-112` (dispatch),
   `compiler/src/llvm/rendering_helpers.sfn:393-451` (export manifest →
   internalization / visibility model evidence),
   `compiler/src/emit_native.sfn:224-232` (`.export` directive emission).

@@ -6,7 +6,8 @@
 // `docs/conventions/runtime-helpers.md`: populate `native_signature` with the
 // canonical `sfn_<domain>_<op>` symbol and route call sites through
 // `emit_runtime_call`.
-import { intrinsic_effect_table } from "../../intrinsic_effects";
+import { intrinsic_effect_table } from "sfn/ir";
+
 import { RuntimeHelperDescriptor } from "../types";
 import { join_with_separator, string_array_contains, trim_text } from "../utils";
 import { _rh_descriptors_02, _rh_descriptors_03, _rh_descriptors_04 } from "./registry_concurrency";

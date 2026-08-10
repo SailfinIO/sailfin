@@ -26,7 +26,8 @@ import {
     Statement,
     TypeAnnotation,
     TypeParameter
-} from "../../src/ast";
+} from "sfn/syntax";
+
 import { validate_capsule_capabilities } from "../../src/effect_checker";
 import { CapabilityViolation } from "../../src/effect_checker/types";
 

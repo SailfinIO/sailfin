@@ -20,11 +20,11 @@
 // Here the derived `char_code` signature (i64 ⟵ [{i8*, i64}]) is fed an
 // imported `char_code` whose return deliberately disagrees (string ⇒
 // {i8*, i64}), so the guard must fire.
+import { NativeFunction, NativeParameter } from "sfn/ir";
 import { expect_to_throw, expect_to_throw_with } from "sfn/test";
 
 import { render_runtime_helper_declarations } from "../../src/llvm/rendering";
 import { TypeContext } from "../../src/llvm/types";
-import { NativeFunction, NativeParameter } from "../../src/native_ir";
 
 fn _empty_context() -> TypeContext {
     return TypeContext {

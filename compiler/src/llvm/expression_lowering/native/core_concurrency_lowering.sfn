@@ -1,10 +1,10 @@
 // compiler/src/llvm/expression_lowering/native/core_concurrency_lowering.sfn
-//
 // Lowering for concurrency and channel/tostring method special forms
 // (spawn/channel/parallel/serve/await), extracted from core.sfn to bound
 // per-module emit working set. Called by `lower_expression` in ./core.
-import { NativeFunction } from "../../../native_ir";
-import { substring } from "../../../string_utils";
+import { NativeFunction } from "sfn/ir";
+import { substring } from "sfn/strings";
+
 import { format_temp_name, is_simple_identifier } from "../../expressions_helpers";
 import { empty_string_constant_set, merge_string_constants } from "../../strings";
 import { resolve_struct_info_for_literal } from "../../type_context_queries";

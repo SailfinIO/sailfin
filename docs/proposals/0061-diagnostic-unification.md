@@ -54,7 +54,7 @@ does**, at statement granularity, which makes this "adopt a struct" rather than
 `emit_span_if_present` / `emit_initializer_span_if_present`
 (`compiler/src/emit_native.sfn:456-464`) write `.span <sl> <sc> <el> <ec>` and
 `.init-span`, round-tripping into `NativeInstruction.{Return,Expression,Let,Throw}.span`
-and `NativeParameter.span`, typed `NativeSourceSpan?` (`compiler/src/native_ir.sfn:59-64`).
+and `NativeParameter.span`, typed `NativeSourceSpan?` (`compiler/capsules/ir/src/native_ir.sfn:59-64`).
 
 Coverage is exactly accountable. In `build/sailfin/.../array.sfn-asm` (1007 lines):
 88 `.let` + 67 `eval` + 68 `.param` + 46 `ret` = **269 spanned constructs, 269
@@ -104,7 +104,7 @@ signature churn.
 
 ## 3. The unified type
 
-`Token` (`compiler/src/token.sfn:17-22`) is the wrong span carrier: it is a
+`Token` (`compiler/capsules/syntax/src/token.sfn:17-22`) is the wrong span carrier: it is a
 *point*, the renderer ignores its `kind`, and the backend has no tokens.
 `SourceSpan` (`ast.sfn:28-33`) and `NativeSourceSpan` (`native_ir.sfn:59-64`)
 are already structurally identical — a fifth duplication — and carry start and

@@ -11,8 +11,6 @@
 // `write_llvm_ir_for_tests_from_text`) were retired in Stage B PR2's
 // A4 deletion alongside `compile_tests_to_llvm_file_with_module` and
 // the textual import inliner.
-import { substring } from "sfn/strings";
-
 import {
     ImportedModuleContext,
     LayoutManifest,
@@ -23,14 +21,16 @@ import {
     NativeModule,
     NativeStruct,
     ParseNativeResult
-} from "../../native_ir";
+} from "sfn/ir";
 import {
     parse_native_artifact,
     parse_native_enums_for_import,
     parse_native_functions_for_import,
     parse_native_interfaces_for_import,
     parse_native_structs_for_import
-} from "../../native_ir_api";
+} from "sfn/ir";
+import { substring } from "sfn/strings";
+
 import {
     append_function_effect_entry,
     append_unique_effect,

@@ -10,7 +10,8 @@
 // re-exporter's .sfn-asm.
 //
 // See docs/rca/2026-04-18-reexport-diagnostic-gep.md.
-import { parse_program } from "../../src/parser/mod";
+import { parse_program } from "sfn/syntax";
+
 import { collect_reexport_violations } from "../../src/reexport_check";
 
 fn _msg_contains(haystack: string, needle: string) -> boolean {

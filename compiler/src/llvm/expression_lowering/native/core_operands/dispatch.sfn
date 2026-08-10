@@ -4,7 +4,8 @@
 // for numeric ABI shape decisions; it dispatches to the numeric, pointer and
 // general-fallback arms in sibling modules. Also holds operand harmonisation
 // (`harmonise_operands`, `dominant_type`) and the union-variant helpers.
-import { NativeSourceSpan } from "../../../../native_ir";
+import { NativeSourceSpan } from "sfn/ir";
+
 import { format_temp_name } from "../../../expressions_helpers";
 import { trace_log, trace_lowering } from "../../../lowering_debug_state";
 import {

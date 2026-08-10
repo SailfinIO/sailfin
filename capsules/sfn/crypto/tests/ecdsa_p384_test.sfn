@@ -1,0 +1,295 @@
+// capsules/sfn/crypto/tests/ecdsa_p384_test.sfn
+//
+// SFN-811: ECDSA-P384 signature verification (FIPS 186-4 §6.4.2) and the
+// field/scalar arithmetic underneath it in `src/p384.sfn`.
+//
+// Design: docs/proposals/design-notes/sfn-653-p256-rsa-bigint-strategy.md,
+// §8.1 (known-answer gate requirements), §9 (primary risks — wrong fixed
+// Montgomery context, incomplete public-key validation, scope reuse). The
+// note's reasoning is curve-independent; only the constants differ.
+//
+// Vector provenance:
+//   - RFC 6979 appendix A.2.6, P-384/SHA-384, key pair and the signatures for
+//     messages `sample` and `test`. `Ux`, `Uy`, `r`, and `s` are transcribed
+//     from the RFC. Each assembled SEC1 key and DER signature was then handed
+//     to OpenSSL 3.6.3 (`openssl pkeyutl -verify -rawin -digest sha384`)
+//     before being embedded: the two positive vectors are accepted and the
+//     tampered variants rejected by that independent implementation, so a
+//     positive case here cannot pass vacuously.
+//
+// Scope note: the DER `Ecdsa-Sig-Value` walk is shared with P-256
+// (`_ecdsa_sig_bytes`), so the malformed-encoding coverage in
+// `ecdsa_p256_test.sfn` — non-SEQUENCE, truncated length, wrong tag, trailing
+// data, non-minimal integers, negative scalars — covers this path too and is
+// not duplicated. What is curve-specific, and therefore tested here, is the
+// range check against P-384's order, the 48-byte widths, the point decoder,
+// and the known-answer gate.
+import { _mont_n0_prime } from "../src/bignum";
+import { string_to_bytes } from "../src/bits";
+import { ecdsa_p384_verify_digest, ecdsa_p384_verify_sha384 } from "../src/ecdsa";
+import {
+    P384PointResult,
+    _p384_bytes,
+    _p384_from_be,
+    _p384_n_from_be_checked,
+    _p384_n_mod,
+    _p384_n_n0_prime,
+    _p384_p_ctx,
+    _p384_p_mod,
+    _p384_p_n0_prime,
+    _p384_point_decode,
+    _p384_to_be
+} from "../src/p384";
+import { sha384_bytes } from "../src/sha384";
+import { eq_bytes, hexb } from "./support/hex";
+
+// ── RFC 6979 A.2.6 vectors ──
+fn _pk_uncompressed() -> string {
+    return "04ec3a4e415b4e19a4568618029f427fa5da9a8bc4ae92e02e06aae5286b300c64"
+        + "def8f0ea9055866064a254515480bc138015d9b72d7d57244ea8ef9ac0c6218967"
+        + "08a59367f9dfb9f54ca84b3f1c9db1288b231c3ae0d4fe7344fd2533264720";
+}
+
+fn _pk_compressed() -> string {
+    return "02ec3a4e415b4e19a4568618029f427fa5da9a8bc4ae92e02e06aae5286b300c64"
+        + "def8f0ea9055866064a254515480bc13";
+}
+
+fn _sig_sample() -> string {
+    return "306602310094edbb92a5ecb8aad4736e56c691916b3f88140666ce9fa73d64c4ea"
+        + "95ad133c81a648152e44acf96e36dd1e80fabe4602310099ef4aeb15f178cea1fe"
+        + "40db2603138f130e740a19624526203b6351d0a3a94fa329c145786e679e7b82c7"
+        + "1a38628ac8";
+}
+
+fn _sig_test() -> string {
+    return "30660231008203b63d3c853e8d77227fb377bcf7b7b772e97892a80f36ab775d50"
+        + "9d7a5feb0542a7f0812998da8f1dd3ca3cf023db023100ddd0760448d42d8a43af"
+        + "45af836fce4de8be06b485e9b61b827c2f13173923e06a739f040649a667bf3b82"
+        + "8246baa5a5";
+}
+
+// `_sig_sample()` with the low bit of s flipped. OpenSSL rejects this one.
+fn _sig_sample_bad_s() -> string {
+    return "306602310094edbb92a5ecb8aad4736e56c691916b3f88140666ce9fa73d64c4ea"
+        + "95ad133c81a648152e44acf96e36dd1e80fabe4602310099ef4aeb15f178cea1fe"
+        + "40db2603138f130e740a19624526203b6351d0a3a94fa329c145786e679e7b82c7"
+        + "1a38628ac9";
+}
+
+// ── Constant integrity: the failure mode a wrong context would hide ──
+// A transcription slip in a Montgomery constant produces a wrong residue, not
+// an error, so the derived value is checked against the shared derivation
+// rather than trusted. Design note §9 lists "wrong fixed Montgomery context"
+// as the primary risk for exactly this reason.
+test "ecdsa p384: the field and order n0' constants match the shared derivation" {
+    assert _mont_n0_prime(_p384_p_mod()[0]) == _p384_p_n0_prime();
+    assert _mont_n0_prime(_p384_n_mod()[0]) == _p384_n_n0_prime();
+}
+
+// Exercises R^2 and n0' together: a wrong r2 would round-trip to the wrong
+// bytes even though every individual operation reports success.
+test "ecdsa p384: a field element round-trips through the Montgomery domain" {
+    let raw: string = "ec3a4e415b4e19a4568618029f427fa5da9a8bc4ae92e02e06aae52"
+        + "86b300c64def8f0ea9055866064a254515480bc13";
+    let value: int[] = hexb(raw);
+    assert value.length == _p384_bytes();
+    assert eq_bytes(_p384_to_be(_p384_from_be(value, _p384_p_ctx()).value, _p384_p_ctx()), value);
+}
+
+// ── Known-answer gate ──
+test "ecdsa p384: RFC 6979 sample vector verifies with the uncompressed key" {
+    assert ecdsa_p384_verify_sha384(hexb(_pk_uncompressed()), string_to_bytes("sample"), hexb(_sig_sample()));
+}
+
+test "ecdsa p384: RFC 6979 sample vector verifies with the compressed key" {
+    assert ecdsa_p384_verify_sha384(hexb(_pk_compressed()), string_to_bytes("sample"), hexb(_sig_sample()));
+}
+
+test "ecdsa p384: RFC 6979 test vector verifies" {
+    assert ecdsa_p384_verify_sha384(hexb(_pk_uncompressed()), string_to_bytes("test"), hexb(_sig_test()));
+}
+
+test "ecdsa p384: the digest entry point agrees with the message entry point" {
+    let digest: int[] = sha384_bytes(string_to_bytes("sample"));
+    assert digest.length == _p384_bytes();
+    assert ecdsa_p384_verify_digest(hexb(_pk_uncompressed()), digest, hexb(_sig_sample()));
+}
+
+// ── Rejections ──
+test "ecdsa p384: a tampered s is rejected" {
+    assert ! ecdsa_p384_verify_sha384(hexb(_pk_uncompressed()), string_to_bytes("sample"), hexb(_sig_sample_bad_s()));
+}
+
+test "ecdsa p384: a tampered message is rejected" {
+    assert ! ecdsa_p384_verify_sha384(hexb(_pk_uncompressed()), string_to_bytes("sampl3"), hexb(_sig_sample()));
+}
+
+test "ecdsa p384: signatures do not cross-verify between the sample and test messages" {
+    assert ! ecdsa_p384_verify_sha384(hexb(_pk_uncompressed()), string_to_bytes("test"), hexb(_sig_sample()));
+    assert ! ecdsa_p384_verify_sha384(hexb(_pk_uncompressed()), string_to_bytes("sample"), hexb(_sig_test()));
+}
+
+// A SHA-256 digest is 32 bytes. Without the width guard in
+// `ecdsa_p384_verify_digest` it would be zero-extended into a different,
+// well-formed scalar and verify nothing meaningful rather than fail.
+test "ecdsa p384: a wrong-length digest is rejected" {
+    let short: int[] = hexb("9a9083505bc92276aec4be312696ef7bf3bf603f4bbd3811"
+        + "96a029f340585312");
+    assert short.length == 32;
+    assert ! ecdsa_p384_verify_digest(hexb(_pk_uncompressed()), short, hexb(_sig_sample()));
+}
+
+// The SEC1 width check is one of the two mechanisms `x509_verify.sfn` relies on
+// to keep a P-256 key from reaching this verifier — see the
+// `x509_verify_oid_ec_public_key` comment there.
+test "ecdsa p384: a P-256-width public key is rejected" {
+    let p256_key: string = "0460fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6c"
+        + "e669622e60f29fb67903fe1008b8bc99a41ae9e95628bc64f2f1b20c2d7e9f5177"
+        + "a3c294d4462299";
+    assert ! _p384_point_decode(hexb(p256_key), _p384_p_ctx()).ok;
+    assert ! ecdsa_p384_verify_sha384(hexb(p256_key), string_to_bytes("sample"), hexb(_sig_sample()));
+}
+
+test "ecdsa p384: the point-at-infinity encoding is rejected" {
+    assert ! _p384_point_decode(hexb("00"), _p384_p_ctx()).ok;
+}
+
+test "ecdsa p384: an empty public key is rejected" {
+    let empty: int[] = [];
+    assert ! _p384_point_decode(empty, _p384_p_ctx()).ok;
+}
+
+test "ecdsa p384: an off-curve public key is rejected" {
+    // The RFC key with the final byte of y altered, so the length and the
+    // x-coordinate stay valid and only the curve equation fails.
+    let key: string = "04ec3a4e415b4e19a4568618029f427fa5da9a8bc4ae92e02e06aae"
+        + "5286b300c64def8f0ea9055866064a254515480bc138015d9b72d7d57244ea8ef9"
+        + "ac0c621896708a59367f9dfb9f54ca84b3f1c9db1288b231c3ae0d4fe7344fd253"
+        + "3264721";
+    // Pinned so the rejection is the curve equation and not a wrong width.
+    assert hexb(key).length == 97;
+    assert ! _p384_point_decode(hexb(key), _p384_p_ctx()).ok;
+}
+
+test "ecdsa p384: a public key x-coordinate not reduced mod p is rejected" {
+    // x = p exactly. The length is right and the prefix is right, so this can
+    // only be caught by `_p384_from_be`'s `>= p` check — one of the two
+    // mechanisms `x509_verify.sfn` relies on to reject a same-sized foreign
+    // curve.
+    let key: string = "04fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe"
+        + "ffffffff0000000000000000ffffffff3617de4a96262c6f5d9e98bf9292dc29f8"
+        + "f41dbd289a147ce9da3113b5f0b8c00a60b1ce1d7e819d7a431d7c90ea0e5f";
+    // Pinned so a mistyped literal cannot make this pass by being the wrong
+    // length instead of by being out of range.
+    assert hexb(key).length == 97;
+    assert ! _p384_point_decode(hexb(key), _p384_p_ctx()).ok;
+}
+
+test "ecdsa p384: a truncated public key encoding is rejected" {
+    let key: string = "04ec3a4e415b4e19a4568618029f427fa5da9a8bc4ae92e02e06aae"
+        + "5286b300c64def8f0ea9055866064a254515480bc138015d9b72d7d57244ea8ef9"
+        + "ac0c621896708a59367f9dfb9f54ca84b3f1c9db1288b231c3ae0d4fe7344fd253"
+        + "32647";
+    assert hexb(key).length == 96;
+    assert ! _p384_point_decode(hexb(key), _p384_p_ctx()).ok;
+}
+
+test "ecdsa p384: an unsupported point prefix is rejected" {
+    let key: string = "05ec3a4e415b4e19a4568618029f427fa5da9a8bc4ae92e02e06aae5286b300c64"
+        + "def8f0ea9055866064a254515480bc138015d9b72d7d57244ea8ef9ac0c6218967"
+        + "08a59367f9dfb9f54ca84b3f1c9db1288b231c3ae0d4fe7344fd2533264720";
+    // The RFC key at a valid width, so only the prefix is wrong.
+    assert hexb(key).length == 97;
+    assert ! _p384_point_decode(hexb(key), _p384_p_ctx()).ok;
+}
+
+test "ecdsa p384: a compressed key whose x has no valid y is rejected" {
+    // x = 4, for which x^3 - 3x + b is a quadratic non-residue mod p. This is
+    // what exercises the square-and-compare after `_p384_p_sqrt`: without it,
+    // the ladder's output for a non-residue would be accepted as a root.
+    let key: string = "020000000000000000000000000000000000000000000000000000000000000000"
+        + "00000000000000000000000000000004";
+    assert hexb(key).length == 49;
+    assert ! _p384_point_decode(hexb(key), _p384_p_ctx()).ok;
+}
+
+test "ecdsa p384: compressed and uncompressed encodings decode to the same point" {
+    let uncompressed: P384PointResult = _p384_point_decode(hexb(_pk_uncompressed()), _p384_p_ctx());
+    let compressed: P384PointResult = _p384_point_decode(hexb(_pk_compressed()), _p384_p_ctx());
+    assert uncompressed.ok;
+    assert compressed.ok;
+    assert eq_bytes(_p384_to_be(uncompressed.point.x, _p384_p_ctx()), _p384_to_be(compressed.point.x, _p384_p_ctx()));
+    assert eq_bytes(_p384_to_be(uncompressed.point.y, _p384_p_ctx()), _p384_to_be(compressed.point.y, _p384_p_ctx()));
+}
+
+// The RFC 6979 key has even y, so `_pk_compressed()` only ever drives the
+// 0x02 branch of the parity correction. 3G has odd y and drives 0x03. An
+// inverted parity test at `p384.sfn`'s `_p384_point_decode` would pass one
+// direction and fail only the other, so both are pinned. Coordinates computed
+// by tripling the FIPS 186-4 generator and confirmed on-curve.
+fn _pt_3g_uncompressed() -> string {
+    return "04077a41d4606ffa1464793c7e5fdc7d98cb9d3910202dcd06bea4f240d3566da"
+        + "6b408bbae5026580d02d7e5c70500c831c995f7ca0b0c42837d0bbe9602a9fc9985"
+        + "20b41c85115aa5f7684c0edc111eacc24abd6be4b5d298b65f28600a2f1df1";
+}
+
+fn _pt_3g_compressed() -> string {
+    return "03077a41d4606ffa1464793c7e5fdc7d98cb9d3910202dcd06bea4f240d3566da"
+        + "6b408bbae5026580d02d7e5c70500c831";
+}
+
+fn _pt_3g_y() -> string {
+    return "c995f7ca0b0c42837d0bbe9602a9fc998520b41c85115aa5f7684c0edc111eacc"
+        + "24abd6be4b5d298b65f28600a2f1df1";
+}
+
+test "ecdsa p384: the odd-parity (0x03) compressed branch decodes to the same y as uncompressed" {
+    let uncompressed: P384PointResult = _p384_point_decode(hexb(_pt_3g_uncompressed()), _p384_p_ctx());
+    let compressed: P384PointResult = _p384_point_decode(hexb(_pt_3g_compressed()), _p384_p_ctx());
+    assert uncompressed.ok;
+    assert compressed.ok;
+    assert eq_bytes(_p384_to_be(compressed.point.y, _p384_p_ctx()), hexb(_pt_3g_y()));
+    assert eq_bytes(_p384_to_be(compressed.point.y, _p384_p_ctx()), _p384_to_be(uncompressed.point.y, _p384_p_ctx()));
+}
+
+test "ecdsa p384: a signature verified against the wrong public key is rejected" {
+    assert ! ecdsa_p384_verify_sha384(hexb(_pt_3g_uncompressed()), string_to_bytes("sample"), hexb(_sig_sample()));
+}
+
+// ── Scalar range check (the standard ECDSA acceptance hole) ──
+// Each of these is refused by `_p384_n_from_be_checked` on the way in, not by
+// the later comparison, so the assertions are direct rather than routed
+// through a verification that would also fail for other reasons.
+test "ecdsa p384: zero r or s is refused by the range check" {
+    let zero: int[] = hexb("000000000000000000000000000000000000000000000000"
+        + "000000000000000000000000000000000000000000000000");
+    assert zero.length == _p384_bytes();
+    assert ! _p384_n_from_be_checked(zero).ok;
+}
+
+test "ecdsa p384: a scalar at least n is refused by the range check" {
+    let n: string = "ffffffffffffffffffffffffffffffffffffffffffffffffc7634d81"
+        + "f4372ddf581a0db248b0a77aecec196accc52973";
+    let n_plus_1: string = "ffffffffffffffffffffffffffffffffffffffffffffffffc763"
+        + "4d81f4372ddf581a0db248b0a77aecec196accc52974";
+    assert ! _p384_n_from_be_checked(hexb(n)).ok;
+    assert ! _p384_n_from_be_checked(hexb(n_plus_1)).ok;
+}
+
+test "ecdsa p384: a scalar wider than 48 bytes is refused by the range check" {
+    let wide: string = "01ffffffffffffffffffffffffffffffffffffffffffffffffc763"
+        + "4d81f4372ddf581a0db248b0a77aecec196accc52973";
+    assert hexb(wide).length == 49;
+    assert ! _p384_n_from_be_checked(hexb(wide)).ok;
+}
+
+test "ecdsa p384: a signature carrying an out-of-range scalar is rejected" {
+    // r = n, s = the sample vector's s. The DER is well formed, so the
+    // rejection has to come from the range check.
+    let sig_r_is_n: string = "3066023100ffffffffffffffffffffffffffffffffffffff"
+        + "ffffffffffffc7634d81f4372ddf581a0db248b0a77aecec196accc5297302310099"
+        + "ef4aeb15f178cea1fe40db2603138f130e740a19624526203b6351d0a3a94fa329c1"
+        + "45786e679e7b82c71a38628ac8";
+    assert ! ecdsa_p384_verify_sha384(hexb(_pk_uncompressed()), string_to_bytes("sample"), hexb(sig_r_is_n));
+}

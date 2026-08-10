@@ -3,8 +3,8 @@
 // Direct syscall builtin checks — name recognition, arity, and operand
 // type rules for the `syscall*` intrinsics.
 import { find } from "sfn/strings";
+import { Expression } from "sfn/syntax";
 
-import { Expression } from "../ast";
 import { Diagnostic } from "../typecheck_types";
 import { make_syscall_builtin_diagnostic } from "../typecheck_types/declaration_and_statement_checks";
 import { SymbolEntry, find_symbol } from "../typecheck_types/symbol_table_and_raw_exprs";

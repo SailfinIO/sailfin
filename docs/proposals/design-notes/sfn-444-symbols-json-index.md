@@ -308,8 +308,8 @@ feature — it adds no syntax or IR.)
 - Symbol sources: `runtime/prelude.sfn`, `capsules/sfn/strings/src/mod.sfn`,
   `compiler/src/prelude_globals.sfn` (`_pg_find_runtime_dir`),
   `compiler/src/capsule_resolver.sfn` (`_cr_capsule_source_dir`).
-- AST: `compiler/src/ast.sfn` (`Program`, `FunctionSignature`, `Parameter`,
-  `TypeAnnotation`); `compiler/src/parser/mod.sfn` (`parse_program`).
+- AST: `compiler/capsules/syntax/src/ast.sfn` (`Program`, `FunctionSignature`, `Parameter`,
+  `TypeAnnotation`); `compiler/capsules/syntax/src/parser/mod.sfn` (`parse_program`).
 - Seed policy: `.claude/rules/seed-dependency.md` (one-PR bundle, no seed cut).
 
 ## 10. Implementation notes (as shipped)

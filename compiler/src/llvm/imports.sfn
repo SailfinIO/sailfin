@@ -2,9 +2,9 @@
 //
 // Import handling and layout manifest management for LLVM lowering.
 // Resolves imported module paths and applies layout metadata.
+import { LayoutManifest, NativeEnum, NativeStruct } from "sfn/ir";
 import { substring } from "sfn/strings";
 
-import { LayoutManifest, NativeEnum, NativeStruct } from "../native_ir";
 import { LayoutManifestApplication } from "./types";
 import {
     append_string,

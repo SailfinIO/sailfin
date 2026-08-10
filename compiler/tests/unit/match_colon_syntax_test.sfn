@@ -2,7 +2,7 @@
 // `Variant: return value`) must parse as MatchStatement, not Unknown.
 //
 // Background: `collect_pattern_until_arrow` in
-// `compiler/src/parser/token_utils.sfn` is called by `parse_match_case` to
+// `compiler/capsules/syntax/src/parser/token_utils.sfn` is called by `parse_match_case` to
 // consume the pattern tokens up to the pattern-to-body separator. The
 // original implementation only recognized `=>` and `->` as terminators,
 // but the spec / tests use `:` (a modern, boring syntax consistent with

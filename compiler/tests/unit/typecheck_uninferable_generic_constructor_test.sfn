@@ -7,7 +7,8 @@
 // it fires only when the instantiation is provably uninferable, mirroring the
 // backend monomorphizer's non-firing condition. Sibling of
 // typecheck_frontend_rejection_test.sfn (SFN-385).
-import { parse_program } from "../../src/parser/mod";
+import { parse_program } from "sfn/syntax";
+
 import { typecheck_diagnostics } from "../../src/typecheck";
 import { Diagnostic } from "../../src/typecheck_types";
 

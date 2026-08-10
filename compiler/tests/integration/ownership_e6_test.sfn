@@ -8,9 +8,10 @@
 // `check_ownership` / `run_ownership_checker` on whole routines, pinning
 // the issue's acceptance line: "a program that mutates an aliased buffer
 // in place is rejected; the unique-owner path compiles."
+import { parse_program } from "sfn/syntax";
+
 import { run_ownership_checker } from "../../src/check/ownership";
 import { check_ownership } from "../../src/ownership_checker";
-import { parse_program } from "../../src/parser/mod";
 
 test "ownership e6: aliased in-place mutation is rejected, unique owner compiles" ![io] {
     // The unsound #1205 shape: `sink(buf)` moves `buf`, then the stale

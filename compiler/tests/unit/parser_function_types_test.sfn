@@ -8,8 +8,8 @@
 // four spellings called out in the issue's acceptance criteria so a
 // later refactor (or any change to whitespace handling in
 // `tokens_to_text`) cannot silently drop the annotation.
-import { Block, Program, Statement } from "../../src/ast";
-import { parse_program } from "../../src/parser/mod";
+import { Block, Program, Statement } from "sfn/syntax";
+import { parse_program } from "sfn/syntax";
 
 // -------------------------------------------------------------------
 // Helpers

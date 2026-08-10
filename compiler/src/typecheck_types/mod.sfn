@@ -7,8 +7,9 @@
 // forwarded through here: re-exporting an imported symbol emits no `.fn`
 // signature for it, so consumers lower calls against an `i8*` return
 // (`docs/rca/2026-04-18-reexport-diagnostic-gep.md`).
+import { Token } from "sfn/syntax";
+
 import { Diag, FixSuggestion, diag_from_typecheck } from "../diagnostic";
-import { Token } from "../token";
 
 struct Diagnostic {
     code: string;

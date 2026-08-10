@@ -707,7 +707,7 @@ using the existing rendering.
 - Support single file and directory paths
 - Verify `make compile` succeeds (self-hosting invariant)
 
-**Test:** `sfn check compiler/src/token.sfn` exits 0 (no errors).
+**Test:** `sfn check compiler/capsules/syntax/src/token.sfn` exits 0 (no errors).
 Create a file with a duplicate function; verify `sfn check` catches it.
 
 **Deliverable:** Working `sfn check` with typecheck-only diagnostics.
@@ -952,7 +952,7 @@ Test the full `check_file()` flow on real files:
 
 ```sfn
 test "check: clean file has no diagnostics" ![io] {
-    let result = check_file("compiler/src/token.sfn");
+    let result = check_file("compiler/capsules/syntax/src/token.sfn");
     assert result.error_count == 0;
 }
 
@@ -1311,12 +1311,12 @@ function with one effectful call at line 47 still draws its caret at line
 **Files affected.** Pipeline stage: AST + parse (token attachment to
 expressions).
 
-- `compiler/src/ast.sfn` — Add `span: SourceSpan?` to the
+- `compiler/capsules/syntax/src/ast.sfn` — Add `span: SourceSpan?` to the
   `Expression.Call`, `Expression.Member`, `Expression.Identifier`, and
   `Expression.Decorator` variants. Other variants don't trigger effect
   requirements and don't need spans. (Adding to all variants inflates
   the AST struct cost across every walk; do it incrementally.)
-- `compiler/src/parser/expressions.sfn` (or wherever `Call` /
+- `compiler/capsules/syntax/src/parser/expressions.sfn` (or wherever `Call` /
   `Member` / `Identifier` are constructed during parse) — Populate
   `span` from the leading token of each expression construction site.
   `SourceSpan { start_line, start_column, end_line, end_column }` is
@@ -1358,7 +1358,7 @@ expressions).
 **New types and signatures.**
 
 ```sfn
-// In compiler/src/ast.sfn — extend (don't replace) existing variants
+// In compiler/capsules/syntax/src/ast.sfn — extend (don't replace) existing variants
 enum Expression {
     Call(callee: Expression, args: Expression[], span: SourceSpan?);
     Member(target: Expression, member: string, span: SourceSpan?);

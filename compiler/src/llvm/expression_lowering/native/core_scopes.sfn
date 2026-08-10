@@ -6,8 +6,10 @@
 // `find_local_binding`, `find_parameter_binding`, `append_local_binding`,
 // `infer_borrow_base_scope`, lifetime region creation/release, and scope ID
 // construction (`format_root_scope_id`, `make_child_scope_id`).
-import { NativeEnum, NativeStruct } from "../../../native_ir";
-import { char_at, substring } from "../../../string_utils";
+import { NativeEnum, NativeStruct } from "sfn/ir";
+import { char_at_index as char_at, substring } from "sfn/strings";
+
+import { sanitize_symbol } from "../../symbols";
 import { integer_type_is_signed, map_type_annotation } from "../../type_mapping";
 import {
     LLVMOperand,
@@ -30,7 +32,6 @@ import { bindings_find_parameter_binding } from "../bindings";
 import { find_call_site } from "./core_calls";
 import { strip_enclosing_parentheses } from "./core_operators";
 import { parse_member_access } from "./core_parse";
-import { sanitize_symbol } from "./core_text";
 import { is_heap_type } from "./core_type_mapping";
 
 fn find_parameter_binding(bindings: ParameterBinding[], name: string) -> ParameterBinding? {

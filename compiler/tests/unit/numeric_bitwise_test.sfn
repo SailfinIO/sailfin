@@ -8,8 +8,9 @@
 // diagnostics when both operands are integer-typed. The
 // LLVM-level emission is pinned by
 // `compiler/tests/e2e/test_numeric_bitwise.sh`.
+import { parse_program } from "sfn/syntax";
+
 import { emit_native_text_with_module_name } from "../../src/emit_native";
-import { parse_program } from "../../src/parser/mod";
 import { index_of } from "../../src/string_utils";
 import { typecheck_diagnostics } from "../../src/typecheck";
 import { Diagnostic } from "../../src/typecheck_types";

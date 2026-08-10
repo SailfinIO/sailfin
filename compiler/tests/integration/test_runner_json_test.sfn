@@ -13,9 +13,10 @@
 // mixed pass/fail fixture — lives in the issue's verification
 // block; reproducing it here would require subprocess piping
 // that integration tests intentionally avoid.
+import { Program, Statement } from "sfn/syntax";
+import { parse_program } from "sfn/syntax";
+
 import { AssertFailure, _empty_assert_failure } from "../../src/assert_failure";
-import { Program, Statement } from "../../src/ast";
-import { parse_program } from "../../src/parser/mod";
 import {
     TEST_RUNNER_JSON_SCHEMA_VERSION,
     TestEntry,

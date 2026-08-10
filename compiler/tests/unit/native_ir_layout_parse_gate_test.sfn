@@ -2,9 +2,8 @@
 //
 // Regression coverage for SFN-532. A failed layout-entry parse must fail
 // closed where the native-IR parser would otherwise drop that entry.
+import { parse_native_artifact } from "sfn/ir";
 import { expect_eq_bool, expect_eq_int } from "sfn/test";
-
-import { parse_native_artifact } from "../../src/native_ir_api";
 
 fn _has_diagnostic(diagnostics: string[], expected: string) -> boolean {
     let mut index: int = 0;

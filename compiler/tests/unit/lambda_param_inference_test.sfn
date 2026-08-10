@@ -2,14 +2,15 @@
 // (#1683, bundled with SFEP-0029). Covers the fn-type-text splitter and the
 // no-op-on-typed-lambda guarantee that keeps typed lambdas (the no-regression
 // surface) untouched.
-import { Expression } from "../../src/ast";
+import { parse_fn_type_text } from "sfn/ir";
+import { Expression } from "sfn/syntax";
+import { parse_program } from "sfn/syntax";
+
 import {
     backfill_lambda_from_fn_type,
     build_binding_table,
     lookup_binding_type
 } from "../../src/lambda_param_inference";
-import { parse_fn_type_text } from "../../src/native_ir_utils_text";
-import { parse_program } from "../../src/parser/mod";
 
 // The lambda bound by the first top-level `let f = <lambda>;`.
 fn first_let_lambda(source: string) -> Expression ![io] {

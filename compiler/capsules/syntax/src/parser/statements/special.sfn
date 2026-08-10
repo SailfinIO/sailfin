@@ -1,0 +1,438 @@
+// compiler/capsules/syntax/src/parser/statements/special.sfn
+//
+// Resource, exit, exception, and assertion statement parsing.
+import { substring } from "sfn/strings";
+
+import {
+    Block,
+    Decorator,
+    ElseBranch,
+    Expression,
+    Statement,
+    WithClause
+} from "../../ast";
+import { Token } from "../../token";
+import { expression_from_tokens } from "../expressions";
+import {
+    append_token,
+    collect_until,
+    consume_keyword,
+    identifier_matches,
+    parser_advance_raw,
+    parser_peek_raw,
+    skip_trivia,
+    source_span_from_tokens,
+    split_token_slices_by_comma,
+    symbol_matches,
+    trim_token_edges
+} from "../token_utils";
+import { BlockStatementParseResult, Parser } from "../types";
+import { parse_block } from "./block";
+
+fn parse_with_statement(parser: Parser, decorators: Decorator[]) -> BlockStatementParseResult {
+    let original = parser;
+    let mut current = skip_trivia(parser);
+    if !identifier_matches(parser_peek_raw(current), "with") {
+        return BlockStatementParseResult {
+            parser: original,
+            statement: null,
+            success: false
+        };
+    }
+    current = consume_keyword(current, "with");
+
+    let clauses_capture = collect_until(skip_trivia(current), ["{"]);
+    current = clauses_capture.parser;
+    let clause_slices = split_token_slices_by_comma(clauses_capture.tokens);
+    let mut clauses: WithClause[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= clause_slices.length { break; }
+        let slice_tokens = trim_token_edges(clause_slices[index]);
+        if slice_tokens.length > 0 {
+            let expression = expression_from_tokens(slice_tokens);
+            clauses = append_with_clause(clauses, WithClause {
+                expression: expression
+            });
+        }
+        index += 1;
+    }
+
+    let block_result = parse_block(current);
+    if block_result.block.tokens.length == 0 {
+        return BlockStatementParseResult {
+            parser: original,
+            statement: null,
+            success: false
+        };
+    }
+    current = block_result.parser;
+    let body = block_result.block;
+
+    current = skip_trivia(current);
+    if symbol_matches(parser_peek_raw(current), ";") {
+        current = parser_advance_raw(current);
+    }
+
+    let statement = Statement.WithStatement {
+        clauses: clauses,
+        body: body,
+        decorators: decorators
+    };
+
+    return BlockStatementParseResult {
+        parser: current,
+        statement: statement,
+        success: true
+    };
+}
+
+// ============================================================================
+// Return, Throw, Try/Catch, Assert
+// ============================================================================
+fn parse_return_statement(parser: Parser) -> BlockStatementParseResult {
+    let original = parser;
+    let mut current = skip_trivia(parser);
+    if !identifier_matches(parser_peek_raw(current), "return") {
+        return BlockStatementParseResult {
+            parser: original,
+            statement: null,
+            success: false
+        };
+    }
+    let mut statement_tokens: Token[] = [];
+    statement_tokens = append_token(statement_tokens, parser_peek_raw(current));
+    current = consume_keyword(current, "return");
+
+    let capture = collect_until(skip_trivia(current), [";", "}"]);
+    current = capture.parser;
+    let trimmed = trim_token_edges(capture.tokens);
+
+    let mut expression: Expression? = null;
+    if trimmed.length > 0 { expression = expression_from_tokens(trimmed); } else if capture.tokens.length > 0 {
+        expression = expression_from_tokens(capture.tokens);
+    }
+
+    let mut index: int = 0;
+    loop {
+        if index >= capture.tokens.length { break; }
+        statement_tokens = append_token(statement_tokens, capture.tokens[index]);
+        index += 1;
+    }
+
+    current = skip_trivia(current);
+    let terminator = parser_peek_raw(current);
+    if symbol_matches(terminator, ";") {
+        statement_tokens = append_token(statement_tokens, terminator);
+        current = parser_advance_raw(current);
+    }
+
+    let span = source_span_from_tokens(statement_tokens);
+
+    let statement = Statement.ReturnStatement {
+        expression: expression,
+        span: span
+    };
+    return BlockStatementParseResult {
+        parser: current,
+        statement: statement,
+        success: true
+    };
+}
+
+fn parse_throw_statement(parser: Parser) -> BlockStatementParseResult {
+    let original = parser;
+    let mut current = skip_trivia(parser);
+    if !identifier_matches(parser_peek_raw(current), "throw") {
+        return BlockStatementParseResult {
+            parser: original,
+            statement: null,
+            success: false
+        };
+    }
+
+    let mut statement_tokens: Token[] = [];
+    statement_tokens = append_token(statement_tokens, parser_peek_raw(current));
+    current = consume_keyword(current, "throw");
+
+    let capture = collect_until(skip_trivia(current), [";", "}"]);
+    current = capture.parser;
+    let trimmed = trim_token_edges(capture.tokens);
+    if trimmed.length == 0 {
+        return BlockStatementParseResult {
+            parser: original,
+            statement: null,
+            success: false
+        };
+    }
+
+    let mut index: int = 0;
+    loop {
+        if index >= capture.tokens.length { break; }
+        statement_tokens = append_token(statement_tokens, capture.tokens[index]);
+        index += 1;
+    }
+
+    current = skip_trivia(current);
+    let terminator = parser_peek_raw(current);
+    if symbol_matches(terminator, ";") {
+        statement_tokens = append_token(statement_tokens, terminator);
+        current = parser_advance_raw(current);
+    }
+
+    let span = source_span_from_tokens(statement_tokens);
+    let expression = expression_from_tokens(trimmed);
+    let statement = Statement.ThrowStatement {
+        expression: expression,
+        span: span
+    };
+
+    return BlockStatementParseResult {
+        parser: current,
+        statement: statement,
+        success: true
+    };
+}
+
+fn parse_try_statement(parser: Parser) -> BlockStatementParseResult {
+    let original = parser;
+    let mut current = skip_trivia(parser);
+    if !identifier_matches(parser_peek_raw(current), "try") {
+        return BlockStatementParseResult {
+            parser: original,
+            statement: null,
+            success: false
+        };
+    }
+
+    current = consume_keyword(current, "try");
+
+    let try_result = parse_block(current);
+    if try_result.block.tokens.length == 0 {
+        return BlockStatementParseResult {
+            parser: original,
+            statement: null,
+            success: false
+        };
+    }
+    current = try_result.parser;
+
+    let mut catch_name: string? = null;
+    let mut catch_name_token: Token? = null;
+    let mut catch_block: Block? = null;
+
+    current = skip_trivia(current);
+    if identifier_matches(parser_peek_raw(current), "catch") {
+        current = consume_keyword(current, "catch");
+
+        // Optional (name)
+        current = skip_trivia(current);
+        if symbol_matches(parser_peek_raw(current), "(") {
+            current = parser_advance_raw(current);
+            current = skip_trivia(current);
+            let name_token = parser_peek_raw(current);
+            if name_token.kind.variant != "Identifier" {
+                return BlockStatementParseResult {
+                    parser: original,
+                    statement: null,
+                    success: false
+                };
+            }
+            catch_name = name_token.lexeme;
+            catch_name_token = name_token;
+            current = parser_advance_raw(current);
+
+            current = skip_trivia(current);
+            if !symbol_matches(parser_peek_raw(current), ")") {
+                return BlockStatementParseResult {
+                    parser: original,
+                    statement: null,
+                    success: false
+                };
+            }
+            current = parser_advance_raw(current);
+        }
+
+        let catch_result = parse_block(current);
+        if catch_result.block.tokens.length == 0 {
+            return BlockStatementParseResult {
+                parser: original,
+                statement: null,
+                success: false
+            };
+        }
+        catch_block = catch_result.block;
+        current = catch_result.parser;
+    }
+
+    let mut finally_block: Block? = null;
+    current = skip_trivia(current);
+    if identifier_matches(parser_peek_raw(current), "finally") {
+        current = consume_keyword(current, "finally");
+        let finally_result = parse_block(current);
+        if finally_result.block.tokens.length == 0 {
+            return BlockStatementParseResult {
+                parser: original,
+                statement: null,
+                success: false
+            };
+        }
+        finally_block = finally_result.block;
+        current = finally_result.parser;
+    }
+
+    current = skip_trivia(current);
+    let terminator = parser_peek_raw(current);
+    if symbol_matches(terminator, ";") {
+        current = parser_advance_raw(current);
+    }
+
+    let statement = Statement.TryStatement {
+        try_block: try_result.block,
+        catch_name: catch_name,
+        catch_name_token: catch_name_token,
+        catch_block: catch_block,
+        finally_block: finally_block
+    };
+
+    return BlockStatementParseResult {
+        parser: current,
+        statement: statement,
+        success: true
+    };
+}
+
+// Integer-to-string for non-negative values, used to embed line/col
+// in the desugared assert call site. Local copy to avoid widening
+// the parser's import surface; the value is always a token's
+// `line` / `column` (small positive number). Digits are extracted
+// via repeated subtraction rather than division.
+fn _assert_int_to_string(value: int) -> string {
+    if value <= 0 { return "0"; }
+    let digits = "0123456789";
+    let mut remaining: int = value;
+    let mut output: string = "";
+    loop {
+        if remaining <= 0 { break; }
+        let mut temp: int = remaining;
+        let mut quotient: int = 0;
+        loop {
+            if temp < 10 { break; }
+            temp -= 10;
+            quotient += 1;
+        }
+        let ch = substring(digits, temp, temp + 1);
+        output = ch + output;
+        remaining = quotient;
+    }
+    return output;
+}
+
+fn parse_assert_statement(parser: Parser) -> BlockStatementParseResult {
+    let original = parser;
+    let mut current = skip_trivia(parser);
+    if !identifier_matches(parser_peek_raw(current), "assert") {
+        return BlockStatementParseResult {
+            parser: original,
+            statement: null,
+            success: false
+        };
+    }
+
+    // Stash the assert keyword's source location so the desugared
+    // failure call can carry it as i64-shaped (lowered to LLVM
+    // `double`) line/col arguments. The test runner reads the
+    // typed record `sailfin_assert_fail` writes and surfaces the
+    // file:line:col attribution without any stdout grep.
+    let assert_token = parser_peek_raw(current);
+    let assert_line = assert_token.line;
+    let assert_col = assert_token.column;
+
+    let mut statement_tokens: Token[] = [];
+    statement_tokens = append_token(statement_tokens, parser_peek_raw(current));
+    current = consume_keyword(current, "assert");
+
+    let capture = collect_until(skip_trivia(current), [";"]);
+    current = capture.parser;
+    let trimmed = trim_token_edges(capture.tokens);
+    if trimmed.length == 0 {
+        return BlockStatementParseResult {
+            parser: original,
+            statement: null,
+            success: false
+        };
+    }
+
+    let mut index: int = 0;
+    loop {
+        if index >= capture.tokens.length { break; }
+        statement_tokens = append_token(statement_tokens, capture.tokens[index]);
+        index += 1;
+    }
+
+    current = skip_trivia(current);
+    let terminator = parser_peek_raw(current);
+    if !symbol_matches(terminator, ";") {
+        return BlockStatementParseResult {
+            parser: original,
+            statement: null,
+            success: false
+        };
+    }
+    statement_tokens = append_token(statement_tokens, terminator);
+    current = parser_advance_raw(current);
+
+    let condition = expression_from_tokens(trimmed);
+
+    // Issue #364 / SFEP-0050: route through the structured-failure
+    // helper so the test runner can read a typed AssertFailure record
+    // instead of grep'ping stdout. The runtime function clamps
+    // double→i64, frames an `assert` SFTR record (file/line/col/message)
+    // onto the streamed stderr record channel, then takes the same abort
+    // path as the legacy raise helper — so non-test callers see no
+    // behavior change.
+    let fail_call = Expression.Call {
+        callee: Expression.Identifier {
+            name: "runtime_assert_fail_fn",
+            span: null
+        },
+        arguments: [Expression.StringLiteral { value: "", lexeme: null }, Expression.NumberLiteral {
+            value: _assert_int_to_string(assert_line)
+        }, Expression.NumberLiteral {
+            value: _assert_int_to_string(assert_col)
+        }, Expression.StringLiteral {
+            value: "assertion failed", lexeme: null
+        }],
+        span: null,
+        type_arguments: []
+    };
+    let fail_statement = Statement.ExpressionStatement {
+        expression: fail_call,
+        span: null
+    };
+
+    let then_block = Block { tokens: [], text: "", statements: [] };
+    let else_block = Block {
+        tokens: [],
+        text: "",
+        statements: [fail_statement]
+    };
+    let else_branch = ElseBranch { statement: null, body: else_block };
+
+    let statement = Statement.IfStatement {
+        condition: condition,
+        then_block: then_block,
+        else_branch: else_branch,
+        decorators: []
+    };
+    return BlockStatementParseResult {
+        parser: current,
+        statement: statement,
+        success: true
+    };
+}
+
+fn append_with_clause(clauses: WithClause[], clause: WithClause) -> WithClause[] {
+    clauses.push(clause);
+    return clauses;
+}

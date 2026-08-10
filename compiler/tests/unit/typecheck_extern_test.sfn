@@ -10,7 +10,8 @@
 // regressions in either the registration logic (extern symbol added
 // to the symbol table, duplicate detection wired up) or the C-ABI
 // signature validator (E0801–E0805).
-import { parse_program } from "../../src/parser/mod";
+import { parse_program } from "sfn/syntax";
+
 import { typecheck_diagnostics } from "../../src/typecheck";
 import { Diagnostic } from "../../src/typecheck_types";
 

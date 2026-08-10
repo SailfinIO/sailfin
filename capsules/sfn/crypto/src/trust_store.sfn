@@ -20,6 +20,7 @@
 // per-function effect annotations and `docs/status.md`'s `sfn/crypto` row.
 import { int_to_string } from "sfn/strings";
 
+import { ptr_off } from "./bits";
 import { pem_certificates_to_der_with_limits, pem_count_blocks } from "./pem";
 import { X509Certificate, x509_parse } from "./x509";
 
@@ -103,28 +104,25 @@ fn trust_store_default_paths() -> string[] {
 // `pem.sfn` worth fixing alongside this (SFN-807).
 fn _trust_store_max_blocks() -> int { return 512; }
 
-// Parse a PEM CA bundle into trust anchors. Pure: this is the whole decode and
-// parse path, and it is what the tests exercise.
-fn trust_store_from_pem(pem: string) -> TrustStore {
-    let blocks: int[][] = pem_certificates_to_der_with_limits(pem, _trust_store_max_blocks());
+// Parse raw DER certificate blobs into trust anchors. Pure: this is the whole
+// parse-and-account path, shared by every producer of anchors in this module,
+// and it is what the tests exercise.
+//
+// DER is the seam because it is the narrowest thing every source of trust
+// already speaks: `x509_parse` takes exactly one raw DER blob, and a platform
+// trust store hands out DER blobs directly (SFN-808). Sharing the tail is what
+// makes a certificate from a platform store and one decoded out of a PEM
+// bundle subject to byte-for-byte identical parsing and `skipped` accounting —
+// a second inlined copy of this loop would be free to drift.
+fn trust_store_from_der_blocks(blocks: int[][]) -> TrustStore {
     if blocks.length == 0 {
-        // `[]` is ambiguous, so report which cause it was. An over-limit
-        // bundle used to be reported as "no CERTIFICATE blocks", pointing
-        // diagnosis at the file instead of the bound (SFN-807).
-        let declared: int = pem_count_blocks(pem, "CERTIFICATE");
-        if declared == 0 {
-            return _store_err("trust_store: no CERTIFICATE blocks in bundle");
-        }
-        if declared > _trust_store_max_blocks() {
-            return _store_err("trust_store: bundle declares " + int_to_string(declared)
-                + " CERTIFICATE blocks, over the "
-                + int_to_string(_trust_store_max_blocks())
-                + "-block limit");
-        }
-        // Covers bad framing, a bad base64 body, an empty decode, and a block
-        // over `_pem_max_block_bytes()` — `pem.sfn` returns the same `[]` for
-        // all four, so the text names the set rather than guessing which.
-        return _store_err("trust_store: a CERTIFICATE block in bundle is malformed (PEM framing, base64, or a block over 65535 bytes)");
+        // Deliberately not "no CERTIFICATE blocks in bundle": this tail now
+        // also serves the platform store (SFN-808), where there is no bundle
+        // and no PEM to have blocks in. The PEM front-end diagnoses its own
+        // empty decode before delegating here, so a cause named at this level
+        // could only ever be the wrong one — which is the misattribution
+        // SFN-807 removed.
+        return _store_err("trust_store: no certificate blocks to parse");
     }
 
     let mut anchors: X509Certificate[] = [];
@@ -147,6 +145,178 @@ fn trust_store_from_pem(pem: string) -> TrustStore {
         source: "",
         anchors: anchors,
         skipped: skipped
+    };
+}
+
+// Parse a PEM CA bundle into trust anchors. Pure: PEM decode under this
+// module's own block bound, then the shared DER tail above.
+fn trust_store_from_pem(pem: string) -> TrustStore {
+    let blocks: int[][] = pem_certificates_to_der_with_limits(pem, _trust_store_max_blocks());
+    if blocks.length == 0 {
+        // `[]` is ambiguous, so report which cause it was. An over-limit
+        // bundle used to be reported as "no CERTIFICATE blocks", pointing
+        // diagnosis at the file instead of the bound (SFN-807).
+        let declared: int = pem_count_blocks(pem, "CERTIFICATE");
+        if declared == 0 {
+            return _store_err("trust_store: no CERTIFICATE blocks in bundle");
+        }
+        if declared > _trust_store_max_blocks() {
+            return _store_err("trust_store: bundle declares " + int_to_string(declared)
+                + " CERTIFICATE blocks, over the "
+                + int_to_string(_trust_store_max_blocks())
+                + "-block limit");
+        }
+        // Covers bad framing, a bad base64 body, an empty decode, and a block
+        // over `_pem_max_block_bytes()` — `pem.sfn` returns the same `[]` for
+        // all four, so the text names the set rather than guessing which.
+        return _store_err("trust_store: a CERTIFICATE block in bundle is malformed (PEM framing, base64, or a block over 65535 bytes)");
+    }
+
+    return trust_store_from_der_blocks(blocks);
+}
+
+// ── Platform trust store (SFN-808) ─────────────────────────────────────────
+//
+// Runtime ABI. `sfn_cert_roots_blob()` is defined in
+// `runtime/sfn/platform/cert_roots.sfn` (POSIX) or, for a Windows target,
+// `cert_roots_windows.sfn` swapped in by `target_condition_runtime_sfn_sources`
+// — and linked into every binary via `runtime/capsule.toml` `sfn-sources`.
+// This module reaches it by the same symbol-name-only extern pattern `rand.sfn`
+// uses for `sfn_rand_fill`, which is what keeps the Windows-only Crypt32
+// externs out of this file: an unconditional Win32 extern here would fail every
+// Linux and macOS link, because both COFF and ELF resolve all external
+// references before dead-stripping (SFN-649). Externs carry no effect (E0804);
+// the `![io]` gate stays on `trust_store_load` below.
+//
+// Full blob layout is documented in `cert_roots_windows.sfn`:
+//
+//    0 : i64 count        number of records
+//    8 : i64 total_bytes  size of the allocation, header and slack included
+//   16 : records          { i64 der_len, der_len bytes, zero pad to 8 }
+extern fn sfn_cert_roots_blob() -> *u8;
+
+extern fn free(ptr: *u8) -> void;
+
+// Result of one platform trust-store enumeration.
+struct PlatformRoots {
+    // Set when the walk abandoned records it could not trust the framing of.
+    // The blob is produced by a sibling runtime module in this same binary, so
+    // a decode that cannot complete means the producer and this decoder
+    // disagree — a bug, not a degraded store. Reported rather than absorbed:
+    // silently returning the prefix would hand back a short anchor set that
+    // looks like a working trust store and rejects chains for no visible
+    // reason.
+    truncated: boolean;
+    // Whether this host HAS an enumerable platform trust store. False on
+    // POSIX, where the trust store is a file and `trust_store_default_paths()`
+    // is the real mechanism — so a false here is not a failure and the caller
+    // must fall through to the path probe. True with an empty `blocks` is a
+    // genuine failure: the platform claims a store and it produced nothing.
+    present: boolean;
+    blocks: int[][];
+}
+
+// The `source` a store enumerated from the platform reports. Windows is the
+// only platform that produces a blob today (POSIX returns null and falls
+// through to a real path, which is what its `source` shows), so this names
+// the Windows store rather than a generic placeholder — a diagnostic that
+// says where the trust actually came from is worth more than one that is
+// portable in the abstract.
+fn _platform_store_name() -> string { return "windows-system-root-store"; }
+
+// Upper bound on a platform-roots blob, used only to reject a corrupt header.
+// Every other bound below is derived from `total_bytes`, so this is the one
+// value that has to be sanity-checked rather than trusted.
+//
+// It is derived from the producer's own limits rather than from a guess about
+// typical certificate sizes: 16-byte header, at most `_cr_max_certs()` (4096)
+// records of at most `_cr_max_der()` (65536) payload bytes plus an 8-byte
+// length and up to 7 bytes of padding, plus the 8-byte decoder slack. A
+// ceiling picked independently of those constants would reject a blob the
+// producer considers well-formed — and because a rejected header yields zero
+// anchors, that would cost ALL trust rather than degrading, so the two bounds
+// have to agree by construction.
+fn _roots_max_blob_bytes() -> int { return 16 + 4096 * (8 + 65536 + 7) + 8; }
+
+// Decode the runtime's platform-roots blob into DER blocks. Never partially
+// trusts a malformed blob: any inconsistency stops the walk, so a truncated
+// or corrupt buffer yields fewer anchors and therefore rejects more chains.
+fn _platform_root_blocks() -> PlatformRoots ![io] {
+    let empty: int[][] = [];
+    let blob: *u8 = sfn_cert_roots_blob();
+    if blob as i64 == 0 {
+        return PlatformRoots {
+            present: false,
+            truncated: false,
+            blocks: empty
+        };
+    }
+
+    let count: int = sailfin_intrinsic_pointer_read_i64(blob) as int;
+    let total: int = sailfin_intrinsic_pointer_read_i64(ptr_off(blob, 8)) as int;
+    if count < 0 || total < 16 || total > _roots_max_blob_bytes() {
+        // A header this shape means the producer is broken, not that the host
+        // has no store — so it stays `present` and fails closed loudly at the
+        // caller rather than silently degrading to the CA-bundle path probe.
+        free(blob);
+        return PlatformRoots {
+            present: true,
+            truncated: true,
+            blocks: empty
+        };
+    }
+
+    let mut out: int[][] = [];
+    let mut off: int = 16;
+    let mut n: int = 0;
+    let mut truncated: boolean = false;
+    loop {
+        if n >= count { break; }
+        if off + 8 > total {
+            truncated = true;
+            break;
+        }
+        let der_len: int = sailfin_intrinsic_pointer_read_i64(ptr_off(blob, off as i64)) as int;
+        off += 8;
+        if der_len <= 0 {
+            truncated = true;
+            break;
+        }
+        // Subtract rather than add: `off + der_len` is an i64 addition that
+        // wraps negative for an adversarial length and would pass the check.
+        // The `- 4` covers the 4-byte read width used per byte below, so the
+        // bound guards the load it is there to guard; `total - off` is already
+        // non-negative from the header check above.
+        if der_len > total - off - 4 {
+            truncated = true;
+            break;
+        }
+
+        let mut der: int[] = [];
+        let mut b: int = 0;
+        loop {
+            if b >= der_len { break; }
+            // Sailfin has no byte-width load, so each byte comes out of a
+            // 4-byte read masked to its low octet — the `random_bytes`
+            // pattern. The producer's 8 bytes of trailing slack are what keep
+            // the read at the final byte in bounds.
+            der.push((sailfin_intrinsic_pointer_read_i32(ptr_off(blob, (off + b) as i64)) as int) & 255);
+            b += 1;
+        }
+        out.push(der);
+
+        off += der_len;
+        // Records are padded so the next `i64` length field stays 8-aligned.
+        let rem: int = off % 8;
+        if rem != 0 { off += 8 - rem; }
+        n += 1;
+    }
+
+    free(blob);
+    return PlatformRoots {
+        present: true,
+        truncated: truncated,
+        blocks: out
     };
 }
 
@@ -198,6 +368,45 @@ fn trust_store_load() -> TrustStore ![io] {
         v += 1;
     }
 
+    // The platform store, when the host has one, is authoritative and is
+    // consulted BEFORE the path probe — it is the live OS trust decision, fed
+    // by the vendor update channel and enterprise policy, where a bundle file
+    // is a snapshot of one. It sits after the overrides so an operator who
+    // named a private CA still wins outright.
+    //
+    // Fail closed and loudly when the platform claims a store but yields
+    // nothing: on a host with a platform store there is no CA-bundle file to
+    // fall through to, so continuing to the probe below would end at the same
+    // generic "no readable CA bundle" error with the real cause — the store
+    // failed to open, or enumerated no usable certificate — erased. A host
+    // with no platform store at all reports `present: false` and skips this
+    // block entirely, which is what keeps POSIX behaviour unchanged.
+    let platform: PlatformRoots = _platform_root_blocks();
+    if platform.present {
+        if platform.truncated {
+            return _store_err("trust_store: platform trust store blob is malformed ("
+                + _platform_store_name()
+                + ")");
+        }
+        if platform.blocks.length == 0 {
+            return _store_err("trust_store: platform trust store is unreadable or empty ("
+                + _platform_store_name()
+                + ")");
+        }
+        let platform_store: TrustStore = trust_store_from_der_blocks(platform.blocks);
+        if !platform_store.ok {
+            return _store_err(platform_store.error + " (" + _platform_store_name()
+                + ")");
+        }
+        return TrustStore {
+            ok: true,
+            error: "",
+            source: _platform_store_name(),
+            anchors: platform_store.anchors,
+            skipped: platform_store.skipped
+        };
+    }
+
     let paths: string[] = trust_store_default_paths();
     let mut i: int = 0;
     loop {
@@ -213,6 +422,7 @@ fn trust_store_load() -> TrustStore ![io] {
 
 export {
     TrustStore,
+    trust_store_from_der_blocks,
     trust_store_from_pem,
     trust_store_load,
     trust_store_load_from,

@@ -1,8 +1,9 @@
 // compiler/src/tools/fmt/imports.sfn
 //
 // Import-block and import-specifier sorting.
+import { Token } from "sfn/syntax";
+
 import { char_at, strings_equal } from "../../string_utils";
-import { Token } from "../../token";
 import { import_group } from "../fmt_rules";
 import { FmtToken } from "./types";
 

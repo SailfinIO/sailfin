@@ -2,7 +2,7 @@
 // `let` / `let mut` declarations through `parse_variable`.
 //
 // History: surfaced by PR #512 / issue #458 (closures-with-capture A1).
-// `parse_block_statement` in `compiler/src/parser/statements/block.sfn`
+// `parse_block_statement` in `compiler/capsules/syntax/src/parser/statements/block.sfn`
 // branched on `for`, `loop`, `break`, `continue`, `if`, `match`, `with`,
 // `unsafe`, `return`, `throw`, `try`, `assert` — but never `let`. Block-
 // scoped variable bindings fell through to `parse_expression_statement`
@@ -17,8 +17,8 @@
 // reference (`site/src/content/docs/docs/reference/keywords.md`) and
 // `spec/03-declarations.md`, Sailfin only has `let` and `let mut`; the
 // scope-adjustment thread on issue #521 documents that decision.
-import { Block, Program, Statement } from "../../src/ast";
-import { parse_program } from "../../src/parser/mod";
+import { Block, Program, Statement } from "sfn/syntax";
+import { parse_program } from "sfn/syntax";
 
 // -------------------------------------------------------------------
 // Helpers

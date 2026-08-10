@@ -183,10 +183,10 @@ jobs:
             // build: the compiler source, the runtime, or the pinned seed. Note
             // this deliberately excludes compiler/tests/ (test churn does not
             // change the compiler binary) and the version-string files the
-            // release bump itself rewrites (compiler/capsule.toml,
-            // compiler/src/version.sfn's fallback) — release.yml diffs a base that
+            // release bump itself rewrites (compiler/capsule.toml, the private
+            // compiler-capsule manifests, and compiler/src/version.sfn's fallback) — release.yml diffs a base that
             // predates its own bump commit, so those never trip the re-check.
-            const SELFHOST_PREFIXES = ['compiler/src/', 'runtime/'];
+            const SELFHOST_PREFIXES = ['compiler/src/', 'compiler/capsules/', 'runtime/'];
             const SELFHOST_FILES = ['bootstrap.toml'];
             const isSelfhostRelevant = (f) =>
               SELFHOST_PREFIXES.some(p => f.startsWith(p)) || SELFHOST_FILES.includes(f);

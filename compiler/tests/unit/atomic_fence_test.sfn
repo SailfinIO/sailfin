@@ -20,11 +20,12 @@
 // Lowering pulls the full backend closure and accumulates arena memory;
 // a single combined source carrying both `atomic_fence` call sites keeps
 // the per-file cost to one lowering.
+import { parse_program } from "sfn/syntax";
+
 import { empty_llvm_import_context, resolve_llvm_provider_context } from "../../src/build/llvm_provider_context";
 import { emit_native_text_with_module_name } from "../../src/emit_native";
 import { is_atomic_builtin } from "../../src/llvm/atomics_check";
 import { lower_to_llvm_ir_from_text_with_provider_context } from "../../src/llvm/lowering/entrypoints";
-import { parse_program } from "../../src/parser/mod";
 import { index_of } from "../../src/string_utils";
 
 fn _contains(haystack: string, needle: string) -> boolean {

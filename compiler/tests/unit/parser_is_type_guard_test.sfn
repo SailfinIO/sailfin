@@ -5,8 +5,8 @@
 // generic targets. Mirrors the style of `effect_cast_operand_test.sfn` and
 // `parser_iife_postfix_test.sfn` — parse a short snippet, walk to the
 // relevant expression, and assert on fields.
-import { Expression } from "../../src/ast";
-import { parse_program } from "../../src/parser/mod";
+import { Expression } from "sfn/syntax";
+import { parse_program } from "sfn/syntax";
 
 // Return the expression of the first return statement in the first top-level
 // function declaration of `source`.

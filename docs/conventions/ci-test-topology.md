@@ -50,7 +50,7 @@ the eight shards' file sets are disjoint, exhaustive, and contain nothing
 outside the surface `make test` discovers
 (`compiler/tests/unit`, `compiler/tests/integration`, `compiler/tests/e2e`,
 `capsules` — `_make_test_roots()`, `dev_shard.sfn:94-96`). CI runs this as
-the `shard-cover` job (`.github/workflows/ci.yml:220-255`); the Makefile
+the `shard-cover` job in `.github/workflows/ci.yml`; the Makefile
 target is `test-shard-cover` (`Makefile:475-480`).
 
 This lint is mandatory, not advisory: it is the only thing standing between
@@ -87,10 +87,11 @@ itself triggers a build cannot fan its emit out again and multiply the
 budget (SFN-547) — see `.claude/rules/compiler-safety.md`, which owns the
 memory-budget contract this composes with.
 
-CI's `shard_test_jobs: "3"` input (`.github/workflows/ci.yml:1029,1415`) sets
-the per-file parallelism *within* each shard leg, on top of the across-leg
-sharding — 8 shards × 2 OS = 16 legs, each internally running up to 3 test
-files concurrently.
+CI's Linux x86_64 and macOS arm64 legs set `shard_test_jobs: "3"`, which pins
+per-file parallelism *within* each shard leg on top of across-leg sharding.
+The aarch64-Linux legs deliberately leave that input empty: each 4-vCPU/16-GiB
+runner applies the native CPU+RAM test budget (currently 2 children) rather
+than overriding the SFN-781 memory guard.
 
 A 2026-07-01 measurement sweep concluded that tree-wide peak RSS stays flat
 or drops as test-suite `--jobs` rises, because test-fixture emits are far
@@ -122,9 +123,8 @@ The design for the content-addressed key derivation lives in
   this job as a merge gate — it is not; a failing baseline never poisons the
   cache PRs consume, because the cache save step only runs when the full
   suite passed.
-- Two paths run cold (`--no-test-cache`): the advisory aarch64 lane on every
-  PR (non-blocking — see "Where each gate lives"), and the nightly
-  `make check`, which is the blocking one.
+- Two paths run cold (`--no-test-cache`): the daily aarch64-Linux unsharded
+  soak, which gates its scheduled workflow, and the nightly `make check`.
 - The correctness backstop for the whole toolchain is the nightly
   `make check` triple-pass self-host
   (`.github/workflows/nightly-selfhost.yml`, `make-check` job, cron
@@ -135,27 +135,33 @@ The design for the content-addressed key derivation lives in
 ## Where each gate lives
 
 - **`build-compiler-linux` / `build-compiler-macos`** — build the compiler
-  once per OS (`.github/workflows/ci.yml:345-601`).
+  once per OS in `.github/workflows/ci.yml`.
 - **`build-linux` / `build-macos`** — fan out over `matrix.shard` (the eight
   named shards) and download the shared compiler tree rather than rebuilding
-  it (`ci.yml:913-1030`, `ci.yml:1298-1420`). This is the "split the build
+  it. This is the "split the build
   into its own job" design now shipped.
 - **`shard-cover`** — the cover-invariant lint, gating on
-  `build-compiler-linux` (`ci.yml:220-255`).
-- **Advisory Tier-3 aarch64-Linux lane** — `build-aarch64-linux`
-  (`ci.yml:844-894`) runs the full unsharded suite with
-  `TEST_BIN_CACHE_FLAGS=--no-test-cache TEST_JOBS=4` (`ci.yml:887-894`). Note
-  what that makes it: a **cold-build full suite on every PR**. It is
-  `continue-on-error: true` and excluded from `required-ci`, so it observes a
-  cache discrepancy rather than blocking on one — but it is the earliest place
-  a stale test-bin hit would show up.
-- **Windows** — boot/frontend smoke only via `smoke-windows`
-  (`ci.yml:1691-1743`); no suite run.
-- **`required-ci`** — the merge gate (`ci.yml:1744-1756`). Needs `ci-scope`,
+  `build-compiler-linux`.
+- **Tier-3 aarch64-Linux source lane** — `build-aarch64-linux` fans source PR
+  and merge-queue tests over the same eight named shards. Every leg downloads
+  the fixed-point compiler from `build-compiler-aarch64-linux`, restores and
+  saves `test-bin-linux-arm64-<shard>-...`, uses native auto-budgeted in-leg
+  concurrency, and reports `test_seconds` plus `test_bin_hit_rate`.
+  `aarch64-linux-result` aggregates the cross vehicle, native fixed point,
+  shard-cover, and matrix result into one check. That aggregate remains outside
+  `required-ci` while the target is Tier 3; SFN-476 can add this single job when
+  promoting the target instead of depending on every matrix child.
+- **Scheduled aarch64-Linux soak** — `soak-aarch64-linux` downloads the same
+  verified native compiler artifact but runs one unsharded full suite with
+  `--no-test-cache`. It restores no test-bin cache, pins no `TEST_JOBS`, and a
+  failure fails the scheduled workflow.
+- **Windows** — boot/frontend smoke only via `smoke-windows`; no suite run.
+- **`required-ci`** — the merge gate. Needs `ci-scope`,
   `linear-branch-claim`, `check-public-claims`, `check-fast`,
   `build-compiler-linux`, `build-compiler-macos`, `shard-cover`, `build-linux`,
   `build-macos`, and `smoke-windows` — ten jobs, not just the test legs. It does
-  **not** need the advisory aarch64 lane. `linear-branch-claim` is the gate that
+  **not yet** need `aarch64-linux-result`; SFN-476 owns that Tier-2 promotion.
+  `linear-branch-claim` is the gate that
   fails an `sfn-<N>` branch whose PR body does not close `SFN-<N>`; see
   `CLAUDE.md` (## Task tracking).
 
@@ -163,12 +169,13 @@ The design for the content-addressed key derivation lives in
 
 The `sailfin-build` action captures `build_seconds` / `build_cache_hit_rate`
 and `test_seconds` / `test_bin_hit_rate` into `build/ci-metrics.env`
-(`.github/actions/sailfin-build/action.yml:283-284,447-450`). Two separate
-macOS-only steps surface them: the build-phase write in
-`build-compiler-macos` (`ci.yml:551-576`, `build_seconds` and
-`build_cache_hit_rate` only) and the test-phase write in `build-macos`
-(`ci.yml:1423-1444`, per-shard `test_seconds` and `test_bin_hit_rate`).
-These metrics are ephemeral and per-run only — unlike
+(`.github/actions/sailfin-build/action.yml`). The build-phase write remains
+macOS-only and is surfaced in
+`build-compiler-macos` (`build_seconds` and
+`build_cache_hit_rate` only). Test-phase writes are surfaced per shard in
+`build-macos` and, since SFN-826, `build-aarch64-linux`, with
+`test_seconds` and `test_bin_hit_rate`. These metrics are ephemeral and
+per-run only — unlike
 `perf-history.yml`'s build-time series, there is no durable time-series for
 test-suite wall time. Rebalancing the shard map or the job budget today has
 no historical baseline to check a regression against beyond the current

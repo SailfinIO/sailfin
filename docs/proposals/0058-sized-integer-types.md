@@ -75,7 +75,7 @@ on:
 
 3. **Literals are not range-checked and cannot be typed.** The lexer captures a
    number as one generic `NumberLiteral` lexeme with no suffix support
-   ([`lexer.sfn:190-280`](../../compiler/src/lexer.sfn#L190-L280));
+   ([`lexer.sfn:190-280`](../../compiler/capsules/syntax/src/lexer.sfn#L190-L280));
    a trailing `u8`/`i16` lexes as a *separate* `Identifier` token. There is no
    parse-time or check-time bounds check, so `let x: u8 = 300` compiles and
    truncates silently. Rust/Swift reject this at compile time.
@@ -147,9 +147,9 @@ keywords. Only the *default* behaviour and the type names are language-level.
 ### 3.1 The type family (types are strings; add sign+width metadata)
 
 Sailfin threads type annotations as raw strings end-to-end (`TypeAnnotation {
-text: string }` at [`ast.sfn:12-14`](../../compiler/src/ast.sfn#L12-L14);
+text: string }` at [`ast.sfn:12-14`](../../compiler/capsules/syntax/src/ast.sfn#L12-L14);
 `NativeFunction.return_type: string` at
-[`native_ir.sfn:73-77`](../../compiler/src/native_ir.sfn#L73-L77)). We keep that
+[`native_ir.sfn:73-77`](../../compiler/capsules/ir/src/native_ir.sfn#L73-L77)). We keep that
 model — **no structured width field is added to the AST or IR.** Signedness and
 width are *derived* from the type-name string at each site that needs them, the
 same way `map_primitive_type` already resolves by string match. This is the
@@ -200,7 +200,7 @@ sidestep the `e`-exponent ambiguity (`1e2` vs a hypothetical `1_e...`).
 
 **Lexer change.** Today the number scanner stops at the last digit/exponent byte
 and the suffix would lex as a separate `Identifier`
-([`lexer.sfn:274-280`](../../compiler/src/lexer.sfn#L274-L280)). Extend the
+([`lexer.sfn:274-280`](../../compiler/capsules/syntax/src/lexer.sfn#L274-L280)). Extend the
 scanner: after the numeric run, if the next bytes (optionally preceded by one
 `_`) spell one of the twelve suffix names, consume them into the same
 `NumberLiteral` lexeme. The token kind stays `NumberLiteral`; the suffix travels
@@ -256,7 +256,7 @@ and no branches for `i16`/the whole `u*` family (they fall through to the
   via `fpext` is retained as a follow-on decision; see §6).
 
 **`as`-cast semantics (the correctness fix).** The `Cast` AST node already exists
-([`ast.sfn:95`](../../compiler/src/ast.sfn#L95)) and the effect checker already
+([`ast.sfn:95`](../../compiler/capsules/syntax/src/ast.sfn#L95)) and the effect checker already
 walks the operand
 ([`effect_checker.sfn:888-897`](../../compiler/src/effect_checker.sfn#L888-L897),
 #1627). The lowering matrix
@@ -559,12 +559,12 @@ opcode selection.
   compound operands at `:479-492`),
   `compiler/src/llvm/expression_lowering/native/core_operands.sfn:2495-2557`
   (`dominant_type` — i8/i32/i64-only branches, silent same-kind widening),
-  `compiler/src/lexer.sfn:190-280` (no suffix support),
+  `compiler/capsules/syntax/src/lexer.sfn:190-280` (no suffix support),
   `compiler/src/typecheck_types.sfn:1057-1075` (`is_extern_primitive_type`
   accept-list), `:464-481` (string-driven kind resolution precedent),
-  `compiler/src/ast.sfn:12-14` (`TypeAnnotation` is text), `:95` (`Cast` node),
+  `compiler/capsules/syntax/src/ast.sfn:12-14` (`TypeAnnotation` is text), `:95` (`Cast` node),
   `compiler/src/effect_checker.sfn:888-897` (Cast operand walk, #1627),
-  `compiler/src/native_ir.sfn:73-77` (string-threaded types).
+  `compiler/capsules/ir/src/native_ir.sfn:73-77` (string-threaded types).
 - **Status / spec:** `docs/status.md:184-185` (numeric types + bitwise ops
   "Shipped"), `site/src/content/docs/docs/reference/spec/06-types.md`
   (primitive table, sized-family FFI note, scalar coercion kinds).

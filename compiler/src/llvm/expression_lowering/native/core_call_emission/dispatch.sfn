@@ -2,10 +2,12 @@
 //
 // Call emission extracted from core_call_lowering.sfn to keep
 // each function under ~500 .sfn-asm instructions (avoids seed OOM).
-import { NativeFunction } from "../../../../native_ir";
-import { substring } from "../../../../string_utils";
+import { NativeFunction } from "sfn/ir";
+import { substring } from "sfn/strings";
+
 import { format_temp_name, format_typed_operand } from "../../../expressions_helpers";
 import { trace_log, trace_lowering } from "../../../lowering_debug_state";
+import { sanitize_symbol } from "../../../symbols";
 import { find_interface_info_by_name } from "../../../type_context_queries";
 import { ends_with_pointer_suffix } from "../../../type_mapping";
 import {
@@ -19,7 +21,6 @@ import {
 } from "../../../types";
 import { extend_string_array, join_with_separator, number_to_string } from "../../../utils";
 import { coerce_operand_to_type } from "../core_operands/dispatch";
-import { sanitize_symbol } from "../core_text";
 import { coerce_call_operands } from "./arguments";
 import { emit_array_call } from "./arrays";
 import { emit_closure_dispatch } from "./closure_dispatch";

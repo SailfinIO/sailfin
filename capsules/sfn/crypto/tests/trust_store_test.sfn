@@ -8,10 +8,12 @@
 // ambient clock. Only the two path-probing tests carry `![io]`, and neither
 // depends on a CA bundle actually being present on the host, so they behave
 // identically on a developer machine and a bare CI container.
+import { pem_certificates_to_der } from "../src/pem";
 import {
     TrustStore,
     trust_store_default_paths,
     trust_store_env_vars,
+    trust_store_from_der_blocks,
     trust_store_from_pem,
     trust_store_load_from
 } from "../src/trust_store";
@@ -64,6 +66,68 @@ test "trust_store: an unparseable entry is skipped and counted, not fatal" {
 test "trust_store: a bundle whose every entry is unparseable is rejected" {
     let junk: string = "-----BEGIN CERTIFICATE-----\nAQIDBAU=\n-----END CERTIFICATE-----\n";
     let store: TrustStore = trust_store_from_pem(junk);
+    assert ! store.ok;
+    assert store.anchors.length == 0;
+}
+
+test "trust_store: the PEM and DER-block producers agree exactly" {
+    // The extraction contract (SFN-808). `trust_store_from_pem` is now
+    // `pem_certificates_to_der` composed with `trust_store_from_der_blocks`,
+    // and a platform trust store hands the DER path the same shape a PEM
+    // bundle decodes to — so the two producers must be indistinguishable on
+    // identical input, field for field. A second inlined parse loop drifting
+    // away from this one is exactly what this pins against.
+    let bundle: string = pem_ed_root() + pem_ec_root();
+    let via_pem: TrustStore = trust_store_from_pem(bundle);
+    let via_der: TrustStore = trust_store_from_der_blocks(pem_certificates_to_der(bundle));
+
+    assert via_pem.ok;
+    assert via_der.ok == via_pem.ok;
+    assert via_der.error == via_pem.error;
+    assert via_der.source == via_pem.source;
+    assert via_der.skipped == via_pem.skipped;
+    assert via_der.anchors.length == via_pem.anchors.length;
+
+    let mut i: int = 0;
+    loop {
+        if i >= via_pem.anchors.length { break; }
+        assert via_der.anchors[i].ok == via_pem.anchors[i].ok;
+        assert via_der.anchors[i].subject_cn == via_pem.anchors[i].subject_cn;
+        assert via_der.anchors[i].issuer_cn == via_pem.anchors[i].issuer_cn;
+        // Serial is the per-certificate identity that a CN collision would
+        // not catch.
+        assert via_der.anchors[i].serial.length == via_pem.anchors[i].serial.length;
+        let mut b: int = 0;
+        loop {
+            if b >= via_pem.anchors[i].serial.length { break; }
+            assert via_der.anchors[i].serial[b] == via_pem.anchors[i].serial[b];
+            b += 1;
+        }
+        i += 1;
+    }
+}
+
+test "trust_store: the DER-block producer skips an unparseable blob rather than failing" {
+    // Skip accounting is shared, not reimplemented: a platform store that
+    // hands back one unusable blob must degrade the same way a PEM bundle
+    // with one bad block does — shrinking trust, never failing shut on the
+    // rest (SFN-808).
+    let good: int[][] = pem_certificates_to_der(pem_ed_root());
+    assert good.length == 1;
+    let store: TrustStore = trust_store_from_der_blocks([good[0], [1, 2, 3, 4, 5]]);
+    assert store.ok;
+    assert store.anchors.length == 1;
+    assert store.skipped == 1;
+    assert store.anchors[0].subject_cn == "Sailfin Test Ed Root";
+}
+
+test "trust_store: the DER-block producer fails closed on no blocks" {
+    // The platform-store path reaches this with an empty list when a store
+    // enumerates nothing usable, so the empty case must stay a failed store
+    // rather than an empty-but-ok one — an empty anchor set that reported
+    // `ok` would be indistinguishable from working trust at the call site.
+    let none: int[][] = [];
+    let store: TrustStore = trust_store_from_der_blocks(none);
     assert ! store.ok;
     assert store.anchors.length == 0;
 }

@@ -39,11 +39,11 @@ inputs:
     required: false
     default: ""
   test_jobs:
-    description: "Parallel test children for the full-suite path (TEST_JOBS, forwarded to `make test` — see Makefile). Empty = serial (TEST_JOBS=1). Only consulted when `shard` is empty: the shard path parallelizes across CI legs instead. Pick N for the runner's RAM budget — each child carries its own footprint under the 8GB per-process cap (e.g. 4 on 4-vCPU/16GB ubuntu, 2 on 3-vCPU/7GB macos-15)."
+    description: "Parallel test children for the full-suite path (TEST_JOBS, forwarded to `make test` — see Makefile). Empty = use the Makefile's native CPU+RAM budget. Only consulted when `shard` is empty: the shard path parallelizes across CI legs instead. Pick N only after measuring the runner's RAM budget — each child carries its own footprint under the 8GB per-process cap."
     required: false
     default: ""
   shard_test_jobs:
-    description: "Per-file parallelism WITHIN a shard leg (SAILFIN_TEST_JOBS, read by `sfn dev shard run`). Only consulted when `shard` is set. Empty/1 = serial (byte-identical to the historical shard run). Benchmarked sweet spots: 3 on 4-vCPU/16GB ubuntu, 2 on 3-vCPU/7GB macos-arm64 (no RLIMIT_AS backstop there). Peak RSS stays a fraction of the runner budget because test fixtures emit ~30x lighter than a heavy compiler module."
+    description: "Per-file parallelism WITHIN a shard leg (SAILFIN_TEST_JOBS, read by `sfn dev shard run`). Only consulted when `shard` is set. Empty = use the native host CPU+RAM budget; 1 forces serial execution. Pin a higher value only after measuring the runner's RAM budget."
     required: false
     default: ""
   package:
@@ -217,7 +217,7 @@ runs:
       uses: actions/cache@v4
       with:
         path: build/cache
-        key: sailfin-buildcache-${{ inputs.target }}-${{ inputs.seed_version }}-${{ steps.layout.outputs.fp }}-${{ hashFiles('compiler/src/**/*.sfn', 'runtime/**/*.sfn', 'compiler/capsule.toml', 'bootstrap.toml') }}
+        key: sailfin-buildcache-${{ inputs.target }}-${{ inputs.seed_version }}-${{ steps.layout.outputs.fp }}-${{ hashFiles('compiler/src/**/*.sfn', 'compiler/capsules/**/*.sfn', 'runtime/**/*.sfn', 'compiler/capsule.toml', 'bootstrap.toml') }}
         restore-keys: |
           sailfin-buildcache-${{ inputs.target }}-${{ inputs.seed_version }}-${{ steps.layout.outputs.fp }}-
 
@@ -251,7 +251,7 @@ runs:
       uses: actions/cache@v4
       with:
         path: build/cache/test-bin
-        key: sailfin-testbin-${{ inputs.target }}-${{ inputs.seed_version }}-${{ hashFiles('compiler/src/**/*.sfn', 'runtime/**/*.sfn', 'runtime/capsule.toml', 'runtime/ir/**', 'compiler/capsule.toml', 'bootstrap.toml') }}
+        key: sailfin-testbin-${{ inputs.target }}-${{ inputs.seed_version }}-${{ hashFiles('compiler/src/**/*.sfn', 'compiler/capsules/**/*.sfn', 'runtime/**/*.sfn', 'runtime/capsule.toml', 'runtime/ir/**', 'compiler/capsule.toml', 'bootstrap.toml') }}
         restore-keys: |
           sailfin-testbin-${{ inputs.target }}-${{ inputs.seed_version }}-
           sailfin-testbin-${{ inputs.target }}-
@@ -400,14 +400,16 @@ runs:
       shell: bash {0}
       run: |
         set -euo pipefail
-        # #1235 measurement (macOS only). Time the test phase and flip on
+        # #1235 / SFN-826 measurement. Time the macOS and aarch64-Linux shard
+        # phases and flip on
         # the SAILFIN_AGENT_REPORT gate so `make test-shard` forwards `--json`
         # to `sfn dev shard run` and tees build/agent-test.shard-<shard>.jsonl,
         # whose `summary` event carries cache.test_bin_hit_rate (#1230).
-        # Additive + macOS-scoped; Linux shard legs keep the byte-identical
-        # human run.
+        # Additive + target-scoped; Linux x86_64 shard legs keep the
+        # byte-identical human run.
         _measure=0
-        if [ "${{ inputs.target }}" = "macos-arm64" ]; then
+        if [ "${{ inputs.target }}" = "macos-arm64" ] ||
+           [ "${{ inputs.target }}" = "linux-arm64" ]; then
           _measure=1
           export SAILFIN_AGENT_REPORT=1
         fi
@@ -427,7 +429,7 @@ runs:
         # Per-file parallelism within a shard leg (benchmarked: ~2x e2e /
         # ~6x unit throughput, peak RSS a fraction of the runner budget).
         # Forwarded via SAILFIN_TEST_JOBS, which `sfn dev shard run` reads.
-        # Empty/unset keeps the byte-identical serial shard run.
+        # Empty/unset lets the native runner apply its CPU+RAM auto-budget.
         if [ -n "${{ inputs.shard_test_jobs }}" ]; then
           export SAILFIN_TEST_JOBS="${{ inputs.shard_test_jobs }}"
         fi

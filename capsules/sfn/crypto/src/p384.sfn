@@ -1,0 +1,652 @@
+// capsules/sfn/crypto/src/p384.sfn
+//
+// NIST P-384 (secp384r1) field, scalar, and point arithmetic for ECDSA
+// signature verification (SFN-811).
+//
+// Design: docs/proposals/design-notes/sfn-653-p256-rsa-bigint-strategy.md —
+// its representation and Montgomery choices are curve-independent; the
+// constants here are P-384's, not P-256's.
+//
+// Representation: 15 little-endian limbs of 26 bits, Montgomery form, for both
+// the field prime `p = 2^384 - 2^128 - 2^96 + 2^32 - 1` and the subgroup order
+// `n`. R = 2^390 in both contexts. This module uses CIOS Montgomery and reuses
+// `src/bignum.sfn`'s `_mont_mul` rather than founding a second CIOS.
+//
+// Both moduli drive the *same* `_mont_mul` through a different `MontCtx`:
+// modulus, n0_prime, R, and R^2 are parameters/constants, not separate
+// algorithms. `_mont_mul`'s CIOS invariant needs one spare bit above 2n; 15
+// limbs give 390 bits of capacity against a 384-bit modulus, so 2p and 2n both
+// clear it.
+//
+// There are no secrets here. Verification receives a public key, a public
+// signature, and a public digest, so a branch on a scalar bit, on a
+// point-at-infinity case, or on a public-key validation result reveals
+// nothing. This module is therefore NOT approved for ECDSA signing, which
+// introduces a secret scalar and nonce and needs a separate constant-time
+// design. Fail-closed indexing still applies: every index below is bounded by
+// a checked length or a loop bound.
+//
+// Every constant is decimal. Hex literals are unavailable in Sailfin source,
+// which is why the curve parameters appear as limb arrays rather than as the
+// hex strings FIPS 186-4 prints.
+//
+// This file is a deliberate parallel of `src/p256.sfn` rather than a shared
+// generic core; a change to the arithmetic in either file must be mirrored in
+// the other.
+import {
+    MontCtx,
+    _bn_at,
+    _bn_cmp,
+    _bn_from_be,
+    _bn_is_zero,
+    _bn_limb_bits,
+    _bn_limb_mask,
+    _bn_sub,
+    _bn_to_be,
+    _bn_zero,
+    _mont_in,
+    _mont_mul,
+    _mont_out
+} from "./bignum";
+
+// ── Shape ──
+fn _p384_limbs() -> int { return 15; }
+
+fn _p384_bytes() -> int { return 48; }
+
+// ── Field modulus p and its Montgomery constants ──
+fn _p384_p_mod() -> int[] {
+    return [67108863, 63, 0, 66846720, 50331647, 67108863, 67108863, 67108863, 67108863, 67108863, 67108863, 67108863, 67108863, 67108863, 1048575];
+}
+
+fn _p384_p_r2() -> int[] {
+    return [4096, 66584576, 16777215, 0, 32, 0, 66977792, 4194303, 0, 8, 256, 0, 0, 0, 0];
+}
+
+// -p[0]^-1 mod 2^26. Guarded by a test against `_mont_n0_prime`, so a
+// transcription slip here cannot pass silently.
+fn _p384_p_n0_prime() -> int { return 1; }
+
+fn _p384_p_ctx() -> MontCtx {
+    return MontCtx {
+        ok: true,
+        error: "",
+        n: _p384_p_mod(),
+        limbs: _p384_limbs(),
+        n0_prime: _p384_p_n0_prime(),
+        r2: _p384_p_r2()
+    };
+}
+
+// R mod p — the Montgomery representation of 1, and the identity the
+// square-and-multiply ladder starts from.
+fn _p384_p_one() -> int[] {
+    return [64, 67104768, 67108863, 16777215, 0, 16, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+}
+
+// ── Subgroup order n and its Montgomery constants ──
+fn _p384_n_mod() -> int[] {
+    return [12921203, 50748083, 41397966, 46736066, 56105485, 17681271, 37017631, 67108637, 67108863, 67108863, 67108863, 67108863, 67108863, 67108863, 1048575];
+}
+
+fn _p384_n_r2() -> int[] {
+    return [43134504, 60394193, 61644819, 44269818, 50578346, 31337053, 49423435, 24100987, 11186636, 3482717, 40408532, 48138761, 34863877, 11331324, 323073];
+}
+
+fn _p384_n_n0_prime() -> int { return 9428037; }
+
+fn _p384_n_ctx() -> MontCtx {
+    return MontCtx {
+        ok: true,
+        error: "",
+        n: _p384_n_mod(),
+        limbs: _p384_limbs(),
+        n0_prime: _p384_n_n0_prime(),
+        r2: _p384_n_r2()
+    };
+}
+
+fn _p384_n_one() -> int[] {
+    return [45458240, 40457011, 34884687, 28790616, 33127571, 9249290, 46790703, 14492, 0, 0, 0, 0, 0, 0, 0];
+}
+
+// ── Curve parameters, Montgomery domain mod p ──
+// y^2 = x^3 - 3x + b. The coefficient a is fixed at -3, which is why
+// `_p384_point_double` can use the 3*(X-delta)*(X+delta) form and never needs
+// a limb array for a.
+fn _p384_b() -> int[] {
+    return [4944691, 8850708, 61874246, 21384242, 13265782, 33563388, 8547428, 48396274, 61154530, 36926654, 557651, 52556831, 67005834, 11928827, 270405];
+}
+
+fn _p384_g_x() -> int[] {
+    return [2968083, 55992284, 14743361, 49075918, 54058552, 28628710, 15462736, 50300828, 18245827, 38094952, 20674733, 66528097, 21291083, 2267617, 322231];
+}
+
+fn _p384_g_y() -> int[] {
+    return [15286154, 64672304, 45124624, 61060265, 40888879, 3867916, 60643514, 64588717, 39468351, 7091489, 27697411, 140857, 24803168, 2466140, 909999];
+}
+
+// ── Fixed public exponents, 48-byte big-endian ──
+// These drive `_p384_pow_be`. All three are compile-time constants, so branching on
+// their bits is public-data control flow.
+// p - 2, for the field inversion x^(p-2).
+fn _p384_p_minus_2_be() -> int[] {
+    return [255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 254, 255, 255, 255, 255, 0, 0, 0, 0, 0, 0, 0, 0, 255, 255, 255, 253];
+}
+
+// (p + 1) / 4, for the square root x^((p+1)/4). Valid because p = 3 mod 4.
+fn _p384_p_plus_1_div_4_be() -> int[] {
+    return [63, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 191, 255, 255, 255, 192, 0, 0, 0, 0, 0, 0, 0, 64, 0, 0, 0];
+}
+
+// n - 2, for the scalar inversion s^(n-2). Chosen over extended Euclid to
+// avoid unbounded signed Bezout coefficients under today's integer model; 383
+// squarings and comparably few multiplies is acceptable off a signing hot
+// path.
+fn _p384_n_minus_2_be() -> int[] {
+    return [255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 199, 99, 77, 129, 244, 55, 45, 223, 88, 26, 13, 178, 72, 176, 167, 122, 236, 236, 25, 106, 204, 197, 41, 113];
+}
+
+// ── Modular arithmetic over a 15-limb modulus ──
+// Raw limbwise sum over exactly 15 limbs, no reduction. No carry can leave the
+// top limb: both inputs are below the 384-bit modulus, so the sum is below
+// 2^385 while 15 limbs hold 2^390.
+fn _p384_add_raw(a: int[], b: int[]) -> int[] {
+    let mask: int = _bn_limb_mask();
+    let bits: int = _bn_limb_bits();
+    let mut out: int[] = [];
+    let mut carry: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= _p384_limbs() { break; }
+        let t: int = _bn_at(a, i) + _bn_at(b, i) + carry;
+        out.push(t & mask);
+        carry = t >> bits;
+        i += 1;
+    }
+    return out;
+}
+
+// (a + b) mod ctx.n, for a, b < ctx.n. The sum is below 2n, so one conditional
+// subtraction canonicalizes it.
+fn _p384_mod_add(a: int[], b: int[], ctx: MontCtx) -> int[] {
+    let sum: int[] = _p384_add_raw(a, b);
+    if _bn_cmp(sum, ctx.n) >= 0 { return _bn_sub(sum, ctx.n); }
+    return sum;
+}
+
+// (a - b) mod ctx.n, for a, b < ctx.n. When a < b, add the modulus first;
+// a + n stays below 2^385 and so still fits 15 limbs.
+fn _p384_mod_sub(a: int[], b: int[], ctx: MontCtx) -> int[] {
+    if _bn_cmp(a, b) >= 0 { return _bn_sub(a, b); }
+    return _bn_sub(_p384_add_raw(a, ctx.n), b);
+}
+
+fn _p384_mod_mul(a: int[], b: int[], ctx: MontCtx) -> int[] {
+    return _mont_mul(a, b, ctx);
+}
+
+fn _p384_mod_sqr(a: int[], ctx: MontCtx) -> int[] {
+    return _mont_mul(a, a, ctx);
+}
+
+// Every value reaching here is fully reduced — `_mont_mul` canonicalizes below
+// the modulus and both `_p384_mod_add`/`_p384_mod_sub` do too — so the
+// representation is unique and limbwise comparison is a valid equality test.
+fn _p384_eq(a: int[], b: int[]) -> bool { return _bn_cmp(a, b) == 0; }
+
+fn _p384_mod_double(a: int[], ctx: MontCtx) -> int[] {
+    return _p384_mod_add(a, a, ctx);
+}
+
+// ── Fixed-exponent ladder ──
+// base^exp, Montgomery domain, exponent as fixed big-endian bytes, MSB first.
+// `one` is the Montgomery representation of 1 for this context. The exponent is
+// always a module constant, so the bit branch is not secret-dependent.
+fn _p384_pow_be(base: int[], exp_be: int[], one: int[], ctx: MontCtx) -> int[] {
+    let mut acc: int[] = one;
+    let mut i: int = 0;
+    loop {
+        if i >= exp_be.length { break; }
+        let byte: int = exp_be[i] & 255;
+        let mut bit: int = 7;
+        loop {
+            if bit < 0 { break; }
+            acc = _mont_mul(acc, acc, ctx);
+            if ((byte >> bit) & 1) == 1 { acc = _mont_mul(acc, base, ctx); }
+            bit -= 1;
+        }
+        i += 1;
+    }
+    return acc;
+}
+
+// x^(p-2) = x^-1 for x != 0. A zero input yields zero; callers that cannot
+// tolerate that reject zero first.
+//
+// The modulus is in the name because the exponent and the identity below are
+// both p-specific: passing `_p384_n_ctx()` would return a wrong value rather
+// than an error, and a name that admitted either context would invite exactly
+// that. The same applies to `_p384_p_sqrt`.
+fn _p384_p_inv(x: int[], ctx: MontCtx) -> int[] {
+    return _p384_pow_be(x, _p384_p_minus_2_be(), _p384_p_one(), ctx);
+}
+
+// A square root of x when one exists. P-384's p = 3 mod 4, so x^((p+1)/4) is a
+// root of x whenever x is a quadratic residue; the caller MUST square the
+// result and compare, because for a non-residue this returns a value that is
+// not a root.
+fn _p384_p_sqrt(x: int[], ctx: MontCtx) -> int[] {
+    return _p384_pow_be(x, _p384_p_plus_1_div_4_be(), _p384_p_one(), ctx);
+}
+
+// a^-1 mod n, canonical in and canonical out. The Montgomery conversions are
+// internal so the ECDSA layer above never has to track which domain a scalar is
+// in — the one bookkeeping mistake that would still produce a plausible-looking
+// point and fail only against the known-answer vectors.
+fn _p384_n_inv(a: int[], ctx: MontCtx) -> int[] {
+    let mont: int[] = _p384_pow_be(_mont_in(a, ctx), _p384_n_minus_2_be(), _p384_n_one(), ctx);
+    return _mont_out(mont, ctx);
+}
+
+// (a * b) mod n, canonical in and canonical out. `_mont_mul(a*R, b)` already
+// yields the canonical product, so this costs two Montgomery multiplies rather
+// than the four a convert-in/convert-out pair would.
+fn _p384_n_mul(a: int[], b: int[], ctx: MontCtx) -> int[] {
+    return _mont_mul(_mont_in(a, ctx), b, ctx);
+}
+
+// A canonical scalar as exactly 48 big-endian bytes, for the bit walk in
+// `_p384_joint_mul`.
+fn _p384_n_to_be(x: int[]) -> int[] { return _bn_to_be(x, _p384_bytes()); }
+
+// ── Byte conversion ──
+struct P384Value {
+    ok: boolean;
+    error: string;
+    value: int[];
+}
+
+fn _p384_value_err(message: string) -> P384Value {
+    return P384Value { ok: false, error: message, value: [] };
+}
+
+// 48 big-endian bytes to a Montgomery field residue. Rejects a coordinate that
+// is not already reduced: `_mont_mul` assumes inputs below the modulus, and an
+// out-of-range coordinate is a malformed key rather than something to reduce.
+fn _p384_from_be(bytes: int[], ctx: MontCtx) -> P384Value {
+    if bytes.length != _p384_bytes() {
+        return _p384_value_err("p384: coordinate is not 48 bytes");
+    }
+    let canonical: int[] = _bn_from_be(bytes, _p384_limbs());
+    if _bn_cmp(canonical, ctx.n) >= 0 {
+        return _p384_value_err("p384: coordinate is not less than p");
+    }
+    return P384Value {
+        ok: true,
+        error: "",
+        value: _mont_in(canonical, ctx)
+    };
+}
+
+// Montgomery field residue to exactly 48 big-endian bytes.
+fn _p384_to_be(x: int[], ctx: MontCtx) -> int[] {
+    return _bn_to_be(_mont_out(x, ctx), _p384_bytes());
+}
+
+// ── Scalar arithmetic modulo n ──
+// A signature scalar. Requires 1 <= value < n, which is exactly the FIPS 186-4
+// range check; `r = 0`, `s = 0`, `r >= n`, and `s >= n` are all refused here.
+// Omitting this is the standard ECDSA acceptance hole, so it is a checked
+// entry point rather than a caller convention. Returns canonical limbs; the
+// caller converts to Montgomery form at the point of use, because `r` is also
+// needed canonically for the final comparison.
+fn _p384_n_from_be_checked(bytes: int[]) -> P384Value {
+    if bytes.length > _p384_bytes() {
+        return _p384_value_err("p384: scalar is wider than 48 bytes");
+    }
+    let canonical: int[] = _bn_from_be(bytes, _p384_limbs());
+    if _bn_is_zero(canonical) {
+        return _p384_value_err("p384: scalar is zero");
+    }
+    if _bn_cmp(canonical, _p384_n_mod()) >= 0 {
+        return _p384_value_err("p384: scalar is not less than n");
+    }
+    return P384Value { ok: true, error: "", value: canonical };
+}
+
+// Any value up to 48 bytes — a SHA-384 digest, or an x-coordinate that may
+// exceed n — to a canonical residue in [0, n). One subtraction suffices
+// because the input is below 2^384 and 2n > 2^384, so a single conditional
+// subtraction canonicalizes it. Deliberately does NOT reject an input at
+// least n: FIPS 186-4 reduces the digest, and the same tolerance is needed for
+// the recovered x-coordinate. Both live callers pass exactly 48 bytes — a
+// SHA-384 digest and a 48-byte x-coordinate.
+fn _p384_n_reduce_384(bytes: int[]) -> int[] {
+    // The one-subtraction argument above rests on the input being below
+    // 2^384 and 2n exceeding 2^384. A longer input would be silently
+    // truncated by `_bn_from_be` above bit 389 and could then still exceed n,
+    // which would hand `_p384_n_mul` an operand violating `_mont_mul`'s
+    // below-the-modulus precondition — a wrong residue rather than an error.
+    // Both live callers pass exactly 48 bytes; this keeps that true for any
+    // future one.
+    if bytes.length > _p384_bytes() { return _bn_zero(_p384_limbs()); }
+    let canonical: int[] = _bn_from_be(bytes, _p384_limbs());
+    if _bn_cmp(canonical, _p384_n_mod()) >= 0 {
+        return _bn_sub(canonical, _p384_n_mod());
+    }
+    return canonical;
+}
+
+// ── Points ──
+// Jacobian coordinates: the affine point is (X/Z^2, Y/Z^3). Jacobian is
+// selected so a joint multiplication pays one field inversion at the end
+// instead of one per point operation. `infinity` is carried as a flag rather
+// than as Z = 0 so no arithmetic path can produce it implicitly.
+struct P384Point {
+    infinity: boolean;
+    x: int[];
+    y: int[];
+    z: int[];
+}
+
+fn _p384_infinity() -> P384Point {
+    let zero: int[] = _bn_zero(_p384_limbs());
+    return P384Point {
+        infinity: true,
+        x: zero,
+        y: zero,
+        z: zero
+    };
+}
+
+// x^3 - 3x + b, the curve equation's right-hand side, Montgomery domain.
+fn _p384_curve_rhs(x: int[], ctx: MontCtx) -> int[] {
+    let x2: int[] = _p384_mod_sqr(x, ctx);
+    let x3: int[] = _p384_mod_mul(x2, x, ctx);
+    let three_x: int[] = _p384_mod_add(_p384_mod_double(x, ctx), x, ctx);
+    return _p384_mod_add(_p384_mod_sub(x3, three_x, ctx), _p384_b(), ctx);
+}
+
+fn _p384_is_on_curve(x: int[], y: int[], ctx: MontCtx) -> bool {
+    return _p384_eq(_p384_mod_sqr(y, ctx), _p384_curve_rhs(x, ctx));
+}
+
+struct P384PointResult {
+    ok: boolean;
+    error: string;
+    point: P384Point;
+}
+
+fn _p384_point_err(message: string) -> P384PointResult {
+    return P384PointResult {
+        ok: false,
+        error: message,
+        point: _p384_infinity()
+    };
+}
+
+fn _p384_slice(bytes: int[], off: int, len: int) -> int[] {
+    let mut out: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= len { break; }
+        let k: int = off + i;
+        if k < 0 || k >= bytes.length { break; }
+        out.push(bytes[k] & 255);
+        i += 1;
+    }
+    return out;
+}
+
+// SEC1 point decoding, uncompressed (0x04, 97 bytes) or compressed
+// (0x02/0x03, 49 bytes). Refuses everything else, including the single-byte
+// 0x00 encoding of infinity: a valid, non-infinity, on-curve public point is
+// required before any scalar multiplication, and an unvalidated key is the
+// classic invalid-curve attack surface.
+fn _p384_point_decode(bytes: int[], ctx: MontCtx) -> P384PointResult {
+    if bytes.length == 0 {
+        return _p384_point_err("p384: empty point encoding");
+    }
+    let prefix: int = bytes[0] & 255;
+
+    if prefix == 4 {
+        if bytes.length != 97 {
+            return _p384_point_err("p384: uncompressed point is not 97 bytes");
+        }
+        let xr: P384Value = _p384_from_be(_p384_slice(bytes, 1, 48), ctx);
+        if !xr.ok { return _p384_point_err(xr.error); }
+        let yr: P384Value = _p384_from_be(_p384_slice(bytes, 49, 48), ctx);
+        if !yr.ok { return _p384_point_err(yr.error); }
+        if !_p384_is_on_curve(xr.value, yr.value, ctx) {
+            return _p384_point_err("p384: point is not on the curve");
+        }
+        return P384PointResult {
+            ok: true,
+            error: "",
+            point: P384Point {
+                infinity: false,
+                x: xr.value,
+                y: yr.value,
+                z: _p384_p_one()
+            }
+        };
+    }
+
+    if prefix == 2 || prefix == 3 {
+        if bytes.length != 49 {
+            return _p384_point_err("p384: compressed point is not 49 bytes");
+        }
+        let xr: P384Value = _p384_from_be(_p384_slice(bytes, 1, 48), ctx);
+        if !xr.ok { return _p384_point_err(xr.error); }
+        let rhs: int[] = _p384_curve_rhs(xr.value, ctx);
+        // A zero right-hand side would make y = 0 pass the square-and-compare
+        // below while denoting a point of order 2. P-384 has odd prime order
+        // so no such point exists, but rejecting it explicitly keeps the
+        // decoder fail-closed rather than resting on that argument.
+        if _bn_is_zero(rhs) {
+            return _p384_point_err("p384: compressed point has no valid y");
+        }
+        let mut y: int[] = _p384_p_sqrt(rhs, ctx);
+        if !_p384_eq(_p384_mod_sqr(y, ctx), rhs) {
+            return _p384_point_err("p384: x is not on the curve");
+        }
+        // SEC1 encodes the parity of the canonical y in the prefix, so the
+        // parity test must run on the value outside the Montgomery domain.
+        let y_bytes: int[] = _p384_to_be(y, ctx);
+        let parity: int = y_bytes[_p384_bytes() - 1] & 1;
+        if parity != (prefix & 1) {
+            y = _p384_mod_sub(_bn_zero(_p384_limbs()), y, ctx);
+        }
+        return P384PointResult {
+            ok: true,
+            error: "",
+            point: P384Point {
+                infinity: false,
+                x: xr.value,
+                y: y,
+                z: _p384_p_one()
+            }
+        };
+    }
+
+    return _p384_point_err("p384: unsupported point encoding");
+}
+
+// Jacobian doubling, the a = -3 form (dbl-2001-b):
+//   delta = Z^2, gamma = Y^2, beta = X*gamma
+//   alpha = 3*(X - delta)*(X + delta)
+//   X' = alpha^2 - 8*beta
+//   Z' = (Y + Z)^2 - gamma - delta
+//   Y' = alpha*(4*beta - X') - 8*gamma^2
+// The 3*(X-delta)*(X+delta) shortcut is exactly where a = -3 is consumed; it
+// is not valid for a general curve. P-384 also has a = -3.
+fn _p384_point_double(pt: P384Point, ctx: MontCtx) -> P384Point {
+    if pt.infinity { return pt; }
+    if _bn_is_zero(pt.y) { return _p384_infinity(); }
+
+    let delta: int[] = _p384_mod_sqr(pt.z, ctx);
+    let gamma: int[] = _p384_mod_sqr(pt.y, ctx);
+    let beta: int[] = _p384_mod_mul(pt.x, gamma, ctx);
+
+    let lo: int[] = _p384_mod_sub(pt.x, delta, ctx);
+    let hi: int[] = _p384_mod_add(pt.x, delta, ctx);
+    let prod: int[] = _p384_mod_mul(lo, hi, ctx);
+    let alpha: int[] = _p384_mod_add(_p384_mod_double(prod, ctx), prod, ctx);
+
+    let beta2: int[] = _p384_mod_double(beta, ctx);
+    let beta4: int[] = _p384_mod_double(beta2, ctx);
+    let beta8: int[] = _p384_mod_double(beta4, ctx);
+
+    let x3: int[] = _p384_mod_sub(_p384_mod_sqr(alpha, ctx), beta8, ctx);
+
+    let yz: int[] = _p384_mod_add(pt.y, pt.z, ctx);
+    let z3: int[] = _p384_mod_sub(_p384_mod_sub(_p384_mod_sqr(yz, ctx), gamma, ctx), delta, ctx);
+
+    let gamma2: int[] = _p384_mod_sqr(gamma, ctx);
+    let gamma4: int[] = _p384_mod_double(_p384_mod_double(gamma2, ctx), ctx);
+    let gamma8: int[] = _p384_mod_double(gamma4, ctx);
+    let y3: int[] = _p384_mod_sub(_p384_mod_mul(alpha, _p384_mod_sub(beta4, x3, ctx), ctx), gamma8, ctx);
+
+    if _bn_is_zero(z3) { return _p384_infinity(); }
+    return P384Point {
+        infinity: false,
+        x: x3,
+        y: y3,
+        z: z3
+    };
+}
+
+// Jacobian addition (add-2007-bl). The H == 0 branch splits the two
+// exceptional cases the formula cannot express: equal x-coordinates with equal
+// y means the inputs are the same point, so defer to doubling; equal x with
+// opposite y means they are inverses, so the sum is infinity. Both branches
+// are on public data, so a readable branch is preferred over a fragile
+// branch-free selection.
+fn _p384_point_add(a: P384Point, b: P384Point, ctx: MontCtx) -> P384Point {
+    if a.infinity { return b; }
+    if b.infinity { return a; }
+
+    let z1z1: int[] = _p384_mod_sqr(a.z, ctx);
+    let z2z2: int[] = _p384_mod_sqr(b.z, ctx);
+    let u1: int[] = _p384_mod_mul(a.x, z2z2, ctx);
+    let u2: int[] = _p384_mod_mul(b.x, z1z1, ctx);
+    let s1: int[] = _p384_mod_mul(_p384_mod_mul(a.y, b.z, ctx), z2z2, ctx);
+    let s2: int[] = _p384_mod_mul(_p384_mod_mul(b.y, a.z, ctx), z1z1, ctx);
+
+    let h: int[] = _p384_mod_sub(u2, u1, ctx);
+    let r: int[] = _p384_mod_double(_p384_mod_sub(s2, s1, ctx), ctx);
+
+    if _bn_is_zero(h) {
+        if _bn_is_zero(r) { return _p384_point_double(a, ctx); }
+        return _p384_infinity();
+    }
+
+    let i: int[] = _p384_mod_sqr(_p384_mod_double(h, ctx), ctx);
+    let j: int[] = _p384_mod_mul(h, i, ctx);
+    let v: int[] = _p384_mod_mul(u1, i, ctx);
+
+    let x3: int[] = _p384_mod_sub(_p384_mod_sub(_p384_mod_sqr(r, ctx), j, ctx), _p384_mod_double(v, ctx), ctx);
+    let s1j: int[] = _p384_mod_mul(s1, j, ctx);
+    let y3: int[] = _p384_mod_sub(_p384_mod_mul(r, _p384_mod_sub(v, x3, ctx), ctx), _p384_mod_double(s1j, ctx), ctx);
+
+    let zsum: int[] = _p384_mod_add(a.z, b.z, ctx);
+    let zt: int[] = _p384_mod_sub(_p384_mod_sub(_p384_mod_sqr(zsum, ctx), z1z1, ctx), z2z2, ctx);
+    let z3: int[] = _p384_mod_mul(zt, h, ctx);
+
+    if _bn_is_zero(z3) { return _p384_infinity(); }
+    return P384Point {
+        infinity: false,
+        x: x3,
+        y: y3,
+        z: z3
+    };
+}
+
+fn _p384_generator() -> P384Point {
+    return P384Point {
+        infinity: false,
+        x: _p384_g_x(),
+        y: _p384_g_y(),
+        z: _p384_p_one()
+    };
+}
+
+// u1*G + u2*Q by Straus's method: one doubling per bit, with a four-entry table
+// covering the four combinations of the two scalars' bits. Index bit 0 selects
+// G and index bit 1 selects Q, so the table order and the index encoding must
+// agree — swapping them computes u2*G + u1*Q, which still produces a
+// well-formed point and would fail only in the known-answer vectors.
+//
+// Both scalars are public, so a table index derived from their bits is not a
+// secret-dependent access.
+fn _p384_joint_mul(u1_be: int[], u2_be: int[], q: P384Point, ctx: MontCtx) -> P384Point {
+    let g: P384Point = _p384_generator();
+    let gq: P384Point = _p384_point_add(g, q, ctx);
+
+    let mut acc: P384Point = _p384_infinity();
+    let mut i: int = 0;
+    loop {
+        if i >= _p384_bytes() { break; }
+        let b1: int = _bn_at(u1_be, i) & 255;
+        let b2: int = _bn_at(u2_be, i) & 255;
+        let mut bit: int = 7;
+        loop {
+            if bit < 0 { break; }
+            acc = _p384_point_double(acc, ctx);
+            let idx: int = ((b1 >> bit) & 1) | (((b2 >> bit) & 1) << 1);
+            if idx == 1 { acc = _p384_point_add(acc, g, ctx); }
+            if idx == 2 { acc = _p384_point_add(acc, q, ctx); }
+            if idx == 3 { acc = _p384_point_add(acc, gq, ctx); }
+            bit -= 1;
+        }
+        i += 1;
+    }
+    return acc;
+}
+
+// The affine x-coordinate as 48 big-endian bytes. Only meaningful for a
+// non-infinity point; the caller rejects infinity first, which is why this
+// returns bytes rather than a result struct.
+fn _p384_affine_x_be(pt: P384Point, ctx: MontCtx) -> int[] {
+    let z_inv: int[] = _p384_p_inv(pt.z, ctx);
+    let z_inv2: int[] = _p384_mod_sqr(z_inv, ctx);
+    return _p384_to_be(_p384_mod_mul(pt.x, z_inv2, ctx), ctx);
+}
+
+// Only what `src/ecdsa.sfn` and the regression tests consume, per the same
+// convention `src/bignum.sfn` states: widen this list when a consumer needs
+// more, not pre-emptively. The unlisted helpers are the precondition-carrying
+// layer — `_p384_add_raw` discards a carry it proves is zero, the point
+// primitives assume canonical Montgomery inputs with a valid z, and
+// `_p384_mod_add`/`_p384_mod_sub` assume both operands below the modulus — so
+// keeping them file-local means a future caller has to come here and read the
+// contract before reaching one.
+export {
+    P384Point,
+    P384PointResult,
+    P384Value,
+    _p384_affine_x_be,
+    _p384_bytes,
+    _p384_eq,
+    _p384_from_be,
+    _p384_joint_mul,
+    _p384_mod_add,
+    _p384_mod_mul,
+    _p384_mod_sqr,
+    _p384_mod_sub,
+    _p384_n_ctx,
+    _p384_n_from_be_checked,
+    _p384_n_inv,
+    _p384_n_mod,
+    _p384_n_mul,
+    _p384_n_n0_prime,
+    _p384_n_reduce_384,
+    _p384_n_to_be,
+    _p384_p_ctx,
+    _p384_p_inv,
+    _p384_p_mod,
+    _p384_p_n0_prime,
+    _p384_point_decode,
+    _p384_to_be
+};

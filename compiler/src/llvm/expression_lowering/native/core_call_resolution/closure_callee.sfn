@@ -1,8 +1,9 @@
 // compiler/src/llvm/expression_lowering/native/core_call_resolution/closure_callee.sfn
 //
 // Closure-callee parsing and operand resolution.
-import { NativeFunction } from "../../../../native_ir";
-import { index_of, substring } from "../../../../string_utils";
+import { NativeFunction } from "sfn/ir";
+import { find, substring } from "sfn/strings";
+
 import { is_simple_identifier } from "../../../expressions_helpers";
 import { find_function_by_name } from "../../../rendering_helpers";
 import {
@@ -106,7 +107,7 @@ fn _parse_fn_pointer_annotation(context: TypeContext, annotation: string) -> _Cl
         // parser preserves the verbatim annotation text, so the
         // form is `name: type`.
         let mut param_type_text: string = raw;
-        let colon_pos = index_of(raw, ":");
+        let colon_pos = find(raw, ":", 0);
         if colon_pos > 0 {
             param_type_text = trim_text(substring(raw, colon_pos + 1, raw.length));
         }

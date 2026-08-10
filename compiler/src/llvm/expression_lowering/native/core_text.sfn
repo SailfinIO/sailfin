@@ -3,10 +3,12 @@
 // Text and string utilities for expression lowering.
 //
 // Provides low-level string manipulation helpers used throughout the lowering
-// pipeline: `number_to_string`, `trim_text`, `matches_case_insensitive`,
-// `sanitize_symbol`, character classification, and LLVM type string inspection
-// (e.g., `is_union_llvm_type`, `parse_union_payload_types`).
-import { char_at, char_code, substring } from "../../../string_utils";
+// pipeline: `number_to_string`, `trim_text`, `matches_case_insensitive`, and
+// LLVM type string inspection (e.g., `is_union_llvm_type`,
+// `parse_union_payload_types`).
+import { char_at_index as char_at, char_code_at, substring } from "sfn/strings";
+
+import { sanitize_symbol } from "../../symbols";
 import { InterpolatedTemplateParse } from "../../types";
 import { is_identifier_part_char, is_identifier_start_char, starts_with } from "../../utils";
 import { split_array_elements } from "../splitting";
@@ -49,11 +51,11 @@ fn number_to_string(value: int) -> string {
 }
 
 fn lower_char_code(code: int) -> int {
-    let upper_a = char_code("A");
-    let upper_z = char_code("Z");
+    let upper_a = char_code_at("A", 0);
+    let upper_z = char_code_at("Z", 0);
     if code >= upper_a {
         if code <= upper_z {
-            let lower_a = char_code("a");
+            let lower_a = char_code_at("a", 0);
             return code + (lower_a - upper_a);
         }
     }
@@ -67,8 +69,8 @@ fn matches_case_insensitive(value: string, expected: string) -> boolean {
         if index >= value.length { break; }
         let value_ch = substring(value, index, index + 1);
         let expected_ch = substring(expected, index, index + 1);
-        let value_code = lower_char_code(char_code(value_ch));
-        let expected_code = lower_char_code(char_code(expected_ch));
+        let value_code = lower_char_code(char_code_at(value_ch, 0));
+        let expected_code = lower_char_code(char_code_at(expected_ch, 0));
         if value_code != expected_code { return false; }
         index += 1;
     }
@@ -103,12 +105,12 @@ fn trim_text(value: string) -> string {
 }
 
 fn is_trim_char(ch: string) -> boolean {
-    let code = char_code(ch);
+    let code = char_code_at(ch, 0);
     let mut _ret124: boolean = false;
-    if code == char_code(" ") { _ret124 = true; }
-    if code == char_code("\n") { _ret124 = true; }
-    if code == char_code("\r") { _ret124 = true; }
-    if code == char_code("\t") { _ret124 = true; }
+    if code == char_code_at(" ", 0) { _ret124 = true; }
+    if code == char_code_at("\n", 0) { _ret124 = true; }
+    if code == char_code_at("\r", 0) { _ret124 = true; }
+    if code == char_code_at("\t", 0) { _ret124 = true; }
     return _ret124;
 }
 
@@ -258,9 +260,9 @@ fn is_null_literal(text: string) -> boolean {
 }
 
 fn is_digit_char(ch: string) -> boolean {
-    let code = char_code(ch);
-    let zero = char_code("0");
-    let nine = char_code("9");
+    let code = char_code_at(ch, 0);
+    let zero = char_code_at("0", 0);
+    let nine = char_code_at("9", 0);
     let mut _ret125: boolean = false;
     if code >= zero {
         if code <= nine { _ret125 = true; }
@@ -269,7 +271,7 @@ fn is_digit_char(ch: string) -> boolean {
 }
 
 fn char_code_at_text(text: string, index: int) -> int {
-    return char_code(char_at(text, index));
+    return char_code_at(text, index);
 }
 
 fn is_integer_literal(text: string) -> boolean {
@@ -427,20 +429,22 @@ fn get_character_literal_value(text: string) -> int {
     if inner.length == 2 {
         if substring(inner, 0, 1) == "\\" {
             let escape = char_at(inner, 1);
-            let escape_code = char_code(escape);
-            if escape_code == char_code("n") { return char_code("\n"); } else if escape_code == char_code("r") {
-                return char_code("\r");
-            } else if escape_code == char_code("t") {
-                return char_code("\t");
-            } else if escape_code == char_code("\"") {
-                return char_code("\"");
-            } else if escape_code == char_code("\\") {
-                return char_code("\\");
+            let escape_code = char_code_at(escape, 0);
+            if escape_code == char_code_at("n", 0) {
+                return char_code_at("\n", 0);
+            } else if escape_code == char_code_at("r", 0) {
+                return char_code_at("\r", 0);
+            } else if escape_code == char_code_at("t", 0) {
+                return char_code_at("\t", 0);
+            } else if escape_code == char_code_at("\"", 0) {
+                return char_code_at("\"", 0);
+            } else if escape_code == char_code_at("\\", 0) {
+                return char_code_at("\\", 0);
             }
-            return char_code(escape);
+            return char_code_at(escape, 0);
         }
     }
-    return char_code(char_at(inner, 0));
+    return char_code_at(inner, 0);
 }
 
 fn make_string_constant_name(content: string) -> string {
@@ -468,7 +472,7 @@ fn compute_string_constant_hash(content: string) -> int {
     let mut index: int = 0;
     loop {
         if index >= content.length { break; }
-        let code = char_code(char_at(content, index));
+        let code = char_code_at(content, index);
         hash = hash * 33 + code;
         loop {
             if hash < modulus { break; }
@@ -542,27 +546,27 @@ fn unescape_string_literal(literal: string) -> string {
         if index >= inner.length { break; }
         let ch = char_at(inner, index);
         let _esc_next = index + 1;
-        if char_code(ch) == char_code("\\") {
+        if char_code_at(ch, 0) == char_code_at("\\", 0) {
             if _esc_next < inner.length {
                 let next = char_at(inner, _esc_next);
-                let next_code = char_code(next);
-                if next_code == char_code("n") {
+                let next_code = char_code_at(next, 0);
+                if next_code == char_code_at("n", 0) {
                     result = result + "\n";
                     index += 2;
                     continue;
-                } else if next_code == char_code("r") {
+                } else if next_code == char_code_at("r", 0) {
                     result = result + "\r";
                     index += 2;
                     continue;
-                } else if next_code == char_code("t") {
+                } else if next_code == char_code_at("t", 0) {
                     result = result + "\t";
                     index += 2;
                     continue;
-                } else if next_code == char_code("\"") {
+                } else if next_code == char_code_at("\"", 0) {
                     result = result + "\"";
                     index += 2;
                     continue;
-                } else if next_code == char_code("\\") {
+                } else if next_code == char_code_at("\\", 0) {
                     result = result + "\\";
                     index += 2;
                     continue;
@@ -709,51 +713,4 @@ fn resolve_interpolation_template(literal: string) -> InterpolatedTemplateParse 
         };
     }
     return parse_dollar_interpolated_template(inner_raw);
-}
-
-// Duplicated from string_utils to avoid cross-module function call issues in Stage2
-fn is_symbol_char(ch: string) -> boolean {
-    if ch.length == 0 { return false; }
-    if ch == "_" { return true; }
-    // `$` is a legal LLVM identifier character and the monomorphization
-    // mangling separator (#1869); admitting it changes only specialized names.
-    if ch == "$" { return true; }
-    let code = char_code(ch);
-    let lower_a = char_code("a");
-    let lower_z = char_code("z");
-    if code >= lower_a {
-        if code <= lower_z { return true; }
-    }
-    let upper_a = char_code("A");
-    let upper_z = char_code("Z");
-    if code >= upper_a {
-        if code <= upper_z { return true; }
-    }
-    let zero = char_code("0");
-    let nine = char_code("9");
-    if code >= zero {
-        if code <= nine { return true; }
-    }
-    return false;
-}
-
-fn sanitize_symbol(name: string) -> string {
-    if name.length == 0 { return "_"; }
-    let mut result: string = "";
-    let mut index: int = 0;
-    loop {
-        if index >= name.length { break; }
-        let ch = substring(name, index, index + 1);
-        if is_symbol_char(ch) { result = result + ch; }
-        index += 1;
-    }
-    if result.length == 0 { return "_"; }
-    let first = substring(result, 0, 1);
-    let first_code = char_code(first);
-    let zero = char_code("0");
-    let nine = char_code("9");
-    if first_code >= zero {
-        if first_code <= nine { result = "_" + result; }
-    }
-    return result;
 }

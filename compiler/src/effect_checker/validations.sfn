@@ -6,7 +6,8 @@ import {
     FunctionSignature,
     Program,
     Statement
-} from "../ast";
+} from "sfn/syntax";
+
 import { empty_import_symbols } from "../effect_imports";
 import { is_recognized_effect, is_universally_allowed_effect } from "../effect_taxonomy";
 import { _collect_nested_fns_in_block } from "./scope";

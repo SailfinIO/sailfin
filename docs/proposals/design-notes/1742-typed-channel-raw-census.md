@@ -26,7 +26,7 @@ Because the `emit_native_format.sfn` `Channel` arm already serializes a node wit
 `kind.length > 0` as exactly `channel:<kind>(<cap>)` — byte-identical to the text
 the shadow re-parser already lowers — **no new lowering arm, AST field, effect-checker
 arm, typecheck arm, or formatter arm was required.** The single change is in the
-parser (`compiler/src/parser/expressions.sfn`): the `channel` dispatch now commits
+parser (`compiler/capsules/syntax/src/parser/expressions.sfn`): the `channel` dispatch now commits
 on the `channel:<Ident>(` form, and `parse_channel_expression` consumes the optional
 `:Type` before the argument list.
 

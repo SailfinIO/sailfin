@@ -21,6 +21,7 @@
 // predecessor left behind. The trailing restores are a courtesy to tests in
 // other files (which never install a context of their own) and are
 // best-effort on the success path only.
+import { NativeFunction } from "sfn/ir";
 import { find } from "sfn/strings";
 
 import { emit_filesystem_intrinsic } from "../../src/llvm/expression_lowering/native/core_call_emission/filesystem_intrinsics";
@@ -34,7 +35,6 @@ import {
     StringConstant,
     TypeContext
 } from "../../src/llvm/types";
-import { NativeFunction } from "../../src/native_ir";
 
 // The default provider context installed by the driver: Linux/x86_64, every
 // trace/test-runner toggle off. Every test restores this before returning.

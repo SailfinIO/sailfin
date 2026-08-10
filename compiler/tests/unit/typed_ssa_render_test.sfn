@@ -20,8 +20,8 @@ import {
     new_module,
     term_cond_branch,
     term_return_value
-} from "../../src/typed_ssa";
-import { render_module } from "../../src/typed_ssa_render";
+} from "sfn/ir";
+import { render_module } from "sfn/ir";
 
 fn _build_choose_module() -> Module {
     let mut m: Module = new_module("demo", "demo");

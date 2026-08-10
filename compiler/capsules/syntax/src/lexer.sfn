@@ -1,0 +1,476 @@
+// compiler/capsules/syntax/src/lexer.sfn
+//
+// Early sketch of the Sailfin lexer written in Sailfin itself. The current
+// implementation is intentionally modest: it tokenises identifier-like runs and
+// individual punctuation characters, preserving whitespace and comments so the
+// parser can decide what to ignore.
+import { char_code_at } from "sfn/strings";
+
+import { Token, TokenKind, eof_token } from "./token";
+
+// Deliberately holds no `source` field. String-typed struct fields lower to a
+// bare `i8*` with no carried length (`map_struct_field_annotation`,
+// llvm/type_mapping.sfn), so passing one into a scalar `string` parameter emits
+// an `i8* -> {i8*, i64}` widening whose length-recovery leg is a `strnlen` over
+// the whole buffer from offset 0. `byte_at` runs once per input character, so
+// that made lexing Theta(n^2) in source size (SFN-631; measurement in
+// docs/proposals/design-notes/sfn-628-strnlen-recovery-tax.md).
+//
+// `lex`'s own `source: string` parameter is a scalar and carries its length, so
+// every helper call below threads that parameter directly and the widening
+// never happens. Keep it that way: do not reintroduce a `source` field here.
+struct LexerState {
+    source_len: int;
+    index: int;
+    line: int;
+    column: int;
+}
+
+fn lex(source: string) -> Token[] {
+    let length = source.length;
+    let state: LexerState = LexerState {
+        source_len: length as int,
+        index: 0,
+        line: 1,
+        column: 1
+    };
+
+    let tokens: Token[] = [];
+    let mut guard: int = 0;
+    let max_guard = length * 8 + 1000;
+
+    loop {
+        guard += 1;
+        if guard > max_guard { break; }
+        if state.index >= state.source_len { break; }
+
+        let ch = byte_at(source, state.index);
+
+        if is_whitespace(ch) {
+            let start_index = state.index;
+            let start_line = state.line;
+            let start_column = state.column;
+            loop {
+                if state.index >= state.source_len { break; }
+                if !is_whitespace(byte_at(source, state.index)) { break; }
+                if byte_at(source, state.index) == "\n" {
+                    state.index += 1;
+                    state.line += 1;
+                    state.column = 1;
+                } else {
+                    state.index += 1;
+                    state.column += 1;
+                }
+            }
+            let lexeme = slice(source, start_index, state.index);
+            tokens = append(tokens, Token {
+                kind: TokenKind.Whitespace(), lexeme: lexeme, line: start_line, column: start_column
+            });
+            continue;
+        }
+
+        if ch == "/" {
+            let has_next = state.index + 1 < state.source_len;
+            if has_next {
+                let next = byte_at(source, state.index + 1);
+                if next == "/" {
+                    let start_index = state.index;
+                    let start_line = state.line;
+                    let start_column = state.column;
+
+                    state.index += 2;
+                    state.column += 2;
+
+                    let mut comment_end: int = state.source_len;
+                    let mut scan_index: int = state.index;
+                    loop {
+                        if scan_index >= state.source_len { break; }
+                        let scan_character = byte_at(source, scan_index);
+                        let mut _if35: boolean = false;
+                        if scan_character == "\n" { _if35 = true; }
+                        if scan_character == "\r" { _if35 = true; }
+                        if _if35 {
+                            comment_end = scan_index;
+                            break;
+                        }
+                        scan_index += 1;
+                    }
+
+                    let lexeme = slice(source, start_index, comment_end);
+                    let consumed_columns: int = comment_end - state.index;
+                    state.index = comment_end;
+                    state.column += consumed_columns;
+                    tokens = append(tokens, Token {
+                        kind: TokenKind.Comment(), lexeme: lexeme, line: start_line, column: start_column
+                    });
+                    continue;
+                }
+                if next == "*" {
+                    let start_index = state.index;
+                    let start_line = state.line;
+                    let start_column = state.column;
+
+                    state.index += 2;
+                    state.column += 2;
+
+                    loop {
+                        if state.index >= state.source_len { break; }
+                        let _next_idx = state.index + 1;
+                        if byte_at(source, state.index) == "*" {
+                            if _next_idx < state.source_len {
+                                if byte_at(source, _next_idx) == "/" {
+                                    state.index += 2;
+                                    state.column += 2;
+                                    break;
+                                }
+                            }
+                        }
+                        if byte_at(source, state.index) == "\n" {
+                            state.index += 1;
+                            state.line += 1;
+                            state.column = 1;
+                        } else {
+                            state.index += 1;
+                            state.column += 1;
+                        }
+                    }
+
+                    let lexeme = slice(source, start_index, state.index);
+                    tokens = append(tokens, Token {
+                        kind: TokenKind.Comment(), lexeme: lexeme, line: start_line, column: start_column
+                    });
+                    continue;
+                }
+            }
+        }
+
+        if is_double_quote(ch) {
+            let start_index = state.index;
+            let start_line = state.line;
+            let start_column = state.column;
+
+            state.index += 1;
+            state.column += 1;
+
+            // Note: we only need to advance to the closing quote.
+            // The token stores the raw lexeme slice; we do not build an
+            // unescaped string here.
+            let escaped: boolean = false;
+
+            loop {
+                if state.index >= state.source_len { break; }
+                let current = byte_at(source, state.index);
+                if !escaped {
+                    if is_double_quote(current) {
+                        state.index += 1;
+                        state.column += 1;
+                        break;
+                    }
+                }
+                if !escaped {
+                    if is_backslash(current) {
+                        escaped = true;
+                        state.index += 1;
+                        state.column += 1;
+                        continue;
+                    }
+                }
+                if escaped { escaped = false; }
+
+                if current == "\n" {
+                    state.index += 1;
+                    state.line += 1;
+                    state.column = 1;
+                } else {
+                    state.index += 1;
+                    state.column += 1;
+                }
+            }
+
+            let lexeme = slice(source, start_index, state.index);
+            tokens = append(tokens, Token {
+                kind: TokenKind.StringLiteral(), lexeme: lexeme, line: start_line, column: start_column
+            });
+            continue;
+        }
+
+        if is_digit(ch) {
+            let start_index = state.index;
+            let start_line = state.line;
+            let start_column = state.column;
+
+            state.index += 1;
+            state.column += 1;
+
+            // Integer run: digits with optional `_` separators between digits.
+            loop {
+                if !_number_run_byte(source, state.source_len, state.index) {
+                    break;
+                }
+                state.index += 1;
+                state.column += 1;
+            }
+
+            // Optional fraction: `.` immediately followed by a digit run.
+            if state.index < state.source_len {
+                if byte_at(source, state.index) == "." {
+                    let mut _let43: boolean = false;
+                    if state.index + 1 < state.source_len {
+                        if is_digit(byte_at(source, state.index + 1)) {
+                            _let43 = true;
+                        }
+                    }
+                    let next_is_digit = _let43;
+                    if next_is_digit {
+                        state.index += 1;
+                        state.column += 1;
+                        loop {
+                            if !_number_run_byte(source, state.source_len, state.index) {
+                                break;
+                            }
+                            state.index += 1;
+                            state.column += 1;
+                        }
+                    }
+                }
+            }
+
+            // Optional scientific exponent: `e`/`E`, optional `+`/`-` sign, then
+            // a digit run. Consumed only when a digit actually follows, so `1e`
+            // (where `e` begins an identifier) keeps the literal as `1`.
+            if state.index < state.source_len {
+                let exp_marker = byte_at(source, state.index);
+                let mut _is_exp: boolean = false;
+                if exp_marker == "e" { _is_exp = true; }
+                if exp_marker == "E" { _is_exp = true; }
+                if _is_exp {
+                    let mut probe = state.index + 1;
+                    if probe < state.source_len {
+                        let sign = byte_at(source, probe);
+                        let mut _is_sign: boolean = false;
+                        if sign == "+" { _is_sign = true; }
+                        if sign == "-" { _is_sign = true; }
+                        if _is_sign { probe += 1; }
+                    }
+                    let mut _has_exp_digit: boolean = false;
+                    if probe < state.source_len {
+                        if is_digit(byte_at(source, probe)) {
+                            _has_exp_digit = true;
+                        }
+                    }
+                    if _has_exp_digit {
+                        state.index += 1;
+                        state.column += 1;
+                        let sign2 = byte_at(source, state.index);
+                        let mut _is_sign2: boolean = false;
+                        if sign2 == "+" { _is_sign2 = true; }
+                        if sign2 == "-" { _is_sign2 = true; }
+                        if _is_sign2 {
+                            state.index += 1;
+                            state.column += 1;
+                        }
+                        loop {
+                            if !_number_run_byte(source, state.source_len, state.index) {
+                                break;
+                            }
+                            state.index += 1;
+                            state.column += 1;
+                        }
+                    }
+                }
+            }
+
+            let lexeme = slice(source, start_index, state.index);
+            tokens = append(tokens, Token {
+                kind: TokenKind.NumberLiteral(), lexeme: lexeme, line: start_line, column: start_column
+            });
+            continue;
+        }
+
+        if is_identifier_start(ch) {
+            let start = state.index;
+            let start_line = state.line;
+            let start_column = state.column;
+            state.index += 1;
+            state.column += 1;
+            loop {
+                if state.index >= state.source_len { break; }
+                if !is_identifier_part(byte_at(source, state.index)) { break; }
+                state.index += 1;
+                state.column += 1;
+            }
+            let value = slice(source, start, state.index);
+            let mut _if36: boolean = false;
+            if value == "true" { _if36 = true; }
+            if value == "false" { _if36 = true; }
+            if _if36 {
+                tokens = append(tokens, Token {
+                    kind: TokenKind.BooleanLiteral(), lexeme: value, line: start_line, column: start_column
+                });
+            } else {
+                tokens = append(tokens, Token {
+                    kind: TokenKind.Identifier(), lexeme: value, line: start_line, column: start_column
+                });
+            }
+            continue;
+        }
+
+        let start_line = state.line;
+        let start_column = state.column;
+        let _lex_next = state.index + 1;
+        let _lex_next2 = state.index + 2;
+        let mut lexeme = slice(source, state.index, _lex_next);
+        if _lex_next < state.source_len {
+            let pair = slice(source, state.index, _lex_next2);
+            // Fast-path: keep <= / >= stable.
+            let mut _if37: boolean = false;
+            if pair == "<=" { _if37 = true; }
+            if pair == ">=" { _if37 = true; }
+            if _if37 {
+                lexeme = pair;
+                state.index += 2;
+                state.column += 2;
+                tokens = append(tokens, Token {
+                    kind: TokenKind.Symbol(), lexeme: lexeme, line: start_line, column: start_column
+                });
+                continue;
+            }
+            if is_two_char_symbol(pair) {
+                lexeme = pair;
+                state.index += 2;
+                state.column += 2;
+                tokens = append(tokens, Token {
+                    kind: TokenKind.Symbol(), lexeme: lexeme, line: start_line, column: start_column
+                });
+                continue;
+            }
+        }
+
+        state.index += 1;
+        if ch == "\n" {
+            state.line += 1;
+            state.column = 1;
+        } else { state.column += 1; }
+
+        tokens = append(tokens, Token {
+            kind: TokenKind.Symbol(), lexeme: lexeme, line: start_line, column: start_column
+        });
+    }
+
+    tokens = append(tokens, eof_token(state.line, state.column));
+    return tokens;
+}
+
+fn is_whitespace(ch: string) -> boolean {
+    let mut _ret38: boolean = false;
+    if ch == " " { _ret38 = true; }
+    if ch == "\t" { _ret38 = true; }
+    if ch == "\n" { _ret38 = true; }
+    if ch == "\r" { _ret38 = true; }
+    return _ret38;
+}
+
+fn is_identifier_start(ch: string) -> boolean {
+    let mut _ret39: boolean = false;
+    if is_letter(ch) { _ret39 = true; }
+    if ch == "_" { _ret39 = true; }
+    return _ret39;
+}
+
+fn is_identifier_part(ch: string) -> boolean {
+    let mut _ret40: boolean = false;
+    if is_identifier_start(ch) { _ret40 = true; }
+    if is_digit(ch) { _ret40 = true; }
+    return _ret40;
+}
+
+fn is_letter(ch: string) -> boolean {
+    let c = char_code_at(ch, 0);
+    let mut _ret41: boolean = false;
+    if c >= 65 {
+        if c <= 90 { _ret41 = true; }
+    }
+    if c >= 97 {
+        if c <= 122 { _ret41 = true; }
+    }
+    return _ret41;
+}
+
+fn is_digit(ch: string) -> boolean {
+    let c = char_code_at(ch, 0);
+    let mut _ret42: boolean = false;
+    if c >= 48 {
+        if c <= 57 { _ret42 = true; }
+    }
+    return _ret42;
+}
+
+// True when the numeric scanner should consume the byte at `index`: a digit,
+// or a `_` digit separator that sits between two digits (`1_000`). A trailing
+// `_` not followed by a digit is left to start an identifier (`1_foo`).
+fn _number_run_byte(source: string, source_len: int, index: int) -> boolean {
+    if index >= source_len { return false; }
+    let ch = byte_at(source, index);
+    if is_digit(ch) { return true; }
+    if ch == "_" {
+        if index + 1 < source_len {
+            if is_digit(byte_at(source, index + 1)) { return true; }
+        }
+    }
+    return false;
+}
+
+fn is_double_quote(ch: string) -> boolean { return ch == "\""; }
+
+fn is_backslash(ch: string) -> boolean { return ch == "\\"; }
+
+fn slice(text: string, start: int, end: int) -> string {
+    let text_len = text.length;
+    let mut safe_start = start;
+    let mut safe_end = end;
+    if safe_start < 0 { safe_start = 0; }
+    if safe_end < safe_start { safe_end = safe_start; }
+    if safe_start > text_len { safe_start = text_len; }
+    if safe_end > text_len { safe_end = text_len; }
+    return substring_unchecked(text, safe_start, safe_end);
+}
+
+fn byte_at(text: string, index: int) -> string {
+    let text_len = text.length;
+    if text_len == 0 { return ""; }
+    if index < 0 { return ""; }
+    if index >= text_len { return ""; }
+    return substring_unchecked(text, index, index + 1);
+}
+
+fn append(tokens: Token[], token: Token) -> Token[] {
+    tokens.push(token);
+    return tokens;
+}
+
+fn is_two_char_symbol(value: string) -> boolean {
+    if value == "->" { return true; }
+    if value == "=>" { return true; }
+    if value == "==" { return true; }
+    if value == "!=" { return true; }
+    if value == "<=" { return true; }
+    if value == ">=" { return true; }
+    if value == "&&" { return true; }
+    if value == "||" { return true; }
+    if value == "<<" { return true; }
+    if value == ">>" { return true; }
+    if value == ".." { return true; }
+    // Compound assignment operators (#1627 Part D). Tokenizing these as
+    // single symbols lets the expression parser's assignment seam recognize
+    // `x += 1` as `Assignment{operator:"+="}` instead of lexing `+` then `=`
+    // — which made the binary `+` climb fail on the trailing `=` and degrade
+    // the whole statement to an effect-blind `Raw`. The lowering
+    // `parse_assignment_expression` is a string-scan (not token-based), so it
+    // is unaffected by this tokenization change. `%=` is intentionally omitted
+    // (the lowering compound-assignment parser handles only `+= -= *= /=`).
+    if value == "+=" { return true; }
+    if value == "-=" { return true; }
+    if value == "*=" { return true; }
+    if value == "/=" { return true; }
+    return false;
+}

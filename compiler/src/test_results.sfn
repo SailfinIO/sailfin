@@ -36,7 +36,8 @@
 // schema/kind/status are treated as passthrough diagnostics and skipped —
 // never fatal, so a partially-written stream still yields whatever prefix
 // of records is well-formed.
-import { split_lines, split_text } from "./native_ir_utils_text";
+import { split_lines, split_text } from "sfn/ir";
+
 import { char_code_at_text, substring } from "./string_utils";
 
 struct TestResultRecord {

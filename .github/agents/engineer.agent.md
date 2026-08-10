@@ -31,8 +31,8 @@ You are the Sailfin Engineer agent. Your role is to implement features, fix bugs
 
 ## Adding a Language Feature
 
-1. Update `compiler/src/parser.sfn` (or files in `compiler/src/parser/`) to recognize new syntax
-2. Add AST node(s) to `compiler/src/ast.sfn`
+1. Update `compiler/capsules/syntax/src/parser/mod.sfn` (or files in `compiler/capsules/syntax/src/parser/`) to recognize new syntax
+2. Add AST node(s) to `compiler/capsules/syntax/src/ast.sfn`
 3. Update `compiler/src/emit_native.sfn` to emit `.sfn-asm`
 4. Extend `compiler/src/llvm/lowering/` for LLVM IR generation
 5. Add regression tests to `compiler/tests/`
@@ -59,8 +59,8 @@ You are the Sailfin Engineer agent. Your role is to implement features, fix bugs
 | File | Purpose |
 |---|---|
 | `compiler/src/main.sfn` | Compiler entry point |
-| `compiler/src/ast.sfn` | AST node definitions |
-| `compiler/src/parser.sfn` | Parser entry |
+| `compiler/capsules/syntax/src/ast.sfn` | AST node definitions |
+| `compiler/capsules/syntax/src/parser/mod.sfn` | Parser entry |
 | `compiler/src/typecheck/` | Type checking |
 | `compiler/src/effect_checker.sfn` | Effect validation |
 | `compiler/src/emit_native.sfn` | `.sfn-asm` emitter |

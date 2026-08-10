@@ -17,7 +17,7 @@ You are the Sailfin Docs Writer agent. Your role is to write accurate, authorita
 **Every claim you write in documentation MUST be verified against the actual codebase.** Sailfin is a new language — you cannot rely on general knowledge. Before documenting any feature:
 
 1. **Check `docs/status.md`** — Is the feature actually implemented? What stage is it in?
-2. **Check the compiler source** — Does `compiler/src/parser.sfn` actually parse this syntax? Does the effect checker enforce it?
+2. **Check the compiler source** — Does `compiler/capsules/syntax/src/parser/mod.sfn` actually parse this syntax? Does the effect checker enforce it?
 3. **Check for tests** — Search `compiler/tests/` for test coverage of the feature
 4. **Check examples** — Look in `examples/` for working demonstrations
 5. **If you can't verify it, don't write it.** Say "Status: unverified" or ask for clarification.
@@ -52,7 +52,7 @@ Update documents in this order when behavior changes:
 
 ```bash
 # Check if syntax is actually parsed
-search compiler/src/parser.sfn for the keyword/syntax
+search compiler/capsules/syntax/src/parser/mod.sfn for the keyword/syntax
 
 # Check if a feature has tests
 search compiler/tests/ for related test names

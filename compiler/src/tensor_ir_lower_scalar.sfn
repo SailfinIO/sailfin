@@ -3,8 +3,6 @@
 // Deterministic scalar-reference exit for shape-typed tensor IR. It emits
 // ordinary native-IR loops and executes the same graph as the CPU numerical
 // oracle. See SFEP-0053 and SFN-427.
-import { int_to_string } from "sfn/strings";
-
 import {
     TensorFunction,
     TensorModule,
@@ -12,9 +10,10 @@ import {
     TensorType,
     tensor_shape_product,
     tensor_shapes_equal
-} from "./tensor_ir";
-import { run_tensor_fusion_pass } from "./tensor_ir_fusion";
-import { verify_tensor_function } from "./tensor_ir_verify";
+} from "sfn/ir";
+import { run_tensor_fusion_pass } from "sfn/ir";
+import { verify_tensor_function } from "sfn/ir";
+import { int_to_string } from "sfn/strings";
 
 struct TensorBuffer {
     shape: int[];

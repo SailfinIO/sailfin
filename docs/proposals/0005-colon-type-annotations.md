@@ -60,11 +60,11 @@ struct Point {
 
 ### Parser enforces separator roles
 
-`consume_annotation_separator()` in `compiler/src/parser/declarations/syntax.sfn`
+`consume_annotation_separator()` in `compiler/capsules/syntax/src/parser/declarations/syntax.sfn`
 accepts only `:` for parameter, variable, and field annotations.
 `consume_return_type_separator()` in the same file accepts only `->` for
 function return types. `expression_tokens_consume_type_separator()` in
-`compiler/src/parser/expressions.sfn` uses boolean flags `accept_colon` and
+`compiler/capsules/syntax/src/parser/expressions.sfn` uses boolean flags `accept_colon` and
 `accept_arrow` to select the correct separator per context.
 
 The AST does not store which separator was parsed — it is discarded at parse
@@ -180,7 +180,7 @@ containing `:` in cached `->` IR (e.g., `handler -> fn(req: Request) -> Response
 
 **Native IR parsers** (accept both, earliest wins):
 
-- `compiler/src/native_ir_utils_parse.sfn` — `parse_struct_field_line`,
+- `compiler/capsules/ir/src/native_ir_utils_parse.sfn` — `parse_struct_field_line`,
   `parse_enum_variant_field`, `parse_parameter_entry`.
 - `compiler/src/llvm/lowering/lowering_recovery.sfn` — recovery parser for
   `.param` and `.field` lines.

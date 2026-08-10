@@ -1,7 +1,8 @@
 // compiler/src/llvm/expression_lowering/native/core_call_resolution/parsed_method_dispatch.sfn
 //
 // Parsed member-access dispatch for structs, interfaces, helpers, and arrays.
-import { NativeFunction } from "../../../../native_ir";
+import { NativeFunction } from "sfn/ir";
+
 import { is_simple_identifier } from "../../../expressions_helpers";
 import { find_function_by_name_or_import } from "../../../rendering_helpers";
 import { find_runtime_helper, make_concat_descriptor, make_push_descriptor } from "../../../runtime_helpers/mod";

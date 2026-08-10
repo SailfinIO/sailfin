@@ -126,7 +126,7 @@ test "declare-loop consumer module emits only well-formed declares" ![io] {
 }
 
 test "heavy expression module emits only well-formed declares" ![io] {
-    let ir = _emit_one("heavy", "compiler/src/parser/expressions/mod.sfn");
+    let ir = _emit_one("heavy", "compiler/capsules/syntax/src/parser/expressions/mod.sfn");
     assert ir != "EMIT_FAILED";
     assert _declares_wellformed(ir);
 }
@@ -152,7 +152,7 @@ test "repeated declare-consumer emit-sweep is byte-identical with clean declares
 }
 
 test "repeated heavy-module emit-sweep is byte-identical with clean declares" ![io] {
-    let src = "compiler/src/parser/expressions/mod.sfn";
+    let src = "compiler/capsules/syntax/src/parser/expressions/mod.sfn";
     let base = _emit_one("heavy_base", src);
     assert base != "EMIT_FAILED";
     assert _declares_wellformed(base);

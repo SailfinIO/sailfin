@@ -55,7 +55,7 @@ self-hosting build nothing.
 
 ### 2.1 The status quo and its frictions
 
-The current lambda parser (`compiler/src/parser/expressions.sfn:1261`,
+The current lambda parser (`compiler/capsules/syntax/src/parser/expressions.sfn:1261`,
 `parse_lambda_expression`) recognizes a lambda by a leading `fn` identifier
 (Sailfin has no keyword tokens; `fn` lexes as `Identifier`). Dispatch is a
 single keyword check at `expressions.sfn:389–402`: if the primary-expression
@@ -124,7 +124,7 @@ be evaluated against them, not against a clean slate:
 - **`=>` is the match-arm separator (shipped).** The lexer produces `=>`
   (`lexer.sfn:448`), but it is **already consumed** — as the pattern→body
   separator in `match` arms. Confirmed in the parser
-  (`compiler/src/parser/token_utils.sfn:545`, `_capture_match_pattern`) and in
+  (`compiler/capsules/syntax/src/parser/token_utils.sfn:545`, `_capture_match_pattern`) and in
   the shipped spec: `reference/spec/04-statements.md:46–48`,
   `08-patterns.md:13–17`, `12-result-and-errors.md:50–97`
   (`Pattern => expr`). `=>` is **not** consumed anywhere for lambdas today. This
@@ -408,12 +408,12 @@ change); this SFEP simply records the decision and rationale.
 - Issue #690 — the open design question this SFEP resolves.
 - SFEP-0005 (`docs/proposals/0005-colon-type-annotations.md`, Implemented) — the
   `:`/`->` reform constraining the lambda head and the kept return arrow.
-- `compiler/src/parser/expressions.sfn:1261` (`parse_lambda_expression`),
+- `compiler/capsules/syntax/src/parser/expressions.sfn:1261` (`parse_lambda_expression`),
   `:389–402` (keyword dispatch).
-- `compiler/src/parser/token_utils.sfn:545` — `=>` consumed as the match-arm
+- `compiler/capsules/syntax/src/parser/token_utils.sfn:545` — `=>` consumed as the match-arm
   separator (the central collision).
-- `compiler/src/ast.sfn:78–82` — `Expression.Lambda` node (no effect field).
-- `compiler/src/lexer.sfn:448` — `=>` already lexed.
+- `compiler/capsules/syntax/src/ast.sfn:78–82` — `Expression.Lambda` node (no effect field).
+- `compiler/capsules/syntax/src/lexer.sfn:448` — `=>` already lexed.
 - `site/src/content/docs/docs/reference/grammar.md:220–222` —
   `Expression`/`LambdaExpression` rules.
 - Shipped `=>` (match arms): `reference/spec/04-statements.md:46`,
@@ -469,7 +469,7 @@ lambda chapter when that PR lands and self-hosts.
 ## 11. Status — Implemented (2026-06-27, #1683)
 
 Shipped end-to-end and self-hosts. `parse_lambda_expression`
-(`compiler/src/parser/expressions.sfn`) accepts `fn(...) => expr` after the
+(`compiler/capsules/syntax/src/parser/expressions.sfn`) accepts `fn(...) => expr` after the
 head, desugaring the expression body to a single-`return` `Block` so
 typecheck / effects / emit / lowering see a normal block (no AST node added).
 The fragile return-type capture was rerouted through the real type parser

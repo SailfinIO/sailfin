@@ -33,19 +33,31 @@ import {
     DerIntResult,
     DerLimits,
     DerOutcome,
+    DerTextResult,
     DerTlv,
     der_check_structure,
+    der_context_number,
     der_default_limits,
     der_first_child,
     der_integer_bytes,
     der_integer_small,
+    der_is_constructed,
+    der_is_context,
     der_next_sibling,
+    der_oid_string,
     der_read_tlv,
+    der_tag_null,
+    der_tag_oid,
     der_tag_sequence
 } from "./der";
-import { ecdsa_p256_verify_sha256 } from "./ecdsa";
+import { ecdsa_p256_verify_sha256, ecdsa_p384_verify_sha384 } from "./ecdsa";
 import { ed25519_verify } from "./ed25519";
-import { rsa_pkcs1_v1_5_verify_sha256, rsa_pkcs1_v1_5_verify_sha384 } from "./rsa";
+import {
+    rsa_pkcs1_v1_5_verify_sha256,
+    rsa_pkcs1_v1_5_verify_sha384,
+    rsa_pss_verify_sha256,
+    rsa_pss_verify_sha384
+} from "./rsa";
 import {
     X509Certificate,
     X509Extension,
@@ -71,21 +83,55 @@ fn x509_verify_oid_sha256_rsa() -> string { return "1.2.840.113549.1.1.11"; }
 
 fn x509_verify_oid_sha384_rsa() -> string { return "1.2.840.113549.1.1.12"; }
 
+// ecdsa-with-SHA384 (RFC 5758 §3.2). It lives here rather than in x509.sfn for
+// the same reason the RSA signature OIDs do: x509.sfn only needed the
+// key-algorithm OID, and this one is dispatched on nowhere else.
+fn x509_verify_oid_ecdsa_p384_sha384() -> string {
+    return "1.2.840.10045.4.3.3";
+}
+
+// id-RSASSA-PSS (RFC 4055 3.1). Unlike every other signature OID this module
+// dispatches on, a PSS AlgorithmIdentifier is not self-describing: the hash,
+// the mask generation function and the salt length live in the `parameters`
+// field, so the one OID names a whole family of profiles. `rsa_pss_verify_*`
+// implements exactly one member of that family — MGF1 over the signature
+// hash, salt length equal to the digest length — which is why the parameters
+// are parsed and matched rather than assumed. Verifying under assumed
+// parameters would report a profile as checked that was never checked, the
+// precise way a signature check becomes decorative (SFN-824).
+fn x509_verify_oid_rsassa_pss() -> string { return "1.2.840.113549.1.1.10"; }
+
+// id-mgf1 (RFC 4055 2.1), the only mask generation function defined for PSS,
+// and the two SHA-2 digest OIDs whose profiles this capsule can verify.
+fn _x509_verify_oid_mgf1() -> string { return "1.2.840.113549.1.1.8"; }
+
+fn _x509_verify_oid_sha256() -> string { return "2.16.840.1.101.3.4.2.1"; }
+
+fn _x509_verify_oid_sha384() -> string { return "2.16.840.1.101.3.4.2.2"; }
+
 // id-ecPublicKey. Note this OID identifies the key *type* only: P-256 and
 // P-384 keys carry the same one and differ solely in the algorithm
 // parameters, which x509.sfn does not expose. Curve agreement is therefore
 // enforced downstream, and by more than one mechanism — worth spelling out,
 // because the obvious argument is not the complete one:
 //
-//   * a differently-sized curve (P-384) fails `_p256_point_decode`'s exact
-//     65/33-byte SEC1 length check (`p256.sfn:410,433`), and its
-//     `ecdsa-with-SHA384` signature OID is refused as unsupported anyway;
-//   * a SAME-SIZED foreign curve (secp256k1, brainpoolP256r1 — both 65 bytes
-//     uncompressed) passes that length check, and is rejected instead by
-//     `_p256_is_on_curve` and the `x >= p` coordinate check.
+//   * a MISMATCHED NIST curve is caught by the SEC1 length check of whichever
+//     verifier the signature OID selected: `ecdsa-with-SHA256` routes to
+//     `_p256_point_decode`, which requires exactly 65/33 bytes, and
+//     `ecdsa-with-SHA384` routes to `_p384_point_decode`, which requires
+//     exactly 97/49 bytes. A P-384 key under a SHA-256 signature and a P-256
+//     key under a SHA-384 signature therefore both fail on width;
+//   * a SAME-SIZED foreign curve (secp256k1 or brainpoolP256r1 against P-256,
+//     brainpoolP384r1 against P-384) passes that length check, and is rejected
+//     instead by the on-curve test and the `x >= p` coordinate check in the
+//     selected curve's decoder.
 //
 // The length check alone would not be sufficient, so do not simplify this to
-// "the length check handles it".
+// "the length check handles it". Note also what this does NOT check: the
+// namedCurve OID in the SPKI parameters is still not parsed, so the signature
+// algorithm alone selects the arithmetic. That is sound only because the two
+// mechanisms above reject every disagreement; it is not a claim that the
+// certificate's declared curve was honoured (SFN-811).
 fn x509_verify_oid_ec_public_key() -> string { return "1.2.840.10045.2.1"; }
 
 // ── Outcome codes. Stable strings so a caller (and a test) can distinguish
@@ -162,6 +208,54 @@ fn _chain_err(code: string, message: string) -> X509ChainResult {
         depth: 0,
         anchor_subject_cn: ""
     };
+}
+
+// Maximum characters of a certificate-supplied OID rendered into a
+// diagnostic. `der_oid_string` (der.sfn:399) builds the dotted form only from
+// decoded integers joined by ".", so it can never carry raw certificate bytes
+// — but its length is bounded only by the certificate size, so a crafted run
+// of single-byte arcs would otherwise render megabytes into an error string.
+// 64 characters holds every registered signature-algorithm OID with room over.
+fn _x509_verify_max_oid_text() -> int { return 64; }
+
+fn _is_oid_char(c: string) -> boolean {
+    if c == "." { return true; }
+    return c == "0" || c == "1" || c == "2" || c == "3" || c == "4" || c == "5"
+        || c == "6"
+        || c == "7"
+        || c == "8"
+        || c == "9";
+}
+
+// Render an untrusted OID for a diagnostic. The parser already guarantees
+// dotted decimal, so re-checking the character set is defence in depth: it
+// keeps a future parser change from turning this into a byte-echo path.
+// Bounded and total — never returns certificate-controlled length or bytes.
+fn _oid_for_message(oid: string) -> string {
+    if oid.length == 0 { return "(absent)"; }
+    let mut limit: int = oid.length;
+    let mut truncated: boolean = false;
+    if limit > _x509_verify_max_oid_text() {
+        limit = _x509_verify_max_oid_text();
+        truncated = true;
+    }
+    let mut i: int = 0;
+    loop {
+        if i >= limit { break; }
+        if !_is_oid_char(char_at(oid, i)) { return "(malformed)"; }
+        i += 1;
+    }
+    if truncated { return substring(oid, 0, limit) + "..."; }
+    return oid;
+}
+
+// Four dispatch arms accept a signature OID but cannot pair it with the
+// issuer's key algorithm. Both OIDs belong in the text: either one alone
+// leaves the reader guessing which side of the pair was the problem.
+fn _pair_detail(algorithm: string, issuer_spki_algorithm: string) -> string {
+    return "x509_verify: signature algorithm " + _oid_for_message(algorithm)
+        + " does not pair with issuer key algorithm "
+        + _oid_for_message(issuer_spki_algorithm);
 }
 
 fn _bytes_to_hex(bytes: int[]) -> string {
@@ -304,52 +398,301 @@ fn x509_rsa_public_key_from_spki(spki_key: int[]) -> RsaPublicKey {
     };
 }
 
-// Verify `subject`'s signature under `issuer`'s public key. Returns "" when
-// the signature is good, otherwise the rejection code. The signed input is
-// always the subject's tbsCertificate TLV verbatim (RFC 5280 4.1.1.3).
-fn _verify_link(issuer: X509Certificate, subject: X509Certificate) -> string {
+// ── RSASSA-PSS parameter matching (RFC 4055 3.1) ──
+//
+//   RSASSA-PSS-params ::= SEQUENCE {
+//       hashAlgorithm    [0] HashAlgorithm    DEFAULT sha1,
+//       maskGenAlgorithm [1] MaskGenAlgorithm DEFAULT mgf1SHA1,
+//       saltLength       [2] INTEGER          DEFAULT 20,
+//       trailerField     [3] TrailerField     DEFAULT trailerFieldBC }
+//
+// The result of matching a certificate's parameters against the single
+// profile family `rsa_pss_verify_sha256`/`_sha384` implement. `sha384`
+// selects the verifier; `reason` is non-empty exactly when `ok` is false and
+// names the parameter that disqualified the certificate. Every `reason` is a
+// fixed string chosen here, never bytes echoed from the certificate, so it is
+// safe to put in a diagnostic without the sanitising `_oid_for_message` takes.
+struct _PssProfile {
+    ok: boolean;
+    reason: string;
+    sha384: boolean;
+}
+
+fn _pss_reject(reason: string) -> _PssProfile {
+    return _PssProfile { ok: false, reason: reason, sha384: false };
+}
+
+fn _pss_text_err() -> DerTextResult {
+    return DerTextResult {
+        ok: false,
+        error: "x509_verify: malformed RSASSA-PSS parameters",
+        value: ""
+    };
+}
+
+// Parse a `HashAlgorithm` AlgorithmIdentifier filling exactly `[off, end)`
+// and return its algorithm OID. RFC 4055 2.1 wants the SHA-2 identifiers to
+// carry a NULL parameters field, but absent is also in the wild; both are
+// accepted and anything else is refused, because a parameter we did not read
+// is a parameter we did not check.
+fn _pss_hash_oid(buf: int[], off: int, end: int) -> DerTextResult {
+    let seq: DerTlv = der_read_tlv(buf, off, end);
+    if !seq.ok { return _pss_text_err(); }
+    if seq.tag != der_tag_sequence() { return _pss_text_err(); }
+    if seq.end_off != end { return _pss_text_err(); }
+    let oid_tlv: DerTlv = der_read_tlv(buf, seq.content_off, seq.end_off);
+    if !oid_tlv.ok { return _pss_text_err(); }
+    if oid_tlv.tag != der_tag_oid() { return _pss_text_err(); }
+    if oid_tlv.end_off != seq.end_off {
+        let param: DerTlv = der_read_tlv(buf, oid_tlv.end_off, seq.end_off);
+        if !param.ok { return _pss_text_err(); }
+        if param.tag != der_tag_null() { return _pss_text_err(); }
+        if param.content_len != 0 { return _pss_text_err(); }
+        if param.end_off != seq.end_off { return _pss_text_err(); }
+    }
+    return der_oid_string(buf, oid_tlv);
+}
+
+// Decide whether `params` — the signature AlgorithmIdentifier's `parameters`
+// field verbatim — names a profile this capsule can actually verify.
+//
+// Fail-closed in both directions: an unparseable or unsupported profile is
+// rejected, and so is a *defaulted* one — for the three fields whose default
+// is the SHA-1 profile. RFC 4055 3.1 defaults hashAlgorithm to sha1,
+// maskGenAlgorithm to mgf1SHA1 and saltLength to 20, so omitting any of those
+// is not "unspecified" but a concrete SHA-1 declaration this capsule does not
+// implement and must not silently read as SHA-256.
+//
+// trailerField is the deliberate exception: its default, trailerFieldBC(1),
+// is the only value RFC 4055 defines and the one this capsule supports, and
+// X.690 11.5 requires DER to *omit* a component equal to its DEFAULT — so
+// every conforming PSS certificate omits [3]. Requiring it present would
+// reject every one of them.
+fn _pss_profile(params: int[]) -> _PssProfile {
+    if params.length == 0 {
+        return _pss_reject("absent parameters default to SHA-1 (RFC 4055 3.1)");
+    }
+    let seq: DerTlv = der_read_tlv(params, 0, params.length);
+    if !seq.ok { return _pss_reject("malformed parameters"); }
+    if seq.tag != der_tag_sequence() {
+        return _pss_reject("malformed parameters");
+    }
+    if seq.end_off != params.length {
+        return _pss_reject("malformed parameters");
+    }
+
+    let mut hash_oid: string = "";
+    let mut mgf_hash_oid: string = "";
+    let mut salt_length: int = -1;
+    let mut trailer_field: int = 1;
+    let mut highest: int = -1;
+
+    let mut child: DerTlv = der_first_child(params, seq);
+    loop {
+        if !child.ok {
+            // der_next_sibling signals exhaustion with ok:false and an empty
+            // error, which is not a parse failure.
+            if child.error.length != 0 {
+                return _pss_reject("malformed parameters");
+            }
+            break;
+        }
+        // RFC 4055's ASN.1 module is DEFINITIONS EXPLICIT TAGS, so each of
+        // [0]-[3] is a constructed wrapper around one inner TLV. Accepting the
+        // primitive form (0x80-0x83) would be accepting a non-DER encoding
+        // this parser then goes on to describe as EXPLICIT.
+        if !der_is_context(child.tag) || !der_is_constructed(child.tag) {
+            return _pss_reject("malformed parameters");
+        }
+        let number: int = der_context_number(child.tag);
+        // The fields are OPTIONAL, so any may be omitted, but DER admits each
+        // at most once and only in ascending tag order. Enforcing that stops
+        // a second [2] from overwriting the salt length the first one set.
+        if number <= highest { return _pss_reject("malformed parameters"); }
+        highest = number;
+
+        if number == 0 {
+            let hash_res: DerTextResult = _pss_hash_oid(params, child.content_off, child.end_off);
+            if !hash_res.ok {
+                return _pss_reject("malformed hash algorithm");
+            }
+            hash_oid = hash_res.value;
+        } else {
+            if number == 1 {
+                let mgf_seq: DerTlv = der_read_tlv(params, child.content_off, child.end_off);
+                if !mgf_seq.ok {
+                    return _pss_reject("malformed mask generation function");
+                }
+                if mgf_seq.tag != der_tag_sequence() {
+                    return _pss_reject("malformed mask generation function");
+                }
+                if mgf_seq.end_off != child.end_off {
+                    return _pss_reject("malformed mask generation function");
+                }
+                let mgf_oid_tlv: DerTlv = der_read_tlv(params, mgf_seq.content_off, mgf_seq.end_off);
+                if !mgf_oid_tlv.ok {
+                    return _pss_reject("malformed mask generation function");
+                }
+                if mgf_oid_tlv.tag != der_tag_oid() {
+                    return _pss_reject("malformed mask generation function");
+                }
+                let mgf_oid_res: DerTextResult = der_oid_string(params, mgf_oid_tlv);
+                if !mgf_oid_res.ok {
+                    return _pss_reject("malformed mask generation function");
+                }
+                if mgf_oid_res.value != _x509_verify_oid_mgf1() {
+                    return _pss_reject("mask generation function is not MGF1");
+                }
+                // MGF1's own parameters are its hash AlgorithmIdentifier, and
+                // they are not optional here: an absent one would again mean
+                // SHA-1 by default.
+                let mgf_hash_res: DerTextResult = _pss_hash_oid(params, mgf_oid_tlv.end_off, mgf_seq.end_off);
+                if !mgf_hash_res.ok {
+                    return _pss_reject("malformed MGF1 hash algorithm");
+                }
+                mgf_hash_oid = mgf_hash_res.value;
+            } else {
+                if number == 2 {
+                    let salt_tlv: DerTlv = der_read_tlv(params, child.content_off, child.end_off);
+                    if !salt_tlv.ok {
+                        return _pss_reject("malformed salt length");
+                    }
+                    if salt_tlv.end_off != child.end_off {
+                        return _pss_reject("malformed salt length");
+                    }
+                    let salt_res: DerIntResult = der_integer_small(params, salt_tlv);
+                    if !salt_res.ok {
+                        return _pss_reject("malformed salt length");
+                    }
+                    salt_length = salt_res.value;
+                } else {
+                    if number == 3 {
+                        let trailer_tlv: DerTlv = der_read_tlv(params, child.content_off, child.end_off);
+                        if !trailer_tlv.ok {
+                            return _pss_reject("malformed trailer field");
+                        }
+                        if trailer_tlv.end_off != child.end_off {
+                            return _pss_reject("malformed trailer field");
+                        }
+                        let trailer_res: DerIntResult = der_integer_small(params, trailer_tlv);
+                        if !trailer_res.ok {
+                            return _pss_reject("malformed trailer field");
+                        }
+                        trailer_field = trailer_res.value;
+                    } else {
+                        return _pss_reject("unrecognised parameter field");
+                    }
+                }
+            }
+        }
+        child = der_next_sibling(params, seq, child);
+    }
+
+    if hash_oid.length == 0 {
+        return _pss_reject("hash algorithm defaults to SHA-1 (RFC 4055 3.1)");
+    }
+    if mgf_hash_oid.length == 0 {
+        return _pss_reject("mask generation function defaults to MGF1-SHA-1 (RFC 4055 3.1)");
+    }
+    if salt_length < 0 {
+        return _pss_reject("salt length defaults to 20 (RFC 4055 3.1)");
+    }
+    // trailerFieldBC(1) is the only value RFC 4055 defines, and the 0xbc
+    // trailer is the one `_emsa_pss_verify` checks for.
+    if trailer_field != 1 { return _pss_reject("unsupported trailer field"); }
+    if mgf_hash_oid != hash_oid {
+        return _pss_reject("MGF1 hash differs from the signature hash");
+    }
+    if hash_oid == _x509_verify_oid_sha256() {
+        if salt_length != 32 {
+            return _pss_reject("salt length is not the SHA-256 digest length");
+        }
+        return _PssProfile { ok: true, reason: "", sha384: false };
+    }
+    if hash_oid == _x509_verify_oid_sha384() {
+        if salt_length != 48 {
+            return _pss_reject("salt length is not the SHA-384 digest length");
+        }
+        return _PssProfile { ok: true, reason: "", sha384: true };
+    }
+    return _pss_reject("unsupported hash algorithm");
+}
+
+// A link rejection plus, when the reason is algorithm-specific, the text that
+// names the algorithm. `detail` is "" whenever the generic chain message is
+// already the whole story.
+struct _LinkVerdict {
+    code: string;  // "" when the signature is good
+    detail: string;
+}
+
+fn _link_ok() -> _LinkVerdict {
+    return _LinkVerdict { code: "", detail: "" };
+}
+
+fn _link_err(code: string, detail: string) -> _LinkVerdict {
+    return _LinkVerdict { code: code, detail: detail };
+}
+
+// Verify `subject`'s signature under `issuer`'s public key. Returns a
+// `_LinkVerdict` whose `code` is "" when the signature is good, otherwise the
+// rejection code (and, for an algorithm-specific rejection, the OID detail).
+// The signed input is always the subject's tbsCertificate TLV verbatim (RFC
+// 5280 4.1.1.3).
+fn _verify_link(issuer: X509Certificate, subject: X509Certificate) -> _LinkVerdict {
     // RFC 5280 4.1.1.2: the outer signatureAlgorithm MUST equal the inner
     // tbsCertificate.signature. A mismatch is a signature-substitution
     // attempt, not a parse quirk.
     if subject.signature_algorithm != subject.signature_algorithm_outer {
-        return x509_verify_err_algorithm_mismatch();
+        return _link_err(x509_verify_err_algorithm_mismatch(), "");
     }
     if subject.tbs_der.length == 0 || subject.signature_value.length == 0 {
-        return x509_verify_err_bad_signature();
+        return _link_err(x509_verify_err_bad_signature(), "");
     }
 
     let algorithm: string = subject.signature_algorithm;
 
     if algorithm == x509_oid_ed25519() {
         if issuer.spki_algorithm != x509_oid_ed25519() {
-            return x509_verify_err_unsupported_algorithm();
+            return _link_err(x509_verify_err_unsupported_algorithm(), _pair_detail(algorithm, issuer.spki_algorithm));
         }
         if issuer.spki_key.length != 32 {
-            return x509_verify_err_bad_signature();
+            return _link_err(x509_verify_err_bad_signature(), "");
         }
         if subject.signature_value.length != 64 {
-            return x509_verify_err_bad_signature();
+            return _link_err(x509_verify_err_bad_signature(), "");
         }
         let ed_ok: boolean = ed25519_verify(_bytes_to_hex(issuer.spki_key), subject.tbs_der, _bytes_to_hex(subject.signature_value));
-        if ed_ok { return ""; }
-        return x509_verify_err_bad_signature();
+        if ed_ok { return _link_ok(); }
+        return _link_err(x509_verify_err_bad_signature(), "");
     }
 
     if algorithm == x509_oid_ecdsa_p256_sha256() {
         if issuer.spki_algorithm != x509_verify_oid_ec_public_key() {
-            return x509_verify_err_unsupported_algorithm();
+            return _link_err(x509_verify_err_unsupported_algorithm(), _pair_detail(algorithm, issuer.spki_algorithm));
         }
         let ec_ok: boolean = ecdsa_p256_verify_sha256(issuer.spki_key, subject.tbs_der, subject.signature_value);
-        if ec_ok { return ""; }
-        return x509_verify_err_bad_signature();
+        if ec_ok { return _link_ok(); }
+        return _link_err(x509_verify_err_bad_signature(), "");
+    }
+
+    if algorithm == x509_verify_oid_ecdsa_p384_sha384() {
+        if issuer.spki_algorithm != x509_verify_oid_ec_public_key() {
+            return _link_err(x509_verify_err_unsupported_algorithm(), _pair_detail(algorithm, issuer.spki_algorithm));
+        }
+        let ec384_ok: boolean = ecdsa_p384_verify_sha384(issuer.spki_key, subject.tbs_der, subject.signature_value);
+        if ec384_ok { return _link_ok(); }
+        return _link_err(x509_verify_err_bad_signature(), "");
     }
 
     if algorithm == x509_verify_oid_sha256_rsa() || algorithm == x509_verify_oid_sha384_rsa() {
         if issuer.spki_algorithm != x509_oid_rsa_encryption() {
-            return x509_verify_err_unsupported_algorithm();
+            return _link_err(x509_verify_err_unsupported_algorithm(), _pair_detail(algorithm, issuer.spki_algorithm));
         }
         let key: RsaPublicKey = x509_rsa_public_key_from_spki(issuer.spki_key);
-        if !key.ok { return x509_verify_err_bad_signature(); }
+        if !key.ok {
+            return _link_err(x509_verify_err_bad_signature(), "");
+        }
 
         let mut rsa_ok: boolean = false;
         if algorithm == x509_verify_oid_sha256_rsa() {
@@ -357,14 +700,52 @@ fn _verify_link(issuer: X509Certificate, subject: X509Certificate) -> string {
         } else {
             rsa_ok = rsa_pkcs1_v1_5_verify_sha384(key.modulus, key.exponent, subject.tbs_der, subject.signature_value);
         }
-        if rsa_ok { return ""; }
-        return x509_verify_err_bad_signature();
+        if rsa_ok { return _link_ok(); }
+        return _link_err(x509_verify_err_bad_signature(), "");
     }
 
-    // Everything else — RSASSA-PSS certificate signatures, ecdsa-with-SHA384,
-    // sha1WithRSA, DSA — rejects the link. Skipping an unverifiable link is
+    if algorithm == x509_verify_oid_rsassa_pss() {
+        if issuer.spki_algorithm != x509_oid_rsa_encryption() {
+            return _link_err(x509_verify_err_unsupported_algorithm(), _pair_detail(algorithm, issuer.spki_algorithm));
+        }
+        // RFC 5280 4.1.1.2 requires the outer signatureAlgorithm to equal the
+        // inner tbsCertificate.signature, and for PSS that has to include the
+        // parameters: the OID-only check above passes even when the two
+        // copies declare different hashes, which would let the unsigned outer
+        // copy advertise the profile we verify while the signed inner copy
+        // declared another. The check is scoped to PSS deliberately — for the
+        // other algorithms the parameters are absent-or-NULL and the two
+        // encodings are both seen in the wild, so comparing bytes there would
+        // reject certificates that are not actually inconsistent (SFN-824).
+        if !_eq_bytes(subject.signature_algorithm_params, subject.signature_algorithm_params_outer) {
+            return _link_err(x509_verify_err_algorithm_mismatch(), "");
+        }
+        let profile: _PssProfile = _pss_profile(subject.signature_algorithm_params);
+        if !profile.ok {
+            return _link_err(x509_verify_err_unsupported_algorithm(), "x509_verify: unsupported RSASSA-PSS parameters: "
+                + profile.reason);
+        }
+        let pss_key: RsaPublicKey = x509_rsa_public_key_from_spki(issuer.spki_key);
+        if !pss_key.ok {
+            return _link_err(x509_verify_err_bad_signature(), "");
+        }
+        let mut pss_ok: boolean = false;
+        if profile.sha384 {
+            pss_ok = rsa_pss_verify_sha384(pss_key.modulus, pss_key.exponent, subject.tbs_der, subject.signature_value);
+        } else {
+            pss_ok = rsa_pss_verify_sha256(pss_key.modulus, pss_key.exponent, subject.tbs_der, subject.signature_value);
+        }
+        if pss_ok { return _link_ok(); }
+        return _link_err(x509_verify_err_bad_signature(), "");
+    }
+
+    // Everything else — ecdsa-with-SHA512 and the P-521 curve it
+    // accompanies, sha1WithRSA, DSA — rejects the link,
+    // naming the OID so the rejection is distinguishable from every other
+    // unsupported-algorithm case (SFN-823). Skipping an unverifiable link is
     // how a chain verifier silently becomes decorative.
-    return x509_verify_err_unsupported_algorithm();
+    return _link_err(x509_verify_err_unsupported_algorithm(), "x509_verify: unsupported certificate signature algorithm "
+        + _oid_for_message(algorithm));
 }
 
 // "" when the certificate is inside its validity window at `now_ms`.
@@ -467,6 +848,7 @@ fn _has_server_auth_eku(cert: X509Certificate) -> boolean {
 struct _IssuerSearch {
     index: int;  // -1 when no candidate was accepted
     reason: string;  // "" when no candidate even matched by name
+    detail: string;  // "" unless `reason` carries algorithm-specific context
 }
 
 // Find a certificate in `candidates` that may issue `subject`, skipping any
@@ -477,6 +859,7 @@ struct _IssuerSearch {
 // what makes this greedy walk safe without backtracking.
 fn _find_issuer(candidates: X509Certificate[], used: boolean[], subject: X509Certificate, below: int, now_ms: int) -> _IssuerSearch {
     let mut reason: string = "";
+    let mut detail: string = "";
     let mut i: int = 0;
     loop {
         if i >= candidates.length { break; }
@@ -492,31 +875,43 @@ fn _find_issuer(candidates: X509Certificate[], used: boolean[], subject: X509Cer
 
         let critical: string = _critical_extensions_code(candidate);
         if critical != "" {
-            if reason == "" { reason = critical; }
+            if reason == "" {
+                reason = critical;
+                detail = "";
+            }
             i += 1;
             continue;
         }
         let ca: string = _ca_code(candidate, below);
         if ca != "" {
-            if reason == "" { reason = ca; }
+            if reason == "" {
+                reason = ca;
+                detail = "";
+            }
             i += 1;
             continue;
         }
         let window: string = _window_code(candidate, now_ms);
         if window != "" {
-            if reason == "" { reason = window; }
+            if reason == "" {
+                reason = window;
+                detail = "";
+            }
             i += 1;
             continue;
         }
-        let link: string = _verify_link(candidate, subject);
-        if link != "" {
-            if reason == "" { reason = link; }
+        let link: _LinkVerdict = _verify_link(candidate, subject);
+        if link.code != "" {
+            if reason == "" {
+                reason = link.code;
+                detail = link.detail;
+            }
             i += 1;
             continue;
         }
-        return _IssuerSearch { index: i, reason: "" };
+        return _IssuerSearch { index: i, reason: "", detail: "" };
     }
-    return _IssuerSearch { index: -1, reason: reason };
+    return _IssuerSearch { index: -1, reason: reason, detail: detail };
 }
 
 // Decide whether `leaf` chains to one of `anchors`, optionally through
@@ -597,9 +992,16 @@ fn x509_verify_chain(leaf: X509Certificate, intermediates: X509Certificate[], an
             // specific reason either search produced; a bare name miss in both
             // means the chain simply does not reach the trust store.
             let mut reason: string = anchor_hit.reason;
-            if reason == "" { reason = inter_hit.reason; }
+            let mut reason_detail: string = anchor_hit.detail;
+            if reason == "" {
+                reason = inter_hit.reason;
+                reason_detail = inter_hit.detail;
+            }
             if reason == "" {
                 return _chain_err(x509_verify_err_no_anchor(), "x509_verify: no path from the leaf to a trust anchor");
+            }
+            if reason_detail != "" {
+                return _chain_err(reason, reason_detail);
             }
             return _chain_err(reason, "x509_verify: certification path rejected");
         }
@@ -632,6 +1034,8 @@ export {
     x509_verify_err_unrecognized_critical_extension,
     x509_verify_oid_sha256_rsa,
     x509_verify_oid_sha384_rsa,
+    x509_verify_oid_ecdsa_p384_sha384,
+    x509_verify_oid_rsassa_pss,
     x509_verify_oid_ec_public_key,
     x509_rsa_public_key_from_spki,
     x509_verify_err_hostname_mismatch

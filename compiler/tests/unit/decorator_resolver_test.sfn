@@ -17,7 +17,8 @@ import {
     Program,
     Statement,
     TypeParameter
-} from "../../src/ast";
+} from "sfn/syntax";
+
 import {
     DecoratorResolution,
     resolve_decorators,

@@ -4,7 +4,8 @@
 // Path behavior mirrors the capsule resolver, including `./dir` ->
 // `dir/mod.sfn`; semantic E0430/E0431 decisions remain in
 // `import_resolution_check.sfn`.
-import { Program } from "../ast";
+import { Program } from "sfn/syntax";
+
 import { ClosureSymbolSet, ImportResolutionContext } from "../import_resolution_check";
 import { substring } from "../string_utils";
 

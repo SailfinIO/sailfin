@@ -10,8 +10,8 @@ import {
     strings_equal,
     substring
 } from "sfn/strings";
+import { SourceSpan, Statement, TypeAnnotation } from "sfn/syntax";
 
-import { SourceSpan, Statement, TypeAnnotation } from "../ast";
 import { Diagnostic } from "../typecheck_types";
 import { parse_type_arguments } from "./interface_and_generics";
 import {

@@ -1,0 +1,91 @@
+// compiler/capsules/syntax/src/parser/declarations/tests.sfn
+//
+// Test and lifecycle-hook declaration parsing.
+import { Decorator, Statement } from "../../ast";
+import { parse_block } from "../statements";
+import {
+    collect_until,
+    consume_keyword,
+    parser_peek_raw,
+    skip_trivia,
+    source_span_from_tokens,
+    tokens_to_text
+} from "../token_utils";
+import { Parser, StatementParseResult } from "../types";
+import { normalize_test_name, trim_text } from "../utils";
+import { parse_unknown } from "./recovery";
+import { parse_effect_list } from "./syntax";
+
+// ============================================================================
+// Test Declaration
+// ============================================================================
+fn parse_test(initial_parser: Parser, decorators: Decorator[]) -> StatementParseResult {
+    let mut parser: Parser = initial_parser;
+    let original = parser;
+    parser = skip_trivia(parser);
+    parser = consume_keyword(parser, "test");
+
+    let name_capture = collect_until(skip_trivia(parser), ["!", "{"]);
+    parser = name_capture.parser;
+    let name_text = trim_text(tokens_to_text(name_capture.tokens));
+    if name_text.length == 0 { return parse_unknown(original); }
+    let name_span = source_span_from_tokens(name_capture.tokens);
+    let name = normalize_test_name(name_text);
+
+    let effect_result = parse_effect_list(parser);
+    parser = effect_result.parser;
+    let parsed_effects = effect_result.effects;
+    let inferred_effects = parsed_effects;
+
+    let block_result = parse_block(parser);
+    parser = block_result.parser;
+    let body = block_result.block;
+
+    let statement = Statement.TestDeclaration {
+        name: name,
+        name_span: name_span,
+        body: body,
+        effects: inferred_effects,
+        decorators: decorators,
+        hook_kind: ""
+    };
+    return StatementParseResult { parser: parser, statement: statement };
+}
+
+// ============================================================================
+// Lifecycle Hook Declaration
+// ============================================================================
+// Recognizes `before_each`/`after_each`/`before_all`/`after_all` blocks and
+// lowers each to a `TestDeclaration` carrying a non-empty `hook_kind`. Hooks
+// have no quoted name; a stable synthetic name (`__hook_<kind>`) keeps the
+// emitted symbol unique and discoverable by the test-harness synthesizer.
+// One hook per kind per file is supported; a second of the same kind produces
+// a duplicate-symbol diagnostic from typecheck (documented limitation).
+fn parse_lifecycle_hook(initial_parser: Parser, decorators: Decorator[], kind: string) -> StatementParseResult {
+    let mut parser: Parser = initial_parser;
+    parser = skip_trivia(parser);
+    // Anchor diagnostics (duplicate-hook, effect errors) at the hook
+    // introducer token, since hooks carry no quoted name to span.
+    let keyword_token = parser_peek_raw(parser);
+    let name_span = source_span_from_tokens([keyword_token]);
+    parser = consume_keyword(parser, kind);
+
+    let effect_result = parse_effect_list(parser);
+    parser = effect_result.parser;
+    let parsed_effects = effect_result.effects;
+    let inferred_effects = parsed_effects;
+
+    let block_result = parse_block(parser);
+    parser = block_result.parser;
+    let body = block_result.block;
+
+    let statement = Statement.TestDeclaration {
+        name: "__hook_" + kind,
+        name_span: name_span,
+        body: body,
+        effects: inferred_effects,
+        decorators: decorators,
+        hook_kind: kind
+    };
+    return StatementParseResult { parser: parser, statement: statement };
+}

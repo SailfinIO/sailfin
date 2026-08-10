@@ -1,4 +1,5 @@
-import { Decorator, Expression, Statement } from "./ast";
+import { Decorator, Expression, Statement } from "sfn/syntax";
+
 import {
     char_at,
     index_of,

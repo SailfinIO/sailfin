@@ -17,7 +17,8 @@ import {
     Statement,
     TypeAnnotation,
     TypeParameter
-} from "./ast";
+} from "sfn/syntax";
+
 import {
     join_with_separator,
     number_to_string,

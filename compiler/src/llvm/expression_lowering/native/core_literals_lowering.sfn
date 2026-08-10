@@ -1,8 +1,9 @@
 // compiler/src/llvm/expression_lowering/native/core_literals_lowering.sfn
 //
 // Literal/cast/interpolation lowering extracted from core.sfn.
-import { NativeFunction, NativeSourceSpan } from "../../../native_ir";
-import { substring } from "../../../string_utils";
+import { NativeFunction, NativeSourceSpan } from "sfn/ir";
+import { substring } from "sfn/strings";
+
 import { default_return_literal, format_temp_name } from "../../expressions_helpers";
 import { empty_string_constant_set, merge_string_constants } from "../../strings";
 import {

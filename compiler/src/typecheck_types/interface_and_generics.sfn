@@ -3,8 +3,8 @@
 // Interface conformance, type-argument parsing, and generic substitution.
 // Extracted from typecheck_types.sfn (SFN-625).
 import { contains_string, starts_with, strings_equal } from "sfn/strings";
+import { Statement, TypeAnnotation, TypeParameter } from "sfn/syntax";
 
-import { Statement, TypeAnnotation, TypeParameter } from "../ast";
 import { Diagnostic } from "../typecheck_types";
 import {
     extract_generic_argument_block,

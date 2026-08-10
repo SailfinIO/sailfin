@@ -1,9 +1,11 @@
 // compiler/src/llvm/expression_lowering/native/core_call_resolution/method_target.sfn
-import { NativeFunction } from "../../../../native_ir";
-import { index_of, substring } from "../../../../string_utils";
+import { NativeFunction } from "sfn/ir";
+import { find, substring } from "sfn/strings";
+
 import { is_simple_identifier } from "../../../expressions_helpers";
 import { find_runtime_helper, make_concat_descriptor } from "../../../runtime_helpers/mod";
 import { merge_string_constants } from "../../../strings";
+import { sanitize_symbol } from "../../../symbols";
 import { find_interface_info_by_name, find_struct_info_by_name } from "../../../type_context_queries";
 import { ends_with_pointer_suffix } from "../../../type_mapping";
 import {
@@ -26,7 +28,6 @@ import {
     parse_range_iterable
 } from "../core_parse";
 import { find_local_binding, find_parameter_binding } from "../core_scopes";
-import { sanitize_symbol } from "../core_text";
 import { map_array_pointer_type } from "../core_type_mapping";
 import { emit_runtime_call, empty_runtime_call_overrides } from "../runtime_call";
 import { try_resolve_closure_callee } from "./closure_callee";
@@ -309,7 +310,7 @@ fn resolve_call_method_target(trimmed_target: string, arguments: string[], bindi
     // Inline member-access fallback: parse_member_access is cross-module
     // and historically returned corrupted data with the v0.1.1 seed, so
     // we re-derive the struct method target from `locals` directly.
-    let _pre_dot = index_of(result_target, ".");
+    let _pre_dot = find(result_target, ".", 0);
     if _pre_dot > 0 {
         if method_operand == null {
             if injected_argument_count == 0 {

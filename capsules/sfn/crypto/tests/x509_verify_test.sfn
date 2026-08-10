@@ -2,15 +2,21 @@
 //
 // Regression coverage for X.509 certification-path validation (SFN-340,
 // design SFEP-0048 Phase C): chain building, signature verification across
-// the three certificate-signature algorithms in the chosen cut, CA-constraint
+// the certificate-signature algorithms in the chosen cut, CA-constraint
 // enforcement, and fail-closed rejection with a distinguishable code.
 //
-// Every fixture below is a real certificate produced by OpenSSL 3.6.3 and
+// Every fixture below is a real certificate produced by OpenSSL — 3.6.3,
+// or 3.0.13 for the SFN-824 `pss2_*` family — and
 // cross-checked with `openssl verify` before being embedded, so a positive
 // case cannot pass vacuously and a negative case is known to be rejected by
 // an independent implementation. The generating commands are recorded above
 // the fixture block. There is no network dependency and no ambient clock: a
 // fixed Unix-millisecond snapshot is passed into every call.
+//
+// Exception: `fx_ov_leaf`, `fx_pm_leaf` (SFN-823) and `fx_pss_noparams` /
+// `fx_pss_tampered` (SFN-824) are synthetic byte-level splices of a real
+// fixture, not independent OpenSSL output — see their own comment blocks for
+// the exact transformation. Each encodes something no signer will emit.
 import { X509Certificate, x509_parse } from "../src/x509";
 import {
     X509ChainResult,
@@ -44,6 +50,13 @@ fn before_ms() -> int { return 1748736000000; }
 // 2028-01-01T00:00:00Z — after every leaf's notAfter.
 fn after_ms() -> int { return 1830297600000; }
 
+// 2026-09-01T00:00:00Z — inside the captured example.com leaf's window
+// (2026-07-29 to 2026-10-27), which is narrower than and later than the
+// synthetic fixtures' and so needs its own snapshot. A public leaf has a
+// ~90-day life; pinning the instant is what keeps this fixture from becoming
+// a time bomb.
+fn ex_now_ms() -> int { return 1788220800000; }
+
 fn cert(hex: string) -> X509Certificate { return x509_parse(hexb(hex)); }
 
 // ── Positive paths: one per certificate-signature algorithm in the cut ──
@@ -67,11 +80,75 @@ test "x509_verify: an ecdsa-p256 chain verifies to its trust anchor" {
     assert result.anchor_subject_cn == "Sailfin Test Ec Root";
 }
 
+test "x509_verify: an ecdsa-p384 chain verifies to its trust anchor" {
+    // SFN-811. Until P-384 arithmetic landed, this exact chain returned
+    // `unsupported-algorithm` — the fixture pair predates the fix and was the
+    // negative case for it.
+    let leaf: X509Certificate = cert(fx_u_leaf());
+    assert leaf.ok;
+    assert leaf.signature_algorithm == "1.2.840.10045.4.3.3";
+
+    let intermediates: X509Certificate[] = [];
+    let result: X509ChainResult = x509_verify_chain(leaf, intermediates, [cert(fx_u_root())], x509_verify_options(now_ms()));
+    assert result.ok;
+    assert result.code == x509_verify_ok();
+    assert result.depth == 0;
+    assert result.anchor_subject_cn == "Sailfin Test P384 Root";
+}
+
+test "x509_verify: a tampered ecdsa-p384 signature is rejected as bad-signature" {
+    // Flip one bit of the trailing signature octet, so every length stays
+    // intact and only the signature value differs. The rejection has to come
+    // from the P-384 verification itself, not from parsing — and it must be
+    // `bad-signature`, not the `unsupported-algorithm` this chain used to give.
+    let mut der: int[] = hexb(fx_u_leaf());
+    der[der.length - 1] = (der[der.length - 1] ^ 1) & 255;
+    let leaf: X509Certificate = x509_parse(der);
+    assert leaf.ok;
+
+    let intermediates: X509Certificate[] = [];
+    let result: X509ChainResult = x509_verify_chain(leaf, intermediates, [cert(fx_u_root())], x509_verify_options(now_ms()));
+    assert ! result.ok;
+    assert result.code == x509_verify_err_bad_signature();
+}
+
 test "x509_verify: an rsa chain verifies to its trust anchor" {
     let result: X509ChainResult = x509_verify_chain(cert(fx_rsa_leaf()), [cert(fx_rsa_inter())], [cert(fx_rsa_root())], x509_verify_options(now_ms()));
     assert result.ok;
     assert result.code == x509_verify_ok();
     assert result.anchor_subject_cn == "Sailfin Test Rsa Root";
+}
+
+// ── A real public chain, captured once and verified offline (SFN-811) ──
+// The synthetic fixtures above are all issued by this repository, so they
+// cannot catch a disagreement between our DER handling and what public CAs
+// actually emit. This is the live `example.com` chain: a P-256 leaf under a
+// P-256 issuing CA, whose own signature is ecdsa-with-SHA384 under a P-384
+// transit CA, under a P-384 root. That P-256-leaf-under-P-384-intermediate
+// topology is the common one, and the reason SFN-811 blocked a large share of
+// real HTTPS rather than an exotic corner.
+//
+// Two of the three links are ecdsa-with-SHA384 against a P-384 issuer key, so
+// this fails on the pre-SFN-811 compiler with `unsupported-algorithm`.
+//
+// The anchor is the chain's own root as served (the Comodo cross-signed
+// `SSL.com TLS ECC Root CA 2022`). `x509_verify_chain` trusts an anchor by
+// identity and never checks its self-signature, so the cross-signed form is
+// the right anchor to pin here and the capture needs no out-of-band root.
+test "x509_verify: the live example.com chain verifies to its real anchor" {
+    let result: X509ChainResult = x509_verify_chain(cert(fx_ex_leaf()), [cert(fx_ex_issuing()), cert(fx_ex_transit())], [cert(fx_ex_root())], x509_verify_options(ex_now_ms()));
+    assert result.ok;
+    assert result.code == x509_verify_ok();
+    assert result.depth == 2;
+    assert result.anchor_subject_cn == "SSL.com TLS ECC Root CA 2022";
+}
+
+test "x509_verify: the live example.com chain is rejected without its P-384 anchor" {
+    // The same chain against an unrelated anchor set must fail to build rather
+    // than succeed on the strength of the intermediates alone.
+    let result: X509ChainResult = x509_verify_chain(cert(fx_ex_leaf()), [cert(fx_ex_issuing()), cert(fx_ex_transit())], [cert(fx_other_root())], x509_verify_options(ex_now_ms()));
+    assert ! result.ok;
+    assert result.code == x509_verify_err_no_anchor();
 }
 
 test "x509_verify: a three-deep chain verifies and reports its depth" {
@@ -188,16 +265,178 @@ test "x509_verify: an exceeded pathLenConstraint is rejected" {
 }
 
 test "x509_verify: an unimplemented signature algorithm rejects the link" {
-    // ecdsa-with-SHA384 over P-384. Nothing in the chosen cut can verify it,
+    // ecdsa-with-SHA512 over P-521. Nothing in the chosen cut can verify it,
     // so the link must reject rather than be skipped.
-    let leaf: X509Certificate = cert(fx_u_leaf());
+    let leaf: X509Certificate = cert(fx_us_leaf());
     assert leaf.ok;
-    assert leaf.signature_algorithm == "1.2.840.10045.4.3.3";
+    assert leaf.signature_algorithm == "1.2.840.10045.4.3.4";
 
     let intermediates: X509Certificate[] = [];
-    let result: X509ChainResult = x509_verify_chain(leaf, intermediates, [cert(fx_u_root())], x509_verify_options(now_ms()));
+    let result: X509ChainResult = x509_verify_chain(leaf, intermediates, [cert(fx_us_root())], x509_verify_options(now_ms()));
     assert ! result.ok;
     assert result.code == x509_verify_err_unsupported_algorithm();
+    assert result.error == "x509_verify: unsupported certificate signature algorithm 1.2.840.10045.4.3.4";
+}
+
+// ── RSASSA-PSS certificate signatures (SFN-824) ──
+//
+// The PSS verifier in rsa.sfn implements exactly one profile family — MGF1
+// over the signature hash, salt length equal to the digest length — so these
+// cases split into two groups that must not blur: a profile we can check and
+// therefore do check, and a profile we cannot check and therefore refuse.
+// Refusing is the whole point: verifying an unsupported profile under the
+// parameters we happen to implement would report a signature as checked that
+// was never checked.
+test "x509_verify: an rsassa-pss sha-256 chain verifies to its trust anchor" {
+    let leaf: X509Certificate = cert(fx_pss_leaf());
+    assert leaf.ok;
+    assert leaf.signature_algorithm == "1.2.840.113549.1.1.10";
+
+    let intermediates: X509Certificate[] = [];
+    let result: X509ChainResult = x509_verify_chain(leaf, intermediates, [cert(fx_pss_root())], x509_verify_options(now_ms()));
+    assert result.ok;
+    assert result.code == x509_verify_ok();
+    assert result.anchor_subject_cn == "Sailfin Test Pss Root";
+}
+
+test "x509_verify: an rsassa-pss sha-384 chain verifies to its trust anchor" {
+    let leaf: X509Certificate = cert(fx_pss2_384());
+    assert leaf.ok;
+    assert leaf.signature_algorithm == "1.2.840.113549.1.1.10";
+
+    let intermediates: X509Certificate[] = [];
+    let result: X509ChainResult = x509_verify_chain(leaf, intermediates, [cert(fx_pss2_root())], x509_verify_options(pss2_now_ms()));
+    assert result.ok;
+    assert result.code == x509_verify_ok();
+    assert result.anchor_subject_cn == "Sailfin Test Pss2 Root";
+}
+
+// The control for the three negative parameter cases below. They share this
+// certificate's issuer, key and validity window and differ from it in exactly
+// one PSS parameter, so a rejection there cannot be blamed on the fixture
+// family being unusable.
+test "x509_verify: the pss2 sha-256 control chain verifies to its trust anchor" {
+    let result: X509ChainResult = x509_verify_chain(cert(fx_pss2_256()), [], [cert(fx_pss2_root())], x509_verify_options(pss2_now_ms()));
+    assert result.ok;
+    assert result.code == x509_verify_ok();
+}
+
+test "x509_verify: an rsassa-pss salt length below the digest length is refused" {
+    // saltLength 20 against a SHA-256 digest. 20 is the RFC 4055 DEFAULT, so
+    // OpenSSL omits the [2] field entirely and the refusal comes from the
+    // defaulting rule rather than from a value comparison — the encoding a
+    // real certificate would carry, hence the fixture.
+    let leaf: X509Certificate = cert(fx_pss2_salt20());
+    assert leaf.ok;
+    let result: X509ChainResult = x509_verify_chain(leaf, [], [cert(fx_pss2_root())], x509_verify_options(pss2_now_ms()));
+    assert ! result.ok;
+    assert result.code == x509_verify_err_unsupported_algorithm();
+    assert result.error == "x509_verify: unsupported RSASSA-PSS parameters: salt length defaults to 20 (RFC 4055 3.1)";
+}
+
+test "x509_verify: an explicitly encoded off-digest salt length is refused" {
+    // saltLength 64 against a SHA-256 digest: not the default, so the [2]
+    // field is present and carries a value we compare and reject. The pair
+    // with the case above covers both ways a wrong salt length can arrive.
+    let leaf: X509Certificate = cert(fx_pss2_salt64());
+    assert leaf.ok;
+    let result: X509ChainResult = x509_verify_chain(leaf, [], [cert(fx_pss2_root())], x509_verify_options(pss2_now_ms()));
+    assert ! result.ok;
+    assert result.code == x509_verify_err_unsupported_algorithm();
+    assert result.error == "x509_verify: unsupported RSASSA-PSS parameters: salt length is not the SHA-256 digest length";
+}
+
+test "x509_verify: an rsassa-pss mgf1 hash differing from the signature hash is refused" {
+    // Signature hash SHA-256, MGF1 hash SHA-384. RFC 4055 permits the two to
+    // differ; `_emsa_pss_verify` masks with the signature hash, so accepting
+    // this would check a different construction than the one declared.
+    let leaf: X509Certificate = cert(fx_pss2_mgf384());
+    assert leaf.ok;
+    let result: X509ChainResult = x509_verify_chain(leaf, [], [cert(fx_pss2_root())], x509_verify_options(pss2_now_ms()));
+    assert ! result.ok;
+    assert result.code == x509_verify_err_unsupported_algorithm();
+    assert result.error == "x509_verify: unsupported RSASSA-PSS parameters: MGF1 hash differs from the signature hash";
+}
+
+test "x509_verify: absent rsassa-pss parameters are refused rather than assumed" {
+    // An absent `parameters` field is not an unspecified one: RFC 4055 3.1
+    // defaults every field, and every default is the SHA-1 profile. Reading
+    // it as SHA-256 because that is what we implement is the exact failure
+    // this refusal exists to prevent.
+    let leaf: X509Certificate = cert(fx_pss_noparams());
+    assert leaf.ok;
+    assert leaf.signature_algorithm == "1.2.840.113549.1.1.10";
+    let result: X509ChainResult = x509_verify_chain(leaf, [], [cert(fx_pss_root())], x509_verify_options(now_ms()));
+    assert ! result.ok;
+    assert result.code == x509_verify_err_unsupported_algorithm();
+    assert result.error == "x509_verify: unsupported RSASSA-PSS parameters: absent parameters default to SHA-1 (RFC 4055 3.1)";
+}
+
+test "x509_verify: an rsassa-pss outer/inner parameters mismatch is rejected" {
+    // RFC 5280 4.1.1.2 equality has to cover the parameters, not just the
+    // OID. Only the unsigned outer copy is stripped here, so the OID check
+    // passes and the signature over the untouched tbsCertificate is still
+    // good: without the parameters comparison this certificate would verify
+    // while advertising a profile different from the one actually checked.
+    let leaf: X509Certificate = cert(fx_pss_outer_stripped());
+    assert leaf.ok;
+    assert leaf.signature_algorithm == leaf.signature_algorithm_outer;
+    let result: X509ChainResult = x509_verify_chain(leaf, [], [cert(fx_pss_root())], x509_verify_options(now_ms()));
+    assert ! result.ok;
+    assert result.code == x509_verify_err_algorithm_mismatch();
+}
+
+test "x509_verify: an rsassa-pss hash outside the supported pair is refused" {
+    // SHA-512 with MGF1-SHA-512 and salt 64 is internally consistent and a
+    // profile OpenSSL will happily produce; it is refused because this
+    // capsule has no SHA-512 PSS verifier, not because anything is malformed.
+    let leaf: X509Certificate = cert(fx_pss2_512());
+    assert leaf.ok;
+    let result: X509ChainResult = x509_verify_chain(leaf, [], [cert(fx_pss2_root())], x509_verify_options(pss2_now_ms()));
+    assert ! result.ok;
+    assert result.code == x509_verify_err_unsupported_algorithm();
+    assert result.error == "x509_verify: unsupported RSASSA-PSS parameters: unsupported hash algorithm";
+}
+
+test "x509_verify: a tampered rsassa-pss signature is rejected as bad-signature" {
+    // The codes must not blur: a signature that fails to verify under a
+    // profile we do support is `bad-signature`, never the
+    // `unsupported-algorithm` this chain returned before PSS was wired in.
+    let leaf: X509Certificate = cert(fx_pss_tampered());
+    assert leaf.ok;
+    assert leaf.signature_algorithm == "1.2.840.113549.1.1.10";
+    let result: X509ChainResult = x509_verify_chain(leaf, [], [cert(fx_pss_root())], x509_verify_options(now_ms()));
+    assert ! result.ok;
+    assert result.code == x509_verify_err_bad_signature();
+    assert result.code != x509_verify_err_unsupported_algorithm();
+}
+
+test "x509_verify: a signature algorithm the issuer key cannot serve names both OIDs" {
+    // The signature OID is inside the chosen cut, but the issuer holds an
+    // Ed25519 key, so no dispatch arm can pair them. Naming only one side
+    // would leave the reader guessing which half was wrong (SFN-823).
+    let leaf: X509Certificate = cert(fx_pm_leaf());
+    assert leaf.ok;
+    assert leaf.signature_algorithm == "1.2.840.10045.4.3.2";
+
+    let result: X509ChainResult = x509_verify_chain(leaf, [cert(fx_ed_inter())], [cert(fx_ed_root())], x509_verify_options(now_ms()));
+    assert ! result.ok;
+    assert result.code == x509_verify_err_unsupported_algorithm();
+    assert result.error == "x509_verify: signature algorithm 1.2.840.10045.4.3.2 does not pair with issuer key algorithm 1.3.101.112";
+}
+
+test "x509_verify: an oversize signature-algorithm OID is truncated in the diagnostic" {
+    // A hostile 241-character OID must not render unbounded output: the
+    // rejection text is bounded to 64 source characters plus "..." (SFN-823).
+    let leaf: X509Certificate = cert(fx_ov_leaf());
+    assert leaf.ok;
+    assert leaf.signature_algorithm.length == 241;
+
+    let intermediates: X509Certificate[] = [];
+    let result: X509ChainResult = x509_verify_chain(leaf, intermediates, [cert(fx_us_root())], x509_verify_options(now_ms()));
+    assert ! result.ok;
+    assert result.code == x509_verify_err_unsupported_algorithm();
+    assert result.error == "x509_verify: unsupported certificate signature algorithm 2.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1....";
 }
 
 test "x509_verify: a leaf whose extendedKeyUsage excludes serverAuth is rejected" {
@@ -358,11 +597,13 @@ fn _find_last_ed25519_oid(der: int[]) -> int {
 //   nc_*     an issuer with basicConstraints CA:FALSE
 //   pl_*     root(pathlen:0) over two intermediates — one more than permitted
 //   xp_*     an intermediate expiring 2026-02-01, inside a chain that is otherwise current
-//   u_*      P-384 / ecdsa-with-SHA384, an algorithm outside the chosen cut
+//   u_*      ecdsa-with-SHA384, P-384, root -> leaf. Predates SFN-811, when it
+//            was the fixture for an algorithm outside the cut; it is now the
+//            P-384 positive case and the tampered-signature negative
 //   ck_leaf  a leaf whose extendedKeyUsage is clientAuth only
 //   other_root  an unrelated trust anchor, for padding and no-path cases
 //
-// Cross-checked before embedding: `openssl verify` accepts the ed/ec/rsa/dp
+// Cross-checked before embedding: `openssl verify` accepts the ed/ec/rsa/dp/u
 // chains and rejects the nc/pl/xp/wrong-anchor ones.
 fn fx_ck_leaf() -> string {
     return "3082017230820124a003020102020200a1300506032b6570301d311b301906035504030c125361696c66696e2054657374204564204341301e170d3236303130313030303030305a170d3237303130313030303030305a30163114301206035504030c0b6578616d706c652e636f6d302a300506032b6570032100b2328b78544abef969353fee0859469286277a5d407529c4b7241afcb57c0b71a3818e30818b300c0603551d130101ff04023000300e0603551d0f0101ff04040302078030130603551d25040c300a06082b0601050507030230160603551d11040f300d820b6578616d706c652e636f6d301d0603551d0e04160414f3be6d6e1a16f9791e81da98ef53d26079529dc9301f0603551d23041830168014226768f6483d21e17344cd4338a7bb4b035b000f300506032b6570034100bc17914a16164ba06f85312524dde1a60b9aed5964647aa7eebee9f9fe2f3e95444bbf78c53d680dced747ac3bde4b2db3b1815ee2432973d0cff7bcb7899e05";
@@ -502,4 +743,246 @@ fn fx_q1_i2() -> string {
 
 fn fx_q1_leaf() -> string {
     return "3082018630820138a003020102020200c4300506032b657030223120301e06035504030c175361696c66696e205465737420506174684c656e312042301e170d3236303130313030303030305a170d3237303130313030303030305a30163114301206035504030c0b6578616d706c652e636f6d302a300506032b6570032100b025a32355b000ffa66dd81a234991614de88b45981ea9a969dea6e280e08f26a3819d30819a300c0603551d130101ff04023000300e0603551d0f0101ff04040302078030130603551d25040c300a06082b0601050507030130250603551d11041e301c820b6578616d706c652e636f6d820d2a2e6578616d706c652e636f6d301d0603551d0e041604143b65287c60dcfcd593fb8431b4ab49abfe8d38a1301f0603551d23041830168014d47a0058c7da40e897c200df24eccd0bc4f252d0300506032b65700341007378b1156225cefa34a98781f0976a07f81617d2e731980a7ff84c35e958dbb58f4b9d0b1a5739353980541be579a69feeea33e13742df6dcbc887c79526a305";
+}
+
+// ── SFN-811 fixtures ──
+//
+// us_*  P-521 / ecdsa-with-SHA512, produced by OpenSSL 3.6.3 the same way as
+//       the fixtures above (fresh key, explicit -not_before, -extfile). It is
+//       the stand-in for "an algorithm outside the chosen cut" now that
+//       ecdsa-with-SHA384 is inside it. `openssl verify` accepts the pair, so
+//       the rejection under test is ours and not a malformed certificate.
+fn fx_us_root() -> string {
+    return "308201ff30820160a00302010202020181300a06082a8648ce3d0403043021311f301d06035504030c165361696c66696e2054657374205035323120526f6f74301e170d3236303130313030303030305a170d3336303130313030303030305a3021311f301d06035504030c165361696c66696e2054657374205035323120526f6f7430819b301006072a8648ce3d020106052b810400230381860004006f7542ab4012c3e4e3b38879520a7982f4453abb9dac394f4bccd96f83115a9ba2e43f3d5f36c8de5106fb7a21e8a005e2f093329e50e3278972432f5a2658c8cb01d9e57cce9da7d05c811288bca923ca84979b0b111fb002ed05aea2d029d3ca5744fc7e87478bd678065d0a8169f1a245197e4d358ec5b9fddcb96bd1ccc703771ba345304330120603551d130101ff040830060101ff020101300e0603551d0f0101ff040403020106301d0603551d0e04160414e0c3bff0f517f83e9e95f3c320ab9291e01eabb9300a06082a8648ce3d04030403818c00308188024200f07827a4ef5f922c740aa036202dbd7d667f3f3e49391c73b80e72402c47fd26e86825481afb5d79416c6f25c9330a5e9e10c5ce6fdb889cb601a223acaf84995f02420124779db0e7544ea5c00ac35e176b55fb6f74f36078d85d3c64702afed91c699e74a994094ee05d55587259e82b676bb0b8f4a29d569960d67a576a16d3dc14cf4d";
+}
+
+fn fx_us_leaf() -> string {
+    return "3082023e3082019fa00302010202020182300a06082a8648ce3d0403043021311f301d06035504030c165361696c66696e2054657374205035323120526f6f74301e170d3236303130313030303030305a170d3237303130313030303030305a30163114301206035504030c0b6578616d706c652e636f6d30819b301006072a8648ce3d020106052b810400230381860004010f3b20a46031c536de4f6b25d5a892dd0e1803d93f6a047417e86f452d5dcc8bbd1f26d7034ee6fad7c614a5467653a5698ff82db3a6f0d8105af9c927f0c1fc860190cead8de1496ac3b9140d2a81f33eb519e08fc9e0a39144588c85794b15482c8244932e2706027c3cbcfd3fae52b92c488abbcc0050461d371944e793a581037ca3818e30818b300c0603551d130101ff04023000300e0603551d0f0101ff04040302078030130603551d25040c300a06082b0601050507030130160603551d11040f300d820b6578616d706c652e636f6d301d0603551d0e04160414315d9c3d613f09c819b10527b5b0fc9e16468aa6301f0603551d23041830168014e0c3bff0f517f83e9e95f3c320ab9291e01eabb9300a06082a8648ce3d04030403818c00308188024200985bf380447296ebbb8b6d4fd2fa0d25b09800685b9048535bdfef8c2c230e789be8b58b7720f7370a3125ea7f7ca121da1ee7232f0823f479a3f3497987860118024200fa1631a26e92d5daa55fddc3cddaefb39a5e43bd71c9a764feacb144638551faf5254e4d5da2c069e7f336c21ba10f6c75cb0bf5d5e41b735d5be9c766ff7b0f74";
+}
+
+// ── SFN-823 oversize-OID fixture ──
+//
+// ov_leaf is `fx_us_leaf` (SFN-811's ecdsa-with-SHA512 fixture) with both the
+// tbsCertificate.signature and outer signatureAlgorithm OIDs replaced,
+// byte-for-byte identically, by a crafted-but-DER-valid 121-arc OID
+// (`2.1.1.1...1`, 241 dotted-decimal characters). It exists only to prove
+// `_oid_for_message`'s 64-character bound holds against a hostile OID; only
+// the signature-algorithm identifiers were replaced, not the signature
+// bytes, and those now-stale signature bytes are never verified, because
+// the chosen-cut dispatch falls through to unsupported-algorithm before any
+// signature arithmetic runs (SFN-823).
+//
+// The transformation, reproducible with any DER encoder: in `fx_us_leaf`,
+// replace the content of both OBJECT IDENTIFIER elements holding
+// `2a8648ce3d040304` (ecdsa-with-SHA512, 8 bytes) with the 120-byte string
+// `51` followed by 119 `01` octets — 0x51 encodes arcs 2.1 per X.690 8.19.4
+// and each 0x01 is a single-octet arc 1 — then re-encode every enclosing
+// length prefix. Both OIDs must change identically or `_verify_link` rejects
+// the inner/outer mismatch at x509_verify.sfn before reaching the dispatch.
+// No openssl invocation produces this; it is deliberately not a certificate
+// any issuer would sign.
+fn fx_ov_leaf() -> string {
+    return "3082031e3082020fa00302010202020182307a06785101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101013021311f301d06035504030c165361696c66696e2054657374205035323120526f6f74301e170d3236303130313030303030305a170d3237303130313030303030305a30163114301206035504030c0b6578616d706c652e636f6d30819b301006072a8648ce3d020106052b810400230381860004010f3b20a46031c536de4f6b25d5a892dd0e1803d93f6a047417e86f452d5dcc8bbd1f26d7034ee6fad7c614a5467653a5698ff82db3a6f0d8105af9c927f0c1fc860190cead8de1496ac3b9140d2a81f33eb519e08fc9e0a39144588c85794b15482c8244932e2706027c3cbcfd3fae52b92c488abbcc0050461d371944e793a581037ca3818e30818b300c0603551d130101ff04023000300e0603551d0f0101ff04040302078030130603551d25040c300a06082b0601050507030130160603551d11040f300d820b6578616d706c652e636f6d301d0603551d0e04160414315d9c3d613f09c819b10527b5b0fc9e16468aa6301f0603551d23041830168014e0c3bff0f517f83e9e95f3c320ab9291e01eabb9307a067851010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010103818c00308188024200985bf380447296ebbb8b6d4fd2fa0d25b09800685b9048535bdfef8c2c230e789be8b58b7720f7370a3125ea7f7ca121da1ee7232f0823f479a3f3497987860118024200fa1631a26e92d5daa55fddc3cddaefb39a5e43bd71c9a764feacb144638551faf5254e4d5da2c069e7f336c21ba10f6c75cb0bf5d5e41b735d5be9c766ff7b0f74";
+}
+
+// ── SFN-823 pair-mismatch fixture ──
+//
+// pm_leaf is `fx_ed_leaf` (SFN-340's Ed25519 leaf) with the tbsCertificate
+// and outer AlgorithmIdentifiers replaced, byte-for-byte identically, by
+// ecdsa-with-SHA256 (`2a8648ce3d040302`, 8 bytes) in place of the Ed25519
+// signature OID (`2b6570`, 3 bytes). It exists only to prove `_pair_detail`
+// names both OIDs when a supported signature algorithm cannot be paired
+// with the issuer's key algorithm; the now-stale Ed25519 signature bytes
+// are never verified, because `_verify_link` rejects on the algorithm
+// mismatch before any signature arithmetic runs (SFN-823).
+//
+// The transformation, reproducible with any DER encoder: in `fx_ed_leaf`,
+// replace the content of both OBJECT IDENTIFIER elements holding
+// `2b6570` (Ed25519, 3 bytes) — the tbsCertificate.signature AlgorithmIdentifier
+// and the outer Certificate.signatureAlgorithm AlgorithmIdentifier, but not
+// the subjectPublicKeyInfo's own Ed25519 OID, which is left unchanged — with
+// `2a8648ce3d040302` (ecdsa-with-SHA256, 8 bytes), then re-encode the two
+// enclosing SEQUENCE length prefixes (tbsCertificate and Certificate; each
+// grows by 5 bytes per replacement, and neither crosses the 127-byte
+// length-of-length boundary). Both OIDs must change identically or
+// `_verify_link` rejects the inner/outer mismatch before reaching the
+// dispatch. The chain is verified through `fx_ed_inter`, the immediate
+// issuer whose SPKI is checked by `_verify_link`; both `fx_ed_inter` and
+// `fx_ed_root` are unmodified, so their SPKI stays Ed25519 (`1.3.101.112`)
+// and the pairing failure is the only thing under test. No openssl
+// invocation produces this; it is deliberately not a certificate any issuer
+// would sign.
+fn fx_pm_leaf() -> string {
+    return "3082018a30820137a003020102020113300a06082a8648ce3d040302301d311b301906035504030c125361696c66696e2054657374204564204341301e170d3236303130313030303030305a170d3237303130313030303030305a30163114301206035504030c0b6578616d706c652e636f6d302a300506032b65700321007269d8384a31069150b30ae775d99433464e7956f4554d2bb7a6cf5335c7e6dda3819d30819a300c0603551d130101ff04023000300e0603551d0f0101ff04040302078030130603551d25040c300a06082b0601050507030130250603551d11041e301c820b6578616d706c652e636f6d820d2a2e6578616d706c652e636f6d301d0603551d0e041604147380118f809f57757dd55dbfb87943ec5aead34a301f0603551d23041830168014226768f6483d21e17344cd4338a7bb4b035b000f300a06082a8648ce3d040302034100d34e4d2e2d0cce5a5b164da3842a210917de63cfc7cdf169757537cf0aaec9d3325e504399f9a5c3c2b466265116004abf01d8a46be5eb9088d79f4333de8807";
+}
+
+// ── SFN-823 fixture, repurposed by SFN-824 ──
+//
+// pss_*  RSASSA-PSS certificate signature: a plain rsaEncryption root signs a
+//        leaf whose signature is RSASSA-PSS, so `signature_algorithm` parses
+//        as 1.2.840.113549.1.1.10 while the issuer's SPKI stays plain RSA.
+//        Its parameters are the supported profile — SHA-256, MGF1-SHA-256,
+//        salt 32 — so since SFN-824 wired the PSS OID into the dispatch this
+//        pair is the *positive* SHA-256 case, not the unsupported-algorithm
+//        rejection it was introduced for. That rejection now rides on the
+//        ecdsa-with-SHA512 `fx_us_leaf` instead. Produced with OpenSSL 3.6.3:
+//
+//   openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out pss_root.key
+//   openssl req -x509 -new -key pss_root.key -sha256 -subj "/CN=Sailfin Test Pss Root" \
+//     -not_before 20260101000000Z -not_after 20360101000000Z \
+//     -extensions v3_ca -config <extfile with basicConstraints=critical,CA:TRUE;
+//       keyUsage=critical,keyCertSign,cRLSign; subjectKeyIdentifier=hash> \
+//     -out pss_root.pem
+//   openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out pss_leaf.key
+//   openssl req -new -key pss_leaf.key -subj "/CN=example.com" -out pss_leaf.csr
+//   openssl x509 -req -in pss_leaf.csr -CA pss_root.pem -CAkey pss_root.key -CAcreateserial \
+//     -sigopt rsa_padding_mode:pss -sigopt rsa_pss_saltlen:digest -sha256 \
+//     -not_before 20260101000000Z -not_after 20270101000000Z \
+//     -extfile <basicConstraints=critical,CA:FALSE; keyUsage=critical,digitalSignature;
+//       extendedKeyUsage=serverAuth; subjectAltName=DNS:example.com,DNS:*.example.com;
+//       subjectKeyIdentifier=hash; authorityKeyIdentifier=keyid> \
+//     -out pss_leaf.pem
+//
+// `openssl verify -CAfile pss_root.pem pss_leaf.pem` accepts the pair, so the
+// rejection under test is ours and not a malformed certificate.
+fn fx_pss_root() -> string {
+    return "30820310308201f8a003020102021422a6df1f6676425705d51b35f7f512448c079836300d06092a864886f70d01010b05003020311e301c06035504030c155361696c66696e20546573742050737320526f6f74301e170d3236303130313030303030305a170d3336303130313030303030305a3020311e301c06035504030c155361696c66696e20546573742050737320526f6f7430820122300d06092a864886f70d01010105000382010f003082010a0282010100bf2b8f243a795be1fd803d811c93080f3c76607b4b1b5f6757e9c9d34e93f224995c68c09b97d62a5db77d54f4684d8a257c7d16e4753934fbc3318a6a780229e563ed9ee6bf72ed8ce7bd596df6bbc4120cf0c2fac18be372ed6ff17c0b0f48231afa308bd6ec5a7ae3ef2292a6e2faa8799ed324475e5202dda70850324ce9a8e302c5ef1841298a712927b8b0820b04900f353c2b947287b9b47ca1cef19224244cae2bae37b4f177e18a677d9e602e3acf06efc563fe21b3a0de7596c9efc021075cef2c70668e0af7011b0e6bd07c7a0d06810f66b78daf2253858a358ac123dcf17bfdbd15055f9346be1f2d201220cbb9a0f4f4048bc7fbd1c6c7c5030203010001a3423040300f0603551d130101ff040530030101ff300e0603551d0f0101ff040403020106301d0603551d0e0416041413063a75fba60b624a3b85320561a666a64f1a07300d06092a864886f70d01010b05000382010100870ac035154334ab8fd51c460c1c33c8e33d7a8be83736e8bf27faf76a935ba5491675fdabda30d9935521c5248e3228d4e9a7f119a07c802358d91e8100caca075e7c27a8274998d0e3e2d520491e5222c19b6625d44dd9bbb8b3b63da3bec63f33fa61de159361fd528d39f9b58d18f66f13ec2465d42e033b58424d6368f8ac16118ff90d3201a02c8c05e94c9e623e5e48f2668b1ba4a2b87c9a51e733f8b3a8f59780bef124c806874e287664e87d54b73b048fbae500ac4c866dc3b8455b5870304392e37a120ab1af15509af3c04ff67bcc8988bcbd0f19b8d62d7a22124ae7e708d37269482248dc8cb37c886064eae964873ba4e47e40758f9240d7";
+}
+
+fn fx_pss_leaf() -> string {
+    return "308203ca3082027ea0030201020214057336b4a93387019d8ef2536bc2c6cddb17fbf2304106092a864886f70d01010a3034a00f300d06096086480165030402010500a11c301a06092a864886f70d010108300d06096086480165030402010500a2030201203020311e301c06035504030c155361696c66696e20546573742050737320526f6f74301e170d3236303130313030303030305a170d3237303130313030303030305a30163114301206035504030c0b6578616d706c652e636f6d30820122300d06092a864886f70d01010105000382010f003082010a0282010100db86977d2008f48685754cd0add379270f86b227e52657aab062aeec8f90986c4455cc01811ae8594c167560da72858ad1a2ee754222f7d0cc50187210b42a8de893fc647275366652cd96348a65c70b286996560671e2dec7558330989d47dff289c54e93424da842ba8308870d583fa70f0d114947e12e351a16e3bdf39b8516b89509b747b30c64e49ad7b292f6bf4fd510d805c49cfcbeca8c9617d76c9c69c4d304254b6d4f0a7f6ef8c6027f583556fa9ce0f378be6dcc8d6a5ad0489281b9bdd16d5a6c78da00f47e10635d4426a4d9c5dbe03e5d5929919275067e922a46b2894a44ebc865f7f7f1f474c826d4b7db8e5f40c10f6265932480b1d80b0203010001a3819d30819a300c0603551d130101ff04023000300e0603551d0f0101ff04040302078030130603551d25040c300a06082b0601050507030130250603551d11041e301c820b6578616d706c652e636f6d820d2a2e6578616d706c652e636f6d301d0603551d0e041604146aed482d5e1fc559fdc61a5d5e5e175575b189ca301f0603551d2304183016801413063a75fba60b624a3b85320561a666a64f1a07304106092a864886f70d01010a3034a00f300d06096086480165030402010500a11c301a06092a864886f70d010108300d06096086480165030402010500a20302012003820101008064023ec84bca987f64954644d453ff16d71832670b4d59bd85d4a6405385a1aecbc5cdb701f633c53d437f29347ffca8cec96f6b2e5d70050b91ed9c3f50641f21f927a8ee678a0dfca6562ff7d29fc26d0b69e5b0119ef7ecb8ee3eb1396b3456746816ad8b7a88da48665203e71738773560bb1e95ff6f400fd34d211d5e18b3782e4e959f3e6aafbcc18747438631a21d112c25d767d68408b8c74a274d5bac26d227124639ff9efcbc12a03af86e7b91d9f2bfc595dd5bb4d965bbdfc6ca73e5b2326f593b28f200d7012195dd4486f876949209722efaf73fa95e46d563bb41954eae257d6f791d4ea2c1a8681ced4d3e6fdd2741df335c1b39a3a787";
+}
+
+// ── SFN-824 fixtures ──
+//
+// pss_noparams / pss_tampered are synthetic byte-level splices of
+// `fx_pss_leaf`, not independent OpenSSL output — OpenSSL will not emit an
+// RSASSA-PSS AlgorithmIdentifier with an absent `parameters` field, and a
+// signature that fails to verify is by definition not something a signer
+// produces.
+//
+//   pss_noparams  both signature AlgorithmIdentifiers (the signed
+//                 tbsCertificate.signature and the outer copy) rewritten from
+//                 `SEQUENCE { OID, RSASSA-PSS-params }` to `SEQUENCE { OID }`,
+//                 with the tbsCertificate and Certificate length prefixes
+//                 recomputed. Both copies are edited so the certificate is
+//                 refused for its parameters rather than for the
+//                 inner/outer mismatch a one-sided edit would create. Editing
+//                 the signed region invalidates the signature, which is
+//                 immaterial: the parameter check runs first, and asserting
+//                 the parameter code is what pins that ordering.
+//   pss_outer_stripped
+//                 `fx_pss_leaf` with the RSASSA-PSS-params removed from the
+//                 OUTER signatureAlgorithm only, leaving the signed
+//                 tbsCertificate — and so the inner copy — byte-identical.
+//                 The OID still matches on both sides, so this reaches the
+//                 dispatch and is caught by the parameters comparison rather
+//                 than by the OID equality check that precedes it.
+//   pss_tampered  `fx_pss_leaf` with the low bit of the final signature octet
+//                 flipped. Length-preserving, so no prefix changes; the
+//                 profile still parses as supported and the failure lands in
+//                 the PSS verifier itself.
+fn fx_pss_noparams() -> string {
+    return "3082035e30820248a0030201020214057336b4a93387019d8ef2536bc2c6cddb17fbf2300b06092a864886f70d01010a3020311e301c06035504030c155361696c66696e20546573742050737320526f6f74301e170d3236303130313030303030305a170d3237303130313030303030305a30163114301206035504030c0b6578616d706c652e636f6d30820122300d06092a864886f70d01010105000382010f003082010a0282010100db86977d2008f48685754cd0add379270f86b227e52657aab062aeec8f90986c4455cc01811ae8594c167560da72858ad1a2ee754222f7d0cc50187210b42a8de893fc647275366652cd96348a65c70b286996560671e2dec7558330989d47dff289c54e93424da842ba8308870d583fa70f0d114947e12e351a16e3bdf39b8516b89509b747b30c64e49ad7b292f6bf4fd510d805c49cfcbeca8c9617d76c9c69c4d304254b6d4f0a7f6ef8c6027f583556fa9ce0f378be6dcc8d6a5ad0489281b9bdd16d5a6c78da00f47e10635d4426a4d9c5dbe03e5d5929919275067e922a46b2894a44ebc865f7f7f1f474c826d4b7db8e5f40c10f6265932480b1d80b0203010001a3819d30819a300c0603551d130101ff04023000300e0603551d0f0101ff04040302078030130603551d25040c300a06082b0601050507030130250603551d11041e301c820b6578616d706c652e636f6d820d2a2e6578616d706c652e636f6d301d0603551d0e041604146aed482d5e1fc559fdc61a5d5e5e175575b189ca301f0603551d2304183016801413063a75fba60b624a3b85320561a666a64f1a07300b06092a864886f70d01010a03820101008064023ec84bca987f64954644d453ff16d71832670b4d59bd85d4a6405385a1aecbc5cdb701f633c53d437f29347ffca8cec96f6b2e5d70050b91ed9c3f50641f21f927a8ee678a0dfca6562ff7d29fc26d0b69e5b0119ef7ecb8ee3eb1396b3456746816ad8b7a88da48665203e71738773560bb1e95ff6f400fd34d211d5e18b3782e4e959f3e6aafbcc18747438631a21d112c25d767d68408b8c74a274d5bac26d227124639ff9efcbc12a03af86e7b91d9f2bfc595dd5bb4d965bbdfc6ca73e5b2326f593b28f200d7012195dd4486f876949209722efaf73fa95e46d563bb41954eae257d6f791d4ea2c1a8681ced4d3e6fdd2741df335c1b39a3a787";
+}
+
+fn fx_pss_tampered() -> string {
+    return "308203ca3082027ea0030201020214057336b4a93387019d8ef2536bc2c6cddb17fbf2304106092a864886f70d01010a3034a00f300d06096086480165030402010500a11c301a06092a864886f70d010108300d06096086480165030402010500a2030201203020311e301c06035504030c155361696c66696e20546573742050737320526f6f74301e170d3236303130313030303030305a170d3237303130313030303030305a30163114301206035504030c0b6578616d706c652e636f6d30820122300d06092a864886f70d01010105000382010f003082010a0282010100db86977d2008f48685754cd0add379270f86b227e52657aab062aeec8f90986c4455cc01811ae8594c167560da72858ad1a2ee754222f7d0cc50187210b42a8de893fc647275366652cd96348a65c70b286996560671e2dec7558330989d47dff289c54e93424da842ba8308870d583fa70f0d114947e12e351a16e3bdf39b8516b89509b747b30c64e49ad7b292f6bf4fd510d805c49cfcbeca8c9617d76c9c69c4d304254b6d4f0a7f6ef8c6027f583556fa9ce0f378be6dcc8d6a5ad0489281b9bdd16d5a6c78da00f47e10635d4426a4d9c5dbe03e5d5929919275067e922a46b2894a44ebc865f7f7f1f474c826d4b7db8e5f40c10f6265932480b1d80b0203010001a3819d30819a300c0603551d130101ff04023000300e0603551d0f0101ff04040302078030130603551d25040c300a06082b0601050507030130250603551d11041e301c820b6578616d706c652e636f6d820d2a2e6578616d706c652e636f6d301d0603551d0e041604146aed482d5e1fc559fdc61a5d5e5e175575b189ca301f0603551d2304183016801413063a75fba60b624a3b85320561a666a64f1a07304106092a864886f70d01010a3034a00f300d06096086480165030402010500a11c301a06092a864886f70d010108300d06096086480165030402010500a20302012003820101008064023ec84bca987f64954644d453ff16d71832670b4d59bd85d4a6405385a1aecbc5cdb701f633c53d437f29347ffca8cec96f6b2e5d70050b91ed9c3f50641f21f927a8ee678a0dfca6562ff7d29fc26d0b69e5b0119ef7ecb8ee3eb1396b3456746816ad8b7a88da48665203e71738773560bb1e95ff6f400fd34d211d5e18b3782e4e959f3e6aafbcc18747438631a21d112c25d767d68408b8c74a274d5bac26d227124639ff9efcbc12a03af86e7b91d9f2bfc595dd5bb4d965bbdfc6ca73e5b2326f593b28f200d7012195dd4486f876949209722efaf73fa95e46d563bb41954eae257d6f791d4ea2c1a8681ced4d3e6fdd2741df335c1b39a3a786";
+}
+
+// pss2_*  A second RSASSA-PSS family carrying the parameter profiles the
+//         `fx_pss_*` pair cannot: SHA-384, and three certificates that differ
+//         from the supported profile in exactly one parameter. One
+//         rsaEncryption root signs all four leaves, and all four leaves share
+//         one key and one CSR, so the only variable across them is the
+//         `-sigopt` set. Produced with OpenSSL 3.0.13:
+//
+//   openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out root.key
+//   openssl req -x509 -new -key root.key -sha256 -days 3650 \
+//     -subj "/CN=Sailfin Test Pss2 Root" \
+//     -addext basicConstraints=critical,CA:TRUE \
+//     -addext keyUsage=critical,keyCertSign,cRLSign \
+//     -addext subjectKeyIdentifier=hash -out root.pem
+//   openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out leaf.key
+//   openssl req -new -key leaf.key -subj "/CN=example.com" -out leaf.csr
+//   openssl x509 -req -in leaf.csr -CA root.pem -CAkey root.key -CAcreateserial \
+//     -extfile leaf.ext -days 365 -sigopt rsa_padding_mode:pss <per-leaf opts> \
+//     -out <leaf>.pem
+//
+//         with leaf.ext holding basicConstraints=critical,CA:FALSE;
+//         keyUsage=critical,digitalSignature; extendedKeyUsage=serverAuth;
+//         subjectAltName=DNS:example.com,DNS:*.example.com;
+//         subjectKeyIdentifier=hash; authorityKeyIdentifier=keyid, and the
+//         per-leaf options:
+//
+//   pss2_256      -sigopt rsa_pss_saltlen:digest -sigopt rsa_mgf1_md:sha256 -sha256
+//   pss2_384      -sigopt rsa_pss_saltlen:digest -sigopt rsa_mgf1_md:sha384 -sha384
+//   pss2_salt20   -sigopt rsa_pss_saltlen:20     -sigopt rsa_mgf1_md:sha256 -sha256
+//   pss2_salt64   -sigopt rsa_pss_saltlen:64     -sigopt rsa_mgf1_md:sha256 -sha256
+//   pss2_mgf384   -sigopt rsa_pss_saltlen:digest -sigopt rsa_mgf1_md:sha384 -sha256
+//
+//         `openssl verify -CAfile root.pem <leaf>.pem` prints OK for all five,
+//         including salt20, salt64 and mgf384: those are well-formed RFC 8017
+//         encodings that OpenSSL supports and this capsule deliberately does
+//         not. Their rejection here is a scope decision, not a claim that the
+//         certificates are malformed — which is why they are refused as
+//         unsupported parameters rather than as a bad signature.
+//
+//         This OpenSSL build rejects `-not_before`/`-not_after` on `req`, so
+//         the window starts at generation time rather than the 2026-01-01 the
+//         older fixtures pin; `pss2_now_ms` exists for that reason.
+fn pss2_now_ms() -> int { return 1788220800000; }
+
+fn fx_pss_outer_stripped() -> string {
+    return "308203943082027ea0030201020214057336b4a93387019d8ef2536bc2c6cddb17fbf2304106092a864886f70d01010a3034a00f300d06096086480165030402010500a11c301a06092a864886f70d010108300d06096086480165030402010500a2030201203020311e301c06035504030c155361696c66696e20546573742050737320526f6f74301e170d3236303130313030303030305a170d3237303130313030303030305a30163114301206035504030c0b6578616d706c652e636f6d30820122300d06092a864886f70d01010105000382010f003082010a0282010100db86977d2008f48685754cd0add379270f86b227e52657aab062aeec8f90986c4455cc01811ae8594c167560da72858ad1a2ee754222f7d0cc50187210b42a8de893fc647275366652cd96348a65c70b286996560671e2dec7558330989d47dff289c54e93424da842ba8308870d583fa70f0d114947e12e351a16e3bdf39b8516b89509b747b30c64e49ad7b292f6bf4fd510d805c49cfcbeca8c9617d76c9c69c4d304254b6d4f0a7f6ef8c6027f583556fa9ce0f378be6dcc8d6a5ad0489281b9bdd16d5a6c78da00f47e10635d4426a4d9c5dbe03e5d5929919275067e922a46b2894a44ebc865f7f7f1f474c826d4b7db8e5f40c10f6265932480b1d80b0203010001a3819d30819a300c0603551d130101ff04023000300e0603551d0f0101ff04040302078030130603551d25040c300a06082b0601050507030130250603551d11041e301c820b6578616d706c652e636f6d820d2a2e6578616d706c652e636f6d301d0603551d0e041604146aed482d5e1fc559fdc61a5d5e5e175575b189ca301f0603551d2304183016801413063a75fba60b624a3b85320561a666a64f1a07300b06092a864886f70d01010a03820101008064023ec84bca987f64954644d453ff16d71832670b4d59bd85d4a6405385a1aecbc5cdb701f633c53d437f29347ffca8cec96f6b2e5d70050b91ed9c3f50641f21f927a8ee678a0dfca6562ff7d29fc26d0b69e5b0119ef7ecb8ee3eb1396b3456746816ad8b7a88da48665203e71738773560bb1e95ff6f400fd34d211d5e18b3782e4e959f3e6aafbcc18747438631a21d112c25d767d68408b8c74a274d5bac26d227124639ff9efcbc12a03af86e7b91d9f2bfc595dd5bb4d965bbdfc6ca73e5b2326f593b28f200d7012195dd4486f876949209722efaf73fa95e46d563bb41954eae257d6f791d4ea2c1a8681ced4d3e6fdd2741df335c1b39a3a787";
+}
+
+fn fx_pss2_512() -> string {
+    return "308203cb3082027fa003020102021478841d4cf3f0996451f2e8a17d42c41b08176c93304106092a864886f70d01010a3034a00f300d06096086480165030402030500a11c301a06092a864886f70d010108300d06096086480165030402030500a2030201403021311f301d06035504030c165361696c66696e2054657374205073733220526f6f74301e170d3236303831303030353733325a170d3237303831303030353733325a30163114301206035504030c0b6578616d706c652e636f6d30820122300d06092a864886f70d01010105000382010f003082010a0282010100e5de0c06634d93d96bc599ce362a351aa2792e11b49faaadd48d1f7eb65c73a1acec70beb7ea3e4fa0dfd0884d50d0b6c33ed46cbd830140dffc55c6ef3ec5365e203071d886c184d96980cf894193eab83a4c1b3b8ffe76c061a227166d71abd7e7215d6098e10e0e4d5d981165aa29c8b507ecffb21516461665f3e833e9fc5e92699812633b1c1952e751527cb5a899d4a7404e04a8c2551271bf437417233b3aea702dd4773cfe193259df047b7ba114a09d471b59bd486014e2a58118efd1c083250302f039a0a5ee62e2dcb0d61b2efa46cda04f0a0e2472a8b968b980d03cfaf5714c49f5426676ef07d0b9492ce59328142d6b32ed00d3bdbbf94e470203010001a3819d30819a300c0603551d130101ff04023000300e0603551d0f0101ff04040302078030130603551d25040c300a06082b0601050507030130250603551d11041e301c820b6578616d706c652e636f6d820d2a2e6578616d706c652e636f6d301d0603551d0e04160414d3b659d14855f0d1b0d5e6b9a78f335b853db355301f0603551d23041830168014a5b96551c2d18a6920ba01ae53e55ccbc25b3489304106092a864886f70d01010a3034a00f300d06096086480165030402030500a11c301a06092a864886f70d010108300d06096086480165030402030500a20302014003820101001325c09994279a96a8862576cff97f7ac5a9c28f576674b8ac795bb90f29a48be5500929061cbb5504674c43c6f4792fcd05829228982c6ffc744380ad5a14d89c1e77a37ec20da62c2a7fc279f7c78d8d286b402b582fdaf79ce75259682fdc9c238c40ac5b0c1749f9332112df706efbc8ca776f9210462ff8b8ab79798407791999578646ec6437ce50243a334eabebade09bd72e14f611a59b20ec287cff550615eca9c4f67380d69472ca814197be628b5ba2d2d0e334aa8f19704c41b724efec87162266b9b2a2b5bb7de8cd55ef51ad3811e25908084af7736e930eab8520b774220879e081e3ecc46a5ad2c0ba241368c1f51009217f265b861050f8";
+}
+
+fn fx_pss2_root() -> string {
+    return "308203333082021ba00302010202146bb7340192361adcd4edf1f516af0d2edcb2e4ef300d06092a864886f70d01010b05003021311f301d06035504030c165361696c66696e2054657374205073733220526f6f74301e170d3236303831303030333635325a170d3336303830373030333635325a3021311f301d06035504030c165361696c66696e2054657374205073733220526f6f7430820122300d06092a864886f70d01010105000382010f003082010a0282010100deafb3b69262e2aba28cb8d6bcfb7dfe88712aadb38c50d263be15c4f38bc570054291c03a4c9c29217a51ff1370cb948cad2191eef0970e691d75e5f6e3a0c0e0c9c9b4467dddfdd2827492a560d64a43638a9f9c4967be9d2354c11710a7003a41a599f4a0a6c643d8cbd2b5e0ec0684358f0b627cd4456bfb587b9042f27d0c4b07a35318e42b12a73ad34b2ee7a1eefcb3ec3adc67341da763fc874a694a7eb7d7126ed87e2558aa4b724ba1f162953f73a250781c65f8bd54d7a82061749e8c6797a1493a89f4326cc09541fd73076f7fca35e701f21c054ac8241eebd49c5ff3cea5dd544d8f8ec95af037bfe11aa01358a303f8dc08b2105941ee6a3f0203010001a3633061301f0603551d23041830168014a5b96551c2d18a6920ba01ae53e55ccbc25b3489300f0603551d130101ff040530030101ff300e0603551d0f0101ff040403020106301d0603551d0e04160414a5b96551c2d18a6920ba01ae53e55ccbc25b3489300d06092a864886f70d01010b0500038201010083457a487ffefc7c3fa3256276064860bf64e1262a8d50e7b6f9dcfb00e1e9e2c5c00d89d3ecf14ceb7172086b637d7096b4583251edea71cee3ce2b38606064fd47e556cac6763d8a63ac9d6efd0ad76b3301ad3f12f1836c7f2fe6b8bcb919bd6c1bcbfbdffd9e05efca7c13906aceeb60e8f17e48dc3ba1789a1d017f5d4d79946bf1ccfdf195243a6beae38b5929bc3daa55fcf1ea3ec3460bca16766cd6889f46f40f2ecd85c3e4e2f6aa5774feaba6c8e6abe6c9545313130fbc2aa9b46c828fb7aef7f21e8befc73d2e9f0fabad29c70265d19d8548a4b16e320043b29455521dd25fe3b01de61d33115da81503479e827b9aa4c55415e6c752576ab8";
+}
+
+fn fx_pss2_256() -> string {
+    return "308203cb3082027fa003020102021478841d4cf3f0996451f2e8a17d42c41b08176c91304106092a864886f70d01010a3034a00f300d06096086480165030402010500a11c301a06092a864886f70d010108300d06096086480165030402010500a2030201203021311f301d06035504030c165361696c66696e2054657374205073733220526f6f74301e170d3236303831303030333731335a170d3237303831303030333731335a30163114301206035504030c0b6578616d706c652e636f6d30820122300d06092a864886f70d01010105000382010f003082010a0282010100e5de0c06634d93d96bc599ce362a351aa2792e11b49faaadd48d1f7eb65c73a1acec70beb7ea3e4fa0dfd0884d50d0b6c33ed46cbd830140dffc55c6ef3ec5365e203071d886c184d96980cf894193eab83a4c1b3b8ffe76c061a227166d71abd7e7215d6098e10e0e4d5d981165aa29c8b507ecffb21516461665f3e833e9fc5e92699812633b1c1952e751527cb5a899d4a7404e04a8c2551271bf437417233b3aea702dd4773cfe193259df047b7ba114a09d471b59bd486014e2a58118efd1c083250302f039a0a5ee62e2dcb0d61b2efa46cda04f0a0e2472a8b968b980d03cfaf5714c49f5426676ef07d0b9492ce59328142d6b32ed00d3bdbbf94e470203010001a3819d30819a300c0603551d130101ff04023000300e0603551d0f0101ff04040302078030130603551d25040c300a06082b0601050507030130250603551d11041e301c820b6578616d706c652e636f6d820d2a2e6578616d706c652e636f6d301d0603551d0e04160414d3b659d14855f0d1b0d5e6b9a78f335b853db355301f0603551d23041830168014a5b96551c2d18a6920ba01ae53e55ccbc25b3489304106092a864886f70d01010a3034a00f300d06096086480165030402010500a11c301a06092a864886f70d010108300d06096086480165030402010500a203020120038201010051f85aa862fd2ff0ae360233890b553a29cb1e3c035ae9ee6d64ec61fa0fdbe6b0568ea5caf633c703e0862453cbd03808eef186db8f78b4e52b3a9bbf61cc7f5812e0a04d621cffe1268099c95a2d2a58d3bf7353d4ec642d3deedc30691c72110534dba5fcd2d77df2dcf55da3e4690d919b8f986b6c1231bd0113a109c395809d8d2605281c2ebaec3494b361f271363a8f559b39f78a2b8640e7f8b05e6f5be42c50576ae4bdfe10e2cd824193541b1554c575d93c5514ebae24661efe57fc3398cf2f9da4331872a52c48b9976cb9288b093c61e5aa60f1f270b28dc3d8c43635028ca86647ae1961ec11ed4af9a21c8bd8530c7ae5277f72bf6b3876b9";
+}
+
+fn fx_pss2_384() -> string {
+    return "308203cb3082027fa003020102021478841d4cf3f0996451f2e8a17d42c41b08176c8e304106092a864886f70d01010a3034a00f300d06096086480165030402020500a11c301a06092a864886f70d010108300d06096086480165030402020500a2030201303021311f301d06035504030c165361696c66696e2054657374205073733220526f6f74301e170d3236303831303030333731335a170d3237303831303030333731335a30163114301206035504030c0b6578616d706c652e636f6d30820122300d06092a864886f70d01010105000382010f003082010a0282010100e5de0c06634d93d96bc599ce362a351aa2792e11b49faaadd48d1f7eb65c73a1acec70beb7ea3e4fa0dfd0884d50d0b6c33ed46cbd830140dffc55c6ef3ec5365e203071d886c184d96980cf894193eab83a4c1b3b8ffe76c061a227166d71abd7e7215d6098e10e0e4d5d981165aa29c8b507ecffb21516461665f3e833e9fc5e92699812633b1c1952e751527cb5a899d4a7404e04a8c2551271bf437417233b3aea702dd4773cfe193259df047b7ba114a09d471b59bd486014e2a58118efd1c083250302f039a0a5ee62e2dcb0d61b2efa46cda04f0a0e2472a8b968b980d03cfaf5714c49f5426676ef07d0b9492ce59328142d6b32ed00d3bdbbf94e470203010001a3819d30819a300c0603551d130101ff04023000300e0603551d0f0101ff04040302078030130603551d25040c300a06082b0601050507030130250603551d11041e301c820b6578616d706c652e636f6d820d2a2e6578616d706c652e636f6d301d0603551d0e04160414d3b659d14855f0d1b0d5e6b9a78f335b853db355301f0603551d23041830168014a5b96551c2d18a6920ba01ae53e55ccbc25b3489304106092a864886f70d01010a3034a00f300d06096086480165030402020500a11c301a06092a864886f70d010108300d06096086480165030402020500a203020130038201010034b0d535f9f13caeb6744ae81d646c3559d9262ae862c7f2d7b2ab61df3127fb81592212f6e159c115e9d3b29a0235fd59407856a0e84b5572bc005c2134eeda0588796bce2f7a62ebd8bada2ed0a6c6bbd53fdb2693a0e04c0eb0ed5a39aac72464bd7c4cb4b0dcdcc223ea87d293a98c2be486c9aaf5f91a002c7eaba3a9a0a1595a8353455ecbc27208fd97ceda8611e2c879736f819027dae5014ccdb45e0860053c7c5a3d3d74fcd446ff651850c55d3034dd17c11189ada0a1b8cc2b2ad41c5a0bde012f68fe906d471626446cbba77f14dc8fd3a027038abcaeb0b60f3eb9e9407f60ce03de7efa19501e98e09f7963c0b7589180a11497799833cc70";
+}
+
+fn fx_pss2_salt20() -> string {
+    return "308203c13082027aa003020102021478841d4cf3f0996451f2e8a17d42c41b08176c8f303c06092a864886f70d01010a302fa00f300d06096086480165030402010500a11c301a06092a864886f70d010108300d060960864801650304020105003021311f301d06035504030c165361696c66696e2054657374205073733220526f6f74301e170d3236303831303030333731335a170d3237303831303030333731335a30163114301206035504030c0b6578616d706c652e636f6d30820122300d06092a864886f70d01010105000382010f003082010a0282010100e5de0c06634d93d96bc599ce362a351aa2792e11b49faaadd48d1f7eb65c73a1acec70beb7ea3e4fa0dfd0884d50d0b6c33ed46cbd830140dffc55c6ef3ec5365e203071d886c184d96980cf894193eab83a4c1b3b8ffe76c061a227166d71abd7e7215d6098e10e0e4d5d981165aa29c8b507ecffb21516461665f3e833e9fc5e92699812633b1c1952e751527cb5a899d4a7404e04a8c2551271bf437417233b3aea702dd4773cfe193259df047b7ba114a09d471b59bd486014e2a58118efd1c083250302f039a0a5ee62e2dcb0d61b2efa46cda04f0a0e2472a8b968b980d03cfaf5714c49f5426676ef07d0b9492ce59328142d6b32ed00d3bdbbf94e470203010001a3819d30819a300c0603551d130101ff04023000300e0603551d0f0101ff04040302078030130603551d25040c300a06082b0601050507030130250603551d11041e301c820b6578616d706c652e636f6d820d2a2e6578616d706c652e636f6d301d0603551d0e04160414d3b659d14855f0d1b0d5e6b9a78f335b853db355301f0603551d23041830168014a5b96551c2d18a6920ba01ae53e55ccbc25b3489303c06092a864886f70d01010a302fa00f300d06096086480165030402010500a11c301a06092a864886f70d010108300d0609608648016503040201050003820101005d22022a7b0cf8c72ad5db6a69aa5d7b228a4c62931badc0f64f57c9a02622723406fb59ed770ea130eaaeac148319cf1df36d2fb148a824602cf41699bce6c401078424145900af74f3f1748816b59f287710534814bb94e54bb474825b38e3b90c992a066e8544ac4b2397fbdacece707afb6efdf605e97efbb5ff6690c39611cfd34e385503184a25e5c44600f42b886cdd9a294381afe75397d9ed970c0066286461a60d7bbaaf470f32624b7e00be9df009b04c2c5a9d9c09fb40f16ac2232dc1d38c0a473779b75453ca5f0d830a047961fa220e73d87d83a734fdfbc3506eb50b83ad297448b51786c16b27dd5efce2e6369a3d7828c1f3d357661a87";
+}
+
+fn fx_pss2_salt64() -> string {
+    return "308203cb3082027fa003020102021478841d4cf3f0996451f2e8a17d42c41b08176c92304106092a864886f70d01010a3034a00f300d06096086480165030402010500a11c301a06092a864886f70d010108300d06096086480165030402010500a2030201403021311f301d06035504030c165361696c66696e2054657374205073733220526f6f74301e170d3236303831303030343033345a170d3237303831303030343033345a30163114301206035504030c0b6578616d706c652e636f6d30820122300d06092a864886f70d01010105000382010f003082010a0282010100e5de0c06634d93d96bc599ce362a351aa2792e11b49faaadd48d1f7eb65c73a1acec70beb7ea3e4fa0dfd0884d50d0b6c33ed46cbd830140dffc55c6ef3ec5365e203071d886c184d96980cf894193eab83a4c1b3b8ffe76c061a227166d71abd7e7215d6098e10e0e4d5d981165aa29c8b507ecffb21516461665f3e833e9fc5e92699812633b1c1952e751527cb5a899d4a7404e04a8c2551271bf437417233b3aea702dd4773cfe193259df047b7ba114a09d471b59bd486014e2a58118efd1c083250302f039a0a5ee62e2dcb0d61b2efa46cda04f0a0e2472a8b968b980d03cfaf5714c49f5426676ef07d0b9492ce59328142d6b32ed00d3bdbbf94e470203010001a3819d30819a300c0603551d130101ff04023000300e0603551d0f0101ff04040302078030130603551d25040c300a06082b0601050507030130250603551d11041e301c820b6578616d706c652e636f6d820d2a2e6578616d706c652e636f6d301d0603551d0e04160414d3b659d14855f0d1b0d5e6b9a78f335b853db355301f0603551d23041830168014a5b96551c2d18a6920ba01ae53e55ccbc25b3489304106092a864886f70d01010a3034a00f300d06096086480165030402010500a11c301a06092a864886f70d010108300d06096086480165030402010500a2030201400382010100c06877dad97dae16b93e0a954b683be725359ab98dc49367f6a90821f1952109225835a548dccd0623d5b12948840cae2d1ec08c4dbef1be07f9ce3573e6a67f09c4d330c024cf1d7e590545b30c91380742e4d06436954e66d866ca472cd4e6d82c7ea7d9a893b367e2ff2e87d7a6be21a4871822ae073936e917693321f08472bced946ffd2a07b09b3af648bf91823eaf30561d06af78c4a5a175a428e6513103b067dc3996fcc69034cb7e414d93be90501f1bf2b4cd5c59477d1b20648c5d248fa6d87b11357bfa3d5b4828b16f4a2250164021973e48f276034bde6415a3c6edce6014f4168e13266a5e3bd44946bb5b60ac7fd98dff33dffaef355b54";
+}
+
+fn fx_pss2_mgf384() -> string {
+    return "308203cb3082027fa003020102021478841d4cf3f0996451f2e8a17d42c41b08176c90304106092a864886f70d01010a3034a00f300d06096086480165030402010500a11c301a06092a864886f70d010108300d06096086480165030402020500a2030201203021311f301d06035504030c165361696c66696e2054657374205073733220526f6f74301e170d3236303831303030333731335a170d3237303831303030333731335a30163114301206035504030c0b6578616d706c652e636f6d30820122300d06092a864886f70d01010105000382010f003082010a0282010100e5de0c06634d93d96bc599ce362a351aa2792e11b49faaadd48d1f7eb65c73a1acec70beb7ea3e4fa0dfd0884d50d0b6c33ed46cbd830140dffc55c6ef3ec5365e203071d886c184d96980cf894193eab83a4c1b3b8ffe76c061a227166d71abd7e7215d6098e10e0e4d5d981165aa29c8b507ecffb21516461665f3e833e9fc5e92699812633b1c1952e751527cb5a899d4a7404e04a8c2551271bf437417233b3aea702dd4773cfe193259df047b7ba114a09d471b59bd486014e2a58118efd1c083250302f039a0a5ee62e2dcb0d61b2efa46cda04f0a0e2472a8b968b980d03cfaf5714c49f5426676ef07d0b9492ce59328142d6b32ed00d3bdbbf94e470203010001a3819d30819a300c0603551d130101ff04023000300e0603551d0f0101ff04040302078030130603551d25040c300a06082b0601050507030130250603551d11041e301c820b6578616d706c652e636f6d820d2a2e6578616d706c652e636f6d301d0603551d0e04160414d3b659d14855f0d1b0d5e6b9a78f335b853db355301f0603551d23041830168014a5b96551c2d18a6920ba01ae53e55ccbc25b3489304106092a864886f70d01010a3034a00f300d06096086480165030402010500a11c301a06092a864886f70d010108300d06096086480165030402020500a2030201200382010100cd7695ea3cb602c4b72dfd918feda90e31de1e2b0118e8954fb4e90a2e535813e500b3bd494c098ee07c1a392a8d2dac2bf4e53561305499bbb483650738a7a69551b836f1de3fe7bc95453a405f334d53539ec99e168da86a395851d57cea574500b8f7cbabf045fbd2eceb1d5071307dfce4e4b50cf1c57ce34628c45a96e3a19e1a4b4ba794b4ddd42c3ff24257b7af2015cb6dc82a4d2dc9d00e3074fb8673ab5a2e9003e96ab94ea53a6868a4d4f9bdc470a0cef759416694e183f20110e505fd22679a26d07542077802cea6cf94a84a819d515a0fc04afefd4dc7378a806e961402f803fc4e8e9502d4e5254d523861fb47b412b2bfa1cd09afd6a83d";
+}
+
+// ex_*  The live example.com chain, captured once with
+//       `openssl s_client -connect example.com:443 -servername example.com
+//       -showcerts` and embedded verbatim in path order: leaf, Cloudflare TLS
+//       Issuing ECC CA 3, SSL.com TLS Transit ECC CA R2, SSL.com TLS ECC Root
+//       CA 2022. Nothing here contacts the network at test time. See
+//       `ex_now_ms` for why the snapshot is pinned separately.
+fn fx_ex_leaf() -> string {
+    return "308203e63082038da00302010202100624d0ab311558780b7d5213b9631831300a06082a8648ce3d0403023051310b300906035504061302555331183016060355040a0c0f53534c20436f72706f726174696f6e3128302606035504030c1f436c6f7564666c61726520544c532049737375696e67204543432043412033301e170d3236303732393232313030385a170d3236313032373232313732315a30163114301206035504030c0b6578616d706c652e636f6d3059301306072a8648ce3d020106082a8648ce3d03010703420004764e09a3ddb2cf45a54dd15b9df05100522333dd9d8177996d8b7f6e86ebc1011ca7f91e89264042bf9e1d9538b3cda501ccb9eb89a3d55bdbb2b182095d3562a38202803082027c300c0603551d130101ff04023000301f0603551d230418301680148303fde7f6f54a4d1541f4ed2216d3320a3eca66306c06082b060105050701010460305e303906082b06010505073002862d687474703a2f2f692e63662d692e73736c2e636f6d2f436c6f7564666c6172652d544c532d492d45332e636572302106082b060105050730018615687474703a2f2f6f2e63662d692e73736c2e636f6d30250603551d11041e301c820b6578616d706c652e636f6d820d2a2e6578616d706c652e636f6d30230603551d20041c301a3008060667810c010201300e060c2b0601040182a9300103010130130603551d25040c300a06082b0601050507030130530603551d1f044c304a3048a046a0448642687474703a2f2f632e63662d692e73736c2e636f6d2f616538303165643163353562623537396437393230386230643737326163666238636333613230382e63726c300e0603551d0f0101ff040403020780300f06092b0601040182da4b2c0402050030820104060a2b06010401d6790204020481f50481f200f0007700944e4387faecc1ef81f3192426a8186501c7d35f3802013f72677d55372e19d80000019faff6c3360000040300483046022100fd585a2d446cd64632d4a4abb95201551085b6241eccb6f65efada1c48d81cc90221009085743a02584f7d26314a4a6ce379185b887d0cdc0c3e878d78cbd6c6c53f8f007500c8a3c47fc7b3adb9356b013f6a7a126de33a4e43a5c646f997ad3975991dcf9a0000019faff6c34c000004030046304402200aa6b3ed8cc40b94bad292ce1e083a0967a5aa7a444b1fa0161d21dca3d2d7b5022032c46136d6f0d06a7d43422d641e43ff4a93ceb3ca3010db259a2bf8d66471ee300a06082a8648ce3d0403020347003044022010b87d444a83b0804c0409000d6b1cde2ba16e4c07c9f72feb0f87b2385d3dcc02203cdd6b6ddf673280dbea86e4bfe4d6d8b9838ae4dd688953451bbe95062ca2af";
+}
+
+fn fx_ex_issuing() -> string {
+    return "308202e230820269a003020102021031eee88afb87cd9ef8336604743f9b27300a06082a8648ce3d040303304f310b300906035504061302555331183016060355040a0c0f53534c20436f72706f726174696f6e3126302406035504030c1d53534c2e636f6d20544c53205472616e73697420454343204341205232301e170d3235303532393139343934355a170d3335303532373139343934345a3051310b300906035504061302555331183016060355040a0c0f53534c20436f72706f726174696f6e3128302606035504030c1f436c6f7564666c61726520544c532049737375696e672045434320434120333059301306072a8648ce3d020106082a8648ce3d03010703420004fd1d14148e23429326cf70d089d7b11e72ac3e5d595281df1cf5d625b9d67707850b8d12b12b3f40b91f7206e0ff40520a9349f8c971b07eeee0a34551184474a38201233082011f30120603551d130101ff040830060101ff020100301f0603551d2304183016801432a2c7d8588bff7fc03cf2556933eccecc1fbc97304806082b06010505070101043c303a303806082b06010505073002862c687474703a2f2f636572742e73736c2e636f6d2f53534c2e636f6d2d544c532d542d4543432d52322e63657230110603551d20040a300830060604551d2000301d0603551d250416301406082b0601050507030206082b06010505070301303d0603551d1f043630343032a030a02e862c687474703a2f2f63726c732e73736c2e636f6d2f53534c2e636f6d2d544c532d542d4543432d52322e63726c301d0603551d0e041604148303fde7f6f54a4d1541f4ed2216d3320a3eca66300e0603551d0f0101ff040403020186300a06082a8648ce3d04030303670030640230645bf7604c0ae5dfaa71e8b54c5b37c72efd29143f8ff41a0e6338ab676692d88c2c40f1dbd2b41d64c6393608534e4e023028b00d4ef57e1b58551ba551ce7be4726ba0b5e08fe064a6406e6dd1e76f6f9a3e9087ecb3fa40d43f5e6f4d8aa77103";
+}
+
+fn fx_ex_transit() -> string {
+    return "30820334308202b9a0030201020210604d8af8d00ba8748b955853172c5f2e300a06082a8648ce3d040303304e310b300906035504061302555331183016060355040a0c0f53534c20436f72706f726174696f6e3125302306035504030c1c53534c2e636f6d20544c532045434320526f6f742043412032303232301e170d3232313032313137303232335a170d3337313031373137303232325a304f310b300906035504061302555331183016060355040a0c0f53534c20436f72706f726174696f6e3126302406035504030c1d53534c2e636f6d20544c53205472616e736974204543432043412052323076301006072a8648ce3d020106052b810400220362000464e77d9903535c911eeaf8d823ada1bf2ce26389ef2868f6edd7f0ecab68ae772be476971b50ebdb59282d6fb836b9ab8d97ca4c229eee89d9023ffd7a733a908d2bcc2f3a3783da0db42d451b737209655f78213de78b663f47fd0929d6140fa38201593082015530120603551d130101ff040830060101ff020101301f0603551d23041830168014898f2fa3e82ba014547bf356b8265f67380b9cd0304c06082b060105050701010440303e303c06082b060105050730028630687474703a2f2f636572742e73736c2e636f6d2f53534c636f6d2d544c532d526f6f742d323032322d4543432e636572303f0603551d200438303630340604551d2000302c302a06082b06010505070201161e68747470733a2f2f7777772e73736c2e636f6d2f7265706f7369746f7279301d0603551d250416301406082b0601050507030206082b0601050507030130410603551d1f043a30383036a034a0328630687474703a2f2f63726c732e73736c2e636f6d2f53534c636f6d2d544c532d526f6f742d323032322d4543432e63726c301d0603551d0e0416041432a2c7d8588bff7fc03cf2556933eccecc1fbc97300e0603551d0f0101ff040403020186300a06082a8648ce3d0403030369003066023100b84a423e7b672db359d337d30246297def3eb6e16c4b029f78853eed35918f64b7bd6222c8cb380aa96fdb1346f687d0023100af5795cc45cba703295068241ce09fc6c11d69ef2acf0b40d15967b22c09105a2e5896d6bd0f1957ef8405164b0508fd";
+}
+
+fn fx_ex_root() -> string {
+    return "3082043e30820326a0030201020210173dca60ea9f8e1026dafcd72810e48e300d06092a864886f70d01010b0500307b310b3009060355040613024742311b301906035504080c1247726561746572204d616e636865737465723110300e06035504070c0753616c666f7264311a3018060355040a0c11436f6d6f646f204341204c696d697465643121301f06035504030c18414141204365727469666963617465205365727669636573301e170d3235303830313030303030305a170d3238313233313233353935395a304e310b300906035504061302555331183016060355040a0c0f53534c20436f72706f726174696f6e3125302306035504030c1c53534c2e636f6d20544c532045434320526f6f7420434120323032323076301006072a8648ce3d020106052b810400220362000445293573fac2b823ce147da8b14da05b36ee2a2c53c3600935b224662669c0b395d65d9240190ec6a51370f4ef1251285de7ccbdf93c85c1cf9490c92bce9242585967fd942710648c4f04b14d49e47b4f9bf5e708f80388f7a7c3924b195481a382019730820193301f0603551d23041830168014a0110a233e96f107ece2af29ef82a57fd030a4b4301d0603551d0e04160414898f2fa3e82ba014547bf356b8265f67380b9cd0300e0603551d0f0101ff04040302018630120603551d130101ff040830060101ff020102301d0603551d250416301406082b0601050507030106082b060105050703023081920603551d2004818a3081873007060567810c01013008060667810c0102013008060667810c0102023008060667810c010203300e060c2b0601040182a93001030101300e060c2b0601040182a93001030102300e060c2b0601040182a93001030103300e060c2b0601040182a93001030104300e060c2b0601040182a93001030105300e060c2b0601040182a9300103010630430603551d1f043c303a3038a036a0348632687474703a2f2f63726c2e636f6d6f646f63612e636f6d2f414141436572746966696361746553657276696365732e63726c303406082b0601050507010104283026302406082b060105050730018618687474703a2f2f6f6373702e636f6d6f646f63612e636f6d300d06092a864886f70d01010b0500038201010043e570fb4bee243cf0382886cbde46c32b2b9c605800575b6be8d04e45d8be42561ad203d717f252129ff2d66ea70511a643a8541fbd66fb11d79059f0e499ad1c3c521df6433e9b61a95edcf67cd22cc08650304964743c3ecc431314c58f5bd86b02bd26fccf55e02717cca194914424d58160e1b9aed607630176d37e03cf33a17758fcf8559e8c743596ccc57742496736ca88d410edc0c1c1847132fdf88d70e80f3da27350d1229f197b3f5f3e946a34fc9b4807d41b5d5146eeaf7681dfe9f4cc9fd4eeedf90ca886bf99a6346f3595d66b5a30532754fd7f15485a699b4d5cd9bf280d32d52e992b390de9658e1949022740b1373ee62081266a9116";
 }

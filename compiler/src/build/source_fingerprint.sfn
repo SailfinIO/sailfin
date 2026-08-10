@@ -36,18 +36,15 @@ import { sha256_hex_of_string } from "./hash";
 import { _dirname, _ensure_dir } from "./paths";
 import { build_target_os, host_exe_name, target_exe_name } from "./target";
 
-// The default fingerprint scope: the compiler's own `.sfn` source tree plus
-// the Sailfin-native runtime it links against — the same scope the retired
-// `scripts/compiler_source_fingerprint.sh` used, kept as-is (SFN-679). This
-// is NOT the complete set of inputs the built binary depends on: it omits
-// the capsule dependencies under `capsules/*/src/` (`sfn/runtime-native`,
-// `sfn/cli`, `sfn/strings`, `sfn/crypto` — see `compiler/capsule.toml`
-// deps), the C sources under `runtime/native/src/*.c`, and the version pin
-// in `compiler/capsule.toml`. A change confined to one of those will not
-// invalidate this fingerprint. `scripts/module_layout_fingerprint.sh`
-// documents the fuller root set.
+// The default fingerprint scope: both physical compiler source populations
+// plus the Sailfin-native runtime linked into the compiler. Compiler
+// implementation capsules are part of the compiler binary, so omitting
+// `compiler/capsules` would let a capsule-only edit falsely report the build as
+// current. Top-level standard-library dependency capsules and manifests remain
+// outside this source-only digest; `scripts/module_layout_fingerprint.sh`
+// documents the broader cache-layout input set.
 fn default_fingerprint_roots() -> string[] {
-    return ["compiler/src", "runtime"];
+    return ["compiler/src", "compiler/capsules", "runtime"];
 }
 
 fn source_fingerprint_path() -> string {

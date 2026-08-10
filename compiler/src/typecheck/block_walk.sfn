@@ -2,7 +2,8 @@
 //
 // Block- and statement-level expression walking: the traversal that
 // reaches every expression nested inside a block's statements.
-import { Block, Statement } from "../ast";
+import { Block, Statement } from "sfn/syntax";
+
 import { Diagnostic } from "../typecheck_types";
 import {
     check_bare_fn_type_annotation,

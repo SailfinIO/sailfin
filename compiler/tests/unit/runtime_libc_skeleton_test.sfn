@@ -15,10 +15,11 @@
 // file (read via `fs.readFile`, so a regression in the live source is
 // caught). `libc.sfn` has no imports, so single-module lowering resolves
 // every symbol it declares.
+import { parse_program } from "sfn/syntax";
+
 import { empty_llvm_import_context, resolve_llvm_provider_context } from "../../src/build/llvm_provider_context";
 import { emit_native_text_with_module_name } from "../../src/emit_native";
 import { lower_to_llvm_ir_from_text_with_provider_context } from "../../src/llvm/lowering/entrypoints";
-import { parse_program } from "../../src/parser/mod";
 import { index_of } from "../../src/string_utils";
 
 fn _contains(haystack: string, needle: string) -> boolean {

@@ -588,7 +588,7 @@ fn command_def() -> Command {
     bootstrap = with_subcommand(bootstrap, with_flag(command("build", "Build the compiler with the exact seed"), flag("force", "Rebuild even when the source fingerprint is unchanged")));
     bootstrap = with_subcommand(bootstrap, command("check", "Build then smoke-verify the compiler"));
     bootstrap = with_subcommand(bootstrap, with_arg(command("pin", "Update the pinned seed version"), arg("version", "Seed version to pin (e.g. 0.8.0-alpha.4)")));
-    bootstrap = with_subcommand(bootstrap, with_arg(command("fingerprint", "Print the compiler source fingerprint"), arg_variadic("root", "Source roots to hash (default: compiler/src runtime)")));
+    bootstrap = with_subcommand(bootstrap, with_arg(command("fingerprint", "Print the compiler source fingerprint"), arg_variadic("root", "Source roots to hash (default: compiler/src compiler/capsules runtime)")));
     bootstrap = with_subcommand(bootstrap, with_flag(command("install", "Publish an already-built compiler as build/bin/sfn"), flag_value("from", "Path to the built compiler binary (default: build/sailfin/program)")));
     let mut dev: Command = with_subcommand(command("dev", "Compiler/toolchain maintainer commands"), bootstrap);
     dev = with_subcommand(dev, shard_command_def());

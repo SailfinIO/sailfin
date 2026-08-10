@@ -74,12 +74,12 @@ lowering. No tensor analysis is reconstructed from `.sfn-asm`.
 
 The implementation will introduce these modules above `native_ir.sfn`:
 
-- `compiler/src/tensor_ir.sfn` — IR value, type, operation, region, attribute,
+- `compiler/capsules/ir/src/tensor_ir.sfn` — IR value, type, operation, region, attribute,
   and source-provenance definitions;
 - `compiler/src/tensor_ir_build.sfn` — checked AST to tensor IR construction;
-- `compiler/src/tensor_ir_verify.sfn` — dtype, rank, dimension, layout, and
+- `compiler/capsules/ir/src/tensor_ir_verify.sfn` — dtype, rank, dimension, layout, and
   dominance verification;
-- `compiler/src/tensor_ir_fusion.sfn` — fusion legality, grouping, and rewrite;
+- `compiler/capsules/ir/src/tensor_ir_fusion.sfn` — fusion legality, grouping, and rewrite;
 - `compiler/src/tensor_ir_lower_scalar.sfn` — reference lowering to
   `native_ir`; and
 - `compiler/src/tensor_ir_emit_stablehlo.sfn` — the separately gated

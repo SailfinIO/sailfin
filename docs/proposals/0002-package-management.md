@@ -614,7 +614,7 @@ populated cache makes **no** network call, so Phases 1–2 cannot affect
   (`validate_capsule_capabilities`), `compiler/src/effect_diagnostics.sfn:147`
   (E0403 literal), `compiler/src/diagnostics_render.sfn:84`,
   `compiler/src/effect_gate.sfn:152-166`
-- `compiler/src/intrinsic_effects.sfn:56-57`, `:125-127` and
+- `compiler/capsules/ir/src/intrinsic_effects.sfn:56-57`, `:125-127` and
   `cli/commands/toolchain.sfn:14-15`, `:240` — the native `![net]` HTTP surface
   the registry client does not yet use
 - `compiler/src/semver.sfn:11-13` — ranges intentionally absent

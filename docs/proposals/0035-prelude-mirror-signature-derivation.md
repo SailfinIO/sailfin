@@ -488,7 +488,7 @@ until `make compile` is green (per the validation ladder in `CLAUDE.md`).
 - `compiler/src/llvm/rendering.sfn:105` (`render_runtime_helper_declarations`),
   `:296-300` (`effective_symbol`), `:306-325` (`_shadowed_by_import` skip — the
   insertion point), `:419-433` (symmetric imported-declare win).
-- `compiler/src/native_ir.sfn:73-82` (`NativeFunction`: `parameters`,
+- `compiler/capsules/ir/src/native_ir.sfn:73-82` (`NativeFunction`: `parameters`,
   `return_type` — the reconciliation data source).
 - `runtime/prelude.sfn:177` (`char_at`), `:358` (`string_starts_with`),
   `:647` (`record_eq_flag_message`), `:652` (`find_char`), `:706` (`char_code`),

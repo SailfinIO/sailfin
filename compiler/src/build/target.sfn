@@ -342,11 +342,15 @@ fn target_filter_link_libs(libs: string[], triple: string) -> string[] {
 
 // Extra link libraries a target REQUIRES beyond `libs` — the reverse of
 // `target_filter_link_libs` above, which only ever drops. Windows needs
-// two:
+// three:
 //
 //   `-lbcrypt`  — bcrypt.dll's import lib, for
 //                 `platform/rand_windows.sfn`'s `BCryptGenRandom`
 //                 (SFN-549).
+//   `-lcrypt32` — crypt32.dll's import lib, for
+//                 `platform/cert_roots_windows.sfn`'s
+//                 `CertOpenSystemStoreA`/`CertEnumCertificatesInStore`/
+//                 `CertFreeCertificateContext`/`CertCloseStore` (SFN-808).
 //   `-lws2_32`  — Winsock2's import lib. On POSIX the socket surface is
 //                 in libc, so `runtime/sfn/adapters/net.sfn` and
 //                 `websocket.sfn` declare `socket`/`bind`/`listen`/
@@ -360,23 +364,25 @@ fn target_filter_link_libs(libs: string[], triple: string) -> string[] {
 //                 net/websocket runtime modules are always linked in
 //                 (SFN-649).
 //
-// `-lws2_32` is needed by BOTH Windows ABIs (Winsock2 is the same DLL
-// either way); `-lbcrypt` is msvc-only — the windows-gnu ABI's mingw-w64
-// CRT resolves `BCryptGenRandom` through its own import libs, so adding it
-// there would be a redundant (harmless but incorrect-by-omission) flag.
-// No other target links either, so every non-Windows target returns `[]`
-// (identity → byte-identical link, #1112).
+// `-lws2_32` and `-lcrypt32` are needed by BOTH Windows ABIs (Winsock2 and
+// Crypt32 are the same DLLs either way, and unlike bcrypt neither is in
+// mingw-w64's default auto-linked import-lib set); `-lbcrypt` is msvc-only
+// — the windows-gnu ABI's mingw-w64 CRT resolves `BCryptGenRandom` through
+// its own import libs, so adding it there would be a redundant (harmless
+// but incorrect-by-omission) flag. No other target links any of the
+// three, so every non-Windows target returns `[]` (identity →
+// byte-identical link, #1112).
 fn target_extra_link_libs(triple: string) -> string[] {
     let abi = triple_abi(triple);
-    if abi == "msvc" { return ["-lbcrypt", "-lws2_32"]; }
+    if abi == "msvc" { return ["-lbcrypt", "-lcrypt32", "-lws2_32"]; }
     if abi == "gnu" && triple_target_os(triple) == "Windows" {
-        return ["-lws2_32"];
+        return ["-lcrypt32", "-lws2_32"];
     }
     return [];
 }
 
 // Rewrite the runtime capsule's `sfn-sources` list for `target_os`. On
-// Windows, six POSIX-only modules are swapped for their Win32 siblings:
+// Windows, seven POSIX-only modules are swapped for their Win32 siblings:
 // `process.sfn` (posix_spawnp/waitpid) for `platform/process_windows.sfn`,
 // `rlimit.sfn` (getrlimit/setrlimit) for `platform/rlimit_windows.sfn`
 // (SFN-549 — previously dropped outright, leaving
@@ -388,8 +394,12 @@ fn target_extra_link_libs(triple: string) -> string[] {
 // UCRT `_access` mode and terminates the process via
 // `_invalid_parameter_noinfo` -> `__fastfail` instead of returning an
 // error; the sibling supplies `F_OK`, the strongest question Windows
-// can answer where no execute permission bit exists). Five further
-// modules —
+// can answer where no execute permission bit exists), and `cert_roots.sfn`
+// (returns null; POSIX's trust store is a CA-bundle file, already covered
+// by `trust_store_default_paths()`) for `platform/cert_roots_windows.sfn`
+// (SFN-808 — Windows has no CA-bundle file anywhere, so the system `ROOT`
+// certificate store reached through Crypt32 is the only trust source
+// there). Five further modules —
 // `platform/realpath_windows.sfn`, `platform/clock_windows.sfn`,
 // `platform/pthread_windows.sfn`, `platform/popen_windows.sfn`, and
 // `platform/mkstemp_windows.sfn` (all SFN-549) — are APPENDED rather than
@@ -405,7 +415,7 @@ fn target_extra_link_libs(triple: string) -> string[] {
 // swapped path from the source's own directory so it stays correctly
 // rooted (`<root>/sfn/process.sfn` → `<root>/sfn/platform/process_windows.sfn`).
 // `rlimit.sfn`/`rand.sfn`/`fs_exec_mode.sfn`/`socket_ops.sfn`/
-// `rename_ops.sfn` already live in `platform/`, so their
+// `rename_ops.sfn`/`cert_roots.sfn` already live in `platform/`, so their
 // siblings are joined directly onto that same directory rather than
 // appending another `platform/` segment.
 fn target_condition_runtime_sfn_sources(sources: string[], target_os: string) -> string[] {
@@ -413,9 +423,9 @@ fn target_condition_runtime_sfn_sources(sources: string[], target_os: string) ->
     let mut out: string[] = [];
     // Anchor for the append block below — the `platform/` directory,
     // discovered from whichever of rlimit.sfn/rand.sfn/tls.sfn/
-    // fs_exec_mode.sfn/socket_ops.sfn/rename_ops.sfn/exec.sfn happens to
-    // be present in `sources`, since none of the seven is guaranteed by
-    // this function's own contract.
+    // fs_exec_mode.sfn/socket_ops.sfn/rename_ops.sfn/cert_roots.sfn/
+    // exec.sfn happens to be present in `sources`, since none of the eight
+    // is guaranteed by this function's own contract.
     let mut platform_dir: string = "";
     let mut i: int = 0;
     loop {
@@ -469,6 +479,18 @@ fn target_condition_runtime_sfn_sources(sources: string[], target_os: string) ->
             // `MoveFileExA` + `MOVEFILE_REPLACE_EXISTING` (SFN-720).
             platform_dir = _dirname(src);
             out.push(_path_join(platform_dir, "rename_ops_windows.sfn"));
+        } else if base == "cert_roots.sfn" {
+            // Already in platform/ — same as the five above. POSIX has no
+            // enumerable trust store to swap in for: the CA bundle is a
+            // file, already covered by `trust_store_default_paths()`, so
+            // the POSIX leg returns null and the caller falls through to
+            // that path probe. Windows has no CA-bundle file anywhere, so
+            // the system `ROOT` certificate store reached through Crypt32
+            // is the only trust source there — the sibling enumerates it
+            // via `CertOpenSystemStoreA`/`CertEnumCertificatesInStore`
+            // (SFN-808).
+            platform_dir = _dirname(src);
+            out.push(_path_join(platform_dir, "cert_roots_windows.sfn"));
         } else if base == "exec.sfn" {
             // exec.sfn itself is unchanged (its `realpath` extern is
             // satisfied by the appended sibling below, not by swapping

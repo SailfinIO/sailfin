@@ -40,11 +40,11 @@ never language syntax.
 `sfn check` and `make check` are **different tools**, not fast/slow versions of the same one. Use the cheapest rung that catches the error.
 
 1. **`sfn check <files>`** — parse + typecheck + effect-check. No IR, no `clang`,
-   no self-host. Seconds for a few files, ~5 min for all of `compiler/src/`.
+   no self-host. Seconds for a few files, ~5 min for all compiler sources.
    The inner loop. It models no codegen or link, so **a build-only failure can
    still pass `check` — green is not a build guarantee** (#1389).
-2. **`make compile`** — self-hosts. **Required before any `compiler/src/*.sfn`
-   change is done.** Structural changes (file splits, new modules, renamed
+2. **`make compile`** — self-hosts. **Required before any `.sfn` change under
+   `compiler/src/` or `compiler/capsules/` is done.** Structural changes (file splits, new modules, renamed
    exports) need `make clean-build` first.
 3. **Targeted tests** — `build/bin/sfn test <path>`, `-k <name>` for one test.
    Issue acceptance should name these narrow commands.
@@ -63,8 +63,8 @@ Never burn `make check` to discover what rung 1 or 3 would have caught. Run
 |---|---|
 | `compiler/capsule.toml` | Version source of truth + capsule manifest |
 | `compiler/src/main.sfn` | Entry point orchestrating all passes |
-| `compiler/src/ast.sfn` | Canonical AST node definitions |
-| `compiler/src/native_ir.sfn` | `.sfn-asm` intermediate representation |
+| `compiler/capsules/syntax/src/ast.sfn` | Canonical AST node definitions |
+| `compiler/capsules/ir/src/native_ir.sfn` | `.sfn-asm` intermediate representation |
 | `compiler/src/cli/` + `capsule_resolver.sfn` | Build driver (`entry.sfn` = `fn main`, `main.sfn` = dispatch) — **pure orchestration, no fixups** |
 | `compiler/src/build_stamp.sfn` | Writes `build/native/.build-stamp` |
 | `runtime/prelude.sfn`, `runtime/sfn/` | Sailfin-native runtime |

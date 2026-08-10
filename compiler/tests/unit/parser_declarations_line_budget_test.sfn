@@ -1,4 +1,4 @@
-// Line-budget sentinel for `compiler/src/parser/declarations/`.
+// Line-budget sentinel for `compiler/capsules/syntax/src/parser/declarations/`.
 //
 // The former flat `declarations.sfn` reached 2,122 lines. Besides making the
 // parser difficult to navigate, a module that large raises the per-worker
@@ -10,7 +10,7 @@ import { expect_eq_bool } from "sfn/test";
 import { find_char_local } from "../../src/string_utils";
 
 let PARSER_DECLARATION_MODULE_LINE_BUDGET: int = 750;
-let PARSER_DECLARATION_ROOT: string = "compiler/src/parser/declarations";
+let PARSER_DECLARATION_ROOT: string = "compiler/capsules/syntax/src/parser/declarations";
 
 fn _count_newlines(source: string) -> int {
     let mut count: int = 0;
@@ -46,6 +46,6 @@ test "parser declarations: each submodule stays under 750 lines" ![io] {
 // `declarations/mod.sfn`. Reintroducing the flat file would shadow the folder
 // and silently undo the decomposition while still allowing builds to pass.
 test "parser declarations: the flat module does not shadow the folder" ![io] {
-    assert expect_eq_bool(fs.exists("compiler/src/parser/declarations.sfn"), false).ok;
+    assert expect_eq_bool(fs.exists("compiler/capsules/syntax/src/parser/declarations.sfn"), false).ok;
     assert expect_eq_bool(fs.exists(PARSER_DECLARATION_ROOT + "/mod.sfn"), true).ok;
 }

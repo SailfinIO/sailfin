@@ -1,5 +1,5 @@
 // Regression coverage for `parse_struct_field` field-terminator handling
-// (`compiler/src/parser/declarations/structs.sfn`).
+// (`compiler/capsules/syntax/src/parser/declarations/structs.sfn`).
 //
 // History: PR #289 surfaced a "struct-string-field reads misfire" symptom
 // — direct `==` comparisons against literal strings on a struct field
@@ -16,8 +16,9 @@
 // (`declarations/enums.sfn`) — both forms of separator (`,` and `;`) work, and
 // the last field can omit the terminator before `}`. These tests pin the
 // parser shape so the regression cannot resurface silently.
+import { parse_program } from "sfn/syntax";
+
 import { emit_native_text_with_module_name } from "../../src/emit_native";
-import { parse_program } from "../../src/parser/mod";
 import { index_of } from "../../src/string_utils";
 
 fn _emit(source: string) -> string ![io] {

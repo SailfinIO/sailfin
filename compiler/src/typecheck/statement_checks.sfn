@@ -2,9 +2,10 @@
 //
 // Statement-level scope and type checking: the per-statement rules that
 // drive the whole program walk.
-import { Program, Statement } from "../ast";
+import { Program, Statement } from "sfn/syntax";
+import { Token } from "sfn/syntax";
+
 import { ImportSymbolTable } from "../effect_imports";
-import { Token } from "../token";
 import { Diagnostic } from "../typecheck_types";
 import {
     check_bare_fn_type_annotation,

@@ -1,8 +1,9 @@
 // compiler/src/llvm/expression_lowering/native/core_expression_tail.sfn
 //
 // Call, literal, member, binding, and function-reference expression dispatch.
-import { NativeFunction } from "../../../native_ir";
-import { substring } from "../../../string_utils";
+import { NativeFunction } from "sfn/ir";
+import { substring } from "sfn/strings";
+
 import { format_temp_name, is_simple_identifier } from "../../expressions_helpers";
 import { trace_log, trace_lowering } from "../../lowering_debug_state";
 import { find_function_by_name_or_import } from "../../rendering_helpers";

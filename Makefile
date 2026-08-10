@@ -229,7 +229,7 @@ help:
 	@echo "  make install        # Install the built compiler binary into PREFIX/bin"
 	@echo "  make check          # Compile (if needed) then run the full test suite"
 	@echo "  make check-strict   # Same as check, but a stage2/stage3 fixed-point mismatch is fatal"
-	@echo "  make check-fast     # Run sfn check on compiler/src/ + runtime/ (no codegen, fast PR gate)"
+	@echo "  make check-fast     # Check compiler/src/, compiler/capsules/, and runtime/"
 	@echo "  make test           # Run Sailfin-native unit + integration + e2e tests"
 	@echo "  make test TEST_JOBS=4 # Same, with 4 parallel test children (pick N for your RAM budget)"
 	@echo "  make test-unit      # Run Sailfin-native unit tests"
@@ -732,7 +732,7 @@ check-fast-impl:
 		echo "[check-fast] missing $(NATIVE_BIN); run: make compile"; \
 		exit 1; \
 	fi
-	@echo "[check-fast] running sfn check on compiler/src/ runtime/"
+	@echo "[check-fast] running sfn check on compiler/src/ compiler/capsules/ runtime/"
 	@# JSON=1 / SAILFIN_AGENT_REPORT=1 gate (#1122): run `sfn check --json` and
 	@# tee the `sailfin-check/1` envelope to build/agent-check-fast.json for the
 	@# report composer (issue E). PIPESTATUS[0] preserves the check exit-code
@@ -747,7 +747,7 @@ check-fast-impl:
 			echo "[check-fast] cannot create build/ for JSON envelope" >&2; \
 			exit 2; \
 		fi; \
-		$(NATIVE_BIN) check --json compiler/src/ runtime/ | tee build/agent-check-fast.json; \
+		$(NATIVE_BIN) check --json compiler/src/ compiler/capsules/ runtime/ | tee build/agent-check-fast.json; \
 		pipe_rc=("$${PIPESTATUS[@]}"); \
 		if [ "$${pipe_rc[0]}" -ne 0 ]; then exit "$${pipe_rc[0]}"; fi; \
 		if [ "$${pipe_rc[1]}" -ne 0 ]; then \
@@ -755,7 +755,7 @@ check-fast-impl:
 			exit 2; \
 		fi; \
 	else \
-		$(NATIVE_BIN) check compiler/src/ runtime/; \
+		$(NATIVE_BIN) check compiler/src/ compiler/capsules/ runtime/; \
 	fi
 	@echo "[check-fast] OK"
 
