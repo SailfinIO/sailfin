@@ -1,4 +1,4 @@
-// Unit tests for compiler/src/decorator_resolver.sfn (SFN-70,
+// Unit tests for compiler/capsules/analyzer/src/decorator_resolver.sfn (SFN-70,
 // SFEP-0023 §4.2 step A): resolving an applied `@foo` decorator on a
 // function declaration against the localized import table, plus the
 // built-in fallback and diagnostic paths (E0701/E0702).
@@ -7,6 +7,12 @@
 // shallow — some seed compilers segfault on deeply nested struct-literal
 // initialisers in test bodies (see `effect_imports_test.sfn` preamble for
 // the same workaround).
+import {
+    DecoratorResolution,
+    resolve_decorators,
+    resolved_decorators_for_function
+} from "sfn/analyzer/decorator_resolver";
+import { append_import_decorator_function, empty_import_symbols } from "sfn/analyzer/effect_imports";
 import {
     Block,
     Decorator,
@@ -18,13 +24,6 @@ import {
     Statement,
     TypeParameter
 } from "sfn/syntax";
-
-import {
-    DecoratorResolution,
-    resolve_decorators,
-    resolved_decorators_for_function
-} from "../../src/decorator_resolver";
-import { append_import_decorator_function, empty_import_symbols } from "../../src/effect_imports";
 
 // -------------------------------------------------------------------
 // Builder helpers

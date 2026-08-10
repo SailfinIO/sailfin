@@ -1,7 +1,6 @@
+import { typecheck_diagnostics } from "sfn/analyzer/typecheck";
+import { Diagnostic } from "sfn/analyzer/typecheck_types";
 import { parse_program } from "sfn/syntax";
-
-import { typecheck_diagnostics } from "../../src/typecheck";
-import { Diagnostic } from "../../src/typecheck_types";
 
 fn _e1019(source: string) -> Diagnostic? ![io] {
     let diagnostics = typecheck_diagnostics(parse_program(source));

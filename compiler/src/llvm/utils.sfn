@@ -2,10 +2,10 @@
 //
 // General utility functions for the LLVM lowering pass. These are basic
 // string manipulation, array helpers, and parsing utilities.
+import { Diag, Span, diag_to_legacy_string } from "sfn/analyzer/diagnostic";
 import { NativeSourceSpan } from "sfn/ir";
 import { char_code_at, substring } from "sfn/strings";
 
-import { Diag, Span, diag_to_legacy_string } from "../diagnostic";
 import { sanitize_symbol } from "./symbols";
 import { ParameterBinding } from "./types";
 

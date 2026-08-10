@@ -110,7 +110,7 @@ signature churn.
 are already structurally identical — a fifth duplication — and carry start and
 end.
 
-New leaf module `compiler/src/diagnostic.sfn`:
+New leaf module `compiler/capsules/analyzer/src/diagnostic.sfn`:
 
 ```
 struct Span { start_line: int; start_column: int; end_line: int; end_column: int; }
@@ -240,7 +240,7 @@ three unused entry points hardcode `diags: []`. Before implementing a stage,
 enumerate the entry points reaching its carrier and check each for a
 duplicate-body or field-dropping conversion.
 
-- **S1 — sink converges.** `compiler/src/diagnostic.sfn` (`Span`, `Diag`,
+- **S1 — sink converges.** `compiler/capsules/analyzer/src/diagnostic.sfn` (`Span`, `Diag`,
   constructors, `diag_to_legacy_string`, `diag_is_error`, `stamp_spans`,
   converters) **bundled with** making the renderer and JSON encoder
   `Diag`-native. Acceptance: `sfn check --json` byte-identical.

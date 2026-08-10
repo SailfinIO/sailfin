@@ -10,13 +10,12 @@
 // preserved. These tests drive `walk_expression` directly with the exact text
 // the parser produces on degradation, so they pin classification without a
 // full compile.
+import { empty_import_symbols } from "sfn/analyzer/effect_imports";
+import { TypeckCtx, make_typeck_ctx } from "sfn/analyzer/typecheck/context";
+import { walk_expression } from "sfn/analyzer/typecheck/expression_walk";
+import { Diagnostic } from "sfn/analyzer/typecheck_types";
+import { SymbolEntry } from "sfn/analyzer/typecheck_types/symbol_table_and_raw_exprs";
 import { Expression, SourceSpan, Statement } from "sfn/syntax";
-
-import { empty_import_symbols } from "../../src/effect_imports";
-import { TypeckCtx, make_typeck_ctx } from "../../src/typecheck/context";
-import { walk_expression } from "../../src/typecheck/expression_walk";
-import { Diagnostic } from "../../src/typecheck_types";
-import { SymbolEntry } from "../../src/typecheck_types/symbol_table_and_raw_exprs";
 
 fn _no_bindings() -> SymbolEntry[] {
     let empty: SymbolEntry[] = [];

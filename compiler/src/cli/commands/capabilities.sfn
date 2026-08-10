@@ -8,6 +8,7 @@
 // (malformed envelope) diagnostic. The exit code follows the envelope's
 // enforcement mode: non-zero on any finding under `enforce` (the default),
 // zero under `mode = "warn"` (a migration aid) and when there is no drift.
+import { diagnostic_to_diag } from "sfn/analyzer/typecheck_types";
 import {
     Command,
     Matches,
@@ -30,7 +31,6 @@ import {
     toml_get_workspace_capabilities_deny,
     toml_get_workspace_capabilities_grant
 } from "../../toml_parser";
-import { diagnostic_to_diag } from "../../typecheck_types";
 import { CliContext } from "../context";
 
 // Join an effect list for table display: comma-separated, or "-" when empty

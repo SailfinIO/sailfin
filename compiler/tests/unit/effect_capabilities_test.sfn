@@ -15,6 +15,8 @@
 // flat — some seed compilers previously segfaulted on deeply nested
 // struct-literal initialisers in test bodies (see
 // `effect_checker_test.sfn` preamble for the same workaround).
+import { validate_capsule_capabilities } from "sfn/analyzer/effect_checker";
+import { CapabilityViolation } from "sfn/analyzer/effect_checker/types";
 import {
     Block,
     Decorator,
@@ -27,9 +29,6 @@ import {
     TypeAnnotation,
     TypeParameter
 } from "sfn/syntax";
-
-import { validate_capsule_capabilities } from "../../src/effect_checker";
-import { CapabilityViolation } from "../../src/effect_checker/types";
 
 // -------------------------------------------------------------------
 // Builder helpers

@@ -61,7 +61,7 @@ the same subcommands and do not replace `make compile`.
 
 ## Pipeline and critical files
 
-`lexer.sfn` → `parser/` → `ast.sfn` → `typecheck/` → `effect_checker.sfn`
+`sfn/syntax` lexer/parser/AST → `sfn/analyzer` type/effect analysis
 → `emit_native.sfn` (`.sfn-asm`) → `llvm/lowering/entrypoints.sfn` (LLVM IR).
 
 | File | Role |
@@ -69,6 +69,7 @@ the same subcommands and do not replace `make compile`.
 | `compiler/capsule.toml` | Version source of truth + capsule manifest |
 | `compiler/src/main.sfn` | Entry point orchestrating all passes |
 | `compiler/capsules/syntax/src/ast.sfn` | Canonical AST node definitions |
+| `compiler/capsules/analyzer/src/mod.sfn` | Pure analyzed-program facade |
 | `compiler/capsules/ir/src/native_ir.sfn` | `.sfn-asm` intermediate representation |
 | `compiler/src/cli/` + `capsule_resolver.sfn` | Build driver (`entry.sfn` = `fn main`, `main.sfn` = dispatch) — **pure orchestration, no fixups** |
 | `compiler/src/build_stamp.sfn` | Writes `build/native/.build-stamp` |
@@ -76,7 +77,8 @@ the same subcommands and do not replace `make compile`.
 | `compiler/tests/{unit,integration,e2e}/*_test.sfn` | Regression coverage |
 
 **Canonical effects:** `clock`, `gpu`, `io`, `model`, `net`, `rand`
-(`effect_taxonomy.sfn::canonical_effects()`). `effect_checker.sfn` walks nested
+(`compiler/capsules/analyzer/src/effect_taxonomy.sfn::canonical_effects()`).
+`compiler/capsules/analyzer/src/effect_checker/` walks nested
 blocks, lambdas, and `routine` scopes. Enforcement is real on Linux x86_64,
 partial on macOS arm64 (#613). When a function calls an effectful helper without
 declaring the effect, add it to the signature and make parent callers declare it

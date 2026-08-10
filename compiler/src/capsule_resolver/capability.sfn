@@ -5,13 +5,14 @@
 // audits each member's declared and inferred effects against it, and renders
 // the resulting diagnostics. Also owns workspace-inherited version resolution
 // and the lock-entry lookup that shares the same member-walk.
+import { inferred_public_effects } from "sfn/analyzer/effect_checker";
+import { empty_import_symbols } from "sfn/analyzer/effect_imports";
+import { effect_subsumes, is_canonical_effect } from "sfn/analyzer/effect_taxonomy";
+import { Diagnostic, diagnostic_to_diag } from "sfn/analyzer/typecheck_types";
 import { parse_program } from "sfn/syntax";
 
 import { _collect_sfn_files_cmd } from "../build/fs";
 import { render_diagnostic } from "../diagnostics_render";
-import { inferred_public_effects } from "../effect_checker";
-import { empty_import_symbols } from "../effect_imports";
-import { effect_subsumes, is_canonical_effect } from "../effect_taxonomy";
 import { _LockEntry } from "../lock";
 import {
     toml_get_capabilities_required,
@@ -23,7 +24,6 @@ import {
     toml_get_workspace_package_version,
     toml_value_is_workspace_inherit
 } from "../toml_parser";
-import { Diagnostic, diagnostic_to_diag } from "../typecheck_types";
 import {
     _cr_path_join,
     _cr_sort_strings,

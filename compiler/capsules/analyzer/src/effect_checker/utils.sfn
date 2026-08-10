@@ -1,0 +1,127 @@
+// compiler/capsules/analyzer/src/effect_checker/utils.sfn
+//
+// Small value and collection helpers shared by the checker passes.
+import { SourceSpan } from "sfn/syntax";
+import { Token, TokenKind } from "sfn/syntax";
+
+import { effect_subsumes } from "../effect_taxonomy";
+import { EffectRequirement, EffectViolation } from "./types";
+
+fn _token_from_signature(span: SourceSpan?, name: string) -> Token? {
+    if span == null { return null; }
+    return Token {
+        kind: TokenKind.Identifier(),
+        lexeme: name,
+        line: span.start_line,
+        column: span.start_column
+    };
+}
+
+// Build a Token from any expression-bearing SourceSpan. Same shape
+// as `_token_from_signature` but parameterized for call-site spans
+// landed in B1: the renderer reads `token.line`/`token.column` for
+// the caret position and `token.lexeme` for caret width, so the
+// lexeme should match the actual identifier at the source position
+// (e.g. "fs" for an `fs.exists(...)` trigger, "spawn" for a bare
+// `spawn(...)` call).
+fn _token_from_span(span: SourceSpan?, lexeme: string) -> Token? {
+    if span == null { return null; }
+    return Token {
+        kind: TokenKind.Identifier(),
+        lexeme: lexeme,
+        line: span.start_line,
+        column: span.start_column
+    };
+}
+
+// Phase B/C/D entry — preserved for the legacy build-path callers
+// that don't have an import resolver in scope (synthesized fixtures,
+// `compile_to_sailfin`, etc.). New callers should use
+// `validate_effects_with_imports` so cross-module propagation
+fn append_violations(violations: EffectViolation[], new_violations: EffectViolation[]) -> EffectViolation[] {
+    let mut result = violations;
+    let mut index: int = 0;
+    loop {
+        if index >= new_violations.length { break; }
+        result.push(new_violations[index]);
+        index += 1;
+    }
+    return result;
+}
+
+fn append_violation(collection: EffectViolation[], item: EffectViolation) -> EffectViolation[] {
+    collection.push(item);
+    return collection;
+}
+
+fn append_unique_effect(effects: string[], effect: string) -> string[] {
+    if contains_effect(effects, effect) { return effects; }
+    effects.push(effect);
+    return effects;
+}
+
+fn contains_effect(effects: string[], effect: string) -> boolean {
+    let mut index: int = 0;
+    loop {
+        if index >= effects.length { break; }
+        if effects[index] == effect { return true; }
+        index += 1;
+    }
+    return false;
+}
+
+// SFEP-0017 D2 satisfaction: a grant set covers a requirement iff some
+// grant subsumes it (`∃ g ∈ grants. requirement ⊑ g`). This replaces the
+// exact-string membership that `contains_effect` gives, so a broad grant
+// (`io`) satisfies a narrow requirement (`io.fs`) while a narrow grant
+// (`io.fs`) satisfies neither a bare-`io` requirement nor a sibling
+// (`io.console`). `contains_effect` stays as the exact-`==` primitive for
+// dedup callers (`append_unique_effect`).
+fn _any_subsumes(grants: string[], requirement: string) -> boolean {
+    let mut index: int = 0;
+    loop {
+        if index >= grants.length { break; }
+        if effect_subsumes(grants[index], requirement) { return true; }
+        index += 1;
+    }
+    return false;
+}
+
+fn append_requirement(collection: EffectRequirement[], item: EffectRequirement) -> EffectRequirement[] {
+    collection.push(item);
+    return collection;
+}
+
+fn merge_requirements(base: EffectRequirement[], additions: EffectRequirement[]) -> EffectRequirement[] {
+    let mut result = base;
+    let mut index: int = 0;
+    loop {
+        if index >= additions.length { break; }
+        result.push(additions[index]);
+        index += 1;
+    }
+    return result;
+}
+
+fn contains_requirement_for_effect(requirements: EffectRequirement[], effect: string) -> boolean {
+    let mut index: int = 0;
+    loop {
+        if index >= requirements.length { break; }
+        if requirements[index].effect == effect { return true; }
+        index += 1;
+    }
+    return false;
+}
+
+export {
+    _any_subsumes,
+    _token_from_signature,
+    _token_from_span,
+    append_requirement,
+    append_unique_effect,
+    append_violation,
+    append_violations,
+    contains_effect,
+    contains_requirement_for_effect,
+    merge_requirements
+};

@@ -15,7 +15,7 @@
 //
 // Type discipline: every declaration here uses only types from the
 // v0 C-ABI accept-list. The validator is `check_extern_signature`
-// in `compiler/src/typecheck_types/declaration_and_statement_checks.sfn` and rejects non-conforming
+// in `compiler/capsules/analyzer/src/typecheck_types/declaration_and_statement_checks.sfn` and rejects non-conforming
 // signatures with diagnostics E0801–E0805. Accepted forms are i8 /
 // i16 / i32 / i64 / u8 / u16 / u32 / u64 / usize / isize / bool, raw
 // pointers (`* u8`, `* const T`, `* OpaqueStruct`), `f32` / `f64`

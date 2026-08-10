@@ -10,6 +10,7 @@
 //   emit_native_state.sfn  — TextBuilder, NativeState, shared utilities
 //   emit_native_format.sfn — expression/signature/specifier formatting
 //   emit_native_layout.sfn — struct/enum layout computation & manifest
+import { Diag, Span } from "sfn/analyzer/diagnostic";
 import { NativeArtifact, NativeModule } from "sfn/ir";
 import { lines_to_native_text } from "sfn/ir";
 import {
@@ -28,7 +29,6 @@ import {
     TypeAnnotation
 } from "sfn/syntax";
 
-import { Diag, Span } from "./diagnostic";
 import { block_contains_try, desugar_try_in_block } from "./emit_native_desugar_try";
 import {
     append_optional_initializer,
@@ -967,7 +967,7 @@ fn emit_native_diag_lines(diags: Diag[]) -> string[] {
 
 // ── Re-export validation ─────────────────────────────────────────────
 // The `collect_reexport_violations` analysis (and its helpers) moved to
-// `compiler/src/reexport_check.sfn` so the emit-free `sfn check` path can
+// `compiler/capsules/analyzer/src/reexport_check.sfn` so the emit-free `sfn check` path can
 // run the same check without importing the emitter. The build-path reporter
 // below stays here to preserve its `[emit-native]` stderr prefix provenance.
 //

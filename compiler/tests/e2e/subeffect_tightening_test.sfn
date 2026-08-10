@@ -3,7 +3,7 @@
 //
 // SFN-98 narrowed the effect-subsumption/parsing primitives
 // (`effect_root`, `is_recognized_effect`, `effect_subsumes`,
-// `compiler/src/effect_taxonomy.sfn`) and wired the effect checker to use
+// `compiler/capsules/analyzer/src/effect_taxonomy.sfn`) and wired the effect checker to use
 // them. SFN-99 narrows the runtime helper descriptors themselves
 // (`compiler/src/llvm/runtime_helpers/`) so `fs.*`/`print.*`/
 // `console.*`/`http.*`/`websocket.*` calls are DETECTED as the narrow

@@ -31,22 +31,23 @@
 // and the seed compiler does not handle import cycles cleanly. The
 // duplication is small (~50 lines, four pure string helpers) and
 // changes here are decoupled from changes to `main.sfn`'s own copies.
-import { Diag, Span } from "./diagnostic";
+import { Diag, Span } from "sfn/analyzer/diagnostic";
 import {
     CapabilityViolation,
     EffectRequirement,
     EffectViolation,
     UnrecognizedEffectViolation
-} from "./effect_checker/types";
+} from "sfn/analyzer/effect_checker/types";
 import {
     capability_violation_to_diagnostic_data,
     code_for_missing_effect_data,
     effect_violation_to_diagnostic_data,
     join_effects_data,
     unrecognized_effect_violation_to_diagnostic_data
-} from "./effect_diagnostics";
+} from "sfn/analyzer/effect_diagnostics";
+import { Diagnostic } from "sfn/analyzer/typecheck_types";
+
 import { substring } from "./string_utils";
-import { Diagnostic } from "./typecheck_types";
 
 // -------------------------------------------------------------------
 // Effect-violation → Diagnostic

@@ -127,10 +127,10 @@ evidence:
 that decision.** `docs/style-guide.md:230` assigns the `W02xx` range to "Lint
 (warning severity, never fails a build)" with home `tools/check.sfn`. Two codes
 are populated: `W0210` (bare `assert` in a test, carrying a `FixSuggestion`,
-`compiler/src/bare_assert_check.sfn` collected and emitted at
-`compiler/src/analyzer.sfn:162`, suppressible with `--allow-bare-assert`) and
+`compiler/capsules/analyzer/src/bare_assert_check.sfn` collected and emitted at
+`compiler/capsules/analyzer/src/analyzer.sfn:162`, suppressible with `--allow-bare-assert`) and
 `W0211` (deprecated built-in decorator, emitted at `analyzer.sfn:178`, with the
-detection helper and rationale at `compiler/src/typecheck/mod.sfn:168-190`).
+detection helper and rationale at `compiler/capsules/analyzer/src/typecheck/mod.sfn:168-190`).
 `W0212` is retired. Two more warnings serve import-context load failures
 (`W0001`/`W0002`, `compiler/src/check/engine.sfn:118` and `:132`, with a second
 pair at `:531`/`:547`). The range is documented in-tree at
@@ -317,11 +317,11 @@ check` and CI drive. Plus `guillermo`, an easter egg.
 **The diagnostic substrate.** Two layered representations, not the single minimal
 one the pre-rewrite text described:
 
-- `compiler/src/diagnostic.sfn:31` — the canonical, backend-agnostic `Diag`:
+- `compiler/capsules/analyzer/src/diagnostic.sfn:31` — the canonical, backend-agnostic `Diag`:
   `code`, `severity`, `message`, `file_path`, `span: Span?`, `stage`,
   `suggestion: FixSuggestion?`. `TextEdit` (`:8`) carries concrete
   machine-applicable replacements.
-- `compiler/src/typecheck_types/mod.sfn:13` — the frontend `Diagnostic`, converted
+- `compiler/capsules/analyzer/src/typecheck_types/mod.sfn:13` — the frontend `Diagnostic`, converted
   at the sink boundary by `diagnostic_to_diag`.
 
 `secondary` spans are the one field still unpopulated:
@@ -355,7 +355,7 @@ stating plainly so nobody reads the old plan as live: the identifier this SFEP
 once proposed as a public library is now the private capsule holding the driver.
 
 What actually discharged the need was neither A nor C but a **pure analyzer
-boundary**: `compiler/src/analyzer.sfn` exposes an authority-free
+boundary**: `compiler/capsules/analyzer/src/analyzer.sfn` exposes an authority-free
 `AnalyzerInput -> AnalyzerResult` contract over parsed syntax that produces
 diagnostics without importing the driver, codegen, or LLVM modules (SFN-713,
 SFEP-0020 §3.5 item 6 at `0020:233-237`, the spelling `docs/status.md:266` gives as
@@ -536,7 +536,7 @@ This is the smallest unblocked item in the document, and the pre-rewrite text go
 it wrong by declaring it blocked. The stated prerequisite — extend `Diagnostic`
 with structured fix-its — is discharged: `FixSuggestion { message, edits:
 TextEdit[] }` and `TextEdit { start_line, start_column, end_line, end_column,
-replacement }` exist in `compiler/src/diagnostic.sfn`, and effect diagnostics
+replacement }` exist in `compiler/capsules/analyzer/src/diagnostic.sfn`, and effect diagnostics
 already populate them (`docs/status.md:296`, SFEP-0004 B3). `W0210` carries one
 today.
 
@@ -814,8 +814,8 @@ are absent. Absence is not a behaviour to pin.
 **Implementation anchors**
 
 - `compiler/src/cli/main.sfn` — the `Command` tree (`:237-259`, `:291-724`)
-- `compiler/src/analyzer.sfn` — `AnalyzerInput -> AnalyzerResult`
-- `compiler/src/diagnostic.sfn:31` — `Diag`; `:8` — `TextEdit`
+- `compiler/capsules/analyzer/src/analyzer.sfn` — `AnalyzerInput -> AnalyzerResult`
+- `compiler/capsules/analyzer/src/diagnostic.sfn:31` — `Diag`; `:8` — `TextEdit`
 - `compiler/src/diagnostics_json.sfn:164` — the reserved `secondary` slot
 - `compiler/src/tools/` — `check.sfn`, `fmt/`, `fmt_rules.sfn`
 - `compiler/capsules/syntax/src/lexer.sfn:74-109` — why `///` cannot be distinguished

@@ -13,7 +13,7 @@ import {
 } from "../../src/cli/commands/dev_det_sweep";
 
 test "det-sweep: slug strips compiler/src prefix" {
-    assert _det_slug_of("compiler/src/analyzer.sfn") == "analyzer";
+    assert _det_slug_of("compiler/src/main.sfn") == "main";
 }
 
 test "det-sweep: slug keeps nested compiler/src path" {
@@ -22,6 +22,10 @@ test "det-sweep: slug keeps nested compiler/src path" {
 
 test "det-sweep: slug canonicalizes a compiler implementation capsule" {
     assert _det_slug_of("compiler/capsules/syntax/src/ast.sfn") == "sfn/syntax/ast";
+}
+
+test "det-sweep: slug canonicalizes the analyzer capsule" {
+    assert _det_slug_of("compiler/capsules/analyzer/src/analyzer.sfn") == "sfn/analyzer/analyzer";
 }
 
 test "det-sweep: slug canonicalizes a nested compiler capsule module" {

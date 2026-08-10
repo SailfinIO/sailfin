@@ -18,7 +18,7 @@
 // library helper flagged by the #616 audit as missing from the
 // pre-existing inline list, deliberately kept out of the envelope so
 // user code can shadow it).
-import { is_builtin_call_name, is_builtin_member_root } from "../../src/typecheck_types/extern_abi";
+import { is_builtin_call_name, is_builtin_member_root } from "sfn/analyzer/typecheck_types/extern_abi";
 
 test "builtin member roots mirror the runtime helper registry" {
     assert is_builtin_member_root("array");

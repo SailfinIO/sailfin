@@ -31,8 +31,8 @@ Sailfin's diagnostics include source spans and fix-it hints. For every diagnosti
 4. **Is the wording approachable?** — A developer new to effect systems should understand "function `fetch` requires `![net]` but its caller declares no effects" without reading the spec first
 
 Check diagnostics in:
-- `compiler/src/effect_checker.sfn` — Effect mismatch messages
-- `compiler/src/typecheck/` — Type error messages
+- `compiler/capsules/analyzer/src/effect_checker/` — Effect mismatch messages
+- `compiler/capsules/analyzer/src/typecheck/` — Type error messages
 - `compiler/capsules/syntax/src/parser/mod.sfn` — Parse error recovery and messages
 
 ## Syntax & API Ergonomics

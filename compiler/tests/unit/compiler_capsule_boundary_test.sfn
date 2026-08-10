@@ -224,20 +224,6 @@ fn _module_role(path: string) -> string {
     if id.length == 0 { return ""; }
 
     if _is_driver_module_id(id) { return ROLE_DRIVER; }
-    if id == "analyzer" || starts_with(id, "typecheck/") || starts_with(id, "typecheck_types/")
-        || starts_with(id, "effect_checker/")
-        || starts_with(id, "typecheck_")
-        || starts_with(id, "effect_")
-        || starts_with(id, "ownership_")
-        || starts_with(id, "decorator_")
-        || id == "bare_assert_check"
-        || id == "import_resolution_check"
-        || id == "prelude_scan"
-        || id == "reexport_check"
-        || id == "symbols_index"
-        || id == "type_id"
-        || id == "type_interner"
-        || id == "diagnostic" { return ROLE_ANALYZER; }
     if starts_with(id, "emit_native") || starts_with(id, "emitter_sailfin")
         || id == "lambda_lowering"
         || id == "lambda_param_inference"
@@ -1191,7 +1177,9 @@ test "capsule roles: classification survives physical compiler capsule moves" {
     assert _role_from_internal_spec("sfn/future-pure") == ROLE_UNKNOWN;
     assert _role_from_internal_spec("runtime/prelude") == ROLE_RUNTIME_PRELUDE;
     assert _role_from_internal_spec("runtime/sfn/filesystem") == ROLE_RUNTIME_INTERNAL;
-    assert _module_role("compiler/src/diagnostic.sfn") == ROLE_ANALYZER;
+    assert _module_role("compiler/src/analyzer.sfn") == "";
+    assert _module_role("compiler/src/diagnostic.sfn") == "";
+    assert _module_role("compiler/src/typecheck/expression_walk.sfn") == "";
     assert _module_role("compiler/src/new_unclassified_role.sfn") == "";
 }
 
@@ -1325,10 +1313,10 @@ test "capsule imports: scanner audits scoped and bare unknown dependencies" {
 }
 
 test "capsule imports: explicit Sailfin extension resolves to the imported module" ![io] {
-    let resolved = _resolve_relative_import("compiler/src/llvm/types.sfn", "../diagnostic.sfn");
-    assert resolved == "compiler/src/diagnostic.sfn";
-    let directory = _resolve_relative_import("compiler/src/typecheck.sfn", "./llvm.sfn");
-    assert directory == "compiler/src/llvm/mod.sfn";
+    let resolved = _resolve_relative_import("compiler/capsules/analyzer/src/typecheck_types/mod.sfn", "../diagnostic.sfn");
+    assert resolved == "compiler/capsules/analyzer/src/diagnostic.sfn";
+    let directory = _resolve_relative_import("compiler/capsules/analyzer/src/analyzer.sfn", "./typecheck.sfn");
+    assert directory == "compiler/capsules/analyzer/src/typecheck/mod.sfn";
 }
 
 test "capsule boundaries: compiler imports obey the role graph and exact exception inventory" ![io] {
@@ -1507,6 +1495,7 @@ test "capsule boundaries: compiler imports obey the role graph and exact excepti
 test "capsule boundaries: check multi-capsule staging excludes LLVM lowering" ![io] {
     let mut queue: string[] = ["compiler/src/check/engine.sfn"];
     let mut seen: string[] = [];
+    let mut analyzer_seen: int = 0;
     let mut index: int = 0;
     loop {
         if index >= queue.length { break; }
@@ -1519,9 +1508,23 @@ test "capsule boundaries: check multi-capsule staging excludes LLVM lowering" ![
         let mut spec_index: int = 0;
         loop {
             if spec_index >= specs.length { break; }
-            let imported = _importee_path(path, specs[spec_index]);
+            let mut imported = _importee_path(path, specs[spec_index]);
             spec_index += 1;
-            if starts_with(imported, "compiler/src/") {
+            if imported == "sfn/analyzer" {
+                imported = "compiler/capsules/analyzer/src/mod.sfn";
+            } else if starts_with(imported, "sfn/analyzer/") {
+                let analyzer_prefix = "sfn/analyzer/";
+                let suffix = substring(imported, analyzer_prefix.length, imported.length);
+                let file_candidate = "compiler/capsules/analyzer/src/" + suffix
+                    + ".sfn";
+                let module_candidate = "compiler/capsules/analyzer/src/"
+                    + suffix
+                    + "/mod.sfn";
+                if fs.exists(file_candidate) { imported = file_candidate; } else if fs.exists(module_candidate) {
+                    imported = module_candidate;
+                }
+            }
+            if starts_with(imported, "compiler/src/") || starts_with(imported, "compiler/capsules/analyzer/src/") {
                 queue.push(imported);
             }
         }
@@ -1530,11 +1533,16 @@ test "capsule boundaries: check multi-capsule staging excludes LLVM lowering" ![
     loop {
         if closure_index >= seen.length { break; }
         let module_path = seen[closure_index];
+        if starts_with(module_path, "compiler/capsules/analyzer/src/") {
+            assert _module_role(module_path) == ROLE_ANALYZER;
+            analyzer_seen += 1;
+        }
         assert ! starts_with(module_path, "compiler/src/llvm/lowering/");
         assert module_path != "compiler/src/main.sfn";
         closure_index += 1;
     }
     assert seen.length > 20;
+    assert analyzer_seen > 20;
 }
 
 test "capsule boundaries: top-level standard-library capsules do not import compiler internals" ![io] {

@@ -1,3 +1,4 @@
+import { empty_import_symbols } from "sfn/analyzer/effect_imports";
 import { LayoutManifest } from "sfn/ir";
 import { int_to_string } from "sfn/strings";
 import { Program, Statement } from "sfn/syntax";
@@ -17,7 +18,6 @@ import {
 } from "../../../build_cache";
 import { _env_flag, _legacy_flag_file } from "../../../build_flags";
 import { prepare_project_capsules_for_test } from "../../../capsule_resolver";
-import { empty_import_symbols } from "../../../effect_imports";
 import { format_backend_failure_banner } from "../../../ice";
 import { compile_tests_to_llvm_file_with_module_imports, module_name_from_path } from "../../../main";
 import {

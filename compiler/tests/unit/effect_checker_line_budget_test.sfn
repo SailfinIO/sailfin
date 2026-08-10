@@ -1,4 +1,4 @@
-// Line-budget sentinel for `compiler/src/effect_checker/`.
+// Line-budget sentinel for `compiler/capsules/analyzer/src/effect_checker/`.
 //
 // The former flat checker reached 1,777 lines. Its facade, routine analysis,
 // lexical-scope handling, declared-effect validation, and AST traversal now
@@ -8,7 +8,7 @@ import { expect_eq_bool } from "sfn/test";
 import { ends_with, find_char_local } from "../../src/string_utils";
 
 let EFFECT_CHECKER_LINE_BUDGET: int = 750;
-let EFFECT_CHECKER_ROOT: string = "compiler/src/effect_checker";
+let EFFECT_CHECKER_ROOT: string = "compiler/capsules/analyzer/src/effect_checker";
 
 fn _count_newlines(source: string) -> int {
     let mut count: int = 0;
@@ -43,6 +43,6 @@ test "effect checker: every module stays under 750 lines" ![io] {
 // Resolution probes the flat file before the folder facade. Restoring it would
 // shadow `effect_checker/mod.sfn` and silently undo the decomposition.
 test "effect checker: the flat module does not shadow the folder" ![io] {
-    assert expect_eq_bool(fs.exists("compiler/src/effect_checker.sfn"), false).ok;
+    assert expect_eq_bool(fs.exists("compiler/capsules/analyzer/src/effect_checker.sfn"), false).ok;
     assert expect_eq_bool(fs.exists(EFFECT_CHECKER_ROOT + "/mod.sfn"), true).ok;
 }

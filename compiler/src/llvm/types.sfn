@@ -3,6 +3,7 @@
 // Struct definitions for the LLVM lowering pass. These types represent
 // intermediate data structures used during the translation from .sfn-asm
 // to LLVM IR.
+import { Diag } from "sfn/analyzer/diagnostic";
 import {
     LayoutManifest,
     NativeEnum,
@@ -11,8 +12,6 @@ import {
     NativeSourceSpan,
     NativeStruct
 } from "sfn/ir";
-
-import { Diag } from "../diagnostic";
 
 // =============================================================================
 // Enum Layout Fixup

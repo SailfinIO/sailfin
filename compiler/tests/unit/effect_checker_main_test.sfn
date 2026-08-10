@@ -7,6 +7,8 @@
 // granted to the body, and the body's used-vs-declared check still
 // gates operations (so `fn main()` without `![io]` cannot call
 // `print.info`). These tests pin that contract.
+import { is_program_entry_point, validate_effects } from "sfn/analyzer/effect_checker";
+import { EffectViolation } from "sfn/analyzer/effect_checker/types";
 import {
     Block,
     Decorator,
@@ -16,9 +18,6 @@ import {
     SourceSpan,
     Statement
 } from "sfn/syntax";
-
-import { is_program_entry_point, validate_effects } from "../../src/effect_checker";
-import { EffectViolation } from "../../src/effect_checker/types";
 
 // -------------------------------------------------------------------
 // Builder helpers — local copies of the shape used in

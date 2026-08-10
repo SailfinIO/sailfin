@@ -9,11 +9,7 @@
 // checker has no expression-type inferencer (#829), so live await/channel-send
 // enforcement waits on that workstream. `spawn_future_kind` mirrors
 // `llvm/type_mapping.sfn:831-905` so emit-native (#1084) agrees on the kind.
-import { Expression } from "sfn/syntax";
-import { parse_program } from "sfn/syntax";
-
-import { index_of } from "../../src/string_utils";
-import { typecheck_diagnostics } from "../../src/typecheck";
+import { typecheck_diagnostics } from "sfn/analyzer/typecheck";
 import {
     analyze_spawn_expression,
     await_receive_result_kind,
@@ -21,7 +17,7 @@ import {
     check_await_operand,
     check_channel_send,
     check_spawn_kind
-} from "../../src/typecheck/concurrency_rules";
+} from "sfn/analyzer/typecheck/concurrency_rules";
 import {
     future_element_kind,
     make_task_array_element_marker,
@@ -29,8 +25,12 @@ import {
     task_array_element_kind,
     task_array_marker_kind,
     type_is_future
-} from "../../src/typecheck_types/expr_type_rules";
-import { SymbolEntry, register_local_symbol } from "../../src/typecheck_types/symbol_table_and_raw_exprs";
+} from "sfn/analyzer/typecheck_types/expr_type_rules";
+import { SymbolEntry, register_local_symbol } from "sfn/analyzer/typecheck_types/symbol_table_and_raw_exprs";
+import { Expression } from "sfn/syntax";
+import { parse_program } from "sfn/syntax";
+
+import { index_of } from "../../src/string_utils";
 
 // Initializer of the first top-level `let` in `source` — the same
 // navigation `parser_concurrency_test.sfn::first_let_initializer` uses.

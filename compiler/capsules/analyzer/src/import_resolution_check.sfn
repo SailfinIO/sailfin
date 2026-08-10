@@ -1,0 +1,117 @@
+// compiler/capsules/analyzer/src/import_resolution_check.sfn
+//
+// Pure import-resolution analysis for `sfn check` (#1953). The driver resolves
+// relative module paths on disk into an `ImportResolutionContext`; the
+// analyzer consumes that value to diagnose unresolved modules (E0430) and
+// names absent from the staged import closure (E0431). Sailfin
+// resolves imported symbols globally by name — a module may legally import
+// a symbol from a module that does not itself declare it, as long as some
+// module in the link defines it — so E0431 checks closure-wide existence,
+// not per-declaring-module export (see `ClosureSymbolSet`). Runs only through
+// the analyzer facade used by `sfn check`, never in the build/self-host emit
+// path, so it cannot affect code generation.
+//
+// Scope is deliberately narrow: only specs beginning with `./` or `../`
+// are checked. Scoped/capsule imports (`sfn/...`), runtime imports
+// (`runtime/...`), and bare names resolve through other mechanisms and are
+// skipped entirely, so they can never false-positive here.
+import { strings_equal, substring } from "sfn/strings";
+import { Program } from "sfn/syntax";
+
+import { Diagnostic } from "./typecheck_types";
+import {
+    make_cannot_find_module_diagnostic,
+    make_symbol_not_exported_diagnostic
+} from "./typecheck_types/declaration_and_statement_checks";
+
+// Closure-wide symbol surface built from the driver's staged import
+// artifacts. `complete == false` suppresses E0431 because a missing or corrupt
+// artifact makes the known-name set only a subset of the real closure.
+struct ClosureSymbolSet {
+    names: string[];
+    complete: boolean;
+}
+
+// Driver-resolved import input for one parsed source file. The analyzer owns
+// the semantic decision and diagnostic data, while the driver owns the
+// filesystem probe needed to populate `resolved_relative_specs`.
+struct ImportResolutionContext {
+    closure_symbols: ClosureSymbolSet;
+    resolved_relative_specs: string[];
+}
+
+fn _irc_starts_with(text: string, prefix: string) -> boolean {
+    if prefix.length > text.length { return false; }
+    return strings_equal(substring(text, 0, prefix.length), prefix);
+}
+
+fn _irc_names_contains(names: string[], target: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= names.length { break; }
+        if strings_equal(names[i], target) { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+fn _irc_specs_contains(specs: string[], target: string) -> boolean {
+    return _irc_names_contains(specs, target);
+}
+
+fn _irc_is_relative(spec: string) -> boolean {
+    if _irc_starts_with(spec, "./") { return true; }
+    if _irc_starts_with(spec, "../") { return true; }
+    return false;
+}
+
+// Walk a parsed program's `import` declarations and emit E0430 for a relative
+// spec absent from the driver-resolved set, or E0431 for a named specifier
+// defined nowhere in the staged import closure.
+// Sailfin resolves imported symbols globally by name (see
+// `ClosureSymbolSet`), so E0431 checks closure-wide existence, not
+// per-module export. It is suppressed unless `closure.complete` — an
+// incomplete closure (a missing/corrupt artifact, or a wildcard re-export)
+// might not list a genuinely-defined name, and a false positive is worse
+// than a missed one. E0430 still fires for a standalone single-file check
+// because its driver adapter populates the resolved-spec set.
+fn collect_import_resolution_findings(program: Program, file_path: string, context: ImportResolutionContext) -> Diagnostic[] {
+    let mut out: Diagnostic[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= program.statements.length { break; }
+        let statement = program.statements[i];
+        if statement.variant == "ImportDeclaration" {
+            let spec_path = statement.source;
+            if _irc_is_relative(spec_path) {
+                if !_irc_specs_contains(context.resolved_relative_specs, spec_path) {
+                    let mut d = make_cannot_find_module_diagnostic(spec_path);
+                    d.file_path = file_path;
+                    out.push(d);
+                } else {
+                    if context.closure_symbols.complete {
+                        let mut s: int = 0;
+                        loop {
+                            if s >= statement.import_specifiers.length { break; }
+                            let importer = statement.import_specifiers[s];
+                            if !_irc_names_contains(context.closure_symbols.names, importer.name) {
+                                let mut nd = make_symbol_not_exported_diagnostic(importer.name, spec_path);
+                                nd.file_path = file_path;
+                                out.push(nd);
+                            }
+                            s += 1;
+                        }
+                    }
+                }
+            }
+        }
+        i += 1;
+    }
+    return out;
+}
+
+export {
+    ClosureSymbolSet,
+    ImportResolutionContext,
+    collect_import_resolution_findings
+};

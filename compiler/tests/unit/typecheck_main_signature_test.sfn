@@ -1,5 +1,5 @@
 // Unit tests for `fn main` signature validation in
-// `compiler/src/typecheck/function_scopes.sfn` (issue #469, M5.3
+// `compiler/capsules/analyzer/src/typecheck/function_scopes.sfn` (issue #469, M5.3
 // prerequisite).
 //
 // The lowering pass at `compiler/src/llvm/lowering/emission.sfn:319`
@@ -8,10 +8,9 @@
 // validation that flags signatures the wrapper can't honour, so users
 // see a Sailfin diagnostic (E0010 / E0011) instead of an `lld` link
 // error after M5.3 emits the real argv-parsing prologue.
+import { typecheck_diagnostics } from "sfn/analyzer/typecheck";
+import { Diagnostic } from "sfn/analyzer/typecheck_types";
 import { parse_program } from "sfn/syntax";
-
-import { typecheck_diagnostics } from "../../src/typecheck";
-import { Diagnostic } from "../../src/typecheck_types";
 
 fn _has_code(diagnostics: Diagnostic[], code: string) -> boolean {
     let mut i: int = 0;

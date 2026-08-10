@@ -1,4 +1,4 @@
-// Unit tests for compiler/src/typecheck_imports.sfn — pure converters
+// Unit tests for compiler/capsules/analyzer/src/typecheck_imports.sfn — pure converters
 // from native-IR interface descriptors to AST statements.
 //
 // Tests construct NativeInterface / NativeInterfaceSignature /
@@ -8,23 +8,22 @@
 // test bodies — see check_tool_test.sfn preamble).
 //
 // See docs/proposals/0004-check-architecture.md.
-import { NativeInterface, NativeInterfaceSignature, NativeParameter } from "sfn/ir";
-import { Statement } from "sfn/syntax";
-import { parse_program } from "sfn/syntax";
-
-import { ImportSymbolTable, append_import_function, empty_import_symbols } from "../../src/effect_imports";
+import { ImportSymbolTable, append_import_function, empty_import_symbols } from "sfn/analyzer/effect_imports";
 import {
     typecheck_diagnostics_with_import_symbols,
     typecheck_diagnostics_with_imports,
     typecheck_walker_resolves_import
-} from "../../src/typecheck";
+} from "sfn/analyzer/typecheck";
 import {
     interface_statement_from_native,
     interfaces_from_native,
     parameter_from_native,
     type_parameter_from_name
-} from "../../src/typecheck_imports";
-import { Diagnostic } from "../../src/typecheck_types";
+} from "sfn/analyzer/typecheck_imports";
+import { Diagnostic } from "sfn/analyzer/typecheck_types";
+import { NativeInterface, NativeInterfaceSignature, NativeParameter } from "sfn/ir";
+import { Statement } from "sfn/syntax";
+import { parse_program } from "sfn/syntax";
 
 fn _count_e0420(diagnostics: Diagnostic[]) -> int {
     let mut count: int = 0;

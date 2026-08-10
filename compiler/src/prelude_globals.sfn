@@ -18,8 +18,9 @@
 // same exe-relative resolution the linker uses to find `prelude.o`), so
 // the lookup is cwd-independent — integration/e2e tests run the compiler
 // from scratch directories where a cwd-relative `runtime/` would miss.
+import { prelude_global_names_from_source } from "sfn/analyzer/prelude_scan";
+
 import { relocate_string_to_heap } from "./arena_relocate";
-import { prelude_global_names_from_source } from "./prelude_scan";
 import { substring } from "./string_utils";
 
 // Mirrors the runtime-root externs declared in `cli_main.sfn` (declared,

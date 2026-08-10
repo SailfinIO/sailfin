@@ -8,10 +8,10 @@
 // primary lines path its own `EmitNativeLines` carrier, so both are covered
 // here; the CLI-level assertion lives in
 // `compiler/tests/e2e/emit_native_structured_diagnostic_test.sfn`.
+import { diag_is_error } from "sfn/analyzer/diagnostic";
 import { parse_program } from "sfn/syntax";
 
 import { empty_llvm_import_context, resolve_llvm_provider_context } from "../../src/build/llvm_provider_context";
-import { diag_is_error } from "../../src/diagnostic";
 import {
     emit_native_diag_lines,
     emit_native_lines_with_module_name,

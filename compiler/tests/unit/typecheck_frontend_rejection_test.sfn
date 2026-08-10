@@ -12,10 +12,9 @@
 // These parse a small `.sfn` source through `parse_program` and run
 // `typecheck_diagnostics` end-to-end, asserting on the `Diagnostic.code`
 // field, mirroring typecheck_bare_fn_type_test.sfn.
+import { typecheck_diagnostics } from "sfn/analyzer/typecheck";
+import { Diagnostic } from "sfn/analyzer/typecheck_types";
 import { parse_program } from "sfn/syntax";
-
-import { typecheck_diagnostics } from "../../src/typecheck";
-import { Diagnostic } from "../../src/typecheck_types";
 
 fn _has_code(diagnostics: Diagnostic[], code: string) -> boolean {
     let mut i: int = 0;

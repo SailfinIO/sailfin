@@ -1,15 +1,14 @@
 // compiler/tests/unit/symbols_index_test.sfn
-// Pure schema/encoder coverage for compiler/src/symbols_index.sfn
+// Pure schema/encoder coverage for compiler/capsules/analyzer/src/symbols_index.sfn
 // (`sfn symbols --json`, SFN-444).
-import { expect_contains_str, expect_eq_str } from "sfn/test";
-
 import {
     SymbolEntry,
     SymbolParameter,
     encode_symbols_error_json,
     encode_symbols_json,
     sort_symbols
-} from "../../src/symbols_index";
+} from "sfn/analyzer/symbols_index";
+import { expect_contains_str, expect_eq_str } from "sfn/test";
 
 fn _entry(name: string, origin: string, import_path: string) -> SymbolEntry {
     return SymbolEntry {

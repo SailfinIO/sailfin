@@ -61,8 +61,8 @@ You are the Sailfin Engineer agent. Your role is to implement features, fix bugs
 | `compiler/src/main.sfn` | Compiler entry point |
 | `compiler/capsules/syntax/src/ast.sfn` | AST node definitions |
 | `compiler/capsules/syntax/src/parser/mod.sfn` | Parser entry |
-| `compiler/src/typecheck/` | Type checking |
-| `compiler/src/effect_checker.sfn` | Effect validation |
+| `compiler/capsules/analyzer/src/typecheck/` | Type checking |
+| `compiler/capsules/analyzer/src/effect_checker/` | Effect validation |
 | `compiler/src/emit_native.sfn` | `.sfn-asm` emitter |
 | `compiler/src/llvm/lowering/entrypoints.sfn` | LLVM lowering entry |
 | `runtime/prelude.sfn` | Runtime library |

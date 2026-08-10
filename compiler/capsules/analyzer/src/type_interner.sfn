@@ -1,0 +1,872 @@
+// compiler/capsules/analyzer/src/type_interner.sfn
+//
+// Deterministic module-local interning for the owner-qualified structural type
+// graph. Equality is fieldwise, hashes come from a private structural encoding,
+// and human-readable rendering is diagnostic output only. See SFN-588,
+// SFEP-0059 §10.2.1, and §3.5.
+import { char_code_at, int_to_string } from "sfn/strings";
+
+import {
+    DeclarationId,
+    EffectSetId,
+    FloatFormat,
+    FunctionCallKind,
+    IntrinsicConstructorKind,
+    ModuleIdentity,
+    OwnershipClass,
+    PointerPermission,
+    QualifiedDeclarationId,
+    StructuralType,
+    StructuralTypeKind,
+    TypeConstructorDescriptor,
+    TypeConstructorId,
+    TypeConstructorKind,
+    TypeId,
+    qualified_declaration_ids_equal
+} from "./type_id";
+
+struct TypeEffectSet {
+    names: string[];
+}
+
+// TypeInterner owns every constructor, effect row, type node, structural key,
+// and hash for one source module. Ordered arrays are the semantic owner; lookup
+// never depends on hash-table iteration order.
+struct TypeInterner {
+    module_identity: ModuleIdentity;
+    constructors: TypeConstructorDescriptor[];
+    effect_sets: TypeEffectSet[];
+    effect_keys: string[];
+    types: StructuralType[];
+    type_keys: string[];
+    type_hashes: int[];
+}
+
+struct TypeInternResult {
+    interner: TypeInterner;
+    id: TypeId;
+    ok: boolean;
+}
+
+struct ConstructorInternResult {
+    interner: TypeInterner;
+    id: TypeConstructorId;
+}
+
+struct EffectSetInternResult {
+    interner: TypeInterner;
+    id: EffectSetId;
+}
+
+fn _empty_qualified_declaration() -> QualifiedDeclarationId {
+    return QualifiedDeclarationId {
+        origin: ModuleIdentity { capsule: "", module: "" },
+        declaration: DeclarationId { value: -1 }
+    };
+}
+
+fn _intrinsic_name(kind: IntrinsicConstructorKind) -> string {
+    if kind.variant == "Array" { return "Array"; }
+    if kind.variant == "Channel" { return "Channel"; }
+    if kind.variant == "Task" { return "Task"; }
+    if kind.variant == "Affine" { return "Affine"; }
+    if kind.variant == "Linear" { return "Linear"; }
+    if kind.variant == "Pii" { return "PII"; }
+    return "Secret";
+}
+
+fn _intrinsic_ownership(kind: IntrinsicConstructorKind) -> OwnershipClass {
+    if kind.variant == "Affine" { return OwnershipClass.Affine(); }
+    if kind.variant == "Linear" { return OwnershipClass.Linear(); }
+    if kind.variant == "Task" { return OwnershipClass.Affine(); }
+    return OwnershipClass.Copyable();
+}
+
+fn _append_intrinsic(constructors: TypeConstructorDescriptor[], kind: IntrinsicConstructorKind) -> TypeConstructorDescriptor[] {
+    let mut updated = constructors;
+    let id = TypeConstructorId { value: updated.length };
+    updated.push(TypeConstructorDescriptor {
+        id: id, kind: TypeConstructorKind.Intrinsic(), intrinsic: kind, has_declaration: false, declaration: _empty_qualified_declaration(), diagnostic_name: _intrinsic_name(kind), arity: 1, ownership: _intrinsic_ownership(kind), is_owned_buf_compatibility: false
+    });
+    return updated;
+}
+
+// new_type_interner constructs an empty graph with intrinsic constructor IDs
+// in a fixed cross-module order.
+fn new_type_interner(capsule: string, module: string) -> TypeInterner {
+    let mut constructors: TypeConstructorDescriptor[] = [];
+    constructors = _append_intrinsic(constructors, IntrinsicConstructorKind.Array());
+    constructors = _append_intrinsic(constructors, IntrinsicConstructorKind.Channel());
+    constructors = _append_intrinsic(constructors, IntrinsicConstructorKind.Task());
+    constructors = _append_intrinsic(constructors, IntrinsicConstructorKind.Affine());
+    constructors = _append_intrinsic(constructors, IntrinsicConstructorKind.Linear());
+    constructors = _append_intrinsic(constructors, IntrinsicConstructorKind.Pii());
+    constructors = _append_intrinsic(constructors, IntrinsicConstructorKind.Secret());
+    return TypeInterner {
+        module_identity: ModuleIdentity { capsule: capsule, module: module },
+        constructors: constructors,
+        effect_sets: [],
+        effect_keys: [],
+        types: [],
+        type_keys: [],
+        type_hashes: []
+    };
+}
+
+// intrinsic_constructor_id returns the fixed module-local handle for an
+// intrinsic constructor.
+fn intrinsic_constructor_id(kind: IntrinsicConstructorKind) -> TypeConstructorId {
+    if kind.variant == "Array" {
+        return TypeConstructorId { value: 0 };
+    }
+    if kind.variant == "Channel" {
+        return TypeConstructorId { value: 1 };
+    }
+    if kind.variant == "Task" {
+        return TypeConstructorId { value: 2 };
+    }
+    if kind.variant == "Affine" {
+        return TypeConstructorId { value: 3 };
+    }
+    if kind.variant == "Linear" {
+        return TypeConstructorId { value: 4 };
+    }
+    if kind.variant == "Pii" {
+        return TypeConstructorId { value: 5 };
+    }
+    return TypeConstructorId { value: 6 };
+}
+
+fn _constructor_id_is_valid(interner: TypeInterner, id: TypeConstructorId) -> boolean {
+    if id.value < 0 { return false; }
+    return id.value < interner.constructors.length;
+}
+
+fn _type_id_is_valid(interner: TypeInterner, id: TypeId) -> boolean {
+    if id.value < 0 { return false; }
+    return id.value < interner.types.length;
+}
+
+// constructor_descriptor resolves a constructor handle. Callers must pass an
+// ID owned by this interner.
+fn constructor_descriptor(interner: TypeInterner, id: TypeConstructorId) -> TypeConstructorDescriptor {
+    return interner.constructors[id.value];
+}
+
+// intern_nominal_constructor interns declaration identity independently of its
+// diagnostic name. The compatibility flag forces the shipped OwnedBuf bridge
+// to Affine without recognizing that spelling in semantic consumers.
+fn intern_nominal_constructor(interner: TypeInterner, declaration: QualifiedDeclarationId, diagnostic_name: string, arity: int, ownership: OwnershipClass, is_owned_buf_compatibility: boolean) -> ConstructorInternResult {
+    let mut index: int = 0;
+    loop {
+        if index >= interner.constructors.length { break; }
+        let existing = interner.constructors[index];
+        if existing.kind.variant == "Nominal" {
+            if qualified_declaration_ids_equal(existing.declaration, declaration) {
+                if is_owned_buf_compatibility && !existing.is_owned_buf_compatibility {
+                    let mut updated = interner;
+                    let mut descriptors = updated.constructors;
+                    let mut descriptor = descriptors[index];
+                    descriptor.ownership = OwnershipClass.Affine();
+                    descriptor.is_owned_buf_compatibility = true;
+                    descriptors[index] = descriptor;
+                    updated.constructors = descriptors;
+                    return ConstructorInternResult {
+                        interner: updated,
+                        id: existing.id
+                    };
+                }
+                return ConstructorInternResult {
+                    interner: interner,
+                    id: existing.id
+                };
+            }
+        }
+        index += 1;
+    }
+    let mut updated = interner;
+    let mut descriptors = updated.constructors;
+    let id = TypeConstructorId { value: descriptors.length };
+    let mut resolved_ownership = ownership;
+    if is_owned_buf_compatibility {
+        resolved_ownership = OwnershipClass.Affine();
+    }
+    descriptors.push(TypeConstructorDescriptor {
+        id: id, kind: TypeConstructorKind.Nominal(), intrinsic: IntrinsicConstructorKind.Array(), has_declaration: true, declaration: declaration, diagnostic_name: diagnostic_name, arity: arity, ownership: resolved_ownership, is_owned_buf_compatibility: is_owned_buf_compatibility
+    });
+    updated.constructors = descriptors;
+    return ConstructorInternResult { interner: updated, id: id };
+}
+
+fn _string_less(left: string, right: string) -> boolean {
+    let mut index: int = 0;
+    loop {
+        if index >= left.length { return right.length > left.length; }
+        if index >= right.length { return false; }
+        let left_code = char_code_at(left, index);
+        let right_code = char_code_at(right, index);
+        if left_code < right_code { return true; }
+        if left_code > right_code { return false; }
+        index += 1;
+    }
+    return false;
+}
+
+fn _sorted_unique_strings(values: string[]) -> string[] {
+    let mut sorted: string[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= values.length { break; }
+        let value = values[index];
+        let mut insert_at: int = sorted.length;
+        let mut scan: int = 0;
+        loop {
+            if scan >= sorted.length { break; }
+            if sorted[scan] == value {
+                insert_at = -1;
+                break;
+            }
+            if _string_less(value, sorted[scan]) {
+                insert_at = scan;
+                break;
+            }
+            scan += 1;
+        }
+        if insert_at >= 0 {
+            sorted.push("");
+            let mut move_at: int = sorted.length - 1;
+            loop {
+                if move_at <= insert_at { break; }
+                sorted[move_at] = sorted[move_at - 1];
+                move_at -= 1;
+            }
+            sorted[insert_at] = value;
+        }
+        index += 1;
+    }
+    return sorted;
+}
+
+fn _encoded_string(value: string) -> string {
+    return int_to_string(value.length) + ":" + value;
+}
+
+fn _effect_key(names: string[]) -> string {
+    let mut key = "E";
+    let mut index: int = 0;
+    loop {
+        if index >= names.length { break; }
+        key = key + _encoded_string(names[index]);
+        index += 1;
+    }
+    return key;
+}
+
+// intern_type_effect_set canonicalizes an exact effect row as an unordered set.
+fn intern_type_effect_set(interner: TypeInterner, names: string[]) -> EffectSetInternResult {
+    let canonical = _sorted_unique_strings(names);
+    let key = _effect_key(canonical);
+    let mut index: int = 0;
+    loop {
+        if index >= interner.effect_keys.length { break; }
+        if interner.effect_keys[index] == key {
+            return EffectSetInternResult {
+                interner: interner,
+                id: EffectSetId { value: index }
+            };
+        }
+        index += 1;
+    }
+    let mut updated = interner;
+    let id = EffectSetId { value: updated.effect_sets.length };
+    let mut sets = updated.effect_sets;
+    sets.push(TypeEffectSet { names: canonical });
+    updated.effect_sets = sets;
+    let mut keys = updated.effect_keys;
+    keys.push(key);
+    updated.effect_keys = keys;
+    return EffectSetInternResult { interner: updated, id: id };
+}
+
+// type_effect_names returns the canonical names for an effect row.
+fn type_effect_names(interner: TypeInterner, id: EffectSetId) -> string[] {
+    return interner.effect_sets[id.value].names;
+}
+
+fn _module_key(identity: ModuleIdentity) -> string {
+    return _encoded_string(identity.capsule) + _encoded_string(identity.module);
+}
+
+fn _qualified_declaration_key(id: QualifiedDeclarationId) -> string {
+    return _module_key(id.origin) + "D" + int_to_string(id.declaration.value);
+}
+
+fn _constructor_key(interner: TypeInterner, id: TypeConstructorId) -> string {
+    let descriptor = interner.constructors[id.value];
+    if descriptor.kind.variant == "Intrinsic" {
+        return "I" + descriptor.intrinsic.variant;
+    }
+    return "N" + _qualified_declaration_key(descriptor.declaration);
+}
+
+fn _type_key_for_id(interner: TypeInterner, id: TypeId) -> string {
+    if !_type_id_is_valid(interner, id) { return "invalid"; }
+    return interner.type_keys[id.value];
+}
+
+fn _type_id_list_key(interner: TypeInterner, ids: TypeId[]) -> string {
+    let mut key = int_to_string(ids.length) + "[";
+    let mut index: int = 0;
+    loop {
+        if index >= ids.length { break; }
+        key = key + _encoded_string(_type_key_for_id(interner, ids[index]));
+        index += 1;
+    }
+    return key + "]";
+}
+
+fn _structural_key(interner: TypeInterner, node: StructuralType) -> string {
+    if node.kind.variant == "Unit" { return "U"; }
+    if node.kind.variant == "Null" { return "N"; }
+    if node.kind.variant == "Bool" { return "B"; }
+    if node.kind.variant == "Int" {
+        let mut signedness = "u";
+        if node.int_signed { signedness = "s"; }
+        return "I" + signedness + int_to_string(node.int_width);
+    }
+    if node.kind.variant == "Float" {
+        return "F" + node.float_format.variant;
+    }
+    if node.kind.variant == "String" { return "S"; }
+    if node.kind.variant == "Dynamic" { return "D"; }
+    if node.kind.variant == "Pointer" {
+        let mut permission = "r";
+        if node.pointer_permission.variant == "Mutable" { permission = "m"; }
+        let mut pointee = "opaque";
+        if node.has_pointee {
+            pointee = _type_key_for_id(interner, node.pointee);
+        }
+        return "P" + permission + int_to_string(node.address_space)
+            + _encoded_string(pointee);
+    }
+    if node.kind.variant == "Reference" {
+        let mut mutability = "i";
+        if node.reference_mutable { mutability = "m"; }
+        return "R" + mutability + _encoded_string(_type_key_for_id(interner, node.referent));
+    }
+    if node.kind.variant == "TypeParameter" {
+        return "T" + _qualified_declaration_key(node.type_parameter_owner) + "P"
+            + int_to_string(node.type_parameter_index);
+    }
+    if node.kind.variant == "Applied" {
+        return "A" + _encoded_string(_constructor_key(interner, node.constructor))
+            + _type_id_list_key(interner, node.arguments);
+    }
+    if node.kind.variant == "Union" {
+        return "O" + _type_id_list_key(interner, node.union_members);
+    }
+    let mut call_kind = "s";
+    if node.call_kind.variant == "CFunction" { call_kind = "c"; }
+    return "K" + call_kind + _type_id_list_key(interner, node.parameters)
+        + _encoded_string(_type_key_for_id(interner, node.result))
+        + _encoded_string(interner.effect_keys[node.effects.value]);
+}
+
+fn _fnv1a_32(value: string) -> int {
+    let mut hash: int = 2166136261;
+    let mut index: int = 0;
+    loop {
+        if index >= value.length { break; }
+        hash = hash ^ (char_code_at(value, index) & 255);
+        hash = (hash * 16777619) & 4294967295;
+        index += 1;
+    }
+    return hash & 4294967295;
+}
+
+fn _type_id_lists_equal(left: TypeId[], right: TypeId[]) -> boolean {
+    if left.length != right.length { return false; }
+    let mut index: int = 0;
+    loop {
+        if index >= left.length { break; }
+        if left[index].value != right[index].value { return false; }
+        index += 1;
+    }
+    return true;
+}
+
+fn _structural_types_equal(left: StructuralType, right: StructuralType) -> boolean {
+    if left.kind.variant != right.kind.variant { return false; }
+    if left.kind.variant == "Int" {
+        if left.int_width != right.int_width { return false; }
+        return left.int_signed == right.int_signed;
+    }
+    if left.kind.variant == "Float" {
+        return left.float_format.variant == right.float_format.variant;
+    }
+    if left.kind.variant == "Pointer" {
+        if left.has_pointee != right.has_pointee { return false; }
+        if left.has_pointee {
+            if left.pointee.value != right.pointee.value { return false; }
+        }
+        if left.pointer_permission.variant != right.pointer_permission.variant {
+            return false;
+        }
+        return left.address_space == right.address_space;
+    }
+    if left.kind.variant == "Reference" {
+        if left.referent.value != right.referent.value { return false; }
+        return left.reference_mutable == right.reference_mutable;
+    }
+    if left.kind.variant == "TypeParameter" {
+        if !qualified_declaration_ids_equal(left.type_parameter_owner, right.type_parameter_owner) {
+            return false;
+        }
+        return left.type_parameter_index == right.type_parameter_index;
+    }
+    if left.kind.variant == "Applied" {
+        if left.constructor.value != right.constructor.value { return false; }
+        return _type_id_lists_equal(left.arguments, right.arguments);
+    }
+    if left.kind.variant == "Union" {
+        return _type_id_lists_equal(left.union_members, right.union_members);
+    }
+    if left.kind.variant == "Function" {
+        if !_type_id_lists_equal(left.parameters, right.parameters) {
+            return false;
+        }
+        if left.result.value != right.result.value { return false; }
+        if left.effects.value != right.effects.value { return false; }
+        return left.call_kind.variant == right.call_kind.variant;
+    }
+    return true;
+}
+
+fn _empty_structural_type(kind: StructuralTypeKind) -> StructuralType {
+    return StructuralType {
+        kind: kind,
+        int_width: 0,
+        int_signed: false,
+        float_format: FloatFormat.F32(),
+        has_pointee: false,
+        pointee: TypeId { value: -1 },
+        pointer_permission: PointerPermission.ReadOnly(),
+        address_space: 0,
+        referent: TypeId { value: -1 },
+        reference_mutable: false,
+        type_parameter_owner: _empty_qualified_declaration(),
+        type_parameter_index: -1,
+        constructor: TypeConstructorId { value: -1 },
+        arguments: [],
+        union_members: [],
+        parameters: [],
+        result: TypeId { value: -1 },
+        effects: EffectSetId { value: -1 },
+        call_kind: FunctionCallKind.SailfinValue()
+    };
+}
+
+fn _intern_structural_type(interner: TypeInterner, node: StructuralType) -> TypeInternResult {
+    let key = _structural_key(interner, node);
+    let hash = _fnv1a_32(key);
+    let mut index: int = 0;
+    loop {
+        if index >= interner.types.length { break; }
+        if interner.type_hashes[index] == hash {
+            if _structural_types_equal(interner.types[index], node) {
+                return TypeInternResult {
+                    interner: interner,
+                    id: TypeId { value: index },
+                    ok: true
+                };
+            }
+        }
+        index += 1;
+    }
+    let mut updated = interner;
+    let id = TypeId { value: updated.types.length };
+    let mut types = updated.types;
+    types.push(node);
+    updated.types = types;
+    let mut keys = updated.type_keys;
+    keys.push(key);
+    updated.type_keys = keys;
+    let mut hashes = updated.type_hashes;
+    hashes.push(hash);
+    updated.type_hashes = hashes;
+    return TypeInternResult { interner: updated, id: id, ok: true };
+}
+
+fn _invalid_type_intern_result(interner: TypeInterner) -> TypeInternResult {
+    return TypeInternResult {
+        interner: interner,
+        id: TypeId { value: -1 },
+        ok: false
+    };
+}
+
+// intern_unit_type interns Unit, the no-result type.
+fn intern_unit_type(interner: TypeInterner) -> TypeInternResult {
+    return _intern_structural_type(interner, _empty_structural_type(StructuralTypeKind.Unit()));
+}
+
+// intern_null_type interns Null, which is semantically distinct from Unit.
+fn intern_null_type(interner: TypeInterner) -> TypeInternResult {
+    return _intern_structural_type(interner, _empty_structural_type(StructuralTypeKind.Null()));
+}
+
+// intern_bool_type interns the logical boolean type.
+fn intern_bool_type(interner: TypeInterner) -> TypeInternResult {
+    return _intern_structural_type(interner, _empty_structural_type(StructuralTypeKind.Bool()));
+}
+
+// intern_int_type interns a fixed-width integer with semantic signedness.
+fn intern_int_type(interner: TypeInterner, width: int, is_signed: boolean) -> TypeInternResult {
+    if width != 8 && width != 16 && width != 32 && width != 64 {
+        return _invalid_type_intern_result(interner);
+    }
+    let mut node = _empty_structural_type(StructuralTypeKind.Int());
+    node.int_width = width;
+    node.int_signed = is_signed;
+    return _intern_structural_type(interner, node);
+}
+
+// intern_float_type interns the shipped f16, f32, or f64 format for width.
+fn intern_float_type(interner: TypeInterner, width: int) -> TypeInternResult {
+    if width != 16 && width != 32 && width != 64 {
+        return _invalid_type_intern_result(interner);
+    }
+    let mut node = _empty_structural_type(StructuralTypeKind.Float());
+    if width == 16 { node.float_format = FloatFormat.F16(); } else if width == 64 {
+        node.float_format = FloatFormat.F64();
+    } else { node.float_format = FloatFormat.F32(); }
+    return _intern_structural_type(interner, node);
+}
+
+// intern_bfloat16_type interns bfloat16 without collapsing it into f16.
+fn intern_bfloat16_type(interner: TypeInterner) -> TypeInternResult {
+    let mut node = _empty_structural_type(StructuralTypeKind.Float());
+    node.float_format = FloatFormat.Bf16();
+    return _intern_structural_type(interner, node);
+}
+
+// intern_string_type interns the target-neutral UTF-8 String type.
+fn intern_string_type(interner: TypeInterner) -> TypeInternResult {
+    return _intern_structural_type(interner, _empty_structural_type(StructuralTypeKind.String()));
+}
+
+// intern_dynamic_type interns the transitional Dynamic/any semantic type.
+fn intern_dynamic_type(interner: TypeInterner) -> TypeInternResult {
+    return _intern_structural_type(interner, _empty_structural_type(StructuralTypeKind.Dynamic()));
+}
+
+// intern_pointer_type interns a raw pointer, including source permission,
+// optional pointee, and address space.
+fn intern_pointer_type(interner: TypeInterner, has_pointee: boolean, pointee: TypeId, permission: PointerPermission, address_space: int) -> TypeInternResult {
+    if address_space < 0 { return _invalid_type_intern_result(interner); }
+    if has_pointee {
+        if !_type_id_is_valid(interner, pointee) {
+            return _invalid_type_intern_result(interner);
+        }
+    }
+    let mut node = _empty_structural_type(StructuralTypeKind.Pointer());
+    node.has_pointee = has_pointee;
+    if has_pointee { node.pointee = pointee; }
+    node.pointer_permission = permission;
+    node.address_space = address_space;
+    return _intern_structural_type(interner, node);
+}
+
+// intern_reference_type interns a checked immutable or mutable reference.
+fn intern_reference_type(interner: TypeInterner, referent: TypeId, is_mutable: boolean) -> TypeInternResult {
+    if !_type_id_is_valid(interner, referent) {
+        return _invalid_type_intern_result(interner);
+    }
+    let mut node = _empty_structural_type(StructuralTypeKind.Reference());
+    node.referent = referent;
+    node.reference_mutable = is_mutable;
+    return _intern_structural_type(interner, node);
+}
+
+// intern_type_parameter interns a declaration-owned zero-based type parameter.
+fn intern_type_parameter(interner: TypeInterner, owner: QualifiedDeclarationId, index: int) -> TypeInternResult {
+    if index < 0 { return _invalid_type_intern_result(interner); }
+    let mut node = _empty_structural_type(StructuralTypeKind.TypeParameter());
+    node.type_parameter_owner = owner;
+    node.type_parameter_index = index;
+    return _intern_structural_type(interner, node);
+}
+
+fn _all_type_ids_valid(interner: TypeInterner, ids: TypeId[]) -> boolean {
+    let mut index: int = 0;
+    loop {
+        if index >= ids.length { break; }
+        if !_type_id_is_valid(interner, ids[index]) { return false; }
+        index += 1;
+    }
+    return true;
+}
+
+// intern_applied_type interns a nominal or intrinsic constructor application.
+fn intern_applied_type(interner: TypeInterner, constructor: TypeConstructorId, arguments: TypeId[]) -> TypeInternResult {
+    if !_constructor_id_is_valid(interner, constructor) {
+        return _invalid_type_intern_result(interner);
+    }
+    if !_all_type_ids_valid(interner, arguments) {
+        return _invalid_type_intern_result(interner);
+    }
+    if interner.constructors[constructor.value].arity != arguments.length {
+        return _invalid_type_intern_result(interner);
+    }
+    let mut node = _empty_structural_type(StructuralTypeKind.Applied());
+    node.constructor = constructor;
+    node.arguments = arguments;
+    return _intern_structural_type(interner, node);
+}
+
+// intern_array_type interns Array<T> as an intrinsic application.
+fn intern_array_type(interner: TypeInterner, element: TypeId) -> TypeInternResult {
+    return intern_applied_type(interner, intrinsic_constructor_id(IntrinsicConstructorKind.Array()), [element]);
+}
+
+// intern_affine_type interns Affine<T> as an intrinsic application.
+fn intern_affine_type(interner: TypeInterner, inner: TypeId) -> TypeInternResult {
+    return intern_applied_type(interner, intrinsic_constructor_id(IntrinsicConstructorKind.Affine()), [inner]);
+}
+
+// intern_linear_type interns Linear<T> as an intrinsic application.
+fn intern_linear_type(interner: TypeInterner, inner: TypeId) -> TypeInternResult {
+    return intern_applied_type(interner, intrinsic_constructor_id(IntrinsicConstructorKind.Linear()), [inner]);
+}
+
+fn _union_add_member(interner: TypeInterner, members: TypeId[], candidate: TypeId) -> TypeId[] {
+    let mut updated = members;
+    let node = interner.types[candidate.value];
+    if node.kind.variant == "Union" {
+        let mut nested_index: int = 0;
+        loop {
+            if nested_index >= node.union_members.length { break; }
+            updated = _union_add_member(interner, updated, node.union_members[nested_index]);
+            nested_index += 1;
+        }
+        return updated;
+    }
+    let mut index: int = 0;
+    loop {
+        if index >= updated.length { break; }
+        if updated[index].value == candidate.value { return updated; }
+        index += 1;
+    }
+    updated.push(candidate);
+    return updated;
+}
+
+fn _sort_type_ids_by_key(interner: TypeInterner, ids: TypeId[]) -> TypeId[] {
+    let mut sorted = ids;
+    let mut index: int = 1;
+    loop {
+        if index >= sorted.length { break; }
+        let candidate = sorted[index];
+        let candidate_key = _type_key_for_id(interner, candidate);
+        let mut scan: int = index;
+        loop {
+            if scan <= 0 { break; }
+            let previous_key = _type_key_for_id(interner, sorted[scan - 1]);
+            if !_string_less(candidate_key, previous_key) { break; }
+            sorted[scan] = sorted[scan - 1];
+            scan -= 1;
+        }
+        sorted[scan] = candidate;
+        index += 1;
+    }
+    return sorted;
+}
+
+// intern_union_type flattens, deduplicates, and structurally orders members. A
+// singleton resolves directly to its member; an empty union is invalid.
+fn intern_union_type(interner: TypeInterner, members: TypeId[]) -> TypeInternResult {
+    if !_all_type_ids_valid(interner, members) {
+        return _invalid_type_intern_result(interner);
+    }
+    let mut canonical: TypeId[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= members.length { break; }
+        canonical = _union_add_member(interner, canonical, members[index]);
+        index += 1;
+    }
+    if canonical.length == 0 { return _invalid_type_intern_result(interner); }
+    canonical = _sort_type_ids_by_key(interner, canonical);
+    if canonical.length == 1 {
+        return TypeInternResult {
+            interner: interner,
+            id: canonical[0],
+            ok: true
+        };
+    }
+    let mut node = _empty_structural_type(StructuralTypeKind.Union());
+    node.union_members = canonical;
+    return _intern_structural_type(interner, node);
+}
+
+// intern_optional_type interns T? through the same canonical T | Null path.
+fn intern_optional_type(interner: TypeInterner, inner: TypeId) -> TypeInternResult {
+    if !_type_id_is_valid(interner, inner) {
+        return _invalid_type_intern_result(interner);
+    }
+    let null_result = intern_null_type(interner);
+    return intern_union_type(null_result.interner, [inner, null_result.id]);
+}
+
+// intern_function_type interns ordered parameters, result, exact effect row,
+// and Sailfin/C call kind as semantic callable identity.
+fn intern_function_type(interner: TypeInterner, parameters: TypeId[], result: TypeId, effects: EffectSetId, call_kind: FunctionCallKind) -> TypeInternResult {
+    if !_all_type_ids_valid(interner, parameters) {
+        return _invalid_type_intern_result(interner);
+    }
+    if !_type_id_is_valid(interner, result) {
+        return _invalid_type_intern_result(interner);
+    }
+    if effects.value < 0 { return _invalid_type_intern_result(interner); }
+    if effects.value >= interner.effect_sets.length {
+        return _invalid_type_intern_result(interner);
+    }
+    let mut node = _empty_structural_type(StructuralTypeKind.Function());
+    node.parameters = parameters;
+    node.result = result;
+    node.effects = effects;
+    node.call_kind = call_kind;
+    return _intern_structural_type(interner, node);
+}
+
+// structural_type returns the node for a valid module-local TypeId.
+fn structural_type(interner: TypeInterner, id: TypeId) -> StructuralType {
+    return interner.types[id.value];
+}
+
+// structural_type_hash returns the deterministic 32-bit structural hash used
+// as the interner lookup filter. Fieldwise equality resolves collisions.
+fn structural_type_hash(interner: TypeInterner, id: TypeId) -> int {
+    return interner.type_hashes[id.value];
+}
+
+// type_interner_len returns the number of unique structural nodes.
+fn type_interner_len(interner: TypeInterner) -> int {
+    return interner.types.length;
+}
+
+fn _render_qualified_declaration(id: QualifiedDeclarationId) -> string {
+    return id.origin.capsule + "/" + id.origin.module + "#d" + int_to_string(id.declaration.value);
+}
+
+fn _render_constructor(interner: TypeInterner, id: TypeConstructorId) -> string {
+    let descriptor = interner.constructors[id.value];
+    if descriptor.kind.variant == "Intrinsic" {
+        return _intrinsic_name(descriptor.intrinsic);
+    }
+    let owner = _render_qualified_declaration(descriptor.declaration);
+    if descriptor.diagnostic_name.length == 0 { return owner; }
+    return descriptor.diagnostic_name + "@" + owner;
+}
+
+fn _render_type_id_list(interner: TypeInterner, ids: TypeId[], separator: string) -> string {
+    let mut output = "";
+    let mut index: int = 0;
+    loop {
+        if index >= ids.length { break; }
+        if index > 0 { output = output + separator; }
+        output = output + render_structural_type(interner, ids[index]);
+        index += 1;
+    }
+    return output;
+}
+
+// render_structural_type produces diagnostic-only text. Semantic equality and
+// hashing never consume this rendering.
+fn render_structural_type(interner: TypeInterner, id: TypeId) -> string {
+    if !_type_id_is_valid(interner, id) { return "<invalid-type>"; }
+    let node = interner.types[id.value];
+    if node.kind.variant == "Unit" { return "Unit"; }
+    if node.kind.variant == "Null" { return "Null"; }
+    if node.kind.variant == "Bool" { return "Bool"; }
+    if node.kind.variant == "Int" {
+        let mut prefix = "u";
+        if node.int_signed { prefix = "i"; }
+        return prefix + int_to_string(node.int_width);
+    }
+    if node.kind.variant == "Float" {
+        if node.float_format.variant == "F16" { return "f16"; }
+        if node.float_format.variant == "Bf16" { return "bf16"; }
+        if node.float_format.variant == "F64" { return "f64"; }
+        return "f32";
+    }
+    if node.kind.variant == "String" { return "String"; }
+    if node.kind.variant == "Dynamic" { return "Dynamic"; }
+    if node.kind.variant == "Pointer" {
+        let mut prefix = "*const ";
+        if node.pointer_permission.variant == "Mutable" { prefix = "*mut "; }
+        let mut target = "opaque";
+        if node.has_pointee {
+            target = render_structural_type(interner, node.pointee);
+        }
+        if node.address_space == 0 { return prefix + target; }
+        return prefix + target + " as" + int_to_string(node.address_space);
+    }
+    if node.kind.variant == "Reference" {
+        let mut prefix = "&";
+        if node.reference_mutable { prefix = "&mut "; }
+        return prefix + render_structural_type(interner, node.referent);
+    }
+    if node.kind.variant == "TypeParameter" {
+        return "T" + int_to_string(node.type_parameter_index) + "@"
+            + _render_qualified_declaration(node.type_parameter_owner);
+    }
+    if node.kind.variant == "Applied" {
+        let constructor = _render_constructor(interner, node.constructor);
+        if node.arguments.length == 0 { return constructor; }
+        return constructor + "<" + _render_type_id_list(interner, node.arguments, ", ")
+            + ">";
+    }
+    if node.kind.variant == "Union" {
+        return _render_type_id_list(interner, node.union_members, " | ");
+    }
+    let mut output = "fn (" + _render_type_id_list(interner, node.parameters, ", ")
+        + ") -> "
+        + render_structural_type(interner, node.result)
+        + " ![";
+    output = output + _render_type_effects(interner, node.effects) + "]";
+    if node.call_kind.variant == "CFunction" { return output + " call=c"; }
+    return output + " call=sailfin";
+}
+
+fn _render_type_effects(interner: TypeInterner, id: EffectSetId) -> string {
+    let names = interner.effect_sets[id.value].names;
+    let mut output = "";
+    let mut index: int = 0;
+    loop {
+        if index >= names.length { break; }
+        if index > 0 { output = output + ", "; }
+        output = output + names[index];
+        index += 1;
+    }
+    return output;
+}
+
+// render_type_interner produces a deterministic diagnostic table in TypeId
+// order, including each structural hash.
+fn render_type_interner(interner: TypeInterner) -> string {
+    let mut output = "types " + interner.module_identity.capsule + "/"
+        + interner.module_identity.module
+        + "\n";
+    let mut index: int = 0;
+    loop {
+        if index >= interner.types.length { break; }
+        let id = TypeId { value: index };
+        output = output + "t" + int_to_string(index) + " hash=" + int_to_string(structural_type_hash(interner, id))
+            + " = "
+            + render_structural_type(interner, id)
+            + "\n";
+        index += 1;
+    }
+    return output;
+}

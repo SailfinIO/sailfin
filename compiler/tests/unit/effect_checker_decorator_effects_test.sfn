@@ -10,6 +10,9 @@
 // some seed compilers segfault on deeply nested struct-literal initialisers in
 // test bodies (see `effect_imports_test.sfn` / `decorator_resolver_test.sfn`
 // preambles for the same workaround).
+import { validate_effects_with_imports } from "sfn/analyzer/effect_checker";
+import { EffectViolation } from "sfn/analyzer/effect_checker/types";
+import { append_import_decorator_function, empty_import_symbols } from "sfn/analyzer/effect_imports";
 import {
     Block,
     Decorator,
@@ -24,10 +27,6 @@ import {
     TypeAnnotation,
     TypeParameter
 } from "sfn/syntax";
-
-import { validate_effects_with_imports } from "../../src/effect_checker";
-import { EffectViolation } from "../../src/effect_checker/types";
-import { append_import_decorator_function, empty_import_symbols } from "../../src/effect_imports";
 
 // -------------------------------------------------------------------
 // Builder helpers

@@ -2,6 +2,7 @@
 //
 // Core LLVM lowering orchestrator. Phase-specific work lives in the
 // sibling modules in this folder and in lowering_phase_*.sfn.
+import { Diag } from "sfn/analyzer/diagnostic";
 import {
     ImportedModuleContext,
     LayoutManifest,
@@ -11,7 +12,6 @@ import {
 } from "sfn/ir";
 import { parse_native_artifact } from "sfn/ir";
 
-import { Diag } from "../../../diagnostic";
 import {
     append_unique_effect,
     collect_direct_function_effects,

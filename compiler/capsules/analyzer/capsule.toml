@@ -1,0 +1,17 @@
+[capsule]
+name = "sfn/analyzer"
+version = "0.9.3"
+description = "Sailfin semantic analysis pipeline (toolchain-internal)"
+publish = false
+
+[dependencies]
+"sfn/syntax" = "*"
+"sfn/ir" = "*"
+"sfn/strings" = "*"
+
+[capabilities]
+required = []
+
+[build]
+kind = "library"
+entry = "src/mod.sfn"

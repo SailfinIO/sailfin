@@ -67,12 +67,12 @@ concretely, is stopping it? §3 answers both.
 A synchronization primitive — a mutex, a semaphore, a wait group — exists to
 be held by more than one concurrent worker at once. It is tempting to assume
 the ownership checker's spawn-capture rule forecloses that, but it does not:
-`_consume_spawn_captures` (`compiler/src/ownership_checker.sfn:438-473`,
+`_consume_spawn_captures` (`compiler/capsules/analyzer/src/ownership_checker.sfn:438-473`,
 called from the `Spawn`, `parallel`-task, and `serve`-handler arms at lines
 960, 981, and 993) routes each free variable of the closure through
 `_consume_identifier`, which gates immediately on `if !binding.is_owned {
 return scope; }` (`ownership_checker.sfn:373`). `is_owned` comes from
-`is_owned_type` (`compiler/src/typecheck_types/expr_type_rules.sfn:232-239`),
+`is_owned_type` (`compiler/capsules/analyzer/src/typecheck_types/expr_type_rules.sfn:232-239`),
 which returns true for exactly four annotation spellings: `OwnedBuf`,
 `OwnedBuf<`, `Affine<`, `Linear<`. An ordinary `struct Mutex` or an `i64`/`*u8`
 handle has `is_owned == false`, so no rule fires and no move is recorded —
@@ -360,10 +360,10 @@ touch it.
 ## 9. References
 
 - `capsules/sfn/sync/capsule.toml`, `capsules/sfn/sync/src/mod.sfn`
-- `compiler/src/ownership_checker.sfn:373` (`_consume_identifier`'s
+- `compiler/capsules/analyzer/src/ownership_checker.sfn:373` (`_consume_identifier`'s
   `is_owned` gate), `:104-105` (copyable bindings never move-tracked),
   `:438-473` (`_consume_spawn_captures`)
-- `compiler/src/typecheck_types/expr_type_rules.sfn:232-239` (`is_owned_type`
+- `compiler/capsules/analyzer/src/typecheck_types/expr_type_rules.sfn:232-239` (`is_owned_type`
   — the four owned/affine annotation spellings)
 - `compiler/tests/e2e/channel_producer_consumer_exec_test.sfn:20-25`
   (superseded module-global sharing precedent — both capture-env carve-outs
