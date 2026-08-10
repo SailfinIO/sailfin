@@ -50,8 +50,15 @@
 // `count == 0` with a non-null return is meaningful and is NOT the same as
 // returning null: it says "this host has a platform trust store and it gave
 // us nothing", which the consumer turns into a loud fail-closed diagnostic.
-// Null from this module means allocation failure only; the POSIX leg's null
-// means "no such store on this platform". See `cert_roots.sfn`.
+// The POSIX leg's null means "no such store on this platform". See
+// `cert_roots.sfn`.
+//
+// This module returns null only when `malloc` itself fails, which does
+// collapse into the POSIX "no store here" answer and costs the caller the
+// specific diagnostic. That is accepted rather than worked around: under
+// memory exhaustion there is no allocation left to describe the failure with,
+// and the outcome is still fail-closed — the caller ends at the CA-bundle
+// probe, which on Windows finds nothing and refuses to verify.
 // ── Crypt32 (crypt32.dll; `-lcrypt32` on both Windows ABIs). ────────────────
 //
 // `CertOpenSystemStoreA(NULL, "ROOT")` opens the current user's view of the
@@ -99,10 +106,14 @@ fn _cr_pad8(n: i64) -> i64 {
     return 8 - rem;
 }
 
-// Guard bounds for the enumeration, which walks OS-owned state of unknown
-// size. A stock Windows root store holds on the order of 50 certificates and
-// an enterprise-managed one a few hundred; 4096 is far above any real store
-// and exists so a corrupt or hostile store cannot spin the loop forever.
+// Guard bound for the enumeration, which walks OS-owned state of unknown size.
+// A stock Windows root store holds on the order of 50 certificates and an
+// enterprise-managed one a few hundred; 4096 is far above any real store.
+//
+// It bounds ITERATIONS, not accepted records. Counting only accepted records
+// would leave both walks unbounded against a store whose every entry reports
+// an unusable `cbCertEncoded`, since the accept counter would never advance —
+// which is exactly the corrupt-store case the guard exists for.
 fn _cr_max_certs() -> i64 { return 4096; }
 
 // A DER certificate above 64 KiB is not a certificate. This also rejects a
@@ -151,13 +162,15 @@ fn sfn_cert_roots_blob() -> *u8 ![io] {
     // here, and the store is small, so two walks are cheaper than growing.
     let mut count: i64 = 0;
     let mut payload: i64 = 0;
+    let mut seen: i64 = 0;
     let mut ctx: *u8 = CertEnumCertificatesInStore(store, null);
     loop {
         if ctx as i64 == 0 { break; }
-        if count >= _cr_max_certs() {
+        if seen >= _cr_max_certs() {
             let _f = CertFreeCertificateContext(ctx);
             break;
         }
+        seen += 1;
         let der_len: i64 = _cr_ctx_der_len(ctx);
         if der_len > 0 && der_len <= _cr_max_der() {
             count += 1;
@@ -188,13 +201,15 @@ fn sfn_cert_roots_blob() -> *u8 ![io] {
     // trailing run of zeroed records.
     let mut written: i64 = 0;
     let mut off: i64 = 16;
+    let mut walked: i64 = 0;
     ctx = CertEnumCertificatesInStore(store, null);
     loop {
         if ctx as i64 == 0 { break; }
-        if written >= count {
+        if written >= count || walked >= _cr_max_certs() {
             let _f = CertFreeCertificateContext(ctx);
             break;
         }
+        walked += 1;
         let der_len: i64 = _cr_ctx_der_len(ctx);
         if der_len > 0 && der_len <= _cr_max_der() {
             let der_ptr: i64 = _cr_ctx_der_ptr(ctx);

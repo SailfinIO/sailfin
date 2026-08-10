@@ -154,6 +154,14 @@ extern fn free(ptr: *u8) -> void;
 
 // Result of one platform trust-store enumeration.
 struct PlatformRoots {
+    // Set when the walk abandoned records it could not trust the framing of.
+    // The blob is produced by a sibling runtime module in this same binary, so
+    // a decode that cannot complete means the producer and this decoder
+    // disagree — a bug, not a degraded store. Reported rather than absorbed:
+    // silently returning the prefix would hand back a short anchor set that
+    // looks like a working trust store and rejects chains for no visible
+    // reason.
+    truncated: boolean;
     // Whether this host HAS an enumerable platform trust store. False on
     // POSIX, where the trust store is a file and `trust_store_default_paths()`
     // is the real mechanism — so a false here is not a failure and the caller
@@ -172,21 +180,31 @@ struct PlatformRoots {
 fn _platform_store_name() -> string { return "windows-system-root-store"; }
 
 // Upper bound on a platform-roots blob, used only to reject a corrupt header.
-// A 4096-certificate store — already far above any real one — runs to roughly
-// 8 MiB, so 32 MiB cannot exclude a legitimate store while still keeping a
-// nonsense `total_bytes` from walking the decoder off the end of the
-// allocation. Every other bound below is derived from `total_bytes`, so this
-// is the one value that has to be sanity-checked rather than trusted.
-fn _roots_max_blob_bytes() -> int { return 33554432; }
+// Every other bound below is derived from `total_bytes`, so this is the one
+// value that has to be sanity-checked rather than trusted.
+//
+// It is derived from the producer's own limits rather than from a guess about
+// typical certificate sizes: 16-byte header, at most `_cr_max_certs()` (4096)
+// records of at most `_cr_max_der()` (65536) payload bytes plus an 8-byte
+// length and up to 7 bytes of padding, plus the 8-byte decoder slack. A
+// ceiling picked independently of those constants would reject a blob the
+// producer considers well-formed — and because a rejected header yields zero
+// anchors, that would cost ALL trust rather than degrading, so the two bounds
+// have to agree by construction.
+fn _roots_max_blob_bytes() -> int { return 16 + 4096 * (8 + 65536 + 7) + 8; }
 
 // Decode the runtime's platform-roots blob into DER blocks. Never partially
 // trusts a malformed blob: any inconsistency stops the walk, so a truncated
 // or corrupt buffer yields fewer anchors and therefore rejects more chains.
-fn _platform_root_blocks() -> PlatformRoots {
+fn _platform_root_blocks() -> PlatformRoots ![io] {
     let empty: int[][] = [];
     let blob: *u8 = sfn_cert_roots_blob();
     if blob as i64 == 0 {
-        return PlatformRoots { present: false, blocks: empty };
+        return PlatformRoots {
+            present: false,
+            truncated: false,
+            blocks: empty
+        };
     }
 
     let count: int = sailfin_intrinsic_pointer_read_i64(blob) as int;
@@ -196,19 +214,38 @@ fn _platform_root_blocks() -> PlatformRoots {
         // has no store — so it stays `present` and fails closed loudly at the
         // caller rather than silently degrading to the CA-bundle path probe.
         free(blob);
-        return PlatformRoots { present: true, blocks: empty };
+        return PlatformRoots {
+            present: true,
+            truncated: true,
+            blocks: empty
+        };
     }
 
     let mut out: int[][] = [];
     let mut off: int = 16;
     let mut n: int = 0;
+    let mut truncated: boolean = false;
     loop {
         if n >= count { break; }
-        if off + 8 > total { break; }
+        if off + 8 > total {
+            truncated = true;
+            break;
+        }
         let der_len: int = sailfin_intrinsic_pointer_read_i64(ptr_off(blob, off as i64)) as int;
         off += 8;
-        if der_len <= 0 { break; }
-        if off + der_len > total { break; }
+        if der_len <= 0 {
+            truncated = true;
+            break;
+        }
+        // Subtract rather than add: `off + der_len` is an i64 addition that
+        // wraps negative for an adversarial length and would pass the check.
+        // The `- 4` covers the 4-byte read width used per byte below, so the
+        // bound guards the load it is there to guard; `total - off` is already
+        // non-negative from the header check above.
+        if der_len > total - off - 4 {
+            truncated = true;
+            break;
+        }
 
         let mut der: int[] = [];
         let mut b: int = 0;
@@ -231,7 +268,11 @@ fn _platform_root_blocks() -> PlatformRoots {
     }
 
     free(blob);
-    return PlatformRoots { present: true, blocks: out };
+    return PlatformRoots {
+        present: true,
+        truncated: truncated,
+        blocks: out
+    };
 }
 
 // Read and parse a CA bundle from an explicit path. `![io]`.
@@ -297,6 +338,11 @@ fn trust_store_load() -> TrustStore ![io] {
     // block entirely, which is what keeps POSIX behaviour unchanged.
     let platform: PlatformRoots = _platform_root_blocks();
     if platform.present {
+        if platform.truncated {
+            return _store_err("trust_store: platform trust store blob is malformed ("
+                + _platform_store_name()
+                + ")");
+        }
         if platform.blocks.length == 0 {
             return _store_err("trust_store: platform trust store is unreadable or empty ("
                 + _platform_store_name()
