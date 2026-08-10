@@ -1032,7 +1032,7 @@ unit; history in the linked issues.
   in `~/.local/bin` (`INSTALL_BASE` / `GLOBAL_BIN_DIR` overrides). Windows uses
   `%LOCALAPPDATA%\sailfin\versions\<version>` and
   `%LOCALAPPDATA%\sailfin\bin`, adding the bin directory to the user `PATH`.
-- Current release: `v0.8.0` (see `bootstrap.toml` `[seed].version`
+- Current release: `v0.9.3` (see `bootstrap.toml` `[seed].version`
   for the pinned self-host seed, which may trail the latest release).
 
 ### Support Tiers
@@ -1048,7 +1048,7 @@ the former with zero work toward the latter.
 | Linux x86-64 | Shipped; primary CI host (`ci.yml`); release asset published | In progress — direct `ld.lld` link path exists (`build/direct_link.sfn::resolve_direct_ld_lld`); owned syscall layer not started — the raw-syscall primitive ships (`compiler/src/llvm/syscall.sfn`, SFEP-0060), its sole permitted consumer `runtime/sfn/platform/syscall_linux.sfn` is unwritten |
 | macOS arm64 (Apple Silicon) | Shipped; CI host; release asset published; effect enforcement partial (#613) | Not a target — mediated vendor-library shim (SFEP-0016 §3.1; no stable raw-syscall ABI) |
 | Windows x86-64 | Cross-compiled from Linux (`ci-cross-windows`); release asset published; native MSVC self-host in progress (SFEP-0021, tracking SFN-53–58) | Not a target — mediated vendor-library shim (SFEP-0016 §3.1) |
-| Linux aarch64 | Tier-3 advisory CI cross-emits pass-1 with an arch-aware x86_64 compiler, then builds native pass-2 and verifies the pass-1/pass-2 fixed point. Source PRs and merge-queue runs reuse that native compiler across the eight named test shards, with target/shard-scoped test-bin caches, per-shard timing/hit-rate metrics, shard-cover enforcement, and one aggregate ARM result kept outside `required-ci` until Tier-2 promotion (SFN-826). The daily scheduled lane gates on the same fixed point plus a cold unsharded `--no-test-cache` full suite under the native 16-GiB job budget. Host-layout probe and direct `ld.lld` fast path included (SFN-473, SFEP-0056 §3.6); release workflows bootstrap a native fixed point and publish the `linux_arm64` installer asset (SFN-475) | Not a target |
+| Linux aarch64 | **Tier 2** (`docs/conventions/target-tiers.md`). Source PRs and merge queues require the `aarch64-linux-result` aggregate, which covers cross-emission, the native pass-1/pass-2 fixed point and smoke probe, shard-cover, and all eight cached test shards (SFN-826, SFN-476). The daily scheduled workflow adds a cold unsharded `--no-test-cache` suite under the native 16-GiB job budget. v0.9.3 publishes the native and installer ARM64 assets; release publication and seed pinning require both (SFN-581, SFN-799). Host-layout support and the direct `ld.lld` fast path are shipped (SFN-471, SFN-473, SFEP-0056). | Not a target |
 
 **Base support is never a claim that the seal holds on that platform** — the
 same discipline as the `![gpu]` row above ("not a claim that an accelerator

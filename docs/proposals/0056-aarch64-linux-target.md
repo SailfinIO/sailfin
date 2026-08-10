@@ -1,15 +1,15 @@
 ---
 sfep: 0056
 title: aarch64-Linux Target Support (Raspberry Pi Install + On-Device Self-Host)
-status: Accepted
+status: Implemented
 type: runtime
 created: 2026-07-24
-updated: 2026-07-31
+updated: 2026-08-10
 author: "agent:compiler-architect"
-tracking: [SFN-471, SFN-472, SFN-473, SFN-474, SFN-475, SFN-476, SFN-644]
+tracking: [SFN-471, SFN-472, SFN-473, SFN-474, SFN-475, SFN-476, SFN-579, SFN-580, SFN-581, SFN-644, SFN-798, SFN-799, SFN-826]
 supersedes:
 superseded-by:
-graduates-to:
+graduates-to: site/src/content/docs/docs/getting-started/install.md
 ---
 
 # SFEP-0056 — aarch64-Linux Target Support (Raspberry Pi Install + On-Device Self-Host)
@@ -38,8 +38,8 @@ explicit non-goal.
 ## 2. Motivation
 
 The Raspberry Pi is the canonical low-cost aarch64-Linux target and a natural
-edge/IoT/hobbyist on-ramp for a capability-secure systems language. Today that
-on-ramp is **broken and, worse, falsely advertised**:
+edge/IoT/hobbyist on-ramp for a capability-secure systems language. When this
+proposal was written, that on-ramp was **broken and, worse, falsely advertised**:
 
 - `install.sh` already maps `aarch64|arm64 → arm64` and constructs
   `sailfin_<ver>_linux_arm64.tar.gz`, then **dies** because no such asset is
@@ -53,11 +53,11 @@ on-ramp is **broken and, worse, falsely advertised**:
   **producer** side (CI matrices, release legs, the two arch-sensitive runtime
   constants, and a bootstrap) is missing.
 
-CI builds exactly three triples from a 2-entry matrix (`macos-26 →
+CI then built exactly three triples from a 2-entry matrix (`macos-26 →
 macos-arm64`, `ubuntu-24.04 → linux-x86_64`, plus a windows cross-build on the
 linux leg), mirrored across `release-tag.yml`, `release-branches.yml`, `ci.yml`,
 `nightly-selfhost.yml`, `seed-test-bin.yml`, `benchmark.yml`, `perf-history.yml`,
-and `build-quality.yml`. No aarch64-Linux leg exists anywhere.
+and `build-quality.yml`. No aarch64-Linux leg existed at proposal time.
 
 Two concrete on-device correctness hazards make "it's Linux, it'll just work"
 false:
@@ -159,78 +159,68 @@ arm64 is gated by `Darwin` and is untouched.
 
 ### 3.4 The aarch64 bootstrap (resolves deliverable (b))
 
-Chicken-and-egg: native aarch64 self-host needs an aarch64 seed, but the pinned
-seed is x86_64 (or macOS arm64) and cannot execute natively on an arm64 runner.
-The Windows epic (SFEP-0021 §4.3) solved the analogous wall with a mingw
-cross-emit vehicle. Here the cleaner vehicle is **qemu-user emulation on a native
-arm64 runner**, because clang on the arm runner is already native aarch64:
+Chicken-and-egg: the first native aarch64 self-host needed an aarch64 compiler,
+but the pinned seed was x86_64 and could not execute natively on the ARM runner.
+SFN-472 crossed that first wall by running the x86_64 seed under qemu-user on
+`ubuntu-24.04-arm`, building an arch-aware compiler A, emitting native pass-1,
+then using pass-1 to build pass-2 and asserting their fixed point. That path is
+preserved for rebuilding legacy tags whose pinned release predates ARM assets.
 
-**Bootstrap sequence (all on `ubuntu-24.04-arm`):**
+The shipped steady state has two optimized consumers of that proof:
 
-1. **Stage 0 — seed under emulation.** Register x86_64 binfmt (`qemu-user`) and
-   run the pinned **x86_64 seed** under `qemu-x86_64`. It orchestrates a build;
-   the `clang`/linker it spawns are **native aarch64**.
-2. **Stage 1 — arch-aware compiler A (x86_64/emulated).** The seed builds the
-   new compiler *from source* (which carries §3.2/§3.3). Compiler A is an x86_64
-   binary that runs under qemu but **is arch-aware**.
-3. **Stage 2 — first native aarch64 compiler B (pass-1).** Compiler A (under
-   qemu) builds the compiler from source targeting the native host. Because A is
-   arch-aware and its driver-side resolver probes the **real aarch64 host filesystem**,
-   it bakes `st_mode = 16` and the runtime source's 512-byte `jmp_buf` — so
-   **pass-1 is already arch-correct**, emitted by an arch-aware compiler. clang
-   compiles it to native aarch64.
-4. **Stage 3 — native self-host fixed point.** Pass-1 (native) builds pass-2
-   (seedcheck); assert `pass-1 == pass-2` and `hello-world` runs. This is the
-   self-host proof.
-5. **Stage 4 — publish + pin.** The release workflow runs Stages 0–3 on
-   `ubuntu-24.04-arm` and publishes a native `sailfin_<ver>_linux_arm64.tar.gz`
-   seed. The cadence auto-pin bumps `bootstrap.toml [seed].version`; from that
-   release onward a Pi `make fetch-seed` downloads a **native** aarch64 seed and
-   on-device self-host no longer needs qemu.
+1. **Source PR and merge-queue CI.** `build-compiler-linux` first builds an
+   arch-aware x86_64 compiler. `build-aarch64-cross-vehicle` uses an aarch64
+   sysroot and `SAILFIN_TARGET_ARCH=aarch64` to cross-emit native pass-1 on the
+   x86_64 runner. `build-compiler-aarch64-linux` runs pass-1 natively, builds
+   pass-2, asserts the pass-1/pass-2 fixed point, and runs the smoke probe. This
+   replaced a full qemu compiler build after live CI showed every frontend
+   worker running under TCG without completing compiler A in the useful budget.
+2. **Release builds and on-device self-host.** Once a release contains both the
+   native and installer ARM64 payloads, the ARM release leg fetches that native
+   seed and follows the ordinary `make rebuild` path. v0.9.3 carries the pair,
+   and SFN-799 requires it before release publication or cadence seed pinning.
+   `scripts/select-aarch64-seed-mode.sh` selects qemu only when rebuilding a
+   legacy tag whose pinned release contains neither ARM payload.
 
-**Key insight (why this avoids an inter-issue seed cut):** the bootstrap builds
-the new compiler *from source* on the old seed at Stage 1, so the §3.3 fixes do
+**Key insight (why this avoids an inter-issue seed cut):** the first bring-up
+builds the new compiler *from source* on the old seed, so the §3.3 fixes do
 **not** need to pre-exist in the pinned seed for the aarch64 bring-up to consume
 them. They land in a normal PR (x86_64 self-host stays green, §3.3). The **only**
 seed cut is the ordinary release event that first produces the arm64 asset
-(Stage 4) — and that release is built from `main`, which already contains the
-fixes. There is no separate "pin an aarch64 cross seed" step the way Windows
-needed one.
-
-The `SAILFIN_TARGET_ARCH` override (from §3.2) also enables an **alternative**
-cross-emit-from-x86_64 bootstrap (build the new compiler on an x86_64 runner,
-cross-emit with `SAILFIN_TARGET_ARCH=aarch64` + `clang -target
-aarch64-linux-gnu` + an aarch64 sysroot). We prefer the qemu path as primary —
-it needs **no** cross sysroot (clang is native on the arm runner) — and keep the
-cross-emit path documented as the mechanism a future first-class `sfn build
---target=aarch64-linux-gnu` generalizes to.
+— and that release is built from `main`, which already contains the fixes.
+There is no separate "pin an aarch64 cross seed" step the way Windows needed
+one. The current source-CI cross vehicle and the native-seed release path are
+later performance/steady-state refinements; neither changes that original
+delivery invariant.
 
 ### 3.5 Target tier (resolves deliverable (c))
 
-SFEP-0037 §3.10 defines Tier 1 = Linux x86_64 (CI-blocking), Tier 2 = macOS
-arm64 (builds+tests in CI), Tier 3 = best-effort (Windows enters here).
-aarch64-Linux **enters as Tier 3**: its CI result is **advisory** (visible but
-excluded from `required-ci`) so a transient emulation flake or an aarch64-only
-miscompile does not red-gate `main`. It **earns promotion to Tier
-2** by written criteria — a full green cycle of build + suite + triple-pass
-self-host on `ubuntu-24.04-arm` — at which point the leg flips to blocking. The
-promotion is a discrete gated event (mirroring Windows' Tier-3→2 path), so it is
-its own milestone (§5, Issue 6), not folded into stand-up. Note: SFEP-0037
-§3.10's `docs/conventions/target-tiers.md` has **not** landed yet; the promotion
-issue creates it (or appends the aarch64 row if it has by then).
+SFEP-0037 §3.10 defines Tier 1 = Linux x86_64 (CI-blocking), Tier 2 = supported
+native build and test targets, and Tier 3 = best effort. aarch64-Linux entered
+as Tier 3: its result was visible but excluded from `required-ci` while the
+native path accumulated evidence.
+
+SFN-476 promoted the target to **Tier 2** after every written gate completed:
+SFN-581 proved the published installer, native seed, on-device self-host, and a
+complete green post-pin cycle; SFN-826 sharded and cached the source suite and
+showed the ARM aggregate finishing before the established merge-critical
+matrix; SFN-799 made both ARM64 payloads mandatory for release publication and
+seed pinning; and v0.9.3 published the complete pair. Source pull requests and
+merge queues now feed the cross vehicle, native fixed point and smoke probe,
+shard-cover, and all ARM shards through `aarch64-linux-result` into
+`required-ci`. The scheduled workflow separately fails on any cross-emit,
+native fixed-point/probe, or cold `--no-test-cache` suite failure. The durable
+policy and linked promotion evidence live in
+`docs/conventions/target-tiers.md`.
 
 ### 3.6 The direct-ld.lld fast path (resolves deliverable (e))
 
-`build/direct_link.sfn`'s `resolve_direct_ld_lld` **hard-gates on `arch ==
-x86_64`** and hardcodes `/usr/lib/x86_64-linux-gnu` multiarch dirs +
-`/lib64/ld-linux-x86-64.so.2`. On aarch64 it returns `ok=false` and the driver
-**falls back to the clang-driver link cleanly** — so the fast path is a
-performance optimization, **not** a correctness blocker. It is therefore
-**deferred, in-scope-but-optional** (§5, Issue 5, `Performance`): teach the arch
-gate + `aarch64-linux-gnu` multiarch dirs + `/lib/ld-linux-aarch64.so.1` + an
-aarch64 `_gcc_crt_dir` probe, reusing the provider target-architecture resolver.
-It can land any time after
-the seam (Issue 1) and does not gate the seed, the self-host, or the release.
+SFN-473 shipped the aarch64 direct-`ld.lld` path. `resolve_direct_ld_lld`
+accepts x86_64 or aarch64, reuses the provider target-architecture seam, and
+selects the matching dynamic loader, emulation, multiarch library directories,
+and GCC CRT directory. A missing target linker or CRT still returns `ok=false`
+and falls back cleanly to the clang-driver link, preserving the original
+correctness boundary while removing that fallback from configured ARM hosts.
 
 ## 4. Effect & capability impact
 
@@ -259,16 +249,19 @@ self-host stay green at every step:
   the change is a pure alloca widening with no compiler-baked immediate on the
   consuming side either, so the old seed compiling this new compiler source is
   fine and the self-host invariant still holds by construction.
-- `build/target.sfn`, `build/direct_link.sfn`, `build/clang_argv.sfn` — the
-  native aarch64 build uses clang's **host-default** triple, so no `-target`
-  work is needed for the native path (unlike Windows). Only the optional
-  direct-link fast path (Issue 5) grows an aarch64 arch dimension.
+- `build/target.sfn`, `build/direct_link.sfn`, `build/clang_argv.sfn` — native
+  aarch64 builds use clang's host-default triple. SFN-473 added the aarch64
+  dynamic loader, emulation, multiarch directories, and GCC CRT probe to the
+  direct-`ld.lld` resolver; unsupported or incomplete hosts retain the clang
+  fallback.
 
-The self-host invariant is preserved by construction: the aarch64 bring-up
-builds the new compiler from source via the qemu bootstrap (§3.4), never
-requiring the fixes to pre-exist in the pinned seed. Every milestone that could
-touch Tier-1 code paths (Issue 1) is gated by `make check` on Linux x86_64
-before merge.
+The self-host invariant is preserved by construction: the first bring-up built
+the new compiler from source via qemu; source CI now cross-emits native pass-1
+from an arch-aware compiler and proves pass-1/pass-2 identity on ARM; release
+builds use the published native seed, with qemu retained only for legacy tags.
+None of these paths requires the aarch fixes to pre-exist in the original
+x86_64 seed. Every milestone that could touch Tier-1 code paths was gated by
+`make check` on Linux x86_64 before merge.
 
 ## 6. Alternatives considered
 
@@ -287,11 +280,12 @@ before merge.
   allocas (SFN-644) put those same 512 bytes on every `try`'s frame — a
   frame-size cost, not a free one. Still the right trade: it needs no arch
   seam and removes an entire arch branch from a hot exception path.
-- **Cross-emit-from-x86_64 as the primary bootstrap.** Rejected as primary
-  (kept as documented alternative): it needs an aarch64 cross sysroot + CRT on
-  the x86_64 runner, whereas the qemu path reuses the arm runner's native clang
-  with zero sysroot plumbing. Cross-emit remains the shape a future `sfn build
-  --target` generalizes.
+- **Cross-emit-from-x86_64 as the only bootstrap.** Rejected for first bring-up
+  because it required an aarch64 sysroot + CRT before the native path had been
+  proven. After SFN-472 established that proof, CI adopted cross-emission as the
+  faster source-validation vehicle. Release and on-device self-host instead use
+  the published native seed, while qemu remains the compatibility fallback for
+  pre-ARM release tags.
 - **Enter directly as Tier 2 (blocking CI).** Rejected: an aarch64-only
   miscompile or emulation flake would red-gate `main` before the leg has proven
   stable. Tier 3 → earned Tier 2 mirrors the Windows precedent and SFEP-0037's
@@ -304,17 +298,18 @@ before merge.
 This epic ports an existing pipeline to a new target rather than adding a
 language construct; the checklist maps to the port surface:
 
-- [ ] Parses — n/a (no new syntax)
-- [ ] Type-checks / effect-checks — driver target resolvers are ordinary
+- [x] Parses — n/a (no new syntax)
+- [x] Type-checks / effect-checks — driver target resolvers are ordinary
       `![io]` fns and provider decisions are pure; `sfn check` clean
-- [ ] Emits valid `.sfn-asm` — n/a (arch-neutral IR unchanged)
-- [ ] Lowers to LLVM IR — `st_mode` offset re-keyed; verified by a forced-arch
+- [x] Emits valid `.sfn-asm` — n/a (arch-neutral IR unchanged)
+- [x] Lowers to LLVM IR — `st_mode` offset re-keyed; verified by a forced-arch
       snapshot (§8)
-- [ ] Regression coverage — arch-seam snapshot (x86_64 CI) + aarch64 self-host +
+- [x] Regression coverage — arch-seam snapshot (x86_64 CI) + aarch64 self-host +
       suite on `ubuntu-24.04-arm`
-- [ ] Self-hosts — aarch64 triple-pass fixed point (Issue 2/3)
-- [ ] `sfn fmt --check` clean — on every touched `.sfn`
-- [ ] Documented — `docs/status.md` tier row, `install.md` made truthful,
+- [x] Self-hosts — native pass-1/pass-2 fixed point plus post-pin on-device
+      self-host evidence (SFN-472, SFN-581)
+- [x] `sfn fmt --check` clean — on every touched `.sfn`
+- [x] Documented — `docs/status.md` tier row, `install.md` made truthful,
       `dl.astro` arm64 row, `target-tiers.md`
 
 ## 8. Test plan
