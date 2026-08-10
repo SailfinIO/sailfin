@@ -381,6 +381,16 @@ else
   log "Warning: runtime bundle not found in archive; sfn run/build will fail without it."
 fi
 
+# The runtime capsule's [dependencies] closure (e.g. sfn/crypto), staged by
+# `sfn package --installer` (SFN-773) as a sibling of runtime/ — the one shape
+# locate_runtime_dep_capsule_src resolves. Absent on releases <= 0.9.3, so no
+# warning here; without it on a newer archive, every user program link-fails.
+if [ -d "${ROOT_DIR}/capsules" ]; then
+  log "Installing runtime capsule dependencies to ${TARGET_DIR}/capsules…"
+  $MAYBE_SUDO rm -rf "${TARGET_DIR}/capsules" 2>/dev/null || true
+  $MAYBE_SUDO cp -R "${ROOT_DIR}/capsules" "${TARGET_DIR}/capsules"
+fi
+
 log "Ensuring global symlink in ${GLOBAL_BIN_DIR}…"
 $MAYBE_SUDO mkdir -p "${GLOBAL_BIN_DIR}"
 LINK_PATH="${GLOBAL_BIN_DIR}/${DEST_BASENAME}"

@@ -1268,5 +1268,20 @@ ci-cross-windows:
 	: "_package_installer (the Linux/host installer)."; \
 	cp -f runtime/prelude.sfn "$$INSTALLER_DIR/runtime/prelude.sfn"; \
 	cp -R runtime/sfn "$$INSTALLER_DIR/runtime/sfn"; \
+	: "SFN-773: stage the runtime capsule's [dependencies] closure (e.g."; \
+	: "sfn/crypto) as a sibling of runtime/, mirroring _package_installer;"; \
+	: "this hand-rolled path would otherwise miss it and every user"; \
+	: "program would link-fail on a fresh install."; \
+	deps="$$(awk '/^\[[^]]+\]/ { section=$$0 } section == "[dependencies]" && /^"/ { gsub(/"/, "", $$1); print $$1 }' runtime/capsule.toml)"; \
+	for dep in $$deps; do \
+		scope="$${dep%%/*}"; name="$${dep##*/}"; \
+		src="capsules/$$scope/$$name/src"; \
+		if [ ! -d "$$src" ]; then \
+			echo "[cross-windows][error] missing sources for runtime dependency $$dep ($$src)" >&2; \
+			exit 1; \
+		fi; \
+		mkdir -p "$$INSTALLER_DIR/capsules/$$scope/$$name"; \
+		cp -R "$$src" "$$INSTALLER_DIR/capsules/$$scope/$$name/src"; \
+	done; \
 	tar -czf "dist/installer-$(MINGW_TARGET).tar.gz" -C "$$INSTALLER_DIR" .; \
 	echo "[cross-windows] done: dist/installer-$(MINGW_TARGET).tar.gz"

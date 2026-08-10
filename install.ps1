@@ -283,6 +283,18 @@ if (Test-Path $RuntimeSrc) {
     Log "Warning: runtime bundle not found in archive; sfn run/build will fail without it."
 }
 
+# The runtime capsule's [dependencies] closure (e.g. sfn/crypto), staged by
+# `sfn package --installer` (SFN-773) as a sibling of runtime\ -- the one shape
+# locate_runtime_dep_capsule_src resolves. Absent on releases <= 0.9.3, so no
+# warning here; without it on a newer archive, every user program link-fails.
+$CapsulesSrc = Join-Path $RootDir "capsules"
+if (Test-Path $CapsulesSrc) {
+    Log "Installing runtime capsule dependencies to $TargetDir\capsules..."
+    $CapsulesDest = Join-Path $TargetDir "capsules"
+    if (Test-Path $CapsulesDest) { Remove-Item -Recurse -Force $CapsulesDest }
+    Copy-Item -Path $CapsulesSrc -Destination $CapsulesDest -Recurse
+}
+
 # --- Symlinks / copies in global bin dir -------------------------------------
 
 New-Item -ItemType Directory -Path $GlobalBinDir -Force | Out-Null
