@@ -1,6 +1,6 @@
 [capsule]
 name = "sfn/analyzer"
-version = "0.9.3"
+version = "0.9.4"
 description = "Sailfin semantic analysis pipeline (toolchain-internal)"
 publish = false
 
