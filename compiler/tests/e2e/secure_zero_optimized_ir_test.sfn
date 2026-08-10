@@ -1,0 +1,279 @@
+// compiler/tests/e2e/secure_zero_optimized_ir_test.sfn
+//
+// SFN-782 acceptance test (design SFEP-0069 §3.6): the volatile
+// byte-store loop `secure_zero` lowers to must survive the PRODUCTION
+// optimizer, not just the unoptimized `-O0` pipeline `sfn test` runs.
+// `secure_zero_lowering_test.sfn` (unit) pins the raw `-O0` IR shape;
+// this test proves the volatile stores are still present after `clang
+// -O2`, which is the whole point of the primitive — an ordinary
+// non-volatile final store to a variable that is never read again is
+// exactly the dead-store pattern `-O2` deletes.
+//
+// The fixture function's wipe target (`addr`/`len`) is never read again
+// inside the module — the textbook dead-store shape — while `wipe`'s
+// external linkage keeps the function itself from being dropped
+// wholesale, so the only thing standing between the store and deletion
+// is the `volatile` qualifier this test exists to pin.
+//
+// Procedure, matching the acceptance criteria:
+//   1. Emit unoptimized LLVM IR for the fixture and assert the raw
+//      `store volatile i8 0` is present (parity with the unit test's
+//      golden-IR-shape assertions, at the CLI boundary).
+//   2. Optimized-retention leg: run `clang -O2` against three target
+//      triples (Linux, Darwin, Windows) and assert the volatile store
+//      survives each — the "one target-neutral contract" acceptance
+//      criterion. IR-level only, so no cross-compilation toolchain is
+//      needed on the host.
+//   3. Control fixture: the same IR with `volatile` stripped, optimized
+//      for the host target, must have the store eliminated — proving the
+//      volatile qualifier (not some other property of the loop) is what
+//      defeats the optimizer.
+//
+// `clang` is probed first and the test skips (does not fail) when it is
+// absent, per `docs/conventions/sanitizer-tests.md` /
+// `docs/conventions/e2e-tests.md` ("External tools ... skip when
+// absent"). Drives the compiler-under-test and `clang` as subprocesses
+// per `.claude/rules/no-bash-e2e.md`.
+import { contains, replace } from "sfn/strings";
+import { clean_runner_env, nested_runner_scratch, with_tmp_dir } from "sfn/test";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+// Minimal env for a direct `clang` invocation (not a nested Sailfin
+// runner, so `clean_runner_env` does not apply — see its doc comment:
+// that helper is for nested `sfn test`/`build`/`run` only).
+fn _clang_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    return e;
+}
+
+fn _find_clang() -> boolean ![io] {
+    let exit = process.run_capture(["clang", "--version"], _clang_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    return exit == 0;
+}
+
+// SFN-782 review: the lowering terminates its incoming block and opens
+// `secure_zero_pre_`/`_body_`/`_done_` blocks of its own, so the risky part
+// is how that composes with surrounding control flow, not the single-call
+// shape alone. `clang` parsing the `.ll` below runs the LLVM verifier for
+// free over every function in the module, so stacking more shapes into the
+// same fixture costs no extra subprocesses. Each function below exercises
+// one composition:
+//   - `wipe_twice`: two calls in one function (label/temp uniqueness)
+//   - `wipe_in_loop`: a call inside a `loop` body that also mutates a local
+//     afterward
+//   - `wipe_in_branch`: a call inside an `if` branch, with the branch's
+//     local read after the merge
+//   - `wipe_in_try`: a call inside a `try` block
+fn _wipe_composition_shapes_source() -> string {
+    return "fn wipe_twice(addr: int, len: int) -> void {\n"
+        + "    secure_zero(addr, len);\n"
+        + "    secure_zero(addr, len);\n"
+        + "}\n\n"
+        + "fn wipe_in_loop(addr: int, len: int, n: int) -> int {\n"
+        + "    let mut count: int = 0;\n"
+        + "    let mut i: int = 0;\n"
+        + "    loop {\n"
+        + "        if i >= n { break; }\n"
+        + "        secure_zero(addr, len);\n"
+        + "        count = count + 1;\n"
+        + "        i = i + 1;\n"
+        + "    }\n"
+        + "    return count;\n"
+        + "}\n\n"
+        + "fn wipe_in_branch(addr: int, len: int, flag: boolean) -> int {\n"
+        + "    let mut result: int = 0;\n"
+        + "    if flag {\n"
+        + "        secure_zero(addr, len);\n"
+        + "        result = 1;\n"
+        + "    } else {\n"
+        + "        result = 2;\n"
+        + "    }\n"
+        + "    return result;\n"
+        + "}\n\n"
+        + "fn wipe_in_try(addr: int, len: int) -> int {\n"
+        + "    try {\n"
+        + "        secure_zero(addr, len);\n"
+        + "        return 0;\n"
+        + "    } catch (e) {\n"
+        + "        return 1;\n"
+        + "    }\n"
+        + "}";
+}
+
+// The original single-call fixture the `store volatile i8 0` / control
+// fixture assertions below key on, followed by the composition shapes above
+// so `clang` runs the LLVM verifier over all of them in one pass. Kept the
+// `wipe` function as-is (unchanged, still the first function in the
+// module) so the existing assertions still hold.
+fn _wipe_source() -> string {
+    return "fn wipe(addr: int, len: int) -> void {\n"
+        + "    secure_zero(addr, len);\n"
+        + "}\n\n"
+        + _wipe_composition_shapes_source();
+}
+
+// `clang -O2 -S -emit-llvm` against `triple`, writing to `out_path`.
+// `-Wno-override-module` matches the established argv shape
+// (`compiler/src/build/clang_argv.sfn:44-66`): the `.ll` carries its own
+// `target triple`/`datalayout`, and clang warns on the mismatch with
+// `-target` otherwise.
+fn _optimize_for_triple(ll_path: string, out_path: string, triple: string) -> int ![io] {
+    let exit = process.run_capture(["clang", "-O2", "-S", "-emit-llvm", "-Wno-override-module", "--target="
+        + triple, ll_path, "-o", out_path], _clang_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    return exit;
+}
+
+test "secure zero optimized ir: volatile store survives -O2 on linux, darwin, and windows targets" ![io] {
+    if !_find_clang() {
+        // clang unavailable on this host — skip rather than fail, matching
+        // the established external-tool-probe convention. Announce the
+        // skip: a silent one is indistinguishable from a passing run, and
+        // this test is the only gate on the SFN-782 non-elision claim, so
+        // a host that quietly never runs it must be visible in the log.
+        print.warn("secure zero optimized ir: clang not found — skipping the -O2 retention gate");
+        return;
+    }
+
+    let outcome = with_tmp_dir(fn (dir: string) -> int {
+        let src = dir + "/wipe.sfn";
+        let raw_ll = dir + "/raw.ll";
+        fs.writeFile(src, _wipe_source());
+
+        // `sfn emit` writes a per-module build-cache artifact under
+        // `SAILFIN_TEST_SCRATCH` internally (mirrors `coff_comdat_link_test.sfn`),
+        // so route it through a nested-runner-clean environment: unlike the
+        // minimal `_clang_env()` above (a bare external tool, not a nested
+        // Sailfin runner), this spawns the compiler-under-test itself and
+        // must not leak the parent pool's orchestration keys.
+        let emit_env = clean_runner_env(nested_runner_scratch("secure-zero-emit"));
+        let emit_exit = process.run_capture([_sfn_bin(), "emit", "-o", raw_ll, "llvm", src], emit_env);
+        let _eo = process.capture_take_stdout();
+        let _ee = process.capture_take_stderr();
+        assert emit_exit == 0;
+        assert fs.exists(raw_ll);
+
+        let raw_ir = fs.readFile(raw_ll);
+        assert contains(raw_ir, "store volatile i8 0");
+
+        // Optimized-retention leg: the same guarantee must hold across all
+        // three target triples the ABI is normative on (SFEP-0069 §3.6) —
+        // this is IR-level only, so no cross-compilation toolchain install
+        // is required on the host.
+        let triples: string[] = ["x86_64-unknown-linux-gnu", "arm64-apple-darwin", "x86_64-pc-windows-msvc",];
+        let mut i: int = 0;
+        loop {
+            if i >= triples.length { break; }
+            let triple = triples[i];
+            let opt_ll = dir + "/opt-" + triple + ".ll";
+            let opt_exit = _optimize_for_triple(raw_ll, opt_ll, triple);
+            assert opt_exit == 0;
+            let opt_ir = fs.readFile(opt_ll);
+            assert contains(opt_ir, "store volatile i8 0");
+            i += 1;
+        }
+
+        // Control fixture: the same IR with `volatile` stripped must have
+        // its byte-store loop eliminated by `-O2` — proving the volatile
+        // qualifier (not some other property of the fixture) is what
+        // defeats the optimizer. Host target is sufficient; the retention
+        // property already proved cross-target above.
+        let control_ll = dir + "/control.ll";
+        let non_volatile_ir = replace(raw_ir, "store volatile i8 0", "store i8 0");
+        fs.writeFile(control_ll, non_volatile_ir);
+        let control_opt_ll = dir + "/control-opt.ll";
+        let control_exit = process.run_capture(["clang", "-O2", "-S", "-emit-llvm", "-Wno-override-module", control_ll, "-o", control_opt_ll], _clang_env());
+        let _co = process.capture_take_stdout();
+        let _ce = process.capture_take_stderr();
+        assert control_exit == 0;
+        let control_opt_ir = fs.readFile(control_opt_ll);
+        // These two assertions are a bare-substring check against the
+        // whole optimized module, not a check that a specific store site
+        // is gone — the fixture module has exactly one non-volatile
+        // "store i8 0" (the one this control leg produced), so "absent
+        // anywhere" and "absent at the site" coincide here. `-O2`
+        // collapses the whole now-dead byte-store loop, so the
+        // `getelementptr i8` computing each element's address disappears
+        // along with the store; asserting both makes the claim specific
+        // to this loop (loop body eliminated) rather than to any bare
+        // "store i8 0" that might appear elsewhere in a future module.
+        assert ! contains(control_opt_ir, "store i8 0");
+        assert ! contains(control_opt_ir, "getelementptr i8");
+        return 0;
+    });
+    assert outcome == 0;
+}
+
+// ---- E0806 fatal gates (SFN-782 review) ----
+// `secure_zero`'s arity gate, its argument-type gate, and the
+// argument-lowering-failure fatal (`_lower_secure_zero_argument` /
+// `lower_secure_zero` in `secure_zero.sfn`) had no test coverage. Precedent:
+// `atomic_cas_compile_test.sfn`'s E0806 tests (~lines 141/160/179) — assert
+// the code lands on stderr AND that no partial `.ll` is published. Kept in
+// their own `test` blocks, separate from the optimized-IR test above, so a
+// failure here points at the arity/type gate rather than the -O2 leg.
+//
+// `clang` is not needed for these — they only exercise `sfn emit`, so they
+// do not probe for or skip on a missing `clang`.
+fn _assert_secure_zero_rejected(tag: string, body_source: string) -> int ![io] {
+    let outcome = with_tmp_dir(fn (dir: string) -> int {
+        let src = dir + "/" + tag + ".sfn";
+        let ll = dir + "/" + tag + ".ll";
+        fs.writeFile(src, body_source);
+
+        let emit_env = clean_runner_env(nested_runner_scratch("secure-zero-e0806-"
+            + tag));
+        let _exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", src], emit_env);
+        let _o = process.capture_take_stdout();
+        let err = process.capture_take_stderr();
+        assert contains(err, "E0806");
+        assert ! fs.exists(ll);
+        return 0;
+    });
+    return outcome;
+}
+
+test "secure zero optimized ir: too few arguments reports E0806 and publishes no .ll" ![io] {
+    let source = "fn bad(addr: int) -> void {\n" + "    secure_zero(addr);\n"
+        + "}";
+    let outcome = _assert_secure_zero_rejected("too-few-args", source);
+    assert outcome == 0;
+}
+
+test "secure zero optimized ir: too many arguments reports E0806 and publishes no .ll" ![io] {
+    let source = "fn bad(a: int, b: int, c: int) -> void {\n"
+        + "    secure_zero(a, b, c);\n"
+        + "}";
+    let outcome = _assert_secure_zero_rejected("too-many-args", source);
+    assert outcome == 0;
+}
+
+test "secure zero optimized ir: non-int address argument reports E0806 and publishes no .ll" ![io] {
+    let source = "fn bad(len: int) -> void {\n"
+        + "    secure_zero(\"not-an-addr\", len);\n"
+        + "}";
+    let outcome = _assert_secure_zero_rejected("bad-addr-type", source);
+    assert outcome == 0;
+}
+
+test "secure zero optimized ir: non-int length argument reports E0806 and publishes no .ll" ![io] {
+    let source = "fn bad(addr: int) -> void {\n"
+        + "    secure_zero(addr, \"not-a-len\");\n"
+        + "}";
+    let outcome = _assert_secure_zero_rejected("bad-len-type", source);
+    assert outcome == 0;
+}
