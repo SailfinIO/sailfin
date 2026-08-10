@@ -40,7 +40,7 @@ on:
   # merge_group (and the default); stated explicitly for clarity.
   merge_group:
     types: [checks_requested]
-  # Tier-3 aarch64-Linux cold soak. Scheduled runs are scoped below so they
+  # Tier-2 aarch64-Linux cold soak. Scheduled runs are scoped below so they
   # run the native fixed point plus one unsharded, cache-independent suite
   # rather than duplicating the blocking PR matrix.
   schedule:
@@ -710,9 +710,9 @@ jobs:
         shell: bash
         run: echo "ready=true" >> "$GITHUB_OUTPUT"
 
-  # aarch64-Linux remains Tier 3 until SFN-476 promotes it (SFEP-0056 §3.5).
-  # The aggregate arm result below is intentionally absent from `required-ci`:
-  # failures stay visible without extending the merge-critical required gate.
+  # aarch64-Linux is Tier 2 (SFN-476, SFEP-0056 §3.5). Source PR and
+  # merge-queue failures flow through the aggregate ARM result into
+  # `required-ci`; scheduled failures fail their workflow directly.
   build-compiler-aarch64-linux:
     name: Self-host compiler [linux-arm64]
     needs: [ci-scope, build-aarch64-cross-vehicle]
@@ -956,7 +956,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   aarch64-linux-result:
-    name: AArch64 Linux result [advisory]
+    name: AArch64 Linux result
     needs:
       - ci-scope
       - build-aarch64-cross-vehicle
@@ -1920,6 +1920,7 @@ jobs:
       - build-linux
       - build-macos
       - smoke-windows
+      - aarch64-linux-result
     if: ${{ always() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -1937,6 +1938,7 @@ jobs:
       BUILD_LINUX: ${{ needs.build-linux.result }}
       BUILD_MACOS: ${{ needs.build-macos.result }}
       SMOKE_WINDOWS: ${{ needs.smoke-windows.result }}
+      AARCH64_LINUX: ${{ needs.aarch64-linux-result.result }}
     steps:
       - name: Summarize required CI result
         shell: bash
@@ -1997,6 +1999,7 @@ jobs:
             check "Build + Test [linux-x86_64]" "$BUILD_LINUX"
             check "Build + Test [macos-arm64]" "$BUILD_MACOS"
             check "Smoke test [windows-x86_64]" "$SMOKE_WINDOWS"
+            check "AArch64 Linux result" "$AARCH64_LINUX"
           else
             echo "[required-ci] compiler CI is out of scope for this PR."
             echo "| Compiler CI | skipped by path scope |" >> "$GITHUB_STEP_SUMMARY"

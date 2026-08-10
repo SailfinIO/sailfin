@@ -118,9 +118,9 @@ uses `io`, its `capsule.toml` must include `io` in `[capabilities].required`.
 
 ## Installing
 
-The v0.8.0 release provides pre-built archives for Linux x86_64, macOS arm64
-(Apple Silicon), and Windows x86_64. The archive installs the compiler as both
-`sailfin` and `sfn`.
+Current releases provide pre-built archives for Linux x86_64, Linux arm64
+(aarch64), macOS arm64 (Apple Silicon), and Windows x86_64. The archive installs
+the compiler as both `sailfin` and `sfn`.
 
 Installing the compiler is only the first prerequisite: compiling, running, or
 testing Sailfin programs still requires LLVM tools 17+ or 18+, `clang`, and the

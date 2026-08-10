@@ -186,7 +186,11 @@ const featured = allAssets;
   <section class="dl-featured">
     <div class="container">
       <h2>Featured Downloads</h2>
-      <p class="section-desc">Pre-built binaries for supported platforms. Download, extract, and add to your PATH.</p>
+      <p class="section-desc">
+        Pre-built binaries for base-supported platforms. Download, extract, and
+        add to your PATH. An installer asset does not imply capability-sealed
+        support; Linux ARM64 is a Tier 2 base target, not a seal target.
+      </p>
       <div class="featured-grid">
         {featured.map((d) => (
           <a href={d.url} class="featured-card">

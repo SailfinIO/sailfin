@@ -25,6 +25,11 @@ detect additional architectures, but installation stops when the selected
 release does not contain a matching archive. WSL on an x86_64 Windows host uses
 the Linux x86_64 asset; Git Bash installs the Windows x86_64 asset.
 
+This table describes base support: published toolchains backed by platform
+validation. It is not a capability-seal claim. Linux arm64 is a Tier 2 base
+target, but owned syscalls and a fully gated syscall boundary are not supported
+there.
+
 ### Compiler and linker tools
 
 The installer only downloads and places the released `sfn` binary. To compile,

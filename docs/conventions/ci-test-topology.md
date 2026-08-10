@@ -142,15 +142,15 @@ The design for the content-addressed key derivation lives in
   into its own job" design now shipped.
 - **`shard-cover`** — the cover-invariant lint, gating on
   `build-compiler-linux`.
-- **Tier-3 aarch64-Linux source lane** — `build-aarch64-linux` fans source PR
+- **Tier-2 aarch64-Linux source lane** — `build-aarch64-linux` fans source PR
   and merge-queue tests over the same eight named shards. Every leg downloads
   the fixed-point compiler from `build-compiler-aarch64-linux`, restores and
   saves `test-bin-linux-arm64-<shard>-...`, uses native auto-budgeted in-leg
   concurrency, and reports `test_seconds` plus `test_bin_hit_rate`.
   `aarch64-linux-result` aggregates the cross vehicle, native fixed point,
-  shard-cover, and matrix result into one check. That aggregate remains outside
-  `required-ci` while the target is Tier 3; SFN-476 can add this single job when
-  promoting the target instead of depending on every matrix child.
+  shard-cover, and matrix result into one check. `required-ci` consumes that
+  aggregate, so any ARM prerequisite or shard failure blocks source PRs and
+  merge queues without depending on every matrix child separately (SFN-476).
 - **Scheduled aarch64-Linux soak** — `soak-aarch64-linux` downloads the same
   verified native compiler artifact but runs one unsharded full suite with
   `--no-test-cache`. It restores no test-bin cache, pins no `TEST_JOBS`, and a
@@ -159,8 +159,8 @@ The design for the content-addressed key derivation lives in
 - **`required-ci`** — the merge gate. Needs `ci-scope`,
   `linear-branch-claim`, `check-public-claims`, `check-fast`,
   `build-compiler-linux`, `build-compiler-macos`, `shard-cover`, `build-linux`,
-  `build-macos`, and `smoke-windows` — ten jobs, not just the test legs. It does
-  **not yet** need `aarch64-linux-result`; SFN-476 owns that Tier-2 promotion.
+  `build-macos`, `smoke-windows`, and `aarch64-linux-result` — eleven jobs, not
+  just the test legs. The ARM aggregate is the Tier-2 promotion gate (SFN-476).
   `linear-branch-claim` is the gate that
   fails an `sfn-<N>` branch whose PR body does not close `SFN-<N>`; see
   `CLAUDE.md` (## Task tracking).
