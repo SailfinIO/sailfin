@@ -76,6 +76,15 @@ test "cross-windows RUNTIME_MODS / manifest per-module contracts" ![io] {
     assert contains(manifest, "\"sfn/platform/rand.sfn\"");
     assert ! contains(makefile, "runtime/sfn/platform/rand.sfn");
 
+    // cert_roots.sfn (SFN-808): in the manifest, excluded from RUNTIME_MODS —
+    // its Windows sibling's Crypt32 externs are not staged by the hand-rolled
+    // cross loop. The compiler pulls @sfn_cert_roots_blob via the sfn/crypto
+    // `trust_store_load` export, resolved to the windows_stubs.ll null stub.
+    // `cert_roots` appears nowhere in the Makefile, so the exclusion check is
+    // exact for both the POSIX module and its sibling.
+    assert contains(manifest, "\"sfn/platform/cert_roots.sfn\"");
+    assert ! contains(makefile, "cert_roots");
+
     // tls.sfn: in the manifest, excluded from RUNTIME_MODS. SFN-341 swapped
     // the OpenSSL-backed implementation for a native TLS stack, so the
     // module no longer pulls OpenSSL externs — but Windows TLS itself
@@ -213,6 +222,14 @@ test "cross-windows windows_stubs.ll defines the required Windows stubs" ![io] {
     // RUNTIME_MODS, so the compiler's @sfn_rand_fill reference (pulled in by
     // the sfn/crypto `random_bytes` export) resolves to this fail-closed stub.
     assert contains(stubs, "define i32 @sfn_rand_fill");
+
+    // Platform trust-store enumeration (SFN-808): cert_roots.sfn is likewise
+    // excluded from RUNTIME_MODS, so the compiler's @sfn_cert_roots_blob
+    // reference (pulled in by the sfn/crypto `trust_store_load` export)
+    // resolves to this null-returning stub. Null is not a fabricated failure:
+    // it means "no enumerable platform trust store", which routes
+    // `trust_store_load` to its environment-override / bundle-path probe.
+    assert contains(stubs, "define i8* @sfn_cert_roots_blob");
 
     // Realtime is not degraded on Windows: clock.sfn supplies the ABI and
     // mingw-w64 supplies clock_gettime. A stub for either would let the
