@@ -85,10 +85,17 @@ fn trust_store_default_paths() -> string[] {
     return ["/etc/ssl/certs/ca-certificates.crt", "/etc/pki/tls/certs/ca-bundle.crt", "/etc/ssl/ca-bundle.pem", "/etc/pki/tls/cacert.pem", "/etc/ssl/cert.pem", "/opt/homebrew/etc/openssl@3/cert.pem", "/usr/local/etc/openssl@3/cert.pem"];
 }
 
-// Parse a PEM CA bundle into trust anchors. Pure: this is the whole decode and
-// parse path, and it is what the tests exercise.
-fn trust_store_from_pem(pem: string) -> TrustStore {
-    let blocks: int[][] = pem_certificates_to_der(pem);
+// Parse raw DER certificate blobs into trust anchors. Pure: this is the whole
+// parse-and-account path, shared by every producer of anchors in this module,
+// and it is what the tests exercise.
+//
+// DER is the seam because it is the narrowest thing every source of trust
+// already speaks: `x509_parse` takes exactly one raw DER blob, and a platform
+// trust store hands out DER blobs directly (SFN-808). Sharing the tail is what
+// makes a certificate from a platform store and one decoded out of a PEM
+// bundle subject to byte-for-byte identical parsing and `skipped` accounting —
+// a second inlined copy of this loop would be free to drift.
+fn trust_store_from_der_blocks(blocks: int[][]) -> TrustStore {
     if blocks.length == 0 {
         return _store_err("trust_store: no CERTIFICATE blocks in bundle");
     }
@@ -114,6 +121,12 @@ fn trust_store_from_pem(pem: string) -> TrustStore {
         anchors: anchors,
         skipped: skipped
     };
+}
+
+// Parse a PEM CA bundle into trust anchors. Pure: PEM decode, then the shared
+// DER tail above.
+fn trust_store_from_pem(pem: string) -> TrustStore {
+    return trust_store_from_der_blocks(pem_certificates_to_der(pem));
 }
 
 // Read and parse a CA bundle from an explicit path. `![io]`.
@@ -179,6 +192,7 @@ fn trust_store_load() -> TrustStore ![io] {
 
 export {
     TrustStore,
+    trust_store_from_der_blocks,
     trust_store_from_pem,
     trust_store_load,
     trust_store_load_from,
