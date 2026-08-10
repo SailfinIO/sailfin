@@ -13,7 +13,7 @@
 # compiler-checkout seed source of truth.
 
 [seed]
-version = "0.9.3"
+version = "0.9.4"
 source = "github-release"
 repo = "SailfinIO/sailfin"
 asset_prefix = "sailfin"
