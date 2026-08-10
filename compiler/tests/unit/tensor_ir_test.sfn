@@ -2,9 +2,6 @@
 //
 // Shape, pass-boundary, native-loop snapshot, and CPU-oracle coverage for the
 // SFEP-0053 tensor IR foundation (SFN-427).
-import { empty_llvm_import_context, resolve_llvm_provider_context } from "../../src/build/llvm_provider_context";
-import { lower_to_llvm_ir_from_text_with_provider_context } from "../../src/llvm/lowering/entrypoints";
-import { index_of } from "../../src/string_utils";
 import {
     TensorFunction,
     TensorModule,
@@ -17,14 +14,18 @@ import {
     tensor_multiply,
     tensor_parameter,
     tensor_reduce_sum
-} from "../../src/tensor_ir";
-import { run_tensor_fusion_pass } from "../../src/tensor_ir_fusion";
+} from "sfn/ir";
+import { run_tensor_fusion_pass } from "sfn/ir";
+import { verify_tensor_function } from "sfn/ir";
+
+import { empty_llvm_import_context, resolve_llvm_provider_context } from "../../src/build/llvm_provider_context";
+import { lower_to_llvm_ir_from_text_with_provider_context } from "../../src/llvm/lowering/entrypoints";
+import { index_of } from "../../src/string_utils";
 import {
     TensorBuffer,
     execute_tensor_function_scalar,
     lower_tensor_module_to_native
 } from "../../src/tensor_ir_lower_scalar";
-import { verify_tensor_function } from "../../src/tensor_ir_verify";
 
 // Direct imports from sfn/tensor currently produce conflicting declarations
 // during test linking (SFN-436). These functions mirror the capsule's CPU

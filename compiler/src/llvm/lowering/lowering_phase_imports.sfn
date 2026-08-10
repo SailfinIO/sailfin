@@ -14,11 +14,12 @@ import {
     NativeImport,
     NativeInterface,
     NativeStruct
-} from "../../native_ir";
+} from "sfn/ir";
 import {
     parse_native_artifact_for_import_with_bindings,
     parse_native_imports_for_import
-} from "../../native_ir_api";
+} from "sfn/ir";
+
 import { apply_layout_manifest_to_module } from "../imports";
 import { collect_exported_symbol_names, find_function_by_name_or_import } from "../rendering_helpers";
 import { string_array_contains } from "../utils";

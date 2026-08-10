@@ -1,9 +1,9 @@
 // compiler/src/llvm/expression_lowering/native/core_expression.sfn
 //
 // Ordered dispatch for LLVM expression lowering.
+import { NativeFunction } from "sfn/ir";
 import { char_at_index as char_at, substring } from "sfn/strings";
 
-import { NativeFunction } from "../../../native_ir";
 import { format_temp_name } from "../../expressions_helpers";
 import { trace_log, trace_lowering } from "../../lowering_debug_state";
 import { find_function_by_name_or_import } from "../../rendering_helpers";

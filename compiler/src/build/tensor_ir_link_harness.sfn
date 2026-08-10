@@ -1,4 +1,4 @@
-// compiler/src/tensor_ir_link_harness.sfn
+// compiler/src/build/tensor_ir_link_harness.sfn
 //
 // Test-only bridge that turns a shape-typed tensor-IR matmul module into a
 // runnable, timeable native binary whose matmul kernel IS the tensor-IR-emitted
@@ -15,20 +15,20 @@
 // the same signature and reuse this harness's equivalence + timing driver
 // unchanged. Not compiled into the shipped binary (main.sfn does not import it);
 // `--gc-sections` drops it, exactly like tensor_ir_lower_scalar.sfn.
+import { TensorModule } from "sfn/ir";
 import { int_to_string } from "sfn/strings";
 
-import { _clang_link_multi } from "./build/link";
-import { empty_llvm_import_context, resolve_llvm_provider_context } from "./build/llvm_provider_context";
-import { _resolve_self_path } from "./build/paths";
-import { empty_build_cache_config } from "./build_cache";
-import { prepare_runtime_dep_capsules } from "./capsule_resolver/mod";
-import { lower_to_llvm_ir_from_text_with_provider_context } from "./llvm/lowering/entrypoints";
-import { take_lowering_trace_buffer } from "./llvm/lowering_debug_state";
-import { compile_to_native_text_with_module } from "./main";
-import { runtime_capsule_from_root } from "./runtime_capsule_resolver";
-import { index_of, substring } from "./string_utils";
-import { TensorModule } from "./tensor_ir";
-import { lower_tensor_module_to_native } from "./tensor_ir_lower_scalar";
+import { empty_build_cache_config } from "../build_cache";
+import { prepare_runtime_dep_capsules } from "../capsule_resolver/mod";
+import { lower_to_llvm_ir_from_text_with_provider_context } from "../llvm/lowering/entrypoints";
+import { take_lowering_trace_buffer } from "../llvm/lowering_debug_state";
+import { compile_to_native_text_with_module } from "../main";
+import { runtime_capsule_from_root } from "../runtime_capsule_resolver";
+import { index_of, substring } from "../string_utils";
+import { lower_tensor_module_to_native } from "../tensor_ir_lower_scalar";
+import { _clang_link_multi } from "./link";
+import { empty_llvm_import_context, resolve_llvm_provider_context } from "./llvm_provider_context";
+import { _resolve_self_path } from "./paths";
 
 struct TensorMatmulBuildResult {
     binary_path: string;

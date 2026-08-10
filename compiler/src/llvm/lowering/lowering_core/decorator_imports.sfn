@@ -1,7 +1,8 @@
 // compiler/src/llvm/lowering/lowering_core/decorator_imports.sfn
 //
 // Imported decorator discovery for lowering.
-import { NativeFunction, NativeImport } from "../../../native_ir";
+import { NativeFunction, NativeImport } from "sfn/ir";
+
 import { string_array_contains } from "../../utils";
 
 // True when an imported function of the given (export) name carries the

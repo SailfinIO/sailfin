@@ -1,4 +1,4 @@
-// compiler/src/tensor_ir.sfn
+// compiler/capsules/ir/src/tensor_ir.sfn
 //
 // Shape-typed tensor IR definitions and deterministic text rendering. This
 // tier retains tensor algebra until an explicit scalar or accelerator exit.

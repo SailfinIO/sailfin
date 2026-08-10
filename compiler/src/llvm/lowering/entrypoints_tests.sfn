@@ -5,8 +5,6 @@
 // Dead function bodies were removed to fix OOM during selfhost.
 // Imports are preserved — the seed linker needs the full import graph
 // for correct cross-module symbol resolution.
-import { substring } from "sfn/strings";
-
 import {
     ImportedModuleContext,
     LayoutManifest,
@@ -17,7 +15,7 @@ import {
     NativeModule,
     NativeStruct,
     ParseNativeResult
-} from "../../native_ir";
+} from "sfn/ir";
 import {
     parse_native_artifact,
     parse_native_enums_for_import,
@@ -25,8 +23,10 @@ import {
     parse_native_interfaces_for_import,
     parse_native_structs_for_import,
     select_text_artifact
-} from "../../native_ir_api";
-import { split_lines } from "../../native_ir_utils_text";
+} from "sfn/ir";
+import { split_lines } from "sfn/ir";
+import { substring } from "sfn/strings";
+
 import {
     append_function_effect_entry,
     append_unique_effect,

@@ -1,10 +1,10 @@
 // compiler/src/llvm/lowering/instructions_if.sfn
 //
 // Control flow handlers: if/else instruction lowering.
+import { NativeFunction, NativeInstruction, NativeSourceSpan } from "sfn/ir";
 import { substring } from "sfn/strings";
 
 import { Diag } from "../../diagnostic";
-import { NativeFunction, NativeInstruction, NativeSourceSpan } from "../../native_ir";
 import { lower_expression } from "../expression_lowering/native/core";
 import { format_scope_id, pop_scope_metadata, push_scope_metadata } from "../expression_lowering/native/core_scopes";
 import { find_local_binding, find_parameter_binding } from "../expressions_bindings";

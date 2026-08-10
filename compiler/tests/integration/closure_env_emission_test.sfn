@@ -30,6 +30,8 @@
 // emitted env struct into a callable closure pair. Until then, the
 // emit pipeline never invokes these helpers — the tests pin the
 // API surface so A3 can rely on a settled IR shape.
+import { NativeLambdaCapture } from "sfn/ir";
+
 import {
     ClosureCaptureOperand,
     closure_env_type_name,
@@ -38,7 +40,6 @@ import {
     emit_closure_env_load_prologue,
     synthesize_closure_env_struct
 } from "../../src/llvm/closures";
-import { NativeLambdaCapture } from "../../src/native_ir";
 
 fn _capture_int(name: string) -> NativeLambdaCapture {
     return NativeLambdaCapture {

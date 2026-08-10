@@ -1,5 +1,4 @@
 // Typed SSA conversion contract coverage for SFEP-0059 §10.4 and §10.6.
-import { index_of } from "../../src/string_utils";
 import {
     ConvertKind,
     Linkage,
@@ -17,9 +16,11 @@ import {
     intern_symbol,
     new_module,
     term_return_value
-} from "../../src/typed_ssa";
-import { render_module } from "../../src/typed_ssa_render";
-import { VerifyResult, verify_module } from "../../src/typed_ssa_verify";
+} from "sfn/ir";
+import { render_module } from "sfn/ir";
+import { VerifyResult, verify_module } from "sfn/ir";
+
+import { index_of } from "../../src/string_utils";
 
 fn _contains(text: string, needle: string) -> boolean {
     return index_of(text, needle) >= 0;

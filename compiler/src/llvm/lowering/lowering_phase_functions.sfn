@@ -5,8 +5,9 @@
 // and merges results into the output lines.
 //
 // Extracted from lowering_core/mod.sfn to reduce per-file memory footprint.
+import { NativeFunction } from "sfn/ir";
+
 import { Diag } from "../../diagnostic";
-import { NativeFunction } from "../../native_ir";
 import { append_function_effect_entry, find_function_effect_entry } from "../effects";
 import { trace_log } from "../lowering_debug_state";
 import { merge_string_constants, render_string_constants } from "../strings";

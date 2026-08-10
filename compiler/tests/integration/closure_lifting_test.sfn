@@ -24,6 +24,8 @@
 //      `Expression.Lambda` node so they continue to flow through
 //      `format_expression` as `<lambda>` until #687 wires the env
 //      struct end-to-end.
+import { NativeLambdaCapture } from "sfn/ir";
+import { percent_escape_capture_text, percent_unescape_capture_text } from "sfn/ir";
 import { Expression, Program, Statement } from "sfn/syntax";
 import { parse_program } from "sfn/syntax";
 
@@ -35,8 +37,6 @@ import {
     lifted_function_name
 } from "../../src/lambda_lowering";
 import { ClosurePairResult, decode_captures, emit_closure_pair_aggregate } from "../../src/llvm/closures";
-import { NativeLambdaCapture } from "../../src/native_ir";
-import { percent_escape_capture_text, percent_unescape_capture_text } from "../../src/native_ir_utils_text";
 
 // ── Closure-pair aggregate emission ──────────────────────────────────
 test "closure_pair: non-capturing lambda emits bitcast + two insertvalues" {

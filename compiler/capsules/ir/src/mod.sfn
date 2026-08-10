@@ -1,0 +1,167 @@
+// sfn/ir — toolchain-internal native, typed SSA, and tensor IR facade.
+//
+// Representation consumers use this contract rather than the capsule's
+// physical module layout. Parsing implementation helpers remain private.
+export {
+    IntrinsicEffectEntry,
+    IntrinsicEffectTable,
+    append_intrinsic_effects,
+    empty_intrinsic_effects,
+    intrinsic_effect_table,
+    intrinsic_effects_for_callee_target,
+    intrinsic_effects_for_exact_target,
+    intrinsic_effects_for_target
+} from "./intrinsic_effects";
+
+export {
+    ImportModuleAlias,
+    ImportedModuleContext,
+    LayoutManifest,
+    NativeArtifact,
+    NativeBinding,
+    NativeEnum,
+    NativeEnumLayout,
+    NativeEnumVariant,
+    NativeEnumVariantField,
+    NativeEnumVariantLayout,
+    NativeFunction,
+    NativeImport,
+    NativeImportSpecifier,
+    NativeInstruction,
+    NativeInterface,
+    NativeInterfaceSignature,
+    NativeLambdaCapture,
+    NativeModule,
+    NativeParameter,
+    NativeSourceSpan,
+    NativeStruct,
+    NativeStructField,
+    NativeStructLayout,
+    NativeStructLayoutField,
+    ParseNativeResult
+} from "./native_ir";
+
+export {
+    parse_layout_manifest,
+    parse_native_artifact,
+    parse_native_artifact_for_import_context,
+    parse_native_artifact_for_import_with_bindings,
+    parse_native_artifact_from_lines,
+    parse_native_bindings_from_text,
+    parse_native_enums_for_import,
+    parse_native_function_count_from_text,
+    parse_native_functions_for_import,
+    parse_native_functions_from_text,
+    parse_native_imports_for_import,
+    parse_native_interfaces_for_import,
+    parse_native_structs_for_import,
+    select_layout_manifest_artifact,
+    select_text_artifact
+} from "./native_ir_api";
+
+export {
+    FnTypeParts,
+    ends_with,
+    index_of,
+    lines_to_native_text,
+    native_lines_have_text,
+    parse_fn_type_text,
+    percent_escape_capture_text,
+    percent_unescape_capture_text,
+    split_lines,
+    split_text,
+    starts_with,
+    strip_prefix,
+    trim_text
+} from "./native_ir_utils_text";
+
+export {
+    BinaryOp,
+    BlockAddResult,
+    CapabilityAtom,
+    CapabilitySet,
+    ComparePredicate,
+    ConvertKind,
+    EffectAtom,
+    EffectSet,
+    FnBuilder,
+    FunctionAddResult,
+    Instr,
+    InstrKind,
+    InternResult,
+    Linkage,
+    MetadataValue,
+    Module,
+    SsaBlock,
+    SsaFunction,
+    SsaManifest,
+    TermKind,
+    Terminator,
+    TypeKind,
+    TssaType,
+    UnaryOp,
+    ValueAddResult,
+    begin_block,
+    begin_function,
+    capability_set_is_subset,
+    declare_function,
+    effect_set_is_subset,
+    emit_binary,
+    emit_call,
+    emit_compare,
+    emit_const_bool,
+    emit_const_float,
+    emit_const_int,
+    emit_convert,
+    emit_unary,
+    end_block,
+    finish_function,
+    intern_bool,
+    intern_capability_set,
+    intern_effect_set,
+    intern_float,
+    intern_int,
+    intern_pointer,
+    intern_symbol,
+    intern_type,
+    intern_unit,
+    new_module,
+    set_manifest,
+    symbol_name,
+    term_branch,
+    term_cond_branch,
+    term_return_value,
+    term_return_void,
+    term_unreachable,
+    types_structurally_equal
+} from "./typed_ssa";
+
+export { render_module } from "./typed_ssa_render";
+
+export { TssaDiagnostic, VerifyResult, verify_module } from "./typed_ssa_verify";
+
+export {
+    TensorDType,
+    TensorFunction,
+    TensorModule,
+    TensorOp,
+    TensorOpKind,
+    TensorProvenance,
+    TensorType,
+    dense_f64_type,
+    render_tensor_module,
+    tensor_add,
+    tensor_dtype_name,
+    tensor_matmul_2d,
+    tensor_multiply,
+    tensor_op_name,
+    tensor_parameter,
+    tensor_reduce_sum,
+    tensor_shape_product,
+    tensor_shapes_equal,
+    tensor_types_equal
+} from "./tensor_ir";
+
+export { TensorPassResult, run_tensor_fusion_pass } from "./tensor_ir_fusion";
+
+export { TensorVerifyResult, verify_tensor_function, verify_tensor_module } from "./tensor_ir_verify";

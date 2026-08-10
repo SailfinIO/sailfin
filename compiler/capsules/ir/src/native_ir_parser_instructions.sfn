@@ -1,4 +1,4 @@
-// compiler/src/native_ir_parser_instructions.sfn
+// compiler/capsules/ir/src/native_ir_parser_instructions.sfn
 //
 // Instruction parsing helpers extracted from native_ir_parser.sfn to keep
 // the module under the seed compiler's OOM threshold.

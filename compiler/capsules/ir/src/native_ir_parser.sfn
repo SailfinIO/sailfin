@@ -1,4 +1,4 @@
-// compiler/src/native_ir_parser.sfn
+// compiler/capsules/ir/src/native_ir_parser.sfn
 //
 // Parser for textual `.sfn-asm` artifacts. Type definitions live in
 // native_ir.sfn; utilities and layout parsers in native_ir_utils.sfn.

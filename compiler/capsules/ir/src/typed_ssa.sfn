@@ -1,4 +1,4 @@
-// compiler/src/typed_ssa.sfn
+// compiler/capsules/ir/src/typed_ssa.sfn
 //
 // Target-neutral typed SSA v0 data model, structural interning, and a
 // deterministic construction builder. This is the semantic IR that sits

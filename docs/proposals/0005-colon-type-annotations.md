@@ -180,7 +180,7 @@ containing `:` in cached `->` IR (e.g., `handler -> fn(req: Request) -> Response
 
 **Native IR parsers** (accept both, earliest wins):
 
-- `compiler/src/native_ir_utils_parse.sfn` — `parse_struct_field_line`,
+- `compiler/capsules/ir/src/native_ir_utils_parse.sfn` — `parse_struct_field_line`,
   `parse_enum_variant_field`, `parse_parameter_entry`.
 - `compiler/src/llvm/lowering/lowering_recovery.sfn` — recovery parser for
   `.param` and `.field` lines.

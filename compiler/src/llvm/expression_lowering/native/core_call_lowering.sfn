@@ -1,9 +1,9 @@
 // compiler/src/llvm/expression_lowering/native/core_call_lowering.sfn
 //
 // Call lowering extracted from core.sfn.
+import { NativeFunction } from "sfn/ir";
 import { find, substring } from "sfn/strings";
 
-import { NativeFunction } from "../../../native_ir";
 import { format_temp_name, format_typed_operand } from "../../expressions_helpers";
 import { is_simple_identifier } from "../../expressions_helpers";
 import { trace_call_lowering, trace_log } from "../../lowering_debug_state";

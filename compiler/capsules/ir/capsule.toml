@@ -1,0 +1,15 @@
+[capsule]
+name = "sfn/ir"
+version = "0.9.3"
+description = "Sailfin native, typed SSA, and tensor IR contracts (toolchain-internal)"
+publish = false
+
+[dependencies]
+"sfn/strings" = "*"
+
+[capabilities]
+required = []
+
+[build]
+kind = "library"
+entry = "src/mod.sfn"

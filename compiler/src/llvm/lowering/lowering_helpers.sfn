@@ -1,8 +1,6 @@
 // compiler/src/llvm/lowering/lowering_helpers.sfn
 //
 // Shared utility functions for LLVM IR lowering.
-import { substring } from "sfn/strings";
-
 import {
     LayoutManifest,
     NativeArtifact,
@@ -23,7 +21,7 @@ import {
     NativeStructLayout,
     NativeStructLayoutField,
     ParseNativeResult
-} from "../../native_ir";
+} from "sfn/ir";
 import {
     parse_layout_manifest,
     parse_native_artifact,
@@ -32,8 +30,10 @@ import {
     parse_native_functions_from_text,
     select_layout_manifest_artifact,
     select_text_artifact
-} from "../../native_ir_api";
-import { split_lines } from "../../native_ir_utils_text";
+} from "sfn/ir";
+import { split_lines } from "sfn/ir";
+import { substring } from "sfn/strings";
+
 import { append_unique_effect } from "../effects";
 import { is_prelude_mirror_symbol } from "../prelude_mirror_signatures";
 import { find_function_by_name, should_internalize_function } from "../rendering";

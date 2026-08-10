@@ -3,8 +3,9 @@
 // SFN-167/SFN-736: the driver derives an import-context root per invocation
 // and passes the resulting loaded data into LLVM. No process-global reader
 // root remains in the lowering subtree.
+import { NativeImport } from "sfn/ir";
+
 import { import_context_root, load_imported_module_context } from "../../src/import_context";
-import { NativeImport } from "../../src/native_ir";
 
 test "import-context reader: empty work dir resolves the canonical shared default" {
     assert import_context_root("") == "build/compiler/import-context";

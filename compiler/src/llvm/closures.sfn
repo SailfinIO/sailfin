@@ -54,10 +54,10 @@
 // lines. Non-capturing lambdas keep their pre-change `<lambda>`
 // placeholder behaviour — a regression guard for issue #459's
 // acceptance criterion.
+import { NativeLambdaCapture } from "sfn/ir";
+import { percent_unescape_capture_text } from "sfn/ir";
 import { substring } from "sfn/strings";
 
-import { NativeLambdaCapture } from "../native_ir";
-import { percent_unescape_capture_text } from "../native_ir_utils_text";
 import { format_temp_name } from "./expressions_helpers";
 import { ends_with_pointer_suffix, map_type_annotation } from "./type_mapping";
 import {

@@ -10,7 +10,7 @@
 // The IR-owned artifact text helpers are pure (no substring/char_code, hence
 // no prelude dependency), so the equivalence tests below gate the real
 // implementations rather than local mirrors.
-import { lines_to_native_text, native_lines_have_text } from "../../src/native_ir_utils_text";
+import { lines_to_native_text, native_lines_have_text } from "sfn/ir";
 
 // ── Local copies of functions under test ─────────────────────────────
 fn _ends_with(value: string, suffix: string) -> boolean {

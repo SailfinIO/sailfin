@@ -74,7 +74,10 @@ fn _grandfathered_ceiling(name: string) -> int {
     if name == "core_parse.sfn" { return 1137; }
     if name == "core_parsing.sfn" { return 1053; }
     if name == "statement.sfn" { return 935; }
-    if name == "core_cast_lowering.sfn" { return 858; }
+    // 858 -> 859: SFN-744 moves the native IR model behind the `sfn/ir`
+    // capsule facade. Canonical formatting separates that scoped import from
+    // relative lowering imports with one blank line; no lowering logic grew.
+    if name == "core_cast_lowering.sfn" { return 859; }
     if name == "core_operators.sfn" { return 830; }
     if name == "core_strings.sfn" { return 789; }
     if name == "core_text.sfn" { return 759; }

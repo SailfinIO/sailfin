@@ -1,4 +1,4 @@
-// compiler/src/native_ir_utils_text.sfn
+// compiler/capsules/ir/src/native_ir_utils_text.sfn
 //
 // Pure string utility functions used across the native IR parser modules.
 // No dependencies on native_ir types.

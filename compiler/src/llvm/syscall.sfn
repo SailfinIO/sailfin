@@ -1,7 +1,8 @@
 // Linux x86-64 raw-syscall lowering. These reserved names are deliberately
 // available to one owned runtime chokepoint only; exposing an effect-free raw
 // syscall to general Sailfin code would bypass capability checking.
-import { NativeFunction } from "../native_ir";
+import { NativeFunction } from "sfn/ir";
+
 import { lower_expression } from "./expression_lowering/native/core";
 import { format_temp_name, format_typed_operand } from "./expressions_helpers";
 import { build_target_os, target_arch_for_lowering, trace_log } from "./lowering_debug_state";

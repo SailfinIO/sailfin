@@ -1,4 +1,4 @@
-// compiler/src/tensor_ir_fusion.sfn
+// compiler/capsules/ir/src/tensor_ir_fusion.sfn
 //
 // Deterministic fusion-pass insertion seam for shape-typed tensor IR. The
 // first implementation preserves verified graphs while later work adds the

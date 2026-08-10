@@ -3,9 +3,10 @@
 // Driver-side resolution for the LLVM provider's primitive input context.
 // Target and debug/test state remain compiler-driver concerns; codegen-LLVM
 // receives the resolved snapshot and owns only pure lowering decisions.
+import { ImportedModuleContext } from "sfn/ir";
+
 import { _env_flag, _get_env_cmd, _legacy_flag_file } from "../build_flags";
 import { LLVMProviderContext } from "../llvm/lowering_debug_state";
-import { ImportedModuleContext } from "../native_ir";
 import { test_runner_active, test_runner_trace } from "../test_runner_state";
 import { build_target_os } from "./target";
 

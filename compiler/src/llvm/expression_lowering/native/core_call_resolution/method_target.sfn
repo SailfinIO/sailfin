@@ -1,7 +1,7 @@
 // compiler/src/llvm/expression_lowering/native/core_call_resolution/method_target.sfn
+import { NativeFunction } from "sfn/ir";
 import { find, substring } from "sfn/strings";
 
-import { NativeFunction } from "../../../../native_ir";
 import { is_simple_identifier } from "../../../expressions_helpers";
 import { find_runtime_helper, make_concat_descriptor } from "../../../runtime_helpers/mod";
 import { merge_string_constants } from "../../../strings";

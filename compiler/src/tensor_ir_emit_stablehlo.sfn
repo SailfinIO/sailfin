@@ -8,15 +8,14 @@
 // (elementwise add/mul, reduction sum, 2D matmul), not the full op surface,
 // and deliberately does not fuse before the exit — the substrate does that.
 // See SFEP-0052 §3.1(3) and SFN-429.
-import { int_to_string } from "sfn/strings";
-
 import {
     TensorDType,
     TensorFunction,
     TensorModule,
     TensorOp,
     TensorType
-} from "./tensor_ir";
+} from "sfn/ir";
+import { int_to_string } from "sfn/strings";
 
 // StableHLO element-type spelling. This diverges from the tensor IR's own
 // `tensor_dtype_name` in two places the MLIR grammar requires: predicates are

@@ -1,4 +1,4 @@
-// compiler/src/tensor_ir_verify.sfn
+// compiler/capsules/ir/src/tensor_ir_verify.sfn
 //
 // Structural and operation verification for shape-typed tensor IR. Invalid
 // compiler state is returned as diagnostics before any exit consumes it.

@@ -6,9 +6,9 @@
 // `find_local_binding`, `find_parameter_binding`, `append_local_binding`,
 // `infer_borrow_base_scope`, lifetime region creation/release, and scope ID
 // construction (`format_root_scope_id`, `make_child_scope_id`).
+import { NativeEnum, NativeStruct } from "sfn/ir";
 import { char_at_index as char_at, substring } from "sfn/strings";
 
-import { NativeEnum, NativeStruct } from "../../../native_ir";
 import { sanitize_symbol } from "../../symbols";
 import { integer_type_is_signed, map_type_annotation } from "../../type_mapping";
 import {

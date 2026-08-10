@@ -9,6 +9,7 @@
 // flat — some seed compilers previously segfaulted on deeply nested
 // struct-literal initialisers in test bodies (see
 // check_tool_test.sfn preamble for the same dodge).
+import { intrinsic_effects_for_target } from "sfn/ir";
 import {
     Block,
     Decorator,
@@ -34,7 +35,6 @@ import {
 import { EffectViolation } from "../../src/effect_checker/types";
 import { append_import_function, empty_import_symbols } from "../../src/effect_imports";
 import { canonical_effects, is_canonical_effect } from "../../src/effect_taxonomy";
-import { intrinsic_effects_for_target } from "../../src/intrinsic_effects";
 
 // -------------------------------------------------------------------
 // Builder helpers

@@ -149,7 +149,7 @@ keywords. Only the *default* behaviour and the type names are language-level.
 Sailfin threads type annotations as raw strings end-to-end (`TypeAnnotation {
 text: string }` at [`ast.sfn:12-14`](../../compiler/capsules/syntax/src/ast.sfn#L12-L14);
 `NativeFunction.return_type: string` at
-[`native_ir.sfn:73-77`](../../compiler/src/native_ir.sfn#L73-L77)). We keep that
+[`native_ir.sfn:73-77`](../../compiler/capsules/ir/src/native_ir.sfn#L73-L77)). We keep that
 model — **no structured width field is added to the AST or IR.** Signedness and
 width are *derived* from the type-name string at each site that needs them, the
 same way `map_primitive_type` already resolves by string match. This is the
@@ -564,7 +564,7 @@ opcode selection.
   accept-list), `:464-481` (string-driven kind resolution precedent),
   `compiler/capsules/syntax/src/ast.sfn:12-14` (`TypeAnnotation` is text), `:95` (`Cast` node),
   `compiler/src/effect_checker.sfn:888-897` (Cast operand walk, #1627),
-  `compiler/src/native_ir.sfn:73-77` (string-threaded types).
+  `compiler/capsules/ir/src/native_ir.sfn:73-77` (string-threaded types).
 - **Status / spec:** `docs/status.md:184-185` (numeric types + bitwise ops
   "Shipped"), `site/src/content/docs/docs/reference/spec/06-types.md`
   (primitive table, sized-family FFI note, scalar coercion kinds).

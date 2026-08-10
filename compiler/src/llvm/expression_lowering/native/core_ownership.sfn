@@ -1,7 +1,8 @@
 // compiler/src/llvm/expression_lowering/native/core_ownership.sfn
 //
 // Ownership/borrow analysis helpers extracted from core.sfn.
-import { NativeSourceSpan } from "../../../native_ir";
+import { NativeSourceSpan } from "sfn/ir";
+
 import { is_simple_identifier } from "../../expressions_helpers";
 import { is_copy_type } from "../../type_mapping";
 import {

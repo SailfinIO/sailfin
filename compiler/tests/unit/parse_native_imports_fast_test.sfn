@@ -1,7 +1,7 @@
 // Regression test for the Phase 3 import-discovery fast path.
 //
 // The real `parse_native_imports_for_import` lives in
-// `compiler/src/native_ir_api.sfn` and replaces a full-artifact
+// `compiler/capsules/ir/src/native_ir_api.sfn` and replaces a full-artifact
 // parse with a line scanner that extracts only top-level
 // `.import`/`.export` directives. Importing it directly would
 // pull the full native_ir parser chain (~4.5k lines) into the
@@ -203,7 +203,7 @@ fn _parse_entry(kind: string, entry: string) -> FastImport? {
 }
 
 // The fast scanner — byte-for-byte port of the shipping implementation
-// in compiler/src/native_ir_api.sfn:parse_native_imports_for_import.
+// in compiler/capsules/ir/src/native_ir_api.sfn:parse_native_imports_for_import.
 // Walks lines and extracts only top-level `.import`/`.export` entries,
 // skipping everything else with a cheap starts_with check.
 fn fast_scan(text: string) -> FastImport[] {

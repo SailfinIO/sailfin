@@ -17,7 +17,7 @@ import {
     NativeEnumVariantField,
     NativeEnumLayout,
     NativeEnumVariantLayout
-} from "../../native_ir";
+} from "sfn/ir";
 
 // ── NativeFunction constructors ──────────────────────────────────────
 // Helper: construct NativeFunction outside of if blocks.

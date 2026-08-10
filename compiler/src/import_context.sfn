@@ -1,7 +1,4 @@
 // Driver-owned staged import-context discovery and artifact loading.
-import { ends_with, starts_with, trim } from "sfn/strings";
-
-import { resolve_import_module_slug_for_module } from "./llvm/imports";
 import {
     ImportModuleAlias,
     ImportedModuleContext,
@@ -9,8 +6,11 @@ import {
     NativeEnum,
     NativeImport,
     NativeStruct
-} from "./native_ir";
-import { parse_layout_manifest, parse_native_imports_for_import } from "./native_ir_api";
+} from "sfn/ir";
+import { parse_layout_manifest, parse_native_imports_for_import } from "sfn/ir";
+import { ends_with, starts_with, trim } from "sfn/strings";
+
+import { resolve_import_module_slug_for_module } from "./llvm/imports";
 
 fn import_context_root(work_dir: string) -> string {
     if work_dir.length == 0 { return "build/compiler/import-context"; }

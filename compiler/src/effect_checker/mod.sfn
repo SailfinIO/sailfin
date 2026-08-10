@@ -2,10 +2,10 @@
 //
 // Stable effect-checker facade. Implementation is partitioned by concern so
 // each compiler module stays below the source-file line budget.
+import { intrinsic_effect_table } from "sfn/ir";
 import { Expression, FunctionSignature, Program } from "sfn/syntax";
 
 import { ImportSymbolTable, empty_import_symbols, with_intrinsic_effects } from "../effect_imports";
-import { intrinsic_effect_table } from "../intrinsic_effects";
 import {
     inferred_public_effects_api,
     is_program_entry_point_api,

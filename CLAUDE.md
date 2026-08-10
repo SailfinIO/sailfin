@@ -69,7 +69,7 @@ the same subcommands and do not replace `make compile`.
 | `compiler/capsule.toml` | Version source of truth + capsule manifest |
 | `compiler/src/main.sfn` | Entry point orchestrating all passes |
 | `compiler/capsules/syntax/src/ast.sfn` | Canonical AST node definitions |
-| `compiler/src/native_ir.sfn` | `.sfn-asm` intermediate representation |
+| `compiler/capsules/ir/src/native_ir.sfn` | `.sfn-asm` intermediate representation |
 | `compiler/src/cli/` + `capsule_resolver.sfn` | Build driver (`entry.sfn` = `fn main`, `main.sfn` = dispatch) — **pure orchestration, no fixups** |
 | `compiler/src/build_stamp.sfn` | Writes `build/native/.build-stamp` |
 | `runtime/prelude.sfn`, `runtime/sfn/` | Sailfin-native runtime |
