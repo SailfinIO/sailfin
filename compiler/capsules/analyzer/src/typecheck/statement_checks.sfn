@@ -47,6 +47,7 @@ import {
     check_intersection_value_type_annotation,
     check_object_literal_target
 } from "../typecheck_types/value_and_object_checks";
+import { void_value_diagnostics } from "./call_signature";
 import {
     TypeckCtx,
     ctx_with_bindings,
@@ -173,9 +174,15 @@ fn check_statement(statement: Statement, ctx: TypeckCtx) -> ScopeResult {
         let primitive_diags = check_expected_primitive_type(statement.initializer, statement.type_annotation, primitive_bindings, "initializer for `"
             + statement.name
             + "`", statement.name, statement.initializer_span);
+        // SFN-812: lowering already fails closed on a void initializer
+        // (E1002), but only after the whole module has lowered. Reject it at
+        // `sfn check` so the error names the callee rather than the slot type.
+        let void_diags = void_value_diagnostics(statement.initializer, ctx, "the initializer for `"
+            + statement.name
+            + "`");
         return ScopeResult {
             bindings: registration.bindings,
-            diagnostics: registration.diagnostics.concat(walk_diags).concat(annotation_diags).concat(array_diags).concat(unknown_diags).concat(intersection_diags).concat(object_literal_diags).concat(uninferable_ctor_diags).concat(primitive_diags)
+            diagnostics: registration.diagnostics.concat(walk_diags).concat(annotation_diags).concat(array_diags).concat(unknown_diags).concat(intersection_diags).concat(object_literal_diags).concat(uninferable_ctor_diags).concat(primitive_diags).concat(void_diags)
         };
     }
     if statement.variant == "FunctionDeclaration" {
@@ -523,9 +530,12 @@ fn check_statement(statement: Statement, ctx: TypeckCtx) -> ScopeResult {
         }
         let object_literal_diags = check_object_literal_target(statement.expression, enclosing_return_type, "return", statement.span, top_level);
         let primitive_diags = check_expected_primitive_type(statement.expression, enclosing_return_type, bindings, "return value", "return", statement.span);
+        // SFN-812: `return print(x);` returns nothing to the caller, which
+        // then reads a fabricated value from the slot.
+        let void_diags = void_value_diagnostics(statement.expression, ctx, "a returned value");
         return ScopeResult {
             bindings: bindings,
-            diagnostics: return_diags.concat(object_literal_diags).concat(primitive_diags)
+            diagnostics: return_diags.concat(object_literal_diags).concat(primitive_diags).concat(void_diags)
         };
     }
     if statement.variant == "Unknown" {

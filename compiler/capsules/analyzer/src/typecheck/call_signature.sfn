@@ -1,0 +1,261 @@
+// compiler/capsules/analyzer/src/typecheck/call_signature.sfn
+//
+// Call-site validation against the callee's declared signature (SFN-812).
+// Two checks share one signature surface:
+//
+//   * arity — E0423, an argument count outside the callee's accepted range.
+//   * void  — E0422, a call returning nothing used where a value is required.
+//
+// Both are proof-based in the SFN-385/SFN-675 sense: silent unless the
+// callee's signature is *known*. A generic callee, an unresolved name, a
+// member-form call, or a builtin outside the pinned table below never
+// produces a diagnostic here. The failure mode this fixes is a plausible
+// wrong answer (a missing argument zero-filled, a dropped store), so a
+// fail-open gap is a missed rejection — never a false one.
+//
+// Signature sources, in resolution order:
+//   1. the `fnprim:` marker on a same-module `SymbolEntry`
+//      (`typecheck_types/symbol_table_and_raw_exprs.sfn`), which encodes the
+//      return code and one code per parameter, uppercase when that parameter
+//      declares a default;
+//   2. the pinned builtin table below, for names that resolve to no
+//      source-level declaration;
+//   3. `ImportedFunctionSignature` for cross-module callees.
+//
+// Why the builtin table is duplicated rather than read from the lowering
+// registry: `find_runtime_helper` lives in `compiler/src/llvm/`, inside the
+// `sailfin` capsule, which already depends on `sfn/analyzer`. Importing it
+// here would close a capsule cycle. The mirror is pinned against the
+// lowering recognizers by `compiler/tests/unit/call_signature_builtin_sync_test.sfn`.
+import { Expression } from "sfn/syntax";
+
+import { ImportedFunctionSignature, lookup_imported_function } from "../effect_imports";
+import { Diagnostic } from "../typecheck_types";
+import { is_builtin_call_name } from "../typecheck_types/extern_abi";
+import { token_from_name, trim_text, typecheck_int_to_string } from "../typecheck_types/text_utils";
+import { TypeckCtx } from "./context";
+import {
+    _find_proven_call_symbol,
+    _function_marker_arity,
+    _function_marker_required_arity,
+    _function_marker_returns_void
+} from "./primitive_rules";
+
+// A resolved callee contract. `known` is the fail-open gate: every field
+// below it is meaningless unless `known` is true.
+struct CallSignature {
+    known: boolean;
+    // Smallest and largest accepted argument counts. Equal unless the
+    // callee declares defaulted trailing parameters. `arity_known` is
+    // false for a callee whose return classification is trustworthy but
+    // whose parameter list is not (an imported pre-SFN-812 artifact).
+    arity_known: boolean;
+    minimum: int;
+    maximum: int;
+    returns_void: boolean;
+    // False when the callee's return type is simply not classifiable, so a
+    // void-position check must stay silent rather than read `returns_void`.
+    return_known: boolean;
+}
+
+fn _unknown_signature() -> CallSignature {
+    return CallSignature {
+        known: false,
+        arity_known: false,
+        minimum: 0,
+        maximum: 0,
+        returns_void: false,
+        return_known: false
+    };
+}
+
+// Builtins whose return is void. A void builtin in value position is the
+// SFN-812 forcing case (`s.a = print(...)` silently drops the store), and
+// unlike arity this classification is unambiguous for every name listed.
+// Kept in sync with the `return_type: "void"` rows in
+// `compiler/src/llvm/runtime_helpers/registry_*.sfn` and the void-emitting
+// arms of `is_atomic_builtin`/`is_secure_zero_builtin`.
+fn builtin_returns_void(name: string) -> boolean {
+    if strings_equal(name, "print") { return true; }
+    if strings_equal(name, "sleep") { return true; }
+    if strings_equal(name, "atomic_store") { return true; }
+    if strings_equal(name, "atomic_fence") { return true; }
+    if strings_equal(name, "secure_zero") { return true; }
+    return false;
+}
+
+// Builtins whose parameter count is fixed and agreed by both the typecheck
+// allowlist (`extern_abi.sfn`) and the lowering recognizers
+// (`llvm/atomics.sfn`, `llvm/byte_load.sfn`, `llvm/secure_zero.sfn`).
+//
+// Deliberately excluded, and why: `syscall1`..`syscall6` already have a
+// dedicated arity check (`syscalls.sfn`); `spawn`/`send`/`receive`/`await`/
+// `channel` sit in the allowlist defensively while structured concurrency
+// is under construction (`extern_abi.sfn:199-222`) and have no settled
+// call-form contract; `serve` is parsed as its own `Serve` node with an
+// optional port; `console` has no lowering target at all; `assert` and
+// `print` take a single aggregated operand whose arity the parser does not
+// preserve faithfully enough to reject on. Returning -1 means "not pinned".
+fn builtin_arity(name: string) -> int {
+    if strings_equal(name, "atomic_load") { return 1; }
+    if strings_equal(name, "atomic_store") { return 2; }
+    if strings_equal(name, "atomic_add") { return 2; }
+    if strings_equal(name, "atomic_sub") { return 2; }
+    if strings_equal(name, "atomic_cas") { return 3; }
+    if strings_equal(name, "atomic_fence") { return 0; }
+    if strings_equal(name, "load_byte") { return 1; }
+    if strings_equal(name, "secure_zero") { return 2; }
+    return -1;
+}
+
+fn _builtin_signature(name: string) -> CallSignature {
+    if !is_builtin_call_name(name) { return _unknown_signature(); }
+    let arity = builtin_arity(name);
+    let returns_void = builtin_returns_void(name);
+    return CallSignature {
+        known: true,
+        arity_known: arity >= 0,
+        minimum: arity,
+        maximum: arity,
+        returns_void: returns_void,
+        return_known: true
+    };
+}
+
+// Resolve the contract for a bare-identifier callee. Order matters: a source
+// declaration shadows a builtin of the same name (a user `fn print` is an
+// ordinary function), and a local declaration shadows an import.
+fn resolve_call_signature(name: string, ctx: TypeckCtx) -> CallSignature {
+    let entry = _find_proven_call_symbol(ctx.bindings, name);
+    if entry != null {
+        // A generic signature's parameter list can be reshaped by
+        // monomorphization; stay silent rather than guess.
+        if entry.is_generic { return _unknown_signature(); }
+        let total = _function_marker_arity(entry);
+        if total < 0 { return _unknown_signature(); }
+        return CallSignature {
+            known: true,
+            arity_known: true,
+            minimum: _function_marker_required_arity(entry),
+            maximum: total,
+            returns_void: _function_marker_returns_void(entry),
+            return_known: true
+        };
+    }
+    let imported = lookup_imported_function(ctx.imports, name);
+    if imported != null { return _imported_signature(imported); }
+    return _builtin_signature(name);
+}
+
+// Imported callees carry their contract in the staged `.sfn-asm` artifact.
+// `parameter_count` is -1 for a synthetic or pre-SFN-812 entry that only
+// carries effect metadata, which keeps arity fail-open while the return
+// classification stays usable.
+fn _imported_signature(signature: ImportedFunctionSignature) -> CallSignature {
+    let declared = trim_text(signature.return_type);
+    let return_known = declared.length > 0;
+    let count = signature.parameter_count;
+    let required = signature.required_parameter_count;
+    return CallSignature {
+        known: true,
+        arity_known: count >= 0,
+        minimum: required,
+        maximum: count,
+        returns_void: strings_equal(declared, "void"),
+        return_known: return_known
+    };
+}
+
+// True when `expression` is a call whose callee provably returns nothing.
+// The caller decides whether that is an error; this only answers the
+// classification question, and answers false whenever it is unsure.
+fn call_returns_void(expression: Expression?, ctx: TypeckCtx) -> boolean {
+    if expression == null { return false; }
+    if expression.variant != "Call" { return false; }
+    if expression.callee == null { return false; }
+    if expression.callee.variant != "Identifier" { return false; }
+    let signature = resolve_call_signature(expression.callee.name, ctx);
+    if !signature.known { return false; }
+    if !signature.return_known { return false; }
+    return signature.returns_void;
+}
+
+// Reject a void call used where a value is required (E0422). `position`
+// names the binding site for the message ("initializer for `x`",
+// "argument 1 to `f`", ...). Silent for every non-void or unproven shape.
+fn void_value_diagnostics(expression: Expression?, ctx: TypeckCtx, position: string) -> Diagnostic[] {
+    if !call_returns_void(expression, ctx) { return []; }
+    let name = expression.callee.name;
+    return [Diagnostic {
+        code: "E0422", severity: "error", message: "`" + name
+            + "` returns no value, so it cannot be used as "
+            + position
+            + " — call it as a statement on its own line instead", file_path: "", primary: token_from_name(name, expression.callee.span), suggestion: null
+    }];
+}
+
+// Reject a void call supplied as argument `index` of `call`.
+fn void_argument_diagnostics(call: Expression, index: int, ctx: TypeckCtx) -> Diagnostic[] {
+    let mut anchor: string = "this call";
+    if call.callee != null {
+        if call.callee.variant == "Identifier" {
+            anchor = "`" + call.callee.name + "`";
+        }
+    }
+    let position = "argument " + typecheck_int_to_string(index + 1) + " to "
+        + anchor;
+    return void_value_diagnostics(call.arguments[index], ctx, position);
+}
+
+// Reject an argument count the callee's signature cannot accept (E0423).
+// Emitted at the callee identifier, matching the E0420 caret placement.
+fn call_arity_diagnostics(expression: Expression, ctx: TypeckCtx) -> Diagnostic[] {
+    if expression.variant != "Call" { return []; }
+    if expression.callee == null { return []; }
+    if expression.callee.variant != "Identifier" { return []; }
+    let name = expression.callee.name;
+    let signature = resolve_call_signature(name, ctx);
+    if !signature.known { return []; }
+    if !signature.arity_known { return []; }
+    let supplied = expression.arguments.length;
+    if supplied >= signature.minimum {
+        if supplied <= signature.maximum { return []; }
+    }
+    return [Diagnostic {
+        code: "E0423", severity: "error", message: "`" + name + "` "
+            + _expectation_text(signature)
+            + ", but "
+            + _supplied_text(supplied)
+            + " — "
+            + _direction_text(supplied, signature), file_path: "", primary: token_from_name(name, expression.callee.span), suggestion: null
+    }];
+}
+
+fn _expectation_text(signature: CallSignature) -> string {
+    if signature.minimum == signature.maximum {
+        return "takes " + _argument_count_text(signature.maximum);
+    }
+    return "takes between " + typecheck_int_to_string(signature.minimum)
+        + " and "
+        + _argument_count_text(signature.maximum);
+}
+
+fn _supplied_text(supplied: int) -> string {
+    if supplied == 1 { return "1 was supplied"; }
+    return typecheck_int_to_string(supplied) + " were supplied";
+}
+
+fn _argument_count_text(count: int) -> string {
+    if count == 1 { return "1 argument"; }
+    return typecheck_int_to_string(count) + " arguments";
+}
+
+// The diagnostic must distinguish too-few from too-many: a missing argument
+// is silently zero-filled and an extra one silently dropped, and the two
+// have different fixes.
+fn _direction_text(supplied: int, signature: CallSignature) -> string {
+    if supplied < signature.minimum {
+        return "an omitted argument is filled with a zero value, not defaulted";
+    }
+    return "the extra arguments are dropped";
+}
