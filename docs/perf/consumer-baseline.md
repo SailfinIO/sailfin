@@ -100,9 +100,17 @@ The child build also runs with `--skip-toolchain-check`, keeping the
 `[toolchain]` version-floor gate — which can dispatch a network fetch — out of
 the measured window.
 
-## Not in this baseline
+## The standing gate
 
-CI wiring, the rolling perf-history series, and regression thresholds are a
-separate leaf. The CSV deliberately carries no `run_sha`/`run_date` columns:
-`scripts/perf_history.sh`'s `_append_tagged` prepends those itself, so this
-shape can be fed to it later without reshaping.
+This shape is what the nightly records. `perf-history.yml` runs
+`make bench-consumer` on the same cadence as the other two benches and appends
+the rows to `consumer.csv` on the `bench-data` branch, where each fixture is
+compared against the rolling median of the last N same-seed runs (SFN-832). The
+CSV deliberately carries no `run_sha`/`run_date` columns —
+`scripts/perf_history.sh`'s `_append_tagged` prepends those itself — so this file
+and the series share one shape.
+
+The gate **warns and never fails the nightly**; `ctors` and `modules_staged` are
+compared with no noise band, because they are deterministic and a percentage
+threshold would absorb exactly the closure growth worth catching. How to read
+the series: `docs/perf/bench-history.md` § *The consumer-build series*.
