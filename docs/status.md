@@ -1,6 +1,6 @@
 # Status
 
-Updated: 2026-08-11 (SFN-830). Seed pinned to `0.9.3` (`bootstrap.toml`
+Updated: 2026-08-11 (SFN-833). Seed pinned to `0.9.3` (`bootstrap.toml`
 `[seed].version` — SFEP-0047); the compiler version source of truth is
 `compiler/capsule.toml`.
 
@@ -306,6 +306,29 @@ here.
   collides with a function defined in the importing module, or when the import
   set exceeds the mangling safety bound, rather than dropping the affected
   rewrite and emitting a binary with the wrong symbol (SFN-530).
+- **Capsule resolver — import-reachable filtering (build path)** (SFEP-0070,
+  SFN-833). `sfn build`, `sfn run`, and the `sfn test` link path narrow
+  `resolved.sources` to the import-reachable closure before staging: a
+  declared dependency capsule nothing imports now contributes zero modules to
+  the build and the link, and a submodule of an imported capsule that neither
+  the capsule's barrel re-exports nor any sibling imports is likewise dropped.
+  `sfn check` stays deliberately unfiltered, so the build set is always a
+  subset of the check set. A capsule reached through a bare spec (`import ...
+  from "sfn/crypto"`) still retains everything its barrel re-exports, so a
+  capsule whose barrel re-exports its whole surface — `sfn/crypto` today —
+  sees no reduction yet; narrowing individual re-exported names is SFN-834.
+  The filter **fails open**: if it cannot prove its own closure invariant it
+  prints a diagnostic, falls back to the unfiltered set, and the build
+  proceeds unchanged — it can only ever remove modules, never add one.
+  `SAILFIN_CAPSULE_FILTER=off` (also `0`/`false`) disables the filter
+  entirely, reproducing the pre-filter artifact set exactly;
+  `SAILFIN_TRACE_CAPSULE_FILTER=1` prints retained/dropped module counts and
+  the dropped slug list to stderr. Measured on the three
+  `docs/perf/consumer-baseline.csv` fixtures, the mechanism itself produced no
+  change in `modules_staged`, ctor count, or binary size, because all three
+  reach `sfn/crypto` through its whole-surface barrel — the mechanism is in
+  place, and the measurable win arrives with SFN-834's re-export name
+  narrowing.
 - **Workspace default targets.** At a workspace root, bare `sfn build` and
   `sfn test` fan out over `[workspace].default-members`; when the field is
   absent they target every member. Each member has distinguishable output and
