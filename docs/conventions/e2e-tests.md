@@ -188,12 +188,11 @@ migration):
 - **`cwd` control**: use the native cwd argument — `process.run_capture_cwd(argv,
   env, cwd)` (or `os::run_capture(args, env, cwd)` / the `sfn/test` fixture
   `with_cwd(args, env, cwd, body)` that wraps it), not a spawned shell.
-  `run_bounded_in(argv, env, cwd, deadline_ms)` from `sfn/test` (see
-  "Bounding and scoping child processes" below) is the deadline-aware sibling
-  when the child also needs a wall-clock bound. The legacy `bash -c "cd <dir>
-  && ..."` vehicle predates `run_capture_cwd`/#1167 and is retained only where
-  it already existed (e.g. `sfn_package_test.sfn`) — **new tests must not
-  copy it.**
+  `os::run_bounded(argv, env, cwd, deadline_ms)` (see "Bounding and scoping
+  child processes" below) takes the cwd directly when the child also needs a
+  wall-clock bound. The legacy `bash -c "cd <dir> && ..."` vehicle predates
+  `run_capture_cwd`/#1167 and is retained only where it already existed (e.g.
+  `sfn_package_test.sfn`) — **new tests must not copy it.**
 - **RLIMIT_AS control**: use `process.run_capture_rlimit_as(argv, env, bytes)`
   (SFN-45) — see `mem_limit_selfcap_test.sfn`. This retired the caller-side
   `bash -c "ulimit -v N; exec ..."` vehicle for the address-space cap.
@@ -207,56 +206,70 @@ SIGKILL) also has no native form — see the next section.
 
 ## Bounding and scoping child processes
 
-`sfn/test`'s `process_control.sfn` (SFEP-0010 §3.2) gives a test control over
-a child's *lifetime*, closing the two remaining reasons a test used to reach
-for a shell: bounding a blocking child in time, and tearing one down on
-demand. A test using any of these declares `![clock, io]` (the deadline path
-reads `monotonic_millis()`/`sleep()`, both `![clock]`).
+Process-lifetime control over a child now splits across two capsules, and the
+split is deliberate rather than historical: `sfn/os` owns process
+*mechanics* — spawning, a wall-clock deadline, stdout/stderr demux via
+`io.poll_any`, kill-on-expiry, the single reap — and `sfn/test`
+(`process_control.sfn`, SFEP-0010 §3.2) owns test *structure* built on top of
+it: a scoped fixture whose distinguishing guarantee is that teardown happens
+even when the test body throws, plus readiness polling. `sfn/test`
+deliberately does not wrap `sfn/os`'s bounded-run functions — a second
+`run_bounded` in a second capsule would be an ambiguity at every call site
+importing both. A test using anything below declares `![clock, io]` (the
+deadline/polling paths read `monotonic_millis()`/`sleep()`, both `![clock]`).
 
-- **Bound a child in wall-clock time**: `run_bounded(argv, env, deadline_ms)`
-  (plus `run_bounded_in` for a cwd and `run_bounded_stdin` to pipe input) runs
-  the child to completion, draining both streams, and kills + reaps it on
-  expiry. This replaces the `timeout <secs> ...` argv vehicle outright — no
+- **Bound a child in wall-clock time**: `os::run_bounded(argv, env: Env, cwd,
+  deadline_ms) -> ProcessDrain` runs the child to completion, draining both
+  streams via `os::drain_to_exit`, and kills + reaps it on expiry. This
+  replaces the `timeout <secs> ...` argv vehicle outright — no
   `command -v timeout`/`gtimeout` probe, and **no skip-when-absent branch**;
   the old probe silently disabled coverage on any host without coreutils.
-  `run_bounded`'s `env` array has the same empty-means-empty contract as
-  `process.run_capture` — see "Build-and-run tests must isolate the build"
-  above for what a nested compiler child needs.
-- **The child's stdin is closed** by `run_bounded`/`run_bounded_in`/
-  `start_background`, giving it `< /dev/null` semantics. The spawn always
-  creates a stdin pipe, so without that close a child which reads stdin
-  (`sort`, `cat`, anything not on a tty) would block on a pipe that never
-  reaches EOF — a permanent hang when `deadline_ms <= 0`.
-- **`run_bounded_stdin` has two limits the caller must respect**, because the
-  write happens before the deadline clock starts and neither can be enforced
-  from inside. `input` must fit the pipe buffer (64 KiB on Linux) unless the
-  child drains promptly — feed anything larger through a file. And if the
-  child exits without reading, the write raises SIGPIPE, which the runtime
-  does not ignore, so it kills the **test process** with exit 141. Pass
-  `input` only to a child known to read it.
-- **Exactly one `stop_background` per `start_background`.** The reap frees the
-  handle, and `Background` is a plain copyable struct — a second stop is a
-  use-after-free plus a double-free. In particular, never call it from inside
-  a `with_background` body; that fixture already stops the child on scope exit.
+  `env` is the typed `os::Env` (`os::env_from_current()`/`os::env_empty()`
+  build one), not a flat `string[]`; a `run_bounded` call still needs to
+  supply the child's environment explicitly the same way `process.run_capture`
+  does — see "Build-and-run tests must isolate the build" above for what a
+  nested compiler child needs. `sfn/test` does not wrap `run_bounded` — call
+  it directly from `sfn/os`.
+- **The child's stdin is closed** by `os::run_bounded`/`os::drain_to_exit`/
+  `sfn/test`'s `start_background`, giving it `< /dev/null` semantics. The
+  spawn always creates a stdin pipe, so without that close a child which
+  reads stdin (`sort`, `cat`, anything not on a tty) would block on a pipe
+  that never reaches EOF — a permanent hang when `deadline_ms <= 0`. There is
+  no bounded-run helper that also pipes input; a caller needing both a
+  deadline and stdin input composes `os::spawn_with_env` +
+  `os::handle_write` (before draining) + `os::drain_to_exit` directly, and
+  owns the same pipe-buffer (64 KiB on Linux) and SIGPIPE-on-early-exit
+  hazards that shape used to warn about.
+- **`os::run_bounded` returns exit `127` on spawn failure**, mirroring
+  `process.run`'s missing-command code, without ever calling
+  `drain_to_exit` — there was no child to reap.
 - **`timed_out` is the deadline discriminator — never exit code `137`.** A
   SIGKILLed child's exit is `128 + 9 = 137`, indistinguishable by exit code
-  alone from a kernel OOM kill. `ChildOutcome.timed_out` is the boolean that
-  actually says "the deadline fired"; `describe_outcome(outcome)` renders a
-  one-line diagnostic that keeps the two apart.
-- **Scope a blocking server's lifetime**: `with_background(argv, env, cwd,
-  label, body)` starts the child, runs `body` against the live `Background`,
-  and kills + reaps on scope exit — including when `body` throws. A test can
-  no longer orphan a server by returning early or failing an assertion, and
-  no longer needs the `timeout`-vehicle's wall-clock backstop as its only
-  teardown. Use the unscoped `start_background`/`stop_background` pair only
-  when the scoped form's structure doesn't fit.
-- **Poll for readiness**: `wait_until(probe, deadline_ms, interval_ms)` polls
-  a `fn () -> boolean` probe against a wall-clock budget using the prelude's
-  in-process `sleep(ms)`. This replaces a hand-rolled retry loop that shelled
-  `process.run(["sleep", "0.5"])` between attempts — a fork+exec per poll
-  tick — with an in-process wait.
+  alone from a kernel OOM kill. `ProcessDrain.timed_out` (`sfn/os`) is the
+  boolean that actually says "the deadline fired"; `sfn/test`'s
+  `describe_outcome(outcome)` renders a one-line diagnostic that keeps the
+  two apart.
+- **Scope a blocking server's lifetime**: `sfn/test`'s `with_background(argv,
+  env: Env, cwd, label, body)` starts the child (via `os::spawn_with_env`,
+  wrapped in a `Background { handle: ProcessHandle, label }`), runs `body`
+  against the live `Background`, and kills + reaps on scope exit — including
+  when `body` throws. A test can no longer orphan a server by returning
+  early or failing an assertion, and no longer needs the `timeout`-vehicle's
+  wall-clock backstop as its only teardown. Use the unscoped
+  `start_background`/`stop_background` pair only when the scoped form's
+  structure doesn't fit.
+- **Exactly one `stop_background` per `start_background`.** The reap frees
+  the handle, and `Background` is a plain copyable struct — a second stop is
+  a use-after-free plus a double-free. In particular, never call it from
+  inside a `with_background` body; that fixture already stops the child on
+  scope exit.
+- **Poll for readiness**: `sfn/test`'s `wait_until(probe, deadline_ms,
+  interval_ms)` polls a `fn () -> boolean` probe against a wall-clock budget
+  using the prelude's in-process `sleep(ms)`. This replaces a hand-rolled
+  retry loop that shelled `process.run(["sleep", "0.5"])` between attempts —
+  a fork+exec per poll tick — with an in-process wait.
 
 What still needs a shell after this: **arbitrary signal delivery** (SIGTERM,
-SIGHUP, etc.) — `process.handle_kill` is SIGKILL-only, so a test that needs a
-graceful-shutdown signal still shells out to `kill -TERM` — and **RLIMIT_FSIZE**
-(above). Do not overclaim beyond these two.
+SIGHUP, etc.) — `process.handle_kill`/`os::handle_kill` is SIGKILL-only, so a
+test that needs a graceful-shutdown signal still shells out to `kill -TERM` —
+and **RLIMIT_FSIZE** (above). Do not overclaim beyond these two.

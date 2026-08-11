@@ -1,11 +1,14 @@
 // Tests for `sfn/test`'s process-lifetime control (SFEP-0010 §3.2).
 //
-// `run_bounded` / `run_bounded_stdin` replace the `timeout <secs> ...` argv
-// vehicle with an in-process deadline; `wait_until` replaces the
-// fork-per-tick readiness poll; `with_background` replaces the hand-rolled
-// spawn/kill/reap trio for a blocking server. These tests prove the deadline
-// actually bites (a killed child returns promptly, not after the full sleep)
-// and that teardown happens on both the normal and throwing paths — the two
+// This module no longer wraps bounded running — `os::run_bounded` and
+// `os::drain_to_exit` own the deadline, the stdout/stderr demux, and the
+// kill-on-expiry, and their coverage lives in
+// `capsules/sfn/os/tests/process_control_test.sfn`. What remains here is
+// test *structure* built on top of that: `with_background` proves teardown
+// happens on both the normal and throwing paths for a scoped background
+// child, `stop_background` proves the reap actually ran, and `wait_until`
+// proves an in-process readiness poll observes "false, then true"
+// asynchronously and bails out at its deadline rather than beyond it — the
 // properties a shell vehicle could not guarantee.
 //
 // Absolute binary paths are used throughout: `env` here is a genuinely empty
@@ -13,27 +16,19 @@
 // available. Each binary is probed with `fs.exists` and the test skips itself
 // (`assert true`) when absent, mirroring the `command -v` skip precedent this
 // module retires (`docs/conventions/e2e-tests.md`).
+import { ProcessDrain, ProcessHandle, env_empty } from "sfn/os";
 import { find } from "sfn/strings";
 
 import {
     Background,
     describe_outcome,
-    run_bounded,
-    run_bounded_in,
-    run_bounded_stdin,
     start_background,
     stop_background,
     wait_until,
-    with_background,
-    with_tmp_dir
+    with_background
 } from "../src/mod";
 
 fn _has_bin(path: string) -> boolean ![io] { return fs.exists(path); }
-
-// A deliberately absent path — no probe needed, it must never exist.
-fn _missing_bin() -> string {
-    return "/nonexistent/sfn-process-control-test-missing-binary";
-}
 
 // Fixed marker path for the `wait_until` readiness test. A file-local
 // helper (not a captured local) so the probe lambda below can call it
@@ -47,109 +42,6 @@ fn _marker_path() -> string ![io] {
     let dir = env.get("SAILFIN_TEST_SCRATCH");
     if dir.length > 0 { return dir + "/sfn-process-control-wait-until.marker"; }
     return "/tmp/sfn-process-control-wait-until.marker";
-}
-
-test "process control: run_bounded captures stdout and a clean exit" ![clock, io] {
-    if !_has_bin("/bin/echo") {
-        assert true;
-        return;
-    }
-    let outcome = run_bounded(["/bin/echo", "hello"], [], 5000);
-    assert outcome.exit == 0;
-    assert find(outcome.stdout, "hello", 0) >= 0;
-    assert ! outcome.timed_out;
-}
-
-// The test that actually proves the deadline works: a child that would
-// otherwise run for 30s is killed and reaped well before that, not after it.
-test "process control: run_bounded kills a child that outlives its deadline" ![clock, io] {
-    if !_has_bin("/bin/sleep") {
-        assert true;
-        return;
-    }
-    let start_ms = monotonic_millis();
-    let outcome = run_bounded(["/bin/sleep", "30"], [], 500);
-    let elapsed_ms = monotonic_millis() - start_ms;
-    assert outcome.timed_out;
-    assert elapsed_ms < 10000;
-}
-
-// A child that finishes on its own well inside its deadline is not
-// mistaken for one the deadline had to kill.
-test "process control: run_bounded does not report timeout for a child that exits early" ![clock, io] {
-    if !_has_bin("/bin/echo") {
-        assert true;
-        return;
-    }
-    let outcome = run_bounded(["/bin/echo", "hi"], [], 10000);
-    assert ! outcome.timed_out;
-}
-
-// A nonexistent binary reports the missing-command exit code rather than
-// hanging until the deadline — the spawn never happened, so there is
-// nothing to drain or kill.
-test "process control: run_bounded reports exit 127 for a nonexistent binary" ![clock, io] {
-    let outcome = run_bounded([_missing_bin()], [], 5000);
-    assert outcome.exit == 127;
-    assert ! outcome.timed_out;
-}
-
-// Stdin is written and closed before the drain begins, so a child reading
-// to EOF (rather than blocking forever) terminates on its own.
-test "process control: run_bounded_stdin feeds stdin and closes it" ![clock, io] {
-    if !_has_bin("/bin/cat") {
-        assert true;
-        return;
-    }
-    let outcome = run_bounded_stdin(["/bin/cat"], [], "ping\n", 5000);
-    assert outcome.exit == 0;
-    assert find(outcome.stdout, "ping", 0) >= 0;
-}
-
-// `run_bounded` must give a stdin-reading child `< /dev/null` semantics.
-// The spawn ALWAYS creates a stdin pipe and the parent holds the write end
-// until the reap, so without an explicit close the child waits on a pipe
-// that never reaches EOF. Deliberately run with NO deadline: before the
-// close was added this hung forever with nothing to break it, so a
-// regression here fails as a runner-deadline timeout rather than passing
-// quietly. `/bin/cat` with no argv reads stdin, sees immediate EOF, and
-// exits 0 having produced nothing.
-test "process control: run_bounded closes stdin so a reading child is not stuck" ![clock, io] {
-    if !_has_bin("/bin/cat") {
-        assert true;
-        return;
-    }
-    let outcome = run_bounded(["/bin/cat"], [], 0);
-    assert outcome.exit == 0;
-    assert ! outcome.timed_out;
-    assert outcome.stdout.length == 0;
-}
-
-// `run_bounded_in` runs the child in the given `cwd` rather than the
-// parent's — the whole point of the function. The body captures nothing
-// from the enclosing test scope; it only uses its own parameter and locals,
-// so the SFN-843 capture miscompile does not apply here.
-//
-// The child lists a marker file rather than printing its own path. Comparing
-// `pwd` output against the fixture's directory string is NOT portable: on
-// macOS `$TMPDIR` sits under `/var/folders/...`, `/var` is a symlink to
-// `/private/var`, and `mkdtemp` hands back the logical path while `pwd`
-// prints the physical one — so the substring never matches even though the
-// cwd was applied correctly. Listing a file that exists only in that
-// directory proves the same thing with no path normalization in play.
-test "process control: run_bounded_in runs the child in the given cwd" ![clock, io] {
-    if !_has_bin("/bin/ls") {
-        assert true;
-        return;
-    }
-    let saw_marker = with_tmp_dir(fn (dir: string) -> int {
-        fs.writeFile(dir + "/cwd-probe.txt", "probe");
-        let outcome = run_bounded_in(["/bin/ls"], [], dir, 10000);
-        if outcome.exit != 0 { return 0; }
-        if find(outcome.stdout, "cwd-probe.txt", 0) >= 0 { return 1; }
-        return 0;
-    });
-    assert saw_marker == 1;
 }
 
 // `wait_until` polls in-process rather than forking `sleep` per tick. The
@@ -169,7 +61,7 @@ test "process control: wait_until returns true once the probe becomes true" ![cl
     if fs.exists(marker) { fs.deleteFile(marker); }
     let bg = start_background(["/bin/sh", "-c", "/bin/sleep 0.2; /bin/touch '"
         + marker
-        + "'"], [], "", "wait-until-marker");
+        + "'"], env_empty(), "", "wait-until-marker");
     let became_true = wait_until(fn () -> boolean {
         return fs.exists(_marker_path());
     }, 5000, 20);
@@ -195,8 +87,8 @@ test "process control: with_background runs the body and threads its result" ![c
         assert true;
         return;
     }
-    let result = with_background(["/bin/sleep", "30"], [], "", "bg-normal", fn (bg: Background) -> int {
-        if bg.handle_id == 0 { return -1; }
+    let result = with_background(["/bin/sleep", "30"], env_empty(), "", "bg-normal", fn (bg: Background) -> int {
+        if bg.handle.handle_id == 0 { return -1; }
         return 99;
     });
     assert result == 99;
@@ -211,7 +103,7 @@ test "process control: with_background reaps on the throwing path" ![clock, io] 
     }
     let mut threw = false;
     try {
-        let _ = with_background(["/bin/sleep", "30"], [], "", "bg-throw", fn (bg: Background) -> int {
+        let _ = with_background(["/bin/sleep", "30"], env_empty(), "", "bg-throw", fn (bg: Background) -> int {
             throw "process-control-body-boom";
         });
     } catch (e) { threw = true; }
@@ -228,18 +120,20 @@ test "process control: stop_background reaps a SIGKILLed child" ![clock, io] {
         assert true;
         return;
     }
-    let bg = start_background(["/bin/sleep", "30"], [], "", "bg-reap-check");
+    let bg = start_background(["/bin/sleep", "30"], env_empty(), "", "bg-reap-check");
     let outcome = stop_background(bg);
     assert outcome.exit == 137;
     assert ! outcome.timed_out;
 }
 
-// `stop_background` on a failed spawn (`handle_id == 0`) must be safe — no
-// crash, no attempt to kill/wait a nonexistent handle — and reports the
-// same missing-command exit code as a direct `run_bounded` on an absent
-// binary.
+// `stop_background` on a failed spawn (`handle.handle_id == 0`) must be
+// safe — no crash, no attempt to kill/wait a nonexistent handle — and
+// reports the same missing-command exit code as a direct `os::run_bounded`
+// on an absent binary.
 test "process control: stop_background on a failed spawn is safe and reports exit 127" ![clock, io] {
-    let outcome = stop_background(Background { handle_id: 0, label: "none" });
+    let outcome = stop_background(Background {
+        handle: ProcessHandle { handle_id: 0 }, label: "none"
+    });
     assert outcome.exit == 127;
     assert ! outcome.timed_out;
 }
@@ -248,16 +142,18 @@ test "process control: stop_background on a failed spawn is safe and reports exi
 // non-zero exit — the exit code alone cannot, since a killed child's `137`
 // is never used as the timeout discriminator.
 test "process control: describe_outcome distinguishes a deadline kill from a normal exit" ![clock, io] {
-    if !_has_bin("/bin/sleep") {
-        assert true;
-        return;
-    }
-    if !_has_bin("/bin/sh") {
-        assert true;
-        return;
-    }
-    let killed = run_bounded(["/bin/sleep", "30"], [], 300);
-    let normal = run_bounded(["/bin/sh", "-c", "exit 3"], [], 5000);
+    let killed = ProcessDrain {
+        stdout: "",
+        stderr: "",
+        exit: 137,
+        timed_out: true
+    };
+    let normal = ProcessDrain {
+        stdout: "",
+        stderr: "",
+        exit: 3,
+        timed_out: false
+    };
     let killed_desc = describe_outcome(killed);
     let normal_desc = describe_outcome(normal);
     assert find(killed_desc, "timed out", 0) >= 0;

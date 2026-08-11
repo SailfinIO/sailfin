@@ -38,6 +38,7 @@
 // Matchers note (#842): `sfn/test`'s `expect_*` matchers are `![pure]` and
 // cannot be called from an `![io]` test; assert on the captured response
 // text with `sfn/strings::contains` instead.
+import { Env, env_from_current } from "sfn/os";
 import { contains } from "sfn/strings";
 import { Background, wait_until, with_background } from "sfn/test";
 
@@ -99,6 +100,13 @@ fn _sfn_bin() -> string ![io] {
 // (the runner sets it), keeping the nested build cache per-invocation
 // under the parallel pool (`.claude/rules/no-bash-e2e.md`).
 fn _child_env() -> string[] ![io] { return process.environ(); }
+
+// The same environment in `sfn/os`'s typed form, for the `sfn/test`
+// fixtures that take an `Env` rather than a flat array. `env_from_current`
+// is the typed equivalent of the `process.environ()` snapshot above; the
+// two are kept side by side because the raw `process.run_capture` calls
+// below still take the flat form.
+fn _child_env_typed() -> Env ![io] { return env_from_current(); }
 
 // ── raw loopback client (inlined `http.sfn::_connect_tcp` idiom) ──
 // Effect note: `http.sfn`'s socket helpers are `![net]`, but they live in
@@ -426,7 +434,7 @@ test "serve loopback: macOS request delivery + framed behavioral round-trips" ![
     // The body captures NOTHING: `port` is re-derived from the file-local
     // `_lb_port()` inside rather than closed over. See `_await_ready` for
     // why capture is avoided in a body that also makes effectful calls.
-    let _served = with_background([server_bin], _child_env(), "", "serve-loopback", fn (server: Background) -> int {
+    let _served = with_background([server_bin], _child_env_typed(), "", "serve-loopback", fn (server: Background) -> int {
         assert server.handle_id != 0;
         let port = _lb_port();
 
