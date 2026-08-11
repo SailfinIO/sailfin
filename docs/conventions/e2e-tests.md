@@ -185,12 +185,62 @@ migration):
 - **C harnesses** (link against emitted `.ll`, fork/pthread, ASAN):
   `fs.writeFile` the `.c`, `run_capture(["clang", ...])`, run the binary —
   see `runtime_memory_arena_test.sfn` and `escape_promotion_channel_send_test.sfn`.
-- **`cwd` / `ulimit` control** (`run_capture` cannot `chdir` or set an
-  rlimit): use a `bash -c "cd <dir> && ..."` / `bash -c "ulimit -v N; exec ..."`
-  vehicle as the spawned argv — see `sfn_package_test.sfn` (cd into the
-  fixture) and `mem_limit_selfcap_test.sfn` (inherited-cap leg). When you
-  build paths for a `cd` vehicle, make them **absolute** (the runner-managed
-  `SAILFIN_TEST_SCRATCH` can be the relative `build/sailfin/...`, which a
-  post-`cd` relative `--out` would resolve against the wrong directory).
-  Native `process` rlimit/`read_link` helpers that would retire the
-  `bash -c` / `readlink` subprocess sidesteps are tracked as follow-ups.
+- **`cwd` control**: use the native cwd argument — `process.run_capture_cwd(argv,
+  env, cwd)` (or `os::run_capture(args, env, cwd)` / the `sfn/test` fixture
+  `with_cwd(args, env, cwd, body)` that wraps it), not a spawned shell.
+  `run_bounded_in(argv, env, cwd, deadline_ms)` from `sfn/test` (see
+  "Bounding and scoping child processes" below) is the deadline-aware sibling
+  when the child also needs a wall-clock bound. The legacy `bash -c "cd <dir>
+  && ..."` vehicle predates `run_capture_cwd`/#1167 and is retained only where
+  it already existed (e.g. `sfn_package_test.sfn`) — **new tests must not
+  copy it.**
+- **RLIMIT_AS control**: use `process.run_capture_rlimit_as(argv, env, bytes)`
+  (SFN-45) — see `mem_limit_selfcap_test.sfn`. This retired the caller-side
+  `bash -c "ulimit -v N; exec ..."` vehicle for the address-space cap.
+  **One gap remains**: RLIMIT_FSIZE has no native form, so a test that needs
+  to bound a child's max file size still shells `bash -c "ulimit -f N; ..."`
+  — see `append_file_short_write_test.sfn`.
+
+Two native gaps are now closed (cwd, RLIMIT_AS); the one still open is
+RLIMIT_FSIZE, above. Arbitrary-signal delivery (e.g. SIGTERM rather than
+SIGKILL) also has no native form — see the next section.
+
+## Bounding and scoping child processes
+
+`sfn/test`'s `process_control.sfn` (SFEP-0010 §3.2) gives a test control over
+a child's *lifetime*, closing the two remaining reasons a test used to reach
+for a shell: bounding a blocking child in time, and tearing one down on
+demand. A test using any of these declares `![clock, io]` (the deadline path
+reads `monotonic_millis()`/`sleep()`, both `![clock]`).
+
+- **Bound a child in wall-clock time**: `run_bounded(argv, env, deadline_ms)`
+  (plus `run_bounded_in` for a cwd and `run_bounded_stdin` to pipe input) runs
+  the child to completion, draining both streams, and kills + reaps it on
+  expiry. This replaces the `timeout <secs> ...` argv vehicle outright — no
+  `command -v timeout`/`gtimeout` probe, and **no skip-when-absent branch**;
+  the old probe silently disabled coverage on any host without coreutils.
+  `run_bounded`'s `env` array has the same empty-means-empty contract as
+  `process.run_capture` — see "Build-and-run tests must isolate the build"
+  above for what a nested compiler child needs.
+- **`timed_out` is the deadline discriminator — never exit code `137`.** A
+  SIGKILLed child's exit is `128 + 9 = 137`, indistinguishable by exit code
+  alone from a kernel OOM kill. `ChildOutcome.timed_out` is the boolean that
+  actually says "the deadline fired"; `describe_outcome(outcome)` renders a
+  one-line diagnostic that keeps the two apart.
+- **Scope a blocking server's lifetime**: `with_background(argv, env, cwd,
+  label, body)` starts the child, runs `body` against the live `Background`,
+  and kills + reaps on scope exit — including when `body` throws. A test can
+  no longer orphan a server by returning early or failing an assertion, and
+  no longer needs the `timeout`-vehicle's wall-clock backstop as its only
+  teardown. Use the unscoped `start_background`/`stop_background` pair only
+  when the scoped form's structure doesn't fit.
+- **Poll for readiness**: `wait_until(probe, deadline_ms, interval_ms)` polls
+  a `fn () -> boolean` probe against a wall-clock budget using the prelude's
+  in-process `sleep(ms)`. This replaces a hand-rolled retry loop that shelled
+  `process.run(["sleep", "0.5"])` between attempts — a fork+exec per poll
+  tick — with an in-process wait.
+
+What still needs a shell after this: **arbitrary signal delivery** (SIGTERM,
+SIGHUP, etc.) — `process.handle_kill` is SIGKILL-only, so a test that needs a
+graceful-shutdown signal still shells out to `kill -TERM` — and **RLIMIT_FSIZE**
+(above). Do not overclaim beyond these two.

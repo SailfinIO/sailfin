@@ -430,3 +430,33 @@ export {
 // a call site stays a single unconditional line before its `assert exit ==
 // 0`. See `child_diag.sfn`.
 export { report_child_failure } from "./child_diag";
+
+// ---------------------------------------------------------------------------
+// Process-lifetime control (SFEP-0010 §3.2)
+// ---------------------------------------------------------------------------
+// The fixtures above spawn a child and wait for it to finish. These bound one
+// in TIME and tear one down on demand, which is what tests previously had to
+// reach for a shell to do — a `timeout <secs>` argv vehicle (behind a
+// `command -v` probe, skipping the test when neither `timeout` nor `gtimeout`
+// was installed) and a `process.run(["sleep", "0.5"])` fork per poll tick.
+//
+// `run_bounded` / `run_bounded_in` / `run_bounded_stdin` run a child to
+// completion under a wall-clock deadline, draining both streams; on expiry the
+// child is killed, still reaped, and the outcome carries `timed_out == true`
+// rather than a `137` the caller would have to disambiguate from an OOM.
+// `with_background` is the scoped fixture for a blocking server: it kills and
+// reaps on scope exit including the throwing path, so a test can no longer
+// orphan one. `wait_until` polls a readiness probe against a wall-clock budget
+// using the prelude's in-process `sleep`. See `process_control.sfn`.
+export {
+    Background,
+    ChildOutcome,
+    describe_outcome,
+    run_bounded,
+    run_bounded_in,
+    run_bounded_stdin,
+    start_background,
+    stop_background,
+    wait_until,
+    with_background
+} from "./process_control";

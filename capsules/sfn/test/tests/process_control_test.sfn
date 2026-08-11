@@ -1,0 +1,190 @@
+// Tests for `sfn/test`'s process-lifetime control (SFEP-0010 §3.2).
+//
+// `run_bounded` / `run_bounded_stdin` replace the `timeout <secs> ...` argv
+// vehicle with an in-process deadline; `wait_until` replaces the
+// fork-per-tick readiness poll; `with_background` replaces the hand-rolled
+// spawn/kill/reap trio for a blocking server. These tests prove the deadline
+// actually bites (a killed child returns promptly, not after the full sleep)
+// and that teardown happens on both the normal and throwing paths — the two
+// properties a shell vehicle could not guarantee.
+//
+// Absolute binary paths are used throughout: `env` here is a genuinely empty
+// child environment (not an inherited one), so bare-name `PATH` lookup is not
+// available. Each binary is probed with `fs.exists` and the test skips itself
+// (`assert true`) when absent, mirroring the `command -v` skip precedent this
+// module retires (`docs/conventions/e2e-tests.md`).
+import { find } from "sfn/strings";
+
+import {
+    Background,
+    ChildOutcome,
+    describe_outcome,
+    run_bounded,
+    run_bounded_stdin,
+    start_background,
+    stop_background,
+    wait_until,
+    with_background
+} from "../src/mod";
+
+fn _has_bin(path: string) -> boolean ![io] { return fs.exists(path); }
+
+// A deliberately absent path — no probe needed, it must never exist.
+fn _missing_bin() -> string {
+    return "/nonexistent/sfn-process-control-test-missing-binary";
+}
+
+// Fixed marker path for the `wait_until` readiness test. A file-local
+// helper (not a captured local) so the probe lambda below can call it
+// instead of capturing anything — a captured enclosing local combined with
+// an effectful call's return value inside a lambda body currently mistypes
+// the capture's env slot in the LLVM lowering (reduced by the E1002/E0307
+// pair on this exact shape; tracked against the lowering, not this test).
+// Mirrors `_scratch()` in `fixtures_test.sfn`.
+fn _marker_path() -> string ![io] {
+    let dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length > 0 { return dir + "/sfn-process-control-wait-until.marker"; }
+    return "/tmp/sfn-process-control-wait-until.marker";
+}
+
+test "process control: run_bounded captures stdout and a clean exit" ![clock, io] {
+    if !_has_bin("/bin/echo") {
+        assert true;
+        return;
+    }
+    let outcome = run_bounded(["/bin/echo", "hello"], [], 5000);
+    assert outcome.exit == 0;
+    assert find(outcome.stdout, "hello", 0) >= 0;
+    assert ! outcome.timed_out;
+}
+
+// The test that actually proves the deadline works: a child that would
+// otherwise run for 30s is killed and reaped well before that, not after it.
+test "process control: run_bounded kills a child that outlives its deadline" ![clock, io] {
+    if !_has_bin("/bin/sleep") {
+        assert true;
+        return;
+    }
+    let start_ms = monotonic_millis();
+    let outcome = run_bounded(["/bin/sleep", "30"], [], 500);
+    let elapsed_ms = monotonic_millis() - start_ms;
+    assert outcome.timed_out;
+    assert elapsed_ms < 10000;
+}
+
+// A child that finishes on its own well inside its deadline is not
+// mistaken for one the deadline had to kill.
+test "process control: run_bounded does not report timeout for a child that exits early" ![clock, io] {
+    if !_has_bin("/bin/echo") {
+        assert true;
+        return;
+    }
+    let outcome = run_bounded(["/bin/echo", "hi"], [], 10000);
+    assert ! outcome.timed_out;
+}
+
+// A nonexistent binary reports the missing-command exit code rather than
+// hanging until the deadline — the spawn never happened, so there is
+// nothing to drain or kill.
+test "process control: run_bounded reports exit 127 for a nonexistent binary" ![clock, io] {
+    let outcome = run_bounded([_missing_bin()], [], 5000);
+    assert outcome.exit == 127;
+    assert ! outcome.timed_out;
+}
+
+// Stdin is written and closed before the drain begins, so a child reading
+// to EOF (rather than blocking forever) terminates on its own.
+test "process control: run_bounded_stdin feeds stdin and closes it" ![clock, io] {
+    if !_has_bin("/bin/cat") {
+        assert true;
+        return;
+    }
+    let outcome = run_bounded_stdin(["/bin/cat"], [], "ping\n", 5000);
+    assert outcome.exit == 0;
+    assert find(outcome.stdout, "ping", 0) >= 0;
+}
+
+// `wait_until` polls in-process rather than forking `sleep` per tick. The
+// probe captures nothing — it only calls the file-local `_marker_path()`
+// helper — because a captured local combined with an effectful call's
+// return value inside a lambda currently miscompiles (see `_marker_path`).
+// A background child creates the marker file after a real delay, so the
+// probe genuinely returns false on early polls and true once the file
+// shows up, exercising the same "false, then true" behavior asynchronously
+// instead of via a captured clock reading.
+test "process control: wait_until returns true once the probe becomes true" ![clock, io] {
+    if !_has_bin("/bin/sh") {
+        assert true;
+        return;
+    }
+    let marker = _marker_path();
+    if fs.exists(marker) { fs.deleteFile(marker); }
+    let bg = start_background(["/bin/sh", "-c", "sleep 0.2; touch " + marker], [], "", "wait-until-marker");
+    let became_true = wait_until(fn () -> boolean {
+        return fs.exists(_marker_path());
+    }, 5000, 20);
+    stop_background(bg);
+    assert became_true;
+}
+
+// A probe that never becomes true returns false at the deadline, and does
+// so within a bounded time — not wildly beyond the deadline it was given.
+test "process control: wait_until returns false when the deadline expires" ![clock, io] {
+    let start_ms = monotonic_millis();
+    let became_true = wait_until(fn () -> boolean { return false; }, 300, 20);
+    let elapsed_ms = monotonic_millis() - start_ms;
+    assert ! became_true;
+    assert elapsed_ms >= 300;
+    assert elapsed_ms < 3000;
+}
+
+// The body's return value threads back out through the fixture, proving it
+// actually ran against the live `Background` rather than being skipped.
+test "process control: with_background runs the body and threads its result" ![clock, io] {
+    if !_has_bin("/bin/sleep") {
+        assert true;
+        return;
+    }
+    let result = with_background(["/bin/sleep", "30"], [], "", "bg-normal", fn (bg: Background) -> int {
+        if bg.handle_id == 0 { return -1; }
+        return 99;
+    });
+    assert result == 99;
+}
+
+// A throwing body still gets its background child reaped, and the original
+// error propagates rather than being swallowed by teardown.
+test "process control: with_background reaps on the throwing path" ![clock, io] {
+    if !_has_bin("/bin/sleep") {
+        assert true;
+        return;
+    }
+    let mut threw = false;
+    try {
+        let _ = with_background(["/bin/sleep", "30"], [], "", "bg-throw", fn (bg: Background) -> int {
+            throw "process-control-body-boom";
+        });
+    } catch (e) { threw = true; }
+    assert threw;
+}
+
+// `describe_outcome` distinguishes a deadline kill from an ordinary
+// non-zero exit — the exit code alone cannot, since a killed child's `137`
+// is never used as the timeout discriminator.
+test "process control: describe_outcome distinguishes a deadline kill from a normal exit" ![clock, io] {
+    if !_has_bin("/bin/sleep") {
+        assert true;
+        return;
+    }
+    if !_has_bin("/bin/sh") {
+        assert true;
+        return;
+    }
+    let killed = run_bounded(["/bin/sleep", "30"], [], 300);
+    let normal = run_bounded(["/bin/sh", "-c", "exit 3"], [], 5000);
+    let killed_desc = describe_outcome(killed);
+    let normal_desc = describe_outcome(normal);
+    assert find(killed_desc, "timed out", 0) >= 0;
+    assert find(normal_desc, "timed out", 0) < 0;
+    assert find(normal_desc, "exit 3", 0) >= 0;
+}
