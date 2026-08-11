@@ -57,7 +57,7 @@ test "hof: named function values pass, return, deduplicate, and dispatch" ![io] 
     assert out == "124";
 }
 
-test "hof: named function value IR has one musttail adapter and preserves direct calls" ![io] {
+test "hof: named function value IR has one tail-call adapter and preserves direct calls" ![io] {
     let outcome = with_tmp_dir(fn (dir: string) -> int {
         let raw_ll = dir + "/named-fn-value.ll";
         let exit = process.run_capture([_sfn_bin(), "emit", "-o", raw_ll, "llvm", "compiler/tests/e2e/fixtures/higher_order_named_fn/apply_named.sfn"], clean_runner_env(dir));
@@ -68,7 +68,8 @@ test "hof: named function value IR has one musttail adapter and preserves direct
         let ir = fs.readFile(raw_ll);
         assert _count_occurrences(ir, "define internal i64 @" + _adapter_symbol()) == 1;
         assert contains(ir, "define i64 @double__fnval_adapter(");
-        assert contains(ir, "musttail call i64 @double__compiler__tests__e2e__fixtures__higher_order_named_fn__apply_named(");
+        assert contains(ir, "tail call i64 @double__compiler__tests__e2e__fixtures__higher_order_named_fn__apply_named(");
+        assert ! contains(ir, "musttail call i64 @double__compiler__tests__e2e__fixtures__higher_order_named_fn__apply_named(");
         assert contains(ir, "bitcast i64 (i8*, i64)* @" + _adapter_symbol()
             + " to i8*");
         assert contains(ir, "insertvalue {i8*, i8*}");
@@ -142,7 +143,7 @@ test "hof: named function value adapter is frame-free at O2" ![io] {
         let body_end = find(assembly, ".Lfunc_end", body_start);
         assert body_end > body_start;
         let body = substring(assembly, body_start, body_end);
-        // Clang may preserve the musttail as a jump or inline the tiny target
+        // Clang may preserve the tail call as a jump or inline the tiny target
         // into this body. Either result must remain a leaf with no stack frame.
         assert contains(body, "retq") || contains(body, "jmp");
         assert ! contains(body, "call");

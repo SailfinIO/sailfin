@@ -172,7 +172,7 @@ path **and** zero-indirection when the callee is statically a named function:
   ```
   ; emitted once per named fn materialized as a value (deduplicated by symbol)
   define i64 @worker.__fnval_adapter(i8* %env, i64 %n) {
-    %r = musttail call i64 @worker(i64 %n)
+    %r = tail call i64 @worker(i64 %n)
     ret i64 %r
   }
   ; at the materialization site
@@ -184,10 +184,12 @@ path **and** zero-indirection when the callee is statically a named function:
   named-fn — carry the *identical* `(i8* env, <args>)` calling convention, so the
   seam at `core_call_emission.sfn:430-503` stays a **single, branchless** indirect
   `call` with the env passed unconditionally. There is **no per-call static-null
-  branch** on the hot indirect path. The `musttail` tail-call is collapsed by
-  LLVM (the adapter is a thin forwarding shim in guaranteed tail position), so
-  Path B's steady-state cost is one indirect call — the same instruction count Go
-  pays for a func value and Rust pays for `Fn` dispatch. The adapter is emitted
+  branch** on the hot indirect path. LLVM's `musttail` form is invalid here
+  because the adapter carries the extra hidden-env parameter that the original
+  C-ABI function lacks. The valid `tail` hint is verified under `-O2` to collapse
+  the thin forwarding shim, so Path B's steady-state cost is one indirect call —
+  the same instruction count Go pays for a func value and Rust pays for `Fn`
+  dispatch. The adapter is emitted
   **once per named function actually materialized as a value** (deduplicated by
   symbol, like a monomorphization cache), not once per call site, so binary-size
   growth is bounded by the count of distinct named functions used as values.
@@ -212,7 +214,7 @@ explicit `* fn (A) -> R` C-ABI code pointer and is untouched.
 **Verification probe (decided direction, not an open fork).** The trampoline-pair
 representation is committed. One implementation-time measurement gates a possible
 *optimization*, not the design: confirm LLVM elides the `@worker.__fnval_adapter`
-frame under `musttail` + `-O2` so Path B is a single indirect call with no extra
+frame under `tail` + `-O2` so Path B is a single indirect call with no extra
 frame in the linked binary. Probe: build
 `compiler/tests/e2e/fixtures/named_fn_value/main.sfn`, disassemble the dispatch
 site, assert no surviving adapter prologue/epilogue between the indirect `call`
@@ -405,7 +407,7 @@ unconditionally), so the common indirect path is a single branchless `call`; and
 Path A keeps the statically-known-named-callee case at a **direct call, zero
 indirection** — matching Rust's `fn`-item call. Net: Sailfin pays exactly the
 Go/Rust cost on both paths. Verification step (codegen quality, not design):
-confirm `musttail` + `-O2` elides the adapter frame; fallback is to open-code the
+confirm `tail` + `-O2` elides the adapter frame; fallback is to open-code the
 forwarding at emission — same representation, still branchless. Committed in §3.1
 Item 1. Full text and the IR shape live there.
 
@@ -573,7 +575,7 @@ Passes touched, in pipeline order:
   v0 closure-param path) and that the value-coercion check feeds it the right row.
 - **Emitter / LLVM lowering** —
   - *Item 1 (D1):* Path A is the unchanged direct call; Path B emits a
-    deduplicated `@<fn>.__fnval_adapter` (`musttail` forward to `@<fn>`) and the
+    deduplicated `@<fn>.__fnval_adapter` (`tail` forward to `@<fn>`) and the
     `{adapter_ptr, null}` pair at the materialization site. The seam
     (`core_call_emission.sfn:386-504`) is **unchanged** — it dispatches the
     uniform `(i8* env, <args>)` convention with no per-call null branch.
@@ -674,9 +676,9 @@ and the item-4 verdict are designed, not shipped — every box below is for the
       item-4 non-pointer-width diagnostic
 - [ ] Emits valid `.sfn-asm`
 - [ ] Lowers to LLVM IR — **D1 hybrid:** Path A direct call; Path B deduplicated
-      `musttail` trampoline pair `{adapter_ptr, null}`; struct-field load → seam.
+      tail-call trampoline pair `{adapter_ptr, null}`; struct-field load → seam.
       Includes the D1 codegen-quality probe (adapter-frame elision under
-      `musttail` + `-O2`)
+      `tail` + `-O2`)
 - [ ] Regression coverage (§8) — incl. the dispatch-cost / branchless-seam check
       and the effect-row-preservation test
 - [ ] Self-hosts (bundled with #1172 per D4 → no seed cut)
@@ -701,7 +703,7 @@ captured stdout / emitted IR). One per item plus the decision-specific tests:
   `compiler/tests/e2e/fixtures/named_fn_value/main.sfn`: `fn worker(n: int) ->
   int { return n + 1; }` + `fn apply(cb: fn (int) -> int, x: int) -> int { return
   cb(x); }` + `print(apply(worker, 5))` → `6`. IR assertions: (a) a deduplicated
-  `@worker.__fnval_adapter` with a `musttail call @worker`; (b) the materialization
+  `@worker.__fnval_adapter` with a `tail call @worker`; (b) the materialization
   builds a `{adapter_ptr, null}` pair; (c) the **dispatch seam is branchless** —
   a single indirect `call` through the pair with **no** per-call null-check /
   duplicated call site (the D1 hot-path guarantee); (d) `sfn check` exits 0 (no

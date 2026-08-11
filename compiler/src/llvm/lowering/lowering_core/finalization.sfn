@@ -13,7 +13,11 @@ import {
 } from "../../utils";
 
 // Hoist named-function adapter requests out of function bodies and render one
-// internal `musttail` forwarding definition per materialized symbol. Markers
+// internal tail-call forwarding definition per materialized symbol. LLVM's
+// `musttail` requires identical parameter counts, but this adapter has the
+// extra hidden env parameter that the original C-ABI function lacks. The
+// `tail` hint remains valid and the e2e `-O2` probe pins frame elimination.
+// Markers
 // carry `adapter|target|return|tilde-separated-params`. Tilde cannot appear in
 // an LLVM type, so imported aggregate signatures cannot corrupt the marker.
 fn hoist_named_fn_value_adapters(lines: string[]) -> string[] {
@@ -60,8 +64,7 @@ fn hoist_named_fn_value_adapters(lines: string[]) -> string[] {
                     + join_with_separator(signature, ", ")
                     + ") {");
                 adapters.push("block.entry:");
-                let call_text = "musttail call " + return_type + " @" + target
-                    + "("
+                let call_text = "tail call " + return_type + " @" + target + "("
                     + join_with_separator(call_args, ", ")
                     + ")";
                 if return_type == "void" {

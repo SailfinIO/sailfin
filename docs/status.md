@@ -694,8 +694,11 @@ here.
   synchronous module-local top-level function may fill an exact expected `fn(A) -> R
   ![effects]` slot in a typed local/assignment, call argument, return, array
   element, or struct initializer. It materializes the same `{fn_ptr, env}` pair
-  as a closure through one deduplicated internal `musttail` adapter with a null
-  env; ordinary `worker(x)` calls stay direct. Source effects must be subsumed
+  as a closure through one deduplicated internal tail-call adapter with a null
+  env; ordinary `worker(x)` calls stay direct. LLVM's stricter `musttail`
+  contract cannot apply because the adapter has one extra hidden-env parameter;
+  the `tail` hint plus the `-O2` code-quality gate keeps the adapter frame-free.
+  Source effects must be subsumed
   by the expected row and calls through a stored value impose that row. Generic,
   nested, async, entry-point, signature-mismatched, or otherwise unsupported
   values remain rejected (`E0808`/`E0839`); non-pointer-width aggregate
