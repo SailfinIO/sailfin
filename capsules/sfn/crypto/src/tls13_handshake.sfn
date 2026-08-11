@@ -1054,8 +1054,13 @@ fn hs_client_recv_finished(hs: ClientHandshake, message: int[]) -> Result<Client
         };
     }
 
-    _append(hs.transcript, message);
-    let th_after: int[] = sha256_bytes(hs.transcript);
+    // Derive from a copy first: an application-secret failure below must not
+    // leave the caller's shared transcript carrying a Finished this step then
+    // rejected.
+    let mut pending: int[] = [];
+    _append(pending, hs.transcript);
+    _append(pending, message);
+    let th_after: int[] = sha256_bytes(pending);
 
     let client_ap: int[] = tls13_client_application_traffic_secret(hs.master_secret, th_after);
     let server_ap: int[] = tls13_server_application_traffic_secret(hs.master_secret, th_after);
@@ -1070,6 +1075,7 @@ fn hs_client_recv_finished(hs: ClientHandshake, message: int[]) -> Result<Client
         };
     }
 
+    _append(hs.transcript, message);
     return Result.Ok {
         value: ClientHandshake {
             state: hs_state_connected(),
