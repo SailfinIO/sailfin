@@ -84,17 +84,42 @@ ordinary issues associated to that Project.
 
 ---
 
-## "What work do I have?" — the daily views
+## The lanes
 
-- **By epic (Linear):** the Sailfin team board grouped by Project shows every
-  epic and its live issues. Filter to an Initiative to see one theme.
-- **Pickable now (Linear first):** open Sailfin (`SFN`) issues in the native
-  `Ready` status, no unclosed `Blocked by`.
-  This is exactly what `/pickup` selects; `/pickup` with no argument picks the
-  top one, and `/pickup SFN-123` targets a specific Linear issue.
-- **Needs shaping:** issues in `Triage`/`Backlog` → run `/groom`; a design gap →
-  architect queue (`needs-design` hint); parked for a human → left in `Triage`
-  with a note. External contributor issues land in `Triage` for this pass.
+Each lane answers exactly one question. If you can't say which question a lane
+answers, it shouldn't exist.
+
+| Lane | Answers | Who moves it | Body bar |
+|---|---|---|---|
+| **Triage** | *Should this exist at all?* | you file here; `/triage` works it | none — raw capture is fine |
+| **Backlog** | *Real, but not now.* | `/triage` | classified (`type:*`/`area:*`) + priority; no structure |
+| **Ready** | *Could an agent finish this cold?* | `/triage` Pass 2, `/groom` | **full bar** — Goal / Scope In+Out / Acceptance / Files / Verification, plus estimate 1–3 |
+| **Todo** | *What's next, in what order?* | **you, by hand** | already `Ready`-grade; this lane only reorders |
+| **In Progress** → **In Review** | in flight | `/pickup` | — |
+| **Done** | merged | Linear's GitHub integration | — |
+| **Blocked** | orthogonal — derived from an open `blockedBy` relation | Linear | — |
+
+**`Todo` is the steering wheel.** `Ready` is a *pool* — it holds dozens of
+groomed issues, and its ordering is only ever "highest priority wins." When you
+want specific work next, drag it to `Todo`. `/pickup` drains `Todo` first and
+only falls back to `Ready` when `Todo` is empty, so a `Todo` issue outranks
+every `Ready` issue regardless of priority. Keep the lane short — a `Todo` with
+twenty issues is just a second `Ready`.
+
+Only two lanes are pickable: `Todo`, then `Ready`. Nothing enters either without
+clearing the full body bar.
+
+### "What work do I have?"
+
+- **By epic:** the Sailfin team board grouped by Project. Filter to an
+  Initiative to see one theme.
+- **Next up:** the `Todo` lane, in order. `/pickup` takes the top one.
+- **Needs deciding:** the `Triage` lane → `/triage` (Pass 1 classifies and
+  reports; Pass 2 grooms the survivors to `Ready`).
+- **Needs decomposing:** an epic-scale item → a Linear Project → `/groom`.
+
+External-contributor GitHub issues mirror into `Triage` and go through the same
+`/triage` pass as anything you file yourself.
 
 ---
 
@@ -134,6 +159,18 @@ retired *Sailfin Tracker* GitHub Project board (org project #4). The migration:
 From here, follow the rules above: epics are Projects, Linear carries maintainer
 leaf work, GitHub remains the public mirror, and no new GitHub
 `Epic:`/`Tracking:` issues are opened.
+
+### Querying lanes — the state-type trap
+
+`mcp__Linear__list_issues state="<name>"` matches a state **type** as readily as
+a state name, and `Ready`, `Backlog`, and `Blocked` are all type `backlog`. So
+`state="Backlog"` returns all three lanes at once. Query the lane you actually
+mean, and never assume the result set is one lane.
+
+This is also why a new workflow state is never free: a lane whose name shadows a
+type silently widens every existing query. `To triage` was deleted for exactly
+this reason — it duplicated `Triage` in meaning while hiding inside `Backlog`
+results.
 
 ## Linear labels
 
