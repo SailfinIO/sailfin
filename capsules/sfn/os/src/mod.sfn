@@ -411,7 +411,14 @@ fn handle_read_chunk_stderr(h: ProcessHandle, n: int) -> string ![io] {
 // deliberately NOT remapped on a deadline kill. `timed_out` is the
 // sole timeout discriminator: a SIGKILL wait yields 137, which is
 // indistinguishable from an OOM kill, so the raw exit code alone can
-// never tell the two apart.
+// never tell the two apart. The one `exit` value that is NOT a
+// `handle_wait` result is `run_bounded`'s synthetic `127`, returned
+// when the spawn itself failed and there was never a child to reap.
+//
+// On a deadline kill the streams are PARTIAL: the loop breaks straight
+// to the reap without a final drain, so `stdout`/`stderr` hold only
+// what had been read when the deadline fired. `timed_out` is the flag
+// that says so.
 struct ProcessDrain {
     stdout: string;
     stderr: string;
@@ -432,10 +439,32 @@ struct ProcessDrain {
 // `drain_to_exit` therefore replaces the whole spawn/pump/reap dance,
 // not just the pump: pair it with `spawn_with_env` and nothing else
 // (or use `run_bounded`, which pairs them for you).
+//
+// Closes the child's stdin first. `spawn_with_env` hands the child a
+// stdin PIPE and keeps the write end open in the parent, so a filter
+// (`cat`, `sort`, `wc`) would never see EOF, never exit, and never
+// close its output pipes — hanging this loop forever when no deadline
+// is set. `run_capture` has no such hazard: it pipes only stdout and
+// stderr and lets the child inherit the parent's stdin. Closing here
+// is what makes the two agree, and it is safe precisely because this
+// function consumes `h`: no caller can write afterward, anything
+// written before is already in the pipe, and the underlying builtin is
+// idempotent on an already-closed stdin.
 fn drain_to_exit(h: ProcessHandle, deadline_ms: int) -> ProcessDrain ![clock, io] {
+    process.handle_close_stdin(h.handle_id);
     let mut out_buf: string = "";
     let mut err_buf: string = "";
     let mut timed_out: boolean = false;
+    // Bounds a `ready < 0` spin. With a deadline that path is already
+    // bounded (it re-checks the clock and the deadline eventually
+    // fires), but with `deadline_ms <= 0` the poll blocks indefinitely
+    // and only returns negative on a genuine error — a persistent one
+    // (EBADF, or the runtime's poll-buffer allocation failing) would
+    // otherwise `continue` in a hot loop with nothing to stop it. Guard
+    // counter per `.claude/rules/code-style.md`; breaking out still
+    // reaps, so a wedged poll surfaces as a normal exit rather than a
+    // hang.
+    let mut poll_errs: int = 0;
     let start_ms = monotonic_millis();
     loop {
         if process.handle_stdout_at_eof(h.handle_id) && process.handle_stderr_at_eof(h.handle_id) {
@@ -474,6 +503,9 @@ fn drain_to_exit(h: ProcessHandle, deadline_ms: int) -> ProcessDrain ![clock, io
             read_out = !process.handle_stdout_at_eof(h.handle_id);
             read_err = !process.handle_stderr_at_eof(h.handle_id);
         } else {
+            // `io.poll_any` returns `-1` for a timeout AND for an error,
+            // so a negative result is not by itself fatal — re-check the
+            // clock and go round again.
             let ready = io.poll_any(fds, poll_to);
             if ready < 0 {
                 if deadline_ms > 0 && ((monotonic_millis() - start_ms) as int) >= deadline_ms {
@@ -481,11 +513,19 @@ fn drain_to_exit(h: ProcessHandle, deadline_ms: int) -> ProcessDrain ![clock, io
                     timed_out = true;
                     break;
                 }
+                poll_errs += 1;
+                if poll_errs > 1024 { break; }
                 continue;
             }
+            poll_errs = 0;
             read_out = ready == out_fd;
             read_err = ready == err_fd;
         }
+        // Concatenation, not a runtime `GrowBuf` — a capsule has no
+        // access to one, so accumulation is quadratic in the number of
+        // 64 KiB chunks. Fine for the command output this is aimed at;
+        // `run_capture` is the better tool for a child emitting many
+        // megabytes, since the runtime accumulates that side natively.
         if read_out {
             let chunk = process.handle_read_bytes_stdout(h.handle_id, 65536);
             if chunk.length > 0 { out_buf = out_buf + chunk; }

@@ -55,6 +55,26 @@ test "drain_to_exit: fires the deadline on a long-sleeping child" ![clock, io] {
     assert d.timed_out == true;
     // Killed well before the child's own 30s sleep would finish.
     assert elapsed < 10000;
+    // ...but it DID wait for the deadline. Without this floor the test
+    // would still pass if the deadline arithmetic regressed to firing at
+    // t=0, which is the exact property it exists to protect.
+    assert elapsed >= 400;
+    // SIGKILL reap: 128 + 9. Pins that `handle_wait` runs on the
+    // deadline exit path too, not just the normal one.
+    assert d.exit == 137;
+}
+
+test "run_bounded: a stdin filter sees EOF and exits rather than hanging" ![clock, io] {
+    // `spawn_with_env` gives the child a stdin PIPE whose write end the
+    // parent holds; `run_capture` instead lets the child inherit the
+    // parent's stdin. A filter would therefore never see EOF and this
+    // would hang forever with no deadline set, unless `drain_to_exit`
+    // closes stdin first. No deadline here on purpose: a deadline would
+    // mask the hang as a timeout instead of failing.
+    let d = run_bounded(["cat"], env_empty(), "", 0);
+    assert strings_equal(d.stdout, "");
+    assert d.timed_out == false;
+    assert d.exit == 0;
 }
 
 test "run_bounded: normal child returns output and exit 0" ![clock, io] {
