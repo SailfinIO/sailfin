@@ -183,15 +183,47 @@ fn _append_function_with_origin(table: ImportSymbolTable, name: string, effects:
         effects_copy.push(effects[j]);
         j += 1;
     }
+    // This table is keyed by bare name with no module qualification, so two
+    // dependencies exporting the same name collide and the last one staged
+    // wins. That is harmless for effects — the checker only needs a superset
+    // — but unsound for a signature contract: `find_matching_paren` is
+    // declared with one parameter in `typecheck_types/text_utils.sfn` and two
+    // in `ir/native_ir_utils_text.sfn`, so whichever staged last would reject
+    // every correct call to the other (SFN-812).
+    //
+    // Resolving the collision properly means qualifying the table by
+    // exporting module and threading each file's actual import statements
+    // through, which is a larger change than this check needs. Until then a
+    // disagreeing collision poisons the contract fields to their existing
+    // fail-open sentinels, so the arity and void checks fall silent for that
+    // name rather than guessing which declaration the caller meant. Effects,
+    // `origin`, and the decorator bit keep their last-wins behaviour.
+    let mut effective_count = parameter_count;
+    let mut effective_required = required_parameter_count;
+    let mut effective_return = return_type;
+    if existing_index >= 0 {
+        let previous = updated.functions[existing_index];
+        if previous.parameter_count != parameter_count {
+            effective_count = -1;
+            effective_required = -1;
+        }
+        if previous.required_parameter_count != required_parameter_count {
+            effective_count = -1;
+            effective_required = -1;
+        }
+        if !strings_equal(previous.return_type, return_type) {
+            effective_return = "";
+        }
+    }
     let entry = ImportedFunctionSignature {
         name: name,
         effects: effects_copy,
         origin: origin,
         is_decorator: is_decorator,
         provider_module: provider_module,
-        return_type: return_type,
-        parameter_count: parameter_count,
-        required_parameter_count: required_parameter_count
+        return_type: effective_return,
+        parameter_count: effective_count,
+        required_parameter_count: effective_required
     };
     if existing_index >= 0 {
         updated.functions[existing_index] = entry;

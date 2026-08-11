@@ -26,7 +26,9 @@
 // registry: `find_runtime_helper` lives in `compiler/src/llvm/`, inside the
 // `sailfin` capsule, which already depends on `sfn/analyzer`. Importing it
 // here would close a capsule cycle. The mirror is pinned against the
-// lowering recognizers by `compiler/tests/unit/call_signature_builtin_sync_test.sfn`.
+// registry and the typecheck allowlist by
+// `compiler/tests/unit/call_signature_builtin_sync_test.sfn`, which records
+// why it cannot also reach the lowering recognizers.
 import { Expression } from "sfn/syntax";
 
 import { ImportedFunctionSignature, lookup_imported_function } from "../effect_imports";

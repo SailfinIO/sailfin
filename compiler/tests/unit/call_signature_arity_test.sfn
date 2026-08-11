@@ -44,21 +44,26 @@ fn _first_message(source: string, code: string) -> string ![io] {
     return "";
 }
 
-let TWO_ARGS: string = "fn two_args(a: int, b: int) -> int { return a + b; }\n";
+// Declared as a function, not a top-level `let`: escape sequences are not
+// processed in a top-level string initializer, so a `\n` there stays two
+// literal characters and the fixture parses as one unusable line (SFN-837).
+fn _two_args() -> string {
+    return "fn two_args(a: int, b: int) -> int { return a + b; }\n";
+}
 
 // -------------------------------------------------------------------
 // Rejecting cases — the four Repro A shapes from SFN-812.
 // -------------------------------------------------------------------
 test "call arity: one argument short of two is rejected" ![io] {
-    assert _e0423_for(TWO_ARGS + "fn main() { let v = two_args(1); }") == 1;
+    assert _e0423_for(_two_args() + "fn main() { let v = two_args(1); }") == 1;
 }
 
 test "call arity: three arguments for two is rejected" ![io] {
-    assert _e0423_for(TWO_ARGS + "fn main() { let v = two_args(1, 2, 3); }") == 1;
+    assert _e0423_for(_two_args() + "fn main() { let v = two_args(1, 2, 3); }") == 1;
 }
 
 test "call arity: zero arguments for two is rejected" ![io] {
-    assert _e0423_for(TWO_ARGS + "fn main() { let v = two_args(); }") == 1;
+    assert _e0423_for(_two_args() + "fn main() { let v = two_args(); }") == 1;
 }
 
 test "call arity: a string parameter omitted is rejected" ![io] {
@@ -70,8 +75,9 @@ test "call arity: a string parameter omitted is rejected" ![io] {
 // The two directions have different fixes, so the message must separate
 // them: an omitted argument is zero-filled, an extra one is dropped.
 test "call arity: too few and too many read differently" ![io] {
-    let too_few = _first_message(TWO_ARGS + "fn main() { let v = two_args(1); }", "E0423");
-    let too_many = _first_message(TWO_ARGS
+    let too_few = _first_message(_two_args()
+        + "fn main() { let v = two_args(1); }", "E0423");
+    let too_many = _first_message(_two_args()
         + "fn main() { let v = two_args(1, 2, 3); }", "E0423");
     assert too_few.length > 0;
     assert too_many.length > 0;
@@ -82,7 +88,7 @@ test "call arity: too few and too many read differently" ![io] {
 // Silent cases — a false rejection here breaks every build.
 // -------------------------------------------------------------------
 test "call arity: an exact-arity call is accepted" ![io] {
-    assert _e0423_for(TWO_ARGS + "fn main() { let v = two_args(1, 2); }") == 0;
+    assert _e0423_for(_two_args() + "fn main() { let v = two_args(1, 2); }") == 0;
 }
 
 // Defaulted trailing parameters widen the accepted range rather than
