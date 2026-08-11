@@ -129,17 +129,27 @@ test "process control: run_bounded closes stdin so a reading child is not stuck"
 // parent's — the whole point of the function. The body captures nothing
 // from the enclosing test scope; it only uses its own parameter and locals,
 // so the SFN-843 capture miscompile does not apply here.
+//
+// The child lists a marker file rather than printing its own path. Comparing
+// `pwd` output against the fixture's directory string is NOT portable: on
+// macOS `$TMPDIR` sits under `/var/folders/...`, `/var` is a symlink to
+// `/private/var`, and `mkdtemp` hands back the logical path while `pwd`
+// prints the physical one — so the substring never matches even though the
+// cwd was applied correctly. Listing a file that exists only in that
+// directory proves the same thing with no path normalization in play.
 test "process control: run_bounded_in runs the child in the given cwd" ![clock, io] {
-    if !_has_bin("/bin/pwd") {
+    if !_has_bin("/bin/ls") {
         assert true;
         return;
     }
-    let saw_dir = with_tmp_dir(fn (dir: string) -> int {
-        let outcome = run_bounded_in(["/bin/pwd"], [], dir, 10000);
-        if find(outcome.stdout, dir, 0) >= 0 { return 1; }
+    let saw_marker = with_tmp_dir(fn (dir: string) -> int {
+        fs.writeFile(dir + "/cwd-probe.txt", "probe");
+        let outcome = run_bounded_in(["/bin/ls"], [], dir, 10000);
+        if outcome.exit != 0 { return 0; }
+        if find(outcome.stdout, "cwd-probe.txt", 0) >= 0 { return 1; }
         return 0;
     });
-    assert saw_dir == 1;
+    assert saw_marker == 1;
 }
 
 // `wait_until` polls in-process rather than forking `sleep` per tick. The
