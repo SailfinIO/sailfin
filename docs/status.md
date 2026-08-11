@@ -909,7 +909,7 @@ Capsules ship under `capsules/sfn/` and are imported by bare name
 | `sfn/path` | `"path"` | Shipped | None | Path join, dirname, basename, ext, normalize |
 | `sfn/toml` | `"toml"` | Shipped | None | TOML v1.0 parsing, serialization, dotted-path access |
 | `sfn/fs` | `"fs"` | Shipped | `io` | File read/write/append, exists, mkdir, read_dir, perms, mkdtemp, symlink, read_link |
-| `sfn/os` | `"os"` | Shipped | `io` | Env vars, home dir, exec, exit |
+| `sfn/os` | `"os"` | Shipped | `clock`, `io` | Env vars, home dir, exec, exit; typed `Env` (`env_empty`/`env_set`/`env_from_current`) and `run_capture(args, env, cwd)`; child-process control over a `ProcessHandle` — `spawn_with_env`, framed stdout line/chunk reads plus the stderr chunk twin, `handle_stdout_fd`/`handle_stderr_fd` and the `*_at_eof` predicates for `io.poll_any` demultiplexing, and `handle_kill` (SIGKILL). `drain_to_exit(h, deadline_ms)` pumps both streams to exit under an optional wall-clock deadline and reports `timed_out` as a boolean rather than remapping the exit code (a SIGKILL wait yields 137, indistinguishable from an OOM kill); `run_bounded` pairs it with `spawn_with_env`. `![clock]` is scoped to the deadline paths |
 | `sfn/log` | `"log"` | Shipped | `io`, `clock` | Structured leveled logging with named loggers |
 | `sfn/time` | `"time"` | Shipped | `clock` | Sleep, monotonic timing/elapsed, and fallible signed Unix epoch milliseconds via `unix_millis() -> Result<int, string> ![clock]`; realtime reads ship on Linux x86-64, Linux arm64, macOS arm64, and Windows x86-64, fail closed on provider error, and may move in either direction after clock adjustment |
 | `sfn/cli` | `"cli"` | Shipped | `io` | Arg parsing, subcommands, help generation, terminal styling |

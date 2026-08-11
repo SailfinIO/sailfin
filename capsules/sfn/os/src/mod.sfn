@@ -323,7 +323,10 @@ fn handle_read_line_stdout(h: ProcessHandle) -> string? ![io] {
 // caller-owned `OwnedBuf`, preserving any unconsumed remainder for the
 // next call. A short read returns fewer than `n`; a zero-length buffer
 // signals EOF (or `n <= 0`). Bounded incremental read for a live child
-// that never closes its pipe.
+// that never closes its pipe. The underlying builtin already returns a
+// string, so this `OwnedBuf` form provides no additional byte-fidelity
+// over `handle_read_chunk_stdout` — it exists for callers who want a
+// libc-backed buffer to hand to C.
 fn handle_read_bytes_stdout(h: ProcessHandle, n: int) -> OwnedBuf ![io] {
     let chunk = process.handle_read_bytes_stdout(h.handle_id, n);
     return _owned_from_str(chunk);
@@ -344,4 +347,177 @@ fn owned_buf_free(buf: OwnedBuf) -> void {
 // Must be called exactly once per `spawn_with_env`.
 fn handle_wait(h: ProcessHandle) -> int ![io] {
     return process.handle_wait(h.handle_id);
+}
+
+// Send SIGKILL(9) to the child. Returns 0 on success, -1 on a
+// zero/dead handle or a `kill(2)` failure — including `ESRCH` when the
+// child already exited, which callers must NOT treat as fatal (the
+// child is gone either way). Killing does not reap: the caller MUST
+// still call `handle_wait` afterward — it is the sole reaper/free
+// path, and skipping it leaks the handle plus both stash buffers and
+// leaves a zombie. `handle_wait` after a kill returns `128 + 9 = 137`,
+// indistinguishable from an OOM kill, so `137` must never be used as a
+// timeout discriminator — track a killed-on-deadline flag instead
+// (`drain_to_exit` below does exactly this via `timed_out`).
+fn handle_kill(h: ProcessHandle) -> int ![io] {
+    return process.handle_kill(h.handle_id);
+}
+
+// True once the child's stdout fd was closed on a prior EOF/error read
+// AND no read-ahead bytes remain in the stash. Reads only handle
+// state — no syscall, never blocks. A zero/invalid handle reports
+// true.
+fn handle_stdout_at_eof(h: ProcessHandle) -> boolean ![io] {
+    return process.handle_stdout_at_eof(h.handle_id);
+}
+
+// The stderr twin of `handle_stdout_at_eof`.
+fn handle_stderr_at_eof(h: ProcessHandle) -> boolean ![io] {
+    return process.handle_stderr_at_eof(h.handle_id);
+}
+
+// The child's raw stdout fd, for use with `io.poll_any`. `-1` once
+// closed/at-EOF, and `-1` ALWAYS on Windows by design (the accessors
+// are stubs there, #1540) — callers must handle an empty fd set rather
+// than assume poll is available.
+fn handle_stdout_fd(h: ProcessHandle) -> int ![io] {
+    return process.handle_stdout_fd(h.handle_id);
+}
+
+// The stderr twin of `handle_stdout_fd`.
+fn handle_stderr_fd(h: ProcessHandle) -> int ![io] {
+    return process.handle_stderr_fd(h.handle_id);
+}
+
+// Read at most `n` bytes from the child's stdout, returned directly as
+// a string (no `OwnedBuf`) — preserving any unconsumed remainder for
+// the next call. A short read returns fewer than `n`; an empty string
+// means EOF or `n <= 0`. This is the recommended chunked read;
+// `handle_read_bytes_stdout` is the owned-buffer form for callers that
+// need a libc-backed allocation to hand to C.
+fn handle_read_chunk_stdout(h: ProcessHandle, n: int) -> string ![io] {
+    return process.handle_read_bytes_stdout(h.handle_id, n);
+}
+
+// The stderr twin of `handle_read_chunk_stdout` — the chunked stderr
+// read the capsule previously lacked. Same contract.
+fn handle_read_chunk_stderr(h: ProcessHandle, n: int) -> string ![io] {
+    return process.handle_read_bytes_stderr(h.handle_id, n);
+}
+
+// Result of draining a child to completion, streams demultiplexed by
+// `drain_to_exit`. `exit` is the RAW `handle_wait` result (128 +
+// signal on signal termination; -1 on an invalid handle) — it is
+// deliberately NOT remapped on a deadline kill. `timed_out` is the
+// sole timeout discriminator: a SIGKILL wait yields 137, which is
+// indistinguishable from an OOM kill, so the raw exit code alone can
+// never tell the two apart.
+struct ProcessDrain {
+    stdout: string;
+    stderr: string;
+    exit: int;
+    timed_out: boolean;
+}
+
+// Drive a spawned child to completion, demultiplexing stdout/stderr
+// via `io.poll_any` over the raw fds (mirrors `_run_test_binary` in
+// `compiler/src/cli/commands/test/exec.sfn`) and enforcing an optional
+// wall-clock deadline. `deadline_ms <= 0` means no deadline: the poll
+// timeout is `-1` and the deadline branch never fires.
+//
+// CONSUMES `h`. This calls `handle_wait` exactly once on the way out,
+// which reaps the child AND frees the handle. The caller must NOT call
+// `handle_wait`, `handle_kill`, or any accessor on `h` afterward — the
+// handle is dangling, and a second `handle_wait` is a use-after-free.
+// `drain_to_exit` therefore replaces the whole spawn/pump/reap dance,
+// not just the pump: pair it with `spawn_with_env` and nothing else
+// (or use `run_bounded`, which pairs them for you).
+fn drain_to_exit(h: ProcessHandle, deadline_ms: int) -> ProcessDrain ![clock, io] {
+    let mut out_buf: string = "";
+    let mut err_buf: string = "";
+    let mut timed_out: boolean = false;
+    let start_ms = monotonic_millis();
+    loop {
+        if process.handle_stdout_at_eof(h.handle_id) && process.handle_stderr_at_eof(h.handle_id) {
+            break;
+        }
+        let mut poll_to: int = -1;
+        if deadline_ms > 0 {
+            let remaining: int = deadline_ms - ((monotonic_millis() - start_ms) as int);
+            if remaining <= 0 {
+                process.handle_kill(h.handle_id);
+                timed_out = true;
+                break;
+            }
+            poll_to = remaining;
+        }
+        let out_fd = process.handle_stdout_fd(h.handle_id);
+        let err_fd = process.handle_stderr_fd(h.handle_id);
+        let mut fds: int[] = [];
+        if out_fd >= 0 { fds.push(out_fd); }
+        if err_fd >= 0 { fds.push(err_fd); }
+        let mut read_out: boolean = false;
+        let mut read_err: boolean = false;
+        if fds.length == 0 {
+            // No fd to select on. That is Windows: the accessors are `-1`
+            // by design there and `io.poll_any` is a `-1` stub (#1540).
+            // POSIX cannot reach this branch — a read only clears an fd to
+            // `-1` when it drained nothing, so both fds are `-1` only once
+            // both stashes are empty, which the check above already broke
+            // on. Drive the framed reads directly: each pumps both pipes,
+            // so neither stream can wedge the other, and each blocks until
+            // a byte or EOF, which is what keeps this from spinning.
+            // Termination stays the both-at-EOF check above. The deadline
+            // is therefore only observed between reads here — an untimed
+            // read cannot be interrupted, so a wholly silent hung child on
+            // Windows is not killed mid-read.
+            read_out = !process.handle_stdout_at_eof(h.handle_id);
+            read_err = !process.handle_stderr_at_eof(h.handle_id);
+        } else {
+            let ready = io.poll_any(fds, poll_to);
+            if ready < 0 {
+                if deadline_ms > 0 && ((monotonic_millis() - start_ms) as int) >= deadline_ms {
+                    process.handle_kill(h.handle_id);
+                    timed_out = true;
+                    break;
+                }
+                continue;
+            }
+            read_out = ready == out_fd;
+            read_err = ready == err_fd;
+        }
+        if read_out {
+            let chunk = process.handle_read_bytes_stdout(h.handle_id, 65536);
+            if chunk.length > 0 { out_buf = out_buf + chunk; }
+        }
+        if read_err {
+            let chunk = process.handle_read_bytes_stderr(h.handle_id, 65536);
+            if chunk.length > 0 { err_buf = err_buf + chunk; }
+        }
+    }
+    let rc = process.handle_wait(h.handle_id);
+    return ProcessDrain {
+        stdout: out_buf,
+        stderr: err_buf,
+        exit: rc,
+        timed_out: timed_out
+    };
+}
+
+// Spawn `args` and drive it to completion with a wall-clock deadline.
+// `run_capture` is the unbounded form; `run_bounded` adds the deadline
+// and a hard `handle_kill` when it expires. On spawn failure
+// (`handle_id == 0`) returns immediately with `exit: 127` (mirroring
+// `process.run`'s missing-command code) without calling `drain_to_exit`.
+fn run_bounded(args: string[], env: Env, cwd: string, deadline_ms: int) -> ProcessDrain ![clock, io] {
+    let h = spawn_with_env(args, env, cwd);
+    if h.handle_id == 0 {
+        return ProcessDrain {
+            stdout: "",
+            stderr: "",
+            exit: 127,
+            timed_out: false
+        };
+    }
+    return drain_to_exit(h, deadline_ms);
 }
