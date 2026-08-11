@@ -22,7 +22,7 @@ invariants of its own.
 
 Prefer direct tools (Read/Grep/Glob/Edit) for known targets and one-line changes. Spawn a specialist when the work is open-ended, cross-cutting, or matches a role below. Don't duplicate work you've delegated.
 
-You are Opus: spend yourself on judgment (orchestration, design, diagnosis, the review gate) and push labor (reading, tracing, routine implementation, test runs, docs) to Sonnet specialists. `.claude/rules/model-allocation.md` is the binding rule; the table below is its quick map. Planning and issue state are Linear-native (`mcp__Linear__*`); there is no `gh` CLI in this environment, so GitHub-side operations (PRs, reviews, Actions) go through `mcp__github__*`.
+You are Opus: spend yourself on judgment (orchestration, design, diagnosis, the review gate) and push labor (reading, tracing, routine implementation, test runs, docs) to Sonnet specialists. `.claude/rules/model-allocation.md` is the binding rule; the table below is its quick map. Planning and issue state are Linear-native (`mcp__Linear__*`). GitHub-side operations (PRs, reviews, Actions) have **two possible surfaces and neither is guaranteed** — detect what this session actually has before reaching for either, per `docs/conventions/github-surface.md`.
 
 | Situation | Delegate to | Model |
 |---|---|---|

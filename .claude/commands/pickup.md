@@ -8,8 +8,10 @@ PR open — flipping the Linear status as you go.
 > `SFN-NNN` issues; there is no GitHub mirror for our own planned work. GitHub
 > hosts the code and the PR. See `docs/conventions/linear-workflow.md` for the
 > full model. Use the `mcp__Linear__*` tools for all issue state; use
-> `mcp__github__*` for GitHub reads/PRs and `git` for branches and commits —
-> don't rely on a `gh` CLI being available.
+> `mcp__github__*` for GitHub reads/PRs and `git` for branches and commits.
+> The `mcp__github__*` spellings below name the *operation*, not a guaranteed
+> tool — when that server isn't connected, resolve them per
+> `docs/conventions/github-surface.md`.
 
 ## Target: $ARGUMENTS
 
