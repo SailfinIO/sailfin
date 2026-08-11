@@ -33,11 +33,13 @@ there.
 
 > **Windows is a Tier 3 (best-effort) target.** A published installer does not by
 > itself promote a platform. The Windows binary is cross-compiled from Linux, and
-> CI proves only that it boots and can run `sfn check`. Compiling, linking, the
-> test suite, and self-hosting are **not** exercised on Windows, so expect gaps
-> beyond the frontend. Native MSVC self-hosting is still in progress. For
-> day-to-day Sailfin work on a Windows machine, prefer **WSL**, which installs and
-> runs the Tier 1 Linux x86_64 toolchain.
+> the merge gate proves only that it boots (`--version`) and runs `sfn check` on
+> one example. Compiling, linking, the test suite, and self-hosting are **not**
+> exercised on Windows by merge-blocking CI, so expect gaps beyond the frontend.
+> Native MSVC self-hosting is still in progress and today runs only as an
+> exploratory, dispatch-only harness. For day-to-day Sailfin work on a Windows
+> machine, prefer **WSL**, which installs and runs the Tier 1 Linux x86_64
+> toolchain.
 
 ### Compiler and linker tools
 

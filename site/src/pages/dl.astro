@@ -180,9 +180,10 @@ const featured = allAssets;
           </div>
           <p class="quick-note">
             <strong>Tier 3 &mdash; best effort.</strong> The Windows binary is
-            cross-compiled from Linux and CI covers only that it boots and runs
-            <code>sfn check</code>; building, linking, and the test suite are not
-            exercised there. Prefer WSL for day-to-day work.
+            cross-compiled from Linux, and the merge gate covers only that it
+            boots and runs <code>sfn check</code> on one example; compiling,
+            linking, the test suite, and self-hosting are not exercised there by
+            merge-blocking CI. Prefer WSL for day-to-day work.
           </p>
         </div>
       </div>
