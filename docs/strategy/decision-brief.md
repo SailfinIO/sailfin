@@ -171,8 +171,10 @@ here.
 
 ### Pillar 3 — Cost: what it takes to run, and whether it finishes
 
-**Mechanism:** schedule-as-contract, plus structured concurrency (nurseries,
-cancel-on-fault, deadlines) as the liveness half.
+**Mechanism:** schedule-as-contract, plus structured concurrency as the liveness
+half. **Shipped today: join-all nurseries only.** Cancel-on-fault and deadlines
+are designed but unimplemented (`docs/proposals/draft-concurrency-cancellation.md`,
+still a draft — never gated, never scheduled).
 
 **Throughput.** Every stack in this space concedes that the per-target *schedule*
 — pipelining, specialization topology, register/TMEM allocation, tile ordering —
@@ -182,11 +184,20 @@ autotuner output, or a hand-written variant. A contract of the form *this
 schedule, on this target, produces these numerics within this tolerance at this
 measured throughput* is the artifact nobody produces.
 
-**Liveness.** Bounded, cancellable, cancel-on-fault tasks make *stuck vs.
+**Liveness.** Bounded, cancellable, cancel-on-fault tasks would make *stuck vs.
 progressing* observable by construction. That is the one language-shaped angle on
 the most expensive failure mode in ML infrastructure — silent collective hangs
 that take hours to weeks to debug because the watchdog fires where execution is
 stuck rather than where it first went wrong.
+
+**The unimplemented half is the differentiator.** What ships today is the
+*bounded* half: `routine { }` lowers to a real nursery whose exit blocks until
+every child completes, so no task outlives its scope and a leaked task is not a
+failure mode we have. What does not ship is the *cancellable* half — a faulting
+child does not cancel its siblings, and the nursery still blocks at exit waiting
+for them. For a long-running server that is a live resource-retention bug: a
+failed request handler cannot shed the work it spawned. Ship Phase 1 of the
+cancellation draft before making a liveness claim in public material.
 
 ---
 
