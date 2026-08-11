@@ -4,9 +4,16 @@ name: Release
 #
 # Reads the current version from compiler/capsule.toml, computes the next
 # version based on `channel` and `bump` inputs, updates the compiler and
-# implementation-capsule manifests plus version.sfn, commits, tags, and pushes.
-# release-tag.yml then verifies every required payload and atomically creates
-# the public GitHub Release with those assets.
+# implementation-capsule manifests plus version.sfn, and commits — then pushes
+# that commit to a *staging branch* rather than to `main`.
+#
+# SFN-829: nothing about a cut is public until release-tag.yml has built,
+# packaged and verified every platform payload from that staging branch. Only
+# then does it fast-forward `main` onto the bump and push the tag, atomically,
+# before publishing the GitHub Release. A payload defect therefore leaves `main`
+# unbumped and untagged rather than burning a version number the way the 0.9.4
+# cut did. Full order of operations and failure modes:
+# docs/runbooks/release-ordering.md.
 #
 # Channel semantics:
 #   alpha       → v0.5.0-alpha.23   (prerelease on main)
@@ -61,7 +68,7 @@ env:
 
 jobs:
   release:
-    name: Bump version & tag
+    name: Stage version bump
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -69,6 +76,8 @@ jobs:
       version: ${{ steps.bump.outputs.version }}
       tag: ${{ steps.bump.outputs.tag }}
       prev_tag: ${{ steps.bump.outputs.prev_tag }}
+      staging_ref: ${{ steps.stage.outputs.staging_ref }}
+      staging_sha: ${{ steps.stage.outputs.staging_sha }}
 
     steps:
       - name: Require RELEASE_PAT
@@ -321,54 +330,76 @@ jobs:
           git add compiler/capsule.toml compiler/capsules/*/capsule.toml compiler/src/version.sfn llms.txt
           git commit -m "chore(release): ${TAG#v}"
 
-      - name: Rebase, tag & push
+      # SFN-829: the bump commit goes to a throwaway staging branch, never to
+      # `main`, and no tag is created here. release-tag.yml builds and verifies
+      # every platform payload from this branch and only then fast-forwards
+      # `main` onto this exact commit and pushes the tag. Until that promotion
+      # the cut is entirely abandonable — which is the point: the 0.9.4 payload
+      # defect burned a version number precisely because the bump and the tag
+      # were public before any asset existed to fail on.
+      - name: Rebase & push staging branch
+        id: stage
         if: inputs.dry_run != true
         env:
           TAG: ${{ steps.bump.outputs.tag }}
           VERIFIED_SHA: ${{ inputs.verified_sha }}
         run: |
           set -euo pipefail
+          STAGING_REF="release-staging/${TAG}"
+
           # main is written to concurrently (e.g. capsule-release.yml auto-commits
           # `chore(capsules): bump versions`). Rebase our version-bump commit onto the
-          # latest origin/main and retry, re-pointing the tag to the rebased commit.
-          # Paths are disjoint (we touch compiler/*, capsule bot touches capsules/*),
-          # so the rebase replays without conflicts; abort defensively if one occurs.
-          for attempt in 1 2 3 4 5; do
-            git fetch origin main
-            # Self-host safety gate (#1956): the release-train passes the SHA of the
-            # green nightly whose triple-pass `make check` verified HEAD's compiler.
-            # We tag origin/main's tip (so the version bump fast-forwards main), which
-            # is safe ONLY while its compiler is byte-behaviour-identical to that
-            # verified commit. Re-check here — origin/main may have advanced since the
-            # train evaluated — and refuse to tag if it moved onto a compiler /
-            # runtime / seed change the nightly never saw; the next nightly must
-            # re-verify first. Diffed BEFORE our own bump commit, so the bump's
-            # compiler manifest/version edits never trip it. Empty on manual/override
-            # cuts (the operator owns the risk).
-            if [ -n "$VERIFIED_SHA" ]; then
-              unverified="$(git diff --name-only "${VERIFIED_SHA}..origin/main" -- compiler/src compiler/capsules runtime bootstrap.toml)"
-              if [ -n "$unverified" ]; then
-                echo "::error::origin/main advanced onto self-host-relevant changes not covered by verified nightly ${VERIFIED_SHA}; refusing to cut an unverified compiler. Re-run after the next green nightly. Files:"
-                echo "$unverified"
-                exit 1
-              fi
-            fi
-            if ! git rebase origin/main; then
-              git rebase --abort || true
-              echo "::error::Rebase onto origin/main hit a conflict (attempt ${attempt})."
+          # latest origin/main so the promotion push is a fast-forward. Paths are
+          # disjoint (we touch compiler/*, capsule bot touches capsules/*), so the
+          # rebase replays without conflicts; abort defensively if one occurs.
+          git fetch origin main
+
+          # Self-host safety gate (#1956): the release-train passes the SHA of the
+          # green nightly whose triple-pass `make check` verified HEAD's compiler.
+          # We stage on top of origin/main's tip (so the version bump fast-forwards
+          # main at promotion), which is safe ONLY while its compiler is
+          # byte-behaviour-identical to that verified commit. Re-check here —
+          # origin/main may have advanced since the train evaluated — and refuse to
+          # cut if it moved onto a compiler / runtime / seed change the nightly never
+          # saw; the next nightly must re-verify first. Diffed BEFORE our own bump
+          # commit, so the bump's compiler manifest/version edits never trip it.
+          # Empty on manual/override cuts (the operator owns the risk).
+          if [ -n "$VERIFIED_SHA" ]; then
+            unverified="$(git diff --name-only "${VERIFIED_SHA}..origin/main" -- compiler/src compiler/capsules runtime bootstrap.toml)"
+            if [ -n "$unverified" ]; then
+              echo "::error::origin/main advanced onto self-host-relevant changes not covered by verified nightly ${VERIFIED_SHA}; refusing to cut an unverified compiler. Re-run after the next green nightly. Files:"
+              echo "$unverified"
               exit 1
             fi
-            # Re-create the tag on the (possibly) rebased commit before pushing.
-            git tag -fa "$TAG" -m "Release ${TAG}"
-            if git push origin HEAD && git push origin --force "$TAG"; then
-              echo "Pushed ${TAG} on attempt ${attempt}."
-              exit 0
-            fi
-            echo "Push rejected (attempt ${attempt}); main moved — retrying after rebase."
-            sleep 5
-          done
-          echo "::error::Failed to push release commit + tag after 5 attempts."
-          exit 1
+          fi
+
+          if ! git rebase origin/main; then
+            git rebase --abort || true
+            echo "::error::Rebase onto origin/main hit a conflict."
+            exit 1
+          fi
+
+          sha="$(git rev-parse HEAD)"
+          base="$(git rev-parse origin/main)"
+          # Force-push: the staging branch is ours alone and a retried cut of the
+          # same version must overwrite whatever a previous attempt left behind.
+          # This races nothing — `concurrency: group: release` serialises cuts.
+          git push --force origin "HEAD:refs/heads/${STAGING_REF}"
+
+          echo "staging_ref=${STAGING_REF}" >> "$GITHUB_OUTPUT"
+          echo "staging_sha=${sha}" >> "$GITHUB_OUTPUT"
+          echo "Staged ${TAG} as ${sha} on ${STAGING_REF} (base ${base}). Nothing public yet."
+          {
+            echo "## Staged ${TAG}"
+            echo ""
+            echo "| Field | Value |"
+            echo "|-------|-------|"
+            echo "| Staging branch | \`${STAGING_REF}\` |"
+            echo "| Commit | \`${sha}\` |"
+            echo "| Base (origin/main) | \`${base}\` |"
+            echo ""
+            echo "\`main\` is unbumped and \`${TAG}\` is untagged until every payload gate passes."
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Dry run summary
         if: inputs.dry_run == true
@@ -386,8 +417,12 @@ jobs:
             echo "No changes were made (dry run)."
           } >> "$GITHUB_STEP_SUMMARY"
 
+  # Builds and verifies every payload from the staging branch, then promotes:
+  # fast-forwards `main` onto the staged commit, pushes the tag, and publishes.
+  # `promote: true` is what makes this workflow — and only this workflow — able
+  # to mutate `main`; a manual release-tag.yml dispatch cannot (SFN-829).
   build-assets:
-    name: Build release assets
+    name: Verify payloads, promote & publish
     needs: release
     if: inputs.dry_run != true
     permissions:
@@ -396,7 +431,45 @@ jobs:
     with:
       tag: ${{ needs.release.outputs.tag }}
       previous_tag: ${{ needs.release.outputs.prev_tag }}
+      ref: ${{ needs.release.outputs.staging_ref }}
+      expect_sha: ${{ needs.release.outputs.staging_sha }}
+      promote: true
     secrets: inherit
+
+  # The staging branch is scaffolding, not history. Delete it once the cut has
+  # landed; keep it after a failure so the operator can inspect exactly what was
+  # built. No workflow triggers on `release-staging/*`, so a leftover is inert
+  # and the next attempt at the same version force-pushes over it.
+  cleanup-staging:
+    name: Delete staging branch
+    needs: [release, build-assets]
+    if: always() && needs.release.outputs.staging_ref != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Delete or retain the staging branch
+        env:
+          RELEASE_TOKEN: ${{ secrets.RELEASE_PAT }}
+          STAGING_REF: ${{ needs.release.outputs.staging_ref }}
+          BUILD_RESULT: ${{ needs.build-assets.result }}
+        run: |
+          set -euo pipefail
+          if [ "$BUILD_RESULT" != "success" ]; then
+            echo "::notice::Release did not complete (build-assets: ${BUILD_RESULT}). Retaining '${STAGING_REF}' for inspection; delete it with: git push origin --delete ${STAGING_REF}"
+            exit 0
+          fi
+          git init -q .staging-cleanup
+          cd .staging-cleanup
+          git remote add origin "https://x-access-token:${RELEASE_TOKEN}@github.com/${{ github.repository }}.git"
+          # Never fail a published release over its own scaffolding: the branch
+          # is inert either way, and a red run here would misreport a cut that
+          # actually succeeded.
+          if git push origin --delete "$STAGING_REF"; then
+            echo "Deleted ${STAGING_REF}."
+          else
+            echo "::warning::Could not delete '${STAGING_REF}'; the release itself published. Delete it with: git push origin --delete ${STAGING_REF}"
+          fi
 
   notify-slack-failure:
     name: Notify Slack on release workflow failure
@@ -423,7 +496,7 @@ jobs:
           bump = os.environ.get("BUMP", "unknown")
           run_url = f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['GITHUB_RUN_ID']}"
           print(json.dumps({
-              "text": f":x: Sailfin release workflow failed before asset build (channel={channel}, bump={bump}).\\nRun: {run_url}"
+              "text": f":x: Sailfin release workflow failed while staging the version bump (channel={channel}, bump={bump}). `main` is unbumped and nothing was tagged.\\nRun: {run_url}"
           }))
           PY
           curl -fsS -X POST \

@@ -208,8 +208,12 @@ Given current version `0.5.0-alpha.22`:
 - Demotions are not allowed (e.g., rc → alpha). Bump major/minor/patch to
   start a new cycle.
 - The workflow requires the `RELEASE_PAT` secret to be configured.
-- Release assets (platform binaries, installers) are built automatically by
-  `release-tag.yml` after the tag is created.
+- Release assets (platform binaries, installers) are built and verified
+  **before** the tag is created — the bump is staged on
+  `release-staging/v<version>`, and `main` is promoted and tagged in one
+  atomic push only after every asset gate passes. A payload failure leaves
+  `main` unbumped and no tag. See `docs/runbooks/release-ordering.md`
+  (SFN-829).
 - An agentic workflow (`release-notes.md`) generates structured release notes
   once the GitHub Release is published.
 - The release-tracking gate is intentionally a soft gate — `/release` will

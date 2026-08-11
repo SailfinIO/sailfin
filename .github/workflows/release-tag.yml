@@ -12,6 +12,12 @@ name: Release (tag)
 env:
   # Tag to build/upload (e.g. v0.1.1)
   RELEASE_TAG: ${{ inputs.tag }}
+  # What to actually check out and build. Blank on the retroactive-rebuild
+  # path, where the tag already exists and is itself the build ref. release.yml
+  # passes a pre-tag staging branch instead, so every payload is built and
+  # verified before `main` is bumped and before the tag exists at all
+  # (SFN-829; docs/runbooks/release-ordering.md).
+  BUILD_REF: ${{ inputs.ref || inputs.tag }}
 
 on:
   workflow_call:
@@ -30,6 +36,21 @@ on:
         required: false
         type: string
         default: ""
+      ref:
+        description: "Ref to check out and build (blank → the tag itself). release.yml passes the pre-tag staging branch."
+        required: false
+        type: string
+        default: ""
+      expect_sha:
+        description: "Commit the checkout must resolve to (blank → unchecked). Pins a staging branch so it cannot move mid-run."
+        required: false
+        type: string
+        default: ""
+      promote:
+        description: "Fast-forward main onto the built commit and push the tag, after every payload gate passes and before publishing."
+        required: false
+        type: boolean
+        default: false
   workflow_dispatch:
     inputs:
       tag:
@@ -43,7 +64,18 @@ on:
         description: "Optional previous release tag used as the generated-notes start point."
         required: false
         default: ""
+      ref:
+        description: "Ref to check out and build (blank → the tag itself)."
+        required: false
+        default: ""
+      expect_sha:
+        description: "Commit the checkout must resolve to (blank → unchecked)."
+        required: false
+        default: ""
 
+# `promote` is deliberately absent from workflow_dispatch: a manual rebuild
+# must never be able to mutate `main` or move a tag. `inputs.promote` is empty
+# on this path, so the promotion step is skipped (SFN-829).
 concurrency:
   group: "release-tag-${{ inputs.tag }}"
   cancel-in-progress: false
@@ -92,20 +124,37 @@ jobs:
             timeout_minutes: 240
 
     steps:
-      - name: Checkout repository (tag)
+      - name: Checkout repository (build ref)
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
-          ref: ${{ env.RELEASE_TAG }}
+          ref: ${{ env.BUILD_REF }}
 
-      - name: Verify tag checkout
+      # Two shapes of build ref, each with its own fidelity check. A tag is
+      # immutable, so `--exact-match` is the whole assertion. A staging branch
+      # is not, so pin it to the exact commit release.yml staged and later
+      # promotes — every leg must build the same bits that get tagged. The
+      # version assertions further down ("Verify compiler version matches tag")
+      # then hold on both paths regardless.
+      - name: Verify build checkout
         shell: bash
+        env:
+          EXPECT_SHA: ${{ inputs.expect_sha }}
         run: |
           set -euo pipefail
-          current="$(git describe --tags --exact-match)"
-          if [ "$current" != "${RELEASE_TAG}" ]; then
-            echo "[ci][error] expected ${RELEASE_TAG}, got $current" >&2
-            exit 1
+          head="$(git rev-parse HEAD)"
+          echo "[ci] building ${BUILD_REF} @ ${head}"
+          if [ -n "${EXPECT_SHA:-}" ]; then
+            if [ "$head" != "${EXPECT_SHA}" ]; then
+              echo "[ci][error] expected commit ${EXPECT_SHA}, got ${head}" >&2
+              exit 1
+            fi
+          elif [ "${BUILD_REF}" = "${RELEASE_TAG}" ]; then
+            current="$(git describe --tags --exact-match)"
+            if [ "$current" != "${RELEASE_TAG}" ]; then
+              echo "[ci][error] expected ${RELEASE_TAG}, got $current" >&2
+              exit 1
+            fi
           fi
 
       - name: Resolve seed version (input override → bootstrap.toml)
@@ -401,7 +450,7 @@ jobs:
           if-no-files-found: error
 
   upload:
-    name: Upload Release Assets
+    name: Verify, promote & publish
     needs: build
     runs-on: ubuntu-latest
     permissions:
@@ -410,11 +459,18 @@ jobs:
       - name: Checkout (signing script + committed public key)
         uses: actions/checkout@v7
         with:
-          # Pin to the released tag so the signing script and the committed
-          # public key come from the same commit the binaries were built at
-          # (the build job checks out this ref too) — matters for retroactive
-          # rebuilds and key-rotation windows.
-          ref: ${{ env.RELEASE_TAG }}
+          # Pin to the build ref so the signing script and the committed public
+          # key come from the same commit the binaries were built at (the build
+          # job checks out this ref too) — matters for retroactive rebuilds and
+          # key-rotation windows. On a release.yml cut this is the staging
+          # branch, and it is also the commit the promotion step tags.
+          ref: ${{ env.BUILD_REF }}
+          # Full history: the promotion step pushes this commit to `main`, and a
+          # shallow clone cannot be pushed. Credentials are configured there
+          # from RELEASE_PAT rather than persisted here, so a non-promoting run
+          # carries no push token at all.
+          fetch-depth: 0
+          persist-credentials: false
 
       # Retroactive tags predate SFN-799's fail-closed payload verifier. Keep
       # their signing code and public key pinned above, but apply the current
@@ -523,6 +579,67 @@ jobs:
           set -euo pipefail
           bash scripts/sign-release-manifest.sh dist
 
+      # SFN-829: the first and only mutation of `main` in a cut, and the point
+      # at which the tag comes into existence. Every gate above has already
+      # passed against these exact bits — per-leg smoke, compiler-version,
+      # installer payload version, per-leg and all-platform dependency closure,
+      # payload presence, and manifest signing. Before this step a cut is
+      # entirely abandonable; that is what keeps a payload defect from burning a
+      # version number the way the 0.9.4 cut did.
+      #
+      # `--atomic` over both refspecs so `main` and the tag land together or not
+      # at all. Non-force so the push is *rejected* if `main` advanced while the
+      # payloads were building: losing the build is the accepted cost of tagging
+      # exactly the commit that was verified, rather than a rebased
+      # approximation whose tree nobody built. Rejection mutates nothing.
+      #
+      # Skipped unless release.yml passed `promote: true` — the workflow_dispatch
+      # path does not expose the input, so a manual rebuild cannot reach here.
+      - name: Promote (fast-forward main, push tag)
+        if: inputs.promote
+        shell: bash
+        env:
+          RELEASE_TOKEN: ${{ secrets.RELEASE_PAT }}
+          GH_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
+          EXPECT_SHA: ${{ inputs.expect_sha }}
+        run: |
+          set -euo pipefail
+          if [ -z "${RELEASE_TOKEN:-}" ]; then
+            echo "::error::RELEASE_PAT is required to promote a release so the new tag triggers downstream workflows."
+            exit 1
+          fi
+          git config user.name "Sailfin Release Bot"
+          git config user.email "releases@sailfin.io"
+          git remote set-url origin "https://x-access-token:${RELEASE_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+
+          sha="$(git rev-parse HEAD)"
+          # The build legs pinned themselves to this same commit. Re-assert it
+          # here so the tag can only ever name bits that were actually built.
+          if [ -n "${EXPECT_SHA:-}" ] && [ "$sha" != "${EXPECT_SHA}" ]; then
+            echo "::error::Refusing to promote ${sha}: the build ref moved from the verified commit ${EXPECT_SHA}."
+            exit 1
+          fi
+          git tag -a "${RELEASE_TAG}" -m "Release ${RELEASE_TAG}" "$sha"
+          if ! git push --atomic origin "${sha}:refs/heads/main" "refs/tags/${RELEASE_TAG}"; then
+            echo "::error::Promotion push rejected — 'main' advanced while the release payloads were building, so the staged bump is no longer a fast-forward. Nothing was mutated: 'main' is unbumped and ${RELEASE_TAG} is not tagged. Re-run the release workflow; it rebases onto the newer 'main'."
+            exit 1
+          fi
+          echo "Promoted ${sha} to main and pushed ${RELEASE_TAG}."
+
+          # `gh release create --verify-tag` below reads the tag back through
+          # the REST API, which can lag the git push by a beat. Poll for it
+          # here rather than racing it at the final step of a release build
+          # that has already spent hours getting this far.
+          for attempt in 1 2 3 4 5 6; do
+            if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${RELEASE_TAG}" >/dev/null 2>&1; then
+              exit 0
+            fi
+            echo "Tag ${RELEASE_TAG} not visible via the API yet (attempt ${attempt}/6); waiting."
+            sleep 5
+          done
+          echo "::error::${RELEASE_TAG} was pushed but is still not visible via the API after 30s."
+          exit 1
+
       # `gh release create <tag> <files...>` creates a draft internally,
       # uploads every asset, and publishes only after every upload succeeds.
       # This ordering is the publication invariant: a failed ARM64 build,
@@ -593,6 +710,7 @@ jobs:
         shell: bash
         env:
           SLACK_RELEASE_WEBHOOK_URL: ${{ secrets.SLACK_RELEASE_WEBHOOK_URL }}
+          IS_PROMOTE: ${{ inputs.promote }}
         run: |
           set -euo pipefail
           if [ -z "${SLACK_RELEASE_WEBHOOK_URL:-}" ]; then
@@ -603,8 +721,18 @@ jobs:
           import os
           tag = os.environ["RELEASE_TAG"]
           run_url = f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['GITHUB_RUN_ID']}"
+          # On a promoting cut the gates run before anything is public, so the
+          # usual outcome of this failure is a clean no-op rather than a
+          # half-finished release (SFN-829). Say so: the remediation is "fix and
+          # re-cut", not "go clean up main".
+          suffix = (
+              " Payload gates run before promotion, so `main` is most likely unbumped and untagged"
+              " — check the run for whether the Promote step was reached."
+              if os.environ.get("IS_PROMOTE") == "true"
+              else ""
+          )
           print(json.dumps({
-              "text": f":x: Sailfin release asset build/upload failed for {tag}.\\nRun: {run_url}"
+              "text": f":x: Sailfin release asset build/upload failed for {tag}.{suffix}\\nRun: {run_url}"
           }))
           PY
           curl -fsS -X POST \
