@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
 # Verifies that a single installer tarball's staged runtime dependency
-# closure (declared in runtime/capsule.toml [dependencies]) is present at
+# closure (declared transitively from runtime/capsule.toml [dependencies],
+# and from there each dependency's own capsule.toml) is present at
 # <root>/capsules/<scope>/<name>/src -- the layout
-# locate_runtime_dep_capsule_src resolves at install time. A payload missing
-# part of that closure link-fails *every* user program on a fresh install,
-# not just ones touching the missing dependency.
+# locate_runtime_dep_capsule_src resolves at install time. Each dependency's
+# capsule.toml must also be staged alongside its src/, since an installed
+# toolchain reads that manifest to discover the next hop in the closure
+# (compiler/src/capsule_resolver/discovery.sfn). A payload missing part of
+# that closure link-fails *every* user program on a fresh install, not just
+# ones touching the missing dependency.
 set -euo pipefail
 
 tarball="${1:-}"
@@ -45,11 +49,43 @@ if [ -z "${deps}" ]; then
     exit 0
 fi
 
-verified=()
+# Transitive worklist walk: each dependency's own capsule.toml may declare
+# further dependencies, so a single-level check would pass a payload that
+# ships sfn/crypto without its own sfn/strings dependency.
+# Bash 3.2 compatible throughout: macOS ships 3.2 and this script runs on the
+# macos-arm64 release leg. So no associative arrays, and the worklist is walked
+# with an index rather than by slicing off the head -- `"${a[@]:1}"` on a
+# one-element array trips `set -u` under 3.2. This mirrors the index-based walk
+# the compiler's own resolver uses.
+worklist=()
 while IFS= read -r dep; do
+    worklist+=("${dep}")
+done <<< "${deps}"
+
+visited=" "
+verified=""
+qi=0
+max_iterations=4096
+
+while [ "${qi}" -lt "${#worklist[@]}" ]; do
+    if [ "${qi}" -ge "${max_iterations}" ]; then
+        echo "[payload-dep-closure][error] dependency closure walk exceeded ${max_iterations} iterations (tarball: ${tarball})" >&2
+        exit 1
+    fi
+
+    dep="${worklist[${qi}]}"
+    qi=$((qi + 1))
+
+    case "${visited}" in
+        *" ${dep} "*) continue ;;
+    esac
+    visited="${visited}${dep} "
+
     scope="${dep%%/*}"
     name="${dep#*/}"
     src_dir="${root_dir}/capsules/${scope}/${name}/src"
+    manifest="${root_dir}/capsules/${scope}/${name}/capsule.toml"
+
     if [ ! -d "${src_dir}" ]; then
         echo "[payload-dep-closure][error] installer payload missing dependency '${dep}': expected directory '${src_dir}' (tarball: ${tarball})" >&2
         exit 1
@@ -59,7 +95,19 @@ while IFS= read -r dep; do
         echo "[payload-dep-closure][error] installer payload dependency '${dep}' has no .sfn sources in '${src_dir}' (tarball: ${tarball})" >&2
         exit 1
     fi
-    verified+=("${dep}")
-done <<< "${deps}"
+    if [ ! -f "${manifest}" ]; then
+        echo "[payload-dep-closure][error] installer payload dependency '${dep}' missing manifest: expected file '${manifest}' (tarball: ${tarball})" >&2
+        exit 1
+    fi
 
-echo "[payload-dep-closure] ${tarball}: verified dependency closure: ${verified[*]}"
+    verified="${verified}${dep} "
+
+    nested_deps="$(awk '/^\[[^]]+\]/ { section=$0 } section == "[dependencies]" && /^"/ { gsub(/"/, "", $1); print $1 }' "${manifest}")"
+    if [ -n "${nested_deps}" ]; then
+        while IFS= read -r nested_dep; do
+            worklist+=("${nested_dep}")
+        done <<< "${nested_deps}"
+    fi
+done
+
+echo "[payload-dep-closure] ${tarball}: verified dependency closure: ${verified% }"
