@@ -19,24 +19,6 @@
 // buffering, plaintext record framing, handshake defragmentation,
 // rekeying, alerts, and blocking socket I/O.
 //
-// Import shape, and why it is not the capsule's public surface. The
-// imports below reach individual `sfn/crypto/<module>` files rather than
-// the capsule's `sfn/crypto` entry module. That is a workaround, not a
-// preference, and the reason is stale objects rather than unresolved
-// symbols. `crypto/mod.sfn` publishes all of this through an
-// `export { ... } from "./sibling"` chain, and a bare-spec import records
-// a `.import-deps` dependency on `mod.sfn-asm` alone — text that does not
-// change when the *defining* submodule's signature does. The consumer's
-// object cache key then stays constant across an ABI change and the link
-// reuses a stale-ABI object. SFN-800 fixed that by walking the re-export
-// closure (`_runtime_reexport_closure`, `build/runtime_objs.sfn`).
-//
-// Why the fix is not enough yet: it lives in the compiler, but the PINNED
-// SEED compiles this file, not the freshly built compiler
-// (`.claude/rules/seed-dependency.md`, the runtime-source carve-out), and
-// seed 0.9.3 predates it. Removal condition: collapse every import below
-// to `from "sfn/crypto"` once a seed carrying SFN-800 is pinned.
-//
 // Handle policy. `tls_client_ctx`/`tls_server_ctx` return a malloc'd
 // `TlsContext *` and `tls_connect_fd`/`tls_accept_fd` a malloc'd
 // `TlsSession *`, both spelled `* u8` at the boundary so the consumer ABI
@@ -52,12 +34,16 @@
 // inside `tls_connect_fd`/`tls_accept_fd`'s own scope; on reaching the
 // connected state the four traffic key/IV arrays are copied out into
 // malloc'd byte buffers and steady state is pointer-only.
-import { aead_aes_128_gcm, aead_chacha20_poly1305 } from "sfn/crypto/aead";
-import { ed25519_seed_from_pkcs8_pem } from "sfn/crypto/ed25519_sign";
-import { pem_certificates_to_der } from "sfn/crypto/pem";
-import { random_bytes } from "sfn/crypto/rand";
 import {
     ClientHandshake,
+    ServerHandshake,
+    TlsRecordPlaintext,
+    TrustStore,
+    X509Certificate,
+    X509ChainResult,
+    aead_aes_128_gcm,
+    aead_chacha20_poly1305,
+    ed25519_seed_from_pkcs8_pem,
     hs_client_finished_message,
     hs_client_hello,
     hs_client_new,
@@ -68,20 +54,6 @@ import {
     hs_client_recv_server_hello,
     hs_client_send_hello,
     hs_client_verify_peer,
-    hs_state_connected,
-    tls13_traffic_iv,
-    tls13_traffic_key
-} from "sfn/crypto/tls13_handshake";
-import {
-    hs_type_finished,
-    hs_type_server_hello,
-    tls_cipher_aes_128_gcm_sha256,
-    tls_cipher_chacha20_poly1305_sha256
-} from "sfn/crypto/tls13_handshake_codec";
-import { tls13_open_record_aead, tls13_seal_record_aead } from "sfn/crypto/tls13_record";
-import { TlsRecordPlaintext } from "sfn/crypto/tls13_record";
-import {
-    ServerHandshake,
     hs_server_certificate_message,
     hs_server_certificate_verify_message,
     hs_server_encrypted_extensions_message,
@@ -95,11 +67,20 @@ import {
     hs_server_send_encrypted_extensions,
     hs_server_send_finished,
     hs_server_send_hello,
-    hs_server_state_connected
-} from "sfn/crypto/tls13_server_handshake";
-import { TrustStore, trust_store_load } from "sfn/crypto/trust_store";
-import { X509Certificate } from "sfn/crypto/x509";
-import { X509ChainResult } from "sfn/crypto/x509_verify";
+    hs_server_state_connected,
+    hs_state_connected,
+    hs_type_finished,
+    hs_type_server_hello,
+    pem_certificates_to_der,
+    random_bytes,
+    tls13_open_record_aead,
+    tls13_seal_record_aead,
+    tls13_traffic_iv,
+    tls13_traffic_key,
+    tls_cipher_aes_128_gcm_sha256,
+    tls_cipher_chacha20_poly1305_sha256,
+    trust_store_load
+} from "sfn/crypto";
 
 // ── libc + sibling-runtime externs ───────────────────────────────
 // Runtime modules forward-declare cross-module runtime symbols rather
