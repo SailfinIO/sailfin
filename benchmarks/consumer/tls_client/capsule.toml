@@ -1,0 +1,13 @@
+[capsule]
+name = "bench/tls-client"
+version = "0.1.0"
+
+[dependencies]
+"sfn/http" = "*"
+
+[capabilities]
+required = ["io", "net"]
+
+[build]
+entry = "src/main.sfn"
+kind = "binary"

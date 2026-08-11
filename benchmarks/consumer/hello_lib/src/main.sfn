@@ -1,0 +1,7 @@
+// benchmarks/consumer/hello_lib/src/main.sfn
+import { string_val, stringify } from "sfn/json";
+
+fn main() -> int ![io] {
+    print(stringify(string_val("hello")));
+    return 0;
+}

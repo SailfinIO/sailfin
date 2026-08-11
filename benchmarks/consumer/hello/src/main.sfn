@@ -1,0 +1,5 @@
+// benchmarks/consumer/hello/src/main.sfn
+fn main() -> int ![io] {
+    print("hello");
+    return 0;
+}

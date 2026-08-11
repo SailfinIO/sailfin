@@ -1,0 +1,127 @@
+// End-to-end smoke test for `sfn bench --consumer` (SFN-830), the
+// end-to-end consumer-build benchmark mode sibling to `--compiler` (SFN-61)
+// and the default runtime mode (SFN-63). Drives the compiler binary as a
+// subprocess against a tiny hello-world fixture built fresh under a temp
+// dir (never `benchmarks/consumer`, which would cost three full cold
+// builds), per .claude/rules/no-bash-e2e.md. Each spawned `sfn bench
+// --consumer` runs a nested `sfn build` per fixture, so the child env must
+// come from `clean_runner_env(nested_runner_scratch(...))` (SFN-401) —
+// PATH included, since it derives from `process.environ()`.
+import { find } from "sfn/strings";
+import { clean_runner_env, nested_runner_scratch, report_child_failure } from "sfn/test";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+// Writes a single `hello`-shaped fixture (no dependencies) under
+// `<root>/hello/`, mirroring `benchmarks/consumer/hello/`.
+fn _write_hello_fixture(root: string) ![io] {
+    let dir = root + "/hello";
+    fs.createDirectory(dir + "/src", true);
+    fs.writeFile(dir + "/capsule.toml", "[capsule]\nname = \"bench/hello\"\nversion = \"0.1.0\"\n\n[capabilities]\nrequired = [\"io\"]\n\n[build]\nentry = \"src/main.sfn\"\nkind = \"binary\"\n");
+    fs.writeFile(dir + "/src/main.sfn", "fn main() -> int ![io] {\n    print(\"hello\");\n    return 0;\n}\n");
+}
+
+test "bench consumer: reports a table row per fixture" ![clock, io] {
+    let scratch = nested_runner_scratch("bench-consumer-table");
+    let child_env = clean_runner_env(scratch);
+    fs.createDirectory(scratch, true);
+    let fixtures = scratch + "/fixtures";
+    _write_hello_fixture(fixtures);
+
+    let exit = process.run_capture([_sfn_bin(), "bench", "--consumer", "--fixtures", fixtures, "--work-dir", scratch
+        + "/work"], child_env);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    report_child_failure("bench consumer table", exit, out, err);
+    assert exit == 0;
+    assert find(out + err, "hello", 0) >= 0;
+    assert find(out + err, "SUMMARY", 0) >= 0;
+}
+
+test "bench consumer: --csv writes the consumer schema header" ![clock, io] {
+    let scratch = nested_runner_scratch("bench-consumer-csv");
+    let child_env = clean_runner_env(scratch);
+    fs.createDirectory(scratch, true);
+    let fixtures = scratch + "/fixtures";
+    _write_hello_fixture(fixtures);
+    let csv = scratch + "/consumer.csv";
+
+    let exit = process.run_capture([_sfn_bin(), "bench", "--consumer", "--fixtures", fixtures, "--work-dir", scratch
+        + "/work", "--csv", csv], child_env);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    report_child_failure("bench consumer --csv", exit, out, err);
+    assert exit == 0;
+    assert fs.exists(csv);
+    let content = fs.readFile(csv);
+    assert find(content, "fixture,cold_s,warm_s,binary_bytes,ctors,modules_staged,cold_cache_misses,cache_hits,cache_misses,status,seed_version,platform", 0) >= 0;
+    assert find(content, "hello", 0) >= 0;
+}
+
+test "bench consumer: warm run hits the cache the cold run populated" ![clock, io] {
+    let scratch = nested_runner_scratch("bench-consumer-warm-cache");
+    let child_env = clean_runner_env(scratch);
+    fs.createDirectory(scratch, true);
+    let fixtures = scratch + "/fixtures";
+    _write_hello_fixture(fixtures);
+    let csv = scratch + "/consumer.csv";
+
+    let exit = process.run_capture([_sfn_bin(), "bench", "--consumer", "--fixtures", fixtures, "--work-dir", scratch
+        + "/work", "--csv", csv], child_env);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    report_child_failure("bench consumer warm cache", exit, out, err);
+    assert exit == 0;
+    let content = fs.readFile(csv);
+
+    // Isolate the data row (skip the header line) and read the
+    // cache_hits/cache_misses columns (9th, 8th from the end) rather than
+    // asserting on wall-clock time, which is not deterministic/noise-free.
+    let nl = find(content, "\n", 0);
+    assert nl >= 0;
+    let row = substring(content, nl + 1, content.length);
+    let fields = _split_csv_row(row);
+    assert fields.length >= 12;
+    // fixture,cold_s,warm_s,binary_bytes,ctors,modules_staged,
+    // cold_cache_misses,cache_hits,cache_misses,status,seed_version,platform
+    let cache_hits = fields[7];
+    let cache_misses = fields[8];
+    assert cache_misses == "0";
+    assert cache_hits != "0";
+}
+
+fn _split_csv_row(row: string) -> string[] {
+    let mut out: string[] = [];
+    let mut cur = "";
+    let mut i = 0;
+    loop {
+        if i >= row.length { break; }
+        let ch = substring(row, i, i + 1);
+        if ch == "," {
+            out.push(cur);
+            cur = "";
+        } else if ch == "\n" || ch == "\r" {
+            // end of row
+        } else { cur = cur + ch; }
+        i += 1;
+    }
+    if cur.length > 0 { out.push(cur); }
+    return out;
+}
+
+test "bench consumer: an empty fixture directory exits 1" ![clock, io] {
+    let scratch = nested_runner_scratch("bench-consumer-empty");
+    let child_env = clean_runner_env(scratch);
+    fs.createDirectory(scratch, true);
+    let empty_dir = scratch + "/no-fixtures-here";
+    fs.createDirectory(empty_dir, true);
+
+    let exit = process.run_capture([_sfn_bin(), "bench", "--consumer", "--fixtures", empty_dir], child_env);
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    assert exit == 1;
+}

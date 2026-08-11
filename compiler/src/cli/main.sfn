@@ -96,7 +96,7 @@ fn _usage() -> string {
     out = out + _cmd_row("sfn run <file|exe>", "build and run");
     out = out + _cmd_row("sfn emit <fmt> <file>", "emit LLVM / sailfin / native IR");
     out = out + _cmd_row("sfn cache <info|prune|clean>", "manage the build cache");
-    out = out + _cmd_row("sfn bench [path...]", "benchmark runtime (or --compiler)");
+    out = out + _cmd_row("sfn bench [path...]", "benchmark runtime (or --compiler/--consumer)");
     out = out + "\n";
     out = out + "project:\n";
     out = out + _cmd_row("sfn init", "scaffold a project");
@@ -633,19 +633,20 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![clock, io, net] {
     }
 
     // `sfn bench --compiler [--module M]... [--top N] [--csv PATH]
-    // [--budget-time S] [--budget-mem KB]` — the registered subcommand
-    // matched. A clean parse dispatches to `bench.run`, which owns the
-    // `--compiler`-mode gate (exit 2 when absent) and its own exit codes
-    // (0 clean / 1 module failures / 2 budget violations). A non-ok parse
-    // that still descended into `bench` (an unrecognized flag, a
-    // non-integer `--top`/`--budget-time`/`--budget-mem`, or `--help`) is
-    // a usage error (exit 2) — the parser owns argument validation. The
-    // literal `2` mirrors the dispatches above (the `sfn/cli` `EXIT_*`
-    // constants lower to 0 here).
+    // [--budget-time S] [--budget-mem KB]` or `sfn bench --consumer
+    // [--fixtures DIR] [--csv PATH]` — the registered subcommand matched.
+    // A clean parse dispatches to `bench.run`, which owns the
+    // `--compiler`/`--consumer`-mode gate (exit 2 when absent) and its own
+    // exit codes (0 clean / 1 module or fixture failures / 2 budget
+    // violations). A non-ok parse that still descended into `bench` (an
+    // unrecognized flag, a non-integer `--top`/`--budget-time`/
+    // `--budget-mem`, or `--help`) is a usage error (exit 2) — the parser
+    // owns argument validation. The literal `2` mirrors the dispatches
+    // above (the `sfn/cli` `EXIT_*` constants lower to 0 here).
     if strings_equal(subcommand(matches), "bench") {
         if ctx.trace_argv { _v2_trace_argv(argv); }
         if parse_ok { return bench_run(matches, ctx); }
-        print("usage: sfn bench --compiler [--module M]... [--top N] [--csv PATH] [--budget-time S] [--budget-mem KB] [--import-context DIR] [--work-dir DIR]");
+        print("usage: sfn bench --compiler [--module M]... [--top N] [--csv PATH] [--budget-time S] [--budget-mem KB] [--import-context DIR] [--work-dir DIR] | --consumer [--fixtures DIR] [--csv PATH] [--work-dir DIR]");
         return 2;
     }
 
