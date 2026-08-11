@@ -122,6 +122,19 @@ Current releases provide pre-built archives for Linux x86_64, Linux arm64
 (aarch64), macOS arm64 (Apple Silicon), and Windows x86_64. The archive installs
 the compiler as both `sailfin` and `sfn`.
 
+A published asset is not by itself a support claim. Linux x86_64 is **Tier 1**;
+Linux arm64 and macOS arm64 are **Tier 2**; **Windows x86_64 is Tier 3 — best
+effort.** The Windows binary is cross-compiled from Linux, and the merge gate
+proves only that it boots (`--version`) and runs `sfn check` on one example; a
+separate advisory job smoke-tests the PowerShell installer. Compiling, linking,
+the test suite, and self-hosting are not exercised on Windows by merge-blocking
+CI — the native MSVC build and self-host path exists only as an exploratory,
+dispatch-only harness. Use WSL for day-to-day Sailfin work there. Native MSVC
+self-hosting is tracked by
+[SFEP-0021](docs/proposals/0021-windows-native-selfhost.md); the tier
+definitions and full matrix live in
+[`docs/conventions/target-tiers.md`](docs/conventions/target-tiers.md).
+
 Installing the compiler is only the first prerequisite: compiling, running, or
 testing Sailfin programs still requires LLVM tools 17+ or 18+, `clang`, and the
 platform linker. The Linux/macOS bootstrap script additionally needs `curl`,
