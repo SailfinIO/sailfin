@@ -50,6 +50,7 @@ import {
 import {
     TypeckCtx,
     ctx_with_bindings,
+    ctx_with_expected_type,
     ctx_with_type_params,
     make_typeck_ctx
 } from "./context";
@@ -73,7 +74,7 @@ fn check_program_scopes(program: Program, interfaces: Statement[], imports: Impo
     let mut diagnostics: Diagnostic[] = [];
 
     for statement in program.statements {
-        let result = check_statement(statement, make_typeck_ctx(bindings, imports, available_imports, interfaces, top_level, true, generic_struct_names, known_types));
+        let result = check_statement(statement, make_typeck_ctx(bindings, imports, available_imports, interfaces, program.statements, top_level, true, generic_struct_names, known_types));
         bindings = result.bindings;
         let mut _ci: int = 0;
         loop {
@@ -160,8 +161,12 @@ fn check_statement(statement: Statement, ctx: TypeckCtx) -> ScopeResult {
                 declared_struct = top_variable.declared_struct;
             }
         }
-        let registration = register_local_symbol(bindings, statement.name, "variable", statement.span, scope_start, false, false, elem_kind, decl_prim, declared_struct);
-        let walk_diags = walk_expression(statement.initializer, ctx);
+        let mut declared_type: string = "";
+        if statement.type_annotation != null {
+            declared_type = statement.type_annotation.text;
+        }
+        let registration = register_local_symbol(bindings, statement.name, "variable", statement.span, scope_start, false, false, elem_kind, decl_prim, declared_struct, declared_type);
+        let walk_diags = walk_expression(statement.initializer, ctx_with_expected_type(ctx, statement.type_annotation));
         let annotation_diags = check_bare_fn_type_annotation(statement.type_annotation, statement.name, statement.span);
         let array_diags = check_malformed_array_annotation(statement.type_annotation, statement.name, statement.span);
         let unknown_diags = check_unknown_type_annotation(statement.type_annotation, statement.name, statement.span, ctx.known_types, ctx.type_params);
@@ -198,7 +203,11 @@ fn check_statement(statement: Statement, ctx: TypeckCtx) -> ScopeResult {
                 diagnostics: nested_diags
             };
         }
-        let registration = register_local_function_symbol(bindings, statement.signature, "function", scope_start);
+        let mut registration = register_local_function_symbol(bindings, statement.signature, "function", scope_start);
+        if registration.diagnostics.length == 0 {
+            let last = registration.bindings.length - 1;
+            registration.bindings[last].is_top_level_function = true;
+        }
         let mut diagnostics = registration.diagnostics;
         let _sig_diags = check_function_signature(statement.signature, interfaces, top_level, ctx.known_types, ctx.type_params);
         let mut _ci: int = 0;
@@ -508,7 +517,7 @@ fn check_statement(statement: Statement, ctx: TypeckCtx) -> ScopeResult {
         };
     }
     if statement.variant == "ReturnStatement" {
-        let return_diags = walk_expression(statement.expression, ctx);
+        let return_diags = walk_expression(statement.expression, ctx_with_expected_type(ctx, enclosing_return_type));
         // A `return { ... }` is classified against the enclosing function's
         // declared return type (#1904). Gate on `in_function_body`, not
         // `!is_top_level`: a `return` in a top-level nested block (`if`/`with`/

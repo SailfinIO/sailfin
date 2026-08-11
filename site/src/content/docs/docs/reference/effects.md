@@ -64,7 +64,10 @@ Effect tokens are comma-separated within `![...]`. Order within the list is not 
 1. A direct call to an operation registered with requirement `E` must be covered by the enclosing function's declared grants (`E0400`).
 2. A call to a statically resolved function inherits that function's declared effects. Imported free functions, aliases, statically resolved member callees, and imported decorator effects are covered (`E0402`); unresolved or dynamic callees yield no guessed effect.
 3. Tests follow the same effect rules as functions.
-4. Immediately used closures are checked in their enclosing effect scope; general effect polymorphism is not shipped.
+4. Immediately used closures are checked in their enclosing effect scope. A
+   named function materialized into `fn(...) -> R ![E]` must have a source row
+   no broader than `E`, and a later call through the stored value imposes `E`
+   on its enclosing routine. General effect polymorphism is not shipped.
 5. A function's declared effects must fit a non-empty capsule `[capabilities] required` surface (`E0403`). An absent or empty surface skips this compatibility cross-check rather than acting as deny-all.
 6. Workspace capability envelopes enforce member manifests' **declared** surfaces. Inferring and auditing the complete source effect surface at workspace level is still planned.
 7. Missing effects are errors by default and carry source spans and structured fix suggestions. `SAILFIN_EFFECT_ENFORCE=warning|off` is a transitional build-path escape hatch; `sfn check` still validates.

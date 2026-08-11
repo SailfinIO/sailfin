@@ -308,6 +308,15 @@ define <ret_ty> @sfn_lambda_<id>(i8* %env, <decl_param_tys>...)
 Non-capturing lambdas use the same signature — `%env` is unused but
 present, so the call shape is uniform.
 
+Concrete synchronous top-level named functions use that shape when an exact
+`fn(...)` type is expected. The compiler emits one internal adapter per named
+function value; the adapter accepts the hidden env, ignores it, and performs a
+`musttail` call to the original function. The materialized pair contains the
+adapter pointer and `null`. A normal direct call to the same named function is
+unchanged, and raw `as * u8` address-taking still names the original C-ABI
+symbol rather than the adapter. Generic, async, nested, entry-point, and
+non-pointer-width aggregate signatures are not admitted by this v0 path.
+
 **Env-struct allocation.** Captures are packed into a per-lambda env
 struct in first-use order (deterministic across runs). The helper
 API in [`closures.sfn`](https://github.com/SailfinIO/sailfin/blob/main/compiler/src/llvm/closures.sfn)

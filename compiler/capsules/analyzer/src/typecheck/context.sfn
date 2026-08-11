@@ -28,6 +28,7 @@ struct TypeckCtx {
     // Resolution never consults this table; it is hint-only for E0420.
     available_imports: ImportSymbolTable;
     interfaces: Statement[];
+    declarations: Statement[];
     top_level: SymbolEntry[];
     is_top_level: boolean;
     in_function_body: boolean;
@@ -51,12 +52,13 @@ struct TypeckCtx {
 }
 
 // Root context for a walk: top-level scope, no enclosing return type.
-fn make_typeck_ctx(bindings: SymbolEntry[], imports: ImportSymbolTable, available_imports: ImportSymbolTable, interfaces: Statement[], top_level: SymbolEntry[], is_top_level: boolean, generic_struct_names: string[], known_types: string[]) -> TypeckCtx {
+fn make_typeck_ctx(bindings: SymbolEntry[], imports: ImportSymbolTable, available_imports: ImportSymbolTable, interfaces: Statement[], declarations: Statement[], top_level: SymbolEntry[], is_top_level: boolean, generic_struct_names: string[], known_types: string[]) -> TypeckCtx {
     return TypeckCtx {
         bindings: bindings,
         imports: imports,
         available_imports: available_imports,
         interfaces: interfaces,
+        declarations: declarations,
         top_level: top_level,
         is_top_level: is_top_level,
         in_function_body: false,
@@ -80,6 +82,7 @@ fn ctx_with_type_params(ctx: TypeckCtx, names: string[]) -> TypeckCtx {
         imports: ctx.imports,
         available_imports: ctx.available_imports,
         interfaces: ctx.interfaces,
+        declarations: ctx.declarations,
         top_level: ctx.top_level,
         is_top_level: ctx.is_top_level,
         in_function_body: ctx.in_function_body,
@@ -103,6 +106,7 @@ fn ctx_with_bindings(ctx: TypeckCtx, bindings: SymbolEntry[], scope_start: int) 
         imports: ctx.imports,
         available_imports: ctx.available_imports,
         interfaces: ctx.interfaces,
+        declarations: ctx.declarations,
         top_level: ctx.top_level,
         is_top_level: false,
         in_function_body: ctx.in_function_body,
@@ -124,12 +128,34 @@ fn ctx_enter_body(ctx: TypeckCtx, bindings: SymbolEntry[], return_type: TypeAnno
         imports: ctx.imports,
         available_imports: ctx.available_imports,
         interfaces: ctx.interfaces,
+        declarations: ctx.declarations,
         top_level: ctx.top_level,
         is_top_level: false,
         in_function_body: true,
         scope_start: 0,
         enclosing_return_type: return_type,
         expected_type: null,
+        generic_struct_names: ctx.generic_struct_names,
+        known_types: ctx.known_types,
+        type_params: ctx.type_params
+    };
+}
+
+// Apply one local expected type to the next expression walk. Recursive arms
+// replace it for children whose own position supplies a stronger expectation.
+fn ctx_with_expected_type(ctx: TypeckCtx, expected_type: TypeAnnotation?) -> TypeckCtx {
+    return TypeckCtx {
+        bindings: ctx.bindings,
+        imports: ctx.imports,
+        available_imports: ctx.available_imports,
+        interfaces: ctx.interfaces,
+        declarations: ctx.declarations,
+        top_level: ctx.top_level,
+        is_top_level: ctx.is_top_level,
+        in_function_body: ctx.in_function_body,
+        scope_start: ctx.scope_start,
+        enclosing_return_type: ctx.enclosing_return_type,
+        expected_type: expected_type,
         generic_struct_names: ctx.generic_struct_names,
         known_types: ctx.known_types,
         type_params: ctx.type_params

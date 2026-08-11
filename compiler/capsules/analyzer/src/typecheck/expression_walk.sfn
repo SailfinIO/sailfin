@@ -2,7 +2,9 @@
 //
 // The expression walk: recursive type/scope checking of every expression
 // form, dispatching to the per-rule modules for the specific checks.
-import { Expression, SourceSpan } from "sfn/syntax";
+import { parse_fn_type_text } from "sfn/ir";
+import { ends_with, substring } from "sfn/strings";
+import { Expression, SourceSpan, TypeAnnotation } from "sfn/syntax";
 
 import { lookup_imported_function } from "../effect_imports";
 import { Diagnostic } from "../typecheck_types";
@@ -16,6 +18,7 @@ import {
 import { make_nested_fn_capture_diagnostic, make_undefined_function_diagnostic } from "../typecheck_types/declaration_and_statement_checks";
 import { make_parse_error_diagnostic } from "../typecheck_types/expr_type_rules";
 import { is_builtin_call_name, is_builtin_member_root } from "../typecheck_types/extern_abi";
+import { check_named_fn_value_compatibility } from "../typecheck_types/named_fn_values";
 import {
     SymbolEntry,
     check_char_literal_raw,
@@ -30,6 +33,7 @@ import {
     make_fn_value_position_diagnostic,
     register_local_symbol
 } from "../typecheck_types/symbol_table_and_raw_exprs";
+import { trim_text } from "../typecheck_types/text_utils";
 import { check_intersection_value_type_annotation, check_object_literal_target } from "../typecheck_types/value_and_object_checks";
 import {
     _struct_arithmetic_diagnostics,
@@ -43,7 +47,12 @@ import {
     check_spawn_expression,
     push_spawn_handle_diagnostics
 } from "./concurrency_rules";
-import { TypeckCtx, ctx_enter_body, ctx_with_bindings } from "./context";
+import {
+    TypeckCtx,
+    ctx_enter_body,
+    ctx_with_bindings,
+    ctx_with_expected_type
+} from "./context";
 import { _serve_resolves_to_user_fn } from "./patterns";
 import {
     call_argument_type_diagnostics,
@@ -69,7 +78,7 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
         let mut diagnostics: Diagnostic[] = [];
         if expression.callee != null {
             if expression.callee.variant != "Identifier" {
-                diagnostics = walk_expression(expression.callee, ctx);
+                diagnostics = walk_expression(expression.callee, ctx_with_expected_type(ctx, null));
             }
         }
         // #812: a bare-identifier callee that resolves to neither an
@@ -111,7 +120,7 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
         let mut index: int = 0;
         loop {
             if index >= expression.arguments.length { break; }
-            diagnostics = diagnostics.concat(walk_expression(expression.arguments[index], ctx));
+            diagnostics = diagnostics.concat(walk_expression(expression.arguments[index], ctx_with_expected_type(ctx, _call_argument_expected_type(expression, index, ctx))));
             index += 1;
         }
         // `ch.send(v)` on a `Channel<T>`-annotated receiver enforces the
@@ -132,8 +141,9 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
         return diagnostics;
     }
     if expression.variant == "Binary" {
-        let mut diagnostics = walk_expression(expression.left, ctx);
-        diagnostics = diagnostics.concat(walk_expression(expression.right, ctx));
+        let child_ctx = ctx_with_expected_type(ctx, null);
+        let mut diagnostics = walk_expression(expression.left, child_ctx);
+        diagnostics = diagnostics.concat(walk_expression(expression.right, child_ctx));
         // `a + b` mixing a proven `int` and `float` operand -> E0306 (SFN-385).
         // Silent unless both operands' numeric kinds are known and differ, so it
         // rejects exactly the arithmetic the lowerer would fatal on ("ABI
@@ -150,7 +160,7 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
         // `Raw`), the operand `Identifier` reaches the `Identifier` arm below,
         // which emits E0808 for a function used in value position — preserving
         // the prior `check_fn_reference_raw` `& fn` behavior.
-        return walk_expression(expression.operand, ctx);
+        return walk_expression(expression.operand, ctx_with_expected_type(ctx, null));
     }
     if expression.variant == "Member" {
         // A bare-identifier member *object* is a receiver / namespace
@@ -177,19 +187,21 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
                 return [make_undefined_value_diagnostic(receiver.name, receiver.span)];
             }
         }
-        return walk_expression(expression.object, ctx);
+        return walk_expression(expression.object, ctx_with_expected_type(ctx, null));
     }
     if expression.variant == "Index" {
-        let mut diagnostics = walk_expression(expression.sequence, ctx);
-        diagnostics = diagnostics.concat(walk_expression(expression.index, ctx));
+        let child_ctx = ctx_with_expected_type(ctx, null);
+        let mut diagnostics = walk_expression(expression.sequence, child_ctx);
+        diagnostics = diagnostics.concat(walk_expression(expression.index, child_ctx));
         return diagnostics;
     }
     if expression.variant == "Array" {
         let mut diagnostics: Diagnostic[] = [];
+        let element_expected = _array_element_expected_type(ctx.expected_type);
         let mut index: int = 0;
         loop {
             if index >= expression.elements.length { break; }
-            diagnostics = diagnostics.concat(walk_expression(expression.elements[index], ctx));
+            diagnostics = diagnostics.concat(walk_expression(expression.elements[index], ctx_with_expected_type(ctx, element_expected)));
             index += 1;
         }
         return diagnostics;
@@ -199,7 +211,7 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
         let mut index: int = 0;
         loop {
             if index >= expression.fields.length { break; }
-            diagnostics = diagnostics.concat(walk_expression(expression.fields[index].value, ctx));
+            diagnostics = diagnostics.concat(walk_expression(expression.fields[index].value, ctx_with_expected_type(ctx, null)));
             index += 1;
         }
         return diagnostics;
@@ -209,7 +221,9 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
         let mut index: int = 0;
         loop {
             if index >= expression.fields.length { break; }
-            diagnostics = diagnostics.concat(walk_expression(expression.fields[index].value, ctx));
+            let field = expression.fields[index];
+            let field_expected = _struct_field_expected_type(expression.type_name, field.name, ctx);
+            diagnostics = diagnostics.concat(walk_expression(field.value, ctx_with_expected_type(ctx, field_expected)));
             index += 1;
         }
         return diagnostics;
@@ -239,11 +253,15 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
                 param_prim = classify_declared_primitive(param.type_annotation.text);
             }
             let declared_struct = _declared_struct_annotation(param.type_annotation, body_bindings, ctx.type_params);
-            let registration = register_local_symbol(body_bindings, param.name, "parameter", param.span, param_scope_start, false, false, param_array, param_prim, declared_struct);
+            let mut param_type: string = "";
+            if param.type_annotation != null {
+                param_type = param.type_annotation.text;
+            }
+            let registration = register_local_symbol(body_bindings, param.name, "parameter", param.span, param_scope_start, false, false, param_array, param_prim, declared_struct, param_type);
             body_bindings = registration.bindings;
             diagnostics = diagnostics.concat(registration.diagnostics);
             let default_ctx = ctx_with_bindings(ctx, default_bindings, param_scope_start);
-            diagnostics = diagnostics.concat(walk_expression(param.default_value, default_ctx));
+            diagnostics = diagnostics.concat(walk_expression(param.default_value, ctx_with_expected_type(default_ctx, param.type_annotation)));
             diagnostics = diagnostics.concat(check_expected_primitive_type(param.default_value, param.type_annotation, default_bindings, "default for `"
                 + param.name
                 + "`", param.name, param.span));
@@ -284,15 +302,16 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
         return diagnostics;
     }
     if expression.variant == "Range" {
-        let mut diagnostics = walk_expression(expression.start, ctx);
-        diagnostics = diagnostics.concat(walk_expression(expression.end, ctx));
+        let child_ctx = ctx_with_expected_type(ctx, null);
+        let mut diagnostics = walk_expression(expression.start, child_ctx);
+        diagnostics = diagnostics.concat(walk_expression(expression.end, child_ctx));
         return diagnostics;
     }
     if expression.variant == "Conditional" {
         // Ternary `cond ? then : else` (#1690) — recurse into all three
         // children so nested diagnostics (undefined symbols, parse-error
         // nodes, removed-keyword statements) inside any branch still fire.
-        let mut diagnostics = walk_expression(expression.condition, ctx);
+        let mut diagnostics = walk_expression(expression.condition, ctx_with_expected_type(ctx, null));
         diagnostics = diagnostics.concat(walk_expression(expression.then_value, ctx));
         diagnostics = diagnostics.concat(walk_expression(expression.else_value, ctx));
         // #1715: constrain the condition to boolean and unify the two branch
@@ -308,8 +327,9 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
         // Assignment `target <op> rhs` (#1627 Part D) — recurse into both
         // sides so diagnostics (undefined symbols, fn-value misuse, nested
         // parse-error nodes) in the lvalue and the rvalue still fire.
-        let mut diagnostics = walk_expression(expression.target, ctx);
-        diagnostics = diagnostics.concat(walk_expression(expression.rhs, ctx));
+        let mut diagnostics = walk_expression(expression.target, ctx_with_expected_type(ctx, null));
+        let rhs_expected = _assignment_expected_type(expression.target, ctx);
+        diagnostics = diagnostics.concat(walk_expression(expression.rhs, ctx_with_expected_type(ctx, rhs_expected)));
         return diagnostics;
     }
     if expression.variant == "Cast" {
@@ -335,7 +355,7 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
                 }
             }
         }
-        return cast_target_diags.concat(walk_expression(expression.operand, ctx));
+        return cast_target_diags.concat(walk_expression(expression.operand, ctx_with_expected_type(ctx, null)));
     }
     if expression.variant == "Is" {
         // Type-guard `x is T` (#1753) — recurse into the operand so inner
@@ -349,10 +369,10 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
         // (E0013, SFN-555): `x is Text` names an enum VARIANT as often as a
         // type, and variant names are not in the type registry. Judging it
         // rejects the valid narrowing form.
-        return walk_expression(expression.operand, ctx);
+        return walk_expression(expression.operand, ctx_with_expected_type(ctx, null));
     }
     if expression.variant == "TryOperator" {
-        return walk_expression(expression.operand, ctx);
+        return walk_expression(expression.operand, ctx_with_expected_type(ctx, null));
     }
     // Concurrency nodes (issue #1082). Recurse into operands so inner
     // diagnostics still fire. The only statically-sound live rule is E0813:
@@ -362,25 +382,25 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
     // (E0815) all need expression-type inference (#829, out of scope) and
     // ship as helpers exercised by `concurrency_typecheck_test.sfn`.
     if expression.variant == "Spawn" {
-        let mut diagnostics = walk_expression(expression.operand, ctx);
+        let mut diagnostics = walk_expression(expression.operand, ctx_with_expected_type(ctx, null));
         if expression.operand.variant == "Lambda" {
             diagnostics = diagnostics.concat(check_spawn_expression(expression));
         }
         return diagnostics;
     }
     if expression.variant == "Await" {
-        return walk_expression(expression.operand, ctx);
+        return walk_expression(expression.operand, ctx_with_expected_type(ctx, null));
     }
     if expression.variant == "Channel" {
         if expression.capacity == null { return []; }
-        return walk_expression(expression.capacity, ctx);
+        return walk_expression(expression.capacity, ctx_with_expected_type(ctx, null));
     }
     if expression.variant == "Parallel" {
         let mut diagnostics: Diagnostic[] = [];
         let mut index: int = 0;
         loop {
             if index >= expression.tasks.length { break; }
-            diagnostics = diagnostics.concat(walk_expression(expression.tasks[index], ctx));
+            diagnostics = diagnostics.concat(walk_expression(expression.tasks[index], ctx_with_expected_type(ctx, null)));
             index += 1;
         }
         return diagnostics;
@@ -396,9 +416,10 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
         // in scope. The bare builtin concurrency serve keeps its permissive
         // treatment (its handler is passed straight through to `@sfn_serve`).
         if _serve_resolves_to_user_fn(bindings) {
-            let mut diagnostics = walk_expression(expression.handler, ctx);
+            let child_ctx = ctx_with_expected_type(ctx, null);
+            let mut diagnostics = walk_expression(expression.handler, child_ctx);
             if expression.port != null {
-                diagnostics = diagnostics.concat(walk_expression(expression.port, ctx));
+                diagnostics = diagnostics.concat(walk_expression(expression.port, child_ctx));
             }
             diagnostics = diagnostics.concat(serve_argument_type_diagnostics(expression, bindings));
             return diagnostics;
@@ -416,10 +437,10 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
                 diagnostics.push(make_nested_fn_capture_diagnostic(handler.name, handler.span));
             }
         } else {
-            diagnostics = diagnostics.concat(walk_expression(expression.handler, ctx));
+            diagnostics = diagnostics.concat(walk_expression(expression.handler, ctx_with_expected_type(ctx, null)));
         }
         if expression.port != null {
-            diagnostics = diagnostics.concat(walk_expression(expression.port, ctx));
+            diagnostics = diagnostics.concat(walk_expression(expression.port, ctx_with_expected_type(ctx, null)));
         }
         // A source-level function named `serve` may still reach this branch
         // when parser/effect disambiguation treats the spelling as builtin.
@@ -461,7 +482,28 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
             if strings_equal(entry.kind, "outer_local") {
                 return [make_nested_fn_capture_diagnostic(expression.name, expression.span)];
             }
+            if ctx.expected_type != null {
+                let expected = parse_fn_type_text(ctx.expected_type.text);
+                if expected.ok {
+                    if strings_equal(entry.kind, "import") || strings_equal(entry.kind, "prelude") {
+                        // Import/prelude placeholders do not carry a complete
+                        // callable signature. Fail closed until parameter,
+                        // generic, async, and ABI metadata cross this boundary.
+                        return [make_fn_value_position_diagnostic(expression.name, expression.span)];
+                    }
+                }
+            }
             if is_function_kind(entry.kind) {
+                if strings_equal(entry.kind, "function") {
+                    if entry.is_top_level_function {
+                        if ctx.expected_type != null {
+                            let expected = parse_fn_type_text(ctx.expected_type.text);
+                            if expected.ok {
+                                return check_named_fn_value_compatibility(expression.name, entry, ctx.expected_type.text, expression.span);
+                            }
+                        }
+                    }
+                }
                 return [make_fn_value_position_diagnostic(expression.name, expression.span)];
             }
         }
@@ -491,6 +533,77 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
         return check_unanalyzable_raw(expression.text, expression.span);
     }
     return [];
+}
+
+fn _call_argument_expected_type(expression: Expression, index: int, ctx: TypeckCtx) -> TypeAnnotation? {
+    if expression.callee == null { return null; }
+    if expression.callee.variant != "Identifier" { return null; }
+    let mut entry = find_value_symbol(ctx.bindings, expression.callee.name);
+    if entry == null {
+        entry = find_value_symbol(ctx.top_level, expression.callee.name);
+    }
+    if entry == null { return null; }
+    if is_function_kind(entry.kind) {
+        if index >= entry.function_parameter_types.length { return null; }
+        return TypeAnnotation {
+            text: entry.function_parameter_types[index]
+        };
+    }
+    if entry.declared_type.length == 0 { return null; }
+    let fn_type = parse_fn_type_text(entry.declared_type);
+    if !fn_type.ok { return null; }
+    if index >= fn_type.param_types.length { return null; }
+    return TypeAnnotation { text: fn_type.param_types[index] };
+}
+
+fn _assignment_expected_type(target: Expression, ctx: TypeckCtx) -> TypeAnnotation? {
+    if target.variant != "Identifier" { return null; }
+    let mut entry = find_value_symbol(ctx.bindings, target.name);
+    if entry == null {
+        entry = find_value_symbol(ctx.top_level, target.name);
+    }
+    if entry == null { return null; }
+    if entry.declared_type.length == 0 { return null; }
+    return TypeAnnotation { text: entry.declared_type };
+}
+
+fn _array_element_expected_type(expected: TypeAnnotation?) -> TypeAnnotation? {
+    if expected == null { return null; }
+    let text = trim_text(expected.text);
+    if !ends_with(text, "[]") { return null; }
+    let mut element = trim_text(substring(text, 0, text.length - 2));
+    if element.length >= 2 {
+        if substring(element, 0, 1) == "(" {
+            if substring(element, element.length - 1, element.length) == ")" {
+                element = trim_text(substring(element, 1, element.length - 1));
+            }
+        }
+    }
+    return TypeAnnotation { text: element };
+}
+
+fn _struct_field_expected_type(type_name: string[], field_name: string, ctx: TypeckCtx) -> TypeAnnotation? {
+    if type_name.length == 0 { return null; }
+    let name = type_name[type_name.length - 1];
+    let mut declaration_index: int = 0;
+    loop {
+        if declaration_index >= ctx.declarations.length { break; }
+        let declaration = ctx.declarations[declaration_index];
+        if declaration.variant == "StructDeclaration" {
+            if declaration.name == name {
+                let mut field_index: int = 0;
+                loop {
+                    if field_index >= declaration.fields.length { break; }
+                    if declaration.fields[field_index].name == field_name {
+                        return declaration.fields[field_index].type_annotation;
+                    }
+                    field_index += 1;
+                }
+            }
+        }
+        declaration_index += 1;
+    }
+    return null;
 }
 
 // Walk a match-arm pattern for diagnostics, exempting the `Raw` shorthand

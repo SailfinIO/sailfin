@@ -1,0 +1,158 @@
+// compiler/capsules/analyzer/src/typecheck_types/named_fn_values.sfn
+//
+// Compatibility and ABI checks for named functions used as typed values.
+import { parse_fn_type_text } from "sfn/ir";
+import { starts_with } from "sfn/strings";
+import { SourceSpan } from "sfn/syntax";
+
+import { effect_subsumes, is_universally_allowed_effect } from "../effect_taxonomy";
+import { Diagnostic } from "../typecheck_types";
+import { is_extern_primitive_type } from "./extern_abi";
+import { SymbolEntry, make_fn_value_position_diagnostic } from "./symbol_table_and_raw_exprs";
+import { token_from_name, trim_text, typecheck_int_to_string } from "./text_utils";
+
+// Validate a concrete named function against the `fn(...)` type expected at a
+// value-materialization site (SFEP-0030 D2/D3). The effect row is coercible
+// only when every source effect is covered by the expected row under the
+// SFEP-0017 subsumption lattice.
+fn check_named_fn_value_compatibility(name: string, entry: SymbolEntry, expected_text: string, span: SourceSpan?) -> Diagnostic[] {
+    let expected = parse_fn_type_text(expected_text);
+    if !expected.ok {
+        return [make_fn_value_position_diagnostic(name, span)];
+    }
+    if entry.is_generic {
+        return [make_fn_value_position_diagnostic(name, span)];
+    }
+    if entry.function_is_async {
+        return [_make_fn_value_type_diagnostic(name, "async functions do not use the synchronous function-value ABI", span)];
+    }
+    if name == "main" {
+        return [_make_fn_value_type_diagnostic(name, "the program entry point has a distinct C wrapper ABI", span)];
+    }
+    if entry.function_parameter_types.length != expected.param_types.length {
+        return [_make_fn_value_type_diagnostic(name, "parameter count does not match expected type `"
+            + expected_text
+            + "`", span)];
+    }
+    let mut index: int = 0;
+    loop {
+        if index >= entry.function_parameter_types.length { break; }
+        let actual_param = trim_text(entry.function_parameter_types[index]);
+        let expected_param = trim_text(expected.param_types[index]);
+        if !_fn_value_types_equal(actual_param, expected_param) {
+            return [_make_fn_value_type_diagnostic(name, "parameter "
+                + typecheck_int_to_string(index
+                + 1)
+                + " has type `"
+                + actual_param
+                + "`, expected `"
+                + expected_param
+                + "`", span)];
+        }
+        index += 1;
+    }
+    if !_fn_value_types_equal(entry.function_return_type, expected.return_type) {
+        return [_make_fn_value_type_diagnostic(name, "return type `" + entry.function_return_type
+            + "` does not match expected `"
+            + expected.return_type
+            + "`", span)];
+    }
+    let mut effect_index: int = 0;
+    loop {
+        if effect_index >= entry.function_effects.length { break; }
+        let effect = trim_text(entry.function_effects[effect_index]);
+        if !is_universally_allowed_effect(effect) {
+            if !_fn_value_effect_is_covered(expected.effects, effect) {
+                return [_make_fn_value_type_diagnostic(name, "effect !["
+                    + effect
+                    + "] exceeds expected function-value effects", span)];
+            }
+        }
+        effect_index += 1;
+    }
+    index = 0;
+    loop {
+        if index >= entry.function_parameter_types.length { break; }
+        if !_fn_value_type_is_pointer_width(entry.function_parameter_types[index], false) {
+            return [_make_fn_value_abi_diagnostic(name, entry.function_parameter_types[index], "parameter", span)];
+        }
+        index += 1;
+    }
+    if !_fn_value_type_is_pointer_width(entry.function_return_type, true) {
+        return [_make_fn_value_abi_diagnostic(name, entry.function_return_type, "return", span)];
+    }
+    return [];
+}
+
+fn _fn_value_types_equal(actual_text: string, expected_text: string) -> boolean {
+    let actual = trim_text(actual_text);
+    let expected = trim_text(expected_text);
+    if actual == expected { return true; }
+    if actual.length == 0 {
+        if expected == "void" { return true; }
+    }
+    if expected.length == 0 {
+        if actual == "void" { return true; }
+    }
+    if actual == "bool" {
+        if expected == "boolean" { return true; }
+    }
+    if actual == "boolean" {
+        if expected == "bool" { return true; }
+    }
+    return false;
+}
+
+fn _fn_value_effect_is_covered(expected_effects: string[], actual_effect: string) -> boolean {
+    let mut index: int = 0;
+    loop {
+        if index >= expected_effects.length { break; }
+        if effect_subsumes(trim_text(expected_effects[index]), actual_effect) {
+            return true;
+        }
+        index += 1;
+    }
+    return false;
+}
+
+// The v0 indirect closure seam is sound only for scalar/pointer callback
+// signatures. Strings, arrays, function pairs, optionals/unions, and named
+// value types are aggregates.
+fn _fn_value_type_is_pointer_width(type_text: string, allow_void: boolean) -> boolean {
+    let text = trim_text(type_text);
+    if text.length == 0 { return allow_void; }
+    if text == "void" { return allow_void; }
+    if is_extern_primitive_type(text) { return true; }
+    if text == "number" || text == "boolean" || text == "ptr" { return true; }
+    if starts_with(text, "*") { return true; }
+    return false;
+}
+
+fn _make_fn_value_type_diagnostic(name: string, reason: string, span: SourceSpan?) -> Diagnostic {
+    return Diagnostic {
+        code: "E0839",
+        severity: "error",
+        message: "function `" + name
+            + "` cannot fill this function-value slot: "
+            + reason,
+        file_path: "",
+        primary: token_from_name(name, span),
+        suggestion: null
+    };
+}
+
+fn _make_fn_value_abi_diagnostic(name: string, type_text: string, position: string, span: SourceSpan?) -> Diagnostic {
+    return Diagnostic {
+        code: "E0840",
+        severity: "error",
+        message: "function value `" + name
+            + "` has non-pointer-width aggregate "
+            + position
+            + " type `"
+            + trim_text(type_text)
+            + "`; aggregate function-value signatures require monomorphized ABI support",
+        file_path: "",
+        primary: token_from_name(name, span),
+        suggestion: null
+    };
+}

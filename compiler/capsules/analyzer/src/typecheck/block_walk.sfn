@@ -31,6 +31,7 @@ import {
     TypeckCtx,
     ctx_enter_body,
     ctx_with_bindings,
+    ctx_with_expected_type,
     ctx_with_type_params
 } from "./context";
 import { walk_expression, walk_match_pattern } from "./expression_walk";
@@ -109,7 +110,11 @@ fn walk_block_expressions(block: Block, ctx: TypeckCtx) -> Diagnostic[] {
                 }
             }
             let declared_struct = _declared_struct_annotation(statement.type_annotation, bindings, ctx.type_params);
-            let registration = register_local_symbol(bindings, statement.name, "variable", statement.span, scope_start, false, false, elem_kind, decl_prim, declared_struct);
+            let mut declared_type: string = "";
+            if statement.type_annotation != null {
+                declared_type = statement.type_annotation.text;
+            }
+            let registration = register_local_symbol(bindings, statement.name, "variable", statement.span, scope_start, false, false, elem_kind, decl_prim, declared_struct, declared_type);
             bindings = registration.bindings;
         }
         index += 1;
@@ -122,7 +127,7 @@ fn walk_statement_expressions(statement: Statement, ctx: TypeckCtx) -> Diagnosti
         return walk_expression(statement.expression, ctx);
     }
     if statement.variant == "ReturnStatement" {
-        let return_diags = walk_expression(statement.expression, ctx);
+        let return_diags = walk_expression(statement.expression, ctx_with_expected_type(ctx, ctx.enclosing_return_type));
         // A lambda-body `return { ... }` is classified against the lambda's
         // declared return type (installed as `ctx.enclosing_return_type` by
         // the `Lambda` branch's `ctx_enter_body`) — the #1905 lambda-return
@@ -135,7 +140,7 @@ fn walk_statement_expressions(statement: Statement, ctx: TypeckCtx) -> Diagnosti
         return walk_expression(statement.expression, ctx);
     }
     if statement.variant == "VariableDeclaration" {
-        let init_diags = walk_expression(statement.initializer, ctx);
+        let init_diags = walk_expression(statement.initializer, ctx_with_expected_type(ctx, statement.type_annotation));
         let annotation_diags = check_bare_fn_type_annotation(statement.type_annotation, statement.name, statement.span);
         let array_diags2 = check_malformed_array_annotation(statement.type_annotation, statement.name, statement.span);
         let unknown_diags2 = check_unknown_type_annotation(statement.type_annotation, statement.name, statement.span, ctx.known_types, ctx.type_params);

@@ -52,6 +52,37 @@ fn main() {
 
 **Out of scope for `E0420`:** member/method callees (`obj.method()`) are not name-resolved here — the member name is never flagged; undefined *variable* references (a bare identifier used as a value, not a callee) are a separate concern; and argument *types* are not checked by this rule.
 
+## Named function values
+
+A concrete synchronous module-local top-level function may be used without a wrapper where
+the surrounding expression supplies an exact `fn(...)` type:
+
+```sfn
+fn double(x: int) -> int { return x * 2; }
+fn apply(cb: fn (int) -> int, x: int) -> int { return cb(x); }
+fn choose() -> fn (int) -> int { return double; }
+
+let callback: fn (int) -> int = double;
+let result = apply(double, 5);
+```
+
+Expected function types are supplied by typed variable initializers and
+assignments, call arguments, return positions, typed collection elements, and
+struct initializers. The parameter and return types must match exactly. A
+source effect row must be no broader than the expected row: for example,
+`![io.fs]` may fill a `![io]` slot, but the reverse is rejected. Calling the
+stored value imposes the effect row written in its `fn(...)` type.
+
+A normal `double(5)` call remains direct. A materialized value uses the uniform
+two-word closure representation described in the runtime ABI reference, with a
+null environment. Generic, nested, `async`, and entry-point functions are not
+eligible. This v0 path admits scalar and pointer parameter/return types only;
+aggregate signatures such as `fn(string) -> string` are rejected with `E0840`.
+Using a bare function name without an expected `fn(...)` type remains `E0808`.
+Imported/prelude function names are not yet eligible because their full callable
+signature proof does not cross the module boundary. Fn-typed struct member
+dispatch is not yet shipped.
+
 ## Anonymous functions (lambdas)
 
 An anonymous function is written with a leading `fn`, a parenthesized parameter list, an optional `-> ReturnType`, and a body. The body is either a `{ ... }` **block** or, for the additive expression-bodied **short form**, `=> expr`:

@@ -68,7 +68,11 @@ fn seed_parameter_scope(signature: FunctionSignature, ctx: TypeckCtx) -> ScopeRe
             param_array = declared_array_marker(parameter.type_annotation.text);
         }
         let declared_struct = _declared_struct_annotation(parameter.type_annotation, ctx.top_level, ctx.type_params);
-        let registration = register_local_symbol(bindings, parameter.name, "parameter", parameter.span, param_scope_start, false, false, param_array, param_prim, declared_struct);
+        let mut param_type: string = "";
+        if parameter.type_annotation != null {
+            param_type = parameter.type_annotation.text;
+        }
+        let registration = register_local_symbol(bindings, parameter.name, "parameter", parameter.span, param_scope_start, false, false, param_array, param_prim, declared_struct, param_type);
         bindings = registration.bindings;
         let mut _ci: int = 0;
         loop {
@@ -157,7 +161,7 @@ fn _build_nested_fn_scope(signature: FunctionSignature, ctx: TypeckCtx) -> Scope
         if !has_symbol(ctx.top_level, entry.name) {
             if !is_function_kind(entry.kind) {
                 scope.push(SymbolEntry {
-                    name: entry.name, kind: "outer_local", span: entry.span, is_generic: false, is_c_abi: false, element_kind: "", declared_prim: "", declared_struct: ""
+                    name: entry.name, kind: "outer_local", span: entry.span, is_generic: false, is_c_abi: false, element_kind: "", declared_prim: "", declared_struct: "", declared_type: entry.declared_type, function_parameter_types: [], function_return_type: "", function_effects: [], function_is_async: false, is_top_level_function: false
                 });
             }
         }
@@ -196,7 +200,11 @@ fn _build_nested_fn_scope(signature: FunctionSignature, ctx: TypeckCtx) -> Scope
             nparam_array = declared_array_marker(parameter.type_annotation.text);
         }
         let declared_struct = _declared_struct_annotation(parameter.type_annotation, scope, param_type_params);
-        let registration = register_local_symbol(scope, parameter.name, "parameter", parameter.span, param_scope_start, false, false, nparam_array, nparam_prim, declared_struct);
+        let mut param_type: string = "";
+        if parameter.type_annotation != null {
+            param_type = parameter.type_annotation.text;
+        }
+        let registration = register_local_symbol(scope, parameter.name, "parameter", parameter.span, param_scope_start, false, false, nparam_array, nparam_prim, declared_struct, param_type);
         scope = registration.bindings;
         let mut _ci: int = 0;
         loop {

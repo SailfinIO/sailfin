@@ -25,7 +25,7 @@ import { array_pointer_element_type } from "../arrays";
 import { find_parameter_binding } from "./core_bindings";
 import { lower_call_expression } from "./core_call_lowering";
 import { find_call_site, split_call_arguments } from "./core_calls";
-import { _compute_function_pointer_type } from "./core_closure_lowering";
+import { _compute_function_pointer_type, _lower_named_fn_value } from "./core_closure_lowering";
 import { try_lower_channel_method, try_lower_tostring_method } from "./core_concurrency_lowering";
 import { lower_index_expression } from "./core_index_lowering";
 import { lower_array_literal, lower_enum_literal, lower_struct_literal } from "./core_literals_lowering";
@@ -363,6 +363,16 @@ fn lower_postfix_expression(expression: string, stripped: string, bindings: Para
     // site (as closure dispatch does), not reuse this text.
     let fn_reference = find_function_by_name_or_import(functions, stripped);
     if fn_reference != null {
+        if trim_text(expected_type) == "{i8*, i8*}" {
+            let materialized = _lower_named_fn_value(fn_reference, context, temp_index, lines);
+            return ExpressionResult {
+                lines: materialized.lines,
+                temp_index: materialized.temp_index,
+                operand: materialized.operand,
+                diagnostics: materialized.diagnostics,
+                string_constants: empty_constants
+            };
+        }
         let fn_ptr_type = _compute_function_pointer_type(fn_reference, context);
         let cast_temp = format_temp_name(temp_index);
         lines.push("  " + cast_temp + " = bitcast " + fn_ptr_type + " @"

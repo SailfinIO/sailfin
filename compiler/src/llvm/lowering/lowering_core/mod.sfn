@@ -101,7 +101,8 @@ import { _decorator_import_local_names } from "./decorator_imports";
 import {
     _append_missing_opaque_forward_decls,
     dedup_module_declare_lines,
-    hoist_closure_env_type_decls
+    hoist_closure_env_type_decls,
+    hoist_named_fn_value_adapters
 } from "./finalization";
 
 fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_arg: ParseNativeResult, import_context: ImportedModuleContext, mangle_symbols: boolean, native_text_override_path_in: string) -> LoweredLLVMLinesResult {
@@ -594,6 +595,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_ar
     // we lift the hints to the preamble — right after the
     // `source_filename` line — with dedup by type name.
     lines = hoist_closure_env_type_decls(lines);
+    lines = hoist_named_fn_value_adapters(lines);
 
     // ── Mangling ────────────────────────────────────────────────────
     let effective_mangle_symbols = mangle_symbols;

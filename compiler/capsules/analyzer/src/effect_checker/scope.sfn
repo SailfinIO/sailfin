@@ -1,6 +1,7 @@
 // compiler/capsules/analyzer/src/effect_checker/scope.sfn
 //
 // Lexical function-scope discovery and effect-table shadowing.
+import { parse_fn_type_text } from "sfn/ir";
 import {
     Block,
     Expression,
@@ -287,13 +288,23 @@ fn _suppress_shadowing_params(imports: ImportSymbolTable, parameters: Parameter[
     let mut i: int = 0;
     loop {
         if i >= parameters.length { break; }
-        let pname = parameters[i].name;
-        if lookup_imported_function(table, pname) != null {
+        let parameter = parameters[i];
+        let pname = parameter.name;
+        let mut fn_effects: string[] = [];
+        let mut is_fn_value: boolean = false;
+        if parameter.type_annotation != null {
+            let parsed = parse_fn_type_text(parameter.type_annotation.text);
+            if parsed.ok {
+                is_fn_value = true;
+                fn_effects = parsed.effects;
+            }
+        }
+        if is_fn_value || lookup_imported_function(table, pname) != null {
             if !copied {
                 table = _copy_effect_table(table);
                 copied = true;
             }
-            table = append_local_function(table, pname, []);
+            table = append_local_function(table, pname, fn_effects);
         }
         i += 1;
     }
