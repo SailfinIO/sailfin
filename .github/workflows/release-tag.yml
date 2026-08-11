@@ -494,6 +494,22 @@ jobs:
           set -euo pipefail
           bash .release-gates/scripts/verify-release-payloads.sh dist "${RELEASE_TAG#v}"
 
+      # Payload completeness, distinct from payload presence above: every
+      # capsule in the runtime's transitive dependency closure must be staged
+      # inside each installer tarball, with its sources and its manifest. A
+      # payload that is present but incomplete link-fails every user program
+      # on a fresh install. Kept as its own step rather than folded into the
+      # presence gate, which stays a pure "are the required files here" check.
+      - name: Verify installer payload dependency closure (all platforms)
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          for label in linux_x86_64 linux_arm64 macos_arm64 windows_x86_64; do
+            bash .release-gates/scripts/verify-payload-dep-closure.sh \
+              "dist/sailfin_${version}_${label}.tar.gz"
+          done
+
       # Supply-chain root: publish a signed SHA256SUMS manifest over the release
       # assets so `sfn` can verify a fetched toolchain against the public key
       # embedded in the binary. Trust model: docs/release-signing.md, SFEP-0046 §3.5.

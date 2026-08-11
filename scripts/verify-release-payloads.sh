@@ -39,9 +39,3 @@ if [ "${#missing[@]}" -ne 0 ]; then
 fi
 
 echo "[release-payloads] verified ${#required[@]} required payloads for ${version}"
-
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-installer_labels=(linux_x86_64 linux_arm64 macos_arm64 windows_x86_64)
-for label in "${installer_labels[@]}"; do
-    bash "${script_dir}/verify-payload-dep-closure.sh" "${payload_dir}/sailfin_${version}_${label}.tar.gz"
-done

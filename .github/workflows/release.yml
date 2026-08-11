@@ -108,7 +108,8 @@ jobs:
           fi
           echo "Current version: $current"
 
-          # `prev_tag` becomes `--notes-start-tag` for `gh release create`. The
+          # `prev_tag` becomes the `--notes-start-tag` the publish step in
+          # release-tag.yml passes when it creates the release. The
           # current version's tag normally exists, but it does not when a bad
           # release was deleted — which is the standard remediation, so the
           # next cut must not depend on it. Emit an empty value in that case
