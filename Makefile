@@ -1268,5 +1268,50 @@ ci-cross-windows:
 	: "_package_installer (the Linux/host installer)."; \
 	cp -f runtime/prelude.sfn "$$INSTALLER_DIR/runtime/prelude.sfn"; \
 	cp -R runtime/sfn "$$INSTALLER_DIR/runtime/sfn"; \
+	: "SFN-773: stage the runtime capsule's [dependencies] closure (e.g."; \
+	: "sfn/crypto) as a sibling of runtime/, mirroring _package_installer;"; \
+	: "this hand-rolled path would otherwise miss it and every user"; \
+	: "program would link-fail on a fresh install. The walk is transitive"; \
+	: "(each staged dependency's own capsule.toml may declare further"; \
+	: "dependencies, e.g. sfn/crypto -> sfn/strings), and each dependency's"; \
+	: "capsule.toml is staged alongside its src/ because an installed"; \
+	: "toolchain reads that manifest from beside src/ to discover the next"; \
+	: "hop (capsule_resolver/discovery.sfn)."; \
+	deps="$$(awk '/^\[[^]]+\]/ { section=$$0 } section == "[dependencies]" && /^"/ { gsub(/"/, "", $$1); print $$1 }' runtime/capsule.toml)"; \
+	worklist="$$deps"; \
+	visited=""; \
+	iterations=0; \
+	max_iterations=4096; \
+	while [ -n "$$worklist" ]; do \
+		iterations=$$((iterations + 1)); \
+		if [ "$$iterations" -gt "$$max_iterations" ]; then \
+			echo "[cross-windows][error] dependency closure walk exceeded $$max_iterations iterations" >&2; \
+			exit 1; \
+		fi; \
+		dep="$$(echo "$$worklist" | head -n 1)"; \
+		worklist="$$(echo "$$worklist" | tail -n +2)"; \
+		case " $$visited " in \
+			*" $$dep "*) continue ;; \
+		esac; \
+		visited="$$visited $$dep"; \
+		scope="$${dep%%/*}"; name="$${dep#*/}"; \
+		src="capsules/$$scope/$$name/src"; \
+		manifest="capsules/$$scope/$$name/capsule.toml"; \
+		if [ ! -d "$$src" ]; then \
+			echo "[cross-windows][error] missing sources for runtime dependency $$dep ($$src)" >&2; \
+			exit 1; \
+		fi; \
+		if [ ! -f "$$manifest" ]; then \
+			echo "[cross-windows][error] missing manifest for runtime dependency $$dep ($$manifest)" >&2; \
+			exit 1; \
+		fi; \
+		mkdir -p "$$INSTALLER_DIR/capsules/$$scope/$$name"; \
+		cp -R "$$src" "$$INSTALLER_DIR/capsules/$$scope/$$name/src"; \
+		cp -f "$$manifest" "$$INSTALLER_DIR/capsules/$$scope/$$name/capsule.toml"; \
+		nested_deps="$$(awk '/^\[[^]]+\]/ { section=$$0 } section == "[dependencies]" && /^"/ { gsub(/"/, "", $$1); print $$1 }' "$$manifest")"; \
+		if [ -n "$$nested_deps" ]; then \
+			worklist="$$(printf '%s\n%s' "$$worklist" "$$nested_deps")"; \
+		fi; \
+	done; \
 	tar -czf "dist/installer-$(MINGW_TARGET).tar.gz" -C "$$INSTALLER_DIR" .; \
 	echo "[cross-windows] done: dist/installer-$(MINGW_TARGET).tar.gz"

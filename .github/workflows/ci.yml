@@ -1204,6 +1204,42 @@ jobs:
           (file build/bin/sfn || true)
           build/bin/sfn version || build/bin/sfn --version || true
 
+      # Every other pre-release gate builds in-repo, where the dependency
+      # sources (runtime/, capsules/) are already sitting on disk -- so
+      # nothing exercises the packaged-and-installed artifact until after
+      # publish. This installs the freshly built payload through the real
+      # installer (install.sh, pointed at the local dist/ archive rather than
+      # a published release) and compiles a program from a directory outside
+      # the checkout, so a payload or installer that failed to deliver the
+      # runtime/capsule sources can't be masked by the capsule resolver
+      # falling back to the in-tree project-root sources.
+      - name: "Package smoke: install freshly built payload"
+        if: ${{ matrix.primary }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # `sfn version` prints `sfn <version>`; take the first line's last
+          # field so a banner or trailing output cannot corrupt it. An empty
+          # value would surface as install.sh's "requires an explicit VERSION"
+          # error, which reads as a usage mistake rather than the real cause.
+          version="$(build/bin/sfn version | head -n 1 | awk '{print $NF}')"
+          if [ -z "$version" ]; then
+            echo "[ci][error] could not resolve version from 'build/bin/sfn version'" >&2
+            exit 1
+          fi
+
+          SAILFIN_LOCAL_ARCHIVE="$PWD/dist/installer-linux-x86_64.tar.gz" \
+          VERSION="$version" \
+          INSTALL_BASE="$RUNNER_TEMP/pkgsmoke/versions" \
+          GLOBAL_BIN_DIR="$RUNNER_TEMP/pkgsmoke/bin" \
+            bash install.sh
+
+          smoke_dir="$RUNNER_TEMP/pkgsmoke/src"
+          mkdir -p "$smoke_dir"
+          cp examples/basics/hello-world.sfn "$smoke_dir/hello-world.sfn"
+          cd "$smoke_dir"
+          "$RUNNER_TEMP/pkgsmoke/bin/sfn" run hello-world.sfn
+
       - name: Check examples Bash compatibility
         if: ${{ matrix.primary }}
         shell: bash

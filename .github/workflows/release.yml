@@ -107,7 +107,21 @@ jobs:
             exit 1
           fi
           echo "Current version: $current"
-          echo "prev_tag=v${current}" >> "$GITHUB_OUTPUT"
+
+          # `prev_tag` becomes the `--notes-start-tag` the publish step in
+          # release-tag.yml passes when it creates the release. The
+          # current version's tag normally exists, but it does not when a bad
+          # release was deleted — which is the standard remediation, so the
+          # next cut must not depend on it. Emit an empty value in that case
+          # and let `--generate-notes` pick the start point itself, rather
+          # than passing a tag that is not there and finding out at the final
+          # publish step of a long release build.
+          if git rev-parse "v${current}" >/dev/null 2>&1; then
+            echo "prev_tag=v${current}" >> "$GITHUB_OUTPUT"
+          else
+            echo "No tag 'v${current}' (deleted or never cut); letting --generate-notes auto-detect the start point."
+            echo "prev_tag=" >> "$GITHUB_OUTPUT"
+          fi
 
           # --- Parse semver components ----------------------------------------
           # Matches: MAJOR.MINOR.PATCH or MAJOR.MINOR.PATCH-pre.N
