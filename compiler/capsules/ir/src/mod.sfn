@@ -13,6 +13,8 @@ export {
     intrinsic_effects_for_target
 } from "./intrinsic_effects";
 
+export { LoweringDiagnostic } from "./lowering_diagnostic";
+
 export {
     ImportModuleAlias,
     ImportedModuleContext,

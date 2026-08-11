@@ -1,10 +1,8 @@
 // compiler/tests/unit/runtime_helper_metadata_only_test.sfn
 //
-// Standing guards for target-neutral intrinsic semantics and #1631 (epic
-// #1180, Phase G). Semantic effects live outside the LLVM descriptors; the
-// first test requires each effectful identity to retain lowering metadata.
-// The remaining tests ensure metadata-only call forms never produce a
-// declaration for an unbridged symbol.
+// Standing guards for #1631 (epic #1180, Phase G). These tests ensure
+// metadata-only call forms never produce a declaration for an unbridged
+// symbol without coupling LLVM descriptors to semantic intrinsic metadata.
 //
 // The websocket client and server operations are bridged to real
 // `sfn_websocket_*` runtime symbols. Only the still-unbridged Call-form
@@ -23,7 +21,6 @@ import { NativeFunction } from "sfn/ir";
 import { find } from "sfn/strings";
 
 import { render_runtime_helper_declarations } from "../../src/llvm/rendering";
-import { runtime_helper_registry_covers_intrinsic_effects } from "../../src/llvm/runtime_helpers/mod";
 import { TypeContext } from "../../src/llvm/types";
 
 // The Call-form `serve` is the only remaining metadata-only target.
@@ -51,10 +48,6 @@ fn _any_line_contains(lines: string[], needle: string) -> boolean {
     return false;
 }
 
-test "intrinsic effect registry: every semantic identity has LLVM lowering metadata" {
-    assert runtime_helper_registry_covers_intrinsic_effects();
-}
-
 test "metadata-only rows (#1631): the serve sentinel emits no unbridged declare" {
     // The remaining metadata-only target is sentinel-skipped, so its fake
     // symbol must never reach a `declare`. Removing its `_preamble_inlined`
@@ -67,7 +60,7 @@ test "metadata-only rows (#1631): the serve sentinel emits no unbridged declare"
     assert ! _any_line_contains(lines, "sfn_serve_unbridged");
 }
 
-test "metadata-only rows (#1631): the real serve_start row declares with neutral effects" {
+test "metadata-only rows (#1631): the real serve_start row declares its runtime symbol" {
     // Negative control: the sentinel-skip must not over-reach. The real
     // `serve_start` row is a distinct target backed by the genuine
     // `sfn_serve` symbol (via `native_signature`); it MUST still emit its
@@ -80,6 +73,5 @@ test "metadata-only rows (#1631): the real serve_start row declares with neutral
     let lines = render_runtime_helper_declarations(["serve_start"], no_locals, no_imports, _empty_context());
 
     assert _any_line_contains(lines, "@sfn_serve(");
-    assert _any_line_contains(lines, "; intrinsic sfn_serve requires capabilities: ![net, io]");
     assert ! _any_line_contains(lines, "sfn_serve_unbridged");
 }

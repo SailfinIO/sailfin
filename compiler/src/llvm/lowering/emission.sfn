@@ -9,8 +9,7 @@
 // at link time via symbol mangling. This cycle is intentional: async emission
 // needs the main emit_llvm_function for the inner body, while the main
 // emitter delegates async wrapper generation to the async module.
-import { Diag, diag_to_legacy_string } from "sfn/analyzer/diagnostic";
-import { NativeFunction } from "sfn/ir";
+import { LoweringDiagnostic, NativeFunction } from "sfn/ir";
 import { substring } from "sfn/strings";
 
 import { make_string_constant_name_for_module } from "../expression_lowering/native/core_text";
@@ -41,6 +40,7 @@ import {
 import {
     append_parameter_binding,
     append_string,
+    diag_to_legacy_string,
     extend_diag_array,
     extend_string_array,
     index_of,
@@ -281,7 +281,7 @@ fn prepare_parameters_from_function(function: NativeFunction, context: TypeConte
 
 fn emit_llvm_function(function: NativeFunction, functions: NativeFunction[], effects: string[], context: TypeContext, module_name: string, entry_points: string[], exported_symbols: string[], imported_functions: NativeFunction[], module_globals: LocalBinding[], module_init_symbol: string, needs_module_init_call: boolean, imported_decorator_names: string[]) -> LoweredLLVMFunction {
     let mut diagnostics: string[] = [];
-    let mut diags: Diag[] = [];
+    let mut diags: LoweringDiagnostic[] = [];
     let debug_lowering = trace_lowering();
 
     let fn_name = function.name;

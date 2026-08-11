@@ -1,9 +1,8 @@
 // compiler/src/llvm/lowering/instructions_let.sfn
 //
 // Let binding instruction lowering.
-import { Diag, diag_to_legacy_string } from "sfn/analyzer/diagnostic";
+import { LoweringDiagnostic, parse_fn_type_text } from "sfn/ir";
 import { NativeFunction, NativeInstruction, NativeSourceSpan } from "sfn/ir";
-import { parse_fn_type_text } from "sfn/ir";
 import { find, substring } from "sfn/strings";
 
 import { array_pointer_element_type } from "../expression_lowering/arrays";
@@ -48,6 +47,7 @@ import {
     TypeContext
 } from "../types";
 import {
+    diag_to_legacy_string,
     is_identifier_part_char,
     is_identifier_start_char,
     lowering_error_diag,
@@ -297,7 +297,7 @@ fn _await_receive_channel_base(value: string) -> string {
 
 fn lower_let_instruction(function: NativeFunction, instruction: NativeInstruction, bindings: ParameterBinding[], locals: LocalBinding[], allocas: string[], lines: string[], temp_index: int, next_local_id: int, next_region_id: int, functions: NativeFunction[], context: TypeContext, scope_id: string, scope_depth: int, current_label: string) -> LetLoweringResult {
     let mut diagnostics: string[] = [];
-    let mut diags: Diag[] = [];
+    let mut diags: LoweringDiagnostic[] = [];
     let mut current_lines: string[] = lines;
     let mut current_allocas: string[] = allocas;
     let mut current_locals: LocalBinding[] = locals;

@@ -1,8 +1,8 @@
 // compiler/capsules/ir/src/intrinsic_effects.sfn
 //
 // Target-neutral intrinsic identity and effect metadata consumed by semantic
-// analysis and target providers. LLVM descriptors keep symbol/type/ABI data
-// and key into this contract by target; they do not own semantic effects.
+// analysis. Target providers do not import this contract: their descriptors
+// own only provider-local target lookup plus symbol/type/ABI lowering data.
 import { substring } from "sfn/strings";
 
 struct IntrinsicEffectEntry {
@@ -28,8 +28,7 @@ fn append_intrinsic_effects(table: IntrinsicEffectTable, target: string, effects
 
 // Canonical semantic registry. Only effectful identities need rows: a missing
 // exact row means the intrinsic is pure. Target providers may own additional
-// lowering-only identities, but every row here must have a corresponding
-// provider descriptor so semantic and lowering registries cannot drift.
+// lowering-only identities without coupling their registries to this table.
 fn intrinsic_effect_table() -> IntrinsicEffectTable {
     let mut table = empty_intrinsic_effects();
     table = append_intrinsic_effects(table, "runtime_monotonic_millis_fn", ["clock"]);

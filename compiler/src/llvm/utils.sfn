@@ -2,8 +2,7 @@
 //
 // General utility functions for the LLVM lowering pass. These are basic
 // string manipulation, array helpers, and parsing utilities.
-import { Diag, Span, diag_to_legacy_string } from "sfn/analyzer/diagnostic";
-import { NativeSourceSpan } from "sfn/ir";
+import { LoweringDiagnostic, NativeSourceSpan } from "sfn/ir";
 import { char_code_at, substring } from "sfn/strings";
 
 import { sanitize_symbol } from "./symbols";
@@ -12,28 +11,30 @@ import { ParameterBinding } from "./types";
 // =============================================================================
 // Lowering diagnostic compatibility
 // =============================================================================
-fn lowering_error_diag(code: string, message: string, span_in: NativeSourceSpan?) -> Diag {
-    let mut span: Span? = null;
-    if span_in != null {
-        span = Span {
-            start_line: span_in.start_line,
-            start_column: span_in.start_column,
-            end_line: span_in.end_line,
-            end_column: span_in.end_column
-        };
-    }
-    return Diag {
+fn lowering_error_diag(code: string, message: string, span_in: NativeSourceSpan?) -> LoweringDiagnostic {
+    return LoweringDiagnostic {
         code: code,
         severity: "error",
         message: message,
         file_path: "",
-        span: span,
-        stage: "lowering",
-        suggestion: null
+        span: span_in,
+        stage: "lowering"
     };
 }
 
-fn extend_diag_array(base: Diag[], extra: Diag[]) -> Diag[] {
+// Preserve the provider's established textual compatibility stream while the
+// structured carrier crosses the IR boundary independently of analyzer data.
+fn diag_to_legacy_string(diag: LoweringDiagnostic) -> string {
+    let mut prefix = diag.stage;
+    if prefix == "lowering" { prefix = "llvm lowering"; }
+    if diag.severity == "error" {
+        prefix = prefix + " [fatal]";
+        if diag.code.length > 0 { prefix = prefix + " [" + diag.code + "]"; }
+    }
+    return prefix + ": " + diag.message;
+}
+
+fn extend_diag_array(base: LoweringDiagnostic[], extra: LoweringDiagnostic[]) -> LoweringDiagnostic[] {
     let mut out = base;
     let mut index: int = 0;
     loop {
@@ -88,13 +89,13 @@ fn _legacy_lowering_diag_message(value: string, code: string) -> string {
     return message;
 }
 
-fn diag_from_legacy_lowering_error(value: string) -> Diag? {
+fn diag_from_legacy_lowering_error(value: string) -> LoweringDiagnostic? {
     if index_of(value, "[fatal]") < 0 { return null; }
     let code = _legacy_lowering_diag_code(value);
     return lowering_error_diag(code, _legacy_lowering_diag_message(value, code), null);
 }
 
-fn append_missing_legacy_lowering_diags(diags: Diag[], diagnostics: string[]) -> Diag[] {
+fn append_missing_legacy_lowering_diags(diags: LoweringDiagnostic[], diagnostics: string[]) -> LoweringDiagnostic[] {
     let mut out = diags;
     let mut matched: boolean[] = [];
     let mut match_index: int = 0;
@@ -132,7 +133,7 @@ fn append_missing_legacy_lowering_diags(diags: Diag[], diagnostics: string[]) ->
     return out;
 }
 
-fn stamp_lowering_diag_file_paths(diags: Diag[], file_path: string) -> Diag[] {
+fn stamp_lowering_diag_file_paths(diags: LoweringDiagnostic[], file_path: string) -> LoweringDiagnostic[] {
     let mut out = diags;
     let mut index: int = 0;
     loop {
@@ -145,7 +146,7 @@ fn stamp_lowering_diag_file_paths(diags: Diag[], file_path: string) -> Diag[] {
     return out;
 }
 
-fn render_lowering_error_diag(diag: Diag) -> string {
+fn render_lowering_error_diag(diag: LoweringDiagnostic) -> string {
     let mut rendered = diag_to_legacy_string(diag);
     if diag.span != null {
         rendered = rendered + "\n  --> " + diag.file_path + ":"

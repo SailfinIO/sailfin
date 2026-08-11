@@ -944,14 +944,13 @@ fn emit_native_diag_lines(diags: Diag[]) -> string[] {
     loop {
         if index >= diags.length { break; }
         let diag = diags[index];
-        // Not `diag_to_legacy_string`: that helper only spells the code out
+        // Not LLVM's `diag_to_legacy_string`: that helper only spells the code out
         // for `error` severity (via the `[fatal] [Exxxx]` tag), and every
         // diagnostic on this channel is a `note` per SFEP-0061 §4 — so the
         // code has to be rendered explicitly or it is lost.
-        // `diag.stage`, not a hardcoded "emit-native": the parameter is a bare
-        // `Diag[]`, and SFEP-0061's later stages produce `lowering`/`tssa`/
-        // `tensor` diags of the same type. Reading the field keeps a
-        // cross-stage caller from being silently mislabelled.
+        // `diag.stage`, not a hardcoded "emit-native": the analyzer/codegen
+        // `Diag[]` carrier serves multiple semantic producers. Reading the
+        // field keeps a cross-stage caller from being silently mislabelled.
         let mut rendered = diag.stage + " [" + diag.code + "]: " + diag.message;
         if diag.span != null {
             rendered = rendered + "\n  --> " + diag.file_path + ":"

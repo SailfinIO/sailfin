@@ -52,18 +52,6 @@ fn _boundary_exception(importer: string, importee: string, seam: string) -> Boun
 fn _boundary_exceptions() -> BoundaryException[] {
     let mut out: BoundaryException[] = [];
 
-    // SFEP-0020 §3.4/§3.5.6 assigns diagnostic data contracts to analyzer.
-    // LLVM still consumes those contracts directly instead of receiving
-    // provider-owned lowering diagnostics through its IR-facing boundary.
-    let diagnostic = "LLVM lowering still imports analyzer-owned diagnostic contracts (SFEP-0020 §3.5.6)";
-    let diagnostic_importers: string[] = ["llvm/expression_lowering/native/statement", "llvm/lowering/emission", "llvm/lowering/emission_async", "llvm/lowering/instructions", "llvm/lowering/instructions_for", "llvm/lowering/instructions_for_range", "llvm/lowering/instructions_if", "llvm/lowering/instructions_let", "llvm/lowering/instructions_loops", "llvm/lowering/instructions_match", "llvm/lowering/instructions_routine", "llvm/lowering/instructions_try", "llvm/lowering/lowering_core/diagnostics", "llvm/lowering/lowering_core/mod", "llvm/lowering/lowering_phase_functions", "llvm/types", "llvm/utils"];
-    let mut diagnostic_i: int = 0;
-    loop {
-        if diagnostic_i >= diagnostic_importers.length { break; }
-        out.push(_boundary_exception(diagnostic_importers[diagnostic_i], "diagnostic", diagnostic));
-        diagnostic_i += 1;
-    }
-
     // SFEP-0020 §3.5.7: the remaining non-LLVM generic monolith string helpers
     // have not yet graduated to sfn/strings or a role-owned implementation.
     // Keep every importer exact so repairs make this inventory stale.
@@ -1155,20 +1143,17 @@ test "capsule roles: classification survives physical compiler capsule moves" {
     assert _module_role("compiler/src/ast.sfn") == "";
     assert _module_role("compiler/capsules/analyzer/src/mod.sfn") == ROLE_ANALYZER;
     assert _module_role("compiler/capsules/ir/src/native_ir.sfn") == ROLE_IR;
+    assert _module_role("compiler/capsules/ir/src/lowering_diagnostic.sfn") == ROLE_IR;
     assert _module_role("compiler/src/native_ir.sfn") == "";
     assert _module_role("compiler/src/intrinsic_effects.sfn") == "";
     assert _module_role("compiler/capsules/codegen/src/emit.sfn") == ROLE_CODEGEN;
     assert _module_role("compiler/capsules/codegen-llvm/src/lowering/mod.sfn") == ROLE_LLVM;
     assert _edge_module_id("compiler/capsules/analyzer/src/type_interner.sfn") == "type_interner";
     assert _edge_module_id("compiler/capsules/codegen-llvm/src/lowering/mod.sfn") == "llvm/lowering/mod";
-    let moved_exceptions = _boundary_exceptions();
-    let moved_importer = _edge_module_id("compiler/capsules/codegen-llvm/src/types.sfn");
-    let moved_importee = _edge_module_id("compiler/capsules/analyzer/src/diagnostic.sfn");
-    assert _find_exception(moved_exceptions, moved_importer, moved_importee) >= 0;
     assert _edge_module_id("sfn/analyzer/diagnostic") == "diagnostic";
+    assert _edge_module_id("sfn/ir/lowering_diagnostic") == "lowering_diagnostic";
     assert _edge_module_id("sfn/codegen/emit_native") == "emit_native";
     assert _edge_module_id("sfn/codegen-llvm/lowering/mod") == "llvm/lowering/mod";
-    assert _find_exception(moved_exceptions, _edge_module_id("sfn/codegen-llvm/types"), _edge_module_id("sfn/analyzer/diagnostic")) >= 0;
     let moved_authority = _edge_module_id("compiler/capsules/codegen-llvm/src/atomics.sfn");
     assert _find_authority_exception(_authority_exceptions(), moved_authority, "effect:io") < 0;
     assert _role_from_internal_spec("sfn/compiler/build") == ROLE_DRIVER;
@@ -1365,6 +1350,27 @@ test "capsule boundaries: compiler imports obey the role graph and exact excepti
         if importer_role == ROLE_LLVM { llvm_count += 1; }
         if importer_role == ROLE_DRIVER { driver_count += 1; }
         let source = fs.readFile(importer);
+        if importer_role == ROLE_LLVM {
+            // SFEP-0020 §3.5.3: target providers own symbol and ABI lowering,
+            // not target-neutral intrinsic identity or semantic effects. IR is
+            // otherwise a legal dependency, so guard the semantic APIs by name.
+            let intrinsic_semantic_apis: string[] = ["IntrinsicEffectEntry", "IntrinsicEffectTable", "append_intrinsic_effects", "empty_intrinsic_effects", "intrinsic_effect_table", "intrinsic_effects_for_callee_target", "intrinsic_effects_for_exact_target", "intrinsic_effects_for_target"];
+            let mut intrinsic_api_index: int = 0;
+            loop {
+                if intrinsic_api_index >= intrinsic_semantic_apis.length {
+                    break;
+                }
+                let intrinsic_api = intrinsic_semantic_apis[intrinsic_api_index];
+                intrinsic_api_index += 1;
+                if contains(source, intrinsic_api) {
+                    failures.push("LLVM provider imports target-neutral intrinsic semantics: module '"
+                        + importer
+                        + "' references '"
+                        + intrinsic_api
+                        + "'; violated rule: LLVM owns only symbol and ABI lowering");
+                }
+            }
+        }
         if importer_role != ROLE_DRIVER {
             // Provider libraries may still carry temporary I/O effect
             // exceptions, but persistent artifact publication is driver-only.

@@ -20,8 +20,7 @@
 // leaking unjoined tasks. Failing closed with a diagnostic is the v0
 // stance (issue #1181); lifting the restriction (emitting the join on
 // every exit edge) is a follow-up.
-import { Diag, diag_to_legacy_string } from "sfn/analyzer/diagnostic";
-import { NativeFunction, NativeInstruction } from "sfn/ir";
+import { LoweringDiagnostic, NativeFunction, NativeInstruction } from "sfn/ir";
 
 import { format_temp_name } from "../expressions_helpers";
 import { make_child_scope_id } from "../lifetime";
@@ -39,6 +38,7 @@ import {
     TypeContext
 } from "../types";
 import {
+    diag_to_legacy_string,
     extend_diag_array,
     extend_string_array,
     lowering_error_diag,
@@ -109,8 +109,8 @@ fn collect_routine_structure(instructions: NativeInstruction[], start_index: int
 //     itself inside the routine (loop-depth 0).
 // Instructions inside a *nested* routine are skipped — the inner
 // routine's own handler reports them, so each escape is flagged once.
-fn collect_routine_escape_diagnostics(instructions: NativeInstruction[], body_start: int, body_end: int, function_name: string) -> Diag[] {
-    let mut diagnostics: Diag[] = [];
+fn collect_routine_escape_diagnostics(instructions: NativeInstruction[], body_start: int, body_end: int, function_name: string) -> LoweringDiagnostic[] {
+    let mut diagnostics: LoweringDiagnostic[] = [];
     let mut loop_depth: int = 0;
     let mut routine_depth: int = 0;
     let mut index: int = body_start;
@@ -185,7 +185,7 @@ fn collect_routine_escape_diagnostics(instructions: NativeInstruction[], body_st
 
 fn lower_routine_instruction(function: NativeFunction, start_index: int, llvm_return: string, bindings: ParameterBinding[], locals: LocalBinding[], allocas: string[], lines: string[], temp_index: int, block_counter: int, next_local_id: int, next_region_id: int, functions: NativeFunction[], loop_stack: LoopContext[], try_stack: TryFrameContext[], end: int, context: TypeContext, scope_id: string, scope_depth: int, current_label: string) -> BlockLoweringResult {
     let mut diagnostics: string[] = [];
-    let mut diags: Diag[] = [];
+    let mut diags: LoweringDiagnostic[] = [];
     let mut current_lines: string[] = lines;
     let mut current_allocas: string[] = allocas;
     let mut current_bindings: ParameterBinding[] = bindings;
