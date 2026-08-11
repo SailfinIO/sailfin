@@ -75,4 +75,4 @@ emit-llvm: mangle local_subs=1
 emit-llvm: mangle import_subs=0
 emit-llvm: mangle shims=0
 emit-llvm: phase=mangle
-emit-llvm: phase=end lines=229
+emit-llvm: phase=end lines=179
