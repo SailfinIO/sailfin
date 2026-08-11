@@ -1,0 +1,462 @@
+// compiler/src/capsule_resolver/reachability.sfn
+//
+// Import-reachability filtering of the resolved capsule source set
+// (SFEP-0070, SFN-833).
+//
+// The resolver walks every `.sfn` file under each declared dependency's
+// `src/`, reachable or not. This module computes the import-reachable
+// closure over that set and drops what nothing in the build names, so an
+// unreached module is never parsed, type-checked, emitted, cached, or
+// lowered — and never contributes its `@__sfn_module_type_init__`
+// constructor to the link.
+//
+// Three properties govern everything here:
+//
+//   1. The filter may only ever REMOVE modules. It never adds one, and it
+//      never runs on the `sfn check` path (SFEP-0070 §3.6), so the build
+//      set stays a subset of the check set.
+//   2. It FAILS OPEN. This is a performance optimisation; a bug in it must
+//      never break or mis-compile a build. Every failure mode — a tripped
+//      guard, a violated closure invariant — returns the unfiltered set and
+//      lets the build proceed exactly as it does today.
+//   3. Uncertainty always widens the retained set. A root class we cannot
+//      classify is treated as a root; an edge we cannot resolve contributes
+//      nothing (the relation only ever returns members of the universe it
+//      is handed, so it cannot manufacture a dangling slug).
+import { int_to_string } from "sfn/strings";
+
+import { _env_flag, _get_env_cmd } from "../build_flags";
+import { collect_relative_import_specs, collect_scoped_import_specs } from "../capsule_import_scan";
+import { runtime_capsule_from_root } from "../runtime_capsule_resolver";
+import { substring } from "../string_utils";
+import { ResolverDedupeResult, _cr_resolve_and_dedupe } from "./dedupe";
+import { _cr_dirname, _cr_ends_with, _cr_string_in_array } from "./paths";
+import { resolve_relative_import } from "./relative";
+import { CapsuleSource, ResolverConsumer } from "./types";
+
+// Extract the `scope/name` prefix from a scoped import spec. Returns:
+//   "sfn/math"        →  "sfn/math"
+//   "sfn/http/client" →  "sfn/http"
+//   "noslash"         →  ""              (not a scoped spec)
+//
+// Lives here rather than in `staging.sfn` because both the staging slug
+// resolver and the reachability closure resolve edges through it, and
+// SFEP-0070 §3.5 makes "the filter and the cache-key/manifest derivation
+// agree on what an edge is" a structural property rather than an
+// incidental one.
+fn _cr_scope_name_prefix(spec: string) -> string {
+    let mut slash_count: int = 0;
+    let mut second_slash: int = -1;
+    let mut i: int = 0;
+    loop {
+        if i >= spec.length { break; }
+        if substring(spec, i, i + 1) == "/" {
+            slash_count += 1;
+            if slash_count == 2 {
+                second_slash = i;
+                break;
+            }
+        }
+        i += 1;
+    }
+    if slash_count == 0 { return ""; }
+    if second_slash < 0 { return spec; }
+    return substring(spec, 0, second_slash);
+}
+
+// The module-edge relation, over already-read source text.
+//
+// Returns the slugs in `universe` that this source names directly.
+// Separated from `_cr_module_edge_slugs` so a root that is NOT itself a
+// `CapsuleSource` — a runtime `sfn-source`, compiled by
+// `_compile_runtime_sfn_sources` rather than by the capsule pipeline —
+// can still contribute its edges to the closure.
+//
+// Scoped specs resolve COARSELY: an import of `sfn/crypto` names every
+// module of that capsule, not just its barrel. That is deliberate at this
+// stage and must not be "fixed" here in isolation. `_cr_direct_import_slugs_for`
+// shares this relation to derive `.import-deps` sidecars, which carry
+// cross-module effect data for `E0402`; narrowing a bare barrel import to
+// the barrel alone would drop the modules that actually DEFINE the
+// re-exported symbols, silently under-enforcing callee-effect
+// transitivity. Narrowing becomes safe only once the closure resolves
+// re-exported NAMES to their defining module (SFEP-0070 §3.3, SFN-834),
+// at which point this one function changes and both callers move with it.
+fn _cr_edge_slugs_for_text(source_text: string, source_path: string, universe: CapsuleSource[]) -> string[] ![io] {
+    let mut out: string[] = [];
+    let cur_dir = _cr_dirname(source_path);
+
+    // Relative imports: resolve each spec to a path, find the matching
+    // source, push its slug.
+    let rel_specs = collect_relative_import_specs(source_text);
+    let mut r: int = 0;
+    loop {
+        if r >= rel_specs.length { break; }
+        let mut dep_path = resolve_relative_import(cur_dir, rel_specs[r]);
+        if !fs.exists(dep_path) {
+            // Directory import fallback: ./dir → dir/mod.sfn — same
+            // behaviour as `enumerate_relative_sources`.
+            if _cr_ends_with(dep_path, ".sfn") {
+                let mod_fallback = substring(dep_path, 0, dep_path.length - 4)
+                    + "/mod.sfn";
+                if fs.exists(mod_fallback) { dep_path = mod_fallback; }
+            }
+        }
+        let mut k: int = 0;
+        loop {
+            if k >= universe.length { break; }
+            if strings_equal(universe[k].source_path, dep_path) {
+                if !_cr_string_in_array(out, universe[k].slug) {
+                    out.push(universe[k].slug);
+                }
+                break;
+            }
+            k += 1;
+        }
+        r += 1;
+    }
+
+    // Scoped imports: match the import's capsule prefix against each
+    // source's `spec`. Sources from `enumerate_relative_sources` have
+    // `spec = ""` and never match a scoped prefix — exactly the right
+    // behaviour, since relative imports don't go through the scoped path.
+    let scoped_specs = collect_scoped_import_specs(source_text);
+    let mut s: int = 0;
+    loop {
+        if s >= scoped_specs.length { break; }
+        let scope_name = _cr_scope_name_prefix(scoped_specs[s]);
+        if scope_name.length > 0 {
+            let mut k2: int = 0;
+            loop {
+                if k2 >= universe.length { break; }
+                if strings_equal(universe[k2].spec, scope_name) {
+                    if !_cr_string_in_array(out, universe[k2].slug) {
+                        out.push(universe[k2].slug);
+                    }
+                }
+                k2 += 1;
+            }
+        }
+        s += 1;
+    }
+    return out;
+}
+
+// The module-edge relation over a resolved source. Reads the source once.
+// A source whose file is missing contributes no edges rather than failing
+// the build — the same tolerance `_cr_direct_import_slugs_for` has always
+// had, and the safe direction for a filter that must never break a build.
+fn _cr_module_edge_slugs(src: CapsuleSource, universe: CapsuleSource[]) -> string[] ![io] {
+    let mut empty: string[] = [];
+    if !fs.exists(src.source_path) { return empty; }
+    let source_text = fs.readFile(src.source_path);
+    return _cr_edge_slugs_for_text(source_text, src.source_path, universe);
+}
+
+// Index of `slug` in `sources`, or -1. Linear because `CapsuleSource[]`
+// has no map keyed by slug and the closure runs once per build over a set
+// bounded by the resolved dependency count.
+fn _cr_source_index_for_slug(sources: CapsuleSource[], slug: string) -> int {
+    let mut i: int = 0;
+    loop {
+        if i >= sources.length { break; }
+        if strings_equal(sources[i].slug, slug) { return i; }
+        i += 1;
+    }
+    return -1;
+}
+
+// SFN-341: two enumerators can surface one file under different spellings
+// (`./capsules/x` vs `capsules/x`), so root membership compares with a
+// leading `./` stripped — mirroring `_cr_strip_leading_dot_slash` in the
+// dedupe pass. Comparing verbatim would misclassify a root as a dependency
+// and drop modules the build needs.
+fn _cr_reach_strip_dot_slash(path: string) -> string {
+    if path.length >= 2 && substring(path, 0, 2) == "./" {
+        return substring(path, 2, path.length);
+    }
+    return path;
+}
+
+// Resolved mode of the `SAILFIN_CAPSULE_FILTER` operator toggle.
+//
+//   ""/unset  → "on"     the filter runs
+//   off/0/false → "off"  bisect handle and field escape hatch; reproduces
+//                        the pre-filter artifact set exactly
+//   fault     → "fault"  test seat: corrupt the retained set after the
+//                        closure so the verification pass observes a real
+//                        invariant violation and exercises the fail-open
+//                        path end-to-end. There is no other way to assert
+//                        fail-open behaviour from a black-box build.
+fn _cr_capsule_filter_mode() -> string ![io] {
+    let raw = _get_env_cmd("SAILFIN_CAPSULE_FILTER");
+    if raw.length == 0 { return "on"; }
+    if strings_equal(raw, "off") { return "off"; }
+    if strings_equal(raw, "0") { return "off"; }
+    if strings_equal(raw, "false") { return "off"; }
+    if strings_equal(raw, "fault") { return "fault"; }
+    return "on";
+}
+
+// Seed the closure with every root, as slugs.
+//
+// A root is any resolved source the DEPENDENCY enumerators did not
+// contribute — the relative-import walk, the `-p` binary `src/` walk, and
+// the host-capsule walk. The discrimination is recorded at the assembly
+// site (`_cr_resolve_and_dedupe`) rather than re-derived here from `spec`
+// or `origin`, because neither is a reliable signal: a relatively-imported
+// file that lands inside a workspace member is tagged with that member's
+// canonical spec (#873), and the host-capsule walk tags the consumer's own
+// sources with the host capsule's name.
+//
+// The default is deliberately ROOT. A future enumeration leg that forgets
+// to declare itself over-approximates the retained set rather than having
+// its sources silently dropped — the safe direction, and the mitigation
+// for this epic's dominant failure mode (a missed root class).
+fn _cr_seed_roots(sources: CapsuleSource[], root_source_paths: string[]) -> string[] {
+    let mut seeded: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= sources.length { break; }
+        let key = _cr_reach_strip_dot_slash(sources[i].source_path);
+        if _cr_string_in_array(root_source_paths, key) {
+            if !_cr_string_in_array(seeded, sources[i].slug) {
+                seeded.push(sources[i].slug);
+            }
+        }
+        i += 1;
+    }
+    return seeded;
+}
+
+// Seed the closure with the runtime's own source list.
+//
+// SFEP-0070 §3.2: when `runtime_root` is set, every runtime `sfn-source`
+// and the prelude entry are roots even though they are NOT members of
+// `resolved.sources` — they are compiled separately by
+// `_compile_runtime_sfn_sources`. Their imports are precisely why the
+// runtime's dependency closure was unioned into this resolution at all
+// (SFN-341/SFN-773), so skipping them would drop every capsule the runtime
+// reaches from every binary that links it.
+//
+// The un-target-conditioned list is used on purpose: over-approximating
+// roots retains more, which is the safe direction.
+fn _cr_seed_runtime_roots(sources: CapsuleSource[], runtime_root: string, seeded: string[]) -> string[] ![io] {
+    let mut out = seeded;
+    if runtime_root.length == 0 { return out; }
+    let capsules = runtime_capsule_from_root(runtime_root);
+    let mut ci: int = 0;
+    loop {
+        if ci >= capsules.length { break; }
+        let mut roots: string[] = [];
+        let rt_sources = capsules[ci].sfn_sources;
+        let mut si: int = 0;
+        loop {
+            if si >= rt_sources.length { break; }
+            roots.push(rt_sources[si]);
+            si += 1;
+        }
+        if capsules[ci].prelude_entry.length > 0 {
+            roots.push(capsules[ci].prelude_entry);
+        }
+        let mut ri: int = 0;
+        loop {
+            if ri >= roots.length { break; }
+            let path = roots[ri];
+            if fs.exists(path) {
+                let text = fs.readFile(path);
+                let edges = _cr_edge_slugs_for_text(text, path, sources);
+                let mut ei: int = 0;
+                loop {
+                    if ei >= edges.length { break; }
+                    if !_cr_string_in_array(out, edges[ei]) {
+                        out.push(edges[ei]);
+                    }
+                    ei += 1;
+                }
+            }
+            ri += 1;
+        }
+        ci += 1;
+    }
+    return out;
+}
+
+// Render at most `limit` slugs for a trace/diagnostic line, so a large
+// dropped set stays readable on a terminal.
+fn _cr_join_slugs(slugs: string[], limit: int) -> string {
+    let mut out: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= slugs.length { break; }
+        if i >= limit {
+            out = out + ", … (" + int_to_string(slugs.length - limit)
+                + " more)";
+            break;
+        }
+        if i > 0 { out = out + ", "; }
+        out = out + slugs[i];
+        i += 1;
+    }
+    return out;
+}
+
+// Filter `sources` to the import-reachable closure from the derived roots.
+//
+// Returns the retained subset, or `sources` unchanged whenever the filter
+// declines or fails to prove itself (SFEP-0070 §3.5, layer 3).
+fn _cr_filter_reachable_sources(sources: CapsuleSource[], root_source_paths: string[], runtime_root: string) -> CapsuleSource[] ![io] {
+    if sources.length == 0 { return sources; }
+    let mode = _cr_capsule_filter_mode();
+    if strings_equal(mode, "off") { return sources; }
+    let trace = _env_flag("SAILFIN_TRACE_CAPSULE_FILTER");
+
+    let seeded = _cr_seed_roots(sources, root_source_paths);
+    let mut retained = _cr_seed_runtime_roots(sources, runtime_root, seeded);
+    if retained.length == 0 {
+        // No root class matched. That means the root discrimination is
+        // wrong for this shape of resolution, not that the build needs
+        // nothing — retaining the empty set would drop every module.
+        if trace {
+            print.err("capsule-filter: no roots derived; retaining the unfiltered set");
+        }
+        return sources;
+    }
+
+    // BFS with membership checked at the PUSH site, so `retained` is
+    // bounded by `sources.length` and cycles terminate structurally. Edges
+    // are memoised per retained slug: the verification pass below reuses
+    // them, so each retained module's text is read at most once and a
+    // dropped module's text is never read at all.
+    let mut memo_slugs: string[] = [];
+    let mut memo_edges: string[][] = [];
+    let mut qi: int = 0;
+    let mut guard: int = 0;
+    let guard_cap = sources.length + 16;
+    loop {
+        if qi >= retained.length { break; }
+        guard += 1;
+        if guard > guard_cap {
+            // Unlike `_runtime_reexport_closure`, which prints and
+            // continues because a truncated closure only makes a sidecar
+            // incomplete, a truncated closure HERE would drop modules the
+            // build needs. Fail open instead.
+            print.err("capsule-resolver: import-reachability closure exceeded its"
+                + " guard; retaining the unfiltered source set");
+            return sources;
+        }
+        let cur_slug = retained[qi];
+        qi += 1;
+        let idx = _cr_source_index_for_slug(sources, cur_slug);
+        if idx < 0 { continue; }
+        let edges = _cr_module_edge_slugs(sources[idx], sources);
+        memo_slugs.push(cur_slug);
+        memo_edges.push(edges);
+        let mut ei: int = 0;
+        loop {
+            if ei >= edges.length { break; }
+            if !_cr_string_in_array(retained, edges[ei]) {
+                retained.push(edges[ei]);
+            }
+            ei += 1;
+        }
+    }
+
+    if strings_equal(mode, "fault") {
+        // Test seat (SFN-833 acceptance): drop the last-enqueued slug.
+        // Anything past the seeded roots was pushed BY an edge, so removing
+        // it guarantees some retained module now names a missing slug and
+        // the verification pass below observes a genuine violation.
+        if retained.length > seeded.length {
+            let mut truncated: string[] = [];
+            let mut fi: int = 0;
+            loop {
+                if fi >= retained.length - 1 { break; }
+                truncated.push(retained[fi]);
+                fi += 1;
+            }
+            retained = truncated;
+        }
+    }
+
+    // Verification pass (SFEP-0070 §3.5, layer 3).
+    //
+    // The invariant checked is `edges(m, U) ⊆ K` for every `m ∈ K` — edges
+    // resolved against the UNFILTERED universe. Re-resolving against `K`
+    // would be tautological: the relation only ever returns members of the
+    // list it is handed, so a run against `K` cannot produce a slug outside
+    // `K` and would prove nothing. Against `U` it is a real fixed-point
+    // check, and it is what catches a closure that stopped early.
+    let mut vi: int = 0;
+    loop {
+        if vi >= memo_slugs.length { break; }
+        if _cr_string_in_array(retained, memo_slugs[vi]) {
+            let edges = memo_edges[vi];
+            let mut vj: int = 0;
+            loop {
+                if vj >= edges.length { break; }
+                if !_cr_string_in_array(retained, edges[vj]) {
+                    print.err("capsule-resolver: import-reachability filter violated its"
+                        + " closure invariant: module `"
+                        + memo_slugs[vi]
+                        + "` imports `"
+                        + edges[vj]
+                        + "` which is not in the retained set; retaining the"
+                        + " unfiltered source set");
+                    return sources;
+                }
+                vj += 1;
+            }
+        }
+        vi += 1;
+    }
+
+    let mut kept: CapsuleSource[] = [];
+    let mut dropped: string[] = [];
+    let mut ki: int = 0;
+    loop {
+        if ki >= sources.length { break; }
+        if _cr_string_in_array(retained, sources[ki].slug) {
+            kept.push(sources[ki]);
+        } else { dropped.push(sources[ki].slug); }
+        ki += 1;
+    }
+
+    if trace {
+        print.err("capsule-filter: retained " + int_to_string(kept.length)
+            + " of "
+            + int_to_string(sources.length)
+            + " modules");
+        if dropped.length > 0 {
+            print.err("capsule-filter: dropped " + _cr_join_slugs(dropped, 40));
+        }
+    }
+    return kept;
+}
+
+// Resolve, dedupe, and filter in one call.
+//
+// Single-list discipline (SFEP-0070 §3.5, layer 2): the filter applies to
+// `resolved.sources` and every downstream list — the staging input, the
+// `.sfn-asm` path list, `compile_capsule_modules`'s input, the
+// `.import-deps` universe — derives from the filtered value. Re-introducing
+// an unfiltered list anywhere is the way this breaks, so build-path callers
+// swap `_cr_resolve_and_dedupe` for this wrapper wholesale rather than
+// filtering at each use site.
+//
+// `sfn check` deliberately does NOT call this (SFEP-0070 §3.6): it keeps
+// the unfiltered set, so the build set stays a subset of the check set and
+// `check` can never go green on something `build` then trips over.
+fn _cr_resolve_dedupe_filtered(entry_paths: string[], consumer: ResolverConsumer, bundled_workspace_start: string) -> ResolverDedupeResult ![io] {
+    let resolved = _cr_resolve_and_dedupe(entry_paths, consumer, bundled_workspace_start);
+    if resolved.has_collision { return resolved; }
+    let filtered = _cr_filter_reachable_sources(resolved.sources, resolved.root_source_paths, consumer.runtime_root);
+    return ResolverDedupeResult {
+        sources: filtered,
+        has_collision: resolved.has_collision,
+        capabilities_required: resolved.capabilities_required,
+        manifest_dep_specs: resolved.manifest_dep_specs,
+        workspace_root: resolved.workspace_root,
+        root_source_paths: resolved.root_source_paths
+    };
+}
