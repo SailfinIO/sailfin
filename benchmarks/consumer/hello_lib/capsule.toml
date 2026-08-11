@@ -1,0 +1,13 @@
+[capsule]
+name = "bench/hello-lib"
+version = "0.1.0"
+
+[dependencies]
+"sfn/json" = "*"
+
+[capabilities]
+required = ["io"]
+
+[build]
+entry = "src/main.sfn"
+kind = "binary"

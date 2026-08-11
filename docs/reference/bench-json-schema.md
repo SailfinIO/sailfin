@@ -6,11 +6,16 @@ Status: Shipped in SFN-64 (epic #1503). Locked at `sailfin.bench/v1`.
 `sfn bench --json` is a boolean flag, the same shape as `sfn check --json`:
 it suppresses the human-readable table and prints a single UTF-8 JSON
 document to stdout. There is no `--json=PATH` form — write to a file with a
-shell redirect (`sfn bench --compiler --json > out.json`). It works in both
-bench modes:
+shell redirect (`sfn bench --compiler --json > out.json`). It works in two of
+`sfn bench`'s three modes:
 
 - `sfn bench --compiler --json` — compiler domain (per-module emit timing).
 - `sfn bench [<path>...] --json` — runtime domain (per-workload timing).
+
+The third mode, `sfn bench --consumer` (SFN-830), has no JSON envelope:
+`--json` is rejected there (exit 2) in favor of `--csv`. It is out of scope
+for this document — see
+[`docs/reference/bench.md`](https://github.com/SailfinIO/sailfin/blob/main/site/src/content/docs/docs/reference/bench.md#consumer-mode).
 
 Exit codes mirror the human renderer: `0` clean, `1` build/emit/run failure,
 `2` budget violation (`--budget-time` / `--budget-mem` exceeded). The same

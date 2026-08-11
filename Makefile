@@ -121,7 +121,7 @@ COMPILER_SOURCE_FINGERPRINT_CMD := $(NATIVE_BIN) dev bootstrap fingerprint
 # Which compiler binary to use for running Sailfin-native tests.
 # Default: the native compiler alias produced by `make compile`.
 
-.PHONY: help install fetch-seed test test-unit test-integration test-e2e test-capsules compile check check-strict check-fast package clean bench bench-runtime test-arena
+.PHONY: help install fetch-seed test test-unit test-integration test-e2e test-capsules compile check check-strict check-fast package clean bench bench-runtime bench-consumer test-arena
 
 .PHONY: ci-prepare-test-artifacts ci-package
 
@@ -240,6 +240,7 @@ help:
 	@echo "  make fetch-seed     # Download the latest released seed"
 	@echo "  make bench          # Benchmark per-module compile time and memory"
 	@echo "  make bench-runtime  # Benchmark compiled-program runtime execution"
+	@echo "  make bench-consumer # Benchmark end-to-end consumer builds (fixtures)"
 	@echo "  make mcp-server     # Build the Sailfin MCP server (tools/mcp-server)"
 	@echo "  make clean          # Remove packaged artifacts (dist/)"
 	@echo ""
@@ -524,6 +525,21 @@ bench-runtime:
 		exit 1; \
 	fi
 	@$(NATIVE_BIN) bench benchmarks/runtime $(BENCH_RUNTIME_ARGS)
+
+# Benchmark end-to-end consumer builds (SFN-830): cold vs warm `sfn build
+# --json` over the fixtures under benchmarks/consumer/, measuring wall time,
+# cache hit/miss counts, linked binary size, and constructor-slot count.
+# Usage:
+#   make bench-consumer                                            # all fixtures
+#   make bench-consumer BENCH_CONSUMER_ARGS="--csv build/consumer.csv"
+#   make bench-consumer BENCH_CONSUMER_ARGS="--fixtures other/fixtures"
+BENCH_CONSUMER_ARGS ?=
+bench-consumer:
+	@if [ ! -x "$(NATIVE_BIN)" ]; then \
+		echo "[bench-consumer] missing $(NATIVE_BIN); run 'make compile' first"; \
+		exit 1; \
+	fi
+	@$(NATIVE_BIN) bench --consumer $(BENCH_CONSUMER_ARGS)
 
 # =============================================================================
 # Arena correctness gate (Phase 0 / M0.5 prerequisite)

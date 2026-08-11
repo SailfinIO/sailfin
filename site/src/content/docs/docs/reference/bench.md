@@ -1,6 +1,6 @@
 ---
 title: Benchmarking
-description: Reference for the sfn bench command, its compiler and runtime modes, the sfn/bench harness capsule, and the sailfin.bench/v1 JSON output.
+description: Reference for the sfn bench command, its compiler, runtime, and consumer modes, the sfn/bench harness capsule, and the sailfin.bench/v1 JSON output.
 section: reference
 sidebar:
   order: 7
@@ -8,7 +8,7 @@ sidebar:
 
 ## Overview
 
-`sfn bench` is the native benchmarking command. It has two modes:
+`sfn bench` is the native benchmarking command. It has three modes:
 
 - **Compiler mode** (`sfn bench --compiler`) measures how fast the compiler
   emits IR — per-module compile time and peak memory across the
@@ -17,19 +17,26 @@ sidebar:
   **compiled Sailfin programs run** — it discovers, builds, and times
   `*_bench.sfn` workloads written against the [`sfn/bench`](#the-sfnbench-capsule)
   harness capsule.
+- **Consumer mode** (`sfn bench --consumer`) measures the **consumer build
+  experience** — it builds a fixture set twice each (cold, then warm against
+  the cache the cold run populated) and records per-fixture cold/warm build
+  time and output-artifact metrics. See [Consumer mode](#consumer-mode).
 
-Both modes share a table renderer, a CSV writer, budget gates, and a
-`--json` envelope ([`sailfin.bench/v1`](#json-output)). The command replaces the
-retired compile-time and runtime bench shell scripts; `make bench` and
-`make bench-runtime` are now thin wrappers over it.
+Compiler and runtime mode share a table renderer, a CSV writer, budget gates,
+and a `--json` envelope ([`sailfin.bench/v1`](#json-output)). The command
+replaces the retired compile-time and runtime bench shell scripts; `make
+bench` and `make bench-runtime` are thin wrappers over it. Consumer mode
+reuses the CSV writer but does not support `--json` or budget gates; `make
+bench-consumer` wraps it.
 
-Mode selection is by the `--compiler` flag: present → compiler mode; absent →
-runtime mode.
+Mode selection is by flag: `--compiler` → compiler mode; `--consumer` →
+consumer mode; neither → runtime mode.
 
 ```bash
 sfn bench --compiler          # per-module compiler emit timing + memory
 sfn bench                     # runtime workloads under benchmarks/runtime
 sfn bench path/to/workloads   # runtime workloads under an explicit path
+sfn bench --consumer          # consumer-build fixtures under benchmarks/consumer
 ```
 
 > **Peak-memory caveat.** In both modes the `PEAK` column and `--budget-mem`
@@ -129,6 +136,76 @@ The bundled workloads and what each stresses are catalogued in
 
 ---
 
+## Consumer mode
+
+```bash
+sfn bench --consumer [options]
+```
+
+Measures the **consumer build experience**: for each fixture capsule under
+the fixture root, it builds the fixture **cold** (no prior cache), then
+builds it again **warm** against the cache the cold run populated. The
+harness only ever builds fixtures — it never executes the resulting
+binaries — so this mode needs no `![net]` and no fixture-specific runtime
+behavior.
+
+For each fixture it records: cold wall time, warm wall time, the stripped
+binary size in bytes, the `.init_array` constructor-slot count, the number of
+modules staged, cold-run cache misses, and warm-run cache hit/miss counts.
+
+Fixtures live under `benchmarks/consumer/{hello,hello_lib,tls_client}/`, each
+a capsule directory with a `capsule.toml` and `src/main.sfn`.
+
+**Options:**
+
+| Flag | Default | Description |
+|---|---|---|
+| `--consumer` | off | Select consumer mode. |
+| `--fixtures <dir>` | `benchmarks/consumer` | Root directory of fixture capsules to build. |
+| `--csv <path>` | none | Also write per-fixture results as CSV to `<path>` (parent dir created). |
+| `--work-dir <dir>` | `build/bench-consumer` | Scratch directory for the cold/warm builds. |
+| `--top <n>` | off | Accepted but ignored in this mode. |
+| `--budget-time <seconds>` | off | Accepted but ignored in this mode — budgets are out of scope for consumer mode. |
+| `--budget-mem <kb>` | off | Accepted but ignored in this mode — budgets are out of scope for consumer mode. |
+| `--json` | — | **Rejected** in this mode: exit 2 with a message pointing at `--csv`. |
+
+**CSV columns** (exact header):
+
+```
+fixture,cold_s,warm_s,binary_bytes,ctors,modules_staged,cold_cache_misses,cache_hits,cache_misses,status,seed_version,platform
+```
+
+`binary_bytes` is the **stripped** binary size. `ctors` counts `.init_array`
+slots on the ELF binary — this includes any C-runtime entry (e.g.
+`frame_dummy`) alongside the per-module `@__sfn_module_type_init__`
+constructors, so it is a consistent relative measure rather than a claim that
+every slot is a Sailfin module constructor.
+
+`status` is one or more of the following tokens, joined with `+` when several
+apply:
+
+| Token | Meaning |
+|---|---|
+| `ok` | Clean run, all metrics collected. |
+| `FAIL` | The cold or warm build failed. |
+| `nostrip` | Stripping the binary was unavailable; `binary_bytes` is `-1`. |
+| `noctor` | `.init_array` inspection was unavailable; `ctors` is `-1`. |
+| `nobin` | The build produced no binary to measure. |
+| `nosize` | The binary size could not be determined. |
+
+A metric that degrades due to a missing tool reports `-1` alongside its
+status token rather than being estimated.
+
+**Example:**
+
+```bash
+sfn bench --consumer                                    # all bundled fixtures
+sfn bench --consumer --fixtures benchmarks/consumer     # explicit fixture root
+sfn bench --consumer --csv build/consumer-baseline.csv
+```
+
+---
+
 ## The `sfn/bench` capsule
 
 Runtime workloads are written against the `sfn/bench` capsule — the
@@ -185,8 +262,9 @@ that `sfn bench <dir>` scans.
 ## JSON output
 
 `--json` suppresses the human table and prints a single `sailfin.bench/v1` JSON
-document to stdout — the same shape as `sfn check --json`. It works in both
-modes:
+document to stdout — the same shape as `sfn check --json`. It works in
+compiler and runtime mode; consumer mode rejects `--json` (exit 2) and uses
+`--csv` instead:
 
 ```bash
 sfn bench --compiler --json > compile.json
@@ -211,23 +289,25 @@ that shells `sfn bench … --json` and returns the parsed envelope as
 
 ## Exit codes
 
-Shared by both modes and mirrored in the JSON envelope's `exit_code`:
+Shared by all three modes (mirrored in the JSON envelope's `exit_code` for
+compiler and runtime mode; consumer mode has no JSON envelope):
 
 | Code | Meaning |
 |---|---|
 | `0` | Clean run; everything within budget. |
-| `1` | Build / emit / run failure, or a pre-flight config error (compiler mode: missing import-context; runtime mode: no workloads resolved). Pre-flight errors print plain text to stderr with **no** JSON envelope. |
-| `2` | Budget violation only (`--budget-time` / `--budget-mem` exceeded, no build/run failure). Also returned for a CLI usage error. |
+| `1` | Build / emit / run failure, or a pre-flight config error (compiler mode: missing import-context; runtime mode: no workloads resolved; consumer mode: a fixture build failure). Pre-flight errors print plain text to stderr with **no** JSON envelope. |
+| `2` | Budget violation (`--budget-time` / `--budget-mem` exceeded, no build/run failure; compiler and runtime mode only), a CLI usage error, or `--json` passed in consumer mode. |
 
 ---
 
 ## Makefile targets
 
-Both targets are thin wrappers over the native command:
+All three targets are thin wrappers over the native command:
 
 ```bash
-make bench BENCH_ARGS="--top 10"                    # → sfn bench --compiler …
-make bench-runtime BENCH_RUNTIME_ARGS="--iterations 10"  # → sfn bench benchmarks/runtime …
+make bench BENCH_ARGS="--top 10"                          # → sfn bench --compiler …
+make bench-runtime BENCH_RUNTIME_ARGS="--iterations 10"    # → sfn bench benchmarks/runtime …
+make bench-consumer BENCH_CONSUMER_ARGS="--csv out.csv"    # → sfn bench --consumer …
 ```
 
 `make bench` requires a prior `make compile` (it needs the staged

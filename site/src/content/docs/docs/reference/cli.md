@@ -587,6 +587,7 @@ guide, see
 | `make fetch-seed` | Download the pinned seed compiler (`bootstrap.toml [seed].version`, override with `SEED_VERSION`) from GitHub Releases into `build/toolchains/seed/`. Set `GITHUB_TOKEN` to raise GitHub API rate limits. |
 | `make bench` | Benchmark compiler per-module compile time and memory. |
 | `make bench-runtime` | Benchmark compiled-program runtime execution. |
+| `make bench-consumer` | Benchmark consumer-build cold/warm compile time and output-artifact size for fixtures under `benchmarks/consumer`. |
 | `make mcp-server` | Build the Sailfin MCP server under `tools/mcp-server/`. |
 | `make clean` | Remove `dist/` packaged artifacts. Does not remove build intermediates. |
 | `make clean-build` | Remove `build/` artifacts (keeps the seed toolchain under `build/toolchains/` by default). Pass `KEEP_SEED=0` to also remove `build/toolchains/`. |

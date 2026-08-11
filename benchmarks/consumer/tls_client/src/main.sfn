@@ -1,0 +1,8 @@
+// benchmarks/consumer/tls_client/src/main.sfn
+import { get } from "sfn/http";
+
+fn main() -> int ![io, net] {
+    let body = get("https://example.invalid/");
+    print(body);
+    return 0;
+}

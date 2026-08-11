@@ -1,0 +1,10 @@
+[capsule]
+name = "bench/hello"
+version = "0.1.0"
+
+[capabilities]
+required = ["io"]
+
+[build]
+entry = "src/main.sfn"
+kind = "binary"

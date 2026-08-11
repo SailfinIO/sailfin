@@ -1,0 +1,558 @@
+// compiler/src/cli/commands/bench_consumer.sfn
+//
+// `sfn bench --consumer` subcommand (SFN-830). A sibling module to
+// bench.sfn (already at its 1500-line soft budget): benchmarks end-to-end
+// *consumer* builds — cold vs warm `sfn build --json` over a fixture set
+// under benchmarks/consumer/ — as opposed to `--compiler`'s per-module
+// compiler-emit benchmark or the default runtime-workload benchmark.
+// Every metric is sourced from the linked artifact itself (binary size is
+// the STRIPPED size) or from the build's own `--json` report; nothing here
+// is estimated.
+import { Matches, get_or, has_flag } from "sfn/cli";
+import { int_to_string } from "sfn/strings";
+
+import { _dirname_cmd, _shell_read_cmd } from "../../build/fs";
+import { _ensure_dir, _resolve_self_path } from "../../build/paths";
+import { char_code_at_text, index_of } from "../../string_utils";
+import { resolve_compiler_version } from "../../version";
+import { CliContext } from "../context";
+
+// Format an integer millisecond duration as fixed-point seconds with two
+// decimal places. A local duplicate of `bench.sfn::_fmt_secs` rather than an
+// import: `bench.sfn` imports `consumer_run` from this module, so importing
+// back would create a cycle the seed compiler doesn't handle cleanly (the
+// same reasoning `bench_json.sfn`'s header records for its own duplicated
+// JSON primitives).
+fn _bc_fmt_secs(ms: int) -> string {
+    let s = ms / 1000;
+    let cs = (ms % 1000) / 10;
+    let mut cs_str = int_to_string(cs);
+    if cs < 10 { cs_str = "0" + cs_str; }
+    return int_to_string(s) + "." + cs_str;
+}
+
+// Strip trailing ASCII whitespace — mirrors `bench.sfn::_bench_rt_trim_end`,
+// duplicated for the same cross-module-cycle reason as `_bc_fmt_secs`.
+fn _bc_trim_end(s: string) -> string {
+    let mut end = s.length;
+    loop {
+        if end <= 0 { break; }
+        let c = char_code_at_text(s, end - 1);
+        if c == 32 || c == 9 || c == 13 || c == 10 { end -= 1; } else { break; }
+    }
+    return substring(s, 0, end);
+}
+
+// `<sysname> <machine>` (e.g. `Linux x86_64`) via `uname -s`/`-m`, matching
+// the `platform` column the runtime and compiler bench modes already emit.
+fn _bc_platform() -> string ![io] {
+    let sysname = _bc_trim_end(_shell_read_cmd("uname -s"));
+    let machine = _bc_trim_end(_shell_read_cmd("uname -m"));
+    if sysname.length == 0 { return "unknown"; }
+    if machine.length == 0 { return sysname; }
+    return sysname + " " + machine;
+}
+
+// Left-justify `s` to `width` columns with trailing spaces (no truncation).
+fn _bc_pad(s: string, width: int) -> string {
+    let mut out = s;
+    loop {
+        if out.length >= width { break; }
+        out = out + " ";
+    }
+    return out;
+}
+
+// Lexicographic byte-order comparison, for sorting fixture names so table
+// and CSV order is stable regardless of `fs.listDirectory` order.
+fn _bc_str_cmp(a: string, b: string) -> int {
+    let mut i = 0;
+    loop {
+        let a_end = i >= a.length;
+        let b_end = i >= b.length;
+        if a_end && b_end { return 0; }
+        if a_end { return -1; }
+        if b_end { return 1; }
+        let ca = char_code_at_text(a, i);
+        let cb = char_code_at_text(b, i);
+        if ca < cb { return -1; }
+        if ca > cb { return 1; }
+        i += 1;
+    }
+}
+
+fn _bc_sorted(xs: string[]) -> string[] {
+    let mut a: string[] = [];
+    let mut c = 0;
+    loop {
+        if c >= xs.length { break; }
+        a.push(xs[c]);
+        c += 1;
+    }
+    let mut x = 1;
+    loop {
+        if x >= a.length { break; }
+        let key = a[x];
+        let mut j = x - 1;
+        loop {
+            if j < 0 { break; }
+            if _bc_str_cmp(a[j], key) <= 0 { break; }
+            a[j + 1] = a[j];
+            j = j - 1;
+        }
+        a[j + 1] = key;
+        x += 1;
+    }
+    return a;
+}
+
+// A fixture is any immediate subdirectory of `root` containing a
+// `capsule.toml`. Sorted so table/CSV order is stable.
+fn _bc_discover_fixtures(root: string) -> string[] ![io] {
+    let mut names: string[] = [];
+    if !fs.exists(root) { return names; }
+    let entries = fs.listDirectory(root);
+    let mut i = 0;
+    loop {
+        if i >= entries.length { break; }
+        let e = entries[i];
+        if fs.exists(root + "/" + e + "/capsule.toml") { names.push(e); }
+        i += 1;
+    }
+    return _bc_sorted(names);
+}
+
+// Child env for the nested `sfn build` invocations: the same PATH/HOME/
+// TMPDIR shape as `bench.sfn::_bench_child_env` (`run_capture`'s env is
+// never inherited, so PATH is required for `clang`), plus a per-fixture
+// build cache root and test-scratch dir so cold/warm isolation is real
+// rather than an artifact of run ordering.
+fn _bc_child_env(cache_root: string, scratch: string) -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    e.push("SAILFIN_BUILD_CACHE_DIR=" + cache_root);
+    e.push("SAILFIN_TEST_SCRATCH=" + scratch + "/sfn");
+    return e;
+}
+
+// The non-negative integer value of the first `"<key>":` field in a `sfn
+// build --json` report, or -1 if the key is absent or has no digits.
+// `"hits"`, `"misses"`, and `"count"` each occur exactly once in the
+// `build_report.sfn` schema (inside `cache` and `deps` respectively), so an
+// unqualified first-match scan is sound here without a real JSON parser —
+// see `bench.sfn::_bench_rt_field` for the same shape against bench-record
+// lines.
+fn _bc_json_int(text: string, key: string) -> int {
+    let needle = "\"" + key + "\":";
+    let at = index_of(text, needle);
+    if at < 0 { return -1; }
+    let mut i = at + needle.length;
+    let mut neg = false;
+    if i < text.length && char_code_at_text(text, i) == 45 {
+        neg = true;
+        i += 1;
+    }
+    let mut val = 0;
+    let mut seen = false;
+    loop {
+        if i >= text.length { break; }
+        let c = char_code_at_text(text, i);
+        if c < 48 || c > 57 { break; }
+        val = val * 10 + (c - 48);
+        seen = true;
+        i += 1;
+    }
+    if !seen { return -1; }
+    if neg { return 0 - val; }
+    return val;
+}
+
+// Leading base-10 integer of `text`, skipping leading ASCII whitespace (the
+// shape `wc -c` and `size -A` columns come in). -1 if no digits are found.
+fn _bc_leading_int(text: string) -> int {
+    let mut i = 0;
+    loop {
+        if i >= text.length { break; }
+        let c = char_code_at_text(text, i);
+        if c == 32 || c == 9 || c == 10 || c == 13 { i += 1; } else { break; }
+    }
+    let mut val = 0;
+    let mut seen = false;
+    loop {
+        if i >= text.length { break; }
+        let c = char_code_at_text(text, i);
+        if c < 48 || c > 57 { break; }
+        val = val * 10 + (c - 48);
+        seen = true;
+        i += 1;
+    }
+    if !seen { return -1; }
+    return val;
+}
+
+fn _bc_split_lines(text: string) -> string[] {
+    let mut out: string[] = [];
+    let mut cur = "";
+    let mut i = 0;
+    loop {
+        if i >= text.length { break; }
+        let c = char_code_at_text(text, i);
+        if c == 10 {
+            out.push(cur);
+            cur = "";
+        } else if c != 13 { cur = cur + substring(text, i, i + 1); }
+        i += 1;
+    }
+    if cur.length > 0 { out.push(cur); }
+    return out;
+}
+
+fn _bc_split_ws(line: string) -> string[] {
+    let mut out: string[] = [];
+    let mut cur = "";
+    let mut i = 0;
+    loop {
+        if i >= line.length { break; }
+        let c = char_code_at_text(line, i);
+        if c == 32 || c == 9 {
+            if cur.length > 0 {
+                out.push(cur);
+                cur = "";
+            }
+        } else { cur = cur + substring(line, i, i + 1); }
+        i += 1;
+    }
+    if cur.length > 0 { out.push(cur); }
+    return out;
+}
+
+// `size -A`'s `.init_array` section byte size, or -1 if the section is
+// absent from the output.
+fn _bc_init_array_bytes(text: string) -> int {
+    let lines = _bc_split_lines(text);
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        let tokens = _bc_split_ws(lines[i]);
+        if tokens.length >= 2 && tokens[0] == ".init_array" {
+            return _bc_leading_int(tokens[1]);
+        }
+        i += 1;
+    }
+    return -1;
+}
+
+// Join two status tokens with `+`, dropping an empty side. Mirrors the
+// `+`-joined status convention `bench.sfn` already uses.
+fn _bc_append_status(base: string, extra: string) -> string {
+    if extra.length == 0 { return base; }
+    if base.length == 0 { return extra; }
+    return base + "+" + extra;
+}
+
+struct BcSizeInfo {
+    binary_bytes: int;
+    ctors: int;
+    status: string;
+}
+
+// STRIPPED binary size and `.init_array` constructor-slot count, both read
+// from the linked artifact after stripping (never estimated). `.init_array`
+// on ELF/Linux includes any C-runtime entry (e.g. `frame_dummy`) alongside
+// the per-module `@__sfn_module_type_init__` constructors — a consistent
+// relative measure across fixtures, not a claim that every slot is a
+// Sailfin module ctor. ELF/Linux-only; a non-ELF platform (or a missing
+// `size`/strip tool) degrades `ctors` to -1 with a `noctor` status token
+// rather than guessing. `binary_bytes` is -1 (never 0) whenever it was not
+// actually measured — 0 is a legitimate size and must not collide with a
+// missing-tool or missing-artifact reading.
+fn _bc_binary_metrics(out_bin: string, child_env: string[]) -> BcSizeInfo ![io] {
+    if !fs.exists(out_bin) {
+        return BcSizeInfo {
+            binary_bytes: -1,
+            ctors: -1,
+            status: "nobin+nostrip+noctor"
+        };
+    }
+    let stripped = out_bin + ".stripped";
+    let cp_exit = process.run_capture(["cp", out_bin, stripped], child_env);
+    let _cp_o = process.capture_take_stdout();
+    let _cp_e = process.capture_take_stderr();
+    if cp_exit != 0 {
+        return BcSizeInfo {
+            binary_bytes: -1,
+            ctors: -1,
+            status: "nostrip+noctor"
+        };
+    }
+
+    let mut status = "";
+    let mut stripped_ok = false;
+    let strip1 = process.run_capture(["llvm-strip", stripped], child_env);
+    let _s1o = process.capture_take_stdout();
+    let _s1e = process.capture_take_stderr();
+    if strip1 == 0 { stripped_ok = true; } else {
+        let strip2 = process.run_capture(["strip", stripped], child_env);
+        let _s2o = process.capture_take_stdout();
+        let _s2e = process.capture_take_stderr();
+        if strip2 == 0 { stripped_ok = true; }
+    }
+    if !stripped_ok { status = _bc_append_status(status, "nostrip"); }
+
+    let mut binary_bytes = -1;
+    if stripped_ok {
+        let size_exit = process.run_capture(["wc", "-c", stripped], child_env);
+        let size_out = process.capture_take_stdout();
+        let _size_e = process.capture_take_stderr();
+        if size_exit == 0 { binary_bytes = _bc_leading_int(size_out); }
+        if binary_bytes < 0 { status = _bc_append_status(status, "nosize"); }
+    }
+
+    let ctors_exit = process.run_capture(["size", "-A", stripped], child_env);
+    let ctors_out = process.capture_take_stdout();
+    let _ctors_e = process.capture_take_stderr();
+    let mut ctors = -1;
+    if ctors_exit == 0 {
+        let bytes = _bc_init_array_bytes(ctors_out);
+        if bytes >= 0 { ctors = bytes / 8; }
+    }
+    if ctors < 0 { status = _bc_append_status(status, "noctor"); }
+
+    fs.deleteFile(stripped);
+
+    return BcSizeInfo {
+        binary_bytes: binary_bytes,
+        ctors: ctors,
+        status: status
+    };
+}
+
+struct BcRow {
+    name: string;
+    cold_ms: int;
+    warm_ms: int;
+    modules_staged: int;
+    cold_cache_misses: int;
+    cache_hits: int;
+    cache_misses: int;
+    binary_bytes: int;
+    ctors: int;
+    status: string;
+}
+
+// One fixture's cold + warm build over an isolated cache root, plus the
+// linked-artifact size/ctor metrics. Cold and warm share the identical
+// argv/env against the same cache root — the cache root does not exist
+// before the cold run (`consumer_run` only creates its parent), so the
+// cold/warm contrast is a real empty-cache-vs-populated-cache measurement:
+// `--work-dir work_subdir` isolates the cwd-relative import-context staging
+// cache and per-capsule `.ll` tree per fixture (`build.sfn`'s `--work-dir`
+// routes both under `<work_dir>/...`), and `SAILFIN_BUILD_CACHE_DIR` points
+// at a per-fixture `cache_root` that does not exist before the cold run, so
+// neither layer carries state across fixtures or across bench-consumer runs.
+fn _bc_run_fixture(self_bin: string, name: string, fixture_dir: string, scratch: string) -> BcRow ![clock, io] {
+    let cache_root = scratch + "/cache";
+    let out_bin = scratch + "/bin";
+    let work_subdir = scratch + "/work";
+    let entry = fixture_dir + "/src/main.sfn";
+    let child_env = _bc_child_env(cache_root, scratch);
+    // `--skip-toolchain-check` keeps the child build's `[toolchain]` floor
+    // check — which can dispatch a network fetch — out of the measured cold
+    // window (build.sfn:170 runs it inside every child build).
+    let argv: string[] = [self_bin, "build", "--json", "-o", out_bin, "--work-dir", work_subdir, "--skip-toolchain-check", entry];
+
+    let mut status = "";
+
+    let cold_exit = process.run_capture_metered(argv, child_env);
+    let cold_out = process.capture_take_stdout();
+    let _cold_e = process.capture_take_stderr();
+    let cold_ms = process.capture_take_wall_ms();
+    let _cold_rss = process.capture_take_peak_rss_kb();
+    if cold_exit != 0 { status = _bc_append_status(status, "FAIL"); }
+
+    let warm_exit = process.run_capture_metered(argv, child_env);
+    let warm_out = process.capture_take_stdout();
+    let _warm_e = process.capture_take_stderr();
+    let warm_ms = process.capture_take_wall_ms();
+    let _warm_rss = process.capture_take_peak_rss_kb();
+    if warm_exit != 0 { status = _bc_append_status(status, "FAIL"); }
+
+    let modules_staged = _bc_json_int(cold_out, "count");
+    // Cold-cache misses span BOTH cache layers the build populates — the
+    // `.ll` module cache and the `.o` object cache — so this is a work
+    // proxy, not a module count, and legitimately exceeds `modules_staged`
+    // (34 staged / 68 cold misses for the hello fixture). It is deliberately
+    // not called `modules_compiled`: the ratio is not a fixed 2x (the
+    // tls_client fixture reads 39 staged / 73 cold misses) because the
+    // runtime object layer is shared across modules. `modules_staged` is the
+    // count SFEP-0070's reachability filter is expected to move.
+    let cold_cache_misses = _bc_json_int(cold_out, "misses");
+    let cache_hits = _bc_json_int(warm_out, "hits");
+    let cache_misses = _bc_json_int(warm_out, "misses");
+
+    let size_info = _bc_binary_metrics(out_bin, child_env);
+    status = _bc_append_status(status, size_info.status);
+    if status.length == 0 { status = "ok"; }
+
+    return BcRow {
+        name: name,
+        cold_ms: cold_ms,
+        warm_ms: warm_ms,
+        modules_staged: modules_staged,
+        cold_cache_misses: cold_cache_misses,
+        cache_hits: cache_hits,
+        cache_misses: cache_misses,
+        binary_bytes: size_info.binary_bytes,
+        ctors: size_info.ctors,
+        status: status
+    };
+}
+
+// CSV header for `--csv PATH`. The trailing `,status,seed_version,platform`
+// deliberately mirrors the existing runtime-mode CSV's tail
+// (`bench.sfn::_run_runtime_mode`). No `run_sha`/`run_date` columns: those
+// are prepended by `scripts/perf_history.sh`'s `_append_tagged` once a
+// sibling issue (SFN-832) wires this mode into perf-history — this module
+// stays perf-history-agnostic.
+let _BC_CSV_HEADER: string = "fixture,cold_s,warm_s,binary_bytes,ctors,modules_staged,cold_cache_misses,cache_hits,cache_misses,status,seed_version,platform";
+
+// `sfn bench --consumer [--fixtures DIR] [--work-dir DIR] [--csv PATH]`
+// entry point. Builds each fixture under `--fixtures` (default
+// `benchmarks/consumer`) cold then warm via `sfn build --json --work-dir
+// <fixture-subdir> --skip-toolchain-check` (per-fixture `--work-dir` for
+// cold/warm cache isolation; `--skip-toolchain-check` to keep network
+// dispatch out of the timed window — see `_bc_run_fixture`), reporting wall
+// time, module staging/compile counts, cache hit/miss counts, and the
+// linked binary's stripped size + constructor-slot count. `--top`/
+// `--budget-time`/`--budget-mem`, accepted by sibling bench modes, are
+// deliberately not read here — budgets are out of scope for this mode.
+// Exits 1 if no fixtures are found, or if any fixture's cold or warm build
+// failed; exits 2 (without building anything) if `--json` is passed, since
+// this mode's own `--csv` is the machine-readable surface.
+fn consumer_run(matches: Matches, ctx: CliContext) -> int ![clock, io] {
+    if has_flag(matches, "json") {
+        print("[bench-consumer] --json is not supported in consumer mode; use --csv PATH");
+        return 2;
+    }
+
+    let fixtures_root = get_or(matches, "fixtures", "benchmarks/consumer");
+    let names = _bc_discover_fixtures(fixtures_root);
+    if names.length == 0 {
+        print("[bench-consumer] no fixtures under " + fixtures_root);
+        return 1;
+    }
+
+    let work_arg = get_or(matches, "work-dir", "");
+    let mut work = work_arg;
+    if work.length == 0 {
+        work = "build/bench-consumer";
+        _ensure_dir(work);
+    }
+
+    let self_bin = _resolve_self_path(ctx.binary_dir);
+    let version = resolve_compiler_version(ctx.binary_dir);
+    let platform = _bc_platform();
+
+    print("[bench-consumer] seed: " + self_bin + " (" + version + ")");
+    print("[bench-consumer] fixtures: " + int_to_string(names.length));
+    print("");
+    print("  " + _bc_pad("FIXTURE", 16) + _bc_pad("COLD", 9) + _bc_pad("WARM", 9)
+        + _bc_pad("BYTES", 11)
+        + _bc_pad("CTORS", 7)
+        + _bc_pad("STAGED", 8)
+        + _bc_pad("COLDMISS", 10)
+        + "STATUS");
+
+    let mut rows: BcRow[] = [];
+    let mut i = 0;
+    loop {
+        if i >= names.length { break; }
+        let name = names[i];
+        let fixture_dir = fixtures_root + "/" + name;
+        let scratch = work + "/f" + int_to_string(i);
+        _ensure_dir(scratch);
+        let row = _bc_run_fixture(self_bin, name, fixture_dir, scratch);
+        print("  " + _bc_pad(row.name, 16) + _bc_pad(_bc_fmt_secs(row.cold_ms)
+            + "s", 9)
+            + _bc_pad(_bc_fmt_secs(row.warm_ms)
+            + "s", 9)
+            + _bc_pad(int_to_string(row.binary_bytes), 11)
+            + _bc_pad(int_to_string(row.ctors), 7)
+            + _bc_pad(int_to_string(row.modules_staged), 8)
+            + _bc_pad(int_to_string(row.cold_cache_misses), 10)
+            + row.status);
+        rows.push(row);
+        i += 1;
+    }
+
+    let mut total_cold_ms = 0;
+    let mut fail_count = 0;
+    i = 0;
+    loop {
+        if i >= rows.length { break; }
+        total_cold_ms += rows[i].cold_ms;
+        if index_of(rows[i].status, "FAIL") >= 0 { fail_count += 1; }
+        i += 1;
+    }
+
+    print("");
+    print("==================================================================");
+    print("");
+    print("  SUMMARY");
+    print("  -------");
+    print("  Fixtures:      " + int_to_string(rows.length));
+    print("  Total cold:    " + _bc_fmt_secs(total_cold_ms) + "s");
+    if fail_count > 0 {
+        print("  FAILURES:      " + int_to_string(fail_count));
+    }
+    print("");
+
+    let csv_out = get_or(matches, "csv", "");
+    if csv_out.length > 0 {
+        _ensure_dir(_dirname_cmd(csv_out));
+        let mut csv_content = _BC_CSV_HEADER + "\n";
+        i = 0;
+        loop {
+            if i >= rows.length { break; }
+            let r = rows[i];
+            csv_content = csv_content + r.name + "," + _bc_fmt_secs(r.cold_ms)
+                + ","
+                + _bc_fmt_secs(r.warm_ms)
+                + ","
+                + int_to_string(r.binary_bytes)
+                + ","
+                + int_to_string(r.ctors)
+                + ","
+                + int_to_string(r.modules_staged)
+                + ","
+                + int_to_string(r.cold_cache_misses)
+                + ","
+                + int_to_string(r.cache_hits)
+                + ","
+                + int_to_string(r.cache_misses)
+                + ","
+                + r.status
+                + ","
+                + version
+                + ","
+                + platform
+                + "\n";
+            i += 1;
+        }
+        fs.writeFile(csv_out, csv_content);
+        print("[bench-consumer] wrote " + csv_out);
+    }
+
+    if fail_count > 0 {
+        print.err("[bench-consumer] FAIL: " + int_to_string(fail_count)
+            + " fixture(s) failed to build");
+        return 1;
+    }
+    print("[bench-consumer] all fixtures built");
+    return 0;
+}

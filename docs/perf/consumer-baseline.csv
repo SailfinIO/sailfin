@@ -1,0 +1,4 @@
+fixture,cold_s,warm_s,binary_bytes,ctors,modules_staged,cold_cache_misses,cache_hits,cache_misses,status,seed_version,platform
+hello,48.73,1.76,386848,32,34,68,68,0,ok,0.9.5,Linux x86_64
+hello_lib,49.50,1.90,390528,34,35,69,69,0,ok,0.9.5,Linux x86_64
+tls_client,49.61,1.85,388288,38,39,73,73,0,ok,0.9.5,Linux x86_64
