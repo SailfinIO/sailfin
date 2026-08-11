@@ -815,11 +815,10 @@ fn _tls_install_read_key(s: *TlsSession, secret: int[], suite: i64) -> bool {
     let iv: int[] = tls13_traffic_iv(secret);
     if key.length != want { return false; }
     if iv.length != 12 { return false; }
-    s.suite = suite;
-    s.write_key_len = key.length;
-    s.read_key_len = key.length;
-    if s.read_key_addr != 0 { free(s.read_key_addr as *u8); }
-    if s.read_iv_addr != 0 { free(s.read_iv_addr as *u8); }
+    // Allocate the replacements before touching the live buffers (SFN-819):
+    // an OOM here now returns with the session's existing keys still intact
+    // and freeable exactly once, instead of leaving a freed pointer behind
+    // for `_tls_session_free` to double-free.
     let kb: *u8 = _tls_bytes_to_buf(key);
     if kb as i64 == 0 { return false; }
     let ib: *u8 = _tls_bytes_to_buf(iv);
@@ -827,6 +826,11 @@ fn _tls_install_read_key(s: *TlsSession, secret: int[], suite: i64) -> bool {
         free(kb);
         return false;
     }
+    s.suite = suite;
+    s.write_key_len = key.length;
+    s.read_key_len = key.length;
+    if s.read_key_addr != 0 { free(s.read_key_addr as *u8); }
+    if s.read_iv_addr != 0 { free(s.read_iv_addr as *u8); }
     s.read_key_addr = kb as i64;
     s.read_iv_addr = ib as i64;
     s.read_seq = 0;
@@ -840,9 +844,10 @@ fn _tls_install_write_key(s: *TlsSession, secret: int[], suite: i64) -> bool {
     let iv: int[] = tls13_traffic_iv(secret);
     if key.length != want { return false; }
     if iv.length != 12 { return false; }
-    s.suite = suite;
-    if s.write_key_addr != 0 { free(s.write_key_addr as *u8); }
-    if s.write_iv_addr != 0 { free(s.write_iv_addr as *u8); }
+    // Allocate the replacements before touching the live buffers (SFN-819):
+    // an OOM here now returns with the session's existing keys still intact
+    // and freeable exactly once, instead of leaving a freed pointer behind
+    // for `_tls_session_free` to double-free.
     let kb: *u8 = _tls_bytes_to_buf(key);
     if kb as i64 == 0 { return false; }
     let ib: *u8 = _tls_bytes_to_buf(iv);
@@ -850,6 +855,9 @@ fn _tls_install_write_key(s: *TlsSession, secret: int[], suite: i64) -> bool {
         free(kb);
         return false;
     }
+    s.suite = suite;
+    if s.write_key_addr != 0 { free(s.write_key_addr as *u8); }
+    if s.write_iv_addr != 0 { free(s.write_iv_addr as *u8); }
     s.write_key_addr = kb as i64;
     s.write_iv_addr = ib as i64;
     s.write_seq = 0;
