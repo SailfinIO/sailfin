@@ -2,15 +2,15 @@
 //
 // Tests that drive a subprocess have had spawn, capture, and per-child
 // env/cwd since `fixtures.sfn`, but nothing that bounds a child in *time*
-// or tears one down on demand. The gap pushed every such test onto a
-// shell vehicle:
+// or tears one down on demand. That gap pushes such tests onto a shell
+// vehicle:
 //
-//   * A blocking server (`serve()` never returns) was reaped by prepending
+//   * A blocking server (`serve()` never returns) is reaped by prepending
 //     `timeout <secs>` to the argv, after a `sh -c "command -v timeout"`
-//     probe — and the test SKIPPED itself when neither `timeout` nor
-//     `gtimeout` was on `PATH`. Thirteen e2e files carried a near-verbatim
+//     probe — and the test SKIPS itself when neither `timeout` nor
+//     `gtimeout` is on `PATH`. Thirteen e2e files carry a near-verbatim
 //     copy of that `_has_cmd` / `_timeout_cmd` / `_spawn_server` trio.
-//   * Readiness was polled by shelling `process.run(["sleep", "0.5"])`
+//   * Readiness is polled by shelling `process.run(["sleep", "0.5"])`
 //     between probe attempts — a fork+exec per tick, in a hand-rolled
 //     bounded retry loop repeated across twelve files.
 //
@@ -18,8 +18,15 @@
 // say "there is no process-kill primitive"; `process.handle_kill` has
 // existed since SFN-402 (SFEP-0050 §5.1), and it is what the test runner
 // itself uses for its per-file deadline. The skip-on-missing-`timeout`
-// branch therefore silently disabled those tests on any host without
+// branch therefore silently disables those tests on any host without
 // coreutils — a coverage hole, not merely an ergonomic one.
+//
+// MIGRATION STATUS: this module provides the capability;
+// `compiler/tests/e2e/serve_loopback_test.sfn` is the migrated exemplar.
+// The other twelve loopback files still carry the shell trio and still
+// skip themselves without `timeout`. Do not read the past tense above into
+// the call sites — the hole is closed for tests written against this
+// module, and remains open in the ones not yet moved.
 //
 // This module closes the gap entirely inside the capsule. It introduces no
 // runtime or compiler surface: every primitive it needs (`spawn_with_env`,
@@ -68,9 +75,15 @@ struct ChildOutcome {
 // A child spawned to run concurrently with the test that started it —
 // typically a blocking server the test then drives over a socket.
 //
-// `handle_id` is `0` when the spawn itself failed; `stop` and the scoped
-// `with_background` both tolerate that, so a call site does not have to
-// branch before tearing down. `label` is carried only for diagnostics.
+// `handle_id` is `0` when the spawn itself failed; `stop_background` and
+// the scoped `with_background` both tolerate that, so a call site does not
+// have to branch before tearing down. `label` is carried only for
+// diagnostics.
+//
+// This is a plain copyable struct holding a raw handle id, NOT an owning
+// handle: copying it does not duplicate the child, and stopping one copy
+// leaves every other copy dangling. Exactly one `stop_background` per
+// `start_background` — see the warning there.
 struct Background {
     handle_id: int;
     label: string;
@@ -79,7 +92,18 @@ struct Background {
 // Chunk size for a single framed read. Matches the runner's own 64 KiB
 // read window in `exec.sfn` so the two loops behave alike under a chatty
 // child.
-fn _read_chunk() -> int { return 65536; }
+let _READ_CHUNK: int = 65536;
+
+// How many consecutive `io.poll_any` failures to tolerate before giving up
+// on a child. `io.poll_any` returns `-1` for a timeout, but also for an
+// allocation failure or a non-retryable `poll(2)` errno — and those are
+// sticky, not transient. Without a bound, a `deadline_ms <= 0` drain would
+// spin at 100% CPU forever on one, since there is no deadline to break it.
+// `exec.sfn` needs no such guard because the runner always passes a
+// deadline; this module documents no-deadline as a supported mode, which
+// makes the hazard reachable (`.claude/rules/code-style.md` asks for a
+// guard counter on input-driven loops).
+let _MAX_POLL_FAILURES: int = 1024;
 
 // Drain a live child's stdout and stderr until both reach EOF, or until
 // `deadline_ms` elapses — then reap it.
@@ -100,7 +124,8 @@ fn _drain_bounded(handle_id: int, deadline_ms: int) -> ChildOutcome ![clock, io]
     let mut out_buf: string = "";
     let mut err_buf: string = "";
     let mut timed_out: boolean = false;
-    let start_ms = monotonic_millis();
+    let mut poll_failures: int = 0;
+    let start_ms: int = monotonic_millis();
     loop {
         if process.handle_stdout_at_eof(handle_id) && process.handle_stderr_at_eof(handle_id) {
             break;
@@ -132,6 +157,10 @@ fn _drain_bounded(handle_id: int, deadline_ms: int) -> ChildOutcome ![clock, io]
             // check above. The deadline is therefore only observed between
             // reads on that platform — an untimed framed read cannot be
             // interrupted, so a wholly silent hung child is not killed here.
+            // POSIX cannot reach this branch: a read only clears an fd to
+            // `-1` when it drained nothing, so both fds are `-1` only once
+            // both stashes are empty, which the both-at-EOF check above has
+            // already broken on.
             read_out = !process.handle_stdout_at_eof(handle_id);
             read_err = !process.handle_stderr_at_eof(handle_id);
         } else {
@@ -142,17 +171,26 @@ fn _drain_bounded(handle_id: int, deadline_ms: int) -> ChildOutcome ![clock, io]
                     timed_out = true;
                     break;
                 }
+                // A sticky poll failure (allocation failure, non-retryable
+                // errno) would otherwise spin forever here when no deadline
+                // bounds the drain. Give up rather than burn a core.
+                poll_failures = poll_failures + 1;
+                if poll_failures >= _MAX_POLL_FAILURES {
+                    process.handle_kill(handle_id);
+                    break;
+                }
                 continue;
             }
+            poll_failures = 0;
             read_out = ready == out_fd;
             read_err = ready == err_fd;
         }
         if read_out {
-            let chunk = process.handle_read_bytes_stdout(handle_id, _read_chunk());
+            let chunk = process.handle_read_bytes_stdout(handle_id, _READ_CHUNK);
             if chunk.length > 0 { out_buf = out_buf + chunk; }
         }
         if read_err {
-            let chunk = process.handle_read_bytes_stderr(handle_id, _read_chunk());
+            let chunk = process.handle_read_bytes_stderr(handle_id, _READ_CHUNK);
             if chunk.length > 0 { err_buf = err_buf + chunk; }
         }
     }
@@ -191,6 +229,9 @@ fn _spawn_failed() -> ChildOutcome {
 // `deadline_ms <= 0` waits indefinitely. On expiry the child is SIGKILLed,
 // still reaped, and the returned outcome has `timed_out == true` with
 // whatever output was drained before the kill.
+//
+// The child's stdin is closed immediately, giving it `< /dev/null`
+// semantics — see `run_bounded_in`. Use `run_bounded_stdin` to feed it.
 fn run_bounded(argv: string[], env: string[], deadline_ms: int) -> ChildOutcome ![clock, io] {
     return run_bounded_in(argv, env, "", deadline_ms);
 }
@@ -203,9 +244,20 @@ fn run_bounded(argv: string[], env: string[], deadline_ms: int) -> ChildOutcome 
 // used to prescribe: the directory is applied to the single spawned child
 // via `spawn_with_env_cwd`, never through a process-global `chdir(2)`,
 // so concurrent tests under `--jobs N` are unaffected.
+//
+// Stdin is closed before the drain starts. `spawn_with_env_cwd` ALWAYS
+// creates a stdin pipe and hands the child its read end, and the parent
+// holds the write end until `handle_wait` — so without this close, any
+// child that reads stdin (`sort`, `cat`, a tool that is not on a tty)
+// would block on a pipe that never reaches EOF. With `deadline_ms <= 0`
+// that is a permanent hang. Closing here restores the `< /dev/null`
+// semantics of both idioms this replaces: `process.run_capture` creates no
+// stdin pipe at all, and a `timeout <secs> <cmd>` vehicle inherits the
+// parent's stdin.
 fn run_bounded_in(argv: string[], env: string[], cwd: string, deadline_ms: int) -> ChildOutcome ![clock, io] {
     let handle_id = process.spawn_with_env_cwd(argv, env, cwd);
     if handle_id == 0 { return _spawn_failed(); }
+    process.handle_close_stdin(handle_id);
     return _drain_bounded(handle_id, deadline_ms);
 }
 
@@ -214,14 +266,32 @@ fn run_bounded_in(argv: string[], env: string[], cwd: string, deadline_ms: int) 
 //
 // `process.run_capture` cannot pipe stdin at all, which is why tests that
 // drive an interactive prompt hand-composed a write / close / drain / wait
-// sequence against the raw handle builtins. Stdin is closed BEFORE the
-// drain begins: a child that blocks reading stdin while the parent blocks
-// draining stdout would otherwise deadlock, and the deadline would be the
-// only thing to break it.
+// sequence against the raw handle builtins. Stdin is closed before the
+// drain begins so a child reading to EOF terminates on its own.
+//
+// TWO LIMITS the caller must respect, because the write happens BEFORE the
+// drain loop and therefore before the deadline clock starts — neither can
+// be enforced from here:
+//
+//   * `input` must fit the pipe buffer (64 KiB on Linux) unless the child
+//     drains promptly. A larger payload against a child that writes output
+//     before reading blocks the parent in `handle_write` with no deadline
+//     to break it. Feed a bigger payload through a file instead.
+//   * If the child exits before reading, the write hits a closed pipe and
+//     raises SIGPIPE. Nothing in the runtime installs `SIG_IGN` for it, so
+//     that terminates the TEST PROCESS with exit 141 — not just this call.
+//     Only pass `input` to a child known to read it; `run_bounded` is the
+//     right call for one that does not.
+//
+// The exact-length `handle_write_bytes` is used rather than
+// `handle_write`, which `strlen`s its argument and would silently truncate
+// input at the first embedded NUL.
 fn run_bounded_stdin(argv: string[], env: string[], input: string, deadline_ms: int) -> ChildOutcome ![clock, io] {
     let handle_id = process.spawn_with_env(argv, env);
     if handle_id == 0 { return _spawn_failed(); }
-    if input.length > 0 { process.handle_write(handle_id, input); }
+    if input.length > 0 {
+        process.handle_write_bytes(handle_id, input, input.length);
+    }
     process.handle_close_stdin(handle_id);
     return _drain_bounded(handle_id, deadline_ms);
 }
@@ -235,12 +305,26 @@ fn run_bounded_stdin(argv: string[], env: string[], input: string, deadline_ms: 
 // on that write; a server whose per-request logging is that chatty should
 // be spawned with its output redirected, or driven with `run_bounded`
 // instead.
+//
+// Stdin is closed immediately, for the reason spelled out in
+// `run_bounded_in`: the spawn always creates a stdin pipe, and a
+// background child that reads stdin would otherwise block on one that
+// never reaches EOF.
 fn start_background(argv: string[], env: string[], cwd: string, label: string) -> Background ![io] {
     let handle_id = process.spawn_with_env_cwd(argv, env, cwd);
+    if handle_id != 0 { process.handle_close_stdin(handle_id); }
     return Background { handle_id: handle_id, label: label };
 }
 
 // Kill a background child and reap it, returning what it produced.
+//
+// CONSUMES the handle — call it EXACTLY ONCE per `start_background`.
+// `handle_wait` is the free path, so a second call dereferences freed
+// memory in `handle_kill` and then double-frees. `Background` is a plain
+// copyable struct carrying a raw handle id, so a stale copy cannot be
+// invalidated for you; in particular, do NOT call this from inside a
+// `with_background` body — that fixture stops the child itself on scope
+// exit, and the two stops would collide.
 //
 // Safe to call on a failed spawn (`handle_id == 0`) and on a child that has
 // already exited on its own: `handle_kill` returning `-1` for a dead pid is
@@ -251,7 +335,10 @@ fn start_background(argv: string[], env: string[], cwd: string, label: string) -
 //
 // The post-kill drain is bounded so a wedged grandchild holding the pipes
 // open cannot hang teardown. A killed child's pipes normally hit EOF at
-// once, so this budget is a backstop, not a wait.
+// once, so this budget is a backstop, not a wait — but it does mean
+// `stdout`/`stderr` may be TRUNCATED if a surviving grandchild holds them
+// open past the budget, and the returned outcome cannot distinguish that
+// from a complete capture.
 fn stop_background(bg: Background) -> ChildOutcome ![clock, io] {
     if bg.handle_id == 0 { return _spawn_failed(); }
     process.handle_kill(bg.handle_id);
@@ -281,17 +368,29 @@ fn stop_background(bg: Background) -> ChildOutcome ![clock, io] {
 // row because the effect checker attributes a lambda body's effects to the
 // scope that defines it. `-> int` is the interim return shape shared with
 // the other scoped fixtures.
+//
+// `body` must NOT call `stop_background` on the handle it is given: this
+// fixture stops it on scope exit, and a second stop is a use-after-free.
+// A body that wants the server's output should capture it another way
+// (redirect the child, or drive it with `run_bounded`).
+//
+// SFN-843: a `body` (or any lambda) must not capture an enclosing `let`
+// that has no type annotation and whose initializer is a call — that
+// mistypes the capture's env slot as `i8*`, which fails to build for
+// scalars and SILENTLY yields zero for structs, while passing `sfn check`.
+// Annotating the captured `let` avoids it, as does reaching the value
+// through a helper function. Delete this note when SFN-843 lands.
 fn with_background(argv: string[], env: string[], cwd: string, label: string, body: fn (Background) -> int) -> int ![clock, io] {
     let bg = start_background(argv, env, cwd, label);
     try {
         let result = body(bg);
-        stop_background(bg);
+        let _ = stop_background(bg);
         return result;
     } catch (err) {
         // Reap first, then re-throw, so the failing test still fails with
         // its own message rather than a teardown error — and so a thrown
         // assertion cannot leak the child.
-        stop_background(bg);
+        let _ = stop_background(bg);
         throw err;
     }
 }
@@ -312,13 +411,13 @@ fn with_background(argv: string[], env: string[], cwd: string, label: string, bo
 // `probe` carries no effect row, for the same reason the scoped fixtures'
 // bodies do not: its effects are attributed to the scope that defines it.
 //
-// SFN-843: a probe must not combine a CAPTURED enclosing local with the
-// return value of an effectful call — that shape currently mistypes the
-// capture's env slot as `i8*` and fails to lower, while passing `sfn
-// check`. Reaching the value through a helper function instead of
-// capturing it is not affected, and is what the in-tree probes do. Delete
-// this note, and the helper-function indirection at the call sites, when
-// SFN-843 lands.
+// SFN-843: a probe must not capture an enclosing `let` that has no type
+// annotation and whose initializer is a CALL. That mistypes the capture's
+// env slot as `i8*` — a build failure for scalars, and a SILENT zero for
+// structs — while `sfn check` stays green. Annotating the captured `let`
+// (`let port: int = _lb_port();`) avoids it, as does reaching the value
+// through a helper function, which is what the in-tree probes do. Delete
+// this note when SFN-843 lands.
 fn wait_until(probe: fn () -> boolean, deadline_ms: int, interval_ms: int) -> boolean ![clock, io] {
     let start_ms = monotonic_millis();
     let mut wait_ms = interval_ms;

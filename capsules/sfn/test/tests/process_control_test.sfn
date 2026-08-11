@@ -17,14 +17,15 @@ import { find } from "sfn/strings";
 
 import {
     Background,
-    ChildOutcome,
     describe_outcome,
     run_bounded,
+    run_bounded_in,
     run_bounded_stdin,
     start_background,
     stop_background,
     wait_until,
-    with_background
+    with_background,
+    with_tmp_dir
 } from "../src/mod";
 
 fn _has_bin(path: string) -> boolean ![io] { return fs.exists(path); }
@@ -36,11 +37,12 @@ fn _missing_bin() -> string {
 
 // Fixed marker path for the `wait_until` readiness test. A file-local
 // helper (not a captured local) so the probe lambda below can call it
-// instead of capturing anything — a captured enclosing local combined with
-// an effectful call's return value inside a lambda body currently mistypes
-// the capture's env slot in the LLVM lowering (reduced by the E1002/E0307
-// pair on this exact shape; tracked against the lowering, not this test).
-// Mirrors `_scratch()` in `fixtures_test.sfn`.
+// instead of capturing anything — SFN-843: a lambda capturing an enclosing
+// `let` that has no type annotation and whose initializer is a call
+// mistypes the capture's env slot as `i8*`, which fails to build for
+// scalars and silently yields zero for structs. Annotating the `let` also
+// avoids it; the helper keeps the probe capture-free either way. Mirrors
+// `_scratch()` in `fixtures_test.sfn`.
 fn _marker_path() -> string ![io] {
     let dir = env.get("SAILFIN_TEST_SCRATCH");
     if dir.length > 0 { return dir + "/sfn-process-control-wait-until.marker"; }
@@ -104,26 +106,64 @@ test "process control: run_bounded_stdin feeds stdin and closes it" ![clock, io]
     assert find(outcome.stdout, "ping", 0) >= 0;
 }
 
+// `run_bounded` must give a stdin-reading child `< /dev/null` semantics.
+// The spawn ALWAYS creates a stdin pipe and the parent holds the write end
+// until the reap, so without an explicit close the child waits on a pipe
+// that never reaches EOF. Deliberately run with NO deadline: before the
+// close was added this hung forever with nothing to break it, so a
+// regression here fails as a runner-deadline timeout rather than passing
+// quietly. `/bin/cat` with no argv reads stdin, sees immediate EOF, and
+// exits 0 having produced nothing.
+test "process control: run_bounded closes stdin so a reading child is not stuck" ![clock, io] {
+    if !_has_bin("/bin/cat") {
+        assert true;
+        return;
+    }
+    let outcome = run_bounded(["/bin/cat"], [], 0);
+    assert outcome.exit == 0;
+    assert ! outcome.timed_out;
+    assert outcome.stdout.length == 0;
+}
+
+// `run_bounded_in` runs the child in the given `cwd` rather than the
+// parent's — the whole point of the function. The body captures nothing
+// from the enclosing test scope; it only uses its own parameter and locals,
+// so the SFN-843 capture miscompile does not apply here.
+test "process control: run_bounded_in runs the child in the given cwd" ![clock, io] {
+    if !_has_bin("/bin/pwd") {
+        assert true;
+        return;
+    }
+    let saw_dir = with_tmp_dir(fn (dir: string) -> int {
+        let outcome = run_bounded_in(["/bin/pwd"], [], dir, 10000);
+        if find(outcome.stdout, dir, 0) >= 0 { return 1; }
+        return 0;
+    });
+    assert saw_dir == 1;
+}
+
 // `wait_until` polls in-process rather than forking `sleep` per tick. The
 // probe captures nothing — it only calls the file-local `_marker_path()`
-// helper — because a captured local combined with an effectful call's
-// return value inside a lambda currently miscompiles (see `_marker_path`).
+// helper — to stay clear of the SFN-843 capture miscompile documented on
+// that helper.
 // A background child creates the marker file after a real delay, so the
 // probe genuinely returns false on early polls and true once the file
 // shows up, exercising the same "false, then true" behavior asynchronously
 // instead of via a captured clock reading.
 test "process control: wait_until returns true once the probe becomes true" ![clock, io] {
-    if !_has_bin("/bin/sh") {
+    if !_has_bin("/bin/sh") || !_has_bin("/bin/sleep") || !_has_bin("/bin/touch") {
         assert true;
         return;
     }
     let marker = _marker_path();
     if fs.exists(marker) { fs.deleteFile(marker); }
-    let bg = start_background(["/bin/sh", "-c", "sleep 0.2; touch " + marker], [], "", "wait-until-marker");
+    let bg = start_background(["/bin/sh", "-c", "/bin/sleep 0.2; /bin/touch '"
+        + marker
+        + "'"], [], "", "wait-until-marker");
     let became_true = wait_until(fn () -> boolean {
         return fs.exists(_marker_path());
     }, 5000, 20);
-    stop_background(bg);
+    let _ = stop_background(bg);
     assert became_true;
 }
 
@@ -166,6 +206,32 @@ test "process control: with_background reaps on the throwing path" ![clock, io] 
         });
     } catch (e) { threw = true; }
     assert threw;
+}
+
+// `stop_background` does not merely stop draining — it actually reaps the
+// child. `exit == 137` (`128 + SIGKILL`) is only observable if `handle_wait`
+// ran; a missed reap would leave the process alive (or a zombie) and this
+// assertion would fail rather than silently pass, unlike a test that only
+// checks a thrown error propagated.
+test "process control: stop_background reaps a SIGKILLed child" ![clock, io] {
+    if !_has_bin("/bin/sleep") {
+        assert true;
+        return;
+    }
+    let bg = start_background(["/bin/sleep", "30"], [], "", "bg-reap-check");
+    let outcome = stop_background(bg);
+    assert outcome.exit == 137;
+    assert ! outcome.timed_out;
+}
+
+// `stop_background` on a failed spawn (`handle_id == 0`) must be safe — no
+// crash, no attempt to kill/wait a nonexistent handle — and reports the
+// same missing-command exit code as a direct `run_bounded` on an absent
+// binary.
+test "process control: stop_background on a failed spawn is safe and reports exit 127" ![clock, io] {
+    let outcome = stop_background(Background { handle_id: 0, label: "none" });
+    assert outcome.exit == 127;
+    assert ! outcome.timed_out;
 }
 
 // `describe_outcome` distinguishes a deadline kill from an ordinary

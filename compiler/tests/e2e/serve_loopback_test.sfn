@@ -17,7 +17,7 @@
 // Why this could not be a `sfn/test` before. The behavioral checks in
 // `test_http_capsule_serve.sh` start a backgrounded BLOCKING `serve`
 // server and drive it with a socket client. The "native server-loopback
-// e2e pattern" was the missing capability (see the allowlist note). It is
+// e2e pattern" was the missing capability. It is
 // now expressible: the server runs as a background subprocess (a handle,
 // not a synchronous drain), and a raw libc socket client — the proven
 // `http.sfn::_connect_tcp` dual-sockaddr idiom, inlined here — drives it
@@ -102,12 +102,9 @@ fn _child_env() -> string[] ![io] { return process.environ(); }
 
 // ── raw loopback client (inlined `http.sfn::_connect_tcp` idiom) ──
 // Effect note: `http.sfn`'s socket helpers are `![net]`, but they live in
-// the `sfn/http` capsule whose surface includes `net`. This test compiles
-// under the COMPILER capsule's surface (`compiler/capsule.toml` →
-// `["io", "clock"]`, no `net`), and widening that to `net` to satisfy a
-// test would wrongly assert the compiler is a network program. The libc
-// socket externs carry no effect annotation, so the effect checker infers
-// no `net` requirement for these direct callers — hence they (and
+// the `sfn/http` capsule whose surface includes `net`. The libc socket
+// externs used here carry no effect annotation, so the effect checker
+// infers no `net` requirement for these direct callers — hence they (and
 // `_lb_request`) are left un-annotated, while `_await_ready`/the test keep
 // `![clock, io]` for their `process.*`/`fs.*` calls plus the wall-clock
 // readiness budget. (Tightening the effect system to tag raw socket
@@ -395,9 +392,9 @@ fn _probe_req() -> string {
 // "0.5"])`, paying a fork+exec per tick.
 // The probe closure captures NOTHING — it reaches the port through the
 // file-local `_lb_port()` rather than closing over a local. That is
-// deliberate (SFN-843): a lambda combining a captured local with the
-// return value of an effectful call currently mistypes the capture's env
-// slot as `i8*` and fails to lower, while still passing `sfn check`.
+// deliberate (SFN-843): a lambda capturing an enclosing `let` that has no
+// type annotation and whose initializer is a call mistypes the capture's
+// env slot as `i8*`, failing to lower while still passing `sfn check`.
 // Calling a helper is not a capture, so this shape is unaffected. Take
 // `port` as a parameter again once SFN-843 lands.
 fn _await_ready() -> string ![clock, io] {

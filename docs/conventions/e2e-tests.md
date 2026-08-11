@@ -222,6 +222,22 @@ reads `monotonic_millis()`/`sleep()`, both `![clock]`).
   `run_bounded`'s `env` array has the same empty-means-empty contract as
   `process.run_capture` — see "Build-and-run tests must isolate the build"
   above for what a nested compiler child needs.
+- **The child's stdin is closed** by `run_bounded`/`run_bounded_in`/
+  `start_background`, giving it `< /dev/null` semantics. The spawn always
+  creates a stdin pipe, so without that close a child which reads stdin
+  (`sort`, `cat`, anything not on a tty) would block on a pipe that never
+  reaches EOF — a permanent hang when `deadline_ms <= 0`.
+- **`run_bounded_stdin` has two limits the caller must respect**, because the
+  write happens before the deadline clock starts and neither can be enforced
+  from inside. `input` must fit the pipe buffer (64 KiB on Linux) unless the
+  child drains promptly — feed anything larger through a file. And if the
+  child exits without reading, the write raises SIGPIPE, which the runtime
+  does not ignore, so it kills the **test process** with exit 141. Pass
+  `input` only to a child known to read it.
+- **Exactly one `stop_background` per `start_background`.** The reap frees the
+  handle, and `Background` is a plain copyable struct — a second stop is a
+  use-after-free plus a double-free. In particular, never call it from inside
+  a `with_background` body; that fixture already stops the child on scope exit.
 - **`timed_out` is the deadline discriminator — never exit code `137`.** A
   SIGKILLed child's exit is `128 + 9 = 137`, indistinguishable by exit code
   alone from a kernel OOM kill. `ChildOutcome.timed_out` is the boolean that
