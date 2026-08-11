@@ -315,7 +315,11 @@ Ordered. Each item is a consequence of §2–§5, not a preference.
 - A contract claim is subject to the same rule: an unenforced tolerance is not a
   tolerance. Do not describe a contract as checked until a gate fails on it.
 - **Base support vs. sealed support.** Base support — builds, runs, tests green,
-  installer ships — targets macOS/Windows/Linux. Sealed support — owned codegen,
+  installer ships — targets Linux x86-64 (Tier 1), Linux arm64 and macOS arm64
+  (Tier 2). Windows x86-64 ships an installer but is **Tier 3 — best effort**:
+  cross-compiled from Linux and smoke-tested only, with no build or suite run on
+  the platform, so it does not carry the full base-support claim
+  (`docs/conventions/target-tiers.md`). Sealed support — owned codegen,
   owned syscalls, no un-gated syscall path — is tier-1 Linux x86-64 only, per
   SFEP-0016 §3.1 and `docs/backend-independence.md`. Adding a base platform does
   not multiply seal work. Shipping a

@@ -178,6 +178,12 @@ const featured = allAssets;
           <div class="code-block">
             <code>irm https://raw.githubusercontent.com/SailfinIO/sailfin/main/install.ps1 | iex</code>
           </div>
+          <p class="quick-note">
+            <strong>Tier 3 &mdash; best effort.</strong> The Windows binary is
+            cross-compiled from Linux and CI covers only that it boots and runs
+            <code>sfn check</code>; building, linking, and the test suite are not
+            exercised there. Prefer WSL for day-to-day work.
+          </p>
         </div>
       </div>
     </div>
@@ -317,6 +323,12 @@ const featured = allAssets;
     min-width: 0;
   }
   .quick-card h3 { font-size: 1rem; margin-bottom: 0.75rem; }
+  .quick-note {
+    color: var(--color-text-secondary);
+    font-size: 0.825rem;
+    line-height: 1.5;
+    margin-top: 0.75rem;
+  }
   .code-block {
     background: var(--gray-900);
     border-radius: 8px;
