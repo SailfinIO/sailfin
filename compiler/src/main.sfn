@@ -14,7 +14,12 @@ import {
     typecheck_has_errors_with_prelude
 } from "sfn/analyzer/typecheck";
 import { Diagnostic, diagnostic_to_diag } from "sfn/analyzer/typecheck_types";
-import { ImportedModuleContext, LayoutManifest, NativeModule } from "sfn/ir";
+import {
+    ImportedModuleContext,
+    LayoutManifest,
+    LoweringDiagnostic,
+    NativeModule
+} from "sfn/ir";
 import { parse_native_artifact, parse_native_artifact_from_lines } from "sfn/ir";
 import { lines_to_native_text, native_lines_have_text } from "sfn/ir";
 import { render_module } from "sfn/ir";
@@ -97,7 +102,7 @@ fn _drain_llvm_lowering_traces() ![io] {
     if buffered.length > 0 { print.err(buffered); }
 }
 
-fn _print_fatal_lowering_diagnostics(diagnostics: string[], diags: Diag[]) ![io] {
+fn _print_fatal_lowering_diagnostics(diagnostics: string[], diags: LoweringDiagnostic[]) ![io] {
     let lines = fatal_lowering_diagnostic_lines(diagnostics, diags);
     let mut index: int = 0;
     loop {

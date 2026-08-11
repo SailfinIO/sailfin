@@ -62,9 +62,10 @@ here.
 - **Compiler IR capsule** (SFN-744, SFEP-0020 §§3.2, 3.3, 3.7 step 3).
   `sfn/ir` is the second physical compiler implementation capsule, rooted at
   `compiler/capsules/ir/` and exposed through its private `src/mod.sfn`
-  facade. Native IR parsing and representation contracts, target-neutral
-  intrinsic-effect metadata, typed SSA data/render/verification, and tensor IR
-  data/fusion/verification now live behind that facade. Typed-SSA production
+  facade. Native IR parsing and representation contracts, the IR-facing LLVM
+  lowering-diagnostic carrier, target-neutral intrinsic-effect metadata, typed
+  SSA data/render/verification, and tensor IR data/fusion/verification now live
+  behind that facade. Typed-SSA production
   and tensor lowering/emission remain codegen-owned under `compiler/src/`; the
   tensor link harness is driver-owned under `compiler/src/build/`. The capsule
   declares `publish = false`, depends only on `sfn/strings` plus the permitted
@@ -388,10 +389,9 @@ here.
   effect policy. It returns analyzed program data plus producer-tagged semantic
   diagnostics without importing driver, codegen, or LLVM modules.
   Target-neutral intrinsic identities and semantic effects live in
-  `intrinsic_effects.sfn`; the analyzer consumes that pure registry directly,
-  while LLVM descriptors retain only target-specific symbol/type/ABI data and
-  use the neutral identity as a lookup key. Targeted drift coverage requires
-  every effectful semantic identity to retain a lowering descriptor.
+  `sfn/ir`'s `intrinsic_effects.sfn`; the analyzer consumes that pure registry
+  directly. LLVM does not import the semantic registry: its descriptors own
+  only the provider-local target lookup plus symbol/type/ABI lowering data.
   `check/engine.sfn` remains driver-owned: it resolves workspaces and relative
   modules, reads sources/runtime context and policy, calls the facade, and
   renders the existing text or `sailfin-check/1` JSON presentation unchanged.
@@ -405,18 +405,19 @@ here.
   sibling-temp atomic rename path. Artifact bytes, short-write handling,
   failed-rename cleanup, and resolver cache policy remain unchanged.
 - **Diagnostics.** One renderer (`diagnostics_render.sfn`) serves check and
-  build paths. Its sink model is the unified `Diag`/`Span` type from
+  build paths. Semantic analysis uses analyzer-owned `Diag`/`Span` values from
   `diagnostic.sfn`, including code, string severity, file path, producing
   stage, optional span, and structured fix-it. Frontend producers still mint
   the legacy token-backed `Diagnostic` and convert at the sink boundary, so
-  `sailfin-check/1` and human output remain byte-compatible while backend
-  producers migrate independently (SFEP-0061 S1, SFN-534). Effect diagnostics
+  `sailfin-check/1` and human output remain byte-compatible (SFEP-0061 S1,
+  SFN-534). Effect diagnostics
   carry structured `FixSuggestion`/`TextEdit` for `sfn fix` / LSP (Track B).
-  LLVM lowering now carries a typed `Diag[]` sidecar through its result graph:
-  every retained `[fatal]` string has a coded lowering-stage diagnostic,
-  direct statement/`let`/routine consumers attach their native-IR span, and
-  the legacy string array remains the fail-closed gate boundary (SFEP-0061 S2,
-  SFN-535).
+  LLVM lowering carries an IR-owned `LoweringDiagnostic[]` sidecar through its
+  result graph without importing analyzer contracts: every retained `[fatal]`
+  string has a coded lowering-stage diagnostic, direct
+  statement/`let`/routine consumers attach their `NativeSourceSpan`, and the
+  legacy string array remains the fail-closed gate boundary with unchanged
+  text (SFEP-0061 S2, SFN-535; SFN-745).
   `sfn check` surfaces parse errors (`E0500`, #974) and implicit re-export
   bans (`E0600`) via the shared `reexport_check.sfn`. Malformed-but-dispatched
   top-level declarations — a broken parameter list (`fn broken( {`), a missing

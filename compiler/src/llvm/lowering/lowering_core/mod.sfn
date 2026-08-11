@@ -2,10 +2,10 @@
 //
 // Core LLVM lowering orchestrator. Phase-specific work lives in the
 // sibling modules in this folder and in lowering_phase_*.sfn.
-import { Diag } from "sfn/analyzer/diagnostic";
 import {
     ImportedModuleContext,
     LayoutManifest,
+    LoweringDiagnostic,
     NativeFunction,
     NativeModule,
     ParseNativeResult
@@ -140,7 +140,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_ar
     let safe_imported_manifests = sanitize_imported_manifests(imported_manifests, debug_lowering);
     let safe_imported_native_texts = sanitize_imported_native_texts(imported_native_texts, debug_lowering);
     let mut diagnostics = sanitize_diagnostics(diagnostics_in);
-    let mut diags: Diag[] = [];
+    let mut diags: LoweringDiagnostic[] = [];
     if debug_lowering {
         trace_log("emit-llvm: dbg-F after diagnostics sanitize");
     }

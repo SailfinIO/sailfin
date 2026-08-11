@@ -1,7 +1,7 @@
 // compiler/src/llvm/lowering/lowering_core/diagnostics.sfn
 //
 // Fail-closed lowering diagnostic gate and rendering.
-import { Diag } from "sfn/analyzer/diagnostic";
+import { LoweringDiagnostic } from "sfn/ir";
 
 import { index_of, render_lowering_error_diag } from "../../utils";
 
@@ -15,9 +15,9 @@ import { index_of, render_lowering_error_diag } from "../../utils";
 //    warning, it is discarded. The only path that ever surfaces one is
 //    `entrypoints.sfn`'s zero-lines branch, which prints `diagnostics[0]`
 //    alone and only when the build is already failing for another reason.
-//    Diagnostics are untyped `string[]` (`llvm/types.sfn` —
-//    `LoweredLLVMLinesResult`), so there is no severity field to set
-//    instead.
+//    The legacy gate remains an untyped `string[]` even though
+//    `LoweredLLVMLinesResult` also carries a structured diagnostic sidecar,
+//    so an untagged legacy entry does not acquire severity at this boundary.
 // 2. Tag when reaching the diagnostic implies the emitted IR is wrong.
 //    Do not tag a condition the language does not yet claim to enforce —
 //    borrow exclusivity is "Parsed only" (`docs/status.md`), and
@@ -51,7 +51,7 @@ fn has_fatal_lowering_diagnostic(diagnostics: string[]) -> boolean {
 // legacy string array remains the fail-closed gate. The canonical first line
 // keeps existing grep-oriented diagnostics stable; Set A adds a source
 // location on the following line.
-fn fatal_lowering_diagnostic_lines(diagnostics: string[], diags: Diag[]) -> string[] {
+fn fatal_lowering_diagnostic_lines(diagnostics: string[], diags: LoweringDiagnostic[]) -> string[] {
     let mut lines: string[] = [];
     let mut printed: boolean = false;
     let mut diag_index: int = 0;

@@ -1,8 +1,7 @@
 // compiler/capsules/analyzer/src/diagnostic.sfn
 //
-// Unified diagnostic representation shared by frontend and backend sinks.
-// This is deliberately a leaf module: backend producers can adopt `Diag`
-// without importing the frontend AST or token graph.
+// Analyzer diagnostic representation consumed by semantic sinks and driver
+// renderers. Target providers return their own IR-facing diagnostic contracts.
 // One concrete, machine-applicable source edit. Coordinates are inclusive
 // and 1-based; an insertion has identical start and end coordinates.
 struct TextEdit {
@@ -77,19 +76,6 @@ fn stamp_spans(diags: Diag[], span: Span) -> Diag[] {
     return diags;
 }
 
-// Compatibility shim for backend carriers that still transport strings.
-// Lowering historically spells its stage as "llvm lowering"; all other
-// stages use their canonical `Diag.stage` value directly.
-fn diag_to_legacy_string(diag: Diag) -> string {
-    let mut prefix = diag.stage;
-    if prefix == "lowering" { prefix = "llvm lowering"; }
-    if diag_is_error(diag) {
-        prefix = prefix + " [fatal]";
-        if diag.code.length > 0 { prefix = prefix + " [" + diag.code + "]"; }
-    }
-    return prefix + ": " + diag.message;
-}
-
 export {
     Diag,
     FixSuggestion,
@@ -97,6 +83,5 @@ export {
     TextEdit,
     diag_from_typecheck,
     diag_is_error,
-    diag_to_legacy_string,
     stamp_spans
 };

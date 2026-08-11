@@ -7,8 +7,7 @@
 // live in instructions_helpers.sfn so that
 // lower_instruction_range is at source position 1 — within the v0.1.1
 // seed's per-module streaming emission limit.
-import { Diag } from "sfn/analyzer/diagnostic";
-import { NativeFunction, NativeInstruction } from "sfn/ir";
+import { LoweringDiagnostic, NativeFunction, NativeInstruction } from "sfn/ir";
 import { char_code_at, substring } from "sfn/strings";
 
 import {
@@ -62,7 +61,7 @@ import { find_last_label_in_tail } from "./phi";
 
 fn lower_instruction_range(function: NativeFunction, start_index: int, end: int, llvm_return: string, bindings: ParameterBinding[], locals: LocalBinding[], allocas: string[], lines: string[], temp_index: int, block_counter: int, next_local_id: int, next_region_id: int, functions: NativeFunction[], loop_stack: LoopContext[], try_stack: TryFrameContext[], context: TypeContext, scope_id: string, scope_depth: int, current_label: string) -> BlockLoweringResult {
     let mut diagnostics: string[] = [];
-    let mut diags: Diag[] = [];
+    let mut diags: LoweringDiagnostic[] = [];
     let mut current_lines: string[] = lines;
     let mut current_allocas: string[] = allocas;
     let mut current_locals: LocalBinding[] = locals;

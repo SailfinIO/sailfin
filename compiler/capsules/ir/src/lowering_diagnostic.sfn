@@ -1,0 +1,16 @@
+// IR-facing diagnostic contract returned by target code-generation providers.
+// The carrier stays independent of analyzer diagnostics: providers report
+// lowering failures against source coordinates already preserved in native IR,
+// while the compiler driver owns user-facing rendering and publication policy.
+import { NativeSourceSpan } from "./native_ir";
+
+struct LoweringDiagnostic {
+    code: string;
+    severity: string;
+    message: string;
+    file_path: string;
+    span: NativeSourceSpan?;
+    stage: string;
+}
+
+export { LoweringDiagnostic };

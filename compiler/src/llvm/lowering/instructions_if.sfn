@@ -1,7 +1,7 @@
 // compiler/src/llvm/lowering/instructions_if.sfn
 //
 // Control flow handlers: if/else instruction lowering.
-import { Diag } from "sfn/analyzer/diagnostic";
+import { LoweringDiagnostic } from "sfn/ir";
 import { NativeFunction, NativeInstruction, NativeSourceSpan } from "sfn/ir";
 import { substring } from "sfn/strings";
 
@@ -289,7 +289,7 @@ fn lower_if_instruction(function: NativeFunction, start_index: int, llvm_return:
     let mut current_block_counter: int = block_counter;
     let mut current_next_local: int = next_local_id;
     let mut diagnostics: string[] = [];
-    let mut diags: Diag[] = [];
+    let mut diags: LoweringDiagnostic[] = [];
     let base_bindings: ParameterBinding[] = bindings;
     let mut then_bindings: ParameterBinding[] = base_bindings;
     let mut else_bindings: ParameterBinding[] = base_bindings;

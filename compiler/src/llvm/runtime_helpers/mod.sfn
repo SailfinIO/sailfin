@@ -6,8 +6,6 @@
 // `docs/conventions/runtime-helpers.md`: populate `native_signature` with the
 // canonical `sfn_<domain>_<op>` symbol and route call sites through
 // `emit_runtime_call`.
-import { intrinsic_effect_table } from "sfn/ir";
-
 import { RuntimeHelperDescriptor } from "../types";
 import { join_with_separator, string_array_contains, trim_text } from "../utils";
 import { _rh_descriptors_02, _rh_descriptors_03, _rh_descriptors_04 } from "./registry_concurrency";
@@ -116,31 +114,6 @@ fn find_runtime_helper(target: string) -> RuntimeHelperDescriptor? {
         index += 1;
     }
     return null;
-}
-
-// Static drift guard for the target-neutral semantic registry. LLVM may own
-// additional pure lowering helpers, but every effectful intrinsic identity
-// must retain an exact descriptor here or targeted tests fail closed.
-fn runtime_helper_registry_covers_intrinsic_effects() -> boolean {
-    let contract = intrinsic_effect_table();
-    let descriptors = runtime_helper_descriptors();
-    let mut effect_index: int = 0;
-    loop {
-        if effect_index >= contract.entries.length { break; }
-        let mut found: boolean = false;
-        let mut descriptor_index: int = 0;
-        loop {
-            if descriptor_index >= descriptors.length { break; }
-            if descriptors[descriptor_index].target == contract.entries[effect_index].target {
-                found = true;
-                break;
-            }
-            descriptor_index += 1;
-        }
-        if !found { return false; }
-        effect_index += 1;
-    }
-    return true;
 }
 
 // LLVM return type for `declare`-line emission. Mirrors the

@@ -32,10 +32,10 @@ In practice this means:
   emit time.
 
 Intrinsic identity and semantic effects are target-neutral contracts in
-`compiler/capsules/ir/src/intrinsic_effects.sfn`. Runtime-helper descriptors use `target`
-to consume that contract but own only LLVM symbol, declaration, and ABI data.
-Every effectful intrinsic identity must have an exact lowering descriptor; the
-targeted metadata test fails closed if the registries drift.
+`compiler/capsules/ir/src/intrinsic_effects.sfn`. The analyzer consumes that
+contract. Runtime-helper descriptors do not import it: their `target` fields
+are provider-local lookup keys, and LLVM owns only symbol, declaration, and ABI
+data.
 
 ## Platform externs are the native boundary
 

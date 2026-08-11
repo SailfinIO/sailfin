@@ -2,7 +2,6 @@
 //
 // LLVM IR rendering functions for declarations and metadata comments.
 // Handles trait metadata comments, runtime helper declarations, and function declarations.
-import { intrinsic_effect_table, intrinsic_effects_for_exact_target } from "sfn/ir";
 import { NativeFunction, NativeParameter } from "sfn/ir";
 import { substring } from "sfn/strings";
 
@@ -210,7 +209,6 @@ fn render_runtime_helper_declarations(used_targets: string[], local_functions: N
     let mut lines: string[] = [];
     let mut declared_symbols: string[] = [];
     let descriptors = runtime_helper_descriptors();
-    let intrinsic_effects = intrinsic_effect_table();
     let mut index: int = 0;
     loop {
         if index >= descriptors.length { break; }
@@ -425,16 +423,6 @@ fn render_runtime_helper_declarations(used_targets: string[], local_functions: N
             if string_array_contains(declared_symbols, effective_symbol) {
                 index += 1;
                 continue;
-            }
-            // Semantic capability metadata is target-neutral. LLVM consumes
-            // it by descriptor identity without owning or duplicating it.
-            let effects = intrinsic_effects_for_exact_target(intrinsic_effects, descriptor.target);
-            if effects.length > 0 {
-                let effects_text = join_with_separator(effects, ", ");
-                lines.push("; intrinsic " + effective_symbol
-                    + " requires capabilities: !["
-                    + effects_text
-                    + "]");
             }
             let mut parameter_text: string = "";
             if descriptor.parameter_types.length > 0 {

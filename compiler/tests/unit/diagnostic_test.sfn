@@ -4,11 +4,16 @@ import {
     Span,
     diag_from_typecheck,
     diag_is_error,
-    diag_to_legacy_string,
     stamp_spans
 } from "sfn/analyzer/diagnostic";
+import { LoweringDiagnostic, NativeSourceSpan } from "sfn/ir";
 
-import { append_missing_legacy_lowering_diags, diag_from_legacy_lowering_error } from "../../src/llvm/utils";
+import {
+    append_missing_legacy_lowering_diags,
+    diag_from_legacy_lowering_error,
+    diag_to_legacy_string,
+    lowering_error_diag
+} from "../../src/llvm/utils";
 
 fn _diag(severity: string, span: Span?) -> Diag {
     return Diag {
@@ -19,6 +24,17 @@ fn _diag(severity: string, span: Span?) -> Diag {
         span: span,
         stage: "lowering",
         suggestion: null
+    };
+}
+
+fn _lowering_diag(severity: string, span: NativeSourceSpan?) -> LoweringDiagnostic {
+    return LoweringDiagnostic {
+        code: "E1003",
+        severity: severity,
+        message: "unable to lower expression",
+        file_path: "sample.sfn",
+        span: span,
+        stage: "lowering"
     };
 }
 
@@ -69,8 +85,21 @@ test "stamp_spans fills only missing spans" {
 }
 
 test "diag_to_legacy_string preserves lowering spelling" {
-    assert diag_to_legacy_string(_diag("error", null)) == "llvm lowering [fatal] [E1003]: unable to lower expression";
-    assert diag_to_legacy_string(_diag("note", null)) == "llvm lowering: unable to lower expression";
+    assert diag_to_legacy_string(_lowering_diag("error", null)) == "llvm lowering [fatal] [E1003]: unable to lower expression";
+    assert diag_to_legacy_string(_lowering_diag("note", null)) == "llvm lowering: unable to lower expression";
+}
+
+test "lowering diagnostic preserves native IR source coordinates" {
+    let span = NativeSourceSpan {
+        start_line: 4,
+        start_column: 6,
+        end_line: 4,
+        end_column: 12
+    };
+    let diag = lowering_error_diag("E1003", "unable to lower expression", span);
+    assert diag.span != null;
+    assert diag.span.start_line == 4;
+    assert diag.span.end_column == 12;
 }
 
 test "legacy lowering conversion preserves an allocated code" {
@@ -106,10 +135,10 @@ test "legacy lowering conversion ignores non-fatal output" {
 }
 
 test "legacy lowering reconciliation preserves duplicate fatal multiplicity" {
-    let mut typed: Diag[] = [];
-    typed.push(_diag("error", null));
+    let mut typed: LoweringDiagnostic[] = [];
+    typed.push(_lowering_diag("error", null));
     let mut legacy: string[] = [];
-    let rendered = diag_to_legacy_string(_diag("error", null));
+    let rendered = diag_to_legacy_string(_lowering_diag("error", null));
     legacy.push(rendered);
     legacy.push(rendered);
 

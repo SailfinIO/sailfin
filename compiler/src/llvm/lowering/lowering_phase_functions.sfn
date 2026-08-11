@@ -5,8 +5,7 @@
 // and merges results into the output lines.
 //
 // Extracted from lowering_core/mod.sfn to reduce per-file memory footprint.
-import { Diag } from "sfn/analyzer/diagnostic";
-import { NativeFunction } from "sfn/ir";
+import { LoweringDiagnostic, NativeFunction } from "sfn/ir";
 
 import { append_function_effect_entry, find_function_effect_entry } from "../effects";
 import { trace_log } from "../lowering_debug_state";
@@ -70,7 +69,7 @@ fn lower_all_functions(local_functions: NativeFunction[], context_functions: Nat
     let mut all_string_constants: StringConstant[] = module_string_constants;
     let mut function_effects: FunctionEffectEntry[] = [];
     let mut diagnostics: string[] = [];
-    let mut diags: Diag[] = [];
+    let mut diags: LoweringDiagnostic[] = [];
 
     if trace {
         trace_log("test llvm: lowering functions start (count="
