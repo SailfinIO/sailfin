@@ -1,0 +1,311 @@
+// End-to-end guard for the capsule reachability filter (SFN-833).
+//
+// A consumer that imports ONE symbol from a multi-module library capsule,
+// and declares a second dependency it never imports at all, must not drag
+// either the never-imported dependency or the unreached sibling submodule
+// of the imported one into the linked binary. Before this filter, capsule
+// linking staged every `.ll` reachable from a *declared* dependency with no
+// module-level reachability pruning, so an unreached submodule (and its
+// `@__sfn_module_type_init__<module>` constructor) still linked.
+//
+// Fixture (in-tree under build/ so `discover_workspace_root` finds a
+// manifest — see below — and content is deterministic so concurrent
+// parallel runs are safe):
+//
+//   build/sfn-reachability-filter-test/
+//     workspace.toml              -- own nested workspace: the walk-up in
+//                                     `discover_workspace_root` stops HERE
+//                                     (nearer than the repo root), so this
+//                                     fixture's three capsules are the only
+//                                     ones registered as members — no edit
+//                                     to the repo's own workspace.toml.
+//     demo/twomod/                -- library: src/mod.sfn barrel re-exports
+//                                     ONLY `reached_fn` (src/reached.sfn).
+//                                     src/unreached.sfn is an orphan: it
+//                                     sits in the capsule's src/ tree and
+//                                     nothing names it. Each submodule
+//                                     defines a named struct so it emits a
+//                                     `@__sfn_module_type_init__` ctor.
+//     demo/neverused/             -- library: one module, one distinctively
+//                                     named function + struct. Declared as
+//                                     a consumer dependency but never
+//                                     imported by any source.
+//     consumer/                   -- binary: depends on BOTH demo/twomod
+//                                     and demo/neverused, but imports ONLY
+//                                     `reached_fn` from demo/twomod's
+//                                     barrel (bare spec, not a deep import).
+//
+// Symbol-name derivation (verified against the emitters, not guessed):
+//   - Type-init ctor: `"__sfn_module_type_init__" + sanitize_symbol(slug)`
+//     (`compiler/src/llvm/lowering/type_descriptors.sfn:94`), where
+//     `sanitize_symbol` DELETES every non-`[A-Za-z0-9_$]` character rather
+//     than replacing it (`compiler/src/llvm/symbols.sfn:54`) — so slug
+//     `demo/twomod/unreached` collapses to `demotwomodunreached`.
+//   - Defined-function symbol: `<fn> + "__" + sanitize_module_suffix(slug)`
+//     (`compiler/src/llvm/lowering/lowering_helpers_mangling.sfn:178,209`),
+//     where `sanitize_module_suffix` replaces `/` with `__`
+//     (`compiler/src/llvm/lowering/lowering_helpers.sfn:275`) — so slug
+//     `demo/twomod/unreached` yields suffix `demo__twomod__unreached`.
+//   - A capsule source file directly under `src/` gets slug
+//     `<capsule-name>/<stem>` (`compiler/src/capsule_resolver/discovery.sfn:227`),
+//     confirmed against the shipped `sfn/math` capsule, whose `src/mod.sfn`
+//     mangles `abs` to `abs__sfn__math__mod` (slug `sfn/math/mod`).
+//
+// NOTE: assert on captured output with `sfn/strings` predicates — the
+// `sfn/test` `expect_*` matchers are `![pure]` and cannot be used from an
+// `![io]` test (`.claude/rules/no-bash-e2e.md`).
+import { contains, ends_with, split } from "sfn/strings";
+import { clean_runner_env, nested_runner_scratch } from "sfn/test";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+// In-tree fixture root (CWD-relative = repo root).
+fn _capsule_root() -> string { return "build/sfn-reachability-filter-test"; }
+
+// Per-test binary output: SAILFIN_TEST_SCRATCH or /tmp, keyed by tag.
+fn _bin_path(tag: string) -> string ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    return base + "/sfn-reachability-filter-" + tag + "-prog";
+}
+
+// Materialize the three-capsule fixture described above. Idempotent —
+// every build call re-writes the same deterministic content.
+fn _ensure_fixture() ![io] {
+    let root = _capsule_root();
+    fs.createDirectory(root + "/demo/twomod/src", true);
+    fs.createDirectory(root + "/demo/neverused/src", true);
+    fs.createDirectory(root + "/consumer/src", true);
+
+    // Own nested workspace: `discover_workspace_root` walks up from
+    // `consumer/` and stops at the FIRST `workspace.toml` it finds, so this
+    // registers exactly the fixture's three capsules as members without
+    // touching the repo's own workspace.toml.
+    fs.writeFile(root + "/workspace.toml", "[workspace]\n" + "members = [\n"
+        + "    \"demo/twomod\",\n"
+        + "    \"demo/neverused\",\n"
+        + "    \"consumer\",\n"
+        + "]\n");
+
+    fs.writeFile(root + "/demo/twomod/capsule.toml", "[capsule]\n"
+        + "name = \"demo/twomod\"\n"
+        + "version = \"0.1.0\"\n"
+        + "description = \"Reachability filter fixture: reached + unreached submodules\"\n\n"
+        + "[dependencies]\n\n"
+        + "[capabilities]\n"
+        + "required = []\n\n"
+        + "[build]\n"
+        + "entry = \"src/mod.sfn\"\n"
+        + "kind = \"library\"\n");
+    // The barrel re-exports ONLY `./reached`. `./unreached` sits in the
+    // capsule's `src/` tree but is named by nothing — not by the barrel,
+    // not by a sibling — which is precisely the "unreached submodule" the
+    // filter must drop (SFN-833). A barrel re-export is an ordinary
+    // relative edge and would retain it.
+    fs.writeFile(root + "/demo/twomod/src/mod.sfn", "export { reached_fn } from \"./reached\";\n");
+    fs.writeFile(root + "/demo/twomod/src/reached.sfn", "struct ReachabilityFilterReachedMarker {\n"
+        + "    tag: int;\n"
+        + "}\n\n"
+        + "fn reached_fn() -> int {\n"
+        + "    let m = ReachabilityFilterReachedMarker { tag: 42 };\n"
+        + "    return m.tag;\n"
+        + "}\n");
+    fs.writeFile(root + "/demo/twomod/src/unreached.sfn", "struct ReachabilityFilterUnreachedCanary {\n"
+        + "    tag: int;\n"
+        + "}\n\n"
+        + "fn twomod_unreached_canary_fn() -> int {\n"
+        + "    let m = ReachabilityFilterUnreachedCanary { tag: 99 };\n"
+        + "    return m.tag;\n"
+        + "}\n");
+
+    fs.writeFile(root + "/demo/neverused/capsule.toml", "[capsule]\n"
+        + "name = \"demo/neverused\"\n"
+        + "version = \"0.1.0\"\n"
+        + "description = \"Reachability filter fixture: declared-but-unimported dependency\"\n\n"
+        + "[dependencies]\n\n"
+        + "[capabilities]\n"
+        + "required = []\n\n"
+        + "[build]\n"
+        + "entry = \"src/mod.sfn\"\n"
+        + "kind = \"library\"\n");
+    fs.writeFile(root + "/demo/neverused/src/mod.sfn", "struct ReachabilityFilterNeverusedCanary {\n"
+        + "    tag: int;\n"
+        + "}\n\n"
+        + "fn neverused_canary_fn() -> int {\n"
+        + "    let m = ReachabilityFilterNeverusedCanary { tag: 7 };\n"
+        + "    return m.tag;\n"
+        + "}\n");
+
+    fs.writeFile(root + "/consumer/capsule.toml", "[capsule]\n"
+        + "name = \"demo/reachability-consumer\"\n"
+        + "version = \"0.1.0\"\n"
+        + "description = \"Reachability filter fixture consumer\"\n\n"
+        + "[dependencies]\n"
+        + "\"demo/twomod\" = \"0.1.0\"\n"
+        + "\"demo/neverused\" = \"0.1.0\"\n\n"
+        + "[capabilities]\n"
+        + "required = [\"io\"]\n\n"
+        + "[build]\n"
+        + "entry = \"src/main.sfn\"\n"
+        + "kind = \"binary\"\n");
+    // Only `reached_fn` is imported, via the bare barrel spec — never a deep
+    // import of `demo/twomod/reached` — and `demo/neverused` is never
+    // imported at all despite being a declared dependency.
+    fs.writeFile(root + "/consumer/src/main.sfn", "import { reached_fn } from \"demo/twomod\";\n\n"
+        + "fn main() ![io] {\n"
+        + "    let r = reached_fn();\n"
+        + "    if r == 42 {\n"
+        + "        print(\"OK\");\n"
+        + "    } else {\n"
+        + "        print(\"FAIL\");\n"
+        + "    }\n"
+        + "}\n");
+}
+
+fn _reached_type_init_symbol() -> string {
+    return "__sfn_module_type_init__demotwomodreached";
+}
+
+fn _unreached_type_init_symbol() -> string {
+    return "__sfn_module_type_init__demotwomodunreached";
+}
+
+fn _neverused_type_init_symbol() -> string {
+    return "__sfn_module_type_init__demoneverusedmod";
+}
+
+fn _unreached_fn_symbol() -> string {
+    return "twomod_unreached_canary_fn__demo__twomod__unreached";
+}
+
+fn _neverused_fn_symbol() -> string {
+    return "neverused_canary_fn__demo__neverused__mod";
+}
+
+// Match a *defined* symbol in `nm` output, precisely:
+//   - ` T ` / ` t ` — a defined symbol in the text section (external `T`
+//     or internal `t`, e.g. the `internal`-linkage type-init ctor);
+//     anything else (undefined `U`, data, ...) is ignored.
+//   - optional leading `_` — ld64 on Darwin prefixes user symbols with an
+//     underscore; GNU nm on Linux does not. Tolerate both.
+//   - end-of-line anchor — the whole mangled name must match, not a
+//     substring of some longer symbol.
+fn _symbol_defined(syms: string, mangled: string) -> boolean {
+    let lines = split(syms, "\n");
+    let mut i: int = 0;
+    let guard = lines.length;
+    loop {
+        if i >= guard { break; }
+        let line = lines[i];
+        let is_text = contains(line, " T ") || contains(line, " t ");
+        if is_text && (ends_with(line, " " + mangled) || ends_with(line, "_"
+            + mangled)) { return true; }
+        i = i + 1;
+    }
+    return false;
+}
+
+// Capture the symbol table of the binary once. Returns "" on nm failure.
+fn _dump_symbols(binary: string, child_env: string[]) -> string ![io] {
+    let exit = process.run_capture(["nm", binary], child_env);
+    let out = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return ""; }
+    return out;
+}
+
+struct BuildOut {
+    exit: int;
+    out: string;
+    err: string;
+}
+
+// Build the consumer to `out_bin`, threading `extra_env` entries (e.g. the
+// `SAILFIN_CAPSULE_FILTER` toggle) on top of the isolated nested-runner env.
+fn _build_consumer(out_bin: string, extra_env: string[]) -> BuildOut ![io] {
+    _ensure_fixture();
+    let mut child_env = clean_runner_env(nested_runner_scratch("capsule_reachability_filter"));
+    let mut i: int = 0;
+    let guard = extra_env.length;
+    loop {
+        if i >= guard { break; }
+        child_env.push(extra_env[i]);
+        i += 1;
+    }
+    let consumer_dir = _capsule_root() + "/consumer";
+    let exit = process.run_capture([_sfn_bin(), "build", "-p", consumer_dir, "-o", out_bin], child_env);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    return BuildOut { exit: exit, out: out, err: err };
+}
+
+// ---- Test 1: an unreached submodule is excluded from the link ----
+test "capsule reachability: an unreached submodule is excluded from the link" ![io] {
+    let out_bin = _bin_path("unreached");
+    let build = _build_consumer(out_bin, []);
+    assert build.exit == 0;
+    assert ! contains(build.out + build.err, "undefined symbol");
+    assert fs.exists(out_bin);
+
+    let run_env = clean_runner_env(nested_runner_scratch("capsule_reachability_filter"));
+    let run_exit = process.run_capture([out_bin], run_env);
+    let run_out = process.capture_take_stdout();
+    let run_err = process.capture_take_stderr();
+    assert run_exit == 0;
+    assert contains(run_out + run_err, "OK");
+
+    let syms = _dump_symbols(out_bin, run_env);
+    // Sanity: without this, the absence checks below would pass vacuously
+    // if the whole `demo/twomod` capsule failed to link.
+    assert _symbol_defined(syms, _reached_type_init_symbol());
+    assert ! _symbol_defined(syms, _unreached_type_init_symbol());
+    assert ! _symbol_defined(syms, _unreached_fn_symbol());
+}
+
+// ---- Test 2: a declared-but-never-imported dependency contributes nothing ----
+test "capsule reachability: a declared-but-never-imported dependency contributes nothing" ![io] {
+    let out_bin = _bin_path("neverused");
+    let build = _build_consumer(out_bin, []);
+    assert build.exit == 0;
+    assert fs.exists(out_bin);
+
+    let run_env = clean_runner_env(nested_runner_scratch("capsule_reachability_filter"));
+    let run_exit = process.run_capture([out_bin], run_env);
+    let run_out = process.capture_take_stdout();
+    let run_err = process.capture_take_stderr();
+    assert run_exit == 0;
+    assert contains(run_out + run_err, "OK");
+
+    let syms = _dump_symbols(out_bin, run_env);
+    assert ! _symbol_defined(syms, _neverused_fn_symbol());
+    assert ! _symbol_defined(syms, _neverused_type_init_symbol());
+}
+
+// ---- Test 3: the disable toggle restores the unfiltered set ----
+test "capsule reachability: the disable toggle restores the unfiltered set" ![io] {
+    let out_bin = _bin_path("toggle-off");
+    let build = _build_consumer(out_bin, ["SAILFIN_CAPSULE_FILTER=off"]);
+    assert build.exit == 0;
+    assert fs.exists(out_bin);
+
+    let run_env = clean_runner_env(nested_runner_scratch("capsule_reachability_filter"));
+    let syms = _dump_symbols(out_bin, run_env);
+    // With the filter disabled, pre-change (unfiltered) behavior is
+    // restored: the unreached submodule's ctor links in.
+    assert _symbol_defined(syms, _unreached_type_init_symbol());
+}
+
+// ---- Test 4: a forced closure violation falls back and still builds ----
+test "capsule reachability: a forced closure violation falls back and still builds" ![io] {
+    let out_bin = _bin_path("fault");
+    let build = _build_consumer(out_bin, ["SAILFIN_CAPSULE_FILTER=fault"]);
+    // Fail-open contract: a forced closure-invariant violation must not
+    // break the build, only fall back to the unfiltered set.
+    assert build.exit == 0;
+    assert fs.exists(out_bin);
+    assert contains(build.err, "closure invariant");
+}

@@ -64,30 +64,13 @@ fn _cr_scope_name_prefix(spec: string) -> string {
     return substring(spec, 0, second_slash);
 }
 
-// The module-edge relation, over already-read source text.
-//
-// Returns the slugs in `universe` that this source names directly.
-// Separated from `_cr_module_edge_slugs` so a root that is NOT itself a
-// `CapsuleSource` — a runtime `sfn-source`, compiled by
-// `_compile_runtime_sfn_sources` rather than by the capsule pipeline —
-// can still contribute its edges to the closure.
-//
-// Scoped specs resolve COARSELY: an import of `sfn/crypto` names every
-// module of that capsule, not just its barrel. That is deliberate at this
-// stage and must not be "fixed" here in isolation. `_cr_direct_import_slugs_for`
-// shares this relation to derive `.import-deps` sidecars, which carry
-// cross-module effect data for `E0402`; narrowing a bare barrel import to
-// the barrel alone would drop the modules that actually DEFINE the
-// re-exported symbols, silently under-enforcing callee-effect
-// transitivity. Narrowing becomes safe only once the closure resolves
-// re-exported NAMES to their defining module (SFEP-0070 §3.3, SFN-834),
-// at which point this one function changes and both callers move with it.
-fn _cr_edge_slugs_for_text(source_text: string, source_path: string, universe: CapsuleSource[]) -> string[] ![io] {
-    let mut out: string[] = [];
+// Relative-import edges, shared by both relations below. Resolves each
+// `./x` / `../x` spec to a path and matches it against `universe` by
+// `source_path`, with the `./dir` → `dir/mod.sfn` fallback
+// `enumerate_relative_sources` uses.
+fn _cr_relative_edge_slugs(source_text: string, source_path: string, universe: CapsuleSource[], seed: string[]) -> string[] ![io] {
+    let mut out = seed;
     let cur_dir = _cr_dirname(source_path);
-
-    // Relative imports: resolve each spec to a path, find the matching
-    // source, push its slug.
     let rel_specs = collect_relative_import_specs(source_text);
     let mut r: int = 0;
     loop {
@@ -115,26 +98,115 @@ fn _cr_edge_slugs_for_text(source_text: string, source_path: string, universe: C
         }
         r += 1;
     }
+    return out;
+}
 
-    // Scoped imports: match the import's capsule prefix against each
-    // source's `spec`. Sources from `enumerate_relative_sources` have
-    // `spec = ""` and never match a scoped prefix — exactly the right
-    // behaviour, since relative imports don't go through the scoped path.
+// Append every module of the capsule named by `scope_name`. The coarse
+// resolution: a capsule prefix matches every source carrying it as `spec`.
+fn _cr_append_capsule_modules(scope_name: string, universe: CapsuleSource[], seed: string[]) -> string[] {
+    let mut out = seed;
+    let mut k: int = 0;
+    loop {
+        if k >= universe.length { break; }
+        if strings_equal(universe[k].spec, scope_name) {
+            if !_cr_string_in_array(out, universe[k].slug) {
+                out.push(universe[k].slug);
+            }
+        }
+        k += 1;
+    }
+    return out;
+}
+
+// True iff some source in `universe` carries exactly this slug.
+fn _cr_universe_has_slug(universe: CapsuleSource[], slug: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= universe.length { break; }
+        if strings_equal(universe[i].slug, slug) { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+// The STAGING module-edge relation, over already-read source text.
+//
+// Scoped specs resolve COARSELY: an import of `sfn/crypto` names every
+// module of that capsule, not just its barrel. `_cr_direct_import_slugs_for`
+// uses this to derive `.import-deps` sidecars, which carry cross-module
+// effect data for `E0402`. Narrowing it to the barrel alone would drop the
+// modules that actually DEFINE the re-exported symbols and silently
+// under-enforce callee-effect transitivity, so this relation must stay
+// coarse until the closure resolves re-exported NAMES to their defining
+// module (SFEP-0070 §3.3, SFN-834).
+//
+// Coarseness costs nothing once the filter has run, because staging
+// resolves against the ALREADY-FILTERED universe: matching "every module
+// of the capsule" can only ever return modules that survived the filter.
+fn _cr_edge_slugs_for_text(source_text: string, source_path: string, universe: CapsuleSource[]) -> string[] ![io] {
+    let mut seed: string[] = [];
+    let mut out = _cr_relative_edge_slugs(source_text, source_path, universe, seed);
     let scoped_specs = collect_scoped_import_specs(source_text);
     let mut s: int = 0;
     loop {
         if s >= scoped_specs.length { break; }
         let scope_name = _cr_scope_name_prefix(scoped_specs[s]);
         if scope_name.length > 0 {
-            let mut k2: int = 0;
-            loop {
-                if k2 >= universe.length { break; }
-                if strings_equal(universe[k2].spec, scope_name) {
-                    if !_cr_string_in_array(out, universe[k2].slug) {
-                        out.push(universe[k2].slug);
+            out = _cr_append_capsule_modules(scope_name, universe, out);
+        }
+        s += 1;
+    }
+    return out;
+}
+
+// The REACHABILITY module-edge relation — the filter's view of an edge.
+//
+// Identical to the staging relation on relative imports, and refined on
+// scoped ones: a deep spec (`sfn/crypto/aead`) names that one module, and a
+// bare capsule spec (`sfn/crypto`) names the capsule's entry module
+// (`sfn/crypto/mod`) rather than all of it. The barrel's own
+// `export … from "./sibling"` statements are then followed as ordinary
+// relative edges, so every module the barrel actually re-exports is still
+// retained — what drops is a submodule the barrel does not name and no
+// sibling imports.
+//
+// Divergence from the staging relation is deliberate and safe in one
+// direction only: this relation is a SUBSET of the coarse one, so the
+// retained set `K` it computes is a subset of what staging would have
+// named, and staging — running against `K` — can only ever return members
+// of `K`. A `.layout-manifest` path therefore cannot point at an unstaged
+// module, which is the silent failure SFEP-0070 §3.5 exists to prevent.
+// The reverse divergence (a filter MORE generous than staging) would be
+// harmless too; it is narrowing staging itself that is unsafe.
+//
+// Any spec this cannot resolve confidently falls back to the coarse
+// whole-capsule match: uncertainty always widens the retained set.
+fn _cr_reach_edge_slugs_for_text(source_text: string, source_path: string, universe: CapsuleSource[]) -> string[] ![io] {
+    let mut seed: string[] = [];
+    let mut out = _cr_relative_edge_slugs(source_text, source_path, universe, seed);
+    let scoped_specs = collect_scoped_import_specs(source_text);
+    let mut s: int = 0;
+    loop {
+        if s >= scoped_specs.length { break; }
+        let spec = scoped_specs[s];
+        let scope_name = _cr_scope_name_prefix(spec);
+        if scope_name.length > 0 {
+            if _cr_universe_has_slug(universe, spec) {
+                // Deep spec naming exactly one module.
+                if !_cr_string_in_array(out, spec) { out.push(spec); }
+            } else {
+                let barrel = spec + "/mod";
+                if _cr_universe_has_slug(universe, barrel) {
+                    // Bare capsule spec → the capsule's entry module.
+                    if !_cr_string_in_array(out, barrel) {
+                        out.push(barrel);
                     }
+                } else {
+                    // Neither shape resolved (a capsule whose entry is not
+                    // `mod`, or a spec this relation does not model).
+                    // Widen rather than guess.
+                    out = _cr_append_capsule_modules(scope_name, universe, out);
                 }
-                k2 += 1;
             }
         }
         s += 1;
@@ -142,7 +214,7 @@ fn _cr_edge_slugs_for_text(source_text: string, source_path: string, universe: C
     return out;
 }
 
-// The module-edge relation over a resolved source. Reads the source once.
+// The staging relation over a resolved source. Reads the source once.
 // A source whose file is missing contributes no edges rather than failing
 // the build — the same tolerance `_cr_direct_import_slugs_for` has always
 // had, and the safe direction for a filter that must never break a build.
@@ -151,6 +223,14 @@ fn _cr_module_edge_slugs(src: CapsuleSource, universe: CapsuleSource[]) -> strin
     if !fs.exists(src.source_path) { return empty; }
     let source_text = fs.readFile(src.source_path);
     return _cr_edge_slugs_for_text(source_text, src.source_path, universe);
+}
+
+// The reachability relation over a resolved source.
+fn _cr_reach_module_edge_slugs(src: CapsuleSource, universe: CapsuleSource[]) -> string[] ![io] {
+    let mut empty: string[] = [];
+    if !fs.exists(src.source_path) { return empty; }
+    let source_text = fs.readFile(src.source_path);
+    return _cr_reach_edge_slugs_for_text(source_text, src.source_path, universe);
 }
 
 // Index of `slug` in `sources`, or -1. Linear because `CapsuleSource[]`
@@ -229,6 +309,54 @@ fn _cr_seed_roots(sources: CapsuleSource[], root_source_paths: string[]) -> stri
     return seeded;
 }
 
+// Seed the closure with the consumer's entry paths.
+//
+// An entry is a root whether or not it is a member of `resolved.sources`,
+// and it is NOT always a member: `walk_project_src` builds exclude it by
+// construction (its `.ll` is produced separately), and the relative-import
+// walk does not necessarily surface the entry itself. Seeding only from
+// the deduped set therefore loses every capsule an entry names directly —
+// observed as the whole `sfn/test` capsule vanishing from a test build,
+// barrel included, because nothing followed the entry's scoped import.
+//
+// Both halves matter: the entry's slug when it IS in the universe, and its
+// edges always, so an entry outside the universe still contributes what it
+// names (SFN-833).
+fn _cr_seed_entry_roots(sources: CapsuleSource[], entry_paths: string[], seed: string[]) -> string[] ![io] {
+    let mut out = seed;
+    let mut i: int = 0;
+    loop {
+        if i >= entry_paths.length { break; }
+        let entry = entry_paths[i];
+        let key = _cr_reach_strip_dot_slash(entry);
+        let mut k: int = 0;
+        loop {
+            if k >= sources.length { break; }
+            if strings_equal(_cr_reach_strip_dot_slash(sources[k].source_path), key) {
+                if !_cr_string_in_array(out, sources[k].slug) {
+                    out.push(sources[k].slug);
+                }
+                break;
+            }
+            k += 1;
+        }
+        if fs.exists(entry) {
+            let text = fs.readFile(entry);
+            let edges = _cr_reach_edge_slugs_for_text(text, entry, sources);
+            let mut ei: int = 0;
+            loop {
+                if ei >= edges.length { break; }
+                if !_cr_string_in_array(out, edges[ei]) {
+                    out.push(edges[ei]);
+                }
+                ei += 1;
+            }
+        }
+        i += 1;
+    }
+    return out;
+}
+
 // Seed the closure with the runtime's own source list.
 //
 // SFEP-0070 §3.2: when `runtime_root` is set, every runtime `sfn-source`
@@ -265,7 +393,7 @@ fn _cr_seed_runtime_roots(sources: CapsuleSource[], runtime_root: string, seeded
             let path = roots[ri];
             if fs.exists(path) {
                 let text = fs.readFile(path);
-                let edges = _cr_edge_slugs_for_text(text, path, sources);
+                let edges = _cr_reach_edge_slugs_for_text(text, path, sources);
                 let mut ei: int = 0;
                 loop {
                     if ei >= edges.length { break; }
@@ -305,13 +433,14 @@ fn _cr_join_slugs(slugs: string[], limit: int) -> string {
 //
 // Returns the retained subset, or `sources` unchanged whenever the filter
 // declines or fails to prove itself (SFEP-0070 §3.5, layer 3).
-fn _cr_filter_reachable_sources(sources: CapsuleSource[], root_source_paths: string[], runtime_root: string) -> CapsuleSource[] ![io] {
+fn _cr_filter_reachable_sources(sources: CapsuleSource[], root_source_paths: string[], entry_paths: string[], runtime_root: string) -> CapsuleSource[] ![io] {
     if sources.length == 0 { return sources; }
     let mode = _cr_capsule_filter_mode();
     if strings_equal(mode, "off") { return sources; }
     let trace = _env_flag("SAILFIN_TRACE_CAPSULE_FILTER");
 
-    let seeded = _cr_seed_roots(sources, root_source_paths);
+    let from_set = _cr_seed_roots(sources, root_source_paths);
+    let seeded = _cr_seed_entry_roots(sources, entry_paths, from_set);
     let mut retained = _cr_seed_runtime_roots(sources, runtime_root, seeded);
     if retained.length == 0 {
         // No root class matched. That means the root discrimination is
@@ -322,6 +451,12 @@ fn _cr_filter_reachable_sources(sources: CapsuleSource[], root_source_paths: str
         }
         return sources;
     }
+
+    // Seed size as a COUNT, not a second array handle: the seeding helpers
+    // accumulate into the array they are handed, so `seeded` and `retained`
+    // refer to one array and comparing their lengths would compare an array
+    // with itself.
+    let seed_count = retained.length;
 
     // BFS with membership checked at the PUSH site, so `retained` is
     // bounded by `sources.length` and cycles terminate structurally. Edges
@@ -349,7 +484,7 @@ fn _cr_filter_reachable_sources(sources: CapsuleSource[], root_source_paths: str
         qi += 1;
         let idx = _cr_source_index_for_slug(sources, cur_slug);
         if idx < 0 { continue; }
-        let edges = _cr_module_edge_slugs(sources[idx], sources);
+        let edges = _cr_reach_module_edge_slugs(sources[idx], sources);
         memo_slugs.push(cur_slug);
         memo_edges.push(edges);
         let mut ei: int = 0;
@@ -367,7 +502,7 @@ fn _cr_filter_reachable_sources(sources: CapsuleSource[], root_source_paths: str
         // Anything past the seeded roots was pushed BY an edge, so removing
         // it guarantees some retained module now names a missing slug and
         // the verification pass below observes a genuine violation.
-        if retained.length > seeded.length {
+        if retained.length > seed_count {
             let mut truncated: string[] = [];
             let mut fi: int = 0;
             loop {
@@ -387,6 +522,10 @@ fn _cr_filter_reachable_sources(sources: CapsuleSource[], root_source_paths: str
     // list it is handed, so a run against `K` cannot produce a slug outside
     // `K` and would prove nothing. Against `U` it is a real fixed-point
     // check, and it is what catches a closure that stopped early.
+    //
+    // `edges` here is the REACHABILITY relation. Staging's coarser relation
+    // needs no separate check: it is a superset of this one evaluated
+    // against `K`, and a superset restricted to `K` is still inside `K`.
     let mut vi: int = 0;
     loop {
         if vi >= memo_slugs.length { break; }
@@ -450,7 +589,7 @@ fn _cr_filter_reachable_sources(sources: CapsuleSource[], root_source_paths: str
 fn _cr_resolve_dedupe_filtered(entry_paths: string[], consumer: ResolverConsumer, bundled_workspace_start: string) -> ResolverDedupeResult ![io] {
     let resolved = _cr_resolve_and_dedupe(entry_paths, consumer, bundled_workspace_start);
     if resolved.has_collision { return resolved; }
-    let filtered = _cr_filter_reachable_sources(resolved.sources, resolved.root_source_paths, consumer.runtime_root);
+    let filtered = _cr_filter_reachable_sources(resolved.sources, resolved.root_source_paths, entry_paths, consumer.runtime_root);
     return ResolverDedupeResult {
         sources: filtered,
         has_collision: resolved.has_collision,
