@@ -416,8 +416,8 @@ fn _bc_run_fixture(self_bin: string, name: string, fixture_dir: string, scratch:
 // CSV header for `--csv PATH`. The trailing `,status,seed_version,platform`
 // deliberately mirrors the existing runtime-mode CSV's tail
 // (`bench.sfn::_run_runtime_mode`). No `run_sha`/`run_date` columns: those
-// are prepended by `scripts/perf_history.sh`'s `_append_tagged` once a
-// sibling issue (SFN-832) wires this mode into perf-history — this module
+// are prepended by `scripts/perf_history.sh`'s `_append_tagged`, which is how
+// the nightly records this mode as the `consumer.csv` series — this module
 // stays perf-history-agnostic.
 let _BC_CSV_HEADER: string = "fixture,cold_s,warm_s,binary_bytes,ctors,modules_staged,cold_cache_misses,cache_hits,cache_misses,status,seed_version,platform";
 

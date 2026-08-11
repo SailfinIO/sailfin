@@ -1,12 +1,17 @@
 [capsule]
 name = "sfn/os"
-version = "0.5.1"
+version = "0.6.0"
 description = "Environment, process, and OS interaction for Sailfin"
 
 [dependencies]
 
 [capabilities]
-required = ["io"]
+# `clock` is for `drain_to_exit`'s wall-clock deadline via
+# `monotonic_millis()`; `sfn/bench` carries the same pair. `required`
+# is a ceiling on the capsule's OWN functions, checked only when
+# `sfn/os` is the resolved project root — it is not inherited by
+# consumers, so no existing caller changes.
+required = ["clock", "io"]
 
 [build]
 entry = "src/mod.sfn"

@@ -10,9 +10,10 @@ build budget). Workflow: `.github/workflows/perf-history.yml`. Logic:
 `bench-data` is an **orphan branch** — it shares no history with `main` and
 holds only benchmark CSVs. The nightly `perf-history.yml` job builds the
 compiler from the pinned seed, runs `make bench` (per-module compile time +
-peak RSS) and `make bench-runtime`, tags each row with the commit SHA and run
-date, and **appends** them. Over time the branch becomes a performance time
-series in the spirit of [perf.rust-lang.org] and the LLVM compile-time tracker —
+peak RSS), `make bench-runtime`, and `make bench-consumer` (end-to-end builds of
+fixed fixtures), tags each row with the commit SHA and run date, and **appends**
+them. Over time the branch becomes a performance time series in the spirit of
+[perf.rust-lang.org] and the LLVM compile-time tracker —
 history with alert thresholds, not one-shot artifacts. The motivating incident
 is #1245: a memory regression that killed CI runners before anyone noticed,
 because there was no history to notice it against.
@@ -28,12 +29,13 @@ compares their output.
 | `compile.csv` | `run_sha,run_date,` + `sfn bench --compiler --csv` header (`module,time_s,peak_kb,ir_lines,status,seed_version`) |
 | `runtime.csv` | `run_sha,run_date,` + `sfn bench benchmarks/runtime --csv` header (`workload,inner_ms_min,inner_ms_median,peak_kb,ops,ops_per_ms,status,seed_version,platform`) |
 | `build.csv` | `run_sha,run_date,build_wall_s,budget_s` |
+| `consumer.csv` | `run_sha,run_date,` + `sfn bench --consumer --csv` header (`fixture,cold_s,warm_s,binary_bytes,ctors,modules_staged,cold_cache_misses,cache_hits,cache_misses,status,seed_version,platform`) |
 
 Every nightly run appends one block of rows to each file. Append is
-**idempotent per commit, per file**: each of `compile.csv`, `runtime.csv`, and
-`build.csv` is guarded on its own SHA column, so re-running the job never
-duplicates rows — even after a partial run where one bench aborted before
-writing its CSV and only the others were recorded (safe manual re-runs).
+**idempotent per commit, per file**: each of `compile.csv`, `runtime.csv`,
+`build.csv`, and `consumer.csv` is guarded on its own SHA column, so re-running
+the job never duplicates rows — even after a partial run where one bench aborted
+before writing its CSV and only the others were recorded (safe manual re-runs).
 
 ## How regressions are detected
 
@@ -85,6 +87,63 @@ Two consequences worth keeping in mind when reading `build.csv`:
   anything a regression — a rising raw wall time at flat cost-per-line is the
   tree growing into a fixed budget, which needs headroom, not a bisect.
 
+### The consumer-build series
+
+`consumer.csv` answers a question neither of the other two can: **what does a
+program that is not the compiler pay to build?** `sfn bench --consumer` builds a
+fixed fixture set (`hello`, `hello_lib`, `tls_client`) end to end — resolve,
+stage, emit, link — cold and warm, on an isolated cache root per fixture. The
+compile bench never resolves a dependency closure, so a capsule the closure drags
+in for free is invisible to it; this series is where that shows up. Design:
+SFEP-0070. The committed pre-filter numbers, and how they were taken:
+`docs/perf/consumer-baseline.md`.
+
+**The headline metrics are `cold_s` and `ctors` — not `binary_bytes`.** A reader
+who reaches for the size column will conclude nothing is happening, because in
+that column nothing is: `--gc-sections` with `-ffunction-sections
+-fdata-sections` already strips unreferenced capsule code, so size stays flat
+across the whole fixture range (386,848 → 388,288 bytes at baseline — 0.4%).
+Module type-init constructors are the opposite case: they are GC roots, so they
+and every descriptor they register survive dead-stripping. That is why `ctors`
+and `modules_staged` move with the closure while `binary_bytes` does not. Size
+is recorded to *demonstrate* that flatness, and a change claiming a size win
+here should be treated as suspicious until explained.
+
+Two thresholds, because the series mixes two kinds of number:
+
+| Metric | Compared against | Threshold |
+|---|---|---|
+| `cold_s` | rolling median of the last `N` same-seed runs | `PERF_THRESHOLD_PCT` (`10`) |
+| `ctors`, `modules_staged` | rolling median of the last `N` same-seed runs | `PERF_COUNT_THRESHOLD_PCT` (`0`) |
+| `warm_s`, `binary_bytes`, cache counters | not compared — recorded only | — |
+
+`cold_s` is a wall time on a shared runner and needs the same noise band the
+compile bench does. `ctors` and `modules_staged` are derived counts,
+deterministic for a given tree and seed, so they need none — `0` means any
+sustained rise above the median. That distinction is the whole point: a 32 → 35
+constructor rise is +9.4%, so a shared 10% band would have absorbed precisely
+the regression this series exists to catch.
+
+`warm_s` is a ~1.8 s control whose relative jitter on a shared runner is wider
+than any drift worth reporting, and the cache counters are work proxies rather
+than measurements. Both accumulate for the dashboard without alerting — the same
+arrangement `runtime.csv` has.
+
+**It warns; it never fails the nightly.** There is no wall-time budget on
+building a hello-world and there is not going to be: a hard wall on a
+two-second measurement fails on infrastructure noise, and a gate that cries wolf
+is muted long before it is ever right. This series files an issue and stops
+there. Only the whole-build wall time is enforced (below).
+
+Cold start and seed scoping behave as they do for modules — fewer than `N` prior
+runs, or a fixture without `N` **same-seed** samples, is skipped rather than
+compared against thin history — so a new series stays quiet through its first
+nights, and a seed bump resets the baselines instead of flagging every fixture at
+once. A metric the harness could not derive is written as `-1`; unavailable is
+not a measurement, so it neither alerts nor enters a baseline window. Detect it
+by the negative value rather than by `status` — only `ctors` also raises a token
+(`noctor`), while `modules_staged` reports `-1` with the status still `ok`.
+
 ## Enforcement
 
 A breach **fails the nightly**. The final `Enforce the whole-build wall-time
@@ -104,12 +163,37 @@ one job summary. When the two differ the step logs both.
 
 ## What happens on a regression
 
-The job auto-files **one `type:perf` issue per offending module**, titled
-`perf regression: <module>`. Dedup mirrors `build-quality.yml`: the
+The job auto-files **one `type:perf` issue per finding**, titled
+`perf regression: <name>`. Dedup mirrors `build-quality.yml`: the
 `perf-regression` label plus exact title equality — an open issue for the same
-module gets a comment instead of a duplicate. The `<whole-build>` pseudo-module
-carries a build-budget breach. Reverting the regression files nothing new; the
-next clean run simply detects no regression.
+name gets a comment instead of a duplicate. Reverting the regression files
+nothing new; the next clean run simply detects no regression.
+
+A finding is a `(kind, name)` pair, and the kind is what tells you which
+comparison produced it. Reporting one comparison under another's label is the
+SFN-567 failure — it hid the stricter one — so the compare step selects on both
+columns:
+
+| Kind | Name | Source |
+|---|---|---|
+| `rolling-median` | the module | per-module compile bench |
+| `budget` | `<whole-build>` | whole-build wall time vs the SFEP-0006 budget |
+| `consumer-median` | `consumer/<fixture>` | the consumer-build series |
+
+The issue title is `name`-keyed only, because `perf_history.sh` namespaces the
+consumer names in column 2 itself (`consumer/<fixture>`). **That namespacing is
+what makes names globally unique across kinds**, and so what makes a title-keyed
+dedup safe — a fixture and a module sharing a name still file as two distinct
+issues. Anything added to the compare output later has to hold that invariant or
+change the dedup key with it.
+
+**The systemic-flood cap applies to modules only.** When more than
+`PERF_SYSTEMIC_MODULES` (`10`) modules regress at once — the signature of an
+environmental shift rather than that many independent code regressions — the
+per-module fan-out collapses into one aggregated issue (SFN-330). The budget row
+and the consumer findings are filed regardless: both are bounded (one row, and
+one per fixture), so neither can flood, and suppressing them would let a broad
+environmental cause hide a genuine breach.
 
 ## Reading / reproducing locally
 
@@ -122,6 +206,7 @@ git show origin/bench-data:compile.csv | column -t -s,
 make compile
 make bench BENCH_ARGS="--csv /tmp/compile.csv --top 20"
 make bench-runtime BENCH_RUNTIME_ARGS="--csv /tmp/runtime.csv --top 20 --iterations 5"
+make bench-consumer BENCH_CONSUMER_ARGS="--csv /tmp/consumer.csv"
 
 # Exercise the compare logic offline against synthetic history
 scripts/perf_history.sh compare --data-dir <dir> --sha <sha> --out /tmp/reg.tsv
