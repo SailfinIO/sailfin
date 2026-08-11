@@ -44,6 +44,15 @@ fn _marker_path() -> string ![io] {
     return "/tmp/sfn-process-control-wait-until.marker";
 }
 
+// A distinct marker for the stdin-EOF test, so the two never alias when
+// both run under the same scratch dir. Same capture-free helper shape as
+// `_marker_path` above, and for the same reason.
+fn _stdin_marker_path() -> string ![io] {
+    let dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length > 0 { return dir + "/sfn-process-control-stdin-eof.marker"; }
+    return "/tmp/sfn-process-control-stdin-eof.marker";
+}
+
 // `wait_until` polls in-process rather than forking `sleep` per tick. The
 // probe captures nothing — it only calls the file-local `_marker_path()`
 // helper — to stay clear of the SFN-843 capture miscompile documented on
@@ -124,6 +133,37 @@ test "process control: stop_background reaps a SIGKILLed child" ![clock, io] {
     let outcome = stop_background(bg);
     assert outcome.exit == 137;
     assert ! outcome.timed_out;
+}
+
+// `start_background` closes the child's stdin at SPAWN, not at teardown.
+// That early close is the one behavior unique to this capsule's
+// composition: `os::drain_to_exit` also closes stdin, but only once the
+// child is being drained, which is too late for a background child that
+// reads stdin *during* the body.
+//
+// The child proves it saw EOF by side effect rather than by exit code. An
+// exit-code test would be racy: `stop_background` kills before it drains,
+// so a child that exited cleanly a moment earlier and one killed mid-read
+// are only distinguishable if the kill loses a race. Here the child drains
+// stdin and only then creates a marker, so the marker exists if and only
+// if stdin reached EOF while the child was running in the background.
+// Without the close in `start_background`, `cat` blocks forever, the
+// marker never appears, and `wait_until` reports false.
+test "process control: start_background closes stdin so a reading child sees EOF" ![clock, io] {
+    if !_has_bin("/bin/sh") || !_has_bin("/bin/cat") || !_has_bin("/bin/touch") {
+        assert true;
+        return;
+    }
+    let marker = _stdin_marker_path();
+    if fs.exists(marker) { fs.deleteFile(marker); }
+    let bg = start_background(["/bin/sh", "-c", "/bin/cat > /dev/null; /bin/touch '"
+        + marker
+        + "'"], env_empty(), "", "bg-stdin-eof");
+    let saw_eof = wait_until(fn () -> boolean {
+        return fs.exists(_stdin_marker_path());
+    }, 5000, 20);
+    let _ = stop_background(bg);
+    assert saw_eof;
 }
 
 // `stop_background` on a failed spawn (`handle.handle_id == 0`) must be

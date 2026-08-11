@@ -131,7 +131,7 @@ fn start_background(argv: string[], env: Env, cwd: string, label: string) -> Bac
 // returned value cannot distinguish that from a complete capture.
 fn stop_background(bg: Background) -> ProcessDrain ![clock, io] {
     if bg.handle.handle_id == 0 { return _spawn_failed(); }
-    handle_kill(bg.handle);
+    let _ = handle_kill(bg.handle);
     let outcome = drain_to_exit(bg.handle, _STOP_DRAIN_MS);
     return ProcessDrain {
         stdout: outcome.stdout,

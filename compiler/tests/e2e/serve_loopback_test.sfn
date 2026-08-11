@@ -435,7 +435,7 @@ test "serve loopback: macOS request delivery + framed behavioral round-trips" ![
     // `_lb_port()` inside rather than closed over. See `_await_ready` for
     // why capture is avoided in a body that also makes effectful calls.
     let _served = with_background([server_bin], _child_env_typed(), "", "serve-loopback", fn (server: Background) -> int {
-        assert server.handle_id != 0;
+        assert server.handle.handle_id != 0;
         let port = _lb_port();
 
         // Readiness + #1387 request delivery: method and path reach the
