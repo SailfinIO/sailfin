@@ -325,10 +325,14 @@ cmd_compare() {
                     for (mi = 1; mi <= nm; mi++) {
                         metric = metrics[mi]
                         cv = val[ck, metric]
-                        # The harness writes -1 for a metric it could not derive
-                        # (the `noctor`/`nosize` status tokens). Unavailable is
-                        # not a measurement: it neither alerts nor pollutes a
-                        # window with a value orders of magnitude below the rest.
+                        # The harness writes -1 for a metric it could not
+                        # derive. Only `ctors` also carries a status token
+                        # (`noctor`); `modules_staged` is a missing JSON key and
+                        # reports -1 with the status still `ok`, so the negative
+                        # value — not the status column — is the reliable test.
+                        # Unavailable is not a measurement: it neither alerts nor
+                        # sits in a window as a value orders of magnitude below
+                        # the rest.
                         if (cv < 0) continue
                         sc = 0
                         for (i = 1; i <= pc; i++) {
@@ -341,11 +345,22 @@ cmd_compare() {
                         for (i = sc - N + 1; i <= sc; i++) wt[++w] = samp[i]
                         md = median(wt, N)
                         th = (metric == "cold_s") ? TH : CTH
-                        if (md > 0 && cv > md * (1 + th / 100)) {
+                        fires = 0
+                        if (md > 0) fires = (cv > md * (1 + th / 100))
+                        else if (metric != "cold_s" && cv > 0) fires = 1
+                        # A zero median with a non-zero current is an unbounded
+                        # rise, not an absent comparison. The `md > 0` guard
+                        # exists to protect the division; letting it also decide
+                        # whether to report would drop the strictest form of the
+                        # regression the counts watch for. A wall time is
+                        # excluded because a 0.0s prior median means the harness
+                        # did not run, not that the build was free.
+                        if (fires) {
+                            pctstr = (md > 0) ? sprintf("%.1f", (cv / md - 1) * 100) : "inf"
                             if (metric == "cold_s")
-                                printf("consumer-median\tconsumer/%s\t%s\t%.4f\t%.4f\t%.1f\n", fixture, metric, cv, md, (cv / md - 1) * 100)
+                                printf("consumer-median\tconsumer/%s\t%s\t%.4f\t%.4f\t%s\n", fixture, metric, cv, md, pctstr)
                             else
-                                printf("consumer-median\tconsumer/%s\t%s\t%.0f\t%.0f\t%.1f\n", fixture, metric, cv, md, (cv / md - 1) * 100)
+                                printf("consumer-median\tconsumer/%s\t%s\t%.0f\t%.0f\t%s\n", fixture, metric, cv, md, pctstr)
                         }
                         delete samp; delete wt
                     }

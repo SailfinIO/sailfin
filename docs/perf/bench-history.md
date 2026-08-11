@@ -139,9 +139,10 @@ Cold start and seed scoping behave as they do for modules — fewer than `N` pri
 runs, or a fixture without `N` **same-seed** samples, is skipped rather than
 compared against thin history — so a new series stays quiet through its first
 nights, and a seed bump resets the baselines instead of flagging every fixture at
-once. A metric the harness could not derive is written as `-1` with a
-`noctor`/`nosize` status token; unavailable is not a measurement, so it neither
-alerts nor enters a window.
+once. A metric the harness could not derive is written as `-1`; unavailable is
+not a measurement, so it neither alerts nor enters a baseline window. Detect it
+by the negative value rather than by `status` — only `ctors` also raises a token
+(`noctor`), while `modules_staged` reports `-1` with the status still `ok`.
 
 ## Enforcement
 
@@ -169,9 +170,9 @@ name gets a comment instead of a duplicate. Reverting the regression files
 nothing new; the next clean run simply detects no regression.
 
 A finding is a `(kind, name)` pair, and the kind is what tells you which
-comparison produced it. Keying on the name alone is the SFN-567 failure — a gate
-that reported one comparison under another's label and hid the stricter one — so
-neither the compare script nor the reporting step ever does:
+comparison produced it. Reporting one comparison under another's label is the
+SFN-567 failure — it hid the stricter one — so the compare step selects on both
+columns:
 
 | Kind | Name | Source |
 |---|---|---|
@@ -179,8 +180,12 @@ neither the compare script nor the reporting step ever does:
 | `budget` | `<whole-build>` | whole-build wall time vs the SFEP-0006 budget |
 | `consumer-median` | `consumer/<fixture>` | the consumer-build series |
 
-The consumer names are namespaced in the compare output itself, so a fixture and
-a module that happen to share a name still file as two distinct issues.
+The issue title is `name`-keyed only, because `perf_history.sh` namespaces the
+consumer names in column 2 itself (`consumer/<fixture>`). **That namespacing is
+what makes names globally unique across kinds**, and so what makes a title-keyed
+dedup safe — a fixture and a module sharing a name still file as two distinct
+issues. Anything added to the compare output later has to hold that invariant or
+change the dedup key with it.
 
 **The systemic-flood cap applies to modules only.** When more than
 `PERF_SYSTEMIC_MODULES` (`10`) modules regress at once — the signature of an

@@ -6,9 +6,9 @@ name: Perf history
 # growing time series in the spirit of perf.rust-lang.org / the LLVM
 # compile-time tracker, not one-shot artifacts. It then compares the current
 # run against the rolling median of the last N runs and auto-files one
-# `type:perf` issue per module that regresses beyond threshold (deduped against
-# an open issue for that module), plus a whole-build wall-time budget check
-# against the SFEP-0006 <5 min target.
+# `type:perf` issue per finding — a (comparison kind, name) pair — that
+# regresses beyond threshold, deduped against an open issue of the same title,
+# plus a whole-build wall-time budget check against the SFEP-0006 <5 min target.
 #
 # It also records the consumer-build series (`sfn bench --consumer`, SFEP-0070):
 # fixed fixtures built end to end, watched for the capsule source closure
@@ -260,7 +260,7 @@ jobs:
           # stays honest, then compare against that. Exercises the full
           # file-issue path end-to-end (acceptance: "synthetic regression
           # injected in a scratch run files exactly one issue").
-          if [ -n "${SYN_MODULE:-}" ]; then
+          if [ -n "${SYN_MODULE:-}" ] && [ -f bench-data/compile.csv ]; then
             echo "[perf-history] synthetic slowdown injected for module: $SYN_MODULE"
             rm -rf bench-data-scratch
             cp -r bench-data bench-data-scratch
@@ -268,6 +268,11 @@ jobs:
               'NR>1 && $1==s && $3==m { $4=$4*2; $5=$5*2 } { print }' \
               bench-data/compile.csv > bench-data-scratch/compile.csv
             data_dir=bench-data-scratch
+          elif [ -n "${SYN_MODULE:-}" ]; then
+            # `compare` tolerates a missing compile.csv; under `set -u` the
+            # injection above would not, so say so instead of dying on a
+            # dispatch against a branch that has no per-module series yet.
+            echo "[perf-history] no compile.csv on $DATA_BRANCH — synthetic slowdown skipped"
           fi
           scripts/perf_history.sh compare \
             --data-dir "$data_dir" \
@@ -372,8 +377,18 @@ jobs:
               | sort -u >> "$remaining_file"
           fi
 
-          while IFS=$'\t' read -r row_kind name; do
-            [ -n "$name" ] || continue
+          # Read the finding list on fd 3, not stdin. The body runs `gh`, which
+          # reads stdin; on stdin this loop can lose a line to it, and with two
+          # fields a partial read misaligns `row_kind` from `name` — a finding
+          # reported under another kind's label, which is the SFN-567 shape this
+          # rewrite exists to prevent.
+          while IFS=$'\t' read -r -u 3 row_kind name; do
+            if [ -z "$name" ]; then
+              # The loop's contract is that no finding is dropped, so a
+              # malformed row is loud rather than skipped.
+              echo "::warning::perf-history: skipping malformed finding row (kind='${row_kind}', empty name)"
+              continue
+            fi
             # `name` already carries its series prefix where one is needed (the
             # script emits `consumer/<fixture>`), so module and `<whole-build>`
             # titles are unchanged and keep deduping against issues already open.
@@ -409,8 +424,19 @@ jobs:
             } > perf-body.md
 
             if [ -n "$existing" ]; then
-              echo "[perf-history] appending to existing issue #${existing} for ${name}"
-              gh issue comment "$existing" --repo "$REPO" --body-file perf-body.md
+              # Idempotent per commit, the same contract `append` holds for the
+              # CSVs: a manual re-run against an already-recorded SHA re-derives
+              # the identical finding, and posting the identical comment again
+              # is a double-alert for one measurement. Every body carries
+              # `**Commit:** <sha>`, so the SHA is the dedup key.
+              already="$(gh issue view "$existing" --repo "$REPO" --json comments \
+                --jq "[.comments[] | select(.body | contains(\"${SHA}\"))] | length" 2>/dev/null || echo 0)"
+              if [ "${already:-0}" -gt 0 ]; then
+                echo "[perf-history] issue #${existing} already reports ${SHA:0:12} for ${name} — skipping duplicate comment"
+              else
+                echo "[perf-history] appending to existing issue #${existing} for ${name}"
+                gh issue comment "$existing" --repo "$REPO" --body-file perf-body.md
+              fi
             else
               {
                 echo "# perf regression: ${name}"
@@ -438,7 +464,7 @@ jobs:
                 | awk -F/ '/^https:/{print $NF}')"
               echo "[perf-history] opened issue #${new_number} for ${name}"
             fi
-          done < "$remaining_file"
+          done 3< "$remaining_file"
 
       - name: Upload run CSVs (artifact)
         if: always()

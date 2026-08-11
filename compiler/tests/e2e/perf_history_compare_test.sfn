@@ -17,10 +17,10 @@
 // .claude/rules/no-bash-e2e.md) and asserts on captured stdout/stderr.
 import { contains } from "sfn/strings";
 
-// The compare path is pure shell/awk with no gh dependency, so bash plus the
-// coreutils it calls (cut/grep/awk/mktemp) is all the child needs — thread
-// PATH (and HOME/TMPDIR for good measure); run_capture's empty env is the
-// EMPTY environment, not "inherit".
+// The append/compare paths are pure shell/awk with no gh dependency, so bash
+// plus the two coreutils they call (`awk` and `wc`) is all the child needs —
+// thread PATH (and HOME/TMPDIR for good measure); run_capture's empty env is
+// the EMPTY environment, not "inherit".
 fn _child_env() -> string[] ![io] {
     let mut e: string[] = [];
     let path = env.get("PATH");
@@ -230,10 +230,9 @@ test "perf-history: consumer binary growth alone files nothing" ![io] {
     assert contains(out, "no regressions detected");
 }
 
-// A metric the harness could not derive is written as -1 with a `noctor` /
-// `nosize` status token. Unavailable is not a measurement: it must neither
-// alert nor sit in a window as a value orders of magnitude below the rest.
-test "perf-history: an underived consumer metric neither alerts nor skews the window" ![io] {
+// A metric the harness could not derive is written as -1. Unavailable is not a
+// measurement, so it must not alert.
+test "perf-history: a consumer metric the harness could not derive does not alert" ![io] {
     let dir = "build/perf-history-compare-test/consumer-noctor";
     _write_consumer_fixture(dir, 8, "48.70,1.76,-1,-1,34,68,68,0,ok+nostrip+noctor,0.9.5,Linux x86_64");
     let exit = _run_compare_consumer(dir);
@@ -241,6 +240,73 @@ test "perf-history: an underived consumer metric neither alerts nor skews the wi
     let _err = process.capture_take_stderr();
     assert exit == 0;
     assert contains(out, "no regressions detected");
+}
+
+// The other half of the same rule, which the test above cannot reach: a -1 in a
+// PRIOR run must not count as a baseline sample. Seven priors, one of which
+// could not derive `ctors`, leaves six valid samples — one short of the seven
+// required — so the fixture falls through the per-fixture cold start and files
+// nothing despite `ctors` jumping 32 -> 35. Were the -1 counted, the window
+// would be full and the jump would be compared against a baseline holding a
+// non-measurement.
+test "perf-history: an underived consumer sample does not count toward the window" ![io] {
+    let dir = "build/perf-history-compare-test/consumer-noctor-window";
+    fs.createDirectory(dir, true);
+    fs.writeFile(dir + "/consumer.csv", _consumer_header()
+        + _consumer_prior_rows(6)
+        + "sha7,2026-08-01,hello,48.70,1.76,386848,-1,34,68,68,0,ok+noctor,0.9.5,Linux x86_64\n"
+        + "cur,2026-08-12,hello,48.70,1.76,386848,35,34,68,68,0,ok,0.9.5,Linux x86_64\n");
+    let exit = _run_compare_consumer(dir);
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    assert exit == 0;
+    assert contains(out, "no regressions detected");
+}
+
+// The reason a missing compile.csv skips only the per-module comparison instead
+// of returning: a run whose compile bench aborted before writing its CSV must
+// still have its whole-build wall time judged. A per-module cold start
+// swallowing a real budget breach is the SFN-421 failure with an extra step.
+test "perf-history: a budget breach files even when the compile bench wrote no CSV" ![io] {
+    let dir = "build/perf-history-compare-test/budget-no-compile";
+    fs.createDirectory(dir, true);
+    fs.writeFile(dir + "/build.csv", "run_sha,run_date,build_wall_s,budget_s\n"
+        + "cur,2026-07-12,301,300\n");
+    let exit = _run_compare_budget(dir, "300");
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    assert exit == 0;
+    assert contains(out, "1 regression line(s) written");
+    let rows = fs.readFile(dir + "/out.tsv");
+    assert contains(rows, "budget\t<whole-build>\tbuild_wall_s\t301.0\t300.0");
+}
+
+// The property the reporting path depends on: three comparisons over three
+// series land in one TSV, each under its own kind, and none stands in for
+// another. `perf-history.yml` counts findings as distinct (kind, name) pairs
+// off exactly this output.
+test "perf-history: three comparison kinds coexist without masking one another" ![io] {
+    let dir = "build/perf-history-compare-test/all-kinds";
+    fs.createDirectory(dir, true);
+    fs.writeFile(dir + "/compile.csv", _header() + _prior_rows("0.8.0")
+        + "cur,2026-07-12,foo,1.5,10000,500,OK,0.8.0\n"
+        + "cur,2026-07-12,bar,1.0,10000,500,OK,0.8.0\n");
+    fs.writeFile(dir + "/build.csv", "run_sha,run_date,build_wall_s,budget_s\n"
+        + "cur,2026-07-12,301,300\n");
+    // `modules_staged` is held flat so the consumer series contributes exactly
+    // one row and the total is unambiguous.
+    fs.writeFile(dir + "/consumer.csv", _consumer_header()
+        + _consumer_prior_rows(8)
+        + "cur,2026-08-12,hello,48.70,1.76,386848,35,34,68,68,0,ok,0.9.5,Linux x86_64\n");
+    let exit = _run_compare_budget(dir, "300");
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    assert exit == 0;
+    assert contains(out, "3 regression line(s) written");
+    let rows = fs.readFile(dir + "/out.tsv");
+    assert contains(rows, "rolling-median\tfoo\ttime_s");
+    assert contains(rows, "budget\t<whole-build>\tbuild_wall_s");
+    assert contains(rows, "consumer-median\tconsumer/hello\tctors");
 }
 
 fn _run_append_consumer(dir: string, raw: string) -> int ![io] {
