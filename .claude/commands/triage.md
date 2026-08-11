@@ -1,253 +1,196 @@
 # Triage the Issue Queue
 
-Audit the **Linear** Sailfin (`SFN`) queue for hygiene **in both directions**:
-promote already-groomed issues that nobody moved to `Ready`, and demote
-incomplete `Ready` issues. Shape new intake (external-contributor GitHub issues
-that mirrored into Linear `Triage`). Surface stale, blocked, and orphaned work.
+Work the **`Triage` lane** on the Sailfin (`SFN`) team: decide what each captured
+item actually is, kill what shouldn't exist, and groom the survivors to the
+`/pickup` bar. Nothing else. This command does not audit `Ready`, does not sweep
+`In Progress`, and does not coordinate picks.
 
-> **Linear is the planning source of truth.** All state changes are
-> `mcp__Linear__save_issue` status/priority/estimate/label/relation writes.
-> There is no GitHub board or fallback labels to keep in sync. External GitHub
-> issues arrive in Linear `Triage` via the integration; that is the only GitHub
-> surface this command reads. See `docs/conventions/linear-workflow.md`.
+> **Linear is the planning source of truth.** Every state change is a
+> `mcp__Linear__save_issue` write on a native field. See
+> `docs/conventions/linear-workflow.md` for the lane model and
+> `docs/conventions/linear-templates.md` for the issue body template.
 
 ## Target: $ARGUMENTS
 
-Optional filter — pass a label (e.g. `type:perf`) or a status to triage a
-subset, or leave empty to triage the whole open queue.
+| Argument | Mode |
+|---|---|
+| *(empty)* | **Pass 1 — CLASSIFY.** Read the whole `Triage` lane, propose a disposition for each item, report, stop. |
+| `groom` | **Pass 2 — GROOM.** Groom the next batch (default 5) of items you approved for `Ready`. |
+| `groom <n>` | Pass 2 with an explicit batch size. |
+| `SFN-123 SFN-456 …` | Pass 2 on exactly these issues, regardless of batch order. |
 
-## Relationship to `/sweep`
+Pass 1 is **read-only**. It never writes. The two passes are separate so the
+keep/kill calls land in front of a human before grooming effort is spent, and so
+17 items don't degrade into one context-starved run.
 
-`/triage` is the **periodic, whole-queue hygiene auditor**. `/sweep` is the
-**event-driven, post-merge coordinator** (concurrency budget, collision
-analysis, next picks). They share one mechanic — **clearing a blocker whose
-blocking issue closed** (both use the hard-vs-prose rule below). Keep that logic
-in sync between the two files.
+## Relationship to `/groom`
+
+`/groom` decomposes an **epic (a Linear Project)** into new leaves. `/triage`
+Pass 2 brings **one existing issue** up to the `Ready` bar. No overlap. When a
+Triage item turns out to be epic-scale, `/triage` routes it to `/groom` rather
+than grooming it in place.
 
 ---
 
-## Phase 1: GATHER
+## Pass 1 — CLASSIFY
 
-Pull the open SFN queue, grouped by the states this pass acts on:
+### 1.1 Gather
 
 ```
 mcp__Linear__list_issues team="Sailfin" state="Triage" limit=200
-mcp__Linear__list_issues team="Sailfin" state="To triage" limit=200
-mcp__Linear__list_issues team="Sailfin" state="Backlog" limit=200
-mcp__Linear__list_issues team="Sailfin" state="Ready" limit=200
-mcp__Linear__list_issues team="Sailfin" state="Blocked" limit=200
-mcp__Linear__list_issues team="Sailfin" state="In Progress" limit=200
 ```
 
-Apply the optional `$ARGUMENTS` filter. Use `includeRelations=true` on any issue
-whose blocker state you need to resolve.
+Do **not** query `state="Backlog"` — the Linear API matches that filter by state
+*type*, so it returns `Ready` + `Blocked` + `Backlog` together and floods the
+pass with work that isn't yours.
 
----
+Fetch `includeRelations=true` only for items whose blocker state you must resolve.
 
-## The hygiene matcher (shared definition)
+### 1.2 Assign exactly one disposition
 
-Promotion and demotion both depend on whether a body is **complete**. Match
-case-insensitively and accept any listed form (brittle matching is the bug this
-pass exists to fix).
+| Disposition | Means | Pass 2 action |
+|---|---|---|
+| **READY** | A real, session-sized leaf. Body may be thin — Pass 2 fills it. | Groom to the full bar, set native fields, → `Ready`. |
+| **BACKLOG** | Real and understood, but not now: no current project, superseded soon, or deliberately deferred. | Set `type:*`/`area:*` + priority, → `Backlog`. No body work. |
+| **EPIC** | Too big for one session (an `L`, or "parent of many"). | Propose a Linear **Project**; hand to `/groom`. Never groom in place. |
+| **KILL** | Stale, already fixed, duplicate, or not actually a defect. | **Propose only.** Terminal states are a human call — see Constraints. |
+| **MISFILED** | Not leaf work at all — a note, or an epic status thread. | Route to its real home (a Project description, an SFEP). |
+
+**Skip release trackers outright.** An issue titled `Release: vX.Y.Z` carrying
+the `tracking` label is auto-opened by `.github/workflows/release-train.yml` and
+mirrored in from GitHub, which is why it lands in `Triage`. It is owned by
+release automation, enriched by `/release-plan`, and walks itself to `Done` when
+the cut closes its GitHub issue. Never groom, classify, or close one — exclude
+it from the counts and note it in one line under a `Skipped` heading.
+
+**Verify before proposing KILL.** "Already fixed" and "stale" are claims about
+the tree, not about the issue text — check the current source, a test, or the
+git log, and cite what you checked. An unverified KILL is worse than leaving it.
+
+### 1.3 The `Ready` bar (shared definition)
+
+An issue is `Ready` when its body carries all of these. Match
+case-insensitively; accept any listed form.
 
 | Section | Accept any of |
 |---|---|
 | Goal | `## Goal` |
 | Scope | `## Scope` |
-| Scope → In | `In:` · `### In` · `**In:**` · `**In**` (under Scope) |
+| Scope → In | `In:` · `### In` · `**In:**` · `**In**` |
 | Scope → Out | `Out:` · `### Out` · `**Out:**` · `**Out**` |
 | Acceptance | `## Acceptance` with ≥1 `- [ ]` item |
 | Files | `## Files` (e.g. "Files Affected"), not "TBD"/empty |
 | Verification | `## Verification` with a runnable command |
 
-**Estimate** is satisfied by a native Linear estimate (1/2/3) OR a `## Size`
-body section declaring XS/S/M. If the body declares a size but the estimate is
-unset, that is a **backfill** (set it), not a failure.
+Plus native fields: a `type:*` label, a priority, and an estimate of 1/2/3
+(never higher — a 5 is an **EPIC**, not a `Ready` issue).
 
-**Type** is satisfied by a `type:*` label.
+### 1.4 Blockers and preconditions
+
+An item with an unresolved gate is **not** READY, however complete its body:
+
+- **Hard blocker** — a `blockedBy` relation or an `SFN-N` reference. Apply
+  `docs/conventions/blocker-classification.md`. Still open → BACKLOG with the
+  relation set, so Linear derives `Blocked`.
+- **Prose gate** — "once a seed past X is pinned", "after Y lands", "pick during
+  grooming", "one of (a)/(b)". Resolve the reference: satisfied → READY, say so;
+  unsatisfied → BACKLOG, name the gate.
+- **Open design choice** — a genuine fork in the body is a design gate, not a
+  grooming gap. Route to `compiler-architect` or an SFEP; do not pick a side.
+
+### 1.5 Report and stop
+
+```
+Triage Pass 1 — <date>
+
+<N> items in the Triage lane.
+
+READY (<n>) — groom these next
+  SFN-123  <title>
+           <one line: why it's ready-able, proposed type/area/priority/estimate>
+
+BACKLOG (<n>)
+  SFN-456  <title> — <why not now>
+
+EPIC (<n>)
+  SFN-789  <title> — proposed Project: <name>; run /groom
+
+KILL (<n>) — proposed, awaiting your call
+  SFN-321  <title> — <claim> (verified: <what you checked>)
+
+MISFILED (<n>)
+  SFN-456  <title> — belongs in <destination>
+
+Skipped (<n>) — not triage work
+  SFN-722  Release: v0.10.0 — release automation, self-closing
+
+Next: /triage groom   (grooms the first 5 READY items)
+```
+
+Then **stop**. No writes in Pass 1.
 
 ---
 
-## Phase 2: AUDIT
+## Pass 2 — GROOM
 
-Classify every issue into exactly one action bucket.
+For each issue in the batch:
 
-### PROMOTE candidates (the queue-unsticking pass)
-An issue is a **PROMOTE** candidate when ALL hold:
-- It is in `Triage` / `To triage` / `Backlog` (not already `Ready`/started).
-- Its body is **complete** per the matcher.
-- It has **no open blocker** (apply the UNBLOCK hard-vs-prose rule to its
-  blocked-by relations and any `## Blocked by` prose in the body).
-- It has **no unresolved in-body decision or precondition** (guards below).
-
-**Promotion guards — do NOT promote if any apply:**
-- **Open design choice in body:** "pick during grooming", "one of (a)/(b)",
-  "TBD by grooming", a Scope listing mutually-exclusive options → leave in place, flag.
-- **Unmet precondition:** "once a seed past #N is pinned", "after #M lands".
-  Resolve the reference: closed/merged → precondition met (promote, say so);
-  still open → leave and flag.
-- **Deferred-by-design:** "not picked up until …". Verify the gate closed first.
-
-### DEMOTE candidates
-An issue is a **DEMOTE** candidate when it is `Ready` but its body is
-**incomplete** per the matcher, or it lacks a `type:*` label, or it has no
-estimate (neither native estimate nor `## Size`).
-
-### INTAKE candidates (new contributor issues)
-An issue in `Triage` / `To triage` that mirrored in from an external GitHub
-issue (the integration records the GitHub link on it) and has **no** SFN
-classification yet. Shape it: set `type:*`/`area:*` labels from the report,
-apply an estimate + priority if scopeable, associate it to the right Project,
-then route it — `Ready` if it's already a complete, session-sized leaf;
-`Backlog` if scoped but not ready; leave in `Triage` with a flag if it needs
-grooming; `Duplicate`/`Canceled` (with a comment) for non-actionable intake.
-
-### State buckets
-- **UNBLOCK** — `Blocked` and every hard blocker (relation or `#N`/`SFN-N` ref) is closed.
-- **RELEASE** — `In Progress` but no active branch / its PR closed unmerged → back to `Ready`.
-- **STALE** — `Ready` with no update in 30+ days (flag only).
-- **OVERSIZED** — an L-scale issue (estimate > 3 or body `## Size: L`) → back to
-  `Triage`/`Backlog` for `/groom` to decompose into a Project's leaves.
-- **STALE-GROOM** — `Backlog`/`Triage` 14+ days that is NOT a promote candidate
-  (still incomplete) → flag for `/groom` or closure review.
-- **MAP-REFRESH** — `Ready` (or just-promoted) issue whose Goal + semantic
-  `In:`/`Out:` scope are intact but whose `## Files Affected` advisory map has
-  missing/renamed paths → re-derive and rewrite the advisory map (still
-  non-binding; no line numbers/counts). A stale map is expected entropy — never
-  a DEMOTE trigger.
-
----
-
-## Phase 3: APPLY ACTIONS
-
-Every action is a native Linear write. Leave a comment
-(`mcp__Linear__save_comment`) whenever you change status so the thread has an
-audit trail. **Never write a terminal status** (`Done`) on open work.
-
-### PROMOTE — move a groomed issue to Ready
+1. **Re-read it.** Pass 1 may be hours or days old and the tree has moved.
+2. **Derive the real surface.** Delegate to `compiler-explorer` for the file map
+   rather than grepping the tree yourself. The `## Files Affected` map is
+   **advisory** — no line numbers, no counts; `/pickup` reconciles drift.
+3. **Write the body** to the `Ready` bar (§1.3), using the
+   `docs/conventions/linear-templates.md` skeleton. Preserve the reporter's
+   original observation — you are adding structure around it, not replacing it.
+4. **Set native fields and route:**
 
 ```
-mcp__Linear__save_issue id="SFN-<N>" state="Ready" estimate=<1|2|3 if backfilled> priority=<1..4 if unset>
-mcp__Linear__save_comment issueId="SFN-<N>" body="Auto-triage promotion: body passes the full hygiene bar (Goal/Scope-In-Out/Acceptance/Files/Verification), no open blocker or unresolved decision. <If backfilled: 'Size <X> in body → estimate <n>; default priority <p>.'> Moving to Ready."
+mcp__Linear__save_issue id="SFN-<N>" state="Ready" priority=<1..4> estimate=<1|2|3> \
+  labels=["type:<t>","area:<a>"] project="<Project>" description="<groomed body>"
+mcp__Linear__save_comment issueId="SFN-<N>" body="Triage: groomed to the Ready bar (Goal/Scope/Acceptance/Files/Verification). Type <t>, estimate <n>, priority <p><, project X>. Files map is advisory."
 ```
 
-Backfill the estimate from the body `## Size` (XS/S/M → 1/2/3) and default the
-priority to the issue's Project priority if unset.
-
-### DEMOTE — strip Ready from an incomplete issue
+For **BACKLOG** items, set labels + priority and move on — no body work:
 
 ```
-mcp__Linear__save_issue id="SFN-<N>" state="Triage"
-mcp__Linear__save_comment issueId="SFN-<N>" body="Auto-triage: missing sections required for /pickup eligibility: <list>. Run /groom to flesh out, or cancel if no longer relevant."
+mcp__Linear__save_issue id="SFN-<N>" state="Backlog" priority=<1..4> labels=["type:<t>","area:<a>"]
+mcp__Linear__save_comment issueId="SFN-<N>" body="Triage: real but not now — <reason>. Classified <type>/<area>; left unstructured until it's picked up for grooming."
 ```
 
-### INTAKE — shape a new contributor issue
+**Stop and report** if grooming an issue reveals it is actually an EPIC, needs a
+design decision, or contradicts what Pass 1 assumed. Do not silently expand the
+batch's scope.
+
+### Pass 2 report
 
 ```
-mcp__Linear__save_issue id="SFN-<N>" labels=["type:<t>","area:<a>"] priority=<1..4> estimate=<1|2|3> project="<Project>" state="<Ready|Backlog>"
-mcp__Linear__save_comment issueId="SFN-<N>" body="Auto-triage intake: classified as <type>/<area>, associated to <Project>. <Routed to Ready | Needs grooming — /groom | Marked duplicate of SFN-M>."
-```
+Triage Pass 2 — groomed <n> of <N> approved
 
-### UNBLOCK — clear a resolved blocker (hard-vs-prose rule, shared with `/sweep`)
+Ready now:
+  SFN-123  <title>  (type, estimate, priority)
 
-Apply the hard-vs-prose rule in `docs/conventions/blocker-classification.md`
-(shared with `/sweep` Phase 2). Flip to `Ready` only when it clears the bar,
-removing the resolved relations in the same call:
+Reclassified mid-groom:
+  SFN-456  → EPIC — <why>
 
-```
-mcp__Linear__save_issue id="SFN-<N>" state="Ready" removeBlockedBy=["SFN-<resolved>"]
-mcp__Linear__save_comment issueId="SFN-<N>" body="Auto-triage: all hard blockers closed (<list>) and no prose gate present. Marking Ready."
-```
-
-If a just-unblocked issue is still `needs-grooming`-incomplete, fold it through
-the PROMOTE guard rather than landing it in `Ready` half-baked.
-
-### RELEASE — orphaned In Progress back to the queue
-
-```
-mcp__Linear__save_issue id="SFN-<N>" state="Ready"
-mcp__Linear__save_comment issueId="SFN-<N>" body="Auto-triage: In Progress but no active branch/PR found. Releasing back to Ready."
-```
-
-### STALE / STALE-GROOM / OVERSIZED — flag (and for OVERSIZED, re-route)
-
-STALE and STALE-GROOM are flag-only (comment, no status change). OVERSIZED moves
-back to `Triage`/`Backlog` with a comment pointing at `/groom` to decompose it
-into a Project's leaves (an L-scale issue is epic-scale — it becomes a Project,
-not a single issue).
-
-### MAP-REFRESH — rewrite a stale advisory map (the one allowed body edit)
-
-When Goal + semantic `In:`/`Out:` scope are intact but `## Files Affected` lists
-missing/renamed paths, re-derive the current surface for each `In:` unit and
-**rewrite only that block** (non-binding, no line numbers/counts). Do not touch
-Goal, Scope, Acceptance, or Verification. Record it:
-
-```
-mcp__Linear__save_issue id="SFN-<N>" description="<body with only the ## Files Affected map refreshed>"
-mcp__Linear__save_comment issueId="SFN-<N>" body="Auto-triage map refresh: re-derived ## Files Affected from the current tree. Map only — Goal and semantic In/Out unchanged. /pickup reconciles any remaining drift."
-```
-
-This is the **sole** exception to "don't modify issue bodies."
-
----
-
-## Phase 4: REPORT
-
-```
-Triage Report (<date>)
-
-Audited: <total> open SFN issues
-
-Status breakdown:
-  Ready (pickable):    <N>
-  Ready (stale):       <N>
-  In Progress (active):   <N>
-  In Progress (orphaned): <N>
-  Backlog/Triage:      <N>
-  Blocked (real):      <N>
-  Blocked (cleared):   <N>
-  New intake shaped:   <N>
-
-Actions taken:
-  - Promoted <N> groomed issues to Ready (backfilled <N> estimates)
-  - Demoted <N> incomplete Ready issues to Triage
-  - Shaped <N> new contributor issues (type/area/priority/project)
-  - Released <N> orphaned In Progress back to Ready
-  - Unblocked <N> issues whose blockers closed
-  - Refreshed <N> stale advisory maps
-  - Flagged <N> stale / oversized issues
-
-Top picks for /pickup right now:
-  1. SFN-<N> — <title> (type, estimate)
-  2. ...
-
-Held back (complete body, not pickable):
-  ? SFN-<N> — open design choice ((a) vs (b))
-  ? SFN-<N> — precondition <M> still open
-  ? SFN-<N> — blocked on <prose>, no tracking issue
-
-Concerns:
-  - <anything needing human attention>
+Remaining approved: <n>   → /triage groom
 ```
 
 ---
 
 ## Constraints
 
-- **Don't cancel/close issues automatically.** Terminal states
-  (`Done`/`Canceled`/`Duplicate`) are human decisions — except an obvious
-  duplicate/spam intake, which you may mark `Duplicate`/`Canceled` **with a
-  comment** during INTAKE.
-- **Don't modify issue bodies, except the advisory map** (MAP-REFRESH).
-- **Promote conservatively.** A complete body is necessary but not sufficient —
-  the guards (open decision / unmet precondition / deferred-by-design) exist
-  because they bit us before. When a guard fires, leave it and report under
-  "Held back."
-- **Be conservative on staleness.** 30 days is the floor for `Ready`.
-- **Match tolerantly.** Use the matcher's accepted forms; a body-only `## Size`
-  or `### In` must pass.
-- **Always comment when you change status.** Audit trail.
-- **Native fields only** — status/priority/estimate/blockers are Linear-native,
-  not labels. Labels are `type:*`/`area:*` (+ `seed-blocker`/`release:*` for the
-  seed/release axes).
+- **Never write a terminal status.** `Done`/`Canceled`/`Duplicate` are human
+  decisions. Pass 1 *proposes* KILL; a human confirms. The sole exception is
+  obvious spam or an exact duplicate of a still-open issue, which you may mark
+  `Duplicate` **with a comment naming the original**.
+- **Pass 1 writes nothing.** Not a label, not a priority. Its output is a report.
+- **Only the Triage lane.** Do not touch `Ready`, `In Progress`, `In Review`, or
+  `Blocked` issues. Hygiene elsewhere in the queue is not this command's job.
+- **Native fields only.** Status, priority, estimate, project, and blockers are
+  Linear-native. Labels are `type:*`/`area:*` (plus `seed-blocker`/`release:*`).
+  Never a `size:*`/`priority:*`/`blocked` label — see
+  `docs/conventions/linear-workflow.md` § Linear labels.
+- **Always comment when you change status.** The thread is the audit trail.
+- **Don't rewrite an issue's substance.** Pass 2 adds structure around the
+  reporter's observation. If you believe the observation is wrong, that is a
+  KILL proposal, not a body edit.

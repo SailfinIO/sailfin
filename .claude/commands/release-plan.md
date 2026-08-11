@@ -246,8 +246,7 @@ body summary from native state:
      re-rendered summary reflect the closed state on their own.
    - **A sub-issue that no longer carries any gating/seed label, still
      open** → flag as drift in the report; **do not detach** (removing a
-     sub-issue is a human decision, same as `/sweep`/`/triage` never
-     auto-close).
+     sub-issue is a human decision, same as `/triage` never auto-closes).
 
 4. **Re-render the body summary** from the reconciled native state: rebuild
    the `## Must close before cut`, `## Seed blockers`, `## Seed bump (this
@@ -504,9 +503,9 @@ Dry run: changes <previewed | applied>
   subset the user explicitly approves** in Phase 4.2, and never applies
   `release-critical-seed` (that stays a `/triage` decision). No `release:*`
   label is ever applied without a human go-ahead in the same run.
-- **Never closes or detaches.** Same convention as `/triage` and `/sweep`:
-  closing an issue and removing a sub-issue are human decisions. Surface
-  drift; don't act on it.
+- **Never closes or detaches.** Same convention as `/triage`: closing an
+  issue and removing a sub-issue are human decisions. Surface drift; don't
+  act on it.
 - **Promotion stays human-gated.** Phase 3c only *surfaces* "stable
   promotion eligible" — it never dispatches `release.yml channel=stable`.
 - **Seeds batch onto the cadence.** `needs-seed-cut` items queue for the
@@ -533,11 +532,12 @@ flows. The commands bookend the curated-release flow:
 cadence train opens tracker
   ──▶ /release-plan --candidates : propose scope ──▶ YOU approve
         ──▶ apply release:<gate> ──▶ render tracker (sub-issues + summary)
-          ──▶ /sweep keeps the rollup synced ──▶ /release cuts
+          ──▶ re-run /release-plan to re-sync the rollup ──▶ /release cuts
 ```
 
 Without the curation loop, `release:*` labeling is a manual step everyone
 forgets — so trackers open empty and unplanned merged work ships
-unrecorded. With it, scope is one approval-gated command per cycle plus
-passive `/sweep` maintenance, and the native "Sub-issues" panel gives a
-real "what's left before X" view instead of string-matched checkboxes.
+unrecorded. With it, scope is one approval-gated command per cycle, the
+rollup re-syncs on each `/release-plan` re-run (Phase 3b), and the native
+"Sub-issues" panel gives a real "what's left before X" view instead of
+string-matched checkboxes.

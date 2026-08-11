@@ -152,7 +152,7 @@ Windows `run_capture` issue") and link by URL instead.
 
 **Anti-patterns:** picking up an ungroomed issue; expanding scope mid-session
 (comment and pause instead); bundling issues into one PR; picking up from the
-roadmap (it isn't pickable — Linear `Ready` is).
+roadmap (it isn't pickable — Linear `Todo`, then `Ready`, is).
 
 ## Approval gates
 

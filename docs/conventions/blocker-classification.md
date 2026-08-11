@@ -1,8 +1,8 @@
 # Blocker classification: hard vs prose
 
-The rule `/sweep` (Phase 2) and `/triage` (Phase 3 → UNBLOCK) share for deciding
-whether a `Blocked` Linear issue may be flipped to `Ready`. It lives here so the
-two commands cite one definition instead of mirroring edits between them.
+The rule `/triage` (Phase 3 → UNBLOCK) uses for deciding whether a `Blocked`
+Linear issue may be flipped to `Ready`. It lives here so the definition has one
+home instead of being inlined in the command.
 
 Read the issue's blocked-by relations (`get_issue includeRelations=true`) and any
 `## Blocked by` prose in the body, then classify each blocker:
