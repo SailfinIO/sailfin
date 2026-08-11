@@ -10,30 +10,35 @@
 #
 #   compare  Compute the rolling median of the last N prior runs per module
 #            and emit a TSV of regressions (>THRESHOLD% wall-time or peak-RSS
-#            vs that median, plus a whole-build wall-time budget breach). Cold
-#            start (fewer than N prior runs, or a module lacking N baseline
-#            samples) no-ops cleanly rather than alerting on thin history.
-#            Rows are kind,module,metric,current,comparison,pct; kind is
-#            "rolling-median" or "budget" so reporting preserves which
-#            comparison produced the regression.
+#            vs that median, plus a whole-build wall-time budget breach and a
+#            per-fixture consumer-build comparison). Cold start (fewer than N
+#            prior runs, or a module/fixture lacking N baseline samples) no-ops
+#            cleanly rather than alerting on thin history.
+#            Rows are kind,name,metric,current,comparison,pct; kind is
+#            "rolling-median", "budget", or "consumer-median" so reporting
+#            preserves which comparison produced the regression (SFN-567: a
+#            kind that blends comparisons hides the stricter one).
 #
 # The accumulating files on the bench-data orphan branch:
 #   compile.csv  run_sha,run_date,module,time_s,peak_kb,ir_lines,status,seed_version
 #   runtime.csv  run_sha,run_date,workload,inner_ms_min,inner_ms_median,peak_kb,ops,ops_per_ms,status,seed_version,platform
 #   build.csv    run_sha,run_date,build_wall_s,budget_s
+#   consumer.csv run_sha,run_date,fixture,cold_s,warm_s,binary_bytes,ctors,modules_staged,cold_cache_misses,cache_hits,cache_misses,status,seed_version,platform
 #
-# The raw per-run CSVs come straight from `sfn bench --compiler --csv` and
-# `sfn bench benchmarks/runtime --csv`; this script only prepends the two run
-# columns. The whole-build budget row is separate because the compile bench
-# sums *isolated* per-module emit times (serial), which is not the parallel
-# clean-build wall-time the SFEP-0006 <5 min target measures — the workflow
-# times a real build and records it in build.csv (see docs/perf/bench-history.md).
+# The raw per-run CSVs come straight from `sfn bench --compiler --csv`,
+# `sfn bench benchmarks/runtime --csv`, and `sfn bench --consumer --csv`; this
+# script only prepends the two run columns. The whole-build budget row is
+# separate because the compile bench sums *isolated* per-module emit times
+# (serial), which is not the parallel clean-build wall-time the SFEP-0006 <5 min
+# target measures — the workflow times a real build and records it in build.csv
+# (see docs/perf/bench-history.md).
 
 set -euo pipefail
 
 COMPILE_HEADER="run_sha,run_date,module,time_s,peak_kb,ir_lines,status,seed_version"
 RUNTIME_HEADER="run_sha,run_date,workload,inner_ms_min,inner_ms_median,peak_kb,ops,ops_per_ms,status,seed_version,platform"
 BUILD_HEADER="run_sha,run_date,build_wall_s,budget_s"
+CONSUMER_HEADER="run_sha,run_date,fixture,cold_s,warm_s,binary_bytes,ctors,modules_staged,cold_cache_misses,cache_hits,cache_misses,status,seed_version,platform"
 
 die() {
     echo "perf_history: $*" >&2
@@ -60,7 +65,7 @@ _append_tagged() {
 }
 
 cmd_append() {
-    local data_dir="" sha="" date="" compile="" runtime="" build_wall="" budget=""
+    local data_dir="" sha="" date="" compile="" runtime="" consumer="" build_wall="" budget=""
     while [ $# -gt 0 ]; do
         case "$1" in
             --data-dir) data_dir="$2"; shift 2 ;;
@@ -68,6 +73,7 @@ cmd_append() {
             --date) date="$2"; shift 2 ;;
             --compile) compile="$2"; shift 2 ;;
             --runtime) runtime="$2"; shift 2 ;;
+            --consumer) consumer="$2"; shift 2 ;;
             --build-wall) build_wall="$2"; shift 2 ;;
             --budget) budget="$2"; shift 2 ;;
             *) die "append: unknown flag '$1'" ;;
@@ -99,6 +105,14 @@ cmd_append() {
             echo "perf_history: appended runtime rows for $sha"
         fi
     fi
+    if [ -n "$consumer" ] && [ -s "$consumer" ]; then
+        if _sha_present "$data_dir/consumer.csv" "$sha"; then
+            echo "perf_history: consumer rows for $sha already present — skipping"
+        else
+            _append_tagged "$consumer" "$data_dir/consumer.csv" "$CONSUMER_HEADER" "$sha" "$date"
+            echo "perf_history: appended consumer rows for $sha"
+        fi
+    fi
     if [ -n "$build_wall" ]; then
         [ -n "$budget" ] || die "append: --budget required when --build-wall is set"
         if _sha_present "$data_dir/build.csv" "$sha"; then
@@ -114,13 +128,14 @@ cmd_append() {
 # --- compare ----------------------------------------------------------------
 
 cmd_compare() {
-    local data_dir="" sha="" min_runs="7" threshold="10" budget="300" out=""
+    local data_dir="" sha="" min_runs="7" threshold="10" count_threshold="0" budget="300" out=""
     while [ $# -gt 0 ]; do
         case "$1" in
             --data-dir) data_dir="$2"; shift 2 ;;
             --sha) sha="$2"; shift 2 ;;
             --min-runs) min_runs="$2"; shift 2 ;;
             --threshold-pct) threshold="$2"; shift 2 ;;
+            --count-threshold-pct) count_threshold="$2"; shift 2 ;;
             --budget) budget="$2"; shift 2 ;;
             --out) out="$2"; shift 2 ;;
             *) die "compare: unknown flag '$1'" ;;
@@ -136,10 +151,16 @@ cmd_compare() {
     # offending module"). runtime.csv is recorded on the branch for the future
     # dashboard but is NOT compared here yet — per-workload runtime alerting is
     # deferred (SFEP-0037 §3.3 follow-up), not part of this slice.
+    #
+    # A missing compile.csv skips the per-module comparison only — it must not
+    # return, or a run whose compile bench aborted before writing its CSV would
+    # silently skip the whole-build budget check and the consumer comparison
+    # too. Reading /dev/null lands in the awk program's own cold-start path
+    # (zero prior runs) and writes nothing.
     local compile_csv="$data_dir/compile.csv"
     if [ ! -f "$compile_csv" ]; then
-        echo "perf_history: no compile.csv yet — cold start, no comparison"
-        return 0
+        echo "perf_history: no compile.csv yet — cold start, no per-module comparison"
+        compile_csv="/dev/null"
     fi
 
     # Per-module rolling-median compare. The awk program builds the distinct
@@ -237,6 +258,117 @@ cmd_compare() {
         ' "$build_csv" >> "$out"
     fi
 
+    # Per-fixture consumer-build compare (SFEP-0070). Same rolling-median shape
+    # and same seed scoping as the per-module block above, over a different
+    # series: `sfn bench --consumer` measures whole `sfn build` runs of fixed
+    # fixtures, so what it catches is the capsule source closure re-inflating —
+    # a cost every consumer of the language pays, which the per-module compile
+    # bench cannot see because it never resolves a dependency closure.
+    #
+    # Two thresholds, because the series mixes two kinds of number. `cold_s` is
+    # a wall time on a shared runner and gets the same noise band as the compile
+    # bench (TH). `ctors` and `modules_staged` are derived counts that are
+    # deterministic for a given tree and seed, so they get CTH — 0 by default,
+    # i.e. any sustained rise above the median. A 10% band would silently absorb
+    # a 32 -> 35 constructor rise, which is precisely the regression this series
+    # exists to catch.
+    #
+    # NOT compared, deliberately: `binary_bytes` (dead-stripping already keeps
+    # it flat, so it is recorded as evidence, not as a signal —
+    # docs/perf/consumer-baseline.md) and `warm_s` (a ~1.8s control measurement
+    # whose relative jitter on a shared runner is far wider than any drift worth
+    # reporting). Both accumulate on the branch for the dashboard, matching how
+    # runtime.csv is recorded but not alerted on.
+    local consumer_csv="$data_dir/consumer.csv"
+    if [ -f "$consumer_csv" ]; then
+        awk -F, \
+            -v CUR="$sha" -v N="$min_runs" -v TH="$threshold" -v CTH="$count_threshold" \
+            '
+            function median(a, len,   i, j, tmp, b, m) {
+                for (i = 1; i <= len; i++) b[i] = a[i]
+                for (i = 2; i <= len; i++) {
+                    tmp = b[i]; j = i - 1
+                    while (j >= 1 && b[j] > tmp) { b[j + 1] = b[j]; j-- }
+                    b[j + 1] = tmp
+                }
+                if (len % 2 == 1) return b[int(len / 2) + 1]
+                m = len / 2
+                return (b[m] + b[m + 1]) / 2
+            }
+            NR == 1 { next }
+            NF == 0 { next }
+            {
+                sha = $1; fixture = $3; st = $12; sv = $13
+                if (!(sha in seen)) { seen[sha] = 1; order[++n] = sha }
+                runseed[sha] = sv
+                k = sha SUBSEP fixture
+                have[k] = 1; sval[k] = st; svval[k] = sv
+                val[k, "cold_s"] = $4 + 0
+                val[k, "ctors"] = $7 + 0
+                val[k, "modules_staged"] = $8 + 0
+                if (sha == CUR) { curfix[fixture] = 1; cur_seed = sv }
+            }
+            END {
+                pc = 0
+                for (i = 1; i <= n; i++) if (order[i] != CUR) prior[++pc] = order[i]
+                if (pc < N) {
+                    printf("perf_history: consumer cold start — %d prior run(s) < %d required; no comparison\n", pc, N) > "/dev/stderr"
+                    exit 0
+                }
+                if (cur_seed != "" && runseed[prior[pc]] != "" && runseed[prior[pc]] != cur_seed) {
+                    printf("perf_history: seed changed %s -> %s; per-fixture consumer baselines reset (need %d same-seed runs before comparison resumes)\n", runseed[prior[pc]], cur_seed, N) > "/dev/stderr"
+                }
+                nm = split("cold_s ctors modules_staged", metrics, " ")
+                for (fixture in curfix) {
+                    ck = CUR SUBSEP fixture
+                    if (!(ck in have) || sval[ck] ~ /FAIL/) continue
+                    for (mi = 1; mi <= nm; mi++) {
+                        metric = metrics[mi]
+                        cv = val[ck, metric]
+                        # The harness writes -1 for a metric it could not
+                        # derive. Only `ctors` also carries a status token
+                        # (`noctor`); `modules_staged` is a missing JSON key and
+                        # reports -1 with the status still `ok`, so the negative
+                        # value — not the status column — is the reliable test.
+                        # Unavailable is not a measurement: it neither alerts nor
+                        # sits in a window as a value orders of magnitude below
+                        # the rest.
+                        if (cv < 0) continue
+                        sc = 0
+                        for (i = 1; i <= pc; i++) {
+                            bk = prior[i] SUBSEP fixture
+                            if ((bk in have) && sval[bk] !~ /FAIL/ && svval[bk] == cur_seed && val[bk, metric] >= 0)
+                                samp[++sc] = val[bk, metric]
+                        }
+                        if (sc < N) { delete samp; continue }
+                        w = 0
+                        for (i = sc - N + 1; i <= sc; i++) wt[++w] = samp[i]
+                        md = median(wt, N)
+                        th = (metric == "cold_s") ? TH : CTH
+                        fires = 0
+                        if (md > 0) fires = (cv > md * (1 + th / 100))
+                        else if (metric != "cold_s" && cv > 0) fires = 1
+                        # A zero median with a non-zero current is an unbounded
+                        # rise, not an absent comparison. The `md > 0` guard
+                        # exists to protect the division; letting it also decide
+                        # whether to report would drop the strictest form of the
+                        # regression the counts watch for. A wall time is
+                        # excluded because a 0.0s prior median means the harness
+                        # did not run, not that the build was free.
+                        if (fires) {
+                            pctstr = (md > 0) ? sprintf("%.1f", (cv / md - 1) * 100) : "inf"
+                            if (metric == "cold_s")
+                                printf("consumer-median\tconsumer/%s\t%s\t%.4f\t%.4f\t%s\n", fixture, metric, cv, md, pctstr)
+                            else
+                                printf("consumer-median\tconsumer/%s\t%s\t%.0f\t%.0f\t%s\n", fixture, metric, cv, md, pctstr)
+                        }
+                        delete samp; delete wt
+                    }
+                }
+            }
+            ' "$consumer_csv" >> "$out"
+    fi
+
     if [ -s "$out" ]; then
         echo "perf_history: $(wc -l < "$out") regression line(s) written to $out"
     else
@@ -250,10 +382,11 @@ usage() {
     cat >&2 <<'EOF'
 usage:
   perf_history.sh append  --data-dir DIR --sha SHA --date DATE
-                          [--compile CSV] [--runtime CSV]
+                          [--compile CSV] [--runtime CSV] [--consumer CSV]
                           [--build-wall SECONDS --budget SECONDS]
   perf_history.sh compare --data-dir DIR --sha SHA --out FILE
-                          [--min-runs N] [--threshold-pct PCT] [--budget SECONDS]
+                          [--min-runs N] [--threshold-pct PCT]
+                          [--count-threshold-pct PCT] [--budget SECONDS]
 EOF
     exit 2
 }
