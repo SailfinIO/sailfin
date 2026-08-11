@@ -3,6 +3,7 @@
 // Pure-Sailfin RFC 8032 Ed25519 signing from a 32-byte seed, plus strict
 // RFC 8410 PKCS#8 DER/PEM seed decoding. Secret scalar multiplication uses a
 // fixed operation schedule and branch-free coordinate selection.
+import { strict_base64_bytes, string_to_bytes } from "./bits";
 import {
     _ed_base_point,
     _ed_mod_l,
@@ -219,54 +220,6 @@ fn ed25519_seed_from_pkcs8_der(der: int[]) -> int[] {
     return _eds_slice(der, seed[0], 32);
 }
 
-fn _eds_base64_sextet(c: string) -> int {
-    let code: int = char_code(c) & 255;
-    if code >= 65 && code <= 90 { return code - 65; }
-    if code >= 97 && code <= 122 { return code - 97 + 26; }
-    if code >= 48 && code <= 57 { return code - 48 + 52; }
-    if code == 43 { return 62; }
-    if code == 47 { return 63; }
-    return -1;
-}
-
-// Decode strict RFC 4648 base64 into bytes, including embedded zero bytes.
-fn _eds_base64_bytes(encoded: string) -> int[] {
-    if encoded.length == 0 || (encoded.length & 3) != 0 { return []; }
-    let mut out: int[] = [];
-    let mut i: int = 0;
-    loop {
-        if i >= encoded.length { break; }
-        let d0: int = _eds_base64_sextet(encoded[i]);
-        let d1: int = _eds_base64_sextet(encoded[i + 1]);
-        if d0 < 0 || d1 < 0 { return []; }
-
-        let c2: string = encoded[i + 2];
-        let c3: string = encoded[i + 3];
-        let pad2: bool = c2 == "=";
-        let pad3: bool = c3 == "=";
-        if (pad2 || pad3) && i + 4 != encoded.length { return []; }
-        if pad2 && !pad3 { return []; }
-        out.push(((d0 << 2) | (d1 >> 4)) & 255);
-
-        if pad2 {
-            if (d1 & 15) != 0 { return []; }
-        } else {
-            let d2: int = _eds_base64_sextet(c2);
-            if d2 < 0 { return []; }
-            out.push(((d1 << 4) | (d2 >> 2)) & 255);
-            if pad3 {
-                if (d2 & 3) != 0 { return []; }
-            } else {
-                let d3: int = _eds_base64_sextet(c3);
-                if d3 < 0 { return []; }
-                out.push(((d2 << 6) | d3) & 255);
-            }
-        }
-        i += 4;
-    }
-    return out;
-}
-
 fn _eds_is_ascii_space(c: string) -> bool {
     let code: int = char_code(c) & 255;
     return code == 9 || code == 10 || code == 13 || code == 32;
@@ -322,7 +275,7 @@ fn ed25519_seed_from_pkcs8_pem(pem: string) -> int[] {
         cursor += 1;
     }
     if cursor != pem.length { return []; }
-    return ed25519_seed_from_pkcs8_der(_eds_base64_bytes(encoded));
+    return ed25519_seed_from_pkcs8_der(strict_base64_bytes(string_to_bytes(encoded)));
 }
 
 export {

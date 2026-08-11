@@ -10,81 +10,26 @@
 // It exists separately from `mod.sfn`'s
 // `base64_decode` because that one returns a `string` and collapses to the
 // "" sentinel on any decoded 0x00 byte — and DER routinely contains them —
-// so it cannot represent a certificate chain.
+// so it cannot represent a certificate chain. The strict decode itself lives
+// in `bits.sfn::strict_base64_bytes` (SFN-760), shared with
+// `ed25519_sign.sfn`.
 //
 // Operates on `int[]` byte arrays (never `string`) for the decoded output,
 // mirroring `tls13_handshake_codec.sfn`'s wire-codec convention. Every
 // function here fails closed: malformed or truncated input returns `[]`
 // rather than a best-effort partial decode.
-// Map a single standard-alphabet base64 byte to its 6-bit value, or -1 if
-// `code` is not an alphabet character (`=` padding included).
-fn _pem_base64_sextet(code: int) -> int {
-    // Callers pass a single byte value, 0-255: Sailfin string indexing is
-    // byte-oriented, matching `bits.sfn::string_to_bytes`. A multi-byte UTF-8
-    // character therefore arrives one byte at a time, and every continuation
-    // byte is outside the alphabet, so it is rejected.
-    if code >= 65 && code <= 90 { return code - 65; }
-    if code >= 97 && code <= 122 { return code - 97 + 26; }
-    if code >= 48 && code <= 57 { return code - 48 + 52; }
-    if code == 43 { return 62; }
-    if code == 47 { return 63; }
-    return -1;
-}
-
-// Decode strict RFC 4648 base64 into bytes, including embedded 0x00 bytes.
-// The strict padding rules (`=` legal only in the final quad; `X=Y=`
-// rejected; the low bits under padding must be zero) match
-// `_eds_base64_bytes` in `ed25519_sign.sfn`. The contrast is against
-// `mod.sfn::base64_decode`, which returns a `string` and cannot carry DER's
-// 0x00 bytes — this function returns binary-safe `int[]` instead.
 //
-// Takes the body as already-extracted byte values rather than a `string`
-// because building that string was quadratic: `+` on strings allocates and
-// copies the whole accumulated left side per character
-// (`runtime/sfn/string.sfn::sfn_str_concat`) out of an arena nothing rewinds
-// on this path, so a ~2.7 KB base64 body cost ~3.6 MB of copying and the same
-// again in unreclaimed arena. Across a 152-certificate system bundle that was
-// ~190 MB per load, measured — roughly 40 HTTPS handshakes under the 8 GiB
-// self-cap before the process died (SFN-807). An `int[]` push is amortised
-// O(1), so the scan is linear in the block and allocates once per growth.
-fn _pem_base64_bytes(codes: int[]) -> int[] {
-    if codes.length == 0 || (codes.length & 3) != 0 { return []; }
-    let mut out: int[] = [];
-    let mut i: int = 0;
-    loop {
-        if i >= codes.length { break; }
-        let d0: int = _pem_base64_sextet(codes[i]);
-        let d1: int = _pem_base64_sextet(codes[i + 1]);
-        if d0 < 0 || d1 < 0 { return []; }
-
-        // 61 is `=`; the alphabet check above already rejected every other
-        // non-alphabet byte.
-        let c2: int = codes[i + 2];
-        let c3: int = codes[i + 3];
-        let pad2: bool = c2 == 61;
-        let pad3: bool = c3 == 61;
-        if (pad2 || pad3) && i + 4 != codes.length { return []; }
-        if pad2 && !pad3 { return []; }
-        out.push(((d0 << 2) | (d1 >> 4)) & 255);
-
-        if pad2 {
-            if (d1 & 15) != 0 { return []; }
-        } else {
-            let d2: int = _pem_base64_sextet(c2);
-            if d2 < 0 { return []; }
-            out.push(((d1 << 4) | (d2 >> 2)) & 255);
-            if pad3 {
-                if (d2 & 3) != 0 { return []; }
-            } else {
-                let d3: int = _pem_base64_sextet(c3);
-                if d3 < 0 { return []; }
-                out.push(((d2 << 6) | d3) & 255);
-            }
-        }
-        i += 4;
-    }
-    return out;
-}
+// The body is passed to `strict_base64_bytes` as already-extracted byte
+// values rather than a `string` because building that string was quadratic:
+// `+` on strings allocates and copies the whole accumulated left side per
+// character (`runtime/sfn/string.sfn::sfn_str_concat`) out of an arena
+// nothing rewinds on this path, so a ~2.7 KB base64 body cost ~3.6 MB of
+// copying and the same again in unreclaimed arena. Across a 152-certificate
+// system bundle that was ~190 MB per load, measured — roughly 40 HTTPS
+// handshakes under the 8 GiB self-cap before the process died (SFN-807). An
+// `int[]` push is amortised O(1), so the scan is linear in the block and
+// allocates once per growth.
+import { strict_base64_bytes } from "./bits";
 
 fn _pem_is_ascii_space(c: string) -> bool {
     let code: int = char_code(c) & 255;
@@ -183,13 +128,15 @@ fn pem_decode_blocks_with_limits(pem: string, label: string, max_blocks: int) ->
                 if codes.length > (_pem_max_block_bytes() + 2) / 3 * 4 {
                     return none;
                 }
+                // `codes` stays an `int[]`, never a string concat — see the
+                // SFN-807 quadratic-cost rationale in this module's header.
                 codes.push(char_code(pem[cursor]) & 255);
                 cursor += 1;
             }
         }
         if !found_footer { return none; }
 
-        let decoded: int[] = _pem_base64_bytes(codes);
+        let decoded: int[] = strict_base64_bytes(codes);
         if decoded.length < 1 || decoded.length > _pem_max_block_bytes() {
             return none;
         }
