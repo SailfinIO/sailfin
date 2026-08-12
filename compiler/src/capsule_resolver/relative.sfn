@@ -196,7 +196,7 @@ fn _cr_capsule_spec_for_slug(slug: string, members: WorkspaceMember[]) -> string
 // re-reads and re-scans every source in every entry's import closure
 // once PER ENTRY — O(entries × closure) full-source scans through the
 // allocation-heavy `collect_relative_import_specs` state machine
-// (`_cr_byte_at` allocates a fresh 1-char string per byte). All of
+// (its keyword matching allocates a substring per candidate match). All of
 // that garbage lands in the process-global arena BEFORE `check/engine`'s
 // Phase 5a loop mark, so the per-file rewind can never reclaim it:
 // measured ~25MB of dead arena per entry (~4.0GB across the warm

@@ -5,7 +5,7 @@ status: Implemented
 author: "agent:compiler-architect"
 created: 2026-06-26
 updated: 2026-07-24
-tracking: [1704]
+tracking: "#1704 (historical intake)"
 graduates-to: TBD
 ---
 

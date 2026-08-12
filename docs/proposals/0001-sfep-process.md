@@ -4,7 +4,7 @@ title: SFEP Purpose and Process
 status: Accepted
 type: process
 created: 2026-06-26
-updated: 2026-06-26
+updated: 2026-08-12
 author: "agent:Sailbot (drafted); project owner (direction + decisions)"
 tracking:
 supersedes:
@@ -105,7 +105,7 @@ type: language                # see §5
 created: 2026-06-07           # YYYY-MM-DD, first drafted
 updated: 2026-06-26           # YYYY-MM-DD, last substantive change
 author: "agent:compiler-architect; human review"   # see §7
-tracking: "#1180, #1466"      # related issue/epic numbers (optional)
+tracking: SFN-774, SFN-775    # what implements this — see §3.1 (optional)
 supersedes:                   # SFEP-N this replaces (optional)
 superseded-by:                # SFEP-N that replaced this (optional)
 graduates-to: reference/preview/hierarchical-effects.md   # spec/preview home (optional)
@@ -117,6 +117,61 @@ status; new SFEPs must not also carry a free-form `**Status:** … **Date:** …
 header block. Proposals migrated into this system may still contain a legacy prose
 header beneath the front-matter — when one is next edited, trim the redundant
 prose so the front-matter is the single source of truth.
+
+### 3.1 `tracking:` — where the work is
+
+`tracking:` answers exactly one question: *where is the work that implements
+this?* It takes one of two forms, and which is correct depends on how much work
+there is.
+
+- **Bounded SFEP** — a handful of leaves, unlikely to grow: list the Linear issue
+  identifiers. `tracking: SFN-774, SFN-775, SFN-776, SFN-777`.
+- **Epic-scale SFEP whose Project exists to implement it and nothing else** —
+  point at the **Project URL**, and enumerate under `design-gates:` only the
+  design-note issues whose verdicts bind implementation. SFEP-0048 is the worked
+  example.
+
+The dividing line is not a count, it is whether the list can stay true. A
+hand-copied list of identifiers is a mirror of a Linear rollup, and a mirror
+nobody re-syncs on every merge is worse than no list at all: a reader trusts it
+and gets a stale answer. SFEP-0048's list sat at 21 entries while its Project
+held roughly 65. Where the URL form applies, **noticing a list has drifted is the
+signal to convert it rather than restate it** — restating only resets the clock
+on the same failure.
+
+**The URL form requires the Project to be 1:1 with the SFEP, and often it is
+not.** A Project may be a long-running container serving several designs, in
+which case its URL over-claims: it would tell a reader that the whole Project
+implements this one proposal. A survey of six accepted SFEPs (2026-08-12) found
+the split runs both ways — SFEP-0061 and SFEP-0070 each own their Project
+exactly, while SFEP-0069's eleven-issue zeroization arc sits inside a
+sixty-eight-issue Project carrying the entire crypto/TLS build-out, and
+SFEP-0068's four-issue cross-target arc is one thread in a seventeen-issue
+Makefile-retirement Project.
+
+For a **slice** like those, the identifier list is the correct form and is *not*
+drifting — it is scoped to the slice, and the gap between it and the Project
+total is the other designs' work, not omissions. Measure before converting: a
+large gap is evidence of drift only once you have established that the Project
+implements this SFEP and nothing else.
+
+Three rules on the value itself:
+
+- **Identifiers must be identifiable.** `SFN-471` or `#1180`, never a bare number
+  — `[690, 1683]` names nothing a reader can look up.
+- **GitHub `#N` is historical provenance only, and must be labelled as such**:
+  `"#965, #839 (historical intake); SFN-17"`. Issues predating the 2026-07-07
+  Linear migration are legitimately recorded this way. A bare `#N` is a GitHub PR
+  or an external-contributor intake issue, never the thing a reader is waiting on
+  (`.claude/rules/code-style.md`).
+- **Empty is legitimate for a `Draft`** with no filed work. It is not legitimate
+  for an `Accepted` SFEP whose work is underway — that SFEP has a Project, and
+  the URL belongs here. Empty is a statement, not a placeholder to fill with a
+  guess.
+
+`tracking:` is a reader's index, not a gate: nothing parses it, and no CI check
+depends on it. That is precisely why it rots quietly, and why the URL form is
+preferred wherever it applies.
 
 ---
 

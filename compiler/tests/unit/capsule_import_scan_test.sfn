@@ -38,3 +38,31 @@ test "capsule_import_scan: scoped scanner ignores commented imports" {
     assert specs.length == 1;
     assert _eq(specs[0], "scope/real");
 }
+
+test "capsule_import_scan: keyword match rejects a leading identifier boundary" {
+    let src = "let reimport = 1;\nimport { a } from \"./ok\";\n";
+    let specs = collect_relative_import_specs(src);
+    assert specs.length == 1;
+    assert _eq(specs[0], "./ok");
+}
+
+test "capsule_import_scan: keyword match rejects a trailing identifier boundary" {
+    let src = "imports { a } from \"./no\";\nimport { b } from \"./yes\";\n";
+    let specs = collect_relative_import_specs(src);
+    assert specs.length == 1;
+    assert _eq(specs[0], "./yes");
+}
+
+test "capsule_import_scan: from keyword match rejects inside a longer identifier" {
+    let src = "import { a } fromage \"./no\";\nimport { b } from \"./yes\";\n";
+    let specs = collect_relative_import_specs(src);
+    assert specs.length == 1;
+    assert _eq(specs[0], "./yes");
+}
+
+test "capsule_import_scan: non-ASCII bytes in a comment do not confuse the scanner" {
+    let src = "// note — café\nimport { a } from \"./ok\";\n";
+    let specs = collect_relative_import_specs(src);
+    assert specs.length == 1;
+    assert _eq(specs[0], "./ok");
+}

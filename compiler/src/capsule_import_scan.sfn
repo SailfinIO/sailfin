@@ -10,30 +10,62 @@
 // the public entry points so its consumers are unchanged.
 import { strings_equal, substring } from "./string_utils";
 
+// ASCII byte codes for the scanner state machines below, which compare
+// the values `_cr_byte_at` returns.
+let _CIS_TAB: int = 9;
+let _CIS_LF: int = 10;
+let _CIS_CR: int = 13;
+let _CIS_SPACE: int = 32;
+let _CIS_QUOTE: int = 34;
+let _CIS_STAR: int = 42;
+let _CIS_SLASH: int = 47;
+let _CIS_SEMI: int = 59;
+let _CIS_BACKSLASH: int = 92;
+let _CIS_UNDERSCORE: int = 95;
+let _CIS_LOWER_E: int = 101;
+let _CIS_LOWER_F: int = 102;
+let _CIS_LOWER_I: int = 105;
+
 // ---- Source-level import scanning ----
 // These helpers replace the cli_commands.sfn `_collect_relative_import_spans_cmd`
 // state machine so the resolver owns the only import-spec scanner. Skip-aware
 // of string literals, line comments, and block comments — must stay in sync
 // with the legacy implementation until that is deleted.
-fn _cr_byte_at(text: string, index: int) -> string {
-    if text.length == 0 { return ""; }
-    if index < 0 { return ""; }
-    if index >= text.length { return ""; }
-    return substring(text, index, index + 1);
+// The scanners below touch every byte of every source they walk, so this
+// accessor is on the hottest path in the resolver. Returning a `string`
+// meant one `substring` allocation per source byte against an arena that
+// never rewinds — ~630 MB of permanent arena for a single scan of the
+// compiler's own source closure, paid once per relation per resolver
+// group. `load_byte` is a true non-allocating `load i8` (the same
+// primitive `prelude::find_char` uses for its ASCII fast path), and
+// `substring`/`.length` are byte-indexed, so the index arithmetic below
+// is unchanged. -1 marks out of range; no byte can collide with it
+// (SFN-833) — `load_byte` lowers as `zext i8 ... to i64`, not `sext`
+// (`compiler/src/llvm/byte_load.sfn`), so the returned range is 0..255;
+// a `sext` lowering would make 0x80..0xFF negative and 0xFF would alias -1.
+fn _cr_byte_at(text: string, index: int) -> int {
+    if text.length == 0 { return -1; }
+    if index < 0 { return -1; }
+    if index >= text.length { return -1; }
+    return load_byte(((text as *u8) as i64) + index) as int;
 }
 
-fn _cr_is_ident_char(ch: string) -> boolean {
-    let allowed = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_";
-    if ch.length == 0 { return false; }
-    let mut i: int = 0;
-    loop {
-        if i >= allowed.length { break; }
-        if substring(allowed, i, i + 1) == ch { return true; }
-        i += 1;
-    }
+// `[A-Za-z0-9_]` over the byte codes `_cr_byte_at` now returns. The
+// previous form scanned a 63-character `allowed` literal with one
+// `substring` allocation per comparison.
+fn _cr_is_ident_char(ch: int) -> boolean {
+    if ch >= 97 && ch <= 122 { return true; }
+    if ch >= 65 && ch <= 90 { return true; }
+    if ch >= 48 && ch <= 57 { return true; }
+    if ch == _CIS_UNDERSCORE { return true; }
     return false;
 }
 
+// Callers gate this on the keyword's first byte before calling. That
+// guard is implied by the comparison below, so it changes no result —
+// it exists because this allocates a `word.length` substring of
+// `source` on every call and the scan loops call it once per source
+// byte, against an arena that never rewinds (SFN-833).
 fn _cr_word_matches(source: string, index: int, word: string) -> boolean {
     if word.length == 0 { return false; }
     if index < 0 { return false; }
@@ -76,14 +108,14 @@ fn collect_relative_import_specs(source: string) -> string[] {
         if steps > max_steps { break; }
         let ch = _cr_byte_at(source, i);
         if in_line_comment {
-            if ch == "\n" { in_line_comment = false; }
+            if ch == _CIS_LF { in_line_comment = false; }
             i += 1;
             continue;
         }
         if in_block_comment {
-            if ch == "*" {
+            if ch == _CIS_STAR {
                 if i + 1 < source_len {
-                    if _cr_byte_at(source, i + 1) == "/" {
+                    if _cr_byte_at(source, i + 1) == _CIS_SLASH {
                         in_block_comment = false;
                         i += 2;
                         continue;
@@ -99,12 +131,12 @@ fn collect_relative_import_specs(source: string) -> string[] {
                 i += 1;
                 continue;
             }
-            if ch == "\\" {
+            if ch == _CIS_BACKSLASH {
                 escaping = true;
                 i += 1;
                 continue;
             }
-            if ch == "\"" {
+            if ch == _CIS_QUOTE {
                 in_string = false;
                 i += 1;
                 continue;
@@ -112,29 +144,33 @@ fn collect_relative_import_specs(source: string) -> string[] {
             i += 1;
             continue;
         }
-        if ch == "/" {
+        if ch == _CIS_SLASH {
             if i + 1 < source_len {
                 let next = _cr_byte_at(source, i + 1);
-                if next == "/" {
+                if next == _CIS_SLASH {
                     in_line_comment = true;
                     i += 2;
                     continue;
                 }
-                if next == "*" {
+                if next == _CIS_STAR {
                     in_block_comment = true;
                     i += 2;
                     continue;
                 }
             }
         }
-        if ch == "\"" {
+        if ch == _CIS_QUOTE {
             in_string = true;
             i += 1;
             continue;
         }
         let mut _is_dep_keyword: boolean = false;
-        if _cr_word_matches(source, i, "import") { _is_dep_keyword = true; }
-        if _cr_word_matches(source, i, "export") { _is_dep_keyword = true; }
+        if ch == _CIS_LOWER_I {
+            if _cr_word_matches(source, i, "import") { _is_dep_keyword = true; }
+        }
+        if ch == _CIS_LOWER_E {
+            if _cr_word_matches(source, i, "export") { _is_dep_keyword = true; }
+        }
         if _is_dep_keyword {
             let mut j: int = i;
             let mut s_in_string: boolean = false;
@@ -149,14 +185,14 @@ fn collect_relative_import_specs(source: string) -> string[] {
                 if steps > max_steps { break; }
                 let cj = _cr_byte_at(source, j);
                 if s_in_line_comment {
-                    if cj == "\n" { s_in_line_comment = false; }
+                    if cj == _CIS_LF { s_in_line_comment = false; }
                     j += 1;
                     continue;
                 }
                 if s_in_block_comment {
-                    if cj == "*" {
+                    if cj == _CIS_STAR {
                         if j + 1 < source_len {
-                            if _cr_byte_at(source, j + 1) == "/" {
+                            if _cr_byte_at(source, j + 1) == _CIS_SLASH {
                                 s_in_block_comment = false;
                                 j += 2;
                                 continue;
@@ -172,12 +208,12 @@ fn collect_relative_import_specs(source: string) -> string[] {
                         j += 1;
                         continue;
                     }
-                    if cj == "\\" {
+                    if cj == _CIS_BACKSLASH {
                         s_escaping = true;
                         j += 1;
                         continue;
                     }
-                    if cj == "\"" {
+                    if cj == _CIS_QUOTE {
                         s_in_string = false;
                         j += 1;
                         continue;
@@ -185,42 +221,42 @@ fn collect_relative_import_specs(source: string) -> string[] {
                     j += 1;
                     continue;
                 }
-                if cj == "/" {
+                if cj == _CIS_SLASH {
                     if j + 1 < source_len {
                         let nj = _cr_byte_at(source, j + 1);
-                        if nj == "/" {
+                        if nj == _CIS_SLASH {
                             s_in_line_comment = true;
                             j += 2;
                             continue;
                         }
-                        if nj == "*" {
+                        if nj == _CIS_STAR {
                             s_in_block_comment = true;
                             j += 2;
                             continue;
                         }
                     }
                 }
-                if cj == "\"" {
+                if cj == _CIS_QUOTE {
                     s_in_string = true;
                     j += 1;
                     continue;
                 }
-                if spec.length == 0 {
+                if spec.length == 0 && cj == _CIS_LOWER_F {
                     if _cr_word_matches(source, j, "from") {
                         let mut k = j + 4;
                         loop {
                             if k >= source_len { break; }
                             let wk = _cr_byte_at(source, k);
                             let mut ws: boolean = false;
-                            if wk == " " { ws = true; }
-                            if wk == "\t" { ws = true; }
-                            if wk == "\n" { ws = true; }
-                            if wk == "\r" { ws = true; }
+                            if wk == _CIS_SPACE { ws = true; }
+                            if wk == _CIS_TAB { ws = true; }
+                            if wk == _CIS_LF { ws = true; }
+                            if wk == _CIS_CR { ws = true; }
                             if !ws { break; }
                             k += 1;
                         }
                         if k < source_len {
-                            if _cr_byte_at(source, k) == "\"" {
+                            if _cr_byte_at(source, k) == _CIS_QUOTE {
                                 k += 1;
                                 let start = k;
                                 let mut esc: boolean = false;
@@ -232,12 +268,12 @@ fn collect_relative_import_specs(source: string) -> string[] {
                                         k += 1;
                                         continue;
                                     }
-                                    if sk == "\\" {
+                                    if sk == _CIS_BACKSLASH {
                                         esc = true;
                                         k += 1;
                                         continue;
                                     }
-                                    if sk == "\"" {
+                                    if sk == _CIS_QUOTE {
                                         spec = substring(source, start, k);
                                         break;
                                     }
@@ -247,7 +283,7 @@ fn collect_relative_import_specs(source: string) -> string[] {
                         }
                     }
                 }
-                if cj == ";" {
+                if cj == _CIS_SEMI {
                     stmt_end = j + 1;
                     break;
                 }
@@ -313,14 +349,14 @@ fn collect_scoped_import_specs(source: string) -> string[] {
         if steps > max_steps { break; }
         let ch = _cr_byte_at(source, i);
         if in_line_comment {
-            if ch == "\n" { in_line_comment = false; }
+            if ch == _CIS_LF { in_line_comment = false; }
             i += 1;
             continue;
         }
         if in_block_comment {
-            if ch == "*" {
+            if ch == _CIS_STAR {
                 if i + 1 < source_len {
-                    if _cr_byte_at(source, i + 1) == "/" {
+                    if _cr_byte_at(source, i + 1) == _CIS_SLASH {
                         in_block_comment = false;
                         i += 2;
                         continue;
@@ -336,12 +372,12 @@ fn collect_scoped_import_specs(source: string) -> string[] {
                 i += 1;
                 continue;
             }
-            if ch == "\\" {
+            if ch == _CIS_BACKSLASH {
                 escaping = true;
                 i += 1;
                 continue;
             }
-            if ch == "\"" {
+            if ch == _CIS_QUOTE {
                 in_string = false;
                 i += 1;
                 continue;
@@ -349,29 +385,33 @@ fn collect_scoped_import_specs(source: string) -> string[] {
             i += 1;
             continue;
         }
-        if ch == "/" {
+        if ch == _CIS_SLASH {
             if i + 1 < source_len {
                 let next = _cr_byte_at(source, i + 1);
-                if next == "/" {
+                if next == _CIS_SLASH {
                     in_line_comment = true;
                     i += 2;
                     continue;
                 }
-                if next == "*" {
+                if next == _CIS_STAR {
                     in_block_comment = true;
                     i += 2;
                     continue;
                 }
             }
         }
-        if ch == "\"" {
+        if ch == _CIS_QUOTE {
             in_string = true;
             i += 1;
             continue;
         }
         let mut _is_dep_keyword: boolean = false;
-        if _cr_word_matches(source, i, "import") { _is_dep_keyword = true; }
-        if _cr_word_matches(source, i, "export") { _is_dep_keyword = true; }
+        if ch == _CIS_LOWER_I {
+            if _cr_word_matches(source, i, "import") { _is_dep_keyword = true; }
+        }
+        if ch == _CIS_LOWER_E {
+            if _cr_word_matches(source, i, "export") { _is_dep_keyword = true; }
+        }
         if _is_dep_keyword {
             let mut j: int = i;
             let mut s_in_string: boolean = false;
@@ -386,14 +426,14 @@ fn collect_scoped_import_specs(source: string) -> string[] {
                 if steps > max_steps { break; }
                 let cj = _cr_byte_at(source, j);
                 if s_in_line_comment {
-                    if cj == "\n" { s_in_line_comment = false; }
+                    if cj == _CIS_LF { s_in_line_comment = false; }
                     j += 1;
                     continue;
                 }
                 if s_in_block_comment {
-                    if cj == "*" {
+                    if cj == _CIS_STAR {
                         if j + 1 < source_len {
-                            if _cr_byte_at(source, j + 1) == "/" {
+                            if _cr_byte_at(source, j + 1) == _CIS_SLASH {
                                 s_in_block_comment = false;
                                 j += 2;
                                 continue;
@@ -409,12 +449,12 @@ fn collect_scoped_import_specs(source: string) -> string[] {
                         j += 1;
                         continue;
                     }
-                    if cj == "\\" {
+                    if cj == _CIS_BACKSLASH {
                         s_escaping = true;
                         j += 1;
                         continue;
                     }
-                    if cj == "\"" {
+                    if cj == _CIS_QUOTE {
                         s_in_string = false;
                         j += 1;
                         continue;
@@ -422,42 +462,42 @@ fn collect_scoped_import_specs(source: string) -> string[] {
                     j += 1;
                     continue;
                 }
-                if cj == "/" {
+                if cj == _CIS_SLASH {
                     if j + 1 < source_len {
                         let nj = _cr_byte_at(source, j + 1);
-                        if nj == "/" {
+                        if nj == _CIS_SLASH {
                             s_in_line_comment = true;
                             j += 2;
                             continue;
                         }
-                        if nj == "*" {
+                        if nj == _CIS_STAR {
                             s_in_block_comment = true;
                             j += 2;
                             continue;
                         }
                     }
                 }
-                if cj == "\"" {
+                if cj == _CIS_QUOTE {
                     s_in_string = true;
                     j += 1;
                     continue;
                 }
-                if spec.length == 0 {
+                if spec.length == 0 && cj == _CIS_LOWER_F {
                     if _cr_word_matches(source, j, "from") {
                         let mut k = j + 4;
                         loop {
                             if k >= source_len { break; }
                             let wk = _cr_byte_at(source, k);
                             let mut ws: boolean = false;
-                            if wk == " " { ws = true; }
-                            if wk == "\t" { ws = true; }
-                            if wk == "\n" { ws = true; }
-                            if wk == "\r" { ws = true; }
+                            if wk == _CIS_SPACE { ws = true; }
+                            if wk == _CIS_TAB { ws = true; }
+                            if wk == _CIS_LF { ws = true; }
+                            if wk == _CIS_CR { ws = true; }
                             if !ws { break; }
                             k += 1;
                         }
                         if k < source_len {
-                            if _cr_byte_at(source, k) == "\"" {
+                            if _cr_byte_at(source, k) == _CIS_QUOTE {
                                 k += 1;
                                 let start = k;
                                 let mut esc: boolean = false;
@@ -469,12 +509,12 @@ fn collect_scoped_import_specs(source: string) -> string[] {
                                         k += 1;
                                         continue;
                                     }
-                                    if sk == "\\" {
+                                    if sk == _CIS_BACKSLASH {
                                         esc = true;
                                         k += 1;
                                         continue;
                                     }
-                                    if sk == "\"" {
+                                    if sk == _CIS_QUOTE {
                                         spec = substring(source, start, k);
                                         break;
                                     }
@@ -484,7 +524,7 @@ fn collect_scoped_import_specs(source: string) -> string[] {
                         }
                     }
                 }
-                if cj == ";" {
+                if cj == _CIS_SEMI {
                     stmt_end = j + 1;
                     break;
                 }
@@ -564,14 +604,14 @@ fn _cr_source_imports_host(source: string, target: string) -> boolean {
         if steps > max_steps { break; }
         let ch = _cr_byte_at(source, i);
         if in_line_comment {
-            if ch == "\n" { in_line_comment = false; }
+            if ch == _CIS_LF { in_line_comment = false; }
             i += 1;
             continue;
         }
         if in_block_comment {
-            if ch == "*" {
+            if ch == _CIS_STAR {
                 if i + 1 < source_len {
-                    if _cr_byte_at(source, i + 1) == "/" {
+                    if _cr_byte_at(source, i + 1) == _CIS_SLASH {
                         in_block_comment = false;
                         i += 2;
                         continue;
@@ -587,12 +627,12 @@ fn _cr_source_imports_host(source: string, target: string) -> boolean {
                 i += 1;
                 continue;
             }
-            if ch == "\\" {
+            if ch == _CIS_BACKSLASH {
                 escaping = true;
                 i += 1;
                 continue;
             }
-            if ch == "\"" {
+            if ch == _CIS_QUOTE {
                 in_string = false;
                 i += 1;
                 continue;
@@ -600,29 +640,33 @@ fn _cr_source_imports_host(source: string, target: string) -> boolean {
             i += 1;
             continue;
         }
-        if ch == "/" {
+        if ch == _CIS_SLASH {
             if i + 1 < source_len {
                 let next = _cr_byte_at(source, i + 1);
-                if next == "/" {
+                if next == _CIS_SLASH {
                     in_line_comment = true;
                     i += 2;
                     continue;
                 }
-                if next == "*" {
+                if next == _CIS_STAR {
                     in_block_comment = true;
                     i += 2;
                     continue;
                 }
             }
         }
-        if ch == "\"" {
+        if ch == _CIS_QUOTE {
             in_string = true;
             i += 1;
             continue;
         }
         let mut _is_dep_keyword: boolean = false;
-        if _cr_word_matches(source, i, "import") { _is_dep_keyword = true; }
-        if _cr_word_matches(source, i, "export") { _is_dep_keyword = true; }
+        if ch == _CIS_LOWER_I {
+            if _cr_word_matches(source, i, "import") { _is_dep_keyword = true; }
+        }
+        if ch == _CIS_LOWER_E {
+            if _cr_word_matches(source, i, "export") { _is_dep_keyword = true; }
+        }
         if _is_dep_keyword {
             // Walk forward to the `from "..."` token and pull the spec.
             // Mirrors `collect_scoped_import_specs`'s tokenising loop —
@@ -642,14 +686,14 @@ fn _cr_source_imports_host(source: string, target: string) -> boolean {
                 if steps > max_steps { break; }
                 let cj = _cr_byte_at(source, j);
                 if s_in_line_comment {
-                    if cj == "\n" { s_in_line_comment = false; }
+                    if cj == _CIS_LF { s_in_line_comment = false; }
                     j += 1;
                     continue;
                 }
                 if s_in_block_comment {
-                    if cj == "*" {
+                    if cj == _CIS_STAR {
                         if j + 1 < source_len {
-                            if _cr_byte_at(source, j + 1) == "/" {
+                            if _cr_byte_at(source, j + 1) == _CIS_SLASH {
                                 s_in_block_comment = false;
                                 j += 2;
                                 continue;
@@ -665,12 +709,12 @@ fn _cr_source_imports_host(source: string, target: string) -> boolean {
                         j += 1;
                         continue;
                     }
-                    if cj == "\\" {
+                    if cj == _CIS_BACKSLASH {
                         s_escaping = true;
                         j += 1;
                         continue;
                     }
-                    if cj == "\"" {
+                    if cj == _CIS_QUOTE {
                         s_in_string = false;
                         j += 1;
                         continue;
@@ -678,42 +722,42 @@ fn _cr_source_imports_host(source: string, target: string) -> boolean {
                     j += 1;
                     continue;
                 }
-                if cj == "/" {
+                if cj == _CIS_SLASH {
                     if j + 1 < source_len {
                         let nj = _cr_byte_at(source, j + 1);
-                        if nj == "/" {
+                        if nj == _CIS_SLASH {
                             s_in_line_comment = true;
                             j += 2;
                             continue;
                         }
-                        if nj == "*" {
+                        if nj == _CIS_STAR {
                             s_in_block_comment = true;
                             j += 2;
                             continue;
                         }
                     }
                 }
-                if cj == "\"" {
+                if cj == _CIS_QUOTE {
                     s_in_string = true;
                     j += 1;
                     continue;
                 }
-                if spec.length == 0 {
+                if spec.length == 0 && cj == _CIS_LOWER_F {
                     if _cr_word_matches(source, j, "from") {
                         let mut k = j + 4;
                         loop {
                             if k >= source_len { break; }
                             let wk = _cr_byte_at(source, k);
                             let mut ws: boolean = false;
-                            if wk == " " { ws = true; }
-                            if wk == "\t" { ws = true; }
-                            if wk == "\n" { ws = true; }
-                            if wk == "\r" { ws = true; }
+                            if wk == _CIS_SPACE { ws = true; }
+                            if wk == _CIS_TAB { ws = true; }
+                            if wk == _CIS_LF { ws = true; }
+                            if wk == _CIS_CR { ws = true; }
                             if !ws { break; }
                             k += 1;
                         }
                         if k < source_len {
-                            if _cr_byte_at(source, k) == "\"" {
+                            if _cr_byte_at(source, k) == _CIS_QUOTE {
                                 k += 1;
                                 let start = k;
                                 let mut esc: boolean = false;
@@ -725,12 +769,12 @@ fn _cr_source_imports_host(source: string, target: string) -> boolean {
                                         k += 1;
                                         continue;
                                     }
-                                    if sk == "\\" {
+                                    if sk == _CIS_BACKSLASH {
                                         esc = true;
                                         k += 1;
                                         continue;
                                     }
-                                    if sk == "\"" {
+                                    if sk == _CIS_QUOTE {
                                         spec = substring(source, start, k);
                                         break;
                                     }
@@ -740,7 +784,7 @@ fn _cr_source_imports_host(source: string, target: string) -> boolean {
                         }
                     }
                 }
-                if cj == ";" {
+                if cj == _CIS_SEMI {
                     stmt_end = j + 1;
                     break;
                 }
