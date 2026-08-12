@@ -368,6 +368,15 @@ test "runtime tls: an untrusted server cert is rejected (verify enforced)" ![io]
     // NEGATIVE: no CAFILE -> the self-signed cert is not trust-anchored ->
     // chain verification fails -> no body is written. A single attempt is
     // conclusive (trust cannot appear on retry).
+    //
+    // This must fail because the cert has no anchor, not because the trust
+    // store failed to load anything at all — SFN-807 showed those are not
+    // the same failure. A bundle-loading bug fail-closed to zero anchors for
+    // a full release cycle while this exact assertion kept passing, because
+    // "no anchors" and "no matching anchor" produce the identical no-body
+    // signal. `runtime_tls_ca_bundle_realistic_size_test.sfn` (SFN-813)
+    // covers the loader itself so a regression there cannot hide behind this
+    // leg again.
     let untrusted_ok = _client_downloads(client_bin, _untrusted_env(), out_path);
     assert untrusted_ok == false;
 
