@@ -1,0 +1,341 @@
+// compiler/capsules/codegen-llvm/src/runtime_helpers/registry_services.sfn
+// Filesystem, network service, channel, collection, and string descriptor chunks.
+import { RuntimeHelperDescriptor } from "../types";
+import { append_runtime_helper } from "./registry_support";
+
+fn _rh_descriptors_07(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelperDescriptor[] {
+    let mut descriptors = descriptors_in;
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "fs.deleteFile", symbol: "sfn_fs_delete", return_type: "i1", parameter_types: ["i8*"], native_signature: "sfn_fs_delete", c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "fs_create_directory", symbol: "sfn_fs_mkdir", return_type: "i1", parameter_types: ["i8*", "i1"], native_signature: "sfn_fs_mkdir", c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "fs.createDirectory", symbol: "sfn_fs_mkdir", return_type: "i1", parameter_types: ["i8*", "i1"], native_signature: "sfn_fs_mkdir", c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "fs_remove_directory", symbol: "sfn_fs_rmdir", return_type: "i1", parameter_types: ["i8*"], native_signature: "sfn_fs_rmdir", c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "fs.removeDirectory", symbol: "sfn_fs_rmdir", return_type: "i1", parameter_types: ["i8*"], native_signature: "sfn_fs_rmdir", c_abi_return_type: null
+    });
+
+    // P5 (#366): filesystem stdlib gap-fill. Permission ops, temp-dir
+    // creation, exec-bit probing, and symlinks — the five POSIX
+    // primitives ~12 e2e bash scripts depend on. M3.1c (#926) flips
+    // them to the `sfn_fs_*` adapters in
+    // `runtime/sfn/adapters/filesystem.sfn`. The bodies trampoline to
+    // the legacy C `sailfin_adapter_fs_*` adapters, which carry the
+    // `#if _WIN32` stubs the single cross-platform `filesystem.ll`
+    // needs to link (`symlink` / `mkdtemp` / raw `stat` have no MinGW
+    // symbol); pure-Sailfin inlining is a follow-up wave. The C
+    // symbols stay exported through the M3 window for seed-link
+    // compat; fresh emission routes through `native_signature`.
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "fs.set_perms", symbol: "sfn_fs_set_perms", return_type: "i1", parameter_types: ["i8*", "i64"], native_signature: "sfn_fs_set_perms", c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "fs.get_perms", symbol: "sfn_fs_get_perms", return_type: "i64", parameter_types: ["i8*"], native_signature: "sfn_fs_get_perms", c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "fs.mkdtemp", symbol: "sfn_fs_mkdtemp", return_type: "i8*", parameter_types: ["i8*"], native_signature: "sfn_fs_mkdtemp", c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "fs.is_executable", symbol: "sfn_fs_is_executable", return_type: "i1", parameter_types: ["i8*"], native_signature: "sfn_fs_is_executable", c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "fs.symlink", symbol: "sfn_fs_symlink", return_type: "i1", parameter_types: ["i8*", "i8*"], native_signature: "sfn_fs_symlink", c_abi_return_type: null
+    });
+    // `fs.read_link` (SFN-46): single-hop `readlink(2)` target reader,
+    // consuming the `sailfin_intrinsic_fs_read_link` sentinel (row above).
+    // `sfn_fs_read_link` is pure Sailfin in
+    // `runtime/sfn/adapters/filesystem.sfn`; returns a malloc'd `""` on
+    // any failure.
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "fs.read_link", symbol: "sfn_fs_read_link", return_type: "i8*", parameter_types: ["i8*"], native_signature: "sfn_fs_read_link", c_abi_return_type: null
+    });
+    // `fs.is_directory` (SFN-755): non-destructive directory predicate,
+    // consuming the `sailfin_intrinsic_fs_is_directory` sentinel.
+    //
+    // This row is deliberately AHEAD of its implementation:
+    // `sfn_fs_is_directory` does not exist in
+    // `runtime/sfn/adapters/filesystem.sfn` yet. It cannot, because the
+    // pinned seed compiles the working-tree runtime, and a seed without the
+    // SENTINEL row rejects the wrapper's call at typecheck
+    // (`E0420: undefined function`). The row here is the separate half: a
+    // seed without THIS row rejects a `fs.is_directory(...)` call site at
+    // lowering (`E1007: callee signature is not known to the compiler`).
+    // Two rows, two different failures — both verified against seed 0.9.1.
+    //
+    // Landing the row early is what lets the wrapper land at all: the
+    // consumer side compiles against the SEED, so the row has to reach a
+    // released seed before any call site can exist.
+    //
+    // Which failure a premature caller gets depends on which compiler
+    // compiles it. Compiler and runtime source are compiled by the pinned
+    // seed, so they still get `E1007`. A program built by a compiler
+    // freshly built from this tree gets past lowering and instead FAILS AT
+    // LINK on an undefined `sfn_fs_is_directory`. Nothing calls it in either
+    // position, and `fs_is_directory_sentinel_test.sfn` pins the emitted IR
+    // directly rather than through a call site for exactly that reason.
+    //
+    // Removal condition: SFN-756 adds the wrapper, switches `walk_dirs`
+    // (`compiler/src/build/fs_tree.sfn`) over, and deletes this paragraph.
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "fs.is_directory", symbol: "sfn_fs_is_directory", return_type: "i1", parameter_types: ["i8*"], native_signature: "sfn_fs_is_directory", c_abi_return_type: null
+    });
+
+    // HTTP adapters (distinct from intrinsics for adapter infrastructure).
+    // M3 (#818): flipped to the Sailfin-native socket client in
+    // `runtime/sfn/adapters/http.sfn`. The legacy C `symbol`s
+    // (`sailfin_adapter_http_*`, no-op stubs) stay for seed compat; the
+    // `native_signature` override routes calls to `sfn_http_get` /
+    // `sfn_http_post2` (the 2-arg POST wrapper matching this row's arity).
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "http_get", symbol: "sfn_http_get", return_type: "i8*", parameter_types: ["i8*"], native_signature: "sfn_http_get", c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "http_post", symbol: "sfn_http_post2", return_type: "i8*", parameter_types: ["i8*", "i8*"], native_signature: "sfn_http_post2", c_abi_return_type: null
+    });
+
+    // Serve adapters — flipped to the Sailfin-native server in
+    // `runtime/sfn/concurrency/serve.sfn` (#1092). The legacy C
+    // `symbol`s (`sailfin_adapter_serve_*`, never defined) stay for
+    // seed compat; the `native_signature` override routes calls to
+    // `sfn_serve` / `sfn_serve_handler_dispatch`. The bespoke `serve`
+    // lowering in `expression_lowering/native/core.sfn` emits the
+    // `@sfn_serve` call site directly (it does not consult this row),
+    // so the `native_signature` here keeps the registry honest with
+    // the emitted symbol.
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "serve_start", symbol: "sailfin_adapter_serve_start", return_type: "void", parameter_types: ["i8*", "i32"], native_signature: "sfn_serve", c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "serve_handler_dispatch", symbol: "sailfin_adapter_serve_handler_dispatch", return_type: "i8*", parameter_types: ["i8*", "i8*"], native_signature: "sfn_serve_handler_dispatch", c_abi_return_type: null
+    });
+
+    // Registry rows for `websocket.*` and the Call-form `serve` (#1601,
+    // epic #1180 Phase G): the effect checker derives their capabilities
+    // from `intrinsic_effects.sfn`, replacing the last
+    // two hardcoded name->effect `if` chains (`websocket` Member arm,
+    // `serve` Call arm in `effect_checker.sfn`).
+    //
+    // `websocket.connect`/`.send`/`.close` are BRIDGED to the Sailfin-native
+    // client runtime in `runtime/sfn/adapters/websocket.sfn` (#1876): real
+    // `sfn_websocket_*` symbols, `native_signature`, and LLVM types, so the
+    // generic member-call path lowers them to real calls (mirroring the
+    // `http.*` rows). Their sentinel-skips in
+    // `rendering.sfn::render_runtime_helper_declarations` were removed with
+    // the bridge.
+    //
+    // `websocket.serve` / `.serve_tls` are now BRIDGED to the Sailfin-native server runtime
+    // (#1877): `sfn_websocket_serve`, `parameter_types: ["i32"]` (the scalar
+    // port; an object literal `{ port }` is NOT used because member-call
+    // registry bridges marshal scalars, not struct literals), mirroring the
+    // connect/send/close bridge above. Its sentinel-skip in
+    // `rendering.sfn::render_runtime_helper_declarations` was removed with
+    // the bridge.
+    //
+    // The Call-form `serve` remains effect-metadata-only: its `symbol` is
+    // deliberately fake (`sfn_serve_unbridged`) and it stays sentinel-skipped
+    // so a metadata row never produces a call/declare to an undefined symbol
+    // (the spurious-declare/link hazard that kept #1183 from adding it). It
+    // lowers via its own bespoke path (`serve_start`/`serve_handler_dispatch`
+    // rows + `core.sfn`).
+    //
+    // The target-neutral `serve` semantic row carries `["io", "net"]` to
+    // match the prelude/capsule `fn serve(...) ![io, net]` signatures. Its
+    // bespoke lowering uses the separately registered `serve_start` and
+    // `serve_handler_dispatch` identities above; all three neutral rows carry
+    // the honest set, tighter than #1183's retained `net`-only check.
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "websocket.serve", symbol: "sfn_websocket_serve", return_type: "void", parameter_types: ["i32"], native_signature: "sfn_websocket_serve", c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "websocket.serve_tls", symbol: "sfn_websocket_serve_tls", return_type: "void", parameter_types: ["i32", "i8*", "i8*"], native_signature: "sfn_websocket_serve_tls", c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "websocket.send", symbol: "sfn_websocket_send", return_type: "i8*", parameter_types: ["i8*", "i8*"], native_signature: "sfn_websocket_send", c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "websocket.close", symbol: "sfn_websocket_close", return_type: "i8*", parameter_types: ["i8*"], native_signature: "sfn_websocket_close", c_abi_return_type: null
+    });
+    return descriptors;
+}
+
+fn _rh_descriptors_08(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelperDescriptor[] {
+    let mut descriptors = descriptors_in;
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "websocket.connect", symbol: "sfn_websocket_connect", return_type: "i8*", parameter_types: ["i8*"], native_signature: "sfn_websocket_connect", c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "serve", symbol: "sfn_serve_unbridged", return_type: "void", parameter_types: [], native_signature: null, c_abi_return_type: null
+    });
+
+    // Concurrency adapters — flipped to sfn_* symbols (#1091).
+    //
+    // Effect-transparent (SFEP-0049, SFN-86): the three concurrency-primitive
+    // targets (`spawn_task`, `channel_send`, `channel_receive`) have no rows in
+    // the target-neutral intrinsic registry, so the in-process primitives
+    // contribute no effects of their own. The effect checker's
+    // spawn/parallel/channel arms recurse into the spawned or sent body, so an
+    // op over a pure body requires no effect and an op over an effectful body
+    // inherits exactly that body's effects. The v0 scheduler primitives
+    // (`runtime/sfn/concurrency/channel.sfn`, `nursery.sfn`) are pure pthread
+    // mutex/condvar/MPMC queue and touch no fs/net/console/clock, so under the
+    // canonical taxonomy none exercises `io` — the prior `["io"]` was a
+    // conservative placeholder, now retired. The `Parallel`-node arm routes
+    // through `spawn_task` (parallel is fan-out of spawns, so its effect IS
+    // the spawn effect); deliberately NO `parallel` descriptor row is added —
+    // the paren-call `parallel(...)` of the unimplemented `sfn/sync` surface
+    // must stay fail-closed in lowering ("cannot resolve return type for call
+    // to `parallel`", `sync_rejects_unimplemented_concurrency_test.sfn`), and
+    // a descriptor row would make that call resolvable. The join-side
+    // (`await`, nursery exit) effect semantics are out of scope here —
+    // deferred to the concurrency-maturity work (SFN-124).
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "spawn_task", symbol: "sfn_spawn_task", return_type: "i8*", parameter_types: ["i8*"], native_signature: "sfn_spawn_task", c_abi_return_type: null
+    });
+    // Channel rows match `runtime/sfn/concurrency/channel.sfn` exactly
+    // (#1266): create takes (capacity: i64, elem_size: i64); send takes a
+    // POINTER to the element bytes and returns i64 (1 ok / 0 closed);
+    // receive is `sfn_channel_recv` and returns a pointer to a malloc'd
+    // copy of the element bytes (null when closed+empty). The bespoke
+    // channel-method lowering in `core_concurrency_lowering.sfn` (`try_lower_channel_method`)
+    // emits the spill/load sequences around these signatures.
+    // `channel_create`/`channel_close` stay absent from the semantic registry (#1655): no checker
+    // arm consults them today — only `.send`/`.receive` are detected as
+    // channel ops — so flipping them to `io` would be dead encoding. The
+    // channel-op generalization (the #1184 direction) revisits this
+    // asymmetry when it scope-resolves channel-typed receivers.
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "channel_create", symbol: "sfn_channel_create", return_type: "i8*", parameter_types: ["i64", "i64", "i64"], native_signature: "sfn_channel_create", c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "channel_send", symbol: "sfn_channel_send", return_type: "i64", parameter_types: ["i8*", "i8*"], native_signature: "sfn_channel_send", c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "channel_receive", symbol: "sfn_channel_recv", return_type: "i8*", parameter_types: ["i8*"], native_signature: "sfn_channel_recv", c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "channel_close", symbol: "sfn_channel_close", return_type: "void", parameter_types: ["i8*"], native_signature: "sfn_channel_close", c_abi_return_type: null
+    });
+
+    // Collection helpers
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "runtime_array_map_fn", symbol: "sfn_array_sfn_map", return_type: "i8*", parameter_types: ["i8*", "{i8*, i8*}"], native_signature: "sfn_array_sfn_map", c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "runtime_array_filter_fn", symbol: "sfn_array_sfn_filter", return_type: "i8*", parameter_types: ["i8*", "{i8*, i8*}"], native_signature: "sfn_array_sfn_filter", c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "runtime_array_reduce_fn", symbol: "sfn_array_sfn_reduce", return_type: "i64", parameter_types: ["i8*", "i64", "{i8*, i8*}"], native_signature: "sfn_array_sfn_reduce", c_abi_return_type: null
+    });
+    // SFN-114: range higher-order functions materialize `(start..end)` into an
+    // `int[]` SfnArray, then dispatch the array-HOF descriptors above. SFEP-0028 (D).
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "runtime_range_materialize_fn", symbol: "sfn_range_materialize", return_type: "i8*", parameter_types: ["i64", "i64"], native_signature: "sfn_range_materialize", c_abi_return_type: null
+    });
+
+    // String utility helpers
+    //
+    // M2.4a (#396): the four string descriptors below carry a
+    // `native_signature` populated with the matching `sfn_str_*`
+    // canonical name. During the M2.4a coexistence period those
+    // bare canonical symbols are *defined by C trampolines* in
+    // `runtime/native/src/sailfin_runtime.c`; the proof-of-life
+    // Sailfin module `runtime/sfn/string.sfn` ships the same
+    // five operations under the `sfn_str_sfn_*` infix to avoid a
+    // link-time collision (mirrors the arena module's
+    // `sfn_arena_sfn_*` namespace). M2.4b retires the C
+    // trampolines and renames the Sailfin exports to the bare
+    // form. The migration mechanism
+    // (`render_runtime_helper_declarations` in `rendering.sfn` and
+    // `coerce_and_emit_call` in `core_call_emission/dispatch.sfn`) prefers
+    // the `native_signature` over `symbol` whenever it is set, so
+    // freshly-emitted IR reaches the new exports while seed-built
+    // IR (which still carries the legacy `symbol` names) keeps
+    // linking through the legacy bodies during the cutover.
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "substring", symbol: "substring", return_type: "i8*", parameter_types: ["i8*", "double", "double"], native_signature: "sfn_str_slice", c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "substring_unchecked", symbol: "substring_unchecked", return_type: "i8*", parameter_types: ["i8*", "double", "double"], native_signature: "sfn_str_slice", c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "string.length", symbol: "sfn_str_len", return_type: "i64", parameter_types: ["i8*"], native_signature: "sfn_str_len", c_abi_return_type: null
+    });
+    // M1.A — string.concat parameters lock to the SfnString aggregate
+    // ABI. Wave 1 pre-#714 emitted
+    // `call i8* @sfn_str_concat({i8*, i64}, {i8*, i64})` against a
+    // 2-arg C trampoline; #714 (M2.4b) introduced the 3-arg arena-
+    // aware ABI under the `_arena` suffix to coexist with the seed's
+    // 2-arg emission; #715 retired the 2-arg trampoline and promoted
+    // the arena-aware function to the bare canonical name.
+    //
+    // The call shape is now
+    //   call {i8*, i64} @sfn_str_concat({i8*, i64}, {i8*, i64}, ptr)
+    // where the third operand is `ptr @sfn_default_arena` (a global
+    // pointer slot defined in `runtime/native/src/sailfin_runtime.c`,
+    // primed at module load by a `__attribute__((constructor))`).
+    // Return type is the SfnString aggregate `{i8*, i64}`; the call-
+    // site emitters in `expression_lowering/native/{core_ops_lowering,
+    // core_strings}.sfn` follow the `call` with an `extractvalue` to
+    // recover the legacy `i8*` operand so the rest of the lowering
+    // pipeline (which still treats string locals as `i8*`) is unchanged.
+    //
+    // The C runtime keeps a thin `sfn_str_concat_arena` trampoline
+    // alive for one more release cycle so seed v0.7.0-alpha.7 (which
+    // still emits the `_arena` suffix in IR) links cleanly; the next
+    // seed bump retires that forwarder in a follow-up PR.
+    //
+    // `native_signature` is left equal to `symbol` so the declare /
+    // call paths uniformly use the canonical name with no special-
+    // casing in `rendering.sfn` / `emit_runtime_call`.
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "string.concat", symbol: "sfn_str_concat", return_type: "{i8*, i64}", parameter_types: ["{i8*, i64}", "{i8*, i64}", "ptr"], native_signature: "sfn_str_concat", c_abi_return_type: null
+    });
+    // M2.4b (#398): `string.append` descriptor parked at the arena-
+    // aware shape. No compiler emission site calls it today (the
+    // existing string_append peephole runs in `lowering_helpers_mangling.sfn`
+    // against `sailfin_runtime_string_append`, not via this descriptor),
+    // so `native_signature` stays null — leaving the row as metadata
+    // until the first caller wires through. The C symbol
+    // `sfn_str_append` (renamed from `sfn_str_append_arena` in #715) is
+    // defined alongside `sfn_str_concat` for surface-area completeness.
+    // First parameter is `ptr` (opaque) so the eventual caller can decide
+    // whether it's an `i8**` legacy pointer or a real `{i8*, i64}*` once
+    // the SfnString flip lands.
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "string.append", symbol: "sfn_str_append", return_type: "void", parameter_types: ["ptr", "{i8*, i64}", "ptr"], native_signature: null, c_abi_return_type: null
+    });
+    // Scope-exit drop helper for owned RC locals (M1.5.2, issue #326).
+    // Emit_scope_drops generates `call void @sfn_rc_release(i8* %ptr)` for
+    // each owned local with `allocation_kind == "rc"` at scope close. The
+    // C-side stub is a no-op until M2 ships real RC semantics — calling
+    // it against arena pointers (everything pre-M1.5.5) must not free.
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "rc.release", symbol: "sfn_rc_release", return_type: "void", parameter_types: ["i8*"], native_signature: null, c_abi_return_type: null
+    });
+    // M2.5 (#403): `number.to_string` / `string.to_number` flip to
+    // the wave-2 trampolines (`sfn_number_to_str`, `sfn_str_to_number`).
+    // C-ABI shape stays identical — the trampoline bodies are pure
+    // renames over the legacy entrypoints — so no `c_abi_return_type`
+    // override is needed.
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "number.to_string", symbol: "sfn_number_to_str", return_type: "i8*", parameter_types: ["double"], native_signature: "sfn_number_to_str", c_abi_return_type: null
+    });
+    // SFN-408: `array.to_string` renders an `int[]`/`bool[]`/`string[]` (or a
+    // nested array, `depth` levels deep) as its bracketed source-literal form.
+    // Delegates to the Sailfin-native `sfn_array_to_string(desc, kind, depth)`
+    // in `runtime/sfn/array.sfn` (`desc` the `SfnArray` descriptor pointer,
+    // `kind` the leaf element formatter, `depth` the array-of-array nesting).
+    // `float[]`/`number[]` is intentionally excluded — it hits the E0832 fatal
+    // floor until the pointer-read-f64 intrinsic is seeded (SFN-408 follow-up).
+    // Pure like `number.to_string` — no arena/ptr param, no effects.
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "array.to_string", symbol: "sfn_array_to_string", return_type: "{i8*, i64}", parameter_types: ["i8*", "i32", "i32"], native_signature: "sfn_array_to_string", c_abi_return_type: null
+    });
+    return descriptors;
+}

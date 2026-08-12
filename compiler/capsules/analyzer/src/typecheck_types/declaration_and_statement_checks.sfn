@@ -453,7 +453,7 @@ fn make_unparseable_statement_diagnostic(anchor: Token?, near: string) -> Diagno
 
 // E0010 — `fn main` declared with too many parameters. The Sailfin
 // entry point accepts at most one argument: the argv slice. The
-// lowering pass (`compiler/src/llvm/lowering/emission.sfn`) emits a
+// lowering pass (`compiler/capsules/codegen-llvm/src/lowering/emission.sfn`) emits a
 // C-compatible `main(argc, argv)` wrapper for any top-level `fn main`,
 // so any extra parameters would either be silently ignored today or
 // (after M5.3) manifest as an LLVM-link mismatch. Validate at typecheck

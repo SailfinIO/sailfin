@@ -16,8 +16,8 @@ test "det-sweep: slug strips compiler/src prefix" {
     assert _det_slug_of("compiler/src/main.sfn") == "main";
 }
 
-test "det-sweep: slug keeps nested compiler/src path" {
-    assert _det_slug_of("compiler/src/llvm/lowering/entrypoints.sfn") == "llvm/lowering/entrypoints";
+test "det-sweep: slug canonicalizes the codegen-llvm capsule" {
+    assert _det_slug_of("compiler/capsules/codegen-llvm/src/lowering/entrypoints.sfn") == "sfn/codegen-llvm/lowering/entrypoints";
 }
 
 test "det-sweep: slug canonicalizes a compiler implementation capsule" {

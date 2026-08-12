@@ -1,4 +1,4 @@
-// Line-budget sentinel for compiler/src/llvm/lowering/.
+// Line-budget sentinel for compiler/capsules/codegen-llvm/src/lowering/.
 //
 // lowering_core.sfn reached 1,762 lines and was split into the
 // lowering_core/ modules, with the orchestrator kept below 750 lines.
@@ -12,7 +12,7 @@
 import { ends_with, find_char_local } from "../../src/string_utils";
 
 let LOWERING_MODULE_LINE_BUDGET: int = 750;
-let LOWERING_ROOT: string = "compiler/src/llvm/lowering";
+let LOWERING_ROOT: string = "compiler/capsules/codegen-llvm/src/lowering";
 
 fn _count_lowering_newlines(source: string) -> int {
     let mut count: int = 0;

@@ -61,7 +61,7 @@ The compiler in `compiler/src/` and `compiler/capsules/` follows this flow:
 3. **Type Checker** (`typecheck/`) → duplicate symbols, interface conformance
 4. **Effect Checker** (`effect_checker.sfn`) → validates `![effect, ...]` annotations
 5. **Native Emitter** (`emit_native.sfn`) → `.sfn-asm` IR (`native_ir.sfn`)
-6. **LLVM Lowering** (`compiler/src/llvm/lowering/entrypoints.sfn`) → LLVM IR
+6. **LLVM Lowering** (`compiler/capsules/codegen-llvm/src/lowering/entrypoints.sfn`) → LLVM IR
 
 Critical files:
 
@@ -103,7 +103,7 @@ Effect checking walks nested blocks, lambdas, and `routine` scopes. Missing effe
 1. Update `compiler/capsules/syntax/src/parser/mod.sfn` to recognize new syntax
 2. Add AST node(s) to `compiler/capsules/syntax/src/ast.sfn`
 3. Update `compiler/capsules/codegen/src/emit_native.sfn` to emit `.sfn-asm`
-4. Extend `compiler/src/llvm/lowering/entrypoints.sfn` for LLVM
+4. Extend `compiler/capsules/codegen-llvm/src/lowering/entrypoints.sfn` for LLVM
 5. Add regression tests to `compiler/tests/`
 6. Update the language spec: `site/src/content/docs/docs/reference/spec/NN-*.md` chapter if shipped, `.../reference/preview/*.md` page if planned
 7. Update `docs/status.md` with implementation status

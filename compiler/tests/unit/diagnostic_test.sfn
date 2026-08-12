@@ -6,14 +6,13 @@ import {
     diag_is_error,
     stamp_spans
 } from "sfn/analyzer/diagnostic";
-import { LoweringDiagnostic, NativeSourceSpan } from "sfn/ir";
-
 import {
     append_missing_legacy_lowering_diags,
     diag_from_legacy_lowering_error,
     diag_to_legacy_string,
     lowering_error_diag
-} from "../../src/llvm/utils";
+} from "sfn/codegen-llvm/utils";
+import { LoweringDiagnostic, NativeSourceSpan } from "sfn/ir";
 
 fn _diag(severity: string, span: Span?) -> Diag {
     return Diag {

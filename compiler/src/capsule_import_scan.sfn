@@ -41,7 +41,7 @@ let _CIS_LOWER_I: int = 105;
 // `substring`/`.length` are byte-indexed, so the index arithmetic below
 // is unchanged. -1 marks out of range; no byte can collide with it
 // (SFN-833) — `load_byte` lowers as `zext i8 ... to i64`, not `sext`
-// (`compiler/src/llvm/byte_load.sfn`), so the returned range is 0..255;
+// (`compiler/capsules/codegen-llvm/src/byte_load.sfn`), so the returned range is 0..255;
 // a `sext` lowering would make 0x80..0xFF negative and 0xFF would alias -1.
 fn _cr_byte_at(text: string, index: int) -> int {
     if text.length == 0 { return -1; }

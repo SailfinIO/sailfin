@@ -20,7 +20,7 @@ You are the Sailfin Architect agent. Your role is to review design decisions, ev
 
 ## Design Principles
 
-1. **Fix the compiler, not the build script.** All improvements must target `compiler/src/*.sfn`, not external workarounds.
+1. **Fix the compiler, not the build script.** All improvements must target canonical source under `compiler/src/` or `compiler/capsules/`, not external workarounds.
 2. **Reduce complexity, don't add it.**
 3. **The seedcheck binary must be a fully functional standalone compiler.**
 4. **Build must be fast and deterministic.** Target: under 5 minutes, zero retries.

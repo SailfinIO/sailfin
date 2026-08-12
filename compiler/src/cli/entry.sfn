@@ -12,7 +12,7 @@ import { sailfin_cli_main_v2, sailfin_cli_main_with_paths } from "./main";
 // retired C driver. The runtime capsule's `sfn-sources` array links
 // `exec.sfn`'s object into every compiler build; the
 // `apply_module_symbol_mangling` pass in
-// `compiler/src/llvm/lowering/lowering_helpers_mangling.sfn`
+// `compiler/capsules/codegen-llvm/src/lowering/lowering_helpers_mangling.sfn`
 // short-circuits when `current_module_slug` starts with `runtime/`
 // and skips mangling entirely for those modules, so the bare
 // `@exe_path` / `@binary_dir` / `@resolve_runtime_root` symbols
@@ -84,7 +84,7 @@ fn native_cli_main(argv: string[]) -> int ![clock, io, net] {
 }
 
 // M5.5 (#473): the compiler binary's C-ABI entry point. The LLVM
-// lowering pass at `compiler/src/llvm/lowering/emission.sfn` detects
+// lowering pass at `compiler/capsules/codegen-llvm/src/lowering/emission.sfn` detects
 // `fn main` and synthesizes the `@main(i32 %argc, i8** %argv)`
 // wrapper (M5.3 / #471), which converts argv into a Sailfin
 // `string[]` and forwards control here. Before #473, `@main` came
@@ -185,8 +185,8 @@ fn main(argv: string[]) -> int ![clock, io, net] {
     // `sailfin_cli_main_with_paths` argv-flag injection sees Sailfin
     // string values. In the current compiler `string` lowers to
     // `i8*` (a bare pointer — see
-    // `compiler/src/llvm/type_mapping.sfn:659` and
-    // `compiler/src/llvm/expression_lowering/native/core_type_mapping.sfn:70`),
+    // `compiler/capsules/codegen-llvm/src/type_mapping.sfn:659` and
+    // `compiler/capsules/codegen-llvm/src/expression_lowering/native/core_type_mapping.sfn:70`),
     // so `* u8` and `string` are bit-compatible across the boundary
     // and the `as` casts are no-ops at the LLVM level. The
     // future-ABI flip to `{i8*, i64}` (M1.A.2 — see the

@@ -1,6 +1,6 @@
 // Unit coverage for the source-text array-HOF result annotation helpers used
 // by let lowering.
-import { _array_hof_map_returns_int_array } from "../../src/llvm/lowering/instructions_let";
+import { _array_hof_map_returns_int_array } from "sfn/codegen-llvm/lowering/instructions_let";
 
 test "array HOF result inference: map return scan stops at callback body" {
     let initializer = "numbers.map(fn (x) -> int { fn nested() -> int[] { return [1, 2]; } return x; })";

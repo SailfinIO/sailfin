@@ -2,7 +2,7 @@
 // canonical SfnString representation `{i8*, i64}` (#1365).
 //
 // History: `comparison_predicate_for_symbol`
-// (`compiler/src/llvm/expression_lowering/native/core_operands.sfn`) had no
+// (`compiler/capsules/codegen-llvm/src/expression_lowering/native/core_operands.sfn`) had no
 // `{i8*, i64}` arm for ordered operators, so they fell through to an empty
 // predicate -> a null comparison operand -> the if-statement lowering SILENTLY
 // DROPPED the guarded branch. `sfn check` passed (lowering isn't run) and the

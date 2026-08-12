@@ -223,7 +223,7 @@ fn sfn_clock_monotonic_nanos() -> i64 ![clock] {
 // The never-shipped `monotonic_millis` backend (issue #819). The
 // prelude's `monotonic_millis()` and `runtime_monotonic_millis_fn`
 // route here through the helper registry
-// (`compiler/src/llvm/runtime_helpers.sfn`), replacing the legacy C
+// (`compiler/capsules/codegen-llvm/src/runtime_helpers.sfn`), replacing the legacy C
 // `sailfin_runtime_monotonic_millis` (which returned a `double` and
 // needed the `c_abi_return_type` coercion). This native version reads
 // the monotonic clock through `sfn_clock_monotonic_nanos` (#878's

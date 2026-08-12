@@ -12,7 +12,7 @@
 // runtime objects via `_emit_runtime_sfn_to_obj`) rejects the repeat with
 // "invalid redefinition of function", breaking a cold-clone `make test` for
 // every test. The dedup pass in
-// `compiler/src/llvm/lowering/lowering_core/finalization.sfn`
+// `compiler/capsules/codegen-llvm/src/lowering/lowering_core/finalization.sfn`
 // (dedup_module_declare_lines)
 // fixes it; this test pins the contract so it can't silently regress.
 //

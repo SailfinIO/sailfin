@@ -1,6 +1,5 @@
+import { fallthrough_block_is_reachable } from "sfn/codegen-llvm/lowering/emission_reachability";
 import { expect_eq_bool } from "sfn/test";
-
-import { fallthrough_block_is_reachable } from "../../src/llvm/lowering/emission_reachability";
 
 test "straight-line final block is reachable" {
     let lines = ["define i32 @f() {", "block.entry:", "  %x = add i32 1, 2"];

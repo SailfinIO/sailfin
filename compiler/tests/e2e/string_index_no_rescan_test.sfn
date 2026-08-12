@@ -3,7 +3,7 @@
 //
 // `s[i]` lowers through the `grapheme_at` descriptor, which pins
 // `parameter_types: ["{i8*, i64}", "double"]` at
-// `compiler/src/llvm/runtime_helpers/registry_values.sfn` and resolves to the length-aware
+// `compiler/capsules/codegen-llvm/src/runtime_helpers/registry_values.sfn` and resolves to the length-aware
 // `sfn_str_grapheme_at_lv` symbol (#1704). The aggregate already carries its
 // length in field 1, so the lowering must pass it through untouched.
 //

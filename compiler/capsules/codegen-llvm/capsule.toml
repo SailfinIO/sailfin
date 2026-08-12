@@ -1,0 +1,16 @@
+[capsule]
+name = "sfn/codegen-llvm"
+version = "0.9.5"
+description = "Sailfin LLVM lowering provider (toolchain-internal)"
+publish = false
+
+[dependencies]
+"sfn/ir" = "*"
+"sfn/strings" = "*"
+
+[capabilities]
+required = []
+
+[build]
+kind = "library"
+entry = "src/mod.sfn"

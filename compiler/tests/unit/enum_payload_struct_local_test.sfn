@@ -2,7 +2,7 @@
 // (`Result.Ok { value: p }`) must be heap-boxed, not stored by value.
 //
 // Background (SFN-770): `Result<T, E>` is generic, so `lower_enum_literal`
-// in `compiler/src/llvm/expression_lowering/native/core_literals_lowering.sfn`
+// in `compiler/capsules/codegen-llvm/src/expression_lowering/native/core_literals_lowering.sfn`
 // takes the `field_is_generic` path — it lowers the payload with no type
 // hint and then adopts the operand's own LLVM type as the field type.
 //

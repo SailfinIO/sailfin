@@ -5,7 +5,7 @@ test "ghash: clmul32 worst case sits exactly on the 62-bit bound" {
     // The carryless square of the all-ones 32-bit word is sum x^(2i) for
     // i in 0..31 — bits 0, 2, ..., 62 set — which is (4^32 - 1) / 3. This is
     // the largest value clmul32 can return, so it is the regression guard on
-    // the 0.813-bit headroom the construction depends on. compiler/src/llvm/
+    // the 0.813-bit headroom the construction depends on. compiler/capsules/codegen-llvm/src/
     // emits no nsw/nuw, so a bound violation wraps and fails here loudly
     // rather than being undefined behaviour.
     assert _clmul32(4294967295, 4294967295) == 6148914691236517205;

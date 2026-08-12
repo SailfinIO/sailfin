@@ -7,6 +7,7 @@ import { collect_reexport_violations } from "sfn/analyzer/reexport_check";
 import { typecheck_diagnostics_with_prelude, typecheck_has_errors_with_prelude } from "sfn/analyzer/typecheck";
 import { Diagnostic, diagnostic_to_diag } from "sfn/analyzer/typecheck_types";
 import { emit_native_diag_lines } from "sfn/codegen";
+import { runtime_helper_call_names } from "sfn/codegen-llvm";
 import { native_lines_have_text } from "sfn/ir";
 import { Program } from "sfn/syntax";
 import { parse_program } from "sfn/syntax";
@@ -17,7 +18,6 @@ import { run_ownership_checker } from "./check/ownership";
 import { emit_native_lines_with_module_name } from "./codegen_driver";
 import { render_diagnostic, report_reexport_violations, split_source_lines } from "./diagnostics_render";
 import { validate_and_render_effects } from "./effect_gate";
-import { runtime_helper_call_names } from "./llvm/runtime_helpers/mod";
 import { load_prelude_global_names } from "./prelude_globals";
 
 fn _staging_emit_typecheck_diagnostics(entries: Diagnostic[], source: string, file_path: string) ![io] {

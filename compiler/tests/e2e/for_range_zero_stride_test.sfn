@@ -7,12 +7,12 @@
 // precise range-parser diagnostics were discarded. Both paths now fail closed
 // with E1004. The success controls pin the unaffected literal and computed
 // stride paths.
+import { parse_range_iterable } from "sfn/codegen-llvm/expression_lowering/native/core_parse";
+import { lower_native_text_to_llvm_artifact_with_context_and_provider } from "sfn/codegen-llvm/lowering/entrypoints";
 import { find } from "sfn/strings";
 import { expect_contains_str, expect_eq_bool } from "sfn/test";
 
 import { empty_llvm_import_context, resolve_llvm_provider_context } from "../../src/build/llvm_provider_context";
-import { parse_range_iterable } from "../../src/llvm/expression_lowering/native/core_parse";
-import { lower_native_text_to_llvm_artifact_with_context_and_provider } from "../../src/llvm/lowering/entrypoints";
 
 fn _sfn_bin() -> string ![io] {
     let configured = env.get("SAILFIN_BIN");

@@ -16,7 +16,7 @@
 // 443, SNI = host, peer chain verified AND hostname checked (RFC 6125);
 // system trust-store discovery hardening is #3.
 //
-// ABI. `compiler/src/llvm/runtime_helpers.sfn` flips the curl
+// ABI. `compiler/capsules/codegen-llvm/src/runtime_helpers.sfn` flips the curl
 // registry rows by setting `native_signature` to the symbols
 // defined here, exactly as the `fs.*` rows were flipped to
 // `sfn_fs_*` (the legacy C `symbol` stays for seed compat):

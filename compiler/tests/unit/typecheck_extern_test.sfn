@@ -121,7 +121,7 @@ test "extern: rejects effects on the extern itself (E0804)" ![io] {
 // and primitives that the LLVM backend does not yet map (i16, u32,
 // f64, etc.). All produce E0805 today; the wider integer/float
 // types come back to the accept-list once `map_primitive_type` in
-// `compiler/src/llvm/type_mapping.sfn` learns to lower them.
+// `compiler/capsules/codegen-llvm/src/type_mapping.sfn` learns to lower them.
 // -------------------------------------------------------------------
 test "extern: rejects bare void parameter (E0805)" ![io] {
     let source = "extern fn evil(x: void) -> i64;";

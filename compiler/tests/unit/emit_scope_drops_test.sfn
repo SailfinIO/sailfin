@@ -16,8 +16,8 @@
 // representation. Drop temp names are slot-prefixed and counter-suffixed
 // (`%l5.drop.<n>`) so the same scope can close at multiple terminator
 // points without producing duplicate `%l5.drop` definitions.
-import { emit_drops_for_scope_chain, emit_scope_drops } from "../../src/llvm/lowering/instructions_helpers";
-import { LocalBinding, OwnershipInfo } from "../../src/llvm/types";
+import { emit_drops_for_scope_chain, emit_scope_drops } from "sfn/codegen-llvm/lowering/instructions_helpers";
+import { LocalBinding, OwnershipInfo } from "sfn/codegen-llvm/types";
 
 fn _make_binding(name: string, slot: string, llvm_type: string, kind: string, consumed: boolean, scope_id: string, ownership: OwnershipInfo?) -> LocalBinding {
     return LocalBinding {

@@ -1,0 +1,887 @@
+// compiler/capsules/codegen-llvm/src/types.sfn
+//
+// Struct definitions for the LLVM lowering pass. These types represent
+// intermediate data structures used during the translation from .sfn-asm
+// to LLVM IR.
+import {
+    LayoutManifest,
+    LoweringDiagnostic,
+    NativeEnum,
+    NativeFunction,
+    NativeInterfaceSignature,
+    NativeSourceSpan,
+    NativeStruct
+} from "sfn/ir";
+
+// =============================================================================
+// Enum Layout Fixup
+// =============================================================================
+struct EnumLayoutFixupResult {
+    enums: NativeEnum[];
+    diagnostics: string[];
+}
+
+// =============================================================================
+// Trait/Interface Metadata
+// =============================================================================
+struct TraitImplementationDescriptor {
+    struct_name: string;
+    interfaces: string[];
+}
+
+struct TraitDescriptor {
+    name: string;
+    type_parameters: string[];
+    signatures: NativeInterfaceSignature[];
+}
+
+struct TraitMetadata {
+    interfaces: TraitDescriptor[];
+    implementations: TraitImplementationDescriptor[];
+}
+
+// =============================================================================
+// Effect System
+// =============================================================================
+struct FunctionEffectEntry {
+    name: string;
+    effects: string[];
+}
+
+struct CapabilityManifestEntry {
+    symbol: string;
+    effects: string[];
+}
+
+struct CapabilityManifest {
+    entries: CapabilityManifestEntry[];
+}
+
+struct FunctionCallEntry {
+    name: string;
+    callees: string[];
+}
+
+// =============================================================================
+// Runtime Helpers
+// =============================================================================
+struct RuntimeHelperDescriptor {
+    target: string;
+    symbol: string;
+    return_type: string;
+    parameter_types: string[];
+    // Optional Sailfin-native ABI symbol. When non-null, lowering
+    // emits a call to this symbol instead of `symbol` (the C ABI).
+    // M2 flips helpers from `sailfin_runtime_*` to `sfn_*` per-symbol
+    // by populating this field; until then it stays `null` and
+    // the C symbol is used. See issue #392.
+    native_signature: string?;
+    // Optional C-ABI return type. When non-null and different from
+    // `return_type`, the lowering emits the `call` against this type
+    // (i.e. the type the C runtime symbol actually returns) and then
+    // injects a post-call coercion into `return_type` at the call
+    // site. This decouples the user-visible return type from the C
+    // ABI without requiring a synchronized C-runtime flip — see
+    // issue #638 (and #634's monotonic_millis worked example, where
+    // the C body returns `double` while Sailfin should see `i64`).
+    // Stays `null` everywhere today; per-helper flips land in
+    // follow-up issues. Only numeric `double ↔ i64` coercion is
+    // supported in this PR; struct/pointer coercion arrives if/when
+    // a future helper needs it.
+    c_abi_return_type: string?;
+}
+
+// =============================================================================
+// String Constants
+// =============================================================================
+struct StringConstant {
+    name: string;
+    content: string;
+    byte_count: int;
+}
+
+struct StringPointerResult {
+    lines: string[];
+    temp_index: int;
+    pointer: string;
+}
+
+struct InterpolatedTemplateParse {
+    parts: string[];
+    expressions: string[];
+    success: boolean;
+}
+
+// =============================================================================
+// Lowering Results
+// =============================================================================
+struct LoweredLLVMResult {
+    ir: string;
+    diagnostics: string[];
+    trait_metadata: TraitMetadata;
+    function_effects: FunctionEffectEntry[];
+    lifetime_regions: LifetimeRegionMetadata[];
+    capability_manifest: CapabilityManifest;
+    string_constants: StringConstant[];
+}
+
+struct LoweredLLVMLinesResult {
+    lines: string[];
+    diagnostics: string[];
+    trait_metadata: TraitMetadata;
+    function_effects: FunctionEffectEntry[];
+    lifetime_regions: LifetimeRegionMetadata[];
+    capability_manifest: CapabilityManifest;
+    string_constants: StringConstant[];
+    diags: LoweringDiagnostic[];
+}
+
+// Provider-owned lowering result. The driver chooses the destination and
+// publication/cache policy; codegen-llvm returns only artifact identity,
+// generated payload, and diagnostics.
+struct LLVMArtifactResult {
+    ok: boolean;
+    artifact_name: string;
+    artifact_format: string;
+    lines: string[];
+    diagnostics: string[];
+    diags: LoweringDiagnostic[];
+    failure_message: string;
+}
+
+struct LayoutManifestApplication {
+    structs: NativeStruct[];
+    enums: NativeEnum[];
+    diagnostics: string[];
+}
+
+struct LoweredLLVMFunction {
+    lines: string[];
+    diagnostics: string[];
+    lifetime_regions: LifetimeRegionMetadata[];
+    string_constants: StringConstant[];
+    diags: LoweringDiagnostic[];
+}
+
+struct BodyResult {
+    lines: string[];
+    diagnostics: string[];
+    lifetime_regions: LifetimeRegionMetadata[];
+    string_constants: StringConstant[];
+}
+
+// =============================================================================
+// Parameter/Local Bindings
+// =============================================================================
+struct ParameterBinding {
+    name: string;
+    llvm_name: string;
+    llvm_type: string;
+    type_annotation: string;
+    consumed: boolean;
+    span: NativeSourceSpan?;
+    // Flow-sensitive variant narrowing for an enum parameter guarded by
+    // `if <name>.variant == "<V>"` (mirror of LocalBinding.narrowed_variant
+    // — the guarded base is often a parameter, e.g. the AST-pass dispatch
+    // `fn f(statement: Statement)`). Empty = no narrowing.
+    narrowed_variant: string;
+}
+
+struct ParameterPreparation {
+    signature: string[];
+    bindings: ParameterBinding[];
+    diagnostics: string[];
+}
+
+struct LocalBinding {
+    name: string;
+    pointer: string;
+    llvm_type: string;
+    type_annotation: string;
+    ownership: OwnershipInfo?;
+    consumed: boolean;
+    scope_id: string;
+    scope_depth: int;
+    // Allocation kind for drop emission (M1.5). Sentinels: "arena" (default —
+    // bump-allocated, no destructor needed), "rc" (escapes to ref-counted, set
+    // by M1.5.5 escape promotion), "static" / "stack" (reserved for M2/M3).
+    allocation_kind: string;
+    // Init sentinel slot for try/catch unwind cleanup (M1.5.4, issue #328).
+    // When this binding lives inside a `try` body, an `i1` flag is allocated
+    // at function entry, zeroed before the let runs, and set after the let's
+    // value store. The catch handler loads this flag to decide whether the
+    // owned RC value is initialized before calling `sfn_rc_release`.
+    // Empty string = no sentinel (binding is outside any try body, or this
+    // is a non-let binding such as a catch variable / for-loop iterator).
+    init_sentinel: string;
+    // Flow-sensitive variant narrowing (issue: enum member-access type
+    // resolution). When this binding is an enum value guarded by an
+    // enclosing `if <name>.variant == "<V>"`, this holds "<V>" for the
+    // guarded region so member access (`<name>.field`) resolves the field
+    // against variant V specifically — rather than mis-inferring `double`
+    // when several variants share the field name with different types.
+    // Empty string = no narrowing in effect.
+    narrowed_variant: string;
+}
+
+struct ModuleGlobalLoweringResult {
+    preamble_lines: string[];
+    init_function_lines: string[];
+    init_function_symbol: string;
+    needs_init_call: boolean;
+    // Synthetic `@sailfin_module_init__<module>` function whose body assigns
+    // each runtime-evaluated module global into its `@global.<name>` slot
+    // (#1386). Null when no global needs runtime init. Lowered by the
+    // orchestrator (`lowering_core/mod.sfn`) via `emit_llvm_function`, which has
+    // the full expression-lowering context this narrow pass lacks.
+    init_function: NativeFunction?;
+    locals: LocalBinding[];
+    string_constants: StringConstant[];
+    diagnostics: string[];
+}
+
+struct BindingLoweringResult {
+    preamble_lines: string[];
+    locals: LocalBinding[];
+    needs_init: boolean;
+}
+
+// =============================================================================
+// LLVM Operands and Expression Results
+// =============================================================================
+struct LLVMOperand {
+    llvm_type: string;
+    value: string;
+}
+
+struct ExpressionResult {
+    lines: string[];
+    temp_index: int;
+    operand: LLVMOperand?;
+    diagnostics: string[];
+    string_constants: StringConstant[];
+}
+
+struct ArrayLiteralMetadata {
+    element_type: string;
+    start_index: int;
+}
+
+// =============================================================================
+// Ownership and Lifetime Tracking
+// =============================================================================
+struct OwnershipInfo {
+    variant: string;
+    base: string;
+    mutable: boolean;
+    span: NativeSourceSpan?;
+    region_id: int;
+}
+
+struct OwnershipConsumption {
+    kind: string;
+    name: string;
+}
+
+struct LifetimeRegionMetadata {
+    id: int;
+    binding: string;
+    base: string;
+    mutable: boolean;
+    start_span: NativeSourceSpan?;
+    scope_id: string;
+    scope_depth: int;
+    base_scope_id: string;
+    base_scope_depth: int;
+    end_scope_id: string;
+    end_scope_depth: int;
+    released: boolean;
+}
+
+struct LifetimeReleaseEvent {
+    region_id: int;
+    scope_id: string;
+    scope_depth: int;
+}
+
+struct ScopeMetadata {
+    scope_id: string;
+    scope_depth: int;
+}
+
+struct OwnershipAnalysis {
+    ownership: OwnershipInfo?;
+    consumption: OwnershipConsumption?;
+    diagnostics: string[];
+}
+
+// =============================================================================
+// Type Context (struct/enum/interface metadata)
+// =============================================================================
+struct StructFieldInfo {
+    name: string;
+    llvm_type: string;
+    type_annotation: string;
+    index: int;
+    offset: int;
+}
+
+struct StructTypeInfo {
+    name: string;
+    llvm_name: string;
+    fields: StructFieldInfo[];
+    size: int;
+    align: int;
+}
+
+struct EnumVariantInfo {
+    name: string;
+    tag: int;
+    offset: int;
+    size: int;
+    align: int;
+    fields: StructFieldInfo[];
+}
+
+struct EnumTypeInfo {
+    name: string;
+    // Declared generic type-parameter names (e.g. ["T", "E"]); empty for
+    // monomorphic enums. Drives #830 per-instantiation payload substitution.
+    type_parameters: string[];
+    llvm_name: string;
+    tag_type: string;
+    tag_size: int;
+    tag_align: int;
+    max_payload_size: int;
+    size: int;
+    align: int;
+    variants: EnumVariantInfo[];
+}
+
+struct VTableEntry {
+    method_name: string;
+    interface_method_name: string;
+    function_pointer_type: string;
+}
+
+struct VTableInfo {
+    struct_name: string;
+    interface_name: string;
+    llvm_type_name: string;
+    llvm_global_name: string;
+    entries: VTableEntry[];
+}
+
+struct InterfaceTypeInfo {
+    name: string;
+    llvm_name: string;
+    type_parameters: string[];
+    signatures: NativeInterfaceSignature[];
+}
+
+struct TypeContext {
+    structs: StructTypeInfo[];
+    enums: EnumTypeInfo[];
+    interfaces: InterfaceTypeInfo[];
+    vtables: VTableInfo[];
+}
+
+struct TypeContextBuild {
+    context: TypeContext;
+    diagnostics: string[];
+}
+
+struct TypeAllocationInfo {
+    llvm_type: string;
+    size: int;
+    align: int;
+}
+
+// =============================================================================
+// Heap/Allocation Helpers
+// =============================================================================
+struct HeapBoxResult {
+    lines: string[];
+    temp_index: int;
+    operand: LLVMOperand?;
+    diagnostics: string[];
+}
+
+// M1.5.3 (issue #327): result of `emit_scope_drops` /
+// `emit_drops_for_scope_chain`. Threading the temp counter through the
+// drop helper guarantees unique drop temp names when the same scope is
+// closed at multiple terminator points (e.g., two `return`s in a
+// function — both drop the function root scope, but each gets its own
+// `%<slot>.drop.<n>` to satisfy LLVM's "unique value name per
+// function" rule).
+struct ScopeDropResult {
+    lines: string[];
+    next_temp: int;
+}
+
+// Result of `emit_guarded_scope_drops` (M1.5.4, issue #328). Like
+// `ScopeDropResult` but also threads the block-label counter, since the
+// guarded-drop emission allocates fresh `drop` / `skip` basic-block
+// labels per binding to host the conditional branch. `final_label` is
+// the basic-block label that becomes the active block after the last
+// guarded drop (the trailing `skip<N>` block); the catch handler must
+// thread it through to the catch body's `current_label` so subsequent
+// instructions emit into the right block. Empty when no drops were
+// emitted (no rc-eligible bindings descended from the try scope) — in
+// that case the caller keeps its existing active label.
+struct GuardedDropResult {
+    lines: string[];
+    next_temp: int;
+    next_block_counter: int;
+    final_label: string;
+}
+
+// =============================================================================
+// Literal Parsing
+// =============================================================================
+struct StructLiteralField {
+    name: string;
+    value: string;
+}
+
+struct StructLiteralParse {
+    recognized: boolean;
+    success: boolean;
+    type_name: string;
+    fields: StructLiteralField[];
+    diagnostics: string[];
+}
+
+struct EnumLiteralParse {
+    recognized: boolean;
+    success: boolean;
+    enum_name: string;
+    variant_name: string;
+    fields: StructLiteralField[];
+    diagnostics: string[];
+}
+
+struct MemberAccessParse {
+    success: boolean;
+    base: string;
+    field: string;
+}
+
+struct IndexExpressionParse {
+    success: boolean;
+    base: string;
+    index: string;
+}
+
+// =============================================================================
+// Mutation Tracking
+// =============================================================================
+struct LocalMutation {
+    name: string;
+    llvm_type: string;
+    value_name: string;
+    span: NativeSourceSpan?;
+    originating_label: string;
+}
+
+// =============================================================================
+// Operator/Expression Parsing
+// =============================================================================
+struct OperatorMatch {
+    index: int;
+    symbol: string;
+    success: boolean;
+}
+
+struct AssignmentParseResult {
+    success: boolean;
+    target: string;
+    value: string;
+    operator: string;  // "" for simple assignment, "+", "-", "*", "/" for compound
+}
+
+struct BorrowParseResult {
+    recognized: boolean;
+    success: boolean;
+    target: string;
+    mutable: boolean;
+    diagnostics: string[];
+}
+
+struct BorrowArgumentParse {
+    success: boolean;
+    argument: string;
+    diagnostics: string[];
+}
+
+struct RawAddressParseResult {
+    recognized: boolean;
+    success: boolean;
+    target: string;
+    diagnostics: string[];
+}
+
+struct CastParseResult {
+    recognized: boolean;
+    success: boolean;
+    value: string;
+    type_annotation: string;
+    diagnostics: string[];
+}
+
+struct TernaryParseResult {
+    success: boolean;
+    condition: string;
+    true_value: string;
+    false_value: string;
+    diagnostics: string[];
+}
+
+// =============================================================================
+// Statement/Instruction Lowering Results
+// =============================================================================
+struct ExpressionStatementResult {
+    lines: string[];
+    temp_index: int;
+    locals: LocalBinding[];
+    bindings: ParameterBinding[];
+    diagnostics: string[];
+    lifetime_regions: LifetimeRegionMetadata[];
+    lifetime_releases: LifetimeReleaseEvent[];
+    next_region_id: int;
+    mutations: LocalMutation[];
+    string_constants: StringConstant[];
+    diags: LoweringDiagnostic[];
+}
+
+struct LetLoweringResult {
+    lines: string[];
+    allocas: string[];
+    locals: LocalBinding[];
+    bindings: ParameterBinding[];
+    temp_index: int;
+    diagnostics: string[];
+    next_local_id: int;
+    lifetime_regions: LifetimeRegionMetadata[];
+    lifetime_releases: LifetimeReleaseEvent[];
+    next_region_id: int;
+    mutations: LocalMutation[];
+    string_constants: StringConstant[];
+    diags: LoweringDiagnostic[];
+}
+
+struct InlineLetParseResult {
+    success: boolean;
+    name: string;
+    mutable: boolean;
+    type_annotation: string;
+    initializer: string?;
+    diagnostics: string[];
+}
+
+// =============================================================================
+// Control Flow Structures
+// =============================================================================
+struct BlockLabelResult {
+    label: string;
+    next_counter: int;
+}
+
+struct IfStructure {
+    then_start: int;
+    then_end: int;
+    else_start: int;
+    else_end: int;
+    has_else: boolean;
+    next_index: int;
+    diagnostics: string[];
+}
+
+struct LoopContext {
+    break_label: string;
+    continue_label: string;
+    // Scope id enclosing the loop. M1.5.3 (issue #327) uses this so
+    // `break` / `continue` can drop every scope from the current
+    // scope up to (but not including) the loop's enclosing scope —
+    // those scopes outlive the loop and must not be dropped here.
+    outer_scope_id: string;
+}
+
+struct LoopStructure {
+    body_start: int;
+    body_end: int;
+    next_index: int;
+    diagnostics: string[];
+}
+
+// SFN-400: a per-try-frame entry on the `try_stack` threaded through
+// `lower_instruction_range`, mirroring `LoopContext`. Lets an early-exit
+// terminator (`return`/`break`/`continue`) emit the missing
+// `sfn_exception_pop_frame` call that only the normal fall-through exit
+// emitted before this fix (see the SFN-400 design note).
+struct TryFrameContext {
+    // The `i8*` SSA operand of the frame alloca (LLVMOperand{ "i8*", %tN }),
+    // captured at the push site; dominates the whole try body, so it is a
+    // valid pop argument at any early-exit terminator within the body.
+    frame_operand: LLVMOperand;
+    // The try's enclosing scope id (the analogue of LoopContext.outer_scope_id),
+    // used to bound which frames a break/continue must pop.
+    scope_id: string;
+}
+
+// Span of a `routine { }` body (issue #1181): the instruction range
+// between `.routine` and its matching `.endroutine`. Mirrors
+// `LoopStructure`; the routine lowering has no loop/phi machinery.
+struct RoutineStructure {
+    body_start: int;
+    body_end: int;
+    next_index: int;
+    diagnostics: string[];
+}
+
+struct TryStructure {
+    try_start: int;
+    try_end: int;
+    catch_index: int;
+    catch_name: string;
+    catch_start: int;
+    catch_end: int;
+    finally_index: int;
+    finally_start: int;
+    finally_end: int;
+    end_index: int;
+    next_index: int;
+    diagnostics: string[];
+}
+
+struct RangeIterableParse {
+    success: boolean;
+    start: string;
+    end: string;
+    stride: string;
+    diagnostics: string[];
+}
+
+// =============================================================================
+// Match Expression Structures
+// =============================================================================
+struct MatchCaseStructure {
+    pattern: string;
+    guard: string?;
+    body_start: int;
+    body_end: int;
+    is_default: boolean;
+}
+
+struct MatchStructure {
+    cases: MatchCaseStructure[];
+    end_index: int;
+    diagnostics: string[];
+}
+
+struct MatchFieldBinding {
+    field_name: string;
+    field_type: string;
+    field_offset: int;
+}
+
+struct MatchStructFieldBinding {
+    field_name: string;
+    field_type: string;
+    field_index: int;
+}
+
+struct MatchCaseCondition {
+    lines: string[];
+    temp_index: int;
+    operand: LLVMOperand?;
+    diagnostics: string[];
+    is_default: boolean;
+    field_bindings: MatchFieldBinding[];
+    enum_info: EnumTypeInfo?;
+    variant_info: EnumVariantInfo?;
+    union_variant_index: int;
+    union_struct_info: StructTypeInfo?;
+    union_struct_bindings: MatchStructFieldBinding[];
+    string_constants: StringConstant[];
+}
+
+// =============================================================================
+// Condition/Comparison Helpers
+// =============================================================================
+struct ConditionConversion {
+    lines: string[];
+    temp_index: int;
+    operand: LLVMOperand?;
+    diagnostics: string[];
+    string_constants: StringConstant[];
+}
+
+struct ComparisonEmission {
+    lines: string[];
+    temp_index: int;
+    operand: LLVMOperand?;
+    diagnostics: string[];
+}
+
+struct CoercionResult {
+    lines: string[];
+    temp_index: int;
+    operand: LLVMOperand?;
+    diagnostics: string[];
+}
+
+struct BinaryAlignmentResult {
+    lines: string[];
+    temp_index: int;
+    left: LLVMOperand?;
+    right: LLVMOperand?;
+    diagnostics: string[];
+    result_type: string;
+}
+
+// =============================================================================
+// Block Lowering Result
+// =============================================================================
+struct BlockLoweringResult {
+    lines: string[];
+    allocas: string[];
+    locals: LocalBinding[];
+    bindings: ParameterBinding[];
+    temp_index: int;
+    block_counter: int;
+    diagnostics: string[];
+    terminated: boolean;
+    next_local_id: int;
+    lifetime_regions: LifetimeRegionMetadata[];
+    next_lifetime_region_id: int;
+    next_index: int;
+    mutations: LocalMutation[];
+    string_constants: StringConstant[];
+    diags: LoweringDiagnostic[];
+}
+
+// =============================================================================
+// Throw/Exception Handling
+// =============================================================================
+struct ThrowLoweringResult {
+    lines: string[];
+    temp_index: int;
+    diagnostics: string[];
+    terminated: boolean;
+    string_constants: StringConstant[];
+}
+
+// =============================================================================
+// PHI Node Merging
+// =============================================================================
+struct PhiMergeResult {
+    lines: string[];
+    temp_index: int;
+}
+
+struct PhiInputEntry {
+    label: string;
+    value_name: string;
+}
+
+struct MutationMaterializationResult {
+    lines: string[];
+    mutations: LocalMutation[];
+    temp_index: int;
+}
+
+struct PhiStoreEntry {
+    phi_line: string;
+    store_line: string;
+}
+
+struct MatchArmMutations {
+    mutations: LocalMutation[];
+    label: string;
+    terminated: boolean;
+}
+
+// =============================================================================
+// Local Loading
+// =============================================================================
+struct LoadLocalResult {
+    lines: string[];
+    temp_index: int;
+    operand: LLVMOperand?;
+    diagnostics: string[];
+}
+
+// =============================================================================
+// Call Resolution (split from core_call_lowering for OOM avoidance)
+// =============================================================================
+struct CallTargetResolution {
+    trimmed_target: string;
+    method_operand: LLVMOperand?;
+    helper_descriptor: RuntimeHelperDescriptor?;
+    injected_argument_count: int;
+    is_array_concat: boolean;
+    array_concat_element_type: string;
+    is_array_push: boolean;
+    array_push_element_type: string;
+    current_lines: string[];
+    current_temp: int;
+    diagnostics: string[];
+    string_constants: StringConstant[];
+    // Issue #689: closure-callee dispatch. When the call target
+    // resolves to a `__closure__@sfn_lambda_<N>`-typed local or a
+    // `fn(...) -> R`-typed parameter binding, this flag steers
+    // `coerce_and_emit_call` into the extractvalue + bitcast +
+    // call sequence instead of the standard `@symbol(...)` path.
+    // `method_operand` carries the loaded `{i8*, i8*}` closure
+    // aggregate when this flag is set.
+    is_closure_dispatch: boolean;
+    closure_return_type: string;
+    closure_parameter_types: string[];
+}
+
+struct CallSignatureResolution {
+    trimmed_target: string;
+    function_entry: NativeFunction?;
+    llvm_return: string;
+    expected_params: string[];
+    is_trait_dispatch: boolean;
+    diagnostics: string[];
+    // Issue #633: when a user-defined function entry wins over a
+    // colliding `target == symbol` runtime-helper row, signal the
+    // caller to drop its `helper_descriptor` so downstream emission
+    // (`coerce_and_emit_call`) does not re-fetch the helper via
+    // `find_runtime_helper` and re-apply its `native_signature` /
+    // `c_abi_return_type` coercion against the function entry's
+    // signature. The legacy precedence let the helper coercion slip
+    // through unconditionally; this flag carries the precedence
+    // decision across the function boundary.
+    helper_overridden: boolean;
+    // Issue #689: closure-callee dispatch. Propagated from
+    // `CallTargetResolution.is_closure_dispatch` so the signature
+    // resolver short-circuits the function-entry / helper lookup
+    // (a `__closure__@…`-typed local has no function entry).
+    is_closure_dispatch: boolean;
+}
+
+// Wraps the output of `lower_all_functions` so the orchestrator can
+// merge diagnostics in-memory instead of reading them back via the
+// `.phase_functions_diagnostics` file IPC channel. The previous file
+// channel was a source of non-determinism: if the file persisted across
+// test invocations (the `cli_commands._clean_lowering_state` sweep
+// happens early in a compile, not between test invocations), a later
+// invocation could read stale bytes into diagnostic strings and
+// contaminate downstream state.
+struct FunctionLoweringResult {
+    lines: string[];
+    diagnostics: string[];
+    diags: LoweringDiagnostic[];
+}
+
+// Wraps the output of `build_type_context_with_recovery` for the same
+// reason as `FunctionLoweringResult` — eliminates the
+// `.phase_types_diagnostics` file IPC channel.
+struct TypeContextBuildResult {
+    context: TypeContext;
+    diagnostics: string[];
+}

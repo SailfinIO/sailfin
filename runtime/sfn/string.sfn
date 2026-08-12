@@ -12,7 +12,7 @@
 // `sfn_str_len` is a single field load and `sfn_str_eq` is a length
 // compare + `memcmp`. The M1.A.2 type-mapping flip has landed —
 // the Sailfin frontend now lowers `string` to the `{i8*, i64}`
-// aggregate (`compiler/src/llvm/type_mapping.sfn`) — but these
+// aggregate (`compiler/capsules/codegen-llvm/src/type_mapping.sfn`) — but these
 // bodies still take their payloads as NUL-terminated `* u8` by the
 // registry ABI and bridge through libc, so the body rewrite over
 // the aggregate field-read shape is still future work. The function
@@ -115,7 +115,7 @@ extern fn strtod(nptr: *u8, endptr: **u8) -> f64;
 //
 // #1308: `read_byte` / `grapheme_byte` are now native Sailfin (the C defs are
 // deleted, seed 0.7.0-alpha.41 carries the `load_byte` builtin). They read a
-// single byte from `real` via `load_byte` (compiler/src/llvm/byte_load.sfn) — a
+// single byte from `real` via `load_byte` (compiler/capsules/codegen-llvm/src/byte_load.sfn) — a
 // true `load i8` + `zext`, sound at any alignment, unlike the word-load
 // `_owned_buf_load_byte` which over-reads the enclosing 8-aligned word and is
 // only safe on padded `owned_buf_new` storage. `read_byte` is byte-identical to

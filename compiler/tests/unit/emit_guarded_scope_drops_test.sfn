@@ -23,8 +23,8 @@
 // locals are skipped (predicate shared with `emit_scope_drops`).
 // Bindings outside the try scope chain are skipped. Bindings without a
 // sentinel (e.g., catch variables, for-loop iterators) are skipped.
-import { emit_guarded_scope_drops, scope_id_inside_try_body } from "../../src/llvm/lowering/instructions_helpers";
-import { LocalBinding, OwnershipInfo } from "../../src/llvm/types";
+import { emit_guarded_scope_drops, scope_id_inside_try_body } from "sfn/codegen-llvm/lowering/instructions_helpers";
+import { LocalBinding, OwnershipInfo } from "sfn/codegen-llvm/types";
 
 fn _make_binding(name: string, slot: string, llvm_type: string, kind: string, consumed: boolean, scope_id: string, ownership: OwnershipInfo?, sentinel: string) -> LocalBinding {
     return LocalBinding {

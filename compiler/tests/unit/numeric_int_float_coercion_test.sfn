@@ -9,8 +9,9 @@
 // that the diagnostic name the escape valve. Tests below pin both
 // directions and confirm the fix-it text survives any future refactor
 // of the diagnostic emitter.
-import { coerce_operand_to_type, dominant_type, harmonise_operands } from "../../src/llvm/expression_lowering/native/core_operands/dispatch";
-import { LLVMOperand } from "../../src/llvm/types";
+import { coerce_operand_to_type, dominant_type, harmonise_operands } from "sfn/codegen-llvm/expression_lowering/native/core_operands/dispatch";
+import { LLVMOperand } from "sfn/codegen-llvm/types";
+
 import { index_of } from "../../src/string_utils";
 
 fn _make_operand(llvm_type: string, value: string) -> LLVMOperand {

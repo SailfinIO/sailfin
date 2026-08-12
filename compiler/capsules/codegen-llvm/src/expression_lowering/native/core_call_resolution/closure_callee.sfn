@@ -1,0 +1,341 @@
+// compiler/capsules/codegen-llvm/src/expression_lowering/native/core_call_resolution/closure_callee.sfn
+//
+// Closure-callee parsing and operand resolution.
+import { NativeFunction } from "sfn/ir";
+import { find, substring } from "sfn/strings";
+
+import { is_simple_identifier } from "../../../expressions_helpers";
+import { find_function_by_name } from "../../../rendering_helpers";
+import {
+    LLVMOperand,
+    LocalBinding,
+    ParameterBinding,
+    TypeContext
+} from "../../../types";
+import { starts_with, trim_text } from "../../../utils";
+import { lower_closure_pair_marker } from "../core";
+import { collect_parameter_types } from "../core_helpers";
+import { load_local_operand } from "../core_operands/comparisons";
+import { find_local_binding, find_parameter_binding } from "../core_scopes";
+import { map_parameter_type, map_return_type } from "../core_type_mapping";
+
+// ── Closure-callee detection (issue #689) ────────────────────────────
+//
+// Recognise a call whose target is a `__closure__@sfn_lambda_<N>`-typed
+// local (set by `lower_let_instruction` after the lambda-lifting pass
+// rewrites the let) or a `fn(...) -> R`-typed parameter (parser
+// support landed in #688). Both forms hold a `{i8*, i8*}` aggregate at
+// runtime — `coerce_and_emit_call` extracts `fn_ptr` and `env*` and
+// emits the dispatch sequence.
+//
+// Returns the loaded closure-pair operand plus the LLVM return type
+// and parameter types (with the hidden `__env: i8*` parameter
+// stripped from the lifted function's signature). The caller plugs
+// these into the resolved `CallTargetResolution` so signature
+// resolution can route to the closure-dispatch path.
+struct _ClosureCalleeInfo {
+    operand: LLVMOperand;
+    lines: string[];
+    temp_index: int;
+    return_type: string;
+    parameter_types: string[];
+}
+
+fn _parse_fn_pointer_annotation(context: TypeContext, annotation: string) -> _ClosureSignatureParse {
+    let trimmed = trim_text(annotation);
+    // `sfn fmt` normalises `fn(` to `fn (` (with an interior space)
+    // — accept either spelling so the round-trip through the
+    // formatter does not desync the call-site dispatch path.
+    let mut cursor: int = -1;
+    if starts_with(trimmed, "fn(") { cursor = 3; }
+    if starts_with(trimmed, "fn (") { cursor = 4; }
+    if cursor < 0 {
+        return _ClosureSignatureParse {
+            ok: false,
+            parameter_types: [],
+            return_type: ""
+        };
+    }
+    let mut depth: int = 1;
+    let mut params_end: int = -1;
+    loop {
+        if cursor >= trimmed.length { break; }
+        let ch = substring(trimmed, cursor, cursor + 1);
+        if ch == "(" { depth += 1; }
+        if ch == ")" {
+            depth -= 1;
+            if depth == 0 {
+                params_end = cursor;
+                break;
+            }
+        }
+        cursor += 1;
+    }
+    if params_end < 0 {
+        return _ClosureSignatureParse {
+            ok: false,
+            parameter_types: [],
+            return_type: ""
+        };
+    }
+    // Recover where the `(` actually starts so the parameter list
+    // slice excludes both the `fn` keyword and the optional space.
+    let mut params_start: int = 3;
+    if starts_with(trimmed, "fn (") { params_start = 4; }
+    let params_text = trim_text(substring(trimmed, params_start, params_end));
+    let after_params = trim_text(substring(trimmed, params_end + 1, trimmed.length));
+    let return_text = _strip_return_arrow(after_params);
+    if return_text.length == 0 {
+        return _ClosureSignatureParse {
+            ok: false,
+            parameter_types: [],
+            return_type: ""
+        };
+    }
+    let mut param_annotations: string[] = _split_top_level_comma(params_text);
+    let mut parameter_types: string[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= param_annotations.length { break; }
+        let raw = trim_text(param_annotations[index]);
+        if raw.length == 0 {
+            index += 1;
+            continue;
+        }
+        // Allow `name: T` form (named function-pointer parameters)
+        // by stripping the leading `<name>:` token if present. The
+        // parser preserves the verbatim annotation text, so the
+        // form is `name: type`.
+        let mut param_type_text: string = raw;
+        let colon_pos = find(raw, ":", 0);
+        if colon_pos > 0 {
+            param_type_text = trim_text(substring(raw, colon_pos + 1, raw.length));
+        }
+        let mapped = map_parameter_type(context, param_type_text);
+        let mut effective_mapped: string = mapped;
+        if effective_mapped.length == 0 { effective_mapped = "i8*"; }
+        parameter_types.push(effective_mapped);
+        index += 1;
+    }
+    let mut return_mapped: string = map_return_type(context, return_text);
+    if return_mapped.length == 0 { return_mapped = "void"; }
+    return _ClosureSignatureParse {
+        ok: true,
+        parameter_types: parameter_types,
+        return_type: return_mapped
+    };
+}
+
+struct _ClosureSignatureParse {
+    ok: boolean;
+    parameter_types: string[];
+    return_type: string;
+}
+
+// Predicate for the user-supplied `fn(...) -> R` parameter annotation
+// (issue #688) in either spelling. `sfn fmt --write` injects a space
+// after `fn`, so a round-trip through the formatter produces
+// `fn (int) -> int` even when the source was authored as `fn(int)`.
+fn _looks_like_fn_pointer_annotation(annotation: string) -> boolean {
+    let trimmed = trim_text(annotation);
+    if starts_with(trimmed, "fn(") { return true; }
+    if starts_with(trimmed, "fn (") { return true; }
+    return false;
+}
+
+fn _strip_return_arrow(text: string) -> string {
+    let trimmed = trim_text(text);
+    if starts_with(trimmed, "->") {
+        let result = trim_text(substring(trimmed, 2, trimmed.length));
+        let effect_start = find(result, "![", 0);
+        if effect_start >= 0 {
+            return trim_text(substring(result, 0, effect_start));
+        }
+        return result;
+    }
+    return "";
+}
+
+fn _split_top_level_comma(text: string) -> string[] {
+    let mut out: string[] = [];
+    if text.length == 0 { return out; }
+    let mut depth: int = 0;
+    let mut segment: string = "";
+    let mut cursor: int = 0;
+    loop {
+        if cursor >= text.length { break; }
+        let ch = substring(text, cursor, cursor + 1);
+        if ch == "(" { depth += 1; }
+        if ch == "<" { depth += 1; }
+        let mut _close: boolean = false;
+        if ch == ")" { _close = true; }
+        if ch == ">" { _close = true; }
+        if _close {
+            if depth > 0 { depth -= 1; }
+        }
+        if ch == "," {
+            if depth == 0 {
+                out.push(segment);
+                segment = "";
+                cursor += 1;
+                continue;
+            }
+        }
+        segment = segment + ch;
+        cursor += 1;
+    }
+    if segment.length > 0 { out.push(segment); }
+    return out;
+}
+
+// Strip the leading `__env: i8*` parameter (synthesised by
+// `_synthesize_lifted_function_rewritten` in `lambda_lowering.sfn`) from a
+// lifted function's parameter type list, leaving just the
+// user-visible parameter types for the call-site signature.
+fn _strip_env_parameter(parameter_types: string[]) -> string[] {
+    if parameter_types.length == 0 { return parameter_types; }
+    let mut out: string[] = [];
+    let mut index: int = 1;
+    loop {
+        if index >= parameter_types.length { break; }
+        out.push(parameter_types[index]);
+        index += 1;
+    }
+    return out;
+}
+
+// Extract the lifted-lambda function name (no leading `@`) from a
+// `<closure_pair @sfn_lambda_<N> ...>` marker, or "" if malformed. Mirrors the
+// symbol parse in `lower_closure_pair_marker` (core_closure_lowering.sfn) so the two agree on
+// which function the marker names.
+fn _closure_pair_symbol(marker: string) -> string {
+    let prefix = "<closure_pair ";
+    let mut cursor: int = prefix.length;
+    let mut symbol: string = "";
+    loop {
+        if cursor >= marker.length { break; }
+        let ch = marker[cursor];
+        if ch == " " { break; }
+        symbol = symbol + ch;
+        cursor += 1;
+    }
+    if symbol.length == 0 { return ""; }
+    if substring(symbol, 0, 1) == "@" {
+        return substring(symbol, 1, symbol.length);
+    }
+    return symbol;
+}
+
+fn try_resolve_closure_callee(target: string, bindings: ParameterBinding[], locals: LocalBinding[], functions: NativeFunction[], context: TypeContext, temp_index: int, lines: string[]) -> _ClosureCalleeInfo? {
+    let name = trim_text(target);
+    if name.length == 0 { return null; }
+
+    // Inline IIFE (#1949): the callee is a lifted-lambda closure-pair marker
+    // (`<closure_pair @sfn_lambda_<N> ...>`) rather than a named binding — e.g.
+    // `(fn (n) => n + 1)(5)`. Materialise the `{i8*, i8*}` pair inline (reusing
+    // `lower_closure_pair_marker`) and resolve the lifted function's user-facing
+    // signature, so the call routes through the same closure-dispatch branch as
+    // a `__closure__`-typed local. Without this the marker is not a simple
+    // identifier and dispatch falls through to a silent zero return. The trailing
+    // space in the prefix excludes the `<closure_pair_fatal_mutable ...>` marker.
+    if starts_with(name, "<closure_pair ") {
+        let symbol = _closure_pair_symbol(name);
+        if symbol.length == 0 { return null; }
+        let marker_fn = find_function_by_name(functions, symbol);
+        if marker_fn != null {
+            let pair = lower_closure_pair_marker(name, functions, context, bindings, locals, temp_index, lines);
+            if pair.operand != null {
+                let materialized: LLVMOperand = pair.operand;
+                let lifted_params = collect_parameter_types(context, marker_fn.parameters, marker_fn.name);
+                let user_params = _strip_env_parameter(lifted_params);
+                let return_type = map_return_type(context, marker_fn.return_type);
+                let mut effective_return: string = return_type;
+                if effective_return.length == 0 { effective_return = "void"; }
+                return _ClosureCalleeInfo {
+                    operand: materialized,
+                    lines: pair.lines,
+                    temp_index: pair.temp_index,
+                    return_type: effective_return,
+                    parameter_types: user_params
+                };
+            }
+        }
+        return null;
+    }
+
+    if !is_simple_identifier(name) { return null; }
+
+    // Locals win over parameters when both bind the same name (the
+    // shadowing rule `find_local_binding` already encodes). Closure
+    // bindings produced by lambda lifting carry the rich form
+    // `__closure__@sfn_lambda_<N>`; a user-supplied
+    // `let f: fn(int) -> int = ...;` keeps its bare `fn(...)`
+    // annotation through `_rewrite_variable` because the lift pass
+    // only overrides when the value is a closure-pair marker — see
+    // `lambda_lowering.sfn:_rewrite_variable`.
+    let local = find_local_binding(locals, name);
+    if local != null {
+        let annotation = local.type_annotation;
+        if starts_with(annotation, "__closure__@") {
+            let symbol = substring(annotation, "__closure__@".length, annotation.length);
+            let target_fn = find_function_by_name(functions, symbol);
+            if target_fn != null {
+                let lifted_params = collect_parameter_types(context, target_fn.parameters, target_fn.name);
+                let user_params = _strip_env_parameter(lifted_params);
+                let return_type = map_return_type(context, target_fn.return_type);
+                let mut effective_return: string = return_type;
+                if effective_return.length == 0 { effective_return = "void"; }
+                let load = load_local_operand(local, temp_index, lines);
+                return _ClosureCalleeInfo {
+                    operand: load.operand,
+                    lines: load.lines,
+                    temp_index: load.temp_index,
+                    return_type: effective_return,
+                    parameter_types: user_params
+                };
+            }
+        }
+        if _looks_like_fn_pointer_annotation(annotation) {
+            let parsed = _parse_fn_pointer_annotation(context, annotation);
+            if parsed.ok {
+                let load = load_local_operand(local, temp_index, lines);
+                return _ClosureCalleeInfo {
+                    operand: load.operand,
+                    lines: load.lines,
+                    temp_index: load.temp_index,
+                    return_type: parsed.return_type,
+                    parameter_types: parsed.parameter_types
+                };
+            }
+        }
+    }
+
+    let parameter = find_parameter_binding(bindings, name);
+    if parameter != null {
+        if _looks_like_fn_pointer_annotation(parameter.type_annotation) {
+            let parsed = _parse_fn_pointer_annotation(context, parameter.type_annotation);
+            if parsed.ok {
+                let operand = LLVMOperand {
+                    llvm_type: parameter.llvm_type,
+                    value: parameter.llvm_name
+                };
+                return _ClosureCalleeInfo {
+                    operand: operand,
+                    lines: lines,
+                    temp_index: temp_index,
+                    return_type: parsed.return_type,
+                    parameter_types: parsed.parameter_types
+                };
+            }
+        }
+    }
+    return null;
+}
+
+// Resolve fused concat/push targets (e.g. `valuesconcat(xs)` → `concat`).
+// Also handles parse_member_access dispatch and struct-method fallback.
+export {
+    _ClosureSignatureParse,
+    _parse_fn_pointer_annotation,
+    try_resolve_closure_callee
+};

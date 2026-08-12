@@ -23,7 +23,7 @@
 //   3. `ImportedFunctionSignature` for cross-module callees.
 //
 // Why the builtin table is duplicated rather than read from the lowering
-// registry: `find_runtime_helper` lives in `compiler/src/llvm/`, inside the
+// registry: `find_runtime_helper` lives in `compiler/capsules/codegen-llvm/src/`, inside the
 // `sailfin` capsule, which already depends on `sfn/analyzer`. Importing it
 // here would close a capsule cycle. The mirror is pinned against the
 // registry and the typecheck allowlist by
@@ -75,7 +75,7 @@ fn _unknown_signature() -> CallSignature {
 // SFN-812 forcing case (`s.a = print(...)` silently drops the store), and
 // unlike arity this classification is unambiguous for every name listed.
 // Kept in sync with the `return_type: "void"` rows in
-// `compiler/src/llvm/runtime_helpers/registry_*.sfn` and the void-emitting
+// `compiler/capsules/codegen-llvm/src/runtime_helpers/registry_*.sfn` and the void-emitting
 // arms of `is_atomic_builtin`/`is_secure_zero_builtin`.
 fn builtin_returns_void(name: string) -> boolean {
     if strings_equal(name, "print") { return true; }

@@ -21,7 +21,7 @@
 // external linkage — two `sfn-sources` modules defining `_append`
 // would be a duplicate-symbol link error.
 //
-// Handler ABI (#1476 — moved OwnedBuf). The emitter (`compiler/src/llvm/
+// Handler ABI (#1476 — moved OwnedBuf). The emitter (`compiler/capsules/codegen-llvm/src/
 // expression_lowering/native/core.sfn`) lowers `serve(<handler>, <port>)`
 // by bitcasting the handler function value to a bare `i8*` code pointer
 // and passing it with the port to `sfn_serve` (unchanged — the bitcast
@@ -39,7 +39,7 @@
 // capsule types) marshals OwnedBuf <-> Request/Response in its
 // trampoline on top of this ABI.
 //
-// ABI flip. `compiler/src/llvm/runtime_helpers.sfn` flips the two
+// ABI flip. `compiler/capsules/codegen-llvm/src/runtime_helpers.sfn` flips the two
 // serve registry rows to the symbols defined here:
 //   - `serve_start`            -> `sfn_serve`                 (handler, port)
 //   - `serve_handler_dispatch` -> `sfn_serve_handler_dispatch` (handler, request)

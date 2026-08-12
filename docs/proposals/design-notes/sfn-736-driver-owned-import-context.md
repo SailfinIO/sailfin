@@ -72,7 +72,7 @@ LLVM text validation was separated into `llvm_validation.sfn` so the parallel
 capsule emitter does not regain a `main.sfn` edge through the generic emit
 helper. A source-graph regression test walks the multi-capsule check closure
 and rejects both `compiler/src/main.sfn` and every
-`compiler/src/llvm/lowering/` module.
+`compiler/capsules/codegen-llvm/src/lowering/` module.
 
 ## 4. Effect and API ratchets
 

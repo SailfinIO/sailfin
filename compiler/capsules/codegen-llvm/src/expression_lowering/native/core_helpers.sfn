@@ -1,0 +1,87 @@
+// compiler/capsules/codegen-llvm/src/expression_lowering/native/core_helpers.sfn
+//
+// Small helper utilities extracted from core.sfn to reduce file size.
+import { NativeParameter } from "sfn/ir";
+import { last_index_of_char as find_last_index_of_char, substring } from "sfn/strings";
+
+import { TypeContext } from "../../types";
+import { append_string } from "../../utils";
+import { map_parameter_type, map_struct_type_annotation_ctx } from "./core_type_mapping";
+
+fn collect_parameter_types(context: TypeContext, parameters: NativeParameter[], function_name: string) -> string[] {
+    let mut types: string[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= parameters.length { break; }
+        let parameter = parameters[index];
+        let mut llvm_type = map_parameter_type(context, parameter.type_annotation);
+
+        // Method receiver type inference: the self parameter type is set by
+        // flatten_struct_methods in lowering_helpers_structs.sfn. Fused method
+        // names (e.g. Counteris_zero) cannot be split back into struct + method.
+        if parameter.type_annotation.length == 0 {
+            if parameter.name == "self" {
+                if index == 0 {
+                    // Type already set in flatten_struct_methods; no split possible.
+                }
+            }
+        }
+        if llvm_type.length == 0 { types.push("double"); } else {
+            types.push(llvm_type);
+        }
+        index += 1;
+    }
+    return types;
+}
+
+// `operands_unsigned` selects the unsigned opcode for the three integer
+// operators whose LLVM spelling differs by sign. LLVM integers are
+// sign-agnostic, so sign is a frontend concept the caller recovers from the
+// operands' source annotations (`binary_operands_are_unsigned` in
+// ./core_scopes) and passes down here — SFEP-0058 §3.1. `+ - * & | ^ <<`
+// are sign-independent and have one spelling each.
+fn operation_name_for_symbol(symbol: string, llvm_type: string, operands_unsigned: boolean) -> string {
+    if llvm_type == "double" {
+        if symbol == "+" { return "fadd"; }
+        if symbol == "-" { return "fsub"; }
+        if symbol == "*" { return "fmul"; }
+        if symbol == "/" { return "fdiv"; }
+        if symbol == "%" { return "frem"; }
+        // Bitwise + shift operators are not valid on floating-
+        // point in LLVM IR. Returning empty triggers the
+        // binary-op caller's diagnostic path; Slice D's `as`
+        // casts plus the planned typecheck rejection will
+        // surface a clean error before lowering reaches here
+        // (L2/L3/L4 in `docs/proposals/0025-native-runtime-architecture.md` §3.7 `#396-numeric-types-int--float`).
+        if symbol == "&" { return ""; }
+        if symbol == "|" { return ""; }
+        if symbol == "^" { return ""; }
+        if symbol == "<<" { return ""; }
+        if symbol == ">>" { return ""; }
+    }
+    if symbol == "+" { return "add"; }
+    if symbol == "-" { return "sub"; }
+    if symbol == "*" { return "mul"; }
+    if symbol == "/" {
+        if operands_unsigned { return "udiv"; }
+        return "sdiv";
+    }
+    if symbol == "%" {
+        if operands_unsigned { return "urem"; }
+        return "srem";
+    }
+    if symbol == "&" { return "and"; }
+    if symbol == "|" { return "or"; }
+    if symbol == "^" { return "xor"; }
+    if symbol == "<<" { return "shl"; }
+    // `>>` is arithmetic (sign-filling) on signed operands and logical
+    // (zero-filling) on unsigned ones. Sailfin has one `>>` spelling, so
+    // the operand sign picks the opcode.
+    if symbol == ">>" {
+        if operands_unsigned { return "lshr"; }
+        return "ashr";
+    }
+    return "add";
+}
+
+export { collect_parameter_types, operation_name_for_symbol };

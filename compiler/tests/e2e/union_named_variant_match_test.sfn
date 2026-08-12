@@ -3,7 +3,7 @@
 //
 // Root cause guarded here: the bare expression-statement lowering path
 // (`lower_expression_statement` in
-// `compiler/src/llvm/expression_lowering/native/statement.sfn`) dropped
+// `compiler/capsules/codegen-llvm/src/expression_lowering/native/statement.sfn`) dropped
 // the `string_constants` produced by a dynamic member access, so the
 // `@.runtime.field.*` field-name globals a `match`/interpolation emits
 // were referenced by a `getelementptr` but never defined. LLVM rejected

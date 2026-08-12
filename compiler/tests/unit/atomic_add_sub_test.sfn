@@ -5,7 +5,7 @@
 // the full background and the GitHub Actions run that timed out at
 // 180s. The same constraint applies here: importing
 // `lower_atomic_builtin` pulls in `lower_expression` and the rest
-// of `compiler/src/llvm/expression_lowering/native/core`, which
+// of `compiler/capsules/codegen-llvm/src/expression_lowering/native/core`, which
 // blows the per-test CI budget.
 //
 // The IR shape (`atomicrmw add ptr ..., i64 ... seq_cst, align 8`
@@ -16,7 +16,7 @@
 // for these builtins runs at all, plus a few near-miss negatives
 // so a regression in `is_atomic_builtin` surfaces here without
 // paying the lowering import cost.
-import { is_atomic_builtin } from "../../src/llvm/atomics_check";
+import { is_atomic_builtin } from "sfn/codegen-llvm/atomics_check";
 
 // ── Predicate recognises the implemented names ──
 test "atomics: is_atomic_builtin recognises atomic_add" {

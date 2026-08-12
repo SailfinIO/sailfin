@@ -19,11 +19,11 @@
 //      `.let f -> __closure__ = <closure_pair @sfn_lambda_0 null>`.
 //      The LLVM-side `lower_expression` pattern-matches the leading
 //      `<closure_pair ` prefix and dispatches to
-//      `emit_closure_pair_aggregate` (see `compiler/src/llvm/closures.sfn`).
+//      `emit_closure_pair_aggregate` (see `compiler/capsules/codegen-llvm/src/closures.sfn`).
 //   3. Marks the binding's `type_annotation` as the `__closure__`
 //      sentinel so subsequent uses don't crash typecheck. The
 //      sentinel maps to `{i8*, i8*}` in `map_type_annotation`
-//      (`compiler/src/llvm/type_mapping.sfn`).
+//      (`compiler/capsules/codegen-llvm/src/type_mapping.sfn`).
 //
 // Capturing lambdas (records with `captures.length > 0`) are left
 // alone — their `Expression.Lambda` node keeps flowing through

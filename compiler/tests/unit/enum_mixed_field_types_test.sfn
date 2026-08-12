@@ -2,7 +2,7 @@
 // different but pointer-depth-compatible LLVM types.
 //
 // Background: `lower_enum_member_access` in
-// `compiler/src/llvm/expression_lowering/native/core_member_lowering.sfn`
+// `compiler/capsules/codegen-llvm/src/expression_lowering/native/core_member_lowering.sfn`
 // filters variants against the caller's expected type before building the
 // select chain that reads the field. The filter used to require EXACT
 // `llvm_type` equality, which silently dropped variants whose field was the

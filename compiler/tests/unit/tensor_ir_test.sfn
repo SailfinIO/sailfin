@@ -7,6 +7,7 @@ import {
     execute_tensor_function_scalar,
     lower_tensor_module_to_native
 } from "sfn/codegen";
+import { lower_to_llvm_ir_from_text_with_provider_context } from "sfn/codegen-llvm/lowering/entrypoints";
 import {
     TensorFunction,
     TensorModule,
@@ -24,7 +25,6 @@ import { run_tensor_fusion_pass } from "sfn/ir";
 import { verify_tensor_function } from "sfn/ir";
 
 import { empty_llvm_import_context, resolve_llvm_provider_context } from "../../src/build/llvm_provider_context";
-import { lower_to_llvm_ir_from_text_with_provider_context } from "../../src/llvm/lowering/entrypoints";
 import { index_of } from "../../src/string_utils";
 
 // Direct imports from sfn/tensor currently produce conflicting declarations

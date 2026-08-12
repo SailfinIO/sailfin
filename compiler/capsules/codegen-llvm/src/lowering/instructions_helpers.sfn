@@ -1,0 +1,849 @@
+// compiler/capsules/codegen-llvm/src/lowering/instructions_helpers.sfn
+//
+// Shared helpers extracted so lower_instruction_range occupies position 1 in
+// instructions.sfn, within the v0.1.1 seed's streaming emission limit.
+import {
+    char_at_index as char_at,
+    char_at_index as grapheme_at,
+    char_code_at,
+    substring
+} from "sfn/strings";
+
+import { is_heap_type } from "../expression_lowering/native/core_type_mapping";
+import { find_local_binding } from "../expressions_bindings";
+import { is_scope_descendant } from "../lifetime";
+import { find_struct_info_by_llvm_type, find_struct_info_by_name } from "../type_context_queries";
+import {
+    GuardedDropResult,
+    LifetimeRegionMetadata,
+    LocalBinding,
+    LocalMutation,
+    ScopeDropResult,
+    TypeContext
+} from "../types";
+import {
+    contains_text,
+    extend_string_array,
+    is_identifier_part_char,
+    is_identifier_start_char,
+    number_to_string
+} from "../utils";
+
+fn clone_local_bindings(values: LocalBinding[]) -> LocalBinding[] {
+    let mut result: LocalBinding[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= values.length { break; }
+        result.push(values[index]);
+        index += 1;
+    }
+    return result;
+}
+
+fn extend_lifetime_regions(values: LifetimeRegionMetadata[], extras: LifetimeRegionMetadata[]) -> LifetimeRegionMetadata[] {
+    if extras.length == 0 { return values; }
+    let mut out = values;
+    let mut index: int = 0;
+    loop {
+        if index >= extras.length { break; }
+        out = out.push(extras[index]);
+        index += 1;
+    }
+    return out;
+}
+
+fn extend_mutations(values: LocalMutation[], extras: LocalMutation[]) -> LocalMutation[] {
+    if extras.length == 0 { return values; }
+    let mut out = values;
+    let mut index: int = 0;
+    loop {
+        if index >= extras.length { break; }
+        out = out.push(extras[index]);
+        index += 1;
+    }
+    return out;
+}
+
+fn insert_lines_before_index(lines: string[], index: int, insert_lines: string[]) -> string[] {
+    if insert_lines.length == 0 { return lines; }
+
+    let mut result: string[] = [];
+    let mut line_idx: int = 0;
+    let mut inserted: boolean = false;
+    loop {
+        if line_idx >= lines.length { break; }
+        if !inserted {
+            if line_idx == index {
+                result = extend_string_array(result, insert_lines);
+                inserted = true;
+            }
+        }
+        result.push(lines[line_idx]);
+        line_idx += 1;
+    }
+
+    if !inserted { result = extend_string_array(result, insert_lines); }
+
+    return result;
+}
+
+// Emit drop instructions for every owned RC local in `scope_id` that is
+// still live at scope close. M1.5.2 ships the seam, M1.5.3 (issue #327)
+// extends it to mid-function-exit terminators (return / break /
+// continue / loop-body close / match-arm close / block close). Borrows
+// and consumed locals are skipped — drop emission is owner-only.
+// Iterates in insertion order; do not sort (seedcheck depends on
+// byte-identical IR).
+//
+// `binding.pointer` is the alloca slot (e.g. `%l5`); the slot itself has
+// type `<llvm_type>*`. The helper loads the stored value out of the slot
+// before calling `sfn_rc_release(i8*)`, with a bitcast when the value
+// type is not already `i8*`. Temp names are derived from the slot name
+// suffixed with the per-binding `temp_index` (`%l5.drop.7`,
+// `%l5.drop_raw.7`); the suffix guarantees uniqueness when the same
+// scope is closed at multiple terminator points within one function (a
+// function with two `return`s would otherwise re-define `%l5.drop`,
+// which LLVM rejects).
+//
+// For an rc local with `llvm_type == "i8*"` (single drop step):
+//
+//     %l5.drop.7 = load i8*, i8** %l5
+//     call void @sfn_rc_release(i8* %l5.drop.7)
+//
+// For an rc local with a non-i8* pointer-typed value (e.g. struct ptr):
+//
+//     %l5.drop_raw.7 = load %MyStruct*, %MyStruct** %l5
+//     %l5.drop.7 = bitcast %MyStruct* %l5.drop_raw.7 to i8*
+//     call void @sfn_rc_release(i8* %l5.drop.7)
+// Shared rc-drop eligibility predicate (M1.5.4, issue #328). Both
+// `emit_scope_drops` (normal scope-exit drops, M1.5.2/3) and
+// `emit_guarded_scope_drops` (catch-entry guarded drops, M1.5.4) use this
+// predicate so they always agree on which bindings are owner-drop
+// candidates. A binding is rc-drop-eligible when it is `allocation_kind ==
+// "rc"`, has not been consumed (move-out semantics), and is not a borrow
+// (the borrow base owns the resource).
+fn is_rc_drop_eligible(binding: LocalBinding) -> boolean {
+    if binding.allocation_kind != "rc" { return false; }
+    if binding.consumed { return false; }
+    if binding.ownership != null {
+        if binding.ownership.variant == "Borrow" { return false; }
+    }
+    return true;
+}
+
+// Emit the load + (optional bitcast) + `call @sfn_rc_release(i8* %t)`
+// triplet for a single rc-eligible local. Factored out so
+// `emit_scope_drops` and `emit_guarded_scope_drops` produce
+// byte-identical release IR (only the wrapping changes — guarded drops
+// add a sentinel branch around this triplet).
+fn _emit_rc_release_triplet(binding: LocalBinding, suffix: string) -> string[] {
+    let mut lines: string[] = [];
+    let drop_temp = binding.pointer + ".drop" + suffix;
+    if binding.llvm_type == "i8*" {
+        lines.push("  " + drop_temp + " = load i8*, i8** " + binding.pointer);
+        lines.push("  call void @sfn_rc_release(i8* " + drop_temp + ")");
+    } else if binding.llvm_type == "{i8*, i64}" {
+        // M1.A.2: a scalar `string` is the `{i8*, i64}` SfnString aggregate.
+        // The heap allocation `sfn_rc_release` must free is the data pointer
+        // in field 0 — releasing it is byte-for-byte what the legacy `i8*`
+        // string path did. The aggregate itself cannot be `bitcast` to `i8*`
+        // (the generic branch below would emit invalid IR), so extract field
+        // 0 first. `{i8*, i64}` is uniquely the string shape (closures are
+        // `{i8*, i8*}`, arrays `{T*, i64, i64}`), so field 0 is always the
+        // heap data pointer.
+        let raw_temp = binding.pointer + ".drop_raw" + suffix;
+        lines.push("  " + raw_temp + " = load {i8*, i64}, {i8*, i64}* "
+            + binding.pointer);
+        lines.push("  " + drop_temp + " = extractvalue {i8*, i64} " + raw_temp
+            + ", 0");
+        lines.push("  call void @sfn_rc_release(i8* " + drop_temp + ")");
+    } else {
+        let raw_temp = binding.pointer + ".drop_raw" + suffix;
+        lines.push("  " + raw_temp + " = load " + binding.llvm_type + ", "
+            + binding.llvm_type
+            + "* "
+            + binding.pointer);
+        lines.push("  " + drop_temp + " = bitcast " + binding.llvm_type + " "
+            + raw_temp
+            + " to i8*");
+        lines.push("  call void @sfn_rc_release(i8* " + drop_temp + ")");
+    }
+    return lines;
+}
+
+fn emit_scope_drops(locals: LocalBinding[], scope_id: string, temp_index: int) -> ScopeDropResult {
+    let mut lines: string[] = [];
+    let mut current_temp: int = temp_index;
+    let mut index: int = 0;
+    loop {
+        if index >= locals.length { break; }
+        let binding = locals[index];
+        index += 1;
+        if binding.scope_id != scope_id { continue; }
+        if !is_rc_drop_eligible(binding) { continue; }
+        let suffix = "." + number_to_string(current_temp);
+        current_temp += 1;
+        lines = extend_string_array(lines, _emit_rc_release_triplet(binding, suffix));
+    }
+    return ScopeDropResult { lines: lines, next_temp: current_temp };
+}
+
+// ── #1514: arena mark/rewind eligibility for non-escaping loop bodies ──
+//
+// Decide whether a generic `loop { … }` body may be wrapped in an arena
+// `mark` / `rewind` pair so its per-iteration non-escaping arena allocations
+// are reclaimed each iteration (epic #1513). A rewind frees every arena
+// allocation made since the mark, so reclamation is sound ONLY when nothing
+// allocated during an iteration is still reachable after that iteration
+// closes — any surviving pointer into the rewound region becomes a dangling
+// use-after-free on the next iteration.
+//
+// Four escape channels must all be ruled out:
+//
+//   (0) There is at least one body-scope arena heap local to reclaim — else
+//       the pair is pure overhead and we skip it (keeps the IR footprint of
+//       control-only loops unchanged).
+//   (1) No body-scope heap local was promoted out of the arena: escape
+//       promotion flips a local from "arena" to "rc" at `return` / `spawn` /
+//       channel-send boundaries (and marks it `consumed`). Such a value
+//       physically lives in the arena the rewind resets, so its presence
+//       forbids the rewind.
+//   (2) No loop-carried store: no mutation in the body targets a binding that
+//       lives in an ANCESTOR scope of the loop body and is heap-typed
+//       (`let mut last; loop { last = cell; }`). Escape promotion does not
+//       catch this; rewinding would free a value the next iteration reads
+//       back through the ancestor binding.
+//   (3) The body is ALLOCATION-INERT apart from the reclaimed struct lets.
+//       The rewind frees every arena allocation made in the iteration, so the
+//       body may contain no call (`arr.push(x)` grows an ANCESTOR container's
+//       backing in the arena — the canonical use-after-free), no string / array
+//       / char literal, and no field/index store into an ancestor object. Only
+//       struct-literal lets of the all-primitive body locals plus pure scalar
+//       arithmetic / scalar assignments survive — exactly the reclaimable
+//       shape. A whole-pointer escape of a reclaimed local (`return cell`,
+//       `last = cell`) is rejected by the bare-value scan.
+//
+// Conservative by construction: any signal we cannot prove safe suppresses
+// the rewind. Channels (1) and (3) overlap (both catch a bare `return cell`);
+// that redundancy is intentional defence in depth.
+//
+// Resolve `binding`'s struct type and return true only when EVERY field is a
+// scalar (non-heap) value. This is the precondition that makes a `name.field`
+// read provably safe in channel (3): reading a scalar field copies a value
+// out, but reading a heap-typed (pointer) field copies an arena-aliasing
+// pointer that can outlive the iteration (`results.push(cell.inner)`), which a
+// text scan alone cannot distinguish. A local that is not a resolvable struct
+// (string / array / enum / unknown) is conservatively rejected — its members
+// are not provably scalar.
+//
+// The field test is a strict PRIMITIVE-scalar whitelist, not merely
+// `!is_heap_type`: nested struct fields lower INLINE (`%Outer = type { %Inner,
+// i64 }`), so a `%Inner` field is not pointer-suffixed and `is_heap_type`
+// would call it non-heap even though the inline aggregate may itself embed an
+// arena `i8*` (`%Inner = type { i8* }`). Reading such a field copies that
+// embedded pointer out. Restricting to first-class numeric/boolean primitives
+// guarantees a field read produces a genuine by-value scalar.
+fn _is_primitive_scalar_llvm_type(llvm_type: string) -> boolean {
+    if llvm_type == "i1" { return true; }
+    if llvm_type == "i8" { return true; }
+    if llvm_type == "i16" { return true; }
+    if llvm_type == "i32" { return true; }
+    if llvm_type == "i64" { return true; }
+    if llvm_type == "i128" { return true; }
+    if llvm_type == "half" { return true; }
+    if llvm_type == "float" { return true; }
+    if llvm_type == "double" { return true; }
+    if llvm_type == "fp128" { return true; }
+    return false;
+}
+
+fn _local_is_all_scalar_struct(context: TypeContext, binding: LocalBinding) -> boolean {
+    let mut info = find_struct_info_by_name(context, binding.type_annotation);
+    if info == null {
+        // Fall back to the lowered type name with any trailing pointer `*`
+        // stripped (`%Cell*` → `%Cell`), matching `llvm_name`.
+        let mut lt: string = binding.llvm_type;
+        loop {
+            if lt.length == 0 { break; }
+            if char_at(lt, lt.length - 1) != "*" { break; }
+            lt = substring(lt, 0, lt.length - 1);
+        }
+        info = find_struct_info_by_llvm_type(context, lt);
+    }
+    if info == null { return false; }
+    if info.fields.length == 0 { return false; }
+    let mut f: int = 0;
+    loop {
+        if f >= info.fields.length { break; }
+        if !_is_primitive_scalar_llvm_type(info.fields[f].llvm_type) {
+            return false;
+        }
+        f += 1;
+    }
+    return true;
+}
+
+// True when the body's lowered IR contains a call to anything other than the
+// arena struct allocator. The rewind reclaims `@sfn_alloc_struct` allocations;
+// every OTHER call may allocate-and-escape arena memory or retain a pointer
+// past the iteration — string concatenation, array growth (`arr.push`), an
+// escape-marker like `@sailfin_runtime_mark_persistent`, fs/io, or any callee
+// that stows its argument. This is the decisive, reliable check: the native-IR
+// instruction *text* does not always preserve call syntax (a flattened call
+// becomes an SSA temp the source-text scan can't see — the `handle_check_command`
+// loop that crashed the Windows smoke build), but the lowered IR shows every
+// `call` / `invoke` explicitly.
+fn _body_ir_has_foreign_call(body_lines: string[]) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= body_lines.length { break; }
+        let line = body_lines[i];
+        i += 1;
+        let mut is_call: boolean = false;
+        if contains_text(line, " call ") { is_call = true; }
+        if contains_text(line, " invoke ") { is_call = true; }
+        if !is_call { continue; }
+        // The sole arena allocator the rewind reclaims is exempt.
+        if contains_text(line, "@sfn_alloc_struct(") { continue; }
+        return true;
+    }
+    return false;
+}
+
+// True when the body's lowered IR actually allocates a struct in the arena
+// (`@sfn_alloc_struct`). A heap local's `allocation_kind` defaults to "arena"
+// for ANY pointer binding — including a cast/alias of existing memory
+// (`let p: * ArenaPage = walker as * ArenaPage`), which allocates nothing.
+// Without this gate such a cast counts as a reclaimable allocation, so a loop
+// that allocates nothing is wrapped in mark/rewind. The catastrophic case is
+// the arena's own page-walk loops inside `sfn_arena_sfn_mark` /
+// `sfn_arena_sfn_rewind`: wrapping them inserts calls to those very functions
+// → infinite recursion / arena reentrancy → abort. Requiring a real
+// `@sfn_alloc_struct` ties eligibility to genuine reclaimable allocation and
+// keeps the optimization out of the allocator's own internals.
+fn _body_ir_allocates_struct(body_lines: string[]) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= body_lines.length { break; }
+        if contains_text(body_lines[i], "@sfn_alloc_struct(") { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+// `body_texts` is the escape-relevant source text of each body instruction
+// (`get_instruction_scan_text`); `body_lines` is the body's lowered LLVM IR;
+// `ancestor_locals` is the binding set captured before the body was lowered
+// (the loop's enclosing scopes); `context` resolves struct field types for the
+// scalar-field precondition.
+fn loop_body_rewind_eligible(body_locals: LocalBinding[], body_mutations: LocalMutation[], body_scope_id: string, ancestor_locals: LocalBinding[], body_texts: string[], body_lines: string[], context: TypeContext) -> boolean {
+    // The body's lowered IR must contain no call except the arena allocator —
+    // the reliable allocation/escape gate (see `_body_ir_has_foreign_call`).
+    if _body_ir_has_foreign_call(body_lines) { return false; }
+    // …and it must genuinely allocate a struct in the arena. A cast/alias
+    // binding (`x as * T`) defaults to `allocation_kind == "arena"` but
+    // reclaims nothing; gating on a real `@sfn_alloc_struct` keeps the
+    // optimization off cast-only loops and out of the allocator internals
+    // (e.g. the arena's own `sfn_arena_sfn_mark` page-walk).
+    if !_body_ir_allocates_struct(body_lines) { return false; }
+    // (0) + (1): collect body-scope arena heap locals; bail on any escapee.
+    let mut arena_names: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= body_locals.length { break; }
+        let binding = body_locals[i];
+        i += 1;
+        if !is_scope_descendant(body_scope_id, binding.scope_id) { continue; }
+        if !is_heap_type(binding.llvm_type) { continue; }
+        // A body-scope heap local promoted out of the arena (rc) or moved
+        // (consumed) still occupies arena memory the rewind would reset.
+        if binding.allocation_kind != "arena" { return false; }
+        if binding.consumed { return false; }
+        // The body-text scan (3) treats `name.field` reads as safe; that is
+        // only true when every field is scalar. A struct with any heap-typed
+        // field could leak an arena pointer through a field read, so reject it.
+        if !_local_is_all_scalar_struct(context, binding) { return false; }
+        arena_names.push(binding.name);
+    }
+    if arena_names.length == 0 { return false; }
+    // (2): no loop-carried store into an ancestor-scope heap binding. A
+    // mutation whose name resolves in `ancestor_locals` targets a binding that
+    // outlives the loop; if it is heap-typed the stored value may alias this
+    // iteration's arena. (Body-local mutations do not resolve here and are
+    // correctly ignored.)
+    let mut m: int = 0;
+    loop {
+        if m >= body_mutations.length { break; }
+        let target = find_local_binding(ancestor_locals, body_mutations[m].name);
+        m += 1;
+        if target == null { continue; }
+        if is_heap_type(target.llvm_type) { return false; }
+    }
+    // (3): the body must be ALLOCATION-INERT apart from the reclaimed struct
+    // lets. The rewind frees EVERY arena allocation made during the iteration,
+    // not just the body locals — so any operation that can allocate arena
+    // memory reachable after the iteration breaks soundness. The decisive case
+    // (PR review + the unit-suite regression) is a call like `results.push(x)`
+    // that grows an ANCESTOR container: the freshly-grown backing buffer is an
+    // arena allocation that `results` keeps pointing at, and the rewind frees
+    // it → use-after-free next access. The same applies to string/array/char
+    // literals and field/index stores into ancestor objects. We therefore
+    // require every body instruction to be free of: a call `(`, an array
+    // literal / index `[`, a string `"` or char `'` literal, and a field/index
+    // store (an assignment whose target is a member access). What remains is
+    // exactly the reclaimable shape: struct-literal lets of the all-primitive
+    // body locals plus pure scalar arithmetic and scalar assignments. The
+    // bare-value scan additionally rejects a whole-pointer escape of a
+    // reclaimed local (`return cell`, `last = cell`).
+    let mut t: int = 0;
+    loop {
+        if t >= body_texts.length { break; }
+        let text = body_texts[t];
+        t += 1;
+        if text.length == 0 { continue; }
+        if _body_text_allocates_or_stores(text) { return false; }
+        let mut a: int = 0;
+        loop {
+            if a >= arena_names.length { break; }
+            if _name_escapes_as_value(text, arena_names[a]) { return false; }
+            a += 1;
+        }
+    }
+    return true;
+}
+
+// True when `text` contains an operation that may allocate arena memory that
+// escapes the iteration, or store into an ancestor object. Conservative: a
+// call `(`, an array literal / index `[`, a string `"` or char `'` literal, or
+// an assignment whose left-hand side is a member access (`obj.f = …`, a field
+// store). Struct-literal braces `{ }`, scalar arithmetic, field READS
+// (`cell.a` on the right of `=`), and assignments to a bare scalar name are
+// allowed — none of them allocate escaping arena memory.
+fn _body_text_allocates_or_stores(text: string) -> boolean {
+    let n = text.length;
+    let mut i: int = 0;
+    loop {
+        if i >= n { break; }
+        let ch = char_at(text, i);
+        if ch == "(" {
+            // Only a CALL `(` allocates/escapes — a grouping (precedence) `(`
+            // does not. In the native-IR token stream a call `(` immediately
+            // follows its callee (an identifier char, or a `)`/`]` closing the
+            // callee expression), whereas a precedence-grouping paren follows
+            // an operator / `=` / `,` / space or another `(`. A structured
+            // assignment RHS now carries such grouping parens (`acc = (a + b)`,
+            // #1741) where the pre-#1627 `Raw` verbatim source — for the
+            // arena-eligible loops in the self-host set — did not, so this scan
+            // never saw them before. Skipping a grouping `(` is sound: its
+            // inner content is still scanned char-by-char below, so any real
+            // call nested inside is caught at that call's own `(`.
+            let mut prev: string = " ";
+            if i > 0 { prev = char_at(text, i - 1); }
+            if is_identifier_part_char(prev) { return true; }
+            if prev == ")" { return true; }
+            if prev == "]" { return true; }
+        }
+        if ch == "[" { return true; }
+        if ch == "\"" { return true; }
+        if ch == "'" { return true; }
+        i += 1;
+    }
+    // Field/index store: an assignment whose LHS contains a member access `.`.
+    // Find the first assignment operator (a `=` that is not part of a
+    // comparison `==` / `!=` / `<=` / `>=` nor a `=>`); a compound assignment
+    // such as `+=` leaves its arithmetic prefix in the LHS, which is fine for
+    // the `.`-detection. `[`-indexed stores are already rejected above.
+    let mut j: int = 0;
+    loop {
+        if j >= n { break; }
+        if char_at(text, j) == "=" {
+            let mut prev: string = " ";
+            if j > 0 { prev = char_at(text, j - 1); }
+            let mut next: string = " ";
+            if j + 1 < n { next = char_at(text, j + 1); }
+            let mut is_comparison: boolean = false;
+            if next == "=" { is_comparison = true; }
+            if next == ">" { is_comparison = true; }
+            if prev == "=" { is_comparison = true; }
+            if prev == "!" { is_comparison = true; }
+            if prev == "<" { is_comparison = true; }
+            if prev == ">" { is_comparison = true; }
+            if !is_comparison {
+                let lhs = substring(text, 0, j);
+                let mut k: int = 0;
+                loop {
+                    if k >= lhs.length { break; }
+                    if char_at(lhs, k) == "." { return true; }
+                    k += 1;
+                }
+                return false;
+            }
+        }
+        j += 1;
+    }
+    return false;
+}
+
+// True when `name` appears in `text` as a bare value rather than only as the
+// base of a field read. Used by `loop_body_rewind_eligible` channel (3).
+//
+// An occurrence is SAFE iff it is `name.<field>` where `<field>` is not
+// immediately a method call — i.e. a field read that copies a scalar/sub-value
+// out without leaking the receiver's pointer. Every other occurrence (a bare
+// `name`, or `name.method(…)`) is treated as a potential escape. Occurrences
+// inside string literals are ignored, and a token preceded by `.` (a field of
+// some OTHER value, e.g. `other.name`) is not a use of `name` at all.
+fn _name_escapes_as_value(text: string, name: string) -> boolean {
+    let n = text.length;
+    let mut in_double: boolean = false;
+    let mut in_single: boolean = false;
+    let mut escape_next: boolean = false;
+    let mut i: int = 0;
+    loop {
+        if i >= n { break; }
+        let ch = char_at(text, i);
+        if in_double {
+            if escape_next { escape_next = false; } else if ch == "\\" {
+                escape_next = true;
+            } else if ch == "\"" { in_double = false; }
+            i += 1;
+            continue;
+        }
+        if in_single {
+            if escape_next { escape_next = false; } else if ch == "\\" {
+                escape_next = true;
+            } else if ch == "'" { in_single = false; }
+            i += 1;
+            continue;
+        }
+        if ch == "\"" {
+            in_double = true;
+            i += 1;
+            continue;
+        }
+        if ch == "'" {
+            in_single = true;
+            i += 1;
+            continue;
+        }
+        if is_identifier_start_char(ch) {
+            let start = i;
+            loop {
+                if i >= n { break; }
+                if !is_identifier_part_char(char_at(text, i)) { break; }
+                i += 1;
+            }
+            let token = substring(text, start, i);
+            if token == name {
+                let mut preceded_by_dot: boolean = false;
+                if start > 0 {
+                    if char_at(text, start - 1) == "." {
+                        preceded_by_dot = true;
+                    }
+                }
+                if !preceded_by_dot {
+                    // Skip whitespace, then inspect the next significant char.
+                    let mut j: int = i;
+                    loop {
+                        if j >= n { break; }
+                        let c2 = char_at(text, j);
+                        if c2 == " " {
+                            j += 1;
+                            continue;
+                        }
+                        if c2 == "\t" {
+                            j += 1;
+                            continue;
+                        }
+                        break;
+                    }
+                    if j >= n { return true; }
+                    if char_at(text, j) != "." { return true; }
+                    // `name.<member>` — a field read is safe, a method call is
+                    // a potential receiver escape. Consume `.<member>` then
+                    // check for a trailing `(`.
+                    let mut k: int = j + 1;
+                    loop {
+                        if k >= n { break; }
+                        let c3 = char_at(text, k);
+                        if c3 == " " {
+                            k += 1;
+                            continue;
+                        }
+                        if c3 == "\t" {
+                            k += 1;
+                            continue;
+                        }
+                        break;
+                    }
+                    loop {
+                        if k >= n { break; }
+                        if !is_identifier_part_char(char_at(text, k)) { break; }
+                        k += 1;
+                    }
+                    loop {
+                        if k >= n { break; }
+                        let c4 = char_at(text, k);
+                        if c4 == " " {
+                            k += 1;
+                            continue;
+                        }
+                        if c4 == "\t" {
+                            k += 1;
+                            continue;
+                        }
+                        break;
+                    }
+                    if k < n {
+                        if char_at(text, k) == "(" { return true; }
+                    }
+                }
+            }
+            continue;
+        }
+        i += 1;
+    }
+    return false;
+}
+
+// Emit guarded drop calls for every owned rc local descended from
+// `try_scope_id`, gated by each binding's `init_sentinel` flag (M1.5.4,
+// issue #328). Used at catch-block entry: when an exception fires
+// mid-try, any rc local declared in the try body (or a nested block
+// inside it) may or may not have been initialized before the throw, so
+// a naive `call @sfn_rc_release` would dereference an uninitialized
+// alloca. The init sentinel is an `i1` flag allocated at function entry
+// (initialized to `false`), set to `true` immediately after the let's
+// value store, and loaded here to decide whether the release fires.
+//
+// IR shape (per binding):
+//
+//     %<sentinel>.load.<n> = load i1, i1* %<sentinel>
+//     br i1 %<sentinel>.load.<n>, label %<drop>.<n>, label %<skip>.<n>
+//   <drop>.<n>:
+//     ; ... `_emit_rc_release_triplet` body ...
+//     br label %<skip>.<n>
+//   <skip>.<n>:
+//
+// Iteration order matches insertion order — `emit_scope_drops` does the
+// same. Bindings without a sentinel are skipped (e.g., catch variables,
+// for-loop iterators); they are not let-initialized and therefore not
+// the responsibility of this helper.
+//
+// The walk uses `is_scope_descendant`, so nested scopes inside the try
+// body are covered (e.g., `try { if x { let y = ... } }` — if the throw
+// fires inside the if-body, `y` is dropped here). Only the predicate
+// shared with `emit_scope_drops` (`is_rc_drop_eligible`) decides
+// owner-drop status; this helper does not duplicate the rc / consumed /
+// borrow filters.
+fn emit_guarded_scope_drops(locals: LocalBinding[], try_scope_id: string, temp_index: int, block_counter: int) -> GuardedDropResult {
+    let mut lines: string[] = [];
+    let mut current_temp: int = temp_index;
+    let mut current_counter: int = block_counter;
+    let mut final_label: string = "";
+    let mut index: int = 0;
+    loop {
+        if index >= locals.length { break; }
+        let binding = locals[index];
+        index += 1;
+        if !is_scope_descendant(try_scope_id, binding.scope_id) { continue; }
+        if !is_rc_drop_eligible(binding) { continue; }
+        if binding.init_sentinel.length == 0 { continue; }
+        let counter_str = number_to_string(current_counter);
+        current_counter += 1;
+        let drop_label = "drop" + counter_str;
+        let skip_label = "skip" + counter_str;
+        let sentinel_temp = binding.init_sentinel + ".load." + counter_str;
+        lines.push("  " + sentinel_temp + " = load i1, i1* " + binding.init_sentinel);
+        lines.push("  br i1 " + sentinel_temp + ", label %" + drop_label
+            + ", label %"
+            + skip_label);
+        lines.push(drop_label + ":");
+        let suffix = "." + number_to_string(current_temp);
+        current_temp += 1;
+        lines = extend_string_array(lines, _emit_rc_release_triplet(binding, suffix));
+        lines.push("  br label %" + skip_label);
+        lines.push(skip_label + ":");
+        final_label = skip_label;
+    }
+    return GuardedDropResult {
+        lines: lines,
+        next_temp: current_temp,
+        next_block_counter: current_counter,
+        final_label: final_label
+    };
+}
+
+// Detect whether a scope id's chain contains a try-body scope. Returns
+// true when any `__`-separated segment matches `try` followed by digits
+// (the literal output of `allocate_block_label("try", N)`). False on
+// the function root (`fn:foo`) or when only non-try labels appear
+// (e.g., `then0`, `forbody1`, `catch2`, `finally3`).
+//
+// Used by `lower_let_instruction` (M1.5.4) to decide whether to
+// allocate an init sentinel for the let's binding. Other label
+// prefixes (`then`, `else`, `loop`, `for`, `forbody`, `match`, `catch`,
+// `finally`, `merge`) are not try bodies and never need a sentinel for
+// the immediately-enclosing scope; if a let happens to live inside a
+// nested scope inside a try body, the walk still finds the outer
+// `try<N>` segment and returns true.
+//
+// Catch variables and finally-body lets do not get sentinels: the
+// catch / finally label scopes are descendants of the *outer* function
+// root, not of the try-body scope. The corresponding scope id has no
+// `try<N>` segment, so this helper correctly returns false.
+fn scope_id_inside_try_body(scope_id: string) -> boolean {
+    let len = scope_id.length;
+    if len < 4 { return false; }
+    let mut segment_start: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i + 1 >= len { break; }
+        let ch = grapheme_at(scope_id, i);
+        if ch == "_" {
+            let next_ch = grapheme_at(scope_id, i + 1);
+            if next_ch == "_" {
+                if _segment_is_try_label(scope_id, segment_start, i) {
+                    return true;
+                }
+                segment_start = i + 2;
+                i += 2;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    return _segment_is_try_label(scope_id, segment_start, len);
+}
+
+// Returns true when `scope_id[from..to]` is a `try<digits>` label as
+// produced by `allocate_block_label("try", N)`. The substring check is
+// strict: `try` prefix, at least one digit, no other chars. This rules
+// out `try.propagate` / `try.continue` (which are sanitized to
+// `trypropagate` / `trycontinue` and never become scope ids anyway),
+// and also rules out user-defined identifiers that happen to start with
+// `try` (sanitize_symbol preserves user input verbatim aside from
+// stripping non-`[A-Za-z0-9_]`, but make_child_scope_id is only ever
+// passed compiler-generated block labels in the LLVM lowering passes —
+// see the `parent_scope_id` separator caveat).
+fn _segment_is_try_label(text: string, from: int, to: int) -> boolean {
+    if to - from < 4 { return false; }
+    if grapheme_at(text, from) != "t" { return false; }
+    if grapheme_at(text, from + 1) != "r" { return false; }
+    if grapheme_at(text, from + 2) != "y" { return false; }
+    let mut i: int = from + 3;
+    loop {
+        if i >= to { break; }
+        let ch = grapheme_at(text, i);
+        let code = char_code_at(ch, 0);
+        if code < 48 { return false; }
+        if code > 57 { return false; }
+        i += 1;
+    }
+    return true;
+}
+
+// Strip the rightmost `__<segment>` from `scope_id`, returning the
+// parent scope id. Mirrors `make_child_scope_id` (which joins parent +
+// "__" + child) so the walk reverses one nesting step per call. Returns
+// "" when `scope_id` has no `__` separator (e.g. the function root,
+// which is `fn:<sanitized_name>` and never contains `__` in practice).
+//
+// Separator caveat: `sanitize_symbol` (compiler/capsules/codegen-llvm/src/symbols.sfn)
+// preserves `_` and *drops* every non-`[A-Za-z0-9_]` character, so it
+// does NOT canonicalize multi-underscore runs. In principle a child
+// segment containing `__` could appear inside a sanitized scope id and
+// confuse a "find the last `__`" walk. In practice every caller of
+// `make_child_scope_id` in the LLVM lowering passes a basic-block
+// label (`then1`, `loopbody2`, `forbody3`, `matcharm4`, etc.) — block
+// labels are generated from `allocate_block_label` and never contain
+// `__`, so the join boundary is unambiguous. If a future caller starts
+// minting child segments from user identifiers, either prepend a
+// reserved sigil or canonicalise sanitize_symbol to collapse `__` runs
+// before relying on the walk here.
+fn parent_scope_id(scope_id: string) -> string {
+    let len = scope_id.length;
+    if len < 2 { return ""; }
+    let mut last_dunder: int = -1;
+    let mut i: int = 0;
+    loop {
+        if i + 1 >= len { break; }
+        let ch = grapheme_at(scope_id, i);
+        if ch == "_" {
+            let next_ch = grapheme_at(scope_id, i + 1);
+            if next_ch == "_" {
+                last_dunder = i;
+                i += 2;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    if last_dunder < 0 { return ""; }
+    return substring(scope_id, 0, last_dunder);
+}
+
+// Walk the scope chain from `from_scope` outward, emitting drops at
+// each scope until reaching `to_scope`. The walk stops *before*
+// emitting drops for `to_scope` when `include_target == false`, or
+// *after* when `include_target == true`.
+//
+// Use cases (M1.5.3, issue #327):
+//   - `return` mid-body: walk from current scope to function root,
+//     `include_target = true` (the function root scope's drops are the
+//     responsibility of the explicit-return path — the function-body
+//     drop seam in `emission.sfn` is skipped when the body is
+//     terminated).
+//   - `break` / `continue`: walk from current scope to the loop's
+//     enclosing scope, `include_target = false` (the enclosing scope
+//     outlives the loop).
+//
+// A guard caps the walk at 64 nesting levels so a malformed scope id
+// can't induce an unbounded loop. The guard ceiling is well above any
+// realistic scope nesting depth (Sailfin source rarely exceeds ~10
+// nested blocks).
+fn emit_drops_for_scope_chain(locals: LocalBinding[], from_scope: string, to_scope: string, include_target: boolean, temp_index: int) -> ScopeDropResult {
+    let mut lines: string[] = [];
+    let mut current_temp: int = temp_index;
+    let mut current: string = from_scope;
+    let mut guard: int = 0;
+    loop {
+        if guard > 64 { break; }
+        guard += 1;
+        if current.length == 0 { break; }
+        if current == to_scope {
+            if include_target {
+                let target_result = emit_scope_drops(locals, current, current_temp);
+                lines = extend_string_array(lines, target_result.lines);
+                current_temp = target_result.next_temp;
+            }
+            break;
+        }
+        let scope_result = emit_scope_drops(locals, current, current_temp);
+        lines = extend_string_array(lines, scope_result.lines);
+        current_temp = scope_result.next_temp;
+        current = parent_scope_id(current);
+    }
+    return ScopeDropResult { lines: lines, next_temp: current_temp };
+}
+
+fn _parse_int_from_string(text: string) -> int {
+    let len = text.length;
+    if len == 0 { return 0; }
+    let mut result: int = 0;
+    let mut i: int = 0;
+    let first_ch = grapheme_at(text, 0);
+    if first_ch == "-" { i = 1; }
+    loop {
+        if i >= len { break; }
+        let ch = grapheme_at(text, i);
+        if ch == "." { break; }
+        let code = char_code_at(ch, 0);
+        if code >= 48 {
+            if code <= 57 { result = result * 10 + (code - 48); }
+        }
+        i = i + 1;
+    }
+    if first_ch == "-" { return 0 - result; }
+    return result;
+}

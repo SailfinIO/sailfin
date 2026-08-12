@@ -1,5 +1,5 @@
 // Regression coverage for aliased function-import signature resolution
-// (`compiler/src/llvm/lowering/lowering_phase_imports.sfn`).
+// (`compiler/capsules/codegen-llvm/src/lowering/lowering_phase_imports.sfn`).
 //
 // Aliased imports (`import { foo as bar }`) bind the call site to the LOCAL
 // alias name while imported function signatures are keyed by the EXPORTED
@@ -9,9 +9,8 @@
 // lowering orchestrator injects those clones into the context table. This
 // exercises the pure helper directly (deterministic, no build subprocess).
 // End-to-end behavior is also covered by `sfn run`/`sfn build`.
+import { build_import_alias_signatures } from "sfn/codegen-llvm/lowering/lowering_phase_imports";
 import { NativeFunction, NativeImport, NativeImportSpecifier } from "sfn/ir";
-
-import { build_import_alias_signatures } from "../../src/llvm/lowering/lowering_phase_imports";
 
 fn _fn(name: string, return_type: string) -> NativeFunction {
     return NativeFunction {

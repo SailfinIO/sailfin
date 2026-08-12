@@ -1,0 +1,179 @@
+// compiler/capsules/codegen-llvm/src/expression_lowering/native/core_call_emission/arrays.sfn
+//
+// Inline array concat and push call emission.
+import { ends_with_pointer_suffix } from "../../../type_mapping";
+import {
+    ExpressionResult,
+    LLVMOperand,
+    LocalBinding,
+    StringConstant
+} from "../../../types";
+import { trim_text } from "../../../utils";
+import { lower_array_push_in_place, lower_struct_array_concat } from "../../arrays";
+import { coerce_operand_to_type } from "../core_operands/dispatch";
+import { parse_member_access } from "../core_parse";
+import { find_local_binding } from "../core_scopes";
+
+fn emit_array_call(trimmed_target: string, final_operands: LLVMOperand[], is_array_concat: boolean, array_concat_element_type: string, is_array_push: boolean, array_push_element_type: string, current_temp: int, current_lines: string[], diagnostics: string[], collected_string_constants: StringConstant[], locals: LocalBinding[]) -> ExpressionResult {
+    let mut result_lines = current_lines;
+    let mut result_temp: int = current_temp;
+    let mut result_diagnostics = diagnostics;
+    // Array concat inline lowering
+    if is_array_concat {
+        if array_concat_element_type.length > 0 {
+            if !ends_with_pointer_suffix(array_concat_element_type) {
+                if final_operands.length >= 2 {
+                    let concat_result = lower_struct_array_concat(final_operands[0], final_operands[1], array_concat_element_type, result_lines, result_temp);
+                    let mut _ci7: int = 0;
+                    loop {
+                        if _ci7 >= concat_result.diagnostics.length { break; }
+                        result_diagnostics.push(concat_result.diagnostics[_ci7]);
+                        _ci7 += 1;
+                    }
+                    result_lines = concat_result.lines;
+                    result_temp = concat_result.temp_index;
+                    if concat_result.operand == null {
+                        return ExpressionResult {
+                            lines: result_lines,
+                            temp_index: result_temp,
+                            operand: null,
+                            diagnostics: result_diagnostics,
+                            string_constants: collected_string_constants
+                        };
+                    }
+                    return ExpressionResult {
+                        lines: result_lines,
+                        temp_index: result_temp,
+                        operand: concat_result.operand,
+                        diagnostics: result_diagnostics,
+                        string_constants: collected_string_constants
+                    };
+                } else {
+                    result_diagnostics.push("llvm lowering: concat requires two operands");
+                    return ExpressionResult {
+                        lines: result_lines,
+                        temp_index: result_temp,
+                        operand: null,
+                        diagnostics: result_diagnostics,
+                        string_constants: collected_string_constants
+                    };
+                }
+            }
+        }
+    }
+
+    // Array push inline lowering
+    if is_array_push {
+        if array_push_element_type.length > 0 {
+            if final_operands.length >= 2 {
+                // Slice E.1 (#488): coerce the push value to the array's
+                // element type before delegating to `lower_array_push_in_place`.
+                // Pre-E.1 the bare-integer-literal default was `double`, so
+                // `arr.push(10)` against a `double[]` (== `number[]`) array
+                // produced a matching `value.llvm_type == "double"` operand
+                // that flowed through the in-place store unchanged. After E.1
+                // the same literal lowers to `i64`, and the in-place store
+                // emits invalid `store double 10, double*` IR unless we coerce
+                // here. `coerce_operand_to_type` is a no-op when the operand
+                // already matches; for integer-literal-vs-double mixes it
+                // routes through the `sitofp` widening path that Slice D
+                // wired up, preserving the pre-E.1 semantics.
+                // `arr.push(...)` is a value-shape coercion that legitimately
+                // widens i64 literals to double[] receivers (see Slice E.1
+                // comment above). Slice E.1.5 (#528) leaves this site exempt
+                // from the ABI primitive kind check.
+                let push_value_coerced = coerce_operand_to_type(final_operands[1], array_push_element_type, result_temp, result_lines, true, null);
+                let mut _ci_apc: int = 0;
+                loop {
+                    if _ci_apc >= push_value_coerced.diagnostics.length {
+                        break;
+                    }
+                    result_diagnostics.push(push_value_coerced.diagnostics[_ci_apc]);
+                    _ci_apc += 1;
+                }
+                result_lines = push_value_coerced.lines;
+                result_temp = push_value_coerced.temp_index;
+                if push_value_coerced.operand == null {
+                    // Coercion failed — bail out instead of forwarding
+                    // the original mismatched operand into
+                    // `lower_array_push_in_place`, which would emit a
+                    // malformed `store <element_type> <value>` line.
+                    // The diagnostics from `coerce_operand_to_type`
+                    // (already propagated above) describe the failure.
+                    result_diagnostics.push("llvm lowering: unable to coerce push argument to `"
+                        + array_push_element_type
+                        + "` for `"
+                        + trimmed_target
+                        + "`");
+                    return ExpressionResult {
+                        lines: result_lines,
+                        temp_index: result_temp,
+                        operand: null,
+                        diagnostics: result_diagnostics,
+                        string_constants: collected_string_constants
+                    };
+                }
+                let push_value_operand = push_value_coerced.operand;
+                let push_result = lower_array_push_in_place(final_operands[0], push_value_operand, array_push_element_type, result_lines, result_temp);
+                let mut _ci8: int = 0;
+                loop {
+                    if _ci8 >= push_result.diagnostics.length { break; }
+                    result_diagnostics.push(push_result.diagnostics[_ci8]);
+                    _ci8 += 1;
+                }
+                result_lines = push_result.lines;
+                result_temp = push_result.temp_index;
+                if push_result.operand == null {
+                    return ExpressionResult {
+                        lines: result_lines,
+                        temp_index: result_temp,
+                        operand: null,
+                        diagnostics: result_diagnostics,
+                        string_constants: collected_string_constants
+                    };
+                }
+                if array_push_element_type == "i8*" {
+                    let method_parse = parse_member_access(trimmed_target);
+                    if method_parse.success {
+                        let push_receiver_name = trim_text(method_parse.base);
+                        let push_receiver_local = find_local_binding(locals, push_receiver_name);
+                        if push_receiver_local != null {
+                            result_lines.push("  store " + push_result.operand.llvm_type
+                                + " "
+                                + push_result.operand.value
+                                + ", "
+                                + push_result.operand.llvm_type
+                                + "* "
+                                + push_receiver_local.pointer);
+                        }
+                    }
+                }
+                return ExpressionResult {
+                    lines: result_lines,
+                    temp_index: result_temp,
+                    operand: push_result.operand,
+                    diagnostics: result_diagnostics,
+                    string_constants: collected_string_constants
+                };
+            } else {
+                result_diagnostics.push("llvm lowering: push requires two operands");
+                return ExpressionResult {
+                    lines: result_lines,
+                    temp_index: result_temp,
+                    operand: null,
+                    diagnostics: result_diagnostics,
+                    string_constants: collected_string_constants
+                };
+            }
+        }
+    }
+    return ExpressionResult {
+        lines: result_lines,
+        temp_index: result_temp,
+        operand: null,
+        diagnostics: result_diagnostics,
+        string_constants: collected_string_constants
+    };
+}
+
+export { emit_array_call };

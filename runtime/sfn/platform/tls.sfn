@@ -877,7 +877,7 @@ fn _tls_session_free(s: *TlsSession) -> void {
 //
 // One constraint governs every read below: the module-init call that
 // would populate `_tls_anchor_cache` is emitted only into the module that
-// defines `fn main` (`compiler/src/llvm/lowering/emission.sfn:452`), and
+// defines `fn main` (`compiler/capsules/codegen-llvm/src/lowering/emission.sfn:452`), and
 // this module has no `main`, so `@sailfin_module_init__tls` is defined but
 // never called — the array slot stays null forever. Never read
 // `_tls_anchor_cache` before `_tls_anchor_cache_valid` is checked; the

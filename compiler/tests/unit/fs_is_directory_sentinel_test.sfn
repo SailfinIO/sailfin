@@ -21,20 +21,19 @@
 // predecessor left behind. The trailing restores are a courtesy to tests in
 // other files (which never install a context of their own) and are
 // best-effort on the success path only.
-import { NativeFunction } from "sfn/ir";
-import { find } from "sfn/strings";
-
-import { emit_filesystem_intrinsic } from "../../src/llvm/expression_lowering/native/core_call_emission/filesystem_intrinsics";
-import { LLVMProviderContext, install_llvm_provider_context } from "../../src/llvm/lowering_debug_state";
-import { render_runtime_helper_declarations } from "../../src/llvm/rendering";
-import { find_runtime_helper } from "../../src/llvm/runtime_helpers/mod";
+import { emit_filesystem_intrinsic } from "sfn/codegen-llvm/expression_lowering/native/core_call_emission/filesystem_intrinsics";
+import { LLVMProviderContext, install_llvm_provider_context } from "sfn/codegen-llvm/lowering_debug_state";
+import { render_runtime_helper_declarations } from "sfn/codegen-llvm/rendering";
+import { find_runtime_helper } from "sfn/codegen-llvm/runtime_helpers/mod";
 import {
     ExpressionResult,
     LLVMOperand,
     RuntimeHelperDescriptor,
     StringConstant,
     TypeContext
-} from "../../src/llvm/types";
+} from "sfn/codegen-llvm/types";
+import { NativeFunction } from "sfn/ir";
+import { find } from "sfn/strings";
 
 // The default provider context installed by the driver: Linux/x86_64, every
 // trace/test-runner toggle off. Every test restores this before returning.
@@ -141,7 +140,7 @@ test "fs is_directory sentinel: the POSIX leg stats and tests S_IFDIR" ![io] {
 
 // The per-arch seam, pinned deliberately. `st_mode` sits at a DIFFERENT
 // byte offset on each supported target — `stat_st_mode_offset_value()`
-// (`compiler/src/llvm/lowering_debug_state.sfn`) answers 4 on Darwin, 16
+// (`compiler/capsules/codegen-llvm/src/lowering_debug_state.sfn`) answers 4 on Darwin, 16
 // on aarch64 Linux, 24 otherwise. A predicate that hardcoded one offset
 // would pass every x86_64 test and silently misread the file type on the
 // other two, which is precisely why this sentinel reuses that function

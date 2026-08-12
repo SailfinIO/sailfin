@@ -1,0 +1,158 @@
+// compiler/capsules/codegen-llvm/src/lowering_debug_state.sfn
+//
+// Provider-owned lowering context for target selection and diagnostic/test
+// tracing. The compiler driver resolves environment, host, and test-runner
+// state once at the LLVM entrypoint and passes the primitive snapshot here.
+// Lowering hot paths read these cached primitives without importing driver
+// modules or repeating authority-bearing probes.
+struct LLVMProviderContext {
+    target_os: string;
+    target_arch: string;
+    trace_lowering: boolean;
+    trace_call_lowering: boolean;
+    skip_module_globals: boolean;
+    test_runner_active: boolean;
+    test_runner_trace: boolean;
+}
+
+let mut _target_os: string = "Linux";
+let mut _target_arch: string = "x86_64";
+let mut _trace_lowering: boolean = false;
+let mut _trace_call_lowering: boolean = false;
+let mut _skip_module_globals: boolean = false;
+let mut _test_runner_active: boolean = false;
+let mut _test_runner_trace: boolean = false;
+let mut _lowering_trace_buffer: string = "";
+
+fn install_llvm_provider_context(context: LLVMProviderContext) {
+    _target_os = context.target_os;
+    _target_arch = context.target_arch;
+    _trace_lowering = context.trace_lowering;
+    _trace_call_lowering = context.trace_call_lowering;
+    _skip_module_globals = context.skip_module_globals;
+    _test_runner_active = context.test_runner_active;
+    _test_runner_trace = context.test_runner_trace;
+    _lowering_trace_buffer = "";
+}
+
+fn build_target_os() -> string { return _target_os; }
+
+fn target_arch_for_lowering() -> string { return _target_arch; }
+
+fn trace_lowering() -> boolean { return _trace_lowering; }
+
+fn trace_call_lowering() -> boolean { return _trace_call_lowering; }
+
+fn skip_module_globals() -> boolean { return _skip_module_globals; }
+
+fn test_runner_active() -> boolean { return _test_runner_active; }
+
+fn test_runner_trace() -> boolean {
+    if !_test_runner_active { return false; }
+    return _test_runner_trace;
+}
+
+// Traces and provider diagnostics share one ordered, authority-free event
+// buffer. The driver drains it after the provider returns and before handling
+// the returned status, preserving the provider's original stderr order.
+fn trace_log(line: string) {
+    if _lowering_trace_buffer.length > 0 {
+        _lowering_trace_buffer = _lowering_trace_buffer + "\n";
+    }
+    _lowering_trace_buffer = _lowering_trace_buffer + line;
+}
+
+fn take_lowering_trace_buffer() -> string {
+    let buffered = _lowering_trace_buffer;
+    _lowering_trace_buffer = "";
+    return buffered;
+}
+
+// Provider-owned target decisions. The driver supplies the resolved target;
+// LLVM owns how that target changes emitted symbols, constants, and ABI legs.
+fn errno_locator_symbol() -> string {
+    if _target_os == "Darwin" { return "__error"; }
+    if _target_os == "Windows" { return "_errno"; }
+    return "__errno_location";
+}
+
+fn clock_monotonic_id_value() -> int {
+    if _target_os == "Darwin" { return 6; }
+    return 1;
+}
+
+fn sc_nprocessors_onln_value() -> int {
+    if _target_os == "Darwin" { return 58; }
+    return 84;
+}
+
+fn exe_path_locator() -> string {
+    if _target_os == "Darwin" { return "darwin"; }
+    if _target_os == "Windows" { return "mingw"; }
+    return "linux";
+}
+
+fn fs_platform_leg() -> string {
+    if _target_os == "Darwin" { return "darwin"; }
+    if _target_os == "Windows" { return "mingw"; }
+    return "linux";
+}
+
+fn comdat_leg_for_os(os: string) -> boolean { return os == "Windows"; }
+
+fn target_uses_comdat() -> boolean { return comdat_leg_for_os(_target_os); }
+
+fn stat_st_mode_offset_value() -> int {
+    if _target_os == "Darwin" { return 4; }
+    if _target_os == "Linux" && _target_arch == "aarch64" { return 16; }
+    return 24;
+}
+
+fn stat_buf_size_value() -> int { return 160; }
+
+// Windows x64 uses the UCRT two-argument `_setjmp`; all other targets keep
+// the POSIX one-argument spelling and call shape.
+fn target_setjmp_symbol(target_os: string) -> string {
+    if target_os == "Windows" { return "_setjmp"; }
+    return "setjmp";
+}
+
+fn target_setjmp_declare(target_os: string) -> string {
+    if target_os == "Windows" { return "declare i32 @_setjmp(i8*, i8*)"; }
+    return "declare i32 @setjmp(i8*)";
+}
+
+fn target_setjmp_call_line(target_os: string, result_temp: string, jmpbuf_operand: string) -> string {
+    if target_os == "Windows" {
+        return "  " + result_temp + " = call i32 @_setjmp(i8* " + jmpbuf_operand
+            + ", i8* null)";
+    }
+    return "  " + result_temp + " = call i32 @setjmp(i8* " + jmpbuf_operand
+        + ")";
+}
+
+export {
+    LLVMProviderContext,
+    install_llvm_provider_context,
+    build_target_os,
+    target_arch_for_lowering,
+    trace_lowering,
+    trace_call_lowering,
+    skip_module_globals,
+    test_runner_active,
+    test_runner_trace,
+    trace_log,
+    take_lowering_trace_buffer,
+    errno_locator_symbol,
+    clock_monotonic_id_value,
+    sc_nprocessors_onln_value,
+    exe_path_locator,
+    fs_platform_leg,
+    comdat_leg_for_os,
+    target_uses_comdat,
+    stat_st_mode_offset_value,
+    stat_buf_size_value,
+    target_setjmp_symbol,
+    target_setjmp_declare,
+    target_setjmp_call_line
+};

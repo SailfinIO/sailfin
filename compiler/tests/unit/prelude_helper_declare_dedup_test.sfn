@@ -22,15 +22,14 @@
 // with pass 2 (via `extract_declared_symbol_names`), so pass 2 defers to the
 // typed declare the prelude's own call sites actually use. This locks the
 // dedup at unit speed instead of as a slow link failure.
-import { NativeFunction, NativeParameter } from "sfn/ir";
-import { find } from "sfn/strings";
-
 import {
     extract_declared_symbol_names,
     render_imported_function_declarations,
     render_runtime_helper_declarations
-} from "../../src/llvm/rendering";
-import { TypeContext } from "../../src/llvm/types";
+} from "sfn/codegen-llvm/rendering";
+import { TypeContext } from "sfn/codegen-llvm/types";
+import { NativeFunction, NativeParameter } from "sfn/ir";
+import { find } from "sfn/strings";
 
 fn _empty_context() -> TypeContext {
     return TypeContext {

@@ -23,7 +23,7 @@ You are the Sailfin Engineer agent. Your role is to implement features, fix bugs
 ## Development Workflow
 
 1. Read the relevant source files before making changes
-2. Implement changes in `compiler/src/*.sfn`
+2. Implement changes in the canonical module under `compiler/src/` or `compiler/capsules/`
 3. Add tests in `compiler/tests/` (unit, integration, or e2e as appropriate)
 4. Run `make compile` to verify self-hosting
 5. Run `make test` to verify all tests pass
@@ -34,7 +34,7 @@ You are the Sailfin Engineer agent. Your role is to implement features, fix bugs
 1. Update `compiler/capsules/syntax/src/parser/mod.sfn` (or files in `compiler/capsules/syntax/src/parser/`) to recognize new syntax
 2. Add AST node(s) to `compiler/capsules/syntax/src/ast.sfn`
 3. Update `compiler/capsules/codegen/src/emit_native.sfn` to emit `.sfn-asm`
-4. Extend `compiler/src/llvm/lowering/` for LLVM IR generation
+4. Extend `compiler/capsules/codegen-llvm/src/lowering/` for LLVM IR generation
 5. Add regression tests to `compiler/tests/`
 6. Update the language spec: `site/src/content/docs/docs/reference/spec/NN-*.md` chapter file if shipped, or `.../reference/preview/*.md` page if planned
 7. Update `docs/status.md` with implementation status
@@ -64,7 +64,7 @@ You are the Sailfin Engineer agent. Your role is to implement features, fix bugs
 | `compiler/capsules/analyzer/src/typecheck/` | Type checking |
 | `compiler/capsules/analyzer/src/effect_checker/` | Effect validation |
 | `compiler/capsules/codegen/src/emit_native.sfn` | `.sfn-asm` emitter |
-| `compiler/src/llvm/lowering/entrypoints.sfn` | LLVM lowering entry |
+| `compiler/capsules/codegen-llvm/src/lowering/entrypoints.sfn` | LLVM lowering entry |
 | `runtime/prelude.sfn` | Runtime library |
 | `runtime/` | Runtime capsule root (`runtime/capsule.toml`; Sailfin sources under `runtime/sfn/` and `runtime/prelude.sfn`) |
 

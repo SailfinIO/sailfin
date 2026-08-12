@@ -66,7 +66,7 @@ helper signature and in the ABI hash's layout string (canonical form
 `SfnArray{f0:i8**@8;f1:i64@8;f2:i64@8}`). Specialized element types
 are recovered at the call site through the
 `array_concat_element_type` / `array_push_element_type` parameters
-threaded through [`coerce_and_emit_call`](https://github.com/SailfinIO/sailfin/blob/main/compiler/src/llvm/expression_lowering/native/core_call_emission.sfn);
+threaded through [`coerce_and_emit_call`](https://github.com/SailfinIO/sailfin/blob/main/compiler/capsules/codegen-llvm/src/expression_lowering/native/core_call_emission.sfn);
 runtime bodies never index into elements directly.
 
 **Growth policy.** `length` and `capacity` are independent — appends
@@ -115,7 +115,7 @@ define i32 @main(i32 %argc, i8** %argv) {
 In LLVM IR the entry symbol is spelled `@main`; after linking, tools
 like `nm` show it without the `@` sigil. `nm build/bin/sfn |
 grep -E ' T main$'` shows exactly one `T main` row, sourced from the
-Sailfin-emitted definition in `compiler/src/llvm/lowering/` (see
+Sailfin-emitted definition in `compiler/capsules/codegen-llvm/src/lowering/` (see
 the Runtime Migration table in `docs/status.md` for the pipeline trace).
 `SAILFIN_TRACE_ARGV` prints the argv vector observed by
 `sailfin_cli_main` for entry-point debugging.
@@ -138,9 +138,9 @@ Every emitted Sailfin LLVM module defines two global symbols with
 ```
 
 Emission lives in
-[`lowering_phase_render.sfn:205-207`](https://github.com/SailfinIO/sailfin/blob/main/compiler/src/llvm/lowering/lowering_phase_render.sfn);
+[`lowering_phase_render.sfn:205-207`](https://github.com/SailfinIO/sailfin/blob/main/compiler/capsules/codegen-llvm/src/lowering/lowering_phase_render.sfn);
 the hash value is computed at compile time by
-[`abi_hash.sfn:sfn_abi_hash_decimal()`](https://github.com/SailfinIO/sailfin/blob/main/compiler/src/llvm/lowering/abi_hash.sfn).
+[`abi_hash.sfn:sfn_abi_hash_decimal()`](https://github.com/SailfinIO/sailfin/blob/main/compiler/capsules/codegen-llvm/src/lowering/abi_hash.sfn).
 
 **Version semantics.** `@sfn_abi_version` is a coarse monotonic
 counter (current value `1`); it bumps when a breaking shape change
@@ -198,7 +198,7 @@ future returns and scope-exit drops of boxed locals), must only be
 paired with `_rt_calloc`-routed pointers, and would otherwise leak
 or corrupt libc metadata. The
 async-context calloc/free pair in
-[`emission_async.sfn`](https://github.com/SailfinIO/sailfin/blob/main/compiler/src/llvm/lowering/emission_async.sfn)
+[`emission_async.sfn`](https://github.com/SailfinIO/sailfin/blob/main/compiler/capsules/codegen-llvm/src/lowering/emission_async.sfn)
 intentionally stays on raw `@calloc` / `@free` because both ends
 of the allocation are libc-resident regardless of arena state.
 
@@ -240,14 +240,14 @@ thread's arena only. Full rationale:
 ## Native Signature Registry
 
 Every entry in
-[`runtime_helpers.sfn`](https://github.com/SailfinIO/sailfin/blob/main/compiler/src/llvm/runtime_helpers.sfn)
+[`runtime_helpers.sfn`](https://github.com/SailfinIO/sailfin/blob/main/compiler/capsules/codegen-llvm/src/runtime_helpers.sfn)
 carries an optional `native_signature` field (issue #392). When set,
 the LLVM lowering emits calls to the canonical Sailfin-native symbol
 (`sfn_<domain>_<op>`) instead of the legacy C entrypoint
 (`sailfin_runtime_*`). Consumers are
-[`render_runtime_helper_declarations`](https://github.com/SailfinIO/sailfin/blob/main/compiler/src/llvm/rendering.sfn)
+[`render_runtime_helper_declarations`](https://github.com/SailfinIO/sailfin/blob/main/compiler/capsules/codegen-llvm/src/rendering.sfn)
 (emits the `declare`) and
-[`coerce_and_emit_call`](https://github.com/SailfinIO/sailfin/blob/main/compiler/src/llvm/expression_lowering/native/core_call_emission.sfn)
+[`coerce_and_emit_call`](https://github.com/SailfinIO/sailfin/blob/main/compiler/capsules/codegen-llvm/src/expression_lowering/native/core_call_emission.sfn)
 (emits the call site); both prefer `native_signature` over `symbol`
 when populated, so unflipped entries keep routing through the legacy
 C body during the M2.4 / M2.6 migration.
@@ -322,7 +322,7 @@ by this v0 path.
 
 **Env-struct allocation.** Captures are packed into a per-lambda env
 struct in first-use order (deterministic across runs). The helper
-API in [`closures.sfn`](https://github.com/SailfinIO/sailfin/blob/main/compiler/src/llvm/closures.sfn)
+API in [`closures.sfn`](https://github.com/SailfinIO/sailfin/blob/main/compiler/capsules/codegen-llvm/src/closures.sfn)
 synthesizes the type (`%sfn_closure_env_<id>`), allocates it via
 [`sfn_alloc_struct`](#allocation-helpers), and emits the
 GEP+load prologue inside the lifted body. Non-capturing closures
@@ -383,7 +383,7 @@ The init-sentinel cleanup at catch entry (M1.5.4 /
 emits guarded `sfn_rc_release` calls for owned RC locals initialized
 before the throw — the sentinel slot lives in the function frame
 and is set at each declaration site by
-[`instructions_let.sfn`](https://github.com/SailfinIO/sailfin/blob/main/compiler/src/llvm/lowering/instructions_let.sfn).
+[`instructions_let.sfn`](https://github.com/SailfinIO/sailfin/blob/main/compiler/capsules/codegen-llvm/src/lowering/instructions_let.sfn).
 
 **Unwind tables.** The setjmp/longjmp path does **not** require
 DWARF unwind tables (`.eh_frame`) — rewind happens through the thread-local Sailfin frame chain, not the C++

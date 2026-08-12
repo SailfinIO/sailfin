@@ -1,0 +1,924 @@
+// compiler/capsules/codegen-llvm/src/lowering/instructions_match.sfn
+//
+// Control flow handler: match instruction lowering.
+import { LoweringDiagnostic } from "sfn/ir";
+import { NativeFunction, NativeInstruction, NativeSourceSpan } from "sfn/ir";
+import { find, substring } from "sfn/strings";
+
+import { lower_expression } from "../expression_lowering/native/core";
+import { append_match_arm_mutations } from "../expression_lowering/native/core_match_helpers";
+import { emit_boolean_and, emit_comparison_instruction } from "../expression_lowering/native/core_operands/comparisons";
+import { harmonise_operands } from "../expression_lowering/native/core_operands/dispatch";
+import { parse_enum_literal, parse_struct_pattern } from "../expression_lowering/native/core_parse";
+import {
+    extract_simple_identifier,
+    is_union_llvm_type,
+    parse_union_payload_types
+} from "../expression_lowering/native/core_text";
+import { find_local_binding } from "../expressions_bindings";
+import { format_temp_name } from "../expressions_helpers";
+import { is_scope_descendant, make_child_scope_id } from "../lifetime";
+import { find_function_by_name_or_import } from "../rendering_helpers";
+import { empty_string_constant_set, merge_string_constants } from "../strings";
+import {
+    find_struct_info_by_name,
+    resolve_enum_info_for_literal,
+    resolve_enum_info_from_llvm_type,
+    resolve_enum_variant_info
+} from "../type_context_queries";
+import {
+    ends_with_pointer_suffix,
+    layout_annotation_represents_user_value,
+    map_struct_field_annotation,
+    strip_pointer_suffix
+} from "../type_mapping";
+import {
+    BlockLoweringResult,
+    EnumTypeInfo,
+    EnumVariantInfo,
+    LLVMOperand,
+    LifetimeRegionMetadata,
+    LocalBinding,
+    LocalMutation,
+    LoopContext,
+    MatchArmMutations,
+    MatchCaseCondition,
+    MatchCaseStructure,
+    MatchFieldBinding,
+    MatchStructFieldBinding,
+    MatchStructure,
+    ParameterBinding,
+    StringConstant,
+    StructFieldInfo,
+    StructTypeInfo,
+    TryFrameContext,
+    TypeContext
+} from "../types";
+import {
+    copy_string_array,
+    extend_diag_array,
+    extend_string_array,
+    is_identifier_part_char,
+    is_identifier_start_char,
+    merge_parameter_bindings,
+    number_to_string,
+    trim_text
+} from "../utils";
+import { lower_instruction_range } from "./instructions";
+import { allocate_block_label, lower_condition_to_i1 } from "./instructions_condition";
+import {
+    _parse_int_from_string,
+    clone_local_bindings,
+    emit_scope_drops,
+    extend_lifetime_regions,
+    extend_mutations
+} from "./instructions_helpers";
+import { lower_match_case_condition } from "./instructions_match_condition";
+import { emit_phi_merges_for_match, materialize_mutation_values_at_label } from "./phi";
+
+// Build a LocalBinding separately so loops never have inline struct literals
+// at body top level, which the v0.1.1 seed misidentifies as a loop closer.
+fn _match_make_local_binding(name: string, pointer: string, llvm_type: string, scope_id: string, scope_depth: int) -> LocalBinding {
+    return LocalBinding {
+        name: name,
+        pointer: pointer,
+        llvm_type: llvm_type,
+        type_annotation: "",
+        ownership: null,
+        consumed: false,
+        scope_id: scope_id,
+        scope_depth: scope_depth,
+        allocation_kind: "arena",
+        init_sentinel: "",
+        narrowed_variant: ""
+    };
+}
+
+// #830: resolve the declared source annotation of a match subject by name,
+// so generic enum payload field types can be substituted per instantiation.
+// Locals take precedence over parameters (a local may shadow/rebind). Returns
+// "" when the subject is not a simple identifier or carries no annotation.
+fn resolve_match_subject_annotation(subject_name: string, bindings: ParameterBinding[], locals: LocalBinding[]) -> string {
+    if subject_name.length == 0 { return ""; }
+    let mut found: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= locals.length { break; }
+        if locals[i].name == subject_name {
+            if locals[i].type_annotation.length > 0 {
+                found = locals[i].type_annotation;
+            }
+        }
+        i += 1;
+    }
+    if found.length > 0 { return found; }
+    i = 0;
+    loop {
+        if i >= bindings.length { break; }
+        if bindings[i].name == subject_name {
+            if bindings[i].type_annotation.length > 0 {
+                return bindings[i].type_annotation;
+            }
+        }
+        i += 1;
+    }
+    return "";
+}
+
+// Extract the leading call target from a subject expression, i.e. `make_ok`
+// from `make_ok()`. Returns "" when the expression is not a direct call of a
+// simple identifier (mirrors `_extract_leading_call_target` in
+// instructions_let.sfn). Used so a `match <call>()` scrutinee can recover the
+// callee's declared `Result<int, Error>` return type for #830 generic payload
+// monomorphization, exactly as a typed local/param already does.
+fn _match_extract_call_target(expression: string) -> string {
+    let trimmed = trim_text(expression);
+    if trimmed.length == 0 { return ""; }
+    let first = substring(trimmed, 0, 1);
+    if !is_identifier_start_char(first) { return ""; }
+    let mut index: int = 1;
+    loop {
+        if index >= trimmed.length { break; }
+        let ch = substring(trimmed, index, index + 1);
+        if !is_identifier_part_char(ch) { break; }
+        index += 1;
+    }
+    if index >= trimmed.length { return ""; }
+    if substring(trimmed, index, index + 1) != "(" { return ""; }
+    return substring(trimmed, 0, index);
+}
+
+// #830 (call/inferred scrutinee gap): when the match subject is a direct call
+// expression (e.g. `match make_ok()`), resolve its concrete instantiation from
+// the callee's declared return type so generic enum payloads monomorphize the
+// same way they do for a typed local/parameter scrutinee. Returns "" when the
+// subject is not a direct call or the callee has no return type.
+fn resolve_match_subject_call_annotation(subject_expression: string, functions: NativeFunction[]) -> string {
+    let call_target = _match_extract_call_target(subject_expression);
+    if call_target.length == 0 { return ""; }
+    let callee = find_function_by_name_or_import(functions, call_target);
+    if callee == null { return ""; }
+    if callee.return_type.length == 0 { return ""; }
+    // Generic instantiations only. The payload monomorphization gap this
+    // recovers from (#830) is generic-only; adopting a non-generic struct
+    // return type (e.g. `SymbolCollectionResult`) as the subject annotation
+    // would mis-route later member/method-call resolution and break the
+    // self-host build (test_work_dir_parity).
+    if find(callee.return_type, "<", 0) == -1 { return ""; }
+    return callee.return_type;
+}
+
+fn collect_match_structure(instructions: NativeInstruction[], start_index: int, end: int, function_name: string) -> MatchStructure {
+    let mut diagnostics: string[] = [];
+    let mut cases: MatchCaseStructure[] = [];
+    let mut current_case: MatchCaseStructure? = null;
+    let mut index: int = start_index + 1;
+    let mut depth: int = 0;
+    let mut limit: int = end;
+    if limit > instructions.length { limit = instructions.length; }
+    loop {
+        if index >= limit {
+            diagnostics.push("llvm lowering: unterminated `.match` in `"
+                + function_name
+                + "`");
+            if current_case != null {
+                let finished = finalize_match_case(current_case, limit);
+                cases = append_match_case(cases, finished);
+            }
+            return MatchStructure {
+                cases: cases,
+                end_index: limit - 1,
+                diagnostics: diagnostics
+            };
+        }
+        let instruction = instructions[index];
+        if instruction.variant == "Match" {
+            depth += 1;
+            index += 1;
+            continue;
+        }
+        if instruction.variant == "EndMatch" {
+            if depth == 0 {
+                if current_case != null {
+                    let finished = finalize_match_case(current_case, index);
+                    cases = append_match_case(cases, finished);
+                    current_case = null;
+                }
+                return MatchStructure {
+                    cases: cases,
+                    end_index: index,
+                    diagnostics: diagnostics
+                };
+            }
+            depth -= 1;
+            index += 1;
+            continue;
+        }
+        if depth > 0 {
+            index += 1;
+            continue;
+        }
+        if instruction.variant == "Case" {
+            if current_case != null {
+                let finished = finalize_match_case(current_case, index);
+                cases = append_match_case(cases, finished);
+            }
+            let mut guard_text: string? = null;
+            if instruction.guard != null { guard_text = instruction.guard; }
+            current_case = MatchCaseStructure {
+                pattern: instruction.pattern,
+                guard: guard_text,
+                body_start: index + 1,
+                body_end: index + 1,
+                is_default: is_default_pattern(instruction.pattern)
+            };
+            index += 1;
+            continue;
+        }
+        index += 1;
+    }
+
+    return MatchStructure {
+        cases: cases,
+        end_index: limit,
+        diagnostics: diagnostics
+    };
+}
+
+fn append_match_case(cases: MatchCaseStructure[], value: MatchCaseStructure) -> MatchCaseStructure[] {
+    let mut out = cases;
+    out = out.push(value);
+    return out;
+}
+
+fn finalize_match_case(case: MatchCaseStructure?, body_end: int) -> MatchCaseStructure {
+    let value = case;
+    return MatchCaseStructure {
+        pattern: value.pattern,
+        guard: value.guard,
+        body_start: value.body_start,
+        body_end: body_end,
+        is_default: value.is_default
+    };
+}
+
+fn is_default_pattern(pattern: string) -> boolean {
+    let trimmed = trim_text(pattern);
+    if trimmed.length == 0 { return true; }
+    if trimmed == "_" { return true; }
+    return false;
+}
+
+fn lower_match_instruction(function: NativeFunction, start_index: int, llvm_return: string, bindings: ParameterBinding[], locals: LocalBinding[], allocas: string[], lines: string[], temp_index: int, block_counter: int, next_local_id: int, next_region_id: int, functions: NativeFunction[], loop_stack: LoopContext[], try_stack: TryFrameContext[], end: int, context: TypeContext, scope_id: string, scope_depth: int, current_label: string) -> BlockLoweringResult {
+    let mut diagnostics: string[] = [];
+    let mut diags: LoweringDiagnostic[] = [];
+    let mut current_lines: string[] = lines;
+    let base_lines_snapshot = copy_string_array(lines);
+    let mut current_allocas: string[] = allocas;
+    let mut current_locals: LocalBinding[] = locals;
+    let mut current_temp: int = temp_index;
+    let mut current_block_counter: int = block_counter;
+    let mut current_next_local: int = next_local_id;
+    let base_bindings: ParameterBinding[] = bindings;
+    let mut merged_bindings: ParameterBinding[] = base_bindings;
+    let mut lifetime_regions: LifetimeRegionMetadata[] = [];
+    let mut current_next_region: int = next_region_id;
+    let mut collected_mutations: LocalMutation[] = [];
+    let mut collected_string_constants: StringConstant[] = empty_string_constant_set();
+
+    let structure = collect_match_structure(function.instructions, start_index, end, function.name);
+    let mut _ci0: int = 0;
+    loop {
+        if _ci0 >= structure.diagnostics.length { break; }
+        diagnostics.push(structure.diagnostics[_ci0]);
+        _ci0 += 1;
+    }
+
+    let subject_instruction = function.instructions[start_index];
+    let subject_name = extract_simple_identifier(subject_instruction.expression);
+    let subject_result = lower_expression(subject_instruction.expression, bindings, current_locals, current_temp, current_lines, functions, context, "");
+    let mut _ci1: int = 0;
+    loop {
+        if _ci1 >= subject_result.diagnostics.length { break; }
+        diagnostics.push(subject_result.diagnostics[_ci1]);
+        _ci1 += 1;
+    }
+    current_lines = subject_result.lines;
+    current_temp = subject_result.temp_index;
+    collected_string_constants = merge_string_constants(collected_string_constants, subject_result.string_constants);
+
+    if subject_result.operand == null {
+        diagnostics.push("llvm lowering: unable to lower match subject in `"
+            + function.name
+            + "`");
+        return BlockLoweringResult {
+            lines: current_lines,
+            allocas: current_allocas,
+            locals: current_locals,
+            bindings: base_bindings,
+            temp_index: current_temp,
+            block_counter: current_block_counter,
+            diagnostics: diagnostics,
+            diags: diags,
+            terminated: false,
+            next_local_id: current_next_local,
+            lifetime_regions: lifetime_regions,
+            next_lifetime_region_id: current_next_region,
+            next_index: structure.end_index + 1,
+            mutations: collected_mutations,
+            string_constants: collected_string_constants
+        };
+    }
+
+    let subject_operand = subject_result.operand;
+
+    // #830: capture the match subject's declared source annotation (e.g.
+    // `Foo<int, Error>`) so payload field types can be resolved per
+    // instantiation. Empty for non-identifier subjects / monomorphic enums.
+    let mut subject_type_annotation = resolve_match_subject_annotation(subject_name, bindings, current_locals);
+    // #830 (call/inferred scrutinee gap): a direct `match <call>()` subject
+    // is not a simple identifier, so the name-based lookup above returns "".
+    // Recover its concrete instantiation from the callee's declared return
+    // type so generic enum payloads monomorphize as they do for typed locals.
+    if subject_type_annotation.length == 0 {
+        subject_type_annotation = resolve_match_subject_call_annotation(subject_instruction.expression, functions);
+    }
+
+    let union_payload_types = parse_union_payload_types(subject_operand.llvm_type);
+    let mut matched_union_variants: int[] = [];
+    let mut subject_enum_info = resolve_enum_info_from_llvm_type(context, subject_operand.llvm_type);
+    // SFN-565: boxed generic enums such as `Result<T, E>` lower as `i8*`,
+    // so LLVM-type lookup cannot prove an otherwise exhaustive match. Recover
+    // the enum identity from the source annotation already carried for payload
+    // substitution; this lets the existing exhaustiveness logic mark the merge
+    // block `unreachable` instead of leaving a fabricated function fallback.
+    if subject_enum_info == null {
+        let mut enum_name = trim_text(subject_type_annotation);
+        let generic_start = find(enum_name, "<", 0);
+        if generic_start > 0 {
+            enum_name = trim_text(substring(enum_name, 0, generic_start));
+        }
+        if enum_name.length > 0 {
+            subject_enum_info = resolve_enum_info_for_literal(context, enum_name);
+        }
+    }
+    let mut matched_enum_tags: int[] = [];
+
+    if structure.cases.length == 0 {
+        diagnostics.push("llvm lowering: match without cases in `" + function.name
+            + "`");
+        let merge_alloc = allocate_block_label("matchmerge", current_block_counter);
+        let merge_label = merge_alloc.label;
+        current_block_counter = merge_alloc.next_counter;
+        current_lines.push("  br label %" + merge_label);
+        current_lines.push(merge_label + ":");
+        return BlockLoweringResult {
+            lines: current_lines,
+            allocas: current_allocas,
+            locals: current_locals,
+            bindings: base_bindings,
+            temp_index: current_temp,
+            block_counter: current_block_counter,
+            diagnostics: diagnostics,
+            diags: diags,
+            terminated: false,
+            next_local_id: current_next_local,
+            lifetime_regions: lifetime_regions,
+            next_lifetime_region_id: current_next_region,
+            next_index: structure.end_index + 1,
+            mutations: collected_mutations,
+            string_constants: collected_string_constants
+        };
+    }
+
+    let mut test_labels: string[] = [];
+    let mut body_labels: string[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= structure.cases.length { break; }
+        let test_alloc = allocate_block_label("matchcase", current_block_counter);
+        let body_alloc = allocate_block_label("matchbody", test_alloc.next_counter);
+        test_labels.push(test_alloc.label);
+        body_labels.push(body_alloc.label);
+        current_block_counter = body_alloc.next_counter;
+        index += 1;
+    }
+
+    let merge_alloc = allocate_block_label("matchmerge", current_block_counter);
+    let merge_label = merge_alloc.label;
+    current_block_counter = merge_alloc.next_counter;
+
+    // Preload all locals before the match (needed for phi nodes at merge)
+    let mut preloaded_locals: string[] = [];
+    let mut preload_index: int = 0;
+    loop {
+        if preload_index >= current_locals.length { break; }
+        let local = current_locals[preload_index];
+        // Only preload a binding whose alloca dominates this match entry.
+        // A sibling-arm pattern binding can leak into `current_locals` (its
+        // alloca lives in a non-dominating arm body block); loading it here
+        // emits IR that fails the LLVM verifier ("Instruction does not
+        // dominate all uses", SFN-378). Skip the load but push a placeholder
+        // so `preloaded_locals` stays index-aligned with `current_locals` for
+        // `find_preloaded_value`.
+        if !is_scope_descendant(local.scope_id, scope_id) {
+            preloaded_locals.push("");
+            preload_index += 1;
+            continue;
+        }
+        let preload_temp = format_temp_name(current_temp);
+        current_temp += 1;
+        let preload_line = "  " + preload_temp + " = load " + local.llvm_type
+            + ", "
+            + local.llvm_type
+            + "* "
+            + local.pointer;
+        current_lines.push(preload_line);
+        preloaded_locals.push(preload_temp);
+        preload_index += 1;
+    }
+
+    current_lines.push("  br label %" + test_labels[0]);
+
+    let mut all_terminated: boolean = true;
+    let mut has_unconditional_default: boolean = false;
+    let mut has_guarded_cases: boolean = false;
+    let mut arm_mutations_list: MatchArmMutations[] = [];
+
+    index = 0;
+    loop {
+        if index >= structure.cases.length { break; }
+        let case = structure.cases[index];
+
+        let mut guard_has_text: boolean = false;
+        if case.guard != null {
+            let guard_trimmed = trim_text(case.guard);
+            if guard_trimmed.length > 0 {
+                guard_has_text = true;
+                has_guarded_cases = true;
+            }
+        }
+
+        let mut failure_target: string = merge_label;
+        let _mc_next = index + 1;
+        if _mc_next < structure.cases.length {
+            failure_target = test_labels[_mc_next];
+        }
+
+        current_lines.push(test_labels[index] + ":");
+        let lowered_condition = lower_match_case_condition(function.name, subject_operand, subject_type_annotation, case, bindings, current_locals, current_temp, current_lines, functions, context);
+        let mut _ci2: int = 0;
+        loop {
+            if _ci2 >= lowered_condition.diagnostics.length { break; }
+            diagnostics.push(lowered_condition.diagnostics[_ci2]);
+            _ci2 += 1;
+        }
+        current_lines = lowered_condition.lines;
+        current_temp = lowered_condition.temp_index;
+        collected_string_constants = merge_string_constants(collected_string_constants, lowered_condition.string_constants);
+
+        if lowered_condition.union_variant_index >= 0 {
+            if !guard_has_text {
+                let mut seen: boolean = false;
+                let mut seen_index: int = 0;
+                loop {
+                    if seen_index >= matched_union_variants.length { break; }
+                    if matched_union_variants[seen_index] == lowered_condition.union_variant_index {
+                        seen = true;
+                        break;
+                    }
+                    seen_index += 1;
+                }
+                if !seen {
+                    matched_union_variants.push(lowered_condition.union_variant_index);
+                }
+            }
+        }
+
+        if subject_enum_info != null {
+            if lowered_condition.enum_info != null {
+                if lowered_condition.variant_info != null {
+                    if !guard_has_text {
+                        let enum_info_val = lowered_condition.enum_info;
+                        let variant_info_val = lowered_condition.variant_info;
+                        if enum_info_val.llvm_name == subject_enum_info.llvm_name {
+                            let tag_value = variant_info_val.tag;
+                            let mut seen_tag: boolean = false;
+                            let mut tag_index: int = 0;
+                            loop {
+                                if tag_index >= matched_enum_tags.length {
+                                    break;
+                                }
+                                if matched_enum_tags[tag_index] == tag_value {
+                                    seen_tag = true;
+                                    break;
+                                }
+                                tag_index += 1;
+                            }
+                            if !seen_tag {
+                                matched_enum_tags.push(tag_value);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if lowered_condition.is_default {
+            has_unconditional_default = true;
+            current_lines.push("  br label %" + body_labels[index]);
+        } else if lowered_condition.operand != null {
+            current_lines.push("  br i1 " + lowered_condition.operand.value
+                + ", label %"
+                + body_labels[index]
+                + ", label %"
+                + failure_target);
+        } else { current_lines.push("  br label %" + failure_target); }
+
+        current_lines.push(body_labels[index] + ":");
+
+        let mut base_locals: LocalBinding[] = clone_local_bindings(current_locals);
+        let mut base_allocas: string[] = current_allocas;
+        let mut base_local_id: int = current_next_local;
+
+        // Extract and bind payload fields if this is an enum pattern with bindings
+        if lowered_condition.field_bindings.length > 0 {
+            if lowered_condition.enum_info != null {
+                if lowered_condition.variant_info != null {
+                    if subject_operand != null {
+                        let enum_info_val = lowered_condition.enum_info;
+                        let variant_info_val = lowered_condition.variant_info;
+
+                        // 0.5.8+ boxed-struct ABI: if the subject is already a
+                        // %EnumT* pointer, we can use it directly as the base
+                        // for payload GEP. The old alloca+store "take address"
+                        // dance was only needed when the subject arrived as a
+                        // by-value %EnumT first-class aggregate.
+                        let mut subject_alloca_temp: string = "";
+                        if ends_with_pointer_suffix(subject_operand.llvm_type) {
+                            subject_alloca_temp = subject_operand.value;
+                        } else {
+                            subject_alloca_temp = format_temp_name(current_temp);
+                            current_temp += 1;
+                            current_lines.push("  " + subject_alloca_temp
+                                + " = alloca "
+                                + subject_operand.llvm_type);
+                            current_lines.push("  store " + subject_operand.llvm_type
+                                + " "
+                                + subject_operand.value
+                                + ", "
+                                + subject_operand.llvm_type
+                                + "* "
+                                + subject_alloca_temp);
+                        }
+
+                        // Note: NOT added to base_allocas since this allocation happens in the match body, not at function entry
+                        let mut binding_idx: int = 0;
+                        loop {
+                            if binding_idx >= lowered_condition.field_bindings.length {
+                                break;
+                            }
+                            let field_binding = lowered_condition.field_bindings[binding_idx];
+
+                            // Extract the field from the payload
+                            // 1. Get pointer to payload byte array (field 1 of enum)
+                            let payload_ptr_temp = format_temp_name(current_temp);
+                            current_temp += 1;
+                            let mut payload_field_index: int = 1;
+                            if enum_info_val.max_payload_size > 0 {
+                                if enum_info_val.align > enum_info_val.tag_size {
+                                    payload_field_index = 2;
+                                }
+                            }
+                            current_lines.push("  " + payload_ptr_temp
+                                + " = getelementptr inbounds "
+                                + enum_info_val.llvm_name
+                                + ", "
+                                + enum_info_val.llvm_name
+                                + "* "
+                                + subject_alloca_temp
+                                + ", i32 0, i32 "
+                                + number_to_string(payload_field_index));
+
+                            // 2. Treat payload as a raw byte pointer (opaque pointers)
+                            let byte_ptr_temp = format_temp_name(current_temp);
+                            current_temp += 1;
+                            current_lines.push("  " + byte_ptr_temp
+                                + " = bitcast ptr "
+                                + payload_ptr_temp
+                                + " to ptr");
+
+                            // 3. Offset to field position
+                            let field_offset_in_payload = field_binding.field_offset - variant_info_val.offset;
+                            let mut field_ptr_temp: string = byte_ptr_temp;
+                            if field_offset_in_payload > 0 {
+                                let offset_ptr_temp = format_temp_name(current_temp);
+                                current_temp += 1;
+                                current_lines.push("  " + offset_ptr_temp
+                                    + " = getelementptr inbounds i8, ptr "
+                                    + byte_ptr_temp
+                                    + ", i64 "
+                                    + number_to_string(field_offset_in_payload));
+                                field_ptr_temp = offset_ptr_temp;
+                            }
+
+                            // 4. Cast to field type pointer (opaque pointers)
+                            let typed_ptr_temp = format_temp_name(current_temp);
+                            current_temp += 1;
+                            current_lines.push("  " + typed_ptr_temp
+                                + " = bitcast ptr "
+                                + field_ptr_temp
+                                + " to ptr");
+
+                            // 5. Load the field value
+                            let value_temp = format_temp_name(current_temp);
+                            current_temp += 1;
+                            current_lines.push("  " + value_temp + " = load "
+                                + field_binding.field_type
+                                + ", ptr "
+                                + typed_ptr_temp);
+
+                            // 6. Allocate a local for this binding
+                            let local_alloca_temp = format_temp_name(current_temp);
+                            current_temp += 1;
+                            current_lines.push("  " + local_alloca_temp
+                                + " = alloca "
+                                + field_binding.field_type);
+
+                            // 7. Store the value into the local
+                            current_lines.push("  store " + field_binding.field_type
+                                + " "
+                                + value_temp
+                                + ", "
+                                + field_binding.field_type
+                                + "* "
+                                + local_alloca_temp);
+
+                            // 8. Add to locals so the match arm body can reference it
+                            base_locals.push(_match_make_local_binding(field_binding.field_name, local_alloca_temp, field_binding.field_type, make_child_scope_id(scope_id, body_labels[index]), scope_depth
+                                + 1));
+
+                            base_local_id += 1;
+                            binding_idx += 1;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Extract and bind fields if this is a union-variant struct pattern with bindings.
+        if lowered_condition.union_variant_index >= 0 {
+            if lowered_condition.union_struct_info != null {
+                if lowered_condition.union_struct_bindings.length > 0 {
+                    let struct_info_val = lowered_condition.union_struct_info;
+                    let variant_index = lowered_condition.union_variant_index;
+                    let payload_index = variant_index + 1;
+
+                    // Extract the variant payload (a struct pointer) from the union.
+                    let payload_temp = format_temp_name(current_temp);
+                    current_temp += 1;
+                    let payload_type = union_payload_types[variant_index];
+                    current_lines.push("  " + payload_temp + " = extractvalue "
+                        + subject_operand.llvm_type
+                        + " "
+                        + subject_operand.value
+                        + ", "
+                        + number_to_string(payload_index));
+
+                    let typed_payload_ptr = payload_temp;
+                    // If the payload is an opaque pointer, try to preserve the expected struct pointer type.
+                    let expected_ptr_type = struct_info_val.llvm_name + "*";
+                    if payload_type == "i8*" {
+                        let cast_temp = format_temp_name(current_temp);
+                        current_temp += 1;
+                        current_lines.push("  " + cast_temp + " = bitcast i8* "
+                            + payload_temp
+                            + " to "
+                            + expected_ptr_type);
+                        typed_payload_ptr = cast_temp;
+                    }
+
+                    let mut binding_idx: int = 0;
+                    loop {
+                        if binding_idx >= lowered_condition.union_struct_bindings.length {
+                            break;
+                        }
+                        let binding = lowered_condition.union_struct_bindings[binding_idx];
+
+                        // Compute field pointer and load.
+                        let gep_temp = format_temp_name(current_temp);
+                        current_temp += 1;
+                        current_lines.push("  " + gep_temp + " = getelementptr "
+                            + struct_info_val.llvm_name
+                            + ", "
+                            + expected_ptr_type
+                            + " "
+                            + typed_payload_ptr
+                            + ", i32 0, i32 "
+                            + number_to_string(binding.field_index));
+                        let load_temp = format_temp_name(current_temp);
+                        current_temp += 1;
+                        current_lines.push("  " + load_temp + " = load "
+                            + binding.field_type
+                            + ", "
+                            + binding.field_type
+                            + "* "
+                            + gep_temp);
+
+                        // Allocate a local for this binding.
+                        let local_alloca_temp = format_temp_name(current_temp);
+                        current_temp += 1;
+                        current_lines.push("  " + local_alloca_temp
+                            + " = alloca "
+                            + binding.field_type);
+                        current_lines.push("  store " + binding.field_type + " "
+                            + load_temp
+                            + ", "
+                            + binding.field_type
+                            + "* "
+                            + local_alloca_temp);
+
+                        base_locals.push(_match_make_local_binding(binding.field_name, local_alloca_temp, binding.field_type, make_child_scope_id(scope_id, body_labels[index]), scope_depth
+                            + 1));
+                        base_local_id += 1;
+                        binding_idx += 1;
+                    }
+                }
+            }
+        }
+
+        // Union narrowing for default arm: if all non-default patterns matched a strict subset
+        // of union variants, and exactly one variant remains, bind the subject identifier to
+        // that remaining payload type in the arm scope.
+        if lowered_condition.is_default {
+            if union_payload_types.length > 0 {
+                if subject_name.length > 0 {
+                    let mut remaining: int[] = [];
+                    let mut v: int = 0;
+                    loop {
+                        if v >= union_payload_types.length { break; }
+                        let mut is_matched: boolean = false;
+                        let mut mi: int = 0;
+                        loop {
+                            if mi >= matched_union_variants.length { break; }
+                            if matched_union_variants[mi] == v {
+                                is_matched = true;
+                                break;
+                            }
+                            mi += 1;
+                        }
+                        if !is_matched { remaining.push(v); }
+                        v += 1;
+                    }
+                    if remaining.length == 1 {
+                        let remaining_index = remaining[0];
+                        let payload_index = remaining_index + 1;
+                        let payload_type = union_payload_types[remaining_index];
+                        let payload_temp = format_temp_name(current_temp);
+                        current_temp += 1;
+                        current_lines.push("  " + payload_temp
+                            + " = extractvalue "
+                            + subject_operand.llvm_type
+                            + " "
+                            + subject_operand.value
+                            + ", "
+                            + number_to_string(payload_index));
+
+                        let local_alloca_temp = format_temp_name(current_temp);
+                        current_temp += 1;
+                        current_lines.push("  " + local_alloca_temp
+                            + " = alloca "
+                            + payload_type);
+                        current_lines.push("  store " + payload_type + " "
+                            + payload_temp
+                            + ", "
+                            + payload_type
+                            + "* "
+                            + local_alloca_temp);
+
+                        base_locals.push(LocalBinding {
+                            name: subject_name, pointer: local_alloca_temp, llvm_type: payload_type, type_annotation: "", ownership: null, consumed: false, scope_id: make_child_scope_id(scope_id, body_labels[index]), scope_depth: scope_depth
+                                + 1, allocation_kind: "arena", init_sentinel: "", narrowed_variant: ""
+                        });
+                        base_local_id += 1;
+                    }
+                }
+            }
+        }
+
+        let body_result = lower_instruction_range(function, case.body_start, case.body_end, llvm_return, bindings, base_locals, base_allocas, [], current_temp, current_block_counter, base_local_id, current_next_region, functions, loop_stack, try_stack, context, make_child_scope_id(scope_id, body_labels[index]), scope_depth
+            + 1, body_labels[index]);
+        let mut _ci3: int = 0;
+        loop {
+            if _ci3 >= body_result.diagnostics.length { break; }
+            diagnostics.push(body_result.diagnostics[_ci3]);
+            _ci3 += 1;
+        }
+        diags = extend_diag_array(diags, body_result.diags);
+        lifetime_regions = extend_lifetime_regions(lifetime_regions, body_result.lifetime_regions);
+        current_lines = extend_string_array(current_lines, body_result.lines);
+        current_allocas = body_result.allocas;
+        // Do NOT propagate this arm's `base_locals` into `current_locals`.
+        // Each arm is an independent scope: its pattern bindings (and any
+        // arm-body `let`s) allocate in the arm's body block, which does not
+        // dominate sibling arms. Leaking them here made the next arm clone a
+        // binding whose alloca lives in a non-dominating block, so a reload of
+        // it in the sibling arm produced `Instruction does not dominate all
+        // uses` and clang rejected the IR. `current_locals` stays the pristine
+        // pre-match scope, which is also the correct post-match scope (arm
+        // bindings are out of scope once the match ends). Cross-arm mutation of
+        // *outer* locals is handled separately via `arm_mutations_list` + phi.
+        current_temp = body_result.temp_index;
+        current_block_counter = body_result.block_counter;
+        current_next_local = body_result.next_local_id;
+        current_next_region = body_result.next_lifetime_region_id;
+        collected_mutations = extend_mutations(collected_mutations, body_result.mutations);
+        collected_string_constants = merge_string_constants(collected_string_constants, body_result.string_constants);
+
+        // Track mutations per arm for phi node emission
+        arm_mutations_list = append_match_arm_mutations(arm_mutations_list, MatchArmMutations {
+            mutations: body_result.mutations, label: body_labels[index], terminated: body_result.terminated
+        });
+
+        if !body_result.terminated {
+            // M1.5.3 (issue #327): drop arm-local owned RC values at the
+            // arm body close, before falling through to the join block.
+            let _arm_scope_id = make_child_scope_id(scope_id, body_labels[index]);
+            let _arm_close_result = emit_scope_drops(body_result.locals, _arm_scope_id, current_temp);
+            let mut _acd_i: int = 0;
+            loop {
+                if _acd_i >= _arm_close_result.lines.length { break; }
+                current_lines.push(_arm_close_result.lines[_acd_i]);
+                _acd_i += 1;
+            }
+            current_temp = _arm_close_result.next_temp;
+            merged_bindings = merge_parameter_bindings(merged_bindings, body_result.bindings);
+            current_lines.push("  br label %" + merge_label);
+            all_terminated = false;
+        } else {
+            let mut _asgn223: boolean = false;
+            if all_terminated {
+                if true { _asgn223 = true; }
+            }
+            all_terminated = _asgn223;
+        }
+
+        index += 1;
+    }
+
+    let mut match_exhaustive: boolean = has_unconditional_default;
+    if !match_exhaustive {
+        if !has_guarded_cases {
+            if subject_enum_info != null {
+                match_exhaustive = matched_enum_tags.length == subject_enum_info.variants.length;
+            } else if union_payload_types.length > 0 {
+                match_exhaustive = matched_union_variants.length == union_payload_types.length;
+            }
+        }
+    }
+
+    let mut _let224: boolean = false;
+    if all_terminated {
+        if match_exhaustive { _let224 = true; }
+    }
+    let terminated = _let224;
+
+    // Always emit the merge label so any generated failure branches have a target.
+    current_lines.push(merge_label + ":");
+    if terminated { current_lines.push("  unreachable"); } else {
+        // Emit phi nodes for all mutated locals across all arms
+        let phi_result = emit_phi_merges_for_match(arm_mutations_list, current_locals, preloaded_locals, current_lines, current_temp);
+        current_lines = phi_result.lines;
+        current_temp = phi_result.temp_index;
+        if collected_mutations.length > 0 {
+            let materialized = materialize_mutation_values_at_label(collected_mutations, current_locals, current_lines, current_temp, merge_label);
+            current_lines = materialized.lines;
+            current_temp = materialized.temp_index;
+            collected_mutations = materialized.mutations;
+        }
+    }
+
+    let result_string_constants = collected_string_constants;
+    let mut merged_lines: string[] = current_lines;
+    if merged_lines.length < base_lines_snapshot.length {
+        merged_lines = extend_string_array(base_lines_snapshot, merged_lines);
+    }
+
+    return BlockLoweringResult {
+        lines: merged_lines,
+        allocas: current_allocas,
+        locals: current_locals,
+        bindings: merged_bindings,
+        temp_index: current_temp,
+        block_counter: current_block_counter,
+        diagnostics: diagnostics,
+        diags: diags,
+        terminated: terminated,
+        next_local_id: current_next_local,
+        lifetime_regions: lifetime_regions,
+        next_lifetime_region_id: current_next_region,
+        next_index: structure.end_index + 1,
+        mutations: collected_mutations,
+        string_constants: result_string_constants
+    };
+}

@@ -422,9 +422,9 @@ fn sfn_array_sfn_push(arr: *u8, elem_ptr: *u8, elem_size: i64, arena: *u8) -> vo
 
 // `sfn_array_concat(a, b)` — allocate a new array containing both.
 // #1316 (C6 of epic #1308): this is the **bare canonical** link target
-// that `compiler/src/llvm/runtime_helpers.sfn` (`concat` descriptor)
+// that `compiler/capsules/codegen-llvm/src/runtime_helpers.sfn` (`concat` descriptor)
 // and the direct emission sites in
-// `compiler/src/llvm/expression_lowering/arrays.sfn` emit `@sfn_array_concat`
+// `compiler/capsules/codegen-llvm/src/expression_lowering/arrays.sfn` emit `@sfn_array_concat`
 // against — the C definition in the retired C runtime
 // is retired and emission now binds here at link (`runtime/sfn/array.sfn`
 // is in `runtime/capsule.toml::sfn-sources`, linked into every
@@ -470,7 +470,7 @@ fn sfn_array_sfn_slice(arr: *u8, start: i64, end: i64) -> *u8 { return arr; }
 // Compiler-emission helpers under the `_sfn_` infix. The C
 // trampolines (`sfn_array_push_string`, `sfn_array_push_slot` in
 // the retired C runtime) carry the bare names that
-// `compiler/src/llvm/expression_lowering/arrays.sfn` emits against;
+// `compiler/capsules/codegen-llvm/src/expression_lowering/arrays.sfn` emits against;
 // these proof-of-life Sailfin exports preserve the same ABIs so the
 // migration to arena-backed bodies stays a single PR — rename
 // `sfn_array_sfn_*` → `sfn_array_*` and delete the C trampolines in
@@ -664,7 +664,7 @@ fn sfn_array_sfn_reduce(arr: *u8, initial: i64, reducer: fn (int, int) -> int) -
 // `bool[]`/`string[]` (or a nested array of arrays, `depth` levels deep) as its
 // bracketed source-literal form (`"[1, 2, 3]"`), the backing body for the
 // `array.to_string` runtime-helper descriptor
-// (`compiler/src/llvm/runtime_helpers.sfn`). `kind` selects the element
+// (`compiler/capsules/codegen-llvm/src/runtime_helpers.sfn`). `kind` selects the element
 // formatter (`0`=int, `1`=float, `2`=bool, `3`=string) and is ignored when
 // `depth > 0`, in which case each element is itself an array descriptor
 // recursed into at `depth - 1`. `data`/`len` are read through the

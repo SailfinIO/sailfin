@@ -1,7 +1,7 @@
 // Regression test: `arr[i].field = value` must actually mutate the slot.
 //
 // Background: `lower_lvalue_assignment_stmt` in
-// `compiler/src/llvm/expression_lowering/native/statement_assignment.sfn`
+// `compiler/capsules/codegen-llvm/src/expression_lowering/native/statement_assignment.sfn`
 // parses `entries[i].version` into base=`entries[i]`, field=`version`,
 // then lowers the base via `lower_expression`. Under the 0.5.8+
 // boxed-struct ABI, `lower_index_expression` LOADS the element by value,

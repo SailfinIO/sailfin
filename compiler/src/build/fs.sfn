@@ -207,7 +207,7 @@ fn _write_lines_or_empty(target: string, lines: string[]) -> void ![io] {
 // Returns the real publish status, which both IR emit callers thread to
 // their own `boolean` return in place of the `fs.exists` check they used
 // to consume. `fs.writeLines` is `-> void` (a frozen runtime-helper
-// descriptor signature under `compiler/src/llvm/runtime_helpers/`), so the
+// descriptor signature under `compiler/capsules/codegen-llvm/src/runtime_helpers/`), so the
 // staged write's outcome is read as `fs.exists(tmp)` — which is only a
 // sound signal because the mint's pre-created temp is dropped first. See
 // the `fs.deleteFile(tmp)` below.
@@ -576,7 +576,7 @@ fn _sha256_of_file_cmd(file_path: string) -> string ![io] {
 // Binary-safe counterpart to `fs.readFile`, whose `i8*` return is
 // coerced to a Sailfin string via the `string.length` descriptor
 // (`sfn_str_len` -> bounded `strnlen`) in
-// `compiler/src/llvm/expression_lowering/native/core_operands/pointer_coercion.sfn:42-83`,
+// `compiler/capsules/codegen-llvm/src/expression_lowering/native/core_operands/pointer_coercion.sfn:42-83`,
 // truncating at the first NUL. `addr`/`length` are used instead of an
 // `int[]` because an `int[]` materialises one i64 per byte, which is
 // the `-O0` blow-up SFEP-0048 §3.5 pre-forbids; consumers read bytes

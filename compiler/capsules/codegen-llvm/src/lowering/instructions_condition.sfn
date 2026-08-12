@@ -1,0 +1,214 @@
+// compiler/capsules/codegen-llvm/src/lowering/instructions_condition.sfn
+//
+// Shared condition-lowering utilities used by if, loop, and match instruction handlers.
+import { NativeFunction, NativeInstruction, NativeSourceSpan } from "sfn/ir";
+import { substring } from "sfn/strings";
+
+import { lower_expression } from "../expression_lowering/native/core";
+import { detect_suspension_conflicts } from "../expression_lowering/native/statement_suspension";
+import { recover_temp_from_lines } from "../expression_lowering/native/temp_recovery";
+import { find_local_binding, find_parameter_binding } from "../expressions_bindings";
+import { default_return_literal, format_temp_name } from "../expressions_helpers";
+import { is_number_literal, normalise_number_literal } from "../expressions_literals";
+import {
+    BlockLabelResult,
+    ConditionConversion,
+    LLVMOperand,
+    LocalBinding,
+    ParameterBinding,
+    StringConstant,
+    TypeContext
+} from "../types";
+import { number_to_string, starts_with, trim_text } from "../utils";
+
+fn allocate_block_label(prefix: string, counter: int) -> BlockLabelResult {
+    return BlockLabelResult {
+        label: prefix + number_to_string(counter),
+        next_counter: counter + 1
+    };
+}
+
+fn lower_condition_to_i1(function_name: string, expression: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ConditionConversion {
+    let mut diagnostics: string[] = detect_suspension_conflicts(expression, locals, bindings, function_name, null);
+    let lowered = lower_expression(expression, bindings, locals, temp_index, lines, functions, context, "");
+    let mut _ci11: int = 0;
+    loop {
+        if _ci11 >= lowered.diagnostics.length { break; }
+        diagnostics.push(lowered.diagnostics[_ci11]);
+        _ci11 += 1;
+    }
+    let mut current_lines: string[] = lowered.lines;
+    let mut current_temp: int = lowered.temp_index;
+    current_temp = recover_temp_from_lines(current_lines, current_temp);
+
+    let string_constants = lowered.string_constants;
+
+    if lowered.operand == null {
+        let rendered_condition = trim_text(expression);
+        if rendered_condition.length == 0 {
+            diagnostics.push("llvm lowering: condition produced no value in `"
+                + function_name
+                + "`");
+        } else {
+            diagnostics.push("llvm lowering: condition produced no value in `"
+                + function_name
+                + "` for `"
+                + rendered_condition
+                + "`");
+        }
+        return ConditionConversion {
+            lines: current_lines,
+            temp_index: current_temp,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: string_constants
+        };
+    }
+
+    let operand = lowered.operand;
+    if operand.llvm_type == "i1" {
+        return ConditionConversion {
+            lines: current_lines,
+            temp_index: current_temp,
+            operand: operand,
+            diagnostics: diagnostics,
+            string_constants: string_constants
+        };
+    }
+
+    if operand.llvm_type == "double" {
+        let temp_name = format_temp_name(current_temp);
+        current_lines.push("  " + temp_name + " = fcmp one double " + operand.value
+            + ", 0.0");
+        let converted = LLVMOperand { llvm_type: "i1", value: temp_name };
+        return ConditionConversion {
+            lines: current_lines,
+            temp_index: current_temp + 1,
+            operand: converted,
+            diagnostics: diagnostics,
+            string_constants: string_constants
+        };
+    }
+
+    let mut _if226: boolean = false;
+    if operand.llvm_type == "i32" { _if226 = true; }
+    if operand.llvm_type == "i64" { _if226 = true; }
+    if _if226 {
+        let temp_name = format_temp_name(current_temp);
+        current_lines.push("  " + temp_name + " = icmp ne " + operand.llvm_type
+            + " "
+            + operand.value
+            + ", "
+            + default_return_literal(operand.llvm_type)
+            + "");
+        let converted = LLVMOperand { llvm_type: "i1", value: temp_name };
+        return ConditionConversion {
+            lines: current_lines,
+            temp_index: current_temp + 1,
+            operand: converted,
+            diagnostics: diagnostics,
+            string_constants: string_constants
+        };
+    }
+
+    diagnostics.push("llvm lowering: unsupported condition type `" + operand.llvm_type
+        + "` in `"
+        + function_name
+        + "`");
+    return ConditionConversion {
+        lines: current_lines,
+        temp_index: current_temp,
+        operand: null,
+        diagnostics: diagnostics,
+        string_constants: string_constants
+    };
+}
+
+fn sanitize_if_condition_text(condition: string) -> string {
+    let trimmed = trim_text(condition);
+    if trimmed.length == 0 { return trimmed; }
+
+    // If the condition starts with a brace, it's likely an expression (e.g. struct literal)
+    // rather than an if-block opener.
+    if starts_with(trimmed, "{") { return trimmed; }
+
+    // Scan for a top-level `{` that appears after some expression content; treat it as the
+    // start of the if body and truncate.
+    let mut paren_depth: int = 0;
+    let mut bracket_depth: int = 0;
+    let mut brace_depth: int = 0;
+    let mut in_string: boolean = false;
+    let mut escape_next: boolean = false;
+    let mut index: int = 0;
+
+    loop {
+        if index >= trimmed.length { break; }
+        let ch = substring(trimmed, index, index + 1);
+        if in_string {
+            if escape_next {
+                escape_next = false;
+                index += 1;
+                continue;
+            }
+            if ch == "\\" {
+                escape_next = true;
+                index += 1;
+                continue;
+            }
+            if ch == "\"" { in_string = false; }
+            index += 1;
+            continue;
+        }
+
+        if ch == "\"" {
+            in_string = true;
+            index += 1;
+            continue;
+        }
+
+        if ch == "(" {
+            paren_depth += 1;
+            index += 1;
+            continue;
+        }
+        if ch == ")" {
+            if paren_depth > 0 { paren_depth -= 1; }
+            index += 1;
+            continue;
+        }
+        if ch == "[" {
+            bracket_depth += 1;
+            index += 1;
+            continue;
+        }
+        if ch == "]" {
+            if bracket_depth > 0 { bracket_depth -= 1; }
+            index += 1;
+            continue;
+        }
+        if ch == "{" {
+            if paren_depth == 0 {
+                if bracket_depth == 0 {
+                    if brace_depth == 0 {
+                        if index > 0 {
+                            // Truncate at the body opener.
+                            return trim_text(substring(trimmed, 0, index));
+                        }
+                    }
+                }
+            }
+            brace_depth += 1;
+            index += 1;
+            continue;
+        }
+        if ch == "}" {
+            if brace_depth > 0 { brace_depth -= 1; }
+            index += 1;
+            continue;
+        }
+
+        index += 1;
+    }
+
+    return trimmed;
+}

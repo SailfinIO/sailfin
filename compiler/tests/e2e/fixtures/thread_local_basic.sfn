@@ -3,7 +3,7 @@
 // Pins the storage-class round-trip for `thread_local let mut`
 // (#730). The fixture exercises three shapes that exercise the
 // distinct lowering branches in
-// `compiler/src/llvm/lowering/module_globals.sfn`:
+// `compiler/capsules/codegen-llvm/src/lowering/module_globals.sfn`:
 //
 //   - `head: i64` → `internal thread_local global i64 0`
 //     (non-string, integer initializer branch)

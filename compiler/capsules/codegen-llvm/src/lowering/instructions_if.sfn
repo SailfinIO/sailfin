@@ -1,0 +1,831 @@
+// compiler/capsules/codegen-llvm/src/lowering/instructions_if.sfn
+//
+// Control flow handlers: if/else instruction lowering.
+import { LoweringDiagnostic } from "sfn/ir";
+import { NativeFunction, NativeInstruction, NativeSourceSpan } from "sfn/ir";
+import { substring } from "sfn/strings";
+
+import { lower_expression } from "../expression_lowering/native/core";
+import { format_scope_id, pop_scope_metadata, push_scope_metadata } from "../expression_lowering/native/core_scopes";
+import { find_local_binding, find_parameter_binding } from "../expressions_bindings";
+import { default_return_literal, format_temp_name } from "../expressions_helpers";
+import { is_scope_descendant, make_child_scope_id } from "../lifetime";
+import { append_string_constant, merge_string_constants } from "../strings";
+import {
+    BlockLoweringResult,
+    IfStructure,
+    LLVMOperand,
+    LifetimeRegionMetadata,
+    LocalBinding,
+    LocalMutation,
+    LoopContext,
+    OwnershipInfo,
+    ParameterBinding,
+    ScopeMetadata,
+    StringConstant,
+    TryFrameContext,
+    TypeContext
+} from "../types";
+import {
+    append_string,
+    copy_string_array,
+    extend_diag_array,
+    extend_string_array,
+    index_of,
+    is_simple_identifier,
+    merge_parameter_bindings,
+    number_to_string,
+    starts_with,
+    strip_mut_prefix,
+    trim_text
+} from "../utils";
+import { lower_instruction_range } from "./instructions";
+import {
+    allocate_block_label,
+    lower_condition_to_i1,
+    sanitize_if_condition_text
+} from "./instructions_condition";
+import {
+    _parse_int_from_string,
+    clone_local_bindings,
+    emit_scope_drops,
+    extend_lifetime_regions,
+    extend_mutations,
+    insert_lines_before_index
+} from "./instructions_helpers";
+import { get_instruction_tag } from "./lowering_native_helpers";
+import {
+    collect_mutation_names,
+    emit_phi_merges_for_if_else,
+    emit_phi_merges_for_straight_if,
+    find_last_label,
+    find_mutation_for_name,
+    materialize_mutation_values_at_label,
+    retarget_recent_mutations
+} from "./phi";
+
+fn collect_if_structure(instructions: NativeInstruction[], start_index: int, end: int, function_name: string) -> IfStructure {
+    let mut diagnostics: string[] = [];
+    let then_start = start_index + 1;
+    let mut then_end = end;
+    let mut else_start: int = -1;
+    let mut else_end: int = -1;
+    let mut has_else: boolean = false;
+    let mut depth: int = 0;
+    let mut index: int = then_start;
+    let mut limit: int = end;
+    if limit > instructions.length { limit = instructions.length; }
+    loop {
+        if index >= limit {
+            diagnostics.push("llvm lowering: unterminated `.if` in `"
+                + function_name
+                + "`");
+            return IfStructure {
+                then_start: then_start,
+                then_end: limit,
+                else_start: else_start,
+                else_end: else_end,
+                has_else: has_else,
+                next_index: limit - 1,
+                diagnostics: diagnostics
+            };
+        }
+        let _cur_tag = get_instruction_tag(instructions, index);
+        if _cur_tag == 3 {  // If
+            depth += 1;
+            index += 1;
+            continue;
+        }
+        if _cur_tag == 5 {  // EndIf
+            if depth == 0 {
+                if !has_else { then_end = index; } else { else_end = index; }
+                return IfStructure {
+                    then_start: then_start,
+                    then_end: then_end,
+                    else_start: else_start,
+                    else_end: else_end,
+                    has_else: has_else,
+                    next_index: index,
+                    diagnostics: diagnostics
+                };
+            }
+            depth -= 1;
+            index += 1;
+            continue;
+        }
+        if _cur_tag == 4 {  // Else
+            if depth == 0 {
+                if has_else {
+                    diagnostics.push("llvm lowering: duplicate `.else` in `.if` within `"
+                        + function_name
+                        + "`");
+                } else {
+                    has_else = true;
+                    then_end = index;
+                    else_start = index + 1;
+                }
+            }
+            index += 1;
+            continue;
+        }
+        index += 1;
+    }
+
+    return IfStructure {
+        then_start: then_start,
+        then_end: then_end,
+        else_start: else_start,
+        else_end: else_end,
+        has_else: has_else,
+        next_index: limit,
+        diagnostics: diagnostics
+    };
+}
+
+// Flow-sensitive variant narrowing: `<base>.variant == "<V>"` narrows the
+// then-branch so enum field access resolves against `<V>`; see
+// `lower_enum_member_access`.
+struct _VariantGuard {
+    matched: boolean;
+    base: string;
+    variant: string;
+}
+
+// Parse a guard of the exact shape `<base>.variant == "<V>"`. `<base>` must
+// be a simple identifier (rejects compound conditions, calls, member
+// chains); the remainder must be exactly the quoted variant name so a
+// trailing `&& ...` / `|| ...` does not narrow (conservative, sound).
+fn _parse_variant_guard(condition: string) -> _VariantGuard {
+    let none = _VariantGuard { matched: false, base: "", variant: "" };
+    let trimmed = trim_text(condition);
+    let marker = ".variant";
+    let vi = index_of(trimmed, marker);
+    if vi <= 0 { return none; }
+    let base = trim_text(substring(trimmed, 0, vi));
+    if !is_simple_identifier(base) { return none; }
+    let mut rest = trim_text(substring(trimmed, vi + marker.length, trimmed.length));
+    if !starts_with(rest, "==") { return none; }
+    rest = trim_text(substring(rest, 2, rest.length));
+    // The remainder must be exactly a quoted variant name — a trailing
+    // `&& ...` / `|| ...` leaves a non-quote final char, so a compound
+    // condition does not narrow (conservative, sound).
+    if rest.length < 2 { return none; }
+    if rest[0] != "\"" { return none; }
+    if rest[rest.length - 1] != "\"" { return none; }
+    let variant = substring(rest, 1, rest.length - 1);
+    if variant.length == 0 { return none; }
+    if index_of(variant, "\"") >= 0 { return none; }
+    return _VariantGuard { matched: true, base: base, variant: variant };
+}
+
+// Parse an `is` type-guard of the shape `(<base>) is <Variant>` (#1753) —
+// the text the `Is` formatter emits for `if <base> is <Variant>`. Maps onto
+// the SAME `_VariantGuard` the `.variant ==` form produces, so the existing
+// then-branch narrowing applies unchanged. `<base>` must be a simple
+// identifier (after stripping the formatter's enclosing parens) and
+// `<Variant>` a simple variant name; a compound operand or a generic /
+// qualified target yields no narrowing (the boolean still lowers — only the
+// narrowing is conservatively skipped).
+fn _parse_is_guard(condition: string) -> _VariantGuard {
+    let none = _VariantGuard { matched: false, base: "", variant: "" };
+    let trimmed = trim_text(condition);
+    let marker = " is ";
+    let mi = index_of(trimmed, marker);
+    if mi <= 0 { return none; }
+    let mut base = trim_text(substring(trimmed, 0, mi));
+    let variant = trim_text(substring(trimmed, mi + marker.length, trimmed.length));
+    // Strip the single enclosing paren pair the `Is` formatter wraps the
+    // operand in (`(operand) is <type>`).
+    if base.length >= 2 {
+        if base[0] == "(" {
+            if base[base.length - 1] == ")" {
+                base = trim_text(substring(base, 1, base.length - 1));
+            }
+        }
+    }
+    if !is_simple_identifier(base) { return none; }
+    if variant.length == 0 { return none; }
+    if !is_simple_identifier(variant) { return none; }
+    return _VariantGuard { matched: true, base: base, variant: variant };
+}
+
+// Return a copy of `locals` with the binding named `base_name` carrying
+// `narrowed_variant = variant` (all other fields preserved).
+fn _narrow_locals_for_variant(locals: LocalBinding[], base_name: string, variant: string) -> LocalBinding[] {
+    let mut out: LocalBinding[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= locals.length { break; }
+        let b = locals[i];
+        if b.name == base_name {
+            out.push(LocalBinding {
+                name: b.name, pointer: b.pointer, llvm_type: b.llvm_type, type_annotation: b.type_annotation, ownership: b.ownership, consumed: b.consumed, scope_id: b.scope_id, scope_depth: b.scope_depth, allocation_kind: b.allocation_kind, init_sentinel: b.init_sentinel, narrowed_variant: variant
+            });
+        } else { out.push(b); }
+        i += 1;
+    }
+    return out;
+}
+
+// Restore the `narrowed_variant` of the binding named `base_name` in
+// `locals` to `original` — clearing the then-branch narrowing so it does
+// not leak past the `if` block.
+fn _restore_narrowing(locals: LocalBinding[], base_name: string, original: string) -> LocalBinding[] {
+    let mut out: LocalBinding[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= locals.length { break; }
+        let b = locals[i];
+        if b.name == base_name {
+            out.push(LocalBinding {
+                name: b.name, pointer: b.pointer, llvm_type: b.llvm_type, type_annotation: b.type_annotation, ownership: b.ownership, consumed: b.consumed, scope_id: b.scope_id, scope_depth: b.scope_depth, allocation_kind: b.allocation_kind, init_sentinel: b.init_sentinel, narrowed_variant: original
+            });
+        } else { out.push(b); }
+        i += 1;
+    }
+    return out;
+}
+
+// Parameter-binding mirror of `_narrow_locals_for_variant` — the guarded
+// base is often a function parameter, not a local.
+fn _narrow_bindings_for_variant(bindings: ParameterBinding[], base_name: string, variant: string) -> ParameterBinding[] {
+    let mut out: ParameterBinding[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= bindings.length { break; }
+        let b = bindings[i];
+        if b.name == base_name {
+            out.push(ParameterBinding {
+                name: b.name, llvm_name: b.llvm_name, llvm_type: b.llvm_type, type_annotation: b.type_annotation, consumed: b.consumed, span: b.span, narrowed_variant: variant
+            });
+        } else { out.push(b); }
+        i += 1;
+    }
+    return out;
+}
+
+fn _restore_bindings_narrowing(bindings: ParameterBinding[], base_name: string, original: string) -> ParameterBinding[] {
+    let mut out: ParameterBinding[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= bindings.length { break; }
+        let b = bindings[i];
+        if b.name == base_name {
+            out.push(ParameterBinding {
+                name: b.name, llvm_name: b.llvm_name, llvm_type: b.llvm_type, type_annotation: b.type_annotation, consumed: b.consumed, span: b.span, narrowed_variant: original
+            });
+        } else { out.push(b); }
+        i += 1;
+    }
+    return out;
+}
+
+fn lower_if_instruction(function: NativeFunction, start_index: int, llvm_return: string, bindings: ParameterBinding[], locals: LocalBinding[], allocas: string[], lines: string[], temp_index: int, block_counter: int, next_local_id: int, next_region_id: int, functions: NativeFunction[], loop_stack: LoopContext[], try_stack: TryFrameContext[], end: int, context: TypeContext, scope_id: string, scope_depth: int, current_label: string) -> BlockLoweringResult {
+    let mut current_lines: string[] = lines;
+    let base_lines_snapshot = copy_string_array(lines);
+    let mut current_allocas: string[] = allocas;
+    let mut current_locals: LocalBinding[] = locals;
+    let mut current_temp: int = temp_index;
+    let mut current_block_counter: int = block_counter;
+    let mut current_next_local: int = next_local_id;
+    let mut diagnostics: string[] = [];
+    let mut diags: LoweringDiagnostic[] = [];
+    let base_bindings: ParameterBinding[] = bindings;
+    let mut then_bindings: ParameterBinding[] = base_bindings;
+    let mut else_bindings: ParameterBinding[] = base_bindings;
+    let mut lifetime_regions: LifetimeRegionMetadata[] = [];
+    let mut current_next_region: int = next_region_id;
+    let mut collected_mutations: LocalMutation[] = [];
+
+    let structure = collect_if_structure(function.instructions, start_index, end, function.name);
+    let mut _ci12: int = 0;
+    loop {
+        if _ci12 >= structure.diagnostics.length { break; }
+        diagnostics.push(structure.diagnostics[_ci12]);
+        _ci12 += 1;
+    }
+
+    // Defensive: If a front-end pass accidentally includes the opening block brace (or
+    // even the whole block) in the textual condition, strip the trailing block portion.
+    // This prevents `lower_expression` from swallowing statements like `return ...` as the
+    // RHS of `&&` / `||`, which can otherwise produce invalid LLVM control flow.
+    let rendered_condition_source = trim_text(function.instructions[start_index].condition);
+    let sanitized_condition_source = sanitize_if_condition_text(rendered_condition_source);
+
+    let condition = lower_condition_to_i1(function.name, sanitized_condition_source, bindings, current_locals, current_temp, current_lines, functions, context);
+    let mut _ci13: int = 0;
+    loop {
+        if _ci13 >= condition.diagnostics.length { break; }
+        diagnostics.push(condition.diagnostics[_ci13]);
+        _ci13 += 1;
+    }
+    current_lines = condition.lines;
+    current_temp = condition.temp_index;
+    let mut collected_string_constants: StringConstant[] = condition.string_constants;
+
+    if condition.operand == null {
+        let rendered_condition = sanitized_condition_source;
+        if rendered_condition.length == 0 {
+            diagnostics.push("llvm lowering: unable to lower if condition in `"
+                + function.name
+                + "`");
+        } else {
+            diagnostics.push("llvm lowering: unable to lower if condition in `"
+                + function.name
+                + "` for `"
+                + rendered_condition
+                + "`");
+        }
+        return BlockLoweringResult {
+            lines: current_lines,
+            allocas: current_allocas,
+            locals: current_locals,
+            bindings: base_bindings,
+            temp_index: current_temp,
+            block_counter: current_block_counter,
+            diagnostics: diagnostics,
+            diags: diags,
+            terminated: false,
+            next_local_id: current_next_local,
+            lifetime_regions: lifetime_regions,
+            next_lifetime_region_id: current_next_region,
+            next_index: structure.next_index + 1,
+            mutations: [],
+            string_constants: collected_string_constants
+        };
+    }
+
+    let then_label_alloc = allocate_block_label("then", current_block_counter);
+    let then_label = then_label_alloc.label;
+    current_block_counter = then_label_alloc.next_counter;
+
+    let mut else_label: string = "";
+    if structure.has_else {
+        let else_alloc = allocate_block_label("else", current_block_counter);
+        else_label = else_alloc.label;
+        current_block_counter = else_alloc.next_counter;
+    }
+
+    let merge_alloc = allocate_block_label("merge", current_block_counter);
+    let merge_label = merge_alloc.label;
+    current_block_counter = merge_alloc.next_counter;
+
+    let mut false_target: string = merge_label;
+    if structure.has_else { false_target = else_label; }
+
+    // Preload all locals before the branch (needed for phi nodes in both straight-line and if/else cases)
+    let mut preloaded_locals: string[] = [];
+    let mut preload_index: int = 0;
+    loop {
+        if preload_index >= current_locals.length { break; }
+        let local = current_locals[preload_index];
+        // Only preload a binding whose alloca dominates this branch point.
+        // A sibling-arm pattern binding can leak into the locals threaded
+        // into a nested `if` (its alloca lives in a non-dominating arm body
+        // block); loading it here emits IR that fails the LLVM verifier
+        // ("Instruction does not dominate all uses", SFN-378). Skip the load
+        // but push a placeholder so `preloaded_locals` stays index-aligned
+        // with `current_locals` for `find_preloaded_value`.
+        if !is_scope_descendant(local.scope_id, scope_id) {
+            preloaded_locals.push("");
+            preload_index += 1;
+            continue;
+        }
+        let preload_temp = format_temp_name(current_temp);
+        current_temp += 1;
+        let preload_line = "  " + preload_temp + " = load " + local.llvm_type
+            + ", "
+            + local.llvm_type
+            + "* "
+            + local.pointer;
+        current_lines.push(preload_line);
+        preloaded_locals.push(preload_temp);
+        preload_index += 1;
+    }
+
+    current_lines.push("  br i1 " + condition.operand.value + ", label %"
+        + then_label
+        + ", label %"
+        + false_target);
+
+    // Track the actual source block for the conditional branch so downstream phi nodes
+    // reference the correct predecessor even when the condition introduced helper blocks
+    let branch_label = find_last_label(current_lines, current_label);
+
+    let base_locals = current_locals;
+    let base_allocas = current_allocas;
+    let base_temp = current_temp;
+    let base_local_id = current_next_local;
+    let base_block_counter = current_block_counter;
+
+    // Flow-sensitive variant narrowing: an `if <base>.variant == "<V>"`
+    // guard narrows `<base>` to variant V inside the then-branch only.
+    let mut _guard = _parse_variant_guard(sanitized_condition_source);
+    if !_guard.matched {
+        // `if <base> is <Variant>` narrows identically to `<base>.variant ==
+        // "<Variant>"` (#1753) — reuse the same then-branch narrowing.
+        _guard = _parse_is_guard(sanitized_condition_source);
+    }
+    let mut then_locals: LocalBinding[] = base_locals;
+    let mut then_param_bindings: ParameterBinding[] = bindings;
+    let mut _guard_local_active: boolean = false;
+    let mut _guard_local_original: string = "";
+    let mut _guard_param_active: boolean = false;
+    let mut _guard_param_original: string = "";
+    if _guard.matched {
+        let _gb = find_local_binding(base_locals, _guard.base);
+        if _gb != null {
+            _guard_local_active = true;
+            _guard_local_original = _gb.narrowed_variant;
+            then_locals = _narrow_locals_for_variant(base_locals, _guard.base, _guard.variant);
+        }
+        let _gp = find_parameter_binding(bindings, _guard.base);
+        if _gp != null {
+            _guard_param_active = true;
+            _guard_param_original = _gp.narrowed_variant;
+            then_param_bindings = _narrow_bindings_for_variant(bindings, _guard.base, _guard.variant);
+        }
+    }
+
+    current_lines.push(then_label + ":");
+    let then_scope_id = make_child_scope_id(scope_id, then_label);
+    let then_result = lower_instruction_range(function, structure.then_start, structure.then_end, llvm_return, then_param_bindings, then_locals, base_allocas, [], base_temp, base_block_counter, base_local_id, current_next_region, functions, loop_stack, try_stack, context, then_scope_id, scope_depth
+        + 1, then_label);
+    let mut _ci14: int = 0;
+    loop {
+        if _ci14 >= then_result.diagnostics.length { break; }
+        diagnostics.push(then_result.diagnostics[_ci14]);
+        _ci14 += 1;
+    }
+    diags = extend_diag_array(diags, then_result.diags);
+    lifetime_regions = extend_lifetime_regions(lifetime_regions, then_result.lifetime_regions);
+    current_allocas = then_result.allocas;
+    current_locals = then_result.locals;
+    // Clear the then-branch narrowing so it does not leak past the `if`.
+    if _guard_local_active {
+        current_locals = _restore_narrowing(current_locals, _guard.base, _guard_local_original);
+    }
+    current_temp = then_result.temp_index;
+    current_block_counter = then_result.block_counter;
+    current_next_local = then_result.next_local_id;
+    then_bindings = then_result.bindings;
+    if _guard_param_active {
+        then_bindings = _restore_bindings_narrowing(then_bindings, _guard.base, _guard_param_original);
+    }
+    current_next_region = then_result.next_lifetime_region_id;
+    current_lines = extend_string_array(current_lines, then_result.lines);
+    let then_exit_label = find_last_label(current_lines, then_label);
+    let mut then_mutations = retarget_recent_mutations(then_result.mutations, 0, then_exit_label);
+    collected_mutations = extend_mutations(collected_mutations, then_mutations);
+    collected_string_constants = merge_string_constants(collected_string_constants, then_result.string_constants);
+    let then_terminated = then_result.terminated;
+    let mut then_merge_insert_index: int = -1;
+    if !then_terminated {
+        // M1.5.3 (issue #327): drop owned RC values declared in the
+        // `then` block before falling through to the merge join. Nested
+        // scopes inside the block already emitted their own drops.
+        let _then_close_result = emit_scope_drops(then_result.locals, then_scope_id, current_temp);
+        let mut _tcd_i: int = 0;
+        loop {
+            if _tcd_i >= _then_close_result.lines.length { break; }
+            current_lines.push(_then_close_result.lines[_tcd_i]);
+            _tcd_i += 1;
+        }
+        current_temp = _then_close_result.next_temp;
+        let merge_branch_index = current_lines.length;
+        current_lines.push("  br label %" + merge_label);
+        then_merge_insert_index = merge_branch_index;
+    }
+
+    let mut else_terminated: boolean = false;
+    let mut else_mutations: LocalMutation[] = [];
+    let mut else_exit_label: string = else_label;
+    let mut else_merge_insert_index: int = -1;
+    if structure.has_else {
+        current_lines.push(else_label + ":");
+        let else_scope_id = make_child_scope_id(scope_id, else_label);
+        let else_result = lower_instruction_range(function, structure.else_start, structure.else_end, llvm_return, bindings, base_locals, current_allocas, [], current_temp, current_block_counter, current_next_local, current_next_region, functions, loop_stack, try_stack, context, else_scope_id, scope_depth
+            + 1, else_label);
+        let mut _ci15: int = 0;
+        loop {
+            if _ci15 >= else_result.diagnostics.length { break; }
+            diagnostics.push(else_result.diagnostics[_ci15]);
+            _ci15 += 1;
+        }
+        diags = extend_diag_array(diags, else_result.diags);
+        lifetime_regions = extend_lifetime_regions(lifetime_regions, else_result.lifetime_regions);
+        current_allocas = else_result.allocas;
+        current_locals = else_result.locals;
+        current_temp = else_result.temp_index;
+        current_block_counter = else_result.block_counter;
+        current_next_local = else_result.next_local_id;
+        else_bindings = else_result.bindings;
+        current_next_region = else_result.next_lifetime_region_id;
+        current_lines = extend_string_array(current_lines, else_result.lines);
+        else_terminated = else_result.terminated;
+        let exit_label = find_last_label(current_lines, else_label);
+        else_exit_label = exit_label;
+        let mut branch_mutations = retarget_recent_mutations(else_result.mutations, 0, exit_label);
+        else_mutations = branch_mutations;
+        collected_mutations = extend_mutations(collected_mutations, else_mutations);
+        collected_string_constants = merge_string_constants(collected_string_constants, else_result.string_constants);
+        if !else_terminated {
+            // M1.5.3 (issue #327): drop owned RC values declared in the
+            // `else` block before falling through to the merge join.
+            let _else_close_result = emit_scope_drops(else_result.locals, else_scope_id, current_temp);
+            let mut _ecd_i: int = 0;
+            loop {
+                if _ecd_i >= _else_close_result.lines.length { break; }
+                current_lines.push(_else_close_result.lines[_ecd_i]);
+                _ecd_i += 1;
+            }
+            current_temp = _else_close_result.next_temp;
+            let merge_branch_index = current_lines.length;
+            current_lines.push("  br label %" + merge_label);
+            else_merge_insert_index = merge_branch_index;
+        }
+    }
+
+    let mut _if227: boolean = false;
+    if structure.has_else {
+        let mut _if232: boolean = false;
+        if !then_terminated { _if232 = true; }
+        if !else_terminated { _if232 = true; }
+        if _if232 { _if227 = true; }
+    }
+    if _if227 {
+        let then_names = collect_mutation_names(then_mutations);
+        let else_names = collect_mutation_names(else_mutations);
+        let mut mutated_names: string[] = then_names;
+        let mut else_idx: int = 0;
+        loop {
+            if else_idx >= else_names.length { break; }
+            let else_name = else_names[else_idx];
+            let mut already_added: boolean = false;
+            let mut check_idx: int = 0;
+            loop {
+                if check_idx >= mutated_names.length { break; }
+                if mutated_names[check_idx] == else_name {
+                    already_added = true;
+                    break;
+                }
+                check_idx += 1;
+            }
+            if !already_added { mutated_names.push(else_name); }
+            else_idx += 1;
+        }
+
+        let mut then_exit_loads: string[] = [];
+        let mut then_added: LocalMutation[] = [];
+        if !then_terminated {
+            let mut name_idx: int = 0;
+            loop {
+                if name_idx >= mutated_names.length { break; }
+                let name = mutated_names[name_idx];
+                let local = find_local_binding(base_locals, name);
+                if local != null {
+                    let load_temp = format_temp_name(current_temp);
+                    current_temp += 1;
+                    then_exit_loads = append_string(then_exit_loads, "  "
+                        + load_temp
+                        + " = load "
+                        + local.llvm_type
+                        + ", "
+                        + local.llvm_type
+                        + "* "
+                        + local.pointer);
+                    let original = find_mutation_for_name(then_mutations, name);
+                    let mut original_span: NativeSourceSpan? = null;
+                    if original != null { original_span = original.span; }
+                    let exit_mutation = LocalMutation {
+                        name: name,
+                        llvm_type: local.llvm_type,
+                        value_name: load_temp,
+                        span: original_span,
+                        originating_label: then_exit_label
+                    };
+                    then_added.push(exit_mutation);
+                }
+                name_idx += 1;
+            }
+        }
+
+        let mut else_exit_loads: string[] = [];
+        let mut else_added: LocalMutation[] = [];
+        if structure.has_else {
+            if !else_terminated {
+                let mut name_idx: int = 0;
+                loop {
+                    if name_idx >= mutated_names.length { break; }
+                    let name = mutated_names[name_idx];
+                    let local = find_local_binding(base_locals, name);
+                    if local != null {
+                        let load_temp = format_temp_name(current_temp);
+                        current_temp += 1;
+                        else_exit_loads = append_string(else_exit_loads, "  "
+                            + load_temp
+                            + " = load "
+                            + local.llvm_type
+                            + ", "
+                            + local.llvm_type
+                            + "* "
+                            + local.pointer);
+                        let original = find_mutation_for_name(else_mutations, name);
+                        let mut original_span: NativeSourceSpan? = null;
+                        if original != null { original_span = original.span; }
+                        let exit_mutation = LocalMutation {
+                            name: name,
+                            llvm_type: local.llvm_type,
+                            value_name: load_temp,
+                            span: original_span,
+                            originating_label: else_exit_label
+                        };
+                        else_added.push(exit_mutation);
+                    }
+                    name_idx += 1;
+                }
+            }
+        }
+
+        let mut inserted_then: boolean = false;
+        let mut inserted_else: boolean = false;
+        if then_exit_loads.length > 0 {
+            if then_merge_insert_index >= 0 {
+                if else_exit_loads.length > 0 {
+                    if else_merge_insert_index >= 0 {
+                        if then_merge_insert_index > else_merge_insert_index {
+                            current_lines = insert_lines_before_index(current_lines, then_merge_insert_index, then_exit_loads);
+                            then_mutations = extend_mutations(then_mutations, then_added);
+                            collected_mutations = extend_mutations(collected_mutations, then_added);
+                            inserted_then = true;
+
+                            current_lines = insert_lines_before_index(current_lines, else_merge_insert_index, else_exit_loads);
+                            else_mutations = extend_mutations(else_mutations, else_added);
+                            collected_mutations = extend_mutations(collected_mutations, else_added);
+                            inserted_else = true;
+                        } else {
+                            current_lines = insert_lines_before_index(current_lines, else_merge_insert_index, else_exit_loads);
+                            else_mutations = extend_mutations(else_mutations, else_added);
+                            collected_mutations = extend_mutations(collected_mutations, else_added);
+                            inserted_else = true;
+
+                            current_lines = insert_lines_before_index(current_lines, then_merge_insert_index, then_exit_loads);
+                            then_mutations = extend_mutations(then_mutations, then_added);
+                            collected_mutations = extend_mutations(collected_mutations, then_added);
+                            inserted_then = true;
+                        }
+                    }
+                }
+            }
+        }
+
+        if !inserted_then {
+            if then_exit_loads.length > 0 {
+                if then_merge_insert_index >= 0 {
+                    current_lines = insert_lines_before_index(current_lines, then_merge_insert_index, then_exit_loads);
+                    then_mutations = extend_mutations(then_mutations, then_added);
+                    collected_mutations = extend_mutations(collected_mutations, then_added);
+                }
+            }
+        }
+
+        if !inserted_else {
+            if else_exit_loads.length > 0 {
+                if else_merge_insert_index >= 0 {
+                    current_lines = insert_lines_before_index(current_lines, else_merge_insert_index, else_exit_loads);
+                    else_mutations = extend_mutations(else_mutations, else_added);
+                    collected_mutations = extend_mutations(collected_mutations, else_added);
+                }
+            }
+        }
+    }
+
+    if !structure.has_else {
+        if !then_terminated {
+            let mutated_names = collect_mutation_names(then_mutations);
+            let mut then_exit_loads: string[] = [];
+            let mut then_added: LocalMutation[] = [];
+            let mut name_idx: int = 0;
+            loop {
+                if name_idx >= mutated_names.length { break; }
+                let name = mutated_names[name_idx];
+                let local = find_local_binding(base_locals, name);
+                if local != null {
+                    let load_temp = format_temp_name(current_temp);
+                    current_temp += 1;
+                    then_exit_loads = append_string(then_exit_loads, "  "
+                        + load_temp
+                        + " = load "
+                        + local.llvm_type
+                        + ", "
+                        + local.llvm_type
+                        + "* "
+                        + local.pointer);
+                    let original = find_mutation_for_name(then_mutations, name);
+                    let mut original_span: NativeSourceSpan? = null;
+                    if original != null { original_span = original.span; }
+                    let exit_mutation = LocalMutation {
+                        name: name,
+                        llvm_type: local.llvm_type,
+                        value_name: load_temp,
+                        span: original_span,
+                        originating_label: then_exit_label
+                    };
+                    then_added.push(exit_mutation);
+                }
+                name_idx += 1;
+            }
+            if then_exit_loads.length > 0 {
+                if then_merge_insert_index >= 0 {
+                    current_lines = insert_lines_before_index(current_lines, then_merge_insert_index, then_exit_loads);
+                    then_mutations = extend_mutations(then_mutations, then_added);
+                    collected_mutations = extend_mutations(collected_mutations, then_added);
+                }
+            }
+        }
+    }
+
+    let mut terminated: boolean = false;
+    if structure.has_else {
+        let mut _asgn228: boolean = false;
+        if then_terminated {
+            if else_terminated { _asgn228 = true; }
+        }
+        terminated = _asgn228;
+    }
+
+    let mut _if229: boolean = false;
+    if !terminated { _if229 = true; }
+    if !structure.has_else { _if229 = true; }
+    if _if229 {
+        current_lines.push(merge_label + ":");
+
+        // Emit phi nodes for mutated locals
+        if structure.has_else {
+            // Full if/else: emit phi nodes merging values from both branches
+            let mut _if233: boolean = false;
+            let mut _if235: boolean = false;
+            if !then_terminated { _if235 = true; }
+            if !else_terminated { _if235 = true; }
+            if _if235 {
+                if collected_mutations.length > 0 { _if233 = true; }
+            }
+            if _if233 {
+                let phi_result = emit_phi_merges_for_if_else(then_mutations, else_mutations, base_locals, preloaded_locals, then_label, else_label, then_exit_label, else_exit_label, then_terminated, else_terminated, current_lines, current_temp);
+                current_lines = phi_result.lines;
+                current_temp = phi_result.temp_index;
+                let materialized = materialize_mutation_values_at_label(collected_mutations, base_locals, current_lines, current_temp, merge_label);
+                current_lines = materialized.lines;
+                current_temp = materialized.temp_index;
+                collected_mutations = materialized.mutations;
+            }
+        } else {
+            // Straight-line if: emit phi nodes merging then branch with base
+            if !then_terminated {
+                if collected_mutations.length > 0 {
+                    let phi_result = emit_phi_merges_for_straight_if(collected_mutations, base_locals, preloaded_locals, branch_label, then_label, then_exit_label, current_lines, current_temp);
+                    current_lines = phi_result.lines;
+                    current_temp = phi_result.temp_index;
+                    let materialized = materialize_mutation_values_at_label(collected_mutations, base_locals, current_lines, current_temp, merge_label);
+                    current_lines = materialized.lines;
+                    current_temp = materialized.temp_index;
+                    collected_mutations = materialized.mutations;
+                }
+            }
+        }
+    }
+
+    current_locals = base_locals;
+    let mut merged_bindings: ParameterBinding[] = base_bindings;
+    if !then_terminated {
+        merged_bindings = merge_parameter_bindings(merged_bindings, then_bindings);
+    }
+    if structure.has_else {
+        if !else_terminated {
+            merged_bindings = merge_parameter_bindings(merged_bindings, else_bindings);
+        }
+    }
+
+    let mut merged_lines: string[] = current_lines;
+    if merged_lines.length < base_lines_snapshot.length {
+        merged_lines = extend_string_array(base_lines_snapshot, merged_lines);
+    }
+
+    return BlockLoweringResult {
+        lines: merged_lines,
+        allocas: current_allocas,
+        locals: current_locals,
+        bindings: merged_bindings,
+        temp_index: current_temp,
+        block_counter: current_block_counter,
+        diagnostics: diagnostics,
+        diags: diags,
+        terminated: terminated,
+        next_local_id: current_next_local,
+        lifetime_regions: lifetime_regions,
+        next_lifetime_region_id: current_next_region,
+        next_index: structure.next_index + 1,
+        mutations: collected_mutations,
+        string_constants: collected_string_constants
+    };
+}

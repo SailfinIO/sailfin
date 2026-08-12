@@ -1,0 +1,789 @@
+// compiler/capsules/codegen-llvm/src/expression_lowering/native/core_strings.sfn
+//
+// String lowering helpers for expression lowering extracted from core.sfn.
+import { format_temp_name } from "../../expressions_helpers";
+import { empty_string_constant_set, escape_string_for_llvm } from "../../strings";
+import { ExpressionResult, LLVMOperand, StringConstant } from "../../types";
+import { append_string, number_to_string } from "../../utils";
+import { array_pointer_element_type } from "../arrays";
+import { emit_bf16_widen_to_double } from "./core_bf16_lowering";
+import { coerce_operand_to_type, harmonise_operands } from "./core_operands/dispatch";
+import {
+    is_union_llvm_type,
+    parse_union_payload_types,
+    unescape_string_literal
+} from "./core_text";
+import { emit_runtime_call, empty_runtime_call_overrides } from "./runtime_call";
+
+fn lower_string_literal(literal: string, temp_index: int, lines: string[]) -> ExpressionResult {
+    // M1.A — String literal lowering to {i8*, i64} aggregate.
+    //
+    // The literal materializes in three layers:
+    //   1. A runtime-allocated byte buffer holds the UTF-8 contents (plus
+    //      a trailing NUL so legacy `i8*`-shaped helpers downstream of a
+    //      data-pointer extract keep working until M2.4).
+    //   2. The buffer pointer + literal byte length are packed into an
+    //      `{i8*, i64}` aggregate via two `insertvalue` ops on `undef`.
+    //   3. The aggregate is the literal's result operand. Consumers that
+    //      still expect `i8*` (most legacy helpers, string-typed locals
+    //      until M1.A.2 ships) extract the data pointer via the
+    //      `coerce_pointer_or_struct` shim in core_operands.sfn.
+    //
+    // Why keep the alloc/store/NUL pattern? The alloc routes through the
+    // bump-allocator arena (default-on for selfhost / installed binaries)
+    // and lets multi-module in-process drivers (`sfn check <dir>`,
+    // `sfn test`, future `sfn lsp`) reclaim per-iteration literal storage
+    // via `runtime.arena_rewind`. Globals (`@.str.N`) have a known Phase 5a
+    // gap — Stage2's struct-return plumbing can drop the collected constant
+    // table, yielding link-time failures. The trailing NUL is one byte
+    // over-allocated past `len`; it costs us nothing and bridges the
+    // aggregate ABI to legacy NUL-terminated C bodies during the M1→M2.4
+    // transition.
+    let content = unescape_string_literal(literal);
+    let escaped = escape_string_for_llvm(content);
+    let array_length = content.length + 1;
+    let array_type = "[" + number_to_string(array_length) + " x i8]";
+    let byte_count = content.length;
+
+    let mut current_lines: string[] = lines;
+    let mut diagnostics: string[] = [];
+    // M1.7.2a (#496): route through descriptor-driven dispatch. The
+    // alloc_struct emission here intentionally does *not* carry the
+    // `noalias` return attribute today (string-literal arena boxes
+    // are not known to be unique pointers, unlike user-struct boxes
+    // in `core_operands.sfn`); we preserve that exact shape by
+    // leaving `RuntimeCallOverrides.return_attributes` empty.
+    let alloc_size_value = number_to_string(array_length);
+    let alloc_size_operand = LLVMOperand {
+        llvm_type: "i64",
+        value: alloc_size_value
+    };
+    let alloc_operands: LLVMOperand[] = [alloc_size_operand];
+    let alloc_result = emit_runtime_call("alloc_struct", alloc_operands, empty_runtime_call_overrides(), temp_index, current_lines);
+    let mut _alloc_di: int = 0;
+    loop {
+        if _alloc_di >= alloc_result.diagnostics.length { break; }
+        diagnostics.push(alloc_result.diagnostics[_alloc_di]);
+        _alloc_di += 1;
+    }
+    current_lines = alloc_result.lines;
+    let malloc_temp = format_temp_name(temp_index);
+    let cast_temp = format_temp_name(temp_index + 1);
+    current_lines.push("  " + cast_temp + " = bitcast i8* " + malloc_temp
+        + " to "
+        + array_type
+        + "*");
+    current_lines.push("  store " + array_type + " c\"" + escaped + "\\00\", "
+        + array_type
+        + "* "
+        + cast_temp);
+
+    let agg_data_temp = format_temp_name(temp_index + 2);
+    current_lines.push("  " + agg_data_temp
+        + " = insertvalue {i8*, i64} undef, i8* "
+        + malloc_temp
+        + ", 0");
+    let agg_full_temp = format_temp_name(temp_index + 3);
+    current_lines.push("  " + agg_full_temp + " = insertvalue {i8*, i64} "
+        + agg_data_temp
+        + ", i64 "
+        + number_to_string(byte_count)
+        + ", 1");
+
+    let operand = LLVMOperand {
+        llvm_type: "{i8*, i64}",
+        value: agg_full_temp
+    };
+    let empty_constants = empty_string_constant_set();
+    return ExpressionResult {
+        lines: current_lines,
+        temp_index: temp_index + 4,
+        operand: operand,
+        diagnostics: diagnostics,
+        string_constants: empty_constants
+    };
+}
+
+fn emit_string_concat(left: LLVMOperand, right: LLVMOperand, temp_index: int, lines: string[]) -> ExpressionResult {
+    let harmonised = harmonise_operands(left, right, temp_index, lines);
+    let mut _if121: boolean = false;
+    if harmonised.left == null { _if121 = true; }
+    if harmonised.right == null { _if121 = true; }
+    if _if121 {
+        return ExpressionResult {
+            lines: harmonised.lines,
+            temp_index: harmonised.temp_index,
+            operand: null,
+            diagnostics: harmonised.diagnostics,
+            string_constants: empty_string_constant_set()
+        };
+    }
+    // M1.A: both operands are coerced to the {i8*, i64} aggregate ABI.
+    // Literals already arrive as aggregates; legacy i8* operands (string
+    // locals/params, numeric stringification) are wrapped via the i8* →
+    // {i8*, i64} shim in core_operands.sfn (which recovers length via
+    // sailfin_runtime_string_length). The C wrapper for
+    // `sailfin_runtime_string_concat` extracts the data pointers and
+    // forwards to the legacy NUL-terminated impl until M2.4 ships
+    // length-aware bodies. Return type stays `i8*` so downstream
+    // legacy-shape consumers don't need updating in this PR.
+    let left_aligned = coerce_operand_to_type(harmonised.left, "{i8*, i64}", harmonised.temp_index, harmonised.lines, true, null);
+    let mut diagnostics: string[] = harmonised.diagnostics;
+    let mut _ci0: int = 0;
+    loop {
+        if _ci0 >= left_aligned.diagnostics.length { break; }
+        diagnostics.push(left_aligned.diagnostics[_ci0]);
+        _ci0 += 1;
+    }
+    let right_aligned = coerce_operand_to_type(harmonised.right, "{i8*, i64}", left_aligned.temp_index, left_aligned.lines, true, null);
+    let mut _ci1: int = 0;
+    loop {
+        if _ci1 >= right_aligned.diagnostics.length { break; }
+        diagnostics.push(right_aligned.diagnostics[_ci1]);
+        _ci1 += 1;
+    }
+    let mut _if122: boolean = false;
+    if left_aligned.operand == null { _if122 = true; }
+    if right_aligned.operand == null { _if122 = true; }
+    if _if122 {
+        return ExpressionResult {
+            lines: right_aligned.lines,
+            temp_index: right_aligned.temp_index,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: empty_string_constant_set()
+        };
+    }
+    // M1.7.2d (#721): route through descriptor-driven dispatch.
+    // The `string.concat` descriptor (runtime_helpers.sfn) pins the
+    // three parameter types (`{i8*, i64}`, `{i8*, i64}`, `ptr`) and
+    // resolves the symbol via `native_signature`; the call site
+    // contributes the operands, including the third arena-slot `ptr`.
+    // #1308: the slot is now a null pointer rather than
+    // `ptr @sfn_default_arena`. The runtime `sfn_str_concat` resolves
+    // the arena via `_sfn_resolve_arena`, which falls back to the
+    // cheap cached `sfn_arena_global()` on a null slot (string.sfn),
+    // so no Sailfin object references the C global `sfn_default_arena`
+    // anymore — retiring that residual symbol. The downstream
+    // `extractvalue` recovers the data pointer so the rest of the
+    // pipeline keeps treating string operands as `i8*`.
+    let arena_operand = LLVMOperand { llvm_type: "ptr", value: "null" };
+    let concat_operands: LLVMOperand[] = [left_aligned.operand, right_aligned.operand, arena_operand];
+    let concat_result = emit_runtime_call("string.concat", concat_operands, empty_runtime_call_overrides(), right_aligned.temp_index, right_aligned.lines);
+    let mut _concat_di: int = 0;
+    loop {
+        if _concat_di >= concat_result.diagnostics.length { break; }
+        diagnostics.push(concat_result.diagnostics[_concat_di]);
+        _concat_di += 1;
+    }
+    // M1.A.2: return the full `{i8*, i64}` aggregate `sfn_str_concat` produces
+    // (data + length) rather than extracting just the data pointer. The length
+    // field is authoritative; discarding it and re-wrapping downstream left the
+    // length undef on paths that reinterpreted the `i8*` as the aggregate (the
+    // `emit_native` builder output had a garbage `.length`, breaking
+    // `index_of`/length-dependent ops in compiled programs). Now that scalar
+    // `string` is the aggregate, this is also the natural result shape.
+    let agg_name = format_temp_name(right_aligned.temp_index);
+    let operand = LLVMOperand { llvm_type: "{i8*, i64}", value: agg_name };
+    return ExpressionResult {
+        lines: concat_result.lines,
+        temp_index: right_aligned.temp_index + 1,
+        operand: operand,
+        diagnostics: diagnostics,
+        string_constants: empty_string_constant_set()
+    };
+}
+
+fn coerce_string_operand_to_aggregate(operand: LLVMOperand, temp_index: int, lines: string[]) -> ExpressionResult {
+    let coerced = coerce_operand_to_type(operand, "{i8*, i64}", temp_index, lines, true, null);
+    return ExpressionResult {
+        lines: coerced.lines,
+        temp_index: coerced.temp_index,
+        operand: coerced.operand,
+        diagnostics: coerced.diagnostics,
+        string_constants: empty_string_constant_set()
+    };
+}
+
+fn select_string_aggregate(condition: LLVMOperand, when_true: LLVMOperand, when_false: LLVMOperand, temp_index: int, lines: string[]) -> ExpressionResult {
+    let mut diagnostics: string[] = [];
+    let true_aggregate = coerce_string_operand_to_aggregate(when_true, temp_index, lines);
+    let mut _ci_union_true: int = 0;
+    loop {
+        if _ci_union_true >= true_aggregate.diagnostics.length { break; }
+        diagnostics.push(true_aggregate.diagnostics[_ci_union_true]);
+        _ci_union_true += 1;
+    }
+    if true_aggregate.operand == null {
+        return ExpressionResult {
+            lines: true_aggregate.lines,
+            temp_index: true_aggregate.temp_index,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: empty_string_constant_set()
+        };
+    }
+
+    let false_aggregate = coerce_string_operand_to_aggregate(when_false, true_aggregate.temp_index, true_aggregate.lines);
+    let mut _ci_union_false: int = 0;
+    loop {
+        if _ci_union_false >= false_aggregate.diagnostics.length { break; }
+        diagnostics.push(false_aggregate.diagnostics[_ci_union_false]);
+        _ci_union_false += 1;
+    }
+    if false_aggregate.operand == null {
+        return ExpressionResult {
+            lines: false_aggregate.lines,
+            temp_index: false_aggregate.temp_index,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: empty_string_constant_set()
+        };
+    }
+
+    let true_data = format_temp_name(false_aggregate.temp_index);
+    let true_len = format_temp_name(false_aggregate.temp_index + 1);
+    let false_data = format_temp_name(false_aggregate.temp_index + 2);
+    let false_len = format_temp_name(false_aggregate.temp_index + 3);
+    let selected_data = format_temp_name(false_aggregate.temp_index + 4);
+    let selected_len = format_temp_name(false_aggregate.temp_index + 5);
+    let aggregate_data = format_temp_name(false_aggregate.temp_index + 6);
+    let aggregate_full = format_temp_name(false_aggregate.temp_index + 7);
+
+    let mut current_lines = false_aggregate.lines;
+    current_lines.push("  " + true_data + " = extractvalue {i8*, i64} "
+        + true_aggregate.operand.value
+        + ", 0");
+    current_lines.push("  " + true_len + " = extractvalue {i8*, i64} "
+        + true_aggregate.operand.value
+        + ", 1");
+    current_lines.push("  " + false_data + " = extractvalue {i8*, i64} "
+        + false_aggregate.operand.value
+        + ", 0");
+    current_lines.push("  " + false_len + " = extractvalue {i8*, i64} "
+        + false_aggregate.operand.value
+        + ", 1");
+    current_lines.push("  " + selected_data + " = select i1 " + condition.value
+        + ", i8* "
+        + true_data
+        + ", i8* "
+        + false_data);
+    current_lines.push("  " + selected_len + " = select i1 " + condition.value
+        + ", i64 "
+        + true_len
+        + ", i64 "
+        + false_len);
+    current_lines.push("  " + aggregate_data
+        + " = insertvalue {i8*, i64} undef, i8* "
+        + selected_data
+        + ", 0");
+    current_lines.push("  " + aggregate_full + " = insertvalue {i8*, i64} "
+        + aggregate_data
+        + ", i64 "
+        + selected_len
+        + ", 1");
+
+    let operand = LLVMOperand {
+        llvm_type: "{i8*, i64}",
+        value: aggregate_full
+    };
+    return ExpressionResult {
+        lines: current_lines,
+        temp_index: false_aggregate.temp_index + 8,
+        operand: operand,
+        diagnostics: diagnostics,
+        string_constants: empty_string_constant_set()
+    };
+}
+
+fn select_i8_pointer_string_aggregate(condition: LLVMOperand, when_true: LLVMOperand, when_false: LLVMOperand, temp_index: int, lines: string[]) -> ExpressionResult {
+    let mut diagnostics: string[] = [];
+    let false_aggregate = coerce_string_operand_to_aggregate(when_false, temp_index, lines);
+    let mut _ci_false: int = 0;
+    loop {
+        if _ci_false >= false_aggregate.diagnostics.length { break; }
+        diagnostics.push(false_aggregate.diagnostics[_ci_false]);
+        _ci_false += 1;
+    }
+    if false_aggregate.operand == null {
+        return ExpressionResult {
+            lines: false_aggregate.lines,
+            temp_index: false_aggregate.temp_index,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: empty_string_constant_set()
+        };
+    }
+
+    let false_data = format_temp_name(false_aggregate.temp_index);
+    let selected_data = format_temp_name(false_aggregate.temp_index + 1);
+    let selected_len = format_temp_name(false_aggregate.temp_index + 2);
+    let mut current_lines = false_aggregate.lines;
+    current_lines.push("  " + false_data + " = extractvalue {i8*, i64} "
+        + false_aggregate.operand.value
+        + ", 0");
+    current_lines.push("  " + selected_data + " = select i1 " + condition.value
+        + ", i8* "
+        + when_true.value
+        + ", i8* "
+        + false_data);
+
+    let sl_operand = LLVMOperand { llvm_type: "i8*", value: selected_data };
+    let sl_operands: LLVMOperand[] = [sl_operand];
+    let sl_result = emit_runtime_call("string.length", sl_operands, empty_runtime_call_overrides(), false_aggregate.temp_index
+        + 2, current_lines);
+    let mut _ci_len: int = 0;
+    loop {
+        if _ci_len >= sl_result.diagnostics.length { break; }
+        diagnostics.push(sl_result.diagnostics[_ci_len]);
+        _ci_len += 1;
+    }
+    current_lines = sl_result.lines;
+
+    let aggregate_data = format_temp_name(sl_result.temp_index);
+    let aggregate_full = format_temp_name(sl_result.temp_index + 1);
+    current_lines.push("  " + aggregate_data
+        + " = insertvalue {i8*, i64} undef, i8* "
+        + selected_data
+        + ", 0");
+    current_lines.push("  " + aggregate_full + " = insertvalue {i8*, i64} "
+        + aggregate_data
+        + ", i64 "
+        + selected_len
+        + ", 1");
+
+    let operand = LLVMOperand {
+        llvm_type: "{i8*, i64}",
+        value: aggregate_full
+    };
+    return ExpressionResult {
+        lines: current_lines,
+        temp_index: sl_result.temp_index + 2,
+        operand: operand,
+        diagnostics: diagnostics,
+        string_constants: empty_string_constant_set()
+    };
+}
+
+fn coerce_union_operand_to_string(operand: LLVMOperand, temp_index: int, lines: string[]) -> ExpressionResult {
+    let variants = parse_union_payload_types(operand.llvm_type);
+    let mut diagnostics: string[] = [];
+    if variants.length == 0 {
+        diagnostics.push("llvm lowering: unable to inspect union payloads for string interpolation");
+        return ExpressionResult {
+            lines: lines,
+            temp_index: temp_index,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: empty_string_constant_set()
+        };
+    }
+
+    let tag_temp = format_temp_name(temp_index);
+    let mut current_lines = append_string(lines, "  " + tag_temp
+        + " = extractvalue "
+        + operand.llvm_type
+        + " "
+        + operand.value
+        + ", 0");
+    let mut current_temp = temp_index + 1;
+    let null_literal = lower_string_literal("\"null\"", current_temp, current_lines);
+    current_lines = null_literal.lines;
+    current_temp = null_literal.temp_index;
+    if null_literal.operand == null {
+        return ExpressionResult {
+            lines: current_lines,
+            temp_index: current_temp,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: empty_string_constant_set()
+        };
+    }
+    let mut current_operand: LLVMOperand = null_literal.operand;
+
+    let tag_operand = LLVMOperand { llvm_type: "i32", value: tag_temp };
+    let mut variant_index: int = 0;
+    loop {
+        if variant_index >= variants.length { break; }
+        let variant_type = variants[variant_index];
+        if variant_type == "i8*" {
+            let payload_temp = format_temp_name(current_temp);
+            current_lines.push("  " + payload_temp + " = extractvalue "
+                + operand.llvm_type
+                + " "
+                + operand.value
+                + ", "
+                + number_to_string(variant_index
+                + 1));
+            current_temp += 1;
+
+            let compare_temp = format_temp_name(current_temp);
+            current_lines.push("  " + compare_temp + " = icmp eq i32 "
+                + tag_operand.value
+                + ", "
+                + number_to_string(variant_index));
+            current_temp += 1;
+
+            let non_null_temp = format_temp_name(current_temp);
+            current_lines.push("  " + non_null_temp + " = icmp ne i8* "
+                + payload_temp
+                + ", null");
+            current_temp += 1;
+
+            let active_temp = format_temp_name(current_temp);
+            current_lines.push("  " + active_temp + " = and i1 " + compare_temp
+                + ", "
+                + non_null_temp);
+            current_temp += 1;
+
+            let payload_operand = LLVMOperand {
+                llvm_type: "i8*",
+                value: payload_temp
+            };
+            let condition = LLVMOperand {
+                llvm_type: "i1",
+                value: active_temp
+            };
+            let selected = select_i8_pointer_string_aggregate(condition, payload_operand, current_operand, current_temp, current_lines);
+            let mut _ci_i8_selected: int = 0;
+            loop {
+                if _ci_i8_selected >= selected.diagnostics.length { break; }
+                diagnostics.push(selected.diagnostics[_ci_i8_selected]);
+                _ci_i8_selected += 1;
+            }
+            current_lines = selected.lines;
+            current_temp = selected.temp_index;
+            if selected.operand == null {
+                return ExpressionResult {
+                    lines: current_lines,
+                    temp_index: current_temp,
+                    operand: null,
+                    diagnostics: diagnostics,
+                    string_constants: empty_string_constant_set()
+                };
+            }
+            current_operand = selected.operand;
+        } else {
+            let payload_temp = format_temp_name(current_temp);
+            current_lines.push("  " + payload_temp + " = extractvalue "
+                + operand.llvm_type
+                + " "
+                + operand.value
+                + ", "
+                + number_to_string(variant_index
+                + 1));
+            current_temp += 1;
+
+            let payload_operand = LLVMOperand {
+                llvm_type: variant_type,
+                value: payload_temp
+            };
+            let payload_string = coerce_operand_to_string(payload_operand, current_temp, current_lines);
+            let mut _ci_payload: int = 0;
+            loop {
+                if _ci_payload >= payload_string.diagnostics.length { break; }
+                diagnostics.push(payload_string.diagnostics[_ci_payload]);
+                _ci_payload += 1;
+            }
+            current_lines = payload_string.lines;
+            current_temp = payload_string.temp_index;
+            if payload_string.operand != null {
+                let compare_temp = format_temp_name(current_temp);
+                current_lines.push("  " + compare_temp + " = icmp eq i32 "
+                    + tag_operand.value
+                    + ", "
+                    + number_to_string(variant_index));
+                current_temp += 1;
+                let condition = LLVMOperand {
+                    llvm_type: "i1",
+                    value: compare_temp
+                };
+                let selected = select_string_aggregate(condition, payload_string.operand, current_operand, current_temp, current_lines);
+                let mut _ci_selected: int = 0;
+                loop {
+                    if _ci_selected >= selected.diagnostics.length { break; }
+                    diagnostics.push(selected.diagnostics[_ci_selected]);
+                    _ci_selected += 1;
+                }
+                current_lines = selected.lines;
+                current_temp = selected.temp_index;
+                if selected.operand == null {
+                    return ExpressionResult {
+                        lines: current_lines,
+                        temp_index: current_temp,
+                        operand: null,
+                        diagnostics: diagnostics,
+                        string_constants: empty_string_constant_set()
+                    };
+                }
+                current_operand = selected.operand;
+            }
+        }
+        variant_index += 1;
+    }
+
+    return ExpressionResult {
+        lines: current_lines,
+        temp_index: current_temp,
+        operand: current_operand,
+        diagnostics: diagnostics,
+        string_constants: empty_string_constant_set()
+    };
+}
+
+fn coerce_operand_to_string(operand: LLVMOperand, temp_index: int, lines: string[]) -> ExpressionResult {
+    let empty_constants = empty_string_constant_set();
+    if operand.llvm_type == "i8*" {
+        return ExpressionResult {
+            lines: lines,
+            temp_index: temp_index,
+            operand: operand,
+            diagnostics: [],
+            string_constants: empty_constants
+        };
+    }
+
+    // M1.A.2: a `{i8*, i64}` operand is already the scalar SfnString
+    // aggregate — the natural string shape after the flip. It needs no
+    // conversion (string interpolation, `print({{x}})`, etc. lower the
+    // interpolated expression to the aggregate). Without this arm it fell
+    // through to the "unable to convert" default, returning a null operand
+    // that silently dropped the whole interpolated statement.
+    if operand.llvm_type == "{i8*, i64}" {
+        return ExpressionResult {
+            lines: lines,
+            temp_index: temp_index,
+            operand: operand,
+            diagnostics: [],
+            string_constants: empty_constants
+        };
+    }
+
+    if is_union_llvm_type(operand.llvm_type) {
+        return coerce_union_operand_to_string(operand, temp_index, lines);
+    }
+
+    if operand.llvm_type == "double" {
+        // M1.7.2b (#497): route number→string through descriptor dispatch.
+        let nts_operands: LLVMOperand[] = [operand];
+        let nts_result = emit_runtime_call("number.to_string", nts_operands, empty_runtime_call_overrides(), temp_index, lines);
+        return ExpressionResult {
+            lines: nts_result.lines,
+            temp_index: nts_result.temp_index,
+            operand: nts_result.operand,
+            diagnostics: nts_result.diagnostics,
+            string_constants: empty_constants
+        };
+    }
+
+    // SFN-610: narrower floats carry no `number.to_string` descriptor of their
+    // own. Widen to `double` and re-enter, so interpolation formats them
+    // through the same runtime call the concatenation path reaches via
+    // `coerce_pointer_or_struct` (core_operands.sfn).
+    if operand.llvm_type == "float" {
+        let widened = format_temp_name(temp_index);
+        let out_lines = append_string(lines, "  " + widened + " = fpext float "
+            + operand.value
+            + " to double");
+        let widened_operand = LLVMOperand {
+            llvm_type: "double",
+            value: widened
+        };
+        return coerce_operand_to_string(widened_operand, temp_index + 1, out_lines);
+    }
+
+    if operand.llvm_type == "half" {
+        let widened = format_temp_name(temp_index);
+        let out_lines = append_string(lines, "  " + widened + " = fpext half "
+            + operand.value
+            + " to double");
+        let widened_operand = LLVMOperand {
+            llvm_type: "double",
+            value: widened
+        };
+        return coerce_operand_to_string(widened_operand, temp_index + 1, out_lines);
+    }
+
+    // `fpext bfloat` has no AArch64 selection pattern (SFN-609), so bf16 widens
+    // through the bit-manipulation helper rather than a native extension.
+    if operand.llvm_type == "bfloat" {
+        let widened = emit_bf16_widen_to_double(operand.value, temp_index, lines);
+        let widened_operand = LLVMOperand {
+            llvm_type: "double",
+            value: widened.value
+        };
+        return coerce_operand_to_string(widened_operand, widened.temp_index, widened.lines);
+    }
+
+    if operand.llvm_type == "i64" {
+        let cast_temp = format_temp_name(temp_index);
+        let mut out_lines = append_string(lines, "  " + cast_temp
+            + " = sitofp i64 "
+            + operand.value
+            + " to double");
+        // M1.7.2b (#497): route number→string through descriptor dispatch.
+        let cast_operand = LLVMOperand {
+            llvm_type: "double",
+            value: cast_temp
+        };
+        let nts_operands: LLVMOperand[] = [cast_operand];
+        let nts_result = emit_runtime_call("number.to_string", nts_operands, empty_runtime_call_overrides(), temp_index
+            + 1, out_lines);
+        return ExpressionResult {
+            lines: nts_result.lines,
+            temp_index: nts_result.temp_index,
+            operand: nts_result.operand,
+            diagnostics: nts_result.diagnostics,
+            string_constants: empty_constants
+        };
+    }
+
+    if operand.llvm_type == "i32" {
+        let cast_temp = format_temp_name(temp_index);
+        let mut out_lines = append_string(lines, "  " + cast_temp
+            + " = sitofp i32 "
+            + operand.value
+            + " to double");
+        // M1.7.2b (#497): route number→string through descriptor dispatch.
+        let cast_operand = LLVMOperand {
+            llvm_type: "double",
+            value: cast_temp
+        };
+        let nts_operands: LLVMOperand[] = [cast_operand];
+        let nts_result = emit_runtime_call("number.to_string", nts_operands, empty_runtime_call_overrides(), temp_index
+            + 1, out_lines);
+        return ExpressionResult {
+            lines: nts_result.lines,
+            temp_index: nts_result.temp_index,
+            operand: nts_result.operand,
+            diagnostics: nts_result.diagnostics,
+            string_constants: empty_constants
+        };
+    }
+
+    if operand.llvm_type == "i8" {
+        let as_i64 = format_temp_name(temp_index);
+        let as_double = format_temp_name(temp_index + 1);
+        let mut out_lines = append_string(lines, "  " + as_i64 + " = sext i8 "
+            + operand.value
+            + " to i64");
+        out_lines.push("  " + as_double + " = sitofp i64 " + as_i64
+            + " to double");
+        // M1.7.2b (#497): route number→string through descriptor dispatch.
+        let cast_operand = LLVMOperand {
+            llvm_type: "double",
+            value: as_double
+        };
+        let nts_operands: LLVMOperand[] = [cast_operand];
+        let nts_result = emit_runtime_call("number.to_string", nts_operands, empty_runtime_call_overrides(), temp_index
+            + 2, out_lines);
+        return ExpressionResult {
+            lines: nts_result.lines,
+            temp_index: nts_result.temp_index,
+            operand: nts_result.operand,
+            diagnostics: nts_result.diagnostics,
+            string_constants: empty_constants
+        };
+    }
+
+    if operand.llvm_type == "i1" {
+        let true_lit = lower_string_literal("\"true\"", temp_index, lines);
+        if true_lit.operand == null {
+            return ExpressionResult {
+                lines: true_lit.lines,
+                temp_index: true_lit.temp_index,
+                operand: null,
+                diagnostics: [],
+                string_constants: empty_constants
+            };
+        }
+        let false_lit = lower_string_literal("\"false\"", true_lit.temp_index, true_lit.lines);
+        if false_lit.operand == null {
+            return ExpressionResult {
+                lines: false_lit.lines,
+                temp_index: false_lit.temp_index,
+                operand: null,
+                diagnostics: [],
+                string_constants: empty_constants
+            };
+        }
+        // SFN-554: literals lower to `{i8*, i64}` aggregates, so select their
+        // data and length fields together. Selecting the aggregate SSA names
+        // as `i8*` produced invalid LLVM whenever boolean interpolation was
+        // compiled.
+        return select_string_aggregate(operand, true_lit.operand, false_lit.operand, false_lit.temp_index, false_lit.lines);
+    }
+
+    // SFN-408: a primitive-element array operand (`{ T*, i64, i64 }*`)
+    // renders as its bracketed source-literal form (`int[]` -> `[19, 22]`,
+    // `int[][]` -> `[[19, 22], [43, 50]]`). Detect the array-pointer shape and
+    // walk its nesting `depth`, then map the leaf element llvm_type to a
+    // formatter `kind` (0=i64, 1=double, 2=i1, 3=i8*). The dynamic-length per-element
+    // loop can't be emitted here (this helper is straight-line SSA with no
+    // block counter), so dispatch to the Sailfin-native `array.to_string`
+    // runtime helper. A leaf element type outside the supported set falls
+    // through to the fatal floor below.
+    let element_type = array_pointer_element_type(operand.llvm_type);
+    if element_type.length > 0 {
+        let mut base = element_type;
+        let mut depth = 0;
+        loop {
+            let inner = array_pointer_element_type(base);
+            if inner.length == 0 { break; }
+            base = inner;
+            depth += 1;
+        }
+        let mut kind = -1;
+        if base == "i64" { kind = 0; }
+        if base == "double" { kind = 1; }
+        if base == "i1" { kind = 2; }
+        if base == "i8*" { kind = 3; }
+        if kind >= 0 {
+            let cast_temp = format_temp_name(temp_index);
+            let out_lines = append_string(lines, "  " + cast_temp
+                + " = bitcast "
+                + operand.llvm_type
+                + " "
+                + operand.value
+                + " to i8*");
+            let desc_operand = LLVMOperand {
+                llvm_type: "i8*",
+                value: cast_temp
+            };
+            let kind_operand = LLVMOperand {
+                llvm_type: "i32",
+                value: number_to_string(kind)
+            };
+            let depth_operand = LLVMOperand {
+                llvm_type: "i32",
+                value: number_to_string(depth)
+            };
+            let ats_operands: LLVMOperand[] = [desc_operand, kind_operand, depth_operand];
+            let ats_result = emit_runtime_call("array.to_string", ats_operands, empty_runtime_call_overrides(), temp_index
+                + 1, out_lines);
+            return ExpressionResult {
+                lines: ats_result.lines,
+                temp_index: ats_result.temp_index,
+                operand: ats_result.operand,
+                diagnostics: ats_result.diagnostics,
+                string_constants: empty_constants
+            };
+        }
+    }
+
+    // SFN-408 safety floor: an interpolation operand with no stringify arm
+    // above must fail the build loudly. The `[fatal]` marker is what
+    // `has_fatal_lowering_diagnostic` (lowering_core/diagnostics.sfn) requires to block
+    // IR emission — without it, the null operand silently drops the whole
+    // enclosing `print`/`call` at exit 0 (the SFN-408 / SFN-343 footgun).
+    let diagnostics: string[] = ["llvm lowering [fatal]: E0832: cannot stringify interpolated operand of LLVM type `"
+        + operand.llvm_type
+        + "` (no Display arm)"];
+    return ExpressionResult {
+        lines: lines,
+        temp_index: temp_index,
+        operand: null,
+        diagnostics: diagnostics,
+        string_constants: empty_constants
+    };
+}

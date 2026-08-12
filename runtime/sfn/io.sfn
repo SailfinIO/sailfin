@@ -5,7 +5,7 @@
 //   1. The bare `sfn_print` / `sfn_print_err` / `sfn_print_info` /
 //      `sfn_print_warn` / `sfn_print_error` printers — the canonical
 //      symbols the compiler emits `call`s against (registered in
-//      `compiler/src/llvm/runtime_helpers.sfn` with
+//      `compiler/capsules/codegen-llvm/src/runtime_helpers.sfn` with
 //      `native_signature: "sfn_print*"`). As of C4/R3 of the C→Sailfin
 //      runtime-retirement epic (#1308, issue #1310) these are **real
 //      native bodies** that write directly to fd 1 / fd 2 via the
@@ -410,7 +410,7 @@ fn sfn_print_sfn(msg: *u8) -> void ![io] {
 // trailing newline to stderr (fd 2). Bare-defined here (link-ownership
 // flip, #1308 residual / #822); the C body is `static`-ified. The emitted
 // `@main` wrapper's catch landing pad calls this by name before returning
-// exit code 1 (`compiler/src/llvm/lowering/emission.sfn`). Kept under a
+// exit code 1 (`compiler/capsules/codegen-llvm/src/lowering/emission.sfn`). Kept under a
 // dedicated symbol rather than reusing `sfn_print_err` so the IO-flip pin
 // in `test_runtime_io_extended.sh` (which forbids `sailfin_runtime_print_*`
 // references in user IR) need not whitelist the wrapper's call site.

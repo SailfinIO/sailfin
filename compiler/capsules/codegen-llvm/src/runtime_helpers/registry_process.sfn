@@ -1,0 +1,322 @@
+// compiler/capsules/codegen-llvm/src/runtime_helpers/registry_process.sfn
+// Process, descriptor I/O, and filesystem descriptor chunks.
+import { RuntimeHelperDescriptor } from "../types";
+import { append_runtime_helper } from "./registry_support";
+
+fn _rh_descriptors_05(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelperDescriptor[] {
+    let mut descriptors = descriptors_in;
+
+    // Process helpers
+    // M1.B (#393): SfnArray ABI — heap-boxed `{ T*, i64, i64 }*` with
+    // explicit cap. Routes through `_v2` C entrypoints that read/write
+    // cap directly (no hidden header). Legacy entrypoints stay
+    // exported for seed-compiled IR; the registry only points the
+    // new compiler at v2.
+    //
+    // M2.9 (#405): `process.run` flips its `native_signature` to the
+    // Sailfin-native `sfn_process_run` defined in
+    // `runtime/sfn/process.sfn` (linked via the runtime capsule's
+    // `sfn-sources`). The function preserves the `double` C-ABI
+    // return shape so the caller's `fptosi` to `i64` keeps working
+    // unchanged. The `_v2` C trampoline stays exported for seed-
+    // compiled IR but is now unreferenced in user emission per the
+    // issue's acceptance criterion (`sailfin_runtime_process_run`
+    // unreferenced).
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "process.run", symbol: "sfn_process_run", return_type: "i64", parameter_types: ["{ i8**, i64, i64 }*"], native_signature: "sfn_process_run", c_abi_return_type: "double"
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "process.exit", symbol: "sfn_process_exit", return_type: "void", parameter_types: ["double"], native_signature: "sfn_process_exit", c_abi_return_type: null
+    });
+
+    // Issue #365: stdout/stderr-capturing process APIs. argv and
+    // env_flat are SfnArray<string>; env_flat carries `"KEY=VALUE"`
+    // entries. `run_capture` returns the exit code; captured streams
+    // are retrieved via the `_take_*` helpers from a stash the
+    // `run_capture` body fills. The C runtime used `__thread` TLS; the
+    // Sailfin-native body (#928) uses two process-global module stash
+    // globals instead, since Sailfin has no TLS surface yet (see
+    // `runtime/sfn/process.sfn`). `spawn_with_env` returns a malloc'd
+    // handle (cast to int64); 0 indicates failure.
+    //
+    // M3 (#928, epic #390): `exit`, `run_capture`, both `capture_take_*`,
+    // and the four `handle_{write,close_stdin,read_stdout,read_stderr,
+    // wait}` rows flip their `native_signature` to the Sailfin-native
+    // `sfn_process_*` bodies in `runtime/sfn/process.sfn` (over
+    // `posix_spawnp` / `posix_spawn_file_actions_*` / `pipe` / `poll`),
+    // exactly as M2.9 flipped `process.run`. `process.spawn_with_env` —
+    // the sole handle producer — is now ALSO Sailfin-native
+    // (`sfn_process_spawn_with_env`, #1102): it mallocs the
+    // `SailfinProcessHandle` the `_handle_*` bodies consume, so the
+    // overlay struct in `process.sfn` is the canonical owner. The C
+    // `SailfinProcessHandle` and the legacy C `sailfin_runtime_process_*`
+    // bodies stay defined for seed-built IR link-compat through the
+    // M-window; the C `spawn_with_env` body is retired separately (#822,
+    // M4-gated) once no seed-built IR references it.
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "process.run_capture", symbol: "sfn_process_run_capture", return_type: "i64", parameter_types: ["{ i8**, i64, i64 }*", "{ i8**, i64, i64 }*"], native_signature: "sfn_process_run_capture", c_abi_return_type: null
+    });
+    // SFN-199 / SFEP-0046 §3.5: `process.exec(argv, env_flat)` — `execve(2)`
+    // process-image replacement for toolchain re-exec dispatch (the SFN-172
+    // consumer). Same 2-array shape as `process.run_capture` (argv + flat
+    // `KEY=VALUE` env). Unlike `process.run_capture_cwd` below — which only
+    // `sfn/os` emits, and `sfn/os` is compiled by the freshly-built compiler —
+    // the dispatcher that will call `process.exec` lives in `compiler/src`,
+    // which the *pinned seed* compiles during `make compile`. So the seed's
+    // runtime-helper table must already contain this target before any
+    // `compiler/src` call site is added: this descriptor ships as a
+    // `seed-blocker` predecessor (no `compiler/src` caller yet, so it
+    // self-hosts now), and the SFN-172 consumer waits for a seed bump that
+    // carries it. See `.claude/rules/seed-dependency.md`.
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "process.exec", symbol: "sfn_process_exec", return_type: "i64", parameter_types: ["{ i8**, i64, i64 }*", "{ i8**, i64, i64 }*"], native_signature: "sfn_process_exec", c_abi_return_type: null
+    });
+    // #1167: `process.run_capture_cwd` — `run_capture` plus a trailing
+    // per-child `cwd` (`i8*`; empty/null = inherit). A SEPARATE target
+    // from `process.run_capture` rather than a widened arity, because
+    // `compiler/src` calls the 2-arg `process.run_capture` and the pinned
+    // seed emits 2-arg calls to it — widening would desync the seed-built
+    // call sites from the 3-arg runtime body (a self-host crash). Only the
+    // freshly-built compiler emits this 3-arg call, exclusively from
+    // `sfn/os`, so no seed cut is required.
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "process.run_capture_cwd", symbol: "sfn_process_run_capture_cwd", return_type: "i64", parameter_types: ["{ i8**, i64, i64 }*", "{ i8**, i64, i64 }*", "i8*"], native_signature: "sfn_process_run_capture_cwd", c_abi_return_type: null
+    });
+    // SFN-45: `process.run_capture_rlimit_as` — `run_capture` plus a
+    // trailing per-child Linux RLIMIT_AS soft cap in bytes (`i64`; <= 0 or
+    // a non-Linux host = uncapped). A SEPARATE target from
+    // `process.run_capture` rather than a widened arity, for the same
+    // reason as `_cwd` above: the pinned seed emits 2-arg `run_capture`
+    // calls, so widening would desync them from the runtime body. Only the
+    // freshly-built compiler emits this 3-arg call, exclusively from the
+    // mem-limit e2e test, so no seed cut is required. See
+    // `.claude/rules/seed-dependency.md`.
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "process.run_capture_rlimit_as", symbol: "sfn_process_run_capture_rlimit_as", return_type: "i64", parameter_types: ["{ i8**, i64, i64 }*", "{ i8**, i64, i64 }*", "i64"], native_signature: "sfn_process_run_capture_rlimit_as", c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "process.capture_take_stdout", symbol: "sfn_process_capture_take_stdout", return_type: "i8*", parameter_types: [], native_signature: "sfn_process_capture_take_stdout", c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "process.capture_take_stderr", symbol: "sfn_process_capture_take_stderr", return_type: "i8*", parameter_types: [], native_signature: "sfn_process_capture_take_stderr", c_abi_return_type: null
+    });
+    // #1520: metered capture — `run_capture` plus a wall-clock +
+    // peak-RSS bracket (`wait4`/`ru_maxrss`), the measurement primitive
+    // the native `sfn bench` driver (epic #1503) uses instead of GNU
+    // `/usr/bin/time -v`. `run_capture_metered` carries `clock` on top
+    // of `io` (it reads the monotonic clock); the two takes hand back
+    // `i64` measurements (wall ms / peak RSS KiB on Linux). Bodies in
+    // `runtime/sfn/process.sfn`.
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "process.run_capture_metered", symbol: "sfn_process_run_capture_metered", return_type: "i64", parameter_types: ["{ i8**, i64, i64 }*", "{ i8**, i64, i64 }*"], native_signature: "sfn_process_run_capture_metered", c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "process.capture_take_wall_ms", symbol: "sfn_process_capture_take_wall_ms", return_type: "i64", parameter_types: [], native_signature: "sfn_process_capture_take_wall_ms", c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "process.capture_take_peak_rss_kb", symbol: "sfn_process_capture_take_peak_rss_kb", return_type: "i64", parameter_types: [], native_signature: "sfn_process_capture_take_peak_rss_kb", c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "process.spawn_with_env", symbol: "sfn_process_spawn_with_env", return_type: "i64", parameter_types: ["{ i8**, i64, i64 }*", "{ i8**, i64, i64 }*"], native_signature: "sfn_process_spawn_with_env", c_abi_return_type: null
+    });
+    // #1167: `process.spawn_with_env_cwd` — trailing per-child `cwd`
+    // (`i8*`; empty/null = inherit). Separate target, same rationale as
+    // `process.run_capture_cwd` above: keep the 2-arg `spawn_with_env`
+    // arity stable for the seed-built `compiler/src` call sites.
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "process.spawn_with_env_cwd", symbol: "sfn_process_spawn_with_env_cwd", return_type: "i64", parameter_types: ["{ i8**, i64, i64 }*", "{ i8**, i64, i64 }*", "i8*"], native_signature: "sfn_process_spawn_with_env_cwd", c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "process.handle_write", symbol: "sfn_process_handle_write", return_type: "i64", parameter_types: ["i64", "i8*"], native_signature: "sfn_process_handle_write", c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "process.handle_close_stdin", symbol: "sfn_process_handle_close_stdin", return_type: "void", parameter_types: ["i64"], native_signature: "sfn_process_handle_close_stdin", c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "process.handle_read_stdout", symbol: "sfn_process_handle_read_stdout", return_type: "i8*", parameter_types: ["i64"], native_signature: "sfn_process_handle_read_stdout", c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "process.handle_read_stderr", symbol: "sfn_process_handle_read_stderr", return_type: "i8*", parameter_types: ["i64"], native_signature: "sfn_process_handle_read_stderr", c_abi_return_type: null
+    });
+    // #1578 (epic #1540 Track A, gaps A1 + A4): framed/length-aware child
+    // stdio. `handle_read_line_stdout` returns one `\n`-delimited line and
+    // stashes the remainder in the handle; `handle_read_bytes_stdout`
+    // returns ≤ n bytes preserving the remainder; `handle_write_bytes`
+    // writes exactly `len` bytes (embedded NULs intact). Same Sailfin-native
+    // bodies + always-declare pattern as `handle_read_stdout` above.
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "process.handle_read_line_stdout", symbol: "sfn_process_handle_read_line_stdout", return_type: "i8*", parameter_types: ["i64"], native_signature: "sfn_process_handle_read_line_stdout", c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "process.handle_read_bytes_stdout", symbol: "sfn_process_handle_read_bytes_stdout", return_type: "i8*", parameter_types: ["i64", "i64"], native_signature: "sfn_process_handle_read_bytes_stdout", c_abi_return_type: null
+    });
+    // SFN-153 (epic #1540 Track A, gap A1): EOF predicate for the framed
+    // stdout reads. The raw line/bytes builtins return `""` for both a
+    // genuine blank line and end-of-stream; this lets the `string?`-typed
+    // `sfn/os::handle_read_line_stdout` wrapper return `null` only at EOF.
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "process.handle_stdout_at_eof", symbol: "sfn_process_handle_stdout_at_eof", return_type: "i1", parameter_types: ["i64"], native_signature: "sfn_process_handle_stdout_at_eof", c_abi_return_type: null
+    });
+    return descriptors;
+}
+
+fn _rh_descriptors_06(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelperDescriptor[] {
+    let mut descriptors = descriptors_in;
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "process.handle_write_bytes", symbol: "sfn_process_handle_write_bytes", return_type: "i64", parameter_types: ["i64", "i8*", "i64"], native_signature: "sfn_process_handle_write_bytes", c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "process.handle_wait", symbol: "sfn_process_handle_wait", return_type: "i64", parameter_types: ["i64"], native_signature: "sfn_process_handle_wait", c_abi_return_type: null
+    });
+
+    // SFEP-0050: process-handle stderr-streaming primitives. The streamed
+    // test-record transport rides the child's stderr; the runner demuxes
+    // stdout(user) + stderr(records) via `io.poll_any` over the two raw
+    // fds, so it needs accessors for those fds (`handle_stdout_fd` /
+    // `handle_stderr_fd`), a stderr counterpart of the framed-stdout
+    // chunk read (`handle_read_bytes_stderr`), the stderr EOF predicate
+    // (`handle_stderr_at_eof`), and a handle-owned deadline kill
+    // (`handle_kill`, SIGKILL) that retires the outer `timeout(1)`
+    // wrapper. Same Sailfin-native bodies + always-declare pattern as the
+    // framed-stdout cluster above (`runtime/sfn/process.sfn`); the cross-
+    // windows path resolves them from the degraded stubs in
+    // `runtime/sfn/platform/process_windows.sfn`.
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "process.handle_stdout_fd", symbol: "sfn_process_handle_stdout_fd", return_type: "i64", parameter_types: ["i64"], native_signature: "sfn_process_handle_stdout_fd", c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "process.handle_stderr_fd", symbol: "sfn_process_handle_stderr_fd", return_type: "i64", parameter_types: ["i64"], native_signature: "sfn_process_handle_stderr_fd", c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "process.handle_read_bytes_stderr", symbol: "sfn_process_handle_read_bytes_stderr", return_type: "i8*", parameter_types: ["i64", "i64"], native_signature: "sfn_process_handle_read_bytes_stderr", c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "process.handle_stderr_at_eof", symbol: "sfn_process_handle_stderr_at_eof", return_type: "i1", parameter_types: ["i64"], native_signature: "sfn_process_handle_stderr_at_eof", c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "process.handle_kill", symbol: "sfn_process_handle_kill", return_type: "i64", parameter_types: ["i64"], native_signature: "sfn_process_handle_kill", c_abi_return_type: null
+    });
+
+    // #1242: environ-iteration primitive. Returns every `"KEY=VALUE"`
+    // entry of the calling process's environment as an
+    // `SfnArray<string>` — the same array-return shape as
+    // `fs.listDirectory`. Sailfin-native body
+    // (`runtime/sfn/process.sfn:sfn_process_environ`) on POSIX; the
+    // cross-windows path resolves the symbol from the `_WIN32` shim in
+    // `runtime/native/src/sailfin_runtime.c` (empty array). Backs
+    // `sfn/os::env_from_current`.
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "process.environ", symbol: "sfn_process_environ", return_type: "{ i8**, i64, i64 }*", parameter_types: [], native_signature: "sfn_process_environ", c_abi_return_type: null
+    });
+
+    // #1580 (epic #1540 Track A, gap A3): single-fd readiness check.
+    // `io.poll_readable(fd, timeout_ms)` wraps a one-slot `POLLIN`
+    // `poll(2)` and returns `true` iff `fd` has data/EOF/error pending
+    // within the timeout (`timeout_ms < 0` blocks until readable, `0`
+    // polls and returns immediately). Lets bidirectional stdio
+    // forwarding wait on multiple fds without deadlock. Sailfin-native
+    // body (`runtime/sfn/process.sfn:sfn_io_poll_readable` — defined
+    // there, not in `io.sfn`, because it needs the POSIX `poll(2)` +
+    // `errno` surface and only `process.sfn` is excluded from the
+    // Windows cross-build; `process_windows.sfn` carries the stub). `fd`
+    // / `timeout_ms` arrive as `int` (i64), the result as `bool` (i1).
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "io.poll_readable", symbol: "sfn_io_poll_readable", return_type: "i1", parameter_types: ["i64", "i64"], native_signature: "sfn_io_poll_readable", c_abi_return_type: null
+    });
+
+    // SFN-155 (epic #1540 Track A, gap A3): multi-fd readiness check.
+    // `io.poll_any(fds, timeout_ms)` waits on every fd in `fds` with one
+    // `poll(2)` and returns *which* fd is ready (`>= 0`), or `-1` for
+    // timeout / empty array / error. Lets a forwarder wait on `{own
+    // stdin, child stdout, child stderr}` together without deadlock, the
+    // multi-fd companion to `io.poll_readable`. Return is a sentinel `i64`
+    // (`-1` == none), not the issue's original `fd?`: an optional `int`
+    // (`i64*`) has no working value-extraction (SFN-182), so the poll
+    // result would be untellable; fds are non-negative, so `-1` is
+    // unambiguous. `fds` is an `int[]` SfnArray (`{ i64*, i64, i64 }*`);
+    // `timeout_ms` arrives as `int` (i64). Sailfin-native body in
+    // `runtime/sfn/process.sfn:sfn_io_poll_any` (defined there, not in
+    // `io.sfn`, because it needs the POSIX `poll(2)` + `errno` surface and
+    // only `process.sfn` is excluded from the Windows cross-build;
+    // `process_windows.sfn` carries the stub).
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "io.poll_any", symbol: "sfn_io_poll_any", return_type: "i64", parameter_types: ["{ i64*, i64, i64 }*", "i64"], native_signature: "sfn_io_poll_any", c_abi_return_type: null
+    });
+
+    // #1579 (epic #1540 Track A, gap A2): read the process's own stdin
+    // (fd 0) incrementally without shelling out. SFN-154 upgraded the two
+    // returns to production-grade typed values (Rust/Go parity):
+    // `io.read_fd(fd, n)` does one `read(2)` of up to `n` bytes and returns
+    // an owned, length-explicit `OwnedBuf` (== `Vec<u8>` / `[]byte`), so its
+    // descriptor return is the boxed `%OwnedBuf*` (the same struct-pointer
+    // shape as `process.environ`'s `{ i8**, i64, i64 }*`) — the string
+    // spelling must equal `map_return_type(context, "OwnedBuf")`.
+    // `io.read_line(fd)` reads to the next newline and returns `string?`
+    // (`null` == EOF, `Some("")` == blank line); `string?` lowers to a
+    // nullable `i8*` (`map_optional_type`), so its descriptor return stays
+    // `i8*` — the null-vs-blank distinction lives in the runtime body.
+    // Sailfin-native bodies in `runtime/sfn/io.sfn` (`sfn_read_fd` /
+    // `sfn_read_line`) over the `read` extern there; `fd` / `n` arrive
+    // as `int` (i64). `read(2)` links on every io.sfn target (the same
+    // libc surface as the file's `write` extern), so — unlike
+    // `io.poll_readable` — no Windows stub is needed.
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "io.read_fd", symbol: "sfn_read_fd", return_type: "%OwnedBuf*", parameter_types: ["i64", "i64"], native_signature: "sfn_read_fd", c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "io.read_line", symbol: "sfn_read_line", return_type: "i8*", parameter_types: ["i64"], native_signature: "sfn_read_line", c_abi_return_type: null
+    });
+
+    // Filesystem adapters.
+    //
+    // M3.1a (#814): `read_file` / `write_file` / `append_file`
+    // flipped to the Sailfin-native `sfn_fs_*` adapters in
+    // `runtime/sfn/adapters/filesystem.sfn`. M3.1b (#815) extends
+    // the flip to `list_directory` / `delete_file` /
+    // `create_directory` (→ `sfn_fs_list_dir` / `sfn_fs_delete` /
+    // `sfn_fs_mkdir`) and `fs.read_bytes` (→ `sfn_fs_read_bytes`).
+    // The legacy C `sailfin_adapter_fs_*` /
+    // `sailfin_runtime_read_file_bytes` symbols stay exported
+    // throughout the M3 window so seed-built compiler IR continues
+    // to link; the `symbol` slots below preserve them as the
+    // registry's fall-back, while every fresh emission routes
+    // through `native_signature` per the `effective_symbol`
+    // resolution in `rendering.sfn`. M3.1c (#926) flips the
+    // `write_lines` / `set_perms` / `get_perms` / `mkdtemp` /
+    // `is_executable` / `symlink` rows to `sfn_fs_*` too (along with
+    // `fs.exists` above), completing the fs adapter wave.
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "fs_read_file", symbol: "sfn_fs_read_file", return_type: "i8*", parameter_types: ["i8*"], native_signature: "sfn_fs_read_file", c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "fs.readFile", symbol: "sfn_fs_read_file", return_type: "i8*", parameter_types: ["i8*"], native_signature: "sfn_fs_read_file", c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "fs_write_file", symbol: "sfn_fs_write_file", return_type: "void", parameter_types: ["i8*", "i8*"], native_signature: "sfn_fs_write_file", c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "fs.writeFile", symbol: "sfn_fs_write_file", return_type: "void", parameter_types: ["i8*", "i8*"], native_signature: "sfn_fs_write_file", c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "fs_append_file", symbol: "sfn_fs_append_file", return_type: "i1", parameter_types: ["i8*", "i8*"], native_signature: "sfn_fs_append_file", c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "fs.appendFile", symbol: "sfn_fs_append_file", return_type: "i1", parameter_types: ["i8*", "i8*"], native_signature: "sfn_fs_append_file", c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "fs_write_lines", symbol: "sfn_fs_write_lines", return_type: "void", parameter_types: ["i8*", "{ i8**, i64, i64 }*"], native_signature: "sfn_fs_write_lines", c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "fs.writeLines", symbol: "sfn_fs_write_lines", return_type: "void", parameter_types: ["i8*", "{ i8**, i64, i64 }*"], native_signature: "sfn_fs_write_lines", c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "fs_list_directory", symbol: "sfn_fs_list_dir", return_type: "{ i8**, i64, i64 }*", parameter_types: ["i8*"], native_signature: "sfn_fs_list_dir", c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "fs.listDirectory", symbol: "sfn_fs_list_dir", return_type: "{ i8**, i64, i64 }*", parameter_types: ["i8*"], native_signature: "sfn_fs_list_dir", c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "fs_delete_file", symbol: "sfn_fs_delete", return_type: "i1", parameter_types: ["i8*"], native_signature: "sfn_fs_delete", c_abi_return_type: null
+    });
+    return descriptors;
+}

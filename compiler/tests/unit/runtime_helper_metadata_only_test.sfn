@@ -17,11 +17,10 @@
 // targets present and asserts none of the emitted lines reference the unbridged
 // symbols, locking #1601's acceptance criterion #4 ("metadata-only rows must
 // NOT emit spurious declare lines") at unit speed.
+import { render_runtime_helper_declarations } from "sfn/codegen-llvm/rendering";
+import { TypeContext } from "sfn/codegen-llvm/types";
 import { NativeFunction } from "sfn/ir";
 import { find } from "sfn/strings";
-
-import { render_runtime_helper_declarations } from "../../src/llvm/rendering";
-import { TypeContext } from "../../src/llvm/types";
 
 // The Call-form `serve` is the only remaining metadata-only target.
 fn _metadata_only_targets() -> string[] { return ["serve"]; }

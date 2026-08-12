@@ -2,9 +2,8 @@
 // emitter path produces an unknown NativeInstruction tag, so pin the diagnostic
 // constructor directly: the fatal code, numeric tag, and function name are all
 // required to make a future lowering gap actionable.
+import { _unsupported_instruction_diagnostic } from "sfn/codegen-llvm/lowering/instructions";
 import { expect_eq_str } from "sfn/test";
-
-import { _unsupported_instruction_diagnostic } from "../../src/llvm/lowering/instructions";
 
 test "lowering instruction gate: unsupported tag diagnostic names tag and function" {
     let diagnostic = _unsupported_instruction_diagnostic(77, "unsupported_probe");

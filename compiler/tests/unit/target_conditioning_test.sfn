@@ -12,6 +12,20 @@
 // the same override-driven pattern the emit-time locator tests use
 // (`errno_locator_test.sfn`), and the argv-shape pattern of
 // `backend_link_libs_parity_test.sfn`.
+import { lower_to_llvm_ir_from_text_with_provider_context } from "sfn/codegen-llvm/lowering/entrypoints";
+import {
+    LLVMProviderContext,
+    build_target_os,
+    skip_module_globals,
+    target_arch_for_lowering,
+    target_setjmp_call_line,
+    target_setjmp_declare,
+    target_setjmp_symbol,
+    test_runner_active,
+    test_runner_trace,
+    trace_call_lowering,
+    trace_lowering
+} from "sfn/codegen-llvm/lowering_debug_state";
 import { contains } from "sfn/strings";
 import { expect_eq_bool, expect_eq_str, expect_eq_str_array } from "sfn/test";
 
@@ -38,20 +52,6 @@ import {
     triple_target_os
 } from "../../src/build/target";
 import { active_build_target, clear_build_target, set_build_target } from "../../src/build/target_state";
-import { lower_to_llvm_ir_from_text_with_provider_context } from "../../src/llvm/lowering/entrypoints";
-import {
-    LLVMProviderContext,
-    build_target_os,
-    skip_module_globals,
-    target_arch_for_lowering,
-    target_setjmp_call_line,
-    target_setjmp_declare,
-    target_setjmp_symbol,
-    test_runner_active,
-    test_runner_trace,
-    trace_call_lowering,
-    trace_lowering
-} from "../../src/llvm/lowering_debug_state";
 
 // Membership check over an emitted argv (`string[]`).
 fn _argv_contains(argv: string[], needle: string) -> boolean ![pure] {

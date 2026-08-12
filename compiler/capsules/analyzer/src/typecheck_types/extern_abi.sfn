@@ -21,7 +21,7 @@ import {
 // return type — see `check_extern_signature`).
 //
 // Accepted forms:
-//   - Primitive scalars accepted by `compiler/src/llvm/type_mapping.sfn:
+//   - Primitive scalars accepted by `compiler/capsules/codegen-llvm/src/type_mapping.sfn:
 //     map_primitive_type` today: i8, i32, i64, u8, usize, bool.
 //   - Raw pointers:       *T, *const T, *mut T, **T (recursive — pointee
 //                         must itself be c-abi or an opaque struct name).
@@ -98,7 +98,7 @@ fn _is_c_abi_type_inner(normalized: string, allow_bare_void: boolean) -> boolean
 // Pure: primitives that v0 externs may use directly (no leading `*`).
 //
 // The accept-list is deliberately the intersection of "what C calls
-// produce sensible LLVM IR" and "what `compiler/src/llvm/type_mapping.sfn:
+// produce sensible LLVM IR" and "what `compiler/capsules/codegen-llvm/src/type_mapping.sfn:
 // map_primitive_type` actually maps today." Adding a primitive here
 // without a corresponding `map_primitive_type` entry would let it
 // pass typecheck and then silently lower to `i8*` (or fall through
@@ -236,7 +236,7 @@ fn is_extern_primitive_type(text: string) -> boolean {
 // `atomic_sub`/`atomic_cas`/`atomic_fence`): these are call-form
 // language intrinsics the lowering recognizes by name and emits as LLVM
 // `atomicrmw`/`cmpxchg`/`fence` (canonical recognizer `is_atomic_builtin`,
-// compiler/src/llvm/atomics.sfn:53). They resolve to no source-level
+// compiler/capsules/codegen-llvm/src/atomics.sfn:53). They resolve to no source-level
 // declaration, so #812's walker must treat them as builtins or every
 // `atomic_*` call would false-positive E0420. The set is the fixed LLVM
 // atomic op surface; keep it in sync with `is_atomic_builtin`.
@@ -266,14 +266,14 @@ fn is_builtin_call_name(name: string) -> boolean {
     if strings_equal(name, "atomic_fence") { _ret = true; }
     // `load_byte(addr: int) -> int` is a call-form lowering primitive
     // (#1308): a single-byte `load i8` + `zext`, recognized by name and
-    // emitted inline (compiler/src/llvm/byte_load.sfn). It resolves to
+    // emitted inline (compiler/capsules/codegen-llvm/src/byte_load.sfn). It resolves to
     // no source-level declaration, so the #812 walker must treat it as a
     // builtin or every `load_byte` call false-positives E0420.
     if strings_equal(name, "load_byte") { _ret = true; }
     // `secure_zero(addr: int, len: int) -> void` is a call-form lowering
     // primitive (SFN-782, design SFEP-0069 §3.6): a guarded loop of
     // volatile byte stores the optimizer may not elide, emitted inline
-    // (compiler/src/llvm/secure_zero.sfn). It resolves to no source-level
+    // (compiler/capsules/codegen-llvm/src/secure_zero.sfn). It resolves to no source-level
     // declaration, so the #812 walker must treat it as a builtin or every
     // `secure_zero` call false-positives E0420.
     if strings_equal(name, "secure_zero") { _ret = true; }

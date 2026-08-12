@@ -1,0 +1,9 @@
+// compiler/capsules/codegen-llvm/src/runtime_helpers/registry_support.sfn
+// Shared append primitive for the partitioned descriptor registry.
+import { RuntimeHelperDescriptor } from "../types";
+
+fn append_runtime_helper(values: RuntimeHelperDescriptor[], value: RuntimeHelperDescriptor) -> RuntimeHelperDescriptor[] {
+    let mut out = values;
+    out = out.push(value);
+    return out;
+}

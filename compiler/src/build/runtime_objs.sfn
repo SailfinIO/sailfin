@@ -1,3 +1,4 @@
+import { resolve_import_module_slug_for_module } from "sfn/codegen-llvm";
 import { parse_native_imports_for_import } from "sfn/ir";
 import { int_to_string } from "sfn/strings";
 
@@ -22,7 +23,6 @@ import {
 import { _env_flag } from "../build_flags";
 import { ParallelProcessTask, _cr_resolve_jobs, _cr_run_bounded_processes } from "../capsule_emit_parallel";
 import { locate_runtime_dep_capsule_src } from "../capsule_resolver/locate";
-import { resolve_import_module_slug_for_module } from "../llvm/imports";
 import { module_name_from_path } from "../main";
 import { RuntimeCapsuleArtifacts } from "../runtime_capsule_resolver";
 import { resolve_compiler_version } from "../version";

@@ -87,7 +87,7 @@ struct SfnTypeDescriptor {
 // Type-kind tags. Match the architect spec at
 // `docs/proposals/0025-native-runtime-architecture.md` `#36-type-metadata-and-reflection` and the constants used
 // by the emitter at
-// `compiler/src/llvm/lowering/type_descriptors.sfn`:
+// `compiler/capsules/codegen-llvm/src/lowering/type_descriptors.sfn`:
 //
 //   PRIMITIVE = 0
 //   STRUCT    = 1
@@ -229,7 +229,7 @@ fn sfn_type_register(desc: *u8) -> void { _registry_append(desc); }
 // The prelude bridges user-level `instance_of(value, Type)`
 // calls through `runtime_resolve_runtime_type_fn(name)` (see
 // `runtime/prelude.sfn:check_type_descriptor`); the descriptor
-// flip in `compiler/src/llvm/runtime_helpers.sfn` routes that
+// flip in `compiler/capsules/codegen-llvm/src/runtime_helpers.sfn` routes that
 // call here.
 fn sfn_resolve_type(name: *u8) -> *u8 {
     if name as i64 == 0 { return null; }

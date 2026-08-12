@@ -1,0 +1,88 @@
+// compiler/capsules/codegen-llvm/src/expression_lowering/native/core_number_literal.sfn
+//
+// Operand selection for a numeric literal under an expected type.
+//
+// Lifted out of `lower_expression`'s number-literal arm
+// (`./core_expression.sfn`) so the
+// choice of carrier is a pure text-to-operand function: it takes the literal
+// source and the typing pressure and returns the LLVM type and value, with
+// no lines, temps, or diagnostics involved. That makes each rule below
+// directly unit-testable and keeps the ordered expression dispatcher focused
+// on precedence and routing rather than carrier details.
+//
+// Three rules apply in order:
+//
+//   1. An integer literal under integer (or absent) pressure keeps its
+//      integer carrier — Slice E.1 (#488) defaults an unsuffixed integer
+//      literal to `i64`.
+//   2. A literal under `half`/`bfloat` pressure becomes a hex-float constant
+//      rounded once from the decimal (SFEP-0054 §3.3, SFN-611).
+//   3. Everything else becomes a `double` constant.
+import { decimal_literal_to_llvm_hex } from "./core_decimal_float";
+import { is_integer_literal, normalise_number_literal, trim_text } from "./core_text";
+
+// The LLVM carrier and constant text for a lowered numeric literal.
+struct NumberLiteralOperand {
+    llvm_type: string;
+    value: string;
+}
+
+// Integer carrier for `expected_type`, or "" when the pressure is not an
+// integer one. Empty pressure means "no annotation", which defaults to
+// `i64`; `double`/`float` pressure (what the deprecated `number` alias maps
+// to once `map_primitive_type` runs) deliberately does not match, so a
+// fractional-looking binding falls through to the float paths.
+fn _integer_target(expected_type: string) -> string {
+    if expected_type.length == 0 { return "i64"; }
+    if expected_type == "int" { return "i64"; }
+    if expected_type == "i64" { return "i64"; }
+    if expected_type == "i32" { return "i32"; }
+    if expected_type == "i16" { return "i16"; }
+    if expected_type == "i8" { return "i8"; }
+    return "";
+}
+
+// number_literal_operand — pick the carrier and constant text for the
+// numeric literal `text` under the typing pressure `expected_type`.
+//
+// The caller has already established that `text` is a numeric literal
+// (`is_number_literal`, ./core_text).
+fn number_literal_operand(text: string, expected_type: string) -> NumberLiteralOperand {
+    let trimmed_expected: string = trim_text(expected_type);
+
+    if is_integer_literal(text) {
+        let integer_target: string = _integer_target(trimmed_expected);
+        if integer_target.length > 0 {
+            let integer_value: string = trim_text(text);
+            return NumberLiteralOperand {
+                llvm_type: integer_target,
+                value: integer_value
+            };
+        }
+    }
+
+    // SFEP-0054 §3.3 (SFN-611): a low-precision expected type rounds the
+    // decimal mathematical value once, straight to the destination. Falling
+    // through to the `double` operand below would round twice — decimal to
+    // `double` in LLVM's own IR parser, then `double` to `half`/`bfloat` —
+    // which §3.3 rules out because double rounding can change a boundary
+    // result. The constant is spelled in hex because a plain decimal beside
+    // `half`/`bfloat` is an LLVM parse error unless exactly representable.
+    let mut low_precision: boolean = false;
+    if trimmed_expected == "half" { low_precision = true; }
+    if trimmed_expected == "bfloat" { low_precision = true; }
+    if low_precision {
+        let constant: string = decimal_literal_to_llvm_hex(text, trimmed_expected);
+        if constant.length > 0 {
+            return NumberLiteralOperand {
+                llvm_type: trimmed_expected,
+                value: constant
+            };
+        }
+    }
+
+    let normalized: string = normalise_number_literal(text);
+    return NumberLiteralOperand { llvm_type: "double", value: normalized };
+}
+
+export { NumberLiteralOperand, number_literal_operand };

@@ -6,9 +6,8 @@
 // against the real implementation. Nothing in `compiler/src` emits a
 // saturating intrinsic, so a break here is invisible to the self-host gate --
 // these import the real function on purpose (SFN-613).
+import { ensure_intrinsic_declarations } from "sfn/codegen-llvm/lowering/lowering_io";
 import { expect_eq_bool, expect_eq_int } from "sfn/test";
-
-import { ensure_intrinsic_declarations } from "../../src/llvm/lowering/lowering_io";
 
 fn _count_matching(values: string[], target: string) -> int {
     let mut count: int = 0;

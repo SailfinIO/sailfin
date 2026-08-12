@@ -2,7 +2,7 @@
 // must store by value in the array slot, not by pointer.
 //
 // Background: `lower_array_literal` in
-// `compiler/src/llvm/expression_lowering/native/core_literals_lowering.sfn`
+// `compiler/capsules/codegen-llvm/src/expression_lowering/native/core_literals_lowering.sfn`
 // infers the element_type by dominant-merging the expected type with every
 // operand's llvm_type. Under the 0.5.8+ boxed-struct ABI, an expression
 // returning a user struct value is a `%T*` pointer (heap-boxed). Before the

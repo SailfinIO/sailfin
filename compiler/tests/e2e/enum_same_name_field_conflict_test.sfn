@@ -4,7 +4,7 @@
 //
 // Two behaviors are pinned here, both via a full `sfn build` (the hazard
 // lives in LLVM lowering — `lower_enum_member_access` in
-// `compiler/src/llvm/expression_lowering/native/core_member_lowering.sfn` —
+// `compiler/capsules/codegen-llvm/src/expression_lowering/native/core_member_lowering.sfn` —
 // so it is NOT visible to `sfn check` / `assert_does_not_compile`, which run
 // the frontend only):
 //

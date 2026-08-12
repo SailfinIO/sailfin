@@ -6,7 +6,7 @@
 // `stamp.substring` — callee signature is not known to the compiler`,
 // while the free-function form `substring(stamp, pos, end)` lowered fine.
 // Root cause: the #1041 fail-closed guard in
-// `compiler/src/llvm/expression_lowering/native/core_call_resolution/receiver_types.sfn`
+// `compiler/capsules/codegen-llvm/src/expression_lowering/native/core_call_resolution/receiver_types.sfn`
 // treated the primitive annotation `string` like an unregistered user
 // struct and returned early, so the receiver-as-arg0 runtime-helper
 // fallback (which routes to the `substring` descriptor) was unreachable.

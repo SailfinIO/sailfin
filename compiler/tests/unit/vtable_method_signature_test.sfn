@@ -1,5 +1,5 @@
 // Unit coverage for `find_vtable_method_signature` / `_parse_fn_pointer_type`
-// (compiler/src/llvm/lowering/lowering_helpers.sfn), the #1739 fix that
+// (compiler/capsules/codegen-llvm/src/lowering/lowering_helpers.sfn), the #1739 fix that
 // recovers an interface method's signature from a per-module vtable constant
 // when the method is referenced ONLY by the vtable (no direct call site).
 //
@@ -11,7 +11,7 @@
 // fixture produces. Tests exercise the parser through the public
 // `find_vtable_method_signature` (the private `_parse_fn_pointer_type` is not
 // exported).
-import { find_vtable_method_signature } from "../../src/llvm/lowering/lowering_helpers";
+import { find_vtable_method_signature } from "sfn/codegen-llvm/lowering/lowering_helpers";
 
 // Build a single vtable constant line in the exact format
 // `render_vtable_constants` emits: comma-joined `<fptype> bitcast (<fptype>

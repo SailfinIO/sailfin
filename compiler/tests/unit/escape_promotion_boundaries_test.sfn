@@ -27,9 +27,9 @@ import {
     append_local_binding,
     find_local_binding,
     promote_escaping_locals_for_boundaries
-} from "../../src/llvm/expression_lowering/native/core_scopes";
-import { emit_scope_drops } from "../../src/llvm/lowering/instructions_helpers";
-import { LocalBinding, OwnershipInfo, ParameterBinding } from "../../src/llvm/types";
+} from "sfn/codegen-llvm/expression_lowering/native/core_scopes";
+import { emit_scope_drops } from "sfn/codegen-llvm/lowering/instructions_helpers";
+import { LocalBinding, OwnershipInfo, ParameterBinding } from "sfn/codegen-llvm/types";
 
 fn _no_params() -> ParameterBinding[] {
     let empty: ParameterBinding[] = [];

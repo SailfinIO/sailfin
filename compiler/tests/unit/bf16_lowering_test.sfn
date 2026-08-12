@@ -2,7 +2,7 @@
 //
 // LLVM 18's AArch64 backend can select no `bfloat` conversion, so every one
 // is emitted as an explicit bit sequence instead
-// (`compiler/src/llvm/expression_lowering/native/core_bf16_lowering.sfn`).
+// (`compiler/capsules/codegen-llvm/src/expression_lowering/native/core_bf16_lowering.sfn`).
 //
 // The assertions below are deliberately about **temp-index accounting**, not
 // about the arithmetic. Each emitter allocates a fixed number of SSA temps and
@@ -14,21 +14,21 @@
 // The rounding itself is validated differentially against LLVM and an exact
 // integer oracle — see the design note
 // (`docs/proposals/design-notes/sfn-609-bf16-conversion-lowering.md`).
-import { contains } from "sfn/strings";
-import { parse_program } from "sfn/syntax";
-
-import { empty_llvm_import_context, resolve_llvm_provider_context } from "../../src/build/llvm_provider_context";
-import { emit_native_text_with_module_name } from "../../src/codegen_driver";
 import {
     emit_bf16_narrow_from_double,
     emit_bf16_narrow_from_float,
     emit_bf16_widen_to_double,
     emit_bf16_widen_to_float,
     emit_i64_round_to_odd
-} from "../../src/llvm/expression_lowering/native/core_bf16_lowering";
-import { coerce_operand_to_string } from "../../src/llvm/expression_lowering/native/core_strings";
-import { lower_to_llvm_ir_from_text_with_provider_context } from "../../src/llvm/lowering/entrypoints";
-import { LLVMOperand } from "../../src/llvm/types";
+} from "sfn/codegen-llvm/expression_lowering/native/core_bf16_lowering";
+import { coerce_operand_to_string } from "sfn/codegen-llvm/expression_lowering/native/core_strings";
+import { lower_to_llvm_ir_from_text_with_provider_context } from "sfn/codegen-llvm/lowering/entrypoints";
+import { LLVMOperand } from "sfn/codegen-llvm/types";
+import { contains } from "sfn/strings";
+import { parse_program } from "sfn/syntax";
+
+import { empty_llvm_import_context, resolve_llvm_provider_context } from "../../src/build/llvm_provider_context";
+import { emit_native_text_with_module_name } from "../../src/codegen_driver";
 
 test "bf16 lowering: widen to float allocates four temps and returns the last" {
     let seed: string[] = [];

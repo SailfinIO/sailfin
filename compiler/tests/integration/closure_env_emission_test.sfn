@@ -3,7 +3,7 @@
 // Golden IR fixtures for the closure env-struct emission helpers
 // introduced in stage A2 of #450 M1.5 (issue #459). Each test
 // feeds a synthetic `NativeLambdaCapture[]` through the public API exported by
-// `compiler/src/llvm/closures.sfn` and pins the rendered LLVM IR
+// `compiler/capsules/codegen-llvm/src/closures.sfn` and pins the rendered LLVM IR
 // against the canonical shape documented in
 // `docs/proposals/0025-native-runtime-architecture.md` `#393-typed-closures`.
 //
@@ -30,8 +30,6 @@
 // emitted env struct into a callable closure pair. Until then, the
 // emit pipeline never invokes these helpers — the tests pin the
 // API surface so A3 can rely on a settled IR shape.
-import { NativeLambdaCapture } from "sfn/ir";
-
 import {
     ClosureCaptureOperand,
     closure_env_type_name,
@@ -39,7 +37,8 @@ import {
     emit_closure_env_alloc,
     emit_closure_env_load_prologue,
     synthesize_closure_env_struct
-} from "../../src/llvm/closures";
+} from "sfn/codegen-llvm/closures";
+import { NativeLambdaCapture } from "sfn/ir";
 
 fn _capture_int(name: string) -> NativeLambdaCapture {
     return NativeLambdaCapture {

@@ -8,7 +8,7 @@
 //   1. lowering shape — `thread_local let mut x: T = init;` emits
 //      `@global.x = internal thread_local global <T> <init>` across the
 //      i64 / i1 / double branches of `_process_one_binding` in
-//      `compiler/src/llvm/lowering/module_globals.sfn`.
+//      `compiler/capsules/codegen-llvm/src/lowering/module_globals.sfn`.
 //   2. use-site symbol — load/store sites still address the global via
 //      `@global.<name>` (thread_local changes only the declaration line).
 //   3. immutable rejection — `thread_local let x = ...` (no `mut`) is an

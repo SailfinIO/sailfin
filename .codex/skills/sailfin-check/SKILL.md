@@ -11,8 +11,8 @@ Use this skill whenever a task touches Sailfin compiler sources, runtime code, t
 
 - The compiler self-caps memory at 8 GiB on Linux (`SAILFIN_MEM_LIMIT` overrides); do not add `ulimit` prefixes or PreToolUse guards for ordinary runs.
 - Wrap direct single-file compiler invocations with `timeout 60`; `make` targets handle their own timeouts.
-- If `.sfn` files under `compiler/src/` or `runtime/` changed, run the formatter before final verification: `sfn fmt --write <files>` followed by `sfn fmt --check <files>` (or `build/bin/sfn ...` when `sfn` is not on `PATH`).
-- If `compiler/src/*.sfn` changed, run `make compile` before test-only validation so tests do not use a stale compiler binary.
+- If `.sfn` files under `compiler/src/`, `compiler/capsules/`, or `runtime/` changed, run the formatter before final verification: `sfn fmt --write <files>` followed by `sfn fmt --check <files>` (or `build/bin/sfn ...` when `sfn` is not on `PATH`).
+- If compiler source under `compiler/src/` or `compiler/capsules/` changed, run `make compile` before test-only validation so tests do not use a stale compiler binary.
 
 ## Verification ladder
 

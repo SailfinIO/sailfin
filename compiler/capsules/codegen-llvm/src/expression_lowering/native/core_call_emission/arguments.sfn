@@ -1,0 +1,121 @@
+// compiler/capsules/codegen-llvm/src/expression_lowering/native/core_call_emission/arguments.sfn
+//
+// Argument coercion and its diagnostic state for native call emission.
+import { trace_log, trace_lowering } from "../../../lowering_debug_state";
+import { LLVMOperand } from "../../../types";
+import { extend_string_array, number_to_string } from "../../../utils";
+import { coerce_operand_to_type_with_source } from "../core_operands/dispatch";
+import { find_substring_from } from "../core_text";
+
+struct CoercedCallState {
+    lines: string[];
+    temp_index: int;
+    operands: LLVMOperand[];
+    diagnostics: string[];
+}
+
+// Slice E.1.5 (#528): if the wrapped diagnostics list contains the ABI
+// primitive mismatch sentinel, return the `llvm lowering [fatal]: ` prefix
+// so the location-aware follow-up message also escalates to fatal (the
+// emit-level entrypoint scans for `[fatal]` and refuses to write IR).
+// Returns the plain `llvm lowering: ` prefix otherwise so non-ABI coercion
+// failures keep their existing tier.
+fn _abi_mismatch_diagnostic_prefix(diagnostics: string[]) -> string {
+    let mut idx: int = 0;
+    loop {
+        if idx >= diagnostics.length { break; }
+        let diag = diagnostics[idx];
+        if find_substring_from(diag, "ABI primitive mismatch", 0) >= 0 {
+            return "llvm lowering [fatal]: ";
+        }
+        idx += 1;
+    }
+    return "llvm lowering: ";
+}
+
+fn coerce_call_operands(trimmed_target: string, operands: LLVMOperand[], operand_source_types: string[], expected_params: string[], llvm_return: string, is_trait_dispatch: boolean, is_closure_dispatch: boolean, current_temp: int, current_lines: string[], diagnostics: string[]) -> CoercedCallState {
+    let mut result_lines = current_lines;
+    let mut result_temp: int = current_temp;
+    let mut result_diagnostics = diagnostics;
+    let _trace_ccl = trace_lowering();
+
+    if _trace_ccl {
+        trace_log("call_lowering: pre-coerce operands=" + number_to_string(operands.length)
+            + " expected_params="
+            + number_to_string(expected_params.length)
+            + " llvm_return="
+            + llvm_return);
+    }
+    let mut coerced_operands: LLVMOperand[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= operands.length { break; }
+        let operand = operands[index];
+        if _trace_ccl {
+            trace_log("call_lowering: coerce-loop idx=" + number_to_string(index)
+                + " operand_type="
+                + operand.llvm_type
+                + " operand_value="
+                + operand.value);
+        }
+        let mut target_type: string = "";
+        if expected_params.length > index {
+            target_type = expected_params[index];
+        }
+        let mut bypass_coercion: boolean = false;
+        if is_trait_dispatch {
+            if index == 0 { bypass_coercion = true; }
+        }
+        // Issue #689: like trait dispatch, the closure-pair operand at
+        // slot 0 is a self-shaped aggregate that bypasses coercion.
+        if is_closure_dispatch {
+            if index == 0 { bypass_coercion = true; }
+        }
+        if bypass_coercion { coerced_operands.push(operand); } else if target_type.length == 0 {
+            coerced_operands.push(operand);
+        } else {
+            // Function call argument coercion is the primary ABI boundary.
+            let mut source_type: string = "";
+            if operand_source_types.length > index {
+                source_type = operand_source_types[index];
+            }
+            let coerced = coerce_operand_to_type_with_source(operand, source_type, target_type, result_temp, result_lines, false, null);
+            result_diagnostics = extend_string_array(result_diagnostics, coerced.diagnostics);
+            result_lines = coerced.lines;
+            result_temp = coerced.temp_index;
+            if coerced.operand == null {
+                let diagnostic_prefix = _abi_mismatch_diagnostic_prefix(coerced.diagnostics);
+                let diagnostic = diagnostic_prefix
+                    + "unable to coerce argument "
+                    + number_to_string(index)
+                    + " (expected `"
+                    + target_type
+                    + "`, got `"
+                    + operand.llvm_type
+                    + "`) for call to `"
+                    + trimmed_target
+                    + "`: passing original operand";
+                if diagnostic_prefix == "llvm lowering [fatal]: " {
+                    trace_log(diagnostic);
+                }
+                result_diagnostics.push(diagnostic);
+                coerced_operands.push(operand);
+            } else { coerced_operands.push(coerced.operand); }
+        }
+        index += 1;
+    }
+    if _trace_ccl {
+        trace_log("call_lowering: post-coerce operands=" + number_to_string(coerced_operands.length));
+        trace_log("call_lowering: checkpoint-A is_concat=" + number_to_string(0)
+            + " is_push="
+            + number_to_string(0));
+    }
+    return CoercedCallState {
+        lines: result_lines,
+        temp_index: result_temp,
+        operands: coerced_operands,
+        diagnostics: result_diagnostics
+    };
+}
+
+export { CoercedCallState, coerce_call_operands };

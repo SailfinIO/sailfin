@@ -11,7 +11,7 @@
 // miscompiles (boolean returns drop `if` guards).
 //
 // Imports from non-local paths (e.g. "runtime/prelude") are resolved via the
-// runtime helper descriptor table under compiler/src/llvm/runtime_helpers/
+// runtime helper descriptor table under compiler/capsules/codegen-llvm/src/runtime_helpers/
 // rather than the re-exporter's .sfn-asm, so they are exempt.
 //
 // Extracted from emit_native.sfn so the emit-free `sfn check` path can run

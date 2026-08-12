@@ -120,7 +120,7 @@ fn _declares_wellformed(ir: string) -> boolean {
 }
 
 test "declare-loop consumer module emits only well-formed declares" ![io] {
-    let ir = _emit_one("consumer", "compiler/src/llvm/lowering/lowering_helpers.sfn");
+    let ir = _emit_one("consumer", "compiler/capsules/codegen-llvm/src/lowering/lowering_helpers.sfn");
     assert ir != "EMIT_FAILED";
     assert _declares_wellformed(ir);
 }
@@ -132,7 +132,7 @@ test "heavy expression module emits only well-formed declares" ![io] {
 }
 
 test "repeated declare-consumer emit-sweep is byte-identical with clean declares" ![io] {
-    let src = "compiler/src/llvm/lowering/lowering_helpers.sfn";
+    let src = "compiler/capsules/codegen-llvm/src/lowering/lowering_helpers.sfn";
     let base = _emit_one("consumer_base", src);
     assert base != "EMIT_FAILED";
     assert _declares_wellformed(base);

@@ -24,9 +24,9 @@ import {
     find_local_binding,
     mark_last_local_consumed,
     promote_local_to_rc
-} from "../../src/llvm/expression_lowering/native/core_scopes";
-import { is_heap_type } from "../../src/llvm/expression_lowering/native/core_type_mapping";
-import { LocalBinding, OwnershipInfo } from "../../src/llvm/types";
+} from "sfn/codegen-llvm/expression_lowering/native/core_scopes";
+import { is_heap_type } from "sfn/codegen-llvm/expression_lowering/native/core_type_mapping";
+import { LocalBinding, OwnershipInfo } from "sfn/codegen-llvm/types";
 
 fn _make_binding(name: string, llvm_type: string, kind: string, ownership: OwnershipInfo?) -> LocalBinding {
     return LocalBinding {

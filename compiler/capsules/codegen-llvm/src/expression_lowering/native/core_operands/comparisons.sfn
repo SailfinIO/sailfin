@@ -1,0 +1,437 @@
+// compiler/capsules/codegen-llvm/src/expression_lowering/native/core_operands/comparisons.sfn
+//
+// LLVM comparison instruction emission and local-operand loading.
+//
+// Emits comparison instructions for equality and relational operators
+// (`emit_comparison_instruction`, `emit_boolean_and`) and provides local
+// variable loading (`load_local_operand`).
+import { format_temp_name } from "../../../expressions_helpers";
+import { ends_with_pointer_suffix } from "../../../type_mapping";
+import {
+    ComparisonEmission,
+    LLVMOperand,
+    LoadLocalResult,
+    LocalBinding
+} from "../../../types";
+
+fn emit_comparison_instruction(symbol: string, left_operand: LLVMOperand, right_operand: LLVMOperand, temp_index: int, lines: string[], operands_unsigned: boolean) -> ComparisonEmission {
+    let mut diagnostics: string[] = [];
+    let mut current_lines: string[] = lines;
+    let mut symbol_is_equality: boolean = false;
+    let mut _if73: boolean = false;
+    if symbol == "==" { _if73 = true; }
+    if symbol == "!=" { _if73 = true; }
+    if _if73 { symbol_is_equality = true; }
+    let left_is_string = is_string_pointer_type(left_operand.llvm_type);
+    let right_is_string = is_string_pointer_type(right_operand.llvm_type);
+    if left_operand.llvm_type != right_operand.llvm_type {
+        // M1.A: literal-vs-local string comparisons cross the
+        // `i8*` / `{i8*, i64}` ABI line. The strings_equal path
+        // below extracts the data pointer from each side, so the
+        // mismatch is semantically benign; suppress the diagnostic
+        // for these mixed-shape string compares.
+        let mut both_string_shapes: boolean = false;
+        if left_is_string {
+            if right_is_string { both_string_shapes = true; }
+        }
+        if !both_string_shapes {
+            diagnostics.push("llvm lowering: comparison operands have mismatched types `"
+                + left_operand.llvm_type
+                + "` and `"
+                + right_operand.llvm_type
+                + "`");
+        }
+    }
+    let left_is_null = left_operand.value == "null";
+    let right_is_null = right_operand.value == "null";
+    if symbol_is_equality {
+        if left_is_string {
+            if right_is_string {
+                if !left_is_null {
+                    if !right_is_null {
+                        // M2.4a (#396): the call routes to
+                        // `@sfn_str_eq` instead of the legacy
+                        // `@strings_equal` C entrypoint. During the
+                        // M2.4a coexistence period the canonical
+                        // `sfn_str_eq` symbol is provided by the C
+                        // trampoline in
+                        // `runtime/native/src/sailfin_runtime.c`;
+                        // the Sailfin proof-of-life module
+                        // `runtime/sfn/string.sfn` exports
+                        // `sfn_str_sfn_eq` alongside it. M2.4b
+                        // retires the trampoline and the Sailfin
+                        // export takes over the bare name. Both
+                        // exports are still backed by the same
+                        // NUL-terminated `i8*` ABI for now — the
+                        // aggregate-by-value rewrite lands with
+                        // M2.4b — so the operand-extraction shim
+                        // below is unchanged from the M1.A landing.
+                        // #1704: length-aware equality. Recover (data, len) for
+                        // each operand — extractvalue BOTH fields from a
+                        // `{i8*, i64}` aggregate (a non-owning slice carries its
+                        // true len), or take the bare `i8*` data and recover its
+                        // length via `@sfn_str_len` (the i8* NUL-scan helper,
+                        // reached only for genuinely NUL-terminated bare
+                        // pointers). Then call the `_lv` symbol; the bare
+                        // `@sfn_str_eq` stays the seed/extern `(i8*, i8*)` ABI.
+                        let mut next_index = temp_index;
+                        let mut left_data = left_operand.value;
+                        let mut left_len = "";
+                        if left_operand.llvm_type == "{i8*, i64}" {
+                            let lext = format_temp_name(next_index);
+                            current_lines.push("  " + lext
+                                + " = extractvalue {i8*, i64} "
+                                + left_operand.value
+                                + ", 0");
+                            next_index += 1;
+                            let llen = format_temp_name(next_index);
+                            current_lines.push("  " + llen
+                                + " = extractvalue {i8*, i64} "
+                                + left_operand.value
+                                + ", 1");
+                            next_index += 1;
+                            left_data = lext;
+                            left_len = llen;
+                        } else {
+                            let llen = format_temp_name(next_index);
+                            current_lines.push("  " + llen
+                                + " = call i64 @sfn_str_len(i8* "
+                                + left_operand.value
+                                + ")");
+                            next_index += 1;
+                            left_len = llen;
+                        }
+                        let mut right_data = right_operand.value;
+                        let mut right_len = "";
+                        if right_operand.llvm_type == "{i8*, i64}" {
+                            let rext = format_temp_name(next_index);
+                            current_lines.push("  " + rext
+                                + " = extractvalue {i8*, i64} "
+                                + right_operand.value
+                                + ", 0");
+                            next_index += 1;
+                            let rlen = format_temp_name(next_index);
+                            current_lines.push("  " + rlen
+                                + " = extractvalue {i8*, i64} "
+                                + right_operand.value
+                                + ", 1");
+                            next_index += 1;
+                            right_data = rext;
+                            right_len = rlen;
+                        } else {
+                            let rlen = format_temp_name(next_index);
+                            current_lines.push("  " + rlen
+                                + " = call i64 @sfn_str_len(i8* "
+                                + right_operand.value
+                                + ")");
+                            next_index += 1;
+                            right_len = rlen;
+                        }
+                        let compare_temp = format_temp_name(next_index);
+                        current_lines.push("  " + compare_temp
+                            + " = call i1 @sfn_str_eq_lv(i8* "
+                            + left_data
+                            + ", i64 "
+                            + left_len
+                            + ", i8* "
+                            + right_data
+                            + ", i64 "
+                            + right_len
+                            + ")");
+                        next_index += 1;
+                        let mut operand = LLVMOperand {
+                            llvm_type: "i1",
+                            value: compare_temp
+                        };
+                        if symbol == "!=" {
+                            let inverted_temp = format_temp_name(next_index);
+                            current_lines.push("  " + inverted_temp
+                                + " = xor i1 "
+                                + compare_temp
+                                + ", true");
+                            operand = LLVMOperand {
+                                llvm_type: "i1",
+                                value: inverted_temp
+                            };
+                            next_index += 1;
+                        }
+                        return ComparisonEmission {
+                            lines: current_lines,
+                            temp_index: next_index,
+                            operand: operand,
+                            diagnostics: diagnostics
+                        };
+                    }
+                }
+            }
+        }
+    }
+    // #1365: string ordered comparison (`<`/`>`/`<=`/`>=`). Route through the
+    // runtime `sfn_str_cmp` helper (lexicographic, strcmp-style i32) then
+    // `icmp <pred> i32 <cmp>, 0`. Without this, ordered string compares fell
+    // through to `comparison_predicate_for_symbol`, which has no `{i8*, i64}`
+    // arm — yielding an empty predicate, a null operand, and a silently dropped
+    // guarded branch. The data-pointer extraction mirrors the equality block
+    // above (covering the mixed `i8*` / `{i8*, i64}` literal-vs-local case).
+    let mut symbol_is_ordered: boolean = false;
+    if symbol == "<" { symbol_is_ordered = true; }
+    if symbol == "<=" { symbol_is_ordered = true; }
+    if symbol == ">" { symbol_is_ordered = true; }
+    if symbol == ">=" { symbol_is_ordered = true; }
+    if symbol_is_ordered {
+        if left_is_string {
+            if right_is_string {
+                if !left_is_null {
+                    if !right_is_null {
+                        // #1704: length-aware ordered compare — same (data, len)
+                        // recovery as the equality block above, then call the
+                        // `_lv` symbol. The bare `@sfn_str_cmp` stays the seed
+                        // `(i8*, i8*)` ABI.
+                        let mut next_index = temp_index;
+                        let mut left_data = left_operand.value;
+                        let mut left_len = "";
+                        if left_operand.llvm_type == "{i8*, i64}" {
+                            let lext = format_temp_name(next_index);
+                            current_lines.push("  " + lext
+                                + " = extractvalue {i8*, i64} "
+                                + left_operand.value
+                                + ", 0");
+                            next_index += 1;
+                            let llen = format_temp_name(next_index);
+                            current_lines.push("  " + llen
+                                + " = extractvalue {i8*, i64} "
+                                + left_operand.value
+                                + ", 1");
+                            next_index += 1;
+                            left_data = lext;
+                            left_len = llen;
+                        } else {
+                            let llen = format_temp_name(next_index);
+                            current_lines.push("  " + llen
+                                + " = call i64 @sfn_str_len(i8* "
+                                + left_operand.value
+                                + ")");
+                            next_index += 1;
+                            left_len = llen;
+                        }
+                        let mut right_data = right_operand.value;
+                        let mut right_len = "";
+                        if right_operand.llvm_type == "{i8*, i64}" {
+                            let rext = format_temp_name(next_index);
+                            current_lines.push("  " + rext
+                                + " = extractvalue {i8*, i64} "
+                                + right_operand.value
+                                + ", 0");
+                            next_index += 1;
+                            let rlen = format_temp_name(next_index);
+                            current_lines.push("  " + rlen
+                                + " = extractvalue {i8*, i64} "
+                                + right_operand.value
+                                + ", 1");
+                            next_index += 1;
+                            right_data = rext;
+                            right_len = rlen;
+                        } else {
+                            let rlen = format_temp_name(next_index);
+                            current_lines.push("  " + rlen
+                                + " = call i64 @sfn_str_len(i8* "
+                                + right_operand.value
+                                + ")");
+                            next_index += 1;
+                            right_len = rlen;
+                        }
+                        let cmp_temp = format_temp_name(next_index);
+                        current_lines.push("  " + cmp_temp
+                            + " = call i32 @sfn_str_cmp_lv(i8* "
+                            + left_data
+                            + ", i64 "
+                            + left_len
+                            + ", i8* "
+                            + right_data
+                            + ", i64 "
+                            + right_len
+                            + ")");
+                        next_index += 1;
+                        let mut pred = "icmp slt";
+                        if symbol == "<=" { pred = "icmp sle"; }
+                        if symbol == ">" { pred = "icmp sgt"; }
+                        if symbol == ">=" { pred = "icmp sge"; }
+                        let result_temp = format_temp_name(next_index);
+                        current_lines.push("  " + result_temp + " = " + pred
+                            + " i32 "
+                            + cmp_temp
+                            + ", 0");
+                        next_index += 1;
+                        let ordered_operand = LLVMOperand {
+                            llvm_type: "i1",
+                            value: result_temp
+                        };
+                        return ComparisonEmission {
+                            lines: current_lines,
+                            temp_index: next_index,
+                            operand: ordered_operand,
+                            diagnostics: diagnostics
+                        };
+                    }
+                }
+            }
+        }
+    }
+    let llvm_type = left_operand.llvm_type;
+    let predicate = comparison_predicate_for_symbol(symbol, llvm_type, operands_unsigned);
+    if predicate.length == 0 {
+        diagnostics.push("llvm lowering: unsupported comparison operator `"
+            + symbol
+            + "` for type `"
+            + llvm_type
+            + "`");
+        return ComparisonEmission {
+            lines: current_lines,
+            temp_index: temp_index,
+            operand: null,
+            diagnostics: diagnostics
+        };
+    }
+    let temp_name = format_temp_name(temp_index);
+    current_lines.push("  " + temp_name + " = " + predicate + " " + llvm_type
+        + " "
+        + left_operand.value
+        + ", "
+        + right_operand.value);
+    let operand = LLVMOperand { llvm_type: "i1", value: temp_name };
+    return ComparisonEmission {
+        lines: current_lines,
+        temp_index: temp_index + 1,
+        operand: operand,
+        diagnostics: diagnostics
+    };
+}
+
+fn emit_boolean_and(left_operand: LLVMOperand, right_operand: LLVMOperand, temp_index: int, lines: string[]) -> ComparisonEmission {
+    let mut diagnostics: string[] = [];
+    let mut current_lines: string[] = lines;
+    if left_operand.llvm_type != "i1" {
+        diagnostics.push("llvm lowering: expected boolean operand for `and`, found `"
+            + left_operand.llvm_type
+            + "`");
+    }
+    if right_operand.llvm_type != "i1" {
+        diagnostics.push("llvm lowering: expected boolean operand for `and`, found `"
+            + right_operand.llvm_type
+            + "`");
+    }
+    let temp_name = format_temp_name(temp_index);
+    current_lines.push("  " + temp_name + " = and i1 " + left_operand.value
+        + ", "
+        + right_operand.value);
+    let operand = LLVMOperand { llvm_type: "i1", value: temp_name };
+    return ComparisonEmission {
+        lines: current_lines,
+        temp_index: temp_index + 1,
+        operand: operand,
+        diagnostics: diagnostics
+    };
+}
+
+// `operands_unsigned` selects `icmp ult/ule/ugt/uge` over the signed
+// predicates for the four *ordered* comparisons. `==`/`!=` are
+// sign-independent (`icmp eq`/`ne` compare bit patterns) and float
+// comparisons carry no integer sign, so both ignore the flag. Sign is
+// recovered from the operands' source annotations by the caller
+// (`binary_operands_are_unsigned` in ./core_scopes) — SFEP-0058 §3.1.
+fn comparison_predicate_for_symbol(symbol: string, llvm_type: string, operands_unsigned: boolean) -> string {
+    // Use direct string == comparisons instead of char_code_at_text which is
+    // broken in older seeds.
+    if llvm_type == "double" {
+        if symbol == "==" { return "fcmp oeq"; }
+        if symbol == "!=" { return "fcmp une"; }
+        if symbol == "<" { return "fcmp olt"; }
+        if symbol == "<=" { return "fcmp ole"; }
+        if symbol == ">" { return "fcmp ogt"; }
+        if symbol == ">=" { return "fcmp oge"; }
+        return "";
+    }
+    let mut _if74: boolean = false;
+    if llvm_type == "i32" { _if74 = true; }
+    if llvm_type == "i64" { _if74 = true; }
+    if _if74 {
+        if symbol == "==" { return "icmp eq"; }
+        if symbol == "!=" { return "icmp ne"; }
+        if operands_unsigned {
+            if symbol == "<" { return "icmp ult"; }
+            if symbol == "<=" { return "icmp ule"; }
+            if symbol == ">" { return "icmp ugt"; }
+            if symbol == ">=" { return "icmp uge"; }
+            return "";
+        }
+        if symbol == "<" { return "icmp slt"; }
+        if symbol == "<=" { return "icmp sle"; }
+        if symbol == ">" { return "icmp sgt"; }
+        if symbol == ">=" { return "icmp sge"; }
+        return "";
+    }
+    if llvm_type == "i1" {
+        if symbol == "==" { return "icmp eq"; }
+        if symbol == "!=" { return "icmp ne"; }
+        return "";
+    }
+    if llvm_type == "i8" {
+        if symbol == "==" { return "icmp eq"; }
+        if symbol == "!=" { return "icmp ne"; }
+        if operands_unsigned {
+            if symbol == "<" { return "icmp ult"; }
+            if symbol == "<=" { return "icmp ule"; }
+            if symbol == ">" { return "icmp ugt"; }
+            if symbol == ">=" { return "icmp uge"; }
+            return "";
+        }
+        if symbol == "<" { return "icmp slt"; }
+        if symbol == "<=" { return "icmp sle"; }
+        if symbol == ">" { return "icmp sgt"; }
+        if symbol == ">=" { return "icmp sge"; }
+        return "";
+    }
+    // Support pointer comparisons for equality checks (i8*, struct pointers, etc.)
+    if ends_with_pointer_suffix(llvm_type) {
+        if symbol == "==" { return "icmp eq"; }
+        if symbol == "!=" { return "icmp ne"; }
+        if llvm_type == "i8*" {
+            if symbol == "<" { return "icmp ult"; }
+            if symbol == "<=" { return "icmp ule"; }
+            if symbol == ">" { return "icmp ugt"; }
+            if symbol == ">=" { return "icmp uge"; }
+        }
+        return "";
+    }
+    return "";
+}
+
+fn is_string_pointer_type(llvm_type: string) -> boolean {
+    if llvm_type == "i8*" { return true; }
+    // M1.A: SfnString aggregate is the new canonical string operand type.
+    // Binary `+` and `==` dispatch on this predicate, so the aggregate
+    // must read as a string here for `s + t` to route through
+    // emit_string_concat instead of degrading to a numeric `add`.
+    if llvm_type == "{i8*, i64}" { return true; }
+    return false;
+}
+
+fn load_local_operand(local: LocalBinding, temp_index: int, lines: string[]) -> LoadLocalResult {
+    let mut diagnostics: string[] = [];
+    let load_name = format_temp_name(temp_index);
+    let mut current_lines: string[] = lines;
+    current_lines.push("  " + load_name + " = load " + local.llvm_type + ", "
+        + local.llvm_type
+        + "* "
+        + local.pointer);
+    let operand = LLVMOperand {
+        llvm_type: local.llvm_type,
+        value: load_name
+    };
+    return LoadLocalResult {
+        lines: current_lines,
+        temp_index: temp_index + 1,
+        operand: operand,
+        diagnostics: diagnostics
+    };
+}

@@ -2,7 +2,7 @@
 // #333). The same CI-budget constraint that
 // `atomic_load_store_test.sfn` and `atomic_add_sub_test.sfn` document
 // applies here verbatim — importing `lower_atomic_builtin` pulls in
-// `lower_expression` and the rest of `compiler/src/llvm/expression_lowering/native/core`,
+// `lower_expression` and the rest of `compiler/capsules/codegen-llvm/src/expression_lowering/native/core`,
 // which blows the per-test 180s GitHub Actions budget. So this file
 // pins the predicate surface that gates whether the LLVM lowering
 // for `atomic_cas` runs at all, and the actual IR shape (the
@@ -12,7 +12,7 @@
 // `compiler/tests/e2e/test_atomic_cas_compile.sh`. The type-error
 // rejections on the second and third arguments are pinned in that
 // same e2e file via `[fatal] [E0806]` stderr probes.
-import { is_atomic_builtin } from "../../src/llvm/atomics_check";
+import { is_atomic_builtin } from "sfn/codegen-llvm/atomics_check";
 
 // ── Predicate recognises atomic_cas ──
 test "atomics: is_atomic_builtin recognises atomic_cas" {

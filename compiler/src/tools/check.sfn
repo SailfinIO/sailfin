@@ -10,6 +10,7 @@ import { AnalyzerInput, AnalyzerResult, analyze_program } from "sfn/analyzer";
 import { ImportSymbolTable, empty_import_symbols } from "sfn/analyzer/effect_imports";
 import { ClosureSymbolSet } from "sfn/analyzer/import_resolution_check";
 import { Diagnostic, diagnostic_to_diag } from "sfn/analyzer/typecheck_types";
+import { runtime_helper_call_names } from "sfn/codegen-llvm";
 import { intrinsic_effect_table } from "sfn/ir";
 import { int_to_string } from "sfn/strings";
 import { Program, Statement } from "sfn/syntax";
@@ -18,7 +19,6 @@ import { parse_program } from "sfn/syntax";
 import { resolve_import_context } from "../check/import_resolution";
 import { render_diagnostic, split_source_lines } from "../diagnostics_render";
 import { read_effect_enforcement_env, resolve_effect_enforcement } from "../effect_gate";
-import { runtime_helper_call_names } from "../llvm/runtime_helpers/mod";
 import { load_prelude_global_names } from "../prelude_globals";
 
 struct CheckResult {
