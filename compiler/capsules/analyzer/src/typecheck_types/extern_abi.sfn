@@ -308,6 +308,7 @@ fn is_builtin_member_root(name: string) -> boolean {
     if strings_equal(name, "rc") { _ret = true; }
     if strings_equal(name, "runtime") { _ret = true; }
     if strings_equal(name, "string") { _ret = true; }
+    if strings_equal(name, "tls") { _ret = true; }
     if strings_equal(name, "websocket") { _ret = true; }
     return _ret;
 }

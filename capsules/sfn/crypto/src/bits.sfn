@@ -6,6 +6,14 @@
 // comparison, and big/little-endian word (de)serialization — so the
 // other Phase A primitives (sha1, sha512, chacha20, poly1305) call a
 // single tested source instead of re-inlining these expressions.
+//
+// `strict_base64_bytes` below sits outside that constant-time charter: it is
+// a PEM/DER text-format decoder, not a secret-comparison primitive, and it
+// fails closed through early `return []` and data-dependent branches on
+// padding and low-bit checks. That variable-time shape is unchanged from
+// before its SFN-760 hoist into this module; callers decoding key material
+// (`ed25519_seed_from_pkcs8_pem`) accept it as a pre-existing property, not a
+// guarantee this module extends to it.
 // Decode a byte-oriented string into integer bytes. Sailfin string indexing is
 // byte-oriented; masking documents and preserves the raw 0-255 contract.
 fn string_to_bytes(s: string) -> int[] {
@@ -96,6 +104,66 @@ fn store_u32_le(out: int[], x: int) -> void {
     out.push((x >> 24) & 255);
 }
 
+// Map a single standard-alphabet base64 byte to its 6-bit value, or -1 if
+// `code` is not an alphabet character (`=` padding included). Callers pass a
+// single byte value, 0-255: Sailfin string indexing is byte-oriented, so a
+// multi-byte UTF-8 character arrives one byte at a time, and every
+// continuation byte is outside the alphabet and rejected.
+fn _base64_sextet(code: int) -> int {
+    if code >= 65 && code <= 90 { return code - 65; }
+    if code >= 97 && code <= 122 { return code - 97 + 26; }
+    if code >= 48 && code <= 57 { return code - 48 + 52; }
+    if code == 43 { return 62; }
+    if code == 47 { return 63; }
+    return -1;
+}
+
+// Decode strict RFC 4648 base64 into bytes, including embedded 0x00 bytes.
+// `codes` is already-extracted byte values (see `string_to_bytes`) rather
+// than a `string`, so the result is binary-safe: a `string` return collapses
+// to a sentinel on any decoded 0x00 byte, which DER routinely contains.
+// Padding rules are strict: `=` is legal only in the final quad, `X=Y=` is
+// rejected, and the low bits covered by padding must be zero. Every failure
+// mode returns `[]` rather than a best-effort partial decode.
+fn strict_base64_bytes(codes: int[]) -> int[] {
+    if codes.length == 0 || (codes.length & 3) != 0 { return []; }
+    let mut out: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= codes.length { break; }
+        let d0: int = _base64_sextet(codes[i]);
+        let d1: int = _base64_sextet(codes[i + 1]);
+        if d0 < 0 || d1 < 0 { return []; }
+
+        // 61 is `=`; the alphabet check above already rejected every other
+        // non-alphabet byte.
+        let c2: int = codes[i + 2];
+        let c3: int = codes[i + 3];
+        let pad2: bool = c2 == 61;
+        let pad3: bool = c3 == 61;
+        if (pad2 || pad3) && i + 4 != codes.length { return []; }
+        if pad2 && !pad3 { return []; }
+        out.push(((d0 << 2) | (d1 >> 4)) & 255);
+
+        if pad2 {
+            if (d1 & 15) != 0 { return []; }
+        } else {
+            let d2: int = _base64_sextet(c2);
+            if d2 < 0 { return []; }
+            out.push(((d1 << 4) | (d2 >> 2)) & 255);
+            if pad3 {
+                if (d2 & 3) != 0 { return []; }
+            } else {
+                let d3: int = _base64_sextet(c3);
+                if d3 < 0 { return []; }
+                out.push(((d2 << 6) | d3) & 255);
+            }
+        }
+        i += 4;
+    }
+    return out;
+}
+
 export {
     string_to_bytes,
     hex_byte,
@@ -107,5 +175,6 @@ export {
     load_u32_be,
     store_u32_be,
     load_u32_le,
-    store_u32_le
+    store_u32_le,
+    strict_base64_bytes
 };

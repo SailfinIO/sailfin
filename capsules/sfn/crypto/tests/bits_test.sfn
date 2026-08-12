@@ -1,7 +1,11 @@
 // capsules/sfn/crypto/tests/bits_test.sfn
 //
 // Regression coverage for the sfn/crypto bits module: masking, rotates,
-// constant-time byte comparison, and big/little-endian word codecs.
+// constant-time byte comparison, big/little-endian word codecs, and the
+// strict base64 decoder (SFN-760). The decoder's transitive coverage through
+// `pem_test.sfn` and `ed25519_sign_test.sfn` is strong, but this module is
+// now where the code lives, so it gets a few direct padding-negative cases
+// too.
 import {
     mask32,
     rotl32,
@@ -10,7 +14,9 @@ import {
     load_u32_be,
     store_u32_be,
     load_u32_le,
-    store_u32_le
+    store_u32_le,
+    string_to_bytes,
+    strict_base64_bytes
 } from "../src/bits";
 
 test "bits: mask32 is 0xffffffff" { assert mask32() == 4294967295; }
@@ -76,4 +82,33 @@ test "bits: store_u32_le round-trips" {
     assert out.length == 4;
     assert out[0] == 120;
     assert load_u32_le(out, 0) == 305419896;
+}
+
+// ── strict_base64_bytes padding negatives (mirrors pem_test.sfn) ──────────
+test "bits: strict_base64_bytes rejects padding outside the final quad" {
+    assert strict_base64_bytes(string_to_bytes("A=B=")).length == 0;
+}
+
+test "bits: strict_base64_bytes rejects a single-pad final quad with nonzero low bits" {
+    // "QUJ=": d2 = sextet('J') = 9, and 9 & 3 != 0.
+    assert strict_base64_bytes(string_to_bytes("QUJ=")).length == 0;
+}
+
+test "bits: strict_base64_bytes rejects a double-pad final quad with nonzero low bits" {
+    // "AC==": d1 = sextet('C') = 2, and 2 & 15 != 0.
+    assert strict_base64_bytes(string_to_bytes("AC==")).length == 0;
+}
+
+test "bits: strict_base64_bytes rejects '=' in the first position of a quad" {
+    assert strict_base64_bytes(string_to_bytes("=ABC")).length == 0;
+}
+
+test "bits: strict_base64_bytes rejects '=' in the second position of a quad" {
+    assert strict_base64_bytes(string_to_bytes("A=BC")).length == 0;
+}
+
+test "bits: strict_base64_bytes rejects a non-ASCII byte" {
+    // U+0141 ('Ł') reaches the decoder as its two UTF-8 bytes 0xC5 0x81;
+    // neither is in the base64 alphabet, so it fails closed.
+    assert strict_base64_bytes(string_to_bytes("AŁB=")).length == 0;
 }

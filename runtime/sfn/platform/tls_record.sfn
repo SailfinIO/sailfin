@@ -517,6 +517,1131 @@ fn _tlsrec_poly1305_tag(otk: *u8, aad: *u8, aad_len: i64, ct: *u8, ct_len: i64, 
     _tlsrec_put_le32(tag_out, 12, f & w32);
 }
 
+// ── AEAD algorithm selector (SFN-817) ────────────────────────────
+// Local identifiers, matching `capsules/sfn/crypto/src/aead.sfn`'s registry
+// value-for-value so a caller can pass `aead_chacha20_poly1305()` /
+// `aead_aes_128_gcm()` / `aead_aes_256_gcm()` straight through — `int` and
+// `i64` are the same type (`docs/style-guide.md`), so no cast is needed.
+//
+// Why this dispatch has to reach the cipher core rather than stopping at a
+// key-length check: AES-256-GCM's key is also 32 bytes, the same length
+// ChaCha20-Poly1305 uses. SFN-814 left `key_len != 32` as the sole guard
+// deliberately, because loosening it alone would let a 32-byte AES-256-GCM
+// key pass length validation and then run through ChaCha20 — a mismatch
+// that fails at the peer as a bad tag, not here. Deriving the required key
+// length from `alg`, and branching on `alg` again at the point the cipher is
+// actually chosen, is what SFN-339 fixed in `aead.sfn` for the same class of
+// bug; this mirrors it in the pointer layer.
+fn _tlsrec_alg_chacha20_poly1305() -> i64 { return 1; }
+
+fn _tlsrec_alg_aes_128_gcm() -> i64 { return 2; }
+
+fn _tlsrec_alg_aes_256_gcm() -> i64 { return 3; }
+
+// The key length an algorithm identifier requires, or 0 for an unknown one.
+fn _tlsrec_alg_key_len(alg: i64) -> i64 {
+    if alg == _tlsrec_alg_chacha20_poly1305() { return 32; }
+    if alg == _tlsrec_alg_aes_128_gcm() { return 16; }
+    if alg == _tlsrec_alg_aes_256_gcm() { return 32; }
+    return 0;
+}
+
+// ── AES (FIPS-197), bitsliced over registers ──────────────────────
+// Table-free forward AES-128/256, ported from the `int[]` reference in
+// `capsules/sfn/crypto/src/aes_sbox.sfn` / `aes.sfn` (SFN-339 design gate,
+// `docs/proposals/design-notes/sfn-339-aes-gcm-strategy.md`) into this file's
+// `*u8` scratch-buffer idiom. GCM only ever runs AES forward (CTR mode), so
+// InvSubBytes/InvMixColumns stay absent by design, same as the oracle.
+//
+// Representation is unchanged from the oracle: 8 words, word j bit k holding
+// bit j of state byte k, bytes 0..15 the first of two packed 16-byte blocks
+// and 16..31 the second — every AES core call processes two blocks, which is
+// what amortizes the bitsliced S-box's cost. A "word" here is a 32-bit value
+// held in an `i64` and stored/loaded 4 bytes little-endian at a time via
+// `_tlsrec_le32`/`_tlsrec_put_le32`, so the oracle's `int[]` slot indices
+// become byte offsets into one caller-owned scratch buffer (`_tlsrec_gw`/
+// `_tlsrec_pw` below) instead of array pushes — the allocation pattern the
+// oracle's header names as the reason a returning, array-per-step form
+// measured 0.2 MB/s / 5.4 GB RSS before that fix.
+//
+// Workspace layout (byte offsets into one `*u8` buffer, `_tlsrec_aesws_bytes()`
+// long): the 8-word cipher state, a 32-byte key-schedule/single-block-encrypt
+// scratch, and the three regions CTR streaming needs (running counter, the
+// two-block counter pair fed to the cipher core, and its keystream output).
+// There is deliberately no separate GF-operation scratch slot: the S-box
+// below computes entirely in local scalars (see its header comment).
+fn _tlsrec_aes_state() -> i64 { return 0; }
+
+fn _tlsrec_aes_dup() -> i64 { return 32; }
+
+fn _tlsrec_aes_ctrw() -> i64 { return 64; }
+
+fn _tlsrec_aes_pair() -> i64 { return 80; }
+
+fn _tlsrec_aes_ks() -> i64 { return 112; }
+
+fn _tlsrec_aesws_bytes() -> i64 { return 144; }
+
+// Load/store word `j` of slot `slot` in workspace `ws` as a little-endian
+// 32-bit value. The endianness is an internal convention private to this
+// workspace — GCM's bit-sliced state carries no wire meaning of its own —
+// so any consistent choice is correct; little-endian matches the rest of
+// this file's word helpers.
+fn _tlsrec_gw(ws: *u8, slot: i64, j: i64) -> i64 {
+    return _tlsrec_le32(ws, slot + 4 * j);
+}
+
+fn _tlsrec_pw(ws: *u8, slot: i64, j: i64, v: i64) -> void {
+    _tlsrec_put_le32(ws, slot + 4 * j, v);
+}
+
+// Apply the S-box to all 32 lanes of `state`, in place: `sbox(x) =
+// affine(x^254)` over GF(2^8), the same inversion chain as
+// `aes_sbox.sfn::_gf_inv_a` (7 squarings, 4 multiplies) plus its affine map,
+// but with every intermediate GF(2^8) value held in a local `i64` rather
+// than a workspace slot.
+//
+// `aes_sbox.sfn`'s buffer form (`_gf_mul`/`_gf_sqr`/`_gf_reduce` reading and
+// writing `ws` through `_tlsrec_gw`/`_tlsrec_pw`) is a faithful port of the
+// `int[]` oracle, but every one of those buffer accesses is real memory
+// traffic: `ws` is heap memory from `malloc`, never a stack `alloca`, so
+// LLVM's SROA/mem2reg cannot promote it to registers the way it promotes a
+// stack local, which is why ChaCha20's round function (`_tlsrec_chacha_apply`
+// above) stays register-resident for its whole 20-round core. A first cut wired that
+// buffer form directly into this file and measured *slower* than the
+// capsule's own `int[]` throughput ceiling despite the pointer idiom —
+// the S-box's ~300 buffer operations per call (one 8x8 multiply alone
+// zeroes and re-touches 15 words, twice per multiply, four multiplies and
+// seven squarings per inversion) dominated everything else. Multiplication
+// and squaring are exactly the fixed formulas `_gf_mul`/`_gf_sqr` compute —
+// XOR-linear for squaring, XOR of 8x8 AND terms for multiplication, per
+// `aes_sbox.sfn`'s own algebra — so the chain below inlines each step as a
+// closed-form scalar expression instead of a function call over a buffer.
+// The formulas were generated from the buffer-form algebra rather than
+// re-derived by hand; their correctness rests on this file's byte-identity
+// differential against the capsule oracle
+// (`compiler/tests/e2e/tls_record_pointer_differential_test.sfn`'s
+// AES-128-GCM sweep), which is itself anchored to SP 800-38D GCM test cases
+// 1-4/13/14/16 for both key sizes
+// (`capsules/sfn/crypto/tests/aead_aes_gcm_test.sfn`) — not on a script kept
+// outside this tree. Only the entry (8 reads) and exit (8 writes) touch
+// `ws` at all, replacing on the order of 700 buffer operations with 16.
+fn _tlsrec_bs_sbox(ws: *u8, state: i64) -> void {
+    let a0: i64 = _tlsrec_gw(ws, state, 0);
+    let a1: i64 = _tlsrec_gw(ws, state, 1);
+    let a2: i64 = _tlsrec_gw(ws, state, 2);
+    let a3: i64 = _tlsrec_gw(ws, state, 3);
+    let a4: i64 = _tlsrec_gw(ws, state, 4);
+    let a5: i64 = _tlsrec_gw(ws, state, 5);
+    let a6: i64 = _tlsrec_gw(ws, state, 6);
+    let a7: i64 = _tlsrec_gw(ws, state, 7);
+
+    let x2_0: i64 = a0 ^ a4 ^ a6;
+    let x2_1: i64 = a4 ^ a6 ^ a7;
+    let x2_2: i64 = a1 ^ a5;
+    let x2_3: i64 = a4 ^ a5 ^ a6 ^ a7;
+    let x2_4: i64 = a2 ^ a4 ^ a7;
+    let x2_5: i64 = a5 ^ a6;
+    let x2_6: i64 = a3 ^ a5;
+    let x2_7: i64 = a6 ^ a7;
+
+    let x3_0: i64 = (x2_0 & a0) ^ (x2_1 & a7) ^ (x2_2 & a6) ^ (x2_3 & a5) ^ (x2_4 & a4) ^ (x2_5 & a3) ^ (x2_5 & a7) ^ (x2_6 & a2) ^ (x2_6 & a6) ^ (x2_6 & a7) ^ (x2_7 & a1) ^ (x2_7 & a5) ^ (x2_7 & a6);
+    let x3_1: i64 = (x2_0 & a1) ^ (x2_1 & a0) ^ (x2_1 & a7) ^ (x2_2 & a6) ^ (x2_2 & a7) ^ (x2_3 & a5) ^ (x2_3 & a6) ^ (x2_4 & a4) ^ (x2_4 & a5) ^ (x2_5 & a3) ^ (x2_5 & a4) ^ (x2_5 & a7) ^ (x2_6 & a2) ^ (x2_6 & a3) ^ (x2_6 & a6) ^ (x2_7 & a1) ^ (x2_7 & a2) ^ (x2_7 & a5) ^ (x2_7 & a7);
+    let x3_2: i64 = (x2_0 & a2) ^ (x2_1 & a1) ^ (x2_2 & a0) ^ (x2_2 & a7) ^ (x2_3 & a6) ^ (x2_3 & a7) ^ (x2_4 & a5) ^ (x2_4 & a6) ^ (x2_5 & a4) ^ (x2_5 & a5) ^ (x2_6 & a3) ^ (x2_6 & a4) ^ (x2_6 & a7) ^ (x2_7 & a2) ^ (x2_7 & a3) ^ (x2_7 & a6);
+    let x3_3: i64 = (x2_0 & a3) ^ (x2_1 & a2) ^ (x2_1 & a7) ^ (x2_2 & a1) ^ (x2_2 & a6) ^ (x2_3 & a0) ^ (x2_3 & a5) ^ (x2_3 & a7) ^ (x2_4 & a4) ^ (x2_4 & a6) ^ (x2_4 & a7) ^ (x2_5 & a3) ^ (x2_5 & a5) ^ (x2_5 & a6) ^ (x2_5 & a7) ^ (x2_6 & a2) ^ (x2_6 & a4) ^ (x2_6 & a5) ^ (x2_6 & a6) ^ (x2_6 & a7) ^ (x2_7 & a1) ^ (x2_7 & a3) ^ (x2_7 & a4) ^ (x2_7 & a5) ^ (x2_7 & a6) ^ (x2_7 & a7);
+    let x3_4: i64 = (x2_0 & a4) ^ (x2_1 & a3) ^ (x2_1 & a7) ^ (x2_2 & a2) ^ (x2_2 & a6) ^ (x2_2 & a7) ^ (x2_3 & a1) ^ (x2_3 & a5) ^ (x2_3 & a6) ^ (x2_4 & a0) ^ (x2_4 & a4) ^ (x2_4 & a5) ^ (x2_4 & a7) ^ (x2_5 & a3) ^ (x2_5 & a4) ^ (x2_5 & a6) ^ (x2_6 & a2) ^ (x2_6 & a3) ^ (x2_6 & a5) ^ (x2_7 & a1) ^ (x2_7 & a2) ^ (x2_7 & a4) ^ (x2_7 & a7);
+    let x3_5: i64 = (x2_0 & a5) ^ (x2_1 & a4) ^ (x2_2 & a3) ^ (x2_2 & a7) ^ (x2_3 & a2) ^ (x2_3 & a6) ^ (x2_3 & a7) ^ (x2_4 & a1) ^ (x2_4 & a5) ^ (x2_4 & a6) ^ (x2_5 & a0) ^ (x2_5 & a4) ^ (x2_5 & a5) ^ (x2_5 & a7) ^ (x2_6 & a3) ^ (x2_6 & a4) ^ (x2_6 & a6) ^ (x2_7 & a2) ^ (x2_7 & a3) ^ (x2_7 & a5);
+    let x3_6: i64 = (x2_0 & a6) ^ (x2_1 & a5) ^ (x2_2 & a4) ^ (x2_3 & a3) ^ (x2_3 & a7) ^ (x2_4 & a2) ^ (x2_4 & a6) ^ (x2_4 & a7) ^ (x2_5 & a1) ^ (x2_5 & a5) ^ (x2_5 & a6) ^ (x2_6 & a0) ^ (x2_6 & a4) ^ (x2_6 & a5) ^ (x2_6 & a7) ^ (x2_7 & a3) ^ (x2_7 & a4) ^ (x2_7 & a6);
+    let x3_7: i64 = (x2_0 & a7) ^ (x2_1 & a6) ^ (x2_2 & a5) ^ (x2_3 & a4) ^ (x2_4 & a3) ^ (x2_4 & a7) ^ (x2_5 & a2) ^ (x2_5 & a6) ^ (x2_5 & a7) ^ (x2_6 & a1) ^ (x2_6 & a5) ^ (x2_6 & a6) ^ (x2_7 & a0) ^ (x2_7 & a4) ^ (x2_7 & a5) ^ (x2_7 & a7);
+
+    let t_0: i64 = x3_0 ^ x3_4 ^ x3_6;
+    let t_1: i64 = x3_4 ^ x3_6 ^ x3_7;
+    let t_2: i64 = x3_1 ^ x3_5;
+    let t_3: i64 = x3_4 ^ x3_5 ^ x3_6 ^ x3_7;
+    let t_4: i64 = x3_2 ^ x3_4 ^ x3_7;
+    let t_5: i64 = x3_5 ^ x3_6;
+    let t_6: i64 = x3_3 ^ x3_5;
+    let t_7: i64 = x3_6 ^ x3_7;
+
+    let x12_0: i64 = t_0 ^ t_4 ^ t_6;
+    let x12_1: i64 = t_4 ^ t_6 ^ t_7;
+    let x12_2: i64 = t_1 ^ t_5;
+    let x12_3: i64 = t_4 ^ t_5 ^ t_6 ^ t_7;
+    let x12_4: i64 = t_2 ^ t_4 ^ t_7;
+    let x12_5: i64 = t_5 ^ t_6;
+    let x12_6: i64 = t_3 ^ t_5;
+    let x12_7: i64 = t_6 ^ t_7;
+
+    let x14_0: i64 = (x12_0 & x2_0) ^ (x12_1 & x2_7) ^ (x12_2 & x2_6) ^ (x12_3 & x2_5) ^ (x12_4 & x2_4) ^ (x12_5 & x2_3) ^ (x12_5 & x2_7) ^ (x12_6 & x2_2) ^ (x12_6 & x2_6) ^ (x12_6 & x2_7) ^ (x12_7 & x2_1) ^ (x12_7 & x2_5) ^ (x12_7 & x2_6);
+    let x14_1: i64 = (x12_0 & x2_1) ^ (x12_1 & x2_0) ^ (x12_1 & x2_7) ^ (x12_2 & x2_6) ^ (x12_2 & x2_7) ^ (x12_3 & x2_5) ^ (x12_3 & x2_6) ^ (x12_4 & x2_4) ^ (x12_4 & x2_5) ^ (x12_5 & x2_3) ^ (x12_5 & x2_4) ^ (x12_5 & x2_7) ^ (x12_6 & x2_2) ^ (x12_6 & x2_3) ^ (x12_6 & x2_6) ^ (x12_7 & x2_1) ^ (x12_7 & x2_2) ^ (x12_7 & x2_5) ^ (x12_7 & x2_7);
+    let x14_2: i64 = (x12_0 & x2_2) ^ (x12_1 & x2_1) ^ (x12_2 & x2_0) ^ (x12_2 & x2_7) ^ (x12_3 & x2_6) ^ (x12_3 & x2_7) ^ (x12_4 & x2_5) ^ (x12_4 & x2_6) ^ (x12_5 & x2_4) ^ (x12_5 & x2_5) ^ (x12_6 & x2_3) ^ (x12_6 & x2_4) ^ (x12_6 & x2_7) ^ (x12_7 & x2_2) ^ (x12_7 & x2_3) ^ (x12_7 & x2_6);
+    let x14_3: i64 = (x12_0 & x2_3) ^ (x12_1 & x2_2) ^ (x12_1 & x2_7) ^ (x12_2 & x2_1) ^ (x12_2 & x2_6) ^ (x12_3 & x2_0) ^ (x12_3 & x2_5) ^ (x12_3 & x2_7) ^ (x12_4 & x2_4) ^ (x12_4 & x2_6) ^ (x12_4 & x2_7) ^ (x12_5 & x2_3) ^ (x12_5 & x2_5) ^ (x12_5 & x2_6) ^ (x12_5 & x2_7) ^ (x12_6 & x2_2) ^ (x12_6 & x2_4) ^ (x12_6 & x2_5) ^ (x12_6 & x2_6) ^ (x12_6 & x2_7) ^ (x12_7 & x2_1) ^ (x12_7 & x2_3) ^ (x12_7 & x2_4) ^ (x12_7 & x2_5) ^ (x12_7 & x2_6) ^ (x12_7 & x2_7);
+    let x14_4: i64 = (x12_0 & x2_4) ^ (x12_1 & x2_3) ^ (x12_1 & x2_7) ^ (x12_2 & x2_2) ^ (x12_2 & x2_6) ^ (x12_2 & x2_7) ^ (x12_3 & x2_1) ^ (x12_3 & x2_5) ^ (x12_3 & x2_6) ^ (x12_4 & x2_0) ^ (x12_4 & x2_4) ^ (x12_4 & x2_5) ^ (x12_4 & x2_7) ^ (x12_5 & x2_3) ^ (x12_5 & x2_4) ^ (x12_5 & x2_6) ^ (x12_6 & x2_2) ^ (x12_6 & x2_3) ^ (x12_6 & x2_5) ^ (x12_7 & x2_1) ^ (x12_7 & x2_2) ^ (x12_7 & x2_4) ^ (x12_7 & x2_7);
+    let x14_5: i64 = (x12_0 & x2_5) ^ (x12_1 & x2_4) ^ (x12_2 & x2_3) ^ (x12_2 & x2_7) ^ (x12_3 & x2_2) ^ (x12_3 & x2_6) ^ (x12_3 & x2_7) ^ (x12_4 & x2_1) ^ (x12_4 & x2_5) ^ (x12_4 & x2_6) ^ (x12_5 & x2_0) ^ (x12_5 & x2_4) ^ (x12_5 & x2_5) ^ (x12_5 & x2_7) ^ (x12_6 & x2_3) ^ (x12_6 & x2_4) ^ (x12_6 & x2_6) ^ (x12_7 & x2_2) ^ (x12_7 & x2_3) ^ (x12_7 & x2_5);
+    let x14_6: i64 = (x12_0 & x2_6) ^ (x12_1 & x2_5) ^ (x12_2 & x2_4) ^ (x12_3 & x2_3) ^ (x12_3 & x2_7) ^ (x12_4 & x2_2) ^ (x12_4 & x2_6) ^ (x12_4 & x2_7) ^ (x12_5 & x2_1) ^ (x12_5 & x2_5) ^ (x12_5 & x2_6) ^ (x12_6 & x2_0) ^ (x12_6 & x2_4) ^ (x12_6 & x2_5) ^ (x12_6 & x2_7) ^ (x12_7 & x2_3) ^ (x12_7 & x2_4) ^ (x12_7 & x2_6);
+    let x14_7: i64 = (x12_0 & x2_7) ^ (x12_1 & x2_6) ^ (x12_2 & x2_5) ^ (x12_3 & x2_4) ^ (x12_4 & x2_3) ^ (x12_4 & x2_7) ^ (x12_5 & x2_2) ^ (x12_5 & x2_6) ^ (x12_5 & x2_7) ^ (x12_6 & x2_1) ^ (x12_6 & x2_5) ^ (x12_6 & x2_6) ^ (x12_7 & x2_0) ^ (x12_7 & x2_4) ^ (x12_7 & x2_5) ^ (x12_7 & x2_7);
+
+    let x15_0: i64 = (x12_0 & x3_0) ^ (x12_1 & x3_7) ^ (x12_2 & x3_6) ^ (x12_3 & x3_5) ^ (x12_4 & x3_4) ^ (x12_5 & x3_3) ^ (x12_5 & x3_7) ^ (x12_6 & x3_2) ^ (x12_6 & x3_6) ^ (x12_6 & x3_7) ^ (x12_7 & x3_1) ^ (x12_7 & x3_5) ^ (x12_7 & x3_6);
+    let x15_1: i64 = (x12_0 & x3_1) ^ (x12_1 & x3_0) ^ (x12_1 & x3_7) ^ (x12_2 & x3_6) ^ (x12_2 & x3_7) ^ (x12_3 & x3_5) ^ (x12_3 & x3_6) ^ (x12_4 & x3_4) ^ (x12_4 & x3_5) ^ (x12_5 & x3_3) ^ (x12_5 & x3_4) ^ (x12_5 & x3_7) ^ (x12_6 & x3_2) ^ (x12_6 & x3_3) ^ (x12_6 & x3_6) ^ (x12_7 & x3_1) ^ (x12_7 & x3_2) ^ (x12_7 & x3_5) ^ (x12_7 & x3_7);
+    let x15_2: i64 = (x12_0 & x3_2) ^ (x12_1 & x3_1) ^ (x12_2 & x3_0) ^ (x12_2 & x3_7) ^ (x12_3 & x3_6) ^ (x12_3 & x3_7) ^ (x12_4 & x3_5) ^ (x12_4 & x3_6) ^ (x12_5 & x3_4) ^ (x12_5 & x3_5) ^ (x12_6 & x3_3) ^ (x12_6 & x3_4) ^ (x12_6 & x3_7) ^ (x12_7 & x3_2) ^ (x12_7 & x3_3) ^ (x12_7 & x3_6);
+    let x15_3: i64 = (x12_0 & x3_3) ^ (x12_1 & x3_2) ^ (x12_1 & x3_7) ^ (x12_2 & x3_1) ^ (x12_2 & x3_6) ^ (x12_3 & x3_0) ^ (x12_3 & x3_5) ^ (x12_3 & x3_7) ^ (x12_4 & x3_4) ^ (x12_4 & x3_6) ^ (x12_4 & x3_7) ^ (x12_5 & x3_3) ^ (x12_5 & x3_5) ^ (x12_5 & x3_6) ^ (x12_5 & x3_7) ^ (x12_6 & x3_2) ^ (x12_6 & x3_4) ^ (x12_6 & x3_5) ^ (x12_6 & x3_6) ^ (x12_6 & x3_7) ^ (x12_7 & x3_1) ^ (x12_7 & x3_3) ^ (x12_7 & x3_4) ^ (x12_7 & x3_5) ^ (x12_7 & x3_6) ^ (x12_7 & x3_7);
+    let x15_4: i64 = (x12_0 & x3_4) ^ (x12_1 & x3_3) ^ (x12_1 & x3_7) ^ (x12_2 & x3_2) ^ (x12_2 & x3_6) ^ (x12_2 & x3_7) ^ (x12_3 & x3_1) ^ (x12_3 & x3_5) ^ (x12_3 & x3_6) ^ (x12_4 & x3_0) ^ (x12_4 & x3_4) ^ (x12_4 & x3_5) ^ (x12_4 & x3_7) ^ (x12_5 & x3_3) ^ (x12_5 & x3_4) ^ (x12_5 & x3_6) ^ (x12_6 & x3_2) ^ (x12_6 & x3_3) ^ (x12_6 & x3_5) ^ (x12_7 & x3_1) ^ (x12_7 & x3_2) ^ (x12_7 & x3_4) ^ (x12_7 & x3_7);
+    let x15_5: i64 = (x12_0 & x3_5) ^ (x12_1 & x3_4) ^ (x12_2 & x3_3) ^ (x12_2 & x3_7) ^ (x12_3 & x3_2) ^ (x12_3 & x3_6) ^ (x12_3 & x3_7) ^ (x12_4 & x3_1) ^ (x12_4 & x3_5) ^ (x12_4 & x3_6) ^ (x12_5 & x3_0) ^ (x12_5 & x3_4) ^ (x12_5 & x3_5) ^ (x12_5 & x3_7) ^ (x12_6 & x3_3) ^ (x12_6 & x3_4) ^ (x12_6 & x3_6) ^ (x12_7 & x3_2) ^ (x12_7 & x3_3) ^ (x12_7 & x3_5);
+    let x15_6: i64 = (x12_0 & x3_6) ^ (x12_1 & x3_5) ^ (x12_2 & x3_4) ^ (x12_3 & x3_3) ^ (x12_3 & x3_7) ^ (x12_4 & x3_2) ^ (x12_4 & x3_6) ^ (x12_4 & x3_7) ^ (x12_5 & x3_1) ^ (x12_5 & x3_5) ^ (x12_5 & x3_6) ^ (x12_6 & x3_0) ^ (x12_6 & x3_4) ^ (x12_6 & x3_5) ^ (x12_6 & x3_7) ^ (x12_7 & x3_3) ^ (x12_7 & x3_4) ^ (x12_7 & x3_6);
+    let x15_7: i64 = (x12_0 & x3_7) ^ (x12_1 & x3_6) ^ (x12_2 & x3_5) ^ (x12_3 & x3_4) ^ (x12_4 & x3_3) ^ (x12_4 & x3_7) ^ (x12_5 & x3_2) ^ (x12_5 & x3_6) ^ (x12_5 & x3_7) ^ (x12_6 & x3_1) ^ (x12_6 & x3_5) ^ (x12_6 & x3_6) ^ (x12_7 & x3_0) ^ (x12_7 & x3_4) ^ (x12_7 & x3_5) ^ (x12_7 & x3_7);
+
+    let t2_0: i64 = x15_0 ^ x15_4 ^ x15_6;
+    let t2_1: i64 = x15_4 ^ x15_6 ^ x15_7;
+    let t2_2: i64 = x15_1 ^ x15_5;
+    let t2_3: i64 = x15_4 ^ x15_5 ^ x15_6 ^ x15_7;
+    let t2_4: i64 = x15_2 ^ x15_4 ^ x15_7;
+    let t2_5: i64 = x15_5 ^ x15_6;
+    let t2_6: i64 = x15_3 ^ x15_5;
+    let t2_7: i64 = x15_6 ^ x15_7;
+
+    let t3_0: i64 = t2_0 ^ t2_4 ^ t2_6;
+    let t3_1: i64 = t2_4 ^ t2_6 ^ t2_7;
+    let t3_2: i64 = t2_1 ^ t2_5;
+    let t3_3: i64 = t2_4 ^ t2_5 ^ t2_6 ^ t2_7;
+    let t3_4: i64 = t2_2 ^ t2_4 ^ t2_7;
+    let t3_5: i64 = t2_5 ^ t2_6;
+    let t3_6: i64 = t2_3 ^ t2_5;
+    let t3_7: i64 = t2_6 ^ t2_7;
+
+    let t4_0: i64 = t3_0 ^ t3_4 ^ t3_6;
+    let t4_1: i64 = t3_4 ^ t3_6 ^ t3_7;
+    let t4_2: i64 = t3_1 ^ t3_5;
+    let t4_3: i64 = t3_4 ^ t3_5 ^ t3_6 ^ t3_7;
+    let t4_4: i64 = t3_2 ^ t3_4 ^ t3_7;
+    let t4_5: i64 = t3_5 ^ t3_6;
+    let t4_6: i64 = t3_3 ^ t3_5;
+    let t4_7: i64 = t3_6 ^ t3_7;
+
+    let t5_0: i64 = t4_0 ^ t4_4 ^ t4_6;
+    let t5_1: i64 = t4_4 ^ t4_6 ^ t4_7;
+    let t5_2: i64 = t4_1 ^ t4_5;
+    let t5_3: i64 = t4_4 ^ t4_5 ^ t4_6 ^ t4_7;
+    let t5_4: i64 = t4_2 ^ t4_4 ^ t4_7;
+    let t5_5: i64 = t4_5 ^ t4_6;
+    let t5_6: i64 = t4_3 ^ t4_5;
+    let t5_7: i64 = t4_6 ^ t4_7;
+
+    let r_0: i64 = (t5_0 & x14_0) ^ (t5_1 & x14_7) ^ (t5_2 & x14_6) ^ (t5_3 & x14_5) ^ (t5_4 & x14_4) ^ (t5_5 & x14_3) ^ (t5_5 & x14_7) ^ (t5_6 & x14_2) ^ (t5_6 & x14_6) ^ (t5_6 & x14_7) ^ (t5_7 & x14_1) ^ (t5_7 & x14_5) ^ (t5_7 & x14_6);
+    let r_1: i64 = (t5_0 & x14_1) ^ (t5_1 & x14_0) ^ (t5_1 & x14_7) ^ (t5_2 & x14_6) ^ (t5_2 & x14_7) ^ (t5_3 & x14_5) ^ (t5_3 & x14_6) ^ (t5_4 & x14_4) ^ (t5_4 & x14_5) ^ (t5_5 & x14_3) ^ (t5_5 & x14_4) ^ (t5_5 & x14_7) ^ (t5_6 & x14_2) ^ (t5_6 & x14_3) ^ (t5_6 & x14_6) ^ (t5_7 & x14_1) ^ (t5_7 & x14_2) ^ (t5_7 & x14_5) ^ (t5_7 & x14_7);
+    let r_2: i64 = (t5_0 & x14_2) ^ (t5_1 & x14_1) ^ (t5_2 & x14_0) ^ (t5_2 & x14_7) ^ (t5_3 & x14_6) ^ (t5_3 & x14_7) ^ (t5_4 & x14_5) ^ (t5_4 & x14_6) ^ (t5_5 & x14_4) ^ (t5_5 & x14_5) ^ (t5_6 & x14_3) ^ (t5_6 & x14_4) ^ (t5_6 & x14_7) ^ (t5_7 & x14_2) ^ (t5_7 & x14_3) ^ (t5_7 & x14_6);
+    let r_3: i64 = (t5_0 & x14_3) ^ (t5_1 & x14_2) ^ (t5_1 & x14_7) ^ (t5_2 & x14_1) ^ (t5_2 & x14_6) ^ (t5_3 & x14_0) ^ (t5_3 & x14_5) ^ (t5_3 & x14_7) ^ (t5_4 & x14_4) ^ (t5_4 & x14_6) ^ (t5_4 & x14_7) ^ (t5_5 & x14_3) ^ (t5_5 & x14_5) ^ (t5_5 & x14_6) ^ (t5_5 & x14_7) ^ (t5_6 & x14_2) ^ (t5_6 & x14_4) ^ (t5_6 & x14_5) ^ (t5_6 & x14_6) ^ (t5_6 & x14_7) ^ (t5_7 & x14_1) ^ (t5_7 & x14_3) ^ (t5_7 & x14_4) ^ (t5_7 & x14_5) ^ (t5_7 & x14_6) ^ (t5_7 & x14_7);
+    let r_4: i64 = (t5_0 & x14_4) ^ (t5_1 & x14_3) ^ (t5_1 & x14_7) ^ (t5_2 & x14_2) ^ (t5_2 & x14_6) ^ (t5_2 & x14_7) ^ (t5_3 & x14_1) ^ (t5_3 & x14_5) ^ (t5_3 & x14_6) ^ (t5_4 & x14_0) ^ (t5_4 & x14_4) ^ (t5_4 & x14_5) ^ (t5_4 & x14_7) ^ (t5_5 & x14_3) ^ (t5_5 & x14_4) ^ (t5_5 & x14_6) ^ (t5_6 & x14_2) ^ (t5_6 & x14_3) ^ (t5_6 & x14_5) ^ (t5_7 & x14_1) ^ (t5_7 & x14_2) ^ (t5_7 & x14_4) ^ (t5_7 & x14_7);
+    let r_5: i64 = (t5_0 & x14_5) ^ (t5_1 & x14_4) ^ (t5_2 & x14_3) ^ (t5_2 & x14_7) ^ (t5_3 & x14_2) ^ (t5_3 & x14_6) ^ (t5_3 & x14_7) ^ (t5_4 & x14_1) ^ (t5_4 & x14_5) ^ (t5_4 & x14_6) ^ (t5_5 & x14_0) ^ (t5_5 & x14_4) ^ (t5_5 & x14_5) ^ (t5_5 & x14_7) ^ (t5_6 & x14_3) ^ (t5_6 & x14_4) ^ (t5_6 & x14_6) ^ (t5_7 & x14_2) ^ (t5_7 & x14_3) ^ (t5_7 & x14_5);
+    let r_6: i64 = (t5_0 & x14_6) ^ (t5_1 & x14_5) ^ (t5_2 & x14_4) ^ (t5_3 & x14_3) ^ (t5_3 & x14_7) ^ (t5_4 & x14_2) ^ (t5_4 & x14_6) ^ (t5_4 & x14_7) ^ (t5_5 & x14_1) ^ (t5_5 & x14_5) ^ (t5_5 & x14_6) ^ (t5_6 & x14_0) ^ (t5_6 & x14_4) ^ (t5_6 & x14_5) ^ (t5_6 & x14_7) ^ (t5_7 & x14_3) ^ (t5_7 & x14_4) ^ (t5_7 & x14_6);
+    let r_7: i64 = (t5_0 & x14_7) ^ (t5_1 & x14_6) ^ (t5_2 & x14_5) ^ (t5_3 & x14_4) ^ (t5_4 & x14_3) ^ (t5_4 & x14_7) ^ (t5_5 & x14_2) ^ (t5_5 & x14_6) ^ (t5_5 & x14_7) ^ (t5_6 & x14_1) ^ (t5_6 & x14_5) ^ (t5_6 & x14_6) ^ (t5_7 & x14_0) ^ (t5_7 & x14_4) ^ (t5_7 & x14_5) ^ (t5_7 & x14_7);
+
+    let ones: i64 = 4294967295;
+    _tlsrec_pw(ws, state, 0, r_0 ^ r_4 ^ r_5 ^ r_6 ^ r_7 ^ ones);
+    _tlsrec_pw(ws, state, 1, r_1 ^ r_5 ^ r_6 ^ r_7 ^ r_0 ^ ones);
+    _tlsrec_pw(ws, state, 2, r_2 ^ r_6 ^ r_7 ^ r_0 ^ r_1);
+    _tlsrec_pw(ws, state, 3, r_3 ^ r_7 ^ r_0 ^ r_1 ^ r_2);
+    _tlsrec_pw(ws, state, 4, r_4 ^ r_0 ^ r_1 ^ r_2 ^ r_3);
+    _tlsrec_pw(ws, state, 5, r_5 ^ r_1 ^ r_2 ^ r_3 ^ r_4 ^ ones);
+    _tlsrec_pw(ws, state, 6, r_6 ^ r_2 ^ r_3 ^ r_4 ^ r_5 ^ ones);
+    _tlsrec_pw(ws, state, 7, r_7 ^ r_3 ^ r_4 ^ r_5 ^ r_6);
+}
+
+// Bitslice `n` (<= 32) bytes at `bytes[off..off+n)` into the 8-word slot
+// `dest`. Port of `bs_slice`; lanes at or above `n` stay zero.
+fn _tlsrec_bs_slice(bytes: *u8, off: i64, n: i64, ws: *u8, dest: i64) -> void {
+    let mut w0: i64 = 0;
+    let mut w1: i64 = 0;
+    let mut w2: i64 = 0;
+    let mut w3: i64 = 0;
+    let mut w4: i64 = 0;
+    let mut w5: i64 = 0;
+    let mut w6: i64 = 0;
+    let mut w7: i64 = 0;
+    let mut k: i64 = 0;
+    loop {
+        if k >= n { break; }
+        let b: i64 = _tlsrec_at(bytes, off + k);
+        w0 = w0 | (((b >> 0) & 1) << k);
+        w1 = w1 | (((b >> 1) & 1) << k);
+        w2 = w2 | (((b >> 2) & 1) << k);
+        w3 = w3 | (((b >> 3) & 1) << k);
+        w4 = w4 | (((b >> 4) & 1) << k);
+        w5 = w5 | (((b >> 5) & 1) << k);
+        w6 = w6 | (((b >> 6) & 1) << k);
+        w7 = w7 | (((b >> 7) & 1) << k);
+        k = k + 1;
+    }
+    _tlsrec_pw(ws, dest, 0, w0);
+    _tlsrec_pw(ws, dest, 1, w1);
+    _tlsrec_pw(ws, dest, 2, w2);
+    _tlsrec_pw(ws, dest, 3, w3);
+    _tlsrec_pw(ws, dest, 4, w4);
+    _tlsrec_pw(ws, dest, 5, w5);
+    _tlsrec_pw(ws, dest, 6, w6);
+    _tlsrec_pw(ws, dest, 7, w7);
+}
+
+// Inverse of `_tlsrec_bs_slice`: write lanes 0..n-1 of 8-word slot `src` to
+// `out[out_off..out_off+n)`. Port of `bs_unslice`.
+fn _tlsrec_bs_unslice(ws: *u8, src: i64, out: *u8, out_off: i64, n: i64) -> void {
+    let w0: i64 = _tlsrec_gw(ws, src, 0);
+    let w1: i64 = _tlsrec_gw(ws, src, 1);
+    let w2: i64 = _tlsrec_gw(ws, src, 2);
+    let w3: i64 = _tlsrec_gw(ws, src, 3);
+    let w4: i64 = _tlsrec_gw(ws, src, 4);
+    let w5: i64 = _tlsrec_gw(ws, src, 5);
+    let w6: i64 = _tlsrec_gw(ws, src, 6);
+    let w7: i64 = _tlsrec_gw(ws, src, 7);
+    let mut k: i64 = 0;
+    loop {
+        if k >= n { break; }
+        let b: i64 = ((w0 >> k) & 1) | (((w1 >> k) & 1) << 1) | (((w2 >> k) & 1) << 2) | (((w3 >> k) & 1) << 3) | (((w4 >> k) & 1) << 4) | (((w5 >> k) & 1) << 5) | (((w6 >> k) & 1) << 6) | (((w7 >> k) & 1) << 7);
+        _tlsrec_put(out, out_off + k, b);
+        k = k + 1;
+    }
+}
+
+// Row masks for ShiftRows and nibble masks for MixColumns' column
+// rotations, in the bitsliced layout — unchanged from `aes.sfn`.
+fn _tlsrec_row0_mask() -> i64 { return 286331153; }
+
+fn _tlsrec_row1_mask() -> i64 { return 572662306; }
+
+fn _tlsrec_row2_mask() -> i64 { return 1145324612; }
+
+fn _tlsrec_row3_mask() -> i64 { return 2290649224; }
+
+fn _tlsrec_nib_lo3_mask() -> i64 { return 2004318071; }
+
+fn _tlsrec_nib_hi1_mask() -> i64 { return 2290649224; }
+
+// Rotate `v` right by `n` (1 <= n <= 15) independently within each 16-bit
+// block half. Port of `_rot16r`.
+fn _tlsrec_rot16r(v: i64, n: i64) -> i64 {
+    let lo: i64 = v & 65535;
+    let hi: i64 = (v >> 16) & 65535;
+    let lo2: i64 = ((lo >> n) | (lo << (16 - n))) & 65535;
+    let hi2: i64 = ((hi >> n) | (hi << (16 - n))) & 65535;
+    return lo2 | (hi2 << 16);
+}
+
+// ShiftRows (FIPS-197 §5.1.2) and MixColumns (§5.1.3) row/column formulas.
+// `_tlsrec_aes_encrypt2` below inlines both directly on local scalars rather
+// than calling a `(ws, state)` buffer-based round function — see its header
+// comment — so only the masks and these two rotations survive as shared
+// helpers.
+fn _tlsrec_rot_col1(v: i64) -> i64 {
+    return ((v >> 1) & _tlsrec_nib_lo3_mask()) | ((v << 3) & _tlsrec_nib_hi1_mask());
+}
+
+fn _tlsrec_rot_col2(v: i64) -> i64 {
+    return ((v >> 2) & 858993459) | ((v << 2) & 3435973836);
+}
+
+// Round constant for key-schedule word `i / Nk`. Port of `_rcon`.
+fn _tlsrec_rcon(n: i64) -> i64 {
+    let mut r: i64 = 1;
+    let mut i: i64 = 1;
+    loop {
+        if i >= n { break; }
+        let hi: i64 = (r >> 7) & 1;
+        r = ((r << 1) & 255) ^ (27 * hi);
+        i = i + 1;
+    }
+    return r;
+}
+
+// FIPS-197 §5.2 key expansion for Nk = 4 (AES-128) and Nk = 8 (AES-256),
+// writing `16 * (Nr + 1)` bytes to caller-owned `ek_out` (must hold at least
+// 240 bytes) and returning that count, or 0 for any other `key_len`
+// (fail-closed, matching `aes_key_expand`). SubWord reuses the same
+// bitsliced S-box as the cipher core, on 4 of its 32 lanes — wasteful, paid
+// once per key rather than per block, exactly as the oracle notes.
+fn _tlsrec_aes_key_expand(ws: *u8, key: *u8, key_len: i64, ek_out: *u8) -> i64 {
+    if key_len != 16 && key_len != 32 { return 0; }
+    let nk: i64 = key_len / 4;
+    let nr: i64 = nk + 6;
+    let total_words: i64 = 4 * (nr + 1);
+    let dup: i64 = _tlsrec_aes_dup();
+    let state: i64 = _tlsrec_aes_state();
+
+    let mut i: i64 = 0;
+    loop {
+        if i >= key_len { break; }
+        _tlsrec_put(ek_out, i, _tlsrec_at(key, i));
+        i = i + 1;
+    }
+
+    i = nk;
+    loop {
+        if i >= total_words { break; }
+        let p: i64 = (i - 1) * 4;
+        let mut t0: i64 = _tlsrec_at(ek_out, p);
+        let mut t1: i64 = _tlsrec_at(ek_out, p + 1);
+        let mut t2: i64 = _tlsrec_at(ek_out, p + 2);
+        let mut t3: i64 = _tlsrec_at(ek_out, p + 3);
+        if i % nk == 0 {
+            _tlsrec_put(ws, dup, t1);
+            _tlsrec_put(ws, dup + 1, t2);
+            _tlsrec_put(ws, dup + 2, t3);
+            _tlsrec_put(ws, dup + 3, t0);
+            _tlsrec_bs_slice(ws, dup, 4, ws, state);
+            _tlsrec_bs_sbox(ws, state);
+            _tlsrec_bs_unslice(ws, state, ws, dup, 4);
+            t0 = _tlsrec_at(ws, dup) ^ _tlsrec_rcon(i / nk);
+            t1 = _tlsrec_at(ws, dup + 1);
+            t2 = _tlsrec_at(ws, dup + 2);
+            t3 = _tlsrec_at(ws, dup + 3);
+        } else if nk == 8 && i % nk == 4 {
+            _tlsrec_put(ws, dup, t0);
+            _tlsrec_put(ws, dup + 1, t1);
+            _tlsrec_put(ws, dup + 2, t2);
+            _tlsrec_put(ws, dup + 3, t3);
+            _tlsrec_bs_slice(ws, dup, 4, ws, state);
+            _tlsrec_bs_sbox(ws, state);
+            _tlsrec_bs_unslice(ws, state, ws, dup, 4);
+            t0 = _tlsrec_at(ws, dup);
+            t1 = _tlsrec_at(ws, dup + 1);
+            t2 = _tlsrec_at(ws, dup + 2);
+            t3 = _tlsrec_at(ws, dup + 3);
+        }
+        let q: i64 = (i - nk) * 4;
+        _tlsrec_put(ek_out, i * 4, _tlsrec_at(ek_out, q) ^ t0);
+        _tlsrec_put(ek_out, i * 4 + 1, _tlsrec_at(ek_out, q + 1) ^ t1);
+        _tlsrec_put(ek_out, i * 4 + 2, _tlsrec_at(ek_out, q + 2) ^ t2);
+        _tlsrec_put(ek_out, i * 4 + 3, _tlsrec_at(ek_out, q + 3) ^ t3);
+        i = i + 1;
+    }
+    return total_words * 4;
+}
+
+// Pre-bitslice the round keys from `ek` (`ek_len` bytes, 176 or 240) into
+// `bk_out`: 8 little-endian words per round, the 16 key bytes replicated
+// into both block halves. Returns the byte count written, or 0 for any
+// other `ek_len` (fail-closed, matching `aes_bs_keys`).
+fn _tlsrec_aes_bs_keys(ws: *u8, ek: *u8, ek_len: i64, bk_out: *u8) -> i64 {
+    if ek_len != 176 && ek_len != 240 { return 0; }
+    let rounds: i64 = ek_len / 16;
+    let dup: i64 = _tlsrec_aes_dup();
+    let state: i64 = _tlsrec_aes_state();
+    let mut r: i64 = 0;
+    loop {
+        if r >= rounds { break; }
+        let off: i64 = r * 16;
+        let mut i: i64 = 0;
+        loop {
+            if i >= 16 { break; }
+            let b: i64 = _tlsrec_at(ek, off + i);
+            _tlsrec_put(ws, dup + i, b);
+            _tlsrec_put(ws, dup + 16 + i, b);
+            i = i + 1;
+        }
+        _tlsrec_bs_slice(ws, dup, 32, ws, state);
+        let mut j: i64 = 0;
+        loop {
+            if j >= 8 { break; }
+            _tlsrec_put_le32(bk_out, r * 32 + 4 * j, _tlsrec_gw(ws, state, j));
+            j = j + 1;
+        }
+        r = r + 1;
+    }
+    return rounds * 32;
+}
+
+// Encrypt the two 16-byte blocks at `blocks[blocks_off..blocks_off+32)`
+// under pre-bitsliced round keys `bk` (`nr` rounds after the initial
+// whitening), writing 32 bytes to `out[out_off..out_off+32)`. `blocks`/
+// `blocks_off` may alias `out`/`out_off` — the whole 32-byte input is
+// bitsliced into `state` before anything is written back.
+//
+// The whole per-round pipeline (S-box, ShiftRows, MixColumns, AddRoundKey)
+// runs on local `w0..w7` scalars for the entire round loop — `state` is
+// touched only once at entry (`_tlsrec_bs_slice`) and once at exit
+// (`_tlsrec_bs_unslice`). ShiftRows/MixColumns/AddRoundKey were themselves
+// buffer-based round-function ports (mirroring `_shift_rows`/
+// `_mix_columns`/`_add_round_key`) before SFN-817's throughput pass folded
+// them in here alongside the S-box, for the same reason recorded on
+// `_tlsrec_bs_sbox`: a `ws` buffer round-trip per word, per sub-step, per
+// round is real heap memory traffic malloc'd `ws` can never be promoted out
+// of. ShiftRows is still expressed with `_tlsrec_rot16r`/the row masks and
+// MixColumns with `_tlsrec_rot_col1`/`_tlsrec_rot_col2` — only the *state*
+// moved out of the buffer, not those formulas. Round keys are read directly
+// from `bk` (a different, read-only buffer, necessarily touched once per
+// round) via `_tlsrec_le32`. Correctness rests on the same byte-identity
+// differential named on `_tlsrec_bs_sbox` above, run over the full round
+// count for both AES-128 and AES-256.
+fn _tlsrec_aes_encrypt2(ws: *u8, bk: *u8, nr: i64, blocks: *u8, blocks_off: i64, out: *u8, out_off: i64) -> void {
+    let state: i64 = _tlsrec_aes_state();
+    _tlsrec_bs_slice(blocks, blocks_off, 32, ws, state);
+    let mut w0: i64 = _tlsrec_gw(ws, state, 0) ^ _tlsrec_le32(bk, 0);
+    let mut w1: i64 = _tlsrec_gw(ws, state, 1) ^ _tlsrec_le32(bk, 4);
+    let mut w2: i64 = _tlsrec_gw(ws, state, 2) ^ _tlsrec_le32(bk, 8);
+    let mut w3: i64 = _tlsrec_gw(ws, state, 3) ^ _tlsrec_le32(bk, 12);
+    let mut w4: i64 = _tlsrec_gw(ws, state, 4) ^ _tlsrec_le32(bk, 16);
+    let mut w5: i64 = _tlsrec_gw(ws, state, 5) ^ _tlsrec_le32(bk, 20);
+    let mut w6: i64 = _tlsrec_gw(ws, state, 6) ^ _tlsrec_le32(bk, 24);
+    let mut w7: i64 = _tlsrec_gw(ws, state, 7) ^ _tlsrec_le32(bk, 28);
+
+    let mut r: i64 = 1;
+    loop {
+        if r >= nr { break; }
+        let a0: i64 = w0;
+        let a1: i64 = w1;
+        let a2: i64 = w2;
+        let a3: i64 = w3;
+        let a4: i64 = w4;
+        let a5: i64 = w5;
+        let a6: i64 = w6;
+        let a7: i64 = w7;
+
+        let x2_0: i64 = a0 ^ a4 ^ a6;
+        let x2_1: i64 = a4 ^ a6 ^ a7;
+        let x2_2: i64 = a1 ^ a5;
+        let x2_3: i64 = a4 ^ a5 ^ a6 ^ a7;
+        let x2_4: i64 = a2 ^ a4 ^ a7;
+        let x2_5: i64 = a5 ^ a6;
+        let x2_6: i64 = a3 ^ a5;
+        let x2_7: i64 = a6 ^ a7;
+
+        let x3_0: i64 = (x2_0 & a0) ^ (x2_1 & a7) ^ (x2_2 & a6) ^ (x2_3 & a5) ^ (x2_4 & a4) ^ (x2_5 & a3) ^ (x2_5 & a7) ^ (x2_6 & a2) ^ (x2_6 & a6) ^ (x2_6 & a7) ^ (x2_7 & a1) ^ (x2_7 & a5) ^ (x2_7 & a6);
+        let x3_1: i64 = (x2_0 & a1) ^ (x2_1 & a0) ^ (x2_1 & a7) ^ (x2_2 & a6) ^ (x2_2 & a7) ^ (x2_3 & a5) ^ (x2_3 & a6) ^ (x2_4 & a4) ^ (x2_4 & a5) ^ (x2_5 & a3) ^ (x2_5 & a4) ^ (x2_5 & a7) ^ (x2_6 & a2) ^ (x2_6 & a3) ^ (x2_6 & a6) ^ (x2_7 & a1) ^ (x2_7 & a2) ^ (x2_7 & a5) ^ (x2_7 & a7);
+        let x3_2: i64 = (x2_0 & a2) ^ (x2_1 & a1) ^ (x2_2 & a0) ^ (x2_2 & a7) ^ (x2_3 & a6) ^ (x2_3 & a7) ^ (x2_4 & a5) ^ (x2_4 & a6) ^ (x2_5 & a4) ^ (x2_5 & a5) ^ (x2_6 & a3) ^ (x2_6 & a4) ^ (x2_6 & a7) ^ (x2_7 & a2) ^ (x2_7 & a3) ^ (x2_7 & a6);
+        let x3_3: i64 = (x2_0 & a3) ^ (x2_1 & a2) ^ (x2_1 & a7) ^ (x2_2 & a1) ^ (x2_2 & a6) ^ (x2_3 & a0) ^ (x2_3 & a5) ^ (x2_3 & a7) ^ (x2_4 & a4) ^ (x2_4 & a6) ^ (x2_4 & a7) ^ (x2_5 & a3) ^ (x2_5 & a5) ^ (x2_5 & a6) ^ (x2_5 & a7) ^ (x2_6 & a2) ^ (x2_6 & a4) ^ (x2_6 & a5) ^ (x2_6 & a6) ^ (x2_6 & a7) ^ (x2_7 & a1) ^ (x2_7 & a3) ^ (x2_7 & a4) ^ (x2_7 & a5) ^ (x2_7 & a6) ^ (x2_7 & a7);
+        let x3_4: i64 = (x2_0 & a4) ^ (x2_1 & a3) ^ (x2_1 & a7) ^ (x2_2 & a2) ^ (x2_2 & a6) ^ (x2_2 & a7) ^ (x2_3 & a1) ^ (x2_3 & a5) ^ (x2_3 & a6) ^ (x2_4 & a0) ^ (x2_4 & a4) ^ (x2_4 & a5) ^ (x2_4 & a7) ^ (x2_5 & a3) ^ (x2_5 & a4) ^ (x2_5 & a6) ^ (x2_6 & a2) ^ (x2_6 & a3) ^ (x2_6 & a5) ^ (x2_7 & a1) ^ (x2_7 & a2) ^ (x2_7 & a4) ^ (x2_7 & a7);
+        let x3_5: i64 = (x2_0 & a5) ^ (x2_1 & a4) ^ (x2_2 & a3) ^ (x2_2 & a7) ^ (x2_3 & a2) ^ (x2_3 & a6) ^ (x2_3 & a7) ^ (x2_4 & a1) ^ (x2_4 & a5) ^ (x2_4 & a6) ^ (x2_5 & a0) ^ (x2_5 & a4) ^ (x2_5 & a5) ^ (x2_5 & a7) ^ (x2_6 & a3) ^ (x2_6 & a4) ^ (x2_6 & a6) ^ (x2_7 & a2) ^ (x2_7 & a3) ^ (x2_7 & a5);
+        let x3_6: i64 = (x2_0 & a6) ^ (x2_1 & a5) ^ (x2_2 & a4) ^ (x2_3 & a3) ^ (x2_3 & a7) ^ (x2_4 & a2) ^ (x2_4 & a6) ^ (x2_4 & a7) ^ (x2_5 & a1) ^ (x2_5 & a5) ^ (x2_5 & a6) ^ (x2_6 & a0) ^ (x2_6 & a4) ^ (x2_6 & a5) ^ (x2_6 & a7) ^ (x2_7 & a3) ^ (x2_7 & a4) ^ (x2_7 & a6);
+        let x3_7: i64 = (x2_0 & a7) ^ (x2_1 & a6) ^ (x2_2 & a5) ^ (x2_3 & a4) ^ (x2_4 & a3) ^ (x2_4 & a7) ^ (x2_5 & a2) ^ (x2_5 & a6) ^ (x2_5 & a7) ^ (x2_6 & a1) ^ (x2_6 & a5) ^ (x2_6 & a6) ^ (x2_7 & a0) ^ (x2_7 & a4) ^ (x2_7 & a5) ^ (x2_7 & a7);
+
+        let t_0: i64 = x3_0 ^ x3_4 ^ x3_6;
+        let t_1: i64 = x3_4 ^ x3_6 ^ x3_7;
+        let t_2: i64 = x3_1 ^ x3_5;
+        let t_3: i64 = x3_4 ^ x3_5 ^ x3_6 ^ x3_7;
+        let t_4: i64 = x3_2 ^ x3_4 ^ x3_7;
+        let t_5: i64 = x3_5 ^ x3_6;
+        let t_6: i64 = x3_3 ^ x3_5;
+        let t_7: i64 = x3_6 ^ x3_7;
+
+        let x12_0: i64 = t_0 ^ t_4 ^ t_6;
+        let x12_1: i64 = t_4 ^ t_6 ^ t_7;
+        let x12_2: i64 = t_1 ^ t_5;
+        let x12_3: i64 = t_4 ^ t_5 ^ t_6 ^ t_7;
+        let x12_4: i64 = t_2 ^ t_4 ^ t_7;
+        let x12_5: i64 = t_5 ^ t_6;
+        let x12_6: i64 = t_3 ^ t_5;
+        let x12_7: i64 = t_6 ^ t_7;
+
+        let x14_0: i64 = (x12_0 & x2_0) ^ (x12_1 & x2_7) ^ (x12_2 & x2_6) ^ (x12_3 & x2_5) ^ (x12_4 & x2_4) ^ (x12_5 & x2_3) ^ (x12_5 & x2_7) ^ (x12_6 & x2_2) ^ (x12_6 & x2_6) ^ (x12_6 & x2_7) ^ (x12_7 & x2_1) ^ (x12_7 & x2_5) ^ (x12_7 & x2_6);
+        let x14_1: i64 = (x12_0 & x2_1) ^ (x12_1 & x2_0) ^ (x12_1 & x2_7) ^ (x12_2 & x2_6) ^ (x12_2 & x2_7) ^ (x12_3 & x2_5) ^ (x12_3 & x2_6) ^ (x12_4 & x2_4) ^ (x12_4 & x2_5) ^ (x12_5 & x2_3) ^ (x12_5 & x2_4) ^ (x12_5 & x2_7) ^ (x12_6 & x2_2) ^ (x12_6 & x2_3) ^ (x12_6 & x2_6) ^ (x12_7 & x2_1) ^ (x12_7 & x2_2) ^ (x12_7 & x2_5) ^ (x12_7 & x2_7);
+        let x14_2: i64 = (x12_0 & x2_2) ^ (x12_1 & x2_1) ^ (x12_2 & x2_0) ^ (x12_2 & x2_7) ^ (x12_3 & x2_6) ^ (x12_3 & x2_7) ^ (x12_4 & x2_5) ^ (x12_4 & x2_6) ^ (x12_5 & x2_4) ^ (x12_5 & x2_5) ^ (x12_6 & x2_3) ^ (x12_6 & x2_4) ^ (x12_6 & x2_7) ^ (x12_7 & x2_2) ^ (x12_7 & x2_3) ^ (x12_7 & x2_6);
+        let x14_3: i64 = (x12_0 & x2_3) ^ (x12_1 & x2_2) ^ (x12_1 & x2_7) ^ (x12_2 & x2_1) ^ (x12_2 & x2_6) ^ (x12_3 & x2_0) ^ (x12_3 & x2_5) ^ (x12_3 & x2_7) ^ (x12_4 & x2_4) ^ (x12_4 & x2_6) ^ (x12_4 & x2_7) ^ (x12_5 & x2_3) ^ (x12_5 & x2_5) ^ (x12_5 & x2_6) ^ (x12_5 & x2_7) ^ (x12_6 & x2_2) ^ (x12_6 & x2_4) ^ (x12_6 & x2_5) ^ (x12_6 & x2_6) ^ (x12_6 & x2_7) ^ (x12_7 & x2_1) ^ (x12_7 & x2_3) ^ (x12_7 & x2_4) ^ (x12_7 & x2_5) ^ (x12_7 & x2_6) ^ (x12_7 & x2_7);
+        let x14_4: i64 = (x12_0 & x2_4) ^ (x12_1 & x2_3) ^ (x12_1 & x2_7) ^ (x12_2 & x2_2) ^ (x12_2 & x2_6) ^ (x12_2 & x2_7) ^ (x12_3 & x2_1) ^ (x12_3 & x2_5) ^ (x12_3 & x2_6) ^ (x12_4 & x2_0) ^ (x12_4 & x2_4) ^ (x12_4 & x2_5) ^ (x12_4 & x2_7) ^ (x12_5 & x2_3) ^ (x12_5 & x2_4) ^ (x12_5 & x2_6) ^ (x12_6 & x2_2) ^ (x12_6 & x2_3) ^ (x12_6 & x2_5) ^ (x12_7 & x2_1) ^ (x12_7 & x2_2) ^ (x12_7 & x2_4) ^ (x12_7 & x2_7);
+        let x14_5: i64 = (x12_0 & x2_5) ^ (x12_1 & x2_4) ^ (x12_2 & x2_3) ^ (x12_2 & x2_7) ^ (x12_3 & x2_2) ^ (x12_3 & x2_6) ^ (x12_3 & x2_7) ^ (x12_4 & x2_1) ^ (x12_4 & x2_5) ^ (x12_4 & x2_6) ^ (x12_5 & x2_0) ^ (x12_5 & x2_4) ^ (x12_5 & x2_5) ^ (x12_5 & x2_7) ^ (x12_6 & x2_3) ^ (x12_6 & x2_4) ^ (x12_6 & x2_6) ^ (x12_7 & x2_2) ^ (x12_7 & x2_3) ^ (x12_7 & x2_5);
+        let x14_6: i64 = (x12_0 & x2_6) ^ (x12_1 & x2_5) ^ (x12_2 & x2_4) ^ (x12_3 & x2_3) ^ (x12_3 & x2_7) ^ (x12_4 & x2_2) ^ (x12_4 & x2_6) ^ (x12_4 & x2_7) ^ (x12_5 & x2_1) ^ (x12_5 & x2_5) ^ (x12_5 & x2_6) ^ (x12_6 & x2_0) ^ (x12_6 & x2_4) ^ (x12_6 & x2_5) ^ (x12_6 & x2_7) ^ (x12_7 & x2_3) ^ (x12_7 & x2_4) ^ (x12_7 & x2_6);
+        let x14_7: i64 = (x12_0 & x2_7) ^ (x12_1 & x2_6) ^ (x12_2 & x2_5) ^ (x12_3 & x2_4) ^ (x12_4 & x2_3) ^ (x12_4 & x2_7) ^ (x12_5 & x2_2) ^ (x12_5 & x2_6) ^ (x12_5 & x2_7) ^ (x12_6 & x2_1) ^ (x12_6 & x2_5) ^ (x12_6 & x2_6) ^ (x12_7 & x2_0) ^ (x12_7 & x2_4) ^ (x12_7 & x2_5) ^ (x12_7 & x2_7);
+
+        let x15_0: i64 = (x12_0 & x3_0) ^ (x12_1 & x3_7) ^ (x12_2 & x3_6) ^ (x12_3 & x3_5) ^ (x12_4 & x3_4) ^ (x12_5 & x3_3) ^ (x12_5 & x3_7) ^ (x12_6 & x3_2) ^ (x12_6 & x3_6) ^ (x12_6 & x3_7) ^ (x12_7 & x3_1) ^ (x12_7 & x3_5) ^ (x12_7 & x3_6);
+        let x15_1: i64 = (x12_0 & x3_1) ^ (x12_1 & x3_0) ^ (x12_1 & x3_7) ^ (x12_2 & x3_6) ^ (x12_2 & x3_7) ^ (x12_3 & x3_5) ^ (x12_3 & x3_6) ^ (x12_4 & x3_4) ^ (x12_4 & x3_5) ^ (x12_5 & x3_3) ^ (x12_5 & x3_4) ^ (x12_5 & x3_7) ^ (x12_6 & x3_2) ^ (x12_6 & x3_3) ^ (x12_6 & x3_6) ^ (x12_7 & x3_1) ^ (x12_7 & x3_2) ^ (x12_7 & x3_5) ^ (x12_7 & x3_7);
+        let x15_2: i64 = (x12_0 & x3_2) ^ (x12_1 & x3_1) ^ (x12_2 & x3_0) ^ (x12_2 & x3_7) ^ (x12_3 & x3_6) ^ (x12_3 & x3_7) ^ (x12_4 & x3_5) ^ (x12_4 & x3_6) ^ (x12_5 & x3_4) ^ (x12_5 & x3_5) ^ (x12_6 & x3_3) ^ (x12_6 & x3_4) ^ (x12_6 & x3_7) ^ (x12_7 & x3_2) ^ (x12_7 & x3_3) ^ (x12_7 & x3_6);
+        let x15_3: i64 = (x12_0 & x3_3) ^ (x12_1 & x3_2) ^ (x12_1 & x3_7) ^ (x12_2 & x3_1) ^ (x12_2 & x3_6) ^ (x12_3 & x3_0) ^ (x12_3 & x3_5) ^ (x12_3 & x3_7) ^ (x12_4 & x3_4) ^ (x12_4 & x3_6) ^ (x12_4 & x3_7) ^ (x12_5 & x3_3) ^ (x12_5 & x3_5) ^ (x12_5 & x3_6) ^ (x12_5 & x3_7) ^ (x12_6 & x3_2) ^ (x12_6 & x3_4) ^ (x12_6 & x3_5) ^ (x12_6 & x3_6) ^ (x12_6 & x3_7) ^ (x12_7 & x3_1) ^ (x12_7 & x3_3) ^ (x12_7 & x3_4) ^ (x12_7 & x3_5) ^ (x12_7 & x3_6) ^ (x12_7 & x3_7);
+        let x15_4: i64 = (x12_0 & x3_4) ^ (x12_1 & x3_3) ^ (x12_1 & x3_7) ^ (x12_2 & x3_2) ^ (x12_2 & x3_6) ^ (x12_2 & x3_7) ^ (x12_3 & x3_1) ^ (x12_3 & x3_5) ^ (x12_3 & x3_6) ^ (x12_4 & x3_0) ^ (x12_4 & x3_4) ^ (x12_4 & x3_5) ^ (x12_4 & x3_7) ^ (x12_5 & x3_3) ^ (x12_5 & x3_4) ^ (x12_5 & x3_6) ^ (x12_6 & x3_2) ^ (x12_6 & x3_3) ^ (x12_6 & x3_5) ^ (x12_7 & x3_1) ^ (x12_7 & x3_2) ^ (x12_7 & x3_4) ^ (x12_7 & x3_7);
+        let x15_5: i64 = (x12_0 & x3_5) ^ (x12_1 & x3_4) ^ (x12_2 & x3_3) ^ (x12_2 & x3_7) ^ (x12_3 & x3_2) ^ (x12_3 & x3_6) ^ (x12_3 & x3_7) ^ (x12_4 & x3_1) ^ (x12_4 & x3_5) ^ (x12_4 & x3_6) ^ (x12_5 & x3_0) ^ (x12_5 & x3_4) ^ (x12_5 & x3_5) ^ (x12_5 & x3_7) ^ (x12_6 & x3_3) ^ (x12_6 & x3_4) ^ (x12_6 & x3_6) ^ (x12_7 & x3_2) ^ (x12_7 & x3_3) ^ (x12_7 & x3_5);
+        let x15_6: i64 = (x12_0 & x3_6) ^ (x12_1 & x3_5) ^ (x12_2 & x3_4) ^ (x12_3 & x3_3) ^ (x12_3 & x3_7) ^ (x12_4 & x3_2) ^ (x12_4 & x3_6) ^ (x12_4 & x3_7) ^ (x12_5 & x3_1) ^ (x12_5 & x3_5) ^ (x12_5 & x3_6) ^ (x12_6 & x3_0) ^ (x12_6 & x3_4) ^ (x12_6 & x3_5) ^ (x12_6 & x3_7) ^ (x12_7 & x3_3) ^ (x12_7 & x3_4) ^ (x12_7 & x3_6);
+        let x15_7: i64 = (x12_0 & x3_7) ^ (x12_1 & x3_6) ^ (x12_2 & x3_5) ^ (x12_3 & x3_4) ^ (x12_4 & x3_3) ^ (x12_4 & x3_7) ^ (x12_5 & x3_2) ^ (x12_5 & x3_6) ^ (x12_5 & x3_7) ^ (x12_6 & x3_1) ^ (x12_6 & x3_5) ^ (x12_6 & x3_6) ^ (x12_7 & x3_0) ^ (x12_7 & x3_4) ^ (x12_7 & x3_5) ^ (x12_7 & x3_7);
+
+        let t2_0: i64 = x15_0 ^ x15_4 ^ x15_6;
+        let t2_1: i64 = x15_4 ^ x15_6 ^ x15_7;
+        let t2_2: i64 = x15_1 ^ x15_5;
+        let t2_3: i64 = x15_4 ^ x15_5 ^ x15_6 ^ x15_7;
+        let t2_4: i64 = x15_2 ^ x15_4 ^ x15_7;
+        let t2_5: i64 = x15_5 ^ x15_6;
+        let t2_6: i64 = x15_3 ^ x15_5;
+        let t2_7: i64 = x15_6 ^ x15_7;
+
+        let t3_0: i64 = t2_0 ^ t2_4 ^ t2_6;
+        let t3_1: i64 = t2_4 ^ t2_6 ^ t2_7;
+        let t3_2: i64 = t2_1 ^ t2_5;
+        let t3_3: i64 = t2_4 ^ t2_5 ^ t2_6 ^ t2_7;
+        let t3_4: i64 = t2_2 ^ t2_4 ^ t2_7;
+        let t3_5: i64 = t2_5 ^ t2_6;
+        let t3_6: i64 = t2_3 ^ t2_5;
+        let t3_7: i64 = t2_6 ^ t2_7;
+
+        let t4_0: i64 = t3_0 ^ t3_4 ^ t3_6;
+        let t4_1: i64 = t3_4 ^ t3_6 ^ t3_7;
+        let t4_2: i64 = t3_1 ^ t3_5;
+        let t4_3: i64 = t3_4 ^ t3_5 ^ t3_6 ^ t3_7;
+        let t4_4: i64 = t3_2 ^ t3_4 ^ t3_7;
+        let t4_5: i64 = t3_5 ^ t3_6;
+        let t4_6: i64 = t3_3 ^ t3_5;
+        let t4_7: i64 = t3_6 ^ t3_7;
+
+        let t5_0: i64 = t4_0 ^ t4_4 ^ t4_6;
+        let t5_1: i64 = t4_4 ^ t4_6 ^ t4_7;
+        let t5_2: i64 = t4_1 ^ t4_5;
+        let t5_3: i64 = t4_4 ^ t4_5 ^ t4_6 ^ t4_7;
+        let t5_4: i64 = t4_2 ^ t4_4 ^ t4_7;
+        let t5_5: i64 = t4_5 ^ t4_6;
+        let t5_6: i64 = t4_3 ^ t4_5;
+        let t5_7: i64 = t4_6 ^ t4_7;
+
+        let r_0: i64 = (t5_0 & x14_0) ^ (t5_1 & x14_7) ^ (t5_2 & x14_6) ^ (t5_3 & x14_5) ^ (t5_4 & x14_4) ^ (t5_5 & x14_3) ^ (t5_5 & x14_7) ^ (t5_6 & x14_2) ^ (t5_6 & x14_6) ^ (t5_6 & x14_7) ^ (t5_7 & x14_1) ^ (t5_7 & x14_5) ^ (t5_7 & x14_6);
+        let r_1: i64 = (t5_0 & x14_1) ^ (t5_1 & x14_0) ^ (t5_1 & x14_7) ^ (t5_2 & x14_6) ^ (t5_2 & x14_7) ^ (t5_3 & x14_5) ^ (t5_3 & x14_6) ^ (t5_4 & x14_4) ^ (t5_4 & x14_5) ^ (t5_5 & x14_3) ^ (t5_5 & x14_4) ^ (t5_5 & x14_7) ^ (t5_6 & x14_2) ^ (t5_6 & x14_3) ^ (t5_6 & x14_6) ^ (t5_7 & x14_1) ^ (t5_7 & x14_2) ^ (t5_7 & x14_5) ^ (t5_7 & x14_7);
+        let r_2: i64 = (t5_0 & x14_2) ^ (t5_1 & x14_1) ^ (t5_2 & x14_0) ^ (t5_2 & x14_7) ^ (t5_3 & x14_6) ^ (t5_3 & x14_7) ^ (t5_4 & x14_5) ^ (t5_4 & x14_6) ^ (t5_5 & x14_4) ^ (t5_5 & x14_5) ^ (t5_6 & x14_3) ^ (t5_6 & x14_4) ^ (t5_6 & x14_7) ^ (t5_7 & x14_2) ^ (t5_7 & x14_3) ^ (t5_7 & x14_6);
+        let r_3: i64 = (t5_0 & x14_3) ^ (t5_1 & x14_2) ^ (t5_1 & x14_7) ^ (t5_2 & x14_1) ^ (t5_2 & x14_6) ^ (t5_3 & x14_0) ^ (t5_3 & x14_5) ^ (t5_3 & x14_7) ^ (t5_4 & x14_4) ^ (t5_4 & x14_6) ^ (t5_4 & x14_7) ^ (t5_5 & x14_3) ^ (t5_5 & x14_5) ^ (t5_5 & x14_6) ^ (t5_5 & x14_7) ^ (t5_6 & x14_2) ^ (t5_6 & x14_4) ^ (t5_6 & x14_5) ^ (t5_6 & x14_6) ^ (t5_6 & x14_7) ^ (t5_7 & x14_1) ^ (t5_7 & x14_3) ^ (t5_7 & x14_4) ^ (t5_7 & x14_5) ^ (t5_7 & x14_6) ^ (t5_7 & x14_7);
+        let r_4: i64 = (t5_0 & x14_4) ^ (t5_1 & x14_3) ^ (t5_1 & x14_7) ^ (t5_2 & x14_2) ^ (t5_2 & x14_6) ^ (t5_2 & x14_7) ^ (t5_3 & x14_1) ^ (t5_3 & x14_5) ^ (t5_3 & x14_6) ^ (t5_4 & x14_0) ^ (t5_4 & x14_4) ^ (t5_4 & x14_5) ^ (t5_4 & x14_7) ^ (t5_5 & x14_3) ^ (t5_5 & x14_4) ^ (t5_5 & x14_6) ^ (t5_6 & x14_2) ^ (t5_6 & x14_3) ^ (t5_6 & x14_5) ^ (t5_7 & x14_1) ^ (t5_7 & x14_2) ^ (t5_7 & x14_4) ^ (t5_7 & x14_7);
+        let r_5: i64 = (t5_0 & x14_5) ^ (t5_1 & x14_4) ^ (t5_2 & x14_3) ^ (t5_2 & x14_7) ^ (t5_3 & x14_2) ^ (t5_3 & x14_6) ^ (t5_3 & x14_7) ^ (t5_4 & x14_1) ^ (t5_4 & x14_5) ^ (t5_4 & x14_6) ^ (t5_5 & x14_0) ^ (t5_5 & x14_4) ^ (t5_5 & x14_5) ^ (t5_5 & x14_7) ^ (t5_6 & x14_3) ^ (t5_6 & x14_4) ^ (t5_6 & x14_6) ^ (t5_7 & x14_2) ^ (t5_7 & x14_3) ^ (t5_7 & x14_5);
+        let r_6: i64 = (t5_0 & x14_6) ^ (t5_1 & x14_5) ^ (t5_2 & x14_4) ^ (t5_3 & x14_3) ^ (t5_3 & x14_7) ^ (t5_4 & x14_2) ^ (t5_4 & x14_6) ^ (t5_4 & x14_7) ^ (t5_5 & x14_1) ^ (t5_5 & x14_5) ^ (t5_5 & x14_6) ^ (t5_6 & x14_0) ^ (t5_6 & x14_4) ^ (t5_6 & x14_5) ^ (t5_6 & x14_7) ^ (t5_7 & x14_3) ^ (t5_7 & x14_4) ^ (t5_7 & x14_6);
+        let r_7: i64 = (t5_0 & x14_7) ^ (t5_1 & x14_6) ^ (t5_2 & x14_5) ^ (t5_3 & x14_4) ^ (t5_4 & x14_3) ^ (t5_4 & x14_7) ^ (t5_5 & x14_2) ^ (t5_5 & x14_6) ^ (t5_5 & x14_7) ^ (t5_6 & x14_1) ^ (t5_6 & x14_5) ^ (t5_6 & x14_6) ^ (t5_7 & x14_0) ^ (t5_7 & x14_4) ^ (t5_7 & x14_5) ^ (t5_7 & x14_7);
+
+        let ones: i64 = 4294967295;
+        let sb0: i64 = r_0 ^ r_4 ^ r_5 ^ r_6 ^ r_7 ^ ones;
+        let sb1: i64 = r_1 ^ r_5 ^ r_6 ^ r_7 ^ r_0 ^ ones;
+        let sb2: i64 = r_2 ^ r_6 ^ r_7 ^ r_0 ^ r_1;
+        let sb3: i64 = r_3 ^ r_7 ^ r_0 ^ r_1 ^ r_2;
+        let sb4: i64 = r_4 ^ r_0 ^ r_1 ^ r_2 ^ r_3;
+        let sb5: i64 = r_5 ^ r_1 ^ r_2 ^ r_3 ^ r_4 ^ ones;
+        let sb6: i64 = r_6 ^ r_2 ^ r_3 ^ r_4 ^ r_5 ^ ones;
+        let sb7: i64 = r_7 ^ r_3 ^ r_4 ^ r_5 ^ r_6;
+
+        let sr0: i64 = (sb0 & _tlsrec_row0_mask()) | _tlsrec_rot16r(sb0 & _tlsrec_row1_mask(), 4) | _tlsrec_rot16r(sb0 & _tlsrec_row2_mask(), 8) | _tlsrec_rot16r(sb0 & _tlsrec_row3_mask(), 12);
+        let sr1: i64 = (sb1 & _tlsrec_row0_mask()) | _tlsrec_rot16r(sb1 & _tlsrec_row1_mask(), 4) | _tlsrec_rot16r(sb1 & _tlsrec_row2_mask(), 8) | _tlsrec_rot16r(sb1 & _tlsrec_row3_mask(), 12);
+        let sr2: i64 = (sb2 & _tlsrec_row0_mask()) | _tlsrec_rot16r(sb2 & _tlsrec_row1_mask(), 4) | _tlsrec_rot16r(sb2 & _tlsrec_row2_mask(), 8) | _tlsrec_rot16r(sb2 & _tlsrec_row3_mask(), 12);
+        let sr3: i64 = (sb3 & _tlsrec_row0_mask()) | _tlsrec_rot16r(sb3 & _tlsrec_row1_mask(), 4) | _tlsrec_rot16r(sb3 & _tlsrec_row2_mask(), 8) | _tlsrec_rot16r(sb3 & _tlsrec_row3_mask(), 12);
+        let sr4: i64 = (sb4 & _tlsrec_row0_mask()) | _tlsrec_rot16r(sb4 & _tlsrec_row1_mask(), 4) | _tlsrec_rot16r(sb4 & _tlsrec_row2_mask(), 8) | _tlsrec_rot16r(sb4 & _tlsrec_row3_mask(), 12);
+        let sr5: i64 = (sb5 & _tlsrec_row0_mask()) | _tlsrec_rot16r(sb5 & _tlsrec_row1_mask(), 4) | _tlsrec_rot16r(sb5 & _tlsrec_row2_mask(), 8) | _tlsrec_rot16r(sb5 & _tlsrec_row3_mask(), 12);
+        let sr6: i64 = (sb6 & _tlsrec_row0_mask()) | _tlsrec_rot16r(sb6 & _tlsrec_row1_mask(), 4) | _tlsrec_rot16r(sb6 & _tlsrec_row2_mask(), 8) | _tlsrec_rot16r(sb6 & _tlsrec_row3_mask(), 12);
+        let sr7: i64 = (sb7 & _tlsrec_row0_mask()) | _tlsrec_rot16r(sb7 & _tlsrec_row1_mask(), 4) | _tlsrec_rot16r(sb7 & _tlsrec_row2_mask(), 8) | _tlsrec_rot16r(sb7 & _tlsrec_row3_mask(), 12);
+
+        let ma0: i64 = sr0 ^ _tlsrec_rot_col1(sr0);
+        let ma1: i64 = sr1 ^ _tlsrec_rot_col1(sr1);
+        let ma2: i64 = sr2 ^ _tlsrec_rot_col1(sr2);
+        let ma3: i64 = sr3 ^ _tlsrec_rot_col1(sr3);
+        let ma4: i64 = sr4 ^ _tlsrec_rot_col1(sr4);
+        let ma5: i64 = sr5 ^ _tlsrec_rot_col1(sr5);
+        let ma6: i64 = sr6 ^ _tlsrec_rot_col1(sr6);
+        let ma7: i64 = sr7 ^ _tlsrec_rot_col1(sr7);
+        let mc0: i64 = sr0 ^ (ma0 ^ _tlsrec_rot_col2(ma0)) ^ (ma7);
+        let mc1: i64 = sr1 ^ (ma1 ^ _tlsrec_rot_col2(ma1)) ^ (ma0 ^ ma7);
+        let mc2: i64 = sr2 ^ (ma2 ^ _tlsrec_rot_col2(ma2)) ^ (ma1);
+        let mc3: i64 = sr3 ^ (ma3 ^ _tlsrec_rot_col2(ma3)) ^ (ma2 ^ ma7);
+        let mc4: i64 = sr4 ^ (ma4 ^ _tlsrec_rot_col2(ma4)) ^ (ma3 ^ ma7);
+        let mc5: i64 = sr5 ^ (ma5 ^ _tlsrec_rot_col2(ma5)) ^ (ma4);
+        let mc6: i64 = sr6 ^ (ma6 ^ _tlsrec_rot_col2(ma6)) ^ (ma5);
+        let mc7: i64 = sr7 ^ (ma7 ^ _tlsrec_rot_col2(ma7)) ^ (ma6);
+
+        let nw0: i64 = mc0 ^ _tlsrec_le32(bk, r * 32 + 0);
+        let nw1: i64 = mc1 ^ _tlsrec_le32(bk, r * 32 + 4);
+        let nw2: i64 = mc2 ^ _tlsrec_le32(bk, r * 32 + 8);
+        let nw3: i64 = mc3 ^ _tlsrec_le32(bk, r * 32 + 12);
+        let nw4: i64 = mc4 ^ _tlsrec_le32(bk, r * 32 + 16);
+        let nw5: i64 = mc5 ^ _tlsrec_le32(bk, r * 32 + 20);
+        let nw6: i64 = mc6 ^ _tlsrec_le32(bk, r * 32 + 24);
+        let nw7: i64 = mc7 ^ _tlsrec_le32(bk, r * 32 + 28);
+        w0 = nw0;
+        w1 = nw1;
+        w2 = nw2;
+        w3 = nw3;
+        w4 = nw4;
+        w5 = nw5;
+        w6 = nw6;
+        w7 = nw7;
+        r = r + 1;
+    }
+
+    // Final round: sbox + shift_rows + AddRoundKey(nr), no MixColumns.
+    let a0: i64 = w0;
+    let a1: i64 = w1;
+    let a2: i64 = w2;
+    let a3: i64 = w3;
+    let a4: i64 = w4;
+    let a5: i64 = w5;
+    let a6: i64 = w6;
+    let a7: i64 = w7;
+
+    let x2_0: i64 = a0 ^ a4 ^ a6;
+    let x2_1: i64 = a4 ^ a6 ^ a7;
+    let x2_2: i64 = a1 ^ a5;
+    let x2_3: i64 = a4 ^ a5 ^ a6 ^ a7;
+    let x2_4: i64 = a2 ^ a4 ^ a7;
+    let x2_5: i64 = a5 ^ a6;
+    let x2_6: i64 = a3 ^ a5;
+    let x2_7: i64 = a6 ^ a7;
+
+    let x3_0: i64 = (x2_0 & a0) ^ (x2_1 & a7) ^ (x2_2 & a6) ^ (x2_3 & a5) ^ (x2_4 & a4) ^ (x2_5 & a3) ^ (x2_5 & a7) ^ (x2_6 & a2) ^ (x2_6 & a6) ^ (x2_6 & a7) ^ (x2_7 & a1) ^ (x2_7 & a5) ^ (x2_7 & a6);
+    let x3_1: i64 = (x2_0 & a1) ^ (x2_1 & a0) ^ (x2_1 & a7) ^ (x2_2 & a6) ^ (x2_2 & a7) ^ (x2_3 & a5) ^ (x2_3 & a6) ^ (x2_4 & a4) ^ (x2_4 & a5) ^ (x2_5 & a3) ^ (x2_5 & a4) ^ (x2_5 & a7) ^ (x2_6 & a2) ^ (x2_6 & a3) ^ (x2_6 & a6) ^ (x2_7 & a1) ^ (x2_7 & a2) ^ (x2_7 & a5) ^ (x2_7 & a7);
+    let x3_2: i64 = (x2_0 & a2) ^ (x2_1 & a1) ^ (x2_2 & a0) ^ (x2_2 & a7) ^ (x2_3 & a6) ^ (x2_3 & a7) ^ (x2_4 & a5) ^ (x2_4 & a6) ^ (x2_5 & a4) ^ (x2_5 & a5) ^ (x2_6 & a3) ^ (x2_6 & a4) ^ (x2_6 & a7) ^ (x2_7 & a2) ^ (x2_7 & a3) ^ (x2_7 & a6);
+    let x3_3: i64 = (x2_0 & a3) ^ (x2_1 & a2) ^ (x2_1 & a7) ^ (x2_2 & a1) ^ (x2_2 & a6) ^ (x2_3 & a0) ^ (x2_3 & a5) ^ (x2_3 & a7) ^ (x2_4 & a4) ^ (x2_4 & a6) ^ (x2_4 & a7) ^ (x2_5 & a3) ^ (x2_5 & a5) ^ (x2_5 & a6) ^ (x2_5 & a7) ^ (x2_6 & a2) ^ (x2_6 & a4) ^ (x2_6 & a5) ^ (x2_6 & a6) ^ (x2_6 & a7) ^ (x2_7 & a1) ^ (x2_7 & a3) ^ (x2_7 & a4) ^ (x2_7 & a5) ^ (x2_7 & a6) ^ (x2_7 & a7);
+    let x3_4: i64 = (x2_0 & a4) ^ (x2_1 & a3) ^ (x2_1 & a7) ^ (x2_2 & a2) ^ (x2_2 & a6) ^ (x2_2 & a7) ^ (x2_3 & a1) ^ (x2_3 & a5) ^ (x2_3 & a6) ^ (x2_4 & a0) ^ (x2_4 & a4) ^ (x2_4 & a5) ^ (x2_4 & a7) ^ (x2_5 & a3) ^ (x2_5 & a4) ^ (x2_5 & a6) ^ (x2_6 & a2) ^ (x2_6 & a3) ^ (x2_6 & a5) ^ (x2_7 & a1) ^ (x2_7 & a2) ^ (x2_7 & a4) ^ (x2_7 & a7);
+    let x3_5: i64 = (x2_0 & a5) ^ (x2_1 & a4) ^ (x2_2 & a3) ^ (x2_2 & a7) ^ (x2_3 & a2) ^ (x2_3 & a6) ^ (x2_3 & a7) ^ (x2_4 & a1) ^ (x2_4 & a5) ^ (x2_4 & a6) ^ (x2_5 & a0) ^ (x2_5 & a4) ^ (x2_5 & a5) ^ (x2_5 & a7) ^ (x2_6 & a3) ^ (x2_6 & a4) ^ (x2_6 & a6) ^ (x2_7 & a2) ^ (x2_7 & a3) ^ (x2_7 & a5);
+    let x3_6: i64 = (x2_0 & a6) ^ (x2_1 & a5) ^ (x2_2 & a4) ^ (x2_3 & a3) ^ (x2_3 & a7) ^ (x2_4 & a2) ^ (x2_4 & a6) ^ (x2_4 & a7) ^ (x2_5 & a1) ^ (x2_5 & a5) ^ (x2_5 & a6) ^ (x2_6 & a0) ^ (x2_6 & a4) ^ (x2_6 & a5) ^ (x2_6 & a7) ^ (x2_7 & a3) ^ (x2_7 & a4) ^ (x2_7 & a6);
+    let x3_7: i64 = (x2_0 & a7) ^ (x2_1 & a6) ^ (x2_2 & a5) ^ (x2_3 & a4) ^ (x2_4 & a3) ^ (x2_4 & a7) ^ (x2_5 & a2) ^ (x2_5 & a6) ^ (x2_5 & a7) ^ (x2_6 & a1) ^ (x2_6 & a5) ^ (x2_6 & a6) ^ (x2_7 & a0) ^ (x2_7 & a4) ^ (x2_7 & a5) ^ (x2_7 & a7);
+
+    let t_0: i64 = x3_0 ^ x3_4 ^ x3_6;
+    let t_1: i64 = x3_4 ^ x3_6 ^ x3_7;
+    let t_2: i64 = x3_1 ^ x3_5;
+    let t_3: i64 = x3_4 ^ x3_5 ^ x3_6 ^ x3_7;
+    let t_4: i64 = x3_2 ^ x3_4 ^ x3_7;
+    let t_5: i64 = x3_5 ^ x3_6;
+    let t_6: i64 = x3_3 ^ x3_5;
+    let t_7: i64 = x3_6 ^ x3_7;
+
+    let x12_0: i64 = t_0 ^ t_4 ^ t_6;
+    let x12_1: i64 = t_4 ^ t_6 ^ t_7;
+    let x12_2: i64 = t_1 ^ t_5;
+    let x12_3: i64 = t_4 ^ t_5 ^ t_6 ^ t_7;
+    let x12_4: i64 = t_2 ^ t_4 ^ t_7;
+    let x12_5: i64 = t_5 ^ t_6;
+    let x12_6: i64 = t_3 ^ t_5;
+    let x12_7: i64 = t_6 ^ t_7;
+
+    let x14_0: i64 = (x12_0 & x2_0) ^ (x12_1 & x2_7) ^ (x12_2 & x2_6) ^ (x12_3 & x2_5) ^ (x12_4 & x2_4) ^ (x12_5 & x2_3) ^ (x12_5 & x2_7) ^ (x12_6 & x2_2) ^ (x12_6 & x2_6) ^ (x12_6 & x2_7) ^ (x12_7 & x2_1) ^ (x12_7 & x2_5) ^ (x12_7 & x2_6);
+    let x14_1: i64 = (x12_0 & x2_1) ^ (x12_1 & x2_0) ^ (x12_1 & x2_7) ^ (x12_2 & x2_6) ^ (x12_2 & x2_7) ^ (x12_3 & x2_5) ^ (x12_3 & x2_6) ^ (x12_4 & x2_4) ^ (x12_4 & x2_5) ^ (x12_5 & x2_3) ^ (x12_5 & x2_4) ^ (x12_5 & x2_7) ^ (x12_6 & x2_2) ^ (x12_6 & x2_3) ^ (x12_6 & x2_6) ^ (x12_7 & x2_1) ^ (x12_7 & x2_2) ^ (x12_7 & x2_5) ^ (x12_7 & x2_7);
+    let x14_2: i64 = (x12_0 & x2_2) ^ (x12_1 & x2_1) ^ (x12_2 & x2_0) ^ (x12_2 & x2_7) ^ (x12_3 & x2_6) ^ (x12_3 & x2_7) ^ (x12_4 & x2_5) ^ (x12_4 & x2_6) ^ (x12_5 & x2_4) ^ (x12_5 & x2_5) ^ (x12_6 & x2_3) ^ (x12_6 & x2_4) ^ (x12_6 & x2_7) ^ (x12_7 & x2_2) ^ (x12_7 & x2_3) ^ (x12_7 & x2_6);
+    let x14_3: i64 = (x12_0 & x2_3) ^ (x12_1 & x2_2) ^ (x12_1 & x2_7) ^ (x12_2 & x2_1) ^ (x12_2 & x2_6) ^ (x12_3 & x2_0) ^ (x12_3 & x2_5) ^ (x12_3 & x2_7) ^ (x12_4 & x2_4) ^ (x12_4 & x2_6) ^ (x12_4 & x2_7) ^ (x12_5 & x2_3) ^ (x12_5 & x2_5) ^ (x12_5 & x2_6) ^ (x12_5 & x2_7) ^ (x12_6 & x2_2) ^ (x12_6 & x2_4) ^ (x12_6 & x2_5) ^ (x12_6 & x2_6) ^ (x12_6 & x2_7) ^ (x12_7 & x2_1) ^ (x12_7 & x2_3) ^ (x12_7 & x2_4) ^ (x12_7 & x2_5) ^ (x12_7 & x2_6) ^ (x12_7 & x2_7);
+    let x14_4: i64 = (x12_0 & x2_4) ^ (x12_1 & x2_3) ^ (x12_1 & x2_7) ^ (x12_2 & x2_2) ^ (x12_2 & x2_6) ^ (x12_2 & x2_7) ^ (x12_3 & x2_1) ^ (x12_3 & x2_5) ^ (x12_3 & x2_6) ^ (x12_4 & x2_0) ^ (x12_4 & x2_4) ^ (x12_4 & x2_5) ^ (x12_4 & x2_7) ^ (x12_5 & x2_3) ^ (x12_5 & x2_4) ^ (x12_5 & x2_6) ^ (x12_6 & x2_2) ^ (x12_6 & x2_3) ^ (x12_6 & x2_5) ^ (x12_7 & x2_1) ^ (x12_7 & x2_2) ^ (x12_7 & x2_4) ^ (x12_7 & x2_7);
+    let x14_5: i64 = (x12_0 & x2_5) ^ (x12_1 & x2_4) ^ (x12_2 & x2_3) ^ (x12_2 & x2_7) ^ (x12_3 & x2_2) ^ (x12_3 & x2_6) ^ (x12_3 & x2_7) ^ (x12_4 & x2_1) ^ (x12_4 & x2_5) ^ (x12_4 & x2_6) ^ (x12_5 & x2_0) ^ (x12_5 & x2_4) ^ (x12_5 & x2_5) ^ (x12_5 & x2_7) ^ (x12_6 & x2_3) ^ (x12_6 & x2_4) ^ (x12_6 & x2_6) ^ (x12_7 & x2_2) ^ (x12_7 & x2_3) ^ (x12_7 & x2_5);
+    let x14_6: i64 = (x12_0 & x2_6) ^ (x12_1 & x2_5) ^ (x12_2 & x2_4) ^ (x12_3 & x2_3) ^ (x12_3 & x2_7) ^ (x12_4 & x2_2) ^ (x12_4 & x2_6) ^ (x12_4 & x2_7) ^ (x12_5 & x2_1) ^ (x12_5 & x2_5) ^ (x12_5 & x2_6) ^ (x12_6 & x2_0) ^ (x12_6 & x2_4) ^ (x12_6 & x2_5) ^ (x12_6 & x2_7) ^ (x12_7 & x2_3) ^ (x12_7 & x2_4) ^ (x12_7 & x2_6);
+    let x14_7: i64 = (x12_0 & x2_7) ^ (x12_1 & x2_6) ^ (x12_2 & x2_5) ^ (x12_3 & x2_4) ^ (x12_4 & x2_3) ^ (x12_4 & x2_7) ^ (x12_5 & x2_2) ^ (x12_5 & x2_6) ^ (x12_5 & x2_7) ^ (x12_6 & x2_1) ^ (x12_6 & x2_5) ^ (x12_6 & x2_6) ^ (x12_7 & x2_0) ^ (x12_7 & x2_4) ^ (x12_7 & x2_5) ^ (x12_7 & x2_7);
+
+    let x15_0: i64 = (x12_0 & x3_0) ^ (x12_1 & x3_7) ^ (x12_2 & x3_6) ^ (x12_3 & x3_5) ^ (x12_4 & x3_4) ^ (x12_5 & x3_3) ^ (x12_5 & x3_7) ^ (x12_6 & x3_2) ^ (x12_6 & x3_6) ^ (x12_6 & x3_7) ^ (x12_7 & x3_1) ^ (x12_7 & x3_5) ^ (x12_7 & x3_6);
+    let x15_1: i64 = (x12_0 & x3_1) ^ (x12_1 & x3_0) ^ (x12_1 & x3_7) ^ (x12_2 & x3_6) ^ (x12_2 & x3_7) ^ (x12_3 & x3_5) ^ (x12_3 & x3_6) ^ (x12_4 & x3_4) ^ (x12_4 & x3_5) ^ (x12_5 & x3_3) ^ (x12_5 & x3_4) ^ (x12_5 & x3_7) ^ (x12_6 & x3_2) ^ (x12_6 & x3_3) ^ (x12_6 & x3_6) ^ (x12_7 & x3_1) ^ (x12_7 & x3_2) ^ (x12_7 & x3_5) ^ (x12_7 & x3_7);
+    let x15_2: i64 = (x12_0 & x3_2) ^ (x12_1 & x3_1) ^ (x12_2 & x3_0) ^ (x12_2 & x3_7) ^ (x12_3 & x3_6) ^ (x12_3 & x3_7) ^ (x12_4 & x3_5) ^ (x12_4 & x3_6) ^ (x12_5 & x3_4) ^ (x12_5 & x3_5) ^ (x12_6 & x3_3) ^ (x12_6 & x3_4) ^ (x12_6 & x3_7) ^ (x12_7 & x3_2) ^ (x12_7 & x3_3) ^ (x12_7 & x3_6);
+    let x15_3: i64 = (x12_0 & x3_3) ^ (x12_1 & x3_2) ^ (x12_1 & x3_7) ^ (x12_2 & x3_1) ^ (x12_2 & x3_6) ^ (x12_3 & x3_0) ^ (x12_3 & x3_5) ^ (x12_3 & x3_7) ^ (x12_4 & x3_4) ^ (x12_4 & x3_6) ^ (x12_4 & x3_7) ^ (x12_5 & x3_3) ^ (x12_5 & x3_5) ^ (x12_5 & x3_6) ^ (x12_5 & x3_7) ^ (x12_6 & x3_2) ^ (x12_6 & x3_4) ^ (x12_6 & x3_5) ^ (x12_6 & x3_6) ^ (x12_6 & x3_7) ^ (x12_7 & x3_1) ^ (x12_7 & x3_3) ^ (x12_7 & x3_4) ^ (x12_7 & x3_5) ^ (x12_7 & x3_6) ^ (x12_7 & x3_7);
+    let x15_4: i64 = (x12_0 & x3_4) ^ (x12_1 & x3_3) ^ (x12_1 & x3_7) ^ (x12_2 & x3_2) ^ (x12_2 & x3_6) ^ (x12_2 & x3_7) ^ (x12_3 & x3_1) ^ (x12_3 & x3_5) ^ (x12_3 & x3_6) ^ (x12_4 & x3_0) ^ (x12_4 & x3_4) ^ (x12_4 & x3_5) ^ (x12_4 & x3_7) ^ (x12_5 & x3_3) ^ (x12_5 & x3_4) ^ (x12_5 & x3_6) ^ (x12_6 & x3_2) ^ (x12_6 & x3_3) ^ (x12_6 & x3_5) ^ (x12_7 & x3_1) ^ (x12_7 & x3_2) ^ (x12_7 & x3_4) ^ (x12_7 & x3_7);
+    let x15_5: i64 = (x12_0 & x3_5) ^ (x12_1 & x3_4) ^ (x12_2 & x3_3) ^ (x12_2 & x3_7) ^ (x12_3 & x3_2) ^ (x12_3 & x3_6) ^ (x12_3 & x3_7) ^ (x12_4 & x3_1) ^ (x12_4 & x3_5) ^ (x12_4 & x3_6) ^ (x12_5 & x3_0) ^ (x12_5 & x3_4) ^ (x12_5 & x3_5) ^ (x12_5 & x3_7) ^ (x12_6 & x3_3) ^ (x12_6 & x3_4) ^ (x12_6 & x3_6) ^ (x12_7 & x3_2) ^ (x12_7 & x3_3) ^ (x12_7 & x3_5);
+    let x15_6: i64 = (x12_0 & x3_6) ^ (x12_1 & x3_5) ^ (x12_2 & x3_4) ^ (x12_3 & x3_3) ^ (x12_3 & x3_7) ^ (x12_4 & x3_2) ^ (x12_4 & x3_6) ^ (x12_4 & x3_7) ^ (x12_5 & x3_1) ^ (x12_5 & x3_5) ^ (x12_5 & x3_6) ^ (x12_6 & x3_0) ^ (x12_6 & x3_4) ^ (x12_6 & x3_5) ^ (x12_6 & x3_7) ^ (x12_7 & x3_3) ^ (x12_7 & x3_4) ^ (x12_7 & x3_6);
+    let x15_7: i64 = (x12_0 & x3_7) ^ (x12_1 & x3_6) ^ (x12_2 & x3_5) ^ (x12_3 & x3_4) ^ (x12_4 & x3_3) ^ (x12_4 & x3_7) ^ (x12_5 & x3_2) ^ (x12_5 & x3_6) ^ (x12_5 & x3_7) ^ (x12_6 & x3_1) ^ (x12_6 & x3_5) ^ (x12_6 & x3_6) ^ (x12_7 & x3_0) ^ (x12_7 & x3_4) ^ (x12_7 & x3_5) ^ (x12_7 & x3_7);
+
+    let t2_0: i64 = x15_0 ^ x15_4 ^ x15_6;
+    let t2_1: i64 = x15_4 ^ x15_6 ^ x15_7;
+    let t2_2: i64 = x15_1 ^ x15_5;
+    let t2_3: i64 = x15_4 ^ x15_5 ^ x15_6 ^ x15_7;
+    let t2_4: i64 = x15_2 ^ x15_4 ^ x15_7;
+    let t2_5: i64 = x15_5 ^ x15_6;
+    let t2_6: i64 = x15_3 ^ x15_5;
+    let t2_7: i64 = x15_6 ^ x15_7;
+
+    let t3_0: i64 = t2_0 ^ t2_4 ^ t2_6;
+    let t3_1: i64 = t2_4 ^ t2_6 ^ t2_7;
+    let t3_2: i64 = t2_1 ^ t2_5;
+    let t3_3: i64 = t2_4 ^ t2_5 ^ t2_6 ^ t2_7;
+    let t3_4: i64 = t2_2 ^ t2_4 ^ t2_7;
+    let t3_5: i64 = t2_5 ^ t2_6;
+    let t3_6: i64 = t2_3 ^ t2_5;
+    let t3_7: i64 = t2_6 ^ t2_7;
+
+    let t4_0: i64 = t3_0 ^ t3_4 ^ t3_6;
+    let t4_1: i64 = t3_4 ^ t3_6 ^ t3_7;
+    let t4_2: i64 = t3_1 ^ t3_5;
+    let t4_3: i64 = t3_4 ^ t3_5 ^ t3_6 ^ t3_7;
+    let t4_4: i64 = t3_2 ^ t3_4 ^ t3_7;
+    let t4_5: i64 = t3_5 ^ t3_6;
+    let t4_6: i64 = t3_3 ^ t3_5;
+    let t4_7: i64 = t3_6 ^ t3_7;
+
+    let t5_0: i64 = t4_0 ^ t4_4 ^ t4_6;
+    let t5_1: i64 = t4_4 ^ t4_6 ^ t4_7;
+    let t5_2: i64 = t4_1 ^ t4_5;
+    let t5_3: i64 = t4_4 ^ t4_5 ^ t4_6 ^ t4_7;
+    let t5_4: i64 = t4_2 ^ t4_4 ^ t4_7;
+    let t5_5: i64 = t4_5 ^ t4_6;
+    let t5_6: i64 = t4_3 ^ t4_5;
+    let t5_7: i64 = t4_6 ^ t4_7;
+
+    let r_0: i64 = (t5_0 & x14_0) ^ (t5_1 & x14_7) ^ (t5_2 & x14_6) ^ (t5_3 & x14_5) ^ (t5_4 & x14_4) ^ (t5_5 & x14_3) ^ (t5_5 & x14_7) ^ (t5_6 & x14_2) ^ (t5_6 & x14_6) ^ (t5_6 & x14_7) ^ (t5_7 & x14_1) ^ (t5_7 & x14_5) ^ (t5_7 & x14_6);
+    let r_1: i64 = (t5_0 & x14_1) ^ (t5_1 & x14_0) ^ (t5_1 & x14_7) ^ (t5_2 & x14_6) ^ (t5_2 & x14_7) ^ (t5_3 & x14_5) ^ (t5_3 & x14_6) ^ (t5_4 & x14_4) ^ (t5_4 & x14_5) ^ (t5_5 & x14_3) ^ (t5_5 & x14_4) ^ (t5_5 & x14_7) ^ (t5_6 & x14_2) ^ (t5_6 & x14_3) ^ (t5_6 & x14_6) ^ (t5_7 & x14_1) ^ (t5_7 & x14_2) ^ (t5_7 & x14_5) ^ (t5_7 & x14_7);
+    let r_2: i64 = (t5_0 & x14_2) ^ (t5_1 & x14_1) ^ (t5_2 & x14_0) ^ (t5_2 & x14_7) ^ (t5_3 & x14_6) ^ (t5_3 & x14_7) ^ (t5_4 & x14_5) ^ (t5_4 & x14_6) ^ (t5_5 & x14_4) ^ (t5_5 & x14_5) ^ (t5_6 & x14_3) ^ (t5_6 & x14_4) ^ (t5_6 & x14_7) ^ (t5_7 & x14_2) ^ (t5_7 & x14_3) ^ (t5_7 & x14_6);
+    let r_3: i64 = (t5_0 & x14_3) ^ (t5_1 & x14_2) ^ (t5_1 & x14_7) ^ (t5_2 & x14_1) ^ (t5_2 & x14_6) ^ (t5_3 & x14_0) ^ (t5_3 & x14_5) ^ (t5_3 & x14_7) ^ (t5_4 & x14_4) ^ (t5_4 & x14_6) ^ (t5_4 & x14_7) ^ (t5_5 & x14_3) ^ (t5_5 & x14_5) ^ (t5_5 & x14_6) ^ (t5_5 & x14_7) ^ (t5_6 & x14_2) ^ (t5_6 & x14_4) ^ (t5_6 & x14_5) ^ (t5_6 & x14_6) ^ (t5_6 & x14_7) ^ (t5_7 & x14_1) ^ (t5_7 & x14_3) ^ (t5_7 & x14_4) ^ (t5_7 & x14_5) ^ (t5_7 & x14_6) ^ (t5_7 & x14_7);
+    let r_4: i64 = (t5_0 & x14_4) ^ (t5_1 & x14_3) ^ (t5_1 & x14_7) ^ (t5_2 & x14_2) ^ (t5_2 & x14_6) ^ (t5_2 & x14_7) ^ (t5_3 & x14_1) ^ (t5_3 & x14_5) ^ (t5_3 & x14_6) ^ (t5_4 & x14_0) ^ (t5_4 & x14_4) ^ (t5_4 & x14_5) ^ (t5_4 & x14_7) ^ (t5_5 & x14_3) ^ (t5_5 & x14_4) ^ (t5_5 & x14_6) ^ (t5_6 & x14_2) ^ (t5_6 & x14_3) ^ (t5_6 & x14_5) ^ (t5_7 & x14_1) ^ (t5_7 & x14_2) ^ (t5_7 & x14_4) ^ (t5_7 & x14_7);
+    let r_5: i64 = (t5_0 & x14_5) ^ (t5_1 & x14_4) ^ (t5_2 & x14_3) ^ (t5_2 & x14_7) ^ (t5_3 & x14_2) ^ (t5_3 & x14_6) ^ (t5_3 & x14_7) ^ (t5_4 & x14_1) ^ (t5_4 & x14_5) ^ (t5_4 & x14_6) ^ (t5_5 & x14_0) ^ (t5_5 & x14_4) ^ (t5_5 & x14_5) ^ (t5_5 & x14_7) ^ (t5_6 & x14_3) ^ (t5_6 & x14_4) ^ (t5_6 & x14_6) ^ (t5_7 & x14_2) ^ (t5_7 & x14_3) ^ (t5_7 & x14_5);
+    let r_6: i64 = (t5_0 & x14_6) ^ (t5_1 & x14_5) ^ (t5_2 & x14_4) ^ (t5_3 & x14_3) ^ (t5_3 & x14_7) ^ (t5_4 & x14_2) ^ (t5_4 & x14_6) ^ (t5_4 & x14_7) ^ (t5_5 & x14_1) ^ (t5_5 & x14_5) ^ (t5_5 & x14_6) ^ (t5_6 & x14_0) ^ (t5_6 & x14_4) ^ (t5_6 & x14_5) ^ (t5_6 & x14_7) ^ (t5_7 & x14_3) ^ (t5_7 & x14_4) ^ (t5_7 & x14_6);
+    let r_7: i64 = (t5_0 & x14_7) ^ (t5_1 & x14_6) ^ (t5_2 & x14_5) ^ (t5_3 & x14_4) ^ (t5_4 & x14_3) ^ (t5_4 & x14_7) ^ (t5_5 & x14_2) ^ (t5_5 & x14_6) ^ (t5_5 & x14_7) ^ (t5_6 & x14_1) ^ (t5_6 & x14_5) ^ (t5_6 & x14_6) ^ (t5_7 & x14_0) ^ (t5_7 & x14_4) ^ (t5_7 & x14_5) ^ (t5_7 & x14_7);
+
+    let ones: i64 = 4294967295;
+    let sb0: i64 = r_0 ^ r_4 ^ r_5 ^ r_6 ^ r_7 ^ ones;
+    let sb1: i64 = r_1 ^ r_5 ^ r_6 ^ r_7 ^ r_0 ^ ones;
+    let sb2: i64 = r_2 ^ r_6 ^ r_7 ^ r_0 ^ r_1;
+    let sb3: i64 = r_3 ^ r_7 ^ r_0 ^ r_1 ^ r_2;
+    let sb4: i64 = r_4 ^ r_0 ^ r_1 ^ r_2 ^ r_3;
+    let sb5: i64 = r_5 ^ r_1 ^ r_2 ^ r_3 ^ r_4 ^ ones;
+    let sb6: i64 = r_6 ^ r_2 ^ r_3 ^ r_4 ^ r_5 ^ ones;
+    let sb7: i64 = r_7 ^ r_3 ^ r_4 ^ r_5 ^ r_6;
+
+    let sr0: i64 = (sb0 & _tlsrec_row0_mask()) | _tlsrec_rot16r(sb0 & _tlsrec_row1_mask(), 4) | _tlsrec_rot16r(sb0 & _tlsrec_row2_mask(), 8) | _tlsrec_rot16r(sb0 & _tlsrec_row3_mask(), 12);
+    let sr1: i64 = (sb1 & _tlsrec_row0_mask()) | _tlsrec_rot16r(sb1 & _tlsrec_row1_mask(), 4) | _tlsrec_rot16r(sb1 & _tlsrec_row2_mask(), 8) | _tlsrec_rot16r(sb1 & _tlsrec_row3_mask(), 12);
+    let sr2: i64 = (sb2 & _tlsrec_row0_mask()) | _tlsrec_rot16r(sb2 & _tlsrec_row1_mask(), 4) | _tlsrec_rot16r(sb2 & _tlsrec_row2_mask(), 8) | _tlsrec_rot16r(sb2 & _tlsrec_row3_mask(), 12);
+    let sr3: i64 = (sb3 & _tlsrec_row0_mask()) | _tlsrec_rot16r(sb3 & _tlsrec_row1_mask(), 4) | _tlsrec_rot16r(sb3 & _tlsrec_row2_mask(), 8) | _tlsrec_rot16r(sb3 & _tlsrec_row3_mask(), 12);
+    let sr4: i64 = (sb4 & _tlsrec_row0_mask()) | _tlsrec_rot16r(sb4 & _tlsrec_row1_mask(), 4) | _tlsrec_rot16r(sb4 & _tlsrec_row2_mask(), 8) | _tlsrec_rot16r(sb4 & _tlsrec_row3_mask(), 12);
+    let sr5: i64 = (sb5 & _tlsrec_row0_mask()) | _tlsrec_rot16r(sb5 & _tlsrec_row1_mask(), 4) | _tlsrec_rot16r(sb5 & _tlsrec_row2_mask(), 8) | _tlsrec_rot16r(sb5 & _tlsrec_row3_mask(), 12);
+    let sr6: i64 = (sb6 & _tlsrec_row0_mask()) | _tlsrec_rot16r(sb6 & _tlsrec_row1_mask(), 4) | _tlsrec_rot16r(sb6 & _tlsrec_row2_mask(), 8) | _tlsrec_rot16r(sb6 & _tlsrec_row3_mask(), 12);
+    let sr7: i64 = (sb7 & _tlsrec_row0_mask()) | _tlsrec_rot16r(sb7 & _tlsrec_row1_mask(), 4) | _tlsrec_rot16r(sb7 & _tlsrec_row2_mask(), 8) | _tlsrec_rot16r(sb7 & _tlsrec_row3_mask(), 12);
+
+    let nw0: i64 = sr0 ^ _tlsrec_le32(bk, nr * 32 + 0);
+    let nw1: i64 = sr1 ^ _tlsrec_le32(bk, nr * 32 + 4);
+    let nw2: i64 = sr2 ^ _tlsrec_le32(bk, nr * 32 + 8);
+    let nw3: i64 = sr3 ^ _tlsrec_le32(bk, nr * 32 + 12);
+    let nw4: i64 = sr4 ^ _tlsrec_le32(bk, nr * 32 + 16);
+    let nw5: i64 = sr5 ^ _tlsrec_le32(bk, nr * 32 + 20);
+    let nw6: i64 = sr6 ^ _tlsrec_le32(bk, nr * 32 + 24);
+    let nw7: i64 = sr7 ^ _tlsrec_le32(bk, nr * 32 + 28);
+    _tlsrec_pw(ws, state, 0, nw0);
+    _tlsrec_pw(ws, state, 1, nw1);
+    _tlsrec_pw(ws, state, 2, nw2);
+    _tlsrec_pw(ws, state, 3, nw3);
+    _tlsrec_pw(ws, state, 4, nw4);
+    _tlsrec_pw(ws, state, 5, nw5);
+    _tlsrec_pw(ws, state, 6, nw6);
+    _tlsrec_pw(ws, state, 7, nw7);
+    _tlsrec_bs_unslice(ws, state, out, out_off, 32);
+}
+
+// Encrypt one 16-byte block, duplicating it into both cipher-core lanes (the
+// second copy is discarded) — GCM needs exactly two of these per record, for
+// H and E(K, J0), and streams everything else through CTR. Port of
+// `aes_encrypt_block_bs`.
+fn _tlsrec_aes_encrypt_block(ws: *u8, bk: *u8, nr: i64, in16: *u8, out16: *u8) -> void {
+    let dup: i64 = _tlsrec_aes_dup();
+    let mut i: i64 = 0;
+    loop {
+        if i >= 16 { break; }
+        let b: i64 = _tlsrec_at(in16, i);
+        _tlsrec_put(ws, dup + i, b);
+        _tlsrec_put(ws, dup + 16 + i, b);
+        i = i + 1;
+    }
+    _tlsrec_aes_encrypt2(ws, bk, nr, ws, dup, ws, dup);
+    memcpy(out16, _tlsrec_ptr_off(ws, dup), 16 as usize);
+}
+
+// Increment the low 32 bits of the 16-byte counter block at `block + off`,
+// big-endian, wrapping at 2^32 (GCM's inc32, SP 800-38D §6.2). Port of
+// `_inc32`; the early-return iteration count depends on the counter's
+// bytes, sound for the same reason recorded there — this file's GCM path
+// accepts 96-bit nonces only, so the counter is public.
+fn _tlsrec_inc32(block: *u8, off: i64) -> void {
+    let mut i: i64 = 15;
+    loop {
+        if i < 12 { break; }
+        let v: i64 = _tlsrec_at(block, off + i) + 1;
+        _tlsrec_put(block, off + i, v & 255);
+        if v < 256 { return; }
+        i = i - 1;
+    }
+}
+
+// CTR-mode XOR of `len` bytes from `src` into `dst` (may alias) starting at
+// counter block `ctr16`, advancing by inc32 per block, two blocks per cipher
+// call. `ctr16` is read into a local copy and never written back — matching
+// `aes_ctr_xor_bs`'s single-shot contract, the caller advances its own
+// counter between calls.
+fn _tlsrec_aes_ctr_xor(ws: *u8, bk: *u8, nr: i64, ctr16: *u8, src: *u8, dst: *u8, len: i64) -> void {
+    let ctrw: i64 = _tlsrec_aes_ctrw();
+    let pair: i64 = _tlsrec_aes_pair();
+    let ks: i64 = _tlsrec_aes_ks();
+    memcpy(_tlsrec_ptr_off(ws, ctrw), ctr16, 16 as usize);
+    let mut off: i64 = 0;
+    loop {
+        if off >= len { break; }
+        memcpy(_tlsrec_ptr_off(ws, pair), _tlsrec_ptr_off(ws, ctrw), 16 as usize);
+        _tlsrec_inc32(ws, ctrw);
+        memcpy(_tlsrec_ptr_off(ws, pair + 16), _tlsrec_ptr_off(ws, ctrw), 16 as usize);
+        _tlsrec_inc32(ws, ctrw);
+        _tlsrec_aes_encrypt2(ws, bk, nr, ws, pair, ws, ks);
+        let mut n: i64 = 0;
+        loop {
+            if n >= 32 { break; }
+            if off + n >= len { break; }
+            _tlsrec_put(dst, off + n, _tlsrec_at(src, off + n) ^ _tlsrec_at(ws, ks
+                + n));
+            n = n + 1;
+        }
+        off = off + 32;
+    }
+}
+
+// ── GHASH (SP 800-38D §6.4) over GF(2^128) ────────────────────────
+// Direct port of `ghash.sfn`'s masked-integer carryless multiplication —
+// see that file for the correctness argument (worst-case intermediate
+// 2^62.19, 0.813 bits under the i64 ceiling, independent of message length)
+// and why there is no window table: one is indexed by values derived from
+// the secret subkey H, and recovering H forges tags.
+//
+// Reverse the bits of a byte, branch-free and table-free (SP 800-38D numbers
+// a block's bits MSB-first, so this converts to this module's word
+// convention and back). Port of `_rev8`.
+fn _tlsrec_ghash_rev8(b: i64) -> i64 {
+    let mut x: i64 = b & 255;
+    x = ((x & 85) << 1) | ((x >> 1) & 85);
+    x = ((x & 51) << 2) | ((x >> 2) & 51);
+    x = ((x & 15) << 4) | ((x >> 4) & 15);
+    return x & 255;
+}
+
+// Carryless 32x32 -> 63-bit multiply. Port of `_clmul32`; see that file's
+// header for the masked-integer argument.
+fn _tlsrec_clmul32(x: i64, y: i64) -> i64 {
+    let x0: i64 = x & 286331153;
+    let x1: i64 = x & 572662306;
+    let x2: i64 = x & 1145324612;
+    let x3: i64 = x & 2290649224;
+    let y0: i64 = y & 286331153;
+    let y1: i64 = y & 572662306;
+    let y2: i64 = y & 1145324612;
+    let y3: i64 = y & 2290649224;
+    let z0: i64 = (x0 * y0) ^ (x1 * y3) ^ (x2 * y2) ^ (x3 * y1);
+    let z1: i64 = (x0 * y1) ^ (x1 * y0) ^ (x2 * y3) ^ (x3 * y2);
+    let z2: i64 = (x0 * y2) ^ (x1 * y1) ^ (x2 * y0) ^ (x3 * y3);
+    let z3: i64 = (x0 * y3) ^ (x1 * y2) ^ (x2 * y1) ^ (x3 * y0);
+    return (z0 & 1229782938247303441) | (z1 & 2459565876494606882) | (z2 & 4919131752989213764) | (z3 & 614891469123651720);
+}
+
+// Convert the 4 bytes at `base[off + 4*k .. off + 4*k + 4)` into one
+// coefficient word (bit `j` holding `x^(32k + j)`), per-byte bit-reversed.
+// Port of one column of `_to_words`.
+fn _tlsrec_ghash_word(base: *u8, off: i64, k: i64) -> i64 {
+    let b0: i64 = _tlsrec_ghash_rev8(_tlsrec_at(base, off + 4 * k));
+    let b1: i64 = _tlsrec_ghash_rev8(_tlsrec_at(base, off + 4 * k + 1));
+    let b2: i64 = _tlsrec_ghash_rev8(_tlsrec_at(base, off + 4 * k + 2));
+    let b3: i64 = _tlsrec_ghash_rev8(_tlsrec_at(base, off + 4 * k + 3));
+    return (b0 | (b1 << 8) | (b2 << 16) | (b3 << 24)) & 4294967295;
+}
+
+// Inverse of `_tlsrec_ghash_word`: write the bit-reversed bytes of
+// coefficient word `w` to `out[off..off+4)`. Port of one column of
+// `_from_words`.
+fn _tlsrec_ghash_put_word(out: *u8, off: i64, w: i64) -> void {
+    _tlsrec_put(out, off, _tlsrec_ghash_rev8(w & 255));
+    _tlsrec_put(out, off + 1, _tlsrec_ghash_rev8((w >> 8) & 255));
+    _tlsrec_put(out, off + 2, _tlsrec_ghash_rev8((w >> 16) & 255));
+    _tlsrec_put(out, off + 3, _tlsrec_ghash_rev8((w >> 24) & 255));
+}
+
+// Multiply coefficient-word values `(x0,x1,x2,x3)` by `(h0,h1,h2,h3)` in
+// GF(2^128) (16 `_clmul32` calls accumulated, then reduced mod
+// x^128 + x^7 + x^2 + x + 1), writing the 4-word result to `out4` (16
+// bytes, little-endian words via `_tlsrec_put_le32`). Port of
+// `_gf128_mul` + `_reduce`, algebraically inlined since this file has no
+// multi-value return.
+fn _tlsrec_gf128_mul(x0: i64, x1: i64, x2: i64, x3: i64, h0: i64, h1: i64, h2: i64, h3: i64, out4: *u8) -> void {
+    let m: i64 = 4294967295;
+    let c00: i64 = _tlsrec_clmul32(x0, h0);
+    let c01: i64 = _tlsrec_clmul32(x0, h1);
+    let c02: i64 = _tlsrec_clmul32(x0, h2);
+    let c03: i64 = _tlsrec_clmul32(x0, h3);
+    let c10: i64 = _tlsrec_clmul32(x1, h0);
+    let c11: i64 = _tlsrec_clmul32(x1, h1);
+    let c12: i64 = _tlsrec_clmul32(x1, h2);
+    let c13: i64 = _tlsrec_clmul32(x1, h3);
+    let c20: i64 = _tlsrec_clmul32(x2, h0);
+    let c21: i64 = _tlsrec_clmul32(x2, h1);
+    let c22: i64 = _tlsrec_clmul32(x2, h2);
+    let c23: i64 = _tlsrec_clmul32(x2, h3);
+    let c30: i64 = _tlsrec_clmul32(x3, h0);
+    let c31: i64 = _tlsrec_clmul32(x3, h1);
+    let c32: i64 = _tlsrec_clmul32(x3, h2);
+    let c33: i64 = _tlsrec_clmul32(x3, h3);
+
+    let p0: i64 = c00 & m;
+    let p1: i64 = ((c00 >> 32) & m) ^ (c01 & m) ^ (c10 & m);
+    let p2: i64 = ((c01 >> 32) & m) ^ ((c10 >> 32) & m) ^ (c02 & m) ^ (c11 & m) ^ (c20 & m);
+    let p3: i64 = ((c02 >> 32) & m) ^ ((c11 >> 32) & m) ^ ((c20 >> 32) & m) ^ (c03 & m) ^ (c12 & m) ^ (c21 & m) ^ (c30 & m);
+    let p4: i64 = ((c03 >> 32) & m) ^ ((c12 >> 32) & m) ^ ((c21 >> 32) & m) ^ ((c30 >> 32) & m) ^ (c13 & m) ^ (c22 & m) ^ (c31 & m);
+    let p5: i64 = ((c13 >> 32) & m) ^ ((c22 >> 32) & m) ^ ((c31 >> 32) & m) ^ (c23 & m) ^ (c32 & m);
+    let p6: i64 = ((c23 >> 32) & m) ^ ((c32 >> 32) & m) ^ (c33 & m);
+    let p7: i64 = (c33 >> 32) & m;
+
+    // Reduce: the high half (p4..p7) contributes hi * (x^7 + x^2 + x + 1),
+    // which overruns 128 bits by at most 6 positions and folds entirely
+    // into word 0 — one extra step suffices. Port of `_reduce`.
+    let s7_0: i64 = (p4 << 7) & m;
+    let s7_1: i64 = ((p5 << 7) | (p4 >> 25)) & m;
+    let s7_2: i64 = ((p6 << 7) | (p5 >> 25)) & m;
+    let s7_3: i64 = ((p7 << 7) | (p6 >> 25)) & m;
+    let s7_4: i64 = (p7 >> 25) & m;
+
+    let s2_0: i64 = (p4 << 2) & m;
+    let s2_1: i64 = ((p5 << 2) | (p4 >> 30)) & m;
+    let s2_2: i64 = ((p6 << 2) | (p5 >> 30)) & m;
+    let s2_3: i64 = ((p7 << 2) | (p6 >> 30)) & m;
+    let s2_4: i64 = (p7 >> 30) & m;
+
+    let s1_0: i64 = (p4 << 1) & m;
+    let s1_1: i64 = ((p5 << 1) | (p4 >> 31)) & m;
+    let s1_2: i64 = ((p6 << 1) | (p5 >> 31)) & m;
+    let s1_3: i64 = ((p7 << 1) | (p6 >> 31)) & m;
+    let s1_4: i64 = (p7 >> 31) & m;
+
+    let o: i64 = s7_4 ^ s2_4 ^ s1_4;
+    let r0: i64 = (p0 ^ s7_0 ^ s2_0 ^ s1_0 ^ p4 ^ (((o << 7) ^ (o << 2) ^ (o << 1) ^ o) & m)) & m;
+    let r1: i64 = (p1 ^ s7_1 ^ s2_1 ^ s1_1 ^ p5) & m;
+    let r2: i64 = (p2 ^ s7_2 ^ s2_2 ^ s1_2 ^ p6) & m;
+    let r3: i64 = (p3 ^ s7_3 ^ s2_3 ^ s1_3 ^ p7) & m;
+
+    _tlsrec_put_le32(out4, 0, r0);
+    _tlsrec_put_le32(out4, 4, r1);
+    _tlsrec_put_le32(out4, 8, r2);
+    _tlsrec_put_le32(out4, 12, r3);
+}
+
+// GHASH the AEAD input A ‖ pad16(A) ‖ C ‖ pad16(C) ‖ [len(A)]_64 ‖ [len(C)]_64
+// (bit lengths, big-endian; SP 800-38D §7.1 step 5) under subkey `h` (16
+// bytes), writing the 16-byte result to `out16`. `gtmp` is a caller-owned
+// 16-byte scratch for `_tlsrec_gf128_mul`'s output and `tail` a caller-owned
+// 48-byte scratch: [0,16) the padded AAD tail, [16,32) the padded ciphertext
+// tail, [32,48) the length block — the same region-streaming technique
+// `_tlsrec_poly1305_tag` above uses, so neither `aad` nor `ct` is ever
+// concatenated into an intermediate buffer.
+fn _tlsrec_ghash_tag(h: *u8, aad: *u8, aad_len: i64, ct: *u8, ct_len: i64, tail: *u8, out16: *u8, gtmp: *u8) -> void {
+    memset(tail, 0, 48 as usize);
+    let aad_full: i64 = aad_len / 16;
+    let aad_rem: i64 = aad_len - aad_full * 16;
+    if aad_rem > 0 {
+        memcpy(tail, _tlsrec_ptr_off(aad, aad_full * 16), aad_rem as usize);
+    }
+    let ct_full: i64 = ct_len / 16;
+    let ct_rem: i64 = ct_len - ct_full * 16;
+    if ct_rem > 0 {
+        memcpy(_tlsrec_ptr_off(tail, 16), _tlsrec_ptr_off(ct, ct_full * 16), ct_rem as usize);
+    }
+    let mut li: i64 = 0;
+    loop {
+        if li >= 8 { break; }
+        _tlsrec_put(tail, 32 + li, (aad_len * 8) >> (8 * (7 - li)));
+        _tlsrec_put(tail, 40 + li, (ct_len * 8) >> (8 * (7 - li)));
+        li = li + 1;
+    }
+
+    let h0: i64 = _tlsrec_ghash_word(h, 0, 0);
+    let h1: i64 = _tlsrec_ghash_word(h, 0, 1);
+    let h2: i64 = _tlsrec_ghash_word(h, 0, 2);
+    let h3: i64 = _tlsrec_ghash_word(h, 0, 3);
+
+    let mut x0: i64 = 0;
+    let mut x1: i64 = 0;
+    let mut x2: i64 = 0;
+    let mut x3: i64 = 0;
+
+    let mut region: i64 = 0;
+    loop {
+        if region >= 5 { break; }
+        let mut rp: i64 = 0;
+        let mut rn: i64 = 0;
+        if region == 0 {
+            rp = aad as i64;
+            rn = aad_full;
+        } else if region == 1 {
+            rp = tail as i64;
+            if aad_rem > 0 { rn = 1; }
+        } else if region == 2 {
+            rp = ct as i64;
+            rn = ct_full;
+        } else if region == 3 {
+            rp = (tail as i64) + 16;
+            if ct_rem > 0 { rn = 1; }
+        } else {
+            rp = (tail as i64) + 32;
+            rn = 1;
+        }
+        let base: *u8 = rp as *u8;
+        let mut b: i64 = 0;
+        loop {
+            if b >= rn { break; }
+            let o: i64 = b * 16;
+            x0 = x0 ^ _tlsrec_ghash_word(base, o, 0);
+            x1 = x1 ^ _tlsrec_ghash_word(base, o, 1);
+            x2 = x2 ^ _tlsrec_ghash_word(base, o, 2);
+            x3 = x3 ^ _tlsrec_ghash_word(base, o, 3);
+            _tlsrec_gf128_mul(x0, x1, x2, x3, h0, h1, h2, h3, gtmp);
+            x0 = _tlsrec_le32(gtmp, 0);
+            x1 = _tlsrec_le32(gtmp, 4);
+            x2 = _tlsrec_le32(gtmp, 8);
+            x3 = _tlsrec_le32(gtmp, 12);
+            b = b + 1;
+        }
+        region = region + 1;
+    }
+
+    _tlsrec_ghash_put_word(out16, 0, x0);
+    _tlsrec_ghash_put_word(out16, 4, x1);
+    _tlsrec_ghash_put_word(out16, 8, x2);
+    _tlsrec_ghash_put_word(out16, 12, x3);
+}
+
+// ── AES-GCM (SP 800-38D) record-layer plumbing ────────────────────
+// One malloc per record (never per byte), holding the S-box/cipher-core
+// workspace, the raw and pre-bitsliced round keys, H, E(K, J0), the running
+// J0/counter block, GHASH's region scratch, and its per-block product
+// output. 96-bit nonces only — the shape RFC 8446 §5.3 uses — so
+// J0 = nonce ‖ 0x00000001 and CTR data starts at inc32(J0), same as
+// `aead_aes_gcm.sfn`.
+//
+// Region sizes, packed with no padding: ws `_tlsrec_aesws_bytes()` (144),
+// ek 240 (the max FIPS-197 §5.2 expansion, AES-256's 15 * 16 bytes), bk 480
+// (15 rounds * 32 bytes, the pre-bitsliced-round-key max), h/ekj0/j0/zero 16
+// each, tail 48 (`_tlsrec_ghash_tag`'s region scratch), gtmp/s 16 each.
+fn _tlsrec_ag_ws_off() -> i64 { return 0; }
+
+fn _tlsrec_ag_ek_off() -> i64 { return 144; }
+
+fn _tlsrec_ag_bk_off() -> i64 { return 384; }
+
+fn _tlsrec_ag_h_off() -> i64 { return 864; }
+
+fn _tlsrec_ag_ekj0_off() -> i64 { return 880; }
+
+fn _tlsrec_ag_j0_off() -> i64 { return 896; }
+
+fn _tlsrec_ag_zero_off() -> i64 { return 912; }
+
+fn _tlsrec_ag_tail_off() -> i64 { return 928; }
+
+fn _tlsrec_ag_gtmp_off() -> i64 { return 976; }
+
+fn _tlsrec_ag_s_off() -> i64 { return 992; }
+
+fn _tlsrec_ag_scratch_bytes() -> i64 { return 1008; }
+
+// Key-schedule + H + E(K, J0) setup shared by seal and open. `scratch` must
+// already be zeroed (so `_tlsrec_ag_zero_off()` is a real 16-byte zero
+// block). `seq` is the record sequence number: J0 is derived from the
+// **per-record** nonce (RFC 8446 §5.3 — the static write/read IV XORed with
+// the big-endian sequence number, the same derivation
+// `_tlsrec_derive_nonce` performs for ChaCha20), not the raw static IV; using
+// the static IV for every record here reused one nonce across a whole
+// connection, breaking GCM's confidentiality and authentication both.
+// Returns the AES round count (10 or 14) or 0 on a bad key length.
+fn _tlsrec_aesgcm_setup(scratch: *u8, key: *u8, key_len: i64, iv: *u8, seq: i64) -> i64 {
+    let ws: *u8 = _tlsrec_ptr_off(scratch, _tlsrec_ag_ws_off());
+    let ek: *u8 = _tlsrec_ptr_off(scratch, _tlsrec_ag_ek_off());
+    let bk: *u8 = _tlsrec_ptr_off(scratch, _tlsrec_ag_bk_off());
+    let ek_len: i64 = _tlsrec_aes_key_expand(ws, key, key_len, ek);
+    if ek_len == 0 { return 0; }
+    let bk_len: i64 = _tlsrec_aes_bs_keys(ws, ek, ek_len, bk);
+    if bk_len == 0 { return 0; }
+    let nr: i64 = bk_len / 32 - 1;
+
+    let zero16: *u8 = _tlsrec_ptr_off(scratch, _tlsrec_ag_zero_off());
+    let h: *u8 = _tlsrec_ptr_off(scratch, _tlsrec_ag_h_off());
+    _tlsrec_aes_encrypt_block(ws, bk, nr, zero16, h);
+
+    let j0: *u8 = _tlsrec_ptr_off(scratch, _tlsrec_ag_j0_off());
+    let mut i: i64 = 0;
+    loop {
+        if i >= 12 { break; }
+        let mut sb: i64 = 0;
+        if i >= 4 { sb = (seq >> (8 * (11 - i))) & 255; }
+        _tlsrec_put(j0, i, _tlsrec_at(iv, i) ^ sb);
+        i = i + 1;
+    }
+    _tlsrec_put(j0, 12, 0);
+    _tlsrec_put(j0, 13, 0);
+    _tlsrec_put(j0, 14, 0);
+    _tlsrec_put(j0, 15, 1);
+    let ekj0: *u8 = _tlsrec_ptr_off(scratch, _tlsrec_ag_ekj0_off());
+    _tlsrec_aes_encrypt_block(ws, bk, nr, j0, ekj0);
+    return nr;
+}
+
 // ── Per-record scratch ───────────────────────────────────────────
 // One allocation per record, never per byte. Layout:
 //   [0,32)    32 zero bytes — the XOR source that turns `_tlsrec_chacha_apply`
@@ -545,19 +1670,49 @@ fn _tlsrec_derive_nonce(scratch: *u8, iv: *u8, seq: i64) -> void {
 }
 
 // ── Seal / open ──────────────────────────────────────────────────
-// Seal `content` (of true type `content_type`, `content_len` bytes) into a TLS
-// 1.3 wire record written to `out`, appending `padding` zero bytes to the
+// Recover the true inner content type by scanning back for the last
+// non-zero octet (RFC 8446 §5.2/§5.4); an all-zero plaintext carries no
+// content type. Returns `(content_type << 32) | content_len` or a negative
+// `tls_record_err_*` code. Shared by every algorithm's `open` path, so the
+// scan logic exists exactly once.
+fn _tlsrec_recover_content_type(body: *u8, ct_len: i64) -> i64 {
+    let mut idx: i64 = ct_len - 1;
+    loop {
+        if idx < 0 { break; }
+        if _tlsrec_at(body, idx) != 0 { break; }
+        idx = idx - 1;
+    }
+    if idx < 0 { return sfn_tls_record_err_no_content_type(); }
+    if idx > sfn_tls_record_max_plaintext() {
+        return sfn_tls_record_err_content_overflow();
+    }
+    return (_tlsrec_at(body, idx) << 32) | idx;
+}
+
+// Seal `content` (of true type `content_type`, `content_len` bytes) under
+// algorithm `alg` (`_tlsrec_alg_chacha20_poly1305()` /
+// `_tlsrec_alg_aes_128_gcm()` / `_tlsrec_alg_aes_256_gcm()`) into a TLS 1.3
+// wire record written to `out`, appending `padding` zero bytes to the
 // TLSInnerPlaintext. `out` receives the full TLSCiphertext: a 5-byte header
 // (opaque_type=23 ‖ 0x0303 ‖ uint16 length) ‖ ciphertext ‖ 16-byte tag, and
 // must be at least `5 + content_len + 1 + padding + 16` bytes. Encryption runs
 // in place in `out`, so `content` may itself be `out + 5` (the zero-copy path);
 // otherwise the content is copied in once with `memcpy`.
 //
+// `key_len` is checked against what `alg` itself requires
+// (`_tlsrec_alg_key_len`), not a standalone constant — the reason is
+// recorded on that function: AES-256-GCM's key is also 32 bytes, so a
+// length-only check cannot tell it apart from a ChaCha20-Poly1305 key, and
+// the algorithm selector must reach the point the cipher is chosen (SFN-817).
+//
 // Returns the number of bytes written to `out`, or a negative
-// `tls_record_err_*` code. Every guard mirrors `tls13_seal_record`, which
-// fails closed by returning `[]`.
-fn sfn_tls_record_seal(key: *u8, key_len: i64, iv: *u8, iv_len: i64, seq: i64, content_type: i64, content: *u8, content_len: i64, padding: i64, out: *u8) -> i64 {
-    if key_len != 32 { return sfn_tls_record_err_bad_key_length(); }
+// `tls_record_err_*` code. Every guard mirrors `tls13_seal_record_aead`,
+// which fails closed by returning `[]`.
+fn sfn_tls_record_seal(alg: i64, key: *u8, key_len: i64, iv: *u8, iv_len: i64, seq: i64, content_type: i64, content: *u8, content_len: i64, padding: i64, out: *u8) -> i64 {
+    let want_key_len: i64 = _tlsrec_alg_key_len(alg);
+    if want_key_len == 0 || key_len != want_key_len {
+        return sfn_tls_record_err_bad_key_length();
+    }
     if iv_len != 12 { return sfn_tls_record_err_bad_iv_length(); }
     if padding < 0 { return sfn_tls_record_err_negative_padding(); }
     // A negative `content_len` has no oracle analogue — `int[].length` is
@@ -574,11 +1729,6 @@ fn sfn_tls_record_seal(key: *u8, key_len: i64, iv: *u8, iv_len: i64, seq: i64, c
     if enc_len > sfn_tls_record_max_encrypted() {
         return sfn_tls_record_err_record_overflow();
     }
-
-    let scratch: *u8 = malloc(_tlsrec_scratch_bytes() as usize);
-    if scratch as i64 == 0 { return sfn_tls_record_err_oom(); }
-    memset(scratch, 0, _tlsrec_scratch_bytes() as usize);
-    _tlsrec_derive_nonce(scratch, iv, seq);
 
     // The 5-byte header doubles as the AEAD's additional authenticated data.
     _tlsrec_put(out, 0, sfn_tls_record_application_data());
@@ -598,17 +1748,57 @@ fn sfn_tls_record_seal(key: *u8, key_len: i64, iv: *u8, iv_len: i64, seq: i64, c
         memset(_tlsrec_ptr_off(body, content_len + 1), 0, padding as usize);
     }
 
-    let otk: *u8 = _tlsrec_ptr_off(scratch, 32);
-    let nonce: *u8 = _tlsrec_ptr_off(scratch, 128);
-    _tlsrec_chacha_apply(key, nonce, 0, scratch, otk, 32);
-    _tlsrec_chacha_apply(key, nonce, 1, body, body, inner_len);
-    _tlsrec_poly1305_tag(otk, out, 5, body, inner_len, _tlsrec_ptr_off(scratch, 64), _tlsrec_ptr_off(body, inner_len));
+    if alg == _tlsrec_alg_chacha20_poly1305() {
+        let scratch: *u8 = malloc(_tlsrec_scratch_bytes() as usize);
+        if scratch as i64 == 0 { return sfn_tls_record_err_oom(); }
+        memset(scratch, 0, _tlsrec_scratch_bytes() as usize);
+        _tlsrec_derive_nonce(scratch, iv, seq);
+        let otk: *u8 = _tlsrec_ptr_off(scratch, 32);
+        let nonce: *u8 = _tlsrec_ptr_off(scratch, 128);
+        _tlsrec_chacha_apply(key, nonce, 0, scratch, otk, 32);
+        _tlsrec_chacha_apply(key, nonce, 1, body, body, inner_len);
+        _tlsrec_poly1305_tag(otk, out, 5, body, inner_len, _tlsrec_ptr_off(scratch, 64), _tlsrec_ptr_off(body, inner_len));
+        free(scratch);
+        return 5 + enc_len;
+    }
+
+    // AES-128-GCM / AES-256-GCM (distinguished only by `key_len`, already
+    // checked above against `alg`).
+    let scratch: *u8 = malloc(_tlsrec_ag_scratch_bytes() as usize);
+    if scratch as i64 == 0 { return sfn_tls_record_err_oom(); }
+    memset(scratch, 0, _tlsrec_ag_scratch_bytes() as usize);
+    let nr: i64 = _tlsrec_aesgcm_setup(scratch, key, key_len, iv, seq);
+    if nr == 0 {
+        free(scratch);
+        return sfn_tls_record_err_bad_key_length();
+    }
+    let ws: *u8 = _tlsrec_ptr_off(scratch, _tlsrec_ag_ws_off());
+    let bk: *u8 = _tlsrec_ptr_off(scratch, _tlsrec_ag_bk_off());
+    // CTR data starts at inc32(J0) = nonce ‖ 0x00000002; `_tlsrec_aesgcm_setup`
+    // left J0 itself at this offset, already spent for E(K, J0).
+    let ctr0: *u8 = _tlsrec_ptr_off(scratch, _tlsrec_ag_j0_off());
+    _tlsrec_inc32(ctr0, 0);
+    _tlsrec_aes_ctr_xor(ws, bk, nr, ctr0, body, body, inner_len);
+
+    let h: *u8 = _tlsrec_ptr_off(scratch, _tlsrec_ag_h_off());
+    let tail: *u8 = _tlsrec_ptr_off(scratch, _tlsrec_ag_tail_off());
+    let gtmp: *u8 = _tlsrec_ptr_off(scratch, _tlsrec_ag_gtmp_off());
+    let s: *u8 = _tlsrec_ptr_off(scratch, _tlsrec_ag_s_off());
+    _tlsrec_ghash_tag(h, out, 5, body, inner_len, tail, s, gtmp);
+    let ekj0: *u8 = _tlsrec_ptr_off(scratch, _tlsrec_ag_ekj0_off());
+    let mut i: i64 = 0;
+    loop {
+        if i >= 16 { break; }
+        _tlsrec_put(body, inner_len + i, _tlsrec_at(ekj0, i) ^ _tlsrec_at(s, i));
+        i = i + 1;
+    }
     free(scratch);
     return 5 + enc_len;
 }
 
 // Open a TLS 1.3 wire record (`record` = 5-byte header ‖ encrypted_record,
-// `record_len` bytes total) under `key` / `iv` at sequence number `seq`.
+// `record_len` bytes total) under algorithm `alg`, `key` / `iv` at sequence
+// number `seq`.
 //
 // Decryption is in place: on success the recovered content occupies
 // `record[5 .. 5 + content_len)` and the trailing content-type byte, padding,
@@ -616,12 +1806,17 @@ fn sfn_tls_record_seal(key: *u8, key_len: i64, iv: *u8, iv_len: i64, seq: i64, c
 // — always non-negative, since the all-zero-plaintext guard rules out a zero
 // content type — or a negative `tls_record_err_*` code.
 //
-// The guards run in the same order as `tls13_open_record`, so a malformed
-// record is rejected at the same point by both implementations, and all of
-// them run before any decryption: the work done is bounded by the record
-// length. The tag is verified before the plaintext is produced.
-fn sfn_tls_record_open(key: *u8, key_len: i64, iv: *u8, iv_len: i64, seq: i64, record: *u8, record_len: i64) -> i64 {
-    if key_len != 32 { return sfn_tls_record_err_bad_key_length(); }
+// The guards run in the same order as `tls13_open_record_aead`, so a
+// malformed record is rejected at the same point by both implementations,
+// and all of them run before any decryption: the work done is bounded by the
+// record length. The tag is verified before the plaintext is produced —
+// including for AES-GCM, where GHASH runs, then EKJ0 is XORed in and
+// compared, strictly before `_tlsrec_aes_ctr_xor` touches `body`.
+fn sfn_tls_record_open(alg: i64, key: *u8, key_len: i64, iv: *u8, iv_len: i64, seq: i64, record: *u8, record_len: i64) -> i64 {
+    let want_key_len: i64 = _tlsrec_alg_key_len(alg);
+    if want_key_len == 0 || key_len != want_key_len {
+        return sfn_tls_record_err_bad_key_length();
+    }
     if iv_len != 12 { return sfn_tls_record_err_bad_iv_length(); }
     if record_len < 5 { return sfn_tls_record_err_short_header(); }
     if _tlsrec_at(record, 0) != sfn_tls_record_application_data() {
@@ -638,35 +1833,58 @@ fn sfn_tls_record_open(key: *u8, key_len: i64, iv: *u8, iv_len: i64, seq: i64, r
         return sfn_tls_record_err_short_encrypted_record();
     }
     let ct_len: i64 = declared - sfn_tls_record_tag_len();
-
-    let scratch: *u8 = malloc(_tlsrec_scratch_bytes() as usize);
-    if scratch as i64 == 0 { return sfn_tls_record_err_oom(); }
-    memset(scratch, 0, _tlsrec_scratch_bytes() as usize);
-    _tlsrec_derive_nonce(scratch, iv, seq);
-
-    let otk: *u8 = _tlsrec_ptr_off(scratch, 32);
-    let nonce: *u8 = _tlsrec_ptr_off(scratch, 128);
     let body: *u8 = _tlsrec_ptr_off(record, 5);
-    _tlsrec_chacha_apply(key, nonce, 0, scratch, otk, 32);
-    _tlsrec_poly1305_tag(otk, record, 5, body, ct_len, _tlsrec_ptr_off(scratch, 64), _tlsrec_ptr_off(scratch, 140));
-    if !_tlsrec_ct_eq16(scratch, 140, body, ct_len) {
+
+    if alg == _tlsrec_alg_chacha20_poly1305() {
+        let scratch: *u8 = malloc(_tlsrec_scratch_bytes() as usize);
+        if scratch as i64 == 0 { return sfn_tls_record_err_oom(); }
+        memset(scratch, 0, _tlsrec_scratch_bytes() as usize);
+        _tlsrec_derive_nonce(scratch, iv, seq);
+        let otk: *u8 = _tlsrec_ptr_off(scratch, 32);
+        let nonce: *u8 = _tlsrec_ptr_off(scratch, 128);
+        _tlsrec_chacha_apply(key, nonce, 0, scratch, otk, 32);
+        _tlsrec_poly1305_tag(otk, record, 5, body, ct_len, _tlsrec_ptr_off(scratch, 64), _tlsrec_ptr_off(scratch, 140));
+        if !_tlsrec_ct_eq16(scratch, 140, body, ct_len) {
+            free(scratch);
+            return sfn_tls_record_err_auth_failed();
+        }
+        _tlsrec_chacha_apply(key, nonce, 1, body, body, ct_len);
+        free(scratch);
+        return _tlsrec_recover_content_type(body, ct_len);
+    }
+
+    // AES-128-GCM / AES-256-GCM.
+    let scratch: *u8 = malloc(_tlsrec_ag_scratch_bytes() as usize);
+    if scratch as i64 == 0 { return sfn_tls_record_err_oom(); }
+    memset(scratch, 0, _tlsrec_ag_scratch_bytes() as usize);
+    let nr: i64 = _tlsrec_aesgcm_setup(scratch, key, key_len, iv, seq);
+    if nr == 0 {
+        free(scratch);
+        return sfn_tls_record_err_bad_key_length();
+    }
+
+    let h: *u8 = _tlsrec_ptr_off(scratch, _tlsrec_ag_h_off());
+    let tail: *u8 = _tlsrec_ptr_off(scratch, _tlsrec_ag_tail_off());
+    let gtmp: *u8 = _tlsrec_ptr_off(scratch, _tlsrec_ag_gtmp_off());
+    let s: *u8 = _tlsrec_ptr_off(scratch, _tlsrec_ag_s_off());
+    _tlsrec_ghash_tag(h, record, 5, body, ct_len, tail, s, gtmp);
+    let ekj0: *u8 = _tlsrec_ptr_off(scratch, _tlsrec_ag_ekj0_off());
+    let mut i: i64 = 0;
+    loop {
+        if i >= 16 { break; }
+        _tlsrec_put(s, i, _tlsrec_at(ekj0, i) ^ _tlsrec_at(s, i));
+        i = i + 1;
+    }
+    if !_tlsrec_ct_eq16(s, 0, body, ct_len) {
         free(scratch);
         return sfn_tls_record_err_auth_failed();
     }
-    _tlsrec_chacha_apply(key, nonce, 1, body, body, ct_len);
-    free(scratch);
 
-    // Recover the content type by scanning back for the last non-zero octet
-    // (RFC 8446 §5.2/§5.4); an all-zero plaintext carries no content type.
-    let mut idx: i64 = ct_len - 1;
-    loop {
-        if idx < 0 { break; }
-        if _tlsrec_at(body, idx) != 0 { break; }
-        idx = idx - 1;
-    }
-    if idx < 0 { return sfn_tls_record_err_no_content_type(); }
-    if idx > sfn_tls_record_max_plaintext() {
-        return sfn_tls_record_err_content_overflow();
-    }
-    return (_tlsrec_at(body, idx) << 32) | idx;
+    let ws: *u8 = _tlsrec_ptr_off(scratch, _tlsrec_ag_ws_off());
+    let bk: *u8 = _tlsrec_ptr_off(scratch, _tlsrec_ag_bk_off());
+    let ctr0: *u8 = _tlsrec_ptr_off(scratch, _tlsrec_ag_j0_off());
+    _tlsrec_inc32(ctr0, 0);
+    _tlsrec_aes_ctr_xor(ws, bk, nr, ctr0, body, body, ct_len);
+    free(scratch);
+    return _tlsrec_recover_content_type(body, ct_len);
 }

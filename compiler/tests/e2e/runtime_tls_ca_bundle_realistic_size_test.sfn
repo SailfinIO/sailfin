@@ -1,0 +1,349 @@
+// Regression e2e for SFN-807: the runtime TLS client's trust-store path
+// (`runtime/sfn/platform/tls.sfn::_tls_anchors()` ->
+// `capsules/sfn/crypto/src/trust_store.sfn::trust_store_load()`) must accept
+// a CA bundle bigger than a *chain* PEM. `pem.sfn`'s wire-chain decoder
+// defaults to a 16-block cap; SFN-807 was that default silently leaking into
+// `trust_store_from_pem`, so a realistically-sized system bundle
+// (~150 certificates) fail-closed to zero trust anchors and every TLS
+// handshake with a `SAILFIN_TLS_CAFILE` override quietly stopped verifying
+// anything.
+//
+// Every existing TLS e2e points `SAILFIN_TLS_CAFILE` at a single generated
+// certificate (2-4 blocks), so none of them would notice a regression of the
+// 16-block cap — a bundle that small clears it either way. This test builds
+// its OWN bundle (never the machine's real system store, which varies by
+// host/CI image and would not be hermetic): 19 distinct throwaway filler
+// anchors followed by the real loopback cert, 20 blocks total — enough to
+// clear the old 16-block cap and small enough to stay well under the
+// ~94 ms / ~23 MB post-fix load cost (SFN-807 also fixed a quadratic base64
+// accumulation that made anything near a real 150-cert bundle prohibitively
+// expensive to even construct in a test).
+//
+// This is deliberately the shape that FAILS pre-fix and PASSES post-fix: the
+// SUCCESS assertion is the one SFN-807 broke. A test that only asserted
+// rejection of an untrusted peer (as the sibling verify-failure e2es do)
+// cannot distinguish "trust store loaded and correctly rejected" from
+// "trust store loaded zero anchors and rejected everything" — see the
+// header note SFN-813 added to those files.
+//
+// no-bash-e2e (`.claude/rules/no-bash-e2e.md`): an `![io]` `*_test.sfn`
+// drives everything via `process.*`; `openssl` is the cert generator and TLS
+// peer (`s_server`), matching `runtime_tls_verify_failure_test.sfn`'s
+// pattern. The client fixture is compiled via a nested `sfn build`, isolated
+// with `clean_runner_env(nested_runner_scratch(...))` (SFN-401) so the pool's
+// per-file scratch/orchestration keys never leak into the nested build.
+import { int_to_string } from "sfn/strings";
+import { clean_runner_env, nested_runner_scratch } from "sfn/test";
+
+// ── file-local raw loopback readiness probe ──────────────────────
+// Prefixed `_tcb_` so these never collide with the external-linkage runtime
+// helpers of the same shape in `http.sfn` (not linked into this test binary,
+// but the prefix keeps that independent of link order).
+extern fn malloc(size: usize) -> *u8;
+
+extern fn free(ptr: *u8) -> void;
+
+extern fn memset(dst: *u8, byte: i32, n: usize) -> *u8;
+
+extern fn socket(domain: i32, ty: i32, protocol: i32) -> i32;
+
+extern fn connect(sockfd: i32, addr: *u8, addrlen: i32) -> i32;
+
+extern fn close(fd: i32) -> i32;
+
+fn _tcb_ptr_off(p: *u8, off: i64) -> *u8 {
+    let addr: i64 = (p as i64) + off;
+    return addr as *u8;
+}
+
+// Connect a stream socket to `127.0.0.1:port`; returns the fd or -1. Tries
+// both `sockaddr_in` byte layouts (Linux u16 sin_family at 0; macOS/BSD u8
+// sin_len at 0 + u8 sin_family at 1), first success wins — the inlined
+// `http.sfn::_connect_tcp` idiom. Used only to detect that `s_server` is
+// accepting before the fixture runs.
+fn _tcb_connect(port: i64) -> i32 {
+    let mut attempt: i64 = 0;
+    loop {
+        if attempt >= 2 { break; }
+        let addr: *u8 = malloc(16 as usize);
+        if addr as i64 == 0 { return 0 - 1; }
+        memset(addr, 0, 16 as usize);
+        if attempt == 0 {
+            memset(_tcb_ptr_off(addr, 0), 2, 1 as usize);
+        } else {
+            memset(_tcb_ptr_off(addr, 0), 16, 1 as usize);
+            memset(_tcb_ptr_off(addr, 1), 2, 1 as usize);
+        }
+        memset(_tcb_ptr_off(addr, 2), ((port >> 8) & 255) as i32, 1 as usize);
+        memset(_tcb_ptr_off(addr, 3), (port & 255) as i32, 1 as usize);
+        memset(_tcb_ptr_off(addr, 4), 127, 1 as usize);
+        memset(_tcb_ptr_off(addr, 7), 1, 1 as usize);
+        let fd: i32 = socket(2, 1, 0);
+        if fd < 0 {
+            free(addr);
+            return 0 - 1;
+        }
+        let rc: i32 = connect(fd, addr, 16);
+        free(addr);
+        if rc == 0 { return fd; }
+        close(fd);
+        attempt = attempt + 1;
+    }
+    return 0 - 1;
+}
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+fn _has_cmd(name: string) -> boolean ![io] {
+    let probe = process.run(["sh", "-c", "command -v " + name
+        + " >/dev/null 2>&1"]);
+    return probe == 0;
+}
+
+// Resolve a wall-clock timeout command to reap the blocking `s_server`;
+// empty if none found.
+fn _timeout_cmd() -> string ![io] {
+    if _has_cmd("timeout") { return "timeout"; }
+    if _has_cmd("gtimeout") { return "gtimeout"; }
+    return "";
+}
+
+fn _scratch_root() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    return dir;
+}
+
+// Generate a self-signed cert+key with SAN = `san_host`. Returns true on
+// success.
+fn _gen_cert(dir: string, san_host: string, env_vars: string[]) -> boolean ![io] {
+    // Native TLS server signs CertificateVerify with Ed25519 only (RSA/ECDSA
+    // signing is out of SFEP-0048 §6.3 scope); the loopback client below
+    // talks to `openssl s_server`, not a native server, but generating the
+    // same key type keeps this fixture aligned with the sibling e2es.
+    let exit = process.run_capture(["openssl", "req", "-x509", "-newkey", "ed25519", "-keyout", dir
+        + "/key.pem", "-out", dir
+        + "/cert.pem", "-days", "1", "-nodes", "-subj", "/CN="
+        + san_host, "-addext", "subjectAltName=DNS:"
+        + san_host], env_vars);
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    return exit == 0;
+}
+
+// Build `dir/bundle.pem`: `filler_count` distinct throwaway self-signed
+// certs (each its own CN, so each is a distinct DER block — never a byte-
+// for-byte duplicate of another anchor) followed by the real loopback cert
+// from `dir/cert.pem`. A hermetic stand-in for a realistically-sized system
+// CA bundle padded with unrelated corporate/vendor anchors: what matters for
+// this regression is the BLOCK COUNT the loader must get through, and every
+// filler is a distinct, independently self-signed (and therefore
+// independently unverifiable-against-the-server) certificate, so only the
+// real loopback cert can ever complete the chain.
+//
+// Distinctness is also a workaround, not just realism: N byte-identical
+// copies of the same DER block intermittently produced a `bad-signature`
+// verify failure during this test's own development, tracked as SFN-851.
+// Remove this workaround (revert to N copies of one cert) only once
+// SFN-851 is fixed.
+fn _write_bundle(dir: string, filler_count: int, env_vars: string[]) -> string ![io] {
+    let mut bundle: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= filler_count { break; }
+        let host = "filler" + int_to_string(i) + ".sfn-ca-bundle-size.invalid";
+        assert _gen_cert(dir, host, env_vars);
+        bundle = bundle + fs.readFile(dir + "/cert.pem");
+        i += 1;
+    }
+    // Regenerate the real loopback cert last so `dir/cert.pem` /
+    // `dir/key.pem` are the pair the server below actually uses. Last is
+    // also load-bearing for the regression itself: block 20 being the only
+    // USABLE anchor is what a truncating (fail-open) loader would get wrong
+    // in addition to a fail-closed one — reordering so the real cert sits
+    // among the first 16 blocks would let a truncate-at-16 bug pass this
+    // test by accident.
+    assert _gen_cert(dir, "localhost", env_vars);
+    bundle = bundle + fs.readFile(dir + "/cert.pem");
+    let path = dir + "/bundle.pem";
+    fs.writeFile(path, bundle);
+    return path;
+}
+
+// Spawn `openssl s_server -www` in the background, wrapped in a wall-clock
+// timeout so it self-reaps (there is no process-kill primitive; s_server
+// blocks forever).
+fn _spawn_server(dir: string, port_str: string, tcmd: string, env_vars: string[]) -> i64 ![io] {
+    let mut argv: string[] = [];
+    argv.push(tcmd);
+    argv.push("60");
+    argv.push("openssl");
+    argv.push("s_server");
+    argv.push("-accept");
+    argv.push(port_str);
+    argv.push("-cert");
+    argv.push(dir + "/cert.pem");
+    argv.push("-key");
+    argv.push(dir + "/key.pem");
+    argv.push("-www");
+    argv.push("-quiet");
+    return process.spawn_with_env(argv, env_vars);
+}
+
+// Poll a raw TCP connect until `s_server` is accepting (or the budget
+// elapses). ~30s budget (60 attempts x ~0.5s) stays under the 60s server
+// timeout.
+fn _await_listening(port: i64) -> boolean ![io] {
+    let mut attempt: i64 = 0;
+    loop {
+        if attempt >= 60 { break; }
+        let fd: i32 = _tcb_connect(port);
+        if fd >= 0 {
+            close(fd);
+            return true;
+        }
+        let _ = process.run(["sleep", "0.5"]);
+        attempt += 1;
+    }
+    return false;
+}
+
+// Write a fixture capsule whose `main` downloads `https://localhost:PORT/`
+// to `out_path`. A failed connect/handshake/verify never opens `out_path`
+// (`sfn_http_download` only writes once `_http_send` returns a body), so a
+// NON-EMPTY file is the round-trip proof; the assertion below checks
+// content length, not merely existence, so an opened-but-empty file (a
+// zero-length body, which `fopen(..., "wb")` alone would still create)
+// cannot masquerade as success.
+fn _write_client(dir: string, port_str: string, out_path: string) -> string ![io] {
+    let root = dir + "/client";
+    fs.createDirectory(root + "/src", true);
+    fs.writeFile(root + "/capsule.toml", "[capsule]\n"
+        + "name = \"sfn/tls-ca-bundle-size-e2e-client\"\n"
+        + "version = \"0.0.1\"\n"
+        + "description = \"tls ca bundle size e2e client\"\n"
+        + "\n"
+        + "[capabilities]\n"
+        + "required = [\"io\", \"net\"]\n"
+        + "\n"
+        + "[build]\n"
+        + "entry = \"src/main.sfn\"\n"
+        + "kind = \"library\"\n");
+    fs.writeFile(root + "/src/main.sfn", "fn main() -> int ![io, net] {\n"
+        + "    let _ = http.download(\"https://localhost:"
+        + port_str
+        + "/\", \""
+        + out_path
+        + "\");\n"
+        + "    return 0;\n"
+        + "}\n");
+    return root + "/src/main.sfn";
+}
+
+fn _build_bin(main_path: string, bin: string, build_env: string[]) -> string ![io] {
+    let exit = process.run_capture([_sfn_bin(), "build", "-o", bin, main_path], build_env);
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return ""; }
+    return bin;
+}
+
+// Run the client once with `run_env` and report whether `http.download`
+// wrote a non-empty body to `out_path`. Removes any stale output first so
+// the result reflects THIS run only.
+fn _client_downloads(client_bin: string, run_env: string[], out_path: string) -> boolean ![io] {
+    let _rm = process.run(["rm", "-f", out_path]);
+    let cexit = process.run_capture([client_bin], run_env);
+    let _co = process.capture_take_stdout();
+    let _ce = process.capture_take_stderr();
+    if cexit != 0 { return false; }
+    if !fs.exists(out_path) { return false; }
+    let content = fs.readFile(out_path);
+    return content.length > 0;
+}
+
+// Retry `_client_downloads` a few times to absorb residual server startup
+// latency.
+fn _client_downloads_retry(client_bin: string, run_env: string[], out_path: string) -> boolean ![io] {
+    let mut attempt: i64 = 0;
+    loop {
+        if attempt >= 20 { break; }
+        if _client_downloads(client_bin, run_env, out_path) { return true; }
+        let _ = process.run(["sleep", "0.5"]);
+        attempt += 1;
+    }
+    return false;
+}
+
+fn _skip_ready() -> boolean ![io] {
+    if !_has_cmd("openssl") {
+        print.info("[tls-ca-bundle-size] SKIP: openssl CLI not available");
+        return false;
+    }
+    if _timeout_cmd().length == 0 {
+        print.info("[tls-ca-bundle-size] SKIP: no timeout/gtimeout to reap the blocking s_server");
+        return false;
+    }
+    return true;
+}
+
+test "runtime tls: a CAFILE bundle over the old 16-block chain cap still verifies (SFN-807)" ![io] {
+    if !_skip_ready() {
+        assert true;
+        return;
+    }
+    let tcmd = _timeout_cmd();
+    // 18900 is taken by `runtime_tls_aes_gcm_client_test.sfn`; 18902 is the
+    // next free fixed port among this repo's TLS e2es. Like every sibling
+    // TLS e2e (`tls_loopback_test.sfn:170-172`), the spawned `s_server`
+    // holds this port for ~55s after `timeout 60` starts it, well past this
+    // test's own runtime — a same-host retry launched inside that window
+    // binds nothing new, `_await_listening` succeeds against the STALE
+    // listener from the prior run, and the handshake against it then fails
+    // for an unrelated reason. That is a false FAILURE, never a false pass
+    // (a stale listener cannot fabricate this test's success), so it is
+    // safe to leave as the accepted, pre-existing exposure rather than
+    // shortening the 60s.
+    let port: i64 = 18902;
+    let port_str = "18902";
+
+    let scratch = nested_runner_scratch("tls-ca-bundle-size");
+    let build_env = clean_runner_env(scratch);
+    let dir = _scratch_root() + "/sfn-tls-ca-bundle-size";
+    fs.createDirectory(dir, true);
+
+    // 19 distinct filler anchors plus the real loopback cert (SAN =
+    // localhost, so the only reason a bundle missing it would fail is
+    // trust, not hostname) = 20 blocks: enough to clear `pem.sfn`'s old
+    // 16-block chain default (the SFN-807 shape), modest enough to stay
+    // well inside the post-fix cost budget (~94 ms / ~23 MB for a real
+    // bundle; this hermetic one is smaller still).
+    let bundle = _write_bundle(dir, 19, build_env);
+
+    let out_path = dir + "/body.out";
+    let main_path = _write_client(dir, port_str, out_path);
+    let client_bin = _build_bin(main_path, dir + "/client-bin", build_env);
+    assert client_bin.length > 0;
+
+    let _handle = _spawn_server(dir, port_str, tcmd, build_env);
+    assert _await_listening(port);
+
+    // The acceptance shape: SUCCESS against a bundle over the old cap. Pre-
+    // SFN-807, `trust_store_from_pem` inherited `pem.sfn`'s 16-block chain
+    // default, so this 20-block bundle fail-closed to zero anchors and every
+    // handshake below would have been rejected for `no-anchor` — the same
+    // failure signal as an actually-untrusted peer, which is exactly why the
+    // bug went undetected. Post-fix, `trust_store.sfn` applies its own
+    // 512-block cap and this succeeds.
+    let mut run_env = build_env;
+    run_env.push("SAILFIN_TLS_CAFILE=" + bundle);
+    let ok = _client_downloads_retry(client_bin, run_env, out_path);
+    print.info("[tls-ca-bundle-size] round-trip against a 20-block CAFILE bundle");
+    assert ok;
+
+    let _rmd = process.run(["rm", "-rf", dir]);
+}

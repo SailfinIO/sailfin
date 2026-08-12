@@ -347,6 +347,56 @@ test "tls13_handshake: a tampered server Finished MAC is rejected" {
     }
 }
 
+test "tls13_handshake: an application-secret derivation failure leaves the shared transcript untouched" {
+    let mut hs: ClientHandshake = _drive_to_wait_finished();
+    assert hs.state == hs_state_wait_finished();
+
+    // A master_secret whose length is neither 32 nor 48 makes
+    // `hkdf_expand_label` fail closed to `[]` (tls13_schedule.sfn:182), which
+    // is the only way to reach the application-secret checks with an
+    // otherwise-valid server Finished — the window between the MAC check and
+    // the append that SFN-758 closed.
+    let mut short_master: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= 16 { break; }
+        short_master.push(hs.master_secret[i]);
+        i += 1;
+    }
+    let broken: ClientHandshake = ClientHandshake {
+        state: hs.state,
+        transcript: hs.transcript,
+        client_private: hs.client_private,
+        client_public: hs.client_public,
+        offered_cipher_suites: hs.offered_cipher_suites,
+        sent_legacy_session_id: hs.sent_legacy_session_id,
+        cipher_suite: hs.cipher_suite,
+        group: hs.group,
+        shared_secret: hs.shared_secret,
+        early_secret: hs.early_secret,
+        handshake_secret: hs.handshake_secret,
+        master_secret: short_master,
+        client_handshake_traffic_secret: hs.client_handshake_traffic_secret,
+        server_handshake_traffic_secret: hs.server_handshake_traffic_secret,
+        client_application_traffic_secret: hs.client_application_traffic_secret,
+        server_application_traffic_secret: hs.server_application_traffic_secret,
+        server_leaf_certificate: hs.server_leaf_certificate,
+        server_certificate_chain: hs.server_certificate_chain,
+        server_certificate_verified: hs.server_certificate_verified
+    };
+
+    // Captured before the failing call: `transcript` is shared by reference,
+    // so if `hs_client_recv_finished` appended the server Finished ahead of
+    // the application-secret derivation checks, this state's hash would move
+    // even though the step returned Err (SFN-758).
+    let before: int[] = hs_transcript_hash(broken);
+    match hs_client_recv_finished(broken, v_server_finished()) {
+        Result.Ok { value } => { assert false; },
+        Result.Err { error } => { assert error.length > 0; }
+    }
+    assert eq_bytes(hs_transcript_hash(broken), before);
+}
+
 test "tls13_handshake: a tampered RSA-PSS CertificateVerify signature is refused" {
     let mut hs: ClientHandshake = _drive_to_wait_certificate_verify();
     assert hs.state == hs_state_wait_certificate_verify();
@@ -504,6 +554,73 @@ test "tls13_handshake: a ServerHello selecting an unoffered suite is rejected" {
     match bad {
         Result.Ok { value } => { assert false; },
         Result.Err { error } => { assert error.length > 0; }
+    }
+}
+
+// Substring search, so the group-negotiation assertion below can name the word
+// it needs rather than pinning the whole message. Local to this file for the
+// same reason `tls13_handshake_codec_test.sfn` keeps its own copy: no
+// `string.contains` idiom is used elsewhere in this capsule's tests.
+fn _contains(haystack: string, needle: string) -> bool {
+    if needle.length == 0 { return true; }
+    if needle.length > haystack.length { return false; }
+    let mut i: int = 0;
+    loop {
+        if i + needle.length > haystack.length { break; }
+        let mut j: int = 0;
+        let mut ok: bool = true;
+        loop {
+            if j >= needle.length { break; }
+            if char_code(haystack[i + j]) != char_code(needle[j]) {
+                ok = false;
+                break;
+            }
+            j += 1;
+        }
+        if ok { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+test "tls13_handshake: a ServerHello selecting a non-x25519 group is rejected and says so" {
+    let created: Result<ClientHandshake, string> = hs_client_new(v_client_private());
+    let mut hs: ClientHandshake = _sentinel_unreachable();
+    match created {
+        Result.Ok { value } => { hs = value; },
+        Result.Err { error } => { assert error.length == 0; }
+    }
+
+    let random: int[] = hexb("cb34ecb1e78163ba1c38c6dacb196a6dffa21a8d9912ec18a2ef6283024dece7");
+    let session_id: int[] = [];
+    let message: int[] = hs_client_hello(hs, random, session_id, "server");
+    let sent: Result<ClientHandshake, string> = hs_client_send_hello(hs, message);
+    match sent {
+        Result.Ok { value } => { hs = value; },
+        Result.Err { error } => { assert error.length == 0; }
+    }
+
+    // Patch the key_share extension's NamedGroup from x25519 (29) to
+    // secp256r1 (23) in place. 4-byte handshake header + legacy_version(2) +
+    // random(32) + session_id_len(1) + cipher_suite(2) + compression(1) +
+    // extensions_len(2) + ext_type(2) + ext_len(2) puts the group at 48..49.
+    // Asserted before patching so a change to the vector cannot silently move
+    // it, matching the unoffered-suite test above.
+    let mut sh: int[] = v_server_hello();
+    assert sh[48] == 0;
+    assert sh[49] == 29;
+    sh[49] = 23;
+
+    // Fail-closed enforcement is unchanged by SFN-825; only the message is. The
+    // assertion covers both, since a rewrite that dropped the check would
+    // return Ok.
+    let bad: Result<ClientHandshake, string> = hs_client_recv_server_hello(hs, sh);
+    match bad {
+        Result.Ok { value } => { assert false; },
+        Result.Err { error } => {
+            assert _contains(error, "key-exchange group");
+            assert _contains(error, "x25519");
+        }
     }
 }
 

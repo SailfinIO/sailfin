@@ -129,6 +129,14 @@ fn intrinsic_effect_table() -> IntrinsicEffectTable {
     table = append_intrinsic_effects(table, "env.get", ["io"]);
     table = append_intrinsic_effects(table, "env.home", ["io"]);
     table = append_intrinsic_effects(table, "fs.read_bytes", ["io.fs"]);
+    // SFN-822: `tls.last_error` / `tls.last_alert` deliberately have NO row
+    // here. `effect_checker/collector.sfn` resolves exact target first, then
+    // falls back to the `tls.*` namespace union only when no `tls.*` row
+    // exists at all; a rootless namespace with zero rows requires no
+    // effects, which is correct for a pure accessor over a process-global
+    // slot. Adding `["net"]` would force `![net]` onto assertion helpers that
+    // read a value already recorded by an earlier `![net]` call — do not
+    // "fix" this by adding a row.
     return table;
 }
 

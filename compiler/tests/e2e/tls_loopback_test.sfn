@@ -443,6 +443,14 @@ test "tls loopback: native serve ↔ native https client round-trips + verify-fa
     // returns 0 regardless) so an unrelated crash — which would ALSO leave no
     // file — cannot masquerade as a rejection and pass. A single attempt is
     // conclusive (trust cannot appear on retry).
+    //
+    // This must fail because the cert has no anchor, not because the trust
+    // store failed to load anything at all — SFN-807 showed those are not
+    // the same failure, and this exact leg kept passing throughout it: a
+    // bundle-loading bug that fail-closed to zero anchors produces the
+    // identical no-body signal as a correctly rejected untrusted peer.
+    // `runtime_tls_ca_bundle_realistic_size_test.sfn` (SFN-813) covers the
+    // loader itself so a regression there cannot hide behind this leg again.
     let uexit = _client_exit(cli_bin, _untrusted_env(), out_path);
     assert uexit == 0;
     assert ! fs.exists(out_path);

@@ -257,6 +257,9 @@ test "tls13_handshake_codec: parse_server_hello rejects the HelloRetryRequest se
         Result.Ok { value } => { assert false; },
         Result.Err { error } => {
             assert _contains(error, "HelloRetryRequest");
+            // SFN-825 made the rejection name its usual cause; the hint is part
+            // of the contract, not incidental wording.
+            assert _contains(error, "key-exchange group");
         }
     }
 }
