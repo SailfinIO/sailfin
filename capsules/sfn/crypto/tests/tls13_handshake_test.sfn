@@ -557,6 +557,73 @@ test "tls13_handshake: a ServerHello selecting an unoffered suite is rejected" {
     }
 }
 
+// Substring search, so the group-negotiation assertion below can name the word
+// it needs rather than pinning the whole message. Local to this file for the
+// same reason `tls13_handshake_codec_test.sfn` keeps its own copy: no
+// `string.contains` idiom is used elsewhere in this capsule's tests.
+fn _contains(haystack: string, needle: string) -> bool {
+    if needle.length == 0 { return true; }
+    if needle.length > haystack.length { return false; }
+    let mut i: int = 0;
+    loop {
+        if i + needle.length > haystack.length { break; }
+        let mut j: int = 0;
+        let mut ok: bool = true;
+        loop {
+            if j >= needle.length { break; }
+            if char_code(haystack[i + j]) != char_code(needle[j]) {
+                ok = false;
+                break;
+            }
+            j += 1;
+        }
+        if ok { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+test "tls13_handshake: a ServerHello selecting a non-x25519 group is rejected and says so" {
+    let created: Result<ClientHandshake, string> = hs_client_new(v_client_private());
+    let mut hs: ClientHandshake = _sentinel_unreachable();
+    match created {
+        Result.Ok { value } => { hs = value; },
+        Result.Err { error } => { assert error.length == 0; }
+    }
+
+    let random: int[] = hexb("cb34ecb1e78163ba1c38c6dacb196a6dffa21a8d9912ec18a2ef6283024dece7");
+    let session_id: int[] = [];
+    let message: int[] = hs_client_hello(hs, random, session_id, "server");
+    let sent: Result<ClientHandshake, string> = hs_client_send_hello(hs, message);
+    match sent {
+        Result.Ok { value } => { hs = value; },
+        Result.Err { error } => { assert error.length == 0; }
+    }
+
+    // Patch the key_share extension's NamedGroup from x25519 (29) to
+    // secp256r1 (23) in place. 4-byte handshake header + legacy_version(2) +
+    // random(32) + session_id_len(1) + cipher_suite(2) + compression(1) +
+    // extensions_len(2) + ext_type(2) + ext_len(2) puts the group at 48..49.
+    // Asserted before patching so a change to the vector cannot silently move
+    // it, matching the unoffered-suite test above.
+    let mut sh: int[] = v_server_hello();
+    assert sh[48] == 0;
+    assert sh[49] == 29;
+    sh[49] = 23;
+
+    // Fail-closed enforcement is unchanged by SFN-825; only the message is. The
+    // assertion covers both, since a rewrite that dropped the check would
+    // return Ok.
+    let bad: Result<ClientHandshake, string> = hs_client_recv_server_hello(hs, sh);
+    match bad {
+        Result.Ok { value } => { assert false; },
+        Result.Err { error } => {
+            assert _contains(error, "key-exchange group");
+            assert _contains(error, "x25519");
+        }
+    }
+}
+
 // ── Drive helpers ────────────────────────────────────────────────
 fn _drive_to_wait_certificate() -> ClientHandshake {
     let created: Result<ClientHandshake, string> = hs_client_new(v_client_private());

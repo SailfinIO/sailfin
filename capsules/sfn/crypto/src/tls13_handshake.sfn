@@ -528,9 +528,15 @@ fn hs_client_recv_server_hello(hs: ClientHandshake, message: int[]) -> Result<Cl
             error: "hs_client_recv_server_hello: server selected a cipher suite whose hash this module does not implement (SHA-256 suites only)"
         };
     }
+    // x25519 is the only group `_encode_supported_groups_extension` offers, so
+    // any other selection is both unoffered and unreachable for this client.
+    // The abort names group negotiation because the reach limit is otherwise
+    // indistinguishable from a generic handshake failure; the design gate for
+    // widening the offer is
+    // docs/proposals/design-notes/sfn-825-p256-ecdh-constant-time.md.
     if sh.selected_group != tls_group_x25519() {
         return Result.Err {
-            error: "hs_client_recv_server_hello: server selected an unoffered group"
+            error: "hs_client_recv_server_hello: server selected a key-exchange group this client did not offer, and x25519 is the only group this client offers (SFN-825)"
         };
     }
     if sh.key_exchange.length != 32 {

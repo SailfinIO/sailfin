@@ -1100,9 +1100,13 @@ fn parse_server_hello(body: int[]) -> Result<ServerHelloMsg, string> {
     if random.length != 32 {
         return Result.Err { error: "parse_server_hello: truncated random" };
     }
+    // Naming the usual cause matters more here than in the other parse errors:
+    // a server sends HelloRetryRequest when it wants a key-exchange group the
+    // ClientHello did not offer, and this client offers x25519 alone
+    // (docs/proposals/design-notes/sfn-825-p256-ecdh-constant-time.md).
     if _is_hello_retry_request(random) {
         return Result.Err {
-            error: "parse_server_hello: HelloRetryRequest is out of scope for SFN-337"
+            error: "parse_server_hello: HelloRetryRequest is out of scope for SFN-337, and usually means the server wants a key-exchange group other than the x25519 this client offers"
         };
     }
 
