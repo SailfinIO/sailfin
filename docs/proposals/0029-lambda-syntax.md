@@ -6,7 +6,7 @@ type: language
 created: 2026-06-26
 updated: 2026-06-27
 author: "agent:compiler-architect"
-tracking: [690, 1683]
+tracking: "#690, #1683 (historical intake)"
 supersedes:
 superseded-by:
 graduates-to: site/src/content/docs/docs/reference/spec/05-expressions.md
