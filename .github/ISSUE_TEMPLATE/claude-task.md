@@ -145,9 +145,10 @@ that `bootstrap.toml [seed].version` points at. Common cases:
     added by a prior PR.
 
 When this is non-empty, the predecessor's source issue MUST also be
-labeled `seed-blocker` so `/sweep` ticks the seed-pin checklist when
-it closes. `/pickup` refuses to claim this issue until every listed
-predecessor is an ancestor of the pinned seed tag (verified via
+labeled `seed-blocker` so `/release-plan` reflects it as resolved on
+the seed-pin checklist once it closes. `/pickup` refuses to claim
+this issue until every listed predecessor is an ancestor of the
+pinned seed tag (verified via
 `git merge-base --is-ancestor <merge-sha> <seed-tag>`).
 
 Empty if the issue does not depend on a fresh seed (most non-compiler

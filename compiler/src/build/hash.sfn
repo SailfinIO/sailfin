@@ -52,9 +52,20 @@ fn sha256_hex_of_string(s: string) -> string {
 
     let mut bytes: int[] = [];
     let mut bi: int = 0;
+    // SFN-841: read bytes through the `load_byte` builtin rather than
+    // `char_code(s[bi])`. Indexing a string allocates a fresh one-byte
+    // arena string per position — `sfn_str_from_byte(load_byte(...))`,
+    // runtime/sfn/string.sfn:130 — which `char_code` then immediately
+    // unwraps. That round trip cost ~675 bytes of arena per input byte,
+    // and arena pages are never returned to the OS (a rewind only resets
+    // the cursor; runtime/sfn/memory/arena.sfn:499-503), so every
+    // cache-key hash grew the process RSS permanently. The byte values
+    // are identical, so digests are unchanged. Same idiom as the ASCII
+    // fast path in `find_char` (runtime/prelude.sfn:702-713).
+    let addr = (s as *u8) as i64;
     loop {
         if bi >= s.length { break; }
-        bytes.push(char_code(s[bi]) & 255);
+        bytes.push(load_byte(addr + bi) & 255);
         bi += 1;
     }
     let bit_len: int = bytes.length * 8;

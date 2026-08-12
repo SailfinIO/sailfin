@@ -6,14 +6,21 @@ name: Perf history
 # growing time series in the spirit of perf.rust-lang.org / the LLVM
 # compile-time tracker, not one-shot artifacts. It then compares the current
 # run against the rolling median of the last N runs and auto-files one
-# `type:perf` issue per module that regresses beyond threshold (deduped against
-# an open issue for that module), plus a whole-build wall-time budget check
-# against the SFEP-0006 <5 min target.
+# `type:perf` issue per finding — a (comparison kind, name) pair — that
+# regresses beyond threshold, deduped against an open issue of the same title,
+# plus a whole-build wall-time budget check against the SFEP-0006 <5 min target.
+#
+# It also records the consumer-build series (`sfn bench --consumer`, SFEP-0070):
+# fixed fixtures built end to end, watched for the capsule source closure
+# re-inflating. That series warns via the same rolling-median path; it never
+# imposes a wall-time budget on a hello-world build, because a hard budget on a
+# two-second measurement fails on infrastructure noise and a gate that cries
+# wolf gets ignored.
 #
 # The bench harnesses themselves (`sfn bench --compiler`,
-# `sfn bench benchmarks/runtime`) and their budgets are unchanged — this job only
-# records and compares their output. All data/compare logic lives in
-# scripts/perf_history.sh so the workflow stays thin; see
+# `sfn bench benchmarks/runtime`, `sfn bench --consumer`) and their budgets are
+# unchanged — this job only records and compares their output. All data/compare
+# logic lives in scripts/perf_history.sh so the workflow stays thin; see
 # docs/perf/bench-history.md for how to read the `bench-data` branch.
 #
 # Single-platform (linux-x86_64) on purpose: compile and especially runtime
@@ -53,6 +60,12 @@ concurrency:
 env:
   PERF_MIN_RUNS: "7"
   PERF_THRESHOLD_PCT: "10"
+  # Threshold for the consumer series' derived counts (`ctors`,
+  # `modules_staged`). They are deterministic for a given tree and seed, so they
+  # need no noise band — 0 means "any sustained rise above the rolling median".
+  # The 10% band above would absorb a 32 -> 35 constructor rise, which is the
+  # regression the consumer series exists to catch (SFEP-0070).
+  PERF_COUNT_THRESHOLD_PCT: "0"
   BUILD_BUDGET_S: "300"
   # Warn (never fail) once a run uses this share of the budget. Wall time grows
   # with the tree at roughly constant cost per IR line, so headroom shrinks
@@ -162,6 +175,18 @@ jobs:
           make bench-runtime BENCH_RUNTIME_ARGS="--csv bench-out/runtime.csv --top 20 --iterations 5" \
             || echo "[perf-history] make bench-runtime exited $? (budget/FAIL flag) — recording CSV anyway"
 
+      - name: Consumer-build benchmark (make bench-consumer)
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Same tolerance as the two benches above: the harness exits non-zero
+          # when a fixture fails to build, but it writes the CSV first, and this
+          # job's signal is the median comparison rather than the harness's own
+          # per-run flags. A FAIL row is recorded and then excluded from the
+          # comparison by perf_history.sh (a build that failed has no timing).
+          make bench-consumer BENCH_CONSUMER_ARGS="--csv bench-out/consumer.csv" \
+            || echo "[perf-history] make bench-consumer exited $? (FAIL flag) — recording CSV anyway"
+
       - name: Check out bench-data branch (create orphan if absent)
         shell: bash
         run: |
@@ -199,6 +224,7 @@ jobs:
             --date "$run_date" \
             --compile bench-out/compile.csv \
             --runtime bench-out/runtime.csv \
+            --consumer bench-out/consumer.csv \
             --build-wall "$BUILD_WALL" \
             --budget "$BUILD_BUDGET_S"
 
@@ -234,7 +260,7 @@ jobs:
           # stays honest, then compare against that. Exercises the full
           # file-issue path end-to-end (acceptance: "synthetic regression
           # injected in a scratch run files exactly one issue").
-          if [ -n "${SYN_MODULE:-}" ]; then
+          if [ -n "${SYN_MODULE:-}" ] && [ -f bench-data/compile.csv ]; then
             echo "[perf-history] synthetic slowdown injected for module: $SYN_MODULE"
             rm -rf bench-data-scratch
             cp -r bench-data bench-data-scratch
@@ -242,34 +268,43 @@ jobs:
               'NR>1 && $1==s && $3==m { $4=$4*2; $5=$5*2 } { print }' \
               bench-data/compile.csv > bench-data-scratch/compile.csv
             data_dir=bench-data-scratch
+          elif [ -n "${SYN_MODULE:-}" ]; then
+            # `compare` tolerates a missing compile.csv; under `set -u` the
+            # injection above would not, so say so instead of dying on a
+            # dispatch against a branch that has no per-module series yet.
+            echo "[perf-history] no compile.csv on $DATA_BRANCH — synthetic slowdown skipped"
           fi
           scripts/perf_history.sh compare \
             --data-dir "$data_dir" \
             --sha "$SHA" \
             --min-runs "$PERF_MIN_RUNS" \
             --threshold-pct "$PERF_THRESHOLD_PCT" \
+            --count-threshold-pct "$PERF_COUNT_THRESHOLD_PCT" \
             --budget "$BUILD_BUDGET_S" \
             --out regressions.tsv
+          # Count distinct (kind, name) pairs, not names alone: the series share
+          # one TSV and a name is only unique within its kind, so keying on the
+          # name would let one series' finding stand in for another's (SFN-567).
           count=0
-          [ -s regressions.tsv ] && count=$(cut -f2 regressions.tsv | sort -u | wc -l | tr -d ' ')
-          echo "modules=$count" >> "$GITHUB_OUTPUT"
+          [ -s regressions.tsv ] && count=$(cut -f1,2 regressions.tsv | sort -u | wc -l | tr -d ' ')
+          echo "findings=$count" >> "$GITHUB_OUTPUT"
           {
             echo "## Perf history — ${{ github.sha }}"
             echo ""
             echo "Clean build wall: ${{ steps.build.outputs.wall_s }}s (budget ${BUILD_BUDGET_S}s)"
             echo ""
             if [ -s regressions.tsv ]; then
-              echo "Regressions (comparison / module / metric / current / comparison value / +%):"
+              echo "Regressions (comparison / name / metric / current / comparison value / +%):"
               echo '```'
               cat regressions.tsv
               echo '```'
             else
-              echo "_No module regressions or whole-build budget breaches._"
+              echo "_No module or consumer-fixture regressions, and no whole-build budget breach._"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: File regression issues (deduped per module)
-        if: ${{ (github.event_name == 'schedule' || inputs.dry_run != true) && steps.compare.outputs.modules != '0' }}
+      - name: File regression issues (deduped per finding)
+        if: ${{ (github.event_name == 'schedule' || inputs.dry_run != true) && steps.compare.outputs.findings != '0' }}
         shell: bash
         env:
           SHA: ${{ github.sha }}
@@ -296,9 +331,22 @@ jobs:
           modules_file="$(mktemp)"
           awk -F'\t' '$1 == "rolling-median" { print $2 }' regressions.tsv | sort -u > "$modules_file"
           module_count="$(grep -c . "$modules_file" || true)"
-          has_wholebuild="$(awk -F'\t' '$1 == "budget" { count++ } END { print count + 0 }' regressions.tsv)"
 
+          # Findings are keyed as `kind<TAB>name` from here on. A name is only
+          # unique within its kind, so keying on the name alone would let one
+          # series' finding stand in for another's — the SFN-567 masking failure
+          # in a new shape.
+          #
+          # The non-`rolling-median` kinds seed the list unconditionally: the cap
+          # exists to bound the *unbounded* per-module fan-out, while the
+          # whole-build budget row (one row) and the consumer series (one per
+          # fixture) are both bounded. Suppressing them under a systemic shift
+          # would let a broad environmental cause hide a genuine breach, which is
+          # the failure this gate is not allowed to repeat.
           remaining_file="$(mktemp)"
+          awk -F'\t' -v OFS='\t' '$1 != "rolling-median" { print $1, $2 }' regressions.tsv \
+            | sort -u > "$remaining_file"
+
           if [ "${module_count:-0}" -gt "${PERF_SYSTEMIC_MODULES}" ]; then
             syn_title="perf regression: systemic — ${module_count} modules (${SHA:0:12})"
             {
@@ -322,25 +370,37 @@ jobs:
               --body-file perf-systemic-body.md \
               | awk -F/ '/^https:/{print $NF}')"
             echo "[perf-history] systemic regression: opened aggregated issue #${new_number} for ${module_count} modules"
-            # Only the whole-build budget breach (if any) still files below.
-            : > "$remaining_file"
-            [ "${has_wholebuild:-0}" -gt 0 ] && printf '%s\n' '<whole-build>' > "$remaining_file"
+            # The per-module fan-out is dropped; $remaining_file already holds
+            # the bounded kinds seeded above.
           else
-            cp "$modules_file" "$remaining_file"
-            [ "${has_wholebuild:-0}" -gt 0 ] && printf '%s\n' '<whole-build>' >> "$remaining_file"
+            awk -F'\t' -v OFS='\t' '$1 == "rolling-median" { print $1, $2 }' regressions.tsv \
+              | sort -u >> "$remaining_file"
           fi
 
-          while IFS= read -r module; do
-            [ -n "$module" ] || continue
-            title="perf regression: ${module}"
-            row_kind="$(awk -F'\t' -v m="$module" '$2 == m { print $1; exit }' regressions.tsv)"
-            metrics="$(awk -F'\t' -v m="$module" \
-              '$1 == "rolling-median" && $2 == m { printf "- **%s**: current `%s` vs rolling median `%s` (**+%s%%**)\n", $3, $4, $5, $6 }
-               $1 == "budget" && $2 == m { printf "- **%s**: current `%s s` vs budget `%s s` (**+%s%%**)\n", $3, $4, $5, $6 }' \
+          # Read the finding list on fd 3, not stdin. The body runs `gh`, which
+          # reads stdin; on stdin this loop can lose a line to it, and with two
+          # fields a partial read misaligns `row_kind` from `name` — a finding
+          # reported under another kind's label, which is the SFN-567 shape this
+          # rewrite exists to prevent.
+          while IFS=$'\t' read -r -u 3 row_kind name; do
+            if [ -z "$name" ]; then
+              # The loop's contract is that no finding is dropped, so a
+              # malformed row is loud rather than skipped.
+              echo "::warning::perf-history: skipping malformed finding row (kind='${row_kind}', empty name)"
+              continue
+            fi
+            # `name` already carries its series prefix where one is needed (the
+            # script emits `consumer/<fixture>`), so module and `<whole-build>`
+            # titles are unchanged and keep deduping against issues already open.
+            title="perf regression: ${name}"
+            metrics="$(awk -F'\t' -v k="$row_kind" -v m="$name" \
+              '$1 != k || $2 != m { next }
+               k == "budget" { printf "- **%s**: current `%s s` vs budget `%s s` (**+%s%%**)\n", $3, $4, $5, $6; next }
+               { printf "- **%s**: current `%s` vs rolling median `%s` (**+%s%%**)\n", $3, $4, $5, $6 }' \
               regressions.tsv)"
 
             # Dedup anchor: the `perf-regression` label plus exact title
-            # equality (module-keyed). Mirrors build-quality.yml — list by
+            # equality (name-keyed). Mirrors build-quality.yml — list by
             # label, filter title in jq to dodge gh --search quoting quirks.
             existing="$(gh issue list --repo "$REPO" --state open \
               --label perf-regression --limit 100 \
@@ -351,8 +411,10 @@ jobs:
               echo "**Run:** ${RUN_URL}"
               echo "**Commit:** \`${SHA}\`"
               if [ "$row_kind" = "budget" ]; then
-                budget_value="$(awk -F'\t' -v m="$module" '$1 == "budget" && $2 == m { print $5; exit }' regressions.tsv)"
+                budget_value="$(awk -F'\t' -v m="$name" '$1 == "budget" && $2 == m { print $5; exit }' regressions.tsv)"
                 echo "**Budget:** SFEP-0006 whole-build budget \`${budget_value} s\`"
+              elif [ "$row_kind" = "consumer-median" ]; then
+                echo "**Baseline:** rolling median of the last ${PERF_MIN_RUNS} same-seed consumer runs on \`${DATA_BRANCH}\` (threshold +${PERF_THRESHOLD_PCT}% on \`cold_s\`, +${PERF_COUNT_THRESHOLD_PCT}% on the derived counts)"
               else
                 echo "**Baseline:** rolling median of the last ${PERF_MIN_RUNS} same-seed runs on \`${DATA_BRANCH}\` (threshold +${PERF_THRESHOLD_PCT}%)"
               fi
@@ -362,16 +424,29 @@ jobs:
             } > perf-body.md
 
             if [ -n "$existing" ]; then
-              echo "[perf-history] appending to existing issue #${existing} for ${module}"
-              gh issue comment "$existing" --repo "$REPO" --body-file perf-body.md
+              # Idempotent per commit, the same contract `append` holds for the
+              # CSVs: a manual re-run against an already-recorded SHA re-derives
+              # the identical finding, and posting the identical comment again
+              # is a double-alert for one measurement. Every body carries
+              # `**Commit:** <sha>`, so the SHA is the dedup key.
+              already="$(gh issue view "$existing" --repo "$REPO" --json comments \
+                --jq "[.comments[] | select(.body | contains(\"${SHA}\"))] | length" 2>/dev/null || echo 0)"
+              if [ "${already:-0}" -gt 0 ]; then
+                echo "[perf-history] issue #${existing} already reports ${SHA:0:12} for ${name} — skipping duplicate comment"
+              else
+                echo "[perf-history] appending to existing issue #${existing} for ${name}"
+                gh issue comment "$existing" --repo "$REPO" --body-file perf-body.md
+              fi
             else
               {
-                echo "# perf regression: ${module}"
+                echo "# perf regression: ${name}"
                 echo ""
                 if [ "$row_kind" = "budget" ]; then
                   echo "Auto-filed by \`perf-history.yml\` (SFEP-0037 §3.3). The whole-build wall time crossed the SFEP-0006 budget. Further budget breaches aggregate here as comments; see \`docs/perf/bench-history.md\` for how to read \`${DATA_BRANCH}\` and reproduce locally (\`make bench\`)."
+                elif [ "$row_kind" = "consumer-median" ]; then
+                  echo "Auto-filed by \`perf-history.yml\` (SFEP-0070). This consumer-build fixture regressed against the rolling median of the last ${PERF_MIN_RUNS} nightly runs. \`ctors\` and \`modules_staged\` are derived counts that are deterministic for a given tree and seed, so any sustained rise in them means the capsule source closure grew — a cost every consumer of the language pays. This is a **warning series**: it never fails the nightly. Further regressions for this fixture aggregate here as comments; see \`docs/perf/bench-history.md\` for how to read \`${DATA_BRANCH}\` and reproduce locally (\`make bench-consumer\`)."
                 else
-                  echo "Auto-filed by \`perf-history.yml\` (SFEP-0037 §3.3). \`${module}\` regressed beyond the +${PERF_THRESHOLD_PCT}% threshold vs the rolling median of the last ${PERF_MIN_RUNS} nightly runs. Further regressions for this module aggregate here as comments; see \`docs/perf/bench-history.md\` for how to read \`${DATA_BRANCH}\` and reproduce locally (\`make bench\` / \`make bench-runtime\`)."
+                  echo "Auto-filed by \`perf-history.yml\` (SFEP-0037 §3.3). \`${name}\` regressed beyond the +${PERF_THRESHOLD_PCT}% threshold vs the rolling median of the last ${PERF_MIN_RUNS} nightly runs. Further regressions for this module aggregate here as comments; see \`docs/perf/bench-history.md\` for how to read \`${DATA_BRANCH}\` and reproduce locally (\`make bench\` / \`make bench-runtime\`)."
                 fi
                 echo ""
                 echo "## Latest measurement"
@@ -387,9 +462,9 @@ jobs:
                 --label "perf-regression" \
                 --body-file perf-new-body.md \
                 | awk -F/ '/^https:/{print $NF}')"
-              echo "[perf-history] opened issue #${new_number} for ${module}"
+              echo "[perf-history] opened issue #${new_number} for ${name}"
             fi
-          done < "$remaining_file"
+          done 3< "$remaining_file"
 
       - name: Upload run CSVs (artifact)
         if: always()

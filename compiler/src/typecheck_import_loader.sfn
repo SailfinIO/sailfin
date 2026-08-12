@@ -119,7 +119,7 @@ fn interfaces_from_native_artifact(text: string) -> ArtifactInterfaceParse {
             // same `.sfn-asm` metadata channel — `NativeFunction.decorators`
             // already round-trips the `@decorator` marker — so no new artifact
             // plumbing is needed.
-            function_effects = append_import_function_signature_from_module(function_effects, function.name, function.effects, _native_function_is_tier1_decorator(function), "", function.return_type);
+            function_effects = append_import_function_signature_from_module(function_effects, function.name, function.effects, _native_function_is_tier1_decorator(function), "", function.return_type, function.parameters.length, _native_function_required_arity(function));
         }
         i += 1;
     }
@@ -128,6 +128,22 @@ fn interfaces_from_native_artifact(text: string) -> ArtifactInterfaceParse {
         function_effects: function_effects,
         diagnostics: parsed.diagnostics
     };
+}
+
+// Smallest argument count a cross-module call may supply: the index of the
+// first parameter declaring a default (SFN-812). `NativeParameter.
+// default_value` round-trips through the artifact (`emit_native.sfn` writes
+// `= <expr>`, `native_ir_utils_parse.sfn` reads it back), so a staged
+// signature carries its defaults faithfully and a caller that omits one is
+// not rejected.
+fn _native_function_required_arity(function: NativeFunction) -> int {
+    let mut index: int = 0;
+    loop {
+        if index >= function.parameters.length { break; }
+        if function.parameters[index].default_value != null { return index; }
+        index += 1;
+    }
+    return function.parameters.length;
 }
 
 // SFEP-0023 §4.1/§4.2: a staged export is a well-formed Tier 1 decorator
@@ -326,7 +342,7 @@ fn load_imported_interfaces_from_paths(paths: string[]) -> ImportedInterfaceLoad
             // per-batch merge — a plain `append_import_function` would reset
             // it to false, defeating the metadata channel before it reaches
             // `localize_import_symbols_for_program`.
-            function_effects = append_import_function_signature_from_module(function_effects, entry.name, entry.effects, entry.is_decorator, _provider_module_from_artifact_path(path), entry.return_type);
+            function_effects = append_import_function_signature_from_module(function_effects, entry.name, entry.effects, entry.is_decorator, _provider_module_from_artifact_path(path), entry.return_type, entry.parameter_count, entry.required_parameter_count);
             k += 1;
         }
         if parsed.interfaces.length == 0 { skipped.push(path); } else {

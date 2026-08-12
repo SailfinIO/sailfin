@@ -14,11 +14,12 @@ sidebar:
 
 Sailfin runs on the following platforms:
 
-| Platform | Architectures |
-|---|---|
-| Linux | x86_64, arm64 (aarch64) |
-| macOS | arm64 (Apple Silicon) |
-| Windows | x86_64 |
+| Platform | Architectures | Tier |
+|---|---|---|
+| Linux | x86_64 | Tier 1 — primary |
+| Linux | arm64 (aarch64) | Tier 2 — supported |
+| macOS | arm64 (Apple Silicon) | Tier 2 — supported |
+| Windows | x86_64 | **Tier 3 — best effort** |
 
 These are the platform assets produced by the release workflow. The scripts can
 detect additional architectures, but installation stops when the selected
@@ -29,6 +30,16 @@ This table describes base support: published toolchains backed by platform
 validation. It is not a capability-seal claim. Linux arm64 is a Tier 2 base
 target, but owned syscalls and a fully gated syscall boundary are not supported
 there.
+
+> **Windows is a Tier 3 (best-effort) target.** A published installer does not by
+> itself promote a platform. The Windows binary is cross-compiled from Linux, and
+> the merge gate proves only that it boots (`--version`) and runs `sfn check` on
+> one example. Compiling, linking, the test suite, and self-hosting are **not**
+> exercised on Windows by merge-blocking CI, so expect gaps beyond the frontend.
+> Native MSVC self-hosting is still in progress and today runs only as an
+> exploratory, dispatch-only harness. For day-to-day Sailfin work on a Windows
+> machine, prefer **WSL**, which installs and runs the Tier 1 Linux x86_64
+> toolchain.
 
 ### Compiler and linker tools
 

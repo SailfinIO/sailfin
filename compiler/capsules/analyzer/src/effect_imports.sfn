@@ -74,6 +74,18 @@ struct ImportedFunctionSignature {
     // across imported calls. Empty for legacy/synthetic entries that only
     // carry effect metadata.
     return_type: string;
+    // Declared parameter counts from the staged artifact, so a call site can
+    // reject a wrong argument count against a cross-module callee (SFN-812).
+    // `required_parameter_count` excludes trailing defaulted parameters; the
+    // two are equal for a signature that declares no defaults. Both are -1
+    // for a synthetic or effect-only entry whose parameter list was never
+    // staged, which keeps the arity check fail-open there.
+    //
+    // Appended last for the same reason `origin` and `is_decorator` were:
+    // the seed compiler indexes this struct positionally, so a new field
+    // must not shift the offset of an existing one.
+    parameter_count: int;
+    required_parameter_count: int;
 }
 
 // Aggregate of imported callable signatures exposed to a single
@@ -135,8 +147,10 @@ fn append_import_function_from_module(table: ImportSymbolTable, name: string, ef
     return _append_function_with_origin(table, name, effects, "import", is_decorator, provider_module, "");
 }
 
-fn append_import_function_signature_from_module(table: ImportSymbolTable, name: string, effects: string[], is_decorator: boolean, provider_module: string, return_type: string) -> ImportSymbolTable {
-    return _append_function_with_origin(table, name, effects, "import", is_decorator, provider_module, return_type);
+// `parameter_count`/`required_parameter_count` default to -1 so the callers
+// that only carry effect metadata keep the SFN-812 arity check fail-open.
+fn append_import_function_signature_from_module(table: ImportSymbolTable, name: string, effects: string[], is_decorator: boolean, provider_module: string, return_type: string, parameter_count: int = -1, required_parameter_count: int = -1) -> ImportSymbolTable {
+    return _append_function_with_origin(table, name, effects, "import", is_decorator, provider_module, return_type, parameter_count, required_parameter_count);
 }
 
 // G1b (#1184): record a same-module top-level `fn` (name, effects) in the
@@ -149,7 +163,7 @@ fn append_local_function(table: ImportSymbolTable, name: string, effects: string
     return _append_function_with_origin(table, name, effects, "local", false, "", "");
 }
 
-fn _append_function_with_origin(table: ImportSymbolTable, name: string, effects: string[], origin: string, is_decorator: boolean, provider_module: string, return_type: string) -> ImportSymbolTable {
+fn _append_function_with_origin(table: ImportSymbolTable, name: string, effects: string[], origin: string, is_decorator: boolean, provider_module: string, return_type: string, parameter_count: int = -1, required_parameter_count: int = -1) -> ImportSymbolTable {
     if name.length == 0 { return table; }
     let mut updated = table;
     let mut existing_index: int = -1;
@@ -169,13 +183,47 @@ fn _append_function_with_origin(table: ImportSymbolTable, name: string, effects:
         effects_copy.push(effects[j]);
         j += 1;
     }
+    // This table is keyed by bare name with no module qualification, so two
+    // dependencies exporting the same name collide and the last one staged
+    // wins. That is harmless for effects — the checker only needs a superset
+    // — but unsound for a signature contract: `find_matching_paren` is
+    // declared with one parameter in `typecheck_types/text_utils.sfn` and two
+    // in `ir/native_ir_utils_text.sfn`, so whichever staged last would reject
+    // every correct call to the other (SFN-812).
+    //
+    // Resolving the collision properly means qualifying the table by
+    // exporting module and threading each file's actual import statements
+    // through, which is a larger change than this check needs. Until then a
+    // disagreeing collision poisons the contract fields to their existing
+    // fail-open sentinels, so the arity and void checks fall silent for that
+    // name rather than guessing which declaration the caller meant. Effects,
+    // `origin`, and the decorator bit keep their last-wins behaviour.
+    let mut effective_count = parameter_count;
+    let mut effective_required = required_parameter_count;
+    let mut effective_return = return_type;
+    if existing_index >= 0 {
+        let previous = updated.functions[existing_index];
+        if previous.parameter_count != parameter_count {
+            effective_count = -1;
+            effective_required = -1;
+        }
+        if previous.required_parameter_count != required_parameter_count {
+            effective_count = -1;
+            effective_required = -1;
+        }
+        if !strings_equal(previous.return_type, return_type) {
+            effective_return = "";
+        }
+    }
     let entry = ImportedFunctionSignature {
         name: name,
         effects: effects_copy,
         origin: origin,
         is_decorator: is_decorator,
         provider_module: provider_module,
-        return_type: return_type
+        return_type: effective_return,
+        parameter_count: effective_count,
+        required_parameter_count: effective_required
     };
     if existing_index >= 0 {
         updated.functions[existing_index] = entry;
@@ -241,7 +289,7 @@ fn localize_import_symbols_for_program(program: Program, table: ImportSymbolTabl
                         let alias_str: string? = alias;
                         if alias_str.length > 0 { local_name = alias_str; }
                     }
-                    local = append_import_function_signature_from_module(local, local_name, entry.effects, entry.is_decorator, entry.provider_module, entry.return_type);
+                    local = append_import_function_signature_from_module(local, local_name, entry.effects, entry.is_decorator, entry.provider_module, entry.return_type, entry.parameter_count, entry.required_parameter_count);
                 }
                 s += 1;
             }

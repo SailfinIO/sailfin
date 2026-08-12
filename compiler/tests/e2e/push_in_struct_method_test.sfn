@@ -109,7 +109,7 @@ test "push in struct method body lowers under per-module emit and runs (#1700)" 
     let build_err = process.capture_take_stderr();
 
     // The defining regression: lowering must NOT abort.
-    assert find(build_out + build_err, "cannot resolve return type") < 0;
+    assert find(build_out + build_err, "cannot resolve return type", 0) < 0;
     assert build_exit == 0;
 
     // ...and the linked program runs, printing the last pushed element

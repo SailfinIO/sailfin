@@ -185,7 +185,7 @@ four human-authored shapes. Do not create new `[aw]` issues manually.
 | Every active issue carries exactly one `type:*` label | `/pickup` routes by it |
 | **Workflow state is Linear-native, not a GitHub label.** Status (`Ready`/`In Progress`/`Blocked`/…), priority, estimate, and blockers live on the Linear issue. `claude-ready`, `in-progress`, and `blocked` are **retired** | One source of truth; `/pickup` selects Linear `Ready` |
 | **Priority is a Linear-native field, not a GitHub label.** Set it in Linear (Urgent/High/Medium/Low) at groom/triage time; the `priority:*` labels are retired (see § *Cross-surface flow (Linear ↔ GitHub)*) | One source of truth; Linear's board sorts on the native field |
-| Apply `area:*` labels when the touched subsystem is unambiguous | Helps `/sweep` dedupe collisions |
+| Apply `area:*` labels when the touched subsystem is unambiguous | Makes the queue filterable by subsystem |
 | `tracking` is **legacy** outside release automation — do not apply to new issues except the `Release: vX.Y.Z` cadence tracker (see § *Release tracking*) | Epics are Linear Projects; release automation still queries `tracking` |
 | Never re-introduce a bare alias (`bug`, `runtime`, `medium`, …) | They are listed in `aliases:` of `labels.yml` and will be migrated away on the next sync |
 | Never invent a new label in a workflow or slash command | Add it to `labels.yml` in a separate PR first |
@@ -211,12 +211,12 @@ A groomed issue's **contract** is its **Goal** plus a **semantic `In:`/`Out:`
 scope**. The `## Files Affected` block is an **advisory map** — a navigation aid
 that is *expected to drift* and is reconciled at pickup, never a checklist that
 gates correctness. This is the convention of record; `/groom`, `/pickup`,
-`/sweep`, and `/triage` all cite it rather than each restating the rule.
+and `/triage` all cite it rather than each restating the rule.
 
 **Why.** Between grooming and pickup the codebase moves — files split, get
 renamed, gain siblings in the same module. If the file map is treated as binding,
 `/pickup` halts on cosmetic drift it cannot distinguish from real scope growth,
-and `/sweep` flags decaying precision as a defect. Making *intent* authoritative
+and `/triage` flags decaying precision as a defect. Making *intent* authoritative
 and the *map* advisory removes that failure mode instead of fighting its entropy.
 
 ### Express scope as semantic units, not files
@@ -267,10 +267,9 @@ required, that is real growth — pause for human input.
   `In:`/`Out:` as semantic units; never line numbers or counts.
 - **`/pickup`** reconciles cosmetic map drift and records it; pauses only on
   semantic scope growth (the Out-of-scope list above).
-- **`/sweep`** reports a missing `## Files Affected` path as a **soft note**
-  ("advisory map may be stale — `/triage` can refresh"), not a defect flag.
-- **`/triage`** refreshes a stale advisory map (re-derives paths, no line
-  numbers/counts) when Goal + semantic scope are intact.
+- **`/triage`** derives the map fresh when it grooms a `Triage` item to `Ready`.
+  It does not revisit maps on already-`Ready` issues — nothing does, by design.
+  A stale map on a `Ready` issue is expected entropy, reconciled at pickup.
 
 ## Issue tracking
 
@@ -544,9 +543,9 @@ Apply `seed-blocker` to any issue whose fix or feature must land
 - A test-runner / CI fix needed before nightly self-host can pass.
 
 `/release-plan` lists open `seed-blocker` issues alongside the
-release-gating set when opening a tracking issue. `/sweep` auto-ticks
-matching checklist items when a `seed-blocker` issue closes via a
-merged PR.
+release-gating set when opening a tracking issue, and reconciles the
+tracker's native sub-issues so matching checklist items reflect the
+closed state once a `seed-blocker` issue closes via a merged PR.
 
 A `seed-blocker` issue does **not** trigger a reactive cut on its own.
 Its seed advance is **batched onto the next cadence bump** (below) unless

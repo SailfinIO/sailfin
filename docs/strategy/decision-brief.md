@@ -171,8 +171,10 @@ here.
 
 ### Pillar 3 — Cost: what it takes to run, and whether it finishes
 
-**Mechanism:** schedule-as-contract, plus structured concurrency (nurseries,
-cancel-on-fault, deadlines) as the liveness half.
+**Mechanism:** schedule-as-contract, plus structured concurrency as the liveness
+half. **Shipped today: join-all nurseries only.** Cancel-on-fault and deadlines
+are designed but unimplemented (`docs/proposals/draft-concurrency-cancellation.md`,
+still a draft — never gated, never scheduled).
 
 **Throughput.** Every stack in this space concedes that the per-target *schedule*
 — pipelining, specialization topology, register/TMEM allocation, tile ordering —
@@ -182,11 +184,20 @@ autotuner output, or a hand-written variant. A contract of the form *this
 schedule, on this target, produces these numerics within this tolerance at this
 measured throughput* is the artifact nobody produces.
 
-**Liveness.** Bounded, cancellable, cancel-on-fault tasks make *stuck vs.
+**Liveness.** Bounded, cancellable, cancel-on-fault tasks would make *stuck vs.
 progressing* observable by construction. That is the one language-shaped angle on
 the most expensive failure mode in ML infrastructure — silent collective hangs
 that take hours to weeks to debug because the watchdog fires where execution is
 stuck rather than where it first went wrong.
+
+**The unimplemented half is the differentiator.** What ships today is the
+*bounded* half: `routine { }` lowers to a real nursery whose exit blocks until
+every child completes, so no task outlives its scope and a leaked task is not a
+failure mode we have. What does not ship is the *cancellable* half — a faulting
+child does not cancel its siblings, and the nursery still blocks at exit waiting
+for them. For a long-running server that is a live resource-retention bug: a
+failed request handler cannot shed the work it spawned. Ship Phase 1 of the
+cancellation draft before making a liveness claim in public material.
 
 ---
 
@@ -304,8 +315,13 @@ Ordered. Each item is a consequence of §2–§5, not a preference.
 - A contract claim is subject to the same rule: an unenforced tolerance is not a
   tolerance. Do not describe a contract as checked until a gate fails on it.
 - **Base support vs. sealed support.** Base support — builds, runs, tests green,
-  installer ships — targets macOS/Windows/Linux. Sealed support — owned codegen,
-  owned syscalls, no un-gated syscall path — is tier-1 Linux x86-64 only, per
+  installer ships — targets Linux x86-64 (Tier 1), Linux arm64 and macOS arm64
+  (Tier 2). Windows x86-64 ships an installer but is **Tier 3 — best effort**:
+  cross-compiled from Linux and smoke-tested only, with no build or suite run on
+  the platform in merge-blocking CI, so it carries partial base support rather
+  than the full claim (`docs/conventions/target-tiers.md`). Sealed support —
+  owned codegen, owned syscalls, no un-gated syscall path — is Linux x86-64
+  only (a seal claim, never a consequence of a target tier), per
   SFEP-0016 §3.1 and `docs/backend-independence.md`. Adding a base platform does
   not multiply seal work. Shipping a
   platform is never a claim that the seal holds on it. See `docs/status.md`

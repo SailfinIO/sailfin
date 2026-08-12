@@ -153,6 +153,7 @@ import {
     mangle_slug
 } from "./paths";
 import { capsule_origin_local } from "./provenance";
+import { _cr_resolve_dedupe_filtered } from "./reachability";
 import {
     _cr_canonicalise_path,
     _cr_empty_relative_scan_memo,
@@ -281,7 +282,12 @@ fn _cr_prepare(entry_paths: string[], config: BuildCacheConfig, consumer: Resolv
     let empty_paths: string[] = [];
     let empty_events: ModuleCacheEvent[] = [];
     let empty_runtime_capsules: RuntimeCapsuleArtifacts[] = [];
-    let resolved = _cr_resolve_and_dedupe(entry_paths, consumer, binary_dir);
+    // SFN-833: the build path resolves through the filtering wrapper, so
+    // every list derived below — the staging input, `slug_universe_extra`'s
+    // universe, `compile_capsule_modules`'s input — comes off the filtered
+    // set. `sfn check` keeps calling `_cr_resolve_and_dedupe` directly and
+    // is unaffected (SFEP-0070 §3.6).
+    let resolved = _cr_resolve_dedupe_filtered(entry_paths, consumer, binary_dir);
     if resolved.has_collision {
         // Slug collision is a setup error (already reported by
         // `_cr_resolve_and_dedupe`), not a "no deps" build.
@@ -469,7 +475,10 @@ fn stage_capsule_imports_for_emit(entry_path: string, sailfin_exe: string, work_
 //     branch of `_cr_resolve_and_dedupe`.
 fn prepare_project_capsules_for_test(entry_paths: string[], consumer: ResolverConsumer, sailfin_exe: string, work_dir: string, binary_dir: string) -> TestCapsuleResolution ![io] {
     let empty_paths: string[] = [];
-    let resolved = _cr_resolve_and_dedupe(entry_paths, consumer, binary_dir);
+    // SFN-833: the test path links, so it takes the filter too — and its
+    // `asm_paths` derive from `resolved.sources` below, which keeps the
+    // single-list discipline intact.
+    let resolved = _cr_resolve_dedupe_filtered(entry_paths, consumer, binary_dir);
     // Phase F: thread `capabilities_required` through every exit
     // path. Same rationale as `prepare_project_capsules_for_check`:
     // staging failures are setup-time concerns, not manifest

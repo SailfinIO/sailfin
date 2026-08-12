@@ -128,7 +128,7 @@ test "coerce_operand_to_type: recovers temp_index from existing emitted lines" !
     lines.push("  %t0 = add i64 1, 2");
     lines.push("  %t1 = add i64 %t0, 3");
 
-    let result = coerce_operand_to_type(operand, "i64", 0, lines, false);
+    let result = coerce_operand_to_type(operand, "i64", 0, lines, false, null);
 
     assert result.operand != null;
     assert result.temp_index == 2;

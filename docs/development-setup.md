@@ -16,6 +16,12 @@ Windows release artifacts are built through the cross-Windows target from
 Linux; for day-to-day compiler work on Windows, use WSL or a Linux/macOS
 machine unless you are specifically working on the Windows toolchain path.
 
+Windows x86_64 is a **Tier 3 — best effort** target
+(`docs/conventions/target-tiers.md`): there is no supported native Windows
+build of the compiler from source, and neither `make compile` nor the test
+suite runs on Windows. Native MSVC self-hosting is tracked by SFEP-0021.
+Treat WSL as the supported path — it runs the Tier 1 Linux x86_64 toolchain.
+
 The current backend lowers Sailfin IR through LLVM and links with the platform
 toolchain. LLVM/clang independence is planned work, not the current build path.
 

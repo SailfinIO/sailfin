@@ -1,0 +1,178 @@
+// Unit tests for the call-arity diagnostic E0423 (SFN-812).
+//
+// A `Call` whose argument count falls outside the resolved callee's
+// accepted range is rejected. Before this check, a missing argument was
+// silently zero-filled and an extra one silently dropped — the program
+// compiled, linked, ran, and returned a plausible wrong answer.
+//
+// The check is proof-based: it fires only when the callee's signature is
+// known (a same-module declaration carrying a `fnprim:` marker, a staged
+// cross-module import, or a pinned builtin). Generic callees, member-form
+// calls, and unresolved names stay silent, so these tests pin the silent
+// cases as carefully as the rejecting ones.
+import { typecheck_diagnostics } from "sfn/analyzer/typecheck";
+import { Diagnostic } from "sfn/analyzer/typecheck_types";
+import { parse_program } from "sfn/syntax";
+
+fn _count_code(diagnostics: Diagnostic[], code: string) -> int {
+    let mut count: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= diagnostics.length { break; }
+        if strings_equal(diagnostics[i].code, code) { count += 1; }
+        i += 1;
+    }
+    return count;
+}
+
+fn _e0423_for(source: string) -> int ![io] {
+    let program = parse_program(source);
+    return _count_code(typecheck_diagnostics(program), "E0423");
+}
+
+fn _first_message(source: string, code: string) -> string ![io] {
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    let mut i: int = 0;
+    loop {
+        if i >= diagnostics.length { break; }
+        if strings_equal(diagnostics[i].code, code) {
+            return diagnostics[i].message;
+        }
+        i += 1;
+    }
+    return "";
+}
+
+// Declared as a function, not a top-level `let`: escape sequences are not
+// processed in a top-level string initializer, so a `\n` there stays two
+// literal characters and the fixture parses as one unusable line (SFN-837).
+fn _two_args() -> string {
+    return "fn two_args(a: int, b: int) -> int { return a + b; }\n";
+}
+
+// -------------------------------------------------------------------
+// Rejecting cases — the four Repro A shapes from SFN-812.
+// -------------------------------------------------------------------
+test "call arity: one argument short of two is rejected" ![io] {
+    assert _e0423_for(_two_args() + "fn main() { let v = two_args(1); }") == 1;
+}
+
+test "call arity: three arguments for two is rejected" ![io] {
+    assert _e0423_for(_two_args() + "fn main() { let v = two_args(1, 2, 3); }") == 1;
+}
+
+test "call arity: zero arguments for two is rejected" ![io] {
+    assert _e0423_for(_two_args() + "fn main() { let v = two_args(); }") == 1;
+}
+
+test "call arity: a string parameter omitted is rejected" ![io] {
+    let source = "fn str_arg(s: string, n: int) -> string { return s; }\n"
+        + "fn main() { let v = str_arg(\"hi\"); }";
+    assert _e0423_for(source) == 1;
+}
+
+// The two directions have different fixes, so the message must separate
+// them: an omitted argument is zero-filled, an extra one is dropped.
+test "call arity: too few and too many read differently" ![io] {
+    let too_few = _first_message(_two_args()
+        + "fn main() { let v = two_args(1); }", "E0423");
+    let too_many = _first_message(_two_args()
+        + "fn main() { let v = two_args(1, 2, 3); }", "E0423");
+    assert too_few.length > 0;
+    assert too_many.length > 0;
+    assert ! strings_equal(too_few, too_many);
+}
+
+// -------------------------------------------------------------------
+// Silent cases — a false rejection here breaks every build.
+// -------------------------------------------------------------------
+test "call arity: an exact-arity call is accepted" ![io] {
+    assert _e0423_for(_two_args() + "fn main() { let v = two_args(1, 2); }") == 0;
+}
+
+// Defaulted trailing parameters widen the accepted range rather than
+// pinning it. `runtime/prelude.sfn` and several shipped capsules declare
+// them, so treating total arity as required would reject correct code
+// across the tree.
+test "call arity: a defaulted trailing parameter may be omitted" ![io] {
+    let source = "fn with_default(a: int, b: int = 0) -> int { return a + b; }\n"
+        + "fn main() { let v = with_default(1); }";
+    assert _e0423_for(source) == 0;
+}
+
+test "call arity: a defaulted trailing parameter may be supplied" ![io] {
+    let source = "fn with_default(a: int, b: int = 0) -> int { return a + b; }\n"
+        + "fn main() { let v = with_default(1, 5); }";
+    assert _e0423_for(source) == 0;
+}
+
+test "call arity: omitting a required parameter before a default is rejected" ![io] {
+    let source = "fn with_default(a: int, b: int = 0) -> int { return a + b; }\n"
+        + "fn main() { let v = with_default(); }";
+    assert _e0423_for(source) == 1;
+}
+
+test "call arity: exceeding a defaulted parameter list is rejected" ![io] {
+    let source = "fn with_default(a: int, b: int = 0) -> int { return a + b; }\n"
+        + "fn main() { let v = with_default(1, 2, 3); }";
+    assert _e0423_for(source) == 1;
+}
+
+// A zero-parameter callee is the boundary case for `marker.length - 8`.
+test "call arity: a zero-parameter callee rejects a supplied argument" ![io] {
+    let source = "fn nothing() -> int { return 1; }\n"
+        + "fn main() { let v = nothing(1); }";
+    assert _e0423_for(source) == 1;
+}
+
+test "call arity: a zero-parameter callee accepts no arguments" ![io] {
+    let source = "fn nothing() -> int { return 1; }\n"
+        + "fn main() { let v = nothing(); }";
+    assert _e0423_for(source) == 0;
+}
+
+// A generic signature's parameter list can be reshaped by
+// monomorphization, so the check must stay silent rather than guess.
+test "call arity: a generic callee stays silent" ![io] {
+    let source = "fn identity<T>(value: T) -> T { return value; }\n"
+        + "fn main() { let v = identity(); }";
+    assert _e0423_for(source) == 0;
+}
+
+// An unresolved callee is E0420's business, not E0423's — reporting both
+// would double-report the same typo.
+test "call arity: an unresolved callee stays silent" ![io] {
+    assert _e0423_for("fn main() { let v = not_declared(1, 2, 3); }") == 0;
+}
+
+// Member-form calls carry no signature in the symbol table today, so the
+// check must not fire on them.
+test "call arity: a member-form call stays silent" ![io] {
+    let source = "struct S { a: int; }\n"
+        + "fn main() { let mut s = S { a: 1 }; let v = s.missing(1, 2, 3); }";
+    assert _e0423_for(source) == 0;
+}
+
+// -------------------------------------------------------------------
+// Builtins — only the fixed intrinsic surface is pinned.
+// -------------------------------------------------------------------
+test "call arity: a wrong-arity atomic intrinsic is rejected" ![io] {
+    assert _e0423_for("fn main() { atomic_fence(1); }") == 1;
+}
+
+test "call arity: a correct-arity atomic intrinsic is accepted" ![io] {
+    assert _e0423_for("fn main() { atomic_fence(); }") == 0;
+}
+
+test "call arity: atomic_cas takes exactly three arguments" ![io] {
+    assert _e0423_for("fn main() { let v = atomic_cas(1, 2); }") == 1;
+    assert _e0423_for("fn main() { let v = atomic_cas(1, 2, 3); }") == 0;
+}
+
+// `print` aggregates its operand, and the concurrency builtins have no
+// settled call-form contract yet, so neither is pinned.
+test "call arity: unpinned builtins stay silent" ![io] {
+    assert _e0423_for("fn main() ![io] { print(\"a\"); }") == 0;
+    assert _e0423_for("fn main() { let c = channel(); }") == 0;
+}

@@ -155,7 +155,9 @@ The design for the content-addressed key derivation lives in
   verified native compiler artifact but runs one unsharded full suite with
   `--no-test-cache`. It restores no test-bin cache, pins no `TEST_JOBS`, and a
   failure fails the scheduled workflow.
-- **Windows** — boot/frontend smoke only via `smoke-windows`; no suite run.
+- **Windows** — boot/frontend smoke only via `smoke-windows`; no suite run. This
+  is the whole of the Windows contract: Tier 3, best effort
+  (`docs/conventions/target-tiers.md`).
 - **`required-ci`** — the merge gate. Needs `ci-scope`,
   `linear-branch-claim`, `check-public-claims`, `check-fast`,
   `build-compiler-linux`, `build-compiler-macos`, `shard-cover`, `build-linux`,

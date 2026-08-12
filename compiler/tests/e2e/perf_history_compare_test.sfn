@@ -1,7 +1,10 @@
 // compiler/tests/e2e/perf_history_compare_test.sfn
 //
-// Regression coverage for the seed-scoped baseline in
-// `scripts/perf_history.sh compare` (SFN-330). The nightly perf-history job
+// Regression coverage for `scripts/perf_history.sh` — the seed-scoped baseline
+// (SFN-330), the whole-build budget boundary (SFN-421), and the consumer-build
+// series (SFN-832 / SFEP-0070).
+//
+// On the seed-scoped baseline (SFN-330): the nightly perf-history job
 // once filed one issue per module on a seed bump because the rolling-median
 // baseline mixed samples from different pinned seeds; a new seed rebuilds
 // every module with a different compiler binary, shifting all timings at once
@@ -14,10 +17,10 @@
 // .claude/rules/no-bash-e2e.md) and asserts on captured stdout/stderr.
 import { contains } from "sfn/strings";
 
-// The compare path is pure shell/awk with no gh dependency, so bash plus the
-// coreutils it calls (cut/grep/awk/mktemp) is all the child needs — thread
-// PATH (and HOME/TMPDIR for good measure); run_capture's empty env is the
-// EMPTY environment, not "inherit".
+// The append/compare paths are pure shell/awk with no gh dependency, so bash
+// plus the two coreutils they call (`awk` and `wc`) is all the child needs —
+// thread PATH (and HOME/TMPDIR for good measure); run_capture's empty env is
+// the EMPTY environment, not "inherit".
 fn _child_env() -> string[] ![io] {
     let mut e: string[] = [];
     let path = env.get("PATH");
@@ -138,4 +141,201 @@ test "perf-history: wall time exactly at the budget files nothing" ![io] {
     let _err = process.capture_take_stderr();
     assert exit == 0;
     assert contains(out, "no regressions detected");
+}
+
+// --- consumer-build series (SFN-832 / SFEP-0070) -----------------------------
+// The raw shape `sfn bench --consumer --csv` writes: no run columns, which
+// `append`'s `_append_tagged` prepends.
+fn _consumer_raw_header() -> string {
+    return "fixture,cold_s,warm_s,binary_bytes,ctors,modules_staged,cold_cache_misses,cache_hits,cache_misses,status,seed_version,platform\n";
+}
+
+fn _consumer_header() -> string {
+    return "run_sha,run_date," + _consumer_raw_header();
+}
+
+// `count` prior nightly runs (distinct shas = chronological order) with the
+// `hello` fixture pinned at the committed pre-filter baseline numbers
+// (docs/perf/consumer-baseline.csv), all produced by seed 0.9.5.
+fn _consumer_prior_rows(count: int) -> string {
+    let mut s = "";
+    let mut i = 1;
+    loop {
+        if i > count { break; }
+        s = s + "sha" + number_to_string(i)
+            + ",2026-08-01,hello,48.70,1.76,386848,32,34,68,68,0,ok,0.9.5,Linux x86_64\n";
+        i += 1;
+    }
+    return s;
+}
+
+fn _write_consumer_fixture(dir: string, priors: int, current: string) -> void ![io] {
+    fs.createDirectory(dir, true);
+    fs.writeFile(dir + "/consumer.csv", _consumer_header()
+        + _consumer_prior_rows(priors)
+        + "cur,2026-08-12,hello,"
+        + current
+        + "\n");
+}
+
+fn _run_compare_consumer(dir: string) -> int ![io] {
+    return process.run_capture(["bash", "scripts/perf_history.sh", "compare", "--data-dir", dir, "--sha", "cur", "--min-runs", "7", "--threshold-pct", "10", "--count-threshold-pct", "0", "--out", dir
+        + "/out.tsv"], _child_env());
+}
+
+// The reason the derived counts get their own threshold. 32 -> 35 constructors
+// is +9.4% — inside the 10% band the wall-time metrics need to survive runner
+// jitter, and therefore invisible if the counts shared it. `cold_s` is held
+// flat so the row cannot have come from the timing metric.
+test "perf-history: a consumer constructor rise inside the wall-time band is still caught" ![io] {
+    let dir = "build/perf-history-compare-test/consumer-ctors";
+    _write_consumer_fixture(dir, 8, "48.70,1.76,386848,35,34,68,68,0,ok,0.9.5,Linux x86_64");
+    let exit = _run_compare_consumer(dir);
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    assert exit == 0;
+    assert contains(out, "1 regression line(s) written");
+    // Its own kind, never `rolling-median`: SFN-567 was a gate that reported one
+    // comparison under another's label and hid the stricter one. The name is
+    // namespaced for the same reason — a fixture and a module may share a name.
+    let rows = fs.readFile(dir + "/out.tsv");
+    assert contains(rows, "consumer-median\tconsumer/hello\tctors\t35\t32\t9.4");
+}
+
+// A standing gate is only useful if it stays quiet while its history is thin —
+// a series that alerts on its first nights gets muted before it is ever right.
+test "perf-history: a consumer series on thin history no-ops rather than alerting" ![io] {
+    let dir = "build/perf-history-compare-test/consumer-coldstart";
+    // Three prior runs against --min-runs 7, and a current run doubled on every
+    // metric: still nothing, because three points are not a baseline.
+    _write_consumer_fixture(dir, 3, "99.00,1.76,773696,64,68,68,68,0,ok,0.9.5,Linux x86_64");
+    let exit = _run_compare_consumer(dir);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit == 0;
+    assert contains(out, "no regressions detected");
+    assert contains(err, "consumer cold start");
+}
+
+// Binary size is recorded as evidence that dead-stripping keeps it flat, not as
+// a signal (docs/perf/consumer-baseline.md). Comparing it would fire on changes
+// the epic does not care about and dilute the metrics that do move.
+test "perf-history: consumer binary growth alone files nothing" ![io] {
+    let dir = "build/perf-history-compare-test/consumer-size";
+    _write_consumer_fixture(dir, 8, "48.70,1.76,773696,32,34,68,68,0,ok,0.9.5,Linux x86_64");
+    let exit = _run_compare_consumer(dir);
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    assert exit == 0;
+    assert contains(out, "no regressions detected");
+}
+
+// A metric the harness could not derive is written as -1. Unavailable is not a
+// measurement, so it must not alert.
+test "perf-history: a consumer metric the harness could not derive does not alert" ![io] {
+    let dir = "build/perf-history-compare-test/consumer-noctor";
+    _write_consumer_fixture(dir, 8, "48.70,1.76,-1,-1,34,68,68,0,ok+nostrip+noctor,0.9.5,Linux x86_64");
+    let exit = _run_compare_consumer(dir);
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    assert exit == 0;
+    assert contains(out, "no regressions detected");
+}
+
+// The other half of the same rule, which the test above cannot reach: a -1 in a
+// PRIOR run must not count as a baseline sample. Seven priors, one of which
+// could not derive `ctors`, leaves six valid samples — one short of the seven
+// required — so the fixture falls through the per-fixture cold start and files
+// nothing despite `ctors` jumping 32 -> 35. Were the -1 counted, the window
+// would be full and the jump would be compared against a baseline holding a
+// non-measurement.
+test "perf-history: an underived consumer sample does not count toward the window" ![io] {
+    let dir = "build/perf-history-compare-test/consumer-noctor-window";
+    fs.createDirectory(dir, true);
+    fs.writeFile(dir + "/consumer.csv", _consumer_header()
+        + _consumer_prior_rows(6)
+        + "sha7,2026-08-01,hello,48.70,1.76,386848,-1,34,68,68,0,ok+noctor,0.9.5,Linux x86_64\n"
+        + "cur,2026-08-12,hello,48.70,1.76,386848,35,34,68,68,0,ok,0.9.5,Linux x86_64\n");
+    let exit = _run_compare_consumer(dir);
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    assert exit == 0;
+    assert contains(out, "no regressions detected");
+}
+
+// The reason a missing compile.csv skips only the per-module comparison instead
+// of returning: a run whose compile bench aborted before writing its CSV must
+// still have its whole-build wall time judged. A per-module cold start
+// swallowing a real budget breach is the SFN-421 failure with an extra step.
+test "perf-history: a budget breach files even when the compile bench wrote no CSV" ![io] {
+    let dir = "build/perf-history-compare-test/budget-no-compile";
+    fs.createDirectory(dir, true);
+    fs.writeFile(dir + "/build.csv", "run_sha,run_date,build_wall_s,budget_s\n"
+        + "cur,2026-07-12,301,300\n");
+    let exit = _run_compare_budget(dir, "300");
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    assert exit == 0;
+    assert contains(out, "1 regression line(s) written");
+    let rows = fs.readFile(dir + "/out.tsv");
+    assert contains(rows, "budget\t<whole-build>\tbuild_wall_s\t301.0\t300.0");
+}
+
+// The property the reporting path depends on: three comparisons over three
+// series land in one TSV, each under its own kind, and none stands in for
+// another. `perf-history.yml` counts findings as distinct (kind, name) pairs
+// off exactly this output.
+test "perf-history: three comparison kinds coexist without masking one another" ![io] {
+    let dir = "build/perf-history-compare-test/all-kinds";
+    fs.createDirectory(dir, true);
+    fs.writeFile(dir + "/compile.csv", _header() + _prior_rows("0.8.0")
+        + "cur,2026-07-12,foo,1.5,10000,500,OK,0.8.0\n"
+        + "cur,2026-07-12,bar,1.0,10000,500,OK,0.8.0\n");
+    fs.writeFile(dir + "/build.csv", "run_sha,run_date,build_wall_s,budget_s\n"
+        + "cur,2026-07-12,301,300\n");
+    // `modules_staged` is held flat so the consumer series contributes exactly
+    // one row and the total is unambiguous.
+    fs.writeFile(dir + "/consumer.csv", _consumer_header()
+        + _consumer_prior_rows(8)
+        + "cur,2026-08-12,hello,48.70,1.76,386848,35,34,68,68,0,ok,0.9.5,Linux x86_64\n");
+    let exit = _run_compare_budget(dir, "300");
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    assert exit == 0;
+    assert contains(out, "3 regression line(s) written");
+    let rows = fs.readFile(dir + "/out.tsv");
+    assert contains(rows, "rolling-median\tfoo\ttime_s");
+    assert contains(rows, "budget\t<whole-build>\tbuild_wall_s");
+    assert contains(rows, "consumer-median\tconsumer/hello\tctors");
+}
+
+fn _run_append_consumer(dir: string, raw: string) -> int ![io] {
+    return process.run_capture(["bash", "scripts/perf_history.sh", "append", "--data-dir", dir, "--sha", "cur", "--date", "2026-08-12", "--consumer", raw], _child_env());
+}
+
+// Re-running the nightly against an already-recorded commit must leave the
+// series byte-identical, or the rolling median silently weights that commit
+// twice and the same run alerts a second time.
+test "perf-history: re-appending a commit's consumer rows is a no-op" ![io] {
+    let dir = "build/perf-history-compare-test/consumer-append";
+    fs.createDirectory(dir, true);
+    let raw = dir + "/raw.csv";
+    let row = "hello,48.70,1.76,386848,32,34,68,68,0,ok,0.9.5,Linux x86_64\n";
+    fs.writeFile(raw, _consumer_raw_header() + row);
+
+    let first = _run_append_consumer(dir, raw);
+    let _out1 = process.capture_take_stdout();
+    let _err1 = process.capture_take_stderr();
+    assert first == 0;
+
+    let second = _run_append_consumer(dir, raw);
+    let out2 = process.capture_take_stdout();
+    let _err2 = process.capture_take_stderr();
+    assert second == 0;
+    assert contains(out2, "consumer rows for cur already present");
+
+    // Exact content, not a substring: one header and one data row is the whole
+    // claim, and a duplicate row would still satisfy a `contains`.
+    let acc = fs.readFile(dir + "/consumer.csv");
+    assert acc == _consumer_header() + "cur,2026-08-12," + row;
 }

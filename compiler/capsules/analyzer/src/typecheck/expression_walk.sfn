@@ -43,6 +43,11 @@ import {
 } from "./arithmetic_rules";
 import { walk_block_expressions } from "./block_walk";
 import {
+    call_arity_diagnostics,
+    void_argument_diagnostics,
+    void_value_diagnostics
+} from "./call_signature";
+import {
     channel_send_diagnostics,
     check_spawn_expression,
     push_spawn_handle_diagnostics
@@ -121,8 +126,16 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
         loop {
             if index >= expression.arguments.length { break; }
             diagnostics = diagnostics.concat(walk_expression(expression.arguments[index], ctx_with_expected_type(ctx, _call_argument_expected_type(expression, index, ctx))));
+            // SFN-812: a void call cannot supply an argument. Without this the
+            // operand lowers to nothing and the callee reads a fabricated
+            // zero — indistinguishable from a legitimate `0`/`""` result.
+            diagnostics = diagnostics.concat(void_argument_diagnostics(expression, index, ctx));
             index += 1;
         }
+        // SFN-812: reject an argument count the callee cannot accept (E0423).
+        // A missing argument is otherwise zero-filled and an extra one
+        // dropped, with no diagnostic at any stage.
+        diagnostics = diagnostics.concat(call_arity_diagnostics(expression, ctx));
         // `ch.send(v)` on a `Channel<T>`-annotated receiver enforces the
         // element type -> E0815 (#1942). Silent unless the mismatch is
         // certain (see `channel_send_diagnostics`).
@@ -151,6 +164,13 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
         diagnostics = diagnostics.concat(mixed_arithmetic_diagnostics(expression, bindings));
         diagnostics = diagnostics.concat(array_arithmetic_diagnostics(expression, bindings));
         diagnostics = diagnostics.concat(_struct_arithmetic_diagnostics(expression, ctx));
+        // SFN-812: `"total: " + print(x)` has no value to concatenate.
+        diagnostics = diagnostics.concat(void_value_diagnostics(expression.left, ctx, "an operand of `"
+            + expression.operator
+            + "`"));
+        diagnostics = diagnostics.concat(void_value_diagnostics(expression.right, ctx, "an operand of `"
+            + expression.operator
+            + "`"));
         return diagnostics;
     }
     if expression.variant == "Unary" {
@@ -160,7 +180,16 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
         // `Raw`), the operand `Identifier` reaches the `Identifier` arm below,
         // which emits E0808 for a function used in value position — preserving
         // the prior `check_fn_reference_raw` `& fn` behavior.
-        return walk_expression(expression.operand, ctx_with_expected_type(ctx, null));
+        let mut diagnostics = walk_expression(expression.operand, ctx_with_expected_type(ctx, null));
+        // SFN-812: `!print(x)` / `-print(x)` have no value to operate on.
+        // `await` is excluded — it takes a task handle, and a void-returning
+        // task is a legitimate shape.
+        if !strings_equal(expression.operator, "await") {
+            diagnostics = diagnostics.concat(void_value_diagnostics(expression.operand, ctx, "an operand of `"
+                + expression.operator
+                + "`"));
+        }
+        return diagnostics;
     }
     if expression.variant == "Member" {
         // A bare-identifier member *object* is a receiver / namespace
@@ -330,6 +359,11 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
         let mut diagnostics = walk_expression(expression.target, ctx_with_expected_type(ctx, null));
         let rhs_expected = _assignment_expected_type(expression.target, ctx);
         diagnostics = diagnostics.concat(walk_expression(expression.rhs, ctx_with_expected_type(ctx, rhs_expected)));
+        // SFN-812: `s.a = print(...)` / `arr[0] = print(...)` / `*p = print(...)`
+        // compiled clean and dropped the store entirely — the complex-lvalue
+        // arms of `statement_assignment.sfn` emit no store when the value
+        // fails to lower. Reject the assignment here, at the source.
+        diagnostics = diagnostics.concat(void_value_diagnostics(expression.rhs, ctx, "an assigned value"));
         return diagnostics;
     }
     if expression.variant == "Cast" {

@@ -14,7 +14,7 @@ Sailfin (`runtime/sfn/` + `runtime/prelude.sfn`).
 |---|---|---|
 | **Reach** | the compiler derives a capability manifest and proves it **complete** | effect types (`![io, net, …]`), capsule manifests, `E0402`/`E0403`, the seal (SFEP-0016) as runtime enforcement |
 | **Result** | the same program yields the same bits, and mixed precision cannot compile | numerics contract (SFEP-0054/0062): exact dtype identity, no implicit promotion, ≥f32 accumulators, no reassociation, bit-exact oracle |
-| **Cost** | this schedule, on this target, hits these numerics at this measured throughput — and finishes or is cancelled | schedule-as-contract; structured concurrency (nurseries, cancel-on-fault, deadlines) as the liveness half |
+| **Cost** | this schedule, on this target, hits these numerics at this measured throughput — and no spawned task outlives its scope | schedule-as-contract; structured concurrency as the liveness half — nurseries ship **join-all** today (`runtime/sfn/concurrency/nursery.sfn`). **Cancel-on-fault and deadlines are designed, not shipped** (`docs/proposals/draft-concurrency-cancellation.md`) — do not claim them |
 
 Pillar names are **positioning words, never identifiers** — "Result" collides with
 `Result<T, E>` (SFEP-0012), so code, artifacts, and diagnostics use `contract`.
@@ -152,7 +152,7 @@ Windows `run_capture` issue") and link by URL instead.
 
 **Anti-patterns:** picking up an ungroomed issue; expanding scope mid-session
 (comment and pause instead); bundling issues into one PR; picking up from the
-roadmap (it isn't pickable — Linear `Ready` is).
+roadmap (it isn't pickable — Linear `Todo`, then `Ready`, is).
 
 ## Approval gates
 

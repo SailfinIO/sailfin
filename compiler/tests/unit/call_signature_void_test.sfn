@@ -1,0 +1,165 @@
+// Unit tests for the void-in-value-position diagnostic E0422 (SFN-812).
+//
+// A call whose callee returns nothing cannot be used where a value is
+// required. Before this check, `s.a = print("x")` compiled, linked, ran,
+// exited 0 — and emitted no store at all: the complex-lvalue arms of
+// `llvm/expression_lowering/native/statement_assignment.sfn` returned
+// early without lowering the assignment, and the untagged diagnostic they
+// pushed was discarded by `has_fatal_lowering_diagnostic`.
+//
+// The forcing case is a security primitive: SFEP-0069 §3.6 specifies
+// `secure_zero(ptr, len)` as void, so `x.wipe = secure_zero(p, n);` would
+// compile and never wipe the buffer.
+//
+// This file pins the binding-site matrix. The companion arity tests live
+// in `call_signature_arity_test.sfn`.
+import { typecheck_diagnostics } from "sfn/analyzer/typecheck";
+import { Diagnostic } from "sfn/analyzer/typecheck_types";
+import { parse_program } from "sfn/syntax";
+
+fn _count_code(diagnostics: Diagnostic[], code: string) -> int {
+    let mut count: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= diagnostics.length { break; }
+        if strings_equal(diagnostics[i].code, code) { count += 1; }
+        i += 1;
+    }
+    return count;
+}
+
+fn _e0422_for(source: string) -> int ![io] {
+    let program = parse_program(source);
+    return _count_code(typecheck_diagnostics(program), "E0422");
+}
+
+// A user-declared void callee, so the matrix does not depend on the
+// builtin table. Declared as a function, not a top-level `let`: escape
+// sequences are not processed in a top-level string initializer, so a `\n`
+// there stays two literal characters and the fixture parses as one unusable
+// line (SFN-837).
+fn _void_fn() -> string { return "fn do_nothing(n: int) { let unused = n; }\n"; }
+
+// -------------------------------------------------------------------
+// The three `statement_assignment.sfn` complex-lvalue forms — the shapes
+// that silently dropped their store.
+// -------------------------------------------------------------------
+test "void value: a struct-field assignment target is rejected" ![io] {
+    let source = "struct S { a: int; }\n" + _void_fn()
+        + "fn main() { let mut s = S { a: 1 }; s.a = do_nothing(1); }";
+    assert _e0422_for(source) == 1;
+}
+
+test "void value: an array-index assignment target is rejected" ![io] {
+    let source = _void_fn()
+        + "fn main() { let mut arr: int[] = [1, 2, 3]; arr[0] = do_nothing(1); }";
+    assert _e0422_for(source) == 1;
+}
+
+test "void value: a deref assignment target is rejected" ![io] {
+    let source = _void_fn()
+        + "fn main() { let p: * int = deref_target(); *p = do_nothing(1); }\n"
+        + "fn deref_target() -> * int { return 0 as * int; }";
+    assert _e0422_for(source) == 1;
+}
+
+test "void value: a simple-identifier assignment target is rejected" ![io] {
+    let source = _void_fn()
+        + "fn main() { let mut v: int = 0; v = do_nothing(1); }";
+    assert _e0422_for(source) == 1;
+}
+
+// -------------------------------------------------------------------
+// The remaining value positions named in the SFN-812 scope.
+// -------------------------------------------------------------------
+test "void value: a let initializer is rejected" ![io] {
+    assert _e0422_for(_void_fn() + "fn main() { let v = do_nothing(1); }") == 1;
+}
+
+test "void value: a call argument is rejected" ![io] {
+    let source = _void_fn() + "fn takes(n: int) -> int { return n; }\n"
+        + "fn main() { let v = takes(do_nothing(1)); }";
+    assert _e0422_for(source) == 1;
+}
+
+test "void value: a returned value is rejected" ![io] {
+    let source = _void_fn() + "fn wrapper() -> int { return do_nothing(1); }\n"
+        + "fn main() { let v = wrapper(); }";
+    assert _e0422_for(source) == 1;
+}
+
+test "void value: a binary operand is rejected" ![io] {
+    let source = _void_fn() + "fn main() { let v = 1 + do_nothing(1); }";
+    assert _e0422_for(source) == 1;
+}
+
+test "void value: a unary operand is rejected" ![io] {
+    let source = _void_fn() + "fn main() { let v = -do_nothing(1); }";
+    assert _e0422_for(source) == 1;
+}
+
+// -------------------------------------------------------------------
+// Builtins — the Repro B shape, and the value-returning surface that
+// must stay accepted.
+// -------------------------------------------------------------------
+test "void value: a void builtin in a struct-field assignment is rejected" ![io] {
+    let source = "struct S { a: int; }\n"
+        + "fn main() ![io] { let mut s = S { a: 1 }; s.a = print(\"x\"); }";
+    assert _e0422_for(source) == 1;
+}
+
+test "void value: a void builtin in an array-index assignment is rejected" ![io] {
+    let source = "fn main() ![io] { let mut arr: int[] = [1, 2, 3]; arr[0] = print(\"x\"); }";
+    assert _e0422_for(source) == 1;
+}
+
+test "void value: atomic_fence in value position is rejected" ![io] {
+    assert _e0422_for("fn main() { let v = atomic_fence(); }") == 1;
+}
+
+test "void value: value-returning atomic intrinsics are accepted" ![io] {
+    assert _e0422_for("fn main() { let v = atomic_load(1); }") == 0;
+    assert _e0422_for("fn main() { let b = atomic_cas(1, 2, 3); }") == 0;
+    assert _e0422_for("fn main() { let n = load_byte(1); }") == 0;
+}
+
+// -------------------------------------------------------------------
+// Correct use — a void call as a bare statement is the *right* way to
+// call one, and must not regress.
+// -------------------------------------------------------------------
+test "void value: a void builtin as a bare statement is accepted" ![io] {
+    assert _e0422_for("fn main() { atomic_fence(); }") == 0;
+    assert _e0422_for("fn main() ![io] { print(\"x\"); }") == 0;
+}
+
+test "void value: a user void fn as a bare statement is accepted" ![io] {
+    assert _e0422_for(_void_fn() + "fn main() { do_nothing(1); }") == 0;
+}
+
+// A callee with a declared non-void return is never a void call, and a
+// callee whose return type this classifier cannot name stays silent
+// rather than guessing.
+test "void value: a value-returning callee is accepted" ![io] {
+    let source = "fn gives(n: int) -> int { return n; }\n"
+        + "fn main() { let v = gives(1); }";
+    assert _e0422_for(source) == 0;
+}
+
+test "void value: a struct-returning callee stays silent" ![io] {
+    let source = "struct S { a: int; }\n"
+        + "fn makes() -> S { return S { a: 1 }; }\n"
+        + "fn main() { let v = makes(); }";
+    assert _e0422_for(source) == 0;
+}
+
+test "void value: an unresolved callee stays silent" ![io] {
+    assert _e0422_for("fn main() { let v = not_declared(1); }") == 0;
+}
+
+// An explicit `-> void` annotation and an omitted return clause are the
+// same contract and must classify identically.
+test "void value: an explicit void annotation is rejected in value position" ![io] {
+    let source = "fn explicit(n: int) -> void { let unused = n; }\n"
+        + "fn main() { let v = explicit(1); }";
+    assert _e0422_for(source) == 1;
+}

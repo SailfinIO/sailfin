@@ -39,6 +39,7 @@ import { module_name_from_path } from "../../main";
 import { char_code_at_text, index_of } from "../../string_utils";
 import { resolve_compiler_version } from "../../version";
 import { CliContext } from "../context";
+import { consumer_run } from "./bench_consumer";
 import { BenchJsonResult, render_bench_json_envelope } from "./bench_json";
 
 // The `sfn/cli` definition for `bench`, registered on the v2 root via
@@ -52,6 +53,8 @@ import { BenchJsonResult, render_bench_json_envelope } from "./bench_json";
 fn command_def() -> Command {
     let mut cmd = command("bench", "Benchmark compiled-program runtime or compiler build performance");
     cmd = with_flag(cmd, flag("compiler", "Benchmark per-module compiler emit time + peak memory instead of runtime workloads"));
+    cmd = with_flag(cmd, flag("consumer", "Benchmark end-to-end consumer builds over a fixture set"));
+    cmd = with_flag(cmd, flag_value("fixtures", "Directory of consumer-build fixtures (default: benchmarks/consumer)"));
     cmd = with_flag(cmd, flag_int("iterations", "Runtime mode: timed runs per workload after the warm-up (default 5)"));
     cmd = with_flag(cmd, flag_int("warmup", "Runtime mode: discarded warm-up runs per workload before timing (default 1)"));
     cmd = with_flag(cmd, flag_value("filter", "Runtime mode: only run workloads whose name matches this glob (e.g. arena*)"));
@@ -148,9 +151,11 @@ fn _bench_filter_sources(all: string[], modules: string[]) -> string[] ![io] {
     return out;
 }
 
-// Mode dispatch: `--compiler` runs the per-module emit benchmark (SFN-61);
-// the default runs the runtime-workload benchmark (SFN-63).
+// Mode dispatch: `--consumer` runs the end-to-end consumer-build benchmark
+// (SFN-830) before `--compiler`'s per-module emit benchmark (SFN-61) is
+// checked; the default runs the runtime-workload benchmark (SFN-63).
 fn run(matches: Matches, ctx: CliContext) -> int ![clock, io] {
+    if has_flag(matches, "consumer") { return consumer_run(matches, ctx); }
     if has_flag(matches, "compiler") {
         return _run_compiler_mode(matches, ctx);
     }

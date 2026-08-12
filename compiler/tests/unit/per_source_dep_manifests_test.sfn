@@ -9,7 +9,7 @@
 // The resolver decomposition keeps both defining modules within the standalone
 // unit-test timeout, so these tests exercise the production helpers directly.
 import { _cr_string_in_array } from "../../src/capsule_resolver/paths";
-import { _cr_scope_name_prefix } from "../../src/capsule_resolver/staging";
+import { _cr_scope_name_prefix } from "../../src/capsule_resolver/reachability";
 
 // -- Tests --
 test "scope_name_prefix: simple scope/name returns full spec" {

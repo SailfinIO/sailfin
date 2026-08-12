@@ -67,6 +67,19 @@ struct ResolverDedupeResult {
     // workspace). Required for `enumerate_runtime_capsule_artifacts`,
     // which reads `<workspace_root>/workspace.toml`.
     workspace_root: string;
+    // SFN-833: the source paths that seed the import-reachability
+    // closure — every resolved source the DEPENDENCY enumerators did
+    // not contribute (the relative-import walk, the `-p` binary `src/`
+    // walk, the host-capsule walk). Recorded here, at the one site that
+    // knows which leg produced which source, because neither `spec` nor
+    // `origin` can be read back as a root signal: a relatively-imported
+    // file inside a workspace member carries that member's canonical
+    // spec (#873), and the host-capsule walk stamps the consumer's own
+    // sources with the host capsule's name.
+    //
+    // Consumed only by the build path's filter (SFEP-0070 §3.2);
+    // `sfn check` ignores it and keeps the unfiltered set.
+    root_source_paths: string[];
 }
 
 // Shared resolution + dedupe used by both `prepare_project_capsules`
@@ -152,13 +165,23 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer, bun
     let empty_specs: string[] = [];
 
     let mut empty_caps: string[] = [];
+    let empty_roots: string[] = [];
+    // SFN-833: paths contributed by the DEPENDENCY enumeration legs
+    // (manifest deps + the runtime union, workspace-implicit, and
+    // cache-implicit). Everything else is a reachability root. Tracking
+    // the dependency side rather than the root side is deliberate: a leg
+    // added later that forgets to declare itself defaults to ROOT, which
+    // over-approximates the retained set instead of silently dropping
+    // sources the build needs.
+    let mut dep_leg_paths: string[] = [];
     if entry_paths.length == 0 && consumer.runtime_root.length == 0 {
         return ResolverDedupeResult {
             sources: empty_sources,
             has_collision: false,
             capabilities_required: empty_caps,
             manifest_dep_specs: empty_specs,
-            workspace_root: ""
+            workspace_root: "",
+            root_source_paths: empty_roots
         };
     }
 
@@ -313,6 +336,7 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer, bun
         loop {
             if di >= dep_sources.length { break; }
             sources.push(dep_sources[di]);
+            dep_leg_paths.push(_cr_strip_leading_dot_slash(dep_sources[di].source_path));
             di += 1;
         }
         implicit_excluded = _cr_specs_union(covered_specs, dep_sources);
@@ -387,6 +411,7 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer, bun
         loop {
             if rdsi >= rt_dep_sources.length { break; }
             sources.push(rt_dep_sources[rdsi]);
+            dep_leg_paths.push(_cr_strip_leading_dot_slash(rt_dep_sources[rdsi].source_path));
             rdsi += 1;
         }
         implicit_excluded = _cr_specs_union(covered_specs, rt_dep_sources);
@@ -407,6 +432,7 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer, bun
             loop {
                 if wi >= implicit.length { break; }
                 sources.push(implicit[wi]);
+                dep_leg_paths.push(_cr_strip_leading_dot_slash(implicit[wi].source_path));
                 wi += 1;
             }
             wi_entry += 1;
@@ -444,6 +470,7 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer, bun
                 loop {
                     if cci >= cached.length { break; }
                     sources.push(cached[cci]);
+                    dep_leg_paths.push(_cr_strip_leading_dot_slash(cached[cci].source_path));
                     cci += 1;
                 }
                 ci_entry += 1;
@@ -457,7 +484,8 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer, bun
             has_collision: false,
             capabilities_required: capabilities_required,
             manifest_dep_specs: covered_specs,
-            workspace_root: workspace_root
+            workspace_root: workspace_root,
+            root_source_paths: empty_roots
         };
     }
 
@@ -491,7 +519,8 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer, bun
                         has_collision: true,
                         capabilities_required: capabilities_required,
                         manifest_dep_specs: covered_specs,
-                        workspace_root: workspace_root
+                        workspace_root: workspace_root,
+                        root_source_paths: empty_roots
                     };
                 }
                 // Same slug AND same path → exact duplicate, drop silently.
@@ -555,11 +584,27 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer, bun
         ri += 1;
     }
 
+    // SFN-833: derive the reachability roots from the post-dedupe set.
+    // A source is a root unless a dependency leg contributed its path —
+    // see `dep_leg_paths` above for why the discrimination runs this way
+    // round.
+    let mut root_source_paths: string[] = [];
+    let mut rp: int = 0;
+    loop {
+        if rp >= resolved.length { break; }
+        let key = _cr_strip_leading_dot_slash(resolved[rp].source_path);
+        if !_cr_string_array_contains(dep_leg_paths, key) {
+            root_source_paths.push(key);
+        }
+        rp += 1;
+    }
+
     return ResolverDedupeResult {
         sources: resolved,
         has_collision: false,
         capabilities_required: capabilities_required,
         manifest_dep_specs: covered_specs,
-        workspace_root: workspace_root
+        workspace_root: workspace_root,
+        root_source_paths: root_source_paths
     };
 }

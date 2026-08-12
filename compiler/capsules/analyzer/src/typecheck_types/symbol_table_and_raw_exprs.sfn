@@ -172,8 +172,15 @@ fn _function_return_type(signature: FunctionSignature) -> string {
     return trim_text(signature.return_type.text);
 }
 
+// Marker layout: `fnprim:<return-code><parameter-code>*`.
+//
+// Total declared arity is `marker.length - 8`, and a parameter code is
+// uppercase exactly when that parameter declares a default value, so a
+// call-site check can derive both the required and the total argument
+// count from the marker alone (SFN-812). Readers live in
+// `typecheck/primitive_rules.sfn`.
 fn _function_primitive_marker(signature: FunctionSignature) -> string {
-    let mut marker = "fnprim:" + _primitive_kind_code(_signature_return_prim(signature));
+    let mut marker = "fnprim:" + _signature_return_code(signature);
     let mut index: int = 0;
     loop {
         if index >= signature.parameters.length { break; }
@@ -182,15 +189,26 @@ fn _function_primitive_marker(signature: FunctionSignature) -> string {
         if parameter.type_annotation != null {
             kind = classify_declared_primitive(parameter.type_annotation.text);
         }
-        marker = marker + _primitive_kind_code(kind);
+        let code = _primitive_kind_code(kind);
+        if parameter.default_value == null { marker = marker + code; } else {
+            marker = marker + _defaulted_kind_code(code);
+        }
         index += 1;
     }
     return marker;
 }
 
-fn _signature_return_prim(signature: FunctionSignature) -> string {
-    if signature.return_type == null { return ""; }
-    return classify_declared_primitive(signature.return_type.text);
+// `void` gets its own return code so a call-site check can tell "returns
+// nothing" from "returns something this classifier cannot name" — the two
+// were previously both `u` (SFN-812). `_primitive_kind_from_code` maps `v`
+// to the fail-open `""` like any unrecognized code, so every existing
+// primitive-type consumer is unaffected.
+fn _signature_return_code(signature: FunctionSignature) -> string {
+    if signature.return_type == null { return "v"; }
+    if strings_equal(trim_text(signature.return_type.text), "void") {
+        return "v";
+    }
+    return _primitive_kind_code(classify_declared_primitive(signature.return_type.text));
 }
 
 fn _primitive_kind_code(kind: string) -> string {
@@ -199,6 +217,14 @@ fn _primitive_kind_code(kind: string) -> string {
     if strings_equal(kind, "string") { return "s"; }
     if strings_equal(kind, "boolean") { return "b"; }
     return "u";
+}
+
+fn _defaulted_kind_code(code: string) -> string {
+    if strings_equal(code, "i") { return "I"; }
+    if strings_equal(code, "f") { return "F"; }
+    if strings_equal(code, "s") { return "S"; }
+    if strings_equal(code, "b") { return "B"; }
+    return "U";
 }
 
 fn clone_bindings(source: SymbolEntry[]) -> SymbolEntry[] {

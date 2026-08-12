@@ -8,8 +8,10 @@ PR open — flipping the Linear status as you go.
 > `SFN-NNN` issues; there is no GitHub mirror for our own planned work. GitHub
 > hosts the code and the PR. See `docs/conventions/linear-workflow.md` for the
 > full model. Use the `mcp__Linear__*` tools for all issue state; use
-> `mcp__github__*` for GitHub reads/PRs and `git` for branches and commits —
-> don't rely on a `gh` CLI being available.
+> `mcp__github__*` for GitHub reads/PRs and `git` for branches and commits.
+> The `mcp__github__*` spellings below name the *operation*, not a guaranteed
+> tool — when that server isn't connected, resolve them per
+> `docs/conventions/github-surface.md`.
 
 ## Target: $ARGUMENTS
 
@@ -20,11 +22,18 @@ If `$ARGUMENTS` is a Linear identifier (e.g. `SFN-142`), work that specific issu
 
 ## Phase 1: SELECT AN ISSUE
 
-Query open `Ready` issues on the Sailfin team:
+Two lanes are pickable, and **`Todo` wins**. `Todo` is the hand-curated "next
+up" shortlist; `Ready` is the groomed pool it is drawn from. Query `Todo` first
+and only fall through when it is empty:
 
 ```
-mcp__Linear__list_issues team="Sailfin" state="Ready" limit=50
+mcp__Linear__list_issues team="Sailfin" state="Todo"  limit=50
+mcp__Linear__list_issues team="Sailfin" state="Ready" limit=50   # only if Todo is empty
 ```
+
+Do **not** merge the two lists. A `Todo` issue outranks every `Ready` issue
+regardless of priority — that is the whole point of the lane. Within `Todo`,
+order by the same rules below.
 
 Filter out any issue that is:
 - Assigned to someone else (`assignee` set to another user).
@@ -37,7 +46,7 @@ Filter out any issue that is:
   verify, because a blocker may have re-opened.)
 
 If `$ARGUMENTS` names an issue, fetch only that one and verify it is pickable
-(`Ready`, unassigned or assigned to you, no open blocker):
+(`Todo` or `Ready`, unassigned or assigned to you, no open blocker):
 
 ```
 mcp__Linear__get_issue id="SFN-<N>" includeRelations=true
@@ -50,8 +59,9 @@ mcp__Linear__get_issue id="SFN-<N>" includeRelations=true
 4. Smallest **estimate** first within the same type (1 → 2 → 3)
 5. Lowest `SFN-` number as tiebreaker (FIFO)
 
-If no pickable issue exists, report: "No `Ready` SFN issues available. Run
-`/triage` to audit the queue, or `/groom <epic>` to add work."
+If no pickable issue exists in either lane, report: "No pickable SFN issues in
+`Todo` or `Ready`. Run `/triage` to work the Triage lane, or `/groom <epic>` to
+add work."
 
 ---
 
@@ -281,7 +291,7 @@ Surface any deferral or mid-flight scope adjustment explicitly.
 ## Constraints
 
 - **Linear owns issue state.** Flip `state` via `mcp__Linear__save_issue`
-  (`Ready` → `In Progress` on claim → `In Review` on PR). `Done` comes from the
+  (`Todo`/`Ready` → `In Progress` on claim → `In Review` on PR). `Done` comes from the
   merge via Linear's integration — never write a terminal status from the skill.
 - **The `claude/sfn-<N>-…` branch prefix is load-bearing.** It is how the PR
   auto-links to the Linear issue; keep it and put `Fixes SFN-<N>` in the PR body.
