@@ -4,9 +4,10 @@ title: Native crypto + TLS stack — removing the OpenSSL dependency
 status: Accepted
 type: runtime
 created: 2026-07-12
-updated: 2026-08-09
+updated: 2026-08-12
 author: "agent:compiler-architect; human review"
-tracking: SFN-333, SFN-335, SFN-339, SFN-336, SFN-337, SFN-340, SFN-341, SFN-504, SFN-654, SFN-655, SFN-656, SFN-657, SFN-658, SFN-659, SFN-660, SFN-699, SFN-766, SFN-767, SFN-768, SFN-769, SFN-814
+tracking: https://linear.app/sailfin/project/native-crypto-tls-stack-zero-openssl-5ce55ca8f46e
+design-gates: SFN-500, SFN-653, SFN-666, SFN-703, SFN-825
 supersedes:
 superseded-by:
 graduates-to:
@@ -938,6 +939,12 @@ re-pointed at the native stack.
 
 ## 10. References
 
+- Issue tracking: the `tracking:` front-matter is the **Linear Project URL**, not
+  an issue list. This epic passed sixty issues, and a hand-copied list of IDs is a
+  mirror of a Linear rollup that goes stale on every merge — it had drifted forty
+  behind before this was changed. The Project is the live index; `design-gates:`
+  enumerates only the design-note issues whose verdicts bind implementation, since
+  those are the ones a reader must not miss.
 - SFEP-0016 (`0016-capability-sealed-runtime.md`, Accepted) — the seal this
   unblocks; 1.0 hallmark / GA blocker per `docs/strategy/decision-brief.md`.
 - SFEP-0036 (`0036-tls-runtime.md`, Implemented) — the OpenSSL TLS runtime this
