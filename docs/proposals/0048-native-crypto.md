@@ -944,7 +944,11 @@ re-pointed at the native stack.
   mirror of a Linear rollup that goes stale on every merge — it had drifted forty
   behind before this was changed. The Project is the live index; `design-gates:`
   enumerates only the design-note issues whose verdicts bind implementation, since
-  those are the ones a reader must not miss.
+  those are the ones a reader must not miss. Note the Project is marginally
+  broader than this SFEP: it also carries SFEP-0069's SecretBuf zeroization arc,
+  which has its own design record. The URL is the epic's index, not a claim that
+  every issue under it is governed here. See SFEP-0001 §3.1 for when the URL form
+  applies and when a scoped identifier list is the correct form instead.
 - SFEP-0016 (`0016-capability-sealed-runtime.md`, Accepted) — the seal this
   unblocks; 1.0 hallmark / GA blocker per `docs/strategy/decision-brief.md`.
 - SFEP-0036 (`0036-tls-runtime.md`, Implemented) — the OpenSSL TLS runtime this
