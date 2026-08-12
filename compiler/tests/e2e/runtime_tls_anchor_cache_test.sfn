@@ -1,0 +1,394 @@
+// Anchor-cache e2e for `_tls_anchors()` (SFN-805).
+//
+// `_tls_anchors()` used to re-parse the whole trust bundle on every
+// handshake (~94 ms/152 certs, SFN-807). SFN-805 adds a module-private
+// `let mut` cache (`runtime/sfn/platform/tls.sfn`, above `_tls_anchors`),
+// keyed on the `SAILFIN_TLS_CAFILE`/`SSL_CERT_FILE` overrides and never
+// caching a load failure (SFN-816 regression: a cached failure would erase
+// `sfn_tls_last_error` on the next handshake).
+//
+// Two properties, each proven against live `openssl s_server` peers on
+// loopback, driven from a SINGLE client process making sequential
+// connections — the process-global cache only has anything to prove wrong
+// within one process, since a fresh process starts with an unfilled cache
+// regardless:
+//
+//   1. Positive/negative/positive round-trip. One client process connects
+//      to a CAFILE-trusted server (a), then to a second server with a
+//      DIFFERENT self-signed cert not in that CAFILE (b), then back to the
+//      trusted server (c). (b) failing, AND reporting `cert-verify` (not
+//      just any failure), proves the cache did not "cache the verdict" or
+//      short-circuit verification; (c) succeeding proves the cache was not
+//      corrupted or nulled by the intervening failed connection.
+//   2. Negative-result caching. The same client connects twice to the
+//      trusted server with `SAILFIN_TLS_CAFILE` pointed at a path that does
+//      not exist. Both connections must fail AND both must report
+//      `tls.last_error() == "trust-store"` (SFN-822's user-reachable
+//      accessor). `tls_connect_fd` resets `sfn_tls_last_error` to `none` at
+//      the start of every connection (`runtime/sfn/platform/tls.sfn:1138`),
+//      so if the second connection wrongly hit a cached failure (skipping
+//      `_tls_fail`), it would NOT read back "none": `x509_verify_chain`
+//      still runs against the (wrongly cached) empty anchor set, reports
+//      `no-anchor`, and `_tls_fail_if_unset` (`tls.sfn:1395`) fires because
+//      the reason is unset, writing `cert-verify` — so the observable
+//      symptom of the SFN-816 erasure here is "trust-store" silently
+//      becoming "cert-verify" on the second connection, not "none".
+//
+// Skips cleanly (`assert true`) when `openssl` or a wall-clock `timeout` is
+// unavailable, matching `runtime_tls_verify_failure_test.sfn`.
+import { contains } from "sfn/strings";
+import { clean_runner_env, nested_runner_scratch } from "sfn/test";
+
+// ── file-local raw loopback readiness probe (cloned from
+// runtime_tls_verify_failure_test.sfn, prefixed `_tac_` to avoid collision
+// with that file's `_tvf_` helpers when both link into the same test pool
+// binary) ──
+extern fn malloc(size: usize) -> *u8;
+
+extern fn free(ptr: *u8) -> void;
+
+extern fn memset(dst: *u8, byte: i32, n: usize) -> *u8;
+
+extern fn socket(domain: i32, ty: i32, protocol: i32) -> i32;
+
+extern fn connect(sockfd: i32, addr: *u8, addrlen: i32) -> i32;
+
+extern fn close(fd: i32) -> i32;
+
+fn _tac_ptr_off(p: *u8, off: i64) -> *u8 {
+    let addr: i64 = (p as i64) + off;
+    return addr as *u8;
+}
+
+fn _tac_connect(port: i64) -> i32 {
+    let mut attempt: i64 = 0;
+    loop {
+        if attempt >= 2 { break; }
+        let addr: *u8 = malloc(16 as usize);
+        if addr as i64 == 0 { return 0 - 1; }
+        memset(addr, 0, 16 as usize);
+        if attempt == 0 {
+            memset(_tac_ptr_off(addr, 0), 2, 1 as usize);
+        } else {
+            memset(_tac_ptr_off(addr, 0), 16, 1 as usize);
+            memset(_tac_ptr_off(addr, 1), 2, 1 as usize);
+        }
+        memset(_tac_ptr_off(addr, 2), ((port >> 8) & 255) as i32, 1 as usize);
+        memset(_tac_ptr_off(addr, 3), (port & 255) as i32, 1 as usize);
+        memset(_tac_ptr_off(addr, 4), 127, 1 as usize);
+        memset(_tac_ptr_off(addr, 7), 1, 1 as usize);
+        let fd: i32 = socket(2, 1, 0);
+        if fd < 0 {
+            free(addr);
+            return 0 - 1;
+        }
+        let rc: i32 = connect(fd, addr, 16);
+        free(addr);
+        if rc == 0 { return fd; }
+        close(fd);
+        attempt = attempt + 1;
+    }
+    return 0 - 1;
+}
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+// Nested build/server child env, pool-safe (SFN-401): stripped of the
+// pool's own orchestration keys and re-pointed at an isolated scratch dir,
+// rather than threading the raw parent `process.environ()`.
+fn _child_env() -> string[] ![io] {
+    return clean_runner_env(nested_runner_scratch("tls-anchor-cache"));
+}
+
+// `_child_env()` with any inherited `SAILFIN_TLS_CAFILE` stripped, so the
+// caller can push its own without a duplicate entry shadowing it (a
+// child's `getenv` resolves the FIRST match).
+fn _env_no_cafile() -> string[] ![io] {
+    let src = _child_env();
+    let mut out: string[] = [];
+    let mut i: i64 = 0;
+    loop {
+        if i >= src.length { break; }
+        let entry = src[i];
+        if !contains(entry, "SAILFIN_TLS_CAFILE=") { out.push(entry); }
+        i = i + 1;
+    }
+    return out;
+}
+
+fn _trusted_env(cert_path: string) -> string[] ![io] {
+    let mut e = _env_no_cafile();
+    e.push("SAILFIN_TLS_CAFILE=" + cert_path);
+    return e;
+}
+
+fn _has_cmd(name: string) -> boolean ![io] {
+    let probe = process.run(["sh", "-c", "command -v " + name
+        + " >/dev/null 2>&1"]);
+    return probe == 0;
+}
+
+fn _timeout_cmd() -> string ![io] {
+    if _has_cmd("timeout") { return "timeout"; }
+    if _has_cmd("gtimeout") { return "gtimeout"; }
+    return "";
+}
+
+fn _scratch_root() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    return dir;
+}
+
+fn _gen_cert(dir: string, san_host: string) -> boolean ![io] {
+    let exit = process.run_capture(["openssl", "req", "-x509", "-newkey", "ed25519", "-keyout", dir
+        + "/key.pem", "-out", dir
+        + "/cert.pem", "-days", "1", "-nodes", "-subj", "/CN="
+        + san_host, "-addext", "subjectAltName=DNS:"
+        + san_host], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    return exit == 0;
+}
+
+fn _spawn_server(cert_dir: string, port_str: string, tcmd: string) -> i64 ![io] {
+    let mut argv: string[] = [];
+    argv.push(tcmd);
+    argv.push("60");
+    argv.push("openssl");
+    argv.push("s_server");
+    argv.push("-accept");
+    argv.push(port_str);
+    argv.push("-cert");
+    argv.push(cert_dir + "/cert.pem");
+    argv.push("-key");
+    argv.push(cert_dir + "/key.pem");
+    argv.push("-www");
+    argv.push("-quiet");
+    return process.spawn_with_env(argv, _child_env());
+}
+
+fn _await_listening(port: i64) -> boolean ![io] {
+    let mut attempt: i64 = 0;
+    loop {
+        if attempt >= 60 { break; }
+        let fd: i32 = _tac_connect(port);
+        if fd >= 0 {
+            close(fd);
+            return true;
+        }
+        let _ = process.run(["sleep", "0.5"]);
+        attempt = attempt + 1;
+    }
+    return false;
+}
+
+// Client fixture for property 1: connects to `port_a` then `port_b` then
+// `port_a` again, in ONE process, printing `c<N>:ok=<bool>` after each so
+// the harness can read all three outcomes off a single stdout capture.
+fn _write_three_conn_client(dir: string, port_a: string, port_b: string) -> string ![io] {
+    let root = dir + "/client";
+    fs.createDirectory(root + "/src", true);
+    fs.writeFile(root + "/capsule.toml", "[capsule]\n"
+        + "name = \"sfn/tls-anchor-cache-client\"\n"
+        + "version = \"0.0.1\"\n"
+        + "description = \"tls anchor cache e2e client (3 conn)\"\n"
+        + "\n"
+        + "[capabilities]\n"
+        + "required = [\"io\", \"net\"]\n"
+        + "\n"
+        + "[build]\n"
+        + "entry = \"src/main.sfn\"\n"
+        + "kind = \"library\"\n");
+    fs.writeFile(root + "/src/main.sfn", "fn _ok(path: string) -> boolean ![io] {\n"
+        + "    if !fs.exists(path) { return false; }\n"
+        + "    return fs.readFile(path).length > 0;\n"
+        + "}\n"
+        + "fn main() -> int ![io, net] {\n"
+        + "    let o1 = \""
+        + dir
+        + "/out1.body\";\n"
+        + "    if fs.exists(o1) { let _ = fs.deleteFile(o1); }\n"
+        + "    let _d1 = http.download(\"https://localhost:"
+        + port_a
+        + "/\", o1);\n"
+        + "    print.info(\"c1:ok=\" + (_ok(o1) as string));\n"
+        + "    let o2 = \""
+        + dir
+        + "/out2.body\";\n"
+        + "    if fs.exists(o2) { let _ = fs.deleteFile(o2); }\n"
+        + "    let _d2 = http.download(\"https://localhost:"
+        + port_b
+        + "/\", o2);\n"
+        + "    print.info(\"c2:ok=\" + (_ok(o2) as string));\n"
+        + "    print.info(\"c2:err=\" + tls.last_error());\n"
+        + "    let o3 = \""
+        + dir
+        + "/out3.body\";\n"
+        + "    if fs.exists(o3) { let _ = fs.deleteFile(o3); }\n"
+        + "    let _d3 = http.download(\"https://localhost:"
+        + port_a
+        + "/\", o3);\n"
+        + "    print.info(\"c3:ok=\" + (_ok(o3) as string));\n"
+        + "    return 0;\n"
+        + "}\n");
+    return root + "/src/main.sfn";
+}
+
+// Client fixture for property 2: connects to `port_a` twice in ONE process,
+// printing `n<N>:err=<tls.last_error()>` after each. Both connections are
+// meant to fail at trust-store resolution — but not before any handshake
+// byte is exchanged: `_tls_anchors` is called from `_tls_verify_peer`
+// (`tls.sfn:1435`), which runs only after ServerHello, Certificate, and
+// CertificateVerify have already been received.
+fn _write_two_conn_client(dir: string, port_a: string) -> string ![io] {
+    let root = dir + "/client2";
+    fs.createDirectory(root + "/src", true);
+    fs.writeFile(root + "/capsule.toml", "[capsule]\n"
+        + "name = \"sfn/tls-anchor-cache-client2\"\n"
+        + "version = \"0.0.1\"\n"
+        + "description = \"tls anchor cache e2e client (2 conn, bad cafile)\"\n"
+        + "\n"
+        + "[capabilities]\n"
+        + "required = [\"io\", \"net\"]\n"
+        + "\n"
+        + "[build]\n"
+        + "entry = \"src/main.sfn\"\n"
+        + "kind = \"library\"\n");
+    fs.writeFile(root + "/src/main.sfn", "fn main() -> int ![io, net] {\n"
+        + "    let o1 = \""
+        + dir
+        + "/bad1.body\";\n"
+        + "    if fs.exists(o1) { let _ = fs.deleteFile(o1); }\n"
+        + "    let _d1 = http.download(\"https://localhost:"
+        + port_a
+        + "/\", o1);\n"
+        + "    print.info(\"n1:err=\" + tls.last_error());\n"
+        + "    let o2 = \""
+        + dir
+        + "/bad2.body\";\n"
+        + "    if fs.exists(o2) { let _ = fs.deleteFile(o2); }\n"
+        + "    let _d2 = http.download(\"https://localhost:"
+        + port_a
+        + "/\", o2);\n"
+        + "    print.info(\"n2:err=\" + tls.last_error());\n"
+        + "    return 0;\n"
+        + "}\n");
+    return root + "/src/main.sfn";
+}
+
+fn _build_bin(main_path: string, bin: string) -> string ![io] {
+    let exit = process.run_capture([_sfn_bin(), "build", "-o", bin, main_path], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return ""; }
+    return bin;
+}
+
+fn _run_stdout(client_bin: string, run_env: string[]) -> string ![io] {
+    let _exit = process.run_capture([client_bin], run_env);
+    let out = process.capture_take_stdout();
+    let _ce = process.capture_take_stderr();
+    return out;
+}
+
+fn _skip_ready() -> boolean ![io] {
+    if !_has_cmd("openssl") {
+        print.info("[tls-anchor-cache] SKIP: openssl CLI not available");
+        return false;
+    }
+    if _timeout_cmd().length == 0 {
+        print.info("[tls-anchor-cache] SKIP: no timeout/gtimeout to reap the blocking s_server");
+        return false;
+    }
+    return true;
+}
+
+test "runtime tls: anchor cache survives an intervening verify failure in-process" ![io] {
+    if !_skip_ready() {
+        assert true;
+        return;
+    }
+    let tcmd = _timeout_cmd();
+    let port_a: i64 = 18910;
+    let port_a_str = "18910";
+    let port_b: i64 = 18911;
+    let port_b_str = "18911";
+
+    let dir = _scratch_root() + "/sfn-tls-anchor-cache-3conn";
+    fs.createDirectory(dir, true);
+    let dir_a = dir + "/server-a";
+    let dir_b = dir + "/server-b";
+    fs.createDirectory(dir_a, true);
+    fs.createDirectory(dir_b, true);
+    // Two DISTINCT self-signed certs so a request to B cannot verify
+    // against A's CAFILE — the property this test pins.
+    assert _gen_cert(dir_a, "localhost");
+    assert _gen_cert(dir_b, "localhost");
+
+    let main_path = _write_three_conn_client(dir, port_a_str, port_b_str);
+    let client_bin = _build_bin(main_path, dir + "/client-bin");
+    assert client_bin.length > 0;
+
+    let _ha = _spawn_server(dir_a, port_a_str, tcmd);
+    let _hb = _spawn_server(dir_b, port_b_str, tcmd);
+    assert _await_listening(port_a);
+    assert _await_listening(port_b);
+
+    // CAFILE trusts ONLY A's cert; B's cert is a different self-signed
+    // chain and stays untrusted for the whole process.
+    let out = _run_stdout(client_bin, _trusted_env(dir_a + "/cert.pem"));
+
+    assert contains(out, "c1:ok=true");
+    assert contains(out, "c2:ok=false");
+    // `ok=false` alone cannot distinguish "the cache did not short-circuit
+    // verification" from "something unrelated went wrong" — pin the reason
+    // too, mirroring `runtime_tls_verify_failure_test.sfn`'s own guard
+    // (its line 442) against exactly that ambiguity.
+    assert contains(out, "c2:err=cert-verify");
+    assert contains(out, "c3:ok=true");
+
+    let _rmd = process.run(["rm", "-rf", dir]);
+}
+
+test "runtime tls: a trust-store load failure is never cached (SFN-816 stays fixed)" ![io] {
+    if !_skip_ready() {
+        assert true;
+        return;
+    }
+    let tcmd = _timeout_cmd();
+    let port_a: i64 = 18912;
+    let port_a_str = "18912";
+
+    let dir = _scratch_root() + "/sfn-tls-anchor-cache-negcache";
+    fs.createDirectory(dir, true);
+    assert _gen_cert(dir, "localhost");
+
+    let main_path = _write_two_conn_client(dir, port_a_str);
+    let client_bin = _build_bin(main_path, dir + "/client-bin");
+    assert client_bin.length > 0;
+
+    let _handle = _spawn_server(dir, port_a_str, tcmd);
+    assert _await_listening(port_a);
+
+    // `SAILFIN_TLS_CAFILE` names a path that never resolves, for both
+    // connections in this one process — a cached negative result would let
+    // the second connection skip `_tls_fail`, so `x509_verify_chain` would
+    // report `no-anchor` against the wrongly-cached empty set and
+    // `_tls_fail_if_unset` (`tls.sfn:1395`) would write `cert-verify`
+    // instead of `trust-store`. Its own server, port 18912, distinct from
+    // the property-1 test's 18910/18911: `_spawn_server` wraps `s_server`
+    // in a bare `timeout` with no kill, so a shared port would silently let
+    // this test's `_await_listening` succeed against the OTHER test's
+    // still-running server instead of its own.
+    let out = _run_stdout(client_bin, _trusted_env(dir + "/does-not-exist.pem"));
+
+    assert contains(out, "n1:err=trust-store");
+    assert contains(out, "n2:err=trust-store");
+
+    let _rmd = process.run(["rm", "-rf", dir]);
+}
