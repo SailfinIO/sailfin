@@ -126,17 +126,34 @@ there is.
 
 - **Bounded SFEP** — a handful of leaves, unlikely to grow: list the Linear issue
   identifiers. `tracking: SFN-774, SFN-775, SFN-776, SFN-777`.
-- **Epic-scale SFEP** — one whose Linear Project keeps accruing issues: point at
-  the **Project URL**, and enumerate under `design-gates:` only the design-note
-  issues whose verdicts bind implementation. SFEP-0048 is the worked example.
+- **Epic-scale SFEP whose Project exists to implement it and nothing else** —
+  point at the **Project URL**, and enumerate under `design-gates:` only the
+  design-note issues whose verdicts bind implementation. SFEP-0048 is the worked
+  example.
 
 The dividing line is not a count, it is whether the list can stay true. A
 hand-copied list of identifiers is a mirror of a Linear rollup, and a mirror
 nobody re-syncs on every merge is worse than no list at all: a reader trusts it
 and gets a stale answer. SFEP-0048's list sat at 21 entries while its Project
-held roughly 65. **Noticing a list has drifted is the signal to convert it to the
-URL form, not to restate it** — restating only resets the clock on the same
-failure.
+held roughly 65. Where the URL form applies, **noticing a list has drifted is the
+signal to convert it rather than restate it** — restating only resets the clock
+on the same failure.
+
+**The URL form requires the Project to be 1:1 with the SFEP, and often it is
+not.** A Project may be a long-running container serving several designs, in
+which case its URL over-claims: it would tell a reader that the whole Project
+implements this one proposal. A survey of six accepted SFEPs (2026-08-12) found
+the split runs both ways — SFEP-0061 and SFEP-0070 each own their Project
+exactly, while SFEP-0069's eleven-issue zeroization arc sits inside a
+sixty-eight-issue Project carrying the entire crypto/TLS build-out, and
+SFEP-0068's four-issue cross-target arc is one thread in a seventeen-issue
+Makefile-retirement Project.
+
+For a **slice** like those, the identifier list is the correct form and is *not*
+drifting — it is scoped to the slice, and the gap between it and the Project
+total is the other designs' work, not omissions. Measure before converting: a
+large gap is evidence of drift only once you have established that the Project
+implements this SFEP and nothing else.
 
 Three rules on the value itself:
 
