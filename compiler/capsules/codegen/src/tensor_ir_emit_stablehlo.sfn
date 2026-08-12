@@ -1,4 +1,4 @@
-// compiler/src/tensor_ir_emit_stablehlo.sfn
+// compiler/capsules/codegen/src/tensor_ir_emit_stablehlo.sfn
 //
 // StableHLO text emission for the shape-typed tensor IR — the first substrate
 // exit (Track A). The tensor IR's small op set is lowered to portable,

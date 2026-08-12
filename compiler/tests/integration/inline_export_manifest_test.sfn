@@ -9,7 +9,7 @@
 // (the one introducer arm with branching `extern`/`unsafe`/`var` lookahead).
 import { parse_program } from "sfn/syntax";
 
-import { emit_native_text_with_module_name } from "../../src/emit_native";
+import { emit_native_text_with_module_name } from "../../src/codegen_driver";
 import { index_of } from "../../src/string_utils";
 
 fn _emit(source: string) -> string ![io] {

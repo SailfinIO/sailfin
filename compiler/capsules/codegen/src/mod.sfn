@@ -1,0 +1,37 @@
+// sfn/codegen — toolchain-internal target-neutral IR production facade.
+//
+// Callers complete parsing and capture analysis before entering this capsule.
+// The capsule returns source or IR artifacts plus diagnostic data; the compiler
+// driver owns publication, process execution, target selection, and linking.
+export {
+    EmitNativeLines,
+    EmitNativeResult,
+    emit_native,
+    emit_native_diag_lines,
+    emit_native_lines_with_module_name,
+    emit_native_module_with_module_name,
+    emit_native_text_with_module_name,
+    emit_native_with_module_name
+} from "./emit_native";
+
+export { emit_program } from "./emitter_sailfin";
+
+export {
+    LiftResult,
+    closure_pair_marker,
+    closure_sentinel_type_text,
+    lift_non_capturing_lambdas,
+    lifted_function_name
+} from "./lambda_lowering";
+
+export { TypedSsaProduceResult, produce_typed_ssa_declarations } from "./typed_ssa_produce";
+
+export {
+    TensorBuffer,
+    TensorExecuteResult,
+    TensorScalarLowerResult,
+    execute_tensor_function_scalar,
+    lower_tensor_module_to_native
+} from "./tensor_ir_lower_scalar";
+
+export { emit_stablehlo_module } from "./tensor_ir_emit_stablehlo";

@@ -1,4 +1,4 @@
-// compiler/src/lambda_lowering.sfn
+// compiler/capsules/codegen/src/lambda_lowering.sfn
 //
 // Lambda-lifting pass for non-capturing lambdas (issue #686, M1.5
 // A3-part-1 of #450). Runs as a pre-pass over the AST inside
@@ -38,7 +38,7 @@
 // `FunctionDeclaration` (in synthesis order). The counter starts at
 // zero per module — LLVM `internal` linkage on synthesised fns
 // keeps cross-module name collisions impossible.
-import { LambdaCaptureRecord, analyze_lambda_captures } from "sfn/analyzer/typecheck_captures";
+import { LambdaCaptureRecord } from "sfn/analyzer";
 import { percent_escape_capture_text } from "sfn/ir";
 import {
     Block,
@@ -126,11 +126,9 @@ struct _LiftedFnResult {
     statement: Statement;
 }
 
-// Public entry point. `analyze_lambda_captures` is invoked here so
-// callers don't have to thread the records list in — and so the
-// pass owns the precondition that records key by body span.
-fn lift_non_capturing_lambdas(program: Program) -> LiftResult {
-    let records = analyze_lambda_captures(program);
+// Public entry point. Capture analysis is complete before codegen begins;
+// records arrive explicitly and remain keyed by the lambda body span.
+fn lift_non_capturing_lambdas(program: Program, records: LambdaCaptureRecord[]) -> LiftResult {
     let signatures = build_fn_signature_table(program);
     let bindings = build_binding_table(program);
     let mut ctx: LiftContext = LiftContext {
@@ -376,7 +374,7 @@ fn _find_capture_record(records: LambdaCaptureRecord[], lambda: Expression) -> L
 
 // True only when a matching record exists AND that record reports
 // zero captures. A missing record (which would indicate a programmer
-// error in `analyze_lambda_captures`) keeps the lambda in
+// error in the preceding capture analysis keeps the lambda in
 // `<lambda>`-placeholder form — refusing to lift is safer than
 // silently dropping captures.
 fn _is_non_capturing(records: LambdaCaptureRecord[], lambda: Expression) -> boolean {
@@ -969,7 +967,7 @@ fn _rewrite_lambda(ctx: LiftContext, lambda_in: Expression, owned_env: boolean) 
     let lambda = backfill_lambda_return_from_body(lambda_in);
     let record = _find_capture_record(ctx.records, lambda);
     if record == null {
-        // No record means `analyze_lambda_captures` did not see this
+        // No record means the preceding capture analysis did not see this
         // lambda — leave it untouched so the placeholder fallback in
         // `format_expression` (or a downstream pass) handles it.
         return ExpressionRewriteResult { ctx: ctx, expression: lambda };

@@ -18,7 +18,7 @@ import { contains } from "sfn/strings";
 import { parse_program } from "sfn/syntax";
 
 import { empty_llvm_import_context, resolve_llvm_provider_context } from "../../src/build/llvm_provider_context";
-import { emit_native_text_with_module_name } from "../../src/emit_native";
+import { emit_native_text_with_module_name } from "../../src/codegen_driver";
 import {
     emit_bf16_narrow_from_double,
     emit_bf16_narrow_from_float,

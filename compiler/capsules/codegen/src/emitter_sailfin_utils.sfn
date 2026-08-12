@@ -1,4 +1,4 @@
-// compiler/src/emitter_sailfin_utils.sfn
+// compiler/capsules/codegen/src/emitter_sailfin_utils.sfn
 //
 // Text utilities and TextBuilder for the Sailfin-to-Sailfin code emitter.
 // Extracted from emitter_sailfin.sfn to keep modules focused and under size.
@@ -22,9 +22,8 @@ export {
     tokens_to_source
 };
 
+import { char_at_index as char_at, substring } from "sfn/strings";
 import { Token } from "sfn/syntax";
-
-import { char_at, substring } from "./string_utils";
 
 struct TextBuilder {
     lines: string[];

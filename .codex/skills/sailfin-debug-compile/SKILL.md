@@ -19,7 +19,7 @@ Map the symptom to the canonical pipeline stage:
 
 1. Lexer/parser: `compiler/src/lexer.sfn`, `compiler/src/parser.sfn`
 2. AST/type/effects: `compiler/src/ast.sfn`, `compiler/capsules/analyzer/src/typecheck/`, `compiler/capsules/analyzer/src/effect_checker/`
-3. Native IR/emitter: `compiler/src/native_ir.sfn`, `compiler/src/emit_native.sfn`
+3. Native IR/emitter: `compiler/capsules/ir/src/native_ir.sfn`, `compiler/capsules/codegen/src/emit_native.sfn`
 4. LLVM lowering: `compiler/src/llvm/lowering/`
 5. Runtime/prelude: `runtime/prelude.sfn`, `runtime/sfn/`
 6. Build orchestration: `compiler/src/cli/`, `compiler/src/capsule_resolver.sfn` (orchestration only; no fixups)

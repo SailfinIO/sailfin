@@ -140,6 +140,17 @@ fn split_source_lines(source: string) -> string[] {
     return _dr_split_lines(source);
 }
 
+// Driver-owned presentation for analyzer re-export findings. Codegen returns
+// diagnostic data and never writes to stderr or persistent storage.
+fn report_reexport_violations(violations: string[]) -> void ![io] {
+    let mut index: int = 0;
+    loop {
+        if index >= violations.length { break; }
+        print.err("[emit-native] " + violations[index]);
+        index += 1;
+    }
+}
+
 fn _dr_join_lines(lines: string[]) -> string {
     if lines.length == 0 { return ""; }
     let mut result: string = lines[0];

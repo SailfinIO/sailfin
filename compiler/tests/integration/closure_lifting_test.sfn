@@ -35,7 +35,7 @@ import {
     closure_sentinel_type_text,
     lift_non_capturing_lambdas,
     lifted_function_name
-} from "../../src/lambda_lowering";
+} from "../../src/codegen_driver";
 import { ClosurePairResult, decode_captures, emit_closure_pair_aggregate } from "../../src/llvm/closures";
 
 // ── Closure-pair aggregate emission ──────────────────────────────────

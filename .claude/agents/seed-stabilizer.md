@@ -52,7 +52,7 @@ See `docs/proposals/0006-build-architecture.md` for the full root cause analysis
 1. **Read the error output** — identify which module fails and the exact error (clang type error, linker undefined symbol, etc.)
 2. **Inspect the generated `.ll`** — look at the broken IR in `build/native/modules/` or regenerate with the seed
 3. **Trace back to the compiler stage** that emitted the bad IR:
-   - `.sfn-asm` structure issues → `compiler/src/emit_native.sfn`
+   - `.sfn-asm` structure issues → `compiler/capsules/codegen/src/emit_native.sfn`
    - LLVM lowering issues → `compiler/src/llvm/lowering/` and `compiler/src/llvm/expression_lowering/`
    - Type mapping issues → `compiler/src/llvm/types.sfn`, `type_context.sfn`
    - Control flow → `compiler/src/llvm/lowering/emission.sfn`, `phi.sfn`
@@ -72,7 +72,7 @@ See `docs/proposals/0006-build-architecture.md` for the full root cause analysis
 | File | Role |
 |---|---|
 | `compiler/src/cli/`, `compiler/src/capsule_resolver.sfn` | Sailfin-native build driver (orchestration only, no fixups) |
-| `compiler/src/emit_native.sfn` | `.sfn-asm` IR emitter |
+| `compiler/capsules/codegen/src/emit_native.sfn` | `.sfn-asm` IR emitter |
 | `compiler/src/llvm/lowering/entrypoints.sfn` | LLVM lowering entry point |
 | `compiler/src/llvm/lowering/emission.sfn` | Function/module emission |
 | `compiler/src/llvm/lowering/phi.sfn` | Phi node generation |

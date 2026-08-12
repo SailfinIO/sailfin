@@ -560,7 +560,7 @@ the file list is the implementation map for R.1–R.5.)
 | Parser | `compiler/capsules/syntax/src/parser/expressions.sfn` (~`:495`) | `?` postfix arm in `parse_postfix_chain` |
 | AST | `compiler/capsules/syntax/src/ast.sfn` | `Expression.TryOperator` variant |
 | Type checker | `compiler/src/typecheck.sfn` | `?` rules + 3 diagnostics; generic-enum monomorphisation (R.2) |
-| Emitter | `compiler/src/emit_native.sfn` | `TryOperator` → `match` + `return Err` desugaring |
+| Emitter | `compiler/capsules/codegen/src/emit_native.sfn` | `TryOperator` → `match` + `return Err` desugaring |
 | LLVM lowering | `compiler/src/llvm/lowering/lowering_phase_types.sfn`, `instructions_match.sfn` | per-instantiation `Result` layout (R.2); no change to `instructions_try.sfn` |
 | Effect checker | `compiler/src/effect_checker.sfn` | none (Q5) |
 | Tests | `compiler/tests/integration/result_types_test.sfn` (+ new unit tests) | replace union stopgap; add `?` round-trip + must-error cases |

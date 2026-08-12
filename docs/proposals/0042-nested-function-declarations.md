@@ -230,7 +230,7 @@ Three sub-changes, all additive:
    scope with the fn's parameters and walks the body — reuse its
    `extend_with_parameters` shape to build the restricted scope.
 
-#### S3 — Emit / lift (`compiler/src/lambda_lowering.sfn`, called from `emit_native.sfn`)
+#### S3 — Emit / lift (`compiler/capsules/codegen/src/lambda_lowering.sfn`, called from `emit_native.sfn`)
 
 Reuse the **shape** of `lift_non_capturing_lambdas` (`lambda_lowering.sfn:123`,
 invoked from `emit_native.sfn:111,166`) but with a simpler target. That pass

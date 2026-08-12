@@ -27,7 +27,7 @@ Implement the feature **one pipeline stage at a time**, following the architect'
 2. **AST** (`compiler/src/ast.sfn`) — new node types
 3. **Type Checker** (`compiler/capsules/analyzer/src/typecheck/`) — type rules and constraints
 4. **Effect Checker** (`compiler/capsules/analyzer/src/effect_checker/`) — if this involves effects
-5. **Native Emitter** (`compiler/src/emit_native.sfn`) — `.sfn-asm` emission
+5. **Native Emitter** (`compiler/capsules/codegen/src/emit_native.sfn`) — `.sfn-asm` emission
 6. **LLVM Lowering** (`compiler/src/llvm/`) — LLVM IR generation
 7. **Tests** — unit tests in `compiler/tests/unit/`, integration tests in `compiler/tests/integration/`. End-to-end tests go in `compiler/tests/e2e/` as `*_test.sfn` using `sfn/test` — **never** new bash scripts (the `compiler/tests/e2e/*.sh` surface was fully migrated and deleted; see `.claude/rules/no-bash-e2e.md` for the native e2e recipe, e.g. `guillermo_test.sfn`)
 

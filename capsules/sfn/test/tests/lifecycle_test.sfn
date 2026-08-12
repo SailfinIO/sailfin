@@ -3,7 +3,7 @@
 //
 // Lifecycle hooks are LANGUAGE SYNTAX (block declarations), not a library
 // API. `before_all`/`before_each`/`after_each`/`after_all` blocks lower to
-// `hook:<kind>` symbols (`compiler/src/emit_native.sfn`) that the LLVM
+// `hook:<kind>` symbols (`compiler/capsules/codegen/src/emit_native.sfn`) that the LLVM
 // test-harness synthesizer (`compiler/src/llvm/lowering/lowering_core.sfn`)
 // discovers statically and calls *directly* — no runtime registry, no
 // fn-value indirection.

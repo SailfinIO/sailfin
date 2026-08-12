@@ -44,6 +44,8 @@ import {
     TypeAnnotation
 } from "sfn/syntax";
 
+import { LambdaCaptureRecord } from "./capture_model";
+
 // One scope-visible binding the walk has accumulated so far.
 // Mirrors the data the unit tests need to verify (`type_text`,
 // `mutable`) plus the by-value/by-pointer hint stage A2 will pick
@@ -72,13 +74,6 @@ struct LocalBinding {
 // human-readable hint for diagnostics and for tests to assert
 // against without depending on exact line/column numbers in source
 // fixtures.
-struct LambdaCaptureRecord {
-    parameter_names: string[];
-    captures: Capture[];
-    body_start_line: int;
-    body_start_column: int;
-}
-
 // Internal walk result. `free` is the set of identifier names
 // referenced in the walked subtree that are NOT bound by lets
 // inside the subtree. The caller subtracts its own bindings before

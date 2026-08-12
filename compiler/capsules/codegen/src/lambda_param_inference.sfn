@@ -1,4 +1,4 @@
-// compiler/src/lambda_param_inference.sfn
+// compiler/capsules/codegen/src/lambda_param_inference.sfn
 //
 // Untyped-lambda parameter/return type backfill (issue #1683, bundled with
 // the SFEP-0029 `fn(x) => expr` short form).

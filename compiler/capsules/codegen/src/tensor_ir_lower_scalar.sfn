@@ -1,4 +1,4 @@
-// compiler/src/tensor_ir_lower_scalar.sfn
+// compiler/capsules/codegen/src/tensor_ir_lower_scalar.sfn
 //
 // Deterministic scalar-reference exit for shape-typed tensor IR. It emits
 // ordinary native-IR loops and executes the same graph as the CPU numerical

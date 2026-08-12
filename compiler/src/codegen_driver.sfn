@@ -1,0 +1,66 @@
+// Driver adapter that completes capture analysis before target-neutral
+// codegen. The sfn/codegen capsule consumes explicit analysis data and remains
+// free of parser, capture-analysis, filesystem, process, and target authority.
+import { LambdaCaptureRecord } from "sfn/analyzer";
+import { analyze_lambda_captures } from "sfn/analyzer/typecheck_captures";
+import {
+    EmitNativeLines,
+    EmitNativeResult,
+    LiftResult,
+    closure_pair_marker,
+    closure_sentinel_type_text,
+    emit_native as codegen_emit_native,
+    emit_native_diag_lines,
+    emit_native_lines_with_module_name as codegen_emit_native_lines,
+    emit_native_module_with_module_name as codegen_emit_native_module,
+    emit_native_text_with_module_name as codegen_emit_native_text,
+    emit_native_with_module_name as codegen_emit_native_with_module,
+    lift_non_capturing_lambdas as codegen_lift_lambdas,
+    lifted_function_name
+} from "sfn/codegen";
+import { NativeModule } from "sfn/ir";
+import { Program } from "sfn/syntax";
+
+fn _capture_records(program: Program) -> LambdaCaptureRecord[] {
+    return analyze_lambda_captures(program);
+}
+
+fn emit_native(program: Program) -> EmitNativeResult {
+    return codegen_emit_native(program, _capture_records(program));
+}
+
+fn emit_native_with_module_name(program: Program, module_name: string) -> EmitNativeResult {
+    return codegen_emit_native_with_module(program, module_name, _capture_records(program));
+}
+
+fn emit_native_lines_with_module_name(program: Program, module_name: string) -> EmitNativeLines {
+    return codegen_emit_native_lines(program, module_name, _capture_records(program));
+}
+
+fn emit_native_text_with_module_name(program: Program, module_name: string) -> string {
+    return codegen_emit_native_text(program, module_name, _capture_records(program));
+}
+
+fn emit_native_module_with_module_name(program: Program, module_name: string) -> NativeModule {
+    return codegen_emit_native_module(program, module_name, _capture_records(program));
+}
+
+fn lift_non_capturing_lambdas(program: Program) -> LiftResult {
+    return codegen_lift_lambdas(program, _capture_records(program));
+}
+
+export {
+    EmitNativeLines,
+    EmitNativeResult,
+    LiftResult,
+    closure_pair_marker,
+    closure_sentinel_type_text,
+    emit_native,
+    emit_native_diag_lines,
+    emit_native_lines_with_module_name,
+    emit_native_module_with_module_name,
+    emit_native_text_with_module_name,
+    emit_native_with_module_name,
+    lift_non_capturing_lambdas,
+    lifted_function_name
+};

@@ -7,9 +7,8 @@
 //   2. a `?` in an UNSUPPORTED position (e.g. a `throw` expression) is left in
 //      place so `emit_function` raises its diagnostic instead of silently
 //      emitting `<TryOperator>` garbage.
+import { block_contains_try, desugar_try_in_block, expression_contains_try } from "sfn/codegen/emit_native_desugar_try";
 import { Block, Expression, Statement } from "sfn/syntax";
-
-import { block_contains_try, desugar_try_in_block, expression_contains_try } from "../../src/emit_native_desugar_try";
 
 fn _try_of(name: string) -> Expression {
     return Expression.TryOperator {

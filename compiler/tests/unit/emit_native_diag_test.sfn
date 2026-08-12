@@ -16,7 +16,7 @@ import {
     emit_native_diag_lines,
     emit_native_lines_with_module_name,
     emit_native_with_module_name
-} from "../../src/emit_native";
+} from "../../src/codegen_driver";
 import { lower_native_lines_to_llvm_artifact_with_context_and_provider } from "../../src/llvm/lowering/entrypoints";
 import { index_of } from "../../src/string_utils";
 

@@ -1,7 +1,7 @@
 // compiler/capsules/analyzer/src/reexport_check.sfn
 //
 // Implicit re-export validation — pure AST analysis, shared by the build
-// path (`main.sfn` via `emit_native.sfn:report_reexport_violations`) and
+// path (`main.sfn` via `diagnostics_render.sfn`) and
 // the `sfn check` fast path (`tools/check.sfn`).
 //
 // Refuse `export { X };` where X is only imported (no local definition) and

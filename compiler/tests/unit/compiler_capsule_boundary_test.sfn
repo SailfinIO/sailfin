@@ -49,23 +49,7 @@ fn _boundary_exception(importer: string, importee: string, seam: string) -> Boun
     };
 }
 
-fn _boundary_exceptions() -> BoundaryException[] {
-    let mut out: BoundaryException[] = [];
-
-    // SFEP-0020 §3.5.7: the remaining non-LLVM generic monolith string helpers
-    // have not yet graduated to sfn/strings or a role-owned implementation.
-    // Keep every importer exact so repairs make this inventory stale.
-    let compat = "generic string helpers remain monolith-owned (SFEP-0020 §3.5.7)";
-    let remaining_compat_importers: string[] = ["emit_native", "emit_native_layout", "emit_native_state", "emitter_sailfin_utils"];
-    let mut remaining_compat_i: int = 0;
-    loop {
-        if remaining_compat_i >= remaining_compat_importers.length { break; }
-        out.push(_boundary_exception(remaining_compat_importers[remaining_compat_i], "string_utils", compat));
-        remaining_compat_i += 1;
-    }
-
-    return out;
-}
+fn _boundary_exceptions() -> BoundaryException[] { return []; }
 
 fn _authority_exception(module: string, token: string, expected_count: int, seam: string) -> AuthorityException {
     return AuthorityException {
@@ -76,17 +60,7 @@ fn _authority_exception(module: string, token: string, expected_count: int, seam
     };
 }
 
-fn _append_effect_authority_exceptions(initial: AuthorityException[]) -> AuthorityException[] {
-    let mut out = initial;
-    let seam = "internal compiler roles still declare I/O effects before capability-free extraction (SFEP-0020 §4)";
-    out.push(_authority_exception("emit_native", "effect:io", 1, seam));
-    return out;
-}
-
-fn _authority_exceptions() -> AuthorityException[] {
-    let out: AuthorityException[] = [];
-    return _append_effect_authority_exceptions(out);
-}
+fn _authority_exceptions() -> AuthorityException[] { return []; }
 
 fn _strip_sfn(path: string) -> string {
     if !ends_with(path, ".sfn") { return path; }
@@ -178,6 +152,7 @@ fn _is_driver_module_id(id: string) -> boolean {
         || id == "capsule_import_scan"
         || id == "capsule_names"
         || id == "cli_selfhost"
+        || id == "codegen_driver"
         || id == "diagnostics_json"
         || id == "diagnostics_render"
         || id == "dist_manifest"
@@ -212,12 +187,6 @@ fn _module_role(path: string) -> string {
     if id.length == 0 { return ""; }
 
     if _is_driver_module_id(id) { return ROLE_DRIVER; }
-    if starts_with(id, "emit_native") || starts_with(id, "emitter_sailfin")
-        || id == "lambda_lowering"
-        || id == "lambda_param_inference"
-        || id == "typed_ssa_produce"
-        || id == "tensor_ir_emit_stablehlo"
-        || id == "tensor_ir_lower_scalar" { return ROLE_CODEGEN; }
     if starts_with(id, "llvm/") { return ROLE_LLVM; }
     return "";
 }
@@ -1146,7 +1115,8 @@ test "capsule roles: classification survives physical compiler capsule moves" {
     assert _module_role("compiler/capsules/ir/src/lowering_diagnostic.sfn") == ROLE_IR;
     assert _module_role("compiler/src/native_ir.sfn") == "";
     assert _module_role("compiler/src/intrinsic_effects.sfn") == "";
-    assert _module_role("compiler/capsules/codegen/src/emit.sfn") == ROLE_CODEGEN;
+    assert _module_role("compiler/capsules/codegen/src/emit_native.sfn") == ROLE_CODEGEN;
+    assert _module_role("compiler/src/emit_native.sfn") == "";
     assert _module_role("compiler/capsules/codegen-llvm/src/lowering/mod.sfn") == ROLE_LLVM;
     assert _edge_module_id("compiler/capsules/analyzer/src/type_interner.sfn") == "type_interner";
     assert _edge_module_id("compiler/capsules/codegen-llvm/src/lowering/mod.sfn") == "llvm/lowering/mod";
@@ -1178,6 +1148,19 @@ test "compiler driver: workspace, process, assembly, and final-link owners class
     assert _module_role("compiler/src/cli/commands/build.sfn") == ROLE_DRIVER;
     assert _module_role("compiler/src/typecheck_import_loader.sfn") == ROLE_DRIVER;
     assert _module_role("compiler/src/emit_helpers.sfn") == ROLE_DRIVER;
+    assert _module_role("compiler/src/codegen_driver.sfn") == ROLE_DRIVER;
+}
+
+test "codegen capsule: manifest is private, capability-free, and role-bounded" ![io] {
+    let manifest = fs.readFile("compiler/capsules/codegen/capsule.toml");
+    assert contains(manifest, "name = \"sfn/codegen\"");
+    assert contains(manifest, "publish = false");
+    let manifest_sections = split(manifest, "[dependencies]");
+    assert manifest_sections.length == 2;
+    let dependency_and_rest = split(manifest_sections[1], "[capabilities]");
+    assert dependency_and_rest.length == 2;
+    assert trim(dependency_and_rest[0]) == "\"sfn/syntax\" = \"*\"\n\"sfn/analyzer\" = \"*\"\n\"sfn/ir\" = \"*\"\n\"sfn/strings\" = \"*\"";
+    assert contains(manifest, "required = []");
 }
 
 test "capsule diagnostics: new reverse edge identifies importer, importee, and role rule" {
@@ -1350,6 +1333,22 @@ test "capsule boundaries: compiler imports obey the role graph and exact excepti
         if importer_role == ROLE_LLVM { llvm_count += 1; }
         if importer_role == ROLE_DRIVER { driver_count += 1; }
         let source = fs.readFile(importer);
+        if importer_role == ROLE_CODEGEN {
+            let frontend_apis: string[] = ["analyze_lambda_captures", "parse_program"];
+            let mut frontend_api_index: int = 0;
+            loop {
+                if frontend_api_index >= frontend_apis.length { break; }
+                let frontend_api = frontend_apis[frontend_api_index];
+                frontend_api_index += 1;
+                if contains(source, frontend_api) {
+                    failures.push("codegen frontend re-entry: module '"
+                        + importer
+                        + "' references '"
+                        + frontend_api
+                        + "'; violated rule: capture analysis and parsing finish before the IR boundary");
+                }
+            }
+        }
         if importer_role == ROLE_LLVM {
             // SFEP-0020 §3.5.3: target providers own symbol and ABI lowering,
             // not target-neutral intrinsic identity or semantic effects. IR is
@@ -1440,9 +1439,19 @@ test "capsule boundaries: compiler imports obey the role graph and exact excepti
         let mut si: int = 0;
         loop {
             if si >= specs.length { break; }
-            let importee = _importee_path(importer, specs[si]);
+            let spec = specs[si];
+            let importee = _importee_path(importer, spec);
             si += 1;
             if importee.length == 0 { continue; }
+            if importer_role == ROLE_CODEGEN {
+                if contains(spec, "typecheck_captures") || contains(spec, "/parser") {
+                    failures.push("codegen frontend re-entry: module '"
+                        + importer
+                        + "' imports '"
+                        + spec
+                        + "'; violated rule: capture analysis and parsing finish before the IR boundary");
+                }
+            }
             let importee_role = _importee_role(importee);
             if importee_role.length == 0 { continue; }
             if _role_import_allowed(importer_role, importee_role) { continue; }

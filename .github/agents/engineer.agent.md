@@ -33,7 +33,7 @@ You are the Sailfin Engineer agent. Your role is to implement features, fix bugs
 
 1. Update `compiler/capsules/syntax/src/parser/mod.sfn` (or files in `compiler/capsules/syntax/src/parser/`) to recognize new syntax
 2. Add AST node(s) to `compiler/capsules/syntax/src/ast.sfn`
-3. Update `compiler/src/emit_native.sfn` to emit `.sfn-asm`
+3. Update `compiler/capsules/codegen/src/emit_native.sfn` to emit `.sfn-asm`
 4. Extend `compiler/src/llvm/lowering/` for LLVM IR generation
 5. Add regression tests to `compiler/tests/`
 6. Update the language spec: `site/src/content/docs/docs/reference/spec/NN-*.md` chapter file if shipped, or `.../reference/preview/*.md` page if planned
@@ -63,7 +63,7 @@ You are the Sailfin Engineer agent. Your role is to implement features, fix bugs
 | `compiler/capsules/syntax/src/parser/mod.sfn` | Parser entry |
 | `compiler/capsules/analyzer/src/typecheck/` | Type checking |
 | `compiler/capsules/analyzer/src/effect_checker/` | Effect validation |
-| `compiler/src/emit_native.sfn` | `.sfn-asm` emitter |
+| `compiler/capsules/codegen/src/emit_native.sfn` | `.sfn-asm` emitter |
 | `compiler/src/llvm/lowering/entrypoints.sfn` | LLVM lowering entry |
 | `runtime/prelude.sfn` | Runtime library |
 | `runtime/` | Runtime capsule root (`runtime/capsule.toml`; Sailfin sources under `runtime/sfn/` and `runtime/prelude.sfn`) |

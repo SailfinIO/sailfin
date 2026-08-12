@@ -168,14 +168,14 @@ containing `:` in cached `->` IR (e.g., `handler -> fn(req: Request) -> Response
 
 **Sailfin source emitter:**
 
-- `compiler/src/emitter_sailfin_expr.sfn` — `format_type_annotation()` returns
+- `compiler/capsules/codegen/src/emitter_sailfin_expr.sfn` — `format_type_annotation()` returns
   `": " + text`; `format_return_type_annotation()` returns `" -> " + text`.
-- `compiler/src/emitter_sailfin.sfn` — field and parameter rendering uses `": "`.
+- `compiler/capsules/codegen/src/emitter_sailfin.sfn` — field and parameter rendering uses `": "`.
 
 **Native IR emitter:**
 
-- `compiler/src/emit_native_format.sfn` — parameter and field in `.sfn-asm`.
-- `compiler/src/emit_native.sfn` — `.param` metadata.
+- `compiler/capsules/codegen/src/emit_native_format.sfn` — parameter and field in `.sfn-asm`.
+- `compiler/capsules/codegen/src/emit_native.sfn` — `.param` metadata.
 - `compiler/src/llvm/rendering_helpers.sfn` — interface parameter rendering.
 
 **Native IR parsers** (accept both, earliest wins):

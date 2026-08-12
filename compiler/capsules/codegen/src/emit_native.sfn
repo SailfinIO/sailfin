@@ -1,4 +1,4 @@
-// compiler/src/emit_native.sfn
+// compiler/capsules/codegen/src/emit_native.sfn
 //
 // Prototype native backend that synthesises a textual intermediate format.
 // The current goal is to surface deterministic structure that future LLVM
@@ -10,9 +10,11 @@
 //   emit_native_state.sfn  — TextBuilder, NativeState, shared utilities
 //   emit_native_format.sfn — expression/signature/specifier formatting
 //   emit_native_layout.sfn — struct/enum layout computation & manifest
+import { LambdaCaptureRecord } from "sfn/analyzer";
 import { Diag, Span } from "sfn/analyzer/diagnostic";
 import { NativeArtifact, NativeModule } from "sfn/ir";
 import { lines_to_native_text } from "sfn/ir";
+import { char_code_at as char_code } from "sfn/strings";
 import {
     Block,
     Decorator,
@@ -84,7 +86,6 @@ import {
 // `mod.sfn` barrel audit lands, any *new* import from this
 // subtree should likewise target the leaf file directly.
 import { lift_non_capturing_lambdas } from "./lambda_lowering";
-import { char_code } from "./string_utils";
 
 // ── Public data structures ───────────────────────────────────────────
 struct EmitNativeResult {
@@ -105,8 +106,8 @@ struct EmitNativeLines {
 }
 
 // ── Entry points ─────────────────────────────────────────────────────
-fn emit_native(program: Program) -> EmitNativeResult {
-    return emit_native_with_module_name(program, "main");
+fn emit_native(program: Program, lambda_captures: LambdaCaptureRecord[]) -> EmitNativeResult {
+    return emit_native_with_module_name(program, "main", lambda_captures);
 }
 
 // Shared emit core for both entry points. Private, so the `NativeState`
@@ -138,13 +139,13 @@ fn _emit_native_state(lifted_program: Program, layout_context: LayoutContext, mo
     return state;
 }
 
-fn emit_native_with_module_name(program: Program, module_name: string) -> EmitNativeResult {
+fn emit_native_with_module_name(program: Program, module_name: string, lambda_captures: LambdaCaptureRecord[]) -> EmitNativeResult {
     // Lambda lifting pre-pass (issue #686): every non-capturing
     // `Expression.Lambda` becomes a synthesised top-level
     // `FunctionDeclaration` named `sfn_lambda_<N>`, and the lambda
     // expression site is rewritten to a `<closure_pair @sfn_lambda_<N> null>`
     // marker. Capturing lambdas are left untouched until #687.
-    let lifted = lift_non_capturing_lambdas(program);
+    let lifted = lift_non_capturing_lambdas(program, lambda_captures);
     let lifted_program = lifted.program;
 
     let layout_context = build_layout_context(lifted_program);
@@ -190,9 +191,9 @@ fn emit_native_with_module_name(program: Program, module_name: string) -> EmitNa
 // the known exception, since its `artifacts[0].contents` is the joined text
 // (`builder_to_string` above). That is the fallback carrier and predates the
 // rule — it is not a licence to add a second one.
-fn emit_native_lines_with_module_name(program: Program, module_name: string) -> EmitNativeLines {
+fn emit_native_lines_with_module_name(program: Program, module_name: string, lambda_captures: LambdaCaptureRecord[]) -> EmitNativeLines {
     // Issue #686 — match the lifting in `emit_native_with_module_name`.
-    let lifted = lift_non_capturing_lambdas(program);
+    let lifted = lift_non_capturing_lambdas(program, lambda_captures);
     let lifted_program = lifted.program;
 
     let layout_context = build_layout_context(lifted_program);
@@ -219,12 +220,12 @@ fn emit_native_lines_with_module_name(program: Program, module_name: string) -> 
 // holds. DISCARDS the diagnostic sidecar — a caller that needs to report
 // emit-native diagnostics must use `emit_native_lines_with_module_name` and
 // join with `lines_to_native_text` itself (SFN-608).
-fn emit_native_text_with_module_name(program: Program, module_name: string) -> string {
-    return lines_to_native_text(emit_native_lines_with_module_name(program, module_name).lines);
+fn emit_native_text_with_module_name(program: Program, module_name: string, lambda_captures: LambdaCaptureRecord[]) -> string {
+    return lines_to_native_text(emit_native_lines_with_module_name(program, module_name, lambda_captures).lines);
 }
 
-fn emit_native_module_with_module_name(program: Program, module_name: string) -> NativeModule {
-    let result = emit_native_with_module_name(program, module_name);
+fn emit_native_module_with_module_name(program: Program, module_name: string, lambda_captures: LambdaCaptureRecord[]) -> NativeModule {
+    let result = emit_native_with_module_name(program, module_name, lambda_captures);
     return result.module;
 }
 
@@ -850,19 +851,19 @@ fn collect_entry_points(program: Program) -> string[] {
 fn is_test_symbol_char(ch: string) -> boolean {
     if ch.length == 0 { return false; }
     if ch == "_" { return true; }
-    let code = char_code(ch);
-    let lower_a = char_code("a");
-    let lower_z = char_code("z");
+    let code = char_code(ch, 0);
+    let lower_a = char_code("a", 0);
+    let lower_z = char_code("z", 0);
     if code >= lower_a {
         if code <= lower_z { return true; }
     }
-    let upper_a = char_code("A");
-    let upper_z = char_code("Z");
+    let upper_a = char_code("A", 0);
+    let upper_z = char_code("Z", 0);
     if code >= upper_a {
         if code <= upper_z { return true; }
     }
-    let zero = char_code("0");
-    let nine = char_code("9");
+    let zero = char_code("0", 0);
+    let nine = char_code("9", 0);
     if code >= zero {
         if code <= nine { return true; }
     }
@@ -882,9 +883,9 @@ fn sanitize_test_name_for_symbol(name: string) -> string {
     if out.length == 0 { return "unnamed"; }
     // Ensure the name is not purely numeric / doesn't start with a digit.
     let first = out[0];
-    let code = char_code(first);
-    if code >= char_code("0") {
-        if code <= char_code("9") { return "_" + out; }
+    let code = char_code(first, 0);
+    if code >= char_code("0", 0) {
+        if code <= char_code("9", 0) { return "_" + out; }
     }
     return out;
 }
@@ -962,20 +963,4 @@ fn emit_native_diag_lines(diags: Diag[]) -> string[] {
         index += 1;
     }
     return lines;
-}
-
-// ── Re-export validation ─────────────────────────────────────────────
-// The `collect_reexport_violations` analysis (and its helpers) moved to
-// `compiler/capsules/analyzer/src/reexport_check.sfn` so the emit-free `sfn check` path can
-// run the same check without importing the emitter. The build-path reporter
-// below stays here to preserve its `[emit-native]` stderr prefix provenance.
-//
-// See docs/rca/2026-04-18-reexport-diagnostic-gep.md.
-fn report_reexport_violations(violations: string[]) ![io] {
-    let mut index: int = 0;
-    loop {
-        if index >= violations.length { break; }
-        print.err("[emit-native] " + violations[index]);
-        index += 1;
-    }
 }

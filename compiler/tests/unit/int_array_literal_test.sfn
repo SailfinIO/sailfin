@@ -2,7 +2,7 @@
 // elements must lower as `i64` storage, not `double`.
 //
 // Background: `infer_expression_type` in
-// `compiler/src/emit_native_format.sfn` previously returned `"number"` for
+// `compiler/capsules/codegen/src/emit_native_format.sfn` previously returned `"number"` for
 // every `NumberLiteral` regardless of whether the literal was integral
 // (`42`) or fractional (`42.0`). The downstream `.sfn-asm` therefore carried
 // `#element:number` for `[42]`, which `parse_array_literal_metadata` maps

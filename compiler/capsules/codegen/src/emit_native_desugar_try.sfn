@@ -1,4 +1,4 @@
-// compiler/src/emit_native_desugar_try.sfn
+// compiler/capsules/codegen/src/emit_native_desugar_try.sfn
 //
 // Desugaring of the postfix `?` operator (Expression.TryOperator, epic #371
 // R.4) into a `match` + early `return Result.Err { error }` AST form, run as a
