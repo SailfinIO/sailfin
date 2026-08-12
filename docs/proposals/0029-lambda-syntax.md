@@ -90,7 +90,7 @@ Three frictions motivate the question:
 
 Lambdas are load-bearing in real Sailfin code: closures shipped in the M1.5
 chain (#685–689; `compiler/src/llvm/closures.sfn`,
-`compiler/src/lambda_lowering.sfn`), with
+`compiler/capsules/codegen/src/lambda_lowering.sfn`), with
 working examples (`examples/advanced/lambda-closure.sfn`,
 `examples/functional/map-reduce.sfn`, `examples/algorithms/quicksort.sfn`) and
 the `spawn fn() -> T { ... }` concurrency surface

@@ -3,7 +3,7 @@
 // pointer-derived value (`(s + "cde").length` returned 3367521, not 5).
 //
 // The defect was in the AST->text renderer, not the parser or the lowering
-// scanners. `format_expression_into` (compiler/src/emit_native_format.sfn)
+// scanners. `format_expression_into` (compiler/capsules/codegen/src/emit_native_format.sfn)
 // flattens the AST to `.sfn-asm` text that the LLVM stage re-parses; the
 // `Member` object and `Index` sequence recursed without parenthesizing, so
 // `Member{object: Binary{s + "cde"}, member: "length"}` rendered as the text
@@ -25,7 +25,7 @@
 // expose `.length` plus free functions (`char_at`, `substring`), not methods.
 import { parse_program } from "sfn/syntax";
 
-import { emit_native_text_with_module_name } from "../../src/emit_native";
+import { emit_native_text_with_module_name } from "../../src/codegen_driver";
 import { index_of } from "../../src/string_utils";
 
 struct Point {

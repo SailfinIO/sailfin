@@ -1,10 +1,9 @@
 // Declaration-producer coverage for SFEP-0059 L1 (SFN-508).
+import { TypedSsaProduceResult, produce_typed_ssa_declarations } from "sfn/codegen";
 import { parse_native_artifact } from "sfn/ir";
 import { render_module } from "sfn/ir";
 import { verify_module } from "sfn/ir";
 import { expect_eq_bool, expect_eq_int, expect_eq_str } from "sfn/test";
-
-import { TypedSsaProduceResult, produce_typed_ssa_declarations } from "../../src/typed_ssa_produce";
 
 fn _produce(text: string) -> TypedSsaProduceResult {
     return produce_typed_ssa_declarations(parse_native_artifact(text), "demo", "demo");

@@ -80,9 +80,9 @@ The implementation will introduce these modules above `native_ir.sfn`:
 - `compiler/capsules/ir/src/tensor_ir_verify.sfn` — dtype, rank, dimension, layout, and
   dominance verification;
 - `compiler/capsules/ir/src/tensor_ir_fusion.sfn` — fusion legality, grouping, and rewrite;
-- `compiler/src/tensor_ir_lower_scalar.sfn` — reference lowering to
+- `compiler/capsules/codegen/src/tensor_ir_lower_scalar.sfn` — reference lowering to
   `native_ir`; and
-- `compiler/src/tensor_ir_emit_stablehlo.sfn` — the separately gated
+- `compiler/capsules/codegen/src/tensor_ir_emit_stablehlo.sfn` — the separately gated
   StableHLO exit.
 
 The first implementation issue may stage only the core IR, verifier, and scalar

@@ -52,7 +52,7 @@ does**, at statement granularity, which makes this "adopt a struct" rather than
 "add source-location fidelity to the native IR."
 
 `emit_span_if_present` / `emit_initializer_span_if_present`
-(`compiler/src/emit_native.sfn:456-464`) write `.span <sl> <sc> <el> <ec>` and
+(`compiler/capsules/codegen/src/emit_native.sfn`) write `.span <sl> <sc> <el> <ec>` and
 `.init-span`, round-tripping into `NativeInstruction.{Return,Expression,Let,Throw}.span`
 and `NativeParameter.span`, typed `NativeSourceSpan?` (`compiler/capsules/ir/src/native_ir.sfn:59-64`).
 
@@ -213,7 +213,7 @@ render-through-the-shim silently drops its code with no compiler complaint.
 SFN-538 hit exactly this: its first cut rendered notes without codes and a test
 caught it. **A stage that displays a diagnostic must build the line explicitly**
 — read `Diag.stage` and `Diag.code` rather than hardcoding either, as
-`emit_native_diag_lines` (`compiler/src/emit_native.sfn`) does. S5 is the
+`emit_native_diag_lines` (`compiler/capsules/codegen/src/emit_native.sfn`) does. S5 is the
 central resolution: once the legacy channel is gone, the shim should be deleted
 outright rather than left as a rendering foot-gun.
 

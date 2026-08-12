@@ -15,7 +15,7 @@ import { typecheck_diagnostics } from "sfn/analyzer/typecheck";
 import { Diagnostic } from "sfn/analyzer/typecheck_types";
 import { parse_program } from "sfn/syntax";
 
-import { emit_native_text_with_module_name } from "../../src/emit_native";
+import { emit_native_text_with_module_name } from "../../src/codegen_driver";
 import { index_of } from "../../src/string_utils";
 
 fn _emit(source: string) -> string ![io] {

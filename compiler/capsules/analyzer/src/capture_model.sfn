@@ -1,0 +1,11 @@
+// Pure capture-analysis result shared with downstream target-neutral codegen.
+// The analyzer owns construction; codegen consumes the data without importing
+// or invoking the capture-analysis implementation.
+import { Capture } from "sfn/syntax";
+
+struct LambdaCaptureRecord {
+    parameter_names: string[];
+    captures: Capture[];
+    body_start_line: int;
+    body_start_column: int;
+}

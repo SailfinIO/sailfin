@@ -20,7 +20,7 @@ Always situate compiler work by pipeline stage. The stages, in order:
 3. **AST** — `compiler/src/ast.sfn`
 4. **Typecheck** — `compiler/capsules/analyzer/src/typecheck/`, `typecheck_types/`
 5. **Effects** — `compiler/capsules/analyzer/src/effect_checker/`
-6. **Emit** — `compiler/src/emit_native.sfn` (`.sfn-asm` IR)
+6. **Emit** — `compiler/capsules/codegen/src/emit_native.sfn` (`.sfn-asm` IR)
 7. **Lower** — `compiler/src/llvm/lowering/` (LLVM IR)
 8. **Render** — `compiler/src/llvm/rendering.sfn`
 

@@ -425,7 +425,7 @@ fragmentation (1505 MB vs 972 MB on `core_operands`).
   (`sfn_str_append` grow guard).
 - Liveness boundary: `compiler/src/main.sfn:667`, `:574`
   (`write_native_text_file_with_module`); `compiler/src/llvm/lowering/lowering_core/file_emission.sfn`;
-  `compiler/src/emit_native.sfn:164,192`.
+  `compiler/capsules/codegen/src/emit_native.sfn`.
 - Build model: `compiler/src/capsule_resolver.sfn:966` (`_cr_stage_one`, native
   staging), `:1527` (`_cr_compile_one`, in-process re-parse+lower);
   `docs/proposals/0006-build-architecture.md` §2.4 (process-per-module), "Stage E".

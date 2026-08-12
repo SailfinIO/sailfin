@@ -9,3 +9,5 @@ export {
     AnalyzerResult,
     analyze_program
 } from "./analyzer";
+
+export { LambdaCaptureRecord } from "./capture_model";

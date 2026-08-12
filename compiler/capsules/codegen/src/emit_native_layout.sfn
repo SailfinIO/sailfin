@@ -1,9 +1,10 @@
-// compiler/src/emit_native_layout.sfn
+// compiler/capsules/codegen/src/emit_native_layout.sfn
 //
 // Struct / enum layout computation and manifest generation for the
 // native emitter.  Extracted from emit_native.sfn to reduce per-file
 // memory footprint during self-hosting compilation.
 import { NativeArtifact } from "sfn/ir";
+import { char_at_index as char_at, contains_string, starts_with } from "sfn/strings";
 import {
     EnumVariant,
     FieldDeclaration,
@@ -30,7 +31,6 @@ import {
     strip_optional_suffix,
     trim_text
 } from "./emit_native_state";
-import { char_at, contains_string, starts_with } from "./string_utils";
 
 // ── Layout-specific data structures ──────────────────────────────────
 struct LayoutEmitResult {

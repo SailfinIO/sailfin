@@ -102,7 +102,7 @@ Effect checking walks nested blocks, lambdas, and `routine` scopes. Missing effe
 
 1. Update `compiler/capsules/syntax/src/parser/mod.sfn` to recognize new syntax
 2. Add AST node(s) to `compiler/capsules/syntax/src/ast.sfn`
-3. Update `compiler/src/emit_native.sfn` to emit `.sfn-asm`
+3. Update `compiler/capsules/codegen/src/emit_native.sfn` to emit `.sfn-asm`
 4. Extend `compiler/src/llvm/lowering/entrypoints.sfn` for LLVM
 5. Add regression tests to `compiler/tests/`
 6. Update the language spec: `site/src/content/docs/docs/reference/spec/NN-*.md` chapter if shipped, `.../reference/preview/*.md` page if planned

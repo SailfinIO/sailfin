@@ -1,4 +1,4 @@
-// compiler/src/typed_ssa_produce.sfn
+// compiler/capsules/codegen/src/typed_ssa_produce.sfn
 //
 // Fail-closed L1 producer from parsed `.sfn-asm` to verified typed-SSA
 // declarations. SFEP-0059 §3.2 deliberately excludes bodies from this slice:

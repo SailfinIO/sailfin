@@ -569,9 +569,9 @@ firstpass→seedcheck build, exactly like #957.
 - **Effect checker:** `compiler/src/effect_checker.sfn` (`Assignment` arm D;
   `Unknown` defensive arm E; **E0818 `Raw` flip F**).
 - **Ownership:** `compiler/capsules/analyzer/src/ownership_checker.sfn` (`Assignment` arm D).
-- **Emit / format:** `compiler/src/emit_native_format.sfn` (`Assignment` arm D),
-  `compiler/src/emitter_sailfin_expr.sfn` (`Assignment` arm D).
-- **Lowering:** `compiler/src/lambda_lowering.sfn`
+- **Emit / format:** `compiler/capsules/codegen/src/emit_native_format.sfn` (`Assignment` arm D),
+  `compiler/capsules/codegen/src/emitter_sailfin_expr.sfn` (`Assignment` arm D).
+- **Lowering:** `compiler/capsules/codegen/src/lambda_lowering.sfn`
   (`Assignment` capture-rewrite arm D). **No new codegen arm** — Cast/Unary/
   Conditional/Assignment all serialize to the exact text the shadow parser
   already lowers.

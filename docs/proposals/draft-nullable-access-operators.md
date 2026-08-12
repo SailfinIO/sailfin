@@ -623,8 +623,8 @@ Regression coverage under `compiler/tests/{unit,integration,e2e}/`:
   (`Member`), `:74` (`Index`), `:69` (`Call`); `compiler/src/typecheck.sfn:1060`
   (`Cast`/`Is`/`TryOperator` walk arms); `compiler/src/effect_checker.sfn:888`
   (`Cast`/`Is`/`Conditional`/`TryOperator` effect arms);
-  `compiler/src/emit_native_format.sfn:203` (`Cast`/`Is`/`Conditional`/
+  `compiler/capsules/codegen/src/emit_native_format.sfn` (`Cast`/`Is`/`Conditional`/
   `TryOperator` native-IR serialization — the fallback-arm template);
-  `compiler/src/emit_native_desugar_try.sfn` (the hoist desugarer to mirror).
+  `compiler/capsules/codegen/src/emit_native_desugar_try.sfn` (the hoist desugarer to mirror).
 - Prior art: TypeScript `?.`/`??`, C# `?.`/`??`, Swift `?.`/`??`, Kotlin
   `?.`/`?:` (Elvis).

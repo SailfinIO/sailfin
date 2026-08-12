@@ -1,4 +1,4 @@
-// compiler/src/emit_native_format.sfn
+// compiler/capsules/codegen/src/emit_native_format.sfn
 //
 // Formatting helpers for the native emitter: expression rendering, type
 // inference, function-signature formatting, and specifier rendering.

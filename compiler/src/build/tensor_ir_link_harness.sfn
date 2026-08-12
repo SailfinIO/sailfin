@@ -15,6 +15,7 @@
 // the same signature and reuse this harness's equivalence + timing driver
 // unchanged. Not compiled into the shipped binary (main.sfn does not import it);
 // `--gc-sections` drops it, exactly like tensor_ir_lower_scalar.sfn.
+import { lower_tensor_module_to_native } from "sfn/codegen";
 import { TensorModule } from "sfn/ir";
 import { int_to_string } from "sfn/strings";
 
@@ -25,7 +26,6 @@ import { take_lowering_trace_buffer } from "../llvm/lowering_debug_state";
 import { compile_to_native_text_with_module } from "../main";
 import { runtime_capsule_from_root } from "../runtime_capsule_resolver";
 import { index_of, substring } from "../string_utils";
-import { lower_tensor_module_to_native } from "../tensor_ir_lower_scalar";
 import { _clang_link_multi } from "./link";
 import { empty_llvm_import_context, resolve_llvm_provider_context } from "./llvm_provider_context";
 import { _resolve_self_path } from "./paths";

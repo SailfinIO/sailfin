@@ -1,0 +1,18 @@
+[capsule]
+name = "sfn/codegen"
+version = "0.9.5"
+description = "Sailfin target-neutral IR production (toolchain-internal)"
+publish = false
+
+[dependencies]
+"sfn/syntax" = "*"
+"sfn/analyzer" = "*"
+"sfn/ir" = "*"
+"sfn/strings" = "*"
+
+[capabilities]
+required = []
+
+[build]
+kind = "library"
+entry = "src/mod.sfn"

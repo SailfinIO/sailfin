@@ -12,6 +12,7 @@
 // This is a pure text emitter — no `sfn build`/link — so the round-trip leg
 // only needs PATH to locate the tool, not the nested-compile isolation the
 // build-and-run e2e tests thread. See `.claude/rules/no-bash-e2e.md`.
+import { emit_stablehlo_module } from "sfn/codegen";
 import {
     TensorFunction,
     TensorModule,
@@ -24,8 +25,6 @@ import {
     tensor_reduce_sum
 } from "sfn/ir";
 import { snapshot_match_in, with_tmp_dir } from "sfn/test";
-
-import { emit_stablehlo_module } from "../../src/tensor_ir_emit_stablehlo";
 
 // A minimal child environment for the tool probe / invocation: only PATH is
 // load-bearing (locating `stablehlo-opt`), with HOME/TMPDIR carried for the

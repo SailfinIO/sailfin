@@ -1,4 +1,4 @@
-// compiler/src/emitter_sailfin_expr.sfn
+// compiler/capsules/codegen/src/emitter_sailfin_expr.sfn
 //
 // Expression formatting helpers for the Sailfin-to-Sailfin code emitter.
 // Extracted from emitter_sailfin.sfn to keep modules focused and under size.

@@ -14,6 +14,8 @@ import {
     typecheck_has_errors_with_prelude
 } from "sfn/analyzer/typecheck";
 import { Diagnostic, diagnostic_to_diag } from "sfn/analyzer/typecheck_types";
+import { emit_native_diag_lines, emit_program } from "sfn/codegen";
+import { TypedSsaProduceResult, produce_typed_ssa_declarations } from "sfn/codegen";
 import {
     ImportedModuleContext,
     LayoutManifest,
@@ -33,19 +35,16 @@ import { _publish_lines_atomic } from "./build/fs";
 import { resolve_llvm_provider_context } from "./build/llvm_provider_context";
 import { _env_flag, _legacy_flag_file } from "./build_flags";
 import { run_ownership_checker, run_ownership_checker_with_imports } from "./check/ownership";
-import { render_diagnostic, split_source_lines } from "./diagnostics_render";
+import {
+    emit_native,
+    emit_native_lines_with_module_name,
+    emit_native_with_module_name
+} from "./codegen_driver";
+import { render_diagnostic, report_reexport_violations, split_source_lines } from "./diagnostics_render";
 import {
     validate_and_render_effects,
     validate_and_render_effects_with_capabilities
 } from "./effect_gate";
-import {
-    emit_native,
-    emit_native_diag_lines,
-    emit_native_lines_with_module_name,
-    emit_native_with_module_name,
-    report_reexport_violations
-} from "./emit_native";
-import { emit_program } from "./emitter_sailfin";
 import { ice_enter_stage, ice_set_source } from "./ice";
 import {
     import_context_root,
@@ -69,7 +68,6 @@ import { substring } from "./string_utils";
 import { test_decl_matches_filters, test_filters_active, test_runner_trace } from "./test_runner_state";
 import { toml_get_dependencies } from "./toml_parser";
 import { load_imported_interfaces_from_paths } from "./typecheck_import_loader";
-import { TypedSsaProduceResult, produce_typed_ssa_declarations } from "./typed_ssa_produce";
 
 // Phase-scoped arena reclamation (SFEP-0043). The arena mark/rewind pair
 // snapshots and restores the arena bump pointer so the AST/typecheck/emit
@@ -181,7 +179,7 @@ fn _reject_parse_errors(program: Program) -> boolean ![io] {
 // Print the `emit_native` diagnostic sidecar. Every entry is `note` severity,
 // which SFEP-0061 §4 prints only under `SAILFIN_DEBUG_LOWERING` — so a default
 // build's behaviour is unchanged. Matches the `[emit-native]` stderr prefix
-// convention of `report_reexport_violations` (`emit_native.sfn`).
+// convention of `report_reexport_violations` (`diagnostics_render.sfn`).
 // `file_path` is stamped in place before rendering: all five producers mint
 // `file_path: ""` (the emitter has no idea which module is being compiled),
 // so without this the renderer emits a bare `--> :3:5`. Same pattern and same

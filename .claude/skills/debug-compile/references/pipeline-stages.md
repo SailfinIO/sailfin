@@ -9,7 +9,7 @@ Use this table to map a compiler diagnostic to the file(s) most likely to contai
 | Unknown AST node shape in downstream pass | AST | `compiler/src/ast.sfn` |
 | Type mismatch / undefined symbol / duplicate symbol | Typecheck | `compiler/capsules/analyzer/src/typecheck/`, `compiler/capsules/analyzer/src/typecheck_types/` |
 | Missing effect annotation / effect not declared | Effects | `compiler/capsules/analyzer/src/effect_checker/` |
-| `.sfn-asm` emission error / malformed IR instruction | Emit | `compiler/src/emit_native.sfn`, `compiler/src/emit_native_state.sfn`, `compiler/src/native_ir.sfn` |
+| `.sfn-asm` emission error / malformed IR instruction | Emit | `compiler/capsules/codegen/src/emit_native.sfn`, `compiler/capsules/codegen/src/emit_native_state.sfn`, `compiler/capsules/ir/src/native_ir.sfn` |
 | LLVM `clang` rejects generated `.ll` | Lowering | `compiler/src/llvm/lowering/` (start at `entrypoints.sfn`) |
 | Linker: undefined / duplicate symbol | Emission header / globals | `compiler/src/llvm/lowering/emission_header.sfn`, `module_globals.sfn` |
 | Runtime crash in a valid program | Runtime / lowering runtime bridge | `runtime/prelude.sfn`, `runtime/sfn/`, `compiler/src/llvm/runtime.sfn` |

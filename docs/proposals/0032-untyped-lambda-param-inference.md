@@ -116,7 +116,7 @@ let lifted = lift_non_capturing_lambdas(typed_program);
 ```
 
 The new pass lives in a new module
-`compiler/src/lambda_param_inference.sfn`
+`compiler/capsules/codegen/src/lambda_param_inference.sfn`
 (peer of `lambda_lowering.sfn`), exporting one entry point
 `backfill_untyped_lambda_types(program: Program) -> Program`.
 
@@ -380,8 +380,8 @@ on captured stdout via `process.run_capture`, threading `PATH` /
 
 ## 10. Verification
 
-- `sfn check compiler/src/lambda_param_inference.sfn
-  compiler/src/emit_native.sfn` — inner loop after each edit.
+- `sfn check compiler/capsules/codegen/src/lambda_param_inference.sfn
+  compiler/capsules/codegen/src/emit_native.sfn` — inner loop after each edit.
 - `sfn fmt --write` then `sfn fmt --check` on both touched `.sfn` files.
 - `sailfin test compiler/tests/unit/lambda_param_inference_test.sfn` — splitter +
   no-op unit coverage.
@@ -439,7 +439,7 @@ Typed lambdas are byte-identical (no regression).
    conservative subset that can only no-op or correctly backfill in the covered
    cases (a non-`int` receiver type fails the array-builtin gate), never a crash.
 
-Files: `compiler/src/lambda_param_inference.sfn`
+Files: `compiler/capsules/codegen/src/lambda_param_inference.sfn`
 (new), `lambda_lowering.sfn` (lift-pass hook + `LiftContext` fields). Tests:
 `compiler/tests/unit/lambda_param_inference_test.sfn` (splitter + no-op pins),
 `compiler/tests/e2e/untyped_lambda_callback_test.sfn` (build-and-run, covered +

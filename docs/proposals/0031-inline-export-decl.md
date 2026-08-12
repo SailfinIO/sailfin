@@ -398,4 +398,4 @@ after the change. Thread `PATH` + `SAILFIN_TEST_SCRATCH` into the nested build p
   `compiler/capsules/syntax/src/parser/mod.sfn:110-112` (dispatch),
   `compiler/src/llvm/rendering_helpers.sfn:393-451` (export manifest →
   internalization / visibility model evidence),
-  `compiler/src/emit_native.sfn:224-232` (`.export` directive emission).
+  `compiler/capsules/codegen/src/emit_native.sfn` (`.export` directive emission).

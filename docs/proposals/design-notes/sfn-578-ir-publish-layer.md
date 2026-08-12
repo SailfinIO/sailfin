@@ -16,7 +16,7 @@
 
 | Site | Artifact |
 |---|---|
-| `compiler/src/emit_native.sfn:204-210` `emit_native_text_to_file_with_module_name` | `.sfn-asm` |
+| `compiler/capsules/codegen/src/emit_native.sfn` pure emit API | `.sfn-asm` |
 | `compiler/src/llvm/lowering/lowering_io.sfn:136-149` `write_llvm_lines_chunked` | `.ll` |
 
 `write_llvm_lines_chunked` reaches the helper from two callers:

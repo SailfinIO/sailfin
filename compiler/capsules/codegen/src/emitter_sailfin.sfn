@@ -1,4 +1,4 @@
-// compiler/src/emitter_sailfin.sfn
+// compiler/capsules/codegen/src/emitter_sailfin.sfn
 //
 // Sailfin-to-Sailfin code emitter. This module consumes the high-level AST
 // produced by the Sailfin-native parser and renders canonical Sailfin source

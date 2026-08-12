@@ -12,10 +12,10 @@
 //   - the pre-existing `unsafe extern fn` path is untouched
 //   - the sailfin re-emitter prints the `unsafe` keyword back out, and a
 //     full parse -> emit -> parse round-trip preserves both markers
+import { emit_program } from "sfn/codegen";
 import { Block, Program, Statement } from "sfn/syntax";
 import { parse_program } from "sfn/syntax";
 
-import { emit_program } from "../../src/emitter_sailfin";
 import { index_of } from "../../src/string_utils";
 
 fn _contains(haystack: string, needle: string) -> boolean {
