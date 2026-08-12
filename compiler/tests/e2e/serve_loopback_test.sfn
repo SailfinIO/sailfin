@@ -17,15 +17,16 @@
 // Why this could not be a `sfn/test` before. The behavioral checks in
 // `test_http_capsule_serve.sh` start a backgrounded BLOCKING `serve`
 // server and drive it with a socket client. The "native server-loopback
-// e2e pattern" was the missing capability (see the allowlist note). It is
-// now expressible: `process.spawn_with_env` runs the server as a
-// background subprocess (handle, not a synchronous drain), and a raw libc
-// socket client — the proven `http.sfn::_connect_tcp` dual-sockaddr idiom,
-// inlined here — drives it over loopback. The server is wrapped in
-// `timeout`/`gtimeout` when available so it self-reaps (there is no
-// process-kill primitive and `serve()` never returns); on a runner with
-// neither, the per-phase compiler caps still bound it, matching the test
-// pool's own tolerance.
+// e2e pattern" was the missing capability. It is
+// now expressible: the server runs as a background subprocess (a handle,
+// not a synchronous drain), and a raw libc socket client — the proven
+// `http.sfn::_connect_tcp` dual-sockaddr idiom, inlined here — drives it
+// over loopback. `sfn/test`'s `with_background` owns the server's
+// lifetime: `serve()` never returns, so it is SIGKILLed and reaped on
+// scope exit, including when an assertion throws. That replaced an
+// external `timeout`/`gtimeout` vehicle which was the only teardown
+// mechanism and which made the whole test skip itself when neither binary
+// was installed.
 //
 // Coverage (the four behavioral checks migrated from the bash script,
 // plus the #1387 request-delivery assertions): request method + path
@@ -37,7 +38,9 @@
 // Matchers note (#842): `sfn/test`'s `expect_*` matchers are `![pure]` and
 // cannot be called from an `![io]` test; assert on the captured response
 // text with `sfn/strings::contains` instead.
+import { Env, env_from_current } from "sfn/os";
 import { contains } from "sfn/strings";
+import { Background, wait_until, with_background } from "sfn/test";
 
 // ── libc memory + string + socket surface (test-local raw client) ──
 // Prefixed `_lb_` so the file-local helpers never collide with the
@@ -98,29 +101,22 @@ fn _sfn_bin() -> string ![io] {
 // under the parallel pool (`.claude/rules/no-bash-e2e.md`).
 fn _child_env() -> string[] ![io] { return process.environ(); }
 
-// Resolve a wall-clock timeout command via a `command -v` probe. Empty
-// string => none found; the caller then spawns the never-returning
-// server unwrapped. (Local to this test — the runner's own per-file
-// deadline moved to a handle-owned `handle_kill` under SFEP-0050.)
-fn _timeout_cmd() -> string ![io] {
-    let probe = process.run(["sh", "-c", "command -v timeout >/dev/null 2>&1"]);
-    if probe == 0 { return "timeout"; }
-    let gprobe = process.run(["sh", "-c", "command -v gtimeout >/dev/null 2>&1"]);
-    if gprobe == 0 { return "gtimeout"; }
-    return "";
-}
+// The same environment in `sfn/os`'s typed form, for the `sfn/test`
+// fixtures that take an `Env` rather than a flat array. `env_from_current`
+// is the typed equivalent of the `process.environ()` snapshot above; the
+// two are kept side by side because the raw `process.run_capture` calls
+// below still take the flat form.
+fn _child_env_typed() -> Env ![io] { return env_from_current(); }
 
 // ── raw loopback client (inlined `http.sfn::_connect_tcp` idiom) ──
 // Effect note: `http.sfn`'s socket helpers are `![net]`, but they live in
-// the `sfn/http` capsule whose surface includes `net`. This test compiles
-// under the COMPILER capsule's surface (`compiler/capsule.toml` →
-// `["io", "clock"]`, no `net`), and widening that to `net` to satisfy a
-// test would wrongly assert the compiler is a network program. The libc
-// socket externs carry no effect annotation, so the effect checker infers
-// no `net` requirement for these direct callers — hence they (and
+// the `sfn/http` capsule whose surface includes `net`. The libc socket
+// externs used here carry no effect annotation, so the effect checker
+// infers no `net` requirement for these direct callers — hence they (and
 // `_lb_request`) are left un-annotated, while `_await_ready`/the test keep
-// `![io]` for their `process.*`/`fs.*` calls. (Tightening the effect system
-// to tag raw socket externs is a separate, out-of-scope concern.)
+// `![clock, io]` for their `process.*`/`fs.*` calls plus the wall-clock
+// readiness budget. (Tightening the effect system to tag raw socket
+// externs is a separate, out-of-scope concern.)
 fn _lb_ptr_off(p: *u8, off: i64) -> *u8 {
     let addr: i64 = (p as i64) + off;
     return addr as *u8;
@@ -386,162 +382,160 @@ fn _build_bin(main_path: string, bin: string) -> string ![io] {
     return bin;
 }
 
-// Spawn the prebuilt blocking server as a background subprocess, wrapped
-// in a wall-clock timeout so it self-reaps — there is no process-kill
-// primitive and `serve()` never returns, so the timeout is the ONLY
-// teardown mechanism. The test guards on a timeout command being present
-// before calling this (see the test body), so `tcmd` is always non-empty
-// here; the length check is defensive. The prebuilt binary listens within
-// ~1s — no compile in the startup path. Returns the spawn handle (unused
-// for teardown — the timeout owns the lifetime).
-fn _spawn_server(bin: string) -> i64 ![io] {
-    let tcmd = _timeout_cmd();
-    let mut argv: string[] = [];
-    if tcmd.length > 0 {
-        argv.push(tcmd);
-        argv.push("60");
-    }
-    argv.push(bin);
-    return process.spawn_with_env(argv, _child_env());
+// The probe request, as a function rather than a local, so the readiness
+// closure below captures only `port`.
+fn _probe_req() -> string {
+    return "GET /probe?x=1 HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n";
 }
 
 // Poll `GET /probe` until the prebuilt server answers (startup is just the
 // binary launching + bind, ~1s — the cold compile already happened in
 // `_build_bin`). Returns the response, or "" if it never came up within the
-// budget. ~45s budget (90 attempts × ~0.5s) stays under the 60s server
-// timeout in `_spawn_server`.
-fn _await_ready(port: i64) -> string ![io] {
-    let probe = "GET /probe?x=1 HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n";
-    let mut attempt: i64 = 0;
-    loop {
-        if attempt >= 90 { break; }
-        let resp = _lb_request(port, probe);
-        if resp.length > 0 {
-            if contains(resp, "M=GET") { return resp; }
-        }
-        let _ = process.run(["sleep", "0.5"]);
-        attempt = attempt + 1;
-    }
-    return "";
+// budget.
+//
+// The budget is wall-clock (45s) rather than an attempt count: an attempt
+// count silently changes meaning when the probe itself slows down, which is
+// exactly what happens on a loaded CI runner. `wait_until` naps in-process
+// between attempts — the previous form shelled `process.run(["sleep",
+// "0.5"])`, paying a fork+exec per tick.
+// The probe closure captures NOTHING — it reaches the port through the
+// file-local `_lb_port()` rather than closing over a local. That is
+// deliberate (SFN-843): a lambda capturing an enclosing `let` that has no
+// type annotation and whose initializer is a call mistypes the capture's
+// env slot as `i8*`, failing to lower while still passing `sfn check`.
+// Calling a helper is not a capture, so this shape is unaffected. Take
+// `port` as a parameter again once SFN-843 lands.
+fn _await_ready() -> string ![clock, io] {
+    let ready = wait_until(fn () -> boolean {
+        let resp = _lb_request(_lb_port(), _probe_req());
+        if resp.length == 0 { return false; }
+        return contains(resp, "M=GET");
+    }, 45000, 500);
+    if !ready { return ""; }
+    return _lb_request(_lb_port(), _probe_req());
 }
 
-test "serve loopback: macOS request delivery + framed behavioral round-trips" ![io] {
-    // Teardown of the blocking server relies on a wall-clock timeout (no
-    // process-kill primitive; `serve()` never returns). Without
-    // `timeout`/`gtimeout`, spawning the server would orphan the fixed port
-    // 18790 and poison subsequent runs — so skip cleanly rather than leak
-    // an unkillable child. The plain suite still covers everything else;
-    // CI runners (Linux + coreutils) always have `timeout`. Mirrors the
-    // sanitizer-skip precedent in `.claude/rules/compiler-safety.md`.
-    if _timeout_cmd().length == 0 {
-        print.info("[serve-loopback] SKIP: no timeout/gtimeout to reap the blocking server");
-        return;
-    }
-
-    let port = _lb_port();
+test "serve loopback: macOS request delivery + framed behavioral round-trips" ![clock, io] {
     let main_path = _write_server(_lb_port_str());
 
     // Compile once (synchronously), then run the prebuilt server.
     let server_bin = _build_bin(main_path, _app_root() + "/server-bin");
     assert server_bin.length > 0;
-    let _handle = _spawn_server(server_bin);
 
-    // Readiness + #1387 request delivery: method and path reach the
-    // handler (the empty-Request symptom would yield "M=;P=").
-    let probe_resp = _await_ready(port);
-    print.info("[serve-loopback] probe: " + probe_resp);
-    assert probe_resp.length > 0;
-    assert contains(probe_resp, "HTTP/1.1 200");
-    assert contains(probe_resp, "M=GET");
-    // Query string is stripped from the path by the capsule parser.
-    assert contains(probe_resp, "P=/probe");
+    // `with_background` owns the blocking server's lifetime: it is killed
+    // and reaped on scope exit, including when an assertion below throws.
+    // This replaces the previous `timeout <secs>` argv vehicle, which was
+    // the ONLY teardown mechanism and required an external
+    // `timeout`/`gtimeout` binary — so the test used to skip itself
+    // entirely on a host without coreutils, silently dropping every
+    // assertion below on that platform. `handle_kill` (SFN-402) is what
+    // makes real teardown possible; the skip is gone with it.
+    //
+    // The body captures NOTHING: `port` is re-derived from the file-local
+    // `_lb_port()` inside rather than closed over. See `_await_ready` for
+    // why capture is avoided in a body that also makes effectful calls.
+    let _served = with_background([server_bin], _child_env_typed(), "", "serve-loopback", fn (server: Background) -> int {
+        assert server.handle.handle_id != 0;
+        let port = _lb_port();
 
-    // GET / matches req.path == "/" (issue's pathlen=0 case).
-    let root_resp = _lb_request(port, "GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
-    print.info("[serve-loopback] root: " + root_resp);
-    assert contains(root_resp, "HTTP/1.1 200");
-    assert contains(root_resp, "ROOT-OK");
+        // Readiness + #1387 request delivery: method and path reach the
+        // handler (the empty-Request symptom would yield "M=;P=").
+        let probe_resp = _await_ready();
+        print.info("[serve-loopback] probe: " + probe_resp);
+        assert probe_resp.length > 0;
+        assert contains(probe_resp, "HTTP/1.1 200");
+        assert contains(probe_resp, "M=GET");
+        // Query string is stripped from the path by the capsule parser.
+        assert contains(probe_resp, "P=/probe");
 
-    // POST Content-Length body is drained and echoed verbatim.
-    let body = "payload-ABC-123-END";
-    let post_req = "POST /echo HTTP/1.1\r\nHost: x\r\nContent-Length: 19\r\nConnection: close\r\n\r\n"
-        + body;
-    let echo_resp = _lb_request(port, post_req);
-    print.info("[serve-loopback] echo: " + echo_resp);
-    assert contains(echo_resp, "HTTP/1.1 200");
-    assert contains(echo_resp, "X-Echo: 1");
-    assert contains(echo_resp, body);
+        // GET / matches req.path == "/" (issue's pathlen=0 case).
+        let root_resp = _lb_request(port, "GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
+        print.info("[serve-loopback] root: " + root_resp);
+        assert contains(root_resp, "HTTP/1.1 200");
+        assert contains(root_resp, "ROOT-OK");
 
-    // Custom status + header reach the wire via the framed path.
-    let secret_resp = _lb_request(port, "GET /secret HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
-    print.info("[serve-loopback] secret: " + secret_resp);
-    assert contains(secret_resp, "HTTP/1.1 403");
-    assert contains(secret_resp, "X-Reason: nope");
-    assert contains(secret_resp, "denied");
+        // POST Content-Length body is drained and echoed verbatim.
+        let body = "payload-ABC-123-END";
+        let post_req = "POST /echo HTTP/1.1\r\nHost: x\r\nContent-Length: 19\r\nConnection: close\r\n\r\n"
+            + body;
+        let echo_resp = _lb_request(port, post_req);
+        print.info("[serve-loopback] echo: " + echo_resp);
+        assert contains(echo_resp, "HTTP/1.1 200");
+        assert contains(echo_resp, "X-Echo: 1");
+        assert contains(echo_resp, body);
 
-    // Over-cap Content-Length is rejected with a 500 (not a hang): declare
-    // 2 MiB (over the 1 MiB cap) but send only a partial body — the server
-    // must reject on the declared length without waiting for the rest.
-    // (The whole ~120-byte request lands in the socket buffer in a single
-    // `send` before the server drains the head and closes, so `_lb_send_all`
-    // does not race a SIGPIPE on the closed peer in practice.)
-    let oversize_req = "POST /echo HTTP/1.1\r\nHost: x\r\nContent-Length: 2000000\r\nConnection: close\r\n\r\npartial";
-    let oversize_resp = _lb_request(port, oversize_req);
-    print.info("[serve-loopback] oversize: " + oversize_resp);
-    assert contains(oversize_resp, "HTTP/1.1 500");
+        // Custom status + header reach the wire via the framed path.
+        let secret_resp = _lb_request(port, "GET /secret HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
+        print.info("[serve-loopback] secret: " + secret_resp);
+        assert contains(secret_resp, "HTTP/1.1 403");
+        assert contains(secret_resp, "X-Reason: nope");
+        assert contains(secret_resp, "denied");
 
-    // #1709: a truncated request (EOF before the `\r\n\r\n` terminator) is
-    // rejected with a 500 — NOT moved into the handler as a malformed
-    // request. Before the fix the partial buffer was handed to the handler
-    // (which saw an unparseable head and 404'd); after it, the worker's
-    // EOF early-return path frees the request buffer and sends a direct
-    // 500. Asserting the 500 distinguishes the fixed behavior from the old
-    // dispatch-the-garbage path.
-    let trunc_resp = _lb_request_halfclose(port, "GET /probe HTTP/1.1\r\nHost: x");
-    print.info("[serve-loopback] truncated: " + trunc_resp);
-    assert contains(trunc_resp, "HTTP/1.1 500");
+        // Over-cap Content-Length is rejected with a 500 (not a hang): declare
+        // 2 MiB (over the 1 MiB cap) but send only a partial body — the server
+        // must reject on the declared length without waiting for the rest.
+        // (The whole ~120-byte request lands in the socket buffer in a single
+        // `send` before the server drains the head and closes, so `_lb_send_all`
+        // does not race a SIGPIPE on the closed peer in practice.)
+        let oversize_req = "POST /echo HTTP/1.1\r\nHost: x\r\nContent-Length: 2000000\r\nConnection: close\r\n\r\npartial";
+        let oversize_resp = _lb_request(port, oversize_req);
+        print.info("[serve-loopback] oversize: " + oversize_resp);
+        assert contains(oversize_resp, "HTTP/1.1 500");
 
-    // #1709: hammer the error paths — interleave empty (immediate-close)
-    // and truncated (partial head + EOF) connections so each repeatedly
-    // takes the worker's free-and-500 early-return path. A per-connection
-    // request-buffer leak, a double-free, or a crash/hang on these paths
-    // would destabilize the long-lived server; the post-storm valid
-    // round-trip below proves it survived every error-path connection
-    // intact. This is the achievable proxy for the RSS-stability criterion
-    // — there is no in-process RSS probe, and the blocking server never
-    // exits cleanly for an atexit LeakSanitizer pass (the focused, clean-
-    // exit ASAN leak gate over `_serve_recv_request` lives in
-    // `serve_request_leak_test.sfn`).
-    let mut storm: i64 = 0;
-    loop {
-        if storm >= 40 { break; }
-        let _e = _lb_fire_and_close(port, "");
-        let _t = _lb_fire_and_close(port, "GET /probe HTTP/1.1\r\nHost: x");
-        storm = storm + 1;
-    }
-    let post_storm = _lb_request(port, "GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
-    print.info("[serve-loopback] post-storm: " + post_storm);
-    assert contains(post_storm, "HTTP/1.1 200");
-    assert contains(post_storm, "ROOT-OK");
+        // #1709: a truncated request (EOF before the `\r\n\r\n` terminator) is
+        // rejected with a 500 — NOT moved into the handler as a malformed
+        // request. Before the fix the partial buffer was handed to the handler
+        // (which saw an unparseable head and 404'd); after it, the worker's
+        // EOF early-return path frees the request buffer and sends a direct
+        // 500. Asserting the 500 distinguishes the fixed behavior from the old
+        // dispatch-the-garbage path.
+        let trunc_resp = _lb_request_halfclose(port, "GET /probe HTTP/1.1\r\nHost: x");
+        print.info("[serve-loopback] truncated: " + trunc_resp);
+        assert contains(trunc_resp, "HTTP/1.1 500");
 
-    // Typed `fetch` client round-trips status + headers from the live
-    // server (the #1323 framed path, proven end-to-end through the
-    // `sfn/http` client). The `sfn/http` capsule is already warm from the
-    // server build, so this second build reuses it.
-    let client_main = _write_fetch_client(_lb_port_str());
-    let client_bin = _build_bin(client_main, _client_root() + "/client-bin");
-    assert client_bin.length > 0;
-    let fexit = process.run_capture([client_bin], _child_env());
-    let fout = process.capture_take_stdout();
-    let _ferr = process.capture_take_stderr();
-    print.info("[serve-loopback] fetch-client: " + fout);
-    assert fexit == 0;
-    assert contains(fout, "FETCH_STATUS=403");
-    assert contains(fout, "FETCH_HEADER=X-Reason: nope");
-    assert contains(fout, "FETCH_BODY=denied");
+        // #1709: hammer the error paths — interleave empty (immediate-close)
+        // and truncated (partial head + EOF) connections so each repeatedly
+        // takes the worker's free-and-500 early-return path. A per-connection
+        // request-buffer leak, a double-free, or a crash/hang on these paths
+        // would destabilize the long-lived server; the post-storm valid
+        // round-trip below proves it survived every error-path connection
+        // intact. This is the achievable proxy for the RSS-stability criterion
+        // — there is no in-process RSS probe, and the blocking server never
+        // exits cleanly for an atexit LeakSanitizer pass (the focused, clean-
+        // exit ASAN leak gate over `_serve_recv_request` lives in
+        // `serve_request_leak_test.sfn`).
+        let mut storm: i64 = 0;
+        loop {
+            if storm >= 40 { break; }
+            let _e = _lb_fire_and_close(port, "");
+            let _t = _lb_fire_and_close(port, "GET /probe HTTP/1.1\r\nHost: x");
+            storm = storm + 1;
+        }
+        let post_storm = _lb_request(port, "GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
+        print.info("[serve-loopback] post-storm: " + post_storm);
+        assert contains(post_storm, "HTTP/1.1 200");
+        assert contains(post_storm, "ROOT-OK");
 
-    // Best-effort cleanup of the consumer trees (the timeout reaps the
-    // server process).
+        // Typed `fetch` client round-trips status + headers from the live
+        // server (the #1323 framed path, proven end-to-end through the
+        // `sfn/http` client). The `sfn/http` capsule is already warm from the
+        // server build, so this second build reuses it.
+        let client_main = _write_fetch_client(_lb_port_str());
+        let client_bin = _build_bin(client_main, _client_root() + "/client-bin");
+        assert client_bin.length > 0;
+        let fexit = process.run_capture([client_bin], _child_env());
+        let fout = process.capture_take_stdout();
+        let _ferr = process.capture_take_stderr();
+        print.info("[serve-loopback] fetch-client: " + fout);
+        assert fexit == 0;
+        assert contains(fout, "FETCH_STATUS=403");
+        assert contains(fout, "FETCH_HEADER=X-Reason: nope");
+        assert contains(fout, "FETCH_BODY=denied");
+        return 0;
+    });
+
+    // Best-effort cleanup of the consumer trees. The server itself was
+    // already killed and reaped by `with_background` on scope exit.
     let _rm = process.run(["rm", "-rf", _app_root()]);
     let _rmc = process.run(["rm", "-rf", _client_root()]);
 }

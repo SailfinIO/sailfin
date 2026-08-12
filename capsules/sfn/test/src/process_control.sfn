@@ -1,0 +1,233 @@
+// sfn/test — Process-lifetime control for tests (SFEP-0010 §3.2).
+//
+// Tests that drive a subprocess have had spawn, capture, and per-child
+// env/cwd since `fixtures.sfn`, but nothing that tears a child down on
+// demand or bounds one in *time*. That gap pushes such tests onto a shell
+// vehicle:
+//
+//   * A blocking server (`serve()` never returns) is reaped by prepending
+//     `timeout <secs>` to the argv, after a `sh -c "command -v timeout"`
+//     probe — and the test SKIPS itself when neither `timeout` nor
+//     `gtimeout` is on `PATH`. Thirteen e2e files carry a near-verbatim
+//     copy of that `_has_cmd` / `_timeout_cmd` / `_spawn_server` trio.
+//   * Readiness is polled by shelling `process.run(["sleep", "0.5"])`
+//     between probe attempts — a fork+exec per tick, in a hand-rolled
+//     bounded retry loop repeated across twelve files.
+//
+// Both workarounds rest on a premise that is no longer true. Their comments
+// say "there is no process-kill primitive"; `process.handle_kill` has
+// existed since SFN-402 (SFEP-0050 §5.1). The skip-on-missing-`timeout`
+// branch therefore silently disables those tests on any host without
+// coreutils — a coverage hole, not merely an ergonomic one.
+//
+// MIGRATION STATUS: this module provides the test-side ergonomics;
+// `compiler/tests/e2e/serve_loopback_test.sfn` is the migrated exemplar.
+// The other twelve loopback files still carry the shell trio and still
+// skip themselves without `timeout`. Do not read the present tense above
+// as describing a closed hole — it is closed only for tests written
+// against this module.
+//
+// WHAT LIVES WHERE. Bounded running is `sfn/os`'s job, not this capsule's:
+// `os::run_bounded` and `os::drain_to_exit` own the deadline, the
+// stdout/stderr demux, the kill-on-expiry, and the single reap. A test that
+// just wants to run something under a deadline calls `os::run_bounded`
+// directly — this module deliberately does NOT wrap it, because a second
+// `run_bounded` in a second capsule is an ambiguity at every call site that
+// imports both.
+//
+// What this module adds is the part `sfn/os` has no opinion about, because
+// it is about test *structure* rather than process mechanics:
+//
+//   * `with_background` — scoped lifetime. A blocking server is killed and
+//     reaped on scope exit INCLUDING the throwing path, so a failing
+//     assertion cannot orphan a child on a fixed port. `sfn/os` gives you
+//     spawn, kill, and drain; the guarantee that teardown happens even when
+//     the body throws is the fixture's contribution.
+//   * `wait_until` — readiness polling on a wall-clock budget.
+//
+// It calls no `process.*` builtin directly; every process operation goes
+// through `sfn/os`'s typed handle.
+import {
+    Env,
+    ProcessDrain,
+    ProcessHandle,
+    drain_to_exit,
+    handle_close_stdin,
+    handle_kill,
+    spawn_with_env
+} from "sfn/os";
+import { int_to_string } from "sfn/strings";
+
+// A child spawned to run concurrently with the test that started it —
+// typically a blocking server the test then drives over a socket.
+//
+// `handle.handle_id` is `0` when the spawn itself failed; `stop_background`
+// and the scoped `with_background` both tolerate that, so a call site does
+// not have to branch before tearing down. `label` is carried only for
+// diagnostics.
+//
+// This is a plain copyable struct wrapping a raw handle, NOT an owning
+// handle: copying it does not duplicate the child, and stopping one copy
+// leaves every other copy dangling. Exactly one `stop_background` per
+// `start_background` — see the warning there.
+struct Background {
+    handle: ProcessHandle;
+    label: string;
+}
+
+// How long to keep draining a killed child before giving up. A SIGKILLed
+// child's pipes normally hit EOF at once, so this is a backstop against a
+// surviving grandchild holding them open, not a wait.
+let _STOP_DRAIN_MS: int = 5000;
+
+// The outcome handed back when the spawn itself never happened. `127`
+// mirrors `process.run`'s missing-command code, matching what
+// `os::run_bounded` reports for the same failure.
+fn _spawn_failed() -> ProcessDrain {
+    return ProcessDrain {
+        stdout: "",
+        stderr: "",
+        exit: 127,
+        timed_out: false
+    };
+}
+
+// Spawn `argv` and return immediately, leaving it running alongside the
+// test. The caller MUST hand the result to `stop_background` — prefer the
+// scoped `with_background`, which cannot forget.
+//
+// Stdin is closed here rather than at teardown. `os::drain_to_exit` closes
+// it too, but only once the child is being drained; a background child that
+// reads stdin would block for the whole body before reaching that point.
+//
+// Output is not drained while the child runs. A background child that
+// writes more than a pipe buffer (~64 KiB) before being stopped will block
+// on that write; a server whose per-request logging is that chatty should
+// be spawned with its output redirected, or run under `os::run_bounded`
+// instead.
+fn start_background(argv: string[], env: Env, cwd: string, label: string) -> Background ![io] {
+    let handle = spawn_with_env(argv, env, cwd);
+    if handle.handle_id != 0 { handle_close_stdin(handle); }
+    return Background { handle: handle, label: label };
+}
+
+// Kill a background child and reap it, returning what it produced.
+//
+// CONSUMES the handle — call it EXACTLY ONCE per `start_background`.
+// `os::drain_to_exit` reaps and frees, so a second call dereferences freed
+// memory and then double-frees. `Background` is a plain copyable struct, so
+// a stale copy cannot be invalidated for you; in particular, do NOT call
+// this from inside a `with_background` body — that fixture stops the child
+// itself on scope exit, and the two stops would collide.
+//
+// Safe on a failed spawn (`handle_id == 0`) and on a child that already
+// exited: `handle_kill` returning `-1` for a dead pid is explicitly not
+// fatal, and the follow-up drain simply sees both pipes at EOF.
+//
+// `timed_out` is always `false` — the stop was the caller's decision, not a
+// deadline expiring. `exit` is reported as the child actually died, so a
+// SIGKILLed server reads `137`. Note `stdout`/`stderr` may be TRUNCATED if
+// a surviving grandchild holds the pipes past `_STOP_DRAIN_MS`, and the
+// returned value cannot distinguish that from a complete capture.
+fn stop_background(bg: Background) -> ProcessDrain ![clock, io] {
+    if bg.handle.handle_id == 0 { return _spawn_failed(); }
+    let _ = handle_kill(bg.handle);
+    let outcome = drain_to_exit(bg.handle, _STOP_DRAIN_MS);
+    return ProcessDrain {
+        stdout: outcome.stdout,
+        stderr: outcome.stderr,
+        exit: outcome.exit,
+        timed_out: false
+    };
+}
+
+// Run a background child for the duration of `body`, and kill + reap it on
+// scope exit — including when `body` throws. Returns whatever `body`
+// returns.
+//
+// This is the structured-lifetime fixture for a blocking server, and the
+// direct replacement for the `_spawn_server` + external-`timeout` idiom: a
+// test can no longer orphan a child by returning early or failing an
+// assertion, so it no longer needs a wall-clock timeout as its only
+// teardown mechanism, and no longer needs to skip itself when that binary
+// is absent.
+//
+// `body` receives the live `Background` (so it can report `label` or check
+// `handle.handle_id != 0`) and follows the same shape as `with_tmp_dir`'s:
+// an ordinary closure over the enclosing test's locals, typed with no
+// `![io]` row because the effect checker attributes a lambda body's effects
+// to the scope that defines it. `-> int` is the interim return shape shared
+// with the other scoped fixtures.
+//
+// `body` must NOT call `stop_background` on the handle it is given: this
+// fixture stops it on scope exit, and a second stop is a use-after-free.
+//
+// SFN-843: a `body` (or any lambda) must not capture an enclosing `let`
+// that has no type annotation and whose initializer is a call — that
+// mistypes the capture's env slot as `i8*`, which fails to build for
+// scalars and SILENTLY yields zero for structs, while passing `sfn check`.
+// Annotating the captured `let` avoids it, as does reaching the value
+// through a helper function. Delete this note when SFN-843 lands.
+fn with_background(argv: string[], env: Env, cwd: string, label: string, body: fn (Background) -> int) -> int ![clock, io] {
+    let bg = start_background(argv, env, cwd, label);
+    try {
+        let result = body(bg);
+        let _ = stop_background(bg);
+        return result;
+    } catch (err) {
+        // Reap first, then re-throw, so the failing test still fails with
+        // its own message rather than a teardown error — and so a thrown
+        // assertion cannot leak the child.
+        let _ = stop_background(bg);
+        throw err;
+    }
+}
+
+// Poll `probe` until it returns true, or until `deadline_ms` elapses.
+// Returns whether it became true in time.
+//
+// This retires the hand-rolled readiness loop that shelled
+// `process.run(["sleep", "0.5"])` between attempts — a whole fork+exec per
+// tick. The prelude's `sleep(ms)` does the same wait in-process, so a poll
+// costs nothing but the probe.
+//
+// The budget is wall-clock rather than an attempt count. An attempt count
+// (`90` tries at `0.5s`) silently changes meaning when the probe itself
+// gets slower, which is exactly what happens on a loaded CI runner; a
+// deadline does not.
+//
+// `probe` carries no effect row, for the same reason the scoped fixtures'
+// bodies do not: its effects are attributed to the scope that defines it.
+//
+// SFN-843: the same capture restriction documented on `with_background`
+// applies to `probe`. Reaching a value through a helper function instead of
+// capturing it is unaffected, and is what the in-tree probes do.
+fn wait_until(probe: fn () -> boolean, deadline_ms: int, interval_ms: int) -> boolean ![clock, io] {
+    let start_ms: int = monotonic_millis();
+    let mut wait_ms = interval_ms;
+    if wait_ms <= 0 { wait_ms = 50; }
+    loop {
+        if probe() { return true; }
+        let elapsed: int = (monotonic_millis() - start_ms) as int;
+        if elapsed >= deadline_ms { return false; }
+        let remaining: int = deadline_ms - elapsed;
+        let mut nap = wait_ms;
+        if nap > remaining { nap = remaining; }
+        sleep(nap);
+    }
+    return false;
+}
+
+// Render a drain outcome as a one-line diagnostic suffix, so a failing
+// assertion can say why without the call site formatting three fields.
+// Distinguishes a deadline kill from an ordinary non-zero exit, which the
+// exit code alone cannot: `os::drain_to_exit` reports the code the child
+// actually died with, and a SIGKILLed child's `137` is indistinguishable
+// from a kernel OOM kill.
+fn describe_outcome(outcome: ProcessDrain) -> string {
+    if outcome.timed_out {
+        return "timed out (killed on deadline, exit " + int_to_string(outcome.exit)
+            + ")";
+    }
+    return "exit " + int_to_string(outcome.exit);
+}

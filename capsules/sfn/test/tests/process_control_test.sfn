@@ -1,0 +1,202 @@
+// Tests for `sfn/test`'s process-lifetime control (SFEP-0010 §3.2).
+//
+// This module no longer wraps bounded running — `os::run_bounded` and
+// `os::drain_to_exit` own the deadline, the stdout/stderr demux, and the
+// kill-on-expiry, and their coverage lives in
+// `capsules/sfn/os/tests/process_control_test.sfn`. What remains here is
+// test *structure* built on top of that: `with_background` proves teardown
+// happens on both the normal and throwing paths for a scoped background
+// child, `stop_background` proves the reap actually ran, and `wait_until`
+// proves an in-process readiness poll observes "false, then true"
+// asynchronously and bails out at its deadline rather than beyond it — the
+// properties a shell vehicle could not guarantee.
+//
+// Absolute binary paths are used throughout: `env` here is a genuinely empty
+// child environment (not an inherited one), so bare-name `PATH` lookup is not
+// available. Each binary is probed with `fs.exists` and the test skips itself
+// (`assert true`) when absent, mirroring the `command -v` skip precedent this
+// module retires (`docs/conventions/e2e-tests.md`).
+import { ProcessDrain, ProcessHandle, env_empty } from "sfn/os";
+import { find } from "sfn/strings";
+
+import {
+    Background,
+    describe_outcome,
+    start_background,
+    stop_background,
+    wait_until,
+    with_background
+} from "../src/mod";
+
+fn _has_bin(path: string) -> boolean ![io] { return fs.exists(path); }
+
+// Fixed marker path for the `wait_until` readiness test. A file-local
+// helper (not a captured local) so the probe lambda below can call it
+// instead of capturing anything — SFN-843: a lambda capturing an enclosing
+// `let` that has no type annotation and whose initializer is a call
+// mistypes the capture's env slot as `i8*`, which fails to build for
+// scalars and silently yields zero for structs. Annotating the `let` also
+// avoids it; the helper keeps the probe capture-free either way. Mirrors
+// `_scratch()` in `fixtures_test.sfn`.
+fn _marker_path() -> string ![io] {
+    let dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length > 0 { return dir + "/sfn-process-control-wait-until.marker"; }
+    return "/tmp/sfn-process-control-wait-until.marker";
+}
+
+// A distinct marker for the stdin-EOF test, so the two never alias when
+// both run under the same scratch dir. Same capture-free helper shape as
+// `_marker_path` above, and for the same reason.
+fn _stdin_marker_path() -> string ![io] {
+    let dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length > 0 { return dir + "/sfn-process-control-stdin-eof.marker"; }
+    return "/tmp/sfn-process-control-stdin-eof.marker";
+}
+
+// `wait_until` polls in-process rather than forking `sleep` per tick. The
+// probe captures nothing — it only calls the file-local `_marker_path()`
+// helper — to stay clear of the SFN-843 capture miscompile documented on
+// that helper.
+// A background child creates the marker file after a real delay, so the
+// probe genuinely returns false on early polls and true once the file
+// shows up, exercising the same "false, then true" behavior asynchronously
+// instead of via a captured clock reading.
+test "process control: wait_until returns true once the probe becomes true" ![clock, io] {
+    if !_has_bin("/bin/sh") || !_has_bin("/bin/sleep") || !_has_bin("/bin/touch") {
+        assert true;
+        return;
+    }
+    let marker = _marker_path();
+    if fs.exists(marker) { fs.deleteFile(marker); }
+    let bg = start_background(["/bin/sh", "-c", "/bin/sleep 0.2; /bin/touch '"
+        + marker
+        + "'"], env_empty(), "", "wait-until-marker");
+    let became_true = wait_until(fn () -> boolean {
+        return fs.exists(_marker_path());
+    }, 5000, 20);
+    let _ = stop_background(bg);
+    assert became_true;
+}
+
+// A probe that never becomes true returns false at the deadline, and does
+// so within a bounded time — not wildly beyond the deadline it was given.
+test "process control: wait_until returns false when the deadline expires" ![clock, io] {
+    let start_ms = monotonic_millis();
+    let became_true = wait_until(fn () -> boolean { return false; }, 300, 20);
+    let elapsed_ms = monotonic_millis() - start_ms;
+    assert ! became_true;
+    assert elapsed_ms >= 300;
+    assert elapsed_ms < 3000;
+}
+
+// The body's return value threads back out through the fixture, proving it
+// actually ran against the live `Background` rather than being skipped.
+test "process control: with_background runs the body and threads its result" ![clock, io] {
+    if !_has_bin("/bin/sleep") {
+        assert true;
+        return;
+    }
+    let result = with_background(["/bin/sleep", "30"], env_empty(), "", "bg-normal", fn (bg: Background) -> int {
+        if bg.handle.handle_id == 0 { return -1; }
+        return 99;
+    });
+    assert result == 99;
+}
+
+// A throwing body still gets its background child reaped, and the original
+// error propagates rather than being swallowed by teardown.
+test "process control: with_background reaps on the throwing path" ![clock, io] {
+    if !_has_bin("/bin/sleep") {
+        assert true;
+        return;
+    }
+    let mut threw = false;
+    try {
+        let _ = with_background(["/bin/sleep", "30"], env_empty(), "", "bg-throw", fn (bg: Background) -> int {
+            throw "process-control-body-boom";
+        });
+    } catch (e) { threw = true; }
+    assert threw;
+}
+
+// `stop_background` does not merely stop draining — it actually reaps the
+// child. `exit == 137` (`128 + SIGKILL`) is only observable if `handle_wait`
+// ran; a missed reap would leave the process alive (or a zombie) and this
+// assertion would fail rather than silently pass, unlike a test that only
+// checks a thrown error propagated.
+test "process control: stop_background reaps a SIGKILLed child" ![clock, io] {
+    if !_has_bin("/bin/sleep") {
+        assert true;
+        return;
+    }
+    let bg = start_background(["/bin/sleep", "30"], env_empty(), "", "bg-reap-check");
+    let outcome = stop_background(bg);
+    assert outcome.exit == 137;
+    assert ! outcome.timed_out;
+}
+
+// `start_background` closes the child's stdin at SPAWN, not at teardown.
+// That early close is the one behavior unique to this capsule's
+// composition: `os::drain_to_exit` also closes stdin, but only once the
+// child is being drained, which is too late for a background child that
+// reads stdin *during* the body.
+//
+// The child proves it saw EOF by side effect rather than by exit code. An
+// exit-code test would be racy: `stop_background` kills before it drains,
+// so a child that exited cleanly a moment earlier and one killed mid-read
+// are only distinguishable if the kill loses a race. Here the child drains
+// stdin and only then creates a marker, so the marker exists if and only
+// if stdin reached EOF while the child was running in the background.
+// Without the close in `start_background`, `cat` blocks forever, the
+// marker never appears, and `wait_until` reports false.
+test "process control: start_background closes stdin so a reading child sees EOF" ![clock, io] {
+    if !_has_bin("/bin/sh") || !_has_bin("/bin/cat") || !_has_bin("/bin/touch") {
+        assert true;
+        return;
+    }
+    let marker = _stdin_marker_path();
+    if fs.exists(marker) { fs.deleteFile(marker); }
+    let bg = start_background(["/bin/sh", "-c", "/bin/cat > /dev/null; /bin/touch '"
+        + marker
+        + "'"], env_empty(), "", "bg-stdin-eof");
+    let saw_eof = wait_until(fn () -> boolean {
+        return fs.exists(_stdin_marker_path());
+    }, 5000, 20);
+    let _ = stop_background(bg);
+    assert saw_eof;
+}
+
+// `stop_background` on a failed spawn (`handle.handle_id == 0`) must be
+// safe — no crash, no attempt to kill/wait a nonexistent handle — and
+// reports the same missing-command exit code as a direct `os::run_bounded`
+// on an absent binary.
+test "process control: stop_background on a failed spawn is safe and reports exit 127" ![clock, io] {
+    let outcome = stop_background(Background {
+        handle: ProcessHandle { handle_id: 0 }, label: "none"
+    });
+    assert outcome.exit == 127;
+    assert ! outcome.timed_out;
+}
+
+// `describe_outcome` distinguishes a deadline kill from an ordinary
+// non-zero exit — the exit code alone cannot, since a killed child's `137`
+// is never used as the timeout discriminator.
+test "process control: describe_outcome distinguishes a deadline kill from a normal exit" ![clock, io] {
+    let killed = ProcessDrain {
+        stdout: "",
+        stderr: "",
+        exit: 137,
+        timed_out: true
+    };
+    let normal = ProcessDrain {
+        stdout: "",
+        stderr: "",
+        exit: 3,
+        timed_out: false
+    };
+    let killed_desc = describe_outcome(killed);
+    let normal_desc = describe_outcome(normal);
+    assert find(killed_desc, "timed out", 0) >= 0;
+    assert find(normal_desc, "timed out", 0) < 0;
+    assert find(normal_desc, "exit 3", 0) >= 0;
+}

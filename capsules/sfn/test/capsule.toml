@@ -1,6 +1,6 @@
 [capsule]
 name = "sfn/test"
-version = "0.9.7"
+version = "0.10.0"
 description = "Test assertion helpers and utilities for Sailfin"
 
 [dependencies]
@@ -25,7 +25,16 @@ description = "Test assertion helpers and utilities for Sailfin"
 "sfn/os" = "*"
 
 [capabilities]
-required = ["io"]
+# `clock` joins `io` for the process-lifetime helpers in
+# `src/process_control.sfn`: a wall-clock deadline and an in-process poll
+# interval both read `monotonic_millis()` / `sleep()` from the prelude,
+# which are `![clock]`. `sfn/bench` carries the same pair for the same
+# reason. `required` is a ceiling on what THIS capsule's own functions may
+# declare, checked only when `sfn/test` is the resolved project root — it
+# is not inherited by consumers, so no existing caller changes. A test that
+# calls a deadline helper declares `![clock, io]` on its own `test` block,
+# exactly as it would for any other imported effect.
+required = ["clock", "io"]
 
 [build]
 entry = "src/mod.sfn"
