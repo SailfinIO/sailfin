@@ -22,7 +22,21 @@
 // CI runner's absolute numbers are not reproducible, so the assertion needs
 // a wide margin. Measured on the dev host at -O0: seal ~42 MB/s, open ~43
 // MB/s, `int[]` oracle ~3.7 MB/s (pointer/oracle ratio ~11x).
-import { tls13_seal_record } from "sfn/crypto";
+//
+// The AES-128-GCM leg below (SFN-817) exists so the `-O2` figure recorded in
+// `docs/status.md` is reproducible and regression-guarded — a prior version
+// of this file measured that figure but asserted nothing about it, so a
+// future change could have silently dropped AES-GCM back to its
+// buffer-based first cut (or worse) with no test failing. Same -O0-only
+// caveat and floor-looseness rationale as the ChaCha20 leg above. Measured
+// on the dev host at -O0: seal/open ~6.3 MB/s, `int[]` AES-GCM oracle
+// (`tls13_seal_record_aead`) ~0.4 MB/s (pointer/oracle ratio ~15x).
+import {
+    aead_aes_128_gcm,
+    aead_chacha20_poly1305,
+    tls13_seal_record,
+    tls13_seal_record_aead
+} from "sfn/crypto";
 import { int_to_string } from "sfn/strings";
 
 extern fn malloc(size: usize) -> *u8;
@@ -31,9 +45,9 @@ extern fn free(ptr: *u8) -> void;
 
 extern fn memset(ptr: *u8, value: i32, n: usize) -> *u8;
 
-extern fn sfn_tls_record_seal(key: *u8, key_len: i64, iv: *u8, iv_len: i64, seq: i64, content_type: i64, content: *u8, content_len: i64, padding: i64, out: *u8) -> i64;
+extern fn sfn_tls_record_seal(alg: i64, key: *u8, key_len: i64, iv: *u8, iv_len: i64, seq: i64, content_type: i64, content: *u8, content_len: i64, padding: i64, out: *u8) -> i64;
 
-extern fn sfn_tls_record_open(key: *u8, key_len: i64, iv: *u8, iv_len: i64, seq: i64, record: *u8, record_len: i64) -> i64;
+extern fn sfn_tls_record_open(alg: i64, key: *u8, key_len: i64, iv: *u8, iv_len: i64, seq: i64, record: *u8, record_len: i64) -> i64;
 
 // `_tlsrec_` is reserved by the module under test and `_td_` by the
 // differential test (tls_record_pointer_differential_test.sfn), so every
@@ -78,7 +92,7 @@ test "tls record: pointer idiom sustains its throughput advantage over the int[]
         i += 1;
     }
     let wire: *u8 = malloc((rec + 32) as usize);
-    let warm: int = sfn_tls_record_seal(key, 32, iv, 12, 0, 23, plain, rec, 0, wire);
+    let warm: int = sfn_tls_record_seal(aead_chacha20_poly1305(), key, 32, iv, 12, 0, 23, plain, rec, 0, wire);
     assert warm > 0;
 
     let t0: int = monotonic_millis();
@@ -88,7 +102,7 @@ test "tls record: pointer idiom sustains its throughput advantage over the int[]
         let mut s: int = 0;
         loop {
             if s >= n_rec { break; }
-            sfn_tls_record_seal(key, 32, iv, 12, s, 23, plain, rec, 0, wire);
+            sfn_tls_record_seal(aead_chacha20_poly1305(), key, 32, iv, 12, s, 23, plain, rec, 0, wire);
             s += 1;
         }
         p1 += 1;
@@ -106,8 +120,8 @@ test "tls record: pointer idiom sustains its throughput advantage over the int[]
         let mut s: int = 0;
         loop {
             if s >= n_rec { break; }
-            let w: int = sfn_tls_record_seal(key, 32, iv, 12, s, 23, plain, rec, 0, wire);
-            let o: int = sfn_tls_record_open(key, 32, iv, 12, s, wire, w);
+            let w: int = sfn_tls_record_seal(aead_chacha20_poly1305(), key, 32, iv, 12, s, 23, plain, rec, 0, wire);
+            let o: int = sfn_tls_record_open(aead_chacha20_poly1305(), key, 32, iv, 12, s, wire, w);
             if o < 0 { open_bad += 1; }
             s += 1;
         }
@@ -168,6 +182,130 @@ test "tls record: pointer idiom sustains its throughput advantage over the int[]
     // rather than divided by zero.
     if seal_ms > 0 { assert _tp_mbps(total, seal_ms) >= 5; }
     if open_ms > 0 { assert _tp_mbps(total, open_ms) >= 5; }
+    if seal_ms > 0 && oracle_ms > 0 {
+        let seal_mbps: int = _tp_mbps(total, seal_ms);
+        let oracle_mbps: int = _tp_mbps(oracle_bytes, oracle_ms);
+        assert seal_mbps >= oracle_mbps * 3;
+    }
+}
+
+test "tls record: pointer idiom sustains its AES-128-GCM throughput advantage over the int[] oracle" ![clock, io] {
+    let rec: int = 16384;
+    let n_rec: int = 64;
+    let passes: int = 4;
+    let total: int = rec * n_rec * passes;
+    let alg: int = aead_aes_128_gcm();
+    let key: *u8 = malloc(16 as usize);
+    let iv: *u8 = malloc(12 as usize);
+    let mut i: int = 0;
+    loop {
+        if i >= 16 { break; }
+        _tp_put(key, i, (i * 7 + 3) & 255);
+        i += 1;
+    }
+    i = 0;
+    loop {
+        if i >= 12 { break; }
+        _tp_put(iv, i, (i * 13 + 5) & 255);
+        i += 1;
+    }
+    let plain: *u8 = malloc(rec as usize);
+    i = 0;
+    loop {
+        if i >= rec { break; }
+        _tp_put(plain, i, (i * 31 + 7) & 255);
+        i += 1;
+    }
+    let wire: *u8 = malloc((rec + 32) as usize);
+    let warm: int = sfn_tls_record_seal(alg, key, 16, iv, 12, 0, 23, plain, rec, 0, wire);
+    assert warm > 0;
+
+    let t0: int = monotonic_millis();
+    let mut p1: int = 0;
+    loop {
+        if p1 >= passes { break; }
+        let mut s: int = 0;
+        loop {
+            if s >= n_rec { break; }
+            sfn_tls_record_seal(alg, key, 16, iv, 12, s, 23, plain, rec, 0, wire);
+            s += 1;
+        }
+        p1 += 1;
+    }
+    let t1: int = monotonic_millis();
+    let t2: int = monotonic_millis();
+    let mut p2: int = 0;
+    // Same rationale as the ChaCha20 leg above: accumulate failures rather
+    // than asserting per iteration inside the timed region.
+    let mut open_bad: int = 0;
+    loop {
+        if p2 >= passes { break; }
+        let mut s: int = 0;
+        loop {
+            if s >= n_rec { break; }
+            let w: int = sfn_tls_record_seal(alg, key, 16, iv, 12, s, 23, plain, rec, 0, wire);
+            let o: int = sfn_tls_record_open(alg, key, 16, iv, 12, s, wire, w);
+            if o < 0 { open_bad += 1; }
+            s += 1;
+        }
+        p2 += 1;
+    }
+    let t3: int = monotonic_millis();
+    assert open_bad == 0;
+    let seal_ms: int = t1 - t0;
+    let open_ms: int = (t3 - t2) - seal_ms;
+    print.info("aes_bytes=" + int_to_string(total));
+    print.info("aes_seal_ms=" + int_to_string(seal_ms));
+    print.info("aes_open_ms=" + int_to_string(open_ms));
+    free(key);
+    free(iv);
+    free(plain);
+    free(wire);
+
+    // The `int[]` AES-128-GCM oracle over the same record shape. Only 4
+    // records here: at -O0 the capsule's bitsliced-over-`int[]` core is
+    // slow enough that a full 1 MiB pass would dominate the test run.
+    let o_rec: int = 4;
+    let mut okey: int[] = [];
+    let mut oiv: int[] = [];
+    let mut q: int = 0;
+    loop {
+        if q >= 16 { break; }
+        okey.push((q * 7 + 3) & 255);
+        q += 1;
+    }
+    q = 0;
+    loop {
+        if q >= 12 { break; }
+        oiv.push((q * 13 + 5) & 255);
+        q += 1;
+    }
+    let mut ocontent: int[] = [];
+    q = 0;
+    loop {
+        if q >= rec { break; }
+        ocontent.push((q * 31 + 7) & 255);
+        q += 1;
+    }
+    let o0: int = monotonic_millis();
+    q = 0;
+    loop {
+        if q >= o_rec { break; }
+        tls13_seal_record_aead(alg, okey, oiv, q, 23, ocontent, 0);
+        q += 1;
+    }
+    let o1: int = monotonic_millis();
+    let oracle_ms: int = o1 - o0;
+    let oracle_bytes: int = rec * o_rec;
+    print.info("aes_oracle_bytes=" + int_to_string(oracle_bytes));
+    print.info("aes_oracle_ms=" + int_to_string(oracle_ms));
+
+    // Catastrophic-regression floors only (see header): AES-GCM is
+    // inherently slower than ChaCha20 without AES-NI, so these floors are
+    // set against the AES-128-GCM oracle measured just above, not the
+    // ChaCha20 floor earlier in this file.
+    if seal_ms > 0 { assert _tp_mbps(total, seal_ms) >= 1; }
+    if open_ms > 0 { assert _tp_mbps(total, open_ms) >= 1; }
     if seal_ms > 0 && oracle_ms > 0 {
         let seal_mbps: int = _tp_mbps(total, seal_ms);
         let oracle_mbps: int = _tp_mbps(oracle_bytes, oracle_ms);

@@ -37,7 +37,6 @@
 import {
     ClientHandshake,
     ServerHandshake,
-    TlsRecordPlaintext,
     TrustStore,
     X509Certificate,
     X509ChainResult,
@@ -73,8 +72,6 @@ import {
     hs_type_server_hello,
     pem_certificates_to_der,
     random_bytes,
-    tls13_open_record_aead,
-    tls13_seal_record_aead,
     tls13_traffic_iv,
     tls13_traffic_key,
     tls_cipher_aes_128_gcm_sha256,
@@ -98,9 +95,9 @@ extern fn recv(sockfd: i32, buf: *u8, len: i64, flags: i32) -> i64;
 
 extern fn send(sockfd: i32, buf: *u8, len: i64, flags: i32) -> i64;
 
-extern fn sfn_tls_record_seal(key: *u8, key_len: i64, iv: *u8, iv_len: i64, seq: i64, content_type: i64, content: *u8, content_len: i64, padding: i64, out: *u8) -> i64;
+extern fn sfn_tls_record_seal(alg: i64, key: *u8, key_len: i64, iv: *u8, iv_len: i64, seq: i64, content_type: i64, content: *u8, content_len: i64, padding: i64, out: *u8) -> i64;
 
-extern fn sfn_tls_record_open(key: *u8, key_len: i64, iv: *u8, iv_len: i64, seq: i64, record: *u8, record_len: i64) -> i64;
+extern fn sfn_tls_record_open(alg: i64, key: *u8, key_len: i64, iv: *u8, iv_len: i64, seq: i64, record: *u8, record_len: i64) -> i64;
 
 extern fn sfn_str_sfn_from_cstr(s: *u8) -> *u8;
 
@@ -721,97 +718,35 @@ fn _tls_suite_key_len(suite: i64) -> i64 {
 }
 
 // ── Encrypted record I/O ─────────────────────────────────────────
-// ChaCha20-Poly1305 goes straight through `tls_record.sfn`, the `*u8`
-// pointer-idiom record layer, with no `int[]` materialisation — that is the
-// ~233 MB/s path SFN-768 exists for.
-//
-// AES-GCM goes through the capsule's `int[]` record layer instead.
-// `tls_record.sfn` implements only ChaCha20 and Poly1305 and stays
-// deliberately self-contained, so a suite it cannot carry never reaches it:
-// its `key_len != 32` guard is left strict rather than loosened, which keeps
-// running the wrong cipher unrepresentable there instead of merely guarded
-// against. A 32-byte AES-256-GCM key would otherwise satisfy a length-only
-// check and be encrypted with ChaCha20 — a failure that surfaces at the peer
-// as a bad tag, not here.
-//
-// The cost is real, and stated as a bound rather than a measurement: the
-// capsule *primitive* measures ~1.0 MB/s at -O2 (SFN-339's
-// `aes_gcm_seal_bench`), and this path adds three `int[]` marshalling
-// passes plus record framing and a writeback loop on top, so ~1 MB/s is a
-// ceiling this path cannot exceed. The ~233 MB/s ChaCha20 figure *is* a
-// runtime-layer measurement, so the two are not directly comparable —
-// SFN-817 measures the AES path properly. That asymmetry is why
-// `encode_client_hello` offers
-// ChaCha20-Poly1305 first, inverting the usual AES-NI-era preference — this
-// stack has no AES-NI, so its AES is the slow option. SFN-817 ports AES-GCM to
-// the pointer idiom and retires this split.
+// Both negotiable suites go through `tls_record.sfn`, the `*u8`
+// pointer-idiom record layer — ChaCha20-Poly1305 at the ~233 MB/s SFN-768
+// measured, AES-128-GCM at the SFN-817 measurement recorded in
+// `docs/status.md`. `sfn_tls_record_seal`/`sfn_tls_record_open` take the
+// negotiated suite's AEAD identifier and derive the required key length from
+// it (`_tlsrec_alg_key_len`, `runtime/sfn/platform/tls_record.sfn`) rather
+// than checking a standalone constant, which is what makes a 32-byte
+// AES-256-GCM key unable to silently run through ChaCha20 (SFN-814 recorded
+// this hazard when AES-GCM still fell back to the capsule's `int[]` layer;
+// SFN-817 retired that fallback).
 // Seal one record under the session's negotiated suite into `out`, returning
 // the wire byte count or -1 fail-closed. `out` must hold
 // `5 + content_len + 1 + tag`, which is what both callers allocate.
 fn _tls_seal_record(s: *TlsSession, content_type: i64, content: *u8, content_len: i64, out: *u8) -> i64 {
-    // Reject an oversized fragment before the AES branch materialises an
-    // `int[]` of it. The pointer path rejects at zero allocation cost, and
-    // `tls_write` caps nothing, so without this an AES-GCM session pays
-    // 8 bytes per content byte before failing closed — consequential
-    // against the 8 GiB RLIMIT_AS the toolchain self-applies.
     if content_len < 0 { return 0 - 1; }
     if content_len > 16384 { return 0 - 1; }
-    if s.suite == tls_cipher_chacha20_poly1305_sha256() {
-        return sfn_tls_record_seal(s.write_key_addr as *u8, 32, s.write_iv_addr as *u8, 12, s.write_seq, content_type, content, content_len, 0, out);
-    }
     let alg: int = _tls_suite_aead(s.suite);
     if alg == 0 { return 0 - 1; }
-    let key: int[] = _tls_buf_to_bytes(s.write_key_addr as *u8, 0, s.write_key_len);
-    let iv: int[] = _tls_buf_to_bytes(s.write_iv_addr as *u8, 0, 12);
-    let body: int[] = _tls_buf_to_bytes(content, 0, content_len);
-    let rec: int[] = tls13_seal_record_aead(alg, key, iv, s.write_seq, content_type, body, 0);
-    if rec.length == 0 { return 0 - 1; }
-    if rec.length > 5 + content_len + 1 + 16 { return 0 - 1; }
-    let mut i: i64 = 0;
-    loop {
-        if i >= rec.length { break; }
-        _tls_put(out, i, rec[i]);
-        i = i + 1;
-    }
-    return rec.length;
+    return sfn_tls_record_seal(alg, s.write_key_addr as *u8, s.write_key_len, s.write_iv_addr as *u8, 12, s.write_seq, content_type, content, content_len, 0, out);
 }
 
 // Open the record at `base[0..total)` under the session's negotiated suite.
-// Matches `sfn_tls_record_open`'s contract exactly: the recovered plaintext is
-// written back in place at `base + 5`, and the return packs the inner content
-// type in the high 32 bits and its length in the low 32, or -1 fail-closed.
+// `sfn_tls_record_open`'s contract: the recovered plaintext is written back
+// in place at `base + 5`, and the return packs the inner content type in the
+// high 32 bits and its length in the low 32, or a negative code fail-closed.
 fn _tls_open_record(s: *TlsSession, base: *u8, total: i64) -> i64 {
-    if s.suite == tls_cipher_chacha20_poly1305_sha256() {
-        return sfn_tls_record_open(s.read_key_addr as *u8, 32, s.read_iv_addr as *u8, 12, s.read_seq, base, total);
-    }
     let alg: int = _tls_suite_aead(s.suite);
     if alg == 0 { return 0 - 1; }
-    let key: int[] = _tls_buf_to_bytes(s.read_key_addr as *u8, 0, s.read_key_len);
-    let iv: int[] = _tls_buf_to_bytes(s.read_iv_addr as *u8, 0, 12);
-    let rec: int[] = _tls_buf_to_bytes(base, 0, total);
-    let opened: Result<TlsRecordPlaintext, string> = tls13_open_record_aead(alg, key, iv, s.read_seq, rec);
-    match opened {
-        Result.Err { error } => { return 0 - 1; },
-        Result.Ok { value } => {
-            return _tls_open_writeback(s, base, total, value);
-        }
-    }
-}
-
-// Write the recovered plaintext back to `base + 5` and pack the return value.
-// Split out of `_tls_open_record` because a `match` arm carrying trailing
-// control flow is miscompiled by the pinned seed (SFN-378) — the same reason
-// `sfn/crypto/tls13_record.sfn` splits its own open path.
-fn _tls_open_writeback(s: *TlsSession, base: *u8, total: i64, pt: TlsRecordPlaintext) -> i64 {
-    let n: i64 = pt.content.length;
-    if 5 + n > total { return 0 - 1; }
-    let mut i: i64 = 0;
-    loop {
-        if i >= n { break; }
-        _tls_put(base, 5 + i, pt.content[i]);
-        i = i + 1;
-    }
-    return (pt.content_type << 32) | n;
+    return sfn_tls_record_open(alg, s.read_key_addr as *u8, s.read_key_len, s.read_iv_addr as *u8, 12, s.read_seq, base, total);
 }
 
 fn _tls_write_encrypted(s: *TlsSession, content_type: i64, body: int[]) -> bool ![net] {
