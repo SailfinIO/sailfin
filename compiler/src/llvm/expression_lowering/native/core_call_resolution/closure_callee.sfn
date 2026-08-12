@@ -146,7 +146,12 @@ fn _looks_like_fn_pointer_annotation(annotation: string) -> boolean {
 fn _strip_return_arrow(text: string) -> string {
     let trimmed = trim_text(text);
     if starts_with(trimmed, "->") {
-        return trim_text(substring(trimmed, 2, trimmed.length));
+        let result = trim_text(substring(trimmed, 2, trimmed.length));
+        let effect_start = find(result, "![", 0);
+        if effect_start >= 0 {
+            return trim_text(substring(result, 0, effect_start));
+        }
+        return result;
     }
     return "";
 }

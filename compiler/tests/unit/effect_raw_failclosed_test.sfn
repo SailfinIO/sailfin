@@ -37,7 +37,7 @@ fn _walk_ctx() -> TypeckCtx {
     let no_interfaces: Statement[] = [];
     let no_generic_structs: string[] = [];
     let no_known_types: string[] = [];
-    return make_typeck_ctx(_no_bindings(), empty_import_symbols(), empty_import_symbols(), no_interfaces, _no_bindings(), false, no_generic_structs, no_known_types);
+    return make_typeck_ctx(_no_bindings(), empty_import_symbols(), empty_import_symbols(), no_interfaces, no_interfaces, _no_bindings(), false, no_generic_structs, no_known_types);
 }
 
 fn _walk_ctx_with_binding(name: string, span: SourceSpan) -> TypeckCtx {
@@ -45,7 +45,7 @@ fn _walk_ctx_with_binding(name: string, span: SourceSpan) -> TypeckCtx {
     let no_generic_structs: string[] = [];
     let no_known_types: string[] = [];
     let bindings = append_symbol(_no_bindings(), name, "variable", span);
-    return make_typeck_ctx(bindings, empty_import_symbols(), empty_import_symbols(), no_interfaces, bindings, false, no_generic_structs, no_known_types);
+    return make_typeck_ctx(bindings, empty_import_symbols(), empty_import_symbols(), no_interfaces, no_interfaces, bindings, false, no_generic_structs, no_known_types);
 }
 
 fn _has_code(diags: Diagnostic[], code: string) -> boolean {

@@ -103,7 +103,7 @@ fn _symbols_from_global_names(names: string[]) -> SymbolEntry[] {
     loop {
         if i >= names.length { break; }
         out.push(SymbolEntry {
-            name: names[i], kind: "prelude", span: null, is_generic: false, is_c_abi: false, element_kind: "", declared_prim: "", declared_struct: ""
+            name: names[i], kind: "prelude", span: null, is_generic: false, is_c_abi: false, element_kind: "", declared_prim: "", declared_struct: "", declared_type: "", function_parameter_types: [], function_return_type: "", function_effects: [], function_is_async: false, is_top_level_function: false
         });
         i += 1;
     }
@@ -214,7 +214,7 @@ fn _collect_imported_call_symbols(program: Program) -> SymbolEntry[] {
                     if alias_str.length > 0 { local_name = alias_str; }
                 }
                 symbols.push(SymbolEntry {
-                    name: local_name, kind: "import", span: null, is_generic: false, is_c_abi: false, element_kind: "", declared_prim: "", declared_struct: ""
+                    name: local_name, kind: "import", span: null, is_generic: false, is_c_abi: false, element_kind: "", declared_prim: "", declared_struct: "", declared_type: "", function_parameter_types: [], function_return_type: "", function_effects: [], function_is_async: false, is_top_level_function: false
                 });
                 s += 1;
             }
@@ -332,7 +332,13 @@ fn register_top_level_symbol(statement: Statement, existing: SymbolEntry[]) -> S
         return register_symbol(statement.name, "type", statement.name_span, existing);
     }
     if statement.variant == "VariableDeclaration" {
-        let registration = register_symbol(statement.name, "variable", statement.span, existing);
+        let mut registration = register_symbol(statement.name, "variable", statement.span, existing);
+        if registration.diagnostics.length == 0 {
+            if statement.type_annotation != null {
+                let last = registration.symbols.length - 1;
+                registration.symbols[last].declared_type = statement.type_annotation.text;
+            }
+        }
         if statement.is_thread_local {
             if !statement.mutable {
                 let mut diagnostics = registration.diagnostics;

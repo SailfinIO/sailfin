@@ -23,8 +23,9 @@ graduates-to:
 > `Accepted`** — the design gate is passed (owner approval, 2026-06-26) and the
 > four forks the architect flagged are **resolved and committed** in §3.5 below
 > (reflected in §3.1, §4, §5, §7, §8); there are no remaining open forks.
-> Implementation has not landed: only the v0 baseline (item 2) is built, so this
-> stays `Accepted` (not `Implemented`) until the work clears the Stage1 Readiness
+> Implementation is incremental: the v0 baseline (item 2) and top-level named
+> function values (item 1, SFN-667) are built. Items 3–4 remain, so this stays
+> `Accepted` (not `Implemented`) until the work clears the Stage1 Readiness
 > Checklist end-to-end and self-hosts.
 
 ## 1. Summary
@@ -35,13 +36,12 @@ and dispatch through a single seam in
 That seam already makes one shape of first-class function value work end-to-end:
 a **capturing closure passed as a `fn(...)` parameter** to a user-defined
 higher-order function (#1610, closed 2026-06-25 — the v0 baseline this SFEP
-documents). What does **not** work yet is the rest of the function-value surface
-a production language is expected to have: (1) referencing a **named function**
-as a typed `fn(...)` value (today only `<fn> as * u8` C-ABI address-taking is
-allowed; the #1147 `E0808` guard rejects every other value-position use), (3)
+documents). At acceptance, the rest of the function-value surface did not work:
+(1) referencing a **named function** as a typed `fn(...)` value, (3)
 **populating and dispatching through fn-typed struct fields**, and (4) a clear
 **ABI verdict** for non-pointer-width signatures (`fn(string) -> string` where
-`string` is `{i8*, i64}`). This SFEP designs all four items so that *every*
+`string` is `{i8*, i64}`). SFN-667 now ships item 1 for pointer-width signatures;
+items 3–4 remain. This SFEP designs all four items so that *every*
 function value — named or closure, in a parameter, a local, or a struct field —
 materializes the same `{fn_ptr, env}` pair and dispatches through the **one**
 existing seam, and it states precisely where generics gate the ABI. The
@@ -55,9 +55,10 @@ shared generics dependency (with SFEP-0012 and SFEP-0028) has a plan.
 ## 2. Motivation
 
 First-class functions are table stakes. Sailfin can pass a lambda to a
-higher-order function and dispatch it, but it cannot yet treat a **named**
-function as a value, store a function in a struct field, or carry a function
-across a non-pointer-width signature. The status quo strands three idioms:
+higher-order function and dispatch it. When this SFEP was accepted it could not
+yet treat a **named** function as a value, store a function in a struct field,
+or carry a function across a non-pointer-width signature. SFN-667 closes the
+first gap; the other two remain:
 
 ```sfn
 fn worker(n: int) -> int { return n + 1; }
@@ -65,9 +66,8 @@ fn worker(n: int) -> int { return n + 1; }
 fn apply(cb: fn (int) -> int, x: int) -> int { return cb(x); }
 
 fn main() ![io] {
-    // (1) Named function as a value — REJECTED today (E0808). The only
-    // allowed value-position use of `worker` is `worker as * u8` (a raw
-    // C-ABI code pointer, #1142/#1146), which is not a callable fn(int)->int.
+    // (1) Named function as a value — shipped for concrete synchronous
+    // top-level functions with pointer-width signatures (SFN-667).
     print(apply(worker, 5));
 
     // (2) Capturing closure as a general fn(...) param — WORKS today (#1610).
@@ -88,14 +88,11 @@ struct Router { handler: fn (int) -> int; }
 inject **named compiler functions** *and* **capturing closures** as typed
 callbacks — a registry of `fn (TestCtx) -> TestResult` handlers, some of which
 are bare named functions and some of which are closures that capture per-suite
-state. Item (2) already lets it pass the closures; items (1) and (3) are what
-block it from registering the named functions and from storing the handler set
-in a struct. Until a named function can become a `fn(...)` value and a struct
-field can hold one, #1172 cannot express its callback table without a workaround
-(wrapping every named function in a trivial forwarding lambda — which works, but
-is exactly the boilerplate first-class functions exist to remove).
+state. Item (2) already let it pass closures, and SFN-667 now lets it register
+named functions directly. Item (3)—storing and dispatching the handler set
+through struct fields—remains the blocker for expressing the full #1172 table.
 
-**Today's rejection is deliberate, not accidental.** The #1147 `E0808` guard
+**The legacy rejection was deliberate, not accidental.** The #1147 `E0808` guard
 (`compiler/src/typecheck_types.sfn:1729-1841`,
 `make_fn_value_position_diagnostic` + `check_fn_reference_raw`) was added so that
 "function used as a value here" fails *loudly* rather than silently miscompiling
@@ -168,18 +165,18 @@ path **and** zero-indirection when the callee is statically a named function:
   `{trampoline_ptr, null}` (branchless indirect).** When a named function *flows
   as a value* through the seam (passed to `apply(worker, …)`, stored in a struct
   field, assigned to a `fn(...)` local), it is reified as the closure pair
-  `{ bitcast(@worker__fnval_adapter to i8*), null }`, where
-  `@worker__fnval_adapter(i8* env, <args>)` ignores `env` and **tail-calls**
+  `{ bitcast(@worker.__fnval_adapter to i8*), null }`, where
+  `@worker.__fnval_adapter(i8* env, <args>)` ignores `env` and **tail-calls**
   `@worker(<args>)`:
 
   ```
   ; emitted once per named fn materialized as a value (deduplicated by symbol)
-  define i64 @worker__fnval_adapter(i8* %env, i64 %n) {
-    %r = musttail call i64 @worker(i64 %n)
+  define i64 @worker.__fnval_adapter(i8* %env, i64 %n) {
+    %r = tail call i64 @worker(i64 %n)
     ret i64 %r
   }
   ; at the materialization site
-  %fp   = bitcast i64 (i8*, i64)* @worker__fnval_adapter to i8*
+  %fp   = bitcast i64 (i8*, i64)* @worker.__fnval_adapter to i8*
   %pair = insertvalue {i8*, i8*} { i8* undef, i8* null }, i8* %fp, 0
   ```
 
@@ -187,10 +184,12 @@ path **and** zero-indirection when the callee is statically a named function:
   named-fn — carry the *identical* `(i8* env, <args>)` calling convention, so the
   seam at `core_call_emission.sfn:430-503` stays a **single, branchless** indirect
   `call` with the env passed unconditionally. There is **no per-call static-null
-  branch** on the hot indirect path. The `musttail` tail-call is collapsed by
-  LLVM (the adapter is a thin forwarding shim in guaranteed tail position), so
-  Path B's steady-state cost is one indirect call — the same instruction count Go
-  pays for a func value and Rust pays for `Fn` dispatch. The adapter is emitted
+  branch** on the hot indirect path. LLVM's `musttail` form is invalid here
+  because the adapter carries the extra hidden-env parameter that the original
+  C-ABI function lacks. The valid `tail` hint is verified under `-O2` to collapse
+  the thin forwarding shim, so Path B's steady-state cost is one indirect call —
+  the same instruction count Go pays for a func value and Rust pays for `Fn`
+  dispatch. The adapter is emitted
   **once per named function actually materialized as a value** (deduplicated by
   symbol, like a monomorphization cache), not once per call site, so binary-size
   growth is bounded by the count of distinct named functions used as values.
@@ -214,8 +213,8 @@ explicit `* fn (A) -> R` C-ABI code pointer and is untouched.
 
 **Verification probe (decided direction, not an open fork).** The trampoline-pair
 representation is committed. One implementation-time measurement gates a possible
-*optimization*, not the design: confirm LLVM elides the `@worker__fnval_adapter`
-frame under `musttail` + `-O2` so Path B is a single indirect call with no extra
+*optimization*, not the design: confirm LLVM elides the `@worker.__fnval_adapter`
+frame under `tail` + `-O2` so Path B is a single indirect call with no extra
 frame in the linked binary. Probe: build
 `compiler/tests/e2e/fixtures/named_fn_value/main.sfn`, disassemble the dispatch
 site, assert no surviving adapter prologue/epilogue between the indirect `call`
@@ -408,7 +407,7 @@ unconditionally), so the common indirect path is a single branchless `call`; and
 Path A keeps the statically-known-named-callee case at a **direct call, zero
 indirection** — matching Rust's `fn`-item call. Net: Sailfin pays exactly the
 Go/Rust cost on both paths. Verification step (codegen quality, not design):
-confirm `musttail` + `-O2` elides the adapter frame; fallback is to open-code the
+confirm `tail` + `-O2` elides the adapter frame; fallback is to open-code the
 forwarding at emission — same representation, still branchless. Committed in §3.1
 Item 1. Full text and the IR shape live there.
 
@@ -576,7 +575,7 @@ Passes touched, in pipeline order:
   v0 closure-param path) and that the value-coercion check feeds it the right row.
 - **Emitter / LLVM lowering** —
   - *Item 1 (D1):* Path A is the unchanged direct call; Path B emits a
-    deduplicated `@<fn>__fnval_adapter` (`musttail` forward to `@<fn>`) and the
+    deduplicated `@<fn>.__fnval_adapter` (`tail` forward to `@<fn>`) and the
     `{adapter_ptr, null}` pair at the materialization site. The seam
     (`core_call_emission.sfn:386-504`) is **unchanged** — it dispatches the
     uniform `(i8* env, <args>)` convention with no per-call null branch.
@@ -677,9 +676,9 @@ and the item-4 verdict are designed, not shipped — every box below is for the
       item-4 non-pointer-width diagnostic
 - [ ] Emits valid `.sfn-asm`
 - [ ] Lowers to LLVM IR — **D1 hybrid:** Path A direct call; Path B deduplicated
-      `musttail` trampoline pair `{adapter_ptr, null}`; struct-field load → seam.
+      tail-call trampoline pair `{adapter_ptr, null}`; struct-field load → seam.
       Includes the D1 codegen-quality probe (adapter-frame elision under
-      `musttail` + `-O2`)
+      `tail` + `-O2`)
 - [ ] Regression coverage (§8) — incl. the dispatch-cost / branchless-seam check
       and the effect-row-preservation test
 - [ ] Self-hosts (bundled with #1172 per D4 → no seed cut)
@@ -704,7 +703,7 @@ captured stdout / emitted IR). One per item plus the decision-specific tests:
   `compiler/tests/e2e/fixtures/named_fn_value/main.sfn`: `fn worker(n: int) ->
   int { return n + 1; }` + `fn apply(cb: fn (int) -> int, x: int) -> int { return
   cb(x); }` + `print(apply(worker, 5))` → `6`. IR assertions: (a) a deduplicated
-  `@worker__fnval_adapter` with a `musttail call @worker`; (b) the materialization
+  `@worker.__fnval_adapter` with a `tail call @worker`; (b) the materialization
   builds a `{adapter_ptr, null}` pair; (c) the **dispatch seam is branchless** —
   a single indirect `call` through the pair with **no** per-call null-check /
   duplicated call site (the D1 hot-path guarantee); (d) `sfn check` exits 0 (no
@@ -713,7 +712,7 @@ captured stdout / emitted IR). One per item plus the decision-specific tests:
   between the indirect `call` and `@worker` under `-O2`.
 - **D1 Path A direct-call pin.** A fixture where `worker(5)` is called directly
   (no value materialized) asserts the IR emits a **direct** `call @worker` with
-  no pair and no `@worker__fnval_adapter` reference — the zero-indirection path.
+  no pair and no `@worker.__fnval_adapter` reference — the zero-indirection path.
 - **Item 3 — fn-typed struct field dispatch.**
   `compiler/tests/e2e/fixtures/fn_field_dispatch/main.sfn`: `struct Router {
   handler: fn (int) -> int; }` populated with **both** a named function and a

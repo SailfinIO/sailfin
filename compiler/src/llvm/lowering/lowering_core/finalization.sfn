@@ -1,14 +1,95 @@
 // compiler/src/llvm/lowering/lowering_core/finalization.sfn
 //
 // Final LLVM text normalization after lowering and symbol mangling.
-import { substring } from "sfn/strings";
+import { split, substring } from "sfn/strings";
 
 import {
     index_of,
+    join_with_separator,
+    number_to_string,
     starts_with,
     string_array_contains,
     trim_text
 } from "../../utils";
+
+// Hoist named-function adapter requests out of function bodies and render one
+// internal tail-call forwarding definition per materialized symbol. LLVM's
+// `musttail` requires identical parameter counts, but this adapter has the
+// extra hidden env parameter that the original C-ABI function lacks. The
+// `tail` hint remains valid and the e2e `-O2` probe pins frame elimination.
+// Markers
+// carry `adapter|target|return|tilde-separated-params`. Tilde cannot appear in
+// an LLVM type, so imported aggregate signatures cannot corrupt the marker.
+fn hoist_named_fn_value_adapters(lines: string[]) -> string[] {
+    let hint_prefix = "; fnval_adapter_decl ";
+    let mut filtered: string[] = [];
+    let mut adapters: string[] = [];
+    let mut seen: string[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= lines.length { break; }
+        let line = lines[index];
+        let trimmed = trim_text(line);
+        if !starts_with(trimmed, hint_prefix) {
+            filtered.push(line);
+            index += 1;
+            continue;
+        }
+        let payload = substring(trimmed, hint_prefix.length, trimmed.length);
+        let parts = split(payload, "|");
+        if parts.length == 4 {
+            let adapter = parts[0];
+            if !string_array_contains(seen, adapter) {
+                seen.push(adapter);
+                let target = parts[1];
+                let return_type = parts[2];
+                let mut parameter_types: string[] = [];
+                if parts[3].length > 0 {
+                    parameter_types = split(parts[3], "~");
+                }
+                let mut signature: string[] = ["i8* %__fnval_env"];
+                let mut call_args: string[] = [];
+                let mut parameter_index: int = 0;
+                loop {
+                    if parameter_index >= parameter_types.length { break; }
+                    let arg_name = "%__fnval_arg" + number_to_string(parameter_index);
+                    signature.push(parameter_types[parameter_index] + " "
+                        + arg_name);
+                    call_args.push(parameter_types[parameter_index] + " "
+                        + arg_name);
+                    parameter_index += 1;
+                }
+                adapters.push("define internal " + return_type + " @" + adapter
+                    + "("
+                    + join_with_separator(signature, ", ")
+                    + ") {");
+                adapters.push("block.entry:");
+                let call_text = "tail call " + return_type + " @" + target + "("
+                    + join_with_separator(call_args, ", ")
+                    + ")";
+                if return_type == "void" {
+                    adapters.push("  " + call_text);
+                    adapters.push("  ret void");
+                } else {
+                    adapters.push("  %__fnval_result = " + call_text);
+                    adapters.push("  ret " + return_type + " %__fnval_result");
+                }
+                adapters.push("}");
+                adapters.push("");
+            }
+        }
+        index += 1;
+    }
+    if adapters.length == 0 { return lines; }
+    filtered.push("");
+    let mut adapter_index: int = 0;
+    loop {
+        if adapter_index >= adapters.length { break; }
+        filtered.push(adapters[adapter_index]);
+        adapter_index += 1;
+    }
+    return filtered;
+}
 
 // Hoist `; closure_env_type_decl %T = type { ... }` hint comments
 // from inside function bodies up to the module preamble (issue #687).

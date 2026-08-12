@@ -68,7 +68,7 @@ fn _module_lines(name: string) -> int ![io] {
 }
 
 test "typecheck types: every submodule stays under the line budget" ![io] {
-    let modules: string[] = ["annotation_shape_checks", "declaration_and_statement_checks", "expr_type_rules", "extern_abi", "generic_bounds", "interface_and_generics", "mod", "symbol_table_and_raw_exprs", "text_utils", "value_and_object_checks"];
+    let modules: string[] = ["annotation_shape_checks", "declaration_and_statement_checks", "expr_type_rules", "extern_abi", "generic_bounds", "interface_and_generics", "mod", "named_fn_values", "symbol_table_and_raw_exprs", "text_utils", "value_and_object_checks"];
     let mut i: int = 0;
     loop {
         if i >= modules.length { break; }

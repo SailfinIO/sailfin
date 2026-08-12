@@ -12,6 +12,7 @@ import {
     synthesize_closure_env_struct
 } from "../../closures";
 import { find_function_by_name } from "../../rendering_helpers";
+import { sanitize_symbol } from "../../symbols";
 import { map_local_type, map_return_type } from "../../type_mapping";
 import {
     LLVMOperand,
@@ -363,4 +364,56 @@ fn _compute_function_pointer_type(target: NativeFunction, context: TypeContext) 
     }
     let params_joined = join_with_separator(parameter_types, ", ");
     return ret_type + " (" + params_joined + ")*";
+}
+
+// Materialize a top-level named function as the uniform closure pair required
+// by SFEP-0030 D1. The inert marker is hoisted into one module-scope adapter
+// definition per symbol by `hoist_named_fn_value_adapters`.
+fn _lower_named_fn_value(target: NativeFunction, context: TypeContext, temp_index: int, lines: string[]) -> _ClosurePairLowerResult {
+    let mut ret_type = map_return_type(context, target.return_type);
+    if ret_type.length == 0 { ret_type = "void"; }
+    let mut parameter_types: string[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= target.parameters.length { break; }
+        let mut mapped = map_local_type(context, target.parameters[index].type_annotation);
+        if mapped.length == 0 { mapped = "i8*"; }
+        parameter_types.push(mapped);
+        index += 1;
+    }
+    let target_symbol = sanitize_symbol(target.name);
+    // `.` cannot occur in a Sailfin identifier, so this LLVM-only namespace
+    // cannot collide with a legal user function such as `worker__fnval_adapter`.
+    // The `__` keeps the internal symbol out of ordinary module mangling.
+    let adapter_symbol = target_symbol + ".__fnval_adapter";
+    // `~` cannot appear in an LLVM type, so it remains unambiguous even if
+    // an imported signature reaches this path with an aggregate type.
+    let joined_params = join_with_separator(parameter_types, "~");
+    let mut new_lines = lines;
+    new_lines.push("; fnval_adapter_decl " + adapter_symbol + "|"
+        + target_symbol
+        + "|"
+        + ret_type
+        + "|"
+        + joined_params);
+    let mut adapter_params: string[] = ["i8*"];
+    adapter_params = adapter_params.concat(parameter_types);
+    let adapter_ptr_type = ret_type + " (" + join_with_separator(adapter_params, ", ")
+        + ")*";
+    let pair = emit_closure_pair_aggregate("@" + adapter_symbol, adapter_ptr_type, "null", temp_index);
+    let mut line_index: int = 0;
+    loop {
+        if line_index >= pair.lines.length { break; }
+        new_lines.push(pair.lines[line_index]);
+        line_index += 1;
+    }
+    return _ClosurePairLowerResult {
+        lines: new_lines,
+        temp_index: pair.next_temp,
+        operand: LLVMOperand {
+            llvm_type: pair.operand_type,
+            value: pair.operand_value
+        },
+        diagnostics: []
+    };
 }

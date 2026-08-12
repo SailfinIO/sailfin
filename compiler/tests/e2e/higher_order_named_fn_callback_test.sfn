@@ -1,17 +1,20 @@
-// End-to-end: an indirect call through a `fn(int) -> int` parameter lowers
-// and returns the correct value (#1837). The callee is a plain parameter
-// identifier, not a method on a receiver, so its return type must come from
-// the parameter's declared function type. The canonical `fn(int) -> int`
-// spelling maps the parameter to the `{i8*, i8*}` closure pair and dispatches
-// through the closure seam; the non-canonical bare `(int) -> int` spelling
-// instead mapped it to an opaque `i8*` and silently produced the wrong result
-// (`Result: 0`), which is why the shipped example was rewritten to the
-// canonical spelling.
+// End-to-end coverage for SFN-667: a bare top-level named function acquires
+// the uniform `{code, env}` representation only where `fn(int) -> int` is
+// expected, then dispatches through the existing closure seam. Raw IR checks
+// keep adapter deduplication, the null environment, and direct-call separation
+// visible alongside the functional assertion.
 //
 // Drives the compiler-under-test as a subprocess and asserts on captured
 // stdout — the canonical e2e pattern (`.claude/rules/no-bash-e2e.md`,
 // `untyped_lambda_callback_test.sfn`).
-import { trim_right } from "sfn/strings";
+import {
+    contains,
+    find,
+    replace,
+    substring,
+    trim_right
+} from "sfn/strings";
+import { clean_runner_env, with_tmp_dir } from "sfn/test";
 
 // The compiler-under-test: `$SAILFIN_BIN` if set, else the self-hosted
 // binary relative to the repo root the runner starts from.
@@ -21,22 +24,134 @@ fn _sfn_bin() -> string ![io] {
     return "build/bin/sfn";
 }
 
-// `sfn run` compiles+links+executes the fixture, so the spawned compiler
-// needs a real environment (PATH for the linker, plus SAILFIN_TEST_SCRATCH
-// for per-invocation build-cache isolation under the parallel pool, #1333).
-fn _child_env() -> string[] ![io] { return process.environ(); }
-
 fn _run(path: string) -> string ![io] {
-    let exit = process.run_capture([_sfn_bin(), "run", path], _child_env());
-    let out = process.capture_take_stdout();
-    let _err = process.capture_take_stderr();
-    assert exit == 0;
-    return trim_right(out);
+    let mut output: string = "";
+    let outcome = with_tmp_dir(fn (dir: string) -> int {
+        let exit = process.run_capture([_sfn_bin(), "run", path], clean_runner_env(dir));
+        output = trim_right(process.capture_take_stdout());
+        let _err = process.capture_take_stderr();
+        return exit;
+    });
+    assert outcome == 0;
+    return output;
 }
 
-test "hof: fn(int)->int param invoked with a named-fn lambda returns 10" ![io] {
+fn _count_occurrences(text: string, needle: string) -> int {
+    let mut count: int = 0;
+    let mut offset: int = 0;
+    loop {
+        let position = find(text, needle, offset);
+        if position < 0 { break; }
+        count += 1;
+        offset = position + needle.length;
+    }
+    return count;
+}
+
+fn _adapter_symbol() -> string {
+    return "double__compiler__tests__e2e__fixtures__higher_order_named_fn__apply_named.__fnval_adapter";
+}
+
+test "hof: named function values pass, return, deduplicate, and dispatch" ![io] {
     let out = _run("compiler/tests/e2e/fixtures/higher_order_named_fn/apply_named.sfn");
-    assert out == "10";
+    assert out == "124";
+}
+
+test "hof: named function value IR has one tail-call adapter and preserves direct calls" ![io] {
+    let outcome = with_tmp_dir(fn (dir: string) -> int {
+        let raw_ll = dir + "/named-fn-value.ll";
+        let exit = process.run_capture([_sfn_bin(), "emit", "-o", raw_ll, "llvm", "compiler/tests/e2e/fixtures/higher_order_named_fn/apply_named.sfn"], clean_runner_env(dir));
+        let _out = process.capture_take_stdout();
+        let _err = process.capture_take_stderr();
+        assert exit == 0;
+        assert fs.exists(raw_ll);
+        let ir = fs.readFile(raw_ll);
+        assert _count_occurrences(ir, "define internal i64 @" + _adapter_symbol()) == 1;
+        assert contains(ir, "define i64 @double__fnval_adapter(");
+        assert contains(ir, "tail call i64 @double__compiler__tests__e2e__fixtures__higher_order_named_fn__apply_named(");
+        assert ! contains(ir, "musttail call i64 @double__compiler__tests__e2e__fixtures__higher_order_named_fn__apply_named(");
+        assert contains(ir, "bitcast i64 (i8*, i64)* @" + _adapter_symbol()
+            + " to i8*");
+        assert contains(ir, "insertvalue {i8*, i8*}");
+        assert contains(ir, "i8* null, 1");
+        assert contains(ir, "call i64 @double__compiler__tests__e2e__fixtures__higher_order_named_fn__apply_named(i64 1)");
+        assert ! contains(ir, "fnval_adapter_decl");
+
+        let dispatch_start = find(ir, "define i64 @apply__", 0);
+        assert dispatch_start >= 0;
+        let dispatch_end = find(ir, "\n}", dispatch_start);
+        assert dispatch_end > dispatch_start;
+        let dispatch = substring(ir, dispatch_start, dispatch_end);
+        assert _count_occurrences(dispatch, "call i64 %") == 1;
+        assert contains(dispatch, "extractvalue {i8*, i8*} %transformer, 0");
+        assert contains(dispatch, "extractvalue {i8*, i8*} %transformer, 1");
+        assert ! contains(dispatch, " br ");
+        assert ! contains(dispatch, "icmp");
+        return 0;
+    });
+    assert outcome == 0;
+}
+
+test "hof: direct-only named call emits no function-value adapter or pair" ![io] {
+    let outcome = with_tmp_dir(fn (dir: string) -> int {
+        let source_path = dir + "/direct-only.sfn";
+        let raw_ll = dir + "/direct-only.ll";
+        fs.writeFile(source_path, "fn worker(x: int) -> int { return x + 1; } fn main() -> int { return worker(5); }");
+        let exit = process.run_capture([_sfn_bin(), "emit", "-o", raw_ll, "llvm", source_path], clean_runner_env(dir));
+        let _out = process.capture_take_stdout();
+        let _err = process.capture_take_stderr();
+        assert exit == 0;
+        let ir = fs.readFile(raw_ll);
+        assert contains(ir, "call i64 @worker");
+        assert ! contains(ir, ".__fnval_adapter");
+        assert ! contains(ir, "insertvalue {i8*, i8*}");
+        return 0;
+    });
+    assert outcome == 0;
+}
+
+test "hof: named function value adapter is frame-free at O2" ![io] {
+    let clang_probe = process.run_capture(["clang", "--version"], process.environ());
+    let _probe_out = process.capture_take_stdout();
+    let _probe_err = process.capture_take_stderr();
+    if clang_probe != 0 {
+        print.warn("named fn value: clang not found — skipping adapter assembly gate");
+        return;
+    }
+    let outcome = with_tmp_dir(fn (dir: string) -> int {
+        let raw_ll = dir + "/named-fn-value.ll";
+        let emit_exit = process.run_capture([_sfn_bin(), "emit", "-o", raw_ll, "llvm", "compiler/tests/e2e/fixtures/higher_order_named_fn/apply_named.sfn"], clean_runner_env(dir));
+        let _emit_out = process.capture_take_stdout();
+        let _emit_err = process.capture_take_stderr();
+        assert emit_exit == 0;
+        let raw_ir = fs.readFile(raw_ll);
+
+        // Keep the adapter observable after optimization so this gate measures
+        // its generated machine body instead of allowing whole-module DCE.
+        let probe_ll = dir + "/adapter-probe.ll";
+        let probe_ir = replace(raw_ir, "define internal i64 @" + _adapter_symbol(), "define i64 @"
+            + _adapter_symbol());
+        fs.writeFile(probe_ll, probe_ir);
+        let assembly_path = dir + "/adapter-probe.s";
+        let clang_exit = process.run_capture(["clang", "-O2", "-S", "-Wno-override-module", "--target=x86_64-unknown-linux-gnu", probe_ll, "-o", assembly_path], process.environ());
+        let _clang_out = process.capture_take_stdout();
+        let _clang_err = process.capture_take_stderr();
+        assert clang_exit == 0;
+        let assembly = fs.readFile(assembly_path);
+        let body_start = find(assembly, _adapter_symbol() + ":", 0);
+        assert body_start >= 0;
+        let body_end = find(assembly, ".Lfunc_end", body_start);
+        assert body_end > body_start;
+        let body = substring(assembly, body_start, body_end);
+        // Clang may preserve the tail call as a jump or inline the tiny target
+        // into this body. Either result must remain a leaf with no stack frame.
+        assert contains(body, "retq") || contains(body, "jmp");
+        assert ! contains(body, "call");
+        assert ! contains(body, "push");
+        assert ! contains(body, "subq");
+        return 0;
+    });
+    assert outcome == 0;
 }
 
 test "hof: shipped higher-order-functions example prints Result: 10" ![io] {

@@ -11,6 +11,7 @@ struct FnTypeParts {
     ok: boolean;
     param_types: string[];
     return_type: string;
+    effects: string[];
 }
 
 // Local implementations of starts_with / strip_prefix so that this module's
@@ -108,26 +109,54 @@ fn parse_fn_type_text(text: string) -> FnTypeParts {
         open_index = 3;
     }
     if open_index < 0 {
-        return FnTypeParts { ok: false, param_types: [], return_type: "" };
+        return FnTypeParts {
+            ok: false,
+            param_types: [],
+            return_type: "",
+            effects: []
+        };
     }
     let params_end = find_matching_paren(trimmed, open_index);
     if params_end < 0 {
-        return FnTypeParts { ok: false, param_types: [], return_type: "" };
+        return FnTypeParts {
+            ok: false,
+            param_types: [],
+            return_type: "",
+            effects: []
+        };
     }
 
     let params_text = trim_text(substring(trimmed, open_index + 1, params_end));
     let param_types = split_top_level_commas(params_text);
     let after = trim_text(substring(trimmed, params_end + 1, trimmed.length));
     let mut return_type: string = "";
+    let mut effects: string[] = [];
     if starts_with(after, "->") {
         return_type = trim_text(substring(after, 2, after.length));
     } else if starts_with(after, ":") {
         return_type = trim_text(substring(after, 1, after.length));
+    } else if starts_with(after, "![") { return_type = "void"; }
+    let effect_start = index_of(return_type, "![");
+    if effect_start >= 0 {
+        let effect_tail = trim_text(substring(return_type, effect_start, return_type.length));
+        return_type = trim_text(substring(return_type, 0, effect_start));
+        if starts_with(effect_tail, "![") {
+            if ends_with(effect_tail, "]") {
+                let effect_text = trim_text(substring(effect_tail, 2, effect_tail.length - 1));
+                effects = split_top_level_commas(effect_text);
+            }
+        }
+    } else if starts_with(after, "![") {
+        if ends_with(after, "]") {
+            let effect_text = trim_text(substring(after, 2, after.length - 1));
+            effects = split_top_level_commas(effect_text);
+        }
     }
     return FnTypeParts {
         ok: true,
         param_types: param_types,
-        return_type: return_type
+        return_type: return_type,
+        effects: effects
     };
 }
 

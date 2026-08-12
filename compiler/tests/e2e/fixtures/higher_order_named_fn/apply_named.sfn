@@ -1,11 +1,29 @@
-// #1837 — a user higher-order function whose parameter is declared
-// `fn(int) -> int`, invoked with a lambda that wraps a named function
-// call. Exercises indirect-call return-type resolution through a
-// function-typed parameter: `apply(5, fn(x) => double(x))` = 10.
+// SFN-667 — a top-level named function materializes as the same closure pair
+// used by lambdas when an exact `fn(int) -> int` type is expected.
 fn apply(value: int, transformer: fn (int) -> int) -> int {
     return transformer(value);
 }
 
 fn double(x: int) -> int { return x * 2; }
 
-fn main() ![io] { print(apply(5, fn (x) => double(x))); }
+// A legal user identifier that collided with the original generated suffix.
+// The compiler-owned adapter now lives at `double.__fnval_adapter` instead.
+fn double__fnval_adapter(x: int) -> int { return x + 100; }
+
+fn choose() -> fn (int) -> int { return double; }
+
+struct Handler {
+    call: fn (int) -> int
+}
+
+fn main() ![io] {
+    let picked: fn (int) -> int = choose();
+    let mut reassigned: fn (int) -> int = double;
+    reassigned = double;
+    let callbacks: (fn (int) -> int)[] = [double];
+    let handler = Handler { call: double };
+    // The two value materializations deduplicate their adapter; this direct
+    // call remains on the ordinary direct-call lowering path.
+    print(apply(5, double) + picked(5) + reassigned(1) + double(1)
+        + double__fnval_adapter(0));
+}

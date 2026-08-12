@@ -48,6 +48,16 @@ struct SymbolEntry {
     // binding's declaration scope, or "" otherwise. This is proof metadata,
     // not inferred type state; use-site checks stay silent on "" (SFN-584).
     declared_struct: string;
+    // Exact source annotation for typed variables/parameters. This is the
+    // expected-type proof used when an assignment materializes a named fn.
+    declared_type: string;
+    // Source signature carried only by function entries. Named-function value
+    // coercion compares this contract with the expected `fn(...)` type.
+    function_parameter_types: string[];
+    function_return_type: string;
+    function_effects: string[];
+    function_is_async: boolean;
+    is_top_level_function: boolean;
 }
 
 struct SymbolCollectionResult {
@@ -70,7 +80,7 @@ struct ScopeResult {
 // compiler's own LLVM lowering uses the pattern e.g.
 // `compiler/src/llvm/lowering/instructions_loops.sfn:492,597`). Other kinds
 // (function/struct/enum/interface/type/test) keep the duplicate diagnostic.
-fn register_local_symbol(bindings: SymbolEntry[], name: string, kind: string, span: SourceSpan?, scope_start: int, is_generic: boolean = false, is_c_abi: boolean = false, element_kind: string = "", declared_prim: string = "", declared_struct: string = "") -> ScopeResult {
+fn register_local_symbol(bindings: SymbolEntry[], name: string, kind: string, span: SourceSpan?, scope_start: int, is_generic: boolean = false, is_c_abi: boolean = false, element_kind: string = "", declared_prim: string = "", declared_struct: string = "", declared_type: string = "") -> ScopeResult {
     if !strings_equal(kind, "variable") {
         if has_symbol_in_range(bindings, name, scope_start) {
             return ScopeResult {
@@ -80,7 +90,7 @@ fn register_local_symbol(bindings: SymbolEntry[], name: string, kind: string, sp
         }
     }
 
-    let updated = append_symbol(bindings, name, kind, span, is_generic, is_c_abi, element_kind, declared_prim, declared_struct);
+    let updated = append_symbol(bindings, name, kind, span, is_generic, is_c_abi, element_kind, declared_prim, declared_struct, declared_type);
     return ScopeResult { bindings: updated, diagnostics: [] };
 }
 
@@ -98,10 +108,10 @@ fn register_symbol(name: string, kind: string, span: SourceSpan?, existing: Symb
     };
 }
 
-fn append_symbol(symbols: SymbolEntry[], name: string, kind: string, span: SourceSpan?, is_generic: boolean = false, is_c_abi: boolean = false, element_kind: string = "", declared_prim: string = "", declared_struct: string = "") -> SymbolEntry[] {
+fn append_symbol(symbols: SymbolEntry[], name: string, kind: string, span: SourceSpan?, is_generic: boolean = false, is_c_abi: boolean = false, element_kind: string = "", declared_prim: string = "", declared_struct: string = "", declared_type: string = "") -> SymbolEntry[] {
     let mut updated: SymbolEntry[] = clone_bindings(symbols);
     updated.push(SymbolEntry {
-        name: name, kind: kind, span: span, is_generic: is_generic, is_c_abi: is_c_abi, element_kind: element_kind, declared_prim: declared_prim, declared_struct: declared_struct
+        name: name, kind: kind, span: span, is_generic: is_generic, is_c_abi: is_c_abi, element_kind: element_kind, declared_prim: declared_prim, declared_struct: declared_struct, declared_type: declared_type, function_parameter_types: [], function_return_type: "", function_effects: [], function_is_async: false, is_top_level_function: false
     });
     return updated;
 }
@@ -116,6 +126,10 @@ fn register_local_function_symbol(bindings: SymbolEntry[], signature: FunctionSi
     let mut updated = registration.bindings;
     let index = updated.length - 1;
     updated[index].element_kind = _function_primitive_marker(signature);
+    updated[index].function_parameter_types = _function_parameter_types(signature);
+    updated[index].function_return_type = _function_return_type(signature);
+    updated[index].function_effects = signature.effects;
+    updated[index].function_is_async = signature.is_async;
     return ScopeResult {
         bindings: updated,
         diagnostics: registration.diagnostics
@@ -128,10 +142,34 @@ fn register_function_symbol(signature: FunctionSignature, kind: string, existing
     let mut updated = registration.symbols;
     let index = updated.length - 1;
     updated[index].element_kind = _function_primitive_marker(signature);
+    updated[index].function_parameter_types = _function_parameter_types(signature);
+    updated[index].function_return_type = _function_return_type(signature);
+    updated[index].function_effects = signature.effects;
+    updated[index].function_is_async = signature.is_async;
+    updated[index].is_top_level_function = true;
     return SymbolCollectionResult {
         symbols: updated,
         diagnostics: registration.diagnostics
     };
+}
+
+fn _function_parameter_types(signature: FunctionSignature) -> string[] {
+    let mut types: string[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= signature.parameters.length { break; }
+        let annotation = signature.parameters[index].type_annotation;
+        let mut text: string = "";
+        if annotation != null { text = trim_text(annotation.text); }
+        types.push(text);
+        index += 1;
+    }
+    return types;
+}
+
+fn _function_return_type(signature: FunctionSignature) -> string {
+    if signature.return_type == null { return "void"; }
+    return trim_text(signature.return_type.text);
 }
 
 // Marker layout: `fnprim:<return-code><parameter-code>*`.

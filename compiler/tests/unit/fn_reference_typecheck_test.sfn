@@ -1,8 +1,6 @@
-// Unit tests for the function-reference-as-value diagnostics (issue
-// #1147): E0808 (a function used as a value in an unsupported position —
-// bare name, `& fn`, or `<fn> as <non-pointer>`) and E0809 (a function
-// address that has no single valid C-ABI code-pointer symbol: a generic
-// function).
+// Unit tests for named functions in value position. SFN-667 admits a bare,
+// concrete top-level function only where an exact `fn(...)` type is expected;
+// legacy raw-address spellings retain their existing diagnostics.
 //
 // #1146 made `<fn> as * u8` lower to a real `bitcast @sym to i8*` for a
 // concrete function; #1147 rejects every other function-reference spelling
@@ -53,6 +51,120 @@ test "fn-ref: `<fn> as <non-pointer>` is E0808" ![io] {
 test "fn-ref: bare function passed as an argument is E0808" ![io] {
     let source = "fn worker() { } fn take(f: * u8) { } fn main() { take(worker); }";
     assert _count_code(source, "E0808") == 1;
+}
+
+// ── SFN-667: exact function-typed expectation sites ──
+test "fn-value: typed let accepts an exact top-level named function" ![io] {
+    let source = "fn worker(x: int) -> int { return x + 1; } fn main() { let f: fn (int) -> int = worker; }";
+    assert _count_code(source, "E0808") == 0;
+    assert _count_code(source, "E0839") == 0;
+}
+
+test "fn-value: function-typed call argument accepts a named function" ![io] {
+    let source = "fn worker(x: int) -> int { return x + 1; } fn apply(f: fn (int) -> int, x: int) -> int { return f(x); } fn main() { apply(worker, 4); }";
+    assert _count_code(source, "E0808") == 0;
+    assert _count_code(source, "E0839") == 0;
+}
+
+test "fn-value: function-typed return accepts a named function" ![io] {
+    let source = "fn worker(x: int) -> int { return x + 1; } fn choose() -> fn (int) -> int { return worker; } fn main() { }";
+    assert _count_code(source, "E0808") == 0;
+    assert _count_code(source, "E0839") == 0;
+}
+
+test "fn-value: function-typed assignment accepts a named function" ![io] {
+    let source = "fn one(x: int) -> int { return x + 1; } fn two(x: int) -> int { return x + 2; } fn main() { let mut f: fn (int) -> int = one; f = two; }";
+    assert _count_code(source, "E0808") == 0;
+    assert _count_code(source, "E0839") == 0;
+}
+
+test "fn-value: function-typed array element accepts a named function" ![io] {
+    let source = "fn worker(x: int) -> int { return x + 1; } fn main() { let fs: (fn (int) -> int)[] = [worker]; }";
+    assert _count_code(source, "E0808") == 0;
+    assert _count_code(source, "E0839") == 0;
+}
+
+test "fn-value: function-typed struct initializer accepts a named function" ![io] {
+    let source = "struct Handler { call: fn (int) -> int } fn worker(x: int) -> int { return x + 1; } fn main() { let h = Handler { call: worker }; }";
+    assert _count_code(source, "E0808") == 0;
+    assert _count_code(source, "E0839") == 0;
+}
+
+test "fn-value: conditional result branches inherit the fn expectation" ![io] {
+    let source = "fn one(x: int) -> int { return x + 1; } fn two(x: int) -> int { return x + 2; } fn main() { let f: fn (int) -> int = true ? one : two; }";
+    assert _count_code(source, "E0808") == 0;
+    assert _count_code(source, "E0839") == 0;
+}
+
+test "fn-value: fn expectation does not leak into binary operands" ![io] {
+    let source = "fn worker(x: int) -> int { return x; } fn main() { let f: fn (int) -> int = worker + 1; }";
+    assert _count_code(source, "E0808") == 1;
+}
+
+test "fn-value: fn expectation does not leak into a conditional condition" ![io] {
+    let source = "fn worker(x: int) -> int { return x; } fn other(x: int) -> int { return x + 1; } fn main() { let f: fn (int) -> int = worker ? other : other; }";
+    assert _count_code(source, "E0808") == 1;
+}
+
+test "fn-value: imported placeholder fails closed under fn expectation" ![io] {
+    let source = "import { remote } from \"pkg\"; fn main() { let f: fn (int) -> int = remote; }";
+    assert _count_code(source, "E0808") == 1;
+}
+
+test "fn-value: generic named function stays rejected under fn expectation" ![io] {
+    let source = "fn identity<T>(x: T) -> T { return x; } fn main() { let f: fn (int) -> int = identity; }";
+    assert _count_code(source, "E0808") == 1;
+}
+
+test "fn-value: nested function stays rejected under fn expectation" ![io] {
+    let source = "fn main() { fn local(x: int) -> int { return x; } let f: fn (int) -> int = local; }";
+    assert _count_code(source, "E0808") == 1;
+}
+
+test "fn-value: async function is E0839 under synchronous fn expectation" ![io] {
+    let source = "async fn worker(x: int) -> int { return x; } fn main() { let f: fn (int) -> int = worker; }";
+    assert _count_code(source, "E0839") == 1;
+}
+
+test "fn-value: main is E0839 under fn expectation" ![io] {
+    let source = "fn main(x: int) -> int { let f: fn (int) -> int = main; return 0; }";
+    assert _count_code(source, "E0839") == 1;
+}
+
+test "fn-value: parameter mismatch is E0839" ![io] {
+    let source = "fn worker(x: i64) -> int { return 1; } fn main() { let f: fn (int) -> int = worker; }";
+    assert _count_code(source, "E0839") == 1;
+}
+
+test "fn-value: return mismatch is E0839" ![io] {
+    let source = "fn worker(x: int) -> i64 { return 1; } fn main() { let f: fn (int) -> int = worker; }";
+    assert _count_code(source, "E0839") == 1;
+}
+
+test "fn-value: number scalar signature is accepted" ![io] {
+    let source = "fn worker(x: number) -> number { return x; } fn main() { let f: fn (number) -> number = worker; }";
+    assert _count_code(source, "E0839") == 0;
+    assert _count_code(source, "E0840") == 0;
+}
+
+test "fn-value: broader expected effect row accepts a narrower source row" ![io] {
+    let source = "fn worker(x: int) -> int ![io.fs] { return x; } fn main() { let f: fn (int) -> int ![io] = worker; }";
+    assert _count_code(source, "E0839") == 0;
+}
+
+test "fn-value: narrower expected effect row rejects a broader source row" ![io] {
+    let source = "fn worker(x: int) -> int ![io] { return x; } fn main() { let f: fn (int) -> int ![io.fs] = worker; }";
+    assert _count_code(source, "E0839") == 1;
+}
+
+test "fn-value: aggregate parameter signature is E0840" ![io] {
+    let source = "fn worker(x: string) -> int { return x.length; } fn main() { let f: fn (string) -> int = worker; }";
+    assert _count_code(source, "E0840") == 1;
+}
+
+test "fn-value: aggregate return signature is E0840" ![io] {
+    let source = "struct Point { x: int } fn worker(x: int) -> Point { return Point { x: x }; } fn main() { let f: fn (int) -> Point = worker; }";
+    assert _count_code(source, "E0840") == 1;
 }
 
 // ── E0809: generic function address has no single concrete code symbol ──

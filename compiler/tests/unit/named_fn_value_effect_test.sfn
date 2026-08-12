@@ -1,0 +1,48 @@
+// SFN-667: a stored function value carries the effect row written in its
+// `fn(...)` type. Calling the local variable must therefore impose that row
+// on the enclosing routine just like a direct call to the named source.
+import { validate_effects } from "sfn/analyzer/effect_checker";
+import { EffectViolation } from "sfn/analyzer/effect_checker/types";
+import { parse_program } from "sfn/syntax";
+
+fn _has_missing_effect(violations: EffectViolation[], routine: string, effect: string) -> boolean {
+    let mut violation_index: int = 0;
+    loop {
+        if violation_index >= violations.length { break; }
+        let violation = violations[violation_index];
+        if violation.routine_name == routine {
+            let mut effect_index: int = 0;
+            loop {
+                if effect_index >= violation.missing_effects.length { break; }
+                if violation.missing_effects[effect_index] == effect {
+                    return true;
+                }
+                effect_index += 1;
+            }
+        }
+        violation_index += 1;
+    }
+    return false;
+}
+
+fn _violations(source: string) -> EffectViolation[] ![io] {
+    return validate_effects(parse_program(source));
+}
+
+test "fn-value effects: calling a stored effectful function requires its row" ![io] {
+    let source = "fn does_io() ![io] { } fn caller() { let cb: fn () -> void ![io] = does_io; cb(); }";
+    let violations = _violations(source);
+    assert _has_missing_effect(violations, "caller", "io");
+}
+
+test "fn-value effects: enclosing declaration can satisfy the stored row" ![io] {
+    let source = "fn does_io() ![io] { } fn caller() ![io] { let cb: fn () -> void ![io] = does_io; cb(); }";
+    let violations = _violations(source);
+    assert violations.length == 0;
+}
+
+test "fn-value effects: a pure stored function adds no requirement" ![io] {
+    let source = "fn pure_worker() { } fn caller() { let cb: fn () -> void = pure_worker; cb(); }";
+    let violations = _violations(source);
+    assert violations.length == 0;
+}

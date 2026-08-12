@@ -2,6 +2,7 @@
 //
 // AST traversal that collects effect requirements from statements and expressions.
 import { intrinsic_effects_for_callee_target } from "sfn/ir";
+import { parse_fn_type_text } from "sfn/ir";
 import {
     Block,
     ElseBranch,
@@ -45,12 +46,21 @@ fn collect_effects_from_block(block: Block, imports: ImportSymbolTable) -> Effec
         // mutated (`_hoist_block_local_fns` returns the shared table unchanged
         // when the block declares no direct fn).
         if statement.variant == "VariableDeclaration" {
-            if lookup_imported_function(scoped, statement.name) != null {
+            let mut fn_effects: string[] = [];
+            let mut is_fn_value: boolean = false;
+            if statement.type_annotation != null {
+                let parsed = parse_fn_type_text(statement.type_annotation.text);
+                if parsed.ok {
+                    is_fn_value = true;
+                    fn_effects = parsed.effects;
+                }
+            }
+            if is_fn_value || lookup_imported_function(scoped, statement.name) != null {
                 if !shadow_copied {
                     scoped = _copy_effect_table(scoped);
                     shadow_copied = true;
                 }
-                scoped = append_local_function(scoped, statement.name, []);
+                scoped = append_local_function(scoped, statement.name, fn_effects);
             }
         }
         index += 1;
