@@ -309,6 +309,38 @@ fn tls_alert_name(desc: i64) -> string {
     return "alert-" + _tls_dec(desc);
 }
 
+// Duplicate a Sailfin string into a caller-owned, NUL-terminated buffer —
+// the same contract `sfn_http_get` returns under. Load-bearing rather than
+// incidental: `tls_alert_name` can return a concatenated ("alert-<n>")
+// heap string, so the callee-frame buffer backing it must not be the one
+// handed back across the intrinsic boundary.
+fn _tls_dup_cstr(s: string) -> *u8 {
+    let p: *u8 = s as *u8;
+    let n: i64 = strlen(p) as i64;
+    let out: *u8 = malloc((n + 1) as usize);
+    // Under memory pressure this is the error-reporting path itself
+    // failing; `sfn_str_sfn_from_cstr` already maps a null `*u8` to `""`
+    // (`runtime/sfn/string.sfn:470-473`), so returning null here degrades
+    // to an empty reason at the call site rather than a null-deref crash.
+    if out as i64 == 0 { return null; }
+    memcpy(out, p, n as usize);
+    memset(_tls_ptr_off(out, n), 0, 1 as usize);
+    return out;
+}
+
+// `tls.last_error()` reachability (SFN-822). Returns a caller-owned
+// `*u8` adopted as a Sailfin `string` at the call site, mirroring
+// `http.get_body` -> `sfn_http_get`.
+fn tls_last_error_name() -> *u8 {
+    return _tls_dup_cstr(tls_error_name(sfn_tls_last_error));
+}
+
+// `tls.last_alert()` reachability (SFN-822). Same contract as
+// `tls_last_error_name` above.
+fn tls_last_alert_name() -> *u8 {
+    return _tls_dup_cstr(tls_alert_name(sfn_tls_last_alert));
+}
+
 // Which message of the server flight a failure was processing. The step
 // index is the loop's own state and is not recoverable from the handshake
 // error string, which describes the parse rather than the message.
@@ -1910,6 +1942,14 @@ fn tls_shutdown_free(ssl: *u8) -> void ![net] {
 // the ordinals would commit this module to them as API with no caller
 // asking for it — the same call made for `pem.sfn`'s `_with_limits`
 // surface under SFN-807.
+//
+// Reachability (SFN-822): the export below made these names linkable but
+// not callable from user source — there was no `tls` builtin-member root
+// and no runtime-helper descriptor. `tls_last_error_name` /
+// `tls_last_alert_name` close that gap through the `tls.last_error()` /
+// `tls.last_alert()` namespaced-global surface, the same mechanism
+// `http.*` already uses; the ordinal itself still never crosses the
+// boundary, only the name.
 export {
     tls_accept_fd,
     tls_alert_name,
@@ -1918,7 +1958,9 @@ export {
     tls_ctx_free,
     tls_error_name,
     tls_last_alert,
+    tls_last_alert_name,
     tls_last_error,
+    tls_last_error_name,
     tls_read,
     tls_server_ctx,
     tls_shutdown_free,

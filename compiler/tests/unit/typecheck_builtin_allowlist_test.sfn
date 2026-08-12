@@ -36,8 +36,23 @@ test "builtin member roots mirror the runtime helper registry" {
     assert is_builtin_member_root("rc");
     assert is_builtin_member_root("runtime");
     assert is_builtin_member_root("string");
+    assert is_builtin_member_root("tls");
     assert is_builtin_member_root("websocket");
     assert ! is_builtin_member_root("unknown_namespace");
+}
+
+test "tls.last_error() is reachable from user source (SFN-822)" {
+    // A fresh process has recorded no TLS failure yet, so the reason
+    // reads "none" — pinning namespace reachability independent of
+    // network availability (no connection is attempted here).
+    assert tls.last_error() == "none";
+}
+
+test "tls.last_alert() is reachable from user source (SFN-822)" {
+    // `sfn_tls_last_alert` defaults to 0 (close_notify) on a fresh
+    // process, so this proves the `tls.last_alert` descriptor links and
+    // returns a valid string, independent of network availability.
+    assert tls.last_alert() == "close_notify";
 }
 
 test "builtin allowlist: print is in envelope" {

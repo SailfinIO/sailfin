@@ -330,6 +330,19 @@ fn _rh_descriptors_11(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
         target: "http.download", symbol: "sfn_http_download", return_type: "i8*", parameter_types: ["i8*", "i8*"], native_signature: "sfn_http_download", c_abi_return_type: null
     });
 
+    // TLS diagnostics (SFN-822). `tls.last_error` / `tls.last_alert` reach
+    // user source through the same `i8*` -> Sailfin `string` adoption as
+    // `http.get_body` above, rather than the `{i8*, i64}` aggregate return
+    // that would need arena-slot splicing at `core_call_lowering.sfn:658-660`
+    // for a new target pair. Both route to a caller-owned `*u8` in
+    // `runtime/sfn/platform/tls.sfn`.
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "tls.last_error", symbol: "tls_last_error_name", return_type: "i8*", parameter_types: [], native_signature: "tls_last_error_name", c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "tls.last_alert", symbol: "tls_last_alert_name", return_type: "i8*", parameter_types: [], native_signature: "tls_last_alert_name", c_abi_return_type: null
+    });
+
     // Environment & path helpers
     // M2.8b (#726): SfnString aggregate ABI flip for env.get / env.home.
     // `parameter_types` carries the `{i8*, i64}` aggregate (name) plus
