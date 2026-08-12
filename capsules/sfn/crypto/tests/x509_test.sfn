@@ -16,9 +16,13 @@ import {
 } from "../src/der";
 import {
     X509Certificate,
+    X509NameSubtree,
+    x509_dns_constraint_matches,
     x509_key_usage_crl_sign,
     x509_key_usage_digital_signature,
     x509_key_usage_key_cert_sign,
+    x509_name_form_dns_name,
+    x509_name_form_ip_address,
     x509_parse,
     x509_parse_with_limits,
     x509_validity_at,
@@ -680,6 +684,93 @@ fn fixture_a_hex() -> string {
     return "308201ba3082016ca00302010202080102030405060708300506032b6570303b311a301806035504030c115361696c66696e2054657374204c6561663110300e060355040a0c075361696c66696e310b3009060355040613025553301e170d3236303130313030303030305a170d3237303130313030303030305a303b311a301806035504030c115361696c66696e2054657374204c6561663110300e060355040a0c075361696c66696e310b3009060355040613025553302a300506032b6570032100ca7b28b5ebd179909c5fb9e6dba6f8678cdbe209dd4e0e2d689ea4e818a79156a3818d30818a300c0603551d130101ff04023000300e0603551d0f0101ff04040302078030130603551d25040c300a06082b0601050507030130360603551d11042f302d820b6578616d706c652e636f6d820d2a2e6578616d706c652e636f6d820f7777772e6578616d706c652e6f7267301d0603551d0e04160414dae9f13ce305fe193bbf7734e12927291ec5119e300506032b6570034100d13358f4f9134f32333e18b2ca533dc44d9a81e94c26338b1336229de15fad2a5ccaa50f446ef820a7c80b9a4ec27a3befded1db8d2087012f4d606b0d413800";
 }
 
+// ── SFN-765 nameConstraints fixtures (RFC 5280 §4.2.1.10) ──
+//
+// `fixture_nc_hex`: an Ed25519 intermediate CA, produced the same way as
+// fixture A/B, carrying a critical nameConstraints extension: permitted
+// DNS:corp.example, excluded DNS:secret.corp.example.
+fn fixture_nc_hex() -> string {
+    return "3082019630820148a003020102020166300506032b6570301f311d301b06035504030c145361696c66696e2054657374204e6320526f6f74301e170d3236303831323030303431315a170d3237303831323030303431315a30273125302306035504030c1c5361696c66696e2054657374204e63205065726d697473204578636c302a300506032b65700321000a9d81283f67d5f7286f84ee8bff7a945a8a649c01104eb0db0941b039d5c5f9a381a030819d30120603551d130101ff040830060101ff020100300e0603551d0f0101ff04040302010630370603551d1e0101ff042d302ba010300e820c636f72702e6578616d706c65a117301582137365637265742e636f72702e6578616d706c65301d0603551d0e04160414d78ef29e1b850a8598c28327712229541896f844301f0603551d23041830168014ec9f1892f73314464b2bafe018b41a14b796de59300506032b65700341007a7a4c7b407a02a792a11a4773be038f27fd8558a9b7727b646912dfdf6f2ddf4bc175d427b9fa4a079791726bdfc9b2107254b3594cd0e4f9393684d3bb180d";
+}
+
+// `fixture_nc_ip_leaf_hex`: an Ed25519 leaf whose only subjectAltName entry
+// is iPAddress 10.1.2.3, produced the same way.
+fn fixture_nc_ip_leaf_hex() -> string {
+    return "3082017530820127a003020102020200ce300506032b657030253123302106035504030c1a5361696c66696e2054657374204e63205065726d697473204970301e170d3236303831323030303433365a170d3237303831323030303433365a30183116301406035504030c0d686f73742d31302d312d322d33302a300506032b6570032100393ab161ac58eef9958cb94bdbedefe556b1c56467c9dee31053ecc0173cf521a38187308184300c0603551d130101ff04023000300e0603551d0f0101ff04040302078030130603551d25040c300a06082b06010505070301300f0603551d110408300687040a010203301d0603551d0e0416041492d53b1a05030cffad37b124f62d95746dcc59dd301f0603551d23041830168014cd046987bdde4dd6cc3fc1854ed55c73fa0e7e94300506032b65700341007567e236f52ac1a30ae6e95e1be9a2d7a1d6c755edd251d4e0e0417fd079b89d8b6f49c08691fb0c63d836e910e689dc7ea7b773cd6f208babed96795476c607";
+}
+
+// The negative fixtures below are hand-spliced from `fixture_nc_hex` (or, for
+// the SAN case, `fixture_nc_ip_leaf_hex`), each rewriting exactly the
+// nameConstraints (or subjectAltName) extnValue OCTET STRING and its
+// enclosing extension/tbsCertificate/Certificate length prefixes in place —
+// no length grows, so no other offset in the certificate shifts. Every
+// signature below is now stale and is never checked by this file's tests.
+// Precomputed offline (precedent: `fx_pss_noparams`), since none of these
+// shapes is one OpenSSL will emit.
+// The single permitted GeneralSubtree's `base` gets a trailing `[0]
+// IMPLICIT INTEGER minimum` of 0 appended — the DER-minimal encoding of the
+// RFC 5280 DEFAULT, so its mere presence is already non-conforming.
+fn fixture_nc_minimum_hex() -> string {
+    return "3082018030820132a003020102020165300506032b6570301f311d301b06035504030c145361696c66696e2054657374204e6320526f6f74301e170d3236303831323030303431315a170d3237303831323030303431315a30273125302306035504030c1c5361696c66696e2054657374204e63205065726d69747320436f7270302a300506032b6570032100abe84a3f8c50a8d33160ac6ac0dbb3ff72a5f7491d206f415f35e93468ec094ca3818a30818730120603551d130101ff040830060101ff020100300e0603551d0f0101ff04040302010630210603551d1e0101ff04173015a0133011820c636f72702e6578616d706c65800100301d0603551d0e04160414776a3e7ff81cf4e68807e53b585d6baff46f00e9301f0603551d23041830168014ec9f1892f73314464b2bafe018b41a14b796de59300506032b657003410034ead47114f44ef2cefb12e0e9e94e743d933e853b2cd3b2616e794eb5d31ffe799f862b3a8c0c06c496561d2743c156878c3343f33a96b3d115e3dea9e7ae0c";
+}
+
+// As above, but a trailing `[1] IMPLICIT INTEGER maximum` of 5 instead.
+fn fixture_nc_maximum_hex() -> string {
+    return "3082018030820132a003020102020165300506032b6570301f311d301b06035504030c145361696c66696e2054657374204e6320526f6f74301e170d3236303831323030303431315a170d3237303831323030303431315a30273125302306035504030c1c5361696c66696e2054657374204e63205065726d69747320436f7270302a300506032b6570032100abe84a3f8c50a8d33160ac6ac0dbb3ff72a5f7491d206f415f35e93468ec094ca3818a30818730120603551d130101ff040830060101ff020100300e0603551d0f0101ff04040302010630210603551d1e0101ff04173015a0133011820c636f72702e6578616d706c65810105301d0603551d0e04160414776a3e7ff81cf4e68807e53b585d6baff46f00e9301f0603551d23041830168014ec9f1892f73314464b2bafe018b41a14b796de59300506032b657003410034ead47114f44ef2cefb12e0e9e94e743d933e853b2cd3b2616e794eb5d31ffe799f862b3a8c0c06c496561d2743c156878c3343f33a96b3d115e3dea9e7ae0c";
+}
+
+// The NameConstraints SEQUENCE's content is replaced with nothing at all —
+// neither permittedSubtrees nor excludedSubtrees present, which RFC 5280
+// §4.2.1.10 forbids.
+fn fixture_nc_absent_hex() -> string {
+    return "308201693082011ba003020102020165300506032b6570301f311d301b06035504030c145361696c66696e2054657374204e6320526f6f74301e170d3236303831323030303431315a170d3237303831323030303431315a30273125302306035504030c1c5361696c66696e2054657374204e63205065726d69747320436f7270302a300506032b6570032100abe84a3f8c50a8d33160ac6ac0dbb3ff72a5f7491d206f415f35e93468ec094ca374307230120603551d130101ff040830060101ff020100300e0603551d0f0101ff040403020106300c0603551d1e0101ff04023000301d0603551d0e04160414776a3e7ff81cf4e68807e53b585d6baff46f00e9301f0603551d23041830168014ec9f1892f73314464b2bafe018b41a14b796de59300506032b657003410034ead47114f44ef2cefb12e0e9e94e743d933e853b2cd3b2616e794eb5d31ffe799f862b3a8c0c06c496561d2743c156878c3343f33a96b3d115e3dea9e7ae0c";
+}
+
+// permittedSubtrees is present but empty — `[0] SEQUENCE {}` with zero
+// GeneralSubtree children.
+fn fixture_nc_empty_subtrees_hex() -> string {
+    return "3082016b3082011da003020102020165300506032b6570301f311d301b06035504030c145361696c66696e2054657374204e6320526f6f74301e170d3236303831323030303431315a170d3237303831323030303431315a30273125302306035504030c1c5361696c66696e2054657374204e63205065726d69747320436f7270302a300506032b6570032100abe84a3f8c50a8d33160ac6ac0dbb3ff72a5f7491d206f415f35e93468ec094ca376307430120603551d130101ff040830060101ff020100300e0603551d0f0101ff040403020106300e0603551d1e0101ff04043002a000301d0603551d0e04160414776a3e7ff81cf4e68807e53b585d6baff46f00e9301f0603551d23041830168014ec9f1892f73314464b2bafe018b41a14b796de59300506032b657003410034ead47114f44ef2cefb12e0e9e94e743d933e853b2cd3b2616e794eb5d31ffe799f862b3a8c0c06c496561d2743c156878c3343f33a96b3d115e3dea9e7ae0c";
+}
+
+// Fixture-nc-ip's permitted iPAddress subtree, truncated from the valid
+// 8-byte address-plus-mask down to 5 bytes.
+fn fixture_nc_ip_bad_len_hex() -> string {
+    return "3082017230820124a003020102020168300506032b6570301f311d301b06035504030c145361696c66696e2054657374204e6320526f6f74301e170d3236303831323030303431315a170d3237303831323030303431315a30253123302106035504030c1a5361696c66696e2054657374204e63205065726d697473204970302a300506032b65700321006788e801c8ab8a45943627801caf21797ad9ba4c37158fbcde941cc8a21e60d5a37f307d30120603551d130101ff040830060101ff020100300e0603551d0f0101ff04040302010630170603551d1e0101ff040d300ba009300787050a000000ff301d0603551d0e04160414cd046987bdde4dd6cc3fc1854ed55c73fa0e7e94301f0603551d23041830168014ec9f1892f73314464b2bafe018b41a14b796de59300506032b6570034100dc07f1a51d1ed8896f08d34564062c2c3506eb6bf9ebb5103816c2bd4fc3e1df80f370ad2f19b9c58fef3da0182087ee23e8493cdba77d82471bb3a86a3e7a02";
+}
+
+// Fixture-nc-ip's permitted iPAddress subtree, with the mask octets rewritten
+// from `ff.00.00.00` to `ff.00.ff.00` — a zero bit followed by a one bit.
+fn fixture_nc_ip_bad_mask_hex() -> string {
+    return "3082017730820129a003020102020168300506032b6570301f311d301b06035504030c145361696c66696e2054657374204e6320526f6f74301e170d3236303831323030303431315a170d3237303831323030303431315a30253123302106035504030c1a5361696c66696e2054657374204e63205065726d697473204970302a300506032b65700321006788e801c8ab8a45943627801caf21797ad9ba4c37158fbcde941cc8a21e60d5a3818330818030120603551d130101ff040830060101ff020100300e0603551d0f0101ff040403020106301a0603551d1e0101ff0410300ea00c300a87080a000000ff00ff00301d0603551d0e04160414cd046987bdde4dd6cc3fc1854ed55c73fa0e7e94301f0603551d23041830168014ec9f1892f73314464b2bafe018b41a14b796de59300506032b6570034100dc07f1a51d1ed8896f08d34564062c2c3506eb6bf9ebb5103816c2bd4fc3e1df80f370ad2f19b9c58fef3da0182087ee23e8493cdba77d82471bb3a86a3e7a02";
+}
+
+// Fixture-nc-ip-leaf's SAN iPAddress entry, padded from the valid 4 bytes to
+// 5.
+fn fixture_san_ip_bad_len_hex() -> string {
+    return "3082017630820128a003020102020200ce300506032b657030253123302106035504030c1a5361696c66696e2054657374204e63205065726d697473204970301e170d3236303831323030303433365a170d3237303831323030303433365a30183116301406035504030c0d686f73742d31302d312d322d33302a300506032b6570032100393ab161ac58eef9958cb94bdbedefe556b1c56467c9dee31053ecc0173cf521a38188308185300c0603551d130101ff04023000300e0603551d0f0101ff04040302078030130603551d25040c300a06082b0601050507030130100603551d110409300787050a01020300301d0603551d0e0416041492d53b1a05030cffad37b124f62d95746dcc59dd301f0603551d23041830168014cd046987bdde4dd6cc3fc1854ed55c73fa0e7e94300506032b65700341007567e236f52ac1a30ae6e95e1be9a2d7a1d6c755edd251d4e0e0417fd079b89d8b6f49c08691fb0c63d836e910e689dc7ea7b773cd6f208babed96795476c607";
+}
+
+// Fixture-nc's permitted dNSName subtree, `corp.example` rewritten to
+// `.corp.example` — a leading dot, which parses as a well-formed IA5String
+// but denotes an empty first label (F1 review finding).
+fn fixture_nc_leading_dot_hex() -> string {
+    return "3082017e30820130a003020102020165300506032b6570301f311d301b06035504030c145361696c66696e2054657374204e6320526f6f74301e170d3236303831323030303431315a170d3237303831323030303431315a30273125302306035504030c1c5361696c66696e2054657374204e63205065726d69747320436f7270302a300506032b6570032100abe84a3f8c50a8d33160ac6ac0dbb3ff72a5f7491d206f415f35e93468ec094ca3818830818530120603551d130101ff040830060101ff020100300e0603551d0f0101ff040403020106301f0603551d1e0101ff04153013a011300f820d2e636f72702e6578616d706c65301d0603551d0e04160414776a3e7ff81cf4e68807e53b585d6baff46f00e9301f0603551d23041830168014ec9f1892f73314464b2bafe018b41a14b796de59300506032b657003410034ead47114f44ef2cefb12e0e9e94e743d933e853b2cd3b2616e794eb5d31ffe799f862b3a8c0c06c496561d2743c156878c3343f33a96b3d115e3dea9e7ae0c";
+}
+
+// Fixture-nc's permitted subtree base, rewritten from primitive dNSName
+// (0x82) to constructed 0xA2 wrapping a nested UTF8String TLV carrying the
+// same text — not the IMPLICIT primitive DER requires (F2 review finding).
+fn fixture_nc_constructed_dns_hex() -> string {
+    return "3082017f30820131a003020102020165300506032b6570301f311d301b06035504030c145361696c66696e2054657374204e6320526f6f74301e170d3236303831323030303431315a170d3237303831323030303431315a30273125302306035504030c1c5361696c66696e2054657374204e63205065726d69747320436f7270302a300506032b6570032100abe84a3f8c50a8d33160ac6ac0dbb3ff72a5f7491d206f415f35e93468ec094ca3818930818630120603551d130101ff040830060101ff020100300e0603551d0f0101ff04040302010630200603551d1e0101ff04163014a0123010a20e0c0c636f72702e6578616d706c65301d0603551d0e04160414776a3e7ff81cf4e68807e53b585d6baff46f00e9301f0603551d23041830168014ec9f1892f73314464b2bafe018b41a14b796de59300506032b657003410034ead47114f44ef2cefb12e0e9e94e743d933e853b2cd3b2616e794eb5d31ffe799f862b3a8c0c06c496561d2743c156878c3343f33a96b3d115e3dea9e7ae0c";
+}
+
+// Fixture-nc-ip's permitted subtree base, rewritten from primitive
+// iPAddress (0x87) to constructed 0xA7 wrapping a nested OCTET STRING TLV
+// carrying the same 8 bytes (F2 review finding).
+fn fixture_nc_constructed_ip_hex() -> string {
+    return "308201793082012ba003020102020168300506032b6570301f311d301b06035504030c145361696c66696e2054657374204e6320526f6f74301e170d3236303831323030303431315a170d3237303831323030303431315a30253123302106035504030c1a5361696c66696e2054657374204e63205065726d697473204970302a300506032b65700321006788e801c8ab8a45943627801caf21797ad9ba4c37158fbcde941cc8a21e60d5a3818530818230120603551d130101ff040830060101ff020100300e0603551d0f0101ff040403020106301c0603551d1e0101ff04123010a00e300ca70a04080a000000ff000000301d0603551d0e04160414cd046987bdde4dd6cc3fc1854ed55c73fa0e7e94301f0603551d23041830168014ec9f1892f73314464b2bafe018b41a14b796de59300506032b6570034100dc07f1a51d1ed8896f08d34564062c2c3506eb6bf9ebb5103816c2bd4fc3e1df80f370ad2f19b9c58fef3da0182087ee23e8493cdba77d82471bb3a86a3e7a02";
+}
+
 // Fixture B: an Ed25519 root certificate, CN=Sailfin Test Root, serial 0x2a,
 // UTCTime notBefore + GeneralizedTime notAfter (2026-01-01 -> 2052-01-01),
 // basicConstraints CA:TRUE pathlen:1 (critical), keyUsage keyCertSign /
@@ -734,6 +825,134 @@ test "x509: fixture A records every extension verbatim and keeps issuer_der inta
     assert cert.extensions.length == 5;
     assert cert.issuer_der.length > 0;
     assert cert.issuer_der[0] == der_tag_sequence();
+}
+
+// ── nameConstraints (SFN-765, RFC 5280 §4.2.1.10) ──
+//
+// `fixture_nc_hex` is an OpenSSL-produced intermediate CA carrying a critical
+// nameConstraints extension: permitted DNS:corp.example, excluded
+// DNS:secret.corp.example. `fixture_nc_ip_leaf_hex` is an OpenSSL-produced
+// leaf whose only SAN entry is iPAddress 10.1.2.3. The negative fixtures
+// below are byte-level splices of these two, precomputed offline (precedent:
+// `fx_pss_noparams`) — each encodes something no signer will emit, so
+// re-deriving them at test time would need the same non-conforming DER this
+// module exists to reject.
+test "x509: a well-formed nameConstraints extension populates both subtree lists" {
+    let cert: X509Certificate = x509_parse(hexb(fixture_nc_hex()));
+    assert cert.ok;
+    assert cert.has_name_constraints;
+    assert cert.name_constraints_permitted.length == 1;
+    assert cert.name_constraints_permitted[0].form == x509_name_form_dns_name();
+    assert strings_equal(cert.name_constraints_permitted[0].dns, "corp.example");
+    assert cert.name_constraints_excluded.length == 1;
+    assert cert.name_constraints_excluded[0].form == x509_name_form_dns_name();
+    assert strings_equal(cert.name_constraints_excluded[0].dns, "secret.corp.example");
+}
+
+test "x509: a SAN iPAddress entry populates ip_addresses" {
+    let cert: X509Certificate = x509_parse(hexb(fixture_nc_ip_leaf_hex()));
+    assert cert.ok;
+    assert cert.ip_addresses.length == 1;
+    assert eq_bytes(cert.ip_addresses[0].bytes, [10, 1, 2, 3]);
+}
+
+test "x509: an encoded GeneralSubtree minimum is rejected" {
+    let cert: X509Certificate = x509_parse(hexb(fixture_nc_minimum_hex()));
+    assert ! cert.ok;
+}
+
+test "x509: an encoded GeneralSubtree maximum is rejected" {
+    let cert: X509Certificate = x509_parse(hexb(fixture_nc_maximum_hex()));
+    assert ! cert.ok;
+}
+
+test "x509: nameConstraints with neither subtree list present is rejected" {
+    let cert: X509Certificate = x509_parse(hexb(fixture_nc_absent_hex()));
+    assert ! cert.ok;
+}
+
+test "x509: an empty GeneralSubtrees list is rejected" {
+    let cert: X509Certificate = x509_parse(hexb(fixture_nc_empty_subtrees_hex()));
+    assert ! cert.ok;
+}
+
+test "x509: a nameConstraints iPAddress subtree of length 5 is rejected" {
+    let cert: X509Certificate = x509_parse(hexb(fixture_nc_ip_bad_len_hex()));
+    assert ! cert.ok;
+}
+
+test "x509: a nameConstraints iPAddress subtree with a non-contiguous mask is rejected" {
+    let cert: X509Certificate = x509_parse(hexb(fixture_nc_ip_bad_mask_hex()));
+    assert ! cert.ok;
+}
+
+test "x509: a SAN iPAddress entry of length 5 is rejected" {
+    let cert: X509Certificate = x509_parse(hexb(fixture_san_ip_bad_len_hex()));
+    assert ! cert.ok;
+}
+
+// ── Review findings F1/F2 (SFN-765): a supported form must imply a usable
+// value, or the excluded side goes fail-open ──
+test "x509: a leading-dot dNSName subtree is rejected rather than left unmatchable" {
+    // ".corp.example" parses as a well-formed IA5String but splits into an
+    // empty first label, which `x509_dns_constraint_matches` always fails
+    // closed on — including on the excluded side, where that silently drops
+    // the exclusion (F1). Refusing the subtree at parse time closes it: a
+    // certificate carrying this shape can never become a usable issuer.
+    let cert: X509Certificate = x509_parse(hexb(fixture_nc_leading_dot_hex()));
+    assert ! cert.ok;
+}
+
+test "x509: a constructed dNSName tag records an unsupported form, not an empty one" {
+    // Constructed 0xA2 is not the IMPLICIT primitive DER requires for
+    // dNSName; recording `form = 2` here anyway (der_context_number's
+    // reading of the tag) would pair a supported-looking form with an empty
+    // `dns`, which the verifier's scan treats as usable and silently
+    // mismatches (F2). `form` must land outside {2, 7} instead.
+    let cert: X509Certificate = x509_parse(hexb(fixture_nc_constructed_dns_hex()));
+    assert cert.ok;
+    assert cert.has_name_constraints;
+    assert cert.name_constraints_permitted.length == 1;
+    assert cert.name_constraints_permitted[0].form != x509_name_form_dns_name();
+    assert strings_equal(cert.name_constraints_permitted[0].dns, "");
+}
+
+test "x509: a constructed iPAddress tag records an unsupported form, not an empty one" {
+    let cert: X509Certificate = x509_parse(hexb(fixture_nc_constructed_ip_hex()));
+    assert cert.ok;
+    assert cert.has_name_constraints;
+    assert cert.name_constraints_permitted.length == 1;
+    assert cert.name_constraints_permitted[0].form != x509_name_form_ip_address();
+    assert cert.name_constraints_permitted[0].ip.length == 0;
+}
+
+// ── x509_dns_constraint_matches direct unit tests (review finding F3) ──
+//
+// This is the single most security-load-bearing line in the nameConstraints
+// diff: `allow_wildcard_label` decides whether a presented wildcard label
+// inside the right-aligned comparison window counts as equal. Flipping
+// either branch is a fail-open (permitted side accepting a wildcard it
+// should not) or a fail-shut (excluded side missing a name it should
+// catch) — and every existing chain-level test happened to pass under
+// either polarity before this file existed, because the wildcard label in
+// every one of them fell outside the aligned window rather than inside it.
+// These four pin all quadrants directly, with the `*` inside the window in
+// both wildcard cases so a flipped `allow_wildcard_label` branch fails
+// exactly one of them.
+test "x509: dns constraint matching under permission rejects a wildcard label in the aligned window" {
+    assert ! x509_dns_constraint_matches("a.example", "*.example", false);
+}
+
+test "x509: dns constraint matching under exclusion accepts a wildcard label in the aligned window" {
+    assert x509_dns_constraint_matches("a.example", "*.example", true);
+}
+
+test "x509: dns constraint matching under permission accepts a literal match" {
+    assert x509_dns_constraint_matches("corp.example", "host.corp.example", false);
+}
+
+test "x509: dns constraint matching under exclusion rejects a non-matching name" {
+    assert ! x509_dns_constraint_matches("secret.corp.example", "host.corp.example", true);
 }
 
 test "x509: fixture B parses with a GeneralizedTime notAfter and no SAN" {

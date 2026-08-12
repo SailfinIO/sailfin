@@ -16,9 +16,11 @@ import {
     der_bit_string_unused,
     der_boolean,
     der_check_structure,
+    der_context_number,
     der_default_limits,
     der_integer_bytes,
     der_integer_small,
+    der_is_context,
     der_octet_string_bytes,
     der_oid_string,
     der_read_tlv,
@@ -53,6 +55,16 @@ fn x509_oid_eku_server_auth() -> string { return "1.3.6.1.5.5.7.3.1"; }
 
 fn x509_oid_eku_client_auth() -> string { return "1.3.6.1.5.5.7.3.2"; }
 
+fn x509_oid_name_constraints() -> string { return "2.5.29.30"; }
+
+// GeneralName context-tag numbers this module decodes inside nameConstraints
+// subtrees (RFC 5280 §4.2.1.10). Every other GeneralName form is recorded with
+// `form` set to its context number and empty `dns`/`ip`; the verifier is the
+// one that rejects an unsupported form (SFN-765).
+fn x509_name_form_dns_name() -> int { return 2; }
+
+fn x509_name_form_ip_address() -> int { return 7; }
+
 // RFC 5280 profiles a handful of extensions; real certificates carry well under
 // 20. The cap bounds both the duplicate-OID scan (which is linear per extension,
 // so quadratic overall) and the memory held by `extensions`, neither of which
@@ -82,6 +94,16 @@ fn _tag_dns_name() -> int {
     return 130;
 }  // [2] IMPLICIT IA5String in GeneralName
 
+fn _tag_ip_address() -> int {
+    return 135;
+}  // [7] IMPLICIT OCTET STRING in GeneralName, primitive
+
+// nameConstraints GeneralSubtrees wrappers (RFC 5280 §4.2.1.10): both are
+// IMPLICIT constructed, [0] permittedSubtrees and [1] excludedSubtrees.
+fn _tag_nc_permitted() -> int { return 160; }
+
+fn _tag_nc_excluded() -> int { return 161; }
+
 // ── KeyUsage bit accessors (RFC 5280 §4.2.1.3). Reported, never enforced. ──
 fn x509_key_usage_digital_signature() -> int { return 1; }
 
@@ -100,6 +122,32 @@ fn x509_key_usage_crl_sign() -> int { return 64; }
 fn x509_key_usage_encipher_only() -> int { return 128; }
 
 fn x509_key_usage_decipher_only() -> int { return 256; }
+
+// RFC 5280 profiles a handful of subtrees per list; real technically-
+// constrained CAs carry well under this. The cap bounds the memory a crafted
+// certificate can force `name_constraints_permitted`/`_excluded` to hold,
+// mirroring `_max_extensions()` (SFN-765).
+fn _max_name_subtrees() -> int { return 64; }
+
+// A SAN iPAddress GeneralName. Wrapped rather than a bare `int[]` so
+// `X509Certificate.ip_addresses` is an array-of-struct, not `int[][]`, which
+// Sailfin structs cannot hold directly (SFN-765).
+struct X509IpAddress {
+    bytes: int[];
+}
+
+// One `GeneralSubtree.base` from a nameConstraints extension (RFC 5280
+// §4.2.1.10). `form` is the GeneralName context-tag number
+// (`x509_name_form_dns_name()`/`x509_name_form_ip_address()`), or -1 for a
+// base that was not a context-tagged GeneralName at all. A form this parser
+// does not decode is recorded with empty `dns`/`ip` rather than a parse
+// failure — a non-critical nameConstraints extension asserting an
+// unsupported form must not break parsing; the verifier rejects it instead.
+struct X509NameSubtree {
+    form: int;
+    dns: string;
+    ip: int[];
+}
 
 struct X509Extension {
     oid: string;  // dotted decimal
@@ -144,6 +192,7 @@ struct X509Certificate {
     spki_algorithm: string;  // SubjectPublicKeyInfo algorithm OID
     spki_key: int[];  // subjectPublicKey BIT STRING, unused-bits octet removed
     dns_names: string[];  // SAN dNSName entries, verbatim (not case-folded)
+    ip_addresses: X509IpAddress[];  // SAN iPAddress entries, verbatim
     has_basic_constraints: boolean;
     is_ca: boolean;  // parsed, never enforced
     path_len_constraint: int;  // -1 when absent
@@ -151,6 +200,9 @@ struct X509Certificate {
     key_usage_bits: int;  // parsed, never enforced
     has_extended_key_usage: boolean;
     extended_key_usages: string[];  // dotted OIDs, parsed, never enforced
+    has_name_constraints: boolean;
+    name_constraints_permitted: X509NameSubtree[];  // parsed, enforced by x509_verify.sfn
+    name_constraints_excluded: X509NameSubtree[];
     extensions: X509Extension[];  // every extension in wire order
 }
 
@@ -178,6 +230,7 @@ fn _failed(message: string) -> X509Certificate {
         spki_algorithm: "",
         spki_key: [],
         dns_names: [],
+        ip_addresses: [],
         has_basic_constraints: false,
         is_ca: false,
         path_len_constraint: -1,
@@ -185,6 +238,9 @@ fn _failed(message: string) -> X509Certificate {
         key_usage_bits: 0,
         has_extended_key_usage: false,
         extended_key_usages: [],
+        has_name_constraints: false,
+        name_constraints_permitted: [],
+        name_constraints_excluded: [],
         extensions: []
     };
 }
@@ -281,6 +337,191 @@ fn _name_common_name(buf: int[], name: DerTlv) -> DerTextResult {
         rdn_cur = rdn.end_off;
     }
     return _text_ok(cn);
+}
+
+// ── nameConstraints (RFC 5280 §4.2.1.10) ──
+struct _SubtreesResult {
+    ok: boolean;
+    error: string;
+    value: X509NameSubtree[];
+}
+
+fn _subtrees_err(message: string) -> _SubtreesResult {
+    let empty: X509NameSubtree[] = [];
+    return _SubtreesResult { ok: false, error: message, value: empty };
+}
+
+struct _SubtreeResult {
+    ok: boolean;
+    error: string;
+    value: X509NameSubtree;
+}
+
+fn _subtree_err(message: string) -> _SubtreeResult {
+    let empty_ip: int[] = [];
+    return _SubtreeResult {
+        ok: false,
+        error: message,
+        value: X509NameSubtree { form: -1, dns: "", ip: empty_ip }
+    };
+}
+
+// Mask octets form a contiguous high-bit prefix (RFC 4632 CIDR shape) when,
+// read most-significant-bit first, every 1 bit precedes every 0 bit. A
+// non-contiguous mask makes `_ip_in_subtree`'s bitwise comparison ambiguous,
+// so it is rejected at parse time rather than matched loosely (SFN-765).
+fn _mask_is_contiguous(mask: int[]) -> boolean {
+    let mut seen_zero: boolean = false;
+    let mut i: int = 0;
+    loop {
+        if i >= mask.length { break; }
+        let byte_val: int = mask[i] & 255;
+        let mut bit: int = 7;
+        loop {
+            if bit < 0 { break; }
+            let is_one: boolean = (byte_val & (1 << bit)) != 0;
+            if is_one {
+                if seen_zero { return false; }
+            } else { seen_zero = true; }
+            bit -= 1;
+        }
+        i += 1;
+    }
+    return true;
+}
+
+// Decode a `GeneralSubtree.base` GeneralName. dNSName and iPAddress are the
+// only forms this module enforces; every other form is recorded with its
+// context number (or -1 when it is not context-tagged at all) and empty
+// `dns`/`ip` — a parse-time success, since a non-critical nameConstraints
+// asserting an unsupported form must not break parsing. The verifier is what
+// rejects it (SFN-765).
+fn _decode_general_name_base(buf: int[], base: DerTlv) -> _SubtreeResult {
+    if base.tag == _tag_dns_name() {
+        if base.content_len == 0 {
+            return _subtree_err("x509: nameConstraints dNSName subtree must not be empty");
+        }
+        let mut name: string = "";
+        let mut k: int = 0;
+        loop {
+            if k >= base.content_len { break; }
+            let b: int = buf[base.content_off + k] & 255;
+            if b < 33 || b > 126 {
+                return _subtree_err("x509: nameConstraints dNSName contains a non-printable byte");
+            }
+            name = name + _byte_to_char(b);
+            k += 1;
+        }
+        // A leading or trailing "." (or an internal empty label, "a..b")
+        // parses as a well-formed IA5String but produces an empty label once
+        // split, and `x509_dns_constraint_matches` fails closed on an empty
+        // label unconditionally — including on the excluded side, where that
+        // silently drops the exclusion instead of enforcing it (SFN-765
+        // review F1: both OpenSSL and Go honour the leading-dot form; this
+        // parser does not implement that semantic, so it refuses the subtree
+        // outright rather than accept a value the matcher can never use).
+        let labels: string[] = split(name, ".");
+        let mut li: int = 0;
+        loop {
+            if li >= labels.length { break; }
+            if labels[li].length == 0 {
+                return _subtree_err("x509: nameConstraints dNSName subtree has an empty label");
+            }
+            li += 1;
+        }
+        let empty_ip: int[] = [];
+        return _SubtreeResult {
+            ok: true,
+            error: "",
+            value: X509NameSubtree {
+                form: x509_name_form_dns_name(),
+                dns: name,
+                ip: empty_ip
+            }
+        };
+    }
+    if base.tag == _tag_ip_address() {
+        if base.content_len != 8 && base.content_len != 32 {
+            return _subtree_err("x509: nameConstraints iPAddress subtree has an invalid length");
+        }
+        let half: int = base.content_len / 2;
+        let mask: int[] = _slice(buf, base.content_off + half, half);
+        if !_mask_is_contiguous(mask) {
+            return _subtree_err("x509: nameConstraints iPAddress subtree mask is not contiguous");
+        }
+        let addr_and_mask: int[] = _slice(buf, base.content_off, base.content_len);
+        return _SubtreeResult {
+            ok: true,
+            error: "",
+            value: X509NameSubtree {
+                form: x509_name_form_ip_address(),
+                dns: "",
+                ip: addr_and_mask
+            }
+        };
+    }
+    let mut form: int = -1;
+    if der_is_context(base.tag) {
+        let number: int = der_context_number(base.tag);
+        // Reaching this fallback with a context number that coincides with a
+        // form this module supports (2 or 7) means the encoding did not
+        // match `_tag_dns_name()`/`_tag_ip_address()` above — e.g. a
+        // constructed `0xA2`/`0xA7` instead of the IMPLICIT primitive DER
+        // requires — so it is not a value this parser knows how to decode.
+        // Recording `number` here would set a supported-looking `form` on a
+        // subtree whose `dns`/`ip` is empty, which the verifier's scan reads
+        // as usable and silently fails to match — the fail-open SFN-765
+        // review F2 exists to close. Leaving `form = -1` keeps `form ∈ {2,
+        // 7}` an invariant that the value is actually usable.
+        if number != x509_name_form_dns_name() && number != x509_name_form_ip_address() {
+            form = number;
+        }
+    }
+    let empty_ip2: int[] = [];
+    return _SubtreeResult {
+        ok: true,
+        error: "",
+        value: X509NameSubtree { form: form, dns: "", ip: empty_ip2 }
+    };
+}
+
+// Decode one permittedSubtrees/excludedSubtrees GeneralSubtrees list.
+// `wrap` is the IMPLICIT constructed [0]/[1] wrapper; its children are
+// `GeneralSubtree ::= SEQUENCE { base GeneralName, minimum [0] DEFAULT 0,
+// maximum [1] OPTIONAL }`. Any element after `base` is a parse failure: DER's
+// default-encoding rule already forbids an encoded `minimum` of 0, so any
+// presence of either is non-conforming (RFC 5280 §4.2.1.10).
+fn _general_subtrees(buf: int[], wrap: DerTlv) -> _SubtreesResult {
+    let mut out: X509NameSubtree[] = [];
+    let mut cur: int = wrap.content_off;
+    let end: int = wrap.end_off;
+    loop {
+        if cur >= end { break; }
+        let gs: DerTlv = der_read_tlv(buf, cur, end);
+        if !gs.ok { return _subtrees_err(gs.error); }
+        if gs.end_off <= cur {
+            return _subtrees_err("x509: parser made no progress");
+        }
+        if gs.tag != der_tag_sequence() {
+            return _subtrees_err("x509: unexpected nameConstraints field");
+        }
+        if out.length >= _max_name_subtrees() {
+            return _subtrees_err("x509: too many nameConstraints subtrees");
+        }
+        let base_tlv: DerTlv = der_read_tlv(buf, gs.content_off, gs.end_off);
+        if !base_tlv.ok { return _subtrees_err(base_tlv.error); }
+        if base_tlv.end_off != gs.end_off {
+            return _subtrees_err("x509: nameConstraints minimum/maximum is not permitted");
+        }
+        let subtree_res: _SubtreeResult = _decode_general_name_base(buf, base_tlv);
+        if !subtree_res.ok { return _subtrees_err(subtree_res.error); }
+        out.push(subtree_res.value);
+        cur = gs.end_off;
+    }
+    if out.length == 0 {
+        return _subtrees_err("x509: nameConstraints GeneralSubtrees must not be empty");
+    }
+    return _SubtreesResult { ok: true, error: "", value: out };
 }
 
 fn x509_parse(der: int[]) -> X509Certificate {
@@ -481,6 +722,10 @@ fn x509_parse_with_limits(der: int[], limits: DerLimits) -> X509Certificate {
     let mut has_extended_key_usage: boolean = false;
     let mut extended_key_usages: string[] = [];
     let mut dns_names: string[] = [];
+    let mut ip_addresses: X509IpAddress[] = [];
+    let mut has_name_constraints: boolean = false;
+    let mut name_constraints_permitted: X509NameSubtree[] = [];
+    let mut name_constraints_excluded: X509NameSubtree[] = [];
     let mut extensions: X509Extension[] = [];
     let mut seen_oids: string[] = [];
 
@@ -631,9 +876,19 @@ fn x509_parse_with_limits(der: int[], limits: DerLimits) -> X509Certificate {
                             k += 1;
                         }
                         dns_names.push(name);
+                    } else if gn_tlv.tag == _tag_ip_address() {
+                        // [7] IMPLICIT OCTET STRING iPAddress, primitive: an
+                        // IPv4 (4 octets) or IPv6 (16 octets) address, nothing
+                        // else (RFC 5280 §4.2.1.6).
+                        if gn_tlv.content_len != 4 && gn_tlv.content_len != 16 {
+                            return _failed("x509: subjectAltName iPAddress has an invalid length");
+                        }
+                        ip_addresses.push(X509IpAddress {
+                            bytes: _slice(value_der, gn_tlv.content_off, gn_tlv.content_len)
+                        });
                     }
-                    // Any other GeneralName tag (rfc822Name, iPAddress,
-                    // otherName, ...) is out of scope: skipped, not an error.
+                    // Any other GeneralName tag (rfc822Name, otherName, ...)
+                    // is out of scope: skipped, not an error.
                     gn_cur = gn_tlv.end_off;
                 }
             } else if strings_equal(oid, x509_oid_basic_constraints()) {
@@ -724,6 +979,66 @@ fn x509_parse_with_limits(der: int[], limits: DerLimits) -> X509Certificate {
                     extended_key_usages.push(eku_oid_res.value);
                     eku_cur = eku_tlv.end_off;
                 }
+            } else if strings_equal(oid, x509_oid_name_constraints()) {
+                // extnValue's inner DER is not covered by the certificate-
+                // level structure guard (X509Extension.value_der comment
+                // above), so it is re-checked here before being walked.
+                let nc_guard = der_check_structure(value_der, limits);
+                if !nc_guard.ok { return _failed(nc_guard.error); }
+                let nc_seq: DerTlv = der_read_tlv(value_der, 0, value_der.length);
+                if !nc_seq.ok { return _failed(nc_seq.error); }
+                if nc_seq.tag != der_tag_sequence() {
+                    return _failed("x509: unexpected nameConstraints field");
+                }
+                if nc_seq.end_off != value_der.length {
+                    return _failed("x509: unexpected nameConstraints field");
+                }
+                has_name_constraints = true;
+                let mut nc_cur: int = nc_seq.content_off;
+                let nc_end: int = nc_seq.end_off;
+                let mut nc_stage: int = 0;  // 0 = start, 1 = saw permitted, 2 = saw excluded
+                let mut saw_permitted: boolean = false;
+                let mut saw_excluded: boolean = false;
+                loop {
+                    if nc_cur >= nc_end { break; }
+                    let gs_wrap: DerTlv = der_read_tlv(value_der, nc_cur, nc_end);
+                    if !gs_wrap.ok { return _failed(gs_wrap.error); }
+                    if gs_wrap.end_off <= nc_cur {
+                        return _failed("x509: parser made no progress");
+                    }
+                    if gs_wrap.tag == _tag_nc_permitted() {
+                        if nc_stage > 0 {
+                            return _failed("x509: unexpected nameConstraints field");
+                        }
+                        nc_stage = 1;
+                        saw_permitted = true;
+                        let permitted_res = _general_subtrees(value_der, gs_wrap);
+                        if !permitted_res.ok {
+                            return _failed(permitted_res.error);
+                        }
+                        name_constraints_permitted = permitted_res.value;
+                    } else if gs_wrap.tag == _tag_nc_excluded() {
+                        if nc_stage > 1 {
+                            return _failed("x509: unexpected nameConstraints field");
+                        }
+                        nc_stage = 2;
+                        saw_excluded = true;
+                        let excluded_res = _general_subtrees(value_der, gs_wrap);
+                        if !excluded_res.ok {
+                            return _failed(excluded_res.error);
+                        }
+                        name_constraints_excluded = excluded_res.value;
+                    } else {
+                        return _failed("x509: unexpected nameConstraints field");
+                    }
+                    nc_cur = gs_wrap.end_off;
+                }
+                // RFC 5280 §4.2.1.10 requires at least one of the two lists;
+                // an extension asserting neither constrains nothing and is
+                // non-conforming.
+                if !saw_permitted && !saw_excluded {
+                    return _failed("x509: nameConstraints must assert at least one subtree list");
+                }
             }
 
             ext_cur = ext_tlv.end_off;
@@ -752,6 +1067,7 @@ fn x509_parse_with_limits(der: int[], limits: DerLimits) -> X509Certificate {
         spki_algorithm: spki_algorithm,
         spki_key: spki_key,
         dns_names: dns_names,
+        ip_addresses: ip_addresses,
         has_basic_constraints: has_basic_constraints,
         is_ca: is_ca,
         path_len_constraint: path_len_constraint,
@@ -759,6 +1075,9 @@ fn x509_parse_with_limits(der: int[], limits: DerLimits) -> X509Certificate {
         key_usage_bits: key_usage_bits_val,
         has_extended_key_usage: has_extended_key_usage,
         extended_key_usages: extended_key_usages,
+        has_name_constraints: has_name_constraints,
+        name_constraints_permitted: name_constraints_permitted,
+        name_constraints_excluded: name_constraints_excluded,
         extensions: extensions
     };
 }
@@ -828,6 +1147,75 @@ fn _label_bytes_valid(label: string) -> boolean {
         if i >= label.length { break; }
         let b: int = char_code(label[i]);
         if b < 33 || b > 126 { return false; }
+        i += 1;
+    }
+    return true;
+}
+
+// Does `presented` (a SAN dNSName, possibly wildcarded) satisfy a
+// nameConstraints dNSName `subtree` (RFC 5280 §4.2.1.10)? Matching is
+// suffix-based: `subtree` matches `presented` when `presented` has at least
+// as many labels and every one of `subtree`'s labels equals the label in the
+// same right-aligned position.
+//
+// `allow_wildcard_label` governs only a label that lands in that aligned
+// window: when true, a `presented` label of exactly "*" there also counts as
+// equal. Callers pass `true` when testing an EXCLUDED subtree and `false` for
+// a PERMITTED one — `*.corp.example` can resolve to an excluded
+// `evil.corp.example`, so exclusion must treat the wildcard as covering
+// anything; permission must not let a wildcard buy coverage it was never
+// granted (SFN-765).
+//
+// This reads as two ad-hoc rules but is one: a presented `*.corp.example`
+// denotes the *set* `{x.corp.example}`, and a nameConstraints subtree is
+// itself a set of names. Exclusion must reject on any overlap with that set
+// — a single member inside the excluded set is enough — so the wildcard is
+// honoured; permission must require the whole set to be contained in the
+// permitted set, so a wildcard cannot buy membership it was not granted.
+// Both call sites fall out of that single reading. Neither RFC settles this
+// by citation — RFC 5280 §4.2.1.10 speaks of names, not patterns, and RFC
+// 6125 §6.4.3 scopes itself to identity matching — so treat this as a
+// derivation from set semantics, not a rule either RFC states. One
+// consequence worth naming: `allow_wildcard_label` is honoured at *any*
+// label position inside the aligned window, not only where a subtree label
+// would make it meaningful, so a malformed presented name like
+// `foo.*.example` can over-reject against a matching excluded subtree —
+// harmless, since a SAN entry that is not a well-formed hostname
+// authenticates nothing regardless of this function's answer.
+fn x509_dns_constraint_matches(subtree: string, presented: string, allow_wildcard_label: boolean) -> boolean {
+    let s: string = _normalize_name(subtree);
+    let p: string = _normalize_name(presented);
+    if s.length == 0 || p.length == 0 { return false; }
+
+    let s_labels: string[] = split(s, ".");
+    let p_labels: string[] = split(p, ".");
+    if p_labels.length < s_labels.length { return false; }
+
+    let mut i: int = 0;
+    loop {
+        if i >= s_labels.length { break; }
+        if s_labels[i].length == 0 { return false; }
+        if !_label_bytes_valid(s_labels[i]) { return false; }
+        i += 1;
+    }
+    i = 0;
+    loop {
+        if i >= p_labels.length { break; }
+        if p_labels[i].length == 0 { return false; }
+        if !_label_bytes_valid(p_labels[i]) { return false; }
+        i += 1;
+    }
+
+    let offset: int = p_labels.length - s_labels.length;
+    i = 0;
+    loop {
+        if i >= s_labels.length { break; }
+        let s_label: string = s_labels[i];
+        let p_label: string = p_labels[offset + i];
+        if !strings_equal(s_label, p_label) {
+            let wildcard_match: boolean = allow_wildcard_label && strings_equal(p_label, "*");
+            if !wildcard_match { return false; }
+        }
         i += 1;
     }
     return true;
@@ -920,16 +1308,21 @@ fn x509_hostname_matches(cert: X509Certificate, hostname: string) -> boolean {
 export {
     X509Extension,
     X509Certificate,
+    X509IpAddress,
+    X509NameSubtree,
     x509_oid_common_name,
     x509_oid_subject_alt_name,
     x509_oid_basic_constraints,
     x509_oid_key_usage,
     x509_oid_extended_key_usage,
+    x509_oid_name_constraints,
     x509_oid_ed25519,
     x509_oid_ecdsa_p256_sha256,
     x509_oid_rsa_encryption,
     x509_oid_eku_server_auth,
     x509_oid_eku_client_auth,
+    x509_name_form_dns_name,
+    x509_name_form_ip_address,
     x509_key_usage_digital_signature,
     x509_key_usage_non_repudiation,
     x509_key_usage_key_encipherment,
@@ -947,5 +1340,6 @@ export {
     x509_parse_with_limits,
     x509_validity_at,
     x509_hostname_matches,
-    x509_dns_name_matches
+    x509_dns_name_matches,
+    x509_dns_constraint_matches
 };

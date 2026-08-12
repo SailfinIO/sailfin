@@ -61,13 +61,18 @@ import {
 import {
     X509Certificate,
     X509Extension,
+    X509NameSubtree,
+    x509_dns_constraint_matches,
     x509_key_usage_key_cert_sign,
+    x509_name_form_dns_name,
+    x509_name_form_ip_address,
     x509_oid_basic_constraints,
     x509_oid_ecdsa_p256_sha256,
     x509_oid_ed25519,
     x509_oid_eku_server_auth,
     x509_oid_extended_key_usage,
     x509_oid_key_usage,
+    x509_oid_name_constraints,
     x509_oid_rsa_encryption,
     x509_oid_subject_alt_name,
     x509_validity_at,
@@ -166,6 +171,17 @@ fn x509_verify_err_path_too_long() -> string { return "path-too-long"; }
 
 fn x509_verify_err_unrecognized_critical_extension() -> string {
     return "unrecognized-critical-extension";
+}
+
+// RFC 5280 §4.2.1.10, enforced whether or not the extension is marked
+// critical (SFN-765). `name_constraint_unsupported` is distinct from a
+// generic parse failure: the certificate parsed fine, but one of its
+// subtrees names a GeneralName form this module cannot enforce, and silently
+// ignoring that form would be the fail-open bug this code exists to avoid.
+fn x509_verify_err_name_constraint() -> string { return "name-constraint"; }
+
+fn x509_verify_err_name_constraint_unsupported() -> string {
+    return "name-constraint-unsupported";
 }
 
 // Not produced by `x509_verify_chain`, which deliberately does not look at
@@ -773,7 +789,11 @@ fn _window_code(cert: X509Certificate, now_ms: int) -> string {
 //
 // So the recognised set is exactly what this module enforces, and it is
 // deliberately short. Adding an OID here is a claim that the code below
-// actually acts on it — never a way to quiet a rejection.
+// actually acts on it — never a way to quiet a rejection. `nameConstraints`
+// is enforced only for its dNSName and iPAddress subtrees (SFN-765): every
+// other GeneralName form a subtree names is rejected by
+// `_name_constraints_code`, not silently ignored, so listing the OID as
+// recognised here does not widen what actually passes.
 fn _critical_extensions_code(cert: X509Certificate) -> string {
     let mut i: int = 0;
     loop {
@@ -783,7 +803,8 @@ fn _critical_extensions_code(cert: X509Certificate) -> string {
             let oid: string = extension.oid;
             let recognized: boolean = oid == x509_oid_basic_constraints() || oid == x509_oid_key_usage()
                 || oid == x509_oid_extended_key_usage()
-                || oid == x509_oid_subject_alt_name();
+                || oid == x509_oid_subject_alt_name()
+                || oid == x509_oid_name_constraints();
             if !recognized {
                 return x509_verify_err_unrecognized_critical_extension();
             }
@@ -845,6 +866,156 @@ fn _has_server_auth_eku(cert: X509Certificate) -> boolean {
     return false;
 }
 
+// `addr` (4 or 16 bytes) is inside `subtree`'s address/mask pair (RFC 4632
+// CIDR shape, `2 * addr.length` bytes: address followed by the same-length
+// mask). A mismatched family — an IPv6 SAN against an IPv4-only subtree, or
+// the reverse — never matches; that is deliberate, not an oversight the two
+// address families are simply incomparable, not a wider-than-intended
+// permission (SFN-765).
+fn _ip_in_subtree(addr: int[], subtree: int[]) -> boolean {
+    if subtree.length != 2 * addr.length { return false; }
+    let mut i: int = 0;
+    loop {
+        if i >= addr.length { break; }
+        let mask_byte: int = subtree[addr.length + i] & 255;
+        let addr_byte: int = (addr[i] & 255) & mask_byte;
+        let subtree_byte: int = (subtree[i] & 255) & mask_byte;
+        if addr_byte != subtree_byte { return false; }
+        i += 1;
+    }
+    return true;
+}
+
+// "" when every certificate in `below` satisfies `issuer`'s nameConstraints
+// (RFC 5280 §4.2.1.10). `below[0]` is the leaf; `below` holds every
+// certificate already accepted underneath `issuer` on this path, so the
+// constraint is checked against the whole subtree it governs, not only the
+// certificate `issuer` directly signed (decision 5: per-chain, not
+// per-certificate).
+//
+// Excluded is checked first and is absolute: a name inside an excluded
+// subtree is rejected regardless of what permittedSubtrees says (decision 1).
+// Permitted is checked per form and only when `issuer` actually asserts a
+// permittedSubtrees entry of that form — `perm_has_dns`/`perm_has_ip` below —
+// so a CA that constrains only DNS names does not accidentally forbid every
+// IP address it never mentioned.
+//
+// Every subtree naming a form other than dNSName or iPAddress rejects the
+// whole chain, critical or not (decision 2): silently accepting an
+// unimplemented form in `excludedSubtrees` is the fail-open version of this
+// bug, and `_critical_extensions_code` no longer catches it once
+// nameConstraints is a recognised critical extension.
+fn _name_constraints_code(issuer: X509Certificate, below: X509Certificate[]) -> string {
+    if !issuer.has_name_constraints { return ""; }
+
+    let mut si: int = 0;
+    loop {
+        if si >= issuer.name_constraints_permitted.length { break; }
+        let form: int = issuer.name_constraints_permitted[si].form;
+        if form != x509_name_form_dns_name() && form != x509_name_form_ip_address() {
+            return x509_verify_err_name_constraint_unsupported();
+        }
+        si += 1;
+    }
+    si = 0;
+    loop {
+        if si >= issuer.name_constraints_excluded.length { break; }
+        let form: int = issuer.name_constraints_excluded[si].form;
+        if form != x509_name_form_dns_name() && form != x509_name_form_ip_address() {
+            return x509_verify_err_name_constraint_unsupported();
+        }
+        si += 1;
+    }
+
+    let mut perm_has_dns: boolean = false;
+    let mut perm_has_ip: boolean = false;
+    si = 0;
+    loop {
+        if si >= issuer.name_constraints_permitted.length { break; }
+        let subtree: X509NameSubtree = issuer.name_constraints_permitted[si];
+        if subtree.form == x509_name_form_dns_name() { perm_has_dns = true; }
+        if subtree.form == x509_name_form_ip_address() { perm_has_ip = true; }
+        si += 1;
+    }
+
+    let mut k: int = 0;
+    loop {
+        if k >= below.length { break; }
+        let c: X509Certificate = below[k];
+
+        let mut ni: int = 0;
+        loop {
+            if ni >= c.dns_names.length { break; }
+            let name: string = c.dns_names[ni];
+            let mut ei: int = 0;
+            loop {
+                if ei >= issuer.name_constraints_excluded.length { break; }
+                let excl: X509NameSubtree = issuer.name_constraints_excluded[ei];
+                if excl.form == x509_name_form_dns_name() {
+                    if x509_dns_constraint_matches(excl.dns, name, true) {
+                        return x509_verify_err_name_constraint();
+                    }
+                }
+                ei += 1;
+            }
+            if perm_has_dns {
+                let mut matched: boolean = false;
+                let mut pi: int = 0;
+                loop {
+                    if pi >= issuer.name_constraints_permitted.length { break; }
+                    let perm: X509NameSubtree = issuer.name_constraints_permitted[pi];
+                    if perm.form == x509_name_form_dns_name() {
+                        if x509_dns_constraint_matches(perm.dns, name, false) {
+                            matched = true;
+                            break;
+                        }
+                    }
+                    pi += 1;
+                }
+                if !matched { return x509_verify_err_name_constraint(); }
+            }
+            ni += 1;
+        }
+
+        let mut ai: int = 0;
+        loop {
+            if ai >= c.ip_addresses.length { break; }
+            let addr: int[] = c.ip_addresses[ai].bytes;
+            let mut ei2: int = 0;
+            loop {
+                if ei2 >= issuer.name_constraints_excluded.length { break; }
+                let excl2: X509NameSubtree = issuer.name_constraints_excluded[ei2];
+                if excl2.form == x509_name_form_ip_address() {
+                    if _ip_in_subtree(addr, excl2.ip) {
+                        return x509_verify_err_name_constraint();
+                    }
+                }
+                ei2 += 1;
+            }
+            if perm_has_ip {
+                let mut matched2: boolean = false;
+                let mut pi2: int = 0;
+                loop {
+                    if pi2 >= issuer.name_constraints_permitted.length { break; }
+                    let perm2: X509NameSubtree = issuer.name_constraints_permitted[pi2];
+                    if perm2.form == x509_name_form_ip_address() {
+                        if _ip_in_subtree(addr, perm2.ip) {
+                            matched2 = true;
+                            break;
+                        }
+                    }
+                    pi2 += 1;
+                }
+                if !matched2 { return x509_verify_err_name_constraint(); }
+            }
+            ai += 1;
+        }
+
+        k += 1;
+    }
+    return "";
+}
+
 struct _IssuerSearch {
     index: int;  // -1 when no candidate was accepted
     reason: string;  // "" when no candidate even matched by name
@@ -853,11 +1024,15 @@ struct _IssuerSearch {
 
 // Find a certificate in `candidates` that may issue `subject`, skipping any
 // index already consumed. A candidate must match by issuer/subject name,
-// satisfy the CA constraints, be inside its validity window, and actually
-// have signed `subject` — checked in that order so the reported reason is the
-// most specific one. Requiring the signature before accepting a candidate is
-// what makes this greedy walk safe without backtracking.
-fn _find_issuer(candidates: X509Certificate[], used: boolean[], subject: X509Certificate, below: int, now_ms: int) -> _IssuerSearch {
+// satisfy the CA constraints, be inside its validity window, actually have
+// signed `subject`, and satisfy its own nameConstraints against `path` —
+// checked in that order so the reported reason is the most specific one.
+// Requiring the signature before accepting a candidate is what makes this
+// greedy walk safe without backtracking. `path` is every certificate already
+// accepted below `subject`, index 0 = leaf, ascending — this is what lets a
+// single call check nameConstraints against the whole path a candidate would
+// become issuer over, not only `subject` itself.
+fn _find_issuer(candidates: X509Certificate[], used: boolean[], subject: X509Certificate, below: int, now_ms: int, path: X509Certificate[]) -> _IssuerSearch {
     let mut reason: string = "";
     let mut detail: string = "";
     let mut i: int = 0;
@@ -909,6 +1084,15 @@ fn _find_issuer(candidates: X509Certificate[], used: boolean[], subject: X509Cer
             i += 1;
             continue;
         }
+        let nc: string = _name_constraints_code(candidate, path);
+        if nc != "" {
+            if reason == "" {
+                reason = nc;
+                detail = "";
+            }
+            i += 1;
+            continue;
+        }
         return _IssuerSearch { index: i, reason: "", detail: "" };
     }
     return _IssuerSearch { index: -1, reason: reason, detail: detail };
@@ -936,6 +1120,13 @@ fn x509_verify_chain(leaf: X509Certificate, intermediates: X509Certificate[], an
         return _chain_err(leaf_critical, "x509_verify: leaf asserts a critical extension this module does not process");
     }
 
+    // RFC 5280 §4.2.1.10 permits nameConstraints only in CA certificates; a
+    // leaf is never a CA in this module's model (`_ca_code`), so a leaf
+    // asserting the extension is non-conforming regardless of what it says.
+    if leaf.has_name_constraints {
+        return _chain_err(x509_verify_err_name_constraint(), "x509_verify: leaf asserts nameConstraints, which RFC 5280 permits only in CA certificates");
+    }
+
     let leaf_window: string = _window_code(leaf, options.now_ms);
     if leaf_window != "" {
         return _chain_err(leaf_window, "x509_verify: leaf is outside its validity window");
@@ -957,6 +1148,11 @@ fn x509_verify_chain(leaf: X509Certificate, intermediates: X509Certificate[], an
 
     let mut current: X509Certificate = leaf;
     let mut depth: int = 0;
+    // Every certificate already accepted below `current`, index 0 = leaf,
+    // ascending. Threaded into `_find_issuer` so nameConstraints checks
+    // against the whole path a candidate would become issuer over, not only
+    // `current` itself (SFN-765).
+    let mut path: X509Certificate[] = [leaf];
 
     // Each turn consumes one intermediate, so `intermediates.length + 1` turns
     // is a hard bound even before `max_depth` applies — the walk cannot cycle.
@@ -970,7 +1166,7 @@ fn x509_verify_chain(leaf: X509Certificate, intermediates: X509Certificate[], an
         // Prefer terminating at an anchor over extending through an
         // intermediate, so a cross-signed intermediate cannot lengthen a path
         // that a configured root already closes.
-        let anchor_hit: _IssuerSearch = _find_issuer(anchors, [], current, depth, options.now_ms);
+        let anchor_hit: _IssuerSearch = _find_issuer(anchors, [], current, depth, options.now_ms, path);
         if anchor_hit.index >= 0 {
             let anchor: X509Certificate = anchors[anchor_hit.index];
             return X509ChainResult {
@@ -986,7 +1182,7 @@ fn x509_verify_chain(leaf: X509Certificate, intermediates: X509Certificate[], an
             return _chain_err(x509_verify_err_path_too_long(), "x509_verify: certification path exceeds the configured depth");
         }
 
-        let inter_hit: _IssuerSearch = _find_issuer(intermediates, used, current, depth, options.now_ms);
+        let inter_hit: _IssuerSearch = _find_issuer(intermediates, used, current, depth, options.now_ms, path);
         if inter_hit.index < 0 {
             // No candidate anywhere could issue `current`. Report the most
             // specific reason either search produced; a bare name miss in both
@@ -1008,6 +1204,7 @@ fn x509_verify_chain(leaf: X509Certificate, intermediates: X509Certificate[], an
 
         used[inter_hit.index] = true;
         current = intermediates[inter_hit.index];
+        path.push(current);
         depth += 1;
     }
 }
@@ -1038,5 +1235,7 @@ export {
     x509_verify_oid_rsassa_pss,
     x509_verify_oid_ec_public_key,
     x509_rsa_public_key_from_spki,
-    x509_verify_err_hostname_mismatch
+    x509_verify_err_hostname_mismatch,
+    x509_verify_err_name_constraint,
+    x509_verify_err_name_constraint_unsupported
 };
