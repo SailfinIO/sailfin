@@ -1,0 +1,4 @@
+run_sha,run_date,fixture,cold_s,warm_s,binary_bytes,ctors,modules_staged,cold_cache_misses,cache_hits,cache_misses,status,seed_version,platform
+c68e1380099d02ad62056b66019bc422e00b2289,2026-08-12T07:32:04Z,hello,61.44,1.77,420920,32,34,68,68,0,ok,0.9.5,Linux x86_64
+c68e1380099d02ad62056b66019bc422e00b2289,2026-08-12T07:32:04Z,hello_lib,62.70,1.82,420920,34,35,69,69,0,ok,0.9.5,Linux x86_64
+c68e1380099d02ad62056b66019bc422e00b2289,2026-08-12T07:32:04Z,tls_client,62.99,1.84,420920,38,39,73,73,0,ok,0.9.5,Linux x86_64
