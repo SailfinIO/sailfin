@@ -10,8 +10,9 @@
 // gate — so the enclosing `assert` was elided (the #832 false-pass). #1021
 // registers prelude `Result`/`Error`; this guard catches the residual class of
 // genuinely-unresolvable literals so the failure is loud instead of silent.
-import { lower_expression } from "../../src/llvm/expression_lowering/native/core";
-import { TypeContext } from "../../src/llvm/types";
+import { lower_expression } from "sfn/codegen-llvm/expression_lowering/native/core";
+import { TypeContext } from "sfn/codegen-llvm/types";
+
 import { index_of } from "../../src/string_utils";
 
 fn _empty_context() -> TypeContext {

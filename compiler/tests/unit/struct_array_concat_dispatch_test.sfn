@@ -4,8 +4,8 @@
 import {
     lower_struct_array_concat,
     lower_struct_array_concat_with_alloc_target
-} from "../../src/llvm/expression_lowering/arrays";
-import { LLVMOperand } from "../../src/llvm/types";
+} from "sfn/codegen-llvm/expression_lowering/arrays";
+import { LLVMOperand } from "sfn/codegen-llvm/types";
 
 fn _array_operand(value: string) -> LLVMOperand {
     return LLVMOperand { llvm_type: "{ i32*, i64, i64 }*", value: value };

@@ -29,8 +29,8 @@
 // caller-visible types match, so those two tests pin the *single*
 // `call i64` line (no `round + fptosi` coercion, one temp consumed)
 // instead of the three-line shape.
-import { emit_runtime_call, empty_runtime_call_overrides } from "../../src/llvm/expression_lowering/native/runtime_call";
-import { LLVMOperand } from "../../src/llvm/types";
+import { emit_runtime_call, empty_runtime_call_overrides } from "sfn/codegen-llvm/expression_lowering/native/runtime_call";
+import { LLVMOperand } from "sfn/codegen-llvm/types";
 
 fn _i8ptr_operand(value: string) -> LLVMOperand {
     return LLVMOperand { llvm_type: "i8*", value: value };

@@ -78,7 +78,7 @@ struct ScopeResult {
 // Variable bindings are exempt from same-scope duplicate checks: `let`
 // rebinding within a single scope is a deliberate Sailfin idiom (the
 // compiler's own LLVM lowering uses the pattern e.g.
-// `compiler/src/llvm/lowering/instructions_loops.sfn:492,597`). Other kinds
+// `compiler/capsules/codegen-llvm/src/lowering/instructions_loops.sfn:492,597`). Other kinds
 // (function/struct/enum/interface/type/test) keep the duplicate diagnostic.
 fn register_local_symbol(bindings: SymbolEntry[], name: string, kind: string, span: SourceSpan?, scope_start: int, is_generic: boolean = false, is_c_abi: boolean = false, element_kind: string = "", declared_prim: string = "", declared_struct: string = "", declared_type: string = "") -> ScopeResult {
     if !strings_equal(kind, "variable") {

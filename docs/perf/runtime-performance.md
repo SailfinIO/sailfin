@@ -105,7 +105,7 @@ are freed each pass instead of accumulating. The `arena_alloc` workload
 **~691 MB (1.01× the raw allocation size)** to a **flat ~1.7 MB** peak, with
 its `RESULT` output unchanged (correctness preserved). Number recorded by the
 shipping change, PR #1528 (#1514); the gate is `loop_body_rewind_eligible`
-(`compiler/src/llvm/lowering/instructions_helpers.sfn`).
+(`compiler/capsules/codegen-llvm/src/lowering/instructions_helpers.sfn`).
 
 **Bounds.** Reclamation is scoped to non-escaping loop-local arena allocations:
 the body must allocate via a real `@sfn_alloc_struct`, every body-scope heap

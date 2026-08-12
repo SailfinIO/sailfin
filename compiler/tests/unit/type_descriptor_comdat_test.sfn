@@ -12,9 +12,8 @@
 // logic is exercisable without the resolver's latched cache (it can only be
 // probed once per process). Same override-driven pattern as
 // `target_conditioning_test.sfn`.
+import { comdat_leg_for_os } from "sfn/codegen-llvm/lowering_debug_state";
 import { expect_eq_bool } from "sfn/test";
-
-import { comdat_leg_for_os } from "../../src/llvm/lowering_debug_state";
 
 test "comdat: only Windows selects the comdat leg" ![pure] {
     assert expect_eq_bool(comdat_leg_for_os("Windows"), true).ok;

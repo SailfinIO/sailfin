@@ -1,0 +1,118 @@
+// compiler/capsules/codegen-llvm/src/lowering/entrypoints_tests.sfn
+//
+// LLVM IR lowering entrypoints — test-specific paths.
+//
+// Dead function bodies were removed to fix OOM during selfhost.
+// Imports are preserved — the seed linker needs the full import graph
+// for correct cross-module symbol resolution.
+import {
+    ImportedModuleContext,
+    LayoutManifest,
+    NativeArtifact,
+    NativeEnum,
+    NativeFunction,
+    NativeInterface,
+    NativeModule,
+    NativeStruct,
+    ParseNativeResult
+} from "sfn/ir";
+import {
+    parse_native_artifact,
+    parse_native_enums_for_import,
+    parse_native_functions_for_import,
+    parse_native_interfaces_for_import,
+    parse_native_structs_for_import,
+    select_text_artifact
+} from "sfn/ir";
+import { split_lines } from "sfn/ir";
+import { substring } from "sfn/strings";
+
+import {
+    append_function_effect_entry,
+    append_unique_effect,
+    collect_direct_function_effects,
+    collect_function_call_graph,
+    collect_runtime_helper_targets,
+    find_function_effect_entry,
+    propagate_function_effects
+} from "../effects";
+import { apply_layout_manifest_to_module } from "../imports";
+import { LLVMProviderContext, install_llvm_provider_context } from "../lowering_debug_state";
+import {
+    render_enum_type_definitions,
+    render_imported_function_declarations,
+    render_runtime_helper_declarations,
+    render_struct_type_definitions,
+    render_trait_metadata_comments
+} from "../rendering";
+import {
+    collect_exported_symbol_names,
+    find_function_by_name,
+    render_interface_type_definitions,
+    render_vtable_constants,
+    render_vtable_type_definitions
+} from "../rendering_helpers";
+import {
+    empty_string_constant_set,
+    merge_string_constants,
+    render_string_constants
+} from "../strings";
+import { sanitize_symbol } from "../symbols";
+import { build_type_context, fixup_enum_layouts } from "../type_context";
+import {
+    FunctionEffectEntry,
+    LifetimeRegionMetadata,
+    LoweredLLVMLinesResult,
+    LoweredLLVMResult,
+    StringConstant,
+    TraitMetadata,
+    TypeContext
+} from "../types";
+import {
+    append_string,
+    index_of,
+    join_with_separator,
+    number_to_string,
+    string_array_contains
+} from "../utils";
+import { emit_llvm_function } from "./emission";
+import { lower_to_llvm_with_context, lower_to_llvm_with_parsed_context } from "./entrypoints";
+import { lower_to_llvm_lines_with_parsed_context_for_tests } from "./lowering_core/test_harness";
+import {
+    empty_trait_metadata,
+    extend_native_enums,
+    extend_native_functions,
+    extend_native_interfaces,
+    extend_native_structs,
+    is_test_module_slug
+} from "./lowering_helpers";
+import { _join_llvm_lines_linear, concat_native_functions } from "./lowering_helpers_mangling";
+import { empty_capability_manifest, flatten_struct_methods } from "./lowering_helpers_structs";
+import {
+    ensure_intrinsic_declarations,
+    extend_string_lines,
+    extend_string_lines_checked,
+    module_source_filename
+} from "./lowering_io";
+import { lower_module_bindings_to_globals } from "./module_globals";
+
+// Native-module test entrypoint retained for callers that already hold the
+// structured artifact instead of its serialized text.
+fn lower_to_llvm_for_tests(native_module: NativeModule, import_context: ImportedModuleContext, provider_context: LLVMProviderContext) -> LoweredLLVMResult {
+    install_llvm_provider_context(provider_context);
+    let artifact = select_text_artifact(native_module.artifacts);
+    if artifact == null {
+        return LoweredLLVMResult {
+            ir: "",
+            diagnostics: [],
+            trait_metadata: empty_trait_metadata(),
+            function_effects: [],
+            lifetime_regions: [],
+            capability_manifest: empty_capability_manifest(),
+            string_constants: empty_string_constant_set()
+        };
+    }
+    let parse = parse_native_artifact(artifact.contents);
+    let base = lower_to_llvm_with_parsed_context(native_module, parse, import_context);
+    return base;
+}

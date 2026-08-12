@@ -30,8 +30,8 @@ import {
     RuntimeCallOverrides,
     emit_runtime_call,
     empty_runtime_call_overrides
-} from "../../src/llvm/expression_lowering/native/runtime_call";
-import { LLVMOperand } from "../../src/llvm/types";
+} from "sfn/codegen-llvm/expression_lowering/native/runtime_call";
+import { LLVMOperand } from "sfn/codegen-llvm/types";
 
 // SfnString aggregate — `string.concat` parameter type per the M1.A
 // lock-in (see `runtime_helpers.sfn` lines 407-431).

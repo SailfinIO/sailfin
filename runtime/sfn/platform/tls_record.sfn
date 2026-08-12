@@ -25,7 +25,7 @@
 //     constant-length-1 `memset` into a single `store i8`; at `-O0` it stays a
 //     real call, which is the dominant term in the `-O0` throughput figure.
 //   * Byte loads use the `load_byte` builtin (a true `load i8` + `zext`,
-//     `compiler/src/llvm/byte_load.sfn`) rather than the word-load
+//     `compiler/capsules/codegen-llvm/src/byte_load.sfn`) rather than the word-load
 //     `sailfin_intrinsic_pointer_read_i32` the WebSocket helpers use. A true
 //     i8 load is sound at any alignment and never reads past the buffer, so
 //     callers owe this module no tail-slack over-allocation.

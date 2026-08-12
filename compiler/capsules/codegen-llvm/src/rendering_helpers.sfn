@@ -1,0 +1,511 @@
+// compiler/capsules/codegen-llvm/src/rendering_helpers.sfn
+//
+// LLVM IR rendering helpers for interfaces, vtables, test harness, symbol visibility,
+// and utility functions for type extraction and parameter collection.
+import {
+    NativeFunction,
+    NativeImport,
+    NativeInterfaceSignature,
+    NativeParameter
+} from "sfn/ir";
+import { last_index_of_char as find_last_index_of_char, substring } from "sfn/strings";
+
+import { sanitize_symbol } from "./symbols";
+import { map_parameter_type, map_struct_type_annotation } from "./type_mapping";
+import { TypeContext } from "./types";
+import {
+    join_with_separator,
+    number_to_string,
+    starts_with,
+    string_array_contains
+} from "./utils";
+
+fn clamp_collection_length(value: int, max: int) -> int {
+    if value < 0 { return 0; }
+    if value > max { return max; }
+    return value;
+}
+
+// =============================================================================
+// Interface Type Definitions
+// =============================================================================
+fn render_interface_type_definitions(context: TypeContext) -> string[] {
+    let mut lines: string[] = [];
+    let mut index: int = 0;
+    let interface_count = clamp_collection_length(context.interfaces.length, 10000);
+    loop {
+        if index >= interface_count { break; }
+        let interface_info = context.interfaces[index];
+        // Trait object layout: { data_ptr, vtable_ptr }
+        let body = "{ i8*, i8* }";
+        lines.push(interface_info.llvm_name + " = type " + body);
+        index += 1;
+    }
+    return lines;
+}
+
+// =============================================================================
+// VTable Type Definitions and Constants
+// =============================================================================
+fn render_vtable_type_definitions(context: TypeContext) -> string[] {
+    let mut lines: string[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= context.vtables.length { break; }
+        let vtable = context.vtables[index];
+        let mut entry_types: string[] = [];
+        let mut entry_index: int = 0;
+        loop {
+            if entry_index >= vtable.entries.length { break; }
+            entry_types.push(vtable.entries[entry_index].function_pointer_type);
+            entry_index += 1;
+        }
+        let mut body: string = "";
+        if entry_types.length == 0 { body = "{}"; } else {
+            body = "{ " + join_with_separator(entry_types, ", ") + " }";
+        }
+        lines.push(vtable.llvm_type_name + " = type " + body);
+        index += 1;
+    }
+    return lines;
+}
+
+fn render_vtable_constants(context: TypeContext) -> string[] {
+    let mut lines: string[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= context.vtables.length { break; }
+        let vtable = context.vtables[index];
+        let mut entry_values: string[] = [];
+        let mut entry_index: int = 0;
+        loop {
+            if entry_index >= vtable.entries.length { break; }
+            let entry = vtable.entries[entry_index];
+            let sanitized_method = sanitize_symbol(entry.method_name);
+            // Cast the method to i8* function pointer type
+            let cast_value = "bitcast (" + entry.function_pointer_type + " @"
+                + sanitized_method
+                + " to "
+                + entry.function_pointer_type
+                + ")";
+            let typed_value = entry.function_pointer_type + " " + cast_value;
+            entry_values.push(typed_value);
+            entry_index += 1;
+        }
+        let mut body: string = "";
+        if entry_values.length == 0 { body = "zeroinitializer"; } else {
+            body = "{ " + join_with_separator(entry_values, ", ") + " }";
+        }
+        // Vtable globals are safe to keep module-local.
+        // Marking them internal avoids duplicate symbol collisions when linking
+        // multiple LLVM modules that share the same type context.
+        lines.push(vtable.llvm_global_name + " = internal constant " + vtable.llvm_type_name
+            + " "
+            + body);
+        index += 1;
+    }
+    return lines;
+}
+
+// =============================================================================
+// Test Harness Rendering
+// =============================================================================
+fn _escape_llvm_string(text: string) -> string {
+    // Chunked: O(K) memory where K = number of escape chars, instead of
+    // O(N^2) per-character `out = out + ch` accumulation.
+    let mut chunks: string[] = [];
+    let mut chunk_start: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= text.length { break; }
+        let ch = substring(text, i, i + 1);
+        let mut esc: string = "";
+        if ch == "\"" { esc = "\\22"; } else if ch == "\\" { esc = "\\5C"; }
+        if esc.length > 0 {
+            if i > chunk_start {
+                chunks.push(substring(text, chunk_start, i));
+            }
+            chunks.push(esc);
+            chunk_start = i + 1;
+        }
+        i += 1;
+    }
+    if chunk_start < text.length {
+        chunks.push(substring(text, chunk_start, text.length));
+    }
+    if chunks.length == 0 { return ""; }
+    if chunks.length == 1 { return chunks[0]; }
+    let mut out: string = chunks[0];
+    let mut j: int = 1;
+    loop {
+        if j >= chunks.length { break; }
+        out = out + chunks[j];
+        j += 1;
+    }
+    return out;
+}
+
+fn _test_label_from_name(raw_name: string) -> string {
+    let mut name = raw_name;
+    if name.length >= 5 {
+        if substring(name, 0, 5) == "test:" {
+            name = substring(name, 5, name.length);
+        }
+    }
+    let mut cleaned: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= name.length { break; }
+        let ch = substring(name, i, i + 1);
+        if ch == "_" { cleaned = cleaned + " "; } else {
+            cleaned = cleaned + ch;
+        }
+        i += 1;
+    }
+    return cleaned;
+}
+
+fn render_test_harness_main(tests: NativeFunction[]) -> string[] {
+    let mut lines: string[] = [];
+    let test_count = tests.length;
+
+    // String constants for test names and summary
+    let mut index: int = 0;
+    loop {
+        if index >= test_count { break; }
+        let label = _test_label_from_name(tests[index].name);
+        let msg = "  RUN  " + label;
+        let escaped = _escape_llvm_string(msg);
+        let idx_str = number_to_string(index);
+        lines.push("@.test_name_" + idx_str
+            + " = private unnamed_addr constant ["
+            + number_to_string(msg.length
+            + 1)
+            + " x i8] c\""
+            + escaped
+            + "\\00\"");
+        index += 1;
+    }
+
+    let pass_msg = "  PASS  (all " + number_to_string(test_count)
+        + " tests passed)";
+    let pass_escaped = _escape_llvm_string(pass_msg);
+    lines.push("@.test_pass_msg = private unnamed_addr constant ["
+        + number_to_string(pass_msg.length
+        + 1)
+        + " x i8] c\""
+        + pass_escaped
+        + "\\00\"");
+    lines.push("declare i32 @puts(i8*)");
+
+    lines.push("define i32 @main(i32 %argc, i8** %argv) {");
+    lines.push("entry:");
+
+    index = 0;
+    loop {
+        if index >= test_count { break; }
+        let sym = sanitize_symbol(tests[index].name);
+        let idx_str = number_to_string(index);
+        let msg = "  RUN  " + _test_label_from_name(tests[index].name);
+        lines.push("  %name_ptr_" + idx_str + " = getelementptr ["
+            + number_to_string(msg.length
+            + 1)
+            + " x i8], ["
+            + number_to_string(msg.length
+            + 1)
+            + " x i8]* @.test_name_"
+            + idx_str
+            + ", i64 0, i64 0");
+        lines.push("  call i32 @puts(i8* %name_ptr_" + idx_str + ")");
+        lines.push("  call void @" + sym + "()");
+        index += 1;
+    }
+
+    // Print summary
+    lines.push("  %pass_ptr = getelementptr [" + number_to_string(pass_msg.length
+        + 1)
+        + " x i8], ["
+        + number_to_string(pass_msg.length
+        + 1)
+        + " x i8]* @.test_pass_msg, i64 0, i64 0");
+    lines.push("  call i32 @puts(i8* %pass_ptr)");
+    lines.push("  ret i32 0");
+    lines.push("}");
+    return lines;
+}
+
+// =============================================================================
+// Interface Signature Rendering
+// =============================================================================
+fn render_interface_signature(signature: NativeInterfaceSignature) -> string {
+    let mut line: string = "fn " + signature.name;
+    if signature.type_parameters.length > 0 {
+        line = line + "<" + join_with_separator(signature.type_parameters, ", ")
+            + ">";
+    }
+    line = line + "(" + render_interface_parameters(signature.parameters) + ")";
+    if signature.return_type.length > 0 {
+        if signature.return_type != "void" {
+            line = line + " -> " + signature.return_type;
+        }
+    }
+    if signature.effects.length > 0 {
+        line = line + " ![" + join_with_separator(signature.effects, ", ") + "]";
+    }
+    if signature.is_async { line = "async " + line; }
+    return line;
+}
+
+fn render_interface_parameters(parameters: NativeParameter[]) -> string {
+    if parameters.length == 0 { return ""; }
+    let mut rendered: string[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= parameters.length { break; }
+        let parameter = parameters[index];
+        let mut entry: string = parameter.name;
+        if parameter.mutable { entry = "mut " + entry; }
+        if parameter.type_annotation.length > 0 {
+            entry = entry + ": " + parameter.type_annotation;
+        }
+        if parameter.default_value != null {
+            entry = entry + " = " + parameter.default_value;
+        }
+        rendered.push(entry);
+        index += 1;
+    }
+    return join_with_separator(rendered, ", ");
+}
+
+// =============================================================================
+// Helper Functions
+// =============================================================================
+fn extract_struct_type_from_llvm(llvm_type: string) -> string {
+    // Extract struct type name from LLVM type like "%Token**" or "{ %Token**, i64 }*"
+    // Returns empty string if no struct type found
+    if llvm_type.length == 0 { return ""; }
+    let mut result: string = "";
+    let mut index: int = 0;
+    loop {
+        if index >= llvm_type.length { break; }
+        let ch = substring(llvm_type, index, index + 1);
+        if ch == "%" {
+            // Found a struct type reference, extract the name
+            let mut end_index: int = index + 1;
+            loop {
+                if end_index >= llvm_type.length { break; }
+                let end_ch = substring(llvm_type, end_index, end_index + 1);
+                // Struct name ends at space, comma, *, }, or >
+                let mut _if288: boolean = false;
+                if end_ch == " " { _if288 = true; }
+                if end_ch == "," { _if288 = true; }
+                if end_ch == "*" { _if288 = true; }
+                if end_ch == "}" { _if288 = true; }
+                if end_ch == ">" { _if288 = true; }
+                if _if288 { break; }
+                end_index += 1;
+            }
+            let _ren_next = index + 1;
+            if end_index > _ren_next {
+                result = substring(llvm_type, index, end_index);
+                break;
+            }
+        }
+        index += 1;
+    }
+    return result;
+}
+
+fn collect_parameter_types(context: TypeContext, parameters: NativeParameter[], function_name: string) -> string[] {
+    let mut types: string[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= parameters.length { break; }
+        let parameter = parameters[index];
+        let mut llvm_type = map_parameter_type(context, parameter.type_annotation);
+
+        // Method receiver type inference: the self parameter type is set by
+        // flatten_struct_methods in lowering_helpers_structs.sfn. This block
+        // is a no-op fallback kept for safety — fused method names (e.g.
+        // Counteris_zero) cannot be split back into struct + method.
+        if parameter.type_annotation.length == 0 {
+            if parameter.name == "self" {
+                if index == 0 {
+                    // Type already set in flatten_struct_methods; no split possible.
+                }
+            }
+        }
+        if llvm_type.length == 0 { types.push("double"); } else {
+            types.push(llvm_type);
+        }
+        index += 1;
+    }
+    return types;
+}
+
+fn find_function_by_name(functions: NativeFunction[], name: string) -> NativeFunction? {
+    let mut index: int = 0;
+    loop {
+        if index >= functions.length { break; }
+        if functions[index].name == name { return functions[index]; }
+        index += 1;
+    }
+    return null;
+}
+
+// Look up a function by exact name first, then fall back to a unique
+// `target + "__"` suffix match for imported / mangled functions (e.g. the
+// resolver will find `foo__pkg` when asked for `foo` as long as exactly one
+// candidate matches). Mirrors the call-resolution lookup used by
+// `resolve_call_signature` so other passes reach the same `NativeFunction`
+// entry without re-implementing the suffix logic.
+fn find_function_by_name_or_import(functions: NativeFunction[], target: string) -> NativeFunction? {
+    let exact = find_function_by_name(functions, target);
+    if exact != null { return exact; }
+    let suffix_prefix = target + "__";
+    let mut match_result: NativeFunction? = null;
+    let mut idx: int = 0;
+    loop {
+        if idx >= functions.length { break; }
+        let candidate = functions[idx];
+        if starts_with(candidate.name, suffix_prefix) {
+            if match_result != null { return null; }
+            match_result = candidate;
+        }
+        idx += 1;
+    }
+    return match_result;
+}
+
+// =============================================================================
+// Symbol Visibility Helpers
+// =============================================================================
+fn is_entry_point(entry_points: string[], function_name: string) -> boolean {
+    if entry_points == null { return false; }
+    let mut index: int = 0;
+    loop {
+        if index >= entry_points.length { break; }
+        if entry_points[index] == function_name { return true; }
+        index += 1;
+    }
+    return false;
+}
+
+fn collect_exported_symbol_names(imports: NativeImport[]) -> string[] {
+    if imports == null { return []; }
+    if imports.length > 10000 { return []; }
+    let mut names: string[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= imports.length { break; }
+        let entry = imports[index];
+        if entry == null {
+            index += 1;
+            continue;
+        }
+        if entry.kind == "export" {
+            let mut specifiers = entry.specifiers;
+            if specifiers == null {
+                index += 1;
+                continue;
+            }
+            let mut spec_index: int = 0;
+            loop {
+                if spec_index >= specifiers.length { break; }
+                let spec = specifiers[spec_index];
+                if spec != null {
+                    let exported = spec.name;
+                    if exported != null {
+                        if exported.length > 0 {
+                            if !string_array_contains(names, exported) {
+                                names.push(exported);
+                            }
+                        }
+                    }
+                }
+                spec_index += 1;
+            }
+        }
+        index += 1;
+    }
+    return names;
+}
+
+fn is_exported_symbol(exported_symbols: string[], function_name: string) -> boolean {
+    let mut index: int = 0;
+    loop {
+        if index >= exported_symbols.length { break; }
+        if exported_symbols[index] == function_name { return true; }
+        index += 1;
+    }
+    return false;
+}
+
+fn should_internalize_function(function: NativeFunction, entry_points: string[], exported_symbols: string[], imported_functions: NativeFunction[]) -> boolean {
+    // Externs are emitted as declarations.
+    if function.is_extern { return false; }
+
+    // Keep declared entry points externally visible.
+    if is_entry_point(entry_points, function.name) { return false; }
+
+    // Preserve explicitly exported symbols for cross-module linkage.
+    if is_exported_symbol(exported_symbols, function.name) { return false; }
+
+    // Preserve native driver API surface expected by selfhost/release linking.
+    //
+    // The historical entries for `compile_to_llvm` / `compile_to_sailfin`
+    // were needed to keep the symbols externally visible for the
+    // C driver's legacy `--emit MODE file.sfn` extern declarations.
+    // M5.4 (#472) retired that dispatch and M5.5 (#473) deleted the
+    // C driver, so both functions reach their sole remaining caller
+    // (the CLI `--emit` dispatch in `cli_main.sfn`) through the
+    // Sailfin import system, which generates module-mangled call
+    // sites that match the mangled definition. The default
+    // `return false` at the bottom of this function keeps them
+    // externally linked across the seedcheck cross-module link.
+    let sanitized = sanitize_symbol(function.name);
+    let mut _if291: boolean = false;
+    if function.name == "cli_main" { _if291 = true; }
+    if sanitized == "sailfin_cli_main__cli_main" { _if291 = true; }
+    if _if291 { return false; }
+    let mut _if292: boolean = false;
+    if function.name == "sailfin_cli_main" { _if292 = true; }
+    if sanitized == "sailfin_cli_main" { _if292 = true; }
+    if _if292 { return false; }
+    let mut _if293: boolean = false;
+    if function.name == "native_cli_main" { _if293 = true; }
+    if sanitized == "native_cli_main" { _if293 = true; }
+    if _if293 { return false; }
+    let mut _if294: boolean = false;
+    if function.name == "append_match_arm_mutations" { _if294 = true; }
+    if sanitized == "append_match_arm_mutations" { _if294 = true; }
+    if _if294 { return false; }
+    let mut _if295: boolean = false;
+    if function.name == "append_match_arm_mutations_impl" { _if295 = true; }
+    if sanitized == "append_match_arm_mutations_impl" { _if295 = true; }
+    if _if295 { return false; }
+    let mut _if296: boolean = false;
+    if function.name == "text_char_at" { _if296 = true; }
+    if sanitized == "text_char_at" { _if296 = true; }
+    if _if296 { return false; }
+    let mut _if297: boolean = false;
+    if function.name == "string_char_at" { _if297 = true; }
+    if sanitized == "string_char_at" { _if297 = true; }
+    if _if297 { return false; }
+
+    // Collision-prone local helper names observed across compiler modules.
+    // Keep these module-local to avoid duplicate symbol definitions at final link.
+    if sanitized == "contains_effect" { return true; }
+
+    // NOTE: A previous revision also internalised any function whose sanitized
+    // name starts with `_`. That heuristic was too aggressive — several
+    // underscore-prefix helpers (e.g. `_parse_int_from_string` from
+    // instructions_helpers, `_parse_lowered_fn_string_constants` from
+    // lowering_text_utils) are imported across modules and must retain
+    // external linkage so the final IR link succeeds. The 0.5.7 seed
+    // happened to produce external linkage for them because its own
+    // baked-in rule was narrower, which hid the regression in self-host
+    // builds until the seedcheck link step exposed it.
+    // Default: preserve existing cross-module linkage behavior.
+    return false;
+}

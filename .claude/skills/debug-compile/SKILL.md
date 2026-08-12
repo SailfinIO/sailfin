@@ -48,7 +48,7 @@ If the proposed fix touches multiple passes or requires a migration, spawn `comp
 
 ## Phase 4 — FIX
 
-Edit the canonical source file under `compiler/src/*.sfn`. After the fix:
+Edit the canonical source file under `compiler/src/` or `compiler/capsules/`. After the fix:
 
 ```bash
 make compile

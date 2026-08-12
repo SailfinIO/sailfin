@@ -1,13 +1,12 @@
 // Unit tests for `integer_type_is_signed` (SFEP-0058 §3.1,
-// compiler/src/llvm/type_mapping.sfn), the sole source-of-truth
+// compiler/capsules/codegen-llvm/src/type_mapping.sfn), the sole source-of-truth
 // signedness predicate consumed by SFN-503's unsigned-widening-cast
 // lowering (zext/uitofp/fptoui). Pins the closed unsigned set, the
 // signed set, whitespace tolerance, and the load-bearing fallback:
 // an unrecognised or non-integer name answers signed so an unresolved
 // name degrades to the pre-existing opcode rather than a wrong one.
+import { integer_type_is_signed } from "sfn/codegen-llvm/type_mapping";
 import { expect_eq_bool } from "sfn/test";
-
-import { integer_type_is_signed } from "../../src/llvm/type_mapping";
 
 test "sign helpers: unsigned integer type names answer false" ![pure] {
     assert expect_eq_bool(integer_type_is_signed("u8"), false).ok;

@@ -46,7 +46,7 @@ git checkout -b feature/my-feature main
 1. Update the parser (`compiler/capsules/syntax/src/parser/mod.sfn`)
 2. Add AST nodes (`compiler/capsules/syntax/src/ast.sfn`)
 3. Update the emitter (`compiler/capsules/codegen/src/emit_native.sfn`)
-4. Extend LLVM lowering (`compiler/src/llvm/lowering/`)
+4. Extend LLVM lowering (`compiler/capsules/codegen-llvm/src/lowering/`)
 5. Add regression tests (`compiler/tests/`)
 6. Update `docs/status.md`, the source of truth for shipped behavior
 7. Update the language spec (`site/src/content/docs/docs/reference/spec/NN-*.md`

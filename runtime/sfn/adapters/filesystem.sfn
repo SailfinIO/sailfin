@@ -9,7 +9,7 @@
 // `posix_spawnp` + `waitpid`) and `runtime/sfn/clock.sfn`
 // (M2.11 — `sfn_sleep`) used to land their adapter flips.
 //
-// ABI. `compiler/src/llvm/runtime_helpers.sfn` flips the
+// ABI. `compiler/capsules/codegen-llvm/src/runtime_helpers.sfn` flips the
 // `fs_read_file` / `fs.readFile` / `fs_write_file` /
 // `fs.writeFile` / `fs_append_file` / `fs.appendFile` descriptor
 // rows' `native_signature` to `sfn_fs_read_file` /
@@ -1074,7 +1074,7 @@ fn sfn_fs_write_lines(path: *u8, lines: *u8) -> void ![io] {
     // dropped tail links as `undefined reference to 'main'`. Removing the
     // file is the only channel a `-> void` body has to report the failure
     // — the descriptor signature is fixed at
-    // `compiler/src/llvm/runtime_helpers.sfn` — and the caller reads it as
+    // `compiler/capsules/codegen-llvm/src/runtime_helpers.sfn` — and the caller reads it as
     // `fs.exists(path) == false` (SFN-542).
     //
     // When the caller is one of the two IR emit sites, `path` on POSIX is

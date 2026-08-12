@@ -1,0 +1,69 @@
+// compiler/capsules/codegen-llvm/src/expressions.sfn
+//
+// Barrel re-export module for expression parsing and lowering helpers.
+// Delegates to focused submodules for maintainability.
+//
+// Submodules:
+//   - expressions_bindings.sfn:  Local/parameter binding lookup and mutation
+//   - expressions_literals.sfn:  Literal detection (boolean, null, number, string, char)
+//   - expressions_helpers.sfn:   Identifier helpers, type helpers, operand formatting
+//   - expressions_operators.sfn: Operator finding, range/union separators
+//   - expressions_parsing.sfn:   Expression parsing (member access, index, assignment, etc.)
+// --- Binding lookup and mutation ---
+export {
+    find_local_binding,
+    find_parameter_binding,
+    mark_parameter_consumed,
+    mark_local_consumed,
+    reset_local_consumption
+} from "./expressions_bindings";
+
+// --- Literal detection ---
+export {
+    is_boolean_literal,
+    is_null_literal,
+    is_digit_char,
+    char_code_at_text,
+    is_integer_literal,
+    is_number_literal,
+    normalise_number_literal,
+    is_string_literal,
+    is_character_literal,
+    get_character_literal_value,
+    matches_case_insensitive
+} from "./expressions_literals";
+
+// --- Identifier helpers, type helpers, and formatting ---
+export {
+    is_simple_identifier,
+    is_effect_delimiter,
+    strip_enclosing_parentheses,
+    strip_mut_prefix,
+    contains_text,
+    is_copy_type,
+    ends_with_pointer_suffix,
+    default_return_literal,
+    format_temp_name,
+    format_local_pointer_name,
+    format_typed_operand
+} from "./expressions_helpers";
+
+// --- Operator finding and separators ---
+export {
+    find_top_level_operator,
+    is_binary_minus,
+    is_binary_star,
+    find_top_level_range_separator,
+    find_top_level_union_separator
+} from "./expressions_operators";
+
+// --- Expression parsing ---
+export {
+    parse_member_access,
+    parse_index_expression,
+    parse_assignment_expression,
+    parse_inline_let_expression,
+    parse_ternary_expression,
+    parse_raw_address_expression,
+    parse_cast_expression
+} from "./expressions_parsing";

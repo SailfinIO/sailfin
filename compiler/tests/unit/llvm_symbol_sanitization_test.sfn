@@ -1,7 +1,7 @@
 // compiler/tests/unit/llvm_symbol_sanitization_test.sfn
 //
 // Pins the LLVM-owned symbol sanitizer and its two character classifications.
-import { is_llvm_symbol_char, is_symbol_char, sanitize_symbol } from "../../src/llvm/symbols";
+import { is_llvm_symbol_char, is_symbol_char, sanitize_symbol } from "sfn/codegen-llvm/symbols";
 
 test "mangling: LLVM symbol sanitizer preserves historical spellings" {
     assert sanitize_symbol("") == "_";

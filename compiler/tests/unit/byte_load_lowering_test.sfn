@@ -7,18 +7,18 @@
 //
 // Two layers of coverage, mirroring `atomic_load_store_test.sfn`:
 //   1. Predicate surface — `is_byte_load_builtin` gates the dispatch
-//      hook (compiler/src/llvm/byte_load.sfn). A regression that
+//      hook (compiler/capsules/codegen-llvm/src/byte_load.sfn). A regression that
 //      loosens it to a prefix/suffix match is caught here.
 //   2. Golden-IR shape — the inttoptr + `load i8` + `zext` emission,
 //      pinned in-process via parse → emit_native → lower_to_llvm_ir.
 //      ONE lowering call for the file (the suite's per-process memory
 //      budget makes multiple lowerings a poor trade).
+import { is_byte_load_builtin } from "sfn/codegen-llvm/byte_load";
+import { lower_to_llvm_ir_from_text_with_provider_context } from "sfn/codegen-llvm/lowering/entrypoints";
 import { parse_program } from "sfn/syntax";
 
 import { empty_llvm_import_context, resolve_llvm_provider_context } from "../../src/build/llvm_provider_context";
 import { emit_native_text_with_module_name } from "../../src/codegen_driver";
-import { is_byte_load_builtin } from "../../src/llvm/byte_load";
-import { lower_to_llvm_ir_from_text_with_provider_context } from "../../src/llvm/lowering/entrypoints";
 import { index_of } from "../../src/string_utils";
 
 fn _contains(haystack: string, needle: string) -> boolean {

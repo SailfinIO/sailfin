@@ -1,0 +1,528 @@
+// compiler/capsules/codegen-llvm/src/lowering/module_globals.sfn
+//
+// Module-global lowering: turns `let` bindings into LLVM globals plus optional init function.
+import { NativeBinding, NativeFunction, NativeInstruction } from "sfn/ir";
+
+import { default_return_literal } from "../expressions_helpers";
+import { is_string_literal, normalise_number_literal } from "../expressions_literals";
+import { format_root_scope_id } from "../lifetime";
+import { empty_string_constant_set } from "../strings";
+import { sanitize_symbol } from "../symbols";
+import { map_local_type } from "../type_mapping";
+import {
+    BindingLoweringResult,
+    LocalBinding,
+    ModuleGlobalLoweringResult,
+    TypeContext
+} from "../types";
+import {
+    index_of,
+    is_boolean_literal,
+    is_integer_literal,
+    is_number_literal,
+    matches_case_insensitive,
+    number_to_string,
+    starts_with,
+    string_array_contains,
+    trim_text
+} from "../utils";
+
+fn module_global_symbol(name: string) -> string {
+    return "@global." + sanitize_symbol(name);
+}
+
+fn module_init_symbol(module_name: string) -> string {
+    return "@sailfin_module_init__" + sanitize_symbol(module_name);
+}
+
+// Bare LLVM function name (no `@`) for the module-init function. Must match
+// `module_init_symbol` after `emit_llvm_function` re-sanitizes + prefixes `@`
+// (the body is composed of symbol-safe characters, so `sanitize_symbol` is
+// idempotent here and the call site / definition agree).
+fn module_init_function_name(module_name: string) -> string {
+    return "sailfin_module_init__" + sanitize_symbol(module_name);
+}
+
+// Map a binding's source type annotation to its LLVM type. Extracted from
+// `_process_one_binding` so the module-global lowering has a single
+// annotation→LLVM-type mapping (#1368).
+fn _binding_llvm_type(context: TypeContext, type_annotation: string) -> string {
+    let mut llvm_type: string = "";
+    if type_annotation == "string" { llvm_type = "i8*"; } else if type_annotation == "number" {
+        llvm_type = "double";
+    } else if type_annotation == "float" { llvm_type = "double"; } else if type_annotation == "boolean" {
+        llvm_type = "i1";
+    } else if type_annotation == "bool" { llvm_type = "i1"; } else if type_annotation == "i64" {
+        llvm_type = "i64";
+    } else if type_annotation == "i32" { llvm_type = "i32"; } else if type_annotation == "channel" {
+        llvm_type = "i8*";
+    } else if starts_with(type_annotation, "channel:") { llvm_type = "i8*"; } else if type_annotation.length > 0 {
+        llvm_type = map_local_type(context, type_annotation);
+    }
+    if llvm_type.length == 0 { llvm_type = "double"; }
+    return llvm_type;
+}
+
+// Strip surrounding quotes from a string literal (e.g., `"hello"` -> `hello`).
+fn _strip_string_quotes(s: string) -> string {
+    if s.length < 2 { return s; }
+    let first = s[0];
+    let last = s[s.length - 1];
+    let mut _is_quoted: boolean = false;
+    if first == "\"" {
+        if last == "\"" { _is_quoted = true; }
+    }
+    if _is_quoted {
+        let mut result: string = "";
+        let mut i: int = 1;
+        loop {
+            if i >= s.length - 1 { break; }
+            result = result + s[i];
+            i += 1;
+        }
+        return result;
+    }
+    return s;
+}
+
+// Render the constant LLVM initializer for a defining `extern var`
+// (`extern var NAME: TYPE = INIT;`). A defining global must carry a
+// compile-time constant, so only literal forms are honored; anything else
+// falls back to the type's zero/null default rather than emitting an
+// invalid runtime expression as a global initializer. Pointer types take
+// `null` (the only constant pointer), matching the runtime-global slots
+// this primitive replaces (e.g. `@runtime = global i8* null`, #1436).
+fn _extern_definition_initializer(llvm_type: string, value: string?) -> string {
+    if value == null { return default_return_literal(llvm_type); }
+    let init_expr = trim_text(value);
+    let mut is_pointer: boolean = false;
+    if llvm_type.length > 0 {
+        if llvm_type[llvm_type.length - 1] == "*" { is_pointer = true; }
+    }
+    if is_pointer {
+        if init_expr == "null" { return "null"; }
+        return default_return_literal(llvm_type);
+    }
+    if llvm_type == "double" {
+        if is_number_literal(init_expr) {
+            return normalise_number_literal(init_expr);
+        }
+    }
+    if llvm_type == "i64" {
+        if is_integer_literal(init_expr) { return init_expr; }
+    }
+    if llvm_type == "i32" {
+        if is_integer_literal(init_expr) { return init_expr; }
+    }
+    if llvm_type == "i1" {
+        if is_boolean_literal(init_expr) {
+            if matches_case_insensitive(init_expr, "true") { return "1"; }
+            return "0";
+        }
+    }
+    return default_return_literal(llvm_type);
+}
+
+// Canonicalize a channel-typed global's annotation to the `channel` /
+// `channel:<kind>` form the bespoke send/receive lowering recognizes
+// (`try_lower_channel_method` in expression_lowering/native/core_concurrency_lowering.sfn).
+// Mirrors the function-local inference in `instructions_let.sfn` (#1091) so a
+// MODULE-GLOBAL channel routes `.send` / `.receive` to the `sfn_channel_*`
+// runtime helpers exactly as a local does. Without this, a global channel
+// binding carries either an unnormalized `channel<K>` annotation (explicit)
+// or none (inferred from a `channel(N)` initializer), and the method call
+// fails to lower with "callee signature is not known to the compiler".
+// Returns "" when the binding is not a channel. (#1474 AC2: a shared global
+// channel lets two `parallel` tasks produce/consume concurrently without the
+// capture-env ABI, which is carved out to #1475/#1476.)
+fn _channel_global_annotation(explicit: string, init_value: string?) -> string {
+    // Explicit annotation: `channel`, `channel:K`, or the generic `channel<K>`.
+    if explicit == "channel" { return "channel"; }
+    if starts_with(explicit, "channel:") { return explicit; }
+    if starts_with(explicit, "channel<") {
+        let close = index_of(explicit, ">");
+        if close > 8 {
+            let kind = trim_text(substring(explicit, 8, close));
+            if kind.length > 0 { return "channel:" + kind; }
+        }
+        return "channel";
+    }
+    // Inferred binding (no explicit annotation): derive the kind from a
+    // `channel(...)` / `channel:K(...)` initializer expression, matching the
+    // local path's text-prefix inference.
+    if explicit.length == 0 {
+        if init_value != null {
+            let init_expr = trim_text(init_value);
+            if starts_with(init_expr, "channel(") { return "channel"; }
+            if starts_with(init_expr, "channel:") {
+                let paren = index_of(init_expr, "(");
+                if paren > 8 {
+                    let kind = trim_text(substring(init_expr, 8, paren));
+                    if kind.length > 0 { return "channel:" + kind; }
+                }
+                return "channel";
+            }
+        }
+    }
+    return "";
+}
+
+// Process a single module binding and return its lowered preamble lines,
+// a zero-or-one-element locals array, and whether it needs runtime init.
+fn _process_one_binding(binding: NativeBinding, context: TypeContext, scope_id: string) -> BindingLoweringResult {
+    let empty_result = BindingLoweringResult {
+        preamble_lines: [],
+        locals: [],
+        needs_init: false
+    };
+    if binding == null { return empty_result; }
+    let mut name = binding.name;
+    if name == null { return empty_result; }
+    if name.length == 0 { return empty_result; }
+    let mut raw_type_annotation = binding.type_annotation;
+    if raw_type_annotation == null { raw_type_annotation = ""; }
+    let mut type_annotation = trim_text(raw_type_annotation);
+    let mut effective_type_annotation = raw_type_annotation;
+    if type_annotation.length == 0 {
+        if binding.value != null {
+            let init_expr = trim_text(binding.value);
+            if is_string_literal(init_expr) {
+                type_annotation = "string";
+                effective_type_annotation = "string";
+            }
+        }
+    }
+    // Canonicalize a channel global (explicit `channel<K>` or inferred from a
+    // `channel(N)` initializer) so `.send` / `.receive` route to the runtime
+    // helpers — see `_channel_global_annotation` (#1474 AC2).
+    let channel_annotation = _channel_global_annotation(type_annotation, binding.value);
+    if channel_annotation.length > 0 {
+        type_annotation = channel_annotation;
+        effective_type_annotation = channel_annotation;
+    }
+    if type_annotation.length == 0 { return empty_result; }
+    let global_name = module_global_symbol(name);
+    let llvm_type = _binding_llvm_type(context, type_annotation);
+
+    // `extern var NAME: TYPE;` (#1313): bind a C-ABI global symbol
+    // (e.g. libc `environ`). Emit `@NAME = external global <ty>` with the
+    // verbatim symbol name (no `@global.` prefix, no `internal` linkage,
+    // no initializer) and register a `LocalBinding` pointing at it so a
+    // reference auto-loads through the same `find_local_binding` ->
+    // `load_local_operand` path as any module global.
+    if binding.is_extern {
+        let extern_symbol = "@" + sanitize_symbol(name);
+        let mut extern_preamble: string[] = [];
+        // With an initializer the `extern var` *defines* the C-ABI symbol
+        // (`@NAME = global <ty> <init>`, strong external linkage, verbatim
+        // name) so a Sailfin object can own a runtime global that one of the
+        // hand-written `runtime/native/ir/*.ll` files used to define (#1436);
+        // exactly one module may carry the initializer or the link fails with
+        // a duplicate symbol (the C-tentative-definition contract). Without
+        // one it stays an `external global` reference (#1313).
+        if binding.value != null {
+            let init_literal = _extern_definition_initializer(llvm_type, binding.value);
+            extern_preamble.push(extern_symbol + " = global " + llvm_type + " "
+                + init_literal);
+        } else {
+            extern_preamble.push(extern_symbol + " = external global "
+                + llvm_type);
+        }
+        let extern_local = LocalBinding {
+            name: name,
+            pointer: extern_symbol,
+            llvm_type: llvm_type,
+            type_annotation: effective_type_annotation,
+            ownership: null,
+            consumed: false,
+            scope_id: scope_id,
+            scope_depth: 0,
+            allocation_kind: "arena",
+            init_sentinel: "",
+            narrowed_variant: ""
+        };
+        return BindingLoweringResult {
+            preamble_lines: extern_preamble,
+            locals: [extern_local],
+            needs_init: false
+        };
+    }
+
+    let mut preamble_lines: string[] = [];
+    let mut needs_init: boolean = false;
+
+    // `thread_local let mut` → `internal thread_local global` (#730).
+    // The TLS model defaults to `initial-exec` on LLVM, which is the
+    // ELF-TLS shape Linux x86_64 and macOS arm64 both link cleanly.
+    let mut global_qualifier: string = "internal global";
+    if binding.is_thread_local {
+        global_qualifier = "internal thread_local global";
+    }
+
+    if llvm_type == "i8*" {
+        let mut string_handled: boolean = false;
+        if binding.value != null {
+            let str_val = trim_text(binding.value);
+            if is_string_literal(str_val) {
+                let str_content = _strip_string_quotes(str_val);
+                let str_len = str_content.length + 1;
+                let str_const_name = "@str.global." + sanitize_symbol(name);
+                let line1 = str_const_name + " = private constant ["
+                    + number_to_string(str_len)
+                    + " x i8] c\""
+                    + str_content
+                    + "\\00\"";
+                let line2 = global_name + " = " + global_qualifier
+                    + " i8* getelementptr (["
+                    + number_to_string(str_len)
+                    + " x i8], ["
+                    + number_to_string(str_len)
+                    + " x i8]* "
+                    + str_const_name
+                    + ", i32 0, i32 0)";
+                preamble_lines.push(line1);
+                preamble_lines.push(line2);
+                string_handled = true;
+            }
+        }
+        if !string_handled {
+            preamble_lines.push(global_name + " = " + global_qualifier
+                + " i8* null");
+            if binding.value != null { needs_init = true; }
+        }
+    } else {
+        let mut initializer_text: string = default_return_literal(llvm_type);
+        if binding.value != null {
+            let init_expr = trim_text(binding.value);
+            let mut is_const: boolean = false;
+            if llvm_type == "double" {
+                if is_number_literal(init_expr) {
+                    initializer_text = normalise_number_literal(init_expr);
+                    is_const = true;
+                }
+            }
+            if llvm_type == "i64" {
+                if is_integer_literal(init_expr) {
+                    initializer_text = init_expr;
+                    is_const = true;
+                }
+            }
+            if llvm_type == "i32" {
+                if is_integer_literal(init_expr) {
+                    initializer_text = init_expr;
+                    is_const = true;
+                }
+            }
+            if llvm_type == "i1" {
+                if is_boolean_literal(init_expr) {
+                    initializer_text = "0";
+                    if matches_case_insensitive(init_expr, "true") {
+                        initializer_text = "1";
+                    }
+                    is_const = true;
+                }
+            }
+            if !is_const { needs_init = true; }
+        }
+        preamble_lines.push(global_name + " = " + global_qualifier + " "
+            + llvm_type
+            + " "
+            + initializer_text);
+    }
+
+    let local = LocalBinding {
+        name: name,
+        pointer: global_name,
+        llvm_type: llvm_type,
+        type_annotation: effective_type_annotation,
+        ownership: null,
+        consumed: false,
+        scope_id: scope_id,
+        scope_depth: 0,
+        allocation_kind: "arena",
+        init_sentinel: "",
+        narrowed_variant: ""
+    };
+    let mut locals: LocalBinding[] = [];
+    locals.push(local);
+
+    return BindingLoweringResult {
+        preamble_lines: preamble_lines,
+        locals: locals,
+        needs_init: needs_init
+    };
+}
+
+fn lower_module_bindings_to_globals(bindings: NativeBinding[], context: TypeContext, module_name: string) -> ModuleGlobalLoweringResult {
+    let init_symbol = module_init_symbol(module_name);
+
+    if bindings.length == 0 {
+        return ModuleGlobalLoweringResult {
+            preamble_lines: [],
+            init_function_lines: [],
+            init_function_symbol: init_symbol,
+            needs_init_call: false,
+            init_function: null,
+            locals: [],
+            string_constants: empty_string_constant_set(),
+            diagnostics: []
+        };
+    }
+
+    let scope_id = format_root_scope_id("module");
+    let mut preamble_lines: string[] = [];
+    let mut locals: LocalBinding[] = [];
+    let mut needs_init: boolean = false;
+    // Assignment instructions for the synthetic module-init function: one
+    // `<name> = <value>` per runtime-evaluated global (#1386). Reusing the
+    // ordinary assignment-lowering path means array literals, struct-literal
+    // arrays, function-call initializers, and computed scalars all flow
+    // through the same machinery that already stores into `@global.<name>`.
+    let mut init_instructions: NativeInstruction[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= bindings.length { break; }
+        let binding = bindings[index];
+        index += 1;
+        let result = _process_one_binding(binding, context, scope_id);
+        let mut li: int = 0;
+        loop {
+            if li >= result.preamble_lines.length { break; }
+            preamble_lines.push(result.preamble_lines[li]);
+            li += 1;
+        }
+        let mut lj: int = 0;
+        loop {
+            if lj >= result.locals.length { break; }
+            locals.push(result.locals[lj]);
+            lj += 1;
+        }
+        if result.needs_init {
+            needs_init = true;
+            let init_name = binding.name;
+            let init_value = binding.value;
+            if init_name != null {
+                if init_name.length > 0 {
+                    if init_value != null {
+                        init_instructions.push(NativeInstruction.Expression {
+                            expression: init_name + " = " + init_value, span: null
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    let mut init_function: NativeFunction? = null;
+    if needs_init {
+        init_function = NativeFunction {
+            name: module_init_function_name(module_name),
+            is_async: false,
+            parameters: [],
+            return_type: "void",
+            effects: [],
+            decorators: [],
+            is_extern: false,
+            instructions: init_instructions
+        };
+    }
+
+    return ModuleGlobalLoweringResult {
+        preamble_lines: preamble_lines,
+        init_function_lines: [],
+        init_function_symbol: init_symbol,
+        needs_init_call: needs_init,
+        init_function: init_function,
+        locals: locals,
+        string_constants: empty_string_constant_set(),
+        diagnostics: []
+    };
+}
+
+// Result of materialising imported module-level `let` constants in the
+// importing module: the global definition preamble lines and the
+// `LocalBinding` entries that make a reference resolve + load (#1368).
+struct ImportedBindingLoweringResult {
+    preamble_lines: string[];
+    locals: LocalBinding[];
+}
+
+// Materialise the module-level `let` constants an imported capsule EXPORTS
+// as the importer's own value-carrying globals (#1368).
+//
+// A module-level `let` constant lowers to an `internal global` — invisible
+// across the link boundary — so a cross-capsule reference used to fall
+// through expression lowering to the zero-default recovery in statement
+// lowering and silently read back `0`. Rather than make the producer's
+// symbol external (which would still require linking the producer's object,
+// and a constant-only producer module is not pulled into the link),
+// constant-propagate the value across the import boundary: the importer
+// already parsed the producer's binding — value and all — so we re-lower it
+// here through `_process_one_binding`, emitting a self-contained
+// `@global.<name> = internal global <ty> <value>` plus a `LocalBinding`. A
+// reference then loads the producer-defined value with no cross-object
+// dependency.
+//
+// Only safe-to-duplicate constants flow through: immutable bindings with a
+// compile-time-constant initializer (`needs_init == false`). Mutable module
+// globals are genuine shared state — duplicating them would diverge per
+// importer — and runtime-initialized bindings would duplicate side effects,
+// so both are skipped (out of scope for #1368, which is constants). Names
+// already present in the importing module's own globals (`existing_names`)
+// and duplicate imported names are materialised once.
+fn lower_imported_bindings_to_globals(bindings: NativeBinding[], context: TypeContext, existing_names: string[]) -> ImportedBindingLoweringResult {
+    let scope_id = format_root_scope_id("module");
+    let mut preamble_lines: string[] = [];
+    let mut locals: LocalBinding[] = [];
+    let mut seen: string[] = [];
+    let mut e: int = 0;
+    loop {
+        if e >= existing_names.length { break; }
+        seen.push(existing_names[e]);
+        e += 1;
+    }
+    if bindings == null {
+        return ImportedBindingLoweringResult {
+            preamble_lines: preamble_lines,
+            locals: locals
+        };
+    }
+    let mut index: int = 0;
+    loop {
+        if index >= bindings.length { break; }
+        let binding = bindings[index];
+        index += 1;
+        if binding == null { continue; }
+        let name = binding.name;
+        if name == null { continue; }
+        if name.length == 0 { continue; }
+        // `extern var` C-ABI globals already declare themselves through the
+        // producer's own emission; only ordinary `let` constants flow here.
+        if binding.is_extern { continue; }
+        // Shared mutable state cannot be constant-propagated — skip it.
+        if binding.mutable { continue; }
+        if string_array_contains(seen, name) { continue; }
+        let result = _process_one_binding(binding, context, scope_id);
+        // A runtime-initialized binding would duplicate its init side effects
+        // (and its init helpers may not be imported) — only inline constants.
+        if result.needs_init { continue; }
+        if result.locals.length == 0 { continue; }
+        seen.push(name);
+        let mut pi: int = 0;
+        loop {
+            if pi >= result.preamble_lines.length { break; }
+            preamble_lines.push(result.preamble_lines[pi]);
+            pi += 1;
+        }
+        let mut li: int = 0;
+        loop {
+            if li >= result.locals.length { break; }
+            locals.push(result.locals[li]);
+            li += 1;
+        }
+    }
+    return ImportedBindingLoweringResult {
+        preamble_lines: preamble_lines,
+        locals: locals
+    };
+}

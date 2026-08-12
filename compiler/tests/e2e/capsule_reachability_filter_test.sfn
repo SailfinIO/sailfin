@@ -37,14 +37,14 @@
 //
 // Symbol-name derivation (verified against the emitters, not guessed):
 //   - Type-init ctor: `"__sfn_module_type_init__" + sanitize_symbol(slug)`
-//     (`compiler/src/llvm/lowering/type_descriptors.sfn:94`), where
+//     (`compiler/capsules/codegen-llvm/src/lowering/type_descriptors.sfn:94`), where
 //     `sanitize_symbol` DELETES every non-`[A-Za-z0-9_$]` character rather
-//     than replacing it (`compiler/src/llvm/symbols.sfn:54`) — so slug
+//     than replacing it (`compiler/capsules/codegen-llvm/src/symbols.sfn:54`) — so slug
 //     `demo/twomod/unreached` collapses to `demotwomodunreached`.
 //   - Defined-function symbol: `<fn> + "__" + sanitize_module_suffix(slug)`
-//     (`compiler/src/llvm/lowering/lowering_helpers_mangling.sfn:178,209`),
+//     (`compiler/capsules/codegen-llvm/src/lowering/lowering_helpers_mangling.sfn:178,209`),
 //     where `sanitize_module_suffix` replaces `/` with `__`
-//     (`compiler/src/llvm/lowering/lowering_helpers.sfn:275`) — so slug
+//     (`compiler/capsules/codegen-llvm/src/lowering/lowering_helpers.sfn:275`) — so slug
 //     `demo/twomod/unreached` yields suffix `demo__twomod__unreached`.
 //   - A capsule source file directly under `src/` gets slug
 //     `<capsule-name>/<stem>` (`compiler/src/capsule_resolver/discovery.sfn:227`),

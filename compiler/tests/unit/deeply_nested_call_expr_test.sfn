@@ -12,7 +12,7 @@
 // The specific crash is no longer reproducible on the current tree: building
 // the exact nested `with_subcommand` form (to depth 15) with either the
 // pinned 0.7.0 seed or the historical 0.7.0-alpha.50 seed runs every command
-// correctly, and there are no `compiler/src/llvm` / `emit_native` / `sfn/cli`
+// correctly, and there are no `compiler/capsules/codegen-llvm/src` / `emit_native` / `sfn/cli`
 // builder changes between #1791's merge and HEAD. The trigger appears to have
 // depended on work-in-progress source state during #1791 that never landed.
 //

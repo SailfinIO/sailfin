@@ -1,0 +1,34 @@
+// compiler/capsules/codegen-llvm/src/expression_lowering/native/core_call_resolution/receiver_types.sfn
+// Built-in scalar receiver classification shared by method-target phases.
+// A method-call base whose declared type is a built-in scalar (`string`,
+// `int`, the sized-int family, ...) can never be an unregistered user
+// struct, so the #1041 fail-closed guard below must not fire on it.
+// Exempting these lets `s.substring(a, b)` fall through to the
+// runtime-helper fallback (which routes the receiver as arg0 to the
+// `substring` descriptor) instead of aborting lowering with a spurious
+// "not in the lowering type context" fatal (SFN-145).
+// The spellings mirror `map_primitive_type` (`type_mapping.sfn`) — keep the
+// two in sync so a primitive receiver is never mistaken for a user struct.
+fn _is_primitive_receiver_type(name: string) -> boolean {
+    if name == "string" { return true; }
+    if name == "int" { return true; }
+    if name == "float" { return true; }
+    if name == "number" { return true; }
+    if name == "boolean" { return true; }
+    if name == "bool" { return true; }
+    if name == "i8" { return true; }
+    if name == "i16" { return true; }
+    if name == "i32" { return true; }
+    if name == "i64" { return true; }
+    if name == "u8" { return true; }
+    if name == "u16" { return true; }
+    if name == "u32" { return true; }
+    if name == "u64" { return true; }
+    if name == "f32" { return true; }
+    if name == "f64" { return true; }
+    if name == "f16" { return true; }
+    if name == "bf16" { return true; }
+    return false;
+}
+
+export { _is_primitive_receiver_type };

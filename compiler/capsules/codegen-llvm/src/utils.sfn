@@ -1,0 +1,704 @@
+// compiler/capsules/codegen-llvm/src/utils.sfn
+//
+// General utility functions for the LLVM lowering pass. These are basic
+// string manipulation, array helpers, and parsing utilities.
+import { LoweringDiagnostic, NativeSourceSpan } from "sfn/ir";
+import { char_code_at, substring } from "sfn/strings";
+
+import { sanitize_symbol } from "./symbols";
+import { ParameterBinding } from "./types";
+
+// =============================================================================
+// Lowering diagnostic compatibility
+// =============================================================================
+fn lowering_error_diag(code: string, message: string, span_in: NativeSourceSpan?) -> LoweringDiagnostic {
+    return LoweringDiagnostic {
+        code: code,
+        severity: "error",
+        message: message,
+        file_path: "",
+        span: span_in,
+        stage: "lowering"
+    };
+}
+
+// Preserve the provider's established textual compatibility stream while the
+// structured carrier crosses the IR boundary independently of analyzer data.
+fn diag_to_legacy_string(diag: LoweringDiagnostic) -> string {
+    let mut prefix = diag.stage;
+    if prefix == "lowering" { prefix = "llvm lowering"; }
+    if diag.severity == "error" {
+        prefix = prefix + " [fatal]";
+        if diag.code.length > 0 { prefix = prefix + " [" + diag.code + "]"; }
+    }
+    return prefix + ": " + diag.message;
+}
+
+fn extend_diag_array(base: LoweringDiagnostic[], extra: LoweringDiagnostic[]) -> LoweringDiagnostic[] {
+    let mut out = base;
+    let mut index: int = 0;
+    loop {
+        if index >= extra.length { break; }
+        out.push(extra[index]);
+        index += 1;
+    }
+    return out;
+}
+
+fn _legacy_lowering_diag_code(value: string) -> string {
+    let marker = index_of(value, "[E");
+    if marker >= 0 {
+        if marker + 7 <= value.length {
+            if substring(value, marker + 6, marker + 7) == "]" {
+                return substring(value, marker + 1, marker + 6);
+            }
+        }
+    }
+    if index_of(value, "E0832:") >= 0 { return "E0832"; }
+    if index_of(value, "ABI primitive mismatch") >= 0 { return "E1009"; }
+    if index_of(value, "cannot coerce task handle") >= 0 { return "E1009"; }
+    if index_of(value, "unable to coerce value") >= 0 { return "E1009"; }
+    if index_of(value, "arithmetic mixes") >= 0 { return "E1009"; }
+    if index_of(value, "cannot resolve return type") >= 0 { return "E1007"; }
+    if index_of(value, "unable to emit call") >= 0 { return "E1007"; }
+    if index_of(value, "closure dispatch arity") >= 0 { return "E1007"; }
+    if index_of(value, "method call base") >= 0 { return "E1007"; }
+    if index_of(value, "emit_runtime_call") >= 0 { return "E1008"; }
+    if index_of(value, "struct-array concat") >= 0 { return "E1008"; }
+    if index_of(value, "channel `") >= 0 { return "E1010"; }
+    if index_of(value, "`join_all`") >= 0 { return "E1010"; }
+    if index_of(value, "await") >= 0 { return "E1010"; }
+    if index_of(value, "task lambda") >= 0 { return "E1010"; }
+    if index_of(value, "lambda #") >= 0 { return "E1012"; }
+    if index_of(value, "struct/enum literal") >= 0 { return "E1012"; }
+    if index_of(value, "struct literal") >= 0 { return "E1012"; }
+    if index_of(value, "enum payload") >= 0 { return "E1012"; }
+    if index_of(value, "stringif") >= 0 { return "E1013"; }
+    if index_of(value, "elided ") >= 0 { return "E1014"; }
+    return "E1006";
+}
+
+fn _legacy_lowering_diag_message(value: string, code: string) -> string {
+    let separator = index_of(value, ": ");
+    if separator < 0 { return value; }
+    let mut message = substring(value, separator + 2, value.length);
+    let code_prefix = code + ": ";
+    if starts_with(message, code_prefix) {
+        message = substring(message, code_prefix.length, message.length);
+    }
+    return message;
+}
+
+fn diag_from_legacy_lowering_error(value: string) -> LoweringDiagnostic? {
+    if index_of(value, "[fatal]") < 0 { return null; }
+    let code = _legacy_lowering_diag_code(value);
+    return lowering_error_diag(code, _legacy_lowering_diag_message(value, code), null);
+}
+
+fn append_missing_legacy_lowering_diags(diags: LoweringDiagnostic[], diagnostics: string[]) -> LoweringDiagnostic[] {
+    let mut out = diags;
+    let mut matched: boolean[] = [];
+    let mut match_index: int = 0;
+    loop {
+        if match_index >= out.length { break; }
+        matched.push(false);
+        match_index += 1;
+    }
+    let mut index: int = 0;
+    loop {
+        if index >= diagnostics.length { break; }
+        let legacy = diagnostics[index];
+        if index_of(legacy, "[fatal]") >= 0 {
+            let mut found: boolean = false;
+            let mut diag_index: int = 0;
+            loop {
+                if diag_index >= out.length { break; }
+                if !matched[diag_index] && diag_to_legacy_string(out[diag_index]) == legacy {
+                    matched[diag_index] = true;
+                    found = true;
+                    break;
+                }
+                diag_index += 1;
+            }
+            if !found {
+                let converted = diag_from_legacy_lowering_error(legacy);
+                if converted != null {
+                    out.push(converted);
+                    matched.push(true);
+                }
+            }
+        }
+        index += 1;
+    }
+    return out;
+}
+
+fn stamp_lowering_diag_file_paths(diags: LoweringDiagnostic[], file_path: string) -> LoweringDiagnostic[] {
+    let mut out = diags;
+    let mut index: int = 0;
+    loop {
+        if index >= out.length { break; }
+        if out[index].file_path.length == 0 {
+            out[index].file_path = file_path;
+        }
+        index += 1;
+    }
+    return out;
+}
+
+fn render_lowering_error_diag(diag: LoweringDiagnostic) -> string {
+    let mut rendered = diag_to_legacy_string(diag);
+    if diag.span != null {
+        rendered = rendered + "\n  --> " + diag.file_path + ":"
+            + number_to_string(diag.span.start_line)
+            + ":"
+            + number_to_string(diag.span.start_column);
+    }
+    return rendered;
+}
+
+// =============================================================================
+// String manipulation
+// =============================================================================
+fn trim_text(value: string) -> string {
+    let mut start: int = 0;
+    let mut end: int = value.length;
+    loop {
+        if start >= end { break; }
+        let ch = char_at(value, start);
+        if is_trim_char(ch) {
+            start += 1;
+            continue;
+        }
+        break;
+    }
+    loop {
+        if end <= start { break; }
+        let ch = char_at(value, end - 1);
+        if is_trim_char(ch) {
+            end -= 1;
+            continue;
+        }
+        break;
+    }
+    if start == 0 {
+        if end == value.length { return value; }
+    }
+    return substring(value, start, end);
+}
+
+// Local char_at using substring (avoids import alias which the seed can't resolve).
+fn char_at(value: string, index: int) -> string {
+    if value.length == 0 { return ""; }
+    if index < 0 { return ""; }
+    if index >= value.length { return ""; }
+    return substring(value, index, index + 1);
+}
+
+fn is_trim_char(ch: string) -> boolean {
+    let code = char_code_at(ch, 0);
+    let mut _ret333: boolean = false;
+    if code == char_code_at(" ", 0) { _ret333 = true; }
+    if code == char_code_at("\n", 0) { _ret333 = true; }
+    if code == char_code_at("\r", 0) { _ret333 = true; }
+    if code == char_code_at("\t", 0) { _ret333 = true; }
+    return _ret333;
+}
+
+fn starts_with(value: string, prefix: string) -> boolean {
+    if prefix.length == 0 { return true; }
+    if value.length < prefix.length { return false; }
+    let head = substring(value, 0, prefix.length);
+    return head == prefix;
+}
+
+fn ends_with(value: string, suffix: string) -> boolean {
+    if suffix.length == 0 { return true; }
+    if value.length < suffix.length { return false; }
+    let start_index = value.length - suffix.length;
+    let tail = substring(value, start_index, value.length);
+    return tail == suffix;
+}
+
+fn contains_text(haystack: string, needle: string) -> boolean {
+    if needle.length == 0 { return true; }
+    if haystack.length < needle.length { return false; }
+    let _search_limit = haystack.length - needle.length;
+    let mut index: int = 0;
+    loop {
+        if index > _search_limit { break; }
+        let candidate = substring(haystack, index, index + needle.length);
+        if candidate == needle { return true; }
+        index += 1;
+    }
+    return false;
+}
+
+fn index_of(value: string, target: string) -> int {
+    if target.length == 0 { return 0; }
+    // Use substring + == instead of char_code_at_text comparisons.
+    // char_code_at_text is miscompiled by older seeds, but substring
+    // (backed by the C runtime grapheme_at) and == both work correctly.
+    let _search_limit = value.length - target.length;
+    let mut index: int = 0;
+    loop {
+        if index > _search_limit { break; }
+        let candidate = substring(value, index, index + target.length);
+        if candidate == target { return index; }
+        index += 1;
+    }
+    return -1;
+}
+
+fn find_last_index_of_char(value: string, target: string) -> int {
+    if target.length != 1 { return -1; }
+    // Use substring + == instead of char_code_at_text.
+    let mut index: int = value.length;
+    loop {
+        if index <= 0 { break; }
+        index -= 1;
+        let ch = substring(value, index, index + 1);
+        if ch == target { return index; }
+    }
+    return -1;
+}
+
+fn char_code_at_text(text: string, index: int) -> int {
+    return char_code_at(text, index);
+}
+
+fn strip_mut_prefix(value: string) -> string {
+    let trimmed = trim_text(value);
+    if trimmed.length < 4 { return trimmed; }
+    let prefix = substring(trimmed, 0, 4);
+    if prefix == "mut " {
+        return trim_text(substring(trimmed, 4, trimmed.length));
+    }
+    return trimmed;
+}
+
+// =============================================================================
+// Number utilities
+// =============================================================================
+fn number_to_string(value: int) -> string {
+    if value == 0 { return "0"; }
+    let digits = "0123456789";
+    let powers: int[] = [1000000000000000, 100000000000000, 10000000000000, 1000000000000, 100000000000, 10000000000, 1000000000, 100000000, 10000000, 1000000, 100000, 10000, 1000, 100, 10, 1];
+    let mut remaining: int = value;
+    let mut is_negative: boolean = false;
+    if remaining < 0 {
+        is_negative = true;
+        remaining = 0 - remaining;
+    }
+    let mut output: string = "";
+    let mut index: int = 0;
+    let mut started: boolean = false;
+    loop {
+        if index >= powers.length { break; }
+        let power = powers[index];
+        let mut count: int = 0;
+        loop {
+            if remaining < power { break; }
+            remaining -= power;
+            count += 1;
+        }
+        let mut _if334: boolean = false;
+        if started { _if334 = true; }
+        if count > 0 { _if334 = true; }
+        if _if334 {
+            started = true;
+            let ch = substring(digits, count, count + 1);
+            output = output + ch;
+        }
+        index += 1;
+    }
+    if output.length == 0 { output = "0"; }
+    if is_negative { return "-" + output; }
+    return output;
+}
+
+fn lower_char_code(code: int) -> int {
+    let upper_a = char_code_at("A", 0);
+    let upper_z = char_code_at("Z", 0);
+    if code >= upper_a {
+        if code <= upper_z {
+            let lower_a = char_code_at("a", 0);
+            return code + (lower_a - upper_a);
+        }
+    }
+    return code;
+}
+
+fn matches_case_insensitive(value: string, expected: string) -> boolean {
+    if value.length != expected.length { return false; }
+    let mut index: int = 0;
+    loop {
+        if index >= value.length { break; }
+        let value_ch = substring(value, index, index + 1);
+        let expected_ch = substring(expected, index, index + 1);
+        let value_code = lower_char_code(char_code_at(value_ch, 0));
+        let expected_code = lower_char_code(char_code_at(expected_ch, 0));
+        if value_code != expected_code { return false; }
+        index += 1;
+    }
+    return true;
+}
+
+// =============================================================================
+// Literal detection
+// =============================================================================
+fn is_boolean_literal(text: string) -> boolean {
+    let trimmed = trim_text(text);
+    if matches_case_insensitive(trimmed, "true") { return true; }
+    if matches_case_insensitive(trimmed, "false") { return true; }
+    return false;
+}
+
+fn is_integer_literal(text: string) -> boolean {
+    let trimmed = trim_text(text);
+    if trimmed.length == 0 { return false; }
+    let mut index: int = 0;
+    if substring(trimmed, 0, 1) == "-" {
+        if trimmed.length == 1 { return false; }
+        index = 1;
+    }
+    let mut has_digit: boolean = false;
+    loop {
+        if index >= trimmed.length { break; }
+        let ch = substring(trimmed, index, index + 1);
+        let mut _if335: boolean = false;
+        if ch == "0" { _if335 = true; }
+        if ch == "1" { _if335 = true; }
+        if ch == "2" { _if335 = true; }
+        if ch == "3" { _if335 = true; }
+        if ch == "4" { _if335 = true; }
+        if ch == "5" { _if335 = true; }
+        if ch == "6" { _if335 = true; }
+        if ch == "7" { _if335 = true; }
+        if ch == "8" { _if335 = true; }
+        if ch == "9" { _if335 = true; }
+        if _if335 {
+            has_digit = true;
+            index += 1;
+            continue;
+        }
+        return false;
+    }
+    return has_digit;
+}
+
+fn is_number_literal(text: string) -> boolean {
+    let mut index: int = 0;
+    let mut has_digit: boolean = false;
+    let mut has_decimal: boolean = false;
+    let mut has_exp: boolean = false;
+    let trimmed = trim_text(text);
+    if trimmed.length == 0 { return false; }
+    if substring(trimmed, 0, 1) == "-" {
+        if trimmed.length == 1 { return false; }
+        index = 1;
+    }
+    loop {
+        if index >= trimmed.length { break; }
+        let ch = substring(trimmed, index, index + 1);
+        let mut _if336: boolean = false;
+        if ch == "0" { _if336 = true; }
+        if ch == "1" { _if336 = true; }
+        if ch == "2" { _if336 = true; }
+        if ch == "3" { _if336 = true; }
+        if ch == "4" { _if336 = true; }
+        if ch == "5" { _if336 = true; }
+        if ch == "6" { _if336 = true; }
+        if ch == "7" { _if336 = true; }
+        if ch == "8" { _if336 = true; }
+        if ch == "9" { _if336 = true; }
+        if _if336 {
+            has_digit = true;
+            index += 1;
+            continue;
+        }
+        if ch == "." {
+            if has_decimal { return false; }
+            if has_exp { return false; }
+            has_decimal = true;
+            index += 1;
+            continue;
+        }
+        let mut _is_exp_marker: boolean = false;
+        if ch == "e" { _is_exp_marker = true; }
+        if ch == "E" { _is_exp_marker = true; }
+        if _is_exp_marker {
+            if has_exp { return false; }
+            if !has_digit { return false; }
+            has_exp = true;
+            index += 1;
+            if index < trimmed.length {
+                let sign = substring(trimmed, index, index + 1);
+                let mut _is_sign: boolean = false;
+                if sign == "+" { _is_sign = true; }
+                if sign == "-" { _is_sign = true; }
+                if _is_sign { index += 1; }
+            }
+            if index >= trimmed.length { return false; }
+            continue;
+        }
+        return false;
+    }
+    return has_digit;
+}
+
+fn is_digit_char(ch: string) -> boolean {
+    let code = char_code_at(ch, 0);
+    let zero = char_code_at("0", 0);
+    let nine = char_code_at("9", 0);
+    let mut _ret337: boolean = false;
+    if code >= zero {
+        if code <= nine { _ret337 = true; }
+    }
+    return _ret337;
+}
+
+fn is_simple_identifier(value: string) -> boolean {
+    let trimmed = trim_text(value);
+    if trimmed.length == 0 { return false; }
+    let first = substring(trimmed, 0, 1);
+    if first >= "0" {
+        if first <= "9" { return false; }
+    }
+    let sanitized = sanitize_symbol(trimmed);
+    if sanitized != trimmed { return false; }
+    return true;
+}
+
+// =============================================================================
+// Identifier and keyword helpers
+// =============================================================================
+fn is_identifier_start_char(ch: string) -> boolean {
+    if ch == "_" { return true; }
+    if index_of("abcdefghijklmnopqrstuvwxyz", ch) != -1 { return true; }
+    if index_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ", ch) != -1 { return true; }
+    return false;
+}
+
+fn is_identifier_part_char(ch: string) -> boolean {
+    if is_identifier_start_char(ch) { return true; }
+    if index_of("0123456789", ch) != -1 { return true; }
+    return false;
+}
+
+fn matches_keyword(value: string, start_index: int, keyword: string) -> boolean {
+    let remaining = value.length - start_index;
+    if remaining < keyword.length { return false; }
+    let slice = substring(value, start_index, start_index + keyword.length);
+    if slice != keyword { return false; }
+    let _keyword_end = start_index + keyword.length;
+    if _keyword_end >= value.length { return true; }
+    let next = substring(value, _keyword_end, _keyword_end + 1);
+    if is_identifier_part_char(next) { return false; }
+    return true;
+}
+
+fn is_effect_prefix_char(ch: string) -> boolean {
+    if is_trim_char(ch) { return true; }
+    let mut _ret338: boolean = false;
+    if ch == "(" { _ret338 = true; }
+    if ch == "," { _ret338 = true; }
+    if ch == ";" { _ret338 = true; }
+    if ch == "{" { _ret338 = true; }
+    if ch == "}" { _ret338 = true; }
+    if ch == "=" { _ret338 = true; }
+    return _ret338;
+}
+
+fn is_effect_delimiter(ch: string) -> boolean {
+    if is_trim_char(ch) { return true; }
+    let mut _ret339: boolean = false;
+    if ch == "(" { _ret339 = true; }
+    if ch == ")" { _ret339 = true; }
+    if ch == "," { _ret339 = true; }
+    if ch == ";" { _ret339 = true; }
+    if ch == "{" { _ret339 = true; }
+    if ch == "}" { _ret339 = true; }
+    if ch == "=" { _ret339 = true; }
+    return _ret339;
+}
+
+// =============================================================================
+// Array utilities
+// =============================================================================
+fn append_string(values: string[], value: string) -> string[] {
+    let mut out = values;
+    if out == null { out = []; }
+    out = out.push(value);
+    return out;
+}
+
+fn extend_string_array(values: string[], additions: string[]) -> string[] {
+    let mut out = values;
+    if out == null { out = []; }
+    let mut safe_additions = additions;
+    if safe_additions == null { safe_additions = []; }
+    let mut index: int = 0;
+    loop {
+        if index >= safe_additions.length { break; }
+        out = out.push(safe_additions[index]);
+        index += 1;
+    }
+    return out;
+}
+
+fn copy_string_array(values: string[]) -> string[] {
+    let mut result: string[] = [];
+    let mut safe_values = values;
+    if safe_values == null { safe_values = []; }
+    let mut index: int = 0;
+    loop {
+        if index >= safe_values.length { break; }
+        result.push(safe_values[index]);
+        index += 1;
+    }
+    return result;
+}
+
+fn string_arrays_equal(first: string[], second: string[]) -> boolean {
+    let mut _if340: boolean = false;
+    if first == null { _if340 = true; }
+    if second == null { _if340 = true; }
+    if _if340 {
+        let mut _ret342: boolean = false;
+        if first == null {
+            if second == null { _ret342 = true; }
+        }
+        return _ret342;
+    }
+    if first.length != second.length { return false; }
+    let mut index: int = 0;
+    loop {
+        if index >= first.length { break; }
+        if first[index] != second[index] { return false; }
+        index += 1;
+    }
+    return true;
+}
+
+fn string_array_contains(values: string[], target: string) -> boolean {
+    if values == null { return false; }
+    let mut index: int = 0;
+    loop {
+        if index >= values.length { break; }
+        if values[index] == target { return true; }
+        index += 1;
+    }
+    return false;
+}
+
+fn join_with_separator(values: string[], separator: string) -> string {
+    if values == null { return ""; }
+    if values.length == 0 { return ""; }
+    if values.length == 1 { return values[0]; }
+
+    // Balanced join to avoid repeatedly concatenating an ever-growing prefix.
+    // This keeps intermediate strings smaller and prevents runtime corruption
+    // observed in large LLVM IR modules (notably the test harness build).
+    let mut parts: string[] = values;
+    loop {
+        if parts.length <= 1 { break; }
+
+        let mut next: string[] = [];
+        let mut index: int = 0;
+        loop {
+            if index >= parts.length { break; }
+            let _jn_next = index + 1;
+            if _jn_next < parts.length {
+                let combined = parts[index] + separator + parts[_jn_next];
+                next.push(combined);
+                index += 2;
+                continue;
+            }
+            next.push(parts[index]);
+            index += 1;
+        }
+        parts = next;
+    }
+
+    return parts[0];
+}
+
+// =============================================================================
+// Parameter binding helpers
+// =============================================================================
+fn find_parameter_binding(bindings: ParameterBinding[], name: string) -> ParameterBinding? {
+    let mut index: int = 0;
+    loop {
+        if index >= bindings.length { break; }
+        if bindings[index].name == name { return bindings[index]; }
+        index += 1;
+    }
+    return null;
+}
+
+fn append_parameter_binding(bindings: ParameterBinding[], binding: ParameterBinding) -> ParameterBinding[] {
+    let mut out = bindings;
+    out = out.push(binding);
+    return out;
+}
+
+// Helper: copy a ParameterBinding with an updated consumed flag.
+// Kept as a separate function so the loop in merge_parameter_bindings never has an
+// inline struct literal at the top level — the v0.1.1 seed misidentifies `identifier {`
+// as a loop-body closer, causing premature `.endloop` emission.
+fn _merge_copy_parameter_binding(primary: ParameterBinding, consumed_flag: boolean) -> ParameterBinding {
+    return ParameterBinding {
+        name: primary.name,
+        llvm_name: primary.llvm_name,
+        llvm_type: primary.llvm_type,
+        type_annotation: primary.type_annotation,
+        consumed: consumed_flag,
+        span: primary.span,
+        narrowed_variant: primary.narrowed_variant
+    };
+}
+
+fn merge_parameter_bindings(first: ParameterBinding[], second: ParameterBinding[]) -> ParameterBinding[] {
+    let mut result: ParameterBinding[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= first.length { break; }
+        let primary = first[index];
+        let mut consumed_flag: boolean = primary.consumed;
+        let counterpart = find_parameter_binding(second, primary.name);
+        if counterpart != null {
+            let mut _asgn341: boolean = false;
+            if consumed_flag { _asgn341 = true; }
+            if counterpart.consumed { _asgn341 = true; }
+            consumed_flag = _asgn341;
+        }
+        result = append_parameter_binding(result, _merge_copy_parameter_binding(primary, consumed_flag));
+        index += 1;
+    }
+    return result;
+}
+
+// =============================================================================
+// Parsing helpers
+// =============================================================================
+fn skip_string_literal(text: string, start_index: int) -> int {
+    let mut index: int = start_index;
+    let mut escaped: boolean = false;
+    loop {
+        if index >= text.length { break; }
+        let current = substring(text, index, index + 1);
+        if escaped { escaped = false; } else {
+            if current == "\\" { escaped = true; } else if current == "\"" {
+                index += 1;
+                break;
+            }
+        }
+        if current == "\n" {
+            index += 1;
+            break;
+        }
+        index += 1;
+    }
+    return index;
+}

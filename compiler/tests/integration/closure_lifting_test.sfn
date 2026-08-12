@@ -24,6 +24,7 @@
 //      `Expression.Lambda` node so they continue to flow through
 //      `format_expression` as `<lambda>` until #687 wires the env
 //      struct end-to-end.
+import { ClosurePairResult, decode_captures, emit_closure_pair_aggregate } from "sfn/codegen-llvm/closures";
 import { NativeLambdaCapture } from "sfn/ir";
 import { percent_escape_capture_text, percent_unescape_capture_text } from "sfn/ir";
 import { Expression, Program, Statement } from "sfn/syntax";
@@ -36,7 +37,6 @@ import {
     lift_non_capturing_lambdas,
     lifted_function_name
 } from "../../src/codegen_driver";
-import { ClosurePairResult, decode_captures, emit_closure_pair_aggregate } from "../../src/llvm/closures";
 
 // ── Closure-pair aggregate emission ──────────────────────────────────
 test "closure_pair: non-capturing lambda emits bitcast + two insertvalues" {

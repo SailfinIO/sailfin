@@ -7,9 +7,9 @@
 // Windows compiler faulted on every invocation before argument dispatch
 // without it. Two of the three emission sites are pinned from live `sfn
 // emit llvm` output: the `@main` exception-frame wrapper
-// (`compiler/src/llvm/lowering/emission.sfn`) and a user `try` block
-// (`compiler/src/llvm/lowering/instructions_try.sfn`). The third
-// (`compiler/src/llvm/lowering/lowering_core/test_harness.sfn`, the `sfn test` harness
+// (`compiler/capsules/codegen-llvm/src/lowering/emission.sfn`) and a user `try` block
+// (`compiler/capsules/codegen-llvm/src/lowering/instructions_try.sfn`). The third
+// (`compiler/capsules/codegen-llvm/src/lowering/lowering_core/test_harness.sfn`, the `sfn test` harness
 // `@main`) is a harness-generator string template that no `sfn emit` on a
 // fixture reaches, so SFN-644 pins it from the other direction: `sfn
 // test` writes the synthesized harness IR to `<scratch>/test.ll`

@@ -1,0 +1,538 @@
+// compiler/capsules/codegen-llvm/src/expression_lowering/native/core_call_resolution/parsed_method_dispatch.sfn
+//
+// Parsed member-access dispatch for structs, interfaces, helpers, and arrays.
+import { NativeFunction } from "sfn/ir";
+
+import { is_simple_identifier } from "../../../expressions_helpers";
+import { find_function_by_name_or_import } from "../../../rendering_helpers";
+import { find_runtime_helper, make_concat_descriptor, make_push_descriptor } from "../../../runtime_helpers/mod";
+import { merge_string_constants } from "../../../strings";
+import {
+    find_interface_info_by_name,
+    find_struct_info_by_name,
+    resolve_interface_info_for_method_target,
+    resolve_struct_info_for_method_target
+} from "../../../type_context_queries";
+import { ends_with_pointer_suffix } from "../../../type_mapping";
+import {
+    CallTargetResolution,
+    LLVMOperand,
+    LocalBinding,
+    ParameterBinding,
+    RuntimeHelperDescriptor,
+    StringConstant,
+    StructTypeInfo,
+    TypeContext
+} from "../../../types";
+import { starts_with, trim_text } from "../../../utils";
+import { array_pointer_element_type } from "../../arrays";
+import { lower_expression } from "../core";
+import { parse_member_access } from "../core_parse";
+import { find_local_binding, find_parameter_binding } from "../core_scopes";
+import { _is_primitive_receiver_type } from "./receiver_types";
+
+// Resolves method calls via parse_member_access (struct methods, interface dispatch,
+// runtime helpers, array concat/push).
+fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], result_temp: int, result_lines: string[], functions: NativeFunction[], context: TypeContext, result_diagnostics: string[], result_string_constants: StringConstant[], method_operand: LLVMOperand?, helper_descriptor: RuntimeHelperDescriptor?, injected_argument_count: int, is_array_concat: boolean, array_concat_element_type: string, is_array_push: boolean, array_push_element_type: string) -> CallTargetResolution {
+    let mut r_target = result_target;
+    let mut r_lines = result_lines;
+    let mut r_temp: int = result_temp;
+    let mut r_diagnostics = result_diagnostics;
+    let mut r_string_constants = result_string_constants;
+    let mut r_method_operand = method_operand;
+    let mut r_helper_descriptor = helper_descriptor;
+    let mut r_injected_count: int = injected_argument_count;
+    let mut r_is_array_concat = is_array_concat;
+    let mut r_array_concat_element_type = array_concat_element_type;
+    let mut r_is_array_push = is_array_push;
+    let mut r_array_push_element_type = array_push_element_type;
+
+    let method_parse = parse_member_access(r_target);
+    if method_parse.success {
+        if r_method_operand == null {
+            let mut _if58: boolean = false;
+            if method_parse.field == "concat" { _if58 = true; }
+            if method_parse.field == "push" { _if58 = true; }
+            if _if58 {
+                let lowered_self = lower_expression(method_parse.base, bindings, locals, r_temp, r_lines, functions, context, "");
+                let mut _ci2: int = 0;
+                loop {
+                    if _ci2 >= lowered_self.diagnostics.length { break; }
+                    r_diagnostics.push(lowered_self.diagnostics[_ci2]);
+                    _ci2 += 1;
+                }
+                r_string_constants = merge_string_constants(r_string_constants, lowered_self.string_constants);
+                r_lines = lowered_self.lines;
+                r_temp = lowered_self.temp_index;
+                if lowered_self.operand == null {
+                    r_diagnostics.push("llvm lowering: method call base `"
+                        + method_parse.base
+                        + "` produced no value");
+                    return CallTargetResolution {
+                        trimmed_target: r_target,
+                        method_operand: null,
+                        helper_descriptor: null,
+                        injected_argument_count: 0,
+                        is_array_concat: false,
+                        array_concat_element_type: "",
+                        is_array_push: false,
+                        array_push_element_type: "",
+                        current_lines: r_lines,
+                        current_temp: r_temp,
+                        diagnostics: r_diagnostics,
+                        string_constants: r_string_constants,
+                        is_closure_dispatch: false,
+                        closure_return_type: "",
+                        closure_parameter_types: []
+                    };
+                }
+
+                let base_operand = lowered_self.operand;
+                let array_element_type = array_pointer_element_type(base_operand.llvm_type);
+                if array_element_type.length > 0 {
+                    if method_parse.field == "concat" {
+                        r_method_operand = base_operand;
+                        r_target = "concat";
+                        r_injected_count = 1;
+                        r_array_concat_element_type = array_element_type;
+                        r_is_array_concat = true;
+
+                        if !ends_with_pointer_suffix(array_element_type) {
+                            r_helper_descriptor = make_concat_descriptor(base_operand.llvm_type, [base_operand.llvm_type, base_operand.llvm_type]);
+                        }
+                    } else {
+                        r_method_operand = base_operand;
+                        r_target = "push";
+                        r_injected_count = 1;
+                        r_array_push_element_type = array_element_type;
+                        r_is_array_push = true;
+                        r_helper_descriptor = make_push_descriptor(base_operand.llvm_type, [base_operand.llvm_type, array_element_type]);
+                    }
+                }
+            }
+
+            let method_info = resolve_struct_info_for_method_target(method_parse.base, bindings, locals, context);
+            let interface_info = resolve_interface_info_for_method_target(method_parse.base, bindings, locals, context);
+
+            if method_info != null {
+                let base_name = trim_text(method_parse.base);
+
+                if is_simple_identifier(base_name) {
+                    let bound_local = find_local_binding(locals, base_name);
+                    let bound_param = find_parameter_binding(bindings, base_name);
+                    let mut _if59: boolean = false;
+                    if bound_local == null {
+                        if bound_param == null { _if59 = true; }
+                    }
+                    if _if59 {
+                        r_target = method_info.name + method_parse.field;
+                        r_injected_count = 0;
+                    } else {
+                        let lowered_self = lower_expression(method_parse.base, bindings, locals, r_temp, r_lines, functions, context, "");
+                        let mut _ci3: int = 0;
+                        loop {
+                            if _ci3 >= lowered_self.diagnostics.length { break; }
+                            r_diagnostics.push(lowered_self.diagnostics[_ci3]);
+                            _ci3 += 1;
+                        }
+                        r_string_constants = merge_string_constants(r_string_constants, lowered_self.string_constants);
+                        r_lines = lowered_self.lines;
+                        r_temp = lowered_self.temp_index;
+                        if lowered_self.operand != null {
+                            r_method_operand = lowered_self.operand;
+                            r_target = method_info.name + method_parse.field;
+                            r_injected_count = 1;
+                        } else {
+                            r_diagnostics.push("llvm lowering: method call base `"
+                                + method_parse.base
+                                + "` produced no value");
+                            return CallTargetResolution {
+                                trimmed_target: r_target,
+                                method_operand: null,
+                                helper_descriptor: null,
+                                injected_argument_count: 0,
+                                is_array_concat: false,
+                                array_concat_element_type: "",
+                                is_array_push: false,
+                                array_push_element_type: "",
+                                current_lines: r_lines,
+                                current_temp: r_temp,
+                                diagnostics: r_diagnostics,
+                                string_constants: r_string_constants,
+                                is_closure_dispatch: false,
+                                closure_return_type: "",
+                                closure_parameter_types: []
+                            };
+                        }
+                    }
+                } else {
+                    let lowered_self = lower_expression(method_parse.base, bindings, locals, r_temp, r_lines, functions, context, "");
+                    let mut _ci4: int = 0;
+                    loop {
+                        if _ci4 >= lowered_self.diagnostics.length { break; }
+                        r_diagnostics.push(lowered_self.diagnostics[_ci4]);
+                        _ci4 += 1;
+                    }
+                    r_string_constants = merge_string_constants(r_string_constants, lowered_self.string_constants);
+                    r_lines = lowered_self.lines;
+                    r_temp = lowered_self.temp_index;
+                    if lowered_self.operand != null {
+                        r_method_operand = lowered_self.operand;
+                        r_target = method_info.name + method_parse.field;
+                        r_injected_count = 1;
+                    } else {
+                        r_diagnostics.push("llvm lowering: method call base `"
+                            + method_parse.base
+                            + "` produced no value");
+                        return CallTargetResolution {
+                            trimmed_target: r_target,
+                            method_operand: null,
+                            helper_descriptor: null,
+                            injected_argument_count: 0,
+                            is_array_concat: false,
+                            array_concat_element_type: "",
+                            is_array_push: false,
+                            array_push_element_type: "",
+                            current_lines: r_lines,
+                            current_temp: r_temp,
+                            diagnostics: r_diagnostics,
+                            string_constants: r_string_constants,
+                            is_closure_dispatch: false,
+                            closure_return_type: "",
+                            closure_parameter_types: []
+                        };
+                    }
+                }
+            } else if interface_info != null {
+                let lowered_self = lower_expression(method_parse.base, bindings, locals, r_temp, r_lines, functions, context, "");
+                let mut _ci5: int = 0;
+                loop {
+                    if _ci5 >= lowered_self.diagnostics.length { break; }
+                    r_diagnostics.push(lowered_self.diagnostics[_ci5]);
+                    _ci5 += 1;
+                }
+                r_string_constants = merge_string_constants(r_string_constants, lowered_self.string_constants);
+                r_lines = lowered_self.lines;
+                r_temp = lowered_self.temp_index;
+                if lowered_self.operand != null {
+                    r_method_operand = lowered_self.operand;
+                    r_target = "trait_dispatch__" + interface_info.name + "__"
+                        + method_parse.field;
+                    r_injected_count = 1;
+                } else {
+                    r_diagnostics.push("llvm lowering: method call base `"
+                        + method_parse.base
+                        + "` produced no value");
+                    return CallTargetResolution {
+                        trimmed_target: r_target,
+                        method_operand: null,
+                        helper_descriptor: null,
+                        injected_argument_count: 0,
+                        is_array_concat: false,
+                        array_concat_element_type: "",
+                        is_array_push: false,
+                        array_push_element_type: "",
+                        current_lines: r_lines,
+                        current_temp: r_temp,
+                        diagnostics: r_diagnostics,
+                        string_constants: r_string_constants,
+                        is_closure_dispatch: false,
+                        closure_return_type: "",
+                        closure_parameter_types: []
+                    };
+                }
+            } else {
+                // Struct method fallback: when the local has i8* type (e.g.
+                // assigned from a method call whose return got opacified),
+                // resolve_struct_info_for_method_target returns null.  Search
+                // all known structs for one that has a function with a fused
+                // name (StructNamefield) in the function list / file context.
+                let mut _struct_fallback_info: StructTypeInfo? = null;
+                let mut _sfi: int = 0;
+                loop {
+                    if _sfi >= context.structs.length { break; }
+                    let _sf_candidate = context.structs[_sfi];
+                    let _sf_fused = _sf_candidate.name + method_parse.field;
+                    let _sf_fn = find_function_by_name_or_import(functions, _sf_fused);
+                    if _sf_fn != null {
+                        _struct_fallback_info = _sf_candidate;
+                        break;
+                    }
+                    _sfi += 1;
+                }
+                if _struct_fallback_info != null {
+                    // Found a struct method — lower the base and dispatch
+                    let lowered_self = lower_expression(method_parse.base, bindings, locals, r_temp, r_lines, functions, context, "");
+                    let mut _ci6b: int = 0;
+                    loop {
+                        if _ci6b >= lowered_self.diagnostics.length { break; }
+                        r_diagnostics.push(lowered_self.diagnostics[_ci6b]);
+                        _ci6b += 1;
+                    }
+                    r_string_constants = merge_string_constants(r_string_constants, lowered_self.string_constants);
+                    r_lines = lowered_self.lines;
+                    r_temp = lowered_self.temp_index;
+                    if lowered_self.operand != null {
+                        r_method_operand = lowered_self.operand;
+                        r_target = _struct_fallback_info.name + method_parse.field;
+                        r_injected_count = 1;
+                    } else {
+                        r_diagnostics.push("llvm lowering: method call base `"
+                            + method_parse.base
+                            + "` produced no value");
+                        return CallTargetResolution {
+                            trimmed_target: r_target,
+                            method_operand: null,
+                            helper_descriptor: null,
+                            injected_argument_count: 0,
+                            is_array_concat: false,
+                            array_concat_element_type: "",
+                            is_array_push: false,
+                            array_push_element_type: "",
+                            current_lines: r_lines,
+                            current_temp: r_temp,
+                            diagnostics: r_diagnostics,
+                            string_constants: r_string_constants,
+                            is_closure_dispatch: false,
+                            closure_return_type: "",
+                            closure_parameter_types: []
+                        };
+                    }
+                } else {
+                    // #1041: fail closed when the method base is a struct
+                    // instance whose declared type is known by name but absent
+                    // from the lowering type context. Without this guard the
+                    // runtime-helper probes below would lower `self` with a
+                    // default/garbage shape (the #960 staging-gap signature) and
+                    // segfault at runtime. Mirrors the #1023/#1037 fail-closed
+                    // pattern: a `[fatal]` diagnostic makes the emit/build gate
+                    // refuse to write IR instead of emitting a miscompile.
+                    //
+                    // The discriminator is deliberately narrow to stay
+                    // self-host safe (#830): only a *bare* struct-name
+                    // annotation triggers it. Opacified locals carry an empty
+                    // annotation (left to the by-name fallback above), and
+                    // generic-instantiation locals like `Result<int, Error>`
+                    // carry a non-simple-identifier annotation that
+                    // `find_struct_info_by_name` can't key on — both are
+                    // excluded so `make compile` keeps lowering
+                    // `.diagnostics.concat` and friends.
+                    let _g_base = trim_text(method_parse.base);
+                    if is_simple_identifier(_g_base) {
+                        let mut _g_annotation: string = "";
+                        let _g_local = find_local_binding(locals, _g_base);
+                        if _g_local != null {
+                            _g_annotation = _g_local.type_annotation;
+                        } else {
+                            let _g_param = find_parameter_binding(bindings, _g_base);
+                            if _g_param != null {
+                                _g_annotation = _g_param.type_annotation;
+                            }
+                        }
+                        let mut _g_fail_closed: boolean = false;
+                        // Channel builtin methods: `send` / `receive` / `close`
+                        // on a `channel`-typed local are runtime-helper calls.
+                        // Route them to the corresponding sfn_channel_* helpers
+                        // instead of failing closed (#1091).
+                        let mut _g_is_channel_method: boolean = false;
+                        let mut _g_is_channel_base: boolean = false;
+                        if _g_annotation == "channel" {
+                            _g_is_channel_base = true;
+                        }
+                        if starts_with(_g_annotation, "channel:") {
+                            _g_is_channel_base = true;
+                        }
+                        if _g_is_channel_base {
+                            if method_parse.field == "send" {
+                                _g_is_channel_method = true;
+                            }
+                            if method_parse.field == "receive" {
+                                _g_is_channel_method = true;
+                            }
+                            if method_parse.field == "close" {
+                                _g_is_channel_method = true;
+                            }
+                        }
+                        if _g_is_channel_method {
+                            // Only `close` routes through the descriptor here
+                            // — a plain (i8*) -> void call. `send` / `receive`
+                            // must lower via `try_lower_channel_method` in
+                            // core_concurrency_lowering.sfn (#1266), which implements the runtime's
+                            // by-pointer element contract; that bespoke path
+                            // intercepts every current route before this
+                            // resolver runs, so seeing them here means a
+                            // refactor bypassed it — fail loud instead of
+                            // emitting a value-where-pointer-expected
+                            // miscompile.
+                            if method_parse.field != "close" {
+                                r_diagnostics.push("llvm lowering [fatal]: channel `"
+                                    + method_parse.field
+                                    + "` reached the descriptor call path — the bespoke channel lowering (#1266) was bypassed");
+                            } else {
+                                // Lower the base (channel handle) and wire to
+                                // the close helper.
+                                let _g_ch_lowered = lower_expression(method_parse.base, bindings, locals, r_temp, r_lines, functions, context, "");
+                                let mut _cig: int = 0;
+                                loop {
+                                    if _cig >= _g_ch_lowered.diagnostics.length {
+                                        break;
+                                    }
+                                    r_diagnostics.push(_g_ch_lowered.diagnostics[_cig]);
+                                    _cig += 1;
+                                }
+                                r_string_constants = merge_string_constants(r_string_constants, _g_ch_lowered.string_constants);
+                                r_lines = _g_ch_lowered.lines;
+                                r_temp = _g_ch_lowered.temp_index;
+                                if _g_ch_lowered.operand != null {
+                                    r_method_operand = _g_ch_lowered.operand;
+                                    r_injected_count = 1;
+                                    r_target = "channel_close";
+                                    r_helper_descriptor = find_runtime_helper("channel_close");
+                                }
+                            }
+                        }
+                        if !_g_is_channel_method {
+                            if _g_annotation.length > 0 {
+                                if is_simple_identifier(_g_annotation) {
+                                    if !_is_primitive_receiver_type(_g_annotation) {
+                                        if find_struct_info_by_name(context, _g_annotation) == null {
+                                            // Exclude interface-typed bases: `m.total()`
+                                            // on `let m: Meter` is valid trait dispatch,
+                                            // not an unresolved struct.
+                                            if find_interface_info_by_name(context, _g_annotation) == null {
+                                                _g_fail_closed = true;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            if _g_fail_closed {
+                                r_diagnostics.push("llvm lowering [fatal]: method call base `"
+                                    + method_parse.base
+                                    + "` has declared type `"
+                                    + _g_annotation
+                                    + "` which is not in the lowering type context");
+                                return CallTargetResolution {
+                                    trimmed_target: r_target,
+                                    method_operand: null,
+                                    helper_descriptor: null,
+                                    injected_argument_count: 0,
+                                    is_array_concat: false,
+                                    array_concat_element_type: "",
+                                    is_array_push: false,
+                                    array_push_element_type: "",
+                                    current_lines: r_lines,
+                                    current_temp: r_temp,
+                                    diagnostics: r_diagnostics,
+                                    string_constants: r_string_constants,
+                                    is_closure_dispatch: false,
+                                    closure_return_type: "",
+                                    closure_parameter_types: []
+                                };
+                            }
+                        }
+                    }  // end if !_g_is_channel_method
+                    let qualified_helper = find_runtime_helper(r_target);
+                    if qualified_helper != null {
+                        r_helper_descriptor = qualified_helper;
+                    } else {
+                        let field_helper = find_runtime_helper(method_parse.field);
+                        let lowered_self = lower_expression(method_parse.base, bindings, locals, r_temp, r_lines, functions, context, "");
+                        let mut _ci6: int = 0;
+                        loop {
+                            if _ci6 >= lowered_self.diagnostics.length { break; }
+                            r_diagnostics.push(lowered_self.diagnostics[_ci6]);
+                            _ci6 += 1;
+                        }
+                        r_string_constants = merge_string_constants(r_string_constants, lowered_self.string_constants);
+                        r_lines = lowered_self.lines;
+                        r_temp = lowered_self.temp_index;
+                        if lowered_self.operand == null {
+                            r_diagnostics.push("llvm lowering: method call base `"
+                                + method_parse.base
+                                + "` produced no value");
+                            return CallTargetResolution {
+                                trimmed_target: r_target,
+                                method_operand: null,
+                                helper_descriptor: null,
+                                injected_argument_count: 0,
+                                is_array_concat: false,
+                                array_concat_element_type: "",
+                                is_array_push: false,
+                                array_push_element_type: "",
+                                current_lines: r_lines,
+                                current_temp: r_temp,
+                                diagnostics: r_diagnostics,
+                                string_constants: r_string_constants,
+                                is_closure_dispatch: false,
+                                closure_return_type: "",
+                                closure_parameter_types: []
+                            };
+                        }
+
+                        let base_operand = lowered_self.operand;
+                        if field_helper != null {
+                            r_method_operand = base_operand;
+                            r_target = method_parse.field;
+                            r_injected_count = 1;
+                            r_helper_descriptor = field_helper;
+                        }
+
+                        let array_element_type = array_pointer_element_type(base_operand.llvm_type);
+                        let mut _if60: boolean = false;
+                        if array_element_type.length > 0 {
+                            if method_parse.field == "concat" { _if60 = true; }
+                        }
+                        if _if60 {
+                            r_method_operand = base_operand;
+                            r_target = "concat";
+                            r_injected_count = 1;
+                            r_array_concat_element_type = array_element_type;
+                            r_is_array_concat = true;
+
+                            if !ends_with_pointer_suffix(array_element_type) {
+                                r_helper_descriptor = make_concat_descriptor(base_operand.llvm_type, [base_operand.llvm_type, base_operand.llvm_type]);
+                            }
+                        } else {
+                            let mut _elif61: boolean = false;
+                            if array_element_type.length > 0 {
+                                if method_parse.field == "push" {
+                                    _elif61 = true;
+                                }
+                            }
+                            if _elif61 {
+                                r_method_operand = base_operand;
+                                r_target = "push";
+                                r_injected_count = 1;
+                                r_array_push_element_type = array_element_type;
+                                r_is_array_push = true;
+
+                                r_helper_descriptor = make_push_descriptor(base_operand.llvm_type, [base_operand.llvm_type, array_element_type]);
+                            }
+                        }
+                    }
+                }
+            }  // close struct fallback else
+        }
+    }
+
+    return CallTargetResolution {
+        trimmed_target: r_target,
+        method_operand: r_method_operand,
+        helper_descriptor: r_helper_descriptor,
+        injected_argument_count: r_injected_count,
+        is_array_concat: r_is_array_concat,
+        array_concat_element_type: r_array_concat_element_type,
+        is_array_push: r_is_array_push,
+        array_push_element_type: r_array_push_element_type,
+        current_lines: r_lines,
+        current_temp: r_temp,
+        diagnostics: r_diagnostics,
+        string_constants: r_string_constants,
+        is_closure_dispatch: false,
+        closure_return_type: "",
+        closure_parameter_types: []
+    };
+}
+
+export { resolve_parsed_method_dispatch };

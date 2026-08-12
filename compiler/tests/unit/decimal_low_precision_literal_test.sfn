@@ -14,7 +14,7 @@
 // once from the decimal keeps the neighbour the true value is nearer to.
 // Every expected bit pattern here was cross-checked against an
 // arbitrary-precision oracle.
-import { decimal_literal_to_llvm_hex } from "../../src/llvm/expression_lowering/native/core_decimal_float";
+import { decimal_literal_to_llvm_hex } from "sfn/codegen-llvm/expression_lowering/native/core_decimal_float";
 
 test "decimal-literal: exactly representable f16 values convert exactly" {
     assert decimal_literal_to_llvm_hex("0.5", "half") == "0xH3800";

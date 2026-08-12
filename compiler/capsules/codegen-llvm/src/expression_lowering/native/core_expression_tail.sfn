@@ -1,0 +1,404 @@
+// compiler/capsules/codegen-llvm/src/expression_lowering/native/core_expression_tail.sfn
+//
+// Call, literal, member, binding, and function-reference expression dispatch.
+import { NativeFunction } from "sfn/ir";
+import { substring } from "sfn/strings";
+
+import { format_temp_name, is_simple_identifier } from "../../expressions_helpers";
+import { trace_log, trace_lowering } from "../../lowering_debug_state";
+import { find_function_by_name_or_import } from "../../rendering_helpers";
+import { empty_string_constant_set } from "../../strings";
+import {
+    resolve_enum_info_for_literal,
+    resolve_struct_info_for_literal,
+    resolve_struct_info_from_llvm_type
+} from "../../type_context_queries";
+import {
+    ExpressionResult,
+    LLVMOperand,
+    LocalBinding,
+    ParameterBinding,
+    TypeContext
+} from "../../types";
+import { starts_with } from "../../utils";
+import { array_pointer_element_type } from "../arrays";
+import { find_parameter_binding } from "./core_bindings";
+import { lower_call_expression } from "./core_call_lowering";
+import { find_call_site, split_call_arguments } from "./core_calls";
+import { _compute_function_pointer_type, _lower_named_fn_value } from "./core_closure_lowering";
+import { try_lower_channel_method, try_lower_tostring_method } from "./core_concurrency_lowering";
+import { lower_index_expression } from "./core_index_lowering";
+import { lower_array_literal, lower_enum_literal, lower_struct_literal } from "./core_literals_lowering";
+import { lower_member_access } from "./core_member_lowering";
+import { load_local_operand } from "./core_operands/comparisons";
+import {
+    parse_enum_literal,
+    parse_index_expression,
+    parse_member_access,
+    parse_struct_literal
+} from "./core_parse";
+import { find_local_binding } from "./core_scopes";
+import { trim_text } from "./core_text";
+
+fn lower_postfix_expression(expression: string, stripped: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string) -> ExpressionResult {
+    let mut diagnostics: string[] = [];
+    let empty_constants = empty_string_constant_set();
+    let dbg_expr = trace_lowering();
+    let call_index = find_call_site(stripped);
+    if call_index >= 0 {
+        if substring(stripped, stripped.length - 1, stripped.length) == ")" {
+            let target = trim_text(substring(stripped, 0, call_index));
+            let arguments_text = substring(stripped, call_index + 1, stripped.length - 1);
+            let argument_entries = split_call_arguments(arguments_text);
+            // Some member calls are syntactic sugar over runtime helpers for arrays.
+            // Rewrite `xs.concat(ys)` into `concat(xs, ys)` early (for simple identifier receivers)
+            // so we don't accidentally sanitize `xs.concat` into an undefined `@xsconcat` symbol.
+            let member_target = parse_member_access(target);
+            // #1266: `send` / `receive` on a `channel`-annotated base
+            // lower bespoke so the by-pointer element contract of
+            // `runtime/sfn/concurrency/channel.sfn` is respected (send
+            // spills the value to a stack slot; receive loads the
+            // element out of the runtime's malloc'd copy). `close`
+            // stays on the descriptor path — its ABI is a plain
+            // (i8*) -> void call with no element indirection.
+            if member_target.success {
+                let channel_lowered = try_lower_channel_method(member_target, argument_entries, bindings, locals, temp_index, lines, functions, context, expected_type);
+                if channel_lowered != null { return channel_lowered; }
+            }
+            // #1706: `<expr>.toString()` on a primitive receiver lowers to
+            // the `number.to_string` conversion. Runs before the struct /
+            // runtime-helper dispatch (which keys on a binding annotation
+            // a primitive receiver does not carry) so the receiver type is
+            // read straight off the lowered operand.
+            if member_target.success {
+                let tostring_lowered = try_lower_tostring_method(member_target, argument_entries, bindings, locals, temp_index, lines, functions, context);
+                if tostring_lowered != null { return tostring_lowered; }
+            }
+            if member_target.success {
+                if member_target.field == "concat" {
+                    let receiver_name = trim_text(member_target.base);
+                    if is_simple_identifier(receiver_name) {
+                        let local = find_local_binding(locals, receiver_name);
+                        if local != null {
+                            let element_type = array_pointer_element_type(local.llvm_type);
+                            // Only rewrite string array concats; the generic runtime helper only supports i8* elements.
+                            if element_type == "i8*" {
+                                let mut rewritten_args: string[] = [member_target.base];
+                                let mut arg_index: int = 0;
+                                loop {
+                                    if arg_index >= argument_entries.length {
+                                        break;
+                                    }
+                                    rewritten_args.push(argument_entries[arg_index]);
+                                    arg_index += 1;
+                                }
+                                return lower_call_expression("concat", rewritten_args, bindings, locals, temp_index, lines, functions, context, expected_type);
+                            }
+                        } else {
+                            let param = find_parameter_binding(bindings, receiver_name);
+                            if param != null {
+                                let element_type = array_pointer_element_type(param.llvm_type);
+                                if element_type == "i8*" {
+                                    let mut rewritten_args: string[] = [member_target.base];
+                                    let mut arg_index: int = 0;
+                                    loop {
+                                        if arg_index >= argument_entries.length {
+                                            break;
+                                        }
+                                        rewritten_args.push(argument_entries[arg_index]);
+                                        arg_index += 1;
+                                    }
+                                    return lower_call_expression("concat", rewritten_args, bindings, locals, temp_index, lines, functions, context, expected_type);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            return lower_call_expression(target, argument_entries, bindings, locals, temp_index, lines, functions, context, expected_type);
+        }
+    }
+
+    if stripped.length >= 2 {
+        let first_ch = substring(stripped, 0, 1);
+        let last_ch = substring(stripped, stripped.length - 1, stripped.length);
+        if first_ch == "[" {
+            if last_ch == "]" {
+                return lower_array_literal(stripped, bindings, locals, temp_index, lines, functions, context, expected_type);
+            }
+        }
+    }
+
+    // Try enum literal first - check if this looks like EnumName.VariantName
+    // This must come before struct literal parsing because Shape.Circle { ... } could be either
+    let enum_parse = parse_enum_literal(stripped);
+    if enum_parse.recognized {
+        if enum_parse.success {
+            // Verify this is actually an enum by checking context
+            let enum_info = resolve_enum_info_for_literal(context, enum_parse.enum_name);
+            if enum_info != null {
+                // Slice E.2 follow-up (#540): `lower_expression` does not
+                // yet carry the enclosing source span — wiring it through is
+                // out of scope per the issue's `Out:` section. Pass `null`;
+                // the ABI mismatch diagnostic falls back to its bare form.
+                let lowered_enum = lower_enum_literal(enum_parse, bindings, locals, temp_index, lines, functions, context, expected_type, null);
+                let mut _ci2: int = 0;
+                loop {
+                    if _ci2 >= lowered_enum.diagnostics.length { break; }
+                    diagnostics.push(lowered_enum.diagnostics[_ci2]);
+                    _ci2 += 1;
+                }
+                return ExpressionResult {
+                    lines: lowered_enum.lines,
+                    temp_index: lowered_enum.temp_index,
+                    operand: lowered_enum.operand,
+                    diagnostics: diagnostics,
+                    string_constants: lowered_enum.string_constants
+                };
+            }
+        }
+    }
+
+    // #1023: the enum dead-end above (enum_parse recognized + success but
+    // `enum_info == null`) has no behavioral `else` on purpose — the bare
+    // `X.Y` shape is indistinguishable from member access (`obj.field`), which
+    // parse_enum_literal also "recognizes", so failing here would break member
+    // access. Note parse_enum_literal recognizes the brace shape `X.Y { ... }`
+    // too: when its enum type DOES resolve, the `enum_info != null` branch
+    // above already lowered and returned it, so only the *unresolvable* brace
+    // form (enum parse unsuccessful, or `enum_info == null`) falls through to
+    // the struct dispatch below (parse_struct_literal recognizes the dotted
+    // name), where the fail-closed guard catches the unresolvable type.
+    // #1855: a bare object literal `{ field: val, ... }` routed through a
+    // concrete-struct type annotation (`let p: Person = { ... }`) reaches
+    // lowering as bare `{...}` text with no leading type name, so the
+    // parse_struct_literal call below cannot recognize it (it requires a
+    // leading identifier) and it would fall through to a zeroinitializer
+    // store — the literal's fields are silently dropped. When `expected_type`
+    // resolves to a concrete struct, prepend that struct's source name so the
+    // literal routes through the same field-population path the explicit
+    // `T { ... }` form uses. Interface/intersection annotations resolve to no
+    // struct here (they lower through the dynamic runtime-object path) and are
+    // intentionally left untouched.
+    if starts_with(stripped, "{") {
+        let bare_target = resolve_struct_info_from_llvm_type(context, expected_type);
+        if bare_target != null {
+            let bare_parse = parse_struct_literal(bare_target.name + " "
+                + stripped);
+            if bare_parse.recognized {
+                // Fail closed on a malformed body (missing `}`, trailing
+                // content) rather than dropping the parse diagnostics and
+                // falling through to a zeroinitializer store — mirrors the
+                // explicit `T { ... }` arm's `!success` handling below so the
+                // bare form surfaces the same struct-literal diagnostics.
+                if !bare_parse.success {
+                    let mut _ci_bad: int = 0;
+                    loop {
+                        if _ci_bad >= bare_parse.diagnostics.length { break; }
+                        diagnostics.push(bare_parse.diagnostics[_ci_bad]);
+                        _ci_bad += 1;
+                    }
+                    return ExpressionResult {
+                        lines: lines,
+                        temp_index: temp_index,
+                        operand: null,
+                        diagnostics: diagnostics,
+                        string_constants: empty_constants
+                    };
+                }
+                let bare_lowered = lower_struct_literal(bare_parse, bindings, locals, temp_index, lines, functions, context, expected_type, null);
+                let mut _ci_bare: int = 0;
+                loop {
+                    if _ci_bare >= bare_lowered.diagnostics.length { break; }
+                    diagnostics.push(bare_lowered.diagnostics[_ci_bare]);
+                    _ci_bare += 1;
+                }
+                return ExpressionResult {
+                    lines: bare_lowered.lines,
+                    temp_index: bare_lowered.temp_index,
+                    operand: bare_lowered.operand,
+                    diagnostics: diagnostics,
+                    string_constants: bare_lowered.string_constants
+                };
+            }
+        }
+    }
+
+    let struct_parse = parse_struct_literal(stripped);
+    if struct_parse.recognized {
+        if !struct_parse.success {
+            let mut _ci3: int = 0;
+            loop {
+                if _ci3 >= struct_parse.diagnostics.length { break; }
+                diagnostics.push(struct_parse.diagnostics[_ci3]);
+                _ci3 += 1;
+            }
+            return ExpressionResult {
+                lines: lines,
+                temp_index: temp_index,
+                operand: null,
+                diagnostics: diagnostics,
+                string_constants: empty_constants
+            };
+        }
+        // #1023: fail-closed on a recognized struct/enum-shaped literal whose
+        // type is absent from the lowering type context. Without this guard,
+        // lower_struct_literal returns a null operand carrying only a
+        // *non-fatal* "unknown struct" diagnostic, which the emit/build
+        // `[fatal]` gate ignores — so the enclosing statement silently lowers
+        // to a default value (the #1020 assert-elision; why the #832 asserts
+        // vanished). Escalate to a `[fatal]` diagnostic so the compile refuses
+        // to emit IR. After #1021, prelude `Result` resolves through the enum
+        // path above and never reaches this guard.
+        if resolve_struct_info_for_literal(context, struct_parse.type_name) == null {
+            diagnostics.push("llvm lowering [fatal]: struct/enum literal `"
+                + struct_parse.type_name
+                + "` references a type not in the lowering type context");
+            return ExpressionResult {
+                lines: lines,
+                temp_index: temp_index,
+                operand: null,
+                diagnostics: diagnostics,
+                string_constants: empty_constants
+            };
+        }
+        let lowered_struct = lower_struct_literal(struct_parse, bindings, locals, temp_index, lines, functions, context, expected_type, null);
+        let mut _ci4: int = 0;
+        loop {
+            if _ci4 >= lowered_struct.diagnostics.length { break; }
+            diagnostics.push(lowered_struct.diagnostics[_ci4]);
+            _ci4 += 1;
+        }
+        return ExpressionResult {
+            lines: lowered_struct.lines,
+            temp_index: lowered_struct.temp_index,
+            operand: lowered_struct.operand,
+            diagnostics: diagnostics,
+            string_constants: lowered_struct.string_constants
+        };
+    }
+
+    // Try index expression before member access (array[index])
+    let index_parse = parse_index_expression(stripped);
+    if index_parse.success {
+        return lower_index_expression(index_parse, bindings, locals, temp_index, lines, functions, context);
+    }
+
+    // Not an enum or index, try member access
+    let member_parse = parse_member_access(stripped);
+    if member_parse.success {
+        return lower_member_access(member_parse, bindings, locals, temp_index, lines, functions, context, expected_type);
+    }
+
+    // Locals are checked before parameters so a `let` that shadows a
+    // parameter with the same name resolves to the local (#697).
+    // `find_local_binding` walks the locals list newest-first, which
+    // matches lexical-scope expectations.
+    let local = find_local_binding(locals, stripped);
+    if local != null {
+        let load_result = load_local_operand(local, temp_index, lines);
+        let mut _ci5: int = 0;
+        loop {
+            if _ci5 >= load_result.diagnostics.length { break; }
+            diagnostics.push(load_result.diagnostics[_ci5]);
+            _ci5 += 1;
+        }
+        return ExpressionResult {
+            lines: load_result.lines,
+            temp_index: load_result.temp_index,
+            operand: load_result.operand,
+            diagnostics: diagnostics,
+            string_constants: empty_constants
+        };
+    }
+
+    let parameter = find_parameter_binding(bindings, stripped);
+    if dbg_expr {
+        let mut param_found = "null";
+        if parameter != null {
+            param_found = parameter.name + " -> " + parameter.llvm_name;
+        }
+        trace_log("emit-llvm: lower_expression param_lookup stripped="
+            + stripped
+            + " result="
+            + param_found);
+    }
+    if parameter != null {
+        let operand = LLVMOperand {
+            llvm_type: parameter.llvm_type,
+            value: parameter.llvm_name
+        };
+        return ExpressionResult {
+            lines: lines,
+            temp_index: temp_index,
+            operand: operand,
+            diagnostics: diagnostics,
+            string_constants: empty_constants
+        };
+    }
+
+    // Function reference in value position (#1146). A bare identifier
+    // that is neither a local nor a parameter, but names a defined or
+    // `extern fn` in the module function table, lowers to that
+    // function's address: `bitcast <fn-ptr-type> @<symbol> to i8*`.
+    // The result is a single `i8*` code pointer — deliberately NOT the
+    // `{i8*, i8*}` closure pair (a top-level function carries no env),
+    // so the closure-dispatch path stays disengaged. The `@<name>`
+    // symbol is emitted bare; the module mangling post-pass rewrites
+    // defined-fn names to their slugged form and leaves extern names
+    // (real C symbols) alone, matching how call sites emit them. This
+    // is what lets `<fn> as * u8` reach a C-ABI callee such as
+    // `pthread_create`'s `start_routine` instead of silently lowering
+    // to `null`.
+    //
+    // `fn_ptr_type` here is the bitcast *source* type only — and an
+    // address-only one. `_compute_function_pointer_type` reconstructs
+    // the signature from `map_return_type` + `map_local_type`, which can
+    // diverge from the real `define` ABI for struct-returning or
+    // `self`-taking functions (sret/by-pointer adjustments it does not
+    // model). That is harmless because the value is immediately bitcast
+    // to `i8*` (a code address is correct regardless of the source
+    // pointee). Do NOT treat the result as a call-ready typed pointer:
+    // calling through it must re-derive the signature from the call
+    // site (as closure dispatch does), not reuse this text.
+    let fn_reference = find_function_by_name_or_import(functions, stripped);
+    if fn_reference != null {
+        if trim_text(expected_type) == "{i8*, i8*}" {
+            let materialized = _lower_named_fn_value(fn_reference, context, temp_index, lines);
+            return ExpressionResult {
+                lines: materialized.lines,
+                temp_index: materialized.temp_index,
+                operand: materialized.operand,
+                diagnostics: materialized.diagnostics,
+                string_constants: empty_constants
+            };
+        }
+        let fn_ptr_type = _compute_function_pointer_type(fn_reference, context);
+        let cast_temp = format_temp_name(temp_index);
+        lines.push("  " + cast_temp + " = bitcast " + fn_ptr_type + " @"
+            + fn_reference.name
+            + " to i8*");
+        let fn_operand = LLVMOperand { llvm_type: "i8*", value: cast_temp };
+        return ExpressionResult {
+            lines: lines,
+            temp_index: temp_index + 1,
+            operand: fn_operand,
+            diagnostics: diagnostics,
+            string_constants: empty_constants
+        };
+    }
+
+    if dbg_expr {
+        trace_log("emit-llvm: lower_expression FALLTHROUGH expr=" + stripped
+            + " (unhandled)");
+    }
+    diagnostics.push("llvm lowering: unable to lower expression `" + expression
+        + "`");
+    return ExpressionResult {
+        lines: lines,
+        temp_index: temp_index,
+        operand: null,
+        diagnostics: diagnostics,
+        string_constants: empty_constants
+    };
+}

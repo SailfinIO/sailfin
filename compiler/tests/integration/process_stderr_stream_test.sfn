@@ -3,7 +3,7 @@
 // (`sfn_process_handle_stdout_fd`, `sfn_process_handle_stderr_fd`,
 // `sfn_process_handle_read_bytes_stderr`, `sfn_process_handle_stderr_at_eof`,
 // `sfn_process_handle_kill`); the `process.*` descriptor rows in
-// `compiler/src/llvm/runtime_helpers/registry_process.sfn` flip the builtin surface onto
+// `compiler/capsules/codegen-llvm/src/runtime_helpers/registry_process.sfn` flip the builtin surface onto
 // them, and `runtime/sfn/platform/process_windows.sfn` carries the degraded
 // stubs. These pin the raw builtins independently of any `sfn/os` wrapper,
 // mirroring `process_framed_stdio_test.sfn` and `io_poll_any_test.sfn`. All

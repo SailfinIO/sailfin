@@ -33,7 +33,7 @@ New features must flow through every stage — flag any stage that's missing.
 - Borrows (`&T`, `&mut T`) don't overlap unsafely?
 
 ### 5. LLVM IR Correctness
-For changes to `compiler/src/llvm/`:
+For changes to `compiler/capsules/codegen-llvm/src/`:
 - No undefined behavior in generated IR
 - Pointer arithmetic respects type sizes
 - Stack allocations are bounded
@@ -50,4 +50,3 @@ minimally and alphabetically) — check the diff against it.
 - Unit tests for the specific module changed
 - Integration tests if the change crosses module boundaries
 - E2e tests if user-facing behavior changed
-

@@ -68,10 +68,10 @@ each role." Measured against the tree on 2026-08-05:
 |---|---|---|
 | Lex / parse / typecheck / effect-check | **Sailfin** | `compiler/src/` |
 | Mid-level IR | **Split.** `.sfn-asm` is the live artifact; typed SSA exists but is off the build path | `native_ir.sfn` (342); `typed_ssa.sfn` (1160) + `_verify` (993) + `_render` (366) + `_produce` (284) |
-| Instruction selection, register allocation, optimization | **LLVM** | `compiler/src/llvm/` — 137 files, 62,830 lines of textual-IR printer |
+| Instruction selection, register allocation, optimization | **LLVM** | `compiler/capsules/codegen-llvm/src/` — 137 files, 62,830 lines of textual-IR printer |
 | Assemble (`.ll` → `.o`) | **clang, 100%** | `compiler/src/build/clang_argv.sfn` |
 | Link | **Sailfin on Linux x86-64/aarch64**, clang elsewhere | `compiler/src/build/direct_link.sfn` (339) |
-| Raw syscall emission | **Sailfin primitive, no consumer** | `compiler/src/llvm/syscall.sfn` (156) |
+| Raw syscall emission | **Sailfin primitive, no consumer** | `compiler/capsules/codegen-llvm/src/syscall.sfn` (156) |
 | Platform access | **libc/POSIX via `extern fn`** | 528 `extern fn` under `runtime/` |
 | TLS / crypto | **Sailfin (native TLS 1.3, SFEP-0036/SFEP-0048, SFN-341)** | `runtime/sfn/platform/tls_record.sfn` |
 

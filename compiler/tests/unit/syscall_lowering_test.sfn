@@ -2,7 +2,8 @@ import {
     is_syscall_builtin,
     render_syscall_constraints,
     syscall_contract_error
-} from "../../src/llvm/syscall";
+} from "sfn/codegen-llvm/syscall";
+
 import { index_of } from "../../src/string_utils";
 
 fn _contains(text: string, needle: string) -> boolean {

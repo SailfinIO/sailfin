@@ -99,7 +99,7 @@ test "builtin allowlist: atomic_add intrinsic is in envelope" {
     // #812: atomic_* are call-form lowering intrinsics (emitted as LLVM
     // atomicrmw/cmpxchg/fence) with no source declaration, so the E0420
     // walker must treat them as builtins. Mirrors `is_atomic_builtin`
-    // (compiler/src/llvm/atomics.sfn).
+    // (compiler/capsules/codegen-llvm/src/atomics.sfn).
     assert is_builtin_call_name("atomic_add") == true;
 }
 

@@ -17,7 +17,7 @@ Source (.sfn)
   → Type Checker (typecheck/) → Validated AST
   → Effect Checker (effect_checker/) → Effect-safe AST
   → Native Emitter (emit_native.sfn) → .sfn-asm IR (native_ir.sfn)
-  → LLVM Lowering (llvm/lowering/) → LLVM IR
+  → LLVM Lowering (sfn/codegen-llvm) → LLVM IR
   → clang + platform linker → Native Binary
 ```
 
@@ -33,7 +33,7 @@ Source (.sfn)
 | `compiler/capsules/analyzer/src/effect_checker/` | Effect validation, scope tracking, and capability checks |
 | `compiler/capsules/codegen/src/emit_native.sfn` | Emit `.sfn-asm` IR |
 | `compiler/capsules/ir/src/native_ir.sfn` | IR representation |
-| `compiler/src/llvm/lowering/entrypoints.sfn` | LLVM IR generation |
+| `compiler/capsules/codegen-llvm/src/lowering/entrypoints.sfn` | LLVM IR generation |
 
 ## Runtime
 
@@ -72,4 +72,4 @@ seed pinned in `bootstrap.toml`:
 
 ---
 
-*For details on the LLVM lowering passes, see `compiler/src/llvm/lowering/`.*
+*For details on the LLVM lowering passes, see `compiler/capsules/codegen-llvm/src/lowering/`.*

@@ -1,0 +1,142 @@
+// compiler/capsules/codegen-llvm/src/expression_lowering/native/core_call_emission/closure_dispatch.sfn
+//
+// Typed indirect-call emission for closure-pair callees.
+import { format_temp_name } from "../../../expressions_helpers";
+import { trace_log } from "../../../lowering_debug_state";
+import { ExpressionResult, LLVMOperand, StringConstant } from "../../../types";
+import { join_with_separator, number_to_string } from "../../../utils";
+
+fn emit_closure_dispatch(trimmed_target: string, final_operands: LLVMOperand[], rendered_args: string[], expected_params: string[], llvm_return: string, current_temp: int, current_lines: string[], diagnostics: string[], collected_string_constants: StringConstant[]) -> ExpressionResult {
+    let mut result_lines = current_lines;
+    let mut result_temp: int = current_temp;
+    let mut result_diagnostics = diagnostics;
+    let is_closure_dispatch: boolean = true;
+    // Issue #689: closure-callee dispatch. `final_operands[0]` is the
+    // `{i8*, i8*}` closure-pair aggregate loaded by
+    // `try_resolve_closure_callee`; the remaining operands are the
+    // user-supplied call arguments (already coerced against the
+    // closure's parameter types in the coerce loop above). The
+    // dispatch sequence mirrors trait dispatch: extract `fn_ptr` and
+    // `env*`, bitcast `fn_ptr` to the typed function-pointer type,
+    // and emit the call with `env*` as the hidden first argument.
+    if is_closure_dispatch {
+        if final_operands.length == 0 {
+            result_diagnostics.push("llvm lowering: closure dispatch requires a closure-pair operand");
+            return ExpressionResult {
+                lines: result_lines,
+                temp_index: result_temp,
+                operand: null,
+                diagnostics: result_diagnostics,
+                string_constants: collected_string_constants
+            };
+        }
+        // Validate arity against the closure's declared parameter
+        // shape (`expected_params[0]` is the `{i8*, i8*}` self slot
+        // injected by `resolve_call_signature`; the remainder is the
+        // user-visible signature). Without this guard, a wrong arg
+        // count would silently bitcast the function pointer to a
+        // signature derived from the provided operand types and emit
+        // a call that mismatches the callee's real ABI — exactly the
+        // UB the `[fatal]` sentinel is meant to refuse IR over.
+        if final_operands.length != expected_params.length {
+            let arity_diag = "llvm lowering [fatal]: closure dispatch arity mismatch for `"
+                + trimmed_target
+                + "`: expected "
+                + number_to_string(expected_params.length - 1)
+                + " user argument(s), got "
+                + number_to_string(final_operands.length - 1);
+            trace_log(arity_diag);
+            result_diagnostics.push(arity_diag);
+            return ExpressionResult {
+                lines: result_lines,
+                temp_index: result_temp,
+                operand: null,
+                diagnostics: result_diagnostics,
+                string_constants: collected_string_constants
+            };
+        }
+        let closure_pair = final_operands[0];
+
+        let fn_ptr_temp = "%t" + number_to_string(result_temp);
+        result_temp += 1;
+        result_lines.push("  " + fn_ptr_temp + " = extractvalue " + closure_pair.llvm_type
+            + " "
+            + closure_pair.value
+            + ", 0");
+
+        let env_ptr_temp = "%t" + number_to_string(result_temp);
+        result_temp += 1;
+        result_lines.push("  " + env_ptr_temp + " = extractvalue "
+            + closure_pair.llvm_type
+            + " "
+            + closure_pair.value
+            + ", 1");
+
+        let mut closure_fp_param_types: string[] = ["i8*"];
+        let mut closure_arg_idx: int = 1;
+        loop {
+            if closure_arg_idx >= final_operands.length { break; }
+            closure_fp_param_types.push(final_operands[closure_arg_idx].llvm_type);
+            closure_arg_idx += 1;
+        }
+        let closure_fp_params = join_with_separator(closure_fp_param_types, ", ");
+        let closure_function_type = llvm_return + " (" + closure_fp_params
+            + ")*";
+
+        let typed_fn_temp = "%t" + number_to_string(result_temp);
+        result_temp += 1;
+        result_lines.push("  " + typed_fn_temp + " = bitcast i8* " + fn_ptr_temp
+            + " to "
+            + closure_function_type);
+
+        let mut closure_call_args: string[] = ["i8* " + env_ptr_temp];
+        closure_arg_idx = 1;
+        loop {
+            if closure_arg_idx >= rendered_args.length { break; }
+            closure_call_args.push(rendered_args[closure_arg_idx]);
+            closure_arg_idx += 1;
+        }
+        let closure_arg_text = join_with_separator(closure_call_args, ", ");
+
+        if llvm_return == "void" {
+            result_lines.push("  call void " + typed_fn_temp + "("
+                + closure_arg_text
+                + ")");
+            return ExpressionResult {
+                lines: result_lines,
+                temp_index: result_temp,
+                operand: null,
+                diagnostics: result_diagnostics,
+                string_constants: collected_string_constants
+            };
+        }
+        let closure_result_temp_name = format_temp_name(result_temp);
+        result_lines.push("  " + closure_result_temp_name + " = call "
+            + llvm_return
+            + " "
+            + typed_fn_temp
+            + "("
+            + closure_arg_text
+            + ")");
+        let closure_result_operand = LLVMOperand {
+            llvm_type: llvm_return,
+            value: closure_result_temp_name
+        };
+        return ExpressionResult {
+            lines: result_lines,
+            temp_index: result_temp + 1,
+            operand: closure_result_operand,
+            diagnostics: result_diagnostics,
+            string_constants: collected_string_constants
+        };
+    }
+    return ExpressionResult {
+        lines: result_lines,
+        temp_index: result_temp,
+        operand: null,
+        diagnostics: result_diagnostics,
+        string_constants: collected_string_constants
+    };
+}
+
+export { emit_closure_dispatch };

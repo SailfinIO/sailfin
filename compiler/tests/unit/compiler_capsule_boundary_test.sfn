@@ -187,7 +187,6 @@ fn _module_role(path: string) -> string {
     if id.length == 0 { return ""; }
 
     if _is_driver_module_id(id) { return ROLE_DRIVER; }
-    if starts_with(id, "llvm/") { return ROLE_LLVM; }
     return "";
 }
 
@@ -1118,6 +1117,7 @@ test "capsule roles: classification survives physical compiler capsule moves" {
     assert _module_role("compiler/capsules/codegen/src/emit_native.sfn") == ROLE_CODEGEN;
     assert _module_role("compiler/src/emit_native.sfn") == "";
     assert _module_role("compiler/capsules/codegen-llvm/src/lowering/mod.sfn") == ROLE_LLVM;
+    assert _module_role("compiler/src/llvm/lowering/mod.sfn") == "";
     assert _edge_module_id("compiler/capsules/analyzer/src/type_interner.sfn") == "type_interner";
     assert _edge_module_id("compiler/capsules/codegen-llvm/src/lowering/mod.sfn") == "llvm/lowering/mod";
     assert _edge_module_id("sfn/analyzer/diagnostic") == "diagnostic";
@@ -1160,6 +1160,18 @@ test "codegen capsule: manifest is private, capability-free, and role-bounded" !
     let dependency_and_rest = split(manifest_sections[1], "[capabilities]");
     assert dependency_and_rest.length == 2;
     assert trim(dependency_and_rest[0]) == "\"sfn/syntax\" = \"*\"\n\"sfn/analyzer\" = \"*\"\n\"sfn/ir\" = \"*\"\n\"sfn/strings\" = \"*\"";
+    assert contains(manifest, "required = []");
+}
+
+test "codegen-llvm capsule: manifest is private, capability-free, and IR-bounded" ![io] {
+    let manifest = fs.readFile("compiler/capsules/codegen-llvm/capsule.toml");
+    assert contains(manifest, "name = \"sfn/codegen-llvm\"");
+    assert contains(manifest, "publish = false");
+    let manifest_sections = split(manifest, "[dependencies]");
+    assert manifest_sections.length == 2;
+    let dependency_and_rest = split(manifest_sections[1], "[capabilities]");
+    assert dependency_and_rest.length == 2;
+    assert trim(dependency_and_rest[0]) == "\"sfn/ir\" = \"*\"\n\"sfn/strings\" = \"*\"";
     assert contains(manifest, "required = []");
 }
 
@@ -1552,7 +1564,7 @@ test "capsule boundaries: check multi-capsule staging excludes LLVM lowering" ![
             assert _module_role(module_path) == ROLE_ANALYZER;
             analyzer_seen += 1;
         }
-        assert ! starts_with(module_path, "compiler/src/llvm/lowering/");
+        assert ! starts_with(module_path, "compiler/capsules/codegen-llvm/src/lowering/");
         assert module_path != "compiler/src/main.sfn";
         closure_index += 1;
     }

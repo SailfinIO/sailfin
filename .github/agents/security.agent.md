@@ -50,7 +50,7 @@ Move-by-default semantics prevent use-after-free and data races. Verify:
 - Memory safety in arena, RC, string, and array implementations
 - Unsafe `extern fn` call sites (unchecked malloc, missing bounds checks)
 
-### LLVM Lowering (`compiler/src/llvm/`)
+### LLVM Lowering (`compiler/capsules/codegen-llvm/src/`)
 - Generated IR must not introduce undefined behavior
 - Pointer arithmetic must respect type sizes
 - Stack allocations must be bounded

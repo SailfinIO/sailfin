@@ -101,7 +101,7 @@ labels:
     description: "compiler/src/* — lexer, parser, typecheck, effects, emit"
   - name: area:lowering
     color: "c5def5"
-    description: "compiler/src/llvm/* — LLVM IR generation"
+    description: "compiler/capsules/codegen-llvm/src/* — LLVM IR generation"
   - name: area:runtime
     color: "c5def5"
     description: "runtime/* — prelude, native runtime, Sailfin runtime port"

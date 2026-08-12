@@ -1,0 +1,908 @@
+// compiler/capsules/codegen-llvm/src/rendering.sfn
+//
+// LLVM IR rendering functions for declarations and metadata comments.
+// Handles trait metadata comments, runtime helper declarations, and function declarations.
+import { NativeFunction, NativeParameter } from "sfn/ir";
+import { substring } from "sfn/strings";
+
+import { prelude_mirror_signatures } from "./prelude_mirror_signatures";
+import {
+    collect_parameter_types,
+    extract_struct_type_from_llvm,
+    render_interface_signature
+} from "./rendering_helpers";
+import {
+    effective_helper_declare_return_type,
+    is_async_runtime_target,
+    runtime_helper_descriptors
+} from "./runtime_helpers/mod";
+import { sanitize_symbol } from "./symbols";
+import { map_parameter_type, map_return_type } from "./type_mapping";
+import { TraitMetadata, TypeContext } from "./types";
+import {
+    append_string,
+    index_of,
+    join_with_separator,
+    number_to_string,
+    string_array_contains,
+    trim_text
+} from "./utils";
+
+fn clamp_collection_length(value: int, max: int) -> int {
+    if value < 0 { return 0; }
+    if value > max { return max; }
+    return value;
+}
+
+// =============================================================================
+// Trait Metadata Comments
+// =============================================================================
+fn render_trait_metadata_comments(metadata: TraitMetadata) -> string[] {
+    let mut interface_lines: string[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= metadata.interfaces.length { break; }
+        let interface = metadata.interfaces[index];
+        let mut header: string = "; interface " + interface.name;
+        if interface.type_parameters.length > 0 {
+            header = header + "<" + join_with_separator(interface.type_parameters, ", ")
+                + ">";
+        }
+        interface_lines.push(header);
+
+        let mut signature_index: int = 0;
+        loop {
+            if signature_index >= interface.signatures.length { break; }
+            let signature = interface.signatures[signature_index];
+            let rendered = render_interface_signature(signature);
+            interface_lines.push(";   " + rendered);
+            signature_index += 1;
+        }
+        if interface.signatures.length == 0 {
+            interface_lines.push(";   ; no signatures recorded");
+        }
+        index += 1;
+    }
+
+    let mut struct_lines: string[] = [];
+    index = 0;
+    loop {
+        if index >= metadata.implementations.length { break; }
+        let implementation = metadata.implementations[index];
+        let mut line: string = "; struct " + implementation.struct_name
+            + " implements "
+            + join_with_separator(implementation.interfaces, ", ");
+        struct_lines.push(line);
+        index += 1;
+    }
+
+    if interface_lines.length == 0 {
+        if struct_lines.length == 0 { return []; }
+    }
+
+    let mut lines: string[] = [];
+    lines.push("; -- Trait Metadata --------------------------------");
+    let mut _ci0: int = 0;
+    loop {
+        if _ci0 >= interface_lines.length { break; }
+        lines.push(interface_lines[_ci0]);
+        _ci0 += 1;
+    }
+    if interface_lines.length > 0 {
+        if struct_lines.length > 0 { lines.push(";"); }
+    }
+    let mut _ci1: int = 0;
+    loop {
+        if _ci1 >= struct_lines.length { break; }
+        lines.push(struct_lines[_ci1]);
+        _ci1 += 1;
+    }
+    lines.push("; -----------------------------------------------");
+    return lines;
+}
+
+// =============================================================================
+// Runtime Helper Declarations
+// =============================================================================
+// #1779 (SFEP-0035 §3.1): locate an imported prelude function by its sanitized
+// LLVM symbol so a `target == symbol` mirror registry row can be reconciled
+// against that function's real lowered signature before the declare loop defers
+// to the imported declare.
+fn _find_imported_fn_by_symbol(imported_functions: NativeFunction[], symbol: string) -> NativeFunction? {
+    let mut index: int = 0;
+    loop {
+        if index >= imported_functions.length { break; }
+        if sanitize_symbol(imported_functions[index].name) == symbol {
+            return imported_functions[index];
+        }
+        index += 1;
+    }
+    return null;
+}
+
+// #1779 (SFEP-0035 §3.1): element-wise LLVM shape-string comparison for the
+// mirror reconciliation.
+fn _llvm_shape_lists_equal(registry: string[], prelude: string[]) -> boolean {
+    if registry.length != prelude.length { return false; }
+    let mut index: int = 0;
+    loop {
+        if index >= registry.length { break; }
+        if registry[index] != prelude[index] { return false; }
+        index += 1;
+    }
+    return true;
+}
+
+// #1779/#1780 (SFEP-0035 §3.1/§3.2): reconcile a derived prelude-mirror
+// signature against the prelude function's actual lowered signature on any
+// build where the symbol is imported. Both the mirror signature
+// (`prelude_mirror_signatures.sfn`) and the imported function are lowered with
+// the same `map_return_type` / `collect_parameter_types` the imported-declare
+// pass (`render_imported_function_declarations`) applies, so the compared shapes
+// are exactly the ones that would be emitted. On drift the fatal names the
+// symbol and both shapes and `throw`s: the synthesized `@main` wrapper renders
+// the message to stderr and exits non-zero, so the *next* `make compile` fails
+// at the moment drift is introduced instead of silently mis-declaring the helper
+// on a non-importing caller's IR (where the derived declare, not the imported
+// one, is emitted). This is the anti-drift net that keeps the source-typed
+// mirror set trustworthy after the hand-typed registry rows were removed (#1780).
+fn _reconcile_mirror_signature_or_fatal(mirror: NativeFunction, imported_functions: NativeFunction[], effective_symbol: string, context: TypeContext) -> void {
+    let imported = _find_imported_fn_by_symbol(imported_functions, effective_symbol);
+    if imported != null {
+        let prelude_return = map_return_type(context, imported.return_type);
+        let prelude_params = collect_parameter_types(context, imported.parameters, imported.name);
+        let mirror_return = map_return_type(context, mirror.return_type);
+        let mirror_params = collect_parameter_types(context, mirror.parameters, mirror.name);
+        let mut _drift: boolean = false;
+        if prelude_return != mirror_return { _drift = true; }
+        if !_llvm_shape_lists_equal(mirror_params, prelude_params) {
+            _drift = true;
+        }
+        if _drift {
+            let mirror_shape = mirror_return + "(" + join_with_separator(mirror_params, ", ")
+                + ")";
+            let prelude_shape = prelude_return + "(" + join_with_separator(prelude_params, ", ")
+                + ")";
+            throw "prelude-mirror signature drift: derived '" + mirror.name
+                + "' lowers to "
+                + mirror_shape
+                + " but prelude '"
+                + effective_symbol
+                + "' lowers to "
+                + prelude_shape
+                + "; update compiler/capsules/codegen-llvm/src/prelude_mirror_signatures.sfn or the prelude in lock-step";
+        }
+    }
+}
+
+fn render_runtime_helper_declarations(used_targets: string[], local_functions: NativeFunction[], imported_functions: NativeFunction[], context: TypeContext) -> string[] {
+    if used_targets.length == 0 { return []; }
+    // Build list of local function symbols to avoid declaring helpers that are defined locally
+    let mut local_symbols: string[] = [];
+    let mut local_index: int = 0;
+    loop {
+        if local_index >= local_functions.length { break; }
+        local_symbols.push(sanitize_symbol(local_functions[local_index].name));
+        local_index += 1;
+    }
+
+    // Issue #633: build the set of imported user-function names so the
+    // helper-declare loop can defer to the imported declare when both
+    // sources resolve to the same symbol. The imported declare carries
+    // the source-level signature parsed from the upstream `.sfn-asm`
+    // interface (e.g. `: int` → `i64`), while the registry rows are
+    // hand-typed and historically static. When they disagree the
+    // imported declare must win so the cross-module call lands on a
+    // declare/define pair with matching parameter ABIs. Helpers whose
+    // effective symbol does NOT collide with any imported function
+    // (the bulk of the registry — `sailfin_runtime_*` C entrypoints,
+    // `runtime_*_fn` aliases, intrinsic stubs) continue to emit
+    // unchanged.
+    let mut imported_symbols: string[] = [];
+    let mut imported_index: int = 0;
+    loop {
+        if imported_index >= imported_functions.length { break; }
+        imported_symbols.push(sanitize_symbol(imported_functions[imported_index].name));
+        imported_index += 1;
+    }
+
+    let mut lines: string[] = [];
+    let mut declared_symbols: string[] = [];
+    let descriptors = runtime_helper_descriptors();
+    let mut index: int = 0;
+    loop {
+        if index >= descriptors.length { break; }
+        let descriptor = descriptors[index];
+        if string_array_contains(used_targets, descriptor.target) {
+            // Issue #740: skip helpers that are unconditionally declared
+            // inline by `render_llvm_preamble` (in
+            // `lowering_phase_render.sfn`). When the dynamic helper-
+            // collection walker (`collect_runtime_helper_targets`) is
+            // enabled it discovers these targets and adds them to
+            // `used_targets`; without this filter the loop below would
+            // emit a duplicate `declare` line that llvm-as rejects with
+            // "invalid redefinition of function" — silently breaking the
+            // `--work-dir` parallel-emit retry cascade and the
+            // 20× emit-sweep determinism gate.
+            //
+            // Several preamble-inlined declare sets must be excluded:
+            //   1. The typed spawn/await runtime family
+            //      (`async_runtime_declare_lines()` walks every
+            //      descriptor where `is_async_runtime_target` is true
+            //      and emits its declare directly into the preamble).
+            //   2. Arena-allocation primitives + the rc-release helper
+            //      (`alloc_struct` / `runtime.free` / `rc.release`).
+            //      `render_llvm_preamble` (`lowering_phase_render.sfn:
+            //      173-185`) writes their declares inline so the
+            //      arena-rewind path stays linked even when the
+            //      module's only references are auto-generated by
+            //      lowering (M1.7.5a / #501 — the post-lowering
+            //      helper-target scan in
+            //      `collect_runtime_helper_targets_from_lines` would
+            //      otherwise re-emit them here and trip the same
+            //      `llvm-as: invalid redefinition` failure that #740
+            //      caught for the spawn/await family).
+            //
+            // All sets are emitted by the preamble even when the walker
+            // is off (see `lowering_phase_render.sfn:110-112`), so
+            // skipping them here never strips a declare the module
+            // actually needs.
+            let mut _preamble_inlined: boolean = false;
+            if is_async_runtime_target(descriptor.target) {
+                _preamble_inlined = true;
+            }
+            if descriptor.target == "alloc_struct" { _preamble_inlined = true; }
+            if descriptor.target == "runtime.free" { _preamble_inlined = true; }
+            if descriptor.target == "rc.release" { _preamble_inlined = true; }
+            // #875: pointer-read intrinsics lower to a raw `load`, not a
+            // `call`, so there is no symbol to declare. Skipping them keeps
+            // the declare loop from emitting a `declare` that links to
+            // nothing.
+            if descriptor.target == "sailfin_intrinsic_pointer_read_i32" {
+                _preamble_inlined = true;
+            }
+            if descriptor.target == "sailfin_intrinsic_pointer_read_i64" {
+                _preamble_inlined = true;
+            }
+            if descriptor.target == "sailfin_intrinsic_pointer_read_f64" {
+                _preamble_inlined = true;
+            }
+            // #877: the errno-location sentinel never appears as a real
+            // `call @sailfin_intrinsic_errno_location(` — the lowering
+            // branch emits the concrete `__errno_location`/`__error`
+            // instead. The source-text walker still picks the sentinel
+            // target up from the call expression in `clock.sfn`, so skip
+            // it here to avoid a bogus `declare` to a symbol that does
+            // not exist. The concrete locator's declare is emitted via
+            // its own descriptor row when the line scan sees the call.
+            if descriptor.target == "sailfin_intrinsic_errno_location" {
+                _preamble_inlined = true;
+            }
+            // #908: the clock-monotonic clk_id sentinel never appears as
+            // a real `call @sailfin_intrinsic_clock_monotonic_id(` — the
+            // lowering branch (`core_call_emission/dispatch.sfn`) inlines a bare
+            // `i32 1`/`i32 6` immediate instead, so there is no symbol to
+            // declare. The source-text walker still picks the sentinel
+            // target up from the call expression, so skip it here to
+            // avoid a bogus `declare` to a symbol that does not exist.
+            if descriptor.target == "sailfin_intrinsic_clock_monotonic_id" {
+                _preamble_inlined = true;
+            }
+            // #1480: the `_SC_NPROCESSORS_ONLN` request-number sentinel
+            // never appears as a real
+            // `call @sailfin_intrinsic_sc_nprocessors_onln(` — the lowering
+            // branch (`core_call_emission/dispatch.sfn`) inlines a bare `i32 84`/
+            // `i32 58` immediate instead, so there is no symbol to declare.
+            // The source-text walker still picks the sentinel target up from
+            // the call expression, so skip it here to avoid a bogus
+            // `declare` to a symbol that does not exist.
+            if descriptor.target == "sailfin_intrinsic_sc_nprocessors_onln" {
+                _preamble_inlined = true;
+            }
+            // SFN-607: the process-footprint sentinel is replaced by a
+            // Darwin-only `getpid` + `proc_pid_rusage` sequence or a
+            // non-Darwin zero. The concrete calls receive declarations from
+            // their dotted registry rows after the post-lowering scan.
+            if descriptor.target == "sailfin_intrinsic_mem_footprint" {
+                _preamble_inlined = true;
+            }
+            // #967: the executable-path sentinel never appears as a real
+            // `call @sailfin_intrinsic_exe_path(` — the lowering branch
+            // (`core_call_emission/dispatch.sfn`) emits the host's concrete primitive
+            // (`readlink` / `_NSGetExecutablePath` / `GetModuleFileNameA`)
+            // instead. The source-text walker still picks the sentinel target
+            // up from the call expression, so skip it here to avoid a bogus
+            // `declare` to a symbol that does not exist. The concrete leg's
+            // declare is emitted via its own descriptor row when the line
+            // scan sees the call.
+            if descriptor.target == "sailfin_intrinsic_exe_path" {
+                _preamble_inlined = true;
+            }
+            // #1308 / SFN-51: the fs-sentinel targets never appear as a real
+            // `call @sailfin_intrinsic_fs_*(` — the lowering branch emits the
+            // host leg's concrete primitive (`symlink`/`mkdtemp`/`stat`,
+            // `opendir`/`FindFirstFileA`) or a bare immediate (the Windows
+            // stub) instead. Skip the bogus declare; the concrete leg's
+            // declare comes from its own row (for `list_dir`, the `opendir`
+            // family / `FindFirstFileA` externs in `filesystem.sfn`).
+            if descriptor.target == "sailfin_intrinsic_fs_symlink" {
+                _preamble_inlined = true;
+            }
+            if descriptor.target == "sailfin_intrinsic_fs_mkdtemp" {
+                _preamble_inlined = true;
+            }
+            if descriptor.target == "sailfin_intrinsic_fs_exists" {
+                _preamble_inlined = true;
+            }
+            if descriptor.target == "sailfin_intrinsic_fs_get_perms" {
+                _preamble_inlined = true;
+            }
+            if descriptor.target == "sailfin_intrinsic_fs_list_dir" {
+                _preamble_inlined = true;
+            }
+            if descriptor.target == "sailfin_intrinsic_fs_read_link" {
+                _preamble_inlined = true;
+            }
+            if descriptor.target == "sailfin_intrinsic_fs_is_directory" {
+                _preamble_inlined = true;
+            }
+            // #1601 / #1876 / #1877: the Call-form `serve` stays
+            // effect-metadata-only, so it stays sentinel-skipped — its
+            // descriptor `symbol` is deliberately fake (`sfn_serve_unbridged`)
+            // and no lowering emits a `call` against it. The source-text
+            // walker (`filter_runtime_helper_targets`) can still surface this
+            // target from a literal `serve` token in a compiled module, which
+            // would otherwise drive the loop below to emit a `declare` to an
+            // undefined symbol and break the link. Skip it so a metadata-only
+            // row never declares. The real serve runtime declares come from
+            // the `serve_start` / `serve_handler_dispatch` rows (distinct
+            // targets, real `sfn_serve` symbol) and are unaffected.
+            //
+            // `websocket.connect`/`.send`/`.close`/`.serve` are NO LONGER
+            // skipped: they are all bridged to real `sfn_websocket_*` symbols
+            // in `runtime/sfn/adapters/websocket.sfn` (#1876, #1877), so the
+            // normal declare path below emits a real `declare` the linker
+            // resolves against that runtime module.
+            if descriptor.target == "serve" { _preamble_inlined = true; }
+            if _preamble_inlined {
+                index += 1;
+                continue;
+            }
+            // M1.C / M2.4a: when `native_signature` is populated the
+            // call-emission path (`coerce_and_emit_call` in
+            // `core_call_emission/dispatch.sfn`) routes the call to that symbol
+            // instead of `descriptor.symbol`. The declare we emit here
+            // has to follow suit so the freshly-emitted call lands on
+            // a declared name the linker can resolve. The C body
+            // backing `descriptor.symbol` is intentionally left
+            // undeclared in this module — seed-built IR that still
+            // calls it carries its own declare line.
+            let mut effective_symbol = descriptor.symbol;
+            let mut _native_sig: string? = descriptor.native_signature;
+            if _native_sig != null {
+                if _native_sig.length > 0 { effective_symbol = _native_sig; }
+            }
+            // Skip if this helper is actually defined locally (not just a runtime intrinsic)
+            if string_array_contains(local_symbols, effective_symbol) {
+                index += 1;
+                continue;
+            }
+            // Issue #633: skip when an imported user function shadows the
+            // helper. The imported declare emitted by
+            // `render_imported_function_declarations` already carries the
+            // source-level signature and would otherwise collide with the
+            // registry's hand-typed shape after symbol mangling renames
+            // `@<sym>` to `@<sym>__<module>`. Limit the skip to
+            // `target == symbol` mirror rows so the helper's alias-declare
+            // path below (which handles `target != symbol` C entrypoints
+            // like `monotonic_millis` → `sfn_clock_millis`)
+            // is not affected.
+            let mut _shadowed_by_import: boolean = false;
+            if descriptor.target == descriptor.symbol {
+                if string_array_contains(imported_symbols, effective_symbol) {
+                    // #633: when an imported user function shadows a
+                    // `target == symbol && native_signature == null` row, the
+                    // imported declare wins. Today the only such rows reaching
+                    // here are the libc-fallback `nanosleep` / `clock_gettime`
+                    // (the six prelude-mirror rows were removed by #1780; their
+                    // reconciliation moved to the derived-declare loop below).
+                    // These libc rows are NOT reconciled: their registry
+                    // signature is the deliberate opaque-pointee form (`i8*`)
+                    // that intentionally differs from the staged `posix.sfn`
+                    // `%Timespec*` import they defer to, so reconciling them
+                    // would be a false-positive drift.
+                    _shadowed_by_import = true;
+                }
+            }
+            if _shadowed_by_import {
+                index += 1;
+                continue;
+            }
+            // Some helper targets intentionally alias the same runtime symbol.
+            // Avoid emitting duplicate declarations for the same symbol.
+            if string_array_contains(declared_symbols, effective_symbol) {
+                index += 1;
+                continue;
+            }
+            let mut parameter_text: string = "";
+            if descriptor.parameter_types.length > 0 {
+                parameter_text = join_with_separator(descriptor.parameter_types, ", ");
+            }
+            // The `declare` line must use the C body's true ABI return
+            // type, not the caller-visible `return_type`. When the
+            // descriptor opts into the post-call coercion mechanism
+            // (`c_abi_return_type` set, #638), `emit_runtime_call`
+            // renders `call <abi> @sym(...)`; this line keeps the
+            // declare aligned so the IR validates and the linker
+            // resolves the C symbol with its true register class.
+            // For descriptors without a coercion opt-in (the entire
+            // registry today) this collapses to `descriptor.return_type`
+            // and the emitted line is byte-identical to the pre-#638
+            // shape.
+            let declare_return = effective_helper_declare_return_type(descriptor);
+            let line = "declare " + declare_return + " @" + effective_symbol
+                + "("
+                + parameter_text
+                + ")";
+            lines.push(line);
+            declared_symbols.push(effective_symbol);
+            // M1.7.5b (#502): the per-target alias `declare` branch was
+            // retired here. It only mattered during the M2.4a coexistence
+            // period, when descriptor `target` names sometimes differed
+            // from the effective symbol the lowering actually emitted a
+            // `call` against. With the two-walker model live (M1.7.5a /
+            // #501 — `collect_runtime_helper_targets` plus the post-
+            // lowering `collect_runtime_helper_targets_from_lines` scan
+            // in `lowering_helpers.sfn`), every real call site is
+            // observed against its actual emitted symbol, so the alias
+            // declare became redundant. See
+            // `docs/conventions/runtime-helpers.md` for the descriptor-
+            // only contract that supersedes it.
+        }
+        index += 1;
+    }
+
+    // #1780 (SFEP-0035 §3.2): derived prelude-mirror declares. The six prelude
+    // free functions (`char_code`, `char_at`, …) have no registry rows anymore;
+    // a module that calls one without importing the prelude (the E0420
+    // implicit-runtime allowance) needs a `declare` here so its `call` resolves.
+    // The shape is derived from the source-typed mirror signature via the same
+    // `map_return_type` / `collect_parameter_types` an imported call would use,
+    // so it is byte-identical to what the prelude's own emitted declare would be
+    // (and `char_from_code` is corrected from the old `i8*` row to `{i8*, i64}`).
+    // A prelude-importing module instead defers to the imported declare emitted
+    // by `render_imported_function_declarations`, and this is where the
+    // retargeted reconciliation guard fires against the real prelude signature.
+    let mirror_signatures = prelude_mirror_signatures();
+    let mut mirror_index: int = 0;
+    loop {
+        if mirror_index >= mirror_signatures.length { break; }
+        let mirror = mirror_signatures[mirror_index];
+        if string_array_contains(used_targets, mirror.name) {
+            let mirror_symbol = sanitize_symbol(mirror.name);
+            // Defined locally (the prelude's own compile) → the define wins.
+            let mut _mirror_handled: boolean = false;
+            if string_array_contains(local_symbols, mirror_symbol) {
+                _mirror_handled = true;
+            }
+            // Imported (prelude-importing module) → reconcile against the
+            // prelude define, then defer to its imported declare.
+            if !_mirror_handled {
+                if string_array_contains(imported_symbols, mirror_symbol) {
+                    _reconcile_mirror_signature_or_fatal(mirror, imported_functions, mirror_symbol, context);
+                    _mirror_handled = true;
+                }
+            }
+            // Already declared (e.g. via an alias row) → do not redeclare.
+            if !_mirror_handled {
+                if string_array_contains(declared_symbols, mirror_symbol) {
+                    _mirror_handled = true;
+                }
+            }
+            if !_mirror_handled {
+                let mirror_return = map_return_type(context, mirror.return_type);
+                let mirror_params = collect_parameter_types(context, mirror.parameters, mirror.name);
+                let mut mirror_param_text: string = "";
+                if mirror_params.length > 0 {
+                    mirror_param_text = join_with_separator(mirror_params, ", ");
+                }
+                lines.push("declare " + mirror_return + " @" + mirror_symbol
+                    + "("
+                    + mirror_param_text
+                    + ")");
+                declared_symbols.push(mirror_symbol);
+            }
+        }
+        mirror_index += 1;
+    }
+    return lines;
+}
+
+// =============================================================================
+// Imported Function Declarations
+// =============================================================================
+// #1736: extract the `@<symbol>` names from rendered `declare ... @sym(...)`
+// lines. Used to share the typed-descriptor pass's declared-symbol set with
+// the imported-function pass below, so a helper that both passes resolve to
+// the same symbol (e.g. `print` → `sfn_print`, `concat` → `sfn_array_concat`,
+// where `target != symbol` so the #633 import-shadow skip does not fire) is
+// declared exactly once — with the typed shape the prelude's own call sites
+// use, not the erased import-closure shape.
+fn extract_declared_symbol_names(lines: string[]) -> string[] {
+    let mut symbols: string[] = [];
+    if lines.length == 0 { return symbols; }
+    let mut index: int = 0;
+    loop {
+        if index >= lines.length { break; }
+        let line = lines[index];
+        // Only parse `declare`-prefixed lines. Capability-metadata comment
+        // lines (`; intrinsic <sym> requires ...`) carry no `@` today, but
+        // keying on the `declare ` prefix makes the extractor robust if a
+        // future comment shape ever embeds an `@symbol` token.
+        if index_of(line, "declare ") == 0 {
+            let at_pos = index_of(line, "@");
+            if at_pos >= 0 {
+                let after_at = substring(line, at_pos + 1, line.length);
+                let paren_pos = index_of(after_at, "(");
+                if paren_pos > 0 {
+                    let symbol = substring(after_at, 0, paren_pos);
+                    if !string_array_contains(symbols, symbol) {
+                        symbols.push(symbol);
+                    }
+                }
+            }
+        }
+        index += 1;
+    }
+    return symbols;
+}
+
+fn render_imported_function_declarations(imported_functions: NativeFunction[], local_functions: NativeFunction[], context: TypeContext, runtime_helpers: string[], already_declared_symbols: string[]) -> string[] {
+    if imported_functions.length == 0 { return []; }
+    // Issue #633: previously this pass collected the runtime-helper
+    // symbol set and skipped imported declares that collided with any
+    // helper, deferring to the registry-emitted declare. That caused
+    // every cross-module call to a `target == symbol` mirror row
+    // (`number_to_string`, `char_code`, `find_char`, etc.) to adopt the
+    // registry's hand-typed C ABI signature, silently overriding the
+    // imported function's source-level types. After this fix the
+    // imported declare wins and `render_runtime_helper_declarations`
+    // takes the symmetric skip when a `target == symbol` row collides
+    // with an imported user function — so the registry retains its
+    // role for true C entrypoints (`sailfin_runtime_*`, `runtime_*_fn`
+    // aliases) but no longer overrules the source-of-truth signature
+    // for Sailfin functions that happen to mirror a legacy helper name.
+    //
+    // Get all local function symbols to avoid redefinitions
+    let mut local_symbols: string[] = [];
+    let mut local_index: int = 0;
+    loop {
+        if local_index >= local_functions.length { break; }
+        local_symbols.push(sanitize_symbol(local_functions[local_index].name));
+        local_index += 1;
+    }
+
+    let mut lines: string[] = [];
+    let mut emitted_declarations: string[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= imported_functions.length { break; }
+        let function = imported_functions[index];
+        let sanitized_name = sanitize_symbol(function.name);
+        // Skip if this function is defined locally — emitting a declare
+        // alongside the local define produces an LLVM redefinition error.
+        if string_array_contains(local_symbols, sanitized_name) {
+            index += 1;
+            continue;
+        }
+        // Skip if we've already emitted a declaration for this function
+        if string_array_contains(emitted_declarations, sanitized_name) {
+            index += 1;
+            continue;
+        }
+        // Issue #1736: skip when the typed runtime-helper declare pass
+        // (`render_runtime_helper_declarations`, run just before this one)
+        // already declared this symbol. For helpers whose `target != symbol`
+        // (e.g. `print` → `sfn_print`, `concat` → `sfn_array_concat`) the
+        // #633 import-shadow skip in that pass does not fire, so it emits the
+        // typed descriptor shape (`{i8*, i64}` / `{i8**,i64,i64}*`). The
+        // prelude's own call sites use that typed shape, so emitting the
+        // erased import-closure declare here would produce a conflicting
+        // redefinition that clang's per-module verifier rejects. The typed
+        // declare must win, so defer to it.
+        if string_array_contains(already_declared_symbols, sanitized_name) {
+            index += 1;
+            continue;
+        }
+        emitted_declarations.push(sanitized_name);
+        let mut return_type = map_return_type(context, function.return_type);
+        if index_of(sanitized_name, "parse_native_artifact") >= 0 {
+            return_type = "i8*";
+        }
+        let param_types = collect_parameter_types(context, function.parameters, function.name);
+        let param_text = join_with_separator(param_types, ", ");
+        let line = "declare " + return_type + " @" + sanitized_name + "("
+            + param_text
+            + ")";
+        lines.push(line);
+        index += 1;
+    }
+    return lines;
+}
+
+// =============================================================================
+// Struct Type Definitions
+// =============================================================================
+fn render_struct_type_definitions(context: TypeContext, functions: NativeFunction[]) -> string[] {
+    let mut _if286: boolean = false;
+    if context.structs == null { _if286 = true; }
+    if context.enums == null { _if286 = true; }
+    if _if286 { return []; }
+    let mut _if287: boolean = false;
+    if context.structs.length > 10000 { _if287 = true; }
+    if context.enums.length > 10000 { _if287 = true; }
+    if _if287 { return []; }
+    if functions == null { return []; }
+    if functions.length > 20000 { return []; }
+    let mut lines: string[] = [];
+
+    // First pass: collect all referenced struct types
+    let mut referenced_types: string[] = [];
+    let mut struct_index: int = 0;
+    let struct_count = clamp_collection_length(context.structs.length, 10000);
+    loop {
+        if struct_index >= struct_count { break; }
+        let info = context.structs[struct_index];
+        let mut field_index: int = 0;
+        let field_count = clamp_collection_length(info.fields.length, 10000);
+        loop {
+            if field_index >= field_count { break; }
+            let field_type = info.fields[field_index].llvm_type;
+            let extracted = extract_struct_type_from_llvm(field_type);
+            if extracted.length > 0 {
+                if !string_array_contains(referenced_types, extracted) {
+                    referenced_types.push(extracted);
+                }
+            }
+            field_index += 1;
+        }
+        struct_index += 1;
+    }
+
+    // Check enums too
+    let mut enum_index: int = 0;
+    let enum_count = clamp_collection_length(context.enums.length, 10000);
+    loop {
+        if enum_index >= enum_count { break; }
+        let enum_info = context.enums[enum_index];
+        let mut variant_index: int = 0;
+        let variant_count = clamp_collection_length(enum_info.variants.length, 10000);
+        loop {
+            if variant_index >= variant_count { break; }
+            let variant = enum_info.variants[variant_index];
+            // Check each field in the variant for struct references
+            let mut variant_field_index: int = 0;
+            let variant_field_count = clamp_collection_length(variant.fields.length, 10000);
+            loop {
+                if variant_field_index >= variant_field_count { break; }
+                let field_type = variant.fields[variant_field_index].llvm_type;
+                let extracted = extract_struct_type_from_llvm(field_type);
+                if extracted.length > 0 {
+                    if !string_array_contains(referenced_types, extracted) {
+                        referenced_types.push(extracted);
+                    }
+                }
+                variant_field_index += 1;
+            }
+            variant_index += 1;
+        }
+        enum_index += 1;
+    }
+
+    // Check function signatures too (return types and parameters)
+    let mut func_index: int = 0;
+    let function_count = clamp_collection_length(functions.length, 20000);
+    loop {
+        if func_index >= function_count { break; }
+        let func = functions[func_index];
+        let mut safe_return_type = func.return_type;
+        if safe_return_type == null { safe_return_type = ""; }
+        let mut safe_params = func.parameters;
+        if safe_params == null { safe_params = []; }
+        let safe_param_count = clamp_collection_length(safe_params.length, 2000);
+        if safe_param_count == 0 { safe_params = []; }
+        // Check return type
+        let return_llvm_type = map_return_type(context, safe_return_type);
+        let extracted_return = extract_struct_type_from_llvm(return_llvm_type);
+        if extracted_return.length > 0 {
+            if !string_array_contains(referenced_types, extracted_return) {
+                referenced_types.push(extracted_return);
+            }
+        }
+        // Check each parameter type
+        let mut param_index: int = 0;
+        loop {
+            if param_index >= safe_param_count { break; }
+            let param_llvm_type = map_parameter_type(context, safe_params[param_index].type_annotation);
+            let extracted_param = extract_struct_type_from_llvm(param_llvm_type);
+            if extracted_param.length > 0 {
+                if !string_array_contains(referenced_types, extracted_param) {
+                    referenced_types.push(extracted_param);
+                }
+            }
+            param_index += 1;
+        }
+        func_index += 1;
+    }
+
+    // Emit opaque forward declarations for referenced but undefined types
+    let mut ref_index: int = 0;
+    let referenced_count = clamp_collection_length(referenced_types.length, 20000);
+    loop {
+        if ref_index >= referenced_count { break; }
+        let ref_type = referenced_types[ref_index];
+        // Check if this type is defined in our context (structs or enums)
+        let mut is_defined: boolean = false;
+        let mut check_index: int = 0;
+        loop {
+            if check_index >= struct_count { break; }
+            if context.structs[check_index].llvm_name == ref_type {
+                is_defined = true;
+                break;
+            }
+            check_index += 1;
+        }
+        // Also check enums
+        if !is_defined {
+            check_index = 0;
+            loop {
+                if check_index >= enum_count { break; }
+                let enum_llvm_name = "%" + sanitize_symbol(context.enums[check_index].name);
+                if enum_llvm_name == ref_type {
+                    is_defined = true;
+                    break;
+                }
+                check_index += 1;
+            }
+        }
+        if !is_defined {
+            // Emit opaque declaration
+            lines.push(ref_type + " = type opaque");
+        }
+        ref_index += 1;
+    }
+
+    // Second pass: emit actual struct definitions (deduplicated)
+    let mut index: int = 0;
+    let mut emitted_types: string[] = [];
+    loop {
+        if index >= struct_count { break; }
+        let info = context.structs[index];
+        // Skip if we already emitted this type
+        if string_array_contains(emitted_types, info.llvm_name) {
+            index += 1;
+            continue;
+        }
+        emitted_types.push(info.llvm_name);
+
+        let mut field_types: string[] = [];
+        let mut field_index: int = 0;
+        let safe_field_count = clamp_collection_length(info.fields.length, 10000);
+        loop {
+            if field_index >= safe_field_count { break; }
+            field_types.push(info.fields[field_index].llvm_type);
+            field_index += 1;
+        }
+        let mut body: string = "";
+        if field_types.length == 0 { body = "{}"; } else {
+            body = "{ " + join_with_separator(field_types, ", ") + " }";
+        }
+        lines.push(info.llvm_name + " = type " + body);
+        index += 1;
+    }
+    return lines;
+}
+
+// =============================================================================
+// Enum Type Definitions
+// =============================================================================
+fn render_enum_type_definitions(context: TypeContext) -> string[] {
+    let mut lines: string[] = [];
+    let mut emitted_types: string[] = [];
+    let mut index: int = 0;
+    let enum_count = clamp_collection_length(context.enums.length, 10000);
+    loop {
+        if index >= enum_count { break; }
+        let enum_info = context.enums[index];
+        let enum_llvm_name = "%" + sanitize_symbol(enum_info.name);
+
+        // Skip if we already emitted this type
+        if string_array_contains(emitted_types, enum_llvm_name) {
+            index += 1;
+            continue;
+        }
+        emitted_types.push(enum_llvm_name);
+
+        // Map tag type to LLVM type
+        let mut llvm_tag_type: string = "i32";
+        if enum_info.tag_type == "i8" { llvm_tag_type = "i8"; }
+        if enum_info.tag_type == "i16" { llvm_tag_type = "i16"; }
+        if enum_info.tag_type == "i32" { llvm_tag_type = "i32"; }
+        if enum_info.tag_type == "i64" { llvm_tag_type = "i64"; }
+
+        // Calculate the maximum payload size across all variants
+        let mut max_payload_size: int = 0;
+        let mut variant_idx: int = 0;
+        let variant_count = clamp_collection_length(enum_info.variants.length, 10000);
+        loop {
+            if variant_idx >= variant_count { break; }
+            let variant = enum_info.variants[variant_idx];
+            if variant.size > max_payload_size {
+                max_payload_size = variant.size;
+            }
+            variant_idx += 1;
+        }
+
+        // Enum layout:
+        // - Tag lives in the first field.
+        // - Payload is stored in a field whose *LLVM alignment* matches the enum's
+        //   ABI alignment. This is critical: if the payload field is `[N x i8]`, the
+        //   whole enum becomes only 4-byte aligned (due to the `i32` tag), which then
+        //   breaks the inferred offsets for structs that contain this enum.
+        // - If the enum's ABI alignment is larger than the tag, insert explicit
+        //   padding bytes so payload begins at an aligned offset.
+        //   This must match `.layout variant offset=...` produced by layout inference.
+        let mut pad_repr: string = "";
+        let mut payload_repr: string = "";
+        if max_payload_size > 0 {
+            let mut enum_align = enum_info.align;
+            if enum_align <= 0 { enum_align = 1; }
+
+            // Payload offset = align_to(tag_size, enum_align)
+            let mut payload_offset = enum_info.tag_size;
+            if enum_align > 1 {
+                let remainder = payload_offset % enum_align;
+                if remainder != 0 {
+                    payload_offset += (enum_align - remainder);
+                }
+            }
+            let pad_size = payload_offset - enum_info.tag_size;
+            if pad_size > 0 {
+                pad_repr = ", [" + number_to_string(pad_size) + " x i8]";
+            }
+
+            // Store payload in an aligned element array so the enum type itself has
+            // `enum_align` alignment.
+            let mut elem_type: string = "i8";
+            let mut elem_size: int = 1;
+            if enum_align >= 16 {
+                elem_type = "i128";
+                elem_size = 16;
+            } else if enum_align >= 8 {
+                elem_type = "i64";
+                elem_size = 8;
+            } else if enum_align >= 4 {
+                elem_type = "i32";
+                elem_size = 4;
+            } else if enum_align >= 2 {
+                elem_type = "i16";
+                elem_size = 2;
+            }
+
+            let mut payload_storage_size = max_payload_size;
+            let remainder = payload_storage_size % elem_size;
+            if remainder != 0 {
+                payload_storage_size += (elem_size - remainder);
+            }
+            let elem_count = payload_storage_size / elem_size;
+            payload_repr = ", [" + number_to_string(elem_count) + " x "
+                + elem_type
+                + "]";
+        }
+
+        let body = "{ " + llvm_tag_type + pad_repr + payload_repr + " }";
+        lines.push(enum_info.llvm_name + " = type " + body);
+        index += 1;
+    }
+    return lines;
+}

@@ -85,7 +85,7 @@ rather than dispatch. "Stage 0 shipped" overstated what exists.
 
 **The longest pole was scheduled in front of the shortest.** SFEP-0015 and
 SFEP-0016 both asserted that owning the syscall layer depends on owning the
-backend. `compiler/src/llvm/syscall.sfn` (156 lines) already emits raw,
+backend. `compiler/capsules/codegen-llvm/src/syscall.sfn` (156 lines) already emits raw,
 register-constrained `syscall` instructions via LLVM inline asm, contract-gated to
 one permitted caller. The dependency does not exist, and asserting it deferred a
 tractable piece of work behind an intractable one.
@@ -190,7 +190,7 @@ dependency this arc exists to reduce.
 
 **Decision: owning the syscall layer (Axis 3, SFEP-0060) has no dependency on
 owning the Select role.** The evidence is in the tree.
-`compiler/src/llvm/syscall.sfn` recognises `syscall1`..`syscall6` and lowers them
+`compiler/capsules/codegen-llvm/src/syscall.sfn` recognises `syscall1`..`syscall6` and lowers them
 to a register-constrained `call i64 asm sideeffect "syscall"` per the SysV AMD64
 ABI on Linux x86-64. `syscall_contract_error` restricts these builtins to exactly
 one caller module, `runtime/sfn/platform/syscall_linux.sfn` — **which does not

@@ -6,7 +6,7 @@
 // "ABI primitive mismatch: arithmetic mixes i64 (int) and double (float)"
 // (root-caused during SFN-119 / PR #1976). The fix makes the propagation
 // bidirectional in `lower_binary_operation` / `lower_comparison_operation`
-// (`compiler/src/llvm/expression_lowering/native/core_ops_lowering.sfn`):
+// (`compiler/capsules/codegen-llvm/src/expression_lowering/native/core_ops_lowering.sfn`):
 // when the literal is on the left and the sibling is typed, the typed side
 // lowers first and feeds its type back.
 //

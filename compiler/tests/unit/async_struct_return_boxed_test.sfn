@@ -7,7 +7,7 @@
 // needs a bitcast before the caller can project fields.
 //
 // Before the fix, `lower_expression`'s await path in
-// `compiler/src/llvm/expression_lowering/native/core.sfn` inferred the
+// `compiler/capsules/codegen-llvm/src/expression_lowering/native/core.sfn` inferred the
 // callee's Sailfin return type, mapped it to LLVM, and then dropped the
 // mapping on the floor whenever `map_return_type` returned a pointer
 // (`ends_with_pointer_suffix(mapped)` skipped the assignment to

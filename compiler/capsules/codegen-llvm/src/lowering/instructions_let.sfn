@@ -1,0 +1,1031 @@
+// compiler/capsules/codegen-llvm/src/lowering/instructions_let.sfn
+//
+// Let binding instruction lowering.
+import { LoweringDiagnostic, parse_fn_type_text } from "sfn/ir";
+import { NativeFunction, NativeInstruction, NativeSourceSpan } from "sfn/ir";
+import { find, substring } from "sfn/strings";
+
+import { array_pointer_element_type } from "../expression_lowering/arrays";
+import { analyze_value_ownership, detect_borrow_conflicts, lower_expression } from "../expression_lowering/native/core";
+import { coerce_null_literal_to_union_variant, coerce_operand_to_type } from "../expression_lowering/native/core_operands/dispatch";
+import {
+    append_local_binding,
+    mark_last_local_consumed,
+    promote_escaping_locals_for_boundaries
+} from "../expression_lowering/native/core_scopes";
+import { is_heap_type, map_array_pointer_type } from "../expression_lowering/native/core_type_mapping";
+import { detect_suspension_conflicts } from "../expression_lowering/native/statement_suspension";
+import { is_union_annotation, map_local_type, split_union_annotations } from "../expression_lowering/native/statement_type_mapping";
+import { find_local_binding, find_parameter_binding, mark_parameter_consumed } from "../expressions_bindings";
+import { default_return_literal, format_local_pointer_name } from "../expressions_helpers";
+import {
+    append_lifetime_region,
+    append_lifetime_release_event,
+    infer_borrow_base_scope,
+    make_lifetime_region_metadata
+} from "../lifetime";
+import { trace_log, trace_lowering } from "../lowering_debug_state";
+import { find_function_by_name_or_import } from "../rendering_helpers";
+import { empty_string_constant_set, merge_string_constants } from "../strings";
+import {
+    find_interface_info_by_name,
+    find_struct_info_by_llvm_type,
+    find_vtable_for_struct_interface
+} from "../type_context_queries";
+import { ends_with_pointer_suffix, numeric_type_kind, strip_pointer_suffix } from "../type_mapping";
+import {
+    LLVMOperand,
+    LetLoweringResult,
+    LifetimeRegionMetadata,
+    LifetimeReleaseEvent,
+    LocalBinding,
+    LocalMutation,
+    OwnershipConsumption,
+    OwnershipInfo,
+    ParameterBinding,
+    StringConstant,
+    TypeContext
+} from "../types";
+import {
+    diag_to_legacy_string,
+    is_identifier_part_char,
+    is_identifier_start_char,
+    lowering_error_diag,
+    number_to_string,
+    starts_with,
+    trim_text
+} from "../utils";
+import { scope_id_inside_try_body } from "./instructions_helpers";
+
+// #537: true for boolean (`i1`) initializers stored into numeric bindings;
+// refuses silent `zext`/`uitofp` widening without flagging other pairings.
+fn _bool_into_numeric(from_type: string, to_type: string) -> boolean {
+    if numeric_type_kind(from_type) != "bool" { return false; }
+    let to_kind = numeric_type_kind(to_type);
+    if to_kind == "int" { return true; }
+    if to_kind == "float" { return true; }
+    return false;
+}
+
+fn _null_union_variant_index(annotation: string) -> int {
+    let normalized = trim_text(annotation);
+    if !is_union_annotation(normalized) { return -1; }
+    let parts = split_union_annotations(normalized);
+    let mut index: int = 0;
+    loop {
+        if index >= parts.length { break; }
+        if trim_text(parts[index]) == "null" { return index; }
+        index += 1;
+    }
+    return -1;
+}
+
+// Extract the lifted lambda symbol from a `<closure_pair @<name> ...>`
+// marker. Returns the bare symbol name (e.g. `sfn_lambda_0`) when the
+// initializer is a closure-pair marker, otherwise the empty string.
+// Used to enrich the let-binding's `type_annotation` from the bare
+// `__closure__` sentinel into the richer `__closure__@sfn_lambda_<N>`
+// form so #689 call-site dispatch can look up the lifted function's
+// signature without a side-channel.
+fn _extract_closure_pair_symbol(expression: string) -> string {
+    let trimmed = trim_text(expression);
+    let prefix = "<closure_pair @";
+    if trimmed.length < prefix.length { return ""; }
+    if !starts_with(trimmed, prefix) { return ""; }
+    let mut cursor: int = prefix.length;
+    let mut symbol: string = "";
+    loop {
+        if cursor >= trimmed.length { break; }
+        let ch = substring(trimmed, cursor, cursor + 1);
+        if ch == " " { break; }
+        if ch == ">" { break; }
+        symbol = symbol + ch;
+        cursor += 1;
+    }
+    return symbol;
+}
+
+// Extract the leading function-call target identifier from a let initializer
+// expression. Returns the identifier when the expression is shaped like
+// `<identifier>(...)`, otherwise the empty string. Used to look up the callee
+// of a direct async call so we can annotate the let's local with the callee's
+// Sailfin return type (needed by `await` to unbox structs).
+fn _extract_leading_call_target(expression: string) -> string {
+    let trimmed = trim_text(expression);
+    if trimmed.length == 0 { return ""; }
+    let first = substring(trimmed, 0, 1);
+    if !is_identifier_start_char(first) { return ""; }
+    let mut index: int = 1;
+    loop {
+        if index >= trimmed.length { break; }
+        let ch = substring(trimmed, index, index + 1);
+        if !is_identifier_part_char(ch) { break; }
+        index += 1;
+    }
+    if index >= trimmed.length { return ""; }
+    if substring(trimmed, index, index + 1) != "(" { return ""; }
+    return substring(trimmed, 0, index);
+}
+
+// Detect an array higher-order-method initializer `<base>.map(...)` /
+// `<base>.filter(...)` and return the `<base>` identifier, else "". The
+// runtime array-HOF helpers return an opaque `i8*` (runtime_helpers.sfn),
+// so an inferred `let sq = arr.map(...)` records no resolvable array
+// annotation and a follow-on `sq.reduce(...)` / `sq.map(...)` cannot
+// recover the `i64` element type the routing needs
+// (core_call_resolution/method_target.sfn). #1836.
+fn _array_hof_result_base(expression: string) -> string {
+    let trimmed = trim_text(expression);
+    if trimmed.length == 0 { return ""; }
+    let first = substring(trimmed, 0, 1);
+    if !is_identifier_start_char(first) { return ""; }
+    let mut index: int = 1;
+    loop {
+        if index >= trimmed.length { break; }
+        let ch = substring(trimmed, index, index + 1);
+        if !is_identifier_part_char(ch) { break; }
+        index += 1;
+    }
+    let base = substring(trimmed, 0, index);
+    if base.length == 0 { return ""; }
+    let rest = substring(trimmed, index, trimmed.length);
+    if starts_with(rest, ".map(") { return base; }
+    if starts_with(rest, ".filter(") { return base; }
+    return "";
+}
+
+fn _array_hof_map_returns_int_array(expression: string) -> boolean {
+    let trimmed = trim_text(expression);
+    let map_index = find(trimmed, ".map(", 0);
+    if map_index < 0 { return false; }
+    let head_start = map_index + 5;
+    if head_start >= trimmed.length { return false; }
+    let callback_text = substring(trimmed, head_start, trimmed.length);
+    let brace_index = find(callback_text, "{", 0);
+    let arrow_index = find(callback_text, "=>", 0);
+    let mut head_end = callback_text.length;
+    if brace_index >= 0 { head_end = brace_index; }
+    if arrow_index >= 0 {
+        if arrow_index < head_end { head_end = arrow_index; }
+    }
+    let callback_head = trim_text(substring(callback_text, 0, head_end));
+    if find(callback_head, "-> int[]", 0) >= 0 { return true; }
+    if find(callback_head, "->int[]", 0) >= 0 { return true; }
+    return false;
+}
+
+// Recover the source array element type for a base identifier binding,
+// mirroring the receiver-element resolution in
+// core_call_resolution/method_target.sfn (the binding's llvm_type first, then
+// the source annotation via `map_array_pointer_type`). Returns "" when the
+// base is not a resolvable array. #1836.
+fn _base_array_element_type(base: string, locals: LocalBinding[], bindings: ParameterBinding[], context: TypeContext) -> string {
+    let mut ltype: string = "";
+    let mut ann: string = "";
+    let local = find_local_binding(locals, base);
+    if local != null {
+        ltype = local.llvm_type;
+        ann = local.type_annotation;
+    } else {
+        let param = find_parameter_binding(bindings, base);
+        if param != null {
+            ltype = param.llvm_type;
+            ann = param.type_annotation;
+        }
+    }
+    let mut elem = array_pointer_element_type(ltype);
+    if elem.length == 0 {
+        if ann.length > 0 {
+            let derived = map_array_pointer_type(context, ann);
+            if derived.length > 0 {
+                elem = array_pointer_element_type(derived);
+            }
+        }
+    }
+    return elem;
+}
+
+// Extract the function-type element text from a `Channel<fn() -> void>` source
+// annotation, or "" for any non-fn element (#1944). Only a function-typed
+// element is recovered — every other `Channel<T>` keeps the bare `channel`
+// binding annotation, so this widens no existing channel behaviour. The outer
+// `>` is always the last character (the `>` inside a `->` return arrow is
+// interior), so stripping the `Channel<` prefix and the final `>` isolates the
+// element even for `fn() -> void`. Parse the element through the shared
+// balanced function-type parser so formatter-canonical whitespace and nested
+// types cannot change lowering semantics (SFN-434).
+fn _channel_annotation_fn_element(annotation: string) -> string {
+    let trimmed = trim_text(annotation);
+    if !starts_with(trimmed, "Channel<") { return ""; }
+    if trimmed.length < 9 { return ""; }
+    if substring(trimmed, trimmed.length - 1, trimmed.length) != ">" {
+        return "";
+    }
+    let inner = trim_text(substring(trimmed, 8, trimmed.length - 1));
+    let parsed = parse_fn_type_text(inner);
+    if !parsed.ok { return ""; }
+    return inner;
+}
+
+// Recover a primitive INTEGER element kind carried by a `Channel<int>` /
+// `Channel<i32>` (etc.) source annotation, or "" when the element is not a
+// recognized integer type. Threaded onto the binding as `channel:<kind>`
+// (SFN-398) so channel send lowering can coerce a `double`-lowered operand
+// (a `for i in a..b` range induction variable lowers to `double`) to the
+// declared integer width instead of storing raw IEEE-754 bits into the i64
+// ring slot. Only integer kinds opt in: non-integer scalars (float/bool/
+// string) round-trip correctly on the bare `channel` path, and struct
+// elements keep the by-pointer path via an explicit `channel:K(N)` initializer.
+fn _channel_annotation_int_element(annotation: string) -> string {
+    let trimmed = trim_text(annotation);
+    if !starts_with(trimmed, "Channel<") { return ""; }
+    if trimmed.length < 9 { return ""; }
+    if substring(trimmed, trimmed.length - 1, trimmed.length) != ">" {
+        return "";
+    }
+    let inner = trim_text(substring(trimmed, 8, trimmed.length - 1));
+    if inner == "int" { return inner; }
+    if inner == "i8" { return inner; }
+    if inner == "i16" { return inner; }
+    if inner == "i32" { return inner; }
+    if inner == "i64" { return inner; }
+    if inner == "u8" { return inner; }
+    if inner == "u16" { return inner; }
+    if inner == "u32" { return inner; }
+    if inner == "u64" { return inner; }
+    return "";
+}
+
+// Recover the function-type element text carried by a
+// `channel:fn() -> void` / `channel:fn () -> void`
+// binding annotation (#1944), or "" when the binding is a bare `channel` or a
+// non-fn `channel:<kind>`. The mirror of `_channel_annotation_fn_element` on
+// the lowered-binding side.
+fn _channel_binding_fn_element(annotation: string) -> string {
+    if !starts_with(annotation, "channel:") { return ""; }
+    let elem = trim_text(substring(annotation, 8, annotation.length));
+    let parsed = parse_fn_type_text(elem);
+    if !parsed.ok { return ""; }
+    return elem;
+}
+
+// Extract the channel base identifier from an `await <base>.receive()`
+// initializer, or "" when the initializer is not that shape (#1944). Only a
+// simple-identifier base is recognised (mirroring the typecheck receiver
+// guard); a compound base fails the binding lookup at the call site anyway.
+fn _await_receive_channel_base(value: string) -> string {
+    let trimmed = trim_text(value);
+    if !starts_with(trimmed, "await ") { return ""; }
+    let rest = trim_text(substring(trimmed, 6, trimmed.length));
+    let recv_pos = find(rest, ".receive()", 0);
+    if recv_pos < 0 { return ""; }
+    if recv_pos + 10 != rest.length { return ""; }
+    let base = trim_text(substring(rest, 0, recv_pos));
+    if base.length == 0 { return ""; }
+    let first = substring(base, 0, 1);
+    if !is_identifier_start_char(first) { return ""; }
+    let mut index: int = 1;
+    loop {
+        if index >= base.length { break; }
+        if !is_identifier_part_char(substring(base, index, index + 1)) {
+            return "";
+        }
+        index += 1;
+    }
+    return base;
+}
+
+fn lower_let_instruction(function: NativeFunction, instruction: NativeInstruction, bindings: ParameterBinding[], locals: LocalBinding[], allocas: string[], lines: string[], temp_index: int, next_local_id: int, next_region_id: int, functions: NativeFunction[], context: TypeContext, scope_id: string, scope_depth: int, current_label: string) -> LetLoweringResult {
+    let mut diagnostics: string[] = [];
+    let mut diags: LoweringDiagnostic[] = [];
+    let mut current_lines: string[] = lines;
+    let mut current_allocas: string[] = allocas;
+    let mut current_locals: LocalBinding[] = locals;
+    let mut current_temp: int = temp_index;
+    let mut current_bindings: ParameterBinding[] = bindings;
+    let mut ownership: OwnershipInfo? = null;
+    let mut consumption: OwnershipConsumption? = null;
+    let mut initializer_span: NativeSourceSpan? = instruction.value_span;
+    let mut lifetime_regions: LifetimeRegionMetadata[] = [];
+    let mut lifetime_releases: LifetimeReleaseEvent[] = [];
+    let mut current_next_region: int = next_region_id;
+    let mut mutations: LocalMutation[] = [];
+    let debug_lowering = trace_lowering();
+    if initializer_span == null { initializer_span = instruction.span; }
+
+    let suspension_diagnostics = detect_suspension_conflicts(instruction.value, current_locals, current_bindings, function.name, initializer_span);
+    let mut _ci16: int = 0;
+    loop {
+        if _ci16 >= suspension_diagnostics.length { break; }
+        diagnostics.push(suspension_diagnostics[_ci16]);
+        _ci16 += 1;
+    }
+
+    // If this binding shadows an existing borrowed local, release the prior borrow region.
+    let existing_binding = find_local_binding(current_locals, instruction.name);
+    if existing_binding != null {
+        let previous_ownership = existing_binding.ownership;
+        if previous_ownership != null {
+            if previous_ownership.variant == "Borrow" {
+                if previous_ownership.region_id >= 0 {
+                    let release_event = LifetimeReleaseEvent {
+                        region_id: previous_ownership.region_id,
+                        scope_id: scope_id,
+                        scope_depth: scope_depth
+                    };
+                    lifetime_releases = append_lifetime_release_event(lifetime_releases, release_event);
+                }
+            }
+        }
+    }
+
+    // #1836: derive an effective source annotation for the binding before
+    // the LLVM type is computed. An inferred `let sq = arr.map(...)` /
+    // `arr.filter(...)` otherwise binds the runtime-helper result as an
+    // opaque `i8*`, losing the array element type that BOTH the array-HOF
+    // routing (core_call_resolution/method_target.sfn) and the closure-parameter
+    // inference need from the receiver — a follow-on `sq.reduce(...)` /
+    // `sq.map(...)` then fatals at lowering or miscompiles its untyped
+    // closure params to `i8*`. The shipped scalar lane records `int[]` when
+    // the base resolves to an i64 array. SFN-112 adds the first
+    // pointer-width array-element lane: if the mapper explicitly returns
+    // `int[]`, record `int[][]` so nested-map results stay first-class array
+    // locals too. Gated on an empty source annotation so explicit
+    // `let sq: ... = ...` bindings are untouched.
+    let mut effective_annotation: string = instruction.type_annotation;
+    if trim_text(instruction.type_annotation).length == 0 {
+        let hof_base = _array_hof_result_base(instruction.value);
+        if hof_base.length > 0 {
+            if _array_hof_map_returns_int_array(instruction.value) {
+                effective_annotation = "int[][]";
+            } else if _base_array_element_type(hof_base, current_locals, current_bindings, context) == "i64" {
+                effective_annotation = "int[]";
+            }
+        }
+    }
+    // #1944: an un-annotated `let task = await ch.receive()` on a channel of
+    // `fn(...)` adopts the channel's function-value element type as its
+    // annotation, so the local lays out as the `{i8*, i8*}` closure pair and
+    // `try_resolve_closure_callee` dispatches `task()` through the same seam a
+    // lambda-bound local uses (SFEP-0030 item 2). Gated on an empty source
+    // annotation (an explicit `let task: fn() -> void = ...` already carries
+    // it) and on the channel binding preserving a `channel:fn(...)` element,
+    // so no other channel or initializer shape is touched.
+    if trim_text(effective_annotation).length == 0 {
+        let recv_base = _await_receive_channel_base(instruction.value);
+        if recv_base.length > 0 {
+            let base_local = find_local_binding(current_locals, recv_base);
+            if base_local != null {
+                let fn_elem = _channel_binding_fn_element(base_local.type_annotation);
+                if fn_elem.length > 0 { effective_annotation = fn_elem; }
+            }
+        }
+    }
+
+    let trimmed_annotation = trim_text(effective_annotation);
+    let mut llvm_type: string = "";
+    if trimmed_annotation.length > 0 {
+        llvm_type = map_local_type(context, effective_annotation);
+        if llvm_type.length == 0 {
+            diagnostics.push("llvm lowering: unsupported local type for `"
+                + instruction.name
+                + "` in `"
+                + function.name
+                + "`");
+        }
+    }
+
+    let mut operand: LLVMOperand? = null;
+    let ownership_analysis = analyze_value_ownership(instruction.value, initializer_span, current_locals, current_bindings);
+    let mut _ci17: int = 0;
+    loop {
+        if _ci17 >= ownership_analysis.diagnostics.length { break; }
+        diagnostics.push(ownership_analysis.diagnostics[_ci17]);
+        _ci17 += 1;
+    }
+    ownership = ownership_analysis.ownership;
+    consumption = ownership_analysis.consumption;
+    if ownership != null {
+        let conflict_diagnostics = detect_borrow_conflicts(ownership, current_locals, instruction.name, function.name);
+        let mut _ci18: int = 0;
+        loop {
+            if _ci18 >= conflict_diagnostics.length { break; }
+            diagnostics.push(conflict_diagnostics[_ci18]);
+            _ci18 += 1;
+        }
+        if ownership.variant == "Borrow" {
+            let base_scope = infer_borrow_base_scope(ownership.base, current_locals, current_bindings, function.name);
+            let region_id = current_next_region;
+            current_next_region += 1;
+            ownership = OwnershipInfo {
+                variant: ownership.variant,
+                base: ownership.base,
+                mutable: ownership.mutable,
+                span: ownership.span,
+                region_id: region_id
+            };
+            let region = make_lifetime_region_metadata(region_id, instruction.name, ownership, scope_id, scope_depth, base_scope.scope_id, base_scope.scope_depth);
+            lifetime_regions = append_lifetime_region(lifetime_regions, region);
+        } else {
+            ownership = OwnershipInfo {
+                variant: ownership.variant,
+                base: ownership.base,
+                mutable: ownership.mutable,
+                span: ownership.span,
+                region_id: -1
+            };
+        }
+    }
+
+    if consumption != null {
+        if consumption.kind == "local" {
+            // Issue #1267: innermost-only consumption. A `let` initializer
+            // that moves a shadowed local must consume only the binding
+            // `find_local_binding` resolves; flipping every same-named match
+            // would suppress the outer binding's scope-exit drop (a leak).
+            current_locals = mark_last_local_consumed(current_locals, consumption.name);
+        } else if consumption.kind == "parameter" {
+            current_bindings = mark_parameter_consumed(current_bindings, consumption.name);
+        }
+    }
+
+    let mut string_constants: StringConstant[] = empty_string_constant_set();
+    let mut _if230: boolean = false;
+    if instruction.value == null { _if230 = true; }
+    if instruction.value.length == 0 { _if230 = true; }
+    // SFN-527: an absent initializer is a legal uninitialized binding
+    // (`let x: i32;`) whose default-value store is the documented semantics
+    // (spec 03-declarations: "Uninitialized bindings default to `null`"), not
+    // a fabrication. Remember which case produced the null operand so the
+    // fail-closed gate below fires only on a real lowering failure.
+    let _initializer_absent: boolean = _if230;
+    if _if230 {
+        diagnostics.push("llvm lowering: let `" + instruction.name
+            + "` missing initializer in `"
+            + function.name
+            + "`");
+    } else {
+        if debug_lowering {
+            trace_log("let-lowering: pre-lower_expression name=" + instruction.name
+                + " value="
+                + instruction.value);
+        }
+        let _pre_expr_line_count = current_lines.length;
+        // #1835: an interface-typed local boxes its concrete initializer into a
+        // trait object below (the `find_vtable_for_struct_interface` path). If
+        // the initializer is lowered with the trait type (`%trait.X`) as its
+        // expected type, the generic coercion fallback reinterpret-loads the
+        // concrete struct's bytes as the `{data, vtable}` fat pointer — the
+        // vtable slot ends up holding a field value, so dispatch jumps through
+        // garbage and segfaults. Lower it with a neutral expected type so the
+        // initializer yields its natural `%Struct*`, then box it with the real
+        // vtable below.
+        let mut init_expected_type: string = llvm_type;
+        if find_interface_info_by_name(context, instruction.type_annotation) != null {
+            init_expected_type = "";
+        }
+        let lowered = lower_expression(instruction.value, current_bindings, current_locals, current_temp, current_lines, functions, context, init_expected_type);
+        if debug_lowering {
+            trace_log("let-lowering: post-lower_expression name=" + instruction.name);
+        }
+        if debug_lowering {
+            trace_log("let-lowering: accessing lowered.diagnostics");
+        }
+        let mut _ci19: int = 0;
+        loop {
+            if _ci19 >= lowered.diagnostics.length { break; }
+            diagnostics.push(lowered.diagnostics[_ci19]);
+            _ci19 += 1;
+        }
+        if debug_lowering {
+            trace_log("let-lowering: accessing lowered.lines");
+        }
+        current_lines = lowered.lines;
+        if debug_lowering {
+            trace_log("let-lowering: got lines, accessing temp_index");
+        }
+        current_temp = lowered.temp_index;
+        if debug_lowering {
+            trace_log("let-lowering: got temp_index=" + number_to_string(current_temp)
+                + ", accessing operand");
+        }
+        operand = lowered.operand;
+        if debug_lowering {
+            trace_log("let-lowering: got operand, accessing string_constants");
+        }
+        // Use lowered.string_constants directly (covers enum variant
+        // globals and any other constants the expression produced).
+        // Also merge line-scanned @.runtime.field.* constants as a
+        // safety net in case the struct return is incomplete.
+        string_constants = lowered.string_constants;
+        let inferred = _infer_field_constants_from_lines(current_lines, _pre_expr_line_count);
+        string_constants = merge_string_constants(string_constants, inferred);
+        // M4 (#1094): conservative escape promotion at channel-send /
+        // spawn-capture boundaries in the initializer (`let f = spawn
+        // fn() ... ;`, `let ok = ch.send(msg);`). Mirrors the M1.5.5
+        // return-boundary rule: escaping heap locals are promoted to `rc`
+        // and marked consumed so the sender's scope-exit drops skip them —
+        // the receiver/worker thread owns the value now.
+        current_locals = promote_escaping_locals_for_boundaries(instruction.value, current_locals, current_bindings);
+    }
+
+    if debug_lowering {
+        trace_log("let-lowering: checking llvm_type len=" + number_to_string(llvm_type.length));
+    }
+    if llvm_type.length == 0 {
+        if operand != null {
+            if debug_lowering {
+                trace_log("let-lowering: operand not null, trimming type");
+            }
+            let operand_type = trim_text(operand.llvm_type);
+            if operand_type.length > 0 { llvm_type = operand_type; }
+            // M1.A.2: an unannotated `let s = "hello"` now keeps the
+            // `{i8*, i64}` aggregate storage type that matches the flipped
+            // `string` mapping. The historical `i8*` clamp (which collapsed
+            // the slot back to a bare pointer during the pre-flip
+            // coexistence window) is retired — annotated and inferred string
+            // locals now agree on the aggregate shape, so reassignments and
+            // cross-module contracts stay consistent without a round-trip.
+        }
+    }
+
+    // Only default to double as a last resort.  Struct and pointer types from
+    // the operand must be preserved to avoid the double-encoding corruption
+    // chain (ptrtoint→sitofp precision loss on struct pointers).
+    if llvm_type.length == 0 { llvm_type = "double"; }
+
+    // Check if we need to box a concrete struct into a trait object
+    let interface_info = find_interface_info_by_name(context, instruction.type_annotation);
+    if interface_info != null {
+        if operand != null {
+            // Target type is an interface; check if operand is a concrete struct.
+            // #1835: under the 0.5.8+ boxed-struct ABI the operand arrives as a
+            // `%T*` pointer (see the pointer branch below), but structs are keyed
+            // by their bare `%T` llvm_name — strip the pointer suffix so the
+            // lookup resolves and boxing is not silently skipped.
+            let struct_info = find_struct_info_by_llvm_type(context, strip_pointer_suffix(operand.llvm_type));
+            if struct_info != null {
+                // Find the vtable for this struct-interface pair
+                let vtable = find_vtable_for_struct_interface(context, struct_info.name, interface_info.name);
+                if vtable != null {
+                    // Box the struct into a trait object
+                    let struct_ptr_temp = "%t" + number_to_string(current_temp);
+                    current_temp += 1;
+                    let vtable_ptr_temp = "%t" + number_to_string(current_temp);
+                    current_temp += 1;
+                    let data_ptr_temp = "%t" + number_to_string(current_temp);
+                    current_temp += 1;
+                    let with_data_temp = "%t" + number_to_string(current_temp);
+                    current_temp += 1;
+                    let with_vtable_temp = "%t" + number_to_string(current_temp);
+                    current_temp += 1;
+
+                    // 0.5.8+ boxed-struct ABI: under the new ABI, struct operands
+                    // arrive as `%T*` pointers. The alloca+store "take address"
+                    // dance below is only needed when the operand is a by-value
+                    // aggregate — which no longer happens for user structs.
+                    // Skip the dance when the operand is already a pointer, and
+                    // bitcast directly from the struct pointer to i8*.
+                    if ends_with_pointer_suffix(operand.llvm_type) {
+                        current_lines.push("  " + data_ptr_temp + " = bitcast "
+                            + operand.llvm_type
+                            + " "
+                            + operand.value
+                            + " to i8*");
+                    } else {
+                        // Legacy by-value aggregate path — kept for any non-user
+                        // aggregate that somehow still arrives as %T.
+                        // Allocate space for the struct on the stack
+                        current_lines.push("  " + struct_ptr_temp + " = alloca "
+                            + struct_info.llvm_name);
+                        // Store the struct value
+                        current_lines.push("  store " + operand.llvm_type + " "
+                            + operand.value
+                            + ", "
+                            + operand.llvm_type
+                            + "* "
+                            + struct_ptr_temp);
+                        // Cast struct pointer to i8*
+                        current_lines.push("  " + data_ptr_temp + " = bitcast "
+                            + struct_info.llvm_name
+                            + "* "
+                            + struct_ptr_temp
+                            + " to i8*");
+                    }
+                    // Get vtable pointer (bitcast global vtable constant to i8*)
+                    current_lines.push("  " + vtable_ptr_temp + " = bitcast "
+                        + vtable.llvm_type_name
+                        + "* "
+                        + vtable.llvm_global_name
+                        + " to i8*");
+                    // Build trait object: insert data pointer
+                    current_lines.push("  " + with_data_temp + " = insertvalue "
+                        + interface_info.llvm_name
+                        + " undef, i8* "
+                        + data_ptr_temp
+                        + ", 0");
+                    // Insert vtable pointer
+                    current_lines.push("  " + with_vtable_temp
+                        + " = insertvalue "
+                        + interface_info.llvm_name
+                        + " "
+                        + with_data_temp
+                        + ", i8* "
+                        + vtable_ptr_temp
+                        + ", 1");
+                    // Update operand to the boxed trait object
+                    operand = LLVMOperand {
+                        llvm_type: interface_info.llvm_name,
+                        value: with_vtable_temp
+                    };
+                    llvm_type = interface_info.llvm_name;
+                } else {
+                    diagnostics.push("llvm lowering: struct `" + struct_info.name
+                        + "` does not implement interface `"
+                        + interface_info.name
+                        + "`");
+                }
+            }
+        }
+    }
+
+    let pointer = format_local_pointer_name(next_local_id);
+    current_allocas.push("  " + pointer + " = alloca " + llvm_type);
+
+    // Init sentinel for try/catch unwind cleanup (M1.5.4, issue #328).
+    // Allocated unconditionally for any heap-typed let inside a try
+    // body — at let time we cannot yet tell whether escape promotion
+    // (M1.5.5) will flip this binding's `allocation_kind` to "rc". The
+    // catch handler's `emit_guarded_scope_drops` only emits the guard
+    // when the binding is rc-eligible at catch-emission time, so an
+    // unused sentinel is just a dead `i1` alloca + store pair that
+    // LLVM will remove. Restricting to heap-typed bindings (the only
+    // ones M1.5.5 ever promotes) avoids emitting sentinels for `let n
+    // = 1` and similar non-pointer locals where the sentinel would
+    // never be read.
+    let mut init_sentinel: string = "";
+    if scope_id_inside_try_body(scope_id) {
+        if is_heap_type(llvm_type) {
+            init_sentinel = pointer + ".init";
+            current_allocas.push("  " + init_sentinel + " = alloca i1");
+            current_allocas.push("  store i1 0, i1* " + init_sentinel);
+        }
+    }
+
+    let mut stored_value: string = default_return_literal(llvm_type);
+    if operand != null {
+        let null_union_variant = _null_union_variant_index(effective_annotation);
+        let annotated_null_union = coerce_null_literal_to_union_variant(operand, operand.llvm_type, llvm_type, null_union_variant, current_temp, current_lines);
+        if annotated_null_union != null {
+            current_lines = annotated_null_union.lines;
+            current_temp = annotated_null_union.temp_index;
+            if annotated_null_union.operand != null {
+                let stored = annotated_null_union.operand;
+                stored_value = stored.value;
+                current_lines.push("  store " + llvm_type + " " + stored.value
+                    + ", "
+                    + llvm_type
+                    + "* "
+                    + pointer);
+            }
+        } else if operand.llvm_type == llvm_type {
+            // Identity coercion — use operand directly
+            stored_value = operand.value;
+            current_lines.push("  store " + llvm_type + " " + operand.value
+                + ", "
+                + llvm_type
+                + "* "
+                + pointer);
+            if debug_lowering {
+                trace_log("let-lowering: identity coerce type=" + llvm_type
+                    + " value="
+                    + operand.value);
+            }
+        } else if _bool_into_numeric(operand.llvm_type, llvm_type) {
+            // #537: a boolean initializer flowing into a numeric (`int`/
+            // `float`) binding is silently `zext`/`uitofp`-widened today.
+            // This path uses `allow_widen = true`, so it bypasses the
+            // boundary diagnostic in `coerce_operand_to_type`; refuse the
+            // silent widening here with the canonical `[fatal]` shape and
+            // store the default so lowering can continue and report. Record
+            // an ordered event like `coerce_operand_to_type` so the gate in
+            // `entrypoints_tests_writer` — which refuses
+            // silently on a `[fatal]` diagnostic — still surfaces the cause.
+            let message = "ABI primitive mismatch: binding `" + instruction.name
+                + "` expects `"
+                + llvm_type
+                + "` ("
+                + numeric_type_kind(llvm_type)
+                + ") but initializer produced `"
+                + operand.llvm_type
+                + "` ("
+                + numeric_type_kind(operand.llvm_type)
+                + ") — add `as int` or `as float` to disambiguate";
+            let diag = lowering_error_diag("E1009", message, initializer_span);
+            diags.push(diag);
+            let legacy_diag = diag_to_legacy_string(diag);
+            trace_log(legacy_diag);
+            diagnostics.push(legacy_diag);
+            current_lines.push("  store " + llvm_type + " "
+                + default_return_literal(llvm_type)
+                + ", "
+                + llvm_type
+                + "* "
+                + pointer);
+        } else {
+            // Types differ — coerce and use the returned struct.
+            let coerced = coerce_operand_to_type(operand, llvm_type, current_temp, current_lines, true, null);
+            let mut _ci20: int = 0;
+            loop {
+                if _ci20 >= coerced.diagnostics.length { break; }
+                diagnostics.push(coerced.diagnostics[_ci20]);
+                _ci20 += 1;
+            }
+            current_lines = coerced.lines;
+            current_temp = coerced.temp_index;
+            if coerced.operand == null {
+                // SFN-527: an uncoercible initializer is otherwise replaced by
+                // `0`/`false`/`null` in the binary with nothing gating it.
+                // Keep the store so the alloca is initialized for the rest of
+                // the pass, but fail the build.
+                let message = "unable to coerce initializer for `" + instruction.name
+                    + "` to `"
+                    + llvm_type
+                    + "` in `"
+                    + function.name
+                    + "` — refusing to fabricate a default";
+                let diag = lowering_error_diag("E1002", message, initializer_span);
+                diags.push(diag);
+                diagnostics.push(diag_to_legacy_string(diag));
+                current_lines.push("  store " + llvm_type + " "
+                    + default_return_literal(llvm_type)
+                    + ", "
+                    + llvm_type
+                    + "* "
+                    + pointer);
+            } else {
+                let stored = coerced.operand;
+                stored_value = stored.value;
+                current_lines.push("  store " + llvm_type + " " + stored.value
+                    + ", "
+                    + llvm_type
+                    + "* "
+                    + pointer);
+            }
+        }
+    } else {
+        // SFN-527: an initializer was written but produced no operand, so the
+        // store below invents the binding's value and every later read of it
+        // is wrong. This branch pushed no diagnostic whatsoever before —
+        // `let x: i32 = t.unknown_field;` compiled to `store i32 0` in
+        // silence. `_initializer_absent` excludes the legal uninitialized
+        // binding, whose identical store is the documented default instead.
+        if !_initializer_absent {
+            let message = "initializer for `" + instruction.name + "` in `"
+                + function.name
+                + "` did not lower — refusing to fabricate a default `"
+                + llvm_type
+                + "`";
+            let diag = lowering_error_diag("E1002", message, initializer_span);
+            diags.push(diag);
+            diagnostics.push(diag_to_legacy_string(diag));
+        }
+        current_lines.push("  store " + llvm_type + " " + default_return_literal(llvm_type)
+            + ", "
+            + llvm_type
+            + "* "
+            + pointer);
+    }
+
+    // Mark the binding as initialized for catch-entry unwind cleanup
+    // (M1.5.4). The sentinel was zeroed at function entry; flipping it
+    // here — *after* the value store — guarantees that if a throw fires
+    // before this point in the try body, the catch handler's guarded
+    // drop sees `i1 0` and skips the release on this slot. If the
+    // initializer's lowering itself throws (e.g., the rhs is a fallible
+    // call), the sentinel is still false at catch entry, so the slot's
+    // potentially-uninitialized contents are never released.
+    if init_sentinel.length > 0 {
+        current_lines.push("  store i1 1, i1* " + init_sentinel);
+    }
+
+    // For locals that hold async futures, store the underlying return type
+    // as type_annotation so the await handler can unbox structs. The callee is
+    // the leading identifier of the initializer (the writer only ever fired
+    // for direct async function calls); looking it up via
+    // `find_function_by_name_or_import` matches the exact name and — for
+    // imported / mangled callees — the unique `target + "__"` suffix, so we
+    // reach the same `NativeFunction.return_type` the file-IPC channel used
+    // to carry for both local and imported async functions.
+    let mut local_type_annotation: string = effective_annotation;
+    // Issue #689: enrich the bare `__closure__` sentinel with the
+    // lifted lambda's symbol so call-site dispatch can recover the
+    // function signature without a side-channel. The AST-level
+    // annotation stays `__closure__` (#686 lifting tests pin that
+    // exact string); only the LocalBinding's runtime annotation
+    // gains the `@sfn_lambda_<N>` suffix. `map_local_type` accepts
+    // both forms via `starts_with("__closure__")` so the alloca's
+    // LLVM type is unaffected.
+    if local_type_annotation == "__closure__" {
+        let lifted_symbol = _extract_closure_pair_symbol(instruction.value);
+        if lifted_symbol.length > 0 {
+            local_type_annotation = "__closure__@" + lifted_symbol;
+        }
+    }
+    if llvm_type == "%SailfinFuturePtr*" {
+        let call_target = _extract_leading_call_target(instruction.value);
+        if call_target.length > 0 {
+            let callee = find_function_by_name_or_import(functions, call_target);
+            if callee != null {
+                if callee.is_async {
+                    if callee.return_type.length > 0 {
+                        local_type_annotation = callee.return_type;
+                    }
+                }
+            }
+        }
+    }
+    // #830 (inferred scrutinee gap): an un-annotated `let tmp = make_ok();`
+    // carries no source annotation, so a later `match tmp` cannot recover the
+    // concrete `Result<int, Error>` instantiation needed to monomorphize
+    // generic enum payloads. When the initializer is a direct call, adopt the
+    // callee's declared return type as the local's annotation — the same
+    // instantiation a typed local would carry. Gated on an empty annotation so
+    // explicitly-typed lets are untouched; only the recorded annotation
+    // changes (llvm_type / alloca are unaffected).
+    if local_type_annotation.length == 0 {
+        let inferred_call_target = _extract_leading_call_target(instruction.value);
+        if inferred_call_target.length > 0 {
+            let inferred_callee = find_function_by_name_or_import(functions, inferred_call_target);
+            if inferred_callee != null {
+                // Generic instantiations only. The payload monomorphization
+                // gap this enables (#830) is generic-only; adopting a
+                // non-generic struct return type (e.g. `SymbolCollectionResult`)
+                // would mis-route later method-call resolution
+                // (`.diagnostics.concat`) and break the self-host build
+                // (test_work_dir_parity).
+                if find(inferred_callee.return_type, "<", 0) >= 0 {
+                    local_type_annotation = inferred_callee.return_type;
+                }
+            }
+        }
+    }
+    // #1091: infer `channel` type annotation for `let ch = channel(N)`.
+    // `channel(...)` and `channel:K(...)` are builtin constructor builtins —
+    // not user-defined functions — so `find_function_by_name_or_import` won't
+    // find them. Annotating the local as `"channel"` lets the method-call
+    // resolver route `.send` / `.receive` / `.close` to the `sfn_channel_*`
+    // runtime helpers instead of failing closed.
+    //
+    // #1835: key off the *initializer*, not the annotation. An explicit
+    // `let buf: Channel<int> = channel(N)` carries a source annotation
+    // ("Channel<int>"), which skipped the old empty-annotation guard, so the
+    // binding never received the `channel` / `channel:<kind>` sentinel — and
+    // `buf.send(x)` fused into an unresolvable `Channel<int>send` callee. A
+    // `channel(...)` / `channel:...` initializer is itself proof the local is
+    // a channel (they are builtin constructors, so typecheck admits them only
+    // for channel-typed bindings), so normalize whenever the initializer is
+    // one, regardless of the source annotation's spelling.
+    {
+        let trimmed_init = trim_text(instruction.value);
+        if starts_with(trimmed_init, "channel(") {
+            // #1944: a `Channel<fn(...)>` binding preserves its function-value
+            // element as `channel:fn(...)` so an un-annotated `await
+            // ch.receive()` target can recover the `fn(...)` type for closure
+            // dispatch. `fn(...)` is pointer-width (the `{fn_ptr, null}` first
+            // word round-trips the 8-byte ring slot for a non-capturing
+            // lambda), so receive stays on the by-pointer path — the kind is
+            // not a struct, so it never opts into the full-width aggregate
+            // load. Every non-fn `Channel<T>` keeps the bare `channel` binding.
+            let fn_elem = _channel_annotation_fn_element(instruction.type_annotation);
+            if fn_elem.length > 0 {
+                local_type_annotation = "channel:" + fn_elem;
+            } else {
+                // SFN-398: preserve a primitive INTEGER element kind
+                // (`Channel<int>` → `channel:int`) so channel send lowering can
+                // coerce a `double`-lowered operand back to the declared
+                // integer width. A `for i in a..b` range induction variable
+                // lowers to `double`; without the kind, `send` stores raw
+                // IEEE-754 bits into the i64 ring slot and the typed receive
+                // reinterprets them as garbage.
+                let int_elem = _channel_annotation_int_element(instruction.type_annotation);
+                if int_elem.length > 0 {
+                    local_type_annotation = "channel:" + int_elem;
+                } else { local_type_annotation = "channel"; }
+            }
+        } else {
+            if starts_with(trimmed_init, "channel:") {
+                // Preserve the element kind on the binding (#1466) so the
+                // bespoke send/receive lowering can tell a by-VALUE struct
+                // channel (`channel:OwnedBuf(N)` — full-width element) from
+                // the pointer-sized monomorphized kinds. The kind is the
+                // text between "channel:" (8 chars) and "(". A bare
+                // `channel(N)` stays "channel" (the by-pointer/scalar path).
+                let paren_pos = find(trimmed_init, "(", 0);
+                if paren_pos > 8 {
+                    let kind_text = trim_text(substring(trimmed_init, 8, paren_pos));
+                    if kind_text.length > 0 {
+                        local_type_annotation = "channel:" + kind_text;
+                    } else { local_type_annotation = "channel"; }
+                } else { local_type_annotation = "channel"; }
+            }
+        }
+    }
+    current_locals = append_local_binding(current_locals, LocalBinding {
+        name: instruction.name, pointer: pointer, llvm_type: llvm_type, type_annotation: local_type_annotation, ownership: ownership, consumed: false, scope_id: scope_id, scope_depth: scope_depth, allocation_kind: "arena", init_sentinel: init_sentinel, narrowed_variant: ""
+    });
+
+    let mutation = LocalMutation {
+        name: instruction.name,
+        llvm_type: llvm_type,
+        value_name: stored_value,
+        span: initializer_span,
+        originating_label: current_label
+    };
+    mutations.push(mutation);
+
+    if debug_lowering {
+        trace_log("let-lowering: returning LetLoweringResult for name="
+            + instruction.name);
+    }
+    return LetLoweringResult {
+        lines: current_lines,
+        allocas: current_allocas,
+        locals: current_locals,
+        bindings: current_bindings,
+        temp_index: current_temp,
+        diagnostics: diagnostics,
+        diags: diags,
+        next_local_id: next_local_id + 1,
+        lifetime_regions: lifetime_regions,
+        lifetime_releases: lifetime_releases,
+        next_region_id: current_next_region,
+        mutations: mutations,
+        string_constants: string_constants
+    };
+}
+
+// Scan emitted lines starting at `start_offset` for @.runtime.field.X
+// references and infer the string constants that need to be declared.
+fn _infer_field_constants_from_lines(lines: string[], start_offset: int) -> StringConstant[] {
+    let mut result: StringConstant[] = [];
+    // Build in two parts to avoid a single "@.runtime.field." literal that
+    // triggers a bogus global constant in the selfhost IR.
+    let marker = "@.runtime" + ".field.";
+    let marker_len = marker.length;
+    let mut i: int = start_offset;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        // Quick scan for the marker
+        let mut pos: int = 0;
+        loop {
+            if pos + marker_len > line.length { break; }
+            let mut matches: boolean = true;
+            let mut ci: int = 0;
+            loop {
+                if ci >= marker_len { break; }
+                if substring(line, pos + ci, pos + ci + 1) != substring(marker, ci, ci
+                    + 1) {
+                    matches = false;
+                    break;
+                }
+                ci += 1;
+            }
+            if matches {
+                // Extract field name: runs until comma or space
+                let name_start = pos;
+                let field_start = pos + marker_len;
+                let mut field_end: int = field_start;
+                loop {
+                    if field_end >= line.length { break; }
+                    let ch = substring(line, field_end, field_end + 1);
+                    if ch == "," { break; }
+                    if ch == " " { break; }
+                    field_end += 1;
+                }
+                let full_name = substring(line, name_start, field_end);
+                let field_name = substring(line, field_start, field_end);
+                // Deduplicate
+                let mut already: boolean = false;
+                let mut ri: int = 0;
+                loop {
+                    if ri >= result.length { break; }
+                    if result[ri].name == full_name {
+                        already = true;
+                        break;
+                    }
+                    ri += 1;
+                }
+                if !already {
+                    result.push(StringConstant {
+                        name: full_name, content: field_name, byte_count: field_name.length
+                    });
+                }
+                pos = field_end;
+            } else { pos += 1; }
+        }
+        i += 1;
+    }
+    return result;
+}

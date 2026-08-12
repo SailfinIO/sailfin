@@ -20,7 +20,7 @@ The script writes a timestamped log to `build/logs/check-<ts>.log`, and exits no
 
 If the script exits non-zero, read the log, identify the failing pipeline stage, and either:
 
-- fix the compiler source (`compiler/src/*.sfn`), or
+- fix the canonical compiler source under `compiler/src/` or `compiler/capsules/`, or
 - spawn the `seed-stabilizer` agent if the root cause isn't obvious.
 
 The four failure surfaces, in order of likelihood:

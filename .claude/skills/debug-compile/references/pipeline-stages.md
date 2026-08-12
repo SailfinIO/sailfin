@@ -10,9 +10,9 @@ Use this table to map a compiler diagnostic to the file(s) most likely to contai
 | Type mismatch / undefined symbol / duplicate symbol | Typecheck | `compiler/capsules/analyzer/src/typecheck/`, `compiler/capsules/analyzer/src/typecheck_types/` |
 | Missing effect annotation / effect not declared | Effects | `compiler/capsules/analyzer/src/effect_checker/` |
 | `.sfn-asm` emission error / malformed IR instruction | Emit | `compiler/capsules/codegen/src/emit_native.sfn`, `compiler/capsules/codegen/src/emit_native_state.sfn`, `compiler/capsules/ir/src/native_ir.sfn` |
-| LLVM `clang` rejects generated `.ll` | Lowering | `compiler/src/llvm/lowering/` (start at `entrypoints.sfn`) |
-| Linker: undefined / duplicate symbol | Emission header / globals | `compiler/src/llvm/lowering/emission_header.sfn`, `module_globals.sfn` |
-| Runtime crash in a valid program | Runtime / lowering runtime bridge | `runtime/prelude.sfn`, `runtime/sfn/`, `compiler/src/llvm/runtime.sfn` |
+| LLVM `clang` rejects generated `.ll` | Lowering | `compiler/capsules/codegen-llvm/src/lowering/` (start at `entrypoints.sfn`) |
+| Linker: undefined / duplicate symbol | Emission header / globals | `compiler/capsules/codegen-llvm/src/lowering/emission_header.sfn`, `module_globals.sfn` |
+| Runtime crash in a valid program | Runtime / lowering runtime bridge | `runtime/prelude.sfn`, `runtime/sfn/`, `compiler/capsules/codegen-llvm/src/runtime_helpers/` |
 | Self-hosting regression (seed OK, seedcheck broken) | LLVM lowering | Compare first-pass vs second-pass IR of the same module |
 
 ## Diagnostic conventions

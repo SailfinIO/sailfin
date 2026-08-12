@@ -48,7 +48,7 @@ The remaining guardrail is time, not caller memory: wrap direct single-file comp
 - The native compiler is self-hosted from the released seed pinned by `bootstrap.toml [seed].version`.
 - The runtime is Sailfin-native (`runtime/prelude.sfn` and `runtime/sfn/`); the old C runtime is gone.
 - `sfn check` is the fast parse/type/effect inner loop but does not prove codegen or self-hosting.
-- `make compile` is required before declaring `compiler/src/*.sfn` changes done; `make check` is the full gate.
+- `make compile` is required before declaring compiler-source changes under `compiler/src/` or `compiler/capsules/` done; `make check` is the full gate.
 - Forward-looking design decisions use the SFEP process in `docs/proposals/0001-sfep-process.md` and the registry in `docs/proposals/README.md`.
 
 ## Linear planning workflow

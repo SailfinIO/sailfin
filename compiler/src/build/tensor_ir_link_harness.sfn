@@ -16,13 +16,15 @@
 // unchanged. Not compiled into the shipped binary (main.sfn does not import it);
 // `--gc-sections` drops it, exactly like tensor_ir_lower_scalar.sfn.
 import { lower_tensor_module_to_native } from "sfn/codegen";
+import {
+    lower_to_llvm_ir_from_text_with_provider_context,
+    take_lowering_trace_buffer
+} from "sfn/codegen-llvm";
 import { TensorModule } from "sfn/ir";
 import { int_to_string } from "sfn/strings";
 
 import { empty_build_cache_config } from "../build_cache";
 import { prepare_runtime_dep_capsules } from "../capsule_resolver/mod";
-import { lower_to_llvm_ir_from_text_with_provider_context } from "../llvm/lowering/entrypoints";
-import { take_lowering_trace_buffer } from "../llvm/lowering_debug_state";
 import { compile_to_native_text_with_module } from "../main";
 import { runtime_capsule_from_root } from "../runtime_capsule_resolver";
 import { index_of, substring } from "../string_utils";

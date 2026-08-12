@@ -15,7 +15,7 @@ You do NOT write implementation code. You produce architectural plans that someo
 
 ## The Sailfin Compiler
 
-The compiler is self-hosted: it compiles itself from a seed binary via `<seed> build -p compiler` — the unified Sailfin-native driver. The build produces ~121 LLVM IR modules from `compiler/src/*.sfn` and links them into a native binary. (The prior `scripts/build.sh` orchestrator was retired in Stage E PR7 / #383.)
+The compiler is self-hosted: it compiles itself from a seed binary via `<seed> build -p compiler` — the unified Sailfin-native driver. The build compiles modules from `compiler/src/` and the private implementation capsules under `compiler/capsules/`, then links them into a native binary. (The prior `scripts/build.sh` orchestrator was retired in Stage E PR7 / #383.)
 
 The pipeline and critical-file map are in CLAUDE.md (## Pipeline and critical
 files). Every feature must flow through all stages — a feature that only

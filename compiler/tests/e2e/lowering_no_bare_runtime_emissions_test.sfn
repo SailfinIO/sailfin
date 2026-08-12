@@ -7,7 +7,7 @@
 // epic #842; `.claude/rules/no-bash-e2e.md`).
 //
 // Why this exists: the runtime helper descriptor registry in
-// `compiler/src/llvm/runtime_helpers/` is the single source of truth
+// `compiler/capsules/codegen-llvm/src/runtime_helpers/` is the single source of truth
 // for runtime call symbols. A descriptor flip migrates every call site
 // in lockstep. Hardcoded `@sailfin_runtime_*` strings pushed straight
 // into the emitted IR (via `lines.push(...)`) bypass that resolution and
@@ -39,8 +39,8 @@ fn _allowlist_path() -> string {
 }
 
 // Recursively collect `.sfn` files under a directory (the bash `grep -r`
-// walked `compiler/src/llvm/lowering/` and
-// `compiler/src/llvm/expression_lowering/native/`). fs.listDirectory is
+// walked `compiler/capsules/codegen-llvm/src/lowering/` and
+// `compiler/capsules/codegen-llvm/src/expression_lowering/native/`). fs.listDirectory is
 // non-recursive and there is no usable `isDirectory` in the test-compile
 // context, so we descend by re-listing: a path whose listing has entries
 // is a directory, a zero-entry listing is a regular file (the trees here
@@ -82,8 +82,8 @@ fn ends_with_sfn(name: string) -> boolean {
 // comment lines (matching the bash `grep -vE ':[[:space:]]*//'`).
 fn _audit_actual() -> string[] ![io] {
     let mut roots: string[] = [];
-    roots.push("compiler/src/llvm/lowering");
-    roots.push("compiler/src/llvm/expression_lowering/native");
+    roots.push("compiler/capsules/codegen-llvm/src/lowering");
+    roots.push("compiler/capsules/codegen-llvm/src/expression_lowering/native");
 
     let mut files: string[] = [];
     let mut ri = 0;

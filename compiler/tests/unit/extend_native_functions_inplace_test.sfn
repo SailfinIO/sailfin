@@ -19,7 +19,7 @@
 // direction.
 //
 // A direct unit test of extend_native_functions_inplace would require
-// importing from compiler/src/llvm/lowering/, which pulls the full LLVM
+// importing from compiler/capsules/codegen-llvm/src/lowering/, which pulls the full LLVM
 // subsystem into the test's transitive closure and times out the test
 // runner. Instead, this file tests the three runtime guarantees using
 // simple types. The function itself stays covered by the self-host build

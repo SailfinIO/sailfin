@@ -21,11 +21,10 @@
 // the old hand-typed registry row's `i8*` with the derived `{i8*, i64}` shape
 // (matching the prelude's real `char_from_code(code: int) -> string`), so it
 // no longer needs the exclusion this test previously carried.
+import { render_runtime_helper_declarations } from "sfn/codegen-llvm/rendering";
+import { TypeContext } from "sfn/codegen-llvm/types";
 import { NativeFunction, NativeParameter } from "sfn/ir";
 import { find } from "sfn/strings";
-
-import { render_runtime_helper_declarations } from "../../src/llvm/rendering";
-import { TypeContext } from "../../src/llvm/types";
 
 fn _empty_context() -> TypeContext {
     return TypeContext {

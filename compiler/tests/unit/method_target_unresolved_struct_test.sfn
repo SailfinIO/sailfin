@@ -15,8 +15,9 @@
 // instantiations such as `Result<int, Error>` carry a non-simple-identifier
 // annotation; both are excluded so the compiler still self-hosts. The two
 // negative tests below pin that boundary.
-import { lower_call_expression } from "../../src/llvm/expression_lowering/native/core_call_lowering";
-import { InterfaceTypeInfo, LocalBinding, TypeContext } from "../../src/llvm/types";
+import { lower_call_expression } from "sfn/codegen-llvm/expression_lowering/native/core_call_lowering";
+import { InterfaceTypeInfo, LocalBinding, TypeContext } from "sfn/codegen-llvm/types";
+
 import { index_of } from "../../src/string_utils";
 
 fn _empty_context() -> TypeContext {

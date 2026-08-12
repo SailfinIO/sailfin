@@ -17,6 +17,19 @@ import { Diagnostic, diagnostic_to_diag } from "sfn/analyzer/typecheck_types";
 import { emit_native_diag_lines, emit_program } from "sfn/codegen";
 import { TypedSsaProduceResult, produce_typed_ssa_declarations } from "sfn/codegen";
 import {
+    LLVMArtifactResult,
+    fatal_lowering_diagnostic_lines,
+    has_fatal_lowering_diagnostic,
+    lower_llvm_for_tests_from_text_with_provider_context,
+    lower_native_lines_to_llvm_artifact_with_context_and_provider,
+    lower_native_text_to_llvm_artifact_with_context_and_provider,
+    lower_to_llvm_ir_from_text_with_provider_context,
+    lower_to_llvm_ir_with_provider_context,
+    native_text_passes_lowering_gate,
+    runtime_helper_call_names,
+    take_lowering_trace_buffer
+} from "sfn/codegen-llvm";
+import {
     ImportedModuleContext,
     LayoutManifest,
     LoweringDiagnostic,
@@ -51,18 +64,6 @@ import {
     imported_module_context_from_loaded_data,
     load_imported_module_context
 } from "./import_context";
-import {
-    lower_native_lines_to_llvm_artifact_with_context_and_provider,
-    lower_native_text_to_llvm_artifact_with_context_and_provider,
-    lower_to_llvm_ir_from_text_with_provider_context,
-    lower_to_llvm_ir_with_provider_context
-} from "./llvm/lowering/entrypoints";
-import { lower_llvm_for_tests_from_text_with_provider_context } from "./llvm/lowering/entrypoints_tests_writer";
-import { fatal_lowering_diagnostic_lines, has_fatal_lowering_diagnostic } from "./llvm/lowering/lowering_core/diagnostics";
-import { native_text_passes_lowering_gate } from "./llvm/lowering/lowering_core/file_emission";
-import { take_lowering_trace_buffer } from "./llvm/lowering_debug_state";
-import { runtime_helper_call_names } from "./llvm/runtime_helpers/mod";
-import { LLVMArtifactResult } from "./llvm/types";
 import { load_prelude_global_names } from "./prelude_globals";
 import { substring } from "./string_utils";
 import { test_decl_matches_filters, test_filters_active, test_runner_trace } from "./test_runner_state";

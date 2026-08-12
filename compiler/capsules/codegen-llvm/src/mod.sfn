@@ -1,0 +1,26 @@
+// sfn/codegen-llvm — toolchain-internal LLVM lowering provider facade.
+//
+// Callers supply verified Sailfin IR plus a driver-resolved provider context.
+// This capsule returns LLVM text and diagnostic data; the compiler driver owns
+// target discovery, persistent artifact I/O, assembly, process execution, and
+// final linking.
+export { resolve_import_module_slug_for_module } from "./imports";
+
+export {
+    lower_native_lines_to_llvm_artifact_with_context_and_provider,
+    lower_native_text_to_llvm_artifact_with_context_and_provider,
+    lower_to_llvm_ir_from_text_with_provider_context,
+    lower_to_llvm_ir_with_provider_context
+} from "./lowering/entrypoints";
+
+export { lower_llvm_for_tests_from_text_with_provider_context } from "./lowering/entrypoints_tests_writer";
+
+export { fatal_lowering_diagnostic_lines, has_fatal_lowering_diagnostic } from "./lowering/lowering_core/diagnostics";
+
+export { native_text_passes_lowering_gate } from "./lowering/lowering_core/file_emission";
+
+export { LLVMProviderContext, take_lowering_trace_buffer } from "./lowering_debug_state";
+
+export { runtime_helper_call_names } from "./runtime_helpers/mod";
+
+export { LLVMArtifactResult } from "./types";

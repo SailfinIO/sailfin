@@ -3,7 +3,7 @@
 // unboxed `%T` form, not the boxed `%T*` form.
 //
 // Background: `lower_array_literal` in
-// `compiler/src/llvm/expression_lowering/native/core_literals_lowering.sfn`
+// `compiler/capsules/codegen-llvm/src/expression_lowering/native/core_literals_lowering.sfn`
 // threads an `inferred_element_type` across operand lowering, falling back
 // to `dominant_type(inferred, operand_type)` when the previous element
 // already picked a type. PR #221 fixed the mid-sequence case (keep `%T`

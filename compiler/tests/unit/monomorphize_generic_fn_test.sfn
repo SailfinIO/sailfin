@@ -7,9 +7,8 @@
 // At the native-IR level the mangled names are clean (`id$int`) — the module
 // symbol suffix is applied later, in LLVM lowering — so these assertions pin
 // the mangling scheme without a build.
+import { monomorphize_native_text } from "sfn/codegen-llvm/monomorphize";
 import { contains } from "sfn/strings";
-
-import { monomorphize_native_text } from "../../src/llvm/monomorphize";
 
 fn _has(haystack: string, needle: string) -> boolean {
     return contains(haystack, needle);

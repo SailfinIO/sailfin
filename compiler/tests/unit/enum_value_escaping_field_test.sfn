@@ -19,7 +19,7 @@
 // `lower_enum_member_access` directly with `pointer_available == false` and pin
 // the spill MECHANISM at IR level, so a revert to the dangling `alloca` spill is
 // caught at unit speed on every platform.
-import { lower_enum_member_access } from "../../src/llvm/expression_lowering/native/core_member_lowering";
+import { lower_enum_member_access } from "sfn/codegen-llvm/expression_lowering/native/core_member_lowering";
 import {
     EnumTypeInfo,
     EnumVariantInfo,
@@ -27,7 +27,8 @@ import {
     MemberAccessParse,
     StringConstant,
     StructFieldInfo
-} from "../../src/llvm/types";
+} from "sfn/codegen-llvm/types";
+
 import { index_of } from "../../src/string_utils";
 
 fn _any_line_contains(lines: string[], needle: string) -> boolean {

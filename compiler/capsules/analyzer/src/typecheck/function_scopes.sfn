@@ -276,7 +276,7 @@ fn check_block(block: Block, ctx: TypeckCtx) -> Diagnostic[] {
 }
 
 // `fn main` is the program entry point: the lowering pass at
-// `compiler/src/llvm/lowering/emission.sfn:319` already detects
+// `compiler/capsules/codegen-llvm/src/lowering/emission.sfn:319` already detects
 // `fn_name == "main"` and emits a C-compatible `main(argc, argv)`
 // wrapper. This validator pins the signature shape the wrapper expects
 // so users get a Sailfin diagnostic — not an `lld` link error — when

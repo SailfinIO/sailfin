@@ -18,7 +18,7 @@
 // client's close code; reject an unmasked or over-large frame with the
 // matching close code, #1924).
 //
-// ABI. `compiler/src/llvm/runtime_helpers.sfn` points the websocket
+// ABI. `compiler/capsules/codegen-llvm/src/runtime_helpers.sfn` points the websocket
 // registry rows at the exports below (owned by the orchestrator, not
 // this file):
 //   - `websocket.connect(url)`        -> `sfn_websocket_connect` (i8*) -> i8*

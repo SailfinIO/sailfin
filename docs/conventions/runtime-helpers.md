@@ -1,7 +1,7 @@
 # Runtime Helper Conventions
 
 This is the canonical reference for adding new entries to the partitioned
-runtime helper registry under `compiler/src/llvm/runtime_helpers/` and routing
+runtime helper registry under `compiler/capsules/codegen-llvm/src/runtime_helpers/` and routing
 their call sites through the LLVM lowering. The stable lookup and declaration
 API lives in `runtime_helpers/mod.sfn`; descriptor rows live in the
 `registry_*.sfn` modules grouped by concern. It supersedes the
@@ -49,7 +49,7 @@ Sailfin-native adapter instead.
 ## Call-site dispatch
 
 Every helper call site goes through `emit_runtime_call`
-(`compiler/src/llvm/expression_lowering/native/runtime_call.sfn`).
+(`compiler/capsules/codegen-llvm/src/expression_lowering/native/runtime_call.sfn`).
 The dispatch:
 
 1. Looks up the descriptor by `target`.
@@ -59,9 +59,9 @@ The dispatch:
    `parameter_types` rows.
 
 The two collection passes (`collect_runtime_helper_targets` in
-`compiler/src/llvm/effects.sfn` and the post-lowering
+`compiler/capsules/codegen-llvm/src/effects.sfn` and the post-lowering
 `collect_runtime_helper_targets_from_lines` in
-`compiler/src/llvm/lowering/lowering_helpers.sfn`) observe the
+`compiler/capsules/codegen-llvm/src/lowering/lowering_helpers.sfn`) observe the
 emitted IR and add the discovered targets to `used_targets`. The
 preamble's `render_runtime_helper_declarations` then emits a single
 `declare` per used target's effective symbol — no aliases, no
@@ -75,7 +75,7 @@ are called by modules that do **not** import the prelude (the E0420
 implicit-runtime typecheck allowance has no emit-layer counterpart, so
 `find_function_by_name_or_import` returns null for them). Their `declare` lines
 and call-return shapes are **derived** from the source-typed signature set in
-`compiler/src/llvm/prelude_mirror_signatures.sfn` (#1780, SFEP-0035 §3.2) — not
+`compiler/capsules/codegen-llvm/src/prelude_mirror_signatures.sfn` (#1780, SFEP-0035 §3.2) — not
 hand-typed as registry rows. The declare-emitter
 (`render_runtime_helper_declarations`) and the call-return resolver
 (`resolve_call_signature`) lower those source signatures through the same
@@ -174,9 +174,9 @@ It is **not** the right place for:
 ## References
 
 - `compiler/capsules/ir/src/intrinsic_effects.sfn` — target-neutral intrinsic identity and semantic-effect registry.
-- `compiler/src/llvm/runtime_helpers/mod.sfn` — LLVM descriptor registry and lookup/declaration APIs.
-- `compiler/src/llvm/runtime_helpers/registry_*.sfn` — descriptor partitions grouped by concern.
-- `compiler/src/llvm/rendering.sfn:render_runtime_helper_declarations` — preamble emission.
-- `compiler/src/llvm/lowering/lowering_helpers.sfn:collect_runtime_helper_targets_from_lines` — post-lowering scan that observes every emitted call site.
-- `compiler/src/llvm/lowering/lowering_helpers.sfn:seed_default_runtime_helpers` — last-resort top-up list for genuinely undiscoverable helpers (each entry carries a WHY comment).
+- `compiler/capsules/codegen-llvm/src/runtime_helpers/mod.sfn` — LLVM descriptor registry and lookup/declaration APIs.
+- `compiler/capsules/codegen-llvm/src/runtime_helpers/registry_*.sfn` — descriptor partitions grouped by concern.
+- `compiler/capsules/codegen-llvm/src/rendering.sfn:render_runtime_helper_declarations` — preamble emission.
+- `compiler/capsules/codegen-llvm/src/lowering/lowering_helpers.sfn:collect_runtime_helper_targets_from_lines` — post-lowering scan that observes every emitted call site.
+- `compiler/capsules/codegen-llvm/src/lowering/lowering_helpers.sfn:seed_default_runtime_helpers` — last-resort top-up list for genuinely undiscoverable helpers (each entry carries a WHY comment).
 - Issues: #501 (M1.7.5a — dynamic discovery), #502 (M1.7.5b — alias path retired), #461 / Epic #450 — `native_signature` rollout history.

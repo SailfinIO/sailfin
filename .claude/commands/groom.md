@@ -236,7 +236,7 @@ binary**, not just merged. `make compile` runs against the seed pinned in
 `bootstrap.toml`, so a
 compiler-source dependency merged but not seeded fails to self-host.
 
-Apply: if the leaf touches `compiler/src/` or `runtime/prelude.sfn` AND its
+Apply: if the leaf touches `compiler/src/`, `compiler/capsules/`, or `runtime/prelude.sfn` AND its
 predecessor is a compiler-source change affecting the binary's behaviour
 (lowering, parsing, typecheck, intrinsics, diagnostics, IR shape), the
 predecessor must be in the seed first. When that holds:

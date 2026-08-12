@@ -71,7 +71,7 @@ let a = id(42);        // emits id$int
 let b = id("hello");   // emits id$string  — two distinct specializations
 ```
 
-The native-IR pass (`compiler/src/llvm/monomorphize.sfn`) collects the set of
+The native-IR pass (`compiler/capsules/codegen-llvm/src/monomorphize.sfn`) collects the set of
 concrete instantiations reached from `@main`, closes the worklist transitively
 (a generic body instantiating another generic adds to it), and emits one
 `$`-mangled specialization per instantiation. Specialized declarations flow

@@ -77,7 +77,7 @@ let NANOS_PER_MILLI: i64 = 1000000;
 // Unix 1970. Any other `clk_id` reads the monotonic clock via
 // `QueryPerformanceCounter`/`QueryPerformanceFrequency` — Windows has no
 // per-id monotonic clock selector the way Linux (`1`) and Darwin (`6`)
-// do (`compiler/src/llvm/lowering_debug_state.sfn:91-98` has no Windows
+// do (`compiler/capsules/codegen-llvm/src/lowering_debug_state.sfn:91-98` has no Windows
 // leg), so every non-zero `clk_id` routes here rather than matching a
 // specific numeric id. Returns 0 on success, -1 on failure (null `ts` or
 // a zero QPC frequency).

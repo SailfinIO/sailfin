@@ -21,8 +21,8 @@ Always situate compiler work by pipeline stage. The stages, in order:
 4. **Typecheck** — `compiler/capsules/analyzer/src/typecheck/`, `typecheck_types/`
 5. **Effects** — `compiler/capsules/analyzer/src/effect_checker/`
 6. **Emit** — `compiler/capsules/codegen/src/emit_native.sfn` (`.sfn-asm` IR)
-7. **Lower** — `compiler/src/llvm/lowering/` (LLVM IR)
-8. **Render** — `compiler/src/llvm/rendering.sfn`
+7. **Lower** — `compiler/capsules/codegen-llvm/src/lowering/` (LLVM IR)
+8. **Render** — `compiler/capsules/codegen-llvm/src/rendering.sfn`
 
 Don't say "the compiler rejects X" — say "the effect checker at `effect_checker.sfn:…` rejects X" or "lowering crashes in `llvm/lowering/entrypoints.sfn:…`". Precision forces correctness.
 

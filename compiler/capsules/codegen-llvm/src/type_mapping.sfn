@@ -1,0 +1,1091 @@
+// compiler/capsules/codegen-llvm/src/type_mapping.sfn
+//
+// Type annotation mapping for LLVM lowering. Converts Sailfin type annotations
+// to their corresponding LLVM IR types.
+import { char_at_index as char_at, char_code_at, substring } from "sfn/strings";
+
+import { sanitize_symbol } from "./symbols";
+import { TypeAllocationInfo, TypeContext } from "./types";
+import {
+    ends_with,
+    index_of,
+    starts_with,
+    trim_text
+} from "./utils";
+
+// =============================================================================
+// Character Classification
+// =============================================================================
+fn is_ascii_uppercase(ch: string) -> boolean {
+    if ch.length == 0 { return false; }
+    let code = char_code_at(ch, 0);
+    let mut _ret302: boolean = false;
+    if code >= char_code_at("A", 0) {
+        if code <= char_code_at("Z", 0) { _ret302 = true; }
+    }
+    return _ret302;
+}
+
+// =============================================================================
+// Pointer Operations
+// =============================================================================
+fn ends_with_pointer_suffix(value: string) -> boolean {
+    let trimmed = trim_text(value);
+    if trimmed.length == 0 { return false; }
+    // Fast-path: well-known primitives that are never pointers.
+    // Avoids character-level indexing which is miscompiled by older seeds.
+    let mut _if303: boolean = false;
+    if trimmed == "double" { _if303 = true; }
+    if trimmed == "i1" { _if303 = true; }
+    if trimmed == "i8" { _if303 = true; }
+    if trimmed == "i16" { _if303 = true; }
+    if trimmed == "i32" { _if303 = true; }
+    if trimmed == "i64" { _if303 = true; }
+    if trimmed == "void" { _if303 = true; }
+    if trimmed == "float" { _if303 = true; }
+    if trimmed == "half" { _if303 = true; }
+    if trimmed == "bfloat" { _if303 = true; }
+    if _if303 { return false; }
+    // Fast-path: well-known pointer types.
+    let mut _if304: boolean = false;
+    if trimmed == "i8*" { _if304 = true; }
+    if trimmed == "i8**" { _if304 = true; }
+    if trimmed == "i32*" { _if304 = true; }
+    if trimmed == "i64*" { _if304 = true; }
+    if trimmed == "double*" { _if304 = true; }
+    if trimmed == "i1*" { _if304 = true; }
+    if _if304 { return true; }
+    // Fast-path: aggregate pointer types starting with { or % and ending with *.
+    // Use starts_with (safe) instead of character indexing.
+    let mut _if305: boolean = false;
+    if starts_with(trimmed, "{") { _if305 = true; }
+    if starts_with(trimmed, "%") { _if305 = true; }
+    if _if305 {
+        // Check if the last few characters end with }* or )* or just *.
+        // We use a simple heuristic: if it starts with { or % AND
+        // the string length > 1, check by building a test string without *.
+        let without_star = substring(trimmed, 0, trimmed.length - 1);
+        if without_star + "*" == trimmed { return true; }
+        return false;
+    }
+    return substring(trimmed, trimmed.length - 1, trimmed.length) == "*";
+}
+
+fn strip_pointer_suffix(value: string) -> string {
+    let trimmed = trim_text(value);
+    if trimmed.length == 0 { return trimmed; }
+    // Use ends_with_pointer_suffix (safe) instead of character indexing.
+    if !ends_with_pointer_suffix(trimmed) { return trimmed; }
+    return trim_text(substring(trimmed, 0, trimmed.length - 1));
+}
+
+// =============================================================================
+// Ownership Wrapper Unwrapping
+// =============================================================================
+fn unwrap_move_wrapper(annotation: string) -> string {
+    let trimmed = trim_text(annotation);
+    if trimmed.length == 0 { return trimmed; }
+    let mut _if306: boolean = false;
+    if starts_with(trimmed, "Affine<") { _if306 = true; }
+    if starts_with(trimmed, "Linear<") { _if306 = true; }
+    if _if306 {
+        let open_index = index_of(trimmed, "<");
+        if open_index >= 0 {
+            if substring(trimmed, trimmed.length - 1, trimmed.length) == ">" {
+                let inner = substring(trimmed, open_index + 1, trimmed.length - 1);
+                return unwrap_move_wrapper(trim_text(inner));
+            }
+        }
+    }
+    return trimmed;
+}
+
+// =============================================================================
+// Type Classification
+// =============================================================================
+fn looks_like_user_type(annotation: string) -> boolean {
+    let trimmed = trim_text(annotation);
+    if trimmed.length == 0 { return false; }
+    let first = substring(trimmed, 0, 1);
+    if is_ascii_uppercase(first) { return true; }
+    // Allow internal/user types prefixed with an underscore, e.g. `_Foo`.
+    if first == "_" {
+        if trimmed.length > 1 {
+            let second = substring(trimmed, 1, 2);
+            if is_ascii_uppercase(second) { return true; }
+        }
+    }
+    let mut index: int = 1;
+    loop {
+        if index >= trimmed.length { break; }
+        let _tm_next = index + 1;
+        let current = substring(trimmed, index, _tm_next);
+        if current == "." {
+            if _tm_next < trimmed.length {
+                let _tm_next2 = index + 2;
+                let next = substring(trimmed, _tm_next, _tm_next2);
+                if is_ascii_uppercase(next) { return true; }
+                let _tm_next3 = index + 3;
+                if next == "_" {
+                    if _tm_next2 < trimmed.length {
+                        let after = substring(trimmed, _tm_next2, _tm_next3);
+                        if is_ascii_uppercase(after) { return true; }
+                    }
+                }
+            }
+        }
+        index += 1;
+    }
+    return false;
+}
+
+// ── #830: generic enum instantiation helpers ─────────────────────────
+// Self-contained (no cross-layer imports) parsing + substitution used to
+// resolve a generic payload enum's declared type parameters against the
+// concrete type arguments at a match site. Monomorphic enums never carry a
+// generic clause, so every entry point below is an inert no-op for them.
+fn enum_inst_is_ident_char(ch: string) -> boolean {
+    if ch.length == 0 { return false; }
+    let code = char_code_at(ch, 0);
+    let mut ok: boolean = false;
+    if code >= char_code_at("a", 0) {
+        if code <= char_code_at("z", 0) { ok = true; }
+    }
+    if code >= char_code_at("A", 0) {
+        if code <= char_code_at("Z", 0) { ok = true; }
+    }
+    if code >= char_code_at("0", 0) {
+        if code <= char_code_at("9", 0) { ok = true; }
+    }
+    if ch == "_" { ok = true; }
+    return ok;
+}
+
+// Parse the top-level type-argument list out of an instantiation
+// annotation such as `Foo<int, Result<int, E>>` -> ["int", "Result<int, E>"].
+// Returns [] when there is no generic clause. Angle-bracket nesting aware.
+fn enum_inst_parse_args(annotation: string) -> string[] {
+    let trimmed = trim_text(annotation);
+    let open = index_of(trimmed, "<");
+    if open < 0 { return []; }
+    let mut args: string[] = [];
+    let mut depth: int = 0;
+    let mut current: string = "";
+    let mut started: boolean = false;
+    let mut index: int = open;
+    loop {
+        if index >= trimmed.length { break; }
+        let ch = substring(trimmed, index, index + 1);
+        if ch == "<" {
+            depth += 1;
+            if depth == 1 {
+                started = true;
+                index += 1;
+                continue;
+            }
+            current = current + ch;
+        } else if ch == ">" {
+            if depth > 0 { depth -= 1; }
+            if depth == 0 {
+                if trim_text(current).length > 0 {
+                    args.push(trim_text(current));
+                }
+                break;
+            }
+            current = current + ch;
+        } else if ch == "," {
+            if depth == 1 {
+                args.push(trim_text(current));
+                current = "";
+            } else { current = current + ch; }
+        } else { current = current + ch; }
+        index += 1;
+    }
+    if !started { return []; }
+    return args;
+}
+
+// True when `annotation` contains an identifier token that exactly matches
+// one of the declared `params` (e.g. `T`, `Array<T>`, `T?`). Used at
+// construction sites to recognise a generic payload field whose concrete
+// type must be taken from the value operand rather than the type-erased
+// declared annotation (#830).
+fn enum_inst_annotation_references_param(annotation: string, params: string[]) -> boolean {
+    if params.length == 0 { return false; }
+    let mut token: string = "";
+    let mut index: int = 0;
+    loop {
+        if index >= annotation.length { break; }
+        let ch = substring(annotation, index, index + 1);
+        if enum_inst_is_ident_char(ch) { token = token + ch; } else {
+            if token.length > 0 {
+                let mut p: int = 0;
+                loop {
+                    if p >= params.length { break; }
+                    if params[p] == token { return true; }
+                    p += 1;
+                }
+                token = "";
+            }
+        }
+        index += 1;
+    }
+    if token.length > 0 {
+        let mut p: int = 0;
+        loop {
+            if p >= params.length { break; }
+            if params[p] == token { return true; }
+            p += 1;
+        }
+    }
+    return false;
+}
+
+fn enum_inst_resolve_token(token: string, params: string[], args: string[]) -> string {
+    let mut index: int = 0;
+    let mut limit: int = params.length;
+    if args.length < limit { limit = args.length; }
+    loop {
+        if index >= limit { break; }
+        if params[index] == token { return args[index]; }
+        index += 1;
+    }
+    return token;
+}
+
+// Substitute declared parameter names with concrete arguments in a field
+// type annotation, identifier-boundary aware (`T` -> `int`, `T[]` ->
+// `int[]`, `Array<T>` -> `Array<int>`, while `Transaction` is left intact).
+// Returns the annotation unchanged when `params` is empty.
+fn enum_inst_substitute_annotation(annotation: string, params: string[], args: string[]) -> string {
+    if params.length == 0 { return annotation; }
+    let mut result: string = "";
+    let mut token: string = "";
+    let mut index: int = 0;
+    loop {
+        if index >= annotation.length { break; }
+        let ch = substring(annotation, index, index + 1);
+        if enum_inst_is_ident_char(ch) { token = token + ch; } else {
+            if token.length > 0 {
+                result = result + enum_inst_resolve_token(token, params, args);
+                token = "";
+            }
+            result = result + ch;
+        }
+        index += 1;
+    }
+    if token.length > 0 {
+        result = result + enum_inst_resolve_token(token, params, args);
+    }
+    return result;
+}
+
+fn annotation_is_array(annotation: string) -> boolean {
+    let trimmed = trim_text(annotation);
+    if trimmed.length < 3 { return false; }
+    let suffix = substring(trimmed, trimmed.length - 2, trimmed.length);
+    return suffix == "[]";
+}
+
+fn is_copy_type(type_annotation: string, llvm_type: string) -> boolean {
+    let trimmed = trim_text(type_annotation);
+    let mut _if307: boolean = false;
+    if starts_with(trimmed, "Affine<") { _if307 = true; }
+    if starts_with(trimmed, "Linear<") { _if307 = true; }
+    if starts_with(trimmed, "Task<") { _if307 = true; }
+    if _if307 { return false; }
+    let mut _if308: boolean = false;
+    if trimmed == "Affine" { _if308 = true; }
+    if trimmed == "Linear" { _if308 = true; }
+    if _if308 { return false; }
+    if llvm_type == "double" { return true; }
+    if llvm_type == "half" { return true; }
+    if llvm_type == "bfloat" { return true; }
+    if llvm_type == "i32" { return true; }
+    if llvm_type == "i64" { return true; }
+    if llvm_type == "i1" { return true; }
+    if ends_with_pointer_suffix(llvm_type) { return true; }
+    if trimmed.length == 0 { return true; }
+    if substring(trimmed, 0, 1) == "&" { return true; }
+    return false;
+}
+
+// =============================================================================
+// Layout Annotation Helpers
+// =============================================================================
+fn layout_annotation_requires_pointer(annotation: string) -> boolean {
+    let trimmed = trim_text(annotation);
+    if trimmed.length == 0 { return false; }
+    let normalized = unwrap_move_wrapper(trimmed);
+    if normalized.length == 0 { return false; }
+    if starts_with(normalized, "mut ") {
+        let remainder = trim_text(substring(normalized, 4, normalized.length));
+        if remainder.length == 0 { return false; }
+        return layout_annotation_requires_pointer(remainder);
+    }
+    if normalized.length > 0 {
+        let first = substring(normalized, 0, 1);
+        if first == "&" { return true; }
+    }
+    if normalized.length > 0 {
+        let last = substring(normalized, normalized.length - 1, normalized.length);
+        if last == "?" { return true; }
+    }
+    if normalized.length > 2 {
+        let suffix = substring(normalized, normalized.length - 2, normalized.length);
+        if suffix == "[]" { return true; }
+    }
+    return false;
+}
+
+fn layout_annotation_base_type(annotation: string) -> string {
+    let trimmed = trim_text(annotation);
+    if trimmed.length == 0 { return ""; }
+    let normalized = unwrap_move_wrapper(trimmed);
+    if normalized.length == 0 { return ""; }
+    if starts_with(normalized, "mut ") {
+        let remainder = trim_text(substring(normalized, 4, normalized.length));
+        return layout_annotation_base_type(remainder);
+    }
+    if normalized.length > 0 {
+        let first = substring(normalized, 0, 1);
+        if first == "&" {
+            let inner_reference = trim_text(substring(normalized, 1, normalized.length));
+            return layout_annotation_base_type(inner_reference);
+        }
+    }
+    if normalized.length > 0 {
+        let last = substring(normalized, normalized.length - 1, normalized.length);
+        if last == "?" {
+            let inner_optional = trim_text(substring(normalized, 0, normalized.length - 1));
+            return layout_annotation_base_type(inner_optional);
+        }
+    }
+    if normalized.length > 2 {
+        let suffix = substring(normalized, normalized.length - 2, normalized.length);
+        if suffix == "[]" {
+            let element = trim_text(substring(normalized, 0, normalized.length - 2));
+            return layout_annotation_base_type(element);
+        }
+    }
+    return normalized;
+}
+
+fn layout_annotation_represents_user_value(annotation: string) -> boolean {
+    // A `Task<T>` handle (SFEP-0055) is pointer-represented — it maps to the
+    // opaque future pointer `%SailfinFuture<Kind>*`, never a by-value
+    // aggregate. It must not be stored inline in an array: stripping its
+    // pointer suffix (as inline user-value elements do) would leave the
+    // unsized opaque `%SailfinFuture<Kind>` element type, which LLVM rejects at
+    // the empty-array sizeof GEP. Keep it pointer-width, like any other handle.
+    if starts_with(trim_text(annotation), "Task<") { return false; }
+    if layout_annotation_requires_pointer(annotation) { return false; }
+    let base = layout_annotation_base_type(annotation);
+    if base.length == 0 { return false; }
+    if base == "number" {
+        return false;
+    }  // alias-coverage: Future mapping seam (Slice E.2 follow-up)
+    if base == "float" { return false; }
+    let mut _if309: boolean = false;
+    if base == "boolean" { _if309 = true; }
+    if base == "bool" { _if309 = true; }
+    if _if309 { return false; }
+    if base == "string" { return false; }
+    if base == "void" { return false; }
+    if base == "any" { return false; }
+    let mut _if310: boolean = false;
+    if base == "i64" { _if310 = true; }
+    if base == "i32" { _if310 = true; }
+    if base == "i16" { _if310 = true; }
+    if base == "i1" { _if310 = true; }
+    if base == "i8" { _if310 = true; }
+    if base == "u64" { _if310 = true; }
+    if base == "u32" { _if310 = true; }
+    if base == "u16" { _if310 = true; }
+    if base == "usize" { _if310 = true; }
+    if base == "isize" { _if310 = true; }
+    if base == "int" { _if310 = true; }
+    if base == "f32" { _if310 = true; }
+    if base == "f64" { _if310 = true; }
+    if base == "f16" { _if310 = true; }
+    if base == "bf16" { _if310 = true; }
+    if _if310 { return false; }
+    if looks_like_user_type(base) { return true; }
+    return false;
+}
+
+// =============================================================================
+// Array Type Helpers
+// =============================================================================
+// M1.B (#393): array struct shape is the {T*, i64, i64} aggregate
+// (data, len, cap). Cap is exposed inline so push/append paths can
+// grow the buffer in place without consulting the legacy hidden
+// header. See docs/proposals/0025-native-runtime-architecture.md §3.4 and the v2 runtime
+// helpers in runtime/native/src/sailfin_runtime.c.
+fn array_struct_type_for_element(element_type: string) -> string {
+    return "{ " + element_type + "*, i64, i64 }";
+}
+
+fn array_pointer_type_for_element(element_type: string) -> string {
+    return "{ " + element_type + "*, i64, i64 }*";
+}
+
+// =============================================================================
+// Core Type Mapping
+// =============================================================================
+fn map_type_annotation(annotation: string) -> string {
+    let trimmed = trim_text(annotation);
+    if trimmed.length == 0 { return "void"; }
+    // `__closure__` is the internal sentinel assigned by the
+    // lambda-lifting pass (`lambda_lowering.sfn`) to bindings whose
+    // initializer was a non-capturing lifted lambda (issue #686).
+    // Maps to the `{i8*, i8*}` closure-pair aggregate emitted by
+    // `emit_closure_pair_aggregate`. Users cannot type this
+    // annotation by hand; it never surfaces in diagnostics.
+    // The richer `__closure__@sfn_lambda_<N>` form (set at
+    // let-lowering time so #689 call-site dispatch can look up
+    // the lifted function's signature) maps to the same LLVM type.
+    if trimmed == "__closure__" { return "{i8*, i8*}"; }
+    if starts_with(trimmed, "__closure__@") { return "{i8*, i8*}"; }
+    // User-supplied fn-pointer annotations (issue #688) also lower
+    // to the closure-pair aggregate. A parameter typed
+    // `cb: fn(int) -> int` is a closure value passed by aggregate.
+    // Both `fn(` and `fn (` are accepted because `sfn fmt` rewrites
+    // the bare keyword form into `fn (` with a separating space.
+    if starts_with(trimmed, "fn(") { return "{i8*, i8*}"; }
+    if starts_with(trimmed, "fn (") { return "{i8*, i8*}"; }
+    let normalized = unwrap_move_wrapper(trimmed);
+
+    // `Task<T>` is the user-writable typed task handle (SFEP-0055): a phantom
+    // newtype over the raw future pointer `spawn fn() -> T` already produces, so
+    // it lowers to the same `%SailfinFuture<Kind>*` pointer at zero runtime
+    // cost. Resolving it here — before the `looks_like_user_type` fallback that
+    // would mint a distinct `%Task*` boxed struct — gives an annotated
+    // `Task<T>[]` a pointer-width future-pointer element slot instead of the
+    // inferred-empty `double` default that is the E0831 corruption precondition
+    // (SFN-386). Parametric-only (`Task<`), so the internal runtime `struct
+    // Task` (`scheduler.sfn`) used bare stays a plain user type.
+    if starts_with(normalized, "Task<") {
+        if ends_with(normalized, ">") {
+            let task_open = index_of(normalized, "<");
+            let task_inner = trim_text(substring(normalized, task_open + 1, normalized.length - 1));
+            return future_pointer_type_for_return_type(task_inner);
+        }
+    }
+
+    // Raw pointer types: `*T`, `*mut T`, `*opaque`.
+    // Sailfin user-defined values often lower as pointers already; avoid
+    // introducing a second pointer layer when the inner mapping already
+    // returns a pointer type.
+    if starts_with(normalized, "*") {
+        let mut remainder = trim_text(substring(normalized, 1, normalized.length));
+        if starts_with(remainder, "mut") {
+            remainder = trim_text(substring(remainder, 3, remainder.length));
+        }
+        if remainder == "opaque" { return "i8*"; }
+        if remainder.length == 0 { return "i8*"; }
+        let inner = map_type_annotation(remainder);
+        let mut _if311: boolean = false;
+        if inner.length == 0 { _if311 = true; }
+        if inner == "void" { _if311 = true; }
+        if _if311 { return "i8*"; }
+        if substring(inner, inner.length - 1, inner.length) == "*" {
+            return inner;
+        }
+        return inner + "*";
+    }
+
+    if normalized.length > 0 {
+        let optional_marker = substring(normalized, normalized.length - 1, normalized.length);
+        if optional_marker == "?" {
+            let inner_annotation = trim_text(substring(normalized, 0, normalized.length - 1));
+            if inner_annotation.length == 0 { return "i8*"; }
+            // M1.A.2: optional `string?` stays a nullable `i8*` (null = none,
+            // non-null = data pointer) — including as a struct field, where
+            // this mapper renders the layout. Scalar `string` flips to the
+            // `{i8*, i64}` aggregate, but the optional-in-container form keeps
+            // the legacy pointer shape so string ops / null checks recognise
+            // it without a `{i8*, i64}*` boxed form.
+            if inner_annotation == "string" { return "i8*"; }
+            if inner_annotation == "SfnString" { return "i8*"; }
+            let inner_type = map_type_annotation(inner_annotation);
+            let mut _if312: boolean = false;
+            if inner_type.length == 0 { _if312 = true; }
+            if inner_type == "void" { _if312 = true; }
+            if _if312 { return "i8*"; }
+            if inner_type.length > 0 {
+                if substring(inner_type, inner_type.length - 1, inner_type.length) == "*" {
+                    return inner_type;
+                }
+            }
+            return inner_type + "*";
+        }
+    }
+    if normalized == "number" {
+        return "double";
+    }  // alias-coverage: Future mapping seam (Slice E.2 follow-up)
+    if normalized == "float" { return "double"; }
+    if normalized == "f64" { return "double"; }
+    if normalized == "f32" { return "float"; }
+    if normalized == "f16" { return "half"; }
+    if normalized == "bf16" { return "bfloat"; }
+    let mut _if313: boolean = false;
+    if normalized == "boolean" { _if313 = true; }
+    if normalized == "bool" { _if313 = true; }
+    if _if313 { return "i1"; }
+    if normalized == "usize" { return "i64"; }
+    if normalized == "isize" { return "i64"; }
+    let mut _if314: boolean = false;
+    if normalized == "int" { _if314 = true; }
+    if normalized == "i64" { _if314 = true; }
+    if normalized == "u64" { _if314 = true; }
+    if _if314 { return "i64"; }
+    let mut _if314b: boolean = false;
+    if normalized == "i32" { _if314b = true; }
+    if normalized == "u32" { _if314b = true; }
+    if _if314b { return "i32"; }
+    let mut _if314c: boolean = false;
+    if normalized == "i16" { _if314c = true; }
+    if normalized == "u16" { _if314c = true; }
+    if _if314c { return "i16"; }
+    let mut _if314d: boolean = false;
+    if normalized == "i8" { _if314d = true; }
+    if normalized == "u8" { _if314d = true; }
+    if _if314d { return "i8"; }
+    // M1.A.2: the language-level `string` type lowers to the by-value
+    // `{i8*, i64}` (data, len) SfnString aggregate — the same two-eightbyte
+    // INTEGER-class layout the runtime C ABI already uses. The historical
+    // bare-`i8*` mapping is retired; data-pointer-only consumers extract slot
+    // 0 via the `coerce_pointer_or_struct` shim (core_operands.sfn).
+    let mut _is_str_ann: boolean = false;
+    if normalized == "string" { _is_str_ann = true; }
+    if normalized == "SfnString" { _is_str_ann = true; }
+    if _is_str_ann { return "{i8*, i64}"; }
+    if normalized == "void" { return "void"; }
+    if normalized.length > 2 {
+        let suffix = substring(normalized, normalized.length - 2, normalized.length);
+        if suffix == "[]" {
+            let element_annotation = trim_text(substring(normalized, 0, normalized.length - 2));
+            let mut element_type = map_type_annotation(element_annotation);
+            if element_type.length == 0 { return "i8*"; }
+            // M1.A.2: scalar `string` flips to the `{i8*, i64}` aggregate, but
+            // `string[]` element slots deliberately stay `i8*` for 1.0 (the
+            // aggregate-element array-header churn, #1316-adjacent, is out of
+            // scope). The array-literal lowering clamps element operands to
+            // `i8*` to match; keep the declared element type in lockstep so
+            // alloca/GEP shapes agree. Indexing an element back to a `string`
+            // value recovers the length via the coercion shim.
+            let mut _str_elem: boolean = false;
+            if element_annotation == "string" { _str_elem = true; }
+            if element_annotation == "SfnString" { _str_elem = true; }
+            if _str_elem { element_type = "i8*"; }
+            // Arrays of user-value types (enums + inline structs) store the value inline.
+            // `map_type_annotation` defaults user types to pointers, so strip that layer
+            // when the surface syntax represents a value type.
+            if layout_annotation_represents_user_value(element_annotation) {
+                if ends_with_pointer_suffix(element_type) {
+                    element_type = strip_pointer_suffix(element_type);
+                }
+            }
+            let aggregate = array_struct_type_for_element(element_type);
+            return aggregate + "*";
+        }
+    }
+    if looks_like_user_type(normalized) {
+        let sanitized = sanitize_symbol(normalized);
+        return "%" + sanitized + "*";
+    }
+    // Default to i8* for unknown types.
+    //
+    // Unreachable for user-written annotations since SFN-555: typecheck rejects
+    // a name that resolves to nothing (E0013) before lowering runs. It stays a
+    // silent default rather than a hard failure because lowering also calls
+    // this with SYNTHETIC annotations carrying LLVM type text that no typecheck
+    // pass ever sees — `TypeAnnotation { text: "i8*" }` for a lambda's `__env`
+    // parameter (`lambda_lowering.sfn`) and the synthetic closure sentinel.
+    // Asserting here would reject those.
+    return "i8*";
+}
+
+fn map_struct_field_annotation(annotation: string) -> string {
+    let result = map_type_annotation(annotation);
+    if result == "void" { return ""; }
+    // M1.A.2: strings live as `i8*` in memory (struct/enum fields, array
+    // elements, globals) and only widen to the `{i8*, i64}` SfnString
+    // aggregate in scalar register positions (locals, params, returns). A
+    // by-value string field would shift the byte offsets of every field
+    // after it, breaking the imported-AST field-offset contract the layout
+    // engine and the canonical table encode at the baseline 8-byte width.
+    // Loading such a field into a scalar `string` recovers the length via
+    // `sfn_str_len` (the existing `i8*` -> `{i8*, i64}` coercion bridge).
+    if result == "{i8*, i64}" { return "i8*"; }
+    return result;
+}
+
+fn map_struct_type_annotation(annotation: string) -> string {
+    let trimmed = trim_text(annotation);
+    if trimmed.length == 0 { return ""; }
+    let normalized = unwrap_move_wrapper(trimmed);
+    if looks_like_user_type(normalized) {
+        return "%" + sanitize_symbol(normalized);
+    }
+    let mapped = map_type_annotation(normalized);
+    if ends_with_pointer_suffix(mapped) {
+        let stripped = strip_pointer_suffix(mapped);
+        if stripped.length > 0 { return stripped; }
+    }
+    return mapped;
+}
+
+fn map_parameter_type(context: TypeContext, parameter_type: string) -> string {
+    // Parameters should use the same context-aware mapping rules as returns.
+    // Otherwise user-defined value types (like enums) can incorrectly become pointers,
+    // causing ABI mismatches and memory corruption.
+    let mapped = map_return_type(context, parameter_type);
+    if mapped == "void" { return ""; }
+    return mapped;
+}
+
+fn map_local_type(context: TypeContext, annotation: string) -> string {
+    // Locals should mirror the context-aware mapping used for returns.
+    let mapped = map_return_type(context, annotation);
+    if mapped == "void" { return ""; }
+    return mapped;
+}
+
+// =============================================================================
+// Return Type Mapping
+// =============================================================================
+fn map_return_type(context: TypeContext, return_type: string) -> string {
+    let trimmed = trim_text(return_type);
+    let mut _if315: boolean = false;
+    if trimmed.length == 0 { _if315 = true; }
+    if trimmed == "void" { _if315 = true; }
+    if _if315 { return "void"; }
+    // Closure-pair sentinel — see comment in `map_type_annotation`.
+    if trimmed == "__closure__" { return "{i8*, i8*}"; }
+    if starts_with(trimmed, "__closure__@") { return "{i8*, i8*}"; }
+    if starts_with(trimmed, "fn(") { return "{i8*, i8*}"; }
+    if starts_with(trimmed, "fn (") { return "{i8*, i8*}"; }
+    let normalized = unwrap_move_wrapper(trimmed);
+    // Runtime-internal by-value `SfnString` aggregate ABI (M1.A.2). The bare
+    // `{i8*, i64}` (data, len) two-eightbyte INTEGER-class struct is the
+    // canonical SfnString layout (see `abi_hash.sfn`), returned/passed in
+    // registers — the ABI the runtime-helper call sites already emit for
+    // `env.get` / `env.home` etc. (`runtime_helpers.sfn`). Naming the return /
+    // parameter type `SfnString` in a runtime `.sfn` body routes the
+    // *definition* onto that same by-value aggregate ABI instead of the boxed
+    // `%T*` struct ABI below, so a Sailfin body can satisfy the call site
+    // without a C trampoline. Checked on the move-unwrapped `normalized`
+    // spelling (so `move SfnString` and move-wrapped params/locals via
+    // `map_parameter_type` / `map_local_type` are caught too), before the
+    // boxed-struct path, so it never becomes `%SfnString*`. Not a user-facing
+    // type — a runtime ABI spelling only.
+    //
+    // M1.A.2: the language-level `string` now shares this same by-value
+    // aggregate ABI, so it is routed onto the identical `{i8*, i64}` return /
+    // parameter shape rather than the legacy bare `i8*`.
+    let mut _is_str_ret: boolean = false;
+    if normalized == "string" { _is_str_ret = true; }
+    if normalized == "SfnString" { _is_str_ret = true; }
+    if _is_str_ret { return "{i8*, i64}"; }
+
+    // Raw pointer types: `*T`, `*mut T`, `*opaque`.
+    if starts_with(normalized, "*") {
+        let mut remainder = trim_text(substring(normalized, 1, normalized.length));
+        if starts_with(remainder, "mut") {
+            remainder = trim_text(substring(remainder, 3, remainder.length));
+        }
+        let mut _if316: boolean = false;
+        if remainder == "opaque" { _if316 = true; }
+        if remainder.length == 0 { _if316 = true; }
+        if _if316 { return "i8*"; }
+        let inner = map_return_type(context, remainder);
+        if ends_with_pointer_suffix(inner) { return inner; }
+        let mut _if317: boolean = false;
+        if inner.length == 0 { _if317 = true; }
+        if inner == "void" { _if317 = true; }
+        if _if317 { return "i8*"; }
+        return inner + "*";
+    }
+
+    let union_type = map_union_type(context, normalized);
+    if union_type.length > 0 { return union_type; }
+    // Try optional type first
+    let optional_type = map_optional_type(context, normalized);
+    if optional_type.length > 0 { return optional_type; }
+    let reference_type = map_reference_type(context, normalized);
+    if reference_type.length > 0 { return reference_type; }
+    let array_type = map_array_pointer_type(context, normalized);
+    if array_type.length > 0 { return array_type; }
+    let primitive_type = map_primitive_type(context, normalized);
+    if primitive_type.length > 0 { return primitive_type; }
+
+    // 0.5.8+ boxed-struct ABI:
+    // User-defined aggregates (structs/enums/interfaces) cross function
+    // boundaries as pointers (%T*), not by-value LLVM first-class aggregates.
+    //
+    // Rationale: LLVM's AArch64 aggregate-return legalizer is ambiguous
+    // without an explicit `sret` attribute — each translation unit legalizes
+    // independently, so cross-module calls non-deterministically truncate
+    // returned struct/enum values. Apple Silicon M3 exposes this UB because
+    // of more aggressive out-of-order execution than older Intel CI hardware.
+    //
+    // The physical struct layout is unchanged (fields still stored inline via
+    // `map_struct_type_annotation` which strips the `*` for field bodies).
+    // Only cross-function passing changes: a struct result is heap-allocated
+    // (via the default-on arena, so allocation is bump-pointer) and returned
+    // as %T* — trivially 8 bytes, always in x0 on AArch64, unambiguous ABI.
+    // GEP still indexes into the layout correctly because the type body is
+    // still `%T = type { field0, field1, ... }`.
+    if looks_like_user_type(normalized) {
+        let mut i: int = 0;
+        loop {
+            if i >= context.structs.length { break; }
+            let info = context.structs[i];
+            if info.name == normalized { return info.llvm_name + "*"; }
+            i += 1;
+        }
+
+        i = 0;
+        loop {
+            if i >= context.enums.length { break; }
+            let info = context.enums[i];
+            if info.name == normalized { return info.llvm_name + "*"; }
+            i += 1;
+        }
+
+        // Interfaces stay by-value. Interface values are `{ i8*, i8* }` fat
+        // pointers (16 bytes) — already register-passable on AArch64 without
+        // aggregate-return ABI ambiguity. Boxing them would require rewriting
+        // the trait-dispatch extractvalue chain in core_call_emission/dispatch.sfn.
+        // Keep the existing by-value ABI for interfaces.
+        i = 0;
+        loop {
+            if i >= context.interfaces.length { break; }
+            let info = context.interfaces[i];
+            if info.name == normalized { return info.llvm_name; }
+            i += 1;
+        }
+    }
+    // Fallback to opaque pointer for unrecognised return types (`any`, etc.)
+    return "i8*";
+}
+
+// =============================================================================
+// Specialized Type Mapping
+// =============================================================================
+fn map_union_type(context: TypeContext, annotation: string) -> string {
+    // Union types: `A | B | C` => tagged struct { i32, <A_llvm>, <B_llvm>, ... }
+    let trimmed = trim_text(annotation);
+    if trimmed.length == 0 { return ""; }
+    // Split on top-level `|` separators (skip nested generics)
+    let mut parts: string[] = [];
+    let mut start: int = 0;
+    let mut index: int = 0;
+    let mut depth: int = 0;
+    let mut found_pipe: boolean = false;
+    loop {
+        if index >= trimmed.length { break; }
+        let ch = substring(trimmed, index, index + 1);
+        let mut _is_open: boolean = false;
+        if ch == "<" { _is_open = true; }
+        if ch == "(" { _is_open = true; }
+        if ch == "[" { _is_open = true; }
+        if _is_open { depth += 1; }
+        let mut _is_close: boolean = false;
+        if ch == ">" { _is_close = true; }
+        if ch == ")" { _is_close = true; }
+        if ch == "]" { _is_close = true; }
+        if _is_close {
+            if depth > 0 { depth -= 1; }
+        }
+        if ch == "|" {
+            if depth == 0 {
+                let part = trim_text(substring(trimmed, start, index));
+                if part.length > 0 { parts.push(part); }
+                start = index + 1;
+                found_pipe = true;
+            }
+        }
+        index += 1;
+    }
+    if !found_pipe { return ""; }
+    // Collect the last part
+    let last_part = trim_text(substring(trimmed, start, trimmed.length));
+    if last_part.length > 0 { parts.push(last_part); }
+    if parts.length < 2 { return ""; }
+    // Map each variant type and build the tagged struct
+    let mut result: string = "{ i32";
+    let mut pi: int = 0;
+    loop {
+        if pi >= parts.length { break; }
+        let mapped = map_type_annotation(parts[pi]);
+        let mut _bad: boolean = false;
+        if mapped.length == 0 { _bad = true; }
+        if mapped == "void" { _bad = true; }
+        if _bad { return ""; }
+        result = result + ", " + mapped;
+        pi += 1;
+    }
+    result = result + " }";
+    return result;
+}
+
+fn map_optional_type(context: TypeContext, annotation: string) -> string {
+    let trimmed = trim_text(annotation);
+    if trimmed.length == 0 { return ""; }
+    if substring(trimmed, trimmed.length - 1, trimmed.length) != "?" {
+        return "";
+    }
+    let inner = trim_text(substring(trimmed, 0, trimmed.length - 1));
+    if inner.length == 0 { return "i8*"; }
+    // M1.A.2: optional `string?` stays a nullable `i8*` (null = none,
+    // non-null = data pointer). Scalar `string` flips to the `{i8*, i64}`
+    // aggregate, but the optional-in-container form keeps the legacy pointer
+    // shape so null checks and the `+`/comparison string paths still
+    // recognise it; length is recovered via the coercion shim where needed.
+    if inner == "string" { return "i8*"; }
+    if inner == "SfnString" { return "i8*"; }
+    let inner_type = map_type_annotation(inner);
+    let mut _if319: boolean = false;
+    if inner_type.length == 0 { _if319 = true; }
+    if inner_type == "void" { _if319 = true; }
+    if _if319 { return "i8*"; }
+    if ends_with_pointer_suffix(inner_type) { return inner_type; }
+    return inner_type + "*";
+}
+
+fn map_reference_type(context: TypeContext, annotation: string) -> string {
+    let trimmed = trim_text(annotation);
+    if trimmed.length == 0 { return ""; }
+    if substring(trimmed, 0, 1) != "&" { return ""; }
+    let mut remainder = trim_text(substring(trimmed, 1, trimmed.length));
+    if starts_with(remainder, "mut") {
+        remainder = trim_text(substring(remainder, 3, remainder.length));
+    }
+    if remainder.length == 0 { return "i8*"; }
+    let inner_type = map_type_annotation(remainder);
+    let mut _if320: boolean = false;
+    if inner_type.length == 0 { _if320 = true; }
+    if inner_type == "void" { _if320 = true; }
+    if _if320 { return "i8*"; }
+    if ends_with_pointer_suffix(inner_type) { return inner_type; }
+    return inner_type + "*";
+}
+
+fn map_array_pointer_type(context: TypeContext, annotation: string) -> string {
+    let trimmed = trim_text(annotation);
+    if trimmed.length < 3 { return ""; }
+    let suffix = substring(trimmed, trimmed.length - 2, trimmed.length);
+    if suffix != "[]" { return ""; }
+    let element_annotation = trim_text(substring(trimmed, 0, trimmed.length - 2));
+    let mut element_type = map_type_annotation(element_annotation);
+    if element_type.length == 0 { return "i8*"; }
+    // M1.A.2: `string[]` element slots stay `i8*` (see the matching clamp in
+    // `map_type_annotation`'s array branch); only scalar `string` flips to the
+    // `{i8*, i64}` aggregate.
+    let mut _str_elem: boolean = false;
+    if element_annotation == "string" { _str_elem = true; }
+    if element_annotation == "SfnString" { _str_elem = true; }
+    if _str_elem { element_type = "i8*"; }
+    // Arrays of user-value types store the value inline.
+    if layout_annotation_represents_user_value(element_annotation) {
+        if ends_with_pointer_suffix(element_type) {
+            element_type = strip_pointer_suffix(element_type);
+        }
+    }
+    return array_pointer_type_for_element(element_type);
+}
+
+fn map_primitive_type(context: TypeContext, annotation: string) -> string {
+    let trimmed = trim_text(annotation);
+    if trimmed == "number" {
+        return "double";
+    }  // alias-coverage: Future mapping seam (Slice E.2 follow-up)
+    if trimmed == "float" { return "double"; }
+    if trimmed == "f64" { return "double"; }
+    if trimmed == "f32" { return "float"; }
+    if trimmed == "f16" { return "half"; }
+    if trimmed == "bf16" { return "bfloat"; }
+    let mut _if321: boolean = false;
+    if trimmed == "boolean" { _if321 = true; }
+    if trimmed == "bool" { _if321 = true; }
+    if _if321 { return "i1"; }
+    if trimmed == "string" { return "i8*"; }
+    if trimmed == "void" { return "void"; }
+    if trimmed == "any" { return "i8*"; }
+    // Pointer-sized aliases: usize/isize lower to i64 because
+    // every Sailfin target today is 64-bit. When a 32-bit target
+    // lands, swap in a target-aware entry.
+    if trimmed == "usize" { return "i64"; }
+    if trimmed == "isize" { return "i64"; }
+    let mut _if322: boolean = false;
+    if trimmed == "int" { _if322 = true; }
+    if trimmed == "i64" { _if322 = true; }
+    if trimmed == "u64" { _if322 = true; }
+    if _if322 { return "i64"; }
+    let mut _if324: boolean = false;
+    if trimmed == "i32" { _if324 = true; }
+    if trimmed == "u32" { _if324 = true; }
+    if _if324 { return "i32"; }
+    let mut _if325: boolean = false;
+    if trimmed == "i16" { _if325 = true; }
+    if trimmed == "u16" { _if325 = true; }
+    if _if325 { return "i16"; }
+    let mut _if323: boolean = false;
+    if trimmed == "u8" { _if323 = true; }
+    if trimmed == "i8" { _if323 = true; }
+    if _if323 { return "i8"; }
+    return "";
+}
+
+// Source-of-truth signedness predicate for Sailfin integer type names
+// (SFEP-0058 §3.1). `map_primitive_type` above collapses each unsigned
+// width onto its signed LLVM twin (`u8`→`i8`, `u32`→`i32`, …), so sign is
+// a frontend concept that survives only in the source-level annotation.
+// Every sign-sensitive lowering decision reads it from here rather than
+// trying to recover it from an already-mapped `LLVMOperand.llvm_type`.
+//
+// Unsigned is the closed set; every other name answers signed. An
+// unrecognised or non-integer name therefore selects the signed forms —
+// the behaviour the lowering already had — so a caller that has not
+// established `name` is an integer type degrades to the status quo rather
+// than to a wrong opcode. `lower_cast_expression` establishes it by
+// requiring the annotation to map onto the operand's own LLVM type.
+fn integer_type_is_signed(name: string) -> boolean {
+    let trimmed = trim_text(name);
+    if trimmed == "u8" { return false; }
+    if trimmed == "u16" { return false; }
+    if trimmed == "u32" { return false; }
+    if trimmed == "u64" { return false; }
+    if trimmed == "usize" { return false; }
+    return true;
+}
+
+// =============================================================================
+// Future/Async Type Mapping
+// =============================================================================
+fn future_pointer_type_for_return_type(return_type: string) -> string {
+    let trimmed = trim_text(return_type);
+    let mut _if324: boolean = false;
+    if trimmed.length == 0 { _if324 = true; }
+    if trimmed == "void" { _if324 = true; }
+    if _if324 { return "%SailfinFutureVoid*"; }
+    let normalized = unwrap_move_wrapper(trimmed);
+    if normalized == "number" {
+        return "%SailfinFutureNumber*";
+    }  // alias-coverage: Future mapping seam (Slice E.2 follow-up)
+    let mut _if324b: boolean = false;
+    if normalized == "int" { _if324b = true; }
+    if normalized == "i64" { _if324b = true; }
+    if normalized == "u64" { _if324b = true; }
+    if normalized == "usize" { _if324b = true; }
+    if normalized == "isize" { _if324b = true; }
+    if _if324b { return "%SailfinFutureInt*"; }
+    let mut _if325: boolean = false;
+    if normalized == "boolean" { _if325 = true; }
+    if normalized == "bool" { _if325 = true; }
+    if _if325 { return "%SailfinFutureBool*"; }
+    if normalized == "string" { return "%SailfinFutureString*"; }
+    // Default: treat unknown/user types as an opaque pointer.
+    return "%SailfinFuturePtr*";
+}
+
+fn spawn_symbol_for_return_type(return_type: string) -> string {
+    let trimmed = trim_text(return_type);
+    let mut _if326: boolean = false;
+    if trimmed.length == 0 { _if326 = true; }
+    if trimmed == "void" { _if326 = true; }
+    if _if326 { return "sfn_spawn_void"; }
+    let normalized = unwrap_move_wrapper(trimmed);
+    if normalized == "number" {
+        return "sfn_spawn_number";
+    }  // alias-coverage: Future mapping seam (Slice E.2 follow-up)
+    let mut _if326b: boolean = false;
+    if normalized == "int" { _if326b = true; }
+    if normalized == "i64" { _if326b = true; }
+    if normalized == "u64" { _if326b = true; }
+    if normalized == "usize" { _if326b = true; }
+    if normalized == "isize" { _if326b = true; }
+    if _if326b { return "sfn_spawn_int"; }
+    let mut _if327: boolean = false;
+    if normalized == "boolean" { _if327 = true; }
+    if normalized == "bool" { _if327 = true; }
+    if _if327 { return "sfn_spawn_bool"; }
+    if normalized == "string" { return "sfn_spawn_string"; }
+    return "sfn_spawn_ptr";
+}
+
+fn spawn_ctx_symbol_for_return_type(return_type: string) -> string {
+    let trimmed = trim_text(return_type);
+    let mut _if328: boolean = false;
+    if trimmed.length == 0 { _if328 = true; }
+    if trimmed == "void" { _if328 = true; }
+    if _if328 { return "sfn_spawn_void_ctx"; }
+    let normalized = unwrap_move_wrapper(trimmed);
+    if normalized == "number" {
+        return "sfn_spawn_number_ctx";
+    }  // alias-coverage: Future mapping seam (Slice E.2 follow-up)
+    let mut _if328b: boolean = false;
+    if normalized == "int" { _if328b = true; }
+    if normalized == "i64" { _if328b = true; }
+    if normalized == "u64" { _if328b = true; }
+    if normalized == "usize" { _if328b = true; }
+    if normalized == "isize" { _if328b = true; }
+    if _if328b { return "sfn_spawn_int_ctx"; }
+    let mut _if329: boolean = false;
+    if normalized == "boolean" { _if329 = true; }
+    if normalized == "bool" { _if329 = true; }
+    if _if329 { return "sfn_spawn_bool_ctx"; }
+    if normalized == "string" { return "sfn_spawn_string_ctx"; }
+    return "sfn_spawn_ptr_ctx";
+}
+
+// =============================================================================
+// ABI Primitive Kind Classification (Slice E.1.5 — issue #528; bool — #537)
+// =============================================================================
+// Returns "int", "float", "bool", or "other" for an LLVM primitive type. Used
+// by `coerce_operand_to_type` and `dominant_type` to refuse silent scalar-kind
+// mismatches at call/binding/arithmetic boundaries during the partial migration
+// from the historical `number` annotation to `int`/`float`. Pointer and
+// aggregate types return "other" — this scopes the diagnostic to scalar
+// primitives so the ABI hazard is caught loudly without disturbing today's
+// pointer/struct lowering.
+//
+// #537: `i1` (boolean) is its own kind, distinct from `int`. This makes
+// `bool ↔ int` and `bool ↔ float` mismatches diagnosable by construction (a
+// bool flowing into a numeric context is otherwise silently widened via
+// `zext`/`uitofp`). `i8` stays `"int"` — it doubles as the char/byte width and
+// reclassifying it would cascade across the tree.
+fn numeric_type_kind(llvm_type: string) -> string {
+    let trimmed = trim_text(llvm_type);
+    if trimmed == "i1" { return "bool"; }
+    if trimmed == "i64" { return "int"; }
+    if trimmed == "i32" { return "int"; }
+    if trimmed == "i16" { return "int"; }
+    if trimmed == "i8" { return "int"; }
+    if trimmed == "double" { return "float"; }
+    if trimmed == "float" { return "float"; }
+    if trimmed == "half" { return "float"; }
+    if trimmed == "bfloat" { return "float"; }
+    return "other";
+}
+
+// =============================================================================
+// Default Value Helpers
+// =============================================================================
+fn default_value_for_llvm_type(llvm_type: string) -> string {
+    let trimmed = trim_text(llvm_type);
+    if trimmed == "double" { return "0.0"; }
+    if trimmed == "half" { return "0.0"; }
+    if trimmed == "bfloat" { return "0.0"; }
+    let mut _if330: boolean = false;
+    if trimmed == "i64" { _if330 = true; }
+    if trimmed == "i32" { _if330 = true; }
+    if trimmed == "i1" { _if330 = true; }
+    if trimmed == "i8" { _if330 = true; }
+    if _if330 { return "0"; }
+    if ends_with_pointer_suffix(llvm_type) { return "null"; }
+    return "zeroinitializer";
+}

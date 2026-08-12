@@ -1,0 +1,1511 @@
+// compiler/capsules/codegen-llvm/src/lowering/lowering_helpers.sfn
+//
+// Shared utility functions for LLVM IR lowering.
+import {
+    LayoutManifest,
+    NativeArtifact,
+    NativeEnum,
+    NativeEnumLayout,
+    NativeEnumVariant,
+    NativeEnumVariantField,
+    NativeEnumVariantLayout,
+    NativeFunction,
+    NativeImport,
+    NativeImportSpecifier,
+    NativeInstruction,
+    NativeInterface,
+    NativeModule,
+    NativeParameter,
+    NativeStruct,
+    NativeStructField,
+    NativeStructLayout,
+    NativeStructLayoutField,
+    ParseNativeResult
+} from "sfn/ir";
+import {
+    parse_layout_manifest,
+    parse_native_artifact,
+    parse_native_artifact_for_import_context,
+    parse_native_function_count_from_text,
+    parse_native_functions_from_text,
+    select_layout_manifest_artifact,
+    select_text_artifact
+} from "sfn/ir";
+import { split_lines } from "sfn/ir";
+import { substring } from "sfn/strings";
+
+import { append_unique_effect } from "../effects";
+import { is_prelude_mirror_symbol } from "../prelude_mirror_signatures";
+import { find_function_by_name, should_internalize_function } from "../rendering";
+import { runtime_helper_descriptors } from "../runtime_helpers/mod";
+import { is_llvm_symbol_char, sanitize_symbol } from "../symbols";
+import {
+    CapabilityManifest,
+    EnumTypeInfo,
+    EnumVariantInfo,
+    FunctionEffectEntry,
+    LifetimeRegionMetadata,
+    LoweredLLVMLinesResult,
+    LoweredLLVMResult,
+    StringConstant,
+    TraitDescriptor,
+    TraitImplementationDescriptor,
+    TraitMetadata,
+    TypeContext
+} from "../types";
+import {
+    append_string,
+    index_of,
+    join_with_separator,
+    number_to_string,
+    starts_with,
+    string_array_contains,
+    trim_text
+} from "../utils";
+import { extend_string_lines } from "./lowering_io";
+
+fn empty_trait_metadata() -> TraitMetadata {
+    return TraitMetadata { interfaces: [], implementations: [] };
+}
+
+fn sanitize_collection_length(value: int, max: int) -> int {
+    if value < 0 { return 0; }
+    if value > max { return max; }
+    return value;
+}
+
+fn extend_native_structs(values: NativeStruct[], extras: NativeStruct[]) -> NativeStruct[] {
+    let mut out = values;
+    if out == null { out = []; }
+    if extras == null { return out; }
+    let mut index: int = 0;
+    loop {
+        if index >= extras.length { break; }
+        out = out.push(extras[index]);
+        index += 1;
+    }
+    return out;
+}
+
+fn extend_native_enums(values: NativeEnum[], extras: NativeEnum[]) -> NativeEnum[] {
+    let mut out = values;
+    if out == null { out = []; }
+    if extras == null { return out; }
+    let mut index: int = 0;
+    loop {
+        if index >= extras.length { break; }
+        out = out.push(extras[index]);
+        index += 1;
+    }
+    return out;
+}
+
+// True iff a `NativeEnum` named `name` is present. Used by the prelude guard and
+// `lowering_core` to suppress descriptor registration for an injected `Result`
+// (#1021).
+fn native_enums_have_name(enums: NativeEnum[], name: string) -> boolean {
+    if enums == null { return false; }
+    let mut index: int = 0;
+    loop {
+        if index >= enums.length { break; }
+        let existing = enums[index];
+        if existing != null {
+            if existing.name == name { return true; }
+        }
+        index += 1;
+    }
+    return false;
+}
+
+// True iff a `NativeStruct` named `name` is already present. Sibling of
+// `native_enums_have_name` for the prelude `Error` struct.
+fn native_structs_have_name(structs: NativeStruct[], name: string) -> boolean {
+    if structs == null { return false; }
+    let mut index: int = 0;
+    loop {
+        if index >= structs.length { break; }
+        let existing = structs[index];
+        if existing != null {
+            if existing.name == name { return true; }
+        }
+        index += 1;
+    }
+    return false;
+}
+
+// #1021: inject the prelude `Result<T, E>` enum into a module's combined enum
+// set when it is not already present via an in-file declaration or explicit
+// import. The prelude is linked into every Sailfin binary, so a bare user file
+// can write `Result.Ok` / `Result.Err` + `match` without importing `Result` —
+// but the LLVM lowering type context only ever saw enums from the module's own
+// `.sfn-asm` or its imports, so the prelude `Result` never reached
+// `build_type_context` and `match` silently miscompiled to `i8*` with no
+// discriminant test. We construct the `NativeEnum` literal directly here rather
+// than reading `runtime/prelude.sfn` because the native-IR parsers cannot parse
+// Sailfin source and no prelude `.sfn-asm` artifact is staged for the
+// single-file `emit llvm` path. The shape below is byte-identical to what the
+// emitter produces for an in-file `enum Result<T, E>` (verified against
+// `sailfin emit native`): a non-null, pointer-erased base layout (size-8 generic
+// payloads) that the per-instantiation monomorphisation (#830) specialises just
+// like any in-file generic payload enum. Source of truth: runtime/prelude.sfn
+// (`enum Result<T, E>`). The name guard means an in-file or imported `Result`
+// always wins — preserving `result_enum_lowering_test.sfn`'s in-file semantics
+// and preventing a duplicate `%Result` type definition if a real prelude
+// artifact is ever staged.
+//
+// The injection is unconditional (every module gets `Result`/`Error` in its
+// LAYOUT type context) so construction/`match` lowering always resolves them.
+// Their *descriptor registration* (`sfn_type_register`) is suppressed for the
+// injected names in `lowering_core` — the prelude module owns that registration,
+// and re-emitting it in every consumer adds an undefined `sfn_type_register`
+// reference to modules that define no other types, breaking standalone-link
+// roundtrip tests (#1021 CI regression).
+fn inject_prelude_result_enum(enums: NativeEnum[]) -> NativeEnum[] {
+    let mut out = enums;
+    if out == null { out = []; }
+    if native_enums_have_name(out, "Result") { return out; }
+    let result_enum = NativeEnum {
+        name: "Result",
+        type_parameters: ["T", "E"],
+        variants: [NativeEnumVariant {
+            name: "Ok", fields: [NativeEnumVariantField {
+                name: "value", type_annotation: "T", mutable: false
+            }]
+        }, NativeEnumVariant {
+            name: "Err", fields: [NativeEnumVariantField {
+                name: "error", type_annotation: "E", mutable: false
+            }]
+        }],
+        layout: NativeEnumLayout {
+            size: 16,
+            align: 8,
+            tag_type: "i32",
+            tag_size: 4,
+            tag_align: 4,
+            variants: [NativeEnumVariantLayout {
+                name: "Ok", tag: 0, offset: 8, size: 8, align: 8, fields: [NativeStructLayoutField {
+                    name: "value", type_annotation: "T", offset: 8, size: 8, align: 8
+                }]
+            }, NativeEnumVariantLayout {
+                name: "Err", tag: 1, offset: 8, size: 8, align: 8, fields: [NativeStructLayoutField {
+                    name: "error", type_annotation: "E", offset: 8, size: 8, align: 8
+                }]
+            }]
+        }
+    };
+    out = out.push(result_enum);
+    return out;
+}
+
+// #1021: inject the prelude default `Error` struct, mirroring
+// `inject_prelude_result_enum`. `Result<string, Error>` uses this as its `Err`
+// payload, so a bare user file matching on a prelude `Result` whose error type
+// is the default `Error` needs the struct layout in the type context too. The
+// shape matches the emitter output for `struct Error { message: string }`
+// (`sailfin emit native`): one pointer-sized `string` field at offset 0. Source
+// of truth: runtime/prelude.sfn (`struct Error`). In-file/imported `Error` wins
+// via the name guard.
+fn inject_prelude_error_struct(structs: NativeStruct[]) -> NativeStruct[] {
+    let mut out = structs;
+    if out == null { out = []; }
+    if native_structs_have_name(out, "Error") { return out; }
+    let error_struct = NativeStruct {
+        name: "Error",
+        fields: [NativeStructField {
+            name: "message", type_annotation: "string", mutable: false
+        }],
+        methods: [],
+        implements: [],
+        layout: NativeStructLayout {
+            size: 8,
+            align: 8,
+            fields: [NativeStructLayoutField {
+                name: "message", type_annotation: "string", offset: 0, size: 8, align: 8
+            }]
+        }
+    };
+    out = out.push(error_struct);
+    return out;
+}
+
+fn extend_native_interfaces(values: NativeInterface[], extras: NativeInterface[]) -> NativeInterface[] {
+    let mut out = values;
+    if out == null { out = []; }
+    if extras == null { return out; }
+    let mut index: int = 0;
+    loop {
+        if index >= extras.length { break; }
+        out = out.push(extras[index]);
+        index += 1;
+    }
+    return out;
+}
+
+fn extend_native_functions(values: NativeFunction[], extras: NativeFunction[]) -> NativeFunction[] {
+    let mut out = values;
+    if out == null { out = []; }
+    if extras == null { return out; }
+    let mut index: int = 0;
+    loop {
+        if index >= extras.length { break; }
+        out = out.push(extras[index]);
+        index += 1;
+    }
+    return out;
+}
+
+fn is_test_module_slug(module_name: string) -> boolean {
+    if module_name.length == 0 { return false; }
+    if index_of(module_name, "build/sailfin/test") >= 0 { return true; }
+    if index_of(module_name, "compiler/tests/") >= 0 { return true; }
+    if index_of(module_name, "/compiler/tests/") >= 0 { return true; }
+    return false;
+}
+
+struct MangledModuleResult {
+    lines: string[];
+    diagnostics: string[];
+}
+
+struct DeclareSignature {
+    return_type: string;
+    param_types: string[];
+}
+
+fn sanitize_module_suffix(module_name: string) -> string {
+    if module_name.length == 0 { return "module"; }
+    let mut out: string = "";
+    let mut index: int = 0;
+    loop {
+        if index >= module_name.length { break; }
+        let ch = module_name[index];
+        if is_llvm_symbol_char(ch) { out = out + ch; } else {
+            if ch == "/" { out = out + "__"; } else { out = out + "_"; }
+        }
+        index += 1;
+    }
+    if out.length == 0 { return "module"; }
+    return out;
+}
+
+fn should_keep_unmangled_abi_symbol(symbol: string) -> boolean {
+    // `native_cli_main` is the legacy C-ABI shim still exported from
+    // `compiler/src/cli_main.sfn` for embedder compatibility — kept
+    // unmangled so any out-of-tree linker that referenced the symbol
+    // by name still resolves it. `main` is the C-ABI entry point.
+    //
+    // The historical entries `compile_to_sailfin` / `compile_to_llvm`
+    // existed solely to satisfy the retired C driver's legacy
+    // `--emit MODE file.sfn` extern declarations. M5.4 (#472) retired
+    // that dispatch and M5.5 (#473) deleted the C driver, so both
+    // symbols now reach the live CLI `--emit` path via the standard
+    // Sailfin import in `cli_main.sfn` — they no longer require an
+    // unmangled C-ABI alias.
+    if symbol == "native_cli_main" { return true; }
+    if symbol == "main" { return true; }
+    return false;
+}
+
+fn extract_module_name_from_native_text(native_text: string) -> string {
+    if native_text.length == 0 { return ""; }
+
+    let module_index = index_of(native_text, ".module ");
+    if module_index < 0 { return ""; }
+
+    let mut start = module_index + 8;
+    loop {
+        if start >= native_text.length { break; }
+        let ch = native_text[start];
+        let mut _if265: boolean = false;
+        if ch == " " { _if265 = true; }
+        if ch == "\t" { _if265 = true; }
+        if _if265 {
+            start += 1;
+            continue;
+        }
+        break;
+    }
+
+    let mut end = start;
+    loop {
+        if end >= native_text.length { break; }
+        if native_text[end] == "\n" { break; }
+        end += 1;
+    }
+
+    return trim_text(substring(native_text, start, end));
+}
+
+fn collect_available_import_module_names(imported_native_texts: string[]) -> string[] {
+    let mut names: string[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= imported_native_texts.length { break; }
+        let text = imported_native_texts[index];
+        let mut _if266: boolean = false;
+        if text == null { _if266 = true; }
+        if text.length == 0 { _if266 = true; }
+        if _if266 {
+            index += 1;
+            continue;
+        }
+        let name = extract_module_name_from_native_text(text);
+        if name.length > 0 {
+            if !string_array_contains(names, name) { names.push(name); }
+        }
+        index += 1;
+    }
+    return names;
+}
+
+fn collect_defined_function_symbols(lines: string[]) -> string[] {
+    let mut symbols: string[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= lines.length { break; }
+        let trimmed = trim_text(lines[index]);
+        if starts_with(trimmed, "define ") {
+            let mut at_index: int = index_of(trimmed, "@");
+            if at_index >= 0 {
+                let mut start = at_index + 1;
+                let mut end = start;
+                loop {
+                    if end >= trimmed.length { break; }
+                    if !is_llvm_symbol_char(trimmed[end]) { break; }
+                    end += 1;
+                }
+                if end > start {
+                    let sym = substring(trimmed, start, end);
+                    if !string_array_contains(symbols, sym) {
+                        symbols.push(sym);
+                    }
+                }
+            }
+        }
+        index += 1;
+    }
+    return symbols;
+}
+
+fn find_substitution_index(olds: string[], news: string[], symbol: string) -> int {
+    let mut index: int = 0;
+    loop {
+        let mut _if267: boolean = false;
+        if index >= olds.length { _if267 = true; }
+        if index >= news.length { _if267 = true; }
+        if _if267 { break; }
+        if olds[index] == symbol { return index; }
+        index += 1;
+    }
+    return -1;
+}
+
+fn replace_symbol_refs_in_line(line: string, olds: string[], news: string[]) -> string {
+    if olds.length == 0 { return line; }
+    if line.length == 0 { return line; }
+    // Token-sink rewrite (#1512). The previous body built `out` one
+    // character at a time (`out = out + ch`), which is O(L^2) bytes under
+    // the no-free compile arena: a handful of long IR lines (large struct
+    // initializers, long GEP chains) made this the dominant allocator of
+    // the whole lowering pass — +2.9 GB on `core`'s mangling phase alone.
+    // Instead, advance over verbatim runs by index and only materialize a
+    // chunk at each *substituted* `@symbol`, then join once. Output is
+    // byte-identical to the char-by-char form (non-substituted symbols,
+    // `@.str`-style names, quoted regions, and a trailing bare `@` all stay
+    // inside the verbatim run). A line with no substitution returns
+    // unchanged with zero allocation.
+    let mut chunks: string[] = [];
+    let mut chunk_start: int = 0;
+    let mut index: int = 0;
+    let mut in_string: boolean = false;
+    let mut substituted: boolean = false;
+    loop {
+        if index >= line.length { break; }
+        let ch = line[index];
+        if ch == "\"" {
+            in_string = !in_string;
+            index += 1;
+            continue;
+        }
+        if in_string {
+            index += 1;
+            continue;
+        }
+        if ch != "@" {
+            index += 1;
+            continue;
+        }
+
+        let start = index + 1;
+        if start >= line.length {
+            // Trailing bare `@` — leave it in the verbatim run.
+            index += 1;
+            continue;
+        }
+
+        let mut end = start;
+        loop {
+            if end >= line.length { break; }
+            if !is_llvm_symbol_char(line[end]) { break; }
+            end += 1;
+        }
+        if end == start {
+            // `@` not followed by a symbol char (e.g. `@.str`) — verbatim.
+            index += 1;
+            continue;
+        }
+
+        let sym = substring(line, start, end);
+        let replacement_index = find_substitution_index(olds, news, sym);
+        if replacement_index >= 0 {
+            // Flush the verbatim run up to (excluding) this `@`, then emit
+            // the rewritten `@<new>`. Non-substituted `@sym` stays in the
+            // run untouched.
+            if index > chunk_start {
+                chunks.push(substring(line, chunk_start, index));
+            }
+            chunks.push("@" + news[replacement_index]);
+            chunk_start = end;
+            substituted = true;
+        }
+        index = end;
+    }
+    if !substituted { return line; }
+    if chunk_start < line.length {
+        chunks.push(substring(line, chunk_start, line.length));
+    }
+    return join_with_separator(chunks, "");
+}
+
+fn apply_symbol_substitutions(lines: string[], olds: string[], news: string[]) -> string[] {
+    if olds.length == 0 { return lines; }
+    let mut out = lines;
+    let mut index: int = 0;
+    loop {
+        if index >= out.length { break; }
+        out[index] = replace_symbol_refs_in_line(out[index], olds, news);
+        index += 1;
+    }
+    return out;
+}
+
+fn _extract_signature_from_header(trimmed: string, prefix_len: int, symbol: string) -> DeclareSignature? {
+    let at_index = index_of(trimmed, "@");
+    if at_index < 0 { return null; }
+    let start = at_index + 1;
+    let mut end = start;
+    loop {
+        if end >= trimmed.length { break; }
+        if !is_llvm_symbol_char(trimmed[end]) { break; }
+        end += 1;
+    }
+    if end == start { return null; }
+    let sym = substring(trimmed, start, end);
+    if sym != symbol { return null; }
+    let open_index = index_of(trimmed, "(");
+    if open_index < 0 { return null; }
+    // Find the matching close paren by tracking depth (handles function-pointer
+    // params like `double (i8*)*`).
+    let mut paren_depth = 1;
+    let mut close_index = open_index + 1;
+    loop {
+        if close_index >= trimmed.length { break; }
+        let pch = trimmed[close_index];
+        if pch == "(" { paren_depth += 1; } else if pch == ")" {
+            paren_depth -= 1;
+            if paren_depth == 0 { break; }
+        }
+        close_index += 1;
+    }
+    if paren_depth != 0 { return null; }
+    let ret_type = trim_text(substring(trimmed, prefix_len, at_index));
+    let params_text = trim_text(substring(trimmed, open_index + 1, close_index));
+    let mut _if269: boolean = false;
+    if params_text.length == 0 { _if269 = true; }
+    if params_text == "void" { _if269 = true; }
+    if _if269 {
+        return DeclareSignature { return_type: ret_type, param_types: [] };
+    }
+
+    // Split parameters on top-level commas only (struct types include commas).
+    let mut parts: string[] = [];
+    let mut start_index: int = 0;
+    let mut scan: int = 0;
+    let mut curly_depth: int = 0;
+    let mut angle_depth: int = 0;
+    loop {
+        if scan >= params_text.length { break; }
+        let ch = params_text[scan];
+        if ch == "{" { curly_depth += 1; } else if ch == "}" {
+            if curly_depth > 0 { curly_depth -= 1; }
+        } else if ch == "<" { angle_depth += 1; } else if ch == ">" {
+            if angle_depth > 0 { angle_depth -= 1; }
+        }
+        if ch == "," {
+            if curly_depth == 0 {
+                if angle_depth == 0 {
+                    let part = trim_text(substring(params_text, start_index, scan));
+                    if part.length > 0 { parts.push(part); }
+                    start_index = scan + 1;
+                }
+            }
+        }
+        scan += 1;
+    }
+    let final_part = trim_text(substring(params_text, start_index, params_text.length));
+    if final_part.length > 0 { parts.push(final_part); }
+    // Strip parameter names from define-style params (e.g. "i8* %text" → "i8*").
+    // Only strip the trailing `%name` when it appears at the top level (curly
+    // depth 0) so that struct types like "{ %Decorator*, i64 }*" are preserved.
+    let mut stripped_parts: string[] = [];
+    let mut pi: int = 0;
+    loop {
+        if pi >= parts.length { break; }
+        let p = parts[pi];
+        // Scan backwards to find the last '%' at curly depth 0.
+        let mut scan_pos = p.length - 1;
+        let mut pct_at_top: int = -1;
+        let mut depth: int = 0;
+        loop {
+            if scan_pos < 0 { break; }
+            let ch = substring(p, scan_pos, scan_pos + 1);
+            if ch == "}" { depth += 1; } else if ch == "{" {
+                if depth > 0 { depth -= 1; }
+            }
+            if ch == "%" {
+                if depth == 0 {
+                    pct_at_top = scan_pos;
+                    break;
+                }
+            }
+            scan_pos -= 1;
+        }
+        let mut stripped: string = p;
+        if pct_at_top > 0 {
+            let prev_char = substring(p, pct_at_top - 1, pct_at_top);
+            if prev_char == " " {
+                stripped = trim_text(substring(p, 0, pct_at_top));
+            }
+        }
+        stripped_parts.push(stripped);
+        pi += 1;
+    }
+    return DeclareSignature {
+        return_type: ret_type,
+        param_types: stripped_parts
+    };
+}
+
+// Extract the type portion from a call-site argument like "i8* %x" or
+// "double (i8*)* %fn".  Finds the last '%' or '@' (start of the SSA/value
+// name) and returns everything before it, trimmed.  Falls back to the whole
+// token if no sigil is found (e.g. bare constants).
+fn _extract_type_from_arg(raw: string) -> string {
+    if raw.length == 0 { return raw; }
+    // Scan backwards for the last '%' or '@'.
+    let mut pos = raw.length - 1;
+    loop {
+        if pos < 0 { break; }
+        let ch = raw[pos];
+        if ch == "%" {
+            let t = trim_text(substring(raw, 0, pos));
+            if t.length > 0 { return t; }
+            return raw;
+        }
+        if ch == "@" {
+            let t = trim_text(substring(raw, 0, pos));
+            if t.length > 0 { return t; }
+            return raw;
+        }
+        pos -= 1;
+    }
+    // No sigil found — might be a bare constant; use first-space heuristic.
+    let space_idx = index_of(raw, " ");
+    if space_idx > 0 { return trim_text(substring(raw, 0, space_idx)); }
+    return raw;
+}
+
+// Pre-trim every line once into a fresh array. `find_declare_signature_t`
+// / `_has_declare_or_define_t` operate on the result without re-trimming,
+// so a caller scanning for many symbols (the mangling shim loop, #1512)
+// pays the per-line `trim_text` allocation once rather than once per
+// symbol — the difference between O(symbols × lines) and O(lines)
+// transient strings under the no-free arena (it was core's +2.7 GB peak).
+fn pretrim_lines(lines: string[]) -> string[] {
+    let mut out: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= lines.length { break; }
+        out.push(trim_text(lines[i]));
+        i += 1;
+    }
+    return out;
+}
+
+fn find_declare_signature(lines: string[], symbol: string) -> DeclareSignature? {
+    return find_declare_signature_t(pretrim_lines(lines), symbol);
+}
+
+// #1739: recover a method's signature from a per-module interface vtable
+// constant that references it. The vtable constant
+// (`@vtable.<Struct>.<Interface>.const = internal constant ...`) references
+// EVERY interface method symbol via a bitcast of its function-pointer type
+// (`<fptype> bitcast (<fptype> @<sym> to <fptype>)`), but a consumer module
+// only emits a direct call site for the methods it actually calls. So a
+// method referenced *only* by the vtable has no call site for
+// `find_declare_signature` to recover from, and the mangling pass would
+// leave its `@<sym>` reference unmangled and undeclared → an undefined value
+// in the vtable initializer (invalid IR). This recovers the signature from
+// the vtable's bitcast function-pointer type so the reference can be
+// rewritten to the provider symbol and an external declare injected.
+// Intentionally scans raw `lines` (not `pretrim_lines`d / indexed like the
+// #1512 hot-shim paths): this runs only in block 2b's cold fallback branch
+// (a vtable-only-referenced imported method), not the per-symbol shim loop,
+// so the index machinery would not pay for itself here.
+fn find_vtable_method_signature(lines: string[], symbol: string) -> DeclareSignature? {
+    if symbol.length == 0 { return null; }
+    let needle = "@" + symbol + " to ";
+    let bitcast_kw = "bitcast (";
+    let mut index: int = 0;
+    loop {
+        if index >= lines.length { break; }
+        let line = lines[index];
+        index += 1;
+        // Only interface vtable constants reference methods via bitcast.
+        if index_of(line, "= internal constant %vtable.") < 0 { continue; }
+        let at_pos = index_of(line, needle);
+        if at_pos < 0 { continue; }
+        // The function-pointer type sits between the enclosing `bitcast (`
+        // and the `@<symbol>` token. The last `bitcast (` before `at_pos` is
+        // the cast for this entry (each entry is one bitcast).
+        let prefix = substring(line, 0, at_pos);
+        let mut bc: int = -1;
+        let mut search_from: int = 0;
+        loop {
+            let rel = index_of(substring(prefix, search_from, prefix.length), bitcast_kw);
+            if rel < 0 { break; }
+            bc = search_from + rel;
+            search_from = bc + 1;
+        }
+        if bc < 0 { continue; }
+        let type_start = bc + bitcast_kw.length;
+        let fptype = trim_text(substring(line, type_start, at_pos));
+        if fptype.length == 0 { continue; }
+        let sig = _parse_fn_pointer_type(fptype);
+        if sig != null { return sig; }
+    }
+    return null;
+}
+
+// Parse an LLVM function-pointer type (`<ret> (<params>)*`) into a
+// DeclareSignature. Depth-aware so nested function-pointer parameter types
+// (themselves containing parens) split correctly.
+fn _parse_fn_pointer_type(fptype: string) -> DeclareSignature? {
+    let paren_open = index_of(fptype, "(");
+    if paren_open < 0 { return null; }
+    let return_type = trim_text(substring(fptype, 0, paren_open));
+    if return_type.length == 0 { return null; }
+    // Find the matching close paren for the parameter list.
+    let mut depth: int = 0;
+    let mut i: int = paren_open;
+    let mut close: int = -1;
+    loop {
+        if i >= fptype.length { break; }
+        let ch = fptype[i];
+        if ch == "(" { depth += 1; }
+        if ch == ")" {
+            depth -= 1;
+            if depth == 0 {
+                close = i;
+                break;
+            }
+        }
+        i += 1;
+    }
+    if close < 0 { return null; }
+    let params_text = substring(fptype, paren_open + 1, close);
+    let mut param_types: string[] = [];
+    let mut ps: int = 0;
+    let mut sc: int = 0;
+    let mut pd: int = 0;
+    let mut cd: int = 0;
+    loop {
+        if sc >= params_text.length { break; }
+        let pch = params_text[sc];
+        if pch == "(" { pd += 1; }
+        if pch == ")" {
+            if pd > 0 { pd -= 1; }
+        }
+        if pch == "{" { cd += 1; }
+        if pch == "}" {
+            if cd > 0 { cd -= 1; }
+        }
+        if pch == "," {
+            if pd == 0 {
+                if cd == 0 {
+                    let part = trim_text(substring(params_text, ps, sc));
+                    if part.length > 0 { param_types.push(part); }
+                    ps = sc + 1;
+                }
+            }
+        }
+        sc += 1;
+    }
+    let last = trim_text(substring(params_text, ps, params_text.length));
+    if last.length > 0 { param_types.push(last); }
+    return DeclareSignature {
+        return_type: return_type,
+        param_types: param_types
+    };
+}
+
+// Symbol → header-line index over pre-trimmed module lines (#1512). The
+// mangling shim loop probes hundreds of symbols against the module; doing
+// that with `find_declare_signature` / `_has_declare_or_define` re-scans
+// (and re-`index_of`s, which allocates a substring per scan position) all
+// ~16k lines per symbol — core's residual +1.4 GB. Building this index in
+// ONE pass turns each probe into an O(declares) name compare with no
+// per-line allocation. `decl_*`/`def_*` are parallel arrays; first
+// occurrence wins, matching `find_declare_signature`'s declare-before-
+// define, first-match order.
+struct HeaderIndex {
+    decl_syms: string[];
+    decl_lines: string[];
+    def_syms: string[];
+    def_lines: string[];
+    call_syms: string[];
+    call_sigs: DeclareSignature[];
+}
+
+// One extracted call-site signature: the called symbol plus its
+// DeclareSignature, recovered from a `call <ret> @sym(<args>)` line.
+struct CallEntry {
+    sym: string;
+    sig: DeclareSignature;
+}
+
+// Generic form of `find_declare_signature`'s call-site pass: extract the
+// called symbol and its signature from a single line, without a target to
+// match. Mirrors that pass exactly (same ret-type / param parsing via
+// `_extract_type_from_arg`) so a call-site index built from this yields
+// byte-identical lookups. Returns null when the line is not a usable
+// `call ... @sym(...)` site.
+fn _extract_call_entry(line: string) -> CallEntry? {
+    let call_kw = index_of(line, "call ");
+    if call_kw < 0 { return null; }
+    let scan_from = call_kw + 5;
+    let at_rel = index_of(substring(line, scan_from, line.length), "@");
+    if at_rel < 0 { return null; }
+    let at_index = scan_from + at_rel;
+    // Mirror the pass-3 `call_pos > 0` guard.
+    if at_index <= 0 { return null; }
+    let sym_start = at_index + 1;
+    let mut sym_end = sym_start;
+    loop {
+        if sym_end >= line.length { break; }
+        if !is_llvm_symbol_char(line[sym_end]) { break; }
+        sym_end += 1;
+    }
+    if sym_end == sym_start { return null; }
+    if sym_end >= line.length { return null; }
+    if line[sym_end] != "(" { return null; }
+    let sym = substring(line, sym_start, sym_end);
+
+    let call_needle = "@" + sym + "(";
+    let ret_type = trim_text(substring(line, scan_from, at_index));
+    if ret_type.length == 0 { return null; }
+    let params_start = at_index + call_needle.length;
+    let close_paren = index_of(substring(line, params_start, line.length), ")");
+    if close_paren < 0 { return null; }
+    let params_text = substring(line, params_start, params_start + close_paren);
+
+    let mut call_parts: string[] = [];
+    let mut ps: int = 0;
+    let mut sc: int = 0;
+    let mut cd: int = 0;
+    let mut pd: int = 0;
+    loop {
+        if sc >= params_text.length { break; }
+        let pch = params_text[sc];
+        if pch == "{" { cd += 1; }
+        if pch == "}" {
+            if cd > 0 { cd -= 1; }
+        }
+        if pch == "(" { pd += 1; }
+        if pch == ")" {
+            if pd > 0 { pd -= 1; }
+        }
+        if pch == "," {
+            if cd == 0 {
+                if pd == 0 {
+                    let raw_part = trim_text(substring(params_text, ps, sc));
+                    call_parts.push(_extract_type_from_arg(raw_part));
+                    ps = sc + 1;
+                }
+            }
+        }
+        sc += 1;
+    }
+    let last_raw = trim_text(substring(params_text, ps, params_text.length));
+    if last_raw.length > 0 {
+        call_parts.push(_extract_type_from_arg(last_raw));
+    }
+    return CallEntry {
+        sym: sym,
+        sig: DeclareSignature {
+            return_type: ret_type,
+            param_types: call_parts
+        }
+    };
+}
+
+// Extract the function symbol from a `declare`/`define` header line — the
+// first `@<name>` token, read with the same char rule
+// `_extract_signature_from_header` uses, so the index key matches what a
+// signature lookup would match.
+fn _header_symbol(trimmed_line: string) -> string {
+    let at_index = index_of(trimmed_line, "@");
+    if at_index < 0 { return ""; }
+    let start = at_index + 1;
+    let mut end = start;
+    loop {
+        if end >= trimmed_line.length { break; }
+        if !is_llvm_symbol_char(trimmed_line[end]) { break; }
+        end += 1;
+    }
+    if end == start { return ""; }
+    return substring(trimmed_line, start, end);
+}
+
+// First index of `target` in `arr` by `==`, or -1. No allocation.
+fn _index_in(arr: string[], target: string) -> int {
+    let mut i: int = 0;
+    loop {
+        if i >= arr.length { break; }
+        if arr[i] == target { return i; }
+        i += 1;
+    }
+    return -1;
+}
+
+// Build the declare/define symbol index from pre-trimmed lines in one pass.
+fn build_header_index(trimmed: string[]) -> HeaderIndex {
+    let mut decl_syms: string[] = [];
+    let mut decl_lines: string[] = [];
+    let mut def_syms: string[] = [];
+    let mut def_lines: string[] = [];
+    let mut call_syms: string[] = [];
+    let mut call_sigs: DeclareSignature[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= trimmed.length { break; }
+        let line = trimmed[i];
+        if starts_with(line, "declare ") {
+            let s = _header_symbol(line);
+            if s.length > 0 {
+                if _index_in(decl_syms, s) < 0 {
+                    decl_syms.push(s);
+                    decl_lines.push(line);
+                }
+            }
+        } else if starts_with(line, "define ") {
+            let s = _header_symbol(line);
+            if s.length > 0 {
+                if _index_in(def_syms, s) < 0 {
+                    def_syms.push(s);
+                    def_lines.push(line);
+                }
+            }
+        } else {
+            // Call-site index: first `call ... @sym(...)` per symbol, the
+            // pass-3 fallback of `find_declare_signature` made O(1).
+            let entry = _extract_call_entry(line);
+            if entry != null {
+                if _index_in(call_syms, entry.sym) < 0 {
+                    call_syms.push(entry.sym);
+                    call_sigs.push(entry.sig);
+                }
+            }
+        }
+        i += 1;
+    }
+    return HeaderIndex {
+        decl_syms: decl_syms,
+        decl_lines: decl_lines,
+        def_syms: def_syms,
+        def_lines: def_lines,
+        call_syms: call_syms,
+        call_sigs: call_sigs
+    };
+}
+
+// Indexed equivalent of `find_declare_signature_t`: resolve via the
+// declare index, then the define index (parsing the single matched line
+// with the trusted `_extract_signature_from_header`), then fall back to
+// the call-site scan for the rare symbol that is neither declared nor
+// defined. Byte-identical results for well-formed module IR.
+fn find_signature_in_index(idx: HeaderIndex, symbol: string) -> DeclareSignature? {
+    if symbol.length == 0 { return null; }
+    let di = _index_in(idx.decl_syms, symbol);
+    if di >= 0 {
+        return _extract_signature_from_header(idx.decl_lines[di], 8, symbol);
+    }
+    let fi = _index_in(idx.def_syms, symbol);
+    if fi >= 0 {
+        return _extract_signature_from_header(idx.def_lines[fi], 7, symbol);
+    }
+    let ci = _index_in(idx.call_syms, symbol);
+    if ci >= 0 { return idx.call_sigs[ci]; }
+    return null;
+}
+
+// Indexed equivalent of `_has_declare_or_define`: a declare/define line's
+// only `@sym(` is its own header symbol (params are types), so index
+// membership is exactly the original line-scan predicate.
+fn has_declare_or_define_in_index(idx: HeaderIndex, symbol: string) -> boolean {
+    if _index_in(idx.decl_syms, symbol) >= 0 { return true; }
+    if _index_in(idx.def_syms, symbol) >= 0 { return true; }
+    return false;
+}
+
+// Pre-trimmed core of `find_declare_signature`: `trimmed` must already be
+// the output of `pretrim_lines` (every element left-/right-trimmed).
+// Byte-identical results to the lazy-trim form.
+fn find_declare_signature_t(trimmed: string[], symbol: string) -> DeclareSignature? {
+    if symbol.length == 0 { return null; }
+    // First pass: check declare lines.
+    let mut index: int = 0;
+    loop {
+        if index >= trimmed.length { break; }
+        let line = trimmed[index];
+        if starts_with(line, "declare ") {
+            let result = _extract_signature_from_header(line, 8, symbol);
+            if result != null { return result; }
+        }
+        index += 1;
+    }
+    // Fallback: check define lines (for symbols that are defined but have
+    // no separate declare, e.g. re-exported runtime functions).
+    index = 0;
+    loop {
+        if index >= trimmed.length { break; }
+        let line = trimmed[index];
+        if starts_with(line, "define ") {
+            let result = _extract_signature_from_header(line, 7, symbol);
+            if result != null { return result; }
+        }
+        index += 1;
+    }
+    // Last resort: extract signature from a `call` instruction.
+    // This handles symbols that are neither declared nor defined in this
+    // module but are referenced via call sites (e.g. transitively imported
+    // runtime functions).
+    let call_needle = "@" + symbol + "(";
+    index = 0;
+    loop {
+        if index >= trimmed.length { break; }
+        let line = trimmed[index];
+        let call_pos = index_of(line, call_needle);
+        if call_pos > 0 {
+            // Extract return type: look for "call <type> @symbol("
+            let call_kw = index_of(line, "call ");
+            if call_kw >= 0 {
+                let ret_start = call_kw + 5;
+                let ret_type = trim_text(substring(line, ret_start, call_pos));
+                // Extract params from after the opening paren.
+                let params_start = call_pos + call_needle.length;
+                let close_paren = index_of(substring(line, params_start, line.length), ")");
+                if close_paren >= 0 {
+                    // #1701: read the parameter list from `line` (the current
+                    // line string), NOT `trimmed` (the whole line array). The
+                    // typo made the call-site signature fallback parse garbage
+                    // params — an empty `()` (clang-tolerated) for the
+                    // compiler's own `cli/commands/test` → `backend.link`, but
+                    // an unparseable `(s)` for a generic cross-dir
+                    // method-bearing-struct consumer under `--import-context`,
+                    // so its injected `declare` was invalid IR and the module
+                    // failed to lower.
+                    let params_text = substring(line, params_start, params_start
+                        + close_paren);
+                    if ret_type.length > 0 {
+                        // Strip parameter values, keeping only types.
+                        // For multi-token types like `double (i8*)*`, split on
+                        // the last `%` or `@` (start of the SSA/value name)
+                        // rather than the first space.
+                        let mut call_parts: string[] = [];
+                        let mut ps: int = 0;
+                        let mut sc: int = 0;
+                        let mut cd: int = 0;
+                        let mut pd: int = 0;
+                        loop {
+                            if sc >= params_text.length { break; }
+                            let pch = params_text[sc];
+                            if pch == "{" { cd += 1; }
+                            if pch == "}" {
+                                if cd > 0 { cd -= 1; }
+                            }
+                            if pch == "(" { pd += 1; }
+                            if pch == ")" {
+                                if pd > 0 { pd -= 1; }
+                            }
+                            if pch == "," {
+                                if cd == 0 {
+                                    if pd == 0 {
+                                        let raw_part = trim_text(substring(params_text, ps, sc));
+                                        call_parts.push(_extract_type_from_arg(raw_part));
+                                        ps = sc + 1;
+                                    }
+                                }
+                            }
+                            sc += 1;
+                        }
+                        let last_raw = trim_text(substring(params_text, ps, params_text.length));
+                        if last_raw.length > 0 {
+                            call_parts.push(_extract_type_from_arg(last_raw));
+                        }
+                        return DeclareSignature {
+                            return_type: ret_type,
+                            param_types: call_parts
+                        };
+                    }
+                }
+            }
+        }
+        index += 1;
+    }
+    return null;
+}
+
+fn render_function_shim(export_symbol: string, target_symbol: string, signature: DeclareSignature) -> string[] {
+    let mut param_decls: string[] = [];
+    let mut call_args: string[] = [];
+    let mut idx: int = 0;
+    loop {
+        if idx >= signature.param_types.length { break; }
+        let ty = trim_text(signature.param_types[idx]);
+        if ty == "..." {
+            param_decls.push("...");
+            // Varargs shims are not supported; omit forwarding.
+            idx += 1;
+            continue;
+        }
+        let name = "%a" + number_to_string(idx);
+        param_decls.push(ty + " " + name);
+        call_args.push(ty + " " + name);
+        idx += 1;
+    }
+
+    let header = "define " + signature.return_type + " @" + export_symbol + "("
+        + join_with_separator(param_decls, ", ")
+        + ") {";
+    if signature.return_type == "void" {
+        return [header, "entry:", "  call void @" + target_symbol + "("
+            + join_with_separator(call_args, ", ")
+            + ")", "  ret void", "}",];
+    }
+    return [header, "entry:", "  %t0 = call " + signature.return_type + " @"
+        + target_symbol
+        + "("
+        + join_with_separator(call_args, ", ")
+        + ")", "  ret "
+        + signature.return_type
+        + " %t0", "}",];
+}
+
+fn insert_before_llvm_footer(lines: string[], inserted: string[]) -> string[] {
+    if inserted.length == 0 { return lines; }
+    let mut footer_index = lines.length;
+    let mut index: int = 0;
+    loop {
+        if index >= lines.length { break; }
+        let trimmed = trim_text(lines[index]);
+        let mut _if270: boolean = false;
+        if starts_with(trimmed, "attributes ") { _if270 = true; }
+        if starts_with(trimmed, "!") { _if270 = true; }
+        if _if270 {
+            footer_index = index;
+            break;
+        }
+        index += 1;
+    }
+    let mut out: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= lines.length { break; }
+        if i == footer_index {
+            let mut j: int = 0;
+            loop {
+                if j >= inserted.length { break; }
+                out.push(inserted[j]);
+                j += 1;
+            }
+        }
+        out.push(lines[i]);
+        i += 1;
+    }
+    if footer_index == lines.length {
+        let mut j: int = 0;
+        loop {
+            if j >= inserted.length { break; }
+            out.push(inserted[j]);
+            j += 1;
+        }
+    }
+    return out;
+}
+
+// Append every `@<symbol>(` call target observed in `line` to `acc`.
+// Word-boundary check before `call ` rejects mid-word matches like
+// `recall` or `; install`. Only adds when the `@<symbol>` is
+// immediately followed by `(`, matching the LLVM call shape:
+//
+//     [%lhs = ] [tail | musttail | notail] call <ret-type> @<sym>(...)
+//
+// Indirect calls (`call <ret-type> %fnptr(...)`) and intrinsic calls
+// with metadata attributes are tolerated — both either omit the `@`
+// or land on the `( before @` exit path.
+fn merge_call_symbols_from_line(acc: string[], line: string) -> string[] {
+    let mut out = acc;
+    let len = line.length;
+    if len < 6 { return out; }
+    if index_of(line, "@") < 0 { return out; }
+    let mut start: int = 0;
+    loop {
+        if start >= len { break; }
+        let suffix_start = start;
+        let suffix = substring(line, suffix_start, len);
+        let local = index_of(suffix, "call ");
+        if local < 0 { break; }
+        let call_pos = suffix_start + local;
+        // Word-boundary check: the byte before `call` must be whitespace
+        // or the start of the line. Rejects identifiers like `recall`,
+        // `nocall`, etc. that happen to contain the substring.
+        let mut is_boundary: boolean = true;
+        if call_pos > 0 {
+            let prev = substring(line, call_pos - 1, call_pos);
+            if prev != " " {
+                if prev != "\t" { is_boundary = false; }
+            }
+        }
+        if !is_boundary {
+            start = call_pos + 1;
+            continue;
+        }
+        // Advance past "call " and locate the `@` (skipping the type).
+        let mut pos = call_pos + 5;
+        let mut at_pos: int = -1;
+        loop {
+            if pos >= len { break; }
+            let ch = substring(line, pos, pos + 1);
+            if ch == "@" {
+                at_pos = pos;
+                break;
+            }
+            // `(` before `@` means an indirect call: bail.
+            if ch == "(" { break; }
+            pos += 1;
+        }
+        if at_pos < 0 {
+            start = call_pos + 5;
+            continue;
+        }
+        // Extract the symbol after `@` up to the first non-symbol char.
+        let sym_start = at_pos + 1;
+        let mut sym_end = sym_start;
+        loop {
+            if sym_end >= len { break; }
+            let ch = substring(line, sym_end, sym_end + 1);
+            if is_llvm_symbol_char(ch) {
+                sym_end += 1;
+                continue;
+            }
+            break;
+        }
+        // Confirm the next non-symbol char is `(` — the call shape.
+        if sym_end < len {
+            if substring(line, sym_end, sym_end + 1) == "(" {
+                if sym_end > sym_start {
+                    let symbol = substring(line, sym_start, sym_end);
+                    out = append_unique_effect(out, symbol);
+                }
+            }
+        }
+        let next_start = sym_end + 1;
+        if next_start <= call_pos { start = call_pos + 5; } else {
+            start = next_start;
+        }
+    }
+    return out;
+}
+
+// Scan emitted LLVM IR lines for `call <type> @<symbol>(` patterns and
+// return runtime-helper descriptor *targets* whose `symbol` or
+// `native_signature` matches an emitted call site. Complements
+// `collect_runtime_helper_targets` (which walks `NativeInstruction`
+// text and only sees user-source-level call shapes) by capturing
+// helpers emitted at LLVM-lowering time — namely the raw
+// `wrapper_lines.push("  call ...")` lines from
+// `compiler/capsules/codegen-llvm/src/lowering/emission.sfn` (panic-wrapper inline
+// `setjmp` / `sfn_exception_*` calls around every user `main`) and
+// the `emit_runtime_call` sites scattered through
+// `compiler/capsules/codegen-llvm/src/expression_lowering/native/*` (e.g.
+// `sailfin_runtime_number_to_string` / `sailfin_runtime_bounds_check`
+// inserted by `core_operands.sfn` / `core_index_lowering.sfn` during
+// operand coercion and bounds-check insertion). Both classes are
+// downstream of the NativeInstruction layer the original walker
+// traverses and so were previously invisible to it — covered only by
+// the conservative carve-outs in `seed_default_runtime_helpers`,
+// which this scan retires.
+fn collect_runtime_helper_targets_from_lines(lines: string[]) -> string[] {
+    let mut called: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= lines.length { break; }
+        called = merge_call_symbols_from_line(called, lines[i]);
+        i += 1;
+    }
+    let descriptors = runtime_helper_descriptors();
+    let mut targets: string[] = [];
+    let mut d: int = 0;
+    loop {
+        if d >= descriptors.length { break; }
+        let descriptor = descriptors[d];
+        let mut matched: boolean = false;
+        if string_array_contains(called, descriptor.symbol) { matched = true; }
+        let native: string? = descriptor.native_signature;
+        if !matched {
+            if native != null {
+                if native.length > 0 {
+                    if string_array_contains(called, native) { matched = true; }
+                }
+            }
+        }
+        if matched {
+            targets = append_unique_effect(targets, descriptor.target);
+        }
+        d += 1;
+    }
+    return targets;
+}
+
+// #1780 (SFEP-0035 §3.2): scan emitted LLVM IR for `call ... @<symbol>(` sites
+// naming one of the six prelude-mirror free functions (`char_code`, `char_at`,
+// `char_from_code`, `find_char`, `string_starts_with`, `record_eq_flag_message`)
+// and return the ones present. Descriptor-independent by design — the hand-typed
+// mirror rows were removed, so `collect_runtime_helper_targets_from_lines`
+// (which maps a called symbol → target only via a descriptor) no longer sees
+// these symbols. The declare-emitter (`render_runtime_helper_declarations`)
+// consumes this list to derive a `declare` for each mirror symbol a
+// non-prelude-importing caller actually references.
+fn collect_prelude_mirror_symbols_from_lines(lines: string[]) -> string[] {
+    let mut called: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= lines.length { break; }
+        called = merge_call_symbols_from_line(called, lines[i]);
+        i += 1;
+    }
+    let mut targets: string[] = [];
+    let mut c: int = 0;
+    loop {
+        if c >= called.length { break; }
+        if is_prelude_mirror_symbol(called[c]) {
+            targets = append_unique_effect(targets, called[c]);
+        }
+        c += 1;
+    }
+    return targets;
+}
+
+// Seed an accumulator with the default set of runtime-helper targets the
+// compiler must always declare.  Each entry that remains in this list
+// after M1.7.5a (#501) is genuinely *undiscoverable* by both walkers:
+//
+//   * `collect_runtime_helper_targets` walks `NativeInstruction` text in
+//     `local_functions` and so can only see helpers whose call site
+//     appears as user-source identifier text (e.g. `print(x)`).
+//   * `collect_runtime_helper_targets_from_lines` scans every emitted
+//     LLVM IR line for `call <type> @<symbol>(` and so picks up helpers
+//     emitted by `emit_runtime_call` or by raw `wrapper_lines.push`
+//     during lowering (panic-wrapper inlines, post-coercion calls).
+//
+// What the scans CANNOT see — and what therefore remains seeded:
+//
+//   1. `extern fn` shims in user source (`@logExecution` decorators,
+//      manual `extern fn` declarations against C entrypoints, the
+//      `sailfin_intrinsic_runtime_arena_*` callers in the prelude that
+//      route through `extern fn` because the 0.5.9 seed predates the
+//      descriptors).
+//   2. Module-level let bindings in `runtime/prelude.sfn` such as
+//      `let runtime_array_filter_fn = runtime.array_filter;` — the
+//      function-pointer is captured at module-init time, never appears
+//      in a `call @X(` instruction in the consumer's IR.
+//   3. C runtime adapters reachable only through `fs.*` / `process.*`
+//      direct-emit paths in `compiler/capsules/codegen-llvm/src/expression_lowering/*`
+//      that bypass `emit_runtime_call` and so don't surface in the
+//      LLVM IR line scan either (the emit happens via raw
+//      `lines.push("...")` outside any descriptor-driven path).
+//
+// Preserves source order — the seed emits declarations in this order,
+// and rendering_helpers downstream depends on stable ordering for
+// byte-identical IR across builds. Each entry is deduped via
+// append_unique_effect, so passing a pre-populated initial list (from
+// the walker + line scan) only appends entries not already present.
+//
+// 14 entries previously seeded here were removed by M1.7.5a (#501) once
+// the LLVM-line scan went live:
+// `copy_bytes`, `get_field`, `grapheme_at`, `mark_persistent`,
+// `number.to_string`, `runtime.bounds_check`, `runtime_log_execution_fn`,
+// `setjmp`, `sfn_exception_pop_frame`, `sfn_exception_push_frame`,
+// `sfn_take_exception_frame`, `sfn_throw_frame`, `string.length`,
+// `string.to_number`. All are emitted by post-`NativeInstruction`
+// lowering paths the scan picks up; modules that never call them no
+// longer carry their dead declares.
+fn seed_default_runtime_helpers(initial: string[]) -> string[] {
+    let mut helpers = initial;
+    // Core string / memory / collection helpers — emitted from prelude
+    // module-level let bindings or from `extern fn` shims in user code
+    // (e.g. `array_push_slot` is captured as the literal-array push hook
+    // in `runtime/prelude.sfn`; `print` and the `print.*` family ride
+    // through compiler-emitted preamble for the test harness).
+    helpers = append_unique_effect(helpers, "array_push_slot");
+    helpers = append_unique_effect(helpers, "append_string");
+    helpers = append_unique_effect(helpers, "concat");
+    helpers = append_unique_effect(helpers, "print");
+    helpers = append_unique_effect(helpers, "print.err");
+    helpers = append_unique_effect(helpers, "print.info");
+    helpers = append_unique_effect(helpers, "print.warn");
+    helpers = append_unique_effect(helpers, "print.error");
+    helpers = append_unique_effect(helpers, "substring");
+    helpers = append_unique_effect(helpers, "substring_unchecked");
+    helpers = append_unique_effect(helpers, "string.concat");
+    helpers = append_unique_effect(helpers, "string.append");
+    helpers = append_unique_effect(helpers, "number_to_string");
+    helpers = append_unique_effect(helpers, "strings_equal");
+    helpers = append_unique_effect(helpers, "runtime_raise_value_error_fn");
+    helpers = append_unique_effect(helpers, "runtime_assert_fail_fn");
+    // Phase 5a: arena mark/rewind for in-process multi-module tools.
+    // No-op when SAILFIN_USE_ARENA is unset; declared unconditionally
+    // so the linker resolves the symbol whether or not the arena is
+    // active at runtime. Targets are the canonical C symbol names
+    // because Sailfin callers reach them via `extern fn` for now —
+    // the 0.5.9 seed predates the descriptors. After the next seed
+    // bump, callers will drop the extern fn and the descriptors
+    // become the canonical lookup path.
+    helpers = append_unique_effect(helpers, "sailfin_intrinsic_runtime_arena_mark");
+    helpers = append_unique_effect(helpers, "sailfin_intrinsic_runtime_arena_rewind");
+    // Runtime prelude helpers — module-level let bindings
+    // (e.g. `let runtime_array_filter_fn = runtime.array_filter;`) whose
+    // call targets are not in any `NativeInstruction.expression` text
+    // (so `collect_runtime_helper_targets` cannot find them) and never
+    // surface as `call @runtime_array_filter_fn(` lines in the lowered
+    // IR (so `collect_runtime_helper_targets_from_lines` doesn't pick
+    // them up either — the prelude module-init captures the function
+    // pointer once and consumer modules dereference through a closure
+    // env field). Declare them unconditionally so the linker can
+    // resolve them against the C runtime.
+    helpers = append_unique_effect(helpers, "runtime_array_map_fn");
+    helpers = append_unique_effect(helpers, "runtime_array_filter_fn");
+    helpers = append_unique_effect(helpers, "runtime_array_reduce_fn");
+    helpers = append_unique_effect(helpers, "runtime_char_code_fn");
+    helpers = append_unique_effect(helpers, "runtime_grapheme_at_fn");
+    helpers = append_unique_effect(helpers, "runtime_grapheme_count_fn");
+    helpers = append_unique_effect(helpers, "runtime_instance_of_fn");
+    helpers = append_unique_effect(helpers, "runtime_is_array_fn");
+    helpers = append_unique_effect(helpers, "runtime_is_boolean_fn");
+    helpers = append_unique_effect(helpers, "runtime_is_callable_fn");
+    helpers = append_unique_effect(helpers, "runtime_is_number_fn");
+    helpers = append_unique_effect(helpers, "runtime_is_string_fn");
+    helpers = append_unique_effect(helpers, "runtime_is_void_fn");
+    helpers = append_unique_effect(helpers, "runtime_monotonic_millis_fn");
+    helpers = append_unique_effect(helpers, "runtime_resolve_runtime_type_fn");
+    helpers = append_unique_effect(helpers, "runtime_serve_fn");
+    helpers = append_unique_effect(helpers, "runtime_sleep_fn");
+    helpers = append_unique_effect(helpers, "runtime_to_debug_string_fn");
+    // Filesystem adapters — compiler emits direct calls to these C runtime
+    // symbols from modules that use fs.readFile, fs.exists, etc. Without
+    // unconditional declares, separate-compilation produces "use of
+    // undefined value" errors at clang time.
+    helpers = append_unique_effect(helpers, "fs.readFile");
+    helpers = append_unique_effect(helpers, "fs.read");
+    helpers = append_unique_effect(helpers, "fs.writeFile");
+    helpers = append_unique_effect(helpers, "fs.write");
+    helpers = append_unique_effect(helpers, "fs.appendFile");
+    helpers = append_unique_effect(helpers, "fs.exists");
+    helpers = append_unique_effect(helpers, "fs.deleteFile");
+    helpers = append_unique_effect(helpers, "fs.listDirectory");
+    helpers = append_unique_effect(helpers, "fs.writeLines");
+    helpers = append_unique_effect(helpers, "fs.createDirectory");
+    helpers = append_unique_effect(helpers, "fs.removeDirectory");
+    helpers = append_unique_effect(helpers, "fs.read_bytes");
+    // P5 (#366): five new fs adapters — perms, mkdtemp, is_executable,
+    // symlink. Separate-compilation needs the declare-tracking entry
+    // for the same reason readFile / writeFile have one above.
+    helpers = append_unique_effect(helpers, "fs.set_perms");
+    helpers = append_unique_effect(helpers, "fs.get_perms");
+    helpers = append_unique_effect(helpers, "fs.mkdtemp");
+    helpers = append_unique_effect(helpers, "fs.is_executable");
+    helpers = append_unique_effect(helpers, "fs.symlink");
+    // Additional helpers used by the compiler but not auto-collected.
+    // The prelude-mirror symbols `char_code` / `find_char` / `string_starts_with`
+    // were removed here by #1780 (SFEP-0035 §3.2): their declares are now derived
+    // and driven by `collect_prelude_mirror_symbols_from_lines`, so seeding them
+    // unconditionally is dead (and would seed a target with no descriptor).
+    helpers = append_unique_effect(helpers, "monotonic_millis");
+    helpers = append_unique_effect(helpers, "process.run");
+    helpers = append_unique_effect(helpers, "process.exit");
+    // `env.get` / `env.home` lower to the bare `sfn_getenv` / `sfn_home_dir`
+    // SfnString aggregate-ABI symbols (now Sailfin-defined in
+    // `runtime/sfn/io.sfn` — C7/R7, #1312); without explicit declare-tracking,
+    // modules that consume them produce IR that clang rejects with
+    // "use of undefined value" (see the env-var workaround note in
+    // `compiler/src/effect_gate.sfn` — same root cause, surfacing as
+    // a hard blocker for capsules/sfn/os clients of #365).
+    helpers = append_unique_effect(helpers, "env.get");
+    helpers = append_unique_effect(helpers, "env.home");
+    helpers = append_unique_effect(helpers, "process.run_capture");
+    // #1167: per-child-cwd variants carry the same `io` gate.
+    helpers = append_unique_effect(helpers, "process.run_capture_cwd");
+    helpers = append_unique_effect(helpers, "process.spawn_with_env_cwd");
+    // SFN-45: per-child RLIMIT_AS variant carries the same `io` gate.
+    helpers = append_unique_effect(helpers, "process.run_capture_rlimit_as");
+    helpers = append_unique_effect(helpers, "process.capture_take_stdout");
+    helpers = append_unique_effect(helpers, "process.capture_take_stderr");
+    // #1520: metered-capture helpers (wall-clock + peak RSS) consumed by
+    // the `sfn bench` driver and the e2e metered-capture test.
+    helpers = append_unique_effect(helpers, "process.run_capture_metered");
+    helpers = append_unique_effect(helpers, "process.capture_take_wall_ms");
+    helpers = append_unique_effect(helpers, "process.capture_take_peak_rss_kb");
+    helpers = append_unique_effect(helpers, "process.spawn_with_env");
+    helpers = append_unique_effect(helpers, "process.handle_write");
+    helpers = append_unique_effect(helpers, "process.handle_close_stdin");
+    helpers = append_unique_effect(helpers, "process.handle_read_stdout");
+    helpers = append_unique_effect(helpers, "process.handle_read_stderr");
+    // #1578: framed/length-aware child stdio (epic #1540 Track A A1+A4).
+    helpers = append_unique_effect(helpers, "process.handle_read_line_stdout");
+    helpers = append_unique_effect(helpers, "process.handle_read_bytes_stdout");
+    helpers = append_unique_effect(helpers, "process.handle_write_bytes");
+    helpers = append_unique_effect(helpers, "process.handle_wait");
+    helpers = append_unique_effect(helpers, "process.environ");
+    // #1580: `io.poll_readable` lowers to the bare `sfn_io_poll_readable`
+    // symbol (Sailfin-native body in `runtime/sfn/process.sfn`, with a
+    // Windows stub in `process_windows.sfn`). Declare-track it so
+    // separate-compilation modules that consume it emit a `declare` and
+    // clang resolves the symbol against the runtime object.
+    helpers = append_unique_effect(helpers, "io.poll_readable");
+    // SFN-155: `io.poll_any` lowers to the bare `sfn_io_poll_any` symbol
+    // (Sailfin-native body in `runtime/sfn/process.sfn`, Windows stub in
+    // `process_windows.sfn`). Declare-track it so separate-compilation
+    // modules that consume it emit a `declare` and clang resolves the
+    // symbol against the runtime object.
+    helpers = append_unique_effect(helpers, "io.poll_any");
+    // #1579: `io.read_fd` / `io.read_line` lower to the bare
+    // `sfn_read_fd` / `sfn_read_line` symbols (Sailfin-native bodies in
+    // `runtime/sfn/io.sfn`). Declare-track them so separate-compilation
+    // modules that consume them emit a `declare` and clang resolves the
+    // symbol against the runtime object.
+    helpers = append_unique_effect(helpers, "io.read_fd");
+    helpers = append_unique_effect(helpers, "io.read_line");
+    helpers = append_unique_effect(helpers, "is_decimal_digit");
+    return helpers;
+}

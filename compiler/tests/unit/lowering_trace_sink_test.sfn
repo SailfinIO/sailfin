@@ -1,14 +1,13 @@
 // SFN-743: LLVM traces and diagnostics share a provider-owned ordered buffer.
 // The driver drains it after every provider return, before it interprets a
 // success or failure, without giving LLVM console authority.
-import { find } from "sfn/strings";
-
 import {
     LLVMProviderContext,
     install_llvm_provider_context,
     take_lowering_trace_buffer,
     trace_log
-} from "../../src/llvm/lowering_debug_state";
+} from "sfn/codegen-llvm/lowering_debug_state";
+import { find } from "sfn/strings";
 
 struct TraceRun {
     exit_code: int;

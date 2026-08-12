@@ -1,0 +1,300 @@
+// compiler/capsules/codegen-llvm/src/imports.sfn
+//
+// Import handling and layout manifest management for LLVM lowering.
+// Resolves imported module paths and applies layout metadata.
+import { LayoutManifest, NativeEnum, NativeStruct } from "sfn/ir";
+import { substring } from "sfn/strings";
+
+import { LayoutManifestApplication } from "./types";
+import {
+    append_string,
+    index_of,
+    join_with_separator,
+    starts_with,
+    trim_text
+} from "./utils";
+
+// =============================================================================
+// Module Path Resolution
+// =============================================================================
+fn resolve_import_module_slug(module: string) -> string {
+    return resolve_import_module_slug_for_module(module, "");
+}
+
+fn dirname_for_module_slug(slug: string) -> string {
+    let mut last_slash: int = -1;
+    let mut index: int = 0;
+    loop {
+        if index >= slug.length { break; }
+        let _sl_end = index + 1;
+        if substring(slug, index, _sl_end) == "/" { last_slash = index; }
+        index += 1;
+    }
+    if last_slash < 0 { return ""; }
+    return substring(slug, 0, last_slash);
+}
+
+fn resolve_import_module_slug_for_module(module: string, current_module_slug: string) -> string {
+    let trimmed = trim_text(module);
+    if trimmed.length == 0 { return ""; }
+
+    let mut normalized = normalize_import_module_path(trimmed);
+    let mut current_slug = normalize_import_module_path(current_module_slug);
+    if current_slug.length > 0 {
+        // Mirror `module_name_from_path`'s prefix policy: paths under
+        // `compiler/src/` and `runtime/` get rooted at those directories;
+        // everything else (test fixtures, external capsule sources, etc.)
+        // keeps its full path so the slug here matches the slug staging
+        // produced via `_cr_relative_slug`. Stripping at any `/compiler/`
+        // (the pre-#508 behavior) collapsed `compiler/tests/...` paths to
+        // `compiler/tests/...` while staging kept the leading prefix —
+        // every artifact lookup then missed and the lowering pass lost
+        // function signatures from any cross-file fixture.
+        let compiler_src_index = index_of(current_slug, "/compiler/src/");
+        if compiler_src_index >= 0 {
+            current_slug = substring(current_slug, compiler_src_index + 1, current_slug.length);
+        } else {
+            let runtime_index = index_of(current_slug, "/runtime/");
+            if runtime_index >= 0 {
+                current_slug = substring(current_slug, runtime_index + 1, current_slug.length);
+            }
+        }
+        if index_of(current_slug, "/") < 0 {
+            if index_of(current_slug, "__") >= 0 {
+                let mut rebuilt: string = "";
+                let mut idx: int = 0;
+                loop {
+                    if idx >= current_slug.length { break; }
+                    let _imp_next = idx + 1;
+                    let ch = substring(current_slug, idx, _imp_next);
+                    let _imp_next2 = idx + 2;
+                    if ch == "_" {
+                        if _imp_next < current_slug.length {
+                            if substring(current_slug, _imp_next, _imp_next2) == "_" {
+                                rebuilt = rebuilt + "/";
+                                idx += 2;
+                                continue;
+                            }
+                        }
+                    }
+                    rebuilt = rebuilt + ch;
+                    idx += 1;
+                }
+                current_slug = rebuilt;
+            }
+        }
+    }
+
+    // Resolve relative imports against the importing module's directory.
+    // This is required now that we preserve directory structure for modules
+    // (e.g. `parser/mod` importing `./token_utils`).
+    let mut _if190: boolean = false;
+    if starts_with(normalized, "./") { _if190 = true; }
+    if starts_with(normalized, "../") { _if190 = true; }
+    if _if190 {
+        let base_dir = dirname_for_module_slug(current_slug);
+        if base_dir.length > 0 { normalized = base_dir + "/" + normalized; }
+    }
+
+    // Normalize relative module specifiers (./foo, ../bar, foo/../baz) into
+    // a stable slug that matches our import-context artifact layout.
+    // Examples:
+    // - "./llvm/type_context" -> "llvm/type_context"
+    // - "../native_ir" -> "native_ir"
+    let mut parts: string[] = [];
+    let mut segment: string = "";
+    let mut index: int = 0;
+    loop {
+        if index >= normalized.length { break; }
+        let ch = substring(normalized, index, index + 1);
+        if ch == "/" {
+            if segment.length > 0 { parts.push(segment); }
+            segment = "";
+        } else { segment = segment + ch; }
+        index += 1;
+    }
+    if segment.length > 0 { parts.push(segment); }
+
+    let mut resolved: string[] = [];
+    index = 0;
+    loop {
+        if index >= parts.length { break; }
+        let part = parts[index];
+        let mut _if191: boolean = false;
+        if part.length == 0 { _if191 = true; }
+        if part == "." { _if191 = true; }
+        if _if191 {
+            index += 1;
+            continue;
+        }
+        if part == ".." {
+            if resolved.length > 0 {
+                let mut shortened: string[] = [];
+                let mut drop_index: int = 0;
+                let limit = resolved.length - 1;
+                loop {
+                    if drop_index >= limit { break; }
+                    shortened.push(resolved[drop_index]);
+                    drop_index += 1;
+                }
+                resolved = shortened;
+            }
+            index += 1;
+            continue;
+        }
+        resolved.push(part);
+        index += 1;
+    }
+
+    let mut slug = join_with_separator(resolved, "/");
+
+    // compiler/tests often import compiler sources via "../../src/<name>",
+    // which resolves to "compiler/src/<name>". Our import-context artifacts
+    // are rooted at build/compiler/import-context/<name>.* (the compiler's own
+    // sources are staged with the `compiler/src/` prefix stripped, mirroring
+    // `module_name_from_path`), so strip that prefix to keep imports and
+    // artifact layout consistent.
+    //
+    // A plain leading `src/` is NOT stripped here (#999): generic
+    // `src/`-rooted binary capsules stage their modules WITH the `src/`
+    // prefix (`module_name_from_path` only roots at `compiler/src/` and
+    // `runtime/`, and the sibling-side `_cr_relative_slug` keeps `src/`).
+    // Stripping `src/` here made `../main` resolve to bare `main` while the
+    // entry was staged + emitted as `src/main`, so the importing sibling's
+    // mangled call (`do_io__main`) never matched the entry's definition
+    // (`do_io__src__main`) and the link failed with an undefined reference.
+    if starts_with(slug, "compiler/src/") {
+        slug = substring(slug, 13, slug.length);
+    }
+    return slug;
+}
+
+fn normalize_import_module_path(value: string) -> string {
+    let mut result: string = "";
+    let mut index: int = 0;
+    loop {
+        if index >= value.length { break; }
+        let ch = substring(value, index, index + 1);
+        if ch == "\\" { result = result + "/"; } else { result = result + ch; }
+        index += 1;
+    }
+    return result;
+}
+
+// =============================================================================
+// Layout Manifest Application
+// =============================================================================
+fn apply_layout_manifest_to_module(structs: NativeStruct[], enums: NativeEnum[], manifest: LayoutManifest?) -> LayoutManifestApplication {
+    if manifest == null {
+        return LayoutManifestApplication {
+            structs: structs,
+            enums: enums,
+            diagnostics: []
+        };
+    }
+    return apply_layout_manifest_entries(structs, enums, manifest);
+}
+
+fn apply_layout_manifest_entries(structs: NativeStruct[], enums: NativeEnum[], manifest: LayoutManifest) -> LayoutManifestApplication {
+    let mut diagnostics: string[] = [];
+
+    let mut updated_structs: NativeStruct[] = structs;
+    let mut struct_index: int = 0;
+    loop {
+        if struct_index >= manifest.structs.length { break; }
+        let layout_struct = manifest.structs[struct_index];
+        let target_index = find_struct_index(updated_structs, layout_struct.name);
+        if target_index < 0 {
+            diagnostics.push("layout manifest: struct `" + layout_struct.name
+                + "` missing from native module");
+        } else {
+            let target = updated_structs[target_index];
+            let replaced = NativeStruct {
+                name: target.name,
+                fields: target.fields,
+                methods: target.methods,
+                implements: target.implements,
+                layout: layout_struct.layout
+            };
+            updated_structs = replace_native_struct(updated_structs, target_index, replaced);
+        }
+        struct_index += 1;
+    }
+
+    let mut updated_enums: NativeEnum[] = enums;
+    let mut enum_index: int = 0;
+    loop {
+        if enum_index >= manifest.enums.length { break; }
+        let layout_enum = manifest.enums[enum_index];
+        let target_index = find_enum_index(updated_enums, layout_enum.name);
+        if target_index < 0 {
+            diagnostics.push("layout manifest: enum `" + layout_enum.name
+                + "` missing from native module");
+        } else {
+            let target = updated_enums[target_index];
+            let replaced = NativeEnum {
+                name: target.name,
+                type_parameters: target.type_parameters,
+                variants: target.variants,
+                layout: layout_enum.layout
+            };
+            updated_enums = replace_native_enum(updated_enums, target_index, replaced);
+        }
+        enum_index += 1;
+    }
+
+    return LayoutManifestApplication {
+        structs: updated_structs,
+        enums: updated_enums,
+        diagnostics: diagnostics
+    };
+}
+
+// =============================================================================
+// Helper Functions
+// =============================================================================
+fn find_struct_index(structs: NativeStruct[], name: string) -> int {
+    let mut index: int = 0;
+    loop {
+        if index >= structs.length { break; }
+        if structs[index].name == name { return index; }
+        index += 1;
+    }
+    return -1;
+}
+
+fn find_enum_index(enums: NativeEnum[], name: string) -> int {
+    let mut index: int = 0;
+    loop {
+        if index >= enums.length { break; }
+        if enums[index].name == name { return index; }
+        index += 1;
+    }
+    return -1;
+}
+
+fn replace_native_struct(structs: NativeStruct[], index: int, replacement: NativeStruct) -> NativeStruct[] {
+    let mut result: NativeStruct[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= structs.length { break; }
+        if i == index { result.push(replacement); } else {
+            result.push(structs[i]);
+        }
+        i += 1;
+    }
+    return result;
+}
+
+fn replace_native_enum(enums: NativeEnum[], index: int, replacement: NativeEnum) -> NativeEnum[] {
+    let mut result: NativeEnum[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= enums.length { break; }
+        if i == index { result.push(replacement); } else {
+            result.push(enums[i]);
+        }
+        i += 1;
+    }
+    return result;
+}

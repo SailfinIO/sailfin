@@ -1,5 +1,5 @@
 // Line-budget sentinel for the whole
-// `compiler/src/llvm/expression_lowering/native/` family.
+// `compiler/capsules/codegen-llvm/src/expression_lowering/native/` family.
 //
 // `core_operands.sfn` reached 3,119 lines — twice the ~1,500-line soft
 // budget in `.claude/rules/code-style.md` — and was split into the ten
@@ -42,7 +42,7 @@ import { ends_with, find_char_local } from "../../src/string_utils";
 
 let NATIVE_LOWERING_MODULE_LINE_BUDGET: int = 750;
 
-let NATIVE_LOWERING_ROOT: string = "compiler/src/llvm/expression_lowering/native";
+let NATIVE_LOWERING_ROOT: string = "compiler/capsules/codegen-llvm/src/expression_lowering/native";
 
 // Count newlines, matching `wc -l` semantics (a trailing newline is not
 // double-counted). Cheap single linear scan via `find_char_local`.

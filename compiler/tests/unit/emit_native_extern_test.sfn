@@ -5,7 +5,7 @@
 // `extern fn` declaration in `.sfn` source produces a properly-shaped
 // `.fn` block with `.meta extern` in the emitted `.sfn-asm`. The LLVM
 // `declare` lowering downstream of this point is already in place
-// (`compiler/src/llvm/lowering/emission.sfn:332`); this test pins
+// (`compiler/capsules/codegen-llvm/src/lowering/emission.sfn:332`); this test pins
 // the contract from the parser through the native-IR emitter so a
 // regression in either layer breaks here.
 import { parse_program } from "sfn/syntax";

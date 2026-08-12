@@ -7,7 +7,7 @@
 // `runtime/sfn/memory/arena.sfn`. Each body reproduces the C
 // original in the retired C runtime exactly; the
 // runtime-helper descriptors in
-// `compiler/src/llvm/runtime_helpers.sfn` flip their `symbol` /
+// `compiler/capsules/codegen-llvm/src/runtime_helpers.sfn` flip their `symbol` /
 // `native_signature` to the `sfn_mem_*` names so call-site emission
 // routes here through `effective_symbol = native_signature ?? symbol`.
 //
@@ -225,7 +225,7 @@ let mut _sfn_alloc_oom_active: i64 = 0;
 // `sailfin_runtime_alloc_struct` (`sailfin_runtime.c:4109`), the hottest
 // Category-C primitive (15 descriptor-routed emission sites across array,
 // closure, and operand lowering, plus the hand-spelled env-capture call in
-// `compiler/src/llvm/closures.sfn`). Returns a pointer to zero-initialised
+// `compiler/capsules/codegen-llvm/src/closures.sfn`). Returns a pointer to zero-initialised
 // memory of the requested size; callers GEP+store fields and hand the
 // pointer back as `%Struct*` (the 0.5.8+ boxed-struct ABI that replaced
 // first-class aggregate returns).

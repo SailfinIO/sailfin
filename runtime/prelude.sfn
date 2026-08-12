@@ -13,7 +13,7 @@
 // M4.8 (#823) — the C runtime is now deleted (#822): there is no
 // `runtime/native/src/sailfin_runtime.c` left. Every `runtime.X` member
 // these delegates reach now lowers (via the descriptor registry in
-// `compiler/src/llvm/runtime_helpers.sfn`) to a Sailfin body under
+// `compiler/capsules/codegen-llvm/src/runtime_helpers.sfn`) to a Sailfin body under
 // `runtime/sfn/**`, so the dead namespace-handle bindings (`console`,
 // `fs`, `http`, `websocket`) and the unused `runtime_assert_fail_fn`
 // delegate — none of which were read in this module; dotted call sites

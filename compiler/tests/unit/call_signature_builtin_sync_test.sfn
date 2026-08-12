@@ -10,7 +10,7 @@
 //   3. the `RuntimeHelperDescriptor` rows under `llvm/runtime_helpers/`.
 //
 // `call_signature.sfn` cannot import universe 2 or 3: they live in
-// `compiler/src/llvm/`, inside the `sailfin` capsule, which already depends
+// `compiler/capsules/codegen-llvm/src/`, inside the `sailfin` capsule, which already depends
 // on `sfn/analyzer`, so importing them would close a capsule cycle. The
 // table is therefore a deliberate mirror, and this test is what keeps it
 // honest — a test can import both sides because it sits in the `sailfin`
@@ -30,8 +30,7 @@
 // is that `s.a = print("x")` must not compile.
 import { builtin_arity, builtin_returns_void } from "sfn/analyzer/typecheck/call_signature";
 import { is_builtin_call_name } from "sfn/analyzer/typecheck_types/extern_abi";
-
-import { find_runtime_helper } from "../../src/llvm/runtime_helpers/mod";
+import { find_runtime_helper } from "sfn/codegen-llvm/runtime_helpers/mod";
 
 // Every name the table pins an arity for.
 fn _pinned_arity() -> string[] {

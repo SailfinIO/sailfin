@@ -1,0 +1,269 @@
+// compiler/capsules/codegen-llvm/src/lowering/lowering_io.sfn
+//
+// String array operations and miscellaneous lowering utilities. Extracted
+// from the former flat lowering_core.sfn to reduce per-file memory footprint
+// during self-hosting compilation.
+import { substring } from "sfn/strings";
+
+import { LifetimeRegionMetadata, StringConstant } from "../types";
+import {
+    index_of,
+    number_to_string,
+    starts_with,
+    trim_text
+} from "../utils";
+
+// ── String array operations ──────────────────────────────────────────
+fn extend_string_lines(values: string[], extras: string[]) -> string[] {
+    let mut out = values;
+    if out == null { out = []; }
+    let mut safe_extras = extras;
+    if safe_extras == null { safe_extras = []; }
+    let mut index: int = 0;
+    loop {
+        if index >= safe_extras.length { break; }
+        out.push(safe_extras[index]);
+        index += 1;
+    }
+    return out;
+}
+
+fn append_string_lines(values: string[], extras: string[]) -> string[] {
+    let mut out = values;
+    if out == null { out = []; }
+    let mut safe_extras = extras;
+    if safe_extras == null { safe_extras = []; }
+    let mut index: int = 0;
+    loop {
+        if index >= safe_extras.length { break; }
+        out.push(safe_extras[index]);
+        index += 1;
+    }
+    return out;
+}
+
+// Upper bound on how many `[fatal]` entries a guard trip retains. The gate
+// downstream fails the build on the *first* `[fatal]` it sees, so a bounded
+// handful carries the same verdict as the whole set while keeping the size
+// guards' memory bound a construction rather than an assumption about how
+// many entries happen to be tagged.
+fn max_retained_fatal_diagnostics() -> int { return 64; }
+
+// Reduce a diagnostic batch to its `[fatal]` entries, scanning at most
+// `scan_limit` of them and retaining at most `max_retained_fatal_diagnostics()`.
+//
+// The size guards below bound memory by dropping an oversized batch, but
+// dropping it wholesale also drops any `[fatal]` in it — and `[fatal]` is
+// the only thing that fails the build, so a guard trip would silently
+// disarm the gate it is feeding (SFN-529; audited in
+// `docs/proposals/design-notes/sfn-526-lowering-fatal-gate-audit.md` §3
+// A3). The substring match mirrors `has_fatal_lowering_diagnostic`
+// (`lowering_core/diagnostics.sfn`), which is the gate this feeds.
+//
+// `scan_limit` is the caller's, not this function's: a guard that tripped
+// because the length is *invalid* rather than merely large must not have
+// its buffer indexed at all, so it passes 0. Overflow past either bound is
+// reported rather than dropped silently, and the note is itself tagged so
+// it keeps tripping the gate on its own.
+fn retain_fatal_diagnostics(diagnostics: string[], scan_limit: int) -> string[] {
+    let mut out: string[] = [];
+    if diagnostics == null { return out; }
+    let keep_limit = max_retained_fatal_diagnostics();
+    let mut elided: int = 0;
+    let mut index: int = 0;
+    loop {
+        if index >= scan_limit { break; }
+        let entry = diagnostics[index];
+        if index_of(entry, "[fatal]") >= 0 {
+            if out.length < keep_limit { out.push(entry); } else { elided += 1; }
+        }
+        index += 1;
+    }
+    if elided > 0 {
+        out.push("llvm lowering [fatal]: elided " + number_to_string(elided)
+            + " further fatal diagnostics past the retention cap");
+    }
+    return out;
+}
+
+fn extend_string_lines_checked(values: string[], extras: string[], label: string) -> string[] {
+    let mut safe_values = values;
+    if safe_values == null { safe_values = []; }
+    let mut safe_extras = extras;
+    if safe_extras == null { safe_extras = []; }
+    if safe_extras.length == 0 { return safe_values; }
+    if safe_extras.length > 1000000 {
+        let mut out = safe_values;
+        // Deliberately avoids the literal `[fatal]`: the gate is a substring
+        // match, so putting the tag in this always-emitted summary would fail
+        // every oversized batch, tagged or not.
+        out.push("llvm lowering: kept only fatal-tagged entries from oversized "
+            + label
+            + " diagnostics (len="
+            + number_to_string(extras.length)
+            + ")");
+        return extend_string_lines(out, retain_fatal_diagnostics(safe_extras, safe_extras.length));
+    }
+    return extend_string_lines(safe_values, safe_extras);
+}
+
+fn extend_lifetime_regions_checked(values: LifetimeRegionMetadata[], extras: LifetimeRegionMetadata[]) -> LifetimeRegionMetadata[] {
+    if extras.length == 0 { return values; }
+    if extras.length > 1000000 { return values; }
+    let mut out = values;
+    let mut index: int = 0;
+    loop {
+        if index >= extras.length { break; }
+        out = out.push(extras[index]);
+        index += 1;
+    }
+    return out;
+}
+
+fn insert_string_at(values: string[], insert_index: int, value: string) -> string[] {
+    let mut out: string[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= values.length { break; }
+        if index == insert_index { out.push(value); }
+        out.push(values[index]);
+        index += 1;
+    }
+    if insert_index >= values.length { out.push(value); }
+    return out;
+}
+
+// ── Module helpers ───────────────────────────────────────────────────
+fn module_source_filename(module_name: string) -> string {
+    if module_name.length == 0 { return "sailfin"; }
+    if module_name.length >= 4 {
+        let suffix = substring(module_name, module_name.length - 4, module_name.length);
+        if suffix == ".sfn" { return module_name; }
+    }
+    return module_name + ".sfn";
+}
+
+fn ensure_intrinsic_declarations(lines: string[]) -> string[] {
+    let mut uses_round: boolean = false;
+    let mut has_round_decl: boolean = false;
+    let mut has_round_define: boolean = false;
+    let mut index: int = 0;
+    loop {
+        if index >= lines.length { break; }
+        let line = lines[index];
+        if index_of(line, "call double @round(") >= 0 { uses_round = true; }
+        let trimmed = trim_text(line);
+        if starts_with(trimmed, "declare double @round(double)") {
+            has_round_decl = true;
+        }
+        if starts_with(trimmed, "define") {
+            if index_of(trimmed, "@round(") >= 0 { has_round_define = true; }
+        }
+        index += 1;
+    }
+
+    let mut out = lines;
+    if uses_round && !has_round_decl && !has_round_define {
+        out.push("");
+        out.push("declare double @round(double)");
+    }
+
+    let int_types = ["i8", "i16", "i32", "i64"];
+    // No `.bf16` saturating intrinsic is ever emitted (SFN-609), so the
+    // declaration for it is dead.
+    let float_types = ["half", "float", "double"];
+    let float_suffixes = ["f16", "f32", "f64"];
+    let operations = ["fptosi", "fptoui"];
+
+    // SFN-613: build the (operation, int, float) table once, then decide every
+    // entry in a single pass over `out`.
+    //
+    // This previously ran a full scan of `out` per combination -- 24 x lines
+    // visits, each allocating through `index_of` and `trim_text`. It is
+    // unconditional, so it ran on every module of every build, and for source
+    // that uses no saturating intrinsic (all of `compiler/src`) it emitted
+    // nothing at all: pure scan cost. Measured per-pass with `sfn emit
+    // --timing llvm`, it accounted for most of the `lower_llvm` regression
+    // that arrived with seed 0.8.4 -- +96% on `effect_checker` (17k IR lines)
+    // against seed 0.8.2, with byte-identical emitted `.ll`.
+    let mut call_prefixes: string[] = [];
+    let mut declarations: string[] = [];
+    let mut operation_index: int = 0;
+    loop {
+        if operation_index >= operations.length { break; }
+        let mut int_index: int = 0;
+        loop {
+            if int_index >= int_types.length { break; }
+            let mut float_index: int = 0;
+            loop {
+                if float_index >= float_types.length { break; }
+                let symbol = "llvm." + operations[operation_index] + ".sat."
+                    + int_types[int_index]
+                    + "."
+                    + float_suffixes[float_index];
+                call_prefixes.push("call " + int_types[int_index] + " @"
+                    + symbol
+                    + "(");
+                declarations.push("declare " + int_types[int_index] + " @"
+                    + symbol
+                    + "("
+                    + float_types[float_index]
+                    + ")");
+                float_index += 1;
+            }
+            int_index += 1;
+        }
+        operation_index += 1;
+    }
+
+    let mut used: boolean[] = [];
+    let mut declared: boolean[] = [];
+    let mut slot: int = 0;
+    loop {
+        if slot >= call_prefixes.length { break; }
+        used.push(false);
+        declared.push(false);
+        slot += 1;
+    }
+
+    // Every candidate line names the intrinsic family, so one `index_of` per
+    // line skips the whole table for all but a handful of lines. Scanning the
+    // array as it stands is equivalent to the old growing-scan: a pushed
+    // declaration starts with `declare`, so it can never match a `call `
+    // prefix, and the declarations are distinct per symbol.
+    let marker = "llvm.fpto";
+    let mut scan_index: int = 0;
+    loop {
+        if scan_index >= out.length { break; }
+        let line = out[scan_index];
+        if index_of(line, marker) >= 0 {
+            let trimmed = trim_text(line);
+            let mut match_index: int = 0;
+            loop {
+                if match_index >= call_prefixes.length { break; }
+                if index_of(line, call_prefixes[match_index]) >= 0 {
+                    used[match_index] = true;
+                }
+                if trimmed == declarations[match_index] {
+                    declared[match_index] = true;
+                }
+                match_index += 1;
+            }
+        }
+        scan_index += 1;
+    }
+
+    // Emitted in table order, which is the order the nested loops used.
+    let mut emit_index: int = 0;
+    loop {
+        if emit_index >= declarations.length { break; }
+        if used[emit_index] {
+            if !declared[emit_index] {
+                out.push("");
+                out.push(declarations[emit_index]);
+            }
+        }
+        emit_index += 1;
+    }
+    return out;
+}  // make_native_module_for_emit lives in lowering_core/file_emission.sfn

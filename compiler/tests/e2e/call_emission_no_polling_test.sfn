@@ -91,14 +91,14 @@ fn _count_call_sites(ir: string) -> int {
 
 // ---- (1) heavy compiler module: lowering_core/mod.sfn ----
 test "no-polling: lowering_core/mod.sfn IR has zero has_exception call sites" ![io] {
-    let ir = _emit_path("lowering_core", "compiler/src/llvm/lowering/lowering_core/mod.sfn");
+    let ir = _emit_path("lowering_core", "compiler/capsules/codegen-llvm/src/lowering/lowering_core/mod.sfn");
     assert ir.length > 0;
     assert _count_call_sites(ir) == 0;
 }
 
 // ---- (2) heavy compiler module: instructions_try.sfn (the migration target) ----
 test "no-polling: instructions_try.sfn IR has zero has_exception call sites" ![io] {
-    let ir = _emit_path("instructions_try", "compiler/src/llvm/lowering/instructions_try.sfn");
+    let ir = _emit_path("instructions_try", "compiler/capsules/codegen-llvm/src/lowering/instructions_try.sfn");
     assert ir.length > 0;
     assert _count_call_sites(ir) == 0;
 }

@@ -2,7 +2,7 @@
 // size guards.
 //
 // `has_fatal_lowering_diagnostic`
-// (`compiler/src/llvm/lowering/lowering_core/diagnostics.sfn`)
+// (`compiler/capsules/codegen-llvm/src/lowering/lowering_core/diagnostics.sfn`)
 // is the only thing that turns a lowering diagnostic into a build failure, and
 // two guards upstream of it used to discard the entire diagnostic array once it
 // exceeded 1,000,000 entries — `[fatal]` included. A tripped guard therefore
@@ -17,8 +17,9 @@ import {
     extend_string_lines_checked,
     max_retained_fatal_diagnostics,
     retain_fatal_diagnostics
-} from "../../src/llvm/lowering/lowering_io";
-import { sanitize_diagnostics } from "../../src/llvm/lowering/lowering_phase_sanitize";
+} from "sfn/codegen-llvm/lowering/lowering_io";
+import { sanitize_diagnostics } from "sfn/codegen-llvm/lowering/lowering_phase_sanitize";
+
 import { index_of } from "../../src/string_utils";
 
 // The sentinel this test tracks through the guards. It carries no E-code:

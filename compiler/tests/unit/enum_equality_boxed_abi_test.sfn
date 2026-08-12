@@ -10,7 +10,7 @@
 //                                access on a boxed parent struct.
 //
 // Before the fix, `lower_comparison_operation` in
-// `compiler/src/llvm/expression_lowering/native/core_ops_lowering.sfn`
+// `compiler/capsules/codegen-llvm/src/expression_lowering/native/core_ops_lowering.sfn`
 // only resolved enum info on an exact llvm_name match (via
 // `find_enum_info_by_llvm_type`), which missed the `%Enum*` form entirely,
 // and further required `left.llvm_type == right.llvm_type` before emitting

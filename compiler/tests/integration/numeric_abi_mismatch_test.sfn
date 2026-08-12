@@ -13,9 +13,10 @@
 // `compiler/tests/unit/numeric_int_float_coercion_test.sfn`. Permissive
 // mode (`allow_widen = true`) keeps silent widening in both directions
 // (`sitofp` / `fptosi`).  // alias-coverage: numeric migration coverage
-import { coerce_operand_to_type, harmonise_operands } from "../../src/llvm/expression_lowering/native/core_operands/dispatch";
-import { numeric_type_kind } from "../../src/llvm/type_mapping";
-import { LLVMOperand } from "../../src/llvm/types";
+import { coerce_operand_to_type, harmonise_operands } from "sfn/codegen-llvm/expression_lowering/native/core_operands/dispatch";
+import { numeric_type_kind } from "sfn/codegen-llvm/type_mapping";
+import { LLVMOperand } from "sfn/codegen-llvm/types";
+
 import { index_of } from "../../src/string_utils";
 
 // -------------------------------------------------------------------

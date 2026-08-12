@@ -7,7 +7,7 @@
 // M2 epic #389 — same migration shape as the M2.11 `sfn_sleep`
 // flip (`runtime/sfn/clock.sfn`).
 //
-// ABI: `compiler/src/llvm/runtime_helpers.sfn` flips the
+// ABI: `compiler/capsules/codegen-llvm/src/runtime_helpers.sfn` flips the
 // `process.run` descriptor's `native_signature` to
 // `sfn_process_run`. The descriptor pins the call shape as
 // `double sfn_process_run({ i8**, i64, i64 }*)` — Sailfin's

@@ -238,7 +238,7 @@ fn _sftr_write(kind: string, status: string, name: *u8, hook: string, file: *u8,
 }
 
 // SFN-17: recoverable test harness. The synthesized `@main`
-// (`compiler/src/llvm/lowering/lowering_core.sfn`) wraps every hook/test
+// (`compiler/capsules/codegen-llvm/src/lowering/lowering_core.sfn`) wraps every hook/test
 // call in an inline `setjmp` frame and records a per-test/hook result as
 // each completes so the runner reports pass/fail/error per test even
 // after a failure — instead of the first failed assert aborting the whole

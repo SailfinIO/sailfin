@@ -1,0 +1,596 @@
+// compiler/capsules/codegen-llvm/src/lowering/lowering_helpers_mangling.sfn
+//
+// Module symbol mangling, trait metadata construction, and function
+// collection helpers.  Split from lowering_helpers.sfn to keep both
+// files under 1000 lines.
+import {
+    ImportModuleAlias,
+    NativeFunction,
+    NativeImport,
+    NativeImportSpecifier,
+    NativeInterface,
+    NativeParameter,
+    NativeStruct
+} from "sfn/ir";
+import { substring } from "sfn/strings";
+
+import { resolve_import_module_slug_for_module } from "../imports";
+import { trace_log, trace_lowering } from "../lowering_debug_state";
+import { sanitize_symbol } from "../symbols";
+import {
+    CapabilityManifest,
+    TraitDescriptor,
+    TraitImplementationDescriptor,
+    TraitMetadata
+} from "../types";
+import {
+    index_of,
+    join_with_separator,
+    number_to_string,
+    starts_with,
+    string_array_contains,
+    trim_text
+} from "../utils";
+import {
+    DeclareSignature,
+    HeaderIndex,
+    MangledModuleResult,
+    apply_symbol_substitutions,
+    build_header_index,
+    collect_available_import_module_names,
+    collect_defined_function_symbols,
+    extract_module_name_from_native_text,
+    find_declare_signature,
+    find_signature_in_index,
+    find_vtable_method_signature,
+    has_declare_or_define_in_index,
+    insert_before_llvm_footer,
+    pretrim_lines,
+    render_function_shim,
+    sanitize_module_suffix,
+    should_keep_unmangled_abi_symbol
+} from "./lowering_helpers";
+
+fn resolve_import_provider_module_name(import_path: string, current_module_slug: string, available_module_names: string[], module_aliases: ImportModuleAlias[]) -> string {
+    let base = resolve_import_module_slug_for_module(import_path, current_module_slug);
+    if base.length == 0 { return base; }
+    let mut alias_index: int = 0;
+    loop {
+        if alias_index >= module_aliases.length { break; }
+        if module_aliases[alias_index].import_slug == base {
+            return module_aliases[alias_index].provider_slug;
+        }
+        alias_index += 1;
+    }
+    if string_array_contains(available_module_names, base) { return base; }
+    let mod_slug = base + "/mod";
+    if string_array_contains(available_module_names, mod_slug) {
+        return mod_slug;
+    }
+    return base;
+}
+
+// #960: scan a `.sfn-asm` native text for struct-method symbols.
+// `flatten_struct_methods` names each method `<StructName><MethodName>`, so a
+// consumer's call site for an imported method appears as the bare symbol
+// `@<StructName><MethodName>`. The imported method is NOT listed in any
+// `.import { specifiers }` line (only the free symbols are), so the mangling
+// pass can't learn it from the import directives — it must be discovered by
+// walking the provider's native text. Returns the sanitized bare symbols
+// (e.g. `ProbeEget_actual`) defined by every `.struct`/`.method` pair.
+fn _collect_struct_method_symbols(native_text: string) -> string[] {
+    let mut result: string[] = [];
+    if native_text.length == 0 { return result; }
+    let mut current_struct: string = "";
+    let mut scan_pos: int = 0;
+    let len = native_text.length;
+    loop {
+        if scan_pos >= len { break; }
+        let mut line_end: int = scan_pos;
+        loop {
+            if line_end >= len { break; }
+            if native_text[line_end] == "\n" { break; }
+            line_end += 1;
+        }
+        let line = trim_text(substring(native_text, scan_pos, line_end));
+        scan_pos = line_end + 1;
+
+        if starts_with(line, ".struct ") {
+            let tail = trim_text(substring(line, 8, line.length));
+            // Stop at the first `<` (generic params) or space (`implements
+            // ...`). `flatten_struct_methods` builds the lowered symbol from
+            // the bare struct name, so `.struct Foo<T> implements Bar` must
+            // resolve to `Foo`, not `Foo<T>`.
+            let mut name_end: int = 0;
+            loop {
+                if name_end >= tail.length { break; }
+                let ch = tail[name_end];
+                if ch == " " { break; }
+                if ch == "<" { break; }
+                name_end += 1;
+            }
+            current_struct = substring(tail, 0, name_end);
+            continue;
+        }
+        if starts_with(line, ".endstruct") {
+            current_struct = "";
+            continue;
+        }
+        if current_struct.length == 0 { continue; }
+        if starts_with(line, ".method ") {
+            let mut tail = trim_text(substring(line, 8, line.length));
+            // The lowered symbol uses the bare method name, so drop an
+            // `async ` prefix and any `<...>` generic parameter list:
+            // `.method async foo<T>(...)` → `foo`.
+            if starts_with(tail, "async ") {
+                tail = trim_text(substring(tail, 6, tail.length));
+            }
+            let mut name_end: int = 0;
+            loop {
+                if name_end >= tail.length { break; }
+                let ch = tail[name_end];
+                if ch == "(" { break; }
+                if ch == "<" { break; }
+                name_end += 1;
+            }
+            if name_end >= tail.length { continue; }
+            let method_name = trim_text(substring(tail, 0, name_end));
+            if method_name.length == 0 { continue; }
+            let symbol = sanitize_symbol(current_struct + method_name);
+            if symbol.length == 0 { continue; }
+            if !string_array_contains(result, symbol) {
+                result.push(symbol);
+            }
+        }
+    }
+    return result;
+}
+
+fn apply_module_symbol_mangling(lines: string[], imports: NativeImport[], current_module_slug: string, imported_native_texts: string[], module_aliases: ImportModuleAlias[], native_text_path: string) -> MangledModuleResult {
+    let mut diagnostics: string[] = [];
+    let debug_lowering = trace_lowering();
+    if debug_lowering {
+        trace_log("emit-llvm: mangle start module=" + current_module_slug);
+    }
+    let mut safe_imports = imports;
+    if safe_imports == null { safe_imports = []; }
+    if safe_imports.length > 100000 {
+        diagnostics.push("llvm lowering [fatal] [E1001]: import list too large for mangling in module `"
+            + current_module_slug
+            + "`; refusing to emit incomplete symbol rewrites");
+        safe_imports = [];
+        if debug_lowering {
+            trace_log("emit-llvm: mangle import list too large; dropping");
+        }
+    }
+
+    // Runtime modules keep their OWN definitions unmangled: they are
+    // referenced implicitly — from `runtime/ir/*.ll`, from `extern fn`
+    // declarations in sibling runtime modules, and from the Windows bridge
+    // stub file — so their bare names are a stable ABI. That argument covers
+    // step 1 and nothing else. Steps 2 and 2b rewrite this module's *imported*
+    // call sites and touch no symbol it exports, so a runtime module runs them
+    // too; suppressing them is what previously made it impossible for the
+    // runtime to call a mangled capsule provider at all (SFN-773, design note
+    // `sfn-341-native-tls-runtime-swap.md` §3.1.1).
+    let is_runtime_module = starts_with(current_module_slug, "runtime/");
+
+    let module_suffix = sanitize_module_suffix(current_module_slug);
+
+    let available_modules = collect_available_import_module_names(imported_native_texts);
+    if debug_lowering {
+        trace_log("emit-llvm: mangle available_modules=" + number_to_string(available_modules.length));
+    }
+
+    // 1) Mangle every function defined in this module to a module-qualified symbol.
+    let defined = collect_defined_function_symbols(lines);
+    if debug_lowering {
+        trace_log("emit-llvm: mangle defined_symbols=" + number_to_string(defined.length));
+    }
+    let mut local_olds: string[] = [];
+    let mut local_news: string[] = [];
+    let mut def_index: int = 0;
+    loop {
+        // Step 1 only. A runtime module leaves `local_olds`/`local_news` empty
+        // so the substitution below is an identity and its symbols stay bare.
+        if is_runtime_module { break; }
+        if def_index >= defined.length { break; }
+        let sym = defined[def_index];
+        if should_keep_unmangled_abi_symbol(sym) {
+            def_index += 1;
+            continue;
+        }
+        // Avoid double-mangling if already qualified.
+        if index_of(sym, "__") >= 0 {
+            def_index += 1;
+            continue;
+        }
+        local_olds.push(sym);
+        local_news.push(sym + "__" + module_suffix);
+        def_index += 1;
+    }
+
+    let mut rewritten = apply_symbol_substitutions(lines, local_olds, local_news);
+    if debug_lowering {
+        trace_log("emit-llvm: mangle local_subs=" + number_to_string(local_olds.length));
+    }
+
+    // 2) Rewrite imported symbol references to the provider's qualified symbol,
+    // and generate re-export shims so downstream modules can import symbols
+    // from this module even if they're transitively provided.
+    //
+    // We process two directive shapes identically:
+    //
+    //   .import "path" { syms }   — symbols this module calls; rewrite
+    //                                 call sites and emit a re-export shim
+    //                                 so consumers can target this slug.
+    //   .export "path" { syms }   — symbols this module re-exports via
+    //                                 `export { ... } from "path";`. The
+    //                                 module never calls them, but
+    //                                 consumers that import from THIS slug
+    //                                 will mangle their calls to
+    //                                 `sym__<this_slug>`. Without a shim
+    //                                 here those references go undefined
+    //                                 at link time (#508).
+    //
+    // The v0.1.1 seed miscompiles NativeImport struct returns: the `kind`
+    // field becomes "named" instead of "import" and the specifiers array is
+    // empty.  To work around this, we re-parse .import / .export lines
+    // directly from the raw .sfn-asm text using simple string operations.
+    let mut import_olds: string[] = [];
+    let mut import_news: string[] = [];
+    let mut shim_exports: string[] = [];
+    let mut shim_targets: string[] = [];
+
+    let mut native_text: string = "";
+    if native_text_path.length > 0 {
+        // native_text_path carries the raw .sfn-asm text content (not a
+        // file path, despite the parameter name).
+        native_text = native_text_path;
+    }
+
+    if native_text.length > 0 {
+        // Scan native text line-by-line for .import / .export directives.
+        let mut scan_pos: int = 0;
+        loop {
+            if scan_pos >= native_text.length { break; }
+            // Find end of current line.
+            let mut line_end: int = scan_pos;
+            loop {
+                if line_end >= native_text.length { break; }
+                if native_text[line_end] == "\n" { break; }
+                line_end += 1;
+            }
+            let raw_line = substring(native_text, scan_pos, line_end);
+            let line = trim_text(raw_line);
+            scan_pos = line_end + 1;
+
+            let mut _is_directive: boolean = false;
+            if starts_with(line, ".import ") { _is_directive = true; }
+            if starts_with(line, ".export ") { _is_directive = true; }
+            if !_is_directive { continue; }
+            // Extract module path between first pair of quotes.
+            let q1 = index_of(line, "\"");
+            if q1 < 0 { continue; }
+            let after_q1 = substring(line, q1 + 1, line.length);
+            let q2 = index_of(after_q1, "\"");
+            if q2 <= 0 { continue; }
+            let import_module = substring(after_q1, 0, q2);
+            if import_module.length == 0 { continue; }
+
+            let provider_module = resolve_import_provider_module_name(import_module, current_module_slug, available_modules, module_aliases);
+            let provider_is_runtime = starts_with(provider_module, "runtime/");
+            let provider_suffix = sanitize_module_suffix(provider_module);
+
+            // Extract specifiers between { and }.
+            let brace_open = index_of(line, "{");
+            let brace_close = index_of(line, "}");
+            if brace_open < 0 { continue; }
+            if brace_close <= brace_open { continue; }
+            let specs_text = substring(line, brace_open + 1, brace_close);
+
+            // Split specifiers by comma and process each one.
+            let mut remaining = specs_text;
+            loop {
+                remaining = trim_text(remaining);
+                if remaining.length == 0 { break; }
+                let comma_pos = index_of(remaining, ",");
+                let mut spec_name: string = "";
+                if comma_pos >= 0 {
+                    spec_name = trim_text(substring(remaining, 0, comma_pos));
+                    remaining = substring(remaining, comma_pos + 1, remaining.length);
+                } else {
+                    spec_name = trim_text(remaining);
+                    remaining = "";
+                }
+                if spec_name.length == 0 { continue; }
+
+                // Handle aliased imports: "name as alias" → local=alias, original=name
+                let mut local_name = spec_name;
+                let mut original_name = spec_name;
+                let as_pos = index_of(spec_name, " as ");
+                if as_pos >= 0 {
+                    original_name = trim_text(substring(spec_name, 0, as_pos));
+                    local_name = trim_text(substring(spec_name, as_pos + 4, spec_name.length));
+                }
+
+                let local_symbol = sanitize_symbol(local_name);
+                let original_symbol = sanitize_symbol(original_name);
+                if should_keep_unmangled_abi_symbol(local_symbol) { continue; }
+                if string_array_contains(defined, local_symbol) {
+                    diagnostics.push("llvm lowering [fatal] [E1001]: import `"
+                        + local_symbol
+                        + "` shadows local function in module `"
+                        + current_module_slug
+                        + "`");
+                    continue;
+                }
+                // Don't rewrite if already qualified.
+                if index_of(local_symbol, "__") >= 0 { continue; }
+                import_olds.push(local_symbol);
+                let mut target_symbol = original_symbol;
+                if !provider_is_runtime {
+                    target_symbol = original_symbol + "__" + provider_suffix;
+                }
+                import_news.push(target_symbol);
+
+                // Re-export shim: provide `local_symbol__<this_module>` as a thin
+                // wrapper forwarding to the provider's symbol. A runtime module
+                // needs none — every importer of a runtime module targets the
+                // bare name (`provider_is_runtime` above keeps `target_symbol`
+                // unmangled), so the shim would be dead on arrival.
+                if !is_runtime_module {
+                    let export_sym = local_symbol + "__" + module_suffix;
+                    if !string_array_contains(shim_exports, export_sym) {
+                        shim_exports.push(export_sym);
+                        shim_targets.push(target_symbol);
+                    }
+                }
+            }
+        }
+    }
+
+    // 2b) #960: rewrite imported struct-method call sites to the home-module
+    // symbol. `flatten_struct_methods` names methods `<Struct><Method>`, and a
+    // consumer references an imported method as the bare `@<Struct><Method>(`.
+    // These never appear in `.import { specifiers }` (only free symbols do), so
+    // the directive loop above can't map them. Discover them by walking each
+    // provider's native text: when THIS module calls a method it does not
+    // define locally, map `@<sym>` → `@<sym>__<provider_suffix>` and remember
+    // the target so an external declare is injected below. Without this the
+    // call would bind to a bodyless local stub (the #960 garbage-`self` bug) or
+    // — once that stub is gone — to an undefined symbol.
+    let mut imm_targets: string[] = [];
+    let mut imm_signatures: DeclareSignature[] = [];
+    let mut imm_ti: int = 0;
+    loop {
+        if imm_ti >= imported_native_texts.length { break; }
+        let imm_text = imported_native_texts[imm_ti];
+        imm_ti += 1;
+        if imm_text == null { continue; }
+        if imm_text.length == 0 { continue; }
+        let provider_slug = extract_module_name_from_native_text(imm_text);
+        if provider_slug.length == 0 { continue; }
+        // Runtime modules keep stable, unmangled ABI symbols.
+        if starts_with(provider_slug, "runtime/") { continue; }
+        let provider_suffix = sanitize_module_suffix(provider_slug);
+        let method_symbols = _collect_struct_method_symbols(imm_text);
+        let mut ms_i: int = 0;
+        loop {
+            if ms_i >= method_symbols.length { break; }
+            let bare = method_symbols[ms_i];
+            ms_i += 1;
+            if should_keep_unmangled_abi_symbol(bare) { continue; }
+            // Already qualified, locally defined, or already mapped: leave it.
+            if index_of(bare, "__") >= 0 { continue; }
+            if string_array_contains(defined, bare) { continue; }
+            if string_array_contains(import_olds, bare) { continue; }
+            // Only act when this module actually references the method. The
+            // signature is recovered from the bare call site, which still
+            // exists in `rewritten` at this point — before substitution.
+            let mut signature = find_declare_signature(rewritten, bare);
+            // #1739: a method referenced only by a per-module interface
+            // vtable constant (not a direct call site) is missed by the
+            // call-site scan above. Recover its signature from the vtable's
+            // bitcast function-pointer type so the reference is rewritten to
+            // the provider symbol and an external declare is injected —
+            // otherwise the vtable initializer references an undefined value
+            // (invalid IR; #1739).
+            if signature == null {
+                signature = find_vtable_method_signature(rewritten, bare);
+            }
+            if signature == null { continue; }
+            let target = bare + "__" + provider_suffix;
+            import_olds.push(bare);
+            import_news.push(target);
+            imm_targets.push(target);
+            imm_signatures.push(signature);
+        }
+    }
+
+    rewritten = apply_symbol_substitutions(rewritten, import_olds, import_news);
+    if debug_lowering {
+        trace_log("emit-llvm: mangle import_subs=" + number_to_string(import_olds.length));
+    }
+
+    // 3) Append shims before the LLVM footer (attributes/metadata).
+    //    Also inject `declare` for any target symbol that is referenced
+    //    but has no existing declare or define in the module.
+    //
+    // #1512: the shim + imm-declare loops below probe `rewritten` for many
+    // symbols (285 shims on `core`). `rewritten` is not mutated again until
+    // the final `insert_before_llvm_footer`, so trim every line once here
+    // and use the `_t` (pre-trimmed) probe variants — turning the per-symbol
+    // `trim_text` of all ~16k lines (core's +2.7 GB mangling peak) into a
+    // single O(lines) trim.
+    let trimmed_rewritten = pretrim_lines(rewritten);
+    let header_index = build_header_index(trimmed_rewritten);
+    let mut shim_lines: string[] = [];
+    let mut injected_declares: string[] = [];
+    let mut shim_index: int = 0;
+    loop {
+        let mut _if274: boolean = false;
+        if shim_index >= shim_exports.length { _if274 = true; }
+        if shim_index >= shim_targets.length { _if274 = true; }
+        if _if274 { break; }
+        let export_sym = shim_exports[shim_index];
+        let target_sym = shim_targets[shim_index];
+        let signature = find_signature_in_index(header_index, target_sym);
+        if signature == null {
+            // Not a function import (e.g. struct/enum type), or declaration not emitted.
+            shim_index += 1;
+            continue;
+        }
+        // If the target symbol has no declare/define line, inject a declare
+        // so the shim (and any other call sites) can reference it.
+        if !has_declare_or_define_in_index(header_index, target_sym) {
+            if !string_array_contains(injected_declares, target_sym) {
+                let decl = _render_declare_line(target_sym, signature);
+                shim_lines.push(decl);
+                shim_lines.push("");
+                injected_declares.push(target_sym);
+            }
+        }
+        let _shim_result = render_function_shim(export_sym, target_sym, signature);
+        let mut _ci0: int = 0;
+        loop {
+            if _ci0 >= _shim_result.length { break; }
+            shim_lines.push(_shim_result[_ci0]);
+            _ci0 += 1;
+        }
+        shim_lines.push("");
+        shim_index += 1;
+    }
+    // #960: external declares for imported struct-method targets rewritten in
+    // step 2b. Their bodies live in the provider module's `.ll`; this consumer
+    // only needs a `declare` so the rewritten call sites resolve at link time.
+    let mut imm_di: int = 0;
+    loop {
+        if imm_di >= imm_targets.length { break; }
+        if imm_di >= imm_signatures.length { break; }
+        let imm_target = imm_targets[imm_di];
+        let imm_sig = imm_signatures[imm_di];
+        imm_di += 1;
+        if string_array_contains(injected_declares, imm_target) { continue; }
+        if has_declare_or_define_in_index(header_index, imm_target) { continue; }
+        shim_lines.push(_render_declare_line(imm_target, imm_sig));
+        shim_lines.push("");
+        injected_declares.push(imm_target);
+    }
+    rewritten = insert_before_llvm_footer(rewritten, shim_lines);
+    if debug_lowering {
+        trace_log("emit-llvm: mangle shims=" + number_to_string(shim_exports.length));
+    }
+
+    return MangledModuleResult { lines: rewritten, diagnostics: diagnostics };
+}
+
+fn _render_declare_line(symbol: string, signature: DeclareSignature) -> string {
+    let mut param_types: string[] = [];
+    let mut idx: int = 0;
+    loop {
+        if idx >= signature.param_types.length { break; }
+        param_types.push(signature.param_types[idx]);
+        idx += 1;
+    }
+    return "declare " + signature.return_type + " @" + symbol + "("
+        + join_with_separator(param_types, ", ")
+        + ")";
+}
+
+fn append_native_function(values: NativeFunction[], value: NativeFunction) -> NativeFunction[] {
+    let mut out = values;
+    if out == null { out = []; }
+    out = out.push(value);
+    return out;
+}
+
+fn concat_native_functions(first: NativeFunction[], second: NativeFunction[]) -> NativeFunction[] {
+    let mut result: NativeFunction[] = [];
+    let mut safe_first = first;
+    if safe_first == null { safe_first = []; }
+    if safe_first.length > 200000 { return result; }
+    let mut safe_second = second;
+    if safe_second == null { safe_second = []; }
+    if safe_second.length > 200000 { return result; }
+    let mut index: int = 0;
+    loop {
+        if index >= safe_first.length { break; }
+        result = append_native_function(result, safe_first[index]);
+        index += 1;
+    }
+    index = 0;
+    loop {
+        if index >= safe_second.length { break; }
+        result = append_native_function(result, safe_second[index]);
+        index += 1;
+    }
+    return result;
+}
+
+// extend_native_functions_inplace: append `src` onto `dst` in-place.
+//
+// Contract:
+//   - The returned array is the same reference as `dst` (aliased, not copied).
+//   - Mutations made by this function are visible through the original
+//     `dst` handle as well as the returned handle.
+//   - Safe only at call sites where no other reference to `dst` expects
+//     the pre-call contents.
+//
+// UNSAFE if another reference to `dst` expects the pre-call contents —
+// use `concat_native_functions` instead when the caller needs a pristine
+// snapshot of `dst`. Audited safe call sites as of Phase 1b: only two
+// sites in lowering_core/mod.sfn (docs/proposals/0006-build-architecture.md Phase 1b).
+//
+// The aliasing contract is locked in by the regression test at
+// compiler/tests/unit/extend_native_functions_inplace_test.sfn, which
+// tests the three runtime guarantees this function is built on. If that
+// test fails, the in-place optimization is broken and this function
+// must either be fixed or reverted — any other option silently corrupts
+// the safe call sites.
+fn extend_native_functions_inplace(dst: NativeFunction[], src: NativeFunction[]) -> NativeFunction[] {
+    let mut out = dst;
+    if out == null { out = []; }
+    let mut safe_src = src;
+    if safe_src == null { safe_src = []; }
+    if safe_src.length > 200000 { return out; }
+    let mut index: int = 0;
+    loop {
+        if index >= safe_src.length { break; }
+        out = append_native_function(out, safe_src[index]);
+        index += 1;
+    }
+    return out;
+}
+
+// Identifier-character test for `Self`-token substitution: ASCII letters,
+// digits, and `_`. Used to keep the rewrite identifier-boundary aware so a
+// distinct type such as `SelfContained` is never partially rewritten.
+fn _join_llvm_lines_linear(lines: string[]) -> string {
+    if lines == null { return ""; }
+    if lines.length == 0 { return ""; }
+    if lines.length == 1 { return lines[0]; }
+    // Pair-wise merge: each pass halves the working array. O(N log N) memory
+    // total instead of the O(N^2) accumulation of `out = out + line` in a
+    // loop. For emit_native.sfn this is the difference between blowing the
+    // 12GB seedcheck cap and finishing with hundreds of MB to spare.
+    //
+    // Bonus: each `current[i] + "\n" + current[i+1]` is a left-associative
+    // chain whose second concat sees a fresh-concat LHS, so the compiler's
+    // string_append peephole (b3b6dad) reuses the buffer in place.
+    let mut current = lines;
+    loop {
+        if current.length <= 1 { break; }
+        let mut next: string[] = [];
+        let mut i: int = 0;
+        loop {
+            if i >= current.length { break; }
+            if i + 1 < current.length {
+                next.push(current[i] + "\n" + current[i + 1]);
+            } else { next.push(current[i]); }
+            i += 2;
+        }
+        current = next;
+    }
+    return current[0];
+}
