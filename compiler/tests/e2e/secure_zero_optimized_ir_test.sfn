@@ -229,36 +229,49 @@ test "secure zero optimized ir: volatile store survives -O2 on linux, darwin, an
 //
 // `clang` is not needed for these — they only exercise `sfn emit`, so they
 // do not probe for or skip on a missing `clang`.
-fn _assert_secure_zero_rejected(tag: string, body_source: string) -> int ![io] {
+// The expected code differs by *which* gate rejects first, so it is a
+// parameter rather than a constant (SFN-812):
+//
+//   * a wrong argument *count* is now rejected at typecheck with `E0423`,
+//     which names the callee and separates too-few from too-many. It never
+//     reaches lowering, so asserting `E0806` here would pin the old, later,
+//     less specific rejection.
+//   * a wrong argument *type* still reaches the lowering contract gate and
+//     reports `E0806`.
+//
+// Both must still publish no `.ll`, which is the property these tests exist
+// to protect. The `E0806` arity branch remains in lowering as defense in
+// depth for any other route to a malformed `secure_zero` call.
+fn _assert_secure_zero_rejected(tag: string, body_source: string, expected_code: string) -> int ![io] {
     let outcome = with_tmp_dir(fn (dir: string) -> int {
         let src = dir + "/" + tag + ".sfn";
         let ll = dir + "/" + tag + ".ll";
         fs.writeFile(src, body_source);
 
-        let emit_env = clean_runner_env(nested_runner_scratch("secure-zero-e0806-"
+        let emit_env = clean_runner_env(nested_runner_scratch("secure-zero-reject-"
             + tag));
         let _exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", src], emit_env);
         let _o = process.capture_take_stdout();
         let err = process.capture_take_stderr();
-        assert contains(err, "E0806");
+        assert contains(err, expected_code);
         assert ! fs.exists(ll);
         return 0;
     });
     return outcome;
 }
 
-test "secure zero optimized ir: too few arguments reports E0806 and publishes no .ll" ![io] {
+test "secure zero optimized ir: too few arguments reports E0423 and publishes no .ll" ![io] {
     let source = "fn bad(addr: int) -> void {\n" + "    secure_zero(addr);\n"
         + "}";
-    let outcome = _assert_secure_zero_rejected("too-few-args", source);
+    let outcome = _assert_secure_zero_rejected("too-few-args", source, "E0423");
     assert outcome == 0;
 }
 
-test "secure zero optimized ir: too many arguments reports E0806 and publishes no .ll" ![io] {
+test "secure zero optimized ir: too many arguments reports E0423 and publishes no .ll" ![io] {
     let source = "fn bad(a: int, b: int, c: int) -> void {\n"
         + "    secure_zero(a, b, c);\n"
         + "}";
-    let outcome = _assert_secure_zero_rejected("too-many-args", source);
+    let outcome = _assert_secure_zero_rejected("too-many-args", source, "E0423");
     assert outcome == 0;
 }
 
@@ -266,7 +279,7 @@ test "secure zero optimized ir: non-int address argument reports E0806 and publi
     let source = "fn bad(len: int) -> void {\n"
         + "    secure_zero(\"not-an-addr\", len);\n"
         + "}";
-    let outcome = _assert_secure_zero_rejected("bad-addr-type", source);
+    let outcome = _assert_secure_zero_rejected("bad-addr-type", source, "E0806");
     assert outcome == 0;
 }
 
@@ -274,6 +287,6 @@ test "secure zero optimized ir: non-int length argument reports E0806 and publis
     let source = "fn bad(addr: int) -> void {\n"
         + "    secure_zero(addr, \"not-a-len\");\n"
         + "}";
-    let outcome = _assert_secure_zero_rejected("bad-len-type", source);
+    let outcome = _assert_secure_zero_rejected("bad-len-type", source, "E0806");
     assert outcome == 0;
 }

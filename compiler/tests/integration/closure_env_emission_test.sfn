@@ -145,7 +145,7 @@ test "closure_env: empty layout emits no alloc lines (non-capturing lambda guard
     let empty: NativeLambdaCapture[] = [];
     let layout = synthesize_closure_env_struct(empty, 3);
     let no_operands: ClosureCaptureOperand[] = [];
-    let result = emit_closure_env_alloc(layout, no_operands, 0);
+    let result = emit_closure_env_alloc(layout, no_operands, 0, false);
     assert result.lines.length == 0;
     assert result.env_raw_var == "";
     assert result.env_typed_var == "";
@@ -221,7 +221,7 @@ test "closure_env: single-capture alloc emits size-via-GEP-null + alloc + popula
     let operands: ClosureCaptureOperand[] = [ClosureCaptureOperand {
         name: "x", llvm_value: "%x_local", llvm_type: ""
     }];
-    let result = emit_closure_env_alloc(layout, operands, 0);
+    let result = emit_closure_env_alloc(layout, operands, 0, false);
     assert result.lines.length == 6;
     assert result.lines[0] == "  %t0 = getelementptr %sfn_closure_env_0, %sfn_closure_env_0* null, i32 1";
     assert result.lines[1] == "  %t1 = ptrtoint %sfn_closure_env_0* %t0 to i64";
@@ -242,7 +242,7 @@ test "closure_env: multi-capture alloc populates each field in capture-set order
     }, ClosureCaptureOperand {
         name: "flag", llvm_value: "%flag", llvm_type: ""
     }];
-    let result = emit_closure_env_alloc(layout, operands, 10);
+    let result = emit_closure_env_alloc(layout, operands, 10, false);
     // Walk produces: size_ptr, size_i64, env_raw, env_typed, then
     // (gep, store) per field. With two fields that is 4 + 2 * 2 = 8
     // lines and the temp index advances by 4 + 2 (only the GEP per
@@ -260,7 +260,7 @@ test "closure_env: missing operand falls back to deterministic zero-init store" 
     let captures: NativeLambdaCapture[] = [_capture_int("count"), _capture_user_pointer("acc", "Buffer")];
     let layout = synthesize_closure_env_struct(captures, 6);
     let operands: ClosureCaptureOperand[] = [];
-    let result = emit_closure_env_alloc(layout, operands, 0);
+    let result = emit_closure_env_alloc(layout, operands, 0, false);
     // count -> i64 zero, acc -> %Buffer* null
     assert result.lines[5] == "  store i64 0, i64* %t4";
     assert result.lines[7] == "  store %Buffer* null, %Buffer** %t5";

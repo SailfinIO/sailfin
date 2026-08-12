@@ -171,12 +171,64 @@ fn _function_parameter_primitive(entry: SymbolEntry, index: int) -> string {
     return _primitive_kind_from_code(marker[offset]);
 }
 
+// Uppercase codes mark a parameter that declares a default value (SFN-812).
+// They map to the same primitive kind so a defaulted parameter keeps its
+// argument-type checking; only the arity readers below care about the case.
 fn _primitive_kind_from_code(code: string) -> string {
     if strings_equal(code, "i") { return "int"; }
+    if strings_equal(code, "I") { return "int"; }
     if strings_equal(code, "f") { return "float"; }
+    if strings_equal(code, "F") { return "float"; }
     if strings_equal(code, "s") { return "string"; }
+    if strings_equal(code, "S") { return "string"; }
     if strings_equal(code, "b") { return "boolean"; }
+    if strings_equal(code, "B") { return "boolean"; }
     return "";
+}
+
+fn _code_is_defaulted(code: string) -> boolean {
+    if strings_equal(code, "I") { return true; }
+    if strings_equal(code, "F") { return true; }
+    if strings_equal(code, "S") { return true; }
+    if strings_equal(code, "B") { return true; }
+    if strings_equal(code, "U") { return true; }
+    return false;
+}
+
+// Total declared parameter count, or -1 when `entry` carries no marker.
+// The marker is `fnprim:` (7) + one return code (1) + one code per
+// parameter, so the parameter codes start at offset 8.
+fn _function_marker_arity(entry: SymbolEntry) -> int {
+    let marker = entry.element_kind;
+    if marker.length < 8 { return -1; }
+    if substring(marker, 0, 7) != "fnprim:" { return -1; }
+    return marker.length - 8;
+}
+
+// Smallest accepted argument count: the index of the first parameter that
+// declares a default. Defaults are trailing in every signature the parser
+// accepts, so the first defaulted position is also the required count.
+fn _function_marker_required_arity(entry: SymbolEntry) -> int {
+    let total = _function_marker_arity(entry);
+    if total < 0 { return -1; }
+    let marker = entry.element_kind;
+    let mut index: int = 0;
+    loop {
+        if index >= total { break; }
+        if _code_is_defaulted(marker[8 + index]) { return index; }
+        index += 1;
+    }
+    return total;
+}
+
+// `v` is the void return code. It is distinct from `u` (unknown/compound)
+// so a value-position check can tell "returns nothing" from "returns
+// something this classifier cannot name" (SFN-812).
+fn _function_marker_returns_void(entry: SymbolEntry) -> boolean {
+    let marker = entry.element_kind;
+    if marker.length < 8 { return false; }
+    if substring(marker, 0, 7) != "fnprim:" { return false; }
+    return strings_equal(marker[7], "v");
 }
 
 fn _primitive_types_compatible(expected: string, actual: string) -> boolean {

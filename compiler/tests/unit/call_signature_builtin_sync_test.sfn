@@ -1,0 +1,127 @@
+// Cross-checks the typecheck-side builtin signature table (SFN-812)
+// against the lowering-side universes it mirrors.
+//
+// SFN-812 had to reconcile parallel name universes that no test related:
+//
+//   1. `extern_abi.sfn`'s typecheck allowlist — membership only, no arity
+//      and no return type;
+//   2. the lowering pre-dispatch recognizers — `is_atomic_builtin`,
+//      `is_byte_load_builtin`, `is_secure_zero_builtin`, `is_syscall_builtin`;
+//   3. the `RuntimeHelperDescriptor` rows under `llvm/runtime_helpers/`.
+//
+// `call_signature.sfn` cannot import universe 2 or 3: they live in
+// `compiler/src/llvm/`, inside the `sailfin` capsule, which already depends
+// on `sfn/analyzer`, so importing them would close a capsule cycle. The
+// table is therefore a deliberate mirror, and this test is what keeps it
+// honest — a test can import both sides because it sits in the `sailfin`
+// capsule itself.
+//
+// Coverage limit, deliberate: this file pins universes 1 and 3 only.
+// Importing the universe-2 recognizers (`llvm/atomics`, `llvm/byte_load`,
+// `llvm/secure_zero`) pulls their whole lowering dependency graph into a
+// unit test and the compile does not complete — `atomics.sfn` alone reaches
+// the expression lowerer. Universe 2 is instead pinned indirectly: every
+// name below is in the typecheck allowlist, and the atomic surface is the
+// fixed LLVM atomic op set, so a name added on the lowering side without a
+// matching allowlist entry already fails `typecheck_builtin_allowlist_test`.
+//
+// A failure here means a builtin's contract moved on one side only. Fix the
+// table, do not relax the test: the whole point of the void classification
+// is that `s.a = print("x")` must not compile.
+import { builtin_arity, builtin_returns_void } from "sfn/analyzer/typecheck/call_signature";
+import { is_builtin_call_name } from "sfn/analyzer/typecheck_types/extern_abi";
+
+import { find_runtime_helper } from "../../src/llvm/runtime_helpers/mod";
+
+// Every name the table pins an arity for.
+fn _pinned_arity() -> string[] {
+    return ["atomic_load", "atomic_store", "atomic_add", "atomic_sub", "atomic_cas", "atomic_fence", "load_byte", "secure_zero"];
+}
+
+// Every name the table classifies as void.
+fn _pinned_void() -> string[] {
+    return ["print", "sleep", "atomic_store", "atomic_fence", "secure_zero"];
+}
+
+// A pinned name outside the allowlist would be rejected as an undefined
+// callee (E0420) before the arity check ever ran.
+test "call signature: every pinned builtin is in the typecheck allowlist" {
+    let pinned_arity = _pinned_arity();
+    let mut i: int = 0;
+    loop {
+        if i >= pinned_arity.length { break; }
+        assert is_builtin_call_name(pinned_arity[i]);
+        assert builtin_arity(pinned_arity[i]) >= 0;
+        i += 1;
+    }
+    let pinned_void = _pinned_void();
+    let mut j: int = 0;
+    loop {
+        if j >= pinned_void.length { break; }
+        assert is_builtin_call_name(pinned_void[j]);
+        assert builtin_returns_void(pinned_void[j]);
+        j += 1;
+    }
+}
+
+// The atomic surface is the fixed LLVM atomic op set. These counts are the
+// arities `llvm/atomics.sfn` emits for each op.
+test "call signature: the atomic arities match the lowering contract" {
+    assert builtin_arity("atomic_load") == 1;
+    assert builtin_arity("atomic_store") == 2;
+    assert builtin_arity("atomic_add") == 2;
+    assert builtin_arity("atomic_sub") == 2;
+    assert builtin_arity("atomic_cas") == 3;
+    assert builtin_arity("atomic_fence") == 0;
+}
+
+test "call signature: byte-load and secure-zero arities match" {
+    assert builtin_arity("load_byte") == 1;
+    assert builtin_arity("secure_zero") == 2;
+    // SFEP-0069 §3.6 specifies `secure_zero` as void. This assertion is the
+    // reason SFN-812 exists: `x.wipe = secure_zero(p, n)` must not compile.
+    assert builtin_returns_void("secure_zero");
+}
+
+// The registry is the third universe. For the void builtins that have a
+// registry row, the row's `return_type` must agree with the table.
+test "call signature: registry rows agree on void returns" {
+    let print_helper = find_runtime_helper("print");
+    assert print_helper != null;
+    assert strings_equal(print_helper.return_type, "void");
+    assert builtin_returns_void("print");
+
+    let sleep_helper = find_runtime_helper("sleep");
+    assert sleep_helper != null;
+    assert strings_equal(sleep_helper.return_type, "void");
+    assert builtin_returns_void("sleep");
+}
+
+// Value-returning builtins must stay out of the void set, or every correct
+// use of them in value position would be rejected.
+test "call signature: value-returning builtins are not classified void" {
+    assert ! builtin_returns_void("atomic_load");
+    assert ! builtin_returns_void("atomic_add");
+    assert ! builtin_returns_void("atomic_sub");
+    assert ! builtin_returns_void("atomic_cas");
+    assert ! builtin_returns_void("load_byte");
+    assert ! builtin_returns_void("join_all");
+    assert ! builtin_returns_void("channel");
+}
+
+// Names deliberately left unpinned return -1 so the arity check stays
+// fail-open on them. Pinning one of these needs a settled call-form
+// contract first — see the rationale on `builtin_arity`.
+test "call signature: unsettled builtins carry no pinned arity" {
+    assert builtin_arity("spawn") == -1;
+    assert builtin_arity("send") == -1;
+    assert builtin_arity("receive") == -1;
+    assert builtin_arity("channel") == -1;
+    assert builtin_arity("serve") == -1;
+    assert builtin_arity("console") == -1;
+    assert builtin_arity("assert") == -1;
+    assert builtin_arity("print") == -1;
+    // `syscall1`..`syscall6` keep their dedicated check in `syscalls.sfn`.
+    assert builtin_arity("syscall1") == -1;
+    assert builtin_arity("syscall6") == -1;
+}
