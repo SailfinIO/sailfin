@@ -425,8 +425,8 @@ fn sailfin_runtime_panic_emit(msg: *u8) -> void ![io] {
 
 // `_sfn_shell_empty()` — a fresh 1-byte NUL-terminated buffer, the empty
 // string the C `sailfin_runtime_shell_capture` returned on any failure
-// path (its callers — `_shell_read_cmd` / `_cr_shell_read` — treat the
-// result as a `string` and immediately iterate, so a null would crash).
+// path (its caller — `_shell_read_cmd` — treats the result as a `string`
+// and immediately iterates, so a null would crash).
 fn _sfn_shell_empty() -> *u8 {
     let p: *u8 = malloc(1 as usize);
     if p as i64 == 0 { return p; }

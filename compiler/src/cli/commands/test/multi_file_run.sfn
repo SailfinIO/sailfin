@@ -57,8 +57,8 @@ fn _run_multi_file(test_files: string[], file_suite_index: int[], suites_in: Tes
     // child. Both the pool and the serial multi-file path now spawn
     // via `spawn_with_env` (the child routes its summary to its own
     // captured stderr, so it must be reaped, not inherited). Each
-    // `_get_env_cmd` read shells out via popen, so resolving it per
-    // spawn would add dozens of subprocesses per test file.
+    // `_get_env_cmd` read is a native `env.get` call, but resolving it
+    // per spawn would still add dozens of redundant lookups per test file.
     let pool_base_env = _pool_env_snapshot();
     // Same signal-kill retry gate the in-process path uses: a
     // child killed by SIGKILL/SIGSEGV (137/139) under transient

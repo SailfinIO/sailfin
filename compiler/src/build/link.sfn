@@ -123,10 +123,16 @@ fn _resolve_linker() -> string ![io] {
 // so importing one symbol from a multi-function capsule no longer drags
 // the whole `src/` closure into the binary. The GC flag is platform-
 // specific: GNU ld / lld use `--gc-sections`, the Darwin linker uses
-// `-dead_strip`. Detected via the same `uname -s` probe the driver
-// already uses (`_package_detect_target`, the errno/exe-path locators).
+// `-dead_strip`. Derived from the **target** OS via `build_target_os()`
+// (SFN-52), not a host probe — a Linux host cross-linking a Darwin
+// target must still emit `-dead_strip`.
+//
+// The msvc ABI never reaches here: the sole call site is gated on
+// `target_uses_gnu_link_gc(build_target_triple())` (`:332`), which is false
+// for msvc. windows-gnu/mingw does reach here and correctly takes the GNU
+// branch, since its mingw linker accepts `--gc-sections`.
 fn _dead_strip_link_flag() -> string ![io] {
-    let os = _shell_read_cmd("uname -s");
+    let os = build_target_os();
     if strings_equal(os, "Darwin") { return "-Wl,-dead_strip"; }
     return "-Wl,--gc-sections";
 }

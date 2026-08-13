@@ -1,4 +1,4 @@
-import { _ends_with_cmd, _shell_read_cmd, _strip_trailing_slashes_cmd } from "../../../build/fs";
+import { _ends_with_cmd, _strip_trailing_slashes_cmd } from "../../../build/fs";
 import { runtime_stamp_identity } from "../../../build/runtime_objs";
 import { runtime_link_inputs_identity } from "../../../build_cache";
 import { _get_env_cmd } from "../../../build_flags";
@@ -13,7 +13,7 @@ import { _has_prefix_cmd } from "../../../string_cmd_utils";
 // that callers wanting per-invocation isolation can keep concurrent
 // `sfn test` runs from racing on the same `test.ll` /
 // `capsules/<slug>.ll` paths. The multi-file runner path mints such
-// a root itself via `mktemp -d` (issue #850, replacing the retired
+// a root itself via `fs.mkdtemp` (issue #850, replacing the retired
 // `scripts/run_native_test.sh`); seedcheck/stage3 pin it explicitly
 // from the Makefile. The capsule
 // resolver reads the same env var (`_cr_scratch_root`), so both
@@ -52,7 +52,7 @@ fn _resolve_test_scratch_root(scratch_env: string) -> TestScratchRoot ![io] {
     let mut tmp_base = _get_env_cmd("TMPDIR");
     if tmp_base.length == 0 { tmp_base = "/tmp"; }
     tmp_base = _strip_trailing_slashes_cmd(tmp_base);
-    let tmp = _shell_read_cmd("mktemp -d \"" + tmp_base + "/sfn-test-XXXXXX\"");
+    let tmp = fs.mkdtemp(tmp_base + "/sfn-test-");
     if tmp.length > 0 {
         return TestScratchRoot { root: tmp, owned: true };
     }

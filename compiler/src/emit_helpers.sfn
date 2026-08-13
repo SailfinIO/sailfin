@@ -39,7 +39,6 @@ import { int_to_string } from "sfn/strings";
 // explicit parameter (`emit_llvm_with_retry_injected`) for unit tests
 // that can't mutate their own environment.
 import { _atomic_rename_into_place, _mktemp_sibling_cmd } from "./build/fs";
-import { host_is_windows } from "./build/target";
 import { validate_llvm_ir } from "./llvm_validation";
 import {
     compile_to_llvm_file_with_module,
@@ -47,22 +46,6 @@ import {
     compile_to_llvm_file_with_module_imports
 } from "./main";
 import { substring } from "./string_utils";
-
-// Same extern the resolver and `build/fs.sfn` declare; repeating
-// it here keeps this module a leaf (no new cross-module import just to
-// read one env var).
-extern fn sailfin_runtime_shell_capture(cmd: *u8) -> *u8;
-
-fn _eh_shell_read(cmd: string) -> string ![io] {
-    // No POSIX shell on a Windows host — see the rationale on
-    // `build/fs.sfn::_shell_read_cmd`. This one runs once per module
-    // emit, so leaving it unguarded floods a native Windows build with
-    // one `cmd.exe` parse failure per module.
-    if host_is_windows() { return ""; }
-    let captured = sailfin_runtime_shell_capture(cmd);
-    if captured.length == 0 { return ""; }
-    return captured;
-}
 
 // Parse a leading non-negative integer; non-digit input (incl. an
 // empty env var) yields 0. Whitespace is skipped so a `printf '%s'`
@@ -124,8 +107,11 @@ fn emit_parse_nonneg_int(value: string) -> int {
 
 // Resolve `SAILFIN_INJECT_FAULT` once. Unset / non-numeric → 0 (no
 // injection), so production builds are byte-for-byte unaffected.
+// `env.get` returns "" for both unset and empty-set (`build_flags.sfn`),
+// matching the prior `printf '%s'` capture's behavior on all three cases
+// — and unlike the shelled read, it works on a native Windows host too.
 fn _eh_resolve_inject() -> int ![io] {
-    return emit_parse_nonneg_int(_eh_shell_read("printf '%s' \"$SAILFIN_INJECT_FAULT\""));
+    return emit_parse_nonneg_int(env.get("SAILFIN_INJECT_FAULT"));
 }
 
 fn _eh_trace(trace: boolean, module_name: string, attempt: int, max_attempts: int, reason: string) -> void ![io] {
