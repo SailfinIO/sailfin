@@ -5,10 +5,14 @@
 // e2e-a/b/c/d) and its coverage lint natively, retiring
 // scripts/test_shards.sh so `sfn` — not a bash script — is the single
 // source of truth for how `make test`'s surface is partitioned across the
-// parallel CI legs. Each named shard is a set of test roots plus a
-// file-count-balanced stride (`I/N`); running one is `sfn test <roots>
-// --shard I/N`, whose stride (`_shard_keeps_index`, #1237) matches the
-// legacy awk stride byte-for-byte.
+// parallel CI legs. Each named shard is a set of test roots plus an `I/N`
+// partition: when `compiler/tests/shard_weights.tsv` loads, that partition
+// is the time-weighted LPT assignment (`_shard_lpt_keeps`, SFN-863);
+// otherwise it fails open to the legacy file-count stride
+// (`_shard_keeps_index`, #1237), which still matches the retired awk stride
+// byte-for-byte. `run` selects its files by re-running `sfn test <roots>
+// --shard I/N --shard-weights <table>`, which applies the identical LPT
+// assignment inside the runner so `list`/`cover`/`run` never disagree.
 //
 //   sfn dev shard names           list the shard names, one per line
 //   sfn dev shard list <name>     print a shard's test files, one per line
@@ -38,7 +42,16 @@ import { int_to_string } from "sfn/strings";
 import { _sort_strings_cmd } from "../../string_cmd_utils";
 import { strings_equal } from "../../string_utils";
 import { CliContext } from "../context";
-import { _resolve_test_jobs, _shard_keeps_index } from "./test/arg_and_jobs";
+import {
+    _resolve_test_jobs,
+    _shard_default_weight,
+    _shard_keeps_index,
+    _shard_lpt_keeps,
+    _shard_weight_for_path,
+    _shard_weight_table_path,
+    _shard_weight_table_row_count,
+    _shard_weight_table_text
+} from "./test/arg_and_jobs";
 import { _collect_test_files_cmd } from "./test/discovery";
 import { command_def as test_command_def, run as test_run } from "./test/mod";
 
@@ -115,19 +128,39 @@ fn _discover(roots: string[]) -> string[] ![io] {
     return files;
 }
 
-// A shard's file set: its roots' discovery, then the `I/N` stride
-// (`_shard_keeps_index`, mirroring the runner's `--shard`). A zero total runs
-// the whole discovery unpartitioned.
+// A shard's file set: its roots' discovery, then the `I/N` partition. Prefers
+// the time-weighted LPT assignment (`_shard_lpt_keeps`, SFN-863) when
+// `compiler/tests/shard_weights.tsv` loads with at least one usable row;
+// fails open to the alphabetical stride (`_shard_keeps_index`, mirroring the
+// runner's plain `--shard`) otherwise, so a missing/corrupt table never
+// breaks `sfn dev shard list/run/cover`. A zero total runs the whole
+// discovery unpartitioned.
 fn _shard_files(def: ShardDef) -> string[] ![io] {
     let all = _discover(def.roots);
     if def.total <= 0 { return all; }
+    let table_text = _shard_weight_table_text();
+    let use_lpt = _shard_weight_table_row_count(table_text) > 0;
+    let mut weights: int[] = [];
+    if use_lpt {
+        let mut wi: int = 0;
+        loop {
+            if wi >= all.length { break; }
+            let w = _shard_weight_for_path(table_text, all[wi]);
+            if w < 0 { weights.push(_shard_default_weight()); } else {
+                weights.push(w);
+            }
+            wi += 1;
+        }
+    }
     let mut kept: string[] = [];
     let mut i: int = 0;
     loop {
         if i >= all.length { break; }
-        if _shard_keeps_index(i, def.index, def.total) {
-            kept.push(all[i]);
-        }
+        let mut keep: boolean = false;
+        if use_lpt {
+            keep = _shard_lpt_keeps(i, def.index, def.total, weights);
+        } else { keep = _shard_keeps_index(i, def.index, def.total); }
+        if keep { kept.push(all[i]); }
         i += 1;
     }
     return kept;
@@ -223,11 +256,14 @@ fn _resolve_jobs(matches: Matches) -> int ![io] {
 
 // `sfn dev shard run <name>` — run the shard's tests. Faithful to
 // scripts/test_shards.sh's `exec "$native" test <files>`: re-run the shard's
-// roots through the same `sfn test` pipeline in process with the
-// file-count-balanced `--shard I/N` stride, so the toolchain gate, per-test
-// cache, and JSONL reporting behave identically to a direct `sfn test`.
-// Building the argv and re-parsing (rather than synthesizing a Matches) keeps
-// the test command's own flag contract the single source of truth.
+// roots through the same `sfn test` pipeline in process with the `I/N`
+// partition, so the toolchain gate, per-test cache, and JSONL reporting
+// behave identically to a direct `sfn test`. Building the argv and
+// re-parsing (rather than synthesizing a Matches) keeps the test command's
+// own flag contract the single source of truth. Passing `--shard-weights`
+// (rather than resolving files here and passing explicit paths) keeps `sfn
+// test`'s suite-summary output shape intact (SFN-863) — explicit file paths
+// would switch it to per-file summaries.
 fn _shard_run_one(name: string, json: boolean, jobs: int, ctx: CliContext) -> int ![clock, io, net] {
     let def = _find_shard(name);
     if def.name.length == 0 {
@@ -245,6 +281,8 @@ fn _shard_run_one(name: string, json: boolean, jobs: int, ctx: CliContext) -> in
     if def.total > 0 {
         argv.push("--shard");
         argv.push(int_to_string(def.index) + "/" + int_to_string(def.total));
+        argv.push("--shard-weights");
+        argv.push(_shard_weight_table_path());
     }
     if jobs >= 1 {
         argv.push("--jobs");

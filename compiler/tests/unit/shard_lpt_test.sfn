@@ -1,0 +1,148 @@
+// SFN-863: unit coverage for the time-weighted LPT (longest processing
+// time) shard assignment that replaces the file-count stride's name-prefix
+// skew for the named CI shards (`sfn dev shard run/cover` and
+// `sfn test --shard-weights`). Pins:
+//   * `_shard_lpt_owner` / `_shard_lpt_keeps` are deterministic: the same
+//     `(item_index, weights, shard_total)` always returns the same shard.
+//   * every index in `0..weights.length` is owned by exactly one shard in
+//     `1..shard_total`.
+//   * on a small hand-built skewed weight set, LPT balances shard load
+//     strictly better than the plain file-count stride (`_shard_keeps_index`)
+//     — the headline motivation for SFN-863.
+//   * `shard_total <= 0` is handled (no owner, no crash).
+// `_shard_keeps_index` and the generic `--shard I/N` stay untouched; this
+// file exercises only the new LPT surface.
+import { _shard_keeps_index, _shard_lpt_keeps, _shard_lpt_owner } from "../../src/cli/commands/test/arg_and_jobs";
+
+// --- Determinism ---
+test "shard-lpt: owner is deterministic across repeated calls" ![pure] {
+    let weights: int[] = [10, 40, 5, 25, 60, 15, 8, 30];
+    let mut i: int = 0;
+    loop {
+        if i >= weights.length { break; }
+        let first = _shard_lpt_owner(i, weights, 3);
+        let second = _shard_lpt_owner(i, weights, 3);
+        assert first == second;
+        i += 1;
+    }
+}
+
+test "shard-lpt: keeps predicate agrees with owner across repeated calls" ![pure] {
+    let weights: int[] = [10, 40, 5, 25, 60, 15, 8, 30];
+    let mut i: int = 0;
+    loop {
+        if i >= weights.length { break; }
+        let owner = _shard_lpt_owner(i, weights, 3);
+        assert _shard_lpt_keeps(i, owner, 3, weights);
+        i += 1;
+    }
+}
+
+// --- Disjoint + exhaustive partition ---
+test "shard-lpt: every index is owned by exactly one shard in 1..total" ![pure] {
+    let weights: int[] = [473, 7825, 788, 721, 2136, 2136, 9000, 12, 3300, 640];
+    let shard_total = 4;
+    let mut i: int = 0;
+    loop {
+        if i >= weights.length { break; }
+        let owner = _shard_lpt_owner(i, weights, shard_total);
+        assert owner >= 1;
+        assert owner <= shard_total;
+        // Exactly one shard keeps this index.
+        let mut keepers: int = 0;
+        let mut s: int = 1;
+        loop {
+            if s > shard_total { break; }
+            if _shard_lpt_keeps(i, s, shard_total, weights) { keepers += 1; }
+            s += 1;
+        }
+        assert keepers == 1;
+        i += 1;
+    }
+}
+
+// --- Balance beats the stride on a skewed set ---
+// Sum the weights of the items a given `[index, total]` shard keeps under a
+// predicate that both partitions share the same shape for
+// (`_shard_lpt_keeps` / `_shard_keeps_index`).
+fn _lpt_shard_load(weights: int[], shard_index: int, shard_total: int) -> int {
+    let mut total: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= weights.length { break; }
+        if _shard_lpt_keeps(i, shard_index, shard_total, weights) {
+            total += weights[i];
+        }
+        i += 1;
+    }
+    return total;
+}
+
+fn _stride_shard_load(weights: int[], shard_index: int, shard_total: int) -> int {
+    let mut total: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= weights.length { break; }
+        if _shard_keeps_index(i, shard_index, shard_total) {
+            total += weights[i];
+        }
+        i += 1;
+    }
+    return total;
+}
+
+// The max shard load minus the min shard load — a spread measure. Smaller
+// is more balanced.
+fn _lpt_spread(weights: int[], shard_total: int) -> int {
+    let mut max_load: int = -1;
+    let mut min_load: int = -1;
+    let mut s: int = 1;
+    loop {
+        if s > shard_total { break; }
+        let load = _lpt_shard_load(weights, s, shard_total);
+        if max_load < 0 || load > max_load { max_load = load; }
+        if min_load < 0 || load < min_load { min_load = load; }
+        s += 1;
+    }
+    return max_load - min_load;
+}
+
+fn _stride_spread(weights: int[], shard_total: int) -> int {
+    let mut max_load: int = -1;
+    let mut min_load: int = -1;
+    let mut s: int = 1;
+    loop {
+        if s > shard_total { break; }
+        let load = _stride_shard_load(weights, s, shard_total);
+        if max_load < 0 || load > max_load { max_load = load; }
+        if min_load < 0 || load < min_load { min_load = load; }
+        s += 1;
+    }
+    return max_load - min_load;
+}
+
+test "shard-lpt: LPT balances a skewed weight set strictly better than the stride" ![pure] {
+    // Heavy items clustered at the front, as a "slow tests share an
+    // alphabetical prefix" set would look under the stride's residue-class
+    // partition — the exact skew SFN-863 targets.
+    let weights: int[] = [9000, 8800, 8600, 100, 90, 80, 70, 60, 50, 40, 30, 20];
+    let shard_total = 3;
+    let lpt_spread = _lpt_spread(weights, shard_total);
+    let stride_spread = _stride_spread(weights, shard_total);
+    assert lpt_spread < stride_spread;
+}
+
+// --- shard_total <= 0 handled ---
+test "shard-lpt: non-positive shard_total returns no owner and keeps nothing" ![pure] {
+    let weights: int[] = [10, 20, 30];
+    assert _shard_lpt_owner(0, weights, 0) == 0;
+    assert _shard_lpt_owner(0, weights, -1) == 0;
+    assert ! _shard_lpt_keeps(0, 1, 0, weights);
+    assert ! _shard_lpt_keeps(0, 1, -1, weights);
+}
+
+test "shard-lpt: out-of-range item_index returns no owner" ![pure] {
+    let weights: int[] = [10, 20, 30];
+    assert _shard_lpt_owner(-1, weights, 2) == 0;
+    assert _shard_lpt_owner(3, weights, 2) == 0;
+}

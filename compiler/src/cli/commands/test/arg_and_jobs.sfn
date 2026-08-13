@@ -3,7 +3,12 @@ import { Matches, get_int, has } from "sfn/cli";
 import { _shell_read_cmd } from "../../../build/fs";
 import { _get_env_cmd } from "../../../build_flags";
 import { _has_prefix_cmd } from "../../../string_cmd_utils";
-import { char_code_at_text, find_char_local, substring } from "../../../string_utils";
+import {
+    char_code_at_text,
+    find_char_local,
+    strings_equal,
+    substring
+} from "../../../string_utils";
 
 // #1236: parse the `--jobs N` value for `sfn test`. Returns the
 // parsed worker count, or `-1` for anything that is not a plain
@@ -257,6 +262,189 @@ fn _shard_keeps_index(item_index: int, shard_index: int, shard_total: int) -> bo
     return (item_index % shard_total) == (shard_index - 1);
 }
 
+// SFN-863: time-weighted LPT (longest processing time) partitioning for the
+// named CI shards (`sfn dev shard run/cover` and `sfn test --shard-weights`),
+// replacing the file-count stride's name-prefix skew (measured 2.13x on the
+// macOS e2e legs). `_shard_keeps_index` above and the generic `--shard I/N`
+// stay untouched — this is a deliberately separate, opt-in partition.
+//
+// Same API-shape constraint as the `--shard` helpers above: every exported
+// function here returns `int`/`boolean`/`string` only, never an array or a
+// struct, because a cross-module call to one that does cannot resolve its
+// return type in the pinned seed. Building a weights `int[]` therefore has
+// to happen locally in each caller's own module (`dev_shard.sfn`,
+// `test/mod.sfn`) via the per-path lookup below; only the algorithm and the
+// table parsing are shared.
+// The generated per-file weight table's default location, used by the named
+// CI shards. `sfn test --shard-weights <path>` can point at any path (e.g.
+// for tests); this constant is the one `sfn dev shard` uses.
+fn _shard_weight_table_path() -> string {
+    return "compiler/tests/shard_weights.tsv";
+}
+
+// Median weight of the generated table (SFN-863 refresh) — the default for a
+// discovered file with no table row, so a newly added test still lands in a
+// plausible LPT slot instead of defaulting to 0, which would always sort
+// last and never balance anything.
+fn _shard_default_weight() -> int { return 2136; }
+
+// Load the raw weight table text at an arbitrary path, or "" if it is
+// missing or unreadable. Fail-open (mirrors SFEP-0070's filter): callers
+// treat "" — and a text with zero parseable rows, see
+// `_shard_weight_table_row_count` — as "no table available" and fall back to
+// the alphabetical stride rather than failing the run.
+fn _shard_weight_table_text_at(path: string) -> string ![io] {
+    if path.length == 0 { return ""; }
+    if !fs.exists(path) { return ""; }
+    return fs.readFile(path);
+}
+
+// Load the raw weight table text from the default `_shard_weight_table_path`
+// location.
+fn _shard_weight_table_text() -> string ![io] {
+    return _shard_weight_table_text_at(_shard_weight_table_path());
+}
+
+// Parse one `path\tweight` row's weight field, given the row's `[line_start,
+// line_end)` span in `table_text`. Returns -1 for a comment line (`#`), the
+// `path\tweight` header (its weight field is not a decimal), a blank line,
+// or any other malformed row.
+fn _shard_weight_row_weight(table_text: string, line_start: int, line_end: int) -> int {
+    if line_end <= line_start { return -1; }
+    if table_text[line_start] == "#" { return -1; }
+    let tab = find_char_local(table_text, "\t", line_start);
+    if tab < 0 || tab >= line_end { return -1; }
+    let weight_text = substring(table_text, tab + 1, line_end);
+    return _parse_positive_decimal_cmd(weight_text);
+}
+
+// Number of parseable `path\tweight` data rows in `table_text`. Zero means
+// the table is present but unusable (empty, only comments/header, or
+// corrupt) — callers fold that into the same fail-open fallback as a missing
+// file.
+fn _shard_weight_table_row_count(table_text: string) -> int {
+    let len = table_text.length;
+    let mut i: int = 0;
+    let mut count: int = 0;
+    loop {
+        if i >= len { break; }
+        let mut line_end = find_char_local(table_text, "\n", i);
+        if line_end < 0 { line_end = len; }
+        if _shard_weight_row_weight(table_text, i, line_end) > 0 { count += 1; }
+        i = line_end + 1;
+    }
+    return count;
+}
+
+// The weight for `path` in `table_text`, or -1 if no row names it (an
+// unlisted file — the caller applies `_shard_default_weight` — or the table
+// itself has no usable rows).
+fn _shard_weight_for_path(table_text: string, path: string) -> int {
+    let len = table_text.length;
+    let mut i: int = 0;
+    loop {
+        if i >= len { break; }
+        let mut line_end = find_char_local(table_text, "\n", i);
+        if line_end < 0 { line_end = len; }
+        let w = _shard_weight_row_weight(table_text, i, line_end);
+        if w > 0 {
+            let tab = find_char_local(table_text, "\t", i);
+            let row_path = substring(table_text, i, tab);
+            if strings_equal(row_path, path) { return w; }
+        }
+        i = line_end + 1;
+    }
+    return -1;
+}
+
+// The 1-based shard (of `shard_total`) that owns `item_index` under greedy
+// LPT: visit indices `0..weights.length` in `(weight desc, index asc)` order
+// (the index tiebreak makes the walk deterministic regardless of sort
+// implementation) and assign each to the currently least-loaded shard,
+// breaking load ties by the lowest shard index. Recomputes the whole
+// assignment on every call — O(n^2) selection sort over the discovered test
+// surface (~325 files today) is trivial next to the compile work a shard
+// actually does, and avoids the array-return hazard a memoized table would
+// hit (see the module note above). Returns 0 for an out-of-range
+// `item_index` or a non-positive `shard_total`.
+fn _shard_lpt_owner(item_index: int, weights: int[], shard_total: int) -> int {
+    let n = weights.length;
+    if shard_total < 1 { return 0; }
+    if item_index < 0 || item_index >= n { return 0; }
+
+    // Selection sort into `order`: indices 0..n-1 by (weight desc, index
+    // asc). Scanning ascending and only replacing `best` on a strictly
+    // greater weight keeps the lowest untried index on a tie.
+    let mut used: boolean[] = [];
+    let mut ui: int = 0;
+    loop {
+        if ui >= n { break; }
+        used.push(false);
+        ui += 1;
+    }
+    let mut order: int[] = [];
+    let mut picked: int = 0;
+    loop {
+        if picked >= n { break; }
+        let mut best: int = -1;
+        let mut bi: int = 0;
+        loop {
+            if bi >= n { break; }
+            if !used[bi] {
+                if best < 0 { best = bi; } else {
+                    if weights[bi] > weights[best] { best = bi; }
+                }
+            }
+            bi += 1;
+        }
+        used[best] = true;
+        order.push(best);
+        picked += 1;
+    }
+
+    // Greedy walk: place each item (in the order above) onto the
+    // least-loaded shard, lowest index breaking ties.
+    let mut loads: int[] = [];
+    let mut li: int = 0;
+    loop {
+        if li >= shard_total { break; }
+        loads.push(0);
+        li += 1;
+    }
+    let mut owner: int[] = [];
+    let mut oi: int = 0;
+    loop {
+        if oi >= n { break; }
+        owner.push(0);
+        oi += 1;
+    }
+    let mut pi: int = 0;
+    loop {
+        if pi >= order.length { break; }
+        let idx = order[pi];
+        let mut least: int = 0;
+        let mut si: int = 1;
+        loop {
+            if si >= shard_total { break; }
+            if loads[si] < loads[least] { least = si; }
+            si += 1;
+        }
+        loads[least] = loads[least] + weights[idx];
+        owner[idx] = least + 1;
+        pi += 1;
+    }
+    return owner[item_index];
+}
+
+// Does `item_index` belong to `shard_index`/`shard_total` under the LPT
+// assignment over `weights`? Companion to `_shard_lpt_owner` so callers
+// share the "is this mine" check instead of re-deriving it from the raw
+// owner index.
+fn _shard_lpt_keeps(item_index: int, shard_index: int, shard_total: int, weights: int[]) -> boolean {
+    if shard_total < 1 { return false; }
+    return _shard_lpt_owner(item_index, weights, shard_total) == shard_index;
+}
+
 export {
     _parse_jobs_value,
     _test_jobs_budget,
@@ -267,5 +455,13 @@ export {
     _parse_shard_field_at,
     _parse_shard_index,
     _parse_shard_total,
-    _shard_keeps_index
+    _shard_keeps_index,
+    _shard_weight_table_path,
+    _shard_default_weight,
+    _shard_weight_table_text_at,
+    _shard_weight_table_text,
+    _shard_weight_table_row_count,
+    _shard_weight_for_path,
+    _shard_lpt_owner,
+    _shard_lpt_keeps
 };
