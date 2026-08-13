@@ -475,7 +475,20 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          paths=(build/bin/sfn build/compiler/import-context)
+          # SFN-875: write the source fingerprint with the binary we just
+          # built. `rebuild-impl` snapshots it with the *previous* binary
+          # (Makefile:881-891), so a cold build — which every CI build job
+          # is — produces no `.pending` and `dev bootstrap install` has
+          # nothing to rename into place. Without this the shard legs get a
+          # compiler but no fingerprint, `compile-impl`'s
+          # `[ -n "$stored_fingerprint" ]` guard (Makefile:632) fails, and
+          # the first nested `make compile` in a leg falls through to a full
+          # `make rebuild` — measured at 190s against 0.32s for the no-op.
+          # Sound because the shard checks out the same commit this job
+          # built from, so a matching digest is a true statement about the
+          # binary; a genuine divergence still differs and still rebuilds.
+          build/bin/sfn dev bootstrap fingerprint > build/.compiler-source-fingerprint
+          paths=(build/bin/sfn build/compiler/import-context build/.compiler-source-fingerprint)
           if [ -f build/native/.build-stamp ]; then
             paths+=(build/native/.build-stamp)
           fi
@@ -581,7 +594,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          paths=(build/bin/sfn build/compiler/import-context)
+          # SFN-875: see the linux twin above for why the fingerprint is
+          # written here rather than by `rebuild-impl`.
+          build/bin/sfn dev bootstrap fingerprint > build/.compiler-source-fingerprint
+          paths=(build/bin/sfn build/compiler/import-context build/.compiler-source-fingerprint)
           if [ -f build/native/.build-stamp ]; then
             paths+=(build/native/.build-stamp)
           fi
@@ -1142,20 +1158,16 @@ jobs:
           set -euo pipefail
           tar -xzf "build-tree-linux-x86_64.tar.gz"
           rm -f "build-tree-linux-x86_64.tar.gz"
-          # mtime fix (the real cause of the macOS e2e "exit 134"
-          # misattributed to #892): the artifact binary was built from
-          # THIS commit's sources, but tar transport leaves it older than
-          # the freshly-checked-out sources. A nested `make compile` (run
-          # by make_result_contract_test / make_report_contract_test) then
-          # sees the binary as stale -> triggers `make rebuild` -> and,
-          # since build/toolchains/seed is not bundled, fetches the seed over the
-          # network (unauthenticated, no GITHUB_TOKEN in the test child
-          # env) and fails -> status != "pass" -> the test aborts (134).
-          # The binary IS up-to-date for this commit, so mark it current
-          # and `make compile` becomes the intended no-op.
-          touch build/bin/sfn
-          [ -f build/native/.build-stamp ] && touch build/native/.build-stamp || true
-          ls -lh build/bin/sfn
+          # SFN-875: the `touch build/bin/sfn` that used to sit here was
+          # inert. It described an mtime staleness gate, but SFN-564
+          # replaced that with a CONTENT gate keyed on
+          # `build/.compiler-source-fingerprint` (Makefile:624-634), which
+          # no mtime can satisfy. The nested `make compile` it was meant to
+          # make free (make_result_contract_test / make_report_contract_test)
+          # was rebuilding the whole compiler anyway. The fingerprint is now
+          # bundled by the build job, which fixes it for real; the touch is
+          # removed rather than left as reassuring dead weight.
+          ls -lh build/bin/sfn build/.compiler-source-fingerprint
 
       # Per-shard test-binary cache restore (#2008, SFEP-0044). The
       # build-tree artifact deliberately excludes build/cache/test-bin;
@@ -1599,20 +1611,10 @@ jobs:
           set -euo pipefail
           tar -xzf "build-tree-macos-arm64.tar.gz"
           rm -f "build-tree-macos-arm64.tar.gz"
-          # mtime fix (the real cause of the macOS e2e "exit 134"
-          # misattributed to #892): the artifact binary was built from
-          # THIS commit's sources, but tar transport leaves it older than
-          # the freshly-checked-out sources. A nested `make compile` (run
-          # by make_result_contract_test / make_report_contract_test) then
-          # sees the binary as stale -> triggers `make rebuild` -> and,
-          # since build/toolchains/seed is not bundled, fetches the seed over the
-          # network (unauthenticated, no GITHUB_TOKEN in the test child
-          # env) and fails -> status != "pass" -> the test aborts (134).
-          # The binary IS up-to-date for this commit, so mark it current
-          # and `make compile` becomes the intended no-op.
-          touch build/bin/sfn
-          [ -f build/native/.build-stamp ] && touch build/native/.build-stamp || true
-          ls -lh build/bin/sfn
+          # SFN-875: see the linux twin above — the former `touch` here was
+          # inert against the content-based fingerprint gate, and the
+          # bundled fingerprint replaces it.
+          ls -lh build/bin/sfn build/.compiler-source-fingerprint
 
       # Per-shard test-binary cache restore (#2008, SFEP-0044) — same
       # contract as the Linux leg: prefix-restore from the latest prior
