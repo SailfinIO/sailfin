@@ -3,9 +3,9 @@
 // Regression for SFN-478 (SFEP-0021 §4.2(C), M7): the build/emit/cache
 // leaf helpers must not shell out to POSIX `sh`/`cmd.exe` on a Windows
 // host — every such call floods `The system cannot find the path
-// specified.` and aborts `sfn build -p compiler`. Each helper is guarded
-// on `host_is_windows()` (a HOST concern, not the artifact target) and
-// degrades to a correct no-subprocess result.
+// specified.` and aborts `sfn build -p compiler`. Shell-dependent helpers
+// are guarded on `host_is_windows()` (a HOST concern, not the artifact
+// target); the file hasher is now native and remains fully functional.
 //
 // There is no runtime `setenv`, so a `.sfn` process cannot flip
 // `SAILFIN_HOST_OS` for an in-process call mid-test. The seam is exercised
@@ -18,7 +18,7 @@
 // the plain suite run takes the POSIX branch and asserts the guards fall
 // through to real behaviour. Both branches keep the normal suite green.
 import { _macos_sdk_link_flags } from "../../src/backend";
-import { _mktemp_sibling_cmd, _sha256_of_file_cmd } from "../../src/build/fs";
+import { _mktemp_sibling_cmd, _sha256_of_file } from "../../src/build/fs";
 import { build_target_os, host_is_windows } from "../../src/build/target";
 import { CacheKey, cache_touch_entry } from "../../src/build_cache";
 import { _cr_jobs_from_probe, _cr_resolve_jobs } from "../../src/capsule_emit_parallel";
@@ -38,9 +38,10 @@ test "windows-deshell: leaf helpers degrade without a POSIX subprocess" ![io] {
         // task owns a distinct output path and no peer child reads
         // another's in-flight output.
         assert _mktemp_sibling_cmd("build/sailfin/capsules/x.ll") == "";
-        // sha256 subprocess hasher → "" ("no hasher" contract); the
-        // in-process `_sha256_of_text_file` path keeps caching real.
-        assert _sha256_of_file_cmd("build/bin/sfn") == "";
+        // File hashing is binary-safe and in-process on every host. This is
+        // the SFN-660 functional gain that makes toolchain archive digest
+        // verification available on native Windows.
+        assert _sha256_of_file("build/bin/sfn").length == 64;
         // Job sizing now returns a real core-derived count on a Windows
         // host (SFN-498): `NUMBER_OF_PROCESSORS` replaces the POSIX
         // `nproc`/`sysctl` probe, so the fan-out is native and shell-free

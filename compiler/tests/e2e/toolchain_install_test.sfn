@@ -55,7 +55,7 @@ fn _timeout_cmd() -> string ![io] {
 
 // Full parent environment plus the caller's extra `KEY=VALUE` entries
 // (`run_capture`/`spawn_with_env`'s empty env is EMPTY, not "inherit",
-// so the child needs PATH etc. to find `uname`/`tar`/`sha256sum`).
+// so the child needs PATH etc. to find `uname` and `tar`).
 fn _env_with(extra: string[]) -> string[] ![io] {
     let mut e = process.environ();
     let mut i: int = 0;
@@ -203,5 +203,67 @@ test "toolchain install: a bad signature is refused before extraction" ![io] {
     // store entry — the unverified toolchain was never extracted.
     assert exit != 0;
     assert contains(out + err, "signature");
+    assert ! _installed(store, ver);
+}
+
+test "toolchain install: a signed manifest refuses an asset digest mismatch" ![io] {
+    let tcmd = _timeout_cmd();
+    if !_has_cmd("python3") {
+        assert true;
+        return;
+    }
+    if tcmd.length == 0 {
+        assert true;
+        return;
+    }
+
+    // Real v0.9.5 release metadata, signed by the release key embedded in the
+    // compiler. Every platform archive below is deliberately replaced with
+    // non-archive bytes, so whichever host runs the test must pass signature
+    // verification and then fail at the in-process artifact digest check.
+    let ver = "0.9.5";
+    let tag = "v" + ver;
+    let srv = _scratch_root() + "/digest-mismatch-srv";
+    let store = _scratch_root() + "/digest-mismatch-store";
+    process.run(["rm", "-rf", srv]);
+    process.run(["rm", "-rf", store]);
+    let release_dir = srv + "/" + tag;
+    fs.createDirectory(release_dir, true);
+    let fixture = "compiler/tests/e2e/fixtures/toolchain_v0.9.5_SHA256SUMS";
+    let signature_fixture = fixture + ".sig";
+    fs.writeFile(release_dir + "/SHA256SUMS", fs.readFile(fixture));
+    fs.writeFile(release_dir + "/SHA256SUMS.sig", fs.readFile(signature_fixture));
+    let corrupt = "not the signed release archive";
+    fs.writeFile(release_dir + "/sailfin_0.9.5_linux_x86_64.tar.gz", corrupt);
+    fs.writeFile(release_dir + "/sailfin_0.9.5_linux_arm64.tar.gz", corrupt);
+    fs.writeFile(release_dir + "/sailfin_0.9.5_macos_arm64.tar.gz", corrupt);
+    fs.writeFile(release_dir + "/sailfin_0.9.5_windows_x86_64.tar.gz", corrupt);
+
+    let port = "18799";
+    let base = "http://127.0.0.1:" + port;
+    let _pid = process.spawn_with_env([tcmd, "30", "python3", "-m", "http.server", port, "--bind", "127.0.0.1", "--directory", srv], process.environ());
+    let poll = "import socket,sys,time\n" + "for _ in range(50):\n"
+        + "    try:\n"
+        + "        socket.create_connection(('127.0.0.1',"
+        + port
+        + "),0.2).close(); sys.exit(0)\n"
+        + "    except Exception:\n"
+        + "        time.sleep(0.1)\n"
+        + "sys.exit(1)\n";
+    let up = process.run_capture(["python3", "-c", poll], process.environ());
+    let _pout = process.capture_take_stdout();
+    let _perr = process.capture_take_stderr();
+    if up != 0 {
+        assert true;
+        return;
+    }
+
+    let exit = process.run_capture([_sfn_bin(), "toolchain", "install", ver], _env_with(["INSTALL_BASE="
+        + store, "SAILFIN_TOOLCHAIN_RELEASE_BASE="
+        + base]));
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit != 0;
+    assert contains(out + err, "digest mismatch");
     assert ! _installed(store, ver);
 }

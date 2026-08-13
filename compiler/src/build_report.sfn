@@ -306,7 +306,7 @@ fn build_report_to_json(report: BuildReport) -> string {
 // orchestrator (`cli_main.sfn`) is responsible for the I/O — reading
 // each pass's per-capsule `build/capsules/<scope>/<name>/manifest.json`
 // sidecar (which carries `modules[*].{slug, cache_key}` per Stage
-// C2c) and shasumming the linked binary, then assembling a
+// C2c) and hashing the linked binary, then assembling a
 // `DeterminismSnapshot` for each pass.
 //
 // Splitting the I/O out keeps the comparator unit-testable without
@@ -391,8 +391,8 @@ fn _find_module_cache_key(modules: DeterminismModule[], slug: string) -> _DetLoo
 // every slug + cache_key pair (set equality with paired values).
 //
 // A pass with an empty `binary_sha256` is a hard mismatch: an empty
-// digest means `sha256sum` failed (file missing, tool not on PATH,
-// etc.), and reporting "match" in that case would be a false
+// digest means the file read/hash failed, and reporting "match" would be a
+// false
 // negative. The CLI catches the empty case earlier with a clearer
 // diagnostic; the defense-in-depth here protects the unit-tested
 // surface.

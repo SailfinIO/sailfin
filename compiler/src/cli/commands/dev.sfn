@@ -452,8 +452,8 @@ fn _dev_bootstrap_install(from_path: string) -> int ![io] {
 
     let cur = compute_source_fingerprint(default_fingerprint_roots());
     if cur.length == 0 {
-        // Not fatal: an unhashable tree (zero-byte .sfn file, or no
-        // sha256sum/shasum on the host for a file over 64 KiB) must not
+        // Not fatal: an unhashable tree (unreadable input, allocation
+        // failure, or a file over the binary-read size cap) must not
         // abort an otherwise-completed ~10-minute build at the final step
         // (SFN-679).
         print.err("warning: could not compute the compiler source fingerprint; installing without a freshness record");

@@ -45,7 +45,7 @@ import {
     with_flag
 } from "sfn/cli";
 
-import { _dirname_cmd, _ensure_dir_recursive_cmd, _sha256_of_file_cmd } from "../../build/fs";
+import { _dirname_cmd, _ensure_dir_recursive_cmd, _sha256_of_file } from "../../build/fs";
 import { _get_home_cmd } from "../../build_flags";
 import { _display_capsule_name_cmd, _resolve_capsule_name_cmd } from "../../capsule_names";
 import { lock_add_entry, lock_get_version } from "../../lock";
@@ -422,7 +422,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io] {
     fs.writeFile("capsule.toml", updated_toml);
 
     // Compute integrity hash of the downloaded package and write capsule.lock
-    let raw_hash = _sha256_of_file_cmd(pkg_path);
+    let raw_hash = _sha256_of_file(pkg_path);
     if raw_hash.length == 0 {
         print("warning: could not compute integrity hash for " + pkg_path
             + " — lockfile entry will have no hash");

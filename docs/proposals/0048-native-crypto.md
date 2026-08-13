@@ -96,7 +96,7 @@ gates Phase B.
 | **B** | TLS 1.3 record layer (AEAD via ChaCha20-Poly1305) + client handshake, then server handshake | still linked (fallback); native path selectable | X25519 unblocked (§6.4 amendment, SFN-335) |
 | **C** | X.509 cert parse + chain verification + system trust-store loading + RFC 6125 hostname check | still linked | after Phase B |
 | **D** | Swap `tls_*` wrapper **bodies** to the native stack; replace `websocket.sfn`'s `SHA1`/`EVP_EncodeBlock`/`RAND_bytes` with the native primitives; replace the `sfn/crypto` HMAC/Ed25519 externs with pure-Sailfin ports; delete all OpenSSL externs; drop `-lssl`/`-lcrypto`; remove `_openssl_link_search_flags()` | **`-lssl`/`-lcrypto` gone from every binary** | after Phase C |
-| **E** | Retire the `sha256sum`/`shasum` shell-out (`_sha256_of_file_cmd`) for binary-artifact hashing; replace with an in-process binary-safe hasher (§3.5) | drops a second, previously unphased external-dependency class — subprocess hashers, not OpenSSL | a binary-safe `fs` read primitive exists and the `-O0` in-process performance regression is resolved; independent of Phases A–D |
+| **E** | Retire the `sha256sum`/`shasum` shell-out (`_sha256_of_file_cmd`) for binary-artifact hashing; replace with an in-process binary-safe hasher (§3.5) | drops a second, previously unphased external-dependency class — subprocess hashers, not OpenSSL | **Shipped** (SFN-659/SFN-660); independent of Phases A–D |
 
 Because the three TLS consumers forward-declare only the **`tls_*` wrapper
 names** (not raw OpenSSL symbols), Phase D changes only `tls.sfn`'s function
@@ -521,6 +521,29 @@ not that the threshold is quietly raised.
 (the read uses `"rb"`, never `"r"`, so no CRLF translation corrupts binary
 input), so this path is a route to closing the platform-incompleteness noted
 above — once SFN-660 repoints the callers.
+
+**Amendment (2026-08-13) — Phase E complete (SFN-660).**
+`compiler/src/build/hash.sfn` now exposes
+`sha256_hex_of_bytes(addr, length)`: complete 64-byte blocks are loaded
+directly from the input pointer, one 64-word message schedule and eight-word
+state are reused throughout, and only the final one or two padded blocks are
+constructed separately. `sha256_hex_of_string` is a thin wrapper over that
+entry point. The whole-message `int[]` and its O(8N) live-memory cost are gone;
+working memory is O(1) in the input length.
+
+`compiler/src/build/fs.sfn::_sha256_of_file` composes the SFN-659 binary-safe
+read with the streaming hasher, frees the file buffer exactly once, and maps
+every read/allocation/size-cap failure to `""`. Empty files remain successful
+and produce the standard empty-message digest. Every text and binary artifact
+caller now uses this one path; `_sha256_of_file_cmd`, the text/binary split,
+the 64 KiB threshold, and the production `sha256sum`/`shasum` subprocess
+pipeline are retired. Native Windows therefore performs the same archive and
+compiler-binary verification as POSIX hosts. Cross-check coverage compares a
+compiled compiler, a compressed tar archive, and generated LLVM IR above 64
+KiB against an independent system implementation; the signed-toolchain test
+uses real v0.9.5 release metadata and proves that a corrupt archive is refused
+after signature verification and before extraction. The SFN-660 delivery
+record carries the matched Linux `int-caps` before/after wall-time evidence.
 
 ## 4. Effect & capability impact
 

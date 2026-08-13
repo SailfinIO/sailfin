@@ -29,7 +29,7 @@ import {
     _atomic_rename_into_place,
     _ensure_dir_cmd,
     _mktemp_sibling_cmd,
-    _sha256_of_text_file,
+    _sha256_of_file,
     _shell_read_cmd
 } from "./fs";
 import { sha256_hex_of_string } from "./hash";
@@ -134,7 +134,7 @@ fn assemble_link_inputs(ll_paths: string[], object_dir: string, opt_flag: string
     loop {
         if i >= ll_paths.length { break; }
         let ll_path = ll_paths[i];
-        let content_hash = _sha256_of_text_file(ll_path);
+        let content_hash = _sha256_of_file(ll_path);
         if content_hash.length == 0 {
             let fallback_key = sha256_hex_of_string(ll_path + "\n" + opt_flag
                 + "\n"

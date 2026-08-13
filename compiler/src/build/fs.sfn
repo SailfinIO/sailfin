@@ -4,7 +4,7 @@
 // relocated from `cli_commands_utils` (SFEP-0027 §3.5); leave the
 // `compiler-common` boundary to #345.
 import { substring } from "../string_utils";
-import { sha256_hex_of_string } from "./hash";
+import { sha256_hex_of_bytes } from "./hash";
 import { host_is_windows } from "./target";
 
 // libc primitives backing the staging path's temp-mint, atomic
@@ -411,7 +411,8 @@ extern fn sailfin_runtime_shell_capture(cmd: *u8) -> *u8;
 // a correctness hazard, not only an ergonomic one. A host with no
 // POSIX shell therefore refuses to run the command at all and returns
 // the empty string — the same "probe unavailable" contract
-// `_mktemp_sibling_cmd` and `_sha256_of_file_cmd` already degrade to.
+// `_mktemp_sibling_cmd` already degrades to. File hashing does not use this
+// helper; `_sha256_of_file` is binary-safe and in-process on every host.
 // Callers must treat "" as "unknown" (SFN-486 made the build-path
 // staging sites non-fatal); as each probe grows a native Windows
 // implementation the guard shrinks to that probe.
@@ -551,28 +552,6 @@ fn _shell_single_quote_arg(value: string) -> string {
     return out + "'";
 }
 
-// Compute the sha256 hex digest of a file. Tries `sha256sum` first
-// (universally available on Linux); falls back to `shasum -a 256` on
-// systems without coreutils (notably default macOS). Mirrors the
-// fallback ladder `tools/package.sh` used historically. Returns
-// `""` if neither tool is available or the file can't be read.
-//
-// `file_path` is properly shell-quoted so paths containing `'` or
-// other shell metacharacters can't break the command.
-fn _sha256_of_file_cmd(file_path: string) -> string ![io] {
-    // A Windows host has neither `sha256sum` nor `shasum`; return "" (the
-    // existing "no hasher" contract) so the digest falls back to the
-    // version stamp. `_sha256_of_text_file` uses the in-process hasher
-    // for NUL-free artifacts on Windows, keeping content-addressed caching.
-    if host_is_windows() { return ""; }
-    let q = _shell_single_quote_arg(file_path);
-    let cmd = "(command -v sha256sum >/dev/null 2>&1 && sha256sum " + q
-        + " || shasum -a 256 "
-        + q
-        + ") | cut -d' ' -f1";
-    return _shell_read_cmd(cmd);
-}
-
 // Binary-safe counterpart to `fs.readFile`, whose `i8*` return is
 // coerced to a Sailfin string via the `string.length` descriptor
 // (`sfn_str_len` -> bounded `strnlen`) in
@@ -631,8 +610,8 @@ fn _read_file_bytes(file_path: string) -> FileBytes ![io] {
     // this bounds one read near 1.5 GiB — deliberately under the smallest
     // per-job reserve any parallel fan-out budgets, the emit fan-out's
     // 2.5 GiB (`.claude/rules/compiler-safety.md`; the test pool reserves
-    // 3 GiB since SFN-781). Anything larger keeps the
-    // subprocess hasher rather than risking a host kill.
+    // 3 GiB since SFN-781). Anything larger fails closed rather than
+    // risking a host kill while reading the file into the hashing path.
     let max_bytes: i64 = 536870912;
     // Backstop only: at a full 64 KiB chunk per read `max_bytes` trips
     // after ~8192 iterations, so this bounds a pathologically short-
@@ -697,51 +676,17 @@ fn _free_file_bytes(b: FileBytes) -> void {
     if b.addr != 0 { free(b.addr as *u8); }
 }
 
-// Compute the SHA-256 hex digest of a NUL-free text file in-process,
-// without spawning a subprocess. Returns `""` when the file does not
-// exist or cannot be read, preserving the `_sha256_of_file_cmd`
-// failure contract (empty digest → not content-addressable → recompile).
-//
-// SOUND ONLY for NUL-free text artifacts: .sfn source, .ll LLVM IR,
-// .toml manifests, .h/.c headers, layout manifests. `fs.readFile`
-// coerces the `i8*` return to a Sailfin string via the `string.length`
-// descriptor (`core_operands/pointer_coercion.sfn:42-83`), which
-// truncates at the first NUL byte. Binary artifacts (compiled
-// binaries, tarballs, archives) MUST use `_sha256_of_file_cmd` or the
-// binary-safe `_read_file_bytes` above. This split can be collapsed
-// once SFN-660 repoints the hashing callers onto `_read_file_bytes`.
-//
-// Inputs larger than 64 KiB fall back to the subprocess pipeline: the
-// vendored hasher's byte loop collapses under -O0 compiler builds (the
-// CI shard configuration) — hashing multi-hundred-KB .ll files
-// in-process pushed the linux int-caps shard from ~6 min to ~23 min and
-// drove selfhost_diff_test.sfn into its 300 s per-file kill (PR #2000
-// triage). One popen (~30 ms) beats seconds of -O0 hashing; the
-// in-process win is the many small .sfn/.toml sources, which stay under
-// the threshold. Retire the threshold together with the split
-// (SFN-660), or earlier if CI shard builds move off -O0.
-fn _sha256_of_text_file(file_path: string) -> string ![io] {
-    if !fs.exists(file_path) { return ""; }
-    let contents = fs.readFile(file_path);
-    let inprocess_max = 65536;
-    if contents.length > inprocess_max {
-        // On a Windows host the subprocess hasher returns "" (no
-        // `sha256sum`), so hash in-process to keep the >64 KiB artifacts
-        // content-addressable. The POSIX host keeps the popen fast path
-        // (the -O0 CI-shard cost the threshold exists to avoid).
-        if host_is_windows() { return sha256_hex_of_string(contents); }
-        return _sha256_of_file_cmd(file_path);
-    }
-    if contents.length == 0 {
-        // Distinguish "empty file" from "read error": an empty file has
-        // the well-known empty-string digest; an unreadable file should
-        // return "" to signal the caller. fs.readFile returns "" on read
-        // failure, so we treat zero-length as a miss (recompile). Files
-        // with real zero-byte content produce the same cache-miss outcome
-        // as they would under _sha256_of_file_cmd ("" on failure).
-        return "";
-    }
-    return sha256_hex_of_string(contents);
+// Compute a file's SHA-256 digest entirely in-process. `_read_file_bytes`
+// preserves embedded NULs and distinguishes an empty file from every failure;
+// `sha256_hex_of_bytes` streams from that buffer with O(1) working memory.
+// The buffer is freed exactly once after hashing. Any read/allocation/size-cap
+// failure maps to `""`, preserving the build driver's fail-closed contract.
+fn _sha256_of_file(file_path: string) -> string ![io] {
+    let bytes = _read_file_bytes(file_path);
+    if bytes.status != 0 { return ""; }
+    let digest = sha256_hex_of_bytes(bytes.addr, bytes.length);
+    _free_file_bytes(bytes);
+    return digest;
 }
 
 export {
@@ -764,8 +709,7 @@ export {
     _toml_trim_cmd,
     _shell_read_cmd,
     _shell_single_quote_arg,
-    _sha256_of_file_cmd,
-    _sha256_of_text_file,
+    _sha256_of_file,
     FileBytes,
     _read_file_bytes,
     _free_file_bytes

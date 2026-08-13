@@ -31,7 +31,7 @@ import {
 import { ed25519_verify_utf8 } from "sfn/crypto";
 import { int_to_string } from "sfn/strings";
 
-import { _sha256_of_file_cmd, _shell_read_cmd, _toml_trim_cmd } from "../../build/fs";
+import { _sha256_of_file, _shell_read_cmd, _toml_trim_cmd } from "../../build/fs";
 import { build_host_os, host_is_windows } from "../../build/target";
 import { _env_flag, _get_home_cmd } from "../../build_flags";
 import { ToolchainDecision, toolchain_decide, toolchain_print_mismatch } from "../../capsule_resolver/toolchain";
@@ -396,7 +396,7 @@ fn toolchain_install_to_base(version_arg: string, store_base: string, work_root:
         process.run(["rm", "-rf", tmp]);
         return 1;
     }
-    let actual = _sha256_of_file_cmd(tarball);
+    let actual = _sha256_of_file(tarball);
     if actual.length == 0 {
         print("error: could not compute sha256 of the downloaded asset");
         process.run(["rm", "-rf", tmp]);

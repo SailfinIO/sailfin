@@ -31,8 +31,7 @@ import {
     _atomic_rename_into_place,
     _collect_sfn_files_cmd,
     _mktemp_sibling_cmd,
-    _sha256_of_file_cmd,
-    _sha256_of_text_file
+    _sha256_of_file
 } from "./fs";
 import { sha256_hex_of_string } from "./hash";
 import {
@@ -659,7 +658,7 @@ fn _runtime_obj_key_with_sibling_deps(base_key: string, ctx_root: string, slug: 
     let mut i: int = 0;
     loop {
         if i >= deps.length { break; }
-        let dep_hash = _sha256_of_text_file(deps[i]);
+        let dep_hash = _sha256_of_file(deps[i]);
         if dep_hash.length == 0 { return ""; }
         key = key + "\n" + dep_hash;
         i += 1;
