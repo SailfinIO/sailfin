@@ -18,13 +18,17 @@ let _CIS_CR: int = 13;
 let _CIS_SPACE: int = 32;
 let _CIS_QUOTE: int = 34;
 let _CIS_STAR: int = 42;
+let _CIS_COMMA: int = 44;
 let _CIS_SLASH: int = 47;
 let _CIS_SEMI: int = 59;
 let _CIS_BACKSLASH: int = 92;
 let _CIS_UNDERSCORE: int = 95;
+let _CIS_LOWER_A: int = 97;
 let _CIS_LOWER_E: int = 101;
 let _CIS_LOWER_F: int = 102;
 let _CIS_LOWER_I: int = 105;
+let _CIS_LBRACE: int = 123;
+let _CIS_RBRACE: int = 125;
 
 // ---- Source-level import scanning ----
 // These helpers replace the cli_commands.sfn `_collect_relative_import_spans_cmd`
@@ -810,9 +814,341 @@ fn _cr_source_imports_host(source: string, target: string) -> boolean {
     return false;
 }
 
+// Join a name list with `,` for `collect_import_statements`'s tab-separated
+// row encoding (SFN-834). Bounded by `names.length`, unlike the byte-level
+// walkers above, so it needs no separate step guard.
+fn _cis_join_names(names: string[]) -> string {
+    let mut result: string = "";
+    let mut idx: int = 0;
+    loop {
+        if idx >= names.length { break; }
+        if idx > 0 { result = result + ","; }
+        result = result + names[idx];
+        idx += 1;
+    }
+    return result;
+}
+
+// SFN-834 (SFEP-0070 §3.3): sibling of `collect_relative_import_specs` /
+// `collect_scoped_import_specs` that also captures the brace-list names, so
+// capsule-source reachability can narrow a barrel's `export { x } from
+// "./sibling"` re-export to only the demanded names. Reuses the same
+// comment-/string-aware walk verbatim; the only addition is tracking a
+// brace-list name accumulator while inside `{ ... }`. Each result row is
+// `<kind>\t<spec>\t<names>`, where `names` is `*` for a bare side-effect
+// import or whenever the brace list couldn't be parsed with confidence
+// (step guard, unterminated brace).
+fn collect_import_statements(source: string) -> string[] {
+    let mut out: string[] = [];
+    let source_len = source.length;
+    if source_len == 0 { return out; }
+    let mut steps: int = 0;
+    let max_steps = source_len * 6 + 1000;
+    let mut i: int = 0;
+    let mut in_string: boolean = false;
+    let mut escaping: boolean = false;
+    let mut in_line_comment: boolean = false;
+    let mut in_block_comment: boolean = false;
+    loop {
+        if i >= source_len { break; }
+        steps += 1;
+        if steps > max_steps { break; }
+        let ch = _cr_byte_at(source, i);
+        if in_line_comment {
+            if ch == _CIS_LF { in_line_comment = false; }
+            i += 1;
+            continue;
+        }
+        if in_block_comment {
+            if ch == _CIS_STAR {
+                if i + 1 < source_len {
+                    if _cr_byte_at(source, i + 1) == _CIS_SLASH {
+                        in_block_comment = false;
+                        i += 2;
+                        continue;
+                    }
+                }
+            }
+            i += 1;
+            continue;
+        }
+        if in_string {
+            if escaping {
+                escaping = false;
+                i += 1;
+                continue;
+            }
+            if ch == _CIS_BACKSLASH {
+                escaping = true;
+                i += 1;
+                continue;
+            }
+            if ch == _CIS_QUOTE {
+                in_string = false;
+                i += 1;
+                continue;
+            }
+            i += 1;
+            continue;
+        }
+        if ch == _CIS_SLASH {
+            if i + 1 < source_len {
+                let next = _cr_byte_at(source, i + 1);
+                if next == _CIS_SLASH {
+                    in_line_comment = true;
+                    i += 2;
+                    continue;
+                }
+                if next == _CIS_STAR {
+                    in_block_comment = true;
+                    i += 2;
+                    continue;
+                }
+            }
+        }
+        if ch == _CIS_QUOTE {
+            in_string = true;
+            i += 1;
+            continue;
+        }
+        let mut _is_dep_keyword: boolean = false;
+        let mut kind: string = "";
+        if ch == _CIS_LOWER_I {
+            if _cr_word_matches(source, i, "import") {
+                _is_dep_keyword = true;
+                kind = "import";
+            }
+        }
+        if ch == _CIS_LOWER_E {
+            if _cr_word_matches(source, i, "export") {
+                _is_dep_keyword = true;
+                kind = "export";
+            }
+        }
+        if _is_dep_keyword {
+            let mut j: int = i + 6;
+            let mut s_in_string: boolean = false;
+            let mut s_escaping: boolean = false;
+            let mut s_in_line_comment: boolean = false;
+            let mut s_in_block_comment: boolean = false;
+            let mut spec: string = "";
+            let mut stmt_end: int = -1;
+            let mut got_brace: boolean = false;
+            let mut in_brace: boolean = false;
+            let mut brace_closed: boolean = false;
+            let mut names: string[] = [];
+            let mut cur_name: string = "";
+            let mut alias_pending: boolean = false;
+            loop {
+                if j >= source_len { break; }
+                steps += 1;
+                if steps > max_steps { break; }
+                let cj = _cr_byte_at(source, j);
+                if s_in_line_comment {
+                    if cj == _CIS_LF { s_in_line_comment = false; }
+                    j += 1;
+                    continue;
+                }
+                if s_in_block_comment {
+                    if cj == _CIS_STAR {
+                        if j + 1 < source_len {
+                            if _cr_byte_at(source, j + 1) == _CIS_SLASH {
+                                s_in_block_comment = false;
+                                j += 2;
+                                continue;
+                            }
+                        }
+                    }
+                    j += 1;
+                    continue;
+                }
+                if s_in_string {
+                    if s_escaping {
+                        s_escaping = false;
+                        j += 1;
+                        continue;
+                    }
+                    if cj == _CIS_BACKSLASH {
+                        s_escaping = true;
+                        j += 1;
+                        continue;
+                    }
+                    if cj == _CIS_QUOTE {
+                        s_in_string = false;
+                        j += 1;
+                        continue;
+                    }
+                    j += 1;
+                    continue;
+                }
+                if cj == _CIS_SLASH {
+                    if j + 1 < source_len {
+                        let nj = _cr_byte_at(source, j + 1);
+                        if nj == _CIS_SLASH {
+                            s_in_line_comment = true;
+                            j += 2;
+                            continue;
+                        }
+                        if nj == _CIS_STAR {
+                            s_in_block_comment = true;
+                            j += 2;
+                            continue;
+                        }
+                    }
+                }
+                if in_brace {
+                    if cj == _CIS_RBRACE {
+                        if cur_name.length > 0 {
+                            if !alias_pending { names.push(cur_name); }
+                        }
+                        cur_name = "";
+                        alias_pending = false;
+                        in_brace = false;
+                        brace_closed = true;
+                        j += 1;
+                        continue;
+                    }
+                    if cj == _CIS_COMMA {
+                        if cur_name.length > 0 {
+                            if !alias_pending { names.push(cur_name); }
+                        }
+                        cur_name = "";
+                        alias_pending = false;
+                        j += 1;
+                        continue;
+                    }
+                    if cj == _CIS_LOWER_A {
+                        if !alias_pending && cur_name.length > 0 {
+                            if _cr_word_matches(source, j, "as") {
+                                names.push(cur_name);
+                                cur_name = "";
+                                alias_pending = true;
+                                j += 2;
+                                continue;
+                            }
+                        }
+                    }
+                    if _cr_is_ident_char(cj) {
+                        if !alias_pending {
+                            cur_name = cur_name + substring(source, j, j + 1);
+                        }
+                        j += 1;
+                        continue;
+                    }
+                    j += 1;
+                    continue;
+                }
+                if !got_brace && spec.length == 0 && cj == _CIS_QUOTE {
+                    let mut k = j + 1;
+                    let start = k;
+                    let mut esc: boolean = false;
+                    loop {
+                        if k >= source_len { break; }
+                        steps += 1;
+                        if steps > max_steps { break; }
+                        let sk = _cr_byte_at(source, k);
+                        if esc {
+                            esc = false;
+                            k += 1;
+                            continue;
+                        }
+                        if sk == _CIS_BACKSLASH {
+                            esc = true;
+                            k += 1;
+                            continue;
+                        }
+                        if sk == _CIS_QUOTE {
+                            spec = substring(source, start, k);
+                            k += 1;
+                            break;
+                        }
+                        k += 1;
+                    }
+                    j = k;
+                    continue;
+                }
+                if cj == _CIS_QUOTE {
+                    s_in_string = true;
+                    j += 1;
+                    continue;
+                }
+                if !got_brace && !brace_closed && cj == _CIS_LBRACE {
+                    got_brace = true;
+                    in_brace = true;
+                    j += 1;
+                    continue;
+                }
+                if spec.length == 0 && cj == _CIS_LOWER_F {
+                    if _cr_word_matches(source, j, "from") {
+                        let mut k = j + 4;
+                        loop {
+                            if k >= source_len { break; }
+                            let wk = _cr_byte_at(source, k);
+                            let mut ws: boolean = false;
+                            if wk == _CIS_SPACE { ws = true; }
+                            if wk == _CIS_TAB { ws = true; }
+                            if wk == _CIS_LF { ws = true; }
+                            if wk == _CIS_CR { ws = true; }
+                            if !ws { break; }
+                            k += 1;
+                        }
+                        if k < source_len {
+                            if _cr_byte_at(source, k) == _CIS_QUOTE {
+                                k += 1;
+                                let start = k;
+                                let mut esc: boolean = false;
+                                loop {
+                                    if k >= source_len { break; }
+                                    let sk = _cr_byte_at(source, k);
+                                    if esc {
+                                        esc = false;
+                                        k += 1;
+                                        continue;
+                                    }
+                                    if sk == _CIS_BACKSLASH {
+                                        esc = true;
+                                        k += 1;
+                                        continue;
+                                    }
+                                    if sk == _CIS_QUOTE {
+                                        spec = substring(source, start, k);
+                                        break;
+                                    }
+                                    k += 1;
+                                }
+                            }
+                        }
+                    }
+                }
+                if cj == _CIS_SEMI {
+                    stmt_end = j + 1;
+                    break;
+                }
+                j += 1;
+            }
+            if stmt_end > 0 {
+                if spec.length > 0 {
+                    let mut names_field: string = "*";
+                    if got_brace {
+                        if brace_closed {
+                            names_field = _cis_join_names(names);
+                        }
+                    }
+                    out.push(kind + "\t" + spec + "\t" + names_field);
+                }
+                i = stmt_end;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    return out;
+}
+
 export {
     _cr_find_substring,
     _cr_source_imports_host,
+    collect_import_statements,
     collect_relative_import_specs,
     collect_scoped_import_specs
 };

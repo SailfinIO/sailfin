@@ -1,0 +1,73 @@
+// Contract coverage for `collect_import_statements` (SFN-834, SFEP-0070
+// §3.3): the pre-parse import scanner's third entry point, which records
+// the brace-list names alongside the spec so capsule-source reachability can
+// narrow a barrel's re-export to only the demanded names.
+import { collect_import_statements } from "../../src/capsule_import_scan";
+import { strings_equal } from "../../src/string_utils";
+
+fn _eq(a: string, b: string) -> boolean { return strings_equal(a, b); }
+
+test "import_statement_scan: plain brace import records names in order" {
+    let src = "import { a, b } from \"./x\";\n";
+    let rows = collect_import_statements(src);
+    assert rows.length == 1;
+    assert _eq(rows[0], "import\t./x\ta,b");
+}
+
+test "import_statement_scan: aliased name records the source name, not the alias" {
+    let src = "import { a as z } from \"./x\";\n";
+    let rows = collect_import_statements(src);
+    assert rows.length == 1;
+    assert _eq(rows[0], "import\t./x\ta");
+}
+
+test "import_statement_scan: re-export records kind export" {
+    let src = "export { p, q } from \"./y\";\n";
+    let rows = collect_import_statements(src);
+    assert rows.length == 1;
+    assert _eq(rows[0], "export\t./y\tp,q");
+}
+
+test "import_statement_scan: bare side-effect import has names *" {
+    let src = "import \"./side\";\n";
+    let rows = collect_import_statements(src);
+    assert rows.length == 1;
+    assert _eq(rows[0], "import\t./side\t*");
+}
+
+test "import_statement_scan: local export with no from clause is skipped" {
+    let src = "export { m };\n";
+    let rows = collect_import_statements(src);
+    assert rows.length == 0;
+}
+
+test "import_statement_scan: scoped spec is returned unfiltered" {
+    let src = "import { k } from \"sfn/crypto\";\n";
+    let rows = collect_import_statements(src);
+    assert rows.length == 1;
+    assert _eq(rows[0], "import\tsfn/crypto\tk");
+}
+
+test "import_statement_scan: names inside comments and strings are not picked up" {
+    let src = "// import { hidden } from \"./nope\";\n"
+        + "/* import { also_hidden } from \"./nope2\"; */\n"
+        + "let s = \"import { fake } from \\\"./nope3\\\";\";\n"
+        + "import { real } from \"./actual\";\n";
+    let rows = collect_import_statements(src);
+    assert rows.length == 1;
+    assert _eq(rows[0], "import\t./actual\treal");
+}
+
+test "import_statement_scan: multi-line brace list with stray whitespace" {
+    let src = "import {\n    a,\n    b as c,\n    d\n} from \"./multi\";\n";
+    let rows = collect_import_statements(src);
+    assert rows.length == 1;
+    assert _eq(rows[0], "import\t./multi\ta,b,d");
+}
+
+test "import_statement_scan: aliased name equal to the from keyword resolves the real spec" {
+    let src = "import { from as origin } from \"sfn/syntax\";\n";
+    let rows = collect_import_statements(src);
+    assert rows.length == 1;
+    assert _eq(rows[0], "import\tsfn/syntax\tfrom");
+}
