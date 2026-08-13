@@ -134,7 +134,7 @@ fn _pool_child_argv(self_exe: string, path: string, name_filter: string, tag_fil
 // `runtime/sfn/process.sfn`), so the pool must reproduce what the
 // serial path's `process.run` children inherit implicitly. The
 // historical version hand-curated a passthrough name list and read
-// each via `_get_env_cmd` (one popen per name) because no
+// each via `_get_env_cmd` (one `env.get` call per name) because no
 // environ-iteration primitive existed yet. `process.environ()`
 // (`sfn_process_environ`, #1313) now returns the parent's full
 // environment as a `string[]` of `KEY=VALUE` entries — byte-for-byte

@@ -49,9 +49,9 @@ import {
 
 import {
     _collect_sfn_files_cmd,
+    _mktemp_from_template_cmd,
     _sha256_of_file_cmd,
     _sha256_of_text_file,
-    _shell_read_cmd,
     _toml_trim_cmd
 } from "../../build/fs";
 import { _get_env_cmd, _get_home_cmd } from "../../build_flags";
@@ -170,7 +170,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io] {
         fi += 1;
     }
 
-    let payload_tmp = _shell_read_cmd("mktemp /tmp/.sfn_pub_XXXXXX");
+    let payload_tmp = _mktemp_from_template_cmd("/tmp/.sfn_pub_XXXXXX");
     if payload_tmp.length == 0 {
         print("failed to create temp file");
         return 1;
@@ -184,7 +184,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io] {
     }
     let digest = "sha256:" + raw_digest;
 
-    let body_tmp = _shell_read_cmd("mktemp /tmp/.sfn_pub_XXXXXX");
+    let body_tmp = _mktemp_from_template_cmd("/tmp/.sfn_pub_XXXXXX");
     if body_tmp.length == 0 {
         print("failed to create temp file");
         process.run(["rm", "-f", payload_tmp]);
@@ -215,8 +215,8 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io] {
     let registry_base = _resolve_registry_url_cmd();
     let registry_url = registry_base + "/api/publish";
     print("publishing to " + registry_url + "...");
-    let response_tmp = _shell_read_cmd("mktemp /tmp/.sfn_pub_XXXXXX");
-    let header_tmp = _shell_read_cmd("mktemp /tmp/.sfn_pub_XXXXXX");
+    let response_tmp = _mktemp_from_template_cmd("/tmp/.sfn_pub_XXXXXX");
+    let header_tmp = _mktemp_from_template_cmd("/tmp/.sfn_pub_XXXXXX");
     let curl_rc = process.run(["curl", "-sS", "-X", "POST", "-H", "Content-Type: application/json", "-H", "Authorization: "
         + auth_header, "-d", "@"
         + body_tmp, "-o", response_tmp, "-D", header_tmp, registry_url]);
