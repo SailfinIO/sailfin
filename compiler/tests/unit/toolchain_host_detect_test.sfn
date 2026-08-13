@@ -1,0 +1,59 @@
+// compiler/tests/unit/toolchain_host_detect_test.sfn
+//
+// Regression for SFN-857: `sfn toolchain install` could not run at all on
+// a native Windows host. `_detect_os()` (`cli/commands/toolchain.sfn`)
+// shelled `uname -s` via `_shell_read_cmd`, which self-disables on Windows
+// (`host_is_windows()` guard, `build/fs.sfn`) and always returned "" there
+// — before the network, before `tar`, before anything. `_detect_os` now
+// derives its answer from the non-shelling `build_host_os()` probe
+// (`build/target.sfn`), which is Windows-correct today.
+//
+// There is no runtime `setenv`, so a `.sfn` process cannot flip
+// `SAILFIN_HOST_OS` for an in-process call mid-test (the SFN-478 pattern,
+// `windows_build_deshell_test.sfn`). This file's Windows leg is exercised
+// by RUNNING it with the override set:
+//   SAILFIN_HOST_OS=Windows build/bin/sfn test compiler/tests/unit/toolchain_host_detect_test.sfn
+//   SAILFIN_HOST_OS=Darwin build/bin/sfn test compiler/tests/unit/toolchain_host_detect_test.sfn
+// The plain suite run (no override) takes the Linux leg on a Linux runner.
+import { build_host_os } from "../../src/build/target";
+import { _detect_arch, _detect_os } from "../../src/cli/commands/toolchain";
+
+test "toolchain-host-detect: OS token matches the running host leg" ![io] {
+    let host = build_host_os();
+    if host == "Linux" { assert _detect_os() == "linux"; } else {
+        if host == "Darwin" { assert _detect_os() == "macos"; } else {
+            if host == "Windows" { assert _detect_os() == "windows"; } else {
+                // An unrecognised SAILFIN_HOST_OS override reaches every
+                // consumer unvalidated (`build/target.sfn` verbatim-override
+                // contract) — `_detect_os` must degrade to "" rather than
+                // guess, matching `toolchain_install_to_base`'s fail-closed
+                // "unsupported host OS" gate.
+                assert _detect_os() == "";
+            }
+        }
+    }
+}
+
+test "toolchain-host-detect: Windows arch is fixed to x86_64, no probe" ![io] {
+    if build_host_os() == "Windows" {
+        // No `aarch64`/`arm64` Windows release target exists
+        // (`triple_is_supported`, `build/target.sfn:112-120`), so the
+        // Windows leg never reaches the `uname -m` probe at all.
+        assert _detect_arch() == "x86_64";
+    } else {
+        // POSIX hosts keep the real `uname -m` probe; only assert it
+        // resolved to something, since the concrete value depends on the
+        // runner.
+        assert _detect_arch().length > 0;
+    }
+}
+
+test "toolchain-host-detect: Windows release asset name matches the publish layout" ![io] {
+    if build_host_os() == "Windows" {
+        let version = "1.2.3";
+        let asset = "sailfin_" + version + "_" + _detect_os() + "_"
+            + _detect_arch()
+            + ".tar.gz";
+        assert asset == "sailfin_1.2.3_windows_x86_64.tar.gz";
+    } else { assert true; }
+}

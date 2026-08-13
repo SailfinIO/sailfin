@@ -32,6 +32,7 @@ import { ed25519_verify_utf8 } from "sfn/crypto";
 import { int_to_string } from "sfn/strings";
 
 import { _sha256_of_file, _shell_read_cmd, _toml_trim_cmd } from "../../build/fs";
+import { build_host_os, host_is_windows } from "../../build/target";
 import { _env_flag, _get_home_cmd } from "../../build_flags";
 import { ToolchainDecision, toolchain_decide, toolchain_print_mismatch } from "../../capsule_resolver/toolchain";
 import { release_signing_public_key_hex } from "../../release_trust";
@@ -129,20 +130,32 @@ fn _versions_base() -> string ![io] {
     return home + "/.local/share/sailfin/versions";
 }
 
-// Canonical release OS token ("" if unrecognised). Mirrors the mapping
-// `install.sh`/`package.sfn` derive from `uname -s`.
+// Canonical release OS token ("" if unrecognised). Built on `build_host_os()`
+// (`build/target.sfn`), the non-shelling host probe, rather than `uname -s`:
+// `_shell_read_cmd` self-disables on Windows (`host_is_windows()` guard,
+// `build/fs.sfn:419`), so the former `uname`-based probe always returned ""
+// on a native Windows host and `sfn toolchain install` could never run there
+// (SFN-857). The `MINGW`/`MSYS`/`CYGWIN` `uname -s` prefixes this replaces
+// were unreachable for the same reason — a POSIX-emulation shell was never
+// consulted once the popen itself refused to run.
 fn _detect_os() -> string ![io] {
-    let s = _shell_read_cmd("uname -s");
-    if strings_equal(s, "Linux") { return "linux"; }
-    if strings_equal(s, "Darwin") { return "macos"; }
-    if starts_with(s, "MINGW") { return "windows"; }
-    if starts_with(s, "MSYS") { return "windows"; }
-    if starts_with(s, "CYGWIN") { return "windows"; }
+    let os = build_host_os();
+    if os == "Linux" { return "linux"; }
+    if os == "Darwin" { return "macos"; }
+    if os == "Windows" { return "windows"; }
     return "";
 }
 
-// Canonical release arch token ("" if unrecognised).
+// Canonical release arch token ("" if unrecognised). The Windows leg is
+// fixed to `x86_64` rather than probed: `triple_is_supported`
+// (`build/target.sfn:112-120`) admits only `x86_64-pc-windows-msvc` and
+// `x86_64-w64-mingw32` — no arm64 Windows target exists — so there is
+// nothing for a native probe to distinguish. The POSIX leg keeps the real
+// `uname -m` probe unchanged: unlike OS detection, `_shell_read_cmd` never
+// ran on Windows for this either, but a native arch probe for POSIX hosts
+// is out of scope here (SFN-857).
 fn _detect_arch() -> string ![io] {
+    if host_is_windows() { return "x86_64"; }
     let m = _shell_read_cmd("uname -m");
     if strings_equal(m, "x86_64") { return "x86_64"; }
     if strings_equal(m, "amd64") { return "x86_64"; }
@@ -281,7 +294,10 @@ fn toolchain_install_to_base(version_arg: string, store_base: string, work_root:
     let os = _detect_os();
     let arch = _detect_arch();
     if os.length == 0 {
-        print("error: unsupported host OS (uname -s not linux/macos/windows)");
+        // Reachable only via an unrecognised `SAILFIN_HOST_OS` override
+        // (`build_host_os()` returns it verbatim, `build/target.sfn:49-53`);
+        // `_detect_os` itself never falls through on a real host.
+        print("error: unsupported host OS (SAILFIN_HOST_OS override not linux/macos/windows)");
         return 1;
     }
     if arch.length == 0 {
@@ -679,5 +695,7 @@ export {
     command_def,
     run,
     toolchain_gate_or_dispatch,
-    toolchain_install_to_base
+    toolchain_install_to_base,
+    _detect_os,
+    _detect_arch
 };
