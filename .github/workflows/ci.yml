@@ -1498,7 +1498,7 @@ jobs:
           if-no-files-found: error
 
   build-macos:
-    name: Build + Test [macos-arm64 / ${{ matrix.shard }}]
+    name: Build + Test [macos-arm64 / ${{ matrix.shard }}${{ matrix.shard2 && format('+{0}', matrix.shard2) || '' }}]
     needs: [ci-scope, build-compiler-macos]
     if: ${{ needs.ci-scope.outputs.source == 'true' }}
     # macos-26: adopted from the nightly-selfhost canary now that the
@@ -1514,11 +1514,44 @@ jobs:
     timeout-minutes: 120
     strategy:
       fail-fast: false
+      # SFN-873: five jobs, not eight. macOS runner concurrency is 5, so an
+      # eight-entry matrix does NOT run eight-wide — three jobs queue, and the
+      # last one *dispatched* sets the makespan rather than the slowest shard.
+      # Measured on run 31740731685: every queued shard started within 3s of a
+      # predecessor finishing, three times consecutively, and `e2e-d` did not
+      # begin until 22 min in. Declaring more shards than there are runners is
+      # strictly worse than declaring exactly as many: total work is fixed and
+      # the surplus buys only queueing. There is no `max-parallel` here to
+      # raise — the ceiling is the account's macOS runner limit, external to
+      # this repo.
+      #
+      # So the eight shards are GROUPED into five legs, LPT-packed on measured
+      # `Test + package` durations (s): e2e-b 2198 | e2e-d 1485 + unit-b 668 |
+      # e2e-c 1505 + int-caps 651 | e2e-a 1711 | unit-a 1012 + unit-c 677.
+      # Makespan 2198s vs ~46 min observed at eight entries.
+      #
+      # The shard *taxonomy* is unchanged and still lives in compiler source
+      # (`_shard_defs()`, `compiler/src/cli/commands/dev_shard.sfn`); this only
+      # changes how many CI jobs those eight shards are spread across, so the
+      # shard-cover lint is unaffected — the union is still all eight.
+      #
+      # Linux deliberately keeps eight entries: both linux matrices start all
+      # eight simultaneously (verified in the same run), so they pay no
+      # queueing penalty and would only lose from grouping.
+      #
+      # Rebalance from fresh measurements after SFN-864 lands — it changes the
+      # per-shard durations these groups are packed against.
       matrix:
-        shard: [unit-a, unit-b, unit-c, int-caps, e2e-a, e2e-b, e2e-c, e2e-d]
         include:
+          - shard: e2e-b
+          - shard: e2e-d
+            shard2: unit-b
+          - shard: e2e-c
+            shard2: int-caps
+          - shard: e2e-a
           # Primary leg: runs the one-shot non-test steps + packaging.
           - shard: unit-a
+            shard2: unit-c
             primary: true
 
     steps:
@@ -1617,34 +1650,77 @@ jobs:
           shard_test_jobs: "3"
           package: ${{ matrix.primary && 'true' || 'false' }}
 
+      # SFN-873: preserve the first shard's metrics before the second run
+      # overwrites `build/ci-metrics.env`. Without this the leg would report
+      # only its last shard, and the per-shard durations needed to rebalance
+      # these groups later would be lost. The per-shard `agent-test.shard-*`
+      # JSONL sidecars are already distinct and unaffected.
+      - name: Snapshot first-shard metrics (SFN-873)
+        if: ${{ always() && matrix.shard2 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f build/ci-metrics.env ]; then
+            cp build/ci-metrics.env "build/ci-metrics.${{ matrix.shard }}.env"
+          fi
+
+      # SFN-873: grouped legs run a second shard in the same job rather than
+      # queueing behind a fifth macOS runner that does not exist. `skip-build`
+      # means this reuses the compiler tree the first invocation already set
+      # up; `package: false` keeps packaging a once-per-OS action on the
+      # primary leg's first invocation.
+      - name: Test second shard (SFN-873)
+        if: ${{ matrix.shard2 }}
+        uses: ./.github/actions/sailfin-build
+        env:
+          # PR CI should not require a PAT.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          mode: skip-build
+          target: macos-arm64
+          clang: clang
+          seed_version: ${{ steps.seed.outputs.seed_version }}
+          shard: ${{ matrix.shard2 }}
+          shard_test_jobs: "3"
+          package: 'false'
+
       # #1235 measurement (read-only): surface this shard leg's test-phase
       # wall time and cache.test_bin_hit_rate (captured by the sailfin-build
       # action into build/ci-metrics.env) into the job log + step summary.
       # The findings comment scrapes the per-shard `[ci-metrics]` line; the
       # per-leg queue/start/end come from the Actions API at analysis time.
+      # SFN-873: a grouped leg produces one metrics file per shard, so this
+      # emits a row per shard rather than a single row. Each file is sourced
+      # in its own subshell — sourcing several in one would let an unset key
+      # in a later file silently inherit the previous file's value.
       - name: Emit macOS test-leg metrics (#1235)
         if: ${{ always() }}
         shell: bash
         run: |
           set -euo pipefail
-          f=build/ci-metrics.env
-          if [ ! -f "$f" ]; then
-            echo "[ci-metrics] no metrics file ($f) — tests likely failed before measurement (shard ${{ matrix.shard }})"
-            exit 0
+          emitted=0
+          for f in "build/ci-metrics.${{ matrix.shard }}.env" build/ci-metrics.env; do
+            [ -f "$f" ] || continue
+            (
+              # shellcheck disable=SC1090
+              . "$f"
+              shard="${ci_metrics_shard:-${{ matrix.shard }}}"
+              echo "[ci-metrics] target=${ci_metrics_target:-macos-arm64} phase=test shard=${shard} test_s=${test_seconds:-?} test_bin_hit_rate=${test_bin_hit_rate:-?}"
+              {
+                echo "### macOS test leg metrics — shard ${shard} (#1235)"
+                echo ""
+                echo "| metric | value |"
+                echo "| --- | --- |"
+                echo "| shard | ${shard} |"
+                echo "| test wall (s) | ${test_seconds:-?} |"
+                echo "| cache.test_bin_hit_rate | ${test_bin_hit_rate:-?} |"
+              } >> "$GITHUB_STEP_SUMMARY"
+            )
+            emitted=$((emitted + 1))
+          done
+          if [ "$emitted" -eq 0 ]; then
+            echo "[ci-metrics] no metrics file — tests likely failed before measurement (shard ${{ matrix.shard }}${{ matrix.shard2 && format('+{0}', matrix.shard2) || '' }})"
           fi
-          # shellcheck disable=SC1090
-          . "$f"
-          shard="${ci_metrics_shard:-${{ matrix.shard }}}"
-          echo "[ci-metrics] target=${ci_metrics_target:-macos-arm64} phase=test shard=${shard} test_s=${test_seconds:-?} test_bin_hit_rate=${test_bin_hit_rate:-?}"
-          {
-            echo "### macOS test leg metrics — shard ${shard} (#1235)"
-            echo ""
-            echo "| metric | value |"
-            echo "| --- | --- |"
-            echo "| shard | ${shard} |"
-            echo "| test wall (s) | ${test_seconds:-?} |"
-            echo "| cache.test_bin_hit_rate | ${test_bin_hit_rate:-?} |"
-          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Report compiler metadata
         if: ${{ matrix.primary }}
