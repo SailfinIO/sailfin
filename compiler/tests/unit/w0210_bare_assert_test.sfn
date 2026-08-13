@@ -74,7 +74,7 @@ test "w0210: every expect_ matcher is exempt" ![io] {
         + "    assert expect_eq_int_array(a, b).ok;\n"
         + "    assert expect_contains_str(a, b).ok;\n"
         + "    assert expect_to_throw(f).ok;\n"
-        + "    assert expect_snapshot(name, actual).ok;\n"
+        + "    assert expect_snapshot(actual, key).ok;\n"
         + "}");
     let findings = collect_bare_assert_findings(program);
     assert findings.length == 0;
@@ -82,11 +82,24 @@ test "w0210: every expect_ matcher is exempt" ![io] {
 
 test "w0210: non-expect MatchResult helpers are exempt" ![io] {
     let program = parse_program("test \"t\" {\n"
-        + "    assert assert_compiles(src).ok;\n"
-        + "    assert assert_does_not_compile(src).ok;\n"
-        + "    assert snapshot_match_in(dir, name, actual).ok;\n"
+        + "    assert assert_compiles(source, expect).ok;\n"
+        + "    assert assert_does_not_compile(source, expect).ok;\n"
+        + "    assert snapshot_match_in(actual, dir, key, update).ok;\n"
         + "    assert match_ok().ok;\n"
         + "    assert match_fail(msg).ok;\n"
+        + "}");
+    let findings = collect_bare_assert_findings(program);
+    assert findings.length == 0;
+}
+
+// `matcher_*` is module-private to `capsules/sfn/test/src/matcher.sfn`, but
+// a test importing that module directly reaches it and would otherwise
+// reproduce the SFN-859 false positive.
+test "w0210: the module-private matcher_ family is exempt" ![io] {
+    let program = parse_program("test \"t\" {\n"
+        + "    assert matcher_eq_int(a, b).ok;\n"
+        + "    assert matcher_eq_string(a, b).ok;\n"
+        + "    assert matcher_contains_string(a, b).ok;\n"
         + "}");
     let findings = collect_bare_assert_findings(program);
     assert findings.length == 0;
@@ -98,11 +111,57 @@ test "w0210: the matcher form is exempt when nested in a block" ![io] {
     assert findings.length == 0;
 }
 
+test "w0210: the matcher form is exempt inside loop and match bodies" ![io] {
+    let program = parse_program("test \"t\" {\n"
+        + "    loop { assert expect_eq_int(1, 1).ok; break; }\n"
+        + "    match v { Some(x) => { assert expect_eq_int(x, 1).ok; } }\n"
+        + "}");
+    let findings = collect_bare_assert_findings(program);
+    assert findings.length == 0;
+}
+
+// The condition is recovered by re-parsing the assert's tokens, which falls
+// back to `Expression.Raw` when the parse does not consume them cleanly —
+// and a Raw condition is not recognizable as a matcher. These argument
+// shapes are the ones most likely to trip that path.
+test "w0210: the matcher form is exempt with a lambda argument" ![io] {
+    let program = parse_program("test \"t\" { assert expect_to_throw(fn () -> int { return boom(); }).ok; }");
+    let findings = collect_bare_assert_findings(program);
+    assert findings.length == 0;
+}
+
+test "w0210: the matcher form is exempt with a struct-literal argument" ![io] {
+    let program = parse_program("test \"t\" { assert expect_eq_int(Point { x: 1, y: 2 }.x, 1).ok; }");
+    let findings = collect_bare_assert_findings(program);
+    assert findings.length == 0;
+}
+
+test "w0210: the matcher form is exempt when its call spans lines" ![io] {
+    let program = parse_program("test \"t\" {\n" + "    assert expect_eq_str(\n"
+        + "        actual,\n"
+        + "        expected\n"
+        + "    ).ok;\n"
+        + "}");
+    let findings = collect_bare_assert_findings(program);
+    assert findings.length == 0;
+}
+
 // The exemption is narrow: only a `.ok` read on a direct matcher call.
 test "w0210: a bare call assert is still flagged" ![io] {
     let program = parse_program("test \"t\" { assert contains(out, \"x\"); }");
     let findings = collect_bare_assert_findings(program);
     assert findings.length == 1;
+}
+
+// Pins the underscore in the `expect_` / `matcher_` prefixes: without it,
+// any identifier merely starting with "expect" or "matcher" is exempted.
+test "w0210: a prefix-adjacent name without the underscore is still flagged" ![io] {
+    let program = parse_program("test \"t\" {\n"
+        + "    assert expectation(x).ok;\n"
+        + "    assert matchers(y).ok;\n"
+        + "}");
+    let findings = collect_bare_assert_findings(program);
+    assert findings.length == 2;
 }
 
 test "w0210: a .ok read on a non-matcher call is still flagged" ![io] {

@@ -36,12 +36,14 @@ test "addition" ![pure] {
 }
 ```
 
-The matcher form above does **not** warn. `assert <matcher>(...).ok;` — a
-`.ok` read on a direct call to any `MatchResult`-returning `sfn/test` helper
-(the `expect_*` family, `assert_compiles`, `assert_does_not_compile`,
-`snapshot_match_in`, `match_ok`, `match_fail`) — is the descriptive shape
-W0210 asks for, so it is exempt. Everything else, including a `.ok` read on
-a variable or on a non-matcher call, is still flagged.
+The matcher form above does **not** warn. `assert <matcher>(...).ok;` is the
+descriptive shape W0210 asks for, so it is exempt. A matcher here means a
+directly-called `sfn/test` helper named `expect_*` or `matcher_*`, or one of
+`assert_compiles`, `assert_does_not_compile`, `snapshot_match_in`,
+`match_ok`, `match_fail`. Everything else is still flagged — including a
+`.ok` read on a variable, and a `.ok` read on a call to anything else.
+Recognition is by name, before types are known, so a helper of your own
+matching one of those names is exempted too.
 
 W0210 is a **warning only** — it never fails a build or changes an exit
 code — and fires solely inside `test` blocks; an `assert` in ordinary code
