@@ -1,6 +1,6 @@
 # Status
 
-Updated: 2026-08-11 (SFN-833). Seed pinned to `0.9.3` (`bootstrap.toml`
+Updated: 2026-08-13 (SFN-587). Seed pinned to `0.9.5` (`bootstrap.toml`
 `[seed].version` — SFEP-0047); the compiler version source of truth is
 `compiler/capsule.toml`.
 
@@ -44,7 +44,7 @@ here.
   rejected outright, it can neither shadow nor substitute for a declared local
   private member. `stage_capsule_imports` additionally refuses any source whose
   origin is empty or unrecognized, so a future locator cannot bypass the gate by
-  omitting provenance. The pinned seed (0.9.3) parses a globbed member
+  omitting provenance. The pinned seed (0.9.5) parses a globbed member
   list, resolves private members from local paths, orders them transitively, and
   links them into a binary, so adopting the field in compiler manifests needs no
   seed cut (`compiler/tests/e2e/seed_private_workspace_fixture_test.sfn`).
@@ -55,7 +55,7 @@ here.
   parser implementation files no longer live under `compiler/src`. The capsule
   declares `publish = false`, depends only on `sfn/strings`, and requires no
   capabilities. The boundary ratchet classifies those files from their physical
-  capsule path with no syntax naming-convention fallback. The pinned 0.9.3 seed
+  capsule path with no syntax naming-convention fallback. The pinned 0.9.5 seed
   resolves the capsule's transitive dependency closure, and the reusable move
   and rename-only determinism procedure is recorded in
   `docs/conventions/compiler-capsule-extractions.md`.
