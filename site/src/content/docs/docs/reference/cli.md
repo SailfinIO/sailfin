@@ -16,6 +16,19 @@ sfn <command> [options] [arguments]
 
 The current version can always be confirmed with `sfn --version`.
 
+### Global options
+
+Global options appear before the command name:
+
+```bash
+sfn --color always check src
+sfn --color=never build src/main.sfn
+```
+
+| Flag | Description |
+|---|---|
+| `--color <auto\|always\|never>` | Control ANSI styling for human terminal diagnostics. The default is `auto`, which enables color only for a terminal; `NO_COLOR` with any non-empty value disables it. JSON output remains unstyled. |
+
 ---
 
 ## Commands

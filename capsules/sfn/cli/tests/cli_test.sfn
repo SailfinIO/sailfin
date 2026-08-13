@@ -402,11 +402,11 @@ test "cli: help hint with subcommand" {
 }
 
 // ---- ANSI styling tests ----
-test "cli: ansi_wrap degrades to plain text when esc is empty" {
-    // With `_esc()` returning "" in the capsule, styling is a no-op.
-    assert strings_equal(bold("hello"), "hello");
-    assert strings_equal(red("error"), "error");
-    assert strings_equal(green("ok"), "ok");
+test "cli: ansi_wrap emits SGR sequences" {
+    let esc = char_from_code(27);
+    assert strings_equal(bold("hello"), esc + "[1mhello" + esc + "[0m");
+    assert strings_equal(red("error"), esc + "[31merror" + esc + "[0m");
+    assert strings_equal(green("ok"), esc + "[32mok" + esc + "[0m");
 }
 
 // ---- Flag label formatting tests ----

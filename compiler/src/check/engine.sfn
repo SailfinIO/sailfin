@@ -35,7 +35,8 @@ import {
     classify_producer,
     render_check_json_envelope
 } from "../diagnostics_json";
-import { render_diagnostic } from "../diagnostics_render";
+import { render_terminal_diagnostic } from "../terminal_output";
+import { style_terminal_diagnostic_text } from "../terminal_output";
 import {
     CheckResult,
     CheckSummary,
@@ -87,7 +88,8 @@ fn _emit_check_diagnostics(result: CheckResult, quiet: boolean) ![io] {
     let mut i: int = 0;
     loop {
         if i >= result.rendered.length { break; }
-        print.err(result.rendered[i]);
+        let severity = result.diagnostics[i].severity;
+        print.err(style_terminal_diagnostic_text(severity, result.rendered[i]));
         i += 1;
     }
 }
@@ -123,7 +125,7 @@ fn _emit_load_warnings(load_result: ImportedInterfaceLoadResult, quiet: boolean)
             primary: null,
             suggestion: null
         };
-        print.err(render_diagnostic(diagnostic_to_diag(diag, "load"), empty_lines, "load"));
+        print.err(render_terminal_diagnostic(diagnostic_to_diag(diag, "load"), empty_lines, "load"));
         i += 1;
     }
     let mut p: int = 0;
@@ -137,7 +139,7 @@ fn _emit_load_warnings(load_result: ImportedInterfaceLoadResult, quiet: boolean)
             primary: null,
             suggestion: null
         };
-        print.err(render_diagnostic(diagnostic_to_diag(diag, "load"), empty_lines, "load"));
+        print.err(render_terminal_diagnostic(diagnostic_to_diag(diag, "load"), empty_lines, "load"));
         p += 1;
     }
 }

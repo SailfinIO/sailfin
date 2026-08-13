@@ -172,6 +172,7 @@ fn _is_driver_module_id(id: string) -> boolean {
         || id == "semver"
         || id == "string_cmd_utils"
         || id == "string_utils"
+        || id == "terminal_output"
         || id == "test_results"
         || id == "test_runner_json"
         || id == "test_runner_state"
@@ -1138,7 +1139,7 @@ test "capsule roles: classification survives physical compiler capsule moves" {
     assert _module_role("compiler/src/new_unclassified_role.sfn") == "";
 }
 
-test "compiler driver: workspace, process, assembly, and final-link owners classify as driver" {
+test "compiler driver: orchestration and terminal-output owners classify as driver" {
     assert _module_role("compiler/src/capsule_resolver/mod.sfn") == ROLE_DRIVER;
     assert _module_role("compiler/src/build/fs.sfn") == ROLE_DRIVER;
     assert _module_role("compiler/src/backend.sfn") == ROLE_DRIVER;
@@ -1149,6 +1150,7 @@ test "compiler driver: workspace, process, assembly, and final-link owners class
     assert _module_role("compiler/src/typecheck_import_loader.sfn") == ROLE_DRIVER;
     assert _module_role("compiler/src/emit_helpers.sfn") == ROLE_DRIVER;
     assert _module_role("compiler/src/codegen_driver.sfn") == ROLE_DRIVER;
+    assert _module_role("compiler/src/terminal_output.sfn") == ROLE_DRIVER;
 }
 
 test "codegen capsule: manifest is private, capability-free, and role-bounded" ![io] {

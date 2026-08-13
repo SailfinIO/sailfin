@@ -16,9 +16,10 @@ import { _publish_lines_atomic } from "./build/fs";
 import { _env_flag } from "./build_flags";
 import { run_ownership_checker } from "./check/ownership";
 import { emit_native_lines_with_module_name } from "./codegen_driver";
-import { render_diagnostic, report_reexport_violations, split_source_lines } from "./diagnostics_render";
+import { report_reexport_violations, split_source_lines } from "./diagnostics_render";
 import { validate_and_render_effects } from "./effect_gate";
 import { load_prelude_global_names } from "./prelude_globals";
+import { render_terminal_diagnostic } from "./terminal_output";
 
 fn _staging_emit_typecheck_diagnostics(entries: Diagnostic[], source: string, file_path: string) ![io] {
     let lines = split_source_lines(source);
@@ -26,7 +27,7 @@ fn _staging_emit_typecheck_diagnostics(entries: Diagnostic[], source: string, fi
     loop {
         if index >= entries.length { break; }
         entries[index].file_path = file_path;
-        let rendered = render_diagnostic(diagnostic_to_diag(entries[index], "typecheck"), lines, "typecheck");
+        let rendered = render_terminal_diagnostic(diagnostic_to_diag(entries[index], "typecheck"), lines, "typecheck");
         print.err(rendered);
         index += 1;
     }

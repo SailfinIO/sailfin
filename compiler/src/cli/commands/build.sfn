@@ -66,10 +66,10 @@ import { prepare_project_capsules } from "../../capsule_resolver";
 import { workspace_capability_gate } from "../../capsule_resolver/capability";
 import { ResolverConsumer } from "../../capsule_resolver/types";
 import { discover_workspace_root, load_workspace_default_members } from "../../capsule_resolver/workspace";
-import { render_diagnostic } from "../../diagnostics_render";
 import { format_backend_failure_banner } from "../../ice";
 import { compile_to_llvm_file_with_module, module_name_from_path } from "../../main";
 import { runtime_capsule_from_root } from "../../runtime_capsule_resolver";
+import { render_terminal_diagnostic } from "../../terminal_output";
 import { CliContext } from "../context";
 import { bootstrap_gate_or_dispatch } from "./dev";
 import { toolchain_gate_or_dispatch } from "./toolchain";
@@ -151,7 +151,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     set_build_target(target_flag);
     if target_flag.length > 0 && !triple_is_supported(target_flag) {
         let empty_lines: string[] = [];
-        print.err(render_diagnostic(diagnostic_to_diag(_unsupported_target_diagnostic(target_flag), "build"), empty_lines, "build"));
+        print.err(render_terminal_diagnostic(diagnostic_to_diag(_unsupported_target_diagnostic(target_flag), "build"), empty_lines, "build"));
         clear_build_target();
         return 2;
     }

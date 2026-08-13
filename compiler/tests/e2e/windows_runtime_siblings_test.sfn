@@ -52,6 +52,13 @@ test "windows siblings: rlimit_windows.sfn emits and defines apply_default_mem_l
     assert contains(ir, "define i32 @apply_default_mem_limit()");
 }
 
+test "windows siblings: terminal_windows.sfn emits and defines sfn_stream_is_terminal" ![io] {
+    let ir = _emit_windows("runtime/sfn/platform/terminal_windows.sfn", "terminal-windows-emit");
+    assert ir.length > 0;
+    assert contains(ir, "define i1 @sfn_stream_is_terminal(");
+    assert contains(ir, "declare i32 @_isatty(");
+}
+
 // SFN-698: this module was a no-op returning 0 for as long as it existed,
 // which left native Windows as the only platform running the compiler with no
 // memory ceiling at all. Pin the job-object surface so a regression back to a

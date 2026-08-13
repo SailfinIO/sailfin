@@ -1,24 +1,24 @@
 // sfn/cli — terminal styling helpers.
 //
-// ANSI styling requires an ESC (0x1B) byte prefix. The bootstrap string
-// unescaper does not support \xHH escapes, so these functions degrade
-// gracefully to plain text. Once \xHH or char_from_code() support lands,
-// swap the _esc() helper to return the real ESC character.
+// ANSI styling requires an ESC (0x1B) byte prefix. Sailfin strings are
+// byte-oriented, so `char_from_code(27)` constructs that prefix directly
+// without relying on a source-level `\xHH` escape.
 //
 // Style policy (issue #792 / 1.3) lives alongside the wrap helpers:
 // `Style` is constructed via `style_for_stream`, `style_with_mode`, or
 // `style_resolve`, and the `paint*` family consults `Style.enabled`
 // to decide whether to apply ANSI codes. The legacy single-arg
-// helpers (`bold`, `red`, …) stay in place — they unconditionally
-// emit plain text today via `_esc()` returning "" — so existing
-// callers keep working while new code threads a `Style` through.
+// helpers (`bold`, `red`, …) stay in place and emit ANSI unconditionally;
+// callers that need policy-aware output should thread a `Style` through the
+// `paint*` family.
 import { Style } from "./types";
 
+extern fn sfn_stream_is_terminal(fd: i32) -> bool;
+
 fn _esc() -> string {
-    // Returns the ANSI escape prefix. Currently returns empty string
-    // because the bootstrap compiler does not support \xHH escapes.
-    // TODO: return real ESC (0x1B) once the string unescaper supports it.
-    return "";
+    // ESC is byte 27. `char_from_code` is the canonical raw-byte constructor
+    // and round-trips every non-NUL byte through Sailfin's string ABI.
+    return char_from_code(27);
 }
 
 fn _ansi_wrap(code: string, text: string) -> string {
@@ -60,10 +60,8 @@ fn gray(text: string) -> string { return _ansi_wrap("90", text); }
 //
 // `Style` policy resolution. The current implementation gates colored
 // output on the `NO_COLOR` env var (see https://no-color.org/) and
-// caller-supplied `--color=auto|always|never` modes. TTY detection
-// will join the `"auto"` gate once Sailfin exposes an `isatty`
-// primitive; until then, `"auto"` returns enabled iff `NO_COLOR` is
-// not set in the environment.
+// caller-supplied `--color=auto|always|never` modes. Automatic mode enables
+// ANSI only when the selected stream is a terminal and `NO_COLOR` is unset.
 //
 // All policy helpers are pure with respect to their arguments except
 // for the env-var read in `no_color_active`, `style_for_stream`, and
@@ -92,10 +90,16 @@ fn _style_enabled(stream: string, mode: string) -> Style {
 
 fn style_for_stream(stream: string) -> Style ![io] {
     // Build an "auto"-mode Style for the named stream. Disabled when
-    // `NO_COLOR` is set in the environment. The `stream` value is
-    // carried on the result so downstream helpers (e.g. `print_diag`
+    // `NO_COLOR` is set or the selected stream is not a terminal. The
+    // `stream` value is carried on the result so downstream helpers (e.g.
+    // `print_diag`
     // in issue 1.4) can pick the right output handle.
     if no_color_active() { return _style_disabled(stream, "auto"); }
+    let mut fd: i32 = 2;
+    if stream == "stdout" { fd = 1; }
+    if !sfn_stream_is_terminal(fd) {
+        return _style_disabled(stream, "auto");
+    }
     return _style_enabled(stream, "auto");
 }
 
@@ -110,16 +114,23 @@ fn style_with_mode(stream: string, mode: string) -> Style ![io] {
 }
 
 fn style_resolve(stream: string, mode: string, no_color_value: string) -> Style {
-    // Fully-pure variant of `style_with_mode`. Useful for tests and
-    // for callers that have already resolved `NO_COLOR` through their
-    // own channel (e.g. a wrapper that snapshots env vars at startup).
+    // Back-compatible pure variant of `style_with_mode`, assuming the stream
+    // is a terminal. Call `style_resolve_for_terminal` when the caller has an
+    // explicit TTY result.
     // `no_color_value` is the raw env-var value — an empty string
     // means "NO_COLOR unset", per the no-color.org convention.
+    if mode == "always" { return _style_enabled(stream, "always"); }
+    if mode == "never" { return _style_disabled(stream, "never"); }
+    return style_resolve_for_terminal(stream, mode, no_color_value, true);
+}
+
+fn style_resolve_for_terminal(stream: string, mode: string, no_color_value: string, is_terminal: boolean) -> Style {
     if mode == "always" { return _style_enabled(stream, "always"); }
     if mode == "never" { return _style_disabled(stream, "never"); }
     if _no_color_from_value(no_color_value) {
         return _style_disabled(stream, "auto");
     }
+    if !is_terminal { return _style_disabled(stream, "auto"); }
     return _style_enabled(stream, "auto");
 }
 

@@ -1,0 +1,5 @@
+// Windows sibling of terminal.sfn. The UCRT exports `_isatty`, not POSIX's
+// undecorated `isatty`; target conditioning swaps this module by basename.
+extern fn _isatty(fd: i32) -> i32;
+
+fn sfn_stream_is_terminal(fd: i32) -> bool ![io] { return _isatty(fd) != 0; }

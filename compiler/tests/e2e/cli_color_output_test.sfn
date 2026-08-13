@@ -1,0 +1,88 @@
+// End-to-end color-policy coverage against the real compiler binary.
+//
+// A malformed standalone file produces one human diagnostic without invoking
+// the linker. These cases pin explicit ANSI enablement, explicit and
+// environment/TTY-driven disablement, and the structured-output invariant.
+import { contains, find } from "sfn/strings";
+import { expect_eq_bool, expect_eq_int, expect_eq_str } from "sfn/test";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+fn _child_env(no_color: string) -> string[] ![io] {
+    let mut values: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { values.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { values.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { values.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 {
+        values.push("SAILFIN_TEST_SCRATCH=" + scratch);
+    }
+    if no_color.length > 0 { values.push("NO_COLOR=" + no_color); }
+    return values;
+}
+
+fn _fixture() -> string ![io] {
+    let mut root = env.get("SAILFIN_TEST_SCRATCH");
+    if root.length == 0 { root = "/tmp"; }
+    root = root + "/cli-color-output";
+    fs.createDirectory(root, true);
+    let path = root + "/broken.sfn";
+    fs.writeFile(path, "fn broken( {\n");
+    return path;
+}
+
+fn _has_ansi(text: string) -> boolean {
+    return find(text, char_from_code(27) + "[", 0) >= 0;
+}
+
+test "cli color: always emits ANSI in captured human diagnostics" ![io] {
+    let exit = process.run_capture([_sfn_bin(), "--color", "always", "check", _fixture()], _child_env("1"));
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    expect_eq_int(exit, 1);
+    expect_eq_bool(_has_ansi(err), true);
+    expect_eq_bool(contains(err, "[31merror"), true);
+    expect_eq_bool(contains(out, "checked 1 file"), true);
+}
+
+test "cli color: never emits plain captured diagnostics" ![io] {
+    let exit = process.run_capture([_sfn_bin(), "--color=never", "check", _fixture()], _child_env(""));
+    let _out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    expect_eq_int(exit, 1);
+    expect_eq_bool(_has_ansi(err), false);
+    expect_eq_bool(contains(err, "error[E0501]"), true);
+}
+
+test "cli color: auto honors NO_COLOR" ![io] {
+    let exit = process.run_capture([_sfn_bin(), "--color", "auto", "check", _fixture()], _child_env("1"));
+    let _out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    expect_eq_int(exit, 1);
+    expect_eq_bool(_has_ansi(err), false);
+}
+
+test "cli color: auto stays plain for captured output" ![io] {
+    let exit = process.run_capture([_sfn_bin(), "--color", "auto", "check", _fixture()], _child_env(""));
+    let _out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    expect_eq_int(exit, 1);
+    expect_eq_bool(_has_ansi(err), false);
+}
+
+test "cli color: JSON output never contains ANSI" ![io] {
+    let exit = process.run_capture([_sfn_bin(), "--color", "always", "check", "--json", _fixture()], _child_env(""));
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    expect_eq_int(exit, 1);
+    expect_eq_str(err, "");
+    expect_eq_bool(_has_ansi(out), false);
+    expect_eq_bool(contains(out, "\"code\":\"E0501\""), true);
+}

@@ -6,7 +6,7 @@ import { analyze_program_ownership_with_imports } from "sfn/analyzer/ownership_c
 import { Diagnostic, diagnostic_to_diag } from "sfn/analyzer/typecheck_types";
 import { Program } from "sfn/syntax";
 
-import { render_diagnostic } from "../diagnostics_render";
+import { render_terminal_diagnostic } from "../terminal_output";
 
 fn run_ownership_checker(program: Program) -> int ![io] {
     return run_ownership_checker_with_imports(program, empty_import_symbols());
@@ -30,7 +30,7 @@ fn run_ownership_checker_with_imports(program: Program, imports: ImportSymbolTab
                 primary: finding.trigger,
                 suggestion: null
             };
-            print.err(render_diagnostic(diagnostic_to_diag(diagnostic, "ownership"), empty_lines, "ownership"));
+            print.err(render_terminal_diagnostic(diagnostic_to_diag(diagnostic, "ownership"), empty_lines, "ownership"));
         }
         index += 1;
     }

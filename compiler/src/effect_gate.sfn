@@ -45,10 +45,10 @@ import { Program } from "sfn/syntax";
 import {
     capability_violation_to_diagnostic,
     effect_violation_to_diagnostic,
-    render_diagnostic,
     split_source_lines,
     unrecognized_effect_violation_to_diagnostic
 } from "./diagnostics_render";
+import { render_terminal_diagnostic } from "./terminal_output";
 
 // -------------------------------------------------------------------
 // Severity selection
@@ -144,7 +144,7 @@ fn validate_and_render_effects_with_capabilities(program: Program, source: strin
         v.severity = severity;
         let mut diag: Diagnostic = effect_violation_to_diagnostic(v);
         diag.file_path = file_path;
-        let rendered = render_diagnostic(diagnostic_to_diag(diag, "effect"), source_lines, "effect");
+        let rendered = render_terminal_diagnostic(diagnostic_to_diag(diag, "effect"), source_lines, "effect");
         print.err(rendered);
         if severity == "error" { errors += 1; }
         i += 1;
@@ -160,7 +160,7 @@ fn validate_and_render_effects_with_capabilities(program: Program, source: strin
         cv.severity = severity;
         let mut cdiag: Diagnostic = capability_violation_to_diagnostic(cv);
         cdiag.file_path = file_path;
-        let rendered = render_diagnostic(diagnostic_to_diag(cdiag, "effect"), source_lines, "effect");
+        let rendered = render_terminal_diagnostic(diagnostic_to_diag(cdiag, "effect"), source_lines, "effect");
         print.err(rendered);
         if severity == "error" { errors += 1; }
         k += 1;
@@ -178,7 +178,7 @@ fn validate_and_render_effects_with_capabilities(program: Program, source: strin
         uv.severity = severity;
         let mut udiag: Diagnostic = unrecognized_effect_violation_to_diagnostic(uv);
         udiag.file_path = file_path;
-        let rendered = render_diagnostic(diagnostic_to_diag(udiag, "effect"), source_lines, "effect");
+        let rendered = render_terminal_diagnostic(diagnostic_to_diag(udiag, "effect"), source_lines, "effect");
         print.err(rendered);
         if severity == "error" { errors += 1; }
         u += 1;
