@@ -731,13 +731,19 @@ fn match_exhaustive_failed(value: any) -> void {
 fn char_code(character: string) -> int {
     if character.length == 0 { return -1; }
 
-    // Returns the raw leading BYTE of `character` (0..255) — not a Unicode
-    // code point. Strings are byte-oriented: `.length` is a byte count, and
-    // `s[i]` / `char_at` / `grapheme_at` each yield a one-byte string
-    // (`sfn_str_grapheme_at_lv` -> `sfn_str_grapheme_byte`, a single
-    // `load_byte`). So `char_code(s[i])` never exceeds 255, and the `& 255` in
-    // callers such as `capsules/sfn/crypto/src/bits.sfn` narrows nothing — it
-    // documents the contract rather than enforcing it.
+    // Returns the raw leading BYTE of `character` (1..255), or -1 for the
+    // empty string — not a Unicode code point. Byte 0 is unreachable: a
+    // non-empty string cannot begin with NUL under the strnlen-recovered
+    // model. Strings are byte-oriented: `.length` is a byte count, and an
+    // in-bounds `s[i]` / `char_at` / `grapheme_at` each yield a one-byte
+    // string (`sfn_str_grapheme_at_lv` -> `sfn_str_grapheme_byte`, a single
+    // `load_byte`); out of bounds they yield "". So `char_code(s[i])` never
+    // exceeds 255, and for an in-bounds index the `& 255` in callers such as
+    // `capsules/sfn/crypto/src/bits.sfn` narrows nothing — it documents the
+    // contract rather than enforcing it. That is not license to drop the
+    // mask: callers taking an arbitrary string (`crypto/src/pem.sfn`,
+    // `crypto/src/ed25519.sfn`) can be handed "", where the mask folds the
+    // -1 sentinel to 255 rather than passing it through.
     //
     // A multi-byte character passed whole yields only its leading UTF-8 byte:
     // `char_code("Ł")` is 197 (0xC5), not the code point 321. `char_from_code`
