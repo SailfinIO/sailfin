@@ -3,7 +3,7 @@
 // Provides SHA-256 and SHA-512 hashing (data integrity, checksums,
 // content-addressable storage), base64 encode/decode, and Ed25519 signing and
 // verification (RFC 8032). No effects required — pure computation.
-import { hex_byte, string_to_bytes } from "./bits";
+import { hex_byte, strict_base64_bytes, string_to_bytes } from "./bits";
 import { hmac_sha256_bytes, sha256_bytes } from "./hkdf";
 
 export { ed25519_verify, ed25519_verify_utf8 } from "./ed25519";
@@ -476,29 +476,6 @@ fn base64_encode(data: string) -> string {
     return out;
 }
 
-// Map a single standard-alphabet base64 character to its 6-bit value, or -1
-// if `c` is not an alphabet character (`=` padding included). Byte-oriented:
-// `char_code(c)` is the raw 0-255 byte, so the ASCII ranges select directly.
-fn base64_sextet(c: string) -> int {
-    let code: int = char_code(c) & 255;
-    if code >= 65 && code <= 90 {
-        return code - 65;
-    }  // 'A'..'Z' → 0..25
-    if code >= 97 && code <= 122 {
-        return code - 97 + 26;
-    }  // 'a'..'z' → 26..51
-    if code >= 48 && code <= 57 {
-        return code - 48 + 52;
-    }  // '0'..'9' → 52..61
-    if code == 43 {
-        return 62;
-    }  // '+' → 62
-    if code == 47 {
-        return 63;
-    }  // '/' → 63
-    return -1;
-}
-
 fn base64_decode(s: string) -> string {
     // Decode standard RFC 4648 base64 (with `=` padding) back to the raw byte
     // string, reversing `base64_encode`. Pure Sailfin: byte-oriented over the
@@ -516,66 +493,35 @@ fn base64_decode(s: string) -> string {
     // tokens); fully general binary decode arrives with the SfnString aggregate
     // (#874 M1.A.2).
     //
+    // The strict-padding state machine lives once, in `strict_base64_bytes`
+    // (SFN-760); this is its `string`-returning face (SFN-848). The two differ
+    // only in the NUL rule above, applied here to the decoded bytes —
+    // `strict_base64_bytes` is binary-safe and returns 0x00 verbatim.
+    //
+    // Nothing in-tree calls this: `capsules/sfn/crypto/tests/base64_test.sfn`
+    // is its only consumer, and DER-bearing callers use `strict_base64_bytes`
+    // or `pem_certificates_to_der`. It stays a published capsule export for
+    // out-of-tree consumers, so removing it is an API break requiring owner
+    // sign-off rather than a cleanup (SFN-848).
+    //
     // Usage:
     //   let decoded = base64_decode("aGVsbG8gd29ybGQ=");
     //   // decoded == "hello world"
     //
-    let len: int = s.length;
-    if len == 0 { return ""; }
-    if (len & 3) != 0 { return ""; }
+    let bytes: int[] = strict_base64_bytes(string_to_bytes(s));
+
+    // Every rejection in `strict_base64_bytes` returns [], and a valid
+    // non-empty decode always yields at least one byte, so an empty result is
+    // an unambiguous failure signal. It also covers `s == ""`.
+    if bytes.length == 0 { return ""; }
 
     let mut out: string = "";
     let mut i: int = 0;
     loop {
-        if i >= len { break; }
-
-        let d0: int = base64_sextet(s[i]);
-        let d1: int = base64_sextet(s[i + 1]);
-        if d0 < 0 { return ""; }
-        if d1 < 0 { return ""; }
-
-        let c2: string = s[i + 2];
-        let c3: string = s[i + 3];
-        let pad2: bool = c2 == "=";
-        let pad3: bool = c3 == "=";
-
-        // `=` is only legal in the final quad, and `X=Y=` (pad in position 2
-        // without one in position 3) is never a valid encoding.
-        if (pad2 || pad3) && (i + 4 != len) { return ""; }
-        if pad2 && !pad3 { return ""; }
-
-        // Byte 0 is present in every quad. A decoded 0x00 byte is
-        // unrepresentable in the current NUL-terminated `string` model
-        // (`char_from_code(0)` yields ""), so decoding collapses to the ""
-        // sentinel rather than silently dropping the byte and returning a
-        // truncated/corrupted payload.
-        let b0: int = ((d0 << 2) | (d1 >> 4)) & 255;
-        if b0 == 0 { return ""; }
-        out = out + char_from_code(b0);
-
-        if pad2 {
-            // "XX==" → one output byte; the low 4 bits of d1 must be zero.
-            if (d1 & 15) != 0 { return ""; }
-        } else {
-            let d2: int = base64_sextet(c2);
-            if d2 < 0 { return ""; }
-            let b1: int = ((d1 << 4) | (d2 >> 2)) & 255;
-            if b1 == 0 { return ""; }
-            out = out + char_from_code(b1);
-
-            if pad3 {
-                // "XXX=" → two output bytes; the low 2 bits of d2 must be zero.
-                if (d2 & 3) != 0 { return ""; }
-            } else {
-                let d3: int = base64_sextet(c3);
-                if d3 < 0 { return ""; }
-                let b2: int = ((d2 << 6) | d3) & 255;
-                if b2 == 0 { return ""; }
-                out = out + char_from_code(b2);
-            }
-        }
-
-        i += 4;
+        if i >= bytes.length { break; }
+        if bytes[i] == 0 { return ""; }
+        out = out + char_from_code(bytes[i]);
+        i += 1;
     }
 
     return out;

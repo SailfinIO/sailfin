@@ -1,13 +1,16 @@
 // capsules/sfn/crypto/src/hkdf.sfn
 //
-// HKDF-SHA-256 (RFC 5869) for the sfn/crypto capsule — the TLS 1.3 key
+// HMAC and HKDF (RFC 2104, RFC 5869) for the sfn/crypto capsule — the TLS 1.3 key
 // schedule's key-derivation primitive (SFEP-0048, Phase B).
 // Operates end-to-end on `int[]` byte arrays (never `string`) because PRK
 // and expand-output blocks are arbitrary binary that routinely contain 0x00
-// bytes, which a Sailfin `string` cannot represent. `hmac_sha256_bytes` here
-// is the pure SHA-256/HMAC-SHA-256 source of truth: the string-based hex
-// wrapper `hmac_sha256` (`mod.sfn`) now delegates to it (SFEP-0048 Phase D).
+// bytes, which a Sailfin `string` cannot represent. `hmac_bytes` is the ladder's
+// source of truth, parametrized on `hash_len` for both SHA-256 and SHA-384
+// (SFN-849); the `*_sha256_*` names are wrappers pinning 32, and the
+// string-based hex wrapper `hmac_sha256` (`mod.sfn`) delegates through them
+// (SFEP-0048 Phase D).
 import { rotr32, store_u32_be } from "./bits";
+import { sha384_bytes } from "./sha384";
 
 // FIPS 180-4 SHA-256 round constants K[0..63].
 fn _sha256_k() -> int[] {
@@ -144,11 +147,32 @@ fn sha256_bytes(msg: int[]) -> int[] {
     return out;
 }
 
-// Pure HMAC-SHA-256 over byte arrays. key and data are int[] byte arrays
-// (values 0-255); returns the 32-byte MAC as an int[]. RFC 2104.
-fn hmac_sha256_bytes(key: int[], data: int[]) -> int[] {
+// Block length in bytes for the HKDF hash selected by `hash_len`: 128 for
+// SHA-384 (hash_len 48), 64 for SHA-256 otherwise.
+fn _hash_block_len(hash_len: int) -> int {
+    if hash_len == 48 { return 128; }
+    return 64;
+}
+
+// Digest dispatch for the HKDF hash selected by `hash_len`: SHA-384 for
+// hash_len 48, SHA-256 otherwise.
+fn _hash_digest(hash_len: int, msg: int[]) -> int[] {
+    if hash_len == 48 { return sha384_bytes(msg); }
+    return sha256_bytes(msg);
+}
+
+// Pure HMAC over byte arrays, parametrized by `hash_len` (32 -> SHA-256, 48
+// -> SHA-384). key and data are int[] byte arrays (values 0-255); returns
+// the hash_len-byte MAC as an int[]. RFC 2104.
+fn hmac_bytes(hash_len: int, key: int[], data: int[]) -> int[] {
+    // A hash length other than 32 or 48 has no HMAC/HKDF ladder here, and
+    // padding to `block_len` while hashing with SHA-256 would produce a
+    // plausible-looking non-standard derivation. Fail closed instead
+    // (SFN-666 design note 5.2), mirroring `hkdf_expand_label`.
+    if hash_len != 32 && hash_len != 48 { return []; }
+    let block_len: int = _hash_block_len(hash_len);
     let mut k: int[] = key;
-    if k.length > 64 { k = sha256_bytes(k); }
+    if k.length > block_len { k = _hash_digest(hash_len, k); }
 
     let mut k_pad: int[] = [];
     let mut ki: int = 0;
@@ -158,7 +182,7 @@ fn hmac_sha256_bytes(key: int[], data: int[]) -> int[] {
         ki += 1;
     }
     loop {
-        if k_pad.length >= 64 { break; }
+        if k_pad.length >= block_len { break; }
         k_pad.push(0);
     }
 
@@ -166,7 +190,7 @@ fn hmac_sha256_bytes(key: int[], data: int[]) -> int[] {
     let mut opad: int[] = [];
     let mut pi: int = 0;
     loop {
-        if pi >= 64 { break; }
+        if pi >= block_len { break; }
         ipad.push((k_pad[pi] ^ 54) & 255);
         opad.push((k_pad[pi] ^ 92) & 255);
         pi += 1;
@@ -185,7 +209,7 @@ fn hmac_sha256_bytes(key: int[], data: int[]) -> int[] {
         inner_msg.push(data[di] & 255);
         di += 1;
     }
-    let inner: int[] = sha256_bytes(inner_msg);
+    let inner: int[] = _hash_digest(hash_len, inner_msg);
 
     let mut outer_msg: int[] = [];
     let mut oi: int = 0;
@@ -200,38 +224,62 @@ fn hmac_sha256_bytes(key: int[], data: int[]) -> int[] {
         outer_msg.push(inner[ni]);
         ni += 1;
     }
-    return sha256_bytes(outer_msg);
+    return _hash_digest(hash_len, outer_msg);
+}
+
+// Pure HMAC-SHA-256 over byte arrays. key and data are int[] byte arrays
+// (values 0-255); returns the 32-byte MAC as an int[]. RFC 2104.
+fn hmac_sha256_bytes(key: int[], data: int[]) -> int[] {
+    return hmac_bytes(32, key, data);
+}
+
+// HKDF-Extract (RFC 5869 §2.2), parametrized by `hash_len` (32 -> SHA-256,
+// 48 -> SHA-384). salt and ikm are int[] byte arrays; salt may be empty
+// (treated as hash_len zero bytes per the RFC). Returns the hash_len-byte
+// PRK.
+fn hkdf_extract(hash_len: int, salt: int[], ikm: int[]) -> int[] {
+    // A hash length other than 32 or 48 has no HMAC/HKDF ladder here, and
+    // padding to `block_len` while hashing with SHA-256 would produce a
+    // plausible-looking non-standard derivation. Fail closed instead
+    // (SFN-666 design note 5.2), mirroring `hkdf_expand_label`.
+    if hash_len != 32 && hash_len != 48 { return []; }
+    let mut s: int[] = salt;
+    if s.length == 0 {
+        let mut zeros: int[] = [];
+        let mut zi: int = 0;
+        loop {
+            if zi >= hash_len { break; }
+            zeros.push(0);
+            zi += 1;
+        }
+        s = zeros;
+    }
+    return hmac_bytes(hash_len, s, ikm);
 }
 
 // HKDF-Extract (RFC 5869 §2.2). salt and ikm are int[] byte arrays; salt may
 // be empty (treated as HashLen=32 zero bytes per the RFC). Returns the
 // 32-byte PRK.
 fn hkdf_sha256_extract(salt: int[], ikm: int[]) -> int[] {
-    let mut s: int[] = salt;
-    if s.length == 0 {
-        let mut zeros: int[] = [];
-        let mut zi: int = 0;
-        loop {
-            if zi >= 32 { break; }
-            zeros.push(0);
-            zi += 1;
-        }
-        s = zeros;
-    }
-    return hmac_sha256_bytes(s, ikm);
+    return hkdf_extract(32, salt, ikm);
 }
 
-// HKDF-Expand (RFC 5869 §2.3). prk is a >=32-byte int[] (HashLen for
-// SHA-256); info is an int[] (may be empty); length is the desired output
-// length in bytes (1..=8160 = 255*32). Returns `length` output bytes as an
-// int[]. Returns [] (empty) if length is out of range or prk is shorter than
-// HashLen (fail-closed — a too-short PRK would silently yield a non-standard
-// derivation).
-fn hkdf_sha256_expand(prk: int[], info: int[], length: int) -> int[] {
-    if length < 1 || length > 8160 { return []; }
-    if prk.length < 32 { return []; }
+// HKDF-Expand (RFC 5869 §2.3), parametrized by `hash_len` (32 -> SHA-256, 48
+// -> SHA-384). prk is a >=hash_len-byte int[]; info is an int[] (may be
+// empty); length is the desired output length in bytes (1..=255*hash_len).
+// Returns `length` output bytes as an int[]. Returns [] (empty) if length is
+// out of range or prk is shorter than hash_len (fail-closed — a too-short
+// PRK would silently yield a non-standard derivation).
+fn hkdf_expand(hash_len: int, prk: int[], info: int[], length: int) -> int[] {
+    // A hash length other than 32 or 48 has no HMAC/HKDF ladder here, and
+    // padding to `block_len` while hashing with SHA-256 would produce a
+    // plausible-looking non-standard derivation. Fail closed instead
+    // (SFN-666 design note 5.2), mirroring `hkdf_expand_label`.
+    if hash_len != 32 && hash_len != 48 { return []; }
+    if length < 1 || length > 255 * hash_len { return []; }
+    if prk.length < hash_len { return []; }
 
-    let n: int = (length + 31) / 32;
+    let n: int = (length + hash_len - 1) / hash_len;
     let mut t: int[] = [];
     let mut okm: int[] = [];
     let mut i: int = 1;
@@ -253,7 +301,7 @@ fn hkdf_sha256_expand(prk: int[], info: int[], length: int) -> int[] {
         }
         msg.push(i & 255);
 
-        t = hmac_sha256_bytes(prk, msg);
+        t = hmac_bytes(hash_len, prk, msg);
 
         let mut tj: int = 0;
         loop {
@@ -272,4 +320,14 @@ fn hkdf_sha256_expand(prk: int[], info: int[], length: int) -> int[] {
         ri += 1;
     }
     return result;
+}
+
+// HKDF-Expand (RFC 5869 §2.3). prk is a >=32-byte int[] (HashLen for
+// SHA-256); info is an int[] (may be empty); length is the desired output
+// length in bytes (1..=8160 = 255*32). Returns `length` output bytes as an
+// int[]. Returns [] (empty) if length is out of range or prk is shorter than
+// HashLen (fail-closed — a too-short PRK would silently yield a non-standard
+// derivation).
+fn hkdf_sha256_expand(prk: int[], info: int[], length: int) -> int[] {
+    return hkdf_expand(32, prk, info, length);
 }

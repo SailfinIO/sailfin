@@ -501,9 +501,9 @@ test "runtime tls: an unreadable trust store reports trust-store, not cert-verif
     //
     // `trust_store_load` fails, so `_tls_anchors` records `trust_store`;
     // `x509_verify_chain` then reports `no-anchor` for the empty anchor
-    // set — the `no-anchor` verdict code itself is trace-only rendering
-    // detail with no equivalent through `tls.last_error()`, so unlike the
-    // pre-SFN-822 version of this test it is not asserted here.
+    // set. The `no-anchor` verdict code is trace-only rendering detail with
+    // no equivalent through `tls.last_error()`, so it is asserted against
+    // the trace below (SFN-850) rather than the reason slot.
     //
     // The reason assertion is the regression guard for the defect the
     // SFN-816 review caught: the verify seam used to OVERWRITE the
@@ -530,6 +530,12 @@ test "runtime tls: an unreadable trust store reports trust-store, not cert-verif
     let traced_err = _client_stderr(client_bin, traced_env, out_path);
     assert contains(traced_err, "(also) cert-verify");
     assert find(traced_err, "trust-store", 0) < find(traced_err, "(also) cert-verify", 0);
+
+    // The verdict code travels in the demoted line's detail, which renders as
+    // `<reason>: <code>: <message>`. Asserting the code together with the
+    // reason that precedes it pins its position in the render, so dropping or
+    // renaming it fails here rather than passing on a bare substring match.
+    assert contains(traced_err, "(also) cert-verify: no-anchor");
 
     // The trace must stay off by default — it goes to stderr on a security
     // path and discloses the CA-bundle path, so a default-on trace would be

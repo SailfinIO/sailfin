@@ -49,6 +49,7 @@ sfn-sources = [
     "sfn/memory/rc.sfn",
     "sfn/memory/mem.sfn",
     "sfn/memory/ownedbuf.sfn",
+    "sfn/memory/secretbuf.sfn",
     "sfn/string.sfn",
     "sfn/array.sfn",
     "sfn/clock.sfn",
