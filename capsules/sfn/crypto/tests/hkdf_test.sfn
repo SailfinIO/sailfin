@@ -3,8 +3,17 @@
 // Regression coverage for HKDF-SHA-256 (RFC 5869) and its internal pure
 // HMAC-SHA-256: RFC 4231 test case 1 cross-checks the HMAC, and RFC 5869
 // test cases 1 and 3 cover extract/expand, including empty salt/info and
-// out-of-range length rejection.
-import { hkdf_sha256_expand, hkdf_sha256_extract, hmac_sha256_bytes } from "../src/hkdf";
+// out-of-range length rejection. Also covers the parametrized hash_len=48
+// (SHA-384) paths of `hmac_bytes`/`hkdf_extract`/`hkdf_expand` (SFN-849),
+// which previously had no execution coverage.
+import {
+    hkdf_expand,
+    hkdf_extract,
+    hkdf_sha256_expand,
+    hkdf_sha256_extract,
+    hmac_bytes,
+    hmac_sha256_bytes
+} from "../src/hkdf";
 import { eq_bytes, hexb } from "./support/hex";
 
 // RFC 4231 test case 1 cross-checks the internal pure HMAC-SHA-256.
@@ -51,4 +60,35 @@ test "hkdf: expand rejects a PRK shorter than HashLen" {
     let info: int[] = [];
     let empty: int[] = hkdf_sha256_expand(short_prk, info, 42);
     assert empty.length == 0;
+}
+
+// RFC 4231 test case 6: >block-size (128-byte) key branch of hmac_bytes at
+// hash_len 48, which had no coverage before SFN-849.
+test "hmac_bytes: RFC 4231 test case 6 at hash_len 48 (key longer than the 128-byte block)" {
+    let key: int[] = hexb("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");  // 131 x 0xaa
+    let data: int[] = hexb("54657374205573696e67204c6172676572205468616e20426c6f636b2d53697a65204b6579202d2048617368204b6579204669727374");
+    let mac: int[] = hmac_bytes(48, key, data);
+    assert eq_bytes(mac, hexb("4ece084485813e9088d2c63a041bc5b44f9ef1012a2b588f3cd11f05033ac4c60c2ef6ab4030fe8296248df163f44952"));
+}
+
+// RFC 4231 test case 7: long key and long data at hash_len 48.
+test "hmac_bytes: RFC 4231 test case 7 at hash_len 48 (long key and long data)" {
+    let key: int[] = hexb("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");  // 131 x 0xaa
+    let data: int[] = hexb("5468697320697320612074657374207573696e672061206c6172676572207468616e20626c6f636b2d73697a65206b657920616e642061206c6172676572207468616e20626c6f636b2d73697a6520646174612e20546865206b6579206e6565647320746f20626520686173686564206265666f7265206265696e6720757365642062792074686520484d414320616c676f726974686d2e");
+    let mac: int[] = hmac_bytes(48, key, data);
+    assert eq_bytes(mac, hexb("6617178e941f020d351e2f254e8fd32c602420feb0b8fb9adccebb82461e99c5a678cc31e799176d3860e6110c46523e"));
+}
+
+// RFC 5869 has no SHA-384 trace; these vectors are computed per the RFC 5869
+// algorithm at hash_len=48, mirroring the convention used for the SHA-384
+// vectors in tls13_schedule_test.sfn. L=100 with hash_len=48 gives n=3,
+// exercising both the multi-block counter loop and the tail truncation.
+test "hkdf: multi-block expand at hash_len 48 (L=100, n=3)" {
+    let ikm: int[] = hexb("0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b");  // 22 x 0x0b
+    let salt: int[] = hexb("000102030405060708090a0b0c");
+    let prk: int[] = hkdf_extract(48, salt, ikm);
+    assert eq_bytes(prk, hexb("704b39990779ce1dc548052c7dc39f303570dd13fb39f7acc564680bef80e8dec70ee9a7e1f3e293ef68eceb072a5ade"));
+    let info: int[] = hexb("f0f1f2f3f4f5f6f7f8f9");
+    let okm: int[] = hkdf_expand(48, prk, info, 100);
+    assert eq_bytes(okm, hexb("9b5097a86038b805309076a44b3a9f38063e25b516dcbf369f394cfab43685f748b6457763e4f0204fc5d95d1da3e62587b22eb8943d0fab6bb631a2fe9df1a68c6ce5d56116a52005b3f122b88b39b7251fcd6c44d3ef25f20ed96802bf1b2c1d98bf74"));
 }

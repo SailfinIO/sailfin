@@ -15,147 +15,24 @@
 //
 // Operates end-to-end on `int[]` byte arrays (never `string`) because secrets
 // and expand outputs are arbitrary binary that routinely contain 0x00 bytes,
-// which a Sailfin `string` cannot represent. SHA-256 HMAC/HKDF are reused from
-// `hkdf.sfn`; the SHA-384 digest comes from `sha384.sfn`'s `sha384_bytes`, so
-// the 64-bit limb core and the 80-entry round-constant table exist exactly once
-// in the capsule (SFN-662). Only the SHA-384 HMAC/HKDF layer (block size 128,
-// 48-byte output) is local, pending SFN-666.
+// which a Sailfin `string` cannot represent. The HMAC/HKDF ladder is reused
+// from `hkdf.sfn`, parametrized on `hash_len` for both hashes (SFN-849); the
+// SHA-384 digest comes from `sha384.sfn`'s `sha384_bytes`, so the 64-bit limb
+// core and the 80-entry round-constant table exist exactly once in the capsule
+// (SFN-662). Nothing in this ladder is local any more — the dispatchers below
+// only forward the inferred `hash_len`.
 import { string_to_bytes } from "./bits";
-import { hkdf_sha256_expand, hmac_sha256_bytes } from "./hkdf";
-import { sha384_bytes } from "./sha384";
-
-// Pure HMAC-SHA-384 over byte arrays (RFC 2104). SHA-384's block size is 128
-// bytes (it is SHA-512-based), not 64. key and data are int[] byte arrays;
-// returns the 48-byte MAC.
-fn _hmac_sha384_bytes(key: int[], data: int[]) -> int[] {
-    let mut k: int[] = key;
-    if k.length > 128 { k = sha384_bytes(k); }
-
-    let mut k_pad: int[] = [];
-    let mut ki: int = 0;
-    loop {
-        if ki >= k.length { break; }
-        k_pad.push(k[ki] & 255);
-        ki += 1;
-    }
-    loop {
-        if k_pad.length >= 128 { break; }
-        k_pad.push(0);
-    }
-
-    let mut ipad: int[] = [];
-    let mut opad: int[] = [];
-    let mut pi: int = 0;
-    loop {
-        if pi >= 128 { break; }
-        ipad.push((k_pad[pi] ^ 54) & 255);
-        opad.push((k_pad[pi] ^ 92) & 255);
-        pi += 1;
-    }
-
-    let mut inner_msg: int[] = [];
-    let mut ii: int = 0;
-    loop {
-        if ii >= ipad.length { break; }
-        inner_msg.push(ipad[ii]);
-        ii += 1;
-    }
-    let mut di: int = 0;
-    loop {
-        if di >= data.length { break; }
-        inner_msg.push(data[di] & 255);
-        di += 1;
-    }
-    let inner: int[] = sha384_bytes(inner_msg);
-
-    let mut outer_msg: int[] = [];
-    let mut oi: int = 0;
-    loop {
-        if oi >= opad.length { break; }
-        outer_msg.push(opad[oi]);
-        oi += 1;
-    }
-    let mut ni: int = 0;
-    loop {
-        if ni >= inner.length { break; }
-        outer_msg.push(inner[ni]);
-        ni += 1;
-    }
-    return sha384_bytes(outer_msg);
-}
-
-// HKDF-Expand over SHA-384 (RFC 5869 §2.3, HashLen=48). Fail-closed to [] for
-// an out-of-range length or a PRK shorter than HashLen, matching the SHA-256
-// `hkdf_sha256_expand` contract.
-fn _hkdf_sha384_expand(prk: int[], info: int[], length: int) -> int[] {
-    if length < 1 || length > 12240 { return []; }
-    if prk.length < 48 { return []; }
-
-    let n: int = (length + 47) / 48;
-    let mut t: int[] = [];
-    let mut okm: int[] = [];
-    let mut i: int = 1;
-    loop {
-        if i > n { break; }
-
-        let mut msg: int[] = [];
-        let mut ti: int = 0;
-        loop {
-            if ti >= t.length { break; }
-            msg.push(t[ti]);
-            ti += 1;
-        }
-        let mut fi: int = 0;
-        loop {
-            if fi >= info.length { break; }
-            msg.push(info[fi] & 255);
-            fi += 1;
-        }
-        msg.push(i & 255);
-
-        t = _hmac_sha384_bytes(prk, msg);
-
-        let mut tj: int = 0;
-        loop {
-            if tj >= t.length { break; }
-            okm.push(t[tj]);
-            tj += 1;
-        }
-        i += 1;
-    }
-
-    let mut result: int[] = [];
-    let mut ri: int = 0;
-    loop {
-        if ri >= length { break; }
-        result.push(okm[ri]);
-        ri += 1;
-    }
-    return result;
-}
+import { hkdf_expand, hkdf_extract } from "./hkdf";
 
 // ── Hash dispatch (hash_len = 32 -> SHA-256, 48 -> SHA-384) ───────
 fn _hkdf_expand(hash_len: int, prk: int[], info: int[], length: int) -> int[] {
-    if hash_len == 48 { return _hkdf_sha384_expand(prk, info, length); }
-    return hkdf_sha256_expand(prk, info, length);
+    return hkdf_expand(hash_len, prk, info, length);
 }
 
 // HKDF-Extract (RFC 5869 §2.2) = HMAC(salt, ikm), with an absent salt treated
 // as HashLen zero bytes.
 fn _hkdf_extract(hash_len: int, salt: int[], ikm: int[]) -> int[] {
-    let mut s: int[] = salt;
-    if s.length == 0 {
-        let mut zeros: int[] = [];
-        let mut zi: int = 0;
-        loop {
-            if zi >= hash_len { break; }
-            zeros.push(0);
-            zi += 1;
-        }
-        s = zeros;
-    }
-    if hash_len == 48 { return _hmac_sha384_bytes(s, ikm); }
-    return hmac_sha256_bytes(s, ikm);
+    return hkdf_extract(hash_len, salt, ikm);
 }
 
 // Transcript-Hash of the empty message — the context for every
