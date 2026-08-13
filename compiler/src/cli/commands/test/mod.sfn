@@ -129,7 +129,12 @@ import {
     _parse_shard_total,
     _resolve_auto_test_jobs,
     _resolve_test_jobs,
+    _shard_default_weight,
     _shard_keeps_index,
+    _shard_lpt_keeps,
+    _shard_weight_for_path,
+    _shard_weight_table_row_count,
+    _shard_weight_table_text_at,
     _test_jobs_budget
 } from "./arg_and_jobs";
 import {
@@ -206,11 +211,11 @@ import {
 import { _run_single_process } from "./single_process_run";
 
 // The `sfn/cli` definition for `test`, registered on the v2 root via
-// `with_subcommand`. Three boolean flags, three value flags (`-k`,
-// `--tag`, `--shard`), one int flag (`--jobs`), and a variadic `suite`
-// positional.
+// `with_subcommand`. Three boolean flags, four value flags (`-k`, `--tag`,
+// `--shard`, `--shard-weights`), one int flag (`--jobs`), and a variadic
+// `suite` positional.
 fn command_def() -> Command {
-    return with_arg(with_flag(with_flag(with_flag(with_flag(with_flag(with_flag(with_flag(with_flag(command("test", "Run tests or workspace default members"), flag("json", "Emit a JSONL event stream")), flag("update-snapshots", "Re-baseline snapshot golden files this run")), flag("no-test-cache", "Bypass the per-test linked-binary cache")), flag_value_short("k", "k", "Only run tests whose name contains this substring")), flag_value("tag", "Only run tests carrying @tag(\"<value>\")")), flag_int("jobs", "Run up to N per-file children concurrently")), flag_value("shard", "Run only the I-th of N file-count-balanced shards (e.g. 1/3)")), flag("skip-toolchain-check", "Bypass the [toolchain] pin check for this invocation")), arg_variadic("suite", "Suite paths (omit at a workspace root to test default members)"));
+    return with_arg(with_flag(with_flag(with_flag(with_flag(with_flag(with_flag(with_flag(with_flag(with_flag(command("test", "Run tests or workspace default members"), flag("json", "Emit a JSONL event stream")), flag("update-snapshots", "Re-baseline snapshot golden files this run")), flag("no-test-cache", "Bypass the per-test linked-binary cache")), flag_value_short("k", "k", "Only run tests whose name contains this substring")), flag_value("tag", "Only run tests carrying @tag(\"<value>\")")), flag_int("jobs", "Run up to N per-file children concurrently")), flag_value("shard", "Run only the I-th of N shards (e.g. 1/3; file-count stride unless --shard-weights loads)")), flag_value("shard-weights", "Path to a path\\tweight TSV; --shard partitions by SFN-863 LPT instead of the stride")), flag("skip-toolchain-check", "Bypass the [toolchain] pin check for this invocation")), arg_variadic("suite", "Suite paths (omit at a workspace root to test default members)"));
 }
 
 fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
@@ -247,12 +252,12 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
             + "')");
         return 2;
     }
-    // `--shard I/N` (issue #1237): run only the I-th of N file-count-
-    // balanced shards of the discovered surface. Absent → no sharding
-    // (the whole surface). A malformed spec (not `I/N` with both sides
-    // positive integers and `1 <= I <= N`) exits 2, mirroring the
-    // `--jobs` range-guard convention. The stable stride partition is
-    // applied to `test_files` after discovery/filtering, below.
+    // `--shard I/N` (issue #1237): run only the I-th of N shards of the
+    // discovered surface. Absent → no sharding (the whole surface). A
+    // malformed spec (not `I/N` with both sides positive integers and
+    // `1 <= I <= N`) exits 2, mirroring the `--jobs` range-guard convention.
+    // The partition itself is applied to `test_files` after
+    // discovery/filtering, below.
     let mut shard_active: boolean = false;
     let mut shard_index: int = 1;
     let mut shard_total: int = 1;
@@ -270,6 +275,13 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
         shard_index = s_index;
         shard_total = s_total;
     }
+    // `--shard-weights <path>` (SFN-863): when set alongside `--shard`, the
+    // partition below prefers the time-weighted LPT assignment
+    // (`_shard_lpt_keeps`) over the alphabetical stride, using the weight
+    // table at this path. Fails open to the stride when the path is absent,
+    // unreadable, or has zero parseable rows — a missing/corrupt table must
+    // never fail a test run.
+    let shard_weights_path: string = get_or(matches, "shard-weights", "");
 
     // Variadic suite positionals: zero or more. Zero defaults to a single
     // "." suite below (the legacy `positional.length == 0` branch).
@@ -412,23 +424,49 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
         file_suite_index = kept_suite_index;
     }
 
-    // `--shard I/N` partition (issue #1237). Keep only the I-th of N
-    // file-count-balanced shards using the stable stride
-    // `i % total == index - 1` over the deterministic (sorted within each
-    // suite) discovery order — mirroring `scripts/test_shards.sh`'s awk
-    // stride so the runner and the legacy bash shard map agree over the
-    // same file list. Applied after the `-k`/`--tag` cut so a shard
-    // partitions exactly the surface that would otherwise run. The
-    // `file_suite_index` parallel array is partitioned in lockstep so
-    // per-suite banner attribution stays aligned. An empty shard (more
-    // shards than files) falls through to the benign 0/0/0 path below.
+    // `--shard I/N` partition (issue #1237, SFN-863). Keep only the I-th of
+    // N shards over the deterministic (sorted within each suite) discovery
+    // order. When `--shard-weights` names a table that loads (at least one
+    // parseable row), the partition is the time-weighted LPT assignment
+    // (`_shard_lpt_keeps`); otherwise it falls open to the stable stride
+    // `i % total == index - 1` (`_shard_keeps_index`), mirroring
+    // `scripts/test_shards.sh`'s awk stride so the runner and the legacy
+    // bash shard map still agree over the same file list. Applied after the
+    // `-k`/`--tag` cut so a shard partitions exactly the surface that would
+    // otherwise run. The `file_suite_index` parallel array is partitioned in
+    // lockstep so per-suite banner attribution stays aligned. An empty shard
+    // (more shards than files) falls through to the benign 0/0/0 path below.
     if shard_active {
+        let mut table_text: string = "";
+        let mut use_lpt: boolean = false;
+        if shard_weights_path.length > 0 {
+            table_text = _shard_weight_table_text_at(shard_weights_path);
+            use_lpt = _shard_weight_table_row_count(table_text) > 0;
+        }
+        let mut weights: int[] = [];
+        if use_lpt {
+            let mut wi: int = 0;
+            loop {
+                if wi >= test_files.length { break; }
+                let w = _shard_weight_for_path(table_text, test_files[wi]);
+                if w < 0 { weights.push(_shard_default_weight()); } else {
+                    weights.push(w);
+                }
+                wi += 1;
+            }
+        }
         let mut sharded_files: string[] = [];
         let mut sharded_suite_index: int[] = [];
         let mut shi: int = 0;
         loop {
             if shi >= test_files.length { break; }
-            if _shard_keeps_index(shi, shard_index, shard_total) {
+            let mut keep: boolean = false;
+            if use_lpt {
+                keep = _shard_lpt_keeps(shi, shard_index, shard_total, weights);
+            } else {
+                keep = _shard_keeps_index(shi, shard_index, shard_total);
+            }
+            if keep {
                 sharded_files.push(test_files[shi]);
                 sharded_suite_index.push(file_suite_index[shi]);
             }

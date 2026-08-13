@@ -21,22 +21,69 @@ Two independent partitioning mechanisms exist, at different layers:
   `_shard_keeps_index` (`compiler/src/cli/commands/test/arg_and_jobs.sfn:184-246`)
   implement the rule: a 0-based file index belongs to shard `I` of `N` when
   `item_index % N == I - 1`. Deterministic and stable across runs for a
-  fixed sorted file list.
+  fixed sorted file list. **This is unchanged by SFN-863** — plain
+  `--shard I/N` always stays the alphabetical stride, not the file-count
+  stride it was previously described as ("file-count-balanced" was true only
+  in the trivial sense that shard sizes differ by at most one file; it says
+  nothing about *time* balance, which is what named shards need).
 - **Named CI shards** — `sfn dev shard`
   (`compiler/src/cli/commands/dev_shard.sfn`). `_shard_defs()`
   (`:59-89`) hardcodes eight shards:
-  - `unit-a`, `unit-b`, `unit-c` — a 3-way `--shard` split of
-    `compiler/tests/unit`
+  - `unit-a`, `unit-b`, `unit-c` — a 3-way split of `compiler/tests/unit`
   - `int-caps` — `compiler/tests/integration` + `capsules`, unsplit
     (`total: 0` means "run the whole discovery")
   - `e2e-a`, `e2e-b`, `e2e-c`, `e2e-d` — a 4-way split of
     `compiler/tests/e2e`
 
+  Since SFN-863 these are **time-weighted**, not file-count-balanced: each
+  shard's `I/N` partition is greedy LPT (longest processing time) over a
+  per-file weight, not the plain stride. Measured macOS e2e shard totals
+  under the old stride were 3716 / 1746 / 3146 / 2243 s (2.13x skew); the LPT
+  partition over the same files simulates to 2776 / 2583 / 2760 / 2732 s
+  (1.07x, ~25% shorter critical path).
+
 `sfn dev shard run <name>` re-parses the shard's roots into an ordinary
-`sfn test <roots> [--shard I/N]` invocation and runs it through the same
-pipeline, so a named shard's toolchain gate, per-test cache, and JSONL
-reporting are identical to a direct `sfn test` call
-(`dev_shard.sfn:224-265`).
+`sfn test <roots> --shard I/N --shard-weights <table>` invocation and runs it
+through the same pipeline, so a named shard's toolchain gate, per-test cache,
+and JSONL reporting are identical to a direct `sfn test` call
+(`dev_shard.sfn:224-265`). `sfn dev shard list`/`run`/`cover` all resolve the
+same `I/N` files through `_shard_lpt_keeps`
+(`compiler/src/cli/commands/test/arg_and_jobs.sfn`), so they can never
+disagree about which files a shard owns.
+
+### The weight table
+
+`compiler/tests/shard_weights.tsv` is a generated `path\tweight` table (one
+`#`-prefixed comment header, then one row per test file):
+
+```
+path	weight
+compiler/tests/e2e/aarch64_binfmt_probe_test.sfn	473
+```
+
+`weight = round(1e6 * max over targets of (file_elapsed / suite_total))` — a
+target-neutral *share* of one target's suite time, not a raw duration, so the
+same table balances hosts running at different absolute speeds (e.g.
+macOS-arm64 vs. Linux-arm64). A discovered file absent from the table gets
+the table's median weight (2136 as of the SFN-863 generation) rather than 0,
+so a newly added test still lands in a plausible LPT slot instead of always
+sorting first.
+
+**Fail-open.** `sfn dev shard` and `sfn test --shard-weights <path>` both
+fall back to the plain alphabetical stride whenever the table is missing,
+unreadable, or has zero parseable data rows
+(`_shard_weight_table_row_count` in `arg_and_jobs.sfn`) — a stale or deleted
+table degrades the partition's balance, it never fails a build or a test
+run.
+
+**Refreshing it.** Re-run a CI job with `SAILFIN_AGENT_REPORT=1` (or pull an
+existing run's JSONL sidecars), sum each file's `duration_ms` per target,
+divide by that target's suite total, take the max share across targets, scale
+by `1e6` and round, and regenerate the table with the new weights (plus the
+median default for any file with no observed duration). There is no
+automated refresh job yet — a stale table only costs balance, per the
+fail-open guarantee above, so refreshing is a manual maintenance task rather
+than a release gate.
 
 `make test-shard SHARD=<name>` (`Makefile:442-470`) dispatches to
 `sfn dev shard run`; it builds the compiler first if the binary is missing,
