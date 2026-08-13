@@ -138,29 +138,46 @@ grapheme_count(empty);       // 0
 
 #### `grapheme_at(text: string, index: int) -> string`
 
-Return the grapheme cluster at the given index. Returns `""` for an out-of-range index (negative or beyond the end of the string). Never panics.
+Return the **single byte** at the given index, as a one-byte string. Returns `""` for an out-of-range index (negative or beyond the end of the string). Never panics.
+
+Despite the name, this does not yet cluster: indexing is byte-oriented, and `index` counts bytes. A multi-byte character therefore occupies several indices, each yielding one of its UTF-8 bytes.
 
 ```sfn
-let s = "café";
+let s = "café";     // 5 bytes: c, a, f, 0xC3, 0xA9
+s.length;           // 5
 grapheme_at(s, 0);  // "c"
-grapheme_at(s, 3);  // "é"  (single grapheme, may be multiple bytes)
+grapheme_at(s, 3);  // the byte 0xC3 — the first half of "é", not "é"
 grapheme_at(s, 99); // ""
 ```
+
+`char_at` is an alias with identical behaviour.
 
 ---
 
 #### `char_code(character: string) -> int`
 
-Return the Unicode code point of the first grapheme cluster in `character`. Returns `-1` for an empty string or an invalid input.
+Return the **raw leading byte** of `character` (1–255), or `-1` for an empty string. This is *not* a Unicode code point: a multi-byte character passed whole yields only the first byte of its UTF-8 encoding.
 
 ```sfn
 char_code("A");    // 65
 char_code("a");    // 97
-char_code("€");    // 8364
+char_code("€");    // 226  (0xE2 — the first UTF-8 byte, not 8364)
 char_code("");     // -1
 ```
 
-**Note:** Only the first grapheme cluster of the argument is examined. Pass a single character for predictable results.
+Because strings are byte-oriented, an in-bounds index yields a single byte, so `char_code(s[i])` never exceeds 255:
+
+```sfn
+let s = "Ł";       // U+0141, encoded 0xC5 0x81
+s.length;          // 2  (bytes, not graphemes)
+char_code(s[0]);   // 197 (0xC5)
+char_code(s[1]);   // 129 (0x81)
+char_code(s);      // 197 — the leading byte, not the code point 321
+```
+
+**Note:** Only the first byte of the argument is examined. Masking the result with `& 255` documents this contract but does not narrow an in-bounds byte — though it does fold the `-1` empty-string sentinel to `255`, so it is not a no-op for callers that accept arbitrary strings.
+
+`char_from_code` is the exact inverse over 1–255.
 
 ---
 
