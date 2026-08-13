@@ -6,7 +6,8 @@
   run across the linux-x86_64 shard matrix, paid on every PR and every target
 - **Affected range:** `main` from `8a67001e` (2026-08-09) onward; still present
   at `76329349`
-- **Status:** Open. Diagnosis complete and measured; no fix landed.
+- **Status:** Open. Diagnosis complete and measured; no fix landed. Tracked as
+  SFN-860 through SFN-869 (see [Tracked work](#tracked-work)).
 
 ## TL;DR
 
@@ -200,6 +201,30 @@ These did not cause the regression but let it run unnoticed and amplified it:
 - **Whole-shard retry-once.** `.github/actions/sailfin-build/action.yml:448-460`
   re-runs the entire shard on any failure, so shard duration is bimodal and
   single-run comparisons can mislead.
+
+## Tracked work
+
+The regression itself is the first two rows; the rest are conditions this
+investigation surfaced, which let a 2x regression run unnoticed or which
+independently cost CI time.
+
+| Issue | What | Priority |
+|---|---|---|
+| SFN-860 | Scope the runtime retain-root set (Defect A — the regression) | Urgent |
+| SFN-861 | Gate `.sfn-asm`/`.layout-manifest` emit on a cache key (Defect B) | High |
+| SFN-862 | Report per-file durations + slowest-N on the default path | High |
+| SFN-863 | Time-weight the shard map (2.13x skew, −27% critical path) | High |
+| SFN-864 | Stop self-hosting the compiler inside four e2e tests | Medium |
+| SFN-865 | Test-bin cache: 0% hits while still paying a 282 MB save | Medium |
+| SFN-866 | No shard timing baseline (no metrics on x86_64, no matrix on `main`) | Medium |
+| SFN-867 | Whole-shard retry-once makes shard duration bimodal | Low |
+| SFN-868 | Seed bundle declares a runtime dep it ships no sources for | High |
+| SFN-869 | The e2e heavy tail beyond the four self-hosting outliers | Medium |
+
+SFN-860 carries `needs-design`: scoping the roots changes link behaviour and
+requires adjusting the migration-test assertions that motivated the broad root
+set. SFN-863 is blocked by SFN-862 — a time-weighted map needs per-file timing
+to weight from.
 
 ## Confidence and falsifiers
 
