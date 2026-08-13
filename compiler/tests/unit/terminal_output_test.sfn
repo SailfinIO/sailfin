@@ -1,0 +1,35 @@
+import { Diag } from "sfn/analyzer/diagnostic";
+import { Style } from "sfn/cli";
+import { expect_eq_str } from "sfn/test";
+
+import { render_diagnostic } from "../../src/diagnostics_render";
+import { render_terminal_diagnostic_with_style } from "../../src/terminal_output";
+
+fn _diag(severity: string) -> Diag {
+    return Diag {
+        code: "E0001",
+        severity: severity,
+        message: "example failure",
+        file_path: "example.sfn",
+        span: null,
+        stage: "typecheck",
+        suggestion: null
+    };
+}
+
+test "terminal output: disabled style preserves canonical diagnostic bytes" {
+    let diagnostic = _diag("error");
+    let lines: string[] = [];
+    let style = Style { enabled: false, mode: "never", stream: "stderr" };
+    expect_eq_str(render_terminal_diagnostic_with_style(diagnostic, lines, "typecheck", style), render_diagnostic(diagnostic, lines, "typecheck"));
+}
+
+test "terminal output: enabled style colors only the severity label" {
+    let diagnostic = _diag("error");
+    let lines: string[] = [];
+    let style = Style { enabled: true, mode: "always", stream: "stderr" };
+    let esc = char_from_code(27);
+    let expected = esc + "[31merror" + esc + "[0m[E0001]: example failure"
+        + "\n  --> example.sfn\n  [kind: typecheck]";
+    expect_eq_str(render_terminal_diagnostic_with_style(diagnostic, lines, "typecheck", style), expected);
+}

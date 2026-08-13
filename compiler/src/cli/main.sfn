@@ -29,6 +29,8 @@
 import {
     Command,
     command,
+    flag_choice,
+    get_or,
     parse,
     parse_error,
     parse_is_ok,
@@ -37,6 +39,7 @@ import {
     render_help_tree,
     subcommand,
     subcommand_path,
+    with_flag,
     with_subcommand
 } from "sfn/cli";
 import { int_to_string } from "sfn/strings";
@@ -45,6 +48,7 @@ import { _ends_with } from "../build/paths";
 import { _runtime_bundle_exists } from "../build/runtime_objs";
 import { handle_selfhost_command } from "../cli_selfhost";
 import { ice_set_binary_dir } from "../ice";
+import { configure_terminal_output } from "../terminal_output";
 import { command_def as add_command_def, run as add_run } from "./commands/add";
 import { command_def as bench_command_def, run as bench_run } from "./commands/bench";
 import { command_def as build_command_def, run as build_run } from "./commands/build";
@@ -118,6 +122,9 @@ fn _usage() -> string {
     out = out + _cmd_row("sfn version", "show version (also --version)");
     out = out + _cmd_row("sfn completion <shell>", "generate shell completions");
     out = out + _cmd_row("sfn symbols", "dump the symbol table (--json)");
+    out = out + "\n";
+    out = out + "global options:\n";
+    out = out + _cmd_row("sfn --color <mode> ...", "color: auto, always, or never");
     out = out + "\n";
     out = out
         + "Run `sfn <command> --help` for the full flags on any command.\n\n";
@@ -194,6 +201,16 @@ fn _is_help_json_args(args: string[]) -> boolean {
     return false;
 }
 
+fn _requests_json(args: string[]) -> boolean {
+    let mut index: int = 0;
+    loop {
+        if index >= args.length { break; }
+        if args[index] == "--json" { return true; }
+        index += 1;
+    }
+    return false;
+}
+
 fn sailfin_cli_main_v2(argv: string[]) -> int ![clock, io, net] {
     // Parse the driver-injected `--runtime-root` / `--binary-dir` prefix
     // (Issue 2.2) so `binary_dir` is available for version resolution
@@ -234,7 +251,8 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![clock, io, net] {
     // eagerly here would add a filesystem read to every `build` / `run`
     // invocation. `parse()` skips argv[0] (the program name), so a synthetic
     // "sfn" head is prepended before parsing.
-    let mut root: Command = command("sfn", "Sailfin compiler");
+    let color_modes: string[] = ["auto", "always", "never"];
+    let mut root: Command = with_flag(command("sfn", "Sailfin compiler"), flag_choice("color", "Color output: auto, always, or never", color_modes));
     root = with_subcommand(root, version_command_def());
     root = with_subcommand(root, guillermo_command_def());
     root = with_subcommand(root, init_command_def());
@@ -287,6 +305,11 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![clock, io, net] {
     let parse_ok: boolean = parse_is_ok(parse_result);
     let matches = parse_matches(parse_result);
     let parse_err = parse_error(parse_result);
+    let mut color_mode = get_or(matches, "color", "auto");
+    // Machine-readable streams are protocol bytes, never terminal text. An
+    // explicit `--color always` cannot inject SGR sequences into JSON.
+    if _requests_json(args) { color_mode = "never"; }
+    configure_terminal_output(color_mode);
 
     // `sfn guillermo` — the registered subcommand matched. Dispatch to
     // the guillermo command's `run` (it takes no input, so `matches` and

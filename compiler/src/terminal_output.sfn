@@ -1,0 +1,85 @@
+// Compiler terminal-output policy and styled diagnostic adapter.
+//
+// The analyzer and canonical diagnostic renderer stay presentation-neutral:
+// `render_diagnostic` always returns stable plain text for tests, JSON/protocol
+// consumers, and non-CLI embeddings. The CLI configures this module once after
+// parsing its root `--color` flag, and human sinks call
+// `render_terminal_diagnostic` to color only the severity label.
+import { Diag } from "sfn/analyzer/diagnostic";
+import {
+    Style,
+    paint_blue,
+    paint_cyan,
+    paint_red,
+    paint_yellow,
+    style_with_mode
+} from "sfn/cli";
+
+import { render_diagnostic } from "./diagnostics_render";
+import { substring } from "./string_utils";
+
+// Disabled defaults preserve plain output for compiler APIs invoked without
+// the CLI entrypoint (including unit tests and protocol adapters).
+let mut _stdout_enabled: boolean = false;
+let mut _stderr_enabled: boolean = false;
+let mut _color_mode: string = "never";
+
+fn configure_terminal_output(mode: string) -> void ![io] {
+    let stdout_style = style_with_mode("stdout", mode);
+    let stderr_style = style_with_mode("stderr", mode);
+    _stdout_enabled = stdout_style.enabled;
+    _stderr_enabled = stderr_style.enabled;
+    _color_mode = stdout_style.mode;
+}
+
+fn terminal_style(stream: string) -> Style {
+    if stream == "stdout" {
+        return Style {
+            enabled: _stdout_enabled,
+            mode: _color_mode,
+            stream: "stdout"
+        };
+    }
+    return Style {
+        enabled: _stderr_enabled,
+        mode: _color_mode,
+        stream: "stderr"
+    };
+}
+
+fn _paint_severity(style: Style, severity: string) -> string {
+    if severity == "error" { return paint_red(style, severity); }
+    if severity == "warning" { return paint_yellow(style, severity); }
+    if severity == "info" { return paint_blue(style, severity); }
+    if severity == "hint" { return paint_cyan(style, severity); }
+    return severity;
+}
+
+fn render_terminal_diagnostic(diagnostic: Diag, source_lines: string[], kind: string) -> string {
+    return render_terminal_diagnostic_with_style(diagnostic, source_lines, kind, terminal_style("stderr"));
+}
+
+fn render_terminal_diagnostic_with_style(diagnostic: Diag, source_lines: string[], kind: string, style: Style) -> string {
+    let plain = render_diagnostic(diagnostic, source_lines, kind);
+    return style_diagnostic_text_with_style(diagnostic.severity, plain, style);
+}
+
+fn style_terminal_diagnostic_text(severity: string, plain: string) -> string {
+    return style_diagnostic_text_with_style(severity, plain, terminal_style("stderr"));
+}
+
+fn style_diagnostic_text_with_style(severity: string, plain: string, style: Style) -> string {
+    if !style.enabled { return plain; }
+    if severity.length == 0 { return plain; }
+    if plain.length < severity.length { return plain; }
+    return _paint_severity(style, severity) + substring(plain, severity.length, plain.length);
+}
+
+export {
+    configure_terminal_output,
+    render_terminal_diagnostic,
+    render_terminal_diagnostic_with_style,
+    style_diagnostic_text_with_style,
+    style_terminal_diagnostic_text,
+    terminal_style
+};

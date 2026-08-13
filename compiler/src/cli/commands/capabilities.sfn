@@ -25,7 +25,7 @@ import {
     workspace_effective_envelope
 } from "../../capsule_resolver/capability";
 import { discover_workspace_root } from "../../capsule_resolver/workspace";
-import { render_diagnostic } from "../../diagnostics_render";
+import { render_terminal_diagnostic } from "../../terminal_output";
 import {
     toml_get_workspace_capabilities_allow,
     toml_get_workspace_capabilities_deny,
@@ -126,7 +126,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io] {
         let mut di: int = 0;
         loop {
             if di >= report.diagnostics.length { break; }
-            print.err(render_diagnostic(diagnostic_to_diag(report.diagnostics[di], "capability"), empty_lines, "capability"));
+            print.err(render_terminal_diagnostic(diagnostic_to_diag(report.diagnostics[di], "capability"), empty_lines, "capability"));
             di += 1;
         }
     }

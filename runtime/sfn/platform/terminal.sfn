@@ -1,0 +1,6 @@
+// POSIX terminal capability probe used by sfn/cli's automatic color policy.
+// Kept behind a runtime-owned symbol so library capsules do not bind libc
+// directly and Windows can provide its UCRT-specific sibling.
+extern fn isatty(fd: i32) -> i32;
+
+fn sfn_stream_is_terminal(fd: i32) -> bool ![io] { return isatty(fd) != 0; }

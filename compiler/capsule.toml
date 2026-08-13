@@ -45,7 +45,7 @@ sfn = "0.9.5"
 # lower to `internal global` and have no cross-capsule import path
 # today, so a function call is what actually forces the link). Wildcard
 # matches the `sfn/runtime-native` convention; the capsule is at
-# 0.13.1 (workspace member `capsules/sfn/cli`).
+# 0.16.1 (workspace member `capsules/sfn/cli`).
 "sfn/cli" = "*"
 # `sfn/strings` is a direct compiler dependency as well as a dependency of
 # `sfn/syntax` and `sfn/cli`. The pinned 0.9.3 seed resolves transitive capsule

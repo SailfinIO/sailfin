@@ -12,8 +12,8 @@ import { Diagnostic, diagnostic_to_diag } from "sfn/analyzer/typecheck_types";
 import { parse_program } from "sfn/syntax";
 
 import { _collect_sfn_files_cmd } from "../build/fs";
-import { render_diagnostic } from "../diagnostics_render";
 import { _LockEntry } from "../lock";
+import { render_terminal_diagnostic } from "../terminal_output";
 import {
     toml_get_capabilities_required,
     toml_get_version,
@@ -421,7 +421,7 @@ fn workspace_capability_gate(workspace_root: string) -> int ![io] {
     let mut i: int = 0;
     loop {
         if i >= report.diagnostics.length { break; }
-        print.err(render_diagnostic(diagnostic_to_diag(report.diagnostics[i], "capability"), empty_lines, "capability"));
+        print.err(render_terminal_diagnostic(diagnostic_to_diag(report.diagnostics[i], "capability"), empty_lines, "capability"));
         i += 1;
     }
     if strings_equal(workspace_capability_mode(workspace_root), "warn") {

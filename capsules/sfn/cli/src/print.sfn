@@ -7,7 +7,7 @@
 // `Style` policy from issue #792 / 1.3: they resolve a stream-aware
 // `Style` via `style_for_stream` and apply ANSI color through the
 // `paint*` helpers, which degrade to plain text when the style is
-// disabled (`NO_COLOR`, `--color=never`, or a non-TTY stream). The
+// disabled (`NO_COLOR` or `--color=never`). The
 // severity word produced by `diag_prefix` matches the leading
 // `severity` token rendered by `compiler/src/diagnostics_render.sfn`
 // (`<severity>[<code>]: <message>`) byte-for-byte, so Phase 5 Issue
@@ -101,7 +101,7 @@ fn print_diag(severity: string, message: string, hint: string) -> void ![io] {
     // Print a diagnostic line for `severity`, optionally followed by a
     // "hint: <hint>" line when `hint` is non-empty. Color and stream
     // are derived from the severity; styling degrades to plain text
-    // under `NO_COLOR` / non-TTY via `style_for_stream`.
+    // under `NO_COLOR` via `style_for_stream`.
     let stream = _diag_stream(severity);
     let s = style_for_stream(stream);
     let line = diag_line(s, severity, message);

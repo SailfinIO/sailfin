@@ -1,6 +1,6 @@
 [capsule]
 name = "sfn/runtime-native"
-version = "0.5.10-alpha.3"
+version = "0.5.10-alpha.4"
 description = "Sailfin-native runtime (runtime/sfn + prelude) linked into every Sailfin compiler binary"
 
 [capabilities]
@@ -60,6 +60,7 @@ sfn-sources = [
     "sfn/type_meta.sfn",
     "sfn/platform/exec.sfn",
     "sfn/platform/rlimit.sfn",
+    "sfn/platform/terminal.sfn",
     "sfn/platform/tls.sfn",
     "sfn/platform/tls_record.sfn",
     "sfn/platform/pthread_layout.sfn",

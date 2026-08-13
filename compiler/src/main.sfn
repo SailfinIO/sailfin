@@ -53,7 +53,7 @@ import {
     emit_native_lines_with_module_name,
     emit_native_with_module_name
 } from "./codegen_driver";
-import { render_diagnostic, report_reexport_violations, split_source_lines } from "./diagnostics_render";
+import { report_reexport_violations, split_source_lines } from "./diagnostics_render";
 import {
     validate_and_render_effects,
     validate_and_render_effects_with_capabilities
@@ -66,6 +66,7 @@ import {
 } from "./import_context";
 import { load_prelude_global_names } from "./prelude_globals";
 import { substring } from "./string_utils";
+import { render_terminal_diagnostic } from "./terminal_output";
 import { test_decl_matches_filters, test_filters_active, test_runner_trace } from "./test_runner_state";
 import { toml_get_dependencies } from "./toml_parser";
 import { load_imported_interfaces_from_paths } from "./typecheck_import_loader";
@@ -1135,7 +1136,7 @@ fn _emit_typecheck_diagnostics(entries: Diagnostic[], source: string, file_path:
         // with empty file_path; this is the single point on the build
         // path that knows which module is currently being analyzed.
         entries[index].file_path = file_path;
-        let rendered = render_diagnostic(diagnostic_to_diag(entries[index], "typecheck"), lines, "typecheck");
+        let rendered = render_terminal_diagnostic(diagnostic_to_diag(entries[index], "typecheck"), lines, "typecheck");
         print.err(rendered);
         index += 1;
     }

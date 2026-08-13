@@ -159,6 +159,7 @@ export {
     style_for_stream,
     style_with_mode,
     style_resolve,
+    style_resolve_for_terminal,
     paint,
     paint_bold,
     paint_dim,

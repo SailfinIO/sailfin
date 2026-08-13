@@ -69,6 +69,13 @@ test "cross-windows RUNTIME_MODS / manifest per-module contracts" ![io] {
     assert contains(makefile, "runtime/sfn/platform/rlimit_windows.sfn");
     assert ! contains(manifest, "rlimit_windows");
 
+    // terminal.sfn uses POSIX isatty; the released Windows bridge must emit
+    // the UCRT `_isatty` sibling instead.
+    assert contains(manifest, "\"sfn/platform/terminal.sfn\"");
+    assert ! contains(makefile, "runtime/sfn/platform/terminal.sfn");
+    assert contains(makefile, "runtime/sfn/platform/terminal_windows.sfn");
+    assert ! contains(manifest, "terminal_windows");
+
     // rand.sfn (SFN-123): in the manifest, excluded from RUNTIME_MODS — its
     // getentropy / /dev/urandom externs have no static-mingw provider. The
     // compiler pulls @sfn_rand_fill via the sfn/crypto `random_bytes` export,

@@ -219,6 +219,7 @@ test "target: Windows swaps process.sfn, rlimit.sfn, rand.sfn, fs_exec_mode.sfn,
     // windows_stubs.ll resolved apply_default_mem_limit for the mingw
     // bridge only); the native MSVC path no longer links that stub, so
     // rlimit.sfn now swaps to its own Win32 sibling instead of vanishing.
+    // terminal.sfn swaps to terminal_windows.sfn (`isatty` -> `_isatty`).
     // rand.sfn swaps the same way (BCryptGenRandom in place of
     // getentropy/`/dev/urandom`). tls.sfn is no longer swapped (SFN-341
     // deleted the OpenSSL link surface, so there is no OpenSSL-backed
@@ -237,8 +238,8 @@ test "target: Windows swaps process.sfn, rlimit.sfn, rand.sfn, fs_exec_mode.sfn,
     // not a Sailfin module), so they are APPENDED at the end rather than
     // replacing a matched basename. Every other module is preserved in
     // order.
-    let sources: string[] = ["/rt/sfn/runtime_globals.sfn", "/rt/sfn/process.sfn", "/rt/sfn/platform/rlimit.sfn", "/rt/sfn/platform/rand.sfn", "/rt/sfn/platform/tls.sfn", "/rt/sfn/platform/fs_exec_mode.sfn", "/rt/sfn/platform/cert_roots.sfn", "/rt/sfn/io.sfn",];
-    let expected: string[] = ["/rt/sfn/runtime_globals.sfn", "/rt/sfn/platform/process_windows.sfn", "/rt/sfn/platform/rlimit_windows.sfn", "/rt/sfn/platform/rand_windows.sfn", "/rt/sfn/platform/tls.sfn", "/rt/sfn/platform/fs_exec_mode_windows.sfn", "/rt/sfn/platform/cert_roots_windows.sfn", "/rt/sfn/io.sfn", "/rt/sfn/platform/realpath_windows.sfn", "/rt/sfn/platform/clock_windows.sfn", "/rt/sfn/platform/pthread_windows.sfn", "/rt/sfn/platform/popen_windows.sfn", "/rt/sfn/platform/mkstemp_windows.sfn", "/rt/sfn/platform/strcasestr_windows.sfn",];
+    let sources: string[] = ["/rt/sfn/runtime_globals.sfn", "/rt/sfn/process.sfn", "/rt/sfn/platform/rlimit.sfn", "/rt/sfn/platform/terminal.sfn", "/rt/sfn/platform/rand.sfn", "/rt/sfn/platform/tls.sfn", "/rt/sfn/platform/fs_exec_mode.sfn", "/rt/sfn/platform/cert_roots.sfn", "/rt/sfn/io.sfn",];
+    let expected: string[] = ["/rt/sfn/runtime_globals.sfn", "/rt/sfn/platform/process_windows.sfn", "/rt/sfn/platform/rlimit_windows.sfn", "/rt/sfn/platform/terminal_windows.sfn", "/rt/sfn/platform/rand_windows.sfn", "/rt/sfn/platform/tls.sfn", "/rt/sfn/platform/fs_exec_mode_windows.sfn", "/rt/sfn/platform/cert_roots_windows.sfn", "/rt/sfn/io.sfn", "/rt/sfn/platform/realpath_windows.sfn", "/rt/sfn/platform/clock_windows.sfn", "/rt/sfn/platform/pthread_windows.sfn", "/rt/sfn/platform/popen_windows.sfn", "/rt/sfn/platform/mkstemp_windows.sfn", "/rt/sfn/platform/strcasestr_windows.sfn",];
     assert expect_eq_str_array(target_condition_runtime_sfn_sources(sources, "Windows"), expected).ok;
 }
 
