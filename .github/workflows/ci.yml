@@ -971,6 +971,25 @@ jobs:
             echo "| cache.test_bin_hit_rate | ${test_bin_hit_rate:-?} |"
           } >> "$GITHUB_STEP_SUMMARY"
 
+      # SFN-866: the per-file JSONL sidecar is already produced on this leg
+      # (`SAILFIN_AGENT_REPORT=1`, sailfin-build action.yml:410-414) and was
+      # then read once for `test_bin_hit_rate` and discarded with the runner.
+      # Its `duration_ms` per file is the only per-file timing this repo
+      # generates, and refreshing `compiler/tests/shard_weights.tsv` requires
+      # it — the current table is still derived from run 31704192414, which
+      # predates SFN-861 and SFN-875. Uploading is purely additive: no extra
+      # run, no extra runner time, no change to any leg's output contract.
+      # `always()` so a red shard still yields its timing, which is exactly
+      # when it is most worth having.
+      - name: Upload per-shard test timing (SFN-866)
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: ci-test-timing-linux-arm64-${{ matrix.shard }}
+          path: build/agent-test.shard-*.jsonl
+          if-no-files-found: ignore
+          retention-days: 90
+
   aarch64-linux-result:
     name: AArch64 Linux result
     needs:
@@ -1723,6 +1742,17 @@ jobs:
           if [ "$emitted" -eq 0 ]; then
             echo "[ci-metrics] no metrics file — tests likely failed before measurement (shard ${{ matrix.shard }}${{ matrix.shard2 && format('+{0}', matrix.shard2) || '' }})"
           fi
+
+      # SFN-866: see the linux-arm64 twin for why. A grouped leg (SFN-873)
+      # writes one sidecar per shard and the glob collects both.
+      - name: Upload per-shard test timing (SFN-866)
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: ci-test-timing-macos-arm64-${{ matrix.shard }}
+          path: build/agent-test.shard-*.jsonl
+          if-no-files-found: ignore
+          retention-days: 90
 
       - name: Report compiler metadata
         if: ${{ matrix.primary }}
