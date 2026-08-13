@@ -29,10 +29,16 @@
 //     suite would flip this leg from a clean rejection to a body arriving
 //     under a cipher the runtime cannot actually decrypt records for.
 //
+// Each leg's `openssl s_server` runs under `sfn/test`'s `with_background`
+// (SFN-852), which owns the child's lifetime: it is killed and reaped when
+// the leg's scope exits, including on a thrown assertion, so the fixed
+// loopback port is always reclaimed and a prior run can never leave a
+// stale listener for this run to connect to.
+//
 // Skips cleanly (`assert true`, the tool-absent SKIP precedent, mirroring
 // `runtime_tls_https_client_test.sfn`) when `openssl` is missing (no TLS
-// peer) or no `timeout`/`gtimeout` is available to reap the blocking
-// `s_server`. Within the guard, every crypto assertion below is
+// peer) or no `timeout`/`gtimeout` is available to backstop a wedged
+// client run. Within the guard, every crypto assertion below is
 // unconditional — a failed handshake on the AES-GCM or ChaCha20 leg FAILS
 // the test, it is never downgraded to a skip or a pass
 // (http_redirect_download_test.sfn's silent-empty-probe class of bug is
@@ -41,7 +47,9 @@
 // Matchers note (#842): `sfn/test`'s `expect_*` matchers are `![pure]` and
 // cannot be called from an `![io]` test; assert on captured text with
 // `sfn/strings::contains` instead.
+import { Env, env_from_current } from "sfn/os";
 import { contains } from "sfn/strings";
+import { Background, wait_until, with_background } from "sfn/test";
 
 // ── file-local raw loopback readiness probe ──────────────────────
 // Prefixed `_tag_` so these never collide with the external-linkage
@@ -116,6 +124,12 @@ fn _sfn_bin() -> string ![io] {
 // per-invocation under the parallel pool.
 fn _child_env() -> string[] ![io] { return process.environ(); }
 
+// `_child_env()` in `sfn/os`'s typed form, for `with_background` (which
+// takes an `Env`, not a flat `string[]`). `env_from_current` is the typed
+// equivalent of the `process.environ()` snapshot above — the
+// `serve_loopback_test.sfn` idiom.
+fn _child_env_typed() -> Env ![io] { return env_from_current(); }
+
 // The client run-env plus `SAILFIN_TLS_CAFILE` pointed at the generated
 // self-signed cert so the client trusts it (verify stays on).
 fn _client_env(cert_path: string) -> string[] ![io] {
@@ -130,8 +144,9 @@ fn _has_cmd(name: string) -> boolean ![io] {
     return probe == 0;
 }
 
-// Resolve a wall-clock timeout command to reap the blocking `s_server`;
-// empty if none found.
+// Resolve a wall-clock timeout command; used as a backstop wrapper around
+// each client attempt (`_client_body`), not the server — the server's
+// lifetime is owned by `with_background` (SFN-852). Empty if none found.
 fn _timeout_cmd() -> string ![io] {
     if _has_cmd("timeout") { return "timeout"; }
     if _has_cmd("gtimeout") { return "gtimeout"; }
@@ -164,15 +179,15 @@ fn _gen_cert(dir: string) -> boolean ![io] {
     return exit == 0;
 }
 
-// Spawn `openssl s_server -www` restricted to exactly one TLS 1.3
-// ciphersuite via `-ciphersuites`, wrapped in a wall-clock timeout so it
-// self-reaps (there is no process-kill primitive; s_server blocks forever).
-// Returns the spawn handle (unused for teardown — the timeout owns the
-// lifetime).
-fn _spawn_server(dir: string, tcmd: string, port_str: string, ciphersuite: string) -> i64 ![io] {
+// Build the argv for `openssl s_server -www` restricted to exactly one
+// TLS 1.3 ciphersuite via `-ciphersuites`. Handed to `with_background`,
+// which owns the child's lifetime (killed + reaped on scope exit,
+// including the throwing path) — the direct replacement for the
+// argv-prepended `timeout <secs>` vehicle, which never reclaimed the port
+// on this test's own failure and could leave a stale listener for the
+// next run to connect to (SFN-852).
+fn _server_argv(dir: string, port_str: string, ciphersuite: string) -> string[] {
     let mut argv: string[] = [];
-    argv.push(tcmd);
-    argv.push("60");
     argv.push("openssl");
     argv.push("s_server");
     argv.push("-accept");
@@ -185,25 +200,22 @@ fn _spawn_server(dir: string, tcmd: string, port_str: string, ciphersuite: strin
     argv.push(ciphersuite);
     argv.push("-www");
     argv.push("-quiet");
-    return process.spawn_with_env(argv, _child_env());
+    return argv;
 }
 
 // Poll a raw TCP connect until `s_server` is accepting (or the budget
-// elapses). ~30s budget (60 attempts x ~0.5s) stays under the 60s server
-// timeout. Returns true once the port accepts a connection.
-fn _await_listening(port: i64) -> boolean ![io] {
-    let mut attempt: i64 = 0;
-    loop {
-        if attempt >= 60 { break; }
+// elapses), napping in-process via `wait_until` rather than shelling
+// `sleep` per tick. ~30s budget, matching the previous 60-attempts x 0.5s
+// shape.
+fn _await_listening(port: i64) -> boolean ![clock, io] {
+    return wait_until(fn () -> boolean {
         let fd: i32 = _tag_connect(port);
         if fd >= 0 {
             close(fd);
             return true;
         }
-        let _ = process.run(["sleep", "0.5"]);
-        attempt = attempt + 1;
-    }
-    return false;
+        return false;
+    }, 30000, 500);
 }
 
 // Write a fixture capsule whose `main` downloads `https://localhost:PORT/`
@@ -259,20 +271,23 @@ fn _client_body(tcmd: string, client_bin: string, run_env: string[], out_path: s
     return fs.readFile(out_path);
 }
 
-// Retry `_client_body` a few times to absorb residual server startup
-// latency — used only for the POSITIVE round-trip legs (AES-128-GCM,
-// ChaCha20-Poly1305), never for the AES-256-GCM negative leg (an
-// unoffered suite cannot start succeeding on retry).
-fn _client_body_retry(tcmd: string, client_bin: string, run_env: string[], out_path: string) -> string ![io] {
-    let mut attempt: i64 = 0;
-    loop {
-        if attempt >= 20 { break; }
-        let body = _client_body(tcmd, client_bin, run_env, out_path);
-        if body.length > 0 { return body; }
-        let _ = process.run(["sleep", "0.5"]);
-        attempt = attempt + 1;
-    }
-    return "";
+// Retry `_client_body` to absorb residual server startup latency — used
+// only for the POSITIVE round-trip legs (AES-128-GCM, ChaCha20-Poly1305),
+// never for the AES-256-GCM negative leg (an unoffered suite cannot start
+// succeeding on retry). Naps in-process via `wait_until` rather than
+// shelling `sleep` per tick; ~10s budget, matching the previous
+// 20-attempts x 0.5s shape.
+fn _client_body_retry(tcmd: string, client_bin: string, run_env: string[], out_path: string) -> string ![clock, io] {
+    let mut last_body: string = "";
+    let _ready = wait_until(fn () -> boolean {
+        let body: string = _client_body(tcmd, client_bin, run_env, out_path);
+        if body.length > 0 {
+            last_body = body;
+            return true;
+        }
+        return false;
+    }, 10000, 500);
+    return last_body;
 }
 
 fn _skip_ready() -> boolean ![io] {
@@ -281,113 +296,142 @@ fn _skip_ready() -> boolean ![io] {
         return false;
     }
     if _timeout_cmd().length == 0 {
-        print.info("[tls-aes-gcm] SKIP: no timeout/gtimeout to reap the blocking s_server");
+        print.info("[tls-aes-gcm] SKIP: no timeout/gtimeout to backstop the client run");
         return false;
     }
     return true;
 }
 
-test "runtime tls: handshake completes against an AES-128-GCM-only server" ![io] {
+test "runtime tls: handshake completes against an AES-128-GCM-only server" ![clock, io] {
     if !_skip_ready() {
         assert true;
         return;
     }
-    let tcmd = _timeout_cmd();
+    let tcmd: string = _timeout_cmd();
     // Distinct from every other e2e's fixed loopback port so the pool's
     // `--jobs N` does not collide.
     let port: i64 = 18898;
-    let port_str = "18898";
+    let port_str: string = "18898";
 
-    let dir = _scratch_dir() + "/aes128";
+    let dir: string = _scratch_dir() + "/aes128";
     fs.createDirectory(dir, true);
     assert _gen_cert(dir);
 
-    let out_path = dir + "/body.out";
+    let out_path: string = dir + "/body.out";
     let main_path = _write_client(dir, port_str, out_path);
-    let client_bin = _build_bin(main_path, dir + "/client-bin");
+    let client_bin: string = _build_bin(main_path, dir + "/client-bin");
     assert client_bin.length > 0;
 
-    let _handle = _spawn_server(dir, tcmd, port_str, "TLS_AES_128_GCM_SHA256");
-    assert _await_listening(port);
+    let argv = _server_argv(dir, port_str, "TLS_AES_128_GCM_SHA256");
+    let run_env: string[] = _client_env(dir + "/cert.pem");
 
-    // `tls.sfn::_tls_suite_aead` maps this suite and `encode_client_hello`
-    // offers it, so a server that speaks ONLY this suite must still
-    // complete the handshake and round-trip the body.
-    let body = _client_body_retry(tcmd, client_bin, _client_env(dir
-        + "/cert.pem"), out_path);
-    print.info("[tls-aes-gcm] AES-128-GCM round-trip body received");
-    assert body.length > 0;
-    assert contains(body, "Ciphers");
+    // `with_background` owns the server's lifetime: it is killed and
+    // reaped when this scope exits, including on a thrown assertion below,
+    // so the port is always reclaimed and cannot serve a stale listener to
+    // the next run of this test (SFN-852). That also structurally couples
+    // the client's retry budget (inside this scope) to the server's
+    // lifetime (the scope itself) rather than two independently chosen
+    // wall clocks.
+    let _served = with_background(argv, _child_env_typed(), "", "tls-aes128", fn (server: Background) -> int {
+        assert server.handle.handle_id != 0;
+        assert _await_listening(port);
+
+        // `tls.sfn::_tls_suite_aead` maps this suite and
+        // `encode_client_hello` offers it, so a server that speaks ONLY
+        // this suite must still complete the handshake and round-trip the
+        // body.
+        let body = _client_body_retry(tcmd, client_bin, run_env, out_path);
+        print.info("[tls-aes-gcm] AES-128-GCM round-trip body received");
+        assert body.length > 0;
+        assert contains(body, "Ciphers");
+        return 0;
+    });
 
     let _rmd = process.run(["rm", "-rf", dir]);
 }
 
-test "runtime tls: handshake completes against a ChaCha20-Poly1305-only server (control)" ![io] {
+test "runtime tls: handshake completes against a ChaCha20-Poly1305-only server (control)" ![clock, io] {
     if !_skip_ready() {
         assert true;
         return;
     }
-    let tcmd = _timeout_cmd();
+    let tcmd: string = _timeout_cmd();
     let port: i64 = 18899;
-    let port_str = "18899";
+    let port_str: string = "18899";
 
-    let dir = _scratch_dir() + "/chacha20";
+    let dir: string = _scratch_dir() + "/chacha20";
     fs.createDirectory(dir, true);
     assert _gen_cert(dir);
 
-    let out_path = dir + "/body.out";
+    let out_path: string = dir + "/body.out";
     let main_path = _write_client(dir, port_str, out_path);
-    let client_bin = _build_bin(main_path, dir + "/client-bin");
+    let client_bin: string = _build_bin(main_path, dir + "/client-bin");
     assert client_bin.length > 0;
 
-    let _handle = _spawn_server(dir, tcmd, port_str, "TLS_CHACHA20_POLY1305_SHA256");
-    assert _await_listening(port);
+    let argv = _server_argv(dir, port_str, "TLS_CHACHA20_POLY1305_SHA256");
+    let run_env: string[] = _client_env(dir + "/cert.pem");
 
-    // Control leg: proves the AES-128-GCM leg above discriminates by
-    // cipher suite rather than passing for an unrelated reason (e.g. the
-    // server ignoring `-ciphersuites` entirely).
-    let body = _client_body_retry(tcmd, client_bin, _client_env(dir
-        + "/cert.pem"), out_path);
-    print.info("[tls-aes-gcm] ChaCha20-Poly1305 round-trip body received");
-    assert body.length > 0;
-    assert contains(body, "Ciphers");
+    // `with_background` owns the server's lifetime; see the AES-128-GCM
+    // leg above for the full rationale (SFN-852).
+    let _served = with_background(argv, _child_env_typed(), "", "tls-chacha20", fn (server: Background) -> int {
+        assert server.handle.handle_id != 0;
+        assert _await_listening(port);
+
+        // Control leg: proves the AES-128-GCM leg above discriminates by
+        // cipher suite rather than passing for an unrelated reason (e.g.
+        // the server ignoring `-ciphersuites` entirely).
+        let body = _client_body_retry(tcmd, client_bin, run_env, out_path);
+        print.info("[tls-aes-gcm] ChaCha20-Poly1305 round-trip body received");
+        assert body.length > 0;
+        assert contains(body, "Ciphers");
+        return 0;
+    });
 
     let _rmd = process.run(["rm", "-rf", dir]);
 }
 
-test "runtime tls: handshake fails against an AES-256-GCM-only server (unoffered suite)" ![io] {
+test "runtime tls: handshake fails against an AES-256-GCM-only server (unoffered suite)" ![clock, io] {
     if !_skip_ready() {
         assert true;
         return;
     }
-    let tcmd = _timeout_cmd();
+    let tcmd: string = _timeout_cmd();
     let port: i64 = 18900;
-    let port_str = "18900";
+    let port_str: string = "18900";
 
-    let dir = _scratch_dir() + "/aes256";
+    let dir: string = _scratch_dir() + "/aes256";
     fs.createDirectory(dir, true);
     assert _gen_cert(dir);
 
-    let out_path = dir + "/body.out";
+    let out_path: string = dir + "/body.out";
     let main_path = _write_client(dir, port_str, out_path);
-    let client_bin = _build_bin(main_path, dir + "/client-bin");
+    let client_bin: string = _build_bin(main_path, dir + "/client-bin");
     assert client_bin.length > 0;
 
-    let _handle = _spawn_server(dir, tcmd, port_str, "TLS_AES_256_GCM_SHA384");
-    assert _await_listening(port);
+    let argv = _server_argv(dir, port_str, "TLS_AES_256_GCM_SHA384");
+    let run_env: string[] = _client_env(dir + "/cert.pem");
 
-    // `tls.sfn::_tls_suite_aead` returns 0 for TLS_AES_256_GCM_SHA384 (the
-    // 48-byte-hash suite is explicitly out of scope, SFN-814) and
-    // `encode_client_hello` does not offer it, so a server restricted to
-    // ONLY this suite has no suite in common with the client: TLS 1.3
-    // requires the server to abort with `handshake_failure` when no offered
-    // suite matches. A single attempt is conclusive — an unoffered suite
-    // cannot start succeeding on retry — and the client's own socket
-    // read/write deadlines plus the `timeout` wrapper keep this from
-    // hanging if the peer ever misbehaves instead of alerting cleanly.
-    let body = _client_body(tcmd, client_bin, _client_env(dir + "/cert.pem"), out_path);
-    print.info("[tls-aes-gcm] AES-256-GCM leg: expecting no body (unoffered suite)");
-    assert body.length == 0;
+    // `with_background` owns the server's lifetime; see the AES-128-GCM
+    // leg above for the full rationale (SFN-852).
+    let _served = with_background(argv, _child_env_typed(), "", "tls-aes256", fn (server: Background) -> int {
+        assert server.handle.handle_id != 0;
+        assert _await_listening(port);
+
+        // `tls.sfn::_tls_suite_aead` returns 0 for TLS_AES_256_GCM_SHA384
+        // (the 48-byte-hash suite is explicitly out of scope, SFN-814) and
+        // `encode_client_hello` does not offer it, so a server restricted
+        // to ONLY this suite has no suite in common with the client:
+        // TLS 1.3 requires the server to abort with `handshake_failure`
+        // when no offered suite matches. A single attempt is conclusive —
+        // an unoffered suite cannot start succeeding on retry — and the
+        // client's own socket read/write deadlines plus the `timeout`
+        // wrapper keep this from hanging if the peer ever misbehaves
+        // instead of alerting cleanly.
+        let body = _client_body(tcmd, client_bin, run_env, out_path);
+        print.info("[tls-aes-gcm] AES-256-GCM leg: expecting no body (unoffered suite)");
+        assert body.length == 0;
+        return 0;
+    });
 
     let _rmd = process.run(["rm", "-rf", dir]);
 }
