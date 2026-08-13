@@ -17,11 +17,12 @@
 //
 // Each test uses its own `/tmp` namespace so parallel runs don't collide,
 // and cleans up on exit.
-import { sha256_of_file } from "../../src/build_cache";
+import { BuildCacheConfig, sha256_of_file } from "../../src/build_cache";
 import { _cr_ensure_dir, _cr_import_context_root } from "../../src/capsule_resolver/paths";
 import { capsule_origin_local, capsule_origin_workspace } from "../../src/capsule_resolver/provenance";
 import {
     _cr_collect_per_source_dep_slugs,
+    _cr_disabled_stage_cache_ctx,
     _cr_srchash_path,
     _cr_stage_cache_hit,
     _cr_stage_one,
@@ -42,6 +43,17 @@ fn _sct_tmp_root(label: string) -> string ![io] {
 
 fn _sct_cleanup(path: string) ![io] {
     process.run(["rm", "-rf", path]);
+}
+
+// These tests exercise the local `.srchash`-gated cache exclusively; the
+// SFN-861 shared cache is covered by `stage_cache_key_test.sfn`.
+fn _sct_no_cache() -> BuildCacheConfig {
+    return BuildCacheConfig {
+        enabled: false,
+        trace: false,
+        clean: false,
+        capsule_name: ""
+    };
 }
 
 // Stage the three on-disk artifacts a real cache hit needs:
@@ -257,10 +269,10 @@ test "capsule-resolver: staging refuses a source with unstamped provenance" ![io
     fs.writeFile(src_path, "fn unused_helper() -> int { return 1; }\n");
     // An unstamped source is a construction site that forgot to declare where
     // the bytes came from — it must not stage.
-    assert ! stage_capsule_imports([_sct_source(src_path, "mymod", "")], "", root);
+    assert ! stage_capsule_imports([_sct_source(src_path, "mymod", "")], _sct_no_cache(), "", root);
     // An origin outside the known set is refused the same way, so adding a new
     // provenance without teaching the guard fails closed.
-    assert ! stage_capsule_imports([_sct_source(src_path, "mymod", "registry")], "", root);
+    assert ! stage_capsule_imports([_sct_source(src_path, "mymod", "registry")], _sct_no_cache(), "", root);
     _sct_cleanup(root);
 }
 
@@ -277,8 +289,8 @@ test "capsule-resolver: provenance guard precedes the staging cache hit" ![io] {
     let manifest_path = context_root + "/" + slug + ".layout-manifest";
     _sct_stage(context_root, slug, src_path, asm_path, manifest_path);
     assert _cr_stage_cache_hit(asm_path, manifest_path, _cr_srchash_path(context_root, slug), src_path);
-    assert ! _cr_stage_one(_sct_source(src_path, slug, ""), "", root);
-    assert ! stage_capsule_imports([_sct_source(src_path, slug, "")], "", root);
+    assert ! _cr_stage_one(_sct_source(src_path, slug, ""), _cr_disabled_stage_cache_ctx(), "", root);
+    assert ! stage_capsule_imports([_sct_source(src_path, slug, "")], _sct_no_cache(), "", root);
     _sct_cleanup(root);
 }
 
@@ -317,9 +329,9 @@ test "capsule-resolver: provenance is validated before a staging strategy is cho
     let good_a = _sct_source(a_path, "a", capsule_origin_local());
     let good_b = _sct_source(b_path, "b", capsule_origin_workspace());
     // Control: fully stamped, all cache hits — succeeds, no emit dispatched.
-    assert stage_capsule_imports([good_a, good_b], unusable_exe, root);
+    assert stage_capsule_imports([good_a, good_b], _sct_no_cache(), unusable_exe, root);
     // One unstamped source must fail the whole set, on the same strategy.
     let bad_b = _sct_source(b_path, "b", "");
-    assert ! stage_capsule_imports([good_a, bad_b], unusable_exe, root);
+    assert ! stage_capsule_imports([good_a, bad_b], _sct_no_cache(), unusable_exe, root);
     _sct_cleanup(root);
 }

@@ -1288,6 +1288,40 @@ fn cache_key_for(source_path: string, dep_slugs: string[], dep_layout_manifest_p
     return CacheKey { digest: final_digest };
 }
 
+// Cache key for the STAGING artifacts (`.sfn-asm` + `.layout-manifest`),
+// distinct from `cache_key_for`'s per-module `.ll`/`.o` key.
+//
+// Omits the dep-manifest hashes `cache_key_for` folds in: native
+// `.sfn-asm` emit consults no cross-module import context —
+// `write_staged_native_text_file` (`native_artifact_writer.sfn`) passes
+// `empty_import_symbols()`, and the subprocess path
+// (`stage_native_text_with_retry`) passes no `--import-context` flag in
+// native mode — so a staged module's bytes are a pure function of its own
+// source text, slug, and emitting compiler. They are also not available
+// here: staging runs BEFORE dep manifests exist (staging PRODUCES the
+// manifests that `cache_key_for` later consumes).
+//
+// Includes `target_triple` even though native emit is believed
+// target-neutral. Deliberately conservative: an over-specific key costs a
+// duplicate cache entry per target, but an under-specific key risks
+// serving one target's bytes to another — revisit only with evidence the
+// emit is provably target-neutral.
+//
+// `stage1:` is a domain separator, distinct from `cache_key_for`'s
+// `tgt2:`, so the two key spaces can never collide even for the same
+// source/slug/version/triple tuple.
+fn stage_cache_key_for(source_path: string, slug: string, compiler_version: string, target_triple: string) -> CacheKey ![io] {
+    let s_hash = _sha256_of_text_file(source_path);
+    if s_hash.length == 0 {
+        return CacheKey { digest: "" };
+    }
+    let final_input = s_hash + "\n" + compiler_version + "\n" + slug
+        + "\nstage1:"
+        + target_triple;
+    let final_digest = _sha256_of_string(final_input, slug + "_stage");
+    return CacheKey { digest: final_digest };
+}
+
 fn _ends_with_suffix(text: string, suffix: string) -> boolean {
     if suffix.length > text.length { return false; }
     return substring(text, text.length - suffix.length, text.length) == suffix;
@@ -1544,6 +1578,7 @@ export {
     cache_store_artifact,
     canonicalize_flags,
     cache_key_for,
+    stage_cache_key_for,
     cache_compiler_identity,
     test_bin_compiler_identity,
     sha256_of_file,

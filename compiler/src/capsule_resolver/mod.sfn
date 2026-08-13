@@ -331,7 +331,7 @@ fn _cr_prepare(entry_paths: string[], config: BuildCacheConfig, consumer: Resolv
     // `sailfin_exe`) are unchanged.
     let effective_exe = _cr_effective_isolation_exe(sailfin_exe, binary_dir, resolved.sources.length);
 
-    let staged = stage_capsule_imports(resolved.sources, effective_exe, work_dir);
+    let staged = stage_capsule_imports(resolved.sources, config, effective_exe, work_dir);
     if !staged {
         print.err("capsule-resolver: failed to stage import-context for project capsules");
         return ProjectCapsuleResult {
@@ -379,7 +379,7 @@ fn _cr_prepare(entry_paths: string[], config: BuildCacheConfig, consumer: Resolv
                 // The build's own entry module.
                 origin: capsule_origin_local()
             });
-            let entry_staged = stage_capsule_imports(entry_src, effective_exe, work_dir);
+            let entry_staged = stage_capsule_imports(entry_src, config, effective_exe, work_dir);
             if !entry_staged {
                 print.err("capsule-resolver: failed to stage entry import-context for "
                     + entry_path);
@@ -445,7 +445,16 @@ fn stage_capsule_imports_for_emit(entry_path: string, sailfin_exe: string, work_
     // runtime/prelude emit (no consumer manifest) lands here untouched.
     if resolved.manifest_dep_specs.length == 0 { return true; }
     if resolved.sources.length == 0 { return true; }
-    return stage_capsule_imports(resolved.sources, sailfin_exe, work_dir);
+    // SFN-861: this cold `sfn emit` staging path deliberately does not
+    // participate in the shared cache — enabling it is follow-up work, not
+    // a regression.
+    let disabled_cache: BuildCacheConfig = BuildCacheConfig {
+        enabled: false,
+        trace: false,
+        clean: false,
+        capsule_name: ""
+    };
+    return stage_capsule_imports(resolved.sources, disabled_cache, sailfin_exe, work_dir);
 }
 
 // Resolver pass tuned for `sfn test`: stages `.sfn-asm` import-context
@@ -513,7 +522,13 @@ fn prepare_project_capsules_for_test(entry_paths: string[], consumer: ResolverCo
     // closure-size threshold) keep the in-process fast path; a non-empty
     // `sailfin_exe` is returned unchanged.
     let effective_exe = _cr_effective_isolation_exe(sailfin_exe, binary_dir, resolved.sources.length);
-    let staged = stage_capsule_imports(resolved.sources, effective_exe, work_dir);
+    // `sfn test` doesn't yet take a CLI cache config; pass the
+    // env-driven default. When the test runner grows `--no-cache`
+    // / `--clean`, thread the resolved config in here. Resolved before
+    // staging so the same config governs the SFN-861 shared staging
+    // cache and the `.ll` module cache below.
+    let test_config = empty_build_cache_config();
+    let staged = stage_capsule_imports(resolved.sources, test_config, effective_exe, work_dir);
     if !staged {
         print.err("capsule-resolver: failed to stage import-context for project capsules");
         return TestCapsuleResolution {
@@ -534,11 +549,6 @@ fn prepare_project_capsules_for_test(entry_paths: string[], consumer: ResolverCo
             + ".sfn-asm");
         ai += 1;
     }
-
-    // `sfn test` doesn't yet take a CLI cache config; pass the
-    // env-driven default. When the test runner grows `--no-cache`
-    // / `--clean`, thread the resolved config in here.
-    let test_config = empty_build_cache_config();
     // #984: `sfn test` resolves the entry as a normal source (no
     // walk-exclusion), so there is no extra slug universe to thread.
     let test_slug_universe_extra: CapsuleSource[] = [];
