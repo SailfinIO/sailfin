@@ -18,8 +18,11 @@ let _CIS_CR: int = 13;
 let _CIS_SPACE: int = 32;
 let _CIS_QUOTE: int = 34;
 let _CIS_STAR: int = 42;
+let _CIS_COMMA: int = 44;
 let _CIS_SLASH: int = 47;
 let _CIS_SEMI: int = 59;
+let _CIS_OPEN_BRACE: int = 123;
+let _CIS_CLOSE_BRACE: int = 125;
 let _CIS_BACKSLASH: int = 92;
 let _CIS_UNDERSCORE: int = 95;
 let _CIS_LOWER_E: int = 101;
@@ -810,9 +813,364 @@ fn _cr_source_imports_host(source: string, target: string) -> boolean {
     return false;
 }
 
+// ---- Import edge specifiers (SFN-834 / SFEP-0070 §3.3) ----
+// A per-statement record of an `import`/`export { ... } from "spec"`
+// statement, capturing the brace-list source names alongside the spec
+// so a caller can narrow a build's compiled module set by name rather
+// than by whole-module inclusion. Every uncertain case must widen
+// (`has_names = false`), never narrow — see `collect_import_edge_specifiers`.
+struct ImportEdgeSpecifiers {
+    spec: string;
+    names: string[];
+    has_names: boolean;
+    is_export: boolean;
+}
+
+// Scan result: the collected edges plus whether the shared step guard
+// tripped anywhere in the scan. A caller must widen the entire module
+// when `truncated` is true, since a tripped guard means some statement
+// was abandoned mid-scan and its true names are unknown.
+struct ImportEdgeScan {
+    edges: ImportEdgeSpecifiers[];
+    truncated: boolean;
+}
+
+// Clone of `collect_relative_import_specs`'s two-loop skeleton (same
+// step guard, same comment/string-aware flags, same `from "<spec>"`
+// capture and `;` terminator) with a brace-list name capture layered
+// on top of the inner loop. Returns every `import`/`export { ... }
+// from "spec"` statement verbatim — no relative/scoped filtering, the
+// caller classifies the spec itself.
+fn collect_import_edge_specifiers(source: string) -> ImportEdgeScan {
+    // Accumulate into locals and build the result struct at each return:
+    // `.push` onto a struct FIELD is not lowerable (`E1007`, the callee
+    // signature of `<struct><field>.push` is not known to the compiler).
+    let mut out: ImportEdgeSpecifiers[] = [];
+    let mut truncated: boolean = false;
+    let source_len = source.length;
+    if source_len == 0 {
+        return ImportEdgeScan { edges: out, truncated: truncated };
+    }
+    let mut steps: int = 0;
+    let max_steps = source_len * 6 + 1000;
+    let mut i: int = 0;
+    let mut in_string: boolean = false;
+    let mut escaping: boolean = false;
+    let mut in_line_comment: boolean = false;
+    let mut in_block_comment: boolean = false;
+    loop {
+        if i >= source_len { break; }
+        steps += 1;
+        if steps > max_steps {
+            truncated = true;
+            break;
+        }
+        let ch = _cr_byte_at(source, i);
+        if in_line_comment {
+            if ch == _CIS_LF { in_line_comment = false; }
+            i += 1;
+            continue;
+        }
+        if in_block_comment {
+            if ch == _CIS_STAR {
+                if i + 1 < source_len {
+                    if _cr_byte_at(source, i + 1) == _CIS_SLASH {
+                        in_block_comment = false;
+                        i += 2;
+                        continue;
+                    }
+                }
+            }
+            i += 1;
+            continue;
+        }
+        if in_string {
+            if escaping {
+                escaping = false;
+                i += 1;
+                continue;
+            }
+            if ch == _CIS_BACKSLASH {
+                escaping = true;
+                i += 1;
+                continue;
+            }
+            if ch == _CIS_QUOTE {
+                in_string = false;
+                i += 1;
+                continue;
+            }
+            i += 1;
+            continue;
+        }
+        if ch == _CIS_SLASH {
+            if i + 1 < source_len {
+                let next = _cr_byte_at(source, i + 1);
+                if next == _CIS_SLASH {
+                    in_line_comment = true;
+                    i += 2;
+                    continue;
+                }
+                if next == _CIS_STAR {
+                    in_block_comment = true;
+                    i += 2;
+                    continue;
+                }
+            }
+        }
+        if ch == _CIS_QUOTE {
+            in_string = true;
+            i += 1;
+            continue;
+        }
+        let mut _is_dep_keyword: boolean = false;
+        let mut _is_export_kw: boolean = false;
+        if ch == _CIS_LOWER_I {
+            if _cr_word_matches(source, i, "import") { _is_dep_keyword = true; }
+        }
+        if ch == _CIS_LOWER_E {
+            if _cr_word_matches(source, i, "export") {
+                _is_dep_keyword = true;
+                _is_export_kw = true;
+            }
+        }
+        if _is_dep_keyword {
+            let mut j: int = i;
+            let mut s_in_string: boolean = false;
+            let mut s_escaping: boolean = false;
+            let mut s_in_line_comment: boolean = false;
+            let mut s_in_block_comment: boolean = false;
+            let mut spec: string = "";
+            let mut stmt_end: int = -1;
+            let mut brace_depth: int = 0;
+            let mut item: string = "";
+            let mut names: string[] = [];
+            let mut has_names: boolean = false;
+            let mut resolved_names: boolean = true;
+            loop {
+                if j >= source_len { break; }
+                steps += 1;
+                if steps > max_steps {
+                    truncated = true;
+                    break;
+                }
+                let cj = _cr_byte_at(source, j);
+                if s_in_line_comment {
+                    if cj == _CIS_LF { s_in_line_comment = false; }
+                    j += 1;
+                    continue;
+                }
+                if s_in_block_comment {
+                    if cj == _CIS_STAR {
+                        if j + 1 < source_len {
+                            if _cr_byte_at(source, j + 1) == _CIS_SLASH {
+                                s_in_block_comment = false;
+                                j += 2;
+                                continue;
+                            }
+                        }
+                    }
+                    j += 1;
+                    continue;
+                }
+                if s_in_string {
+                    if s_escaping {
+                        s_escaping = false;
+                        j += 1;
+                        continue;
+                    }
+                    if cj == _CIS_BACKSLASH {
+                        s_escaping = true;
+                        j += 1;
+                        continue;
+                    }
+                    if cj == _CIS_QUOTE {
+                        s_in_string = false;
+                        j += 1;
+                        continue;
+                    }
+                    j += 1;
+                    continue;
+                }
+                if cj == _CIS_SLASH {
+                    if j + 1 < source_len {
+                        let nj = _cr_byte_at(source, j + 1);
+                        if nj == _CIS_SLASH {
+                            s_in_line_comment = true;
+                            j += 2;
+                            continue;
+                        }
+                        if nj == _CIS_STAR {
+                            s_in_block_comment = true;
+                            j += 2;
+                            continue;
+                        }
+                    }
+                }
+                if cj == _CIS_QUOTE {
+                    s_in_string = true;
+                    j += 1;
+                    continue;
+                }
+                if cj == _CIS_OPEN_BRACE {
+                    brace_depth += 1;
+                    if brace_depth == 1 {
+                        has_names = true;
+                        item = "";
+                    }
+                    j += 1;
+                    continue;
+                }
+                if cj == _CIS_CLOSE_BRACE {
+                    if brace_depth == 1 {
+                        let flushed = _cis_flush_item(item);
+                        if flushed.length == 0 { resolved_names = false; } else {
+                            names.push(flushed);
+                        }
+                    }
+                    if brace_depth > 0 { brace_depth -= 1; }
+                    j += 1;
+                    continue;
+                }
+                if brace_depth == 1 && cj == _CIS_COMMA {
+                    let flushed = _cis_flush_item(item);
+                    if flushed.length == 0 { resolved_names = false; } else {
+                        names.push(flushed);
+                    }
+                    item = "";
+                    j += 1;
+                    continue;
+                }
+                if spec.length == 0 && cj == _CIS_LOWER_F {
+                    if _cr_word_matches(source, j, "from") {
+                        let mut k = j + 4;
+                        loop {
+                            if k >= source_len { break; }
+                            let wk = _cr_byte_at(source, k);
+                            let mut ws: boolean = false;
+                            if wk == _CIS_SPACE { ws = true; }
+                            if wk == _CIS_TAB { ws = true; }
+                            if wk == _CIS_LF { ws = true; }
+                            if wk == _CIS_CR { ws = true; }
+                            if !ws { break; }
+                            k += 1;
+                        }
+                        if k < source_len {
+                            if _cr_byte_at(source, k) == _CIS_QUOTE {
+                                k += 1;
+                                let start = k;
+                                let mut esc: boolean = false;
+                                loop {
+                                    if k >= source_len { break; }
+                                    let sk = _cr_byte_at(source, k);
+                                    if esc {
+                                        esc = false;
+                                        k += 1;
+                                        continue;
+                                    }
+                                    if sk == _CIS_BACKSLASH {
+                                        esc = true;
+                                        k += 1;
+                                        continue;
+                                    }
+                                    if sk == _CIS_QUOTE {
+                                        spec = substring(source, start, k);
+                                        break;
+                                    }
+                                    k += 1;
+                                }
+                            }
+                        }
+                    }
+                }
+                if cj == _CIS_SEMI {
+                    stmt_end = j + 1;
+                    break;
+                }
+                // Fallback: an ordinary content byte inside an open brace
+                // that the `from`/`;` tests above did not consume. Placed
+                // after those tests (not before) so a bare `;` — or a
+                // literal `from` keyword — still terminates/captures even
+                // with an unclosed brace (degrade rule 3); a well-formed
+                // brace list never reaches here for those bytes because
+                // the closing `}` already returned `brace_depth` to 0
+                // before `from`/`;` appear.
+                if brace_depth >= 1 {
+                    item = item + substring(source, j, j + 1);
+                    j += 1;
+                    continue;
+                }
+                j += 1;
+            }
+            if stmt_end > 0 {
+                if brace_depth > 0 {
+                    has_names = false;
+                    resolved_names = false;
+                }
+                if !resolved_names { has_names = false; }
+                if !has_names { names = []; }
+                if spec.length > 0 {
+                    let edge = ImportEdgeSpecifiers {
+                        spec: spec,
+                        names: names,
+                        has_names: has_names,
+                        is_export: _is_export_kw
+                    };
+                    out.push(edge);
+                }
+                i = stmt_end;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    return ImportEdgeScan { edges: out, truncated: truncated };
+}
+
+// Trim ASCII whitespace from both ends of a raw brace-list item, then
+// take the leading identifier run — the source name, pre-alias (so
+// `a as b` yields `a`). Returns "" when the run is empty, which the
+// caller treats as an unresolved item (SFN-834 degrade rule 2).
+fn _cis_flush_item(item: string) -> string {
+    let len = item.length;
+    let mut start: int = 0;
+    loop {
+        if start >= len { break; }
+        let b = _cr_byte_at(item, start);
+        let mut ws: boolean = false;
+        if b == _CIS_SPACE { ws = true; }
+        if b == _CIS_TAB { ws = true; }
+        if b == _CIS_LF { ws = true; }
+        if b == _CIS_CR { ws = true; }
+        if !ws { break; }
+        start += 1;
+    }
+    let mut end: int = len;
+    loop {
+        if end <= start { break; }
+        let b = _cr_byte_at(item, end - 1);
+        let mut ws: boolean = false;
+        if b == _CIS_SPACE { ws = true; }
+        if b == _CIS_TAB { ws = true; }
+        if b == _CIS_LF { ws = true; }
+        if b == _CIS_CR { ws = true; }
+        if !ws { break; }
+        end -= 1;
+    }
+    let mut ident_end: int = start;
+    loop {
+        if ident_end >= end { break; }
+        if !_cr_is_ident_char(_cr_byte_at(item, ident_end)) { break; }
+        ident_end += 1;
+    }
+    if ident_end == start { return ""; }
+    return substring(item, start, ident_end);
+}
+
 export {
     _cr_find_substring,
     _cr_source_imports_host,
+    collect_import_edge_specifiers,
     collect_relative_import_specs,
     collect_scoped_import_specs
 };

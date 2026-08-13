@@ -6,7 +6,11 @@
 // silently break the scanner contract. Behavior parity with resolver consumers
 // is covered by relative_import_resolver_test.sfn, which imports the production
 // scanners, and the resolver e2e tests.
-import { collect_relative_import_specs, collect_scoped_import_specs } from "../../src/capsule_import_scan";
+import {
+    collect_import_edge_specifiers,
+    collect_relative_import_specs,
+    collect_scoped_import_specs
+} from "../../src/capsule_import_scan";
 import { strings_equal } from "../../src/string_utils";
 
 fn _eq(a: string, b: string) -> boolean { return strings_equal(a, b); }
@@ -65,4 +69,91 @@ test "capsule_import_scan: non-ASCII bytes in a comment do not confuse the scann
     let specs = collect_relative_import_specs(src);
     assert specs.length == 1;
     assert _eq(specs[0], "./ok");
+}
+
+test "capsule_import_scan: edge scan captures brace-list names in source order" {
+    let src = "import { a, b } from \"./x\";\n";
+    let scan = collect_import_edge_specifiers(src);
+    assert scan.truncated == false;
+    assert scan.edges.length == 1;
+    assert _eq(scan.edges[0].spec, "./x");
+    assert scan.edges[0].has_names == true;
+    assert scan.edges[0].is_export == false;
+    assert scan.edges[0].names.length == 2;
+    assert _eq(scan.edges[0].names[0], "a");
+    assert _eq(scan.edges[0].names[1], "b");
+}
+
+test "capsule_import_scan: edge scan marks export statements" {
+    let src = "export { a } from \"./x\";\n";
+    let scan = collect_import_edge_specifiers(src);
+    assert scan.edges.length == 1;
+    assert scan.edges[0].is_export == true;
+}
+
+test "capsule_import_scan: edge scan captures the source name, not the alias" {
+    let src = "import { a as b } from \"./x\";\n";
+    let scan = collect_import_edge_specifiers(src);
+    assert scan.edges.length == 1;
+    assert scan.edges[0].names.length == 1;
+    assert _eq(scan.edges[0].names[0], "a");
+}
+
+// The no-names degrade path, exercised through the only shape that can
+// actually reach the scanner.
+//
+// A literal side-effect `import "./x";` is NOT a Sailfin construct:
+// `parse_import` consumes `{` unconditionally via `parse_specifier_list`
+// and then consumes `from` unconditionally
+// (`compiler/capsules/syntax/src/parser/declarations/imports_exports.sfn`),
+// so a brace list and a `from` clause are both mandatory. Such a source
+// fails to parse long before the resolver stages anything, which is why
+// the scanner emitting no edge for it cannot narrow a build. An empty
+// brace list is the reachable shape that yields no names, and it must
+// widen rather than resolve to the empty demand set.
+test "capsule_import_scan: edge scan widens on a brace list that yields no names" {
+    let src = "import { } from \"./x\";\n";
+    let scan = collect_import_edge_specifiers(src);
+    assert scan.edges.length == 1;
+    assert scan.edges[0].has_names == false;
+    assert scan.edges[0].names.length == 0;
+}
+
+test "capsule_import_scan: edge scan skips a bare export with no from clause" {
+    let src = "export { a };\n";
+    let scan = collect_import_edge_specifiers(src);
+    assert scan.edges.length == 0;
+}
+
+test "capsule_import_scan: edge scan tolerates multiline brace lists with interleaved comments" {
+    let src = "import {\n  a, // first\n  /* skip */ b\n} from \"./x\";\n";
+    let scan = collect_import_edge_specifiers(src);
+    assert scan.edges.length == 1;
+    assert scan.edges[0].names.length == 2;
+    assert _eq(scan.edges[0].names[0], "a");
+    assert _eq(scan.edges[0].names[1], "b");
+}
+
+test "capsule_import_scan: edge scan is not confused by a comma or brace inside a name-list string" {
+    let src = "import { a /* , } */ } from \"./x\";\n";
+    let scan = collect_import_edge_specifiers(src);
+    assert scan.edges.length == 1;
+    assert scan.edges[0].names.length == 1;
+    assert _eq(scan.edges[0].names[0], "a");
+}
+
+test "capsule_import_scan: edge scan widens on unbalanced braces" {
+    let src = "import { a from \"./x\";\n";
+    let scan = collect_import_edge_specifiers(src);
+    assert scan.edges.length == 1;
+    assert scan.edges[0].has_names == false;
+    assert scan.edges[0].names.length == 0;
+}
+
+test "capsule_import_scan: edge scan returns scoped specs verbatim without filtering" {
+    let src = "import { a } from \"sfn/crypto\";\n";
+    let scan = collect_import_edge_specifiers(src);
+    assert scan.edges.length == 1;
+    assert _eq(scan.edges[0].spec, "sfn/crypto");
+    assert scan.edges[0].has_names == true;
 }
