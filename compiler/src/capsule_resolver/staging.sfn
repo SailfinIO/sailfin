@@ -240,8 +240,8 @@ fn _cr_print_stage_cache_summary(summary: _StageCacheSummary) ![io] {
         + int_to_string(summary.restore_failed));
 }
 
-// Per-module outcome of `_cr_stage_one`, carrying the shared-cache
-// event alongside the plain success/failure `_cr_stage_one` exposes to
+// Per-module outcome of `_cr_stage_one_outcome`, carrying the shared-cache
+// event alongside the plain success/failure it exposes to
 // its (test) callers. `stage_capsule_imports`'s serial loops fold this
 // into a `_StageCacheSummary`.
 struct _StageOneOutcome {
@@ -501,7 +501,7 @@ fn _cr_write_capsule_slug_aliases(sources: CapsuleSource[], context_root: string
 }
 
 // Extract `.layout` lines from a freshly-emitted `.sfn-asm` and
-// write the sibling `.layout-manifest`. Split out of `_cr_stage_one`
+// write the sibling `.layout-manifest`. Split out of `_cr_stage_one_outcome`
 // so the parallel-emit path can call it after xargs returns.
 fn _cr_extract_layout_manifest(asm_path: string, manifest_path: string) ![io] {
     if !fs.exists(asm_path) { return; }
@@ -543,7 +543,7 @@ fn _cr_extract_layout_manifest(asm_path: string, manifest_path: string) ![io] {
 // `SAILFIN_BUILD_JOBS != 1`, the cache-miss subset is fanned across
 // `_cr_resolve_jobs()` workers via `_cr_run_parallel_emit`.
 // Single-process and `SAILFIN_BUILD_JOBS=1` paths fall through to
-// the legacy serial loop (one `_cr_stage_one` call per source) so
+// the legacy serial loop (one `_cr_stage_one_outcome` call per source) so
 // regression bisects keep the simple shape they had pre-PR3.
 //
 // Empty `sailfin_exe` keeps the in-process stage path that's
