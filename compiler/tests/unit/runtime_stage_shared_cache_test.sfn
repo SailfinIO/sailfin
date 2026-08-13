@@ -1,0 +1,198 @@
+// End-to-end coverage for the SFN-861 shared content-addressed cache layer
+// on the RUNTIME staging path (`_stage_one_runtime_sfn_import_context`,
+// `compiler/src/build/runtime_objs.sfn`) — the mirror of
+// `stage_shared_cache_test.sfn`'s CAPSULE staging coverage (e87cc220), for
+// the second, larger of the two staging roots
+// (`<work>/sailfin/rt-import-context/`, ~68 of the 102 `.sfn-asm` a build
+// emits).
+//
+// Unlike the capsule staging path, the runtime staging path has no
+// in-process emit fallback — `_stage_one_runtime_sfn_import_context`
+// always drives a real `<self_path> emit --no-resolve-gate native` child.
+// So every test here calls it directly against the built `sfn` binary
+// (`SAILFIN_BIN` or `build/bin/sfn`), rather than an in-process stub.
+//
+// A plain boolean return gives no `cache_hit`/`cache_stored` flag to
+// assert on directly, so "this call was served from the shared cache, not
+// a fresh emit" is proven by pointing `self_path` at a binary that does
+// not exist: if the call still succeeds and produces correct content, the
+// emit subprocess was never invoked.
+//
+// Each test uses its own scratch namespace so parallel runs don't
+// collide, and cleans up on exit.
+import { _stage_one_runtime_sfn_import_context } from "../../src/build/runtime_objs";
+import {
+    CacheKey,
+    cache_lookup_artifact,
+    cache_store_artifact,
+    is_valid_digest,
+    runtime_object_cache_key_with_identity,
+    runtime_object_entry_key_from_str
+} from "../../src/build_cache";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+// A self_path that cannot resolve to a runnable binary. Used to prove a
+// call was served from the shared cache without ever reaching the emit
+// subprocess.
+fn _rsc_unusable_self_path() -> string {
+    return "/nonexistent/sfn-861-should-not-be-invoked";
+}
+
+fn _rsc_tmp_root(label: string) -> string ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    let dir = base + "/sfn_runtime_stage_shared_cache_test_" + label;
+    process.run(["rm", "-rf", dir]);
+    process.run(["mkdir", "-p", dir]);
+    return dir;
+}
+
+fn _rsc_cleanup(path: string) ![io] {
+    process.run(["rm", "-rf", path]);
+}
+
+// --------------------------------------------------------------
+// 1. store -> fresh work dir -> restore
+// --------------------------------------------------------------
+test "runtime stage shared cache: a fresh work dir restores a module staged by a prior run" ![io] {
+    let cache_root = _rsc_tmp_root("t1_cache");
+    let src_root = _rsc_tmp_root("t1_src");
+    let src_path = src_root + "/mymod.sfn";
+    fs.writeFile(src_path, "fn hello() -> int { return 1; }\n");
+
+    let ctx_root1 = _rsc_tmp_root("t1_ctx1");
+    let ok1 = _stage_one_runtime_sfn_import_context(_sfn_bin(), src_path, "mymod", ctx_root1, "", cache_root);
+    assert ok1;
+    let asm_path1 = ctx_root1 + "/mymod.sfn-asm";
+    let asm1 = fs.readFile(asm_path1);
+    assert asm1.length > 0;
+
+    // A DIFFERENT, never-before-seen ctx root, and a self_path that would
+    // fail if the emit subprocess were ever invoked: any success here must
+    // come from the shared cache written above, not a fresh emit.
+    let ctx_root2 = _rsc_tmp_root("t1_ctx2");
+    let ok2 = _stage_one_runtime_sfn_import_context(_rsc_unusable_self_path(), src_path, "mymod", ctx_root2, "", cache_root);
+    assert ok2;
+    let asm_path2 = ctx_root2 + "/mymod.sfn-asm";
+    assert fs.readFile(asm_path2) == asm1;
+    // The restore also writes the work-dir `.key` sidecar so a same-work-dir
+    // rebuild fast-paths through `_runtime_obj_cache_hit`.
+    assert fs.exists(asm_path2 + ".key");
+
+    _rsc_cleanup(cache_root);
+    _rsc_cleanup(src_root);
+    _rsc_cleanup(ctx_root1);
+    _rsc_cleanup(ctx_root2);
+}
+
+// --------------------------------------------------------------
+// 2. a changed source does NOT hit the stored entry
+// --------------------------------------------------------------
+test "runtime stage shared cache: a changed source does not hit the entry stored for the old content" ![io] {
+    let cache_root = _rsc_tmp_root("t2_cache");
+    let src_root = _rsc_tmp_root("t2_src");
+    let src_path = src_root + "/mymod.sfn";
+    fs.writeFile(src_path, "fn hello() -> int { return 1; }\n");
+
+    let ctx_root1 = _rsc_tmp_root("t2_ctx1");
+    let ok1 = _stage_one_runtime_sfn_import_context(_sfn_bin(), src_path, "mymod", ctx_root1, "", cache_root);
+    assert ok1;
+    let asm1 = fs.readFile(ctx_root1 + "/mymod.sfn-asm");
+    assert asm1.length > 0;
+
+    // Same slug, DIFFERENT bytes: the content key must miss the entry
+    // stored for the old content, forcing a real (successful) re-emit
+    // rather than a bogus shared-cache hit.
+    fs.writeFile(src_path, "fn hello() -> int { return 2; }\n");
+    let ctx_root2 = _rsc_tmp_root("t2_ctx2");
+    let ok2 = _stage_one_runtime_sfn_import_context(_sfn_bin(), src_path, "mymod", ctx_root2, "", cache_root);
+    assert ok2;
+    let asm2 = fs.readFile(ctx_root2 + "/mymod.sfn-asm");
+    assert asm2.length > 0;
+    assert asm2 != asm1;
+
+    _rsc_cleanup(cache_root);
+    _rsc_cleanup(src_root);
+    _rsc_cleanup(ctx_root1);
+    _rsc_cleanup(ctx_root2);
+}
+
+// --------------------------------------------------------------
+// 3. an empty `shared_cache_root` is inert
+// --------------------------------------------------------------
+test "runtime stage shared cache: an empty shared_cache_root neither reads nor writes the shared cache" ![io] {
+    let cache_root = _rsc_tmp_root("t3_cache");
+    let src_root = _rsc_tmp_root("t3_src");
+    let src_path = src_root + "/mymod.sfn";
+    fs.writeFile(src_path, "fn hello() -> int { return 1; }\n");
+
+    // Pre-populate `cache_root` with a WRONG entry for this exact key —
+    // if the empty-`shared_cache_root` call below ever consulted it, it
+    // would restore this bogus content instead of emitting fresh.
+    let key_str = runtime_object_cache_key_with_identity(src_path, "", "");
+    let key: CacheKey = runtime_object_entry_key_from_str(key_str, "mymod");
+    assert is_valid_digest(key.digest);
+    let bogus_asm = src_root + "/bogus.sfn-asm";
+    fs.writeFile(bogus_asm, "; this must never be served\n");
+    assert cache_store_artifact(cache_root, key, "sfn-asm", bogus_asm);
+
+    let ctx_root = _rsc_tmp_root("t3_ctx");
+    let ok = _stage_one_runtime_sfn_import_context(_sfn_bin(), src_path, "mymod", ctx_root, "", "");
+    assert ok;
+    let asm = fs.readFile(ctx_root + "/mymod.sfn-asm");
+    assert asm.length > 0;
+    assert asm != "; this must never be served\n";
+
+    // No publish either: a second, unrelated slug staged with an empty
+    // `shared_cache_root` must not add an entry under `cache_root`.
+    let src_path2 = src_root + "/othermod.sfn";
+    fs.writeFile(src_path2, "fn other() -> int { return 3; }\n");
+    let key_str2 = runtime_object_cache_key_with_identity(src_path2, "", "");
+    let key2: CacheKey = runtime_object_entry_key_from_str(key_str2, "othermod");
+    assert is_valid_digest(key2.digest);
+    let ctx_root2 = _rsc_tmp_root("t3_ctx2");
+    let ok2 = _stage_one_runtime_sfn_import_context(_sfn_bin(), src_path2, "othermod", ctx_root2, "", "");
+    assert ok2;
+    assert ! cache_lookup_artifact(cache_root, key2, "sfn-asm");
+
+    _rsc_cleanup(cache_root);
+    _rsc_cleanup(src_root);
+    _rsc_cleanup(ctx_root);
+    _rsc_cleanup(ctx_root2);
+}
+
+// --------------------------------------------------------------
+// 4. a missing shared entry falls open to a fresh emit
+// --------------------------------------------------------------
+test "runtime stage shared cache: a missing shared entry falls open to a fresh emit" ![io] {
+    let cache_root = _rsc_tmp_root("t4_cache");
+    let src_root = _rsc_tmp_root("t4_src");
+    let src_path = src_root + "/mymod.sfn";
+    fs.writeFile(src_path, "fn hello() -> int { return 1; }\n");
+
+    // `cache_root` exists but has never seen this key — a genuine cold
+    // shared cache. The call must still succeed via a real emit.
+    let ctx_root = _rsc_tmp_root("t4_ctx");
+    let ok = _stage_one_runtime_sfn_import_context(_sfn_bin(), src_path, "mymod", ctx_root, "", cache_root);
+    assert ok;
+    let asm_path = ctx_root + "/mymod.sfn-asm";
+    assert fs.readFile(asm_path).length > 0;
+    assert fs.exists(asm_path + ".key");
+
+    // And the fresh emit was published, so a subsequent fresh work dir
+    // (proven via the unusable self_path trick) now hits it.
+    let ctx_root2 = _rsc_tmp_root("t4_ctx2");
+    let ok2 = _stage_one_runtime_sfn_import_context(_rsc_unusable_self_path(), src_path, "mymod", ctx_root2, "", cache_root);
+    assert ok2;
+    assert fs.readFile(ctx_root2 + "/mymod.sfn-asm") == fs.readFile(asm_path);
+
+    _rsc_cleanup(cache_root);
+    _rsc_cleanup(src_root);
+    _rsc_cleanup(ctx_root);
+    _rsc_cleanup(ctx_root2);
+}
