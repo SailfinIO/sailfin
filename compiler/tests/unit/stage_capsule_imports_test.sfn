@@ -25,7 +25,7 @@ import {
     _cr_disabled_stage_cache_ctx,
     _cr_srchash_path,
     _cr_stage_cache_hit,
-    _cr_stage_one,
+    _cr_stage_one_outcome,
     _cr_write_srchash,
     stage_capsule_imports
 } from "../../src/capsule_resolver/staging";
@@ -249,10 +249,11 @@ test "capsule resolver: splitting a dependency module changes its dependents' de
 // Fail-closed provenance guard (SFN-715)
 // --------------------------------------------------------------
 // `stage_capsule_imports` picks one of three staging strategies, and only two
-// of them call `_cr_stage_one` — the parallel branch builds its emit tasks
-// directly. The cache-hit probe inside `_cr_stage_one` also returns early. A
-// guard placed downstream of either is dead on the paths a real build uses, so
-// these tests pin the ordering rather than just the predicate.
+// of them call `_cr_stage_one_outcome` — the parallel branch builds its emit
+// tasks directly. The cache-hit probe inside `_cr_stage_one_outcome` also
+// returns early. A guard placed downstream of either is dead on the paths a
+// real build uses, so these tests pin the ordering rather than just the
+// predicate.
 fn _sct_source(path: string, slug: string, origin: string) -> CapsuleSource {
     return CapsuleSource {
         spec: "",
@@ -289,13 +290,13 @@ test "capsule-resolver: provenance guard precedes the staging cache hit" ![io] {
     let manifest_path = context_root + "/" + slug + ".layout-manifest";
     _sct_stage(context_root, slug, src_path, asm_path, manifest_path);
     assert _cr_stage_cache_hit(asm_path, manifest_path, _cr_srchash_path(context_root, slug), src_path);
-    assert ! _cr_stage_one(_sct_source(src_path, slug, ""), _cr_disabled_stage_cache_ctx(), "", root);
+    assert ! _cr_stage_one_outcome(_sct_source(src_path, slug, ""), _cr_disabled_stage_cache_ctx(), "", root).ok;
     assert ! stage_capsule_imports([_sct_source(src_path, slug, "")], _sct_no_cache(), "", root);
     _sct_cleanup(root);
 }
 
 // Two sources plus a non-empty exe selects the multi-source strategy, which
-// never calls `_cr_stage_one`. Both sources are pre-warmed into the staging
+// never calls `_cr_stage_one_outcome`. Both sources are pre-warmed into the staging
 // cache so that strategy dispatches no emit at all: a fully-stamped set then
 // succeeds without touching the (deliberately unusable) exe, which is what
 // makes the unstamped variant's failure attributable to provenance and nothing

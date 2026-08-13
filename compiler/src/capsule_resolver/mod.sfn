@@ -167,7 +167,6 @@ import {
     _cr_dep_manifest_paths_for_slugs,
     _cr_manifests_to_asm_paths,
     _cr_stage_import_deps,
-    _cr_stage_one,
     stage_capsule_imports
 } from "./staging";
 import {
@@ -445,9 +444,9 @@ fn stage_capsule_imports_for_emit(entry_path: string, sailfin_exe: string, work_
     // runtime/prelude emit (no consumer manifest) lands here untouched.
     if resolved.manifest_dep_specs.length == 0 { return true; }
     if resolved.sources.length == 0 { return true; }
-    // SFN-861: this cold `sfn emit` staging path deliberately does not
-    // participate in the shared cache — enabling it is follow-up work, not
-    // a regression.
+    // SFN-861: this cold `sfn emit` staging path is a one-shot, single-
+    // module call with no per-invocation build loop to amortise a shared-
+    // cache lookup against — it does not participate in the shared cache.
     let disabled_cache: BuildCacheConfig = BuildCacheConfig {
         enabled: false,
         trace: false,

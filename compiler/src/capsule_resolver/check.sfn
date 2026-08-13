@@ -71,8 +71,9 @@ fn prepare_project_capsules_for_check(entry_paths: string[], consumer: ResolverC
         };
     }
 
-    // SFN-861: `sfn check` is already the fast rung; opting it into the
-    // shared staging cache is follow-up work, not a regression.
+    // SFN-861: `sfn check` is already the fast rung — no LLVM IR, no
+    // `clang`, no self-host — so the shared staging cache has no cold-
+    // start cost here to amortise; this path does not participate in it.
     let disabled_cache: BuildCacheConfig = BuildCacheConfig {
         enabled: false,
         trace: false,

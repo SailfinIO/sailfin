@@ -1,0 +1,250 @@
+// End-to-end coverage for the SFN-861 shared content-addressed cache layer
+// on the staging path (`.sfn-asm` + `.layout-manifest`).
+//
+// `stage_cache_key_test.sfn` covers only the pure key derivation, and
+// `stage_capsule_imports_test.sfn` exercises `_cr_stage_one_outcome`
+// exclusively with a DISABLED `BuildCacheConfig`, so `ctx.enabled == true`
+// is never reached by either file. These tests drive the real
+// `_cr_stage_one_outcome` shared-cache branches directly, via the
+// test-facing `_cr_stage_cache_ctx_for` constructor, against a `/tmp`
+// cache root and literal version/triple — no env manipulation, no
+// `stage_capsule_imports` plumbing.
+//
+// Each test uses its own `/tmp` namespace so parallel runs don't collide,
+// and cleans up on exit.
+import {
+    CacheKey,
+    cache_store_artifact,
+    is_valid_digest,
+    sha256_of_file,
+    stage_cache_key_from_digest
+} from "../../src/build_cache";
+import { _cr_import_context_root } from "../../src/capsule_resolver/paths";
+import { capsule_origin_local } from "../../src/capsule_resolver/provenance";
+import { _cr_srchash_path, _cr_stage_cache_ctx_for, _cr_stage_one_outcome } from "../../src/capsule_resolver/staging";
+import { CapsuleSource } from "../../src/capsule_resolver/types";
+
+// --------------------------------------------------------------
+// Fixture helpers
+// --------------------------------------------------------------
+fn _ssc_tmp_root(label: string) -> string ![io] {
+    let root = "/tmp/sfn_stage_shared_cache_test_" + label;
+    process.run(["rm", "-rf", root]);
+    process.run(["mkdir", "-p", root]);
+    return root;
+}
+
+fn _ssc_cleanup(path: string) ![io] {
+    process.run(["rm", "-rf", path]);
+}
+
+fn _ssc_source(path: string, slug: string) -> CapsuleSource {
+    return CapsuleSource {
+        spec: "",
+        source_path: path,
+        slug: slug,
+        ll_path: "",
+        origin: capsule_origin_local()
+    };
+}
+
+// --------------------------------------------------------------
+// 1. store -> fresh work dir -> restore
+// --------------------------------------------------------------
+test "stage shared cache: a fresh work dir restores a module staged by a prior run" ![io] {
+    let cache_root = _ssc_tmp_root("t1_cache");
+    let src_root = _ssc_tmp_root("t1_src");
+    let src_path = src_root + "/mymod.sfn";
+    fs.writeFile(src_path, "fn hello() -> int { return 1; }\n");
+    let ctx = _cr_stage_cache_ctx_for(cache_root, "test-version-1", "x86_64-unknown-linux-gnu");
+    let src = _ssc_source(src_path, "mymod");
+
+    let work_dir1 = _ssc_tmp_root("t1_work1");
+    let first = _cr_stage_one_outcome(src, ctx, "", work_dir1);
+    assert first.ok;
+    assert first.cache_stored;
+    assert ! first.cache_hit;
+
+    // A DIFFERENT, never-before-seen work dir: no local `.srchash` tree at
+    // all, so any hit must come from the shared cache written above.
+    let work_dir2 = _ssc_tmp_root("t1_work2");
+    let second = _cr_stage_one_outcome(src, ctx, "", work_dir2);
+    assert second.ok;
+    assert second.cache_hit;
+    assert ! second.cache_stored;
+
+    let context_root2 = _cr_import_context_root(work_dir2);
+    let asm_path2 = context_root2 + "/mymod.sfn-asm";
+    let manifest_path2 = context_root2 + "/mymod.layout-manifest";
+    assert fs.readFile(asm_path2).length > 0;
+    assert fs.exists(manifest_path2);
+
+    _ssc_cleanup(cache_root);
+    _ssc_cleanup(src_root);
+    _ssc_cleanup(work_dir1);
+    _ssc_cleanup(work_dir2);
+}
+
+// --------------------------------------------------------------
+// 2. a changed source does NOT hit the stored entry
+// --------------------------------------------------------------
+test "stage shared cache: a changed source does not hit the entry stored for the old content" ![io] {
+    let cache_root = _ssc_tmp_root("t2_cache");
+    let src_root = _ssc_tmp_root("t2_src");
+    let src_path = src_root + "/mymod.sfn";
+    fs.writeFile(src_path, "fn hello() -> int { return 1; }\n");
+    let ctx = _cr_stage_cache_ctx_for(cache_root, "test-version-1", "x86_64-unknown-linux-gnu");
+    let src = _ssc_source(src_path, "mymod");
+
+    let work_dir1 = _ssc_tmp_root("t2_work1");
+    let first = _cr_stage_one_outcome(src, ctx, "", work_dir1);
+    assert first.ok;
+    assert first.cache_stored;
+
+    // Same slug, same work-dir shape, DIFFERENT bytes.
+    fs.writeFile(src_path, "fn hello() -> int { return 2; }\n");
+
+    let work_dir2 = _ssc_tmp_root("t2_work2");
+    let second = _cr_stage_one_outcome(src, ctx, "", work_dir2);
+    assert second.ok;
+    assert ! second.cache_hit;
+    assert second.cache_miss;
+
+    _ssc_cleanup(cache_root);
+    _ssc_cleanup(src_root);
+    _ssc_cleanup(work_dir1);
+    _ssc_cleanup(work_dir2);
+}
+
+// --------------------------------------------------------------
+// 3. `.srchash` ordering: a torn (empty) restored artifact must not be
+// blessed by the sidecar
+// --------------------------------------------------------------
+// `_cache_atomic_copy` degrades to a non-atomic in-place copy when
+// `mktemp` is unavailable, so a truncated restore is reachable. This pins
+// the FIX-3 guard: an empty restored `.sfn-asm` is caught BEFORE the
+// `.srchash` sidecar is written, so a subsequent probe can never see a
+// matching sidecar over a torn pair — the sidecar is written only once a
+// complete pair (this run's fresh re-emit) is actually on disk.
+test "stage shared cache: a torn empty restore is not blessed and falls open to a fresh emit" ![io] {
+    let cache_root = _ssc_tmp_root("t3_cache");
+    let src_root = _ssc_tmp_root("t3_src");
+    let src_path = src_root + "/mymod.sfn";
+    fs.writeFile(src_path, "fn hello() -> int { return 1; }\n");
+    let compiler_version = "test-version-1";
+    let target_triple = "x86_64-unknown-linux-gnu";
+    let s_hash = sha256_of_file(src_path);
+    let key: CacheKey = stage_cache_key_from_digest(s_hash, "mymod", compiler_version, target_triple);
+    assert is_valid_digest(key.digest);
+
+    // Simulate a torn restore directly: an EMPTY `.sfn-asm` artifact next
+    // to an otherwise normal manifest.
+    let empty_asm_src = src_root + "/empty.sfn-asm";
+    fs.writeFile(empty_asm_src, "");
+    let manifest_src = src_root + "/mymod.layout-manifest";
+    fs.writeFile(manifest_src, ".layout foo i64\n");
+    assert cache_store_artifact(cache_root, key, "sfn-asm", empty_asm_src);
+    assert cache_store_artifact(cache_root, key, "layout-manifest", manifest_src);
+
+    let ctx = _cr_stage_cache_ctx_for(cache_root, compiler_version, target_triple);
+    let src = _ssc_source(src_path, "mymod");
+    let work_dir = _ssc_tmp_root("t3_work");
+    let outcome = _cr_stage_one_outcome(src, ctx, "", work_dir);
+
+    assert outcome.cache_restore_failed;
+    assert ! outcome.cache_hit;
+    assert outcome.ok;
+
+    let context_root = _cr_import_context_root(work_dir);
+    let asm_path = context_root + "/mymod.sfn-asm";
+    let srchash_path = _cr_srchash_path(context_root, "mymod");
+    // The re-emit produced real content, not the torn empty restore.
+    assert fs.readFile(asm_path).length > 0;
+    assert fs.readFile(srchash_path) == s_hash;
+
+    _ssc_cleanup(cache_root);
+    _ssc_cleanup(src_root);
+    _ssc_cleanup(work_dir);
+}
+
+// --------------------------------------------------------------
+// 4. restore failure (incomplete shared entry) falls open to a fresh emit
+// --------------------------------------------------------------
+test "stage shared cache: an entry missing its manifest falls open to a fresh emit" ![io] {
+    let cache_root = _ssc_tmp_root("t4_cache");
+    let src_root = _ssc_tmp_root("t4_src");
+    let src_path = src_root + "/mymod.sfn";
+    fs.writeFile(src_path, "fn hello() -> int { return 1; }\n");
+    let compiler_version = "test-version-1";
+    let target_triple = "x86_64-unknown-linux-gnu";
+    let s_hash = sha256_of_file(src_path);
+    let key: CacheKey = stage_cache_key_from_digest(s_hash, "mymod", compiler_version, target_triple);
+    assert is_valid_digest(key.digest);
+
+    let asm_only_src = src_root + "/mymod.sfn-asm";
+    fs.writeFile(asm_only_src, "; staged native IR placeholder\n");
+    assert cache_store_artifact(cache_root, key, "sfn-asm", asm_only_src);
+
+    // Deliberately never store "layout-manifest" for this key — an
+    // incomplete pair the lookup must never treat as a hit.
+    let ctx = _cr_stage_cache_ctx_for(cache_root, compiler_version, target_triple);
+    let src = _ssc_source(src_path, "mymod");
+    let work_dir = _ssc_tmp_root("t4_work");
+    let outcome = _cr_stage_one_outcome(src, ctx, "", work_dir);
+
+    assert outcome.cache_miss;
+    assert ! outcome.cache_restore_failed;
+    assert ! outcome.cache_hit;
+    assert outcome.ok;
+
+    let context_root = _cr_import_context_root(work_dir);
+    let asm_path = context_root + "/mymod.sfn-asm";
+    let srchash_path = _cr_srchash_path(context_root, "mymod");
+    assert fs.readFile(asm_path).length > 0;
+    assert fs.readFile(srchash_path) == s_hash;
+
+    _ssc_cleanup(cache_root);
+    _ssc_cleanup(src_root);
+    _ssc_cleanup(work_dir);
+}
+
+// --------------------------------------------------------------
+// 5. a module with an EMPTY `.layout-manifest` round-trips correctly
+// --------------------------------------------------------------
+// Most compiler modules emit no `.layout` lines (no struct definitions) —
+// if empty artifacts silently failed to store or look up, the feature
+// would deliver ~zero benefit across the self-host build.
+test "stage shared cache: a module with an empty layout-manifest round-trips through the shared cache" ![io] {
+    let cache_root = _ssc_tmp_root("t5_cache");
+    let src_root = _ssc_tmp_root("t5_src");
+    let src_path = src_root + "/mymod.sfn";
+    // No struct definitions -> `.layout-manifest` is legitimately empty.
+    fs.writeFile(src_path, "fn hello() -> int { return 1; }\n");
+    let ctx = _cr_stage_cache_ctx_for(cache_root, "test-version-1", "x86_64-unknown-linux-gnu");
+    let src = _ssc_source(src_path, "mymod");
+
+    let work_dir1 = _ssc_tmp_root("t5_work1");
+    let first = _cr_stage_one_outcome(src, ctx, "", work_dir1);
+    assert first.ok;
+    assert first.cache_stored;
+    let context_root1 = _cr_import_context_root(work_dir1);
+    let manifest_path1 = context_root1 + "/mymod.layout-manifest";
+    assert fs.readFile(manifest_path1) == "";
+
+    let work_dir2 = _ssc_tmp_root("t5_work2");
+    let second = _cr_stage_one_outcome(src, ctx, "", work_dir2);
+    assert second.ok;
+    assert second.cache_hit;
+    assert ! second.cache_restore_failed;
+
+    let context_root2 = _cr_import_context_root(work_dir2);
+    let asm_path2 = context_root2 + "/mymod.sfn-asm";
+    let manifest_path2 = context_root2 + "/mymod.layout-manifest";
+    assert fs.readFile(asm_path2).length > 0;
+    assert fs.readFile(manifest_path2) == "";
+
+    _ssc_cleanup(cache_root);
+    _ssc_cleanup(src_root);
+    _ssc_cleanup(work_dir1);
+    _ssc_cleanup(work_dir2);
+}

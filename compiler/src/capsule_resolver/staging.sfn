@@ -19,13 +19,15 @@ import {
     CacheKey,
     cache_compiler_identity,
     cache_copy_artifact_to,
+    cache_copy_artifact_to_untouched,
     cache_lookup_artifact,
     cache_root,
     cache_store_artifact,
     is_valid_digest,
     sha256_of_file,
-    stage_cache_key_for
+    stage_cache_key_from_digest
 } from "../build_cache";
+import { _get_env_cmd } from "../build_flags";
 import { ParallelEmitTask, _cr_resolve_jobs, _cr_run_parallel_emit } from "../capsule_emit_parallel";
 import { _cr_find_substring } from "../capsule_import_scan";
 import { module_name_from_path } from "../module_paths";
@@ -85,9 +87,21 @@ fn _cr_stage_cache_hit(asm_path: string, manifest_path: string, srchash_path: st
 // _cr_write_srchash: record the source SHA-256 sidecar for a freshly staged
 // module so the next run's cache-hit probe can detect an unchanged source.
 // Best-effort: a hash failure leaves no sidecar, which forces a re-emit.
+// Hashes `src_path` itself — callers that already hold the source's digest
+// (from a shared-cache key derivation, e.g.) should call
+// `_cr_write_srchash_digest` instead so the file isn't hashed twice for one
+// publish (SFN-861).
 fn _cr_write_srchash(srchash_path: string, src_path: string) ![io] {
-    let current = sha256_of_file(src_path);
-    if current.length == 0 { return; }
+    _cr_write_srchash_digest(srchash_path, sha256_of_file(src_path));
+}
+
+// Same sidecar write as `_cr_write_srchash`, but takes an ALREADY-COMPUTED
+// source digest instead of hashing `src_path` again. `sha256_of_file` and
+// `stage_cache_key_for`'s internal hash (`_sha256_of_text_file`) are the
+// same underlying call (`sha256_of_file` is a thin wrapper over it), so a
+// digest obtained from either is a valid sidecar value here.
+fn _cr_write_srchash_digest(srchash_path: string, digest: string) ![io] {
+    if digest.length == 0 { return; }
     // #1011: publish atomically. The srchash is the entry-complete gate
     // (`_cr_stage_cache_hit` only trusts an entry when it exists AND
     // matches), so it MUST be renamed last and as a unit — a concurrent
@@ -95,10 +109,10 @@ fn _cr_write_srchash(srchash_path: string, src_path: string) ![io] {
     // `.sfn-asm` + `.layout-manifest` are already fully published.
     let tmp = _mktemp_sibling_cmd(srchash_path);
     if tmp.length == 0 {
-        fs.writeFile(srchash_path, current);
+        fs.writeFile(srchash_path, digest);
         return;
     }
-    fs.writeFile(tmp, current);
+    fs.writeFile(tmp, digest);
     _atomic_rename_into_place(tmp, srchash_path);
 }
 
@@ -110,7 +124,7 @@ fn _cr_write_srchash(srchash_path: string, src_path: string) ![io] {
 // (`capsule_resolver/compile.sfn`) via the same helpers, so the `.ll`
 // cache and this staging cache can never disagree about compiler
 // identity or target.
-struct StageCacheCtx {
+struct _StageCacheContext {
     enabled: boolean;
     trace: boolean;
     root: string;
@@ -123,8 +137,8 @@ struct StageCacheCtx {
 // versus "identity/root resolution failed" — both fail open the same
 // way, onto the local `.srchash`-gated cache above (unaffected either
 // way).
-fn _cr_disabled_stage_cache_ctx() -> StageCacheCtx {
-    return StageCacheCtx {
+fn _cr_disabled_stage_cache_ctx() -> _StageCacheContext {
+    return _StageCacheContext {
         enabled: false,
         trace: false,
         root: "",
@@ -137,16 +151,60 @@ fn _cr_disabled_stage_cache_ctx() -> StageCacheCtx {
 // call. `config.enabled == false` short-circuits before touching the
 // filesystem or env; an empty resolved compiler identity or cache root
 // also disables the shared-cache path.
-fn _cr_resolve_stage_cache_ctx(config: BuildCacheConfig, sailfin_exe: string) -> StageCacheCtx ![io] {
+//
+// An empty `sailfin_exe` must ALSO disable the shared cache, ahead of
+// every other check: `sailfin_exe` is empty exactly on the in-process
+// emit leg (`_cr_effective_isolation_exe` returns "" under the
+// sub-16-module closure threshold — see `mod.sfn`), and
+// `cache_compiler_identity` can only fold the emitting binary's SHA-256
+// into the key when it is handed a non-empty `compiler_binary_path`.
+// Without that fold, the key degrades to `{source, slug, bare version
+// stamp, triple}` — identical across two DIFFERENT compiler binaries at
+// an uncommitted (`.dirty`) revision. Because this cache is shared
+// ACROSS work directories (unlike the local `.srchash` tree), a rebuilt
+// compiler would then restore a PRIOR compiler's staged bytes, and since
+// the `.ll` cache key hashes the restored `.layout-manifest` content, a
+// byte-identical manifest restore makes the downstream `.ll` layer hit
+// too — silent stale IR with no signal anywhere in the chain. This
+// costs no measured performance: this leg is by construction the
+// sub-16-module closure, while the large closures this cache targets
+// take the subprocess branch and always carry a real `sailfin_exe`. The
+// underlying identity gap is documented as a known residual in
+// `docs/runbooks/build-cache-stale-ir.md` §3.
+fn _cr_resolve_stage_cache_ctx(config: BuildCacheConfig, sailfin_exe: string) -> _StageCacheContext ![io] {
     if !config.enabled { return _cr_disabled_stage_cache_ctx(); }
+    if sailfin_exe.length == 0 { return _cr_disabled_stage_cache_ctx(); }
+    // SFN-861: `empty_build_cache_config()` (the `sfn test` leg's config)
+    // hardcodes `enabled: true` and never consults these env vars the way
+    // `resolve_build_cache_config` does, so this staging layer needs its
+    // own kill switch and trace toggle rather than inheriting one that
+    // was never read for it.
+    if _get_env_cmd("SAILFIN_NO_CACHE") == "1" {
+        return _cr_disabled_stage_cache_ctx();
+    }
+    let trace = config.trace || _get_env_cmd("SAILFIN_CACHE_TRACE") == "1";
     let compiler_version = cache_compiler_identity(resolve_compiler_version_for_cache(""), sailfin_exe);
     if compiler_version.length == 0 { return _cr_disabled_stage_cache_ctx(); }
     let root = cache_root(config.capsule_name);
     if root.length == 0 { return _cr_disabled_stage_cache_ctx(); }
     let target_triple = build_target_triple();
-    return StageCacheCtx {
+    return _StageCacheContext {
         enabled: true,
-        trace: config.trace,
+        trace: trace,
+        root: root,
+        compiler_version: compiler_version,
+        target_triple: target_triple
+    };
+}
+
+// Test-facing constructor for an ENABLED context, mirroring
+// `_cr_stage_cache_hit` / `_cr_write_srchash`'s precedent of exposing
+// the pure per-module primitives directly to tests rather than forcing
+// them through `stage_capsule_imports`'s config/env plumbing.
+fn _cr_stage_cache_ctx_for(root: string, compiler_version: string, target_triple: string) -> _StageCacheContext {
+    return _StageCacheContext {
+        enabled: true,
+        trace: false,
         root: root,
         compiler_version: compiler_version,
         target_triple: target_triple
@@ -224,7 +282,7 @@ fn _cr_empty_stage_one_outcome() -> _StageOneOutcome {
 //
 // `stage_capsule_imports` runs this over the whole set before it picks a
 // staging strategy, because two of its three branches never reach
-// `_cr_stage_one`, and the cache-hit probe inside `_cr_stage_one` short-
+// `_cr_stage_one_outcome`, and the cache-hit probe inside it short-
 // circuits before any per-source work. A guard placed anywhere downstream of
 // either would be dead on the paths that matter.
 fn _cr_check_provenance(src: CapsuleSource) -> boolean ![io.console] {
@@ -236,14 +294,11 @@ fn _cr_check_provenance(src: CapsuleSource) -> boolean ![io.console] {
     return false;
 }
 
-fn _cr_stage_one(src: CapsuleSource, ctx: StageCacheCtx, sailfin_exe: string, work_dir: string) -> boolean ![io] {
-    return _cr_stage_one_outcome(src, ctx, sailfin_exe, work_dir).ok;
-}
-
-fn _cr_stage_one_outcome(src: CapsuleSource, ctx: StageCacheCtx, sailfin_exe: string, work_dir: string) -> _StageOneOutcome ![io] {
+fn _cr_stage_one_outcome(src: CapsuleSource, ctx: _StageCacheContext, sailfin_exe: string, work_dir: string) -> _StageOneOutcome ![io] {
     let mut outcome = _cr_empty_stage_one_outcome();
-    // Re-checked here so a direct caller of `_cr_stage_one` is covered too.
-    // Must precede the cache-hit probe below, which returns early.
+    // Re-checked here so a direct caller of `_cr_stage_one_outcome` is
+    // covered too. Must precede the cache-hit probe below, which returns
+    // early.
     if !_cr_check_provenance(src) { return outcome; }
     let context_root = _cr_import_context_root(work_dir);
     let asm_path = context_root + "/" + src.slug + ".sfn-asm";
@@ -263,19 +318,35 @@ fn _cr_stage_one_outcome(src: CapsuleSource, ctx: StageCacheCtx, sailfin_exe: st
     // SFN-861: local disk cache missed — try the shared content-addressed
     // cache before paying for a fresh emit. `.sfn-asm` emit is a pure
     // function of {source text, slug, emitting compiler, target}
-    // (`stage_cache_key_for`), so a restore here is exactly as valid as a
-    // locally-staged pair. `key` is remembered past this block so a
-    // subsequent fresh emit can store under the same digest without
-    // rehashing the source.
+    // (`stage_cache_key_from_digest`), so a restore here is exactly as
+    // valid as a locally-staged pair. `s_hash` is hashed once here and
+    // reused both to derive `key` and, on a hit or a subsequent fresh
+    // emit, to write the `.srchash` sidecar — otherwise the source would
+    // be hashed a second time for the same publish (SFN-861). `key` is
+    // remembered past this block so a subsequent fresh emit can store
+    // under the same digest.
     let mut key: CacheKey = CacheKey { digest: "" };
+    let mut s_hash: string = "";
     if ctx.enabled {
-        key = stage_cache_key_for(src.source_path, src.slug, ctx.compiler_version, ctx.target_triple);
+        s_hash = sha256_of_file(src.source_path);
+        key = stage_cache_key_from_digest(s_hash, src.slug, ctx.compiler_version, ctx.target_triple);
         if is_valid_digest(key.digest) {
             let found = cache_lookup_artifact(ctx.root, key, "sfn-asm")
                 && cache_lookup_artifact(ctx.root, key, "layout-manifest");
             if found {
-                let restored = cache_copy_artifact_to(ctx.root, key, "sfn-asm", asm_path)
-                    && cache_copy_artifact_to(ctx.root, key, "layout-manifest", manifest_path);
+                let mut restored = cache_copy_artifact_to(ctx.root, key, "sfn-asm", asm_path)
+                    && cache_copy_artifact_to_untouched(ctx.root, key, "layout-manifest", manifest_path);
+                // A restored pair must be verified non-empty before the
+                // `.srchash` sidecar (the entry-complete gate) is written
+                // over it — `_cache_atomic_copy` degrades to a non-atomic
+                // in-place copy when `mktemp` is unavailable, so a torn
+                // restore is reachable and would otherwise be blessed by a
+                // matching sidecar. The manifest is deliberately NOT
+                // probed here: it is legitimately empty for a module with
+                // no `.layout` lines.
+                if restored {
+                    if fs.readFile(asm_path).length == 0 { restored = false; }
+                }
                 if restored {
                     outcome.ok = true;
                     outcome.cache_hit = true;
@@ -285,7 +356,7 @@ fn _cr_stage_one_outcome(src: CapsuleSource, ctx: StageCacheCtx, sailfin_exe: st
                     // #1011: only a full pair restore reaches the
                     // entry-complete gate — write the sidecar LAST, same
                     // as the local fresh-emit path below.
-                    _cr_write_srchash(srchash_path, src.source_path);
+                    _cr_write_srchash_digest(srchash_path, s_hash);
                     return outcome;
                 }
                 outcome.cache_restore_failed = true;
@@ -377,7 +448,11 @@ fn _cr_stage_one_outcome(src: CapsuleSource, ctx: StageCacheCtx, sailfin_exe: st
 
     // Record the source-content sidecar so the next run can detect an
     // unchanged source (best-effort; a hash failure simply re-emits later).
-    _cr_write_srchash(srchash_path, src.source_path);
+    // Reuse `s_hash` when it was already computed above (SFN-861) rather
+    // than hashing the source a second time for this publish.
+    if s_hash.length > 0 { _cr_write_srchash_digest(srchash_path, s_hash); } else {
+        _cr_write_srchash(srchash_path, src.source_path);
+    }
     outcome.ok = true;
     return outcome;
 }
@@ -560,6 +635,14 @@ fn stage_capsule_imports(sources: CapsuleSource[], config: BuildCacheConfig, sai
     // read + grep, no subprocess).
     let mut needs_emit: ParallelEmitTask[] = [];
     let mut emit_indices: int[] = [];
+    // SFN-861: parallel arrays to `emit_indices`, carrying the cache key
+    // and source digest already computed for that module in the
+    // partition loop below into the post-emit pass — mirrors
+    // `compile.sfn`'s `emit_keys` pattern (its parallel-fan pass 1/pass 3
+    // split) so the post-emit pass never rehashes a source it already
+    // hashed once for the same publish.
+    let mut emit_keys: CacheKey[] = [];
+    let mut emit_source_digests: string[] = [];
     let mut si: int = 0;
     loop {
         if si >= sources.length { break; }
@@ -576,23 +659,39 @@ fn stage_capsule_imports(sources: CapsuleSource[], config: BuildCacheConfig, sai
         if !cache_hit {
             // SFN-861: local miss — try the shared cache before queueing a
             // real emit. A restored pair is staged the same as a local hit,
-            // so it never enters `needs_emit`.
+            // so it never enters `needs_emit`. `s_hash` is hashed once and
+            // reused for the key derivation and, on a hit, the sidecar
+            // write below — and, on a miss, is carried into the post-emit
+            // pass so a subsequent store + sidecar write need not rehash.
             let mut shared_hit: boolean = false;
+            let mut key: CacheKey = CacheKey { digest: "" };
+            let mut s_hash: string = "";
             if ctx.enabled {
-                let key = stage_cache_key_for(src.source_path, src.slug, ctx.compiler_version, ctx.target_triple);
+                s_hash = sha256_of_file(src.source_path);
+                key = stage_cache_key_from_digest(s_hash, src.slug, ctx.compiler_version, ctx.target_triple);
                 if is_valid_digest(key.digest) {
                     let found = cache_lookup_artifact(ctx.root, key, "sfn-asm")
                         && cache_lookup_artifact(ctx.root, key, "layout-manifest");
                     if found {
-                        let restored = cache_copy_artifact_to(ctx.root, key, "sfn-asm", asm_path)
-                            && cache_copy_artifact_to(ctx.root, key, "layout-manifest", manifest_path);
+                        let mut restored = cache_copy_artifact_to(ctx.root, key, "sfn-asm", asm_path)
+                            && cache_copy_artifact_to_untouched(ctx.root, key, "layout-manifest", manifest_path);
+                        // Same torn-restore guard as the serial path: verify
+                        // the restored `.sfn-asm` is non-empty before the
+                        // `.srchash` sidecar blesses it as complete. The
+                        // manifest is deliberately not probed — legitimately
+                        // empty for a module with no `.layout` lines.
+                        if restored {
+                            if fs.readFile(asm_path).length == 0 {
+                                restored = false;
+                            }
+                        }
                         if restored {
                             shared_hit = true;
                             summary.hits = summary.hits + 1;
                             if ctx.trace {
                                 print.err("[stage cache hit] " + src.slug);
                             }
-                            _cr_write_srchash(srchash_path, src.source_path);
+                            _cr_write_srchash_digest(srchash_path, s_hash);
                         } else {
                             summary.restore_failed = summary.restore_failed + 1;
                             if ctx.trace {
@@ -616,6 +715,8 @@ fn stage_capsule_imports(sources: CapsuleSource[], config: BuildCacheConfig, sai
                     slug: src.slug, output_path: asm_path, source_path: src.source_path
                 });
                 emit_indices.push(si);
+                emit_keys.push(key);
+                emit_source_digests.push(s_hash);
             }
         }
         si += 1;
@@ -641,12 +742,13 @@ fn stage_capsule_imports(sources: CapsuleSource[], config: BuildCacheConfig, sai
                 + ".layout-manifest";
             let srchash_path = _cr_srchash_path(context_root, src.slug);
             _cr_extract_layout_manifest(asm_path, manifest_path);
-            // SFN-861: publish the fresh pair into the shared cache.
-            // Recomputed here (one file hash per freshly-emitted module,
-            // only on a miss) rather than carried from the partition loop
-            // above, to keep this pass a plain array of indices.
+            // SFN-861: publish the fresh pair into the shared cache using
+            // the key already computed for this module in the partition
+            // loop above — carried via `emit_keys` rather than recomputed,
+            // so the source is not hashed a second time for one publish.
+            let store_key = emit_keys[ei];
+            let s_hash = emit_source_digests[ei];
             if ctx.enabled {
-                let store_key = stage_cache_key_for(src.source_path, src.slug, ctx.compiler_version, ctx.target_triple);
                 if is_valid_digest(store_key.digest) {
                     let stored = cache_store_artifact(ctx.root, store_key, "sfn-asm", asm_path)
                         && cache_store_artifact(ctx.root, store_key, "layout-manifest", manifest_path);
@@ -659,8 +761,11 @@ fn stage_capsule_imports(sources: CapsuleSource[], config: BuildCacheConfig, sai
                 }
             }
             // Record the source-content sidecar so a subsequent probe sees
-            // this freshly-emitted module as a valid cache hit.
-            _cr_write_srchash(srchash_path, src.source_path);
+            // this freshly-emitted module as a valid cache hit. Reuses
+            // `s_hash` carried from the partition loop when present.
+            if s_hash.length > 0 {
+                _cr_write_srchash_digest(srchash_path, s_hash);
+            } else { _cr_write_srchash(srchash_path, src.source_path); }
             ei += 1;
         }
     }
