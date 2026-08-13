@@ -32,7 +32,7 @@ import { int_to_string } from "sfn/strings";
 import {
     _collect_sfn_files_cmd,
     _ensure_dir_cmd,
-    _sha256_of_text_file,
+    _sha256_of_file,
     _shell_read_cmd
 } from "../../build/fs";
 import { host_exe_name } from "../../build/target";
@@ -214,7 +214,7 @@ fn _det_worker(src: string, seed: string, iters: int, out: string) -> int ![io] 
         let _o = process.capture_take_stdout();
         let _e = process.capture_take_stderr();
 
-        let mut h = _sha256_of_text_file(out_ll);
+        let mut h = _sha256_of_file(out_ll);
         if h.length == 0 { h = "EMPTY"; }
         let mut sz = 0;
         if fs.exists(out_ll) {

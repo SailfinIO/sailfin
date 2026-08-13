@@ -43,21 +43,16 @@ import { int_to_string } from "sfn/strings";
 // no `sh` there to reach (SFEP-0021 §4.2). Stage builds, scratch
 // cleanup, binary promotion and the smoke gate are all shell-free.
 //
-// One reach survives, and only on POSIX: `_selfhost_snapshot` hashes via
-// `_sha256_of_file_cmd` / `_sha256_of_text_file`, which `popen` a
-// `sha256sum`/`shasum` pipeline for the binary shas and for any `.ll`
-// over 64 KiB (i.e. every compiler module). Both self-guard
-// `host_is_windows()` and degrade to the in-process hasher, so the
-// Windows goal holds — at the cost of an empty binary sha there, which
-// makes `binary_match` vacuous on Windows. SFN-620 retires the ladder.
+// `_selfhost_snapshot` hashes every `.ll` module and linked binary through the
+// same binary-safe in-process path. No spawned stage reaches a hashing shell,
+// and Windows records a real binary digest instead of a platform-only miss.
 import {
     _atomic_rename_into_place,
     _copy_file,
     _dirname_cmd,
     _ensure_dir_recursive_cmd,
     _mktemp_sibling_cmd,
-    _sha256_of_file_cmd,
-    _sha256_of_text_file
+    _sha256_of_file
 } from "./build/fs";
 import { host_exe_name } from "./build/target";
 import {
@@ -525,7 +520,7 @@ fn _selfhost_snapshot(capsules_dir: string, runtime_dir: string, binary_path: st
     loop {
         if i >= files.length { break; }
         let slug = _selfhost_basename(files[i]);
-        let sha = _sha256_of_text_file(files[i]);
+        let sha = _sha256_of_file(files[i]);
         modules.push(make_determinism_module(slug, sha));
         i += 1;
     }
@@ -534,11 +529,11 @@ fn _selfhost_snapshot(capsules_dir: string, runtime_dir: string, binary_path: st
     loop {
         if ri >= runtime_files.length { break; }
         let slug = "cache/" + _selfhost_basename(runtime_files[ri]);
-        let sha = _sha256_of_text_file(runtime_files[ri]);
+        let sha = _sha256_of_file(runtime_files[ri]);
         modules.push(make_determinism_module(slug, sha));
         ri += 1;
     }
-    let binary_sha = _sha256_of_file_cmd(binary_path);
+    let binary_sha = _sha256_of_file(binary_path);
     return DeterminismSnapshot {
         binary_path: binary_path,
         binary_sha256: binary_sha,
@@ -691,7 +686,7 @@ fn handle_selfhost_command(args: string[], binary_dir: string) -> int ![io] {
     // `<stage_work>/sfn` binary collides with nothing today but running
     // it fails downstream lookups that expect `sailfin` to be a
     // directory next to the binary — proven by a local repro where
-    // `sha256sum` on the linked path errored "Is a directory" and the
+    // hashing the linked path errored "Is a directory" and the
     // seedcheck binary could not stage its own runtime sfn-source
     // import context. `<stage_work>/bin/sfn` keeps the same basename
     // property while removing that sibling collision.

@@ -17,7 +17,7 @@ import {
     _mktemp_from_template_cmd,
     _mktemp_sibling_cmd,
     _publish_lines_atomic,
-    _sha256_of_file_cmd,
+    _sha256_of_file,
     _strip_trailing_slashes_cmd
 } from "../../src/build/fs";
 import { _collect_test_files_cmd, _suite_name_from_path } from "../../src/cli/commands/test/discovery";
@@ -320,9 +320,9 @@ test "copy-file: multi-chunk payload round-trips byte-for-byte" ![io] {
     assert _copy_file(src, dst);
     assert fs.exists(dst);
 
-    let src_digest = _sha256_of_file_cmd(src);
-    let dst_digest = _sha256_of_file_cmd(dst);
-    // Guard against a vacuous pass: `_sha256_of_file_cmd` returns ""
+    let src_digest = _sha256_of_file(src);
+    let dst_digest = _sha256_of_file(dst);
+    // Guard against a vacuous pass: `_sha256_of_file` returns ""
     // on a read failure, so two empty strings would satisfy a bare
     // equality without proving anything.
     assert src_digest.length > 0;

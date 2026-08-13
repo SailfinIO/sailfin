@@ -32,7 +32,7 @@ import {
 } from "sfn/cli";
 import { int_to_string } from "sfn/strings";
 
-import { _sha256_of_file_cmd, _shell_read_cmd, _shell_single_quote_arg } from "../../build/fs";
+import { _sha256_of_file, _shell_read_cmd, _shell_single_quote_arg } from "../../build/fs";
 import { host_exe_name } from "../../build/target";
 import { is_safe_scope_name, parse_scope_name } from "../../capsule_artifact";
 import { locate_runtime_dep_capsule_src } from "../../capsule_resolver/locate";
@@ -239,7 +239,7 @@ fn _package_compiler(target: string, out_dir: string, compiler_bin: string) -> i
         return 1;
     }
 
-    let digest = _sha256_of_file_cmd(tarball);
+    let digest = _sha256_of_file(tarball);
     if digest.length == 0 {
         print("sfn package: failed to compute sha256 for " + tarball);
         process.run(["rm", "-rf", staging]);
@@ -572,7 +572,7 @@ fn _package_installer(target: string, out_dir: string, compiler_bin: string) -> 
         return 1;
     }
 
-    let digest = _sha256_of_file_cmd(tarball);
+    let digest = _sha256_of_file(tarball);
     if digest.length == 0 {
         print("sfn package: failed to compute sha256 for " + tarball);
         process.run(["rm", "-rf", staging]);
@@ -743,7 +743,7 @@ fn _package_user_capsule(target: string, out_dir: string, capsule_path: string) 
         return 1;
     }
 
-    let digest = _sha256_of_file_cmd(tarball);
+    let digest = _sha256_of_file(tarball);
     if digest.length == 0 {
         print("sfn package: failed to compute sha256 for " + tarball);
         process.run(["rm", "-rf", staging]);

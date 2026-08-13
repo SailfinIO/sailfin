@@ -15,13 +15,13 @@
 //      string — the filesystem walk order is not stable across
 //      platforms, so this sort is what makes the digest reproducible.
 //   3. Drop exact duplicate paths once sorted (roots may overlap).
-//   4. For each path in that order, hash its NUL-free text content and
+//   4. For each path in that order, hash its binary-safe file content and
 //      append `<sha256>\t<path>\n` to a manifest string. Any file whose
 //      hash comes back empty (unreadable) fails the whole computation.
 //   5. The digest is the SHA-256 of that manifest string.
 //
 // Both the file hashes and the manifest hash go through the in-process
-// hasher (`sha256_hex_of_string` / `_sha256_of_text_file`), so the
+// hasher (`sha256_hex_of_string` / `_sha256_of_file`), so the
 // result depends only on file contents and paths — never on mtimes,
 // permissions, or the order the filesystem happens to enumerate.
 import {
@@ -29,7 +29,7 @@ import {
     _collect_sfn_files_cmd,
     _copy_file,
     _mktemp_sibling_cmd,
-    _sha256_of_text_file,
+    _sha256_of_file,
     _toml_trim_cmd
 } from "./fs";
 import { sha256_hex_of_string } from "./hash";
@@ -180,7 +180,7 @@ fn compute_source_fingerprint(roots: string[]) -> string ![io] {
     loop {
         if i >= ordered.length { break; }
         let path = ordered[i];
-        let digest = _sha256_of_text_file(path);
+        let digest = _sha256_of_file(path);
         if digest.length == 0 { return ""; }
         manifest = manifest + digest + "\t" + path + "\n";
         i += 1;

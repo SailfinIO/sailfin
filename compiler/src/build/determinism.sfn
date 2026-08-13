@@ -17,7 +17,7 @@ import {
     make_determinism_module
 } from "../build_report";
 import { capsule_artifact_manifest_path, is_safe_scope_name, parse_scope_name } from "../capsule_artifact";
-import { _sha256_of_file_cmd } from "./fs";
+import { _sha256_of_file } from "./fs";
 import { _find_substring_from, _resolve_self_path } from "./paths";
 import { build_target_os, target_exe_name } from "./target";
 import { active_build_target } from "./target_state";
@@ -275,7 +275,7 @@ fn _read_sidecar_modules(sidecar_path: string) -> DeterminismModule[] ![io] {
 // Returns the process exit code: 0 on match, non-zero on mismatch
 // or pass-2 failure.
 fn _do_determinism_check(pass1_out: string, is_library: boolean, cap_capsule_name: string, work_dir: string, capsule_path: string, input_path: string, binary_dir: string, cache_trace_flag: boolean, json_flag: boolean) -> int ![io] {
-    let pass1_sha = _sha256_of_file_cmd(pass1_out);
+    let pass1_sha = _sha256_of_file(pass1_out);
     if pass1_sha.length == 0 {
         if !json_flag {
             print.err("[determinism] failed to sha256 first-pass binary: "
@@ -339,7 +339,7 @@ fn _do_determinism_check(pass1_out: string, is_library: boolean, cap_capsule_nam
         return pass2_rc;
     }
 
-    let pass2_sha = _sha256_of_file_cmd(pass2_out);
+    let pass2_sha = _sha256_of_file(pass2_out);
     if pass2_sha.length == 0 {
         if !json_flag {
             print.err("[determinism] failed to sha256 second-pass binary: "

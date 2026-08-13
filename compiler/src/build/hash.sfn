@@ -4,19 +4,15 @@
 // `capsules/sfn/crypto/src/mod.sfn` (#1995,
 // `docs/proposals/draft-test-runner-invocation-cache.md` §3-B).
 // Vendoring avoids adding `sfn/crypto` to the compiler's dependency
-// closure while keeping the algorithm identical — both copies are
-// cross-checked against `sha256sum` by
+// closure while keeping the algorithm identical. The string and file
+// entry points are cross-checked against a system SHA-256 implementation by
 // `compiler/tests/e2e/build_hash_matches_sha256sum_test.sfn`.
 //
-// `sha256_hex_of_string` is the sole public export. It hashes the raw
-// bytes of its input using the Sailfin string's length field (not a
-// NUL scan), so it is safe for any in-memory string — including strings
-// that contain embedded NUL bytes. It is NOT safe to use on content
-// loaded via `fs.readFile`, whose `i8* → {i8*, i64}` coercion computes
-// the length with `strlen` and therefore truncates at the first NUL
-// (core_operands.sfn NUL-truncation, diagnosed in #1995). Use
-// `_sha256_of_text_file` (./fs.sfn) for NUL-free text artifacts, or
-// keep `_sha256_of_file_cmd` for binary artifacts.
+// The pointer entry point streams complete 64-byte blocks directly from
+// `(addr, length)` and constructs only the final one or two padded blocks.
+// It therefore keeps O(1) working memory instead of materialising one i64
+// array element per input byte. `sha256_hex_of_string` is a thin wrapper over
+// the same binary-safe path.
 // Rotate a 32-bit word right by `n` bits. All intermediate values are
 // masked to 32 bits because `>>` lowers to LLVM `ashr` (arithmetic
 // shift); masking keeps every value non-negative so `ashr` behaves as
@@ -38,143 +34,144 @@ fn _sha256_word_hex(x: int) -> string {
     return out;
 }
 
-// sha256_hex_of_string — compute the SHA-256 digest of `s` (FIPS 180-4)
-// and return the bare 64-character lowercase hex string.
-//
-// Iterates over bytes using `s.length` (length-based, not NUL-terminated),
-// so embedded NUL bytes are hashed correctly. Digests match `sha256sum`
-// on the same byte sequence.
-//
-// Hex literals are unavailable in Sailfin source, so round constants and
-// the initial hash state are written in decimal.
-fn sha256_hex_of_string(s: string) -> string {
+// Expand and compress one already-loaded 16-word message block. `w` is a
+// single 64-word workspace reused for every block; `h` is the eight-word
+// running state. Mutating both arrays in place avoids per-block allocation.
+fn _sha256_compress(w: int[], h: int[], k: int[]) -> void {
     let mask: int = 4294967295;
-
-    let mut bytes: int[] = [];
-    let mut bi: int = 0;
-    // SFN-841: read bytes through the `load_byte` builtin rather than
-    // `char_code(s[bi])`. Indexing a string allocates a fresh one-byte
-    // arena string per position — `sfn_str_from_byte(load_byte(...))`,
-    // runtime/sfn/string.sfn:130 — which `char_code` then immediately
-    // unwraps. That round trip cost ~675 bytes of arena per input byte,
-    // and arena pages are never returned to the OS (a rewind only resets
-    // the cursor; runtime/sfn/memory/arena.sfn:499-503), so every
-    // cache-key hash grew the process RSS permanently. The byte values
-    // are identical, so digests are unchanged. Same idiom as the ASCII
-    // fast path in `find_char` (runtime/prelude.sfn:702-713).
-    let addr = (s as *u8) as i64;
+    let mut t: int = 16;
     loop {
-        if bi >= s.length { break; }
-        bytes.push(load_byte(addr + bi) & 255);
-        bi += 1;
+        if t >= 64 { break; }
+        let w15: int = w[t - 15];
+        let w2: int = w[t - 2];
+        let s0: int = (_sha256_rotr(w15, 7) ^ _sha256_rotr(w15, 18) ^ ((w15 >> 3) & mask)) & mask;
+        let s1: int = (_sha256_rotr(w2, 17) ^ _sha256_rotr(w2, 19) ^ ((w2 >> 10) & mask)) & mask;
+        w[t] = (w[t - 16] + s0 + w[t - 7] + s1) & mask;
+        t += 1;
     }
-    let bit_len: int = bytes.length * 8;
 
-    // Pad: 0x80, then zeros until length ≡ 56 (mod 64), then the
-    // 64-bit big-endian message-length in bits.
-    bytes.push(128);
+    let mut a: int = h[0];
+    let mut b: int = h[1];
+    let mut c: int = h[2];
+    let mut d: int = h[3];
+    let mut e: int = h[4];
+    let mut f: int = h[5];
+    let mut g: int = h[6];
+    let mut hh: int = h[7];
+
+    let mut r: int = 0;
     loop {
-        if (bytes.length % 64) == 56 { break; }
-        bytes.push(0);
+        if r >= 64 { break; }
+        let big_s1: int = (_sha256_rotr(e, 6) ^ _sha256_rotr(e, 11) ^ _sha256_rotr(e, 25)) & mask;
+        let ch: int = ((e & f) ^ ((mask ^ e) & g)) & mask;
+        let temp1: int = (hh + big_s1 + ch + k[r] + w[r]) & mask;
+        let big_s0: int = (_sha256_rotr(a, 2) ^ _sha256_rotr(a, 13) ^ _sha256_rotr(a, 22)) & mask;
+        let maj: int = ((a & b) ^ (a & c) ^ (b & c)) & mask;
+        let temp2: int = (big_s0 + maj) & mask;
+        hh = g;
+        g = f;
+        f = e;
+        e = (d + temp1) & mask;
+        d = c;
+        c = b;
+        b = a;
+        a = (temp1 + temp2) & mask;
+        r += 1;
     }
-    let hi: int = (bit_len >> 32) & mask;
-    let lo: int = bit_len & mask;
-    bytes.push((hi >> 24) & 255);
-    bytes.push((hi >> 16) & 255);
-    bytes.push((hi >> 8) & 255);
-    bytes.push(hi & 255);
-    bytes.push((lo >> 24) & 255);
-    bytes.push((lo >> 16) & 255);
-    bytes.push((lo >> 8) & 255);
-    bytes.push(lo & 255);
 
-    // Round constants K[0..63].
+    h[0] = (h[0] + a) & mask;
+    h[1] = (h[1] + b) & mask;
+    h[2] = (h[2] + c) & mask;
+    h[3] = (h[3] + d) & mask;
+    h[4] = (h[4] + e) & mask;
+    h[5] = (h[5] + f) & mask;
+    h[6] = (h[6] + g) & mask;
+    h[7] = (h[7] + hh) & mask;
+}
+
+// Return one byte from the final one or two padded blocks. Only the tail uses
+// this branchy accessor; complete input blocks load directly from `addr`.
+fn _sha256_padded_byte(addr: int, length: int, index: int, padded_length: int, bit_hi: int, bit_lo: int) -> int {
+    if index < length { return load_byte(addr + index) & 255; }
+    if index == length { return 128; }
+
+    let trailer_index = index - (padded_length - 8);
+    if trailer_index < 0 { return 0; }
+    if trailer_index < 4 {
+        return (bit_hi >> (24 - trailer_index * 8)) & 255;
+    }
+    return (bit_lo >> (24 - (trailer_index - 4) * 8)) & 255;
+}
+
+// Compute SHA-256 over `length` raw bytes starting at `addr` (FIPS 180-4).
+// Returns the bare 64-character lowercase hex digest. A null pointer is valid
+// only for the empty input; invalid pointer/length pairs fail closed to `""`.
+fn sha256_hex_of_bytes(addr: int, length: int) -> string {
+    if length < 0 { return ""; }
+    if length > 0 && addr == 0 { return ""; }
+
+    let mask: int = 4294967295;
     let k: int[] = [1116352408, 1899447441, 3049323471, 3921009573, 961987163, 1508970993, 2453635748, 2870763221, 3624381080, 310598401, 607225278, 1426881987, 1925078388, 2162078206, 2614888103, 3248222580, 3835390401, 4022224774, 264347078, 604807628, 770255983, 1249150122, 1555081692, 1996064986, 2554220882, 2821834349, 2952996808, 3210313671, 3336571891, 3584528711, 113926993, 338241895, 666307205, 773529912, 1294757372, 1396182291, 1695183700, 1986661051, 2177026350, 2456956037, 2730485921, 2820302411, 3259730800, 3345764771, 3516065817, 3600352804, 4094571909, 275423344, 430227734, 506948616, 659060556, 883997877, 958139571, 1322822218, 1537002063, 1747873779, 1955562222, 2024104815, 2227730452, 2361852424, 2428436474, 2756734187, 3204031479, 3329325298,];
+    let mut h: int[] = [1779033703, 3144134277, 1013904242, 2773480762, 1359893119, 2600822924, 528734635, 1541459225,];
+    let mut w: int[] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,];
 
-    // Initial hash state H[0..7].
-    let mut h0: int = 1779033703;
-    let mut h1: int = 3144134277;
-    let mut h2: int = 1013904242;
-    let mut h3: int = 2773480762;
-    let mut h4: int = 1359893119;
-    let mut h5: int = 2600822924;
-    let mut h6: int = 528734635;
-    let mut h7: int = 1541459225;
-
-    let num_blocks: int = bytes.length / 64;
+    let full_blocks: int = length / 64;
     let mut block: int = 0;
     loop {
-        if block >= num_blocks { break; }
+        if block >= full_blocks { break; }
         let base: int = block * 64;
-
-        let mut w: int[] = [];
         let mut t: int = 0;
         loop {
             if t >= 16 { break; }
             let j: int = base + t * 4;
-            let word: int = ((bytes[j] << 24) | (bytes[j + 1] << 16) | (bytes[j
-                + 2] << 8) | bytes[j
-                + 3]) & mask;
-            w.push(word);
+            w[t] = ((load_byte(addr + j) << 24) | (load_byte(addr + j + 1) << 16) | (load_byte(addr
+                + j
+                + 2) << 8) | load_byte(addr
+                + j
+                + 3)) & mask;
             t += 1;
         }
-        t = 16;
-        loop {
-            if t >= 64 { break; }
-            let w15: int = w[t - 15];
-            let w2: int = w[t - 2];
-            let s0: int = (_sha256_rotr(w15, 7) ^ _sha256_rotr(w15, 18) ^ ((w15 >> 3) & mask)) & mask;
-            let s1: int = (_sha256_rotr(w2, 17) ^ _sha256_rotr(w2, 19) ^ ((w2 >> 10) & mask)) & mask;
-            w.push((w[t - 16] + s0 + w[t - 7] + s1) & mask);
-            t += 1;
-        }
-
-        let mut a: int = h0;
-        let mut b: int = h1;
-        let mut c: int = h2;
-        let mut d: int = h3;
-        let mut e: int = h4;
-        let mut f: int = h5;
-        let mut g: int = h6;
-        let mut h: int = h7;
-
-        let mut r: int = 0;
-        loop {
-            if r >= 64 { break; }
-            let big_s1: int = (_sha256_rotr(e, 6) ^ _sha256_rotr(e, 11) ^ _sha256_rotr(e, 25)) & mask;
-            let ch: int = ((e & f) ^ ((mask ^ e) & g)) & mask;
-            let temp1: int = (h + big_s1 + ch + k[r] + w[r]) & mask;
-            let big_s0: int = (_sha256_rotr(a, 2) ^ _sha256_rotr(a, 13) ^ _sha256_rotr(a, 22)) & mask;
-            let maj: int = ((a & b) ^ (a & c) ^ (b & c)) & mask;
-            let temp2: int = (big_s0 + maj) & mask;
-            h = g;
-            g = f;
-            f = e;
-            e = (d + temp1) & mask;
-            d = c;
-            c = b;
-            b = a;
-            a = (temp1 + temp2) & mask;
-            r += 1;
-        }
-
-        h0 = (h0 + a) & mask;
-        h1 = (h1 + b) & mask;
-        h2 = (h2 + c) & mask;
-        h3 = (h3 + d) & mask;
-        h4 = (h4 + e) & mask;
-        h5 = (h5 + f) & mask;
-        h6 = (h6 + g) & mask;
-        h7 = (h7 + h) & mask;
+        _sha256_compress(w, h, k);
         block += 1;
     }
 
-    return _sha256_word_hex(h0) + _sha256_word_hex(h1) + _sha256_word_hex(h2)
-        + _sha256_word_hex(h3)
-        + _sha256_word_hex(h4)
-        + _sha256_word_hex(h5)
-        + _sha256_word_hex(h6)
-        + _sha256_word_hex(h7);
+    let remaining: int = length - full_blocks * 64;
+    let mut tail_blocks: int = 1;
+    if remaining > 55 { tail_blocks = 2; }
+    let padded_length: int = (full_blocks + tail_blocks) * 64;
+    let bit_len: int = length * 8;
+    let bit_hi: int = (bit_len >> 32) & mask;
+    let bit_lo: int = bit_len & mask;
+
+    let mut tail_block: int = 0;
+    loop {
+        if tail_block >= tail_blocks { break; }
+        let base: int = (full_blocks + tail_block) * 64;
+        let mut t: int = 0;
+        loop {
+            if t >= 16 { break; }
+            let j: int = base + t * 4;
+            let b0 = _sha256_padded_byte(addr, length, j, padded_length, bit_hi, bit_lo);
+            let b1 = _sha256_padded_byte(addr, length, j + 1, padded_length, bit_hi, bit_lo);
+            let b2 = _sha256_padded_byte(addr, length, j + 2, padded_length, bit_hi, bit_lo);
+            let b3 = _sha256_padded_byte(addr, length, j + 3, padded_length, bit_hi, bit_lo);
+            w[t] = ((b0 << 24) | (b1 << 16) | (b2 << 8) | b3) & mask;
+            t += 1;
+        }
+        _sha256_compress(w, h, k);
+        tail_block += 1;
+    }
+
+    return _sha256_word_hex(h[0]) + _sha256_word_hex(h[1]) + _sha256_word_hex(h[2])
+        + _sha256_word_hex(h[3])
+        + _sha256_word_hex(h[4])
+        + _sha256_word_hex(h[5])
+        + _sha256_word_hex(h[6])
+        + _sha256_word_hex(h[7]);
 }
 
-export { sha256_hex_of_string };
+fn sha256_hex_of_string(s: string) -> string {
+    return sha256_hex_of_bytes((s as *u8) as i64, s.length);
+}
+
+export { sha256_hex_of_bytes, sha256_hex_of_string };

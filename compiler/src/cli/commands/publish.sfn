@@ -36,7 +36,7 @@
 // The registry helper `_resolve_registry_url_cmd` now lives in the shared
 // `cli/commands/cmd_shared.sfn` module (relocated from the deleted
 // `cli_commands.sfn` in #1795, SFEP-0027 §3.2); the crypto/collection
-// helpers (`_collect_sfn_files_cmd`, `_sha256_of_file_cmd`, …) live in the
+// helpers (`_collect_sfn_files_cmd`, `_sha256_of_file`, …) live in the
 // backend-shared `build/fs.sfn` module and are imported from there.
 import {
     Command,
@@ -49,8 +49,7 @@ import {
 
 import {
     _collect_sfn_files_cmd,
-    _sha256_of_file_cmd,
-    _sha256_of_text_file,
+    _sha256_of_file,
     _shell_read_cmd,
     _toml_trim_cmd
 } from "../../build/fs";
@@ -176,7 +175,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io] {
         return 1;
     }
     fs.writeFile(payload_tmp, payload);
-    let raw_digest = _sha256_of_text_file(payload_tmp);
+    let raw_digest = _sha256_of_file(payload_tmp);
     if raw_digest.length == 0 {
         print("failed to compute digest");
         process.run(["rm", "-f", payload_tmp]);

@@ -163,8 +163,7 @@ import {
     _ensure_dir_recursive_cmd,
     _mktemp_sibling_cmd,
     _sanitize_filename_cmd,
-    _sha256_of_file_cmd,
-    _sha256_of_text_file,
+    _sha256_of_file,
     _shell_read_cmd,
     _shell_single_quote_arg,
     _write_text_cmd
@@ -225,7 +224,7 @@ struct CacheEntryPaths {
 //     want to alarm on.
 //   - `invalid_keys` — `_is_valid_digest` rejected a digest before
 //     any filesystem access. Non-zero in production indicates a
-//     hash failure (sha256sum missing, source unreadable) — the
+//     hash failure (source unreadable or allocation failure) — the
 //     build still succeeds, but cache hit rate goes to zero. CI
 //     gates can alarm on `invalid_keys > 0`.
 //   - `copy_failures` — the cache contained the artifact but
@@ -743,8 +742,8 @@ fn _cache_entry_dir(root: string, key: CacheKey) -> string {
 
 // True iff `digest` is a 64-character lowercase hex string —
 // exactly the shape sha256 produces. Empty / short / non-hex
-// digests appear when `_sha256_of_file_cmd` fails (sha256sum
-// missing on PATH, source file missing, write to tmp failed).
+// digests appear when `_sha256_of_file` fails (source file missing,
+// unreadable input, allocation failure, or size-cap refusal).
 // Cache reads/writes against an invalid digest would land at
 // nonsense paths like `<root>///ir.sfn-asm` and pollute the
 // cache root with cross-module collisions; treating them as a
@@ -752,7 +751,7 @@ fn _cache_entry_dir(root: string, key: CacheKey) -> string {
 // Public alias of `_is_valid_digest` so the resolver can use the
 // same predicate when classifying a freshly-derived `cache_key`.
 // Without sharing the validator, callers might check `digest.length
-// == 64` (which `sha256sum` always satisfies on success) but miss
+// == 64` (which SHA-256 always satisfies on success) but miss
 // the non-hex case (where a future hash function or an injected
 // digest could leak in). One source of truth keeps
 // `ModuleCacheEvent.invalid_key` honest.
@@ -1049,20 +1048,13 @@ fn canonicalize_flags(flags: string[]) -> string {
 // ----------------------------------------------------------------
 // Content-hash primitive (shared)
 // ----------------------------------------------------------------
-// Content-address a NUL-free text artifact (`.sfn` source, `.ll` LLVM IR,
-// `.toml` manifest, `.layout.manifest`, `.h`/`.c` header). Delegates to
-// `_sha256_of_text_file`, which reads via `fs.readFile`; that call coerces
-// the `i8*` return to a Sailfin string via `strlen`
-// (core_operands.sfn:1013–1043) and therefore truncates at the first NUL
-// byte. Binary artifacts (compiled binaries, tarballs, archives) MUST NOT
-// use this wrapper — route them through `_sha256_of_file_cmd` in
-// `build/fs.sfn` instead. When #1999 lands a binary-safe read builtin, the
-// two paths can be collapsed. Returns "" if the file does not exist or
-// cannot be read — callers must treat an empty hash as "not
+// Content-address any file through the shared binary-safe in-process path.
+// Returns "" if the file does not exist or cannot be read — callers must
+// treat an empty hash as "not
 // content-addressable" and fall back to recompile rather than risk a stale
 // hit (#514, #632).
 fn sha256_of_file(file_path: string) -> string ![io] {
-    return _sha256_of_text_file(file_path);
+    return _sha256_of_file(file_path);
 }
 
 // Content-addressed cache key for a runtime C / LL object compile.
@@ -1195,8 +1187,8 @@ fn runtime_object_entry_key_from_str(key_str: string, hash_suffix: string) -> Ca
 // runners and work-dirs, breaking the CI cache restore the whole
 // content-addressing scheme exists to serve.
 //
-// Failures in `_sha256_of_file_cmd` (missing file, sha256sum not
-// on PATH) collapse to empty digests; the resulting key is still
+// Failures in `_sha256_of_file` (missing or unreadable input) collapse to
+// empty digests; the resulting key is still
 // stable but reflects "input was missing", which the caller can
 // surface as a build setup error.
 //
@@ -1208,9 +1200,8 @@ fn runtime_object_entry_key_from_str(key_str: string, hash_suffix: string) -> Ca
 // contract and #527). Because it feeds the digest it must be
 // *stable* for a given module enumeration — it is NOT a per-worker
 // nonce; a slug that varied per worker would give the same module a
-// different key each run and defeat cache hits. Distinct enumerations
-// carry distinct slugs, which incidentally keeps the `sha256sum` temp
-// filenames below from colliding across concurrent workers.
+// different key each run and defeat cache hits. Distinct enumerations carry
+// distinct slugs, preventing concurrent workers from sharing an identity.
 fn cache_key_for(source_path: string, dep_slugs: string[], dep_layout_manifest_paths: string[], compiler_version: string, flags_canonical: string, slug: string, target_triple: string) -> CacheKey ![io] {
     // A length mismatch means the caller built the two arrays
     // independently and they drifted. Fail safe: an empty digest is
@@ -1220,7 +1211,7 @@ fn cache_key_for(source_path: string, dep_slugs: string[], dep_layout_manifest_p
         return CacheKey { digest: "" };
     }
 
-    let s_hash = _sha256_of_text_file(source_path);
+    let s_hash = _sha256_of_file(source_path);
 
     let mut dep_hashes: string[] = [];
     let mut i: int = 0;
@@ -1231,7 +1222,7 @@ fn cache_key_for(source_path: string, dep_slugs: string[], dep_layout_manifest_p
         // when either changes (SFN-661). `\n` separates the two so a
         // slug ending in hex cannot collide with a shorter slug plus a
         // longer hash.
-        dep_hashes.push(dep_slugs[i] + "\n" + _sha256_of_text_file(dep_layout_manifest_paths[i]));
+        dep_hashes.push(dep_slugs[i] + "\n" + _sha256_of_file(dep_layout_manifest_paths[i]));
         i += 1;
     }
     let sorted_dep_hashes = _sort_strings(dep_hashes);
@@ -1314,7 +1305,7 @@ fn _ends_with_suffix(text: string, suffix: string) -> boolean {
 // ⇒ the key changes). Tagged / clean-commit stamps are left untouched
 // so their keys stay reproducible across machines and CI cache
 // sharing is unaffected. The caller resolves `compiler_version` once
-// per build, so the single `_sha256_of_file_cmd` here is paid once,
+// per build, so the single `_sha256_of_file` here is paid once,
 // not per module. An empty or unhashable `compiler_binary_path`
 // falls back to the raw stamp (no worse than the prior behaviour).
 fn cache_compiler_identity(compiler_version: string, compiler_binary_path: string) -> string ![io] {
@@ -1322,7 +1313,7 @@ fn cache_compiler_identity(compiler_version: string, compiler_binary_path: strin
         return compiler_version;
     }
     if compiler_binary_path.length == 0 { return compiler_version; }
-    let bin_hash = _sha256_of_file_cmd(compiler_binary_path);
+    let bin_hash = _sha256_of_file(compiler_binary_path);
     if bin_hash.length == 0 { return compiler_version; }
     return compiler_version + "+bin." + bin_hash;
 }
@@ -1334,15 +1325,15 @@ fn cache_compiler_identity(compiler_version: string, compiler_binary_path: strin
 // share entries across commits, but two different binaries at the same
 // capsule version must never address the same cached executable.
 //
-// The hash is binary-safe (`_sha256_of_file_cmd`, not the text-file hash)
-// and is resolved once per `sfn test` invocation by the caller. Failure
+// The binary-safe hash is resolved once per `sfn test` invocation by the
+// caller. Failure
 // returns an empty identity so the runner can disable cache reads and
 // writes; falling back to the bare capsule version would recreate the
 // stale cross-compiler hit this identity prevents.
 fn test_bin_compiler_identity(compiler_version: string, compiler_binary_path: string) -> string ![io] {
     if compiler_version.length == 0 { return ""; }
     if compiler_binary_path.length == 0 { return ""; }
-    let bin_hash = _sha256_of_file_cmd(compiler_binary_path);
+    let bin_hash = _sha256_of_file(compiler_binary_path);
     if bin_hash.length == 0 { return ""; }
     return compiler_version + "+bin." + bin_hash;
 }
@@ -1440,13 +1431,13 @@ fn test_bin_cache_root() -> string ![io] {
 // file simultaneously (the module cache carries the identical
 // single-process precondition).
 fn test_bin_cache_key(test_source_path: string, dep_ll_paths: string[], native_texts: string[], compiler_identity: string, runtime_identity: string, flags_canonical: string, unique_suffix: string) -> CacheKey ![io] {
-    let s_hash = _sha256_of_text_file(test_source_path);
+    let s_hash = _sha256_of_file(test_source_path);
 
     let mut dep_hashes: string[] = [];
     let mut i: int = 0;
     loop {
         if i >= dep_ll_paths.length { break; }
-        dep_hashes.push(_sha256_of_text_file(dep_ll_paths[i]));
+        dep_hashes.push(_sha256_of_file(dep_ll_paths[i]));
         i += 1;
     }
     let mut j: int = 0;
@@ -1496,7 +1487,7 @@ fn test_bin_cache_key(test_source_path: string, dep_ll_paths: string[], native_t
 // All components are sorted before folding so the identity is invariant
 // under enumeration order. Each source folds in as `<path>@<sha256>`: the
 // path keeps two distinct inputs from aliasing (notably when a file is
-// unreadable and `_sha256_of_file_cmd` returns an empty digest) and makes
+// unreadable and `_sha256_of_file` returns an empty digest) and makes
 // a rename observable. Hashing SOURCES (not built objects) is both
 // available on the single-file leaf path — where objects may not exist
 // yet — and strictly upstream: a source edit busts even before a rebuild.
@@ -1505,7 +1496,7 @@ fn runtime_link_inputs_identity(source_paths: string[], value_inputs: string[], 
     let mut i: int = 0;
     loop {
         if i >= source_paths.length { break; }
-        parts.push("src:" + source_paths[i] + "@" + _sha256_of_text_file(source_paths[i]));
+        parts.push("src:" + source_paths[i] + "@" + _sha256_of_file(source_paths[i]));
         i += 1;
     }
     let mut j: int = 0;
