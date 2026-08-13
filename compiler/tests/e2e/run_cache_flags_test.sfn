@@ -230,6 +230,17 @@ test "sfn run --clean wipes the cache and rebuilds" ![io] {
 
     assert find(log, "OK", 0) >= 0;
     // After --clean the .ll module cache is wiped → at least one miss and store.
-    assert find(log, "[cache]", 0) >= 0;
-    assert find(log, "misses=0", 0) < 0;
+    // Scoped to the `[cache]` summary line rather than searched across the whole
+    // log: the trace carries a second, independent `[stage cache]` summary whose
+    // counters describe the staged-artifact layer (SFN-861), and a bare
+    // whole-log search for "misses=0" matches that line's legitimately-zero
+    // shared-cache counters too. The assertion below still proves exactly what
+    // this test is named for — that `--clean` forced the `.ll` layer to re-miss
+    // — it just stops binding on text that belongs to a different cache.
+    let cache_line_start = find(log, "[cache] hits=", 0);
+    assert cache_line_start >= 0;
+    let cache_line_end = find(log, "\n", cache_line_start);
+    assert cache_line_end > cache_line_start;
+    let cache_line = substring(log, cache_line_start, cache_line_end);
+    assert find(cache_line, "misses=0", 0) < 0;
 }
