@@ -1,6 +1,7 @@
 // Check-only capsule preparation. Keeping this entry point outside the
 // build resolver facade prevents `sfn check` from importing driver emission
 // and LLVM lowering modules that it never executes.
+import { BuildCacheConfig } from "../build_cache";
 import { module_name_from_path } from "../module_paths";
 import { toml_get_entry } from "../toml_parser";
 import { _cr_resolve_and_dedupe } from "./dedupe";
@@ -70,7 +71,16 @@ fn prepare_project_capsules_for_check(entry_paths: string[], consumer: ResolverC
         };
     }
 
-    let staged = stage_capsule_imports(resolved.sources, sailfin_exe, work_dir);
+    // SFN-861: `sfn check` is already the fast rung — no LLVM IR, no
+    // `clang`, no self-host — so the shared staging cache has no cold-
+    // start cost here to amortise; this path does not participate in it.
+    let disabled_cache: BuildCacheConfig = BuildCacheConfig {
+        enabled: false,
+        trace: false,
+        clean: false,
+        capsule_name: ""
+    };
+    let staged = stage_capsule_imports(resolved.sources, disabled_cache, sailfin_exe, work_dir);
     if !staged {
         print.err("capsule-resolver: failed to stage import-context for project capsules");
         return CheckCapsuleResolution {

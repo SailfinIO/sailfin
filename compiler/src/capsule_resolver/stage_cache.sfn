@@ -1,0 +1,242 @@
+// compiler/src/capsule_resolver/stage_cache.sfn
+//
+// SFN-861 shared content-addressed cache layer for import-context staging
+// (`.sfn-asm` + `.layout-manifest`). Split out of `staging.sfn` (SFN-861
+// line-budget follow-up) to keep both modules under the 900-line ceiling
+// (`capsule_resolver_line_budget_test.sfn`) — this module owns the shared-
+// cache CONTEXT, SUMMARY, and per-module PROBE/STORE mechanics; `staging.sfn`
+// keeps the emit/publish orchestration (`_cr_stage_one_outcome`,
+// `stage_capsule_imports`) and the local `.srchash`-gated disk cache, which
+// predates SFN-861 and has no counters of its own.
+import { int_to_string } from "sfn/strings";
+
+import { build_target_triple } from "../build/target";
+import {
+    BuildCacheConfig,
+    CacheKey,
+    cache_compiler_identity,
+    cache_copy_artifact_to,
+    cache_copy_artifact_to_untouched,
+    cache_lookup_artifact,
+    cache_root,
+    cache_store_artifact,
+    is_valid_digest,
+    sha256_of_file,
+    stage_cache_key_from_digest
+} from "../build_cache";
+import { _get_env_cmd } from "../build_flags";
+import { resolve_compiler_version_for_cache } from "../version";
+
+// SFN-861: per-invocation shared-cache identity for the STAGING
+// artifacts (`.sfn-asm` + `.layout-manifest`), resolved once by
+// `stage_capsule_imports` and threaded down so every per-module probe
+// avoids re-deriving the compiler identity / target triple / cache root.
+// Mirrors `compile_capsule_modules`'s resolution of the same values
+// (`capsule_resolver/compile.sfn`) via the same helpers, so the `.ll`
+// cache and this staging cache can never disagree about compiler
+// identity or target.
+struct _StageCacheContext {
+    enabled: boolean;
+    trace: boolean;
+    root: string;
+    compiler_version: string;
+    target_triple: string;
+}
+
+// A disabled ctx collapses every downstream check to the single
+// `ctx.enabled` guard, so callers never special-case "config said no"
+// versus "identity/root resolution failed" — both fail open the same
+// way, onto the local `.srchash`-gated cache in `staging.sfn` (unaffected
+// either way).
+fn _cr_disabled_stage_cache_ctx() -> _StageCacheContext {
+    return _StageCacheContext {
+        enabled: false,
+        trace: false,
+        root: "",
+        compiler_version: "",
+        target_triple: ""
+    };
+}
+
+// Resolve the shared-cache context once per `stage_capsule_imports`
+// call. `config.enabled == false` short-circuits before touching the
+// filesystem or env; an empty resolved compiler identity or cache root
+// also disables the shared-cache path.
+//
+// An empty `sailfin_exe` must ALSO disable the shared cache, ahead of
+// every other check: `sailfin_exe` is empty exactly on the in-process
+// emit leg (`_cr_effective_isolation_exe` returns "" under the
+// sub-16-module closure threshold — see `mod.sfn`), and
+// `cache_compiler_identity` can only fold the emitting binary's SHA-256
+// into the key when it is handed a non-empty `compiler_binary_path`.
+// Without that fold, the key degrades to `{source, slug, bare version
+// stamp, triple}` — identical across two DIFFERENT compiler binaries at
+// an uncommitted (`.dirty`) revision. Because this cache is shared
+// ACROSS work directories (unlike the local `.srchash` tree), a rebuilt
+// compiler would then restore a PRIOR compiler's staged bytes, and since
+// the `.ll` cache key hashes the restored `.layout-manifest` content, a
+// byte-identical manifest restore makes the downstream `.ll` layer hit
+// too — silent stale IR with no signal anywhere in the chain. This
+// costs no measured performance: this leg is by construction the
+// sub-16-module closure, while the large closures this cache targets
+// take the subprocess branch and always carry a real `sailfin_exe`. The
+// underlying identity gap is documented as a known residual in
+// `docs/runbooks/build-cache-stale-ir.md` §3.
+fn _cr_resolve_stage_cache_ctx(config: BuildCacheConfig, sailfin_exe: string) -> _StageCacheContext ![io] {
+    if !config.enabled { return _cr_disabled_stage_cache_ctx(); }
+    if sailfin_exe.length == 0 { return _cr_disabled_stage_cache_ctx(); }
+    // SFN-861: `empty_build_cache_config()` (the `sfn test` leg's config)
+    // hardcodes `enabled: true` and never consults these env vars the way
+    // `resolve_build_cache_config` does, so this staging layer needs its
+    // own kill switch and trace toggle rather than inheriting one that
+    // was never read for it.
+    if _get_env_cmd("SAILFIN_NO_CACHE") == "1" {
+        return _cr_disabled_stage_cache_ctx();
+    }
+    let trace = config.trace || _get_env_cmd("SAILFIN_CACHE_TRACE") == "1";
+    let compiler_version = cache_compiler_identity(resolve_compiler_version_for_cache(""), sailfin_exe);
+    if compiler_version.length == 0 { return _cr_disabled_stage_cache_ctx(); }
+    let root = cache_root(config.capsule_name);
+    if root.length == 0 { return _cr_disabled_stage_cache_ctx(); }
+    let target_triple = build_target_triple();
+    return _StageCacheContext {
+        enabled: true,
+        trace: trace,
+        root: root,
+        compiler_version: compiler_version,
+        target_triple: target_triple
+    };
+}
+
+// Test-facing constructor for an ENABLED context, mirroring
+// `_cr_stage_cache_hit` / `_cr_write_srchash`'s precedent of exposing
+// the pure per-module primitives directly to tests rather than forcing
+// them through `stage_capsule_imports`'s config/env plumbing.
+fn _cr_stage_cache_ctx_for(root: string, compiler_version: string, target_triple: string) -> _StageCacheContext {
+    return _StageCacheContext {
+        enabled: true,
+        trace: false,
+        root: root,
+        compiler_version: compiler_version,
+        target_triple: target_triple
+    };
+}
+
+// Per-module accounting for the shared-cache summary line, kept
+// separate from `CacheStats` (the `.ll`/`.o` layer's summary, which
+// SFN-861 does not touch) and from the local `.srchash` disk cache in
+// `staging.sfn`, which has no counters of its own.
+//
+// `local_hits` is counted separately from `hits` (the SHARED-cache hit
+// count) rather than folded together: a local hit costs a stat plus one
+// hash, a shared hit costs a cross-directory copy — different costs, and
+// collapsing them would make it impossible to tell from a trace whether
+// the shared layer is earning its keep (SFN-861).
+struct _StageCacheSummary {
+    local_hits: int;
+    hits: int;
+    misses: int;
+    stores: int;
+    restore_failed: int;
+}
+
+fn _cr_empty_stage_cache_summary() -> _StageCacheSummary {
+    return _StageCacheSummary {
+        local_hits: 0,
+        hits: 0,
+        misses: 0,
+        stores: 0,
+        restore_failed: 0
+    };
+}
+
+fn _cr_print_stage_cache_summary(summary: _StageCacheSummary) ![io] {
+    print.err("[stage cache] local_hits=" + int_to_string(summary.local_hits)
+        + " hits="
+        + int_to_string(summary.hits)
+        + " misses="
+        + int_to_string(summary.misses)
+        + " stores="
+        + int_to_string(summary.stores)
+        + " restore_failed="
+        + int_to_string(summary.restore_failed));
+}
+
+// Result of one shared-cache lookup/restore attempt for a module whose
+// LOCAL `.srchash` probe already missed (`staging.sfn`'s
+// `_cr_stage_cache_hit`). Shared between the serial (`_cr_stage_one_outcome`)
+// and parallel (`stage_capsule_imports`'s partition loop) staging paths so
+// the lookup/restore/verify mechanics exist exactly once — the two paths
+// previously carried near-identical inline copies of this logic.
+//
+// `key` and `s_hash` are returned even on a miss/disabled context so the
+// caller's later fresh-emit publish can reuse them without re-hashing the
+// source (SFN-861). The caller (still `staging.sfn`, which owns the local
+// `.srchash` sidecar) is responsible for writing that sidecar on
+// `result.hit`, using `result.s_hash` — kept caller-side so this module
+// never needs to import back from `staging.sfn`.
+struct _StageCacheProbeResult {
+    key: CacheKey;
+    s_hash: string;
+    hit: boolean;
+    miss: boolean;
+    restore_failed: boolean;
+}
+
+fn _cr_stage_cache_probe(ctx: _StageCacheContext, src_path: string, slug: string, asm_path: string, manifest_path: string) -> _StageCacheProbeResult ![io] {
+    let mut result = _StageCacheProbeResult {
+        key: CacheKey { digest: "" },
+        s_hash: "",
+        hit: false,
+        miss: false,
+        restore_failed: false
+    };
+    if !ctx.enabled { return result; }
+    let s_hash = sha256_of_file(src_path);
+    let key = stage_cache_key_from_digest(s_hash, slug, ctx.compiler_version, ctx.target_triple);
+    result.s_hash = s_hash;
+    result.key = key;
+    if !is_valid_digest(key.digest) { return result; }
+    let found = cache_lookup_artifact(ctx.root, key, "sfn-asm")
+        && cache_lookup_artifact(ctx.root, key, "layout-manifest");
+    if !found {
+        result.miss = true;
+        if ctx.trace { print.err("[stage cache miss] " + slug); }
+        return result;
+    }
+    let mut restored = cache_copy_artifact_to(ctx.root, key, "sfn-asm", asm_path)
+        && cache_copy_artifact_to_untouched(ctx.root, key, "layout-manifest", manifest_path);
+    // A restored pair must be verified non-empty before the caller blesses
+    // it complete with the `.srchash` sidecar — `_cache_atomic_copy`
+    // degrades to a non-atomic in-place copy when `mktemp` is unavailable,
+    // so a torn restore is reachable and would otherwise be blessed by a
+    // matching sidecar. The manifest is deliberately NOT probed here: it
+    // is legitimately empty for a module with no `.layout` lines.
+    if restored {
+        if fs.readFile(asm_path).length == 0 { restored = false; }
+    }
+    if restored {
+        result.hit = true;
+        if ctx.trace { print.err("[stage cache hit] " + slug); }
+        return result;
+    }
+    result.restore_failed = true;
+    if ctx.trace { print.err("[stage cache restore-failed] " + slug); }
+    return result;
+}
+
+// Publish a freshly-staged `(asm_path, manifest_path)` pair into the
+// shared cache under `key`. `key.digest` is empty/invalid when `ctx` was
+// disabled or the source was unhashable — a no-op then, matching
+// `cache_store_artifact`'s own no-op-on-invalid-key contract.
+// Best-effort: a store failure never fails the build.
+fn _cr_stage_cache_store(ctx: _StageCacheContext, key: CacheKey, slug: string, asm_path: string, manifest_path: string) -> boolean ![io] {
+    if !ctx.enabled { return false; }
+    if !is_valid_digest(key.digest) { return false; }
+    let stored = cache_store_artifact(ctx.root, key, "sfn-asm", asm_path)
+        && cache_store_artifact(ctx.root, key, "layout-manifest", manifest_path);
+    if stored {
+        if ctx.trace { print.err("[stage cache store] " + slug); }
+    }
+    return stored;
+}

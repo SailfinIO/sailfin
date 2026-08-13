@@ -895,17 +895,30 @@ fn cache_lookup_artifact(root: string, key: CacheKey, kind: string) -> boolean !
 // on the first build into a fresh tree, silently flipping every
 // cache hit into a recompile.
 fn cache_copy_artifact_to(root: string, key: CacheKey, kind: string, dst_path: string) -> boolean ![io] {
+    let ok = _cache_copy_artifact_to_impl(root, key, kind, dst_path);
+    // Cache hit: bump the entry's mtime so `cache_prune` sees true
+    // recency (SFEP-0040 §3.4). Best-effort — never fails the restore.
+    if ok { let _ = cache_touch_entry(root, key); }
+    return ok;
+}
+
+// Same restore as `cache_copy_artifact_to`, but skips the recency-bumping
+// `touch`. For a caller restoring MULTIPLE artifacts out of the SAME entry
+// directory in one operation (the staging cache's `.sfn-asm` +
+// `.layout-manifest` pair, e.g.) — one entry needs one recency bump, not
+// one per artifact, and `touch` forks a process per call.
+fn cache_copy_artifact_to_untouched(root: string, key: CacheKey, kind: string, dst_path: string) -> boolean ![io] {
+    return _cache_copy_artifact_to_impl(root, key, kind, dst_path);
+}
+
+fn _cache_copy_artifact_to_impl(root: string, key: CacheKey, kind: string, dst_path: string) -> boolean ![io] {
     if !_is_valid_digest(key.digest) { return false; }
     if !_is_known_kind(kind) { return false; }
     let src = cache_artifact_path(root, key, kind);
     if !fs.exists(src) { return false; }
     let dst_dir = _dirname_cmd(dst_path);
     if dst_dir.length > 0 { _ensure_dir_recursive_cmd(dst_dir); }
-    let ok = _cache_atomic_copy(src, dst_path);
-    // Cache hit: bump the entry's mtime so `cache_prune` sees true
-    // recency (SFEP-0040 §3.4). Best-effort — never fails the restore.
-    if ok { let _ = cache_touch_entry(root, key); }
-    return ok;
+    return _cache_atomic_copy(src, dst_path);
 }
 
 // Copy `src_path` into the cache as the artifact of `kind` for
@@ -1279,6 +1292,56 @@ fn cache_key_for(source_path: string, dep_slugs: string[], dep_layout_manifest_p
     return CacheKey { digest: final_digest };
 }
 
+// Cache key for the STAGING artifacts (`.sfn-asm` + `.layout-manifest`),
+// distinct from `cache_key_for`'s per-module `.ll`/`.o` key.
+//
+// Omits the dep-manifest hashes `cache_key_for` folds in: native
+// `.sfn-asm` emit consults no cross-module import context —
+// `write_staged_native_text_file` (`native_artifact_writer.sfn`) passes
+// `empty_import_symbols()`, and the subprocess path
+// (`stage_native_text_with_retry`) passes no `--import-context` flag in
+// native mode — so a staged module's bytes are a pure function of its own
+// source text, slug, and emitting compiler. They are also not available
+// here: staging runs BEFORE dep manifests exist (staging PRODUCES the
+// manifests that `cache_key_for` later consumes).
+//
+// Includes `target_triple` even though native emit is believed
+// target-neutral. Deliberately conservative: an over-specific key costs a
+// duplicate cache entry per target, but an under-specific key risks
+// serving one target's bytes to another — revisit only with evidence the
+// emit is provably target-neutral.
+//
+// `stage1:` is a domain separator, distinct from `cache_key_for`'s
+// `tgt2:`, so the two key spaces can never collide even for the same
+// source/slug/version/triple tuple.
+// Hashes through `sha256_of_file` — the SAME entry point the `.srchash`
+// sidecar uses (`_cr_write_srchash`). That identity is load-bearing, not
+// incidental: `stage_cache_key_from_digest` lets a caller reuse one digest
+// for both the key and the sidecar, which is only sound while the two
+// derive from the same function. Keep them on one entry point rather than
+// two that merely happen to agree.
+fn stage_cache_key_for(source_path: string, slug: string, compiler_version: string, target_triple: string) -> CacheKey ![io] {
+    let s_hash = sha256_of_file(source_path);
+    return stage_cache_key_from_digest(s_hash, slug, compiler_version, target_triple);
+}
+
+// Same derivation as `stage_cache_key_for`, but takes an ALREADY-COMPUTED
+// source digest instead of hashing `source_path` itself. A caller that has
+// already hashed the source for another purpose (the local `.srchash`
+// sidecar, in particular) uses this to avoid a second file read + SHA-256
+// pass for one staging publish (SFN-861 follow-up). `stage_cache_key_for`
+// delegates here so the two can never drift on the derivation formula.
+fn stage_cache_key_from_digest(s_hash: string, slug: string, compiler_version: string, target_triple: string) -> CacheKey ![io] {
+    if s_hash.length == 0 {
+        return CacheKey { digest: "" };
+    }
+    let final_input = s_hash + "\n" + compiler_version + "\n" + slug
+        + "\nstage1:"
+        + target_triple;
+    let final_digest = _sha256_of_string(final_input, slug + "_stage");
+    return CacheKey { digest: final_digest };
+}
+
 fn _ends_with_suffix(text: string, suffix: string) -> boolean {
     if suffix.length > text.length { return false; }
     return substring(text, text.length - suffix.length, text.length) == suffix;
@@ -1532,9 +1595,12 @@ export {
     cache_store,
     cache_lookup_artifact,
     cache_copy_artifact_to,
+    cache_copy_artifact_to_untouched,
     cache_store_artifact,
     canonicalize_flags,
     cache_key_for,
+    stage_cache_key_for,
+    stage_cache_key_from_digest,
     cache_compiler_identity,
     test_bin_compiler_identity,
     sha256_of_file,

@@ -224,40 +224,43 @@ fn _runtime_obj_cache_record(obj_path: string, key: string) ![io] {
     fs.writeFile(obj_path + ".key", key);
 }
 
-// Shared content-addressed cache lookup for a runtime object (#1096).
-// When the shared cache is enabled (`shared_cache_root` non-empty) and
-// holds the artifact for this content key, copy it into the work-dir
-// `obj_path`, write the work-dir sidecar so a same-work-dir rebuild
-// can fast-path it, and return true (the caller counts a HIT and skips
-// the compile). Returns false on a disabled cache, an empty/unhashable
-// key, or a miss — leaving the caller to compile fresh. `hash_suffix`
-// only needs to be unique enough to avoid a tmp-file collision while
-// the key string is hashed; the per-source `cap_prefix + basename +
-// opt_flag` the callers pass satisfies that.
-fn _runtime_obj_shared_cache_fetch(shared_cache_root: string, key: string, obj_path: string, hash_suffix: string) -> boolean ![io] {
+// Shared content-addressed cache lookup for a runtime artifact (#1096,
+// SFN-861). When the shared cache is enabled (`shared_cache_root`
+// non-empty) and holds the artifact for this content key, copy it into
+// the work-dir `obj_path`, write the work-dir sidecar so a same-work-dir
+// rebuild can fast-path it, and return true (the caller counts a HIT and
+// skips the compile/emit). Returns false on a disabled cache, an
+// empty/unhashable key, or a miss — leaving the caller to produce it
+// fresh. `hash_suffix` is INERT: it reaches `_sha256_of_string`
+// (`build_cache.sfn`), whose body is `sha256_hex_of_string(input)` and
+// never reads its `unique_suffix` argument — the parameter is retained
+// only for signature compatibility with that entry point, not because
+// it distinguishes cache entries. `kind` selects the artifact filename
+// within the shared entry directory (`runtime-obj` for a compiled `.o`,
+// `sfn-asm` for a staged import-context module) so the two layers never
+// alias within one entry.
+fn _runtime_obj_shared_cache_fetch(shared_cache_root: string, key: string, obj_path: string, hash_suffix: string, kind: string) -> boolean ![io] {
     if shared_cache_root.length == 0 { return false; }
     if key.length == 0 { return false; }
     let ck = runtime_object_entry_key_from_str(key, hash_suffix);
-    if !cache_lookup_artifact(shared_cache_root, ck, "runtime-obj") {
-        return false;
-    }
-    if !cache_copy_artifact_to(shared_cache_root, ck, "runtime-obj", obj_path) {
+    if !cache_lookup_artifact(shared_cache_root, ck, kind) { return false; }
+    if !cache_copy_artifact_to(shared_cache_root, ck, kind, obj_path) {
         return false;
     }
     _runtime_obj_cache_record(obj_path, key);
     return true;
 }
 
-// Publish a freshly-compiled runtime object into the shared
+// Publish a freshly-produced runtime artifact into the shared
 // content-addressed cache so sibling work-dirs and CI cache restores
-// can warm-hit it (#1096). No-op when the shared cache is disabled or
-// the key is unhashable. A store failure is non-fatal — the object
-// already exists at `obj_path` for this build's link.
-fn _runtime_obj_shared_cache_publish(shared_cache_root: string, key: string, obj_path: string, hash_suffix: string) ![io] {
+// can warm-hit it (#1096, SFN-861). No-op when the shared cache is
+// disabled or the key is unhashable. A store failure is non-fatal — the
+// artifact already exists at `obj_path` for this build's link/emit.
+fn _runtime_obj_shared_cache_publish(shared_cache_root: string, key: string, obj_path: string, hash_suffix: string, kind: string) ![io] {
     if shared_cache_root.length == 0 { return; }
     if key.length == 0 { return; }
     let ck = runtime_object_entry_key_from_str(key, hash_suffix);
-    cache_store_artifact(shared_cache_root, ck, "runtime-obj", obj_path);
+    cache_store_artifact(shared_cache_root, ck, kind, obj_path);
 }
 
 struct PendingRuntimeObjectAssembly {
@@ -334,7 +337,7 @@ fn _clang_compile_runtime_capsule_objects(runtime_capsules: RuntimeCapsuleArtifa
             }
             if _runtime_obj_cache_hit(obj, key) {
                 stats.hits = stats.hits + 1;
-            } else if _runtime_obj_shared_cache_fetch(shared_cache_root, key, obj, base) {
+            } else if _runtime_obj_shared_cache_fetch(shared_cache_root, key, obj, base, "runtime-obj") {
                 stats.hits = stats.hits + 1;
             } else {
                 stats.misses = stats.misses + 1;
@@ -381,7 +384,7 @@ fn _clang_compile_runtime_capsule_objects(runtime_capsules: RuntimeCapsuleArtifa
             }
             if _runtime_obj_cache_hit(obj, key) {
                 stats.hits = stats.hits + 1;
-            } else if _runtime_obj_shared_cache_fetch(shared_cache_root, key, obj, base) {
+            } else if _runtime_obj_shared_cache_fetch(shared_cache_root, key, obj, base, "runtime-obj") {
                 stats.hits = stats.hits + 1;
             } else {
                 stats.misses = stats.misses + 1;
@@ -444,7 +447,7 @@ fn _clang_compile_runtime_capsule_objects(runtime_capsules: RuntimeCapsuleArtifa
         _runtime_obj_cache_record(item.object_path, item.cache_key);
         if item.cache_key.length > 0 {
             stats.stores = stats.stores + 1;
-            _runtime_obj_shared_cache_publish(shared_cache_root, item.cache_key, item.object_path, item.cache_suffix);
+            _runtime_obj_shared_cache_publish(shared_cache_root, item.cache_key, item.object_path, item.cache_suffix, "runtime-obj");
         }
         pi += 1;
     }
@@ -706,6 +709,29 @@ fn _runtime_obj_key_with_target(base_key: string, target_triple: string) -> stri
     return base_key + "\ntgt2:" + target_triple;
 }
 
+// SFN-861 review follow-up: fold the module SLUG into the `sfn-asm`
+// staging key. The emitted native text's first directive is
+// `.module <slug>` (`_emit_native_state`,
+// `compiler/capsules/codegen/src/emit_native.sfn:117-122`), so two
+// byte-identical sources staged under different slugs (e.g. a
+// `runtime/sfn/util.sfn` re-exported into a dep capsule's own
+// namespace) produce DIFFERENT artifact bytes but, without this fold,
+// hashed to the SAME address — `runtime_object_cache_key_with_identity`
+// hashes only source bytes + a flag tag + the compiler identity, never
+// the slug the caller passes to name the artifact. The `hash_suffix`
+// argument threaded through `_runtime_obj_shared_cache_fetch`/`_publish`
+// does NOT close this gap: it reaches `_sha256_of_string`, whose body is
+// `sha256_hex_of_string(input)` — the suffix is documented there as
+// unused. `asm1:` domain-separates this key space from the `.o` key
+// (`_runtime_obj_key_with_target`'s `tgt2:`), which never carries a
+// slug fold. Scoped to `sfn-asm` only; the `.o` cache has the same gap
+// (#1096) but is out of scope here.
+fn runtime_asm_cache_key(src_path: string, slug: string, compiler_identity: string) -> string ![io] {
+    let base = runtime_object_cache_key_with_identity(src_path, "", compiler_identity);
+    if base.length == 0 { return ""; }
+    return base + "\nasm1:" + slug;
+}
+
 // SFN-50: the child compiler's environment for a runtime sfn-source
 // emit — the parent's full environment (PATH, HOME, the macOS
 // SDK/toolchain vars the child's clang/ld need, …) with the four
@@ -832,7 +858,7 @@ fn _prepare_runtime_sfn_object(self_path: string, cap_prefix: string, src: strin
     // Shared content-addressed cache hit (#1096): a sibling work-dir or
     // a CI cache restore may already hold this object even though the
     // local sidecar above missed. Skip the re-emit + clang entirely.
-    if _runtime_obj_shared_cache_fetch(shared_cache_root, key, obj_path, shared_suffix) {
+    if _runtime_obj_shared_cache_fetch(shared_cache_root, key, obj_path, shared_suffix, "runtime-obj") {
         stats.hits = stats.hits + 1;
         return _ready_runtime_sfn_object(obj_path, stats);
     }
@@ -957,7 +983,7 @@ fn _finish_runtime_sfn_objects(plans: RuntimeSfnObjectPlan[], jobs: int, shared_
             _runtime_obj_cache_record(item.obj_path, item.cache_key);
             if item.cache_key.length > 0 {
                 stats.stores = stats.stores + 1;
-                _runtime_obj_shared_cache_publish(shared_cache_root, item.cache_key, item.obj_path, item.cache_suffix);
+                _runtime_obj_shared_cache_publish(shared_cache_root, item.cache_key, item.obj_path, item.cache_suffix, "runtime-obj");
             }
             result_index += 1;
         }
@@ -1038,7 +1064,7 @@ fn _runtime_sfn_ctx_root(out_dir: string) -> string {
 // (#1011) so a concurrent reader never observes a torn artifact.
 // The `native` emit stage is import-context-free by design (#906),
 // so staging order across the sfn-sources list does not matter.
-fn _stage_one_runtime_sfn_import_context(self_path: string, src: string, slug: string, ctx_root: string, compiler_identity: string) -> boolean ![io] {
+fn _stage_one_runtime_sfn_import_context(self_path: string, src: string, slug: string, ctx_root: string, compiler_identity: string, shared_cache_root: string) -> boolean ![io] {
     let asm_path = ctx_root + "/" + slug + ".sfn-asm";
     // #1996 / SFEP-0044 §3-A: stamped fast path — same shape as the
     // `.o` emit hook. The stamp lives in the warm objdir, which is the
@@ -1050,8 +1076,53 @@ fn _stage_one_runtime_sfn_import_context(self_path: string, src: string, slug: s
     // compiler too, so a codegen change must bust it on the same identity
     // basis as the `.o` emit below — otherwise a stale staged context
     // feeds outdated sibling signatures into `_prepare_runtime_sfn_object`.
-    let key = runtime_object_cache_key_with_identity(src, "", compiler_identity);
+    // SFN-861 review follow-up: `runtime_asm_cache_key` (not the bare
+    // `_with_identity` key) folds `slug` in, because the emitted native
+    // text's `.module <slug>` directive makes the slug part of the
+    // artifact's content — see that helper's header for the full defect.
+    // Used for BOTH the fetch and the publish below via this one `key`
+    // binding so the two addresses can never diverge.
+    let key = runtime_asm_cache_key(src, slug, compiler_identity);
     if _runtime_obj_cache_hit(asm_path, key) { return true; }
+    // SFN-861 review follow-up: an empty `compiler_identity` is a caller
+    // bug (the production caller always resolves a real one), but this
+    // function is now on the export surface with no way to enforce that
+    // at the call site — defend in-function, mirroring
+    // `_cr_resolve_stage_cache_ctx`'s equivalent guard on the capsule
+    // staging path (`capsule_resolver/staging.sfn`), which disables its
+    // shared-cache context under the same condition. Folding this into
+    // one `effective_shared_cache_root` reuses the existing "empty root
+    // disables both the fetch and the publish" behavior already built
+    // into `_runtime_obj_shared_cache_fetch`/`_publish` rather than
+    // adding a second disable path.
+    let mut effective_shared_cache_root = shared_cache_root;
+    if compiler_identity.length == 0 { effective_shared_cache_root = ""; }
+    // SFN-861: the local `.key` sidecar lives NEXT TO `asm_path`, so it
+    // only ever hits inside the work dir that staged it — a fresh work
+    // dir (the common case: CI runs ~1,285 nested builds each in a fresh
+    // scratch dir) misses here on every one of the ~68 runtime sfn-source
+    // modules regardless of what the shared cache already holds. Probe it
+    // before paying for a child emit, exactly as the capsule staging path
+    // does in `_cr_stage_one_outcome`. `slug` is passed as the
+    // `hash_suffix` argument here, but that argument is INERT (see
+    // `_runtime_obj_shared_cache_fetch`'s header) — it does not fold
+    // `slug` into the key. The slug fold that actually matters for
+    // correctness lives in `runtime_asm_cache_key` above, in `key`
+    // itself.
+    if _runtime_obj_shared_cache_fetch(effective_shared_cache_root, key, asm_path, slug, "sfn-asm") {
+        // SFN-861 review follow-up: `_cache_atomic_copy`
+        // (`build_cache.sfn:823-834`) degrades to a non-atomic copy when
+        // `_mktemp_sibling_cmd` returns empty, so an interrupted or
+        // disk-full store write under that degrade can leave a truncated
+        // `ir.sfn-asm` in the shared store. A restored artifact must be
+        // verified non-empty before it is trusted — mirrors the
+        // restore-then-verify shape of `_cr_stage_one_outcome`
+        // (`capsule_resolver/staging.sfn`), which checks the SAME degrade
+        // on its restored `.sfn-asm` before blessing the pair.
+        if fs.readFile(asm_path).length > 0 { return true; }
+        fs.deleteFile(asm_path);
+        fs.deleteFile(asm_path + ".key");
+    }
     _ensure_dir(_dirname(asm_path));
     let staged = _mktemp_sibling_cmd(asm_path);
     let mut emit_target: string = asm_path;
@@ -1095,6 +1166,10 @@ fn _stage_one_runtime_sfn_import_context(self_path: string, src: string, slug: s
         }
     }
     _runtime_obj_cache_record(asm_path, key);
+    // SFN-861: publish the freshly-staged artifact so a sibling work dir
+    // or a warm CI cache restore can skip this emit entirely next time.
+    // Best-effort — a store failure never fails the build.
+    _runtime_obj_shared_cache_publish(effective_shared_cache_root, key, asm_path, slug, "sfn-asm");
     return true;
 }
 
@@ -1281,7 +1356,7 @@ fn _write_runtime_sfn_import_deps(asm_path: string, slug: string, ctx_root: stri
 // emit failure does — a missing sibling artifact would otherwise
 // surface later as the far less actionable "cannot resolve return
 // type" fatal in whichever module imports it.
-fn _stage_runtime_sfn_import_context(self_path: string, runtime_capsules: RuntimeCapsuleArtifacts[], ctx_root: string, compiler_identity: string) -> boolean ![io] {
+fn _stage_runtime_sfn_import_context(self_path: string, runtime_capsules: RuntimeCapsuleArtifacts[], ctx_root: string, compiler_identity: string, shared_cache_root: string) -> boolean ![io] {
     let mut staged_slugs: string[] = [];
     let mut staged_asm_paths: string[] = [];
     let mut staged_src_paths: string[] = [];
@@ -1294,7 +1369,7 @@ fn _stage_runtime_sfn_import_context(self_path: string, runtime_capsules: Runtim
             if si >= cap.sfn_sources.length { break; }
             let src = cap.sfn_sources[si];
             let slug = _runtime_module_slug(cap.manifest_dir, src);
-            if !_stage_one_runtime_sfn_import_context(self_path, src, slug, ctx_root, compiler_identity) {
+            if !_stage_one_runtime_sfn_import_context(self_path, src, slug, ctx_root, compiler_identity, shared_cache_root) {
                 return false;
             }
             staged_slugs.push(slug);
@@ -1349,7 +1424,7 @@ fn _stage_runtime_sfn_import_context(self_path: string, runtime_capsules: Runtim
                 if substring(dep_src, 0, prefix.length) != prefix { continue; }
                 let rel = substring(dep_src, prefix.length, dep_src.length);
                 let dep_slug = spec + "/" + _strip_module_ext(rel);
-                if !_stage_one_runtime_sfn_import_context(self_path, dep_src, dep_slug, ctx_root, compiler_identity) {
+                if !_stage_one_runtime_sfn_import_context(self_path, dep_src, dep_slug, ctx_root, compiler_identity, shared_cache_root) {
                     return false;
                 }
                 staged_slugs.push(dep_slug);
@@ -1365,7 +1440,7 @@ fn _stage_runtime_sfn_import_context(self_path: string, runtime_capsules: Runtim
     // `./platform/posix` for `nanosleep`/`clock_gettime`. Without staging
     // it here the importer's LLVM emit falls back to the opaque #414
     // descriptor; staging lets it render the source-of-truth signature.
-    if !_stage_imported_platform_externs(self_path, staged_src_paths, staged_slugs, staged_asm_paths, ctx_root, compiler_identity) {
+    if !_stage_imported_platform_externs(self_path, staged_src_paths, staged_slugs, staged_asm_paths, ctx_root, compiler_identity, shared_cache_root) {
         return false;
     }
     // Second pass (all siblings + imported platform externs now staged):
@@ -1406,7 +1481,7 @@ fn _stage_runtime_sfn_import_context(self_path: string, runtime_capsules: Runtim
 // the retained #414 fallback descriptor, and the consumer e2e asserts
 // the canonical `%Timespec*` form so a staging regression fails a test
 // rather than passing silently.
-fn _stage_imported_platform_externs(self_path: string, staged_src_paths: string[], staged_slugs: string[], staged_asm_paths: string[], ctx_root: string, compiler_identity: string) -> boolean ![io] {
+fn _stage_imported_platform_externs(self_path: string, staged_src_paths: string[], staged_slugs: string[], staged_asm_paths: string[], ctx_root: string, compiler_identity: string, shared_cache_root: string) -> boolean ![io] {
     let source_count = staged_slugs.length;
     let mut pi: int = 0;
     loop {
@@ -1423,7 +1498,7 @@ fn _stage_imported_platform_externs(self_path: string, staged_src_paths: string[
                 if dep_slug.length > 0 && !_slug_already_staged(staged_slugs, dep_slug) {
                     let dep_src = _resolve_relative_import_source(importer_src, entries[ei].module);
                     if dep_src.length > 0 && fs.exists(dep_src) {
-                        if !_stage_one_runtime_sfn_import_context(self_path, dep_src, dep_slug, ctx_root, compiler_identity) {
+                        if !_stage_one_runtime_sfn_import_context(self_path, dep_src, dep_slug, ctx_root, compiler_identity, shared_cache_root) {
                             return false;
                         }
                         staged_slugs.push(dep_slug);
@@ -1532,7 +1607,7 @@ fn _compile_runtime_sfn_sources(runtime_capsules: RuntimeCapsuleArtifacts[], out
     // #1288: stage every sfn-source's import-context artifacts FIRST
     // so each module's llvm emit below can resolve sibling imports.
     let ctx_root = _runtime_sfn_ctx_root(out_dir);
-    if !_stage_runtime_sfn_import_context(self_path, runtime_capsules, ctx_root, compiler_identity) {
+    if !_stage_runtime_sfn_import_context(self_path, runtime_capsules, ctx_root, compiler_identity, shared_cache_root) {
         return _failed_runtime_link_inputs();
     }
     let mut plans: RuntimeSfnObjectPlan[] = [];
@@ -1815,5 +1890,7 @@ export {
     write_runtime_identity_stamp,
     _runtime_bundle_exists,
     _runtime_obj_stem,
-    _runtime_obj_key_with_target
+    _runtime_obj_key_with_target,
+    _stage_one_runtime_sfn_import_context,
+    runtime_asm_cache_key
 };

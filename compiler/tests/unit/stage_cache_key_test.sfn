@@ -1,0 +1,112 @@
+// Unit tests for `stage_cache_key_for` (SFN-861), the cache key for the
+// STAGING artifacts (`.sfn-asm` + `.layout-manifest`), distinct from
+// `cache_key_for`'s per-module `.ll`/`.o` key.
+//
+// Mirrors the determinism/sensitivity coverage `build_cache_test.sfn`
+// already has for `cache_key_for`, scoped to `stage_cache_key_for`'s
+// narrower input set (no dep manifests — see the function's doc comment
+// for why).
+import { cache_key_for, is_valid_digest, stage_cache_key_for } from "../../src/build_cache";
+
+fn _sck_tmp_root(label: string) -> string ![io] {
+    let root = "/tmp/sfn_stage_cache_key_test_" + label;
+    process.run(["rm", "-rf", root]);
+    process.run(["mkdir", "-p", root]);
+    return root;
+}
+
+fn _sck_cleanup(path: string) ![io] {
+    process.run(["rm", "-rf", path]);
+}
+
+fn _sck_write(path: string, content: string) ![io] {
+    fs.writeFile(path, content);
+}
+
+// --------------------------------------------------------------
+// Determinism
+// --------------------------------------------------------------
+test "stage_cache_key_for: same inputs -> same digest" ![io] {
+    let scratch = _sck_tmp_root("determinism");
+    let src = scratch + "/source.sfn";
+    _sck_write(src, "fn hello() -> string { return \"world\"; }");
+    let key1 = stage_cache_key_for(src, "mymod", "0.5.10-alpha.2", "x86_64-unknown-linux-gnu");
+    let key2 = stage_cache_key_for(src, "mymod", "0.5.10-alpha.2", "x86_64-unknown-linux-gnu");
+    assert key1.digest == key2.digest;
+    assert key1.digest.length == 64;
+    _sck_cleanup(scratch);
+}
+
+// --------------------------------------------------------------
+// Sensitivity
+// --------------------------------------------------------------
+test "stage_cache_key_for: differing slug -> different digest" ![io] {
+    let scratch = _sck_tmp_root("slug_sensitive");
+    let src = scratch + "/source.sfn";
+    _sck_write(src, "fn hello() -> string { return \"world\"; }");
+    let key_a = stage_cache_key_for(src, "mod_a", "0.5.10-alpha.2", "x86_64-unknown-linux-gnu");
+    let key_b = stage_cache_key_for(src, "mod_b", "0.5.10-alpha.2", "x86_64-unknown-linux-gnu");
+    assert key_a.digest != key_b.digest;
+    _sck_cleanup(scratch);
+}
+
+test "stage_cache_key_for: differing compiler version -> different digest" ![io] {
+    let scratch = _sck_tmp_root("version_sensitive");
+    let src = scratch + "/source.sfn";
+    _sck_write(src, "fn hello() -> string { return \"world\"; }");
+    let key1 = stage_cache_key_for(src, "mymod", "0.5.10-alpha.1", "x86_64-unknown-linux-gnu");
+    let key2 = stage_cache_key_for(src, "mymod", "0.5.10-alpha.2", "x86_64-unknown-linux-gnu");
+    assert key1.digest != key2.digest;
+    _sck_cleanup(scratch);
+}
+
+test "stage_cache_key_for: differing target triple -> different digest" ![io] {
+    let scratch = _sck_tmp_root("target_sensitive");
+    let src = scratch + "/source.sfn";
+    _sck_write(src, "fn hello() -> string { return \"world\"; }");
+    let key_linux = stage_cache_key_for(src, "mymod", "0.5.10-alpha.2", "x86_64-unknown-linux-gnu");
+    let key_darwin = stage_cache_key_for(src, "mymod", "0.5.10-alpha.2", "aarch64-apple-darwin");
+    assert key_linux.digest != key_darwin.digest;
+    _sck_cleanup(scratch);
+}
+
+test "stage_cache_key_for: differing source content -> different digest" ![io] {
+    let scratch = _sck_tmp_root("source_sensitive");
+    let src = scratch + "/source.sfn";
+    _sck_write(src, "fn hello() -> string { return \"world\"; }");
+    let key1 = stage_cache_key_for(src, "mymod", "0.5.10-alpha.2", "x86_64-unknown-linux-gnu");
+    _sck_write(src, "fn hello() -> string { return \"WORLD\"; }");
+    let key2 = stage_cache_key_for(src, "mymod", "0.5.10-alpha.2", "x86_64-unknown-linux-gnu");
+    assert key1.digest != key2.digest;
+    _sck_cleanup(scratch);
+}
+
+// --------------------------------------------------------------
+// Fail-open on an unreadable source
+// --------------------------------------------------------------
+test "stage_cache_key_for: missing source -> empty, invalid digest" ![io] {
+    let scratch = _sck_tmp_root("missing_source");
+    let src = scratch + "/does-not-exist.sfn";
+    let key = stage_cache_key_for(src, "mymod", "0.5.10-alpha.2", "x86_64-unknown-linux-gnu");
+    assert key.digest == "";
+    assert ! is_valid_digest(key.digest);
+    _sck_cleanup(scratch);
+}
+
+// --------------------------------------------------------------
+// Domain separation from `cache_key_for`
+// --------------------------------------------------------------
+// `stage1:` vs `tgt2:` keeps the two key spaces disjoint even for the
+// same source/slug/version/triple tuple with empty dep lists — a
+// staging-cache entry can never alias a `.ll` cache entry.
+test "stage_cache_key_for: digest differs from cache_key_for for the same source/slug/version/triple" ![io] {
+    let scratch = _sck_tmp_root("domain_separation");
+    let src = scratch + "/source.sfn";
+    _sck_write(src, "fn hello() -> string { return \"world\"; }");
+    let no_deps: string[] = [];
+    let no_dep_slugs: string[] = [];
+    let stage_key = stage_cache_key_for(src, "mymod", "0.5.10-alpha.2", "x86_64-unknown-linux-gnu");
+    let module_key = cache_key_for(src, no_dep_slugs, no_deps, "0.5.10-alpha.2", "[]", "mymod", "x86_64-unknown-linux-gnu");
+    assert stage_key.digest != module_key.digest;
+    _sck_cleanup(scratch);
+}

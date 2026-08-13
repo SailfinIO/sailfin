@@ -50,7 +50,7 @@ fn _module_lines(name: string) -> int ![io] {
 }
 
 test "capsule resolver: every submodule stays under the line budget" ![io] {
-    let modules: string[] = ["capability", "compile", "dedupe", "discovery", "implicit", "mod", "paths", "relative", "staging", "toolchain", "types", "workspace"];
+    let modules: string[] = ["capability", "compile", "dedupe", "discovery", "implicit", "mod", "paths", "relative", "stage_cache", "staging", "toolchain", "types", "workspace"];
     let mut i: int = 0;
     loop {
         if i >= modules.length { break; }
