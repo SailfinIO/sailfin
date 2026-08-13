@@ -1,0 +1,62 @@
+// Pins the byte-oriented contract of `char_code` / `char_at` / `grapheme_at`
+// documented in `runtime/prelude.sfn`, so the comment cannot drift from the
+// behaviour again (SFN-759).
+//
+// The prelude comment previously claimed `char_code` returns "the
+// corresponding Unicode code point". It does not — it returns the raw leading
+// byte. A reviewer reasoning from that wording raised a false-positive
+// security finding against the crypto base64 decoders' `char_code(c) & 255`,
+// on the theory that the mask folds non-ASCII characters onto ASCII ones.
+// These assertions make the real contract testable rather than re-derivable.
+//
+// Byte references below: U+0141 'Ł' encodes as 0xC5 0x81 (197, 129);
+// U+00E9 'é' encodes as 0xC3 0xA9 (195, 169).
+import { expect_eq_int } from "sfn/test";
+
+test "char_code contract: string length counts bytes, not graphemes" {
+    assert expect_eq_int("A".length, 1).ok;
+    assert expect_eq_int("Ł".length, 2).ok;
+    assert expect_eq_int("é".length, 2).ok;
+}
+
+test "char_code contract: indexed access yields exactly one byte" {
+    let s = "Ł";
+    let b0 = s[0];
+    let b1 = s[1];
+    assert expect_eq_int(b0.length, 1).ok;
+    assert expect_eq_int(b1.length, 1).ok;
+    assert expect_eq_int(char_at(s, 0).length, 1).ok;
+    assert expect_eq_int(grapheme_at(s, 1).length, 1).ok;
+}
+
+test "char_code contract: an indexed character never exceeds 255" {
+    let s = "Ł";
+    assert expect_eq_int(char_code(s[0]), 197).ok;
+    assert expect_eq_int(char_code(s[1]), 129).ok;
+
+    let e = "é";
+    assert expect_eq_int(char_code(e[0]), 195).ok;
+    assert expect_eq_int(char_code(e[1]), 169).ok;
+}
+
+test "char_code contract: a whole multi-byte string yields its leading byte" {
+    // Not the code points 321 / 233 — the defect this file guards against.
+    assert expect_eq_int(char_code("Ł"), 197).ok;
+    assert expect_eq_int(char_code("é"), 195).ok;
+}
+
+test "char_code contract: char_at and grapheme_at agree byte for byte" {
+    let s = "Ł";
+    assert expect_eq_int(char_code(char_at(s, 0)), char_code(grapheme_at(s, 0))).ok;
+    assert expect_eq_int(char_code(char_at(s, 1)), char_code(grapheme_at(s, 1))).ok;
+}
+
+test "char_code contract: an empty string reports -1" {
+    assert expect_eq_int(char_code(""), -1).ok;
+}
+
+test "char_code contract: char_from_code inverts char_code across 1..255" {
+    assert expect_eq_int(char_code(char_from_code(1)), 1).ok;
+    assert expect_eq_int(char_code(char_from_code(197)), 197).ok;
+    assert expect_eq_int(char_code(char_from_code(255)), 255).ok;
+}

@@ -731,10 +731,23 @@ fn match_exhaustive_failed(value: any) -> void {
 fn char_code(character: string) -> int {
     if character.length == 0 { return -1; }
 
+    // Returns the raw leading BYTE of `character` (0..255) — not a Unicode
+    // code point. Strings are byte-oriented: `.length` is a byte count, and
+    // `s[i]` / `char_at` / `grapheme_at` each yield a one-byte string
+    // (`sfn_str_grapheme_at_lv` -> `sfn_str_grapheme_byte`, a single
+    // `load_byte`). So `char_code(s[i])` never exceeds 255, and the `& 255` in
+    // callers such as `capsules/sfn/crypto/src/bits.sfn` narrows nothing — it
+    // documents the contract rather than enforcing it.
+    //
+    // A multi-byte character passed whole yields only its leading UTF-8 byte:
+    // `char_code("Ł")` is 197 (0xC5), not the code point 321. `char_from_code`
+    // below is the exact inverse over 1..255. Reading the old wording as a
+    // code-point guarantee produced a false-positive security finding against
+    // the crypto base64 decoders (SFN-759); the contract is pinned by
+    // `compiler/tests/unit/char_code_byte_contract_test.sfn`.
+    //
     // Performance note: this function sits on hot paths in the compiler.
-    // Prefer the runtime intrinsic instead of scanning through ASCII tables.
-    // `char_at` returns a single grapheme; `runtime_char_code_fn` returns the
-    // corresponding Unicode code point.
+    // Prefer the runtime helper instead of scanning through ASCII tables.
     return runtime_char_code_fn(grapheme_at(character, 0));
 }
 
