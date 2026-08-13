@@ -145,11 +145,14 @@ fn _gen_cert(dir: string, san_host: string, env_vars: string[]) -> boolean ![io]
 // independently unverifiable-against-the-server) certificate, so only the
 // real loopback cert can ever complete the chain.
 //
-// Distinctness is also a workaround, not just realism: N byte-identical
-// copies of the same DER block intermittently produced a `bad-signature`
-// verify failure during this test's own development, tracked as SFN-851.
-// Remove this workaround (revert to N copies of one cert) only once
-// SFN-851 is fixed.
+// Distinctness is realism only — it is NOT a workaround. The `bad-signature`
+// seen during this test's development was attributed to byte-identical
+// anchors and filed as SFN-851; that attribution was wrong. Duplicate
+// anchors verify correctly (`_find_issuer` iterates every subject match, so
+// a bad copy is skipped), and the real cause was a stale listener from a
+// prior run serving a certificate with this CN but a different key. The
+// guard in the test below is what fixes it, so there is nothing here to
+// revert.
 fn _write_bundle(dir: string, filler_count: int, env_vars: string[]) -> string ![io] {
     let mut bundle: string = "";
     let mut i: int = 0;
@@ -298,22 +301,23 @@ test "runtime tls: a CAFILE bundle over the old 16-block chain cap still verifie
     }
     let tcmd = _timeout_cmd();
     // 18900 is taken by `runtime_tls_aes_gcm_client_test.sfn`; 18902 is the
-    // next free fixed port among this repo's TLS e2es. Like every sibling
-    // TLS e2e (`tls_loopback_test.sfn:170-172`), the spawned `s_server`
-    // holds this port for ~55s after `timeout 60` starts it, well past this
-    // test's own runtime — a same-host retry launched inside that window
-    // binds nothing new, `_await_listening` succeeds against the STALE
-    // listener from the prior run, and the handshake against it then fails
-    // for an unrelated reason. That is a false FAILURE, never a false pass
-    // (a stale listener cannot fabricate this test's success), so it is
-    // safe to leave as the accepted, pre-existing exposure rather than
-    // shortening the 60s.
+    // next free fixed port among this repo's TLS e2es. The spawned
+    // `s_server` holds it for ~55s after `timeout 60` starts it, past this
+    // test's own runtime, so a same-host rerun inside that window binds
+    // nothing new and would otherwise handshake against the PRIOR run's
+    // server. That peer presents this CN under a different key, so
+    // `_find_issuer` matches on subject and `_verify_link` then fails the
+    // signature — a deterministic `bad-signature` that has nothing to do
+    // with the anchors under test. That is SFN-851's root cause; the
+    // pre-flight probe below refuses to run rather than reporting it.
     let port: i64 = 18902;
     let port_str = "18902";
 
     let scratch = nested_runner_scratch("tls-ca-bundle-size");
     let build_env = clean_runner_env(scratch);
-    let dir = _scratch_root() + "/sfn-tls-ca-bundle-size";
+    // Per-invocation, so a rerun can never inherit the previous run's
+    // cert.pem/key.pem and silently verify against the wrong key.
+    let dir = scratch + "/sfn-tls-ca-bundle-size";
     fs.createDirectory(dir, true);
 
     // 19 distinct filler anchors plus the real loopback cert (SAN =
@@ -328,6 +332,19 @@ test "runtime tls: a CAFILE bundle over the old 16-block chain cap still verifie
     let main_path = _write_client(dir, port_str, out_path);
     let client_bin = _build_bin(main_path, dir + "/client-bin", build_env);
     assert client_bin.length > 0;
+
+    // A listener already on this port is a prior run's server, not ours:
+    // this run's `s_server` cannot bind, `_spawn_server` does not check that,
+    // and `_await_listening` would succeed against the foreign peer. Skip
+    // rather than report its `bad-signature` as this test's verdict
+    // (SFN-851).
+    let stale: i32 = _tcb_connect(port);
+    if stale >= 0 {
+        close(stale);
+        print.info("[tls-ca-bundle-size] SKIP: port 18902 still held by a prior run's s_server");
+        assert true;
+        return;
+    }
 
     let _handle = _spawn_server(dir, port_str, tcmd, build_env);
     assert _await_listening(port);
