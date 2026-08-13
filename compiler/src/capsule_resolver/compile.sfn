@@ -47,8 +47,7 @@ import {
     _cr_collect_per_source_dep_slugs,
     _cr_dep_manifest_paths_for_slugs,
     _cr_manifests_to_asm_paths,
-    _cr_stage_import_deps,
-    _cr_stage_one
+    _cr_stage_import_deps
 } from "./staging";
 import {
     CapsuleSource,
@@ -148,7 +147,7 @@ fn _cr_compile_one(src: CapsuleSource, dep_slugs: string[], dep_manifests: strin
         // (`EMIT_RETRIES=3`) for exactly this reason; the driver
         // inherits that contract. #515 lifted the emit+probe+
         // validate+retry body into `emit_subprocess_with_retry`
-        // so `_cr_stage_one`, single-shot `sfn emit --validate`,
+        // so `_cr_stage_one_outcome`, single-shot `sfn emit --validate`,
         // and the Makefile cross-build staging share one cascade.
         // `validate=true` here runs the `llvm-as`/`clang` round-
         // trip; the empty-file probe lives inside the helper.
