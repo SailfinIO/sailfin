@@ -92,3 +92,53 @@ test "hkdf: multi-block expand at hash_len 48 (L=100, n=3)" {
     let okm: int[] = hkdf_expand(48, prk, info, 100);
     assert eq_bytes(okm, hexb("9b5097a86038b805309076a44b3a9f38063e25b516dcbf369f394cfab43685f748b6457763e4f0204fc5d95d1da3e62587b22eb8943d0fab6bb631a2fe9df1a68c6ce5d56116a52005b3f122b88b39b7251fcd6c44d3ef25f20ed96802bf1b2c1d98bf74"));
 }
+
+// ── Fail-closed on an unsupported hash length (SFN-666 design note 5.2) ──
+//
+// A hash_len that is neither 32 nor 48 has no ladder here. Without the guard
+// `hkdf_expand` would size its counter loop on hash_len while `hmac_bytes`
+// returned a 32-byte SHA-256 digest, so the truncation loop would read past
+// the end of the accumulated output. These pin the guard on each entry point.
+test "hmac_bytes: fails closed on an unsupported hash length" {
+    let key: int[] = hexb("0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b");
+    let data: int[] = hexb("4869205468657265");
+    assert hmac_bytes(64, key, data).length == 0;
+    assert hmac_bytes(20, key, data).length == 0;
+    assert hmac_bytes(0, key, data).length == 0;
+}
+
+test "hkdf: extract fails closed on an unsupported hash length" {
+    let ikm: int[] = hexb("0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b");
+    let salt: int[] = hexb("000102030405060708090a0b0c");
+    assert hkdf_extract(64, salt, ikm).length == 0;
+    assert hkdf_extract(20, salt, ikm).length == 0;
+}
+
+test "hkdf: expand fails closed on an unsupported hash length" {
+    let prk: int[] = hexb("704b39990779ce1dc548052c7dc39f303570dd13fb39f7acc564680bef80e8dec70ee9a7e1f3e293ef68eceb072a5ade");
+    let info: int[] = hexb("f0f1f2f3f4f5f6f7f8f9");
+    assert hkdf_expand(64, prk, info, 64).length == 0;
+    assert hkdf_expand(40, prk, info, 40).length == 0;
+}
+
+// ── Output-length bounds at both hash lengths ────────────────────────────
+//
+// The 255 * hash_len cap is the one arithmetic substitution with no vector
+// behind it at either instantiation, so a `256 *` typo or a `>=`/`>` slip
+// would pass every RFC vector in this file.
+test "hkdf: expand accepts the maximum output length and rejects one past it" {
+    let prk32: int[] = hexb("077709362c2e32df0ddc3f0dc47bba6390b6c73bb50f9c3122ec844ad7c2b3e5");
+    let info: int[] = hexb("f0f1f2f3f4f5f6f7f8f9");
+    assert hkdf_sha256_expand(prk32, info, 8160).length == 8160;
+    assert hkdf_sha256_expand(prk32, info, 8161).length == 0;
+
+    let prk48: int[] = hexb("704b39990779ce1dc548052c7dc39f303570dd13fb39f7acc564680bef80e8dec70ee9a7e1f3e293ef68eceb072a5ade");
+    assert hkdf_expand(48, prk48, info, 12240).length == 12240;
+    assert hkdf_expand(48, prk48, info, 12241).length == 0;
+}
+
+test "hkdf: expand rejects a PRK shorter than hash_len at 48" {
+    let short: int[] = hexb("077709362c2e32df0ddc3f0dc47bba6390b6c73bb50f9c3122ec844ad7c2b3e5");  // 32 bytes
+    let info: int[] = hexb("f0f1f2f3f4f5f6f7f8f9");
+    assert hkdf_expand(48, short, info, 48).length == 0;
+}

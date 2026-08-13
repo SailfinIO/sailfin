@@ -15,25 +15,13 @@
 //
 // Operates end-to-end on `int[]` byte arrays (never `string`) because secrets
 // and expand outputs are arbitrary binary that routinely contain 0x00 bytes,
-// which a Sailfin `string` cannot represent. The HMAC/HKDF ladder is reused
-// from `hkdf.sfn`, parametrized on `hash_len` for both hashes (SFN-849); the
-// SHA-384 digest comes from `sha384.sfn`'s `sha384_bytes`, so the 64-bit limb
-// core and the 80-entry round-constant table exist exactly once in the capsule
-// (SFN-662). Nothing in this ladder is local any more — the dispatchers below
-// only forward the inferred `hash_len`.
+// which a Sailfin `string` cannot represent. No HMAC/HKDF composition is local
+// to this file: `hkdf.sfn` owns one ladder parametrized on `hash_len` for both
+// hashes and reaches SHA-384 through `sha384.sfn` (SFN-849, SFN-662), so this
+// module only infers `hash_len` and calls it. `_empty_transcript_hash` remains
+// here because it is a constant table rather than composition logic.
 import { string_to_bytes } from "./bits";
 import { hkdf_expand, hkdf_extract } from "./hkdf";
-
-// ── Hash dispatch (hash_len = 32 -> SHA-256, 48 -> SHA-384) ───────
-fn _hkdf_expand(hash_len: int, prk: int[], info: int[], length: int) -> int[] {
-    return hkdf_expand(hash_len, prk, info, length);
-}
-
-// HKDF-Extract (RFC 5869 §2.2) = HMAC(salt, ikm), with an absent salt treated
-// as HashLen zero bytes.
-fn _hkdf_extract(hash_len: int, salt: int[], ikm: int[]) -> int[] {
-    return hkdf_extract(hash_len, salt, ikm);
-}
 
 // Transcript-Hash of the empty message — the context for every
 // Derive-Secret(secret, "derived", "") ladder transition (RFC 8446 §7.1).
@@ -89,7 +77,7 @@ fn hkdf_expand_label(secret: int[], label: string, context: int[], length: int) 
         ci += 1;
     }
 
-    return _hkdf_expand(hash_len, secret, info, length);
+    return hkdf_expand(hash_len, secret, info, length);
 }
 
 // Derive-Secret(Secret, Label, Transcript-Hash) =
@@ -116,7 +104,7 @@ fn tls13_early_secret(psk: int[], hash_len: int) -> int[] {
         ikm = zeros;
     }
     let empty_salt: int[] = [];
-    return _hkdf_extract(hash_len, empty_salt, ikm);
+    return hkdf_extract(hash_len, empty_salt, ikm);
 }
 
 // Handshake Secret = HKDF-Extract(Derive-Secret(EarlySecret, "derived", ""),
@@ -126,7 +114,7 @@ fn tls13_handshake_secret(early_secret: int[], shared_secret: int[]) -> int[] {
     let hash_len: int = early_secret.length;
     if hash_len != 32 && hash_len != 48 { return []; }
     let derived: int[] = derive_secret(early_secret, "derived", _empty_transcript_hash(hash_len));
-    return _hkdf_extract(hash_len, derived, shared_secret);
+    return hkdf_extract(hash_len, derived, shared_secret);
 }
 
 // Master Secret = HKDF-Extract(Derive-Secret(HandshakeSecret, "derived", ""),
@@ -142,7 +130,7 @@ fn tls13_master_secret(handshake_secret: int[]) -> int[] {
         zeros.push(0);
         zi += 1;
     }
-    return _hkdf_extract(hash_len, derived, zeros);
+    return hkdf_extract(hash_len, derived, zeros);
 }
 
 // client_handshake_traffic_secret =
