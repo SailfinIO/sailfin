@@ -231,13 +231,14 @@ fn _runtime_obj_cache_record(obj_path: string, key: string) ![io] {
 // rebuild can fast-path it, and return true (the caller counts a HIT and
 // skips the compile/emit). Returns false on a disabled cache, an
 // empty/unhashable key, or a miss — leaving the caller to produce it
-// fresh. `hash_suffix` only needs to be unique enough to avoid a
-// tmp-file collision while the key string is hashed; the per-source
-// `cap_prefix + basename + opt_flag` (or, for the SFN-861 staging path,
-// the module slug) the callers pass satisfies that. `kind` selects the
-// artifact filename within the shared entry directory (`runtime-obj` for
-// a compiled `.o`, `sfn-asm` for a staged import-context module) so the
-// two layers never alias within one entry.
+// fresh. `hash_suffix` is INERT: it reaches `_sha256_of_string`
+// (`build_cache.sfn`), whose body is `sha256_hex_of_string(input)` and
+// never reads its `unique_suffix` argument — the parameter is retained
+// only for signature compatibility with that entry point, not because
+// it distinguishes cache entries. `kind` selects the artifact filename
+// within the shared entry directory (`runtime-obj` for a compiled `.o`,
+// `sfn-asm` for a staged import-context module) so the two layers never
+// alias within one entry.
 fn _runtime_obj_shared_cache_fetch(shared_cache_root: string, key: string, obj_path: string, hash_suffix: string, kind: string) -> boolean ![io] {
     if shared_cache_root.length == 0 { return false; }
     if key.length == 0 { return false; }
@@ -708,6 +709,29 @@ fn _runtime_obj_key_with_target(base_key: string, target_triple: string) -> stri
     return base_key + "\ntgt2:" + target_triple;
 }
 
+// SFN-861 review follow-up: fold the module SLUG into the `sfn-asm`
+// staging key. The emitted native text's first directive is
+// `.module <slug>` (`_emit_native_state`,
+// `compiler/capsules/codegen/src/emit_native.sfn:117-122`), so two
+// byte-identical sources staged under different slugs (e.g. a
+// `runtime/sfn/util.sfn` re-exported into a dep capsule's own
+// namespace) produce DIFFERENT artifact bytes but, without this fold,
+// hashed to the SAME address — `runtime_object_cache_key_with_identity`
+// hashes only source bytes + a flag tag + the compiler identity, never
+// the slug the caller passes to name the artifact. The `hash_suffix`
+// argument threaded through `_runtime_obj_shared_cache_fetch`/`_publish`
+// does NOT close this gap: it reaches `_sha256_of_string`, whose body is
+// `sha256_hex_of_string(input)` — the suffix is documented there as
+// unused. `asm1:` domain-separates this key space from the `.o` key
+// (`_runtime_obj_key_with_target`'s `tgt2:`), which never carries a
+// slug fold. Scoped to `sfn-asm` only; the `.o` cache has the same gap
+// (#1096) but is out of scope here.
+fn runtime_asm_cache_key(src_path: string, slug: string, compiler_identity: string) -> string ![io] {
+    let base = runtime_object_cache_key_with_identity(src_path, "", compiler_identity);
+    if base.length == 0 { return ""; }
+    return base + "\nasm1:" + slug;
+}
+
 // SFN-50: the child compiler's environment for a runtime sfn-source
 // emit — the parent's full environment (PATH, HOME, the macOS
 // SDK/toolchain vars the child's clang/ld need, …) with the four
@@ -1052,19 +1076,52 @@ fn _stage_one_runtime_sfn_import_context(self_path: string, src: string, slug: s
     // compiler too, so a codegen change must bust it on the same identity
     // basis as the `.o` emit below — otherwise a stale staged context
     // feeds outdated sibling signatures into `_prepare_runtime_sfn_object`.
-    let key = runtime_object_cache_key_with_identity(src, "", compiler_identity);
+    // SFN-861 review follow-up: `runtime_asm_cache_key` (not the bare
+    // `_with_identity` key) folds `slug` in, because the emitted native
+    // text's `.module <slug>` directive makes the slug part of the
+    // artifact's content — see that helper's header for the full defect.
+    // Used for BOTH the fetch and the publish below via this one `key`
+    // binding so the two addresses can never diverge.
+    let key = runtime_asm_cache_key(src, slug, compiler_identity);
     if _runtime_obj_cache_hit(asm_path, key) { return true; }
+    // SFN-861 review follow-up: an empty `compiler_identity` is a caller
+    // bug (the production caller always resolves a real one), but this
+    // function is now on the export surface with no way to enforce that
+    // at the call site — defend in-function, mirroring
+    // `_cr_resolve_stage_cache_ctx`'s equivalent guard on the capsule
+    // staging path (`capsule_resolver/staging.sfn`), which disables its
+    // shared-cache context under the same condition. Folding this into
+    // one `effective_shared_cache_root` reuses the existing "empty root
+    // disables both the fetch and the publish" behavior already built
+    // into `_runtime_obj_shared_cache_fetch`/`_publish` rather than
+    // adding a second disable path.
+    let mut effective_shared_cache_root = shared_cache_root;
+    if compiler_identity.length == 0 { effective_shared_cache_root = ""; }
     // SFN-861: the local `.key` sidecar lives NEXT TO `asm_path`, so it
     // only ever hits inside the work dir that staged it — a fresh work
     // dir (the common case: CI runs ~1,285 nested builds each in a fresh
     // scratch dir) misses here on every one of the ~68 runtime sfn-source
     // modules regardless of what the shared cache already holds. Probe it
     // before paying for a child emit, exactly as the capsule staging path
-    // does in `_cr_stage_one_outcome`. `slug` is already the per-module
-    // unique key used to name `asm_path` itself, so it doubles as the
-    // `hash_suffix` that keeps a concurrent tmp-file mint collision-free.
-    if _runtime_obj_shared_cache_fetch(shared_cache_root, key, asm_path, slug, "sfn-asm") {
-        return true;
+    // does in `_cr_stage_one_outcome`. `slug` is passed as the
+    // `hash_suffix` argument here, but that argument is INERT (see
+    // `_runtime_obj_shared_cache_fetch`'s header) — it does not fold
+    // `slug` into the key. The slug fold that actually matters for
+    // correctness lives in `runtime_asm_cache_key` above, in `key`
+    // itself.
+    if _runtime_obj_shared_cache_fetch(effective_shared_cache_root, key, asm_path, slug, "sfn-asm") {
+        // SFN-861 review follow-up: `_cache_atomic_copy`
+        // (`build_cache.sfn:823-834`) degrades to a non-atomic copy when
+        // `_mktemp_sibling_cmd` returns empty, so an interrupted or
+        // disk-full store write under that degrade can leave a truncated
+        // `ir.sfn-asm` in the shared store. A restored artifact must be
+        // verified non-empty before it is trusted — mirrors the
+        // restore-then-verify shape of `_cr_stage_one_outcome`
+        // (`capsule_resolver/staging.sfn`), which checks the SAME degrade
+        // on its restored `.sfn-asm` before blessing the pair.
+        if fs.readFile(asm_path).length > 0 { return true; }
+        fs.deleteFile(asm_path);
+        fs.deleteFile(asm_path + ".key");
     }
     _ensure_dir(_dirname(asm_path));
     let staged = _mktemp_sibling_cmd(asm_path);
@@ -1112,7 +1169,7 @@ fn _stage_one_runtime_sfn_import_context(self_path: string, src: string, slug: s
     // SFN-861: publish the freshly-staged artifact so a sibling work dir
     // or a warm CI cache restore can skip this emit entirely next time.
     // Best-effort — a store failure never fails the build.
-    _runtime_obj_shared_cache_publish(shared_cache_root, key, asm_path, slug, "sfn-asm");
+    _runtime_obj_shared_cache_publish(effective_shared_cache_root, key, asm_path, slug, "sfn-asm");
     return true;
 }
 
@@ -1834,5 +1891,6 @@ export {
     _runtime_bundle_exists,
     _runtime_obj_stem,
     _runtime_obj_key_with_target,
-    _stage_one_runtime_sfn_import_context
+    _stage_one_runtime_sfn_import_context,
+    runtime_asm_cache_key
 };
