@@ -438,9 +438,9 @@ fn _sfn_shell_empty() -> *u8 {
 // return its captured stdout as a fresh NUL-terminated buffer. Bare
 // link-ownership flip (#822 / #1308 — the 4th and final Linux residual):
 // the C body (`_popen_read_all` + the `_rt_calloc` copy) is retired and
-// `sailfin_runtime.c` deleted. The 3 compiler call sites
-// (`emit_helpers`/`capsule_resolver`/`cli_commands_utils`) keep their
-// `extern fn sailfin_runtime_shell_capture` and bind here. Faithful port:
+// `sailfin_runtime.c` deleted. The sole remaining compiler declaration
+// (`build/fs.sfn`, backing `_shell_read_cmd`) keeps its
+// `extern fn sailfin_runtime_shell_capture` and binds here. Faithful port:
 // `popen(cmd,"r")`, read in growing chunks, NUL-terminate. Returns a
 // fresh empty string (never null) on any failure.
 fn sailfin_runtime_shell_capture(cmd: *u8) -> *u8 ![io] {

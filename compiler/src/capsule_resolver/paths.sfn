@@ -119,7 +119,7 @@ fn mangle_slug(slug: string) -> string {
 // `"build/sailfin"`; honours `SAILFIN_TEST_SCRATCH` when set so that
 // callers wanting per-invocation isolation can keep concurrent
 // `sfn test` runs from racing on `build/sailfin/capsules/<slug>.ll`.
-// The multi-file `sfn test` runner mints such a root via `mktemp -d`
+// The multi-file `sfn test` runner mints such a root via `fs.mkdtemp`
 // (issue #850, replacing the retired `scripts/run_native_test.sh`)
 // and hands it to each child via `env`. Single-file `sfn test` runs set
 // the same root in process-local `test_runner_state`, because their

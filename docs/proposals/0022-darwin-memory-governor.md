@@ -320,8 +320,17 @@ else                              -> other (Windows stub / unknown): no-op (unch
 ```
 
 Layer 1's `_cr_resolve_jobs` reads `hw.memsize` via `sysctl -n hw.memsize` (it
-already shells `sysctl -n hw.ncpu` at `capsule_resolver.sfn:451`, so the shell
-path is established — reuse `_cr_shell_read`, no new extern in that file).
+already reads `hw.ncpu`, so the probe path is established).
+
+> **Stale as written (SFN-809).** This section originally said to reuse
+> `_cr_shell_read`. That helper has been deleted — it was an orphaned third
+> copy of the shell-capture guard with zero callers. More importantly the
+> shell path it assumed is no longer the house pattern: `capsule_emit_parallel.sfn`
+> (`_cr_host_cpu_count` / `_cr_host_memsize_bytes`) now probes CPU and RAM with
+> **no shell at all** — Linux reads `/proc` via `fs.exists`/`fs.readFile`,
+> Darwin execs `/usr/sbin/sysctl` by absolute path with an empty env, and
+> Windows reads `NUMBER_OF_PROCESSORS` via `env.get`. Any implementation of
+> this proposal should extend that ladder rather than reintroduce a popen.
 
 ## 7. CI
 
@@ -364,8 +373,10 @@ PR #1532's shard now. Verify: re-run `int-e2e-caps`; expect zero 137/134 exits.
 
 **Step 1 — Darwin-aware fan-out governor (Layer 1, the real low-risk fix).**
 - `capsule_resolver.sfn:436` `_cr_resolve_jobs`: after the `SAILFIN_BUILD_JOBS`
-  override and the `nproc` read, add a RAM clamp: read `sysctl -n hw.memsize`
-  via `_cr_shell_read`, compute `ram_budget_jobs` (§3 formula), return
+  override and the `nproc` read, add a RAM clamp: read `hw.memsize` via the
+  no-shell probe ladder in `capsule_emit_parallel.sfn` (`_cr_host_memsize_bytes`
+  — see the note in §6; do not reintroduce `_cr_shell_read`, which is
+  deleted), compute `ram_budget_jobs` (§3 formula), return
   `min(nproc_clamped, ram_budget_jobs)`. Keep the `SAILFIN_BUILD_JOBS` override
   ahead of the clamp (explicit intent wins).
 - Verify: `sfn check compiler/src/capsule_resolver.sfn`; `make compile`; on this

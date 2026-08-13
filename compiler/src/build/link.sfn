@@ -22,7 +22,8 @@ import {
     build_target_os,
     build_target_triple,
     target_forced_linker_flag,
-    target_uses_gnu_link_gc
+    target_uses_gnu_link_gc,
+    triple_target_os
 } from "./target";
 
 // True when `name` resolves to an executable on PATH. `command -v` is
@@ -123,17 +124,28 @@ fn _resolve_linker() -> string ![io] {
 // so importing one symbol from a multi-function capsule no longer drags
 // the whole `src/` closure into the binary. The GC flag is platform-
 // specific: GNU ld / lld use `--gc-sections`, the Darwin linker uses
-// `-dead_strip`. Derived from the **target** OS via `build_target_os()`
-// (SFN-52), not a host probe — a Linux host cross-linking a Darwin
-// target must still emit `-dead_strip`.
+// `-dead_strip`. Derived from the **target**, not a host probe (SFN-52) —
+// a Linux host cross-linking a Darwin target must still emit
+// `-dead_strip`.
+//
+// Takes the caller's already-resolved `triple` rather than re-deriving the
+// target itself. Both matter and they disagree: the gate in
+// `_clang_link_multi_with_opt` resolves via `build_target_triple()`, which
+// reads `SAILFIN_TARGET_TRIPLE` before `SAILFIN_TARGET_OS`, while
+// `build_target_os()` reads them the other way round. Re-deriving here
+// would let a contradictory pair (a mingw triple plus
+// `SAILFIN_TARGET_OS=Darwin`) pass the gnu-ABI gate and then emit the
+// Mach-O `-dead_strip` to a mingw linker. One resolution, threaded
+// through, cannot disagree with itself.
 //
 // The msvc ABI never reaches here: the sole call site is gated on
-// `target_uses_gnu_link_gc(build_target_triple())` (`:332`), which is false
-// for msvc. windows-gnu/mingw does reach here and correctly takes the GNU
-// branch, since its mingw linker accepts `--gc-sections`.
-fn _dead_strip_link_flag() -> string ![io] {
-    let os = build_target_os();
-    if strings_equal(os, "Darwin") { return "-Wl,-dead_strip"; }
+// `target_uses_gnu_link_gc()` in `_clang_link_multi_with_opt`, which is
+// false for that ABI. windows-gnu/mingw does reach here and correctly
+// takes the GNU branch, since its mingw linker accepts `--gc-sections`.
+fn _dead_strip_link_flag(triple: string) -> string {
+    if strings_equal(triple_target_os(triple), "Darwin") {
+        return "-Wl,-dead_strip";
+    }
     return "-Wl,--gc-sections";
 }
 
@@ -320,10 +332,13 @@ fn _clang_link_multi_with_opt(ll_paths: string[], out_path: string, runtime_root
     // MSVC-native GC flags are tuned against a real link (SFEP-0021 M7).
     // Every other target (incl. windows-gnu, whose mingw linker accepts
     // the GNU flags) runs this block exactly as before (SFN-52 / SFN-774).
-    if target_uses_gnu_link_gc(build_target_triple()) {
+    let gc_triple = build_target_triple();
+    if target_uses_gnu_link_gc(gc_triple) {
         let retain_flags = _runtime_retain_root_flags(runtime_objs);
         let strip_safe = runtime_objs.length == 0 || retain_flags.length > 0;
-        if strip_safe { link_flags.push(_dead_strip_link_flag()); } else {
+        if strip_safe {
+            link_flags.push(_dead_strip_link_flag(gc_triple));
+        } else {
             print("sfn: dead-code strip disabled — could not enumerate runtime");
             print("     provider symbols (is `nm` on PATH?); linking unstripped");
         }
