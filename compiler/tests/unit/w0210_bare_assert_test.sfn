@@ -58,3 +58,77 @@ test "w0210: counts only test-block asserts when fn asserts coexist" ![io] {
     let findings = collect_bare_assert_findings(program);
     assert findings.length == 1;
 }
+
+// SFN-859: `assert <matcher>(...).ok;` is the form W0210's own fix
+// suggestion recommends, so it must not be flagged.
+test "w0210: the expect matcher form is not flagged" ![io] {
+    let program = parse_program("test \"t\" { assert expect_eq_int(1, 1).ok; }");
+    let findings = collect_bare_assert_findings(program);
+    assert findings.length == 0;
+}
+
+test "w0210: every expect_ matcher is exempt" ![io] {
+    let program = parse_program("test \"t\" {\n"
+        + "    assert expect_eq_str(a, b).ok;\n"
+        + "    assert expect_eq_bool(a, b).ok;\n"
+        + "    assert expect_eq_int_array(a, b).ok;\n"
+        + "    assert expect_contains_str(a, b).ok;\n"
+        + "    assert expect_to_throw(f).ok;\n"
+        + "    assert expect_snapshot(name, actual).ok;\n"
+        + "}");
+    let findings = collect_bare_assert_findings(program);
+    assert findings.length == 0;
+}
+
+test "w0210: non-expect MatchResult helpers are exempt" ![io] {
+    let program = parse_program("test \"t\" {\n"
+        + "    assert assert_compiles(src).ok;\n"
+        + "    assert assert_does_not_compile(src).ok;\n"
+        + "    assert snapshot_match_in(dir, name, actual).ok;\n"
+        + "    assert match_ok().ok;\n"
+        + "    assert match_fail(msg).ok;\n"
+        + "}");
+    let findings = collect_bare_assert_findings(program);
+    assert findings.length == 0;
+}
+
+test "w0210: the matcher form is exempt when nested in a block" ![io] {
+    let program = parse_program("test \"t\" { if true { assert expect_eq_int(1, 1).ok; } }");
+    let findings = collect_bare_assert_findings(program);
+    assert findings.length == 0;
+}
+
+// The exemption is narrow: only a `.ok` read on a direct matcher call.
+test "w0210: a bare call assert is still flagged" ![io] {
+    let program = parse_program("test \"t\" { assert contains(out, \"x\"); }");
+    let findings = collect_bare_assert_findings(program);
+    assert findings.length == 1;
+}
+
+test "w0210: a .ok read on a non-matcher call is still flagged" ![io] {
+    let program = parse_program("test \"t\" { assert parse_semver(text).ok; }");
+    let findings = collect_bare_assert_findings(program);
+    assert findings.length == 1;
+}
+
+test "w0210: a .ok read on a plain variable is still flagged" ![io] {
+    let program = parse_program("test \"t\" { assert result.ok; }");
+    let findings = collect_bare_assert_findings(program);
+    assert findings.length == 1;
+}
+
+test "w0210: a matcher call not read through .ok is still flagged" ![io] {
+    let program = parse_program("test \"t\" { assert expect_eq_int(1, 1).message == \"\"; }");
+    let findings = collect_bare_assert_findings(program);
+    assert findings.length == 1;
+}
+
+test "w0210: flags only the bare assert when both forms coexist" ![io] {
+    let program = parse_program("test \"t\" {\n"
+        + "    assert expect_eq_int(1, 1).ok;\n"
+        + "    assert 2 == 2;\n"
+        + "}");
+    let findings = collect_bare_assert_findings(program);
+    assert findings.length == 1;
+    assert findings[0].line == 3;
+}

@@ -16,15 +16,26 @@
 // arguments the desugarer embeds in the fail call.
 //
 // Scope: only statements lexically inside a `test { ... }` body are
-// visited, so an `assert` in ordinary function code never warns. Every
-// bare `assert` in a test body is flagged (including the stop-gap
-// `assert expect_*(...).ok;` form) — the whole `assert` statement form is
-// being soft-deprecated in tests in favor of `expect()` matchers; the
-// `--allow-bare-assert` flag is the escape hatch for code that still
-// relies on it.
+// visited, so an `assert` in ordinary function code never warns. Inside a
+// test body every `assert` is flagged *except* the matcher form
+// `assert <sfn/test matcher>(...).ok;` — that is the descriptive shape the
+// warning's own fix suggestion asks for, so flagging it made the lint
+// unactionable (SFN-859). The `--allow-bare-assert` flag remains the
+// escape hatch for the genuinely bare form.
+//
+// `assert m.ok;` is still the only way to fail a test from a `MatchResult`
+// — no runner-side sink consumes one — so the matcher form is exempt
+// rather than merely tolerated. When such a sink exists, the exemption
+// becomes a deprecation of its own.
 //
 // See issue #1173 (epic #842 Phase 3, sub-issue 3.3) and §11 Testing.
-import { Program, Statement, Block } from "sfn/syntax";
+import { starts_with } from "sfn/strings";
+import {
+    Block,
+    Expression,
+    Program,
+    Statement
+} from "sfn/syntax";
 
 export { BareAssertFinding, collect_bare_assert_findings };
 
@@ -93,6 +104,40 @@ fn _is_desugared_assert(statement: Statement) -> boolean {
     return call.callee.name == "runtime_assert_fail_fn";
 }
 
+// The `sfn/test` helpers that return a `MatchResult`, whose `.ok` field
+// therefore already carries a descriptive failure message. The `expect_`
+// prefix covers the whole matcher family — `expect_eq_*`,
+// `expect_contains_*`, `expect_to_throw*`, `expect_snapshot` — and stays
+// correct as it grows; the explicit names are the `MatchResult`-returning
+// exports of `capsules/sfn/test/src/` that do not carry that prefix.
+// Matched by name alone: this lint runs before type information exists,
+// and no `expect_*` helper is defined outside `sfn/test`.
+fn _is_match_result_helper(name: string) -> boolean {
+    if starts_with(name, "expect_") { return true; }
+    if name == "assert_compiles" { return true; }
+    if name == "assert_does_not_compile" { return true; }
+    if name == "snapshot_match_in" { return true; }
+    if name == "match_ok" { return true; }
+    return name == "match_fail";
+}
+
+// Recognize `assert <matcher>(...).ok;`, i.e. a condition of the shape
+//   Member { object: Call { callee: Identifier <matcher> }, member: "ok" }
+// The desugarer stores the condition verbatim rather than inverting it
+// (`parser/statements/special.sfn:parse_assert_statement`), so the
+// condition operand is exactly what the author wrote. A `.ok` read on a
+// plain variable (`assert result.ok;`) is deliberately not exempt — only a
+// direct matcher call is recognizable without type information.
+fn _is_matcher_assert(condition: Expression) -> boolean {
+    if condition.variant != "Member" { return false; }
+    if condition.member != "ok" { return false; }
+    let object = condition.object;
+    if object.variant != "Call" { return false; }
+    let callee = object.callee;
+    if callee.variant != "Identifier" { return false; }
+    return _is_match_result_helper(callee.name);
+}
+
 // Recover the assert's 1-based location from the fail call's embedded
 // arguments: [StringLiteral file, NumberLiteral line, NumberLiteral col,
 // StringLiteral msg]. Falls back to 0:0 when the shape is unexpected.
@@ -125,14 +170,16 @@ fn _scan_block(block: Block?, findings: BareAssertFinding[]) -> BareAssertFindin
     return out;
 }
 
-// Visit one statement: flag it if it is a desugared assert (and do NOT
-// descend into its synthesized fail branch), otherwise recurse into any
-// block-bearing children so asserts nested in if/for/loop/match/try/etc.
-// are still found.
+// Visit one statement: flag it if it is a desugared assert that is not the
+// exempt matcher form (and either way do NOT descend into its synthesized
+// fail branch), otherwise recurse into any block-bearing children so
+// asserts nested in if/for/loop/match/try/etc. are still found.
 fn _scan_statement(statement: Statement, findings: BareAssertFinding[]) -> BareAssertFinding[] {
     let mut out = findings;
     if _is_desugared_assert(statement) {
-        out = _append_finding(out, _finding_for_assert(statement));
+        if !_is_matcher_assert(statement.condition) {
+            out = _append_finding(out, _finding_for_assert(statement));
+        }
         return out;
     }
 

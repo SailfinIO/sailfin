@@ -36,6 +36,13 @@ test "addition" ![pure] {
 }
 ```
 
+The matcher form above does **not** warn. `assert <matcher>(...).ok;` — a
+`.ok` read on a direct call to any `MatchResult`-returning `sfn/test` helper
+(the `expect_*` family, `assert_compiles`, `assert_does_not_compile`,
+`snapshot_match_in`, `match_ok`, `match_fail`) — is the descriptive shape
+W0210 asks for, so it is exempt. Everything else, including a `.ok` read on
+a variable or on a non-matcher call, is still flagged.
+
 W0210 is a **warning only** — it never fails a build or changes an exit
 code — and fires solely inside `test` blocks; an `assert` in ordinary code
 is unaffected. Pass `sfn check --allow-bare-assert` to suppress it. Removal
