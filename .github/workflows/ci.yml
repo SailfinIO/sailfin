@@ -1528,6 +1528,23 @@ jobs:
           path: dist/installer-linux-x86_64.tar.gz
           if-no-files-found: error
 
+      # The third target's timing sidecar. `sailfin-build` already writes it
+      # on every leg (action.yml:464), so linux-arm64 and macos-arm64 were
+      # uploading it while this leg discarded it with the runner. The shard
+      # weight table is `max over targets of (file_elapsed / suite_total)`,
+      # so a missing target silently biases every weight toward the two that
+      # do report. Same contract as the sibling steps: `always()` so a red
+      # shard still yields its timing, `ignore` so a leg that never reached
+      # the test phase does not fail on the missing file.
+      - name: Upload per-shard test timing (SFN-866)
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: ci-test-timing-linux-x86_64-${{ matrix.shard }}
+          path: build/agent-test.shard-*.jsonl
+          if-no-files-found: ignore
+          retention-days: 90
+
   build-macos:
     name: Build + Test [macos-arm64 / ${{ matrix.shard }}${{ matrix.shard2 && format('+{0}', matrix.shard2) || '' }}]
     needs: [ci-scope, build-compiler-macos]
@@ -2050,6 +2067,77 @@ jobs:
         run: |
           set -euo pipefail
           "$SAILFIN_EXE" check examples/basics/hello-world.sfn
+
+  # `compiler/tests/shard_weights.tsv` drives the time-weighted LPT partition
+  # (SFN-863), but nothing in the repo wrote it — every other reference is a
+  # reader, and the refresh existed only as prose. So the table silently
+  # rotted: it was still derived from run 31704192414, three shard-time
+  # changes out of date, and the resulting imbalance ran the e2e legs at a
+  # 1.33-1.37x spread on both Linux targets (~15% of the critical path).
+  #
+  # This job closes that loop. It is advisory by construction: it is NOT in
+  # `required-ci`'s needs, uses `always()` so it still reports when a shard
+  # is red, and only ever uploads a CANDIDATE artifact. Applying the table
+  # stays a reviewed commit — an auto-committed weight table would let a
+  # single anomalous run silently repartition the suite.
+  shard-weights-candidate:
+    name: Shard weights candidate
+    needs:
+      - build-linux
+      - build-macos
+      - build-aarch64-linux
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Download per-shard timing sidecars
+        uses: actions/download-artifact@v7
+        with:
+          pattern: ci-test-timing-*
+          path: ci-timing
+        continue-on-error: true
+
+      - name: Aggregate into a shard_weights.tsv candidate
+        run: |
+          set -euo pipefail
+          if [ ! -d ci-timing ]; then
+            echo "No timing artifacts downloaded — nothing to aggregate." >&2
+            exit 0
+          fi
+          scripts/aggregate_shard_weights.sh ci-timing shard_weights.candidate.tsv
+
+          # Surface the drift so a reviewer can see whether applying it is
+          # worth a commit, without downloading anything.
+          {
+            echo "### Shard weights candidate"
+            echo
+            sed -n 's/^# Targets contributing:/Targets contributing:/p' \
+              shard_weights.candidate.tsv
+            echo
+            echo '| file | current | candidate |'
+            echo '| --- | ---: | ---: |'
+            # Select data rows by shape, not by line offset: both files carry
+            # a comment preamble whose length has already changed once, and a
+            # hardcoded `tail -n +N` silently joins comment text as if it were
+            # a path.
+            join -t "$(printf '\t')" -j 1 \
+              <(grep '^compiler/tests' compiler/tests/shard_weights.tsv | sort -k1,1) \
+              <(grep '^compiler/tests' shard_weights.candidate.tsv | sort -k1,1) \
+              2>/dev/null \
+              | sort -t "$(printf '\t')" -k3 -nr | head -15 \
+              | awk -F'\t' '{printf("| `%s` | %s | %s |\n", $1, $2, $3)}'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload candidate
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: shard-weights-candidate
+          path: shard_weights.candidate.tsv
+          if-no-files-found: ignore
+          retention-days: 90
 
   required-ci:
     name: Required CI gate
