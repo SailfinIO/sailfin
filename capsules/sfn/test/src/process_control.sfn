@@ -6,10 +6,14 @@
 // vehicle:
 //
 //   * A blocking server (`serve()` never returns) is reaped by prepending
-//     `timeout <secs>` to the argv, after a `sh -c "command -v timeout"`
-//     probe — and the test SKIPS itself when neither `timeout` nor
-//     `gtimeout` is on `PATH`. Thirteen e2e files carry a near-verbatim
-//     copy of that `_has_cmd` / `_timeout_cmd` / `_spawn_server` trio.
+//     `timeout <secs>` to the argv — and the test SKIPS itself when neither
+//     `timeout` nor `gtimeout` is on `PATH`. Thirteen e2e files carry a
+//     near-verbatim copy of that `_has_cmd` / `_timeout_cmd` /
+//     `_spawn_server` trio. SFN-840 retired the shell half of it: the probe
+//     was a `sh -c "command -v timeout"` spawn, and is now
+//     `first_present_tool(["timeout", "gtimeout"])` from `tool_probe.sfn`.
+//     The argv vehicle and the skip branch it feeds are untouched — those
+//     go away per file as each migrates to `with_background`, below.
 //   * Readiness is polled by shelling `process.run(["sleep", "0.5"])`
 //     between probe attempts — a fork+exec per tick, in a hand-rolled
 //     bounded retry loop repeated across twelve files.

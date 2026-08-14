@@ -1,0 +1,112 @@
+// Guard for SFN-840. `.claude/rules/no-bash-e2e.md` bans bash *test files*
+// (`*.sh` under `compiler/tests/`) — but the observed adaptation was to keep
+// the bash and move it inside a Sailfin string literal: spawning `sh -c` (or
+// `bash -c`) purely to run a `command` + " -v" PATH lookup from inside a
+// `.sfn` test. That still shells out from test code, which is exactly what
+// the no-bash rule (see also `docs/conventions/e2e-tests.md`) exists to
+// prevent — it just moved the string past the file-extension check. This
+// test closes that loophole by scanning every `*_test.sfn` line for the
+// idiom directly, as a zero-tolerance ratchet: the target count is zero,
+// not an allowlist.
+//
+// Needles are built by runtime concatenation rather than as contiguous
+// literals, so no line of this file is itself a match. That is what lets the
+// guard scan its own source along with every other test — a guard that skips
+// itself is a hole, and splitting the needles closes it without one.
+import {
+    contains,
+    int_to_string,
+    split,
+    trim
+} from "sfn/strings";
+
+fn _tests_root() -> string { return "compiler/tests"; }
+
+// Recursively collect `.sfn` files under a directory. Mirrors the walk in
+// lowering_no_bare_runtime_emissions_test.sfn: fs.listDirectory is
+// non-recursive, so a path whose listing has entries is treated as a
+// directory and descended into; a zero-entry listing is treated as a file.
+fn _collect_test_files(dir: string, acc: string[]) -> string[] ![io] {
+    let mut out = acc;
+    if !fs.exists(dir) { return out; }
+    let entries = fs.listDirectory(dir);
+    let mut i = 0;
+    loop {
+        if i >= entries.length { break; }
+        let name = entries[i];
+        i = i + 1;
+        if name == "." || name == ".." { continue; }
+        let full = dir + "/" + name;
+        let sub = fs.listDirectory(full);
+        if sub.length > 0 { out = _collect_test_files(full, out); } else if _ends_with_test_sfn(name) {
+            out.push(full);
+        }
+    }
+    return out;
+}
+
+fn _ends_with_test_sfn(name: string) -> boolean {
+    let suffix = "_test.sfn";
+    if name.length < suffix.length { return false; }
+    let start = name.length - suffix.length;
+    return substring(name, start, name.length) == suffix;
+}
+
+// A shell argv head that starts a `-c` invocation — a quoted `sh` or `bash`
+// followed by a quoted `-c`, with or without a space after the comma. Spelled
+// via concatenation below rather than shown literally here, for the same
+// reason the header gives: this file is scanned along with every other.
+fn _has_shell_argv_head(line: string) -> boolean {
+    let needle_sh = "\"sh\"," + " \"-c\"";
+    let needle_sh_tight = "\"sh\"," + "\"-c\"";
+    let needle_bash = "\"bash\"," + " \"-c\"";
+    let needle_bash_tight = "\"bash\"," + "\"-c\"";
+    if contains(line, needle_sh) { return true; }
+    if contains(line, needle_sh_tight) { return true; }
+    if contains(line, needle_bash) { return true; }
+    if contains(line, needle_bash_tight) { return true; }
+    return false;
+}
+
+// The PATH-lookup command itself: `command` + " -v".
+fn _has_command_v(line: string) -> boolean {
+    let needle = "command" + " -v";
+    return contains(line, needle);
+}
+
+test "e2e: no shell-spawned tool-presence probes in the test tree" ![io] {
+    let files = _collect_test_files(_tests_root(), []);
+    assert files.length > 0;
+
+    let mut offenders: string[] = [];
+    let mut fi = 0;
+    loop {
+        if fi >= files.length { break; }
+        let path = files[fi];
+        fi = fi + 1;
+
+        let body = fs.readFile(path);
+        let lines = split(body, "\n");
+        let mut li = 0;
+        loop {
+            if li >= lines.length { break; }
+            let line = lines[li];
+            let line_no = li + 1;
+            li = li + 1;
+            if !_has_shell_argv_head(line) { continue; }
+            if !_has_command_v(line) { continue; }
+            offenders.push(path + ":" + int_to_string(line_no) + ": " + trim(line));
+        }
+    }
+
+    if offenders.length > 0 {
+        let mut oi = 0;
+        loop {
+            if oi >= offenders.length { break; }
+            print.err(offenders[oi]);
+            oi = oi + 1;
+        }
+        print.err("fix: use tool_present / first_present_tool from sfn/test (capsules/sfn/test/src/tool_probe.sfn) instead of shelling out to probe PATH");
+    }
+    assert offenders.length == 0;
+}

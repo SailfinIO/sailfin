@@ -37,7 +37,12 @@
 // Skips cleanly (`assert true`) when `openssl` or a wall-clock `timeout` is
 // unavailable, matching `runtime_tls_verify_failure_test.sfn`.
 import { contains } from "sfn/strings";
-import { clean_runner_env, nested_runner_scratch } from "sfn/test";
+import {
+    clean_runner_env,
+    first_present_tool,
+    nested_runner_scratch,
+    tool_present
+} from "sfn/test";
 
 // ── file-local raw loopback readiness probe (cloned from
 // runtime_tls_verify_failure_test.sfn, prefixed `_tac_` to avoid collision
@@ -126,16 +131,8 @@ fn _trusted_env(cert_path: string) -> string[] ![io] {
     return e;
 }
 
-fn _has_cmd(name: string) -> boolean ![io] {
-    let probe = process.run(["sh", "-c", "command -v " + name
-        + " >/dev/null 2>&1"]);
-    return probe == 0;
-}
-
 fn _timeout_cmd() -> string ![io] {
-    if _has_cmd("timeout") { return "timeout"; }
-    if _has_cmd("gtimeout") { return "gtimeout"; }
-    return "";
+    return first_present_tool(["timeout", "gtimeout"]);
 }
 
 fn _scratch_root() -> string ![io] {
@@ -297,7 +294,7 @@ fn _run_stdout(client_bin: string, run_env: string[]) -> string ![io] {
 }
 
 fn _skip_ready() -> boolean ![io] {
-    if !_has_cmd("openssl") {
+    if !tool_present("openssl") {
         print.info("[tls-anchor-cache] SKIP: openssl CLI not available");
         return false;
     }

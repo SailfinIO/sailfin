@@ -1,0 +1,85 @@
+// sfn/test — host tool-presence probing for tests (SFN-840).
+//
+// A test that drives an external tool (`tar`, `jq`, `openssl`, `python3`,
+// `ld.lld`, `timeout`) has to decide whether that tool exists on the host
+// before it can either use it or skip the leg that needs it. The idiom the
+// test tree reached for was a shell:
+//
+//     process.run(["sh", "-c", "command -v " + name + " >/dev/null 2>&1"])
+//
+// That spawns a POSIX shell purely to perform a `PATH` lookup, so it fails
+// outright on a native Windows host — the reason SFN-646's de-shell
+// inventory and this capsule's own migration care about it. It is also the
+// shape `.claude/rules/no-bash-e2e.md` is aimed at: the rule bans bash *test
+// files*, and the observed adaptation was to keep the bash and move it
+// inside a string literal.
+//
+// `tool_present` is the shell-free replacement, hoisted here so the fifteen
+// e2e files that each carried a private `_has_cmd` copy share one
+// implementation. It runs the tool directly and reads the exit code.
+//
+// WHY THE EXIT-CODE TEST IS "did it spawn", NOT "did it exit 0". The
+// pre-existing hand-rolled probes in `sfn_package_test.sfn` and
+// `cli_completion_test.sfn` return `exit == 0`, which is *stricter* than the
+// `command -v` they replaced: it reports a tool as absent when the tool is
+// installed but does not accept `--version` (`openssl` before 3.0 answers
+// `--version` with an error, and `command -v openssl` still succeeds). That
+// difference silently disables coverage on such a host — the same failure
+// mode `docs/conventions/e2e-tests.md` records for the old
+// `command -v timeout` probe. Matching `command -v` means asking only
+// whether the binary resolved on `PATH` and executed at all.
+//
+// The two failure codes are a documented split between the runtime's two
+// spawn wrappers, not a redundancy:
+//
+//   * `process.run_capture` returns `-1` when the runtime could not complete
+//     the call at all — `posix_spawnp` reporting `ENOENT` for a binary that
+//     is not on `PATH` is exactly this case (`runtime/sfn/process.sfn`).
+//   * `127` is the conventional shell "could not execute" code, which
+//     `process.run` returns on the same spawn failure and which the wait
+//     decoder also yields for a stopped/continued child.
+//
+// Anything else — `0`, or a nonzero code from a tool that ran and rejected
+// `--version` — means the binary resolved and executed, which is what
+// `command -v` reports.
+//
+// The probe inherits the parent environment via `process.environ()`. That is
+// deliberate and matches the `process.run` calls it replaces, which pass the
+// parent `environ` through unconditionally: `PATH` is what resolves the
+// binary, and a probe run under an empty env would report every tool absent
+// (`process.run_capture`'s `env` argument is the *empty* environment, not
+// "inherit"). This is not the nested-runner case that
+// `clean_runner_env` exists for — the probe child is `<tool> --version`, not
+// a nested `sfn test`/`build`/`run`, so it carries none of the pool-key leak
+// hazard described in `docs/conventions/e2e-tests.md`.
+// True when `tool` resolves on the host's `PATH` and can be executed.
+//
+// Mirrors `command -v <tool>`: it reports presence, not usability. A tool
+// that runs but rejects `--version` is present. Callers use this to *skip* a
+// leg that needs the tool, never to fail one.
+fn tool_present(tool: string) -> boolean ![io] {
+    let exit = process.run_capture([tool, "--version"], process.environ());
+    let _out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    // Spawn never happened: no such binary on `PATH`.
+    if exit < 0 { return false; }
+    if exit == 127 { return false; }
+    return true;
+}
+
+// First present tool from `candidates`, or `""` when none resolve.
+//
+// The `timeout` / `gtimeout` pair is the recurring case: coreutils installs
+// `timeout` on Linux and Homebrew installs it as `gtimeout` on macOS, so a
+// caller wants "whichever of these exists". Returning the name rather than a
+// boolean lets the caller use it as an argv element.
+fn first_present_tool(candidates: string[]) -> string ![io] {
+    let mut i = 0;
+    loop {
+        if i >= candidates.length { break; }
+        let candidate = candidates[i];
+        if tool_present(candidate) { return candidate; }
+        i = i + 1;
+    }
+    return "";
+}

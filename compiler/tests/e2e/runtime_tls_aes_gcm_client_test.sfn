@@ -49,7 +49,13 @@
 // `sfn/strings::contains` instead.
 import { Env, env_from_current } from "sfn/os";
 import { contains } from "sfn/strings";
-import { Background, wait_until, with_background } from "sfn/test";
+import {
+    Background,
+    first_present_tool,
+    tool_present,
+    wait_until,
+    with_background
+} from "sfn/test";
 
 // ── file-local raw loopback readiness probe ──────────────────────
 // Prefixed `_tag_` so these never collide with the external-linkage
@@ -138,19 +144,11 @@ fn _client_env(cert_path: string) -> string[] ![io] {
     return e;
 }
 
-fn _has_cmd(name: string) -> boolean ![io] {
-    let probe = process.run(["sh", "-c", "command -v " + name
-        + " >/dev/null 2>&1"]);
-    return probe == 0;
-}
-
 // Resolve a wall-clock timeout command; used as a backstop wrapper around
 // each client attempt (`_client_body`), not the server — the server's
 // lifetime is owned by `with_background` (SFN-852). Empty if none found.
 fn _timeout_cmd() -> string ![io] {
-    if _has_cmd("timeout") { return "timeout"; }
-    if _has_cmd("gtimeout") { return "gtimeout"; }
-    return "";
+    return first_present_tool(["timeout", "gtimeout"]);
 }
 
 fn _scratch_dir() -> string ![io] {
@@ -291,7 +289,7 @@ fn _client_body_retry(tcmd: string, client_bin: string, run_env: string[], out_p
 }
 
 fn _skip_ready() -> boolean ![io] {
-    if !_has_cmd("openssl") {
+    if !tool_present("openssl") {
         print.info("[tls-aes-gcm] SKIP: openssl CLI not available");
         return false;
     }

@@ -17,7 +17,12 @@
 // `ld.lld` installed (macOS/Windows keep the clang path). See
 // `.claude/rules/no-bash-e2e.md`.
 import { contains, find } from "sfn/strings";
-import { clean_runner_env, nested_runner_scratch, report_child_failure } from "sfn/test";
+import {
+    clean_runner_env,
+    nested_runner_scratch,
+    report_child_failure,
+    tool_present
+} from "sfn/test";
 
 fn _sfn_bin() -> string ![io] {
     let configured = env.get("SAILFIN_BIN");
@@ -67,11 +72,7 @@ fn _direct_eligible() -> boolean ![io] {
     if find(arch, "x86_64", 0) < 0 && find(arch, "aarch64", 0) < 0 {
         return false;
     }
-    let lld = process.run_capture(["sh", "-c", "command -v ld.lld"], []);
-    let lld_out = process.capture_take_stdout();
-    let _e2 = process.capture_take_stderr();
-    if lld != 0 { return false; }
-    return lld_out.length > 0;
+    return tool_present("ld.lld");
 }
 
 fn _write_fixture(dir: string) -> string ![io] {

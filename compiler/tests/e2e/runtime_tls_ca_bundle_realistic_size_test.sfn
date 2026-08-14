@@ -33,7 +33,12 @@
 // with `clean_runner_env(nested_runner_scratch(...))` (SFN-401) so the pool's
 // per-file scratch/orchestration keys never leak into the nested build.
 import { int_to_string } from "sfn/strings";
-import { clean_runner_env, nested_runner_scratch } from "sfn/test";
+import {
+    clean_runner_env,
+    first_present_tool,
+    nested_runner_scratch,
+    tool_present
+} from "sfn/test";
 
 // ── file-local raw loopback readiness probe ──────────────────────
 // Prefixed `_tcb_` so these never collide with the external-linkage runtime
@@ -98,18 +103,10 @@ fn _sfn_bin() -> string ![io] {
     return "build/bin/sfn";
 }
 
-fn _has_cmd(name: string) -> boolean ![io] {
-    let probe = process.run(["sh", "-c", "command -v " + name
-        + " >/dev/null 2>&1"]);
-    return probe == 0;
-}
-
 // Resolve a wall-clock timeout command to reap the blocking `s_server`;
 // empty if none found.
 fn _timeout_cmd() -> string ![io] {
-    if _has_cmd("timeout") { return "timeout"; }
-    if _has_cmd("gtimeout") { return "gtimeout"; }
-    return "";
+    return first_present_tool(["timeout", "gtimeout"]);
 }
 
 fn _scratch_root() -> string ![io] {
@@ -283,7 +280,7 @@ fn _client_downloads_retry(client_bin: string, run_env: string[], out_path: stri
 }
 
 fn _skip_ready() -> boolean ![io] {
-    if !_has_cmd("openssl") {
+    if !tool_present("openssl") {
         print.info("[tls-ca-bundle-size] SKIP: openssl CLI not available");
         return false;
     }
