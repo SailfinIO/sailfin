@@ -46,6 +46,7 @@ import {
     get,
     with_arg
 } from "sfn/cli";
+import { base64_encode } from "sfn/crypto";
 import { fetch } from "sfn/http";
 import { int_to_string } from "sfn/strings";
 
@@ -185,7 +186,12 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io, net] {
     }
     let digest = "sha256:" + raw_digest;
 
-    let content_b64 = base64.encode(payload);
+    // `sfn/crypto`'s `base64_encode` rather than the `base64.encode`
+    // intrinsic: the intrinsic lowers to this same capsule symbol but creates
+    // no import edge, so demand-driven staging never emits the definition and
+    // the compiler link fails on an undefined
+    // `base64_encode__capsules__sfn__crypto__src__mod` (SFN-496).
+    let content_b64 = base64_encode(payload);
     let json_body = "{\"type\":\"capsule\",\"capsule\":\"" + pkg_name
         + "\",\"version\":\""
         + pkg_version
