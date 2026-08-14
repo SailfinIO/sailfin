@@ -678,10 +678,20 @@ ifeq ($(CHECK_FULL_PASS1),1)
 	@$(CHECK_TEST_TIMEOUT_ENV) $(MAKE) test NATIVE_BIN=build/bin/sfn$(EXE_EXT) TEST_BIN_CACHE_FLAGS=--no-test-cache TEST_JOBS=$(CHECK_TEST_JOBS)
 else
 	@echo "[check] pass1 smoke gate: hello-world + sfn/test capsule tests (jobs=$(CHECK_TEST_JOBS))..."
-	@t60=""; \
-	if command -v timeout >/dev/null 2>&1; then t60="timeout 60"; \
-	elif command -v gtimeout >/dev/null 2>&1; then t60="gtimeout 60"; fi; \
-	$$t60 build/bin/sfn$(EXE_EXT) run examples/basics/hello-world.sfn
+	@# The budget is a hang guard, not a wall-time gate: it must fail a
+	@# first-pass binary that deadlocks, not one that is merely slow. 60s was
+	@# sized when a cold hello-world built in ~12s. Since the runtime took its
+	@# `sfn/crypto` dependency edge, every binary compiles the whole TLS stack
+	@# (38 of 69 modules for `print`), and a cold hello-world measures ~59s on a
+	@# 4-vCPU runner — under the seed-built `-O0` first-pass binary CI used, past
+	@# 60s. The nightly Linux leg died here at minute 6 without ever reaching the
+	@# self-host check it exists to run. Restore the original ~3x hang-guard
+	@# headroom; drop back to 60 once the runtime closure is demand-driven again.
+	@# docs/rca/2026-08-13-e2e-shard-time-doubling-runtime-crypto-retain-roots.md
+	@t180=""; \
+	if command -v timeout >/dev/null 2>&1; then t180="timeout 180"; \
+	elif command -v gtimeout >/dev/null 2>&1; then t180="gtimeout 180"; fi; \
+	$$t180 build/bin/sfn$(EXE_EXT) run examples/basics/hello-world.sfn
 	@if [ "$${SAILFIN_AGENT_REPORT:-}" = "1" ]; then \
 		mkdir -p build; \
 		set -o pipefail; \
