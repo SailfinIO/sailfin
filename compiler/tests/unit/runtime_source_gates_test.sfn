@@ -291,10 +291,10 @@ test "runtime source gates: select_runtime_sfn_sources is the identity under run
 // 6. The gate section did not truncate sfn-sources — pins that
 //    `[sfn-source-gates]` stays LAST in the manifest.
 // --------------------------------------------------------------
-test "runtime source gates: sfn-sources still has all 35 entries" ![io] {
+test "runtime source gates: sfn-sources still has all 36 entries" ![io] {
     let manifest = fs.readFile(_runtime_manifest_path);
     let sources = toml_get_sfn_sources(manifest);
-    assert sources.length == 35;
+    assert sources.length == 36;
 }
 
 // --------------------------------------------------------------

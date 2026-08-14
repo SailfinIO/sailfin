@@ -79,6 +79,39 @@ import {
     trust_store_load
 } from "sfn/crypto";
 
+// Status codes, the process-global last-error slots, and their renderers
+// moved to `./tls_status` (SFN-882): that module carries zero dependency on
+// `sfn/crypto`, so `tls.last_error()`/`tls.last_alert()` — zero-effect
+// builtins (SFN-822) — stay linkable when the `net` effect gate drops this
+// module from the build.
+import {
+    _tls_alert_bad_certificate,
+    _tls_alert_certificate_expired,
+    _tls_alert_close_notify,
+    _tls_alert_handshake_failure,
+    _tls_alert_level_fatal,
+    _tls_alert_protocol_version,
+    _tls_alert_unknown_ca,
+    _tls_cstr,
+    _tls_dec,
+    _tls_dup_cstr,
+    _tls_err_cert_verify,
+    _tls_err_handshake_init,
+    _tls_err_handshake_recv,
+    _tls_err_handshake_send,
+    _tls_err_none,
+    _tls_err_peer_alert,
+    _tls_err_record,
+    _tls_err_session_alloc,
+    _tls_err_trust_store,
+    _tls_note,
+    _tls_ptr_off,
+    tls_alert_name,
+    tls_error_name,
+    tls_last_alert_name,
+    tls_last_error_name
+} from "./tls_status";
+
 // ── libc + sibling-runtime externs ───────────────────────────────
 // Runtime modules forward-declare cross-module runtime symbols rather
 // than importing them (the SFN-635 convention `../adapters/http.sfn`
@@ -99,8 +132,6 @@ extern fn sfn_tls_record_seal(alg: i64, key: *u8, key_len: i64, iv: *u8, iv_len:
 
 extern fn sfn_tls_record_open(alg: i64, key: *u8, key_len: i64, iv: *u8, iv_len: i64, seq: i64, record: *u8, record_len: i64) -> i64;
 
-extern fn sfn_str_sfn_from_cstr(s: *u8) -> *u8;
-
 extern fn sfn_fs_read_file(path: *u8) -> *u8;
 
 extern fn sfn_clock_unix_millis(out_millis: *i64) -> i32;
@@ -115,10 +146,6 @@ extern fn strlen(s: *u8) -> usize;
 // the trace gate's empty-string probe needs it.
 extern fn memcmp(a: *u8, b: *u8, n: usize) -> i32;
 
-// Defined in `runtime/sfn/string.sfn`; forward-declared here the same way
-// `runtime/sfn/array.sfn` declares this exact symbol.
-extern fn sfn_int_to_str(value: i64) -> *u8;
-
 extern fn write(fd: i32, buf: *u8, count: usize) -> i64;
 
 // `sfn_str_eq` is genuinely `(i8*, i8*)`, unlike the prelude
@@ -126,16 +153,6 @@ extern fn write(fd: i32, buf: *u8, count: usize) -> i64;
 // garbage length fields from a `* u8` call (#1372). Same reasoning as
 // `runtime/sfn/platform/rlimit.sfn`, which this trace surface mirrors.
 extern fn sfn_str_eq(a: *u8, b: *u8) -> bool;
-
-// Adopt a NUL-terminated C string as a Sailfin string.
-fn _tls_cstr(p: *u8) -> string {
-    if p as i64 == 0 { return ""; }
-    // A Sailfin `string` is a `* u8`-backed value, and `extern fn` cannot
-    // declare a `string` return (E0801 — not C-ABI-compatible), so the
-    // sibling helper is declared as `* u8` and adopted here.
-    let adopted: string = sfn_str_sfn_from_cstr(p) as string;
-    return adopted;
-}
 
 // Wall-clock milliseconds for certificate validity windows. The
 // underlying primitive reports failure by returning 0 rather than
@@ -162,181 +179,17 @@ fn _tls_ct_handshake() -> i64 { return 22; }
 
 fn _tls_ct_application_data() -> i64 { return 23; }
 
-// AlertDescription close_notify(0) — the only warning-level alert the
-// driver treats as a clean stream end (§6.1).
-fn _tls_alert_close_notify() -> i64 { return 0; }
-
-// AlertLevel fatal(2).
-fn _tls_alert_level_fatal() -> i64 { return 2; }
-
-// The AlertDescription values (RFC 8446 §6.2) the driver names. Only the
-// ones it either sends or reports are here — this is a diagnostic
-// vocabulary, not the full registry, and an unnamed description is
-// reported by number rather than being mapped to a wrong name.
+// Alert descriptions, failure-reason codes, and their renderers moved to
+// `./tls_status` (SFN-882) — see the import block above.
 //
-// `handshake_failure` is the one worth calling out: it is what a server
-// sends when no offered cipher suite is acceptable, so it is the alert
-// that distinguishes "we cannot negotiate" from "the socket died"
-// (SFN-814, where the two were the same observation).
-fn _tls_alert_handshake_failure() -> i64 { return 40; }
+// `sfn_tls_last_error`/`sfn_tls_last_alert` are *defined* in `./tls_status`
+// (#1436 defining-global primitive); this module only writes them directly
+// below (`_tls_classify_alert`, `tls_connect_fd`), so it keeps its own
+// reference declaration — a global is resolved by C-ABI symbol name, not by
+// import.
+extern var sfn_tls_last_error: i64;
 
-fn _tls_alert_bad_certificate() -> i64 { return 42; }
-
-fn _tls_alert_certificate_expired() -> i64 { return 45; }
-
-fn _tls_alert_unknown_ca() -> i64 { return 48; }
-
-fn _tls_alert_protocol_version() -> i64 { return 70; }
-
-// ── Failure reasons (SFN-816) ────────────────────────────────────
-//
-// Why a positive enum with 0 = none, rather than the negative codes
-// `tls_record.sfn::sfn_tls_record_err_*` uses: those are returned
-// *in band* alongside a non-negative success length, so they must be
-// negative to be distinguishable. These are read from a dedicated slot
-// that has no success value to collide with, so a plain ordinal reads
-// better and 0 is a natural "nothing recorded".
-fn _tls_err_none() -> i64 { return 0; }
-
-fn _tls_err_session_alloc() -> i64 { return 1; }
-
-fn _tls_err_handshake_init() -> i64 { return 2; }
-
-fn _tls_err_handshake_send() -> i64 { return 3; }
-
-fn _tls_err_handshake_recv() -> i64 { return 4; }
-
-// The peer sent a fatal alert. `tls_last_alert()` carries which one.
-fn _tls_err_peer_alert() -> i64 { return 5; }
-
-// The trust store could not be loaded at all — distinct from loading
-// cleanly and then finding no anchor for this chain, which is
-// `_tls_err_cert_verify` with a `no-anchor` verdict code.
-fn _tls_err_trust_store() -> i64 { return 6; }
-
-fn _tls_err_cert_verify() -> i64 { return 7; }
-
-fn _tls_err_record() -> i64 { return 8; }
-
-// ── Last-error slots ─────────────────────────────────────────────
-//
-// `tls_connect_fd` frees the session on every failure path and returns a
-// bare `null`, so a reason stored in `TlsSession` dies with it. These
-// process-global slots outlive the free, which is what lets a caller ask
-// *why* after the fact.
-//
-// Concurrency: process-global, last-writer-wins, deliberately
-// unsynchronised. A single client connect is sequential, so the slots are
-// accurate for the common case. Two concurrent handshakes in one process
-// are worse than lossy, and the honest statement is *misattribution*, not
-// loss: because `_tls_fail_if_unset` reads a shared slot, connection B can
-// see connection A's reason, suppress its own, and then report A's reason
-// as B's. Reachable today through `http.sfn`'s client under `spawn`.
-//
-// Clearing is likewise narrower than "cleared per connect".
-// `tls_connect_fd` clears both slots on entry, but it is not the only
-// writer: `tls_read` records through `_tls_classify_alert` in steady
-// state, and `tls_accept_fd` reaches the same path and never clears. So a
-// post-connect `tls_read` failure that is not a peer alert can leave the
-// connect-time value readable, and a server-only process (`serve.sfn`),
-// which never calls `tls_connect_fd`, latches whatever it last saw.
-//
-// All of which is acceptable for a diagnostic and is not acceptable for
-// control flow — nothing in the driver branches on these except
-// `_tls_fail_if_unset`, and callers must not either. A nursery-scoped slot
-// under structured concurrency is the real fix and is post-1.0.
-extern var sfn_tls_last_error: i64 = 0;
-
-extern var sfn_tls_last_alert: i64 = 0;
-
-// Record a failure reason. Effect-free: a global store is not a
-// capability, matching `http.sfn::_conn_tls_register`, which writes
-// `http_conn_tls_head` with no annotation. That is what lets the
-// `![net]`-only read path record reasons without acquiring `![io]` and
-// propagating it to every caller.
-fn _tls_note(reason: i64) -> void { sfn_tls_last_error = reason; }
-
-// The reason for the most recent driver failure in this process, or
-// `_tls_err_none()`. Cleared at the start of each `tls_connect_fd`.
-fn tls_last_error() -> i64 { return sfn_tls_last_error; }
-
-// The peer's AlertDescription byte when `tls_last_error()` is
-// `_tls_err_peer_alert()`.
-//
-// Not guaranteed 0 otherwise: a `tls_read` alert can set this slot and a
-// later non-alert failure can then set only the reason, so read it only
-// when the reason is `peer-alert` (compare via `tls_error_name`).
-fn tls_last_alert() -> i64 { return sfn_tls_last_alert; }
-
-// Human-readable form of a reason code, for a trace line or a test
-// assertion. Kept a total function: an unknown code is reported rather
-// than triggering a panic on a diagnostic path.
-fn tls_error_name(reason: i64) -> string {
-    if reason == _tls_err_none() { return "none"; }
-    if reason == _tls_err_session_alloc() { return "session-alloc"; }
-    if reason == _tls_err_handshake_init() { return "handshake-init"; }
-    if reason == _tls_err_handshake_send() { return "handshake-send"; }
-    if reason == _tls_err_handshake_recv() { return "handshake-recv"; }
-    if reason == _tls_err_peer_alert() { return "peer-alert"; }
-    if reason == _tls_err_trust_store() { return "trust-store"; }
-    if reason == _tls_err_cert_verify() { return "cert-verify"; }
-    if reason == _tls_err_record() { return "record"; }
-    return "unknown";
-}
-
-// Decimal form of an integer, for the unnamed-alert case.
-//
-// Forwards to the runtime's own `sfn_int_to_str` rather than reaching for
-// `sfn/strings::int_to_string`, which would add a second capsule edge to
-// `runtime/capsule.toml` for a diagnostic string. The sibling
-// forward-declare is the module header's stated convention and is already
-// used for this exact symbol in `runtime/sfn/array.sfn`. It handles
-// negatives and INT64_MIN, which a hand-rolled digit loop here did not.
-fn _tls_dec(v: i64) -> string { return _tls_cstr(sfn_int_to_str(v)); }
-
-// Human-readable form of an AlertDescription. Unnamed descriptions fall
-// through to "alert-<n>" rather than being guessed at.
-fn tls_alert_name(desc: i64) -> string {
-    if desc == _tls_alert_close_notify() { return "close_notify"; }
-    if desc == _tls_alert_handshake_failure() { return "handshake_failure"; }
-    if desc == _tls_alert_bad_certificate() { return "bad_certificate"; }
-    if desc == _tls_alert_certificate_expired() { return "certificate_expired"; }
-    if desc == _tls_alert_unknown_ca() { return "unknown_ca"; }
-    if desc == _tls_alert_protocol_version() { return "protocol_version"; }
-    return "alert-" + _tls_dec(desc);
-}
-
-// Duplicate a Sailfin string into a caller-owned, NUL-terminated buffer —
-// the same contract `sfn_http_get` returns under. Load-bearing rather than
-// incidental: `tls_alert_name` can return a concatenated ("alert-<n>")
-// heap string, so the callee-frame buffer backing it must not be the one
-// handed back across the intrinsic boundary.
-fn _tls_dup_cstr(s: string) -> *u8 {
-    let p: *u8 = s as *u8;
-    let n: i64 = strlen(p) as i64;
-    let out: *u8 = malloc((n + 1) as usize);
-    // Under memory pressure this is the error-reporting path itself
-    // failing; `sfn_str_sfn_from_cstr` already maps a null `*u8` to `""`
-    // (`runtime/sfn/string.sfn:470-473`), so returning null here degrades
-    // to an empty reason at the call site rather than a null-deref crash.
-    if out as i64 == 0 { return null; }
-    memcpy(out, p, n as usize);
-    memset(_tls_ptr_off(out, n), 0, 1 as usize);
-    return out;
-}
-
-// `tls.last_error()` reachability (SFN-822). Returns a caller-owned
-// `*u8` adopted as a Sailfin `string` at the call site, mirroring
-// `http.get_body` -> `sfn_http_get`.
-fn tls_last_error_name() -> *u8 {
-    return _tls_dup_cstr(tls_error_name(sfn_tls_last_error));
-}
-
-// `tls.last_alert()` reachability (SFN-822). Same contract as
-// `tls_last_error_name` above.
-fn tls_last_alert_name() -> *u8 {
-    return _tls_dup_cstr(tls_alert_name(sfn_tls_last_alert));
-}
+extern var sfn_tls_last_alert: i64;
 
 // Which message of the server flight a failure was processing. The step
 // index is the loop's own state and is not recoverable from the handshake
@@ -481,11 +334,6 @@ struct TlsContext {
 fn _tls_context_bytes() -> i64 { return 48; }
 
 // ── Byte-buffer helpers ──────────────────────────────────────────
-fn _tls_ptr_off(p: *u8, off: i64) -> *u8 {
-    let base: i64 = p as i64;
-    return (base + off) as *u8;
-}
-
 fn _tls_put(dst: *u8, off: i64, b: i64) -> void {
     memset(_tls_ptr_off(dst, off), (b & 255) as i32, 1 as usize);
 }
@@ -1909,32 +1757,15 @@ fn tls_shutdown_free(ssl: *u8) -> void ![net] {
     _tls_session_free(s);
 }
 
-// The `_tls_err_*` ordinals are deliberately NOT exported (SFN-816).
-// Callers read a reason through `tls_error_name`/`tls_alert_name`, which
-// keeps the numbering an implementation detail free to change, and keeps
-// assertions readable (`== "cert-verify"` rather than `== 7`). Publishing
-// the ordinals would commit this module to them as API with no caller
-// asking for it — the same call made for `pem.sfn`'s `_with_limits`
-// surface under SFN-807.
-//
-// Reachability (SFN-822): the export below made these names linkable but
-// not callable from user source — there was no `tls` builtin-member root
-// and no runtime-helper descriptor. `tls_last_error_name` /
-// `tls_last_alert_name` close that gap through the `tls.last_error()` /
-// `tls.last_alert()` namespaced-global surface, the same mechanism
-// `http.*` already uses; the ordinal itself still never crosses the
-// boundary, only the name.
+// The status/diagnostics surface (`tls_error_name`, `tls_alert_name`,
+// `tls_last_error`/`tls_last_alert`, and their `*u8` reachability forms)
+// moved to `./tls_status` (SFN-882) along with its own export block; this
+// module exports only the driver entry points it still defines.
 export {
     tls_accept_fd,
-    tls_alert_name,
     tls_client_ctx,
     tls_connect_fd,
     tls_ctx_free,
-    tls_error_name,
-    tls_last_alert,
-    tls_last_alert_name,
-    tls_last_error,
-    tls_last_error_name,
     tls_read,
     tls_server_ctx,
     tls_shutdown_free,

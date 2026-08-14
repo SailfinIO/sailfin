@@ -48,6 +48,8 @@ import { _env_flag, _get_env_cmd } from "../build_flags";
 import { collect_effect_tokens, collect_scoped_import_specs } from "../capsule_import_scan";
 import { RuntimeCapsuleArtifacts } from "../runtime_capsule_resolver";
 import { contains_string, substring } from "../string_utils";
+import { _shell_read_cmd } from "./fs";
+import { build_target_triple, target_uses_gnu_link_gc } from "./target";
 
 // The retain-everything sentinel. A demand set containing it makes every
 // selection an identity — the pre-SFN-882 behaviour, exactly.
@@ -70,6 +72,33 @@ fn runtime_source_gates_disabled() -> boolean ![io] {
     if raw == "off" { return true; }
     if raw == "0" { return true; }
     return raw == "false";
+}
+
+// SFN-882: demand-driven gating is only sound when the final link dead-strips.
+//
+// This is the invariant the whole design rests on, and it is worth stating
+// plainly because it is invisible at every call site. An ungated module may
+// hold a reference to a gated module's symbol that is dead in practice — the
+// prelude's `serve` wrapper (`runtime/prelude.sfn`, lowered via
+// `registry_concurrency.sfn` to `@sailfin_runtime_serve` in the `net`-gated
+// `serve.sfn`) is exactly that. `--gc-sections` / `-dead_strip` drops the
+// uncalled wrapper and its reference with it, so the gated module is never
+// needed. Without that pass the reference survives into the link and must
+// resolve, and a program that never mentions TLS fails with an undefined
+// symbol.
+//
+// Two link paths skip the strip (`build/link.sfn`): the msvc ABI, whose
+// `lld-link` rejects the GNU/Mach-O flags outright, and a host where `nm` is
+// unavailable so the retain-root enumeration comes back empty. Both must
+// therefore retain everything. Deciding it HERE rather than at the link is
+// deliberate: the link-contract preflight and the dep-staging loop derive from
+// the same demand set, so widening at the link alone would leave the contract
+// still demanding `sfn/crypto` while nothing staged it — the §6 landmine.
+fn runtime_link_dead_strips() -> boolean ![io] {
+    if !target_uses_gnu_link_gc(build_target_triple()) { return false; }
+    // Mirrors `_runtime_retain_root_flags`' own dependency: it shells
+    // `nm | awk`, and an empty result there disables the strip.
+    return _shell_read_cmd("command -v nm 2>/dev/null").length > 0;
 }
 
 fn runtime_gates_trace_enabled() -> boolean ![io] {
@@ -184,6 +213,7 @@ fn _rs_absorb_tokens(demand: string[], source_text: string) -> string[] {
 fn compute_runtime_demand(source_paths: string[], capabilities_required: string[], full_runtime: boolean) -> string[] ![io] {
     if full_runtime { return runtime_demand_all(); }
     if runtime_source_gates_disabled() { return runtime_demand_all(); }
+    if !runtime_link_dead_strips() { return runtime_demand_all(); }
     let mut demand: string[] = [];
     let mut c: int = 0;
     loop {

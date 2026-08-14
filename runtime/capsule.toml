@@ -61,6 +61,7 @@ sfn-sources = [
     "sfn/platform/exec.sfn",
     "sfn/platform/rlimit.sfn",
     "sfn/platform/terminal.sfn",
+    "sfn/platform/tls_status.sfn",
     "sfn/platform/tls.sfn",
     "sfn/platform/tls_record.sfn",
     "sfn/platform/pthread_layout.sfn",
@@ -121,10 +122,24 @@ prelude-entry = "prelude.sfn"
 # server loop. Every entry point into these modules is `net`-rooted in
 # `compiler/capsules/ir/src/intrinsic_effects.sfn`, so a program that can call
 # one must declare a `net` effect transitively to `fn main` or fail E0400.
-# Naming a source that is not present in `sfn-sources` is inert: the two
-# `_windows` spellings are appended by `target_condition_runtime_sfn_sources`
-# (`compiler/src/build/target.sfn`) and are listed so the gate composes with
-# that substitution rather than letting a conditioned-in sibling escape it.
+# DO NOT list the `_windows` siblings here. It is tempting — they are gated
+# modules' platform twins — but it is both unnecessary and actively harmful.
+#
+# Unnecessary, because selection runs BEFORE target conditioning: the call
+# sites narrow, and `_condition_runtime_capsules` runs later inside
+# `assemble_runtime_capsule_link_inputs`. `target_condition_runtime_sfn_sources`
+# appends a Windows sibling only when it still sees the POSIX module it swaps
+# from, so when `net` is undemanded that module is already gone and the sibling
+# is never appended. When `net` IS demanded the module survives, the sibling is
+# appended, and it is wanted. Both branches are correct with no entry here; that
+# ordering is therefore load-bearing, not incidental.
+#
+# Harmful, because `compiler/tests/e2e/cross_windows_runtime_modules_test.sfn`
+# asserts the Windows spellings appear NOWHERE in this file — its whole-text
+# `contains` search is exact only while each token occurs in one place, and it
+# cannot be rewritten to parse the arrays instead (that form reproducibly
+# miscompiles from an `![io]` test, documented in its own header). Listing a
+# sibling here fails that test with no behaviour change to show for it.
 #
 # THIS SECTION MUST STAY LAST IN THE FILE. `toml_get_string_array` scans forward
 # from a `[section]` header to the next header, so a section inserted before
@@ -154,9 +169,7 @@ net = [
     "sfn/platform/tls.sfn",
     "sfn/platform/tls_record.sfn",
     "sfn/platform/cert_roots.sfn",
-    "sfn/platform/cert_roots_windows.sfn",
     "sfn/platform/socket_ops.sfn",
-    "sfn/platform/socket_ops_windows.sfn",
     "sfn/adapters/http.sfn",
     "sfn/adapters/websocket.sfn",
     "sfn/adapters/net.sfn",

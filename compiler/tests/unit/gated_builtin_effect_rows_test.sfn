@@ -1,0 +1,245 @@
+// SFN-882: every user-callable builtin whose runtime symbol lives in a gated
+// module must carry a `net`-rooted effect row.
+//
+// This is the standing guard for the one bug class that demand-driven runtime
+// source selection can introduce, and it is worth stating precisely because the
+// design note's own §5.4 named the risk but guessed the wrong instance.
+//
+// The shape: a builtin the user can call (`tls.last_error()`) lowers to a
+// runtime symbol (`tls_last_error_name`) that a gate can remove from the build.
+// If that builtin carries no effect row, a program calling it demands nothing,
+// the gate closes, the module is never compiled — and the call is still there.
+// Unlike an uncalled wrapper, this reference is LIVE and reachable from `main`,
+// so `--gc-sections` cannot save it. The build fails at link with an undefined
+// symbol, and because the failure lands in the backend it is reported as an ICE
+// rather than as a diagnostic pointing at the call.
+//
+// That is exactly what shipped and had to be fixed: `tls.last_error` /
+// `tls.last_alert` are deliberately effect-free (SFN-822 — a pure accessor over
+// a process-global slot, and adding a row would force `![net]` onto assertion
+// helpers) while resolving into the `net`-gated `tls.sfn`. The fix moved them to
+// the ungated `tls_status.sfn`; this test is what stops the pairing coming back
+// by either route — re-gating that module, or adding a new effect-free builtin
+// that resolves into an already-gated one.
+//
+// Deliberately NOT asserted here: a reference from an ungated module into a
+// gated one. The prelude's uncalled `serve` wrapper is exactly that, and it is
+// safe because the link dead-strips it. That safety is a separate invariant,
+// enforced in `runtime_selection.sfn::runtime_link_dead_strips` — a link that
+// cannot strip retains everything instead. Asserting it here too would fail on
+// a tree that is correct.
+import { canonical_effects, effect_root } from "sfn/analyzer/effect_taxonomy";
+import {
+    contains,
+    contains_string,
+    find,
+    split,
+    starts_with,
+    trim
+} from "sfn/strings";
+
+import { toml_get_sfn_source_gate } from "../../src/toml_parser";
+
+let _runtime_manifest_path: string = "runtime/capsule.toml";
+let _registry_dir: string = "compiler/capsules/codegen-llvm/src/runtime_helpers";
+let _intrinsic_effects_path: string = "compiler/capsules/ir/src/intrinsic_effects.sfn";
+let _builtin_namespaces_path: string = "compiler/capsules/analyzer/src/typecheck_types/extern_abi.sfn";
+
+// The registry files carrying `RuntimeHelperDescriptor` literals. Listed rather
+// than globbed so a new registry file is a deliberate addition here — an
+// unlisted one would silently narrow this test's coverage to nothing.
+fn _registry_files() -> string[] {
+    return ["registry_concurrency.sfn", "registry_platform.sfn", "registry_services.sfn", "registry_strings.sfn", "registry_values.sfn"];
+}
+
+// Every gate list entry across the canonical six, deduplicated.
+fn _gated_sources(manifest: string) -> string[] {
+    let mut out: string[] = [];
+    let effects = canonical_effects();
+    let mut e: int = 0;
+    loop {
+        if e >= effects.length { break; }
+        let gate = toml_get_sfn_source_gate(manifest, effects[e]);
+        let mut g: int = 0;
+        loop {
+            if g >= gate.length { break; }
+            if !contains_string(out, gate[g]) { out.push(gate[g]); }
+            g += 1;
+        }
+        e += 1;
+    }
+    return out;
+}
+
+// The value of a `key: "value"` pair on one line, or "" when absent.
+fn _field(line: string, key: string) -> string {
+    let needle = key + ": \"";
+    let at = find(line, needle, 0);
+    if at < 0 { return ""; }
+    let rest_start = at + needle.length;
+    let rest = substring(line, rest_start, line.length);
+    let close = find(rest, "\"", 0);
+    if close < 0 { return ""; }
+    return substring(rest, 0, close);
+}
+
+// Symbols a gated runtime module defines: `fn <name>(` and `extern var <name>:`.
+// Both matter — a descriptor can route to either, and an earlier version of this
+// guard missed `extern var` entirely.
+fn _defined_symbols(source: string) -> string[] {
+    let mut out: string[] = [];
+    let lines = split(source, "\n");
+    let mut i: int = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        i += 1;
+        let mut name: string = "";
+        if starts_with(line, "fn ") {
+            let rest = substring(line, 3, line.length);
+            let paren = find(rest, "(", 0);
+            if paren > 0 { name = trim(substring(rest, 0, paren)); }
+        } else if starts_with(line, "extern var ") {
+            let rest = substring(line, 11, line.length);
+            let colon = find(rest, ":", 0);
+            if colon > 0 { name = trim(substring(rest, 0, colon)); }
+        }
+        if name.length > 0 {
+            if !contains_string(out, name) { out.push(name); }
+        }
+    }
+    return out;
+}
+
+// The builtin namespaces a user may call through, read from the typechecker's
+// own allowlist rather than duplicated here — this is what separates a
+// user-reachable `tls.last_error` from an internal alias like
+// `runtime_serve_fn`, which no user can name and which the dead-strip
+// invariant covers instead.
+fn _builtin_namespaces() -> string[] ![io] {
+    let text = fs.readFile(_builtin_namespaces_path);
+    let mut out: string[] = [];
+    let lines = split(text, "\n");
+    let mut i: int = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = trim(lines[i]);
+        i += 1;
+        if !starts_with(line, "if strings_equal(name, \"") { continue; }
+        let rest = substring(line, 24, line.length);
+        let close = find(rest, "\"", 0);
+        if close <= 0 { continue; }
+        let ns = substring(rest, 0, close);
+        if !contains_string(out, ns) { out.push(ns); }
+    }
+    return out;
+}
+
+// True iff `target` has an intrinsic-effects row naming a `net`-rooted effect.
+// Matches the row text directly: a row is one
+// `append_intrinsic_effects(table, "<target>", [...])` call.
+fn _has_net_row(effects_src: string, target: string) -> boolean {
+    let lines = split(effects_src, "\n");
+    let mut i: int = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        i += 1;
+        if !contains(line, "append_intrinsic_effects(table, \"" + target + "\"") {
+            continue;
+        }
+        let open = find(line, "[", 0);
+        if open < 0 { continue; }
+        let list = substring(line, open, line.length);
+        let toks = split(list, "\"");
+        let mut t: int = 0;
+        loop {
+            if t >= toks.length { break; }
+            if effect_root(trim(toks[t])) == "net" { return true; }
+            t += 1;
+        }
+    }
+    return false;
+}
+
+test "gated builtins: every user-callable builtin resolving into a gated module declares a net effect" ![io] {
+    let manifest = fs.readFile(_runtime_manifest_path);
+    let gated = _gated_sources(manifest);
+    assert gated.length > 0;
+
+    // Symbol -> the gated module defining it.
+    let mut gated_symbols: string[] = [];
+    let mut gated_owner: string[] = [];
+    let mut g: int = 0;
+    loop {
+        if g >= gated.length { break; }
+        let rel = gated[g];
+        g += 1;
+        let path = "runtime/" + rel;
+        if !fs.exists(path) { continue; }
+        let defined = _defined_symbols(fs.readFile(path));
+        let mut d: int = 0;
+        loop {
+            if d >= defined.length { break; }
+            if !contains_string(gated_symbols, defined[d]) {
+                gated_symbols.push(defined[d]);
+                gated_owner.push(rel);
+            }
+            d += 1;
+        }
+    }
+    assert gated_symbols.length > 0;
+
+    let namespaces = _builtin_namespaces();
+    assert namespaces.length > 0;
+    let effects_src = fs.readFile(_intrinsic_effects_path);
+
+    let mut offenders: string[] = [];
+    let files = _registry_files();
+    let mut f: int = 0;
+    loop {
+        if f >= files.length { break; }
+        let path = _registry_dir + "/" + files[f];
+        f += 1;
+        if !fs.exists(path) { continue; }
+        let lines = split(fs.readFile(path), "\n");
+        let mut i: int = 0;
+        loop {
+            if i >= lines.length { break; }
+            let line = lines[i];
+            i += 1;
+            let target = _field(line, "target");
+            if target.length == 0 { continue; }
+            let symbol = _field(line, "symbol");
+            if symbol.length == 0 { continue; }
+
+            // Only user-reachable namespaced builtins. A dotless target is an
+            // internal alias the user cannot write, covered by the dead-strip
+            // invariant instead.
+            let dot = find(target, ".", 0);
+            if dot <= 0 { continue; }
+            let ns = substring(target, 0, dot);
+            if !contains_string(namespaces, ns) { continue; }
+
+            let mut si: int = 0;
+            loop {
+                if si >= gated_symbols.length { break; }
+                if gated_symbols[si] == symbol {
+                    if !_has_net_row(effects_src, target) {
+                        offenders.push(target + " -> " + symbol + " in "
+                            + gated_owner[si]);
+                    }
+                    break;
+                }
+                si += 1;
+            }
+        }
+    }
+
+    // A non-empty list here is a user-visible build break, not a lint: a
+    // program calling the named builtin with no effect passes `sfn check`,
+    // then fails to link with an undefined symbol reported as an ICE.
+    // Fix by moving the symbol to an ungated module (as SFN-882 did for
+    // `tls_last_error_name`), never by widening the gate.
+    assert offenders.length == 0;
+}
