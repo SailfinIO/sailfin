@@ -45,8 +45,9 @@ import { int_to_string } from "sfn/strings";
 import { ct_eq_bytes, string_to_bytes } from "./bits";
 import { ecdsa_p256_verify_sha256 } from "./ecdsa";
 import { ed25519_verify } from "./ed25519";
-import { hmac_sha256_bytes, sha256_bytes } from "./hkdf";
+import { hmac_bytes, sha256_bytes } from "./hkdf";
 import { rsa_pss_verify_sha256, rsa_pss_verify_sha384 } from "./rsa";
+import { sha384_bytes } from "./sha384";
 import {
     CertificateMsg,
     CertificateVerifyMsg,
@@ -69,6 +70,7 @@ import {
     parse_handshake_message,
     parse_server_hello,
     tls_cipher_aes_128_gcm_sha256,
+    tls_cipher_aes_256_gcm_sha384,
     tls_cipher_chacha20_poly1305_sha256,
     tls_group_x25519,
     tls_sigalg_ecdsa_secp256r1_sha256,
@@ -126,23 +128,39 @@ fn hs_state_wait_finished() -> int { return 5; }
 
 fn hs_state_connected() -> int { return 6; }
 
-// SHA-256 output length. The minimal cut accepts only SHA-256 cipher suites,
-// so every transcript hash, chaining secret and Finished verify_data is
-// exactly 32 bytes.
-fn _hash_len() -> int { return 32; }
+// The transcript-hash length selected by a TLS 1.3 cipher suite, or 0 for a
+// suite this state machine cannot drive. The suite is public negotiation data,
+// so this dispatch does not depend on secret material.
+fn _suite_hash_len(suite: int) -> int {
+    if suite == tls_cipher_aes_256_gcm_sha384() { return 48; }
+    if suite == tls_cipher_chacha20_poly1305_sha256() { return 32; }
+    if suite == tls_cipher_aes_128_gcm_sha256() { return 32; }
+    return 0;
+}
+
+// A newly constructed handshake has not negotiated a suite yet. Preserve the
+// original SHA-256 transcript behavior for that provisional state; every
+// non-zero suite still has to pass the explicit supported-suite dispatch.
+fn _state_hash_len(suite: int) -> int {
+    if suite == 0 {
+        return _suite_hash_len(tls_cipher_aes_128_gcm_sha256());
+    }
+    return _suite_hash_len(suite);
+}
+
+fn _transcript_hash(hash_len: int, transcript: int[]) -> int[] {
+    let empty: int[] = [];
+    if hash_len == 48 { return sha384_bytes(transcript); }
+    if hash_len == 32 { return sha256_bytes(transcript); }
+    return empty;
+}
 
 // The AEAD write_iv length is 12 for every TLS 1.3 suite (RFC 8446 §5.3).
 fn _aead_iv_len() -> int { return 12; }
 
 // Whether `suite` is a TLS 1.3 cipher suite this module can drive a handshake
-// for. Both are SHA-256 suites, so they share one transcript hash and one key
-// schedule and differ only in the AEAD — which is the record layer's concern,
-// not the handshake's. TLS_AES_256_GCM_SHA384 (0x1302) is excluded because it
-// is SHA-384: accepting it would silently change every hash length here.
 fn _is_supported_suite(suite: int) -> bool {
-    if suite == tls_cipher_chacha20_poly1305_sha256() { return true; }
-    if suite == tls_cipher_aes_128_gcm_sha256() { return true; }
-    return false;
+    return _suite_hash_len(suite) > 0;
 }
 
 // ── Handshake state ──────────────────────────────────────────────
@@ -240,15 +258,21 @@ fn _with(hs: ClientHandshake, state: int) -> ClientHandshake {
 // (tls13_record.sfn), so there is no key-install step to perform.
 //
 // The key length is the negotiated suite's, not a constant: ChaCha20-Poly1305
-// takes 32 bytes and AES-128-GCM 16. Returns [] fail-closed for a suite this
-// module does not support, rather than guessing a length.
+// and AES-256-GCM take 32 bytes, while AES-128-GCM takes 16. The traffic
+// secret must also match the negotiated suite's hash length so HKDF cannot
+// silently select a different hash. Returns [] fail-closed on either mismatch.
 fn tls13_traffic_key(traffic_secret: int[], cipher_suite: int) -> int[] {
     let empty: int[] = [];
+    let hash_len: int = _suite_hash_len(cipher_suite);
+    if hash_len == 0 || traffic_secret.length != hash_len { return empty; }
     if cipher_suite == tls_cipher_chacha20_poly1305_sha256() {
         return hkdf_expand_label(traffic_secret, "key", [], 32);
     }
     if cipher_suite == tls_cipher_aes_128_gcm_sha256() {
         return hkdf_expand_label(traffic_secret, "key", [], 16);
+    }
+    if cipher_suite == tls_cipher_aes_256_gcm_sha384() {
+        return hkdf_expand_label(traffic_secret, "key", [], 32);
     }
     return empty;
 }
@@ -261,22 +285,24 @@ fn tls13_traffic_iv(traffic_secret: int[]) -> int[] {
 // ── Finished (RFC 8446 §4.4.4) ───────────────────────────────────
 // finished_key = HKDF-Expand-Label(BaseKey, "finished", "", Hash.length).
 fn tls13_finished_key(traffic_secret: int[]) -> int[] {
-    return hkdf_expand_label(traffic_secret, "finished", [], _hash_len());
+    return hkdf_expand_label(traffic_secret, "finished", [], traffic_secret.length);
 }
 
 // verify_data = HMAC(finished_key, Transcript-Hash(Handshake Context)).
 // Returns [] fail-closed when the finished key could not be derived (a
 // traffic secret of the wrong length) or when `transcript_hash` is not a
-// SHA-256 digest. The second check matters because HMAC accepts any input
+// suite-selected digest. The second check matters because HMAC accepts any input
 // length: a caller passing raw transcript bytes instead of their hash would
 // otherwise get a plausible-looking verify_data for the wrong context rather
 // than an error.
 fn tls13_finished_verify_data(traffic_secret: int[], transcript_hash: int[]) -> int[] {
     let empty: int[] = [];
-    if transcript_hash.length != _hash_len() { return empty; }
+    let hash_len: int = traffic_secret.length;
+    if hash_len != 32 && hash_len != 48 { return empty; }
+    if transcript_hash.length != hash_len { return empty; }
     let key: int[] = tls13_finished_key(traffic_secret);
-    if key.length != _hash_len() { return empty; }
-    return hmac_sha256_bytes(key, transcript_hash);
+    if key.length != hash_len { return empty; }
+    return hmac_bytes(hash_len, key, transcript_hash);
 }
 
 // ── CertificateVerify signed content (RFC 8446 §4.4.3) ───────────
@@ -325,8 +351,12 @@ fn hs_client_new(client_private: int[]) -> Result<ClientHandshake, string> {
 
     // Early Secret with no PSK: HKDF-Extract(0, 0) (RFC 8446 §7.1).
     let no_psk: int[] = [];
-    let early: int[] = tls13_early_secret(no_psk, _hash_len());
-    if early.length != _hash_len() {
+    // The suite is not selected until ServerHello. Keep the historical
+    // SHA-256 provisional value so pre-negotiation state stays byte-identical;
+    // `hs_client_recv_server_hello` re-derives it from the selected suite.
+    let initial_hash_len: int = _suite_hash_len(tls_cipher_aes_128_gcm_sha256());
+    let early: int[] = tls13_early_secret(no_psk, initial_hash_len);
+    if early.length != initial_hash_len {
         return Result.Err {
             error: "hs_client_new: early secret derivation failed"
         };
@@ -525,7 +555,7 @@ fn hs_client_recv_server_hello(hs: ClientHandshake, message: int[]) -> Result<Cl
     }
     if !_is_supported_suite(sh.cipher_suite) {
         return Result.Err {
-            error: "hs_client_recv_server_hello: server selected a cipher suite whose hash this module does not implement (SHA-256 suites only)"
+            error: "hs_client_recv_server_hello: server selected an unsupported cipher suite"
         };
     }
     // x25519 is the only group `_encode_supported_groups_extension` offers, so
@@ -555,8 +585,17 @@ fn hs_client_recv_server_hello(hs: ClientHandshake, message: int[]) -> Result<Cl
         };
     }
 
-    let handshake: int[] = tls13_handshake_secret(hs.early_secret, shared);
-    if handshake.length != _hash_len() {
+    let hash_len: int = _suite_hash_len(sh.cipher_suite);
+    let no_psk: int[] = [];
+    let early: int[] = tls13_early_secret(no_psk, hash_len);
+    if early.length != hash_len {
+        return Result.Err {
+            error: "hs_client_recv_server_hello: early secret derivation failed"
+        };
+    }
+
+    let handshake: int[] = tls13_handshake_secret(early, shared);
+    if handshake.length != hash_len {
         return Result.Err {
             error: "hs_client_recv_server_hello: handshake secret derivation failed"
         };
@@ -570,16 +609,16 @@ fn hs_client_recv_server_hello(hs: ClientHandshake, message: int[]) -> Result<Cl
     let mut pending: int[] = [];
     _append(pending, hs.transcript);
     _append(pending, message);
-    let th: int[] = sha256_bytes(pending);
+    let th: int[] = _transcript_hash(hash_len, pending);
 
     let client_hs: int[] = tls13_client_handshake_traffic_secret(handshake, th);
     let server_hs: int[] = tls13_server_handshake_traffic_secret(handshake, th);
-    if client_hs.length != _hash_len() {
+    if client_hs.length != hash_len {
         return Result.Err {
             error: "hs_client_recv_server_hello: client handshake traffic secret derivation failed"
         };
     }
-    if server_hs.length != _hash_len() {
+    if server_hs.length != hash_len {
         return Result.Err {
             error: "hs_client_recv_server_hello: server handshake traffic secret derivation failed"
         };
@@ -589,7 +628,7 @@ fn hs_client_recv_server_hello(hs: ClientHandshake, message: int[]) -> Result<Cl
     // here; the application traffic secrets it feeds still need the transcript
     // through the server's Finished and are derived in that step.
     let master: int[] = tls13_master_secret(handshake);
-    if master.length != _hash_len() {
+    if master.length != hash_len {
         return Result.Err {
             error: "hs_client_recv_server_hello: master secret derivation failed"
         };
@@ -609,7 +648,7 @@ fn hs_client_recv_server_hello(hs: ClientHandshake, message: int[]) -> Result<Cl
             cipher_suite: sh.cipher_suite,
             group: sh.selected_group,
             shared_secret: shared,
-            early_secret: hs.early_secret,
+            early_secret: early,
             handshake_secret: handshake,
             master_secret: master,
             client_handshake_traffic_secret: client_hs,
@@ -750,9 +789,9 @@ fn hs_client_recv_certificate(hs: ClientHandshake, message: int[]) -> Result<Cli
 // 8446 §4.4.3 lets the peer choose the scheme, and a peer that could pick a
 // scheme the verifier silently ignores would be unauthenticated.
 //
-// The transcript hash is fixed at SHA-256 by the only cipher suites the
-// capsule negotiates; the SHA-384 branch is the signature's own hash over the
-// signed content, not the transcript's.
+// The transcript hash follows the negotiated cipher suite: SHA-256 for
+// ChaCha20-Poly1305 and AES-128-GCM, SHA-384 for AES-256-GCM. The signature
+// scheme then applies its own hash to the resulting signed content.
 //
 // RFC 8446 4.4.3 requires the receiver to reject a scheme it did not offer, so
 // the branches below must stay the same set as
@@ -885,7 +924,7 @@ fn hs_client_recv_certificate_verify(hs: ClientHandshake, message: int[]) -> Res
     }
 
     // Hash the transcript as it stood through Certificate, before appending.
-    let th: int[] = sha256_bytes(hs.transcript);
+    let th: int[] = _transcript_hash(_state_hash_len(hs.cipher_suite), hs.transcript);
     let content: int[] = tls13_certificate_verify_content(tls13_server_certificate_verify_context(), th);
 
     let checked: Result<bool, string> = _verify_certificate_verify_signature(leaf, cv, content);
@@ -1036,7 +1075,8 @@ fn hs_client_recv_finished(hs: ClientHandshake, message: int[]) -> Result<Client
         Result.Ok { value } => { fin_body = value; }
     }
 
-    let parsed: Result<int[], string> = parse_finished(fin_body, _hash_len());
+    let hash_len: int = _state_hash_len(hs.cipher_suite);
+    let parsed: Result<int[], string> = parse_finished(fin_body, hash_len);
     let mut received: int[] = [];
     match parsed {
         Result.Err { error } => {
@@ -1045,9 +1085,9 @@ fn hs_client_recv_finished(hs: ClientHandshake, message: int[]) -> Result<Client
         Result.Ok { value } => { received = value; }
     }
 
-    let th_before: int[] = sha256_bytes(hs.transcript);
+    let th_before: int[] = _transcript_hash(hash_len, hs.transcript);
     let expected: int[] = tls13_finished_verify_data(hs.server_handshake_traffic_secret, th_before);
-    if expected.length != _hash_len() {
+    if expected.length != hash_len {
         return Result.Err {
             error: "hs_client_recv_finished: server Finished verify_data derivation failed"
         };
@@ -1066,16 +1106,16 @@ fn hs_client_recv_finished(hs: ClientHandshake, message: int[]) -> Result<Client
     let mut pending: int[] = [];
     _append(pending, hs.transcript);
     _append(pending, message);
-    let th_after: int[] = sha256_bytes(pending);
+    let th_after: int[] = _transcript_hash(hash_len, pending);
 
     let client_ap: int[] = tls13_client_application_traffic_secret(hs.master_secret, th_after);
     let server_ap: int[] = tls13_server_application_traffic_secret(hs.master_secret, th_after);
-    if client_ap.length != _hash_len() {
+    if client_ap.length != hash_len {
         return Result.Err {
             error: "hs_client_recv_finished: client application traffic secret derivation failed"
         };
     }
-    if server_ap.length != _hash_len() {
+    if server_ap.length != hash_len {
         return Result.Err {
             error: "hs_client_recv_finished: server application traffic secret derivation failed"
         };
@@ -1120,9 +1160,10 @@ fn hs_client_finished_message(hs: ClientHandshake) -> Result<int[], string> {
         };
     }
 
-    let th: int[] = sha256_bytes(hs.transcript);
+    let hash_len: int = _state_hash_len(hs.cipher_suite);
+    let th: int[] = _transcript_hash(hash_len, hs.transcript);
     let verify_data: int[] = tls13_finished_verify_data(hs.client_handshake_traffic_secret, th);
-    if verify_data.length != _hash_len() {
+    if verify_data.length != hash_len {
         return Result.Err {
             error: "hs_client_finished_message: client Finished verify_data derivation failed"
         };
@@ -1142,7 +1183,7 @@ fn hs_client_finished_message(hs: ClientHandshake) -> Result<int[], string> {
 // test) can check the transcript at each step without reaching into the
 // state.
 fn hs_transcript_hash(hs: ClientHandshake) -> int[] {
-    return sha256_bytes(hs.transcript);
+    return _transcript_hash(_state_hash_len(hs.cipher_suite), hs.transcript);
 }
 
 export {

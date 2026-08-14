@@ -41,6 +41,7 @@ import {
     X509Certificate,
     X509ChainResult,
     aead_aes_128_gcm,
+    aead_aes_256_gcm,
     aead_chacha20_poly1305,
     ed25519_seed_from_pkcs8_pem,
     hs_client_finished_message,
@@ -75,6 +76,7 @@ import {
     tls13_traffic_iv,
     tls13_traffic_key,
     tls_cipher_aes_128_gcm_sha256,
+    tls_cipher_aes_256_gcm_sha384,
     tls_cipher_chacha20_poly1305_sha256,
     trust_store_load
 } from "sfn/crypto";
@@ -545,14 +547,14 @@ fn _tls_send_alert(s: *TlsSession, desc: i64) -> void ![net] {
 
 // ── Suite dispatch ───────────────────────────────────────────────
 // The AEAD identifier (`sfn/crypto/aead`) for a negotiated cipher suite, or 0
-// for one this stack cannot carry records under. Only the two SHA-256 suites
-// are mapped: TLS_AES_256_GCM_SHA384 needs a 48-byte hash threaded through the
-// handshake and is out of scope (SFN-814).
+// for one this stack cannot carry records under. All three TLS 1.3 suites the
+// handshake accepts are mapped here, including AES-256-GCM/SHA-384.
 fn _tls_suite_aead(suite: i64) -> int {
     if suite == tls_cipher_chacha20_poly1305_sha256() {
         return aead_chacha20_poly1305();
     }
     if suite == tls_cipher_aes_128_gcm_sha256() { return aead_aes_128_gcm(); }
+    if suite == tls_cipher_aes_256_gcm_sha384() { return aead_aes_256_gcm(); }
     return 0;
 }
 
@@ -562,14 +564,15 @@ fn _tls_suite_aead(suite: i64) -> int {
 fn _tls_suite_key_len(suite: i64) -> i64 {
     if suite == tls_cipher_chacha20_poly1305_sha256() { return 32; }
     if suite == tls_cipher_aes_128_gcm_sha256() { return 16; }
+    if suite == tls_cipher_aes_256_gcm_sha384() { return 32; }
     return 0;
 }
 
 // ── Encrypted record I/O ─────────────────────────────────────────
-// Both negotiable suites go through `tls_record.sfn`, the `*u8`
+// All three negotiable suites go through `tls_record.sfn`, the `*u8`
 // pointer-idiom record layer — ChaCha20-Poly1305 at the ~233 MB/s SFN-768
-// measured, AES-128-GCM at the SFN-817 measurement recorded in
-// `docs/status.md`. `sfn_tls_record_seal`/`sfn_tls_record_open` take the
+// measured, with AES-GCM measurements recorded in `docs/status.md`.
+// `sfn_tls_record_seal`/`sfn_tls_record_open` take the
 // negotiated suite's AEAD identifier and derive the required key length from
 // it (`_tlsrec_alg_key_len`, `runtime/sfn/platform/tls_record.sfn`) rather
 // than checking a standalone constant, which is what makes a 32-byte

@@ -355,6 +355,7 @@ export {
     hs_type_finished,
     tls_cipher_chacha20_poly1305_sha256,
     tls_cipher_aes_128_gcm_sha256,
+    tls_cipher_aes_256_gcm_sha384,
     tls_group_x25519,
     tls_sigalg_ed25519,
     tls_sigalg_rsa_pss_rsae_sha256,

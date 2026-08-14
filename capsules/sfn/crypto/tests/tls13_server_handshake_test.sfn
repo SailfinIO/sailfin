@@ -31,6 +31,7 @@
 // over a socket because `sfn/crypto` declares `[capabilities] required = []`
 // and SFEP-0048 keeps the crypto capsule effect-free; the socket transport is
 // `sfn/net`'s, and wiring these state machines to it is SFN-341's.
+import { aead_aes_256_gcm, aead_chacha20_poly1305 } from "../src/aead";
 import {
     ClientHandshake,
     hs_client_finished_message,
@@ -48,10 +49,11 @@ import {
 } from "../src/tls13_handshake";
 import {
     tls_cipher_aes_128_gcm_sha256,
+    tls_cipher_aes_256_gcm_sha384,
     tls_cipher_chacha20_poly1305_sha256,
     tls_group_x25519
 } from "../src/tls13_handshake_codec";
-import { TlsRecordPlaintext, tls13_open_record, tls13_seal_record } from "../src/tls13_record";
+import { TlsRecordPlaintext, tls13_open_record_aead, tls13_seal_record_aead } from "../src/tls13_record";
 import {
     ServerHandshake,
     hs_server_certificate_message,
@@ -299,12 +301,51 @@ test "tls13_server_handshake: RFC 8448 simple 1-RTT handshake reproduces every s
     assert hs.client_finished_verified;
 }
 
-// ── Client/server interop ────────────────────────────────────────
+// Replace the encoded ClientHello's suite vector with exactly `suite`, keeping
+// every following extension byte unchanged and repairing the handshake length.
+// This lets the server-side acceptance test prove an AES-256-only offer rather
+// than merely observing that the normal three-suite offer is accepted.
+fn _client_hello_only_suite(message: int[], suite: int) -> int[] {
+    let session_id_len: int = message[38] & 255;
+    let suites_len_off: int = 39 + session_id_len;
+    let suites_len: int = ((message[suites_len_off] & 255) << 8) | (message[suites_len_off
+        + 1] & 255);
+    let suffix_off: int = suites_len_off + 2 + suites_len;
+    let new_body_len: int = message.length - 4 - suites_len + 2;
+
+    let mut out: int[] = [];
+    out.push(message[0] & 255);
+    out.push((new_body_len >> 16) & 255);
+    out.push((new_body_len >> 8) & 255);
+    out.push(new_body_len & 255);
+
+    let mut i: int = 4;
+    loop {
+        if i >= suites_len_off { break; }
+        out.push(message[i] & 255);
+        i += 1;
+    }
+    out.push(0);
+    out.push(2);
+    out.push((suite >> 8) & 255);
+    out.push(suite & 255);
+    i = suffix_off;
+    loop {
+        if i >= message.length { break; }
+        out.push(message[i] & 255);
+        i += 1;
+    }
+    return out;
+}
+
+fn _suite_aead(suite: int) -> int {
+    if suite == tls_cipher_aes_256_gcm_sha384() { return aead_aes_256_gcm(); }
+    return aead_chacha20_poly1305();
+}
+
 // Both state machines driven against each other with a real X25519 exchange
-// and a real Ed25519 CertificateVerify the client actually verifies. This is
-// AC3 of SFN-654, read as in-memory interop: `sfn/crypto` is effect-free, so
-// the socket transport belongs to SFN-341.
-test "tls13_server_handshake: client and server interoperate over x25519 and chacha20-poly1305" {
+// and a real Ed25519 CertificateVerify the client actually verifies.
+fn _assert_client_server_interop(cipher_suite: int) -> void {
     let client_private: int[] = hexb("77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a");
     let server_private: int[] = hexb("5dab087e624a8a4b79e17f8b83800ee66f3bb1292618b6fd1c2f8b27ff88e0eb");
     let client_random: int[] = hexb("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f");
@@ -330,7 +371,8 @@ test "tls13_server_handshake: client and server interoperate over x25519 and cha
     }
 
     // ClientHello.
-    let client_hello: int[] = hs_client_hello(c, client_random, session_id, "example.com");
+    let offered: int[] = hs_client_hello(c, client_random, session_id, "example.com");
+    let client_hello: int[] = _client_hello_only_suite(offered, cipher_suite);
     assert client_hello.length > 0;
     match hs_client_send_hello(c, client_hello) {
         Result.Ok { value } => { c = value; },
@@ -340,8 +382,8 @@ test "tls13_server_handshake: client and server interoperate over x25519 and cha
         Result.Ok { value } => { s = value; },
         Result.Err { error } => { assert error.length == 0; }
     }
-    // The client offers exactly one suite, so this is the negotiated one.
-    assert s.cipher_suite == tls_cipher_chacha20_poly1305_sha256();
+    assert s.client_offered_cipher_suites.length == 1;
+    assert s.cipher_suite == cipher_suite;
     assert s.client_offers_ed25519_sigalg;
 
     // ServerHello.
@@ -360,7 +402,7 @@ test "tls13_server_handshake: client and server interoperate over x25519 and cha
     assert eq_bytes(c.handshake_secret, s.handshake_secret);
     assert eq_bytes(c.client_handshake_traffic_secret, s.client_handshake_traffic_secret);
     assert eq_bytes(c.server_handshake_traffic_secret, s.server_handshake_traffic_secret);
-    assert c.cipher_suite == tls_cipher_chacha20_poly1305_sha256();
+    assert c.cipher_suite == cipher_suite;
     assert c.group == tls_group_x25519();
 
     // EncryptedExtensions.
@@ -457,15 +499,25 @@ test "tls13_server_handshake: client and server interoperate over x25519 and cha
     assert eq_bytes(server_iv, client_iv);
 
     let payload: int[] = hexb("48656c6c6f2c205361696c66696e21");
-    let record: int[] = tls13_seal_record(server_key, server_iv, 0, 23, payload, 0);
+    let alg: int = _suite_aead(cipher_suite);
+    let record: int[] = tls13_seal_record_aead(alg, server_key, server_iv, 0, 23, payload, 0);
     assert record.length > 0;
-    match tls13_open_record(client_key, client_iv, 0, record) {
+    match tls13_open_record_aead(alg, client_key, client_iv, 0, record) {
         Result.Ok { value } => {
             assert value.content_type == 23;
             assert eq_bytes(value.content, payload);
         },
         Result.Err { error } => { assert error.length == 0; }
     }
+}
+
+// ── Client/server interop ────────────────────────────────────────
+test "tls13_server_handshake: client and server interoperate over x25519 and chacha20-poly1305" {
+    _assert_client_server_interop(tls_cipher_chacha20_poly1305_sha256());
+}
+
+test "tls13_server_handshake: client and server complete an AES-256-GCM/SHA-384-only handshake" {
+    _assert_client_server_interop(tls_cipher_aes_256_gcm_sha384());
 }
 
 // ── Fail-closed behaviour ────────────────────────────────────────

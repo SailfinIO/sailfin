@@ -20,14 +20,9 @@
 //     discriminates by cipher suite (a broken AES-GCM path would still
 //     pass this leg) rather than the AES-128 leg passing for an unrelated
 //     reason (e.g. the server ignoring `-ciphersuites`).
-//   - AES-256-GCM (`TLS_AES_256_GCM_SHA384`) only: the client deliberately
-//     does not offer this suite — `_tls_suite_aead` returns 0 for it
-//     ("TLS_AES_256_GCM_SHA384 needs a 48-byte hash threaded through the
-//     handshake and is out of scope (SFN-814)"), so the handshake MUST
-//     fail. This pins that the client's offer list is exactly what
-//     `tls.sfn` claims: a regression that started (mis-)offering this
-//     suite would flip this leg from a clean rejection to a body arriving
-//     under a cipher the runtime cannot actually decrypt records for.
+//   - AES-256-GCM (`TLS_AES_256_GCM_SHA384`) only: the SHA-384 leg. This pins
+//     the suite-derived transcript hash, 48-byte key schedule and Finished
+//     MAC together with the runtime's AES-256 record dispatch (SFN-853).
 //
 // Each leg's `openssl s_server` runs under `sfn/test`'s `with_background`
 // (SFN-852), which owns the child's lifetime: it is killed and reaped when
@@ -272,9 +267,7 @@ fn _client_body(tcmd: string, client_bin: string, run_env: string[], out_path: s
 }
 
 // Retry `_client_body` to absorb residual server startup latency — used
-// only for the POSITIVE round-trip legs (AES-128-GCM, ChaCha20-Poly1305),
-// never for the AES-256-GCM negative leg (an unoffered suite cannot start
-// succeeding on retry). Naps in-process via `wait_until` rather than
+// only for the positive round-trip legs. Naps in-process via `wait_until` rather than
 // shelling `sleep` per tick; ~10s budget, matching the previous
 // 20-attempts x 0.5s shape.
 fn _client_body_retry(tcmd: string, client_bin: string, run_env: string[], out_path: string) -> string ![clock, io] {
@@ -390,7 +383,7 @@ test "runtime tls: handshake completes against a ChaCha20-Poly1305-only server (
     let _rmd = process.run(["rm", "-rf", dir]);
 }
 
-test "runtime tls: handshake fails against an AES-256-GCM-only server (unoffered suite)" ![clock, io] {
+test "runtime tls: handshake completes against an AES-256-GCM/SHA-384-only server" ![clock, io] {
     if !_skip_ready() {
         assert true;
         return;
@@ -417,19 +410,10 @@ test "runtime tls: handshake fails against an AES-256-GCM-only server (unoffered
         assert server.handle.handle_id != 0;
         assert _await_listening(port);
 
-        // `tls.sfn::_tls_suite_aead` returns 0 for TLS_AES_256_GCM_SHA384
-        // (the 48-byte-hash suite is explicitly out of scope, SFN-814) and
-        // `encode_client_hello` does not offer it, so a server restricted
-        // to ONLY this suite has no suite in common with the client:
-        // TLS 1.3 requires the server to abort with `handshake_failure`
-        // when no offered suite matches. A single attempt is conclusive —
-        // an unoffered suite cannot start succeeding on retry — and the
-        // client's own socket read/write deadlines plus the `timeout`
-        // wrapper keep this from hanging if the peer ever misbehaves
-        // instead of alerting cleanly.
-        let body = _client_body(tcmd, client_bin, run_env, out_path);
-        print.info("[tls-aes-gcm] AES-256-GCM leg: expecting no body (unoffered suite)");
-        assert body.length == 0;
+        let body = _client_body_retry(tcmd, client_bin, run_env, out_path);
+        print.info("[tls-aes-gcm] AES-256-GCM/SHA-384 round-trip body received");
+        assert body.length > 0;
+        assert contains(body, "Ciphers");
         return 0;
     });
 

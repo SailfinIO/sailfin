@@ -756,6 +756,16 @@ is ~60 extra lines of key schedule, and the capsule is a public library). The
 returns a constant 32 by deliberate design, and there is no RFC 8448 SHA-384
 trace to check it against. §9.1 makes it unnecessary for interop.
 
+**Amendment (2026-08-14) — TLS_AES_256_GCM_SHA384 shipped (SFN-853).** Both
+handshake state machines now derive the transcript hash length from the
+negotiated suite, dispatch transcript hashing and Finished HMAC to SHA-384 for
+0x1302, and re-derive the no-PSK Early Secret once the suite is known. The
+client offers 0x1302 third so the established suite preference is unchanged;
+the runtime maps it to the existing AES-256-GCM pointer-idiom record path. An
+in-process client/server handshake restricted to 0x1302 and an OpenSSL
+AES-256-GCM/SHA-384-only loopback leg provide the missing end-to-end evidence;
+the RFC 8448 SHA-256 trace remains byte-identical.
+
 **AES-NI / ARMv8-Crypto intrinsics remain the right long-term performance answer,
 and are explicitly not on this path's critical line.** They are a
 `seed-blocker`-class compiler capability, and the seed analysis is stricter than
@@ -794,9 +804,8 @@ and native-TLS rows of `docs/status.md`, plus `encode_client_hello`'s offered
 cipher-suite and signature-algorithm lists in
 `capsules/sfn/crypto/src/tls13_handshake_codec.sfn`.
 
-Still deferred/out of scope: RSA signing, RSA key generation, the
-`TLS_AES_256_GCM_SHA384` cipher suite (above), and AES-NI/ARMv8-Crypto intrinsics
-(above).
+Still deferred/out of scope: RSA signing, RSA key generation, and
+AES-NI/ARMv8-Crypto intrinsics (above).
 
 ### 6.4 Pure-Sailfin X25519 in Phase A
 **Rejected for Phase A — recorded as a blocker (§7).** Curve25519 field

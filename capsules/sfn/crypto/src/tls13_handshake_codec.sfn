@@ -44,6 +44,11 @@ fn tls_cipher_chacha20_poly1305_sha256() -> int { return 4867; }
 // checked against RFC 8448 §3 — that trace negotiates 0x1301.
 fn tls_cipher_aes_128_gcm_sha256() -> int { return 4865; }
 
+// TLS_AES_256_GCM_SHA384 (0x1302) — offered third so adding the SHA-384
+// suite widens interoperability without changing the existing client
+// preference between ChaCha20-Poly1305 and AES-128-GCM.
+fn tls_cipher_aes_256_gcm_sha384() -> int { return 4866; }
+
 // x25519 (0x001d).
 fn tls_group_x25519() -> int { return 29; }
 
@@ -351,16 +356,17 @@ fn encode_client_hello(random: int[], legacy_session_id: int[], key_share_public
     body.push(legacy_session_id.length & 255);
     _append(body, legacy_session_id);
 
-    // Both SHA-256 suites, ChaCha20-Poly1305 first. RFC 8446 §9.1 makes
-    // TLS_AES_128_GCM_SHA256 mandatory, and offering only ChaCha20 left the
-    // client unable to reach an AES-GCM-only server at all (SFN-814).
+    // ChaCha20-Poly1305 stays first, followed by the mandatory AES-128-GCM
+    // suite and then AES-256-GCM/SHA-384. Adding the third offer does not
+    // change the established preference between the two SHA-256 suites.
     // The order inverts the usual AES-NI-era preference on purpose: this
     // stack has no AES-NI, and its AES-GCM record path measures ~1 MB/s
     // against ChaCha20-Poly1305's ~233 MB/s, so AES-GCM is the fallback
     // rather than the preference until SFN-817 ports it to the pointer idiom.
-    _push_u16(body, 4);
+    _push_u16(body, 6);
     _push_u16(body, tls_cipher_chacha20_poly1305_sha256());
     _push_u16(body, tls_cipher_aes_128_gcm_sha256());
+    _push_u16(body, tls_cipher_aes_256_gcm_sha384());
 
     body.push(1);  // legacy_compression_methods length
     body.push(0);  // null compression
@@ -1472,6 +1478,7 @@ export {
     hs_type_finished,
     tls_cipher_chacha20_poly1305_sha256,
     tls_cipher_aes_128_gcm_sha256,
+    tls_cipher_aes_256_gcm_sha384,
     tls_group_x25519,
     tls_sigalg_ed25519,
     tls_version_legacy,
