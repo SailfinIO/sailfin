@@ -5,12 +5,13 @@
 // (`GET <registry>/api/index.json`). That resolution used to shell out to
 // `python3 -c "...json..."`; it is now parsed natively in
 // `compiler/src/cli/commands/add.sfn` (`_extract_index_latest_cmd`), so no
-// `python3` is spawned. These tests drive the native path via a
-// PATH-injected fake `curl` shim (NOT a real server): the shim writes a
-// canned `index.json` body for the index GET and exits non-zero for the
-// subsequent `.sfnpkg` download, so the test observes the resolved version
-// (`downloading <name>@<version>...`, printed before the download) without
-// needing a real package payload.
+// `python3` is spawned. `sfn add` itself used to shell out to a system HTTP
+// client; SFN-496 replaced that with an in-process HTTP client, so these
+// tests now drive the native path against a small generated `sfn/http`
+// server (`_write_fixture_server`, built once via `_ensure_fixture_bin`)
+// run as a background subprocess on loopback, rather than a PATH-injected
+// fake HTTP client. Reference pattern:
+// `compiler/tests/e2e/serve_loopback_test.sfn`.
 //
 // `sfn add` reads/writes `capsule.toml` in the CWD and has no path arg, so
 // each case runs inside its own temp dir via a `cd <dir> && exec <sfn>`
@@ -19,7 +20,9 @@
 // NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]` and so
 // cannot be called from an `![io]` test; assert on captured stdout/stderr
 // with `sfn/strings::contains` instead. (#842.)
+import { Env, env_from_current, env_set } from "sfn/os";
 import { contains, split } from "sfn/strings";
+import { Background, wait_until, with_background } from "sfn/test";
 
 fn _sfn_bin() -> string ![io] {
     let configured = env.get("SAILFIN_BIN");
@@ -61,8 +64,7 @@ fn _child_env() -> string[] ![io] {
 
 // Absolute scratch root. `SAILFIN_TEST_SCRATCH` is often the relative
 // `build/sailfin`; the tests `cd` into a temp dir via a bash vehicle, so a
-// relative shim-dir PATH entry would break after the `cd` (the shim would
-// silently fall through to the real `curl`). Anchor it to the repo root.
+// relative path would break after the `cd`. Anchor it to the repo root.
 fn _scratch_dir() -> string ![io] {
     let mut dir = env.get("SAILFIN_TEST_SCRATCH");
     if dir.length == 0 { dir = "/tmp"; }
@@ -92,67 +94,24 @@ fn _make_consumer(dir: string) -> void ![io] {
     fs.writeFile(dir + "/capsule.toml", "[capsule]\nname = \"test/consumer\"\nversion = \"0.1.0\"\n\n[dependencies]\n");
 }
 
-fn _chmod_x(path: string) -> void ![io] {
-    let _ = process.run_capture(["chmod", "+x", path], _child_env());
-    let _o = process.capture_take_stdout();
-    let _e = process.capture_take_stderr();
-}
-
-// Fake `curl`: for a URL containing `index.json`, write `body` to the `-o`
-// target and exit 0; for anything else (the `.sfnpkg` download) exit 1.
-// `body` is embedded single-quoted, so it must contain no single quotes
-// (JSON here never does).
-fn _make_index_shim(dir: string, body: string) -> void ![io] {
-    fs.createDirectory(dir, true);
-    let shim = "#!/usr/bin/env bash\n" + "out_file=\"\"\n" + "url=\"\"\n"
-        + "prev=\"\"\n"
-        + "for arg in \"$@\"; do\n"
-        + "    if [ \"$prev\" = \"-o\" ]; then out_file=\"$arg\"; fi\n"
-        + "    url=\"$arg\"\n"
-        + "    prev=\"$arg\"\n"
-        + "done\n"
-        + "case \"$url\" in\n"
-        + "    *index.json*)\n"
-        + "        if [ -n \"$out_file\" ]; then\n"
-        + "            printf '%s' '"
-        + body
-        + "' > \"$out_file\"\n"
-        + "        fi\n"
-        + "        exit 0\n"
-        + "        ;;\n"
-        + "    *)\n"
-        + "        exit 1\n"
-        + "        ;;\n"
-        + "esac\n";
-    fs.writeFile(dir + "/curl", shim);
-    _chmod_x(dir + "/curl");
-}
-
-// Child env with a shim-prefixed PATH, forced HOME, and a deterministic
-// registry so the index URL host is fixed. `extra` appends KEY=value pairs.
-fn _env_for(home: string, shim_dir: string, extra: string[]) -> string[] ![io] {
+// Child env with a fixed registry (the fixture server) and forced HOME.
+fn _env_for(home: string) -> string[] ![io] {
     let mut e: string[] = [];
     let path = env.get("PATH");
-    e.push("PATH=" + shim_dir + ":" + path);
+    if path.length > 0 { e.push("PATH=" + path); }
     e.push("HOME=" + home);
-    e.push("SFN_REGISTRY=https://registry.test");
+    e.push("SFN_REGISTRY=http://127.0.0.1:" + _fixture_port());
     let tmpdir = env.get("TMPDIR");
     if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
     let scratch = env.get("SAILFIN_TEST_SCRATCH");
     if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
-    let mut i = 0;
-    loop {
-        if i >= extra.length { break; }
-        e.push(extra[i]);
-        i += 1;
-    }
     return e;
 }
 
-// Run `sfn add <capsule>` in `workdir` (cd vehicle) with `home`/`shim_dir`.
-fn _run_add(workdir: string, home: string, shim_dir: string, capsule: string) -> string ![io] {
+// Run `sfn add <capsule>` in `workdir` (cd vehicle) with `home`.
+fn _run_add(workdir: string, home: string, capsule: string) -> string ![io] {
     let sfn_abs = _sfn_bin_abs();
-    let e = _env_for(home, shim_dir, []);
+    let e = _env_for(home);
     let cmd = "cd \"" + workdir + "\" && exec \"" + sfn_abs + "\" add "
         + capsule;
     let _exit = process.run_capture(["bash", "-c", cmd], e);
@@ -161,77 +120,220 @@ fn _run_add(workdir: string, home: string, shim_dir: string, capsule: string) ->
     return out + err;
 }
 
+// ── Fixture registry server (SFN-496) ──────────────────────────────
+//
+// A generated `sfn/http` capsule, built once and run as a background
+// subprocess on loopback. It serves `<fixture_dir>/index.json` for the
+// index GET, and 404s any `.sfnpkg` GET (the download leg must fail after
+// version resolution, matching the old shim's exit-1-for-non-index
+// behavior). Port is fixed: this is the sole `add`-registry-index e2e file
+// binding it, so it does not collide under `--jobs N`.
+fn _fixture_port() -> string { return "18921"; }
+
+fn _fixture_app_root() -> string { return "build/add-idx-e2e-fixture-server"; }
+
+fn _fixture_bin_path() -> string {
+    return _fixture_app_root() + "/server-bin";
+}
+
+fn _write_fixture_server() -> string ![io] {
+    let root = _fixture_app_root();
+    fs.createDirectory(root + "/src", true);
+    fs.writeFile(root + "/capsule.toml", "[capsule]\n"
+        + "name = \"sfn/add-idx-e2e-fixture-server\"\n"
+        + "version = \"0.0.1\"\n"
+        + "description = \"sfn add registry-index e2e fixture registry\"\n"
+        + "\n"
+        + "[dependencies]\n"
+        + "\"sfn/http\" = \"*\"\n"
+        + "\n"
+        + "[capabilities]\n"
+        + "required = [\"io\", \"net\"]\n"
+        + "\n"
+        + "[build]\n"
+        + "entry = \"src/main.sfn\"\n"
+        + "kind = \"library\"\n");
+    fs.writeFile(root + "/src/main.sfn", "import { serve, Request, Response } from \"sfn/http\";\n"
+        + "\n"
+        + "fn _ends_with(s: string, suffix: string) -> boolean {\n"
+        + "    if suffix.length > s.length { return false; }\n"
+        + "    return substring(s, s.length - suffix.length, s.length) == suffix;\n"
+        + "}\n"
+        + "\n"
+        + "fn handle(req: Request) -> Response ![io] {\n"
+        + "    if strings_equal(req.path, \"/probe\") {\n"
+        + "        return Response { status: 200, headers: [], body: \"ready\" };\n"
+        + "    }\n"
+        + "    let dir = env.get(\"SFN_FIXTURE_DIR\");\n"
+        + "    if dir.length > 0 {\n"
+        + "        fs.writeFile(dir + \"/last_path\", req.path);\n"
+        + "        fs.writeFile(dir + \"/last_body\", req.body);\n"
+        + "        if _ends_with(req.path, \".sfnpkg\") {\n"
+        + "            return Response { status: 404, headers: [], body: \"not found\" };\n"
+        + "        }\n"
+        + "        if fs.exists(dir + \"/index.json\") {\n"
+        + "            return Response { status: 200, headers: [], body: fs.readFile(dir + \"/index.json\") };\n"
+        + "        }\n"
+        + "    }\n"
+        + "    return Response { status: 200, headers: [], body: \"{\\\"ok\\\":true}\" };\n"
+        + "}\n"
+        + "\n"
+        + "fn main() -> int ![io, net] {\n"
+        + "    serve(handle as * fn (Request) -> Response, "
+        + _fixture_port()
+        + ");\n"
+        + "    return 0;\n"
+        + "}\n");
+    return root + "/src/main.sfn";
+}
+
+// Full parent environment: the nested build LINKS a binary (clang + ld),
+// which needs the toolchain surface beyond PATH/HOME/TMPDIR
+// (`.claude/rules/no-bash-e2e.md`).
+fn _fixture_build_env() -> string[] ![io] { return process.environ(); }
+
+fn _build_fixture_bin(main_path: string, bin: string) -> string ![io] {
+    let exit = process.run_capture([_sfn_bin(), "build", "-o", bin, main_path], _fixture_build_env());
+    let _out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    if exit != 0 { return ""; }
+    return bin;
+}
+
+// Build the fixture server binary once and reuse it across every test in
+// this file. Returns the binary path, or "" on a build failure.
+fn _ensure_fixture_bin() -> string ![io] {
+    let bin = _fixture_bin_path();
+    if fs.exists(bin) { return bin; }
+    let main_path = _write_fixture_server();
+    return _build_fixture_bin(main_path, bin);
+}
+
+// Typed env for the backgrounded fixture server: the full parent
+// environment plus `SFN_FIXTURE_DIR` pointed at this test's own recording
+// directory (so no state leaks between tests).
+fn _fixture_env(fixture_dir: string) -> Env ![io] {
+    return env_set(env_from_current(), "SFN_FIXTURE_DIR", fixture_dir);
+}
+
+// Poll `GET /probe` until the prebuilt fixture server answers.
+fn _await_fixture_ready() -> boolean ![clock, io, net] {
+    return wait_until(fn () -> boolean {
+        return http.get_body("http://127.0.0.1:" + _fixture_port() + "/probe").length > 0;
+    }, 45000, 500);
+}
+
 // ---- Test 1: latest resolved natively from a compact index ----
-test "add: resolves latest from compact registry index" ![io] {
+test "add: resolves latest from compact registry index" ![clock, io, net] {
     let root = _test_root("t1");
     let home = root + "/home";
     let workdir = root + "/work";
-    let shim_dir = root + "/shim";
+    let fixture_dir = root + "/fixture";
+    fs.createDirectory(fixture_dir, true);
     _make_consumer(workdir);
-    _make_index_shim(shim_dir, "{\"capsules\":{\"acme/router\":{\"latest\":\"1.2.3\"}}}");
-    let all = _run_add(workdir, home, shim_dir, "acme/router");
-    // The version printed in the download line proves native resolution
-    // to 1.2.3 (no python3 involved).
-    assert contains(all, "downloading acme/router@1.2.3");
-    assert ! contains(all, "capsule not found in registry");
+    fs.writeFile(fixture_dir + "/index.json", "{\"capsules\":{\"acme/router\":{\"latest\":\"1.2.3\"}}}");
+    let bin = _ensure_fixture_bin();
+    assert bin.length > 0;
+    let _served = with_background([bin], _fixture_env(fixture_dir), "", "add-idx-fixture", fn (server: Background) -> int {
+        assert server.handle.handle_id != 0;
+        assert _await_fixture_ready();
+        let all = _run_add(workdir, home, "acme/router");
+        // The version printed in the download line proves native resolution
+        // to 1.2.3 (no python3 involved).
+        assert contains(all, "downloading acme/router@1.2.3");
+        assert ! contains(all, "capsule not found in registry");
+        return 0;
+    });
 }
 
 // ---- Test 2: whitespace-tolerant parse (pretty-printed index) ----
-test "add: resolves latest from pretty-printed index" ![io] {
+test "add: resolves latest from pretty-printed index" ![clock, io, net] {
     let root = _test_root("t2");
     let home = root + "/home";
     let workdir = root + "/work";
-    let shim_dir = root + "/shim";
+    let fixture_dir = root + "/fixture";
+    fs.createDirectory(fixture_dir, true);
     _make_consumer(workdir);
     // Spaces after colons and around braces exercise the whitespace
     // tolerance of the hand-rolled extractor.
-    _make_index_shim(shim_dir, "{ \"capsules\": { \"acme/router\": { \"latest\": \"4.5.6\" } } }");
-    let all = _run_add(workdir, home, shim_dir, "acme/router");
-    assert contains(all, "downloading acme/router@4.5.6");
+    fs.writeFile(fixture_dir + "/index.json", "{ \"capsules\": { \"acme/router\": { \"latest\": \"4.5.6\" } } }");
+    let bin = _ensure_fixture_bin();
+    assert bin.length > 0;
+    let _served = with_background([bin], _fixture_env(fixture_dir), "", "add-idx-fixture", fn (server: Background) -> int {
+        assert server.handle.handle_id != 0;
+        assert _await_fixture_ready();
+        let all = _run_add(workdir, home, "acme/router");
+        assert contains(all, "downloading acme/router@4.5.6");
+        return 0;
+    });
 }
 
 // ---- Test 3: capsule absent from the index -> not found ----
-test "add: reports not found when capsule absent from index" ![io] {
+test "add: reports not found when capsule absent from index" ![clock, io, net] {
     let root = _test_root("t3");
     let home = root + "/home";
     let workdir = root + "/work";
-    let shim_dir = root + "/shim";
+    let fixture_dir = root + "/fixture";
+    fs.createDirectory(fixture_dir, true);
     _make_consumer(workdir);
     // The requested capsule has no entry at all (only an unrelated one),
     // so resolution fails at the entry-key lookup.
-    _make_index_shim(shim_dir, "{\"capsules\":{\"other/pkg\":{\"latest\":\"9.9.9\"}}}");
-    let all = _run_add(workdir, home, shim_dir, "acme/router");
-    assert contains(all, "capsule not found in registry: acme/router");
-    assert ! contains(all, "downloading");
+    fs.writeFile(fixture_dir + "/index.json", "{\"capsules\":{\"other/pkg\":{\"latest\":\"9.9.9\"}}}");
+    let bin = _ensure_fixture_bin();
+    assert bin.length > 0;
+    let _served = with_background([bin], _fixture_env(fixture_dir), "", "add-idx-fixture", fn (server: Background) -> int {
+        assert server.handle.handle_id != 0;
+        assert _await_fixture_ready();
+        let all = _run_add(workdir, home, "acme/router");
+        assert contains(all, "capsule not found in registry: acme/router");
+        assert ! contains(all, "downloading");
+        return 0;
+    });
 }
 
 // ---- Test 4: capsule present but carries no `latest`; sibling has one ----
 // Exercises the object-bound guard: the requested capsule's object has no
 // `latest`, and a *sibling* that does must NOT bleed through.
-test "add: does not borrow a sibling's latest" ![io] {
+test "add: does not borrow a sibling's latest" ![clock, io, net] {
     let root = _test_root("t4");
     let home = root + "/home";
     let workdir = root + "/work";
-    let shim_dir = root + "/shim";
+    let fixture_dir = root + "/fixture";
+    fs.createDirectory(fixture_dir, true);
     _make_consumer(workdir);
-    _make_index_shim(shim_dir, "{\"capsules\":{\"acme/router\":{\"version\":\"1.0.0\"},\"other/pkg\":{\"latest\":\"9.9.9\"}}}");
-    let all = _run_add(workdir, home, shim_dir, "acme/router");
-    assert contains(all, "capsule not found in registry: acme/router");
-    assert ! contains(all, "9.9.9");
-    assert ! contains(all, "downloading");
+    fs.writeFile(fixture_dir + "/index.json", "{\"capsules\":{\"acme/router\":{\"version\":\"1.0.0\"},\"other/pkg\":{\"latest\":\"9.9.9\"}}}");
+    let bin = _ensure_fixture_bin();
+    assert bin.length > 0;
+    let _served = with_background([bin], _fixture_env(fixture_dir), "", "add-idx-fixture", fn (server: Background) -> int {
+        assert server.handle.handle_id != 0;
+        assert _await_fixture_ready();
+        let all = _run_add(workdir, home, "acme/router");
+        assert contains(all, "capsule not found in registry: acme/router");
+        assert ! contains(all, "9.9.9");
+        assert ! contains(all, "downloading");
+        return 0;
+    });
 }
 
 // ---- Test 5: prefix-collision — `acme/router` vs `acme/router-extras` ----
 // The longer-named sibling is listed FIRST; the trailing-quote anchor must
 // resolve the exact requested key, not the prefix match.
-test "add: resolves the exact key, not a prefix sibling" ![io] {
+test "add: resolves the exact key, not a prefix sibling" ![clock, io, net] {
     let root = _test_root("t5");
     let home = root + "/home";
     let workdir = root + "/work";
-    let shim_dir = root + "/shim";
+    let fixture_dir = root + "/fixture";
+    fs.createDirectory(fixture_dir, true);
     _make_consumer(workdir);
-    _make_index_shim(shim_dir, "{\"capsules\":{\"acme/router-extras\":{\"latest\":\"7.7.7\"},\"acme/router\":{\"latest\":\"1.2.3\"}}}");
-    let all = _run_add(workdir, home, shim_dir, "acme/router");
-    assert contains(all, "downloading acme/router@1.2.3");
-    assert ! contains(all, "7.7.7");
+    fs.writeFile(fixture_dir + "/index.json", "{\"capsules\":{\"acme/router-extras\":{\"latest\":\"7.7.7\"},\"acme/router\":{\"latest\":\"1.2.3\"}}}");
+    let bin = _ensure_fixture_bin();
+    assert bin.length > 0;
+    let _served = with_background([bin], _fixture_env(fixture_dir), "", "add-idx-fixture", fn (server: Background) -> int {
+        assert server.handle.handle_id != 0;
+        assert _await_fixture_ready();
+        let all = _run_add(workdir, home, "acme/router");
+        assert contains(all, "downloading acme/router@1.2.3");
+        assert ! contains(all, "7.7.7");
+        return 0;
+    });
 }

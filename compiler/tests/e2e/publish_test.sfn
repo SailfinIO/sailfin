@@ -2,11 +2,15 @@
 // SFNPKG packaging, digest format, registry resolution).
 //
 // Native replacement for the former `test_publish.sh` (test-infra Phase 3,
-// epic #842). Network-dependent cases use a PATH-injected fake `curl` shim
-// (NOT a real server) so the real registry is never contacted. The shim has
-// three variants: (a) captures the `-d @<body>` file to CAPTURE_BODY_TO and
-// exits 1; (b) writes a 400 response to the `-o`/`-D` files and exits 0; (c)
-// captures the last positional arg (URL) to CAPTURE_URL_TO and exits 1.
+// epic #842). `sfn publish` used to shell out to a system HTTP client;
+// SFN-496 replaced that with an in-process HTTP call, so the
+// network-dependent cases below no longer intercept anything via a
+// PATH-injected fake HTTP client. They instead run
+// a small generated `sfn/http` server (`_write_fixture_server`, built once
+// via `_ensure_fixture_bin`) as a background subprocess on loopback, point
+// `SFN_REGISTRY` at it, and inspect what the fixture records under
+// `SFN_FIXTURE_DIR` (`last_path` / `last_body`) after the CLI run
+// completes. Reference pattern: `compiler/tests/e2e/serve_loopback_test.sfn`.
 //
 // NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]` and so
 // cannot be called from an `![io]` test like this. Assert on the captured
@@ -17,7 +21,9 @@
 // shape is reproduced by passing the capsule dir as an explicit path arg.
 // The "uses cwd" case (test 5) is therefore covered by passing the workdir
 // as the path arg; the cwd-discovery nuance is exercised equivalently.
-import { find, contains, split } from "sfn/strings";
+import { Env, env_from_current, env_set } from "sfn/os";
+import { contains, find, split } from "sfn/strings";
+import { Background, wait_until, with_background } from "sfn/test";
 
 // True iff `ch` (a 1-char string) is a lowercase-hex digit. String indexing
 // + `>=`/`<=` does not compare 1-char strings lexicographically, so route
@@ -43,8 +49,8 @@ fn _scratch_dir() -> string ![io] {
 }
 
 // Base child env: PATH/HOME/TMPDIR + SAILFIN_TEST_SCRATCH. Callers build
-// the real per-test env by hand (one PATH entry only) so they can prepend a
-// shim dir to PATH and set HOME / capture-target vars explicitly.
+// the real per-test env by hand (one PATH entry only) so they can set HOME
+// / registry-override vars explicitly.
 fn _child_env() -> string[] ![io] {
     let mut e: string[] = [];
     let path = env.get("PATH");
@@ -92,75 +98,12 @@ fn _write_credentials(home: string) -> void ![io] {
     fs.writeFile(home + "/.sfn/credentials", "fake-token\n");
 }
 
-fn _chmod_x(path: string) -> void ![io] {
-    let _ = process.run_capture(["chmod", "+x", path], _child_env());
-    let _o = process.capture_take_stdout();
-    let _e = process.capture_take_stderr();
-}
-
-// Shim variant (a): capture the `-d @<body>` file to CAPTURE_BODY_TO, exit 1.
-fn _make_curl_shim_capture_body(dir: string) -> void ![io] {
-    fs.createDirectory(dir, true);
-    let shim = "#!/usr/bin/env bash\n" + "body_file=\"\"\n"
-        + "for arg in \"$@\"; do\n"
-        + "    if [[ \"$arg\" == @* ]]; then\n"
-        + "        body_file=\"$"
-        + "{arg#@}\"\n"
-        + "        break\n"
-        + "    fi\n"
-        + "done\n"
-        + "if [ -n \"$body_file\" ] && [ -f \"$body_file\" ]; then\n"
-        + "    cp \"$body_file\" \"$"
-        + "{CAPTURE_BODY_TO}\"\n"
-        + "fi\n"
-        + "exit 1\n";
-    fs.writeFile(dir + "/curl", shim);
-    _chmod_x(dir + "/curl");
-}
-
-// Shim variant (b): write a 400 response body + header to -o/-D files, exit 0.
-fn _make_curl_shim_http_400(dir: string) -> void ![io] {
-    fs.createDirectory(dir, true);
-    let shim = "#!/usr/bin/env bash\n" + "out_file=\"\"\n" + "hdr_file=\"\"\n"
-        + "prev=\"\"\n"
-        + "for arg in \"$@\"; do\n"
-        + "    if [ \"$prev\" = \"-o\" ]; then out_file=\"$arg\"; fi\n"
-        + "    if [ \"$prev\" = \"-D\" ]; then hdr_file=\"$arg\"; fi\n"
-        + "    prev=\"$arg\"\n"
-        + "done\n"
-        + "if [ -n \"$out_file\" ]; then\n"
-        + "    echo '{\"error\":\"Digest mismatch: expected sha256:abc, got sha256:def\"}' > \"$out_file\"\n"
-        + "fi\n"
-        + "if [ -n \"$hdr_file\" ]; then\n"
-        + "    printf 'HTTP/1.1 400 Bad Request\\r\\nContent-Type: application/json\\r\\n\\r\\n' > \"$hdr_file\"\n"
-        + "fi\n"
-        + "exit 0\n";
-    fs.writeFile(dir + "/curl", shim);
-    _chmod_x(dir + "/curl");
-}
-
-// Shim variant (c): capture the last positional arg (URL) to CAPTURE_URL_TO,
-// exit 1.
-fn _make_curl_shim_capture_url(dir: string) -> void ![io] {
-    fs.createDirectory(dir, true);
-    let shim = "#!/usr/bin/env bash\n" + "last=\"\"\n"
-        + "for arg in \"$@\"; do last=\"$arg\"; done\n"
-        + "echo \"$last\" > \"$"
-        + "{CAPTURE_URL_TO}\"\n"
-        + "exit 1\n";
-    fs.writeFile(dir + "/curl", shim);
-    _chmod_x(dir + "/curl");
-}
-
-// Build a child env with a single PATH entry (optionally prefixed by a shim
-// dir), HOME forced to `home`, and any extra `KEY=value` entries appended.
-// A shim_dir of "" means: do not prepend.
-fn _env_for(home: string, shim_dir: string, extra: string[]) -> string[] ![io] {
+// Build a child env with a single PATH entry, HOME forced to `home`, and
+// any extra `KEY=value` entries appended.
+fn _env_for(home: string, extra: string[]) -> string[] ![io] {
     let mut e: string[] = [];
     let path = env.get("PATH");
-    if shim_dir.length > 0 { e.push("PATH=" + shim_dir + ":" + path); } else {
-        if path.length > 0 { e.push("PATH=" + path); }
-    }
+    if path.length > 0 { e.push("PATH=" + path); }
     e.push("HOME=" + home);
     let tmpdir = env.get("TMPDIR");
     if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
@@ -205,12 +148,109 @@ fn _abs_sfn_bin() -> string ![io] {
     return pwd + "/" + bin;
 }
 
+// ── Fixture registry server (SFN-496) ──────────────────────────────
+//
+// A generated `sfn/http` capsule, built once and run as a background
+// subprocess on loopback. `handle` records every request's path and body
+// under `SFN_FIXTURE_DIR` (set per-test), and can be told to answer with a
+// 400 (marker file `status400`). Port is fixed: this is the sole publish
+// e2e file binding it, so it does not collide under `--jobs N`.
+fn _fixture_port() -> string { return "18920"; }
+
+fn _fixture_app_root() -> string { return "build/publish-e2e-fixture-server"; }
+
+fn _fixture_bin_path() -> string {
+    return _fixture_app_root() + "/server-bin";
+}
+
+fn _write_fixture_server() -> string ![io] {
+    let root = _fixture_app_root();
+    fs.createDirectory(root + "/src", true);
+    fs.writeFile(root + "/capsule.toml", "[capsule]\n"
+        + "name = \"sfn/publish-e2e-fixture-server\"\n"
+        + "version = \"0.0.1\"\n"
+        + "description = \"sfn publish e2e fixture registry\"\n"
+        + "\n"
+        + "[dependencies]\n"
+        + "\"sfn/http\" = \"*\"\n"
+        + "\n"
+        + "[capabilities]\n"
+        + "required = [\"io\", \"net\"]\n"
+        + "\n"
+        + "[build]\n"
+        + "entry = \"src/main.sfn\"\n"
+        + "kind = \"library\"\n");
+    fs.writeFile(root + "/src/main.sfn", "import { serve, Request, Response } from \"sfn/http\";\n"
+        + "\n"
+        + "fn handle(req: Request) -> Response ![io] {\n"
+        + "    if strings_equal(req.path, \"/probe\") {\n"
+        + "        return Response { status: 200, headers: [], body: \"ready\" };\n"
+        + "    }\n"
+        + "    let dir = env.get(\"SFN_FIXTURE_DIR\");\n"
+        + "    if dir.length > 0 {\n"
+        + "        fs.writeFile(dir + \"/last_path\", req.path);\n"
+        + "        fs.writeFile(dir + \"/last_body\", req.body);\n"
+        + "        if fs.exists(dir + \"/status400\") {\n"
+        + "            return Response { status: 400, headers: [], body: \"{\\\"error\\\":\\\"Digest mismatch: expected sha256:abc, got sha256:def\\\"}\" };\n"
+        + "        }\n"
+        + "        if fs.exists(dir + \"/index.json\") {\n"
+        + "            return Response { status: 200, headers: [], body: fs.readFile(dir + \"/index.json\") };\n"
+        + "        }\n"
+        + "    }\n"
+        + "    return Response { status: 200, headers: [], body: \"{\\\"ok\\\":true}\" };\n"
+        + "}\n"
+        + "\n"
+        + "fn main() -> int ![io, net] {\n"
+        + "    serve(handle as * fn (Request) -> Response, "
+        + _fixture_port()
+        + ");\n"
+        + "    return 0;\n"
+        + "}\n");
+    return root + "/src/main.sfn";
+}
+
+// Full parent environment: the nested build LINKS a binary (clang + ld),
+// which needs the toolchain surface beyond PATH/HOME/TMPDIR
+// (`.claude/rules/no-bash-e2e.md`).
+fn _fixture_build_env() -> string[] ![io] { return process.environ(); }
+
+fn _build_fixture_bin(main_path: string, bin: string) -> string ![io] {
+    let exit = process.run_capture([_sfn_bin(), "build", "-o", bin, main_path], _fixture_build_env());
+    let _out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    if exit != 0 { return ""; }
+    return bin;
+}
+
+// Build the fixture server binary once and reuse it across every test in
+// this file. Returns the binary path, or "" on a build failure.
+fn _ensure_fixture_bin() -> string ![io] {
+    let bin = _fixture_bin_path();
+    if fs.exists(bin) { return bin; }
+    let main_path = _write_fixture_server();
+    return _build_fixture_bin(main_path, bin);
+}
+
+// Typed env for the backgrounded fixture server: the full parent
+// environment plus `SFN_FIXTURE_DIR` pointed at this test's own recording
+// directory (so no state leaks between tests).
+fn _fixture_env(fixture_dir: string) -> Env ![io] {
+    return env_set(env_from_current(), "SFN_FIXTURE_DIR", fixture_dir);
+}
+
+// Poll `GET /probe` until the prebuilt fixture server answers.
+fn _await_fixture_ready() -> boolean ![clock, io, net] {
+    return wait_until(fn () -> boolean {
+        return http.get_body("http://127.0.0.1:" + _fixture_port() + "/probe").length > 0;
+    }, 45000, 500);
+}
+
 // ---- Test 1: publish with too many args shows usage ----
 test "publish: too many args shows usage" ![io] {
     let root = _test_root("t1");
     let home = root + "/home";
     fs.createDirectory(home, true);
-    let e = _env_for(home, "", []);
+    let e = _env_for(home, []);
     let _exit = process.run_capture([_sfn_bin(), "publish", "a", "b"], e);
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
@@ -224,7 +264,7 @@ test "publish: no capsule.toml fails" ![io] {
     let workdir = root + "/work";
     fs.createDirectory(workdir, true);
     _write_credentials(home);
-    let e = _env_for(home, "", []);
+    let e = _env_for(home, []);
     // run_capture cannot chdir; pass the empty workdir as the path arg so
     // discovery looks there and finds no capsule.toml.
     let _exit = process.run_capture([_sfn_bin(), "publish", workdir], e);
@@ -240,7 +280,7 @@ test "publish: path arg finds capsule" ![io] {
     let workdir = root + "/work";
     _write_credentials(home);
     _make_capsule(workdir + "/my/capsule", "test/pkg", "1.0.0");
-    let e = _env_for(home, "", []);
+    let e = _env_for(home, []);
     let _exit = process.run_capture([_sfn_bin(), "publish", workdir
         + "/my/capsule"], e);
     let out = process.capture_take_stdout();
@@ -255,7 +295,7 @@ test "publish: trailing-slash path works" ![io] {
     let workdir = root + "/work";
     _write_credentials(home);
     _make_capsule(workdir + "/cap", "test/pkg", "1.0.0");
-    let e = _env_for(home, "", []);
+    let e = _env_for(home, []);
     let _exit = process.run_capture([_sfn_bin(), "publish", workdir + "/cap/"], e);
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
@@ -271,7 +311,7 @@ test "publish: discovers capsule (cwd semantics)" ![io] {
     let workdir = root + "/work";
     _write_credentials(home);
     _make_capsule(workdir, "my/cap", "2.0.0");
-    let e = _env_for(home, "", []);
+    let e = _env_for(home, []);
     let _exit = process.run_capture([_sfn_bin(), "publish", workdir], e);
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
@@ -287,7 +327,7 @@ test "publish: no token fails" ![io] {
     _make_capsule(workdir, "test/pkg", "1.0.0");
     // No credentials written, and SFN_TOKEN/SFN_REGISTRY omitted from env
     // (run_capture env is complete, so omission = unset).
-    let e = _env_for(home, "", []);
+    let e = _env_for(home, []);
     let _exit = process.run_capture([_sfn_bin(), "publish", workdir], e);
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
@@ -295,19 +335,26 @@ test "publish: no token fails" ![io] {
 }
 
 // ---- Test 7: digest in payload has sha256: prefix ----
-test "publish: digest has sha256: prefix" ![io] {
+test "publish: digest has sha256: prefix" ![clock, io, net] {
     let root = _test_root("t7");
     let home = root + "/home";
     let workdir = root + "/work";
-    let shim_dir = root + "/shim";
-    let captured = root + "/body";
+    let fixture_dir = root + "/fixture";
+    fs.createDirectory(fixture_dir, true);
     _write_credentials(home);
     _make_capsule(workdir, "test/pkg", "1.0.0");
-    _make_curl_shim_capture_body(shim_dir);
-    let e = _env_for(home, shim_dir, ["CAPTURE_BODY_TO=" + captured]);
-    let _exit = process.run_capture([_sfn_bin(), "publish", workdir], e);
-    let _o = process.capture_take_stdout();
-    let _err = process.capture_take_stderr();
+    let bin = _ensure_fixture_bin();
+    assert bin.length > 0;
+    let _served = with_background([bin], _fixture_env(fixture_dir), "", "publish-fixture", fn (server: Background) -> int {
+        assert server.handle.handle_id != 0;
+        assert _await_fixture_ready();
+        let e = _env_for(home, ["SFN_REGISTRY=http://127.0.0.1:" + _fixture_port()]);
+        let _exit = process.run_capture([_sfn_bin(), "publish", workdir], e);
+        let _o = process.capture_take_stdout();
+        let _err = process.capture_take_stderr();
+        return 0;
+    });
+    let captured = fixture_dir + "/last_body";
     assert fs.exists(captured);
     let body = fs.readFile(captured);
     // The code prepends "sha256:" to the hex digest. Assert the literal
@@ -336,121 +383,152 @@ test "publish: digest has sha256: prefix" ![io] {
 // path. (Acceptable simplification — a full base64 decode would require
 // shelling out; the relative-path invariant is covered by the packaging
 // message and the field's presence.)
-test "publish: payload carries content_b64 with relative packaging" ![io] {
+test "publish: payload carries content_b64 with relative packaging" ![clock, io, net] {
     let root = _test_root("t8");
     let home = root + "/home";
     let workdir = root + "/work";
-    let shim_dir = root + "/shim";
-    let captured = root + "/body";
+    let fixture_dir = root + "/fixture";
+    fs.createDirectory(fixture_dir, true);
     _write_credentials(home);
     _make_capsule(workdir + "/nested/cap", "test/pkg", "1.0.0");
-    _make_curl_shim_capture_body(shim_dir);
-    let e = _env_for(home, shim_dir, ["CAPTURE_BODY_TO=" + captured]);
-    let _exit = process.run_capture([_sfn_bin(), "publish", workdir
-        + "/nested/cap"], e);
-    let out = process.capture_take_stdout();
-    let err = process.capture_take_stderr();
-    // The packaging message proves the capsule was discovered via the path.
-    assert contains(out + err, "packaging test/pkg@1.0.0");
+    let bin = _ensure_fixture_bin();
+    assert bin.length > 0;
+    let _served = with_background([bin], _fixture_env(fixture_dir), "", "publish-fixture", fn (server: Background) -> int {
+        assert server.handle.handle_id != 0;
+        assert _await_fixture_ready();
+        let e = _env_for(home, ["SFN_REGISTRY=http://127.0.0.1:" + _fixture_port()]);
+        let _exit = process.run_capture([_sfn_bin(), "publish", workdir
+            + "/nested/cap"], e);
+        let out = process.capture_take_stdout();
+        let err = process.capture_take_stderr();
+        // The packaging message proves the capsule was discovered via the path.
+        assert contains(out + err, "packaging test/pkg@1.0.0");
+        return 0;
+    });
+    let captured = fixture_dir + "/last_body";
     assert fs.exists(captured);
     let body = fs.readFile(captured);
     assert contains(body, "content_b64");
 }
 
 // ---- Test 9: publish surfaces HTTP error details ----
-test "publish: surfaces HTTP error details" ![io] {
+test "publish: surfaces HTTP error details" ![clock, io, net] {
     let root = _test_root("t9");
     let home = root + "/home";
     let workdir = root + "/work";
-    let shim_dir = root + "/shim";
+    let fixture_dir = root + "/fixture";
+    fs.createDirectory(fixture_dir, true);
+    fs.writeFile(fixture_dir + "/status400", "1");
     _write_credentials(home);
     _make_capsule(workdir, "test/pkg", "1.0.0");
-    _make_curl_shim_http_400(shim_dir);
-    let e = _env_for(home, shim_dir, []);
-    let _exit = process.run_capture([_sfn_bin(), "publish", workdir], e);
-    let out = process.capture_take_stdout();
-    let err = process.capture_take_stderr();
-    let all = out + err;
-    assert contains(all, "HTTP 400");
-    assert contains(all, "Digest mismatch");
+    let bin = _ensure_fixture_bin();
+    assert bin.length > 0;
+    let _served = with_background([bin], _fixture_env(fixture_dir), "", "publish-fixture", fn (server: Background) -> int {
+        assert server.handle.handle_id != 0;
+        assert _await_fixture_ready();
+        let e = _env_for(home, ["SFN_REGISTRY=http://127.0.0.1:" + _fixture_port()]);
+        let _exit = process.run_capture([_sfn_bin(), "publish", workdir], e);
+        let out = process.capture_take_stdout();
+        let err = process.capture_take_stderr();
+        let all = out + err;
+        assert contains(all, "HTTP 400");
+        assert contains(all, "Digest mismatch");
+        return 0;
+    });
 }
 
 // ---- Test 10: publish uses default registry when none configured ----
-test "publish: default registry URL" ![io] {
-    let root = _test_root("t10");
-    let home = root + "/home";
-    let workdir = root + "/work";
-    let shim_dir = root + "/shim";
-    let captured = root + "/url";
-    _write_credentials(home);
-    _make_capsule(workdir, "test/pkg", "1.0.0");
-    _make_curl_shim_capture_url(shim_dir);
-    let e = _env_for(home, shim_dir, ["CAPTURE_URL_TO=" + captured]);
-    let _exit = process.run_capture([_sfn_bin(), "publish", workdir], e);
-    let _o = process.capture_take_stdout();
-    let _err = process.capture_take_stderr();
-    assert fs.exists(captured);
-    let url = _first_line(fs.readFile(captured));
-    assert url == "https://pkg.sfn.dev/api/publish";
-}
-
+//
+// Deleted (SFN-496): the old fake HTTP-client shim intercepted every
+// request, so exercising the *default* registry cost nothing. The in-process HTTP
+// client has no shim to intercept — driving this case for real would send a
+// live publish POST to the production registry `https://pkg.sfn.dev`. The
+// default-resolution claim is already covered without any network access by
+// `compiler/tests/e2e/config_test.sfn`'s "config: get returns default when
+// unset" test, which asserts the default resolves to
+// `https://pkg.sfn.dev`.
 // ---- Test 11: publish uses registry from config file ----
-test "publish: config-file registry URL" ![io] {
+test "publish: config-file registry URL" ![clock, io, net] {
     let root = _test_root("t11");
     let home = root + "/home";
     let workdir = root + "/work";
-    let shim_dir = root + "/shim";
-    let captured = root + "/url";
+    let fixture_dir = root + "/fixture";
+    fs.createDirectory(fixture_dir, true);
     _write_credentials(home);
-    fs.writeFile(home + "/.sfn/config.toml", "[registry]\nurl = \"https://registry.acme.internal\"\n");
+    fs.writeFile(home + "/.sfn/config.toml", "[registry]\nurl = \"http://127.0.0.1:"
+        + _fixture_port()
+        + "\"\n");
     _make_capsule(workdir, "test/pkg", "1.0.0");
-    _make_curl_shim_capture_url(shim_dir);
-    let e = _env_for(home, shim_dir, ["CAPTURE_URL_TO=" + captured]);
-    let _exit = process.run_capture([_sfn_bin(), "publish", workdir], e);
-    let _o = process.capture_take_stdout();
-    let _err = process.capture_take_stderr();
-    assert fs.exists(captured);
-    let url = _first_line(fs.readFile(captured));
-    assert url == "https://registry.acme.internal/api/publish";
+    let bin = _ensure_fixture_bin();
+    assert bin.length > 0;
+    let _served = with_background([bin], _fixture_env(fixture_dir), "", "publish-fixture", fn (server: Background) -> int {
+        assert server.handle.handle_id != 0;
+        assert _await_fixture_ready();
+        let e = _env_for(home, []);
+        let _exit = process.run_capture([_sfn_bin(), "publish", workdir], e);
+        let _o = process.capture_take_stdout();
+        let _err = process.capture_take_stderr();
+        return 0;
+    });
+    let last_path = fixture_dir + "/last_path";
+    assert fs.exists(last_path);
+    assert _first_line(fs.readFile(last_path)) == "/api/publish";
 }
 
 // ---- Test 12: SFN_REGISTRY env var overrides config file ----
-test "publish: SFN_REGISTRY env overrides config" ![io] {
+test "publish: SFN_REGISTRY env overrides config" ![clock, io, net] {
     let root = _test_root("t12");
     let home = root + "/home";
     let workdir = root + "/work";
-    let shim_dir = root + "/shim";
-    let captured = root + "/url";
+    let fixture_dir = root + "/fixture";
+    fs.createDirectory(fixture_dir, true);
     _write_credentials(home);
-    fs.writeFile(home + "/.sfn/config.toml", "[registry]\nurl = \"https://in-file.test\"\n");
+    fs.writeFile(home + "/.sfn/config.toml", "[registry]\nurl = \"http://127.0.0.1:9\"\n");
     _make_capsule(workdir, "test/pkg", "1.0.0");
-    _make_curl_shim_capture_url(shim_dir);
-    let e = _env_for(home, shim_dir, ["CAPTURE_URL_TO=" + captured, "SFN_REGISTRY=https://from-env.test"]);
-    let _exit = process.run_capture([_sfn_bin(), "publish", workdir], e);
-    let _o = process.capture_take_stdout();
-    let _err = process.capture_take_stderr();
-    assert fs.exists(captured);
-    let url = _first_line(fs.readFile(captured));
-    assert url == "https://from-env.test/api/publish";
+    let bin = _ensure_fixture_bin();
+    assert bin.length > 0;
+    let _served = with_background([bin], _fixture_env(fixture_dir), "", "publish-fixture", fn (server: Background) -> int {
+        assert server.handle.handle_id != 0;
+        assert _await_fixture_ready();
+        let e = _env_for(home, ["SFN_REGISTRY=http://127.0.0.1:" + _fixture_port()]);
+        let _exit = process.run_capture([_sfn_bin(), "publish", workdir], e);
+        let _o = process.capture_take_stdout();
+        let _err = process.capture_take_stderr();
+        return 0;
+    });
+    let last_path = fixture_dir + "/last_path";
+    // The server recording a request at all (rather than the config file's
+    // unreachable http://127.0.0.1:9) proves the env var won.
+    assert fs.exists(last_path);
+    assert _first_line(fs.readFile(last_path)) == "/api/publish";
 }
 
 // ---- Test 13: SFN_REGISTRY strips trailing slash ----
-test "publish: SFN_REGISTRY strips trailing slash" ![io] {
+test "publish: SFN_REGISTRY strips trailing slash" ![clock, io, net] {
     let root = _test_root("t13");
     let home = root + "/home";
     let workdir = root + "/work";
-    let shim_dir = root + "/shim";
-    let captured = root + "/url";
+    let fixture_dir = root + "/fixture";
+    fs.createDirectory(fixture_dir, true);
     _write_credentials(home);
     _make_capsule(workdir, "test/pkg", "1.0.0");
-    _make_curl_shim_capture_url(shim_dir);
-    let e = _env_for(home, shim_dir, ["CAPTURE_URL_TO=" + captured, "SFN_REGISTRY=https://slashy.test/"]);
-    let _exit = process.run_capture([_sfn_bin(), "publish", workdir], e);
-    let _o = process.capture_take_stdout();
-    let _err = process.capture_take_stderr();
-    assert fs.exists(captured);
-    let url = _first_line(fs.readFile(captured));
-    assert url == "https://slashy.test/api/publish";
+    let bin = _ensure_fixture_bin();
+    assert bin.length > 0;
+    let _served = with_background([bin], _fixture_env(fixture_dir), "", "publish-fixture", fn (server: Background) -> int {
+        assert server.handle.handle_id != 0;
+        assert _await_fixture_ready();
+        let e = _env_for(home, ["SFN_REGISTRY=http://127.0.0.1:" + _fixture_port()
+            + "/"]);
+        let _exit = process.run_capture([_sfn_bin(), "publish", workdir], e);
+        let _o = process.capture_take_stdout();
+        let _err = process.capture_take_stderr();
+        return 0;
+    });
+    let last_path = fixture_dir + "/last_path";
+    assert fs.exists(last_path);
+    // Exactly "/api/publish" — NOT "//api/publish" — is precisely the
+    // trailing-slash claim.
+    assert _first_line(fs.readFile(last_path)) == "/api/publish";
 }
 
 // ---- SFEP-0020 §3.6 / SFN-714: [capsule] publish = false private-capsule
@@ -467,7 +545,7 @@ test "publish: private capsule is rejected before credential discovery" ![io] {
     // run would fail on the missing token instead of the private-capsule
     // rejection. Asserting the token message's absence is the ordering proof.
     _make_capsule_with_publish(workdir, "private/cap", "1.0.0", "publish = false");
-    let e = _env_for(home, "", []);
+    let e = _env_for(home, []);
     let _exit = process.run_capture([_sfn_bin(), "publish", workdir], e);
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
@@ -481,46 +559,64 @@ test "publish: private capsule is rejected before credential discovery" ![io] {
 }
 
 // ---- Test 15: private capsule makes no network call ----
-test "publish: private capsule makes no network call" ![io] {
+test "publish: private capsule makes no network call" ![clock, io, net] {
     let root = _test_root("t15");
     let home = root + "/home";
     let workdir = root + "/work";
-    let shim_dir = root + "/shim";
-    let captured = root + "/body";
+    let fixture_dir = root + "/fixture";
+    fs.createDirectory(fixture_dir, true);
     _write_credentials(home);
     _make_capsule_with_publish(workdir, "private/cap", "1.0.0", "publish = false");
-    _make_curl_shim_capture_body(shim_dir);
-    let e = _env_for(home, shim_dir, ["CAPTURE_BODY_TO=" + captured]);
-    let _exit = process.run_capture([_sfn_bin(), "publish", workdir], e);
-    let out = process.capture_take_stdout();
-    let err = process.capture_take_stderr();
-    let all = out + err;
-    assert _exit != 0;
-    assert contains(all, "is private and cannot be published");
-    // curl was never invoked, so the shim never wrote the capture file.
-    assert ! fs.exists(captured);
-    assert ! contains(all, "packaging");
+    let bin = _ensure_fixture_bin();
+    assert bin.length > 0;
+    let _served = with_background([bin], _fixture_env(fixture_dir), "", "publish-fixture", fn (server: Background) -> int {
+        assert server.handle.handle_id != 0;
+        assert _await_fixture_ready();
+        let e = _env_for(home, ["SFN_REGISTRY=http://127.0.0.1:" + _fixture_port()]);
+        let _exit = process.run_capture([_sfn_bin(), "publish", workdir], e);
+        let out = process.capture_take_stdout();
+        let err = process.capture_take_stderr();
+        let all = out + err;
+        assert _exit != 0;
+        assert contains(all, "is private and cannot be published");
+        assert ! contains(all, "packaging");
+        return 0;
+    });
+    // The fixture server never recorded a request: with no system client
+    // in the loop, the gate still blocked before any HTTP call reached the
+    // wire.
+    assert ! fs.exists(fixture_dir + "/last_path");
 }
 
 // ---- Test 16: registry override cannot bypass the private gate ----
-test "publish: registry override cannot bypass the private gate" ![io] {
+test "publish: registry override cannot bypass the private gate" ![clock, io, net] {
     let root = _test_root("t16");
     let home = root + "/home";
     let workdir = root + "/work";
-    let shim_dir = root + "/shim";
-    let captured = root + "/url";
+    let fixture_dir = root + "/fixture";
+    fs.createDirectory(fixture_dir, true);
     _write_credentials(home);
     _make_capsule_with_publish(workdir, "private/cap", "1.0.0", "publish = false");
-    _make_curl_shim_capture_url(shim_dir);
-    let e = _env_for(home, shim_dir, ["CAPTURE_URL_TO=" + captured, "SFN_REGISTRY=http://127.0.0.1:9/private-bypass"]);
-    let _exit = process.run_capture([_sfn_bin(), "publish", workdir], e);
-    let out = process.capture_take_stdout();
-    let err = process.capture_take_stderr();
-    let all = out + err;
-    assert _exit != 0;
-    assert contains(all, "is private and cannot be published");
-    assert ! fs.exists(captured);
-    assert ! contains(all, "packaging");
+    let bin = _ensure_fixture_bin();
+    assert bin.length > 0;
+    let _served = with_background([bin], _fixture_env(fixture_dir), "", "publish-fixture", fn (server: Background) -> int {
+        assert server.handle.handle_id != 0;
+        assert _await_fixture_ready();
+        let e = _env_for(home, ["SFN_REGISTRY=http://127.0.0.1:" + _fixture_port()]);
+        let _exit = process.run_capture([_sfn_bin(), "publish", workdir], e);
+        let out = process.capture_take_stdout();
+        let err = process.capture_take_stderr();
+        let all = out + err;
+        assert _exit != 0;
+        assert contains(all, "is private and cannot be published");
+        assert ! contains(all, "packaging");
+        return 0;
+    });
+    // Pointing the override at a real, reachable server (rather than the
+    // old unreachable 127.0.0.1:9) makes the "no call happened" proof
+    // strictly stronger: if the gate failed, the server would have
+    // recorded the request.
+    assert ! fs.exists(fixture_dir + "/last_path");
 }
 
 // ---- Test 17: cwd discovery cannot bypass the private gate ----
@@ -534,7 +630,7 @@ test "publish: cwd discovery cannot bypass the private gate" ![io] {
     _write_credentials(home);
     _make_capsule_with_publish(workdir, "private/cap", "1.0.0", "publish = false");
     let bin = _abs_sfn_bin();
-    let e = _env_for(home, "", []);
+    let e = _env_for(home, []);
     let _exit = process.run_capture(["sh", "-c", "cd '" + workdir
         + "' && exec '"
         + bin
@@ -548,61 +644,79 @@ test "publish: cwd discovery cannot bypass the private gate" ![io] {
 }
 
 // ---- Test 18: explicit publish = true preserves publishing ----
-test "publish: explicit publish = true preserves publishing" ![io] {
+test "publish: explicit publish = true preserves publishing" ![clock, io, net] {
     let root = _test_root("t18");
     let home = root + "/home";
     let workdir = root + "/work";
-    let shim_dir = root + "/shim";
-    let captured = root + "/body";
+    let fixture_dir = root + "/fixture";
+    fs.createDirectory(fixture_dir, true);
     _write_credentials(home);
     _make_capsule_with_publish(workdir, "test/pkg", "1.0.0", "publish = true");
-    _make_curl_shim_capture_body(shim_dir);
-    let e = _env_for(home, shim_dir, ["CAPTURE_BODY_TO=" + captured]);
-    let _exit = process.run_capture([_sfn_bin(), "publish", workdir], e);
-    let out = process.capture_take_stdout();
-    let err = process.capture_take_stderr();
-    assert contains(out + err, "packaging test/pkg@1.0.0");
-    assert fs.exists(captured);
+    let bin = _ensure_fixture_bin();
+    assert bin.length > 0;
+    let _served = with_background([bin], _fixture_env(fixture_dir), "", "publish-fixture", fn (server: Background) -> int {
+        assert server.handle.handle_id != 0;
+        assert _await_fixture_ready();
+        let e = _env_for(home, ["SFN_REGISTRY=http://127.0.0.1:" + _fixture_port()]);
+        let _exit = process.run_capture([_sfn_bin(), "publish", workdir], e);
+        let out = process.capture_take_stdout();
+        let err = process.capture_take_stderr();
+        assert contains(out + err, "packaging test/pkg@1.0.0");
+        return 0;
+    });
+    assert fs.exists(fixture_dir + "/last_body");
 }
 
 // ---- Test 19: omitted publish preserves publishing ----
-test "publish: omitted publish preserves publishing" ![io] {
+test "publish: omitted publish preserves publishing" ![clock, io, net] {
     let root = _test_root("t19");
     let home = root + "/home";
     let workdir = root + "/work";
-    let shim_dir = root + "/shim";
-    let captured = root + "/body";
+    let fixture_dir = root + "/fixture";
+    fs.createDirectory(fixture_dir, true);
     _write_credentials(home);
     _make_capsule(workdir, "test/pkg", "1.0.0");
-    _make_curl_shim_capture_body(shim_dir);
-    let e = _env_for(home, shim_dir, ["CAPTURE_BODY_TO=" + captured]);
-    let _exit = process.run_capture([_sfn_bin(), "publish", workdir], e);
-    let out = process.capture_take_stdout();
-    let err = process.capture_take_stderr();
-    assert contains(out + err, "packaging test/pkg@1.0.0");
-    assert fs.exists(captured);
+    let bin = _ensure_fixture_bin();
+    assert bin.length > 0;
+    let _served = with_background([bin], _fixture_env(fixture_dir), "", "publish-fixture", fn (server: Background) -> int {
+        assert server.handle.handle_id != 0;
+        assert _await_fixture_ready();
+        let e = _env_for(home, ["SFN_REGISTRY=http://127.0.0.1:" + _fixture_port()]);
+        let _exit = process.run_capture([_sfn_bin(), "publish", workdir], e);
+        let out = process.capture_take_stdout();
+        let err = process.capture_take_stderr();
+        assert contains(out + err, "packaging test/pkg@1.0.0");
+        return 0;
+    });
+    assert fs.exists(fixture_dir + "/last_body");
 }
 
 // ---- Test 20: invalid publish value is a manifest error ----
-test "publish: invalid publish value is a manifest error" ![io] {
+test "publish: invalid publish value is a manifest error" ![clock, io, net] {
     let root = _test_root("t20");
     let home = root + "/home";
     let workdir = root + "/work";
-    let shim_dir = root + "/shim";
-    let captured = root + "/body";
+    let fixture_dir = root + "/fixture";
+    fs.createDirectory(fixture_dir, true);
     _write_credentials(home);
     // A quoted string must not be coerced to either boolean.
     _make_capsule_with_publish(workdir, "test/pkg", "1.0.0", "publish = \"false\"");
-    _make_curl_shim_capture_body(shim_dir);
-    let e = _env_for(home, shim_dir, ["CAPTURE_BODY_TO=" + captured]);
-    let _exit = process.run_capture([_sfn_bin(), "publish", workdir], e);
-    let out = process.capture_take_stdout();
-    let err = process.capture_take_stderr();
-    let all = out + err;
-    assert _exit != 0;
-    assert contains(all, "manifest error");
-    assert ! contains(all, "packaging");
-    assert ! fs.exists(captured);
+    let bin = _ensure_fixture_bin();
+    assert bin.length > 0;
+    let _served = with_background([bin], _fixture_env(fixture_dir), "", "publish-fixture", fn (server: Background) -> int {
+        assert server.handle.handle_id != 0;
+        assert _await_fixture_ready();
+        let e = _env_for(home, ["SFN_REGISTRY=http://127.0.0.1:" + _fixture_port()]);
+        let _exit = process.run_capture([_sfn_bin(), "publish", workdir], e);
+        let out = process.capture_take_stdout();
+        let err = process.capture_take_stderr();
+        let all = out + err;
+        assert _exit != 0;
+        assert contains(all, "manifest error");
+        assert ! contains(all, "packaging");
+        return 0;
+    });
+    assert ! fs.exists(fixture_dir + "/last_path");
 }
 
 // ---- Test 21: the compiler's own manifest reaches the private gate ----
@@ -612,7 +726,7 @@ test "publish: compiler capsule is rejected before credential discovery" ![io] {
     fs.createDirectory(home, true);
     // The real compiler manifest must reach E0612 before an empty HOME can
     // trigger credential discovery or packaging.
-    let e = _env_for(home, "", []);
+    let e = _env_for(home, []);
     let _exit = process.run_capture([_sfn_bin(), "publish", "compiler"], e);
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
