@@ -36,6 +36,17 @@ extern fn mkstemp(template: *u8) -> i32;
 
 extern fn close(fd: i32) -> i32;
 
+// `opendir`/`closedir` back `_dir_is_enumerable` below. Only the open and
+// the close are declared because whether `opendir` succeeds is the entire
+// question; reading the entries out is `fs.listDirectory`'s job. Like
+// `mkstemp` and `close` above, these are POSIX spellings absent from the
+// MSVC UCRT, and unlike `mkstemp` they have no sibling Windows module yet,
+// so they remain unresolved symbols on the native MSVC leg — the same gap
+// `close` already carries, inventoried in SFN-646.
+extern fn opendir(path: *u8) -> *u8;
+
+extern fn closedir(dirp: *u8) -> i32;
+
 // `realpath(path, null)` — libc allocates the resolved buffer. Backs
 // `_cwd_cmd` below. Declared module-locally rather than imported from
 // `cli/entry.sfn`, which declares the same extern, per the SFN-635
@@ -610,6 +621,25 @@ fn _strip_trailing_slashes_cmd(path: string) -> string {
     return result;
 }
 
+// Can `path` actually be opened for enumeration, as opposed to being
+// empty? `fs.listDirectory` answers both questions with `[]` — returning
+// an empty array rather than null is what lets its callers iterate
+// unconditionally (`runtime/sfn/adapters/filesystem.sfn`) — so a caller
+// that must not fabricate success re-probes an empty listing with this.
+//
+// `opendir` is the honest test because it is the exact call whose failure
+// `fs.listDirectory` swallows: `EACCES`, fd exhaustion, `ENOMEM`. A
+// permission-bit reading via `fs.get_perms` would be cheaper and wrong in
+// both directions — it cannot see fd pressure, and it answers "unreadable"
+// for root, who may enumerate a mode-000 directory perfectly well.
+fn _dir_is_enumerable(path: string) -> boolean ![io] {
+    if path.length == 0 { return false; }
+    let handle: *u8 = opendir(path as *u8);
+    if handle as i64 == 0 { return false; }
+    closedir(handle);
+    return true;
+}
+
 fn _collect_sfn_files_cmd(root: string, max_depth: int) -> string[] ![io] {
     let mut results: string[] = [];
     // Single-file fast path — but only for a file that is actually there.
@@ -845,6 +875,7 @@ export {
     CopyOutcome,
     _copy_file_counted,
     _file_size_of,
+    _dir_is_enumerable,
     _ensure_dir_cmd,
     _ensure_dir_recursive_cmd,
     _write_text_cmd,

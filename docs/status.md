@@ -415,8 +415,8 @@ here.
   a new bounded `copy_tree` (`compiler/src/build/fs_tree.sfn`, joining
   `remove_tree`/`walk_dirs`/`ensure_dir_p`, sharing their 16-depth/200000-node
   bounds and returning `false` on hitting either rather than fabricating a
-  `true`; it cannot yet detect the third truncation source, a directory it
-  failed to enumerate, because `fs.listDirectory` reports that as empty —
+  `true`, and re-probing an empty listing with `opendir` so a directory it
+  could not enumerate is also a `false` rather than a silent truncation —
   SFN-892)
   and `_file_size_of` (`compiler/src/build/fs.sfn`, replacing `wc -c`, `0` on
   read failure) retire every `mkdir -p`/`rm -rf`/`cp -f`/`cp -R`/`wc -c` spawn
