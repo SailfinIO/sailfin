@@ -413,6 +413,61 @@ fn _copy_file(src: string, dst: string) -> boolean ![io] {
     return _copy_file_counted(src, dst).ok;
 }
 
+// `path`'s size in bytes, the shell-free replacement for `wc -c < path`.
+// Returns `0` on any failure — a missing file, an unreadable one, or a
+// read error — matching the contract the `wc` spawn it displaces already
+// had, so no caller changes.
+//
+// Reads and discards the bytes rather than seeking. `fseek(SEEK_END)` +
+// `ftell` would be O(1) instead of O(n), but `ftell` returns `long`,
+// which is 32-bit on Win64: the size would silently truncate above 2 GiB
+// and the correct Windows spelling is `_ftelli64`, a per-platform
+// divergence needing a `platform/` sibling module. Not worth it for a
+// probe that runs three times per `sfn package`; the same reasoning
+// `runtime/sfn/adapters/filesystem.sfn` records for avoiding the
+// seek/tell pair. `_read_file_bytes(path).length` is the other obvious
+// answer and is wrong for a different reason: it slurps the whole file
+// and hard-fails above its 512 MiB cap, so a large release artifact
+// would report `0`.
+//
+// Chunk size, buffer discipline, and the `max_chunks` guard are
+// `_copy_file_counted`'s, for the same reasons.
+fn _file_size_of(path: string) -> int ![io] {
+    let read_mode: string = "rb";
+    let fin: *File = fopen(path as *u8, read_mode as *u8);
+    if fin as i64 == 0 { return 0; }
+
+    let chunk: i64 = 65536;
+    let buf: *u8 = malloc(chunk as usize);
+    if buf as i64 == 0 {
+        fclose(fin);
+        return 0;
+    }
+
+    let mut ok: boolean = true;
+    let mut total: i64 = 0;
+    let mut guard: i64 = 0;
+    let max_chunks: i64 = 1000000;
+    loop {
+        guard += 1;
+        if guard > max_chunks {
+            ok = false;
+            break;
+        }
+        let got: i64 = fread(buf, 1 as usize, chunk as usize, fin) as i64;
+        // A short read is EOF *or* a hard read error; the `ferror` check
+        // below is what tells them apart.
+        if got <= 0 { break; }
+        total += got;
+    }
+
+    if ferror(fin) != 0 { ok = false; }
+    free(buf);
+    fclose(fin);
+    if !ok { return 0; }
+    return total as int;
+}
+
 fn _toml_trim_cmd(text: string) -> string {
     let mut s: int = 0;
     let mut e: int = text.length;
@@ -760,6 +815,7 @@ export {
     _copy_file,
     CopyOutcome,
     _copy_file_counted,
+    _file_size_of,
     _ensure_dir_cmd,
     _ensure_dir_recursive_cmd,
     _write_text_cmd,

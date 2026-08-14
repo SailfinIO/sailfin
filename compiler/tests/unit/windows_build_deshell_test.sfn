@@ -22,6 +22,7 @@ import { _mktemp_sibling_cmd, _sha256_of_file } from "../../src/build/fs";
 import { build_target_os, host_is_windows } from "../../src/build/target";
 import { CacheKey, cache_touch_entry } from "../../src/build_cache";
 import { _cr_jobs_from_probe, _cr_resolve_jobs } from "../../src/capsule_emit_parallel";
+import { _package_detect_target } from "../../src/cli/commands/package";
 
 // SFN-498 adds a second env seam to the same file: `SAILFIN_BUILD_JOBS` is
 // now read ahead of every host branch, so `=1` forces the serial emit path
@@ -144,4 +145,16 @@ test "windows-deshell: cache LRU touch succeeds on either host" ![io] {
     assert ! cache_touch_entry(root, CacheKey { digest: absent });
 
     process.run(["rm", "-rf", scratch]);
+}
+
+// SFN-495: `_package_detect_target` used to read `uname -s`/`uname -m` via
+// `_shell_read_cmd`, which self-disables on Windows and returns "" — turned
+// into a hard failure by this function, so `sfn package` died at
+// argument-parse time before reaching any argv site (the identical bug
+// SFN-857 fixed in `toolchain.sfn::_detect_os`). It now derives the OS from
+// `build_host_os()` and fixes the arch to `x86_64` on the Windows leg.
+test "windows-deshell: _package_detect_target resolves on a Windows host" ![io] {
+    let target = _package_detect_target();
+    assert target.length > 0;
+    if host_is_windows() { assert target == "windows-x86_64"; }
 }

@@ -32,8 +32,14 @@ import {
 } from "sfn/cli";
 import { int_to_string } from "sfn/strings";
 
-import { _sha256_of_file, _shell_read_cmd, _shell_single_quote_arg } from "../../build/fs";
-import { host_exe_name } from "../../build/target";
+import {
+    _copy_file,
+    _file_size_of,
+    _sha256_of_file,
+    _shell_read_cmd
+} from "../../build/fs";
+import { copy_tree, ensure_dir_p, remove_tree } from "../../build/fs_tree";
+import { build_host_os, host_exe_name } from "../../build/target";
 import { is_safe_scope_name, parse_scope_name } from "../../capsule_artifact";
 import { locate_runtime_dep_capsule_src } from "../../capsule_resolver/locate";
 import { DistManifest, dist_manifest_to_json, empty_dist_manifest } from "../../dist_manifest";
@@ -74,6 +80,11 @@ import { _is_safe_capsule_version_cmd, _package_basename } from "./cmd_shared";
 // <path>`) first. Auto-rebuilding from inside a Sailfin-native
 // command shelling out to `make` is a bootstrapping smell (the
 // compiler would be rebuilding itself before packaging itself).
+//
+// SFN-495 de-shelled every `mkdir`/`rm`/`cp`/`wc` spawn onto `fs.*`
+// and `build/fs_tree.sfn`, but `sfn package` still cannot run on a
+// native Windows host: the three `tar -czf` sites remain unmigrated
+// pending in-process `.tar.gz` writing (SFN-753).
 fn handle_package_command(args: string[]) -> int ![io] {
     // Parse args.
     let mut target_arg: string = "";
@@ -159,12 +170,22 @@ fn handle_package_command(args: string[]) -> int ![io] {
     return _package_user_capsule(target, out_dir, capsule_path);
 }
 
-// Map `uname -s` + `uname -m` → canonical target string.
+// Map the host OS/arch to a canonical target string.
 // Falls back to `unknown-<s>-<m>` for unrecognised pairs.
+//
+// `os` comes from `build_host_os()` rather than a `uname -s` shell
+// read: `_shell_read_cmd` self-disables on Windows and returns "",
+// which this function used to turn into a hard failure before
+// reaching any argv site (SFN-857 fixed the identical bug in
+// `toolchain.sfn::_detect_os`). The Windows arch leg is fixed to
+// `x86_64` rather than probed — `triple_is_supported`
+// (`build/target.sfn`) admits no arm64 Windows target, so there is
+// nothing for a probe to distinguish.
 fn _package_detect_target() -> string ![io] {
-    let os = _shell_read_cmd("uname -s");
-    let arch = _shell_read_cmd("uname -m");
+    let os = build_host_os();
     if os.length == 0 { return ""; }
+    if strings_equal(os, "Windows") { return "windows-x86_64"; }
+    let arch = _shell_read_cmd("uname -m");
     if arch.length == 0 { return ""; }
     if strings_equal(os, "Linux") {
         if strings_equal(arch, "x86_64") { return "linux-x86_64"; }
@@ -198,7 +219,7 @@ fn _package_compiler(target: string, out_dir: string, compiler_bin: string) -> i
         return 1;
     }
     // Defence-in-depth: `version` is interpolated into the tarball
-    // stem (used as a filename and as a `wc -c < <path>` argument).
+    // stem, which is a filename, and into the `tar` argv below.
     // A malformed manifest with `version = "x'$(rm)"` would otherwise
     // produce a path-traversal or shell-metachar surface. The
     // sanitiser blocks `/`, `\`, `..` traversal components.
@@ -213,36 +234,40 @@ fn _package_compiler(target: string, out_dir: string, compiler_bin: string) -> i
     let staging_bin = staging_root + "/bin";
 
     // Staging is wiped on entry AND exit so a prior failed run
-    // can't bleed contents into this run.
-    process.run(["rm", "-rf", staging]);
-    process.run(["mkdir", "-p", staging_bin]);
-    let cp1 = process.run(["cp", "-f", compiler_bin, staging_bin + "/sailfin"]);
-    let cp2 = process.run(["cp", "-f", compiler_bin, staging_bin + "/sfn"]);
-    if cp1 != 0 {
-        print("sfn package: failed to stage sailfin binary");
-        process.run(["rm", "-rf", staging]);
+    // can't bleed contents into this run. The entry wipe's result is
+    // checked (unlike the exit wipes below): a failed `rm -rf` used to
+    // discard its exit status, so a prior run's files could bleed
+    // silently into this run's tarball — a release artifact.
+    if !remove_tree(staging) {
+        print("sfn package: failed to wipe staging directory " + staging);
         return 1;
     }
-    if cp2 != 0 {
+    ensure_dir_p(staging_bin);
+    if !_copy_file(compiler_bin, staging_bin + "/sailfin") {
+        print("sfn package: failed to stage sailfin binary");
+        remove_tree(staging);
+        return 1;
+    }
+    if !_copy_file(compiler_bin, staging_bin + "/sfn") {
         print("sfn package: failed to stage sfn binary");
-        process.run(["rm", "-rf", staging]);
+        remove_tree(staging);
         return 1;
     }
 
-    process.run(["mkdir", "-p", out_dir]);
+    ensure_dir_p(out_dir);
     let tarball = out_dir + "/" + stem + ".tar.gz";
     let tar_rc = process.run(["tar", "-czf", tarball, "-C", staging, "sailfin-native-"
         + target,]);
     if tar_rc != 0 {
         print("sfn package: tar failed (exit=" + int_to_string(tar_rc) + ")");
-        process.run(["rm", "-rf", staging]);
+        remove_tree(staging);
         return 1;
     }
 
     let digest = _sha256_of_file(tarball);
     if digest.length == 0 {
         print("sfn package: failed to compute sha256 for " + tarball);
-        process.run(["rm", "-rf", staging]);
+        remove_tree(staging);
         return 1;
     }
     fs.writeFile(tarball + ".sha256", digest + "\n");
@@ -266,7 +291,7 @@ fn _package_compiler(target: string, out_dir: string, compiler_bin: string) -> i
     let manifest_out = out_dir + "/" + stem + ".manifest.json";
     fs.writeFile(manifest_out, dist_manifest_to_json(manifest));
 
-    process.run(["rm", "-rf", staging]);
+    remove_tree(staging);
 
     print("[package] created " + tarball);
     print("[package] created " + tarball + ".sha256");
@@ -359,19 +384,22 @@ fn _package_installer(target: string, out_dir: string, compiler_bin: string) -> 
     let staging = "build/sailfin/.installer-staging";
     let staging_bin = staging + "/bin";
     let staging_runtime = staging + "/runtime";
-    process.run(["rm", "-rf", staging]);
-    process.run(["mkdir", "-p", staging_bin]);
-    process.run(["mkdir", "-p", staging_runtime]);
-    let cp1 = process.run(["cp", "-f", compiler_bin, staging_bin + "/sailfin"]);
-    let cp2 = process.run(["cp", "-f", compiler_bin, staging_bin + "/sfn"]);
-    if cp1 != 0 {
-        print("sfn package: failed to stage sailfin binary");
-        process.run(["rm", "-rf", staging]);
+    // Staging is wiped on entry AND exit so a prior failed run can't
+    // bleed contents into this run.
+    if !remove_tree(staging) {
+        print("sfn package: failed to wipe staging directory " + staging);
         return 1;
     }
-    if cp2 != 0 {
+    ensure_dir_p(staging_bin);
+    ensure_dir_p(staging_runtime);
+    if !_copy_file(compiler_bin, staging_bin + "/sailfin") {
+        print("sfn package: failed to stage sailfin binary");
+        remove_tree(staging);
+        return 1;
+    }
+    if !_copy_file(compiler_bin, staging_bin + "/sfn") {
         print("sfn package: failed to stage sfn binary");
-        process.run(["rm", "-rf", staging]);
+        remove_tree(staging);
         return 1;
     }
 
@@ -382,14 +410,12 @@ fn _package_installer(target: string, out_dir: string, compiler_bin: string) -> 
     // copied below.
     if !fs.exists("runtime/capsule.toml") {
         print("sfn package: missing runtime/capsule.toml (was the build run from the repo root?)");
-        process.run(["rm", "-rf", staging]);
+        remove_tree(staging);
         return 1;
     }
-    let cp_runtime = process.run(["cp", "-f", "runtime/capsule.toml", staging_runtime
-        + "/capsule.toml"]);
-    if cp_runtime != 0 {
+    if !_copy_file("runtime/capsule.toml", staging_runtime + "/capsule.toml") {
         print("sfn package: failed to copy runtime/capsule.toml");
-        process.run(["rm", "-rf", staging]);
+        remove_tree(staging);
         return 1;
     }
 
@@ -410,26 +436,22 @@ fn _package_installer(target: string, out_dir: string, compiler_bin: string) -> 
     // sufficient; the `.o` were dead weight.
     if !fs.exists("runtime/prelude.sfn") {
         print("sfn package: missing runtime/prelude.sfn (was the build run from the repo root?)");
-        process.run(["rm", "-rf", staging]);
+        remove_tree(staging);
         return 1;
     }
-    let cp_prelude_src = process.run(["cp", "-f", "runtime/prelude.sfn", staging_runtime
-        + "/prelude.sfn"]);
-    if cp_prelude_src != 0 {
+    if !_copy_file("runtime/prelude.sfn", staging_runtime + "/prelude.sfn") {
         print("sfn package: failed to copy runtime/prelude.sfn");
-        process.run(["rm", "-rf", staging]);
+        remove_tree(staging);
         return 1;
     }
     if !fs.exists("runtime/sfn") {
         print("sfn package: missing runtime/sfn (was the build run from the repo root?)");
-        process.run(["rm", "-rf", staging]);
+        remove_tree(staging);
         return 1;
     }
-    let cp_sfn_src = process.run(["cp", "-R", "runtime/sfn", staging_runtime
-        + "/sfn"]);
-    if cp_sfn_src != 0 {
+    if !copy_tree("runtime/sfn", staging_runtime + "/sfn") {
         print("sfn package: failed to copy runtime/sfn sources");
-        process.run(["rm", "-rf", staging]);
+        remove_tree(staging);
         return 1;
     }
 
@@ -493,7 +515,7 @@ fn _package_installer(target: string, out_dir: string, compiler_bin: string) -> 
         if !is_safe_scope_name(dep_parts.scope, dep_parts.name) {
             print("sfn package: runtime dependency `" + dep_spec
                 + "` is not a safe scope/name");
-            process.run(["rm", "-rf", staging]);
+            remove_tree(staging);
             return 1;
         }
         let dep_loc = locate_runtime_dep_capsule_src(dep_anchor_dir, dep_spec);
@@ -501,19 +523,17 @@ fn _package_installer(target: string, out_dir: string, compiler_bin: string) -> 
             print("sfn package: cannot locate sources for runtime dependency `"
                 + dep_spec
                 + "` (was the build run from the repo root?)");
-            process.run(["rm", "-rf", staging]);
+            remove_tree(staging);
             return 1;
         }
         let dep_dest_dir = staging + "/capsules/" + dep_parts.scope + "/"
             + dep_parts.name;
-        process.run(["mkdir", "-p", dep_dest_dir]);
-        let cp_dep = process.run(["cp", "-R", dep_loc.src_dir, dep_dest_dir
-            + "/src"]);
-        if cp_dep != 0 {
+        ensure_dir_p(dep_dest_dir);
+        if !copy_tree(dep_loc.src_dir, dep_dest_dir + "/src") {
             print("sfn package: failed to bundle runtime dependency `"
                 + dep_spec
                 + "` sources");
-            process.run(["rm", "-rf", staging]);
+            remove_tree(staging);
             return 1;
         }
 
@@ -522,13 +542,11 @@ fn _package_installer(target: string, out_dir: string, compiler_bin: string) -> 
         let dep_root = substring(dep_loc.src_dir, 0, dep_loc.src_dir.length - 4);
         let dep_manifest = dep_root + "/capsule.toml";
         if fs.exists(dep_manifest) {
-            let cp_man = process.run(["cp", "-f", dep_manifest, dep_dest_dir
-                + "/capsule.toml"]);
-            if cp_man != 0 {
+            if !_copy_file(dep_manifest, dep_dest_dir + "/capsule.toml") {
                 print("sfn package: failed to bundle runtime dependency `"
                     + dep_spec
                     + "` manifest");
-                process.run(["rm", "-rf", staging]);
+                remove_tree(staging);
                 return 1;
             }
             let dep_text = fs.readFile(dep_manifest);
@@ -550,32 +568,29 @@ fn _package_installer(target: string, out_dir: string, compiler_bin: string) -> 
     // without it (they regenerate from the seed) but bundling
     // saves a rebuild on first use. Same logic as the prelude
     // copy: presence is conditional, but once present a
-    // failed `cp -R` is a bug, not a soft skip.
+    // failed copy is a bug, not a soft skip.
     if fs.exists("build/compiler/import-context") {
-        let cp_import_ctx = process.run(["cp", "-R", "build/compiler/import-context", staging
-            + "/import-context"]);
-        if cp_import_ctx != 0 {
-            print("sfn package: failed to stage import-context (cp exit="
-                + int_to_string(cp_import_ctx)
-                + ")");
-            process.run(["rm", "-rf", staging]);
+        if !copy_tree("build/compiler/import-context", staging
+            + "/import-context") {
+            print("sfn package: failed to stage import-context");
+            remove_tree(staging);
             return 1;
         }
     }
 
-    process.run(["mkdir", "-p", out_dir]);
+    ensure_dir_p(out_dir);
     let tarball = out_dir + "/" + stem + ".tar.gz";
     let tar_rc = process.run(["tar", "-czf", tarball, "-C", staging, ".",]);
     if tar_rc != 0 {
         print("sfn package: tar failed (exit=" + int_to_string(tar_rc) + ")");
-        process.run(["rm", "-rf", staging]);
+        remove_tree(staging);
         return 1;
     }
 
     let digest = _sha256_of_file(tarball);
     if digest.length == 0 {
         print("sfn package: failed to compute sha256 for " + tarball);
-        process.run(["rm", "-rf", staging]);
+        remove_tree(staging);
         return 1;
     }
     fs.writeFile(tarball + ".sha256", digest + "\n");
@@ -604,7 +619,7 @@ fn _package_installer(target: string, out_dir: string, compiler_bin: string) -> 
     let manifest_out = out_dir + "/" + stem + ".manifest.json";
     fs.writeFile(manifest_out, dist_manifest_to_json(dm));
 
-    process.run(["rm", "-rf", staging]);
+    remove_tree(staging);
 
     print("[package] created " + tarball);
     print("[package] created " + tarball + ".sha256");
@@ -695,58 +710,62 @@ fn _package_user_capsule(target: string, out_dir: string, capsule_path: string) 
     let staging = "build/sailfin/.package-staging";
     let staging_root = staging + "/" + safe_name + "-" + target;
 
-    process.run(["rm", "-rf", staging]);
-    process.run(["mkdir", "-p", staging_root]);
+    // Staging is wiped on entry AND exit so a prior failed run can't
+    // bleed contents into this run.
+    if !remove_tree(staging) {
+        print("sfn package: failed to wipe staging directory " + staging);
+        return 1;
+    }
+    ensure_dir_p(staging_root);
 
     // Stage the artifact under bin/ or obj/ depending on kind.
     let mut artifact_dest: string = "";
     if strings_equal(kind, "binary") {
-        process.run(["mkdir", "-p", staging_root + "/bin"]);
+        ensure_dir_p(staging_root + "/bin");
         // Use the artifact's basename for the tarball's bin entry.
         let bn = _package_basename(artifact_path);
         if bn.length == 0 {
             print("sfn package: could not derive binary basename from "
                 + artifact_path);
-            process.run(["rm", "-rf", staging]);
+            remove_tree(staging);
             return 1;
         }
         artifact_dest = staging_root + "/bin/" + bn;
     } else if strings_equal(kind, "library") {
-        process.run(["mkdir", "-p", staging_root + "/obj"]);
+        ensure_dir_p(staging_root + "/obj");
         artifact_dest = staging_root + "/obj/mod.o";
     } else {
         print("sfn package: unsupported kind \"" + kind
             + "\" (expected binary | library)");
-        process.run(["rm", "-rf", staging]);
+        remove_tree(staging);
         return 1;
     }
-    let cp_artifact = process.run(["cp", "-f", artifact_path, artifact_dest]);
-    if cp_artifact != 0 {
+    if !_copy_file(artifact_path, artifact_dest) {
         print("sfn package: failed to stage artifact " + artifact_path);
-        process.run(["rm", "-rf", staging]);
+        remove_tree(staging);
         return 1;
     }
     // Self-describing: copy the sidecar AND capsule.toml so a
     // consumer of the tarball can see what they got without
     // re-running the build.
-    process.run(["cp", "-f", sidecar_path, staging_root + "/manifest.json"]);
-    process.run(["cp", "-f", manifest_path, staging_root + "/capsule.toml"]);
+    _copy_file(sidecar_path, staging_root + "/manifest.json");
+    _copy_file(manifest_path, staging_root + "/capsule.toml");
 
-    process.run(["mkdir", "-p", out_dir]);
+    ensure_dir_p(out_dir);
     let tarball = out_dir + "/" + stem + ".tar.gz";
     let tar_rc = process.run(["tar", "-czf", tarball, "-C", staging, safe_name
         + "-"
         + target,]);
     if tar_rc != 0 {
         print("sfn package: tar failed (exit=" + int_to_string(tar_rc) + ")");
-        process.run(["rm", "-rf", staging]);
+        remove_tree(staging);
         return 1;
     }
 
     let digest = _sha256_of_file(tarball);
     if digest.length == 0 {
         print("sfn package: failed to compute sha256 for " + tarball);
-        process.run(["rm", "-rf", staging]);
+        remove_tree(staging);
         return 1;
     }
     fs.writeFile(tarball + ".sha256", digest + "\n");
@@ -770,7 +789,7 @@ fn _package_user_capsule(target: string, out_dir: string, capsule_path: string) 
     let manifest_out = out_dir + "/" + stem + ".manifest.json";
     fs.writeFile(manifest_out, dist_manifest_to_json(manifest));
 
-    process.run(["rm", "-rf", staging]);
+    remove_tree(staging);
 
     print("[package] created " + tarball);
     print("[package] created " + tarball + ".sha256");
@@ -778,32 +797,11 @@ fn _package_user_capsule(target: string, out_dir: string, capsule_path: string) 
     return 0;
 }
 
-// `wc -c < path` returns a base-10 size. Returns 0 on read failure.
-// `path` is shell-quoted via `_shell_single_quote_arg` so paths
-// containing `'` (or other shell metacharacters) can't break out
-// of the `sh -c` interpolation in `_shell_read_cmd`.
+// Thin alias over `_file_size_of` (`build/fs.sfn`), kept so call sites
+// elsewhere in this module don't change shape. Returns 0 on read
+// failure.
 fn _package_size_of_file(path: string) -> int ![io] {
-    let raw = _shell_read_cmd("wc -c < " + _shell_single_quote_arg(path));
-    if raw.length == 0 { return 0; }
-    let mut value: int = 0;
-    let mut i: int = 0;
-    loop {
-        if i >= raw.length { break; }
-        let ch = substring(raw, i, i + 1);
-        if ch == "0" { value = value * 10; } else if ch == "1" {
-            value = value * 10 + 1;
-        } else if ch == "2" { value = value * 10 + 2; } else if ch == "3" {
-            value = value * 10 + 3;
-        } else if ch == "4" { value = value * 10 + 4; } else if ch == "5" {
-            value = value * 10 + 5;
-        } else if ch == "6" { value = value * 10 + 6; } else if ch == "7" {
-            value = value * 10 + 7;
-        } else if ch == "8" { value = value * 10 + 8; } else if ch == "9" {
-            value = value * 10 + 9;
-        } else { break; }
-        i += 1;
-    }
-    return value;
+    return _file_size_of(path);
 }
 
 // Replace `/` and `\` in a capsule name with `-` so it's safe to
