@@ -23,12 +23,19 @@
 //     (and make a mismatched artifact visible in a directory listing
 //     rather than silently mislabelled).
 //
-// Pure assertions over the two composers — no build, no link, no target
-// probe — so both legs are exercised on any host.
+// SFN-870 extends the same file to the third axis of a runtime object's
+// identity, the module SLUG, in its own section at the bottom.
+//
+// Pure assertions over the composers — no build, no link, no target
+// probe — so every leg is exercised on any host.
 import { contains } from "sfn/strings";
 import { expect_eq_bool, expect_eq_str } from "sfn/test";
 
-import { _runtime_obj_key_with_target, _runtime_obj_stem } from "../../src/build/runtime_objs";
+import {
+    _runtime_obj_key_with_slug,
+    _runtime_obj_key_with_target,
+    _runtime_obj_stem
+} from "../../src/build/runtime_objs";
 import { target_artifact_tag } from "../../src/build/target";
 
 // ---- The stem: filename isolation ----
@@ -168,4 +175,86 @@ test "runtime-obj identity: one source yields a distinct stem and key per target
     let windows_key = _runtime_obj_key_with_target("BASE", "Windows");
     assert expect_eq_bool(linux_stem == windows_stem, false).ok;
     assert expect_eq_bool(linux_key == windows_key, false).ok;
+}
+
+// ---- SFN-870: the module slug is part of the object's identity ----
+//
+// The `.o`-side twin of the SFN-861 `asm1:` fold. The object is compiled
+// from a `.ll` carrying slug-derived symbol names, emitted from a
+// `.sfn-asm` whose first directive is `.module <slug>` — so two
+// byte-identical sources built under different slugs produce different
+// object bytes. Before this fold they hashed to one address: the base key
+// sees only source bytes, an opt-flag tag and the compiler identity, and
+// `_runtime_obj_key_with_sibling_deps` spends its `slug` argument on the
+// `.import-deps` lookup alone, returning the base key byte-for-byte for a
+// module with no sidecar. Reverting the `"\nobj1:" + slug` line in
+// `_runtime_obj_key_with_slug` fails the discrimination tests below.
+test "runtime-obj identity: key folds the slug under a scheme tag" ![pure] {
+    // Pinning the literal keeps the scheme greppable and makes an
+    // accidental format change loud, matching the `tgt2:` pin above.
+    assert expect_eq_str(_runtime_obj_key_with_slug("BASE", "runtime/sfn/string"), "BASE\nobj1:runtime/sfn/string").ok;
+}
+
+test "runtime-obj identity: keys differ across slugs for one base key" ![pure] {
+    // The SFN-870 contract. Identical source content, opt flag, compiler
+    // identity and sibling deps all collapse into one base key; only the
+    // slug distinguishes them. The realistic collision is a shared
+    // helper re-exported into a dep capsule's own namespace, or a module
+    // split whose halves are briefly identical.
+    let a = _runtime_obj_key_with_slug("SAME-BASE", "runtime/sfn/util");
+    let b = _runtime_obj_key_with_slug("SAME-BASE", "dep/sfn/util");
+    assert expect_eq_bool(a == b, false).ok;
+}
+
+test "runtime-obj identity: a one-character slug difference still separates keys" ![pure] {
+    // No prefix-collapsing or truncation in the fold: the whole slug is
+    // key material.
+    let a = _runtime_obj_key_with_slug("SAME-BASE", "runtime/sfn/io");
+    let b = _runtime_obj_key_with_slug("SAME-BASE", "runtime/sfn/io2");
+    assert expect_eq_bool(a == b, false).ok;
+}
+
+test "runtime-obj identity: an unhashable base key stays empty under the slug fold" ![pure] {
+    // "" is the always-recompile fallback the callers propagate. Folding
+    // a slug onto it must not manufacture a usable key, matching the
+    // target fold's behaviour on the same input.
+    assert expect_eq_str(_runtime_obj_key_with_slug("", "runtime/sfn/string"), "").ok;
+}
+
+test "runtime-obj identity: slug fold composition is stable across calls" ![pure] {
+    // A key that varied per call would miss on every build, silently
+    // turning the cache off rather than failing loudly.
+    let first = _runtime_obj_key_with_slug("BASE", "runtime/prelude");
+    let second = _runtime_obj_key_with_slug("BASE", "runtime/prelude");
+    assert expect_eq_str(first, second).ok;
+}
+
+test "runtime-obj identity: the slug fold nests inside the target fold, leaving the triple last" ![pure] {
+    // Both `.sfn`-source call sites — `_prepare_runtime_sfn_object` and
+    // `write_runtime_identity_stamp`'s stamped entry — compose the two
+    // folds in this order. The triple stays last with nothing after it,
+    // preserving the SFN-677 absorption guarantee that the target fold's
+    // own comment documents.
+    let composed = _runtime_obj_key_with_target(_runtime_obj_key_with_slug("BASE", "runtime/sfn/string"), "Linux");
+    assert expect_eq_str(composed, "BASE\nobj1:runtime/sfn/string\ntgt2:Linux").ok;
+}
+
+test "runtime-obj identity: one base key yields a distinct composed key per slug at one target" ![pure] {
+    // The end-to-end SFN-870 contract, at the composition the call sites
+    // actually build: same source, same target, different module identity
+    // must not share a cache address.
+    let a = _runtime_obj_key_with_target(_runtime_obj_key_with_slug("SAME-BASE", "runtime/sfn/util"), "Linux");
+    let b = _runtime_obj_key_with_target(_runtime_obj_key_with_slug("SAME-BASE", "dep/sfn/util"), "Linux");
+    assert expect_eq_bool(a == b, false).ok;
+    assert expect_eq_bool(contains(a, "\ntgt2:Linux"), true).ok;
+    assert expect_eq_bool(contains(b, "\ntgt2:Linux"), true).ok;
+}
+
+test "runtime-obj identity: the slug fold reshapes the key, orphaning pre-SFN-870 entries" ![pure] {
+    // Adding the component changes every `.sfn`-source object key, so a
+    // pre-fix entry can never be served under the new derivation — the
+    // same no-collision property the `tgt1:` -> `tgt2:` bump relied on.
+    let pre_fix = _runtime_obj_key_with_target("BASE", "Linux");
+    let post_fix = _runtime_obj_key_with_target(_runtime_obj_key_with_slug("BASE", "runtime/sfn/string"), "Linux");
+    assert expect_eq_bool(pre_fix == post_fix, false).ok;
 }
