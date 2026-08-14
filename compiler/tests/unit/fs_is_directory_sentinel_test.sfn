@@ -1,11 +1,11 @@
 // compiler/tests/unit/fs_is_directory_sentinel_test.sfn
 //
 // Standing coverage for the `sailfin_intrinsic_fs_is_directory` sentinel
-// (SFN-755). The runtime wrapper `sfn_fs_is_directory` cannot exist until
-// the pinned seed carries the two new registry rows (the seed rejects the
-// wrapper with `E0420` today), so this file is the ONLY coverage the
-// lowering gets until that follow-up lands — it pins the emitted IR
-// directly rather than through a source-level call.
+// (SFN-755). It pins the emitted IR directly rather than through a
+// source-level call, which is what keeps both legs testable from one host:
+// `fs_tree_test` and `cache_command_test` drive the same lowering through
+// real call sites (SFN-756), but only the POSIX one a Linux runner
+// executes. The mingw `GetFileAttributesA` leg has no other coverage.
 //
 // Global-state hygiene. `install_llvm_provider_context` mutates a
 // module-level `_target_os`/`_target_arch` pair in `lowering_debug_state.sfn`

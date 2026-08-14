@@ -56,32 +56,9 @@ fn _rh_descriptors_07(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
         target: "fs.read_link", symbol: "sfn_fs_read_link", return_type: "i8*", parameter_types: ["i8*"], native_signature: "sfn_fs_read_link", c_abi_return_type: null
     });
     // `fs.is_directory` (SFN-755): non-destructive directory predicate,
-    // consuming the `sailfin_intrinsic_fs_is_directory` sentinel.
-    //
-    // This row is deliberately AHEAD of its implementation:
-    // `sfn_fs_is_directory` does not exist in
-    // `runtime/sfn/adapters/filesystem.sfn` yet. It cannot, because the
-    // pinned seed compiles the working-tree runtime, and a seed without the
-    // SENTINEL row rejects the wrapper's call at typecheck
-    // (`E0420: undefined function`). The row here is the separate half: a
-    // seed without THIS row rejects a `fs.is_directory(...)` call site at
-    // lowering (`E1007: callee signature is not known to the compiler`).
-    // Two rows, two different failures — both verified against seed 0.9.1.
-    //
-    // Landing the row early is what lets the wrapper land at all: the
-    // consumer side compiles against the SEED, so the row has to reach a
-    // released seed before any call site can exist.
-    //
-    // Which failure a premature caller gets depends on which compiler
-    // compiles it. Compiler and runtime source are compiled by the pinned
-    // seed, so they still get `E1007`. A program built by a compiler
-    // freshly built from this tree gets past lowering and instead FAILS AT
-    // LINK on an undefined `sfn_fs_is_directory`. Nothing calls it in either
-    // position, and `fs_is_directory_sentinel_test.sfn` pins the emitted IR
-    // directly rather than through a call site for exactly that reason.
-    //
-    // Removal condition: SFN-756 adds the wrapper, switches `walk_dirs`
-    // (`compiler/src/build/fs_tree.sfn`) over, and deletes this paragraph.
+    // consuming the `sailfin_intrinsic_fs_is_directory` sentinel. The
+    // wrapper it names lives in `runtime/sfn/adapters/filesystem.sfn`
+    // (SFN-756).
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "fs.is_directory", symbol: "sfn_fs_is_directory", return_type: "i1", parameter_types: ["i8*"], native_signature: "sfn_fs_is_directory", c_abi_return_type: null
     });

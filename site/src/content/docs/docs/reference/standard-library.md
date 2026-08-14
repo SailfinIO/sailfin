@@ -701,6 +701,20 @@ fn find_in_path(name: string) -> string ![io] {
 
 ---
 
+#### `fs.is_directory(path: string) -> boolean ![io]`
+
+Return `true` iff `path` resolves to a directory, answered from a single non-mutating syscall — `stat` + `st_mode & S_IFMT == S_IFDIR` on POSIX, `GetFileAttributesA` + `FILE_ATTRIBUTE_DIRECTORY` (guarded against `INVALID_FILE_ATTRIBUTES`) on Windows. A missing path, or one whose parent denies traversal, returns `false` rather than erroring. `stat` follows symlinks, so a symlink to a directory answers `true` — this matches `fs.listDirectory`'s `opendir`, which also follows, so the predicate agrees with what a subsequent enumeration will do. It is the non-destructive counterpart to the destructive probes: `fs.deleteFile` succeeds only on a file, `fs.removeDirectory` only on an empty directory, so a read-only tree walk needs this instead.
+
+```sfn
+fn find_subdir(base: string, name: string) -> string ![io] {
+    let candidate = base + "/" + name;
+    if fs.is_directory(candidate) { return candidate; }
+    return "";
+}
+```
+
+---
+
 #### `fs.symlink(target: string, link: string) -> boolean ![io]`
 
 Create a symbolic link at `link` pointing at `target` — the `symlink(2)` wrapper. Per POSIX, the target need not exist; dangling links are intentionally allowed. Returns `true` on success, `false` if `link` already exists or any other error occurs. POSIX-only; Windows returns `false`.

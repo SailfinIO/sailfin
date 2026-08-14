@@ -14,6 +14,8 @@ import {
     get_perms,
     mkdtemp,
     is_executable,
+    is_directory,
+    mkdir,
     symlink,
     read_link,
     exists,
@@ -123,6 +125,48 @@ test "fs: is_executable tracks set_perms flips" ![io] {
     // 493 = 0o755 — owner exec bit set.
     assert set_perms(script, 493);
     assert is_executable(script);
+
+    process.run(["rm", "-rf", scratch]);
+}
+
+// ── is_directory ──────────────────────────────────────────────────
+test "fs: is_directory returns true for a directory" ![io] {
+    let scratch = mkdtemp("sfn-fs-test-isdir-");
+    assert scratch.length > 0;
+    assert is_directory(scratch);
+
+    process.run(["rmdir", scratch]);
+}
+
+test "fs: is_directory returns false for a regular file" ![io] {
+    let scratch = mkdtemp("sfn-fs-test-isdir-file-");
+    let target = scratch + "/file.txt";
+    write(target, "not a directory");
+
+    assert is_directory(target) == false;
+
+    process.run(["rm", "-rf", scratch]);
+}
+
+test "fs: is_directory returns false for a missing path" ![io] {
+    // Missing files collapse to `false` rather than surfacing an
+    // error — matches `is_executable`'s probe-style semantics.
+    assert is_directory("/tmp/sfn-fs-test-missing-dir-XXXX") == false;
+}
+
+test "fs: is_directory follows a symlink to a directory" ![io] {
+    // `stat` follows symlinks, so a symlink pointing at a directory
+    // must read as `true`, not `false`. This deliberately matches
+    // `list_directory`'s `opendir` behaviour rather than treating the
+    // link itself as the answer — the case most likely to regress if
+    // the implementation switched to `lstat`.
+    let scratch = mkdtemp("sfn-fs-test-isdir-link-");
+    let dir = scratch + "/target-dir";
+    let link = scratch + "/alias";
+    mkdir(dir);
+
+    assert symlink(dir, link);
+    assert is_directory(link);
 
     process.run(["rm", "-rf", scratch]);
 }

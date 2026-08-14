@@ -123,6 +123,21 @@ test "cache: info counts seeded entries and reports a size" ![io] {
     assert find(r.out, "size:", 0) >= 0;
 }
 
+// An entry directory that has lost its artifacts is not a live entry and
+// must not be counted, even though `walk_dirs` can now see it (SFN-756
+// gave it a real `fs.is_directory` classifier). Before that the filter
+// was an accident of the walk's classification limit; `_cache_entry_dirs`
+// (`compiler/src/build_cache.sfn`) now states it as policy, and this
+// pins the policy rather than the accident.
+test "cache: info does not count an artifact-less entry directory" ![io] {
+    let base = _cache_base("info_empty_entry");
+    _seed_entry(base, "aa", "aa_entry_one");
+    fs.createDirectory(base + "/v2/bb/bb_entry_lost_artifacts", true);
+    let r = _run_cache(base, ["info"]);
+    assert r.exit == 0;
+    assert find(r.out, "entries: 1", 0) >= 0;
+}
+
 // ---- prune ----
 test "cache: prune --max-size 0 empties the cache" ![io] {
     let base = _cache_base("prune_size0");
@@ -157,6 +172,22 @@ test "cache: clean --all-schemas sweeps stale sibling schema trees" ![io] {
     assert r.exit == 0;
     assert ! fs.exists(base + "/v1");
     assert ! fs.exists(base + "/v2");
+}
+
+// The other side of the SFN-756 split: where `_cache_entry_dirs` wants
+// empty directories filtered OUT, this sweep wants them swept. An
+// already-empty stale schema tree used to survive uncounted because the
+// walk could not see it (~4 KiB of cruft per stale-but-empty schema);
+// `build_cache.sfn:cache_sweep_stale_schemas` documented that as a known
+// leak awaiting exactly this change.
+test "cache: clean --all-schemas sweeps an artifact-less stale schema tree" ![io] {
+    let base = _cache_base("sweep_empty_schema");
+    _seed_entry(base, "aa", "current_entry");
+    // A stale sibling schema tree holding no artifacts at all.
+    fs.createDirectory(base + "/v1", true);
+    let r = _run_cache(base, ["clean", "--all-schemas"]);
+    assert r.exit == 0;
+    assert ! fs.exists(base + "/v1");
 }
 
 test "cache: clean --all-schemas leaves non-schema siblings (test-bin)" ![io] {

@@ -1,9 +1,10 @@
 // Unit coverage for `compiler/src/build/fs_tree.sfn` (SFN-494 groundwork)
 // and the byte-counting copy added alongside it in
-// `compiler/src/build/fs.sfn`. Every directory-tree helper here is
-// probe-based (no `fs.isDirectory` intrinsic exists), so several fixtures
-// are deliberately shaped to exercise the empty-directory edge the naive
-// "non-empty `listDirectory` result means directory" heuristic gets wrong.
+// `compiler/src/build/fs.sfn`. `walk_dirs` classifies with the
+// non-destructive `fs.is_directory` predicate (SFN-756); the destructive
+// helpers still classify by attempting the removal itself. Several
+// fixtures are deliberately shaped around the empty-directory edge, which
+// is where those two strategies diverge.
 import { expect_eq_bool, expect_eq_int, expect_eq_str } from "sfn/test";
 
 import { _copy_file, _copy_file_counted } from "../../src/build/fs";
@@ -83,9 +84,9 @@ test "fs_tree: remove_tree on / returns false and deletes nothing" ![io] {
 // --------------------------------------------------------------
 // walk_dirs / list_child_dirs
 // --------------------------------------------------------------
-// A single-child chain with a file at the leaf so every intermediate
-// directory is non-empty and therefore visible to the classification
-// heuristic.
+// A single-child chain with a file at the leaf, so the fixture exercises
+// depth bounds rather than the empty-directory edge (which the cases
+// further down cover directly).
 fn _build_depth_chain(root: string) -> void ![io] {
     if fs.exists(root) { remove_tree(root); }
     fs.createDirectory(root + "/d1/d2/d3", true);
@@ -212,9 +213,11 @@ test "fs_tree: ensure_dir_p creates a missing directory" ![io] {
 // entries at `depth + 1`, so the loop must stop at `depth >= max_depth`,
 // not `depth > max_depth`. Stopping one level late still returns the
 // correct set — which is why only a cost check catches it — but it costs
-// an `fs.listDirectory` on every FILE at the boundary depth, and for
-// `_cache_entry_dirs` (`walk_dirs(root, 2, 2)`) that is one `opendir` per
-// stored artifact on every `sfn cache info`.
+// an `fs.listDirectory` on every directory at the boundary depth plus an
+// `fs.is_directory` on each of its entries. For `_cache_entry_dirs`
+// (`walk_dirs(root, 2, 2)`) that is one `opendir` per stored entry
+// directory and a `stat` per artifact, discarded, on every
+// `sfn cache info`.
 //
 // The assertion is on the result set rather than the syscall count, which
 // this harness cannot observe: a tree deeper than `max_depth` with files
@@ -240,11 +243,12 @@ test "fs_tree: walk_dirs stops at max_depth and ignores deeper levels" ![io] {
     assert ! _contains_str(dirs, root + "/s1/e1/artifact.bin");
 }
 
-// An entry directory holding no files is invisible to the classification
-// heuristic where `find -type d` reported it. Pinned rather than merely
-// documented, because SFN-755 is expected to change this answer and the
-// change should be deliberate.
-test "fs_tree: walk_dirs cannot see an artifact-less directory" ![io] {
+// An entry directory holding no files is visible, matching what
+// `find -type d` reported. The previous
+// "non-empty `listDirectory` result means directory" heuristic could not
+// see it — it reported an empty directory as a file. SFN-756's switch to
+// `fs.is_directory` is what closed that gap, and this case pins it.
+test "fs_tree: walk_dirs sees an artifact-less directory" ![io] {
     let root = _scratch_dir() + "/walk-empty-entry";
     if fs.exists(root) { remove_tree(root); }
     fs.createDirectory(root + "/shard/empty-entry", true);
@@ -252,7 +256,24 @@ test "fs_tree: walk_dirs cannot see an artifact-less directory" ![io] {
     fs.writeFile(root + "/shard/full-entry/artifact.bin", "x");
 
     let dirs = walk_dirs(root, 2, 2);
-    assert expect_eq_int(dirs.length, 1).ok;
+    assert expect_eq_int(dirs.length, 2).ok;
     assert _contains_str(dirs, root + "/shard/full-entry");
-    assert ! _contains_str(dirs, root + "/shard/empty-entry");
+    assert _contains_str(dirs, root + "/shard/empty-entry");
+}
+
+// The other half of the same predicate: a FILE must never be reported as
+// a directory. The old heuristic got this right only by accident (a file
+// lists zero entries, like an empty directory); `fs.is_directory`
+// distinguishes them, so both answers are now pinned independently.
+test "fs_tree: walk_dirs does not report a file as a directory" ![io] {
+    let root = _scratch_dir() + "/walk-file-not-dir";
+    if fs.exists(root) { remove_tree(root); }
+    fs.createDirectory(root + "/shard", true);
+    fs.writeFile(root + "/shard/plain.txt", "x");
+    fs.writeFile(root + "/shard/empty.txt", "");
+
+    let dirs = walk_dirs(root, 2, 2);
+    assert expect_eq_int(dirs.length, 0).ok;
+    assert ! _contains_str(dirs, root + "/shard/plain.txt");
+    assert ! _contains_str(dirs, root + "/shard/empty.txt");
 }
