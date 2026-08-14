@@ -2121,6 +2121,20 @@ jobs:
               | awk -F'\t' 'NR<=15 {printf("| `%s` | %s | %s |\n", $1, $2, $3)}'
           } >> "$GITHUB_STEP_SUMMARY"
 
+          # Echo the whole table to stdout as well (SFN-881). The artifact and
+          # the step summary are both fine for a human, but neither is readable
+          # programmatically: artifact download needs credentials, and step
+          # summaries are not exposed through the check-run API (`output.text`
+          # comes back empty). Job logs ARE retrievable, so this is what makes
+          # the candidate usable by whoever actually applies it. The summary
+          # above stays capped at the top 15 drifts; this is the full table.
+          #
+          # Measured at ~59 bytes/row on a 157-row sample, so a full ~621-row
+          # table is ~36 KB of log — noise next to a shard leg's output.
+          echo "----- BEGIN shard_weights.candidate.tsv -----"
+          cat shard_weights.candidate.tsv
+          echo "----- END shard_weights.candidate.tsv -----"
+
       - name: Upload candidate
         if: ${{ always() }}
         uses: actions/upload-artifact@v7
