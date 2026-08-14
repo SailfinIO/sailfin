@@ -26,7 +26,7 @@ import {
     with_subcommand
 } from "sfn/cli";
 
-import { _ensure_dir_recursive_cmd, _toml_trim_cmd } from "../../build/fs";
+import { _ensure_dir_recursive_cmd, _set_perms_or_skip, _toml_trim_cmd } from "../../build/fs";
 import { _get_home_cmd } from "../../build_flags";
 import { CliContext } from "../context";
 import {
@@ -43,8 +43,7 @@ fn _write_config_registry_cmd(url: string) -> int ![io] {
     }
     let sfn_dir = home + "/.sfn";
     _ensure_dir_recursive_cmd(sfn_dir);
-    let dir_chmod_rc = process.run(["chmod", "700", sfn_dir]);
-    if dir_chmod_rc != 0 {
+    if !_set_perms_or_skip(sfn_dir, 448) {
         print("error: failed to set permissions on " + sfn_dir);
         return 1;
     }
@@ -55,8 +54,7 @@ fn _write_config_registry_cmd(url: string) -> int ![io] {
         out = out + "url = \"" + url + "\"\n";
     }
     fs.writeFile(path, out);
-    let file_chmod_rc = process.run(["chmod", "600", path]);
-    if file_chmod_rc != 0 {
+    if !_set_perms_or_skip(path, 384) {
         print("error: failed to set permissions on " + path);
         return 1;
     }

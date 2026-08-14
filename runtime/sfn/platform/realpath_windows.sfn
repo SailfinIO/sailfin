@@ -20,8 +20,9 @@
 //
 // `_fullpath(resolved, path, maxlen)` is MSVC's `realpath` equivalent, but
 // differs from it in both argument ORDER and ARITY — this is a reorder,
-// not a rename. `260` is Win32's `MAX_PATH`; all three current callers
-// pass `resolved = null` (`exec.sfn:283`, `:358`, `entry.sfn:224`), and the
+// not a rename. `260` is Win32's `MAX_PATH`; all four current callers
+// pass `resolved = null` (`exec.sfn:283`, `:358`, `entry.sfn:224`, and
+// `compiler/src/build/fs.sfn::_cwd_cmd`, SFN-888), and the
 // CRT mallocs its own buffer whenever `resolved` is null — `maxlen` is
 // documented as ignored on that path, so the constant is inert for every
 // caller today. Kept (rather than dropped) to match the retired

@@ -9,7 +9,9 @@
 // NOTE: assert on captured stdout+stderr with `sfn/strings` predicates
 // (the `sfn/test` `expect_*` matchers are `![pure]` and cannot be called
 // from an `![io]` test). (#842.)
-import { find, contains, to_lower_all } from "sfn/strings";
+import { contains, find, to_lower_all } from "sfn/strings";
+
+import { host_is_windows } from "../../src/build/target";
 
 fn _sfn_bin() -> string ![io] {
     let configured = env.get("SAILFIN_BIN");
@@ -142,8 +144,37 @@ test "login: sets restrictive permissions" ![io] {
     let home = _home("permissions");
     let r = _run(home, ["login", "perm-token"]);
     assert r.exit == 0;
-    assert fs.get_perms(home + "/.sfn") == 448;
-    assert fs.get_perms(home + "/.sfn/credentials") == 384;
+    if host_is_windows() {
+        // SFN-888: `fs.get_perms` is a `-1` stub on Windows and the mode
+        // was deliberately never applied there, so only existence is
+        // claimable.
+        assert fs.exists(home + "/.sfn");
+        assert fs.exists(home + "/.sfn/credentials");
+    } else {
+        assert fs.get_perms(home + "/.sfn") == 448;
+        assert fs.get_perms(home + "/.sfn/credentials") == 384;
+    }
+}
+
+// ---- Test 8b: the Windows permission degradation is disclosed ----
+// The host arms above are dead on a POSIX runner, so this drives the
+// Windows leg through the `SAILFIN_HOST_OS` seam `host_is_windows()` reads
+// (`build/target.sfn`), which is the only way to execute the SFN-888
+// short-circuit and its notice on CI. Two claims, both load-bearing: a
+// permission Windows cannot express must not fail the login, and the
+// resulting gap must appear in command output rather than only in source.
+// Deleted by SFN-884, which restricts the file via an NTFS ACL.
+test "login: windows host discloses the unrestricted credential file" ![io] {
+    let home = _home("windows-notice");
+    let mut child_env = _env(home);
+    child_env.push("SAILFIN_HOST_OS=Windows");
+    let exit = process.run_capture([_sfn_bin(), "login", "win-token"], child_env);
+    let out = process.capture_take_stdout() + process.capture_take_stderr();
+
+    assert exit == 0;
+    assert fs.exists(home + "/.sfn/credentials");
+    assert contains(out, "NOT access-restricted on Windows");
+    assert contains(out, "SFN-884");
 }
 
 // ---- Test 9: login on immediate stdin EOF fails cleanly ----

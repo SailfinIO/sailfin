@@ -36,6 +36,12 @@ extern fn mkstemp(template: *u8) -> i32;
 
 extern fn close(fd: i32) -> i32;
 
+// `realpath(path, null)` — libc allocates the resolved buffer. Backs
+// `_cwd_cmd` below. Declared module-locally rather than imported from
+// `cli/entry.sfn`, which declares the same extern, per the SFN-635
+// no-cross-module-extern convention.
+extern fn realpath(path: *u8, resolved: *u8) -> *u8;
+
 // Publish-into-place, replacing an existing destination. Defined by
 // `runtime/sfn/platform/rename_ops.sfn` and swapped for its Windows
 // sibling per target — declared as an extern here rather than imported,
@@ -138,6 +144,56 @@ fn _mktemp_from_template_cmd(template: string) -> string ![io] {
 fn _mktemp_sibling_cmd(dst_path: string) -> string ![io] {
     return _mktemp_from_template_cmd(_dirname_cmd(dst_path)
         + "/.sfn_stage.XXXXXX");
+}
+
+// The current working directory, replacing the `pwd` shellout (SFN-888).
+// `realpath(".", null)` has libc allocate the resolved buffer, the same
+// `*u8`->`string` shape `_mktemp_from_template_cmd` returns above.
+//
+// Unlike `_shell_read_cmd("pwd")` this needs no `host_is_windows()` gate:
+// `@realpath` is provided on a native Windows host by
+// `runtime/sfn/platform/realpath_windows.sfn` over `_fullpath`, appended
+// for Windows targets by `target_condition_runtime_sfn_sources` — the same
+// sibling-module treatment `mkstemp` gets. That sibling returns
+// BACKSLASH-separated paths; consumers concatenate forward-slash suffixes
+// onto the result and Win32 accepts both separators, so the mixed spelling
+// is benign (`realpath_windows.sfn:43-49` argues this at length).
+//
+// `PWD` is the fallback, not the primary, because it is maintained by a
+// *shell*: it is absent when `sfn` is spawned by a non-shell parent and
+// absent on native Windows. That ordering is the one difference from the
+// existing `env.get("PWD")` reads at `init.sfn:51` and `lock.sfn:61`.
+// Returns "." when neither answers, leaving a relative path relative
+// rather than fabricating a root.
+fn _cwd_cmd() -> string ![io] {
+    let resolved: *u8 = realpath("." as *u8, null);
+    if resolved as i64 != 0 { return resolved as string; }
+    let pwd = env.get("PWD");
+    if pwd.length > 0 { return pwd; }
+    return ".";
+}
+
+// Apply a POSIX mode to `path`, short-circuiting to success on a Windows
+// host (SFN-888). Backs the `chmod 700`/`chmod 600` sites in
+// `cli/commands/config.sfn` and `cli/commands/login.sfn`; each caller keeps
+// its own failure policy for the POSIX result.
+//
+// The short-circuit sits BEFORE the call deliberately. `_chmod` honours
+// only the read-only attribute, so `0o600` and `0o700` are inexpressible
+// on Windows and `fs.set_perms` is a semantic no-op there even when it
+// succeeds — reporting its failure would let a permission Windows never
+// had block `sfn config set` outright.
+//
+// The consequence is that `~/.sfn/credentials` and `~/.sfn/config.toml`
+// are NOT access-restricted on Windows. That is already true today, since
+// `chmod` is unspawnable there, and this does not make it worse — but it
+// is disclosed in `sfn login`'s output rather than left silent, because a
+// source comment is not disclosure. Removal condition: SFN-884 restricts
+// the credential file via an NTFS ACL, and its PR deletes this gate, the
+// `login` notice, and the `login.sfn` header qualifier together.
+fn _set_perms_or_skip(path: string, mode: int) -> boolean ![io] {
+    if host_is_windows() { return true; }
+    return fs.set_perms(path, mode);
 }
 
 // Atomically publish an already-written temp file as `dst_path`. The
@@ -697,6 +753,8 @@ export {
     _sanitize_filename_cmd,
     _mktemp_sibling_cmd,
     _mktemp_from_template_cmd,
+    _cwd_cmd,
+    _set_perms_or_skip,
     _atomic_rename_into_place,
     _publish_lines_atomic,
     _copy_file,
