@@ -51,6 +51,7 @@
 import { ct_eq_bytes } from "./bits";
 import { ed25519_sign } from "./ed25519_sign";
 import { sha256_bytes } from "./hkdf";
+import { sha384_bytes } from "./sha384";
 import {
     tls13_certificate_verify_content,
     tls13_finished_verify_data,
@@ -81,6 +82,7 @@ import {
     parse_handshake_message,
     parse_server_hello,
     tls_cipher_aes_128_gcm_sha256,
+    tls_cipher_aes_256_gcm_sha384,
     tls_cipher_chacha20_poly1305_sha256,
     tls_group_x25519,
     tls_sigalg_ed25519,
@@ -122,24 +124,40 @@ fn hs_server_state_wait_client_finished() -> int { return 6; }
 
 fn hs_server_state_connected() -> int { return 7; }
 
-// SHA-256 output length. The minimal cut accepts only SHA-256 cipher suites,
-// so every transcript hash, chaining secret and Finished verify_data is
-// exactly 32 bytes.
-fn _hash_len() -> int { return 32; }
+// The transcript-hash length selected by a TLS 1.3 cipher suite, or 0 for a
+// suite this state machine cannot drive. Cipher-suite negotiation is public,
+// so the dispatch does not depend on secret material.
+fn _suite_hash_len(suite: int) -> int {
+    if suite == tls_cipher_aes_256_gcm_sha384() { return 48; }
+    if suite == tls_cipher_chacha20_poly1305_sha256() { return 32; }
+    if suite == tls_cipher_aes_128_gcm_sha256() { return 32; }
+    return 0;
+}
+
+// A newly constructed handshake has not negotiated a suite yet. Preserve the
+// original SHA-256 transcript behavior for that provisional state; every
+// non-zero suite still has to pass the explicit supported-suite dispatch.
+fn _state_hash_len(suite: int) -> int {
+    if suite == 0 {
+        return _suite_hash_len(tls_cipher_aes_128_gcm_sha256());
+    }
+    return _suite_hash_len(suite);
+}
+
+fn _transcript_hash(hash_len: int, transcript: int[]) -> int[] {
+    let empty: int[] = [];
+    if hash_len == 48 { return sha384_bytes(transcript); }
+    if hash_len == 32 { return sha256_bytes(transcript); }
+    return empty;
+}
 
 // An Ed25519 signature is 64 bytes (RFC 8032 §3.3). `ed25519_sign` returns []
 // fail-closed on a bad seed, so a length check is how this module notices.
 fn _ed25519_signature_len() -> int { return 64; }
 
 // Whether `suite` is a TLS 1.3 cipher suite this module can drive a handshake
-// for. Both are SHA-256 suites, so they share one transcript hash and one key
-// schedule and differ only in the AEAD — which is the record layer's concern,
-// not the handshake's. TLS_AES_256_GCM_SHA384 (0x1302) is excluded because it
-// is SHA-384: accepting it would silently change every hash length here.
 fn _is_supported_suite(suite: int) -> bool {
-    if suite == tls_cipher_chacha20_poly1305_sha256() { return true; }
-    if suite == tls_cipher_aes_128_gcm_sha256() { return true; }
-    return false;
+    return _suite_hash_len(suite) > 0;
 }
 
 // ── Handshake state ──────────────────────────────────────────────
@@ -251,8 +269,8 @@ fn _was_offered(offered: int[], suite: int) -> bool {
 
 // The first offered suite this module can actually drive, or -1 if the client
 // offered none. Selection follows the client's preference order rather than
-// imposing the server's: both supported suites share SHA-256 and differ only
-// in the AEAD, so there is no security reason to override the peer here.
+// imposing a server policy; which supported suite is preferred is outside
+// this handshake state machine's scope.
 fn _select_cipher_suite(offered: int[]) -> int {
     let mut i: int = 0;
     loop {
@@ -347,8 +365,12 @@ fn hs_server_new(server_private: int[], certificate_chain: int[][], signing_seed
     // computes the same value the client does; resumption PSKs are outside the
     // minimal cut.
     let no_psk: int[] = [];
-    let early: int[] = tls13_early_secret(no_psk, _hash_len());
-    if early.length != _hash_len() {
+    // The suite is selected from ClientHello in the next step. Keep the
+    // historical SHA-256 provisional value so pre-negotiation state remains
+    // byte-identical, then re-derive it from the selected suite there.
+    let initial_hash_len: int = _suite_hash_len(tls_cipher_aes_128_gcm_sha256());
+    let early: int[] = tls13_early_secret(no_psk, initial_hash_len);
+    if early.length != initial_hash_len {
         return Result.Err {
             error: "hs_server_new: early secret derivation failed"
         };
@@ -444,7 +466,7 @@ fn hs_server_recv_client_hello(hs: ServerHandshake, message: int[]) -> Result<Se
     let selected: int = _select_cipher_suite(ch.cipher_suites);
     if selected < 0 {
         return Result.Err {
-            error: "hs_server_recv_client_hello: client offered no cipher suite this module supports (SHA-256 suites only)"
+            error: "hs_server_recv_client_hello: client offered no supported cipher suite"
         };
     }
     // Whether the client offered ed25519 is recorded rather than enforced
@@ -480,6 +502,15 @@ fn hs_server_recv_client_hello(hs: ServerHandshake, message: int[]) -> Result<Se
         };
     }
 
+    let hash_len: int = _suite_hash_len(selected);
+    let no_psk: int[] = [];
+    let early: int[] = tls13_early_secret(no_psk, hash_len);
+    if early.length != hash_len {
+        return Result.Err {
+            error: "hs_server_recv_client_hello: early secret derivation failed"
+        };
+    }
+
     _append(hs.transcript, message);
     return Result.Ok {
         value: ServerHandshake {
@@ -497,7 +528,7 @@ fn hs_server_recv_client_hello(hs: ServerHandshake, message: int[]) -> Result<Se
             cipher_suite: selected,
             group: tls_group_x25519(),
             shared_secret: hs.shared_secret,
-            early_secret: hs.early_secret,
+            early_secret: early,
             handshake_secret: hs.handshake_secret,
             master_secret: hs.master_secret,
             client_handshake_traffic_secret: hs.client_handshake_traffic_secret,
@@ -587,7 +618,7 @@ fn hs_server_send_hello(hs: ServerHandshake, server_hello: int[]) -> Result<Serv
     }
     if !_is_supported_suite(sh.cipher_suite) {
         return Result.Err {
-            error: "hs_server_send_hello: ServerHello selects a cipher suite whose hash this module does not implement (SHA-256 suites only)"
+            error: "hs_server_send_hello: ServerHello selects an unsupported cipher suite"
         };
     }
     if sh.selected_group != tls_group_x25519() {
@@ -615,8 +646,9 @@ fn hs_server_send_hello(hs: ServerHandshake, server_hello: int[]) -> Result<Serv
         };
     }
 
+    let hash_len: int = _suite_hash_len(sh.cipher_suite);
     let handshake: int[] = tls13_handshake_secret(hs.early_secret, shared);
-    if handshake.length != _hash_len() {
+    if handshake.length != hash_len {
         return Result.Err {
             error: "hs_server_send_hello: handshake secret derivation failed"
         };
@@ -630,16 +662,16 @@ fn hs_server_send_hello(hs: ServerHandshake, server_hello: int[]) -> Result<Serv
     let mut pending: int[] = [];
     _append(pending, hs.transcript);
     _append(pending, server_hello);
-    let th: int[] = sha256_bytes(pending);
+    let th: int[] = _transcript_hash(hash_len, pending);
 
     let client_hs: int[] = tls13_client_handshake_traffic_secret(handshake, th);
     let server_hs: int[] = tls13_server_handshake_traffic_secret(handshake, th);
-    if client_hs.length != _hash_len() {
+    if client_hs.length != hash_len {
         return Result.Err {
             error: "hs_server_send_hello: client handshake traffic secret derivation failed"
         };
     }
-    if server_hs.length != _hash_len() {
+    if server_hs.length != hash_len {
         return Result.Err {
             error: "hs_server_send_hello: server handshake traffic secret derivation failed"
         };
@@ -649,7 +681,7 @@ fn hs_server_send_hello(hs: ServerHandshake, server_hello: int[]) -> Result<Serv
     // here; the application traffic secrets it feeds still need the transcript
     // through this server's Finished and are derived in that step.
     let master: int[] = tls13_master_secret(handshake);
-    if master.length != _hash_len() {
+    if master.length != hash_len {
         return Result.Err {
             error: "hs_server_send_hello: master secret derivation failed"
         };
@@ -796,7 +828,7 @@ fn hs_server_certificate_verify_message(hs: ServerHandshake) -> Result<int[], st
         };
     }
 
-    let th: int[] = sha256_bytes(hs.transcript);
+    let th: int[] = _transcript_hash(_state_hash_len(hs.cipher_suite), hs.transcript);
     let content: int[] = tls13_certificate_verify_content(tls13_server_certificate_verify_context(), th);
     let signature: int[] = ed25519_sign(hs.signing_seed, content);
     if signature.length != _ed25519_signature_len() {
@@ -847,9 +879,10 @@ fn hs_server_finished_message(hs: ServerHandshake) -> Result<int[], string> {
         };
     }
 
-    let th: int[] = sha256_bytes(hs.transcript);
+    let hash_len: int = _state_hash_len(hs.cipher_suite);
+    let th: int[] = _transcript_hash(hash_len, hs.transcript);
     let verify_data: int[] = tls13_finished_verify_data(hs.server_handshake_traffic_secret, th);
-    if verify_data.length != _hash_len() {
+    if verify_data.length != hash_len {
         return Result.Err {
             error: "hs_server_finished_message: server Finished verify_data derivation failed"
         };
@@ -884,13 +917,15 @@ fn hs_server_send_finished(hs: ServerHandshake, message: int[]) -> Result<Server
         },
         Result.Ok { value } => { fin_body = value; }
     }
-    let parsed: Result<int[], string> = parse_finished(fin_body, _hash_len());
+    let hash_len: int = _state_hash_len(hs.cipher_suite);
+    let parsed: Result<int[], string> = parse_finished(fin_body, hash_len);
     match parsed {
         Result.Err { error } => {
             return Result.Err { error: "hs_server_send_finished: " + error };
         },
         // `parse_finished` already enforces the verify_data length against the
-        // `_hash_len()` passed above, so the value itself is not needed here —
+        // The suite-derived hash length was passed above, so the value itself
+        // is not needed here —
         // this step only has to prove the framing before transcripting.
         Result.Ok { value } => { }
     }
@@ -901,16 +936,16 @@ fn hs_server_send_finished(hs: ServerHandshake, message: int[]) -> Result<Server
     let mut pending: int[] = [];
     _append(pending, hs.transcript);
     _append(pending, message);
-    let th_after: int[] = sha256_bytes(pending);
+    let th_after: int[] = _transcript_hash(hash_len, pending);
 
     let client_ap: int[] = tls13_client_application_traffic_secret(hs.master_secret, th_after);
     let server_ap: int[] = tls13_server_application_traffic_secret(hs.master_secret, th_after);
-    if client_ap.length != _hash_len() {
+    if client_ap.length != hash_len {
         return Result.Err {
             error: "hs_server_send_finished: client application traffic secret derivation failed"
         };
     }
-    if server_ap.length != _hash_len() {
+    if server_ap.length != hash_len {
         return Result.Err {
             error: "hs_server_send_finished: server application traffic secret derivation failed"
         };
@@ -965,7 +1000,8 @@ fn hs_server_recv_finished(hs: ServerHandshake, message: int[]) -> Result<Server
         Result.Ok { value } => { fin_body = value; }
     }
 
-    let parsed: Result<int[], string> = parse_finished(fin_body, _hash_len());
+    let hash_len: int = _state_hash_len(hs.cipher_suite);
+    let parsed: Result<int[], string> = parse_finished(fin_body, hash_len);
     let mut received: int[] = [];
     match parsed {
         Result.Err { error } => {
@@ -974,9 +1010,9 @@ fn hs_server_recv_finished(hs: ServerHandshake, message: int[]) -> Result<Server
         Result.Ok { value } => { received = value; }
     }
 
-    let th_before: int[] = sha256_bytes(hs.transcript);
+    let th_before: int[] = _transcript_hash(hash_len, hs.transcript);
     let expected: int[] = tls13_finished_verify_data(hs.client_handshake_traffic_secret, th_before);
-    if expected.length != _hash_len() {
+    if expected.length != hash_len {
         return Result.Err {
             error: "hs_server_recv_finished: client Finished verify_data derivation failed"
         };
@@ -1023,7 +1059,7 @@ fn hs_server_recv_finished(hs: ServerHandshake, message: int[]) -> Result<Server
 // known-answer test) can check the transcript at each step without reaching
 // into the state.
 fn hs_server_transcript_hash(hs: ServerHandshake) -> int[] {
-    return sha256_bytes(hs.transcript);
+    return _transcript_hash(_state_hash_len(hs.cipher_suite), hs.transcript);
 }
 
 export {
