@@ -57,10 +57,12 @@ sfn = "0.9.5"
 # toolchain. Declared like `sfn/cli` — a normal source capsule staged +
 # linked into the self-hosted build (workspace member `capsules/sfn/crypto`).
 "sfn/crypto" = "*"
-# SFN-496: `publish`/`add` use the typed `fetch` client (`sfn/http`) in
-# place of shelling out to `curl`. Declared like `sfn/crypto` — a normal
-# source capsule staged + linked into the self-hosted build.
-"sfn/http" = "*"
+# `sfn/http` is deliberately NOT declared here (SFN-496): its barrel exports a
+# client `get(url: string)` that collides on bare name with `sfn/cli`'s
+# `get(m: Matches, name: string)` across the whole compiler tree, and imported
+# names are matched without provenance. `publish`/`add` reach the runtime HTTP
+# primitive through an `extern fn` in `cli/commands/cmd_shared.sfn` instead.
+# Revisit once SFN-893 makes name resolution provenance-aware.
 
 [capabilities]
 # `io` covers fs.*, print.*, console.*, and process.* surface used
