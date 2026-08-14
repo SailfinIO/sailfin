@@ -2074,10 +2074,18 @@ jobs:
   shard-weights-candidate:
     name: Shard weights candidate
     needs:
+      - ci-scope
       - build-linux
       - build-macos
       - build-aarch64-linux
-    if: ${{ always() }}
+    # Gated on the same scope signal as the legs that feed it. `ci-scope`
+    # sets `source=false` for `schedule` (:80-84), so a scheduled run
+    # executes no shard leg and produces no `ci-test-timing-*` sidecar.
+    # Under a bare `always()` this job still ran, found nothing, and
+    # reported SUCCESS in 5s — an advisory job whose green tick meant "I
+    # checked" when no check occurred (SFN-890). `always()` is still
+    # needed so a red shard's timing is not lost.
+    if: ${{ always() && needs.ci-scope.outputs.source == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -2094,7 +2102,12 @@ jobs:
         run: |
           set -euo pipefail
           if [ ! -d ci-timing ]; then
-            echo "No timing artifacts downloaded — nothing to aggregate." >&2
+            # Reachable now only when the legs ran but produced nothing,
+            # which is an anomaly worth seeing. Warn rather than fail: this
+            # job runs under `always()`, so a genuinely red run can
+            # legitimately have no sidecars, and failing here would raise a
+            # second alarm for someone else's breakage.
+            echo "::warning::No ci-test-timing-* sidecars found despite ci-scope source=true; no candidate produced."
             exit 0
           fi
           scripts/aggregate_shard_weights.sh ci-timing shard_weights.candidate.tsv
