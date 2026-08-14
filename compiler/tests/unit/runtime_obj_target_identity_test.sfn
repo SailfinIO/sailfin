@@ -198,11 +198,19 @@ test "runtime-obj identity: key folds the slug under a scheme tag" ![pure] {
 test "runtime-obj identity: keys differ across slugs for one base key" ![pure] {
     // The SFN-870 contract. Identical source content, opt flag, compiler
     // identity and sibling deps all collapse into one base key; only the
-    // slug distinguishes them. The realistic collision is a shared
-    // helper re-exported into a dep capsule's own namespace, or a module
-    // split whose halves are briefly identical.
+    // slug distinguishes them.
+    //
+    // The reachable collision on THIS path is narrower than the staging
+    // twin's: only `runtime_capsules[..].sfn_sources` and `prelude_entry`
+    // are compiled to objects, and `_runtime_module_slug` re-prefixes
+    // every one of them with a canonical `runtime/`, so the dep-capsule
+    // re-export that motivates SFN-861 never reaches here. What does is
+    // the same content at a different relative position under a re-rooted
+    // `SAILFIN_RUNTIME_ROOT`, cross-serving between work-dirs through the
+    // content-addressed shared cache. The fold is keyed on the whole
+    // slug either way, so both legs below use realistic `runtime/` slugs.
     let a = _runtime_obj_key_with_slug("SAME-BASE", "runtime/sfn/util");
-    let b = _runtime_obj_key_with_slug("SAME-BASE", "dep/sfn/util");
+    let b = _runtime_obj_key_with_slug("SAME-BASE", "runtime/vendor/sfn/util");
     assert expect_eq_bool(a == b, false).ok;
 }
 
@@ -244,7 +252,7 @@ test "runtime-obj identity: one base key yields a distinct composed key per slug
     // actually build: same source, same target, different module identity
     // must not share a cache address.
     let a = _runtime_obj_key_with_target(_runtime_obj_key_with_slug("SAME-BASE", "runtime/sfn/util"), "Linux");
-    let b = _runtime_obj_key_with_target(_runtime_obj_key_with_slug("SAME-BASE", "dep/sfn/util"), "Linux");
+    let b = _runtime_obj_key_with_target(_runtime_obj_key_with_slug("SAME-BASE", "runtime/vendor/sfn/util"), "Linux");
     assert expect_eq_bool(a == b, false).ok;
     assert expect_eq_bool(contains(a, "\ntgt2:Linux"), true).ok;
     assert expect_eq_bool(contains(b, "\ntgt2:Linux"), true).ok;

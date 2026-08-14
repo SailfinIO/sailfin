@@ -696,19 +696,19 @@ fn _runtime_obj_key_with_sibling_deps(base_key: string, ctx_root: string, slug: 
 // hashes only source bytes, an opt-flag tag and the compiler identity, and
 // `_runtime_obj_key_with_sibling_deps` takes a `slug` argument but spends it
 // solely on the `.import-deps` LOOKUP — a module without that sidecar keeps
-// the base key byte-for-byte. The `hash_suffix`/`unique_suffix` argument
-// threaded through `_runtime_obj_shared_cache_fetch`/`_publish` does not
-// close it either: it reaches `_sha256_of_string`, whose body is
-// `sha256_hex_of_string(input)` — the suffix is documented inert at that
-// signature. The slug only counts when it is inside the hashed string.
+// the base key byte-for-byte. Nor does the `hash_suffix` the callers thread
+// into `_runtime_obj_shared_cache_fetch`/`_publish`, which is inert for the
+// reason `runtime_asm_cache_key` records below. The slug only counts when
+// it is inside the hashed string.
 //
 // Callers compose this INSIDE `_runtime_obj_key_with_target`, leaving the
 // unvalidated target triple last with nothing after it (see that fold's
-// absorption note). A slug adjacent to the following `tgt2:` tag mirrors
-// `cache_key_for` in `build_cache.sfn`, which has placed `slug`
-// immediately before its own `tgt2:` component since SFN-661. Unlike the
-// triple, a slug is derived from repository paths by
-// `_runtime_module_slug`, not from the environment.
+// absorption note). Placing the slug immediately before the following
+// target component mirrors `cache_key_for` in `build_cache.sfn`, which has
+// had that adjacency since SFN-677 introduced its target fold after the
+// existing `slug` component (marker `tgt1:` -> `tgt2:` per SFN-774 /
+// SFEP-0068 §3.6). Unlike the triple, a slug is derived from repository
+// paths by `_runtime_module_slug`, not from the environment.
 //
 // Adding the component reshapes every `.sfn`-source object key, so
 // pre-SFN-870 entries are orphaned rather than mismatched — the same
@@ -1947,6 +1947,7 @@ fn clean_runtime_object_cache(runtime_capsules: RuntimeCapsuleArtifacts[], out_d
 
 export {
     RuntimeLinkInputs,
+    RuntimeSfnObjectPlan,
     assemble_runtime_capsule_link_inputs,
     clean_runtime_object_cache,
     runtime_stamp_identity,
@@ -1955,6 +1956,7 @@ export {
     _runtime_obj_stem,
     _runtime_obj_key_with_target,
     _runtime_obj_key_with_slug,
+    _prepare_runtime_sfn_object,
     _stage_one_runtime_sfn_import_context,
     runtime_asm_cache_key
 };
