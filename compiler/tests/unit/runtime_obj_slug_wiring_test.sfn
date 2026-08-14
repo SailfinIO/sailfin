@@ -1,0 +1,116 @@
+// compiler/tests/unit/runtime_obj_slug_wiring_test.sfn
+//
+// SFN-870 added `_runtime_obj_key_with_slug` and composed it at two
+// `.sfn`-source call sites. `runtime_obj_target_identity_test.sfn` pins the
+// COMPOSER half — the fold's own behaviour in isolation — but never calls
+// the call site itself, so a regression that drops the wrapper from
+// `_prepare_runtime_sfn_object` (compiler/src/build/runtime_objs.sfn,
+// `_runtime_obj_key_with_target(_runtime_obj_key_with_slug(...), target_triple)`
+// around line 903) would leave every existing test green. This file closes
+// that gap: it is the WIRING half, exercising `_prepare_runtime_sfn_object`
+// itself rather than the composer functions it calls.
+//
+// Mechanism: two byte-identical sources (`alpha.sfn`, `beta.sfn`) share a
+// base cache key, since that key hashes source CONTENT only. A shared-cache
+// entry is pre-stored under the key this test composes for `alpha` (module
+// slug `runtime/alpha`). Calling `_prepare_runtime_sfn_object` for `alpha`
+// with an unusable `self_path` must still succeed (a shared-cache HIT,
+// proven by the emit subprocess being unable to run) — this is the
+// non-vacuity leg, asserted FIRST, and it fails loudly if this test's own
+// key composition ever drifts from the function's. Calling it for `beta`
+// (slug `runtime/beta`), same unusable `self_path`, must MISS: if the slug
+// fold were removed from `_prepare_runtime_sfn_object`, `beta`'s key would
+// collapse onto `alpha`'s stored entry and this leg would wrongly hit
+// instead.
+import {
+    RuntimeSfnObjectPlan,
+    _prepare_runtime_sfn_object,
+    _runtime_obj_key_with_slug,
+    _runtime_obj_key_with_target
+} from "../../src/build/runtime_objs";
+import {
+    CacheKey,
+    cache_store_artifact,
+    runtime_object_cache_key_with_identity,
+    runtime_object_entry_key_from_str
+} from "../../src/build_cache";
+
+// A self_path that cannot resolve to a runnable binary. Used to prove a
+// call was served from the shared cache without ever reaching the emit
+// subprocess.
+fn _ros_unusable_self_path() -> string {
+    return "/nonexistent/sfn-870-wiring-should-not-be-invoked";
+}
+
+fn _ros_identity() -> string { return "sfn-870-wiring-identity"; }
+
+fn _ros_tmp_root(label: string) -> string ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    let dir = base + "/sfn_runtime_obj_slug_wiring_test_" + label;
+    process.run(["rm", "-rf", dir]);
+    process.run(["mkdir", "-p", dir]);
+    return dir;
+}
+
+fn _ros_cleanup(path: string) ![io] {
+    process.run(["rm", "-rf", path]);
+}
+
+test "runtime-obj slug wiring: a shared entry stored under one slug is never served to a different slug" ![io] {
+    let manifest_dir = _ros_tmp_root("manifest");
+    let alpha_src = manifest_dir + "/alpha.sfn";
+    let beta_src = manifest_dir + "/beta.sfn";
+    let content = "fn hello() -> int { return 1; }\n";
+    fs.writeFile(alpha_src, content);
+    fs.writeFile(beta_src, content);
+
+    let ctx_root = _ros_tmp_root("ctx");
+    let shared_cache_root = _ros_tmp_root("cache");
+    let out_dir_store = _ros_tmp_root("out_store");
+    let out_dir_hit = _ros_tmp_root("out_hit");
+    let out_dir_miss = _ros_tmp_root("out_miss");
+
+    let opt_flag = "-O0";
+    let compiler_identity = _ros_identity();
+    let target_triple = "x86_64-unknown-linux-gnu";
+    let cap_prefix = "sfn__runtime-native__";
+
+    // Compose the expected key for `alpha.sfn` at module slug
+    // `runtime/alpha`, matching `_runtime_module_slug(manifest_dir, alpha_src)`.
+    // No `.import-deps` sidecar exists under `ctx_root`, so the
+    // sibling-deps fold (not exported here) returns its input unchanged —
+    // it is omitted from this composition, per its own documented
+    // behaviour in `runtime_objs.sfn`.
+    let alpha_slug = "runtime/alpha";
+    let base_key = runtime_object_cache_key_with_identity(alpha_src, opt_flag, compiler_identity);
+    let alpha_key = _runtime_obj_key_with_target(_runtime_obj_key_with_slug(base_key, alpha_slug), target_triple);
+
+    // Store a sentinel object under that exact key.
+    let sentinel_path = out_dir_store + "/sentinel.o";
+    fs.writeFile(sentinel_path, "sentinel runtime object\n");
+    let entry_key: CacheKey = runtime_object_entry_key_from_str(alpha_key, "");
+    assert cache_store_artifact(shared_cache_root, entry_key, "runtime-obj", sentinel_path);
+
+    // Non-vacuity leg: `alpha` must HIT via the shared cache. An unusable
+    // `self_path` means any success here can only come from the stored
+    // entry, proving this test's key composition matches the function's.
+    let hit_plan: RuntimeSfnObjectPlan = _prepare_runtime_sfn_object(_ros_unusable_self_path(), cap_prefix, alpha_src, out_dir_hit, opt_flag, shared_cache_root, ctx_root, compiler_identity, manifest_dir, target_triple);
+    assert hit_plan.obj_path.length > 0;
+
+    // Discrimination leg: `beta` is byte-identical content under a
+    // different slug (`runtime/beta`). If the slug fold were dropped from
+    // `_prepare_runtime_sfn_object`, its key would collapse onto `alpha`'s
+    // stored entry and this would wrongly hit too. With the fold intact it
+    // misses the shared cache and falls through to a real emit, which
+    // fails because `self_path` cannot run.
+    let miss_plan: RuntimeSfnObjectPlan = _prepare_runtime_sfn_object(_ros_unusable_self_path(), cap_prefix, beta_src, out_dir_miss, opt_flag, shared_cache_root, ctx_root, compiler_identity, manifest_dir, target_triple);
+    assert miss_plan.obj_path.length == 0;
+
+    _ros_cleanup(manifest_dir);
+    _ros_cleanup(ctx_root);
+    _ros_cleanup(shared_cache_root);
+    _ros_cleanup(out_dir_store);
+    _ros_cleanup(out_dir_hit);
+    _ros_cleanup(out_dir_miss);
+}
