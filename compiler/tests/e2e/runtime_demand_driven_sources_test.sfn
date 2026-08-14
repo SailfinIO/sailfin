@@ -1,0 +1,327 @@
+// End-to-end acceptance gate for SFN-882 — demand-driven runtime
+// `sfn-sources` selection. Design:
+// `docs/proposals/design-notes/runtime-demand-driven-sources.md` §10.3
+// (this file implements that test plan; §0 records five corrections made
+// during implementation, most importantly that the enforcement E-code is
+// `E0400`, not the `E0402` predicted in the original design).
+//
+// `runtime/capsule.toml` gains a last-in-file `[sfn-source-gates]` table:
+// a runtime source listed under an effect is compiled only when the
+// build's declared effect surface demands that effect. `net` gates the
+// TLS/socket/HTTP/WebSocket/serve group, so a `print`-only program no
+// longer compiles `sfn/crypto`.
+//
+// Every nested build/run/check spawned here uses
+// `clean_runner_env(nested_runner_scratch("<label>"))` (SFN-401) — never a
+// hand-rolled env array — with a distinct label per test so concurrent
+// pool runs cannot collide, and each nested build's `cwd` is pinned to
+// that same scratch dir (`process.run_capture_cwd`) so BOTH artifact
+// trees a gated build can write to — the `SAILFIN_TEST_SCRATCH`-rooted
+// resolver cache (`rt-import-context/...`) and the CWD-relative
+// `build/capsules/<scope>/<name>/ir/...` capsule-closure tree
+// (`capsule_artifact_dir`, `compiler/src/capsule_artifact.sfn`) — land
+// under the same isolated root. That is what makes "walk the scratch"
+// a complete audit rather than a partial one.
+//
+// NOTE: assert on captured output with `sfn/strings` predicates — the
+// `sfn/test` `expect_*` matchers are `![pure]` and cannot be used from an
+// `![io]` test (`.claude/rules/no-bash-e2e.md`).
+import { contains, ends_with } from "sfn/strings";
+import { clean_runner_env, nested_runner_scratch } from "sfn/test";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+// Recursively collect every leaf path under `dir`, bounding recursion so a
+// pathological or cyclic tree cannot run away. `fs.listDirectory` has no
+// `isDirectory` counterpart in the test-compile context, so a path whose
+// listing has entries is treated as a directory and descended, and a
+// zero-entry listing is treated as a leaf (a regular file, or an empty
+// directory — the acceptance criteria only cares whether a file is
+// present, and an empty directory contributes no file either way). Mirrors
+// `lowering_no_bare_runtime_emissions_test.sfn::_collect_sfn`.
+fn _collect_leaves(dir: string, acc: string[], depth: int) -> string[] ![io] {
+    let mut out = acc;
+    if depth > 40 { return out; }
+    if !fs.exists(dir) { return out; }
+    let entries = fs.listDirectory(dir);
+    let mut i: int = 0;
+    loop {
+        if i >= entries.length { break; }
+        let name = entries[i];
+        i += 1;
+        if name == "." || name == ".." { continue; }
+        let full = dir + "/" + name;
+        let sub = fs.listDirectory(full);
+        if sub.length > 0 { out = _collect_leaves(full, out, depth + 1); } else {
+            out.push(full);
+        }
+    }
+    return out;
+}
+
+fn _sfn_asm_files(leaves: string[]) -> string[] {
+    let mut out: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= leaves.length { break; }
+        if ends_with(leaves[i], ".sfn-asm") { out.push(leaves[i]); }
+        i += 1;
+    }
+    return out;
+}
+
+fn _any_contains(leaves: string[], needle: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= leaves.length { break; }
+        if contains(leaves[i], needle) { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+struct _BuildRun {
+    exit: int;
+    scratch: string;
+}
+
+// Build `src` (an absolute path) to `<scratch>/bin/prog` with the nested
+// runner's env AND cwd pinned to the same isolated scratch dir, so every
+// relative artifact path the build writes (`build/sailfin/...`,
+// `build/capsules/...`) lands inside it. `extra_env` appends per-test
+// overrides (e.g. the escape-hatch toggle) after the stripped, re-scratched
+// base env.
+fn _build_in_scratch(label: string, src: string, extra_env: string[]) -> _BuildRun ![io] {
+    let scratch = nested_runner_scratch(label);
+    fs.createDirectory(scratch, true);
+    fs.createDirectory(scratch + "/bin", true);
+    let mut runner_env = clean_runner_env(scratch);
+    let mut k: int = 0;
+    loop {
+        if k >= extra_env.length { break; }
+        runner_env.push(extra_env[k]);
+        k += 1;
+    }
+    let out_bin = scratch + "/bin/prog";
+    let exit = process.run_capture_cwd([_sfn_bin(), "build", "-o", out_bin, src], runner_env, scratch);
+    let _out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    return _BuildRun { exit: exit, scratch: scratch };
+}
+
+fn _run_binary(scratch: string) -> string ![io] {
+    let bin = scratch + "/bin/prog";
+    let run_env = clean_runner_env(scratch);
+    let _exit = process.run_capture(["" + bin], run_env);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    return out + err;
+}
+
+// ---- Fixture sources ----
+// A `print`-only program: cannot reach TLS, HTTP, WebSocket, sockets, or
+// `serve` — the compiler already knows that (E0400 would reject an attempt).
+fn _hello_source() -> string {
+    return "fn main() -> int ![io] {\n" + "    print(\"gates-ok\");\n"
+        + "    return 0;\n"
+        + "}\n";
+}
+
+// Declares `![io, net]` and calls the bespoke concurrency `serve(...)`
+// builtin behind a branch whose condition depends on runtime file content
+// (never a compile-time constant), so clang cannot fold it away — the
+// `@sfn_serve` reference (and the whole `net` gate group behind it) must
+// still reach the link even though `serve` never actually fires. Mirrors
+// the `http.get_body` guard in `runtime_implicit_capsule_link_test.sfn`.
+fn _serve_source(marker: string) -> string {
+    return "fn handler() ![io, net] { }\n\n" + "fn main() -> int ![io, net] {\n"
+        + "    let path = \""
+        + marker
+        + "\";\n"
+        + "    fs.writeFile(path, \"serve-gate-marker\");\n"
+        + "    let contents = fs.readFile(path);\n"
+        + "    if contents == \"this-string-never-equals-the-marker\" {\n"
+        + "        serve(handler, 8080);\n"
+        + "    }\n"
+        + "    print(\"net-gate-ok\");\n"
+        + "    return 0;\n"
+        + "}\n";
+}
+
+// Declares `![io, net.http]` — NOT bare `![net]` — and calls `http.get_body`
+// behind the same runtime-false guard. Regression test for the sharpest
+// correctness bug found during implementation (§0 item 1 of the design
+// note): `http.get` requires `![net.http]`, and matching raw effect tokens
+// against the gate key `net` would miss it and fail the link on an
+// undefined `sfn_http_get`.
+fn _subeffect_source(marker: string) -> string {
+    return "fn fetch(url: string) -> string ![net.http] {\n"
+        + "    return http.get_body(url);\n"
+        + "}\n\n"
+        + "fn main() -> int ![io, net.http] {\n"
+        + "    let path = \""
+        + marker
+        + "\";\n"
+        + "    fs.writeFile(path, \"subeffect-gate-marker\");\n"
+        + "    let contents = fs.readFile(path);\n"
+        + "    if contents == \"this-string-never-equals-the-marker\" {\n"
+        + "        let body = fetch(\"http://127.0.0.1:9/\");\n"
+        + "        print(body);\n"
+        + "    }\n"
+        + "    print(\"net-http-gate-ok\");\n"
+        + "    return 0;\n"
+        + "}\n";
+}
+
+// A bare `serve(...)` with no effect declaration anywhere — the §5.4
+// investigation fixture. If `sfn check` does not reject this, the gate is
+// unsound: a program could reach a `net`-rooted intrinsic through the
+// bespoke `serve` lowering without ever contributing a `net` token to the
+// demand scan.
+fn _bare_serve_source() -> string {
+    return "fn handler() { }\n\n" + "fn main() {\n"
+        + "    serve(handler, 8080);\n"
+        + "}\n";
+}
+
+test "runtime gates: hello-world builds, runs, and stages no crypto" ![io] {
+    let scratch = nested_runner_scratch("runtime-gates-hello");
+    fs.createDirectory(scratch, true);
+    let src = scratch + "/fixture.sfn";
+    fs.writeFile(src, _hello_source());
+
+    let run = _build_in_scratch("runtime-gates-hello", src, []);
+    assert run.exit == 0;
+
+    let output = _run_binary(run.scratch);
+    assert contains(output, "gates-ok");
+
+    let leaves = _collect_leaves(run.scratch, [], 0);
+    // No directory matching `sfn/crypto/ir` has any file in it.
+    assert ! _any_contains(leaves, "sfn/crypto/ir");
+    // No staged `.sfn-asm` names the crypto capsule.
+    let asm = _sfn_asm_files(leaves);
+    let mut asm_has_crypto = false;
+    let mut i: int = 0;
+    loop {
+        if i >= asm.length { break; }
+        if contains(asm[i], "sfn/crypto") { asm_has_crypto = true; }
+        i += 1;
+    }
+    assert ! asm_has_crypto;
+}
+
+test "runtime gates: module count stays under the ceiling" ![io] {
+    let scratch = nested_runner_scratch("runtime-gates-count");
+    fs.createDirectory(scratch, true);
+    let src = scratch + "/fixture.sfn";
+    fs.writeFile(src, _hello_source());
+
+    let run = _build_in_scratch("runtime-gates-count", src, []);
+    assert run.exit == 0;
+
+    let leaves = _collect_leaves(run.scratch, [], 0);
+    let asm = _sfn_asm_files(leaves);
+    // A ceiling, not an exact band — before this change it was 69; after,
+    // ~29. An exact count is a cross-platform flake generator.
+    assert asm.length <= 40;
+}
+
+test "runtime gates: a net-demanding program still links and runs" ![io] {
+    let scratch = nested_runner_scratch("runtime-gates-net-serve");
+    fs.createDirectory(scratch, true);
+    let src = scratch + "/fixture.sfn";
+    let marker = scratch + "/marker.txt";
+    fs.writeFile(src, _serve_source(marker));
+
+    let run = _build_in_scratch("runtime-gates-net-serve", src, []);
+    assert run.exit == 0;
+
+    let output = _run_binary(run.scratch);
+    assert contains(output, "net-gate-ok");
+
+    let leaves = _collect_leaves(run.scratch, [], 0);
+    assert _any_contains(leaves, "sfn/crypto");
+}
+
+test "runtime gates: manifest [capabilities] required opens the gate" ![io] {
+    let scratch = nested_runner_scratch("runtime-gates-manifest");
+    fs.createDirectory(scratch, true);
+    let proj = scratch + "/proj";
+    fs.createDirectory(proj, true);
+    fs.writeFile(proj + "/capsule.toml", "[capsule]\n"
+        + "name = \"fixture/manifest-net\"\n"
+        + "version = \"0.1.0\"\n\n"
+        + "[capabilities]\n"
+        + "required = [\"net\"]\n\n"
+        + "[build]\n"
+        + "kind = \"binary\"\n"
+        + "entry = \"main.sfn\"\n");
+    // No `![net]` anywhere — the gate must open purely off the manifest
+    // capability, proving path 2 of the design note's §5.3 independently
+    // of the effect-annotation path.
+    fs.writeFile(proj + "/main.sfn", "fn main() -> int ![io] {\n"
+        + "    print(\"manifest-net-ok\");\n"
+        + "    return 0;\n"
+        + "}\n");
+
+    let out_bin = scratch + "/bin/prog";
+    fs.createDirectory(scratch + "/bin", true);
+    let runner_env = clean_runner_env(scratch);
+    let exit = process.run_capture_cwd([_sfn_bin(), "build", "-p", proj, "-o", out_bin], runner_env, scratch);
+    let _out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    assert exit == 0;
+
+    let leaves = _collect_leaves(scratch, [], 0);
+    assert _any_contains(leaves, "sfn/crypto");
+}
+
+test "runtime gates: net.http sub-effect opens the net gate" ![io] {
+    let scratch = nested_runner_scratch("runtime-gates-subeffect");
+    fs.createDirectory(scratch, true);
+    let src = scratch + "/fixture.sfn";
+    let marker = scratch + "/marker.txt";
+    fs.writeFile(src, _subeffect_source(marker));
+
+    let run = _build_in_scratch("runtime-gates-subeffect", src, []);
+    assert run.exit == 0;
+
+    let output = _run_binary(run.scratch);
+    assert contains(output, "net-http-gate-ok");
+}
+
+test "runtime gates: SAILFIN_RUNTIME_SOURCE_GATES=off restores the full set" ![io] {
+    let scratch = nested_runner_scratch("runtime-gates-escape");
+    fs.createDirectory(scratch, true);
+    let src = scratch + "/fixture.sfn";
+    fs.writeFile(src, _hello_source());
+
+    let run = _build_in_scratch("runtime-gates-escape", src, ["SAILFIN_RUNTIME_SOURCE_GATES=off"]);
+    assert run.exit == 0;
+
+    let leaves = _collect_leaves(run.scratch, [], 0);
+    assert _any_contains(leaves, "sfn/crypto");
+}
+
+test "runtime gates: bare serve() with no net effect fails sfn check with E0400" ![io] {
+    let scratch = nested_runner_scratch("runtime-gates-serve-check");
+    fs.createDirectory(scratch, true);
+    let src = scratch + "/fixture.sfn";
+    fs.writeFile(src, _bare_serve_source());
+
+    let runner_env = clean_runner_env(scratch);
+    let exit = process.run_capture_cwd([_sfn_bin(), "check", src], runner_env, scratch);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    let output = out + err;
+    // If this fails, the design note's §5.4 hole is live and the whole
+    // gate is unsound — stop and report rather than weakening this.
+    assert exit != 0;
+    assert contains(output, "E0400");
+    assert contains(output, "![net]");
+}

@@ -14,6 +14,7 @@ import { _shell_read_cmd, _shell_single_quote_arg } from "./fs";
 import { missing_runtime_dep_specs, runtime_dep_link_failure_message } from "./link_contract";
 import { _ensure_dir, _find_substring_from } from "./paths";
 import { RuntimeLinkInputs, assemble_runtime_capsule_link_inputs } from "./runtime_objs";
+import { runtime_demanded_dep_specs } from "./runtime_selection";
 // Target conditioning (SFN-52, SFEP-0021 §4.2(A); promoted to the triple
 // axis by SFN-774 / SFEP-0068 §3.1): the msvc ABI forces `-fuse-ld=lld`
 // and skips the GNU-only dead-strip / retain-root flags `lld-link`
@@ -270,7 +271,11 @@ fn _clang_link_multi_with_opt(ll_paths: string[], out_path: string, runtime_root
     // `ran_backend: false` — this is a driver-side refusal before the
     // backend ever runs, not a backend failure, so callers correctly skip
     // the SFN-212 ICE banner for it.
-    let missing_deps = missing_runtime_dep_specs(runtime_capsules, ll_paths);
+    // SFN-882: `runtime_capsules` arrives already narrowed — the call sites
+    // apply `select_runtime_sfn_sources` where they materialise it, so this
+    // preflight and `assemble_runtime_capsule_link_inputs` below necessarily
+    // see the same source set and cannot disagree about which deps are needed.
+    let missing_deps = missing_runtime_dep_specs(runtime_capsules, ll_paths, runtime_demanded_dep_specs(runtime_capsules));
     if missing_deps.length > 0 {
         print(runtime_dep_link_failure_message(missing_deps));
         return _failed_link_result();

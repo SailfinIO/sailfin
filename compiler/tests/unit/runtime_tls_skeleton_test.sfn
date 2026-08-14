@@ -54,9 +54,60 @@ test "lowering: runtime/sfn/platform/tls.sfn emits a declare for every extern" !
     assert _contains(ir, "@sfn_tls_record_seal(");
     assert _contains(ir, "@sfn_tls_record_open(");
     // Trust-store and certificate-validity support.
-    assert _contains(ir, "@sfn_str_sfn_from_cstr(");
+    //
+    // SFN-882 moved `@sfn_str_sfn_from_cstr` out of this module: it was
+    // reached only through `_tls_cstr`, which now lives in `./tls_status`
+    // along with the diagnostics accessors. Its declare is asserted against
+    // that module below rather than dropped, so the coverage moves with the
+    // extern instead of thinning out.
     assert _contains(ir, "@sfn_fs_read_file(");
     assert _contains(ir, "@sfn_clock_unix_millis(");
+}
+
+// SFN-882: `tls_status.sfn` carries the TLS diagnostics surface — the two
+// process-global slots, the error/alert name tables, and the `*u8` accessors
+// `tls.last_error()` / `tls.last_alert()` lower to.
+//
+// It exists as a separate module for a reason worth restating at its test: it
+// must stay free of any `sfn/crypto` edge. `tls.sfn` is gated on the `net`
+// effect, but those two builtins are deliberately effect-free (SFN-822), so a
+// program calling one demands nothing, the gate closes, and a gated home for
+// them fails the link with an undefined symbol reported as an ICE. The
+// standing guard for that pairing is
+// `compiler/tests/unit/gated_builtin_effect_rows_test.sfn`.
+fn _tls_status_ir() -> string ![io] {
+    let source = fs.readFile("runtime/sfn/platform/tls_status.sfn");
+    let program = parse_program(source);
+    let native = emit_native_text_with_module_name(program, "runtime/sfn/platform/tls_status");
+    return lower_to_llvm_ir_from_text_with_provider_context(native, "runtime/sfn/platform/tls_status", empty_llvm_import_context(), resolve_llvm_provider_context());
+}
+
+test "lowering: runtime/sfn/platform/tls_status.sfn emits the diagnostics accessors and their externs" ![io] {
+    let ir = _tls_status_ir();
+
+    assert _contains(ir, "declare ");
+    // The two `*u8`-returning accessors the descriptor registry routes
+    // `tls.last_error` / `tls.last_alert` to.
+    assert _contains(ir, "@tls_last_error_name(");
+    assert _contains(ir, "@tls_last_alert_name(");
+    // String adoption and integer formatting, which travelled here with
+    // `_tls_cstr` / `_tls_dec`.
+    assert _contains(ir, "@sfn_str_sfn_from_cstr(");
+    assert _contains(ir, "@sfn_int_to_str(");
+    // The caller-owned duplication path.
+    assert _contains(ir, "@malloc(");
+    assert _contains(ir, "@memcpy(");
+}
+
+// The property that makes the ungated home correct: nothing here reaches the
+// crypto capsule, so keeping it out of the `net` gate costs no modules. A
+// regression would show up as a `sfn/crypto` mangled call in this IR.
+test "lowering: runtime/sfn/platform/tls_status.sfn pulls in no crypto symbol" ![io] {
+    let ir = _tls_status_ir();
+
+    assert ! _contains(ir, "sfn__crypto");
+    assert ! _contains(ir, "@sfn_tls_record_seal(");
+    assert ! _contains(ir, "@sfn_tls_record_open(");
 }
 
 test "lowering: runtime/sfn/platform/tls.sfn declares no OpenSSL symbol" ![io] {

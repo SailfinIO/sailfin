@@ -9,6 +9,7 @@ import {
     _path_join_cmd,
     _strip_trailing_slashes_cmd
 } from "../../../build/fs";
+import { runtime_demand_all } from "../../../build/runtime_selection";
 import { is_safe_scope_name, parse_scope_name } from "../../../capsule_artifact";
 import { prepare_project_capsules_for_test } from "../../../capsule_resolver";
 import { discover_project_root } from "../../../capsule_resolver/paths";
@@ -119,6 +120,9 @@ struct TestGroup {
     // test body declaring an effect outside this surface produces
     // an `E0403` diagnostic.
     capabilities_required: string[];
+    // SFN-882: carried from the group's resolver pass to the link site so both
+    // use one demand set. See `TestCapsuleResolution.runtime_demand`.
+    runtime_demand: string[];
 }
 
 // Compute the resolution-group key for a test file path. Two files
@@ -165,7 +169,8 @@ fn _test_resolver_consumer_for_group(file_path: string, runtime_root: string) ->
             name: "",
             walk_project_src: false,
             include_host_as_dep: true,
-            runtime_root: runtime_root
+            runtime_root: runtime_root,
+            retain_full_runtime: true
         };
     }
     let manifest_path = _path_join_cmd(project_root, "capsule.toml");
@@ -175,7 +180,8 @@ fn _test_resolver_consumer_for_group(file_path: string, runtime_root: string) ->
             name: "",
             walk_project_src: false,
             include_host_as_dep: true,
-            runtime_root: runtime_root
+            runtime_root: runtime_root,
+            retain_full_runtime: true
         };
     }
     let manifest_text = fs.readFile(manifest_path);
@@ -186,7 +192,8 @@ fn _test_resolver_consumer_for_group(file_path: string, runtime_root: string) ->
             name: "",
             walk_project_src: false,
             include_host_as_dep: true,
-            runtime_root: runtime_root
+            runtime_root: runtime_root,
+            retain_full_runtime: true
         };
     }
     let parts = parse_scope_name(capsule_name);
@@ -199,7 +206,8 @@ fn _test_resolver_consumer_for_group(file_path: string, runtime_root: string) ->
             name: "",
             walk_project_src: false,
             include_host_as_dep: true,
-            runtime_root: runtime_root
+            runtime_root: runtime_root,
+            retain_full_runtime: true
         };
     }
     return ResolverConsumer {
@@ -207,7 +215,8 @@ fn _test_resolver_consumer_for_group(file_path: string, runtime_root: string) ->
         name: parts.name,
         walk_project_src: false,
         include_host_as_dep: true,
-        runtime_root: runtime_root
+        runtime_root: runtime_root,
+        retain_full_runtime: true
     };
 }
 
@@ -296,7 +305,7 @@ fn _resolve_test_groups(test_files: string[], runtime_root: string, binary_dir: 
             let empty_lls: string[] = [];
             let empty_caps: string[] = [];
             groups.push(TestGroup {
-                key: key, entry_paths: empty_entries, interfaces: empty_interfaces, native_texts: empty_texts, dep_ll_paths: empty_lls, function_effects: empty_import_symbols(), capabilities_required: empty_caps
+                key: key, entry_paths: empty_entries, interfaces: empty_interfaces, native_texts: empty_texts, dep_ll_paths: empty_lls, function_effects: empty_import_symbols(), capabilities_required: empty_caps, runtime_demand: runtime_demand_all()
             });
             idx = groups.length - 1;
         }
@@ -387,6 +396,26 @@ fn _resolve_test_groups(test_files: string[], runtime_root: string, binary_dir: 
         // so the per-test compile produces `E0403` for any test
         // body declaring an effect outside the surface.
         groups[gi].capabilities_required = resolution.capabilities_required;
+        // SFN-882: `sfn test` opts OUT of demand-driven selection entirely, on
+        // both sides — this is deliberate and load-bearing, not an oversight.
+        //
+        // The test-link path does not dead-strip, so the prelude's `serve`
+        // wrapper survives into every test binary and its reference to
+        // `sailfin_runtime_serve` (gated `serve.sfn`) must resolve. Gating here
+        // produces `ld.lld: error: undefined symbol: sailfin_runtime_serve`
+        // referenced by prelude.sfn, in EVERY test binary. `sfn build` is
+        // unaffected because `--gc-sections` removes the unused wrapper.
+        //
+        // Forcing `"*"` here rather than only at the link site keeps C1 and the
+        // link consuming ONE demand set. Narrowing the closure here while the
+        // link stayed wide is the divergence that makes the contract preflight
+        // reject `sfn/crypto`, and vice versa produces undefined symbols.
+        //
+        // Nothing is lost: the pooled runner warms the runtime once per
+        // invocation and every child cache-hits it, so this path was already
+        // amortised. The win is paid by the NESTED builds e2e tests spawn,
+        // which go through `build.sfn`/`run.sfn` and do select.
+        groups[gi].runtime_demand = runtime_demand_all();
         if trace_runner {
             print.err("test runner: resolver pass done (group=" + int_to_string(gi)
                 + ", deps="

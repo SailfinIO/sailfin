@@ -5,11 +5,17 @@
 // capsule, workspace-implicit and cache-implicit — then folds the results into
 // one `CapsuleSource[]` with no duplicate path or slug, and fills in each
 // source's `ll_path` once the consumer and dep layout are known.
+import { compute_runtime_demand, runtime_demand_all } from "../build/runtime_selection";
 import { cache_key_for } from "../build_cache";
 import { capsule_artifact_layout_from_specs } from "../capsule_artifact";
 import { module_name_from_path } from "../module_paths";
 import { enumerate_runtime_capsule_artifacts } from "../runtime_capsule_resolver";
-import { toml_get_capabilities_required, toml_get_dependencies, toml_get_name } from "../toml_parser";
+import {
+    toml_get_build_full_runtime,
+    toml_get_capabilities_required,
+    toml_get_dependencies,
+    toml_get_name
+} from "../toml_parser";
 import { _cr_enumerate_host_capsule_sources, enumerate_capsule_sources } from "./discovery";
 import {
     _cr_any_entry_imports_host,
@@ -80,6 +86,18 @@ struct ResolverDedupeResult {
     // Consumed only by the build path's filter (SFEP-0070 §3.2);
     // `sfn check` ignores it and keeps the unfiltered set.
     root_source_paths: string[];
+    // SFN-882: the canonical effect roots this build demands, or the `"*"`
+    // sentinel meaning "retain everything". Drives demand-driven runtime
+    // `sfn-source` selection at all three consumers — runtime-root seeding
+    // here in the resolver, and dep staging plus the link in the driver.
+    //
+    // Computed once, at the single success return below, and threaded
+    // verbatim thereafter; never recomputed per consumer, because the
+    // consumers straddle two phases and independent recomputation would be
+    // free to disagree. Every early/error return sets `"*"`, which is the
+    // fail-open direction: a resolution that did not get far enough to
+    // compute a real demand set must not narrow anything.
+    runtime_demand: string[];
 }
 
 // Shared resolution + dedupe used by both `prepare_project_capsules`
@@ -181,7 +199,8 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer, bun
             capabilities_required: empty_caps,
             manifest_dep_specs: empty_specs,
             workspace_root: "",
-            root_source_paths: empty_roots
+            root_source_paths: empty_roots,
+            runtime_demand: runtime_demand_all()
         };
     }
 
@@ -299,6 +318,12 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer, bun
     }
     let mut covered_specs: string[] = [];
     let mut capabilities_required: string[] = [];
+    // SFN-882: `[build] full-runtime = true` opts this artifact out of
+    // demand-driven runtime source selection entirely. Set on
+    // `compiler/capsule.toml`, whose binary is the runtime provider surface
+    // and must carry every runtime module regardless of what its own sources
+    // declare. Absent → false for every ordinary project.
+    let mut project_full_runtime: boolean = false;
     // SFN-341: the exclusion set for the workspace-implicit walk (3). It is
     // NOT `covered_specs`: the declared-dep list omits both the transitive
     // closure and the runtime `[dependencies]` union, so a capsule the dep
@@ -330,6 +355,7 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer, bun
             // []`) tells the checker to skip the cross-check —
             // that's the right call for projects mid-migration.
             capabilities_required = toml_get_capabilities_required(manifest_text);
+            project_full_runtime = toml_get_build_full_runtime(manifest_text);
         }
         let dep_sources = enumerate_capsule_sources(project_root, consumer.runtime_root);
         let mut di: int = 0;
@@ -485,7 +511,8 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer, bun
             capabilities_required: capabilities_required,
             manifest_dep_specs: covered_specs,
             workspace_root: workspace_root,
-            root_source_paths: empty_roots
+            root_source_paths: empty_roots,
+            runtime_demand: runtime_demand_all()
         };
     }
 
@@ -520,7 +547,8 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer, bun
                         capabilities_required: capabilities_required,
                         manifest_dep_specs: covered_specs,
                         workspace_root: workspace_root,
-                        root_source_paths: empty_roots
+                        root_source_paths: empty_roots,
+                        runtime_demand: runtime_demand_all()
                     };
                 }
                 // Same slug AND same path → exact duplicate, drop silently.
@@ -599,12 +627,48 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer, bun
         rp += 1;
     }
 
+    // SFN-882: the demand scan reads the UNFILTERED set plus the entry paths.
+    // Scanning the filtered closure would be circular — the closure depends on
+    // which runtime roots are seeded, which depends on this answer.
+    //
+    // Skipped entirely when the consumer declares no `runtime_root`. That is
+    // exactly the `sfn check` shape (the field's own comment at
+    // `types.sfn:85-94` records the split: build/run/test-link set it, `check`
+    // leaves it empty), and `check` neither links nor selects runtime sources,
+    // so scanning for it would buy nothing. The guard is not a micro-
+    // optimisation: `_cr_resolve_and_dedupe` is on the `sfn check` path, which
+    // is rung 1 of the validation ladder and the inner development loop, and an
+    // unconditional extra full read pass over every resolved source would tax
+    // every `check` in the repo to serve a consumer that does not exist there.
+    let mut demand_paths: string[] = [];
+    if consumer.runtime_root.length > 0 && !consumer.retain_full_runtime {
+        let mut dp: int = 0;
+        loop {
+            if dp >= resolved.length { break; }
+            demand_paths.push(resolved[dp].source_path);
+            dp += 1;
+        }
+        let mut ep: int = 0;
+        loop {
+            if ep >= entry_paths.length { break; }
+            if !_cr_string_array_contains(demand_paths, entry_paths[ep]) {
+                demand_paths.push(entry_paths[ep]);
+            }
+            ep += 1;
+        }
+    }
+    let mut resolved_demand = runtime_demand_all();
+    if consumer.runtime_root.length > 0 && !consumer.retain_full_runtime {
+        resolved_demand = compute_runtime_demand(demand_paths, capabilities_required, project_full_runtime);
+    }
+
     return ResolverDedupeResult {
         sources: resolved,
         has_collision: false,
         capabilities_required: capabilities_required,
         manifest_dep_specs: covered_specs,
         workspace_root: workspace_root,
-        root_source_paths: root_source_paths
+        root_source_paths: root_source_paths,
+        runtime_demand: resolved_demand
     };
 }

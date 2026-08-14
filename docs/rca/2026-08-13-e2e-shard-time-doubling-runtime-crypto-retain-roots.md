@@ -220,11 +220,24 @@ independently cost CI time.
 | SFN-867 | Whole-shard retry-once makes shard duration bimodal | Low |
 | SFN-868 | Seed bundle declares a runtime dep it ships no sources for | High |
 | SFN-869 | The e2e heavy tail beyond the four self-hosting outliers | Medium |
+| SFN-882 | Demand-driven runtime `sfn-sources` — don't compile TLS for hello-world | Urgent |
 
 SFN-860 carries `needs-design`: scoping the roots changes link behaviour and
 requires adjusting the migration-test assertions that motivated the broad root
 set. SFN-863 is blocked by SFN-862 — a time-weighted map needs per-file timing
 to weight from.
+
+SFN-882 was added after this RCA was written, and it is the row that addresses
+the *cause* rather than the symptom. This document attributes the regression to
+the retain-root policy (Defect A) and the missing emit cache (Defect B), both of
+which are real; but neither explains why a program that cannot reach a socket
+compiles the TLS 1.3 stack at all. The answer is upstream of both: every one of
+the runtime's `sfn-sources` is compiled unconditionally, so the 8 that import
+`sfn/crypto` pull the capsule into every build. SFN-860 §10.1 says as much —
+scoping the roots "will not recover the 1.93x CI regression" — and §10.3 names
+demand-driven module selection as the deeper lever. Measured on the shape this
+RCA used: 69 modules / 58.32 s / 1,915 MB → 29 / 20.32 s / 361 MB.
+Design: `docs/proposals/design-notes/runtime-demand-driven-sources.md`.
 
 ## Confidence and falsifiers
 

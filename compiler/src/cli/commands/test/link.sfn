@@ -3,6 +3,7 @@ import { assemble_link_inputs } from "../../../build/clang_argv";
 import { _ensure_dir_cmd } from "../../../build/fs";
 import { missing_runtime_dep_specs, runtime_dep_link_failure_message } from "../../../build/link_contract";
 import { assemble_runtime_capsule_link_inputs } from "../../../build/runtime_objs";
+import { runtime_demanded_dep_specs, select_runtime_sfn_sources } from "../../../build/runtime_selection";
 import { _get_env_cmd } from "../../../build_flags";
 import { runtime_capsule_from_root } from "../../../runtime_capsule_resolver";
 
@@ -45,7 +46,7 @@ struct TestLinkResult {
     ran_backend: boolean;
 }
 
-fn _clang_link_test_cmd_with_deps(ll_path: string, out_path: string, runtime_root: string, dep_ll_paths: string[], cache_dir: string, binary_dir: string) -> TestLinkResult ![io] {
+fn _clang_link_test_cmd_with_deps(ll_path: string, out_path: string, runtime_root: string, dep_ll_paths: string[], cache_dir: string, binary_dir: string, runtime_demand: string[]) -> TestLinkResult ![io] {
     // `-Wno-override-module`: every emitted `.ll` carries its own `target
     // triple`, which clang's link overrides — matching the suppression on
     // every other clang invocation in cli_main.sfn so the test path is not
@@ -86,7 +87,23 @@ fn _clang_link_test_cmd_with_deps(ll_path: string, out_path: string, runtime_roo
     if !dep_objects.success {
         return TestLinkResult { rc: 1, ran_backend: true };
     }
-    let runtime_caps = runtime_capsule_from_root(runtime_root);
+    // SFN-882: narrow with the demand set the GROUP'S RESOLVER PASS computed,
+    // never with one derived here.
+    //
+    // An earlier revision left this path unnarrowed on the theory that a link
+    // site without a demand set should fail open. That is wrong, and it fails
+    // loudly: `sfn test` threads a non-empty `runtime_root` into every
+    // `ResolverConsumer` (`test/discovery.sfn`), so C1 has ALREADY narrowed the
+    // capsule closure by the time control arrives here. Re-widening the runtime
+    // capsule then asks the link contract to require `sfn/crypto` reach a link
+    // that no longer compiles it, and the preflight refuses every gated test
+    // binary with `link-contract: ... sfn/crypto`.
+    //
+    // The invariant is therefore not "either side may fail open independently"
+    // but "C1 and the link site must use the SAME demand set". Fail-open is a
+    // property of how that one set is computed, not a licence for two consumers
+    // to disagree about it.
+    let runtime_caps = select_runtime_sfn_sources(runtime_capsule_from_root(runtime_root), runtime_demand);
     if runtime_caps.length == 0 {
         print.err("sfn test: runtime bundle/manifest missing — expected "
             + runtime_root
@@ -113,7 +130,7 @@ fn _clang_link_test_cmd_with_deps(ll_path: string, out_path: string, runtime_roo
         contract_lls.push(dep_ll_paths[cli]);
         cli += 1;
     }
-    let missing_deps = missing_runtime_dep_specs(runtime_caps, contract_lls);
+    let missing_deps = missing_runtime_dep_specs(runtime_caps, contract_lls, runtime_demanded_dep_specs(runtime_caps));
     if missing_deps.length > 0 {
         print.err(runtime_dep_link_failure_message(missing_deps));
         return TestLinkResult { rc: 1, ran_backend: false };

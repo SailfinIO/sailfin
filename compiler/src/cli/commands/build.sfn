@@ -50,6 +50,7 @@ import { _do_determinism_check } from "../../build/determinism";
 import { _clang_link_multi } from "../../build/link";
 import { _dirname, _ensure_dir, _resolve_self_path } from "../../build/paths";
 import { _runtime_bundle_exists, clean_runtime_object_cache } from "../../build/runtime_objs";
+import { select_runtime_sfn_sources } from "../../build/runtime_selection";
 import { build_target_os, target_exe_name, triple_is_supported } from "../../build/target";
 import { clear_build_target, set_build_target } from "../../build/target_state";
 import { cache_root, merge_cache_stats, resolve_build_cache_config } from "../../build_cache";
@@ -320,7 +321,8 @@ fn _run_single_build(capsule_path: string, input_path_arg: string, out_path_arg:
         name: "",
         walk_project_src: walk_src,
         include_host_as_dep: false,
-        runtime_root: runtime_root
+        runtime_root: runtime_root,
+        retain_full_runtime: false
     };
     if cap_capsule_name.length > 0 {
         let parts0 = parse_scope_name(cap_capsule_name);
@@ -330,7 +332,8 @@ fn _run_single_build(capsule_path: string, input_path_arg: string, out_path_arg:
                 name: parts0.name,
                 walk_project_src: walk_src,
                 include_host_as_dep: false,
-                runtime_root: runtime_root
+                runtime_root: runtime_root,
+                retain_full_runtime: false
             };
         }
     }
@@ -524,7 +527,13 @@ fn _run_single_build(capsule_path: string, input_path_arg: string, out_path_arg:
     // `runtime/capsule.toml` instead of the retired probe.
     let mut build_runtime_caps = capsule_result.runtime_capsules;
     if build_runtime_caps.length == 0 {
-        build_runtime_caps = runtime_capsule_from_root(runtime_root);
+        // SFN-882: the implicit-capsule fallback is the hot path for a
+        // positional `sfn build <file>` — no manifest, no declared runtime dep,
+        // so `capsule_result.runtime_capsules` is empty and this recovers the
+        // runtime from disk. It is also where the regression is measured, so it
+        // must be narrowed here; the declared-dep list above was already
+        // narrowed inside the resolver.
+        build_runtime_caps = select_runtime_sfn_sources(runtime_capsule_from_root(runtime_root), capsule_result.runtime_demand);
     }
     // Shared content-addressed cache root for runtime objects
     // (#1096), mirroring the `.ll` module cache. Empty under

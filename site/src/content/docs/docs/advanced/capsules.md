@@ -112,6 +112,31 @@ Declares which effects this capsule uses. See the [Capability Declarations](#cap
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `entry` | string | `"src/mod.sfn"` | The source file the compiler starts from when building this capsule. For application capsules this is typically `"src/main.sfn"`. |
+| `full-runtime` | boolean | `false` | Opts this artifact out of demand-driven `sfn-sources` selection ([sfn-source-gates]) entirely, forcing every gated runtime source to compile regardless of the build's declared effect surface. Runtime-provider artifacts (the compiler binary itself) set this because they must carry every runtime module regardless of what their own sources declare (SFN-882). |
+
+#### `[sfn-source-gates]`
+
+Runtime-only: applies to `runtime/capsule.toml` (`kind = "runtime"`), not to library or application capsules. By default, every source listed in `[build] sfn-sources` compiles unconditionally into every artifact — including runtime subsystems, like the TLS 1.3 stack, that a given build never exercises. `[sfn-source-gates]` narrows that: it is a table keyed by canonical effect name (`"io"`, `"net"`, `"model"`, `"gpu"`, `"rand"`, `"clock"`), each value an array of `sfn-sources` paths gated behind that effect.
+
+```toml
+[sfn-source-gates]
+net = [
+  "sfn/platform/tls.sfn",
+  "sfn/platform/tls_record.sfn",
+  # ...
+]
+```
+
+A gated source compiles only when the build's demand set — the union of the project manifest's `[capabilities] required` and every effect token appearing in an `![...]` annotation across the unfiltered source set, each normalized through `effect_root()` — contains the gating effect. A source named in no gate always compiles. `[sfn-source-gates]` must be the last table in `runtime/capsule.toml`: the TOML reader scans from a section header to the next header to collect an array, so a section inserted before it would truncate `sfn-sources` under the pinned seed and break `make compile`.
+
+Two environment overrides:
+
+| Variable | Effect |
+|---|---|
+| `SAILFIN_RUNTIME_SOURCE_GATES=off` (also `0`/`false`) | Disables selection — every gated source compiles, reproducing the pre-gating artifact set. Useful for bisecting a regression against gating itself. |
+| `SAILFIN_TRACE_RUNTIME_GATES=1` | Prints the computed demand set to stderr. |
+
+Selection changes which sources reach the link line for a given build; it does not change binary size on its own (gated modules were already dead-strippable) and has no effect on `sfn check`, which never links. `sfn build -p compiler` always retains every runtime source (see `full-runtime` above), so it is unaffected by this table. Design: `docs/proposals/design-notes/runtime-demand-driven-sources.md` (SFN-882).
 
 #### `[toolchain]`
 

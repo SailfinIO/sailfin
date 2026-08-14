@@ -92,6 +92,16 @@ struct ResolverConsumer {
     // link does (SFN-773, design note
     // `sfn-341-native-tls-runtime-swap.md` §3.1.3).
     runtime_root: string;
+    // SFN-882: opt this resolution out of demand-driven runtime `sfn-source`
+    // selection — the demand set is forced to `"*"` and nothing is narrowed.
+    //
+    // Set by `sfn test`, whose link path does not dead-strip: the prelude's
+    // `serve` wrapper survives into every test binary and its reference to
+    // `sailfin_runtime_serve` (in gated `serve.sfn`) must resolve. It lives on
+    // the CONSUMER rather than at the link site because C1 and the link must
+    // consume one demand set; opting out at only one of them reintroduces the
+    // divergence as either an undefined symbol or a link-contract refusal.
+    retain_full_runtime: boolean;
 }
 
 fn empty_resolver_consumer() -> ResolverConsumer {
@@ -100,7 +110,8 @@ fn empty_resolver_consumer() -> ResolverConsumer {
         name: "",
         walk_project_src: false,
         include_host_as_dep: false,
-        runtime_root: ""
+        runtime_root: "",
+        retain_full_runtime: false
     };
 }
 
@@ -203,6 +214,14 @@ struct ProjectCapsuleResult {
     // `[dependencies] "sfn/runtime-native" = "*"`, which is what
     // unblocks `sfn build -p compiler` as a real bootstrap path.
     runtime_capsules: RuntimeCapsuleArtifacts[];
+    // SFN-882: the demand set this resolution computed, carried so the build
+    // and run drivers can narrow the IMPLICIT runtime capsule too.
+    // `runtime_capsules` above is already narrowed, but it is empty for a
+    // positional build that declares no runtime dep — the hello-world shape,
+    // and the one the regression is measured on — and those drivers recover it
+    // with their own `runtime_capsule_from_root` fallback. Without the demand
+    // set here that fallback would silently re-widen to all 34 sources.
+    runtime_demand: string[];
 }
 
 // One entry from the workspace's [workspace].members list, with the
@@ -280,4 +299,11 @@ struct TestCapsuleResolution {
     // body declaring an effect the capsule manifest doesn't grant
     // produces an `E0403` diagnostic.
     capabilities_required: string[];
+    // SFN-882: the demand set this resolution used. The test-link path MUST
+    // narrow its runtime capsule with this exact value, not with its own
+    // independently-derived one. `sfn test` threads a non-empty `runtime_root`,
+    // so C1 already narrowed the capsule closure here — a link site that
+    // re-widened would demand `sfn/crypto` reach a link that no longer compiles
+    // it, and the preflight would refuse every gated test binary.
+    runtime_demand: string[];
 }

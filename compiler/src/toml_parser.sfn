@@ -441,6 +441,25 @@ fn toml_get_build_implicit(text: string) -> boolean {
     return t.build_implicit;
 }
 
+// SFN-882: `[build] full-runtime = true` opts an artifact out of demand-driven
+// runtime `sfn-sources` selection — it forces the demand set to the `"*"`
+// sentinel so every runtime module is retained regardless of the effects the
+// artifact's own sources declare. Set on `compiler/capsule.toml`, whose binary
+// is the runtime provider surface.
+//
+// Read via `toml_get_string` rather than `_parse_toml_internal` so no field is
+// added to `SailToml` (and so the seed's serializer round-trip is untouched).
+// `toml_get_string` returns the raw remainder after `=`, so a trailing
+// same-line comment would land in the value; cut at `#` before comparing.
+// Absent → false, which is the correct default for every other capsule.
+fn toml_get_build_full_runtime(text: string) -> boolean {
+    let raw = toml_get_string(text, "build", "full-runtime");
+    let hash_pos = find_char_local(raw, "#", 0);
+    let mut value = raw;
+    if hash_pos >= 0 { value = substring(raw, 0, hash_pos); }
+    return strings_equal(_toml_trim(value), "true");
+}
+
 // ---- Stage D PR1 getters: kind = "runtime" capsule schema ----
 //
 // `kind = "runtime"` capsules ship declarative C / LL source lists
@@ -502,6 +521,20 @@ fn toml_get_link_libs(text: string) -> string[] {
 // Returns `[]` when unset.
 fn toml_get_sfn_sources(text: string) -> string[] {
     return _toml_split_lines_into_array(toml_get_string_array(text, "build", "sfn-sources"));
+}
+
+// SFN-882: read one gate list from `[sfn-source-gates]` — the sources a runtime
+// capsule compiles only when the build's declared effect surface demands
+// `effect`. Absent key → `[]`, which reads as "nothing is gated on this
+// effect", the fail-open direction (an unrecognized or misspelled gate key
+// retains its sources rather than dropping them).
+//
+// Deliberately keyed per effect rather than enumerating the section: the driver
+// looks up the six `canonical_effects()` names, so no section-enumeration API is
+// needed and a new gate key costs a manifest edit alone. Same dynamic-key shape
+// as `toml_get_workspace_capability_grants`.
+fn toml_get_sfn_source_gate(text: string, effect: string) -> string[] {
+    return _toml_split_lines_into_array(toml_get_string_array(text, "sfn-source-gates", effect));
 }
 
 // Transitional Stage D field — the entry path for the Sailfin

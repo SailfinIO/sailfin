@@ -7,12 +7,35 @@ import { missing_runtime_dep_specs, runtime_dep_link_failure_message } from "../
 import { RuntimeCapsuleArtifacts, empty_runtime_capsule_artifacts } from "../../src/runtime_capsule_resolver";
 import { index_of } from "../../src/string_utils";
 
+// SFN-882 added a third parameter: the specs the SELECTED runtime sources
+// actually import. Every test below predates demand-driven selection and pins a
+// property of the covered/uncovered decision itself, so each passes the full
+// declared set — reproducing the pre-SFN-882 behaviour exactly, and keeping
+// those assertions a test of the invariant rather than of the new filter. The
+// filter gets its own test at the bottom of this file.
+fn all_declared_specs(caps: RuntimeCapsuleArtifacts[]) -> string[] {
+    let mut out: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= caps.length { break; }
+        let deps = caps[i].capsule_deps;
+        let mut d: int = 0;
+        loop {
+            if d >= deps.length { break; }
+            out.push(deps[d]);
+            d += 1;
+        }
+        i += 1;
+    }
+    return out;
+}
+
 test "missing_runtime_dep_specs: a dep with a matching ir/ path is covered" {
     let mut artifacts = empty_runtime_capsule_artifacts();
     artifacts.capsule_deps = ["sfn/crypto"];
     let runtime_capsules: RuntimeCapsuleArtifacts[] = [artifacts];
     let ll_paths = ["build/capsules/sfn/crypto/ir/aead.ll"];
-    let missing = missing_runtime_dep_specs(runtime_capsules, ll_paths);
+    let missing = missing_runtime_dep_specs(runtime_capsules, ll_paths, all_declared_specs(runtime_capsules));
     assert missing.length == 0;
 }
 
@@ -21,7 +44,7 @@ test "missing_runtime_dep_specs: a dep with no matching link path is reported" {
     artifacts.capsule_deps = ["sfn/crypto"];
     let runtime_capsules: RuntimeCapsuleArtifacts[] = [artifacts];
     let ll_paths = ["build/sailfin/program.ll"];
-    let missing = missing_runtime_dep_specs(runtime_capsules, ll_paths);
+    let missing = missing_runtime_dep_specs(runtime_capsules, ll_paths, all_declared_specs(runtime_capsules));
     assert missing.length == 1;
     assert missing[0] == "sfn/crypto";
 }
@@ -32,7 +55,7 @@ test "missing_runtime_dep_specs: no declared deps is a vacuous pass" {
     artifacts.capsule_deps = empty_deps;
     let runtime_capsules: RuntimeCapsuleArtifacts[] = [artifacts];
     let ll_paths: string[] = [];
-    let missing = missing_runtime_dep_specs(runtime_capsules, ll_paths);
+    let missing = missing_runtime_dep_specs(runtime_capsules, ll_paths, all_declared_specs(runtime_capsules));
     assert missing.length == 0;
 }
 
@@ -41,7 +64,7 @@ test "missing_runtime_dep_specs: a single-segment spec fails open" {
     artifacts.capsule_deps = ["mycap"];
     let runtime_capsules: RuntimeCapsuleArtifacts[] = [artifacts];
     let ll_paths: string[] = [];
-    let missing = missing_runtime_dep_specs(runtime_capsules, ll_paths);
+    let missing = missing_runtime_dep_specs(runtime_capsules, ll_paths, all_declared_specs(runtime_capsules));
     assert missing.length == 0;
 }
 
@@ -50,7 +73,7 @@ test "missing_runtime_dep_specs: an absolute link path still matches by substrin
     artifacts.capsule_deps = ["sfn/crypto"];
     let runtime_capsules: RuntimeCapsuleArtifacts[] = [artifacts];
     let ll_paths = ["/work/build/capsules/sfn/crypto/ir/x.ll"];
-    let missing = missing_runtime_dep_specs(runtime_capsules, ll_paths);
+    let missing = missing_runtime_dep_specs(runtime_capsules, ll_paths, all_declared_specs(runtime_capsules));
     assert missing.length == 0;
 }
 
@@ -59,7 +82,7 @@ test "missing_runtime_dep_specs: a sibling capsule with a longer name does not c
     artifacts.capsule_deps = ["sfn/crypto"];
     let runtime_capsules: RuntimeCapsuleArtifacts[] = [artifacts];
     let ll_paths = ["build/capsules/sfn/crypto-extra/ir/x.ll"];
-    let missing = missing_runtime_dep_specs(runtime_capsules, ll_paths);
+    let missing = missing_runtime_dep_specs(runtime_capsules, ll_paths, all_declared_specs(runtime_capsules));
     assert missing.length == 1;
     assert missing[0] == "sfn/crypto";
 }
@@ -71,10 +94,39 @@ test "missing_runtime_dep_specs: overlapping deps across capsules dedupe in firs
     second.capsule_deps = ["sfn/crypto", "sfn/other"];
     let runtime_capsules: RuntimeCapsuleArtifacts[] = [first, second];
     let ll_paths: string[] = [];
-    let missing = missing_runtime_dep_specs(runtime_capsules, ll_paths);
+    let missing = missing_runtime_dep_specs(runtime_capsules, ll_paths, all_declared_specs(runtime_capsules));
     assert missing.length == 2;
     assert missing[0] == "sfn/crypto";
     assert missing[1] == "sfn/other";
+}
+
+// SFN-882: the relaxation that makes demand-driven selection landable at all.
+// Once the `net` gate closes, no selected runtime source imports `sfn/crypto`,
+// so its IR tree contributes nothing to the link — and the un-relaxed contract
+// would fail EVERY hello-world build before the backend ran. `sfn check` cannot
+// catch that (it never links), which is what makes it the sharpest hazard in
+// this change rather than a footnote.
+test "missing_runtime_dep_specs: an undemanded dep is skipped, not reported" {
+    let mut artifacts = empty_runtime_capsule_artifacts();
+    artifacts.capsule_deps = ["sfn/crypto"];
+    let runtime_capsules: RuntimeCapsuleArtifacts[] = [artifacts];
+    let ll_paths: string[] = [];
+    let no_demand: string[] = [];
+    let missing = missing_runtime_dep_specs(runtime_capsules, ll_paths, no_demand);
+    assert missing.length == 0;
+}
+
+// The relaxation must not become a blanket exemption: a dep that IS imported by
+// a selected source still has to reach the link, or the contract stops catching
+// the resolver regression it exists for.
+test "missing_runtime_dep_specs: a demanded dep with no link path is still reported" {
+    let mut artifacts = empty_runtime_capsule_artifacts();
+    artifacts.capsule_deps = ["sfn/crypto"];
+    let runtime_capsules: RuntimeCapsuleArtifacts[] = [artifacts];
+    let ll_paths: string[] = [];
+    let missing = missing_runtime_dep_specs(runtime_capsules, ll_paths, ["sfn/crypto"]);
+    assert missing.length == 1;
+    assert missing[0] == "sfn/crypto";
 }
 
 test "runtime_dep_link_failure_message: renders the singular case correctly" {
