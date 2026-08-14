@@ -87,17 +87,23 @@
 // at all — `EACCES`, fd exhaustion, `ENOMEM`. `fs.listDirectory` reports
 // that as `[]`, indistinguishable from a genuinely empty directory, so a
 // copy would drain its loop over nothing and report success where `cp -R`
-// exits non-zero. `copy_tree` does not inherit that blindness: it re-probes
-// an empty listing with `_dir_is_enumerable` and returns `false` when the
-// directory will not open (SFN-892). The probe is `opendir`, the call whose
-// failure `fs.listDirectory` swallowed in the first place, so it tests the
-// real condition rather than approximating it from permission bits.
+// exits non-zero. `copy_tree` catches it: an EMPTY listing is re-probed
+// with `_dir_is_enumerable` and returns `false` when the directory will
+// not open (SFN-892). The probe is `opendir`, the call whose failure was
+// swallowed in the first place, rather than an approximation from
+// permission bits. A listing truncated part-way through — `readdir`
+// failing mid-walk, which the lowering cannot distinguish from
+// end-of-stream — is NOT covered by this and remains a silent short read.
 //
-// The destructive walkers never needed the probe: they end on a
-// post-condition (`remove_tree`'s `!fs.exists(path)`), and a directory that
-// failed to enumerate also fails to `rmdir`, so the answer is already
-// `false`. A copy has no post-condition available — its only `true` is
-// "the loop drained" — which is why it is the one walker that had to ask.
+// `remove_tree` never needed the probe: it ends on a post-condition
+// (`!fs.exists(path)`), and a directory that failed to enumerate also
+// fails to `rmdir`, so its answer is already `false`.
+// `remove_empty_dirs_under` is safe for a different reason — an
+// unenumerable non-empty directory fails `fs.removeDirectory`, then lists
+// as `[]`, so it is neither descended into nor counted, and the count
+// stays honest by construction. A copy has no post-condition available —
+// its only `true` is "the loop drained" — which is why it is the one
+// walker that had to ask.
 import { starts_with } from "../string_utils";
 import { _copy_file_preserving_mode, _dir_is_enumerable, _dirname_cmd } from "./fs";
 

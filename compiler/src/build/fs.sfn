@@ -38,11 +38,25 @@ extern fn close(fd: i32) -> i32;
 
 // `opendir`/`closedir` back `_dir_is_enumerable` below. Only the open and
 // the close are declared because whether `opendir` succeeds is the entire
-// question; reading the entries out is `fs.listDirectory`'s job. Like
-// `mkstemp` and `close` above, these are POSIX spellings absent from the
-// MSVC UCRT, and unlike `mkstemp` they have no sibling Windows module yet,
-// so they remain unresolved symbols on the native MSVC leg — the same gap
-// `close` already carries, inventoried in SFN-646.
+// question; reading the entries out is `fs.listDirectory`'s job.
+//
+// Like `mkstemp` and `close` above these are POSIX spellings absent from
+// the MSVC UCRT with no sibling Windows module yet, so they are unresolved
+// symbols on the native MSVC leg (inventoried in SFN-646). The parallel
+// with `close` stops at the linker, though, and the difference is worth
+// stating: `close`'s call site sits behind a `host_is_windows()`
+// short-circuit and is unreachable there, while this one is not. Bridging
+// the MSVC gap for `opendir` therefore needs a shim that genuinely opens a
+// directory, not merely one that resolves.
+//
+// This is also the first `opendir` call from compiler source, and it runs
+// against the grain of SFN-51: directory enumeration was put behind the
+// `sailfin_intrinsic_fs_list_dir` sentinel precisely so the libc family is
+// never *called* on native Windows, leaving the runtime's declarations
+// link-safe by keeping them uncalled. Matching that here would mean a
+// registry row the pinned seed lacks, splitting this fix across a seed cut
+// (`.claude/rules/seed-dependency.md`), so the departure is deliberate. It
+// is benign on mingw, where libmingwex implements `opendir`.
 extern fn opendir(path: *u8) -> *u8;
 
 extern fn closedir(dirp: *u8) -> i32;
@@ -622,16 +636,21 @@ fn _strip_trailing_slashes_cmd(path: string) -> string {
 }
 
 // Can `path` actually be opened for enumeration, as opposed to being
-// empty? `fs.listDirectory` answers both questions with `[]` — returning
-// an empty array rather than null is what lets its callers iterate
-// unconditionally (`runtime/sfn/adapters/filesystem.sfn`) — so a caller
-// that must not fabricate success re-probes an empty listing with this.
+// empty? `fs.listDirectory` answers both questions with `[]` — the
+// substitution happens in the lowering, whose failure branch materializes
+// an empty array (`codegen-llvm/.../core_call_emission/filesystem_list.sfn`;
+// the runtime wrapper only sorts) — so a caller that must not fabricate
+// success re-probes an empty listing with this.
 //
-// `opendir` is the honest test because it is the exact call whose failure
-// `fs.listDirectory` swallows: `EACCES`, fd exhaustion, `ENOMEM`. A
-// permission-bit reading via `fs.get_perms` would be cheaper and wrong in
-// both directions — it cannot see fd pressure, and it answers "unreadable"
-// for root, who may enumerate a mode-000 directory perfectly well.
+// On POSIX `opendir` is the honest test because it is the very call whose
+// failure that branch swallows: `EACCES`, fd exhaustion, `ENOMEM`. On the
+// mingw leg the swallowed call is `FindFirstFileA` instead, so this probes
+// an equivalent rather than an identical operation.
+//
+// A permission-bit reading via `fs.get_perms` would be cheaper and wrong
+// in both directions — it cannot see fd pressure, and it answers
+// "unreadable" for root, who may enumerate a mode-000 directory perfectly
+// well.
 fn _dir_is_enumerable(path: string) -> boolean ![io] {
     if path.length == 0 { return false; }
     let handle: *u8 = opendir(path as *u8);

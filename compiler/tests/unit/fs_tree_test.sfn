@@ -484,12 +484,22 @@ test "fs_tree: copy_tree returns false past the depth bound" ![io] {
 // The unreadable-directory case (SFN-892)
 // --------------------------------------------------------------
 // Try to make `path` genuinely unenumerable, reporting whether it worked.
-// It does not work for a privileged user: `opendir` ignores the permission
-// bits for root, so under a root-run suite (containers, some CI images)
-// there is no unreadable directory to construct and the property under
-// test does not exist on that host. Skipping is therefore honest rather
-// than flaky — the alternative would be asserting that root cannot read a
-// directory, which is false.
+// It reports false — skip — for three distinct reasons, not only the
+// obvious one:
+//
+//   * Windows, where `fs.set_perms` is a stub;
+//   * `chmod` itself failing;
+//   * `chmod` succeeding while `opendir` keeps working. That is root,
+//     who bypasses the permission bits, but ALSO any filesystem that does
+//     not enforce them — WSL `drvfs`, FAT/exFAT, 9p/virtiofs, some Docker
+//     volume drivers — and `_scratch_dir()` follows `SAILFIN_TEST_SCRATCH`
+//     to wherever the pool points it.
+//
+// Skipping is honest rather than flaky: on such a host there is no
+// unreadable directory to construct, so the property under test does not
+// exist there. The alternative would be asserting that root cannot read a
+// directory, which is false. Each caller keeps an unconditional assertion
+// so that a skipping host still tests something.
 fn _make_unreadable_dir(path: string) -> boolean ![io] {
     if host_is_windows() { return false; }
     if !fs.set_perms(path, 0) { return false; }
@@ -514,12 +524,17 @@ test "fs: _dir_is_enumerable separates an unreadable directory from an empty one
     fs.createDirectory(locked, true);
     fs.writeFile(locked + "/hidden.txt", "secret");
     if _make_unreadable_dir(locked) {
-        assert expect_eq_bool(_dir_is_enumerable(locked), false).ok;
+        let probed = _dir_is_enumerable(locked);
+        let listed = fs.listDirectory(locked).length;
+        // Restored BEFORE asserting: the harness recovers from a failed
+        // assertion and runs on, so a restore placed after one would be
+        // skipped, stranding a mode-000 directory that `remove_tree`
+        // cannot delete and a later `rm -rf build` trips over.
+        fs.set_perms(locked, 493);
+        assert expect_eq_bool(probed, false).ok;
         // The indistinguishability being fixed: identical to `empty`'s
         // listing above, though this directory holds a file.
-        assert expect_eq_int(fs.listDirectory(locked).length, 0).ok;
-        // Restored so the scratch tree is removable again.
-        assert expect_eq_bool(fs.set_perms(locked, 493), true).ok;
+        assert expect_eq_int(listed, 0).ok;
     }
     remove_tree(root);
 }
@@ -538,10 +553,19 @@ test "fs_tree: copy_tree returns false for a subdirectory it cannot enumerate" !
     fs.createDirectory(locked, true);
     fs.writeFile(locked + "/hidden.txt", "secret");
 
+    let dst = root + "/dst";
     if _make_unreadable_dir(locked) {
-        assert expect_eq_bool(copy_tree(src, root + "/dst"), false).ok;
-        // Restored so the scratch tree is removable again.
-        assert expect_eq_bool(fs.set_perms(locked, 493), true).ok;
+        let ok = copy_tree(src, dst);
+        // Restored before asserting; see `_dir_is_enumerable`'s test.
+        fs.set_perms(locked, 493);
+        assert expect_eq_bool(ok, false).ok;
+    } else {
+        // The unreadable case is not constructible on this host, so pin
+        // the other half instead: the same tree, fully readable, still
+        // copies. Without this the test would report `pass` having
+        // asserted nothing at all.
+        assert expect_eq_bool(copy_tree(src, dst), true).ok;
+        assert expect_eq_str(fs.readFile(dst + "/readable/keep.txt"), "hi").ok;
     }
     remove_tree(root);
 }
