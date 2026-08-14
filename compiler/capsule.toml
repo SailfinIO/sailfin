@@ -57,6 +57,10 @@ sfn = "0.9.5"
 # toolchain. Declared like `sfn/cli` — a normal source capsule staged +
 # linked into the self-hosted build (workspace member `capsules/sfn/crypto`).
 "sfn/crypto" = "*"
+# SFN-496: `publish`/`add` use the typed `fetch` client (`sfn/http`) in
+# place of shelling out to `curl`. Declared like `sfn/crypto` — a normal
+# source capsule staged + linked into the self-hosted build.
+"sfn/http" = "*"
 
 [capabilities]
 # `io` covers fs.*, print.*, console.*, and process.* surface used
