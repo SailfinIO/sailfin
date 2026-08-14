@@ -83,22 +83,29 @@
 // strictly less work — `cache_info` under-reports, `cache_prune`
 // under-prunes — and neither is unsafe.
 //
-// A THIRD truncation source is not covered by any of that, and the honest
-// statement of it is that `copy_tree` cannot currently detect it.
-// `fs.listDirectory` yields an empty array on an enumeration failure —
-// `EACCES`, fd exhaustion, `ENOMEM` — which is indistinguishable from a
-// genuinely empty directory (the contract is stated at
-// `runtime/sfn/adapters/filesystem.sfn`, where returning `[]` rather than
-// null is what lets callers iterate unconditionally). `copy_tree` copies
-// nothing from such a subtree and returns `true`, where `cp -R` would exit
-// non-zero. The destructive walkers are immune structurally rather than by
-// luck: they end on a post-condition (`remove_tree`'s `!fs.exists(path)`),
-// and a directory that failed to enumerate also fails to `rmdir`. A copy
-// has no post-condition to check, so it cannot buy the same immunity —
-// only a `listDirectory` that can report failure can, which is SFN-892.
-// Delete this paragraph when that lands.
+// A THIRD truncation source is a directory that could not be enumerated
+// at all — `EACCES`, fd exhaustion, `ENOMEM`. `fs.listDirectory` reports
+// that as `[]`, indistinguishable from a genuinely empty directory, so a
+// copy would drain its loop over nothing and report success where `cp -R`
+// exits non-zero. `copy_tree` catches it: an EMPTY listing is re-probed
+// with `_dir_is_enumerable` and returns `false` when the directory will
+// not open (SFN-892). The probe is `opendir`, the call whose failure was
+// swallowed in the first place, rather than an approximation from
+// permission bits. A listing truncated part-way through — `readdir`
+// failing mid-walk, which the lowering cannot distinguish from
+// end-of-stream — is NOT covered by this and remains a silent short read.
+//
+// `remove_tree` never needed the probe: it ends on a post-condition
+// (`!fs.exists(path)`), and a directory that failed to enumerate also
+// fails to `rmdir`, so its answer is already `false`.
+// `remove_empty_dirs_under` is safe for a different reason — an
+// unenumerable non-empty directory fails `fs.removeDirectory`, then lists
+// as `[]`, so it is neither descended into nor counted, and the count
+// stays honest by construction. A copy has no post-condition available —
+// its only `true` is "the loop drained" — which is why it is the one
+// walker that had to ask.
 import { starts_with } from "../string_utils";
-import { _copy_file_preserving_mode, _dirname_cmd } from "./fs";
+import { _copy_file_preserving_mode, _dir_is_enumerable, _dirname_cmd } from "./fs";
 
 let FS_TREE_MAX_DEPTH: int = 16;
 
@@ -298,6 +305,14 @@ fn copy_tree(src: string, dst: string) -> boolean ![io] {
             let dir_dst = level_dst[li];
             nodes += 1;
             let entries = fs.listDirectory(dir_src);
+            // An empty listing is either a genuinely empty directory or
+            // one that could not be opened; `fs.listDirectory` spells
+            // both `[]`. Probing only in that case costs one
+            // `opendir`/`closedir` pair per empty directory, and a
+            // non-empty listing has already proved the open succeeded.
+            if entries.length == 0 {
+                if !_dir_is_enumerable(dir_src) { return false; }
+            }
             let mut ei: int = 0;
             loop {
                 if ei >= entries.length { break; }

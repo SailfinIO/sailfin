@@ -11,6 +11,7 @@ import {
     _copy_file,
     _copy_file_counted,
     _copy_file_preserving_mode,
+    _dir_is_enumerable,
     _file_size_of
 } from "../../src/build/fs";
 import {
@@ -477,6 +478,96 @@ test "fs_tree: copy_tree returns false past the depth bound" ![io] {
     // Truncated, not absent: the levels within the bound were copied and
     // are left for the caller to remove.
     assert fs.is_directory(dst);
+}
+
+// --------------------------------------------------------------
+// The unreadable-directory case (SFN-892)
+// --------------------------------------------------------------
+// Try to make `path` genuinely unenumerable, reporting whether it worked.
+// It reports false — skip — for three distinct reasons, not only the
+// obvious one:
+//
+//   * Windows, where `fs.set_perms` is a stub;
+//   * `chmod` itself failing;
+//   * `chmod` succeeding while `opendir` keeps working. That is root,
+//     who bypasses the permission bits, but ALSO any filesystem that does
+//     not enforce them — WSL `drvfs`, FAT/exFAT, 9p/virtiofs, some Docker
+//     volume drivers — and `_scratch_dir()` follows `SAILFIN_TEST_SCRATCH`
+//     to wherever the pool points it.
+//
+// Skipping is honest rather than flaky: on such a host there is no
+// unreadable directory to construct, so the property under test does not
+// exist there. The alternative would be asserting that root cannot read a
+// directory, which is false. Each caller keeps an unconditional assertion
+// so that a skipping host still tests something.
+fn _make_unreadable_dir(path: string) -> boolean ![io] {
+    if host_is_windows() { return false; }
+    if !fs.set_perms(path, 0) { return false; }
+    return !_dir_is_enumerable(path);
+}
+
+// The probe must key on "can this be opened", never on "does this have
+// entries" — an empty directory is perfectly enumerable, and conflating
+// the two is the bug itself.
+test "fs: _dir_is_enumerable separates an unreadable directory from an empty one" ![io] {
+    let root = _scratch_dir() + "/dir-enumerable";
+    if fs.exists(root) { remove_tree(root); }
+    let empty = root + "/empty";
+    fs.createDirectory(empty, true);
+
+    assert expect_eq_bool(_dir_is_enumerable(empty), true).ok;
+    assert expect_eq_int(fs.listDirectory(empty).length, 0).ok;
+    assert expect_eq_bool(_dir_is_enumerable(root + "/missing"), false).ok;
+    assert expect_eq_bool(_dir_is_enumerable(""), false).ok;
+
+    let locked = root + "/locked";
+    fs.createDirectory(locked, true);
+    fs.writeFile(locked + "/hidden.txt", "secret");
+    if _make_unreadable_dir(locked) {
+        let probed = _dir_is_enumerable(locked);
+        let listed = fs.listDirectory(locked).length;
+        // Restored BEFORE asserting: the harness recovers from a failed
+        // assertion and runs on, so a restore placed after one would be
+        // skipped, stranding a mode-000 directory that `remove_tree`
+        // cannot delete and a later `rm -rf build` trips over.
+        fs.set_perms(locked, 493);
+        assert expect_eq_bool(probed, false).ok;
+        // The indistinguishability being fixed: identical to `empty`'s
+        // listing above, though this directory holds a file.
+        assert expect_eq_int(listed, 0).ok;
+    }
+    remove_tree(root);
+}
+
+// The SFN-892 repro in miniature. Before the probe this returned `true`
+// over a destination missing `locked/` entirely — the shape that let
+// `sfn package` print its success banner over a truncated release tarball,
+// where the `cp -R` it replaced exits non-zero.
+test "fs_tree: copy_tree returns false for a subdirectory it cannot enumerate" ![io] {
+    let root = _scratch_dir() + "/copy-unreadable";
+    if fs.exists(root) { remove_tree(root); }
+    let src = root + "/src";
+    fs.createDirectory(src + "/readable", true);
+    fs.writeFile(src + "/readable/keep.txt", "hi");
+    let locked = src + "/locked";
+    fs.createDirectory(locked, true);
+    fs.writeFile(locked + "/hidden.txt", "secret");
+
+    let dst = root + "/dst";
+    if _make_unreadable_dir(locked) {
+        let ok = copy_tree(src, dst);
+        // Restored before asserting; see `_dir_is_enumerable`'s test.
+        fs.set_perms(locked, 493);
+        assert expect_eq_bool(ok, false).ok;
+    } else {
+        // The unreadable case is not constructible on this host, so pin
+        // the other half instead: the same tree, fully readable, still
+        // copies. Without this the test would report `pass` having
+        // asserted nothing at all.
+        assert expect_eq_bool(copy_tree(src, dst), true).ok;
+        assert expect_eq_str(fs.readFile(dst + "/readable/keep.txt"), "hi").ok;
+    }
+    remove_tree(root);
 }
 
 test "fs: _copy_file_preserving_mode carries the executable bit" ![io] {
