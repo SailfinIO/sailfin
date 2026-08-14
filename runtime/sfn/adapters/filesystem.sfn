@@ -187,8 +187,8 @@ extern fn access(path: *u8, mode: i32) -> i32;
 // by design, to avoid colliding with same-named capsule funcs). All
 // five are inlined unconditionally: an unused `declare` on a platform
 // that never `call`s it is link-safe (no relocation), so the Windows
-// cross-build (which lowers `GetFileAttributesA` for `fs_exists` and
-// stubs the rest) links cleanly too.
+// cross-build (which lowers `GetFileAttributesA` for both `fs_exists`
+// and `fs_is_directory`, and stubs the rest) links cleanly too.
 extern fn symlink(target: *u8, link: *u8) -> i32;
 
 extern fn mkdtemp(template: *u8) -> *u8;
@@ -565,6 +565,27 @@ fn sfn_fs_rmdir(path: *u8) -> bool ![io] {
 // `exec.sfn` route through this canonical wrapper now.
 fn sfn_fs_exists(path: *u8) -> bool ![io] {
     return sailfin_intrinsic_fs_exists(path);
+}
+
+// `sfn_fs_is_directory(path)` — true iff `path` resolves to a directory.
+// Same shape as `sfn_fs_exists` above: no `extern` declaration, so the
+// call fires the per-target `sailfin_intrinsic_fs_is_directory` SENTINEL
+// the compiler lowers (SFN-755) — POSIX `stat` + `st_mode & S_IFMT ==
+// S_IFDIR`, Windows `GetFileAttributesA` + `FILE_ATTRIBUTE_DIRECTORY`
+// guarded against `INVALID_FILE_ATTRIBUTES`. Both `stat` and
+// `GetFileAttributesA` are already declared in the extern block above,
+// and an unused declare on a platform that never calls it is link-safe.
+//
+// This is the NON-DESTRUCTIVE predicate: it answers from a single
+// syscall and never mutates, which is what a read-only tree walk needs
+// and what the destructive probes (`fs.deleteFile` succeeds only on a
+// file, `fs.removeDirectory` only on an empty directory) cannot give it.
+//
+// `stat` follows symlinks, so a symlink-to-directory answers `true`.
+// That agrees with `fs.listDirectory` (`opendir`, which also follows),
+// so the predicate matches what a subsequent enumeration will do.
+fn sfn_fs_is_directory(path: *u8) -> bool ![io] {
+    return sailfin_intrinsic_fs_is_directory(path);
 }
 
 // `sfn_fs_mkdir(path, recursive)` — create the directory `path`.

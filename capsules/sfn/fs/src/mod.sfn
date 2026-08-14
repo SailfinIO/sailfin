@@ -129,6 +129,21 @@ fn is_executable(path: string) -> boolean ![io] {
     return fs.is_executable(path);
 }
 
+fn is_directory(path: string) -> boolean ![io] {
+    // True iff `path` resolves to a directory. Answers from a single
+    // non-mutating syscall — `stat` + `st_mode & S_IFMT == S_IFDIR` on
+    // POSIX, `GetFileAttributesA` + `FILE_ATTRIBUTE_DIRECTORY` on
+    // Windows — which is what separates it from the destructive probes
+    // a read-only tree walk cannot use (`delete_file` succeeds only on
+    // a file, `remove_directory` only on an empty directory).
+    //
+    // A missing path, or one whose parent denies traversal, returns
+    // `false` rather than erroring: every consumer treats this as a
+    // filter. `stat` follows symlinks, so a symlink-to-directory is
+    // `true` — matching `list_directory` (`opendir`), which follows too.
+    return fs.is_directory(path);
+}
+
 fn symlink(target: string, link: string) -> boolean ![io] {
     // Creates `link` pointing at `target`. Per POSIX, the target
     // need not exist; dangling symlinks are intentionally allowed.

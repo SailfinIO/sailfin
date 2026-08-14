@@ -5,46 +5,35 @@
 // already-shipped `fs.*` intrinsics; no new extern, builtin, or intrinsic
 // sentinel is introduced (SFN-494 groundwork).
 //
-// There is no `fs.isDirectory` intrinsic, so entry classification is
-// probe-based throughout this file, and each function documents which
+// Entry classification differs per function, and each documents which
 // probe it uses and why:
 //
 //   * `remove_tree` may delete anything under `path`, so it classifies by
 //     attempting `fs.deleteFile` first (only a file/symlink succeeds) and
 //     falling back to directory handling — the same shape
 //     `_selfhost_remove_tree` (`compiler/src/cli_selfhost.sfn`) already
-//     uses.
+//     uses. `fs.is_directory` would cost an extra syscall per entry to
+//     reach the same outcome, since the `deleteFile` this walk must issue
+//     anyway already answers the question.
 //   * `remove_empty_dirs_under` must never delete a non-empty directory or
 //     a file, so it classifies by attempting `fs.removeDirectory` (which
 //     only ever succeeds on an empty directory) and falls back to treating
 //     a non-empty `fs.listDirectory` result as "directory with children to
-//     explore" — anything left over is a file and is left untouched.
+//     explore" — anything left over is a file and is left untouched. Same
+//     reasoning as `remove_tree`: the destructive probe is the operation,
+//     not an extra cost paid for classification.
 //   * `walk_dirs` is read-only, so neither destructive probe is available.
-//     It falls back to the `_collect_sfn_files_cmd` heuristic
-//     (`build/fs.sfn`): `fs.listDirectory(entry).length > 0` implies
-//     "directory". This misclassifies an EMPTY directory as a file, so a
-//     directory that is empty at walk time is invisible to `walk_dirs`.
-//     `fs.get_perms` cannot rescue this — its lowering masks `st_mode` to
-//     the low 12 bits (`& 0o7777`,
-//     `llvm/expression_lowering/native/core_call_emission/filesystem_intrinsics.sfn`),
-//     so the `S_IFDIR` bit never reaches the caller. The
-//     `sailfin_intrinsic_fs_is_directory` sentinel that answers this
-//     properly now exists (SFN-755), but is not yet callable from Sailfin
-//     source: its runtime wrapper needs the sentinel present in the PINNED
-//     seed, which the next cadence bump supplies.
+//     It uses `fs.is_directory` (SFN-755's non-destructive
+//     `sailfin_intrinsic_fs_is_directory` sentinel, wired to its runtime
+//     wrapper in SFN-756) — a single `stat`/`GetFileAttributesA` per
+//     entry that answers correctly for an EMPTY directory, which the
+//     previous `fs.listDirectory(entry).length > 0` heuristic could not:
+//     it reported an empty directory as a file, making it invisible to
+//     the walk.
 //
-//     This is acceptable for every consumer here: cache shard and entry
-//     directories always hold at least one artifact, and an entry that has
-//     lost its artifact is exactly what `remove_empty_dirs_under` exists to
-//     reap. SFN-756 switches this walk over once the seed advances, and
-//     deletes this note.
-//
-// There is deliberately no `copy_tree` here. `cp -R`/`cp -a` has no
-// consumer in SFN-494, and the heuristic above is not merely lossy for a
-// copy: an empty source subdirectory would be treated as a file, creating a
-// spurious empty file at the destination before failing the whole copy.
-// The `cp -R` replacement lands with its first real consumer (SFN-495),
-// on top of `fs.is_directory` once SFN-756 makes it callable.
+// `copy_tree` is deliberately still absent: `cp -R`/`cp -a` has no
+// consumer here, and the replacement lands with its first real consumer
+// (SFN-495) now that `fs.is_directory` makes a correct one writable.
 //
 // Symlinks: `fs.deleteFile` is `unlink(2)`, which removes a
 // symlink-to-directory without following it, so `remove_tree`'s deletion
@@ -56,9 +45,12 @@
 //
 // Bounds: every traversal below is iterative (an explicit worklist, never
 // recursion), bounded by `FS_TREE_MAX_DEPTH` (16 levels) and
-// `FS_TREE_MAX_NODES` (200000 parent directories expanded — the
-// classification listing of each child is not separately counted, so the
-// true `fs.listDirectory` ceiling is that plus one per entry encountered).
+// `FS_TREE_MAX_NODES` (200000 parent directories expanded). The node count
+// covers expansions only, so the true syscall ceiling depends on how a
+// function classifies: `remove_empty_dirs_under` may issue a second
+// `fs.listDirectory` per entry encountered on top of it, while `walk_dirs`
+// classifies with a single `fs.is_directory` (`stat`) per entry and
+// `remove_tree` with the `fs.deleteFile` it must issue anyway.
 // These are not user-source inputs, so hitting a bound is never a panic or
 // a `Diagnostic`; it degrades to best-effort.
 //
@@ -80,8 +72,8 @@ fn list_child_dirs(dir: string) -> string[] ![io] {
 
 // Directory paths under `root` at depth in `[min_depth, max_depth]`
 // inclusive, where `root` itself is depth 0. Order need not match `find`'s.
-// Returns `[]` if `root` does not exist. See the module header for the
-// directory-classification limitation (an empty directory is invisible).
+// Returns `[]` if `root` does not exist. An empty directory IS visible
+// (SFN-756); see the module header for the classification probe.
 fn walk_dirs(root: string, min_depth: int, max_depth: int) -> string[] ![io] {
     let mut results: string[] = [];
     if !fs.exists(root) { return results; }
@@ -98,10 +90,11 @@ fn walk_dirs(root: string, min_depth: int, max_depth: int) -> string[] ![io] {
         if level.length == 0 { break; }
         // Listing a level at `depth` can only yield entries at `depth + 1`,
         // so the last level worth listing is `effective_max - 1`. Stopping
-        // at `>` instead would list one level too many — and since
-        // classification lists every child, that costs an `opendir` on
-        // every FILE at the boundary depth. For `walk_dirs(root, 2, 2)`
-        // over a cache that is one `opendir` per stored artifact.
+        // at `>` instead would list one level too many, costing an
+        // `fs.listDirectory` on every directory at the boundary depth plus
+        // an `fs.is_directory` on each of its entries — for
+        // `walk_dirs(root, 2, 2)` over a cache, one `opendir` per stored
+        // entry directory and a `stat` per artifact, all discarded.
         if depth >= effective_max { break; }
         let mut next_level: string[] = [];
         let mut li: int = 0;
@@ -118,8 +111,7 @@ fn walk_dirs(root: string, min_depth: int, max_depth: int) -> string[] ![io] {
             loop {
                 if ei >= entries.length { break; }
                 let full = dir + "/" + entries[ei];
-                let child_entries = fs.listDirectory(full);
-                if child_entries.length > 0 {
+                if fs.is_directory(full) {
                     if depth + 1 >= min_depth { results.push(full); }
                     next_level.push(full);
                 }
