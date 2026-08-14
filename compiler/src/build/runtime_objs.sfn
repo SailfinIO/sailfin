@@ -598,7 +598,12 @@ fn write_runtime_identity_stamp(runtime_capsules: RuntimeCapsuleArtifacts[], out
             let slug = _runtime_module_slug(cap.manifest_dir, src);
             let obj_base = _runtime_obj_stem(cap_prefix, src, opt_flag, target_tag)
                 + ".o";
-            let obj_key = _runtime_obj_key_with_target(_runtime_obj_key_with_sibling_deps(runtime_object_cache_key_with_identity(src, opt_flag, compiler_identity), ctx_root, slug), target_triple);
+            // SFN-870: the slug fold sits inside the target fold, exactly
+            // as `_prepare_runtime_sfn_object` composes it. The stamped
+            // fast path compares against this hash, so any divergence
+            // between the two compositions silently demotes every stamped
+            // lookup to a full derivation.
+            let obj_key = _runtime_obj_key_with_target(_runtime_obj_key_with_slug(_runtime_obj_key_with_sibling_deps(runtime_object_cache_key_with_identity(src, opt_flag, compiler_identity), ctx_root, slug), slug), target_triple);
             if obj_key.length > 0 {
                 text = text + "obj/" + obj_base + "=" + sha256_hex_of_string(obj_key)
                     + "\n";
@@ -671,6 +676,49 @@ fn _runtime_obj_key_with_sibling_deps(base_key: string, ctx_root: string, slug: 
     return key;
 }
 
+// SFN-870: fold the module SLUG into the runtime `.o` cache key. This is
+// the `.o`-side twin of `runtime_asm_cache_key`'s `asm1:` fold (SFN-861),
+// and closes the gap that fold's comment recorded as still open on this
+// key space since #1096.
+//
+// The object is not a pure function of the source bytes: it is compiled
+// from a `.ll` whose symbol names derive from the module slug, emitted in
+// turn from a `.sfn-asm` whose first directive is literally `.module
+// <slug>` (`_emit_native_state`,
+// `compiler/capsules/codegen/src/emit_native.sfn:117-122`). Two
+// byte-identical sources built under different slugs therefore produce
+// DIFFERENT object bytes while, without this fold, hashing to the SAME
+// address — so one module's `.o` could be served for another's link,
+// surfacing as a wrong-symbol link or a silently wrong module rather than
+// a clean error.
+//
+// Neither preceding fold closes this. `runtime_object_cache_key_with_identity`
+// hashes only source bytes, an opt-flag tag and the compiler identity, and
+// `_runtime_obj_key_with_sibling_deps` takes a `slug` argument but spends it
+// solely on the `.import-deps` LOOKUP — a module without that sidecar keeps
+// the base key byte-for-byte. Nor does the `hash_suffix` the callers thread
+// into `_runtime_obj_shared_cache_fetch`/`_publish`, which is inert for the
+// reason `runtime_asm_cache_key` records below. The slug only counts when
+// it is inside the hashed string.
+//
+// Callers compose this INSIDE `_runtime_obj_key_with_target`, leaving the
+// unvalidated target triple last with nothing after it (see that fold's
+// absorption note). Placing the slug immediately before the following
+// target component mirrors `cache_key_for` in `build_cache.sfn`, which has
+// had that adjacency since SFN-677 introduced its target fold after the
+// existing `slug` component (marker `tgt1:` -> `tgt2:` per SFN-774 /
+// SFEP-0068 §3.6). Unlike the triple, a slug is derived from repository
+// paths by `_runtime_module_slug`, not from the environment.
+//
+// Adding the component reshapes every `.sfn`-source object key, so
+// pre-SFN-870 entries are orphaned rather than mismatched — the same
+// no-collision property the `tgt1:` -> `tgt2:` bump relied on. Empty base
+// propagates empty, matching the folds either side of it.
+fn _runtime_obj_key_with_slug(base_key: string, slug: string) -> string {
+    if base_key.length == 0 { return ""; }
+    return base_key + "\nobj1:" + slug;
+}
+
 // SFN-617: fold the build TARGET into the runtime object cache key. The
 // source-content hash `runtime_object_cache_key`/`_with_identity` folds
 // cannot see the target any more than they could see the compile flags
@@ -724,10 +772,10 @@ fn _runtime_obj_key_with_target(base_key: string, target_triple: string) -> stri
 // argument threaded through `_runtime_obj_shared_cache_fetch`/`_publish`
 // does NOT close this gap: it reaches `_sha256_of_string`, whose body is
 // `sha256_hex_of_string(input)` — the suffix is documented there as
-// unused. `asm1:` domain-separates this key space from the `.o` key
-// (`_runtime_obj_key_with_target`'s `tgt2:`), which never carries a
-// slug fold. Scoped to `sfn-asm` only; the `.o` cache has the same gap
-// (#1096) but is out of scope here.
+// unused. `asm1:` domain-separates this key space from the `.o` key,
+// which carries its own slug fold under `obj1:`
+// (`_runtime_obj_key_with_slug`) — the `.o`-side gap this comment
+// originally recorded as open (#1096) was closed by SFN-870.
 fn runtime_asm_cache_key(src_path: string, slug: string, compiler_identity: string) -> string ![io] {
     let base = runtime_object_cache_key_with_identity(src_path, "", compiler_identity);
     if base.length == 0 { return ""; }
@@ -850,7 +898,9 @@ fn _prepare_runtime_sfn_object(self_path: string, cap_prefix: string, src: strin
     // `runtime_object_cache_key_with_identity`.
     // SFN-617: the target fold wraps OUTSIDE the sibling-deps fold, same
     // ordering `write_runtime_identity_stamp` uses for its stamped entry.
-    let key = _runtime_obj_key_with_target(_runtime_obj_key_with_sibling_deps(runtime_object_cache_key_with_identity(src, opt_flag, compiler_identity), ctx_root, slug), target_triple);
+    // SFN-870: the slug fold sits between them, in that same shared
+    // ordering — the stamp writer must compose these identically.
+    let key = _runtime_obj_key_with_target(_runtime_obj_key_with_slug(_runtime_obj_key_with_sibling_deps(runtime_object_cache_key_with_identity(src, opt_flag, compiler_identity), ctx_root, slug), slug), target_triple);
     if key.length == 0 { stats.invalid_keys = stats.invalid_keys + 1; }
     let shared_suffix = stem;
     if _runtime_obj_cache_hit(obj_path, key) {
@@ -1897,6 +1947,7 @@ fn clean_runtime_object_cache(runtime_capsules: RuntimeCapsuleArtifacts[], out_d
 
 export {
     RuntimeLinkInputs,
+    RuntimeSfnObjectPlan,
     assemble_runtime_capsule_link_inputs,
     clean_runtime_object_cache,
     runtime_stamp_identity,
@@ -1904,6 +1955,8 @@ export {
     _runtime_bundle_exists,
     _runtime_obj_stem,
     _runtime_obj_key_with_target,
+    _runtime_obj_key_with_slug,
+    _prepare_runtime_sfn_object,
     _stage_one_runtime_sfn_import_context,
     runtime_asm_cache_key
 };
