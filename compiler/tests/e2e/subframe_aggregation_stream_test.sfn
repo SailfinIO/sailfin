@@ -83,7 +83,13 @@ test "subframe aggregation: multi-file --json aggregates from the stream, single
 test "subframe aggregation: --jobs 2 aggregates match the serial totals, no side-channel file" ![io] {
     let code = with_tmp_dir(fn (dir: string) -> int {
         _write_fixtures(dir);
-        let scratch = nested_runner_scratch("subframe-jobs2");
+        // Same label as the serial test above: both tests compile the
+        // byte-identical fixtures from `_write_fixtures`, so sharing the
+        // scratch lets this run reuse that closure instead of compiling it
+        // cold a second time. Safe because both tests assert the
+        // side-channel file is ABSENT — a shared scratch cannot mask a
+        // stray write, it can only carry one in (SFN-877 precedent).
+        let scratch = nested_runner_scratch("subframe");
         let exit = process.run_capture([_sfn_bin(), "test", dir, "--jobs", "2", "--json"], clean_runner_env(scratch));
         let out = process.capture_take_stdout();
         let _ = process.capture_take_stderr();
