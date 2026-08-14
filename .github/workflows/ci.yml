@@ -1528,22 +1528,13 @@ jobs:
           path: dist/installer-linux-x86_64.tar.gz
           if-no-files-found: error
 
-      # The third target's timing sidecar. `sailfin-build` already writes it
-      # on every leg (action.yml:464), so linux-arm64 and macos-arm64 were
-      # uploading it while this leg discarded it with the runner. The shard
-      # weight table is `max over targets of (file_elapsed / suite_total)`,
-      # so a missing target silently biases every weight toward the two that
-      # do report. Same contract as the sibling steps: `always()` so a red
-      # shard still yields its timing, `ignore` so a leg that never reached
-      # the test phase does not fail on the missing file.
-      - name: Upload per-shard test timing (SFN-866)
-        if: ${{ always() }}
-        uses: actions/upload-artifact@v7
-        with:
-          name: ci-test-timing-linux-x86_64-${{ matrix.shard }}
-          path: build/agent-test.shard-*.jsonl
-          if-no-files-found: ignore
-          retention-days: 90
+      # No timing-sidecar upload on this leg, deliberately. `sailfin-build`
+      # only exports SAILFIN_AGENT_REPORT for macos-arm64 and linux-arm64
+      # (action.yml:411-415); linux-x86_64 keeps the byte-identical human
+      # run, so `build/agent-test.shard-*.jsonl` is never written here and
+      # an upload step would silently find nothing. Extending the measured
+      # set to this target means changing that leg's output contract, which
+      # is a separate decision from aggregating what already exists.
 
   build-macos:
     name: Build + Test [macos-arm64 / ${{ matrix.shard }}${{ matrix.shard2 && format('+{0}', matrix.shard2) || '' }}]
@@ -2126,8 +2117,8 @@ jobs:
               <(grep '^compiler/tests' compiler/tests/shard_weights.tsv | sort -k1,1) \
               <(grep '^compiler/tests' shard_weights.candidate.tsv | sort -k1,1) \
               2>/dev/null \
-              | sort -t "$(printf '\t')" -k3 -nr | head -15 \
-              | awk -F'\t' '{printf("| `%s` | %s | %s |\n", $1, $2, $3)}'
+              | sort -t "$(printf '\t')" -k3 -nr \
+              | awk -F'\t' 'NR<=15 {printf("| `%s` | %s | %s |\n", $1, $2, $3)}'
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload candidate
