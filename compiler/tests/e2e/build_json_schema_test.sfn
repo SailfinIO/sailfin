@@ -9,9 +9,13 @@
 // The original cd'd into a scratch project; here we build via
 // `-p <capsule-path>` (resolves capsule.toml relative to the path, no
 // cwd lever needed) and route the program.ll cache per-invocation via
-// SAILFIN_TEST_SCRATCH. Each test uses its own SAILFIN_BUILD_CACHE_DIR
-// (keyed by tag) so the cold/warm distinction is independent under the
-// parallel pool.
+// SAILFIN_TEST_SCRATCH.
+//
+// The three tests that assert cache COUNTERS (cold stats, cold hit_rate,
+// warm saturation) each take a fresh `_fresh_iso()`, so their cold/warm
+// distinction stays independent under the parallel pool. The tests that
+// assert only envelope SHAPE share one warm cache via `_shared_shape_iso()`
+// — see its comment for why that is safe and what it saves (SFN-877).
 //
 // NOTE: assert on captured stdout/stderr with `sfn/strings` predicates
 // (the `sfn/test` `expect_*` matchers are `![pure]`, unusable from an
@@ -95,6 +99,38 @@ fn _fresh_iso() -> Iso ![io] {
     };
 }
 
+// Shared isolation for the tests that assert only the JSON envelope's
+// SHAPE and never its cache counters (SFN-877). Those tests do not need a
+// cold build — every fixture in this file is byte-identical apart from its
+// directory name, so a cold `_fresh_iso()` per test meant rebuilding the
+// same program from scratch five times to read five different substrings
+// of the same output.
+//
+// A fixed path rather than shared mutable state: the first shape test to
+// run populates it and the rest hit warm, with no cross-test ordering
+// contract to violate. Safe against the pool because `--jobs N`
+// parallelises across FILES; the tests inside one file run sequentially in
+// one process, so nothing else races this directory.
+//
+// Rooted under `SAILFIN_TEST_SCRATCH` so it is per-run rather than
+// persisting in-tree — a stale cache from a previous run would still
+// satisfy these assertions, but a per-run root keeps a failure
+// reproducible from a clean state.
+//
+// Do NOT use this for the cache-state tests (cold stats, cold hit_rate,
+// warm saturation). Their assertions are exactly what a warm shared cache
+// would invalidate, and `_fresh_iso()` is load-bearing there.
+fn _shared_shape_iso() -> Iso ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    let root = base + "/sfn-build-json-shape";
+    let cache = root + "/cache";
+    let scratch = root + "/scratch";
+    fs.createDirectory(cache, true);
+    fs.createDirectory(scratch, true);
+    return Iso { cache: cache, scratch: scratch };
+}
+
 // Run `sfn build --json [extra...] -o <bin> -p <root>` with the cache +
 // scratch dirs threaded, returning exit + captured streams.
 fn _build(root: string, iso: Iso, tag: string, extra: string[]) -> BuildRun ![io] {
@@ -119,7 +155,7 @@ fn _build(root: string, iso: Iso, tag: string, extra: string[]) -> BuildRun ![io
 // ---- Test 1: cold build emits JSON with the locked schema fields ----
 test "build json: cold build emits valid JSON envelope" ![io] {
     let root = _fixture("emit");
-    let r = _build(root, _fresh_iso(), "prog", []);
+    let r = _build(root, _shared_shape_iso(), "prog", []);
     assert r.exit == 0;
     assert r.out.length > 0;
     assert contains(r.out, "\"schema_version\":\"1\"");
@@ -128,7 +164,7 @@ test "build json: cold build emits valid JSON envelope" ![io] {
 // ---- Test 2: top-level fields present ----
 test "build json: top-level fields present" ![io] {
     let root = _fixture("toplevel");
-    let r = _build(root, _fresh_iso(), "prog", []);
+    let r = _build(root, _shared_shape_iso(), "prog", []);
     assert r.exit == 0;
     assert contains(r.out, "\"command\":\"build\"");
     assert contains(r.out, "\"kind\":\"binary\"");
@@ -175,7 +211,7 @@ test "build json: cold hit_rate is 0.0" ![io] {
 // the runtime's closure changes size, which is not what this test is for.
 test "build json: deps.count and ll_paths present" ![io] {
     let root = _fixture("deps");
-    let r = _build(root, _fresh_iso(), "prog", []);
+    let r = _build(root, _shared_shape_iso(), "prog", []);
     assert r.exit == 0;
     assert contains(r.out, "\"deps\":");
     assert contains(r.out, "\"count\":");
@@ -187,7 +223,7 @@ test "build json: deps.count and ll_paths present" ![io] {
 // ---- Test 6: diagnostics is an empty array (reserved slot) ----
 test "build json: diagnostics array is empty" ![io] {
     let root = _fixture("diag");
-    let r = _build(root, _fresh_iso(), "prog", []);
+    let r = _build(root, _shared_shape_iso(), "prog", []);
     assert r.exit == 0;
     assert contains(r.out, "\"diagnostics\":[]");
 }
@@ -195,7 +231,7 @@ test "build json: diagnostics array is empty" ![io] {
 // ---- Test 7: no human '[cache]' / 'built:' lines leak into JSON stdout ----
 test "build json: no human output leaks into JSON stdout" ![io] {
     let root = _fixture("human");
-    let r = _build(root, _fresh_iso(), "prog", []);
+    let r = _build(root, _shared_shape_iso(), "prog", []);
     assert r.exit == 0;
     assert find(r.out, "[cache]", 0) < 0;
     assert find(r.out, "built:", 0) < 0;
