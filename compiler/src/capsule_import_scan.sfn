@@ -29,6 +29,17 @@ let _CIS_LOWER_F: int = 102;
 let _CIS_LOWER_I: int = 105;
 let _CIS_LBRACE: int = 123;
 let _CIS_RBRACE: int = 125;
+let _CIS_BANG: int = 33;
+let _CIS_DOT: int = 46;
+let _CIS_LBRACKET: int = 91;
+let _CIS_RBRACKET: int = 93;
+let _CIS_LOWER_Z: int = 122;
+
+// Bound on how far past a `![` the effect scanner will read before giving up.
+// An effect list is a handful of short lowercase names; 128 bytes is well past
+// the longest real one and stops a stray `![` in prose or a string literal from
+// running away over the rest of the file.
+let _CIS_EFFECT_WINDOW: int = 128;
 
 // ---- Source-level import scanning ----
 // These helpers replace the cli_commands.sfn `_collect_relative_import_spans_cmd`
@@ -1145,9 +1156,106 @@ fn collect_import_statements(source: string) -> string[] {
     return out;
 }
 
+// ---- Effect-annotation scanning ----
+// SFN-882: collect every effect token appearing in an `![ ... ]` annotation.
+// The demand set that drives runtime `sfn-source` gate selection is the union
+// of these tokens across the unfiltered source set, each normalized through
+// `effect_root()` — `![net.http]` demands `net`.
+//
+// Deliberately a RAW scan, unlike every other scanner in this file: it does not
+// skip string literals or comments. The asymmetry is intentional and is the
+// whole safety argument. An e2e test that embeds a fixture program as a string
+// literal, or a comment reading "(http.download, ![io, net])", over-retains —
+// which costs compile time and nothing else. A comment-state bug that *missed*
+// a real annotation would drop a runtime module that a call site still
+// references, and the build would fail at link with an undefined symbol. Only
+// one of those two directions is recoverable, so the scan is biased toward it.
+//
+// Tokens are the lowercase-and-dot runs between separators inside the window;
+// anything else (whitespace, commas, brackets) terminates the current token.
+// Uppercase and digits terminate too — no canonical effect or sub-effect
+// contains either, so a `![` that opened on non-effect text yields nothing
+// rather than a junk token that could match a gate key.
+fn _cis_is_effect_char(ch: int) -> boolean {
+    if ch == _CIS_DOT { return true; }
+    if ch < _CIS_LOWER_A { return false; }
+    return ch <= _CIS_LOWER_Z;
+}
+
+fn collect_effect_tokens(source: string) -> string[] {
+    let mut out: string[] = [];
+    let source_len = source.length;
+    if source_len == 0 { return out; }
+    let mut steps: int = 0;
+    let max_steps = source_len * 4 + 1000;
+    let mut i: int = 0;
+    loop {
+        if i >= source_len { break; }
+        steps += 1;
+        if steps > max_steps { break; }
+        if _cr_byte_at(source, i) != _CIS_BANG {
+            i += 1;
+            continue;
+        }
+        if i + 1 >= source_len { break; }
+        // Skip whitespace between `!` and `[`. The grammar allows it —
+        // `parse_effect_list` matches `!`, then `parser_advance_raw`, then
+        // `skip_trivia`, then `consume_symbol("[")` — so `fn main() ! [net]`
+        // parses and effect-checks exactly like `![net]`. `sfn fmt`
+        // canonicalises to the tight form, so no in-tree source takes this
+        // path, but unformatted user source can, and requiring adjacency here
+        // would drop the effect from the demand set and break the link.
+        let mut bracket = i + 1;
+        let mut ws_guard: int = 0;
+        loop {
+            if bracket >= source_len { break; }
+            if ws_guard > _CIS_EFFECT_WINDOW { break; }
+            let wc = _cr_byte_at(source, bracket);
+            if wc != _CIS_SPACE && wc != _CIS_TAB && wc != _CIS_LF && wc != _CIS_CR {
+                break;
+            }
+            bracket += 1;
+            ws_guard += 1;
+        }
+        if bracket >= source_len { break; }
+        if _cr_byte_at(source, bracket) != _CIS_LBRACKET {
+            i += 1;
+            continue;
+        }
+        let mut window_end = bracket + 1 + _CIS_EFFECT_WINDOW;
+        if window_end > source_len { window_end = source_len; }
+        let mut j = bracket + 1;
+        let mut tok_start: int = -1;
+        loop {
+            if j >= window_end { break; }
+            let ch = _cr_byte_at(source, j);
+            if ch == _CIS_RBRACKET { break; }
+            if _cis_is_effect_char(ch) {
+                if tok_start < 0 { tok_start = j; }
+                j += 1;
+                continue;
+            }
+            if tok_start >= 0 {
+                out.push(substring(source, tok_start, j));
+                tok_start = -1;
+            }
+            j += 1;
+        }
+        if tok_start >= 0 {
+            out.push(substring(source, tok_start, j));
+        }
+        // Resume after the `![` rather than after the window: a nested or
+        // malformed annotation inside the window should still get its own
+        // pass, and re-scanning at most 128 bytes is not worth the branch.
+        i = i + 2;
+    }
+    return out;
+}
+
 export {
     _cr_find_substring,
     _cr_source_imports_host,
+    collect_effect_tokens,
     collect_import_statements,
     collect_relative_import_specs,
     collect_scoped_import_specs

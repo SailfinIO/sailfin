@@ -4,11 +4,10 @@ import { int_to_string } from "sfn/strings";
 //
 // SFN-341: verifies the runtime-dependency link invariant.
 //
-// The runtime's `sfn-sources` land in every binary (they compile into the
-// prelude every program links against), so a call one of those modules
-// makes into a `[dependencies]`-declared capsule provider is emitted for
-// EVERY consumer, not just one that happens to import the capsule
-// directly. If the link path that assembled `ll_paths` skipped the
+// A runtime `sfn-source` that reaches the link makes calls into the
+// `[dependencies]`-declared capsule providers it imports, so that provider must
+// have reached the link too. If the link path that assembled `ll_paths` skipped
+// the
 // capsule-resolver pass for that dependency — e.g. a positional build, or
 // a resolver branch that forgot to fold in the runtime capsule's own
 // deps — the runtime module's calls compile to unresolved
@@ -21,6 +20,17 @@ import { int_to_string } from "sfn/strings";
 // invoked, not that it did its job, so it would stay green through a
 // resolver regression that dropped sources while still running. Checking
 // the actual link set catches both failure modes.
+//
+// SFN-882 retired this module's original premise, which read "the runtime's
+// `sfn-sources` land in every binary". They no longer do: demand-driven
+// selection compiles a runtime source only when the build's declared effect
+// surface demands its gate effect, so a hello-world links none of the TLS group
+// and therefore never calls into `sfn/crypto`. The contract's real content
+// survives that change intact — "a resolver pass that DROPPED a needed dep is
+// caught" — but "needed" now has to be evaluated against the selected source
+// set rather than the raw manifest declaration. A dep that no selected source
+// imports was never needed, and requiring it to reach the link would fail every
+// gated build before the backend ran.
 import { capsule_artifact_ir_dir, is_safe_scope_name, parse_scope_name } from "../capsule_artifact";
 import { RuntimeCapsuleArtifacts } from "../runtime_capsule_resolver";
 import { contains_string, index_of } from "../string_utils";
@@ -37,7 +47,20 @@ import { contains_string, index_of } from "../string_utils";
 // spec shaped outside that rule was never going to produce a matching
 // path regardless of whether the link is correct. Failing it here would
 // flag a shape the layout never produced, not an actual missing link.
-fn missing_runtime_dep_specs(runtime_capsules: RuntimeCapsuleArtifacts[], ll_paths: string[]) -> string[] {
+//
+// SFN-882: `demanded_specs` is the set of scoped-import specs appearing in the
+// SELECTED runtime sources — `runtime_demanded_dep_specs` in
+// `build/runtime_selection.sfn`. A declared spec absent from it is skipped for
+// the same reason an unsafe-shaped spec is: nothing left in the build can call
+// into it, so its absence from the link is the intended outcome rather than a
+// dropped dependency. A spec in BOTH must still cover.
+//
+// Callers must derive `demanded_specs` from that one helper and not re-derive
+// it locally. The staging loop in `runtime_objs.sfn` makes the same decision
+// about the same capsules, and if the two ever disagree the failure is a build
+// that stages a dep the contract rejects (or the reverse) — which presents as
+// an unexplained link-contract failure on a perfectly correct tree.
+fn missing_runtime_dep_specs(runtime_capsules: RuntimeCapsuleArtifacts[], ll_paths: string[], demanded_specs: string[]) -> string[] {
     let mut seen: string[] = [];
     let mut missing: string[] = [];
     let mut ci: int = 0;
@@ -50,6 +73,10 @@ fn missing_runtime_dep_specs(runtime_capsules: RuntimeCapsuleArtifacts[], ll_pat
             let spec = deps[di];
             if !contains_string(seen, spec) {
                 seen.push(spec);
+                if !contains_string(demanded_specs, spec) {
+                    di += 1;
+                    continue;
+                }
                 let parts = parse_scope_name(spec);
                 if is_safe_scope_name(parts.scope, parts.name) {
                     let needle = capsule_artifact_ir_dir(parts.scope, parts.name)

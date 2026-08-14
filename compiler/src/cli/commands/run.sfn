@@ -43,6 +43,7 @@ import { _print_cache_summary, _resolve_sailfin_cache_dir_for_work } from "../..
 import { _clang_link_multi } from "../../build/link";
 import { _ends_with, _ensure_dir } from "../../build/paths";
 import { _runtime_bundle_exists } from "../../build/runtime_objs";
+import { select_runtime_sfn_sources } from "../../build/runtime_selection";
 import { build_target_os, target_exe_name } from "../../build/target";
 import { cache_root, merge_cache_stats, resolve_build_cache_config } from "../../build_cache";
 import { prepare_project_capsules } from "../../capsule_resolver";
@@ -147,7 +148,8 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
         name: "",
         walk_project_src: false,
         include_host_as_dep: false,
-        runtime_root: runtime_root
+        runtime_root: runtime_root,
+        retain_full_runtime: false
     };
     let run_capsule_result = prepare_project_capsules(input_path, run_cache_config, run_consumer, "", "", binary_dir);
     let capsule_lls = run_capsule_result.ll_paths;
@@ -172,7 +174,8 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     // `-p` / declared-dep, load-bearing for a no-dep `sfn run <file>`).
     let mut run_runtime_caps = run_capsule_result.runtime_capsules;
     if run_runtime_caps.length == 0 {
-        run_runtime_caps = runtime_capsule_from_root(runtime_root);
+        // SFN-882: narrow the implicit-capsule fallback, same as `sfn build`.
+        run_runtime_caps = select_runtime_sfn_sources(runtime_capsule_from_root(runtime_root), run_capsule_result.runtime_demand);
     }
     // Shared runtime-object cache root (#1096); empty under `--no-cache` to
     // leave the persistent store untouched.

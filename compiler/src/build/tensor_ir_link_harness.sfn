@@ -31,6 +31,7 @@ import { index_of, substring } from "../string_utils";
 import { _clang_link_multi } from "./link";
 import { empty_llvm_import_context, resolve_llvm_provider_context } from "./llvm_provider_context";
 import { _resolve_self_path } from "./paths";
+import { select_runtime_sfn_sources } from "./runtime_selection";
 
 struct TensorMatmulBuildResult {
     binary_path: string;
@@ -289,8 +290,20 @@ fn build_tensor_matmul_kernel_binary(kernel_module: TensorModule, kernel_fn_name
     // populate it is never reached. This fallback therefore ALWAYS fires —
     // it is the intended path here, not a rare edge case, and mirrors
     // `run.sfn`'s identical fallback. Do not "simplify" it away.
+    //
+    // SFN-882: narrow the fallback with the SAME demand set the resolution
+    // above used. This is not optional bookkeeping — `prepare_runtime_dep_capsules`
+    // passes empty `entry_paths`, so no project manifest is found, `full-runtime`
+    // reads false, and the demand scan sees only runtime-union sources (none of
+    // which declare `net`). C1 therefore drops `tls.sfn` and `sfn/crypto` never
+    // reaches `dep_result.ll_paths`. Re-widening here would hand the link
+    // contract a capsule list that still declares the dep, and the preflight
+    // would refuse the link with `link-contract: … sfn/crypto` — the §6 landmine,
+    // reached by this harness specifically because its fallback always fires.
     let mut caps = dep_result.runtime_capsules;
-    if caps.length == 0 { caps = runtime_capsule_from_root(runtime_root); }
+    if caps.length == 0 {
+        caps = select_runtime_sfn_sources(runtime_capsule_from_root(runtime_root), dep_result.runtime_demand);
+    }
     let link = _clang_link_multi(link_lls, out_binary, runtime_root, caps, binary_dir, out_dir, "");
     if link.rc != 0 {
         return TensorMatmulBuildResult {

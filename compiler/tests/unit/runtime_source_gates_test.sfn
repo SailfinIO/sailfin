@@ -1,0 +1,315 @@
+// SFN-882: pure manifest/selector invariants for `runtime/capsule.toml`'s
+// `[sfn-source-gates]` section.
+//
+// The gate table narrows `[build] sfn-sources` to what a build's declared
+// effect surface demands (`compiler/src/build/runtime_selection.sfn`), so a
+// broken invariant here is an undefined-symbol-at-link risk for every gated
+// build, not just a test failure. Every test below is a pure read of the
+// real in-tree manifest and sibling runtime sources — no build, no
+// subprocess, no nested runner (`.claude/rules/no-bash-e2e.md`).
+import { canonical_effects } from "sfn/analyzer/effect_taxonomy";
+import {
+    contains,
+    contains_string,
+    ends_with,
+    find,
+    join,
+    split,
+    starts_with,
+    trim
+} from "sfn/strings";
+
+import {
+    runtime_demand_all,
+    runtime_source_gate_effect,
+    select_runtime_sfn_sources
+} from "../../src/build/runtime_selection";
+import { runtime_capsule_from_root } from "../../src/runtime_capsule_resolver";
+import { toml_get_sfn_source_gate, toml_get_sfn_sources } from "../../src/toml_parser";
+
+let _runtime_manifest_path: string = "runtime/capsule.toml";
+let _runtime_root: string = "runtime";
+
+// Every gate list entry, deduplicated, across the canonical six effects.
+fn _all_gated_sources(manifest: string) -> string[] {
+    let mut out: string[] = [];
+    let effects = canonical_effects();
+    let mut e: int = 0;
+    loop {
+        if e >= effects.length { break; }
+        let gate = toml_get_sfn_source_gate(manifest, effects[e]);
+        let mut g: int = 0;
+        loop {
+            if g >= gate.length { break; }
+            if !contains_string(out, gate[g]) { out.push(gate[g]); }
+            g += 1;
+        }
+        e += 1;
+    }
+    return out;
+}
+
+// Drop everything from the first `//` on each line. Not string-literal aware
+// — deliberately, per the test spec: the only known comment hit
+// (`sfn/concurrency/scheduler.sfn`) is a plain `//` line comment, and a
+// false negative here would only widen the search, never narrow it past a
+// real symbol reference.
+fn _strip_line_comments(text: string) -> string {
+    let lines = split(text, "\n");
+    let mut out: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        i += 1;
+        let idx = find(line, "//", 0);
+        if idx < 0 { out.push(line); } else {
+            out.push(substring(line, 0, idx));
+        }
+    }
+    return join(out, "\n");
+}
+
+fn _find_source_ending(sources: string[], suffix: string) -> string {
+    let mut i: int = 0;
+    loop {
+        if i >= sources.length { break; }
+        if ends_with(sources[i], suffix) { return sources[i]; }
+        i += 1;
+    }
+    return "";
+}
+
+// --------------------------------------------------------------
+// 1. Every gate member names a real source (or a `_windows` sibling
+//    appended later by target conditioning).
+// --------------------------------------------------------------
+test "runtime source gates: every gated source is a declared source or a _windows sibling" ![io] {
+    let manifest = fs.readFile(_runtime_manifest_path);
+    let sources = toml_get_sfn_sources(manifest);
+    let effects = canonical_effects();
+    let mut e: int = 0;
+    loop {
+        if e >= effects.length { break; }
+        let gate = toml_get_sfn_source_gate(manifest, effects[e]);
+        let mut g: int = 0;
+        loop {
+            if g >= gate.length { break; }
+            let member = gate[g];
+            let is_declared = contains_string(sources, member);
+            let is_windows_sibling = ends_with(member, "_windows.sfn");
+            assert is_declared || is_windows_sibling;
+            g += 1;
+        }
+        e += 1;
+    }
+}
+
+// --------------------------------------------------------------
+// 2. Every gate key is a canonical effect — scan the raw manifest text
+//    for the `[sfn-source-gates]` section and check every `key =` line.
+// --------------------------------------------------------------
+test "runtime source gates: every gate section key is a canonical effect" ![io] {
+    let manifest = fs.readFile(_runtime_manifest_path);
+    let effects = canonical_effects();
+    // Every canonical effect's lookup must be legal.
+    let mut e: int = 0;
+    loop {
+        if e >= effects.length { break; }
+        let _ = toml_get_sfn_source_gate(manifest, effects[e]);
+        e += 1;
+    }
+    let lines = split(manifest, "\n");
+    let mut in_section: boolean = false;
+    let mut i: int = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = trim(lines[i]);
+        i += 1;
+        if line.length == 0 { continue; }
+        if starts_with(line, "[") {
+            let close = find(line, "]", 0);
+            let section = substring(line, 1, close);
+            in_section = section == "sfn-source-gates";
+            continue;
+        }
+        if !in_section { continue; }
+        let eq = find(line, "=", 0);
+        if eq < 0 { continue; }
+        let key = trim(substring(line, 0, eq));
+        if key.length == 0 { continue; }
+        assert contains_string(effects, key);
+    }
+}
+
+// --------------------------------------------------------------
+// 3. No gate member is imported by the prelude — the prelude is always
+//    compiled and never gated.
+// --------------------------------------------------------------
+test "runtime source gates: no gate member is imported by the prelude" ![io] {
+    let manifest = fs.readFile(_runtime_manifest_path);
+    let gated = _all_gated_sources(manifest);
+    let prelude = fs.readFile("runtime/prelude.sfn");
+    let lines = split(prelude, "\n");
+    let mut i: int = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        i += 1;
+        let marker = "from \"./";
+        let from_idx = find(line, marker, 0);
+        if from_idx < 0 { continue; }
+        let after = substring(line, from_idx + marker.length, line.length);
+        let quote_end = find(after, "\"", 0);
+        if quote_end < 0 { continue; }
+        let rel = substring(after, 0, quote_end);
+        let module_path = rel + ".sfn";
+        assert ! contains_string(gated, module_path);
+    }
+}
+
+// --------------------------------------------------------------
+// 4. No always-compiled source references a symbol DEFINED BY a gated
+//    module. This is the real undefined-symbol risk, and the check is
+//    deliberately derived rather than pattern-matched: it extracts each
+//    gated module's public `fn` names and searches for those exact
+//    names, instead of guessing prefix families.
+//
+//    That distinction is not academic. An earlier revision of this test
+//    matched the families `sfn_tls_`/`sfn_http_`/`sfn_serve`/... and
+//    passed while the tree was broken, because `runtime/prelude.sfn`
+//    references `sailfin_runtime_serve` — a name no `sfn_*` prefix
+//    matches. Every binary failed to link with `undefined symbol:
+//    sailfin_runtime_serve`.
+//
+//    `runtime/prelude.sfn` is included in the scanned set and is the
+//    single most important member: it is compiled into every binary
+//    unconditionally and the selector never sees it, so a gated symbol
+//    reachable from the prelude breaks every link. An import-only audit
+//    cannot see this — the modules involved have no imports at all.
+// --------------------------------------------------------------
+fn _public_fn_names(source: string) -> string[] {
+    let mut out: string[] = [];
+    let lines = split(_strip_line_comments(source), "\n");
+    let mut i: int = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        i += 1;
+        if !starts_with(line, "fn ") { continue; }
+        let rest = substring(line, 3, line.length);
+        let mut n: int = 0;
+        loop {
+            if n >= rest.length { break; }
+            if rest[n] == "(" { break; }
+            n += 1;
+        }
+        if n == 0 { continue; }
+        let name = substring(rest, 0, n);
+        // `_`-prefixed functions are module-private and cannot be
+        // referenced across a module boundary, so they cannot produce a
+        // cross-module undefined symbol.
+        if starts_with(name, "_") { continue; }
+        if name.length > 0 { out.push(name); }
+    }
+    return out;
+}
+
+test "runtime source gates: no always-compiled source references a gated module's symbol" ![io] {
+    let manifest = fs.readFile(_runtime_manifest_path);
+    let sources = toml_get_sfn_sources(manifest);
+    let gated = _all_gated_sources(manifest);
+
+    // Every public symbol the gate can remove from the link.
+    let mut gated_symbols: string[] = [];
+    let mut g: int = 0;
+    loop {
+        if g >= gated.length { break; }
+        let gpath = _runtime_root + "/" + gated[g];
+        g += 1;
+        if !fs.exists(gpath) { continue; }
+        let names = _public_fn_names(fs.readFile(gpath));
+        let mut k: int = 0;
+        loop {
+            if k >= names.length { break; }
+            if !contains_string(gated_symbols, names[k]) {
+                gated_symbols.push(names[k]);
+            }
+            k += 1;
+        }
+    }
+
+    // Everything compiled unconditionally: the ungated `sfn-sources`
+    // plus the prelude, which is not an `sfn-sources` member at all.
+    let mut always: string[] = [_runtime_root + "/prelude.sfn"];
+    let mut s: int = 0;
+    loop {
+        if s >= sources.length { break; }
+        let src = sources[s];
+        s += 1;
+        if contains_string(gated, src) { continue; }
+        always.push(_runtime_root + "/" + src);
+    }
+
+    let mut a: int = 0;
+    loop {
+        if a >= always.length { break; }
+        let path = always[a];
+        a += 1;
+        if !fs.exists(path) { continue; }
+        let stripped = _strip_line_comments(fs.readFile(path));
+        let mut f: int = 0;
+        loop {
+            if f >= gated_symbols.length { break; }
+            assert ! contains(stripped, gated_symbols[f]);
+            f += 1;
+        }
+    }
+}
+
+// --------------------------------------------------------------
+// 5. select_runtime_sfn_sources(caps, runtime_demand_all()) is the
+//    identity on the real manifest.
+// --------------------------------------------------------------
+test "runtime source gates: select_runtime_sfn_sources is the identity under runtime_demand_all" ![io] {
+    let caps = runtime_capsule_from_root(_runtime_root);
+    assert caps.length == 1;
+    let selected = select_runtime_sfn_sources(caps, runtime_demand_all());
+    assert selected.length == caps.length;
+    let original = caps[0].sfn_sources;
+    let picked = selected[0].sfn_sources;
+    assert original.length == picked.length;
+    let mut i: int = 0;
+    loop {
+        if i >= original.length { break; }
+        assert original[i] == picked[i];
+        i += 1;
+    }
+}
+
+// --------------------------------------------------------------
+// 6. The gate section did not truncate sfn-sources — pins that
+//    `[sfn-source-gates]` stays LAST in the manifest.
+// --------------------------------------------------------------
+test "runtime source gates: sfn-sources still has all 35 entries" ![io] {
+    let manifest = fs.readFile(_runtime_manifest_path);
+    let sources = toml_get_sfn_sources(manifest);
+    assert sources.length == 35;
+}
+
+// --------------------------------------------------------------
+// 7. runtime_source_gate_effect resolves a real net-gated path to "net"
+//    and a real ungated path to "".
+// --------------------------------------------------------------
+test "runtime source gates: runtime_source_gate_effect resolves tls.sfn to net and io.sfn to none" ![io] {
+    let caps = runtime_capsule_from_root(_runtime_root);
+    assert caps.length == 1;
+    let sources = caps[0].sfn_sources;
+    let gates = caps[0].sfn_source_gates;
+    let tls_path = _find_source_ending(sources, "sfn/platform/tls.sfn");
+    let io_path = _find_source_ending(sources, "sfn/io.sfn");
+    assert tls_path.length > 0;
+    assert io_path.length > 0;
+    assert runtime_source_gate_effect(gates, tls_path) == "net";
+    assert runtime_source_gate_effect(gates, io_path) == "";
+}

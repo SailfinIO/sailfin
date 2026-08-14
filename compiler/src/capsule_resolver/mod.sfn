@@ -46,6 +46,7 @@ import {
     _collect_sfn_files_cmd,
     _mktemp_sibling_cmd
 } from "../build/fs";
+import { select_runtime_sfn_sources } from "../build/runtime_selection";
 import {
     BuildCacheConfig,
     CacheKey,
@@ -270,7 +271,8 @@ fn prepare_runtime_dep_capsules(runtime_root: string, config: BuildCacheConfig, 
         name: "",
         walk_project_src: false,
         include_host_as_dep: false,
-        runtime_root: runtime_root
+        runtime_root: runtime_root,
+        retain_full_runtime: false
     };
     return _cr_prepare(empty_entry_paths, config, consumer, sailfin_exe, work_dir, binary_dir);
 }
@@ -295,7 +297,8 @@ fn _cr_prepare(entry_paths: string[], config: BuildCacheConfig, consumer: Resolv
             success: false,
             stats: empty_cache_stats(),
             module_events: empty_events,
-            runtime_capsules: empty_runtime_capsules
+            runtime_capsules: empty_runtime_capsules,
+            runtime_demand: resolved.runtime_demand
         };
     }
     // Stage D PR2: surface every `kind = "runtime"` workspace
@@ -309,7 +312,10 @@ fn _cr_prepare(entry_paths: string[], config: BuildCacheConfig, consumer: Resolv
     let mut runtime_capsules: RuntimeCapsuleArtifacts[] = [];
     if resolved.workspace_root.length > 0 {
         if resolved.manifest_dep_specs.length > 0 {
-            runtime_capsules = enumerate_runtime_capsule_artifacts(resolved.workspace_root, resolved.manifest_dep_specs);
+            // SFN-882: narrow at the point of materialisation so every
+            // `ProjectCapsuleResult` below carries the selected set and no
+            // consumer has to remember to filter.
+            runtime_capsules = select_runtime_sfn_sources(enumerate_runtime_capsule_artifacts(resolved.workspace_root, resolved.manifest_dep_specs), resolved.runtime_demand);
         }
     }
     if resolved.sources.length == 0 {
@@ -320,7 +326,8 @@ fn _cr_prepare(entry_paths: string[], config: BuildCacheConfig, consumer: Resolv
             success: true,
             stats: empty_cache_stats(),
             module_events: empty_events,
-            runtime_capsules: runtime_capsules
+            runtime_capsules: runtime_capsules,
+            runtime_demand: resolved.runtime_demand
         };
     }
 
@@ -338,7 +345,8 @@ fn _cr_prepare(entry_paths: string[], config: BuildCacheConfig, consumer: Resolv
             success: false,
             stats: empty_cache_stats(),
             module_events: empty_events,
-            runtime_capsules: runtime_capsules
+            runtime_capsules: runtime_capsules,
+            runtime_demand: resolved.runtime_demand
         };
     }
 
@@ -387,7 +395,8 @@ fn _cr_prepare(entry_paths: string[], config: BuildCacheConfig, consumer: Resolv
                     success: false,
                     stats: empty_cache_stats(),
                     module_events: empty_events,
-                    runtime_capsules: runtime_capsules
+                    runtime_capsules: runtime_capsules,
+                    runtime_demand: resolved.runtime_demand
                 };
             }
             slug_universe_extra = entry_src;
@@ -405,7 +414,8 @@ fn _cr_prepare(entry_paths: string[], config: BuildCacheConfig, consumer: Resolv
             success: false,
             stats: result.stats,
             module_events: result.module_events,
-            runtime_capsules: runtime_capsules
+            runtime_capsules: runtime_capsules,
+            runtime_demand: resolved.runtime_demand
         };
     }
     return ProjectCapsuleResult {
@@ -413,7 +423,8 @@ fn _cr_prepare(entry_paths: string[], config: BuildCacheConfig, consumer: Resolv
         success: true,
         stats: result.stats,
         module_events: result.module_events,
-        runtime_capsules: runtime_capsules
+        runtime_capsules: runtime_capsules,
+        runtime_demand: resolved.runtime_demand
     };
 }
 
@@ -498,7 +509,8 @@ fn prepare_project_capsules_for_test(entry_paths: string[], consumer: ResolverCo
             ll_paths: empty_paths,
             capsule_count: 0,
             staging_failed: true,
-            capabilities_required: resolved.capabilities_required
+            capabilities_required: resolved.capabilities_required,
+            runtime_demand: resolved.runtime_demand
         };
     }
     if resolved.sources.length == 0 {
@@ -507,7 +519,8 @@ fn prepare_project_capsules_for_test(entry_paths: string[], consumer: ResolverCo
             ll_paths: empty_paths,
             capsule_count: 0,
             staging_failed: false,
-            capabilities_required: resolved.capabilities_required
+            capabilities_required: resolved.capabilities_required,
+            runtime_demand: resolved.runtime_demand
         };
     }
 
@@ -535,7 +548,8 @@ fn prepare_project_capsules_for_test(entry_paths: string[], consumer: ResolverCo
             ll_paths: empty_paths,
             capsule_count: 0,
             staging_failed: true,
-            capabilities_required: resolved.capabilities_required
+            capabilities_required: resolved.capabilities_required,
+            runtime_demand: resolved.runtime_demand
         };
     }
 
@@ -563,7 +577,8 @@ fn prepare_project_capsules_for_test(entry_paths: string[], consumer: ResolverCo
             ll_paths: empty_paths,
             capsule_count: resolved.sources.length as int,
             staging_failed: true,
-            capabilities_required: resolved.capabilities_required
+            capabilities_required: resolved.capabilities_required,
+            runtime_demand: resolved.runtime_demand
         };
     }
 
@@ -572,6 +587,7 @@ fn prepare_project_capsules_for_test(entry_paths: string[], consumer: ResolverCo
         ll_paths: result.ll_paths,
         capsule_count: resolved.sources.length as int,
         staging_failed: false,
-        capabilities_required: resolved.capabilities_required
+        capabilities_required: resolved.capabilities_required,
+        runtime_demand: resolved.runtime_demand
     };
 }

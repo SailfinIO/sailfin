@@ -13,6 +13,166 @@ independent, land in either order, and compose.
 
 ---
 
+## 0. Implementation corrections (SFN-882)
+
+Five claims below were contradicted during implementation. They are corrected
+here rather than edited in place, so the reasoning that produced them stays
+readable.
+
+1. **`![net.http]` and `![net.ws]`, not `![net]` — §4.1 was unsound as
+   written.** The `net`-rooted intrinsics are declared as *sub-effects*
+   (SFEP-0017 D1): `http.get`/`http.post`/`http.download` require `![net.http]`,
+   the five `websocket.*` entries require `![net.ws]`, and only `serve` requires
+   bare `![net]` (`compiler/capsules/ir/src/intrinsic_effects.sfn:56-128`).
+   §4.1's demand set is "every effect token appearing inside an `![ … ]` list",
+   matched against gate keys — which are canonical roots. A program declaring
+   `![net.http]` would contribute the token `net.http`, match no `net` gate,
+   close the gate, and fail the link on an undefined `sfn_http_get`. **Every
+   scanned token must be normalized through `effect_root()`**
+   (`analyzer/src/effect_taxonomy.sfn:65`, already exported). The same applies
+   to `[capabilities] required` entries.
+
+2. **The blocking §5.4 investigation passed; the E-code is `E0400`.** A bare
+   `serve(...)` with no `net` effect *is* rejected — the bespoke lowering does
+   not escape enforcement. The diagnostic is `E0400` ("function `main` is
+   missing required effects"), not the `E0402` predicted in §3, §4.2, §5.4 and
+   §10.3.7. Every `E0402` in this note referring to a *missing effect
+   declaration* should read `E0400`.
+
+3. **`sfn-sources` has 35 entries, not 34.** The count is wrong everywhere it
+   appears (§2.1, §2.3, §8.2, §8.4, §9.1). 26 ungated + 10 gated names, of which
+   9 are present in the POSIX list (`cert_roots_windows.sfn` and
+   `socket_ops_windows.sfn` are conditioning-appended and absent) → 35 − 9 = 26
+   ungated. Pinned by `runtime_source_gates_test.sfn`.
+
+4. **`CapsuleResolution` is not a real type.** §4.4 and §7 name it; the tree has
+   `CheckCapsuleResolution` (`capsule_resolver/types.sfn:246-257`) and
+   `TestCapsuleResolution` (`:269-283`) — two distinct structs. Neither needed
+   the field: `sfn check` never links, and the test-link path takes the
+   fail-open default (see 5). The demand rides on `ResolverDedupeResult` and
+   `ProjectCapsuleResult` instead.
+
+5. **`sfn_source_gates` is a record list, not a parallel array.** §4.3 specifies
+   an array parallel to `sfn_sources`. That breaks:
+   `target_condition_runtime_sfn_sources` substitutes and *appends* platform
+   siblings, so any positional alignment is stale the moment conditioning runs.
+   The field holds `"<effect>\t<absolute-path>"` records, making the lookup
+   independent of order and length — which is what actually lets §4.7's
+   select-then-condition composition hold.
+
+6. **C1 does not work without also fixing the filter's fail-open guard — §9.1's
+   "crypto → 0" is unreachable as designed.** This was found by measurement, not
+   review: with everything else implemented, the demand set computed correctly
+   (`[runtime-gates] demand: io rand clock`) and the gate closed, yet all 33
+   crypto modules were still compiled and peak RSS landed at 455 MB — exactly
+   the "gated sources only, dep edge left in place" datapoint from §2.4, not the
+   361 MB the full design predicts.
+
+   The cause is `_cr_filter_reachable_sources`' own `retained.length == 0`
+   guard. On a positional build the runtime roots were the **only** root class
+   that ever produced edges: `root_source_paths` is empty because the project
+   contributed no capsule sources, and `tls.sfn` naming `sfn/crypto` is how the
+   crypto capsule entered the retained set at all. Close the `net` gate and
+   every root class goes empty, the guard concludes "root discrimination is
+   wrong for this shape", and it retains the **unfiltered** set — silently
+   restoring all 33 modules. The design's own fail-open posture defeats its
+   largest win.
+
+   The fix distinguishes *well-defined and empty* from *never derived*:
+   `_cr_selected_runtime_root_count` reports how many runtime sources selection
+   left to seed from, and a zero edge set is authoritative only when that count
+   is non-zero. This is safe because `_cr_seed_entry_roots` reads the entry file
+   and seeds its edges (`reachability.sfn:344-355`), so a project that genuinely
+   imports a capsule still derives roots; `retained == 0` with a live runtime
+   root means nothing in `sources` is referenced by anything.
+
+   **Generalisable lesson:** a fail-open guard written for one cause silently
+   swallows a second cause introduced later. §11's risk table anticipated the
+   link contract (§6) as the sharpest hazard and was right that it fails
+   *loudly*; this one fails **silently**, as a change that merely does nothing.
+   The only reason it was caught is that §10.4 makes measurement a required
+   deliverable rather than a nice-to-have.
+
+7. **"Either consumer may fail open independently" is FALSE, and it was the
+   §6 landmine in disguise.** The scope reduction below originally left the
+   `sfn test` link path unnarrowed, reasoning that a link site without a demand
+   set should fail open. Review caught it and measurement confirmed it: `sfn
+   test` threads a non-empty `runtime_root` into every `ResolverConsumer`, so
+   **C1 has already narrowed** the capsule closure by the time control reaches
+   the link. Re-widening the runtime capsule there asks the contract to require
+   `sfn/crypto` reach a link that no longer compiles it. The same divergence
+   exists in `build/tensor_ir_link_harness.sfn`, whose fallback the code
+   comments describe as *always* firing. Confirmed live:
+
+   ```
+   link-contract: the runtime capsule declares 1 [dependencies] entry
+   with no compiled module reaching the link:
+     - sfn/crypto
+   ```
+
+   The correct invariant is **"C1 and the link site must use the same demand
+   set"** — fail-open is a property of how that *one* set is computed, never a
+   licence for two consumers to derive it separately. `runtime_demand` is
+   therefore threaded onto `TestCapsuleResolution` and `TestGroup` and into
+   `_clang_link_test_cmd_with_deps`, as §4.4 originally specified; the harness
+   narrows its fallback with `dep_result.runtime_demand`.
+
+   Note what this says about test design: the e2e suite passed 7/7 while both
+   paths were broken, because every one of its fixtures drives `sfn build`.
+   A build-only acceptance suite cannot see a defect that lives on the test-link
+   and harness paths.
+
+8. **The scan must tolerate `! [net]`.** `parse_effect_list` matches `!`, then
+   `parser_advance_raw`, then `skip_trivia`, then `consume_symbol("[")`, so
+   whitespace between the two is grammatical and effect-checks normally.
+   Requiring literal `![` adjacency would drop the effect from the demand set
+   and break the link on unformatted user source. `sfn fmt` canonicalises to the
+   tight form, so no in-tree source exercises it.
+
+9. **§4.8 is wrong: the prelude IS in scope, by symbol reference.** The note
+   argues the prelude is safe because "everything the prelude imports is
+   ungated", and mechanises that as unit test 10.2.3 (an *import* disjointness
+   check). Imports are the wrong relation. `runtime/prelude.sfn:90` binds
+   `runtime_serve_fn = runtime.serve` and `:621` defines a `serve()` wrapper
+   over it, giving the always-compiled prelude a reference to
+   `sailfin_runtime_serve` in **gated** `serve.sfn`. Nested `sfn test` fails:
+
+   ```
+   ld.lld: error: undefined symbol: sailfin_runtime_serve
+   >>> referenced by prelude.sfn
+   ```
+
+   The closure does not stop there, and this is the part that forecloses the
+   obvious fix. `serve.sfn` and `http.sfn` have **no imports at all**, yet both
+   call the bare `tls_*` API (`tls_client_ctx`, `tls_read`, `tls_write`) in
+   `tls.sfn` — which imports `sfn/crypto`. So "just ungate what the prelude
+   reaches" ungates serve → http → tls → crypto and erases the entire win. An
+   import-only audit reports a clean bill of health on all of it.
+
+   The actual resolution is that the reference is **dead-strippable**: the
+   prelude's `serve` wrapper does not match the `sfn*` retain-root pattern, so
+   `--gc-sections` removes it from any binary that never calls `serve`, and a
+   binary that does call it must declare `![net]`, opening the gate. `sfn build`
+   was therefore never broken. Only the test-link path, which does not
+   dead-strip, retains the wrapper — so `sfn test` opts out of selection on both
+   sides (correction 7's invariant), and the gate stays intact everywhere else.
+
+   §10.2.4's symbol-family grep also cannot catch this: it matches prefixes like
+   `sfn_serve`, and the symbol is `sailfin_runtime_serve`. The test now derives
+   each gated module's actual public `fn` names and searches for those, over the
+   ungated sources **and the prelude**. Guessing prefixes is what let two
+   separate defects through.
+
+One scope reduction, deliberate: the `sfn test` link path
+(`cli/commands/test/link.sfn`) takes the fail-open `"*"` default rather than
+threading a demand set — the pooled runner already amortises its runtime objects
+and the capsule-closure win is paid by the nested builds e2e tests spawn, which
+go through `build.sfn`/`run.sfn`. And `_stage_runtime_sfn_import_context`'s dep
+guard (§4.5) and the link contract (§6) share one helper,
+`runtime_demanded_dep_specs`, as §6 requires.
+
+---
+
 ## 1. Decision
 
 **Compile a runtime `sfn-source` only when the build's declared effect surface

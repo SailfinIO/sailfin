@@ -25,6 +25,7 @@
 //      is handed, so it cannot manufacture a dangling slug).
 import { int_to_string } from "sfn/strings";
 
+import { select_runtime_sfn_sources } from "../build/runtime_selection";
 import { _env_flag, _get_env_cmd } from "../build_flags";
 import { collect_relative_import_specs, collect_scoped_import_specs } from "../capsule_import_scan";
 import { runtime_capsule_from_root } from "../runtime_capsule_resolver";
@@ -369,10 +370,22 @@ fn _cr_seed_entry_roots(sources: CapsuleSource[], entry_paths: string[], seed: s
 //
 // The un-target-conditioned list is used on purpose: over-approximating
 // roots retains more, which is the safe direction.
-fn _cr_seed_runtime_roots(sources: CapsuleSource[], runtime_root: string, seeded: string[]) -> string[] ![io] {
+// SFN-882: `demand` narrows which runtime sources seed the closure. This is the
+// consumer where the largest share of the win lives, and the reason is indirect:
+// the seeded roots are what pull dependency capsules into the retained set, so
+// leaving `tls.sfn` unseeded means nothing names `sfn/crypto`, no
+// `sfn/crypto/mod` edge is ever produced, and the SFN-833 filter drops all 33 of
+// its modules. Narrowing only the compiled source list — without this — recovers
+// under a third of the regression, because the crypto capsule is compiled twice
+// per build and only one of those two passes is the source list.
+//
+// The prelude is never gated: it is always compiled, from a separate call site,
+// and everything it imports is ungated by construction (pinned by
+// `compiler/tests/unit/runtime_source_gates_test.sfn`).
+fn _cr_seed_runtime_roots(sources: CapsuleSource[], runtime_root: string, seeded: string[], demand: string[]) -> string[] ![io] {
     let mut out = seeded;
     if runtime_root.length == 0 { return out; }
-    let capsules = runtime_capsule_from_root(runtime_root);
+    let capsules = select_runtime_sfn_sources(runtime_capsule_from_root(runtime_root), demand);
     let mut ci: int = 0;
     loop {
         if ci >= capsules.length { break; }
@@ -429,11 +442,31 @@ fn _cr_join_slugs(slugs: string[], limit: int) -> string {
     return out;
 }
 
+// SFN-882: how many runtime sources selection actually left to seed from.
+//
+// Exists only to let the caller tell "root derivation was well-defined and
+// yielded nothing" apart from "root derivation never happened". A non-zero
+// count means the runtime capsule resolved and the demand set kept at least one
+// source, so an empty edge set downstream is a real answer.
+fn _cr_selected_runtime_root_count(runtime_root: string, demand: string[]) -> int ![io] {
+    if runtime_root.length == 0 { return 0; }
+    let capsules = select_runtime_sfn_sources(runtime_capsule_from_root(runtime_root), demand);
+    let mut total: int = 0;
+    let mut ci: int = 0;
+    loop {
+        if ci >= capsules.length { break; }
+        total = total + capsules[ci].sfn_sources.length;
+        if capsules[ci].prelude_entry.length > 0 { total += 1; }
+        ci += 1;
+    }
+    return total;
+}
+
 // Filter `sources` to the import-reachable closure from the derived roots.
 //
 // Returns the retained subset, or `sources` unchanged whenever the filter
 // declines or fails to prove itself (SFEP-0070 §3.5, layer 3).
-fn _cr_filter_reachable_sources(sources: CapsuleSource[], root_source_paths: string[], entry_paths: string[], runtime_root: string) -> CapsuleSource[] ![io] {
+fn _cr_filter_reachable_sources(sources: CapsuleSource[], root_source_paths: string[], entry_paths: string[], runtime_root: string, demand: string[]) -> CapsuleSource[] ![io] {
     if sources.length == 0 { return sources; }
     let mode = _cr_capsule_filter_mode();
     if strings_equal(mode, "off") { return sources; }
@@ -441,15 +474,45 @@ fn _cr_filter_reachable_sources(sources: CapsuleSource[], root_source_paths: str
 
     let from_set = _cr_seed_roots(sources, root_source_paths);
     let seeded = _cr_seed_entry_roots(sources, entry_paths, from_set);
-    let mut retained = _cr_seed_runtime_roots(sources, runtime_root, seeded);
+    let mut retained = _cr_seed_runtime_roots(sources, runtime_root, seeded, demand);
     if retained.length == 0 {
-        // No root class matched. That means the root discrimination is
-        // wrong for this shape of resolution, not that the build needs
-        // nothing — retaining the empty set would drop every module.
-        if trace {
-            print.err("capsule-filter: no roots derived; retaining the unfiltered set");
+        // Two very different situations reach here, and SFN-882 is what made
+        // them different.
+        //
+        // Historically only one was possible: no root class matched, meaning
+        // the root discrimination is wrong for this shape of resolution rather
+        // than that the build needs nothing. Retaining the empty set would drop
+        // every module, so the filter declines.
+        //
+        // Demand-driven selection introduced the second. On a positional build
+        // (`sfn run hello.sfn`) the runtime roots were historically the ONLY
+        // class that produced edges — `root_source_paths` is empty because the
+        // project contributed no capsule sources, the entry is not itself a
+        // capsule source, and `tls.sfn` named `sfn/crypto`, which is how the
+        // whole crypto capsule entered the retained set in the first place.
+        // Once the `net` gate closes, that class legitimately produces nothing,
+        // and every remaining source is runtime-dep-union material that no
+        // selected root names. There the empty set is the ANSWER, not a
+        // failure — and treating it as a failure silently retains all 33 crypto
+        // modules, which is exactly the regression this change exists to fix.
+        //
+        // Distinguish on whether root derivation was well-defined, not on
+        // whether it yielded anything: if the runtime capsule resolved and
+        // selection examined at least one of its sources, zero edges is
+        // authoritative. If it examined none, we learned nothing and must
+        // still fail open.
+        let examined = _cr_selected_runtime_root_count(runtime_root, demand);
+        if examined == 0 {
+            if trace {
+                print.err("capsule-filter: no roots derived and no runtime root examined;"
+                    + " retaining the unfiltered set");
+            }
+            return sources;
         }
-        return sources;
+        if trace {
+            print.err("capsule-filter: no roots reachable from " + int_to_string(examined)
+                + " selected runtime source(s); retaining nothing");
+        }
     }
 
     // Seed size as a COUNT, not a second array handle: the seeding helpers
@@ -589,13 +652,14 @@ fn _cr_filter_reachable_sources(sources: CapsuleSource[], root_source_paths: str
 fn _cr_resolve_dedupe_filtered(entry_paths: string[], consumer: ResolverConsumer, bundled_workspace_start: string) -> ResolverDedupeResult ![io] {
     let resolved = _cr_resolve_and_dedupe(entry_paths, consumer, bundled_workspace_start);
     if resolved.has_collision { return resolved; }
-    let filtered = _cr_filter_reachable_sources(resolved.sources, resolved.root_source_paths, entry_paths, consumer.runtime_root);
+    let filtered = _cr_filter_reachable_sources(resolved.sources, resolved.root_source_paths, entry_paths, consumer.runtime_root, resolved.runtime_demand);
     return ResolverDedupeResult {
         sources: filtered,
         has_collision: resolved.has_collision,
         capabilities_required: resolved.capabilities_required,
         manifest_dep_specs: resolved.manifest_dep_specs,
         workspace_root: resolved.workspace_root,
-        root_source_paths: resolved.root_source_paths
+        root_source_paths: resolved.root_source_paths,
+        runtime_demand: resolved.runtime_demand
     };
 }

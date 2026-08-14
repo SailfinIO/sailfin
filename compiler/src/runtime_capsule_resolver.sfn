@@ -29,6 +29,8 @@
 // so consumers don't have to redo the join. The manifest stores
 // paths relative to its own directory (Cargo-style); the
 // resolver does the workspace-rooted resolution once.
+import { canonical_effects } from "sfn/analyzer/effect_taxonomy";
+
 import { contains_string, strip_prefix, substring } from "./string_utils";
 import {
     toml_get_build_kind,
@@ -39,6 +41,7 @@ import {
     toml_get_ll_sources,
     toml_get_name,
     toml_get_prelude_entry,
+    toml_get_sfn_source_gate,
     toml_get_sfn_sources,
     toml_get_workspace_members
 } from "./toml_parser";
@@ -78,6 +81,22 @@ struct RuntimeCapsuleArtifacts {
     // Reintroducing versioned runtime deps is a deliberate future change,
     // not an oversight.
     capsule_deps: string[];
+    // SFN-882: the manifest's `[sfn-source-gates]` table, resolved to absolute
+    // paths, as `"<effect>\t<absolute-source-path>"` records. A source named
+    // here is compiled only when the build's demand set contains `<effect>`; a
+    // source absent from every record is always compiled.
+    //
+    // A record list rather than an array parallel to `sfn_sources` because
+    // `target_condition_runtime_sfn_sources` rewrites that list — substituting
+    // and appending platform siblings — so any positional alignment is stale
+    // the moment conditioning runs. Keying on the path makes the lookup
+    // independent of both ordering and length, which is what lets selection and
+    // conditioning compose in either order (SFN-882 design note §4.7).
+    //
+    // Paths are resolved through `_rcr_resolve_paths` here, at parse time, so
+    // the comparison downstream is absolute-to-absolute and cannot drift when
+    // `SAILFIN_RUNTIME_ROOT` relocates the runtime — the SFN-146 defect class.
+    sfn_source_gates: string[];
 }
 
 fn empty_runtime_capsule_artifacts() -> RuntimeCapsuleArtifacts {
@@ -87,6 +106,7 @@ fn empty_runtime_capsule_artifacts() -> RuntimeCapsuleArtifacts {
     let empty4: string[] = [];
     let empty5: string[] = [];
     let empty6: string[] = [];
+    let empty7: string[] = [];
     return RuntimeCapsuleArtifacts {
         capsule_name: "",
         manifest_dir: "",
@@ -96,7 +116,8 @@ fn empty_runtime_capsule_artifacts() -> RuntimeCapsuleArtifacts {
         include_dirs: empty3,
         link_libs: empty4,
         prelude_entry: "",
-        capsule_deps: empty6
+        capsule_deps: empty6,
+        sfn_source_gates: empty7
     };
 }
 
@@ -469,6 +490,34 @@ fn _rcr_parse_dep_specs(deps_text: string) -> string[] {
     return out;
 }
 
+// SFN-882: read `[sfn-source-gates]` into `"<effect>\t<absolute-path>"` records.
+//
+// Six fixed lookups, one per `canonical_effects()` member — no section
+// enumeration is needed, and a new gate key costs a manifest edit alone. Only
+// canonical effect names are consulted, which is the fail-open direction: a
+// misspelled or non-canonical key is never read, so its sources match no record
+// and stay compiled. An entry naming a source that is not in `sfn-sources` is
+// inert; the two `_windows` spellings are exactly that until
+// `target_condition_runtime_sfn_sources` appends them.
+fn _rcr_resolve_source_gates(manifest_dir: string, manifest_text: string) -> string[] {
+    let mut out: string[] = [];
+    let effects = canonical_effects();
+    let mut e: int = 0;
+    loop {
+        if e >= effects.length { break; }
+        let effect = effects[e];
+        let gated_abs = _rcr_resolve_paths(manifest_dir, toml_get_sfn_source_gate(manifest_text, effect));
+        let mut g: int = 0;
+        loop {
+            if g >= gated_abs.length { break; }
+            out.push(effect + "\t" + gated_abs[g]);
+            g += 1;
+        }
+        e += 1;
+    }
+    return out;
+}
+
 fn _rcr_artifacts_from_manifest(workspace_root: string, member_path: string, manifest_text: string) -> RuntimeCapsuleArtifacts {
     let kind = toml_get_build_kind(manifest_text);
     if kind != "runtime" { return empty_runtime_capsule_artifacts(); }
@@ -508,7 +557,8 @@ fn _rcr_artifacts_from_manifest(workspace_root: string, member_path: string, man
         include_dirs: _rcr_resolve_paths(manifest_dir, include_dirs_rel),
         link_libs: link_libs,
         prelude_entry: prelude_entry,
-        capsule_deps: capsule_deps
+        capsule_deps: capsule_deps,
+        sfn_source_gates: _rcr_resolve_source_gates(manifest_dir, manifest_text)
     };
 }
 

@@ -25,6 +25,7 @@ import { ParallelProcessTask, _cr_resolve_jobs, _cr_run_bounded_processes } from
 import { locate_runtime_dep_capsule_src } from "../capsule_resolver/locate";
 import { module_name_from_path } from "../main";
 import { RuntimeCapsuleArtifacts } from "../runtime_capsule_resolver";
+import { contains_string } from "../string_utils";
 import { resolve_compiler_version } from "../version";
 import { llvm_assemble, llvm_assemble_argv } from "./clang_argv";
 import {
@@ -43,6 +44,7 @@ import {
     _read_import_deps,
     _resolve_self_path
 } from "./paths";
+import { runtime_demanded_dep_specs } from "./runtime_selection";
 // Target conditioning (SFN-52, SFEP-0021 §4.2(A)): rewrite the runtime
 // module set for a Windows target — `process`/`rlimit`/`rand` swap to
 // their `platform/*_windows` siblings. Identity off Windows, so
@@ -1394,6 +1396,16 @@ fn _stage_runtime_sfn_import_context(self_path: string, runtime_capsules: Runtim
     // Fail-closed like every other staging step: a declared dep that cannot
     // be located is a build error here, not a missing signature discovered
     // later as the far less actionable "cannot resolve return type" fatal.
+    //
+    // SFN-882: narrowing `sfn_sources` alone does not stop this loop — it
+    // iterates `capsule_deps`, which is the raw manifest declaration and still
+    // names `sfn/crypto` after every one of its importers has been dropped.
+    // Skip a dep no SELECTED source imports; that is the intended outcome, not
+    // a failure, so it must not trip the fail-closed branch below. The
+    // demanded set comes from the same helper the link contract reads, because
+    // a staging pass and a contract that disagree about the same capsule
+    // present as an unexplained link-contract failure on a correct tree.
+    let demanded_specs = runtime_demanded_dep_specs(runtime_capsules);
     let mut ci: int = 0;
     loop {
         if ci >= runtime_capsules.length { break; }
@@ -1404,6 +1416,7 @@ fn _stage_runtime_sfn_import_context(self_path: string, runtime_capsules: Runtim
             if dsi >= cap2.capsule_deps.length { break; }
             let spec = cap2.capsule_deps[dsi];
             dsi += 1;
+            if !contains_string(demanded_specs, spec) { continue; }
             let located = locate_runtime_dep_capsule_src(cap2.manifest_dir, spec);
             if located.src_dir.length == 0 {
                 print("sfn build: runtime capsule `" + cap2.capsule_name
@@ -1659,7 +1672,7 @@ fn _condition_runtime_capsules(caps: RuntimeCapsuleArtifacts[], target_os: strin
         if i >= caps.length { break; }
         let c = caps[i];
         out.push(RuntimeCapsuleArtifacts {
-            capsule_name: c.capsule_name, manifest_dir: c.manifest_dir, c_sources: c.c_sources, ll_sources: c.ll_sources, sfn_sources: target_condition_runtime_sfn_sources(c.sfn_sources, target_os), include_dirs: c.include_dirs, link_libs: c.link_libs, prelude_entry: c.prelude_entry, capsule_deps: c.capsule_deps
+            capsule_name: c.capsule_name, manifest_dir: c.manifest_dir, c_sources: c.c_sources, ll_sources: c.ll_sources, sfn_sources: target_condition_runtime_sfn_sources(c.sfn_sources, target_os), include_dirs: c.include_dirs, link_libs: c.link_libs, prelude_entry: c.prelude_entry, capsule_deps: c.capsule_deps, sfn_source_gates: c.sfn_source_gates
         });
         i += 1;
     }

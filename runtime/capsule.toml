@@ -106,3 +106,59 @@ prelude-entry = "prelude.sfn"
 # ctor floor is paid where the benefit lands (SFN-341).
 [dependencies]
 "sfn/crypto" = "*"
+
+# Demand-driven `sfn-sources` selection (SFN-882). A source listed under an
+# effect name is compiled only when the build's declared effect surface demands
+# that effect; a source named in NO gate is always compiled. Keys are canonical
+# effect names (`analyzer/src/effect_taxonomy.sfn::canonical_effects()`).
+#
+# Demand is the union of the project manifest's `[capabilities] required` and
+# every effect token appearing in an `![ ... ]` list across the unfiltered
+# source set, each normalized through `effect_root()` — `![net.http]` and
+# `![net.ws]` demand `net`, since only `serve` is rooted at bare `net`.
+#
+# `net` covers the TLS 1.3 stack, the socket/HTTP/WebSocket adapters and the
+# server loop. Every entry point into these modules is `net`-rooted in
+# `compiler/capsules/ir/src/intrinsic_effects.sfn`, so a program that can call
+# one must declare a `net` effect transitively to `fn main` or fail E0400.
+# Naming a source that is not present in `sfn-sources` is inert: the two
+# `_windows` spellings are appended by `target_condition_runtime_sfn_sources`
+# (`compiler/src/build/target.sfn`) and are listed so the gate composes with
+# that substitution rather than letting a conditioned-in sibling escape it.
+#
+# THIS SECTION MUST STAY LAST IN THE FILE. `toml_get_string_array` scans forward
+# from a `[section]` header to the next header, so a section inserted before
+# `[build]`'s array block would truncate `sfn-sources` under the pinned seed —
+# which parses this file during `make compile` — and break self-hosting
+# outright. Pinned by `compiler/tests/unit/runtime_source_gates_test.sfn`.
+#
+# THE PRELUDE CONSTRAINT. `runtime/prelude.sfn` is compiled and linked into
+# every binary unconditionally — it is not an `sfn-sources` member and the
+# selector never sees it — and it binds `runtime_serve_fn = runtime.serve`,
+# giving it a reference to `sailfin_runtime_serve` in gated `serve.sfn`. That
+# reference is safe ONLY because it is dead-strippable: the prelude's `serve`
+# wrapper does not match the `sfn*` retain-root pattern, so `--gc-sections`
+# removes it from any binary that never calls `serve`, and a binary that DOES
+# call it must declare `![net]`, which opens the gate. A link path that neither
+# dead-strips nor narrows would see an undefined `sailfin_runtime_serve`; that
+# is why `sfn test` opts out of selection entirely rather than gating (SFN-882).
+#
+# Do not try to "fix" this by ungating the group. The closure is by SYMBOL
+# REFERENCE, not import — `serve.sfn` and `http.sfn` have no imports at all, yet
+# both call the bare `tls_*` API (`tls_client_ctx`, `tls_read`, `tls_write`) in
+# `tls.sfn`, which imports `sfn/crypto`. Ungating serve/http therefore drags in
+# TLS and all 33 crypto modules, erasing the entire win. An import-only audit
+# sees a false all-clear here; `runtime_source_gates_test.sfn` checks symbols.
+[sfn-source-gates]
+net = [
+    "sfn/platform/tls.sfn",
+    "sfn/platform/tls_record.sfn",
+    "sfn/platform/cert_roots.sfn",
+    "sfn/platform/cert_roots_windows.sfn",
+    "sfn/platform/socket_ops.sfn",
+    "sfn/platform/socket_ops_windows.sfn",
+    "sfn/adapters/http.sfn",
+    "sfn/adapters/websocket.sfn",
+    "sfn/adapters/net.sfn",
+    "sfn/concurrency/serve.sfn",
+]

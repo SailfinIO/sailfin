@@ -77,6 +77,20 @@ required = ["clock", "io", "net"]
 kind = "binary"
 entry = "src/main.sfn"
 
+# Opt out of demand-driven runtime `sfn-sources` selection (SFN-882): this
+# artifact is the runtime provider surface and must carry every runtime module
+# regardless of the effects its own sources declare. Forces the demand set to
+# the `"*"` sentinel, so `select_runtime_sfn_sources` is the identity.
+#
+# The compiler already demands `net` twice over — `cli/entry.sfn`'s `fn main`
+# declares `![clock, io, net]` and 17 sources carry a `net` effect list — so the
+# gate would open on the demand signal alone. This key exists so that stays true
+# if `entry.sfn`'s signature is ever narrowed. Without it, a future seed pin (the
+# first one whose seed understands the gate table) would silently narrow the
+# compiler's own runtime and change six `nm build/bin/sfn` assertions under a
+# bump that touched no source.
+full-runtime = true
+
 # The compiler reads its version from this file at runtime via
 # resolve_compiler_version() in compiler/src/version.sfn.
 # For installed binaries, __version_fallback__ in version.sfn is used.
