@@ -413,6 +413,34 @@ fn _copy_file(src: string, dst: string) -> boolean ![io] {
     return _copy_file_counted(src, dst).ok;
 }
 
+// `_copy_file` plus the source's low-12 mode — the faithful replacement
+// for `cp -f`, which creates its destination from the source's mode.
+// `_copy_file` alone does not: it is `fopen(dst, "wb")`, whose
+// 0666-and-umask default is 0644, so a copied executable arrives
+// unrunnable. `_selfhost_promote_binary` (`compiler/src/cli_selfhost.sfn`)
+// documents the same trap and carries the mode for the same reason.
+//
+// The `> 0` guard is load-bearing, not padding: `fs.get_perms` reports
+// `-1` on any error and `fs.set_perms` masks to 12 bits, so chmod-ing an
+// unchecked `-1` would quietly set 0o7777 — setuid, setgid, sticky and
+// world-writable. The Windows `get_perms` lowering is a fixed `-1` stub,
+// so the guard is also what disables the carry there; no
+// `host_is_windows()` gate is needed, and none would be right, since
+// Windows has no execute bit to carry.
+//
+// The carry is best-effort and does not fail the copy: the bytes are the
+// deliverable, and a host that cannot report or set a mode is the same
+// host on which the copy's default already stands. Callers that must not
+// publish an unrunnable binary check the mode themselves —
+// `_selfhost_promote_binary` does, because it is staging the compiler
+// over itself.
+fn _copy_file_preserving_mode(src: string, dst: string) -> boolean ![io] {
+    if !_copy_file(src, dst) { return false; }
+    let mode = fs.get_perms(src);
+    if mode > 0 { fs.set_perms(dst, mode); }
+    return true;
+}
+
 // `path`'s size in bytes, the shell-free replacement for `wc -c < path`.
 // Returns `0` on any failure — a missing file, an unreadable one, or a
 // read error — matching the contract the `wc` spawn it displaces already
@@ -813,6 +841,7 @@ export {
     _atomic_rename_into_place,
     _publish_lines_atomic,
     _copy_file,
+    _copy_file_preserving_mode,
     CopyOutcome,
     _copy_file_counted,
     _file_size_of,

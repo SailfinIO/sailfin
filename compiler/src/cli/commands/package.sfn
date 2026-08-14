@@ -33,7 +33,7 @@ import {
 import { int_to_string } from "sfn/strings";
 
 import {
-    _copy_file,
+    _copy_file_preserving_mode,
     _file_size_of,
     _sha256_of_file,
     _shell_read_cmd
@@ -243,12 +243,12 @@ fn _package_compiler(target: string, out_dir: string, compiler_bin: string) -> i
         return 1;
     }
     ensure_dir_p(staging_bin);
-    if !_copy_file(compiler_bin, staging_bin + "/sailfin") {
+    if !_copy_file_preserving_mode(compiler_bin, staging_bin + "/sailfin") {
         print("sfn package: failed to stage sailfin binary");
         remove_tree(staging);
         return 1;
     }
-    if !_copy_file(compiler_bin, staging_bin + "/sfn") {
+    if !_copy_file_preserving_mode(compiler_bin, staging_bin + "/sfn") {
         print("sfn package: failed to stage sfn binary");
         remove_tree(staging);
         return 1;
@@ -392,12 +392,12 @@ fn _package_installer(target: string, out_dir: string, compiler_bin: string) -> 
     }
     ensure_dir_p(staging_bin);
     ensure_dir_p(staging_runtime);
-    if !_copy_file(compiler_bin, staging_bin + "/sailfin") {
+    if !_copy_file_preserving_mode(compiler_bin, staging_bin + "/sailfin") {
         print("sfn package: failed to stage sailfin binary");
         remove_tree(staging);
         return 1;
     }
-    if !_copy_file(compiler_bin, staging_bin + "/sfn") {
+    if !_copy_file_preserving_mode(compiler_bin, staging_bin + "/sfn") {
         print("sfn package: failed to stage sfn binary");
         remove_tree(staging);
         return 1;
@@ -413,7 +413,8 @@ fn _package_installer(target: string, out_dir: string, compiler_bin: string) -> 
         remove_tree(staging);
         return 1;
     }
-    if !_copy_file("runtime/capsule.toml", staging_runtime + "/capsule.toml") {
+    if !_copy_file_preserving_mode("runtime/capsule.toml", staging_runtime
+        + "/capsule.toml") {
         print("sfn package: failed to copy runtime/capsule.toml");
         remove_tree(staging);
         return 1;
@@ -439,7 +440,8 @@ fn _package_installer(target: string, out_dir: string, compiler_bin: string) -> 
         remove_tree(staging);
         return 1;
     }
-    if !_copy_file("runtime/prelude.sfn", staging_runtime + "/prelude.sfn") {
+    if !_copy_file_preserving_mode("runtime/prelude.sfn", staging_runtime
+        + "/prelude.sfn") {
         print("sfn package: failed to copy runtime/prelude.sfn");
         remove_tree(staging);
         return 1;
@@ -542,7 +544,8 @@ fn _package_installer(target: string, out_dir: string, compiler_bin: string) -> 
         let dep_root = substring(dep_loc.src_dir, 0, dep_loc.src_dir.length - 4);
         let dep_manifest = dep_root + "/capsule.toml";
         if fs.exists(dep_manifest) {
-            if !_copy_file(dep_manifest, dep_dest_dir + "/capsule.toml") {
+            if !_copy_file_preserving_mode(dep_manifest, dep_dest_dir
+                + "/capsule.toml") {
                 print("sfn package: failed to bundle runtime dependency `"
                     + dep_spec
                     + "` manifest");
@@ -740,7 +743,7 @@ fn _package_user_capsule(target: string, out_dir: string, capsule_path: string) 
         remove_tree(staging);
         return 1;
     }
-    if !_copy_file(artifact_path, artifact_dest) {
+    if !_copy_file_preserving_mode(artifact_path, artifact_dest) {
         print("sfn package: failed to stage artifact " + artifact_path);
         remove_tree(staging);
         return 1;
@@ -748,8 +751,8 @@ fn _package_user_capsule(target: string, out_dir: string, capsule_path: string) 
     // Self-describing: copy the sidecar AND capsule.toml so a
     // consumer of the tarball can see what they got without
     // re-running the build.
-    _copy_file(sidecar_path, staging_root + "/manifest.json");
-    _copy_file(manifest_path, staging_root + "/capsule.toml");
+    _copy_file_preserving_mode(sidecar_path, staging_root + "/manifest.json");
+    _copy_file_preserving_mode(manifest_path, staging_root + "/capsule.toml");
 
     ensure_dir_p(out_dir);
     let tarball = out_dir + "/" + stem + ".tar.gz";

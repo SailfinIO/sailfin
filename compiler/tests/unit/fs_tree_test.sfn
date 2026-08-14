@@ -7,7 +7,12 @@
 // is where those two strategies diverge.
 import { expect_eq_bool, expect_eq_int, expect_eq_str } from "sfn/test";
 
-import { _copy_file, _copy_file_counted, _file_size_of } from "../../src/build/fs";
+import {
+    _copy_file,
+    _copy_file_counted,
+    _copy_file_preserving_mode,
+    _file_size_of
+} from "../../src/build/fs";
 import {
     copy_tree,
     ensure_dir_p,
@@ -446,4 +451,52 @@ test "fs: _file_size_of returns 0 for a missing file" ![io] {
     if fs.exists(path) { fs.deleteFile(path); }
 
     assert expect_eq_int(_file_size_of(path), 0).ok;
+}
+
+// The bound is what the module header stakes its "never a fabricated
+// `true`" claim on, so it is pinned rather than assumed: a chain one
+// level deeper than `FS_TREE_MAX_DEPTH` (16) must report `false`. The
+// partial tree it leaves behind is the caller's to clean up, which is
+// also asserted — `copy_tree` must never delete.
+test "fs_tree: copy_tree returns false past the depth bound" ![io] {
+    let root = _scratch_dir() + "/copy-depth-bound";
+    if fs.exists(root) { remove_tree(root); }
+    let src = root + "/src";
+    let mut deep = src;
+    let mut i: int = 0;
+    loop {
+        if i >= 17 { break; }
+        deep = deep + "/d";
+        i += 1;
+    }
+    fs.createDirectory(deep, true);
+    fs.writeFile(deep + "/leaf.txt", "too deep");
+    let dst = root + "/dst";
+
+    assert expect_eq_bool(copy_tree(src, dst), false).ok;
+    // Truncated, not absent: the levels within the bound were copied and
+    // are left for the caller to remove.
+    assert fs.is_directory(dst);
+}
+
+test "fs: _copy_file_preserving_mode carries the executable bit" ![io] {
+    let dir = _scratch_dir();
+    let src = dir + "/mode-carry-src";
+    let dst = dir + "/mode-carry-dst";
+    if fs.exists(dst) { fs.deleteFile(dst); }
+    fs.writeFile(src, "#!/bin/sh\nexit 0\n");
+
+    if host_is_windows() {
+        // `fs.get_perms` is a `-1` stub there, so the carry self-disables
+        // and only the bytes are asserted.
+        assert expect_eq_bool(_copy_file_preserving_mode(src, dst), true).ok;
+        assert expect_eq_str(fs.readFile(dst), "#!/bin/sh\nexit 0\n").ok;
+    } else {
+        assert fs.set_perms(src, 493);
+        assert expect_eq_bool(_copy_file_preserving_mode(src, dst), true).ok;
+        // `_copy_file` alone would leave 0644 here: `fopen(dst, "wb")`
+        // creates with the 0666-and-umask default, dropping the bit that
+        // the `cp -f` this replaces carried across.
+        assert fs.is_executable(dst);
+    }
 }

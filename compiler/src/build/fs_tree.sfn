@@ -75,15 +75,30 @@
 // The degradation is reported where a false success would mislead and
 // silent where truncation is safe. `remove_tree` returns `false`, because a
 // fabricated `true` would let `cache_clean` claim it wiped a tree that
-// survived. `copy_tree` returns `false` for the same reason, and the stakes
-// there are the module's highest: a fabricated `true` would let
-// `sfn package` tar a truncated tree and publish it as a release artifact.
-// `remove_empty_dirs_under` returns a short count. `walk_dirs` truncates
-// silently: a short result set makes its callers do strictly less work —
-// `cache_info` under-reports, `cache_prune` under-prunes — and neither is
-// unsafe.
+// survived. `copy_tree` returns `false` on either bound for the same
+// reason, and the stakes there are the module's highest: a fabricated
+// `true` would let `sfn package` tar a truncated tree and publish it as a
+// release artifact. `remove_empty_dirs_under` returns a short count.
+// `walk_dirs` truncates silently: a short result set makes its callers do
+// strictly less work — `cache_info` under-reports, `cache_prune`
+// under-prunes — and neither is unsafe.
+//
+// A THIRD truncation source is not covered by any of that, and the honest
+// statement of it is that `copy_tree` cannot currently detect it.
+// `fs.listDirectory` yields an empty array on an enumeration failure —
+// `EACCES`, fd exhaustion, `ENOMEM` — which is indistinguishable from a
+// genuinely empty directory (the contract is stated at
+// `runtime/sfn/adapters/filesystem.sfn`, where returning `[]` rather than
+// null is what lets callers iterate unconditionally). `copy_tree` copies
+// nothing from such a subtree and returns `true`, where `cp -R` would exit
+// non-zero. The destructive walkers are immune structurally rather than by
+// luck: they end on a post-condition (`remove_tree`'s `!fs.exists(path)`),
+// and a directory that failed to enumerate also fails to `rmdir`. A copy
+// has no post-condition to check, so it cannot buy the same immunity —
+// only a `listDirectory` that can report failure can, which is SFN-892.
+// Delete this paragraph when that lands.
 import { starts_with } from "../string_utils";
-import { _copy_file, _dirname_cmd } from "./fs";
+import { _copy_file_preserving_mode, _dirname_cmd } from "./fs";
 
 let FS_TREE_MAX_DEPTH: int = 16;
 
@@ -222,22 +237,6 @@ fn remove_tree(path: string) -> boolean ![io] {
     return !fs.exists(path);
 }
 
-// Carry `src`'s low-12 mode onto `dst`, best-effort. `fs.get_perms`
-// returns `-1` on any failure and is a `-1` stub on Windows, so the
-// `> 0` test is what disables the carry there — no `host_is_windows()`
-// gate is needed, and none would be right, since Windows has no execute
-// bit to carry. Applied per regular file and never to a directory: a
-// restrictive source mode on a staging directory could lock out the walk
-// still writing into it, and `ensure_dir_p`'s default is already correct.
-// Same shape as `_selfhost_promote_binary` (`compiler/src/cli_selfhost.sfn`).
-// A failed `set_perms` does not fail the copy — the bytes are the
-// deliverable and the mode is fidelity to the `cp` this replaces, which
-// itself reports a mode failure separately from a copy failure.
-fn _carry_file_mode(src: string, dst: string) ![io] {
-    let mode = fs.get_perms(src);
-    if mode > 0 { fs.set_perms(dst, mode); }
-}
-
 // Copy `src` to `dst` recursively, the shell-free replacement for
 // `cp -R`. `dst` is the destination ITSELF, never a container:
 // `copy_tree("runtime/sfn", staging + "/sfn")` produces
@@ -270,9 +269,7 @@ fn copy_tree(src: string, dst: string) -> boolean ![io] {
     if !fs.is_directory(src) {
         let parent = _dirname_cmd(dst);
         if parent.length > 0 { ensure_dir_p(parent); }
-        if !_copy_file(src, dst) { return false; }
-        _carry_file_mode(src, dst);
-        return true;
+        return _copy_file_preserving_mode(src, dst);
     }
 
     if !ensure_dir_p(dst) { return false; }
@@ -311,8 +308,9 @@ fn copy_tree(src: string, dst: string) -> boolean ![io] {
                     next_src.push(child_src);
                     next_dst.push(child_dst);
                 } else {
-                    if !_copy_file(child_src, child_dst) { return false; }
-                    _carry_file_mode(child_src, child_dst);
+                    if !_copy_file_preserving_mode(child_src, child_dst) {
+                        return false;
+                    }
                 }
                 ei += 1;
             }
