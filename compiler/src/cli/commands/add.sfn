@@ -44,7 +44,6 @@ import {
     with_arg,
     with_flag
 } from "sfn/cli";
-import { fetch } from "sfn/http";
 
 import { _dirname_cmd, _ensure_dir_recursive_cmd, _sha256_of_file } from "../../build/fs";
 import { _get_home_cmd } from "../../build_flags";
@@ -61,6 +60,7 @@ import { CliContext } from "../context";
 import {
     _is_safe_capsule_segment_cmd,
     _is_safe_capsule_version_cmd,
+    _registry_get_cmd,
     _resolve_registry_url_cmd
 } from "./cmd_shared";
 
@@ -92,17 +92,6 @@ fn _registry_download_cmd(url: string, output_path: string) -> int ![io, net] {
     let _ = http.download(url, output_path);
     if fs.exists(output_path) { return 0; }
     return 1;
-}
-
-// GET `url` and return the response body, or "" on any transport failure or
-// a non-2xx status. The status gate preserves the fail-closed semantics the
-// pre-SFN-496 shelled fetch had (`-f`): a 4xx/5xx index fetch is a miss, not
-// a body.
-fn _registry_get_cmd(url: string) -> string ![net] {
-    let resp = fetch("GET", url, [], "");
-    if resp.status < 200 { return ""; }
-    if resp.status >= 300 { return ""; }
-    return resp.body;
 }
 
 // First index of `needle` in `haystack` at or after `start`, or -1.

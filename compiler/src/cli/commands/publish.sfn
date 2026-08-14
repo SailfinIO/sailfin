@@ -47,7 +47,6 @@ import {
     with_arg
 } from "sfn/cli";
 import { base64_encode } from "sfn/crypto";
-import { fetch } from "sfn/http";
 import { int_to_string } from "sfn/strings";
 
 import {
@@ -60,7 +59,7 @@ import { _get_env_cmd, _get_home_cmd } from "../../build_flags";
 import { substring } from "../../string_utils";
 import { toml_get_name, toml_get_publish, toml_get_version } from "../../toml_parser";
 import { CliContext } from "../context";
-import { _resolve_registry_url_cmd } from "./cmd_shared";
+import { _registry_post_json_cmd, _resolve_registry_url_cmd } from "./cmd_shared";
 
 // The `sfn/cli` definition for `publish`, registered on the v2 root via
 // `with_subcommand`. A single optional `[path]` positional; no flags.
@@ -205,8 +204,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io, net] {
     let registry_base = _resolve_registry_url_cmd();
     let registry_url = registry_base + "/api/publish";
     print("publishing to " + registry_url + "...");
-    let resp = fetch("POST", registry_url, ["Content-Type: application/json", "Authorization: "
-        + auth_header], json_body);
+    let resp = _registry_post_json_cmd(registry_url, auth_header, json_body);
     fs.deleteFile(payload_tmp);
     let response = _toml_trim_cmd(resp.body);
     if resp.status == 0 {
