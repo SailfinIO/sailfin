@@ -65,9 +65,13 @@ compiler/tests/e2e/aarch64_binfmt_probe_test.sfn	473
 target-neutral *share* of one target's suite time, not a raw duration, so the
 same table balances hosts running at different absolute speeds (e.g.
 macOS-arm64 vs. Linux-arm64). A discovered file absent from the table gets
-the table's median weight (2136 as of the SFN-863 generation) rather than 0,
-so a newly added test still lands in a plausible LPT slot instead of always
-sorting first.
+the fixed default weight 2136 (`_shard_default_weight` in
+`compiler/src/cli/commands/test/arg_and_jobs.sfn`) rather than 0, so a newly
+added test still lands in a plausible LPT slot instead of always sorting
+first. That default is a compiler constant, not a value read from the table:
+it was the table's median at the SFN-863 generation, but the two drift apart
+on every refresh (the SFN-883 table's median is 282), so re-deriving it is a
+compiler change, not a table change.
 
 **Fail-open.** `sfn dev shard` and `sfn test --shard-weights <path>` both
 fall back to the plain alphabetical stride whenever the table is missing,
