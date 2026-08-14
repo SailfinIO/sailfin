@@ -8,8 +8,8 @@
 // Phase 3, epic #842). It inspected tarballs with `tar -tzf` and manifest
 // JSON with `jq`; here we shell out to `tar` / `jq` / `sha256sum` via
 // `process.run_capture` and parse the single-line stdout. Tests that need
-// `tar` or `jq` skip (assert true) if a `--version` probe fails, mirroring
-// the .sh's `command -v` SKIP guards.
+// `tar` or `jq` skip (assert true) when `tool_present` reports them absent
+// — the shared shell-free presence probe (SFN-840).
 //
 // Run semantics: `run_capture` cannot chdir. The .sh ran compiler/installer
 // mode from the repo root (to find `compiler/capsule.toml`); the test runner
@@ -19,7 +19,8 @@
 // NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]` and so
 // cannot be called from an `![io]` test like this. Assert on captured
 // stdout / parsed `jq` output with `sfn/strings` predicates instead. (#842.)
-import { find, contains, split } from "sfn/strings";
+import { contains, find, split } from "sfn/strings";
+import { tool_present } from "sfn/test";
 
 fn _sfn_bin() -> string ![io] {
     let configured = env.get("SAILFIN_BIN");
@@ -72,15 +73,6 @@ fn _first_line(text: string) -> string {
     let lines = split(text, "\n");
     if lines.length == 0 { return text; }
     return lines[0];
-}
-
-// True when an external tool (`tar`, `jq`) is available — runs `<tool>
-// --version` and checks the exit code, mirroring the .sh `command -v` guard.
-fn _tool_present(tool: string) -> bool ![io] {
-    let exit = process.run_capture([tool, "--version"], _child_env());
-    let _o = process.capture_take_stdout();
-    let _e = process.capture_take_stderr();
-    return exit == 0;
 }
 
 // `jq -r .<field> <file>` -> first line of stdout (trimmed). Empty on error.
@@ -216,11 +208,11 @@ fn _tarball_stem(tarball: string) -> string {
 // Compiler mode
 // =====================================================================
 test "sfn package (compiler mode): full artifact + manifest contract" ![io] {
-    if !_tool_present("tar") {
+    if !tool_present("tar") {
         assert true;
         return;
     }
-    if !_tool_present("jq") {
+    if !tool_present("jq") {
         assert true;
         return;
     }
@@ -289,11 +281,11 @@ test "sfn package (compiler mode): full artifact + manifest contract" ![io] {
 // User-capsule mode (-p)
 // =====================================================================
 test "sfn package -p (user capsule): build then package, library manifest" ![io] {
-    if !_tool_present("tar") {
+    if !tool_present("tar") {
         assert true;
         return;
     }
-    if !_tool_present("jq") {
+    if !tool_present("jq") {
         assert true;
         return;
     }
@@ -382,11 +374,11 @@ fn _first_line_pwd() -> string ![io] {
 // Installer mode
 // =====================================================================
 test "sfn package --installer: bundle + manifest contract" ![io] {
-    if !_tool_present("tar") {
+    if !tool_present("tar") {
         assert true;
         return;
     }
-    if !_tool_present("jq") {
+    if !tool_present("jq") {
         assert true;
         return;
     }

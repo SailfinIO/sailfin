@@ -5,9 +5,16 @@
 // `.sfn` test. That still shells out from test code, which is exactly what
 // the no-bash rule (see also `docs/conventions/e2e-tests.md`) exists to
 // prevent — it just moved the string past the file-extension check. This
-// test closes that loophole by scanning every `*_test.sfn` line for the
-// idiom directly, as a zero-tolerance ratchet: the target count is zero,
-// not an allowlist.
+// test closes that loophole by scanning every `*_test.sfn` for the idiom
+// directly. The target count is zero, not an allowlist.
+//
+// It is a ratchet against the idiom as written, not a proof of absence. It
+// matches the spelled-out argv form — per line, and once more over the
+// whitespace-collapsed file so a `fmt`-wrapped concatenation cannot slip
+// through — but a determined author can still evade it with `"/bin/sh"`, an
+// `["env", "sh", ...]` head, or `which`/`type`/`hash` in place of
+// `command -v`. Those are worth adding the day one appears; guessing at
+// them now would trade real false-positive risk for hypothetical coverage.
 //
 // Needles are built by runtime concatenation rather than as contiguous
 // literals, so no line of this file is itself a match. That is what lets the
@@ -74,7 +81,44 @@ fn _has_command_v(line: string) -> boolean {
     return contains(line, needle);
 }
 
-test "e2e: no shell-spawned tool-presence probes in the test tree" ![io] {
+// Collapse every run of whitespace to a single space.
+//
+// The banned idiom is a string concatenation, which is exactly what
+// `sfn fmt` wraps across lines once it grows past the column budget — a
+// per-line scan would miss the wrapped form. Normalizing the whole file and
+// looking for the three tokens adjacent catches it while staying precise:
+// requiring adjacency means an unrelated shell pipeline elsewhere in the
+// file plus a `command -v` mention in a comment cannot combine into a false
+// positive.
+fn _collapse_whitespace(text: string) -> string {
+    let mut out = "";
+    let mut i = 0;
+    let mut in_space = false;
+    loop {
+        if i >= text.length { break; }
+        let ch = text[i];
+        i = i + 1;
+        if ch == " " || ch == "\t" || ch == "\n" || ch == "\r" {
+            if !in_space { out = out + " "; }
+            in_space = true;
+            continue;
+        }
+        in_space = false;
+        out = out + ch;
+    }
+    return out;
+}
+
+// The fully-spelled idiom, adjacency required, after whitespace collapse.
+fn _has_wrapped_probe(normalized: string) -> boolean {
+    let cmd = "\", " + "\"command" + " -v";
+    let cmd_tight = "\"," + "\"command" + " -v";
+    if !_has_shell_argv_head(normalized) { return false; }
+    if contains(normalized, cmd) { return true; }
+    return contains(normalized, cmd_tight);
+}
+
+test "no-bash rule: no shell-spawned tool-presence probes in the test tree" ![io] {
     let files = _collect_test_files(_tests_root(), []);
     assert files.length > 0;
 
@@ -88,6 +132,7 @@ test "e2e: no shell-spawned tool-presence probes in the test tree" ![io] {
         let body = fs.readFile(path);
         let lines = split(body, "\n");
         let mut li = 0;
+        let mut hit_on_a_line = false;
         loop {
             if li >= lines.length { break; }
             let line = lines[li];
@@ -95,7 +140,22 @@ test "e2e: no shell-spawned tool-presence probes in the test tree" ![io] {
             li = li + 1;
             if !_has_shell_argv_head(line) { continue; }
             if !_has_command_v(line) { continue; }
+            hit_on_a_line = true;
             offenders.push(path + ":" + int_to_string(line_no) + ": " + trim(line));
+        }
+        // The wrapped form carries no single line to point at, so it is
+        // reported against the file. Only checked when no line already
+        // matched, to avoid reporting the same site twice.
+        if hit_on_a_line { continue; }
+        // Gate the normalization on a cheap raw scan. Wrapping splits the
+        // argv head from the command string but never splits `command -v`
+        // itself — that stays one literal — so a file without it raw cannot
+        // hold a wrapped probe. Without this early-out the char-by-char
+        // rebuild below would run over every test file in the tree.
+        if !_has_command_v(body) { continue; }
+        if _has_wrapped_probe(_collapse_whitespace(body)) {
+            offenders.push(path
+                + ": shell tool probe spelled across wrapped lines");
         }
     }
 

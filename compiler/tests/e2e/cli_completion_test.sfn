@@ -6,6 +6,7 @@
 // output, command coverage, target-shell syntax validity, and the
 // unsupported-/missing-shell error paths (SFN-130, SFEP-0027 Phase D).
 import { contains } from "sfn/strings";
+import { tool_present } from "sfn/test";
 
 fn _sfn_bin() -> string ![io] {
     let configured = env.get("SAILFIN_BIN");
@@ -33,15 +34,10 @@ fn _scratch_dir() -> string ![io] {
     return dir;
 }
 
-// Probe for a runnable `bash`; the syntax-check leg is skipped when absent,
-// mirroring the `command -v` SKIP the legacy shell tests used
-// (.claude/rules/no-bash-e2e.md).
-fn _has_bash() -> boolean ![io] {
-    let exit = process.run_capture(["bash", "--version"], _child_env());
-    let _ = process.capture_take_stdout();
-    let _ = process.capture_take_stderr();
-    return exit == 0;
-}
+// Probe for a runnable `bash`; the syntax-check leg is skipped when absent.
+// `tool_present` is the shell-free `command -v` equivalent shared by the
+// whole e2e tree (SFN-840, `capsules/sfn/test/src/tool_probe.sfn`).
+fn _has_bash() -> boolean ![io] { return tool_present("bash"); }
 
 test "cli completion: bash script is deterministic and names registered commands" ![io] {
     let exit1 = process.run_capture([_sfn_bin(), "completion", "bash"], _child_env());

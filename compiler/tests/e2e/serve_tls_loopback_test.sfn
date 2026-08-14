@@ -52,7 +52,7 @@ fn _timeout_cmd() -> string ![io] {
     return first_present_tool(["timeout", "gtimeout"]);
 }
 
-fn _has_openssl() -> bool ![io] { return tool_present("openssl"); }
+fn _has_openssl() -> boolean ![io] { return tool_present("openssl"); }
 
 // A scratch dir for the cert/key + fixture. Keep the generated consumer
 // under the repo build tree so workspace discovery resolves `sfn/http`.
@@ -151,8 +151,9 @@ fn _tls_get(tcmd: string) -> string ![io] {
         + _tls_port_str()
         + " -quiet 2>/dev/null";
     // `sh -c` (not `bash -c`): the command is POSIX-shell compatible (printf
-    // + pipe + redirect) and `sh` is more universally present — matches the
-    // `_timeout_cmd`/`_has_openssl` probes above.
+    // + pipe + redirect) and `sh` is more universally present. This is a
+    // genuine pipeline, not a PATH lookup — the tool probes above no longer
+    // spawn a shell at all (SFN-840); retiring this one needs SFN-885.
     let exit = process.run_capture(["sh", "-c", cmd], _child_env());
     let out = process.capture_take_stdout();
     let _err = process.capture_take_stderr();

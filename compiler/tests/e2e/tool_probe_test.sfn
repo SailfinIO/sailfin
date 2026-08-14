@@ -9,6 +9,11 @@
 // distinction, because the obvious `exit == 0` implementation passes the
 // first two and still silently skips coverage on a host whose `openssl`
 // predates 3.0.
+//
+// This file lives under `compiler/tests/e2e/` rather than beside the
+// capsule's other module tests in `capsules/sfn/test/tests/` because its
+// "known present" fixture is the built compiler itself, reached by a path
+// relative to the repo root the e2e runner starts from.
 import { first_present_tool, tool_present } from "sfn/test";
 
 // A name no host has on `PATH`. Deliberately not a plausible tool name.
@@ -42,10 +47,11 @@ test "tool probe: presence does not require a zero exit" ![io] {
     let exit = process.run_capture(argv, process.environ());
     let _out = process.capture_take_stdout();
     let _err = process.capture_take_stderr();
-    // Guard the premise: if this ever starts exiting 0, the test below
-    // stops proving anything and should be re-pointed at another vehicle.
-    assert exit != 0;
-    assert exit != 127;
+    // Guard the premise: the child must actually have run (a non-negative
+    // code) and exited nonzero. If it ever starts exiting 0, the assertion
+    // below stops proving anything and should be re-pointed at another
+    // vehicle.
+    assert exit > 0;
     assert tool_present(_sfn_bin());
 }
 
