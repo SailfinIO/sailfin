@@ -23,6 +23,7 @@
 //      when `python3`/`timeout` are unavailable (the tool-probe SKIP
 //      pattern the e2e rules establish).
 import { contains } from "sfn/strings";
+import { first_present_tool, tool_present } from "sfn/test";
 
 // The compiler-under-test: `$SAILFIN_BIN` if set, else the self-hosted
 // binary relative to the repo root the runner starts from (mirrors
@@ -41,16 +42,8 @@ fn _scratch_root() -> string ![io] {
     return dir + "/sfn-toolchain-install-e2e";
 }
 
-fn _has_cmd(name: string) -> boolean ![io] {
-    let probe = process.run(["sh", "-c", "command -v " + name
-        + " >/dev/null 2>&1"]);
-    return probe == 0;
-}
-
 fn _timeout_cmd() -> string ![io] {
-    if _has_cmd("timeout") { return "timeout"; }
-    if _has_cmd("gtimeout") { return "gtimeout"; }
-    return "";
+    return first_present_tool(["timeout", "gtimeout"]);
 }
 
 // Full parent environment plus the caller's extra `KEY=VALUE` entries
@@ -138,7 +131,7 @@ test "toolchain install: a bad signature is refused before extraction" ![io] {
     // `python3` HTTP server, or no wall-clock `timeout` to reap it (there
     // is no process-kill primitive). Legs above still cover fail-closed
     // fetch without a server.
-    if !_has_cmd("python3") {
+    if !tool_present("python3") {
         assert true;
         return;
     }
@@ -208,7 +201,7 @@ test "toolchain install: a bad signature is refused before extraction" ![io] {
 
 test "toolchain install: a signed manifest refuses an asset digest mismatch" ![io] {
     let tcmd = _timeout_cmd();
-    if !_has_cmd("python3") {
+    if !tool_present("python3") {
         assert true;
         return;
     }

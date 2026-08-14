@@ -24,6 +24,7 @@
 // called from an `![io]` test; assert on captured output with
 // `sfn/strings::contains`.
 import { contains } from "sfn/strings";
+import { first_present_tool, tool_present } from "sfn/test";
 
 // The compiler-under-test: `$SAILFIN_BIN` if set, else the self-hosted
 // binary relative to the repo root the runner starts from.
@@ -48,17 +49,10 @@ fn _tls_port_str() -> string { return "18893"; }
 // test). Empty => none found; the caller then skips (the blocking server
 // would otherwise orphan the fixed port).
 fn _timeout_cmd() -> string ![io] {
-    let probe = process.run(["sh", "-c", "command -v timeout >/dev/null 2>&1"]);
-    if probe == 0 { return "timeout"; }
-    let gprobe = process.run(["sh", "-c", "command -v gtimeout >/dev/null 2>&1"]);
-    if gprobe == 0 { return "gtimeout"; }
-    return "";
+    return first_present_tool(["timeout", "gtimeout"]);
 }
 
-fn _has_openssl() -> bool ![io] {
-    let probe = process.run(["sh", "-c", "command -v openssl >/dev/null 2>&1"]);
-    return probe == 0;
-}
+fn _has_openssl() -> boolean ![io] { return tool_present("openssl"); }
 
 // A scratch dir for the cert/key + fixture. Keep the generated consumer
 // under the repo build tree so workspace discovery resolves `sfn/http`.
@@ -157,8 +151,9 @@ fn _tls_get(tcmd: string) -> string ![io] {
         + _tls_port_str()
         + " -quiet 2>/dev/null";
     // `sh -c` (not `bash -c`): the command is POSIX-shell compatible (printf
-    // + pipe + redirect) and `sh` is more universally present — matches the
-    // `_timeout_cmd`/`_has_openssl` probes above.
+    // + pipe + redirect) and `sh` is more universally present. This is a
+    // genuine pipeline, not a PATH lookup — the tool probes above no longer
+    // spawn a shell at all (SFN-840); retiring this one needs SFN-885.
     let exit = process.run_capture(["sh", "-c", cmd], _child_env());
     let out = process.capture_take_stdout();
     let _err = process.capture_take_stderr();

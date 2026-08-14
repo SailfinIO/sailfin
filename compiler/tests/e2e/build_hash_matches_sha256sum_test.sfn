@@ -5,6 +5,8 @@
 // every representative artifact class the build hashes in production: the
 // compiler binary, a compressed tar archive, and generated LLVM IR larger than
 // the retired 64 KiB threshold.
+import { tool_present } from "sfn/test";
+
 import { _sha256_of_file } from "../../src/build/fs";
 import { sha256_hex_of_string } from "../../src/build/hash";
 
@@ -45,13 +47,6 @@ fn _system_sha256(path: string) -> string ![io] {
     return _capture_digest(["shasum", "-a", "256", path]);
 }
 
-fn _has_cmd(name: string) -> boolean ![io] {
-    let rc = process.run_capture(["sh", "-c", "command -v " + name], process.environ());
-    let _ = process.capture_take_stdout();
-    let _ = process.capture_take_stderr();
-    return rc == 0;
-}
-
 fn _tmp_path(name: string) -> string ![io] {
     let scratch = env.get("SAILFIN_TEST_SCRATCH");
     if scratch.length > 0 { return scratch + "/" + name; }
@@ -84,7 +79,7 @@ test "build_hash: compiled binary matches the system digest" ![io] {
 }
 
 test "build_hash: tar.gz archive matches the system digest" ![io] {
-    if !_has_cmd("tar") {
+    if !tool_present("tar") {
         assert true;
         return;
     }

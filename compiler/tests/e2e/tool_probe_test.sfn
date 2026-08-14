@@ -1,0 +1,66 @@
+// Regression coverage for `sfn/test`'s shell-free tool-presence probe
+// (SFN-840, `capsules/sfn/test/src/tool_probe.sfn`).
+//
+// The probe replaced a `sh -c "command -v <tool>"` spawn that fifteen e2e
+// files each carried a private copy of. Its contract is deliberately
+// "did the binary resolve on `PATH` and execute", not "did it exit 0" —
+// matching `command -v`, which succeeds for an installed tool regardless of
+// whether that tool accepts `--version`. The third test below pins that
+// distinction, because the obvious `exit == 0` implementation passes the
+// first two and still silently skips coverage on a host whose `openssl`
+// predates 3.0.
+//
+// This file lives under `compiler/tests/e2e/` rather than beside the
+// capsule's other module tests in `capsules/sfn/test/tests/` because its
+// "known present" fixture is the built compiler itself, reached by a path
+// relative to the repo root the e2e runner starts from.
+import { first_present_tool, tool_present } from "sfn/test";
+
+// A name no host has on `PATH`. Deliberately not a plausible tool name.
+fn _absent_name() -> string { return "sfn840_definitely_absent_probe_target"; }
+
+// The compiler under test: `$SAILFIN_BIN` if set, else the self-hosted
+// binary relative to the repo root the runner starts from. Mirrors
+// `_sfn_bin` in the other e2e files. `tool_present` passes its argument
+// straight to the spawn, so a relative path probes as readily as a bare
+// name on `PATH` — which is what makes this a dependency-free "known
+// present" fixture, with no assumption about the host's installed tools.
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+test "tool probe: an absent tool reports absent" ![io] {
+    assert ! tool_present(_absent_name());
+}
+
+test "tool probe: a present executable reports present" ![io] {
+    assert tool_present(_sfn_bin());
+}
+
+test "tool probe: presence does not require a zero exit" ![io] {
+    // `sfn <unknown-subcommand>` resolves and runs, then exits nonzero.
+    // `command -v` would still report the binary as present, so the probe
+    // must too. This is the case an `exit == 0` probe gets wrong.
+    let argv = [_sfn_bin(), "sfn840-not-a-subcommand"];
+    let exit = process.run_capture(argv, process.environ());
+    let _out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    // Guard the premise: the child must actually have run (a non-negative
+    // code) and exited nonzero. If it ever starts exiting 0, the assertion
+    // below stops proving anything and should be re-pointed at another
+    // vehicle.
+    assert exit > 0;
+    assert tool_present(_sfn_bin());
+}
+
+test "tool probe: first_present_tool picks the first that resolves" ![io] {
+    let picked = first_present_tool([_absent_name(), _sfn_bin()]);
+    assert picked == _sfn_bin();
+}
+
+test "tool probe: first_present_tool returns empty when none resolve" ![io] {
+    let picked = first_present_tool([_absent_name(), _absent_name() + "_2"]);
+    assert picked == "";
+}

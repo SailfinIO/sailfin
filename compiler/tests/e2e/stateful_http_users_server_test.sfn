@@ -1,6 +1,7 @@
 // Native e2e regression for SFN-33: a pure-Sailfin `sfn/http` server keeps
 // module-global state across requests in one process.
 import { contains } from "sfn/strings";
+import { first_present_tool } from "sfn/test";
 
 extern fn malloc(size: usize) -> *u8;
 
@@ -33,11 +34,7 @@ fn _sfn_bin() -> string ![io] {
 fn _child_env() -> string[] ![io] { return process.environ(); }
 
 fn _timeout_cmd() -> string ![io] {
-    let probe = process.run(["sh", "-c", "command -v timeout >/dev/null 2>&1"]);
-    if probe == 0 { return "timeout"; }
-    let gprobe = process.run(["sh", "-c", "command -v gtimeout >/dev/null 2>&1"]);
-    if gprobe == 0 { return "gtimeout"; }
-    return "";
+    return first_present_tool(["timeout", "gtimeout"]);
 }
 
 fn _fixture_root() -> string {

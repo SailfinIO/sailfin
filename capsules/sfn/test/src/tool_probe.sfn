@@ -1,0 +1,101 @@
+// sfn/test — host tool-presence probing for tests (SFN-840).
+//
+// A test that drives an external tool (`tar`, `jq`, `openssl`, `python3`,
+// `ld.lld`, `timeout`) has to decide whether that tool exists on the host
+// before it can either use it or skip the leg that needs it. The idiom the
+// test tree reached for was a shell:
+//
+//     process.run(["sh", "-c", "command " + "-v " + name])
+//
+// That spawns a POSIX shell purely to perform a `PATH` lookup, so it fails
+// outright on a native Windows host — the reason SFN-646's de-shell
+// inventory and this capsule's own migration care about it. It is also the
+// shape `.claude/rules/no-bash-e2e.md` is aimed at: the rule bans bash *test
+// files*, and the observed adaptation was to keep the bash and move it
+// inside a string literal.
+//
+// `tool_present` is the shell-free replacement, hoisted here so the fifteen
+// e2e files that each carried a private `_has_cmd` copy share one
+// implementation. It runs the tool directly and reads the exit code.
+//
+// WHY THE TEST IS "did it spawn", NOT "did it exit 0". `command -v` reports
+// whether the binary resolved on `PATH`; it never ran anything, so it
+// succeeds for an installed tool regardless of what that tool does with
+// `--version`. An `exit == 0` probe is therefore *stricter* than the
+// `command -v` it stands in for: it reports a tool as absent when the tool
+// is installed but rejects `--version` (`openssl` before 3.0 answers
+// `--version` with an error), silently disabling coverage on such a host —
+// the same failure mode `docs/conventions/e2e-tests.md` records for the old
+// `command -v timeout` probe.
+//
+// `-1` IS THE WHOLE ABSENCE TEST, and the reason is specific to the wrapper
+// this calls. `process.run_capture` routes to `_run_capture_impl` in
+// `runtime/sfn/process.sfn`, and *every* failure path there returns `-1`:
+// empty argv, argv/envp marshalling, pipe/malloc/file-actions setup,
+// `posix_spawnp` reporting `ENOENT` for a binary that is not on `PATH`, and
+// a failed `wait`. It never synthesizes `127`. (`process.run` — a different
+// function, which this does not call — does return `127` on spawn failure,
+// the conventional shell "could not execute" code. Do not carry that
+// constant over here: on the `run_capture` path a `127` can only be a
+// genuine child exit code, so treating it as absence would misreport a
+// present tool that happens to exit 127 — e.g. a `PATH` wrapper script
+// ending in `exec <inner-tool>` where the inner tool is missing.)
+//
+// Anything `>= 0` therefore means the binary resolved and executed, which is
+// what `command -v` reports.
+//
+// KNOWN SLACK, documented rather than fixed: `-1` conflates "not on `PATH`"
+// with "the runtime could not spawn at all" (`EMFILE`/`ENOMEM`, plausible
+// under `--jobs N`). A resource exhaustion therefore reads as absence and
+// becomes a silent skip rather than a loud failure. Callers use this to skip
+// a leg, never to fail one, so the blast radius is a missed test rather than
+// a wrong result.
+//
+// The probe inherits the parent environment via `process.environ()`. Note
+// this is NOT what resolves the binary: `_run_capture_impl` hands `argv[0]`
+// to `posix_spawnp`, which resolves against the *calling* process's `PATH`
+// via `getenv`, independent of the `envp` passed to the child — a probe run
+// with an empty env still resolves. The parent env is passed because the
+// probed tool may itself need `HOME`/`TMPDIR`/locale to run at all, and
+// because it matches the `process.run` calls this replaces, which passed the
+// parent `environ` through unconditionally. This is not the nested-runner
+// case that `clean_runner_env` exists for — the probe child is
+// `<tool> --version`, not a nested `sfn test`/`build`/`run`, so it carries
+// none of the pool-key leak hazard described in
+// `docs/conventions/e2e-tests.md`.
+// True when `tool` resolves on the host's `PATH` and can be executed.
+//
+// Mirrors `command -v <tool>`: it reports presence, not usability. A tool
+// that runs but rejects `--version` is present. Callers use this to *skip* a
+// leg that needs the tool, never to fail one.
+//
+// Unlike `command -v`, this actually *executes* the tool, and
+// `process.run_capture` leaves the child's stdin inherited and applies no
+// deadline. Only probe tools whose `--version` is non-interactive and
+// terminates on its own; a tool that reads stdin would hang the pool.
+fn tool_present(tool: string) -> boolean ![io] {
+    let exit = process.run_capture([tool, "--version"], process.environ());
+    let _out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    // Negative is the runtime's "the call could not complete" signal, of
+    // which a binary that is not on `PATH` is the overwhelmingly common
+    // case. Every other code means the tool ran.
+    return exit >= 0;
+}
+
+// First present tool from `candidates`, or `""` when none resolve.
+//
+// The `timeout` / `gtimeout` pair is the recurring case: coreutils installs
+// `timeout` on Linux and Homebrew installs it as `gtimeout` on macOS, so a
+// caller wants "whichever of these exists". Returning the name rather than a
+// boolean lets the caller use it as an argv element.
+fn first_present_tool(candidates: string[]) -> string ![io] {
+    let mut i = 0;
+    loop {
+        if i >= candidates.length { break; }
+        let candidate = candidates[i];
+        if tool_present(candidate) { return candidate; }
+        i = i + 1;
+    }
+    return "";
+}

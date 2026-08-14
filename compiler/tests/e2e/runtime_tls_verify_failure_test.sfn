@@ -33,6 +33,7 @@
 // cannot be called from an `![io]` test; assert on captured state with
 // direct comparisons instead.
 import { contains, find } from "sfn/strings";
+import { first_present_tool, tool_present } from "sfn/test";
 
 // ── file-local raw loopback readiness probe ──────────────────────
 // Prefixed `_tvf_` so these never collide with the external-linkage
@@ -137,18 +138,10 @@ fn _trusted_env(cert_path: string) -> string[] ![io] {
     return e;
 }
 
-fn _has_cmd(name: string) -> boolean ![io] {
-    let probe = process.run(["sh", "-c", "command -v " + name
-        + " >/dev/null 2>&1"]);
-    return probe == 0;
-}
-
 // Resolve a wall-clock timeout command to reap the blocking `s_server`;
 // empty if none found.
 fn _timeout_cmd() -> string ![io] {
-    if _has_cmd("timeout") { return "timeout"; }
-    if _has_cmd("gtimeout") { return "gtimeout"; }
-    return "";
+    return first_present_tool(["timeout", "gtimeout"]);
 }
 
 fn _scratch_root() -> string ![io] {
@@ -331,7 +324,7 @@ fn _client_stderr(client_bin: string, run_env: string[], out_path: string) -> st
 }
 
 fn _skip_ready() -> boolean ![io] {
-    if !_has_cmd("openssl") {
+    if !tool_present("openssl") {
         print.info("[tls-verify] SKIP: openssl CLI not available");
         return false;
     }

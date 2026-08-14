@@ -52,7 +52,8 @@
 // Matchers note (#842): `sfn/test`'s `expect_*` matchers are `![pure]` and
 // cannot be called from an `![io]` test; assert on captured output with
 // `sfn/strings` predicates instead.
-import { find, contains } from "sfn/strings";
+import { contains, find } from "sfn/strings";
+import { first_present_tool } from "sfn/test";
 
 fn _sfn_bin() -> string ![io] {
     let configured = env.get("SAILFIN_BIN");
@@ -420,11 +421,7 @@ fn _drive_echoes(port: i64, count: i64) -> i64 ![io] {
 }
 
 fn _timeout_cmd() -> string ![io] {
-    let probe = process.run(["sh", "-c", "command -v timeout >/dev/null 2>&1"]);
-    if probe == 0 { return "timeout"; }
-    let gprobe = process.run(["sh", "-c", "command -v gtimeout >/dev/null 2>&1"]);
-    if gprobe == 0 { return "gtimeout"; }
-    return "";
+    return first_present_tool(["timeout", "gtimeout"]);
 }
 
 // Lay out a consumer capsule depending on `sfn/http` whose handler echoes

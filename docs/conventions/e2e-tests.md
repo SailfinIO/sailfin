@@ -175,9 +175,17 @@ migration):
 - **External tools** (`tar`, `jq`, `sha256sum`, `readlink`, `ln`, `clang`):
   call them as the subprocess argv and parse the captured stdout with
   `sfn/strings` — e.g. `sfn_package_test.sfn` shells `tar -tzf` / `jq -r`,
-  `llms_txt_sync_test.sfn` shells `readlink -f`. Guard with a `--version`
-  probe and *skip* (`assert true`) when the tool is absent, mirroring the
-  old `command -v` SKIP.
+  `llms_txt_sync_test.sfn` shells `readlink -f`. Guard with the shared
+  `tool_present(tool)` / `first_present_tool(candidates)` helpers exported
+  from `sfn/test` (`capsules/sfn/test/src/tool_probe.sfn`, SFN-840) and
+  *skip* (`assert true`) when the tool is absent, rather than hand-rolling
+  a `--version` probe. `tool_present` is a faithful `command -v`: it
+  reports true once the binary resolves on `PATH` and executes — including
+  a tool that runs but rejects `--version` — so a hand-rolled `exit == 0`
+  check is *stricter* than `command -v` and silently skips coverage on
+  such a host; don't write one. `first_present_tool(["timeout",
+  "gtimeout"])` is the "whichever of these exists" shape, for coreutils on
+  Linux vs. Homebrew's `g`-prefixed spelling on macOS.
 - **Shell shims** (fake `curl`/`uname` on `PATH`): write the shim with
   `fs.writeFile`, `chmod +x` it via `run_capture(["chmod","+x",path], env)`,
   then prepend its dir to the child's `PATH` entry — see `publish_test.sfn`
@@ -203,6 +211,40 @@ migration):
 Two native gaps are now closed (cwd, RLIMIT_AS); the one still open is
 RLIMIT_FSIZE, above. Arbitrary-signal delivery (e.g. SIGTERM rather than
 SIGKILL) also has no native form — see the next section.
+
+### Inline `sh -c` is the same violation as a `.sh` file
+
+`.claude/rules/no-bash-e2e.md` bans a **dependency on a POSIX shell**, not
+a file extension. Moving the pipeline out of a banned
+`compiler/tests/e2e/*.sh` and into a Sailfin string literal —
+`process.run(["sh", "-c", "<pipeline>"])` — does not satisfy the rule: a
+native Windows host has no `sh`, so an inline `sh -c` fails there exactly
+as the `.sh` file it replaced would have. Everything that spawns a shell
+falls into one of three categories, and only one of them is the
+violation:
+
+- **WORKAROUND-INLINE (banned)**: spawning a shell to do work the
+  stdlib/runtime should do directly — a `PATH` lookup, a `find | grep -q`
+  existence check, `ls -a | grep -q`, a `sha256sum || shasum | cut`
+  pipeline, a shell `for` loop driving `clang`. If you're reaching for
+  `sh -c`, the question to ask is "which primitive am I missing" — then
+  either use it (several are listed in the bullets above and below) or
+  file the capability gap. Don't launder the bash into a string literal.
+- **SANCTIONED-SHIM (fine)**: the shell script *is* the test fixture or
+  the subject under test. Two shapes qualify: a fake `curl`/`uname`/seed
+  stub that the test itself writes and puts on the child's `PATH`,
+  because the shim is the thing under test — see "Shell shims" above
+  (`publish_test.sfn`, `clock_monotonic_id_sentinel_test.sfn`) — and a
+  thin `.sfn` wrapper whose whole job is to drive a checked-in
+  `scripts/*.sh` that is itself the subject under test, e.g.
+  `perf_history_compare_test.sfn` covering `scripts/perf_history.sh` or
+  `aarch64_seed_mode_test.sfn` covering the release-verify scripts. These
+  are regression coverage for the shim or the script, not a rule
+  violation, and go obsolete only when the shim or script they cover
+  does.
+- **The discriminator**, in one line: is the shell doing work a Sailfin
+  primitive should do (banned), or is the shell script itself the thing
+  being tested or faked (fine)?
 
 ## Bounding and scoping child processes
 

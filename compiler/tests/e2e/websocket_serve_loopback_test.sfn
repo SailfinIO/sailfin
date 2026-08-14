@@ -21,6 +21,7 @@
 // cannot be called from an `![io]` test; assert on captured bytes with
 // `sfn/strings::contains`/`find` instead.
 import { contains, find } from "sfn/strings";
+import { first_present_tool } from "sfn/test";
 
 // ── libc memory + string + socket surface (test-local raw client) ──
 // Prefixed `_lb_` so the file-local helpers never collide with the
@@ -76,11 +77,7 @@ fn _child_env() -> string[] ![io] { return process.environ(); }
 // Resolve a wall-clock timeout command, mirroring
 // `serve_loopback_test.sfn::_timeout_cmd`. Empty string => none found.
 fn _timeout_cmd() -> string ![io] {
-    let probe = process.run(["sh", "-c", "command -v timeout >/dev/null 2>&1"]);
-    if probe == 0 { return "timeout"; }
-    let gprobe = process.run(["sh", "-c", "command -v gtimeout >/dev/null 2>&1"]);
-    if gprobe == 0 { return "gtimeout"; }
-    return "";
+    return first_present_tool(["timeout", "gtimeout"]);
 }
 
 // ── raw loopback websocket client (test-local, not the #1876 adapter) ──

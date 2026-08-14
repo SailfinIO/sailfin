@@ -25,7 +25,7 @@
 // `sfn/test` `expect_*` matchers are `![pure]` and cannot be used from an
 // `![io]` test (#842).
 import { contains } from "sfn/strings";
-import { report_child_failure } from "sfn/test";
+import { report_child_failure, tool_present } from "sfn/test";
 
 import { build_target_os, target_exe_name } from "../../src/build/target";
 
@@ -68,15 +68,10 @@ fn _host_is_darwin() -> boolean ![io] {
     return contains(out, "Darwin");
 }
 
-// `cmp` availability probe (coreutils, near-universal on Linux). Mirrors
-// the `command -v` SKIP the old bash hold-outs used: if `cmp` is absent
-// the byte-identity leg is skipped rather than failed.
-fn _have_cmp() -> boolean ![io] {
-    let exit = process.run_capture(["cmp", "--version"], _child_env());
-    let _o = process.capture_take_stdout();
-    let _e = process.capture_take_stderr();
-    return exit == 0;
-}
+// `cmp` availability probe (coreutils, near-universal on Linux): if `cmp`
+// is absent the byte-identity leg is skipped rather than failed. Presence is
+// the shared shell-free probe (SFN-840).
+fn _have_cmp() -> boolean ![io] { return tool_present("cmp"); }
 
 // Byte-identity of two files via `cmp -s` (silent; exit 0 iff identical).
 // NUL-safe — unlike a Sailfin-level `fs.readFile` `==`, which truncates

@@ -29,6 +29,7 @@
 // `expect_*` are `![pure]` and cannot be called from an `![io]` test; assert
 // on captured text with `sfn/strings`.
 import { contains, find } from "sfn/strings";
+import { first_present_tool } from "sfn/test";
 
 // ── libc memory + socket surface (test-local raw client) ──
 extern fn malloc(size: usize) -> *u8;
@@ -71,11 +72,7 @@ fn _sfn_bin() -> string ![io] {
 fn _child_env() -> string[] ![io] { return process.environ(); }
 
 fn _timeout_cmd() -> string ![io] {
-    let probe = process.run(["sh", "-c", "command -v timeout >/dev/null 2>&1"]);
-    if probe == 0 { return "timeout"; }
-    let gprobe = process.run(["sh", "-c", "command -v gtimeout >/dev/null 2>&1"]);
-    if gprobe == 0 { return "gtimeout"; }
-    return "";
+    return first_present_tool(["timeout", "gtimeout"]);
 }
 
 // ── raw loopback client (inlined `http.sfn::_connect_tcp` idiom) ──

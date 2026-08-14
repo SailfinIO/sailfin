@@ -30,6 +30,7 @@
 // cannot be called from an `![io]` test; assert on captured text with
 // `sfn/strings::contains` instead.
 import { contains } from "sfn/strings";
+import { first_present_tool, tool_present } from "sfn/test";
 
 // ── file-local raw loopback readiness probe ──────────────────────
 // Prefixed `_tlp_` so these never collide with the external-linkage
@@ -120,18 +121,10 @@ fn _client_env(cert_path: string) -> string[] ![io] {
     return e;
 }
 
-fn _has_cmd(name: string) -> boolean ![io] {
-    let probe = process.run(["sh", "-c", "command -v " + name
-        + " >/dev/null 2>&1"]);
-    return probe == 0;
-}
-
 // Resolve a wall-clock timeout command to reap the blocking `s_server`;
 // empty if none found.
 fn _timeout_cmd() -> string ![io] {
-    if _has_cmd("timeout") { return "timeout"; }
-    if _has_cmd("gtimeout") { return "gtimeout"; }
-    return "";
+    return first_present_tool(["timeout", "gtimeout"]);
 }
 
 fn _scratch_dir() -> string ![io] {
@@ -237,7 +230,7 @@ test "runtime tls: https GET round-trips against a local openssl s_server" ![io]
     // Need the openssl CLI (TLS peer + cert gen) and a timeout to reap the
     // blocking server. Skip cleanly otherwise — the plain suite still
     // covers the surface via the unit skeleton test + `make compile`.
-    if !_has_cmd("openssl") {
+    if !tool_present("openssl") {
         print.info("[tls-https] SKIP: openssl CLI not available");
         assert true;
         return;
