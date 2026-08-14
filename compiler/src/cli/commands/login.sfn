@@ -9,12 +9,23 @@
 // `login` takes a single optional positional `[token]`. When present it is
 // the registry token; when absent, `run` prompts and reads the token from
 // stdin exactly as the legacy handler did. The credential store
-// (`~/.sfn/credentials`), the `chmod 700/600` handling, and the write-back
-// verification are preserved, as are the exit codes below. Messages match
-// the legacy handler except that immediate stdin EOF now reports "failed to
-// read token" (SFN-154 made EOF distinguishable from a blank line):
+// (`~/.sfn/credentials`), the 0o700/0o600 permission handling, and the
+// write-back verification are preserved, as are the exit codes below.
+// Messages match the legacy handler except that immediate stdin EOF now
+// reports "failed to read token" (SFN-154 made EOF distinguishable from a
+// blank line):
 //   - 0 — credentials written and verified.
 //   - 1 — empty token, no home directory, or a failed write.
+//
+// That permission handling is POSIX-only (SFN-888). It is `fs.set_perms`
+// via `_set_perms_or_skip` rather than a `chmod` spawn, and on a Windows
+// host it short-circuits to success because `_chmod` there honours only
+// the read-only attribute — 0o600 is inexpressible, so
+// `~/.sfn/credentials` is NOT access-restricted on that host. `run` prints
+// a notice saying so after the write rather than leaving the degradation
+// silent. Removal condition: SFN-884 restricts the file via an NTFS ACL,
+// and its PR deletes the notice and this paragraph together.
+//
 // The usage error (2) for extra positionals is enforced by the v2 dispatch
 // in `cli/main.sfn`: a second positional makes the parse non-ok while
 // marking `login` as descended, and the dispatch returns 2 there — the
@@ -45,7 +56,8 @@ import {
     with_arg
 } from "sfn/cli";
 
-import { _ensure_dir_recursive_cmd, _toml_trim_cmd } from "../../build/fs";
+import { _ensure_dir_recursive_cmd, _set_perms_or_skip, _toml_trim_cmd } from "../../build/fs";
+import { host_is_windows } from "../../build/target";
 import { _get_home_cmd } from "../../build_flags";
 import { CliContext } from "../context";
 
@@ -106,11 +118,11 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io] {
 
     let sfn_dir = home + "/.sfn";
     _ensure_dir_recursive_cmd(sfn_dir);
-    process.run(["chmod", "700", sfn_dir]);
+    _set_perms_or_skip(sfn_dir, 448);
 
     let cred_path = sfn_dir + "/credentials";
     fs.writeFile(cred_path, token);
-    process.run(["chmod", "600", cred_path]);
+    _set_perms_or_skip(cred_path, 384);
 
     if !fs.exists(cred_path) {
         print("error: failed to write credentials to " + cred_path);
@@ -123,5 +135,14 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io] {
     }
 
     print("credentials saved to " + cred_path);
+    // The credential file is not access-restricted on a Windows host:
+    // `_set_perms_or_skip` short-circuits there because `_chmod` honours
+    // only the read-only attribute, so 0o600 is inexpressible. Disclose it
+    // in command output — a source comment is not disclosure. Deleted by
+    // SFN-884, which restricts the file via an NTFS ACL.
+    if host_is_windows() {
+        print("note: this file is NOT access-restricted on Windows");
+        print("      (NTFS ACL support tracked in SFN-884)");
+    }
     return 0;
 }

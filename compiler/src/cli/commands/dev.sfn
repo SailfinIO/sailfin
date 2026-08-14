@@ -48,7 +48,13 @@ import {
     read_bootstrap_manifest,
     rewrite_seed_version
 } from "../../bootstrap_manifest";
-import { _atomic_rename_into_place, _shell_read_cmd, _toml_trim_cmd } from "../../build/fs";
+import {
+    _atomic_rename_into_place,
+    _copy_file,
+    _cwd_cmd,
+    _toml_trim_cmd
+} from "../../build/fs";
+import { ensure_dir_p } from "../../build/fs_tree";
 import {
     built_program_path,
     compute_source_fingerprint,
@@ -81,13 +87,40 @@ fn _bootstrap_work_root() -> string ![io] {
     return "/tmp";
 }
 
+// True when `path` is already rooted. A POSIX absolute path leads with `/`;
+// a Windows one leads with a drive letter, a `:`, and a separator (SFN-888).
+// Without the drive-letter arm a `C:\...` install base read from
+// `bootstrap.toml` is treated as relative and gets a cwd prefix, producing
+// an alias target that resolves nowhere.
+//
+// Both separators are accepted because this path is not `\`->`/` normalized
+// first, unlike the two existing inlined copies of this check at
+// `module_paths.sfn:73-84` and `main.sfn:325-338`; like those, the drive
+// character itself is not validated as a letter. Folding all three into one
+// shared `is_absolute_path` helper is a named follow-up in the SFN-495
+// design note (§9), not scope here.
+fn _bootstrap_is_absolute(path: string) -> boolean {
+    if path.length == 0 { return false; }
+    if path[0] == "/" { return true; }
+    if path.length >= 3 {
+        if path[1] == ":" {
+            if path[2] == "/" { return true; }
+            if path[2] == "\\" { return true; }
+        }
+    }
+    return false;
+}
+
 // Absolute path to `path` (relative paths are resolved against the current
 // working directory). Symlink targets must be absolute so the seed store's
 // `bin/` alias holds regardless of the directory a later `sfn` runs from.
 fn _bootstrap_abspath(path: string) -> string ![io] {
-    if starts_with(path, "/") { return path; }
-    let cwd = _shell_read_cmd("pwd");
-    if cwd.length == 0 { return path; }
+    if _bootstrap_is_absolute(path) { return path; }
+    let cwd = _cwd_cmd();
+    // `_cwd_cmd` floors at "." when neither `realpath` nor `PWD` answers;
+    // prefixing that would only re-spell the same relative path, so degrade
+    // to returning `path` untouched exactly as the `pwd` shellout did.
+    if cwd.length == 0 || strings_equal(cwd, ".") { return path; }
     return cwd + "/" + path;
 }
 
@@ -122,10 +155,48 @@ fn _bootstrap_seed_bin(install_base: string, ver: string) -> string {
 // migration. Best-effort: a filesystem without symlinks leaves the versioned
 // binary usable directly, which is all the native dispatch path needs.
 fn _bootstrap_link_bin(install_base: string, bin_dir: string, ver: string) -> void ![io] {
-    process.run(["mkdir", "-p", bin_dir]);
+    ensure_dir_p(bin_dir);
     let abs_bin = _bootstrap_abspath(_bootstrap_seed_bin(install_base, ver));
-    process.run(["ln", "-sfn", abs_bin, bin_dir + "/sfn"]);
-    process.run(["ln", "-sfn", abs_bin, bin_dir + "/sailfin"]);
+    _bootstrap_alias(abs_bin, bin_dir + "/sfn");
+    _bootstrap_alias(abs_bin, bin_dir + "/sailfin");
+}
+
+// Point `alias` at `abs_bin`, preferring a symlink and falling back to a
+// copy (SFN-888, replacing `ln -sfn`).
+//
+// The `fs.deleteFile` is load-bearing, not tidiness: `ln -sfn` is *force* +
+// *no-dereference*, while `fs.symlink` is bare `symlink(2)` and fails
+// `EEXIST` on any existing path, so without the unlink this would be a
+// no-op on every re-run. It is also what makes both modes idempotent —
+// `_bootstrap_link_bin` re-runs on the fetch path and on the
+// already-present path, so a re-pin refreshes an alias rather than leaving
+// a stale binary, on any host that permits the unlink. Windows cannot
+// unlink a RUNNING image (the property `build/fs.sfn` records for
+// `_atomic_rename_into_place`), so a re-pin racing a live `bin/sfn` there
+// leaves the old copy in place; that is the best-effort contract this leaf
+// already declares, not a guarantee being made.
+//
+// The unlink is unconditional — it happens before anything knows a
+// replacement is achievable — so a refused symlink followed by a failed
+// `_copy_file` leaves no alias at all. That window is copy-leg-only and
+// unreachable on POSIX, where `symlink(2)` succeeds even for a target that
+// does not exist and the copy is never entered. `fs.deleteFile` is `unlink(2)`, which removes a
+// symlink WITHOUT following it, so this cannot reach through an existing
+// alias into the store entry it points at.
+//
+// The fallback branches on the RETURN VALUE, not on `host_is_windows()`.
+// `sailfin_intrinsic_fs_symlink` is a hard `false` stub on Windows, so the
+// Developer Mode / `SeCreateSymbolicLinkPrivilege` question never arises;
+// branching on the capability also covers a POSIX filesystem that refuses
+// links, and leaves nothing to delete when the Windows stub is replaced.
+// A copy is not a concession there: the alias must be executable, and the
+// store entry is immutable and version-keyed, so it costs one binary of
+// disk and nothing in correctness. Best-effort throughout, matching this
+// leaf's `-> void` contract.
+fn _bootstrap_alias(abs_bin: string, alias: string) -> void ![io] {
+    fs.deleteFile(alias);
+    if fs.symlink(abs_bin, alias) { return; }
+    if _copy_file(abs_bin, alias) { fs.set_perms(alias, 493); }
 }
 
 // Acquire + verify + install the pinned seed into the checkout's repo-local
@@ -657,4 +728,11 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     return 2;
 }
 
-export { bootstrap_gate_or_dispatch, command_def, run };
+export {
+    bootstrap_gate_or_dispatch,
+    command_def,
+    run,
+    // Exported for regression coverage (compiler/tests/unit).
+    _bootstrap_alias,
+    _bootstrap_is_absolute
+};

@@ -9,7 +9,9 @@
 // NOTE: assert on captured stdout+stderr with `sfn/strings` predicates
 // (the `sfn/test` `expect_*` matchers are `![pure]` and cannot be
 // called from an `![io]` test). (#842.)
-import { find, contains, to_lower_all } from "sfn/strings";
+import { contains, find, to_lower_all } from "sfn/strings";
+
+import { host_is_windows } from "../../src/build/target";
 
 fn _sfn_bin() -> string ![io] {
     let configured = env.get("SAILFIN_BIN");
@@ -192,6 +194,14 @@ test "config: config dir/file permissions are restricted" ![io] {
     let home = _home("perms");
     let r = _run(home, ["config", "set", "registry", "https://perm.test"], []);
     assert r.exit == 0;
-    assert fs.get_perms(home + "/.sfn") == 448;
-    assert fs.get_perms(home + "/.sfn/config.toml") == 384;
+    if host_is_windows() {
+        // SFN-888: `fs.get_perms` is a `-1` stub on Windows and the mode
+        // was deliberately never applied there, so only existence is
+        // claimable.
+        assert fs.exists(home + "/.sfn");
+        assert fs.exists(home + "/.sfn/config.toml");
+    } else {
+        assert fs.get_perms(home + "/.sfn") == 448;
+        assert fs.get_perms(home + "/.sfn/config.toml") == 384;
+    }
 }

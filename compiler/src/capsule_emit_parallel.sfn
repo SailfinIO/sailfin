@@ -646,9 +646,7 @@ fn _cr_run_parallel_emit(tasks: ParallelEmitTask[], mode: string, sailfin_exe: s
             if staged.length > 0 { emit_target = staged; }
             let rc = process.run(_cr_emit_child_argv(sailfin_exe, t.slug, emit_target, mode, t.source_path, import_context_root));
             if rc != 0 {
-                if staged.length > 0 {
-                    process.run(["rm", "-f", staged]);
-                }
+                if staged.length > 0 { fs.deleteFile(staged); }
                 return false;
             }
             if staged.length > 0 {

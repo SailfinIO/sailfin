@@ -1,0 +1,121 @@
+// Unit coverage for the de-shelled `sfn dev bootstrap` alias and path
+// helpers in `compiler/src/cli/commands/dev.sfn` (SFN-888), which replaced
+// the `ln -sfn` and `pwd` spawns `_bootstrap_link_bin` used to make.
+//
+// The copy fallback inside `_bootstrap_alias` is deliberately NOT asserted
+// here. It is reached only when `fs.symlink` returns false, which is the
+// Windows leg (`sailfin_intrinsic_fs_symlink` is a hard `false` stub there)
+// or a POSIX filesystem that refuses links — and there is no seam to force
+// a symlink refusal on this runner. What IS provable here is that the
+// symlink leg is the one actually taken (asserted via `fs.read_link`, since
+// `fs.exists`/`fs.readFile` cannot tell a link from a copy) plus the
+// re-run behaviour both legs share, which is where the
+// rewrite could regress: `fs.symlink` is bare `symlink(2)` and fails
+// `EEXIST` on an existing path, so without the `fs.deleteFile` that
+// replaced `ln`'s `-f` the second bootstrap would silently keep a stale
+// alias.
+import { _cwd_cmd } from "../../src/build/fs";
+import { host_is_windows } from "../../src/build/target";
+import { _bootstrap_alias, _bootstrap_is_absolute } from "../../src/cli/commands/dev";
+
+// Same scratch shape as `fs_tree_test.sfn`: the per-invocation test
+// scratch when the pool provides one, else a repo-relative path rather
+// than `/tmp`, so this file carries no POSIX assumption of its own.
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "build/sailfin"; }
+    dir = dir + "/sfn-dev-bootstrap-alias";
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// `_bootstrap_alias` takes an already-absolute target, because a relative
+// symlink target would resolve against the LINK's directory rather than
+// the cwd. `_bootstrap_abspath` is what supplies that in production; here
+// `_cwd_cmd` stands in for it directly.
+fn _abs(path: string) -> string ![io] {
+    if _bootstrap_is_absolute(path) { return path; }
+    return _cwd_cmd() + "/" + path;
+}
+
+test "dev-bootstrap: _bootstrap_alias points an alias at the target" ![io] {
+    let root = _scratch_dir() + "/point";
+    fs.createDirectory(root, true);
+    let target = root + "/sailfin-v1";
+    fs.writeFile(target, "seed-binary-v1");
+
+    let alias = root + "/sfn";
+    _bootstrap_alias(_abs(target), alias);
+
+    assert fs.exists(alias);
+    assert fs.readFile(alias) == "seed-binary-v1";
+    // Pin the SYMLINK leg specifically. `fs.exists`/`fs.readFile` are
+    // satisfied identically by a copy, so without this a regression that
+    // dropped `fs.symlink` and always copied would still pass green.
+    // `fs.read_link` returns "" for a non-symlink, so this is only
+    // claimable where the link leg is reachable.
+    if !host_is_windows() { assert fs.read_link(alias) == _abs(target); }
+}
+
+test "dev-bootstrap: _bootstrap_alias is idempotent across re-runs" ![io] {
+    let root = _scratch_dir() + "/idempotent";
+    fs.createDirectory(root, true);
+    let target = root + "/sailfin-v1";
+    fs.writeFile(target, "seed-binary-v1");
+    let alias = root + "/sfn";
+
+    // `_bootstrap_link_bin` re-runs on both the fetch path and the
+    // already-present path, so laying the same alias twice must converge
+    // rather than fail closed on the second pass.
+    _bootstrap_alias(_abs(target), alias);
+    _bootstrap_alias(_abs(target), alias);
+
+    assert fs.exists(alias);
+    assert fs.readFile(alias) == "seed-binary-v1";
+}
+
+test "dev-bootstrap: _bootstrap_alias re-points a stale alias after a re-pin" ![io] {
+    let root = _scratch_dir() + "/repin";
+    fs.createDirectory(root, true);
+    let old_target = root + "/sailfin-v1";
+    let new_target = root + "/sailfin-v2";
+    fs.writeFile(old_target, "seed-binary-v1");
+    fs.writeFile(new_target, "seed-binary-v2");
+    let alias = root + "/sfn";
+
+    _bootstrap_alias(_abs(old_target), alias);
+    _bootstrap_alias(_abs(new_target), alias);
+
+    // The pinned version changed, so the alias must follow it. This is the
+    // property that makes the copy fallback safe to use on a host without
+    // symlinks: a re-pin refreshes the copy instead of stranding one.
+    assert fs.readFile(alias) == "seed-binary-v2";
+    // Re-pointing must not disturb the store entry it used to name.
+    assert fs.exists(old_target);
+    assert fs.readFile(old_target) == "seed-binary-v1";
+}
+
+test "dev-bootstrap: _bootstrap_is_absolute accepts POSIX and drive-letter roots" {
+    assert _bootstrap_is_absolute("/opt/sailfin/0.9.5/sailfin");
+    // The drive-letter arm is the SFN-888 fix: without it a `C:\...`
+    // install base read from `bootstrap.toml` was treated as relative and
+    // received a cwd prefix, naming a path that resolves nowhere.
+    assert _bootstrap_is_absolute("C:/sailfin/0.9.5/sailfin");
+    assert _bootstrap_is_absolute("C:\\sailfin\\0.9.5\\sailfin");
+}
+
+test "dev-bootstrap: _bootstrap_is_absolute rejects relative and malformed roots" {
+    assert ! _bootstrap_is_absolute("build/toolchains/seed/0.9.5/sailfin");
+    assert ! _bootstrap_is_absolute("");
+    assert ! _bootstrap_is_absolute("C:");
+    // A drive letter with no separator is not a rooted path.
+    assert ! _bootstrap_is_absolute("C:sailfin");
+}
+
+test "fs: _cwd_cmd returns an absolute path" ![io] {
+    let cwd = _cwd_cmd();
+    assert cwd.length > 0;
+    // Rooted on either host spelling, and never the "." floor, which would
+    // mean neither `realpath` nor `PWD` answered.
+    assert _bootstrap_is_absolute(cwd);
+}
