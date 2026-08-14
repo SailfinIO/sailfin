@@ -7,14 +7,21 @@
 // is where those two strategies diverge.
 import { expect_eq_bool, expect_eq_int, expect_eq_str } from "sfn/test";
 
-import { _copy_file, _copy_file_counted } from "../../src/build/fs";
 import {
+    _copy_file,
+    _copy_file_counted,
+    _copy_file_preserving_mode,
+    _file_size_of
+} from "../../src/build/fs";
+import {
+    copy_tree,
     ensure_dir_p,
     list_child_dirs,
     remove_empty_dirs_under,
     remove_tree,
     walk_dirs
 } from "../../src/build/fs_tree";
+import { host_is_windows } from "../../src/build/target";
 
 // Falls back to a repo-relative path rather than `/tmp`: this file exists
 // to prove the tree helpers carry no POSIX assumption, so its own fixtures
@@ -276,4 +283,220 @@ test "fs_tree: walk_dirs does not report a file as a directory" ![io] {
     assert expect_eq_int(dirs.length, 0).ok;
     assert ! _contains_str(dirs, root + "/shard/plain.txt");
     assert ! _contains_str(dirs, root + "/shard/empty.txt");
+}
+
+// --------------------------------------------------------------
+// copy_tree (SFN-495)
+// --------------------------------------------------------------
+test "fs_tree: copy_tree copies a nested tree" ![io] {
+    let root = _scratch_dir() + "/copy-nested";
+    if fs.exists(root) { remove_tree(root); }
+    let src = root + "/src";
+    let dst = root + "/dst";
+    fs.createDirectory(src + "/a/b", true);
+    fs.writeFile(src + "/top.txt", "top");
+    fs.writeFile(src + "/a/mid.txt", "mid");
+    fs.writeFile(src + "/a/b/leaf.txt", "leaf");
+
+    let ok = copy_tree(src, dst);
+    assert expect_eq_bool(ok, true).ok;
+    // Every file's CONTENT at the destination, not just existence.
+    assert expect_eq_str(fs.readFile(dst + "/top.txt"), "top").ok;
+    assert expect_eq_str(fs.readFile(dst + "/a/mid.txt"), "mid").ok;
+    assert expect_eq_str(fs.readFile(dst + "/a/b/leaf.txt"), "leaf").ok;
+}
+
+test "fs_tree: copy_tree with a file source copies one file" ![io] {
+    let root = _scratch_dir() + "/copy-file-source";
+    if fs.exists(root) { remove_tree(root); }
+    fs.createDirectory(root, true);
+    let src = root + "/one.txt";
+    fs.writeFile(src, "solo");
+    let dst = root + "/dest-dir/one-copy.txt";
+
+    let ok = copy_tree(src, dst);
+    assert expect_eq_bool(ok, true).ok;
+    assert expect_eq_str(fs.readFile(dst), "solo").ok;
+    assert ! fs.is_directory(dst);
+}
+
+// `dst` is the destination tree root ITSELF, never a container:
+// `copy_tree("a/b", "out/b")` yields `out/b/<entries>`, matching
+// `cp -R src dst` where `dst` is absent — never `out/b/b/<entries>`.
+test "fs_tree: copy_tree creates the destination as the tree root, not a container" ![io] {
+    let root = _scratch_dir() + "/copy-root-shape";
+    if fs.exists(root) { remove_tree(root); }
+    let src = root + "/a/b";
+    fs.createDirectory(src, true);
+    fs.writeFile(src + "/file.txt", "hi");
+    let dst = root + "/out/b";
+
+    let ok = copy_tree(src, dst);
+    assert expect_eq_bool(ok, true).ok;
+    assert expect_eq_str(fs.readFile(dst + "/file.txt"), "hi").ok;
+    assert ! fs.exists(dst + "/b");
+}
+
+test "fs_tree: copy_tree merges into an existing destination" ![io] {
+    let root = _scratch_dir() + "/copy-merge";
+    if fs.exists(root) { remove_tree(root); }
+    let src = root + "/src";
+    let dst = root + "/dst";
+    fs.createDirectory(src, true);
+    fs.writeFile(src + "/shared.txt", "new");
+    fs.createDirectory(dst, true);
+    fs.writeFile(dst + "/shared.txt", "old");
+    fs.writeFile(dst + "/extra.txt", "keep me");
+
+    let ok = copy_tree(src, dst);
+    assert expect_eq_bool(ok, true).ok;
+    // Same-named entries overwritten, extra entries in `dst` survive.
+    assert expect_eq_str(fs.readFile(dst + "/shared.txt"), "new").ok;
+    assert expect_eq_str(fs.readFile(dst + "/extra.txt"), "keep me").ok;
+}
+
+test "fs_tree: copy_tree on a nonexistent source returns false" ![io] {
+    let root = _scratch_dir() + "/copy-missing-src";
+    if fs.exists(root) { remove_tree(root); }
+    fs.createDirectory(root, true);
+    let src = root + "/does-not-exist";
+    let dst = root + "/dst";
+
+    assert expect_eq_bool(copy_tree(src, dst), false).ok;
+    assert ! fs.exists(dst);
+}
+
+// Also covers `dst == src`, the degenerate case of the same guard family:
+// both would otherwise recurse into (or self-overwrite) the source.
+test "fs_tree: copy_tree refuses a destination inside the source" ![io] {
+    let root = _scratch_dir() + "/copy-dst-inside-src";
+    if fs.exists(root) { remove_tree(root); }
+    let src = root + "/tree";
+    fs.createDirectory(src, true);
+    fs.writeFile(src + "/file.txt", "hi");
+
+    assert expect_eq_bool(copy_tree(src, src + "/nested"), false).ok;
+    assert ! fs.exists(src + "/nested");
+    assert expect_eq_bool(copy_tree(src, src), false).ok;
+}
+
+test "fs_tree: copy_tree refuses an empty path" ![io] {
+    let root = _scratch_dir() + "/copy-empty-path";
+    if fs.exists(root) { remove_tree(root); }
+    fs.createDirectory(root, true);
+
+    assert expect_eq_bool(copy_tree("", root + "/dst"), false).ok;
+    assert expect_eq_bool(copy_tree(root, ""), false).ok;
+}
+
+// Mirrors `selfhost_diff_test.sfn`'s
+// "selfhost_promote_binary: a fresh destination is left executable":
+// `_copy_file` opens `"wb"`, whose 0666-and-umask default drops an
+// executable bit, so the mode carry is what makes the copy fidelity to
+// the `cp -R` it replaces. `fs.get_perms` is a `-1` stub on Windows, so
+// there is nothing to carry or assert there.
+test "fs_tree: copy_tree preserves a file's executable bit" ![io] {
+    let root = _scratch_dir() + "/copy-exec-bit";
+    if fs.exists(root) { remove_tree(root); }
+    fs.createDirectory(root + "/bin", true);
+    let src = root + "/bin/tool";
+    fs.writeFile(src, "#!/bin/sh\necho hi\n");
+
+    if host_is_windows() {
+        assert copy_tree(src, root + "/staged/tool");
+        assert fs.exists(root + "/staged/tool");
+    } else {
+        assert fs.set_perms(src, 493);
+        assert fs.is_executable(src);
+
+        let dst = root + "/staged/tool";
+        assert expect_eq_bool(copy_tree(src, dst), true).ok;
+        assert fs.is_executable(dst);
+    }
+}
+
+// The SFN-756 property: an empty source subdirectory is copied as a
+// directory. A `fs.listDirectory().length > 0` classification would have
+// treated it as a file and dropped it, exactly the gap SFN-756 closed for
+// `walk_dirs`.
+test "fs_tree: copy_tree copies an empty directory" ![io] {
+    let root = _scratch_dir() + "/copy-empty-dir";
+    if fs.exists(root) { remove_tree(root); }
+    let src = root + "/src";
+    fs.createDirectory(src + "/empty-child", true);
+    fs.writeFile(src + "/sibling.txt", "hi");
+    let dst = root + "/dst";
+
+    let ok = copy_tree(src, dst);
+    assert expect_eq_bool(ok, true).ok;
+    assert fs.is_directory(dst + "/empty-child");
+    assert expect_eq_str(fs.readFile(dst + "/sibling.txt"), "hi").ok;
+}
+
+// --------------------------------------------------------------
+// _file_size_of (SFN-495)
+// --------------------------------------------------------------
+test "fs: _file_size_of reports the byte count of a file" ![io] {
+    let dir = _scratch_dir();
+    let path = dir + "/file-size-of.bin";
+    let content = "0123456789";
+    fs.writeFile(path, content);
+
+    assert expect_eq_int(_file_size_of(path), content.length).ok;
+}
+
+test "fs: _file_size_of returns 0 for a missing file" ![io] {
+    let dir = _scratch_dir();
+    let path = dir + "/file-size-of-missing.bin";
+    if fs.exists(path) { fs.deleteFile(path); }
+
+    assert expect_eq_int(_file_size_of(path), 0).ok;
+}
+
+// The bound is what the module header stakes its "never a fabricated
+// `true`" claim on, so it is pinned rather than assumed: a chain one
+// level deeper than `FS_TREE_MAX_DEPTH` (16) must report `false`. The
+// partial tree it leaves behind is the caller's to clean up, which is
+// also asserted — `copy_tree` must never delete.
+test "fs_tree: copy_tree returns false past the depth bound" ![io] {
+    let root = _scratch_dir() + "/copy-depth-bound";
+    if fs.exists(root) { remove_tree(root); }
+    let src = root + "/src";
+    let mut deep = src;
+    let mut i: int = 0;
+    loop {
+        if i >= 17 { break; }
+        deep = deep + "/d";
+        i += 1;
+    }
+    fs.createDirectory(deep, true);
+    fs.writeFile(deep + "/leaf.txt", "too deep");
+    let dst = root + "/dst";
+
+    assert expect_eq_bool(copy_tree(src, dst), false).ok;
+    // Truncated, not absent: the levels within the bound were copied and
+    // are left for the caller to remove.
+    assert fs.is_directory(dst);
+}
+
+test "fs: _copy_file_preserving_mode carries the executable bit" ![io] {
+    let dir = _scratch_dir();
+    let src = dir + "/mode-carry-src";
+    let dst = dir + "/mode-carry-dst";
+    if fs.exists(dst) { fs.deleteFile(dst); }
+    fs.writeFile(src, "#!/bin/sh\nexit 0\n");
+
+    if host_is_windows() {
+        // `fs.get_perms` is a `-1` stub there, so the carry self-disables
+        // and only the bytes are asserted.
+        assert expect_eq_bool(_copy_file_preserving_mode(src, dst), true).ok;
+        assert expect_eq_str(fs.readFile(dst), "#!/bin/sh\nexit 0\n").ok;
+    } else {
+        assert fs.set_perms(src, 493);
+        assert expect_eq_bool(_copy_file_preserving_mode(src, dst), true).ok;
+        // `_copy_file` alone would leave 0644 here: `fopen(dst, "wb")`
+        // creates with the 0666-and-umask default, dropping the bit that
+        // the `cp -f` this replaces carried across.
+        assert fs.is_executable(dst);
+    }
 }

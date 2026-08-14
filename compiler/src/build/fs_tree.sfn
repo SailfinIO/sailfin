@@ -30,10 +30,14 @@
 //     previous `fs.listDirectory(entry).length > 0` heuristic could not:
 //     it reported an empty directory as a file, making it invisible to
 //     the walk.
-//
-// `copy_tree` is deliberately still absent: `cp -R`/`cp -a` has no
-// consumer here, and the replacement lands with its first real consumer
-// (SFN-495) now that `fs.is_directory` makes a correct one writable.
+//   * `copy_tree` reads but also writes, and its write is not a
+//     classification probe — creating a directory tells you nothing about
+//     whether the source was one. So, like `walk_dirs`, it classifies with
+//     `fs.is_directory`. Unlike `walk_dirs` the extra `stat` is not a cost
+//     paid for correctness at empty directories; it is the only available
+//     answer, because neither destructive probe (`fs.deleteFile`,
+//     `fs.removeDirectory`) may be pointed at a source tree a copy must
+//     leave intact.
 //
 // Symlinks: `fs.deleteFile` is `unlink(2)`, which removes a
 // symlink-to-directory without following it, so `remove_tree`'s deletion
@@ -42,6 +46,20 @@
 // `remove_empty_dirs_under` may `rmdir` an empty directory outside `root`
 // — neither of which `find` does without `-L`. `FS_TREE_MAX_DEPTH` is what
 // makes a symlink cycle terminate rather than spin.
+//
+// `copy_tree` DOES NOT PRESERVE SYMLINKS — it copies what they resolve
+// to, a real behavioural divergence from `cp -R`, which recreates them as
+// links. This is a capability limit rather than a preference: classifying
+// an entry needs `fs.is_directory` (`stat`, follows) and enumeration is
+// `opendir` (follows), there is no `is_symlink` predicate and no `lstat`,
+// and `fs.read_link` (SFN-46) returns `""` for both "not a link" and
+// "failed" so it cannot classify either. Link preservation is not
+// expressible today. It is benign for the staging trees in scope, which
+// contain no links, and is the better answer for a tree destined for a
+// tarball, where a relative link would land dangling in the consumer's
+// install. A symlink CYCLE terminates on `FS_TREE_MAX_DEPTH`, having
+// copied 16 levels of it; cleaning up that partial tree is the caller's
+// job (see the failure contract below).
 //
 // Bounds: every traversal below is iterative (an explicit worklist, never
 // recursion), bounded by `FS_TREE_MAX_DEPTH` (16 levels) and
@@ -57,10 +75,31 @@
 // The degradation is reported where a false success would mislead and
 // silent where truncation is safe. `remove_tree` returns `false`, because a
 // fabricated `true` would let `cache_clean` claim it wiped a tree that
-// survived. `remove_empty_dirs_under` returns a short count. `walk_dirs`
-// truncates silently: a short result set makes its callers do strictly
-// less work — `cache_info` under-reports, `cache_prune` under-prunes —
-// and neither is unsafe.
+// survived. `copy_tree` returns `false` on either bound for the same
+// reason, and the stakes there are the module's highest: a fabricated
+// `true` would let `sfn package` tar a truncated tree and publish it as a
+// release artifact. `remove_empty_dirs_under` returns a short count.
+// `walk_dirs` truncates silently: a short result set makes its callers do
+// strictly less work — `cache_info` under-reports, `cache_prune`
+// under-prunes — and neither is unsafe.
+//
+// A THIRD truncation source is not covered by any of that, and the honest
+// statement of it is that `copy_tree` cannot currently detect it.
+// `fs.listDirectory` yields an empty array on an enumeration failure —
+// `EACCES`, fd exhaustion, `ENOMEM` — which is indistinguishable from a
+// genuinely empty directory (the contract is stated at
+// `runtime/sfn/adapters/filesystem.sfn`, where returning `[]` rather than
+// null is what lets callers iterate unconditionally). `copy_tree` copies
+// nothing from such a subtree and returns `true`, where `cp -R` would exit
+// non-zero. The destructive walkers are immune structurally rather than by
+// luck: they end on a post-condition (`remove_tree`'s `!fs.exists(path)`),
+// and a directory that failed to enumerate also fails to `rmdir`. A copy
+// has no post-condition to check, so it cannot buy the same immunity —
+// only a `listDirectory` that can report failure can, which is SFN-892.
+// Delete this paragraph when that lands.
+import { starts_with } from "../string_utils";
+import { _copy_file_preserving_mode, _dirname_cmd } from "./fs";
+
 let FS_TREE_MAX_DEPTH: int = 16;
 
 let FS_TREE_MAX_NODES: int = 200000;
@@ -198,6 +237,92 @@ fn remove_tree(path: string) -> boolean ![io] {
     return !fs.exists(path);
 }
 
+// Copy `src` to `dst` recursively, the shell-free replacement for
+// `cp -R`. `dst` is the destination ITSELF, never a container:
+// `copy_tree("runtime/sfn", staging + "/sfn")` produces
+// `staging/sfn/<entries>`, matching `cp -R src dst` where `dst` does not
+// exist. An existing `dst` is MERGED into rather than replaced —
+// same-named entries are overwritten, extra entries in `dst` survive;
+// callers wanting replace semantics call `remove_tree(dst)` first.
+//
+// Returns `false` having copied nothing when `src` or `dst` is empty,
+// `src` does not exist, `dst == src`, or `dst` lies inside `src` (which
+// would otherwise recurse into its own output until the depth bound cut
+// it off, 16 levels of garbage later). Unlike `remove_tree`, a missing
+// `src` is a failure rather than a satisfied post-condition: "already
+// gone" fulfils a delete, nothing fulfils a copy.
+//
+// On any other failure it stops at the first one, returns `false`, and
+// DELETES NOTHING: continuing multiplies the damage, and rolling back
+// would mean deleting a pre-existing `dst` that was never ours to
+// remove. `dst` is left holding a partial tree and cleanup is the
+// caller's — the shape every call site already has for the `cp` this
+// replaces. Hitting a traversal bound is also `false`; see the header.
+fn copy_tree(src: string, dst: string) -> boolean ![io] {
+    if src.length == 0 { return false; }
+    if dst.length == 0 { return false; }
+    if !fs.exists(src) { return false; }
+    if dst == src { return false; }
+    if starts_with(dst, src + "/") { return false; }
+
+    // A file root copies as one file, matching `cp -R <file> <dst>`.
+    if !fs.is_directory(src) {
+        let parent = _dirname_cmd(dst);
+        if parent.length > 0 { ensure_dir_p(parent); }
+        return _copy_file_preserving_mode(src, dst);
+    }
+
+    if !ensure_dir_p(dst) { return false; }
+
+    // BFS over two parallel level arrays indexed together — the same
+    // parallel-array shape `package.sfn` uses for its dependency queue,
+    // keeping this module free of struct types. Each destination
+    // directory is created BEFORE its source is listed, so creation
+    // order is discovery order and no second pass is needed: the mirror
+    // image of `remove_tree`, where a delete must empty children before
+    // parents and so walks its discovery record backwards.
+    let mut level_src: string[] = [src];
+    let mut level_dst: string[] = [dst];
+    let mut depth: int = 0;
+    let mut nodes: int = 0;
+    loop {
+        if level_src.length == 0 { break; }
+        if depth >= FS_TREE_MAX_DEPTH { return false; }
+        let mut next_src: string[] = [];
+        let mut next_dst: string[] = [];
+        let mut li: int = 0;
+        loop {
+            if li >= level_src.length { break; }
+            if nodes >= FS_TREE_MAX_NODES { return false; }
+            let dir_src = level_src[li];
+            let dir_dst = level_dst[li];
+            nodes += 1;
+            let entries = fs.listDirectory(dir_src);
+            let mut ei: int = 0;
+            loop {
+                if ei >= entries.length { break; }
+                let child_src = dir_src + "/" + entries[ei];
+                let child_dst = dir_dst + "/" + entries[ei];
+                if fs.is_directory(child_src) {
+                    if !ensure_dir_p(child_dst) { return false; }
+                    next_src.push(child_src);
+                    next_dst.push(child_dst);
+                } else {
+                    if !_copy_file_preserving_mode(child_src, child_dst) {
+                        return false;
+                    }
+                }
+                ei += 1;
+            }
+            li += 1;
+        }
+        level_src = next_src;
+        level_dst = next_dst;
+        depth += 1;
+    }
+    return true;
+}
+
 // Remove every directory strictly under `root` that is empty, or becomes
 // empty once its own empty descendants are removed — the shell-free
 // replacement for `find <root> -mindepth 1 -type d -empty -delete`.
@@ -278,6 +403,7 @@ export {
     walk_dirs,
     list_child_dirs,
     remove_tree,
+    copy_tree,
     remove_empty_dirs_under,
     ensure_dir_p
 };

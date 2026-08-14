@@ -1,6 +1,6 @@
 # Status
 
-Updated: 2026-08-14 (SFN-756). Seed pinned to `0.9.5` (`bootstrap.toml`
+Updated: 2026-08-14 (SFN-495). Seed pinned to `0.9.5` (`bootstrap.toml`
 `[seed].version` — SFEP-0047); the compiler version source of truth is
 `compiler/capsule.toml`.
 
@@ -409,7 +409,29 @@ here.
   (schema v1) enumerating per-module IR + cache keys (Stage C2, #261–#264).
 - **`sfn package`.** Sailfin-native packaging: compiler mode, user-capsule
   mode (`-p`), and `--installer` mode produce tarball + sha256 + JSON
-  manifest (Stage C4, #265–#267); replaces `tools/package.sh`.
+  manifest (Stage C4, #265–#267); replaces `tools/package.sh`. **De-shelled
+  onto `fs.*` (SFN-495 Part A, design:
+  `docs/proposals/design-notes/sfn-495-deshell-local-fs-cli-commands.md`):**
+  a new bounded `copy_tree` (`compiler/src/build/fs_tree.sfn`, joining
+  `remove_tree`/`walk_dirs`/`ensure_dir_p`, sharing their 16-depth/200000-node
+  bounds and returning `false` on hitting either rather than fabricating a
+  `true`; it cannot yet detect the third truncation source, a directory it
+  failed to enumerate, because `fs.listDirectory` reports that as empty —
+  SFN-892)
+  and `_file_size_of` (`compiler/src/build/fs.sfn`, replacing `wc -c`, `0` on
+  read failure) retire every `mkdir -p`/`rm -rf`/`cp -f`/`cp -R`/`wc -c` spawn
+  in `package.sfn`; `_package_detect_target` now derives the host OS from
+  `build_host_os()` instead of a `uname -s` shell read that hard-failed
+  before Windows ever reached a `process.run` (the same class of bug SFN-857
+  fixed for `sfn toolchain install`). `copy_tree` copies what a symlink
+  resolves to rather than preserving it — a stated divergence from `cp -R`,
+  not a bug, since neither `is_symlink` nor `lstat` exists yet and no tree in
+  scope contains one. **`sfn package` still cannot run end-to-end on a
+  native Windows host**: `tar -czf` (three sites, blocked on SFN-753's
+  in-process `.tar.gz` writer) and `date -u` (three sites, needs
+  epoch→civil formatting that exists nowhere yet) are the shell spawns
+  left on the Windows path. A `uname -m` arch probe also remains, but only
+  on the POSIX leg — the Windows leg returns before reaching it.
 - **Structured output.** `sfn build --json` emits a schema-versioned
   `BuildReport` (#259); `sfn check --json` emits the `sailfin-check/1`
   envelope (`docs/reference/check-json-schema.md`), consumed by the MCP

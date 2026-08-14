@@ -413,6 +413,89 @@ fn _copy_file(src: string, dst: string) -> boolean ![io] {
     return _copy_file_counted(src, dst).ok;
 }
 
+// `_copy_file` plus the source's low-12 mode — the faithful replacement
+// for `cp -f`, which creates its destination from the source's mode.
+// `_copy_file` alone does not: it is `fopen(dst, "wb")`, whose
+// 0666-and-umask default is 0644, so a copied executable arrives
+// unrunnable. `_selfhost_promote_binary` (`compiler/src/cli_selfhost.sfn`)
+// documents the same trap and carries the mode for the same reason.
+//
+// The `> 0` guard is load-bearing, not padding: `fs.get_perms` reports
+// `-1` on any error and `fs.set_perms` masks to 12 bits, so chmod-ing an
+// unchecked `-1` would quietly set 0o7777 — setuid, setgid, sticky and
+// world-writable. The Windows `get_perms` lowering is a fixed `-1` stub,
+// so the guard is also what disables the carry there; no
+// `host_is_windows()` gate is needed, and none would be right, since
+// Windows has no execute bit to carry.
+//
+// The carry is best-effort and does not fail the copy: the bytes are the
+// deliverable, and a host that cannot report or set a mode is the same
+// host on which the copy's default already stands. Callers that must not
+// publish an unrunnable binary check the mode themselves —
+// `_selfhost_promote_binary` does, because it is staging the compiler
+// over itself.
+fn _copy_file_preserving_mode(src: string, dst: string) -> boolean ![io] {
+    if !_copy_file(src, dst) { return false; }
+    let mode = fs.get_perms(src);
+    if mode > 0 { fs.set_perms(dst, mode); }
+    return true;
+}
+
+// `path`'s size in bytes, the shell-free replacement for `wc -c < path`.
+// Returns `0` on any failure — a missing file, an unreadable one, or a
+// read error — matching the contract the `wc` spawn it displaces already
+// had, so no caller changes.
+//
+// Reads and discards the bytes rather than seeking. `fseek(SEEK_END)` +
+// `ftell` would be O(1) instead of O(n), but `ftell` returns `long`,
+// which is 32-bit on Win64: the size would silently truncate above 2 GiB
+// and the correct Windows spelling is `_ftelli64`, a per-platform
+// divergence needing a `platform/` sibling module. Not worth it for a
+// probe that runs three times per `sfn package`; the same reasoning
+// `runtime/sfn/adapters/filesystem.sfn` records for avoiding the
+// seek/tell pair. `_read_file_bytes(path).length` is the other obvious
+// answer and is wrong for a different reason: it slurps the whole file
+// and hard-fails above its 512 MiB cap, so a large release artifact
+// would report `0`.
+//
+// Chunk size, buffer discipline, and the `max_chunks` guard are
+// `_copy_file_counted`'s, for the same reasons.
+fn _file_size_of(path: string) -> int ![io] {
+    let read_mode: string = "rb";
+    let fin: *File = fopen(path as *u8, read_mode as *u8);
+    if fin as i64 == 0 { return 0; }
+
+    let chunk: i64 = 65536;
+    let buf: *u8 = malloc(chunk as usize);
+    if buf as i64 == 0 {
+        fclose(fin);
+        return 0;
+    }
+
+    let mut ok: boolean = true;
+    let mut total: i64 = 0;
+    let mut guard: i64 = 0;
+    let max_chunks: i64 = 1000000;
+    loop {
+        guard += 1;
+        if guard > max_chunks {
+            ok = false;
+            break;
+        }
+        let got: i64 = fread(buf, 1 as usize, chunk as usize, fin) as i64;
+        // A short read is EOF *or* a hard read error; the `ferror` check
+        // below is what tells them apart.
+        if got <= 0 { break; }
+        total += got;
+    }
+
+    if ferror(fin) != 0 { ok = false; }
+    free(buf);
+    fclose(fin);
+    if !ok { return 0; }
+    return total as int;
+}
+
 fn _toml_trim_cmd(text: string) -> string {
     let mut s: int = 0;
     let mut e: int = text.length;
@@ -758,8 +841,10 @@ export {
     _atomic_rename_into_place,
     _publish_lines_atomic,
     _copy_file,
+    _copy_file_preserving_mode,
     CopyOutcome,
     _copy_file_counted,
+    _file_size_of,
     _ensure_dir_cmd,
     _ensure_dir_recursive_cmd,
     _write_text_cmd,
