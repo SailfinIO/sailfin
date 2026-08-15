@@ -69,15 +69,16 @@ fn native_install_path() -> string ![io] {
 }
 
 // Where `<seed> build -p compiler` writes the freshly built binary before
-// it is installed. Must track the exact literal `build.sfn`'s no-`-p`
-// fallback derives (`"build/sailfin/program"`, `target_exe_name`-wrapped)
+// it is installed. Must track the scoped binary-capsule path that
+// `build.sfn` derives (`"build/capsules/sfn/compiler/bin/compiler"`,
+// `target_exe_name`-wrapped)
 // and gate on the same `build_target_os()` — not `host_exe_name()` above
 // — so the two producers agree by construction under a cross `-target`
 // bootstrap; a same-target gate on this call site and a different-target
 // gate on the writer is exactly the producer/consumer split SFN-693 exists
 // to close.
 fn built_program_path() -> string ![io] {
-    return target_exe_name("build/sailfin/program", build_target_os());
+    return target_exe_name("build/capsules/sfn/compiler/bin/compiler", build_target_os());
 }
 
 // Replace any `\` with `/` so a caller-supplied root (e.g. `sfn dev

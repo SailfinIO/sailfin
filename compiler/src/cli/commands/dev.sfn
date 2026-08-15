@@ -502,7 +502,8 @@ fn _looks_like_digest(s: string) -> boolean {
 }
 
 // install: publish an already-built compiler binary (from `from_path`, or
-// `build/sailfin/program` by default) as the canonical `build/bin/sfn`.
+// `build/capsules/sfn/compiler/bin/compiler` by default) as the canonical
+// `build/bin/sfn`.
 // The post-build publish half of `_dev_bootstrap_build`, invoked by the
 // Makefile from the freshly built binary. Applies the same
 // pending-fingerprint race guard: if the sources changed since the build
@@ -660,7 +661,7 @@ fn command_def() -> Command {
     bootstrap = with_subcommand(bootstrap, command("check", "Build then smoke-verify the compiler"));
     bootstrap = with_subcommand(bootstrap, with_arg(command("pin", "Update the pinned seed version"), arg("version", "Seed version to pin (e.g. 0.8.0-alpha.4)")));
     bootstrap = with_subcommand(bootstrap, with_arg(command("fingerprint", "Print the compiler source fingerprint"), arg_variadic("root", "Source roots to hash (default: compiler/src compiler/capsules runtime)")));
-    bootstrap = with_subcommand(bootstrap, with_flag(command("install", "Publish an already-built compiler as build/bin/sfn"), flag_value("from", "Path to the built compiler binary (default: build/sailfin/program)")));
+    bootstrap = with_subcommand(bootstrap, with_flag(command("install", "Publish an already-built compiler as build/bin/sfn"), flag_value("from", "Path to the built compiler binary (default: build/capsules/sfn/compiler/bin/compiler)")));
     let mut dev: Command = with_subcommand(command("dev", "Compiler/toolchain maintainer commands"), bootstrap);
     dev = with_subcommand(dev, shard_command_def());
     dev = with_subcommand(dev, arena_command_def());

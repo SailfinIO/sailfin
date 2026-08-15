@@ -1,6 +1,6 @@
 # Status
 
-Updated: 2026-08-14 (SFN-496). Seed pinned to `0.9.5` (`bootstrap.toml`
+Updated: 2026-08-14 (SFN-750). Seed pinned to `0.9.5` (`bootstrap.toml`
 `[seed].version` — SFEP-0047); the compiler version source of truth is
 `compiler/capsule.toml`.
 
@@ -108,6 +108,18 @@ here.
   capability effects. Target discovery, persistent artifact I/O, assembly,
   external-tool execution, and final linking remain in `sfn/compiler`.
   `sfn/codegen-native` remains a reserved name and does not exist on disk.
+- **Compiler root identity** (SFN-750, SFEP-0020 §§3.1, 3.7 step 7, §5).
+  `compiler/capsule.toml` declares the private binary capsule as
+  `sfn/compiler`. A manifest-driven build emits the scoped artifact at
+  `build/capsules/sfn/compiler/bin/compiler` and its module IR plus sidecar
+  under `build/capsules/sfn/compiler/`, while `make compile` and
+  `sfn dev bootstrap install` continue to publish the user-facing executable
+  as `build/bin/sfn` (and the installed command remains `sfn`). Bootstrap,
+  build-stamp, and hermetic-cache predicates use the scoped identity; version
+  resolution still reads `compiler/capsule.toml`. Warm self-host rebuilds keep
+  the in-tree content-addressed cache, and determinism checks now include the
+  compiler's per-module sidecar data rather than degrading to a binary-only
+  comparison.
 - **Build driver.** `<seed> build -p compiler` is the sole self-build driver
   (`compiler/src/cli_main.sfn` + `capsule_resolver.sfn` — pure orchestration,
   no fixups). The `scripts/build.sh` orchestrator (Stage E PR7, #383) and the
@@ -189,7 +201,8 @@ here.
   self-host seed. The Makefile bootstrap recipes stay as transitional
   compatibility shims.
 - **Native bootstrap install + fingerprint gate** (SFN-679). `sfn dev
-  bootstrap build` no longer stops at `build/sailfin/program` — it now owns
+  bootstrap build` no longer stops at the scoped
+  `build/capsules/sfn/compiler/bin/compiler` artifact — it now owns
   publishing a working compiler end to end. A new whole-tree source digest
   (`compiler/src/build/source_fingerprint.sfn`: SHA-256 over a path-sorted
   `<sha256(content)>\t<path>` manifest of every `*.sfn` under `compiler/src`,

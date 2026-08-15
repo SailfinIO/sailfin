@@ -10,11 +10,11 @@
 //   3. the `RuntimeHelperDescriptor` rows under `llvm/runtime_helpers/`.
 //
 // `call_signature.sfn` cannot import universe 2 or 3: they live in
-// `compiler/capsules/codegen-llvm/src/`, inside the `sailfin` capsule, which already depends
+// `compiler/capsules/codegen-llvm/src/`, inside the `sfn/compiler` graph, which already depends
 // on `sfn/analyzer`, so importing them would close a capsule cycle. The
 // table is therefore a deliberate mirror, and this test is what keeps it
-// honest — a test can import both sides because it sits in the `sailfin`
-// capsule itself.
+// honest — a test can import both sides because it sits in the root
+// `sfn/compiler` capsule itself.
 //
 // Coverage limit, deliberate: this file pins universes 1 and 3 only.
 // Importing the universe-2 recognizers (`llvm/atomics`, `llvm/byte_load`,

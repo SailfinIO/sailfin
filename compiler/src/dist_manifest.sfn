@@ -34,7 +34,7 @@ import { substring } from "./string_utils";
 //   "schema_version": "1",
 //   "name": "sailfin-native",                        // dist artifact name (human-facing)
 //   "kind": "compiler",                              // "compiler" | "binary" | "library"
-//   "capsule": "sailfin",                            // canonical capsule name from capsule.toml
+//   "capsule": "sfn/compiler",                       // canonical capsule name from capsule.toml
 //   "version": "0.5.10-alpha.2",
 //   "target": "linux-x86_64",                        // <os>-<arch>
 //   "tarball": "sailfin-native-linux-x86_64-0.5.10-alpha.2.tar.gz",

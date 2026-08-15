@@ -113,24 +113,20 @@ Help text is added to `_usage()` (`cli_main.sfn:161`) under a new
 - stage2: `<work_dir>/native-seedcheck`, scratch `<work_dir>/native-seedcheck/scratch`
 - stage3: `<work_dir>/native-stage3`, scratch `<work_dir>/native-stage3/scratch`
 
-It `mkdir -p`s each stage dir and **deletes any pre-existing
-`scratch/capsules/*.ll`** before that stage's build (reproducing
-`Makefile:559-561` and `592-594`), so a stale `.ll` from a prior run can't
-poison the fixed-point hash.
+It `mkdir -p`s each stage dir and clears both legacy
+`scratch/capsules/*.ll` and the canonical
+`build/capsules/sfn/compiler/ir/` tree before that stage's build. Because the
+canonical tree is shared between sequential stages, stage2 is snapshotted
+before stage3 clears and repopulates it.
 
 ### How the `.ll` scratch is redirected from *inside* the driver
-This is the load-bearing subtlety. The per-module `.ll` scratch root is **not**
-controlled by `--work-dir`. It is resolved by
-`capsule_resolver.sfn:461 _cr_scratch_root()`, which reads the
-`SAILFIN_TEST_SCRATCH` env var (via a `printf` shell read) and falls back to
-`build/sailfin`. For the compiler self-host the `[capsule].name` is `"sailfin"`
-(single-segment), so every module takes the **legacy flat path**
-`_cr_legacy_ll_path` → `<SAILFIN_TEST_SCRATCH>/capsules/<mangled>.ll`
-(`capsule_resolver.sfn:473-475`). `--work-dir` alone leaves this at
-`build/sailfin/capsules/`, which is exactly why the Makefile sets
-`SAILFIN_TEST_SCRATCH` per stage — without it stage3 would clobber stage2's
-`.ll` and the hash-diff would be vacuous (the Makefile comment at
-`:546-550` says exactly this).
+SFN-750 changed the compiler root to scoped identity `sfn/compiler`. Its module
+IR therefore uses the canonical `build/capsules/sfn/compiler/ir/` tree rather
+than the legacy flat scratch path. `SAILFIN_TEST_SCRATCH` remains load-bearing
+for each stage's top-level/runtime scratch; compiler-module isolation comes
+from snapshotting stage2 before stage3 replaces the canonical tree. Both stage
+trees must contribute at least one compiler `.ll`, or self-hosting fails rather
+than accepting a vacuous fixed point.
 
 **Mechanism:** `sfn selfhost` does NOT try to set its *own* env (process-global
 `setenv` is unsound and the runtime exposes no `with_env`). Instead it sets
@@ -210,20 +206,16 @@ in stage3".
   (`build_report.sfn:333-348, 455-529`) are a good fit and unit-tested. We can
   populate a `DeterminismDiff`-shaped result and render it the same way for
   consistent `--json`.
-- **Do NOT reuse `compare_for_determinism` as-is for the snapshot source.** It
-  keys modules on the **sidecar `manifest.json` slug+cache_key**
-  (`build_report.sfn:399`, fed by `_read_sidecar_modules`,
-  `cli_main.sfn:615`). The compiler self-host emits **no sidecar** (`name =
-  "sailfin"` is single-segment → `_sidecar_path_for_capsule` returns `""`,
-  `cli_main.sfn:403-408`), so `--check-determinism` on the compiler degrades to a
-  pure binary-sha256 compare. That is strictly weaker than the Makefile's
-  per-`.ll` hash diff and would lose the per-module divergence report.
+- **Keep a self-host snapshot loader.** `--check-determinism` now reads the
+  scoped `sfn/compiler` sidecar and compares module cache keys, while the
+  self-host gate hashes the actual uncached stage2/stage3 `.ll` files plus
+  their top-level/runtime scratch. The two checks share diff structures and
+  rendering but intentionally use different snapshot sources.
 
-**Decision:** add a **new snapshot loader** that enumerates `*.ll` under a stage's
-`scratch/capsules` (via `fs.listDirectory`, mirroring `_collect_sfn_files_cmd`,
-`cli_commands_utils.sfn:447`) and sha256s each file (`_sha256_of_file_cmd`,
-`cli_commands_utils.sfn:532`), keyed by `.ll` basename. Feed those into the
-existing `compare_for_determinism` by mapping `slug=basename`,
+**Decision:** the snapshot loader recursively enumerates `*.ll` under the
+scoped compiler IR and stage runtime roots and sha256s each file, keyed by its
+root-relative path so duplicate basenames remain distinct. It feeds those into
+the existing `compare_for_determinism` with
 `cache_key=<per-file-sha>` — the comparator's set-equality-with-paired-values
 logic is exactly right for "same modules, same content," and the `only_in_a` /
 `only_in_b` kinds already render the "missing in stage3" case. The binary
@@ -231,9 +223,9 @@ sha256 fields stay populated from `<seedcheck-out>` vs `<stage3-out>` so the
 diff also asserts the two **binaries** match (a strictly stronger check than the
 Makefile, which only hashed `.ll`).
 
-This means **no new comparator and no new renderer** — only a new I/O loader
-(`_selfhost_snapshot_from_ll_dir`) that builds a `DeterminismSnapshot` from a
-scratch dir. The pure comparator stays unit-tested as-is.
+This means **no new comparator and no new renderer** — only I/O snapshot
+construction in `_selfhost_snapshot`. The pure comparator stays unit-tested
+as-is.
 
 > Mismatch policy: the Makefile treats `.ll` mismatch as a **WARN** (non-fatal,
 > `Makefile:607`). Recommend `sfn selfhost` keep that as a **warning by default**

@@ -226,14 +226,11 @@ jobs:
           # via `set -euo pipefail`) makes tee propagate the failure
           # even though tee itself always returns 0.
           #
-          # Caveat: the compiler self-host's `[capsule].name = "sailfin"`
-          # is single-segment, so `_emit_capsule_artifact_sidecar`
-          # skips sidecar emission and the determinism check degrades
-          # to a binary-sha256 comparison only (cli_main.sfn:343-350).
-          # Mismatches still fail the gate, but `module_diffs` will be
-          # empty — triage via the printed `binary_sha256_{a,b}` and
-          # `binary_path_{a,b}` instead. Foreign `-p` builds with
-          # scope/name form get full per-module diffs.
+          # The compiler's scoped `sfn/compiler` identity emits a sidecar, so
+          # this check compares per-module cache identities as well as the
+          # linked binary. `module_diffs` names the affected modules directly;
+          # a binary-only divergence remains visible through
+          # `binary_sha256_{a,b}` and `binary_path_{a,b}`.
           build/bin/sfn build -p compiler \
             --check-determinism \
             --work-dir build/det-pass2 \

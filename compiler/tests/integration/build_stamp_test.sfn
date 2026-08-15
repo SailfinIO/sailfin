@@ -133,3 +133,23 @@ test "build_stamp: emit_compiler_build_stamp_if_applicable is a no-op for foreig
     emit_compiler_build_stamp_if_applicable("someother/capsule", "9.9.9", "build/sailfin/.build_stamp_test_workdir");
     assert fs.exists(would_be) == false;
 }
+
+test "build_stamp: former unscoped compiler identity is a no-op" ![io] {
+    let would_be = "build/sailfin/.build_stamp_old_identity/native/.build-stamp";
+    if fs.exists(would_be) { fs.deleteFile(would_be); }
+    emit_compiler_build_stamp_if_applicable("sailfin", "9.9.9", "build/sailfin/.build_stamp_old_identity");
+    assert ! fs.exists(would_be);
+}
+
+test "build_stamp: scoped compiler capsule writes the compiler stamp" ![io] {
+    let work_dir = "build/sailfin/.build_stamp_scoped_identity";
+    let stamp = compiler_stamp_path(work_dir);
+    fs.createDirectory(work_dir + "/native", true);
+    if fs.exists(stamp) { fs.deleteFile(stamp); }
+    emit_compiler_build_stamp_if_applicable("sfn/compiler", "9.9.9", work_dir);
+    assert fs.exists(stamp);
+    let text = fs.readFile(stamp);
+    assert text.length >= 5;
+    assert substring(text, 0, 5) == "9.9.9";
+    fs.deleteFile(stamp);
+}

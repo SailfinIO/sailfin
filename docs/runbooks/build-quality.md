@@ -63,17 +63,14 @@ attach `pass1.json` + `pass2.json` from the failing CI run (kept for
 14 days as the `build-quality-passes` artifact) to the regression
 issue and request a maintainer rerun before bisecting.
 
-### Caveat: single-segment capsule name
+### Scoped compiler sidecar
 
-The compiler self-host's `capsule.toml` declares
-`[capsule].name = "sailfin"` — single-segment, so
-`_emit_capsule_artifact_sidecar` skips sidecar emission and the
-`--check-determinism` flag degrades to a binary-sha256 comparison
-only. The `module_diffs` array will be empty even on a real
-regression; triage from the printed `binary_sha256_a` /
-`binary_sha256_b` and `binary_path_a` / `binary_path_b` fields
-instead. Foreign capsules with scope/name form get full per-module
-diffs.
+The compiler self-host declares `[capsule].name = "sfn/compiler"`, so it emits
+`build/capsules/sfn/compiler/manifest.json` and `--check-determinism` compares
+both per-module cache identities and the linked binary. A non-empty
+`module_diffs` array identifies the affected module directly; a binary-only
+divergence still reports `binary_sha256_a` / `binary_sha256_b` and the two
+binary paths.
 
 ---
 

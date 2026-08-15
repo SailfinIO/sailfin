@@ -257,7 +257,7 @@ jobs:
           "$SEED_EXE" build -p compiler
           echo "--- locating native-built compiler ---"
           OUT=""
-          for c in build/sailfin/program.exe build/sailfin/program build/bin/sfn.exe build/bin/sfn; do
+          for c in build/capsules/sfn/compiler/bin/compiler.exe build/capsules/sfn/compiler/bin/compiler build/bin/sfn.exe build/bin/sfn; do
             if [ -f "$c" ]; then OUT="$PWD/$c"; break; fi
           done
           [ -n "$OUT" ] || { echo "native-built compiler not found under build/" >&2; ls -R build | head -50; exit 1; }

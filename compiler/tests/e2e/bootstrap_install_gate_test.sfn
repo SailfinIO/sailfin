@@ -119,12 +119,14 @@ fn _write_bootstrap_toml(repo: string) -> void ![io] {
 
 // Seed a ready store entry `<repo>/seed-store/999.0.0/sailfin`: a stub that
 // appends a line to `marker` (so the test can count invocations), then
-// fabricates `build/sailfin/program` in whatever directory it is run from
+// fabricates `build/capsules/sfn/compiler/bin/compiler` in whatever directory
+// it is run from
 // (the repo root, via the child's cwd), regardless of the argv it is
 // invoked with. The `.sha256` completeness marker is written last so the
 // entry reads as ready without a real fetch/verify pass.
 //
-// `build/sailfin/program` must itself be a genuinely runnable script (not
+// `build/capsules/sfn/compiler/bin/compiler` must itself be a genuinely
+// runnable script (not
 // opaque bytes): SFN-679 fix 3 smoke-verifies the installed binary with
 // `<binary> version` before recording a freshness claim, so a
 // non-executable stub would fail every build in this file.
@@ -133,30 +135,30 @@ fn _seed_stub(repo: string, marker: string) -> void ![io] {
     fs.createDirectory(dir, true);
     let bin = dir + "/sailfin";
     fs.writeFile(bin, "#!/bin/sh\n" + "echo invoked >> \"" + marker + "\"\n"
-        + "mkdir -p build/sailfin\n"
-        + "printf '#!/bin/sh\\necho stub-version\\nexit 0\\n' > build/sailfin/program\n"
-        + "chmod +x build/sailfin/program\n"
+        + "mkdir -p build/capsules/sfn/compiler/bin\n"
+        + "printf '#!/bin/sh\\necho stub-version\\nexit 0\\n' > build/capsules/sfn/compiler/bin/compiler\n"
+        + "chmod +x build/capsules/sfn/compiler/bin/compiler\n"
         + "exit 0\n");
     process.run(["chmod", "+x", bin]);
     fs.writeFile(dir + "/.sha256", "0000000000000000000000000000000000000000000000000000000000000000\n");
 }
 
 // A seed stub that always fails the build outright: it records an
-// invocation, but never produces `build/sailfin/program` and exits
+// invocation, but never produces the scoped compiler artifact and exits
 // non-zero.
 fn _seed_stub_failing_build(repo: string, marker: string) -> void ![io] {
     let dir = repo + "/seed-store/999.0.0";
     fs.createDirectory(dir, true);
     let bin = dir + "/sailfin";
     fs.writeFile(bin, "#!/bin/sh\n" + "echo invoked >> \"" + marker + "\"\n"
-        + "rm -f build/sailfin/program\n"
+        + "rm -f build/capsules/sfn/compiler/bin/compiler\n"
         + "exit 1\n");
     process.run(["chmod", "+x", bin]);
     fs.writeFile(dir + "/.sha256", "0000000000000000000000000000000000000000000000000000000000000000\n");
 }
 
 // A seed stub that "succeeds" (exit 0) and produces
-// `build/sailfin/program`, but that program is not actually runnable (no
+// the scoped compiler artifact, but that program is not actually runnable (no
 // shebang, not a real executable) — the case fix 3's smoke-verify exists
 // to catch.
 fn _seed_stub_unrunnable_program(repo: string, marker: string) -> void ![io] {
@@ -164,9 +166,9 @@ fn _seed_stub_unrunnable_program(repo: string, marker: string) -> void ![io] {
     fs.createDirectory(dir, true);
     let bin = dir + "/sailfin";
     fs.writeFile(bin, "#!/bin/sh\n" + "echo invoked >> \"" + marker + "\"\n"
-        + "mkdir -p build/sailfin\n"
-        + "printf 'not-a-real-executable' > build/sailfin/program\n"
-        + "chmod +x build/sailfin/program\n"
+        + "mkdir -p build/capsules/sfn/compiler/bin\n"
+        + "printf 'not-a-real-executable' > build/capsules/sfn/compiler/bin/compiler\n"
+        + "chmod +x build/capsules/sfn/compiler/bin/compiler\n"
         + "exit 0\n");
     process.run(["chmod", "+x", bin]);
     fs.writeFile(dir + "/.sha256", "0000000000000000000000000000000000000000000000000000000000000000\n");
@@ -276,9 +278,10 @@ test "bootstrap install gate: a malformed .pending is treated as no snapshot, no
     // Fabricate a build output directly (bypassing `dev bootstrap build`) so
     // `install` runs with only the malformed `.pending` a pre-SFN-679
     // binary would have left there — a usage line, not a digest.
-    fs.createDirectory(repo + "/build/sailfin", true);
-    fs.writeFile(repo + "/build/sailfin/program", "#!/bin/sh\necho stub-version\nexit 0\n");
-    process.run(["chmod", "+x", repo + "/build/sailfin/program"]);
+    fs.createDirectory(repo + "/build/capsules/sfn/compiler/bin", true);
+    fs.writeFile(repo + "/build/capsules/sfn/compiler/bin/compiler", "#!/bin/sh\necho stub-version\nexit 0\n");
+    process.run(["chmod", "+x", repo
+        + "/build/capsules/sfn/compiler/bin/compiler"]);
     fs.writeFile(repo + "/build/.compiler-source-fingerprint.pending", "usage: sfn dev bootstrap <fetch|build|check|pin>");
 
     let sfn = _sfn_bin_abs();
@@ -364,7 +367,7 @@ test "bootstrap install gate: a seed that produces an unrunnable binary leaves t
 
     // Edit a source file (so the fingerprint gate cannot short-circuit),
     // then swap in a seed that "succeeds" but whose produced
-    // build/sailfin/program does not actually run.
+    // The scoped compiler artifact does not actually run.
     fs.writeFile(repo + "/compiler/src/a.sfn", "fn a_value() -> int { return 2; }\n");
     _seed_stub_unrunnable_program(repo, marker);
 
@@ -373,7 +376,7 @@ test "bootstrap install gate: a seed that produces an unrunnable binary leaves t
     let fail_err = process.capture_take_stderr();
     assert fail_exit != 0;
     assert find(fail_err, "smoke check", 0) >= 0;
-    // The smoke check runs against `build/sailfin/program` BEFORE it is
+    // The smoke check runs against the scoped compiler artifact BEFORE it is
     // published, so an unrunnable build never reaches `build/bin/sfn`: the
     // previously installed compiler survives intact, and the unchanged
     // freshness record forces the next build to retry (SFN-679).

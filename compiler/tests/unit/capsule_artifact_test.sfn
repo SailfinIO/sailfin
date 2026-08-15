@@ -143,6 +143,13 @@ test "capsule_artifact_bin_path: composes <dir>/bin/<bin>" {
     assert capsule_artifact_bin_path("acme", "server", "httpd") == "build/capsules/acme/server/bin/httpd";
 }
 
+test "compiler identity: scoped artifact paths keep the compiler basename" {
+    assert capsule_artifact_dir("sfn", "compiler") == "build/capsules/sfn/compiler";
+    assert capsule_artifact_bin_path("sfn", "compiler", capsule_default_bin_name("compiler")) == "build/capsules/sfn/compiler/bin/compiler";
+    let layout = capsule_artifact_layout_from_specs([], "sfn", "compiler");
+    assert ir_path_for_slug(layout, "src/version") == "build/capsules/sfn/compiler/ir/src/version.ll";
+}
+
 test "capsule_default_bin_name: simple name returns it verbatim" {
     assert capsule_default_bin_name("cli") == "cli";
 }

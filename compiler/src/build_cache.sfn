@@ -302,7 +302,7 @@ struct BuildCacheConfig {
     // reaches every `cache_root()` call site (this config already
     // flows to all of them). Used only to pin the content-addressed
     // cache root in-tree for the compiler self-host build
-    // (`== "sailfin"`, SFEP-0040 §3.1) so `make compile` / `make
+    // (`== "sfn/compiler"`, SFEP-0040 §3.1) so `make compile` / `make
     // check` never read a developer's global `~/.cache/sailfin`.
     // Empty for positional/foreign builds → global default root.
     capsule_name: string;
@@ -701,15 +701,22 @@ fn cache_root_with_override(override_path: string) -> string {
     return cache_root_from(override_path, false, "", "");
 }
 
+// The root capsule's scoped identity is the self-host discriminator for
+// cache placement. Keep this pure so the manifest rename is directly pinned
+// without depending on the process environment's cache overrides.
+fn is_compiler_selfhost_capsule(capsule_name: string) -> boolean {
+    return strings_equal(capsule_name, "sfn/compiler");
+}
+
 // Production reader. Resolves the cache-root ladder from the
 // environment plus `capsule_name` (the current build's
 // `[capsule].name`); callers should invoke once at the top of a
-// build and thread the result through. `capsule_name == "sailfin"`
+// build and thread the result through. `capsule_name == "sfn/compiler"`
 // pins the in-tree root so the compiler self-host build stays
 // hermetic (SFEP-0040 §3.1).
 fn cache_root(capsule_name: string) -> string ![io] {
     let explicit = _get_env_cmd("SAILFIN_BUILD_CACHE_DIR");
-    let is_selfhost = strings_equal(capsule_name, "sailfin");
+    let is_selfhost = is_compiler_selfhost_capsule(capsule_name);
     let xdg = _get_env_cmd("XDG_CACHE_HOME");
     let home = _get_env_cmd("HOME");
     return cache_root_from(explicit, is_selfhost, xdg, home);
@@ -1611,6 +1618,7 @@ export {
     build_cache_schema_version,
     cache_root_from,
     cache_root_with_override,
+    is_compiler_selfhost_capsule,
     cache_root,
     cache_artifact_path,
     cache_paths_for,

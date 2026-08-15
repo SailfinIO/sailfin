@@ -701,9 +701,9 @@ else
 	fi
 endif
 	@echo "[check] pass1 smoke passed — validating self-host (stage2/stage3 fixed point)..."
-	@# #1502 (epic #513 Phase 1): the stage2/stage3 builds, per-stage `.ll`
-	@# scratch isolation (`SAILFIN_TEST_SCRATCH` so stage3 can't clobber
-	@# stage2's IR), `--no-cache` independence, the hello-world smoke gate,
+	@# #1502 (epic #513 Phase 1): the stage2/stage3 builds, per-stage runtime
+	@# scratch isolation plus the stage2 snapshot of canonical scoped IR,
+	@# `--no-cache` independence, the hello-world smoke gate,
 	@# the fixed-point IR hash-diff, and the seedcheck→canonical promotion
 	@# are now owned by the compiler (`sfn selfhost`,
 	@# compiler/src/cli_selfhost.sfn) instead of ~90 lines of shell. The
@@ -932,7 +932,7 @@ rebuild-impl:
 	@# inlines its `write` extern). The post-build block below still stages
 	@# posix + ownedbuf into the SHARED tree — but only as the
 	@# `ci-cross-windows` (SFN-58) prerequisite, not for this build.
-	@# Wipe stale `build/sailfin/program` so the existence check
+	@# Wipe the scoped compiler binary so the existence check
 	@# below can't be fooled by an old binary surviving a failed
 	@# seed run. The `set -o pipefail` + bash wrapper captures
 	@# the seed's real exit status (otherwise `| cat` always
@@ -941,7 +941,7 @@ rebuild-impl:
 	@# error block instead of failing fast on the unguarded
 	@# recipe line. The `&&` chain ensures every diagnostic
 	@# message reaches the user before we exit.
-	@rm -f build/sailfin/program build/sailfin/program.ll
+	@rm -f build/capsules/sfn/compiler/bin/compiler build/capsules/sfn/compiler/bin/compiler.exe build/sailfin/program.ll
 	@# #1120: under the JSON=1 / SAILFIN_AGENT_REPORT=1 gate, append
 	@# `--json` so the seed emits its single-line BuildReport on stdout,
 	@# and tee that to build/native/.build-report.json for the report
@@ -953,19 +953,23 @@ rebuild-impl:
 	@# half-written report — the contract for consumers is "file exists =>
 	@# valid BuildReport". Default (gate off) keeps the original
 	@# `2>&1 | cat` form byte-for-byte.
+	@# The pinned seed predates the `sfn/compiler` self-host predicate, so give
+	@# its first pass the same in-tree cache root explicitly. A caller override
+	@# still wins; freshly built compilers recognize the scoped identity natively.
 	@seed=$$(cat build/.seed-resolved); \
+	cache_root="$${SAILFIN_BUILD_CACHE_DIR:-build/cache}"; \
 	echo "[rebuild] running sfn build -p compiler (seed=$$seed)..."; \
 	build_rc=0; \
 	if [ "$${SAILFIN_AGENT_REPORT:-}" = "1" ]; then \
 		mkdir -p build/native; \
-		{ cd $(CURDIR) && bash -c "set -o pipefail; \"$$seed\" build $(BUILD_ARGS) --json -p compiler | tee build/native/.build-report.json"; } \
+		{ cd $(CURDIR) && bash -c "set -o pipefail; SAILFIN_BUILD_CACHE_DIR=\"$$cache_root\" \"$$seed\" build $(BUILD_ARGS) --json -p compiler | tee build/native/.build-report.json"; } \
 			|| build_rc=$$?; \
 	else \
-		{ cd $(CURDIR) && bash -c "set -o pipefail; \"$$seed\" build $(BUILD_ARGS) -p compiler 2>&1 | cat"; } \
+		{ cd $(CURDIR) && bash -c "set -o pipefail; SAILFIN_BUILD_CACHE_DIR=\"$$cache_root\" \"$$seed\" build $(BUILD_ARGS) -p compiler 2>&1 | cat"; } \
 			|| build_rc=$$?; \
 	fi; \
-	if [ "$$build_rc" -ne 0 ] || [ ! -f build/sailfin/program ]; then \
-		echo "[rebuild][error] sfn build failed (exit=$$build_rc) or did not produce build/sailfin/program" >&2; \
+	if [ "$$build_rc" -ne 0 ] || [ ! -f build/capsules/sfn/compiler/bin/compiler$(EXE_EXT) ]; then \
+		echo "[rebuild][error] sfn build failed (exit=$$build_rc) or did not produce build/capsules/sfn/compiler/bin/compiler$(EXE_EXT)" >&2; \
 		echo "[rebuild][error] expected the seed's subprocess-stage path to keep the cold build under the 8 GiB memory budget" >&2; \
 		echo "[rebuild][error] if this is a regression, rerun with BUILD_ARGS='--cache-trace' to bisect, or fall back to the prior seed via bootstrap.toml [seed].version" >&2; \
 		if [ "$${SAILFIN_AGENT_REPORT:-}" = "1" ]; then rm -f build/native/.build-report.json; fi; \
@@ -976,27 +980,27 @@ rebuild-impl:
 	@# promotion to the FRESHLY BUILT compiler's own `dev bootstrap install`.
 	@# The freshly built program carries the new install/fingerprint logic
 	@# even though the pinned seed that built it does not — that is exactly
-	@# why this targets build/sailfin/program and not $(SEED).
-	@chmod +x build/sailfin/program 2>/dev/null || true
-	@build/sailfin/program dev bootstrap install
+	@# why this targets the scoped compiler artifact and not $(SEED).
+	@chmod +x build/capsules/sfn/compiler/bin/compiler$(EXE_EXT) 2>/dev/null || true
+	@build/capsules/sfn/compiler/bin/compiler$(EXE_EXT) dev bootstrap install
 	@# Save .ll files to a location `make test` won't clobber. Each
 	@# integration / e2e test's own `sfn build` overwrites
-	@# `build/sailfin/capsules/*.ll` and `build/sailfin/program.ll`
+	@# scoped per-capsule `ir/*.ll` trees and `build/sailfin/program.ll`
 	@# — by the time `make ci-cross-windows` runs (after the test
 	@# suite), the rebuild's IR set is gone. Mirror to
 	@# `build/native/raw/` which the test suite never touches;
 	@# cross-windows reads from there. Cheap (`cp -a`, ~140 small
 	@# files), survives `make test` cleanly.
 	@mkdir -p build/native/raw
-	@cp -a build/sailfin/capsules/. build/native/raw/ 2>/dev/null || true
+	@# Replace the snapshot as one generation. Without this bounded cleanup,
+	@# pre-SFN-750 flat compiler modules survive beside the scoped filenames
+	@# and the cross-Windows link consumes both definitions.
+	@rm -f build/native/raw/*.ll
 	@cp -f build/sailfin/program.ll build/native/raw/program.ll 2>/dev/null || true
-	@# #1159: the legacy flat copy above only catches modules routed to
-	@# `build/sailfin/capsules/` — i.e. the compiler's own modules (its
-	@# `[capsule].name = "sailfin"` is single-segment, so Stage C2b2 keeps
-	@# them on the legacy path). Scope/name SOURCE-capsule deps (the first
-	@# being `sfn/cli`, a compiler dependency since #1159) route instead to
+	@# #1159 / SFN-750: every source capsule, including the scoped
+	@# `sfn/compiler` root, routes to
 	@# `build/capsules/<scope>/<name>/ir/*.ll`. The native self-host link
-	@# pulls from BOTH trees, so the cross-windows IR snapshot must too —
+	@# pulls from these trees, so the cross-windows IR snapshot must too —
 	@# otherwise `make ci-cross-windows` link-fails with an undefined
 	@# reference to the dep's symbols (e.g. `bold__sfn__cli__mod`). Flatten
 	@# each `<scope>/<name>/ir/<rel>.ll` to `<scope>__<name>__ir__<rel>.ll`
@@ -1095,8 +1099,8 @@ rebuild-impl:
 #
 # Stage E PR4: reads exclusively from the saved sfn-build IR
 # layout at `build/native/raw/*.ll` (mirrored by `make rebuild`
-# so the test suite can't clobber the originals at
-# `build/sailfin/capsules/`). The legacy `build/selfhost/native/raw`
+# so the test suite can't clobber the originals in their per-capsule
+# `ir/` trees). The legacy `build/selfhost/native/raw`
 # fallback that survived through PR3 retired here — `make
 # rebuild` is the only path producing IR for cross-compile, and
 # it always populates `build/native/raw/`. The future

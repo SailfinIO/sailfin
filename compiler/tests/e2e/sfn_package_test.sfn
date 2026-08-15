@@ -257,7 +257,7 @@ test "sfn package (compiler mode): full artifact + manifest contract" ![io] {
     assert _jq("schema_version", manifest) == "1";
     assert _jq("name", manifest) == "sailfin-native";
     assert _jq("kind", manifest) == "compiler";
-    assert _jq("capsule", manifest) == "sailfin";
+    assert _jq("capsule", manifest) == "sfn/compiler";
     assert _jq("version", manifest) == version;
 
     // Sizes are positive numbers.
@@ -418,7 +418,7 @@ test "sfn package --installer: bundle + manifest contract" ![io] {
 
     // Manifest invariants.
     assert _jq("kind", manifest) == "installer";
-    assert _jq("capsule", manifest) == "sailfin";
+    assert _jq("capsule", manifest) == "sfn/compiler";
     assert _jq("version", manifest) == version;
     assert _jq("schema_version", manifest) == "1";
 

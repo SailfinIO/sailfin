@@ -15,6 +15,7 @@
 // replaced `ln`'s `-f` the second bootstrap would silently keep a stale
 // alias.
 import { _cwd_cmd } from "../../src/build/fs";
+import { built_program_path, native_install_path } from "../../src/build/source_fingerprint";
 import { host_is_windows } from "../../src/build/target";
 import { _bootstrap_alias, _bootstrap_is_absolute } from "../../src/cli/commands/dev";
 
@@ -36,6 +37,13 @@ fn _scratch_dir() -> string ![io] {
 fn _abs(path: string) -> string ![io] {
     if _bootstrap_is_absolute(path) { return path; }
     return _cwd_cmd() + "/" + path;
+}
+
+test "dev-bootstrap: scoped build artifact installs as sfn" ![io] {
+    let built = built_program_path();
+    assert built == "build/capsules/sfn/compiler/bin/compiler" || built == "build/capsules/sfn/compiler/bin/compiler.exe";
+    let installed = native_install_path();
+    assert installed == "build/bin/sfn" || installed == "build/bin/sfn.exe";
 }
 
 test "dev-bootstrap: _bootstrap_alias points an alias at the target" ![io] {

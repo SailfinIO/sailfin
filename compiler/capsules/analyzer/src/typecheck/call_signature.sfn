@@ -23,8 +23,9 @@
 //   3. `ImportedFunctionSignature` for cross-module callees.
 //
 // Why the builtin table is duplicated rather than read from the lowering
-// registry: `find_runtime_helper` lives in `compiler/capsules/codegen-llvm/src/`, inside the
-// `sailfin` capsule, which already depends on `sfn/analyzer`. Importing it
+// registry: `find_runtime_helper` lives in
+// `compiler/capsules/codegen-llvm/src/`, inside the `sfn/compiler` graph,
+// which already depends on `sfn/analyzer`. Importing it
 // here would close a capsule cycle. The mirror is pinned against the
 // registry and the typecheck allowlist by
 // `compiler/tests/unit/call_signature_builtin_sync_test.sfn`, which records

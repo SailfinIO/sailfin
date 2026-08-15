@@ -8,11 +8,24 @@ import { expect_eq_bool, expect_eq_str_array } from "sfn/test";
 
 import {
     _selfhost_basename,
+    _selfhost_compiler_ir_dir,
     _selfhost_contains,
     _selfhost_env_entry_has_key,
+    _selfhost_relative_ll_slug,
     _selfhost_stage_argv,
     _selfhost_stage_env
 } from "../../src/cli_selfhost";
+
+test "selfhost paths: compiler IR uses the scoped capsule prefix" {
+    assert _selfhost_compiler_ir_dir() == "build/capsules/sfn/compiler/ir";
+}
+
+test "selfhost paths: nested IR slugs stay root-relative" {
+    let root = "build/capsules/sfn/compiler/ir";
+    assert _selfhost_relative_ll_slug(root, root + "/cli/commands/build.ll") == "cli/commands/build.ll";
+    assert _selfhost_relative_ll_slug(root + "/", root + "/build/cache.ll") == "build/cache.ll";
+    assert _selfhost_relative_ll_slug(root, "elsewhere/mod.ll") == "mod.ll";
+}
 
 // --------------------------------------------------------------
 // _selfhost_contains — substring scan (smoke-gate grep)

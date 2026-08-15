@@ -378,8 +378,8 @@ test "manifest: default-members and exclude coexist under [workspace]" {
 
 // ---- Existing fields still parse after extension ----
 test "manifest: existing fields unaffected by Stage A extensions" {
-    let toml = "[capsule]\nname = \"sailfin\"\nversion = \"0.5.9\"\ndescription = \"the compiler\"\n\n[dependencies]\n\n[capabilities]\nrequired = [\"io\"]\n\n[build]\nentry = \"src/main.sfn\"\nkind = \"binary\"\n";
-    assert _str_eq(toml_get_name(toml), "sailfin");
+    let toml = "[capsule]\nname = \"sfn/compiler\"\nversion = \"0.5.9\"\ndescription = \"the compiler\"\n\n[dependencies]\n\n[capabilities]\nrequired = [\"io\"]\n\n[build]\nentry = \"src/main.sfn\"\nkind = \"binary\"\n";
+    assert _str_eq(toml_get_name(toml), "sfn/compiler");
     assert _str_eq(toml_get_entry(toml), "src/main.sfn");
     assert _str_eq(toml_get_build_kind(toml), "binary");
 }

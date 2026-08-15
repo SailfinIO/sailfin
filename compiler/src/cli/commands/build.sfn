@@ -53,7 +53,12 @@ import { _runtime_bundle_exists, clean_runtime_object_cache } from "../../build/
 import { select_runtime_sfn_sources } from "../../build/runtime_selection";
 import { build_target_os, target_exe_name, triple_is_supported } from "../../build/target";
 import { clear_build_target, set_build_target } from "../../build/target_state";
-import { cache_root, merge_cache_stats, resolve_build_cache_config } from "../../build_cache";
+import {
+    cache_root,
+    is_compiler_selfhost_capsule,
+    merge_cache_stats,
+    resolve_build_cache_config
+} from "../../build_cache";
 import { emit_compiler_build_stamp_if_applicable } from "../../build_stamp";
 import {
     capsule_artifact_bin_path,
@@ -248,19 +253,19 @@ fn _run_single_build(capsule_path: string, input_path_arg: string, out_path_arg:
     }
 
     // Bootstrap mode (SFEP-0047): `sfn build -p compiler` in a compiler
-    // checkout (capsule name "sailfin" + a root bootstrap.toml) self-hosts
+    // checkout (capsule name "sfn/compiler" + a root bootstrap.toml) self-hosts
     // from the exact pinned seed. When the running toolchain is already that
     // seed — every `make compile` self-host pass and any contributor on the
     // pinned toolchain — this is a no-op and the build proceeds in-process;
     // it only re-execs a *different* toolchain to the pinned stage0.
-    if strings_equal(cap_capsule_name, "sailfin") {
+    if is_compiler_selfhost_capsule(cap_capsule_name) {
         let _bs = bootstrap_gate_or_dispatch(ctx);
         if _bs != 0 { return _bs; }
     }
     // Thread the resolved capsule name into the cache config so every
     // downstream `cache_root(...)` call (this fn, `_emit_build_report`,
     // `compile_capsule_modules`) pins the in-tree root for the
-    // compiler self-host build (`== "sailfin"`, SFEP-0040 §3.1). Empty
+    // compiler self-host build (`== "sfn/compiler"`, SFEP-0040 §3.1). Empty
     // for a positional build → global default root.
     cache_config.capsule_name = cap_capsule_name;
     if input_path.length == 0 {
@@ -302,8 +307,8 @@ fn _run_single_build(capsule_path: string, input_path_arg: string, out_path_arg:
     //       relative-import `.ll`s land under the consumer's
     //       per-capsule tree (Stage C2b2).
     // Both `out_path` and dep `.ll` routing fall back to the
-    // legacy flat layout when the name isn't scope-form (e.g.
-    // the compiler's own `[capsule].name = "sailfin"`).
+    // legacy flat layout when the name isn't scope-form. The compiler's
+    // scoped identity routes its own modules through its per-capsule tree.
     // Stage D PR3: opt the resolver into walking
     // `<project_root>/src/**/*.sfn` for any `-p` build of a
     // `kind = "binary"` capsule. The compiler is the canonical
@@ -473,8 +478,8 @@ fn _run_single_build(capsule_path: string, input_path_arg: string, out_path_arg:
 
     // Library builds stop after `clang -c` on the main .ll — no link,
     // no main symbol required. Capsule deps remain as `.ll` files
-    // under build/sailfin/capsules/ (compiled in `prepare_project_capsules`
-    // but not lowered to `.o` here). Downstream consumers that need
+    // under their canonical per-capsule `ir/` trees (compiled in
+    // `prepare_project_capsules` but not lowered to `.o` here). Downstream consumers that need
     // dep object files will compile them on demand once Stage C lands
     // the in-process driver.
     if no_link {
@@ -502,7 +507,7 @@ fn _run_single_build(capsule_path: string, input_path_arg: string, out_path_arg:
         // Epic #513 Phase 0.3 / issue #516: the compiler
         // self-stamps `build/native/.build-stamp` here so the
         // Makefile can stop shelling out to git. Gated on
-        // `[capsule].name == "sailfin"` inside the helper,
+        // `[capsule].name == "sfn/compiler"` inside the helper,
         // so foreign capsule builds are a no-op.
         emit_compiler_build_stamp_if_applicable(cap_capsule_name, cap_version, work_dir);
         if check_determinism_flag {
@@ -595,7 +600,7 @@ fn _run_single_build(capsule_path: string, input_path_arg: string, out_path_arg:
     _emit_capsule_artifact_sidecar(cap_capsule_name, cap_version, "binary", cap_entry_relative, exe_path, capsule_result);
     // Epic #513 Phase 0.3 / issue #516: the compiler self-stamps
     // `build/native/.build-stamp` here so the Makefile can stop
-    // shelling out to git. Gated on `[capsule].name == "sailfin"`
+    // shelling out to git. Gated on `[capsule].name == "sfn/compiler"`
     // inside the helper, so foreign capsule builds are a no-op.
     emit_compiler_build_stamp_if_applicable(cap_capsule_name, cap_version, work_dir);
     if check_determinism_flag {

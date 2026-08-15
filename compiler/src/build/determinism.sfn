@@ -42,11 +42,10 @@ import { active_build_target } from "./target_state";
 // regardless of `--work-dir`), so the orchestrator reads pass 1's
 // sidecar BEFORE invoking pass 2. Using the same `_read_sidecar_modules`
 // path for both passes keeps the comparison symmetric: capsules
-// whose `[capsule].name` isn't in scope/name form (the compiler
-// self-host's `name = "sailfin"` is the canonical example —
-// `_emit_capsule_artifact_sidecar` skips emission in that case)
-// produce empty module lists on BOTH sides, so the check
-// gracefully degrades to a binary-sha256 comparison. Pulling pass
+// whose `[capsule].name` isn't in scope/name form produce empty module lists
+// on BOTH sides, so the check gracefully degrades to a binary-sha256
+// comparison. The scoped `sfn/compiler` root emits a sidecar and therefore
+// participates in the full module comparison. Pulling pass
 // 1's modules from the in-memory `module_events` instead would
 // inject the full module list into the pass 1 snapshot while
 // pass 2 stayed empty, surfacing every module as `only_in_a`
@@ -57,8 +56,7 @@ import { active_build_target } from "./target_state";
 // `compiler/tests/unit/build_report_determinism_test.sfn`.
 // Resolve the capsule's sidecar path for `-p` builds, or `""` for
 // positional builds and capsules whose `[capsule].name` isn't in
-// safe scope/name form (the compiler self-host's `name = "sailfin"`
-// is the canonical example — single-segment, so no sidecar). When
+// safe scope/name form. When
 // this returns `""`, the determinism check falls back to comparing
 // only the binary sha256.
 fn _sidecar_path_for_capsule(capsule_name: string) -> string {
@@ -251,7 +249,7 @@ fn _run_determinism_pass2(self_exe: string, capsule_path: string, input_path: st
 
 // Read pass 2's sidecar (now overwritten on disk by the subprocess)
 // and extract its module list. `""` sidecar_path covers the
-// no-sidecar case (positional builds, compiler self-host) —
+// no-sidecar case (positional builds and bare capsule names) —
 // fall through to an empty list and let the binary sha256
 // carry the determinism check.
 //
@@ -286,9 +284,10 @@ fn _do_determinism_check(pass1_out: string, is_library: boolean, cap_capsule_nam
     // Read pass 1's sidecar BEFORE pass 2 runs — pass 2 will
     // overwrite the same `build/capsules/<scope>/<name>/manifest.json`
     // path because sidecar emission isn't gated by `--work-dir`.
-    // Capsules without scope/name form (compiler self-host) get
-    // an empty list from `_read_sidecar_modules`; pass 2 will see
-    // the same empty list later, so the comparison stays symmetric.
+    // Capsules without scope/name form get an empty list from
+    // `_read_sidecar_modules`; pass 2 will see the same empty list later, so
+    // the comparison stays symmetric. The `sfn/compiler` self-host is scoped
+    // and must take the sidecar-backed path.
     //
     // When `sidecar_path` IS non-empty (`-p` build with safe
     // scope/name), the file must exist — `_emit_capsule_artifact_sidecar`
