@@ -1,6 +1,6 @@
 [capsule]
 name = "sfn/archive"
-version = "0.1.0"
+version = "0.2.0"
 description = "In-process .tar.gz reading and writing for Sailfin"
 
 [dependencies]
