@@ -1,7 +1,7 @@
 ---
-sfep: TBD
+sfep: 0071
 title: In-Process .tar.gz Reader and Writer (sfn/archive)
-status: Draft
+status: Accepted
 type: tooling
 created: 2026-08-15
 updated: 2026-08-15
@@ -12,7 +12,7 @@ superseded-by:
 graduates-to:
 ---
 
-# SFEP-XXXX — In-Process `.tar.gz` Reader and Writer (`sfn/archive`)
+# SFEP-0071 — In-Process `.tar.gz` Reader and Writer (`sfn/archive`)
 
 ## 1. Summary
 

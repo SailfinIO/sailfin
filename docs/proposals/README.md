@@ -93,6 +93,7 @@ The next number is `max + 1`. Add a row in the same PR that introduces an SFEP.
 | [0068](./0068-native-cross-target-build.md) | Native Cross-Target Builds (`sfn build --target=<triple>`) | Accepted | tooling |
 | [0069](./0069-secret-buffer-zeroization.md) | Non-Elidable Zeroization for Uniquely Owned Secret Buffers | Accepted | runtime |
 | [0070](./0070-capsule-source-closure-reachability.md) | Import-Reachability Filtering of the Capsule Source Closure | Accepted | tooling |
+| [0071](./0071-archive-targz.md) | In-Process `.tar.gz` Reader and Writer (`sfn/archive`) | Accepted | tooling |
 
 ## Drafts under review (numbers assigned at merge)
 
@@ -112,14 +113,11 @@ Index row. Two slates are in review.
 | [`draft-import-surface-compaction`](./draft-import-surface-compaction.md) | Import-surface compaction across the phase rewind to cut emit peak RSS | runtime |
 | [`draft-concurrency-cancellation`](./draft-concurrency-cancellation.md) | Concurrency runtime maturity — cancel-on-fault and async I/O | runtime |
 
-**The native-Windows toolchain critical path:**
-
-| Draft | Title | Type |
-|---|---|---|
-| [`draft-archive-targz`](./draft-archive-targz.md) | In-Process `.tar.gz` Reader and Writer (`sfn/archive`) | tooling |
-
-Tracked by SFN-753. The last external-binary dependency on the seed-acquisition
-path: native TLS retired `curl` (SFN-341), leaving `tar` as the one tool a stock
+The **native-Windows toolchain critical path** design graduated out of this
+slate on 2026-08-15 and now holds an Index row: SFEP-0071 (in-process
+`.tar.gz`), tracked by SFN-753 and groomed into SFN-895/896/897/898/899/900.
+It removes the last external-binary dependency on the seed-acquisition path —
+native TLS retired `curl` (SFN-341), leaving `tar` as the one tool a stock
 Windows host does not have and `sfn toolchain install` still requires
 (`toolchain.sfn:418`). Blocks SFN-493 → SFN-57.
 
