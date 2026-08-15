@@ -42,9 +42,13 @@ test "toolchain layout: a complete entry lands the binary, alias, runtime, and m
 
     assert toolchain_lay_out_store_entry(root, store_dir, bin_path, expected);
 
-    // The binary lands at `bin_path` with the source's exact bytes.
+    // The binary lands at `bin_path` with the source's exact bytes, and is
+    // EXECUTABLE — `_copy_file` alone lands 0644, so this is what pins
+    // `fs.set_perms(bin_path, 493)` (toolchain.sfn) as load-bearing rather
+    // than incidental.
     assert fs.exists(bin_path);
     assert fs.readFile(bin_path) == "fake-toolchain-binary-bytes";
+    assert fs.is_executable(bin_path);
 
     // The `sfn` alias exists and is either a relative symlink to
     // "sailfin" or, on a host where `fs.symlink` refuses, a
@@ -83,5 +87,31 @@ test "toolchain layout: a missing source binary fails closed with no marker" ![i
 
     // The incomplete-install contract: no marker means the entry is not
     // read as complete on a later run.
+    assert ! fs.exists(store_dir + "/.sha256");
+}
+
+// The alias-fallback seam: pre-creating `store_dir + "/sfn"` as a DIRECTORY
+// forces every leg of `_toolchain_link_alias` to fail on a POSIX runner —
+// `fs.deleteFile` refuses a directory (EISDIR), `fs.symlink` then fails
+// EEXIST over the surviving directory, and `_copy_file`'s
+// `fopen(dir, "wb")` fails too — so `toolchain_lay_out_store_entry` must
+// return `false` without ever reaching the runtime bundle or the marker.
+// Without this seam, deleting the `_copy_file` fallback AND the caller's
+// `if !_toolchain_link_alias { ... return false; }` would fail no test at
+// all — SFN-906.
+test "toolchain layout: an alias path that cannot be replaced fails closed with no marker" ![io] {
+    let base = _scratch_dir() + "/alias-seam";
+    fs.createDirectory(base, true);
+    let root = _fake_extract_root(base);
+    let store_dir = base + "/store";
+    let bin_path = store_dir + "/sailfin";
+    let expected = "deadbeef00000000000000000000000000000000000000000000000000ff";
+
+    // Pre-create the alias path as a non-empty directory so nothing can
+    // replace it with a file or a link.
+    fs.createDirectory(store_dir + "/sfn", true);
+    fs.writeFile(store_dir + "/sfn/blocker", "occupying the alias path");
+
+    assert ! toolchain_lay_out_store_entry(root, store_dir, bin_path, expected);
     assert ! fs.exists(store_dir + "/.sha256");
 }
