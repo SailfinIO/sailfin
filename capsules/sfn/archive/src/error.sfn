@@ -1,0 +1,64 @@
+// sfn/archive — the capsule's single failure type.
+//
+// `Result<T, string>` is the established capsule convention
+// (`capsules/sfn/crypto/src/aead_aes_gcm.sfn:119`); `ArchiveError` is the
+// structured version of it. Deliberately NOT a `Diagnostic`: a `Diagnostic`
+// carries an `E0xxx` code and a source span over *user source*
+// (`.claude/rules/code-style.md`), and a downloaded tarball is neither
+// (draft-archive-targz.md §3.6). The CLI consumer (SFN-753 phase A3) maps
+// this onto `E0615` at the `sfn toolchain install` boundary.
+enum ArchiveErrorKind {
+    Io,
+    Truncated,
+    BadMagic,
+    BadChecksum,
+    UnsupportedFeature,
+    CorruptStream,
+    PathRejected,
+    LinkRejected,
+    LimitExceeded
+}
+
+struct ArchiveError {
+    kind: ArchiveErrorKind;
+    // Human-readable, already fully specific — the CLI prints it verbatim.
+    message: string;
+    // The offending member name, or "" for a stream-level failure.
+    member: string;
+    // Byte offset into the archive, or -1 when not meaningful.
+    offset: int;
+}
+
+// A stream-level failure with no member and no offset — the common case for
+// bytes.sfn, crc32.sfn, and gzip header parsing, none of which know which
+// tar member (if any) they are inside.
+fn archive_error(kind: ArchiveErrorKind, message: string) -> ArchiveError {
+    return ArchiveError {
+        kind: kind,
+        message: message,
+        member: "",
+        offset: -1
+    };
+}
+
+// A failure attributed to one archive member, with no meaningful byte
+// offset — the common case once ustar/path_guard parsing knows a member
+// name but is not reporting a specific byte within it.
+fn archive_error_member(kind: ArchiveErrorKind, message: string, member: string) -> ArchiveError {
+    return ArchiveError {
+        kind: kind,
+        message: message,
+        member: member,
+        offset: -1
+    };
+}
+
+// The fully specific case: a member and a byte offset within the archive.
+fn archive_error_at(kind: ArchiveErrorKind, message: string, member: string, offset: int) -> ArchiveError {
+    return ArchiveError {
+        kind: kind,
+        message: message,
+        member: member,
+        offset: offset
+    };
+}

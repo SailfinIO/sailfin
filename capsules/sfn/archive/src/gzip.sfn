@@ -1,0 +1,194 @@
+// sfn/archive — RFC 1952 gzip container framing, header parse only.
+//
+// This phase (SFN-895/A1) parses the fixed header plus the optional
+// FEXTRA/FNAME/FCOMMENT/FHCRC fields and reports where the deflate stream
+// begins. Inflating that stream is SFN-896's `inflate.sfn`; the streaming
+// `gzip_reader_open`/`gzip_read` API that owns a `FILE*` and therefore
+// carries `![io]` is a later phase too (draft-archive-targz.md §3.4).
+//
+// Pure: this module operates on an in-memory `ByteCursor` and declares no
+// effect, matching the pure-codec-layer split in draft §4 — only the
+// stream openers that touch a `FILE*` carry `![io]`, not header parsing
+// over bytes already in memory.
+import { ByteCursor, _byte_at } from "./bytes";
+import { ArchiveError, ArchiveErrorKind, archive_error } from "./error";
+
+let _GZIP_MAGIC0: int = 31;  // 0x1f
+let _GZIP_MAGIC1: int = 139;  // 0x8b
+let _GZIP_CM_DEFLATE: int = 8;
+
+let _FLG_FHCRC: int = 2;
+let _FLG_FEXTRA: int = 4;
+let _FLG_FNAME: int = 8;
+let _FLG_FCOMMENT: int = 16;
+
+// Parsed fixed-size fields plus the optional-field payloads. `xfl` and `os`
+// are carried through unexamined — nothing in this phase acts on them; the
+// writer (SFN-897) is what gives them meaning (canonical `MTIME=0, XFL=0,
+// OS=255` per draft §3.7). `fname`/`fcomment` are `""` when the
+// corresponding FLG bit is unset, which is indistinguishable from a
+// present-but-empty field — RFC 1952 gives a reader no way to tell those
+// apart, so no caller needs to.
+struct GzipHeader {
+    mtime: int;
+    xfl: int;
+    os: int;
+    fname: string;
+    fcomment: string;
+    has_extra: boolean;
+    has_crc16: boolean;
+}
+
+struct GzipHeaderResult {
+    header: GzipHeader;
+    // Cursor positioned at the first byte of the deflate stream — "where
+    // the deflate stream begins" is this phase's whole job.
+    body: ByteCursor;
+}
+
+fn _gzip_u8(cursor: ByteCursor, pos: int) -> Result<int, ArchiveError> {
+    if pos < 0 || pos >= cursor.len {
+        return Result.Err {
+            error: archive_error(ArchiveErrorKind.Truncated, "gzip header truncated")
+        };
+    }
+    return Result.Ok { value: _byte_at(cursor.addr + (pos as i64)) };
+}
+
+fn _gzip_u16le(cursor: ByteCursor, pos: int) -> Result<int, ArchiveError> {
+    let lo: int = _gzip_u8(cursor, pos)?;
+    let hi: int = _gzip_u8(cursor, pos + 1)?;
+    return Result.Ok { value: lo | (hi << 8) };
+}
+
+fn _gzip_u32le(cursor: ByteCursor, pos: int) -> Result<int, ArchiveError> {
+    let b0: int = _gzip_u8(cursor, pos)?;
+    let b1: int = _gzip_u8(cursor, pos + 1)?;
+    let b2: int = _gzip_u8(cursor, pos + 2)?;
+    let b3: int = _gzip_u8(cursor, pos + 3)?;
+    return Result.Ok { value: b0 | (b1 << 8) | (b2 << 16) | (b3 << 24) };
+}
+
+struct _GzipCstringResult {
+    text: string;
+    next_pos: int;
+}
+
+// Bounded scan for a NUL-terminated field (FNAME / FCOMMENT). RFC 1952
+// gives these no declared length, so a hostile stream lacking a terminator
+// must fail closed here, rather than via an unbounded `as string` cstr
+// cast reading past the buffer.
+fn _gzip_read_cstring(cursor: ByteCursor, pos: int) -> Result<_GzipCstringResult, ArchiveError> {
+    let max_field: int = 65536;
+    let mut i: int = pos;
+    let mut guard: int = 0;
+    loop {
+        if i >= cursor.len {
+            return Result.Err {
+                error: archive_error(ArchiveErrorKind.Truncated, "gzip header string field runs past the buffer")
+            };
+        }
+        guard += 1;
+        if guard > max_field {
+            return Result.Err {
+                error: archive_error(ArchiveErrorKind.CorruptStream, "gzip header string field exceeds 64 KiB without a NUL terminator")
+            };
+        }
+        if _byte_at(cursor.addr + (i as i64)) == 0 { break; }
+        i += 1;
+    }
+    // `i` is a confirmed in-bounds NUL, so the memchr this cast performs
+    // cannot read past it. `as string` *adopts* the cstr buffer rather than
+    // copying it (`runtime/sfn/string.sfn:469`'s "no copy" from_cstr), so
+    // without the `+ ""` this string would alias `cursor`'s backing
+    // `ByteBuf` and dangle the moment a caller frees it — the concatenation
+    // forces a real, independently-owned copy.
+    let adopted: string = ((cursor.addr + (pos as i64)) as *u8) as string;
+    let text: string = adopted + "";
+    return Result.Ok {
+        value: _GzipCstringResult { text: text, next_pos: i + 1 }
+    };
+}
+
+// Parse the RFC 1952 §2.3 header at `cursor`. Fields are read in the order
+// the RFC lays them out: the fixed 10-byte header, then FEXTRA, FNAME,
+// FCOMMENT, FHCRC — each gated by its FLG bit.
+fn gzip_parse_header(cursor: ByteCursor) -> Result<GzipHeaderResult, ArchiveError> {
+    let start: int = cursor.pos;
+    let magic0: int = _gzip_u8(cursor, start)?;
+    let magic1: int = _gzip_u8(cursor, start + 1)?;
+    if magic0 != _GZIP_MAGIC0 || magic1 != _GZIP_MAGIC1 {
+        return Result.Err {
+            error: archive_error(ArchiveErrorKind.BadMagic, "not a gzip stream (bad magic)")
+        };
+    }
+    let cm: int = _gzip_u8(cursor, start + 2)?;
+    if cm != _GZIP_CM_DEFLATE {
+        // No `sfn/strings` dependency for a one-off diagnostic: the capsule
+        // declares no dependencies (`capsule.toml`), and this message does
+        // not need the offending byte value to be actionable.
+        return Result.Err {
+            error: archive_error(ArchiveErrorKind.UnsupportedFeature, "gzip compression method is not deflate (CM must be 8)")
+        };
+    }
+    let flg: int = _gzip_u8(cursor, start + 3)?;
+    let mtime: int = _gzip_u32le(cursor, start + 4)?;
+    let xfl: int = _gzip_u8(cursor, start + 8)?;
+    let os: int = _gzip_u8(cursor, start + 9)?;
+
+    let mut pos: int = start + 10;
+    let has_extra: boolean = (flg & _FLG_FEXTRA) != 0;
+    if has_extra {
+        let xlen: int = _gzip_u16le(cursor, pos)?;
+        pos += 2;
+        if pos + xlen > cursor.len {
+            return Result.Err {
+                error: archive_error(ArchiveErrorKind.Truncated, "gzip FEXTRA field runs past the buffer")
+            };
+        }
+        pos += xlen;
+    }
+
+    let mut fname: string = "";
+    if (flg & _FLG_FNAME) != 0 {
+        let r: _GzipCstringResult = _gzip_read_cstring(cursor, pos)?;
+        fname = r.text;
+        pos = r.next_pos;
+    }
+
+    let mut fcomment: string = "";
+    if (flg & _FLG_FCOMMENT) != 0 {
+        let r: _GzipCstringResult = _gzip_read_cstring(cursor, pos)?;
+        fcomment = r.text;
+        pos = r.next_pos;
+    }
+
+    let has_crc16: boolean = (flg & _FLG_FHCRC) != 0;
+    if has_crc16 {
+        // Read-and-discard: verifying FHCRC needs a CRC-16 over the header
+        // bytes seen so far, which no phase in this epic needs and which
+        // RFC 1952 §2.3.1 itself treats as optional for a reader to check.
+        _gzip_u16le(cursor, pos)?;
+        pos += 2;
+    }
+
+    let header: GzipHeader = GzipHeader {
+        mtime: mtime,
+        xfl: xfl,
+        os: os,
+        fname: fname,
+        fcomment: fcomment,
+        has_extra: has_extra,
+        has_crc16: has_crc16
+    };
+    return Result.Ok {
+        value: GzipHeaderResult {
+            header: header,
+            body: ByteCursor {
+                addr: cursor.addr,
+                len: cursor.len,
+                pos: pos
+            }
+        }
+    };
+}

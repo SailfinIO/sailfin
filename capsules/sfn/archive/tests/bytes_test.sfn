@@ -1,0 +1,217 @@
+// capsules/sfn/archive/tests/bytes_test.sfn
+//
+// The SFN-895 step-0 byte-primitive probe, as a test rather than a scratch
+// build. `load_byte` is a compiler builtin that had only ever been spelled from
+// runtime source (`runtime/sfn/string.sfn:126`); this asserts it survives
+// lowering from a library capsule, which `sfn check` alone cannot show — a
+// builtin that fails to resolve fails at lowering, not typecheck.
+//
+// It is worth keeping past the probe: it pins the primitive every other layer
+// in this capsule reads bytes through.
+import {
+    _buf_alloc,
+    _buf_free,
+    _buf_store,
+    _byte_at
+} from "../src/bytes";
+import {
+    ByteBuf,
+    bytes_append_byte,
+    bytes_free,
+    bytes_from_int_array,
+    bytes_get,
+    bytes_len,
+    bytes_new,
+    bytes_set,
+    bytes_to_int_array
+} from "../src/bytes";
+
+test "archive bytes: load_byte round-trips a stored byte from capsule source" {
+    let buf: i64 = _buf_alloc(4);
+    _buf_store(buf, 0, 0);
+    _buf_store(buf, 1, 127);
+    _buf_store(buf, 2, 128);
+    _buf_store(buf, 3, 255);
+
+    // The high two matter most: a signed `load i8` would surface these as -128
+    // and -1. The builtin zero-extends, so a byte is always 0..255.
+    assert _byte_at(buf + 0) == 0;
+    assert _byte_at(buf + 1) == 127;
+    assert _byte_at(buf + 2) == 128;
+    assert _byte_at(buf + 3) == 255;
+
+    _buf_free(buf);
+}
+
+// A 0xff byte must read back as 255 through the `ByteBuf` API too, not just
+// the raw `_byte_at` primitive above — a signed re-interpretation anywhere
+// in `bytes_append_byte`/`bytes_get` would surface it as -1.
+test "archive bytes: a 0xff byte round-trips through ByteBuf as 255, not -1" {
+    let created = bytes_new(4);
+    match created {
+        Result.Ok { value }
+        : {
+            let appended = bytes_append_byte(value, 255);
+            match appended {
+                Result.Ok { value }
+                : {
+                    let got = bytes_get(value, 0);
+                    match got {
+                        Result.Ok { value }
+                        : {
+                            assert value == 255;
+                        },
+                        Result.Err { error }
+                        : {
+                            assert false;
+                        }
+                    }
+                    bytes_free(value);
+                },
+                Result.Err { error }
+                : {
+                    assert false;
+                }
+            }
+        },
+        Result.Err { error }
+        : {
+            assert false;
+        }
+    }
+}
+
+// Force growth past the tiny initial capacity requested — `bytes_new(1)`
+// rounds up to an 8-byte allocation, so appending 50 bytes must trigger at
+// least three doublings of `_bytes_grow`, relocating the storage at least
+// once. Every byte must still read back at its original index afterward.
+test "archive bytes: ByteBuf grows past its initial capacity and keeps every byte" {
+    let created = bytes_new(1);
+    match created {
+        Result.Ok { value }
+        : {
+            let mut buf: ByteBuf = value;
+            let mut i: int = 0;
+            loop {
+                if i >= 50 { break; }
+                let appended = bytes_append_byte(buf, i & 255);
+                match appended {
+                    Result.Ok { value }
+                    : buf = value,
+                    Result.Err { error }
+                    : {
+                        assert false;
+                    }
+                }
+                i += 1;
+            }
+            assert bytes_len(buf) == 50;
+            let mut j: int = 0;
+            loop {
+                if j >= 50 { break; }
+                let got = bytes_get(buf, j);
+                match got {
+                    Result.Ok { value }
+                    : {
+                        assert value == (j & 255);
+                    },
+                    Result.Err { error }
+                    : {
+                        assert false;
+                    }
+                }
+                j += 1;
+            }
+            bytes_free(buf);
+        },
+        Result.Err { error }
+        : {
+            assert false;
+        }
+    }
+}
+
+// `bytes_set` writes in place without changing length, and out-of-bounds
+// reads/writes fail closed rather than touching adjacent memory.
+test "archive bytes: bytes_set writes in place; out-of-bounds get/set errors" {
+    let created = bytes_from_int_array([1, 2, 3,]);
+    match created {
+        Result.Ok { value }
+        : {
+            let updated = bytes_set(value, 1, 99);
+            match updated {
+                Result.Ok { value }
+                : {
+                    let got = bytes_get(value, 1);
+                    match got {
+                        Result.Ok { value }
+                        : {
+                            assert value == 99;
+                        },
+                        Result.Err { error }
+                        : {
+                            assert false;
+                        }
+                    }
+
+                    let oob_get = bytes_get(value, 3);
+                    match oob_get {
+                        Result.Ok { value }
+                        : {
+                            assert false;
+                        },
+                        Result.Err { error }
+                        : {
+                            assert true;
+                        }
+                    }
+
+                    let oob_set = bytes_set(value, -1, 0);
+                    match oob_set {
+                        Result.Ok { value }
+                        : {
+                            assert false;
+                        },
+                        Result.Err { error }
+                        : {
+                            assert true;
+                        }
+                    }
+
+                    bytes_free(value);
+                },
+                Result.Err { error }
+                : {
+                    assert false;
+                }
+            }
+        },
+        Result.Err { error }
+        : {
+            assert false;
+        }
+    }
+}
+
+// `int[]` interop (test-boundary only, draft §3.3) round-trips.
+test "archive bytes: bytes_from_int_array / bytes_to_int_array round-trip" {
+    let src: int[] = [0, 1, 127, 128, 255,];
+    let created = bytes_from_int_array(src);
+    match created {
+        Result.Ok { value }
+        : {
+            let out = bytes_to_int_array(value);
+            assert out.length == src.length;
+            assert out[0] == 0;
+            assert out[1] == 1;
+            assert out[2] == 127;
+            assert out[3] == 128;
+            assert out[4] == 255;
+            bytes_free(value);
+        },
+        Result.Err { error }
+        : {
+            assert false;
+        }
+    }
+}

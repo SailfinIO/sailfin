@@ -1,0 +1,18 @@
+[capsule]
+name = "sfn/archive"
+version = "0.1.0"
+description = "In-process .tar.gz reading and writing for Sailfin"
+
+[dependencies]
+
+[capabilities]
+# The pure layers — bytes, crc32, inflate, deflate, ustar framing, and the
+# extraction path guard — are computation over buffers and need no capability.
+# `io` is required by the file-backed reader/writer sources only. Declared here
+# because `required` is a ceiling on this capsule's OWN functions, checked when
+# `sfn/archive` is the resolved project root; it is not inherited by consumers.
+required = ["io"]
+
+[build]
+entry = "src/mod.sfn"
+kind = "library"
