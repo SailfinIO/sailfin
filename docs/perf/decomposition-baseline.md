@@ -284,3 +284,243 @@ Both commands exited 0 on every timed run. The measured check paths performed
 no LLVM lowering. A future Linux x86_64 run on the frozen baseline host remains
 required before these values can accept or reject the optional
 `sfn/module-interface` split under SFEP-0020 §3.3.
+
+## 2026-08-15 — SFN-747 §3.3 adjudication (Linux x86_64, five-point series)
+
+**Verdict: over the 5% gate.** Three-run median cold `sfn check` peak RSS on the
+`trivial` workload regressed from **157.7 MiB to 696.3 MiB (+341.5%)** between
+the monolith baseline and the current tree — **68× the 7.9 MiB budget**. The
+`sfn/analyzer` extraction's own isolated marginal cost is **+35.0%**, itself 7×
+the gate. Recorded in SFEP-0020 §3.3.
+
+The verdict carries a second finding that matters more than the number: the
+regression is **not** caused by the `sfn/analyzer -> sfn/ir` edge that §3.3's
+prescribed remedy targets, so the `sfn/module-interface` split would not
+resolve it. See "Why the sanctioned remedy does not match the cause" below.
+
+### Host and toolchain
+
+| Field | Value |
+|---|---|
+| Commits measured | five points, `959f2bdb` … `cd64ea05` (table below) |
+| Compiler under test | `build/bin/sfn`, self-hosted at each commit via `make compile` |
+| Seed | each commit's own `bootstrap.toml [seed].version` (0.9.1 / 0.9.3 / 0.9.5) |
+| OS / kernel | Linux 6.18.5-fc-v20, x86_64 |
+| CPU | Intel Xeon @ 2.80GHz, 4 cores |
+| RAM | 15.7 GiB |
+| clang | Ubuntu clang 18.1.3 |
+| Memory cap | default 8 GiB `RLIMIT_AS` self-cap (not overridden) |
+| Captured | 2026-08-15T01:1xZ |
+
+**This host is not the frozen baseline host** — same kernel line, same core
+count, same RAM, same clang, but a 2.80GHz Xeon against the baseline's 2.10GHz.
+The same-host rule is nonetheless satisfied, by re-measuring the monolith
+commit here rather than by asserting hardware equivalence. That re-measurement
+reproduced the frozen numbers to within 0.2 MiB on all three workloads:
+
+| Workload | Frozen baseline (2026-08-05 host) | Re-measured here (M0) | Delta |
+|---|---:|---:|---:|
+| `trivial` | 157.8 MiB | 157.7 MiB | −0.1 MiB |
+| `examples` | 105.9 MiB | 105.8 MiB | −0.1 MiB |
+| `compiler-src` / `allsrc` | 3,345.7 MiB | 3,345.5 MiB | −0.2 MiB |
+
+**Peak RSS is portable across these two hosts; wall time is not.** The same
+monolith commit takes 33.46 s on the baseline host and 43.60 s here on
+`allsrc` — a 30% wall difference against a 0.006% RSS difference. This
+retrospectively strengthens the frozen document's "peak RSS carries the
+decision" finding: RSS survives a host change that would have made any
+wall-time verdict meaningless.
+
+### Three corrections to the frozen procedure
+
+**1. `compiler-src` is not comparable as literally defined, and was replaced.**
+The frozen workload is `compiler/src/**/*.sfn`. The extractions *move* those
+files into `compiler/capsules/*/src/`, so that glob falls 357 → 129 while the
+compiler's actual source count *grows* 357 → 385. Measuring the frozen glob at
+HEAD would have reported a large fake improvement from checking 64% fewer
+files. This section therefore uses **`allsrc` = `compiler/src` +
+`compiler/capsules/*/src`**, and the file count is printed in every row so the
++7.8% growth in real work is visible rather than hidden.
+
+**2. `trivial` and `examples` measure different things, and only `trivial`
+exercises the mechanism under adjudication.** The frozen document attributes
+the `trivial` > `examples` inversion to `![io]` and `print.info` pulling a
+wider import closure. That is not the main cause. `trivial`
+(`compiler/tests/fixtures/cli/clean_effect.sfn`) sits under `compiler/`, which
+carries a `capsule.toml`; `examples/basics/*.sfn` has no capsule manifest above
+it (only the root `workspace.toml`). Project-root discovery therefore resolves
+the compiler's capsule graph for `trivial` and resolves nothing for `examples`.
+This makes `examples` a **negative control** rather than a second reading of
+the same quantity — a role the frozen document did not know it had.
+
+**3. Both fixtures were verified byte-identical across all five commits**
+(SHA-256 of the `trivial` fixture and of the `examples/basics` tree), so the
+primary signal is a controlled comparison and not a moving target.
+
+### Measurement points
+
+| Label | Commit | Seed | What landed | `compiler/src` | capsules |
+|---|---|---|---|---:|---:|
+| M0 | `959f2bdb` | 0.9.1 | monolith — the frozen baseline commit | 357 | 0 |
+| M1 | `b28fec58` | 0.9.3 | import-context reads moved into driver (#2856) | 368 | 0 |
+| M2 | `03598a6b` | 0.9.3 | `sfn/syntax` (#2872) + `sfn/ir` (#2878) extracted | 323 | 49 |
+| M3 | `91ee684a` | 0.9.3 | `sfn/analyzer` extracted (#2880) | 275 | 98 |
+| M4 | `cd64ea05` | 0.9.5 | `sfn/codegen` (#2908) + `sfn/codegen-llvm` (#2909) | 129 | 256 |
+
+The issue that commissioned this run assumed HEAD was the post-analyzer point.
+It is not — two further extractions landed after #2880, so M3 is the
+post-analyzer reading and M4 is the current tree. Isolating M3 is what makes
+the analyzer's marginal cost visible at all.
+
+### A. Cold `sfn check` — three-run medians, all five points
+
+Procedure matched frozen section A: one discarded warm-up, three timed runs,
+`/usr/bin/time -f "%e %M"`. Every run of every workload at every point exited 0.
+All 45 raw per-run values are committed as
+`docs/baselines/check-sfep0020-adjudication-linux-x86_64.csv`
+(`label,sha,workload,files,run,wall_s,peak_kb,exit`), so every median below is
+recomputable from the record rather than taken on trust.
+
+**`trivial` (1 file, inside the compiler capsule project) — the primary signal**
+
+| Point | Wall median | vs M0 | Peak RSS median | vs M0 | RSS spread |
+|---|---:|---:|---:|---:|---:|
+| M0 monolith | 0.51 s | — | **157.7 MiB** | — | 0.07% |
+| M1 import-context | 0.72 s | +41.2% | **206.9 MiB** | **+31.2%** | 0.06% |
+| M2 post-syntax+ir | 1.33 s | +160.8% | **342.8 MiB** | **+117.4%** | 0.03% |
+| M3 post-analyzer | 1.86 s | +264.7% | **462.9 MiB** | **+193.5%** | 0.02% |
+| M4 current tree | 3.16 s | +519.6% | **696.3 MiB** | **+341.5%** | 0.02% |
+
+**`examples` (15 files, no capsule manifest above them) — negative control**
+
+| Point | Wall median | Peak RSS median | vs M0 | RSS spread |
+|---|---:|---:|---:|---:|
+| M0 | 0.31 s | 105.8 MiB | — | 0.07% |
+| M1 | 0.32 s | 109.4 MiB | +3.3% | 0.04% |
+| M2 | 0.35 s | 114.7 MiB | +8.3% | 0.14% |
+| M3 | 0.34 s | 116.2 MiB | +9.8% | 0.06% |
+| M4 | 0.40 s | 132.7 MiB | +25.4% | 0.13% |
+
+**`allsrc` (whole compiler tree) — corroborating amortized signal**
+
+| Point | Files | Wall median | vs M0 | Peak RSS median | vs M0 |
+|---|---:|---:|---:|---:|---:|
+| M0 | 357 | 43.60 s | — | 3,345.5 MiB | — |
+| M1 | 368 | 44.19 s | +1.4% | 3,391.0 MiB | +1.4% |
+| M2 | 372 | 33.29 s | −23.6% | 2,817.8 MiB | −15.8% |
+| M3 | 373 | 33.88 s | −22.3% | 3,050.9 MiB | −8.8% |
+| M4 | 385 | 37.10 s | −14.9% | 2,847.6 MiB | −14.9% |
+
+The amortized workload **improved** by 14.9% on both metrics while checking 28
+more files. The decomposition is not globally more expensive — it moved cost
+from the amortized path onto the fixed per-invocation floor, which is precisely
+the ratio the frozen document chose these three workloads to bracket.
+
+### The mechanism, measured directly
+
+The cost is capsule-graph resolution at check time, and it can be isolated
+without reference to any historical commit. Copying the `trivial` fixture
+outside any project (identical bytes, verified by SHA-256) and checking both
+with the same M4 binary:
+
+| Target | Wall | Peak RSS | Result |
+|---|---:|---:|---|
+| `compiler/tests/fixtures/cli/clean_effect.sfn` (in project) | 3.16 s | **696.3 MiB** | `checked 1 files: ok` |
+| `/tmp/probe/clean_effect.sfn` (identical bytes, no project) | 0.33 s | **131.8 MiB** | `checked 1 files: ok` |
+
+Same source, same verdict, **5.3× the memory and 9.6× the wall time.** The
+entire difference is capsule resolution and staging. Two corroborations: the
+out-of-project figure (131.8 MiB) matches the `examples` median (132.7 MiB),
+confirming `examples` resolves no capsule graph and is a true control; and the
+in-project figure at M0, when `compiler/capsule.toml` declared no internal
+capsule dependencies, was 157.7 MiB.
+
+The code path was traced independently of the measurement:
+`_cr_collect_capsule_sources` (`compiler/src/capsule_resolver/discovery.sfn:181-251`)
+walks a dependency capsule's entire `src/` tree and pushes every `.sfn` file,
+with no import-relevance test, driven transitively through declared
+`[dependencies]` (`discovery.sfn:552-575`). SFN-833 / SFEP-0070 added an
+import-reachability filter that narrows this to the reachable closure — but
+`sfn check` deliberately does **not** call it
+(`compiler/src/capsule_resolver/reachability.sfn:648-665`), on the invariant
+that check's staged set must remain a superset of build's. So check pays the
+unfiltered cost by design.
+
+### Applying the 5% rule
+
+Thresholds derived from the M0 medians re-measured on this host:
+
+| Workload | 5% of wall median | 5% of RSS median | Measured RSS regression | Verdict |
+|---|---:|---:|---:|---|
+| `trivial` | 26 ms | 7.9 MiB | **+538.6 MiB** | **over — 68×** |
+| `examples` | 16 ms | 5.3 MiB | +26.9 MiB | over — 5.1× |
+| `allsrc` | 2.18 s | 167.3 MiB | −497.8 MiB | under (improved) |
+
+The gate is exceeded on the primary signal by any reading. Isolating the
+`sfn/analyzer` extraction alone (M2 → M3, an interval spanning only 5 commits):
+**+120.1 MiB, +35.0%** on `trivial` — 7× the gate on its own, and the tightest
+attribution in the series.
+
+The `examples` control also exceeds the gate (+25.4%), but it resolves no
+capsule graph, so that drift is ordinary compiler growth across 154 commits and
+is not attributable to decomposition. Netting it out, the capsule-attributable
+share of the `trivial` regression is roughly 316 percentage points of the 341.5.
+
+### Why the sanctioned remedy does not match the cause
+
+§3.3 permits exactly one remedy for an over-gate result: split the serialized
+import contract into a narrow `sfn/module-interface` capsule. The measurements
+say that remedy would not fix what was measured.
+
+§3.3's cost model is the `sfn/analyzer -> sfn/ir` edge making *analyzer-only
+consumers* stage the whole IR capsule. But `compiler/capsule.toml` declares all
+five internal capsules **directly** — at M0 it declared none:
+
+```toml
+# HEAD                          # M0 (959f2bdb)
+"sfn/syntax"      = "*"         (no internal capsule dependencies)
+"sfn/ir"          = "*"
+"sfn/analyzer"    = "*"
+"sfn/codegen"     = "*"
+"sfn/codegen-llvm" = "*"
+```
+
+So checking a file in the compiler project enumerates all five capsules through
+the root manifest, whether or not `sfn/analyzer` names `sfn/ir`. The regression
+tracks the *number of declared capsules*, not that one edge — each extraction
+adds cost of the same order (syntax+ir +136 MiB, analyzer +120 MiB,
+codegen+codegen-llvm +233 MiB). Splitting `sfn/module-interface` would remove
+part of one 120 MiB contribution out of a 539 MiB regression, leaving the great
+majority in place. There is also no analyzer-only consumer in the tree today —
+only one binary capsule exists, and it depends on all five — so the specific
+shape §3.3 reasoned about is currently hypothetical.
+
+The remedy the evidence points to is extending the SFN-833 reachability filter
+to the check path. That is not one of the two approaches §3.3 forbids (it
+neither moves artifact parsing into the analyzer nor restores a generic common
+capsule), but it is also not the remedy §3.3 sanctions, so it needs an explicit
+design decision rather than an implementer's judgement call. Filed as a
+follow-up rather than decided here.
+
+### Caveats
+
+- **Each point self-hosts from its own pinned seed** (0.9.1 / 0.9.3 / 0.9.5),
+  so the measured binary's codegen partly reflects the seed that built it. This
+  matches how the frozen baseline was produced — each point is the compiler as
+  it actually was at that commit — but it is a genuine confound for
+  seed-sensitive quantities. It does not plausibly explain a 341% RSS change
+  whose mechanism is independently traced to source enumeration, and the M0
+  re-measurement reproducing the frozen numbers to 0.2 MiB bounds seed-to-seed
+  drift on this instrument as very small.
+- **Intervals are not single commits.** M0→M1 spans 48 commits, M1→M2 27, M3→M4
+  74. Only **M2→M3 (5 commits)** is a tight attribution — which is fortunate,
+  since that is the analyzer interval the gate is actually about. The other
+  deltas should be read as "the wave", not as single changes.
+- The `trivial` workload is the compiler's own tree, whose root manifest
+  declares five internal capsules. An ordinary user project declaring one or
+  two dependencies pays a proportionally smaller cost. The regression is real
+  for anyone running `sfn check` inside a multi-capsule project, but 341% is
+  the compiler's own figure, not a universal user-facing number.
+- Wall time is reported for completeness and corroborates the RSS story on
+  `trivial` (+519.6%), but per the frozen document's resolvability analysis the
+  sub-second wall readings do not independently carry the verdict.
