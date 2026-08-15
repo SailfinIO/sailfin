@@ -143,11 +143,154 @@ fn _package_basename(path: string) -> string {
     return substring(path, last_slash + 1, path.length);
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// Registry transport
+// ═══════════════════════════════════════════════════════════════════
+//
+// The registry transport reaches the runtime's HTTP primitive through a plain
+// `extern fn` rather than by depending on the `sfn/http` capsule (SFN-496).
+//
+// Declaring `"sfn/http"` in `compiler/capsule.toml` makes that capsule's
+// barrel — which exports its own client `get(url: string) -> string ![net]` —
+// visible across the whole compiler tree, where it collides on bare name with
+// `sfn/cli`'s `get(m: Matches, name: string)` and with `env.get`. Imported
+// names are matched without provenance, so the collision resolves to the
+// wrong declaration: the effect checker then demands `![net]` from a dozen
+// unrelated commands (`E0402` in `completion`, `config`, `dev`, `emit`,
+// `login`, `symbols`, `toolchain`), and LLVM lowering emits colliding calls
+// with the wrong ABI. The extern reaches the same runtime symbol with no
+// capsule dependency and therefore no new names in scope. Collapse this back
+// onto `sfn/http`'s typed `fetch` once SFN-893 makes name resolution
+// provenance-aware.
+//
+// The extern carries no effect annotation (externs may not); enforcement
+// rides on the `![net]` wrappers below. `sfn_http_request_raw` returns the
+// FULL raw response (status line + headers + body) as a caller-owned
+// NUL-terminated buffer, or null on a socket/connect/TLS failure.
+extern fn sfn_http_request_raw(method: *u8, url: *u8, headers: *u8, body: *u8) -> *u8;
+
+// Status code and body of a registry HTTP call. `status` is 0 when the
+// request never reached the server (connect/socket failure).
+struct RegistryResponse {
+    status: int;
+    body: string;
+}
+
+// Drop a single trailing CR, so a CRLF-delimited line compares as its text.
+fn _registry_strip_cr_cmd(line: string) -> string {
+    let n = line.length;
+    if n == 0 { return line; }
+    if substring(line, n - 1, n) != "\r" { return line; }
+    return substring(line, 0, n - 1);
+}
+
+// Leading run of ASCII digits as an int; 0 when there are none.
+fn _registry_parse_int_cmd(s: string) -> int {
+    let mut value: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= s.length { break; }
+        let code = char_code(substring(s, i, i + 1));
+        if code < 48 { break; }
+        if code > 57 { break; }
+        value = value * 10 + (code - 48);
+        i += 1;
+    }
+    return value;
+}
+
+// Status code and body out of a raw HTTP/1.1 response. Mirrors the status and
+// body halves of `sfn/http`'s `parse_response`; the header lines are walked
+// only to find the blank line that starts the body, since no caller here reads
+// response headers.
+fn _registry_parse_response_cmd(raw: string) -> RegistryResponse {
+    let total = raw.length;
+    if total == 0 {
+        return RegistryResponse { status: 0, body: "" };
+    }
+
+    let line_nl = find_char_local(raw, "\n", 0);
+    let mut line_end = total;
+    if line_nl >= 0 { line_end = line_nl; }
+    let status_line = _registry_strip_cr_cmd(substring(raw, 0, line_end));
+
+    // "HTTP/1.1 <code> <reason>" — the code is the token after the first space.
+    let mut status: int = 0;
+    let sp1 = find_char_local(status_line, " ", 0);
+    if sp1 >= 0 {
+        let sp2 = find_char_local(status_line, " ", sp1 + 1);
+        let mut code_end = status_line.length;
+        if sp2 >= 0 { code_end = sp2; }
+        status = _registry_parse_int_cmd(substring(status_line, sp1 + 1, code_end));
+    }
+
+    let mut body: string = "";
+    let mut cursor = total;
+    if line_nl >= 0 { cursor = line_nl + 1; }
+    loop {
+        if cursor >= total { break; }
+        let nl = find_char_local(raw, "\n", cursor);
+        let mut end = total;
+        if nl >= 0 { end = nl; }
+        let line = _registry_strip_cr_cmd(substring(raw, cursor, end));
+        let mut next = total;
+        if nl >= 0 { next = nl + 1; }
+        if line.length == 0 {
+            body = substring(raw, next, total);
+            break;
+        }
+        if nl < 0 { break; }
+        cursor = next;
+    }
+    return RegistryResponse { status: status, body: body };
+}
+
+// Perform `method url` with `headers` ("Name: value" lines) and `body`. The
+// runtime owns the Host / Content-Length / Connection framing.
+fn _registry_request_cmd(method: string, url: string, headers: string[], body: string) -> RegistryResponse ![net] {
+    let mut headers_blob: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= headers.length { break; }
+        headers_blob = headers_blob + headers[i] + "\r\n";
+        i += 1;
+    }
+    let raw_ptr = sfn_http_request_raw(method as *u8, url as *u8, headers_blob as *u8, body as *u8);
+    if raw_ptr as i64 == 0 {
+        // Connect/socket failure — surface status 0 rather than dereferencing
+        // a null buffer as a string.
+        return RegistryResponse { status: 0, body: "" };
+    }
+    return _registry_parse_response_cmd(raw_ptr as string);
+}
+
+// GET `url` and return the response body, or "" on any transport failure or
+// a non-2xx status. The status gate preserves the fail-closed semantics the
+// pre-SFN-496 shelled fetch had (`-f`): a 4xx/5xx index fetch is a miss, not
+// a body.
+fn _registry_get_cmd(url: string) -> string ![net] {
+    let resp = _registry_request_cmd("GET", url, [], "");
+    if resp.status < 200 { return ""; }
+    if resp.status >= 300 { return ""; }
+    return resp.body;
+}
+
+// POST `json_body` to `url` with a bearer `auth_header`, returning the raw
+// status and body so the caller can distinguish "unreachable" (status 0) from
+// a server-side rejection.
+fn _registry_post_json_cmd(url: string, auth_header: string, json_body: string) -> RegistryResponse ![net] {
+    return _registry_request_cmd("POST", url, ["Content-Type: application/json", "Authorization: "
+        + auth_header], json_body);
+}
+
 export {
     _is_safe_capsule_segment_cmd,
     _is_safe_capsule_version_cmd,
     _resolve_registry_url_cmd,
     _package_basename,
     _strip_trailing_slash_cmd,
-    _is_valid_registry_url_cmd
+    _is_valid_registry_url_cmd,
+    RegistryResponse,
+    _registry_get_cmd,
+    _registry_post_json_cmd
 };
