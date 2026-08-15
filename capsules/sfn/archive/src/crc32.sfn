@@ -1,0 +1,72 @@
+// sfn/archive — RFC 1952 §8 CRC-32.
+//
+// The same reflected, table-driven algorithm every gzip implementation
+// uses: polynomial 0xEDB88320 (ISO 3309 / ITU-T V.42, reflected), initial
+// and final XOR 0xFFFFFFFF. The gzip trailer (RFC 1952 §2.3.1) checksums
+// the decompressed stream, and a future `.zip` central directory entry
+// (SFEP-0071 §10) needs this exact checksum unchanged.
+//
+// Exposed as both a one-shot (`crc32`) and an incremental update
+// (`crc32_init` / `crc32_update` / `crc32_finish`), because the gzip
+// reader checksums a decompressed stream in chunks rather than all at
+// once (SFEP-0071 §3.4) — `crc32(whole_cursor)` alone would force materializing
+// the entire decompressed member before it could be verified.
+import { ByteCursor, _byte_at } from "./bytes";
+
+let _CRC32_POLY: int = 3988292384;  // 0xEDB88320, reflected
+
+// Built on demand rather than cached as a module global: crc32 runs at
+// most a few dozen times per archive member (once per stream, or once per
+// chunk during incremental checksumming), so regenerating the 256-entry
+// table (~2000 shift/xor ops) each time is cheap and keeps this module out
+// of the runtime-initialized-module-global class of bug that #1386/#1389
+// exists to guard against.
+fn _crc32_table() -> int[] {
+    let mut table: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= 256 { break; }
+        let mut c: int = i;
+        let mut k: int = 0;
+        loop {
+            if k >= 8 { break; }
+            if (c & 1) != 0 { c = (c >> 1) ^ _CRC32_POLY; } else { c = c >> 1; }
+            k += 1;
+        }
+        table.push(c & 4294967295);
+        i += 1;
+    }
+    return table;
+}
+
+// Running CRC-32 state. `crc` is carried in the algorithm's inverted
+// working form; `crc32_finish` applies the final XOR to recover the
+// conventional value.
+struct Crc32State {
+    crc: int;
+}
+
+fn crc32_init() -> Crc32State {
+    return Crc32State { crc: 4294967295 };  // 0xFFFFFFFF
+}
+
+fn crc32_update(state: Crc32State, cursor: ByteCursor) -> Crc32State {
+    let table: int[] = _crc32_table();
+    let mut crc: int = state.crc;
+    let mut pos: int = cursor.pos;
+    loop {
+        if pos >= cursor.len { break; }
+        let byte: int = _byte_at(cursor.addr + (pos as i64));
+        let idx: int = (crc ^ byte) & 255;
+        crc = table[idx] ^ (crc >> 8);
+        pos += 1;
+    }
+    return Crc32State { crc: crc };
+}
+
+fn crc32_finish(state: Crc32State) -> int { return state.crc ^ 4294967295; }
+
+// One-shot CRC-32 over `cursor` (from `cursor.pos` to `cursor.len`).
+fn crc32(cursor: ByteCursor) -> int {
+    return crc32_finish(crc32_update(crc32_init(), cursor));
+}

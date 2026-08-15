@@ -1,0 +1,252 @@
+// capsules/sfn/archive/tests/gzip_test.sfn
+//
+// RFC 1952 §2.3 header framing (SFEP-0071 §8.1): the FLG
+// matrix with each optional field present alone and in combination, plus
+// the two hard-error cases a reader must reject before ever touching a
+// deflate decoder — bad magic and an unsupported compression method.
+import {
+    ByteCursor,
+    bytes_cursor,
+    bytes_free,
+    bytes_from_int_array
+} from "../src/bytes";
+import { ArchiveErrorKind } from "../src/error";
+import { GzipHeader, GzipHeaderResult, gzip_parse_header } from "../src/gzip";
+
+let _FLG_FHCRC: int = 2;
+let _FLG_FEXTRA: int = 4;
+let _FLG_FNAME: int = 8;
+let _FLG_FCOMMENT: int = 16;
+
+// "a.txt\0" — an arbitrary short FNAME payload, including its terminator.
+fn _fname_bytes() -> int[] {
+    return [97, 46, 116, 120, 116, 0,];
+}
+
+// "hi\0" — an arbitrary short FCOMMENT payload, including its terminator.
+fn _fcomment_bytes() -> int[] {
+    return [104, 105, 0,];
+}
+
+fn _push_all(dst: int[], src: int[]) -> void {
+    let mut i: int = 0;
+    loop {
+        if i >= src.length { break; }
+        dst.push(src[i]);
+        i += 1;
+    }
+}
+
+// Trailing bytes standing in for "the deflate stream" — this phase never
+// inflates them, so any fixed marker works. Parsing must leave `body`
+// pointing exactly at the first one (222 == 0xDE).
+fn _body_marker() -> int[] {
+    return [222, 173, 190, 239,];
+}
+
+// The fixed 10-byte RFC 1952 header: magic (0x1f, 0x8b), CM = 8 (deflate),
+// FLG, a zero MTIME (unexamined by this phase), XFL = 0, OS = 255
+// (unknown). `sfn fmt` does not round-trip a per-element trailing comment
+// inside a multi-line array literal cleanly, so the field meanings are
+// documented here instead of inline on the array below.
+fn _fixed_header(flg: int) -> int[] {
+    return [31, 139, 8, flg, 0, 0, 0, 0, 0, 255,];
+}
+
+// Assemble a full RFC 1952 header: the fixed 10 bytes, then FEXTRA, FNAME,
+// FCOMMENT, FHCRC in that order (only the ones set in `flg`), then the
+// body marker.
+fn _gzip_stream(flg: int) -> int[] {
+    let mut out: int[] = _fixed_header(flg);
+    if (flg & _FLG_FEXTRA) != 0 {
+        // XLEN = 3, then 3 arbitrary extra-field bytes.
+        _push_all(out, [3, 0, 9, 9, 9,]);
+    }
+    if (flg & _FLG_FNAME) != 0 { _push_all(out, _fname_bytes()); }
+    if (flg & _FLG_FCOMMENT) != 0 { _push_all(out, _fcomment_bytes()); }
+    if (flg & _FLG_FHCRC) != 0 {
+        _push_all(out, [1, 2,]);
+    }
+    _push_all(out, _body_marker());
+    return out;
+}
+
+// A zeroed placeholder, returned only from the "should be unreachable"
+// branches below — `assert false` fails the test before a caller could
+// ever observe this value.
+fn _dummy_result() -> GzipHeaderResult {
+    return GzipHeaderResult {
+        header: GzipHeader {
+            mtime: 0,
+            xfl: 0,
+            os: 0,
+            fname: "",
+            fcomment: "",
+            has_extra: false,
+            has_crc16: false
+        },
+        body: ByteCursor { addr: 0, len: 0, pos: 0 }
+    };
+}
+
+// Parse `arr` and hand the successful result to the caller for inline
+// assertions, then free the backing buffer. Asserts failure (rather than
+// returning it) on a parse error, since every caller here expects success.
+fn _assert_parses(arr: int[]) -> GzipHeaderResult {
+    let buf = bytes_from_int_array(arr);
+    match buf {
+        Result.Ok { value }
+        : {
+            let parsed = gzip_parse_header(bytes_cursor(value));
+            bytes_free(value);
+            match parsed {
+                Result.Ok { value }
+                : return value,
+                Result.Err { error }
+                : {
+                    assert false;
+                    return _dummy_result();
+                }
+            }
+        },
+        Result.Err { error }
+        : {
+            assert false;
+            return _dummy_result();
+        }
+    }
+}
+
+// `body.addr` no longer points at live storage once `_assert_parses` frees
+// the buffer, so every assertion here reads only the plain scalar fields
+// (`pos`/`len`/`mtime`/`fname`/...), never dereferences `body.addr`, and
+// checks the marker's *position* rather than its bytes.
+test "archive gzip: minimal header (no optional fields)" {
+    let result = _assert_parses(_gzip_stream(0));
+    assert result.header.fname == "";
+    assert result.header.fcomment == "";
+    assert result.header.has_extra == false;
+    assert result.header.has_crc16 == false;
+    assert result.body.pos == 10;
+}
+
+test "archive gzip: FNAME alone" {
+    let result = _assert_parses(_gzip_stream(_FLG_FNAME));
+    assert result.header.fname == "a.txt";
+    assert result.header.fcomment == "";
+    assert result.body.pos == 10 + _fname_bytes().length;
+}
+
+test "archive gzip: FCOMMENT alone" {
+    let result = _assert_parses(_gzip_stream(_FLG_FCOMMENT));
+    assert result.header.fname == "";
+    assert result.header.fcomment == "hi";
+    assert result.body.pos == 10 + _fcomment_bytes().length;
+}
+
+test "archive gzip: FEXTRA alone" {
+    let result = _assert_parses(_gzip_stream(_FLG_FEXTRA));
+    assert result.header.has_extra == true;
+    // 10 (fixed header) + 2 (XLEN) + 3 (extra field bytes).
+    assert result.body.pos == 15;
+}
+
+test "archive gzip: FHCRC alone" {
+    let result = _assert_parses(_gzip_stream(_FLG_FHCRC));
+    assert result.header.has_crc16 == true;
+    assert result.body.pos == 12;
+}
+
+test "archive gzip: FEXTRA + FNAME + FCOMMENT + FHCRC combined" {
+    let flg = _FLG_FEXTRA | _FLG_FNAME | _FLG_FCOMMENT | _FLG_FHCRC;
+    let result = _assert_parses(_gzip_stream(flg));
+    assert result.header.has_extra == true;
+    assert result.header.fname == "a.txt";
+    assert result.header.fcomment == "hi";
+    assert result.header.has_crc16 == true;
+    let expected = 10 + 5 + _fname_bytes().length + _fcomment_bytes().length + 2;
+    assert result.body.pos == expected;
+}
+
+test "archive gzip: bad magic is rejected" {
+    let mut arr = _gzip_stream(0);
+    arr[0] = 0;
+    let buf = bytes_from_int_array(arr);
+    match buf {
+        Result.Ok { value }
+        : {
+            let parsed = gzip_parse_header(bytes_cursor(value));
+            bytes_free(value);
+            match parsed {
+                Result.Ok { value }
+                : {
+                    assert false;
+                },
+                Result.Err { error }
+                : {
+                    assert error.kind == ArchiveErrorKind.BadMagic;
+                }
+            }
+        },
+        Result.Err { error }
+        : {
+            assert false;
+        }
+    }
+}
+
+test "archive gzip: a non-deflate compression method is rejected" {
+    let mut arr = _gzip_stream(0);
+    arr[2] = 9;  // anything other than 8 (deflate)
+    let buf = bytes_from_int_array(arr);
+    match buf {
+        Result.Ok { value }
+        : {
+            let parsed = gzip_parse_header(bytes_cursor(value));
+            bytes_free(value);
+            match parsed {
+                Result.Ok { value }
+                : {
+                    assert false;
+                },
+                Result.Err { error }
+                : {
+                    assert error.kind == ArchiveErrorKind.UnsupportedFeature;
+                }
+            }
+        },
+        Result.Err { error }
+        : {
+            assert false;
+        }
+    }
+}
+
+test "archive gzip: a header truncated before FNAME's terminator errors rather than reading past the buffer" {
+    let full = _gzip_stream(_FLG_FNAME);
+    // Cut the stream inside the FNAME field, well before its NUL and well
+    // before the body marker that would otherwise mask an over-read.
+    let cut: int[] = [full[0], full[1], full[2], full[3], full[4], full[5], full[6], full[7], full[8], full[9], full[10],];
+    let buf = bytes_from_int_array(cut);
+    match buf {
+        Result.Ok { value }
+        : {
+            let parsed = gzip_parse_header(bytes_cursor(value));
+            bytes_free(value);
+            match parsed {
+                Result.Ok { value }
+                : {
+                    assert false;
+                },
+                Result.Err { error }
+                : {
+                    assert error.kind == ArchiveErrorKind.Truncated;
+                }
+            }
+        },
+        Result.Err { error }
+        : {
+            assert false;
+        }
+    }
+}
