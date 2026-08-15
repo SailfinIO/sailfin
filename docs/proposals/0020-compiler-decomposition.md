@@ -4,7 +4,7 @@ title: Role-Oriented Compiler Capsules
 status: Accepted
 type: tooling
 created: 2026-06-22
-updated: 2026-08-08
+updated: 2026-08-15
 author: "agent:compiler-architect; project owner (direction + naming); agent:Codex (2026-08-03 amendment; 2026-08-08 §3.5 corrections 1–2 status); agent:implementer (2026-08-05 provider slot); agent:Sailbot (2026-08-06 narrow-stdlib matrix amendment; 2026-08-06 §3.5 correction 7 prelude-slug extension)"
 tracking: "#345 (historical epic); Linear project Role-Oriented Compiler Capsules. §3.7 steps 1-2 (landed): SFN-705, SFN-706, SFN-707, SFN-708, SFN-709, SFN-710, SFN-711, SFN-712, SFN-713, SFN-714, SFN-715, SFN-717, SFN-718, SFN-734. §3.7 steps 3-8 (groomed 2026-08-06): SFN-735 through SFN-751."
 supersedes:
@@ -192,6 +192,45 @@ moving artifact parsing into analyzer or by restoring a generic common capsule.
 For this decision, "materially" means more than a 5% regression in the
 three-run median cold `sfn check` wall time or peak RSS against the monolith
 baseline on the same host.
+
+#### 3.3.1 Adjudication (2026-08-15, SFN-747) — over the gate
+
+**Verdict: the 5% gate is exceeded, decisively.** Three-run median cold
+`sfn check` peak RSS on the `trivial` workload went from **157.7 MiB at the
+monolith baseline to 696.3 MiB in the current tree (+341.5%)** — 68× the 7.9 MiB
+budget — measured across a five-point commit series on one host, with the
+monolith commit re-measured there and reproducing the frozen baseline to within
+0.2 MiB. The `sfn/analyzer` extraction's own isolated marginal cost is
+**+35.0%**, 7× the gate. Full data, procedure, and caveats:
+`docs/perf/decomposition-baseline.md` § "2026-08-15 — SFN-747 §3.3 adjudication".
+
+**The prescribed remedy does not address the measured cause, so it is not
+adopted here.** This paragraph's cost model is the `sfn/analyzer -> sfn/ir` edge
+making analyzer-only consumers stage the whole IR capsule. Measurement shows the
+regression instead tracks the *number of internal capsules the consuming
+manifest declares*: `compiler/capsule.toml` names all five directly (it named
+none at the baseline), so a check inside the compiler project enumerates all
+five regardless of that edge, and each extraction contributed cost of the same
+order (syntax+ir +136 MiB, analyzer +120 MiB, codegen+codegen-llvm +233 MiB). A
+narrow `sfn/module-interface` capsule would remove part of one 120 MiB
+contribution out of a 539 MiB regression. There is also no analyzer-only
+consumer in the tree today — one binary capsule exists and it depends on all
+five — so the shape this paragraph reasoned about is currently hypothetical.
+
+The mechanism is confirmed live in code, not merely inferred:
+`_cr_collect_capsule_sources`
+(`compiler/src/capsule_resolver/discovery.sfn:181-251`) enumerates a dependency
+capsule's whole `src/` tree with no import-relevance test. SFN-833 / SFEP-0070
+added a reachability filter that narrows this on the *build* path, but
+`sfn check` deliberately does not call it
+(`compiler/src/capsule_resolver/reachability.sfn:648-665`) so that check's
+staged set stays a superset of build's. Extending that filter to check is the
+remedy the evidence points to; it is forbidden by neither prohibition above
+(it moves no artifact parsing into the analyzer and restores no generic common
+capsule), but it is outside what this paragraph sanctions, so it requires an
+explicit design decision. Tracked as SFN-894; **`sfn/module-interface` is not
+adopted or rejected on its own merits here — it is set aside as not responsive
+to the measured cost.**
 
 The following dependency rules are build/test invariants:
 
