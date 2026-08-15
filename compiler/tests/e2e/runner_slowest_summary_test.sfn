@@ -96,7 +96,7 @@ fn _parse_rank_cs(out: string, rank: int) -> int {
 // ---- Test 1: per-file PASS lines carry an elapsed time ----
 test "test runner: per-file PASS lines carry an elapsed time" ![io] {
     let dir = _make_pass_dir("t1");
-    let exit = process.run_capture([_sfn_bin(), "test", dir], _child_env());
+    let exit = process.run_capture([_sfn_bin(), "test", dir, "--jobs", "1"], _child_env());
     let out = process.capture_take_stdout();
     let _ = process.capture_take_stderr();
 
@@ -113,19 +113,19 @@ test "test runner: per-file PASS lines carry an elapsed time" ![io] {
 // ---- Test 2: multi-file run ends with a slowest summary ----
 test "test runner: multi-file run ends with a slowest summary" ![io] {
     let dir = _make_pass_dir("t2");
-    let exit = process.run_capture([_sfn_bin(), "test", dir], _child_env());
+    let exit = process.run_capture([_sfn_bin(), "test", dir, "--jobs", "1"], _child_env());
     let out = process.capture_take_stdout();
     let _ = process.capture_take_stderr();
 
     assert exit == 0;
     assert find(out, "[test] slowest ", 0) >= 0;
-    assert find(out, "1. ", 0) >= 0;
+    assert find(out, "[test]   1. ", 0) >= 0;
 }
 
 // ---- Test 3: slowest summary is ordered descending ----
 test "test runner: slowest summary is ordered descending" ![io] {
     let dir = _make_pass_dir("t3");
-    let exit = process.run_capture([_sfn_bin(), "test", dir], _child_env());
+    let exit = process.run_capture([_sfn_bin(), "test", dir, "--jobs", "1"], _child_env());
     let out = process.capture_take_stdout();
     let _ = process.capture_take_stderr();
 
@@ -140,7 +140,7 @@ test "test runner: slowest summary is ordered descending" ![io] {
 // ---- Test 4: slowest summary is suppressed with --slowest 0 ----
 test "test runner: slowest summary is suppressed with --slowest 0" ![io] {
     let dir = _make_pass_dir("t4");
-    let exit = process.run_capture([_sfn_bin(), "test", dir, "--slowest", "0"], _child_env());
+    let exit = process.run_capture([_sfn_bin(), "test", dir, "--slowest", "0", "--jobs", "1"], _child_env());
     let out = process.capture_take_stdout();
     let _ = process.capture_take_stderr();
 
@@ -157,4 +157,26 @@ test "test runner: slowest summary survives a pooled run" ![io] {
 
     assert exit == 0;
     assert find(out, "[test] slowest ", 0) >= 0;
+}
+
+// ---- Test 6: a directory resolving to one test file runs cleanly ----
+// Regression for SFN-862: the single-process path took an arena mark before
+// declaring its now-removed slowest-N accumulators, so a rewind inside the
+// per-file loop invalidated the arena-allocated basename just pushed into
+// them; the end-of-run summary then read reclaimed memory and crashed with
+// SIGSEGV (exit 139). A single test file always takes the single-process
+// path (`mod.sfn` routes >1 file to `_run_multi_file`).
+test "test runner: a directory resolving to one test file runs cleanly" ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    let dir = base + "/sfn-runner-slowest-t6";
+    fs.createDirectory(dir, true);
+    fs.writeFile(dir + "/solo_test.sfn", "test \"solo: one\" { assert 1 == 1; }\n");
+    let exit = process.run_capture([_sfn_bin(), "test", dir, "--jobs", "1"], _child_env());
+    let out = process.capture_take_stdout();
+    let _ = process.capture_take_stderr();
+
+    assert exit == 0;
+    assert find(out, "[test] PASS:", 0) >= 0;
+    assert find(out, "[test] slowest ", 0) < 0;
 }

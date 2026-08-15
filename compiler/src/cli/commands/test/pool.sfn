@@ -388,8 +388,14 @@ fn _reap_test_child(handle: int, deadline_ms: int, json_output: boolean) -> Reap
         }
     }
     // Trailing partial stderr line (mid-crash): never a complete summary
-    // (a summary line ends with \n); forward it as a diagnostic.
-    if err_buf.length > 0 { err_fwd = err_fwd + err_buf; }
+    // or frame-timing marker (both end with \n); forward it as a
+    // diagnostic. A `handle_kill` can land between `_sfn_print_line`'s
+    // body write and its trailing `\n`, leaving a bare
+    // `[test-frame] elapsed_ms=` fragment in `err_buf` — never forward
+    // that to the user (SFN-862).
+    if err_buf.length > 0 && !_is_frame_timing_line(err_buf) {
+        err_fwd = err_fwd + err_buf;
+    }
     let rc0 = process.handle_wait(handle);
     let mut rc = rc0;
     if deadline_killed { rc = 124; }
@@ -441,6 +447,7 @@ export {
     _pool_env_snapshot,
     _pool_child_env,
     ReapResult,
+    _is_frame_timing_line,
     _is_subframe_summary_line,
     _reap_test_child,
     _extract_json_uint_after

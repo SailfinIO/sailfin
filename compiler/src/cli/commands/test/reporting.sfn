@@ -398,8 +398,12 @@ fn _emit_slowest_summary(names: string[], elapsed_ms: int[], limit: int) -> bool
     let mut fnames: string[] = [];
     let mut fms: int[] = [];
     let mut i: int = 0;
+    // SFN-862: `names`/`elapsed_ms` are pushed in lockstep by the caller;
+    // the min-length guard is defensive against a mismatched pair.
+    let mut pair_count = elapsed_ms.length;
+    if names.length < pair_count { pair_count = names.length; }
     loop {
-        if i >= elapsed_ms.length { break; }
+        if i >= pair_count { break; }
         if elapsed_ms[i] > 0 {
             fnames.push(names[i]);
             fms.push(elapsed_ms[i]);
@@ -430,7 +434,7 @@ fn _emit_slowest_summary(names: string[], elapsed_ms: int[], limit: int) -> bool
         }
         a += 1;
     }
-    let shown = fnames.length;
+    let mut shown = fnames.length;
     if limit < shown { shown = limit; }
     print("[test] slowest " + int_to_string(shown) + " files:");
     let mut r: int = 0;

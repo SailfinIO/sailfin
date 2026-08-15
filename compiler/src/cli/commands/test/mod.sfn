@@ -253,7 +253,8 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
         return 2;
     }
     // SFN-862: `--slowest N` prints the N slowest test files after a
-    // multi-file run. Default 5; 0 disables the summary.
+    // multi-file run. Default 5; 0 disables the summary. Applies to the
+    // multi-file path only — a single-file run has nothing to rank.
     let mut slowest_n: int = 5;
     if has(matches, "slowest") { slowest_n = get_int(matches, "slowest"); }
     if slowest_n < 0 || slowest_n > 1000 {
@@ -554,7 +555,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
         return _run_multi_file(test_files, file_suite_index, suites, jobs, json_output, name_filter, tag_filter, no_test_cache, update_snapshots, emit_banners, scratch_root, scratch_owned, runtime_root, binary_dir, slowest_n);
     }
 
-    return _run_single_process(test_files, file_suite_index, suites, json_output, json_subframe, trace_runner, no_test_cache, update_snapshots, emit_banners, scratch_root, scratch_owned, runtime_root, binary_dir, ctx, slowest_n);
+    return _run_single_process(test_files, file_suite_index, suites, json_output, json_subframe, trace_runner, no_test_cache, update_snapshots, emit_banners, scratch_root, scratch_owned, runtime_root, binary_dir, ctx);
 }
 
 export { command_def, run };

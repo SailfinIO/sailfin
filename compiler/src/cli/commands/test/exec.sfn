@@ -196,7 +196,14 @@ fn _test_exec_env(scratch_root: string, update_snapshots: boolean, self_exe: str
     loop {
         if i >= base.length { break; }
         let e = base[i];
-        if !_env_entry_has_key(e, "SAILFIN_TEST_SCRATCH") && !_env_entry_has_key(e, "SAILFIN_UPDATE_SNAPSHOTS") {
+        // SFN-862: drop the frame-timing marker key — the compiled test
+        // binary is a leaf and never reports timing. Leaving it set means a
+        // fixture that spawns a nested runner with an inherited env can
+        // emit a marker that the OUTER parent matches and uses to
+        // overwrite the real file's elapsed — a silent, pool-only
+        // mis-ranking.
+        if !_env_entry_has_key(e, "SAILFIN_TEST_SCRATCH") && !_env_entry_has_key(e, "SAILFIN_UPDATE_SNAPSHOTS")
+            && !_env_entry_has_key(e, "SAILFIN_TEST_FRAME_TIMING") {
             env_flat.push(e);
         }
         i += 1;

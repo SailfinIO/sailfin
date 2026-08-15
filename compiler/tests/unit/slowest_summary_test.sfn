@@ -1,0 +1,62 @@
+// SFN-862: rung-1 coverage for the human-mode per-file elapsed formatter and
+// the multi-file "slowest N" summary, complementing the e2e coverage in
+// `compiler/tests/e2e/runner_slowest_summary_test.sfn`.
+import { _emit_slowest_summary, _fmt_elapsed_ms } from "../../src/cli/commands/test/reporting";
+
+test "fmt_elapsed_ms: zero formats as 0.00" {
+    assert _fmt_elapsed_ms(0) == "0.00";
+}
+
+test "fmt_elapsed_ms: sub-centisecond rounds down to 0.00" {
+    assert _fmt_elapsed_ms(5) == "0.00";
+}
+
+test "fmt_elapsed_ms: 90ms formats as 0.09" {
+    assert _fmt_elapsed_ms(90) == "0.09";
+}
+
+test "fmt_elapsed_ms: 999ms formats as 0.99" {
+    assert _fmt_elapsed_ms(999) == "0.99";
+}
+
+test "fmt_elapsed_ms: 1000ms formats as 1.00" {
+    assert _fmt_elapsed_ms(1000) == "1.00";
+}
+
+test "fmt_elapsed_ms: 1234ms formats as 1.23" {
+    assert _fmt_elapsed_ms(1234) == "1.23";
+}
+
+test "fmt_elapsed_ms: negative input does not crash and formats as 0.00" {
+    assert _fmt_elapsed_ms(-5) == "0.00";
+}
+
+test "emit_slowest_summary: limit <= 0 prints nothing" ![io] {
+    let names: string[] = ["a", "b"];
+    let ms: int[] = [10, 20];
+    assert _emit_slowest_summary(names, ms, 0) == false;
+}
+
+test "emit_slowest_summary: fewer than two timed entries prints nothing" ![io] {
+    let names: string[] = ["a"];
+    let ms: int[] = [10];
+    assert _emit_slowest_summary(names, ms, 5) == false;
+}
+
+test "emit_slowest_summary: a zero-ms entry is filtered before the count check" ![io] {
+    let names: string[] = ["a", "b"];
+    let ms: int[] = [10, 0];
+    assert _emit_slowest_summary(names, ms, 5) == false;
+}
+
+test "emit_slowest_summary: two or more timed entries prints a summary" ![io] {
+    let names: string[] = ["a", "b"];
+    let ms: int[] = [10, 20];
+    assert _emit_slowest_summary(names, ms, 5) == true;
+}
+
+test "emit_slowest_summary: limit above entry count does not index out of bounds" ![io] {
+    let names: string[] = ["a", "b", "c"];
+    let ms: int[] = [10, 20, 30];
+    assert _emit_slowest_summary(names, ms, 100) == true;
+}

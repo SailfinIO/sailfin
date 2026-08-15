@@ -129,7 +129,8 @@ An e2e that spawns a **nested full runner** — `sfn test`, `sfn build`, or
 test` — must not build that child's env from a raw `process.environ()`
 inheritance. `process.environ()` carries the *parent* pool's per-child
 orchestration keys (`SAILFIN_TEST_SCRATCH`, `SAILFIN_TEST_JSON_SUBFRAME`,
-`SAILFIN_TEST_RUNTIME_OBJDIR` / `_STAMP`, `SAILFIN_UPDATE_SNAPSHOTS`), and
+`SAILFIN_TEST_RUNTIME_OBJDIR` / `_STAMP`, `SAILFIN_UPDATE_SNAPSHOTS`,
+`SAILFIN_TEST_FRAME_TIMING`), and
 leaking any of them into the nested runner binds it to the parent's private
 state: the nested run adopts the parent's `SAILFIN_TEST_SCRATCH` and
 clobbers its harness-IPC files, emits as a JSON subframe under
