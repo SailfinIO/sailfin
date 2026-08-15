@@ -1,0 +1,274 @@
+// sfn/archive — the byte container.
+//
+// A libc-backed growable byte buffer. Deliberately NOT `int[]`: the archive
+// layers address content byte-by-byte, and an `int[]` spends 8 bytes per byte,
+// which would put a 100 MB archive member at ~1.6 GB against the shared 8 GiB
+// budget (`.claude/rules/compiler-safety.md`).
+//
+// Byte-primitive probe (SFN-895 step 0) — RESOLVED: `load_byte` works from
+// capsule source. It is a compiler builtin
+// (`compiler/capsules/codegen-llvm/src/byte_load.sfn`) lowering to a true
+// `load i8` + `zext`, sound at any alignment, but it had only ever been spelled
+// from RUNTIME source (`runtime/sfn/string.sfn:126`) — never from a library
+// capsule — so whether it resolved through capsule import staging was an open
+// question rather than an assumption. `sfn check` could not answer it: a
+// builtin that fails to resolve fails at lowering, not typecheck. It was
+// settled by building and running `tests/bytes_test.sfn`, which stays as the
+// pin.
+//
+// So this capsule reads bytes through `load_byte` directly. The fallbacks that
+// would have applied had it failed — `sailfin_intrinsic_pointer_read_i32(p) &
+// 255` (`capsules/sfn/crypto/src/rand.sfn:57`) and a `memset` single-byte store
+// (`capsules/sfn/os/src/mod.sfn:296`), both proven from capsule code — are
+// recorded only so a future reader knows the question was asked and what the
+// answer cost would have been (a constant factor, never a gate).
+import { ArchiveError, ArchiveErrorKind, archive_error } from "./error";
+
+// libc allocation primitives. Redeclared per-module (the #306 cross-module
+// extern limit), matching `sfn/os` and the `sfn/http` capsule.
+extern fn malloc(size: usize) -> *u8;
+
+extern fn realloc(ptr: *u8, size: usize) -> *u8;
+
+extern fn memcpy(dst: *u8, src: *u8, n: usize) -> *u8;
+
+extern fn memset(dst: *u8, byte: i32, n: usize) -> *u8;
+
+extern fn free(ptr: *u8) -> void;
+
+// The probe itself: a single byte read from a raw address, spelled from capsule
+// source. If `load_byte` does not survive capsule lowering, this is the call
+// that fails and the fallback spelling above replaces this body alone.
+//
+// Zero-extending is load-bearing, not incidental: a signed byte load would
+// surface 0x80..0xff as negative, and every length, checksum, and Huffman code
+// in this capsule is built by shifting bytes together. Pinned by
+// `tests/bytes_test.sfn`.
+fn _byte_at(addr: i64) -> int { return load_byte(addr) as int; }
+
+fn _buf_alloc(n: int) -> i64 {
+    let p: *u8 = malloc(n as usize);
+    if (p as i64) == 0 { return 0; }
+    memset(p, 0, n as usize);
+    return p as i64;
+}
+
+fn _buf_store(addr: i64, idx: int, value: int) -> void {
+    memset((addr + (idx as i64)) as *u8, (value & 255) as i32, 1 as usize);
+}
+
+fn _buf_free(addr: i64) -> void {
+    if addr != 0 { free(addr as *u8); }
+}
+
+// ---------------------------------------------------------------------
+// ByteBuf — the growable, libc-backed byte buffer built around the probe
+// primitives above (draft-archive-targz.md §3.3).
+//
+// `addr` is the storage address (an unsafe interior — never handed out
+// past the owner), `len` the bytes written, `cap` the bytes allocated.
+// `cap` is always a multiple of 8 with 8 bytes of slack past `cap`
+// allocated beneath `addr`, matching the `owned_buf_new` discipline
+// (`runtime/sfn/memory/ownedbuf.sfn:114-119`) so a future masked-word
+// access at any in-bounds index stays in-bounds too, even though today's
+// reads and writes go through `_byte_at`/`_buf_store`.
+struct ByteBuf {
+    addr: i64;
+    len: int;
+    cap: int;
+}
+
+// A non-owning read cursor over a byte range. `pos` is the read offset;
+// every layer above this one bounds-checks against `len` on access, so a
+// truncated archive errors instead of reading past the allocation.
+struct ByteCursor {
+    addr: i64;
+    len: int;
+    pos: int;
+}
+
+fn _round_up8(n: int) -> int { return ((n + 7) / 8) * 8; }
+
+fn bytes_new(initial_cap: int) -> Result<ByteBuf, ArchiveError> {
+    let mut cap: int = initial_cap;
+    if cap < 8 { cap = 8; }
+    cap = _round_up8(cap);
+    let addr: i64 = _buf_alloc(cap + 8);
+    if addr == 0 {
+        return Result.Err {
+            error: archive_error(ArchiveErrorKind.Io, "out of memory allocating a ByteBuf")
+        };
+    }
+    return Result.Ok {
+        value: ByteBuf { addr: addr, len: 0, cap: cap }
+    };
+}
+
+fn bytes_free(b: ByteBuf) -> void { _buf_free(b.addr); }
+
+fn bytes_len(b: ByteBuf) -> int { return b.len; }
+
+fn bytes_cap(b: ByteBuf) -> int { return b.cap; }
+
+// Cursor over the whole buffer, starting at position 0.
+fn bytes_cursor(b: ByteBuf) -> ByteCursor {
+    return ByteCursor { addr: b.addr, len: b.len, pos: 0 };
+}
+
+fn bytes_get(b: ByteBuf, idx: int) -> Result<int, ArchiveError> {
+    if idx < 0 || idx >= b.len {
+        return Result.Err {
+            error: archive_error(ArchiveErrorKind.Truncated, "ByteBuf index out of bounds")
+        };
+    }
+    return Result.Ok { value: _byte_at(b.addr + (idx as i64)) };
+}
+
+fn bytes_set(b: ByteBuf, idx: int, value: int) -> Result<ByteBuf, ArchiveError> {
+    if idx < 0 || idx >= b.len {
+        return Result.Err {
+            error: archive_error(ArchiveErrorKind.Truncated, "ByteBuf index out of bounds")
+        };
+    }
+    _buf_store(b.addr, idx, value);
+    return Result.Ok { value: b };
+}
+
+// Grow to at least `min_cap`, doubling from the current capacity (floor 8).
+// `realloc` may relocate the storage, so callers must adopt the returned
+// `ByteBuf` and stop using the one they passed in.
+fn _bytes_grow(b: ByteBuf, min_cap: int) -> Result<ByteBuf, ArchiveError> {
+    let mut new_cap: int = b.cap;
+    if new_cap < 8 { new_cap = 8; }
+    let mut guard: int = 0;
+    loop {
+        if new_cap >= min_cap { break; }
+        guard += 1;
+        if guard > 62 {
+            // 62 doublings from 8 overflows a 64-bit capacity long before
+            // this trips on any real archive member; it exists so a
+            // corrupt `min_cap` fails closed instead of looping forever.
+            return Result.Err {
+                error: archive_error(ArchiveErrorKind.LimitExceeded, "ByteBuf capacity growth exceeded a sane bound")
+            };
+        }
+        new_cap = new_cap * 2;
+    }
+    let p: *u8 = realloc((b.addr as *u8), (new_cap + 8) as usize);
+    if (p as i64) == 0 {
+        return Result.Err {
+            error: archive_error(ArchiveErrorKind.Io, "out of memory growing a ByteBuf")
+        };
+    }
+    // Zero the newly extended region so a future masked-word access at the
+    // new boundary never observes uninitialized bytes, mirroring the
+    // zero-fill `_buf_alloc` does on first allocation.
+    let old_span: int = b.cap + 8;
+    let new_span: int = new_cap + 8;
+    memset((((p as i64) + (old_span as i64))) as *u8, 0, (new_span - old_span) as usize);
+    return Result.Ok {
+        value: ByteBuf { addr: p as i64, len: b.len, cap: new_cap }
+    };
+}
+
+// Return `b` unchanged if it already holds `min_cap`, else grow it. Kept
+// separate from `_bytes_grow` so every append site can reach "at least
+// this much room" with a single `let` + `?`.
+fn _bytes_ensure_cap(b: ByteBuf, min_cap: int) -> Result<ByteBuf, ArchiveError> {
+    if b.cap >= min_cap {
+        return Result.Ok { value: b };
+    }
+    return _bytes_grow(b, min_cap);
+}
+
+// SFN-901 lowering hazard, worked around below rather than fixed (out of
+// this capsule's reach — it is a seed-compiler codegen bug, not something
+// wrong in this source): `let x = f(...)?;` followed by using an
+// already-live parameter in the same call silently corrupts that
+// parameter — no `check`/`build` error, just a wrong runtime value
+// (confirmed with a minimal two-function repro outside this capsule: a
+// plain `int` parameter read back as a stray float, or as a copy of the
+// unrelated `?`-bound local, depending on the exact shape). The fix that
+// held across every repro variant: copy every parameter that survives
+// past the `?` into a fresh `let` immediately *before* the `?` call, so
+// it is not the original parameter binding still live across the
+// `?`-desugared match. `value`/`src_addr`/`n` below are captured into
+// `_v`/`_src`/`_n` for exactly this reason — do not "simplify" this back
+// to using the parameter directly after the `?` line.
+//
+// Removal condition: the PR that fixes SFN-901 deletes these captures and
+// this comment together.
+fn bytes_append_byte(b: ByteBuf, value: int) -> Result<ByteBuf, ArchiveError> {
+    let _v: int = value;
+    let grown: ByteBuf = _bytes_ensure_cap(b, b.len + 1)?;
+    _buf_store(grown.addr, grown.len, _v);
+    return Result.Ok {
+        value: ByteBuf {
+            addr: grown.addr,
+            len: grown.len + 1,
+            cap: grown.cap
+        }
+    };
+}
+
+// Append `n` bytes read from raw address `src_addr`. `src_addr` is the
+// caller's responsibility to keep valid for `n` bytes — this is the one
+// entry point that reaches outside the buffer's own storage, mirroring
+// `memcpy`'s own contract.
+//
+// See `bytes_append_byte`'s header comment for why `src_addr`/`n` are
+// copied into `_src`/`_n` before the `?` call.
+fn bytes_append_slice(b: ByteBuf, src_addr: i64, n: int) -> Result<ByteBuf, ArchiveError> {
+    if n <= 0 {
+        return Result.Ok { value: b };
+    }
+    let _src: i64 = src_addr;
+    let _n: int = n;
+    let grown: ByteBuf = _bytes_ensure_cap(b, b.len + _n)?;
+    memcpy(((grown.addr + (grown.len as i64)) as *u8), (_src as *u8), _n as usize);
+    return Result.Ok {
+        value: ByteBuf {
+            addr: grown.addr,
+            len: grown.len + _n,
+            cap: grown.cap
+        }
+    };
+}
+
+// `int[]` interop, at the test boundary only (draft §3.3): published RFC
+// vectors are literal `int[]` arrays, and this is where they cross into a
+// `ByteBuf`. Not for use inside the codec layers themselves — an `int[]`
+// is 8 bytes per byte (§3.8 of the same rationale that ruled it out as the
+// container in the first place).
+//
+// Allocates exactly `arr.length` up front and stores directly, rather than
+// looping `bytes_append_byte` — `bytes_new` already guarantees enough
+// capacity for the whole array, so no growth call (and so no per-iteration
+// `?`) is needed at all.
+fn bytes_from_int_array(arr: int[]) -> Result<ByteBuf, ArchiveError> {
+    let out: ByteBuf = bytes_new(arr.length)?;
+    let mut i: int = 0;
+    loop {
+        if i >= arr.length { break; }
+        _buf_store(out.addr, i, arr[i] & 255);
+        i += 1;
+    }
+    return Result.Ok {
+        value: ByteBuf {
+            addr: out.addr,
+            len: arr.length,
+            cap: out.cap
+        }
+    };
+}
+
+fn bytes_to_int_array(b: ByteBuf) -> int[] {
+    let mut out: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= b.len { break; }
+        out.push(_byte_at(b.addr + (i as i64)));
+        i += 1;
+    }
+    return out;
+}

@@ -1,0 +1,82 @@
+// capsules/sfn/archive/tests/crc32_test.sfn
+//
+// RFC 1952 §8 CRC-32 (draft-archive-targz.md §8.1). The check value below —
+// CRC-32("123456789") == 0xCBF43926 — is the standard vector every
+// implementation of this exact algorithm (zlib, gzip, PNG, Ethernet FCS)
+// publishes; matching it is the whole correctness bar for a table-driven
+// reflected CRC-32.
+import {
+    ByteCursor,
+    bytes_cursor,
+    bytes_free,
+    bytes_from_int_array
+} from "../src/bytes";
+import {
+    crc32,
+    crc32_finish,
+    crc32_init,
+    crc32_update
+} from "../src/crc32";
+
+// ASCII "123456789".
+fn _check_vector() -> int[] {
+    return [49, 50, 51, 52, 53, 54, 55, 56, 57,];
+}
+
+fn _crc32_of_int_array(arr: int[]) -> int {
+    let buf = bytes_from_int_array(arr);
+    match buf {
+        Result.Ok { value }
+        : {
+            let sum = crc32(bytes_cursor(value));
+            bytes_free(value);
+            return sum;
+        },
+        Result.Err { error }
+        : return -1
+    }
+}
+
+test "archive crc32: RFC 1952 check value for the ASCII digits 1-9" {
+    // 0xCBF43926 — the published zlib/RFC 1952 check value for this input.
+    assert _crc32_of_int_array(_check_vector()) == 3421780262;
+}
+
+test "archive crc32: empty input checksums to 0" {
+    assert _crc32_of_int_array([]) == 0;
+}
+
+test "archive crc32: incremental update over two chunks equals one-shot over the whole buffer" {
+    let buf = bytes_from_int_array(_check_vector());
+    match buf {
+        Result.Ok { value }
+        : {
+            let whole = bytes_cursor(value);
+            let one_shot = crc32(whole);
+
+            // Split the same bytes into two chunks — [0, 4) and [4, 9) —
+            // and fold them through the incremental API, mirroring how the
+            // gzip reader will checksum a decompressed stream chunk by
+            // chunk rather than all at once.
+            let first_half: ByteCursor = ByteCursor {
+                addr: whole.addr,
+                len: 4,
+                pos: 0
+            };
+            let second_half: ByteCursor = ByteCursor {
+                addr: whole.addr,
+                len: whole.len,
+                pos: 4
+            };
+            let state = crc32_update(crc32_update(crc32_init(), first_half), second_half);
+            let incremental = crc32_finish(state);
+
+            bytes_free(value);
+            assert incremental == one_shot;
+        },
+        Result.Err { error }
+        : {
+            assert false;
+        }
+    }
+}

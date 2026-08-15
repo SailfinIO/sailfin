@@ -1,0 +1,23 @@
+// sfn/archive — in-process `.tar.gz` reading and writing.
+//
+// Retires the external `tar` binary from the Sailfin toolchain. A stock Windows
+// host ships no `tar`, so `sfn toolchain install` could not unpack a seed there
+// at all; that is the bootstrap gap this capsule closes (SFN-753 → SFN-493).
+//
+// Design: `docs/proposals/draft-archive-targz.md`.
+//
+// Layering, innermost first — each layer depends only on those above it, so a
+// future `.zip` container reuses `crc32` and `deflate` unchanged:
+//
+//   bytes    — the libc-backed byte buffer
+//   error    — `ArchiveError`, the capsule's single failure type
+//   crc32    — RFC 1952 checksum
+//   gzip     — RFC 1952 container framing
+//   inflate  — RFC 1951 decompression          (SFN-896)
+//   deflate  — RFC 1951 compression            (SFN-897)
+//   ustar    — POSIX.1-1988 header format      (SFN-898 read / SFN-899 write)
+//   tar_read — the extractor and its path guard (SFN-898)
+import "./bytes.sfn";
+import "./error.sfn";
+import "./crc32.sfn";
+import "./gzip.sfn";
