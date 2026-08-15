@@ -5,6 +5,7 @@
 // the two hard-error cases a reader must reject before ever touching a
 // deflate decoder — bad magic and an unsupported compression method.
 import {
+    ByteBuf,
     ByteCursor,
     bytes_cursor,
     bytes_free,
@@ -89,83 +90,107 @@ fn _dummy_result() -> GzipHeaderResult {
     };
 }
 
-// Parse `arr` and hand the successful result to the caller for inline
-// assertions, then free the backing buffer. Asserts failure (rather than
-// returning it) on a parse error, since every caller here expects success.
-fn _assert_parses(arr: int[]) -> GzipHeaderResult {
-    let buf = bytes_from_int_array(arr);
-    match buf {
+// A parsed header plus the still-live `ByteBuf` it was parsed from. Freeing
+// is left to the caller (see `_assert_parses` below) so `result.body.addr`
+// stays valid for the whole assertion block instead of dangling before the
+// caller ever reads it.
+struct _ParsedGzip {
+    result: GzipHeaderResult;
+    buf: ByteBuf;
+}
+
+// Parse `arr` and hand the successful result — plus the backing buffer it
+// points into — to the caller. The caller reads `result`, then frees `buf`
+// itself once done. Asserts failure (rather than returning it) on a parse
+// error, since every caller here expects success.
+fn _assert_parses(arr: int[]) -> _ParsedGzip {
+    let parsed_buf = bytes_from_int_array(arr);
+    match parsed_buf {
         Result.Ok { value }
         : {
-            let parsed = gzip_parse_header(bytes_cursor(value));
-            bytes_free(value);
+            let owned_buf: ByteBuf = value;
+            let parsed = gzip_parse_header(bytes_cursor(owned_buf));
             match parsed {
                 Result.Ok { value }
-                : return value,
+                : return _ParsedGzip { result: value, buf: owned_buf },
                 Result.Err { error }
                 : {
                     assert false;
-                    return _dummy_result();
+                    return _ParsedGzip {
+                        result: _dummy_result(),
+                        buf: owned_buf
+                    };
                 }
             }
         },
         Result.Err { error }
         : {
             assert false;
-            return _dummy_result();
+            return _ParsedGzip {
+                result: _dummy_result(),
+                buf: ByteBuf { addr: 0, len: 0, cap: 0 }
+            };
         }
     }
 }
 
-// `body.addr` no longer points at live storage once `_assert_parses` frees
-// the buffer, so every assertion here reads only the plain scalar fields
-// (`pos`/`len`/`mtime`/`fname`/...), never dereferences `body.addr`, and
-// checks the marker's *position* rather than its bytes.
 test "archive gzip: minimal header (no optional fields)" {
-    let result = _assert_parses(_gzip_stream(0));
+    let parsed = _assert_parses(_gzip_stream(0));
+    let result = parsed.result;
     assert result.header.fname == "";
     assert result.header.fcomment == "";
     assert result.header.has_extra == false;
     assert result.header.has_crc16 == false;
     assert result.body.pos == 10;
+    bytes_free(parsed.buf);
 }
 
 test "archive gzip: FNAME alone" {
-    let result = _assert_parses(_gzip_stream(_FLG_FNAME));
+    let parsed = _assert_parses(_gzip_stream(_FLG_FNAME));
+    let result = parsed.result;
     assert result.header.fname == "a.txt";
     assert result.header.fcomment == "";
     assert result.body.pos == 10 + _fname_bytes().length;
+    bytes_free(parsed.buf);
 }
 
 test "archive gzip: FCOMMENT alone" {
-    let result = _assert_parses(_gzip_stream(_FLG_FCOMMENT));
+    let parsed = _assert_parses(_gzip_stream(_FLG_FCOMMENT));
+    let result = parsed.result;
     assert result.header.fname == "";
     assert result.header.fcomment == "hi";
     assert result.body.pos == 10 + _fcomment_bytes().length;
+    bytes_free(parsed.buf);
 }
 
 test "archive gzip: FEXTRA alone" {
-    let result = _assert_parses(_gzip_stream(_FLG_FEXTRA));
+    let parsed = _assert_parses(_gzip_stream(_FLG_FEXTRA));
+    let result = parsed.result;
     assert result.header.has_extra == true;
     // 10 (fixed header) + 2 (XLEN) + 3 (extra field bytes).
     assert result.body.pos == 15;
+    bytes_free(parsed.buf);
 }
 
 test "archive gzip: FHCRC alone" {
-    let result = _assert_parses(_gzip_stream(_FLG_FHCRC));
+    let parsed = _assert_parses(_gzip_stream(_FLG_FHCRC));
+    let result = parsed.result;
     assert result.header.has_crc16 == true;
     assert result.body.pos == 12;
+    bytes_free(parsed.buf);
 }
 
 test "archive gzip: FEXTRA + FNAME + FCOMMENT + FHCRC combined" {
     let flg = _FLG_FEXTRA | _FLG_FNAME | _FLG_FCOMMENT | _FLG_FHCRC;
-    let result = _assert_parses(_gzip_stream(flg));
+    let parsed = _assert_parses(_gzip_stream(flg));
+    let result = parsed.result;
     assert result.header.has_extra == true;
     assert result.header.fname == "a.txt";
     assert result.header.fcomment == "hi";
     assert result.header.has_crc16 == true;
     let expected = 10 + 5 + _fname_bytes().length + _fcomment_bytes().length + 2;
     assert result.body.pos == expected;
+    bytes_free(parsed.buf);
 }
 
 test "archive gzip: bad magic is rejected" {
@@ -198,6 +223,33 @@ test "archive gzip: bad magic is rejected" {
 test "archive gzip: a non-deflate compression method is rejected" {
     let mut arr = _gzip_stream(0);
     arr[2] = 9;  // anything other than 8 (deflate)
+    let buf = bytes_from_int_array(arr);
+    match buf {
+        Result.Ok { value }
+        : {
+            let parsed = gzip_parse_header(bytes_cursor(value));
+            bytes_free(value);
+            match parsed {
+                Result.Ok { value }
+                : {
+                    assert false;
+                },
+                Result.Err { error }
+                : {
+                    assert error.kind == ArchiveErrorKind.UnsupportedFeature;
+                }
+            }
+        },
+        Result.Err { error }
+        : {
+            assert false;
+        }
+    }
+}
+
+test "archive gzip: a reserved FLG bit is rejected" {
+    let mut arr = _gzip_stream(0);
+    arr[3] = 32;  // FLG bit 5 (reserved; RFC 1952 §2.3.1.2)
     let buf = bytes_from_int_array(arr);
     match buf {
         Result.Ok { value }
