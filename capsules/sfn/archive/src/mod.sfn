@@ -4,7 +4,7 @@
 // host ships no `tar`, so `sfn toolchain install` could not unpack a seed there
 // at all; that is the bootstrap gap this capsule closes (SFN-753 → SFN-493).
 //
-// Design: `docs/proposals/draft-archive-targz.md`.
+// Design: `docs/proposals/0071-archive-targz.md` (SFEP-0071).
 //
 // Layering, innermost first — each layer depends only on those above it, so a
 // future `.zip` container reuses `crc32` and `deflate` unchanged:

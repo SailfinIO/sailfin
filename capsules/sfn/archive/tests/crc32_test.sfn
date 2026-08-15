@@ -1,6 +1,6 @@
 // capsules/sfn/archive/tests/crc32_test.sfn
 //
-// RFC 1952 §8 CRC-32 (draft-archive-targz.md §8.1). The check value below —
+// RFC 1952 §8 CRC-32 (SFEP-0071 §8.1). The check value below —
 // CRC-32("123456789") == 0xCBF43926 — is the standard vector every
 // implementation of this exact algorithm (zlib, gzip, PNG, Ethernet FCS)
 // publishes; matching it is the whole correctness bar for a table-driven

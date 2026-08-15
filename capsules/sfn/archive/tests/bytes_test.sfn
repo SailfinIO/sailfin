@@ -193,7 +193,7 @@ test "archive bytes: bytes_set writes in place; out-of-bounds get/set errors" {
     }
 }
 
-// `int[]` interop (test-boundary only, draft §3.3) round-trips.
+// `int[]` interop (test-boundary only, SFEP-0071 §3.3) round-trips.
 test "archive bytes: bytes_from_int_array / bytes_to_int_array round-trip" {
     let src: int[] = [0, 1, 127, 128, 255,];
     let created = bytes_from_int_array(src);

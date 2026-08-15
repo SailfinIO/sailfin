@@ -63,7 +63,7 @@ fn _buf_free(addr: i64) -> void {
 
 // ---------------------------------------------------------------------
 // ByteBuf — the growable, libc-backed byte buffer built around the probe
-// primitives above (draft-archive-targz.md §3.3).
+// primitives above (SFEP-0071 §3.3).
 //
 // `addr` is the storage address (an unsafe interior — never handed out
 // past the owner), `len` the bytes written, `cap` the bytes allocated.
@@ -232,7 +232,7 @@ fn bytes_append_slice(b: ByteBuf, src_addr: i64, n: int) -> Result<ByteBuf, Arch
     };
 }
 
-// `int[]` interop, at the test boundary only (draft §3.3): published RFC
+// `int[]` interop, at the test boundary only (SFEP-0071 §3.3): published RFC
 // vectors are literal `int[]` arrays, and this is where they cross into a
 // `ByteBuf`. Not for use inside the codec layers themselves — an `int[]`
 // is 8 bytes per byte (§3.8 of the same rationale that ruled it out as the

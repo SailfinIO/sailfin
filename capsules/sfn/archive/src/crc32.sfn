@@ -4,12 +4,12 @@
 // uses: polynomial 0xEDB88320 (ISO 3309 / ITU-T V.42, reflected), initial
 // and final XOR 0xFFFFFFFF. The gzip trailer (RFC 1952 §2.3.1) checksums
 // the decompressed stream, and a future `.zip` central directory entry
-// (draft-archive-targz.md §10) needs this exact checksum unchanged.
+// (SFEP-0071 §10) needs this exact checksum unchanged.
 //
 // Exposed as both a one-shot (`crc32`) and an incremental update
 // (`crc32_init` / `crc32_update` / `crc32_finish`), because the gzip
 // reader checksums a decompressed stream in chunks rather than all at
-// once (draft §3.4) — `crc32(whole_cursor)` alone would force materializing
+// once (SFEP-0071 §3.4) — `crc32(whole_cursor)` alone would force materializing
 // the entire decompressed member before it could be verified.
 import { ByteCursor, _byte_at } from "./bytes";
 

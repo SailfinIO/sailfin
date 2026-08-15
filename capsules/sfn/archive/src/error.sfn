@@ -5,7 +5,7 @@
 // structured version of it. Deliberately NOT a `Diagnostic`: a `Diagnostic`
 // carries an `E0xxx` code and a source span over *user source*
 // (`.claude/rules/code-style.md`), and a downloaded tarball is neither
-// (draft-archive-targz.md §3.6). The CLI consumer (SFN-753 phase A3) maps
+// (SFEP-0071 §3.6). The CLI consumer (SFN-753 phase A3) maps
 // this onto `E0615` at the `sfn toolchain install` boundary.
 enum ArchiveErrorKind {
     Io,

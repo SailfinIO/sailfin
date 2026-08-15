@@ -1,6 +1,6 @@
 // capsules/sfn/archive/tests/gzip_test.sfn
 //
-// RFC 1952 §2.3 header framing (draft-archive-targz.md §8.1): the FLG
+// RFC 1952 §2.3 header framing (SFEP-0071 §8.1): the FLG
 // matrix with each optional field present alone and in combination, plus
 // the two hard-error cases a reader must reject before ever touching a
 // deflate decoder — bad magic and an unsupported compression method.

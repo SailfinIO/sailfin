@@ -4,10 +4,10 @@
 // FEXTRA/FNAME/FCOMMENT/FHCRC fields and reports where the deflate stream
 // begins. Inflating that stream is SFN-896's `inflate.sfn`; the streaming
 // `gzip_reader_open`/`gzip_read` API that owns a `FILE*` and therefore
-// carries `![io]` is a later phase too (draft-archive-targz.md §3.4).
+// carries `![io]` is a later phase too (SFEP-0071 §3.4).
 //
 // Pure: this module operates on an in-memory `ByteCursor` and declares no
-// effect, matching the pure-codec-layer split in draft §4 — only the
+// effect, matching the pure-codec-layer split in SFEP-0071 §4 — only the
 // stream openers that touch a `FILE*` carry `![io]`, not header parsing
 // over bytes already in memory.
 import { ByteCursor, _byte_at } from "./bytes";
@@ -25,7 +25,7 @@ let _FLG_FCOMMENT: int = 16;
 // Parsed fixed-size fields plus the optional-field payloads. `xfl` and `os`
 // are carried through unexamined — nothing in this phase acts on them; the
 // writer (SFN-897) is what gives them meaning (canonical `MTIME=0, XFL=0,
-// OS=255` per draft §3.7). `fname`/`fcomment` are `""` when the
+// OS=255` per SFEP-0071 §3.7). `fname`/`fcomment` are `""` when the
 // corresponding FLG bit is unset, which is indistinguishable from a
 // present-but-empty field — RFC 1952 gives a reader no way to tell those
 // apart, so no caller needs to.
