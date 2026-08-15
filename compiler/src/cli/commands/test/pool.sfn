@@ -40,6 +40,23 @@ fn _prewarm_test_dep_closures(test_files: string[], runtime_root: string, binary
         group_files[found].push(test_files[i]);
         i += 1;
     }
+    // SFN-793: every group's dep closure is compiled *in-process* here —
+    // `sailfin_exe` is pinned empty below, and a closure smaller than
+    // `_cr_positional_isolation_threshold()` stays in-process instead of
+    // forking a subprocess per module. The arena is a bump allocator with
+    // no per-object free, so without a rewind the parent retains each
+    // group's AST/typecheck/IR residue for the rest of the run: measured
+    // growing in per-group steps through prewarm and then flat at 1.26 GiB
+    // for the remaining ~20 min of a pooled suite.
+    //
+    // Mark here rather than inside the loop so `group_keys`/`group_files`
+    // (built above) sit below the mark and survive every rewind. Nothing
+    // allocated inside the body escapes it: `res` is read only for
+    // `.staging_failed`, the resolver holds no module-level mutable state,
+    // and its one memo (`RelativeScanMemo`) is value-threaded per call. A
+    // no-op when the arena is disabled (`SAILFIN_USE_ARENA=0`). Mirrors the
+    // serial path's per-test mark/rewind (`single_process_run.sfn:115`).
+    let prewarm_mark = sailfin_intrinsic_runtime_arena_mark();
     let mut g: int = 0;
     loop {
         if g >= group_files.length { break; }
@@ -57,6 +74,11 @@ fn _prewarm_test_dep_closures(test_files: string[], runtime_root: string, binary
                 print.err("[test] warning: dep-closure pre-warm failed for a group (children will compile per file)");
             }
         }
+        // Reclaim this group's in-process compile residue before the next
+        // group allocates on top of it. The on-disk cache the pre-warm
+        // exists to populate is already written by this point, so the
+        // rewind costs no cache benefit.
+        sailfin_intrinsic_runtime_arena_rewind(prewarm_mark);
         g += 1;
     }
 }
