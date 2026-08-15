@@ -507,18 +507,18 @@ fn target_condition_runtime_sfn_sources(sources: string[], target_os: string) ->
         i += 1;
     }
     // `realpath_windows.sfn`, `clock_windows.sfn`, `pthread_windows.sfn`,
-    // `popen_windows.sfn`, `mkstemp_windows.sfn`, and
-    // `strcasestr_windows.sfn` have no POSIX `.sfn` counterpart to swap
-    // FROM (SFN-549): `realpath(3)`, `clock_gettime`/`nanosleep`, the
-    // `pthread_*`/`sysconf` surface, `popen`/`pclose`/`mkstemp`, and
-    // `strcasestr(3)` are bare libc/pthreads symbols on POSIX, not
-    // Sailfin-authored runtime modules, so — unlike the swaps above —
-    // these are pure ADDITIONS with nothing in `sources` to replace. Each
-    // satisfies its `extern fn` declaration(s) elsewhere in the runtime
-    // via ordinary link-time symbol resolution; see each module's own
-    // header for the full rationale. Skipped (rather than guessing a
-    // path) if none of the four platform/ modules above were present to
-    // anchor on.
+    // `popen_windows.sfn`, `mkstemp_windows.sfn`, `strcasestr_windows.sfn`,
+    // and `opendir_windows.sfn` have no POSIX `.sfn` counterpart to swap
+    // FROM (SFN-549, SFN-903): `realpath(3)`, `clock_gettime`/`nanosleep`,
+    // the `pthread_*`/`sysconf` surface, `popen`/`pclose`/`mkstemp`,
+    // `strcasestr(3)`, and `opendir`/`closedir` are bare libc/pthreads
+    // symbols on POSIX, not Sailfin-authored runtime modules, so — unlike
+    // the swaps above — these are pure ADDITIONS with nothing in `sources`
+    // to replace. Each satisfies its `extern fn` declaration(s) elsewhere
+    // in the runtime via ordinary link-time symbol resolution; see each
+    // module's own header for the full rationale. Skipped (rather than
+    // guessing a path) if none of the seven platform/ modules above were
+    // present to anchor on.
     if platform_dir.length > 0 {
         out.push(_path_join(platform_dir, "realpath_windows.sfn"));
         out.push(_path_join(platform_dir, "clock_windows.sfn"));
@@ -526,6 +526,7 @@ fn target_condition_runtime_sfn_sources(sources: string[], target_os: string) ->
         out.push(_path_join(platform_dir, "popen_windows.sfn"));
         out.push(_path_join(platform_dir, "mkstemp_windows.sfn"));
         out.push(_path_join(platform_dir, "strcasestr_windows.sfn"));
+        out.push(_path_join(platform_dir, "opendir_windows.sfn"));
     }
     return out;
 }
