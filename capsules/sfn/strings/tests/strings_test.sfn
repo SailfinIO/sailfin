@@ -6,11 +6,17 @@ import {
     ascii_lowercase,
     ascii_uppercase,
     char_code_at,
+    contains,
     contains_string,
+    find,
     last_index_of_char,
     strip_prefix
 } from "../src/mod";
 
+// The pre-SFN-792 `find` body, retained verbatim as a differential oracle for
+// the byte-wise rewrite below. It is deliberately the allocating form: the
+// rewrite's contract is that it returns identical results, not that it shares
+// an implementation. Delete both this and the differential test only together.
 fn _find(text: string, needle: string, start: int) -> int {
     if needle.length == 0 { return start; }
     if needle.length > text.length { return -1; }
@@ -244,4 +250,69 @@ test "strings: char_code_at returns the code at an index and -1 out of bounds" {
     assert char_code_at("abc", 2) == 99;
     assert char_code_at("abc", -1) == -1;
     assert char_code_at("abc", 3) == -1;
+}
+
+test "strings: find locates a needle and reports -1 when absent" {
+    assert find("hello world", "world", 0) == 6;
+    assert find("hello", "hello", 0) == 0;
+    assert find("hello", "z", 0) == -1;
+    assert find("banana", "ana", 0) == 1;
+    assert find("banana", "ana", 2) == 3;
+    assert find("aaa", "aa", 0) == 0;
+}
+
+test "strings: find handles empty, oversized, and out-of-range arguments" {
+    assert find("abc", "", 0) == 0;
+    assert find("abc", "", 2) == 2;
+    assert find("", "a", 0) == -1;
+    assert find("ab", "abc", 0) == -1;
+    assert find("abc", "c", 3) == -1;
+    assert find("abc", "a", 99) == -1;
+    assert find("abc", "b", -5) == 1;
+}
+
+test "strings: find matches bytes above ASCII and escape sequences" {
+    assert find("a\nb", "\n", 0) == 1;
+    assert find("a\tb", "\t", 0) == 1;
+    assert find("a\\b", "\\", 0) == 1;
+    assert find("héllo", "llo", 0) == 3;
+    assert find("héllo", "é", 0) == 1;
+}
+
+test "strings: contains agrees with find on presence" {
+    assert contains("hello world", "world") == true;
+    assert contains("hello", "z") == false;
+    assert contains("abc", "") == true;
+    assert contains("", "a") == false;
+}
+
+// SFN-792: the byte-wise `find` must agree with the allocating implementation
+// it replaced on every input, not merely on the hand-picked cases above.
+test "strings: find agrees with the pre-rewrite implementation" {
+    let texts: string[] = ["", "a", "abc", "banana", "aaaa", "hello world", "a\nb\tc", "héllo"];
+    let needles: string[] = ["", "a", "z", "ab", "ana", "aa", "world", "héllo", "abcd", "\n"];
+    let starts: int[] = [-2, -1, 0, 1, 3, 6, 99];
+    let mut ti: int = 0;
+    loop {
+        if ti >= texts.length { break; }
+        let text = texts[ti];
+        ti += 1;
+        let mut ni: int = 0;
+        loop {
+            if ni >= needles.length { break; }
+            let needle = needles[ni];
+            ni += 1;
+            let mut si: int = 0;
+            loop {
+                if si >= starts.length { break; }
+                let start = starts[si];
+                si += 1;
+                // Same `start` for both: an empty needle returns `start`
+                // verbatim in each implementation (the rewrite's clamp sits
+                // after that arm), so clamping only the oracle would compare
+                // two different questions.
+                assert find(text, needle, start) == _find(text, needle, start);
+            }
+        }
+    }
 }
