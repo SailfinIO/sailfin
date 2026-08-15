@@ -181,27 +181,29 @@ fn _bytes_ensure_cap(b: ByteBuf, min_cap: int) -> Result<ByteBuf, ArchiveError> 
     return _bytes_grow(b, min_cap);
 }
 
-// SFN-901 lowering hazard, worked around below rather than fixed (out of
-// this capsule's reach — it is a seed-compiler codegen bug, not something
-// wrong in this source): `let x = f(...)?;` followed by using an
-// already-live parameter in the same call silently corrupts that
-// parameter — no `check`/`build` error, just a wrong runtime value
-// (confirmed with a minimal two-function repro outside this capsule: a
-// plain `int` parameter read back as a stray float, or as a copy of the
-// unrelated `?`-bound local, depending on the exact shape). The fix that
-// held across every repro variant: copy every parameter that survives
-// past the `?` into a fresh `let` immediately *before* the `?` call, so
-// it is not the original parameter binding still live across the
-// `?`-desugared match. `value`/`src_addr`/`n` below are captured into
-// `_v`/`_src`/`_n` for exactly this reason — do not "simplify" this back
-// to using the parameter directly after the `?` line.
+// SFN-901: do not name a binding `value` in a function that uses `?`.
 //
-// Removal condition: the PR that fixes SFN-901 deletes these captures and
-// this comment together.
-fn bytes_append_byte(b: ByteBuf, value: int) -> Result<ByteBuf, ArchiveError> {
-    let _v: int = value;
+// The `?` desugaring is unhygienic. It rewrites `let x = f()?;` into a
+// `match`, and the match pattern parser forces the Ok arm's binder to the
+// enum field name — literally `value`
+// (`compiler/capsules/codegen/src/emit_native_desugar_try.sfn:760`) — while
+// the whole remainder of the enclosing block is moved into that arm. Any
+// enclosing binding named `value` is therefore shadowed for the rest of the
+// function: reads after the `?` silently return the unwrapped payload
+// instead. There is no diagnostic, and `sfn check` cannot see it — the
+// rewrite is an emit-stage prepass that runs after typecheck, so no
+// analyzer pass ever observes the shadowed AST.
+//
+// `bytes_append_byte` takes `byte_value`, not `value`, for exactly this
+// reason. The name is load-bearing; renaming it back reintroduces a silent
+// wrong-value bug that every test here would still pass.
+//
+// Only the identifier `value` collides — `error` does not, since the Err
+// arm carries no continuation. Removal condition: SFN-901 makes the
+// desugaring hygienic, after which this constraint and this comment go.
+fn bytes_append_byte(b: ByteBuf, byte_value: int) -> Result<ByteBuf, ArchiveError> {
     let grown: ByteBuf = _bytes_ensure_cap(b, b.len + 1)?;
-    _buf_store(grown.addr, grown.len, _v);
+    _buf_store(grown.addr, grown.len, byte_value);
     return Result.Ok {
         value: ByteBuf {
             addr: grown.addr,
@@ -215,21 +217,16 @@ fn bytes_append_byte(b: ByteBuf, value: int) -> Result<ByteBuf, ArchiveError> {
 // caller's responsibility to keep valid for `n` bytes — this is the one
 // entry point that reaches outside the buffer's own storage, mirroring
 // `memcpy`'s own contract.
-//
-// See `bytes_append_byte`'s header comment for why `src_addr`/`n` are
-// copied into `_src`/`_n` before the `?` call.
 fn bytes_append_slice(b: ByteBuf, src_addr: i64, n: int) -> Result<ByteBuf, ArchiveError> {
     if n <= 0 {
         return Result.Ok { value: b };
     }
-    let _src: i64 = src_addr;
-    let _n: int = n;
-    let grown: ByteBuf = _bytes_ensure_cap(b, b.len + _n)?;
-    memcpy(((grown.addr + (grown.len as i64)) as *u8), (_src as *u8), _n as usize);
+    let grown: ByteBuf = _bytes_ensure_cap(b, b.len + n)?;
+    memcpy(((grown.addr + (grown.len as i64)) as *u8), (src_addr as *u8), n as usize);
     return Result.Ok {
         value: ByteBuf {
             addr: grown.addr,
-            len: grown.len + _n,
+            len: grown.len + n,
             cap: grown.cap
         }
     };
