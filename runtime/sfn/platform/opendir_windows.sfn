@@ -1,0 +1,95 @@
+// runtime/sfn/platform/opendir_windows.sfn
+//
+// Windows sibling providing `opendir` / `closedir` (SFN-903), APPENDED by
+// `target_condition_runtime_sfn_sources` (`compiler/src/build/target.sfn`)
+// for a Windows target — like `mkstemp_windows.sfn`, `opendir(3)` /
+// `closedir(3)` are bare libc symbols on POSIX, not Sailfin-authored
+// modules, so there is no POSIX `.sfn` module to swap FROM.
+// `compiler/src/build/fs.sfn:60-62` declares the two externs `opendir`
+// backs `_dir_is_enumerable` (`fs.sfn:654-660`) with; this module satisfies
+// them at the Windows link, closing the last undefined symbol blocking the
+// native MSVC self-host link.
+//
+// `_dir_is_enumerable` only asks "can this be opened", never "what is in
+// it", so the Win32 equivalent of `opendir` is `FindFirstFileA` over a
+// `"<path>\*"` glob: it fails exactly when the directory cannot be
+// enumerated, and succeeds — even on an EMPTY directory, since `.` and
+// `..` are always matched first — exactly when it can. That is what makes
+// `fs_tree_test.sfn:518` (empty dir → true) and `:520` (missing path →
+// false) pass unchanged.
+//
+// DELIBERATELY NO `readdir`. The handle this hands back is a raw Win32
+// `HANDLE` from `FindFirstFileA`, not a POSIX `DIR*` — reading entries out
+// of it needs `FindNextFileA`, a wholly different iteration contract, which
+// no caller in this tree needs (`fs.listDirectory` goes through the
+// `sailfin_intrinsic_fs_list_dir` sentinel, never through this pair). Not
+// implementing it is a safety property, not an oversight: a future
+// `readdir` caller gets a loud undefined symbol at link time instead of
+// silently misbehaving against a handle it cannot iterate.
+//
+// KNOWN LIMITATION, not solved here: `FindFirstFileA` is `MAX_PATH`-bound
+// without a `\\?\` long-path prefix. That constraint applies to the whole
+// native Windows leg, not specially to this probe.
+extern fn malloc(size: usize) -> *u8;
+
+extern fn free(ptr: *u8) -> void;
+
+extern fn strlen(s: *u8) -> usize;
+
+extern fn memcpy(dst: *u8, src: *u8, n: usize) -> *u8;
+
+extern fn memset(ptr: *u8, value: i32, n: usize) -> *u8;
+
+// `HANDLE FindFirstFileA(LPCSTR lpFileName, LPWIN32_FIND_DATAA lpFindFileData)`
+// — implicitly linked by mingw (kernel32), like the rest of the Win32
+// family declared across this platform/ directory.
+extern fn FindFirstFileA(pattern: *u8, find_data: *u8) -> i64;
+
+extern fn FindClose(handle: i64) -> i32;
+
+// `opendir(path)` — `FindFirstFileA("<path>\*", ...)`, keeping only the
+// success/failure signal `_dir_is_enumerable` needs. `WIN32_FIND_DATAA` is
+// 320 bytes on x64; `malloc(640)` and pass as an opaque `*u8` buffer, the
+// same treatment `process_windows.sfn:94` gives `STARTUPINFOA` /
+// `PROCESS_INFORMATION` — the probe never reads a field out of it, so no
+// Sailfin struct mirror is needed. Freed before returning either way.
+//
+// Returns `0 as *u8` on failure (`FindFirstFileA` yields `INVALID_HANDLE_VALUE`,
+// spelled `0 - 1` per the no-hex-literal-folding convention in
+// `mkstemp_windows.sfn`), matching the `handle as i64 == 0` test
+// `_dir_is_enumerable` (`compiler/src/build/fs.sfn:657`) runs on it.
+fn opendir(path: *u8) -> *u8 ![io] {
+    if path as i64 == 0 { return 0 as *u8; }
+    let src_len: usize = strlen(path);
+    // "<path>" + "\*" + NUL.
+    let pattern_len: usize = src_len + (3 as usize);
+    let pattern: *u8 = malloc(pattern_len);
+    if pattern as i64 == 0 { return 0 as *u8; }
+    memcpy(pattern, path, src_len);
+    let suffix: string = "\\*";
+    memcpy((pattern as i64 + (src_len as i64)) as *u8, suffix as *u8, 2 as usize);
+    memset((pattern as i64 + (src_len as i64) + 2) as *u8, 0, 1 as usize);
+
+    let find_data: *u8 = malloc(640 as usize);
+    if find_data as i64 == 0 {
+        free(pattern);
+        return 0 as *u8;
+    }
+
+    let handle: i64 = FindFirstFileA(pattern, find_data);
+    free(pattern);
+    free(find_data);
+    if handle == 0 - 1 { return 0 as *u8; }
+    return handle as *u8;
+}
+
+// `closedir(dirp)` — `FindClose` on the `HANDLE` `opendir` returned
+// reinterpreted as `*u8`. Returns 0 on success, `0 - 1` on a null handle or
+// a `FindClose` failure, mirroring POSIX `closedir`'s contract (though
+// `_dir_is_enumerable` itself discards the result).
+fn closedir(dirp: *u8) -> i32 ![io] {
+    if dirp as i64 == 0 { return 0 - 1; }
+    let ok: i32 = FindClose(dirp as i64);
+    if ok == 0 { return 0 - 1; }
+    return 0;
+}

@@ -1,9 +1,10 @@
 // compiler/tests/e2e/windows_runtime_siblings_test.sfn
 //
 // SFN-549: `runtime/sfn/platform/rlimit_windows.sfn`,
-// `runtime/sfn/platform/rand_windows.sfn`, and the six anchor-less appends
+// `runtime/sfn/platform/rand_windows.sfn`, and the seven anchor-less appends
 // (`realpath_windows.sfn`, `clock_windows.sfn`, `pthread_windows.sfn`,
-// `popen_windows.sfn`, `mkstemp_windows.sfn`, `strcasestr_windows.sfn`) are
+// `popen_windows.sfn`, `mkstemp_windows.sfn`, `strcasestr_windows.sfn`,
+// `opendir_windows.sfn` — the last added by SFN-903) are
 // the Windows siblings that replace the retired native-MSVC link of
 // `runtime/ir/windows_stubs.ll` (`compiler/src/build/runtime_objs.sfn`,
 // formerly :1332-1362). SFN-808 adds
@@ -11,7 +12,7 @@
 // the system `ROOT` certificate store reached through Crypt32. Pins that
 // each module still emits clean LLVM IR for a Windows target and defines
 // the symbol it provides — via a basename swap for rlimit/rand/cert_roots,
-// and via a pure append for the six anchor-less siblings
+// and via a pure append for the seven anchor-less siblings
 // (no POSIX `.sfn` counterpart to swap from) — in
 // `target_condition_runtime_sfn_sources`
 // (`compiler/src/build/target.sfn`). The native TLS stack (SFN-341) needs no
@@ -131,4 +132,23 @@ test "windows siblings: strcasestr_windows.sfn emits and defines strcasestr" ![i
     let ir = _emit_windows("runtime/sfn/platform/strcasestr_windows.sfn", "strcasestr-windows-emit");
     assert ir.length > 0;
     assert contains(ir, "define i8* @strcasestr(");
+}
+
+// SFN-903. These two symbols were the last undefined ones blocking the
+// native MSVC self-host link — `_dir_is_enumerable` (`build/fs.sfn`) calls
+// `opendir`, which is in no Microsoft library at all (unlike `close`, which
+// links only because `oldnames.lib` aliases it to `_close`).
+//
+// `readdir` is deliberately absent from the sibling: the handle is a Win32
+// `HANDLE`, not a POSIX `DIR*`, so a future caller gets a loud undefined
+// symbol rather than silent misbehaviour. Asserting it is NOT defined keeps
+// that decision from being quietly undone.
+test "windows siblings: opendir_windows.sfn emits and defines opendir/closedir" ![io] {
+    let ir = _emit_windows("runtime/sfn/platform/opendir_windows.sfn", "opendir-windows-emit");
+    assert ir.length > 0;
+    assert contains(ir, "define i8* @opendir(");
+    assert contains(ir, "define i32 @closedir(");
+    assert contains(ir, "declare i64 @FindFirstFileA(");
+    assert contains(ir, "declare i32 @FindClose(");
+    assert ! contains(ir, "define i8* @readdir(");
 }
