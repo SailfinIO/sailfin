@@ -76,6 +76,11 @@ fn find(text: string, needle: string, start: int) -> int {
     if needle.length == 0 { return start; }
     if needle.length > text.length { return -1; }
     let limit = text.length - needle.length;
+    // `.length` on a string lowers to an `sfn_str_len` (`strnlen`) call, so
+    // reading it in the inner condition would walk the needle once per
+    // compared byte. `runtime/sfn/platform/strcasestr_windows.sfn` hoists both
+    // lengths in this same algorithm for the same reason.
+    let needle_length = needle.length;
     let text_address = (text as *u8) as i64;
     let needle_address = (needle as *u8) as i64;
     let mut i: int = start;
@@ -87,7 +92,7 @@ fn find(text: string, needle: string, start: int) -> int {
         let mut j: int = 0;
         let mut matched: boolean = true;
         loop {
-            if j >= needle.length { break; }
+            if j >= needle_length { break; }
             if load_byte(text_address + i + j) != load_byte(needle_address + j) {
                 matched = false;
                 break;
