@@ -49,7 +49,9 @@ import {
     TestSuite,
     _emit_file_test_events,
     _emit_results_events,
+    _emit_slowest_summary,
     _emit_suite_banners,
+    _fmt_elapsed_ms,
     _format_assert_failure,
     _outcome_all_pass,
     _outcome_failed_at,
@@ -65,7 +67,7 @@ import {
 // test file: the tests are compiled, linked and run in this process under
 // one resolver pass per group. Like `_run_multi_file` it owns its own
 // reporting and scratch teardown and returns the process exit code.
-fn _run_single_process(test_files: string[], file_suite_index: int[], suites_in: TestSuite[], json_output: boolean, json_subframe: boolean, trace_runner: boolean, no_test_cache: boolean, update_snapshots: boolean, emit_banners: boolean, scratch_root: string, scratch_owned: boolean, runtime_root: string, binary_dir: string, ctx: CliContext) -> int ![clock, io, net] {
+fn _run_single_process(test_files: string[], file_suite_index: int[], suites_in: TestSuite[], json_output: boolean, json_subframe: boolean, trace_runner: boolean, no_test_cache: boolean, update_snapshots: boolean, emit_banners: boolean, scratch_root: string, scratch_owned: boolean, runtime_root: string, binary_dir: string, ctx: CliContext, slowest_n: int) -> int ![clock, io, net] {
     let mut suites = suites_in;
     let ll_path = scratch_root + "/test.ll";
     // Derived name (never an explicit `-o`), so it carries Windows' `.exe`
@@ -164,6 +166,10 @@ fn _run_single_process(test_files: string[], file_suite_index: int[], suites_in:
     let mut total_failed: int = 0;
     let mut total_skipped: int = 0;
     let mut overall_rc: int = 0;
+    // SFN-862: per-file elapsed collected for the end-of-run slowest-N
+    // summary.
+    let mut slow_names: string[] = [];
+    let mut slow_ms: int[] = [];
 
     // #1230/#1233: per-test linked-binary cache. Resolve the
     // invocation-stable key inputs once: the compiler identity (bare
@@ -409,6 +415,13 @@ fn _run_single_process(test_files: string[], file_suite_index: int[], suites_in:
         let failure = br.failure;
         let results = br.records;
         let file_elapsed_ms = monotonic_millis() - file_start_ms;
+        slow_names.push(_package_basename(path));
+        slow_ms.push(file_elapsed_ms as int);
+        // SFN-862: a pooled/serial multi-file child reports its own elapsed to
+        // the parent, which cannot time it (children are reaped oldest-first).
+        if _env_flag("SAILFIN_TEST_FRAME_TIMING") {
+            print.err("[test-frame] elapsed_ms=" + int_to_string(file_elapsed_ms as int));
+        }
         // SFN-17: classify from the harness's per-test records (source of
         // truth) instead of the fail.bin index-inference — but only when
         // the records *explain* the exit code. `@main` exits non-zero iff
@@ -432,11 +445,16 @@ fn _run_single_process(test_files: string[], file_suite_index: int[], suites_in:
                 if res_failed > 0 {
                     print("[test] FAIL: " + rf_basename + " (exit code "
                         + int_to_string(run_rc)
-                        + ")");
+                        + ")"
+                        + " ("
+                        + _fmt_elapsed_ms(file_elapsed_ms as int)
+                        + "s)");
                     suites[file_suite_index[index]].fail_count += 1;
                     suites[file_suite_index[index]].failed_files.push(rf_basename);
                 } else {
-                    print("[test] PASS: " + _package_basename(path));
+                    print("[test] PASS: " + _package_basename(path) + " ("
+                        + _fmt_elapsed_ms(file_elapsed_ms as int)
+                        + "s)");
                     suites[file_suite_index[index]].pass_count += 1;
                 }
             }
@@ -481,7 +499,10 @@ fn _run_single_process(test_files: string[], file_suite_index: int[], suites_in:
             // post-hoc.
             let rf_basename = _package_basename(path);
             print("[test] FAIL: " + rf_basename + " (exit code " + int_to_string(run_rc)
-                + ")");
+                + ")"
+                + " ("
+                + _fmt_elapsed_ms(file_elapsed_ms as int)
+                + "s)");
             if failure.present {
                 print("test failed: " + _format_assert_failure(path, failure));
             } else { print("test failed: " + path); }
@@ -503,7 +524,9 @@ fn _run_single_process(test_files: string[], file_suite_index: int[], suites_in:
             // `[test] PASS: <basename>` output exactly. Emitted only
             // on the human path; the JSON path emits structured
             // per-test events instead.
-            print("[test] PASS: " + _package_basename(path));
+            print("[test] PASS: " + _package_basename(path) + " ("
+                + _fmt_elapsed_ms(file_elapsed_ms as int)
+                + "s)");
             suites[file_suite_index[index]].pass_count += 1;
         }
         // Phase 5a: rewind arena scratch back to the per-test
@@ -531,6 +554,7 @@ fn _run_single_process(test_files: string[], file_suite_index: int[], suites_in:
         // single-file callers and the multi-file path's own children
         // — `emit_banners` gates the call site).
         _emit_suite_banners(suites);
+        let _ = _emit_slowest_summary(slow_names, slow_ms, slowest_n);
     }
     exit_test_runner_mode();
     _cleanup_test_scratch(scratch_owned, scratch_root, overall_rc == 0);

@@ -1,0 +1,160 @@
+// End-to-end regression for SFN-862: `sfn test` prints each test file's
+// elapsed time on the default (non-JSON) output path, and a multi-file run
+// ends with a "slowest N" summary.
+//
+// Native replacement pattern, modelled on `runner_json_multifile_test.sfn`
+// (test-infra Phase 3, epic #842) — no bash, no `sh -c`.
+//
+// The summary is produced from timing the CHILD reports to the parent on
+// its stderr (`[test-frame] elapsed_ms=...`, consumed in `pool.sfn`), not
+// from parent-side timing: children are reaped oldest-first
+// (`_reap_test_child`), so a fast child's parent-measured wall time would
+// include the wait for older siblings. This test pins:
+//
+//   1. Per-file PASS lines carry an elapsed time suffix.
+//   2. A multi-file run ends with a `[test] slowest N files:` summary.
+//   3. The summary is sorted descending by elapsed time.
+//   4. `--slowest 0` suppresses the summary entirely.
+//   5. The summary is still correct under a pooled (`--jobs > 1`) run.
+//
+// NOTE: the `sfn/test` `expect_*` matchers are `![pure]` and cannot be
+// used from an `![io]` test; output is asserted with `sfn/strings`
+// predicates.
+import {
+    find,
+    int_to_string,
+    parse_int,
+    substring
+} from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+// env-safe (SFN-401): hand-built minimal child env — no raw
+// process.environ() pool-key leak. The build spawns nested clang +
+// linker, so the child needs PATH; SAILFIN_TEST_SCRATCH routes
+// program.ll per invocation so the parallel pool does not collide on
+// build/sailfin (#1333).
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+// A scratch directory with 3 trivially-passing test files.
+fn _make_pass_dir(tag: string) -> string ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    let dir = base + "/sfn-runner-slowest-" + tag;
+    fs.createDirectory(dir, true);
+    fs.writeFile(dir + "/alpha_test.sfn", "test \"alpha: one\" { assert 1 + 1 == 2; }\n");
+    fs.writeFile(dir + "/beta_test.sfn", "test \"beta: one\" { assert 2 * 3 == 6; }\n");
+    fs.writeFile(dir + "/gamma_test.sfn", "test \"gamma: one\" { assert 4 - 1 == 3; }\n");
+    return dir;
+}
+
+// Parse the elapsed seconds value (as integer centiseconds, e.g. "1.23"
+// -> 123) that follows a `[test]   <rank>. ` slowest-summary rank line.
+// Returns -1 when the rank marker or a well-formed `D.DDs` value after it
+// is not found.
+fn _parse_rank_cs(out: string, rank: int) -> int {
+    let marker = "[test]   " + int_to_string(rank) + ". ";
+    let start = find(out, marker, 0);
+    if start < 0 { return -1; }
+    let after = start + marker.length;
+    let send = find(out, "s", after);
+    if send < 0 { return -1; }
+    let value = substring(out, after, send);
+    let dot = find(value, ".", 0);
+    if dot < 0 { return -1; }
+    let secs_str = substring(value, 0, dot);
+    let cs_str = substring(value, dot + 1, value.length);
+    let mut secs: int = -1;
+    let mut cs: int = -1;
+    match parse_int(secs_str) {
+        Result.Ok { value } => { secs = value; },
+        Result.Err { error } => { return -1; }
+    }
+    match parse_int(cs_str) {
+        Result.Ok { value } => { cs = value; },
+        Result.Err { error } => { return -1; }
+    }
+    if secs < 0 || cs < 0 { return -1; }
+    return secs * 100 + cs;
+}
+
+// ---- Test 1: per-file PASS lines carry an elapsed time ----
+test "test runner: per-file PASS lines carry an elapsed time" ![io] {
+    let dir = _make_pass_dir("t1");
+    let exit = process.run_capture([_sfn_bin(), "test", dir], _child_env());
+    let out = process.capture_take_stdout();
+    let _ = process.capture_take_stderr();
+
+    assert exit == 0;
+    assert find(out, "[test] PASS:", 0) >= 0;
+    let pass_at = find(out, "[test] PASS:", 0);
+    let line_end = find(out, "\n", pass_at);
+    let mut end = out.length as int;
+    if line_end >= 0 { end = line_end; }
+    let line = substring(out, pass_at, end);
+    assert find(line, "s)", 0) >= 0;
+}
+
+// ---- Test 2: multi-file run ends with a slowest summary ----
+test "test runner: multi-file run ends with a slowest summary" ![io] {
+    let dir = _make_pass_dir("t2");
+    let exit = process.run_capture([_sfn_bin(), "test", dir], _child_env());
+    let out = process.capture_take_stdout();
+    let _ = process.capture_take_stderr();
+
+    assert exit == 0;
+    assert find(out, "[test] slowest ", 0) >= 0;
+    assert find(out, "1. ", 0) >= 0;
+}
+
+// ---- Test 3: slowest summary is ordered descending ----
+test "test runner: slowest summary is ordered descending" ![io] {
+    let dir = _make_pass_dir("t3");
+    let exit = process.run_capture([_sfn_bin(), "test", dir], _child_env());
+    let out = process.capture_take_stdout();
+    let _ = process.capture_take_stderr();
+
+    assert exit == 0;
+    let cs1 = _parse_rank_cs(out, 1);
+    let cs2 = _parse_rank_cs(out, 2);
+    assert cs1 >= 0;
+    assert cs2 >= 0;
+    assert cs1 >= cs2;
+}
+
+// ---- Test 4: slowest summary is suppressed with --slowest 0 ----
+test "test runner: slowest summary is suppressed with --slowest 0" ![io] {
+    let dir = _make_pass_dir("t4");
+    let exit = process.run_capture([_sfn_bin(), "test", dir, "--slowest", "0"], _child_env());
+    let out = process.capture_take_stdout();
+    let _ = process.capture_take_stderr();
+
+    assert exit == 0;
+    assert find(out, "[test] slowest ", 0) < 0;
+}
+
+// ---- Test 5: slowest summary survives a pooled run ----
+test "test runner: slowest summary survives a pooled run" ![io] {
+    let dir = _make_pass_dir("t5");
+    let exit = process.run_capture([_sfn_bin(), "test", dir, "--jobs", "2"], _child_env());
+    let out = process.capture_take_stdout();
+    let _ = process.capture_take_stderr();
+
+    assert exit == 0;
+    assert find(out, "[test] slowest ", 0) >= 0;
+}
