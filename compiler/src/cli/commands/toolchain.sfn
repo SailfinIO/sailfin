@@ -32,7 +32,13 @@ import {
 import { ed25519_verify_utf8 } from "sfn/crypto";
 import { int_to_string } from "sfn/strings";
 
-import { _sha256_of_file, _shell_read_cmd, _toml_trim_cmd } from "../../build/fs";
+import {
+    _copy_file,
+    _sha256_of_file,
+    _shell_read_cmd,
+    _toml_trim_cmd
+} from "../../build/fs";
+import { copy_tree, ensure_dir_p, remove_tree } from "../../build/fs_tree";
 import { build_host_os, host_is_windows } from "../../build/target";
 import { _env_flag, _get_home_cmd } from "../../build_flags";
 import { ToolchainDecision, toolchain_decide, toolchain_print_mismatch } from "../../capsule_resolver/toolchain";
@@ -287,6 +293,90 @@ fn _toolchain_install(version_arg: string, work_root: string) -> int ![io, net] 
     return toolchain_install_to_base(version_arg, base, work_root);
 }
 
+// Point `alias_path` at `bin_path`, preferring a relative symlink (target
+// the bare name "sailfin", not `bin_path` itself) so the store entry stays
+// relocatable, falling back to a copy for a filesystem that refuses
+// symlinks. `fs.deleteFile` before `fs.symlink` reproduces `ln -f`: a bare
+// `symlink(2)` fails `EEXIST` over an existing alias, so a re-install would
+// otherwise strand the stale one.
+//
+// Modeled on `_bootstrap_alias` (`cli/commands/dev.sfn`), but NOT
+// interchangeable with it: that leaf is best-effort (`-> void`), while an
+// alias here is load-bearing — SFN-195's parallel-emit-worker dependency
+// on `<dir>/sfn` means a failed alias must abort the install, so this
+// reports success/failure and the caller treats `false` as fatal.
+fn _toolchain_link_alias(bin_path: string, alias_path: string) -> boolean ![io] {
+    fs.deleteFile(alias_path);
+    if fs.symlink("sailfin", alias_path) { return true; }
+    if !_copy_file(bin_path, alias_path) { return false; }
+    // Best-effort: on Windows `fs.set_perms` can only express the
+    // read-only attribute, so a `false` return here is not an error
+    // worth failing the install over — SFN-906.
+    fs.set_perms(alias_path, 493);
+    return true;
+}
+
+// Lay out a verified store entry under `store_dir`: copy the binary out of
+// the extracted `root`, alias it as `sfn`, copy the bundled runtime when the
+// asset ships one, then write the `.sha256` completeness marker LAST — a
+// store dir without it reads as an incomplete install on the next run.
+// Extracted from `toolchain_install_to_base` as pure code motion (SFN-906)
+// so the store-layout tail is directly testable with no network, signing,
+// or fixture. Returns `true` once every step lands; `false` on the first
+// failure, having printed the exact message that step printed before the
+// extraction. The caller still owns cleanup: on `false` it removes
+// `store_dir` and the temp work dir via `_cleanup_failed_install`, exactly
+// as it did when this was inline.
+fn toolchain_lay_out_store_entry(root: string, store_dir: string, bin_path: string, expected: string) -> boolean ![io] {
+    let sha_path = store_dir + "/.sha256";
+    let src_bin = _binary_in_root(root);
+
+    // Every failure after `store_dir` is created removes it (not just `tmp`),
+    // so a partial install never leaves a half-populated version dir a later
+    // run could mistake for complete — the fail-closed store contract.
+    ensure_dir_p(store_dir);
+    if !_copy_file(src_bin, bin_path) {
+        print("error: failed to install the toolchain binary into " + store_dir);
+        return false;
+    }
+    // Best-effort: on Windows `fs.set_perms` can only express the
+    // read-only attribute, so treating a `false` return as fatal would
+    // break Windows installs for a permission bit the host never had
+    // (SFN-906).
+    fs.set_perms(bin_path, 493);
+
+    // `sfn`-named peer in the versioned dir (SFN-195): a post-SFN-173
+    // binary re-invokes `<dir>/sfn` for parallel emit workers.
+    let alias_path = store_dir + "/sfn";
+    if !_toolchain_link_alias(bin_path, alias_path) {
+        print("error: failed to create the sfn alias in " + store_dir);
+        return false;
+    }
+
+    // Bundled runtime, when the asset ships one (sfn run/build need it). A
+    // failed copy is fatal — an entry without its runtime would fail later at
+    // `sfn run`/`build`.
+    if fs.exists(root + "/runtime") {
+        remove_tree(store_dir + "/runtime");
+        let rt_ok = copy_tree(root + "/runtime", store_dir + "/runtime");
+        if !rt_ok {
+            print("error: failed to install the runtime bundle into "
+                + store_dir);
+            return false;
+        }
+    }
+
+    // Completeness marker LAST: written only once the binary, alias, and
+    // runtime are in place. A verified write is the install's commit point —
+    // if it can't be written, the entry is not complete and is torn down.
+    fs.writeFile(sha_path, expected + "\n");
+    if !fs.exists(sha_path) {
+        print("error: failed to write the store marker " + sha_path);
+        return false;
+    }
+    return true;
+}
+
 // Core installer: fetch, verify (signature + digest), then extract into the
 // store rooted at `store_base` (the `versions` dir; the entry lands at
 // `store_base/<version>/`). Fail-closed at every step. Callers own the store
@@ -337,8 +427,8 @@ fn toolchain_install_to_base(version_arg: string, store_base: string, work_root:
     let sig_url = release_base + "/SHA256SUMS.sig";
 
     let tmp = work_root + "/.sfn-toolchain-" + ver;
-    process.run(["rm", "-rf", tmp]);
-    process.run(["mkdir", "-p", tmp]);
+    remove_tree(tmp);
+    ensure_dir_p(tmp);
 
     // 1. Fetch the signed manifest (small) — always, so a re-install
     //    re-verifies the trust chain without re-downloading the tarball.
@@ -347,13 +437,13 @@ fn toolchain_install_to_base(version_arg: string, store_base: string, work_root:
     if !_download_to(sums_url, sums_path) {
         print("error: failed to download release manifest");
         print("  " + sums_url);
-        process.run(["rm", "-rf", tmp]);
+        remove_tree(tmp);
         return 1;
     }
     if !_download_to(sig_url, sig_path) {
         print("error: failed to download release manifest signature");
         print("  " + sig_url);
-        process.run(["rm", "-rf", tmp]);
+        remove_tree(tmp);
         return 1;
     }
 
@@ -369,14 +459,14 @@ fn toolchain_install_to_base(version_arg: string, store_base: string, work_root:
         print("error: downloaded release manifest or signature is empty for "
             + tag);
         print("  the fetch returned no content (transport error or unfollowed redirect)");
-        process.run(["rm", "-rf", tmp]);
+        remove_tree(tmp);
         return 1;
     }
     let pubkey = release_signing_public_key_hex();
     if !ed25519_verify_utf8(pubkey, sums_text, sig_hex) {
         print("error: SHA256SUMS signature verification failed for " + tag);
         print("  the release manifest is unsigned or tampered; refusing to install");
-        process.run(["rm", "-rf", tmp]);
+        remove_tree(tmp);
         return 1;
     }
 
@@ -384,7 +474,7 @@ fn toolchain_install_to_base(version_arg: string, store_base: string, work_root:
     let expected = _digest_for_asset(sums_text, asset);
     if expected.length == 0 {
         print("error: asset not listed in the signed manifest: " + asset);
-        process.run(["rm", "-rf", tmp]);
+        remove_tree(tmp);
         return 1;
     }
 
@@ -402,7 +492,7 @@ fn toolchain_install_to_base(version_arg: string, store_base: string, work_root:
                 print("sfn toolchain: " + ver
                     + " already installed; release signature re-verified");
                 print("  " + store_dir);
-                process.run(["rm", "-rf", tmp]);
+                remove_tree(tmp);
                 return 0;
             }
         }
@@ -413,20 +503,20 @@ fn toolchain_install_to_base(version_arg: string, store_base: string, work_root:
     if !_download_to(asset_url, tarball) {
         print("error: failed to download toolchain asset");
         print("  " + asset_url);
-        process.run(["rm", "-rf", tmp]);
+        remove_tree(tmp);
         return 1;
     }
     let actual = _sha256_of_file(tarball);
     if actual.length == 0 {
         print("error: could not compute sha256 of the downloaded asset");
-        process.run(["rm", "-rf", tmp]);
+        remove_tree(tmp);
         return 1;
     }
     if !strings_equal(actual, expected) {
         print("error: digest mismatch for " + asset + " — refusing to install");
         print("  expected " + expected);
         print("  actual   " + actual);
-        process.run(["rm", "-rf", tmp]);
+        remove_tree(tmp);
         return 1;
     }
 
@@ -434,78 +524,27 @@ fn toolchain_install_to_base(version_arg: string, store_base: string, work_root:
     //    marker is written LAST so a store dir without it reads as an
     //    incomplete install on the next run.
     let extract_dir = tmp + "/extract";
-    process.run(["mkdir", "-p", extract_dir]);
+    ensure_dir_p(extract_dir);
     let tar_rc = process.run(["tar", "-xzf", tarball, "-C", extract_dir]);
     if tar_rc != 0 {
         print("error: failed to extract " + asset + " (tar exit "
             + int_to_string(tar_rc)
             + ")");
-        process.run(["rm", "-rf", tmp]);
+        remove_tree(tmp);
         return 1;
     }
     let root = _find_extracted_root(extract_dir);
     if root.length == 0 {
         print("error: no sailfin binary found in " + asset);
-        process.run(["rm", "-rf", tmp]);
+        remove_tree(tmp);
         return 1;
     }
-    let src_bin = _binary_in_root(root);
 
-    // Every failure after `store_dir` is created removes it (not just `tmp`),
-    // so a partial install never leaves a half-populated version dir a later
-    // run could mistake for complete — the fail-closed store contract.
-    process.run(["mkdir", "-p", store_dir]);
-    let cp_rc = process.run(["cp", "-f", src_bin, bin_path]);
-    if cp_rc != 0 {
-        print("error: failed to install the toolchain binary into " + store_dir);
+    if !toolchain_lay_out_store_entry(root, store_dir, bin_path, expected) {
         _cleanup_failed_install(store_dir, tmp);
         return 1;
     }
-    process.run(["chmod", "0755", bin_path]);
-
-    // `sfn`-named peer in the versioned dir (SFN-195): a post-SFN-173
-    // binary re-invokes `<dir>/sfn` for parallel emit workers. Relative
-    // symlink so it holds regardless of the store path; copy fallback
-    // for filesystems without symlinks — the fallback is checked too, so a
-    // failed alias is a hard error rather than a silently broken entry.
-    let alias_path = store_dir + "/sfn";
-    process.run(["rm", "-f", alias_path]);
-    let ln_rc = process.run(["ln", "-s", "sailfin", alias_path]);
-    if ln_rc != 0 {
-        let cp_alias_rc = process.run(["cp", "-f", bin_path, alias_path]);
-        if cp_alias_rc != 0 {
-            print("error: failed to create the sfn alias in " + store_dir);
-            _cleanup_failed_install(store_dir, tmp);
-            return 1;
-        }
-        process.run(["chmod", "0755", alias_path]);
-    }
-
-    // Bundled runtime, when the asset ships one (sfn run/build need it). A
-    // failed copy is fatal — an entry without its runtime would fail later at
-    // `sfn run`/`build`.
-    if fs.exists(root + "/runtime") {
-        process.run(["rm", "-rf", store_dir + "/runtime"]);
-        let rt_rc = process.run(["cp", "-R", root + "/runtime", store_dir
-            + "/runtime"]);
-        if rt_rc != 0 {
-            print("error: failed to install the runtime bundle into "
-                + store_dir);
-            _cleanup_failed_install(store_dir, tmp);
-            return 1;
-        }
-    }
-
-    // Completeness marker LAST: written only once the binary, alias, and
-    // runtime are in place. A verified write is the install's commit point —
-    // if it can't be written, the entry is not complete and is torn down.
-    fs.writeFile(sha_path, expected + "\n");
-    if !fs.exists(sha_path) {
-        print("error: failed to write the store marker " + sha_path);
-        _cleanup_failed_install(store_dir, tmp);
-        return 1;
-    }
-    process.run(["rm", "-rf", tmp]);
+    remove_tree(tmp);
 
     print("sfn toolchain: installed " + ver + " to " + store_dir);
     print("  verified signature + sha256 " + expected);
@@ -515,8 +554,8 @@ fn toolchain_install_to_base(version_arg: string, store_base: string, work_root:
 // Tear down a partial store entry and the temp work dir on a post-verification
 // install failure, keeping the store free of half-created version dirs.
 fn _cleanup_failed_install(store_dir: string, tmp: string) -> void ![io] {
-    process.run(["rm", "-rf", store_dir]);
-    process.run(["rm", "-rf", tmp]);
+    remove_tree(store_dir);
+    remove_tree(tmp);
 }
 
 // ---- Re-exec dispatch (SFEP-0046 §3.5, Phase 2 "use" — SFN-172) ----
@@ -717,6 +756,8 @@ export {
     run,
     toolchain_gate_or_dispatch,
     toolchain_install_to_base,
+    toolchain_lay_out_store_entry,
     _detect_os,
-    _detect_arch
+    _detect_arch,
+    _toolchain_link_alias
 };

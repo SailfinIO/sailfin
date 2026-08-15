@@ -1,0 +1,101 @@
+// Unit coverage for the de-shelled `sfn`-alias step inside
+// `toolchain_install_to_base` (`compiler/src/cli/commands/toolchain.sfn`,
+// SFN-906), which replaced the `ln -sfn` / `rm -f` / `chmod` spawns with
+// `_toolchain_link_alias`.
+//
+// Modeled on `dev_bootstrap_alias_test.sfn` (SFN-888), which covers the
+// sibling `_bootstrap_alias`. The symlink leg is proven via `fs.read_link`
+// (`fs.exists`/`fs.readFile` can't tell a link from a copy), guarded by
+// `host_is_windows()` since `fs.symlink` is a hard `false` stub there and
+// `_toolchain_link_alias` takes the copy leg instead — matching
+// `dev_bootstrap_alias_test.sfn:65`'s identical guard. The copy leg's own
+// primitives (`_copy_file` + the exec-bit `fs.set_perms`) are proven
+// directly below, but that alone does not prove `_toolchain_link_alias`
+// TAKES that branch on a POSIX host where `fs.symlink` normally succeeds;
+// `toolchain_layout_test.sfn`'s directory-seam test is what forces the
+// branch itself (pre-creating the alias path as a directory fails every
+// leg — delete, symlink, and `_copy_file`'s `fopen` — the same way).
+import { _copy_file } from "../../src/build/fs";
+import { host_is_windows } from "../../src/build/target";
+import { _toolchain_link_alias } from "../../src/cli/commands/toolchain";
+
+// Same scratch shape as `dev_bootstrap_alias_test.sfn`: the per-invocation
+// test scratch when the pool provides one, else a repo-relative path
+// rather than `/tmp`.
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "build/sailfin"; }
+    dir = dir + "/toolchain-alias";
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+test "toolchain alias: fresh create points the alias at the target" ![io] {
+    let root = _scratch_dir() + "/fresh";
+    fs.createDirectory(root, true);
+    let bin_path = root + "/sailfin";
+    fs.writeFile(bin_path, "toolchain-binary-v1");
+    // Matches production order: `toolchain_lay_out_store_entry` chmods
+    // `bin_path` before it calls `_toolchain_link_alias`. The symlink leg
+    // resolves through to `bin_path`'s own permission bits, so without
+    // this the `fs.is_executable(alias_path)` assertion below would fail
+    // for a reason unrelated to the alias step itself.
+    fs.set_perms(bin_path, 493);
+    let alias_path = root + "/sfn";
+
+    assert _toolchain_link_alias(bin_path, alias_path);
+
+    assert fs.exists(alias_path);
+    assert fs.readFile(alias_path) == "toolchain-binary-v1";
+    assert fs.is_executable(alias_path);
+    // Pin the SYMLINK leg specifically, and that the target is the bare
+    // RELATIVE name "sailfin" (not an absolute path) — SFN-906 keeps the
+    // store entry relocatable, matching the shelled `ln -s sailfin
+    // <alias>` it replaced. Guarded: `fs.symlink` is a hard `false` stub
+    // on Windows, so the copy leg runs there instead and `read_link`
+    // would return "".
+    if !host_is_windows() { assert fs.read_link(alias_path) == "sailfin"; }
+}
+
+test "toolchain alias: re-run over an existing alias is idempotent" ![io] {
+    let root = _scratch_dir() + "/idempotent";
+    fs.createDirectory(root, true);
+    let bin_path = root + "/sailfin";
+    fs.writeFile(bin_path, "toolchain-binary-v1");
+    fs.set_perms(bin_path, 493);
+    let alias_path = root + "/sfn";
+
+    // `fs.symlink` is bare `symlink(2)` and fails `EEXIST` on an existing
+    // path, so without the `fs.deleteFile` inside `_toolchain_link_alias`
+    // the second install over the same store dir would fail closed.
+    assert _toolchain_link_alias(bin_path, alias_path);
+    assert _toolchain_link_alias(bin_path, alias_path);
+
+    assert fs.exists(alias_path);
+    assert fs.readFile(alias_path) == "toolchain-binary-v1";
+    assert fs.is_executable(alias_path);
+    if !host_is_windows() { assert fs.read_link(alias_path) == "sailfin"; }
+}
+
+// The copy-fallback leg's own primitives, in isolation: `_copy_file` plus
+// the `fs.set_perms(alias_path, 493)` (0o755) `_toolchain_link_alias` runs
+// once `fs.symlink` returns `false`. This proves the primitives produce a
+// runnable alias; it does NOT prove `_toolchain_link_alias` actually takes
+// this branch — `toolchain_layout_test.sfn`'s directory-seam test covers
+// that (see the header).
+test "toolchain alias: the copy fallback's primitives produce a runnable alias" ![io] {
+    let root = _scratch_dir() + "/copy-fallback";
+    fs.createDirectory(root, true);
+    let bin_path = root + "/sailfin";
+    fs.writeFile(bin_path, "toolchain-binary-v1");
+    let alias_path = root + "/sfn";
+
+    assert _copy_file(bin_path, alias_path);
+    fs.set_perms(alias_path, 493);
+
+    assert fs.exists(alias_path);
+    assert fs.readFile(alias_path) == "toolchain-binary-v1";
+    // A copy, not a link — `read_link` returns "" for a non-symlink.
+    assert fs.read_link(alias_path) == "";
+    assert fs.is_executable(alias_path);
+}
