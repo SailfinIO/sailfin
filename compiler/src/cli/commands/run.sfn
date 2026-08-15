@@ -133,7 +133,10 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     // relative-import `.ll`s take the legacy flat layout. `sailfin_exe` /
     // `work_dir` stay empty; threading `binary_dir` lets
     // `prepare_project_capsules` upgrade to subprocess isolation only when
-    // the resolved closure is large enough to otherwise OOM.
+    // the resolved closure is large enough to otherwise OOM. `ctx.compiler_path`
+    // (SFN-904) is the running binary's own exact path, threaded as
+    // `self_exe` so an isolated-emit child spawns the real file instead of
+    // a guessed `<binary_dir>/sfn` that doesn't exist under a renamed build.
     //
     // SFN-341: `runtime_root` IS threaded, unlike the rest of the consumer.
     // `sfn run` links, so it needs the runtime capsule's own `[dependencies]`
@@ -151,7 +154,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
         runtime_root: runtime_root,
         retain_full_runtime: false
     };
-    let run_capsule_result = prepare_project_capsules(input_path, run_cache_config, run_consumer, "", "", binary_dir);
+    let run_capsule_result = prepare_project_capsules(input_path, run_cache_config, run_consumer, "", ctx.compiler_path, "", binary_dir);
     let capsule_lls = run_capsule_result.ll_paths;
 
     let source = fs.readFile(input_path);

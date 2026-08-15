@@ -11,6 +11,14 @@
 // cold self-host build stages without ordering hazards.
 //
 // Behavior-preserving move: every body is verbatim from cli_main.sfn.
+//
+// `exe_path` is declared here rather than imported: this module's leaf
+// property (no local imports) is what breaks the `cli_main <->
+// build/runtime_objs` cycle described above, and an `extern fn` costs
+// nothing against it. Redeclared per-module per the #306 cross-module
+// extern limit, matching `cli/entry.sfn:36`.
+extern fn exe_path() -> *u8;
+
 fn _path_join(base: string, name: string) -> string {
     if base.length == 0 { return name; }
     if base[base.length - 1] == "/" { return base + name; }
@@ -111,13 +119,55 @@ fn _resolve_self_path(binary_dir: string) -> string ![io] {
         // directory with search permission satisfies access(X_OK), and
         // self-host work roots contain exactly such a `sailfin` cache
         // directory beside the published `sfn` binary (SFN-579).
+        // The `!fs.is_directory` guard is load-bearing, not defensive
+        // filler: `fs.is_executable` is `_access(path, 0)` on Windows
+        // (SFN-649) — identical to `fs.exists`, so it cannot itself tell
+        // a file from a directory — and a self-host work root's `sailfin`
+        // cache directory sits right beside the published `sfn` binary
+        // (the SFN-579 note above). Without this guard, a probe order
+        // that reaches `sailfin` before it reaches a real executable
+        // would return that directory, and every isolated-emit child
+        // spawned against it would fail exactly like the fabricated
+        // path this function replaces (SFN-904).
         let names: string[] = ["sfn", "sfn.exe", "sailfin", "sailfin.exe"];
         let mut i: int = 0;
         loop {
             if i >= names.length { break; }
             let candidate = _path_join(binary_dir, names[i]);
-            if fs.is_executable(candidate) { return candidate; }
+            if fs.is_executable(candidate) {
+                if !fs.is_directory(candidate) { return candidate; }
+            }
             i += 1;
+        }
+        // SFN-904 last resort: the name probe above only knows the four
+        // canonical spellings, so it finds nothing when the running
+        // compiler is named anything else — `build/sailfin/program` (the
+        // output of `sfn build -p compiler`) being the case that motivated
+        // this. When the directory being asked about IS the running
+        // binary's own directory, no probing is needed: `exe_path()` names
+        // the exact file that answered this invocation.
+        //
+        // The dirname equality guard is what keeps this honest. This
+        // function answers "which compiler lives in `binary_dir`", and for
+        // some other directory the running binary is not the answer —
+        // returning it there would swap a fabricated path for a plausible
+        // wrong one, which is harder to notice.
+        //
+        // `exe_path()` resolves on every host via the
+        // `sailfin_intrinsic_exe_path` sentinel (#967) — `readlink` on
+        // Linux, `_NSGetExecutablePath` on Darwin, `GetModuleFileNameA` on
+        // Windows — and returns "" only when the host lookup genuinely
+        // fails, which falls through to the same "" as before.
+        // (`cli/entry.sfn:105` still claims macOS/Windows return "";
+        // that comment is stale, contradicted by `:200` in its own file.)
+        let self_raw: *u8 = exe_path();
+        let self_str: string = self_raw as string;
+        if self_str.length > 0 {
+            if _dirname(self_str) == binary_dir {
+                if fs.is_executable(self_str) {
+                    if !fs.is_directory(self_str) { return self_str; }
+                }
+            }
         }
     }
     return "";

@@ -1,0 +1,101 @@
+// compiler/tests/unit/cr_effective_isolation_exe_test.sfn
+//
+// Regression coverage for SFN-904: `_cr_effective_isolation_exe`
+// (`capsule_resolver/mod.sfn`) fabricated `<binary_dir>/sfn` for the
+// isolated-emit child's argv[0] — a filename guess that is wrong whenever
+// the running compiler binary isn't literally named `sfn` (any `-o`-renamed
+// build), spawning every child against a nonexistent path. Neither this
+// helper nor `_resolve_self_path` (`build/paths.sfn`) had unit coverage
+// before this fix; that absence is why the bug shipped.
+import { _cr_effective_isolation_exe } from "../../src/capsule_resolver";
+import { _resolve_self_path } from "../../src/build/paths";
+import { ensure_dir_p, remove_tree } from "../../src/build/fs_tree";
+
+// Rung 1: an explicit `sailfin_exe` (the `-p` self-host path, which always
+// forces subprocess isolation) wins outright — unchanged regardless of
+// `self_exe`, `binary_dir`, or closure size.
+test "isolation-exe: explicit sailfin_exe wins over every other rung" ![io] {
+    assert _cr_effective_isolation_exe("/explicit/sfn", "/self/sfn", "/bin", 999) == "/explicit/sfn";
+}
+
+// Below the closure-size threshold (16, `_cr_positional_isolation_threshold`),
+// the empty `sailfin_exe` is returned unchanged: small builds stay in-process
+// even when a `self_exe` is available.
+test "isolation-exe: below the closure threshold stays in-process" ![io] {
+    assert _cr_effective_isolation_exe("", "/self/sfn", "/bin", 4) == "";
+}
+
+// No `binary_dir` to probe at all: nothing to spawn against, so this
+// degrades to `sailfin_exe` unchanged rather than guessing.
+test "isolation-exe: empty binary_dir returns sailfin_exe unchanged" ![io] {
+    assert _cr_effective_isolation_exe("", "/self/sfn", "", 999) == "";
+}
+
+// Rung 2 (SFN-904): above threshold, no explicit `sailfin_exe` — the
+// caller-threaded `self_exe` (the running binary's own exact path,
+// `ctx.compiler_path`) is preferred over the `binary_dir` name probe.
+test "isolation-exe: self_exe is preferred over the binary_dir probe" ![io] {
+    assert _cr_effective_isolation_exe("", "/self/sfn", "/bin", 999) == "/self/sfn";
+}
+
+// Rung 3: with no `self_exe` threaded, falls through to
+// `_resolve_self_path(binary_dir)` — a real file this test creates, so the
+// helper must never fabricate a filename it hasn't verified exists.
+test "isolation-exe: falls back to _resolve_self_path when self_exe is empty" ![io] {
+    let scratch = "build/sailfin/.cr-isolation-exe-test-1";
+    remove_tree(scratch);
+    ensure_dir_p(scratch);
+    let exe_path = scratch + "/sfn";
+    fs.writeFile(exe_path, "");
+    assert fs.set_perms(exe_path, 493);
+    assert _cr_effective_isolation_exe("", "", scratch, 999) == exe_path;
+    remove_tree(scratch);
+}
+
+// Rung 4: every source exhausted (no explicit exe, no self_exe, and
+// `binary_dir` holds nothing `_resolve_self_path` recognizes) — the
+// deliberate graceful degrade to "" (in-process emit), never a fabricated
+// nonexistent path.
+test "isolation-exe: exhausted ladder degrades to empty, never a fabricated path" ![io] {
+    let scratch = "build/sailfin/.cr-isolation-exe-test-2";
+    remove_tree(scratch);
+    ensure_dir_p(scratch);
+    assert _cr_effective_isolation_exe("", "", scratch, 999) == "";
+    remove_tree(scratch);
+}
+
+// `_resolve_self_path` itself: `fs.is_executable` is `_access(path, 0)` on
+// Windows (SFN-649) — identical to `fs.exists` — and cannot alone
+// distinguish a file from a directory. A self-host work root's `sailfin`
+// cache DIRECTORY sits right beside the published `sfn` binary (SFN-579),
+// and on POSIX a directory typically carries the search/execute bit too, so
+// without the `!fs.is_directory` guard this probe returns the directory —
+// reproducible on Linux, not just Windows.
+test "resolve-self-path: a directory named sailfin is never returned" ![io] {
+    let scratch = "build/sailfin/.cr-isolation-exe-test-3";
+    remove_tree(scratch);
+    ensure_dir_p(scratch);
+    let dir_path = scratch + "/sailfin";
+    fs.createDirectory(dir_path, true);
+    // No `sfn`/`sfn.exe`/`sailfin.exe` candidate exists — only the
+    // directory — so a correct probe finds nothing and returns "".
+    assert _resolve_self_path(scratch) == "";
+    remove_tree(scratch);
+}
+
+// The guard must SKIP a rejected directory and keep probing, not just stop:
+// `sailfin` (a directory, lower-priority name) sits alongside a real
+// `sailfin.exe` executable (the lowest-priority name in the ladder) — the
+// probe must reject the former and still land on the latter.
+test "resolve-self-path: skips a directory candidate and keeps probing" ![io] {
+    let scratch = "build/sailfin/.cr-isolation-exe-test-4";
+    remove_tree(scratch);
+    ensure_dir_p(scratch);
+    let dir_path = scratch + "/sailfin";
+    fs.createDirectory(dir_path, true);
+    let exe_path = scratch + "/sailfin.exe";
+    fs.writeFile(exe_path, "");
+    assert fs.set_perms(exe_path, 493);
+    assert _resolve_self_path(scratch) == exe_path;
+    remove_tree(scratch);
+}
