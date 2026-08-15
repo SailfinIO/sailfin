@@ -47,6 +47,7 @@ import {
     _collect_sfn_files_cmd,
     _mktemp_sibling_cmd
 } from "../build/fs";
+import { _resolve_self_path } from "../build/paths";
 import { select_runtime_sfn_sources } from "../build/runtime_selection";
 import {
     BuildCacheConfig,
@@ -193,6 +194,7 @@ import { discover_workspace_root, load_workspace_members } from "./workspace";
 // through it cannot determine the callee's return type and the emit fails
 // (`E0600`, `E1002`, docs/rca/2026-04-18-reexport-diagnostic-gep.md).
 export {
+    _cr_effective_isolation_exe,
     prepare_project_capsules,
     prepare_project_capsules_for_test,
     prepare_runtime_dep_capsules,
@@ -233,22 +235,42 @@ fn _cr_positional_isolation_threshold() -> int { return 16; }
 // so the self-host path is byte-for-byte unaffected. A positional
 // build/test arrives with an empty `sailfin_exe`; when a same-generation
 // binary is available (`binary_dir`) and the resolved import closure is
-// large, return `<binary_dir>/sailfin` so `stage_capsule_imports` /
+// large, resolve a real, spawnable child path so `stage_capsule_imports` /
 // `compile_capsule_modules` take their subprocess-per-module path
 // instead of accumulating the entire closure in one never-freed bump
 // arena (the ~15.5 GB cold-compile OOM this issue fixes).
-fn _cr_effective_isolation_exe(sailfin_exe: string, binary_dir: string, source_count: int) -> string {
+//
+// SFN-904: below the threshold, or with no `binary_dir`, this still
+// returns `sailfin_exe` unchanged (empty on the positional path) rather
+// than guessing a filename. The prior body fabricated `<binary_dir>/sfn`
+// unconditionally — wrong whenever the running binary isn't literally
+// named `sfn` (any `-o`-renamed build, e.g. `cp program; mv program sfn`
+// skipped), which spawned every isolated-emit child against a
+// nonexistent path and killed the build. `self_exe` — the actual running
+// binary's own path, threaded by the caller (`ctx.compiler_path`) — is
+// preferred over the `binary_dir` probe below because it names the exact
+// file that answered this invocation, without the probe's ordering
+// ambiguity; `_resolve_self_path` remains as the fallback for callers
+// that have no `self_exe` to thread (e.g. `sfn check`).
+fn _cr_effective_isolation_exe(sailfin_exe: string, self_exe: string, binary_dir: string, source_count: int) -> string ![io] {
     if sailfin_exe.length > 0 { return sailfin_exe; }
     if binary_dir.length == 0 { return sailfin_exe; }
     if source_count < _cr_positional_isolation_threshold() {
         return sailfin_exe;
     }
-    return binary_dir + "/sfn";
+    if self_exe.length > 0 { return self_exe; }
+    let resolved = _resolve_self_path(binary_dir);
+    if resolved.length > 0 { return resolved; }
+    // Deliberate graceful degrade, not a failure: no known-good child
+    // path could be resolved, so isolated emit is skipped and the
+    // closure compiles in-process instead — slower on a large closure,
+    // but never broken the way a fabricated nonexistent path was.
+    return "";
 }
 
-fn prepare_project_capsules(input_path: string, config: BuildCacheConfig, consumer: ResolverConsumer, sailfin_exe: string, work_dir: string, binary_dir: string) -> ProjectCapsuleResult ![io] {
+fn prepare_project_capsules(input_path: string, config: BuildCacheConfig, consumer: ResolverConsumer, sailfin_exe: string, self_exe: string, work_dir: string, binary_dir: string) -> ProjectCapsuleResult ![io] {
     let entry_paths: string[] = [input_path];
-    return _cr_prepare(entry_paths, config, consumer, sailfin_exe, work_dir, binary_dir);
+    return _cr_prepare(entry_paths, config, consumer, sailfin_exe, self_exe, work_dir, binary_dir);
 }
 
 // SFN-341: resolve a runtime capsule's own `[dependencies]` into a
@@ -265,7 +287,7 @@ fn prepare_project_capsules(input_path: string, config: BuildCacheConfig, consum
 // `ll_paths` is meaningful here; a caller that needs the runtime
 // capsules themselves resolves them with `runtime_capsule_from_root`,
 // as `run.sfn` already does when the resolver surfaces none.
-fn prepare_runtime_dep_capsules(runtime_root: string, config: BuildCacheConfig, sailfin_exe: string, work_dir: string, binary_dir: string) -> ProjectCapsuleResult ![io] {
+fn prepare_runtime_dep_capsules(runtime_root: string, config: BuildCacheConfig, sailfin_exe: string, self_exe: string, work_dir: string, binary_dir: string) -> ProjectCapsuleResult ![io] {
     let empty_entry_paths: string[] = [];
     let consumer = ResolverConsumer {
         scope: "",
@@ -275,12 +297,12 @@ fn prepare_runtime_dep_capsules(runtime_root: string, config: BuildCacheConfig, 
         runtime_root: runtime_root,
         retain_full_runtime: false
     };
-    return _cr_prepare(empty_entry_paths, config, consumer, sailfin_exe, work_dir, binary_dir);
+    return _cr_prepare(empty_entry_paths, config, consumer, sailfin_exe, self_exe, work_dir, binary_dir);
 }
 
 // Shared tail of `prepare_project_capsules` / `prepare_runtime_dep_capsules`:
 // resolve + dedupe, surface declared runtime capsules, stage, and compile.
-fn _cr_prepare(entry_paths: string[], config: BuildCacheConfig, consumer: ResolverConsumer, sailfin_exe: string, work_dir: string, binary_dir: string) -> ProjectCapsuleResult ![io] {
+fn _cr_prepare(entry_paths: string[], config: BuildCacheConfig, consumer: ResolverConsumer, sailfin_exe: string, self_exe: string, work_dir: string, binary_dir: string) -> ProjectCapsuleResult ![io] {
     let empty_paths: string[] = [];
     let empty_events: ModuleCacheEvent[] = [];
     let empty_runtime_capsules: RuntimeCapsuleArtifacts[] = [];
@@ -336,7 +358,7 @@ fn _cr_prepare(entry_paths: string[], config: BuildCacheConfig, consumer: Resolv
     // subprocess-per-module path (fresh arena per child) when a
     // same-generation binary is available; `-p` builds (non-empty
     // `sailfin_exe`) are unchanged.
-    let effective_exe = _cr_effective_isolation_exe(sailfin_exe, binary_dir, resolved.sources.length);
+    let effective_exe = _cr_effective_isolation_exe(sailfin_exe, self_exe, binary_dir, resolved.sources.length);
 
     let staged = stage_capsule_imports(resolved.sources, config, effective_exe, work_dir);
     if !staged {
@@ -533,8 +555,12 @@ fn prepare_project_capsules_for_test(entry_paths: string[], consumer: ResolverCo
     // entire closure in one never-freed bump arena and OOMing past the
     // 8 GiB self-cap on a cold test-bin cache. Small fixtures (below the
     // closure-size threshold) keep the in-process fast path; a non-empty
-    // `sailfin_exe` is returned unchanged.
-    let effective_exe = _cr_effective_isolation_exe(sailfin_exe, binary_dir, resolved.sources.length);
+    // `sailfin_exe` is returned unchanged. `prepare_project_capsules_for_test`
+    // has no running-binary path of its own to thread (SFN-904 only added
+    // that parameter to the build/run path), so this passes "" and falls
+    // through to `_cr_effective_isolation_exe`'s own `_resolve_self_path`
+    // probe.
+    let effective_exe = _cr_effective_isolation_exe(sailfin_exe, "", binary_dir, resolved.sources.length);
     // `sfn test` doesn't yet take a CLI cache config; pass the
     // env-driven default. When the test runner grows `--no-cache`
     // / `--clean`, thread the resolved config in here. Resolved before

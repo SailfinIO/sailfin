@@ -268,7 +268,11 @@ fn build_tensor_matmul_kernel_binary(kernel_module: TensorModule, kernel_fn_name
     // `sfn build` / `sfn run` do.
     let cache_config = empty_build_cache_config();
     let sailfin_exe = _resolve_self_path(binary_dir);
-    let dep_result = prepare_runtime_dep_capsules(runtime_root, cache_config, sailfin_exe, out_dir, binary_dir);
+    // `sailfin_exe` above is already the real, resolved self-path and
+    // wins `_cr_effective_isolation_exe`'s first rung unconditionally
+    // (SFN-904), so `self_exe` is moot here — passed "" rather than
+    // duplicating `sailfin_exe`.
+    let dep_result = prepare_runtime_dep_capsules(runtime_root, cache_config, sailfin_exe, "", out_dir, binary_dir);
     if !dep_result.success {
         return TensorMatmulBuildResult {
             binary_path: "",

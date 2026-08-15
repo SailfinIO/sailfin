@@ -65,8 +65,12 @@ fn _cr_disabled_stage_cache_ctx() -> _StageCacheContext {
 //
 // An empty `sailfin_exe` must ALSO disable the shared cache, ahead of
 // every other check: `sailfin_exe` is empty exactly on the in-process
-// emit leg (`_cr_effective_isolation_exe` returns "" under the
-// sub-16-module closure threshold — see `mod.sfn`), and
+// emit leg. `_cr_effective_isolation_exe` (see `mod.sfn`) returns "" for
+// two distinct reasons — the sub-16-module closure threshold, and
+// (SFN-904) an exhausted resolution ladder where no real spawnable child
+// path could be found. Both land here identically and both must disable
+// the cache, so do not narrow this to the threshold case: a large-closure
+// build can now reach the in-process leg too. And
 // `cache_compiler_identity` can only fold the emitting binary's SHA-256
 // into the key when it is handed a non-empty `compiler_binary_path`.
 // Without that fold, the key degrades to `{source, slug, bare version

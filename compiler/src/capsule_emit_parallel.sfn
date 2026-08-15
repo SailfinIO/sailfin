@@ -574,8 +574,21 @@ fn _cr_emit_pool_round(tasks: ParallelEmitTask[], mode: string, sailfin_exe: str
         let rc = results[ti];
         let mut ok: boolean = rc == 0;
         if !ok {
+            // SFN-904: name what was spawned alongside the exit code. `127`
+            // here is `_cr_reap_child`'s synthesized "could not execute"
+            // sentinel for a `spawn_with_env` handle-0 failure — the OS
+            // never told us why (`GetLastError()` is discarded in
+            // `_pw_spawn_impl`, `process_windows.sfn`; surfacing it is a
+            // wider change, out of scope here), so without `argv[0]` this
+            // line said only "exit 127" and named nothing to investigate.
+            let mut argv0: string = "";
+            if process_tasks[ti].argv.length > 0 {
+                argv0 = process_tasks[ti].argv[0];
+            }
             print.err("capsule-resolver: emit failed for " + t.slug + " (exit "
                 + int_to_string(rc)
+                + ", argv[0]="
+                + argv0
                 + ")");
         }
         if ok {

@@ -453,7 +453,14 @@ fn _run_single_build(capsule_path: string, input_path_arg: string, out_path_arg:
     // in-process path below.
     let mut sailfin_exe: string = "";
     if walk_src { sailfin_exe = _resolve_self_path(binary_dir); }
-    let capsule_result = prepare_project_capsules(input_path, cache_config, consumer, sailfin_exe, work_dir, binary_dir);
+    // SFN-904: `ctx.compiler_path` — the running binary's own exact
+    // path — is threaded as `self_exe`, distinct from `sailfin_exe`
+    // above. `sailfin_exe` non-empty FORCES subprocess isolation
+    // (`walk_src`'s 138-module self-host); `self_exe` only supplies the
+    // real spawn path if/when `prepare_project_capsules` upgrades a
+    // positional build past the closure-size threshold, so a small
+    // end-user build stays in-process exactly as before.
+    let capsule_result = prepare_project_capsules(input_path, cache_config, consumer, sailfin_exe, ctx.compiler_path, work_dir, binary_dir);
     // Issue #991: a per-module emit failure (e.g. an effect-gate
     // `E0402` on an unimported sibling) leaves `ll_paths` empty and
     // silently drops the offending module from the link. Without

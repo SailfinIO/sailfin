@@ -1,0 +1,146 @@
+// End-to-end regression for SFN-904: `_cr_effective_isolation_exe`
+// (`capsule_resolver/mod.sfn`) used to fabricate `<binary_dir>/sfn` as the
+// isolated-emit child's argv[0]. That name is wrong whenever the running
+// compiler binary isn't literally named `sfn` — any `-o`-renamed build —
+// so every isolated-emit child spawned against a nonexistent path and the
+// whole build died. Reproduced with byte-identical binaries under two
+// different filenames:
+//
+//   cp build/sailfin/program /tmp/scratch/bin/program   # failed pre-fix
+//   cp build/sailfin/program /tmp/scratch/bin2/sfn      # same bytes, worked
+//
+// This drives the exact repro: copy the compiler under test to a
+// non-canonical filename, then run a POSITIONAL build (no `-p`, so
+// `sailfin_exe` stays empty and `_cr_effective_isolation_exe`'s
+// closure-size ladder is genuinely exercised — a `-p` build forces
+// `sailfin_exe` non-empty via `_resolve_self_path` before this helper is
+// even reached, `cli/commands/build.sfn`) whose resolved capsule
+// dependency closure crosses the 16-module subprocess-isolation threshold
+// (`_cr_positional_isolation_threshold`) — `sfn/crypto` alone is 100+
+// modules, so importing it from a single-file entry is enough to cross it.
+//
+// No-bash e2e (`.claude/rules/no-bash-e2e.md`): the nested build uses
+// `clean_runner_env(nested_runner_scratch(label))`
+// (`docs/conventions/e2e-tests.md`) so its `SAILFIN_TEST_SCRATCH` is
+// re-pointed at an isolated subdir and the parent pool's private
+// orchestration keys never leak into the nested compile (SFN-401).
+// The compiler binary is copied with `_copy_file_preserving_mode`
+// (`compiler/src/build/fs.sfn`), not a `cp` subprocess. There is no
+// `fs.copyFile` *builtin*, and `fs.readFile`/`writeFile`'s `string`
+// round-trip is for text rather than arbitrary binary content — but a
+// native compiler-source helper does exist, it preserves the executable
+// bit, and this is a compiler test that already imports from
+// `../../src/build/`. Shelling `cp` here would be particularly wrong:
+// this test exists to fix a native-Windows bug, and `cp` is one of the
+// POSIX tools a stock Windows host does not have (SFN-885).
+//
+// The fixture (capsule.toml + src/main.sfn importing `sfn/crypto` by
+// name) is the same shape `capsule_byname_import_link_test.sfn` already
+// proves works; it must live IN-TREE (under `build/`) so
+// `discover_workspace_root` finds the repo's `workspace.toml`, which
+// registers the in-tree `capsules/sfn/crypto` — the same requirement that
+// test's own header documents. `fs.mkdtemp("build/...")` keeps this run
+// collision-free under the parallel pool.
+//
+// NOTE: `sfn/test`'s `expect_*` matchers are `![pure]` and unusable from
+// an `![io]` test; assert directly on captured values instead.
+import { contains } from "sfn/strings";
+import { clean_runner_env, nested_runner_scratch } from "sfn/test";
+
+import { _copy_file_preserving_mode } from "../../src/build/fs";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+// Known-answer: sha256("abc"), matching `capsule_byname_import_link_test.sfn`.
+fn _expected_digest() -> string {
+    return "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+}
+
+// Materialize the in-tree fixture under a fresh `build/` subdir. Same
+// shape as `capsule_byname_import_link_test.sfn::_ensure_fixture`, kept
+// unique per-run via `fs.mkdtemp` rather than a fixed shared path.
+fn _make_fixture() -> string ![io] {
+    let root = fs.mkdtemp("build/sfn-904-self-exe-");
+    assert root.length > 0;
+    fs.createDirectory(root + "/src", true);
+    fs.writeFile(root + "/capsule.toml", "[capsule]\n"
+        + "name = \"sfn-904-self-exe-test\"\n"
+        + "version = \"0.1.0\"\n"
+        + "description = \"E2E regression for SFN-904 self-exe isolation path\"\n\n"
+        + "[dependencies]\n"
+        + "\"sfn/crypto\" = \"0.3.0\"\n\n"
+        + "[capabilities]\n"
+        + "required = [\"io\"]\n\n"
+        + "[build]\n"
+        + "entry = \"src/main.sfn\"\n");
+    fs.writeFile(root + "/src/main.sfn", "import { sha256_hex } from \"sfn/crypto\";\n\n"
+        + "fn main() -> int ![io] {\n"
+        + "    print.info(sha256_hex(\"abc\"));\n"
+        + "    return 0;\n"
+        + "}\n");
+    return root;
+}
+
+// Copy the compiler under test to `<root>/bin/<name>` — a filename that is
+// none of `sfn`/`sfn.exe`/`sailfin`/`sailfin.exe`, so `_resolve_self_path`'s
+// probe cannot accidentally paper over the bug this test targets — and make
+// sure the copy is executable. Returns "" on any step's failure.
+fn _copy_renamed_compiler(root: string, name: string) -> string ![io] {
+    let bin_dir = root + "/bin";
+    fs.createDirectory(bin_dir, true);
+    let dst = bin_dir + "/" + name;
+    if !_copy_file_preserving_mode(_sfn_bin(), dst) { return ""; }
+    // `_copy_file_preserving_mode` already carries the source's mode over,
+    // so this is a post-condition check rather than the thing that makes
+    // the copy runnable — a copy that is not executable would fail later
+    // as an opaque spawn error instead of here.
+    if !fs.set_perms(dst, 493) { return ""; }
+    return dst;
+}
+
+// ---- Test 1: a positional build through a non-canonically-named compiler
+// crosses the isolation threshold and still succeeds ----
+test "self-exe isolation: a renamed compiler builds a large-closure positional source" ![io] {
+    let root = _make_fixture();
+    let renamed = _copy_renamed_compiler(root, "program");
+    assert renamed.length > 0;
+
+    let out_bin = root + "/out";
+    let exit = process.run_capture([renamed, "build", "-o", out_bin, root + "/src/main.sfn"], clean_runner_env(nested_runner_scratch("sfn-904-self-exe-run-1")));
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+
+    // Pre-fix this failed: `_cr_effective_isolation_exe` fabricated
+    // `<binary_dir>/sfn` (a name that does not exist here — the copy is
+    // named `program`), so every isolated-emit child failed to spawn and
+    // the build died non-zero.
+    assert exit == 0;
+    assert !contains(out + err, "emit failed");
+    assert fs.exists(out_bin);
+}
+
+// ---- Test 2: the resulting binary runs and produced the right digest,
+// proving the isolated-emit path produced a CORRECT build, not just a
+// successful one ----
+test "self-exe isolation: the binary built through a renamed compiler runs correctly" ![io] {
+    let root = _make_fixture();
+    let renamed = _copy_renamed_compiler(root, "program");
+    assert renamed.length > 0;
+
+    let out_bin = root + "/out";
+    let build_exit = process.run_capture([renamed, "build", "-o", out_bin, root + "/src/main.sfn"], clean_runner_env(nested_runner_scratch("sfn-904-self-exe-run-2")));
+    let _bo = process.capture_take_stdout();
+    let _be = process.capture_take_stderr();
+    assert build_exit == 0;
+    assert fs.exists(out_bin);
+
+    let run_exit = process.run_capture([out_bin], clean_runner_env(""));
+    let run_out = process.capture_take_stdout();
+    let run_err = process.capture_take_stderr();
+    assert run_exit == 0;
+    assert contains(run_out + run_err, _expected_digest());
+}
