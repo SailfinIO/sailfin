@@ -33,6 +33,7 @@
 // the shared `cli/commands/cmd_shared.sfn` module (relocated from the
 // deleted `cli_commands.sfn` in #1795, SFEP-0027 §3.2) and are imported
 // from there.
+import { Diagnostic, diagnostic_to_diag } from "sfn/analyzer/typecheck_types";
 import {
     Command,
     Matches,
@@ -50,6 +51,7 @@ import { _get_home_cmd } from "../../build_flags";
 import { _display_capsule_name_cmd, _resolve_capsule_name_cmd } from "../../capsule_names";
 import { lock_add_entry, lock_get_version } from "../../lock";
 import { find_char_local, substring } from "../../string_utils";
+import { render_terminal_diagnostic } from "../../terminal_output";
 import {
     toml_add_dependency,
     toml_add_dev_dependency,
@@ -63,6 +65,20 @@ import {
     _registry_get_cmd,
     _resolve_registry_url_cmd
 } from "./cmd_shared";
+
+// E0616: see `cli/commands/login.sfn::_home_dir_diagnostic` for the full
+// rationale (no source span — a process-environment condition, not a
+// `.sfn` file).
+fn _home_dir_diagnostic() -> Diagnostic {
+    return Diagnostic {
+        code: "E0616",
+        severity: "error",
+        message: "could not determine home directory (HOME, USERPROFILE, and HOMEDRIVE+HOMEPATH are all unset)",
+        file_path: "",
+        primary: null,
+        suggestion: null
+    };
+}
 
 // The `sfn/cli` definition for `add`, registered on the v2 root via
 // `with_subcommand`. Two boolean flags and one required `<capsule>`
@@ -337,7 +353,8 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io, net] {
 
     let home = _get_home_cmd();
     if home.length == 0 {
-        print("could not determine home directory");
+        let empty_lines: string[] = [];
+        print.err(render_terminal_diagnostic(diagnostic_to_diag(_home_dir_diagnostic(), "add"), empty_lines, "add"));
         return 1;
     }
     let cache_base = home + "/.sfn/cache/capsules/" + scope + "/" + name + "/"

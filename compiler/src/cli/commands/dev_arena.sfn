@@ -95,7 +95,7 @@ fn _arena_child_env(arena: string) -> string[] ![io] {
     let mut e: string[] = [];
     let path = env.get("PATH");
     if path.length > 0 { e.push("PATH=" + path); }
-    let home = env.get("HOME");
+    let home = env.home();
     if home.length > 0 { e.push("HOME=" + home); }
     let tmpdir = env.get("TMPDIR");
     if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }

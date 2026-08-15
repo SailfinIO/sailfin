@@ -100,3 +100,64 @@ test "env-abi: env.home returns HOME" ![io] {
     if fs.exists(marker) { fs.deleteFile(marker); }
     assert find(out, "/sfn/env/abi/home", 0) >= 0;
 }
+
+// The three-rung `sfn_home_dir` ladder (SFN-856, `runtime/sfn/io.sfn`),
+// exercised on a Linux runner via an explicit, non-inherited `run_env`
+// array (`run_capture`'s env is never merged with the parent's, so
+// omitting `HOME` here means genuinely unset, not "unset on this host") —
+// the same env-var seam the `env.get`/`env.home` tests above already use,
+// no `SAILFIN_HOST_OS` override needed since `sfn_home_dir` has no
+// host-OS branch to select.
+//
+// Rung 2: `HOME` unset, `USERPROFILE` set — a stock `cmd.exe`/PowerShell
+// session before this fix's third rung existed.
+test "env-abi: env.home falls back to USERPROFILE when HOME is unset" ![io] {
+    let marker = _marker("home-userprofile");
+    let src = "fn main() -> void ![io] { let h: string = env.home(); print.info(h); }";
+    let exit = _build_and_run(src, ["USERPROFILE=/sfn/env/abi/userprofile"], marker);
+    assert exit == 0;
+    let out = fs.readFile(marker);
+    if fs.exists(marker) { fs.deleteFile(marker); }
+    assert find(out, "/sfn/env/abi/userprofile", 0) >= 0;
+}
+
+// Rung 3 (SFN-856): `HOME` and `USERPROFILE` both unset, `HOMEDRIVE` +
+// `HOMEPATH` set — the ladder's new rung, concatenated in that order with
+// no separator (matching how Windows itself composes the two).
+test "env-abi: env.home falls back to HOMEDRIVE+HOMEPATH when HOME and USERPROFILE are unset" ![io] {
+    let marker = _marker("home-homedrive");
+    let src = "fn main() -> void ![io] { let h: string = env.home(); print.info(h); }";
+    let exit = _build_and_run(src, ["HOMEDRIVE=C:", "HOMEPATH=\\Users\\sfn"], marker);
+    assert exit == 0;
+    let out = fs.readFile(marker);
+    if fs.exists(marker) { fs.deleteFile(marker); }
+    assert find(out, "C:\\Users\\sfn", 0) >= 0;
+}
+
+// Rung ordering: `HOME` wins over every later rung when all four are set —
+// this is what keeps POSIX behaviour byte-identical, since a POSIX host
+// with a stray `USERPROFILE`/`HOMEDRIVE`/`HOMEPATH` in its environment must
+// still resolve `$HOME`.
+test "env-abi: env.home prefers HOME over USERPROFILE and HOMEDRIVE+HOMEPATH" ![io] {
+    let marker = _marker("home-priority");
+    let src = "fn main() -> void ![io] { let h: string = env.home(); print.info(h); }";
+    let exit = _build_and_run(src, ["HOME=/sfn/env/abi/home-priority", "USERPROFILE=/sfn/env/abi/wrong", "HOMEDRIVE=C:", "HOMEPATH=\\Wrong"], marker);
+    assert exit == 0;
+    let out = fs.readFile(marker);
+    if fs.exists(marker) { fs.deleteFile(marker); }
+    assert find(out, "/sfn/env/abi/home-priority", 0) >= 0;
+    assert find(out, "wrong", 0) < 0;
+}
+
+// Ladder fully exhausted: none of the four variables set, so `env.home()`
+// degrades to "" — the condition the CLI call sites (`login`/`config`/`add`/
+// `toolchain`) now surface as `E0616` instead of a silent empty-path join.
+test "env-abi: env.home is empty when every ladder rung is unset" ![io] {
+    let marker = _marker("home-empty");
+    let src = "fn main() -> void ![io] { let h: string = env.home(); print.info(\"[\" + h + \"]\"); }";
+    let exit = _build_and_run(src, [], marker);
+    assert exit == 0;
+    let out = fs.readFile(marker);
+    if fs.exists(marker) { fs.deleteFile(marker); }
+    assert find(out, "[]", 0) >= 0;
+}

@@ -16,7 +16,12 @@
 // uses; it returns "" for an unset variable on every platform.
 fn _get_env_cmd(name: string) -> string ![io] { return env.get(name); }
 
-fn _get_home_cmd() -> string ![io] { return _get_env_cmd("HOME"); }
+// Routes onto the native `env.home` builtin (`sfn_home_dir`,
+// `runtime/sfn/io.sfn`) rather than `_get_env_cmd("HOME")`: the latter
+// only reads `HOME` and returns "" on a stock native Windows shell, which
+// sets neither `HOME` nor `USERPROFILE` by default. `env.home` walks the
+// full `HOME` -> `USERPROFILE` -> `HOMEDRIVE`+`HOMEPATH` ladder (SFN-856).
+fn _get_home_cmd() -> string ![io] { return env.home(); }
 
 // Compiler debug toggle: returns true when `name` is set to a value
 // other than "", "0", or "false". The legacy file probes
