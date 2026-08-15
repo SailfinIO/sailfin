@@ -58,18 +58,48 @@ fn contains(text: string, needle: string) -> boolean {
     return find(text, needle, 0) >= 0;
 }
 
+// Compare candidate positions byte-wise rather than materializing one
+// `substring` per position. The runtime arena never frees (SFEP-0043:
+// `sfn_mem_free` is a no-op, so peak RSS is every byte ever allocated), which
+// made the previous form cost O(text.length) *permanent* bytes to answer a
+// boolean — 66% of a 7.5 GiB peak in one test (SFN-792). The compiler's own
+// copy of this scanner took the same `load_byte` fix in SFN-833
+// (`compiler/src/capsule_import_scan.sfn`); this carries it back to the
+// stdlib primitive every other scanner calls.
+//
+// `load_byte` lowers as `zext i8 ... to i64`, so the returned range is 0..255
+// and 0xFF never aliases -1. `.length` and the old `substring` are both
+// byte-indexed, so this matches the previous results byte for byte.
 fn find(text: string, needle: string, start: int) -> int {
     // Find the first occurrence of needle in text starting from start.
     // Returns -1 if not found.
     if needle.length == 0 { return start; }
     if needle.length > text.length { return -1; }
-    let mut i: int = start;
     let limit = text.length - needle.length;
+    // `.length` on a string lowers to an `sfn_str_len` (`strnlen`) call, so
+    // reading it in the inner condition would walk the needle once per
+    // compared byte. `runtime/sfn/platform/strcasestr_windows.sfn` hoists both
+    // lengths in this same algorithm for the same reason.
+    let needle_length = needle.length;
+    let text_address = (text as *u8) as i64;
+    let needle_address = (needle as *u8) as i64;
+    let mut i: int = start;
+    // `i <= limit` keeps every read in bounds, so a negative `start` only ever
+    // skipped positions that could not match a non-empty needle.
+    if i < 0 { i = 0; }
     loop {
         if i > limit { return -1; }
-        if strings_equal(substring(text, i, i + needle.length), needle) {
-            return i;
+        let mut j: int = 0;
+        let mut matched: boolean = true;
+        loop {
+            if j >= needle_length { break; }
+            if load_byte(text_address + i + j) != load_byte(needle_address + j) {
+                matched = false;
+                break;
+            }
+            j += 1;
         }
+        if matched { return i; }
         i += 1;
     }
     return -1;
