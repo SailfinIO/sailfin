@@ -400,18 +400,25 @@ test "archive inflate: a distance pointing before the start of output is rejecte
     }
 }
 
-// 11. Regression for SFN-896 review Fix 1 (double free of the output buffer
-// on error): the initial `ByteBuf` capacity is 256 bytes
-// (`inflate_all:bytes_new(256)`), so decompressing more than that forces at
-// least one `realloc`-relocation of the buffer (`bytes.sfn:157`) before the
-// stream then fails. Before the fix, the block-body helpers dropped the
-// post-relocation buffer on their `Result::Err` path and `inflate_all` freed
-// the stale pre-relocation address instead — a double free of a dangling
-// pointer, live under any truncated archive whose first block alone
-// produces more than 256 bytes. 300 'A's is comfortably past that
-// threshold; the vector is the same fixed-Huffman encoding as test 2, minus
-// its final byte, so the stream ends mid-symbol well before the
-// end-of-block code.
+// 11. Structural pin for SFN-896 review Fix 1 (double free of the output
+// buffer on error). The initial `ByteBuf` capacity is 256 bytes
+// (`inflate_all:bytes_new(256)`), so these 300 bytes force a `_bytes_grow`
+// (`bytes.sfn:157`) before the stream fails, which pins the shape that
+// matters: an error return taken *after* the buffer has been grown must
+// still hand back the current buffer, and `inflate_all` must free that one.
+//
+// Be precise about what this does NOT do. It is not a reliable detector of
+// the original bug, because that bug only bites when `realloc` genuinely
+// RELOCATES. Here the 264-byte allocation is the most recent one and sits
+// against the top chunk, so glibc will almost certainly extend it in place —
+// leaving the stale and current addresses equal, and the pre-fix code
+// looking correct. Growing the output further does not help: a brk-backed
+// chunk keeps extending into top at any size.
+//
+// Deterministic detection needs a sanitizer leg, where the stale free is a
+// hard reproducible failure (`docs/conventions/sanitizer-tests.md`). Keep
+// this test for the structural guarantee; do not read a pass here as proof
+// the ownership fix is present.
 // python3 -c "import zlib; c = zlib.compressobj(level=1, wbits=-15,
 // strategy=zlib.Z_FIXED); full = c.compress(b'A' * 300) + c.flush();
 // print(list(full)[:-1])"

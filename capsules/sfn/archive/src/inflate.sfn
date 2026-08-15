@@ -40,7 +40,11 @@ let _MAX_BITS: int = 15;
 // whose `failed` is false. Callers must check `failed` before touching
 // `error` — this exists only so the struct literal is total.
 fn _no_archive_error() -> ArchiveError {
-    return archive_error(ArchiveErrorKind.Io, "");
+    // Self-identifying rather than blank: this string is unreachable today,
+    // but if a future edit ever reads `error` without checking `failed`, a
+    // named internal error is an obvious bug report where an empty `Io`
+    // failure would just look like a confusing blank diagnostic (SFN-896).
+    return archive_error(ArchiveErrorKind.Io, "internal: archive step reported no error");
 }
 
 // ---------------------------------------------------------------------
@@ -559,7 +563,13 @@ fn _inflate_huff_block(reader_in: _BitReader, lit: _HuffTable, dist: _HuffTable,
     let mut cur: _BitReader = reader_in;
     let mut buf: ByteBuf = out_in;
     let mut guard: int = 0;
-    let max_symbols: int = max_output + 8;
+    // Saturate rather than add blindly: `inflate_all` only rejects a negative
+    // `max_output`, so a caller passing a large "no limit" sentinel would wrap
+    // this negative and trip the guard on the first symbol — rejecting a
+    // perfectly good stream. The streaming `gzip_read` path is the expected
+    // source of such a sentinel (SFEP-0071 §3.4, SFN-896).
+    let mut max_symbols: int = 9223372036854775807;
+    if max_output < 9223372036854775799 { max_symbols = max_output + 8; }
     loop {
         guard += 1;
         if guard > max_symbols {
