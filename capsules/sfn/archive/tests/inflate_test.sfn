@@ -1,0 +1,357 @@
+// capsules/sfn/archive/tests/inflate_test.sfn
+//
+// RFC 1951 DEFLATE coverage (SFEP-0071 §8.1): stored, fixed-Huffman, and
+// dynamic-Huffman blocks; a distance-1 run-length fill; a back-reference at
+// the 32768 window edge; the length-258/distance-32768 maxima; and the
+// rejection table (truncated stream, over-subscribed tree, incomplete
+// tree, a distance pointing before the start of output).
+//
+// Real compressed vectors (every case that needs actual DEFLATE bytes, not
+// a hand-built one) were produced on this machine with zlib's raw-deflate
+// mode (`wbits=-15` strips the zlib header/trailer, leaving a bare RFC 1951
+// stream) and pasted below as `int[]` literals, per `bytes_from_int_array`
+// (SFEP-0071 §3.3). Each vector's generating command is recorded next to it
+// so a future reader can regenerate.
+import {
+    ByteBuf,
+    ByteCursor,
+    bytes_cursor,
+    bytes_free,
+    bytes_from_int_array,
+    bytes_get,
+    bytes_len
+} from "../src/bytes";
+import { ArchiveError, ArchiveErrorKind, inflate_all } from "../src/mod";
+
+fn _inflate_int_array(arr: int[], max_output: int) -> Result<ByteBuf, ArchiveError> {
+    let buf: ByteBuf = bytes_from_int_array(arr)?;
+    let cursor: ByteCursor = bytes_cursor(buf);
+    let result: Result<ByteBuf, ArchiveError> = inflate_all(cursor, max_output);
+    bytes_free(buf);
+    return result;
+}
+
+fn _bytes_equal_int_array(buf: ByteBuf, expected: int[]) -> boolean {
+    if bytes_len(buf) != expected.length { return false; }
+    let mut i: int = 0;
+    loop {
+        if i >= expected.length { break; }
+        let got = bytes_get(buf, i);
+        match got {
+            Result.Ok { value }
+            : {
+                if value != expected[i] { return false; }
+            },
+            Result.Err { error }
+            : {
+                return false;
+            }
+        }
+        i += 1;
+    }
+    return true;
+}
+
+// `bytes_get` at every one of a potentially huge count of indices, checked
+// against a formula rather than a materialized `int[]` — the window-edge
+// and length/distance-maxima cases decompress tens of KB, and a literal
+// expected array that size would dwarf everything else in this file.
+fn _bytes_equal_fn(buf: ByteBuf, expected_len: int, expected_at: fn (int) -> int) -> boolean {
+    if bytes_len(buf) != expected_len { return false; }
+    let mut i: int = 0;
+    loop {
+        if i >= expected_len { break; }
+        let got = bytes_get(buf, i);
+        match got {
+            Result.Ok { value }
+            : {
+                if value != expected_at(i) { return false; }
+            },
+            Result.Err { error }
+            : {
+                return false;
+            }
+        }
+        i += 1;
+    }
+    return true;
+}
+
+// 1. Stored block (BTYPE=00): BFINAL=1, BTYPE=00, byte-align, then
+// LEN=5/NLEN=~5 and the 5 literal bytes "Hello". Hand-built — RFC 1951's
+// simplest block type needs no encoder.
+test "archive inflate: stored block copies its literal bytes verbatim" {
+    let compressed: int[] = [1, 5, 0, 250, 255, 72, 101, 108, 108, 111,];
+    let result = _inflate_int_array(compressed, 1024);
+    match result {
+        Result.Ok { value }
+        : {
+            assert _bytes_equal_int_array(value, [72, 101, 108, 108, 111,]);
+            bytes_free(value);
+        },
+        Result.Err { error }
+        : {
+            assert false;
+        }
+    }
+}
+
+// 2. Fixed-Huffman block (BTYPE=01).
+// python3 -c "import zlib; c = zlib.compressobj(level=1, wbits=-15,
+// strategy=zlib.Z_FIXED); print(list(c.compress(b'A' * 28) + c.flush()))"
+test "archive inflate: fixed-Huffman block decompresses a run of literals" {
+    let compressed: int[] = [115, 116, 196, 13, 0,];
+    let result = _inflate_int_array(compressed, 1024);
+    match result {
+        Result.Ok { value }
+        : {
+            assert bytes_len(value) == 28;
+            let mut i: int = 0;
+            let mut all_a: boolean = true;
+            loop {
+                if i >= 28 { break; }
+                let got = bytes_get(value, i);
+                match got {
+                    Result.Ok { value }
+                    : {
+                        if value != 65 { all_a = false; }
+                    },
+                    Result.Err { error }
+                    : {
+                        all_a = false;
+                    }
+                }
+                i += 1;
+            }
+            assert all_a;
+            bytes_free(value);
+        },
+        Result.Err { error }
+        : {
+            assert false;
+        }
+    }
+}
+
+// 3. Dynamic-Huffman block (BTYPE=10) — real archives (gzip -6) emit these,
+// not fixed blocks, so this is the required case per SFN-896.
+// python3 -c "
+// import zlib
+// c = zlib.compressobj(level=6, wbits=-15)
+// data = (b'the quick brown fox jumps over the lazy dog. ' * 5) +
+//     b'1234567890 sailfin archive inflate test vector variety!'
+// print(list(c.compress(data) + c.flush()))"
+test "archive inflate: dynamic-Huffman block decompresses varied text" {
+    let compressed: int[] = [213, 202, 81, 18, 130, 48, 12, 69, 209, 173, 60, 55, 224, 136, 138, 232, 114, 98, 73, 37, 88, 27, 77, 67, 17, 86, 175, 227, 46, 252, 188, 115, 174, 15, 140, 215, 36, 225, 142, 171, 233, 156, 17, 245, 141, 113, 122, 60, 11, 180, 178, 193, 191, 156, 104, 93, 208, 235, 109, 251, 171, 127, 155, 155, 253, 225, 216, 158, 186, 243, 101, 135, 66, 146, 162, 100, 144, 133, 65, 42, 67, 114, 76, 228, 12, 231, 226, 168, 28, 92, 13, 149, 76, 216, 151, 205, 7,];
+    let expected: int[] = [116, 104, 101, 32, 113, 117, 105, 99, 107, 32, 98, 114, 111, 119, 110, 32, 102, 111, 120, 32, 106, 117, 109, 112, 115, 32, 111, 118, 101, 114, 32, 116, 104, 101, 32, 108, 97, 122, 121, 32, 100, 111, 103, 46, 32, 116, 104, 101, 32, 113, 117, 105, 99, 107, 32, 98, 114, 111, 119, 110, 32, 102, 111, 120, 32, 106, 117, 109, 112, 115, 32, 111, 118, 101, 114, 32, 116, 104, 101, 32, 108, 97, 122, 121, 32, 100, 111, 103, 46, 32, 116, 104, 101, 32, 113, 117, 105, 99, 107, 32, 98, 114, 111, 119, 110, 32, 102, 111, 120, 32, 106, 117, 109, 112, 115, 32, 111, 118, 101, 114, 32, 116, 104, 101, 32, 108, 97, 122, 121, 32, 100, 111, 103, 46, 32, 116, 104, 101, 32, 113, 117, 105, 99, 107, 32, 98, 114, 111, 119, 110, 32, 102, 111, 120, 32, 106, 117, 109, 112, 115, 32, 111, 118, 101, 114, 32, 116, 104, 101, 32, 108, 97, 122, 121, 32, 100, 111, 103, 46, 32, 116, 104, 101, 32, 113, 117, 105, 99, 107, 32, 98, 114, 111, 119, 110, 32, 102, 111, 120, 32, 106, 117, 109, 112, 115, 32, 111, 118, 101, 114, 32, 116, 104, 101, 32, 108, 97, 122, 121, 32, 100, 111, 103, 46, 32, 49, 50, 51, 52, 53, 54, 55, 56, 57, 48, 32, 115, 97, 105, 108, 102, 105, 110, 32, 97, 114, 99, 104, 105, 118, 101, 32, 105, 110, 102, 108, 97, 116, 101, 32, 116, 101, 115, 116, 32, 118, 101, 99, 116, 111, 114, 32, 118, 97, 114, 105, 101, 116, 121, 33,];
+    let result = _inflate_int_array(compressed, 4096);
+    match result {
+        Result.Ok { value }
+        : {
+            assert _bytes_equal_int_array(value, expected);
+            bytes_free(value);
+        },
+        Result.Err { error }
+        : {
+            assert false;
+        }
+    }
+}
+
+// 4. Back-reference at distance 1 — a run-length fill, the extreme case of
+// an overlapping copy (source and destination alias every byte).
+// python3 -c "import zlib; c = zlib.compressobj(level=9, wbits=-15);
+// print(list(c.compress(b'B' * 20) + c.flush()))"
+test "archive inflate: a distance-1 back-reference fills a run of one repeated byte" {
+    let compressed: int[] = [115, 114, 194, 4, 0,];
+    let result = _inflate_int_array(compressed, 1024);
+    match result {
+        Result.Ok { value }
+        : {
+            assert bytes_len(value) == 20;
+            let mut i: int = 0;
+            let mut all_b: boolean = true;
+            loop {
+                if i >= 20 { break; }
+                let got = bytes_get(value, i);
+                match got {
+                    Result.Ok { value }
+                    : {
+                        if value != 66 { all_b = false; }
+                    },
+                    Result.Err { error }
+                    : {
+                        all_b = false;
+                    }
+                }
+                i += 1;
+            }
+            assert all_b;
+            bytes_free(value);
+        },
+        Result.Err { error }
+        : {
+            assert false;
+        }
+    }
+}
+
+// "DISTANCE_EDGE_MARKER_9x" (23 bytes) as byte codes, shared by the
+// generator command below and the in-test expected-output formula.
+fn _dist_edge_marker() -> int[] {
+    return [68, 73, 83, 84, 65, 78, 67, 69, 95, 69, 68, 71, 69, 95, 77, 65, 82, 75, 69, 82, 95, 57, 120,];
+}
+
+fn _dist_edge_expected(i: int) -> int {
+    let marker: int[] = _dist_edge_marker();
+    if i < marker.length { return marker[i]; }
+    if i < 32768 {
+        return 113;
+    }  // 'q'
+    return marker[i - 32768];
+}
+
+// 5. Distance at the 32768 window edge: a 23-byte marker, then filler out
+// to exactly 32768 bytes, then the marker again — the second occurrence is
+// only reachable with a back-reference distance of exactly the maximum
+// window size.
+// python3 -c "
+// import zlib
+// marker = b'DISTANCE_EDGE_MARKER_9x'
+// data = marker + b'q' * (32768 - len(marker)) + marker
+// c = zlib.compressobj(level=9, wbits=-15)
+// print(list(c.compress(data) + c.flush()))"
+test "archive inflate: a back-reference at the 32768 window edge decompresses correctly" {
+    let compressed: int[] = [237, 193, 177, 13, 128, 32, 16, 0, 192, 185, 44, 9, 124, 12, 33, 80, 160, 253, 207, 96, 231, 248, 14, 226, 221, 181, 126, 221, 101, 213, 200, 104, 103, 228, 44, 123, 196, 206, 227, 125, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 224, 79, 90, 191, 238, 178, 106, 100, 180, 51, 114, 150, 61, 98, 231, 241, 126,];
+    let result = _inflate_int_array(compressed, 40000);
+    match result {
+        Result.Ok { value }
+        : {
+            let ok = _bytes_equal_fn(value, 32791, _dist_edge_expected);
+            assert ok;
+            bytes_free(value);
+        },
+        Result.Err { error }
+        : {
+            assert false;
+        }
+    }
+}
+
+fn _maxima_expected(i: int) -> int {
+    if i < 258 { return (i * 7 + 3) % 256; }
+    if i < 32768 {
+        let f: int = i - 258;
+        return (f * 13 + 5) % 251;
+    }
+    let p: int = i - 32768;
+    return (p * 7 + 3) % 256;
+}
+
+// 6. The length-258/distance-32768 maxima together: a 258-byte pattern, a
+// 32510-byte filler that never repeats it, then the same 258-byte pattern
+// again — the only way to reach it is the single longest length code (258)
+// at the single longest distance (32768).
+// python3 -c "
+// import zlib
+// pattern = bytes([(i * 7 + 3) % 256 for i in range(258)])
+// filler = bytes([(i * 13 + 5) % 251 for i in range(32768 - 258)])
+// data = pattern + filler + pattern
+// c = zlib.compressobj(level=9, wbits=-15)
+// print(list(c.compress(data) + c.flush()))"
+test "archive inflate: the length-258/distance-32768 maxima decompress correctly" {
+    let compressed: int[] = [237, 207, 231, 66, 8, 10, 0, 6, 208, 134, 82, 105, 104, 105, 47, 146, 52, 104, 239, 162, 101, 165, 168, 72, 83, 147, 246, 222, 123, 136, 162, 18, 138, 138, 22, 162, 40, 101, 181, 119, 162, 137, 246, 222, 123, 239, 109, 221, 127, 247, 41, 190, 243, 6, 135, 152, 130, 150, 153, 139, 79, 88, 66, 94, 229, 252, 229, 107, 215, 111, 56, 184, 251, 133, 70, 198, 62, 73, 201, 200, 254, 88, 92, 85, 247, 163, 115, 96, 124, 110, 117, 231, 31, 41, 21, 3, 219, 225, 227, 34, 210, 74, 234, 23, 117, 13, 205, 109, 156, 189, 2, 195, 163, 30, 37, 165, 103, 230, 230, 151, 125, 105, 108, 237, 25, 158, 90, 220, 248, 69, 68, 126, 144, 137, 243, 168, 144, 184, 156, 242, 185, 75, 122, 38, 86, 246, 110, 190, 33, 17, 247, 31, 39, 191, 124, 251, 161, 168, 242, 219, 247, 142, 254, 177, 217, 149, 237, 191, 36, 148, 244, 172, 60, 252, 39, 165, 20, 213, 52, 116, 12, 204, 172, 157, 60, 3, 110, 221, 123, 152, 152, 246, 250, 221, 231, 210, 154, 134, 150, 238, 161, 201, 133, 245, 61, 66, 50, 154, 67, 28, 188, 130, 98, 178, 167, 207, 106, 93, 53, 182, 180, 115, 245, 9, 190, 19, 19, 255, 236, 197, 155, 247, 133, 21, 95, 155, 219, 251, 70, 103, 150, 183, 254, 236, 59, 64, 199, 194, 125, 236, 132, 164, 130, 234, 5, 109, 125, 211, 155, 142, 30, 254, 97, 119, 31, 36, 164, 190, 202, 249, 84, 82, 93, 255, 179, 107, 112, 98, 126, 109, 151, 96, 63, 53, 35, 251, 17, 1, 81, 153, 83, 103, 52, 175, 24, 89, 216, 186, 120, 7, 221, 142, 142, 123, 250, 60, 43, 175, 160, 188, 182, 169, 173, 119, 100, 122, 105, 243, 55, 49, 5, 9, 29, 151, 144, 236, 25, 93, 51, 71, 191, 136, 248, 231, 185, 165, 245, 157, 99, 203, 132, 212, 108, 252, 146, 42, 151, 140, 109, 189, 110, 61, 72, 121, 91, 88, 219, 58, 52, 191, 67, 193, 196, 43, 170, 164, 161, 127, 195, 45, 56, 58, 233, 245, 167, 170, 239, 125, 211, 27, 164, 244, 220, 194, 114, 103, 175, 152, 59, 249, 71, 62, 126, 145, 87, 214, 208, 53, 190, 66, 68, 195, 126, 92, 74, 245, 178, 137, 157, 119, 248, 195, 212, 236, 162, 175, 109, 195, 11, 187, 7, 152, 143, 138, 157, 186, 104, 112, 211, 61, 36, 230, 105, 230, 231, 234, 31, 253, 51, 155, 251, 25, 120, 78, 200, 159, 187, 106, 225, 28, 112, 247, 201, 203, 247, 229, 141, 221, 19, 171, 196, 7, 57, 4, 164, 213, 180, 175, 219, 251, 220, 126, 148, 150, 83, 252, 173, 125, 100, 113, 143, 146, 133, 79, 252, 180, 166, 161, 181, 71, 232, 253, 103, 89, 249, 53, 63, 7, 102, 183, 200, 24, 15, 159, 84, 56, 175, 103, 233, 18, 120, 47, 33, 227, 67, 69, 83, 207, 228, 218, 62, 90, 78, 65, 25, 117, 29, 83, 7, 223, 59, 113, 233, 239, 74, 234, 58, 70, 151, 8, 168, 88, 143, 73, 40, 107, 25, 217, 120, 134, 197, 38, 191, 41, 248, 210, 50, 56, 183, 77, 126, 232, 136, 136, 226, 133, 107, 86, 174, 65, 81, 137, 175, 62, 86, 54, 247, 78, 173, 163, 142, 58, 234, 168, 163, 142, 58, 234, 168, 163, 142, 58, 234, 168, 163, 142, 58, 234, 168, 163, 142, 58, 234, 168, 163, 142, 58, 234, 168, 163, 142, 58, 234, 168, 163, 142, 58, 234, 168, 163, 142, 58, 234, 168, 163, 142, 58, 234, 168, 163, 142, 58, 234, 168, 163, 142, 58, 234, 168, 163, 142, 58, 234, 168, 163, 142, 58, 234, 168, 163, 142, 58, 234, 168, 163, 142, 58, 234, 168, 163, 142, 58, 234, 168, 163, 142, 58, 234, 168, 163, 142, 58, 234, 168, 163, 142, 58, 234, 168, 163, 142, 58, 234, 168, 163, 142, 58, 234, 168, 163, 142, 58, 234, 168, 163, 142, 58, 234, 168, 163, 142, 58, 234, 168, 163, 142, 58, 234, 168, 163, 142, 58, 234, 168, 163, 142, 58, 234, 168, 163, 142, 58, 234, 168, 163, 142, 58, 234, 168, 163, 142, 58, 234, 168, 163, 254, 127, 157, 152, 130, 150, 153, 139, 79, 88, 66, 94, 229, 252, 229, 107, 215, 111, 56, 184, 251, 133, 70, 198, 62, 73, 201, 200, 254, 88, 92, 85, 247, 163, 115, 96, 124, 110, 117, 231, 31, 41, 21, 3, 219, 225, 227, 34, 210, 74, 234, 23, 117, 13, 205, 109, 156, 189, 2, 195, 163, 30, 37, 165, 103, 230, 230, 151, 125, 105, 108, 237, 25, 158, 90, 220, 248, 69, 68, 126, 144, 137, 243, 168, 144, 184, 156, 242, 185, 75, 122, 38, 86, 246, 110, 190, 33, 17, 247, 31, 39, 191, 124, 251, 161, 168, 242, 219, 247, 142, 254, 177, 217, 149, 237, 191, 36, 148, 244, 172, 60, 252, 39, 165, 20, 213, 52, 116, 12, 204, 172, 157, 60, 3, 110, 221, 123, 152, 152, 246, 250, 221, 231, 210, 154, 134, 150, 238, 161, 201, 133, 245, 61, 66, 50, 154, 67, 28, 188, 130, 98, 178, 167, 207, 106, 93, 53, 182, 180, 115, 245, 9, 190, 19, 19, 255, 236, 197, 155, 247, 133, 21, 95, 155, 219, 251, 70, 103, 150, 183, 254, 236, 59, 64, 199, 194, 125, 236, 132, 164, 130, 234, 5, 109, 125, 211, 155, 142, 30, 254, 97, 119, 31, 36, 164, 190, 202, 249, 84, 82, 93, 255, 179, 107, 112, 98, 126, 109, 151, 96, 63, 53, 35, 251, 17, 1, 81, 153, 83, 103, 52, 175, 24, 89, 216, 186, 120, 7, 221, 142, 142, 123, 250, 60, 43, 175, 160, 188, 182, 169, 173, 119, 100, 122, 105, 243, 55, 49, 197, 127,];
+    let result = _inflate_int_array(compressed, 40000);
+    match result {
+        Result.Ok { value }
+        : {
+            let ok = _bytes_equal_fn(value, 33026, _maxima_expected);
+            assert ok;
+            bytes_free(value);
+        },
+        Result.Err { error }
+        : {
+            assert false;
+        }
+    }
+}
+
+// 7. Stream ending mid-symbol: only the first byte of the (valid) fixed
+// Huffman "A" x 28 vector above, cut well before its end-of-block symbol.
+// The bit reader must run out of input and error, not hang or treat the
+// short read as EOF.
+test "archive inflate: a stream truncated mid-symbol errors instead of hanging" {
+    let compressed: int[] = [115,];
+    let result = _inflate_int_array(compressed, 1024);
+    match result {
+        Result.Ok { value }
+        : {
+            bytes_free(value);
+            assert false;
+        },
+        Result.Err { error }
+        : {
+            assert error.kind == ArchiveErrorKind.Truncated;
+        }
+    }
+}
+
+// 8. An over-subscribed code-length tree: a hand-built dynamic block header
+// where seven of the 19-symbol code-length alphabet's entries all claim
+// code length 1 (only two 1-bit codes exist), so the Kraft inequality is
+// violated before any literal/length or distance table is even reached.
+test "archive inflate: an over-subscribed code-length tree is rejected, not crashed" {
+    let compressed: int[] = [5, 96, 146, 36, 9,];
+    let result = _inflate_int_array(compressed, 1024);
+    match result {
+        Result.Ok { value }
+        : {
+            bytes_free(value);
+            assert false;
+        },
+        Result.Err { error }
+        : {
+            assert error.kind == ArchiveErrorKind.CorruptStream;
+        }
+    }
+}
+
+// 9. An incomplete literal/length tree: a hand-built dynamic block header
+// whose 257 literal/length code lengths use exactly one 1-bit code and
+// leave the rest of the code space (and every longer length) unclaimed —
+// incomplete, and unlike the single-code distance-tree case, always
+// rejected.
+test "archive inflate: an incomplete literal/length tree is rejected" {
+    let compressed: int[] = [5, 192, 129, 0, 0, 0, 0, 0, 16, 255, 217,];
+    let result = _inflate_int_array(compressed, 1024);
+    match result {
+        Result.Ok { value }
+        : {
+            bytes_free(value);
+            assert false;
+        },
+        Result.Err { error }
+        : {
+            assert error.kind == ArchiveErrorKind.CorruptStream;
+        }
+    }
+}
+
+// 10. A distance code pointing before the start of output: a hand-built
+// fixed-Huffman block whose very first symbol is a length/distance pair
+// (length 3, distance 1) with no literal output yet produced to copy from.
+test "archive inflate: a distance pointing before the start of output is rejected" {
+    let compressed: int[] = [3, 2,];
+    let result = _inflate_int_array(compressed, 1024);
+    match result {
+        Result.Ok { value }
+        : {
+            bytes_free(value);
+            assert false;
+        },
+        Result.Err { error }
+        : {
+            assert error.kind == ArchiveErrorKind.CorruptStream;
+        }
+    }
+}
