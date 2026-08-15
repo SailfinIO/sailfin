@@ -16,7 +16,7 @@ import {
     crc32_finish,
     crc32_init,
     crc32_update
-} from "../src/crc32";
+} from "../src/mod";
 
 // ASCII "123456789".
 fn _check_vector() -> int[] {

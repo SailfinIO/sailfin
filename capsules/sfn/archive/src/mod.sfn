@@ -17,7 +17,17 @@
 //   deflate  — RFC 1951 compression            (SFN-897)
 //   ustar    — POSIX.1-1988 header format      (SFN-898 read / SFN-899 write)
 //   tar_read — the extractor and its path guard (SFN-898)
-import "./bytes.sfn";
-import "./error.sfn";
-import "./crc32.sfn";
-import "./gzip.sfn";
+export { ArchiveError, ArchiveErrorKind } from "./error";
+
+// RFC 1952 §8 CRC-32 — one-shot plus the incremental update the gzip reader
+// needs to checksum a decompressed stream in chunks (SFEP-0071 §3.4).
+// `ByteBuf`/`ByteCursor` stay capsule-internal (SFEP-0071 §3.3) — no caller
+// outside this capsule constructs one.
+export {
+    crc32,
+    crc32_init,
+    crc32_update,
+    crc32_finish
+} from "./crc32";
+
+export { GzipHeader, GzipHeaderResult, gzip_parse_header } from "./gzip";

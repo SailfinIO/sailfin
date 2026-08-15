@@ -132,6 +132,13 @@ fn gzip_parse_header(cursor: ByteCursor) -> Result<GzipHeaderResult, ArchiveErro
         };
     }
     let flg: int = _gzip_u8(cursor, start + 3)?;
+    if (flg & 224) != 0 {
+        // RFC 1952 §2.3.1.2: FLG bits 5-7 are reserved and MUST be zero; a
+        // compliant decompressor must fail rather than ignore them.
+        return Result.Err {
+            error: archive_error(ArchiveErrorKind.UnsupportedFeature, "gzip reserved FLG bits are set")
+        };
+    }
     let mtime: int = _gzip_u32le(cursor, start + 4)?;
     let xfl: int = _gzip_u8(cursor, start + 8)?;
     let os: int = _gzip_u8(cursor, start + 9)?;
