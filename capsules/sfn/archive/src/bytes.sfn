@@ -53,8 +53,8 @@ fn _buf_alloc(n: int) -> i64 {
     return p as i64;
 }
 
-fn _buf_store(addr: i64, idx: int, value: int) -> void {
-    memset((addr + (idx as i64)) as *u8, (value & 255) as i32, 1 as usize);
+fn _buf_store(addr: i64, idx: int, byte_value: int) -> void {
+    memset((addr + (idx as i64)) as *u8, (byte_value & 255) as i32, 1 as usize);
 }
 
 fn _buf_free(addr: i64) -> void {
@@ -124,13 +124,13 @@ fn bytes_get(b: ByteBuf, idx: int) -> Result<int, ArchiveError> {
     return Result.Ok { value: _byte_at(b.addr + (idx as i64)) };
 }
 
-fn bytes_set(b: ByteBuf, idx: int, value: int) -> Result<ByteBuf, ArchiveError> {
+fn bytes_set(b: ByteBuf, idx: int, byte_value: int) -> Result<ByteBuf, ArchiveError> {
     if idx < 0 || idx >= b.len {
         return Result.Err {
             error: archive_error(ArchiveErrorKind.Truncated, "ByteBuf index out of bounds")
         };
     }
-    _buf_store(b.addr, idx, value);
+    _buf_store(b.addr, idx, byte_value);
     return Result.Ok { value: b };
 }
 
@@ -218,7 +218,18 @@ fn bytes_append_byte(b: ByteBuf, byte_value: int) -> Result<ByteBuf, ArchiveErro
 // entry point that reaches outside the buffer's own storage, mirroring
 // `memcpy`'s own contract.
 fn bytes_append_slice(b: ByteBuf, src_addr: i64, n: int) -> Result<ByteBuf, ArchiveError> {
-    if n <= 0 {
+    // The A3 ustar reader's PAX `size` field is arbitrary-length decimal
+    // with no octal ceiling, so an archive-controlled length can reach here
+    // uncapped (SFN-895). A negative or overflowing `n` makes `b.len + n`
+    // wrap negative, so `_bytes_ensure_cap` sees `b.cap >= min_cap` as
+    // already satisfied and returns `b` ungrown, after which the `memcpy`
+    // below writes past the allocation.
+    if n < 0 || b.len > 9223372036854775807 - n {
+        return Result.Err {
+            error: archive_error(ArchiveErrorKind.LimitExceeded, "bytes_append_slice length is negative or would overflow")
+        };
+    }
+    if n == 0 {
         return Result.Ok { value: b };
     }
     let grown: ByteBuf = _bytes_ensure_cap(b, b.len + n)?;
