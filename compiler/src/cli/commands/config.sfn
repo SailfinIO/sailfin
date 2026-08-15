@@ -15,6 +15,7 @@
 // handler the legacy dispatch called, so output and exit codes are
 // byte-identical to today (parity oracle:
 // `compiler/tests/e2e/config_test.sfn`).
+import { Diagnostic, diagnostic_to_diag } from "sfn/analyzer/typecheck_types";
 import {
     Command,
     Matches,
@@ -28,6 +29,7 @@ import {
 
 import { _ensure_dir_recursive_cmd, _set_perms_or_skip, _toml_trim_cmd } from "../../build/fs";
 import { _get_home_cmd } from "../../build_flags";
+import { render_terminal_diagnostic } from "../../terminal_output";
 import { CliContext } from "../context";
 import {
     _is_valid_registry_url_cmd,
@@ -35,10 +37,25 @@ import {
     _strip_trailing_slash_cmd
 } from "./cmd_shared";
 
+// E0616: see `cli/commands/login.sfn::_home_dir_diagnostic` for the full
+// rationale (no source span — a process-environment condition, not a
+// `.sfn` file).
+fn _home_dir_diagnostic() -> Diagnostic {
+    return Diagnostic {
+        code: "E0616",
+        severity: "error",
+        message: "could not determine home directory (HOME, USERPROFILE, and HOMEDRIVE+HOMEPATH are all unset)",
+        file_path: "",
+        primary: null,
+        suggestion: null
+    };
+}
+
 fn _write_config_registry_cmd(url: string) -> int ![io] {
     let home = _get_home_cmd();
     if home.length == 0 {
-        print("could not determine home directory");
+        let empty_lines: string[] = [];
+        print.err(render_terminal_diagnostic(diagnostic_to_diag(_home_dir_diagnostic(), "config"), empty_lines, "config"));
         return 1;
     }
     let sfn_dir = home + "/.sfn";

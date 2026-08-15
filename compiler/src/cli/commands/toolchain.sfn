@@ -18,6 +18,7 @@
 // releases URL, INSTALL_BASE store). Re-exec dispatch + the
 // `SAILFIN_TOOLCHAIN` knob are the sibling leaf SFN-172, out of scope
 // here.
+import { Diagnostic, diagnostic_to_diag } from "sfn/analyzer/typecheck_types";
 import {
     Command,
     Matches,
@@ -44,8 +45,26 @@ import {
     strings_equal,
     substring
 } from "../../string_utils";
+import { render_terminal_diagnostic } from "../../terminal_output";
 import { CliContext } from "../context";
 import { _is_safe_capsule_version_cmd } from "./cmd_shared";
+
+// E0616: `_versions_base()` exhausted `INSTALL_BASE`, `SAILFIN_HOME`, and
+// `env.home`'s full `HOME` -> `USERPROFILE` -> `HOMEDRIVE`+`HOMEPATH`
+// ladder (`runtime/sfn/io.sfn`). No source span — a process-environment
+// condition, not a `.sfn` file — see
+// `cli/commands/login.sfn::_home_dir_diagnostic` for the generic form this
+// specializes.
+fn _toolchain_store_diagnostic() -> Diagnostic {
+    return Diagnostic {
+        code: "E0616",
+        severity: "error",
+        message: "could not determine the toolchain store (set INSTALL_BASE or HOME)",
+        file_path: "",
+        primary: null,
+        suggestion: null
+    };
+}
 
 // The GitHub releases base the native fetch reads from. The release
 // asset layout (asset name + this URL shape) is the only thing reused
@@ -261,7 +280,8 @@ fn _download_to(url: string, dest: string) -> boolean ![io, net] {
 fn _toolchain_install(version_arg: string, work_root: string) -> int ![io, net] {
     let base = _versions_base();
     if base.length == 0 {
-        print("error: could not determine the toolchain store (set INSTALL_BASE or HOME)");
+        let empty_lines: string[] = [];
+        print.err(render_terminal_diagnostic(diagnostic_to_diag(_toolchain_store_diagnostic(), "toolchain"), empty_lines, "toolchain"));
         return 1;
     }
     return toolchain_install_to_base(version_arg, base, work_root);
@@ -624,7 +644,8 @@ fn toolchain_gate_or_dispatch(entry_hint: string, ctx: CliContext, skip_flag: bo
 
     let base = _versions_base();
     if base.length == 0 {
-        print.err("error: could not determine the toolchain store (set INSTALL_BASE or HOME)");
+        let empty_lines: string[] = [];
+        print.err(render_terminal_diagnostic(diagnostic_to_diag(_toolchain_store_diagnostic(), "toolchain"), empty_lines, "toolchain"));
         return 1;
     }
     let bin_path = base + "/" + target + "/sailfin";

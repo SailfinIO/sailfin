@@ -51,7 +51,10 @@ fn _cr_ends_with(text: string, suffix: string) -> boolean {
     return strings_equal(substring(text, start, text.length), suffix);
 }
 
-fn _cr_get_home() -> string ![io] { return env.get("HOME"); }
+// `env.home` (not `env.get("HOME")`): the full `HOME` -> `USERPROFILE` ->
+// `HOMEDRIVE`+`HOMEPATH` ladder (SFN-856), since `HOME` alone resolves to
+// "" on a stock native Windows shell.
+fn _cr_get_home() -> string ![io] { return env.home(); }
 
 fn _cr_ensure_dir(path: string) -> void ![io] {
     if !fs.exists(path) { fs.createDirectory(path, true); }

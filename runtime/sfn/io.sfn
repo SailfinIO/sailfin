@@ -118,6 +118,11 @@ extern fn realloc(ptr: *u8, size: usize) -> *u8;
 
 extern fn memset(ptr: *u8, value: i32, n: usize) -> *u8;
 
+// libc `memcpy` — concatenates `HOMEDRIVE` + `HOMEPATH` for the third
+// `sfn_home_dir` rung below. Inlined for the same SFN-635
+// cross-module-extern reason as the rest of this block.
+extern fn memcpy(dst: *u8, src: *u8, n: usize) -> *u8;
+
 extern fn popen(cmd: *u8, mode: *u8) -> *u8;
 
 extern fn pclose(fp: *u8) -> i32;
@@ -544,12 +549,16 @@ fn sfn_getenv(name_data: *u8, name_len: i64, arena: *u8) -> SfnString ![io] {
 // `runtime_helpers.sfn`: `symbol: sfn_home_dir`, `parameter_types: ["ptr"]`).
 // Replaces the deleted C `SfnString sfn_home_dir(SfnArena**)`. The C
 // body forked on `_WIN32` (`USERPROFILE`) vs POSIX (`HOME`); Sailfin has no
-// `cfg(target_os)` yet, so this tries `HOME` first then falls back to
-// `USERPROFILE` — platform-agnostic and correct on both (Linux/macOS set
-// `HOME`; Windows sets `USERPROFILE`). Literals are bound to `string` locals
-// before the `* u8` cast — the proven env-read pattern (`arena.sfn` /
-// `rlimit.sfn`): the inline `getenv("…" as * u8)` form miscompiles under the
-// seed (the call is elided to a null store). Return ABI as `sfn_getenv`.
+// `cfg(target_os)` yet, so this tries `HOME` first, falls back to
+// `USERPROFILE`, and finally to `HOMEDRIVE` + `HOMEPATH` concatenated
+// (SFN-856) — the third rung `cmd.exe` needs, since a stock native Windows
+// shell sets neither `HOME` nor `USERPROFILE` by default but always sets
+// `HOMEDRIVE`/`HOMEPATH`. Platform-agnostic and correct everywhere:
+// Linux/macOS set `HOME` and never reach the later rungs. Literals are
+// bound to `string` locals before the `* u8` cast — the proven env-read
+// pattern (`arena.sfn` / `rlimit.sfn`): the inline `getenv("…" as * u8)`
+// form miscompiles under the seed (the call is elided to a null store).
+// Return ABI as `sfn_getenv`.
 fn sfn_home_dir(arena: *u8) -> SfnString ![io] {
     let home: string = "HOME";
     let val: *u8 = getenv(home as *u8);
@@ -557,6 +566,21 @@ fn sfn_home_dir(arena: *u8) -> SfnString ![io] {
     let userprofile: string = "USERPROFILE";
     let val2: *u8 = getenv(userprofile as *u8);
     if val2 as i64 != 0 { return val2; }
+    let homedrive: string = "HOMEDRIVE";
+    let drive: *u8 = getenv(homedrive as *u8);
+    let homepath: string = "HOMEPATH";
+    let path: *u8 = getenv(homepath as *u8);
+    if drive as i64 != 0 && path as i64 != 0 {
+        let drive_len: i64 = strlen(drive) as i64;
+        let path_len: i64 = strlen(path) as i64;
+        let buf: *u8 = malloc((drive_len + path_len + 1) as usize);
+        if buf as i64 != 0 {
+            memcpy(buf, drive, drive_len as usize);
+            memcpy((buf as i64 + drive_len) as *u8, path, path_len as usize);
+            memset((buf as i64 + drive_len + path_len) as *u8, 0, 1 as usize);
+            return buf;
+        }
+    }
     let empty: string = "";
     return empty;
 }
