@@ -1,0 +1,87 @@
+// Unit coverage for `toolchain_lay_out_store_entry`
+// (`compiler/src/cli/commands/toolchain.sfn`, SFN-906), the store-layout
+// tail extracted from `toolchain_install_to_base` — binary copy, `sfn`
+// alias, runtime-bundle copy, `.sha256` marker. This is the exact code
+// SFN-906 de-shelled; the pre-existing `toolchain_install_test.sfn` e2e
+// never reaches it, since every leg it drives fails before extraction
+// (fail-closed fetch/verify) or is skipped without a local server. Driving
+// this helper directly needs no network, no release signature, and no
+// binary fixture — it operates on a hand-built fake extract root.
+import { toolchain_lay_out_store_entry } from "../../src/cli/commands/toolchain";
+
+// Same scratch shape as the sibling `toolchain_alias_test.sfn`.
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "build/sailfin"; }
+    dir = dir + "/toolchain-layout";
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// A fake extract root: a `sailfin` binary plus a small `runtime/` bundle,
+// mirroring what `_find_extracted_root` hands `toolchain_lay_out_store_entry`
+// after a real tarball extraction.
+fn _fake_extract_root(dir: string) -> string ![io] {
+    let root = dir + "/root";
+    fs.createDirectory(root, true);
+    fs.writeFile(root + "/sailfin", "fake-toolchain-binary-bytes");
+    fs.createDirectory(root + "/runtime", true);
+    fs.writeFile(root + "/runtime/prelude.sfn", "// fake prelude");
+    fs.createDirectory(root + "/runtime/sfn", true);
+    fs.writeFile(root + "/runtime/sfn/io.sfn", "// fake io");
+    return root;
+}
+
+test "toolchain layout: a complete entry lands the binary, alias, runtime, and marker" ![io] {
+    let base = _scratch_dir() + "/complete";
+    fs.createDirectory(base, true);
+    let root = _fake_extract_root(base);
+    let store_dir = base + "/store";
+    let bin_path = store_dir + "/sailfin";
+    let expected = "deadbeef00000000000000000000000000000000000000000000000000ff";
+
+    assert toolchain_lay_out_store_entry(root, store_dir, bin_path, expected);
+
+    // The binary lands at `bin_path` with the source's exact bytes.
+    assert fs.exists(bin_path);
+    assert fs.readFile(bin_path) == "fake-toolchain-binary-bytes";
+
+    // The `sfn` alias exists and is either a relative symlink to
+    // "sailfin" or, on a host where `fs.symlink` refuses, a
+    // byte-identical copy — `_toolchain_link_alias`'s two legs.
+    let alias_path = store_dir + "/sfn";
+    assert fs.exists(alias_path);
+    let link_target = fs.read_link(alias_path);
+    if link_target.length > 0 { assert link_target == "sailfin"; } else {
+        assert fs.readFile(alias_path) == "fake-toolchain-binary-bytes";
+    }
+
+    // The runtime bundle is present with its contents.
+    assert fs.exists(store_dir + "/runtime/prelude.sfn");
+    assert fs.readFile(store_dir + "/runtime/prelude.sfn") == "// fake prelude";
+    assert fs.exists(store_dir + "/runtime/sfn/io.sfn");
+    assert fs.readFile(store_dir + "/runtime/sfn/io.sfn") == "// fake io";
+
+    // The `.sha256` marker exists and contains `expected` + "\n".
+    let sha_path = store_dir + "/.sha256";
+    assert fs.exists(sha_path);
+    assert fs.readFile(sha_path) == expected + "\n";
+}
+
+test "toolchain layout: a missing source binary fails closed with no marker" ![io] {
+    let base = _scratch_dir() + "/missing-binary";
+    fs.createDirectory(base, true);
+    // An extract root with no `sailfin` binary — `_binary_in_root` returns
+    // "", so the binary copy fails before anything else is written.
+    let root = base + "/root";
+    fs.createDirectory(root, true);
+    let store_dir = base + "/store";
+    let bin_path = store_dir + "/sailfin";
+    let expected = "deadbeef00000000000000000000000000000000000000000000000000ff";
+
+    assert ! toolchain_lay_out_store_entry(root, store_dir, bin_path, expected);
+
+    // The incomplete-install contract: no marker means the entry is not
+    // read as complete on a later run.
+    assert ! fs.exists(store_dir + "/.sha256");
+}
