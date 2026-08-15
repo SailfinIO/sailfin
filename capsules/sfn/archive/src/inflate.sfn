@@ -1,0 +1,755 @@
+// sfn/archive — RFC 1951 DEFLATE decompression.
+//
+// Pure: this module operates on an in-memory `ByteCursor` and produces a
+// `ByteBuf`, with no effect declared, matching the pure-codec-layer split in
+// SFEP-0071 §4 — only the file-backed `gzip_reader_*` API (a later phase)
+// carries `![io]`. Purity is what makes the whole rejection table (§8.1)
+// unit-testable with no filesystem.
+//
+// The classic three pieces of an inflate implementation, in the order they
+// appear below:
+//
+//   - a bit reader (`_BitReader`/`_br_bits`) pulling bits LSB-first within
+//     each byte, per RFC 1951 §3.1.1's packing order;
+//   - a canonical Huffman decoder (`_huff_construct`/`_huff_decode`) built
+//     from a code-length array, reading one bit at a time and comparing
+//     against per-length code ranges (`counts`/`symbols`) rather than
+//     building an explicit bit-address table — codes are packed MSB-first,
+//     the opposite order from the bit reader, which is the single most
+//     common inflate bug (SFN-896 issue text);
+//   - the three RFC 1951 §3.2.3 block types (stored / fixed / dynamic),
+//     each producing symbols consumed by `_inflate_huff_block`'s literal
+//     and length/distance back-reference logic.
+//
+// `inflate_all` materializes the whole decompressed output as one `ByteBuf`
+// and exists for RFC vectors and small in-memory uses (SFEP-0071 §3.4); it
+// is not what the streaming `gzip_read` path (a later phase) calls.
+import {
+    ByteBuf,
+    ByteCursor,
+    _byte_at,
+    bytes_append_byte,
+    bytes_free,
+    bytes_new
+} from "./bytes";
+import { ArchiveError, ArchiveErrorKind, archive_error } from "./error";
+
+let _MAX_BITS: int = 15;
+
+// ---------------------------------------------------------------------
+// Bit reader — LSB-first within each byte.
+struct _BitReader {
+    addr: i64;
+    len: int;
+    pos: int;
+    bitbuf: int;
+    bitcnt: int;
+}
+
+fn _br_new(cursor: ByteCursor) -> _BitReader {
+    return _BitReader {
+        addr: cursor.addr,
+        len: cursor.len,
+        pos: cursor.pos,
+        bitbuf: 0,
+        bitcnt: 0
+    };
+}
+
+// Discard any partial byte in the bit buffer. RFC 1951 §3.2.4: before a
+// stored block, "any bits of input up to the next byte boundary are
+// ignored."
+fn _br_align_byte(r: _BitReader) -> _BitReader {
+    return _BitReader {
+        addr: r.addr,
+        len: r.len,
+        pos: r.pos,
+        bitbuf: 0,
+        bitcnt: 0
+    };
+}
+
+struct _BitsResult {
+    reader: _BitReader;
+    bits: int;
+}
+
+// Pull `need` bits LSB-first from the stream. `need` never exceeds 16 in
+// this codec (the widest single field is a stored-block LEN/NLEN halfword;
+// Huffman codes are pulled one bit at a time by `_huff_decode` instead), so
+// four 8-bit refills always suffice.
+fn _br_bits(r: _BitReader, need: int) -> Result<_BitsResult, ArchiveError> {
+    let mut buf: int = r.bitbuf;
+    let mut cnt: int = r.bitcnt;
+    let mut pos: int = r.pos;
+    let mut guard: int = 0;
+    loop {
+        if cnt >= need { break; }
+        guard += 1;
+        if guard > 4 {
+            return Result.Err {
+                error: archive_error(ArchiveErrorKind.CorruptStream, "inflate bit reader requested an unreasonable bit count")
+            };
+        }
+        if pos >= r.len {
+            return Result.Err {
+                error: archive_error(ArchiveErrorKind.Truncated, "deflate stream ended mid-symbol")
+            };
+        }
+        buf = buf | (_byte_at(r.addr + (pos as i64)) << cnt);
+        pos += 1;
+        cnt += 8;
+    }
+    // Split from `(1 << need) - 1`: a parenthesized group used as the
+    // operand of another binary operator does not lower (SFN-670, see the
+    // identical note in `core_decimal_float.sfn:45`) — a compiler limit,
+    // not a style choice.
+    let mask_span: int = 1 << need;
+    let mask: int = mask_span - 1;
+    let taken: int = buf & mask;
+    let new_reader: _BitReader = _BitReader {
+        addr: r.addr,
+        len: r.len,
+        pos: pos,
+        bitbuf: buf >> need,
+        bitcnt: cnt - need
+    };
+    return Result.Ok {
+        value: _BitsResult { reader: new_reader, bits: taken }
+    };
+}
+
+// ---------------------------------------------------------------------
+// Canonical Huffman decode — codes are packed MSB-first (RFC 1951 §3.1.1),
+// the opposite bit order from the bit reader above. Built from per-length
+// counts and a symbol table sorted by (length, symbol), the standard
+// construction that lets `_huff_decode` compare an accumulated code against
+// the first code of each length rather than building an explicit lookup
+// table.
+struct _HuffTable {
+    counts: int[];
+    symbols: int[];
+}
+
+struct _ConstructResult {
+    table: _HuffTable;
+    // 0 = complete; positive = incomplete (that many code points unused);
+    // negative = over-subscribed (the code lengths do not satisfy the Kraft
+    // inequality). Callers decide what to reject — see `_read_dynamic_tables`.
+    left: int;
+}
+
+fn _huff_construct(lengths: int[], n: int) -> _ConstructResult {
+    let mut counts: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i > _MAX_BITS { break; }
+        counts.push(0);
+        i += 1;
+    }
+    let mut sym: int = 0;
+    loop {
+        if sym >= n { break; }
+        let len: int = lengths[sym];
+        counts[len] = counts[len] + 1;
+        sym += 1;
+    }
+
+    // Kraft-inequality check: with `left` possible code points remaining at
+    // each length, doubling for one more bit and deducting the codes
+    // actually used at that length must never go negative.
+    let mut left: int = 1;
+    let mut len2: int = 1;
+    loop {
+        if len2 > _MAX_BITS { break; }
+        left = left * 2;
+        left = left - counts[len2];
+        if left < 0 { break; }
+        len2 += 1;
+    }
+
+    let mut offs: int[] = [];
+    let mut k: int = 0;
+    loop {
+        if k > _MAX_BITS { break; }
+        offs.push(0);
+        k += 1;
+    }
+    let mut ln: int = 1;
+    loop {
+        if ln >= _MAX_BITS { break; }
+        offs[ln + 1] = offs[ln] + counts[ln];
+        ln += 1;
+    }
+
+    let mut symbols: int[] = [];
+    let mut s: int = 0;
+    loop {
+        if s >= n { break; }
+        symbols.push(0);
+        s += 1;
+    }
+    let mut sym2: int = 0;
+    loop {
+        if sym2 >= n { break; }
+        let l: int = lengths[sym2];
+        if l != 0 {
+            symbols[offs[l]] = sym2;
+            offs[l] = offs[l] + 1;
+        }
+        sym2 += 1;
+    }
+
+    return _ConstructResult {
+        table: _HuffTable { counts: counts, symbols: symbols },
+        left: left
+    };
+}
+
+struct _DecodeResult {
+    reader: _BitReader;
+    symbol: int;
+}
+
+// Decode one symbol, reading one bit at a time and building the code
+// MSB-first (`code = (code << 1) | bit`), comparing against the first code
+// of each length — the standard canonical-Huffman decode paired with
+// `_huff_construct`'s `counts`/`symbols` tables.
+fn _huff_decode(reader: _BitReader, table: _HuffTable) -> Result<_DecodeResult, ArchiveError> {
+    let mut code: int = 0;
+    let mut first: int = 0;
+    let mut index: int = 0;
+    let mut len: int = 1;
+    let mut cur: _BitReader = reader;
+    loop {
+        if len > _MAX_BITS {
+            return Result.Err {
+                error: archive_error(ArchiveErrorKind.CorruptStream, "Huffman code did not match any known code (bad tree or corrupt stream)")
+            };
+        }
+        let step: _BitsResult = _br_bits(cur, 1)?;
+        cur = step.reader;
+        code = code | step.bits;
+        let count: int = table.counts[len];
+        if (code - count) < first {
+            let symbol: int = table.symbols[index + (code - first)];
+            return Result.Ok {
+                value: _DecodeResult { reader: cur, symbol: symbol }
+            };
+        }
+        index += count;
+        first += count;
+        first = first << 1;
+        code = code << 1;
+        len += 1;
+    }
+}
+
+// ---------------------------------------------------------------------
+// RFC 1951 §3.2.5 length/distance extra-bit tables, and §3.2.6 fixed
+// Huffman code lengths. Built on demand rather than cached as a module
+// global, matching `crc32.sfn`'s `_crc32_table()` rationale: these run at
+// most a few times per stream, so keeping this module out of the
+// runtime-initialized-module-global bug class (#1386/#1389) is worth more
+// than the tiny recomputation cost.
+fn _length_base() -> int[] {
+    return [3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258,];
+}
+
+fn _length_extra() -> int[] {
+    return [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0,];
+}
+
+fn _dist_base() -> int[] {
+    return [1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513, 769, 1025, 1537, 2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577,];
+}
+
+fn _dist_extra() -> int[] {
+    return [0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13,];
+}
+
+// The 19-symbol code-length alphabet permutation (RFC 1951 §3.2.7): dynamic
+// block headers store HCLEN code lengths in this order, not index order.
+fn _clc_order() -> int[] {
+    return [16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15,];
+}
+
+fn _fixed_lit_lengths() -> int[] {
+    let mut lengths: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= 288 { break; }
+        if i < 144 { lengths.push(8); } else if i < 256 { lengths.push(9); } else if i < 280 {
+            lengths.push(7);
+        } else { lengths.push(8); }
+        i += 1;
+    }
+    return lengths;
+}
+
+fn _fixed_dist_lengths() -> int[] {
+    let mut lengths: int[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= 30 { break; }
+        lengths.push(5);
+        i += 1;
+    }
+    return lengths;
+}
+
+struct _HuffPair {
+    lit: _HuffTable;
+    dist: _HuffTable;
+}
+
+// The RFC 1951 §3.2.6 fixed tables are a static, spec-defined constant, not
+// attacker-controlled input, so unlike `_read_dynamic_tables` this does not
+// check `_huff_construct`'s `left` result: the fixed distance table is
+// deliberately "incomplete" (30 five-bit codes out of 32 possible), and any
+// bit pattern that would need one of the two unused codes simply never
+// terminates in `_huff_decode` within `_MAX_BITS`, surfacing as the same
+// `CorruptStream` a genuinely bad code would.
+fn _fixed_tables() -> _HuffPair {
+    let lit_result: _ConstructResult = _huff_construct(_fixed_lit_lengths(), 288);
+    let dist_result: _ConstructResult = _huff_construct(_fixed_dist_lengths(), 30);
+    return _HuffPair { lit: lit_result.table, dist: dist_result.table };
+}
+
+// ---------------------------------------------------------------------
+// BTYPE=10 dynamic Huffman: HLIT/HDIST/HCLEN header, the code-length
+// alphabet (with its 16/17/18 repeat codes), then the literal/length and
+// distance code-length arrays it decodes.
+struct _DynamicTablesResult {
+    reader: _BitReader;
+    lit: _HuffTable;
+    dist: _HuffTable;
+}
+
+fn _read_dynamic_tables(reader_in: _BitReader) -> Result<_DynamicTablesResult, ArchiveError> {
+    let hlit_bits: _BitsResult = _br_bits(reader_in, 5)?;
+    let hlit: int = hlit_bits.bits + 257;
+    let hdist_bits: _BitsResult = _br_bits(hlit_bits.reader, 5)?;
+    let hdist: int = hdist_bits.bits + 1;
+    let hclen_bits: _BitsResult = _br_bits(hdist_bits.reader, 4)?;
+    let hclen: int = hclen_bits.bits + 4;
+
+    let order: int[] = _clc_order();
+    let mut clc_lengths: int[] = [];
+    let mut z: int = 0;
+    loop {
+        if z >= 19 { break; }
+        clc_lengths.push(0);
+        z += 1;
+    }
+    let mut cur: _BitReader = hclen_bits.reader;
+    let mut j: int = 0;
+    loop {
+        if j >= hclen { break; }
+        let step: _BitsResult = _br_bits(cur, 3)?;
+        cur = step.reader;
+        let pos: int = order[j];
+        clc_lengths[pos] = step.bits;
+        j += 1;
+    }
+    // No completeness check on the code-length alphabet itself: like the
+    // fixed tables above, an unreachable code simply never terminates in
+    // `_huff_decode`, which already fails closed with `CorruptStream`.
+    let clc_construct: _ConstructResult = _huff_construct(clc_lengths, 19);
+    if clc_construct.left < 0 {
+        return Result.Err {
+            error: archive_error(ArchiveErrorKind.CorruptStream, "dynamic block code-length alphabet is over-subscribed")
+        };
+    }
+    let clc_table: _HuffTable = clc_construct.table;
+
+    let total: int = hlit + hdist;
+    let mut lengths: int[] = [];
+    let mut prev: int = 0;
+    let mut have_prev: boolean = false;
+    let mut cur2: _BitReader = cur;
+    let mut guard: int = 0;
+    let max_iters: int = total + 146;
+    loop {
+        if lengths.length >= total { break; }
+        guard += 1;
+        if guard > max_iters {
+            return Result.Err {
+                error: archive_error(ArchiveErrorKind.CorruptStream, "dynamic block code-length decoding did not terminate within the declared HLIT+HDIST count")
+            };
+        }
+        let symbol_result: _DecodeResult = _huff_decode(cur2, clc_table)?;
+        cur2 = symbol_result.reader;
+        let sym: int = symbol_result.symbol;
+        if sym < 16 {
+            lengths.push(sym);
+            prev = sym;
+            have_prev = true;
+        } else if sym == 16 {
+            if !have_prev {
+                return Result.Err {
+                    error: archive_error(ArchiveErrorKind.CorruptStream, "dynamic block repeat code 16 has no previous code length to repeat")
+                };
+            }
+            let extra: _BitsResult = _br_bits(cur2, 2)?;
+            cur2 = extra.reader;
+            let repeat: int = extra.bits + 3;
+            let mut r: int = 0;
+            loop {
+                if r >= repeat { break; }
+                if lengths.length >= total {
+                    return Result.Err {
+                        error: archive_error(ArchiveErrorKind.CorruptStream, "dynamic block code-length repeat overruns the declared HLIT+HDIST count")
+                    };
+                }
+                lengths.push(prev);
+                r += 1;
+            }
+        } else if sym == 17 {
+            let extra: _BitsResult = _br_bits(cur2, 3)?;
+            cur2 = extra.reader;
+            let repeat: int = extra.bits + 3;
+            let mut r: int = 0;
+            loop {
+                if r >= repeat { break; }
+                if lengths.length >= total {
+                    return Result.Err {
+                        error: archive_error(ArchiveErrorKind.CorruptStream, "dynamic block code-length repeat overruns the declared HLIT+HDIST count")
+                    };
+                }
+                lengths.push(0);
+                r += 1;
+            }
+            prev = 0;
+            have_prev = true;
+        } else if sym == 18 {
+            let extra: _BitsResult = _br_bits(cur2, 7)?;
+            cur2 = extra.reader;
+            let repeat: int = extra.bits + 11;
+            let mut r: int = 0;
+            loop {
+                if r >= repeat { break; }
+                if lengths.length >= total {
+                    return Result.Err {
+                        error: archive_error(ArchiveErrorKind.CorruptStream, "dynamic block code-length repeat overruns the declared HLIT+HDIST count")
+                    };
+                }
+                lengths.push(0);
+                r += 1;
+            }
+            prev = 0;
+            have_prev = true;
+        } else {
+            return Result.Err {
+                error: archive_error(ArchiveErrorKind.CorruptStream, "dynamic block code-length alphabet decoded an invalid symbol")
+            };
+        }
+    }
+
+    let mut lit_lengths: int[] = [];
+    let mut k: int = 0;
+    loop {
+        if k >= hlit { break; }
+        lit_lengths.push(lengths[k]);
+        k += 1;
+    }
+    let mut dist_lengths: int[] = [];
+    let mut m: int = 0;
+    loop {
+        if m >= hdist { break; }
+        dist_lengths.push(lengths[hlit + m]);
+        m += 1;
+    }
+
+    let lit_construct: _ConstructResult = _huff_construct(lit_lengths, hlit);
+    if lit_construct.left != 0 {
+        return Result.Err {
+            error: archive_error(ArchiveErrorKind.CorruptStream, "dynamic block literal/length code table is incomplete or over-subscribed")
+        };
+    }
+
+    let dist_construct: _ConstructResult = _huff_construct(dist_lengths, hdist);
+    if dist_construct.left != 0 {
+        // RFC 1951 leaves room for a degenerate one-code distance tree
+        // (a block with no back-references at all still needs some
+        // distance table to satisfy the format, and real encoders emit a
+        // single incomplete code for it) — accept that one case, and
+        // reject every other incomplete or over-subscribed distance tree.
+        if dist_construct.left < 0 || hdist != 1 {
+            return Result.Err {
+                error: archive_error(ArchiveErrorKind.CorruptStream, "dynamic block distance code table is incomplete or over-subscribed")
+            };
+        }
+    }
+
+    return Result.Ok {
+        value: _DynamicTablesResult {
+            reader: cur2,
+            lit: lit_construct.table,
+            dist: dist_construct.table
+        }
+    };
+}
+
+// ---------------------------------------------------------------------
+// Symbol stream -> output bytes, shared by the fixed and dynamic block
+// types: literals append directly, length/distance pairs copy from
+// already-produced output.
+struct _HuffBlockResult {
+    reader: _BitReader;
+    out: ByteBuf;
+}
+
+fn _inflate_huff_block(reader_in: _BitReader, lit: _HuffTable, dist: _HuffTable, out_in: ByteBuf, max_output: int) -> Result<_HuffBlockResult, ArchiveError> {
+    let lbase: int[] = _length_base();
+    let lext: int[] = _length_extra();
+    let dbase: int[] = _dist_base();
+    let dext: int[] = _dist_extra();
+
+    let mut cur: _BitReader = reader_in;
+    let mut buf: ByteBuf = out_in;
+    let mut guard: int = 0;
+    let max_symbols: int = max_output + 8;
+    loop {
+        guard += 1;
+        if guard > max_symbols {
+            return Result.Err {
+                error: archive_error(ArchiveErrorKind.LimitExceeded, "deflate block decoded more symbols than max_output permits")
+            };
+        }
+        let sym_result: _DecodeResult = _huff_decode(cur, lit)?;
+        cur = sym_result.reader;
+        let sym: int = sym_result.symbol;
+
+        if sym < 256 {
+            if buf.len + 1 > max_output {
+                return Result.Err {
+                    error: archive_error(ArchiveErrorKind.LimitExceeded, "decompressed output exceeded max_output")
+                };
+            }
+            let appended: ByteBuf = bytes_append_byte(buf, sym)?;
+            buf = appended;
+        } else if sym == 256 {
+            return Result.Ok {
+                value: _HuffBlockResult { reader: cur, out: buf }
+            };
+        } else if sym <= 285 {
+            let lidx: int = sym - 257;
+            let extra_bits: int = lext[lidx];
+            let mut length: int = lbase[lidx];
+            if extra_bits > 0 {
+                let extra: _BitsResult = _br_bits(cur, extra_bits)?;
+                cur = extra.reader;
+                length = length + extra.bits;
+            }
+
+            let dist_sym_result: _DecodeResult = _huff_decode(cur, dist)?;
+            cur = dist_sym_result.reader;
+            let dsym: int = dist_sym_result.symbol;
+            if dsym < 0 || dsym >= dbase.length {
+                return Result.Err {
+                    error: archive_error(ArchiveErrorKind.CorruptStream, "deflate distance code is out of the defined 0-29 range")
+                };
+            }
+            let dextra_bits: int = dext[dsym];
+            let mut distance: int = dbase[dsym];
+            if dextra_bits > 0 {
+                let dextra: _BitsResult = _br_bits(cur, dextra_bits)?;
+                cur = dextra.reader;
+                distance = distance + dextra.bits;
+            }
+
+            if distance > buf.len {
+                return Result.Err {
+                    error: archive_error(ArchiveErrorKind.CorruptStream, "back-reference distance points before the start of output")
+                };
+            }
+            if buf.len + length > max_output {
+                return Result.Err {
+                    error: archive_error(ArchiveErrorKind.LimitExceeded, "decompressed output exceeded max_output")
+                };
+            }
+            // Overlapping copy: distance can be smaller than length (a
+            // distance-1 back-reference is a run-length fill), so source
+            // and destination alias and this must read one byte behind the
+            // growing tail and append it, never a bulk copy of the whole
+            // source range in one shot.
+            let mut c: int = 0;
+            loop {
+                if c >= length { break; }
+                let src_idx: int = buf.len - distance;
+                let byte_val: int = _byte_at(buf.addr + (src_idx as i64));
+                let appended: ByteBuf = bytes_append_byte(buf, byte_val)?;
+                buf = appended;
+                c += 1;
+            }
+        } else {
+            return Result.Err {
+                error: archive_error(ArchiveErrorKind.CorruptStream, "deflate literal/length code decoded an undefined symbol (286 or 287)")
+            };
+        }
+    }
+}
+
+// ---------------------------------------------------------------------
+// RFC 1951 §3.2.4 stored block: skip to the next byte boundary, read
+// LEN/NLEN, verify NLEN is LEN's one's complement, then copy LEN literal
+// bytes straight from the input.
+struct _StoredResult {
+    reader: _BitReader;
+    out: ByteBuf;
+}
+
+fn _inflate_stored(reader: _BitReader, out: ByteBuf) -> Result<_StoredResult, ArchiveError> {
+    let aligned: _BitReader = _br_align_byte(reader);
+    if aligned.pos + 4 > aligned.len {
+        return Result.Err {
+            error: archive_error(ArchiveErrorKind.Truncated, "stored block header (LEN/NLEN) runs past the end of the stream")
+        };
+    }
+    let len_lo: int = _byte_at(aligned.addr + (aligned.pos as i64));
+    let len_hi: int = _byte_at(aligned.addr + ((aligned.pos + 1) as i64));
+    let nlen_lo: int = _byte_at(aligned.addr + ((aligned.pos + 2) as i64));
+    let nlen_hi: int = _byte_at(aligned.addr + ((aligned.pos + 3) as i64));
+    let len: int = len_lo | (len_hi << 8);
+    let nlen: int = nlen_lo | (nlen_hi << 8);
+    // One's complement of a 16-bit value: 65535 - len, avoiding a bitwise-not
+    // operator this codebase does not otherwise use.
+    if nlen != (65535 - len) {
+        return Result.Err {
+            error: archive_error(ArchiveErrorKind.CorruptStream, "stored block NLEN is not the one's complement of LEN")
+        };
+    }
+
+    let data_pos: int = aligned.pos + 4;
+    if data_pos + len > aligned.len {
+        return Result.Err {
+            error: archive_error(ArchiveErrorKind.Truncated, "stored block data runs past the end of the stream")
+        };
+    }
+
+    let mut buf: ByteBuf = out;
+    let mut i: int = 0;
+    loop {
+        if i >= len { break; }
+        let byte_val: int = _byte_at(aligned.addr + ((data_pos + i) as i64));
+        let appended: ByteBuf = bytes_append_byte(buf, byte_val)?;
+        buf = appended;
+        i += 1;
+    }
+
+    let new_reader: _BitReader = _BitReader {
+        addr: aligned.addr,
+        len: aligned.len,
+        pos: data_pos + len,
+        bitbuf: 0,
+        bitcnt: 0
+    };
+    return Result.Ok {
+        value: _StoredResult { reader: new_reader, out: buf }
+    };
+}
+
+// ---------------------------------------------------------------------
+// One block: BFINAL + BTYPE, then dispatch to the matching block-type
+// reader.
+struct _BlockOutcome {
+    reader: _BitReader;
+    out: ByteBuf;
+    bfinal: boolean;
+}
+
+fn _inflate_block(reader_in: _BitReader, out_in: ByteBuf, max_output: int) -> Result<_BlockOutcome, ArchiveError> {
+    let bfinal_bits: _BitsResult = _br_bits(reader_in, 1)?;
+    let bfinal: boolean = bfinal_bits.bits == 1;
+    let btype_bits: _BitsResult = _br_bits(bfinal_bits.reader, 2)?;
+    let btype: int = btype_bits.bits;
+    let reader: _BitReader = btype_bits.reader;
+
+    if btype == 0 {
+        let r: _StoredResult = _inflate_stored(reader, out_in)?;
+        return Result.Ok {
+            value: _BlockOutcome {
+                reader: r.reader,
+                out: r.out,
+                bfinal: bfinal
+            }
+        };
+    }
+    if btype == 1 {
+        let tables: _HuffPair = _fixed_tables();
+        let r: _HuffBlockResult = _inflate_huff_block(reader, tables.lit, tables.dist, out_in, max_output)?;
+        return Result.Ok {
+            value: _BlockOutcome {
+                reader: r.reader,
+                out: r.out,
+                bfinal: bfinal
+            }
+        };
+    }
+    if btype == 2 {
+        let dyn_tables: _DynamicTablesResult = _read_dynamic_tables(reader)?;
+        let r: _HuffBlockResult = _inflate_huff_block(dyn_tables.reader, dyn_tables.lit, dyn_tables.dist, out_in, max_output)?;
+        return Result.Ok {
+            value: _BlockOutcome {
+                reader: r.reader,
+                out: r.out,
+                bfinal: bfinal
+            }
+        };
+    }
+    return Result.Err {
+        error: archive_error(ArchiveErrorKind.CorruptStream, "deflate block type 3 (BTYPE=11) is reserved and invalid")
+    };
+}
+
+// ---------------------------------------------------------------------
+// Public entry point (SFEP-0071 §3.4). Owns `out` end to end and frees it
+// on every exit path, including every error return below.
+fn inflate_all(src: ByteCursor, max_output: int) -> Result<ByteBuf, ArchiveError> {
+    if max_output < 0 {
+        return Result.Err {
+            error: archive_error(ArchiveErrorKind.LimitExceeded, "inflate_all max_output must be non-negative")
+        };
+    }
+
+    let mut out: ByteBuf = bytes_new(256)?;
+    let mut reader: _BitReader = _br_new(src);
+    let mut guard: int = 0;
+    // A well-formed deflate stream cannot need more blocks than it has bits
+    // of input; this backstop rejects a corrupt stream whose block headers
+    // alone would loop past that, rather than ever spinning.
+    let max_blocks: int = (src.len * 8) + 32;
+    loop {
+        guard += 1;
+        if guard > max_blocks {
+            bytes_free(out);
+            return Result.Err {
+                error: archive_error(ArchiveErrorKind.CorruptStream, "deflate stream exceeded the maximum possible block count for its length")
+            };
+        }
+
+        let block_result: Result<_BlockOutcome, ArchiveError> = _inflate_block(reader, out, max_output);
+        let mut outcome: _BlockOutcome = _BlockOutcome {
+            reader: reader,
+            out: out,
+            bfinal: false
+        };
+        match block_result {
+            Result.Ok { value }
+            : {
+                outcome = value;
+            },
+            Result.Err { error }
+            : {
+                bytes_free(out);
+                return Result.Err { error: error };
+            }
+        }
+        reader = outcome.reader;
+        out = outcome.out;
+        if outcome.bfinal { break; }
+    }
+
+    return Result.Ok { value: out };
+}
