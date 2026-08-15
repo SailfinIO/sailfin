@@ -76,7 +76,7 @@ Multiple path arguments group tests into named **suites** for reporting: each pa
 **Usage:**
 
 ```bash
-sfn test [--json] [-k NAME] [--tag TAG] [--update-snapshots] [--no-test-cache] [--jobs N] [--shard I/N] [--skip-toolchain-check] [path...]
+sfn test [--json] [-k NAME] [--tag TAG] [--update-snapshots] [--no-test-cache] [--jobs N] [--slowest N] [--shard I/N] [--skip-toolchain-check] [path...]
 ```
 
 **Examples:**
@@ -98,10 +98,18 @@ sfn test compiler/tests/unit compiler/tests/integration capsules  # three suites
 | `--update-snapshots` | Re-baseline snapshot golden files. |
 | `--no-test-cache` | Bypass the per-test linked-binary cache. |
 | `--jobs N` | Run up to `N` per-file test children concurrently. |
+| `--slowest N` | Print the `N` slowest test files after a multi-file run (default `5`; `0` disables the summary; range `[0, 1000]`, out-of-range exits `2`). |
 | `--shard I/N` | Run only the `I`-th of `N` file-count-balanced shards. |
 | `--skip-toolchain-check` | Bypass the `[toolchain]` pin check for this invocation — see [Toolchain Pinning Flags](#toolchain-pinning-flags) |
 
 > **Note:** `--filter` is not yet supported. To narrow test scope, pass a specific file or directory path.
+
+**Timing output** (human output only — unaffected, and not emitted, under `--json`; the JSON schema is unchanged):
+
+- Each file's `PASS`/`FAIL` line is appended with its wall-clock elapsed time, e.g. `[test] PASS: foo_test.sfn (1.23s)` or `[test] FAIL: bar_test.sfn (exit code 1) (2.10s)`.
+- A run with at least two timed files ends with a slowest-files summary listing up to `--slowest N` entries (default `5`), slowest first. `--slowest 0` disables the summary; a single-file run never prints one regardless of the flag.
+- Files with no captured timing — for example one that failed at the compile or link stage before it could run — are excluded from the summary.
+- The unit is per-file, deliberately: a file's binary executes all of its tests in one process, so per-test wall time isn't directly observable. `--json`'s per-test `duration_ms` remains an even distribution of the file total, not a measurement.
 
 **Test file conventions:**
 
