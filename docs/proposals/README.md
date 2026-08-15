@@ -112,6 +112,17 @@ Index row. Two slates are in review.
 | [`draft-import-surface-compaction`](./draft-import-surface-compaction.md) | Import-surface compaction across the phase rewind to cut emit peak RSS | runtime |
 | [`draft-concurrency-cancellation`](./draft-concurrency-cancellation.md) | Concurrency runtime maturity — cancel-on-fault and async I/O | runtime |
 
+**The native-Windows toolchain critical path:**
+
+| Draft | Title | Type |
+|---|---|---|
+| [`draft-archive-targz`](./draft-archive-targz.md) | In-Process `.tar.gz` Reader and Writer (`sfn/archive`) | tooling |
+
+Tracked by SFN-753. The last external-binary dependency on the seed-acquisition
+path: native TLS retired `curl` (SFN-341), leaving `tar` as the one tool a stock
+Windows host does not have and `sfn toolchain install` still requires
+(`toolchain.sfn:418`). Blocks SFN-493 → SFN-57.
+
 The **capability-seal critical path** designs graduated out of this slate on
 2026-07-25 and now hold Index rows: SFEP-0059 (typed SSA activation) and
 SFEP-0060 (the owned syscall layer). Both amended their parents rather than
