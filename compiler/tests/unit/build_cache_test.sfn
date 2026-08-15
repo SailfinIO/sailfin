@@ -46,6 +46,7 @@ import {
     canonicalize_flags,
     empty_build_cache_config,
     empty_cache_stats,
+    is_compiler_selfhost_capsule,
     is_valid_digest,
     merge_cache_stats,
     runtime_link_inputs_identity,
@@ -101,6 +102,12 @@ test "build_cache: cache_root_from explicit override wins over all" {
 
 test "build_cache: cache_root_from self-host pins in-tree over XDG/HOME" {
     assert cache_root_from("", true, "/xdg", "/home/dev") == "build/cache/v2";
+}
+
+test "build_cache: scoped compiler identity selects the self-host cache" {
+    assert is_compiler_selfhost_capsule("sfn/compiler");
+    assert ! is_compiler_selfhost_capsule("sailfin");
+    assert ! is_compiler_selfhost_capsule("sfn/codegen");
 }
 
 test "build_cache: cache_root_from XDG_CACHE_HOME beats HOME" {

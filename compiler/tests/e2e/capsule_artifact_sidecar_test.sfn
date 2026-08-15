@@ -325,8 +325,7 @@ test "sidecar: positional sfn build produces the output artifact" ![io] {
 }
 
 // Bare (scope-less) capsule name fixture (`barewidget`, binary, no deps).
-// A single-segment name is a legitimate configuration — the compiler
-// self-host's own `name = "sailfin"` is one, and `sfn init` scaffolds
+// A single-segment name is a legitimate configuration — `sfn init` scaffolds
 // bare names from the directory basename. `sfn build -p` must NOT emit a
 // `scope/name form` warning for it (#1395).
 fn _bare_root() -> string { return "build/sfn-sidecar-bare-test"; }

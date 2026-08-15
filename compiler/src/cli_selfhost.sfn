@@ -28,15 +28,13 @@ import { int_to_string } from "sfn/strings";
 //   5. promotion: the validated seedcheck binary is copied over the
 //      canonical `build/bin/sfn`.
 //
-// Per-stage isolation is load-bearing: the per-module `.ll` scratch
-// root is resolved from `SAILFIN_TEST_SCRATCH` (not `--work-dir`) by
-// `capsule_resolver.sfn::_cr_scratch_root`. Without a distinct value
-// per stage, stage3 would clobber stage2's `.ll` and the diff would be
-// vacuous. It is set on each spawned child through `run_capture`'s
-// explicit env array (`_selfhost_stage_env`), the same shell-free
-// vehicle `build/runtime_objs.sfn::_runtime_emit_child_env` uses,
-// keeping this a pure-orchestration driver that post-processes no
-// artifact.
+// Per-stage isolation is load-bearing for top-level/runtime scratch. The
+// scoped compiler module tree is canonical, so stage2 is snapshotted before
+// stage3 clears and repopulates it. `SAILFIN_TEST_SCRATCH` is set on each
+// spawned child through `run_capture`'s explicit env array
+// (`_selfhost_stage_env`), the same shell-free vehicle
+// `build/runtime_objs.sfn::_runtime_emit_child_env` uses, keeping this a
+// pure-orchestration driver that post-processes no artifact.
 //
 // Nothing this command *spawns* may reach a POSIX shell: `sfn selfhost`
 // is what proves the native Windows self-host fixed point, and there is
@@ -63,7 +61,7 @@ import {
     determinism_diff_to_text,
     make_determinism_module
 } from "./build_report";
-import { substring } from "./string_utils";
+import { starts_with, substring } from "./string_utils";
 
 // Resolved configuration for one `sfn selfhost` invocation. Defaults
 // reproduce the former Makefile paths byte-for-byte.
@@ -450,11 +448,9 @@ fn _selfhost_promote_binary(src: string, dst: string) -> boolean ![io] {
     return _atomic_rename_into_place(staged, dst);
 }
 
-// Recursively collect `*.ll` files under `root`. For the compiler
-// self-host the `.ll` files land flat at `<scratch>/capsules/*.ll`
-// (the `name = "sailfin"` single-segment legacy path), but the BFS
-// matches the Makefile's recursive `find ... -name '*.ll'` so nested
-// layouts stay covered.
+// Recursively collect `*.ll` files under `root`. The BFS covers the scoped
+// compiler tree at `build/capsules/sfn/compiler/ir/` and the nested runtime
+// cache layout.
 fn _selfhost_collect_ll_files(root: string) -> string[] ![io] {
     let mut results: string[] = [];
     if !fs.exists(root) { return results; }
@@ -494,6 +490,36 @@ fn _selfhost_collect_ll_files(root: string) -> string[] ![io] {
     return results;
 }
 
+// `sfn/compiler` is scoped, so its own module IR lives in the canonical
+// per-capsule tree instead of the legacy `SAILFIN_TEST_SCRATCH/capsules`
+// tree. Self-host stages run sequentially; each stage clears this tree, and
+// the caller snapshots it before starting the next stage.
+fn _selfhost_compiler_ir_dir() -> string {
+    return "build/capsules/sfn/compiler/ir";
+}
+
+// A fixed-point check without the compiler's own module IR is vacuous. Keep
+// this probe separate from the runtime-cache warning: an empty compiler tree
+// is a hard orchestration failure, not reduced coverage.
+fn _selfhost_has_compiler_ir(root: string) -> boolean ![io] {
+    return _selfhost_collect_ll_files(root).length > 0;
+}
+
+// Scoped IR is nested (`build/fs.ll`, `cli/commands/build.ll`, ...), so a
+// basename is not a unique module identity. Preserve the path relative to the
+// enumerated root; retain the basename fallback for a path outside that root.
+fn _selfhost_relative_ll_slug(root: string, path: string) -> string {
+    let mut prefix = root;
+    if prefix.length > 1 && prefix[prefix.length - 1] == "/" {
+        prefix = substring(prefix, 0, prefix.length - 1);
+    }
+    if prefix.length > 0 && path.length > prefix.length && starts_with(path, prefix)
+        && path[prefix.length] == "/" {
+        return substring(path, prefix.length + 1, path.length);
+    }
+    return _selfhost_basename(path);
+}
+
 // Build a determinism snapshot from a stage's `.ll` scratch dir, its
 // sailfin cache dir, and its linked binary. The `.ll` digests carry the
 // fixed-point check (the Makefile compared only these); the binary sha
@@ -519,7 +545,7 @@ fn _selfhost_snapshot(capsules_dir: string, runtime_dir: string, binary_path: st
     let mut i: int = 0;
     loop {
         if i >= files.length { break; }
-        let slug = _selfhost_basename(files[i]);
+        let slug = _selfhost_relative_ll_slug(capsules_dir, files[i]);
         let sha = _sha256_of_file(files[i]);
         modules.push(make_determinism_module(slug, sha));
         i += 1;
@@ -528,7 +554,7 @@ fn _selfhost_snapshot(capsules_dir: string, runtime_dir: string, binary_path: st
     let mut ri: int = 0;
     loop {
         if ri >= runtime_files.length { break; }
-        let slug = "cache/" + _selfhost_basename(runtime_files[ri]);
+        let slug = "cache/" + _selfhost_relative_ll_slug(runtime_dir, runtime_files[ri]);
         let sha = _sha256_of_file(runtime_files[ri]);
         modules.push(make_determinism_module(slug, sha));
         ri += 1;
@@ -542,10 +568,10 @@ fn _selfhost_snapshot(capsules_dir: string, runtime_dir: string, binary_path: st
 }
 
 // Spawn one stage build: `<driver> build --no-cache -p compiler
-// --work-dir <work_subdir> -o <out_bin>`, with `SAILFIN_TEST_SCRATCH`
-// pinned to this stage's scratch root so its `.ll` files do not collide
-// with the other stage's. Clears any stale `.ll` first (port of the
-// Makefile's pre-build `find ... -delete`). Returns the child exit code.
+// --work-dir <work_subdir> -o <out_bin>`. `SAILFIN_TEST_SCRATCH` isolates
+// legacy scratch, while the scoped compiler IR tree is cleared explicitly and
+// snapshotted by the caller before the next stage starts. Returns the child
+// exit code.
 fn _selfhost_build_stage(driver_bin: string, scratch_dir: string, work_subdir: string, out_bin: string) -> int ![io] {
     _ensure_dir_recursive_cmd(work_subdir);
     // Fresh scratch: drop any prior `.ll` so a stale module can't poison
@@ -555,6 +581,11 @@ fn _selfhost_build_stage(driver_bin: string, scratch_dir: string, work_subdir: s
     if !_selfhost_remove_tree(scratch_capsules) {
         print.err("[selfhost] WARNING: could not fully clear "
             + scratch_capsules
+            + " — a stale module may skew the fixed-point diff");
+    }
+    let compiler_ir = _selfhost_compiler_ir_dir();
+    if !_selfhost_remove_tree(compiler_ir) {
+        print.err("[selfhost] WARNING: could not fully clear " + compiler_ir
             + " — a stale module may skew the fixed-point diff");
     }
     let rc = process.run_capture(_selfhost_stage_argv(driver_bin, work_subdir, out_bin), _selfhost_stage_env(process.environ(), scratch_dir));
@@ -656,16 +687,16 @@ fn handle_selfhost_command(args: string[], binary_dir: string) -> int ![io] {
         argi += 1;
     }
 
-    // Derived per-stage roots under `--work-dir`. `SAILFIN_TEST_SCRATCH`
-    // points at `<stage>/scratch`; the per-module `.ll` then land at
-    // `<stage>/scratch/capsules` (capsule_resolver legacy flat path).
+    // Derived per-stage roots under `--work-dir`. The scoped compiler modules
+    // use one canonical per-capsule tree and are snapshotted between stages;
+    // each stage retains an isolated top-level/runtime scratch tree.
     let s2_work = cfg.work_dir + "/native-seedcheck";
     let s2_scratch = s2_work + "/scratch";
-    let s2_capsules = s2_scratch + "/capsules";
+    let s2_capsules = _selfhost_compiler_ir_dir();
     let s2_runtime = s2_work + "/sailfin";
     let s3_work = cfg.work_dir + "/native-stage3";
     let s3_scratch = s3_work + "/scratch";
-    let s3_capsules = s3_scratch + "/capsules";
+    let s3_capsules = _selfhost_compiler_ir_dir();
     let s3_runtime = s3_work + "/sailfin";
 
     // Both stages link to the SAME basename (`sfn`), only in different
@@ -743,6 +774,16 @@ fn handle_selfhost_command(args: string[], binary_dir: string) -> int ![io] {
             + " — that coverage in the "
             + "fixed-point diff is not effective");
     }
+    if !_selfhost_has_compiler_ir(s2_capsules) {
+        print.err("[selfhost] stage2 produced zero compiler IR modules under "
+            + s2_capsules
+            + " — refusing a vacuous fixed-point check");
+        led.phases.push(SelfhostPhase {
+            name: "stage2", status: "fail", exit_code: 1
+        });
+        led.failed_phase = "stage2";
+        return _selfhost_finish(cfg, led, 1);
+    }
 
     led.phases.push(SelfhostPhase {
         name: "stage2", status: "pass", exit_code: 0
@@ -766,6 +807,10 @@ fn handle_selfhost_command(args: string[], binary_dir: string) -> int ![io] {
     led.phases.push(SelfhostPhase {
         name: "seedcheck-smoke", status: "pass", exit_code: 0
     });
+
+    // The scoped compiler IR tree is canonical rather than work-dir-local.
+    // Capture stage2 before the stage3 build clears and repopulates it.
+    let snap2 = _selfhost_snapshot(s2_capsules, s2_runtime, s2_linked_bin);
 
     // ---- stage3: built by the stage2 (seedcheck) binary ----
     if !cfg.json {
@@ -798,13 +843,22 @@ fn handle_selfhost_command(args: string[], binary_dir: string) -> int ![io] {
             + " — that coverage in the "
             + "fixed-point diff is not effective");
     }
+    if !_selfhost_has_compiler_ir(s3_capsules) {
+        print.err("[selfhost] stage3 produced zero compiler IR modules under "
+            + s3_capsules
+            + " — refusing a vacuous fixed-point check");
+        led.phases.push(SelfhostPhase {
+            name: "stage3", status: "fail", exit_code: 1
+        });
+        led.failed_phase = "stage3";
+        return _selfhost_finish(cfg, led, 1);
+    }
 
     // ---- fixed-point diff: stage2 vs stage3 ----
     // Hashed from the same-basename linked paths, not `cfg.seedcheck_out`
     // / `cfg.stage3_out` — those differ only by copy destination, but the
     // whole point of the same-basename link is that the *linked* outputs
     // carry an aligned ad-hoc signature.
-    let snap2 = _selfhost_snapshot(s2_capsules, s2_runtime, s2_linked_bin);
     let snap3 = _selfhost_snapshot(s3_capsules, s3_runtime, s3_linked_bin);
     let diff = compare_for_determinism(snap2, snap3);
 
@@ -895,6 +949,9 @@ export {
     // Exported for regression coverage (compiler/tests/{unit,integration}).
     _selfhost_basename,
     _selfhost_collect_ll_files,
+    _selfhost_compiler_ir_dir,
+    _selfhost_has_compiler_ir,
+    _selfhost_relative_ll_slug,
     _selfhost_contains,
     _selfhost_env_entry_has_key,
     _selfhost_promote_binary,

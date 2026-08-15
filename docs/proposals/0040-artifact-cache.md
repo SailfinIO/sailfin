@@ -85,7 +85,7 @@ removed*.
    (containers, minimal CI) and as the in-tree cache for the compiler's own
    self-host build, which must stay hermetic under `build/`.
 
-The compiler self-host build (`[capsule].name == "sailfin"`, the same predicate
+The compiler self-host build (`[capsule].name == "sfn/compiler"`, the same predicate
 `build_stamp.sfn:75` already keys on) pins the root to in-tree `build/cache` so
 `make compile` / `make check` remain hermetic and reproducible — the global
 store is a *user-project* convenience, never a self-host input.

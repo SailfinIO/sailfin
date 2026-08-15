@@ -205,7 +205,7 @@ functions.
 Precedent for driver behaviour gated on the project manifest already exists in
 the same function: `emit_compiler_build_stamp_if_applicable`
 (`build.sfn:504, 591`) and the toolchain gate at `build.sfn:255`, both keyed on
-`[capsule].name == "sailfin"`. A manifest key is preferred over a third
+`[capsule].name == "sfn/compiler"`. A manifest key is preferred over a third
 name-equality gate because it (i) states intent instead of identity, (ii) is
 testable with a scratch fixture that does not have to impersonate the
 compiler, and (iii) does not hardcode the compiler into link policy.

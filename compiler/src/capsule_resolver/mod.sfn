@@ -34,9 +34,10 @@ import { parse_program } from "sfn/syntax";
 //        on the main source sees the capsule's layout and symbols.
 //
 //   4. compile_capsule_modules(sources, project_root)
-//        Lowers each capsule source to its own .ll file under
-//        build/sailfin/capsules/<mangled-slug>.ll so the final clang link
-//        can bind the main module's external declarations.
+//        Lowers each capsule source to its canonical per-capsule path under
+//        build/capsules/<scope>/<name>/ir/<rel>.ll. Positional builds, bare
+//        capsule names, and unresolved ownership fall back to the legacy flat
+//        build/sailfin/capsules/<mangled-slug>.ll layout.
 //
 // Consumers then call `_clang_link_multi` with the main .ll and the
 // capsule .ll paths, and clang produces a linked binary with all

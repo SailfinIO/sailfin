@@ -19,7 +19,7 @@
 //   - dirty working tree        → "<version>+dev.<short_hash>.dirty"
 //   - no git available at all   → "<version>+dev"
 //
-// Only the compiler capsule (`[capsule].name == "sailfin"`)
+// Only the compiler capsule (`[capsule].name == "sfn/compiler"`)
 // self-stamps; foreign capsule builds via `sfn build -p <other>`
 // never touch `.build-stamp`. The capsule-name gate is enforced
 // by `emit_compiler_build_stamp_if_applicable` below — the
@@ -128,7 +128,7 @@ fn write_build_stamp(stamp_path: string, capsule_version: string) -> boolean ![i
     return true;
 }
 
-// Driver-side entry point. Gates on `[capsule].name == "sailfin"`
+// Driver-side entry point. Gates on `[capsule].name == "sfn/compiler"`
 // so only the compiler's own `sfn build -p compiler` writes a
 // stamp; foreign capsule builds never touch `.build-stamp`. Called
 // once per successful build from `cli_main.sfn`'s `is_build`
@@ -137,7 +137,7 @@ fn write_build_stamp(stamp_path: string, capsule_version: string) -> boolean ![i
 // surfaces inside `fs.writeFile` itself and does not poison the
 // build, which has already produced the artifact.
 fn emit_compiler_build_stamp_if_applicable(cap_capsule_name: string, capsule_version: string, work_dir: string) ![io] {
-    if !strings_equal(cap_capsule_name, "sailfin") { return; }
+    if !strings_equal(cap_capsule_name, "sfn/compiler") { return; }
     let stamp_path = compiler_stamp_path(work_dir);
     write_build_stamp(stamp_path, capsule_version);
 }

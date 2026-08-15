@@ -30,9 +30,9 @@ unusable without a recorded "before", and §8 additionally requires cold/warm
 compile time, cache hits, and peak RSS captured *before the first move*. This
 page is that "before".
 
-It measures the compiler as it stands today — one `sailfin` capsule, no
-capsules extracted. Nothing here is an optimization target; it is a reference
-point.
+It records the pre-decomposition compiler — one root capsule, before role
+capsules were extracted. The root is now `sfn/compiler`; nothing here is an
+optimization target, only a historical reference point.
 
 ## Host and toolchain
 
@@ -73,7 +73,7 @@ ordinary developer.
 precedence first:
 
 1. `$SAILFIN_BUILD_CACHE_DIR` — the override this procedure uses;
-2. the compiler self-host pin — `capsule.name == "sailfin"` forces in-tree
+2. the compiler self-host pin — `capsule.name == "sfn/compiler"` forces in-tree
    `build/cache/<schema>`, so `make compile` never reads a developer's global
    store even without the override;
 3. `$XDG_CACHE_HOME/sailfin/<schema>`;

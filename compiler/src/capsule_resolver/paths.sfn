@@ -141,9 +141,8 @@ fn _cr_scratch_root() -> string ![io] {
 }
 
 // Legacy flat layout for the `.ll` of a slug. Used by the C2b2
-// fallback path: positional builds, single-segment `[capsule].name`
-// (the compiler self-host falls in this bucket — its name is
-// `"sailfin"`), and any source whose slug doesn't match a known
+// fallback path: positional builds, single-segment `[capsule].name`, and any
+// source whose slug doesn't match a known
 // dep prefix. One source of truth so the fallback never drifts
 // across the two CapsuleSource construction sites.
 fn _cr_legacy_ll_path(slug: string) -> string ![io] {

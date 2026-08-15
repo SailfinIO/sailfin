@@ -732,7 +732,7 @@ test "publish: compiler capsule is rejected before credential discovery" ![io] {
     let err = process.capture_take_stderr();
     let all = out + err;
     assert _exit != 0;
-    assert contains(all, "sailfin");
+    assert contains(all, "sfn/compiler");
     assert contains(all, "is private and cannot be published");
     assert contains(all, "E0612");
     assert ! contains(all, "no auth token found");

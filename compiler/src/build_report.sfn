@@ -60,9 +60,8 @@ import { substring } from "./string_utils";
 // from `build/sailfin/capsules/<mangled>.ll` to
 // `build/capsules/<scope>/<name>/ir/<rel>.ll` for manifest-
 // declared deps and intra-capsule sources of `-p` builds with
-// safe scope/name. Positional builds (and the compiler self-host,
-// whose `[capsule].name = "sailfin"` is single-segment) still
-// produce legacy paths in this field. Field shape is unchanged
+// safe scope/name, including the `sfn/compiler` self-host. Positional builds
+// and bare capsule names still produce legacy paths in this field. Field shape is unchanged
 // (string array of file paths); a *shape* change (entries become
 // objects, etc.) would require a v2.
 //

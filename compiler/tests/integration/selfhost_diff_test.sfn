@@ -11,6 +11,7 @@
 import { compare_for_determinism } from "../../src/build_report";
 import {
     _selfhost_collect_ll_files,
+    _selfhost_has_compiler_ir,
     _selfhost_promote_binary,
     _selfhost_remove_tree,
     _selfhost_snapshot,
@@ -44,6 +45,13 @@ test "selfhost_collect_ll_files: missing dir yields empty list" ![io] {
     assert files.length == 0;
 }
 
+test "selfhost compiler IR gate: empty tree is rejected" ![io] {
+    let root = fs.mkdtemp("sfn-selfhost-empty-compiler-ir-");
+    assert ! _selfhost_has_compiler_ir(root);
+    _write_ll(root + "/nested", "mod.ll", "; compiler module\n");
+    assert _selfhost_has_compiler_ir(root);
+}
+
 // --------------------------------------------------------------
 // _selfhost_snapshot + compare_for_determinism — fixed-point path
 // --------------------------------------------------------------
@@ -68,6 +76,26 @@ test "selfhost_snapshot: identical .ll sets + same binary => fixed point" ![io] 
     let diff = compare_for_determinism(snap2, snap3);
     assert diff.matched;
     assert diff.binary_match;
+    assert diff.module_diffs.length == 0;
+}
+
+test "selfhost_snapshot: nested duplicate basenames retain distinct slugs" ![io] {
+    let root = fs.mkdtemp("sfn-selfhost-nested-slugs-");
+    let bin = root + "/fakebin";
+    fs.writeFile(bin, "same binary");
+
+    let s2 = root + "/s2/capsules";
+    let s3 = root + "/s3/capsules";
+    _write_ll(s2 + "/build", "mod.ll", "; build module\n");
+    _write_ll(s2 + "/cli", "mod.ll", "; cli module\n");
+    _write_ll(s3 + "/build", "mod.ll", "; build module\n");
+    _write_ll(s3 + "/cli", "mod.ll", "; cli module\n");
+
+    let snap2 = _selfhost_snapshot(s2, root + "/s2/runtime", bin);
+    let snap3 = _selfhost_snapshot(s3, root + "/s3/runtime", bin);
+    let diff = compare_for_determinism(snap2, snap3);
+    assert snap2.modules.length == 2;
+    assert diff.matched;
     assert diff.module_diffs.length == 0;
 }
 
