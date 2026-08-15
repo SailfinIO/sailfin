@@ -36,6 +36,13 @@ import { ArchiveError, ArchiveErrorKind, archive_error } from "./error";
 
 let _MAX_BITS: int = 15;
 
+// A never-read placeholder for the `error` field of a `_Step`/`_BlockStep`
+// whose `failed` is false. Callers must check `failed` before touching
+// `error` — this exists only so the struct literal is total.
+fn _no_archive_error() -> ArchiveError {
+    return archive_error(ArchiveErrorKind.Io, "");
+}
+
 // ---------------------------------------------------------------------
 // Bit reader — LSB-first within each byte.
 struct _BitReader {
@@ -467,6 +474,17 @@ fn _read_dynamic_tables(reader_in: _BitReader) -> Result<_DynamicTablesResult, A
             error: archive_error(ArchiveErrorKind.CorruptStream, "dynamic block literal/length code table is incomplete or over-subscribed")
         };
     }
+    // zlib rejects this as "invalid code -- missing end-of-block": a table
+    // that never assigns symbol 256 a code is complete in every other
+    // respect (SFN-896 review), so without this check a block with no
+    // reachable EOB decodes literals/matches until the `max_symbols` guard
+    // in `_inflate_huff_block` — up to `max_output` bytes of allocation and
+    // iterations — from a few bytes of dynamic-block header.
+    if lit_lengths[256] == 0 {
+        return Result.Err {
+            error: archive_error(ArchiveErrorKind.CorruptStream, "dynamic block literal/length code table has no end-of-block (256) code")
+        };
+    }
 
     let dist_construct: _ConstructResult = _huff_construct(dist_lengths, hdist);
     if dist_construct.left != 0 {
@@ -492,15 +510,47 @@ fn _read_dynamic_tables(reader_in: _BitReader) -> Result<_DynamicTablesResult, A
 }
 
 // ---------------------------------------------------------------------
+// `_Step` — the shape every block-body helper below returns. `buf` is
+// ALWAYS the current, live `ByteBuf`, success or failure: `bytes_append_byte`
+// (`bytes.sfn:157`) can `realloc`-relocate, and once it does, the buffer
+// handed in is stale — its address may already be freed by libc. A helper
+// that returned `Result<T, ArchiveError>` and dropped `buf` on the `Err` arm
+// left the caller no way to reach the live address, so the caller freed the
+// stale one instead: a double free of a dangling pointer, and a leak of the
+// real buffer (SFN-896 review, Fix 1). Carrying `buf` unconditionally in the
+// return value — never behind `?`, which is exactly the operator that drops
+// it — is what makes "adopt `buf`, then check `failed`" the only shape a
+// caller can use.
+struct _Step {
+    reader: _BitReader;
+    buf: ByteBuf;
+    failed: boolean;
+    error: ArchiveError;
+}
+
+fn _step_ok(reader: _BitReader, buf: ByteBuf) -> _Step {
+    return _Step {
+        reader: reader,
+        buf: buf,
+        failed: false,
+        error: _no_archive_error()
+    };
+}
+
+fn _step_err(reader: _BitReader, buf: ByteBuf, error: ArchiveError) -> _Step {
+    return _Step {
+        reader: reader,
+        buf: buf,
+        failed: true,
+        error: error
+    };
+}
+
+// ---------------------------------------------------------------------
 // Symbol stream -> output bytes, shared by the fixed and dynamic block
 // types: literals append directly, length/distance pairs copy from
 // already-produced output.
-struct _HuffBlockResult {
-    reader: _BitReader;
-    out: ByteBuf;
-}
-
-fn _inflate_huff_block(reader_in: _BitReader, lit: _HuffTable, dist: _HuffTable, out_in: ByteBuf, max_output: int) -> Result<_HuffBlockResult, ArchiveError> {
+fn _inflate_huff_block(reader_in: _BitReader, lit: _HuffTable, dist: _HuffTable, out_in: ByteBuf, max_output: int) -> _Step {
     let lbase: int[] = _length_base();
     let lext: int[] = _length_extra();
     let dbase: int[] = _dist_base();
@@ -513,61 +563,95 @@ fn _inflate_huff_block(reader_in: _BitReader, lit: _HuffTable, dist: _HuffTable,
     loop {
         guard += 1;
         if guard > max_symbols {
-            return Result.Err {
-                error: archive_error(ArchiveErrorKind.LimitExceeded, "deflate block decoded more symbols than max_output permits")
-            };
+            return _step_err(cur, buf, archive_error(ArchiveErrorKind.LimitExceeded, "deflate block decoded more symbols than max_output permits"));
         }
-        let sym_result: _DecodeResult = _huff_decode(cur, lit)?;
-        cur = sym_result.reader;
-        let sym: int = sym_result.symbol;
+
+        let sym_step: Result<_DecodeResult, ArchiveError> = _huff_decode(cur, lit);
+        let mut sym: int = 0;
+        match sym_step {
+            Result.Ok { value }
+            : {
+                cur = value.reader;
+                sym = value.symbol;
+            },
+            Result.Err { error }
+            : {
+                return _step_err(cur, buf, error);
+            }
+        }
 
         if sym < 256 {
             if buf.len + 1 > max_output {
-                return Result.Err {
-                    error: archive_error(ArchiveErrorKind.LimitExceeded, "decompressed output exceeded max_output")
-                };
+                return _step_err(cur, buf, archive_error(ArchiveErrorKind.LimitExceeded, "decompressed output exceeded max_output"));
             }
-            let appended: ByteBuf = bytes_append_byte(buf, sym)?;
-            buf = appended;
-        } else if sym == 256 {
-            return Result.Ok {
-                value: _HuffBlockResult { reader: cur, out: buf }
-            };
-        } else if sym <= 285 {
+            let append_step: Result<ByteBuf, ArchiveError> = bytes_append_byte(buf, sym);
+            match append_step {
+                Result.Ok { value }
+                : {
+                    buf = value;
+                },
+                Result.Err { error }
+                : {
+                    return _step_err(cur, buf, error);
+                }
+            }
+        } else if sym == 256 { return _step_ok(cur, buf); } else if sym <= 285 {
             let lidx: int = sym - 257;
             let extra_bits: int = lext[lidx];
             let mut length: int = lbase[lidx];
             if extra_bits > 0 {
-                let extra: _BitsResult = _br_bits(cur, extra_bits)?;
-                cur = extra.reader;
-                length = length + extra.bits;
+                let extra_step: Result<_BitsResult, ArchiveError> = _br_bits(cur, extra_bits);
+                match extra_step {
+                    Result.Ok { value }
+                    : {
+                        cur = value.reader;
+                        length = length + value.bits;
+                    },
+                    Result.Err { error }
+                    : {
+                        return _step_err(cur, buf, error);
+                    }
+                }
             }
 
-            let dist_sym_result: _DecodeResult = _huff_decode(cur, dist)?;
-            cur = dist_sym_result.reader;
-            let dsym: int = dist_sym_result.symbol;
+            let dist_sym_step: Result<_DecodeResult, ArchiveError> = _huff_decode(cur, dist);
+            let mut dsym: int = 0;
+            match dist_sym_step {
+                Result.Ok { value }
+                : {
+                    cur = value.reader;
+                    dsym = value.symbol;
+                },
+                Result.Err { error }
+                : {
+                    return _step_err(cur, buf, error);
+                }
+            }
             if dsym < 0 || dsym >= dbase.length {
-                return Result.Err {
-                    error: archive_error(ArchiveErrorKind.CorruptStream, "deflate distance code is out of the defined 0-29 range")
-                };
+                return _step_err(cur, buf, archive_error(ArchiveErrorKind.CorruptStream, "deflate distance code is out of the defined 0-29 range"));
             }
             let dextra_bits: int = dext[dsym];
             let mut distance: int = dbase[dsym];
             if dextra_bits > 0 {
-                let dextra: _BitsResult = _br_bits(cur, dextra_bits)?;
-                cur = dextra.reader;
-                distance = distance + dextra.bits;
+                let dextra_step: Result<_BitsResult, ArchiveError> = _br_bits(cur, dextra_bits);
+                match dextra_step {
+                    Result.Ok { value }
+                    : {
+                        cur = value.reader;
+                        distance = distance + value.bits;
+                    },
+                    Result.Err { error }
+                    : {
+                        return _step_err(cur, buf, error);
+                    }
+                }
             }
 
             if distance > buf.len {
-                return Result.Err {
-                    error: archive_error(ArchiveErrorKind.CorruptStream, "back-reference distance points before the start of output")
-                };
+                return _step_err(cur, buf, archive_error(ArchiveErrorKind.CorruptStream, "back-reference distance points before the start of output"));
             }
             if buf.len + length > max_output {
-                return Result.Err {
-                    error: archive_error(ArchiveErrorKind.LimitExceeded, "decompressed output exceeded max_output")
-                };
+                return _step_err(cur, buf, archive_error(ArchiveErrorKind.LimitExceeded, "decompressed output exceeded max_output"));
             }
             // Overlapping copy: distance can be smaller than length (a
             // distance-1 back-reference is a run-length fill), so source
@@ -579,14 +663,21 @@ fn _inflate_huff_block(reader_in: _BitReader, lit: _HuffTable, dist: _HuffTable,
                 if c >= length { break; }
                 let src_idx: int = buf.len - distance;
                 let byte_val: int = _byte_at(buf.addr + (src_idx as i64));
-                let appended: ByteBuf = bytes_append_byte(buf, byte_val)?;
-                buf = appended;
+                let copy_step: Result<ByteBuf, ArchiveError> = bytes_append_byte(buf, byte_val);
+                match copy_step {
+                    Result.Ok { value }
+                    : {
+                        buf = value;
+                    },
+                    Result.Err { error }
+                    : {
+                        return _step_err(cur, buf, error);
+                    }
+                }
                 c += 1;
             }
         } else {
-            return Result.Err {
-                error: archive_error(ArchiveErrorKind.CorruptStream, "deflate literal/length code decoded an undefined symbol (286 or 287)")
-            };
+            return _step_err(cur, buf, archive_error(ArchiveErrorKind.CorruptStream, "deflate literal/length code decoded an undefined symbol (286 or 287)"));
         }
     }
 }
@@ -595,17 +686,10 @@ fn _inflate_huff_block(reader_in: _BitReader, lit: _HuffTable, dist: _HuffTable,
 // RFC 1951 §3.2.4 stored block: skip to the next byte boundary, read
 // LEN/NLEN, verify NLEN is LEN's one's complement, then copy LEN literal
 // bytes straight from the input.
-struct _StoredResult {
-    reader: _BitReader;
-    out: ByteBuf;
-}
-
-fn _inflate_stored(reader: _BitReader, out: ByteBuf) -> Result<_StoredResult, ArchiveError> {
+fn _inflate_stored(reader: _BitReader, out: ByteBuf, max_output: int) -> _Step {
     let aligned: _BitReader = _br_align_byte(reader);
     if aligned.pos + 4 > aligned.len {
-        return Result.Err {
-            error: archive_error(ArchiveErrorKind.Truncated, "stored block header (LEN/NLEN) runs past the end of the stream")
-        };
+        return _step_err(aligned, out, archive_error(ArchiveErrorKind.Truncated, "stored block header (LEN/NLEN) runs past the end of the stream"));
     }
     let len_lo: int = _byte_at(aligned.addr + (aligned.pos as i64));
     let len_hi: int = _byte_at(aligned.addr + ((aligned.pos + 1) as i64));
@@ -616,16 +700,21 @@ fn _inflate_stored(reader: _BitReader, out: ByteBuf) -> Result<_StoredResult, Ar
     // One's complement of a 16-bit value: 65535 - len, avoiding a bitwise-not
     // operator this codebase does not otherwise use.
     if nlen != (65535 - len) {
-        return Result.Err {
-            error: archive_error(ArchiveErrorKind.CorruptStream, "stored block NLEN is not the one's complement of LEN")
-        };
+        return _step_err(aligned, out, archive_error(ArchiveErrorKind.CorruptStream, "stored block NLEN is not the one's complement of LEN"));
     }
 
     let data_pos: int = aligned.pos + 4;
     if data_pos + len > aligned.len {
-        return Result.Err {
-            error: archive_error(ArchiveErrorKind.Truncated, "stored block data runs past the end of the stream")
-        };
+        return _step_err(aligned, out, archive_error(ArchiveErrorKind.Truncated, "stored block data runs past the end of the stream"));
+    }
+    // SFN-896 review, Fix 2: `_inflate_huff_block` already checks
+    // `max_output` before every append; a stored block copied straight
+    // through with no such check, so `inflate_all(src, 1024)` over a
+    // stored-only stream returned the whole thing regardless of the cap.
+    // Checked before the copy loop below, not during it, so a stream that
+    // would blow the limit fails without allocating any of the excess.
+    if out.len + len > max_output {
+        return _step_err(aligned, out, archive_error(ArchiveErrorKind.LimitExceeded, "decompressed output exceeded max_output"));
     }
 
     let mut buf: ByteBuf = out;
@@ -633,8 +722,17 @@ fn _inflate_stored(reader: _BitReader, out: ByteBuf) -> Result<_StoredResult, Ar
     loop {
         if i >= len { break; }
         let byte_val: int = _byte_at(aligned.addr + ((data_pos + i) as i64));
-        let appended: ByteBuf = bytes_append_byte(buf, byte_val)?;
-        buf = appended;
+        let append_step: Result<ByteBuf, ArchiveError> = bytes_append_byte(buf, byte_val);
+        match append_step {
+            Result.Ok { value }
+            : {
+                buf = value;
+            },
+            Result.Err { error }
+            : {
+                return _step_err(aligned, buf, error);
+            }
+        }
         i += 1;
     }
 
@@ -645,62 +743,127 @@ fn _inflate_stored(reader: _BitReader, out: ByteBuf) -> Result<_StoredResult, Ar
         bitbuf: 0,
         bitcnt: 0
     };
-    return Result.Ok {
-        value: _StoredResult { reader: new_reader, out: buf }
-    };
+    return _step_ok(new_reader, buf);
 }
 
 // ---------------------------------------------------------------------
 // One block: BFINAL + BTYPE, then dispatch to the matching block-type
-// reader.
-struct _BlockOutcome {
+// reader. `_BlockStep` mirrors `_Step` with the added `bfinal` flag; same
+// carry-the-buffer-unconditionally contract.
+struct _BlockStep {
     reader: _BitReader;
-    out: ByteBuf;
+    buf: ByteBuf;
     bfinal: boolean;
+    failed: boolean;
+    error: ArchiveError;
 }
 
-fn _inflate_block(reader_in: _BitReader, out_in: ByteBuf, max_output: int) -> Result<_BlockOutcome, ArchiveError> {
-    let bfinal_bits: _BitsResult = _br_bits(reader_in, 1)?;
-    let bfinal: boolean = bfinal_bits.bits == 1;
-    let btype_bits: _BitsResult = _br_bits(bfinal_bits.reader, 2)?;
-    let btype: int = btype_bits.bits;
-    let reader: _BitReader = btype_bits.reader;
+fn _block_step_ok(reader: _BitReader, buf: ByteBuf, bfinal: boolean) -> _BlockStep {
+    return _BlockStep {
+        reader: reader,
+        buf: buf,
+        bfinal: bfinal,
+        failed: false,
+        error: _no_archive_error()
+    };
+}
+
+fn _block_step_err(reader: _BitReader, buf: ByteBuf, error: ArchiveError) -> _BlockStep {
+    return _BlockStep {
+        reader: reader,
+        buf: buf,
+        bfinal: false,
+        failed: true,
+        error: error
+    };
+}
+
+fn _inflate_block(reader_in: _BitReader, out_in: ByteBuf, max_output: int) -> _BlockStep {
+    let bfinal_step: Result<_BitsResult, ArchiveError> = _br_bits(reader_in, 1);
+    let mut bfinal: boolean = false;
+    let mut after_bfinal: _BitReader = reader_in;
+    match bfinal_step {
+        Result.Ok { value }
+        : {
+            after_bfinal = value.reader;
+            bfinal = value.bits == 1;
+        },
+        Result.Err { error }
+        : {
+            return _block_step_err(reader_in, out_in, error);
+        }
+    }
+
+    let btype_step: Result<_BitsResult, ArchiveError> = _br_bits(after_bfinal, 2);
+    let mut btype: int = 0;
+    let mut reader: _BitReader = after_bfinal;
+    match btype_step {
+        Result.Ok { value }
+        : {
+            reader = value.reader;
+            btype = value.bits;
+        },
+        Result.Err { error }
+        : {
+            return _block_step_err(after_bfinal, out_in, error);
+        }
+    }
 
     if btype == 0 {
-        let r: _StoredResult = _inflate_stored(reader, out_in)?;
-        return Result.Ok {
-            value: _BlockOutcome {
-                reader: r.reader,
-                out: r.out,
-                bfinal: bfinal
-            }
-        };
+        let r: _Step = _inflate_stored(reader, out_in, max_output);
+        if r.failed {
+            return _block_step_err(r.reader, r.buf, r.error);
+        }
+        return _block_step_ok(r.reader, r.buf, bfinal);
     }
     if btype == 1 {
         let tables: _HuffPair = _fixed_tables();
-        let r: _HuffBlockResult = _inflate_huff_block(reader, tables.lit, tables.dist, out_in, max_output)?;
-        return Result.Ok {
-            value: _BlockOutcome {
-                reader: r.reader,
-                out: r.out,
-                bfinal: bfinal
-            }
-        };
+        let r: _Step = _inflate_huff_block(reader, tables.lit, tables.dist, out_in, max_output);
+        if r.failed {
+            return _block_step_err(r.reader, r.buf, r.error);
+        }
+        return _block_step_ok(r.reader, r.buf, bfinal);
     }
     if btype == 2 {
-        let dyn_tables: _DynamicTablesResult = _read_dynamic_tables(reader)?;
-        let r: _HuffBlockResult = _inflate_huff_block(dyn_tables.reader, dyn_tables.lit, dyn_tables.dist, out_in, max_output)?;
-        return Result.Ok {
-            value: _BlockOutcome {
-                reader: r.reader,
-                out: r.out,
-                bfinal: bfinal
-            }
+        let dyn_step: Result<_DynamicTablesResult, ArchiveError> = _read_dynamic_tables(reader);
+        let mut dyn_reader: _BitReader = reader;
+        let mut lit_table: _HuffTable = _HuffTable {
+            counts: [],
+            symbols: []
         };
+        let mut dist_table: _HuffTable = _HuffTable {
+            counts: [],
+            symbols: []
+        };
+        let mut dyn_failed: boolean = false;
+        let mut dyn_error: ArchiveError = _no_archive_error();
+        match dyn_step {
+            Result.Ok { value }
+            : {
+                dyn_reader = value.reader;
+                lit_table = value.lit;
+                dist_table = value.dist;
+            },
+            Result.Err { error }
+            : {
+                dyn_failed = true;
+                dyn_error = error;
+            }
+        }
+        if dyn_failed {
+            // No `out_in` growth has happened yet at this point (the
+            // dynamic header carries no output bytes of its own), so
+            // `out_in` is still the live address — same as every other
+            // early-failure return above.
+            return _block_step_err(reader, out_in, dyn_error);
+        }
+        let r: _Step = _inflate_huff_block(dyn_reader, lit_table, dist_table, out_in, max_output);
+        if r.failed {
+            return _block_step_err(r.reader, r.buf, r.error);
+        }
+        return _block_step_ok(r.reader, r.buf, bfinal);
     }
-    return Result.Err {
-        error: archive_error(ArchiveErrorKind.CorruptStream, "deflate block type 3 (BTYPE=11) is reserved and invalid")
-    };
+    return _block_step_err(reader, out_in, archive_error(ArchiveErrorKind.CorruptStream, "deflate block type 3 (BTYPE=11) is reserved and invalid"));
 }
 
 // ---------------------------------------------------------------------
@@ -729,26 +892,19 @@ fn inflate_all(src: ByteCursor, max_output: int) -> Result<ByteBuf, ArchiveError
             };
         }
 
-        let block_result: Result<_BlockOutcome, ArchiveError> = _inflate_block(reader, out, max_output);
-        let mut outcome: _BlockOutcome = _BlockOutcome {
-            reader: reader,
-            out: out,
-            bfinal: false
-        };
-        match block_result {
-            Result.Ok { value }
-            : {
-                outcome = value;
-            },
-            Result.Err { error }
-            : {
-                bytes_free(out);
-                return Result.Err { error: error };
-            }
+        let step: _BlockStep = _inflate_block(reader, out, max_output);
+        // Adopt `step.buf` unconditionally, before looking at `failed`:
+        // `_inflate_block` (and everything it calls) always carries the
+        // live buffer address here, success or failure (SFN-896 review,
+        // Fix 1) — freeing the pre-call `out` instead would free a stale,
+        // possibly already-`realloc`-relocated address.
+        out = step.buf;
+        reader = step.reader;
+        if step.failed {
+            bytes_free(out);
+            return Result.Err { error: step.error };
         }
-        reader = outcome.reader;
-        out = outcome.out;
-        if outcome.bfinal { break; }
+        if step.bfinal { break; }
     }
 
     return Result.Ok { value: out };

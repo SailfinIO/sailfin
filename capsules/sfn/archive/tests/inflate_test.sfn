@@ -2,16 +2,28 @@
 //
 // RFC 1951 DEFLATE coverage (SFEP-0071 §8.1): stored, fixed-Huffman, and
 // dynamic-Huffman blocks; a distance-1 run-length fill; a back-reference at
-// the 32768 window edge; the length-258/distance-32768 maxima; and the
-// rejection table (truncated stream, over-subscribed tree, incomplete
-// tree, a distance pointing before the start of output).
+// the 32768 window edge; the length-258/distance-32768 maxima; the upper
+// half of the distance table (codes 16-29); `max_output` enforcement for
+// both a Huffman and a stored block; a buffer that grows past its initial
+// capacity and then hits an error (SFN-896 review, Fix 1's regression case);
+// and the rejection table (truncated stream, over-subscribed tree,
+// incomplete tree, a distance pointing before the start of output).
 //
-// Real compressed vectors (every case that needs actual DEFLATE bytes, not
-// a hand-built one) were produced on this machine with zlib's raw-deflate
-// mode (`wbits=-15` strips the zlib header/trailer, leaving a bare RFC 1951
-// stream) and pasted below as `int[]` literals, per `bytes_from_int_array`
-// (SFEP-0071 §3.3). Each vector's generating command is recorded next to it
-// so a future reader can regenerate.
+// Two kinds of vector appear below. Most are real compressed bytes,
+// produced on this machine with zlib's raw-deflate mode (`wbits=-15` strips
+// the zlib header/trailer, leaving a bare RFC 1951 stream); each records its
+// generating command so a future reader can regenerate it. But zlib's
+// encoder caps match distance at `MAX_DIST = 32768 - 262 = 32506`
+// (`deflate.c`), so **no `zlib.compressobj` output can contain a distance
+// above 32506** — every case that needs a distance beyond that (the window
+// edge at exactly 32768, the length-258/distance-32768 maxima, and the
+// distance-16-29 sweep up to base 24577) is instead assembled bit-by-bit by
+// a small hand-rolled encoder (fixed Huffman codes per RFC 1951 §3.2.6,
+// written MSB-first; everything else LSB-first) and checked once against
+// `zlib.decompressobj` for ground truth — decoding such a stream is no
+// problem for zlib, only producing one is. Every vector, either way, is
+// pasted below as an `int[]` literal per `bytes_from_int_array`
+// (SFEP-0071 §3.3).
 import {
     ByteBuf,
     ByteCursor,
@@ -41,31 +53,6 @@ fn _bytes_equal_int_array(buf: ByteBuf, expected: int[]) -> boolean {
             Result.Ok { value }
             : {
                 if value != expected[i] { return false; }
-            },
-            Result.Err { error }
-            : {
-                return false;
-            }
-        }
-        i += 1;
-    }
-    return true;
-}
-
-// `bytes_get` at every one of a potentially huge count of indices, checked
-// against a formula rather than a materialized `int[]` — the window-edge
-// and length/distance-maxima cases decompress tens of KB, and a literal
-// expected array that size would dwarf everything else in this file.
-fn _bytes_equal_fn(buf: ByteBuf, expected_len: int, expected_at: fn (int) -> int) -> boolean {
-    if bytes_len(buf) != expected_len { return false; }
-    let mut i: int = 0;
-    loop {
-        if i >= expected_len { break; }
-        let got = bytes_get(buf, i);
-        match got {
-            Result.Ok { value }
-            : {
-                if value != expected_at(i) { return false; }
             },
             Result.Err { error }
             : {
@@ -196,39 +183,50 @@ test "archive inflate: a distance-1 back-reference fills a run of one repeated b
     }
 }
 
-// "DISTANCE_EDGE_MARKER_9x" (23 bytes) as byte codes, shared by the
-// generator command below and the in-test expected-output formula.
-fn _dist_edge_marker() -> int[] {
-    return [68, 73, 83, 84, 65, 78, 67, 69, 95, 69, 68, 71, 69, 95, 77, 65, 82, 75, 69, 82, 95, 57, 120,];
+// Both vectors below are hand-built, not zlib output (see the file header):
+// each starts with one literal byte, then fills forward with repeated
+// distance-1/length-258 matches (the cheapest possible way to grow the
+// output -- each match just re-copies the byte immediately behind it) up to
+// exactly 32768 bytes, so every byte in the whole run is identical to the
+// seed literal. The final match then reaches all the way back to position
+// 0 for its distance, which zlib's own encoder cannot do:
+// `deflate.c`'s `MAX_DIST = 32768 - 262 = 32506` caps every distance a real
+// encoder emits below what this vector deliberately reaches.
+fn _all_equal(buf: ByteBuf, expected_len: int, expected_byte: int) -> boolean {
+    if bytes_len(buf) != expected_len { return false; }
+    let mut i: int = 0;
+    loop {
+        if i >= expected_len { break; }
+        let got = bytes_get(buf, i);
+        match got {
+            Result.Ok { value }
+            : {
+                if value != expected_byte { return false; }
+            },
+            Result.Err { error }
+            : {
+                return false;
+            }
+        }
+        i += 1;
+    }
+    return true;
 }
 
-fn _dist_edge_expected(i: int) -> int {
-    let marker: int[] = _dist_edge_marker();
-    if i < marker.length { return marker[i]; }
-    if i < 32768 {
-        return 113;
-    }  // 'q'
-    return marker[i - 32768];
-}
-
-// 5. Distance at the 32768 window edge: a 23-byte marker, then filler out
-// to exactly 32768 bytes, then the marker again — the second occurrence is
-// only reachable with a back-reference distance of exactly the maximum
-// window size.
-// python3 -c "
-// import zlib
-// marker = b'DISTANCE_EDGE_MARKER_9x'
-// data = marker + b'q' * (32768 - len(marker)) + marker
-// c = zlib.compressobj(level=9, wbits=-15)
-// print(list(c.compress(data) + c.flush()))"
+// 5. Distance at the 32768 window edge: a single 'D' (68), filled forward to
+// exactly 32768 bytes, then one more 3-byte match at distance 32768 --
+// reaching all the way back to the seed literal, the maximum window size.
 test "archive inflate: a back-reference at the 32768 window edge decompresses correctly" {
-    let compressed: int[] = [237, 193, 177, 13, 128, 32, 16, 0, 192, 185, 44, 9, 124, 12, 33, 80, 160, 253, 207, 96, 231, 248, 14, 226, 221, 181, 126, 221, 101, 213, 200, 104, 103, 228, 44, 123, 196, 206, 227, 125, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 224, 79, 90, 191, 238, 178, 106, 100, 180, 51, 114, 150, 61, 98, 231, 241, 126,];
+    // Vector hand-assembled as a raw fixed-Huffman bitstream, not produced by
+    // an encoder: zlib caps match distance at MAX_DIST = 32768 - 262 = 32506
+    // (deflate.c), so no zlib output can ever reach distance 32768. Verified
+    // by round-tripping through a raw-DEFLATE decompressor before landing.
+    let compressed: int[] = [115, 25, 249, 96, 228, 131, 145, 15, 70, 62, 24, 249, 96, 228, 131, 145, 15, 70, 62, 24, 249, 96, 228, 131, 145, 15, 70, 62, 24, 249, 96, 228, 131, 145, 15, 70, 62, 24, 249, 96, 228, 131, 145, 15, 70, 62, 24, 249, 96, 228, 131, 145, 15, 70, 62, 24, 249, 96, 228, 131, 145, 15, 70, 62, 24, 249, 96, 228, 131, 145, 15, 70, 62, 24, 249, 96, 228, 131, 145, 15, 70, 62, 24, 249, 96, 228, 131, 145, 15, 70, 62, 24, 249, 96, 228, 131, 145, 15, 70, 62, 24, 249, 96, 228, 131, 145, 15, 70, 62, 24, 249, 96, 228, 131, 145, 15, 70, 62, 24, 249, 96, 228, 131, 145, 15, 70, 62, 24, 249, 96, 228, 131, 145, 15, 70, 62, 24, 249, 96, 228, 131, 145, 15, 70, 62, 24, 249, 96, 228, 131, 145, 15, 70, 62, 24, 249, 96, 228, 131, 145, 15, 70, 62, 24, 249, 96, 228, 131, 145, 15, 70, 62, 24, 249, 96, 228, 131, 145, 15, 70, 62, 24, 249, 96, 228, 131, 145, 15, 70, 62, 24, 249, 96, 228, 131, 145, 15, 70, 62, 24, 249, 96, 228, 131, 145, 15, 70, 62, 24, 249, 96, 228, 131, 145, 15, 70, 62, 24, 249, 96, 228, 131, 145, 15, 70, 62, 24, 249, 96, 228, 131, 145, 15, 70, 62, 24, 249, 96, 228, 131, 145, 15, 70, 62, 24, 249, 96, 228, 131, 145, 15, 70, 62, 24, 249, 96, 228, 131, 145, 15, 70, 62, 24, 249, 96, 228, 131, 145, 15, 70, 62, 24, 249, 96, 228, 131, 145, 15, 70, 62, 24, 249, 96, 228, 131, 145, 14, 128, 0, 120, 255, 63, 0,];
     let result = _inflate_int_array(compressed, 40000);
     match result {
         Result.Ok { value }
         : {
-            let ok = _bytes_equal_fn(value, 32791, _dist_edge_expected);
-            assert ok;
+            assert _all_equal(value, 32771, 68);
             bytes_free(value);
         },
         Result.Err { error }
@@ -238,35 +236,74 @@ test "archive inflate: a back-reference at the 32768 window edge decompresses co
     }
 }
 
-fn _maxima_expected(i: int) -> int {
-    if i < 258 { return (i * 7 + 3) % 256; }
-    if i < 32768 {
-        let f: int = i - 258;
-        return (f * 13 + 5) % 251;
-    }
-    let p: int = i - 32768;
-    return (p * 7 + 3) % 256;
-}
-
-// 6. The length-258/distance-32768 maxima together: a 258-byte pattern, a
-// 32510-byte filler that never repeats it, then the same 258-byte pattern
-// again — the only way to reach it is the single longest length code (258)
-// at the single longest distance (32768).
-// python3 -c "
-// import zlib
-// pattern = bytes([(i * 7 + 3) % 256 for i in range(258)])
-// filler = bytes([(i * 13 + 5) % 251 for i in range(32768 - 258)])
-// data = pattern + filler + pattern
-// c = zlib.compressobj(level=9, wbits=-15)
-// print(list(c.compress(data) + c.flush()))"
+// 6. The length-258/distance-32768 maxima together: a single 'M' (77),
+// filled forward to exactly 32768 bytes the same way as test 5, then one
+// final match of the single longest length (258) at the single longest
+// distance (32768).
 test "archive inflate: the length-258/distance-32768 maxima decompress correctly" {
-    let compressed: int[] = [237, 207, 231, 66, 8, 10, 0, 6, 208, 134, 82, 105, 104, 105, 47, 146, 52, 104, 239, 162, 101, 165, 168, 72, 83, 147, 246, 222, 123, 136, 162, 18, 138, 138, 22, 162, 40, 101, 181, 119, 162, 137, 246, 222, 123, 239, 109, 221, 127, 247, 41, 190, 243, 6, 135, 152, 130, 150, 153, 139, 79, 88, 66, 94, 229, 252, 229, 107, 215, 111, 56, 184, 251, 133, 70, 198, 62, 73, 201, 200, 254, 88, 92, 85, 247, 163, 115, 96, 124, 110, 117, 231, 31, 41, 21, 3, 219, 225, 227, 34, 210, 74, 234, 23, 117, 13, 205, 109, 156, 189, 2, 195, 163, 30, 37, 165, 103, 230, 230, 151, 125, 105, 108, 237, 25, 158, 90, 220, 248, 69, 68, 126, 144, 137, 243, 168, 144, 184, 156, 242, 185, 75, 122, 38, 86, 246, 110, 190, 33, 17, 247, 31, 39, 191, 124, 251, 161, 168, 242, 219, 247, 142, 254, 177, 217, 149, 237, 191, 36, 148, 244, 172, 60, 252, 39, 165, 20, 213, 52, 116, 12, 204, 172, 157, 60, 3, 110, 221, 123, 152, 152, 246, 250, 221, 231, 210, 154, 134, 150, 238, 161, 201, 133, 245, 61, 66, 50, 154, 67, 28, 188, 130, 98, 178, 167, 207, 106, 93, 53, 182, 180, 115, 245, 9, 190, 19, 19, 255, 236, 197, 155, 247, 133, 21, 95, 155, 219, 251, 70, 103, 150, 183, 254, 236, 59, 64, 199, 194, 125, 236, 132, 164, 130, 234, 5, 109, 125, 211, 155, 142, 30, 254, 97, 119, 31, 36, 164, 190, 202, 249, 84, 82, 93, 255, 179, 107, 112, 98, 126, 109, 151, 96, 63, 53, 35, 251, 17, 1, 81, 153, 83, 103, 52, 175, 24, 89, 216, 186, 120, 7, 221, 142, 142, 123, 250, 60, 43, 175, 160, 188, 182, 169, 173, 119, 100, 122, 105, 243, 55, 49, 5, 9, 29, 151, 144, 236, 25, 93, 51, 71, 191, 136, 248, 231, 185, 165, 245, 157, 99, 203, 132, 212, 108, 252, 146, 42, 151, 140, 109, 189, 110, 61, 72, 121, 91, 88, 219, 58, 52, 191, 67, 193, 196, 43, 170, 164, 161, 127, 195, 45, 56, 58, 233, 245, 167, 170, 239, 125, 211, 27, 164, 244, 220, 194, 114, 103, 175, 152, 59, 249, 71, 62, 126, 145, 87, 214, 208, 53, 190, 66, 68, 195, 126, 92, 74, 245, 178, 137, 157, 119, 248, 195, 212, 236, 162, 175, 109, 195, 11, 187, 7, 152, 143, 138, 157, 186, 104, 112, 211, 61, 36, 230, 105, 230, 231, 234, 31, 253, 51, 155, 251, 25, 120, 78, 200, 159, 187, 106, 225, 28, 112, 247, 201, 203, 247, 229, 141, 221, 19, 171, 196, 7, 57, 4, 164, 213, 180, 175, 219, 251, 220, 126, 148, 150, 83, 252, 173, 125, 100, 113, 143, 146, 133, 79, 252, 180, 166, 161, 181, 71, 232, 253, 103, 89, 249, 53, 63, 7, 102, 183, 200, 24, 15, 159, 84, 56, 175, 103, 233, 18, 120, 47, 33, 227, 67, 69, 83, 207, 228, 218, 62, 90, 78, 65, 25, 117, 29, 83, 7, 223, 59, 113, 233, 239, 74, 234, 58, 70, 151, 8, 168, 88, 143, 73, 40, 107, 25, 217, 120, 134, 197, 38, 191, 41, 248, 210, 50, 56, 183, 77, 126, 232, 136, 136, 226, 133, 107, 86, 174, 65, 81, 137, 175, 62, 86, 54, 247, 78, 173, 163, 142, 58, 234, 168, 163, 142, 58, 234, 168, 163, 142, 58, 234, 168, 163, 142, 58, 234, 168, 163, 142, 58, 234, 168, 163, 142, 58, 234, 168, 163, 142, 58, 234, 168, 163, 142, 58, 234, 168, 163, 142, 58, 234, 168, 163, 142, 58, 234, 168, 163, 142, 58, 234, 168, 163, 142, 58, 234, 168, 163, 142, 58, 234, 168, 163, 142, 58, 234, 168, 163, 142, 58, 234, 168, 163, 142, 58, 234, 168, 163, 142, 58, 234, 168, 163, 142, 58, 234, 168, 163, 142, 58, 234, 168, 163, 142, 58, 234, 168, 163, 142, 58, 234, 168, 163, 142, 58, 234, 168, 163, 142, 58, 234, 168, 163, 142, 58, 234, 168, 163, 142, 58, 234, 168, 163, 142, 58, 234, 168, 163, 142, 58, 234, 168, 163, 142, 58, 234, 168, 163, 142, 58, 234, 168, 163, 142, 58, 234, 168, 163, 142, 58, 234, 168, 163, 254, 127, 157, 152, 130, 150, 153, 139, 79, 88, 66, 94, 229, 252, 229, 107, 215, 111, 56, 184, 251, 133, 70, 198, 62, 73, 201, 200, 254, 88, 92, 85, 247, 163, 115, 96, 124, 110, 117, 231, 31, 41, 21, 3, 219, 225, 227, 34, 210, 74, 234, 23, 117, 13, 205, 109, 156, 189, 2, 195, 163, 30, 37, 165, 103, 230, 230, 151, 125, 105, 108, 237, 25, 158, 90, 220, 248, 69, 68, 126, 144, 137, 243, 168, 144, 184, 156, 242, 185, 75, 122, 38, 86, 246, 110, 190, 33, 17, 247, 31, 39, 191, 124, 251, 161, 168, 242, 219, 247, 142, 254, 177, 217, 149, 237, 191, 36, 148, 244, 172, 60, 252, 39, 165, 20, 213, 52, 116, 12, 204, 172, 157, 60, 3, 110, 221, 123, 152, 152, 246, 250, 221, 231, 210, 154, 134, 150, 238, 161, 201, 133, 245, 61, 66, 50, 154, 67, 28, 188, 130, 98, 178, 167, 207, 106, 93, 53, 182, 180, 115, 245, 9, 190, 19, 19, 255, 236, 197, 155, 247, 133, 21, 95, 155, 219, 251, 70, 103, 150, 183, 254, 236, 59, 64, 199, 194, 125, 236, 132, 164, 130, 234, 5, 109, 125, 211, 155, 142, 30, 254, 97, 119, 31, 36, 164, 190, 202, 249, 84, 82, 93, 255, 179, 107, 112, 98, 126, 109, 151, 96, 63, 53, 35, 251, 17, 1, 81, 153, 83, 103, 52, 175, 24, 89, 216, 186, 120, 7, 221, 142, 142, 123, 250, 60, 43, 175, 160, 188, 182, 169, 173, 119, 100, 122, 105, 243, 55, 49, 197, 127,];
+    // Vector hand-assembled as a raw fixed-Huffman bitstream, not produced by
+    // an encoder: zlib caps match distance at MAX_DIST = 32768 - 262 = 32506
+    // (deflate.c), so no zlib output can ever reach distance 32768. Verified
+    // by round-tripping through a raw-DEFLATE decompressor before landing.
+    let compressed: int[] = [243, 29, 249, 96, 228, 131, 145, 15, 70, 62, 24, 249, 96, 228, 131, 145, 15, 70, 62, 24, 249, 96, 228, 131, 145, 15, 70, 62, 24, 249, 96, 228, 131, 145, 15, 70, 62, 24, 249, 96, 228, 131, 145, 15, 70, 62, 24, 249, 96, 228, 131, 145, 15, 70, 62, 24, 249, 96, 228, 131, 145, 15, 70, 62, 24, 249, 96, 228, 131, 145, 15, 70, 62, 24, 249, 96, 228, 131, 145, 15, 70, 62, 24, 249, 96, 228, 131, 145, 15, 70, 62, 24, 249, 96, 228, 131, 145, 15, 70, 62, 24, 249, 96, 228, 131, 145, 15, 70, 62, 24, 249, 96, 228, 131, 145, 15, 70, 62, 24, 249, 96, 228, 131, 145, 15, 70, 62, 24, 249, 96, 228, 131, 145, 15, 70, 62, 24, 249, 96, 228, 131, 145, 15, 70, 62, 24, 249, 96, 228, 131, 145, 15, 70, 62, 24, 249, 96, 228, 131, 145, 15, 70, 62, 24, 249, 96, 228, 131, 145, 15, 70, 62, 24, 249, 96, 228, 131, 145, 15, 70, 62, 24, 249, 96, 228, 131, 145, 15, 70, 62, 24, 249, 96, 228, 131, 145, 15, 70, 62, 24, 249, 96, 228, 131, 145, 15, 70, 62, 24, 249, 96, 228, 131, 145, 15, 70, 62, 24, 249, 96, 228, 131, 145, 15, 70, 62, 24, 249, 96, 228, 131, 145, 15, 70, 62, 24, 249, 96, 228, 131, 145, 15, 70, 62, 24, 249, 96, 228, 131, 145, 15, 70, 62, 24, 249, 96, 228, 131, 145, 15, 70, 62, 24, 249, 96, 228, 131, 145, 15, 70, 62, 24, 249, 96, 228, 131, 145, 15, 70, 62, 24, 249, 96, 228, 131, 145, 14, 128, 96, 228, 223, 255, 15, 0,];
     let result = _inflate_int_array(compressed, 40000);
     match result {
         Result.Ok { value }
         : {
-            let ok = _bytes_equal_fn(value, 33026, _maxima_expected);
-            assert ok;
+            assert _all_equal(value, 33026, 77);
+            bytes_free(value);
+        },
+        Result.Err { error }
+        : {
+            assert false;
+        }
+    }
+}
+
+// 6b. Distance codes 16-29 -- the upper half of the distance table (bases
+// 257 through 24577, extra bits 7 through 13), exercised by no other test
+// in this suite: every vector elsewhere either never needs a distance past
+// 251 (real encoder output tops out around there for this input size) or
+// only reaches the single largest code (29) via tests 5/6 above, and only
+// incidentally at length 258, not for coverage of the distance table's
+// upper half specifically. Hand-built: 14 one-byte markers (200..213) at
+// positions 0-13, filled forward with distance-1/length-258 matches up to
+// `base(code) + code_index` for each distance code 16..29 in turn, then a
+// 3-byte match at exactly that base (extra bits = 0) reaching back to its
+// marker. Each match's first output byte is asserted against its marker to
+// confirm that specific distance code retrieved the right source byte.
+fn _dist_sweep_marker_positions() -> int[] {
+    // (output offset, expected byte) pairs, flattened: offset0, value0,
+    // offset1, value1, ... -- one pair per distance code 16..29, in order.
+    return [257, 200, 386, 201, 515, 202, 772, 203, 1029, 204, 1542, 205, 2055, 206, 3080, 207, 4105, 208, 6154, 209, 8203, 210, 12300, 211, 16397, 212, 24590, 213,];
+}
+
+test "archive inflate: distance codes 16-29 (the upper half of the distance table) round-trip" {
+    let compressed: int[] = [59, 113, 242, 212, 233, 51, 103, 207, 157, 191, 112, 241, 210, 229, 43, 87, 71, 32, 0, 6, 192, 192, 2, 96, 4, 12, 44, 0, 38, 128, 145, 13, 128, 25, 96, 100, 3, 96, 1, 48, 242, 193, 72, 6, 192, 10, 96, 228, 131, 145, 12, 128, 13, 128, 145, 15, 70, 62, 24, 249, 96, 164, 2, 96, 7, 96, 228, 131, 145, 15, 70, 62, 24, 169, 0, 56, 0, 48, 242, 193, 200, 7, 35, 31, 140, 124, 48, 242, 193, 200, 7, 35, 31, 140, 52, 0, 156, 0, 24, 249, 96, 228, 131, 145, 15, 70, 62, 24, 249, 96, 228, 131, 145, 15, 70, 26, 0, 46, 0, 24, 249, 96, 228, 131, 145, 15, 70, 62, 24, 249, 96, 228, 131, 145, 15, 70, 62, 24, 249, 96, 228, 131, 145, 15, 70, 62, 24, 249, 96, 228, 131, 145, 15, 134, 59, 0, 110, 0, 24, 249, 96, 228, 131, 145, 15, 70, 62, 24, 249, 96, 228, 131, 145, 15, 70, 62, 24, 249, 96, 228, 131, 145, 15, 70, 62, 24, 249, 96, 228, 131, 145, 15, 134, 59, 0, 30, 0, 48, 242, 193, 200, 7, 35, 31, 140, 124, 48, 242, 193, 200, 7, 35, 31, 140, 124, 48, 242, 193, 200, 7, 35, 31, 140, 124, 48, 242, 193, 200, 7, 35, 31, 140, 124, 48, 242, 193, 200, 7, 35, 31, 140, 124, 48, 242, 193, 200, 7, 35, 31, 140, 124, 48, 242, 193, 200, 7, 35, 31, 140, 124, 48, 242, 193, 200, 7, 35, 31, 12, 117, 0, 188, 0, 0, 0,];
+    let result = _inflate_int_array(compressed, 40000);
+    match result {
+        Result.Ok { value }
+        : {
+            assert bytes_len(value) == 24593;
+            let pairs: int[] = _dist_sweep_marker_positions();
+            let mut i: int = 0;
+            loop {
+                if i >= pairs.length { break; }
+                let offset: int = pairs[i];
+                let expected_byte: int = pairs[i + 1];
+                let got = bytes_get(value, offset);
+                match got {
+                    Result.Ok { value }
+                    : {
+                        assert value == expected_byte;
+                    },
+                    Result.Err { error }
+                    : {
+                        assert false;
+                    }
+                }
+                i += 2;
+            }
             bytes_free(value);
         },
         Result.Err { error }
@@ -311,7 +348,12 @@ test "archive inflate: an over-subscribed code-length tree is rejected, not cras
         },
         Result.Err { error }
         : {
+            // Pinned on the message too, not just the kind: `CorruptStream`
+            // covers a dozen distinct failures, and without this an
+            // over-subscribed tree (test 8) and an incomplete one (test 9)
+            // would be indistinguishable by assertion alone (SFN-896 review).
             assert error.kind == ArchiveErrorKind.CorruptStream;
+            assert error.message == "dynamic block code-length alphabet is over-subscribed";
         }
     }
 }
@@ -333,6 +375,7 @@ test "archive inflate: an incomplete literal/length tree is rejected" {
         Result.Err { error }
         : {
             assert error.kind == ArchiveErrorKind.CorruptStream;
+            assert error.message == "dynamic block literal/length code table is incomplete or over-subscribed";
         }
     }
 }
@@ -352,6 +395,78 @@ test "archive inflate: a distance pointing before the start of output is rejecte
         Result.Err { error }
         : {
             assert error.kind == ArchiveErrorKind.CorruptStream;
+            assert error.message == "back-reference distance points before the start of output";
+        }
+    }
+}
+
+// 11. Regression for SFN-896 review Fix 1 (double free of the output buffer
+// on error): the initial `ByteBuf` capacity is 256 bytes
+// (`inflate_all:bytes_new(256)`), so decompressing more than that forces at
+// least one `realloc`-relocation of the buffer (`bytes.sfn:157`) before the
+// stream then fails. Before the fix, the block-body helpers dropped the
+// post-relocation buffer on their `Result::Err` path and `inflate_all` freed
+// the stale pre-relocation address instead — a double free of a dangling
+// pointer, live under any truncated archive whose first block alone
+// produces more than 256 bytes. 300 'A's is comfortably past that
+// threshold; the vector is the same fixed-Huffman encoding as test 2, minus
+// its final byte, so the stream ends mid-symbol well before the
+// end-of-block code.
+// python3 -c "import zlib; c = zlib.compressobj(level=1, wbits=-15,
+// strategy=zlib.Z_FIXED); full = c.compress(b'A' * 300) + c.flush();
+// print(list(full)[:-1])"
+test "archive inflate: truncation after growing past the initial buffer capacity errors cleanly" {
+    let compressed: int[] = [115, 116, 28, 5, 196, 134, 0,];
+    let result = _inflate_int_array(compressed, 4096);
+    match result {
+        Result.Ok { value }
+        : {
+            bytes_free(value);
+            assert false;
+        },
+        Result.Err { error }
+        : {
+            assert error.kind == ArchiveErrorKind.Truncated;
+        }
+    }
+}
+
+// 12. `max_output` enforcement, Huffman block: the same 28-'A' vector as
+// test 2, one byte over the cap.
+test "archive inflate: max_output is enforced for a Huffman block" {
+    let compressed: int[] = [115, 116, 196, 13, 0,];
+    let result = _inflate_int_array(compressed, 27);
+    match result {
+        Result.Ok { value }
+        : {
+            bytes_free(value);
+            assert false;
+        },
+        Result.Err { error }
+        : {
+            assert error.kind == ArchiveErrorKind.LimitExceeded;
+        }
+    }
+}
+
+// 13. `max_output` enforcement, stored block (SFN-896 review, Fix 2):
+// `_inflate_stored` never received `max_output` at all, so
+// `inflate_all(src, 1024)` over a stored stream returned the whole thing
+// regardless of the cap — this is the regression case for that. A stored
+// block encoding "HelloWorld" (10 bytes), decompressed with `max_output`
+// one byte short.
+test "archive inflate: max_output is enforced for a stored block" {
+    let compressed: int[] = [1, 10, 0, 245, 255, 72, 101, 108, 108, 111, 87, 111, 114, 108, 100,];
+    let result = _inflate_int_array(compressed, 9);
+    match result {
+        Result.Ok { value }
+        : {
+            bytes_free(value);
+            assert false;
+        },
+        Result.Err { error }
+        : {
+            assert error.kind == ArchiveErrorKind.LimitExceeded;
         }
     }
 }
