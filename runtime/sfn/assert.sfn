@@ -253,6 +253,47 @@ thread_local let mut sfn_test_phase: i64 = 0;
 
 thread_local let mut sfn_test_fail_count: i64 = 0;
 
+// SFN-815: a voluntary, body-declared skip. The synthesized harness gives
+// a test body exactly two exits — return normally (unconditional
+// `sfn_test_report_pass`) or unwind (unconditional
+// `sfn_test_report_caught`) — so `skip("reason")` cannot simply return: it
+// would emit a second `T` record and break the one-record-per-test
+// ordering invariant the runner relies on
+// (`compiler/src/cli/commands/test/reporting.sfn`). It therefore arms this
+// slot and throws, and `sfn_test_report_caught` consumes the slot before
+// its phase classification. The reason rides as an address (the
+// `sfn_exception_frame_head_addr` idiom) because these slots hold a raw
+// cstr, not a managed string.
+thread_local let mut sfn_test_skip_pending: i64 = 0;
+
+thread_local let mut sfn_test_skip_reason_addr: i64 = 0;
+
+// `sfn_test_declare_skip(reason, len)` — the runtime half of `sfn/test`'s
+// `skip(reason)`. Arms the pending-skip slot, then unwinds through the
+// same path a failed assertion takes. Mirrors `sailfin_assert_fail`'s
+// frame check exactly: inside a harness frame, `sfn_throw` longjmps back
+// to the synthesized `@main`, which records the skip and continues to the
+// next test; with no frame on the chain (a test binary run standalone,
+// outside the runner) there is nothing to unwind to, so the raise/abort
+// path reports the reason on fd 2 rather than letting the body run on
+// past a skip it just declared.
+fn sfn_test_declare_skip(reason_data: *u8, reason_len: i64) -> void ![io] {
+    let mut reason_c: *u8 = null;
+    if (reason_data as i64) != 0 && reason_len > 0 {
+        reason_c = sfn_str_to_cstr(reason_data, reason_len, null);
+    }
+    sfn_test_skip_pending = 1;
+    sfn_test_skip_reason_addr = reason_c as i64;
+    let mut raise_msg: *u8 = reason_c;
+    if (raise_msg as i64) == 0 {
+        let fallback: string = "test skipped";
+        raise_msg = fallback as *u8;
+    }
+    if (sfn_exception_frame_head() as i64) != 0 { sfn_throw(raise_msg); } else {
+        sfn_raise_value_error(raise_msg);
+    }
+}
+
 // Set the current lifecycle phase (called by the harness before each
 // hook/test sub-call). No I/O — a bare global store.
 fn sfn_test_set_phase(phase: i32) -> void { sfn_test_phase = phase as i64; }
@@ -288,6 +329,26 @@ fn sfn_test_report_pass(name: *u8) -> void ![io] {
 // the SFN-17 `results.log` records did.
 fn sfn_test_report_caught(name: *u8, msg: *u8) -> void ![io] {
     let phase: i64 = sfn_test_phase;
+    // SFN-815: a voluntary skip unwinds through this same path. Consume
+    // the slot before classifying, so a declared skip is recorded `skip`
+    // rather than `fail` and — critically — never increments
+    // `sfn_test_fail_count`, which drives the process exit code. Honored
+    // for the two phases that name a test: the body (2) and its
+    // `before_each` (1), where gating the setup gates that test. A skip
+    // raised from `before_all`/`after_each`/`after_all` (0/3/4) has no
+    // single test to attribute to and is misuse — clear the slot and fall
+    // through to the failure classification so the signal is not lost.
+    if sfn_test_skip_pending != 0 {
+        let reason: *u8 = sfn_test_skip_reason_addr as *u8;
+        sfn_test_skip_pending = 0;
+        sfn_test_skip_reason_addr = 0;
+        if phase == 1 || phase == 2 {
+            if _test_records_enabled() {
+                _sftr_write("test", "skip", name, "", null, 0, 0, "", reason);
+            }
+            return;
+        }
+    }
     if _test_records_enabled() {
         if phase == 1 {
             // before_each failed → mark THIS test failed (AC1), naming the

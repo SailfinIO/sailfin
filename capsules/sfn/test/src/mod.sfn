@@ -449,6 +449,18 @@ export { report_child_failure } from "./child_diag";
 export { first_present_tool, tool_present } from "./tool_probe";
 
 // ---------------------------------------------------------------------------
+// Voluntary test skips (SFN-815)
+// ---------------------------------------------------------------------------
+// `skip(reason)` records the running test as skipped rather than passed, and
+// is the required way to gate a test on a missing tool, an offline network, or
+// an unsupported platform. It replaces the `assert true; return;` idiom, which
+// reports `pass` and so makes a dormant test indistinguishable from a working
+// one — the mechanism that hid SFN-807 for a full release cycle. It does not
+// return: the skip leaves the body by unwinding, because the harness reports an
+// unconditional pass for any body that returns normally. See `skip.sfn`.
+export { skip } from "./skip";
+
+// ---------------------------------------------------------------------------
 // Process-lifetime control (SFEP-0010 §3.2)
 // ---------------------------------------------------------------------------
 // The fixtures above spawn a child and wait for it to finish. These tear one

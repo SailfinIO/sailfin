@@ -543,13 +543,22 @@ fn _run_single_process(test_files: string[], file_suite_index: int[], suites_in:
         if json_subframe { print.err(summary_line); } else {
             print(summary_line);
         }
-    } else if emit_banners {
-        // Per-suite banners. Suppressed in `--json` mode (the
-        // structured summary event is the source of truth there)
-        // and suppressed in legacy single-`.sfn`-file mode (direct
-        // single-file callers and the multi-file path's own children
-        // — `emit_banners` gates the call site).
-        _emit_suite_banners(suites);
+    } else {
+        // SFN-815: the run-level skip count in the human stream. Ungated
+        // by `emit_banners` — a single-file run reports its skips too, and
+        // a skip that only shows up under `--json` is the invisibility
+        // this primitive exists to remove.
+        if total_skipped > 0 {
+            print("[test] " + int_to_string(total_skipped) + " skipped");
+        }
+        if emit_banners {
+            // Per-suite banners. Suppressed in `--json` mode (the
+            // structured summary event is the source of truth there)
+            // and suppressed in legacy single-`.sfn`-file mode (direct
+            // single-file callers and the multi-file path's own children
+            // — `emit_banners` gates the call site).
+            _emit_suite_banners(suites);
+        }
     }
     exit_test_runner_mode();
     _cleanup_test_scratch(scratch_owned, scratch_root, overall_rc == 0);

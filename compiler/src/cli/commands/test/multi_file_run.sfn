@@ -379,9 +379,17 @@ fn _run_multi_file(test_files: string[], file_suite_index: int[], suites_in: Tes
         // one `summary` with run-level counts and wall-clock duration.
         let sf_dur = monotonic_millis() - sf_start_ms;
         print(render_summary_event(sf_passed, sf_failed, sf_skipped, sf_dur, sf_tb_hits, sf_tb_misses));
-    } else if emit_banners {
-        _emit_suite_banners(suites);
-        let _ = _emit_slowest_summary(slow_names, slow_ms, slowest_n);
+    } else {
+        // SFN-815: run-level skip count in the human stream, mirroring
+        // `_run_single_process`. Ungated by `emit_banners` for the same
+        // reason: a skip nobody sees is the defect this closes.
+        if sf_skipped > 0 {
+            print("[test] " + int_to_string(sf_skipped) + " skipped");
+        }
+        if emit_banners {
+            _emit_suite_banners(suites);
+            let _ = _emit_slowest_summary(slow_names, slow_ms, slowest_n);
+        }
     }
     exit_test_runner_mode();
     _cleanup_test_scratch(scratch_owned, sub_root, overall_rc == 0);

@@ -96,20 +96,20 @@ test "test_runner_json: summary cache hit_rate saturated and cold" {
 test "test_runner_json: test event pass shape omits assertion" {
     let effects: string[] = ["io"];
     let nothing = _empty_assert_failure();
-    let line = render_test_event("answer", "foo_test.sfn", 3, "pass", 12, effects, nothing);
+    let line = render_test_event("answer", "foo_test.sfn", 3, "pass", 12, effects, nothing, "");
     assert line == "{\"event\":\"test\",\"name\":\"answer\",\"file\":\"foo_test.sfn\",\"line\":3,\"status\":\"pass\",\"duration_ms\":12,\"effects\":[\"io\"]}";
 }
 
 test "test_runner_json: test event with empty effects renders []" {
     let nothing = _empty_assert_failure();
-    let line = render_test_event("plain", "bar_test.sfn", 1, "pass", 0, _empty_effects(), nothing);
+    let line = render_test_event("plain", "bar_test.sfn", 1, "pass", 0, _empty_effects(), nothing, "");
     assert line == "{\"event\":\"test\",\"name\":\"plain\",\"file\":\"bar_test.sfn\",\"line\":1,\"status\":\"pass\",\"duration_ms\":0,\"effects\":[]}";
 }
 
 test "test_runner_json: test event with multiple effects preserves order" {
     let effects: string[] = ["io", "net", "clock"];
     let nothing = _empty_assert_failure();
-    let line = render_test_event("multi", "x.sfn", 5, "pass", 1, effects, nothing);
+    let line = render_test_event("multi", "x.sfn", 5, "pass", 1, effects, nothing, "");
     assert line == "{\"event\":\"test\",\"name\":\"multi\",\"file\":\"x.sfn\",\"line\":5,\"status\":\"pass\",\"duration_ms\":1,\"effects\":[\"io\",\"net\",\"clock\"]}";
 }
 
@@ -118,8 +118,31 @@ test "test_runner_json: test event with multiple effects preserves order" {
 // --------------------------------------------------------------
 test "test_runner_json: test event fail shape attaches assertion" {
     let failure = _failure("foo_test.sfn", 8, 12, "expected x == 42");
-    let line = render_test_event("breaks", "foo_test.sfn", 7, "fail", 3, _empty_effects(), failure);
+    let line = render_test_event("breaks", "foo_test.sfn", 7, "fail", 3, _empty_effects(), failure, "");
     assert line == "{\"event\":\"test\",\"name\":\"breaks\",\"file\":\"foo_test.sfn\",\"line\":7,\"status\":\"fail\",\"duration_ms\":3,\"effects\":[],\"assertion\":{\"file\":\"foo_test.sfn\",\"line\":8,\"col\":12,\"message\":\"expected x == 42\"}}";
+}
+
+// --------------------------------------------------------------
+// `test` event — skip_kind qualifier (SFN-815)
+// --------------------------------------------------------------
+test "test_runner_json: declared skip carries skip_kind and the reason" {
+    let reason = _failure("net_test.sfn", 0, 0, "no outbound network");
+    let line = render_test_event("dl", "net_test.sfn", 4, "skip", 0, _empty_effects(), reason, "declared");
+    assert line == "{\"event\":\"test\",\"name\":\"dl\",\"file\":\"net_test.sfn\",\"line\":4,\"status\":\"skip\",\"skip_kind\":\"declared\",\"duration_ms\":0,\"effects\":[],\"assertion\":{\"file\":\"net_test.sfn\",\"line\":0,\"col\":0,\"message\":\"no outbound network\"}}";
+}
+
+test "test_runner_json: involuntary skip kinds stay distinct from declared" {
+    let nothing = _empty_assert_failure();
+    let after = render_test_event("t2", "x.sfn", 9, "skip", 0, _empty_effects(), nothing, "after_failure");
+    assert after == "{\"event\":\"test\",\"name\":\"t2\",\"file\":\"x.sfn\",\"line\":9,\"status\":\"skip\",\"skip_kind\":\"after_failure\",\"duration_ms\":0,\"effects\":[]}";
+    let not_run = render_test_event("t3", "x.sfn", 11, "skip", 0, _empty_effects(), nothing, "not_run");
+    assert not_run == "{\"event\":\"test\",\"name\":\"t3\",\"file\":\"x.sfn\",\"line\":11,\"status\":\"skip\",\"skip_kind\":\"not_run\",\"duration_ms\":0,\"effects\":[]}";
+}
+
+test "test_runner_json: empty skip_kind omits the field entirely" {
+    let nothing = _empty_assert_failure();
+    let line = render_test_event("q", "y.sfn", 2, "pass", 0, _empty_effects(), nothing, "");
+    assert line == "{\"event\":\"test\",\"name\":\"q\",\"file\":\"y.sfn\",\"line\":2,\"status\":\"pass\",\"duration_ms\":0,\"effects\":[]}";
 }
 
 // --------------------------------------------------------------
