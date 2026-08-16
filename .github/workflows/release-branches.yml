@@ -70,21 +70,17 @@ jobs:
                     - os: macos-26
                       package_label: macos-arm64
                       clang: clang
-                      # 3-vCPU / 7GB hosted runner — see the test_jobs
-                      # input in actions/sailfin-build for the RAM budget.
-                      test_jobs: 2
+                      # 3-vCPU / 7GB hosted runner.
                       timeout_minutes: 120
                     - os: ubuntu-24.04
                       package_label: linux-x86_64
                       clang: clang-18
                       # 4-vCPU / 16GB hosted runner.
-                      test_jobs: 4
                       timeout_minutes: 120
                     - os: ubuntu-24.04-arm
                       package_label: linux-arm64
                       clang: clang-18
                       # Bootstrap plus the full branch test suite.
-                      test_jobs: 4
                       timeout_minutes: 360
 
         steps:
@@ -193,6 +189,18 @@ jobs:
                   brew install jq llvm
                   echo "$(brew --prefix llvm)/bin" >> "$GITHUB_PATH"
 
+            # Unlike release-tag.yml this leg runs the full suite (no
+            # `mode:`, so the action's default `full` path), which makes
+            # `test_jobs` load-bearing here. It is deliberately not pinned:
+            # an explicit value outranks both halves of the SFN-781 budget
+            # (`_test_jobs_budget` and scripts/detect_test_jobs.sh), and the
+            # pins removed here — 4 on the 16 GB ubuntu legs — were the same
+            # host class and count that SFN-781 measured OOM-killing a
+            # runner at 17.26 GiB tree RSS. Leaving it empty lets each host
+            # measure its own budget at runtime (2 on a 4-vCPU/16 GB Linux
+            # runner, 1 on the ~7 GiB macos-26 arm64 runner, which has no
+            # RLIMIT_AS backstop). Re-pin only with measured tree RSS for
+            # that runner attached (SFN-795).
             - name: Build + test + package (via Makefile)
               uses: ./.github/actions/sailfin-build
               env:
@@ -201,7 +209,6 @@ jobs:
                   target: ${{ matrix.package_label }}
                   clang: ${{ matrix.clang }}
                   seed_version: ${{ steps.seed.outputs.seed_version }}
-                  test_jobs: ${{ matrix.test_jobs }}
                   arm_seed_mode: ${{ steps.arm_seed.outputs.mode || 'qemu' }}
 
             - name: Report compiler metadata
