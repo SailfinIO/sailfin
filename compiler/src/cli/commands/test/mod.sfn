@@ -318,12 +318,22 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     // reported as an ICE pointing at a `.ll` file, when the real problem is
     // a typo in the argument (SFN-648). Reporting every missing path (not
     // just the first) keeps a multi-suite invocation diagnosable in one run.
-    // Only user-supplied positionals are checked: the zero-positional
-    // branch below derives its suites from the workspace or the `.` default,
-    // which are not the caller's typo to report. Mirrors `cli/commands/fmt.sfn`
-    // `run()` and `check/engine.sfn` (SFN-643).
-    let mut missing_paths = 0;
-    let mut mpi = 0;
+    // Only user-supplied positionals are checked. The zero-positional branch
+    // below derives its suites from `[workspace] default-members` or the `.`
+    // fallback, which are always directories and so could never reach the ICE
+    // — the directory walk returns nothing for a missing path. A typo'd
+    // manifest member silently testing nothing is a real but separate hole,
+    // and belongs to workspace-manifest validation rather than here.
+    //
+    // Exit 2, not 1: within `sfn test`, 1 means tests failed and 2 means the
+    // invocation was malformed (`--jobs`, `--slowest`, `--shard` all take it),
+    // so returning 1 here would make a typo'd path indistinguishable from a
+    // red suite to a CI script. `check/engine.sfn` returns 2 for this same
+    // condition; `cli/commands/fmt.sfn` `run()` — the model for reporting
+    // every miss rather than only the first — returns 1 only because `fmt`
+    // has no 2 (SFN-643).
+    let mut missing_paths: int = 0;
+    let mut mpi: int = 0;
     loop {
         if mpi >= positional.length { break; }
         if !fs.exists(positional[mpi]) {
@@ -332,7 +342,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
         }
         mpi += 1;
     }
-    if missing_paths > 0 { return 1; }
+    if missing_paths > 0 { return 2; }
 
     set_test_filters(name_filter, tag_filter);
 

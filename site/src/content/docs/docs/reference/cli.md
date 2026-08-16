@@ -73,6 +73,8 @@ Discover and run Sailfin test files. Test files follow the `*_test.sfn` naming c
 
 Multiple path arguments group tests into named **suites** for reporting: each path becomes a suite labelled by its basename, and the runner emits a per-suite `═══ <name>: N/M passed, K failed ═══` banner at end-of-run. The repository `make test` target uses this to run unit / integration / e2e / capsule tests in one invocation.
 
+Every explicitly named path must exist. If any does not, `sfn test` prints `error: path not found: <path>` for each missing one and exits 2 **without compiling or running anything**. Exit 2 marks a malformed invocation, distinct from exit 1 for a failing suite — so a typo'd path in CI is never mistaken for a red test run. A path that exists but contains no `*_test.sfn` files is not an error: it reports `no *_test.sfn files found under <path>` and exits 0.
+
 **Usage:**
 
 ```bash

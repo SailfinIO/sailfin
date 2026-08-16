@@ -31,7 +31,8 @@ fn _collect_test_files_cmd(root: string, max_depth: int) -> string[] ![io] {
     // `sfn test absent_test.sfn` compile nothing and then fail the link on a
     // missing `main`, surfacing a typo as a backend ICE that told the reader
     // they had probably hit a compiler bug (SFN-648). The directory walk
-    // below already tolerates a missing path; this makes the two legs agree.
+    // below returns nothing for a missing path, so this makes the two legs
+    // agree.
     //
     // The helper only filters — reporting the missing path is the caller's
     // job, so that dropping it never reads as "your typo was quietly
