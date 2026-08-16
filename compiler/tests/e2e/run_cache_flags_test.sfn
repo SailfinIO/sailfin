@@ -10,13 +10,15 @@
 //   4. `--no-cache` suppresses the `[cache]` summary line entirely.
 //   5. `--cache-trace` emits per-module `[cache hit]` lines.
 //   6. `--clean` wipes `<cache_root>/v2/...` before building.
+//   7. `--clean` also wipes the staged import-context tree, not just the
+//      shared cache root (SFN-872).
 //
-// The fixture capsule imports `sfn/math` so the module cache has work to
-// do. A symlink `capsules/sfn` is created in the scratch dir via `ln -s`
-// (run as a subprocess) since Sailfin's `fs` surface has no symlink
-// primitive. The compiler resolves capsule deps by walking up from the
-// source file to find `capsule.toml`, then looks for
-// `capsules/<scope>/<name>/` relative to that root.
+// Tests 1-5 share a fixture capsule importing `sfn/math`, so the module
+// cache has work to do. It lives under `build/` — CWD-relative, i.e. the
+// repo root — so the repo's own `workspace.toml` resolves `sfn/math` with
+// no symlink and no hardcoded absolute path (see `_ensure_fixture`). The
+// compiler resolves capsule deps by walking up from the source file to
+// find `capsule.toml`.
 //
 // `sfn run` does not support `--work-dir`, so the absolute path to the
 // main sfn file is passed directly; the compiler discovers capsule.toml
@@ -27,15 +29,46 @@
 // (for .ll module cache). This prevents cross-test cache contamination and
 // ensures each test's "cold" vs "warm" assertions see only its own runs.
 //
+// `--clean` additionally wipes the staged import-context tree
+// (`build/compiler/import-context/`, SFN-872). That tree is rooted at a
+// fixed, CWD-relative path with NO `SAILFIN_TEST_SCRATCH` override, and
+// `sfn run` has no `--work-dir` to redirect it — cwd is the only lever.
+// Tests 6 and 7 therefore run `sfn run --clean` against a private per-test
+// fixture directory as the CHILD's cwd (via `process.run_capture_cwd`),
+// never this repo's own cwd: a `--clean` started from the repo root would
+// wipe the repo's own staged tree, which other e2e tests read or write and
+// which several more silently skip on when absent — silent lost coverage
+// under the parallel pool. Do not "simplify" this back to the repo cwd.
+//
 // NOTE: the `sfn/test` `expect_*` matchers are `![pure]` and cannot be
 // used from an `![io]` test; output is asserted with `sfn/strings` predicates.
-import { find } from "sfn/strings";
+import { find, split } from "sfn/strings";
 import { report_child_failure } from "sfn/test";
 
 fn _sfn_bin() -> string ![io] {
     let configured = env.get("SAILFIN_BIN");
     if configured.length > 0 { return configured; }
     return "build/bin/sfn";
+}
+
+fn _first_line(text: string) -> string {
+    let lines = split(text, "\n");
+    if lines.length == 0 { return text; }
+    return lines[0];
+}
+
+// `run_capture_cwd` resolves the child's argv[0] against the CHILD cwd, not
+// the parent's — an unqualified "build/bin/sfn" would not resolve once the
+// nested run's cwd is the private fixture dir. Mirrors
+// `target_flag_cache_key_test.sfn`'s `_sfn_bin_abs`.
+fn _sfn_bin_abs() -> string ![io] {
+    let bin = _sfn_bin();
+    if bin.length > 0 && bin[0] == "/" { return bin; }
+    let exit = process.run_capture(["pwd"], []);
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    if exit != 0 { return bin; }
+    return _first_line(out) + "/" + bin;
 }
 
 // Build env for sfn run: PATH (clang/linker), HOME, TMPDIR,
@@ -102,6 +135,59 @@ fn _run_with(main_sfn: string, test_scratch: string, cache_dir: string, extra_fl
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     return out + err;
+}
+
+// A self-contained fixture (relative import, no workspace dependency) for
+// the `--clean` tests, which must run with the fixture root itself as the
+// CHILD's cwd (see the file header) rather than this repo's cwd. Returns
+// the fixture root; `src/main.sfn` is passed relative to that root.
+fn _ensure_private_fixture(name: string) -> string ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    let root = base + "/" + name;
+    fs.createDirectory(root + "/src", true);
+
+    fs.writeFile(root + "/capsule.toml", "[capsule]\n"
+        + "name = \"sfn872/probe\"\n"
+        + "version = \"0.1.0\"\n\n"
+        + "[build]\n"
+        + "entry = \"src/main.sfn\"\n"
+        + "kind = \"binary\"\n");
+
+    fs.writeFile(root + "/src/util.sfn", "fn helper() -> int { return 7; }\n"
+        + "export { helper };\n");
+
+    fs.writeFile(root + "/src/main.sfn", "import { helper } from \"./util\";\n"
+        + "fn main() -> int ![io] {\n"
+        + "    if helper() == 7 { print(\"OK\"); }\n"
+        + "    return 0;\n"
+        + "}\n");
+
+    return root;
+}
+
+struct Run {
+    exit: int,
+    log: string
+}
+
+// Run `sfn run [extra_flags...] src/main.sfn` with the given directory as
+// the CHILD's cwd (not this test's own cwd — see the file header). Returns
+// the exit code and combined stdout+stderr.
+fn _run_with_cwd(dir: string, test_scratch: string, cache_dir: string, extra_flags: string[]) -> Run ![io] {
+    let e = _make_env(test_scratch, cache_dir);
+    let mut argv: string[] = [_sfn_bin_abs(), "run"];
+    let mut i = 0;
+    loop {
+        if i >= extra_flags.length { break; }
+        argv.push(extra_flags[i]);
+        i += 1;
+    }
+    argv.push("src/main.sfn");
+    let exit = process.run_capture_cwd(argv, e, dir);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    return Run { exit: exit, log: out + err };
 }
 
 // ---- Test 1: backwards compat — `sfn run <file>` with no flags ----
@@ -208,6 +294,9 @@ test "sfn run --cache-trace prints '[cache hit] sfn/math'" ![io] {
 }
 
 // ---- Test 6: --clean wipes the cache and forces a fresh miss ----
+// Uses the private-cwd fixture (see file header): `--clean` also wipes the
+// CWD-fixed staged import-context tree, so this must not run with the
+// repo itself as cwd.
 test "sfn run --clean wipes the cache and rebuilds" ![io] {
     let mut base = env.get("SAILFIN_TEST_SCRATCH");
     if base.length == 0 { base = "/tmp"; }
@@ -215,19 +304,24 @@ test "sfn run --clean wipes the cache and rebuilds" ![io] {
     let test_scratch = root + "/scratch";
     let cache_dir = root + "/cache";
     fs.createDirectory(test_scratch, true);
-    let main_sfn = _ensure_fixture();
+    let fixture_dir = _ensure_private_fixture("sfn-rcf-t6-fixture");
 
     // Two warm runs to populate the cache.
-    let _ = _run_with(main_sfn, test_scratch, cache_dir, []);
-    let _ = _run_with(main_sfn, test_scratch, cache_dir, []);
+    let _ = _run_with_cwd(fixture_dir, test_scratch, cache_dir, []);
+    let _ = _run_with_cwd(fixture_dir, test_scratch, cache_dir, []);
 
     // Sanity: v2 cache dir must exist.
     assert fs.exists(cache_dir + "/v2");
 
     // Run with --clean and telemetry: wipes the .ll module cache and forces
     // a re-miss.
-    let log = _run_with(main_sfn, test_scratch, cache_dir, ["--clean", "--cache-trace"]);
+    let run = _run_with_cwd(fixture_dir, test_scratch, cache_dir, ["--clean", "--cache-trace"]);
+    let log = run.log;
 
+    // Surface the child's own output on failure: a bare `exit != 0` from a
+    // nested build is undiagnosable from CI logs alone.
+    report_child_failure("run-cache-flags --clean run", run.exit, log, "");
+    assert run.exit == 0;
     assert find(log, "OK", 0) >= 0;
     // After --clean the .ll module cache is wiped → at least one miss and store.
     // Scoped to the `[cache]` summary line rather than searched across the whole
@@ -243,4 +337,48 @@ test "sfn run --clean wipes the cache and rebuilds" ![io] {
     assert cache_line_end > cache_line_start;
     let cache_line = substring(log, cache_line_start, cache_line_end);
     assert find(cache_line, "misses=0", 0) < 0;
+}
+
+// ---- Test 7: --clean wipes the staged import-context tree (SFN-872) ----
+// Distinct from test 6: this proves `--clean` reaches the CWD-fixed staged
+// import-context tree (`build/compiler/import-context/`), not just the
+// shared `SAILFIN_BUILD_CACHE_DIR` root that tests 3-6 exercise. Uses a
+// small (sub-threshold) fixture, so the shared stage cache is disabled
+// in-process (`_cr_resolve_stage_cache_ctx` requires `sailfin_exe`, unset
+// below the subprocess-isolation module count) and no `[stage cache]` trace
+// line is emitted — the filesystem state before/after `--clean` is the
+// oracle instead.
+test "sfn run --clean wipes the staged import-context tree (SFN-872)" ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    let root = base + "/sfn-rcf-t7";
+    let test_scratch = root + "/scratch";
+    let cache_dir = root + "/cache";
+    fs.createDirectory(test_scratch, true);
+    let fixture_dir = _ensure_private_fixture("sfn-rcf-t7-fixture");
+    let import_context = fixture_dir + "/build/compiler/import-context";
+
+    // Cold run (no --clean): precondition — the staged tree is populated.
+    let cold = _run_with_cwd(fixture_dir, test_scratch, cache_dir, []);
+    report_child_failure("run-cache-flags SFN-872 cold run", cold.exit, cold.log, "");
+    assert cold.exit == 0;
+    assert fs.exists(import_context + "/src/util.sfn-asm");
+    assert fs.exists(import_context + "/src/util.srchash");
+
+    // Plant a sentinel in the staged tree to prove `--clean` wipes the
+    // whole tree, not just the specific artifacts a normal build touches.
+    let sentinel = import_context + "/.sfn872-sentinel";
+    fs.writeFile(sentinel, "x\n");
+    assert fs.exists(sentinel);
+
+    // Second run with --clean: must wipe the staged tree before rebuilding.
+    let cleaned = _run_with_cwd(fixture_dir, test_scratch, cache_dir, ["--clean"]);
+    report_child_failure("run-cache-flags SFN-872 --clean run", cleaned.exit, cleaned.log, "");
+    assert cleaned.exit == 0;
+
+    // The sentinel is gone — the tree was actually wiped, not just skipped.
+    assert ! fs.exists(sentinel);
+    // The staged artifact is back — the post-clean build re-emitted it
+    // rather than serving a stale staged artifact.
+    assert fs.exists(import_context + "/src/util.sfn-asm");
 }

@@ -47,6 +47,7 @@ import {
     _collect_sfn_files_cmd,
     _mktemp_sibling_cmd
 } from "../build/fs";
+import { remove_tree } from "../build/fs_tree";
 import { _resolve_self_path } from "../build/paths";
 import { select_runtime_sfn_sources } from "../build/runtime_selection";
 import {
@@ -360,6 +361,50 @@ fn _cr_prepare(entry_paths: string[], config: BuildCacheConfig, consumer: Resolv
     // `sailfin_exe`) are unchanged.
     let effective_exe = _cr_effective_isolation_exe(sailfin_exe, self_exe, binary_dir, resolved.sources.length);
 
+    // SFN-872: `--clean` must also reach the LOCAL staged import-context
+    // tree. `compile_capsule_modules` wipes `cache_root(...)` — which covers
+    // the SFN-861 shared staging tier — but the tree `stage_capsule_imports`
+    // reads is work-dir rooted and survives that wipe. Its local gate is the
+    // `.srchash` sidecar, a hash of the SOURCE alone (no compiler identity,
+    // no target), so an artifact emitted by a DIFFERENT compiler is served
+    // straight back — exactly the staleness `--clean` exists to break.
+    //
+    // Wiped HERE, before staging, and deliberately NOT in
+    // `compile_capsule_modules`'s own `config.clean` block: that block runs
+    // after `_cr_stage_import_deps` and the `stage_capsule_imports` call
+    // below have populated the tree, so a wipe there deletes the `.sfn-asm` /
+    // `.layout-manifest` / `.import-deps` that `_cr_compile_one` is about to
+    // read — losing cross-module effect enforcement via the W01xx
+    // missing-artifact path rather than failing loudly.
+    //
+    // A workspace `sfn build --clean` re-enters this tail once per member
+    // (`cli/commands/build.sfn` loops `_run_single_build` over the default
+    // members in one process), so the tree is wiped per member rather than
+    // once per invocation. That is correct but not free: each member
+    // re-stages its own closure below before lowering, so members after the
+    // first lose the `.srchash` fast path on shared deps. Cleaning per member
+    // is the honest reading of `--clean`; collapsing it to once per process
+    // would need state this tail does not otherwise carry.
+    //
+    // `sfn run` and `sfn build` both reach staging through this one call and
+    // both had the hole. `rt-import-context` is deliberately untouched: it is
+    // `.key`-keyed with the compiler identity folded in
+    // (`runtime_asm_cache_key`) and re-checks artifact existence on hit, so
+    // it has no equivalent stale-serve hole, and `clean_runtime_object_cache`
+    // leaves it alone too.
+    //
+    // Fail-open, matching the sibling wipe's posture in `compile.sfn`: a tree
+    // that cannot be removed warns but never fails the build. A surviving
+    // content-keyed tree still yields correct artifacts; only `--clean`'s
+    // "start fresh" guarantee is broken, and failing silently there would be
+    // the same unearned all-clear this fix removes.
+    if config.clean {
+        let clean_ctx_root = _cr_import_context_root(work_dir);
+        if !remove_tree(clean_ctx_root) {
+            print.err("[cache] --clean: failed to wipe " + clean_ctx_root
+                + " (staged import-context may be partially populated)");
+        }
+    }
     let staged = stage_capsule_imports(resolved.sources, config, effective_exe, work_dir);
     if !staged {
         print.err("capsule-resolver: failed to stage import-context for project capsules");
