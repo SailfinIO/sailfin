@@ -24,8 +24,13 @@ The distinction that actually decides whether you have cleared anything is
 
 | Tier | Holds | Keyed on | Cleared by |
 |---|---|---|---|
-| **Shared** (`cache_root`) | `.ll`, `.o`, `runtime.o`, and staged `.sfn-asm` / `layout.manifest` | source + **compiler identity** + target | `--clean`, `SAILFIN_BUILD_CACHE_DIR` |
-| **Local** (`build/compiler/import-context/`) | staged `.sfn-asm`, `.layout-manifest` | **source hash alone** — no compiler identity, no target | `--clean` only |
+| **Shared** (`cache_root`) | `.ll`, `.o`, `runtime.o`, and staged `.sfn-asm` / `layout.manifest` | source + **compiler identity** + target¹ | `--clean`, or re-rooted by `SAILFIN_BUILD_CACHE_DIR` |
+| **Local** (`build/compiler/import-context/`) | staged `.sfn-asm`, `.layout-manifest` | **source hash alone** — no compiler identity, no target | `--clean`, or re-rooted by `--work-dir` |
+
+¹ The one exception is harmless: clang-compiled C/LL `runtime.o` keys on source
++ opt flag + target only (`runtime_object_cache_key`, `build_cache.sfn:1114`).
+Those objects are not compiler-emitted, so a Sailfin codegen change cannot
+stale them. Runtime objects built from `.sfn` sources *do* fold identity.
 
 That second row is the whole reason this section exists. Every shared entry
 folds the emitting compiler's identity, so §2's guarantee — a rebuilt compiler
@@ -35,7 +40,8 @@ served straight back (`capsule_resolver/mod.sfn:364-370`). That is a live
 staleness path of exactly the family §1–§3 exist to discuss, and §2's "no manual
 cache clear is needed" does not extend to it.
 
-**The two things most likely to mislead you**, both in §4.3:
+**The two things most likely to mislead you** — the first in §4.3, the second in
+§4.4:
 
 - `--no-cache` does **not** give you a cold `.sfn-asm`. `--clean` does.
 - Under `--no-cache`, the `[stage cache]` trace line disappears entirely — so it
@@ -86,9 +92,11 @@ The dirty rebuild re-emitted all eight `sfn/cli` modules. **No manual cache
 clear is needed for the normal `sfn build -p` / `make compile` loop.**
 
 That guarantee is about the **`.ll` module cache**, and it extends to every
-cache tier that folds compiler identity — which is all of them except one. The
-local staging tier does not, so a dirty rebuild leaves its `.sfn-asm` /
-`.layout-manifest` untouched. See §4.2.
+cache tier that folds compiler identity — all of them but two, plus one leg.
+The **local staging tier** folds none, so a dirty rebuild leaves its `.sfn-asm` /
+`.layout-manifest` untouched (§4.2). Clang-compiled **C/LL runtime objects**
+fold none either, but need not — they are not compiler-emitted. And the `.ll`
+tier itself does not fold identity on the in-process leg (§3).
 
 ## 3. The one narrow caveat: the in-process fallback
 
@@ -97,12 +105,10 @@ the emitting-binary path is empty — the **in-process serial fallback**
 (`sailfin_exe == ""`). Two callers reach it:
 
 - **`sfn check`** — frontend-only (parse + typecheck + effect-check); it emits no
-  `.ll` and touches no module-IR cache entry, so the trap cannot apply *to the
-  module cache*. It does still **stage**, with an explicitly disabled cache
-  config (`capsule_resolver/check.sfn:77-83`) — populating
-  `build/compiler/import-context/` and its `.srchash` sidecars, which a later
-  `sfn build` will locally hit. Combined with §4.2, a `sfn check` run is one
-  concrete way to seed the local tier with artifacts from a different compiler.
+  `.ll` and touches no module-IR cache entry, so the trap cannot apply. Note it
+  reaches this fallback only when `_resolve_check_self_path`
+  (`check/engine.sfn:157-165`) finds no executable in `binary_dir`; since #1246
+  it normally threads a real exe.
 - **`sfn test` on a small import closure** — `_cr_effective_isolation_exe`
   (`capsule_resolver/mod.sfn:256`) keeps the in-process path (returns `""`) when the
   closure is below the isolation threshold, and only switches to the
@@ -202,6 +208,14 @@ cross-module import context, so it is a pure function of that tuple
 > exists to break." This is the staging layer's analogue of §3's residual, and
 > it is why `--clean` (not `--no-cache`) is the lever in §5.
 
+One concrete way to populate that tier from a *different* compiler: `sfn check`
+also stages. It runs with an explicitly disabled cache config
+(`capsule_resolver/check.sfn:77-83`), so it never touches the shared tier — but
+it still writes `build/compiler/import-context/` and its `.srchash` sidecars on
+the fresh-emit path (`staging.sfn:302-304` serial, `:584-586` parallel), which a
+later `sfn build` will locally hit. Checking with one compiler and building with
+another therefore seeds exactly the stale-serve case above.
+
 ### 4.3 Local hit vs. shared hit — and why it matters
 
 The two are counted separately in the trace because they fail differently.
@@ -245,7 +259,7 @@ under different gating** — zeros on one say nothing about the other:
 
 | Line | On `sfn build` | On `sfn run` | Suppressed when |
 |---|---|---|---|
-| `[cache]` | **always** (no flag needed) | only under trace | all counters zero |
+| `[cache]` | **always** (no flag needed) | only under trace | all counters zero, or `--json` |
 | `[stage cache]` | only under trace | only under trace | trace off — see below |
 
 `SAILFIN_CACHE_TRACE=1` / `--cache-trace` is what turns on `[stage cache]` and
@@ -357,8 +371,8 @@ nothing about whether staging ran.
 > `asm1:` separator), its own local sidecar convention (`<artifact>.key`, not
 > `.srchash`), and a private *local* root at `<out_dir>/rt-import-context` that
 > none of §5's levers clear. Its **shared** tier, though, publishes `sfn-asm`
-> artifacts into the same `cache_root` as §4.1 (`runtime_objs.sfn:1164`),
-> separated only by the `asm1:` / `stage1:` key domains — so
+> artifacts into the same `cache_root` as §4.1 (fetch `runtime_objs.sfn:1164`,
+> publish `:1224`), separated only by the `asm1:` / `stage1:` key domains — so
 > `SAILFIN_BUILD_CACHE_DIR` and `--clean`'s shared wipe do reach it. Its local
 > tier is deliberately left alone by `--clean` (`capsule_resolver/mod.sfn:390-394`)
 > because its `.key` sidecar *does* fold compiler identity, so it has no
