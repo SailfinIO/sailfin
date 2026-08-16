@@ -374,6 +374,80 @@ fn _trj_decode_skipped(packed: int) -> int {
     return p;
 }
 
+// SFN-862: format an integer millisecond duration as fixed-point seconds
+// with two decimal places (e.g. `1234` -> `"1.23"`). Mirrors the shape of
+// `_fmt_secs` in `bench.sfn`; not imported from there since it is
+// module-private. Callers append the trailing "s".
+fn _fmt_elapsed_ms(ms: int) -> string {
+    let mut clamped: int = ms;
+    if clamped < 0 { clamped = 0; }
+    let s = clamped / 1000;
+    let cs = (clamped % 1000) / 10;
+    let mut cs_str = int_to_string(cs);
+    if cs < 10 { cs_str = "0" + cs_str; }
+    return int_to_string(s) + "." + cs_str;
+}
+
+// SFN-862: print the `[test] slowest N files:` summary at the end of a
+// human-mode run. Files whose timing was never captured (compile/link
+// failures) are excluded, and the summary is suppressed entirely for a
+// single-file run or when `limit <= 0`. Returns whether anything was
+// printed.
+fn _emit_slowest_summary(names: string[], elapsed_ms: int[], limit: int) -> boolean ![io] {
+    if limit <= 0 { return false; }
+    let mut fnames: string[] = [];
+    let mut fms: int[] = [];
+    let mut i: int = 0;
+    // SFN-862: `names`/`elapsed_ms` are pushed in lockstep by the caller;
+    // the min-length guard is defensive against a mismatched pair.
+    let mut pair_count = elapsed_ms.length;
+    if names.length < pair_count { pair_count = names.length; }
+    loop {
+        if i >= pair_count { break; }
+        if elapsed_ms[i] > 0 {
+            fnames.push(names[i]);
+            fms.push(elapsed_ms[i]);
+        }
+        i += 1;
+    }
+    if fnames.length < 2 { return false; }
+    // Selection sort, descending by ms then ascending by name.
+    let mut a: int = 0;
+    loop {
+        if a >= fms.length { break; }
+        let mut best: int = a;
+        let mut b: int = a + 1;
+        loop {
+            if b >= fms.length { break; }
+            if fms[b] > fms[best] { best = b; } else if fms[b] == fms[best] {
+                if fnames[b] < fnames[best] { best = b; }
+            }
+            b += 1;
+        }
+        if best != a {
+            let tmp_ms = fms[a];
+            fms[a] = fms[best];
+            fms[best] = tmp_ms;
+            let tmp_name = fnames[a];
+            fnames[a] = fnames[best];
+            fnames[best] = tmp_name;
+        }
+        a += 1;
+    }
+    let mut shown = fnames.length;
+    if limit < shown { shown = limit; }
+    print("[test] slowest " + int_to_string(shown) + " files:");
+    let mut r: int = 0;
+    loop {
+        if r >= shown { break; }
+        print("[test]   " + int_to_string(r + 1) + ". " + _fmt_elapsed_ms(fms[r])
+            + "s  "
+            + fnames[r]);
+        r += 1;
+    }
+    return true;
+}
+
 export {
     _collect_test_records,
     _records_have_failure,
@@ -390,5 +464,7 @@ export {
     _emit_file_test_events,
     _trj_decode_passed,
     _trj_decode_failed,
-    _trj_decode_skipped
+    _trj_decode_skipped,
+    _fmt_elapsed_ms,
+    _emit_slowest_summary
 };

@@ -50,6 +50,7 @@ import {
     _emit_file_test_events,
     _emit_results_events,
     _emit_suite_banners,
+    _fmt_elapsed_ms,
     _format_assert_failure,
     _outcome_all_pass,
     _outcome_failed_at,
@@ -159,6 +160,9 @@ fn _run_single_process(test_files: string[], file_suite_index: int[], suites_in:
     // shell out via popen, and the gate is invariant for the
     // duration of the invocation.
     let retries_disabled = _test_retries_disabled();
+    // SFN-862: same rationale — read once up front rather than once per
+    // file in the loop below.
+    let frame_timing_enabled = _env_flag("SAILFIN_TEST_FRAME_TIMING");
 
     let mut total_passed: int = 0;
     let mut total_failed: int = 0;
@@ -409,6 +413,11 @@ fn _run_single_process(test_files: string[], file_suite_index: int[], suites_in:
         let failure = br.failure;
         let results = br.records;
         let file_elapsed_ms = monotonic_millis() - file_start_ms;
+        // SFN-862: a pooled/serial multi-file child reports its own elapsed to
+        // the parent, which cannot time it (children are reaped oldest-first).
+        if frame_timing_enabled {
+            print.err("[test-frame] elapsed_ms=" + int_to_string(file_elapsed_ms as int));
+        }
         // SFN-17: classify from the harness's per-test records (source of
         // truth) instead of the fail.bin index-inference — but only when
         // the records *explain* the exit code. `@main` exits non-zero iff
@@ -432,11 +441,16 @@ fn _run_single_process(test_files: string[], file_suite_index: int[], suites_in:
                 if res_failed > 0 {
                     print("[test] FAIL: " + rf_basename + " (exit code "
                         + int_to_string(run_rc)
-                        + ")");
+                        + ")"
+                        + " ("
+                        + _fmt_elapsed_ms(file_elapsed_ms as int)
+                        + "s)");
                     suites[file_suite_index[index]].fail_count += 1;
                     suites[file_suite_index[index]].failed_files.push(rf_basename);
                 } else {
-                    print("[test] PASS: " + _package_basename(path));
+                    print("[test] PASS: " + _package_basename(path) + " ("
+                        + _fmt_elapsed_ms(file_elapsed_ms as int)
+                        + "s)");
                     suites[file_suite_index[index]].pass_count += 1;
                 }
             }
@@ -481,7 +495,10 @@ fn _run_single_process(test_files: string[], file_suite_index: int[], suites_in:
             // post-hoc.
             let rf_basename = _package_basename(path);
             print("[test] FAIL: " + rf_basename + " (exit code " + int_to_string(run_rc)
-                + ")");
+                + ")"
+                + " ("
+                + _fmt_elapsed_ms(file_elapsed_ms as int)
+                + "s)");
             if failure.present {
                 print("test failed: " + _format_assert_failure(path, failure));
             } else { print("test failed: " + path); }
@@ -503,7 +520,9 @@ fn _run_single_process(test_files: string[], file_suite_index: int[], suites_in:
             // `[test] PASS: <basename>` output exactly. Emitted only
             // on the human path; the JSON path emits structured
             // per-test events instead.
-            print("[test] PASS: " + _package_basename(path));
+            print("[test] PASS: " + _package_basename(path) + " ("
+                + _fmt_elapsed_ms(file_elapsed_ms as int)
+                + "s)");
             suites[file_suite_index[index]].pass_count += 1;
         }
         // Phase 5a: rewind arena scratch back to the per-test

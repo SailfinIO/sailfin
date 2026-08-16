@@ -210,7 +210,8 @@ fn _pool_child_env(base_env: string[], child_scratch: string, runtime_objdir: st
         if !_env_entry_has_key(entry, "SAILFIN_TEST_SCRATCH") && !_env_entry_has_key(entry, "SAILFIN_TEST_RUNTIME_OBJDIR")
             && !_env_entry_has_key(entry, "SAILFIN_TEST_RUNTIME_STAMP")
             && !_env_entry_has_key(entry, "SAILFIN_UPDATE_SNAPSHOTS")
-            && !_env_entry_has_key(entry, "SAILFIN_TEST_JSON_SUBFRAME") {
+            && !_env_entry_has_key(entry, "SAILFIN_TEST_JSON_SUBFRAME")
+            && !_env_entry_has_key(entry, "SAILFIN_TEST_FRAME_TIMING") {
             env_flat.push(entry);
         }
         i += 1;
@@ -226,6 +227,10 @@ fn _pool_child_env(base_env: string[], child_scratch: string, runtime_objdir: st
     }
     if update_snapshots { env_flat.push("SAILFIN_UPDATE_SNAPSHOTS=1"); }
     if json_output { env_flat.push("SAILFIN_TEST_JSON_SUBFRAME=1"); }
+    // SFN-862: ask the child to report its own per-file elapsed on stderr. The
+    // parent consumes the marker for the slowest-N summary. Unconditional (not
+    // `--json`-gated) because the human path is exactly where timing was missing.
+    env_flat.push("SAILFIN_TEST_FRAME_TIMING=1");
     // SFN-547: the pool IS the parallelism layer. A pooled child that spawns
     // a build would otherwise fan its own per-module emit out to
     // `_cr_resolve_jobs`' RAM budget, which reads the host's total RAM and
@@ -257,6 +262,8 @@ fn _pool_child_env(base_env: string[], child_scratch: string, runtime_objdir: st
 // to its own stderr (SFEP-0050). `summary_seen` is false when the child
 // died before emitting a summary — the caller then counts the whole file
 // as failed, as the missing-`_subframe_summary.json` fallback did.
+// `elapsed_ms` is the child's self-measured per-file elapsed (SFN-862),
+// 0 when the child never reported one.
 struct ReapResult {
     rc: int;
     passed: int;
@@ -266,6 +273,7 @@ struct ReapResult {
     tb_misses: int;
     summary_seen: boolean;
     deadline_killed: boolean;
+    elapsed_ms: int;
 }
 
 // True when `line` is a sub-frame child's `summary` jsonl line — the
@@ -273,6 +281,15 @@ struct ReapResult {
 // one aggregate `summary` closes the run-level document.
 fn _is_subframe_summary_line(line: string) -> boolean {
     return index_of(line, "{\"event\":\"summary\"") == 0;
+}
+
+// True when `line` is a sub-frame child's frame-timing marker — the child's
+// self-measured per-file elapsed. The parent consumes it (for the slowest-N
+// summary) instead of forwarding it, so it never reaches user output. The
+// parent cannot time the child itself: children are reaped oldest-first, so a
+// fast child's wall time would include the wait for older siblings (SFN-862).
+fn _is_frame_timing_line(line: string) -> boolean {
+    return index_of(line, "[test-frame] elapsed_ms=") == 0;
 }
 
 // Demux + reap one `<self> test <file>` sub-frame child (SFEP-0050),
@@ -299,7 +316,8 @@ fn _reap_test_child(handle: int, deadline_ms: int, json_output: boolean) -> Reap
             tb_hits: 0,
             tb_misses: 0,
             summary_seen: false,
-            deadline_killed: false
+            deadline_killed: false,
+            elapsed_ms: 0
         };
     }
     let mut out_buf: string = "";
@@ -312,6 +330,7 @@ fn _reap_test_child(handle: int, deadline_ms: int, json_output: boolean) -> Reap
     let mut tb_misses: int = 0;
     let mut summary_seen: boolean = false;
     let mut deadline_killed: boolean = false;
+    let mut elapsed_ms: int = 0;
     let start_ms = monotonic_millis();
     loop {
         if process.handle_stdout_at_eof(handle) && process.handle_stderr_at_eof(handle) {
@@ -376,7 +395,9 @@ fn _reap_test_child(handle: int, deadline_ms: int, json_output: boolean) -> Reap
                     if nl < 0 { break; }
                     let line = substring(err_buf, 0, nl);
                     err_buf = substring(err_buf, nl + 1, err_buf.length);
-                    if json_output && _is_subframe_summary_line(line) {
+                    if _is_frame_timing_line(line) {
+                        elapsed_ms = _extract_json_uint_after(line, "elapsed_ms=");
+                    } else if json_output && _is_subframe_summary_line(line) {
                         passed += _extract_json_uint_after(line, "\"passed\":");
                         failed += _extract_json_uint_after(line, "\"failed\":");
                         skipped += _extract_json_uint_after(line, "\"skipped\":");
@@ -389,8 +410,14 @@ fn _reap_test_child(handle: int, deadline_ms: int, json_output: boolean) -> Reap
         }
     }
     // Trailing partial stderr line (mid-crash): never a complete summary
-    // (a summary line ends with \n); forward it as a diagnostic.
-    if err_buf.length > 0 { err_fwd = err_fwd + err_buf; }
+    // or frame-timing marker (both end with \n); forward it as a
+    // diagnostic. A `handle_kill` can land between `_sfn_print_line`'s
+    // body write and its trailing `\n`, leaving a bare
+    // `[test-frame] elapsed_ms=` fragment in `err_buf` — never forward
+    // that to the user (SFN-862).
+    if err_buf.length > 0 && !_is_frame_timing_line(err_buf) {
+        err_fwd = err_fwd + err_buf;
+    }
     let rc0 = process.handle_wait(handle);
     let mut rc = rc0;
     if deadline_killed { rc = 124; }
@@ -405,7 +432,8 @@ fn _reap_test_child(handle: int, deadline_ms: int, json_output: boolean) -> Reap
         tb_hits: tb_hits,
         tb_misses: tb_misses,
         summary_seen: summary_seen,
-        deadline_killed: deadline_killed
+        deadline_killed: deadline_killed,
+        elapsed_ms: elapsed_ms
     };
 }
 
@@ -441,6 +469,7 @@ export {
     _pool_env_snapshot,
     _pool_child_env,
     ReapResult,
+    _is_frame_timing_line,
     _is_subframe_summary_line,
     _reap_test_child,
     _extract_json_uint_after

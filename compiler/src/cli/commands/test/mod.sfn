@@ -212,10 +212,10 @@ import { _run_single_process } from "./single_process_run";
 
 // The `sfn/cli` definition for `test`, registered on the v2 root via
 // `with_subcommand`. Three boolean flags, four value flags (`-k`, `--tag`,
-// `--shard`, `--shard-weights`), one int flag (`--jobs`), and a variadic
-// `suite` positional.
+// `--shard`, `--shard-weights`), two int flags (`--jobs`, `--slowest`), and
+// a variadic `suite` positional.
 fn command_def() -> Command {
-    return with_arg(with_flag(with_flag(with_flag(with_flag(with_flag(with_flag(with_flag(with_flag(with_flag(command("test", "Run tests or workspace default members"), flag("json", "Emit a JSONL event stream")), flag("update-snapshots", "Re-baseline snapshot golden files this run")), flag("no-test-cache", "Bypass the per-test linked-binary cache")), flag_value_short("k", "k", "Only run tests whose name contains this substring")), flag_value("tag", "Only run tests carrying @tag(\"<value>\")")), flag_int("jobs", "Run up to N per-file children concurrently")), flag_value("shard", "Run only the I-th of N shards (e.g. 1/3; file-count stride unless --shard-weights loads)")), flag_value("shard-weights", "Path to a path\\tweight TSV; --shard partitions by SFN-863 LPT instead of the stride")), flag("skip-toolchain-check", "Bypass the [toolchain] pin check for this invocation")), arg_variadic("suite", "Suite paths (omit at a workspace root to test default members)"));
+    return with_arg(with_flag(with_flag(with_flag(with_flag(with_flag(with_flag(with_flag(with_flag(with_flag(with_flag(command("test", "Run tests or workspace default members"), flag("json", "Emit a JSONL event stream")), flag("update-snapshots", "Re-baseline snapshot golden files this run")), flag("no-test-cache", "Bypass the per-test linked-binary cache")), flag_value_short("k", "k", "Only run tests whose name contains this substring")), flag_value("tag", "Only run tests carrying @tag(\"<value>\")")), flag_int("jobs", "Run up to N per-file children concurrently")), flag_int("slowest", "Print the N slowest test files after a multi-file run (0 disables, default 5)")), flag_value("shard", "Run only the I-th of N shards (e.g. 1/3; file-count stride unless --shard-weights loads)")), flag_value("shard-weights", "Path to a path\\tweight TSV; --shard partitions by SFN-863 LPT instead of the stride")), flag("skip-toolchain-check", "Bypass the [toolchain] pin check for this invocation")), arg_variadic("suite", "Suite paths (omit at a workspace root to test default members)"));
 }
 
 fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
@@ -249,6 +249,17 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     if jobs < 1 || jobs > 256 {
         print("sfn test: --jobs requires a positive integer in [1, 256] (got '"
             + int_to_string(jobs)
+            + "')");
+        return 2;
+    }
+    // SFN-862: `--slowest N` prints the N slowest test files after a
+    // multi-file run. Default 5; 0 disables the summary. Applies to the
+    // multi-file path only — a single-file run has nothing to rank.
+    let mut slowest_n: int = 5;
+    if has(matches, "slowest") { slowest_n = get_int(matches, "slowest"); }
+    if slowest_n < 0 || slowest_n > 1000 {
+        print("sfn test: --slowest requires an integer in [0, 1000] (got '"
+            + int_to_string(slowest_n)
             + "')");
         return 2;
     }
@@ -541,7 +552,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     // `summary`. Human banners and the RETRY line are suppressed in JSON
     // mode so the stream stays pure jsonl.
     if test_files.length > 1 {
-        return _run_multi_file(test_files, file_suite_index, suites, jobs, json_output, name_filter, tag_filter, no_test_cache, update_snapshots, emit_banners, scratch_root, scratch_owned, runtime_root, binary_dir);
+        return _run_multi_file(test_files, file_suite_index, suites, jobs, json_output, name_filter, tag_filter, no_test_cache, update_snapshots, emit_banners, scratch_root, scratch_owned, runtime_root, binary_dir, slowest_n);
     }
 
     return _run_single_process(test_files, file_suite_index, suites, json_output, json_subframe, trace_runner, no_test_cache, update_snapshots, emit_banners, scratch_root, scratch_owned, runtime_root, binary_dir, ctx);

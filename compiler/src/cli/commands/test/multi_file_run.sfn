@@ -27,7 +27,7 @@ import {
     _reap_test_child,
     _resolve_test_self_path
 } from "./pool";
-import { TestSuite, _emit_suite_banners } from "./reporting";
+import { TestSuite, _emit_slowest_summary, _emit_suite_banners } from "./reporting";
 
 // Multi-file isolation path (issue #848). Owns the whole lifecycle for an
 // invocation that discovered more than one test file: it spawns a
@@ -35,8 +35,13 @@ import { TestSuite, _emit_suite_banners } from "./reporting";
 // the results into the per-suite banners, emits the run-level `--json`
 // summary or the human banners, and tears the scratch root down. It
 // returns the process exit code, so `run` delegates and returns directly.
-fn _run_multi_file(test_files: string[], file_suite_index: int[], suites_in: TestSuite[], jobs: int, json_output: boolean, name_filter: string, tag_filter: string, no_test_cache: boolean, update_snapshots: boolean, emit_banners: boolean, scratch_root: string, scratch_owned: boolean, runtime_root: string, binary_dir: string) -> int ![clock, io, net] {
+fn _run_multi_file(test_files: string[], file_suite_index: int[], suites_in: TestSuite[], jobs: int, json_output: boolean, name_filter: string, tag_filter: string, no_test_cache: boolean, update_snapshots: boolean, emit_banners: boolean, scratch_root: string, scratch_owned: boolean, runtime_root: string, binary_dir: string, slowest_n: int) -> int ![clock, io, net] {
     let mut suites = suites_in;
+    // SFN-862: per-file elapsed (self-reported by each child, since the
+    // parent reaps oldest-first and cannot time a child accurately) for the
+    // end-of-run slowest-N summary.
+    let mut slow_names: string[] = [];
+    let mut slow_ms: int[] = [];
     let self_exe = _resolve_test_self_path(binary_dir);
     // Ephemeral scratch root + cleanup, ported from the retired
     // `scripts/run_native_test.sh` (issue #850). The script ran
@@ -215,6 +220,8 @@ fn _run_multi_file(test_files: string[], file_suite_index: int[], suites_in: Tes
                 ti += 1;
                 continue;
             }
+            slow_names.push(_package_basename(path));
+            slow_ms.push(reap.elapsed_ms);
             if rc == 0 { suites[suite_idx].pass_count += 1; } else {
                 // #1303: a signal-kill that reaches here (rather than
                 // the deferred tail) means retries are disabled
@@ -274,6 +281,8 @@ fn _run_multi_file(test_files: string[], file_suite_index: int[], suites_in: Tes
             let retry_handle = process.spawn_with_env(_pool_child_argv(self_exe, rpath, name_filter, tag_filter, json_output, no_test_cache), _pool_child_env(pool_base_env, rchild_scratch, sub_root, stamp_nonce, update_snapshots, json_output, self_exe));
             let reap = _reap_test_child(retry_handle, deadline_ms, json_output);
             let rc = reap.rc;
+            slow_names.push(_package_basename(rpath));
+            slow_ms.push(reap.elapsed_ms);
             if rc == 0 { suites[rsuite_idx].pass_count += 1; } else {
                 // #1303: the isolated retry also died. The RETRY
                 // banner above already named the file; add the
@@ -331,6 +340,8 @@ fn _run_multi_file(test_files: string[], file_suite_index: int[], suites_in: Tes
                 reap = _reap_test_child(process.spawn_with_env(child_argv, child_env), deadline_ms, json_output);
             }
             let rc = reap.rc;
+            slow_names.push(_package_basename(path));
+            slow_ms.push(reap.elapsed_ms);
             if rc == 0 { suites[suite_idx].pass_count += 1; } else {
                 // #1303: serial path — a signal-kill (after the
                 // inline retry, if any) lost its own output to the
@@ -368,7 +379,10 @@ fn _run_multi_file(test_files: string[], file_suite_index: int[], suites_in: Tes
         // one `summary` with run-level counts and wall-clock duration.
         let sf_dur = monotonic_millis() - sf_start_ms;
         print(render_summary_event(sf_passed, sf_failed, sf_skipped, sf_dur, sf_tb_hits, sf_tb_misses));
-    } else if emit_banners { _emit_suite_banners(suites); }
+    } else if emit_banners {
+        _emit_suite_banners(suites);
+        let _ = _emit_slowest_summary(slow_names, slow_ms, slowest_n);
+    }
     exit_test_runner_mode();
     _cleanup_test_scratch(scratch_owned, sub_root, overall_rc == 0);
     return overall_rc;

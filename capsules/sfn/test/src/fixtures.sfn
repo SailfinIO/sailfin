@@ -157,7 +157,7 @@ fn with_cwd(args: string[], env: Env, cwd: string, body: fn (ProcessOutput) -> i
 // copy. When a new pool key is added to `_pool_child_env`, add it here too
 // so a nested runner keeps inheriting a clean environment.
 fn _pool_managed_keys() -> string[] {
-    return ["SAILFIN_TEST_SCRATCH", "SAILFIN_TEST_RUNTIME_OBJDIR", "SAILFIN_TEST_RUNTIME_STAMP", "SAILFIN_UPDATE_SNAPSHOTS", "SAILFIN_TEST_JSON_SUBFRAME",];
+    return ["SAILFIN_TEST_SCRATCH", "SAILFIN_TEST_RUNTIME_OBJDIR", "SAILFIN_TEST_RUNTIME_STAMP", "SAILFIN_UPDATE_SNAPSHOTS", "SAILFIN_TEST_JSON_SUBFRAME", "SAILFIN_TEST_FRAME_TIMING",];
 }
 
 // True when `entry` ("KEY=VALUE") carries one of the pool-managed keys. Matched
