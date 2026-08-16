@@ -29,7 +29,7 @@ import {
     term_return_value,
     term_return_void
 } from "sfn/ir";
-import { TssaDiagnostic, VerifyResult, verify_module } from "sfn/ir";
+import { VerifyResult, verify_module } from "sfn/ir";
 
 fn _has_code(result: VerifyResult, code: string) -> boolean {
     let mut i: int = 0;

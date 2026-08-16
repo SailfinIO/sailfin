@@ -13,6 +13,7 @@ import {
 } from "sfn/ir";
 import { run_tensor_fusion_pass } from "sfn/ir";
 import { verify_tensor_function } from "sfn/ir";
+import { LoweringDiagnostic } from "sfn/ir";
 import { int_to_string } from "sfn/strings";
 
 struct TensorBuffer {
@@ -27,12 +28,12 @@ struct TensorBinding {
 
 struct TensorScalarLowerResult {
     native_text: string;
-    diagnostics: string[];
+    diagnostics: LoweringDiagnostic[];
 }
 
 struct TensorExecuteResult {
     value: TensorBuffer;
-    diagnostics: string[];
+    diagnostics: LoweringDiagnostic[];
 }
 
 struct TensorBindingLookup {
@@ -454,8 +455,10 @@ fn execute_tensor_function_scalar(function: TensorFunction, inputs: TensorBuffer
     if inputs.length != function.parameter_types.length {
         return TensorExecuteResult {
             value: _ts_empty_buffer(),
-            diagnostics: [function.name
-                + ": scalar oracle input count does not match signature"]
+            diagnostics: [LoweringDiagnostic {
+                code: "E1021", severity: "error", message: function.name
+                    + ": scalar oracle input count does not match signature", file_path: "", span: null, stage: "tensor"
+            }]
         };
     }
     let mut bindings: TensorBinding[] = [];
@@ -470,8 +473,10 @@ fn execute_tensor_function_scalar(function: TensorFunction, inputs: TensorBuffer
                 || value.data.length != tensor_shape_product(operation.result_type.shape) {
                 return TensorExecuteResult {
                     value: _ts_empty_buffer(),
-                    diagnostics: [function.name
-                        + ": scalar oracle input shape or size does not match signature"]
+                    diagnostics: [LoweringDiagnostic {
+                        code: "E1021", severity: "error", message: function.name
+                            + ": scalar oracle input shape or size does not match signature", file_path: "", span: null, stage: "tensor"
+                    }]
                 };
             }
         } else if operation.kind.variant == "Add" || operation.kind.variant == "Multiply" {
@@ -497,8 +502,10 @@ fn execute_tensor_function_scalar(function: TensorFunction, inputs: TensorBuffer
     if !returned.found {
         return TensorExecuteResult {
             value: _ts_empty_buffer(),
-            diagnostics: [function.name
-                + ": scalar oracle return value is missing"]
+            diagnostics: [LoweringDiagnostic {
+                code: "E1021", severity: "error", message: function.name
+                    + ": scalar oracle return value is missing", file_path: "", span: null, stage: "tensor"
+            }]
         };
     }
     return TensorExecuteResult { value: returned.value, diagnostics: [] };

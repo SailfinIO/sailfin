@@ -21,12 +21,12 @@ import {
     intern_unit,
     new_module
 } from "sfn/ir";
-import { TssaDiagnostic, verify_module } from "sfn/ir";
+import { LoweringDiagnostic, verify_module } from "sfn/ir";
 
 struct TypedSsaProduceResult {
     ok: boolean;
     module: Module?;
-    diagnostics: TssaDiagnostic[];
+    diagnostics: LoweringDiagnostic[];
 }
 
 struct TssaTypeMapResult {
@@ -35,8 +35,15 @@ struct TssaTypeMapResult {
     id: int;
 }
 
-fn _produce_diag(code: string, message: string) -> TssaDiagnostic {
-    return TssaDiagnostic { code: code, message: message };
+fn _produce_diag(code: string, message: string) -> LoweringDiagnostic {
+    return LoweringDiagnostic {
+        code: code,
+        severity: "error",
+        message: message,
+        file_path: "",
+        span: null,
+        stage: "tssa"
+    };
 }
 
 fn _failed_type(module: Module) -> TssaTypeMapResult {
@@ -200,7 +207,7 @@ fn _intern_effects(module: Module, effects: string[]) -> TssaTypeMapResult {
 }
 
 fn produce_typed_ssa_declarations(parsed: ParseNativeResult, module_name: string, capsule_name: string) -> TypedSsaProduceResult {
-    let mut diagnostics: TssaDiagnostic[] = [];
+    let mut diagnostics: LoweringDiagnostic[] = [];
     let mut parse_index: int = 0;
     loop {
         if parse_index >= parsed.diagnostics.length { break; }
