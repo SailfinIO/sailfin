@@ -203,6 +203,9 @@ test "tensor_ir: verifier rejects implicit shape conversion" {
     let verified = verify_tensor_function(function);
     assert ! verified.is_valid;
     assert verified.diagnostics.length > 0;
+    assert verified.diagnostics[0].code == "E1021";
+    assert verified.diagnostics[0].severity == "error";
+    assert verified.diagnostics[0].stage == "tensor";
 }
 
 test "tensor_ir: scalar native-loop snapshot lowers through LLVM" ![io] {

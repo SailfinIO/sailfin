@@ -8,6 +8,7 @@
 // main.sfn (SFN-454): checked and self-hostable, not yet selected by builds.
 import { int_to_string } from "sfn/strings";
 
+import { LoweringDiagnostic } from "./lowering_diagnostic";
 import {
     Instr,
     Module,
@@ -20,18 +21,20 @@ import {
     types_structurally_equal
 } from "./typed_ssa";
 
-struct TssaDiagnostic {
-    code: string;
-    message: string;
-}
-
 struct VerifyResult {
     ok: boolean;
-    diagnostics: TssaDiagnostic[];
+    diagnostics: LoweringDiagnostic[];
 }
 
-fn _diag(code: string, message: string) -> TssaDiagnostic {
-    return TssaDiagnostic { code: code, message: message };
+fn _diag(code: string, message: string) -> LoweringDiagnostic {
+    return LoweringDiagnostic {
+        code: code,
+        severity: "error",
+        message: message,
+        file_path: "",
+        span: null,
+        stage: "tssa"
+    };
 }
 
 // ---------------------------------------------------------------------------
@@ -138,8 +141,8 @@ fn _is_numeric(module: Module, tid: int) -> boolean {
 // ---------------------------------------------------------------------------
 // §9.6.1 Module-level structural canonicalization
 // ---------------------------------------------------------------------------
-fn _verify_module_structure(module: Module) -> TssaDiagnostic[] {
-    let mut diags: TssaDiagnostic[] = [];
+fn _verify_module_structure(module: Module) -> LoweringDiagnostic[] {
+    let mut diags: LoweringDiagnostic[] = [];
     // Symbols must be unique.
     let mut i: int = 0;
     loop {
@@ -488,8 +491,8 @@ fn _dominates_use(func: SsaFunction, defs: DefSites, dom: int[], n: int, v: int,
 // ---------------------------------------------------------------------------
 // §9.6 per-function verification
 // ---------------------------------------------------------------------------
-fn _verify_function(module: Module, func: SsaFunction) -> TssaDiagnostic[] {
-    let mut diags: TssaDiagnostic[] = [];
+fn _verify_function(module: Module, func: SsaFunction) -> LoweringDiagnostic[] {
+    let mut diags: LoweringDiagnostic[] = [];
     let fname: string = "f" + int_to_string(func.id) + " (" + symbol_name(module, func.symbol)
         + ")";
     if !func.is_defined {
@@ -586,7 +589,7 @@ fn _verify_function(module: Module, func: SsaFunction) -> TssaDiagnostic[] {
         loop {
             if ii >= block.instrs.length { break; }
             let instr: Instr = block.instrs[ii];
-            let idiags: TssaDiagnostic[] = _verify_instr(module, func, fname, block, instr, defs, dom, n, bi, ii, reachable);
+            let idiags: LoweringDiagnostic[] = _verify_instr(module, func, fname, block, instr, defs, dom, n, bi, ii, reachable);
             let mut d: int = 0;
             loop {
                 if d >= idiags.length { break; }
@@ -596,7 +599,7 @@ fn _verify_function(module: Module, func: SsaFunction) -> TssaDiagnostic[] {
             ii += 1;
         }
         // Terminator checks.
-        let tdiags: TssaDiagnostic[] = _verify_terminator(module, func, fname, block, defs, dom, n, bi, term_pos);
+        let tdiags: LoweringDiagnostic[] = _verify_terminator(module, func, fname, block, defs, dom, n, bi, term_pos);
         let mut t: int = 0;
         loop {
             if t >= tdiags.length { break; }
@@ -611,8 +614,8 @@ fn _verify_function(module: Module, func: SsaFunction) -> TssaDiagnostic[] {
 // ---------------------------------------------------------------------------
 // §9.6.5 instruction arity + typing, §9.6.2 operand dominance, §9.6.6 effects
 // ---------------------------------------------------------------------------
-fn _use_dominates(module: Module, func: SsaFunction, fname: string, defs: DefSites, dom: int[], n: int, use_block: int, use_pos: int, v: int, ctx: string) -> TssaDiagnostic[] {
-    let mut diags: TssaDiagnostic[] = [];
+fn _use_dominates(module: Module, func: SsaFunction, fname: string, defs: DefSites, dom: int[], n: int, use_block: int, use_pos: int, v: int, ctx: string) -> LoweringDiagnostic[] {
+    let mut diags: LoweringDiagnostic[] = [];
     if v < 0 || v >= func.value_types.length {
         diags.push(_diag("TSSA020", "function " + fname + ": " + ctx
             + " references undefined value v"
@@ -629,8 +632,8 @@ fn _use_dominates(module: Module, func: SsaFunction, fname: string, defs: DefSit
     return diags;
 }
 
-fn _verify_instr(module: Module, func: SsaFunction, fname: string, block: SsaBlock, instr: Instr, defs: DefSites, dom: int[], n: int, bi: int, ii: int, reachable: int[]) -> TssaDiagnostic[] {
-    let mut diags: TssaDiagnostic[] = [];
+fn _verify_instr(module: Module, func: SsaFunction, fname: string, block: SsaBlock, instr: Instr, defs: DefSites, dom: int[], n: int, bi: int, ii: int, reachable: int[]) -> LoweringDiagnostic[] {
+    let mut diags: LoweringDiagnostic[] = [];
     let rt: int = instr.result_type;
     let where: string = "instruction " + int_to_string(ii) + " in block b"
         + int_to_string(block.id);
@@ -656,7 +659,7 @@ fn _verify_instr(module: Module, func: SsaFunction, fname: string, block: SsaBlo
                 + " const_float must have Float result"));
         }
     } else if instr.kind.variant == "Unary" {
-        let od: TssaDiagnostic[] = _use_dominates(module, func, fname, defs, dom, n, bi, ii, instr.operand_a, where
+        let od: LoweringDiagnostic[] = _use_dominates(module, func, fname, defs, dom, n, bi, ii, instr.operand_a, where
             + " operand");
         diags = _concat(diags, od);
         let ot: int = _value_type(func, instr.operand_a);
@@ -678,10 +681,10 @@ fn _verify_instr(module: Module, func: SsaFunction, fname: string, block: SsaBlo
             }
         }
     } else if instr.kind.variant == "Binary" {
-        let oa: TssaDiagnostic[] = _use_dominates(module, func, fname, defs, dom, n, bi, ii, instr.operand_a, where
+        let oa: LoweringDiagnostic[] = _use_dominates(module, func, fname, defs, dom, n, bi, ii, instr.operand_a, where
             + " left operand");
         diags = _concat(diags, oa);
-        let ob: TssaDiagnostic[] = _use_dominates(module, func, fname, defs, dom, n, bi, ii, instr.operand_b, where
+        let ob: LoweringDiagnostic[] = _use_dominates(module, func, fname, defs, dom, n, bi, ii, instr.operand_b, where
             + " right operand");
         diags = _concat(diags, ob);
         let lt: int = _value_type(func, instr.operand_a);
@@ -707,10 +710,10 @@ fn _verify_instr(module: Module, func: SsaFunction, fname: string, block: SsaBlo
             }
         }
     } else if instr.kind.variant == "Compare" {
-        let oa: TssaDiagnostic[] = _use_dominates(module, func, fname, defs, dom, n, bi, ii, instr.operand_a, where
+        let oa: LoweringDiagnostic[] = _use_dominates(module, func, fname, defs, dom, n, bi, ii, instr.operand_a, where
             + " left operand");
         diags = _concat(diags, oa);
-        let ob: TssaDiagnostic[] = _use_dominates(module, func, fname, defs, dom, n, bi, ii, instr.operand_b, where
+        let ob: LoweringDiagnostic[] = _use_dominates(module, func, fname, defs, dom, n, bi, ii, instr.operand_b, where
             + " right operand");
         diags = _concat(diags, ob);
         let lt: int = _value_type(func, instr.operand_a);
@@ -733,7 +736,7 @@ fn _verify_instr(module: Module, func: SsaFunction, fname: string, block: SsaBlo
             }
         }
     } else if instr.kind.variant == "Convert" {
-        let od: TssaDiagnostic[] = _use_dominates(module, func, fname, defs, dom, n, bi, ii, instr.operand_a, where
+        let od: LoweringDiagnostic[] = _use_dominates(module, func, fname, defs, dom, n, bi, ii, instr.operand_a, where
             + " operand");
         diags = _concat(diags, od);
         let ot: int = _value_type(func, instr.operand_a);
@@ -752,7 +755,7 @@ fn _verify_instr(module: Module, func: SsaFunction, fname: string, block: SsaBlo
         let mut a: int = 0;
         loop {
             if a >= instr.call_args.length { break; }
-            let ad: TssaDiagnostic[] = _use_dominates(module, func, fname, defs, dom, n, bi, ii, instr.call_args[a], where
+            let ad: LoweringDiagnostic[] = _use_dominates(module, func, fname, defs, dom, n, bi, ii, instr.call_args[a], where
                 + " call argument "
                 + int_to_string(a));
             diags = _concat(diags, ad);
@@ -839,8 +842,8 @@ fn _value_type(func: SsaFunction, v: int) -> int {
     return func.value_types[v];
 }
 
-fn _concat(a: TssaDiagnostic[], b: TssaDiagnostic[]) -> TssaDiagnostic[] {
-    let mut out: TssaDiagnostic[] = a;
+fn _concat(a: LoweringDiagnostic[], b: LoweringDiagnostic[]) -> LoweringDiagnostic[] {
+    let mut out: LoweringDiagnostic[] = a;
     let mut i: int = 0;
     loop {
         if i >= b.length { break; }
@@ -880,8 +883,8 @@ fn _int_fits_width(value: int, width: int, signed: boolean) -> boolean {
 // ---------------------------------------------------------------------------
 // §9.6.3/§9.6.4 terminator verification
 // ---------------------------------------------------------------------------
-fn _verify_branch_args(module: Module, func: SsaFunction, fname: string, defs: DefSites, dom: int[], n: int, bi: int, term_pos: int, target_id: int, args: int[], edge: string) -> TssaDiagnostic[] {
-    let mut diags: TssaDiagnostic[] = [];
+fn _verify_branch_args(module: Module, func: SsaFunction, fname: string, defs: DefSites, dom: int[], n: int, bi: int, term_pos: int, target_id: int, args: int[], edge: string) -> LoweringDiagnostic[] {
+    let mut diags: LoweringDiagnostic[] = [];
     let tidx: int = _block_index_by_id(func, target_id);
     if tidx < 0 {
         diags.push(_diag("TSSA031", "function " + fname + ": " + edge
@@ -904,7 +907,7 @@ fn _verify_branch_args(module: Module, func: SsaFunction, fname: string, defs: D
     let mut i: int = 0;
     loop {
         if i >= args.length { break; }
-        let ud: TssaDiagnostic[] = _use_dominates(module, func, fname, defs, dom, n, bi, term_pos, args[i], edge
+        let ud: LoweringDiagnostic[] = _use_dominates(module, func, fname, defs, dom, n, bi, term_pos, args[i], edge
             + " argument "
             + int_to_string(i));
         diags = _concat(diags, ud);
@@ -922,17 +925,17 @@ fn _verify_branch_args(module: Module, func: SsaFunction, fname: string, defs: D
     return diags;
 }
 
-fn _verify_terminator(module: Module, func: SsaFunction, fname: string, block: SsaBlock, defs: DefSites, dom: int[], n: int, bi: int, term_pos: int) -> TssaDiagnostic[] {
-    let mut diags: TssaDiagnostic[] = [];
+fn _verify_terminator(module: Module, func: SsaFunction, fname: string, block: SsaBlock, defs: DefSites, dom: int[], n: int, bi: int, term_pos: int) -> LoweringDiagnostic[] {
+    let mut diags: LoweringDiagnostic[] = [];
     let term: Terminator = block.terminator;
     let where: string = "terminator of block b" + int_to_string(block.id);
     if term.kind.variant == "Branch" {
-        let bd: TssaDiagnostic[] = _verify_branch_args(module, func, fname, defs, dom, n, bi, term_pos, term.target, term.args, where
+        let bd: LoweringDiagnostic[] = _verify_branch_args(module, func, fname, defs, dom, n, bi, term_pos, term.target, term.args, where
             + " branch");
         diags = _concat(diags, bd);
     } else if term.kind.variant == "CondBranch" {
         // Condition must be a Bool value that dominates the terminator.
-        let cd: TssaDiagnostic[] = _use_dominates(module, func, fname, defs, dom, n, bi, term_pos, term.condition, where
+        let cd: LoweringDiagnostic[] = _use_dominates(module, func, fname, defs, dom, n, bi, term_pos, term.condition, where
             + " condition");
         diags = _concat(diags, cd);
         if !_is_bool(module, _value_type(func, term.condition)) {
@@ -941,10 +944,10 @@ fn _verify_terminator(module: Module, func: SsaFunction, fname: string, block: S
                 + int_to_string(term.condition)
                 + " is not Bool"));
         }
-        let td: TssaDiagnostic[] = _verify_branch_args(module, func, fname, defs, dom, n, bi, term_pos, term.target, term.args, where
+        let td: LoweringDiagnostic[] = _verify_branch_args(module, func, fname, defs, dom, n, bi, term_pos, term.target, term.args, where
             + " then-edge");
         diags = _concat(diags, td);
-        let ed: TssaDiagnostic[] = _verify_branch_args(module, func, fname, defs, dom, n, bi, term_pos, term.else_target, term.else_args, where
+        let ed: LoweringDiagnostic[] = _verify_branch_args(module, func, fname, defs, dom, n, bi, term_pos, term.else_target, term.else_args, where
             + " else-edge");
         diags = _concat(diags, ed);
     } else if term.kind.variant == "Return" {
@@ -958,7 +961,7 @@ fn _verify_terminator(module: Module, func: SsaFunction, fname: string, block: S
                 diags.push(_diag("TSSA052", "function " + fname + ": " + where
                     + " returns no value from a non-Unit function"));
             } else {
-                let rd: TssaDiagnostic[] = _use_dominates(module, func, fname, defs, dom, n, bi, term_pos, term.value, where
+                let rd: LoweringDiagnostic[] = _use_dominates(module, func, fname, defs, dom, n, bi, term_pos, term.value, where
                     + " return value");
                 diags = _concat(diags, rd);
                 if _value_type(func, term.value) != func.result {
@@ -977,11 +980,11 @@ fn _verify_terminator(module: Module, func: SsaFunction, fname: string, block: S
 // Entry point
 // ---------------------------------------------------------------------------
 fn verify_module(module: Module) -> VerifyResult {
-    let mut diags: TssaDiagnostic[] = _verify_module_structure(module);
+    let mut diags: LoweringDiagnostic[] = _verify_module_structure(module);
     let mut i: int = 0;
     loop {
         if i >= module.functions.length { break; }
-        let fdiags: TssaDiagnostic[] = _verify_function(module, module.functions[i]);
+        let fdiags: LoweringDiagnostic[] = _verify_function(module, module.functions[i]);
         let mut d: int = 0;
         loop {
             if d >= fdiags.length { break; }

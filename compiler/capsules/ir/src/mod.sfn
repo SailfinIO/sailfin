@@ -140,7 +140,7 @@ export {
 
 export { render_module } from "./typed_ssa_render";
 
-export { TssaDiagnostic, VerifyResult, verify_module } from "./typed_ssa_verify";
+export { VerifyResult, verify_module } from "./typed_ssa_verify";
 
 export {
     TensorDType,

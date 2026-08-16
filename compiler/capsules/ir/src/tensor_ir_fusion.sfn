@@ -3,13 +3,14 @@
 // Deterministic fusion-pass insertion seam for shape-typed tensor IR. The
 // first implementation preserves verified graphs while later work adds the
 // SFEP-0053 producer-consumer rewrite.
+import { LoweringDiagnostic } from "./lowering_diagnostic";
 import { TensorModule } from "./tensor_ir";
 import { verify_tensor_module } from "./tensor_ir_verify";
 
 struct TensorPassResult {
     module: TensorModule;
     changed: boolean;
-    diagnostics: string[];
+    diagnostics: LoweringDiagnostic[];
 }
 
 // run_tensor_fusion_pass verifies both sides of the pass boundary even while
