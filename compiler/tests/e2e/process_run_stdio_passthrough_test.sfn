@@ -17,7 +17,9 @@
 //
 // The POSIX leg is genuine coverage on every Linux run; the Windows leg only
 // executes on a Windows host, so this file does not go red-to-green on Linux.
-// The third test below is the Linux-runnable half of the SFN-546 guard.
+// The third and fourth tests below are the Linux-runnable halves of the
+// SFN-546 and SFN-572 guards respectively — the latter covering the same
+// defect class on `sfn_process_run_capture`'s stdin handle.
 //
 // The property is proved TRANSITIVELY: `sfn run` itself passes its child's
 // output through with `process.run` (`compiler/src/cli/commands/run.sfn`), so
@@ -150,4 +152,35 @@ test "process.run: the Windows spawn keeps its inheritable-stdio wiring (SFN-546
     // STARTF_USESTDHANDLES (0x100) must be set, or the named handles are
     // ignored and the wiring above is dead code.
     assert contains(src, "flags_view.v = 256");
+}
+
+// The same Linux-runnable static form, for the sibling defect on the CAPTURE
+// path (SFN-572). `sfn_process_run_capture` also sets STARTF_USESTDHANDLES and
+// spawns with `bInheritHandles = 1`, so its `hStdInput` is under the same
+// inheritability precondition as the passthrough path above — but it once
+// stored a raw `GetStdHandle(-10)` there, which may be non-inheritable and may
+// be a `0`/`-1` sentinel. Nothing on a Linux run compiles the module, so this
+// is the only thing standing between that line and a silent return.
+test "process.run_capture: the Windows spawn duplicates stdin inheritable (SFN-572)" ![io] {
+    let src = fs.readFile("runtime/sfn/platform/process_windows.sfn");
+
+    // The capture path's stdin is an inheritable duplicate, not a raw handle.
+    // `sfn_process_run` passes its own `self_proc` local rather than calling
+    // `GetCurrentProcess()` inline, so this exact expression occurs only in
+    // `sfn_process_run_capture` — asserting it pins the fix to that function
+    // without slicing the source.
+    assert contains(src, "let h_stdin: i64 = _pw_dup_inheritable(GetCurrentProcess(), GetStdHandle(-10));");
+
+    // ...and the duplicate is released after the spawn rather than leaked.
+    // `h_stdin` is the capture path's name for it; the passthrough path's
+    // three duplicates are `h_in`/`h_out`/`h_err`.
+    assert contains(src, "_pw_close_dup(h_stdin)");
+
+    // The release must also sit BEFORE the `ok == 0` bail, or it runs only
+    // on the spawn-failure path and leaks the duplicate on every successful
+    // spawn — which is the regression the presence check above would still
+    // pass. Pinning the two adjacent lines is what makes this a guard for
+    // *placement* rather than existence; the passthrough path's analogue is
+    // `_pw_close_dup(h_err);` before its own `if ok == 0 {`.
+    assert contains(src, "_pw_close_dup(h_stdin);\n    if ok == 0 {");
 }
