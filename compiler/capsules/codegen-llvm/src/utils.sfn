@@ -175,6 +175,27 @@ fn stamp_lowering_diag_spans(diags: LoweringDiagnostic[], span: NativeSourceSpan
     return out;
 }
 
+// Pick the more precise of two candidate spans. `NativeInstruction.Let`
+// carries both a statement span and an initializer span; the initializer is
+// the better attribution for a diagnostic raised while lowering the value.
+fn first_span(primary: NativeSourceSpan?, fallback: NativeSourceSpan?) -> NativeSourceSpan? {
+    if primary != null { return primary; }
+    return fallback;
+}
+
+// Fold a sub-lowering result's diagnostics into the instruction-scoped set.
+//
+// Expression lowering is structurally span-blind (SFEP-0061 §2.2, Set C): it
+// reports through the legacy `string[]` channel and has no field to carry a
+// span. The instruction dispatch is the nearest frame that knows where the
+// statement is, so it converts those strings to structured diagnostics and
+// stamps its span onto whatever arrives without one.
+fn merge_lowered_diags(diags: LoweringDiagnostic[], sub_diags: LoweringDiagnostic[], legacy: string[], span: NativeSourceSpan?) -> LoweringDiagnostic[] {
+    let mut merged = append_missing_legacy_lowering_diags(sub_diags, legacy);
+    merged = stamp_lowering_diag_spans(merged, span);
+    return extend_diag_array(diags, merged);
+}
+
 fn render_lowering_error_diag(diag: LoweringDiagnostic) -> string {
     let mut rendered = diag_to_legacy_string(diag);
     if diag.span != null {
