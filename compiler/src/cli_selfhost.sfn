@@ -355,9 +355,18 @@ fn _selfhost_emit_captured_stream(text: string, to_stderr: boolean) -> void ![io
 // both stages is a false *fixed point* — the displaced `rm -rf` swallowed
 // its errors, so this is the one silent false-green path worth reporting.
 fn _selfhost_remove_tree(root: string) -> boolean ![io] {
-    if !fs.exists(root) { return true; }
-    // A file root has no entries to walk; `rmdir` would refuse it.
+    // The unlink runs BEFORE the existence probe, and the order is the whole
+    // fix for SFN-681. `fs.exists` is `stat(2)` and follows symlinks, so a
+    // root that is a *dangling* link fails that probe and would take the
+    // absent-root `return true` without ever being unlinked — reporting a
+    // removal that did not happen. `fs.deleteFile` is `unlink(2)`, which
+    // does not follow: it removes the link itself and leaves any live target
+    // alone. A genuinely absent root just makes it fail harmlessly, which
+    // the probe below then answers.
+    //
+    // A file root also has no entries to walk, and `rmdir` would refuse it.
     if fs.deleteFile(root) { return true; }
+    if !fs.exists(root) { return true; }
     let mut dirs: string[] = [root];
     let mut di: int = 0;
     let mut guard: int = 0;
@@ -382,6 +391,11 @@ fn _selfhost_remove_tree(root: string) -> boolean ![io] {
         fs.removeDirectory(dirs[ri]);
         ri -= 1;
     }
+    // `fs.exists` is safe as the survival check here even though it follows
+    // symlinks: every non-directory root — plain file, live link, dangling
+    // link — was already unlinked above and returned early, so the only root
+    // that reaches this line is a real directory. Moving the unlink back
+    // below the probe would reopen SFN-681 here as well as there.
     return !fs.exists(root);
 }
 

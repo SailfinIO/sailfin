@@ -8,6 +8,7 @@
 // `unit/build_report_determinism_test.sfn`; the pure string helpers by
 // `unit/selfhost_helpers_test.sfn`. This test exercises the real
 // filesystem enumeration + sha256 path on hand-built fixtures.
+import { host_is_windows } from "../../src/build/target";
 import { compare_for_determinism } from "../../src/build_report";
 import {
     _selfhost_collect_ll_files,
@@ -271,6 +272,47 @@ test "selfhost_remove_tree: removes a file root" ![io] {
     fs.writeFile(target, "; content\n");
     assert _selfhost_remove_tree(target);
     assert ! fs.exists(target);
+}
+
+// SFN-681: `fs.exists` is `stat(2)` and follows symlinks, so a dangling link
+// root reads as absent. Probing existence before the unlink therefore
+// returned the absent-root `true` and left the link in place — a removal
+// reported that did not happen. Unlinking first removes it and the report
+// tells the truth.
+test "selfhost_remove_tree: removes a dangling symlink root" ![io] {
+    // `sailfin_intrinsic_fs_symlink` is a hard `false` stub on Windows, so
+    // the fixture this rests on cannot be built there.
+    if host_is_windows() { return; }
+    let root = fs.mkdtemp("sfn-selfhost-rmdangle-");
+    let link = root + "/dangling";
+    assert fs.symlink(root + "/definitely-not-here", link);
+    // The predicate the old ordering trusted: the link is present on disk,
+    // but `fs.exists` follows it to a missing target and reports absence.
+    assert ! fs.exists(link);
+
+    assert _selfhost_remove_tree(link);
+    // `fs.exists` cannot witness the removal for the same reason, so re-create
+    // the link and check that the second `fs.symlink` succeeds — `symlink(2)`
+    // fails EEXIST while the old link is still there.
+    assert fs.symlink(root + "/definitely-not-here", link);
+    assert fs.deleteFile(link);
+    assert fs.exists(root);
+}
+
+// A link root is unlinked, never followed: the live target outside the tree
+// must survive. `unlink(2)` gives this for free; `rm -rf` needed the trailing
+// slash omitted to get it.
+test "selfhost_remove_tree: unlinks a live symlink root without touching its target" ![io] {
+    if host_is_windows() { return; }
+    let root = fs.mkdtemp("sfn-selfhost-rmlive-");
+    let outside = fs.mkdtemp("sfn-selfhost-rmlive-target-");
+    fs.writeFile(outside + "/keep.ll", "; keep\n");
+    let link = root + "/link-to-outside";
+    assert fs.symlink(outside, link);
+
+    assert _selfhost_remove_tree(link);
+    assert ! fs.exists(link);
+    assert fs.exists(outside + "/keep.ll");
 }
 
 // --------------------------------------------------------------
