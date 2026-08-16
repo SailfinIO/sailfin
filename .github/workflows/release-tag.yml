@@ -105,22 +105,17 @@ jobs:
           - os: macos-26
             package_label: macos-arm64
             clang: clang
-            # 3-vCPU / 7GB hosted runner: 2 parallel test children is the
-            # safe RAM budget (each child runs under the 8GB per-process
-            # cap; see the test_jobs input in actions/sailfin-build).
-            test_jobs: 2
+            # 3-vCPU / 7GB hosted runner.
             timeout_minutes: 120
           - os: ubuntu-24.04
             package_label: linux-x86_64
             clang: clang-18
             # 4-vCPU / 16GB hosted runner.
-            test_jobs: 4
             timeout_minutes: 120
           - os: ubuntu-24.04-arm
             package_label: linux-arm64
             clang: clang-18
             # The first-native qemu bootstrap builds three compiler passes.
-            test_jobs: 4
             timeout_minutes: 240
 
     steps:
@@ -279,9 +274,12 @@ jobs:
       # suite here. The former stable-only `full` path re-ran the suite as
       # a belt-and-braces GA gate, but the macOS-arm64 full-suite leg grew
       # past the 120-minute job timeout and cancelled the cut; the coverage
-      # it added is already provided by the gates above. `test_jobs` is
-      # unused on this path (it only fed the retired full-suite run).
-      - name: Build + test + package (via Makefile)
+      # it added is already provided by the gates above. `mode:
+      # build-package` therefore gates out the test steps entirely (see the
+      # mode conditions in actions/sailfin-build), so no `test_jobs` is
+      # passed: a value here would be dead config that reads as a
+      # deliberate override of the SFN-781 auto-budget (SFN-795).
+      - name: Build + package (via Makefile)
         uses: ./.github/actions/sailfin-build
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
@@ -289,7 +287,6 @@ jobs:
           target: ${{ matrix.package_label }}
           clang: ${{ matrix.clang }}
           seed_version: ${{ steps.seed.outputs.seed_version }}
-          test_jobs: ${{ matrix.test_jobs }}
           mode: build-package
           arm_seed_mode: ${{ steps.arm_seed.outputs.mode || 'qemu' }}
 
