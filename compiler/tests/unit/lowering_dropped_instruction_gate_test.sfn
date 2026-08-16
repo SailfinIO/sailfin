@@ -2,11 +2,34 @@
 // emitter path produces an unknown NativeInstruction tag, so pin the diagnostic
 // constructor directly: the fatal code, numeric tag, and function name are all
 // required to make a future lowering gap actionable.
-import { _unsupported_instruction_diagnostic } from "sfn/codegen-llvm/lowering/instructions";
+//
+// SFN-536 moved the constructor to `codegen-llvm/utils` and made it return a
+// structured `LoweringDiagnostic` rather than a bare string, so the legacy
+// rendering is asserted through `diag_to_legacy_string` — that rendering is what
+// `has_fatal_lowering_diagnostic` greps, so it is the part that must not drift.
+import { diag_to_legacy_string, unsupported_instruction_diag } from "sfn/codegen-llvm/utils";
+import { NativeSourceSpan } from "sfn/ir";
 import { expect_eq_str } from "sfn/test";
 
 test "lowering instruction gate: unsupported tag diagnostic names tag and function" {
-    let diagnostic = _unsupported_instruction_diagnostic(77, "unsupported_probe");
-    let result = expect_eq_str(diagnostic, "llvm lowering [fatal] [E1003]: unsupported instruction tag=77 in `unsupported_probe`");
+    let diagnostic = unsupported_instruction_diag(77, "unsupported_probe", null);
+    let result = expect_eq_str(diag_to_legacy_string(diagnostic), "llvm lowering [fatal] [E1003]: unsupported instruction tag=77 in `unsupported_probe`");
     if !result.ok { throw result.message; }
+}
+
+// The span rides through to the structured carrier so the catch-all can report a
+// location once a span-bearing tag reaches it; the legacy string never carries
+// one, which is what keeps the grep-oriented rendering stable.
+test "lowering instruction gate: unsupported tag diagnostic carries its span" {
+    let span = NativeSourceSpan {
+        start_line: 4,
+        start_column: 9,
+        end_line: 4,
+        end_column: 14
+    };
+    let diagnostic = unsupported_instruction_diag(77, "unsupported_probe", span);
+    assert diagnostic.span != null;
+    assert diagnostic.span.start_line == 4;
+    assert diagnostic.code == "E1003";
+    assert diagnostic.severity == "error";
 }
