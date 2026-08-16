@@ -346,10 +346,10 @@ fn emit_statement_type_decls(state: NativeState, statement: Statement) -> Statem
 
 fn emit_statement_control_flow(state: NativeState, statement: Statement) -> NativeState {
     if statement.variant == "BreakStatement" {
-        return state_emit_line(state, "break");
+        return state_emit_line(emit_span_if_present(state, statement.span), "break");
     }
     if statement.variant == "ContinueStatement" {
-        return state_emit_line(state, "continue");
+        return state_emit_line(emit_span_if_present(state, statement.span), "continue");
     }
     if statement.variant == "IfStatement" {
         return emit_if(state, statement);
@@ -663,6 +663,7 @@ fn emit_with(state: NativeState, statement: Statement) -> NativeState {
 
 fn emit_for(state: NativeState, statement: Statement) -> NativeState {
     let mut current = emit_decorators(state, statement.decorators);
+    current = emit_span_if_present(current, statement.span);
     let line = ".for " + format_expression(statement.clause.target) + " in "
         + format_expression(statement.clause.iterable);
     current = state_emit_line(current, line);
@@ -674,6 +675,7 @@ fn emit_for(state: NativeState, statement: Statement) -> NativeState {
 
 fn emit_loop(state: NativeState, statement: Statement) -> NativeState {
     let mut current = emit_decorators(state, statement.decorators);
+    current = emit_span_if_present(current, statement.span);
     current = state_emit_line(current, ".loop");
     current = state_push_indent(current);
     current = emit_block(current, statement.body);
@@ -683,6 +685,7 @@ fn emit_loop(state: NativeState, statement: Statement) -> NativeState {
 
 fn emit_match(state: NativeState, statement: Statement) -> NativeState {
     let mut current = emit_decorators(state, statement.decorators);
+    current = emit_span_if_present(current, statement.span);
     current = state_emit_line(current, ".match " + format_expression(statement.expression));
     current = state_push_indent(current);
     let mut index: int = 0;
@@ -727,6 +730,7 @@ fn emit_inline_match_case(state: NativeState, case: MatchCase, statement: Statem
 
 fn emit_if(state: NativeState, statement: Statement) -> NativeState {
     let mut current = emit_decorators(state, statement.decorators);
+    current = emit_span_if_present(current, statement.span);
     current = state_emit_line(current, ".if " + format_expression(statement.condition));
     current = state_push_indent(current);
     current = emit_block(current, statement.then_block);

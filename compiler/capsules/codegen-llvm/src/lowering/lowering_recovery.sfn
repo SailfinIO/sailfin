@@ -446,10 +446,13 @@ fn recover_native_functions_light(native_text: string) -> NativeFunction[] {
         if is_endif_kw { next_instruction = NativeInstruction.EndIf(); }
         if is_if_kw {
             next_instruction = NativeInstruction.If {
-                condition: trim_text_local(substring(line, 4, line.length))
+                condition: trim_text_local(substring(line, 4, line.length)),
+                span: null
             };
         }
-        if is_loop_kw { next_instruction = NativeInstruction.Loop(); }
+        if is_loop_kw {
+            next_instruction = NativeInstruction.Loop { span: null };
+        }
         if is_loop_vectorize_kw {
             next_instruction = NativeInstruction.LoopVectorize();
         }
@@ -458,18 +461,22 @@ fn recover_native_functions_light(native_text: string) -> NativeFunction[] {
             if for_in_idx >= 0 {
                 next_instruction = NativeInstruction.For {
                     target: for_target_raw,
-                    iterable: for_iterable_raw
+                    iterable: for_iterable_raw,
+                    span: null
                 };
             }
         }
         if is_endfor_kw { next_instruction = NativeInstruction.EndFor(); }
-        if is_break_kw { next_instruction = NativeInstruction.Break(); }
+        if is_break_kw {
+            next_instruction = NativeInstruction.Break { span: null };
+        }
         if is_continue_kw {
-            next_instruction = NativeInstruction.Continue();
+            next_instruction = NativeInstruction.Continue { span: null };
         }
         if is_match_kw {
             next_instruction = NativeInstruction.Match {
-                expression: match_expr_raw
+                expression: match_expr_raw,
+                span: null
             };
         }
         if is_endmatch_kw {

@@ -37,10 +37,12 @@ import {
 } from "../types";
 import {
     append_string,
+    diag_to_legacy_string,
     extend_diag_array,
     extend_string_array,
     first_span,
     index_of,
+    lowering_error_diag,
     merge_lowered_diags,
     number_to_string,
     trim_text
@@ -542,9 +544,11 @@ fn lower_instruction_range(function: NativeFunction, start_index: int, end: int,
         if !_tag_handled {
             if _instr_tag == 10 {
                 if current_loop_stack.length == 0 {
-                    diagnostics.push("llvm lowering [fatal] [E1003]: `break` outside loop in `"
+                    let _break_diag = lowering_error_diag("E1003", "`break` outside loop in `"
                         + function.name
-                        + "`");
+                        + "`", instruction.span);
+                    diagnostics.push(diag_to_legacy_string(_break_diag));
+                    diags.push(_break_diag);
                 } else {
                     let loop_context = last_loop_context(current_loop_stack);
                     // M1.5.3 (issue #327): drop every scope between the
@@ -594,9 +598,11 @@ fn lower_instruction_range(function: NativeFunction, start_index: int, end: int,
         if !_tag_handled {
             if _instr_tag == 11 {
                 if current_loop_stack.length == 0 {
-                    diagnostics.push("llvm lowering [fatal] [E1003]: `continue` outside loop in `"
+                    let _continue_diag = lowering_error_diag("E1003", "`continue` outside loop in `"
                         + function.name
-                        + "`");
+                        + "`", instruction.span);
+                    diagnostics.push(diag_to_legacy_string(_continue_diag));
+                    diags.push(_continue_diag);
                 } else {
                     let loop_context = last_loop_context(current_loop_stack);
                     // M1.5.3 (issue #327): drop every scope between the

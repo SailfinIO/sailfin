@@ -215,8 +215,10 @@ fn parse_instruction(line: string, span: NativeSourceSpan?, value_span: NativeSo
     if starts_with(line, ".if ") {
         let condition = trim_text(strip_prefix(line, ".if "));
         return InstructionParseResult {
-            instructions: [NativeInstruction.If { condition: condition }],
-            span_consumed: false,
+            instructions: [NativeInstruction.If {
+                condition: condition, span: span
+            }],
+            span_consumed: true,
             value_span_consumed: false
         };
     }
@@ -265,9 +267,9 @@ fn parse_instruction(line: string, span: NativeSourceSpan?, value_span: NativeSo
             let iterable = trim_text(substring(body, index + separator.length, body.length));
             return InstructionParseResult {
                 instructions: [NativeInstruction.For {
-                    target: target, iterable: iterable
+                    target: target, iterable: iterable, span: span
                 }],
-                span_consumed: false,
+                span_consumed: true,
                 value_span_consumed: false
             };
         }
@@ -281,8 +283,8 @@ fn parse_instruction(line: string, span: NativeSourceSpan?, value_span: NativeSo
     }
     if line == ".loop" {
         return InstructionParseResult {
-            instructions: [NativeInstruction.Loop()],
-            span_consumed: false,
+            instructions: [NativeInstruction.Loop { span: span }],
+            span_consumed: true,
             value_span_consumed: false
         };
     }
@@ -302,23 +304,25 @@ fn parse_instruction(line: string, span: NativeSourceSpan?, value_span: NativeSo
     }
     if line == "break" {
         return InstructionParseResult {
-            instructions: [NativeInstruction.Break()],
-            span_consumed: false,
+            instructions: [NativeInstruction.Break { span: span }],
+            span_consumed: true,
             value_span_consumed: false
         };
     }
     if line == "continue" {
         return InstructionParseResult {
-            instructions: [NativeInstruction.Continue()],
-            span_consumed: false,
+            instructions: [NativeInstruction.Continue { span: span }],
+            span_consumed: true,
             value_span_consumed: false
         };
     }
     if starts_with(line, ".match ") {
         let expression = trim_text(strip_prefix(line, ".match "));
         return InstructionParseResult {
-            instructions: [NativeInstruction.Match { expression: expression }],
-            span_consumed: false,
+            instructions: [NativeInstruction.Match {
+                expression: expression, span: span
+            }],
+            span_consumed: true,
             value_span_consumed: false
         };
     }
