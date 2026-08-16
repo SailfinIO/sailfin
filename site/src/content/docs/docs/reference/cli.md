@@ -93,8 +93,8 @@ sfn test compiler/tests/unit compiler/tests/integration capsules  # three suites
 | Flag | Description |
 |---|---|
 | `--json` | Emit a JSONL event stream. |
-| `-k NAME` | Only run tests whose name contains `NAME`. |
-| `--tag TAG` | Only run tests carrying `@tag("TAG")`. |
+| `-k NAME` | Only run tests whose name contains `NAME`. Exits non-zero if it matches no tests. |
+| `--tag TAG` | Only run tests carrying `@tag("TAG")`. Exits non-zero if it matches no tests. |
 | `--update-snapshots` | Re-baseline snapshot golden files. |
 | `--no-test-cache` | Bypass the per-test linked-binary cache. |
 | `--jobs N` | Run up to `N` per-file test children concurrently. |

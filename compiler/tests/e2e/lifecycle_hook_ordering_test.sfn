@@ -101,10 +101,14 @@ test "lifecycle hooks: wrap tests in before_all/before_each/after_each/after_all
 // ---- Test 2: a non-matching -k drops a hooks-bearing file cleanly ----
 // Hooks alone must not keep the file alive and trim it to a hooks-only,
 // main-less harness that fails to link. With `-k zzz_nomatch` matching no
-// test the file is dropped: the run exits 0 and no hook/test body runs.
+// test the file is dropped and no hook/test body runs. The drop must be
+// clean, not silent: since SFN-820 an explicit selector that matches
+// nothing fails closed, so the run exits non-zero. What this test guards
+// is the absence of an empty-harness link failure (#975) — asserted by the
+// three `find` checks below — not the exit code itself.
 test "lifecycle hooks: non-matching -k skips a hooks-bearing file without an empty-harness link failure" ![io] {
     let r = _run_test_dir(["-k", "zzz_nomatch"]);
-    assert r.exit == 0;
+    assert r.exit != 0;
     assert find(r.out, "TEST_ALPHA", 0) < 0;
     assert find(r.out, "BEFORE_EACH", 0) < 0;
     assert find(r.out, "no main", 0) < 0;
