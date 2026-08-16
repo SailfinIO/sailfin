@@ -10,7 +10,13 @@
 import { parse_range_iterable } from "sfn/codegen-llvm/expression_lowering/native/core_parse";
 import { lower_native_text_to_llvm_artifact_with_context_and_provider } from "sfn/codegen-llvm/lowering/entrypoints";
 import { find } from "sfn/strings";
-import { expect_contains_str, expect_eq_bool } from "sfn/test";
+import {
+    clean_runner_env,
+    expect_contains_str,
+    expect_eq_bool,
+    nested_runner_scratch,
+    report_child_failure
+} from "sfn/test";
 
 import { empty_llvm_import_context, resolve_llvm_provider_context } from "../../src/build/llvm_provider_context";
 
@@ -69,18 +75,29 @@ test "range for: literal zero stride fails closed and names the function" ![io] 
 // SFN-536 gave `.for` a source span and made the instruction frame stamp it
 // onto sub-lowering diagnostics, so this one points at the loop header instead
 // of naming only the enclosing function. The `for` keyword is line 3, column 5.
+//
+// Isolated per SFN-401, unlike the older cases above: a span assertion is the
+// one that cross-contamination breaks first, because a `.sfn-asm` clobbered by
+// a concurrent compile is span-less — fail-soft by design — so `-->` vanishes
+// while a plain message match still passes.
 test "range for: the zero-stride diagnostic reports a source location" ![io] {
-    let src = _write_source("sfn536_zero_stride_span.sfn", "fn zero_stride_probe() -> int {\n"
+    let scratch = nested_runner_scratch("sfn536-zero-stride-span");
+    fs.createDirectory(scratch, true);
+    let src = scratch + "/sfn536_zero_stride_span.sfn";
+    fs.writeFile(src, "fn zero_stride_probe() -> int {\n"
         + "    let mut n: int = 0;\n"
         + "    for i in 0..10..0 { n += 1; }\n"
         + "    return n;\n"
         + "}\n");
-    let exit = process.run_capture([_sfn_bin(), "emit", "llvm", src], process.environ());
+    let exit = process.run_capture([_sfn_bin(), "emit", "llvm", src], clean_runner_env(scratch));
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     if fs.exists(src) { fs.deleteFile(src); }
 
     assert exit != 0;
+    if find(out + err, "-->", 0) < 0 {
+        report_child_failure("SFN-536 zero-stride span", exit, out, err);
+    }
     assert find(out + err, "-->", 0) >= 0;
     assert find(out + err, ":3:5", 0) >= 0;
 }
