@@ -31,6 +31,21 @@ import {
 } from "sfn/ir";
 import { VerifyResult, verify_module } from "sfn/ir";
 
+// The converged carrier's stage and severity are uniform across this channel
+// (SFN-537), so they are asserted wholesale rather than per-invariant; the
+// per-invariant codes are asserted individually through `_has_code`.
+fn _all_carry_tssa_stage(result: VerifyResult) -> boolean {
+    if result.diagnostics.length == 0 { return false; }
+    let mut i: int = 0;
+    loop {
+        if i >= result.diagnostics.length { break; }
+        if result.diagnostics[i].stage != "tssa" { return false; }
+        if result.diagnostics[i].severity != "error" { return false; }
+        i += 1;
+    }
+    return true;
+}
+
 fn _has_code(result: VerifyResult, code: string) -> boolean {
     let mut i: int = 0;
     loop {
@@ -94,6 +109,7 @@ test "typed_ssa: branch to a nonexistent block fails verification" {
     let result = verify_module(m);
     assert ! result.ok;
     assert _has_code(result, "TSSA031");
+    assert _all_carry_tssa_stage(result);
 }
 
 test "typed_ssa: return of an undefined value fails verification" {
