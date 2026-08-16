@@ -48,13 +48,20 @@ fn _assert_emit_fails_closed(label: string, name: string, source: string, diagno
         report_child_failure(label + " (no source location)", exit, out, err);
     }
     assert find(err, "-->", 0) >= 0;
+    if find(err, location, 0) < 0 {
+        report_child_failure(label + " (expected location " + location + ")", exit, out, err);
+    }
     assert find(err, location, 0) >= 0;
 }
 
+// The keyword sits on its own line so the asserted location can only be the
+// `break`/`continue`'s own span (4:9), never the enclosing `if`'s (3:5). Those
+// two coincide on a single-line `if c { break; }`, which would let a diagnostic
+// attributed to the wrong construct still satisfy the assertion.
 test "lowering instruction gate: break outside loop fails closed" ![io] {
-    _assert_emit_fails_closed("sfn528-break", "sfn528_break_outside_loop.sfn", "fn main() -> i32 {\n    let mut n: int = 1;\n    if n > 0 { break; }\n    return n;\n}\n", "`break` outside loop in `main`", ":3:16");
+    _assert_emit_fails_closed("sfn528-break", "sfn528_break_outside_loop.sfn", "fn main() -> i32 {\n    let mut n: int = 1;\n    if n > 0 {\n        break;\n    }\n    return n;\n}\n", "`break` outside loop in `main`", ":4:9");
 }
 
 test "lowering instruction gate: continue outside loop fails closed" ![io] {
-    _assert_emit_fails_closed("sfn528-continue", "sfn528_continue_outside_loop.sfn", "fn main() -> i32 {\n    let mut n: int = 1;\n    if n > 0 { continue; }\n    return n;\n}\n", "`continue` outside loop in `main`", ":3:16");
+    _assert_emit_fails_closed("sfn528-continue", "sfn528_continue_outside_loop.sfn", "fn main() -> i32 {\n    let mut n: int = 1;\n    if n > 0 {\n        continue;\n    }\n    return n;\n}\n", "`continue` outside loop in `main`", ":4:9");
 }
