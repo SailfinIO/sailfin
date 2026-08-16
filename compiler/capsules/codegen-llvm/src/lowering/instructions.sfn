@@ -368,7 +368,7 @@ fn lower_instruction_range(function: NativeFunction, start_index: int, end: int,
                     diagnostics.push(lowered.diagnostics[_ci0]);
                     _ci0 += 1;
                 }
-                diags = extend_diag_array(diags, lowered.diags);
+                diags = merge_lowered_diags(diags, lowered.diags, lowered.diagnostics, instruction.span);
                 collected_lifetime_regions = extend_lifetime_regions(collected_lifetime_regions, lowered.lifetime_regions);
                 current_lines = lowered.lines;
                 current_allocas = lowered.allocas;
@@ -396,7 +396,7 @@ fn lower_instruction_range(function: NativeFunction, start_index: int, end: int,
                     diagnostics.push(lowered.diagnostics[_ci1]);
                     _ci1 += 1;
                 }
-                diags = extend_diag_array(diags, lowered.diags);
+                diags = merge_lowered_diags(diags, lowered.diags, lowered.diagnostics, instruction.span);
                 collected_lifetime_regions = extend_lifetime_regions(collected_lifetime_regions, lowered.lifetime_regions);
                 current_lines = lowered.lines;
                 current_allocas = lowered.allocas;
@@ -452,7 +452,7 @@ fn lower_instruction_range(function: NativeFunction, start_index: int, end: int,
                     diagnostics.push(lowered.diagnostics[_ci2]);
                     _ci2 += 1;
                 }
-                diags = extend_diag_array(diags, lowered.diags);
+                diags = merge_lowered_diags(diags, lowered.diags, lowered.diagnostics, instruction.span);
                 collected_lifetime_regions = extend_lifetime_regions(collected_lifetime_regions, lowered.lifetime_regions);
                 current_lines = lowered.lines;
                 current_allocas = lowered.allocas;
@@ -523,7 +523,7 @@ fn lower_instruction_range(function: NativeFunction, start_index: int, end: int,
                     diagnostics.push(lowered.diagnostics[_ci5]);
                     _ci5 += 1;
                 }
-                diags = extend_diag_array(diags, lowered.diags);
+                diags = merge_lowered_diags(diags, lowered.diags, lowered.diagnostics, instruction.span);
                 collected_lifetime_regions = extend_lifetime_regions(collected_lifetime_regions, lowered.lifetime_regions);
                 current_lines = lowered.lines;
                 current_allocas = lowered.allocas;

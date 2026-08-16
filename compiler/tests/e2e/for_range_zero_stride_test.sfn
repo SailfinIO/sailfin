@@ -66,6 +66,25 @@ test "range for: literal zero stride fails closed and names the function" ![io] 
         + "}\n", "`.for` stride must not be zero in `zero_stride_probe`");
 }
 
+// SFN-536 gave `.for` a source span and made the instruction frame stamp it
+// onto sub-lowering diagnostics, so this one points at the loop header instead
+// of naming only the enclosing function. The `for` keyword is line 3, column 5.
+test "range for: the zero-stride diagnostic reports a source location" ![io] {
+    let src = _write_source("sfn536_zero_stride_span.sfn", "fn zero_stride_probe() -> int {\n"
+        + "    let mut n: int = 0;\n"
+        + "    for i in 0..10..0 { n += 1; }\n"
+        + "    return n;\n"
+        + "}\n");
+    let exit = process.run_capture([_sfn_bin(), "emit", "llvm", src], process.environ());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    if fs.exists(src) { fs.deleteFile(src); }
+
+    assert exit != 0;
+    assert find(out + err, "-->", 0) >= 0;
+    assert find(out + err, ":3:5", 0) >= 0;
+}
+
 test "range for: missing start surfaces the range parse diagnostic" ![io] {
     let parsed = parse_range_iterable("..10");
     let parse_result = expect_eq_bool(parsed.success, false);
