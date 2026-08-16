@@ -37,6 +37,8 @@ import {
     extend_diag_array,
     extend_string_array,
     join_with_separator,
+    lowering_error_diag,
+    lowering_warning_diag,
     number_to_string,
     starts_with,
     string_array_contains,
@@ -108,7 +110,9 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
             if index >= elements.length { break; }
             let element_text = trim_text(elements[index]);
             if element_text.length == 0 {
-                diagnostics.push("llvm lowering: empty element in array literal");
+                let _empty_element_message = "empty element in array literal";
+                diags.push(lowering_warning_diag("E1006", _empty_element_message, null));
+                diagnostics.push("llvm lowering: " + _empty_element_message);
                 index += 1;
                 continue;
             }
@@ -162,7 +166,9 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
             current_lines = lowered.lines;
             current_temp = lowered.temp_index;
             if lowered.operand == null {
-                diagnostics.push("llvm lowering: array literal element produced no value");
+                let _no_value_message = "array literal element produced no value";
+                diags.push(lowering_warning_diag("E1006", _no_value_message, null));
+                diagnostics.push("llvm lowering: " + _no_value_message);
                 return ExpressionResult {
                     lines: current_lines,
                     temp_index: current_temp,
@@ -185,7 +191,9 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
             current_lines = as_string.lines;
             current_temp = as_string.temp_index;
             if as_string.operand == null {
-                diagnostics.push("llvm lowering: unable to stringify array literal element");
+                let _stringify_message = "unable to stringify array literal element";
+                diags.push(lowering_warning_diag("E1013", _stringify_message, null));
+                diagnostics.push("llvm lowering: " + _stringify_message);
                 return ExpressionResult {
                     lines: current_lines,
                     temp_index: current_temp,
@@ -330,7 +338,9 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
         if index >= elements.length { break; }
         let element_text = trim_text(elements[index]);
         if element_text.length == 0 {
-            diagnostics.push("llvm lowering: empty element in array literal");
+            let _empty_element_message2 = "empty element in array literal";
+            diags.push(lowering_warning_diag("E1006", _empty_element_message2, null));
+            diagnostics.push("llvm lowering: " + _empty_element_message2);
             index += 1;
             continue;
         }
@@ -340,7 +350,9 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
         current_lines = lowered.lines;
         current_temp = lowered.temp_index;
         if lowered.operand == null {
-            diagnostics.push("llvm lowering: array literal element produced no value");
+            let _no_value_message2 = "array literal element produced no value";
+            diags.push(lowering_warning_diag("E1006", _no_value_message2, null));
+            diagnostics.push("llvm lowering: " + _no_value_message2);
             return ExpressionResult {
                 lines: current_lines,
                 temp_index: current_temp,
@@ -453,7 +465,9 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
     }
 
     if inferred_element_type.length == 0 {
-        diagnostics.push("llvm lowering: unsupported array literal element type");
+        let _unsupported_element_message = "unsupported array literal element type";
+        diags.push(lowering_warning_diag("E1006", _unsupported_element_message, null));
+        diagnostics.push("llvm lowering: " + _unsupported_element_message);
         return ExpressionResult {
             lines: current_lines,
             temp_index: current_temp,
@@ -497,9 +511,11 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
                         current_lines = boxed.lines;
                         current_temp = boxed.temp_index;
                         if boxed.operand == null {
-                            diagnostics.push("llvm lowering: array literal element could not be boxed to `"
+                            let _boxed_message = "array literal element could not be boxed to `"
                                 + element_type
-                                + "`");
+                                + "`";
+                            diags.push(lowering_warning_diag("E1006", _boxed_message, null));
+                            diagnostics.push("llvm lowering: " + _boxed_message);
                             return ExpressionResult {
                                 lines: current_lines,
                                 temp_index: current_temp,
@@ -521,9 +537,11 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
         current_lines = coerced.lines;
         current_temp = coerced.temp_index;
         if coerced.operand == null {
-            diagnostics.push("llvm lowering: array literal element could not be coerced to `"
+            let _coerced_message = "array literal element could not be coerced to `"
                 + element_type
-                + "`");
+                + "`";
+            diags.push(lowering_warning_diag("E1006", _coerced_message, null));
+            diagnostics.push("llvm lowering: " + _coerced_message);
             return ExpressionResult {
                 lines: current_lines,
                 temp_index: current_temp,
@@ -756,11 +774,15 @@ fn lower_struct_literal(parse: StructLiteralParse, bindings: ParameterBinding[],
     let mut info = resolve_struct_info_for_literal(context, parse.type_name);
     if info == null {
         if parse.type_name.length > 0 {
-            diagnostics.push("llvm lowering: struct literal references unknown struct `"
+            let _unknown_struct_message = "struct literal references unknown struct `"
                 + parse.type_name
-                + "`");
+                + "`";
+            diags.push(lowering_warning_diag("E1012", _unknown_struct_message, span));
+            diagnostics.push("llvm lowering: " + _unknown_struct_message);
         } else {
-            diagnostics.push("llvm lowering: struct literal references unknown struct");
+            let _unknown_struct_bare_message = "struct literal references unknown struct";
+            diags.push(lowering_warning_diag("E1012", _unknown_struct_bare_message, span));
+            diagnostics.push("llvm lowering: " + _unknown_struct_bare_message);
         }
         return ExpressionResult {
             lines: current_lines,
@@ -865,9 +887,7 @@ fn lower_struct_literal(parse: StructLiteralParse, bindings: ParameterBinding[],
                     // Slice E.2 follow-up (#540): when the caller threaded a
                     // span, attach the same `line:col` here so the follow-up
                     // diagnostic colocates with the bare mismatch detail.
-                    let mut _lit_diag = _lit_diag_prefix
-                        + "unable to coerce value (got `"
-                        + lowered.operand.llvm_type
+                    let _lit_message = "unable to coerce value (got `" + lowered.operand.llvm_type
                         + "`) into struct literal field `"
                         + info.name
                         + "."
@@ -875,6 +895,8 @@ fn lower_struct_literal(parse: StructLiteralParse, bindings: ParameterBinding[],
                         + "` (expected `"
                         + expected.llvm_type
                         + "`)";
+                    diags.push(lowering_error_diag("E1002", _lit_message, span));
+                    let mut _lit_diag = _lit_diag_prefix + _lit_message;
                     if span != null {
                         _lit_diag = _lit_diag + " at " + _format_literal_span(span);
                     }
@@ -888,13 +910,16 @@ fn lower_struct_literal(parse: StructLiteralParse, bindings: ParameterBinding[],
                 // omitted field, reached through a different branch. This is
                 // the shape an unresolvable field access takes inside a
                 // struct literal (`S { a: t.unknown, ... }`).
-                let mut _unlowered_diag = "llvm lowering [fatal] [E1002]: unable to lower value for struct literal field `"
+                let _unlowered_message = "unable to lower value for struct literal field `"
                     + info.name
                     + "."
                     + expected.name
                     + "` — refusing to fabricate a default `"
                     + expected.llvm_type
                     + "`";
+                diags.push(lowering_error_diag("E1002", _unlowered_message, span));
+                let mut _unlowered_diag = "llvm lowering [fatal] [E1002]: "
+                    + _unlowered_message;
                 if span != null {
                     _unlowered_diag = _unlowered_diag + " at "
                         + _format_literal_span(span);
@@ -909,13 +934,15 @@ fn lower_struct_literal(parse: StructLiteralParse, bindings: ParameterBinding[],
             // field with `default_return_literal`, so the constructed struct
             // silently carries `0`/`false`/`null` where the author's value
             // belongs. No language feature grants partial literals.
-            let mut _missing_diag = "llvm lowering [fatal] [E1002]: struct literal for `"
-                + info.name
+            let _missing_message = "struct literal for `" + info.name
                 + "` missing field `"
                 + expected.name
                 + "` — refusing to fabricate a default `"
                 + expected.llvm_type
                 + "`";
+            diags.push(lowering_error_diag("E1002", _missing_message, span));
+            let mut _missing_diag = "llvm lowering [fatal] [E1002]: "
+                + _missing_message;
             if span != null {
                 _missing_diag = _missing_diag + " at " + _format_literal_span(span);
             }
@@ -949,10 +976,12 @@ fn lower_struct_literal(parse: StructLiteralParse, bindings: ParameterBinding[],
         if extra_index >= parse.fields.length { break; }
         let literal_field = parse.fields[extra_index];
         if !string_array_contains(used_names, literal_field.name) {
-            diagnostics.push("llvm lowering: struct literal for `" + info.name
+            let _extra_field_message = "struct literal for `" + info.name
                 + "` provides unknown field `"
                 + literal_field.name
-                + "`");
+                + "`";
+            diags.push(lowering_warning_diag("E1012", _extra_field_message, span));
+            diagnostics.push("llvm lowering: " + _extra_field_message);
         }
         extra_index += 1;
     }
@@ -1118,11 +1147,15 @@ fn lower_enum_literal(parse: EnumLiteralParse, bindings: ParameterBinding[], loc
     let enum_info = resolve_enum_info_for_literal(context, parse.enum_name);
     if enum_info == null {
         if parse.enum_name.length > 0 {
-            diagnostics.push("llvm lowering: enum literal references unknown enum `"
+            let _unknown_enum_message = "enum literal references unknown enum `"
                 + parse.enum_name
-                + "`");
+                + "`";
+            diags.push(lowering_warning_diag("E1006", _unknown_enum_message, span));
+            diagnostics.push("llvm lowering: " + _unknown_enum_message);
         } else {
-            diagnostics.push("llvm lowering: enum literal references unknown enum");
+            let _unknown_enum_bare_message = "enum literal references unknown enum";
+            diags.push(lowering_warning_diag("E1006", _unknown_enum_bare_message, span));
+            diagnostics.push("llvm lowering: " + _unknown_enum_bare_message);
         }
         return ExpressionResult {
             lines: current_lines,
@@ -1136,10 +1169,12 @@ fn lower_enum_literal(parse: EnumLiteralParse, bindings: ParameterBinding[], loc
 
     let variant_info = resolve_enum_variant_info(enum_info, parse.variant_name);
     if variant_info == null {
-        diagnostics.push("llvm lowering: enum `" + parse.enum_name
+        let _no_variant_message = "enum `" + parse.enum_name
             + "` has no variant `"
             + parse.variant_name
-            + "`");
+            + "`";
+        diags.push(lowering_warning_diag("E1006", _no_variant_message, span));
+        diagnostics.push("llvm lowering: " + _no_variant_message);
         return ExpressionResult {
             lines: current_lines,
             temp_index: current_temp,
@@ -1338,8 +1373,7 @@ fn lower_enum_literal(parse: EnumLiteralParse, bindings: ParameterBinding[], loc
                         }
                         // As in the struct-literal branch, both the ABI detail
                         // and this enrichment remain ordered provider events.
-                        let mut _payload_diag = _payload_diag_prefix
-                            + "unable to coerce value (got `"
+                        let _payload_message = "unable to coerce value (got `"
                             + field_operand.llvm_type
                             + "`) into enum payload field `"
                             + parse.enum_name
@@ -1350,6 +1384,13 @@ fn lower_enum_literal(parse: EnumLiteralParse, bindings: ParameterBinding[], loc
                             + "` (expected `"
                             + field_llvm_type
                             + "`)";
+                        if _abi_match {
+                            diags.push(lowering_error_diag("E1009", _payload_message, span));
+                        } else {
+                            diags.push(lowering_warning_diag("E1009", _payload_message, span));
+                        }
+                        let mut _payload_diag = _payload_diag_prefix
+                            + _payload_message;
                         if span != null {
                             _payload_diag = _payload_diag + " at "
                                 + _format_literal_span(span);
@@ -1416,12 +1457,14 @@ fn lower_enum_literal(parse: EnumLiteralParse, bindings: ParameterBinding[], loc
                     used_names.push(expected.name);
                 }
             } else {
-                diagnostics.push("llvm lowering: enum literal for `" + parse.enum_name
+                let _enum_missing_message = "enum literal for `" + parse.enum_name
                     + "."
                     + parse.variant_name
                     + "` missing field `"
                     + expected.name
-                    + "`");
+                    + "`";
+                diags.push(lowering_warning_diag("E1006", _enum_missing_message, span));
+                diagnostics.push("llvm lowering: " + _enum_missing_message);
             }
 
             field_index += 1;
@@ -1432,12 +1475,14 @@ fn lower_enum_literal(parse: EnumLiteralParse, bindings: ParameterBinding[], loc
             if extra_index >= parse.fields.length { break; }
             let literal_field = parse.fields[extra_index];
             if !string_array_contains(used_names, literal_field.name) {
-                diagnostics.push("llvm lowering: enum literal for `" + parse.enum_name
+                let _enum_extra_message = "enum literal for `" + parse.enum_name
                     + "."
                     + parse.variant_name
                     + "` provides unknown field `"
                     + literal_field.name
-                    + "`");
+                    + "`";
+                diags.push(lowering_warning_diag("E1006", _enum_extra_message, span));
+                diagnostics.push("llvm lowering: " + _enum_extra_message);
             }
             extra_index += 1;
         }

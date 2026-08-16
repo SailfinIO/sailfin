@@ -44,7 +44,13 @@ import {
     RuntimeHelperDescriptor,
     StringConstant
 } from "../../types";
-import { extend_string_array, join_with_separator, number_to_string } from "../../utils";
+import {
+    extend_string_array,
+    join_with_separator,
+    lowering_error_diag,
+    lowering_warning_diag,
+    number_to_string
+} from "../../utils";
 import { coerce_operand_to_type } from "./core_operands/dispatch";
 
 // Per-call-site overrides for `emit_runtime_call`. Empty fields fall
@@ -177,10 +183,12 @@ fn emit_runtime_call(target: string, operands: LLVMOperand[], overrides: Runtime
     // gap rather than silently emitting malformed IR.
     if descriptor == null {
         if overrides.return_type.length == 0 {
-            let missing_diag = "llvm lowering [fatal]: emit_runtime_call: no descriptor for `"
+            let missing_message = "emit_runtime_call: no descriptor for `"
                 + target
                 + "` and no return-type override supplied";
+            let missing_diag = "llvm lowering [fatal]: " + missing_message;
             trace_log(missing_diag);
+            result_diags.push(lowering_error_diag("E1008", missing_message, null));
             result_diagnostics.push(missing_diag);
             return ExpressionResult {
                 lines: result_lines,
@@ -211,11 +219,13 @@ fn emit_runtime_call(target: string, operands: LLVMOperand[], overrides: Runtime
             result_lines = coerced.lines;
             result_temp = coerced.temp_index;
             if coerced.operand == null {
-                result_diagnostics.push("llvm lowering: emit_runtime_call: unable to coerce argument "
+                let coerce_message = "emit_runtime_call: unable to coerce argument "
                     + number_to_string(index)
                     + " for call to `"
                     + target
-                    + "`: passing original operand");
+                    + "`: passing original operand";
+                result_diags.push(lowering_warning_diag("E1008", coerce_message, null));
+                result_diagnostics.push("llvm lowering: " + coerce_message);
                 coerced_operands.push(operand);
             } else { coerced_operands.push(coerced.operand); }
         }
@@ -236,12 +246,13 @@ fn emit_runtime_call(target: string, operands: LLVMOperand[], overrides: Runtime
     if overrides.parameter_types.length > 0 { signature_known = true; }
     if signature_known {
         if parameter_types.length != coerced_operands.length {
-            result_diagnostics.push("llvm lowering: emit_runtime_call: call to `"
-                + target
+            let arity_message = "emit_runtime_call: call to `" + target
                 + "` expected "
                 + number_to_string(parameter_types.length)
                 + " arguments but received "
-                + number_to_string(coerced_operands.length));
+                + number_to_string(coerced_operands.length);
+            result_diags.push(lowering_warning_diag("E1008", arity_message, null));
+            result_diagnostics.push("llvm lowering: " + arity_message);
         }
     }
 
@@ -255,10 +266,12 @@ fn emit_runtime_call(target: string, operands: LLVMOperand[], overrides: Runtime
     let argument_text = join_with_separator(rendered_args, ", ");
 
     if return_type.length == 0 {
-        let unresolved = "llvm lowering [fatal]: emit_runtime_call: cannot resolve return type for call to `"
+        let unresolved_message = "emit_runtime_call: cannot resolve return type for call to `"
             + target
             + "`";
+        let unresolved = "llvm lowering [fatal]: " + unresolved_message;
         trace_log(unresolved);
+        result_diags.push(lowering_error_diag("E1007", unresolved_message, null));
         result_diagnostics.push(unresolved);
         return ExpressionResult {
             lines: result_lines,

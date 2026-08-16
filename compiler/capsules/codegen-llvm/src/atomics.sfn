@@ -46,7 +46,13 @@ import {
     StringConstant,
     TypeContext
 } from "./types";
-import { extend_string_array, number_to_string, trim_text } from "./utils";
+import {
+    extend_string_array,
+    lowering_error_diag,
+    lowering_warning_diag,
+    number_to_string,
+    trim_text
+} from "./utils";
 
 // Predicate over the six reserved atomic-builtin names. Used by the
 // pre-resolution dispatch hook in `lower_call_expression` (see
@@ -101,8 +107,10 @@ fn lower_atomic_builtin(name: string, arguments: string[], bindings: ParameterBi
     // written with the side-effecting atomic call silently dropped.
     let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
-    let diag = "llvm lowering [fatal]: atomic builtin `" + trimmed
+    let message = "atomic builtin `" + trimmed
         + "` is reserved but not yet implemented (tracking issue #323)";
+    diags.push(lowering_error_diag("E1006", message, null));
+    let diag = "llvm lowering [fatal]: " + message;
     trace_log(diag);
     diagnostics.push(diag);
     return ExpressionResult {
@@ -131,8 +139,10 @@ fn _lower_atomic_load(arguments: string[], bindings: ParameterBinding[], locals:
         // mirrors the diagnostic the same way
         // `core_call_emission/dispatch.sfn` does, so the user sees the
         // failure rather than a silently-empty IR file.
-        let diag1 = "llvm lowering [fatal] [E0806]: atomic_load expects exactly 1 argument (`*int`), got "
+        let message = "atomic_load expects exactly 1 argument (`*int`), got "
             + number_to_string(arguments.length);
+        diags.push(lowering_error_diag("E0806", message, null));
+        let diag1 = "llvm lowering [fatal] [E0806]: " + message;
         trace_log(diag1);
         diagnostics.push(diag1);
         return ExpressionResult {
@@ -153,7 +163,9 @@ fn _lower_atomic_load(arguments: string[], bindings: ParameterBinding[], locals:
     current_temp = ptr_lowered.temp_index;
 
     if ptr_lowered.operand == null {
-        diagnostics.push("llvm lowering: atomic_load failed to lower pointer argument");
+        let message = "atomic_load failed to lower pointer argument";
+        diags.push(lowering_warning_diag("E1006", message, null));
+        diagnostics.push("llvm lowering: " + message);
         return ExpressionResult {
             lines: current_lines,
             temp_index: current_temp,
@@ -167,9 +179,11 @@ fn _lower_atomic_load(arguments: string[], bindings: ParameterBinding[], locals:
     let ptr_operand = ptr_lowered.operand;
     let ptr_type = trim_text(ptr_operand.llvm_type);
     if ptr_type != "i64*" {
-        let diag2 = "llvm lowering [fatal] [E0806]: atomic_load expects argument 0 of type `*int` (i64*), got `"
+        let message = "atomic_load expects argument 0 of type `*int` (i64*), got `"
             + ptr_type
             + "`";
+        diags.push(lowering_error_diag("E0806", message, null));
+        let diag2 = "llvm lowering [fatal] [E0806]: " + message;
         trace_log(diag2);
         diagnostics.push(diag2);
         return ExpressionResult {
@@ -208,8 +222,10 @@ fn _lower_atomic_store(arguments: string[], bindings: ParameterBinding[], locals
     let mut collected_strings: StringConstant[] = [];
 
     if arguments.length != 2 {
-        let diag1 = "llvm lowering [fatal] [E0806]: atomic_store expects exactly 2 arguments (`*int`, `int`), got "
+        let message = "atomic_store expects exactly 2 arguments (`*int`, `int`), got "
             + number_to_string(arguments.length);
+        diags.push(lowering_error_diag("E0806", message, null));
+        let diag1 = "llvm lowering [fatal] [E0806]: " + message;
         trace_log(diag1);
         diagnostics.push(diag1);
         return ExpressionResult {
@@ -230,7 +246,9 @@ fn _lower_atomic_store(arguments: string[], bindings: ParameterBinding[], locals
     current_temp = ptr_lowered.temp_index;
 
     if ptr_lowered.operand == null {
-        diagnostics.push("llvm lowering: atomic_store failed to lower pointer argument");
+        let message = "atomic_store failed to lower pointer argument";
+        diags.push(lowering_warning_diag("E1006", message, null));
+        diagnostics.push("llvm lowering: " + message);
         return ExpressionResult {
             lines: current_lines,
             temp_index: current_temp,
@@ -244,9 +262,11 @@ fn _lower_atomic_store(arguments: string[], bindings: ParameterBinding[], locals
     let ptr_operand = ptr_lowered.operand;
     let ptr_type = trim_text(ptr_operand.llvm_type);
     if ptr_type != "i64*" {
-        let diag2 = "llvm lowering [fatal] [E0806]: atomic_store expects argument 0 of type `*int` (i64*), got `"
+        let message = "atomic_store expects argument 0 of type `*int` (i64*), got `"
             + ptr_type
             + "`";
+        diags.push(lowering_error_diag("E0806", message, null));
+        let diag2 = "llvm lowering [fatal] [E0806]: " + message;
         trace_log(diag2);
         diagnostics.push(diag2);
         return ExpressionResult {
@@ -267,7 +287,9 @@ fn _lower_atomic_store(arguments: string[], bindings: ParameterBinding[], locals
     current_temp = value_lowered.temp_index;
 
     if value_lowered.operand == null {
-        diagnostics.push("llvm lowering: atomic_store failed to lower value argument");
+        let message = "atomic_store failed to lower value argument";
+        diags.push(lowering_warning_diag("E1006", message, null));
+        diagnostics.push("llvm lowering: " + message);
         return ExpressionResult {
             lines: current_lines,
             temp_index: current_temp,
@@ -281,9 +303,11 @@ fn _lower_atomic_store(arguments: string[], bindings: ParameterBinding[], locals
     let value_operand = value_lowered.operand;
     let value_type = trim_text(value_operand.llvm_type);
     if value_type != "i64" {
-        let diag3 = "llvm lowering [fatal] [E0806]: atomic_store expects argument 1 of type `int` (i64), got `"
+        let message = "atomic_store expects argument 1 of type `int` (i64), got `"
             + value_type
             + "`";
+        diags.push(lowering_error_diag("E0806", message, null));
+        let diag3 = "llvm lowering [fatal] [E0806]: " + message;
         trace_log(diag3);
         diagnostics.push(diag3);
         return ExpressionResult {
@@ -323,8 +347,10 @@ fn _lower_atomic_fence(arguments: string[], temp_index: int, lines: string[]) ->
     let mut current_lines = lines;
 
     if arguments.length != 0 {
-        let diag = "llvm lowering [fatal] [E0806]: atomic_fence expects zero arguments, got "
+        let message = "atomic_fence expects zero arguments, got "
             + number_to_string(arguments.length);
+        diags.push(lowering_error_diag("E0806", message, null));
+        let diag = "llvm lowering [fatal] [E0806]: " + message;
         trace_log(diag);
         diagnostics.push(diag);
         return ExpressionResult {
@@ -374,9 +400,11 @@ fn _lower_atomic_rmw(op: string, name: string, arguments: string[], bindings: Pa
     let mut collected_strings: StringConstant[] = [];
 
     if arguments.length != 2 {
-        let diag1 = "llvm lowering [fatal] [E0806]: " + name
+        let message = name
             + " expects exactly 2 arguments (`*int`, `int`), got "
             + number_to_string(arguments.length);
+        diags.push(lowering_error_diag("E0806", message, null));
+        let diag1 = "llvm lowering [fatal] [E0806]: " + message;
         trace_log(diag1);
         diagnostics.push(diag1);
         return ExpressionResult {
@@ -397,8 +425,9 @@ fn _lower_atomic_rmw(op: string, name: string, arguments: string[], bindings: Pa
     current_temp = ptr_lowered.temp_index;
 
     if ptr_lowered.operand == null {
-        diagnostics.push("llvm lowering: " + name
-            + " failed to lower pointer argument");
+        let message = name + " failed to lower pointer argument";
+        diags.push(lowering_warning_diag("E1006", message, null));
+        diagnostics.push("llvm lowering: " + message);
         return ExpressionResult {
             lines: current_lines,
             temp_index: current_temp,
@@ -412,10 +441,11 @@ fn _lower_atomic_rmw(op: string, name: string, arguments: string[], bindings: Pa
     let ptr_operand = ptr_lowered.operand;
     let ptr_type = trim_text(ptr_operand.llvm_type);
     if ptr_type != "i64*" {
-        let diag2 = "llvm lowering [fatal] [E0806]: " + name
-            + " expects argument 0 of type `*int` (i64*), got `"
+        let message = name + " expects argument 0 of type `*int` (i64*), got `"
             + ptr_type
             + "`";
+        diags.push(lowering_error_diag("E0806", message, null));
+        let diag2 = "llvm lowering [fatal] [E0806]: " + message;
         trace_log(diag2);
         diagnostics.push(diag2);
         return ExpressionResult {
@@ -436,8 +466,9 @@ fn _lower_atomic_rmw(op: string, name: string, arguments: string[], bindings: Pa
     current_temp = delta_lowered.temp_index;
 
     if delta_lowered.operand == null {
-        diagnostics.push("llvm lowering: " + name
-            + " failed to lower delta argument");
+        let message = name + " failed to lower delta argument";
+        diags.push(lowering_warning_diag("E1006", message, null));
+        diagnostics.push("llvm lowering: " + message);
         return ExpressionResult {
             lines: current_lines,
             temp_index: current_temp,
@@ -451,10 +482,11 @@ fn _lower_atomic_rmw(op: string, name: string, arguments: string[], bindings: Pa
     let delta_operand = delta_lowered.operand;
     let delta_type = trim_text(delta_operand.llvm_type);
     if delta_type != "i64" {
-        let diag3 = "llvm lowering [fatal] [E0806]: " + name
-            + " expects argument 1 of type `int` (i64), got `"
+        let message = name + " expects argument 1 of type `int` (i64), got `"
             + delta_type
             + "`";
+        diags.push(lowering_error_diag("E0806", message, null));
+        let diag3 = "llvm lowering [fatal] [E0806]: " + message;
         trace_log(diag3);
         diagnostics.push(diag3);
         return ExpressionResult {
@@ -507,8 +539,10 @@ fn _lower_atomic_cas(arguments: string[], bindings: ParameterBinding[], locals: 
     let mut collected_strings: StringConstant[] = [];
 
     if arguments.length != 3 {
-        let diag1 = "llvm lowering [fatal] [E0806]: atomic_cas expects exactly 3 arguments (`*int`, `int`, `int`), got "
+        let message = "atomic_cas expects exactly 3 arguments (`*int`, `int`, `int`), got "
             + number_to_string(arguments.length);
+        diags.push(lowering_error_diag("E0806", message, null));
+        let diag1 = "llvm lowering [fatal] [E0806]: " + message;
         trace_log(diag1);
         diagnostics.push(diag1);
         return ExpressionResult {
@@ -529,7 +563,9 @@ fn _lower_atomic_cas(arguments: string[], bindings: ParameterBinding[], locals: 
     current_temp = ptr_lowered.temp_index;
 
     if ptr_lowered.operand == null {
-        diagnostics.push("llvm lowering: atomic_cas failed to lower pointer argument");
+        let message = "atomic_cas failed to lower pointer argument";
+        diags.push(lowering_warning_diag("E1006", message, null));
+        diagnostics.push("llvm lowering: " + message);
         return ExpressionResult {
             lines: current_lines,
             temp_index: current_temp,
@@ -543,9 +579,11 @@ fn _lower_atomic_cas(arguments: string[], bindings: ParameterBinding[], locals: 
     let ptr_operand = ptr_lowered.operand;
     let ptr_type = trim_text(ptr_operand.llvm_type);
     if ptr_type != "i64*" {
-        let diag2 = "llvm lowering [fatal] [E0806]: atomic_cas expects argument 0 of type `*int` (i64*), got `"
+        let message = "atomic_cas expects argument 0 of type `*int` (i64*), got `"
             + ptr_type
             + "`";
+        diags.push(lowering_error_diag("E0806", message, null));
+        let diag2 = "llvm lowering [fatal] [E0806]: " + message;
         trace_log(diag2);
         diagnostics.push(diag2);
         return ExpressionResult {
@@ -566,7 +604,9 @@ fn _lower_atomic_cas(arguments: string[], bindings: ParameterBinding[], locals: 
     current_temp = expected_lowered.temp_index;
 
     if expected_lowered.operand == null {
-        diagnostics.push("llvm lowering: atomic_cas failed to lower expected argument");
+        let message = "atomic_cas failed to lower expected argument";
+        diags.push(lowering_warning_diag("E1006", message, null));
+        diagnostics.push("llvm lowering: " + message);
         return ExpressionResult {
             lines: current_lines,
             temp_index: current_temp,
@@ -580,9 +620,11 @@ fn _lower_atomic_cas(arguments: string[], bindings: ParameterBinding[], locals: 
     let expected_operand = expected_lowered.operand;
     let expected_type = trim_text(expected_operand.llvm_type);
     if expected_type != "i64" {
-        let diag3 = "llvm lowering [fatal] [E0806]: atomic_cas expects argument 1 of type `int` (i64), got `"
+        let message = "atomic_cas expects argument 1 of type `int` (i64), got `"
             + expected_type
             + "`";
+        diags.push(lowering_error_diag("E0806", message, null));
+        let diag3 = "llvm lowering [fatal] [E0806]: " + message;
         trace_log(diag3);
         diagnostics.push(diag3);
         return ExpressionResult {
@@ -603,7 +645,9 @@ fn _lower_atomic_cas(arguments: string[], bindings: ParameterBinding[], locals: 
     current_temp = new_lowered.temp_index;
 
     if new_lowered.operand == null {
-        diagnostics.push("llvm lowering: atomic_cas failed to lower new argument");
+        let message = "atomic_cas failed to lower new argument";
+        diags.push(lowering_warning_diag("E1006", message, null));
+        diagnostics.push("llvm lowering: " + message);
         return ExpressionResult {
             lines: current_lines,
             temp_index: current_temp,
@@ -617,9 +661,11 @@ fn _lower_atomic_cas(arguments: string[], bindings: ParameterBinding[], locals: 
     let new_operand = new_lowered.operand;
     let new_type = trim_text(new_operand.llvm_type);
     if new_type != "i64" {
-        let diag4 = "llvm lowering [fatal] [E0806]: atomic_cas expects argument 2 of type `int` (i64), got `"
+        let message = "atomic_cas expects argument 2 of type `int` (i64), got `"
             + new_type
             + "`";
+        diags.push(lowering_error_diag("E0806", message, null));
+        let diag4 = "llvm lowering [fatal] [E0806]: " + message;
         trace_log(diag4);
         diagnostics.push(diag4);
         return ExpressionResult {

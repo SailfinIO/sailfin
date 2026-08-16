@@ -19,6 +19,7 @@ import {
 import {
     append_string,
     extend_diag_array,
+    lowering_warning_diag,
     number_to_string,
     starts_with,
     trim_text
@@ -73,7 +74,9 @@ fn lower_index_expression(parse: IndexExpressionParse, bindings: ParameterBindin
     current_temp = index_result.temp_index;
 
     if index_result.operand == null {
-        diagnostics.push("llvm lowering: index expression produced no value");
+        let message = "index expression produced no value";
+        diags.push(lowering_warning_diag("E1006", message, null));
+        diagnostics.push("llvm lowering: " + message);
         return ExpressionResult {
             lines: current_lines,
             temp_index: current_temp,
@@ -97,7 +100,9 @@ fn lower_index_expression(parse: IndexExpressionParse, bindings: ParameterBindin
     current_lines = index_coercion.lines;
     current_temp = index_coercion.temp_index;
     if index_coercion.operand == null {
-        diagnostics.push("llvm lowering: unable to coerce index expression to i64");
+        let message = "unable to coerce index expression to i64";
+        diags.push(lowering_warning_diag("E1006", message, null));
+        diagnostics.push("llvm lowering: " + message);
         return ExpressionResult {
             lines: current_lines,
             temp_index: current_temp,
@@ -186,9 +191,11 @@ fn lower_index_expression(parse: IndexExpressionParse, bindings: ParameterBindin
     }
 
     if element_type.length == 0 {
-        diagnostics.push("llvm lowering: unable to determine element type for array indexing on type `"
+        let message = "unable to determine element type for array indexing on type `"
             + array_type
-            + "`");
+            + "`";
+        diags.push(lowering_warning_diag("E1006", message, null));
+        diagnostics.push("llvm lowering: " + message);
         return ExpressionResult {
             lines: current_lines,
             temp_index: current_temp,
@@ -211,7 +218,9 @@ fn lower_index_expression(parse: IndexExpressionParse, bindings: ParameterBindin
         current_lines = index_as_double.lines;
         current_temp = index_as_double.temp_index;
         if index_as_double.operand == null {
-            diagnostics.push("llvm lowering: unable to coerce string index expression to double");
+            let message = "unable to coerce string index expression to double";
+            diags.push(lowering_warning_diag("E1006", message, null));
+            diagnostics.push("llvm lowering: " + message);
             return ExpressionResult {
                 lines: current_lines,
                 temp_index: current_temp,
@@ -346,9 +355,9 @@ fn lower_index_expression(parse: IndexExpressionParse, bindings: ParameterBindin
         };
     }
 
-    diagnostics.push("llvm lowering: unsupported array type for indexing: `"
-        + array_type
-        + "`");
+    let message = "unsupported array type for indexing: `" + array_type + "`";
+    diags.push(lowering_warning_diag("E1006", message, null));
+    diagnostics.push("llvm lowering: " + message);
     return ExpressionResult {
         lines: current_lines,
         temp_index: current_temp,

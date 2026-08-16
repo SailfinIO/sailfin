@@ -44,7 +44,9 @@ import {
 import {
     append_string,
     contains_text,
+    diag_from_legacy_lowering_error,
     extend_diag_array,
+    lowering_warning_diag,
     number_to_string,
     starts_with,
     trim_text
@@ -422,10 +424,10 @@ fn lower_enum_member_access(parse: MemberAccessParse, enum_info: EnumTypeInfo, b
         if parse.field == "tag" {
             return make_expression_result(current_lines, current_temp, tag_operand, messages, messages_diags, enum_string_constants);
         }
-        messages.push("llvm lowering: enum `" + enum_info.name
-            + "` has no field `"
-            + parse.field
-            + "` on any variant");
+        let message = "enum `" + enum_info.name + "` has no field `" + parse.field
+            + "` on any variant";
+        messages_diags.push(lowering_warning_diag("E1006", message, null));
+        messages.push("llvm lowering: " + message);
         return make_expression_result(current_lines, current_temp, null, messages, messages_diags, enum_string_constants);
     }
 
@@ -495,17 +497,18 @@ fn lower_enum_member_access(parse: MemberAccessParse, enum_info: EnumTypeInfo, b
 
     if selected_variants.length == 0 {
         if expected_type.length > 0 {
-            messages.push("llvm lowering: enum `" + enum_info.name
-                + "` has no field `"
-                + parse.field
+            let message = "enum `" + enum_info.name + "` has no field `" + parse.field
                 + "` compatible with expected type `"
                 + expected_type
-                + "`");
+                + "`";
+            messages_diags.push(lowering_warning_diag("E1006", message, null));
+            messages.push("llvm lowering: " + message);
         } else {
-            messages.push("llvm lowering: enum member access for `" + enum_info.name
-                + "."
+            let message = "enum member access for `" + enum_info.name + "."
                 + parse.field
-                + "` uses incompatible field types across variants");
+                + "` uses incompatible field types across variants";
+            messages_diags.push(lowering_warning_diag("E1006", message, null));
+            messages.push("llvm lowering: " + message);
         }
         return make_expression_result(current_lines, current_temp, null, messages, messages_diags, enum_string_constants);
     }
@@ -565,6 +568,8 @@ fn lower_enum_member_access(parse: MemberAccessParse, enum_info: EnumTypeInfo, b
         // negative e2e test (enum_same_name_field_conflict_test.sfn) guards it.
         let diag = _enum_field_conflict_diag(enum_info.name, parse.field, selected_variants, selected_fields);
         trace_log(diag);
+        let structured_diag = diag_from_legacy_lowering_error(diag);
+        if structured_diag != null { messages_diags.push(structured_diag); }
         messages.push(diag);
         return make_expression_result(current_lines, current_temp, null, messages, messages_diags, enum_string_constants);
     }
@@ -977,9 +982,10 @@ fn lower_member_access(parse: MemberAccessParse, bindings: ParameterBinding[], l
 
             if base_type_trimmed != "double" {
                 if base_type_trimmed != "i8" {
-                    diagnostics.push("llvm lowering: member access base `"
-                        + base_type_trimmed
-                        + "` lacks struct metadata");
+                    let message = "member access base `" + base_type_trimmed
+                        + "` lacks struct metadata";
+                    diags.push(lowering_warning_diag("E1006", message, null));
+                    diagnostics.push("llvm lowering: " + message);
                 }
             }
             return ExpressionResult {
@@ -1006,9 +1012,10 @@ fn lower_member_access(parse: MemberAccessParse, bindings: ParameterBinding[], l
             }
             if base_type_trimmed != "double" {
                 if base_type_trimmed != "i8" {
-                    diagnostics.push("llvm lowering: member access base `"
-                        + base_type_trimmed
-                        + "` lacks struct metadata");
+                    let message = "member access base `" + base_type_trimmed
+                        + "` lacks struct metadata";
+                    diags.push(lowering_warning_diag("E1006", message, null));
+                    diagnostics.push("llvm lowering: " + message);
                 }
             }
             return ExpressionResult {
@@ -1025,10 +1032,10 @@ fn lower_member_access(parse: MemberAccessParse, bindings: ParameterBinding[], l
     let info = struct_info;
     let field_info = find_struct_field_info(info, parse.field);
     if field_info == null {
-        diagnostics.push("llvm lowering: struct `" + info.name
-            + "` has no field `"
-            + parse.field
-            + "`");
+        let message = "struct `" + info.name + "` has no field `" + parse.field
+            + "`";
+        diags.push(lowering_warning_diag("E1006", message, null));
+        diagnostics.push("llvm lowering: " + message);
         return ExpressionResult {
             lines: current_lines,
             temp_index: current_temp,

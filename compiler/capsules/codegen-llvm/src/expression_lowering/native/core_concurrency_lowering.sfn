@@ -18,7 +18,13 @@ import {
     StringConstant,
     TypeContext
 } from "../../types";
-import { extend_diag_array, extend_string_array, starts_with } from "../../utils";
+import {
+    extend_diag_array,
+    extend_string_array,
+    lowering_error_diag,
+    lowering_warning_diag,
+    starts_with
+} from "../../utils";
 import { lower_expression } from "./core";
 import { find_parameter_binding } from "./core_bindings";
 import { split_call_arguments } from "./core_calls";
@@ -140,10 +146,12 @@ fn try_lower_channel_method(member_target: MemberAccessParse, argument_entries: 
     ch_temp = base_lowered.temp_index;
     ch_constants = merge_string_constants(ch_constants, base_lowered.string_constants);
     if base_lowered.operand == null {
-        ch_diag.push("llvm lowering: channel `" + field
+        let message = "channel `" + field
             + "`: could not lower channel handle `"
             + base
-            + "`");
+            + "`";
+        ch_diags.push(lowering_warning_diag("E1010", message, null));
+        ch_diag.push("llvm lowering: " + message);
         return ExpressionResult {
             lines: ch_lines,
             temp_index: ch_temp,
@@ -171,9 +179,11 @@ fn try_lower_channel_method(member_target: MemberAccessParse, argument_entries: 
         ch_temp = value_lowered.temp_index;
         ch_constants = merge_string_constants(ch_constants, value_lowered.string_constants);
         if value_lowered.operand == null {
-            ch_diag.push("llvm lowering: channel send: could not lower element `"
+            let message = "channel send: could not lower element `"
                 + argument_entries[0]
-                + "`");
+                + "`";
+            ch_diags.push(lowering_warning_diag("E1006", message, null));
+            ch_diag.push("llvm lowering: " + message);
             return ExpressionResult {
                 lines: ch_lines,
                 temp_index: ch_temp,
@@ -290,11 +300,13 @@ fn try_lower_channel_method(member_target: MemberAccessParse, argument_entries: 
     // routes, subsuming the earlier SFN-397 guard in `lower_await_expression`.
     if channel_elem_kind.length == 0 {
         if trim_text(expected_type).length == 0 {
-            ch_diag.push("[fatal] llvm lowering: `" + base
+            let message = "`" + base
                 + ".receive()` cannot resolve the received element type; "
                 + "annotate the receiving binding "
                 + "(`let x: T = <channel>.receive()`) so the channel payload "
-                + "type is known");
+                + "type is known";
+            ch_diags.push(lowering_error_diag("E1006", message, null));
+            ch_diag.push("[fatal] llvm lowering: " + message);
             return ExpressionResult {
                 lines: ch_lines,
                 temp_index: ch_temp,
@@ -569,9 +581,10 @@ fn lower_spawn_typed_expression(stripped: string, bindings: ParameterBinding[], 
         }
     }
     if !have_operand {
-        spawn_diag.push("llvm lowering: spawn:<kind>: could not lower operand for `"
-            + stripped
-            + "`");
+        let message = "spawn:<kind>: could not lower operand for `" + stripped
+            + "`";
+        spawn_diags.push(lowering_warning_diag("E1006", message, null));
+        spawn_diag.push("llvm lowering: " + message);
         return ExpressionResult {
             lines: spawn_lines,
             temp_index: spawn_temp,
@@ -703,9 +716,9 @@ fn lower_spawn_expression(stripped: string, bindings: ParameterBinding[], locals
             };
         }
     }
-    spawn2_diag.push("llvm lowering: spawn: could not lower operand for `"
-        + stripped
-        + "`");
+    let message = "spawn: could not lower operand for `" + stripped + "`";
+    spawn2_diags.push(lowering_warning_diag("E1006", message, null));
+    spawn2_diag.push("llvm lowering: " + message);
     return ExpressionResult {
         lines: spawn2_lines,
         temp_index: spawn2_temp,
@@ -1159,9 +1172,10 @@ fn lower_join_all_expression(stripped: string, bindings: ParameterBinding[], loc
     // parameter carries no element-kind marker (#829) — so only the lowered IR
     // type reliably classifies it; this mirrors the E0831 `[fatal]` backstop.
     if strings_equal(future_kind, "bool") || strings_equal(future_kind, "void") {
-        ja_diag.push("[fatal] llvm lowering: `join_all` does not support `Task<"
-            + future_kind
-            + ">[]` — results are collected in a pointer-width array (supported result kinds: int, number, string, ptr).");
+        let message = "`join_all` does not support `Task<" + future_kind
+            + ">[]` — results are collected in a pointer-width array (supported result kinds: int, number, string, ptr).";
+        ja_diags.push(lowering_error_diag("E1010", message, null));
+        ja_diag.push("[fatal] llvm lowering: " + message);
         let bad = LLVMOperand {
             llvm_type: "{ i8**, i64, i64 }*",
             value: "null"
@@ -1184,9 +1198,11 @@ fn lower_join_all_expression(stripped: string, bindings: ParameterBinding[], loc
     // (future-pointer) element slot.
     if future_kind.length == 0 {
         if !is_empty_literal {
-            ja_diag.push("[fatal] llvm lowering: `join_all` argument is not a task-handle array (`Task<T>[]`); its lowered type was `"
+            let message = "`join_all` argument is not a task-handle array (`Task<T>[]`); its lowered type was `"
                 + handles_type
-                + "`. Build the array from `spawn` handles (`let mut hs: Task<int>[] = []; hs.push(spawn ...)`), or pass `[]` for an empty join.");
+                + "`. Build the array from `spawn` handles (`let mut hs: Task<int>[] = []; hs.push(spawn ...)`), or pass `[]` for an empty join.";
+            ja_diags.push(lowering_error_diag("E1010", message, null));
+            ja_diag.push("[fatal] llvm lowering: " + message);
             let bad = LLVMOperand {
                 llvm_type: "{ i8**, i64, i64 }*",
                 value: "null"
@@ -1382,7 +1398,9 @@ fn lower_await_expression(stripped: string, bindings: ParameterBinding[], locals
     let empty_constants = empty_string_constant_set();
     let remainder = trim_text(substring(stripped, 5, stripped.length));
     if remainder.length == 0 {
-        diagnostics.push("llvm lowering: await expression missing operand");
+        let message = "await expression missing operand";
+        diags.push(lowering_warning_diag("E1010", message, null));
+        diagnostics.push("llvm lowering: " + message);
         return ExpressionResult {
             lines: lines,
             temp_index: temp_index,
@@ -1445,11 +1463,18 @@ fn lower_await_expression(stripped: string, bindings: ParameterBinding[], locals
         if strings_equal(future_operand.llvm_type, "double") {
             await_prefix = "[fatal] ";
         }
-        let with_issue = append_string(diagnostics, await_prefix
-            + "llvm lowering: await expects a Future pointer, got `"
+        let issue_message = "await expects a Future pointer, got `"
             + future_operand.llvm_type
-            + "`");
-        let with_issue_diags = diags;
+            + "`";
+        let with_issue = append_string(diagnostics, await_prefix
+            + "llvm lowering: "
+            + issue_message);
+        let mut with_issue_diags = diags;
+        if await_prefix.length > 0 {
+            with_issue_diags.push(lowering_error_diag("E1010", issue_message, null));
+        } else {
+            with_issue_diags.push(lowering_warning_diag("E1010", issue_message, null));
+        }
         return ExpressionResult {
             lines: lowered.lines,
             temp_index: lowered.temp_index,

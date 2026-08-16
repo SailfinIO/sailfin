@@ -26,6 +26,8 @@ import {
     extend_diag_array,
     extend_string_array,
     join_with_separator,
+    lowering_error_diag,
+    lowering_warning_diag,
     number_to_string,
     starts_with,
     string_array_contains,
@@ -152,10 +154,12 @@ fn lower_numeric_negation_result(result: ExpressionResult, base_diagnostics: str
         current_lines.push("  " + result_temp + " = fneg " + operand_type + " "
             + operand.value);
     } else {
-        let with_issue = append_string(diagnostics, "llvm lowering: cannot negate non-numeric type `"
-            + operand_type
-            + "`");
-        let with_issue_diags = diags;
+        let neg_message = "cannot negate non-numeric type `" + operand_type
+            + "`";
+        let with_issue = append_string(diagnostics, "llvm lowering: "
+            + neg_message);
+        let mut with_issue_diags = diags;
+        with_issue_diags.push(lowering_warning_diag("E1006", neg_message, null));
         return ExpressionResult {
             lines: current_lines,
             temp_index: result.temp_index,
@@ -275,11 +279,13 @@ fn lower_ternary_expression(parse: TernaryParseResult, bindings: ParameterBindin
     current_lines.push(merge_label + ":");
 
     if then_result.operand.llvm_type != else_result.operand.llvm_type {
-        diagnostics.push("llvm lowering: ternary expression branches have incompatible types: `"
+        let message = "ternary expression branches have incompatible types: `"
             + then_result.operand.llvm_type
             + "` vs `"
             + else_result.operand.llvm_type
-            + "`");
+            + "`";
+        diags.push(lowering_warning_diag("E1006", message, null));
+        diagnostics.push("llvm lowering: " + message);
         return ExpressionResult {
             lines: current_lines,
             temp_index: else_result.temp_index,
@@ -328,9 +334,9 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
     if left_text.length == 0 { _if95 = true; }
     if right_text.length == 0 { _if95 = true; }
     if _if95 {
-        diagnostics.push("llvm lowering: malformed binary expression `"
-            + expression
-            + "`");
+        let message = "malformed binary expression `" + expression + "`";
+        diags.push(lowering_warning_diag("E1006", message, null));
+        diagnostics.push("llvm lowering: " + message);
         let empty_constants = empty_string_constant_set();
         return ExpressionResult {
             lines: lines,
@@ -876,10 +882,12 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
         }
     }
     if numeric_type_kind(result_type) == "other" {
-        diagnostics.push("llvm lowering [fatal] [E0307]: operator `" + match.symbol
+        let message = "operator `" + match.symbol
             + "` is not supported on aggregate operands of LLVM type `"
             + result_type
-            + "`");
+            + "`";
+        diags.push(lowering_error_diag("E0307", message, null));
+        diagnostics.push("llvm lowering [fatal] [E0307]: " + message);
         return ExpressionResult {
             lines: harmonised.lines,
             temp_index: harmonised.temp_index,
@@ -902,12 +910,13 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
         // fix lives in Slice D (`as` casts + dominant_type
         // tightening) which will reject this at typecheck before
         // we reach lowering.
-        diagnostics.push("llvm lowering: operator `" + match.symbol
-            + "` is not supported on `"
+        let message = "operator `" + match.symbol + "` is not supported on `"
             + result_type
             + "` operands; bitwise and shift operators require"
             + " integer operands. Annotate the operands as `int`"
-            + " or `i64` (or use an `as` cast once Slice D ships).");
+            + " or `i64` (or use an `as` cast once Slice D ships).";
+        diags.push(lowering_warning_diag("E1006", message, null));
+        diagnostics.push("llvm lowering: " + message);
         let empty_constants = empty_string_constant_set();
         return ExpressionResult {
             lines: harmonised.lines,
@@ -942,7 +951,9 @@ fn lower_comparison_operation(expression: string, match: OperatorMatch, bindings
     if expression == null { _if100 = true; }
     if expression.length == 0 { _if100 = true; }
     if _if100 {
-        diagnostics.push("llvm lowering: empty comparison expression");
+        let message = "empty comparison expression";
+        diags.push(lowering_warning_diag("E1006", message, null));
+        diagnostics.push("llvm lowering: " + message);
         let empty_constants = empty_string_constant_set();
         return ExpressionResult {
             lines: lines,
@@ -957,9 +968,9 @@ fn lower_comparison_operation(expression: string, match: OperatorMatch, bindings
     if match.symbol == null { _if101 = true; }
     if match.symbol.length == 0 { _if101 = true; }
     if _if101 {
-        diagnostics.push("llvm lowering: comparison operator missing in `"
-            + expression
-            + "`");
+        let message = "comparison operator missing in `" + expression + "`";
+        diags.push(lowering_warning_diag("E1006", message, null));
+        diagnostics.push("llvm lowering: " + message);
         let empty_constants = empty_string_constant_set();
         return ExpressionResult {
             lines: lines,
@@ -974,9 +985,11 @@ fn lower_comparison_operation(expression: string, match: OperatorMatch, bindings
     if match.index < 0 { _if102 = true; }
     if match.index >= expression.length { _if102 = true; }
     if _if102 {
-        diagnostics.push("llvm lowering: comparison operator index out of bounds in `"
+        let message = "comparison operator index out of bounds in `"
             + expression
-            + "`");
+            + "`";
+        diags.push(lowering_warning_diag("E1006", message, null));
+        diagnostics.push("llvm lowering: " + message);
         let empty_constants = empty_string_constant_set();
         return ExpressionResult {
             lines: lines,
@@ -996,9 +1009,9 @@ fn lower_comparison_operation(expression: string, match: OperatorMatch, bindings
     if left_text.length == 0 { _if103 = true; }
     if right_text.length == 0 { _if103 = true; }
     if _if103 {
-        diagnostics.push("llvm lowering: malformed comparison expression `"
-            + expression
-            + "`");
+        let message = "malformed comparison expression `" + expression + "`";
+        diags.push(lowering_warning_diag("E1006", message, null));
+        diagnostics.push("llvm lowering: " + message);
         let empty_constants = empty_string_constant_set();
         return ExpressionResult {
             lines: lines,
@@ -1376,8 +1389,9 @@ fn lower_logical_and(expression: string, match: OperatorMatch, bindings: Paramet
     if left_text.length == 0 { _if106 = true; }
     if right_text.length == 0 { _if106 = true; }
     if _if106 {
-        diagnostics.push("llvm lowering: malformed && expression `" + expression
-            + "`");
+        let message = "malformed && expression `" + expression + "`";
+        diags.push(lowering_warning_diag("E1006", message, null));
+        diagnostics.push("llvm lowering: " + message);
         return ExpressionResult {
             lines: lines,
             temp_index: temp_index,
@@ -1440,9 +1454,9 @@ fn lower_logical_and(expression: string, match: OperatorMatch, bindings: Paramet
     diagnostics = extend_string_array(diagnostics, right_result.diagnostics);
     string_constants = merge_string_constants(string_constants, right_result.string_constants);
     if right_result.operand == null {
-        diagnostics.push("llvm lowering: unable to lower && RHS in `"
-            + expression
-            + "`");
+        let message = "unable to lower && RHS in `" + expression + "`";
+        diags.push(lowering_warning_diag("E1006", message, null));
+        diagnostics.push("llvm lowering: " + message);
 
         let mut fallback_lines = right_result.lines;
         if !lines_end_with_terminator(fallback_lines) {
@@ -1514,8 +1528,9 @@ fn lower_logical_or(expression: string, match: OperatorMatch, bindings: Paramete
     if left_text.length == 0 { _if107 = true; }
     if right_text.length == 0 { _if107 = true; }
     if _if107 {
-        diagnostics.push("llvm lowering: malformed || expression `" + expression
-            + "`");
+        let message = "malformed || expression `" + expression + "`";
+        diags.push(lowering_warning_diag("E1006", message, null));
+        diagnostics.push("llvm lowering: " + message);
         return ExpressionResult {
             lines: lines,
             temp_index: temp_index,
@@ -1578,9 +1593,9 @@ fn lower_logical_or(expression: string, match: OperatorMatch, bindings: Paramete
     diagnostics = extend_string_array(diagnostics, right_result.diagnostics);
     string_constants = merge_string_constants(string_constants, right_result.string_constants);
     if right_result.operand == null {
-        diagnostics.push("llvm lowering: unable to lower || RHS in `"
-            + expression
-            + "`");
+        let message = "unable to lower || RHS in `" + expression + "`";
+        diags.push(lowering_warning_diag("E1006", message, null));
+        diagnostics.push("llvm lowering: " + message);
 
         let mut fallback_lines = right_result.lines;
         if !lines_end_with_terminator(fallback_lines) {

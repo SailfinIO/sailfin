@@ -17,6 +17,8 @@ import {
     ends_with,
     extend_diag_array,
     index_of,
+    lowering_error_diag,
+    lowering_warning_diag,
     trim_text
 } from "../utils";
 import {
@@ -47,7 +49,9 @@ fn lower_struct_array_concat_with_alloc_target(lhs: LLVMOperand, rhs: LLVMOperan
     let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
     if element_type.length == 0 {
-        diagnostics.push("llvm lowering: concat requires a concrete element type");
+        let message = "concat requires a concrete element type";
+        diags.push(lowering_warning_diag("E1006", message, null));
+        diagnostics.push("llvm lowering: " + message);
         return ExpressionResult {
             lines: current_lines,
             temp_index: current_temp,
@@ -60,9 +64,9 @@ fn lower_struct_array_concat_with_alloc_target(lhs: LLVMOperand, rhs: LLVMOperan
 
     let array_struct_type = array_struct_type_for_element(element_type);
     if array_struct_type.length == 0 {
-        diagnostics.push("llvm lowering: unsupported concat element type `"
-            + element_type
-            + "`");
+        let message = "unsupported concat element type `" + element_type + "`";
+        diags.push(lowering_warning_diag("E1006", message, null));
+        diagnostics.push("llvm lowering: " + message);
         return ExpressionResult {
             lines: current_lines,
             temp_index: current_temp,
@@ -186,7 +190,9 @@ fn lower_struct_array_concat_with_alloc_target(lhs: LLVMOperand, rhs: LLVMOperan
     current_lines = buffer_result.lines;
     current_temp = buffer_result.temp_index;
     if buffer_result.operand == null {
-        diagnostics.push("llvm lowering [fatal]: struct-array concat buffer allocation produced no operand");
+        let message = "struct-array concat buffer allocation produced no operand";
+        diags.push(lowering_error_diag("E1008", message, null));
+        diagnostics.push("llvm lowering [fatal]: " + message);
         return ExpressionResult {
             lines: current_lines,
             temp_index: current_temp,
@@ -338,7 +344,9 @@ fn lower_struct_array_concat_with_alloc_target(lhs: LLVMOperand, rhs: LLVMOperan
     current_lines = struct_concat_result.lines;
     current_temp = struct_concat_result.temp_index;
     if struct_concat_result.operand == null {
-        diagnostics.push("llvm lowering [fatal]: struct-array concat result allocation produced no operand");
+        let message = "struct-array concat result allocation produced no operand";
+        diags.push(lowering_error_diag("E1008", message, null));
+        diagnostics.push("llvm lowering [fatal]: " + message);
         return ExpressionResult {
             lines: current_lines,
             temp_index: current_temp,
@@ -416,7 +424,9 @@ fn lower_array_push_in_place(array: LLVMOperand, value: LLVMOperand, element_typ
     let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
     if element_type.length == 0 {
-        diagnostics.push("llvm lowering: push requires a concrete element type");
+        let message = "push requires a concrete element type";
+        diags.push(lowering_warning_diag("E1006", message, null));
+        diagnostics.push("llvm lowering: " + message);
         return ExpressionResult {
             lines: current_lines,
             temp_index: current_temp,
@@ -480,9 +490,9 @@ fn lower_array_push_in_place(array: LLVMOperand, value: LLVMOperand, element_typ
 
     let array_struct_type = array_struct_type_for_element(element_type);
     if array_struct_type.length == 0 {
-        diagnostics.push("llvm lowering: unsupported push element type `"
-            + element_type
-            + "`");
+        let message = "unsupported push element type `" + element_type + "`";
+        diags.push(lowering_warning_diag("E1006", message, null));
+        diagnostics.push("llvm lowering: " + message);
         return ExpressionResult {
             lines: current_lines,
             temp_index: current_temp,

@@ -6,7 +6,13 @@ import { LoweringDiagnostic } from "sfn/ir";
 import { format_temp_name } from "../../expressions_helpers";
 import { empty_string_constant_set, escape_string_for_llvm } from "../../strings";
 import { ExpressionResult, LLVMOperand, StringConstant } from "../../types";
-import { append_string, extend_diag_array, number_to_string } from "../../utils";
+import {
+    append_string,
+    extend_diag_array,
+    lowering_error_diag,
+    lowering_warning_diag,
+    number_to_string
+} from "../../utils";
 import { array_pointer_element_type } from "../arrays";
 import { emit_bf16_widen_to_double } from "./core_bf16_lowering";
 import { coerce_operand_to_type, harmonise_operands } from "./core_operands/dispatch";
@@ -120,7 +126,10 @@ fn emit_string_concat(left: LLVMOperand, right: LLVMOperand, temp_index: int, li
             temp_index: harmonised.temp_index,
             operand: null,
             diagnostics: harmonised.diagnostics,
-            string_constants: empty_string_constant_set()
+            string_constants: empty_string_constant_set(),
+            // SFN-915: `BinaryAlignmentResult` carries no structured channel,
+            // so there is nothing to forward here. See `core_expression_tail`.
+            diags: []
         };
     }
     // M1.A: both operands are coerced to the {i8*, i64} aggregate ABI.
@@ -393,7 +402,9 @@ fn coerce_union_operand_to_string(operand: LLVMOperand, temp_index: int, lines: 
     let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
     if variants.length == 0 {
-        diagnostics.push("llvm lowering: unable to inspect union payloads for string interpolation");
+        let message = "unable to inspect union payloads for string interpolation";
+        diags.push(lowering_warning_diag("E1006", message, null));
+        diagnostics.push("llvm lowering: " + message);
         return ExpressionResult {
             lines: lines,
             temp_index: temp_index,
@@ -817,10 +828,11 @@ fn coerce_operand_to_string(operand: LLVMOperand, temp_index: int, lines: string
     // `has_fatal_lowering_diagnostic` (lowering_core/diagnostics.sfn) requires to block
     // IR emission — without it, the null operand silently drops the whole
     // enclosing `print`/`call` at exit 0 (the SFN-408 / SFN-343 footgun).
-    let diagnostics: string[] = ["llvm lowering [fatal]: E0832: cannot stringify interpolated operand of LLVM type `"
+    let message = "cannot stringify interpolated operand of LLVM type `"
         + operand.llvm_type
-        + "` (no Display arm)"];
-    let diags: LoweringDiagnostic[] = [];
+        + "` (no Display arm)";
+    let diags: LoweringDiagnostic[] = [lowering_error_diag("E0832", message, null)];
+    let diagnostics: string[] = ["llvm lowering [fatal]: E0832: " + message];
     return ExpressionResult {
         lines: lines,
         temp_index: temp_index,

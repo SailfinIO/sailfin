@@ -11,7 +11,7 @@ import {
     RuntimeHelperDescriptor,
     StringConstant
 } from "../../../types";
-import { number_to_string } from "../../../utils";
+import { lowering_warning_diag, number_to_string } from "../../../utils";
 
 fn emit_filesystem_intrinsic(helper_descriptor: RuntimeHelperDescriptor, final_operands: LLVMOperand[], current_temp: int, current_lines: string[], diagnostics: string[], diags: LoweringDiagnostic[], collected_string_constants: StringConstant[]) -> ExpressionResult {
     let mut result_lines = current_lines;
@@ -26,7 +26,9 @@ fn emit_filesystem_intrinsic(helper_descriptor: RuntimeHelperDescriptor, final_o
     if helper_descriptor != null {
         if helper_descriptor.symbol == "sailfin_intrinsic_fs_symlink" {
             if final_operands.length < 2 {
-                result_diagnostics.push("llvm lowering: sailfin_intrinsic_fs_symlink requires (target: i8*, link: i8*) operands");
+                let message = "sailfin_intrinsic_fs_symlink requires (target: i8*, link: i8*) operands";
+                result_diags.push(lowering_warning_diag("E1006", message, null));
+                result_diagnostics.push("llvm lowering: " + message);
             } else {
                 let _fs_leg = fs_platform_leg();
                 if _fs_leg == "mingw" {
@@ -84,7 +86,9 @@ fn emit_filesystem_intrinsic(helper_descriptor: RuntimeHelperDescriptor, final_o
     if helper_descriptor != null {
         if helper_descriptor.symbol == "sailfin_intrinsic_fs_read_link" {
             if final_operands.length < 3 {
-                result_diagnostics.push("llvm lowering: sailfin_intrinsic_fs_read_link requires (path: i8*, buf: i8*, size: i64) operands");
+                let message = "sailfin_intrinsic_fs_read_link requires (path: i8*, buf: i8*, size: i64) operands";
+                result_diags.push(lowering_warning_diag("E1006", message, null));
+                result_diagnostics.push("llvm lowering: " + message);
             } else {
                 let _fs_leg = fs_platform_leg();
                 if _fs_leg == "mingw" {
@@ -140,7 +144,9 @@ fn emit_filesystem_intrinsic(helper_descriptor: RuntimeHelperDescriptor, final_o
     if helper_descriptor != null {
         if helper_descriptor.symbol == "sailfin_intrinsic_fs_mkdtemp" {
             if final_operands.length < 1 {
-                result_diagnostics.push("llvm lowering: sailfin_intrinsic_fs_mkdtemp requires (template: i8*) operand");
+                let message = "sailfin_intrinsic_fs_mkdtemp requires (template: i8*) operand";
+                result_diags.push(lowering_warning_diag("E1006", message, null));
+                result_diagnostics.push("llvm lowering: " + message);
             } else {
                 let _fs_leg = fs_platform_leg();
                 if _fs_leg == "mingw" {
@@ -192,7 +198,9 @@ fn emit_filesystem_intrinsic(helper_descriptor: RuntimeHelperDescriptor, final_o
     if helper_descriptor != null {
         if helper_descriptor.symbol == "sailfin_intrinsic_fs_exists" {
             if final_operands.length < 1 {
-                result_diagnostics.push("llvm lowering: sailfin_intrinsic_fs_exists requires (path: i8*) operand");
+                let message = "sailfin_intrinsic_fs_exists requires (path: i8*) operand";
+                result_diags.push(lowering_warning_diag("E1006", message, null));
+                result_diagnostics.push("llvm lowering: " + message);
             } else {
                 let _fs_leg = fs_platform_leg();
                 let _fs_path = final_operands[0].value;
@@ -272,7 +280,9 @@ fn emit_filesystem_intrinsic(helper_descriptor: RuntimeHelperDescriptor, final_o
     if helper_descriptor != null {
         if helper_descriptor.symbol == "sailfin_intrinsic_fs_get_perms" {
             if final_operands.length < 1 {
-                result_diagnostics.push("llvm lowering: sailfin_intrinsic_fs_get_perms requires (path: i8*) operand");
+                let message = "sailfin_intrinsic_fs_get_perms requires (path: i8*) operand";
+                result_diags.push(lowering_warning_diag("E1006", message, null));
+                result_diagnostics.push("llvm lowering: " + message);
             } else {
                 let _fs_leg = fs_platform_leg();
                 if _fs_leg == "mingw" {
@@ -423,7 +433,9 @@ fn emit_filesystem_intrinsic(helper_descriptor: RuntimeHelperDescriptor, final_o
     if helper_descriptor != null {
         if helper_descriptor.symbol == "sailfin_intrinsic_fs_is_directory" {
             if final_operands.length < 1 {
-                result_diagnostics.push("llvm lowering: sailfin_intrinsic_fs_is_directory requires (path: i8*) operand");
+                let message = "sailfin_intrinsic_fs_is_directory requires (path: i8*) operand";
+                result_diags.push(lowering_warning_diag("E1006", message, null));
+                result_diagnostics.push("llvm lowering: " + message);
             } else {
                 let _fs_leg = fs_platform_leg();
                 let _fs_path = final_operands[0].value;

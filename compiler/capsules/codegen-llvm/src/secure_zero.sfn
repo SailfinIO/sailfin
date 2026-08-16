@@ -75,7 +75,12 @@ import {
     StringConstant,
     TypeContext
 } from "./types";
-import { extend_string_array, number_to_string, trim_text } from "./utils";
+import {
+    extend_string_array,
+    lowering_error_diag,
+    number_to_string,
+    trim_text
+} from "./utils";
 
 // Predicate over the reserved `secure_zero` name. Used by the
 // pre-resolution dispatch hook in `lower_call_expression` (see
@@ -107,9 +112,9 @@ fn _lower_secure_zero_argument(label: string, index: int, arguments: string[], b
         // that is published, links, runs, and never wipes. Several
         // `lower_expression` failures are themselves non-fatal (e.g. an
         // unresolved array element type), so the path is reachable.
-        let diag = "llvm lowering [fatal] [E0806]: secure_zero failed to lower "
-            + label
-            + " argument";
+        let message = "secure_zero failed to lower " + label + " argument";
+        diags.push(lowering_error_diag("E0806", message, null));
+        let diag = "llvm lowering [fatal] [E0806]: " + message;
         trace_log(diag);
         diagnostics.push(diag);
         return ExpressionResult {
@@ -125,13 +130,14 @@ fn _lower_secure_zero_argument(label: string, index: int, arguments: string[], b
     let operand = lowered.operand;
     let operand_type = trim_text(operand.llvm_type);
     if operand_type != "i64" {
-        let diag = "llvm lowering [fatal] [E0806]: secure_zero expects argument "
-            + number_to_string(index)
+        let message = "secure_zero expects argument " + number_to_string(index)
             + " ("
             + label
             + ") of type `int` (i64), got `"
             + operand_type
             + "`";
+        diags.push(lowering_error_diag("E0806", message, null));
+        let diag = "llvm lowering [fatal] [E0806]: " + message;
         trace_log(diag);
         diagnostics.push(diag);
         return ExpressionResult {
@@ -174,8 +180,10 @@ fn lower_secure_zero(name: string, arguments: string[], bindings: ParameterBindi
     let mut collected_strings: StringConstant[] = [];
 
     if arguments.length != 2 {
-        let diag = "llvm lowering [fatal] [E0806]: secure_zero expects exactly 2 arguments (`int` address, `int` length), got "
+        let message = "secure_zero expects exactly 2 arguments (`int` address, `int` length), got "
             + number_to_string(arguments.length);
+        diags.push(lowering_error_diag("E0806", message, null));
+        let diag = "llvm lowering [fatal] [E0806]: " + message;
         trace_log(diag);
         diagnostics.push(diag);
         return ExpressionResult {

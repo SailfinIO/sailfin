@@ -17,7 +17,7 @@ import {
     RuntimeHelperDescriptor,
     StringConstant
 } from "../../../types";
-import { number_to_string } from "../../../utils";
+import { lowering_warning_diag, number_to_string } from "../../../utils";
 import { lower_mem_footprint_intrinsic } from "../mem_footprint_lowering";
 
 fn emit_platform_intrinsic(helper_descriptor: RuntimeHelperDescriptor, final_operands: LLVMOperand[], current_temp: int, current_lines: string[], diagnostics: string[], diags: LoweringDiagnostic[], collected_string_constants: StringConstant[]) -> ExpressionResult {
@@ -129,7 +129,9 @@ fn emit_platform_intrinsic(helper_descriptor: RuntimeHelperDescriptor, final_ope
     if helper_descriptor != null {
         if helper_descriptor.symbol == "sailfin_intrinsic_exe_path" {
             if final_operands.length < 2 {
-                result_diagnostics.push("llvm lowering: sailfin_intrinsic_exe_path requires (buf: i8*, size: i64) operands");
+                let message = "sailfin_intrinsic_exe_path requires (buf: i8*, size: i64) operands";
+                result_diags.push(lowering_warning_diag("E1006", message, null));
+                result_diagnostics.push("llvm lowering: " + message);
             } else {
                 let _ep_leg = exe_path_locator();
                 let _ep_buf = final_operands[0].value;

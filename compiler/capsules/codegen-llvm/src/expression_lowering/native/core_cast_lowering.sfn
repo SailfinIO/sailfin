@@ -25,6 +25,8 @@ import {
 } from "../../types";
 import {
     extend_diag_array,
+    lowering_error_diag,
+    lowering_warning_diag,
     number_to_string,
     starts_with,
     trim_text
@@ -112,8 +114,10 @@ fn lower_is_expression(parse: CastParseResult, bindings: ParameterBinding[], loc
     }
     let enum_info = find_enum_info_by_llvm_type(context, candidate);
     if enum_info == null {
-        diagnostics.push("llvm lowering: `is` on a non-enum value `" + subject.llvm_type
-            + "` is not yet supported; the operand must be a named `enum` type");
+        let message = "`is` on a non-enum value `" + subject.llvm_type
+            + "` is not yet supported; the operand must be a named `enum` type";
+        diags.push(lowering_warning_diag("E1006", message, null));
+        diagnostics.push("llvm lowering: " + message);
         return ExpressionResult {
             lines: current_lines,
             temp_index: current_temp,
@@ -125,10 +129,10 @@ fn lower_is_expression(parse: CastParseResult, bindings: ParameterBinding[], loc
     }
     let variant_info = resolve_enum_variant_info(enum_info, parse.type_annotation);
     if variant_info == null {
-        diagnostics.push("llvm lowering: enum `" + enum_info.name
-            + "` has no variant `"
-            + parse.type_annotation
-            + "` for `is`");
+        let message = "enum `" + enum_info.name + "` has no variant `" + parse.type_annotation
+            + "` for `is`";
+        diags.push(lowering_warning_diag("E1006", message, null));
+        diagnostics.push("llvm lowering: " + message);
         return ExpressionResult {
             lines: current_lines,
             temp_index: current_temp,
@@ -215,8 +219,10 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
     }
     let target_type = map_type_annotation(parse.type_annotation);
     if target_type.length == 0 {
-        diagnostics.push("llvm lowering: unsupported cast target type `" + parse.type_annotation
-            + "`");
+        let message = "unsupported cast target type `" + parse.type_annotation
+            + "`";
+        diags.push(lowering_warning_diag("E1006", message, null));
+        diagnostics.push("llvm lowering: " + message);
         return ExpressionResult {
             lines: lines,
             temp_index: temp_index,
@@ -269,8 +275,10 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
     // branches so `ptr as bool` doesn't sneak through `ptrtoint`.
     if target_type == "i1" {
         if ends_with_pointer_suffix(operand.llvm_type) {
-            diagnostics.push("llvm lowering: cast to `bool` via `as` is rejected;"
-                + " use a comparison like `x != null` instead");
+            let message = "cast to `bool` via `as` is rejected;"
+                + " use a comparison like `x != null` instead";
+            diags.push(lowering_warning_diag("E1006", message, null));
+            diagnostics.push("llvm lowering: " + message);
             return ExpressionResult {
                 lines: current_lines,
                 temp_index: current_temp,
@@ -281,8 +289,10 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
             };
         }
         if is_integer_llvm_type(operand.llvm_type) {
-            diagnostics.push("llvm lowering: cast to `bool` via `as` is rejected;"
-                + " use a comparison like `x != 0` instead");
+            let message = "cast to `bool` via `as` is rejected;"
+                + " use a comparison like `x != 0` instead";
+            diags.push(lowering_warning_diag("E1006", message, null));
+            diagnostics.push("llvm lowering: " + message);
             return ExpressionResult {
                 lines: current_lines,
                 temp_index: current_temp,
@@ -293,8 +303,10 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
             };
         }
         if is_float_llvm_type(operand.llvm_type) {
-            diagnostics.push("llvm lowering: cast to `bool` via `as` is rejected;"
-                + " use a comparison like `x != 0.0` instead");
+            let message = "cast to `bool` via `as` is rejected;"
+                + " use a comparison like `x != 0.0` instead";
+            diags.push(lowering_warning_diag("E1006", message, null));
+            diagnostics.push("llvm lowering: " + message);
             return ExpressionResult {
                 lines: current_lines,
                 temp_index: current_temp,
@@ -730,10 +742,11 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
         };
     }
 
-    diagnostics.push("llvm lowering: unsupported cast from `" + operand.llvm_type
-        + "` to `"
+    let message = "unsupported cast from `" + operand.llvm_type + "` to `"
         + target_type
-        + "`");
+        + "`";
+    diags.push(lowering_warning_diag("E1006", message, null));
+    diagnostics.push("llvm lowering: " + message);
     return ExpressionResult {
         lines: current_lines,
         temp_index: current_temp,
@@ -793,9 +806,11 @@ fn try_lower_interpolated_string_literal(literal: string, bindings: ParameterBin
         collected_string_constants = merge_string_constants(collected_string_constants, lowered_expr.string_constants);
 
         if lowered_expr.operand == null {
-            diagnostics.push("llvm lowering: unable to lower interpolated expression `"
+            let message = "unable to lower interpolated expression `"
                 + expr_text
-                + "`");
+                + "`";
+            diags.push(lowering_warning_diag("E1006", message, null));
+            diagnostics.push("llvm lowering: " + message);
             return ExpressionResult {
                 lines: current_lines,
                 temp_index: current_temp,
@@ -821,9 +836,11 @@ fn try_lower_interpolated_string_literal(literal: string, bindings: ParameterBin
             // SFN-408: mark fatal so the build aborts loudly with the source
             // expression text as the span surrogate, instead of silently
             // dropping the enclosing `print`/`call` at exit 0.
-            diagnostics.push("llvm lowering [fatal]: unable to stringify interpolated expression `"
+            let message = "unable to stringify interpolated expression `"
                 + expr_text
-                + "`");
+                + "`";
+            diags.push(lowering_error_diag("E1013", message, null));
+            diagnostics.push("llvm lowering [fatal]: " + message);
             return ExpressionResult {
                 lines: current_lines,
                 temp_index: current_temp,

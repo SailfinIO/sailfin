@@ -20,7 +20,12 @@ import {
     ParameterBinding,
     TypeContext
 } from "../../types";
-import { extend_diag_array, starts_with } from "../../utils";
+import {
+    extend_diag_array,
+    lowering_error_diag,
+    lowering_warning_diag,
+    starts_with
+} from "../../utils";
 import { array_pointer_element_type } from "../arrays";
 import { find_parameter_binding } from "./core_bindings";
 import { lower_call_expression } from "./core_call_lowering";
@@ -258,9 +263,10 @@ fn lower_postfix_expression(expression: string, stripped: string, bindings: Para
         // to emit IR. After #1021, prelude `Result` resolves through the enum
         // path above and never reaches this guard.
         if resolve_struct_info_for_literal(context, struct_parse.type_name) == null {
-            diagnostics.push("llvm lowering [fatal]: struct/enum literal `"
-                + struct_parse.type_name
-                + "` references a type not in the lowering type context");
+            let message = "struct/enum literal `" + struct_parse.type_name
+                + "` references a type not in the lowering type context";
+            diags.push(lowering_error_diag("E1012", message, null));
+            diagnostics.push("llvm lowering [fatal]: " + message);
             return ExpressionResult {
                 lines: lines,
                 temp_index: temp_index,
@@ -382,7 +388,12 @@ fn lower_postfix_expression(expression: string, stripped: string, bindings: Para
                 temp_index: materialized.temp_index,
                 operand: materialized.operand,
                 diagnostics: materialized.diagnostics,
-                string_constants: empty_constants
+                string_constants: empty_constants,
+                // SFN-915: `_ClosurePairLowerResult` carries no structured
+                // channel, so there is nothing to forward here. Its legacy
+                // strings still flow, and `lowering_core/mod.sfn`
+                // reconstructs them at the module boundary.
+                diags: []
             };
         }
         let fn_ptr_type = _compute_function_pointer_type(fn_reference, context);
@@ -405,8 +416,9 @@ fn lower_postfix_expression(expression: string, stripped: string, bindings: Para
         trace_log("emit-llvm: lower_expression FALLTHROUGH expr=" + stripped
             + " (unhandled)");
     }
-    diagnostics.push("llvm lowering: unable to lower expression `" + expression
-        + "`");
+    let message = "unable to lower expression `" + expression + "`";
+    diags.push(lowering_warning_diag("E1006", message, null));
+    diagnostics.push("llvm lowering: " + message);
     return ExpressionResult {
         lines: lines,
         temp_index: temp_index,

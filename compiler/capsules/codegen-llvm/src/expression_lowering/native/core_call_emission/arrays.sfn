@@ -10,7 +10,7 @@ import {
     LocalBinding,
     StringConstant
 } from "../../../types";
-import { extend_diag_array, trim_text } from "../../../utils";
+import { extend_diag_array, lowering_warning_diag, trim_text } from "../../../utils";
 import { lower_array_push_in_place, lower_struct_array_concat } from "../../arrays";
 import { coerce_operand_to_type } from "../core_operands/dispatch";
 import { parse_member_access } from "../core_parse";
@@ -55,7 +55,9 @@ fn emit_array_call(trimmed_target: string, final_operands: LLVMOperand[], is_arr
                         diags: result_diags
                     };
                 } else {
-                    result_diagnostics.push("llvm lowering: concat requires two operands");
+                    let message = "concat requires two operands";
+                    result_diags.push(lowering_warning_diag("E1006", message, null));
+                    result_diagnostics.push("llvm lowering: " + message);
                     return ExpressionResult {
                         lines: result_lines,
                         temp_index: result_temp,
@@ -108,11 +110,13 @@ fn emit_array_call(trimmed_target: string, final_operands: LLVMOperand[], is_arr
                     // malformed `store <element_type> <value>` line.
                     // The diagnostics from `coerce_operand_to_type`
                     // (already propagated above) describe the failure.
-                    result_diagnostics.push("llvm lowering: unable to coerce push argument to `"
+                    let message = "unable to coerce push argument to `"
                         + array_push_element_type
                         + "` for `"
                         + trimmed_target
-                        + "`");
+                        + "`";
+                    result_diags.push(lowering_warning_diag("E1006", message, null));
+                    result_diagnostics.push("llvm lowering: " + message);
                     return ExpressionResult {
                         lines: result_lines,
                         temp_index: result_temp,
@@ -168,7 +172,9 @@ fn emit_array_call(trimmed_target: string, final_operands: LLVMOperand[], is_arr
                     diags: result_diags
                 };
             } else {
-                result_diagnostics.push("llvm lowering: push requires two operands");
+                let message = "push requires two operands";
+                result_diags.push(lowering_warning_diag("E1006", message, null));
+                result_diagnostics.push("llvm lowering: " + message);
                 return ExpressionResult {
                     lines: result_lines,
                     temp_index: result_temp,

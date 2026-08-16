@@ -12,7 +12,7 @@ import {
     ParameterBinding,
     RawAddressParseResult
 } from "../../types";
-import { append_string, trim_text } from "../../utils";
+import { append_string, lowering_warning_diag, trim_text } from "../../utils";
 import { find_parameter_binding } from "./core_bindings";
 import { find_local_binding } from "./core_scopes";
 
@@ -32,9 +32,11 @@ fn lower_raw_address_expression(parse: RawAddressParseResult, bindings: Paramete
     }
     let target = trim_text(parse.target);
     if !is_simple_identifier(target) {
-        diagnostics.push("llvm lowering: &raw currently supports only simple identifiers (got `"
+        let message = "&raw currently supports only simple identifiers (got `"
             + target
-            + "`)");
+            + "`)";
+        diags.push(lowering_warning_diag("E1006", message, null));
+        diagnostics.push("llvm lowering: " + message);
         return ExpressionResult {
             lines: lines,
             temp_index: temp_index,
@@ -61,9 +63,10 @@ fn lower_raw_address_expression(parse: RawAddressParseResult, bindings: Paramete
     }
     let param = find_parameter_binding(bindings, target);
     if param != null {
-        diagnostics.push("llvm lowering: cannot take raw address of parameter `"
-            + target
-            + "` yet");
+        let message = "cannot take raw address of parameter `" + target
+            + "` yet";
+        diags.push(lowering_warning_diag("E1006", message, null));
+        diagnostics.push("llvm lowering: " + message);
         return ExpressionResult {
             lines: lines,
             temp_index: temp_index,
@@ -73,8 +76,9 @@ fn lower_raw_address_expression(parse: RawAddressParseResult, bindings: Paramete
             diags: diags
         };
     }
-    diagnostics.push("llvm lowering: &raw target `" + target
-        + "` is not a local");
+    let message = "&raw target `" + target + "` is not a local";
+    diags.push(lowering_warning_diag("E1006", message, null));
+    diagnostics.push("llvm lowering: " + message);
     return ExpressionResult {
         lines: lines,
         temp_index: temp_index,

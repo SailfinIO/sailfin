@@ -31,6 +31,8 @@ import {
     extend_diag_array,
     extend_string_array,
     join_with_separator,
+    lowering_error_diag,
+    lowering_warning_diag,
     number_to_string,
     starts_with,
     trim_text
@@ -150,11 +152,12 @@ fn try_lower_plain_fn_ptr_call(target: string, arguments: string[], bindings: Pa
         result_lines = lowered.lines;
         result_temp = lowered.temp_index;
         if lowered.operand == null {
-            diagnostics.push("llvm lowering: failed to lower argument "
-                + number_to_string(index)
+            let message = "failed to lower argument " + number_to_string(index)
                 + " for plain function-pointer call to `"
                 + name
-                + "`");
+                + "`";
+            diags.push(lowering_warning_diag("E1006", message, null));
+            diagnostics.push("llvm lowering: " + message);
             return ExpressionResult {
                 lines: result_lines,
                 temp_index: result_temp,
@@ -241,7 +244,9 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
     let empty_constants = empty_string_constant_set();
     let mut trimmed_target = trim_text(target);
     if trimmed_target.length == 0 {
-        diagnostics.push("llvm lowering: call target missing");
+        let message = "call target missing";
+        diags.push(lowering_warning_diag("E1006", message, null));
+        diagnostics.push("llvm lowering: " + message);
         return ExpressionResult {
             lines: lines,
             temp_index: temp_index,
@@ -424,9 +429,9 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
         if index >= arguments.length { break; }
         let argument_text = trim_text(get_string_at(arguments, index));
         if argument_text.length == 0 {
-            diagnostics.push("llvm lowering: empty argument in call to `"
-                + trimmed_target
-                + "`");
+            let message = "empty argument in call to `" + trimmed_target + "`";
+            diags.push(lowering_warning_diag("E1006", message, null));
+            diagnostics.push("llvm lowering: " + message);
         }
         let mut argument_expected_type: string = "";
         let parameter_index = index + injected_argument_count;
@@ -442,11 +447,12 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
             operands.push(lowered.operand);
             operand_source_types.push(operand_source_type(argument_text, bindings, locals));
         } else {
-            diagnostics.push("llvm lowering: failed to lower argument "
-                + number_to_string(index)
+            let message = "failed to lower argument " + number_to_string(index)
                 + " for call to `"
                 + trimmed_target
-                + "`");
+                + "`";
+            diags.push(lowering_warning_diag("E1006", message, null));
+            diagnostics.push("llvm lowering: " + message);
         }
         index += 1;
     }
@@ -477,9 +483,10 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
         // links, and exits 0 having skipped the statement entirely. A
         // dropped call is a miscompile, so fail the build instead. The
         // per-argument diagnostic above carries the specific cause.
-        diagnostics.push("llvm lowering [fatal]: unable to emit call to `"
-            + trimmed_target
-            + "` due to argument errors");
+        let message = "unable to emit call to `" + trimmed_target
+            + "` due to argument errors";
+        diags.push(lowering_error_diag("E1007", message, null));
+        diagnostics.push("llvm lowering [fatal]: " + message);
         return ExpressionResult {
             lines: current_lines,
             temp_index: current_temp,
@@ -523,11 +530,13 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
                 current_lines = lowered_default.lines;
                 current_temp = lowered_default.temp_index;
                 if lowered_default.operand == null {
-                    diagnostics.push("llvm lowering: failed to lower default argument for parameter `"
+                    let message = "failed to lower default argument for parameter `"
                         + param.name
                         + "` in call to `"
                         + trimmed_target
-                        + "`");
+                        + "`";
+                    diags.push(lowering_warning_diag("E1006", message, null));
+                    diagnostics.push("llvm lowering: " + message);
                     break;
                 }
                 operands.push(lowered_default.operand);
@@ -562,11 +571,13 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
                                 };
                                 operands = replace_llvm_operand(operands, 0, updated_operand);
                             } else {
-                                diagnostics.push("llvm lowering: method call expects `"
+                                let message = "method call expects `"
                                     + expected_self_type
                                     + "` but base `"
                                     + self_operand.llvm_type
-                                    + "` is incompatible");
+                                    + "` is incompatible";
+                                diags.push(lowering_warning_diag("E1006", message, null));
+                                diagnostics.push("llvm lowering: " + message);
                             }
                         } else if ends_with_pointer_suffix(expected_self_type) {
                             let method_parse = parse_member_access(trimmed_target);
@@ -609,11 +620,14 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
                                         if _elif66 {
                                             // avoid warning
                                         } else {
-                                            diagnostics.push("llvm lowering: method call expects `"
+                                            let message = "method call expects `"
                                                 + expected_self_type
                                                 + "` but base `"
                                                 + self_operand.llvm_type
-                                                + "` is incompatible");
+                                                + "` is incompatible";
+                                            diags.push(lowering_warning_diag("E1006", message, null));
+                                            diagnostics.push("llvm lowering: "
+                                                + message);
                                         }
                                     }
                                 }
@@ -633,19 +647,23 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
                                 if _if63 {
                                     // ok
                                 } else {
-                                    diagnostics.push("llvm lowering: method call expects `"
+                                    let message = "method call expects `"
                                         + expected_self_type
                                         + "` but base `"
                                         + self_operand.llvm_type
-                                        + "` is incompatible");
+                                        + "` is incompatible";
+                                    diags.push(lowering_warning_diag("E1006", message, null));
+                                    diagnostics.push("llvm lowering: " + message);
                                 }
                             }
                         } else {
-                            diagnostics.push("llvm lowering: method call expects `"
+                            let message = "method call expects `"
                                 + expected_self_type
                                 + "` but base `"
                                 + self_operand.llvm_type
-                                + "` is incompatible");
+                                + "` is incompatible";
+                            diags.push(lowering_warning_diag("E1006", message, null));
+                            diagnostics.push("llvm lowering: " + message);
                         }
                     }
                 }
