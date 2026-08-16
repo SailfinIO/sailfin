@@ -1,0 +1,101 @@
+// End-to-end regression for SFN-905: a module-level string global must
+// hold the UNESCAPED bytes of its literal, and its `@str.global.*`
+// constant must declare an array length that matches the initializer.
+//
+// `_lower_module_globals`' string-literal branch used to take the raw
+// source text for both, which produced two distinct failures:
+//   1. Silent wrongness — `let NL: string = "\n";` held a backslash and
+//      an `n` (length 2), while the same literal as a local held one
+//      byte, so the two compared unequal.
+//   2. Hard build failure — `let BS: string = "\\";` emitted
+//      `@str.global.BS = private constant [3 x i8] c"\\\00"`, whose
+//      initializer LLVM sizes at 2 bytes against the declared 3, failing
+//      the clang link as an ICE.
+//
+// The fix applies the same `unescape_string_literal` ->
+// `escape_string_for_llvm` round trip the local-expression path uses, so
+// this test asserts the two paths agree: every global's length is the
+// unescaped byte count and every global equals the identical literal
+// written as a local. Case (2) is covered by the build succeeding at all.
+//
+// Build/parallel-runner hygiene (temp-dir build, full inherited env via
+// `process.environ()` for the nested clang/ld toolchain, out-of-tree
+// marker under SAILFIN_TEST_SCRATCH) mirrors
+// module_global_runtime_init_test.sfn — see `.claude/rules/no-bash-e2e.md`.
+import { find } from "sfn/strings";
+import { with_tmp_dir } from "sfn/test";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+fn _fixture_src() -> string ![io] {
+    return fs.readFile("compiler/tests/e2e/fixtures/module_global_string_escape_probe.sfn");
+}
+
+// Inherit the full parent environment: PATH/HOME/TMPDIR plus the macOS
+// SDK/toolchain vars the nested clang/ld need (#1410), and
+// SAILFIN_TEST_SCRATCH for per-invocation build-cache isolation (#1333).
+fn _child_env() -> string[] ![io] { return process.environ(); }
+
+// A fresh out-of-tree marker path (survives `with_tmp_dir` teardown).
+fn _marker() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    let path = dir + "/sfn-905-module-global-string-escape.out";
+    if fs.exists(path) { fs.deleteFile(path); }
+    return path;
+}
+
+// Build the probe in a temp dir and run it. Stashes captured stdout to
+// `out_marker`; returns the run's exit code, or `-100` on build failure
+// (which is how the `[3 x i8]`/`[2 x i8]` mismatch surfaced).
+fn _build_and_run(out_marker: string) -> int ![io] {
+    return with_tmp_dir(fn (dir: string) -> int {
+        let srcpath = dir + "/probe.sfn";
+        fs.writeFile(srcpath, _fixture_src());
+        let binpath = dir + "/probe";
+        let build_exit = process.run_capture([_sfn_bin(), "build", "-o", binpath, srcpath], _child_env());
+        let _bo = process.capture_take_stdout();
+        let _be = process.capture_take_stderr();
+        if build_exit != 0 { return -100; }
+        let run_exit = process.run_capture([binpath], []);
+        let out = process.capture_take_stdout();
+        let _re = process.capture_take_stderr();
+        fs.writeFile(out_marker, out);
+        return run_exit;
+    });
+}
+
+test "lowering: module-level string globals unescape before emission (SFN-905)" ![io] {
+    let marker = _marker();
+    let exit = _build_and_run(marker);
+    // Rejects the `-100` build-failure sentinel first: `"\\"` and `"\""`
+    // at module scope used to fail the clang link outright, so reaching
+    // a zero exit is itself half the regression.
+    assert exit == 0;
+    let out = fs.readFile(marker);
+    if fs.exists(marker) { fs.deleteFile(marker); }
+
+    // Each single-escape global is exactly one byte...
+    assert find(out, "nl_len=1;", 0) >= 0;
+    assert find(out, "tab_len=1;", 0) >= 0;
+    assert find(out, "bs_len=1;", 0) >= 0;
+    assert find(out, "quote_len=1;", 0) >= 0;
+    // ...the non-ASCII body keeps its two UTF-8 bytes...
+    assert find(out, "accent_len=2;", 0) >= 0;
+    // ...and the mixed literal is `a`, TAB, `b`, `\`, `c`, `"`, `d`, LF.
+    assert find(out, "mixed_len=8;", 0) >= 0;
+
+    // The invariant behind all of the above: module scope and local scope
+    // produce identical bytes for the identical literal.
+    assert find(out, "nl_eq=1;", 0) >= 0;
+    assert find(out, "tab_eq=1;", 0) >= 0;
+    assert find(out, "bs_eq=1;", 0) >= 0;
+    assert find(out, "quote_eq=1;", 0) >= 0;
+    assert find(out, "accent_eq=1;", 0) >= 0;
+    assert find(out, "mixed_eq=1;", 0) >= 0;
+}

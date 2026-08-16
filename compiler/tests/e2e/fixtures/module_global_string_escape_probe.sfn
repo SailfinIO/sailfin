@@ -1,0 +1,46 @@
+// Fixture for module_global_string_escape_test.sfn (SFN-905).
+//
+// Every global below is a module-level `string` whose initializer is a
+// compile-time string literal, so `_lower_module_globals` emits it as a
+// `@str.global.<name>` constant rather than routing it through the
+// module-init function. Before SFN-905 that branch took the RAW source
+// text for both the constant body and its declared array length, so:
+//   - `NL` held a backslash and an `n` (length 2, unequal to the same
+//     literal written as a local), and
+//   - `BS` / `QUOTE` failed the build outright, because LLVM reads `\\`
+//     and `\"` as one byte each while the declared length counted the
+//     two source characters (`[3 x i8]` type against a `[2 x i8]`
+//     initializer, surfaced as an ICE at the clang link step).
+//
+// `_probe` compares each global against the identical literal declared as
+// a local, which is the invariant the fix restores: the two paths agree
+// byte for byte. `ACCENT` covers a non-ASCII (multi-byte UTF-8) body,
+// which carries no escape and so must keep working unchanged; `MIXED`
+// covers several escapes in one literal alongside ordinary text.
+let NL: string = "\n";
+let TAB: string = "\t";
+let BS: string = "\\";
+let QUOTE: string = "\"";
+let ACCENT: string = "é";
+let MIXED: string = "a\tb\\c\"d\n";
+
+// Emit one `<label>_len=<n>;<label>_eq=<0|1>;` record per global. The
+// trailing `;` keeps each marker unambiguous under a substring search
+// (`nl_len=1;` cannot match a hypothetical `nl_len=10`).
+fn _probe(label: string, global_value: string, local_value: string) ![io] {
+    let mut eq: int = 0;
+    if global_value == local_value { eq = 1; }
+    print(label + "_len=" + number_to_string(global_value.length) + ";" + label
+        + "_eq="
+        + number_to_string(eq)
+        + ";");
+}
+
+fn main() ![io] {
+    _probe("nl", NL, "\n");
+    _probe("tab", TAB, "\t");
+    _probe("bs", BS, "\\");
+    _probe("quote", QUOTE, "\"");
+    _probe("accent", ACCENT, "é");
+    _probe("mixed", MIXED, "a\tb\\c\"d\n");
+}
