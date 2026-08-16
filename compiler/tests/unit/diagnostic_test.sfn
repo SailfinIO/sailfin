@@ -10,7 +10,8 @@ import {
     append_missing_legacy_lowering_diags,
     diag_from_legacy_lowering_error,
     diag_to_legacy_string,
-    lowering_error_diag
+    lowering_error_diag,
+    stamp_lowering_diag_spans
 } from "sfn/codegen-llvm/utils";
 import { LoweringDiagnostic, NativeSourceSpan } from "sfn/ir";
 
@@ -83,6 +84,40 @@ test "stamp_spans fills only missing spans" {
     assert second.end_column == 3;
 }
 
+test "lowering diagnostics: stamp_lowering_diag_spans fills only missing spans" {
+    let existing = NativeSourceSpan {
+        start_line: 1,
+        start_column: 2,
+        end_line: 1,
+        end_column: 3
+    };
+    let fallback = NativeSourceSpan {
+        start_line: 8,
+        start_column: 4,
+        end_line: 8,
+        end_column: 9
+    };
+    let mut diags: LoweringDiagnostic[] = [];
+    diags.push(_lowering_diag("note", null));
+    diags.push(_lowering_diag("error", existing));
+    let stamped = stamp_lowering_diag_spans(diags, fallback);
+    let first: NativeSourceSpan? = stamped[0].span;
+    let second: NativeSourceSpan? = stamped[1].span;
+    assert first.start_line == 8;
+    assert first.end_column == 9;
+    assert second.start_line == 1;
+    assert second.end_column == 3;
+
+    let mut unchanged: LoweringDiagnostic[] = [];
+    unchanged.push(_lowering_diag("note", null));
+    unchanged.push(_lowering_diag("error", existing));
+    let untouched = stamp_lowering_diag_spans(unchanged, null);
+    assert untouched[0].span == null;
+    let untouched_second: NativeSourceSpan? = untouched[1].span;
+    assert untouched_second.start_line == 1;
+    assert untouched_second.end_column == 3;
+}
+
 test "diag_to_legacy_string preserves lowering spelling" {
     assert diag_to_legacy_string(_lowering_diag("error", null)) == "llvm lowering [fatal] [E1003]: unable to lower expression";
     assert diag_to_legacy_string(_lowering_diag("note", null)) == "llvm lowering: unable to lower expression";
@@ -131,6 +166,26 @@ test "legacy lowering conversion uses E1006 for an uncategorized invariant" {
 
 test "legacy lowering conversion ignores non-fatal output" {
     assert diag_from_legacy_lowering_error("llvm lowering: advisory") == null;
+}
+
+test "legacy lowering reconciliation does not re-add an upstream-converted uncoded fatal" {
+    // An uncoded legacy fatal converted early (at the instruction dispatch, so
+    // it can carry a statement span) must not be duplicated by the terminal
+    // reconcile, whose rendering carries the inferred `[E1007]` the raw string
+    // never had.
+    let legacy_line = "llvm lowering [fatal]: unable to emit call to unresolved callee";
+    let early = diag_from_legacy_lowering_error(legacy_line);
+    assert early != null;
+    assert diag_to_legacy_string(early) != legacy_line;
+
+    let mut typed: LoweringDiagnostic[] = [];
+    typed.push(early);
+    let mut legacy: string[] = [];
+    legacy.push(legacy_line);
+
+    let reconciled = append_missing_legacy_lowering_diags(typed, legacy);
+    assert reconciled.length == 1;
+    assert reconciled[0].code == "E1007";
 }
 
 test "legacy lowering reconciliation preserves duplicate fatal multiplicity" {
