@@ -62,25 +62,37 @@ fn _count_newlines(source: string) -> int {
 // ceiling that may only ever be lowered. Returns 0 for a file that is not
 // grandfathered, which then has to satisfy the full budget.
 fn _grandfathered_ceiling(name: string) -> int {
-    if name == "core_concurrency_lowering.sfn" { return 1608; }
-    if name == "core_ops_lowering.sfn" { return 1581; }
+    // SFN-915 (SFEP-0061 S4b) raises the entries below. `ExpressionResult`
+    // and `CoercionResult` gained a `diags: LoweringDiagnostic[]` field, and
+    // Sailfin rejects a partial struct literal at lowering (`E1002`), so
+    // every one of the 417 literals across this family must name the new
+    // field. That is a mandatory line per literal with no net-zero form —
+    // the same situation SFN-770 recorded below. Each ceiling is pinned to
+    // its exact new length so the ratchet keeps holding. Splitting these
+    // modules remains SFN-639's job.
+    if name == "core_concurrency_lowering.sfn" { return 1678; }
+    if name == "core_ops_lowering.sfn" { return 1671; }
     // 1447 -> 1460: SFN-770, a miscompile that stored a struct-typed local
-    // into a pointer-width enum payload slot by value. The fix needs real
-    // lines in this file and no net-zero form of it exists, so the raise is
-    // deliberate rather than a reflex — pinned to the exact new length so the
-    // ratchet keeps holding. Splitting this module stays SFN-639's job.
-    if name == "core_literals_lowering.sfn" { return 1460; }
-    if name == "core_member_lowering.sfn" { return 1212; }
-    if name == "core_parse.sfn" { return 1137; }
-    if name == "core_parsing.sfn" { return 1053; }
-    if name == "statement.sfn" { return 935; }
+    // into a pointer-width enum payload slot by value. 1460 -> 1536: SFN-915,
+    // per the note above.
+    if name == "core_literals_lowering.sfn" { return 1536; }
+    if name == "core_member_lowering.sfn" { return 1243; }
+    if name == "core_parse.sfn" { return 1142; }
+    if name == "core_parsing.sfn" { return 1062; }
+    if name == "statement.sfn" { return 949; }
     // 858 -> 859: SFN-744 moves the native IR model behind the `sfn/ir`
-    // capsule facade. Canonical formatting separates that scoped import from
-    // relative lowering imports with one blank line; no lowering logic grew.
-    if name == "core_cast_lowering.sfn" { return 859; }
+    // capsule facade; no lowering logic grew. 859 -> 925: SFN-915, per the
+    // note above.
+    if name == "core_cast_lowering.sfn" { return 925; }
     if name == "core_operators.sfn" { return 830; }
-    if name == "core_strings.sfn" { return 789; }
+    if name == "core_strings.sfn" { return 844; }
     if name == "core_text.sfn" { return 759; }
+    // Newly grandfathered by SFN-915: both were under 750 before the
+    // `diags` field landed and are over only by the per-literal cost of
+    // naming it. They are the two smallest entries here and the first
+    // candidates to drop back under the budget.
+    if name == "statement_assignment.sfn" { return 762; }
+    if name == "method_target.sfn" { return 758; }
     return 0;
 }
 

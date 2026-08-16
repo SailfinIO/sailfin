@@ -57,7 +57,6 @@ import { collect_mutation_names, find_mutation_for_name } from "./phi";
 fn lower_for_array(function: NativeFunction, structure: LoopStructure, raw_target: string, instruction: NativeInstruction, iterable_operand: LLVMOperand, llvm_return: string, bindings: ParameterBinding[], locals: LocalBinding[], allocas: string[], lines: string[], temp_index: int, block_counter: int, next_local_id: int, next_region_id: int, functions: NativeFunction[], loop_stack: LoopContext[], try_stack: TryFrameContext[], context: TypeContext, scope_id: string, scope_depth: int, next_index: int) -> BlockLoweringResult {
     let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
-    let mut diags: LoweringDiagnostic[] = [];
     let mut current_lines: string[] = lines;
     let mut current_allocas: string[] = allocas;
     let mut current_locals: LocalBinding[] = locals;

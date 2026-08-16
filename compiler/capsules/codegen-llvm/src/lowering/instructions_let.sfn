@@ -299,7 +299,6 @@ fn _await_receive_channel_base(value: string) -> string {
 fn lower_let_instruction(function: NativeFunction, instruction: NativeInstruction, bindings: ParameterBinding[], locals: LocalBinding[], allocas: string[], lines: string[], temp_index: int, next_local_id: int, next_region_id: int, functions: NativeFunction[], context: TypeContext, scope_id: string, scope_depth: int, current_label: string) -> LetLoweringResult {
     let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
-    let mut diags: LoweringDiagnostic[] = [];
     let mut current_lines: string[] = lines;
     let mut current_allocas: string[] = allocas;
     let mut current_locals: LocalBinding[] = locals;

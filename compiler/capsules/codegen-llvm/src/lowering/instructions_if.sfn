@@ -291,7 +291,6 @@ fn lower_if_instruction(function: NativeFunction, start_index: int, llvm_return:
     let mut current_next_local: int = next_local_id;
     let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
-    let mut diags: LoweringDiagnostic[] = [];
     let base_bindings: ParameterBinding[] = bindings;
     let mut then_bindings: ParameterBinding[] = base_bindings;
     let mut else_bindings: ParameterBinding[] = base_bindings;
