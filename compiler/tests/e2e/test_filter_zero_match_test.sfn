@@ -1,0 +1,110 @@
+// End-to-end regression for SFN-820: an explicit `-k`/`--tag` selector that
+// matches zero tests, while discovery DID find `*_test.sfn` files, must fail
+// closed instead of silently exiting 0.
+//
+// Native e2e per `.claude/rules/no-bash-e2e.md`.
+import { find } from "sfn/strings";
+import { clean_runner_env, nested_runner_scratch, with_tmp_dir } from "sfn/test";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+struct TestRun {
+    exit: int,
+    out: string
+}
+
+// Write a single-test fixture named `test_name` into a fresh temp dir and
+// return the dir path.
+fn _write_fixture(test_name: string) -> string ![io] {
+    let dir = fs.mkdtemp("sfn-filter-");
+    let src = "test \"" + test_name + "\" ![io] {\n    print.info(\""
+        + test_name
+        + "_RAN\");\n}\n";
+    fs.writeFile(dir + "/" + test_name + "_test.sfn", src);
+    return dir;
+}
+
+// Run `sfn test <args...>` with a dedicated scratch env, returning the exit
+// code and combined stdout+stderr.
+fn _run_sfn_test(args: string[], label: string) -> TestRun ![io] {
+    let mut argv: string[] = [_sfn_bin(), "test"];
+    let mut i = 0;
+    loop {
+        if i >= args.length { break; }
+        argv.push(args[i]);
+        i += 1;
+    }
+    let exit = process.run_capture(argv, clean_runner_env(nested_runner_scratch(label)));
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    return TestRun { exit: exit, out: out + err };
+}
+
+test "test filter: an unmatched -k exits non-zero with a zero-match diagnostic" ![io] {
+    let exit = process.run_capture([_sfn_bin(), "test", "compiler/tests/unit", "-k", "definitely_missing_selector",], clean_runner_env(nested_runner_scratch("unmatched-k")));
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    let combined = out + err;
+
+    assert exit != 0;
+    assert find(combined, "no tests matched", 0) >= 0;
+    assert find(combined, "definitely_missing_selector", 0) >= 0;
+    assert find(combined, "no *_test.sfn files found", 0) < 0;
+}
+
+test "test filter: an unfiltered empty suite still exits 0" ![io] {
+    let code = with_tmp_dir(fn (dir: string) -> int {
+        let exit = process.run_capture([_sfn_bin(), "test", dir], clean_runner_env(nested_runner_scratch("empty-suite")));
+        let out = process.capture_take_stdout();
+        let err = process.capture_take_stderr();
+        let combined = out + err;
+
+        assert exit == 0;
+        assert find(combined, "no *_test.sfn files found", 0) >= 0;
+        return 0;
+    });
+    assert code == 0;
+}
+
+test "test filter: a matching -k still selects tests and exits 0" ![io] {
+    // `--no-test-cache` is load-bearing, not incidental: the test-bin cache
+    // key does not include the active `-k`/`--tag`, so a filtered compile
+    // could poison a later unfiltered run of identical source under the
+    // same key. Remove once SFN-914 puts the active filters into the
+    // test-bin cache key.
+    let dir = _write_fixture("alpha_marker");
+    let r = _run_sfn_test([dir, "-k", "alpha_marker", "--no-test-cache"], "matching-k");
+
+    assert r.exit == 0;
+    assert find(r.out, "no tests matched", 0) < 0;
+}
+
+test "test filter: an unmatched --tag exits non-zero and names the tag selector" ![io] {
+    let dir = _write_fixture("plain");
+    let r = _run_sfn_test([dir, "--tag", "zzz_nomatch"], "unmatched-tag");
+
+    assert r.exit != 0;
+    assert find(r.out, "no tests matched", 0) >= 0;
+    assert find(r.out, "--tag \"zzz_nomatch\"", 0) >= 0;
+}
+
+test "test filter: a selector matching one suite of several still exits 0" ![io] {
+    let dir_a = _write_fixture("alpha_marker");
+    let dir_b = _write_fixture("beta_other");
+    let r = _run_sfn_test([dir_a, dir_b, "-k", "alpha_marker", "--no-test-cache"], "multi-suite-match");
+
+    assert r.exit == 0;
+    assert find(r.out, "no tests matched", 0) < 0;
+}
+
+test "test filter: an empty shard with an active filter still exits 0" ![io] {
+    let dir = _write_fixture("alpha_marker");
+    let r = _run_sfn_test([dir, "-k", "alpha_marker", "--shard", "2/2", "--no-test-cache"], "empty-shard-filter");
+
+    assert r.exit == 0;
+    assert find(r.out, "no tests matched", 0) < 0;
+}

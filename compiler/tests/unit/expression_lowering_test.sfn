@@ -1,0 +1,58 @@
+// Unit coverage for the expression-lowering surface
+// (`compiler/capsules/codegen-llvm/src/expression_lowering/`).
+//
+// These tests are deliberately named with the `expression_lowering` area so
+// `sfn test compiler/tests/unit -k "expression_lowering"` selects a real,
+// non-empty set (SFN-820). Sibling files cover narrower slices of the same
+// surface under their own area names (`bf16 lowering`, `numeric coercion`);
+// this file pins the two context-free entrypoints every other slice builds
+// on: literal operand typing, and the `lower_expression` dispatcher itself.
+import { lower_expression } from "sfn/codegen-llvm/expression_lowering/native/core";
+import { number_literal_operand } from "sfn/codegen-llvm/expression_lowering/native/core_number_literal";
+import { TypeContext } from "sfn/codegen-llvm/types";
+import { expect_eq_int, expect_eq_str } from "sfn/test";
+
+// The smallest context `lower_expression` accepts. Every collection is
+// empty-safe for expressions that reference no user-declared type.
+fn _empty_context() -> TypeContext {
+    return TypeContext {
+        structs: [],
+        enums: [],
+        interfaces: [],
+        vtables: []
+    };
+}
+
+test "expression_lowering: an unpressured integer literal defaults to i64" {
+    let operand = number_literal_operand("42", "");
+    assert expect_eq_str(operand.llvm_type, "i64").ok;
+    assert expect_eq_str(operand.value, "42").ok;
+}
+
+test "expression_lowering: type pressure narrows an integer literal operand" {
+    let operand = number_literal_operand("42", "i32");
+    assert expect_eq_str(operand.llvm_type, "i32").ok;
+    assert expect_eq_str(operand.value, "42").ok;
+}
+
+test "expression_lowering: an unpressured decimal literal defaults to double" {
+    let operand = number_literal_operand("3.5", "");
+    assert expect_eq_str(operand.llvm_type, "double").ok;
+}
+
+test "expression_lowering: an integer literal lowers without emitting lines" {
+    let result = lower_expression("42", [], [], 0, [], [], _empty_context(), "");
+    assert expect_eq_str(result.operand.llvm_type, "i64").ok;
+    assert expect_eq_str(result.operand.value, "42").ok;
+    // Literals are pure value substitution: no instructions, no temps burned.
+    assert expect_eq_int(result.lines.length, 0).ok;
+    assert expect_eq_int(result.temp_index, 0).ok;
+    assert expect_eq_int(result.diagnostics.length, 0).ok;
+}
+
+test "expression_lowering: a boolean literal lowers to i1" {
+    let result = lower_expression("true", [], [], 0, [], [], _empty_context(), "");
+    assert expect_eq_str(result.operand.llvm_type, "i1").ok;
+    assert expect_eq_str(result.operand.value, "1").ok;
+    assert expect_eq_int(result.diagnostics.length, 0).ok;
+}

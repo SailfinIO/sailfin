@@ -76,8 +76,14 @@ sfn test -k auth --tag slow # both filters compose (a test must match both)
 - `--tag <value>` keeps tests carrying a `@tag("<value>")` decorator
   (see [§3.8 Test Declarations](/docs/reference/spec/03-declarations/)).
 - When both are given, a test must satisfy **both** to run.
-- A filter that matches nothing is not an error: the run reports
-  `0/0 passed` and exits `0`.
+- An explicit filter that matches nothing **is** an error: the run reports
+  which selector matched no tests and exits non-zero, so a typo'd `-k` in a
+  script cannot masquerade as a green run. This mirrors
+  [`sfn bench --filter`](/docs/reference/bench/).
+- A suite that is genuinely empty — no `*_test.sfn` files discovered at all
+  — is still not an error: it reports `0/0 passed` and exits `0`, so a
+  capsule with no `tests/` directory does not fail a build. An empty
+  `--shard` partition is likewise benign.
 
 ---
 

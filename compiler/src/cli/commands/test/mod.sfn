@@ -218,6 +218,19 @@ fn command_def() -> Command {
     return with_arg(with_flag(with_flag(with_flag(with_flag(with_flag(with_flag(with_flag(with_flag(with_flag(with_flag(command("test", "Run tests or workspace default members"), flag("json", "Emit a JSONL event stream")), flag("update-snapshots", "Re-baseline snapshot golden files this run")), flag("no-test-cache", "Bypass the per-test linked-binary cache")), flag_value_short("k", "k", "Only run tests whose name contains this substring")), flag_value("tag", "Only run tests carrying @tag(\"<value>\")")), flag_int("jobs", "Run up to N per-file children concurrently")), flag_int("slowest", "Print the N slowest test files after a multi-file run (0 disables, default 5)")), flag_value("shard", "Run only the I-th of N shards (e.g. 1/3; file-count stride unless --shard-weights loads)")), flag_value("shard-weights", "Path to a path\\tweight TSV; --shard partitions by SFN-863 LPT instead of the stride")), flag("skip-toolchain-check", "Bypass the [toolchain] pin check for this invocation")), arg_variadic("suite", "Suite paths (omit at a workspace root to test default members)"));
 }
 
+// Human-readable rendering of the active `-k`/`--tag` selectors, for the
+// zero-match diagnostic (SFN-820). Only non-empty filters are named, so a
+// `-k`-only run does not mention a `--tag` the caller never passed.
+fn _filter_selector_description(name_filter: string, tag_filter: string) -> string {
+    let mut described: string = "";
+    if name_filter.length > 0 { described = "-k \"" + name_filter + "\""; }
+    if tag_filter.length > 0 {
+        if described.length > 0 { described = described + " "; }
+        described = described + "--tag \"" + tag_filter + "\"";
+    }
+    return described;
+}
+
 fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     // Flag surface migrated to `sfn/cli` (epic #351, Issue 3.8). The
     // legacy hand-rolled argv walk is replaced by typed builders:
@@ -419,7 +432,10 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     // surviving files down to only their matching tests. Both passes
     // share `test_decl_matches_filters`, so a file kept here always has
     // at least one test that survives the cut.
+    let mut discovered_before_filter: int = 0;
+    let mut filter_selected_zero: boolean = false;
     if test_filters_active() {
+        discovered_before_filter = test_files.length;
         let mut kept_files: string[] = [];
         let mut kept_suite_index: int[] = [];
         let mut fpi: int = 0;
@@ -433,6 +449,13 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
         }
         test_files = kept_files;
         file_suite_index = kept_suite_index;
+        // Discovery found files, the selector kept none of them: the
+        // command is vacuous (SFN-820). Recorded here, before the
+        // `--shard` cut below, so an empty shard is never misreported as
+        // an unmatched selector.
+        if discovered_before_filter > 0 && test_files.length == 0 {
+            filter_selected_zero = true;
+        }
     }
 
     // `--shard I/N` partition (issue #1237, SFN-863). Keep only the I-th of
@@ -488,6 +511,30 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     }
 
     if test_files.length == 0 {
+        // An explicit `-k`/`--tag` that matched nothing fails closed
+        // (SFN-820). The benign 0/0/0 contract below is the answer for a
+        // suite that is genuinely empty; a selector that quietly selects
+        // no tests is a vacuous command, and answering it with "no
+        // *_test.sfn files found under <path>" actively misleads — the
+        // files are there, the selector missed them. Fails closed so a
+        // typo'd `-k` in CI cannot masquerade as a green run.
+        if filter_selected_zero {
+            print.err("[test] no tests matched " + _filter_selector_description(name_filter, tag_filter)
+                + " ("
+                + int_to_string(discovered_before_filter)
+                + " *_test.sfn file(s) discovered, none containing a matching test)");
+            if json_output {
+                if json_subframe {
+                    print.err(render_summary_event(0, 0, 0, 0, 0, 0));
+                } else {
+                    print(render_start_event(0));
+                    print(render_summary_event(0, 0, 0, 0, 0, 0));
+                }
+            }
+            exit_test_runner_mode();
+            _cleanup_test_scratch(scratch_owned, scratch_root, true);
+            return 1;
+        }
         // Empty discovery exits 0 in BOTH modes (issue #848). The
         // pre-#848 split — JSON returned 1, the human path printed
         // "no Sailfin test files found" and also returned 1, while
