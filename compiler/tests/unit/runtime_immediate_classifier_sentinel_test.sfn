@@ -1,0 +1,130 @@
+// Sentinel: no pointer classifier under `runtime/` may class a 4 GiB-aligned
+// heap pointer as a legacy immediate-codepoint pseudo-pointer.
+//
+// Why this guard is textual rather than behavioral. The fault only fires when
+// an allocation's base lands on a 4 GiB boundary, which depends on ASLR/VM
+// churn under concurrent-compile load — roughly 1/80 at 8-wide concurrency and
+// effectively never when idle. No test can schedule that, so a behavioral
+// regression test would pass on a broken tree; the property that IS checkable
+// deterministically is the source-level one.
+//
+// Why the whole folder and not one file. The clause
+// `raw != 0 && (raw & 0xFFFFFFFF) == 0` was deleted from
+// `runtime/sfn/io.sfn::_sfn_is_immediate` after it corrupted `print` output
+// (docs/rca/2026-07-23-nightly-selfhost-print-immediate-misclassification.md),
+// but an inlined copy survived in
+// `runtime/sfn/adapters/filesystem.sfn::_fs_is_immediate` — inlined because the
+// runtime `sfn-source` emit path does not resolve imported *defined* functions
+// (SFN-635). That copy sat on `fs.writeLines`, the primary self-host IR emit
+// path, and wrote a lone `raw >> 32` control byte in place of a line of LLVM
+// IR, so `clang` rejected the module with "expected instruction opcode" and the
+// enclosing test failed. The victim was whichever compile drew the aligned
+// pointer, so it roamed across unrelated tests and read as flake for a month.
+//
+// The defect class is therefore "the fix reached one copy and not its twin",
+// which a per-file guard reproduces rather than prevents. While SFN-635 forces
+// classifiers to be duplicated by hand, the guard has to cover every copy.
+//
+// Comment lines are exempt on purpose: the notes recording this removal quote
+// the clause verbatim, and that is the documentation the next reader needs.
+import { ends_with, find_char_local, index_of } from "../../src/string_utils";
+
+let RUNTIME_ROOT: string = "runtime";
+
+// Both spellings a future edit might reach for. `index_of` is a plain
+// substring scan, so these match the clause's tail regardless of the
+// identifier in front of the mask.
+let UNSOUND_DECIMAL: string = "4294967295) == 0";
+let UNSOUND_HEX: string = "0xFFFFFFFF) == 0";
+
+// Bound every input-driven walk (.claude/rules/code-style.md). The tree is 59
+// files today; these ceilings only exist so a malformed read cannot spin.
+let MAX_DIRS: int = 512;
+let MAX_LINES: int = 200000;
+
+fn _starts_comment(line: string, from: int) -> boolean {
+    if from + 2 > line.length { return false; }
+    return substring(line, from, from + 2) == "//";
+}
+
+// A line whose first non-blank characters are `//`. Leading whitespace only —
+// a trailing `// ...` on a real code line is deliberately NOT exempt, because
+// the clause must not survive as live code with a comment after it.
+fn _is_comment_line(line: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= line.length { return false; }
+        let ch = substring(line, i, i + 1);
+        if ch != " " && ch != "\t" { break; }
+        i += 1;
+    }
+    return _starts_comment(line, i);
+}
+
+fn _line_carries_unsound_clause(line: string) -> boolean {
+    if _is_comment_line(line) { return false; }
+    if index_of(line, UNSOUND_DECIMAL) >= 0 { return true; }
+    if index_of(line, UNSOUND_HEX) >= 0 { return true; }
+    return false;
+}
+
+// Number of non-comment lines in `source` carrying the clause.
+fn _count_unsound_lines(source: string) -> int {
+    let mut hits: int = 0;
+    let mut pos: int = 0;
+    let mut guard: int = 0;
+    loop {
+        if guard >= MAX_LINES { break; }
+        guard += 1;
+        if pos >= source.length { break; }
+        let nl = find_char_local(source, "\n", pos);
+        let mut end: int = source.length;
+        if nl >= 0 { end = nl; }
+        if _line_carries_unsound_clause(substring(source, pos, end)) {
+            hits += 1;
+        }
+        if nl < 0 { break; }
+        pos = nl + 1;
+    }
+    return hits;
+}
+
+test "runtime immediate classifier: no 4 GiB-aligned pointer is classed immediate" ![io] {
+    let mut dir_queue: string[] = [RUNTIME_ROOT];
+    let mut head: int = 0;
+    let mut scanned: int = 0;
+    let mut offenders: int = 0;
+
+    loop {
+        if head >= dir_queue.length { break; }
+        if head >= MAX_DIRS { break; }
+        let dir = dir_queue[head];
+        head += 1;
+        let entries = fs.listDirectory(dir);
+        let mut i: int = 0;
+        loop {
+            if i >= entries.length { break; }
+            let entry = entries[i];
+            let full = dir + "/" + entry;
+            if ends_with(entry, ".sfn") {
+                let source = fs.readFile(full);
+                // A non-empty read is a precondition — a path typo must not
+                // pass this check by scanning an empty string.
+                assert source.length > 0;
+                scanned += 1;
+                offenders += _count_unsound_lines(source);
+            } else {
+                // Anything without a `.sfn` suffix is a potential
+                // subdirectory; `listDirectory` on a non-directory returns
+                // an empty list, so this is safe to enqueue unguarded.
+                dir_queue.push(full);
+            }
+            i += 1;
+        }
+    }
+
+    // The walk itself has to have worked; 59 `.sfn` files live under
+    // `runtime/` today, so a collapsed walk is a broken test, not a pass.
+    assert scanned >= 50;
+    assert offenders == 0;
+}
