@@ -780,7 +780,8 @@ fn dt_build_match(statement: Statement, rest: Statement[], id: int) -> DtStmt {
         statement: Statement.MatchStatement {
             expression: replaced.operand,
             cases: [ok_case, err_case],
-            decorators: []
+            decorators: [],
+            span: null
         },
         next_id: ok_result.next_id
     };

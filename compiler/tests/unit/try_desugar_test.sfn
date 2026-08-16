@@ -75,7 +75,8 @@ test "desugar: unsupported `?` position survives for the emitter diagnostic" {
     let match_try = Statement.MatchStatement {
         expression: _try_of("r"),
         cases: [],
-        decorators: []
+        decorators: [],
+        span: null
     };
     let input = _block([match_try]);
     assert block_contains_try(input);
