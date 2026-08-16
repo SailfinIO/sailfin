@@ -1,5 +1,5 @@
 // compiler/capsules/codegen-llvm/src/expression_lowering/native/core_call_resolution/method_target.sfn
-import { NativeFunction } from "sfn/ir";
+import { LoweringDiagnostic, NativeFunction } from "sfn/ir";
 import { find, substring } from "sfn/strings";
 
 import { is_simple_identifier } from "../../../expressions_helpers";
@@ -17,7 +17,12 @@ import {
     StringConstant,
     TypeContext
 } from "../../../types";
-import { ends_with, starts_with, trim_text } from "../../../utils";
+import {
+    ends_with,
+    extend_diag_array,
+    starts_with,
+    trim_text
+} from "../../../utils";
 import { array_pointer_element_type } from "../../arrays";
 import { lower_expression } from "../core";
 import { load_local_operand } from "../core_operands/comparisons";
@@ -34,11 +39,12 @@ import { try_resolve_closure_callee } from "./closure_callee";
 import { resolve_parsed_method_dispatch } from "./parsed_method_dispatch";
 import { _is_primitive_receiver_type } from "./receiver_types";
 
-fn resolve_call_method_target(trimmed_target: string, arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], current_temp: int, current_lines: string[], functions: NativeFunction[], context: TypeContext, diagnostics: string[], collected_string_constants: StringConstant[]) -> CallTargetResolution {
+fn resolve_call_method_target(trimmed_target: string, arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], current_temp: int, current_lines: string[], functions: NativeFunction[], context: TypeContext, diagnostics: string[], diags: LoweringDiagnostic[], collected_string_constants: StringConstant[]) -> CallTargetResolution {
     let mut result_target = trimmed_target;
     let mut result_lines = current_lines;
     let mut result_temp: int = current_temp;
     let mut result_diagnostics = diagnostics;
+    let mut result_diags = diags;
     let mut result_string_constants = collected_string_constants;
     let mut method_operand: LLVMOperand? = null;
     let mut helper_descriptor: RuntimeHelperDescriptor? = null;
@@ -131,6 +137,7 @@ fn resolve_call_method_target(trimmed_target: string, arguments: string[], bindi
                                 result_diagnostics.push(_rng_start.diagnostics[_rci0]);
                                 _rci0 += 1;
                             }
+                            result_diags = extend_diag_array(result_diags, _rng_start.diags);
                             result_string_constants = merge_string_constants(result_string_constants, _rng_start.string_constants);
                             result_lines = _rng_start.lines;
                             result_temp = _rng_start.temp_index;
@@ -143,6 +150,7 @@ fn resolve_call_method_target(trimmed_target: string, arguments: string[], bindi
                                 result_diagnostics.push(_rng_end.diagnostics[_rci1]);
                                 _rci1 += 1;
                             }
+                            result_diags = extend_diag_array(result_diags, _rng_end.diags);
                             result_string_constants = merge_string_constants(result_string_constants, _rng_end.string_constants);
                             result_lines = _rng_end.lines;
                             result_temp = _rng_end.temp_index;
@@ -159,6 +167,7 @@ fn resolve_call_method_target(trimmed_target: string, arguments: string[], bindi
                                         result_diagnostics.push(_rng_call.diagnostics[_rci2]);
                                         _rci2 += 1;
                                     }
+                                    result_diags = extend_diag_array(result_diags, _rng_call.diags);
                                     result_string_constants = merge_string_constants(result_string_constants, _rng_call.string_constants);
                                     result_lines = _rng_call.lines;
                                     result_temp = _rng_call.temp_index;
@@ -601,6 +610,7 @@ fn resolve_call_method_target(trimmed_target: string, arguments: string[], bindi
                                                 result_diagnostics.push(_pre_ch_lowered.diagnostics[_cich]);
                                                 _cich += 1;
                                             }
+                                            result_diags = extend_diag_array(result_diags, _pre_ch_lowered.diags);
                                             result_string_constants = merge_string_constants(result_string_constants, _pre_ch_lowered.string_constants);
                                             result_lines = _pre_ch_lowered.lines;
                                             result_temp = _pre_ch_lowered.temp_index;
@@ -663,6 +673,7 @@ fn resolve_call_method_target(trimmed_target: string, arguments: string[], bindi
                                         result_diagnostics.push(_pre_lowered.diagnostics[_ci1]);
                                         _ci1 += 1;
                                     }
+                                    result_diags = extend_diag_array(result_diags, _pre_lowered.diags);
                                     result_string_constants = merge_string_constants(result_string_constants, _pre_lowered.string_constants);
                                     result_lines = _pre_lowered.lines;
                                     result_temp = _pre_lowered.temp_index;
@@ -741,7 +752,7 @@ fn resolve_call_method_target(trimmed_target: string, arguments: string[], bindi
 
     // Delegate parse_member_access dispatch to a separate function to keep
     // each function under ~500 .sfn-asm instructions.
-    return resolve_parsed_method_dispatch(result_target, arguments, bindings, locals, result_temp, result_lines, functions, context, result_diagnostics, result_string_constants, method_operand, helper_descriptor, injected_argument_count, is_array_concat, array_concat_element_type, is_array_push, array_push_element_type);
+    return resolve_parsed_method_dispatch(result_target, arguments, bindings, locals, result_temp, result_lines, functions, context, result_diagnostics, result_diags, result_string_constants, method_operand, helper_descriptor, injected_argument_count, is_array_concat, array_concat_element_type, is_array_push, array_push_element_type);
 }
 
 export { resolve_call_method_target };

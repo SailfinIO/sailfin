@@ -14,7 +14,7 @@ import {
     promote_escaping_locals_for_boundaries
 } from "../expression_lowering/native/core_scopes";
 import { is_heap_type, map_array_pointer_type } from "../expression_lowering/native/core_type_mapping";
-import { detect_suspension_conflicts } from "../expression_lowering/native/statement_suspension";
+import { detect_suspension_conflict_diags, detect_suspension_conflicts } from "../expression_lowering/native/statement_suspension";
 import { is_union_annotation, map_local_type, split_union_annotations } from "../expression_lowering/native/statement_type_mapping";
 import { find_local_binding, find_parameter_binding, mark_parameter_consumed } from "../expressions_bindings";
 import { default_return_literal, format_local_pointer_name } from "../expressions_helpers";
@@ -48,6 +48,7 @@ import {
 } from "../types";
 import {
     diag_to_legacy_string,
+    extend_diag_array,
     is_identifier_part_char,
     is_identifier_start_char,
     lowering_error_diag,
@@ -298,6 +299,7 @@ fn _await_receive_channel_base(value: string) -> string {
 fn lower_let_instruction(function: NativeFunction, instruction: NativeInstruction, bindings: ParameterBinding[], locals: LocalBinding[], allocas: string[], lines: string[], temp_index: int, next_local_id: int, next_region_id: int, functions: NativeFunction[], context: TypeContext, scope_id: string, scope_depth: int, current_label: string) -> LetLoweringResult {
     let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
+    let mut diags: LoweringDiagnostic[] = [];
     let mut current_lines: string[] = lines;
     let mut current_allocas: string[] = allocas;
     let mut current_locals: LocalBinding[] = locals;
@@ -320,6 +322,9 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
         diagnostics.push(suspension_diagnostics[_ci16]);
         _ci16 += 1;
     }
+    // SFN-915: structured twin of the suspension diagnostics above. The
+    // statement span reaches these through `initializer_span` (SFN-539 AC3).
+    diags = extend_diag_array(diags, detect_suspension_conflict_diags(instruction.value, current_locals, current_bindings, function.name, initializer_span));
 
     // If this binding shadows an existing borrowed local, release the prior borrow region.
     let existing_binding = find_local_binding(current_locals, instruction.name);
@@ -497,6 +502,7 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
             diagnostics.push(lowered.diagnostics[_ci19]);
             _ci19 += 1;
         }
+        diags = extend_diag_array(diags, lowered.diags);
         if debug_lowering {
             trace_log("let-lowering: accessing lowered.lines");
         }
@@ -741,6 +747,7 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
                 diagnostics.push(coerced.diagnostics[_ci20]);
                 _ci20 += 1;
             }
+            diags = extend_diag_array(diags, coerced.diags);
             current_lines = coerced.lines;
             current_temp = coerced.temp_index;
             if coerced.operand == null {

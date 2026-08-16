@@ -260,6 +260,10 @@ struct ExpressionResult {
     operand: LLVMOperand?;
     diagnostics: string[];
     string_constants: StringConstant[];
+    // SFN-915: structured twin of `diagnostics`, appended last per the
+    // GEP-append discipline (docs/rca/2026-04-18-reexport-diagnostic-gep.md).
+    // Both channels run in parallel until SFN-540 retires the string one.
+    diags: LoweringDiagnostic[];
 }
 
 struct ArrayLiteralMetadata {
@@ -729,6 +733,9 @@ struct CoercionResult {
     temp_index: int;
     operand: LLVMOperand?;
     diagnostics: string[];
+    // SFN-915: structured twin of `diagnostics`, appended last. See
+    // `ExpressionResult` above.
+    diags: LoweringDiagnostic[];
 }
 
 struct BinaryAlignmentResult {

@@ -1,7 +1,7 @@
 // compiler/capsules/codegen-llvm/src/expression_lowering/native/core_ownership.sfn
 //
 // Ownership/borrow analysis helpers extracted from core.sfn.
-import { NativeSourceSpan } from "sfn/ir";
+import { LoweringDiagnostic, NativeSourceSpan } from "sfn/ir";
 
 import { is_simple_identifier } from "../../expressions_helpers";
 import { is_copy_type } from "../../type_mapping";
@@ -36,6 +36,7 @@ fn analyze_value_ownership_impl(initializer: string?, span: NativeSourceSpan?, l
 
     let parse = parse_borrow_expression(trimmed);
     let mut diagnostics: string[] = parse.diagnostics;
+    let mut diags: LoweringDiagnostic[] = [];
     if parse.recognized {
         if !parse.success {
             return OwnershipAnalysis {
@@ -167,6 +168,7 @@ fn format_suspension_location_impl(keyword: string, borrow_span: NativeSourceSpa
 
 fn detect_borrow_conflicts_impl(ownership: OwnershipInfo?, locals: LocalBinding[], binding_name: string, function_name: string) -> string[] {
     let mut diagnostics: string[] = [];
+    let mut diags: LoweringDiagnostic[] = [];
     if ownership == null { return diagnostics; }
     if ownership.variant != "Borrow" { return diagnostics; }
     let base = trim_text(ownership.base);

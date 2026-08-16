@@ -1,7 +1,7 @@
 // compiler/capsules/codegen-llvm/src/expression_lowering/native/core_call_lowering.sfn
 //
 // Call lowering extracted from core.sfn.
-import { NativeFunction } from "sfn/ir";
+import { LoweringDiagnostic, NativeFunction } from "sfn/ir";
 import { find, substring } from "sfn/strings";
 
 import { format_temp_name, format_typed_operand } from "../../expressions_helpers";
@@ -28,6 +28,7 @@ import {
 } from "../../types";
 import {
     ends_with,
+    extend_diag_array,
     extend_string_array,
     join_with_separator,
     number_to_string,
@@ -114,6 +115,7 @@ fn try_lower_plain_fn_ptr_call(target: string, arguments: string[], bindings: Pa
     if arguments.length != parsed.parameter_types.length { return null; }
 
     let mut diagnostics: string[] = [];
+    let mut diags: LoweringDiagnostic[] = [];
     let mut collected_string_constants: StringConstant[] = empty_string_constant_set();
     let mut result_lines = lines;
     let mut result_temp: int = temp_index;
@@ -158,7 +160,8 @@ fn try_lower_plain_fn_ptr_call(target: string, arguments: string[], bindings: Pa
                 temp_index: result_temp,
                 operand: null,
                 diagnostics: diagnostics,
-                string_constants: collected_string_constants
+                string_constants: collected_string_constants,
+                diags: diags
             };
         }
         let coerced = coerce_operand_to_type(lowered.operand, expected_type, result_temp, result_lines, false, null);
@@ -206,7 +209,8 @@ fn try_lower_plain_fn_ptr_call(target: string, arguments: string[], bindings: Pa
             temp_index: result_temp,
             operand: null,
             diagnostics: diagnostics,
-            string_constants: collected_string_constants
+            string_constants: collected_string_constants,
+            diags: diags
         };
     }
 
@@ -225,12 +229,14 @@ fn try_lower_plain_fn_ptr_call(target: string, arguments: string[], bindings: Pa
         temp_index: result_temp + 1,
         operand: call_result,
         diagnostics: diagnostics,
-        string_constants: collected_string_constants
+        string_constants: collected_string_constants,
+        diags: diags
     };
 }
 
 fn lower_call_expression(target: string, arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string) -> ExpressionResult {
     let mut diagnostics: string[] = [];
+    let mut diags: LoweringDiagnostic[] = [];
     let mut collected_string_constants: StringConstant[] = empty_string_constant_set();
     let empty_constants = empty_string_constant_set();
     let mut trimmed_target = trim_text(target);
@@ -241,7 +247,8 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
             temp_index: temp_index,
             operand: null,
             diagnostics: diagnostics,
-            string_constants: empty_constants
+            string_constants: empty_constants,
+            diags: diags
         };
     }
 
@@ -336,7 +343,7 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
     }
 
     // Phase 1: Resolve method target (fused concat, file-based, parse_member_access)
-    let resolution = resolve_call_method_target(trimmed_target, arguments, bindings, locals, temp_index, lines, functions, context, diagnostics, collected_string_constants);
+    let resolution = resolve_call_method_target(trimmed_target, arguments, bindings, locals, temp_index, lines, functions, context, diagnostics, diags, collected_string_constants);
     trimmed_target = resolution.trimmed_target;
     let mut current_lines = resolution.current_lines;
     let mut current_temp: int = resolution.current_temp;
@@ -478,7 +485,8 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
             temp_index: current_temp,
             operand: null,
             diagnostics: diagnostics,
-            string_constants: collected_string_constants
+            string_constants: collected_string_constants,
+            diags: diags
         };
     }
 
@@ -665,7 +673,7 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
     }
 
     // Phase 4: Coerce operands and emit the call (delegated to core_call_emission)
-    let emitted = coerce_and_emit_call(trimmed_target, operands, operand_source_types, expected_params, llvm_return, is_trait_dispatch, is_closure_dispatch, is_array_concat, array_concat_element_type, is_array_push, array_push_element_type, method_operand, helper_descriptor, function_entry, current_temp, current_lines, diagnostics, collected_string_constants, bindings, locals, context);
+    let emitted = coerce_and_emit_call(trimmed_target, operands, operand_source_types, expected_params, llvm_return, is_trait_dispatch, is_closure_dispatch, is_array_concat, array_concat_element_type, is_array_push, array_push_element_type, method_operand, helper_descriptor, function_entry, current_temp, current_lines, diagnostics, diags, collected_string_constants, bindings, locals, context);
     if emitted.operand == null { return emitted; }
     if expected_type.length == 0 { return emitted; }
     if function_entry == null { return emitted; }
@@ -697,13 +705,15 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
     if !should_coerce_narrow_result { return emitted; }
     let coerced_result = coerce_operand_to_type_with_source(emitted.operand, return_source_type, expected_type, emitted.temp_index, emitted.lines, true, null);
     let result_diagnostics = extend_string_array(emitted.diagnostics, coerced_result.diagnostics);
+    let result_diags = extend_diag_array(emitted.diags, coerced_result.diags);
     if coerced_result.operand == null {
         return ExpressionResult {
             lines: coerced_result.lines,
             temp_index: coerced_result.temp_index,
             operand: emitted.operand,
             diagnostics: result_diagnostics,
-            string_constants: emitted.string_constants
+            string_constants: emitted.string_constants,
+            diags: result_diags
         };
     }
     return ExpressionResult {
@@ -711,7 +721,8 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
         temp_index: coerced_result.temp_index,
         operand: coerced_result.operand,
         diagnostics: result_diagnostics,
-        string_constants: emitted.string_constants
+        string_constants: emitted.string_constants,
+        diags: result_diags
     };
 }
 

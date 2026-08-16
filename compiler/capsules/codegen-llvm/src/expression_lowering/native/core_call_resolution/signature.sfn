@@ -1,7 +1,7 @@
 // compiler/capsules/codegen-llvm/src/expression_lowering/native/core_call_resolution/signature.sfn
 //
 // Final call-signature resolution after target and method dispatch.
-import { NativeFunction } from "sfn/ir";
+import { LoweringDiagnostic, NativeFunction } from "sfn/ir";
 import { last_index_of_char as find_last_index_of_char, substring } from "sfn/strings";
 
 import { find_prelude_mirror_signature } from "../../../prelude_mirror_signatures";
@@ -37,6 +37,7 @@ fn resolve_call_signature(trimmed_target: string, helper_descriptor: RuntimeHelp
     let mut expected_params: string[] = [];
     let mut is_trait_dispatch: boolean = false;
     let mut result_diagnostics: string[] = [];
+    let mut result_diags: LoweringDiagnostic[] = [];
     let mut result_helper = helper_descriptor;
 
     // Issue #689: closure dispatch carries its own pre-resolved

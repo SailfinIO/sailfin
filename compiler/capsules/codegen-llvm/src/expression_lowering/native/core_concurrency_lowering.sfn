@@ -2,7 +2,7 @@
 // Lowering for concurrency and channel/tostring method special forms
 // (spawn/channel/parallel/serve/await), extracted from core.sfn to bound
 // per-module emit working set. Called by `lower_expression` in ./core.
-import { NativeFunction } from "sfn/ir";
+import { LoweringDiagnostic, NativeFunction } from "sfn/ir";
 import { substring } from "sfn/strings";
 
 import { format_temp_name, is_simple_identifier } from "../../expressions_helpers";
@@ -18,7 +18,7 @@ import {
     StringConstant,
     TypeContext
 } from "../../types";
-import { extend_string_array, starts_with } from "../../utils";
+import { extend_diag_array, extend_string_array, starts_with } from "../../utils";
 import { lower_expression } from "./core";
 import { find_parameter_binding } from "./core_bindings";
 import { split_call_arguments } from "./core_calls";
@@ -130,6 +130,7 @@ fn try_lower_channel_method(member_target: MemberAccessParse, argument_entries: 
     let mut ch_lines: string[] = lines;
     let mut ch_temp: int = temp_index;
     let mut ch_diag: string[] = [];
+    let mut ch_diags: LoweringDiagnostic[] = [];
     let mut ch_constants: StringConstant[] = empty_string_constant_set();
 
     // Lower the channel handle (an opaque i8*).
@@ -148,7 +149,8 @@ fn try_lower_channel_method(member_target: MemberAccessParse, argument_entries: 
             temp_index: ch_temp,
             operand: null,
             diagnostics: ch_diag,
-            string_constants: ch_constants
+            string_constants: ch_constants,
+            diags: ch_diags
         };
     }
     let mut ch_handle = base_lowered.operand;
@@ -177,7 +179,8 @@ fn try_lower_channel_method(member_target: MemberAccessParse, argument_entries: 
                 temp_index: ch_temp,
                 operand: null,
                 diagnostics: ch_diag,
-                string_constants: ch_constants
+                string_constants: ch_constants,
+                diags: ch_diags
             };
         }
         // Normalize the element to match the channel's elem_size. The
@@ -267,7 +270,8 @@ fn try_lower_channel_method(member_target: MemberAccessParse, argument_entries: 
             temp_index: ch_temp,
             operand: send_operand,
             diagnostics: ch_diag,
-            string_constants: ch_constants
+            string_constants: ch_constants,
+            diags: ch_diags
         };
     }
 
@@ -296,7 +300,8 @@ fn try_lower_channel_method(member_target: MemberAccessParse, argument_entries: 
                 temp_index: ch_temp,
                 operand: null,
                 diagnostics: ch_diag,
-                string_constants: ch_constants
+                string_constants: ch_constants,
+                diags: ch_diags
             };
         }
     }
@@ -431,7 +436,8 @@ fn try_lower_channel_method(member_target: MemberAccessParse, argument_entries: 
         temp_index: ch_temp,
         operand: recv_operand,
         diagnostics: ch_diag,
-        string_constants: ch_constants
+        string_constants: ch_constants,
+        diags: ch_diags
     };
 }
 
@@ -490,13 +496,15 @@ fn try_lower_tostring_method(member_target: MemberAccessParse, argument_entries:
     if base_lowered.operand == null { return null; }
     let coerced = coerce_operand_to_string(base_lowered.operand, base_lowered.temp_index, base_lowered.lines);
     let mut ts_diag: string[] = base_lowered.diagnostics;
+    let mut ts_diags = base_lowered.diags;
     ts_diag = extend_string_array(ts_diag, coerced.diagnostics);
     return ExpressionResult {
         lines: coerced.lines,
         temp_index: coerced.temp_index,
         operand: coerced.operand,
         diagnostics: ts_diag,
-        string_constants: base_lowered.string_constants
+        string_constants: base_lowered.string_constants,
+        diags: ts_diags
     };
 }
 
@@ -506,6 +514,7 @@ fn try_lower_tostring_method(member_target: MemberAccessParse, argument_entries:
 // instead of accumulating into `lower_expression`'s 240+-local frame.
 fn lower_spawn_typed_expression(stripped: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult {
     let diagnostics: string[] = [];
+    let diags: LoweringDiagnostic[] = [];
     let colon_pos = index_of(stripped, ":");
     let space_pos = index_of(stripped, " ");
     let mut spawn_kind: string = "";
@@ -542,6 +551,7 @@ fn lower_spawn_typed_expression(stripped: string, bindings: ParameterBinding[], 
     let mut spawn_lines: string[] = lines;
     let mut spawn_temp: int = temp_index;
     let mut spawn_diag: string[] = diagnostics;
+    let mut spawn_diags = diags;
     let empty_spawn_constants: StringConstant[] = [];
     let mut have_operand: boolean = false;
     let mut op_llvm_type: string = "";
@@ -567,7 +577,8 @@ fn lower_spawn_typed_expression(stripped: string, bindings: ParameterBinding[], 
             temp_index: spawn_temp,
             operand: null,
             diagnostics: spawn_diag,
-            string_constants: empty_spawn_constants
+            string_constants: empty_spawn_constants,
+            diags: spawn_diags
         };
     }
     // The spawned task lowers to one of two operand shapes:
@@ -639,7 +650,8 @@ fn lower_spawn_typed_expression(stripped: string, bindings: ParameterBinding[], 
         temp_index: spawn_temp,
         operand: spawn_operand,
         diagnostics: spawn_diag,
-        string_constants: empty_spawn_constants
+        string_constants: empty_spawn_constants,
+        diags: spawn_diags
     };
 }
 
@@ -647,10 +659,12 @@ fn lower_spawn_typed_expression(stripped: string, bindings: ParameterBinding[], 
 // (i8* → i8*). Extracted sibling of `lower_expression`.
 fn lower_spawn_expression(stripped: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult {
     let diagnostics: string[] = [];
+    let diags: LoweringDiagnostic[] = [];
     let spawn_op_text = trim_text(substring(stripped, 6, stripped.length));
     let mut spawn2_lines: string[] = lines;
     let mut spawn2_temp: int = temp_index;
     let mut spawn2_diag: string[] = diagnostics;
+    let mut spawn2_diags = diags;
     let empty_spawn2_constants: StringConstant[] = [];
     if spawn_op_text.length > 0 {
         let lowered2 = lower_expression(spawn_op_text, bindings, locals, spawn2_temp, spawn2_lines, functions, context, "");
@@ -684,7 +698,8 @@ fn lower_spawn_expression(stripped: string, bindings: ParameterBinding[], locals
                 temp_index: spawn2_temp,
                 operand: spawn2_operand,
                 diagnostics: spawn2_diag,
-                string_constants: empty_spawn2_constants
+                string_constants: empty_spawn2_constants,
+                diags: spawn2_diags
             };
         }
     }
@@ -696,7 +711,8 @@ fn lower_spawn_expression(stripped: string, bindings: ParameterBinding[], locals
         temp_index: spawn2_temp,
         operand: null,
         diagnostics: spawn2_diag,
-        string_constants: empty_spawn2_constants
+        string_constants: empty_spawn2_constants,
+        diags: spawn2_diags
     };
 }
 
@@ -705,6 +721,7 @@ fn lower_spawn_expression(stripped: string, bindings: ParameterBinding[], locals
 // sibling of `lower_expression`.
 fn lower_channel_capacity_expression(stripped: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult {
     let diagnostics: string[] = [];
+    let diags: LoweringDiagnostic[] = [];
     let chan_inner = trim_text(substring(stripped, 8, stripped.length));
     // The end index is computed in a standalone statement (not a
     // ternary inside the call argument): the inline form mis-lowered
@@ -717,6 +734,7 @@ fn lower_channel_capacity_expression(stripped: string, bindings: ParameterBindin
     let mut chan_lines: string[] = lines;
     let mut chan_temp: int = temp_index;
     let mut chan_diag: string[] = diagnostics;
+    let mut chan_diags = diags;
     let mut cap_llvm: string = "i64 0";
     if cap_text.length > 0 {
         let cap_lowered = lower_expression(cap_text, bindings, locals, chan_temp, chan_lines, functions, context, "");
@@ -747,7 +765,8 @@ fn lower_channel_capacity_expression(stripped: string, bindings: ParameterBindin
         temp_index: chan_temp,
         operand: chan_operand,
         diagnostics: chan_diag,
-        string_constants: empty_chan_constants
+        string_constants: empty_chan_constants,
+        diags: chan_diags
     };
 }
 
@@ -756,11 +775,13 @@ fn lower_channel_capacity_expression(stripped: string, bindings: ParameterBindin
 // Extracted sibling of `lower_expression`.
 fn lower_channel_typed_expression(stripped: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult {
     let diagnostics: string[] = [];
+    let diags: LoweringDiagnostic[] = [];
     let paren_pos = index_of(stripped, "(");
     let empty_chantyped_constants: StringConstant[] = [];
     let mut chantyped_lines: string[] = lines;
     let mut chantyped_temp: int = temp_index;
     let mut chantyped_diag: string[] = diagnostics;
+    let mut chantyped_diags = diags;
     let mut typed_cap_llvm: string = "i64 0";
     if paren_pos >= 0 {
         let inner_start = paren_pos + 1;
@@ -842,7 +863,8 @@ fn lower_channel_typed_expression(stripped: string, bindings: ParameterBinding[]
         temp_index: chantyped_temp,
         operand: chantyped_operand,
         diagnostics: chantyped_diag,
-        string_constants: empty_chantyped_constants
+        string_constants: empty_chantyped_constants,
+        diags: chantyped_diags
     };
 }
 
@@ -851,12 +873,14 @@ fn lower_channel_typed_expression(stripped: string, bindings: ParameterBinding[]
 // runtime contract.
 fn lower_parallel_expression(stripped: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult {
     let diagnostics: string[] = [];
+    let diags: LoweringDiagnostic[] = [];
     let list_start = index_of(stripped, "[");
     let list_end = find_last_index_of_char(stripped, "]");
     let empty_par_constants: StringConstant[] = [];
     let mut par_lines: string[] = lines;
     let mut par_temp: int = temp_index;
     let mut par_diag: string[] = diagnostics;
+    let mut par_diags = diags;
     // Per-task fn-ptr / ctx values as i64 SSA temps (input order).
     let mut par_fn_addrs: string[] = [];
     let mut par_ctx_addrs: string[] = [];
@@ -946,7 +970,8 @@ fn lower_parallel_expression(stripped: string, bindings: ParameterBinding[], loc
             temp_index: par_temp,
             operand: par_empty_operand,
             diagnostics: par_diag,
-            string_constants: empty_par_constants
+            string_constants: empty_par_constants,
+            diags: par_diags
         };
     }
     // Stack-allocate the fn-ptr and ctx arrays (one i64 per task).
@@ -1024,7 +1049,8 @@ fn lower_parallel_expression(stripped: string, bindings: ParameterBinding[], loc
         temp_index: par_temp,
         operand: par_operand,
         diagnostics: par_diag,
-        string_constants: empty_par_constants
+        string_constants: empty_par_constants,
+        diags: par_diags
     };
 }
 
@@ -1102,6 +1128,7 @@ fn lower_join_all_expression(stripped: string, bindings: ParameterBinding[], loc
     let mut ja_lines: string[] = lines;
     let mut ja_temp: int = temp_index;
     let mut ja_diag: string[] = [];
+    let mut ja_diags: LoweringDiagnostic[] = [];
 
     // Lower the handles argument to its `Task<T>[]` = `{ Future*, i64, i64 }*`
     // operand. An empty `[]` literal lowers to `{ double*, i64, i64 }*` (len 0).
@@ -1144,7 +1171,8 @@ fn lower_join_all_expression(stripped: string, bindings: ParameterBinding[], loc
             temp_index: ja_temp,
             operand: bad,
             diagnostics: ja_diag,
-            string_constants: empty_constants
+            string_constants: empty_constants,
+            diags: ja_diags
         };
     }
 
@@ -1168,7 +1196,8 @@ fn lower_join_all_expression(stripped: string, bindings: ParameterBinding[], loc
                 temp_index: ja_temp,
                 operand: bad,
                 diagnostics: ja_diag,
-                string_constants: empty_constants
+                string_constants: empty_constants,
+                diags: ja_diags
             };
         }
     }
@@ -1231,7 +1260,8 @@ fn lower_join_all_expression(stripped: string, bindings: ParameterBinding[], loc
         temp_index: ja_temp,
         operand: ja_operand,
         diagnostics: ja_diag,
-        string_constants: empty_constants
+        string_constants: empty_constants,
+        diags: ja_diags
     };
 }
 
@@ -1241,12 +1271,14 @@ fn lower_join_all_expression(stripped: string, bindings: ParameterBinding[], loc
 // here (#1323).
 fn lower_serve_expression(stripped: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult {
     let diagnostics: string[] = [];
+    let diags: LoweringDiagnostic[] = [];
     let serve_inner_start = index_of(stripped, "(");
     let serve_inner_end = find_last_index_of_char(stripped, ")");
     let empty_serve_constants: StringConstant[] = [];
     let mut serve_lines: string[] = lines;
     let mut serve_temp: int = temp_index;
     let mut serve_diag: string[] = diagnostics;
+    let mut serve_diags = diags;
     if serve_inner_start >= 0 {
         if serve_inner_end > serve_inner_start {
             let serve_args_text = trim_text(substring(stripped, serve_inner_start
@@ -1310,7 +1342,8 @@ fn lower_serve_expression(stripped: string, bindings: ParameterBinding[], locals
         temp_index: serve_temp,
         operand: null,
         diagnostics: serve_diag,
-        string_constants: empty_serve_constants
+        string_constants: empty_serve_constants,
+        diags: serve_diags
     };
 }
 
@@ -1345,6 +1378,7 @@ fn _is_channel_receive_remainder(remainder: string, bindings: ParameterBinding[]
 // fall-through cases stay inline at the call site.
 fn lower_await_expression(stripped: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string) -> ExpressionResult {
     let mut diagnostics: string[] = [];
+    let mut diags: LoweringDiagnostic[] = [];
     let empty_constants = empty_string_constant_set();
     let remainder = trim_text(substring(stripped, 5, stripped.length));
     if remainder.length == 0 {
@@ -1354,7 +1388,8 @@ fn lower_await_expression(stripped: string, bindings: ParameterBinding[], locals
             temp_index: temp_index,
             operand: null,
             diagnostics: diagnostics,
-            string_constants: empty_constants
+            string_constants: empty_constants,
+            diags: diags
         };
     }
     let lowered = lower_expression(remainder, bindings, locals, temp_index, lines, functions, context, expected_type);
@@ -1364,13 +1399,15 @@ fn lower_await_expression(stripped: string, bindings: ParameterBinding[], locals
         diagnostics.push(lowered.diagnostics[_ci0]);
         _ci0 += 1;
     }
+    diags = extend_diag_array(diags, lowered.diags);
     if lowered.operand == null {
         return ExpressionResult {
             lines: lowered.lines,
             temp_index: lowered.temp_index,
             operand: null,
             diagnostics: diagnostics,
-            string_constants: lowered.string_constants
+            string_constants: lowered.string_constants,
+            diags: diags
         };
     }
 
@@ -1389,7 +1426,8 @@ fn lower_await_expression(stripped: string, bindings: ParameterBinding[], locals
             temp_index: lowered.temp_index,
             operand: lowered.operand,
             diagnostics: diagnostics,
-            string_constants: lowered.string_constants
+            string_constants: lowered.string_constants,
+            diags: diags
         };
     }
 
@@ -1411,12 +1449,14 @@ fn lower_await_expression(stripped: string, bindings: ParameterBinding[], locals
             + "llvm lowering: await expects a Future pointer, got `"
             + future_operand.llvm_type
             + "`");
+        let with_issue_diags = diags;
         return ExpressionResult {
             lines: lowered.lines,
             temp_index: lowered.temp_index,
             operand: null,
             diagnostics: with_issue,
-            string_constants: lowered.string_constants
+            string_constants: lowered.string_constants,
+            diags: with_issue_diags
         };
     }
 
@@ -1441,7 +1481,8 @@ fn lower_await_expression(stripped: string, bindings: ParameterBinding[], locals
             temp_index: cast_fut_idx,
             operand: out_operand,
             diagnostics: diagnostics,
-            string_constants: lowered.string_constants
+            string_constants: lowered.string_constants,
+            diags: diags
         };
     }
 
@@ -1553,6 +1594,7 @@ fn lower_await_expression(stripped: string, bindings: ParameterBinding[], locals
                         diagnostics.push(free_result.diagnostics[_free_di]);
                         _free_di += 1;
                     }
+                    diags = extend_diag_array(diags, free_result.diags);
                     awaited_lines2 = free_result.lines;
                     let out_operand_unboxed = LLVMOperand {
                         llvm_type: trimmed_expected,
@@ -1563,7 +1605,8 @@ fn lower_await_expression(stripped: string, bindings: ParameterBinding[], locals
                         temp_index: lowered.temp_index + 4,
                         operand: out_operand_unboxed,
                         diagnostics: diagnostics,
-                        string_constants: lowered.string_constants
+                        string_constants: lowered.string_constants,
+                        diags: diags
                     };
                 }
             }
@@ -1589,7 +1632,8 @@ fn lower_await_expression(stripped: string, bindings: ParameterBinding[], locals
                 temp_index: lowered.temp_index + 3,
                 operand: out_operand_boxed,
                 diagnostics: diagnostics,
-                string_constants: lowered.string_constants
+                string_constants: lowered.string_constants,
+                diags: diags
             };
         }
     }
@@ -1603,6 +1647,7 @@ fn lower_await_expression(stripped: string, bindings: ParameterBinding[], locals
         temp_index: lowered.temp_index + 2,
         operand: out_operand2,
         diagnostics: diagnostics,
-        string_constants: lowered.string_constants
+        string_constants: lowered.string_constants,
+        diags: diags
     };
 }

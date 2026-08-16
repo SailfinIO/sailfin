@@ -70,6 +70,7 @@ fn lower_all_functions(local_functions: NativeFunction[], context_functions: Nat
     let mut function_effects: FunctionEffectEntry[] = [];
     let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
+    let mut diags: LoweringDiagnostic[] = [];
 
     if trace {
         trace_log("test llvm: lowering functions start (count="

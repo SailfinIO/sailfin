@@ -3,6 +3,8 @@
 // Target-aware LLVM lowering for the Darwin process memory-footprint
 // intrinsic. The Darwin ABI sequence stays isolated from the central call
 // emitter so non-Darwin legs cannot acquire platform-only symbols.
+import { LoweringDiagnostic } from "sfn/ir";
+
 import { format_temp_name } from "../../expressions_helpers";
 import { fs_platform_leg } from "../../lowering_debug_state";
 import { ExpressionResult, LLVMOperand, StringConstant } from "../../types";
@@ -12,7 +14,7 @@ import { number_to_string } from "../../utils";
 // Darwin and folds the sentinel to zero on every other target. The Darwin
 // `rusage_info_v2` ABI is 160 bytes with `ri_phys_footprint` at byte offset
 // 72; the field is loaded only after `proc_pid_rusage` reports success.
-fn lower_mem_footprint_intrinsic(temp_index: int, lines: string[], diagnostics: string[], string_constants: StringConstant[]) -> ExpressionResult {
+fn lower_mem_footprint_intrinsic(temp_index: int, lines: string[], diagnostics: string[], diags: LoweringDiagnostic[], string_constants: StringConstant[]) -> ExpressionResult {
     if fs_platform_leg() != "darwin" {
         let zero = LLVMOperand { llvm_type: "i64", value: "0" };
         return ExpressionResult {
@@ -20,7 +22,8 @@ fn lower_mem_footprint_intrinsic(temp_index: int, lines: string[], diagnostics: 
             temp_index: temp_index,
             operand: zero,
             diagnostics: diagnostics,
-            string_constants: string_constants
+            string_constants: string_constants,
+            diags: diags
         };
     }
 
@@ -89,7 +92,8 @@ fn lower_mem_footprint_intrinsic(temp_index: int, lines: string[], diagnostics: 
         temp_index: next_temp,
         operand: operand,
         diagnostics: diagnostics,
-        string_constants: string_constants
+        string_constants: string_constants,
+        diags: diags
     };
 }
 

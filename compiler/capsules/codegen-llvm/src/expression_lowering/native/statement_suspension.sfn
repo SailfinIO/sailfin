@@ -4,12 +4,13 @@
 //
 // Detects when mutable borrows remain active across `await`/`yield` suspension
 // points, and provides future type / spawn symbol mapping for the async runtime.
-import { NativeSourceSpan } from "sfn/ir";
+import { LoweringDiagnostic, NativeSourceSpan } from "sfn/ir";
 import { substring } from "sfn/strings";
 
 import { LocalBinding, ParameterBinding } from "../../types";
 import {
     is_identifier_part_char,
+    lowering_warning_diag,
     matches_keyword,
     starts_with,
     trim_text
@@ -113,8 +114,20 @@ fn normalise_borrow_base(raw_base: string) -> string {
 // ---------------------------------------------------------------------------
 // Suspension conflict detection
 // ---------------------------------------------------------------------------
-fn collect_suspension_conflicts(keyword: string, locals: LocalBinding[], bindings: ParameterBinding[], function_name: string, suspension_span: NativeSourceSpan?) -> string[] {
-    let mut diagnostics: string[] = [];
+// One detected conflict, held in the single shape both output channels are
+// derived from (SFN-915). `message` is the location-free core; `location` is
+// the legacy ` (borrow at L:C-L:C; await at L:C-L:C)` suffix; `span` is the
+// same information as a real span for the structured channel. Deriving both
+// renderings from one record is what keeps the legacy string byte-identical
+// while SFN-539 AC3 moves the location out of the structured message.
+struct SuspensionConflict {
+    message: string;
+    location: string;
+    span: NativeSourceSpan?;
+}
+
+fn _collect_suspension_conflict_records(keyword: string, locals: LocalBinding[], bindings: ParameterBinding[], function_name: string, suspension_span: NativeSourceSpan?) -> SuspensionConflict[] {
+    let mut conflicts: SuspensionConflict[] = [];
     let mut index: int = 0;
     loop {
         if index >= locals.length { break; }
@@ -125,16 +138,22 @@ fn collect_suspension_conflicts(keyword: string, locals: LocalBinding[], binding
                 if details.variant == "Borrow" {
                     if details.mutable {
                         let base_name = normalise_borrow_base(details.base);
-                        let location = format_suspension_location(keyword, details.span, suspension_span);
-                        diagnostics.push("llvm lowering: " + keyword
-                            + " suspends while mutable borrow `"
-                            + local.name
-                            + "` of `"
-                            + base_name
-                            + "` remains active in `"
-                            + function_name
-                            + "`"
-                            + location);
+                        // The suspension point is where the conflict is
+                        // observable, so it is the primary span; the borrow
+                        // site stands in when the caller threaded no
+                        // statement span. Both remain in `location`.
+                        let mut primary: NativeSourceSpan? = suspension_span;
+                        if primary == null { primary = details.span; }
+                        conflicts.push(SuspensionConflict {
+                            message: keyword
+                                + " suspends while mutable borrow `"
+                                + local.name
+                                + "` of `"
+                                + base_name
+                                + "` remains active in `"
+                                + function_name
+                                + "`", location: format_suspension_location(keyword, details.span, suspension_span), span: primary
+                        });
                     }
                 }
             }
@@ -147,19 +166,50 @@ fn collect_suspension_conflicts(keyword: string, locals: LocalBinding[], binding
         let binding = bindings[parameter_index];
         if !binding.consumed {
             if is_mutable_borrow_annotation(binding.type_annotation) {
-                let location = format_suspension_location(keyword, binding.span, suspension_span);
-                diagnostics.push("llvm lowering: " + keyword
-                    + " suspends while mutable borrow parameter `"
-                    + binding.name
-                    + "` remains active in `"
-                    + function_name
-                    + "`"
-                    + location);
+                let mut primary: NativeSourceSpan? = suspension_span;
+                if primary == null { primary = binding.span; }
+                conflicts.push(SuspensionConflict {
+                    message: keyword
+                        + " suspends while mutable borrow parameter `"
+                        + binding.name
+                        + "` remains active in `"
+                        + function_name
+                        + "`", location: format_suspension_location(keyword, binding.span, suspension_span), span: primary
+                });
             }
         }
         parameter_index += 1;
     }
+    return conflicts;
+}
+
+fn collect_suspension_conflicts(keyword: string, locals: LocalBinding[], bindings: ParameterBinding[], function_name: string, suspension_span: NativeSourceSpan?) -> string[] {
+    let conflicts = _collect_suspension_conflict_records(keyword, locals, bindings, function_name, suspension_span);
+    let mut diagnostics: string[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= conflicts.length { break; }
+        let conflict = conflicts[index];
+        diagnostics.push("llvm lowering: " + conflict.message + conflict.location);
+        index += 1;
+    }
     return diagnostics;
+}
+
+// The structured twin. These conflicts have never carried `[fatal]`, so they
+// stay `warning` severity — promoting them would make the gate SFN-540
+// derives from `diags` reject builds the string gate accepts today.
+fn collect_suspension_conflict_diags(keyword: string, locals: LocalBinding[], bindings: ParameterBinding[], function_name: string, suspension_span: NativeSourceSpan?) -> LoweringDiagnostic[] {
+    let conflicts = _collect_suspension_conflict_records(keyword, locals, bindings, function_name, suspension_span);
+    let mut diags: LoweringDiagnostic[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= conflicts.length { break; }
+        let conflict = conflicts[index];
+        diags.push(lowering_warning_diag("E1022", conflict.message, conflict.span));
+        index += 1;
+    }
+    return diags;
 }
 
 fn detect_suspension_conflicts(expression: string?, locals: LocalBinding[], bindings: ParameterBinding[], function_name: string, suspension_span: NativeSourceSpan?) -> string[] {
@@ -169,6 +219,15 @@ fn detect_suspension_conflicts(expression: string?, locals: LocalBinding[], bind
     let keyword = find_suspension_keyword(trimmed);
     if keyword.length == 0 { return []; }
     return collect_suspension_conflicts(keyword, locals, bindings, function_name, suspension_span);
+}
+
+fn detect_suspension_conflict_diags(expression: string?, locals: LocalBinding[], bindings: ParameterBinding[], function_name: string, suspension_span: NativeSourceSpan?) -> LoweringDiagnostic[] {
+    if expression == null { return []; }
+    let trimmed = trim_text(expression);
+    if trimmed.length == 0 { return []; }
+    let keyword = find_suspension_keyword(trimmed);
+    if keyword.length == 0 { return []; }
+    return collect_suspension_conflict_diags(keyword, locals, bindings, function_name, suspension_span);
 }
 
 // ---------------------------------------------------------------------------

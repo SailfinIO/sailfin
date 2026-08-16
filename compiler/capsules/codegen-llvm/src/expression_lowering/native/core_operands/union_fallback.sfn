@@ -4,10 +4,12 @@
 // by matching the operand against each payload variant. Split out to bound
 // per-module emit working set. Returns null if the target is not a union
 // or no variant matches — caller falls through to its own tail.
+import { LoweringDiagnostic } from "sfn/ir";
+
 import { format_temp_name } from "../../../expressions_helpers";
 import { ends_with_pointer_suffix, strip_pointer_suffix } from "../../../type_mapping";
 import { CoercionResult, LLVMOperand } from "../../../types";
-import { starts_with } from "../../../utils";
+import { extend_diag_array, starts_with } from "../../../utils";
 import { is_union_llvm_type, number_to_string, parse_union_payload_types } from "../core_text";
 import {
     RuntimeCallOverrides,
@@ -19,6 +21,7 @@ import { coerce_numeric_primitive } from "./numeric_coercion";
 fn _coerce_union_target_fallback(operand: LLVMOperand, operand_type: string, target: string, temp_index: int, lines: string[]) -> CoercionResult? {
     let mut current_lines: string[] = lines;
     let mut diagnostics: string[] = [];
+    let mut diags: LoweringDiagnostic[] = [];
 
     if is_union_llvm_type(target) {
         let variants = parse_union_payload_types(target);
@@ -42,6 +45,7 @@ fn _coerce_union_target_fallback(operand: LLVMOperand, operand_type: string, tar
                         diagnostics.push(variant_numeric.diagnostics[_vndi]);
                         _vndi += 1;
                     }
+                    diags = extend_diag_array(diags, variant_numeric.diags);
                     if variant_numeric.operand != null {
                         local_lines = variant_numeric.lines;
                         local_temp = variant_numeric.temp_index;
@@ -97,6 +101,7 @@ fn _coerce_union_target_fallback(operand: LLVMOperand, operand_type: string, tar
                             diagnostics.push(alloc_result_d.diagnostics[_alloc_di_d]);
                             _alloc_di_d += 1;
                         }
+                        diags = extend_diag_array(diags, alloc_result_d.diags);
                         local_lines = alloc_result_d.lines;
                         local_lines.push("  " + typed_ptr_temp
                             + " = bitcast i8* "
@@ -125,6 +130,7 @@ fn _coerce_union_target_fallback(operand: LLVMOperand, operand_type: string, tar
                             diagnostics.push(mp_result_d.diagnostics[_mp_di_d]);
                             _mp_di_d += 1;
                         }
+                        diags = extend_diag_array(diags, mp_result_d.diags);
                         local_lines = mp_result_d.lines;
                         has_value = true;
                         value_text = typed_ptr_temp;
@@ -182,6 +188,7 @@ fn _coerce_union_target_fallback(operand: LLVMOperand, operand_type: string, tar
                                 diagnostics.push(alloc_result_e.diagnostics[_alloc_di_e]);
                                 _alloc_di_e += 1;
                             }
+                            diags = extend_diag_array(diags, alloc_result_e.diags);
                             local_lines = alloc_result_e.lines;
                             local_lines.push("  " + typed_ptr_temp
                                 + " = bitcast i8* "
@@ -210,6 +217,7 @@ fn _coerce_union_target_fallback(operand: LLVMOperand, operand_type: string, tar
                                 diagnostics.push(mp_result_e.diagnostics[_mp_di_e]);
                                 _mp_di_e += 1;
                             }
+                            diags = extend_diag_array(diags, mp_result_e.diags);
                             local_lines = mp_result_e.lines;
                             has_value = true;
                             value_text = malloc_temp;
@@ -243,7 +251,8 @@ fn _coerce_union_target_fallback(operand: LLVMOperand, operand_type: string, tar
                     lines: local_lines,
                     temp_index: local_temp + 2,
                     operand: coerced,
-                    diagnostics: diagnostics
+                    diagnostics: diagnostics,
+                    diags: diags
                 };
             }
             variant_index += 1;
@@ -262,7 +271,8 @@ fn _coerce_union_target_fallback(operand: LLVMOperand, operand_type: string, tar
             lines: current_lines,
             temp_index: temp_index,
             operand: null,
-            diagnostics: diagnostics
+            diagnostics: diagnostics,
+            diags: diags
         };
     }
     return null;

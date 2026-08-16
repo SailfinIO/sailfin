@@ -30,7 +30,7 @@
 // `zext` (not `sext`): the byte is unsigned (0..255), matching the C
 // `(int64_t)(unsigned char)s[idx]`. A `sext` would make bytes >= 0x80
 // negative and corrupt every UTF-8 comparison on the self-host path.
-import { NativeFunction } from "sfn/ir";
+import { LoweringDiagnostic, NativeFunction } from "sfn/ir";
 
 // Mutually recursive with `lower_expression` (which dispatches calls
 // back through the byte-load hook): the same cycle the atomic builtins
@@ -66,6 +66,7 @@ fn is_byte_load_builtin(name: string) -> boolean {
 // `operand` is the zero-extended i64 byte value.
 fn lower_byte_load(name: string, arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult {
     let mut diagnostics: string[] = [];
+    let mut diags: LoweringDiagnostic[] = [];
     let mut current_lines = lines;
     let mut current_temp = temp_index;
     let mut collected_strings: StringConstant[] = [];
@@ -84,7 +85,8 @@ fn lower_byte_load(name: string, arguments: string[], bindings: ParameterBinding
             temp_index: current_temp,
             operand: null,
             diagnostics: diagnostics,
-            string_constants: collected_strings
+            string_constants: collected_strings,
+            diags: diags
         };
     }
 
@@ -102,7 +104,8 @@ fn lower_byte_load(name: string, arguments: string[], bindings: ParameterBinding
             temp_index: current_temp,
             operand: null,
             diagnostics: diagnostics,
-            string_constants: collected_strings
+            string_constants: collected_strings,
+            diags: diags
         };
     }
 
@@ -119,7 +122,8 @@ fn lower_byte_load(name: string, arguments: string[], bindings: ParameterBinding
             temp_index: current_temp,
             operand: null,
             diagnostics: diagnostics,
-            string_constants: collected_strings
+            string_constants: collected_strings,
+            diags: diags
         };
     }
 
@@ -142,7 +146,8 @@ fn lower_byte_load(name: string, arguments: string[], bindings: ParameterBinding
         temp_index: current_temp,
         operand: LLVMOperand { llvm_type: "i64", value: result_name },
         diagnostics: diagnostics,
-        string_constants: collected_strings
+        string_constants: collected_strings,
+        diags: diags
     };
 }
 

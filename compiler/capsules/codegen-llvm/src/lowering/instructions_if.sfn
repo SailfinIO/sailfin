@@ -66,6 +66,7 @@ import {
 
 fn collect_if_structure(instructions: NativeInstruction[], start_index: int, end: int, function_name: string) -> IfStructure {
     let mut diagnostics: string[] = [];
+    let mut diags: LoweringDiagnostic[] = [];
     let then_start = start_index + 1;
     let mut then_end = end;
     let mut else_start: int = -1;
@@ -289,6 +290,7 @@ fn lower_if_instruction(function: NativeFunction, start_index: int, llvm_return:
     let mut current_block_counter: int = block_counter;
     let mut current_next_local: int = next_local_id;
     let mut diagnostics: string[] = [];
+    let mut diags: LoweringDiagnostic[] = [];
     let mut diags: LoweringDiagnostic[] = [];
     let base_bindings: ParameterBinding[] = bindings;
     let mut then_bindings: ParameterBinding[] = base_bindings;

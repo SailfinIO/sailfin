@@ -48,6 +48,7 @@ import { collect_mutation_names, find_mutation_for_name } from "./phi";
 
 fn collect_loop_structure(instructions: NativeInstruction[], start_index: int, end: int, function_name: string) -> LoopStructure {
     let mut diagnostics: string[] = [];
+    let mut diags: LoweringDiagnostic[] = [];
     let body_start = start_index + 1;
     let mut body_end = end;
     let mut depth: int = 0;
@@ -132,6 +133,7 @@ fn last_loop_context(values: LoopContext[]) -> LoopContext {
 
 fn lower_loop_instruction(function: NativeFunction, start_index: int, llvm_return: string, bindings: ParameterBinding[], locals: LocalBinding[], allocas: string[], lines: string[], temp_index: int, block_counter: int, next_local_id: int, next_region_id: int, functions: NativeFunction[], loop_stack: LoopContext[], try_stack: TryFrameContext[], end: int, context: TypeContext, scope_id: string, scope_depth: int, current_label: string) -> BlockLoweringResult {
     let mut diagnostics: string[] = [];
+    let mut diags: LoweringDiagnostic[] = [];
     let mut diags: LoweringDiagnostic[] = [];
     let mut current_lines: string[] = lines;
     let mut current_allocas: string[] = allocas;

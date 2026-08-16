@@ -38,6 +38,7 @@ import { prepare_parameters_from_function } from "./emission";
 fn emit_async_function(function: NativeFunction, functions: NativeFunction[], effects: string[], context: TypeContext, module_name: string, entry_points: string[], exported_symbols: string[], imported_functions: NativeFunction[], module_globals: LocalBinding[], module_init_symbol: string, needs_module_init_call: boolean, imported_decorator_names: string[]) -> LoweredLLVMFunction {
     let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
+    let mut diags: LoweringDiagnostic[] = [];
     let fn_name = function.name;
     let fn_return_type = function.return_type;
     let fn_param_count = function.parameters.length;

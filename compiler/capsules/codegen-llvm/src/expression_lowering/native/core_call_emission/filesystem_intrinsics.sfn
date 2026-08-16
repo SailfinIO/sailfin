@@ -1,6 +1,8 @@
 // compiler/capsules/codegen-llvm/src/expression_lowering/native/core_call_emission/filesystem_intrinsics.sfn
 //
 // Simple cross-platform filesystem intrinsic emission.
+import { LoweringDiagnostic } from "sfn/ir";
+
 import { format_temp_name } from "../../../expressions_helpers";
 import { fs_platform_leg, stat_buf_size_value, stat_st_mode_offset_value } from "../../../lowering_debug_state";
 import {
@@ -11,10 +13,11 @@ import {
 } from "../../../types";
 import { number_to_string } from "../../../utils";
 
-fn emit_filesystem_intrinsic(helper_descriptor: RuntimeHelperDescriptor, final_operands: LLVMOperand[], current_temp: int, current_lines: string[], diagnostics: string[], collected_string_constants: StringConstant[]) -> ExpressionResult {
+fn emit_filesystem_intrinsic(helper_descriptor: RuntimeHelperDescriptor, final_operands: LLVMOperand[], current_temp: int, current_lines: string[], diagnostics: string[], diags: LoweringDiagnostic[], collected_string_constants: StringConstant[]) -> ExpressionResult {
     let mut result_lines = current_lines;
     let mut result_temp: int = current_temp;
     let mut result_diagnostics = diagnostics;
+    let mut result_diags = diags;
     // Filesystem sentinels (#1308): retire the last platform-divergent C fs
     // symbols by lowering each to a per-target sequence (modeled on
     // `exe_path` above), choosing the host leg via `fs_platform_leg`. Only
@@ -37,7 +40,8 @@ fn emit_filesystem_intrinsic(helper_descriptor: RuntimeHelperDescriptor, final_o
                         temp_index: result_temp,
                         operand: _fs_stub,
                         diagnostics: result_diagnostics,
-                        string_constants: collected_string_constants
+                        string_constants: collected_string_constants,
+                        diags: result_diags
                     };
                 } else {
                     // POSIX (linux/darwin): symlink(target, link) == 0 => true.
@@ -64,7 +68,8 @@ fn emit_filesystem_intrinsic(helper_descriptor: RuntimeHelperDescriptor, final_o
                         temp_index: result_temp,
                         operand: _fs_operand,
                         diagnostics: result_diagnostics,
-                        string_constants: collected_string_constants
+                        string_constants: collected_string_constants,
+                        diags: result_diags
                     };
                 }
             }
@@ -93,7 +98,8 @@ fn emit_filesystem_intrinsic(helper_descriptor: RuntimeHelperDescriptor, final_o
                         temp_index: result_temp,
                         operand: _fs_stub,
                         diagnostics: result_diagnostics,
-                        string_constants: collected_string_constants
+                        string_constants: collected_string_constants,
+                        diags: result_diags
                     };
                 } else {
                     // POSIX (linux/darwin): readlink(path, buf, size).
@@ -119,7 +125,8 @@ fn emit_filesystem_intrinsic(helper_descriptor: RuntimeHelperDescriptor, final_o
                         temp_index: result_temp,
                         operand: _fs_operand,
                         diagnostics: result_diagnostics,
-                        string_constants: collected_string_constants
+                        string_constants: collected_string_constants,
+                        diags: result_diags
                     };
                 }
             }
@@ -146,7 +153,8 @@ fn emit_filesystem_intrinsic(helper_descriptor: RuntimeHelperDescriptor, final_o
                         temp_index: result_temp,
                         operand: _fs_stub,
                         diagnostics: result_diagnostics,
-                        string_constants: collected_string_constants
+                        string_constants: collected_string_constants,
+                        diags: result_diags
                     };
                 } else {
                     let _fs_tmpl = final_operands[0].value;
@@ -169,7 +177,8 @@ fn emit_filesystem_intrinsic(helper_descriptor: RuntimeHelperDescriptor, final_o
                         temp_index: result_temp,
                         operand: _fs_operand,
                         diagnostics: result_diagnostics,
-                        string_constants: collected_string_constants
+                        string_constants: collected_string_constants,
+                        diags: result_diags
                     };
                 }
             }
@@ -208,7 +217,8 @@ fn emit_filesystem_intrinsic(helper_descriptor: RuntimeHelperDescriptor, final_o
                         temp_index: result_temp,
                         operand: _fs_operand,
                         diagnostics: result_diagnostics,
-                        string_constants: collected_string_constants
+                        string_constants: collected_string_constants,
+                        diags: result_diags
                     };
                 } else {
                     let _fs_bufsz = number_to_string(stat_buf_size_value());
@@ -245,7 +255,8 @@ fn emit_filesystem_intrinsic(helper_descriptor: RuntimeHelperDescriptor, final_o
                         temp_index: result_temp,
                         operand: _fs_operand,
                         diagnostics: result_diagnostics,
-                        string_constants: collected_string_constants
+                        string_constants: collected_string_constants,
+                        diags: result_diags
                     };
                 }
             }
@@ -274,7 +285,8 @@ fn emit_filesystem_intrinsic(helper_descriptor: RuntimeHelperDescriptor, final_o
                         temp_index: result_temp,
                         operand: _fs_stub,
                         diagnostics: result_diagnostics,
-                        string_constants: collected_string_constants
+                        string_constants: collected_string_constants,
+                        diags: result_diags
                     };
                 } else {
                     let _fs_path = final_operands[0].value;
@@ -365,7 +377,8 @@ fn emit_filesystem_intrinsic(helper_descriptor: RuntimeHelperDescriptor, final_o
                         temp_index: result_temp,
                         operand: _fs_operand,
                         diagnostics: result_diagnostics,
-                        string_constants: collected_string_constants
+                        string_constants: collected_string_constants,
+                        diags: result_diags
                     };
                 }
             }
@@ -450,7 +463,8 @@ fn emit_filesystem_intrinsic(helper_descriptor: RuntimeHelperDescriptor, final_o
                         temp_index: result_temp,
                         operand: _fs_operand,
                         diagnostics: result_diagnostics,
-                        string_constants: collected_string_constants
+                        string_constants: collected_string_constants,
+                        diags: result_diags
                     };
                 } else {
                     let _fs_id = number_to_string(result_temp);
@@ -539,7 +553,8 @@ fn emit_filesystem_intrinsic(helper_descriptor: RuntimeHelperDescriptor, final_o
                         temp_index: result_temp,
                         operand: _fs_operand,
                         diagnostics: result_diagnostics,
-                        string_constants: collected_string_constants
+                        string_constants: collected_string_constants,
+                        diags: result_diags
                     };
                 }
             }
@@ -551,7 +566,8 @@ fn emit_filesystem_intrinsic(helper_descriptor: RuntimeHelperDescriptor, final_o
         temp_index: result_temp,
         operand: null,
         diagnostics: result_diagnostics,
-        string_constants: collected_string_constants
+        string_constants: collected_string_constants,
+        diags: result_diags
     };
 }
 

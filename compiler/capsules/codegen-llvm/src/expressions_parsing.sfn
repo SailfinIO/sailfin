@@ -2,6 +2,7 @@
 //
 // Expression parsing helpers: member access, index expressions, assignments,
 // inline let, ternary, cast, and raw address parsing.
+import { LoweringDiagnostic } from "sfn/ir";
 import { char_at_index as char_at, find, substring } from "sfn/strings";
 
 import {
@@ -381,6 +382,7 @@ fn parse_assignment_expression(expression: string) -> AssignmentParseResult {
 fn parse_inline_let_expression(expression: string) -> InlineLetParseResult {
     let trimmed = trim_text(expression);
     let mut diagnostics: string[] = [];
+    let mut diags: LoweringDiagnostic[] = [];
 
     if !starts_with(trimmed, "let ") {
         return InlineLetParseResult {
@@ -455,6 +457,7 @@ fn parse_inline_let_expression(expression: string) -> InlineLetParseResult {
 // =============================================================================
 fn parse_ternary_expression(text: string) -> TernaryParseResult {
     let mut diagnostics: string[] = [];
+    let mut diags: LoweringDiagnostic[] = [];
     let trimmed = trim_text(text);
 
     if trimmed.length == 0 {
@@ -627,6 +630,7 @@ fn parse_raw_address_expression(text: string) -> RawAddressParseResult {
 fn parse_cast_expression(text: string) -> CastParseResult {
     let trimmed = trim_text(text);
     let mut diagnostics: string[] = [];
+    let mut diags: LoweringDiagnostic[] = [];
     if trimmed.length == 0 {
         return CastParseResult {
             recognized: false,

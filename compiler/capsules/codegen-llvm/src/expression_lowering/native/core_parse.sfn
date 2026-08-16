@@ -5,6 +5,7 @@
 // struct/enum literal parsing, member access (`parse_member_access`),
 // index expressions (`parse_index_expression`), range iterables, and
 // brace/bracket/paren balancing utilities.
+import { LoweringDiagnostic } from "sfn/ir";
 import { char_at_index as char_at, substring } from "sfn/strings";
 
 import { is_simple_identifier } from "../../expressions_helpers";
@@ -164,6 +165,7 @@ fn find_top_level_colon(text: string) -> int {
 fn parse_struct_literal(text: string) -> StructLiteralParse {
     let trimmed = trim_text(text);
     let mut diagnostics: string[] = [];
+    let mut diags: LoweringDiagnostic[] = [];
     if trimmed.length == 0 {
         return StructLiteralParse {
             recognized: false,
@@ -339,6 +341,7 @@ fn parse_struct_literal(text: string) -> StructLiteralParse {
 fn parse_struct_pattern(text: string) -> StructLiteralParse {
     let trimmed = trim_text(text);
     let mut diagnostics: string[] = [];
+    let mut diags: LoweringDiagnostic[] = [];
     if trimmed.length == 0 {
         return StructLiteralParse {
             recognized: false,
@@ -482,6 +485,7 @@ fn parse_struct_pattern(text: string) -> StructLiteralParse {
 fn parse_enum_literal(text: string) -> EnumLiteralParse {
     let trimmed = trim_text(text);
     let mut diagnostics: string[] = [];
+    let mut diags: LoweringDiagnostic[] = [];
     if trimmed.length == 0 {
         return EnumLiteralParse {
             recognized: false,
@@ -1074,6 +1078,7 @@ fn parse_index_expression(expression: string) -> IndexExpressionParse {
 fn parse_range_iterable(iterable: string) -> RangeIterableParse {
     let trimmed = trim_text(iterable);
     let mut diagnostics: string[] = [];
+    let mut diags: LoweringDiagnostic[] = [];
     if trimmed.length == 0 {
         diagnostics.push("llvm lowering: `.for` iterable expression is empty");
         return RangeIterableParse {

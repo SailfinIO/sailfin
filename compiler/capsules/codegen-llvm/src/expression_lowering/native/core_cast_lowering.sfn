@@ -3,7 +3,7 @@
 // Lowering for `is`/cast expressions and interpolated string literals,
 // extracted from core_literals_lowering.sfn to bound per-module emit
 // working set. Called by `lower_expression` in ./core.
-import { NativeFunction } from "sfn/ir";
+import { LoweringDiagnostic, NativeFunction } from "sfn/ir";
 
 import { format_temp_name } from "../../expressions_helpers";
 import { empty_string_constant_set, merge_string_constants } from "../../strings";
@@ -23,7 +23,12 @@ import {
     StringConstant,
     TypeContext
 } from "../../types";
-import { number_to_string, starts_with, trim_text } from "../../utils";
+import {
+    extend_diag_array,
+    number_to_string,
+    starts_with,
+    trim_text
+} from "../../utils";
 import { lower_expression } from "./core";
 import {
     emit_bf16_narrow_from_double,
@@ -63,6 +68,7 @@ fn float_intrinsic_suffix(llvm_type: string) -> string {
 // fast-follows (SFEP-0034 §3.6).
 fn lower_is_expression(parse: CastParseResult, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult {
     let mut diagnostics = parse.diagnostics;
+    let mut diags: LoweringDiagnostic[] = [];
     let empty_constants = empty_string_constant_set();
     if !parse.success {
         return ExpressionResult {
@@ -70,7 +76,8 @@ fn lower_is_expression(parse: CastParseResult, bindings: ParameterBinding[], loc
             temp_index: temp_index,
             operand: null,
             diagnostics: diagnostics,
-            string_constants: empty_constants
+            string_constants: empty_constants,
+            diags: diags
         };
     }
 
@@ -81,13 +88,15 @@ fn lower_is_expression(parse: CastParseResult, bindings: ParameterBinding[], loc
         diagnostics.push(lowered.diagnostics[_ci_is]);
         _ci_is += 1;
     }
+    diags = extend_diag_array(diags, lowered.diags);
     if lowered.operand == null {
         return ExpressionResult {
             lines: lowered.lines,
             temp_index: lowered.temp_index,
             operand: null,
             diagnostics: diagnostics,
-            string_constants: lowered.string_constants
+            string_constants: lowered.string_constants,
+            diags: diags
         };
     }
     let subject = lowered.operand;
@@ -110,7 +119,8 @@ fn lower_is_expression(parse: CastParseResult, bindings: ParameterBinding[], loc
             temp_index: current_temp,
             operand: null,
             diagnostics: diagnostics,
-            string_constants: lowered.string_constants
+            string_constants: lowered.string_constants,
+            diags: diags
         };
     }
     let variant_info = resolve_enum_variant_info(enum_info, parse.type_annotation);
@@ -124,7 +134,8 @@ fn lower_is_expression(parse: CastParseResult, bindings: ParameterBinding[], loc
             temp_index: current_temp,
             operand: null,
             diagnostics: diagnostics,
-            string_constants: lowered.string_constants
+            string_constants: lowered.string_constants,
+            diags: diags
         };
     }
 
@@ -183,12 +194,14 @@ fn lower_is_expression(parse: CastParseResult, bindings: ParameterBinding[], loc
         temp_index: comparison.temp_index,
         operand: comparison.operand,
         diagnostics: diagnostics,
-        string_constants: lowered.string_constants
+        string_constants: lowered.string_constants,
+        diags: diags
     };
 }
 
 fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult {
     let mut diagnostics = parse.diagnostics;
+    let mut diags: LoweringDiagnostic[] = [];
     let empty_constants = empty_string_constant_set();
     if !parse.success {
         return ExpressionResult {
@@ -196,7 +209,8 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
             temp_index: temp_index,
             operand: null,
             diagnostics: diagnostics,
-            string_constants: empty_constants
+            string_constants: empty_constants,
+            diags: diags
         };
     }
     let target_type = map_type_annotation(parse.type_annotation);
@@ -208,7 +222,8 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
             temp_index: temp_index,
             operand: null,
             diagnostics: diagnostics,
-            string_constants: empty_constants
+            string_constants: empty_constants,
+            diags: diags
         };
     }
 
@@ -219,13 +234,15 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
         diagnostics.push(lowered.diagnostics[_ci10]);
         _ci10 += 1;
     }
+    diags = extend_diag_array(diags, lowered.diags);
     if lowered.operand == null {
         return ExpressionResult {
             lines: lowered.lines,
             temp_index: lowered.temp_index,
             operand: null,
             diagnostics: diagnostics,
-            string_constants: lowered.string_constants
+            string_constants: lowered.string_constants,
+            diags: diags
         };
     }
     let operand = lowered.operand;
@@ -235,7 +252,8 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
             temp_index: lowered.temp_index,
             operand: operand,
             diagnostics: diagnostics,
-            string_constants: lowered.string_constants
+            string_constants: lowered.string_constants,
+            diags: diags
         };
     }
 
@@ -258,7 +276,8 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
                 temp_index: current_temp,
                 operand: null,
                 diagnostics: diagnostics,
-                string_constants: lowered.string_constants
+                string_constants: lowered.string_constants,
+                diags: diags
             };
         }
         if is_integer_llvm_type(operand.llvm_type) {
@@ -269,7 +288,8 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
                 temp_index: current_temp,
                 operand: null,
                 diagnostics: diagnostics,
-                string_constants: lowered.string_constants
+                string_constants: lowered.string_constants,
+                diags: diags
             };
         }
         if is_float_llvm_type(operand.llvm_type) {
@@ -280,7 +300,8 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
                 temp_index: current_temp,
                 operand: null,
                 diagnostics: diagnostics,
-                string_constants: lowered.string_constants
+                string_constants: lowered.string_constants,
+                diags: diags
             };
         }
     }
@@ -312,13 +333,15 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
             diagnostics.push(coerced.diagnostics[_agg_di]);
             _agg_di += 1;
         }
+        diags = extend_diag_array(diags, coerced.diags);
         if coerced.operand == null {
             return ExpressionResult {
                 lines: current_lines,
                 temp_index: current_temp,
                 operand: null,
                 diagnostics: diagnostics,
-                string_constants: lowered.string_constants
+                string_constants: lowered.string_constants,
+                diags: diags
             };
         }
         let mut result_operand: LLVMOperand = coerced.operand;
@@ -341,7 +364,8 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
             temp_index: current_temp,
             operand: result_operand,
             diagnostics: diagnostics,
-            string_constants: lowered.string_constants
+            string_constants: lowered.string_constants,
+            diags: diags
         };
     }
 
@@ -365,12 +389,14 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
             diagnostics.push(str_cast.diagnostics[_str_di]);
             _str_di += 1;
         }
+        diags = extend_diag_array(diags, str_cast.diags);
         return ExpressionResult {
             lines: str_cast.lines,
             temp_index: str_cast.temp_index,
             operand: str_cast.operand,
             diagnostics: diagnostics,
-            string_constants: lowered.string_constants
+            string_constants: lowered.string_constants,
+            diags: diags
         };
     }
 
@@ -390,7 +416,8 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
                 temp_index: current_temp,
                 operand: casted,
                 diagnostics: diagnostics,
-                string_constants: lowered.string_constants
+                string_constants: lowered.string_constants,
+                diags: diags
             };
         }
     }
@@ -412,7 +439,8 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
                     temp_index: current_temp,
                     operand: casted,
                     diagnostics: diagnostics,
-                    string_constants: lowered.string_constants
+                    string_constants: lowered.string_constants,
+                    diags: diags
                 };
             }
         }
@@ -435,7 +463,8 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
                     temp_index: current_temp,
                     operand: casted,
                     diagnostics: diagnostics,
-                    string_constants: lowered.string_constants
+                    string_constants: lowered.string_constants,
+                    diags: diags
                 };
             }
         }
@@ -533,7 +562,8 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
                     value: narrowed.value
                 },
                 diagnostics: diagnostics,
-                string_constants: lowered.string_constants
+                string_constants: lowered.string_constants,
+                diags: diags
             };
         }
     }
@@ -581,7 +611,8 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
                     temp_index: current_temp,
                     operand: casted,
                     diagnostics: diagnostics,
-                    string_constants: lowered.string_constants
+                    string_constants: lowered.string_constants,
+                    diags: diags
                 };
             }
         }
@@ -612,7 +643,8 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
                     value: widened.value
                 },
                 diagnostics: diagnostics,
-                string_constants: lowered.string_constants
+                string_constants: lowered.string_constants,
+                diags: diags
             };
         }
         if target_type == "double" {
@@ -625,7 +657,8 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
                     value: widened.value
                 },
                 diagnostics: diagnostics,
-                string_constants: lowered.string_constants
+                string_constants: lowered.string_constants,
+                diags: diags
             };
         }
     }
@@ -640,7 +673,8 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
                     value: narrowed.value
                 },
                 diagnostics: diagnostics,
-                string_constants: lowered.string_constants
+                string_constants: lowered.string_constants,
+                diags: diags
             };
         }
     }
@@ -655,7 +689,8 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
                     value: narrowed.value
                 },
                 diagnostics: diagnostics,
-                string_constants: lowered.string_constants
+                string_constants: lowered.string_constants,
+                diags: diags
             };
         }
     }
@@ -690,7 +725,8 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
             temp_index: current_temp,
             operand: casted,
             diagnostics: diagnostics,
-            string_constants: lowered.string_constants
+            string_constants: lowered.string_constants,
+            diags: diags
         };
     }
 
@@ -703,7 +739,8 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
         temp_index: current_temp,
         operand: null,
         diagnostics: diagnostics,
-        string_constants: lowered.string_constants
+        string_constants: lowered.string_constants,
+        diags: diags
     };
 }
 
@@ -718,6 +755,7 @@ fn try_lower_interpolated_string_literal(literal: string, bindings: ParameterBin
     let mut current_lines: string[] = lines;
     let mut current_temp: int = temp_index;
     let mut diagnostics: string[] = [];
+    let mut diags: LoweringDiagnostic[] = [];
     let mut collected_string_constants: StringConstant[] = empty_string_constant_set();
 
     let first_literal = encode_string_literal_for_sailfin(parsed.parts[0]);
@@ -731,7 +769,8 @@ fn try_lower_interpolated_string_literal(literal: string, bindings: ParameterBin
             temp_index: current_temp,
             operand: null,
             diagnostics: diagnostics,
-            string_constants: collected_string_constants
+            string_constants: collected_string_constants,
+            diags: diags
         };
     }
     let mut current_operand: LLVMOperand = first.operand;
@@ -748,6 +787,7 @@ fn try_lower_interpolated_string_literal(literal: string, bindings: ParameterBin
             diagnostics.push(lowered_expr.diagnostics[_ci11]);
             _ci11 += 1;
         }
+        diags = extend_diag_array(diags, lowered_expr.diags);
         current_lines = lowered_expr.lines;
         current_temp = lowered_expr.temp_index;
         collected_string_constants = merge_string_constants(collected_string_constants, lowered_expr.string_constants);
@@ -761,7 +801,8 @@ fn try_lower_interpolated_string_literal(literal: string, bindings: ParameterBin
                 temp_index: current_temp,
                 operand: null,
                 diagnostics: diagnostics,
-                string_constants: collected_string_constants
+                string_constants: collected_string_constants,
+                diags: diags
             };
         }
 
@@ -772,6 +813,7 @@ fn try_lower_interpolated_string_literal(literal: string, bindings: ParameterBin
             diagnostics.push(coerced.diagnostics[_ci12]);
             _ci12 += 1;
         }
+        diags = extend_diag_array(diags, coerced.diags);
         current_lines = coerced.lines;
         current_temp = coerced.temp_index;
         collected_string_constants = merge_string_constants(collected_string_constants, coerced.string_constants);
@@ -787,7 +829,8 @@ fn try_lower_interpolated_string_literal(literal: string, bindings: ParameterBin
                 temp_index: current_temp,
                 operand: null,
                 diagnostics: diagnostics,
-                string_constants: collected_string_constants
+                string_constants: collected_string_constants,
+                diags: diags
             };
         }
 
@@ -798,6 +841,7 @@ fn try_lower_interpolated_string_literal(literal: string, bindings: ParameterBin
             diagnostics.push(concat1.diagnostics[_ci13]);
             _ci13 += 1;
         }
+        diags = extend_diag_array(diags, concat1.diags);
         current_lines = concat1.lines;
         current_temp = concat1.temp_index;
         if concat1.operand == null {
@@ -806,7 +850,8 @@ fn try_lower_interpolated_string_literal(literal: string, bindings: ParameterBin
                 temp_index: current_temp,
                 operand: null,
                 diagnostics: diagnostics,
-                string_constants: collected_string_constants
+                string_constants: collected_string_constants,
+                diags: diags
             };
         }
         current_operand = concat1.operand;
@@ -822,7 +867,8 @@ fn try_lower_interpolated_string_literal(literal: string, bindings: ParameterBin
                 temp_index: current_temp,
                 operand: null,
                 diagnostics: diagnostics,
-                string_constants: collected_string_constants
+                string_constants: collected_string_constants,
+                diags: diags
             };
         }
 
@@ -833,6 +879,7 @@ fn try_lower_interpolated_string_literal(literal: string, bindings: ParameterBin
             diagnostics.push(concat2.diagnostics[_ci14]);
             _ci14 += 1;
         }
+        diags = extend_diag_array(diags, concat2.diags);
         current_lines = concat2.lines;
         current_temp = concat2.temp_index;
         if concat2.operand == null {
@@ -841,7 +888,8 @@ fn try_lower_interpolated_string_literal(literal: string, bindings: ParameterBin
                 temp_index: current_temp,
                 operand: null,
                 diagnostics: diagnostics,
-                string_constants: collected_string_constants
+                string_constants: collected_string_constants,
+                diags: diags
             };
         }
         current_operand = concat2.operand;
@@ -854,6 +902,7 @@ fn try_lower_interpolated_string_literal(literal: string, bindings: ParameterBin
         temp_index: current_temp,
         operand: current_operand,
         diagnostics: diagnostics,
-        string_constants: collected_string_constants
+        string_constants: collected_string_constants,
+        diags: diags
     };
 }

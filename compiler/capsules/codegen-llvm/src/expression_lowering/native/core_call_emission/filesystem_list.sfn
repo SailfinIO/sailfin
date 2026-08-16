@@ -1,6 +1,8 @@
 // compiler/capsules/codegen-llvm/src/expression_lowering/native/core_call_emission/filesystem_list.sfn
 //
 // Cross-platform directory iteration for the list-dir intrinsic.
+import { LoweringDiagnostic } from "sfn/ir";
+
 import { format_temp_name } from "../../../expressions_helpers";
 import { fs_platform_leg } from "../../../lowering_debug_state";
 import {
@@ -11,10 +13,11 @@ import {
 } from "../../../types";
 import { number_to_string } from "../../../utils";
 
-fn emit_filesystem_list(helper_descriptor: RuntimeHelperDescriptor, final_operands: LLVMOperand[], current_temp: int, current_lines: string[], diagnostics: string[], collected_string_constants: StringConstant[]) -> ExpressionResult {
+fn emit_filesystem_list(helper_descriptor: RuntimeHelperDescriptor, final_operands: LLVMOperand[], current_temp: int, current_lines: string[], diagnostics: string[], diags: LoweringDiagnostic[], collected_string_constants: StringConstant[]) -> ExpressionResult {
     let mut result_lines = current_lines;
     let mut result_temp: int = current_temp;
     let mut result_diagnostics = diagnostics;
+    let mut result_diags = diags;
     // `list_dir(path) -> i8*` sentinel (SFN-51, epic #1485,
     // `docs/proposals/0021-windows-native-selfhost.md` §4.2(B)): enumerate a
     // directory into a sorted `SfnArray` (`{ i8**, i64, i64 }*`, spelled i8*)
@@ -262,7 +265,8 @@ fn emit_filesystem_list(helper_descriptor: RuntimeHelperDescriptor, final_operan
                         temp_index: result_temp,
                         operand: _w_operand,
                         diagnostics: result_diagnostics,
-                        string_constants: collected_string_constants
+                        string_constants: collected_string_constants,
+                        diags: result_diags
                     };
                 } else {
                     let _p_empty = "fs_list_dir_empty_" + _ld_id;
@@ -418,7 +422,8 @@ fn emit_filesystem_list(helper_descriptor: RuntimeHelperDescriptor, final_operan
                         temp_index: result_temp,
                         operand: _p_operand,
                         diagnostics: result_diagnostics,
-                        string_constants: collected_string_constants
+                        string_constants: collected_string_constants,
+                        diags: result_diags
                     };
                 }
             }
@@ -430,7 +435,8 @@ fn emit_filesystem_list(helper_descriptor: RuntimeHelperDescriptor, final_operan
         temp_index: result_temp,
         operand: null,
         diagnostics: result_diagnostics,
-        string_constants: collected_string_constants
+        string_constants: collected_string_constants,
+        diags: result_diags
     };
 }
 

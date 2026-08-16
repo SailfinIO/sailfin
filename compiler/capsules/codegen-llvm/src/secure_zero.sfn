@@ -59,7 +59,7 @@
 // The loop is entered only when `addr != 0 && len > 0`, so a null
 // pointer or a zero/negative length writes nothing (SFN-782 scope:
 // zero-length/null safety, exact `[ptr, ptr + len)` range).
-import { NativeFunction } from "sfn/ir";
+import { LoweringDiagnostic, NativeFunction } from "sfn/ir";
 
 // Mutually recursive with `lower_expression` (which dispatches calls
 // back through the secure-zero hook): the same cycle `byte_load.sfn`
@@ -92,6 +92,7 @@ fn is_secure_zero_builtin(name: string) -> boolean {
 // lower or is not an `i64`; the caller turns that into the E0806 fatal.
 fn _lower_secure_zero_argument(label: string, index: int, arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult {
     let mut diagnostics: string[] = [];
+    let mut diags: LoweringDiagnostic[] = [];
     let argument_text = trim_text(arguments[index]);
     let lowered = lower_expression(argument_text, bindings, locals, temp_index, lines, functions, context, "i64");
     diagnostics = extend_string_array(diagnostics, lowered.diagnostics);
@@ -116,7 +117,8 @@ fn _lower_secure_zero_argument(label: string, index: int, arguments: string[], b
             temp_index: lowered.temp_index,
             operand: null,
             diagnostics: diagnostics,
-            string_constants: lowered.string_constants
+            string_constants: lowered.string_constants,
+            diags: diags
         };
     }
 
@@ -137,7 +139,8 @@ fn _lower_secure_zero_argument(label: string, index: int, arguments: string[], b
             temp_index: lowered.temp_index,
             operand: null,
             diagnostics: diagnostics,
-            string_constants: lowered.string_constants
+            string_constants: lowered.string_constants,
+            diags: diags
         };
     }
 
@@ -146,7 +149,8 @@ fn _lower_secure_zero_argument(label: string, index: int, arguments: string[], b
         temp_index: lowered.temp_index,
         operand: operand,
         diagnostics: diagnostics,
-        string_constants: lowered.string_constants
+        string_constants: lowered.string_constants,
+        diags: diags
     };
 }
 
@@ -164,6 +168,7 @@ fn _lower_secure_zero_argument(label: string, index: int, arguments: string[], b
 // byte-load arity gates).
 fn lower_secure_zero(name: string, arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult {
     let mut diagnostics: string[] = [];
+    let mut diags: LoweringDiagnostic[] = [];
     let mut current_lines = lines;
     let mut current_temp = temp_index;
     let mut collected_strings: StringConstant[] = [];
@@ -178,7 +183,8 @@ fn lower_secure_zero(name: string, arguments: string[], bindings: ParameterBindi
             temp_index: current_temp,
             operand: null,
             diagnostics: diagnostics,
-            string_constants: collected_strings
+            string_constants: collected_strings,
+            diags: diags
         };
     }
 
@@ -193,7 +199,8 @@ fn lower_secure_zero(name: string, arguments: string[], bindings: ParameterBindi
             temp_index: current_temp,
             operand: null,
             diagnostics: diagnostics,
-            string_constants: collected_strings
+            string_constants: collected_strings,
+            diags: diags
         };
     }
 
@@ -208,7 +215,8 @@ fn lower_secure_zero(name: string, arguments: string[], bindings: ParameterBindi
             temp_index: current_temp,
             operand: null,
             diagnostics: diagnostics,
-            string_constants: collected_strings
+            string_constants: collected_strings,
+            diags: diags
         };
     }
 
@@ -291,7 +299,8 @@ fn lower_secure_zero(name: string, arguments: string[], bindings: ParameterBindi
         temp_index: current_temp,
         operand: null,
         diagnostics: diagnostics,
-        string_constants: collected_strings
+        string_constants: collected_strings,
+        diags: diags
     };
 }
 

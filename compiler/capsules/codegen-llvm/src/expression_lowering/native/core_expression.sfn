@@ -1,7 +1,7 @@
 // compiler/capsules/codegen-llvm/src/expression_lowering/native/core_expression.sfn
 //
 // Ordered dispatch for LLVM expression lowering.
-import { NativeFunction } from "sfn/ir";
+import { LoweringDiagnostic, NativeFunction } from "sfn/ir";
 import { char_at_index as char_at, substring } from "sfn/strings";
 
 import { format_temp_name } from "../../expressions_helpers";
@@ -16,7 +16,12 @@ import {
     ParameterBinding,
     TypeContext
 } from "../../types";
-import { ends_with, extend_string_array, starts_with } from "../../utils";
+import {
+    ends_with,
+    extend_diag_array,
+    extend_string_array,
+    starts_with
+} from "../../utils";
 import { lower_raw_address_expression } from "./core_addressing";
 import { lower_borrow_expression } from "./core_borrow_lowering";
 import { lower_call_expression } from "./core_call_lowering";
@@ -84,6 +89,7 @@ import {
 fn lower_expression(expression: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string) -> ExpressionResult {
     let trimmed = trim_text(expression);
     let mut diagnostics: string[] = [];
+    let mut diags: LoweringDiagnostic[] = [];
     let empty_constants = empty_string_constant_set();
     let dbg_expr = trace_lowering();
     if dbg_expr {
@@ -100,7 +106,8 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
             temp_index: temp_index,
             operand: null,
             diagnostics: diagnostics,
-            string_constants: empty_constants
+            string_constants: empty_constants,
+            diags: diags
         };
     }
 
@@ -148,7 +155,8 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
             temp_index: pair_result.temp_index,
             operand: pair_result.operand,
             diagnostics: diagnostics,
-            string_constants: empty_constants
+            string_constants: empty_constants,
+            diags: diags
         };
     }
 
@@ -173,7 +181,8 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
             temp_index: temp_index,
             operand: null,
             diagnostics: diagnostics,
-            string_constants: empty_constants
+            string_constants: empty_constants,
+            diags: diags
         };
     }
 
@@ -200,7 +209,8 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
             temp_index: temp_index,
             operand: null,
             diagnostics: diagnostics,
-            string_constants: empty_constants
+            string_constants: empty_constants,
+            diags: diags
         };
     }
 
@@ -303,7 +313,8 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
             temp_index: temp_index,
             operand: operand,
             diagnostics: diagnostics,
-            string_constants: empty_constants
+            string_constants: empty_constants,
+            diags: diags
         };
     }
     if is_null_literal(stripped) {
@@ -320,7 +331,8 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
             temp_index: temp_index,
             operand: operand,
             diagnostics: diagnostics,
-            string_constants: empty_constants
+            string_constants: empty_constants,
+            diags: diags
         };
     }
     if is_number_literal(stripped) {
@@ -336,7 +348,8 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
             temp_index: temp_index,
             operand: operand,
             diagnostics: diagnostics,
-            string_constants: empty_constants
+            string_constants: empty_constants,
+            diags: diags
         };
     }
     if is_string_literal(stripped) {
@@ -349,7 +362,8 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
                 temp_index: result.temp_index,
                 operand: result.operand,
                 diagnostics: diagnostics,
-                string_constants: result.string_constants
+                string_constants: result.string_constants,
+                diags: diags
             };
         }
         let literal_result = lower_string_literal(stripped, temp_index, lines);
@@ -359,7 +373,8 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
             temp_index: literal_result.temp_index,
             operand: literal_result.operand,
             diagnostics: diagnostics,
-            string_constants: literal_result.string_constants
+            string_constants: literal_result.string_constants,
+            diags: diags
         };
     }
 
@@ -372,7 +387,8 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
                 temp_index: temp_index,
                 operand: null,
                 diagnostics: diagnostics,
-                string_constants: empty_constants
+                string_constants: empty_constants,
+                diags: diags
             };
         }
         let next = char_at(stripped, 5);
@@ -510,7 +526,8 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
                     temp_index: temp_index,
                     operand: null,
                     diagnostics: diagnostics,
-                    string_constants: empty_constants
+                    string_constants: empty_constants,
+                    diags: diags
                 };
             }
             let lowered_ptr = lower_expression(operand_text, bindings, locals, temp_index, lines, functions, context, "");
@@ -520,13 +537,15 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
                 diagnostics.push(lowered_ptr.diagnostics[_ci1]);
                 _ci1 += 1;
             }
+            diags = extend_diag_array(diags, lowered_ptr.diags);
             if lowered_ptr.operand == null {
                 return ExpressionResult {
                     lines: lowered_ptr.lines,
                     temp_index: lowered_ptr.temp_index,
                     operand: null,
                     diagnostics: diagnostics,
-                    string_constants: lowered_ptr.string_constants
+                    string_constants: lowered_ptr.string_constants,
+                    diags: diags
                 };
             }
             let ptr_operand = lowered_ptr.operand;
@@ -534,12 +553,14 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
                 let with_issue = append_string(diagnostics, "llvm lowering: cannot dereference non-pointer type `"
                     + ptr_operand.llvm_type
                     + "`");
+                let with_issue_diags = diags;
                 return ExpressionResult {
                     lines: lowered_ptr.lines,
                     temp_index: lowered_ptr.temp_index,
                     operand: null,
                     diagnostics: with_issue,
-                    string_constants: lowered_ptr.string_constants
+                    string_constants: lowered_ptr.string_constants,
+                    diags: with_issue_diags
                 };
             }
             let element_type = strip_pointer_suffix(ptr_operand.llvm_type);
@@ -561,7 +582,8 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
                 temp_index: lowered_ptr.temp_index + 1,
                 operand: operand,
                 diagnostics: diagnostics,
-                string_constants: lowered_ptr.string_constants
+                string_constants: lowered_ptr.string_constants,
+                diags: diags
             };
         }
     }

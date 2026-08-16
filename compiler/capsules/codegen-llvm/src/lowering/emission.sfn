@@ -222,6 +222,7 @@ fn prepare_parameters_from_function(function: NativeFunction, context: TypeConte
     let mut signature: string[] = [];
     let mut bindings: ParameterBinding[] = [];
     let mut diagnostics: string[] = [];
+    let mut diags: LoweringDiagnostic[] = [];
     let mut seen_names: string[] = [];
     let parameters = function.parameters;
     let mut index: int = 0;
@@ -281,6 +282,7 @@ fn prepare_parameters_from_function(function: NativeFunction, context: TypeConte
 
 fn emit_llvm_function(function: NativeFunction, functions: NativeFunction[], effects: string[], context: TypeContext, module_name: string, entry_points: string[], exported_symbols: string[], imported_functions: NativeFunction[], module_globals: LocalBinding[], module_init_symbol: string, needs_module_init_call: boolean, imported_decorator_names: string[]) -> LoweredLLVMFunction {
     let mut diagnostics: string[] = [];
+    let mut diags: LoweringDiagnostic[] = [];
     let mut diags: LoweringDiagnostic[] = [];
     let debug_lowering = trace_lowering();
 
@@ -569,6 +571,7 @@ fn emit_llvm_function(function: NativeFunction, functions: NativeFunction[], eff
                 diagnostics.push(log_result.diagnostics[_log_di]);
                 _log_di += 1;
             }
+            diags = extend_diag_array(diags, log_result.diags);
             lines = log_result.lines;
             decorator_temp_index = log_result.temp_index;
         }

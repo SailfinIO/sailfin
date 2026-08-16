@@ -1,5 +1,6 @@
 // compiler/capsules/codegen-llvm/src/expression_lowering/native/core_parsing.sfn
 // Parsing helpers for expression lowering extracted from core.sfn.
+import { LoweringDiagnostic } from "sfn/ir";
 import { char_at_index as char_at, substring } from "sfn/strings";
 
 import { array_struct_type_for_element } from "../../type_mapping";
@@ -26,6 +27,7 @@ import { map_primitive_type } from "./core_type_mapping";
 fn parse_borrow_expression(expression: string) -> BorrowParseResult {
     let trimmed = trim_text(expression);
     let mut diagnostics: string[] = [];
+    let mut diags: LoweringDiagnostic[] = [];
     if trimmed.length == 0 {
         return BorrowParseResult {
             recognized: false,
@@ -109,6 +111,7 @@ fn parse_borrow_expression(expression: string) -> BorrowParseResult {
         if substring(remainder, 0, 1) == "(" {
             let argument_parse = extract_borrow_argument(remainder);
             let mut messages: string[] = diagnostics;
+            let mut messages_diags = diags;
             let mut _ci0: int = 0;
             loop {
                 if _ci0 >= argument_parse.diagnostics.length { break; }
@@ -192,6 +195,7 @@ fn parse_borrow_expression(expression: string) -> BorrowParseResult {
 
 fn extract_borrow_argument(text: string) -> BorrowArgumentParse {
     let mut diagnostics: string[] = [];
+    let mut diags: LoweringDiagnostic[] = [];
     let mut depth: int = 0;
     let mut index: int = 0;
     let mut closing_index: int = -1;
@@ -252,6 +256,7 @@ fn extract_borrow_argument(text: string) -> BorrowArgumentParse {
 
 fn extract_simple_borrow_target(text: string) -> BorrowArgumentParse {
     let mut diagnostics: string[] = [];
+    let mut diags: LoweringDiagnostic[] = [];
     let trimmed = trim_text(text);
     if trimmed.length == 0 {
         diagnostics.push("llvm lowering: borrow expression missing target");
@@ -318,6 +323,7 @@ fn is_valid_borrow_target(text: string) -> boolean {
 
 fn parse_ternary_expression(text: string) -> TernaryParseResult {
     let mut diagnostics: string[] = [];
+    let mut diags: LoweringDiagnostic[] = [];
     let trimmed = trim_text(text);
 
     if trimmed.length == 0 {
@@ -498,6 +504,7 @@ fn parse_ternary_expression(text: string) -> TernaryParseResult {
 fn parse_raw_address_expression(text: string) -> RawAddressParseResult {
     let trimmed = trim_text(text);
     let mut diagnostics: string[] = [];
+    let mut diags: LoweringDiagnostic[] = [];
     if trimmed.length == 0 {
         return RawAddressParseResult {
             recognized: false,
@@ -623,6 +630,7 @@ fn _cast_annotation_has_binary_continuation(annotation: string) -> boolean {
 fn parse_cast_expression(text: string) -> CastParseResult {
     let trimmed = trim_text(text);
     let mut diagnostics: string[] = [];
+    let mut diags: LoweringDiagnostic[] = [];
     if trimmed.length == 0 {
         return CastParseResult {
             recognized: false,
@@ -820,6 +828,7 @@ fn parse_cast_expression(text: string) -> CastParseResult {
 fn parse_is_expression(text: string) -> CastParseResult {
     let trimmed = trim_text(text);
     let mut diagnostics: string[] = [];
+    let mut diags: LoweringDiagnostic[] = [];
     if trimmed.length == 0 {
         return CastParseResult {
             recognized: false,

@@ -4,9 +4,9 @@ title: Diagnostic Unification — One Coded, Spanned, Severity-Bearing Diagnosti
 status: Accepted
 type: tooling
 created: 2026-07-25
-updated: 2026-07-30
+updated: 2026-08-16
 author: "agent:compiler-architect; agent:Sailbot (orchestrator); project owner (design gate 2026-07-25)"
-tracking: "SFN-534, SFN-535, SFN-536, SFN-537, SFN-538, SFN-539, SFN-540, SFN-541, SFN-608"
+tracking: "SFN-534, SFN-535, SFN-536, SFN-537, SFN-538, SFN-539, SFN-540, SFN-541, SFN-608, SFN-915"
 supersedes:
 superseded-by:
 graduates-to:
@@ -254,6 +254,20 @@ duplicate-body or field-dropping conversion.
 - **S4 — Set B control-flow spans.** Additive `.span` before
   `.if`/`.loop`/`.for`/`.match`/`break`/`continue`. Fail-soft: a stale cached
   `.sfn-asm` is merely span-less, never wrong.
+- **S4b — carry `diags` on the leaf producers (SFN-915).** `ExpressionResult`
+  and `CoercionResult` gain `diags: Diag[]` **alongside** their existing
+  `diagnostics: string[]`, populated at the leaf push sites and folded upward
+  wherever the strings are. Split out of S5 on 2026-08-16: S2 reached only the
+  seven hot carriers, so deleting their `diagnostics` field before this stage
+  would silently drop every expression- and coercion-lowering diagnostic —
+  S5's AC1 and AC5 are in direct tension without it. Also lands SFN-539's
+  twice-deferred AC3 (the three location-formatting sites move the location
+  out of the message text and into the `span` field). Intermediate carriers
+  that are neither leaf nor hot carrier — `ThrowLoweringResult`,
+  `ConditionConversion`, `CallTargetResolution`, `CoercedCallState` — stay on
+  the legacy channel here and are reconstructed at the module boundary by
+  `append_missing_legacy_lowering_diags`; **S5 must widen them before it
+  deletes the string channel.**
 - **S5 — retire the substring; fix gate integrity (closes SFN-529).** Drop
   `diagnostics: string[]` from the hot carriers; `has_fatal_lowering_diagnostic`
   → `has_error_diag`. Size guards must **retain every `error`** rather than

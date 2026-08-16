@@ -1,7 +1,7 @@
 // compiler/capsules/codegen-llvm/src/expression_lowering/native/core_literals_lowering.sfn
 //
 // Literal/cast/interpolation lowering extracted from core.sfn.
-import { NativeFunction, NativeSourceSpan } from "sfn/ir";
+import { LoweringDiagnostic, NativeFunction, NativeSourceSpan } from "sfn/ir";
 import { substring } from "sfn/strings";
 
 import { default_return_literal, format_temp_name } from "../../expressions_helpers";
@@ -34,6 +34,7 @@ import {
 } from "../../types";
 import {
     append_string,
+    extend_diag_array,
     extend_string_array,
     join_with_separator,
     number_to_string,
@@ -76,6 +77,7 @@ fn pick_agg_cast_shim_target(operand_type: string, target_type: string) -> strin
 
 fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string) -> ExpressionResult {
     let mut diagnostics: string[] = [];
+    let mut diags: LoweringDiagnostic[] = [];
     let mut current_lines: string[] = lines;
     let mut current_temp: int = temp_index;
     let mut collected_string_constants: StringConstant[] = empty_string_constant_set();
@@ -95,7 +97,8 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
                 temp_index: current_temp,
                 operand: null,
                 diagnostics: diagnostics,
-                string_constants: collected_string_constants
+                string_constants: collected_string_constants,
+                diags: diags
             };
         }
         let mut current_operand: LLVMOperand = open.operand;
@@ -120,7 +123,8 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
                         temp_index: current_temp,
                         operand: null,
                         diagnostics: diagnostics,
-                        string_constants: collected_string_constants
+                        string_constants: collected_string_constants,
+                        diags: diags
                     };
                 }
                 let with_sep = emit_string_concat(current_operand, sep.operand, current_temp, current_lines);
@@ -130,6 +134,7 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
                     diagnostics.push(with_sep.diagnostics[_ci0]);
                     _ci0 += 1;
                 }
+                diags = extend_diag_array(diags, with_sep.diags);
                 current_lines = with_sep.lines;
                 current_temp = with_sep.temp_index;
                 if with_sep.operand == null {
@@ -138,7 +143,8 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
                         temp_index: current_temp,
                         operand: null,
                         diagnostics: diagnostics,
-                        string_constants: collected_string_constants
+                        string_constants: collected_string_constants,
+                        diags: diags
                     };
                 }
                 current_operand = with_sep.operand;
@@ -151,6 +157,7 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
                 diagnostics.push(lowered.diagnostics[_ci1]);
                 _ci1 += 1;
             }
+            diags = extend_diag_array(diags, lowered.diags);
             collected_string_constants = merge_string_constants(collected_string_constants, lowered.string_constants);
             current_lines = lowered.lines;
             current_temp = lowered.temp_index;
@@ -161,7 +168,8 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
                     temp_index: current_temp,
                     operand: null,
                     diagnostics: diagnostics,
-                    string_constants: collected_string_constants
+                    string_constants: collected_string_constants,
+                    diags: diags
                 };
             }
 
@@ -172,6 +180,7 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
                 diagnostics.push(as_string.diagnostics[_ci2]);
                 _ci2 += 1;
             }
+            diags = extend_diag_array(diags, as_string.diags);
             collected_string_constants = merge_string_constants(collected_string_constants, as_string.string_constants);
             current_lines = as_string.lines;
             current_temp = as_string.temp_index;
@@ -182,7 +191,8 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
                     temp_index: current_temp,
                     operand: null,
                     diagnostics: diagnostics,
-                    string_constants: collected_string_constants
+                    string_constants: collected_string_constants,
+                    diags: diags
                 };
             }
 
@@ -193,6 +203,7 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
                 diagnostics.push(appended.diagnostics[_ci3]);
                 _ci3 += 1;
             }
+            diags = extend_diag_array(diags, appended.diags);
             current_lines = appended.lines;
             current_temp = appended.temp_index;
             if appended.operand == null {
@@ -201,7 +212,8 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
                     temp_index: current_temp,
                     operand: null,
                     diagnostics: diagnostics,
-                    string_constants: collected_string_constants
+                    string_constants: collected_string_constants,
+                    diags: diags
                 };
             }
             current_operand = appended.operand;
@@ -218,7 +230,8 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
                 temp_index: current_temp,
                 operand: null,
                 diagnostics: diagnostics,
-                string_constants: collected_string_constants
+                string_constants: collected_string_constants,
+                diags: diags
             };
         }
         let finished = emit_string_concat(current_operand, close.operand, current_temp, current_lines);
@@ -228,6 +241,7 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
             diagnostics.push(finished.diagnostics[_ci4]);
             _ci4 += 1;
         }
+        diags = extend_diag_array(diags, finished.diags);
         current_lines = finished.lines;
         current_temp = finished.temp_index;
         return ExpressionResult {
@@ -235,7 +249,8 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
             temp_index: current_temp,
             operand: finished.operand,
             diagnostics: diagnostics,
-            string_constants: collected_string_constants
+            string_constants: collected_string_constants,
+            diags: diags
         };
     }
 
@@ -331,7 +346,8 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
                 temp_index: current_temp,
                 operand: null,
                 diagnostics: diagnostics,
-                string_constants: collected_string_constants
+                string_constants: collected_string_constants,
+                diags: diags
             };
         }
         operands.push(lowered.operand);
@@ -443,7 +459,8 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
             temp_index: current_temp,
             operand: null,
             diagnostics: diagnostics,
-            string_constants: collected_string_constants
+            string_constants: collected_string_constants,
+            diags: diags
         };
     }
 
@@ -488,7 +505,8 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
                                 temp_index: current_temp,
                                 operand: null,
                                 diagnostics: diagnostics,
-                                string_constants: collected_string_constants
+                                string_constants: collected_string_constants,
+                                diags: diags
                             };
                         }
                         prepared_operand = boxed.operand;
@@ -511,7 +529,8 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
                 temp_index: current_temp,
                 operand: null,
                 diagnostics: diagnostics,
-                string_constants: collected_string_constants
+                string_constants: collected_string_constants,
+                diags: diags
             };
         }
         coerced_operands.push(coerced.operand);
@@ -584,6 +603,7 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
         diagnostics.push(raw_array_result.diagnostics[_raw_array_di]);
         _raw_array_di += 1;
     }
+    diags = extend_diag_array(diags, raw_array_result.diags);
     current_lines = raw_array_result.lines;
     current_temp += 1;
 
@@ -650,6 +670,7 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
         diagnostics.push(struct_alloc_result.diagnostics[_struct_alloc_di]);
         _struct_alloc_di += 1;
     }
+    diags = extend_diag_array(diags, struct_alloc_result.diags);
     current_lines = struct_alloc_result.lines;
     current_temp += 1;
 
@@ -714,7 +735,8 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
         temp_index: current_temp,
         operand: operand,
         diagnostics: diagnostics,
-        string_constants: collected_string_constants
+        string_constants: collected_string_constants,
+        diags: diags
     };
 }
 
@@ -726,6 +748,7 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
 // issue's `Out:` section for the deferred plumbing.
 fn lower_struct_literal(parse: StructLiteralParse, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string, span: NativeSourceSpan?) -> ExpressionResult {
     let mut diagnostics: string[] = parse.diagnostics;
+    let mut diags: LoweringDiagnostic[] = [];
     let mut current_lines: string[] = lines;
     let mut current_temp: int = temp_index;
     let mut collected_string_constants: StringConstant[] = empty_string_constant_set();
@@ -744,7 +767,8 @@ fn lower_struct_literal(parse: StructLiteralParse, bindings: ParameterBinding[],
             temp_index: current_temp,
             operand: null,
             diagnostics: diagnostics,
-            string_constants: collected_string_constants
+            string_constants: collected_string_constants,
+            diags: diags
         };
     }
 
@@ -766,7 +790,8 @@ fn lower_struct_literal(parse: StructLiteralParse, bindings: ParameterBinding[],
             temp_index: boxed.temp_index,
             operand: boxed.operand,
             diagnostics: diagnostics,
-            string_constants: collected_string_constants
+            string_constants: collected_string_constants,
+            diags: diags
         };
     }
 
@@ -804,6 +829,7 @@ fn lower_struct_literal(parse: StructLiteralParse, bindings: ParameterBinding[],
                 diagnostics.push(lowered.diagnostics[_ci5]);
                 _ci5 += 1;
             }
+            diags = extend_diag_array(diags, lowered.diags);
             current_lines = lowered.lines;
             current_temp = lowered.temp_index;
             collected_string_constants = merge_string_constants(collected_string_constants, lowered.string_constants);
@@ -822,6 +848,7 @@ fn lower_struct_literal(parse: StructLiteralParse, bindings: ParameterBinding[],
                     diagnostics.push(coerced.diagnostics[_ci6]);
                     _ci6 += 1;
                 }
+                diags = extend_diag_array(diags, coerced.diags);
                 current_lines = coerced.lines;
                 current_temp = coerced.temp_index;
                 if coerced.operand == null {
@@ -948,7 +975,8 @@ fn lower_struct_literal(parse: StructLiteralParse, bindings: ParameterBinding[],
             temp_index: boxed.temp_index,
             operand: boxed.operand,
             diagnostics: diagnostics,
-            string_constants: collected_string_constants
+            string_constants: collected_string_constants,
+            diags: diags
         };
     }
 
@@ -976,12 +1004,14 @@ fn lower_struct_literal(parse: StructLiteralParse, bindings: ParameterBinding[],
         temp_index: boxed.temp_index,
         operand: boxed.operand,
         diagnostics: diagnostics,
-        string_constants: collected_string_constants
+        string_constants: collected_string_constants,
+        diags: diags
     };
 }
 
 fn box_aggregate_operand(operand: LLVMOperand, expected_pointer_type: string, temp_index: int, lines: string[], context: TypeContext) -> HeapBoxResult {
     let mut diagnostics: string[] = [];
+    let mut diags: LoweringDiagnostic[] = [];
     let mut current_lines: string[] = lines;
     let mut current_temp: int = temp_index;
 
@@ -1032,6 +1062,7 @@ fn box_aggregate_operand(operand: LLVMOperand, expected_pointer_type: string, te
         diagnostics.push(box_result.diagnostics[_box_di]);
         _box_di += 1;
     }
+    diags = extend_diag_array(diags, box_result.diags);
     current_lines = box_result.lines;
 
     let typed_ptr_temp = format_temp_name(current_temp);
@@ -1079,6 +1110,7 @@ fn box_aggregate_operand(operand: LLVMOperand, expected_pointer_type: string, te
 // `lower_struct_literal`. Pre-#540 callers pass `null`.
 fn lower_enum_literal(parse: EnumLiteralParse, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string, span: NativeSourceSpan?) -> ExpressionResult {
     let mut diagnostics: string[] = parse.diagnostics;
+    let mut diags: LoweringDiagnostic[] = [];
     let mut current_lines: string[] = lines;
     let mut current_temp: int = temp_index;
     let mut collected_string_constants: StringConstant[] = empty_string_constant_set();
@@ -1097,7 +1129,8 @@ fn lower_enum_literal(parse: EnumLiteralParse, bindings: ParameterBinding[], loc
             temp_index: current_temp,
             operand: null,
             diagnostics: diagnostics,
-            string_constants: collected_string_constants
+            string_constants: collected_string_constants,
+            diags: diags
         };
     }
 
@@ -1112,7 +1145,8 @@ fn lower_enum_literal(parse: EnumLiteralParse, bindings: ParameterBinding[], loc
             temp_index: current_temp,
             operand: null,
             diagnostics: diagnostics,
-            string_constants: collected_string_constants
+            string_constants: collected_string_constants,
+            diags: diags
         };
     }
 
@@ -1202,6 +1236,7 @@ fn lower_enum_literal(parse: EnumLiteralParse, bindings: ParameterBinding[], loc
                     diagnostics.push(lowered.diagnostics[_ci7]);
                     _ci7 += 1;
                 }
+                diags = extend_diag_array(diags, lowered.diags);
                 current_lines = lowered.lines;
                 current_temp = lowered.temp_index;
                 if lowered.operand != null {
@@ -1284,6 +1319,7 @@ fn lower_enum_literal(parse: EnumLiteralParse, bindings: ParameterBinding[], loc
                         diagnostics.push(coerced.diagnostics[_ci9]);
                         _ci9 += 1;
                     }
+                    diags = extend_diag_array(diags, coerced.diags);
                     current_lines = coerced.lines;
                     current_temp = coerced.temp_index;
                     if coerced.operand == null {
@@ -1441,7 +1477,8 @@ fn lower_enum_literal(parse: EnumLiteralParse, bindings: ParameterBinding[], loc
         temp_index: boxed.temp_index,
         operand: boxed.operand,
         diagnostics: diagnostics,
-        string_constants: collected_string_constants
+        string_constants: collected_string_constants,
+        diags: diags
     };
 }
 

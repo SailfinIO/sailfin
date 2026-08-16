@@ -4,6 +4,7 @@
 import {
     ImportedModuleContext,
     LayoutManifest,
+    LoweringDiagnostic,
     NativeArtifact,
     NativeBinding,
     NativeEnum,
@@ -326,6 +327,7 @@ fn lower_to_llvm_with_context(native_module: NativeModule, import_context: Impor
 
 fn lower_to_llvm_lines_with_context(native_module: NativeModule, import_context: ImportedModuleContext) -> LoweredLLVMLinesResult {
     let mut diagnostics: string[] = [];
+    let mut diags: LoweringDiagnostic[] = [];
     if import_context.diagnostics.length > 0 {
         let mut _ci0: int = 0;
         loop {

@@ -22,6 +22,25 @@ fn lowering_error_diag(code: string, message: string, span_in: NativeSourceSpan?
     };
 }
 
+// The advisory counterpart of `lowering_error_diag` (SFN-915). Lowering has
+// no advisory *string* channel — an untagged legacy line is discarded rather
+// than surfaced (see `lowering_core/diagnostics.sfn`) — so the many
+// `"llvm lowering: ..."` sites that never carried `[fatal]` must not become
+// `severity: "error"` when they gain a structured twin. Marking them
+// `"warning"` keeps `diag_to_legacy_string` from synthesising a `[fatal]`
+// prefix, so the gate SFN-540 derives from `diags` refuses exactly what the
+// string gate refuses today, no more.
+fn lowering_warning_diag(code: string, message: string, span_in: NativeSourceSpan?) -> LoweringDiagnostic {
+    return LoweringDiagnostic {
+        code: code,
+        severity: "warning",
+        message: message,
+        file_path: "",
+        span: span_in,
+        stage: "lowering"
+    };
+}
+
 // A `break` or `continue` that reached lowering with no enclosing loop
 // (SFN-528). The keyword is all that differs between the two sites, and the
 // span rides in from the instruction so the diagnostic can be located.

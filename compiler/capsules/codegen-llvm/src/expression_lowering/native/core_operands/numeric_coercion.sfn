@@ -2,8 +2,11 @@
 //
 // Numeric primitive coercion entry point: delegates to the float-target
 // and integer-target arms, then handles the `i8*` (stringify/box) tail.
+import { LoweringDiagnostic } from "sfn/ir";
+
 import { format_temp_name } from "../../../expressions_helpers";
 import { CoercionResult, LLVMOperand } from "../../../types";
+import { extend_diag_array } from "../../../utils";
 import {
     RuntimeCallOverrides,
     emit_runtime_call,
@@ -17,6 +20,7 @@ import { _coerce_numeric_to_integer_target } from "./numeric_integer";
 fn coerce_numeric_primitive(operand: LLVMOperand, operand_type: string, target: string, temp_index: int, lines: string[]) -> CoercionResult? {
     let mut current_lines: string[] = lines;
     let mut diagnostics: string[] = [];
+    let mut diags: LoweringDiagnostic[] = [];
 
     let float_result = _coerce_numeric_to_float_target(operand, operand_type, target, temp_index, current_lines);
     if float_result != null { return float_result; }
@@ -40,11 +44,13 @@ fn coerce_numeric_primitive(operand: LLVMOperand, operand_type: string, target: 
                 diagnostics.push(nts_result.diagnostics[_nts_di]);
                 _nts_di += 1;
             }
+            diags = extend_diag_array(diags, nts_result.diags);
             return CoercionResult {
                 lines: nts_result.lines,
                 temp_index: nts_result.temp_index,
                 operand: nts_result.operand,
-                diagnostics: diagnostics
+                diagnostics: diagnostics,
+                diags: diags
             };
         }
     }
@@ -72,11 +78,13 @@ fn coerce_numeric_primitive(operand: LLVMOperand, operand_type: string, target: 
                 diagnostics.push(nts_result.diagnostics[_nts_di]);
                 _nts_di += 1;
             }
+            diags = extend_diag_array(diags, nts_result.diags);
             return CoercionResult {
                 lines: nts_result.lines,
                 temp_index: nts_result.temp_index,
                 operand: nts_result.operand,
-                diagnostics: diagnostics
+                diagnostics: diagnostics,
+                diags: diags
             };
         }
     }
@@ -106,6 +114,7 @@ fn coerce_numeric_primitive(operand: LLVMOperand, operand_type: string, target: 
                 diagnostics.push(i8c_result.diagnostics[_i8c_di]);
                 _i8c_di += 1;
             }
+            diags = extend_diag_array(diags, i8c_result.diags);
             current_lines = i8c_result.lines;
             let char_ptr = format_temp_name(temp_index + 1);
             current_lines.push("  " + char_ptr + " = getelementptr i8, i8* "
@@ -123,7 +132,8 @@ fn coerce_numeric_primitive(operand: LLVMOperand, operand_type: string, target: 
                 lines: current_lines,
                 temp_index: temp_index + 3,
                 operand: coerced,
-                diagnostics: diagnostics
+                diagnostics: diagnostics,
+                diags: diags
             };
         }
     }

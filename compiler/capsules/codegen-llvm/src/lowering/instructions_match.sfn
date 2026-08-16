@@ -170,6 +170,7 @@ fn resolve_match_subject_call_annotation(subject_expression: string, functions: 
 
 fn collect_match_structure(instructions: NativeInstruction[], start_index: int, end: int, function_name: string) -> MatchStructure {
     let mut diagnostics: string[] = [];
+    let mut diags: LoweringDiagnostic[] = [];
     let mut cases: MatchCaseStructure[] = [];
     let mut current_case: MatchCaseStructure? = null;
     let mut index: int = start_index + 1;
@@ -272,6 +273,7 @@ fn is_default_pattern(pattern: string) -> boolean {
 fn lower_match_instruction(function: NativeFunction, start_index: int, llvm_return: string, bindings: ParameterBinding[], locals: LocalBinding[], allocas: string[], lines: string[], temp_index: int, block_counter: int, next_local_id: int, next_region_id: int, functions: NativeFunction[], loop_stack: LoopContext[], try_stack: TryFrameContext[], end: int, context: TypeContext, scope_id: string, scope_depth: int, current_label: string) -> BlockLoweringResult {
     let mut diagnostics: string[] = [];
     let mut diags: LoweringDiagnostic[] = [];
+    let mut diags: LoweringDiagnostic[] = [];
     let mut current_lines: string[] = lines;
     let base_lines_snapshot = copy_string_array(lines);
     let mut current_allocas: string[] = allocas;
@@ -303,6 +305,7 @@ fn lower_match_instruction(function: NativeFunction, start_index: int, llvm_retu
         diagnostics.push(subject_result.diagnostics[_ci1]);
         _ci1 += 1;
     }
+    diags = extend_diag_array(diags, subject_result.diags);
     current_lines = subject_result.lines;
     current_temp = subject_result.temp_index;
     collected_string_constants = merge_string_constants(collected_string_constants, subject_result.string_constants);

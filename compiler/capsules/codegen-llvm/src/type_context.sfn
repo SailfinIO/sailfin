@@ -4,6 +4,7 @@
 // NativeStruct/NativeEnum/NativeInterface definitions. Lookup and
 // query functions live in type_context_queries.sfn.
 import {
+    LoweringDiagnostic,
     NativeEnum,
     NativeEnumLayout,
     NativeEnumVariantLayout,
@@ -128,6 +129,7 @@ fn fixup_enum_layouts(enums: NativeEnum[]) -> EnumLayoutFixupResult {
         };
     }
     let mut diagnostics: string[] = [];
+    let mut diags: LoweringDiagnostic[] = [];
     let mut updated: NativeEnum[] = [];
     let mut index: int = 0;
     loop {
@@ -210,6 +212,7 @@ fn build_type_context(structs: NativeStruct[], enums: NativeEnum[], interfaces: 
         };
     }
     let mut diagnostics: string[] = [];
+    let mut diags: LoweringDiagnostic[] = [];
     let mut struct_entries: StructTypeInfo[] = [];
     let mut index: int = 0;
     loop {

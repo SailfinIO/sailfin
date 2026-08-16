@@ -33,6 +33,8 @@
 // sites that hit this path haven't populated overrides — surfacing
 // the gap keeps malformed IR from leaking into emission. See epic
 // #494 for the M1.7 architecture and migration sequencing.
+import { LoweringDiagnostic } from "sfn/ir";
+
 import { format_temp_name, format_typed_operand } from "../../expressions_helpers";
 import { trace_log } from "../../lowering_debug_state";
 import { find_runtime_helper } from "../../runtime_helpers/mod";
@@ -166,6 +168,7 @@ fn emit_runtime_call(target: string, operands: LLVMOperand[], overrides: Runtime
     let mut result_lines: string[] = lines;
     let mut result_temp: int = temp_index;
     let mut result_diagnostics: string[] = [];
+    let mut result_diags: LoweringDiagnostic[] = [];
     let empty_constants: StringConstant[] = [];
 
     // Diagnostic-and-fallback when no descriptor exists and no
@@ -184,7 +187,8 @@ fn emit_runtime_call(target: string, operands: LLVMOperand[], overrides: Runtime
                 temp_index: result_temp,
                 operand: null,
                 diagnostics: result_diagnostics,
-                string_constants: empty_constants
+                string_constants: empty_constants,
+                diags: result_diags
             };
         }
     }
@@ -261,7 +265,8 @@ fn emit_runtime_call(target: string, operands: LLVMOperand[], overrides: Runtime
             temp_index: result_temp,
             operand: null,
             diagnostics: result_diagnostics,
-            string_constants: empty_constants
+            string_constants: empty_constants,
+            diags: result_diags
         };
     }
 
@@ -273,7 +278,8 @@ fn emit_runtime_call(target: string, operands: LLVMOperand[], overrides: Runtime
             temp_index: result_temp,
             operand: null,
             diagnostics: result_diagnostics,
-            string_constants: empty_constants
+            string_constants: empty_constants,
+            diags: result_diags
         };
     }
 
@@ -324,7 +330,8 @@ fn emit_runtime_call(target: string, operands: LLVMOperand[], overrides: Runtime
         temp_index: next_temp,
         operand: result_operand,
         diagnostics: result_diagnostics,
-        string_constants: empty_constants
+        string_constants: empty_constants,
+        diags: result_diags
     };
 }
 

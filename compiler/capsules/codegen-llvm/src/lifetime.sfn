@@ -2,7 +2,7 @@
 //
 // Lifetime tracking, borrow checking, and ownership analysis for LLVM lowering.
 // Handles borrow expression parsing, lifetime region management, and conflict detection.
-import { NativeFunction, NativeSourceSpan } from "sfn/ir";
+import { LoweringDiagnostic, NativeFunction, NativeSourceSpan } from "sfn/ir";
 import { find as find_char, substring } from "sfn/strings";
 
 import { find_local_binding, find_parameter_binding } from "./expressions_bindings";
@@ -47,6 +47,7 @@ import {
 fn parse_borrow_expression(text: string) -> BorrowParseResult {
     let trimmed = trim_text(text);
     let diagnostics: string[] = [];
+    let diags: LoweringDiagnostic[] = [];
     if trimmed.length == 0 {
         return BorrowParseResult {
             recognized: false,
@@ -97,6 +98,7 @@ fn parse_borrow_expression(text: string) -> BorrowParseResult {
             if substring(remainder, 0, 1) == "(" {
                 let argument_parse = extract_borrow_argument(remainder);
                 let mut messages: string[] = [];
+                let mut messages_diags: LoweringDiagnostic[] = [];
                 let mut _ci0: int = 0;
                 loop {
                     if _ci0 >= diagnostics.length { break; }
@@ -230,6 +232,7 @@ fn parse_borrow_expression(text: string) -> BorrowParseResult {
 
 fn extract_borrow_argument(text: string) -> BorrowArgumentParse {
     let mut diagnostics: string[] = [];
+    let mut diags: LoweringDiagnostic[] = [];
     let mut depth: int = 0;
     let mut index: int = 0;
     let mut closing_index: int = -1;
@@ -290,6 +293,7 @@ fn extract_borrow_argument(text: string) -> BorrowArgumentParse {
 
 fn extract_simple_borrow_target(text: string) -> BorrowArgumentParse {
     let mut diagnostics: string[] = [];
+    let mut diags: LoweringDiagnostic[] = [];
     let trimmed = trim_text(text);
     if trimmed.length == 0 {
         diagnostics.push("llvm lowering: borrow expression missing target");
@@ -359,6 +363,7 @@ fn is_valid_borrow_target(text: string) -> boolean {
 // =============================================================================
 fn lower_borrow_expression(parse: BorrowParseResult, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[]) -> ExpressionResult {
     let mut diagnostics: string[] = parse.diagnostics;
+    let mut diags: LoweringDiagnostic[] = [];
     let empty_constants = empty_string_constant_set();
     if !parse.success {
         return ExpressionResult {
@@ -366,7 +371,8 @@ fn lower_borrow_expression(parse: BorrowParseResult, bindings: ParameterBinding[
             temp_index: temp_index,
             operand: null,
             diagnostics: diagnostics,
-            string_constants: empty_constants
+            string_constants: empty_constants,
+            diags: diags
         };
     }
 
@@ -379,7 +385,8 @@ fn lower_borrow_expression(parse: BorrowParseResult, bindings: ParameterBinding[
             temp_index: temp_index,
             operand: null,
             diagnostics: diagnostics,
-            string_constants: empty_constants
+            string_constants: empty_constants,
+            diags: diags
         };
     }
 
@@ -394,7 +401,8 @@ fn lower_borrow_expression(parse: BorrowParseResult, bindings: ParameterBinding[
                 temp_index: temp_index,
                 operand: null,
                 diagnostics: diagnostics,
-                string_constants: empty_constants
+                string_constants: empty_constants,
+                diags: diags
             };
         }
 
@@ -409,7 +417,8 @@ fn lower_borrow_expression(parse: BorrowParseResult, bindings: ParameterBinding[
                 temp_index: temp_index,
                 operand: operand,
                 diagnostics: diagnostics,
-                string_constants: empty_constants
+                string_constants: empty_constants,
+                diags: diags
             };
         }
 
@@ -423,7 +432,8 @@ fn lower_borrow_expression(parse: BorrowParseResult, bindings: ParameterBinding[
             temp_index: temp_index,
             operand: null,
             diagnostics: diagnostics,
-            string_constants: empty_constants
+            string_constants: empty_constants,
+            diags: diags
         };
     }
 
@@ -437,7 +447,8 @@ fn lower_borrow_expression(parse: BorrowParseResult, bindings: ParameterBinding[
         temp_index: temp_index,
         operand: operand,
         diagnostics: diagnostics,
-        string_constants: empty_constants
+        string_constants: empty_constants,
+        diags: diags
     };
 }
 
@@ -463,6 +474,7 @@ fn analyze_value_ownership(initializer: string?, span: NativeSourceSpan?, locals
 
     let parse = parse_borrow_expression(trimmed);
     let mut diagnostics: string[] = parse.diagnostics;
+    let mut diags: LoweringDiagnostic[] = [];
     if parse.recognized {
         if !parse.success {
             return OwnershipAnalysis {
@@ -592,6 +604,7 @@ fn update_local_ownership(locals: LocalBinding[], name: string, ownership: Owner
 // =============================================================================
 fn detect_borrow_conflicts(ownership: OwnershipInfo?, locals: LocalBinding[], binding_name: string, function_name: string) -> string[] {
     let mut diagnostics: string[] = [];
+    let mut diags: LoweringDiagnostic[] = [];
     if ownership == null { return diagnostics; }
     if ownership.variant != "Borrow" { return diagnostics; }
     let base = trim_text(ownership.base);
@@ -796,6 +809,7 @@ fn infer_borrow_base_scope(base: string, locals: LocalBinding[], bindings: Param
 // =============================================================================
 fn validate_borrow_lifetimes(function: NativeFunction, regions: LifetimeRegionMetadata[]) -> string[] {
     let mut diagnostics: string[] = [];
+    let mut diags: LoweringDiagnostic[] = [];
     if regions == null { return diagnostics; }
     if regions.length > 1000000 {
         diagnostics.push("llvm lowering: lifetime region overflow in `"
@@ -847,89 +861,6 @@ fn validate_borrow_lifetimes(function: NativeFunction, regions: LifetimeRegionMe
 }
 
 // =============================================================================
-// Suspension Conflict Detection (for async/await)
-// =============================================================================
-fn collect_suspension_conflicts(keyword: string, locals: LocalBinding[], bindings: ParameterBinding[], function_name: string, suspension_span: NativeSourceSpan?) -> string[] {
-    let mut diagnostics: string[] = [];
-    let mut index: int = 0;
-    loop {
-        if index >= locals.length { break; }
-        let local = locals[index];
-        if !local.consumed {
-            if local.ownership != null {
-                let details = local.ownership;
-                if details.variant == "Borrow" {
-                    if details.mutable {
-                        let base_name = normalise_borrow_base(details.base);
-                        let location = format_suspension_location(keyword, details.span, suspension_span);
-                        diagnostics.push("llvm lowering: " + keyword
-                            + " suspends while mutable borrow `"
-                            + local.name
-                            + "` of `"
-                            + base_name
-                            + "` remains active in `"
-                            + function_name
-                            + "`"
-                            + location);
-                    }
-                }
-            }
-        }
-        index += 1;
-    }
-    let mut parameter_index: int = 0;
-    loop {
-        if parameter_index >= bindings.length { break; }
-        let binding = bindings[parameter_index];
-        if !binding.consumed {
-            if is_mutable_borrow_annotation(binding.type_annotation) {
-                let location = format_suspension_location(keyword, binding.span, suspension_span);
-                diagnostics.push("llvm lowering: " + keyword
-                    + " suspends while mutable borrow parameter `"
-                    + binding.name
-                    + "` remains active in `"
-                    + function_name
-                    + "`"
-                    + location);
-            }
-        }
-        parameter_index += 1;
-    }
-    return diagnostics;
-}
-
-fn detect_suspension_conflicts(expression: string?, locals: LocalBinding[], bindings: ParameterBinding[], function_name: string, suspension_span: NativeSourceSpan?) -> string[] {
-    if expression == null { return []; }
-    let trimmed = trim_text(expression);
-    if trimmed.length == 0 { return []; }
-    let keyword = find_suspension_keyword(trimmed);
-    if keyword.length == 0 { return []; }
-    return collect_suspension_conflicts(keyword, locals, bindings, function_name, suspension_span);
-}
-
-fn find_suspension_keyword(text: string) -> string {
-    if starts_with(text, "await") {
-        if text.length == 5 { return "await"; }
-        let next = char_at(text, 5);
-        let mut _if192: boolean = false;
-        if next == " " { _if192 = true; }
-        if next == "\t" { _if192 = true; }
-        if next == "(" { _if192 = true; }
-        if _if192 { return "await"; }
-    }
-    if starts_with(text, "yield") {
-        if text.length == 5 { return "yield"; }
-        let next = char_at(text, 5);
-        let mut _if193: boolean = false;
-        if next == " " { _if193 = true; }
-        if next == "\t" { _if193 = true; }
-        if next == "(" { _if193 = true; }
-        if _if193 { return "yield"; }
-    }
-    return "";
-}
-
-// =============================================================================
 // Scope ID Helpers
 // =============================================================================
 fn format_root_scope_id(function_name: string) -> string {
@@ -967,24 +898,4 @@ fn format_span_location(span: NativeSourceSpan) -> string {
     let start = number_to_string(span.start_line) + ":" + number_to_string(span.start_column);
     let end = number_to_string(span.end_line) + ":" + number_to_string(span.end_column);
     return start + "-" + end;
-}
-
-fn format_suspension_location(keyword: string, borrow_span: NativeSourceSpan?, suspension_span: NativeSourceSpan?) -> string {
-    let mut has_segment: boolean = false;
-    let mut combined: string = "";
-    if borrow_span != null {
-        combined = "borrow at " + format_span_location(borrow_span);
-        has_segment = true;
-    }
-    if suspension_span != null {
-        let mut label: string = keyword;
-        if label.length == 0 { label = "suspend"; }
-        let segment = label + " at " + format_span_location(suspension_span);
-        if has_segment { combined = combined + "; " + segment; } else {
-            combined = segment;
-            has_segment = true;
-        }
-    }
-    if !has_segment { return ""; }
-    return " (" + combined + ")";
 }

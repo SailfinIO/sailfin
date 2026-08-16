@@ -1,6 +1,8 @@
 // compiler/capsules/codegen-llvm/src/expression_lowering/native/core_call_emission/arrays.sfn
 //
 // Inline array concat and push call emission.
+import { LoweringDiagnostic } from "sfn/ir";
+
 import { ends_with_pointer_suffix } from "../../../type_mapping";
 import {
     ExpressionResult,
@@ -8,16 +10,17 @@ import {
     LocalBinding,
     StringConstant
 } from "../../../types";
-import { trim_text } from "../../../utils";
+import { extend_diag_array, trim_text } from "../../../utils";
 import { lower_array_push_in_place, lower_struct_array_concat } from "../../arrays";
 import { coerce_operand_to_type } from "../core_operands/dispatch";
 import { parse_member_access } from "../core_parse";
 import { find_local_binding } from "../core_scopes";
 
-fn emit_array_call(trimmed_target: string, final_operands: LLVMOperand[], is_array_concat: boolean, array_concat_element_type: string, is_array_push: boolean, array_push_element_type: string, current_temp: int, current_lines: string[], diagnostics: string[], collected_string_constants: StringConstant[], locals: LocalBinding[]) -> ExpressionResult {
+fn emit_array_call(trimmed_target: string, final_operands: LLVMOperand[], is_array_concat: boolean, array_concat_element_type: string, is_array_push: boolean, array_push_element_type: string, current_temp: int, current_lines: string[], diagnostics: string[], diags: LoweringDiagnostic[], collected_string_constants: StringConstant[], locals: LocalBinding[]) -> ExpressionResult {
     let mut result_lines = current_lines;
     let mut result_temp: int = current_temp;
     let mut result_diagnostics = diagnostics;
+    let mut result_diags = diags;
     // Array concat inline lowering
     if is_array_concat {
         if array_concat_element_type.length > 0 {
@@ -30,6 +33,7 @@ fn emit_array_call(trimmed_target: string, final_operands: LLVMOperand[], is_arr
                         result_diagnostics.push(concat_result.diagnostics[_ci7]);
                         _ci7 += 1;
                     }
+                    result_diags = extend_diag_array(result_diags, concat_result.diags);
                     result_lines = concat_result.lines;
                     result_temp = concat_result.temp_index;
                     if concat_result.operand == null {
@@ -38,7 +42,8 @@ fn emit_array_call(trimmed_target: string, final_operands: LLVMOperand[], is_arr
                             temp_index: result_temp,
                             operand: null,
                             diagnostics: result_diagnostics,
-                            string_constants: collected_string_constants
+                            string_constants: collected_string_constants,
+                            diags: result_diags
                         };
                     }
                     return ExpressionResult {
@@ -46,7 +51,8 @@ fn emit_array_call(trimmed_target: string, final_operands: LLVMOperand[], is_arr
                         temp_index: result_temp,
                         operand: concat_result.operand,
                         diagnostics: result_diagnostics,
-                        string_constants: collected_string_constants
+                        string_constants: collected_string_constants,
+                        diags: result_diags
                     };
                 } else {
                     result_diagnostics.push("llvm lowering: concat requires two operands");
@@ -55,7 +61,8 @@ fn emit_array_call(trimmed_target: string, final_operands: LLVMOperand[], is_arr
                         temp_index: result_temp,
                         operand: null,
                         diagnostics: result_diagnostics,
-                        string_constants: collected_string_constants
+                        string_constants: collected_string_constants,
+                        diags: result_diags
                     };
                 }
             }
@@ -91,6 +98,7 @@ fn emit_array_call(trimmed_target: string, final_operands: LLVMOperand[], is_arr
                     result_diagnostics.push(push_value_coerced.diagnostics[_ci_apc]);
                     _ci_apc += 1;
                 }
+                result_diags = extend_diag_array(result_diags, push_value_coerced.diags);
                 result_lines = push_value_coerced.lines;
                 result_temp = push_value_coerced.temp_index;
                 if push_value_coerced.operand == null {
@@ -110,7 +118,8 @@ fn emit_array_call(trimmed_target: string, final_operands: LLVMOperand[], is_arr
                         temp_index: result_temp,
                         operand: null,
                         diagnostics: result_diagnostics,
-                        string_constants: collected_string_constants
+                        string_constants: collected_string_constants,
+                        diags: result_diags
                     };
                 }
                 let push_value_operand = push_value_coerced.operand;
@@ -121,6 +130,7 @@ fn emit_array_call(trimmed_target: string, final_operands: LLVMOperand[], is_arr
                     result_diagnostics.push(push_result.diagnostics[_ci8]);
                     _ci8 += 1;
                 }
+                result_diags = extend_diag_array(result_diags, push_result.diags);
                 result_lines = push_result.lines;
                 result_temp = push_result.temp_index;
                 if push_result.operand == null {
@@ -129,7 +139,8 @@ fn emit_array_call(trimmed_target: string, final_operands: LLVMOperand[], is_arr
                         temp_index: result_temp,
                         operand: null,
                         diagnostics: result_diagnostics,
-                        string_constants: collected_string_constants
+                        string_constants: collected_string_constants,
+                        diags: result_diags
                     };
                 }
                 if array_push_element_type == "i8*" {
@@ -153,7 +164,8 @@ fn emit_array_call(trimmed_target: string, final_operands: LLVMOperand[], is_arr
                     temp_index: result_temp,
                     operand: push_result.operand,
                     diagnostics: result_diagnostics,
-                    string_constants: collected_string_constants
+                    string_constants: collected_string_constants,
+                    diags: result_diags
                 };
             } else {
                 result_diagnostics.push("llvm lowering: push requires two operands");
@@ -162,7 +174,8 @@ fn emit_array_call(trimmed_target: string, final_operands: LLVMOperand[], is_arr
                     temp_index: result_temp,
                     operand: null,
                     diagnostics: result_diagnostics,
-                    string_constants: collected_string_constants
+                    string_constants: collected_string_constants,
+                    diags: result_diags
                 };
             }
         }
@@ -172,7 +185,8 @@ fn emit_array_call(trimmed_target: string, final_operands: LLVMOperand[], is_arr
         temp_index: result_temp,
         operand: null,
         diagnostics: result_diagnostics,
-        string_constants: collected_string_constants
+        string_constants: collected_string_constants,
+        diags: result_diags
     };
 }
 

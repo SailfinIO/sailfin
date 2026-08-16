@@ -1,6 +1,8 @@
 // compiler/capsules/codegen-llvm/src/expression_lowering/native/core_borrow_lowering.sfn
 //
 // Borrow-expression lowering extracted from core.sfn.
+import { LoweringDiagnostic } from "sfn/ir";
+
 import { empty_string_constant_set } from "../../strings";
 import {
     BorrowParseResult,
@@ -16,6 +18,7 @@ import { find_local_binding } from "./core_scopes";
 
 fn lower_borrow_expression(parse: BorrowParseResult, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[]) -> ExpressionResult {
     let mut diagnostics: string[] = parse.diagnostics;
+    let mut diags: LoweringDiagnostic[] = [];
     let empty_constants = empty_string_constant_set();
     if !parse.success {
         return ExpressionResult {
@@ -23,7 +26,8 @@ fn lower_borrow_expression(parse: BorrowParseResult, bindings: ParameterBinding[
             temp_index: temp_index,
             operand: null,
             diagnostics: diagnostics,
-            string_constants: empty_constants
+            string_constants: empty_constants,
+            diags: diags
         };
     }
 
@@ -36,7 +40,8 @@ fn lower_borrow_expression(parse: BorrowParseResult, bindings: ParameterBinding[
             temp_index: temp_index,
             operand: null,
             diagnostics: diagnostics,
-            string_constants: empty_constants
+            string_constants: empty_constants,
+            diags: diags
         };
     }
 
@@ -51,7 +56,8 @@ fn lower_borrow_expression(parse: BorrowParseResult, bindings: ParameterBinding[
                 temp_index: temp_index,
                 operand: null,
                 diagnostics: diagnostics,
-                string_constants: empty_constants
+                string_constants: empty_constants,
+                diags: diags
             };
         }
 
@@ -66,7 +72,8 @@ fn lower_borrow_expression(parse: BorrowParseResult, bindings: ParameterBinding[
                 temp_index: temp_index,
                 operand: operand,
                 diagnostics: diagnostics,
-                string_constants: empty_constants
+                string_constants: empty_constants,
+                diags: diags
             };
         }
 
@@ -80,7 +87,8 @@ fn lower_borrow_expression(parse: BorrowParseResult, bindings: ParameterBinding[
             temp_index: temp_index,
             operand: null,
             diagnostics: diagnostics,
-            string_constants: empty_constants
+            string_constants: empty_constants,
+            diags: diags
         };
     }
 
@@ -94,7 +102,8 @@ fn lower_borrow_expression(parse: BorrowParseResult, bindings: ParameterBinding[
         temp_index: temp_index,
         operand: operand,
         diagnostics: diagnostics,
-        string_constants: empty_constants
+        string_constants: empty_constants,
+        diags: diags
     };
 }
 

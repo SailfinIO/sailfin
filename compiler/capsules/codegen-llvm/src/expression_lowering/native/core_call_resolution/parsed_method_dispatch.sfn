@@ -1,7 +1,7 @@
 // compiler/capsules/codegen-llvm/src/expression_lowering/native/core_call_resolution/parsed_method_dispatch.sfn
 //
 // Parsed member-access dispatch for structs, interfaces, helpers, and arrays.
-import { NativeFunction } from "sfn/ir";
+import { LoweringDiagnostic, NativeFunction } from "sfn/ir";
 
 import { is_simple_identifier } from "../../../expressions_helpers";
 import { find_function_by_name_or_import } from "../../../rendering_helpers";
@@ -24,7 +24,7 @@ import {
     StructTypeInfo,
     TypeContext
 } from "../../../types";
-import { starts_with, trim_text } from "../../../utils";
+import { extend_diag_array, starts_with, trim_text } from "../../../utils";
 import { array_pointer_element_type } from "../../arrays";
 import { lower_expression } from "../core";
 import { parse_member_access } from "../core_parse";
@@ -33,11 +33,12 @@ import { _is_primitive_receiver_type } from "./receiver_types";
 
 // Resolves method calls via parse_member_access (struct methods, interface dispatch,
 // runtime helpers, array concat/push).
-fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], result_temp: int, result_lines: string[], functions: NativeFunction[], context: TypeContext, result_diagnostics: string[], result_string_constants: StringConstant[], method_operand: LLVMOperand?, helper_descriptor: RuntimeHelperDescriptor?, injected_argument_count: int, is_array_concat: boolean, array_concat_element_type: string, is_array_push: boolean, array_push_element_type: string) -> CallTargetResolution {
+fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], result_temp: int, result_lines: string[], functions: NativeFunction[], context: TypeContext, result_diagnostics: string[], result_diags: LoweringDiagnostic[], result_string_constants: StringConstant[], method_operand: LLVMOperand?, helper_descriptor: RuntimeHelperDescriptor?, injected_argument_count: int, is_array_concat: boolean, array_concat_element_type: string, is_array_push: boolean, array_push_element_type: string) -> CallTargetResolution {
     let mut r_target = result_target;
     let mut r_lines = result_lines;
     let mut r_temp: int = result_temp;
     let mut r_diagnostics = result_diagnostics;
+    let mut r_diags = result_diags;
     let mut r_string_constants = result_string_constants;
     let mut r_method_operand = method_operand;
     let mut r_helper_descriptor = helper_descriptor;
@@ -61,6 +62,7 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                     r_diagnostics.push(lowered_self.diagnostics[_ci2]);
                     _ci2 += 1;
                 }
+                r_diags = extend_diag_array(r_diags, lowered_self.diags);
                 r_string_constants = merge_string_constants(r_string_constants, lowered_self.string_constants);
                 r_lines = lowered_self.lines;
                 r_temp = lowered_self.temp_index;
@@ -135,6 +137,7 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                             r_diagnostics.push(lowered_self.diagnostics[_ci3]);
                             _ci3 += 1;
                         }
+                        r_diags = extend_diag_array(r_diags, lowered_self.diags);
                         r_string_constants = merge_string_constants(r_string_constants, lowered_self.string_constants);
                         r_lines = lowered_self.lines;
                         r_temp = lowered_self.temp_index;
@@ -173,6 +176,7 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                         r_diagnostics.push(lowered_self.diagnostics[_ci4]);
                         _ci4 += 1;
                     }
+                    r_diags = extend_diag_array(r_diags, lowered_self.diags);
                     r_string_constants = merge_string_constants(r_string_constants, lowered_self.string_constants);
                     r_lines = lowered_self.lines;
                     r_temp = lowered_self.temp_index;
@@ -211,6 +215,7 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                     r_diagnostics.push(lowered_self.diagnostics[_ci5]);
                     _ci5 += 1;
                 }
+                r_diags = extend_diag_array(r_diags, lowered_self.diags);
                 r_string_constants = merge_string_constants(r_string_constants, lowered_self.string_constants);
                 r_lines = lowered_self.lines;
                 r_temp = lowered_self.temp_index;
@@ -269,6 +274,7 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                         r_diagnostics.push(lowered_self.diagnostics[_ci6b]);
                         _ci6b += 1;
                     }
+                    r_diags = extend_diag_array(r_diags, lowered_self.diags);
                     r_string_constants = merge_string_constants(r_string_constants, lowered_self.string_constants);
                     r_lines = lowered_self.lines;
                     r_temp = lowered_self.temp_index;
@@ -380,6 +386,7 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                                     r_diagnostics.push(_g_ch_lowered.diagnostics[_cig]);
                                     _cig += 1;
                                 }
+                                r_diags = extend_diag_array(r_diags, _g_ch_lowered.diags);
                                 r_string_constants = merge_string_constants(r_string_constants, _g_ch_lowered.string_constants);
                                 r_lines = _g_ch_lowered.lines;
                                 r_temp = _g_ch_lowered.temp_index;
@@ -444,6 +451,7 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                             r_diagnostics.push(lowered_self.diagnostics[_ci6]);
                             _ci6 += 1;
                         }
+                        r_diags = extend_diag_array(r_diags, lowered_self.diags);
                         r_string_constants = merge_string_constants(r_string_constants, lowered_self.string_constants);
                         r_lines = lowered_self.lines;
                         r_temp = lowered_self.temp_index;
