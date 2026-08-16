@@ -1,0 +1,56 @@
+// compiler/tests/e2e/test_missing_path_test.sfn
+//
+// End-to-end guard for `sfn test`'s missing-path check (SFN-648,
+// `compiler/src/cli/commands/test/mod.sfn` `run()` /
+// `compiler/src/cli/commands/test/discovery.sfn`
+// `_collect_test_files_cmd`). Before the fix, `_collect_test_files_cmd`'s
+// single-file fast path returned any `.sfn`-suffixed argument as a
+// collected file without checking that it existed, so `sfn test
+// <absent>.sfn` proceeded straight into compilation and link with no
+// `main` symbol for the phantom file — an internal compiler error
+// instead of a diagnostic naming the missing path. The fix mirrors
+// `fmt.sfn` `run()`: `run()` validates every positional suite path up
+// front and fails the whole invocation — before any suite/collection
+// work — printing `error: path not found: <path>` for each. This test
+// drives the real CLI as a subprocess and pins: the diagnostic text, the
+// non-zero exit, and that neither an ICE nor a "failing IR" note is
+// emitted. See `.claude/rules/no-bash-e2e.md`.
+import { contains } from "sfn/strings";
+import { clean_runner_env, nested_runner_scratch, report_child_failure } from "sfn/test";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    dir = dir + "/sfn-test-missing-e2e";
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+fn _child_env() -> string[] ![io] {
+    return clean_runner_env(nested_runner_scratch("test-missing-path"));
+}
+
+test "test-missing-path: sfn test on an absent .sfn path fails without an ICE" ![io] {
+    let dir = _scratch_dir();
+    let absent = dir + "/absent_test.sfn";
+    if fs.exists(absent) { fs.deleteFile(absent); }
+
+    let rc = process.run_capture([_sfn_bin(), "test", absent], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+
+    assert rc != 0;
+    assert contains(out, "path not found");
+    assert contains(out, absent);
+    assert ! contains(out, "internal compiler error");
+    assert ! contains(err, "internal compiler error");
+    assert ! contains(out, "failing IR");
+    assert ! contains(err, "failing IR");
+    assert ! fs.exists(absent);
+}

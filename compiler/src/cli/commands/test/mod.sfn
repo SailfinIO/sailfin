@@ -310,6 +310,30 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     // Variadic suite positionals: zero or more. Zero defaults to a single
     // "." suite below (the legacy `positional.length == 0` branch).
     let positional: string[] = positionals(matches, "suite");
+
+    // Every explicitly named suite path must exist before anything is
+    // compiled. `_collect_test_files_cmd` drops a non-existent `.sfn` path
+    // silently, so without this the only symptom would be an empty module
+    // set reaching the backend and failing the link on a missing `main` —
+    // reported as an ICE pointing at a `.ll` file, when the real problem is
+    // a typo in the argument (SFN-648). Reporting every missing path (not
+    // just the first) keeps a multi-suite invocation diagnosable in one run.
+    // Only user-supplied positionals are checked: the zero-positional
+    // branch below derives its suites from the workspace or the `.` default,
+    // which are not the caller's typo to report. Mirrors `cli/commands/fmt.sfn`
+    // `run()` and `check/engine.sfn` (SFN-643).
+    let mut missing_paths = 0;
+    let mut mpi = 0;
+    loop {
+        if mpi >= positional.length { break; }
+        if !fs.exists(positional[mpi]) {
+            print("error: path not found: " + positional[mpi]);
+            missing_paths += 1;
+        }
+        mpi += 1;
+    }
+    if missing_paths > 0 { return 1; }
+
     set_test_filters(name_filter, tag_filter);
 
     // Build the suite list. At a workspace root, zero positional args select
