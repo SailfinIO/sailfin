@@ -3,10 +3,11 @@
 // Module-global lowering: turns `let` bindings into LLVM globals plus optional init function.
 import { NativeBinding, NativeFunction, NativeInstruction } from "sfn/ir";
 
+import { unescape_string_literal } from "../expression_lowering/native/core_text";
 import { default_return_literal } from "../expressions_helpers";
 import { is_string_literal, normalise_number_literal } from "../expressions_literals";
 import { format_root_scope_id } from "../lifetime";
-import { empty_string_constant_set } from "../strings";
+import { empty_string_constant_set, escape_string_for_llvm } from "../strings";
 import { sanitize_symbol } from "../symbols";
 import { map_local_type } from "../type_mapping";
 import {
@@ -61,28 +62,6 @@ fn _binding_llvm_type(context: TypeContext, type_annotation: string) -> string {
     }
     if llvm_type.length == 0 { llvm_type = "double"; }
     return llvm_type;
-}
-
-// Strip surrounding quotes from a string literal (e.g., `"hello"` -> `hello`).
-fn _strip_string_quotes(s: string) -> string {
-    if s.length < 2 { return s; }
-    let first = s[0];
-    let last = s[s.length - 1];
-    let mut _is_quoted: boolean = false;
-    if first == "\"" {
-        if last == "\"" { _is_quoted = true; }
-    }
-    if _is_quoted {
-        let mut result: string = "";
-        let mut i: int = 1;
-        loop {
-            if i >= s.length - 1 { break; }
-            result = result + s[i];
-            i += 1;
-        }
-        return result;
-    }
-    return s;
 }
 
 // Render the constant LLVM initializer for a defining `extern var`
@@ -264,13 +243,24 @@ fn _process_one_binding(binding: NativeBinding, context: TypeContext, scope_id: 
         if binding.value != null {
             let str_val = trim_text(binding.value);
             if is_string_literal(str_val) {
-                let str_content = _strip_string_quotes(str_val);
+                // Same unescape -> re-escape round trip the local-expression
+                // path uses (`lower_string_literal` in
+                // expression_lowering/native/core_strings.sfn), so a module
+                // global and the identical literal written as a local hold the
+                // same bytes (SFN-905). Taking the raw source text instead
+                // both stored the escape sequence verbatim (`"\n"` became two
+                // bytes) and sized the array from the source length, which
+                // LLVM rejects outright whenever an escape is wider in source
+                // than in bytes (`"\\"` declared [3 x i8] against a [2 x i8]
+                // initializer).
+                let str_content = unescape_string_literal(str_val);
+                let str_escaped = escape_string_for_llvm(str_content);
                 let str_len = str_content.length + 1;
                 let str_const_name = "@str.global." + sanitize_symbol(name);
                 let line1 = str_const_name + " = private constant ["
                     + number_to_string(str_len)
                     + " x i8] c\""
-                    + str_content
+                    + str_escaped
                     + "\\00\"";
                 let line2 = global_name + " = " + global_qualifier
                     + " i8* getelementptr (["

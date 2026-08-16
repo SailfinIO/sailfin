@@ -1,0 +1,168 @@
+// End-to-end regression for SFN-905: a module-level string global must
+// hold the UNESCAPED bytes of its literal, and its `@str.global.*`
+// constant must declare an array length that matches the initializer.
+//
+// `_lower_module_globals`' string-literal branch used to take the raw
+// source text for both, which produced two distinct failures:
+//   1. Silent wrongness — `let NL: string = "\n";` held a backslash and
+//      an `n` (length 2), while the same literal as a local held one
+//      byte, so the two compared unequal. LLVM leaves a non-hex `\n`
+//      escape as a literal backslash, so the declared length happened to
+//      match and nothing warned.
+//   2. Hard build failure — `let BS: string = "\\";` emitted
+//      `@str.global.BS = private constant [3 x i8] c"\\\00"`, whose
+//      initializer LLVM sizes at 2 bytes against the declared 3, failing
+//      the clang link as an ICE.
+//
+// The fix applies the same `unescape_string_literal` ->
+// `escape_string_for_llvm` round trip the local-expression path uses. The
+// two tests below pin the two halves of that contract:
+//
+//   - the IR-shape test pins the emitted constant directly, so the
+//     declared array length is asserted rather than inferred, and a
+//     future regression that stopped taking this branch at all (falling
+//     through to the `i8* null` + module-init path, which re-lowers
+//     through expression lowering and would unescape correctly) fails
+//     here instead of passing silently;
+//   - the build-and-run test pins the observable invariant — module scope
+//     and local scope produce identical bytes for identical literals.
+//
+// Build/parallel-runner hygiene: the nested `sfn emit`/`sfn build` runs
+// take `clean_runner_env(nested_runner_scratch(...))` so the child does
+// not inherit the parent pool's orchestration keys (SFN-401), plus a
+// temp-dir build and an out-of-tree marker. See
+// `.claude/rules/no-bash-e2e.md` and `docs/conventions/e2e-tests.md`.
+import { find, starts_with } from "sfn/strings";
+import { clean_runner_env, nested_runner_scratch, with_tmp_dir } from "sfn/test";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+fn _fixture_path() -> string {
+    return "compiler/tests/e2e/fixtures/module_global_string_escape_probe.sfn";
+}
+
+fn _fixture_src() -> string ![io] { return fs.readFile(_fixture_path()); }
+
+// A child env with every pool-managed key stripped and SAILFIN_TEST_SCRATCH
+// re-pointed at a dir this test owns (SFN-401). Everything else is
+// inherited, so the nested clang/ld still find their toolchain — a
+// minimal PATH-only set links on Linux but fails on macOS (#1410).
+fn _child_env() -> string[] ![io] {
+    return clean_runner_env(nested_runner_scratch("sfn-905-string-escape"));
+}
+
+// A scratch dir this test owns, for the emitted `.ll` and the run marker.
+fn _scratch_dir() -> string ![io] {
+    let dir = nested_runner_scratch("sfn-905-string-escape");
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// The whole line of `ir` that starts (at a line boundary) with `prefix`,
+// or "" if there is none. Mirrors thread_local_lowering_test.sfn.
+fn _line_starting_with(ir: string, prefix: string) -> string {
+    let mut start = find(ir, prefix, 0);
+    loop {
+        if start < 0 { return ""; }
+        let at_line_start = start == 0 || substring(ir, start - 1, start) == "\n";
+        if at_line_start {
+            let nl = find(ir, "\n", start);
+            let mut end = nl;
+            if end < 0 { end = ir.length; }
+            return substring(ir, start, end);
+        }
+        start = find(ir, prefix, start + 1);
+    }
+    return "";
+}
+
+fn _emit_ir() -> string ![io] {
+    let out_path = _scratch_dir() + "/module_global_string_escape.ll";
+    if fs.exists(out_path) { fs.deleteFile(out_path); }
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", out_path, "llvm", _fixture_path()], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return ""; }
+    if !fs.exists(out_path) { return ""; }
+    return fs.readFile(out_path);
+}
+
+// Build the probe in a temp dir and run it. Stashes captured stdout to
+// `out_marker`; returns the run's exit code, or `-100` on build failure
+// (which is how the `[3 x i8]`/`[2 x i8]` mismatch surfaced).
+fn _build_and_run(out_marker: string) -> int ![io] {
+    return with_tmp_dir(fn (dir: string) -> int {
+        let srcpath = dir + "/probe.sfn";
+        fs.writeFile(srcpath, _fixture_src());
+        let binpath = dir + "/probe";
+        let build_exit = process.run_capture([_sfn_bin(), "build", "-o", binpath, srcpath], _child_env());
+        let _bo = process.capture_take_stdout();
+        let _be = process.capture_take_stderr();
+        if build_exit != 0 { return -100; }
+        let run_exit = process.run_capture([binpath], []);
+        let out = process.capture_take_stdout();
+        let _re = process.capture_take_stderr();
+        fs.writeFile(out_marker, out);
+        return run_exit;
+    });
+}
+
+test "lowering: module-level string globals emit unescaped LLVM constants (SFN-905)" ![io] {
+    let ir = _emit_ir();
+    assert ir.length > 0;
+
+    // Each escape occupies one byte in the constant, and the declared
+    // array length is that byte count + 1 for the trailing NUL. The old
+    // lowering emitted the raw source text at the raw source length, so
+    // `NL` read `[3 x i8] c"\n\00"` and `BS` declared `[3 x i8]` against
+    // a 2-byte initializer.
+    assert _line_starting_with(ir, "@str.global.NL ") == "@str.global.NL = private constant [2 x i8] c\"\\0A\\00\"";
+    assert _line_starting_with(ir, "@str.global.TAB ") == "@str.global.TAB = private constant [2 x i8] c\"\\09\\00\"";
+    assert _line_starting_with(ir, "@str.global.BS ") == "@str.global.BS = private constant [2 x i8] c\"\\5C\\00\"";
+    assert _line_starting_with(ir, "@str.global.QUOTE ") == "@str.global.QUOTE = private constant [2 x i8] c\"\\22\\00\"";
+    // Several escapes plus ordinary text in one literal.
+    assert _line_starting_with(ir, "@str.global.MIXED ") == "@str.global.MIXED = private constant [9 x i8] c\"a\\09b\\5Cc\\22d\\0A\\00\"";
+    // The non-ASCII body carries no escape, so its two UTF-8 bytes pass
+    // through raw; pin the declared length rather than the raw bytes.
+    assert starts_with(_line_starting_with(ir, "@str.global.ACCENT "), "@str.global.ACCENT = private constant [3 x i8] c\"");
+
+    // The globals themselves address the constants at the same declared
+    // length — a getelementptr disagreeing with the constant's type is
+    // exactly what LLVM rejected.
+    assert _line_starting_with(ir, "@global.BS ") == "@global.BS = internal global i8* getelementptr ([2 x i8], [2 x i8]* @str.global.BS, i32 0, i32 0)";
+}
+
+test "lowering: module-level and local string literals hold identical bytes (SFN-905)" ![io] {
+    let marker = _scratch_dir() + "/probe.out";
+    if fs.exists(marker) { fs.deleteFile(marker); }
+    let exit = _build_and_run(marker);
+    // Rejects the `-100` build-failure sentinel first: `"\\"` and `"\""`
+    // at module scope used to fail the clang link outright, so reaching
+    // a zero exit is itself half the regression.
+    assert exit == 0;
+    let out = fs.readFile(marker);
+    if fs.exists(marker) { fs.deleteFile(marker); }
+
+    // Each single-escape global is exactly one byte...
+    assert find(out, "nl_len=1;", 0) >= 0;
+    assert find(out, "tab_len=1;", 0) >= 0;
+    assert find(out, "bs_len=1;", 0) >= 0;
+    assert find(out, "quote_len=1;", 0) >= 0;
+    // ...the non-ASCII body keeps its two UTF-8 bytes...
+    assert find(out, "accent_len=2;", 0) >= 0;
+    // ...and the mixed literal is `a`, TAB, `b`, `\`, `c`, `"`, `d`, LF.
+    assert find(out, "mixed_len=8;", 0) >= 0;
+
+    // The invariant behind all of the above: module scope and local scope
+    // produce identical bytes for the identical literal.
+    assert find(out, "nl_eq=1;", 0) >= 0;
+    assert find(out, "tab_eq=1;", 0) >= 0;
+    assert find(out, "bs_eq=1;", 0) >= 0;
+    assert find(out, "quote_eq=1;", 0) >= 0;
+    assert find(out, "accent_eq=1;", 0) >= 0;
+    assert find(out, "mixed_eq=1;", 0) >= 0;
+}
