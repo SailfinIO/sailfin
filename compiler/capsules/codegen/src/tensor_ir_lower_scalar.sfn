@@ -41,6 +41,21 @@ struct TensorBindingLookup {
     value: TensorBuffer;
 }
 
+// Scalar-oracle invocation-contract failures. `sfn/ir`'s `_tensor_diag` is not
+// reachable from this capsule, so the duplication is structural; keeping it to
+// one site here confines the field-order discipline the GEP RCA calls for
+// (docs/rca/2026-04-18-reexport-diagnostic-gep.md).
+fn _ts_diag(message: string) -> LoweringDiagnostic {
+    return LoweringDiagnostic {
+        code: "E1021",
+        severity: "error",
+        message: message,
+        file_path: "",
+        span: null,
+        stage: "tensor"
+    };
+}
+
 fn _ts_empty_buffer() -> TensorBuffer {
     return TensorBuffer { shape: [], data: [] };
 }
@@ -455,10 +470,8 @@ fn execute_tensor_function_scalar(function: TensorFunction, inputs: TensorBuffer
     if inputs.length != function.parameter_types.length {
         return TensorExecuteResult {
             value: _ts_empty_buffer(),
-            diagnostics: [LoweringDiagnostic {
-                code: "E1021", severity: "error", message: function.name
-                    + ": scalar oracle input count does not match signature", file_path: "", span: null, stage: "tensor"
-            }]
+            diagnostics: [_ts_diag(function.name
+                + ": scalar oracle input count does not match signature")]
         };
     }
     let mut bindings: TensorBinding[] = [];
@@ -473,10 +486,8 @@ fn execute_tensor_function_scalar(function: TensorFunction, inputs: TensorBuffer
                 || value.data.length != tensor_shape_product(operation.result_type.shape) {
                 return TensorExecuteResult {
                     value: _ts_empty_buffer(),
-                    diagnostics: [LoweringDiagnostic {
-                        code: "E1021", severity: "error", message: function.name
-                            + ": scalar oracle input shape or size does not match signature", file_path: "", span: null, stage: "tensor"
-                    }]
+                    diagnostics: [_ts_diag(function.name
+                        + ": scalar oracle input shape or size does not match signature")]
                 };
             }
         } else if operation.kind.variant == "Add" || operation.kind.variant == "Multiply" {
@@ -502,10 +513,8 @@ fn execute_tensor_function_scalar(function: TensorFunction, inputs: TensorBuffer
     if !returned.found {
         return TensorExecuteResult {
             value: _ts_empty_buffer(),
-            diagnostics: [LoweringDiagnostic {
-                code: "E1021", severity: "error", message: function.name
-                    + ": scalar oracle return value is missing", file_path: "", span: null, stage: "tensor"
-            }]
+            diagnostics: [_ts_diag(function.name
+                + ": scalar oracle return value is missing")]
         };
     }
     return TensorExecuteResult { value: returned.value, diagnostics: [] };

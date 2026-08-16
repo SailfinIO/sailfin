@@ -20,7 +20,7 @@ import {
     lower_to_llvm_ir_from_text_with_provider_context,
     take_lowering_trace_buffer
 } from "sfn/codegen-llvm";
-import { TensorModule } from "sfn/ir";
+import { LoweringDiagnostic, TensorModule } from "sfn/ir";
 import { int_to_string } from "sfn/strings";
 
 import { empty_build_cache_config } from "../build_cache";
@@ -37,6 +37,21 @@ struct TensorMatmulBuildResult {
     binary_path: string;
     success: boolean;
     diagnostics: string[];
+}
+
+// The tensor lowering channel carries `LoweringDiagnostic` (SFN-537) while this
+// harness reports bare strings, as its six other failure branches do. Project
+// the messages rather than widening the result type, which preserves exactly
+// the strings this branch produced before the carrier changed.
+fn _tensor_diag_messages(diags: LoweringDiagnostic[]) -> string[] {
+    let mut out: string[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= diags.length { break; }
+        out.push(diags[index].message);
+        index += 1;
+    }
+    return out;
 }
 
 // A `.fn <name>( … ) … .endfn` block is self-terminating: `.fn` blocks do not
@@ -216,7 +231,7 @@ fn build_tensor_matmul_kernel_binary(kernel_module: TensorModule, kernel_fn_name
         return TensorMatmulBuildResult {
             binary_path: "",
             success: false,
-            diagnostics: lowered.diagnostics
+            diagnostics: _tensor_diag_messages(lowered.diagnostics)
         };
     }
     let kernel_block = _extract_fn_block(lowered.native_text, kernel_fn_name);
