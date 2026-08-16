@@ -109,19 +109,33 @@ fn append_missing_legacy_lowering_diags(diags: LoweringDiagnostic[], diagnostics
         if index >= diagnostics.length { break; }
         let legacy = diagnostics[index];
         if index_of(legacy, "[fatal]") >= 0 {
+            // Match on the canonical rendering as well as the raw string, so
+            // this stays idempotent: a caller may already have converted the
+            // same legacy line earlier (the instruction dispatch does, to
+            // attach a statement span — SFEP-0061 §2.2, Set C fill-down). A
+            // legacy fatal with no inline `[Exxxx]` re-renders *with* an
+            // inferred code, so exact-string matching alone would fail to
+            // recognize that conversion and re-add it as a duplicate.
+            let converted = diag_from_legacy_lowering_error(legacy);
+            let mut canonical = legacy;
+            if converted != null {
+                canonical = diag_to_legacy_string(converted);
+            }
             let mut found: boolean = false;
             let mut diag_index: int = 0;
             loop {
                 if diag_index >= out.length { break; }
-                if !matched[diag_index] && diag_to_legacy_string(out[diag_index]) == legacy {
-                    matched[diag_index] = true;
-                    found = true;
-                    break;
+                if !matched[diag_index] {
+                    let rendered = diag_to_legacy_string(out[diag_index]);
+                    if rendered == legacy || rendered == canonical {
+                        matched[diag_index] = true;
+                        found = true;
+                        break;
+                    }
                 }
                 diag_index += 1;
             }
             if !found {
-                let converted = diag_from_legacy_lowering_error(legacy);
                 if converted != null {
                     out.push(converted);
                     matched.push(true);
@@ -141,6 +155,21 @@ fn stamp_lowering_diag_file_paths(diags: LoweringDiagnostic[], file_path: string
         if out[index].file_path.length == 0 {
             out[index].file_path = file_path;
         }
+        index += 1;
+    }
+    return out;
+}
+
+// Fill an instruction span onto lowering diagnostics that do not carry one.
+// Producer-provided spans always win, so a more precise span set at the
+// producing site survives (SFEP-0061 §2.2, Set C fill-down).
+fn stamp_lowering_diag_spans(diags: LoweringDiagnostic[], span: NativeSourceSpan?) -> LoweringDiagnostic[] {
+    let mut out = diags;
+    if span == null { return out; }
+    let mut index: int = 0;
+    loop {
+        if index >= out.length { break; }
+        if out[index].span == null { out[index].span = span; }
         index += 1;
     }
     return out;

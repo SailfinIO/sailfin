@@ -85,6 +85,25 @@ test "emit-llvm: unresolved-callee return path fails closed (stdout)" ![io] {
     assert find(sout + serr, "[fatal]", 0) >= 0;
 }
 
+// SFN-539 (SFEP-0061 §2.2, Set C): the `cannot resolve return type` fatal is
+// produced inside expression lowering, which has no span parameter and no
+// field to carry one, so it used to render as bare text. The instruction
+// dispatch now stamps the enclosing statement's span onto every returned
+// diagnostic that lacks one, so it renders with `file:line:col`.
+test "emit-llvm: expression-lowering fatal carries the statement span" ![io] {
+    let src = _write_source("emit_llvm_539_span.sfn", _unresolved_source());
+    let exit = process.run_capture([_sfn_bin(), "emit", "llvm", src], process.environ());
+    let sout = process.capture_take_stdout();
+    let serr = process.capture_take_stderr();
+    let combined = sout + serr;
+    assert exit != 0;
+    // The coded, structured form of the expression-lowering fatal...
+    assert find(combined, "[E1007]", 0) >= 0;
+    // ...rendered against the enclosing `return` statement (line 2, column 25
+    // of `_unresolved_source()`), not span-less.
+    assert find(combined, "emit_llvm_539_span.sfn:2:25", 0) >= 0;
+}
+
 test "emit-llvm: valid return-path file still emits and exits 0" ![io] {
     let src = _write_source("emit_llvm_1954_valid.sfn", _valid_source());
     let out = _scratch_dir() + "/emit_llvm_1954_valid.ll";
