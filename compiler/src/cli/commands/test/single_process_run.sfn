@@ -432,10 +432,15 @@ fn _run_single_process(test_files: string[], file_suite_index: int[], suites_in:
         if results.length > 0 && results_explain {
             let packed = _emit_results_events(entries, results, failure, json_output, file_elapsed_ms as int, path);
             let res_failed = _trj_decode_failed(packed);
+            // SFN-815: declared skips are counted from the records alone,
+            // so they are known in human mode too — where `entries` is
+            // empty and the pass/fail totals come from the per-suite
+            // counters instead. Accumulate before the mode split, or the
+            // run-level `N skipped` line never sees them.
+            total_skipped += _trj_decode_skipped(packed);
             if json_output {
                 total_passed += _trj_decode_passed(packed);
                 total_failed += res_failed;
-                total_skipped += _trj_decode_skipped(packed);
             } else {
                 let rf_basename = _package_basename(path);
                 if res_failed > 0 {
