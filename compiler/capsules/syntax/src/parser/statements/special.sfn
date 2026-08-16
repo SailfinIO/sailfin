@@ -417,13 +417,18 @@ fn parse_assert_statement(parser: Parser) -> BlockStatementParseResult {
         text: "",
         statements: [fail_statement]
     };
-    let else_branch = ElseBranch { statement: null, body: else_block };
+    let else_branch = ElseBranch {
+        statement: null,
+        body: else_block,
+        span: source_span_from_tokens([assert_token])
+    };
 
     let statement = Statement.IfStatement {
         condition: condition,
         then_block: then_block,
         else_branch: else_branch,
-        decorators: []
+        decorators: [],
+        span: source_span_from_tokens([assert_token])
     };
     return BlockStatementParseResult {
         parser: current,

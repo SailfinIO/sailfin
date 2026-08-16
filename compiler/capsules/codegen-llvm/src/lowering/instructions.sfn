@@ -37,13 +37,16 @@ import {
 } from "../types";
 import {
     append_string,
+    diag_to_legacy_string,
     extend_diag_array,
     extend_string_array,
     first_span,
     index_of,
     merge_lowered_diags,
     number_to_string,
-    trim_text
+    outside_loop_diag,
+    trim_text,
+    unsupported_instruction_diag
 } from "../utils";
 import { lower_for_instruction } from "./instructions_for";
 import {
@@ -58,7 +61,7 @@ import { append_loop_context, last_loop_context, lower_loop_instruction } from "
 import { lower_match_instruction } from "./instructions_match";
 import { lower_routine_instruction } from "./instructions_routine";
 import { lower_throw_instruction, lower_try_instruction } from "./instructions_try";
-import { get_instruction_tag } from "./lowering_native_helpers";
+import { get_instruction_tag, get_unhandled_instruction_span } from "./lowering_native_helpers";
 import { find_last_label_in_tail } from "./phi";
 
 fn lower_instruction_range(function: NativeFunction, start_index: int, end: int, llvm_return: string, bindings: ParameterBinding[], locals: LocalBinding[], allocas: string[], lines: string[], temp_index: int, block_counter: int, next_local_id: int, next_region_id: int, functions: NativeFunction[], loop_stack: LoopContext[], try_stack: TryFrameContext[], context: TypeContext, scope_id: string, scope_depth: int, current_label: string) -> BlockLoweringResult {
@@ -366,7 +369,7 @@ fn lower_instruction_range(function: NativeFunction, start_index: int, end: int,
                     diagnostics.push(lowered.diagnostics[_ci0]);
                     _ci0 += 1;
                 }
-                diags = extend_diag_array(diags, lowered.diags);
+                diags = merge_lowered_diags(diags, lowered.diags, lowered.diagnostics, instruction.span);
                 collected_lifetime_regions = extend_lifetime_regions(collected_lifetime_regions, lowered.lifetime_regions);
                 current_lines = lowered.lines;
                 current_allocas = lowered.allocas;
@@ -394,7 +397,7 @@ fn lower_instruction_range(function: NativeFunction, start_index: int, end: int,
                     diagnostics.push(lowered.diagnostics[_ci1]);
                     _ci1 += 1;
                 }
-                diags = extend_diag_array(diags, lowered.diags);
+                diags = merge_lowered_diags(diags, lowered.diags, lowered.diagnostics, instruction.span);
                 collected_lifetime_regions = extend_lifetime_regions(collected_lifetime_regions, lowered.lifetime_regions);
                 current_lines = lowered.lines;
                 current_allocas = lowered.allocas;
@@ -450,7 +453,7 @@ fn lower_instruction_range(function: NativeFunction, start_index: int, end: int,
                     diagnostics.push(lowered.diagnostics[_ci2]);
                     _ci2 += 1;
                 }
-                diags = extend_diag_array(diags, lowered.diags);
+                diags = merge_lowered_diags(diags, lowered.diags, lowered.diagnostics, instruction.span);
                 collected_lifetime_regions = extend_lifetime_regions(collected_lifetime_regions, lowered.lifetime_regions);
                 current_lines = lowered.lines;
                 current_allocas = lowered.allocas;
@@ -521,7 +524,7 @@ fn lower_instruction_range(function: NativeFunction, start_index: int, end: int,
                     diagnostics.push(lowered.diagnostics[_ci5]);
                     _ci5 += 1;
                 }
-                diags = extend_diag_array(diags, lowered.diags);
+                diags = merge_lowered_diags(diags, lowered.diags, lowered.diagnostics, instruction.span);
                 collected_lifetime_regions = extend_lifetime_regions(collected_lifetime_regions, lowered.lifetime_regions);
                 current_lines = lowered.lines;
                 current_allocas = lowered.allocas;
@@ -542,9 +545,9 @@ fn lower_instruction_range(function: NativeFunction, start_index: int, end: int,
         if !_tag_handled {
             if _instr_tag == 10 {
                 if current_loop_stack.length == 0 {
-                    diagnostics.push("llvm lowering [fatal] [E1003]: `break` outside loop in `"
-                        + function.name
-                        + "`");
+                    let _bd = outside_loop_diag("break", function.name, instruction.span);
+                    diagnostics.push(diag_to_legacy_string(_bd));
+                    diags.push(_bd);
                 } else {
                     let loop_context = last_loop_context(current_loop_stack);
                     // M1.5.3 (issue #327): drop every scope between the
@@ -594,9 +597,9 @@ fn lower_instruction_range(function: NativeFunction, start_index: int, end: int,
         if !_tag_handled {
             if _instr_tag == 11 {
                 if current_loop_stack.length == 0 {
-                    diagnostics.push("llvm lowering [fatal] [E1003]: `continue` outside loop in `"
-                        + function.name
-                        + "`");
+                    let _cd = outside_loop_diag("continue", function.name, instruction.span);
+                    diagnostics.push(diag_to_legacy_string(_cd));
+                    diags.push(_cd);
                 } else {
                     let loop_context = last_loop_context(current_loop_stack);
                     // M1.5.3 (issue #327): drop every scope between the
@@ -670,7 +673,9 @@ fn lower_instruction_range(function: NativeFunction, start_index: int, end: int,
         }
         if !_tag_handled {
             if _instr_tag != 20 {
-                diagnostics.push(_unsupported_instruction_diagnostic(_instr_tag, function.name));
+                let _ud = unsupported_instruction_diag(_instr_tag, function.name, get_unhandled_instruction_span(function.instructions, index));
+                diagnostics.push(diag_to_legacy_string(_ud));
+                diags.push(_ud);
             }
         }
         // For terminated instructions (return, throw, break, continue), exit loop.
@@ -848,12 +853,4 @@ fn _parse_prologue_string(text: string, key: string) -> string {
         cursor += 1;
     }
     return value;
-}
-
-fn _unsupported_instruction_diagnostic(instruction_tag: int, function_name: string) -> string {
-    return "llvm lowering [fatal] [E1003]: unsupported instruction tag="
-        + number_to_string(instruction_tag)
-        + " in `"
-        + function_name
-        + "`";
 }

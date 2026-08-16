@@ -46,7 +46,9 @@ fn parse_match_statement(parser: Parser, decorators: Decorator[]) -> BlockStatem
             success: false
         };
     }
+    let match_token = parser_peek_raw(current);
     current = consume_keyword(current, "match");
+    let match_span = source_span_from_tokens([match_token]);
 
     let value_capture = collect_until(skip_trivia(current), ["{"]);
     current = value_capture.parser;
@@ -81,7 +83,8 @@ fn parse_match_statement(parser: Parser, decorators: Decorator[]) -> BlockStatem
     let statement = Statement.MatchStatement {
         expression: match_expression,
         cases: body_result.cases,
-        decorators: decorators
+        decorators: decorators,
+        span: match_span
     };
 
     return BlockStatementParseResult {
@@ -167,6 +170,7 @@ fn parse_match_case(parser: Parser) -> MatchCaseParseResult {
         };
     }
     current = pattern_capture.parser;
+    let case_span = source_span_from_tokens(pattern_capture.tokens);
     let split_tokens = split_match_case_tokens(pattern_capture.tokens);
     if split_tokens.pattern_tokens.length == 0 {
         return MatchCaseParseResult {
@@ -304,7 +308,8 @@ fn parse_match_case(parser: Parser) -> MatchCaseParseResult {
     let case = MatchCase {
         pattern: pattern_expression,
         guard: guard_expression,
-        body: body
+        body: body,
+        span: case_span
     };
 
     return MatchCaseParseResult {

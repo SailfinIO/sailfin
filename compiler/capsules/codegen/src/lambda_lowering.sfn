@@ -1143,14 +1143,16 @@ fn _rewrite_statement(ctx: LiftContext, statement: Statement) -> StatementRewrit
                 final_ctx = else_result.ctx;
                 new_else = ElseBranch {
                     statement: branch.statement,
-                    body: else_result.block
+                    body: else_result.block,
+                    span: branch.span
                 };
             } else if branch.statement != null {
                 let stmt_result = _rewrite_statement(final_ctx, branch.statement);
                 final_ctx = stmt_result.ctx;
                 new_else = ElseBranch {
                     statement: stmt_result.statement,
-                    body: branch.body
+                    body: branch.body,
+                    span: branch.span
                 };
             }
         }
@@ -1160,7 +1162,8 @@ fn _rewrite_statement(ctx: LiftContext, statement: Statement) -> StatementRewrit
                 condition: cond.expression,
                 then_block: then_result.block,
                 else_branch: new_else,
-                decorators: statement.decorators
+                decorators: statement.decorators,
+                span: statement.span
             }
         };
     }
@@ -1181,7 +1184,8 @@ fn _rewrite_statement(ctx: LiftContext, statement: Statement) -> StatementRewrit
             statement: Statement.ForStatement {
                 clause: statement.clause,
                 body: body_result.block,
-                decorators: statement.decorators
+                decorators: statement.decorators,
+                span: statement.span
             }
         };
     }
@@ -1191,7 +1195,8 @@ fn _rewrite_statement(ctx: LiftContext, statement: Statement) -> StatementRewrit
             ctx: body_result.ctx,
             statement: Statement.LoopStatement {
                 body: body_result.block,
-                decorators: statement.decorators
+                decorators: statement.decorators,
+                span: statement.span
             }
         };
     }
@@ -1251,7 +1256,7 @@ fn _rewrite_statement(ctx: LiftContext, statement: Statement) -> StatementRewrit
             let body_result = _rewrite_block(current_ctx, original_case.body);
             current_ctx = body_result.ctx;
             new_cases.push(MatchCase {
-                pattern: pattern_result.expression, guard: new_guard, body: body_result.block
+                pattern: pattern_result.expression, guard: new_guard, body: body_result.block, span: original_case.span
             });
             case_index += 1;
         }
@@ -1260,7 +1265,8 @@ fn _rewrite_statement(ctx: LiftContext, statement: Statement) -> StatementRewrit
             statement: Statement.MatchStatement {
                 expression: expr_result.expression,
                 cases: new_cases,
-                decorators: statement.decorators
+                decorators: statement.decorators,
+                span: statement.span
             }
         };
     }

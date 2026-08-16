@@ -21,25 +21,38 @@ enum NativeInstruction {
         span: NativeSourceSpan?;
         value_span: NativeSourceSpan?;
     },
-    If { condition: string },
-    Else,
+    // Control-flow directives carry the span of the statement that opened them
+    // (SFEP-0061 §2.2 Set B), so lowering can locate a `break` outside a loop or
+    // a zero-stride `.for`. `LoopVectorize` is span-less: `.loop vectorize` is
+    // emitted from a tensor-lowering text template rather than from an AST
+    // statement.
+    If {
+        condition: string;
+        span: NativeSourceSpan?;
+    },
+    Else { span: NativeSourceSpan? },
     EndIf,
     Routine,
     EndRoutine,
     For {
         target: string;
         iterable: string;
+        span: NativeSourceSpan?;
     },
     EndFor,
-    Loop,
+    Loop { span: NativeSourceSpan? },
     LoopVectorize,
     EndLoop,
-    Break,
-    Continue,
-    Match { expression: string },
+    Break { span: NativeSourceSpan? },
+    Continue { span: NativeSourceSpan? },
+    Match {
+        expression: string;
+        span: NativeSourceSpan?;
+    },
     Case {
         pattern: string;
         guard: string?;
+        span: NativeSourceSpan?;
     },
     EndMatch,
     Try,

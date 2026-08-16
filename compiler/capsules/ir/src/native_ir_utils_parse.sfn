@@ -68,16 +68,17 @@ export {
     parse_effect_list
 };
 
-fn parse_case_instruction(line: string) -> NativeInstruction {
+fn parse_case_instruction(line: string, span: NativeSourceSpan?) -> NativeInstruction {
     let body = trim_text(strip_prefix(line, ".case "));
     let split = split_case_components(body);
     return NativeInstruction.Case {
         pattern: split.pattern,
-        guard: split.guard
+        guard: split.guard,
+        span: span
     };
 }
 
-fn parse_inline_case_instruction(line: string) -> NativeInstruction[] {
+fn parse_inline_case_instruction(line: string, span: NativeSourceSpan?) -> NativeInstruction[] {
     let trimmed = trim_trailing_delimiters(trim_text(line));
     let arrow_index = index_of(trimmed, "=>");
     if arrow_index < 0 {
@@ -89,7 +90,7 @@ fn parse_inline_case_instruction(line: string) -> NativeInstruction[] {
     let split = split_case_components(head);
     let mut instructions: NativeInstruction[] = [];
     instructions.push(NativeInstruction.Case {
-        pattern: split.pattern, guard: split.guard
+        pattern: split.pattern, guard: split.guard, span: span
     });
     if remainder.length == 0 {
         instructions.push(NativeInstruction.Noop());

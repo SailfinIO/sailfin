@@ -596,7 +596,8 @@ fn replace_first_try_in_statement(statement: Statement, bind_name: string) -> Tr
                 condition: replaced.expression,
                 then_block: statement.then_block,
                 else_branch: statement.else_branch,
-                decorators: statement.decorators
+                decorators: statement.decorators,
+                span: statement.span
             },
             operand: replaced.operand,
             found: replaced.found
@@ -612,7 +613,8 @@ fn replace_first_try_in_statement(statement: Statement, bind_name: string) -> Tr
                     tokens: statement.clause.tokens
                 },
                 body: statement.body,
-                decorators: statement.decorators
+                decorators: statement.decorators,
+                span: statement.span
             },
             operand: replaced.operand,
             found: replaced.found
@@ -756,22 +758,30 @@ fn dt_build_match(statement: Statement, rest: Statement[], id: int) -> DtStmt {
         statements: [err_return]
     };
 
+    // Both arms are synthesized for the `?` desugar with no source `match` case
+    // behind them, so there is no span to carry. `null` is written explicitly:
+    // a struct literal that omits an optional field is refused at lowering
+    // (`E1002`, "refusing to fabricate a default"), unlike an enum-variant
+    // literal, which defaults it.
     let ok_case = MatchCase {
         pattern: Expression.Raw { text: "Result.Ok { value }", span: null },
         guard: null,
-        body: ok_result.block
+        body: ok_result.block,
+        span: null
     };
     let err_case = MatchCase {
         pattern: Expression.Raw { text: "Result.Err { error }", span: null },
         guard: null,
-        body: err_block
+        body: err_block,
+        span: null
     };
 
     return DtStmt {
         statement: Statement.MatchStatement {
             expression: replaced.operand,
             cases: [ok_case, err_case],
-            decorators: []
+            decorators: [],
+            span: null
         },
         next_id: ok_result.next_id
     };
@@ -788,7 +798,8 @@ fn dt_nested(statement: Statement, id: int) -> DtStmt {
                 condition: statement.condition,
                 then_block: then_result.block,
                 else_branch: else_result.else_branch,
-                decorators: statement.decorators
+                decorators: statement.decorators,
+                span: statement.span
             },
             next_id: else_result.next_id
         };
@@ -799,7 +810,8 @@ fn dt_nested(statement: Statement, id: int) -> DtStmt {
             statement: Statement.ForStatement {
                 clause: statement.clause,
                 body: body_result.block,
-                decorators: statement.decorators
+                decorators: statement.decorators,
+                span: statement.span
             },
             next_id: body_result.next_id
         };
@@ -809,7 +821,8 @@ fn dt_nested(statement: Statement, id: int) -> DtStmt {
         return DtStmt {
             statement: Statement.LoopStatement {
                 body: body_result.block,
-                decorators: statement.decorators
+                decorators: statement.decorators,
+                span: statement.span
             },
             next_id: body_result.next_id
         };
@@ -841,7 +854,8 @@ fn dt_nested(statement: Statement, id: int) -> DtStmt {
             statement: Statement.MatchStatement {
                 expression: statement.expression,
                 cases: cases_result.cases,
-                decorators: statement.decorators
+                decorators: statement.decorators,
+                span: statement.span
             },
             next_id: cases_result.next_id
         };
@@ -859,7 +873,8 @@ fn dt_else(else_branch: ElseBranch?, id: int) -> DtElse {
         return DtElse {
             else_branch: ElseBranch {
                 statement: else_branch.statement,
-                body: body_result.block
+                body: body_result.block,
+                span: else_branch.span
             },
             next_id: body_result.next_id
         };
@@ -872,7 +887,8 @@ fn dt_else(else_branch: ElseBranch?, id: int) -> DtElse {
     return DtElse {
         else_branch: ElseBranch {
             statement: nested_result.statement,
-            body: null
+            body: null,
+            span: else_branch.span
         },
         next_id: nested_result.next_id
     };
@@ -887,7 +903,7 @@ fn dt_cases(cases: MatchCase[], id: int) -> DtCases {
         let case = cases[index];
         let body_result = dt_block(case.body, next_id);
         out.push(MatchCase {
-            pattern: case.pattern, guard: case.guard, body: body_result.block
+            pattern: case.pattern, guard: case.guard, body: body_result.block, span: case.span
         });
         next_id = body_result.next_id;
         index += 1;
