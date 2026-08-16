@@ -596,7 +596,8 @@ fn replace_first_try_in_statement(statement: Statement, bind_name: string) -> Tr
                 condition: replaced.expression,
                 then_block: statement.then_block,
                 else_branch: statement.else_branch,
-                decorators: statement.decorators
+                decorators: statement.decorators,
+                span: statement.span
             },
             operand: replaced.operand,
             found: replaced.found
@@ -612,7 +613,8 @@ fn replace_first_try_in_statement(statement: Statement, bind_name: string) -> Tr
                     tokens: statement.clause.tokens
                 },
                 body: statement.body,
-                decorators: statement.decorators
+                decorators: statement.decorators,
+                span: statement.span
             },
             operand: replaced.operand,
             found: replaced.found
@@ -788,7 +790,8 @@ fn dt_nested(statement: Statement, id: int) -> DtStmt {
                 condition: statement.condition,
                 then_block: then_result.block,
                 else_branch: else_result.else_branch,
-                decorators: statement.decorators
+                decorators: statement.decorators,
+                span: statement.span
             },
             next_id: else_result.next_id
         };
@@ -799,7 +802,8 @@ fn dt_nested(statement: Statement, id: int) -> DtStmt {
             statement: Statement.ForStatement {
                 clause: statement.clause,
                 body: body_result.block,
-                decorators: statement.decorators
+                decorators: statement.decorators,
+                span: statement.span
             },
             next_id: body_result.next_id
         };
@@ -809,7 +813,8 @@ fn dt_nested(statement: Statement, id: int) -> DtStmt {
         return DtStmt {
             statement: Statement.LoopStatement {
                 body: body_result.block,
-                decorators: statement.decorators
+                decorators: statement.decorators,
+                span: statement.span
             },
             next_id: body_result.next_id
         };
@@ -841,7 +846,8 @@ fn dt_nested(statement: Statement, id: int) -> DtStmt {
             statement: Statement.MatchStatement {
                 expression: statement.expression,
                 cases: cases_result.cases,
-                decorators: statement.decorators
+                decorators: statement.decorators,
+                span: statement.span
             },
             next_id: cases_result.next_id
         };

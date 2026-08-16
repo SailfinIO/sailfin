@@ -1160,7 +1160,8 @@ fn _rewrite_statement(ctx: LiftContext, statement: Statement) -> StatementRewrit
                 condition: cond.expression,
                 then_block: then_result.block,
                 else_branch: new_else,
-                decorators: statement.decorators
+                decorators: statement.decorators,
+                span: statement.span
             }
         };
     }
@@ -1181,7 +1182,8 @@ fn _rewrite_statement(ctx: LiftContext, statement: Statement) -> StatementRewrit
             statement: Statement.ForStatement {
                 clause: statement.clause,
                 body: body_result.block,
-                decorators: statement.decorators
+                decorators: statement.decorators,
+                span: statement.span
             }
         };
     }
@@ -1191,7 +1193,8 @@ fn _rewrite_statement(ctx: LiftContext, statement: Statement) -> StatementRewrit
             ctx: body_result.ctx,
             statement: Statement.LoopStatement {
                 body: body_result.block,
-                decorators: statement.decorators
+                decorators: statement.decorators,
+                span: statement.span
             }
         };
     }
@@ -1260,7 +1263,8 @@ fn _rewrite_statement(ctx: LiftContext, statement: Statement) -> StatementRewrit
             statement: Statement.MatchStatement {
                 expression: expr_result.expression,
                 cases: new_cases,
-                decorators: statement.decorators
+                decorators: statement.decorators,
+                span: statement.span
             }
         };
     }
