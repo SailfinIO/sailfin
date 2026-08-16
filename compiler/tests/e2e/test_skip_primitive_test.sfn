@@ -1,0 +1,78 @@
+// End-to-end regression for SFN-815: the voluntary-skip primitive
+// (`skip(reason)` from `sfn/test`) reports as a declared skip distinct
+// from pass/fail, without aborting the rest of the file or the process
+// exit code.
+//
+// This drives a NESTED `sfn test --json` over a small fixture with three
+// tests — pass, skip, pass — so the JSON stream proves in one run: (1) the
+// skip is reported `"status":"skip"` with `"skip_kind":"declared"` and the
+// reason text; (2) the two passing tests still report `"status":"pass"`
+// with no `skip_kind` field at all (SFN-815 omits it for non-skip
+// statuses); (3) a declared skip does not abort the file the way a
+// failure would — the test after it still ran and passed; and (4) the
+// summary's `"skipped":1` agrees with the single skip event, and the
+// whole nested run still exits 0.
+//
+// Native e2e per `.claude/rules/no-bash-e2e.md`.
+import { find } from "sfn/strings";
+import { clean_runner_env, nested_runner_scratch, report_child_failure } from "sfn/test";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+// pass / declared skip / pass — the middle test is the primitive under
+// test; the third proves a skip does not unwind the whole file.
+fn _fixture_src() -> string {
+    return "import { skip } from \"sfn/test\";\n\n"
+        + "test \"first: passes normally\" {\n"
+        + "    assert 1 == 1;\n"
+        + "}\n\n"
+        + "test \"second: declares a skip\" ![io] {\n"
+        + "    skip(\"fixture-declared skip reason\");\n"
+        + "}\n\n"
+        + "test \"third: still runs and passes after the skip\" {\n"
+        + "    assert 2 == 2;\n"
+        + "}\n";
+}
+
+test "skip primitive: declared skip reports skip_kind, reason, and does not fail the run" ![io] {
+    let scratch = nested_runner_scratch("skip-primitive");
+    let child_env = clean_runner_env(scratch);
+    let fixture_path = scratch + "/skip_fixture_test.sfn";
+    fs.createDirectory(scratch, true);
+    fs.writeFile(fixture_path, _fixture_src());
+
+    let exit = process.run_capture([_sfn_bin(), "test", fixture_path, "--json"], child_env);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    report_child_failure("skip primitive nested run", exit, out, err);
+
+    // 1. A declared skip does not fail the run.
+    assert exit == 0;
+
+    // 2. The skip event carries both the skip status and the declared
+    // qualifier that distinguishes it from a runner-synthesized skip.
+    assert find(out, "\"status\":\"skip\"", 0) >= 0;
+    assert find(out, "\"skip_kind\":\"declared\"", 0) >= 0;
+
+    // 3. The skip reason is retrievable from the nested output.
+    assert find(out, "fixture-declared skip reason", 0) >= 0;
+
+    // 4. The summary agrees: exactly one skip.
+    assert find(out, "\"skipped\":1", 0) >= 0;
+
+    // 5. Both passing tests report pass, and a passing event carries no
+    // skip_kind field at all (SFN-815 omits it for non-skip statuses).
+    assert find(out, "\"name\":\"first: passes normally\",\"file\":", 0) >= 0;
+    assert find(out, "\"name\":\"third: still runs and passes after the skip\",\"file\":", 0) >= 0;
+    assert find(out, "\"passed\":2", 0) >= 0;
+
+    // render_test_event (test_runner_json.sfn) emits `skip_kind` only
+    // between `status` and `duration_ms`, and omits it entirely otherwise
+    // — so a pass event's `status` field is immediately followed by
+    // `duration_ms` with nothing in between when the field is absent.
+    assert find(out, "\"status\":\"pass\",\"duration_ms\":", 0) >= 0;
+}

@@ -75,6 +75,56 @@ The supported building blocks (all already shipped):
   **mandatory** under the parallel pool. See the dedicated section below
   for the why.
 
+## Gating a test that cannot run
+
+Use `skip(reason: string) -> void ![io]` (`sfn/test`,
+`capsules/sfn/test/src/skip.sfn`, SFN-815) whenever a test needs to bail out
+because a precondition isn't met — no network, a missing tool, an
+unsupported platform. It is the **required** way to gate a test; the old
+`if !cond { assert true; return; }` idiom is banned.
+
+That old idiom is not a lesser form of skip — it's a silent pass. The body
+runs, `assert true` succeeds, and the test is recorded **pass**, so a test
+that never actually exercised anything is indistinguishable from one that
+did. That gap is exactly what let SFN-807 (the system CA trust store never
+loading) survive a full release cycle:
+`compiler/tests/e2e/http_redirect_download_test.sfn` gated on a connectivity
+probe that, with TLS wholly broken, always returned empty — so the test that
+existed to catch the regression reported pass on every single run. It was
+dormant, not passing.
+
+```sfn
+test "download: follows a cross-host redirect" ![io, net] {
+    if !network_available() { skip("no outbound network"); }
+    // ...
+}
+```
+
+What to know before using it:
+
+1. **`skip()` does not return.** The synthesized test harness reports an
+   unconditional `pass` the moment a test body returns normally, so a skip
+   has to leave the body by unwinding rather than by falling through. Write
+   it as an early exit — `if <gate> { skip("reason"); }` — never as
+   `skip("reason"); return;`; any statement after the call is unreachable.
+2. **A declared skip never affects the exit code.** It does not increment
+   the harness failure counter, so a skipped run still exits 0.
+3. **Where it's honored**: from a test body, and from `before_each` (where
+   it gates the one test that hook is running for). `before_all`,
+   `after_each`, and `after_all` have no single test to attribute the skip
+   to, so calling it there is reported as a hook failure instead — don't use
+   it in those hooks.
+4. **How it surfaces**: the test is reported `skip`, not `pass`. Human mode
+   prints `[test] SKIP: <name> (<reason>)` per test plus a run-level
+   `[test] N skipped` line. `--json` mode emits `"status":"skip"` with a
+   `"skip_kind":"declared"` qualifier and the reason on the
+   `assertion.message` field.
+5. **`skip_kind` distinguishes voluntary from involuntary skips** in the
+   `--json` stream: `"declared"` means the body called `skip()`, versus the
+   runner-synthesized `"setup_failed"` (the file failed to compile/link),
+   `"after_failure"` (an earlier test in the file aborted the process), and
+   `"not_run"` (declared but no record produced).
+
 ## Build-and-run tests must isolate the build
 
 A test that spawns a full `sfn build` (compile a fixture to a binary and
@@ -178,9 +228,17 @@ migration):
   `sfn/strings` — e.g. `sfn_package_test.sfn` shells `tar -tzf` / `jq -r`,
   `llms_txt_sync_test.sfn` shells `readlink -f`. Guard with the shared
   `tool_present(tool)` / `first_present_tool(candidates)` helpers exported
-  from `sfn/test` (`capsules/sfn/test/src/tool_probe.sfn`, SFN-840) and
-  *skip* (`assert true`) when the tool is absent, rather than hand-rolling
-  a `--version` probe. `tool_present` is a faithful `command -v`: it
+  from `sfn/test` (`capsules/sfn/test/src/tool_probe.sfn`, SFN-840) and call
+  `skip("<tool> not on PATH")` when the tool is absent, rather than
+  hand-rolling a `--version` probe:
+
+  ```sfn
+  if !tool_present("jq") { skip("jq not on PATH"); }
+  ```
+
+  See "Gating a test that cannot run" above for why `skip()`, not
+  `assert true`, is the required form. `tool_present` is a faithful
+  `command -v`: it
   reports true once the binary resolves on `PATH` and executes — including
   a tool that runs but rejects `--version` — so a hand-rolled `exit == 0`
   check is *stricter* than `command -v` and silently skips coverage on

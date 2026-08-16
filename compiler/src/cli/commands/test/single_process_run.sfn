@@ -432,10 +432,15 @@ fn _run_single_process(test_files: string[], file_suite_index: int[], suites_in:
         if results.length > 0 && results_explain {
             let packed = _emit_results_events(entries, results, failure, json_output, file_elapsed_ms as int, path);
             let res_failed = _trj_decode_failed(packed);
+            // SFN-815: declared skips are counted from the records alone,
+            // so they are known in human mode too — where `entries` is
+            // empty and the pass/fail totals come from the per-suite
+            // counters instead. Accumulate before the mode split, or the
+            // run-level `N skipped` line never sees them.
+            total_skipped += _trj_decode_skipped(packed);
             if json_output {
                 total_passed += _trj_decode_passed(packed);
                 total_failed += res_failed;
-                total_skipped += _trj_decode_skipped(packed);
             } else {
                 let rf_basename = _package_basename(path);
                 if res_failed > 0 {
@@ -543,13 +548,22 @@ fn _run_single_process(test_files: string[], file_suite_index: int[], suites_in:
         if json_subframe { print.err(summary_line); } else {
             print(summary_line);
         }
-    } else if emit_banners {
-        // Per-suite banners. Suppressed in `--json` mode (the
-        // structured summary event is the source of truth there)
-        // and suppressed in legacy single-`.sfn`-file mode (direct
-        // single-file callers and the multi-file path's own children
-        // — `emit_banners` gates the call site).
-        _emit_suite_banners(suites);
+    } else {
+        // SFN-815: the run-level skip count in the human stream. Ungated
+        // by `emit_banners` — a single-file run reports its skips too, and
+        // a skip that only shows up under `--json` is the invisibility
+        // this primitive exists to remove.
+        if total_skipped > 0 {
+            print("[test] " + int_to_string(total_skipped) + " skipped");
+        }
+        if emit_banners {
+            // Per-suite banners. Suppressed in `--json` mode (the
+            // structured summary event is the source of truth there)
+            // and suppressed in legacy single-`.sfn`-file mode (direct
+            // single-file callers and the multi-file path's own children
+            // — `emit_banners` gates the call site).
+            _emit_suite_banners(suites);
+        }
     }
     exit_test_runner_mode();
     _cleanup_test_scratch(scratch_owned, scratch_root, overall_rc == 0);

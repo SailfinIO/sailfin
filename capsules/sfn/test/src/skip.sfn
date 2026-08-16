@@ -1,0 +1,45 @@
+// capsules/sfn/test/src/skip.sfn — Voluntary test skips (SFN-815).
+//
+// Before this existed, a test that wanted to gate itself on a missing
+// tool, an offline network, or an unsupported platform had exactly one
+// idiom available:
+//
+//     if !tool_present("jq") { assert true; return; }   // "skip"
+//
+// That body runs, asserts successfully, and is recorded `pass`. The
+// harness never learns a skip happened, so a dormant test is
+// indistinguishable from a passing one — the mechanism that let SFN-807
+// (system CA trust store never loads) survive a full release cycle behind
+// a connectivity probe that always returned empty.
+//
+// `skip(reason)` is the replacement: the test is recorded `skip` with the
+// reason attached, counted in the `skipped` total, and reported distinctly
+// from the runner-synthesized involuntary skips (setup failed, unreachable
+// after a failure, crashed before running).
+//
+// It does not return. The synthesized harness reports an unconditional
+// `pass` the moment a test body returns normally, so a skip must leave the
+// body by unwinding — `sfn_test_declare_skip` arms a pending-skip slot and
+// throws, and the harness's catch path turns that into the `skip` record
+// (`runtime/sfn/assert.sfn`). Statements after a `skip(...)` call are
+// therefore unreachable; write it as an early exit:
+//
+//     test "download: follows a cross-host redirect" ![io, net] {
+//         if !network_available() { skip("no outbound network"); }
+//         ...
+//     }
+//
+// A declared skip never increments the failure counter, so it cannot
+// change the process exit code.
+// No `![io]` on the extern itself (E0804): effects are enforced on the
+// wrapping adapter below, which declares them for both.
+extern fn sfn_test_declare_skip(reason_data: *u8, reason_len: i64) -> void;
+
+// Record the running test as skipped, with `reason` explaining why it did
+// not run, and abandon the rest of the test body. Honored from a test body
+// and from `before_each` (where it gates that test); from the remaining
+// lifecycle hooks there is no single test to attribute the skip to, so it
+// is reported as a hook failure instead.
+fn skip(reason: string) -> void ![io] {
+    sfn_test_declare_skip(reason as *u8, reason.length);
+}

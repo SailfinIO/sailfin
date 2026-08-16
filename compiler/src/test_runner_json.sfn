@@ -196,13 +196,32 @@ fn render_start_event(total: int) -> string {
 // share a file's binary process, the per-test slice is approximated
 // by even-distribution of the file's run time over its tests. See
 // the spec for the full schema.
-fn render_test_event(name: string, file: string, line: int, status: string, duration_ms: int, effects: string[], failure: AssertFailure) -> string {
+//
+// `skip_kind` (SFN-815) qualifies a `"skip"` status and is omitted for
+// every other status. It answers the question a bare `skip` count cannot:
+// did this test gate itself, or did it never get to run?
+//
+//   `"declared"`      — the body called `skip(reason)`; the reason is on
+//                       the attached `assertion.message`. Voluntary.
+//   `"setup_failed"`  — the file's compile/link failed, so no test ran.
+//   `"after_failure"` — an earlier test in the file failed and aborted
+//                       the process before this one was reached.
+//   `"not_run"`       — the test was declared but produced no record at
+//                       all (the process died before reaching it).
+//
+// The latter three are involuntary and synthesized by the runner. Adding
+// this optional field is non-breaking under the schema-version policy
+// above, so `TEST_RUNNER_JSON_SCHEMA_VERSION` is unchanged.
+fn render_test_event(name: string, file: string, line: int, status: string, duration_ms: int, effects: string[], failure: AssertFailure, skip_kind: string) -> string {
     let mut parts: string[] = [];
     parts.push(_trj_string_field("event", "test"));
     parts.push(_trj_string_field("name", name));
     parts.push(_trj_string_field("file", file));
     parts.push(_trj_number_field("line", line));
     parts.push(_trj_string_field("status", status));
+    if skip_kind.length > 0 {
+        parts.push(_trj_string_field("skip_kind", skip_kind));
+    }
     parts.push(_trj_number_field("duration_ms", duration_ms));
     parts.push(_trj_field("effects", _trj_render_string_array(effects)));
     if failure.present {

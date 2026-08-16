@@ -54,12 +54,17 @@ fn _emit_results_events(entries: TestEntry[], records: TestResultRecord[], failu
     // correct pass/fail counts driving the file banner + exit code. ---
     let mut passed: int = 0;
     let mut failed: int = 0;
+    // SFN-815: a body-declared `skip(reason)` arrives as a real `T` record
+    // with status `skip`. Without this branch it would land in the `else`
+    // and be counted a failure — the runner previously never saw a `skip`
+    // record because nothing could emit one.
+    let mut declared_skips: int = 0;
     let mut tr: int = 0;
     loop {
         if tr >= t_records.length { break; }
-        if strings_equal(t_records[tr].status, "pass") { passed += 1; } else {
-            failed += 1;
-        }
+        if strings_equal(t_records[tr].status, "pass") { passed += 1; } else if strings_equal(t_records[tr].status, "skip") {
+            declared_skips += 1;
+        } else { failed += 1; }
         tr += 1;
     }
     let mut hcount: int = 0;
@@ -72,9 +77,11 @@ fn _emit_results_events(entries: TestEntry[], records: TestResultRecord[], failu
     failed += hcount;
     // Tests with no record ran neither pass nor fail (a crash before
     // reaching them). Only knowable when `entries` is present (`--json`).
-    let mut skipped: int = 0;
+    // Declared skips are known from the records alone, so they count in
+    // both modes.
+    let mut skipped: int = declared_skips;
     if entries.length > t_records.length {
-        skipped = entries.length - t_records.length;
+        skipped += entries.length - t_records.length;
     }
     // --- Emission. JSON emits one event per entry (needs `entries`, only
     // present in `--json` mode); human mode prints a detail line per
@@ -87,11 +94,26 @@ fn _emit_results_events(entries: TestEntry[], records: TestResultRecord[], failu
             if idx >= entries.length { break; }
             let entry = entries[idx];
             let mut status: string = "skip";
+            // No record for this entry at all — the process died before
+            // reaching it. Involuntary, and distinct from a declared skip.
+            let mut skip_kind: string = "not_run";
             let mut event_failure: AssertFailure = _empty_assert_failure();
             if idx < t_records.length {
                 let r = t_records[idx];
-                if strings_equal(r.status, "pass") { status = "pass"; } else {
+                if strings_equal(r.status, "pass") {
+                    status = "pass";
+                    skip_kind = "";
+                } else if strings_equal(r.status, "skip") {
+                    // SFN-815: the body called `skip(reason)`. Carry the
+                    // reason on the assertion object so it is retrievable
+                    // from the event stream, the same way the involuntary
+                    // sites carry the runner's explanation.
+                    status = "skip";
+                    skip_kind = "declared";
+                    event_failure = _synthetic_assert_failure(test_path, r.message);
+                } else {
                     status = "fail";
+                    skip_kind = "";
                     if failure.present && strings_equal(failure.message, r.message) {
                         event_failure = failure;
                     } else {
@@ -99,7 +121,7 @@ fn _emit_results_events(entries: TestEntry[], records: TestResultRecord[], failu
                     }
                 }
             }
-            print(render_test_event(entry.name, entry.file, entry.line, status, per_test_ms, entry.effects, event_failure));
+            print(render_test_event(entry.name, entry.file, entry.line, status, per_test_ms, entry.effects, event_failure, skip_kind));
             idx += 1;
         }
     } else {
@@ -114,6 +136,11 @@ fn _emit_results_events(entries: TestEntry[], records: TestResultRecord[], failu
                 }
                 print("[test] FAIL: " + r.name + " (" + _format_assert_failure(test_path, ef)
                     + ")");
+            } else if strings_equal(r.status, "skip") {
+                // SFN-815: per-test pass lines are deliberately omitted as
+                // noise, but a skip is not noise — an unreported skip is
+                // exactly what made a dormant test read as a passing one.
+                print("[test] SKIP: " + r.name + " (" + r.message + ")");
             }
             tri += 1;
         }
@@ -283,12 +310,17 @@ fn _emit_file_test_events(entries: TestEntry[], outcome: TestFileOutcome) -> int
         if idx >= entries.length { break; }
         let entry = entries[idx];
         let mut status: string = "pass";
+        // SFN-815: every skip this function produces is involuntary — the
+        // file never built, or an earlier failure aborted the process. The
+        // qualifier keeps them distinguishable from a body-declared skip.
+        let mut skip_kind: string = "";
         let mut event_failure: AssertFailure = _empty_assert_failure();
         if strings_equal(outcome.kind, "pass") {
             status = "pass";
             passed += 1;
         } else if strings_equal(outcome.kind, "setup_failed") {
             status = "skip";
+            skip_kind = "setup_failed";
             event_failure = outcome.failure;
             skipped += 1;
         } else {
@@ -303,6 +335,7 @@ fn _emit_file_test_events(entries: TestEntry[], outcome: TestFileOutcome) -> int
                     failed += 1;
                 } else {
                     status = "skip";
+                    skip_kind = "after_failure";
                     skipped += 1;
                 }
             } else {
@@ -315,11 +348,12 @@ fn _emit_file_test_events(entries: TestEntry[], outcome: TestFileOutcome) -> int
                     failed += 1;
                 } else {
                     status = "skip";
+                    skip_kind = "after_failure";
                     skipped += 1;
                 }
             }
         }
-        let line = render_test_event(entry.name, entry.file, entry.line, status, per_test_ms, entry.effects, event_failure);
+        let line = render_test_event(entry.name, entry.file, entry.line, status, per_test_ms, entry.effects, event_failure, skip_kind);
         print(line);
         idx += 1;
     }
