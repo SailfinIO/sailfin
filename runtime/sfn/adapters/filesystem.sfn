@@ -344,14 +344,23 @@ extern fn sfn_str_from_codepoint(cp: i64) -> *u8;
 // `runtime/sfn/io.sfn::_sfn_is_immediate` (the runtime `sfn-source`
 // emit path does not resolve imported *defined* functions — see the
 // note in `clock.sfn`, SFN-635). Pointer math only — no syscall.
-// A near-null ASCII byte (`1..=0x7f`, plus NULL `0`) or a codepoint
-// shifted into the upper 32 bits (`cp << 32`, low 32 bits zero,
-// value non-zero) classifies as immediate; a real pointer is `> 0x7f`
-// with a non-zero low word, so it never matches.
+//
+// Only the near-null ASCII guard (`0..=0x7f`) remains. The former
+// "codepoint shifted into the upper 32 bits" clause
+// (`raw != 0 && (raw & 0xFFFFFFFF) == 0`) was unsound for the same
+// reason it was unsound in `io.sfn`: a real heap pointer can be
+// 4 GiB-aligned, and under concurrent-compile load the arena page base
+// occasionally lands on such a boundary (ASLR/VM churn). When it fired,
+// `_fs_decode_immediate` replaced a valid line buffer with a one-byte
+// `raw >> 32` codepoint, so `fs.writeLines` — the primary self-host IR
+// emit path below — wrote a lone control byte in place of a line of
+// LLVM IR, and `clang` rejected the module with "expected instruction
+// opcode". `io.sfn` had its copy of this clause deleted; this inlined
+// twin was missed and kept the fault alive on the IR writer.
+// See docs/rca/2026-07-23-nightly-selfhost-print-immediate-misclassification.md.
 fn _fs_is_immediate(data: *u8) -> bool {
     let raw: i64 = data as i64;
     if raw >= 0 && raw <= 127 { return true; }
-    if raw != 0 && (raw & 4294967295) == 0 { return true; }
     return false;
 }
 
