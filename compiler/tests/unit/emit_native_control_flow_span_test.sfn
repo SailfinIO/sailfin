@@ -1,0 +1,85 @@
+// Round-trip guard for control-flow source spans in `.sfn-asm` (SFN-536,
+// SFEP-0061 §2.2 Set B).
+//
+// `.span` used to be emitted only for `.let`, `eval`, `.param` and `ret`, so a
+// diagnostic raised while lowering a `break`, `.for` or `.if` had no location
+// to report. Emit and parse must stay in lockstep: a `.span` written before a
+// directive whose parse arm does not consume it makes the parser report
+// `unused span metadata before: ...` instead of attaching it.
+import { parse_native_artifact } from "sfn/ir";
+import { parse_program } from "sfn/syntax";
+
+import { emit_native_text_with_module_name } from "../../src/codegen_driver";
+import { index_of } from "../../src/string_utils";
+
+// Line numbers are asserted below, so the layout is load-bearing:
+//
+//  1  fn main() -> i32 {
+//  2      loop {
+//  3          if 1 > 0 { break; }
+//  4          continue;
+//  5      }
+//  6      let values: int[] = [1];
+//  7      for item in values {
+//  8          match item {
+//  9              _ => 0,
+// 10          }
+// 11      }
+// 12      return 0;
+// 13  }
+fn _control_flow_source() -> string {
+    return "fn main() -> i32 {\n    loop {\n        if 1 > 0 { break; }\n        continue;\n    }\n    let values: int[] = [1];\n    for item in values {\n        match item {\n            _ => 0,\n        }\n    }\n    return 0;\n}\n";
+}
+
+fn _emit_control_flow() -> string {
+    return emit_native_text_with_module_name(parse_program(_control_flow_source()), "test_control_flow_span");
+}
+
+// The parsed start line of the first instruction of `variant`. Returns -1 when
+// the instruction is present but span-less, and -2 when it never parsed at all,
+// so a regression reports which half of the round-trip broke.
+fn _span_line_of(text: string, variant: string) -> int {
+    let parsed = parse_native_artifact(text);
+    let mut function_index: int = 0;
+    loop {
+        if function_index >= parsed.functions.length { break; }
+        let instructions = parsed.functions[function_index].instructions;
+        let mut instruction_index: int = 0;
+        loop {
+            if instruction_index >= instructions.length { break; }
+            let instruction = instructions[instruction_index];
+            if instruction.variant == variant {
+                if instruction.span == null { return -1; }
+                return instruction.span.start_line;
+            }
+            instruction_index += 1;
+        }
+        function_index += 1;
+    }
+    return -2;
+}
+
+// `break` and `continue` land on different lines, so this also pins that each
+// statement carries its own span rather than one value stamped across the body.
+test "native IR: control-flow instructions round-trip a span through emit and parse" {
+    let text = _emit_control_flow();
+    assert _span_line_of(text, "Loop") == 2;
+    assert _span_line_of(text, "If") == 3;
+    assert _span_line_of(text, "Break") == 3;
+    assert _span_line_of(text, "Continue") == 4;
+    assert _span_line_of(text, "For") == 7;
+    assert _span_line_of(text, "Match") == 8;
+}
+
+// Guard for the lockstep failure mode: every `.span` the emitter writes must be
+// consumed by the parse arm that follows it.
+test "native IR: emitted control-flow spans leave no unused span metadata" {
+    let parsed = parse_native_artifact(_emit_control_flow());
+    let mut index: int = 0;
+    loop {
+        if index >= parsed.diagnostics.length { break; }
+        assert index_of(parsed.diagnostics[index], "unused span metadata") < 0;
+        assert index_of(parsed.diagnostics[index], "unused initializer span metadata") < 0;
+        index += 1;
+    }
+}

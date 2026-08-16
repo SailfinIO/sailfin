@@ -18,6 +18,7 @@ import {
     parser_advance_raw,
     parser_peek_raw,
     skip_trivia,
+    source_span_from_tokens,
     symbol_matches,
     token_slice,
     trim_token_edges
@@ -35,7 +36,9 @@ fn parse_for_statement(parser: Parser, decorators: Decorator[]) -> BlockStatemen
             success: false
         };
     }
+    let for_token = parser_peek_raw(current);
     current = consume_keyword(current, "for");
+    let for_span = source_span_from_tokens([for_token]);
 
     let clause_capture = collect_until(skip_trivia(current), ["{"]);
     current = clause_capture.parser;
@@ -99,7 +102,8 @@ fn parse_for_statement(parser: Parser, decorators: Decorator[]) -> BlockStatemen
     let statement = Statement.ForStatement {
         clause: clause,
         body: body,
-        decorators: decorators
+        decorators: decorators,
+        span: for_span
     };
 
     return BlockStatementParseResult {
@@ -125,7 +129,9 @@ fn parse_while_statement(parser: Parser, decorators: Decorator[]) -> BlockStatem
             success: false
         };
     }
+    let while_token = parser_peek_raw(current);
     current = consume_keyword(current, "while");
+    let while_span = source_span_from_tokens([while_token]);
 
     let condition_capture = collect_until(skip_trivia(current), ["{"]);
     current = condition_capture.parser;
@@ -154,10 +160,11 @@ fn parse_while_statement(parser: Parser, decorators: Decorator[]) -> BlockStatem
         then_block: Block {
             tokens: [],
             text: "{ break; }",
-            statements: [Statement.BreakStatement]
+            statements: [Statement.BreakStatement { span: while_span }]
         },
         else_branch: null,
-        decorators: []
+        decorators: [],
+        span: while_span
     };
     let mut statements: Statement[] = [guard];
     let mut body_index: int = 0;
@@ -181,7 +188,8 @@ fn parse_while_statement(parser: Parser, decorators: Decorator[]) -> BlockStatem
         parser: current,
         statement: Statement.LoopStatement {
             body: desugared_body,
-            decorators: decorators
+            decorators: decorators,
+            span: while_span
         },
         success: true
     };
@@ -197,7 +205,9 @@ fn parse_loop_statement(parser: Parser, decorators: Decorator[]) -> BlockStateme
             success: false
         };
     }
+    let loop_token = parser_peek_raw(current);
     current = consume_keyword(current, "loop");
+    let loop_span = source_span_from_tokens([loop_token]);
 
     let body_result = parse_block(current);
     if body_result.block.tokens.length == 0 {
@@ -217,7 +227,8 @@ fn parse_loop_statement(parser: Parser, decorators: Decorator[]) -> BlockStateme
 
     let statement = Statement.LoopStatement {
         body: body_result.block,
-        decorators: decorators
+        decorators: decorators,
+        span: loop_span
     };
 
     return BlockStatementParseResult {
@@ -288,7 +299,9 @@ fn parse_break_statement(parser: Parser) -> BlockStatementParseResult {
             success: false
         };
     }
+    let break_token = parser_peek_raw(current);
     current = consume_keyword(current, "break");
+    let break_span = source_span_from_tokens([break_token]);
 
     current = skip_trivia(current);
     let terminator = parser_peek_raw(current);
@@ -298,7 +311,7 @@ fn parse_break_statement(parser: Parser) -> BlockStatementParseResult {
 
     return BlockStatementParseResult {
         parser: current,
-        statement: Statement.BreakStatement(),
+        statement: Statement.BreakStatement { span: break_span },
         success: true
     };
 }
@@ -313,7 +326,9 @@ fn parse_continue_statement(parser: Parser) -> BlockStatementParseResult {
             success: false
         };
     }
+    let continue_token = parser_peek_raw(current);
     current = consume_keyword(current, "continue");
+    let continue_span = source_span_from_tokens([continue_token]);
 
     current = skip_trivia(current);
     let terminator = parser_peek_raw(current);
@@ -323,7 +338,7 @@ fn parse_continue_statement(parser: Parser) -> BlockStatementParseResult {
 
     return BlockStatementParseResult {
         parser: current,
-        statement: Statement.ContinueStatement(),
+        statement: Statement.ContinueStatement { span: continue_span },
         success: true
     };
 }
@@ -338,7 +353,9 @@ fn parse_if_statement(parser: Parser, decorators: Decorator[]) -> BlockStatement
             success: false
         };
     }
+    let if_token = parser_peek_raw(current);
     current = consume_keyword(current, "if");
+    let if_span = source_span_from_tokens([if_token]);
 
     let condition_capture = collect_until(skip_trivia(current), ["{"]);
     current = condition_capture.parser;
@@ -417,7 +434,8 @@ fn parse_if_statement(parser: Parser, decorators: Decorator[]) -> BlockStatement
         condition: condition_expression,
         then_block: then_block,
         else_branch: else_branch,
-        decorators: decorators
+        decorators: decorators,
+        span: if_span
     };
 
     return BlockStatementParseResult {

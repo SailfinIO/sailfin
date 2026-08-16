@@ -458,23 +458,31 @@ enum Statement {
         clause: ForClause;
         body: Block;
         decorators: Decorator[];
+        span: SourceSpan?;
     },
     LoopStatement {
         body: Block;
         decorators: Decorator[];
+        span: SourceSpan?;
     },
-    BreakStatement,
-    ContinueStatement,
+    BreakStatement {
+        span: SourceSpan?;
+    },
+    ContinueStatement {
+        span: SourceSpan?;
+    },
     MatchStatement {
         expression: Expression;
         cases: MatchCase[];
         decorators: Decorator[];
+        span: SourceSpan?;
     },
     IfStatement {
         condition: Expression;
         then_block: Block;
         else_branch: ElseBranch?;
         decorators: Decorator[];
+        span: SourceSpan?;
     },
     BlockStatement {
         body: Block;

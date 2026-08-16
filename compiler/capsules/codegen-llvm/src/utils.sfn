@@ -22,6 +22,15 @@ fn lowering_error_diag(code: string, message: string, span_in: NativeSourceSpan?
     };
 }
 
+// A `break` or `continue` that reached lowering with no enclosing loop
+// (SFN-528). The keyword is all that differs between the two sites, and the
+// span rides in from the instruction so the diagnostic can be located.
+fn outside_loop_diag(keyword: string, function_name: string, span_in: NativeSourceSpan?) -> LoweringDiagnostic {
+    return lowering_error_diag("E1003", "`" + keyword + "` outside loop in `"
+        + function_name
+        + "`", span_in);
+}
+
 // Preserve the provider's established textual compatibility stream while the
 // structured carrier crosses the IR boundary independently of analyzer data.
 fn diag_to_legacy_string(diag: LoweringDiagnostic) -> string {

@@ -21,7 +21,10 @@ fn _scratch_dir() -> string ![io] {
     return dir;
 }
 
-fn _assert_emit_fails_closed(name: string, source: string, diagnostic: string) ![io] {
+// The location half is SFN-536: the `NativeInstruction` for `break`/`continue`
+// now carries the statement's span, so `render_lowering_error_diag` can append
+// a `-->` line. Before that the diagnostic named only the enclosing function.
+fn _assert_emit_fails_closed(name: string, source: string, diagnostic: string, location: string) ![io] {
     let path = _scratch_dir() + "/" + name;
     if fs.exists(path) { fs.deleteFile(path); }
     fs.writeFile(path, source);
@@ -35,12 +38,14 @@ fn _assert_emit_fails_closed(name: string, source: string, diagnostic: string) !
     assert exit != 0;
     assert find(err, "llvm lowering [fatal] [E1003]:", 0) >= 0;
     assert find(err, diagnostic, 0) >= 0;
+    assert find(err, "-->", 0) >= 0;
+    assert find(err, location, 0) >= 0;
 }
 
 test "lowering instruction gate: break outside loop fails closed" ![io] {
-    _assert_emit_fails_closed("sfn528_break_outside_loop.sfn", "fn main() -> i32 {\n    let mut n: int = 1;\n    if n > 0 { break; }\n    return n;\n}\n", "`break` outside loop in `main`");
+    _assert_emit_fails_closed("sfn528_break_outside_loop.sfn", "fn main() -> i32 {\n    let mut n: int = 1;\n    if n > 0 { break; }\n    return n;\n}\n", "`break` outside loop in `main`", ":3:16");
 }
 
 test "lowering instruction gate: continue outside loop fails closed" ![io] {
-    _assert_emit_fails_closed("sfn528_continue_outside_loop.sfn", "fn main() -> i32 {\n    let mut n: int = 1;\n    if n > 0 { continue; }\n    return n;\n}\n", "`continue` outside loop in `main`");
+    _assert_emit_fails_closed("sfn528_continue_outside_loop.sfn", "fn main() -> i32 {\n    let mut n: int = 1;\n    if n > 0 { continue; }\n    return n;\n}\n", "`continue` outside loop in `main`", ":3:16");
 }
