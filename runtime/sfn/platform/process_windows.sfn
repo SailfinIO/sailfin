@@ -703,10 +703,11 @@ fn sfn_process_run_capture(argv: string[], env_flat: string[]) -> i64 ![io] {
     let _s2: i32 = SetHandleInformation(err_rd, 1, 0);
 
     // STARTUPINFOA (104 bytes): zeroed, then cb@0=104,
-    // dwFlags@60=STARTF_USESTDHANDLES(0x100=256), hStdInput@80,
+    // dwFlags@60=STARTF_USESTDHANDLES(0x100=256),
     // hStdOutput@88=out_wr, hStdError@96=err_wr. cb/dwFlags are 4-aligned
     // DWORDs written via the `PwDword` overlay; the three HANDLEs are
-    // 8-aligned and written with `atomic_store`.
+    // 8-aligned and written with `atomic_store`. hStdInput@80 is filled in
+    // after `pi` below, where its duplicate cannot leak past an early return.
     let si: *u8 = malloc(104 as usize);
     if si as i64 == 0 {
         let _c1: i32 = CloseHandle(out_rd);
@@ -723,8 +724,6 @@ fn sfn_process_run_capture(argv: string[], env_flat: string[]) -> i64 ![io] {
     cb_view.v = 104;
     let flags_view: *PwDword = (si as i64 + 60) as *PwDword;
     flags_view.v = 256;
-    let h_stdin: i64 = GetStdHandle(-10);
-    atomic_store((si as i64 + 80) as *i64, h_stdin);
     atomic_store((si as i64 + 88) as *i64, out_wr);
     atomic_store((si as i64 + 96) as *i64, err_wr);
 
@@ -743,12 +742,30 @@ fn sfn_process_run_capture(argv: string[], env_flat: string[]) -> i64 ![io] {
     }
     memset(pi, 0, 24 as usize);
 
+    // hStdInput@80: an inheritable duplicate of the parent's stdin, or `0`
+    // when there is none. `STARTF_USESTDHANDLES` is set above, and a handle
+    // named under it reaches the child as an *invalid* handle unless it is
+    // actually inheritable — `GetStdHandle` promises nothing about that, and
+    // reports "no handle"/"error" as `0`/`-1`, neither of which may be handed
+    // to a child either (SFN-572). `_pw_dup_inheritable` collapses both
+    // sentinels to `0`, which stores harmlessly. The stdout/stderr slots need
+    // no such treatment: they hold this function's own `CreatePipe` write
+    // ends, already inheritable via `sa`.
+    //
+    // Duplicated after `pi` so that no early return sits between it and the
+    // `_pw_close_dup` below — the discipline `sfn_process_run` uses.
+    let h_stdin: i64 = _pw_dup_inheritable(GetCurrentProcess(), GetStdHandle(-10));
+    atomic_store((si as i64 + 80) as *i64, h_stdin);
+
     // bInheritHandles=TRUE(1) so the child inherits the redirected write
     // ends; flags=0 (ANSI environment block).
     let ok: i32 = CreateProcessA(null, cmdline, null, null, 1, 0, env_block, null, si, pi);
     free(cmdline);
     free(env_block);
     free(sa);
+    // `CreateProcessA` has copied the named handles into the child, so the
+    // parent's duplicate is dead on both the success and the failure path.
+    _pw_close_dup(h_stdin);
     if ok == 0 {
         let _c1: i32 = CloseHandle(out_rd);
         let _c2: i32 = CloseHandle(out_wr);

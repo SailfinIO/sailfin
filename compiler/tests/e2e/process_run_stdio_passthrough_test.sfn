@@ -151,3 +151,26 @@ test "process.run: the Windows spawn keeps its inheritable-stdio wiring (SFN-546
     // ignored and the wiring above is dead code.
     assert contains(src, "flags_view.v = 256");
 }
+
+// The same Linux-runnable static form, for the sibling defect on the CAPTURE
+// path (SFN-572). `sfn_process_run_capture` also sets STARTF_USESTDHANDLES and
+// spawns with `bInheritHandles = 1`, so its `hStdInput` is under the same
+// inheritability precondition as the passthrough path above — but it once
+// stored a raw `GetStdHandle(-10)` there, which may be non-inheritable and may
+// be a `0`/`-1` sentinel. Nothing on a Linux run compiles the module, so this
+// is the only thing standing between that line and a silent return.
+test "process.run_capture: the Windows spawn duplicates stdin inheritable (SFN-572)" ![io] {
+    let src = fs.readFile("runtime/sfn/platform/process_windows.sfn");
+
+    // The capture path's stdin is an inheritable duplicate, not a raw handle.
+    // `sfn_process_run` passes its own `self_proc` local rather than calling
+    // `GetCurrentProcess()` inline, so this exact expression occurs only in
+    // `sfn_process_run_capture` — asserting it pins the fix to that function
+    // without slicing the source.
+    assert contains(src, "let h_stdin: i64 = _pw_dup_inheritable(GetCurrentProcess(), GetStdHandle(-10));");
+
+    // ...and the duplicate is released after the spawn rather than leaked.
+    // `h_stdin` is the capture path's name for it; the passthrough path's
+    // three duplicates are `h_in`/`h_out`/`h_err`.
+    assert contains(src, "_pw_close_dup(h_stdin)");
+}
