@@ -50,13 +50,17 @@
 // way, each with its own leak window:
 //
 //   - `_pw_spawn_impl` and `sfn_process_run_capture` close their
-//     child-side pipe ends immediately after the spawn returns, so the
+//     child-side pipe ends immediately after the spawn returns, so that
 //     window is exactly the CreatePipe→CloseHandle span of ONE call.
 //   - `sfn_process_run` (SFN-546) duplicates the parent's OWN standard
 //     handles inheritable, so its window is the
 //     `_pw_dup_inheritable`→`_pw_close_dup` span, and what leaks into a
 //     concurrent child is the parent's stdout/stderr rather than a pipe
 //     end.
+//   - `sfn_process_run_capture` is in BOTH categories (SFN-572): besides
+//     its pipe ends it holds an inheritable duplicate of the parent's
+//     stdin across `CreateProcessA`, so it carries a second, narrower
+//     `_pw_dup_inheritable`→`_pw_close_dup` window of the same shape.
 //
 // Two spawns overlapping IN DIFFERENT THREADS would cross-inherit: a
 // victim's pipe read end would never see EOF (its pipe would still have

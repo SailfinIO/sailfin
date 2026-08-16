@@ -17,7 +17,9 @@
 //
 // The POSIX leg is genuine coverage on every Linux run; the Windows leg only
 // executes on a Windows host, so this file does not go red-to-green on Linux.
-// The third test below is the Linux-runnable half of the SFN-546 guard.
+// The third and fourth tests below are the Linux-runnable halves of the
+// SFN-546 and SFN-572 guards respectively — the latter covering the same
+// defect class on `sfn_process_run_capture`'s stdin handle.
 //
 // The property is proved TRANSITIVELY: `sfn run` itself passes its child's
 // output through with `process.run` (`compiler/src/cli/commands/run.sfn`), so
@@ -173,4 +175,12 @@ test "process.run_capture: the Windows spawn duplicates stdin inheritable (SFN-5
     // `h_stdin` is the capture path's name for it; the passthrough path's
     // three duplicates are `h_in`/`h_out`/`h_err`.
     assert contains(src, "_pw_close_dup(h_stdin)");
+
+    // The release must also sit BEFORE the `ok == 0` bail, or it runs only
+    // on the spawn-failure path and leaks the duplicate on every successful
+    // spawn — which is the regression the presence check above would still
+    // pass. Pinning the two adjacent lines is what makes this a guard for
+    // *placement* rather than existence; the passthrough path's analogue is
+    // `_pw_close_dup(h_err);` before its own `if ok == 0 {`.
+    assert contains(src, "_pw_close_dup(h_stdin);\n    if ok == 0 {");
 }
