@@ -253,6 +253,7 @@ struct ObjectField {
 struct ElseBranch {
     statement: Statement?;
     body: Block?;
+    span: SourceSpan?;
 }
 
 struct ForClause {
@@ -265,6 +266,7 @@ struct MatchCase {
     pattern: Expression;
     guard: Expression?;
     body: Block;
+    span: SourceSpan?;
 }
 
 struct FieldDeclaration {

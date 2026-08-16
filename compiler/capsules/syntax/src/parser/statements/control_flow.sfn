@@ -383,6 +383,8 @@ fn parse_if_statement(parser: Parser, decorators: Decorator[]) -> BlockStatement
     current = skip_trivia(current);
     let mut else_branch: ElseBranch? = null;
     if identifier_matches(parser_peek_raw(current), "else") {
+        let else_token = parser_peek_raw(current);
+        let else_span = source_span_from_tokens([else_token]);
         current = consume_keyword(current, "else");
         current = skip_trivia(current);
         let next_token = parser_peek_raw(current);
@@ -405,7 +407,8 @@ fn parse_if_statement(parser: Parser, decorators: Decorator[]) -> BlockStatement
             current = nested_result.parser;
             else_branch = ElseBranch {
                 statement: nested_result.statement,
-                body: null
+                body: null,
+                span: else_span
             };
         } else {
             let else_result = parse_block(current);
@@ -419,7 +422,8 @@ fn parse_if_statement(parser: Parser, decorators: Decorator[]) -> BlockStatement
             current = else_result.parser;
             else_branch = ElseBranch {
                 statement: null,
-                body: else_result.block
+                body: else_result.block,
+                span: else_span
             };
         }
 

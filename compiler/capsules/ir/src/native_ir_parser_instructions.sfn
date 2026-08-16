@@ -224,8 +224,8 @@ fn parse_instruction(line: string, span: NativeSourceSpan?, value_span: NativeSo
     }
     if line == ".else" {
         return InstructionParseResult {
-            instructions: [NativeInstruction.Else()],
-            span_consumed: false,
+            instructions: [NativeInstruction.Else { span: span }],
+            span_consumed: true,
             value_span_consumed: false
         };
     }
@@ -328,8 +328,8 @@ fn parse_instruction(line: string, span: NativeSourceSpan?, value_span: NativeSo
     }
     if starts_with(line, ".case ") {
         return InstructionParseResult {
-            instructions: [parse_case_instruction(line)],
-            span_consumed: false,
+            instructions: [parse_case_instruction(line, span)],
+            span_consumed: true,
             value_span_consumed: false
         };
     }
@@ -461,8 +461,8 @@ fn parse_instruction(line: string, span: NativeSourceSpan?, value_span: NativeSo
     }
     if index_of(line, "=>") >= 0 {
         return InstructionParseResult {
-            instructions: parse_inline_case_instruction(line),
-            span_consumed: false,
+            instructions: parse_inline_case_instruction(line, span),
+            span_consumed: true,
             value_span_consumed: false
         };
     }

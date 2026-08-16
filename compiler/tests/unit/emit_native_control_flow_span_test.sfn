@@ -71,10 +71,55 @@ test "native IR: control-flow instructions round-trip a span through emit and pa
     assert _span_line_of(text, "Match") == 8;
 }
 
+// `.else` takes the `else` keyword's own span, not the `if`'s, so an else-arm
+// diagnostic points at the arm that produced it.
+//
+//  1  fn cover(item: int) -> i32 {
+//  2      if item > 0 {
+//  3          return 1;
+//  4      } else {
+//  5          return 2;
+//  6      }
+//  7  }
+fn _else_source() -> string {
+    return "fn cover(item: int) -> i32 {\n    if item > 0 {\n        return 1;\n    } else {\n        return 2;\n    }\n}\n";
+}
+
+// The block `.case` form. A single-statement body would take the inline
+// `pattern => body,` path instead, so the body carries two statements.
+//
+//  1  fn cover(item: int) -> i32 {
+//  2      match item {
+//  3          1 => { let x: int = 1; return x; }
+//  4      }
+//  5      return 0;
+//  6  }
+fn _case_source() -> string {
+    return "fn cover(item: int) -> i32 {\n    match item {\n        1 => { let x: int = 1; return x; }\n    }\n    return 0;\n}\n";
+}
+
+test "native IR: an else branch carries its own keyword span" {
+    let text = emit_native_text_with_module_name(parse_program(_else_source()), "test_else_span");
+    assert _span_line_of(text, "If") == 2;
+    assert _span_line_of(text, "Else") == 4;
+}
+
+test "native IR: a match case carries the span of its pattern" {
+    let text = emit_native_text_with_module_name(parse_program(_case_source()), "test_case_span");
+    assert _span_line_of(text, "Match") == 2;
+    assert _span_line_of(text, "Case") == 3;
+}
+
 // Guard for the lockstep failure mode: every `.span` the emitter writes must be
 // consumed by the parse arm that follows it.
 test "native IR: emitted control-flow spans leave no unused span metadata" {
-    let parsed = parse_native_artifact(_emit_control_flow());
+    _assert_no_unused_span_metadata(_emit_control_flow());
+    _assert_no_unused_span_metadata(emit_native_text_with_module_name(parse_program(_else_source()), "test_else_span"));
+    _assert_no_unused_span_metadata(emit_native_text_with_module_name(parse_program(_case_source()), "test_case_span"));
+}
+
+fn _assert_no_unused_span_metadata(text: string) {
+    let parsed = parse_native_artifact(text);
     let mut index: int = 0;
     loop {
         if index >= parsed.diagnostics.length { break; }

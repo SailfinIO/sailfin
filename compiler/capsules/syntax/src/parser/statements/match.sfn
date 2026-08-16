@@ -170,6 +170,7 @@ fn parse_match_case(parser: Parser) -> MatchCaseParseResult {
         };
     }
     current = pattern_capture.parser;
+    let case_span = source_span_from_tokens(pattern_capture.tokens);
     let split_tokens = split_match_case_tokens(pattern_capture.tokens);
     if split_tokens.pattern_tokens.length == 0 {
         return MatchCaseParseResult {
@@ -307,7 +308,8 @@ fn parse_match_case(parser: Parser) -> MatchCaseParseResult {
     let case = MatchCase {
         pattern: pattern_expression,
         guard: guard_expression,
-        body: body
+        body: body,
+        span: case_span
     };
 
     return MatchCaseParseResult {

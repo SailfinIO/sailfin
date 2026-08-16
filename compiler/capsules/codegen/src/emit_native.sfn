@@ -705,7 +705,8 @@ fn emit_match_case(state: NativeState, case: MatchCase) -> NativeState {
     let inline_statement = select_inline_match_case_statement(case.body);
     if inline_statement == null {
         let mut line: string = ".case " + format_match_case_head(case);
-        let mut current = state_emit_line(state, line);
+        let mut current = emit_span_if_present(state, case.span);
+        current = state_emit_line(current, line);
         current = state_push_indent(current);
         current = emit_block(current, case.body);
         current = state_pop_indent(current);
@@ -725,7 +726,8 @@ fn select_inline_match_case_statement(block: Block) -> Statement? {
 fn emit_inline_match_case(state: NativeState, case: MatchCase, statement: Statement) -> NativeState {
     let mut line: string = format_match_case_head(case) + " => "
         + format_inline_case_body(statement);
-    return state_emit_line(state, line + ",");
+    let current = emit_span_if_present(state, case.span);
+    return state_emit_line(current, line + ",");
 }
 
 fn emit_if(state: NativeState, statement: Statement) -> NativeState {
@@ -742,7 +744,8 @@ fn emit_if(state: NativeState, statement: Statement) -> NativeState {
 }
 
 fn emit_else_branch(state: NativeState, branch: ElseBranch) -> NativeState {
-    let mut current = state_emit_line(state, ".else");
+    let mut current = emit_span_if_present(state, branch.span);
+    current = state_emit_line(current, ".else");
     current = state_push_indent(current);
     let body = branch.body;
     if body == null {

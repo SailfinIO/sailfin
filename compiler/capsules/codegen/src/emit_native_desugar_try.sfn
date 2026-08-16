@@ -758,15 +758,22 @@ fn dt_build_match(statement: Statement, rest: Statement[], id: int) -> DtStmt {
         statements: [err_return]
     };
 
+    // Both arms are synthesized for the `?` desugar with no source `match` case
+    // behind them, so there is no span to carry. `null` is written explicitly:
+    // a struct literal that omits an optional field is refused at lowering
+    // (`E1002`, "refusing to fabricate a default"), unlike an enum-variant
+    // literal, which defaults it.
     let ok_case = MatchCase {
         pattern: Expression.Raw { text: "Result.Ok { value }", span: null },
         guard: null,
-        body: ok_result.block
+        body: ok_result.block,
+        span: null
     };
     let err_case = MatchCase {
         pattern: Expression.Raw { text: "Result.Err { error }", span: null },
         guard: null,
-        body: err_block
+        body: err_block,
+        span: null
     };
 
     return DtStmt {
@@ -865,7 +872,8 @@ fn dt_else(else_branch: ElseBranch?, id: int) -> DtElse {
         return DtElse {
             else_branch: ElseBranch {
                 statement: else_branch.statement,
-                body: body_result.block
+                body: body_result.block,
+                span: else_branch.span
             },
             next_id: body_result.next_id
         };
@@ -878,7 +886,8 @@ fn dt_else(else_branch: ElseBranch?, id: int) -> DtElse {
     return DtElse {
         else_branch: ElseBranch {
             statement: nested_result.statement,
-            body: null
+            body: null,
+            span: else_branch.span
         },
         next_id: nested_result.next_id
     };
@@ -893,7 +902,7 @@ fn dt_cases(cases: MatchCase[], id: int) -> DtCases {
         let case = cases[index];
         let body_result = dt_block(case.body, next_id);
         out.push(MatchCase {
-            pattern: case.pattern, guard: case.guard, body: body_result.block
+            pattern: case.pattern, guard: case.guard, body: body_result.block, span: case.span
         });
         next_id = body_result.next_id;
         index += 1;

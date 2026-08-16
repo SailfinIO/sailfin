@@ -8,6 +8,7 @@ import {
     NativeFunction,
     NativeParameter,
     NativeInstruction,
+    NativeSourceSpan,
     NativeStruct,
     NativeStructField,
     NativeStructLayout,
@@ -259,7 +260,7 @@ fn get_instruction_tag(instructions: NativeInstruction[], idx: int) -> int {
             value_span
         } => return 2,
         NativeInstruction.If { condition, span } => return 3,
-        NativeInstruction.Else => return 4,
+        NativeInstruction.Else { span } => return 4,
         NativeInstruction.EndIf => return 5,
         NativeInstruction.For { target, iterable, span } => return 6,
         NativeInstruction.EndFor => return 7,
@@ -269,7 +270,7 @@ fn get_instruction_tag(instructions: NativeInstruction[], idx: int) -> int {
         NativeInstruction.Break { span } => return 10,
         NativeInstruction.Continue { span } => return 11,
         NativeInstruction.Match { expression, span } => return 12,
-        NativeInstruction.Case { pattern, guard } => return 13,
+        NativeInstruction.Case { pattern, guard, span } => return 13,
         NativeInstruction.EndMatch => return 14,
         NativeInstruction.Try => return 15,
         NativeInstruction.Catch { name } => return 16,
@@ -319,6 +320,19 @@ fn get_instruction_let_value(instructions: NativeInstruction[], idx: int) -> str
 // that fails to dominate the load at the function's return merge (the LLVM
 // verifier rejects it at `llvm-link` time even though per-module `clang`
 // accepts it). The tag-guarded direct accesses avoid that latent codegen bug.
+// The span for an instruction `lower_instruction_range` has no arm for.
+// `Case` (13) is the only span-bearing tag that can reach that catch-all —
+// every other one is dispatched earlier — so it is the only tag worth reading
+// here. The remaining tags that land there (Catch 16, Finally 17, EndTry 18,
+// Unknown 21) declare no `span`, and reading one off them would take whatever
+// the variant layout puts at that offset. Tag 8 is deliberately absent for the
+// same reason: `Loop` and `LoopVectorize` share it and only `Loop` has a span.
+fn get_unhandled_instruction_span(instructions: NativeInstruction[], idx: int) -> NativeSourceSpan? {
+    let tag = get_instruction_tag(instructions, idx);
+    if tag == 13 { return instructions[idx].span; }
+    return null;
+}
+
 fn get_instruction_scan_text(instructions: NativeInstruction[], idx: int) -> string {
     let tag = get_instruction_tag(instructions, idx);
     let instr = instructions[idx];

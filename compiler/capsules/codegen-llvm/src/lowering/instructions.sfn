@@ -45,7 +45,8 @@ import {
     merge_lowered_diags,
     number_to_string,
     outside_loop_diag,
-    trim_text
+    trim_text,
+    unsupported_instruction_diag
 } from "../utils";
 import { lower_for_instruction } from "./instructions_for";
 import {
@@ -60,7 +61,7 @@ import { append_loop_context, last_loop_context, lower_loop_instruction } from "
 import { lower_match_instruction } from "./instructions_match";
 import { lower_routine_instruction } from "./instructions_routine";
 import { lower_throw_instruction, lower_try_instruction } from "./instructions_try";
-import { get_instruction_tag } from "./lowering_native_helpers";
+import { get_instruction_tag, get_unhandled_instruction_span } from "./lowering_native_helpers";
 import { find_last_label_in_tail } from "./phi";
 
 fn lower_instruction_range(function: NativeFunction, start_index: int, end: int, llvm_return: string, bindings: ParameterBinding[], locals: LocalBinding[], allocas: string[], lines: string[], temp_index: int, block_counter: int, next_local_id: int, next_region_id: int, functions: NativeFunction[], loop_stack: LoopContext[], try_stack: TryFrameContext[], context: TypeContext, scope_id: string, scope_depth: int, current_label: string) -> BlockLoweringResult {
@@ -672,7 +673,9 @@ fn lower_instruction_range(function: NativeFunction, start_index: int, end: int,
         }
         if !_tag_handled {
             if _instr_tag != 20 {
-                diagnostics.push(_unsupported_instruction_diagnostic(_instr_tag, function.name));
+                let _ud = unsupported_instruction_diag(_instr_tag, function.name, get_unhandled_instruction_span(function.instructions, index));
+                diagnostics.push(diag_to_legacy_string(_ud));
+                diags.push(_ud);
             }
         }
         // For terminated instructions (return, throw, break, continue), exit loop.
@@ -850,12 +853,4 @@ fn _parse_prologue_string(text: string, key: string) -> string {
         cursor += 1;
     }
     return value;
-}
-
-fn _unsupported_instruction_diagnostic(instruction_tag: int, function_name: string) -> string {
-    return "llvm lowering [fatal] [E1003]: unsupported instruction tag="
-        + number_to_string(instruction_tag)
-        + " in `"
-        + function_name
-        + "`";
 }

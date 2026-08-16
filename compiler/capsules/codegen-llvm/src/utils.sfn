@@ -31,6 +31,17 @@ fn outside_loop_diag(keyword: string, function_name: string, span_in: NativeSour
         + "`", span_in);
 }
 
+// An instruction tag `lower_instruction_range` has no arm for (SFN-528). The
+// tag and function name are the only things that make the gap diagnosable, so
+// both stay in the message.
+fn unsupported_instruction_diag(instruction_tag: int, function_name: string, span_in: NativeSourceSpan?) -> LoweringDiagnostic {
+    return lowering_error_diag("E1003", "unsupported instruction tag="
+        + number_to_string(instruction_tag)
+        + " in `"
+        + function_name
+        + "`", span_in);
+}
+
 // Preserve the provider's established textual compatibility stream while the
 // structured carrier crosses the IR boundary independently of analyzer data.
 fn diag_to_legacy_string(diag: LoweringDiagnostic) -> string {
