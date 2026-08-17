@@ -163,7 +163,8 @@ started, normally because it hit its `timeout-minutes` cap. There is no
   when it occurs at the job's wall-time cap, it is a `timeout-minutes`
   expiry. The cold full suite on
   the 4-core `ubuntu-24.04` runner has repeatedly crept toward the cap
-  (run-1010 overran the old 60-min cap; PR #2492 raised it to 90 min). If
+  (run-1010 overran the old 60-min cap; PR #2492 raised it to 90 min, and
+  PR #2851 to the current 180). If
   the warm step is still running when the job is killed, the complete
   `Save test-bin cache for PR CI` step never lands; since SFN-797 the
   `Save partial test-bin cache` step publishes what was built under a
