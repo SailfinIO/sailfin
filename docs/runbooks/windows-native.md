@@ -18,7 +18,7 @@ It proves two things in sequence:
 2. **The self-host fixed point** (M8/SFN-54) — the native compiler rebuilds
    itself twice, and pass-2 must be byte-identical to pass-1.
 
-When either job fails or `native-build` is cancelled after it started (a
+When either job fails, or either job is cancelled after it started (a
 `timeout-minutes` expiry, not an expected concurrency supersede — see
 §2 below), the `notify-failure` job opens a deduplicated regression issue
 labeled `area:architecture` and `windows-native-regression`. The issue title
@@ -71,25 +71,28 @@ compare flaky at PE byte 129 regardless of genuine compiler determinism.
 
 ## 2. Cancelled vs. failed
 
-`native-build` can end up `cancelled` for two different reasons, and only
-one of them is a regression:
+Either `cross-seed` or `native-build` can end up `cancelled`, for two
+different reasons, and only one of them is a regression:
 
 - **Expected concurrency coalescing.** `push: main` and `workflow_dispatch`
   share one concurrency group per event type with `cancel-in-progress:
   true` (SFN-55 review A1) — landing a merge every ~20 minutes against a
   ~45-60 minute job means an older in-flight `push` run is routinely
-  cancelled by a newer one. `notify-failure`'s classify step checks whether
-  a newer run of the same event type has since started; if so, it skips
+  cancelled by a newer one, taking both jobs down together. `notify-failure`'s
+  classify step checks whether a newer run of the same event type (and, for
+  `workflow_dispatch`, the same ref) has since started; if so, it skips
   notification.
-- **A genuine timeout.** `native-build` carries a 90-minute job timeout and
-  the fixed-point step its own 30-minute step timeout. If this run is still
-  the newest of its event type and shows `cancelled`, it hit one of those
-  caps. Check the job log for where it stopped — a heartbeat gap in the
-  Stage 2 build step, or a fixed-point pass still running past 30 minutes —
-  and treat it as a build-setup or fixed-point regression respectively
-  (SFN-55 §2's measured budget: ~13m30s build+boot+ABI, ~14m27s for both
-  fixed-point passes; a run running meaningfully longer than that on a
-  warm-cache run is itself the finding).
+- **A genuine timeout.** `cross-seed` and `native-build` each carry a
+  90-minute job timeout, and the fixed-point step inside `native-build` its
+  own 30-minute step timeout — a step-level timeout surfaces as `failure`,
+  not `cancelled` (see §1's "either job fails"). If this run is still the
+  newest of its event type/ref and shows `cancelled`, it hit one of the
+  job-level caps. Check the job log for where it stopped — the Linux
+  self-host/`make ci-cross-windows` step in `cross-seed`, or a heartbeat gap
+  in `native-build`'s Stage 2 build step — and treat it as a build-setup
+  regression (SFN-55 §2's measured budget: ~13m30s build+boot+ABI, ~14m27s
+  for both fixed-point passes; a run running meaningfully longer than that on
+  a warm-cache run is itself the finding).
 
 `schedule` runs never cancel each other or a `push` run — the concurrency
 group is keyed by `github.event_name`, not just `github.ref`

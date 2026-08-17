@@ -41,10 +41,11 @@ on:
 # would cancel an in-flight push run, on a job that takes ~45-60 min. Either
 # way the fixed point never finishes and the gate it exists to run never goes
 # red. Keying on `github.event_name` too separates the two triggers into
-# independent groups; `cancel-in-progress` stays true only for `push`, where
-# superseding an in-flight run with the newest commit is still correct
-# (SFN-55 review A1) — a burst of merges should still collapse to the latest
-# push, just not at the cost of cancelling the nightly.
+# independent groups; `cancel-in-progress` is true for everything except
+# `schedule` (`push` and `workflow_dispatch`), where superseding an in-flight
+# run with the newest commit is still correct (SFN-55 review A1) — a burst of
+# merges should still collapse to the latest push, just not at the cost of
+# cancelling the nightly.
 concurrency:
   group: windows-native-selfhost-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name != 'schedule' }}
@@ -263,25 +264,39 @@ jobs:
   notify-failure:
     name: Open regression issue + PR comment on failure
     needs: [cross-seed, native-build]
-    # `always()`, not `!cancelled()`: a `timeout-minutes` expiry on
-    # `native-build` (job-level 90 min, or the 30-min fixed-point step)
-    # surfaces as a `cancelled` job conclusion, and after A1 that is the
-    # single most likely failure signal this workflow can produce —
-    # `!cancelled()` would suppress exactly it (copied verbatim from
-    # `build-quality.yml:632-638`).
+    # `always()`, not `!cancelled()`: a `timeout-minutes` expiry on the
+    # job-level 90-minute caps (either `cross-seed` or `native-build`)
+    # surfaces as a `cancelled` job conclusion — a step-level timeout (the
+    # fixed-point step's own 30 min) instead marks the step and the job
+    # `failure`, already caught by the `== 'failure'` disjuncts below without
+    # needing `always()`. After A1, a job-level cancellation is the single
+    # most likely failure signal this workflow can produce, and
+    # `!cancelled()` would suppress it (copied verbatim from
+    # `build-quality.yml:632-638`). `cross-seed` gets the same `cancelled`
+    # disjunct as `native-build`: it carries its own 90-minute timeout and
+    # does real work (a full Linux self-host + `make ci-cross-windows`), and
+    # without it a `cross-seed` cancellation leaves `native-build` `skipped`
+    # — no disjunct holds, and nothing is filed (SFN-55 review, round 2).
     if: >-
       always() &&
       (needs.cross-seed.result == 'failure' ||
+       needs.cross-seed.result == 'cancelled' ||
        needs.native-build.result == 'failure' ||
        needs.native-build.result == 'cancelled')
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     # Elevated beyond the workflow-level `contents: read` (`:52-53`) —
     # `gh issue create`/`gh pr comment` need `issues: write` and
-    # `pull-requests: write`, scoped to this job alone so the two build jobs
-    # stay minimally privileged.
+    # `pull-requests: write`, and the classify step below queries the Actions
+    # API (`actions: read`) — omitted in round 1, which meant every
+    # cancellation the `always()` comment above calls out as "the single most
+    # likely failure signal" hit a 403 under `set -euo pipefail`, aborted the
+    # classify step, and silently filed nothing (SFN-55 review, round 2).
+    # Scoped to this job alone so the two build jobs stay minimally
+    # privileged.
     permissions:
       contents: read
+      actions: read
       issues: write
       pull-requests: write
     env:
@@ -309,15 +324,21 @@ jobs:
           report=true
           if [ "${{ needs.cross-seed.result }}" != "failure" ] &&
              [ "${{ needs.native-build.result }}" != "failure" ] &&
-             [ "${{ needs.native-build.result }}" = "cancelled" ]; then
+             { [ "${{ needs.cross-seed.result }}" = "cancelled" ] ||
+               [ "${{ needs.native-build.result }}" = "cancelled" ]; }; then
+            # `branch=main` matches `push`/`schedule` (always `main`), but
+            # `workflow_dispatch` can run on any ref — strip the `refs/heads/`
+            # prefix so a manual dispatch from a feature branch compares
+            # against the latest run of that SAME branch, not main's.
+            branch="${REF#refs/heads/}"
             latest_run_id="$(gh api \
-              "/repos/${REPO}/actions/workflows/windows-native-selfhost.yml/runs?event=${EVENT_NAME}&branch=main&per_page=1" \
+              "/repos/${REPO}/actions/workflows/windows-native-selfhost.yml/runs?event=${EVENT_NAME}&branch=${branch}&per_page=1" \
               --jq '.workflow_runs[0].id // empty')"
             if [ -n "$latest_run_id" ] && [ "$latest_run_id" != "$RUN_ID" ]; then
               report=false
               echo "[notify] superseded by run ${latest_run_id}; expected concurrency coalescing, no regression notification"
             else
-              echo "[notify] this is the latest ${EVENT_NAME} run and still cancelled; reporting as a genuine cancellation/timeout"
+              echo "[notify] this is the latest ${EVENT_NAME} run on ${branch} and still cancelled; reporting as a genuine cancellation/timeout"
             fi
           fi
           echo "report=${report}" >> "$GITHUB_OUTPUT"

@@ -2171,9 +2171,12 @@ jobs:
   #
   # `windows-2025` is pinned, not `windows-latest` — an unpinned label has
   # already cost this workflow surprise migrations on other OSes (see the
-  # `macos-26` comment on `build-compiler-macos`). Ladder rungs 1-4 keep
-  # `continue-on-error` (diagnostics only); the boot / check / run / R1 / R3
-  # gates do not — those are the ABI proofs this job exists to run.
+  # `macos-26` comment on `build-compiler-macos`). Ladder rungs 1-4 stay
+  # advisory-only by construction — each rung's script ends in an
+  # `echo`/`|| true` tail that exits 0 regardless of the rung's own result
+  # (see `sailfin-build-windows/action.yml`) — the boot / check / run / R1 /
+  # R3 gates do not have that shape and stay genuinely fatal: those are the
+  # ABI proofs this job exists to run.
   build-compiler-windows:
     name: Build compiler [windows-x86_64]
     needs: [ci-scope, build-compiler-linux]

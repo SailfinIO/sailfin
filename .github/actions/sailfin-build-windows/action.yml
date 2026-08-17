@@ -100,11 +100,13 @@ runs:
     #   2 frontend     — parse/typecheck/effects, fully in-process
     #   3 one module   — emit -> clang -> lld-link, ONE child spawn
     #   4 the artifact — the binary it produced actually executes
-    # No `continue-on-error` needed: `runs.steps[*]` in a composite action
-    # rejects that key (B1/B2, SFN-55 review), and it would be redundant here
-    # anyway — each rung runs under `set -uo pipefail` (no `-e`) and its last
-    # command is always an `echo`/`|| true` that exits 0, so a failed rung
-    # already lets later rungs run and report without it.
+    # No `continue-on-error` here: unlike `timeout-minutes` (confirmed absent
+    # from `runs.steps[*]`'s schema — B1, SFN-55 review), it is unconfirmed
+    # whether a composite step actually rejects `continue-on-error`; the key
+    # is dropped because it would be redundant either way — each rung runs
+    # under `set -uo pipefail` (no `-e`) and its last command is always an
+    # `echo`/`|| true` that exits 0, so a failed rung already lets later
+    # rungs run and report without it.
     - name: "Rung 1 — seed boots (--version)"
       shell: bash
       run: |
