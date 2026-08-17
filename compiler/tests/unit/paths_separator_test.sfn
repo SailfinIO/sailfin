@@ -1,0 +1,82 @@
+// compiler/tests/unit/paths_separator_test.sfn
+//
+// Regression coverage for SFN-919: the leaf path helpers in
+// `build/paths.sfn` scanned for `/` only, so on native Windows —
+// where `exe_path()` resolves through `GetModuleFileNameA` and hands
+// back a `\` path — `_dirname` found no separator and returned ".".
+// That defeated the `_dirname(self_str) == binary_dir` guard on
+// SFN-904's `exe_path()` last resort, making the fallback unreachable
+// on the one platform it was written for: the native MSVC self-host
+// failed its end-to-end gate with "cannot resolve self path for
+// runtime sfn-source emit" while running as `compiler.exe`.
+import {
+    _dirname,
+    _is_path_sep,
+    _path_basename,
+    _path_join,
+    _paths_equal_ignoring_sep
+} from "../../src/build/paths";
+
+test "paths: separator predicate accepts both spellings" {
+    assert _is_path_sep("/");
+    assert _is_path_sep("\\");
+    assert ! _is_path_sep("a");
+    assert ! _is_path_sep(":");
+}
+
+test "paths: dirname splits a POSIX path" {
+    assert _dirname("/a/b/c.exe") == "/a/b";
+    assert _dirname("a/b") == "a";
+}
+
+test "paths: dirname splits a Windows backslash path" {
+    assert _dirname("D:\\a\\bin\\compiler.exe") == "D:\\a\\bin";
+}
+
+test "paths: dirname splits a mixed-separator path at the last separator" {
+    assert _dirname("D:/a\\bin/compiler.exe") == "D:/a\\bin";
+    assert _dirname("D:/a/bin\\compiler.exe") == "D:/a/bin";
+}
+
+test "paths: dirname of a bare name is the current directory" {
+    assert _dirname("compiler.exe") == ".";
+}
+
+test "paths: dirname preserves the root separator spelling" {
+    assert _dirname("/foo") == "/";
+    assert _dirname("\\foo") == "\\";
+}
+
+test "paths: dirname of a drive-rooted file is the drive" {
+    assert _dirname("C:\\x.exe") == "C:";
+}
+
+test "paths: basename splits on either separator" {
+    assert _path_basename("/a/b/c.exe") == "c.exe";
+    assert _path_basename("D:\\a\\bin\\compiler.exe") == "compiler.exe";
+    assert _path_basename("D:/a\\bin/compiler.exe") == "compiler.exe";
+    assert _path_basename("compiler.exe") == "compiler.exe";
+}
+
+test "paths: join does not double an existing separator" {
+    assert _path_join("D:\\a\\bin\\", "sfn.exe") == "D:\\a\\bin\\sfn.exe";
+    assert _path_join("/a/bin/", "sfn") == "/a/bin/sfn";
+    assert _path_join("/a/bin", "sfn") == "/a/bin/sfn";
+    assert _path_join("", "sfn") == "sfn";
+}
+
+// The guard this whole issue turns on: the build driver joins with `/`
+// while the OS reports `\`, so the two spellings of one directory must
+// compare equal or SFN-904's fallback stays unreachable.
+test "paths: equality ignores separator spelling" {
+    assert _paths_equal_ignoring_sep("D:\\a\\bin", "D:/a/bin");
+    assert _paths_equal_ignoring_sep("D:/a\\bin", "D:\\a/bin");
+    assert _paths_equal_ignoring_sep("/a/b", "/a/b");
+}
+
+test "paths: equality still rejects genuinely different paths" {
+    assert ! _paths_equal_ignoring_sep("D:\\a\\bin", "D:\\a\\lib");
+    assert ! _paths_equal_ignoring_sep("D:\\a", "D:\\a\\bin");
+    assert ! _paths_equal_ignoring_sep("/a/b", "/a:b");
+    assert ! _paths_equal_ignoring_sep("", "/");
+}
