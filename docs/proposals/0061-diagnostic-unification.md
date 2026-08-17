@@ -4,9 +4,9 @@ title: Diagnostic Unification — One Coded, Spanned, Severity-Bearing Diagnosti
 status: Accepted
 type: tooling
 created: 2026-07-25
-updated: 2026-08-16
+updated: 2026-08-17
 author: "agent:compiler-architect; agent:Sailbot (orchestrator); project owner (design gate 2026-07-25)"
-tracking: "SFN-534, SFN-535, SFN-536, SFN-537, SFN-538, SFN-539, SFN-540, SFN-541, SFN-608, SFN-915"
+tracking: "SFN-534, SFN-535, SFN-536, SFN-537, SFN-538, SFN-539, SFN-540, SFN-541, SFN-608, SFN-915, SFN-916"
 supersedes:
 superseded-by:
 graduates-to:
@@ -268,11 +268,24 @@ duplicate-body or field-dropping conversion.
   the legacy channel here and are reconstructed at the module boundary by
   `append_missing_legacy_lowering_diags`; **S5 must widen them before it
   deletes the string channel.**
-- **S5 — retire the substring; fix gate integrity (closes SFN-529).** Drop
-  `diagnostics: string[]` from the hot carriers; `has_fatal_lowering_diagnostic`
-  → `has_error_diag`. Size guards must **retain every `error`** rather than
-  clearing the array (`lowering_phase_sanitize.sfn:89-96`,
-  `lowering_io.sfn:44-59`), and the two silent gates print their cause.
+- **S5 — the gate reads severity (SFN-540, closes SFN-529).**
+  `has_fatal_lowering_diagnostic` → `has_error_diag`, at all five consult
+  sites. Adds the structured size guards `retain_error_diags` and
+  `extend_diag_array_checked` (`lowering_io.sfn`), so a guard trip cannot
+  disarm the gate on the `diags` channel the way SFN-529 found it could on the
+  string one. Every gate refusal reports its cause exactly once — the two sites
+  that returned an artifact without reporting rely on the driver, which prints
+  over the same arrays; reporting at both renders each line twice (SFN-608).
+- **S5b — widen the last carriers, then delete the string channel (SFN-916).**
+  Split out of S5 on 2026-08-17. The two halves cannot ship together: the
+  reconciliation that makes `diags` complete —
+  `append_missing_legacy_lowering_diags` and `merge_lowered_diags` — takes the
+  legacy `string[]` as an **input parameter**, so deleting the field removes
+  the mechanism that makes S5's gate safe. Widen the carriers S4b named (plus
+  `CallSignatureResolution`, `MangledModuleResult`, `_ClosurePairLowerResult`,
+  `BinaryAlignmentResult`, and `ParseNativeResult` in `sfn/ir`), pair the three
+  `[fatal]` pushes that have no structured twin, and only then drop
+  `diagnostics: string[]` from the carriers and delete the reconciliation.
 - **S6 — converge `TssaDiagnostic` and `TensorVerifyResult`.** Parallel to S2–S5.
 - **S7 — revive the dead `emit_native` channel.** `EmitNativeResult.diagnostics`
   is never read at any of its four `main.sfn` call sites (`:347, 429, 433, 515`),
