@@ -479,11 +479,14 @@ jobs:
       # produce a *wrong* binary: each per-test entry is content-addressed by
       # compiler binary SHA-256 + source content (SFN-545), so a different
       # compiler or changed test rolls the entry identity and misses → recompile.
-      # RESTORE-ONLY (`actions/cache/restore`, not `actions/cache`): the sole
-      # save is the explicit `Save test-bin cache for PR CI` step below, which
-      # is gated on a green suite so a failed baseline can't poison the cache.
-      # A combined `actions/cache` would add a post-job save that runs on
-      # failure too, defeating that guard. Keys mirror the module-IR restore
+      # RESTORE-ONLY (`actions/cache/restore`, not `actions/cache`): saving is
+      # explicit, in the two `Save ... test-bin cache` steps below, because the
+      # complete and partial baselines must land under *different* keys. A
+      # combined `actions/cache` would add a post-job save under this exact
+      # key on failure too, permanently occupying the slot a complete run
+      # needs (SFN-797). Poisoning is not the constraint — key occupancy is:
+      # the per-entry key is content-addressed (SFN-545), so a partial save
+      # yields fewer entries, never wrong ones. Keys mirror the module-IR restore
       # above and the PR action's `sailfin-testbin-...` key exactly, so the
       # exact-key hit lands on an unchanged tree and the prefix `restore-keys`
       # fall back to the most recent prior baseline after a source change.
@@ -523,6 +526,7 @@ jobs:
       # reruns against the now-warm test-bin cache, so it is cheap. A
       # persistent failure still fails → no save.
       - name: Warm test-bin cache (full suite, parallel, cache enabled)
+        id: warm
         shell: bash
         run: |
           set -euo pipefail
@@ -533,22 +537,67 @@ jobs:
             run_suite
           fi
 
-      # Save the warmed test-bin cache for PR CI to restore. Save-only (no
-      # `if:`) so it runs only when every prior step — including the suite
-      # — succeeded; a failed baseline leaves the previous good cache in
-      # place (no poisoning). Key matches the PR action's
-      # `sailfin-testbin-...` key exactly; if it already exists (no source
-      # change since the last main run) the save is a no-op.
-      # Key matches the PR action's `sailfin-testbin-...` key exactly,
-      # including `runtime/capsule.toml` + `runtime/ir/**` (manifest and
-      # cross-windows link stub) so a runtime edit rolls the key and the
-      # baseline can publish a fresh entry (an existing key makes
-      # `cache/save` a no-op). (`runtime/native/**` retired in #823.)
+      # Save the COMPLETE warmed test-bin cache for PR CI to restore. No `if:`,
+      # so it runs only when every prior step — including the suite —
+      # succeeded. This step owns the exact key, and only a complete run may
+      # occupy it: `cache/save` is a no-op when the key already exists, so a
+      # partial result written here would lock out the full baseline for this
+      # tree state forever (SFN-797). Key matches the PR action's
+      # `sailfin-testbin-...` key exactly, including `runtime/capsule.toml` +
+      # `runtime/ir/**` (manifest and cross-windows link stub) so a runtime
+      # edit rolls the key and the baseline can publish a fresh entry.
+      # (`runtime/native/**` retired in #823.)
       - name: Save test-bin cache for PR CI
         uses: actions/cache/save@v6
         with:
           path: build/cache/test-bin
           key: sailfin-testbin-linux-x86_64-${{ steps.seed.outputs.seed_version }}-${{ hashFiles('compiler/src/**/*.sfn', 'compiler/capsules/**/*.sfn', 'runtime/**/*.sfn', 'runtime/capsule.toml', 'runtime/ir/**', 'compiler/capsule.toml', 'bootstrap.toml') }}
+
+      # Publish whatever a failed or timed-out warmer did build, so one flake
+      # stops compounding into an ever-colder rebuild (SFN-797: a single
+      # failure latched 29 consecutive cold runs over 2026-08-06→08).
+      #
+      # Three properties make this safe, and all three are load-bearing:
+      #   1. It never occupies the exact key — the `-partial-` suffix keeps
+      #      complete and partial baselines in distinct slots, so a later
+      #      complete run can still publish for this same tree state, and its
+      #      exact-key hit is preferred over any prefix match on restore.
+      #   2. The suffix still matches the `restore-keys` prefix ladder above
+      #      and in `.github/actions/sailfin-build`, so PR CI picks it up.
+      #   3. The saved directory is cumulative — the restore step above seeded
+      #      it with the best available prior baseline, and the warmer only
+      #      adds to it — so a partial entry is never worse than what the
+      #      ladder would have returned anyway. Entries stay content-addressed
+      #      (SFN-545): fewer of them, never wrong ones.
+      #
+      # `run_attempt` is in the key because a re-run reuses `run_id`, and the
+      # second attempt's save would otherwise be a no-op against its own key.
+      # `always()` (not `failure()`) is required: a `timeout-minutes` expiry
+      # surfaces as a *cancelled* job, the exact case this exists for — see
+      # the same reasoning in `notify-failure` below. A save cut short by the
+      # cancellation grace period simply does not publish; best-effort is the
+      # contract.
+      - name: Check for partial test-bin results
+        id: partial
+        if: always() && steps.warm.outcome != 'success' && steps.warm.outcome != 'skipped'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # An empty save would win the prefix ladder by recency and hand the
+          # next run a cold cache — strictly worse than falling back.
+          if [ -d build/cache/test-bin ] && [ -n "$(ls -A build/cache/test-bin)" ]; then
+            echo "save=1" >> "$GITHUB_OUTPUT"
+          else
+            echo "save=0" >> "$GITHUB_OUTPUT"
+            echo "[warm] no test-bin entries to publish; skipping partial save."
+          fi
+
+      - name: Save partial test-bin cache (warmer did not finish)
+        if: always() && steps.partial.outputs.save == '1'
+        uses: actions/cache/save@v6
+        with:
+          path: build/cache/test-bin
+          key: sailfin-testbin-linux-x86_64-${{ steps.seed.outputs.seed_version }}-${{ hashFiles('compiler/src/**/*.sfn', 'compiler/capsules/**/*.sfn', 'runtime/**/*.sfn', 'runtime/capsule.toml', 'runtime/ir/**', 'compiler/capsule.toml', 'bootstrap.toml') }}-partial-${{ github.run_id }}-${{ github.run_attempt }}
 
   # Failure-mode job (issue #782). Runs only when `build-quality` fails.
   # Elevated permissions are scoped to this job alone so the gate job

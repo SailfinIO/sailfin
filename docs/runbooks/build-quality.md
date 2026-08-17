@@ -164,8 +164,13 @@ started, normally because it hit its `timeout-minutes` cap. There is no
   expiry. The cold full suite on
   the 4-core `ubuntu-24.04` runner has repeatedly crept toward the cap
   (run-1010 overran the old 60-min cap; PR #2492 raised it to 90 min). If
-  the warm step is still running when the job is killed, the
-  `Save test-bin cache` step never lands and PRs keep paying the cold cost.
+  the warm step is still running when the job is killed, the complete
+  `Save test-bin cache for PR CI` step never lands; since SFN-797 the
+  `Save partial test-bin cache` step publishes what was built under a
+  `-partial-<run_id>-<run_attempt>` key, so PRs keep a warm-ish cache
+  instead of falling back to an ever-older baseline. Expect the next run's
+  `test_bin_hit_rate` to be materially above zero — if it is not, check
+  that the partial save actually landed in the killed job's log.
   Confirm the wall-time trend and, if the suite has genuinely outgrown the
   cap, raise `timeout-minutes` or split the warmer (the incremental-restore
   follow-up); do **not** just re-run and hope.
