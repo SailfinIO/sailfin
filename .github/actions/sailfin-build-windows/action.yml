@@ -1,0 +1,210 @@
+name: "Sailfin Windows Build"
+description: >-
+  Stages a bootstrap seed and drives a native MSVC build of the compiler on a
+  Windows runner: MSVC dev environment, LLVM probe, the SFN-53 diagnostic
+  ladder, `<seed> build -p compiler`, then the boot / check / run / R1 / R3
+  ABI gates. Shared by SFN-55 tier A (`build-compiler-windows` in ci.yml) and
+  tier B (`windows-native-selfhost.yml`)'s fixed-point job. `make` is not used
+  here — host GnuWin32 `make` on Windows runners is too old for this repo's
+  targets (SFEP-0021 §4.4).
+inputs:
+  seed_source:
+    description: >-
+      'cross' = stage the mingw-cross bootstrap seed from the
+      `ci-installer-windows-x86_64` artifact (M9, the only supported value
+      today). 'release' is reserved for the pinned native windows-x86_64
+      release asset (M11/SFN-57) and is not implemented yet.
+    required: false
+    default: "cross"
+
+outputs:
+  native_sfn:
+    description: "Absolute path to the native-built compiler executable."
+    value: ${{ steps.locate.outputs.native_sfn }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Download mingw-cross bootstrap seed
+      if: ${{ inputs.seed_source == 'cross' }}
+      uses: actions/download-artifact@v8
+      with:
+        name: ci-installer-windows-x86_64
+        path: seed-dl
+
+    - name: Stage the bootstrap seed
+      if: ${{ inputs.seed_source == 'cross' }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        mkdir -p seed
+        tar -xzf seed-dl/installer-windows-x86_64.tar.gz -C seed
+        EXE="$(find "$PWD/seed" -name sailfin.exe | head -1)"
+        [ -n "$EXE" ] || { echo "sailfin.exe not found in bootstrap seed" >&2; exit 1; }
+        echo "SEED_EXE=$EXE" >> "$GITHUB_ENV"
+        echo "staged seed: $EXE"
+        "$EXE" --version || true
+
+    - name: Reject unsupported seed_source
+      if: ${{ inputs.seed_source != 'cross' }}
+      shell: bash
+      run: |
+        echo "[sailfin-build-windows] seed_source '${{ inputs.seed_source }}' is not implemented; only 'cross' is supported until SFN-57 lands the native release seed." >&2
+        exit 1
+
+    - name: Set up MSVC developer environment (UCRT + libs on PATH/LIB/INCLUDE)
+      uses: ilammy/msvc-dev-cmd@v1
+      with:
+        arch: x64
+
+    - name: Ensure LLVM (clang + lld-link) present
+      shell: bash
+      run: |
+        set -euo pipefail
+        # windows-2025 ships LLVM; surface the versions the native link
+        # will use so a toolchain mismatch is visible in the log.
+        clang --version | head -1
+        lld-link --version || true
+        echo "clang: $(command -v clang)"
+
+    # ── Staircase (SFN-53) ────────────────────────────────────────
+    # Four cheap rungs before the 281-module self-host, each proving one
+    # capability and each bounded by its own `timeout`. See
+    # `windows-native-selfhost.yml`'s history for why: a single 90-minute
+    # self-host step that emits zero bytes on failure distinguishes nothing.
+    #   1 boots        — the bootstrap seed runs under UCRT at all
+    #   2 frontend     — parse/typecheck/effects, fully in-process
+    #   3 one module   — emit -> clang -> lld-link, ONE child spawn
+    #   4 the artifact — the binary it produced actually executes
+    # `continue-on-error` so a failed rung still lets later rungs run and
+    # report — one run then yields the whole ladder's shape instead of only
+    # its first break.
+    - name: "Rung 1 — seed boots (--version)"
+      shell: bash
+      continue-on-error: true
+      run: |
+        set -uo pipefail
+        timeout 60 "$SEED_EXE" --version; echo "rung1 exit=$?"
+
+    - name: "Rung 2 — seed frontend check (hello-world)"
+      shell: bash
+      continue-on-error: true
+      run: |
+        set -uo pipefail
+        timeout 120 "$SEED_EXE" check examples/basics/hello-world.sfn; echo "rung2 exit=$?"
+
+    - name: "Rung 3 — seed builds ONE module (emit -> clang -> lld-link)"
+      shell: bash
+      continue-on-error: true
+      run: |
+        set -uo pipefail
+        # The single most diagnostic step in the workflow: one child spawn,
+        # one link. SAILFIN_BUILD_JOBS=1 pins the serial path so a failure
+        # here is not confounded by the parallel pool.
+        SAILFIN_BUILD_JOBS=1 timeout 600 "$SEED_EXE" build examples/basics/hello-world.sfn -o hello.exe
+        echo "rung3 exit=$?"
+        ls -la hello.exe || true
+
+    - name: "Rung 4 — run the produced binary"
+      shell: bash
+      continue-on-error: true
+      run: |
+        set -uo pipefail
+        if [ -f hello.exe ]; then timeout 60 ./hello.exe; echo "rung4 exit=$?";
+        else echo "rung4 skipped — rung 3 produced no binary"; fi
+
+    - name: Native MSVC build of the compiler (Stage 2)
+      shell: bash
+      timeout-minutes: 30
+      run: |
+        set -euo pipefail
+        # Call the seed directly rather than `make rebuild` — host `make` on
+        # Windows runners is too old (SFEP-0021 §4.4), and `build -p
+        # compiler` is exactly what `make rebuild` shells (Makefile
+        # rebuild-impl). SAILFIN_TARGET_OS=Windows drives the SFN-52 target
+        # seam (MSVC triple, lld-link, POSIX-lib drop, process_windows.sfn
+        # swap).
+        #
+        # The build driver emits no progress output: a full self-host prints
+        # under 1 KB, all of it at exit. A working build and a hung one are
+        # therefore byte-identical to a watcher, and a timeout kill leaves no
+        # diagnostic whatsoever. Count emitted artifacts on an interval so a
+        # slow build reads as slow and a stuck one as stuck.
+        (
+          # `set +e` is load-bearing: the subshell inherits `set -e` from
+          # the step, so any single failing command inside the loop would
+          # kill the heartbeat silently and restore the exact zero-output
+          # condition it exists to prevent.
+          set +e
+          while :; do
+            sleep 30
+            printf '[heartbeat] %s sfn-asm=%s ll=%s o=%s\n' \
+              "$(date -u +%H:%M:%S)" \
+              "$(find build -name '*.sfn-asm' 2>/dev/null | wc -l)" \
+              "$(find build -name '*.ll' 2>/dev/null | wc -l)" \
+              "$(find build -name '*.o' 2>/dev/null | wc -l)"
+          done
+        ) &
+        heartbeat_pid=$!
+        # Kill the subshell, and its in-flight `sleep` where the tooling
+        # allows: a survivor inherits this step's stdout and can hold the
+        # step open. `pkill` is absent from Git for Windows' bundled msys
+        # set, so the child reap is best-effort — killing the subshell
+        # alone still bounds any delay at one sleep interval.
+        trap 'pkill -P "$heartbeat_pid" 2>/dev/null || true; kill "$heartbeat_pid" 2>/dev/null || true' EXIT
+        "$SEED_EXE" build -p compiler
+        echo "--- locating native-built compiler ---"
+        OUT=""
+        for c in build/capsules/sfn/compiler/bin/compiler.exe build/capsules/sfn/compiler/bin/compiler build/bin/sfn.exe build/bin/sfn; do
+          if [ -f "$c" ]; then OUT="$PWD/$c"; break; fi
+        done
+        [ -n "$OUT" ] || { echo "native-built compiler not found under build/" >&2; ls -R build | head -50; exit 1; }
+        echo "NATIVE_SFN=$OUT" >> "$GITHUB_ENV"
+        echo "native compiler: $OUT"
+
+    - name: Locate native compiler (composite output)
+      id: locate
+      shell: bash
+      run: |
+        set -euo pipefail
+        [ -n "${NATIVE_SFN:-}" ] || { echo "NATIVE_SFN not set by the Stage 2 build step" >&2; exit 1; }
+        echo "native_sfn=$NATIVE_SFN" >> "$GITHUB_OUTPUT"
+
+    - name: Gate — boots and prints version
+      shell: bash
+      run: |
+        set -euo pipefail
+        out="$("$NATIVE_SFN" --version)"
+        echo "version: $out"
+        case "$out" in
+          "sfn "*) echo "ok: native MSVC compiler boots" ;;
+          *) echo "FAIL: unexpected --version output: $out" >&2; exit 1 ;;
+        esac
+
+    - name: Gate — frontend check (hello-world)
+      shell: bash
+      run: |
+        set -euo pipefail
+        "$NATIVE_SFN" check examples/basics/hello-world.sfn
+        echo "ok: check passed"
+
+    - name: Gate — end-to-end run (hello-world)
+      shell: bash
+      run: |
+        set -euo pipefail
+        "$NATIVE_SFN" run examples/basics/hello-world.sfn
+        echo "ok: hello-world ran"
+
+    - name: Gate R1 — try/throw (setjmp/longjmp under MSVC UCRT)
+      shell: bash
+      run: |
+        set -euo pipefail
+        "$NATIVE_SFN" run examples/basics/try-catch-finally.sfn
+        echo "ok: R1 try/throw ran"
+
+    - name: Gate R3 — struct-channel round-trip (Microsoft x64 struct ABI)
+      shell: bash
+      run: |
+        set -euo pipefail
+        "$NATIVE_SFN" run examples/concurrency/channels.sfn
+        echo "ok: R3 struct-channel ran"

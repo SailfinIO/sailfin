@@ -60,6 +60,7 @@ jobs:
     outputs:
       source: ${{ steps.scope.outputs.source }}
       public_claims: ${{ steps.scope.outputs.public_claims }}
+      windows: ${{ steps.scope.outputs.windows }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -74,19 +75,25 @@ jobs:
 
           source=true
           public_claims=true
+          windows=true
           reason="full compiler CI for ${GITHUB_EVENT_NAME}"
           public_claims_reason="public-claim verification for ${GITHUB_EVENT_NAME}"
+          windows_reason="native Windows CI for ${GITHUB_EVENT_NAME}"
 
           if [ "${GITHUB_EVENT_NAME}" = "schedule" ]; then
             source=false
             public_claims=false
+            windows=false
             reason="scheduled run reserved for the cold aarch64-Linux soak"
             public_claims_reason="scheduled soak has no public-claim scope"
+            windows_reason="scheduled soak is not the Windows nightly (that is windows-native-selfhost.yml)"
           elif [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
             source=false
             public_claims=false
+            windows=false
             reason="no compiler/runtime/build-system paths changed"
             public_claims_reason="no public-claim contract paths changed"
+            windows_reason="no Windows-relevant path changed"
             base="${{ github.event.pull_request.base.sha }}"
             head="${{ github.event.pull_request.head.sha }}"
 
@@ -113,13 +120,28 @@ jobs:
                   public_claims_reason="public-claim contract path changed: $path"
                   ;;
               esac
+              # SFN-55 §4.1: every historically-traced Windows-only fix
+              # touched at least one of these paths. Widened past the
+              # starting `compiler/src/build/**`-only list because three
+              # traced fixes (SFN-488, SFN-857, SFN-374) landed in
+              # `backend.sfn`, `cli/commands/**`, and
+              # `runtime/sfn/adapters/**` — ordinary, frequently-edited
+              # surfaces the narrower glob does not name.
+              case "$path" in
+                compiler/src/build/*|compiler/src/build_cache.sfn|compiler/src/build_stamp.sfn|compiler/src/backend.sfn|compiler/src/emit_helpers.sfn|compiler/src/capsule_emit_parallel.sfn|compiler/src/cli_selfhost.sfn|compiler/src/native_emit_subprocess.sfn|compiler/src/llvm_validation.sfn|compiler/src/codegen_driver.sfn|compiler/src/capsule_resolver/*|compiler/src/cli/*|compiler/capsules/codegen/*|compiler/capsules/codegen-llvm/*|runtime/*|Makefile|bootstrap.toml|.github/workflows/ci.yml|.github/workflows/windows-native-selfhost.yml|.github/actions/*)
+                  windows=true
+                  windows_reason="Windows-relevant path changed: $path"
+                  ;;
+              esac
             done < changed-files.txt
           fi
 
           echo "source=$source" >> "$GITHUB_OUTPUT"
           echo "public_claims=$public_claims" >> "$GITHUB_OUTPUT"
+          echo "windows=$windows" >> "$GITHUB_OUTPUT"
           echo "[ci-scope] source=$source ($reason)"
           echo "[ci-scope] public_claims=$public_claims ($public_claims_reason)"
+          echo "[ci-scope] windows=$windows ($windows_reason)"
           {
             echo "### CI scope"
             echo ""
@@ -127,6 +149,8 @@ jobs:
             echo "- reason: $reason"
             echo "- public-claim verification in scope: \`$public_claims\`"
             echo "- reason: $public_claims_reason"
+            echo "- native Windows CI in scope: \`$windows\`"
+            echo "- reason: $windows_reason"
           } >> "$GITHUB_STEP_SUMMARY"
 
   check-public-claims:
@@ -2135,6 +2159,47 @@ jobs:
           set -euo pipefail
           "$SAILFIN_EXE" check examples/basics/hello-world.sfn
 
+  # SFN-55 (SFEP-0021 M9), tier A: the filtered native-Windows build + ABI
+  # gate. Sibling of `build-compiler-macos` above, but path-filtered on
+  # `ci-scope.outputs.windows` (§4.1's globs) rather than running on every
+  # source PR — the fixed point below (`windows-native-selfhost.yml`, tier
+  # B) is the unconditional backstop that bounds how long the filter can be
+  # wrong. `needs: build-compiler-linux` because the bootstrap seed staged
+  # here is the `ci-installer-windows-x86_64` artifact THAT job produces
+  # (`make ci-cross-windows`, already consumed by `smoke-windows` above) —
+  # no separate cross-seed job.
+  #
+  # `windows-2025` is pinned, not `windows-latest` — an unpinned label has
+  # already cost this workflow surprise migrations on other OSes (see the
+  # `macos-26` comment on `build-compiler-macos`). Ladder rungs 1-4 keep
+  # `continue-on-error` (diagnostics only); the boot / check / run / R1 / R3
+  # gates do not — those are the ABI proofs this job exists to run.
+  build-compiler-windows:
+    name: Build compiler [windows-x86_64]
+    needs: [ci-scope, build-compiler-linux]
+    if: ${{ needs.ci-scope.outputs.windows == 'true' }}
+    runs-on: windows-2025
+    timeout-minutes: 45
+    env:
+      SAILFIN_TARGET_OS: Windows
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Build native Windows compiler
+        id: build
+        uses: ./.github/actions/sailfin-build-windows
+        with:
+          seed_source: cross
+
+      - name: Upload native compiler
+        uses: actions/upload-artifact@v7
+        with:
+          name: ci-build-windows-x86_64
+          path: ${{ steps.build.outputs.native_sfn }}
+          if-no-files-found: error
+          retention-days: 1
+
   # SFN-55 (SFEP-0021 M9), tier A': the Windows-host regression guard.
   #
   # `SAILFIN_HOST_OS=Windows` forces every Windows-host branch —
@@ -2393,6 +2458,7 @@ jobs:
       - build-macos
       - smoke-windows
       - windows-host-guard
+      - build-compiler-windows
       - aarch64-linux-result
     if: ${{ always() }}
     runs-on: ubuntu-24.04
@@ -2403,6 +2469,7 @@ jobs:
       LINEAR_BRANCH_CLAIM: ${{ needs.linear-branch-claim.result }}
       SOURCE_CI: ${{ needs.ci-scope.outputs.source }}
       PUBLIC_CLAIMS_CI: ${{ needs.ci-scope.outputs.public_claims }}
+      WINDOWS_CI: ${{ needs.ci-scope.outputs.windows }}
       CHECK_PUBLIC_CLAIMS: ${{ needs.check-public-claims.result }}
       CHECK_FAST: ${{ needs.check-fast.result }}
       BUILD_COMPILER_LINUX: ${{ needs.build-compiler-linux.result }}
@@ -2412,6 +2479,7 @@ jobs:
       BUILD_MACOS: ${{ needs.build-macos.result }}
       SMOKE_WINDOWS: ${{ needs.smoke-windows.result }}
       WINDOWS_HOST_GUARD: ${{ needs.windows-host-guard.result }}
+      BUILD_COMPILER_WINDOWS: ${{ needs.build-compiler-windows.result }}
       AARCH64_LINUX: ${{ needs.aarch64-linux-result.result }}
     steps:
       - name: Summarize required CI result
@@ -2441,6 +2509,11 @@ jobs:
 
           if [ "${PUBLIC_CLAIMS_CI:-}" != "true" ] && [ "${PUBLIC_CLAIMS_CI:-}" != "false" ]; then
             echo "[required-ci] CI scope emitted unexpected public-claim value: ${PUBLIC_CLAIMS_CI:-unset}" >&2
+            exit 1
+          fi
+
+          if [ "${WINDOWS_CI:-}" != "true" ] && [ "${WINDOWS_CI:-}" != "false" ]; then
+            echo "[required-ci] CI scope emitted unexpected windows value: ${WINDOWS_CI:-unset}" >&2
             exit 1
           fi
 
@@ -2474,6 +2547,12 @@ jobs:
             check "Build + Test [macos-arm64]" "$BUILD_MACOS"
             check "Smoke test [windows-x86_64]" "$SMOKE_WINDOWS"
             check "Windows-host guard [linux-x86_64]" "$WINDOWS_HOST_GUARD"
+            if [ "${WINDOWS_CI:-}" = "true" ]; then
+              check "Build compiler [windows-x86_64]" "$BUILD_COMPILER_WINDOWS"
+            else
+              echo "[required-ci] native Windows CI is out of scope for this PR."
+              echo "| Native Windows CI | skipped by path scope |" >> "$GITHUB_STEP_SUMMARY"
+            fi
             check "AArch64 Linux result" "$AARCH64_LINUX"
           else
             echo "[required-ci] compiler CI is out of scope for this PR."

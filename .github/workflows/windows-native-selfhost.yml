@@ -1,33 +1,31 @@
-# Windows Native Self-Host (M7/M8) — exploratory bootstrap harness.
+# Windows Native Self-Host (M7/M8/M9 tier B) — the unconditional nightly
+# fixed point.
 #
-# Executes SFEP-0021 milestone M7 (SFN-53): produce the first *native
-# MSVC-ABI* Sailfin compiler on a `windows-latest` runner and prove it
-# boots. There is no released native Windows seed yet (that is M11), so
-# per SFEP-0021 §4.3 the bootstrap seed is the mingw-cross exe, which can
-# only be produced on Linux — hence two jobs:
+# Executes SFEP-0021 milestones M7 (SFN-53) and M8 (SFN-54) on every push to
+# `main` and once nightly: the `cross-seed` job rebuilds the mingw-cross
+# bootstrap seed on Linux (there is no released native Windows seed yet —
+# that is M11/SFN-57 — so per SFEP-0021 §4.3 the seed comes from `make
+# ci-cross-windows`, uploaded under the same artifact name ci.yml's
+# `build-compiler-linux` uses); `native-build` stages it and drives the SFN-53
+# ladder plus the boot / check / run / R1 (try-throw) / R3 (struct-channel)
+# ABI gates via the shared `.github/actions/sailfin-build-windows` composite,
+# then runs the self-host fixed point: the native compiler rebuilds itself
+# twice and pass-2 must be byte-identical to pass-1.
 #
-#   cross-seed   (ubuntu)  — self-host main + `make ci-cross-windows` →
-#                            the mingw-cross sailfin.exe (bootstrap seed).
-#   native-build (windows) — run `<cross-exe> build -p compiler` with
-#                            SAILFIN_TARGET_OS=Windows (the target seam
-#                            SFN-52 already wired), then --version / check
-#                            / R1 (try-throw) / R3 (struct-channel) gates,
-#                            then milestone M8 (SFN-54): the native compiler
-#                            rebuilds itself twice and pass-2 must be
-#                            byte-identical to pass-1 (self-host fixed point).
-#
-# This is a manual/dispatch harness, not the permanent CI job (that is
-# M9/SFN-55). It is expected to iterate: the deepest unknowns are R1
-# (`setjmp` symbol binding under MSVC UCRT) and R3 (struct-by-value ABI),
-# plus the UCRT/stub link surface — all of which only a real native link
-# surfaces. Keep it dispatchable until M7 is green, then fold into M9.
-name: Windows Native Self-Host (M7)
+# This is SFN-55 (SFEP-0021 M9) tier B: the *unconditional* backstop to tier
+# A's path-filtered `build-compiler-windows` job in `ci.yml`. Tier A only
+# runs on PRs whose changed paths match the Windows filter (SFN-55 §4); this
+# workflow runs on every push to `main` regardless of what changed, plus a
+# daily cron, so a false negative in tier A's filter is caught within 24h
+# instead of never.
+name: Windows native self-host (fixed point)
 
 on:
-  workflow_dispatch:
   push:
-    branches:
-      - claude/sfn-53-windows-native-runner
+    branches: [main]
+  schedule:
+    - cron: "0 8 * * *" # after nightly-selfhost's 07:00
+  workflow_dispatch:
 
 # One run per ref. The native leg carries a 90-minute timeout on a
 # `windows-latest` runner (billed at 2x), so without this a burst of
@@ -42,6 +40,11 @@ permissions:
   contents: read
 
 jobs:
+  # ci.yml's `build-compiler-linux` produces and uploads this same archive
+  # on every source PR, but only within that workflow's own run — there is
+  # no sibling `ci.yml` run for a `push: main` or `schedule` event to
+  # download from. Rebuilding it inline here (~2 min on a 1x ubuntu job)
+  # also keeps `make ci-cross-windows` itself exercised nightly.
   cross-seed:
     name: Build mingw-cross bootstrap seed [linux]
     runs-on: ubuntu-latest
@@ -89,18 +92,23 @@ jobs:
         shell: bash
         run: make ci-cross-windows
 
+      # Named to match ci.yml's `build-compiler-linux` upload: the
+      # `sailfin-build-windows` composite (used by both tier A in ci.yml and
+      # this job) downloads `ci-installer-windows-x86_64` unconditionally,
+      # so both callers can share one download step regardless of which
+      # workflow produced the artifact.
       - name: Upload mingw-cross bootstrap seed
         uses: actions/upload-artifact@v7
         with:
-          name: windows-cross-seed
+          name: ci-installer-windows-x86_64
           path: dist/installer-windows-x86_64.tar.gz
           if-no-files-found: error
           retention-days: 1
 
   native-build:
-    name: Native MSVC build from cross seed [windows-latest]
+    name: Native MSVC build from cross seed [windows-2025]
     needs: cross-seed
-    runs-on: windows-latest
+    runs-on: windows-2025 # pinned, not `windows-latest` — SFN-55 Risk R3
     timeout-minutes: 90
     # The whole job runs with the Windows target seam active. SFN-52's
     # build_target_os() would also probe %SystemRoot% natively, but the
@@ -112,199 +120,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
-      - name: Download mingw-cross bootstrap seed
-        uses: actions/download-artifact@v8
+      - name: Build native Windows compiler
+        uses: ./.github/actions/sailfin-build-windows
         with:
-          name: windows-cross-seed
-          path: seed-dl
-
-      - name: Stage the bootstrap seed
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p seed
-          tar -xzf seed-dl/installer-windows-x86_64.tar.gz -C seed
-          EXE="$(find "$PWD/seed" -name sailfin.exe | head -1)"
-          [ -n "$EXE" ] || { echo "sailfin.exe not found in bootstrap seed" >&2; exit 1; }
-          echo "SEED_EXE=$EXE" >> "$GITHUB_ENV"
-          echo "staged seed: $EXE"
-          "$EXE" --version || true
-
-      - name: Set up MSVC developer environment (UCRT + libs on PATH/LIB/INCLUDE)
-        uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: x64
-
-      - name: Ensure LLVM (clang + lld-link) present
-        shell: bash
-        run: |
-          set -euo pipefail
-          # windows-latest ships LLVM; surface the versions the native link
-          # will use so a toolchain mismatch is visible in the log.
-          clang --version | head -1
-          lld-link --version || true
-          echo "clang: $(command -v clang)"
-
-      # ── Staircase (SFN-53) ────────────────────────────────────────
-      # Four cheap rungs before the 281-module self-host, each proving
-      # one capability and each bounded by its own `timeout`.
-      #
-      # Why: four consecutive runs reached the 90-minute job timeout in
-      # the self-host step having emitted ZERO bytes, so every attempt
-      # cost 90 minutes and distinguished nothing — not a hang from a
-      # slow build, not a broken seed from a broken fan-out. Jumping
-      # straight to the hardest possible task made every failure
-      # maximally expensive and minimally informative.
-      #
-      # Each rung isolates one layer, so the first one that fails names
-      # the culprit directly:
-      #   1 boots        — the mingw-cross exe runs under UCRT at all
-      #   2 frontend     — parse/typecheck/effects, fully in-process
-      #   3 one module   — emit -> clang -> lld-link, ONE child spawn
-      #   4 the artifact — the binary it produced actually executes
-      # Rung 3 is the sharp one: it is the smallest possible exercise of
-      # emit -> compile -> link for a single module.
-      #
-      # The rungs were written against a "the self-host hangs on Windows"
-      # hypothesis. That hypothesis was wrong: measurement on a native
-      # Windows host found no hang at all. Every `s[i]` re-derived the
-      # string's length with a full `strnlen`, which made lowering
-      # quadratic — 47M scans totalling 243 GB for ONE module — and
-      # Windows merely lacked the SIMD `strnlen` that hides the same cost
-      # on Linux. The self-host was running correctly the whole time, just
-      # ~20x slower than the job timeout allowed, and printing nothing.
-      # The ladder is kept because bounded rungs beat one 90-minute
-      # all-or-nothing step regardless of what is being diagnosed.
-      #
-      # `continue-on-error` so a failed rung still lets later rungs run
-      # and report — one run then yields the whole ladder's shape
-      # instead of only its first break.
-      - name: "Rung 1 — seed boots (--version)"
-        shell: bash
-        continue-on-error: true
-        run: |
-          set -uo pipefail
-          timeout 60 "$SEED_EXE" --version; echo "rung1 exit=$?"
-
-      - name: "Rung 2 — seed frontend check (hello-world)"
-        shell: bash
-        continue-on-error: true
-        run: |
-          set -uo pipefail
-          timeout 120 "$SEED_EXE" check examples/basics/hello-world.sfn; echo "rung2 exit=$?"
-
-      - name: "Rung 3 — seed builds ONE module (emit -> clang -> lld-link)"
-        shell: bash
-        continue-on-error: true
-        run: |
-          set -uo pipefail
-          # The single most diagnostic step in the workflow: one child
-          # spawn, one link. SAILFIN_BUILD_JOBS=1 pins the serial path so
-          # a failure here is not confounded by the parallel pool.
-          SAILFIN_BUILD_JOBS=1 timeout 600 "$SEED_EXE" build examples/basics/hello-world.sfn -o hello.exe
-          echo "rung3 exit=$?"
-          ls -la hello.exe || true
-
-      - name: "Rung 4 — run the produced binary"
-        shell: bash
-        continue-on-error: true
-        run: |
-          set -uo pipefail
-          if [ -f hello.exe ]; then timeout 60 ./hello.exe; echo "rung4 exit=$?";
-          else echo "rung4 skipped — rung 3 produced no binary"; fi
-
-      - name: Native MSVC build of the compiler (Stage 2)
-        shell: bash
-        timeout-minutes: 30
-        run: |
-          set -euo pipefail
-          # Call the seed directly rather than `make rebuild` — the
-          # GnuWin32 make on windows-latest is too old (SFEP-0021 §4.4),
-          # and `build -p compiler` is exactly what `make rebuild` shells
-          # (Makefile rebuild-impl). SAILFIN_TARGET_OS=Windows drives the
-          # SFN-52 target seam (MSVC triple, lld-link, POSIX-lib drop,
-          # process_windows.sfn swap).
-          #
-          # The build driver emits no progress output: a full self-host
-          # prints under 1 KB, all of it at exit (measured on both Linux
-          # and Windows). A working build and a hung one are therefore
-          # byte-identical to a watcher, and a timeout kill leaves no
-          # diagnostic whatsoever — run 30166490718 logged ZERO bytes
-          # between this step opening and its cancellation 90 minutes
-          # later, which is what made the native leg so expensive to
-          # iterate on remotely. Count emitted artifacts on an interval
-          # so a slow build reads as slow and a stuck one as stuck. Drop
-          # this once the driver reports progress natively.
-          (
-            # `set +e` is load-bearing: the subshell inherits `set -e` from
-            # the step, so any single failing command inside the loop would
-            # kill the heartbeat silently and restore the exact zero-output
-            # condition it exists to prevent.
-            set +e
-            while :; do
-              sleep 30
-              printf '[heartbeat] %s sfn-asm=%s ll=%s o=%s\n' \
-                "$(date -u +%H:%M:%S)" \
-                "$(find build -name '*.sfn-asm' 2>/dev/null | wc -l)" \
-                "$(find build -name '*.ll' 2>/dev/null | wc -l)" \
-                "$(find build -name '*.o' 2>/dev/null | wc -l)"
-            done
-          ) &
-          heartbeat_pid=$!
-          # Kill the subshell, and its in-flight `sleep` where the tooling
-          # allows: a survivor inherits this step's stdout and can hold the
-          # step open. `pkill` is absent from Git for Windows' bundled msys
-          # set, so the child reap is best-effort — killing the subshell
-          # alone still bounds any delay at one sleep interval.
-          trap 'pkill -P "$heartbeat_pid" 2>/dev/null || true; kill "$heartbeat_pid" 2>/dev/null || true' EXIT
-          "$SEED_EXE" build -p compiler
-          echo "--- locating native-built compiler ---"
-          OUT=""
-          for c in build/capsules/sfn/compiler/bin/compiler.exe build/capsules/sfn/compiler/bin/compiler build/bin/sfn.exe build/bin/sfn; do
-            if [ -f "$c" ]; then OUT="$PWD/$c"; break; fi
-          done
-          [ -n "$OUT" ] || { echo "native-built compiler not found under build/" >&2; ls -R build | head -50; exit 1; }
-          echo "NATIVE_SFN=$OUT" >> "$GITHUB_ENV"
-          echo "native compiler: $OUT"
-
-      - name: Gate — boots and prints version
-        shell: bash
-        run: |
-          set -euo pipefail
-          out="$("$NATIVE_SFN" --version)"
-          echo "version: $out"
-          case "$out" in
-            "sfn "*) echo "ok: native MSVC compiler boots" ;;
-            *) echo "FAIL: unexpected --version output: $out" >&2; exit 1 ;;
-          esac
-
-      - name: Gate — frontend check (hello-world)
-        shell: bash
-        run: |
-          set -euo pipefail
-          "$NATIVE_SFN" check examples/basics/hello-world.sfn
-          echo "ok: check passed"
-
-      - name: Gate — end-to-end run (hello-world)
-        shell: bash
-        run: |
-          set -euo pipefail
-          "$NATIVE_SFN" run examples/basics/hello-world.sfn
-          echo "ok: hello-world ran"
-
-      - name: Gate R1 — try/throw (setjmp/longjmp under MSVC UCRT)
-        shell: bash
-        run: |
-          set -euo pipefail
-          "$NATIVE_SFN" run examples/basics/try-catch-finally.sfn
-          echo "ok: R1 try/throw ran"
-
-      - name: Gate R3 — struct-channel round-trip (Microsoft x64 struct ABI)
-        shell: bash
-        run: |
-          set -euo pipefail
-          "$NATIVE_SFN" run examples/concurrency/channels.sfn
-          echo "ok: R3 struct-channel ran"
+          seed_source: cross
 
       # M8 (SFN-54): the native compiler self-hosts twice and pass-2 must be
       # byte-identical to pass-1. Mirrors the POSIX fixed-point gate
