@@ -1,6 +1,6 @@
 # Status
 
-Updated: 2026-08-17 (SFN-751). Seed pinned to `0.10.0` (`bootstrap.toml`
+Updated: 2026-08-17 (SFN-751, SFN-894). Seed pinned to `0.10.0` (`bootstrap.toml`
 `[seed].version` — SFEP-0047); the compiler version source of truth is
 `compiler/capsule.toml`.
 
@@ -366,14 +366,18 @@ here.
   collides with a function defined in the importing module, or when the import
   set exceeds the mangling safety bound, rather than dropping the affected
   rewrite and emitting a binary with the wrong symbol (SFN-530).
-- **Capsule resolver — import-reachable filtering (build path)** (SFEP-0070,
-  SFN-833). `sfn build`, `sfn run`, and the `sfn test` link path narrow
+- **Capsule resolver — import-reachable filtering** (SFEP-0070, SFN-833,
+  SFN-894). `sfn build`, `sfn run`, `sfn check`, and the `sfn test` link path narrow
   `resolved.sources` to the import-reachable closure before staging: a
   declared dependency capsule nothing imports now contributes zero modules to
   the build and the link, and a submodule of an imported capsule that neither
   the capsule's barrel re-exports nor any sibling imports is likewise dropped.
-  `sfn check` stays deliberately unfiltered, so the build set is always a
-  subset of the check set. A capsule reached through a bare spec (`import ...
+  Build/link roots include the project entry and selected runtime sources;
+  check roots are the files explicitly requested in that resolution group.
+  The two retained sets need not contain one another: each is complete for its
+  own command's semantic roots, and the shared fail-open closure validation
+  prevents either path from staging a module with an omitted dependency. A
+  capsule reached through a bare spec (`import ...
   from "sfn/crypto"`) still retains everything its barrel re-exports, so a
   capsule whose barrel re-exports its whole surface — `sfn/crypto` today —
   sees no reduction yet; narrowing individual re-exported names is SFN-834.
@@ -388,7 +392,10 @@ here.
   change in `modules_staged`, ctor count, or binary size, because all three
   reach `sfn/crypto` through its whole-surface barrel — the mechanism is in
   place, and the measurable win arrives with SFN-834's re-export name
-  narrowing.
+  narrowing. On SFN-894's dependency-free `sfn check` workload, the check path
+  retains 0 of 301 dependency sources and cuts same-host median peak RSS from
+  762.0 MiB with the filter disabled to 149.0 MiB enabled; that result is also
+  below SFEP-0020's 165.6 MiB (+5%) ceiling.
 - **Workspace default targets.** At a workspace root, bare `sfn build` and
   `sfn test` fan out over `[workspace].default-members`; when the field is
   absent they target every member. Each member has distinguishable output and

@@ -592,9 +592,12 @@ Same posture as `reachability.sfn:13-25`, and for the same reason. Concretely:
   distinct from the reachability filter, where an unreadable source safely
   contributes no edges; here a missed annotation is a link break, so a read
   failure must escalate rather than degrade.
-- **`sfn check` is untouched.** It never calls
-  `_cr_resolve_dedupe_filtered` (SFEP-0070 §3.6) and never links; the compiled
-  set stays a subset of the checked set.
+- **`sfn check` is untouched by runtime-source selection.** It never links and
+  passes an empty runtime root, so this design's demand-driven selector has no
+  check-path consumer. SFN-894 separately applies dependency-capsule
+  reachability filtering to check, rooted in the explicitly requested files;
+  SFEP-0070 §3.6 therefore requires per-command closure completeness rather
+  than cross-command set inclusion.
 - **Operator escape hatch:** `SAILFIN_RUNTIME_SOURCE_GATES=off` (also `0` /
   `false`) forces `demand = ["*"]`, reproducing today's artifact set exactly —
   the bisect handle, mirroring `SAILFIN_CAPSULE_FILTER`
