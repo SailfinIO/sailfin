@@ -100,7 +100,7 @@ The next number is `max + 1`. Add a row in the same PR that introduces an SFEP.
 
 Per SFEP-0001 §2, a draft keeps its `draft-<slug>.md` name and `sfep: TBD`
 front-matter until it merges, at which point it claims `max + 1` and gets an
-Index row. Two slates are in review.
+Index row. One slate is in review.
 
 **Language gaps surfaced by the 2026-07 grammar/object-model audit:**
 
