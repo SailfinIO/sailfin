@@ -1,0 +1,4 @@
+// compiler/tests/unit/fixtures/repository_topology/transitional/stdlib/json/src/mod.sfn
+//
+// Transitional target-stdlib fixture for SFN-929.
+fn json_marker() { }

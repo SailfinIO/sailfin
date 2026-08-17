@@ -1,0 +1,6 @@
+[capsule]
+name = "sfn/runtime-native"
+version = "0.0.0"
+
+[build]
+kind = "runtime"

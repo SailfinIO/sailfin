@@ -1,0 +1,7 @@
+[capsule]
+name = "sfn/compiler"
+version = "0.0.0"
+
+[build]
+kind = "binary"
+entry = "src/main.sfn"

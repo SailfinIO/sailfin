@@ -1,0 +1,4 @@
+// compiler/tests/unit/fixtures/repository_topology/transitional/compiler/capsules/syntax/src/mod.sfn
+//
+// Transitional current-role fixture for SFN-929.
+fn syntax_marker() { }

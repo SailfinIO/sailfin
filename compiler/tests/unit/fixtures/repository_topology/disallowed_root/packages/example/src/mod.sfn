@@ -1,0 +1,4 @@
+// compiler/tests/unit/fixtures/repository_topology/disallowed_root/packages/example/src/mod.sfn
+//
+// Disallowed-root fixture for SFN-929.
+fn example_marker() { }

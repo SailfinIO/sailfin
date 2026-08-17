@@ -1,0 +1,598 @@
+// compiler/tests/unit/repository_topology_test.sfn
+//
+// Executable repository-topology contract for SFEP-0072 migration slice 1.
+// It separates canonical capsule identity from physical member placement and
+// rejects duplicate identities or member entries that escape their owner.
+import {
+    contains,
+    ends_with,
+    split,
+    starts_with,
+    substring
+} from "sfn/strings";
+
+import { _cr_sort_strings } from "../../src/capsule_resolver/paths";
+import { _cr_expand_member_globs, parse_workspace_member_paths } from "../../src/capsule_resolver/workspace";
+import {
+    toml_get_entry,
+    toml_get_name,
+    toml_get_workspace_exclude,
+    toml_get_workspace_members
+} from "../../src/toml_parser";
+
+struct TopologyResult {
+    ok: boolean;
+    diagnostic: string;
+    member_count: int;
+}
+
+struct ResolvedPath {
+    ok: boolean;
+    path: string;
+}
+
+fn _topology_ok(member_count: int) -> TopologyResult {
+    return TopologyResult {
+        ok: true,
+        diagnostic: "",
+        member_count: member_count
+    };
+}
+
+fn _topology_error(diagnostic: string) -> TopologyResult {
+    return TopologyResult {
+        ok: false,
+        diagnostic: diagnostic,
+        member_count: 0
+    };
+}
+
+fn _resolved_path_ok(path: string) -> ResolvedPath {
+    return ResolvedPath { ok: true, path: path };
+}
+
+fn _resolved_path_error() -> ResolvedPath {
+    return ResolvedPath { ok: false, path: "" };
+}
+
+fn _path_join(parent: string, child: string) -> string {
+    if child.length == 0 { return parent; }
+    if starts_with(child, "/") { return child; }
+    if parent.length == 0 || parent == "." { return child; }
+    if parent == "/" { return "/" + child; }
+    return parent + "/" + child;
+}
+
+fn _path_parent(path: string) -> string {
+    let mut last: int = -1;
+    let mut i: int = 0;
+    loop {
+        if i >= path.length { break; }
+        if path[i] == "/" { last = i; }
+        i += 1;
+    }
+    if last < 0 { return "."; }
+    if last == 0 { return "/"; }
+    return substring(path, 0, last);
+}
+
+// Collapse dot segments before containment comparisons. Repository manifests
+// use forward slashes on every host; backslashes are rejected separately.
+fn _normalize_path(path: string) -> string {
+    let is_absolute = starts_with(path, "/");
+    let parts = split(path, "/");
+    let mut out = "";
+    if is_absolute { out = "/"; }
+    let mut i: int = 0;
+    loop {
+        if i >= parts.length { break; }
+        let part = parts[i];
+        i += 1;
+        if part.length == 0 || part == "." { continue; }
+        if part == ".." {
+            if out.length == 0 || out == "." { out = ".."; } else if out == ".."
+                || ends_with(out, "/..") { out = _path_join(out, ".."); } else if out != "/" {
+                out = _path_parent(out);
+            }
+            continue;
+        }
+        out = _path_join(out, part);
+    }
+    if out.length == 0 { return "."; }
+    return out;
+}
+
+fn _remaining_path(parts: string[], start: int) -> string {
+    let mut out = "";
+    let mut i = start;
+    loop {
+        if i >= parts.length { break; }
+        if parts[i].length > 0 { out = _path_join(out, parts[i]); }
+        i += 1;
+    }
+    return out;
+}
+
+// Resolve link components in traversal order with a bounded restart. Dot-dot
+// segments are applied only after every preceding link is resolved, matching
+// filesystem traversal rather than lexical pre-normalization. `fs.read_link`
+// returns an empty string for regular files and on unsupported hosts. A cycle
+// or overlong chain fails closed instead of returning a partially resolved
+// path that could pass containment.
+fn _resolve_links(path: string, depth: int) -> ResolvedPath ![io] {
+    if depth >= 16 { return _resolved_path_error(); }
+    let is_absolute = starts_with(path, "/");
+    let parts = split(path, "/");
+    let mut current = "";
+    if is_absolute { current = "/"; }
+    let mut i: int = 0;
+    loop {
+        if i >= parts.length { break; }
+        let part = parts[i];
+        i += 1;
+        if part.length == 0 || part == "." { continue; }
+        if part == ".." {
+            if current.length == 0 || current == "." { current = ".."; } else if current == ".."
+                || ends_with(current, "/..") {
+                current = _path_join(current, "..");
+            } else if current != "/" { current = _path_parent(current); }
+            continue;
+        }
+        let candidate = _path_join(current, part);
+        let link_target = fs.read_link(candidate);
+        if link_target.length == 0 {
+            current = candidate;
+            continue;
+        }
+        let mut replacement = link_target;
+        if !starts_with(link_target, "/") {
+            replacement = _path_join(_path_parent(candidate), link_target);
+        }
+        let remaining = _remaining_path(parts, i);
+        if remaining.length > 0 {
+            replacement = _path_join(replacement, remaining);
+        }
+        return _resolve_links(replacement, depth + 1);
+    }
+    if current.length == 0 { return _resolved_path_ok("."); }
+    return _resolved_path_ok(_normalize_path(current));
+}
+
+fn _is_contained(root: string, path: string) -> boolean {
+    let normalized_root = _normalize_path(root);
+    let normalized_path = _normalize_path(path);
+    if normalized_root == "." {
+        return normalized_path != ".." && !starts_with(normalized_path, "../")
+            && !starts_with(normalized_path, "/");
+    }
+    return normalized_path == normalized_root || starts_with(normalized_path, normalized_root
+        + "/");
+}
+
+// These are the only member placements committed by SFEP-0072: today's
+// roots, the dual-root transition, and the three-root target. Logical capsule
+// names are intentionally absent from this physical policy.
+fn _is_allowed_member_path(path: string) -> boolean {
+    if path == "compiler" || path == "runtime" { return true; }
+    let parts = split(path, "/");
+    if parts.length == 2 {
+        if parts[0] == "stdlib" { return true; }
+        return parts[0] == "compiler" && parts[1] != "capsules";
+    }
+    if parts.length != 3 { return false; }
+    if parts[0] == "compiler" && parts[1] == "capsules" { return true; }
+    return parts[0] == "capsules" && parts[1] == "sfn";
+}
+
+fn _is_safe_member_declaration(path: string) -> boolean {
+    if path.length == 0 || starts_with(path, "/") || contains(path, "\\") {
+        return false;
+    }
+    let parts = split(path, "/");
+    let mut i: int = 0;
+    loop {
+        if i >= parts.length { break; }
+        let part = parts[i];
+        let is_last = i == parts.length - 1;
+        i += 1;
+        if part.length == 0 || part == "." || part == ".." { return false; }
+        if contains(part, "*") && (!is_last || part != "*") { return false; }
+    }
+    return true;
+}
+
+fn _is_allowed_member_declaration(path: string) -> boolean {
+    if path == "compiler/*" || path == "compiler/capsules/*" || path == "capsules/sfn/*"
+        || path == "stdlib/*" { return true; }
+    if contains(path, "*") { return false; }
+    return _is_allowed_member_path(path);
+}
+
+fn _members_text_has_empty_entry(members_text: string) -> boolean {
+    return starts_with(members_text, "\n") || ends_with(members_text, "\n")
+        || contains(members_text, "\n\n");
+}
+
+fn _name_index(names: string[], name: string) -> int {
+    let mut i: int = 0;
+    loop {
+        if i >= names.length { break; }
+        if names[i] == name { return i; }
+        i += 1;
+    }
+    return -1;
+}
+
+// The dormant prelude manifest is the sole accepted legacy escape. It remains
+// exact and link-resolved so another capsule, target, or spelling cannot grow
+// the exception before SFEP-0072's prelude-adoption slice removes it.
+fn _is_legacy_prelude_escape(workspace_root: string, resolved_workspace: string, member_path: string, name: string, entry: string, resolved_entry: string) -> boolean ![io] {
+    if member_path != "capsules/sfn/prelude" || name != "sfn/prelude" || entry != "../../../runtime/prelude.sfn" {
+        return false;
+    }
+    let expected_path = _normalize_path(_path_join(resolved_workspace, "runtime/prelude.sfn"));
+    let expected = _resolve_links(_path_join(workspace_root, "runtime/prelude.sfn"), 0);
+    if !expected.ok || !_is_contained(resolved_workspace, expected.path) {
+        return false;
+    }
+    if expected.path != expected_path { return false; }
+    return resolved_entry == expected_path;
+}
+
+fn _validate_repository_topology(workspace_root: string) -> TopologyResult ![io] {
+    let workspace_manifest = _path_join(workspace_root, "workspace.toml");
+    if !fs.exists(workspace_manifest) {
+        return _topology_error("repository topology: missing workspace.toml at \""
+            + workspace_manifest
+            + "\"");
+    }
+    let workspace_resolution = _resolve_links(workspace_root, 0);
+    if !workspace_resolution.ok {
+        return _topology_error("repository topology: workspace root link resolution reached the 16-hop bound");
+    }
+    let resolved_workspace = workspace_resolution.path;
+    let workspace_manifest_resolution = _resolve_links(workspace_manifest, 0);
+    if !workspace_manifest_resolution.ok {
+        return _topology_error("repository topology: workspace.toml link resolution reached the 16-hop bound");
+    }
+    let expected_workspace_manifest = _normalize_path(_path_join(resolved_workspace, "workspace.toml"));
+    if workspace_manifest_resolution.path != expected_workspace_manifest {
+        return _topology_error("repository topology: workspace.toml resolves outside its physical location");
+    }
+    let workspace_text = fs.readFile(workspace_manifest);
+    let members_text = toml_get_workspace_members(workspace_text);
+    let raw_paths = parse_workspace_member_paths(members_text);
+    if raw_paths.length == 0 {
+        return _topology_error("repository topology: workspace declares no non-empty members");
+    }
+    if _members_text_has_empty_entry(members_text) {
+        return _topology_error("repository topology: workspace member declaration \"\" is unsafe");
+    }
+    let mut raw_index: int = 0;
+    loop {
+        if raw_index >= raw_paths.length { break; }
+        let raw_path = raw_paths[raw_index];
+        raw_index += 1;
+        if !_is_safe_member_declaration(raw_path) {
+            return _topology_error("repository topology: workspace member declaration \""
+                + raw_path
+                + "\" is unsafe");
+        }
+        if !_is_allowed_member_declaration(raw_path) {
+            return _topology_error("repository topology: workspace member declaration \""
+                + raw_path
+                + "\" is outside the allowed current, transitional, and target roots");
+        }
+    }
+    let exclude = toml_get_workspace_exclude(workspace_text);
+    let paths = _cr_sort_strings(_cr_expand_member_globs(workspace_root, raw_paths, exclude));
+    let mut names: string[] = [];
+    let mut name_paths: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= paths.length { break; }
+        let member_path = paths[i];
+        i += 1;
+        if !_is_allowed_member_path(member_path) {
+            return _topology_error("repository topology: member \""
+                + member_path
+                + "\" is outside the allowed current, transitional, and target roots");
+        }
+        let member_root = _path_join(workspace_root, member_path);
+        let member_resolution = _resolve_links(member_root, 0);
+        if !member_resolution.ok {
+            return _topology_error("repository topology: member \""
+                + member_path
+                + "\" link resolution reached the 16-hop bound");
+        }
+        let resolved_member = member_resolution.path;
+        if !_is_contained(resolved_workspace, resolved_member) {
+            return _topology_error("repository topology: member \""
+                + member_path
+                + "\" resolves outside the workspace root");
+        }
+        let expected_member = _normalize_path(_path_join(resolved_workspace, member_path));
+        if resolved_member != expected_member {
+            return _topology_error("repository topology: member \""
+                + member_path
+                + "\" resolves outside its declared physical placement");
+        }
+        let manifest_path = _path_join(member_root, "capsule.toml");
+        if !fs.exists(manifest_path) {
+            return _topology_error("repository topology: member \""
+                + member_path
+                + "\" has no capsule.toml");
+        }
+        let manifest_resolution = _resolve_links(manifest_path, 0);
+        if !manifest_resolution.ok {
+            return _topology_error("repository topology: member \""
+                + member_path
+                + "\" capsule.toml link resolution reached the 16-hop bound");
+        }
+        let resolved_manifest = manifest_resolution.path;
+        if !_is_contained(resolved_member, resolved_manifest) {
+            return _topology_error("repository topology: member \""
+                + member_path
+                + "\" resolves capsule.toml outside its member root");
+        }
+        let expected_manifest = _normalize_path(_path_join(resolved_member, "capsule.toml"));
+        if resolved_manifest != expected_manifest {
+            return _topology_error("repository topology: member \""
+                + member_path
+                + "\" resolves capsule.toml outside its canonical physical placement");
+        }
+        let manifest_text = fs.readFile(manifest_path);
+        let name = toml_get_name(manifest_text);
+        if name.length == 0 {
+            return _topology_error("repository topology: member \""
+                + member_path
+                + "\" has no canonical [capsule].name");
+        }
+        let duplicate = _name_index(names, name);
+        if duplicate >= 0 {
+            return _topology_error("repository topology: duplicate capsule name \""
+                + name
+                + "\" at \""
+                + name_paths[duplicate]
+                + "\" and \""
+                + member_path
+                + "\"");
+        }
+        names.push(name);
+        name_paths.push(member_path);
+
+        let entry = toml_get_entry(manifest_text);
+        if entry.length == 0 { continue; }
+        if contains(entry, "\\") {
+            return _topology_error("repository topology: member \""
+                + member_path
+                + "\" [build].entry \""
+                + entry
+                + "\" uses a backslash");
+        }
+        let entry_resolution = _resolve_links(_path_join(member_root, entry), 0);
+        if !entry_resolution.ok {
+            return _topology_error("repository topology: member \""
+                + member_path
+                + "\" [build].entry \""
+                + entry
+                + "\" link resolution reached the 16-hop bound");
+        }
+        let resolved_entry = entry_resolution.path;
+        if !_is_contained(resolved_member, resolved_entry) && !_is_legacy_prelude_escape(workspace_root, resolved_workspace, member_path, name, entry, resolved_entry) {
+            return _topology_error("repository topology: member \""
+                + member_path
+                + "\" [build].entry \""
+                + entry
+                + "\" escapes its member root");
+        }
+    }
+    return _topology_ok(paths.length);
+}
+
+fn _fixture(name: string) -> string {
+    return "compiler/tests/unit/fixtures/repository_topology/" + name;
+}
+
+fn _assert_valid(root: string) -> int ![io] {
+    let result = _validate_repository_topology(root);
+    if !result.ok { print.err(result.diagnostic); }
+    assert result.ok;
+    return result.member_count;
+}
+
+fn _write_legacy_prelude_workspace(root: string) ![io] {
+    fs.createDirectory(root + "/runtime", true);
+    fs.createDirectory(root + "/capsules/sfn/prelude", true);
+    fs.writeFile(root + "/workspace.toml", "[workspace]\nmembers = [\"runtime\","
+        + " \"capsules/sfn/*\"]\n");
+    fs.writeFile(root + "/runtime/capsule.toml", "[capsule]\n"
+        + "name = \"sfn/runtime-native\"\nversion = \"0.0.0\"\n\n"
+        + "[build]\nkind = \"runtime\"\n");
+    fs.writeFile(root + "/capsules/sfn/prelude/capsule.toml", "[capsule]\n"
+        + "name = \"sfn/prelude\"\nversion = \"0.0.0\"\n\n[build]\n"
+        + "kind = \"library\"\nentry = \"../../../runtime/prelude.sfn\"\n");
+}
+
+test "repository topology: current checkout satisfies the contract" ![io] {
+    assert _assert_valid(".") > 0;
+}
+
+test "repository topology: accepted transitional member shapes pass" ![io] {
+    assert _assert_valid(_fixture("transitional")) == 6;
+}
+
+test "repository topology: accepted target member shapes pass" ![io] {
+    assert _assert_valid(_fixture("target")) == 5;
+}
+
+test "repository topology: duplicate canonical names fail deterministically" ![io] {
+    let result = _validate_repository_topology(_fixture("duplicate_name"));
+    assert ! result.ok;
+    assert result.diagnostic == "repository topology: duplicate capsule name \"sfn/duplicate\""
+        + " at \"stdlib/alpha\" and \"stdlib/beta\"";
+}
+
+test "repository topology: lexical entry escapes fail deterministically" ![io] {
+    let result = _validate_repository_topology(_fixture("entry_escape"));
+    assert ! result.ok;
+    assert result.diagnostic == "repository topology: member \"stdlib/escape\""
+        + " [build].entry \"../outside.sfn\" escapes its member root";
+}
+
+test "repository topology: unsafe member declarations fail before expansion" ![io] {
+    let root = fs.mkdtemp("sfn-topology-unsafe-member-");
+    fs.writeFile(root + "/workspace.toml", "[workspace]\nmembers = [\"compiler/.\"]\n");
+    let result = _validate_repository_topology(root);
+    assert ! result.ok;
+    assert result.diagnostic == "repository topology: workspace member declaration"
+        + " \"compiler/.\" is unsafe";
+}
+
+test "repository topology: dormant unapproved roots fail before expansion" ![io] {
+    let root = fs.mkdtemp("sfn-topology-dormant-root-");
+    fs.writeFile(root + "/workspace.toml", "[workspace]\n"
+        + "members = [\"compiler\", \"packages/*\"]\n");
+    let result = _validate_repository_topology(root);
+    assert ! result.ok;
+    assert result.diagnostic == "repository topology: workspace member declaration"
+        + " \"packages/*\" is outside the allowed current, transitional, and target roots";
+}
+
+test "repository topology: workspace manifest links cannot redirect policy" ![io] {
+    let root = fs.mkdtemp("sfn-topology-workspace-link-");
+    let outside = fs.mkdtemp("sfn-topology-workspace-link-outside-");
+    fs.writeFile(outside + "/workspace.toml", "[workspace]\nmembers = [\"compiler\"]\n");
+    if !fs.symlink(outside + "/workspace.toml", root + "/workspace.toml") {
+        return;
+    }
+    let result = _validate_repository_topology(root);
+    assert ! result.ok;
+    assert result.diagnostic == "repository topology: workspace.toml"
+        + " resolves outside its physical location";
+}
+
+test "repository topology: link entry escapes fail where links are supported" ![io] {
+    let root = fs.mkdtemp("sfn-topology-link-");
+    fs.createDirectory(root + "/outside", true);
+    fs.createDirectory(root + "/stdlib/link/src", true);
+    fs.writeFile(root + "/workspace.toml", "[workspace]\nmembers = [\"stdlib/*\"]\n");
+    fs.writeFile(root + "/stdlib/link/capsule.toml", "[capsule]\n"
+        + "name = \"sfn/link\"\nversion = \"0.0.0\"\n\n[build]\n"
+        + "kind = \"library\"\nentry = \"src/mod.sfn\"\n");
+    fs.writeFile(root + "/outside/mod.sfn", "fn outside_marker() {}\n");
+    if !fs.symlink("../../../outside/mod.sfn", root + "/stdlib/link/src/mod.sfn") {
+        return;
+    }
+    let result = _validate_repository_topology(root);
+    assert ! result.ok;
+    assert result.diagnostic == "repository topology: member \"stdlib/link\""
+        + " [build].entry \"src/mod.sfn\" escapes its member root";
+}
+
+test "repository topology: member links cannot redirect physical placement" ![io] {
+    let root = fs.mkdtemp("sfn-topology-member-link-");
+    fs.createDirectory(root + "/packages/evil/src", true);
+    fs.createDirectory(root + "/stdlib", true);
+    fs.writeFile(root + "/workspace.toml", "[workspace]\nmembers = [\"stdlib/*\"]\n");
+    fs.writeFile(root + "/packages/evil/capsule.toml", "[capsule]\n"
+        + "name = \"sfn/evil\"\nversion = \"0.0.0\"\n\n[build]\n"
+        + "kind = \"library\"\nentry = \"src/mod.sfn\"\n");
+    fs.writeFile(root + "/packages/evil/src/mod.sfn", "fn evil_marker() {}\n");
+    if !fs.symlink("../packages/evil", root + "/stdlib/evil") { return; }
+    let result = _validate_repository_topology(root);
+    assert ! result.ok;
+    assert result.diagnostic == "repository topology: member \"stdlib/evil\""
+        + " resolves outside its declared physical placement";
+}
+
+test "repository topology: canonical manifests cannot redirect inside a member" ![io] {
+    let root = fs.mkdtemp("sfn-topology-manifest-link-");
+    fs.createDirectory(root + "/stdlib/linked/src", true);
+    fs.writeFile(root + "/workspace.toml", "[workspace]\nmembers = [\"stdlib/*\"]\n");
+    fs.writeFile(root + "/stdlib/linked/alternate.toml", "[capsule]\n"
+        + "name = \"sfn/linked\"\nversion = \"0.0.0\"\n\n[build]\n"
+        + "kind = \"library\"\nentry = \"src/mod.sfn\"\n");
+    fs.writeFile(root + "/stdlib/linked/src/mod.sfn", "fn linked_marker() {}\n");
+    if !fs.symlink("alternate.toml", root + "/stdlib/linked/capsule.toml") {
+        return;
+    }
+    let result = _validate_repository_topology(root);
+    assert ! result.ok;
+    assert result.diagnostic == "repository topology: member \"stdlib/linked\""
+        + " resolves capsule.toml outside its canonical physical placement";
+}
+
+test "repository topology: link traversal resolves before dot-dot containment" ![io] {
+    let root = fs.mkdtemp("sfn-topology-link-dotdot-");
+    fs.createDirectory(root + "/outside/dir", true);
+    fs.createDirectory(root + "/stdlib/link/src", true);
+    fs.writeFile(root + "/workspace.toml", "[workspace]\nmembers = [\"stdlib/*\"]\n");
+    fs.writeFile(root + "/stdlib/link/capsule.toml", "[capsule]\n"
+        + "name = \"sfn/link\"\nversion = \"0.0.0\"\n\n[build]\n"
+        + "kind = \"library\"\nentry = \"src/pivot/../escape.sfn\"\n");
+    fs.writeFile(root + "/outside/escape.sfn", "fn outside_marker() {}\n");
+    if !fs.symlink("../../../outside/dir", root + "/stdlib/link/src/pivot") {
+        return;
+    }
+    let result = _validate_repository_topology(root);
+    assert ! result.ok;
+    assert result.diagnostic == "repository topology: member \"stdlib/link\""
+        + " [build].entry \"src/pivot/../escape.sfn\" escapes its member root";
+}
+
+test "repository topology: link cycles fail closed at the traversal bound" ![io] {
+    let root = fs.mkdtemp("sfn-topology-link-cycle-");
+    fs.createDirectory(root + "/stdlib/link/src", true);
+    fs.writeFile(root + "/workspace.toml", "[workspace]\nmembers = [\"stdlib/*\"]\n");
+    fs.writeFile(root + "/stdlib/link/capsule.toml", "[capsule]\n"
+        + "name = \"sfn/link\"\nversion = \"0.0.0\"\n\n[build]\n"
+        + "kind = \"library\"\nentry = \"src/a.sfn\"\n");
+    if !fs.symlink("b.sfn", root + "/stdlib/link/src/a.sfn") { return; }
+    assert fs.symlink("a.sfn", root + "/stdlib/link/src/b.sfn");
+    let result = _validate_repository_topology(root);
+    assert ! result.ok;
+    assert result.diagnostic == "repository topology: member \"stdlib/link\""
+        + " [build].entry \"src/a.sfn\" link resolution reached the 16-hop bound";
+}
+
+test "repository topology: legacy prelude exception stays inside workspace" ![io] {
+    let root = fs.mkdtemp("sfn-topology-prelude-link-");
+    let outside = fs.mkdtemp("sfn-topology-prelude-outside-");
+    _write_legacy_prelude_workspace(root);
+    fs.writeFile(outside + "/prelude.sfn", "fn outside_prelude_marker() {}\n");
+    if !fs.symlink(outside + "/prelude.sfn", root + "/runtime/prelude.sfn") {
+        return;
+    }
+    let result = _validate_repository_topology(root);
+    assert ! result.ok;
+    assert result.diagnostic == "repository topology: member \"capsules/sfn/prelude\""
+        + " [build].entry \"../../../runtime/prelude.sfn\" escapes its member root";
+}
+
+test "repository topology: legacy prelude exception rejects internal redirects" ![io] {
+    let root = fs.mkdtemp("sfn-topology-prelude-internal-link-");
+    _write_legacy_prelude_workspace(root);
+    fs.writeFile(root + "/runtime/other.sfn", "fn other_prelude_marker() {}\n");
+    if !fs.symlink("other.sfn", root + "/runtime/prelude.sfn") { return; }
+    let result = _validate_repository_topology(root);
+    assert ! result.ok;
+    assert result.diagnostic == "repository topology: member \"capsules/sfn/prelude\""
+        + " [build].entry \"../../../runtime/prelude.sfn\" escapes its member root";
+}
+
+test "repository topology: unapproved physical roots fail deterministically" ![io] {
+    let result = _validate_repository_topology(_fixture("disallowed_root"));
+    assert ! result.ok;
+    assert result.diagnostic == "repository topology: workspace member declaration"
+        + " \"packages/*\" is outside the allowed current, transitional, and target roots";
+}
+
+test "repository topology: path audit keeps all four semantic classes" ![io] {
+    let inventory = fs.readFile("docs/conventions/repository-topology-path-audit.md");
+    assert contains(inventory, "`logical`");
+    assert contains(inventory, "`physical`");
+    assert contains(inventory, "`hybrid`");
+    assert contains(inventory, "`historical`");
+    assert contains(inventory, "Historical citations are evidence, not migration defects");
+}
