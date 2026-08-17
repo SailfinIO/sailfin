@@ -2208,28 +2208,26 @@ jobs:
       #   grep -rln 'host_is_windows\|build_host_os\|SAILFIN_HOST_OS' compiler/tests/
       # and add any file whose Windows branch should be enforced.
       #
-      # `compiler/tests/e2e/windows_exe_suffix_test.sfn` is deliberately
-      # ABSENT: turning this seam on found it already broken. It passes
-      # normally and fails at `:99` (`ends_with(out_arg, ".exe")`) under the
-      # host override. Tracked as SFN-925; excluded so the other eleven get
-      # coverage now instead of waiting on it. This exclusion is the one
-      # thing here that must not become permanent — SFN-925 deletes it.
+      # `capsules/sfn/test/tests/fixtures_test.sfn` is here for a reason
+      # specific to this job. Its `clean_runner_env` tests use the file's
+      # "holds whatever the ambient environment carries" idiom, so they pass
+      # anywhere but only EXERCISE the caller-override strip when the
+      # invoking process actually carries `SAILFIN_TARGET_OS` /
+      # `SAILFIN_HOST_OS`. This leg is the only place in CI that does. Run
+      # anywhere else those assertions are vacuous; run here they are the
+      # regression guard for SFN-925. Removing this file from the list does
+      # not fail anything — it silently stops testing the fix.
       #
-      # KNOWN LIMIT of this leg, and the reason SFN-925 is Urgent rather
-      # than a one-test fix. `clean_runner_env`
-      # (`capsules/sfn/test/src/fixtures.sfn:200-213`) strips only the
-      # pool-managed keys, so the two variables set below LEAK into any
-      # nested build a test spawns. A test that then pushes its own value
-      # produces a duplicate-keyed envp, and `getenv()` returns the FIRST
-      # match — the leaked one. So for the subset of these files that drive
-      # a nested build with a differing override, the child may run under
-      # the outer value and the test can pass while asserting something
-      # other than what it claims. That is how SFN-925 hid.
-      #
-      # In-process assertions are unaffected; only `run_capture` /
-      # `process.run` children are. So this leg is a real guard, not a
-      # theoretical one — but until SFN-925 lands, treat a green here as
-      # "the in-process Windows-host branches hold", not as full coverage.
+      # SFN-925 also closed this leg's own blind spot, so the note that used
+      # to sit here is gone rather than merely amended. `clean_runner_env`
+      # once stripped only the pool-managed keys, so the two variables set
+      # below leaked into every nested build a test spawned; a test pushing
+      # its own value produced a duplicate-keyed envp and `getenv()` returned
+      # the FIRST match — the leaked one. Children silently ran under the
+      # outer value while their tests passed. `windows_exe_suffix_test.sfn`
+      # is back in the list below because that is fixed: it was the one file
+      # whose assertion happened to fail rather than pass wrongly, which is
+      # how the whole class was found.
       - name: Windows-host seam (SAILFIN_HOST_OS=Windows)
         shell: bash
         timeout-minutes: 25
@@ -2249,7 +2247,9 @@ jobs:
             compiler/tests/e2e/env_value_abi_test.sfn \
             compiler/tests/e2e/config_test.sfn \
             compiler/tests/e2e/login_test.sfn \
-            compiler/tests/e2e/fn_reference_pthread_test.sfn
+            compiler/tests/e2e/fn_reference_pthread_test.sfn \
+            compiler/tests/e2e/windows_exe_suffix_test.sfn \
+            capsules/sfn/test/tests/fixtures_test.sfn
           echo "ok: Windows-host seam green on a Linux runner"
 
       # A host-conditional test passes trivially when the override does not
