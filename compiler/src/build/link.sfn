@@ -23,6 +23,7 @@ import {
     build_target_os,
     build_target_triple,
     target_forced_linker_flag,
+    target_reproducible_link_flag,
     target_uses_gnu_link_gc,
     triple_target_os
 } from "./target";
@@ -319,6 +320,10 @@ fn _clang_link_multi_with_opt(ll_paths: string[], out_path: string, runtime_root
     // direct-link successor (SFN-455) takes ownership of the raw linker argv.
     link_flags.push("-ffunction-sections");
     link_flags.push("-fdata-sections");
+    // `lld-link` writes a live wall-clock `TimeDateStamp` unless `/Brepro`
+    // is passed; msvc-only, no-op everywhere else (SFN-920).
+    let repro_flag = target_reproducible_link_flag(build_target_triple());
+    if repro_flag.length > 0 { link_flags.push(repro_flag); }
     // Root the runtime provider surface, then GC unreferenced sections
     // (#1047). The order matters for correctness: if symbol enumeration
     // yields nothing while runtime objects are present (`nm`/`awk`
