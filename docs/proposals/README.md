@@ -94,12 +94,13 @@ The next number is `max + 1`. Add a row in the same PR that introduces an SFEP.
 | [0069](./0069-secret-buffer-zeroization.md) | Non-Elidable Zeroization for Uniquely Owned Secret Buffers | Accepted | runtime |
 | [0070](./0070-capsule-source-closure-reachability.md) | Import-Reachability Filtering of the Capsule Source Closure | Accepted | tooling |
 | [0071](./0071-archive-targz.md) | In-Process `.tar.gz` Reader and Writer (`sfn/archive`) | Accepted | tooling |
+| [0072](./0072-domain-oriented-repository-topology.md) | Domain-Oriented Repository Topology | Accepted | tooling |
 
 ## Drafts under review (numbers assigned at merge)
 
 Per SFEP-0001 §2, a draft keeps its `draft-<slug>.md` name and `sfep: TBD`
 front-matter until it merges, at which point it claims `max + 1` and gets an
-Index row. Two slates are in review.
+Index row. One slate is in review.
 
 **Language gaps surfaced by the 2026-07 grammar/object-model audit:**
 
