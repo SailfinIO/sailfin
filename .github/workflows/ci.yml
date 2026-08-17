@@ -2135,6 +2135,152 @@ jobs:
           set -euo pipefail
           "$SAILFIN_EXE" check examples/basics/hello-world.sfn
 
+  # SFN-55 (SFEP-0021 M9), tier A': the Windows-host regression guard.
+  #
+  # `SAILFIN_HOST_OS=Windows` forces every Windows-host branch —
+  # `host_is_windows()` true, `_mktemp_sibling_cmd` returns "",
+  # `_cr_resolve_jobs()` returns 1 — while the artifacts stay natively
+  # runnable on this Linux runner. Twelve test files carry a branch behind
+  # that seam, and `grep -rn SAILFIN_HOST_OS .github/` returned NOTHING
+  # before this job: not one of those branches had ever executed in CI.
+  # They were written as regression guards for the host-side de-shell set
+  # (SFN-478/486/487/488/489/490) and were quietly guarding nothing.
+  #
+  # Deliberately on ubuntu and deliberately NOT behind any Windows path
+  # filter. The largest historical class of Windows breakage is host-side
+  # POSIX shell-out, and this catches that class on every source PR. When
+  # the filtered native-Windows job lands, this is the Windows signal that
+  # still runs when the filter skips — which is what makes filtering the
+  # expensive job defensible at all.
+  #
+  # Cost, measured rather than assumed: ~9 minutes locally with a warm
+  # test-binary cache. The design note's "~2 minutes" was an estimate and
+  # is wrong by roughly 5x. Only ~57s of that is assertions; the rest is
+  # per-file test-binary compilation, which is COLD here (this job restores
+  # no test-bin cache), so budget above the local figure rather than at it.
+  # It still costs nothing on the critical path: the run is set by
+  # `Build + Test [macos-arm64]` at ~26 min and this is well inside that.
+  #
+  # `SAILFIN_TARGET_OS=Linux` is mandatory, not decorative: without it
+  # `build_target_os()` falls back to the host override and the nested
+  # runtime-object link targets Windows on a Linux box (SFN-617). Omitting
+  # it fails with corrupt objects and a `cannot find entry symbol
+  # 'faultlib:oldnames'` from gold, which reads like a compiler bug rather
+  # than a missing variable. The pairing is recorded verbatim at
+  # `compiler/tests/unit/windows_build_deshell_test.sfn:11-19`.
+  windows-host-guard:
+    name: Windows-host guard [linux-x86_64]
+    needs: [ci-scope, build-compiler-linux]
+    if: ${{ needs.ci-scope.outputs.source == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install clang (Linux)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-18 llvm-18 jq
+          echo "CLANG=clang-18" >> "$GITHUB_ENV"
+
+      - name: Download shared compiler build
+        uses: actions/download-artifact@v8
+        with:
+          name: ci-build-tree-linux-x86_64
+
+      - name: Extract shared compiler build
+        shell: bash
+        run: |
+          set -euo pipefail
+          tar -xzf "build-tree-linux-x86_64.tar.gz"
+          rm -f "build-tree-linux-x86_64.tar.gz"
+          if [ ! -x build/bin/sfn ]; then
+            echo "[windows-host-guard] build/bin/sfn missing or not executable" >&2
+            ls -l build/bin 2>/dev/null || true
+            exit 1
+          fi
+
+      # The file list is explicit rather than globbed: a glob over
+      # `*windows*` would miss most of these (they are named for the
+      # behaviour they guard, not the host) and would silently widen if
+      # someone adds an unrelated file matching the pattern. Regenerate with:
+      #   grep -rln 'host_is_windows\|build_host_os\|SAILFIN_HOST_OS' compiler/tests/
+      # and add any file whose Windows branch should be enforced.
+      #
+      # `compiler/tests/e2e/windows_exe_suffix_test.sfn` is deliberately
+      # ABSENT: turning this seam on found it already broken. It passes
+      # normally and fails at `:99` (`ends_with(out_arg, ".exe")`) under the
+      # host override. Tracked as SFN-925; excluded so the other eleven get
+      # coverage now instead of waiting on it. This exclusion is the one
+      # thing here that must not become permanent — SFN-925 deletes it.
+      #
+      # KNOWN LIMIT of this leg, and the reason SFN-925 is Urgent rather
+      # than a one-test fix. `clean_runner_env`
+      # (`capsules/sfn/test/src/fixtures.sfn:200-213`) strips only the
+      # pool-managed keys, so the two variables set below LEAK into any
+      # nested build a test spawns. A test that then pushes its own value
+      # produces a duplicate-keyed envp, and `getenv()` returns the FIRST
+      # match — the leaked one. So for the subset of these files that drive
+      # a nested build with a differing override, the child may run under
+      # the outer value and the test can pass while asserting something
+      # other than what it claims. That is how SFN-925 hid.
+      #
+      # In-process assertions are unaffected; only `run_capture` /
+      # `process.run` children are. So this leg is a real guard, not a
+      # theoretical one — but until SFN-925 lands, treat a green here as
+      # "the in-process Windows-host branches hold", not as full coverage.
+      - name: Windows-host seam (SAILFIN_HOST_OS=Windows)
+        shell: bash
+        timeout-minutes: 25
+        env:
+          SAILFIN_HOST_OS: Windows
+          SAILFIN_TARGET_OS: Linux
+        run: |
+          set -euo pipefail
+          build/bin/sfn test \
+            compiler/tests/unit/toolchain_host_detect_test.sfn \
+            compiler/tests/unit/windows_build_deshell_test.sfn \
+            compiler/tests/unit/toolchain_alias_test.sfn \
+            compiler/tests/unit/dev_bootstrap_alias_test.sfn \
+            compiler/tests/unit/fs_tree_test.sfn \
+            compiler/tests/integration/selfhost_diff_test.sfn \
+            compiler/tests/e2e/errno_locator_test.sfn \
+            compiler/tests/e2e/env_value_abi_test.sfn \
+            compiler/tests/e2e/config_test.sfn \
+            compiler/tests/e2e/login_test.sfn \
+            compiler/tests/e2e/fn_reference_pthread_test.sfn
+          echo "ok: Windows-host seam green on a Linux runner"
+
+      # A host-conditional test passes trivially when the override does not
+      # take effect, so the leg above would report green while asserting
+      # nothing — the same silent-vacuity shape SFN-922 found in the
+      # fixed-point gates. Prove the override is load-bearing: this must
+      # PASS with it and FAIL without it. Both directions, or the guard is
+      # theatre.
+      - name: Prove the host override actually flips (anti-vacuity)
+        shell: bash
+        timeout-minutes: 10
+        run: |
+          set -euo pipefail
+          probe=compiler/tests/unit/_ci_host_override_probe_test.sfn
+          cat > "$probe" <<'PROBE'
+          import { build_host_os } from "../../src/build/target";
+          test "ci: host override reports Windows" ![io] {
+              assert build_host_os() == "Windows";
+          }
+          PROBE
+          trap 'rm -f "$probe"' EXIT
+          echo "--- with the override (must pass) ---"
+          SAILFIN_HOST_OS=Windows SAILFIN_TARGET_OS=Linux build/bin/sfn test "$probe"
+          echo "--- without the override (must fail) ---"
+          if SAILFIN_TARGET_OS=Linux build/bin/sfn test "$probe"; then
+            echo "[windows-host-guard] SAILFIN_HOST_OS is not load-bearing: the probe passed WITHOUT it," >&2
+            echo "  so the seam leg above is asserting nothing and this guard is vacuous (SFN-55)." >&2
+            exit 1
+          fi
+          echo "ok: SAILFIN_HOST_OS genuinely selects the Windows branch"
+
   # `compiler/tests/shard_weights.tsv` drives the time-weighted LPT partition
   # (SFN-863), but nothing in the repo wrote it — every other reference is a
   # reader, and the refresh existed only as prose. So the table silently
@@ -2246,6 +2392,7 @@ jobs:
       - build-linux
       - build-macos
       - smoke-windows
+      - windows-host-guard
       - aarch64-linux-result
     if: ${{ always() }}
     runs-on: ubuntu-24.04
@@ -2264,6 +2411,7 @@ jobs:
       BUILD_LINUX: ${{ needs.build-linux.result }}
       BUILD_MACOS: ${{ needs.build-macos.result }}
       SMOKE_WINDOWS: ${{ needs.smoke-windows.result }}
+      WINDOWS_HOST_GUARD: ${{ needs.windows-host-guard.result }}
       AARCH64_LINUX: ${{ needs.aarch64-linux-result.result }}
     steps:
       - name: Summarize required CI result
@@ -2325,6 +2473,7 @@ jobs:
             check "Build + Test [linux-x86_64]" "$BUILD_LINUX"
             check "Build + Test [macos-arm64]" "$BUILD_MACOS"
             check "Smoke test [windows-x86_64]" "$SMOKE_WINDOWS"
+            check "Windows-host guard [linux-x86_64]" "$WINDOWS_HOST_GUARD"
             check "AArch64 Linux result" "$AARCH64_LINUX"
           else
             echo "[required-ci] compiler CI is out of scope for this PR."
