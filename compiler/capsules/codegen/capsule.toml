@@ -1,6 +1,6 @@
 [capsule]
 name = "sfn/codegen"
-version = "0.9.5"
+version = "0.10.0"
 description = "Sailfin target-neutral IR production (toolchain-internal)"
 publish = false
 

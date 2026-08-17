@@ -1,6 +1,6 @@
 [capsule]
 name = "sfn/ir"
-version = "0.9.5"
+version = "0.10.0"
 description = "Sailfin native, typed SSA, and tensor IR contracts (toolchain-internal)"
 publish = false
 

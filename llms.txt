@@ -1,6 +1,6 @@
 # Sailfin Language Reference for LLMs
 
-> Version: 0.9.5 | Updated: 2026-08-11
+> Version: 0.10.0 | Updated: 2026-08-17
 > Source: https://github.com/SailfinIO/sailfin | Site: https://sailfin.dev
 
 Sailfin is a systems language with compile-time capability enforcement
