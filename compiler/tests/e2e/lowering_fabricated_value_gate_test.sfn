@@ -18,6 +18,12 @@
 // shared frontend as E0309. The remaining fixtures still exercise lowering's
 // E1002 backstop because their invalidity is not yet structurally proven there.
 //
+// SFN-543 moved the proven unknown-field access to the shared frontend as
+// E0015, which fires before lowering runs. The fixtures below therefore reach
+// the field through an *inferred* receiver (`let t = mk_t()`), which the
+// frontend cannot prove and so still reaches this backstop — the shape a
+// lowering gate exists to catch.
+//
 // SFN-565 splits the structural function-body fallback by reachability over
 // the emitted LLVM block graph. The infinite-loop exit block remains
 // disconnected and untagged, while a genuine fall-off-the-end reaches its
@@ -82,7 +88,7 @@ test "lowering fail-closed gate: bare return in value-returning fn" ![io] {
 }
 
 test "lowering fail-closed gate: unknown field in return position" ![io] {
-    _assert_emit_fails_closed("sfn527_return_null_operand.sfn", "struct T { a: i32; }\nfn in_return(t: T) -> i32 { return t.nope; }\nfn main() -> i32 { return 0; }\n", "unhandled return expression in `in_return`");
+    _assert_emit_fails_closed("sfn527_return_null_operand.sfn", "struct T { a: i32; }\nfn mk_t() -> T { return T { a: 1 }; }\nfn in_return() -> i32 { let t = mk_t(); return t.nope; }\nfn main() -> i32 { return 0; }\n", "unhandled return expression in `in_return`");
 }
 
 test "lowering fail-closed gate: return operand uncoercible to declared type" ![io] {
@@ -90,7 +96,7 @@ test "lowering fail-closed gate: return operand uncoercible to declared type" ![
 }
 
 test "lowering fail-closed gate: assignment RHS fails to lower" ![io] {
-    _assert_emit_fails_closed("sfn527_assign_null_operand.sfn", "struct T { a: i32; }\nfn in_assign(t: T) -> i32 { let mut x: i32 = 41; x = t.nope; return x; }\nfn main() -> i32 { return 0; }\n", "failed to lower assignment expression for `x` in `in_assign`");
+    _assert_emit_fails_closed("sfn527_assign_null_operand.sfn", "struct T { a: i32; }\nfn mk_t() -> T { return T { a: 1 }; }\nfn in_assign() -> i32 { let t = mk_t(); let mut x: i32 = 41; x = t.nope; return x; }\nfn main() -> i32 { return 0; }\n", "failed to lower assignment expression for `x` in `in_assign`");
 }
 
 test "lowering fail-closed gate: assignment RHS uncoercible" ![io] {
@@ -102,7 +108,7 @@ test "lowering fail-closed gate: let initializer uncoercible" ![io] {
 }
 
 test "lowering fail-closed gate: let initializer fails to lower" ![io] {
-    _assert_emit_fails_closed("sfn527_let_null_operand.sfn", "struct T { a: i32; }\nfn in_let(t: T) -> i32 { let x: i32 = t.nope; return x; }\nfn main() -> i32 { return 0; }\n", "initializer for `x` in `in_let` did not lower");
+    _assert_emit_fails_closed("sfn527_let_null_operand.sfn", "struct T { a: i32; }\nfn mk_t() -> T { return T { a: 1 }; }\nfn in_let() -> i32 { let t = mk_t(); let x: i32 = t.nope; return x; }\nfn main() -> i32 { return 0; }\n", "initializer for `x` in `in_let` did not lower");
 }
 
 test "lowering fail-closed gate: struct literal missing field" ![io] {
@@ -110,11 +116,11 @@ test "lowering fail-closed gate: struct literal missing field" ![io] {
 }
 
 test "lowering fail-closed gate: struct literal field value fails to lower" ![io] {
-    _assert_emit_fails_closed("sfn527_struct_literal_unlowered_field.sfn", "struct T { a: i32; }\nstruct S { a: i32; flag: boolean; }\nfn mk(t: T) -> S { return S { a: t.nope, flag: true }; }\nfn main() -> i32 { return 0; }\n", "unable to lower value for struct literal field `S.a`");
+    _assert_emit_fails_closed("sfn527_struct_literal_unlowered_field.sfn", "struct T { a: i32; }\nfn mk_t() -> T { return T { a: 1 }; }\nstruct S { a: i32; flag: boolean; }\nfn mk() -> S { let t = mk_t(); return S { a: t.nope, flag: true }; }\nfn main() -> i32 { return 0; }\n", "unable to lower value for struct literal field `S.a`");
 }
 
 test "lowering fail-closed gate: combined repro fails `sfn build` and produces no binary" ![io] {
-    let src = _write_source("sfn527_build_gate.sfn", "struct T { a: i32; }\nfn f() -> i32 { return; }\nfn g(t: T) -> i32 { let x: i32 = t.nope; return x; }\nfn in_return(t: T) -> i32 { return t.nope; }\nfn main() -> i32 { return 0; }\n");
+    let src = _write_source("sfn527_build_gate.sfn", "struct T { a: i32; }\nfn mk_t() -> T { return T { a: 1 }; }\nfn f() -> i32 { return; }\nfn g() -> i32 { let t = mk_t(); let x: i32 = t.nope; return x; }\nfn in_return() -> i32 { let t = mk_t(); return t.nope; }\nfn main() -> i32 { return 0; }\n");
     let binpath = _scratch_dir() + "/sfn527_build_gate_bin";
     if fs.exists(binpath) { fs.deleteFile(binpath); }
     let env_vars = clean_runner_env(nested_runner_scratch("sfn527-build"));
