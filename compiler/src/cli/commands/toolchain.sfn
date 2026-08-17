@@ -319,10 +319,15 @@ fn _is_https_url(url: string) -> boolean {
 // unrelated reason, undermining the very discriminator it names. SFN-927
 // fixes that, so the claim now holds for any toolchain built after it.
 //
-// Removal condition: unchanged, SFN-923 — once the cross-Windows build
-// stages the `sfn/crypto` capsule and `tls.sfn` joins `RUNTIME_MODS`,
-// every shipped Windows binary speaks HTTPS and this note stops being
-// true. SFN-927 does not retire this note (it fixes a different bug on
+// Removal condition: SFN-58 — this note stops being true when no shipped
+// Windows binary carries the TLS stubs, i.e. when `runtime/ir/
+// windows_stubs.ll` and the mingw cross path are retired in favour of the
+// native MSVC build, which links the real `tls.sfn`. SFN-923 is a
+// prerequisite rather than the condition: the duplicate
+// `__sfn_type_desc.*` failures that block a cross-Windows link are in
+// `sfn/crypto` itself, so the capsule cannot be staged until that lands —
+// but staging it would not retire this note, because the mingw build
+// would still ship stubs. SFN-927 does not retire this note (it fixes a different bug on
 // the same runtime-module list); it only makes the note's `http://`
 // discriminator trustworthy rather than aspirational.
 fn _download_failure_note(url: string) -> string ![io] {

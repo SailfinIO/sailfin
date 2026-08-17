@@ -121,7 +121,7 @@ test "socket-ops: the POSIX module keeps close and never links Winsock" ![io] {
     assert outcome == 0;
 }
 
-// Both halves must define the same five symbols, or the swap produces a
+// Both halves must define the same six symbols, or the swap produces a
 // link with an unresolved reference on whichever target loses. This is
 // the contract `target_condition_runtime_sfn_sources` depends on and
 // that no type checker enforces across a module swap.
@@ -136,11 +136,13 @@ test "socket-ops: both siblings define the same exported surface" ![io] {
         assert _has_define(posix, "sfn_socket_set_timeouts");
         assert _has_define(posix, "sfn_socket_recv");
         assert _has_define(posix, "sfn_socket_send");
+        assert _has_define(posix, "sfn_socket_timeout_readback_ms");
         assert _has_define(win, "sfn_socket_open");
         assert _has_define(win, "sfn_socket_close");
         assert _has_define(win, "sfn_socket_set_timeouts");
         assert _has_define(win, "sfn_socket_recv");
         assert _has_define(win, "sfn_socket_send");
+        assert _has_define(win, "sfn_socket_timeout_readback_ms");
         return 0;
     });
     assert outcome == 0;
@@ -168,6 +170,14 @@ test "socket-ops: the Windows sibling declares 32-bit recv/send, the POSIX sibli
         assert ! contains(win, "declare i64 @send(");
         assert contains(posix, "declare i64 @recv(");
         assert contains(posix, "declare i64 @send(");
+        // The narrowed declaration is useless without a genuine `sext` back
+        // to i64 (a `zext` would still turn Winsock's `-1` into a large
+        // positive number). `core_cast_lowering.sfn` selects `sext` for a
+        // signed `i32 -> i64` widening today; this pins that the emitted
+        // body actually does, so a regression in that selector (not just
+        // the declared width) fails here instead of passing silently
+        // because these assertions never looked inside the function body.
+        assert _line_has_both(win, "sext i32", "to i64");
         return 0;
     });
     assert outcome == 0;
@@ -197,6 +207,42 @@ test "socket-ops: the Windows sibling converts seconds to a millisecond DWORD" !
         assert ! contains(posix, "mul i32 %secs, 1000");
         assert _line_has_both(posix, "i32 1, i32 20", "i32 16)");
         assert _line_has_both(posix, "i32 1, i32 21", "i32 16)");
+        return 0;
+    });
+    assert outcome == 0;
+}
+
+// SFN-927's generic-fd counterpart to the two tests above, for the
+// `platform/fd_io.sfn` / `fd_io_windows.sfn` pair `io.sfn`/`assert.sfn`
+// route through. Content pins, not just plumbing: `fd_io_windows.sfn`
+// declaring the UCRT's `_read`/`_write` at the wrong (64-bit) width is a
+// memory-unsafety regression nothing else in this suite catches — no
+// Windows CI leg runs `sfn test`, and `cross_windows_runtime_modules_test.sfn`
+// only proves the manifest/Makefile agree the sibling is swapped in, not
+// what the sibling's body contains.
+test "fd-io: the Windows sibling declares 32-bit _read/_write and sign-extends; the POSIX sibling 64-bit read/write" ![io] {
+    let outcome = with_tmp_dir(fn (dir: string) -> int {
+        let win = _emit("fdiowin", "runtime/sfn/platform/fd_io_windows.sfn", dir);
+        let posix = _emit("fdioposix", "runtime/sfn/platform/fd_io.sfn", dir);
+        assert win != "EMIT_FAILED";
+        assert posix != "EMIT_FAILED";
+        assert contains(win, "declare i32 @_read(");
+        assert contains(win, "declare i32 @_write(");
+        assert ! contains(win, "declare i64 @_read(");
+        assert ! contains(win, "declare i64 @_write(");
+        // The Windows sibling must never fall back to the un-underscored
+        // POSIX names: `read`/`write` are not what the UCRT exports them
+        // as, and `_has_declare`'s exact-symbol match means "read" would
+        // NOT be satisfied by a stray "_read" substring, so this is a
+        // real assertion.
+        assert ! _has_declare(win, "read");
+        assert ! _has_declare(win, "write");
+        assert contains(posix, "declare i64 @read(");
+        assert contains(posix, "declare i64 @write(");
+        // Same sign-extension pin as the socket pair above (W2): the
+        // narrowed declaration alone does not restore the negative-error
+        // signal without a genuine `sext`.
+        assert _line_has_both(win, "sext i32", "to i64");
         return 0;
     });
     assert outcome == 0;

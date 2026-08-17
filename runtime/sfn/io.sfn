@@ -77,16 +77,20 @@
 // for call to …". So these are declared locally here, mirroring the
 // `arena.sfn` / `string.sfn` / `process.sfn` discipline.
 //
-// Routed through `platform/socket_ops.sfn`'s `sfn_fd_write`/`sfn_fd_read`
+// Routed through `platform/fd_io.sfn`'s `sfn_fd_write`/`sfn_fd_read`
 // rather than a raw `write`/`read` extern: the UCRT's `_write`/`_read`
 // are `int` (32-bit), not POSIX's `ssize_t` (64-bit), so a raw `-> i64`
 // extern here would silently promote a `-1` error into `4294967295` on
 // Windows — the identical defect `sfn_socket_recv`/`sfn_socket_send`
-// fixed on the socket path (SFN-927). `platform/socket_ops.sfn` is
-// swapped for its Windows sibling by
-// `target_condition_runtime_sfn_sources`, so linking against these two
-// symbols here is a plain cross-module runtime reference — the same
-// shape `adapters/http.sfn` uses for the socket wrappers.
+// fixed on the socket path (SFN-927). `platform/fd_io.sfn`, not
+// `platform/socket_ops.sfn`: that module is gated behind the `net`
+// effect (`runtime/capsule.toml [sfn-source-gates]`) and this module is
+// not, so reaching for the gated pair here would leave `sfn_fd_write`/
+// `sfn_fd_read` undefined at link time for any binary that never
+// declares `![net]`. `platform/fd_io.sfn` is swapped for its Windows
+// sibling by `target_condition_runtime_sfn_sources`, so linking against
+// these two symbols here is a plain cross-module runtime reference —
+// the same shape `adapters/http.sfn` uses for the socket wrappers.
 extern fn sfn_fd_write(fd: i32, buf: *u8, count: usize) -> i64;
 
 // The read-side counterpart, for the `io.read_fd` / `io.read_line`

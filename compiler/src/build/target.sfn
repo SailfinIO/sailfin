@@ -427,10 +427,10 @@ fn target_extra_link_libs(triple: string) -> string[] {
 // basename so the manifest-root prefix is irrelevant, and rebuild the
 // swapped path from the source's own directory so it stays correctly
 // rooted (`<root>/sfn/process.sfn` → `<root>/sfn/platform/process_windows.sfn`).
-// `rlimit.sfn`/`terminal.sfn`/`rand.sfn`/`fs_exec_mode.sfn`/`socket_ops.sfn`/
-// `rename_ops.sfn`/`cert_roots.sfn` already live in `platform/`, so their
-// siblings are joined directly onto that same directory rather than
-// appending another `platform/` segment.
+// `rlimit.sfn`/`terminal.sfn`/`rand.sfn`/`fs_exec_mode.sfn`/`fd_io.sfn`/
+// `socket_ops.sfn`/`rename_ops.sfn`/`cert_roots.sfn` already live in
+// `platform/`, so their siblings are joined directly onto that same
+// directory rather than appending another `platform/` segment.
 fn target_condition_runtime_sfn_sources(sources: string[], target_os: string) -> string[] {
     if !target_os_is_windows(target_os) { return sources; }
     let mut out: string[] = [];
