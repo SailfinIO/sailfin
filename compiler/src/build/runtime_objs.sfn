@@ -770,10 +770,15 @@ fn _runtime_obj_key_with_slug(base_key: string, slug: string) -> string {
 // triple, so the pre-fix aarch64-cross-Linux arch defect (§2.2/§5 row 11)
 // baked the WRONG arch into a runtime object while still keying it under a
 // correct-LOOKING triple string — a real but narrower gap than the module
-// key's, and not one a marker bump alone would close (the key would still
-// read `aarch64-unknown-linux-gnu` either way). Left as a known, narrower
-// residual rather than bumped to avoid manufacturing a second orphan sweep
-// for a fold that was not actually poisoned the way the module key was.
+// key's. A marker bump here WOULD close it: a bump orphans every pre-bump
+// entry by changing the hashed input, so the stale entries become
+// unreachable regardless of what their triple field reads (the same
+// orphan-never-mismatch property `build_cache.sfn:cache_key_for` relies
+// on). It is left unbumped on reachability grounds alone: because
+// `target_clang_triple` returns `""` for every non-Windows triple, the
+// aarch64 and Darwin cross paths were never wired, so the poisoned
+// entries are near-unreachable and a second orphan sweep would cost more
+// than the residual it clears.
 fn _runtime_obj_key_with_target(base_key: string, target_triple: string) -> string {
     if base_key.length == 0 { return ""; }
     return base_key + "\ntgt2:" + target_triple;
