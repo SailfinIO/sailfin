@@ -31,6 +31,7 @@ import { expect_eq_bool, expect_eq_str, expect_eq_str_array } from "sfn/test";
 
 import { LinkPlan, _llvm_text_link_program_argv, _llvm_text_link_test_argv } from "../../src/backend";
 import { _llvm_text_assemble_argv } from "../../src/build/clang_argv";
+import { emit_child_argv } from "../../src/build/emit_child_argv";
 import { empty_llvm_import_context, resolve_llvm_provider_context } from "../../src/build/llvm_provider_context";
 import {
     build_host_os,
@@ -662,4 +663,44 @@ test "target: resolve_llvm_provider_context derives target_arch from an explicit
     let ctx = resolve_llvm_provider_context();
     assert expect_eq_str(ctx.target_arch, "aarch64").ok;
     clear_build_target();
+}
+
+// ---- SFN-923 (review A1): the PARENT half — `emit_child_argv` itself ----
+//
+// The e2e coverage in `cross_target_emit_test.sfn` drives `sfn emit
+// --target=…` directly, which only pins the CHILD-side wiring (the flag
+// parses, `set_build_target` seeds the cell, the comdat gate flips). It
+// exercises nothing about whether a build's per-module emit spawners
+// (`native_emit_subprocess.sfn`, `emit_helpers.sfn`,
+// `capsule_emit_parallel.sfn`, `cli/commands/bench.sfn`) actually call
+// through `emit_child_argv` to REACH that flag. This test pins the other
+// half directly: the constructor itself must append `--target` and the
+// resolved triple to the complete argv it builds, for every caller shape
+// (with and without an import-context root).
+test "emit_child_argv: the full argv carries --target and the resolved triple" ![io] {
+    set_build_target("x86_64-pc-windows-msvc");
+    let argv = emit_child_argv("sailfin", "mymod", "out.ll", "llvm", "in.sfn", "");
+    assert expect_eq_bool(_argv_contains(argv, "--target"), true).ok;
+    assert expect_eq_bool(_argv_contains(argv, "x86_64-pc-windows-msvc"), true).ok;
+    clear_build_target();
+}
+
+test "emit_child_argv: --target is still carried when an import-context root is present" ![io] {
+    set_build_target("aarch64-unknown-linux-gnu");
+    let argv = emit_child_argv("sailfin", "mymod", "out.ll", "native", "in.sfn", "/tmp/import-ctx");
+    assert expect_eq_bool(_argv_contains(argv, "--target"), true).ok;
+    assert expect_eq_bool(_argv_contains(argv, "aarch64-unknown-linux-gnu"), true).ok;
+    assert expect_eq_bool(_argv_contains(argv, "--import-context"), true).ok;
+    clear_build_target();
+}
+
+// No explicit `--target` (the common host-build path): `emit_child_argv`
+// still appends the flag unconditionally, carrying whatever
+// `build_target_triple()` resolves absent the cell — same-host builds are
+// unaffected because that is exactly what the child would have probed for
+// itself (design note §8).
+test "emit_child_argv: --target is appended even with no active cell" ![io] {
+    clear_build_target();
+    let argv = emit_child_argv("sailfin", "mymod", "out.ll", "llvm", "in.sfn", "");
+    assert expect_eq_bool(_argv_contains(argv, "--target"), true).ok;
 }

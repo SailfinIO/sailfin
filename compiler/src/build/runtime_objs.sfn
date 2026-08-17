@@ -754,6 +754,26 @@ fn _runtime_obj_key_with_slug(base_key: string, slug: string) -> string {
 // `target_triple` last; keep it that way. Should a target-derived input
 // ever depend on something NOT derived from the triple, that input must
 // be folded in on its own.
+// SFN-923: this marker deliberately did NOT bump alongside
+// `build_cache.sfn:cache_key_for`'s `tgt2:` -> `tgt3:` move. That module
+// key needed the bump because a Windows-keyed entry could hold IR a
+// HOST-flavoured emit child actually produced (`emit_child_argv` did not
+// exist yet, so the per-module emit subprocess silently ignored the
+// parent's resolved target). This runtime-object key is not exposed to
+// that failure mode the same way: every runtime `.sfn` emit child already
+// received the target via `SAILFIN_TARGET_TRIPLE` injection
+// (`_runtime_emit_child_env`, `:818-836`), so a pre-SFN-923 runtime object
+// keyed under `tgt2:` was genuinely built for the triple its key records —
+// UNLIKE the module-emit poisoning this fix closes. Reachability of a
+// mismatch here is additionally low for a non-Windows-msvc target:
+// `target_clang_triple` (`./target.sfn`) returns `""` for every non-Windows
+// triple, so the pre-fix aarch64-cross-Linux arch defect (§2.2/§5 row 11)
+// baked the WRONG arch into a runtime object while still keying it under a
+// correct-LOOKING triple string — a real but narrower gap than the module
+// key's, and not one a marker bump alone would close (the key would still
+// read `aarch64-unknown-linux-gnu` either way). Left as a known, narrower
+// residual rather than bumped to avoid manufacturing a second orphan sweep
+// for a fold that was not actually poisoned the way the module key was.
 fn _runtime_obj_key_with_target(base_key: string, target_triple: string) -> string {
     if base_key.length == 0 { return ""; }
     return base_key + "\ntgt2:" + target_triple;

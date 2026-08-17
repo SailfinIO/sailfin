@@ -232,7 +232,7 @@ fn _run_compiler_mode(matches: Matches, ctx: CliContext) -> int ![clock, io] {
         // file's presence + non-emptiness).
         if fs.exists(out_ll) { fs.deleteFile(out_ll); }
 
-        let argv: string[] = emit_child_argv([self_bin, "emit", "--module-name", slug, "--import-context", import_ctx, "--no-resolve-gate", "-o", out_ll, "llvm", src]);
+        let argv: string[] = emit_child_argv(self_bin, slug, out_ll, "llvm", src, import_ctx);
 
         let exit_code = process.run_capture_metered(argv, child_env);
         let _o = process.capture_take_stdout();

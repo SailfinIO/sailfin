@@ -47,6 +47,7 @@ import {
 import { _write_llvm_text } from "../../build/cache";
 import { _read_import_deps, _resolve_self_path } from "../../build/paths";
 import { build_target_triple, triple_is_supported } from "../../build/target";
+import { unsupported_target_diagnostic } from "../../build/target_diagnostics";
 import { clear_build_target, set_build_target } from "../../build/target_state";
 import { stage_capsule_imports_for_emit } from "../../capsule_resolver";
 import { emit_llvm_with_retry, emit_parse_nonneg_int } from "../../emit_helpers";
@@ -80,24 +81,6 @@ fn command_def() -> Command {
     return cmd;
 }
 
-// E0614: an `--target` value outside the closed SFEP-0068 §3.1 set.
-// Mirrors `cli/commands/build.sfn::_unsupported_target_diagnostic` — same
-// code and message shape, so `build` and `emit` render byte-identical
-// text for the identical mistake.
-fn _emit_unsupported_target_diagnostic(triple: string) -> Diagnostic {
-    return Diagnostic {
-        code: "E0614",
-        severity: "error",
-        message: "unsupported --target triple: \"" + triple
-            + "\" (supported: x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu, "
-            + "x86_64-apple-darwin, arm64-apple-darwin, x86_64-pc-windows-msvc, "
-            + "x86_64-w64-mingw32)",
-        file_path: "",
-        primary: null,
-        suggestion: null
-    };
-}
-
 // E0617: `--target` was supplied but `build_target_triple()` resolved a
 // different triple after `set_build_target`. Today the cell wins
 // unconditionally so this cannot fire; it exists so a future reorder of
@@ -123,12 +106,12 @@ fn _emit_target_disagreement_diagnostic(requested: string, resolved: string) -> 
 // EVERY return path — mirroring the lifecycle contract
 // `cli/commands/build.sfn:148-206` documents, expressed once here instead
 // of at each of `_run_emit`'s several return points.
-fn run(matches: Matches, ctx: CliContext) -> int ![io, clock] {
+fn run(matches: Matches, ctx: CliContext) -> int ![clock, io] {
     let target_flag: string = get_or(matches, "target", "");
     set_build_target(target_flag);
     if target_flag.length > 0 && !triple_is_supported(target_flag) {
         let empty_lines: string[] = [];
-        print.err(render_terminal_diagnostic(diagnostic_to_diag(_emit_unsupported_target_diagnostic(target_flag), "emit"), empty_lines, "emit"));
+        print.err(render_terminal_diagnostic(diagnostic_to_diag(unsupported_target_diagnostic(target_flag), "emit"), empty_lines, "emit"));
         clear_build_target();
         return 2;
     }
@@ -148,7 +131,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io, clock] {
 
 // Reproduce the legacy `_legacy_dispatch_emit` body against typed matches.
 // Flag reads mirror the hand-rolled walk; the mode dispatch is verbatim.
-fn _run_emit(matches: Matches, ctx: CliContext) -> int ![io, clock] {
+fn _run_emit(matches: Matches, ctx: CliContext) -> int ![clock, io] {
     let timing: boolean = has_flag(matches, "timing");
     let out_path: string = get_or(matches, "o", "");
     // Stage D PR3: explicit module-name override for symbol mangling of
