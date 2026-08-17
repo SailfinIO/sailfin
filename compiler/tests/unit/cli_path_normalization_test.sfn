@@ -94,6 +94,23 @@ test "collect-test-files: trailing slash on root produces clean paths" ![io] {
     }
 }
 
+// SFN-648: the single-file fast path used to return `[root]` for any
+// `.sfn`-suffixed argument without checking existence, which is what let
+// `sfn test <absent>.sfn` reach compilation/link with no `main` symbol
+// and ICE instead of reporting the missing path. The fast path now checks
+// `fs.exists` first: an absent `.sfn` root collects nothing, and a real
+// one is unaffected.
+test "collect-test-files: a non-existent .sfn path collects nothing" ![io] {
+    let absent = _collect_test_files_cmd("compiler/tests/unit/does-not-exist_test.sfn", 25);
+    assert absent.length == 0;
+}
+
+test "collect-test-files: an existing .sfn path still collects exactly that file" ![io] {
+    let real = _collect_test_files_cmd("compiler/tests/unit/cli_path_normalization_test.sfn", 25);
+    assert real.length == 1;
+    assert real[0] == "compiler/tests/unit/cli_path_normalization_test.sfn";
+}
+
 test "collect-test-files: trailing-slash and bare root produce identical lists" ![io] {
     let bare = _collect_test_files_cmd("compiler/tests/unit", 25);
     let with_slash = _collect_test_files_cmd("compiler/tests/unit/", 25);
