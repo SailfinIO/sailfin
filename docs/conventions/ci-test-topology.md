@@ -129,20 +129,35 @@ together:
 1. **Across-leg sharding** — the eight named CI shards, run as separate
    jobs (see below).
 2. **Per-file parallelism within a leg** — `_test_jobs_budget(memsize_bytes,
-   nproc, is_darwin)` (`compiler/src/cli/commands/test/arg_and_jobs.sfn:71-102`):
+   nproc, is_darwin)` (`compiler/src/cli/commands/test/arg_and_jobs.sfn:89-122`):
    `min(cores, (usable_RAM - 5 GiB) / 3 GiB)`, floored at 1, capped at 16,
    and capped at 2 on Darwin, where `usable_RAM` is 80% of total RAM (the
    same name the code gives the pre-subtraction slice) and the 5 GiB
    subtrahend reserves the parent runner (SFN-781). Resolution precedence in
-   `_resolve_test_jobs` (`:151-160`): an explicit `--jobs` flag beats
+   `_resolve_test_jobs` (`:171-180`): an explicit `--jobs` flag beats
    `SAILFIN_TEST_JOBS`, which beats the native host probe.
    `scripts/detect_test_jobs.sh` reimplements the identical policy in bash
    for the Makefile's `TEST_JOBS ?=` default; the comment at
-   `arg_and_jobs.sfn:68-70` states the two must stay in lockstep — there is
+   `arg_and_jobs.sfn:74-76` states the two must stay in lockstep — there is
    no shared source for the policy across the two languages, so a change to
-   one budget function requires the mirrored edit in the other. Nothing
-   automatically cross-checks them: no test asserts the bash script's output
-   against the native budget, so drift is caught only by review.
+   one budget function still requires the mirrored edit in the other.
+   `compiler/tests/integration/test_jobs_budget_parity_test.sfn` (SFN-794)
+   enforces that lockstep: it drives both implementations over one shared
+   table of structural boundaries — the parent reserve, the `by_mem < 1`
+   floor, the job thresholds, the Darwin and global caps — and fails when
+   they disagree, so a one-sided edit is caught by CI rather than by review.
+   The script takes injected `mem_mb`/`cores`/`uname_s` arguments for that
+   test; called with no arguments it probes the real host exactly as the
+   Makefile expects.
+
+   Two properties of that test are worth knowing before editing a constant.
+   It pins the agreed values as well as the agreement, so a *coordinated*
+   edit also goes red and has to re-derive the table deliberately. And a
+   separate case asserts each job threshold steps at an exact MiB boundary,
+   which is what makes the bash form's whole-MiB truncation lossless — that
+   is the assertion that fails if a future slice or reserve lands a threshold
+   at a fractional MiB, a divergence the table alone cannot see because it
+   samples whole-MiB inputs.
 
 Pooled test children are pinned to `SAILFIN_BUILD_JOBS=1`
 (`compiler/src/cli/commands/test/pool.sfn:219-221`) so a pooled child that

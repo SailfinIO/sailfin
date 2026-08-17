@@ -51,7 +51,10 @@
 # (6400 + 3840N) MiB exactly, so this script's truncation loses nothing.
 # Change the slice to 75%, or a reserve to 4.5 GiB, and the two forms
 # separate, silently disagreeing by one job in narrow RAM windows.
-# Re-derive that boundary before editing either constant.
+# Re-derive that boundary before editing either constant — SFN-794's
+# compiler/tests/integration/test_jobs_budget_parity_test.sfn drives both
+# forms over one shared table and fails on a one-sided edit, and pins the
+# exact-MiB step points that make this script's truncation lossless.
 #
 # macOS additionally caps at 2 jobs, mirroring detect_build_jobs.sh. On the
 # memory-constrained macOS runner (~7 GB) the memory budget alone let enough
@@ -73,24 +76,58 @@
 # Override by exporting TEST_JOBS=N before invoking make. The Makefile
 # honours `TEST_JOBS ?=` so an explicit env value always wins.
 # See #1998 and docs/proposals/0044-test-runner-invocation-cache.md.
+#
+# SFN-794: host values may be injected so the lockstep above is enforced by a
+# test rather than by review. The no-argument form probes the real host and is
+# the only form the Makefile uses; the two- and three-argument forms feed the
+# same budget arithmetic from a caller-supplied table.
+#
+#   detect_test_jobs.sh                            # probe this host
+#   detect_test_jobs.sh <mem_mb> <cores>           # inject, assume Linux
+#   detect_test_jobs.sh <mem_mb> <cores> <uname_s> # inject, incl. platform
+#
+# Injected values run through the identical sanitize-and-budget path below, so
+# the cross-check in compiler/tests/integration/test_jobs_budget_parity_test.sfn
+# exercises what the Makefile actually gets.
 
 set -eu
 
-uname_s="$(uname -s 2>/dev/null || echo unknown)"
+usage() {
+    echo "usage: detect_test_jobs.sh [mem_mb cores [uname_s]]" >&2
+    exit 2
+}
+
+uname_s=unknown
 cores=1
 mem_mb=0
 
-case "$uname_s" in
-    Linux*)
-        cores=$(nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1)
-        mem_kb=$(awk '/^MemTotal:/ {print $2; exit}' /proc/meminfo 2>/dev/null || echo 0)
-        mem_mb=$((mem_kb / 1024))
+case "$#" in
+    0)
+        uname_s="$(uname -s 2>/dev/null || echo unknown)"
+        case "$uname_s" in
+            Linux*)
+                cores=$(nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1)
+                mem_kb=$(awk '/^MemTotal:/ {print $2; exit}' /proc/meminfo 2>/dev/null || echo 0)
+                mem_mb=$((mem_kb / 1024))
+                ;;
+            Darwin*)
+                cores=$(sysctl -n hw.ncpu 2>/dev/null || echo 1)
+                mem_b=$(sysctl -n hw.memsize 2>/dev/null || echo 0)
+                mem_mb=$((mem_b / 1024 / 1024))
+                ;;
+        esac
         ;;
-    Darwin*)
-        cores=$(sysctl -n hw.ncpu 2>/dev/null || echo 1)
-        mem_b=$(sysctl -n hw.memsize 2>/dev/null || echo 0)
-        mem_mb=$((mem_b / 1024 / 1024))
+    2)
+        mem_mb=$1
+        cores=$2
+        uname_s=Linux
         ;;
+    3)
+        mem_mb=$1
+        cores=$2
+        uname_s=$3
+        ;;
+    *) usage ;;
 esac
 
 # Sanitize: a non-numeric or zero result falls back to safe defaults. The

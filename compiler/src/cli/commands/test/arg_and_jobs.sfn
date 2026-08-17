@@ -82,7 +82,10 @@ fn _parse_jobs_value(text: string) -> int {
 // `(6400 + 3840n)` MiB exactly, so the bash truncation loses nothing. Change
 // the slice to 75%, or a reserve to 4.5 GiB, and the byte-form and MiB-form
 // thresholds separate, silently disagreeing by one job in narrow RAM windows.
-// Re-derive that boundary before editing either constant.
+// Re-derive that boundary before editing either constant — SFN-794's
+// `compiler/tests/integration/test_jobs_budget_parity_test.sfn` drives both
+// forms over one shared table and fails on a one-sided edit, and pins the
+// exact-MiB step points that make the bash truncation lossless.
 fn _test_jobs_budget(memsize_bytes: int, nproc: int, is_darwin: boolean) -> int {
     if memsize_bytes <= 0 { return 1; }
     let mut cores = nproc;
