@@ -113,6 +113,12 @@ Index row. Two slates are in review.
 | [`draft-import-surface-compaction`](./draft-import-surface-compaction.md) | Import-surface compaction across the phase rewind to cut emit peak RSS | runtime |
 | [`draft-concurrency-cancellation`](./draft-concurrency-cancellation.md) | Concurrency runtime maturity — cancel-on-fault and async I/O | runtime |
 
+**Tooling topology:**
+
+| Draft | Title | Type |
+|---|---|---|
+| [`draft-domain-oriented-repository-topology`](./draft-domain-oriented-repository-topology.md) | Domain-Oriented Repository Topology | tooling |
+
 The **native-Windows toolchain critical path** design graduated out of this
 slate on 2026-08-15 and now holds an Index row: SFEP-0071 (in-process
 `.tar.gz`), tracked by SFN-753 and groomed into SFN-895/896/897/898/899/900.
