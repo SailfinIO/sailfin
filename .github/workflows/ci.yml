@@ -1474,34 +1474,72 @@ jobs:
           # comparison. Wipe both work dirs and their scratch roots
           # before each build, mirroring `make check`'s targeted-find
           # cleanup at Makefile:455-460/495-500.
-          rm -rf build/selfhost/native-selfhost1 build/selfhost/native-selfhost2
-          mkdir -p build/selfhost/native-selfhost1 build/selfhost/native-selfhost2
+          # SFN-922: each pass writes into its own EMPTY directory, and
+          # that is load-bearing — not tidiness. Under `-p` (`walk_src`),
+          # the binary that emits all ~281 modules is not the one invoked
+          # here: `build.sfn:455` resolves it via
+          # `_resolve_self_path(binary_dir)`, which probes
+          # `sfn`/`sfn.exe`/`sailfin`/`sailfin.exe` inside `binary_dir`
+          # FIRST and only falls back to `exe_path()` — the actually
+          # running binary — when all four miss (SFN-904,
+          # `build/paths.sfn:226-234`).
+          #
+          # These outputs previously landed in `build/bin/`, where
+          # `build/bin/sfn` exists (it is used above, and is pass-1
+          # itself). Pass-2's probe therefore resolved back to
+          # `build/bin/sfn`, so BOTH passes emitted their modules with
+          # the same compiler and the comparison never exercised pass-1's
+          # codegen at all — a false pass, silent since the gate was
+          # written. Keep these directories free of any probe-matching
+          # name so the SFN-904 fallback stays the only reachable path.
+          #
+          # Not inside the work dirs either: `<work-dir>/sailfin` is the
+          # cache directory (`build/cache.sfn:184-189`), which is exactly
+          # the SFN-579 shape the `!fs.is_directory` guard at
+          # `paths.sfn:201` exists to catch.
+          rm -rf build/selfhost/native-selfhost1 build/selfhost/native-selfhost2 \
+                 build/selfhost/fp1 build/selfhost/fp2
+          mkdir -p build/selfhost/native-selfhost1 build/selfhost/native-selfhost2 \
+                   build/selfhost/fp1 build/selfhost/fp2
           SAILFIN_TEST_SCRATCH="build/selfhost/native-selfhost1/scratch" \
             build/bin/sfn build --no-cache -p compiler \
               --work-dir build/selfhost/native-selfhost1 \
-              -o build/bin/sfn-selfhost1
+              -o build/selfhost/fp1/sfn-selfhost1
+          # Assert the invariant the comment above depends on rather than
+          # trusting it: if a probe-matching name ever appears beside
+          # pass-1's output, pass-2 would silently emit with that binary
+          # instead and the gate would go quietly vacuous again.
+          for probe in sfn sfn.exe sailfin sailfin.exe; do
+            if [ -e "build/selfhost/fp1/$probe" ]; then
+              echo "[ci][error] build/selfhost/fp1/$probe exists; pass-2 would emit with it, not with pass-1 (SFN-922)" >&2
+              exit 1
+            fi
+          done
           SAILFIN_TEST_SCRATCH="build/selfhost/native-selfhost2/scratch" \
-            build/bin/sfn-selfhost1 build --no-cache -p compiler \
+            build/selfhost/fp1/sfn-selfhost1 build --no-cache -p compiler \
               --work-dir build/selfhost/native-selfhost2 \
-              -o build/bin/sfn-selfhost2
-          ls -lh build/bin/sfn-selfhost1 build/bin/sfn-selfhost2
-          (file build/bin/sfn-selfhost1 build/bin/sfn-selfhost2 || true)
-          build/bin/sfn-selfhost1 version || true
-          build/bin/sfn-selfhost2 version || true
+              -o build/selfhost/fp2/sfn-selfhost2
+          for f in build/selfhost/fp1/sfn-selfhost1 build/selfhost/fp2/sfn-selfhost2; do
+            [ -s "$f" ] || { echo "[ci][error] missing or empty pass artifact: $f" >&2; exit 1; }
+          done
+          ls -lh build/selfhost/fp1/sfn-selfhost1 build/selfhost/fp2/sfn-selfhost2
+          (file build/selfhost/fp1/sfn-selfhost1 build/selfhost/fp2/sfn-selfhost2 || true)
+          build/selfhost/fp1/sfn-selfhost1 version || true
+          build/selfhost/fp2/sfn-selfhost2 version || true
           echo "[ci] fixed-point sha256:"
-          (sha256sum build/bin/sfn-selfhost1 build/bin/sfn-selfhost2 2>/dev/null || shasum -a 256 build/bin/sfn-selfhost1 build/bin/sfn-selfhost2)
+          (sha256sum build/selfhost/fp1/sfn-selfhost1 build/selfhost/fp2/sfn-selfhost2 2>/dev/null || shasum -a 256 build/selfhost/fp1/sfn-selfhost1 build/selfhost/fp2/sfn-selfhost2 || true)
           if [ "${RUNNER_OS}" = "Linux" ]; then
-            if ! cmp -s build/bin/sfn-selfhost1 build/bin/sfn-selfhost2; then
+            if ! cmp -s build/selfhost/fp1/sfn-selfhost1 build/selfhost/fp2/sfn-selfhost2; then
               echo "[ci][error] fixed-point rebuild mismatch (binaries differ)" >&2
-              (cmp -l build/bin/sfn-selfhost1 build/bin/sfn-selfhost2 | head -n 20 || true)
+              (cmp -l build/selfhost/fp1/sfn-selfhost1 build/selfhost/fp2/sfn-selfhost2 | head -n 20 || true)
               exit 1
             fi
           else
             # macOS binaries (Mach-O) embed a per-link UUID (LC_UUID), so byte-for-byte
             # equality is not a stable determinism signal. Instead, assert the second
             # selfhosted compiler can run a minimal unit test.
-            (dwarfdump --uuid build/bin/sfn-selfhost1 build/bin/sfn-selfhost2 || true)
-            build/bin/sfn-selfhost2 test compiler/tests/unit/cli_version_test.sfn
+            (dwarfdump --uuid build/selfhost/fp1/sfn-selfhost1 build/selfhost/fp2/sfn-selfhost2 || true)
+            build/selfhost/fp2/sfn-selfhost2 test compiler/tests/unit/cli_version_test.sfn
           fi
 
       # NOTE (#1234): the Windows cross-compile + its installer upload
@@ -1951,34 +1989,72 @@ jobs:
           # comparison. Wipe both work dirs and their scratch roots
           # before each build, mirroring `make check`'s targeted-find
           # cleanup at Makefile:455-460/495-500.
-          rm -rf build/selfhost/native-selfhost1 build/selfhost/native-selfhost2
-          mkdir -p build/selfhost/native-selfhost1 build/selfhost/native-selfhost2
+          # SFN-922: each pass writes into its own EMPTY directory, and
+          # that is load-bearing — not tidiness. Under `-p` (`walk_src`),
+          # the binary that emits all ~281 modules is not the one invoked
+          # here: `build.sfn:455` resolves it via
+          # `_resolve_self_path(binary_dir)`, which probes
+          # `sfn`/`sfn.exe`/`sailfin`/`sailfin.exe` inside `binary_dir`
+          # FIRST and only falls back to `exe_path()` — the actually
+          # running binary — when all four miss (SFN-904,
+          # `build/paths.sfn:226-234`).
+          #
+          # These outputs previously landed in `build/bin/`, where
+          # `build/bin/sfn` exists (it is used above, and is pass-1
+          # itself). Pass-2's probe therefore resolved back to
+          # `build/bin/sfn`, so BOTH passes emitted their modules with
+          # the same compiler and the comparison never exercised pass-1's
+          # codegen at all — a false pass, silent since the gate was
+          # written. Keep these directories free of any probe-matching
+          # name so the SFN-904 fallback stays the only reachable path.
+          #
+          # Not inside the work dirs either: `<work-dir>/sailfin` is the
+          # cache directory (`build/cache.sfn:184-189`), which is exactly
+          # the SFN-579 shape the `!fs.is_directory` guard at
+          # `paths.sfn:201` exists to catch.
+          rm -rf build/selfhost/native-selfhost1 build/selfhost/native-selfhost2 \
+                 build/selfhost/fp1 build/selfhost/fp2
+          mkdir -p build/selfhost/native-selfhost1 build/selfhost/native-selfhost2 \
+                   build/selfhost/fp1 build/selfhost/fp2
           SAILFIN_TEST_SCRATCH="build/selfhost/native-selfhost1/scratch" \
             build/bin/sfn build --no-cache -p compiler \
               --work-dir build/selfhost/native-selfhost1 \
-              -o build/bin/sfn-selfhost1
+              -o build/selfhost/fp1/sfn-selfhost1
+          # Assert the invariant the comment above depends on rather than
+          # trusting it: if a probe-matching name ever appears beside
+          # pass-1's output, pass-2 would silently emit with that binary
+          # instead and the gate would go quietly vacuous again.
+          for probe in sfn sfn.exe sailfin sailfin.exe; do
+            if [ -e "build/selfhost/fp1/$probe" ]; then
+              echo "[ci][error] build/selfhost/fp1/$probe exists; pass-2 would emit with it, not with pass-1 (SFN-922)" >&2
+              exit 1
+            fi
+          done
           SAILFIN_TEST_SCRATCH="build/selfhost/native-selfhost2/scratch" \
-            build/bin/sfn-selfhost1 build --no-cache -p compiler \
+            build/selfhost/fp1/sfn-selfhost1 build --no-cache -p compiler \
               --work-dir build/selfhost/native-selfhost2 \
-              -o build/bin/sfn-selfhost2
-          ls -lh build/bin/sfn-selfhost1 build/bin/sfn-selfhost2
-          (file build/bin/sfn-selfhost1 build/bin/sfn-selfhost2 || true)
-          build/bin/sfn-selfhost1 version || true
-          build/bin/sfn-selfhost2 version || true
+              -o build/selfhost/fp2/sfn-selfhost2
+          for f in build/selfhost/fp1/sfn-selfhost1 build/selfhost/fp2/sfn-selfhost2; do
+            [ -s "$f" ] || { echo "[ci][error] missing or empty pass artifact: $f" >&2; exit 1; }
+          done
+          ls -lh build/selfhost/fp1/sfn-selfhost1 build/selfhost/fp2/sfn-selfhost2
+          (file build/selfhost/fp1/sfn-selfhost1 build/selfhost/fp2/sfn-selfhost2 || true)
+          build/selfhost/fp1/sfn-selfhost1 version || true
+          build/selfhost/fp2/sfn-selfhost2 version || true
           echo "[ci] fixed-point sha256:"
-          (sha256sum build/bin/sfn-selfhost1 build/bin/sfn-selfhost2 2>/dev/null || shasum -a 256 build/bin/sfn-selfhost1 build/bin/sfn-selfhost2)
+          (sha256sum build/selfhost/fp1/sfn-selfhost1 build/selfhost/fp2/sfn-selfhost2 2>/dev/null || shasum -a 256 build/selfhost/fp1/sfn-selfhost1 build/selfhost/fp2/sfn-selfhost2 || true)
           if [ "${RUNNER_OS}" = "Linux" ]; then
-            if ! cmp -s build/bin/sfn-selfhost1 build/bin/sfn-selfhost2; then
+            if ! cmp -s build/selfhost/fp1/sfn-selfhost1 build/selfhost/fp2/sfn-selfhost2; then
               echo "[ci][error] fixed-point rebuild mismatch (binaries differ)" >&2
-              (cmp -l build/bin/sfn-selfhost1 build/bin/sfn-selfhost2 | head -n 20 || true)
+              (cmp -l build/selfhost/fp1/sfn-selfhost1 build/selfhost/fp2/sfn-selfhost2 | head -n 20 || true)
               exit 1
             fi
           else
             # macOS binaries (Mach-O) embed a per-link UUID (LC_UUID), so byte-for-byte
             # equality is not a stable determinism signal. Instead, assert the second
             # selfhosted compiler can run a minimal unit test.
-            (dwarfdump --uuid build/bin/sfn-selfhost1 build/bin/sfn-selfhost2 || true)
-            build/bin/sfn-selfhost2 test compiler/tests/unit/cli_version_test.sfn
+            (dwarfdump --uuid build/selfhost/fp1/sfn-selfhost1 build/selfhost/fp2/sfn-selfhost2 || true)
+            build/selfhost/fp2/sfn-selfhost2 test compiler/tests/unit/cli_version_test.sfn
           fi
 
       - name: Upload native artifacts

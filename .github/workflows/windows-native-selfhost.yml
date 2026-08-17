@@ -317,37 +317,83 @@ jobs:
       # A byte compare is trustworthy here specifically because SFN-920
       # threads `/Brepro` through `lld-link` for MSVC targets — without it,
       # `lld-link` stamps a live epoch `TimeDateStamp` into the PE header on
-      # every link, so two otherwise-identical builds diverge at byte 129
-      # regardless of compiler determinism. That base branch is why this gate
-      # is safe to add now and would have been flaky before it.
+      # every link, so two otherwise-identical builds diverge at the observed
+      # byte 129 regardless of compiler determinism. Before SFN-920 this gate
+      # would have been flaky.
+      #
+      # `/Brepro` does not cover an absolute path embedded in the image. If
+      # `-g` / `/DEBUG` ever reaches the MSVC link, `lld-link` writes the PDB
+      # path into the debug directory, and the two distinct `--work-dir`s
+      # below turn from an isolation property into a guaranteed mismatch.
       #
       # Placed last, after the cheap R1/R3 ABI gates: this step is two full
       # native self-hosts of the ~281-module compiler, by far the most
       # expensive step in the job, so the fast gates should fail first and
       # leave this one uncharged.
+      # 30 minutes is >2x the observed ~7 min/pass. Deliberately not 45:
+      # the job's own 90-minute budget is already largely committed by the
+      # staging/MSVC/ladder steps and the 30-minute build, and a step
+      # timeout that outruns the job's remainder yields GitHub's generic
+      # job cancellation instead of this step's own timeout message —
+      # a worse diagnostic, not a wrong verdict.
       - name: Gate — self-host fixed point (pass-2 == pass-1)
         shell: bash
-        timeout-minutes: 45
+        timeout-minutes: 30
         run: |
           set -euo pipefail
-          rm -rf build/selfhost/native-w1 build/selfhost/native-w2
-          mkdir -p build/selfhost/native-w1 build/selfhost/native-w2
+          # SFN-922: each pass writes into its own EMPTY directory, and that
+          # is load-bearing. Under `-p` (`walk_src`), the binary that emits
+          # all ~281 modules is not the one invoked here: `build.sfn:455`
+          # resolves it via `_resolve_self_path(binary_dir)`, which probes
+          # `sfn`/`sfn.exe`/`sailfin`/`sailfin.exe` inside `binary_dir` FIRST
+          # and only falls back to `exe_path()` — the actually running binary
+          # — when all four miss (SFN-904, `build/paths.sfn:226-234`).
+          #
+          # These outputs used to land in `build/bin/`. That happened to be
+          # correct here only because nothing on this runner puts a
+          # probe-matching name there; the same shape in `ci.yml` WAS wrong,
+          # emitting both passes with `build/bin/sfn` (SFN-922). Correct by
+          # accident is not correct, and folding this step into `ci.yml`
+          # under SFN-55 would have inherited the accident.
+          #
+          # Not inside the work dirs either: `<work-dir>/sailfin` is the
+          # cache directory (`build/cache.sfn:184-189`), the SFN-579 shape
+          # the `!fs.is_directory` guard at `paths.sfn:201` catches.
+          #
+          # The `.exe` suffix on `-o` is load-bearing: an explicit `-o` is
+          # honored verbatim (`build.sfn:346`, `build/target.sfn:234-236`),
+          # and an extensionless image cannot be launched by `CreateProcessA`
+          # with a null `lpApplicationName` (SFN-693), so pass 2 would fail
+          # to spawn on Windows only.
+          rm -rf build/selfhost/native-w1 build/selfhost/native-w2 \
+                 build/selfhost/fp1 build/selfhost/fp2
+          mkdir -p build/selfhost/native-w1 build/selfhost/native-w2 \
+                   build/selfhost/fp1 build/selfhost/fp2
           SAILFIN_TEST_SCRATCH="build/selfhost/native-w1/scratch" \
             "$NATIVE_SFN" build --no-cache -p compiler \
               --work-dir build/selfhost/native-w1 \
-              -o build/bin/sfn-selfhost1.exe
-          SAILFIN_TEST_SCRATCH="build/selfhost/native-w2/scratch" \
-            build/bin/sfn-selfhost1.exe build --no-cache -p compiler \
-              --work-dir build/selfhost/native-w2 \
-              -o build/bin/sfn-selfhost2.exe
-          for f in build/bin/sfn-selfhost1.exe build/bin/sfn-selfhost2.exe; do
-            [ -f "$f" ] || { echo "[error] expected pass artifact missing: $f" >&2; exit 1; }
+              -o build/selfhost/fp1/sfn-selfhost1.exe
+          # Assert the invariant above rather than trusting it: a
+          # probe-matching name beside pass-1's output would send pass-2's
+          # emit back through that binary and quietly re-vacuum the gate.
+          for probe in sfn sfn.exe sailfin sailfin.exe; do
+            if [ -e "build/selfhost/fp1/$probe" ]; then
+              echo "[error] build/selfhost/fp1/$probe exists; pass-2 would emit with it, not with pass-1 (SFN-922)" >&2
+              exit 1
+            fi
           done
-          ls -lh build/bin/sfn-selfhost1.exe build/bin/sfn-selfhost2.exe
-          (sha256sum build/bin/sfn-selfhost1.exe build/bin/sfn-selfhost2.exe 2>/dev/null || shasum -a 256 build/bin/sfn-selfhost1.exe build/bin/sfn-selfhost2.exe)
-          if ! cmp -s build/bin/sfn-selfhost1.exe build/bin/sfn-selfhost2.exe; then
+          SAILFIN_TEST_SCRATCH="build/selfhost/native-w2/scratch" \
+            build/selfhost/fp1/sfn-selfhost1.exe build --no-cache -p compiler \
+              --work-dir build/selfhost/native-w2 \
+              -o build/selfhost/fp2/sfn-selfhost2.exe
+          for f in build/selfhost/fp1/sfn-selfhost1.exe build/selfhost/fp2/sfn-selfhost2.exe; do
+            [ -s "$f" ] || { echo "[error] pass artifact missing or empty: $f" >&2; exit 1; }
+          done
+          ls -lh build/selfhost/fp1/sfn-selfhost1.exe build/selfhost/fp2/sfn-selfhost2.exe
+          (sha256sum build/selfhost/fp1/sfn-selfhost1.exe build/selfhost/fp2/sfn-selfhost2.exe 2>/dev/null || shasum -a 256 build/selfhost/fp1/sfn-selfhost1.exe build/selfhost/fp2/sfn-selfhost2.exe || true)
+          if ! cmp -s build/selfhost/fp1/sfn-selfhost1.exe build/selfhost/fp2/sfn-selfhost2.exe; then
             echo "[error] fixed-point mismatch: pass-2 differs from pass-1" >&2
-            cmp -l build/bin/sfn-selfhost1.exe build/bin/sfn-selfhost2.exe | head -n 20 || true
+            cmp -l build/selfhost/fp1/sfn-selfhost1.exe build/selfhost/fp2/sfn-selfhost2.exe | head -n 20 || true
             exit 1
           fi
           echo "ok: native MSVC self-host fixed point (pass-2 == pass-1)"
