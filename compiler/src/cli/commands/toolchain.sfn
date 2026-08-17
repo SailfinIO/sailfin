@@ -306,9 +306,25 @@ fn _is_https_url(url: string) -> boolean {
 // unaffected. Naming the discriminator (plain `http://` still works when
 // only TLS is stubbed) lets the reader settle it in one command.
 //
-// Removal condition: SFN-923 — once the cross-Windows build stages the
-// `sfn/crypto` capsule and `tls.sfn` joins `RUNTIME_MODS`, every shipped
-// Windows binary speaks HTTPS and this note stops being true.
+// That discriminator's premise — that plain `http://` genuinely works on
+// the shipped mingw-cross build — was unverified when this note was
+// written, and was in fact false until SFN-927: `http.sfn` and its
+// `platform/socket_ops_windows.sfn`/`platform/fd_io_windows.sfn`
+// dependencies are all in the Makefile `ci-cross-windows` RUNTIME_MODS
+// list (the mingw-cross toolchain's runtime source set) alongside the TLS
+// stubs, so a Windows-built `sfn` from before SFN-927 landed carried the
+// same Winsock `recv`/`send` sign-truncation and millisecond/DWORD
+// timeout bugs `http.sfn`'s client path hit on every request — the
+// `http://` half of this note's advice would have failed too, for an
+// unrelated reason, undermining the very discriminator it names. SFN-927
+// fixes that, so the claim now holds for any toolchain built after it.
+//
+// Removal condition: unchanged, SFN-923 — once the cross-Windows build
+// stages the `sfn/crypto` capsule and `tls.sfn` joins `RUNTIME_MODS`,
+// every shipped Windows binary speaks HTTPS and this note stops being
+// true. SFN-927 does not retire this note (it fixes a different bug on
+// the same runtime-module list); it only makes the note's `http://`
+// discriminator trustworthy rather than aspirational.
 fn _download_failure_note(url: string) -> string ![io] {
     if !_is_https_url(url) { return ""; }
     if !host_is_windows() { return ""; }

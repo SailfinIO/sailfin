@@ -45,6 +45,23 @@ fn _has_declare(ir: string, sym: string) -> boolean {
     return false;
 }
 
+// True iff some line of `ir` contains both `needle_a` and `needle_b`.
+// Matching on line content rather than a full-line string (with its
+// compiler-assigned SSA register numbers) keeps the SFN-927 IR-literal
+// assertions below from breaking on an unrelated change to this module
+// that shifts `%tN` numbering.
+fn _line_has_both(ir: string, needle_a: string, needle_b: string) -> boolean {
+    let lines = split(ir, "\n");
+    let mut i: int = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        if contains(line, needle_a) && contains(line, needle_b) { return true; }
+        i += 1;
+    }
+    return false;
+}
+
 // Same shape as `_has_declare` but for a module-scope `define`. The two
 // are NOT interchangeable: a bare `contains(ir, "@sym(")` is satisfied
 // by a forward `declare`, so a module that only declared the pair would
@@ -104,7 +121,7 @@ test "socket-ops: the POSIX module keeps close and never links Winsock" ![io] {
     assert outcome == 0;
 }
 
-// Both halves must define the same two symbols, or the swap produces a
+// Both halves must define the same five symbols, or the swap produces a
 // link with an unresolved reference on whichever target loses. This is
 // the contract `target_condition_runtime_sfn_sources` depends on and
 // that no type checker enforces across a module swap.
@@ -116,8 +133,70 @@ test "socket-ops: both siblings define the same exported surface" ![io] {
         assert win != "EMIT_FAILED";
         assert _has_define(posix, "sfn_socket_open");
         assert _has_define(posix, "sfn_socket_close");
+        assert _has_define(posix, "sfn_socket_set_timeouts");
+        assert _has_define(posix, "sfn_socket_recv");
+        assert _has_define(posix, "sfn_socket_send");
         assert _has_define(win, "sfn_socket_open");
         assert _has_define(win, "sfn_socket_close");
+        assert _has_define(win, "sfn_socket_set_timeouts");
+        assert _has_define(win, "sfn_socket_recv");
+        assert _has_define(win, "sfn_socket_send");
+        return 0;
+    });
+    assert outcome == 0;
+}
+
+// SFN-927 defect 2, pinned statically: Winsock's `recv`/`send` are `int`
+// (32-bit), not POSIX's `ssize_t` (64-bit). A caller-side `-> i64` extern
+// against the Windows symbol reads a `-1` error back as `4294967295`
+// instead of a negative value, which silently defeats every `if n < 0`
+// guard in the adapters. This is checkable without running anything —
+// `sfn emit` prints the raw extern declaration widths — so it is
+// host-independent and catches a regression on any CI runner, including
+// a Windows one, unlike the earlier "issue a live request" style
+// coverage this bug slipped through (nothing in CI makes an outbound
+// request from a Windows binary).
+test "socket-ops: the Windows sibling declares 32-bit recv/send, the POSIX sibling 64-bit" ![io] {
+    let outcome = with_tmp_dir(fn (dir: string) -> int {
+        let win = _emit("sockwin3", "runtime/sfn/platform/socket_ops_windows.sfn", dir);
+        let posix = _emit("sockposix3", "runtime/sfn/platform/socket_ops.sfn", dir);
+        assert win != "EMIT_FAILED";
+        assert posix != "EMIT_FAILED";
+        assert contains(win, "declare i32 @recv(");
+        assert contains(win, "declare i32 @send(");
+        assert ! contains(win, "declare i64 @recv(");
+        assert ! contains(win, "declare i64 @send(");
+        assert contains(posix, "declare i64 @recv(");
+        assert contains(posix, "declare i64 @send(");
+        return 0;
+    });
+    assert outcome == 0;
+}
+
+// SFN-927 defect 1, pinned statically: Winsock's `SO_RCVTIMEO`/
+// `SO_SNDTIMEO` optval is a 4-byte millisecond DWORD, not a 16-byte
+// POSIX `struct timeval`. The Windows sibling must convert seconds to
+// milliseconds (`secs * 1000`) and pass a 4-byte optlen; the POSIX
+// sibling must keep passing the unconverted seconds count with a
+// 16-byte optlen. Checking the emitted IR literals is a host-independent
+// substitute for a live `getsockopt` readback, which would require
+// actually running the compiled Windows binary — not possible on the
+// Linux-only CI fleet this suite runs on.
+test "socket-ops: the Windows sibling converts seconds to a millisecond DWORD" ![io] {
+    let outcome = with_tmp_dir(fn (dir: string) -> int {
+        let win = _emit("sockwin4", "runtime/sfn/platform/socket_ops_windows.sfn", dir);
+        let posix = _emit("sockposix4", "runtime/sfn/platform/socket_ops.sfn", dir);
+        assert win != "EMIT_FAILED";
+        assert posix != "EMIT_FAILED";
+        // secs -> ms, and a 4-byte DWORD optlen on both SO_RCVTIMEO/SO_SNDTIMEO calls.
+        assert contains(win, "mul i32 %secs, 1000");
+        assert _line_has_both(win, "i32 65535, i32 4102", "i32 4)");
+        assert _line_has_both(win, "i32 65535, i32 4101", "i32 4)");
+        // The POSIX sibling keeps the unconverted `struct timeval` shape:
+        // no ms conversion, 16-byte optlen throughout.
+        assert ! contains(posix, "mul i32 %secs, 1000");
+        assert _line_has_both(posix, "i32 1, i32 20", "i32 16)");
+        assert _line_has_both(posix, "i32 1, i32 21", "i32 16)");
         return 0;
     });
     assert outcome == 0;

@@ -181,24 +181,30 @@ test "http emit: define for every sfn_http_* export" ![io] {
 }
 
 // SFN-671: creation and disposal are no longer libc `socket`/`close`.
-// Both diverge on Windows — `close` on a Winsock SOCKET fastfails the
-// process, and Winsock refuses every call until `WSAStartup` runs — so
-// they route through `platform/socket_ops.sfn`, which is swapped for
-// its Windows sibling by `target_condition_runtime_sfn_sources`. The
-// rest of the surface is exported under the same names by `ws2_32.dll`
-// and stays a bare libc declaration. Asserting the ABSENCE of the two
-// POSIX declares is the half that matters: it is what would catch a
-// regression that reintroduced a direct `close(fd)` on a socket.
-test "http emit: declares the socket surface, POSIX close retired" ![io] {
+// SFN-927 widened this to timeouts and recv/send: Winsock's `recv`/
+// `send` are 32-bit (not POSIX's 64-bit `ssize_t`) and its
+// `SO_RCVTIMEO`/`SO_SNDTIMEO` optval is a millisecond DWORD (not a
+// `struct timeval`), so all four now route through
+// `platform/socket_ops.sfn`, which is swapped for its Windows sibling by
+// `target_condition_runtime_sfn_sources`. The rest of the surface is
+// exported under the same names by `ws2_32.dll` and stays a bare libc
+// declaration. Asserting the ABSENCE of the POSIX-only declares is the
+// half that matters: it is what would catch a regression that
+// reintroduced a direct `close(fd)`/`recv(fd)`/`send(fd)`/`setsockopt`-
+// timeout call on a socket.
+test "http emit: declares the socket surface, POSIX close/recv/send retired" ![io] {
     let ir = _emit_module("http", "runtime/sfn/adapters/http.sfn");
     assert ir != "EMIT_FAILED";
     assert _has_declare(ir, "sfn_socket_open");
     assert _has_declare(ir, "connect");
-    assert _has_declare(ir, "send");
-    assert _has_declare(ir, "recv");
+    assert _has_declare(ir, "sfn_socket_send");
+    assert _has_declare(ir, "sfn_socket_recv");
     assert _has_declare(ir, "sfn_socket_close");
+    assert _has_declare(ir, "sfn_socket_set_timeouts");
     assert ! _has_declare(ir, "socket");
     assert ! _has_declare(ir, "close");
+    assert ! _has_declare(ir, "send");
+    assert ! _has_declare(ir, "recv");
 }
 
 test "http emit: declares getaddrinfo for real-DNS host resolution (#1707)" ![io] {

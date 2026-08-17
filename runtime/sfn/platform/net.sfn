@@ -57,9 +57,17 @@ extern fn listen(sockfd: i32, backlog: i32) -> i32;
 extern fn accept(sockfd: i32, addr: *SockAddr, addrlen: *i32) -> i32;
 
 // ── Data transfer ─────────────────────────────────────────────
-// Returns are `ssize_t` (signed `i64` on every platform Sailfin
-// targets); negative values signal `errno`. Adapters translate
-// to `Result<T, IoError>` once the type ships.
+// Returns are `ssize_t` (signed `i64`) on POSIX; negative values signal
+// `errno`. Adapters translate to `Result<T, IoError>` once the type
+// ships. This is POSIX-only, not universal: Winsock's `recv`/`send` are
+// `int` (32-bit), so a caller-side raw `i64` extern like this one reads
+// a `-1` error back as `4294967295` on Windows instead of a negative
+// value (SFN-927). The live adapters (`adapters/http.sfn`,
+// `adapters/net.sfn`, `adapters/websocket.sfn`, `concurrency/serve.sfn`,
+// `platform/tls.sfn`) route through `platform/socket_ops.sfn`'s
+// `sfn_socket_recv`/`sfn_socket_send` rather than this declaration —
+// this file is an unconsumed typecheck smoke test (see the module
+// header), so there is no live call site here to route.
 extern fn send(sockfd: i32, buf: *u8, len: i64, flags: i32) -> i64;
 
 extern fn recv(sockfd: i32, buf: *u8, len: i64, flags: i32) -> i64;
