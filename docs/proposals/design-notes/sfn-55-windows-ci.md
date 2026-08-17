@@ -72,6 +72,12 @@ way tier B can run un-triggered by a sibling `ci.yml` PR run. Acceptance
 criterion 8 and the `:573` file-plan row are stale; this correction
 supersedes them.
 
+**§11's file-plan row for `windows-native-selfhost.yml` — drop "append pass-3 +
+`sfn selfhost` strict (SFN-668 absorption)."** The owner decided against folding
+that absorption into this issue: it stays tracked as its own narrowed issue,
+blocked on SFN-55, rather than landing here. The row as written would instruct
+a future reader to add it to this file; it does not belong in tier B's scope.
+
 ---
 
 ## 1. Goal
