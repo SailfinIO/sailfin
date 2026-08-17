@@ -9,13 +9,21 @@
 //
 // This module is deliberately separate from `socket_ops.sfn`, which
 // fixes the identical `int`-vs-`ssize_t` width defect for `recv`/`send`
-// (SFN-927): `socket_ops.sfn` is gated behind the `net` effect in
-// `runtime/capsule.toml`'s `[sfn-source-gates]` (only linked when a
-// program declares `![net]` transitively), but `io.sfn`/`assert.sfn` —
-// the consumers here — are ungated and linked into every Sailfin
-// binary. Reusing the gated module for an ungated consumer would leave
-// `sfn_fd_read`/`sfn_fd_write` undefined at link time for any binary
-// that prints or reads a file without touching the network.
+// (SFN-927). The split is a separation of concerns: generic-fd I/O and
+// Winsock socket I/O are distinct handle spaces (see below), and the
+// POSIX `socket_ops.sfn` is genuinely socket-only, so an ungated
+// consumer like `io.sfn` or `assert.sfn` has no business importing it.
+//
+// It would be natural to justify the split by saying `socket_ops.sfn` is
+// gated behind the `net` effect (`runtime/capsule.toml`
+// `[sfn-source-gates]`) and so would be absent from a non-networked
+// link. **That reasoning does not hold today and must not be relied on.**
+// Measured on a plain `![io]` hello-world for the MSVC target with
+// `SAILFIN_TRACE_LINK=1`: `socket_ops_windows.sfn`'s object is on the
+// link line, along with every other `net`-gated module. The gate does
+// not bound link inputs — unreferenced code is removed by the linker's
+// dead-strip (`-ffunction-sections` + `/OPT:REF`), not by the effect
+// system. Tracked as SFN-943.
 //
 // The UCRT's low-fd `_read`/`_write` (the CRT names — NOT usable on a
 // Winsock `SOCKET`, which is a distinct handle space reached only
