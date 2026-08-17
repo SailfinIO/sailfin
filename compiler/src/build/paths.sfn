@@ -10,7 +10,10 @@
 // clean one-directional `cli_main -> build/runtime_objs` DAG that the
 // cold self-host build stages without ordering hazards.
 //
-// Behavior-preserving move: every body is verbatim from cli_main.sfn.
+// Originally a behavior-preserving move: every body arrived verbatim
+// from cli_main.sfn. `_path_join`, `_dirname`, and `_path_basename`
+// have since diverged — they recognize `\` as a separator alongside
+// `/` (SFN-919). Every other body is still verbatim.
 //
 // `exe_path` is declared here rather than imported: this module's leaf
 // property (no local imports) is what breaks the `cli_main <->
@@ -19,9 +22,67 @@
 // extern limit, matching `cli/entry.sfn:36`.
 extern fn exe_path() -> *u8;
 
+// True iff `ch` is a path separator. Windows accepts `/` and `\`
+// interchangeably in every Win32 file API, and `GetModuleFileNameA` —
+// which is what `exe_path()` resolves to on Windows — hands back `\`.
+// A path reaching this module on Windows therefore routinely carries
+// either, or both in one string. Unconditional on host, matching the
+// `_rcr_is_sep` precedent (`runtime_capsule_resolver.sfn`, SFN-642):
+// this module is a dependency-free leaf (see the header note), so it
+// cannot import `host_is_windows()` from `build/target.sfn` without
+// reintroducing the `cli_main <-> build/runtime_objs` cycle (SFN-919).
+fn _is_path_sep(ch: string) -> boolean { return ch == "/" || ch == "\\"; }
+
+// Compare two paths for equality, treating `/` and `\` as the same
+// separator.
+//
+// Not the load-bearing half of SFN-919 — that is `_is_path_sep` in
+// `_dirname` below. On the primary path the two sides already agree
+// byte for byte: `binary_dir` is produced by the runtime's own
+// `binary_dir()` (`runtime/sfn/platform/exec.sfn:177`), which scans
+// for both separators too, so it and `_dirname(exe_path())` cut the
+// same string at the same index.
+//
+// This guards the case where `binary_dir` did not come from there —
+// an externally supplied `--binary-dir`, which reaches
+// `_resolve_self_path` verbatim (`cli/context.sfn:71`) and may spell
+// its separators however the caller pleased. A raw string compare
+// would fail such a path on spelling alone.
+//
+// Known limitation, deliberate: this compares length-first, so a
+// trailing separator on one side is still unequal. No in-tree
+// producer emits one (`exec.sfn:205` cuts before the separator), and
+// normalizing here would make the function silently accept paths that
+// are not the same string for reasons unrelated to spelling.
+fn _paths_equal_ignoring_sep(a: string, b: string) -> boolean {
+    if a.length != b.length { return false; }
+    let mut i: int = 0;
+    loop {
+        if i >= a.length { break; }
+        let ca = a[i];
+        let cb = b[i];
+        if ca != cb {
+            if !_is_path_sep(ca) { return false; }
+            if !_is_path_sep(cb) { return false; }
+        }
+        i += 1;
+    }
+    return true;
+}
+
+// Deliberately does NOT carry the bare-drive-root carve-out its
+// `_rcr_path_join` sibling has (`runtime_capsule_resolver.sfn`,
+// SFN-642), which distinguishes `C:sfn` (cwd on drive C) from `C:/sfn`
+// (drive root). Nothing here can produce a bare `C:` base: the only
+// `binary_dir` producer cuts before the final separator
+// (`runtime/sfn/platform/exec.sfn:205`), so a drive-root binary
+// arrives as `C:/` or `C:\`, never `C:`. Importing the rule on
+// speculation would add an untested branch; if a real caller ever
+// yields a bare drive root, take the sibling's version wholesale
+// rather than reinventing it here.
 fn _path_join(base: string, name: string) -> string {
     if base.length == 0 { return name; }
-    if base[base.length - 1] == "/" { return base + name; }
+    if _is_path_sep(base[base.length - 1]) { return base + name; }
     return base + "/" + name;
 }
 
@@ -30,11 +91,13 @@ fn _dirname(path: string) -> string {
     let mut index: int = 0;
     loop {
         if index >= path.length { break; }
-        if path[index] == "/" { last_slash = index; }
+        if _is_path_sep(path[index]) { last_slash = index; }
         index += 1;
     }
     if last_slash < 0 { return "."; }
-    if last_slash == 0 { return "/"; }
+    // Preserve the separator the caller actually used, so a Windows
+    // root keeps its `\` spelling rather than being rewritten to `/`.
+    if last_slash == 0 { return substring(path, 0, 1); }
     return substring(path, 0, last_slash);
 }
 
@@ -43,7 +106,7 @@ fn _path_basename(path: string) -> string {
     let mut i: int = 0;
     loop {
         if i >= path.length { break; }
-        if path[i] == "/" { last_slash = i; }
+        if _is_path_sep(path[i]) { last_slash = i; }
         i += 1;
     }
     if last_slash < 0 { return path; }
@@ -163,7 +226,7 @@ fn _resolve_self_path(binary_dir: string) -> string ![io] {
         let self_raw: *u8 = exe_path();
         let self_str: string = self_raw as string;
         if self_str.length > 0 {
-            if _dirname(self_str) == binary_dir {
+            if _paths_equal_ignoring_sep(_dirname(self_str), binary_dir) {
                 if fs.is_executable(self_str) {
                     if !fs.is_directory(self_str) { return self_str; }
                 }
@@ -178,8 +241,10 @@ export {
     _ends_with,
     _ensure_dir,
     _find_substring_from,
+    _is_path_sep,
     _path_basename,
     _path_join,
+    _paths_equal_ignoring_sep,
     _read_import_deps,
     _resolve_self_path
 };
