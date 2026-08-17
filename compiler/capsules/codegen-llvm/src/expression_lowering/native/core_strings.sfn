@@ -824,8 +824,8 @@ fn coerce_operand_to_string(operand: LLVMOperand, temp_index: int, lines: string
     }
 
     // SFN-408 safety floor: an interpolation operand with no stringify arm
-    // above must fail the build loudly. The `[fatal]` marker is what
-    // `has_fatal_lowering_diagnostic` (lowering_core/diagnostics.sfn) requires to block
+    // above must fail the build loudly. The `severity == "error"` marker is what
+    // `has_error_diag` (lowering_core/diagnostics.sfn) requires to block
     // IR emission — without it, the null operand silently drops the whole
     // enclosing `print`/`call` at exit 0 (the SFN-408 / SFN-343 footgun).
     let message = "cannot stringify interpolated operand of LLVM type `"

@@ -15,7 +15,7 @@ export {
 
 export { lower_llvm_for_tests_from_text_with_provider_context } from "./lowering/entrypoints_tests_writer";
 
-export { fatal_lowering_diagnostic_lines, has_fatal_lowering_diagnostic } from "./lowering/lowering_core/diagnostics";
+export { fatal_lowering_diagnostic_lines, has_error_diag } from "./lowering/lowering_core/diagnostics";
 
 export { native_text_passes_lowering_gate } from "./lowering/lowering_core/file_emission";
 

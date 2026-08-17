@@ -19,7 +19,7 @@ import { TypedSsaProduceResult, produce_typed_ssa_declarations } from "sfn/codeg
 import {
     LLVMArtifactResult,
     fatal_lowering_diagnostic_lines,
-    has_fatal_lowering_diagnostic,
+    has_error_diag,
     lower_llvm_for_tests_from_text_with_provider_context,
     lower_native_lines_to_llvm_artifact_with_context_and_provider,
     lower_native_text_to_llvm_artifact_with_context_and_provider,
@@ -516,7 +516,7 @@ fn print_llvm_with_module(source: string, module_name: string) -> boolean ![io] 
     let generated = lower_native_text_to_llvm_artifact_with_context_and_provider(native_text, module_name, import_context, resolve_llvm_provider_context());
     _drain_llvm_lowering_traces();
     if !generated.ok {
-        if has_fatal_lowering_diagnostic(generated.diagnostics) {
+        if has_error_diag(generated.diags) {
             _print_fatal_lowering_diagnostics(generated.diagnostics, generated.diags);
         } else if generated.failure_message.length > 0 {
             print.err(generated.failure_message);
@@ -995,7 +995,7 @@ fn compile_to_llvm_file_with_module(source: string, module_name: string, out_pat
 // fatal generation failure, and invokes atomic publication.
 fn _publish_llvm_artifact(result: LLVMArtifactResult, out_path: string, publication_failure_message: string) -> boolean ![io] {
     if !result.ok {
-        let fatal = has_fatal_lowering_diagnostic(result.diagnostics);
+        let fatal = has_error_diag(result.diags);
         if fatal {
             _print_fatal_lowering_diagnostics(result.diagnostics, result.diags);
             if fs.exists(out_path) { fs.deleteFile(out_path); }

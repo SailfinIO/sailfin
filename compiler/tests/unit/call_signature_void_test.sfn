@@ -5,7 +5,7 @@
 // exited 0 — and emitted no store at all: the complex-lvalue arms of
 // `llvm/expression_lowering/native/statement_assignment.sfn` returned
 // early without lowering the assignment, and the untagged diagnostic they
-// pushed was discarded by `has_fatal_lowering_diagnostic`.
+// pushed was discarded by the lowering gate.
 //
 // The forcing case is a security primitive: SFEP-0069 §3.6 specifies
 // `secure_zero(ptr, len)` as void, so `x.wipe = secure_zero(p, n);` would

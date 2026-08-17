@@ -9,8 +9,8 @@
 // emitted at every site, deliberately, so the rest of the pass sees
 // structurally valid IR (dropping it would leave a block unterminated or an
 // alloca uninitialized). What changed is the severity — each site now *tags*
-// the fabrication `llvm lowering [fatal] [E1002]`, which is the only thing
-// `has_fatal_lowering_diagnostic` acts on, so the emit fails closed instead
+// the fabrication `E1002` with `severity == "error"`, which is the only thing
+// `has_error_diag` acts on, so the emit fails closed instead
 // of exiting 0 in silence. This test pins that at each consumer site plus
 // the combined `sfn build` repro from the issue.
 //

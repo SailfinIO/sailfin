@@ -7,7 +7,7 @@
 // `return f()` expression (e.g. an unresolved callee whose return type is
 // unknown) was dropped because the Return branch in
 // `compiler/capsules/codegen-llvm/src/lowering/instructions.sfn` did not thread the return
-// expression's diagnostics into the emit-level `has_fatal_lowering_diagnostic`
+// expression's diagnostics into the emit-level `has_error_diag`
 // gate — so the emit printed the `[fatal]` and still exited 0.
 //
 // Pins both directions: an unresolved-callee `return f()` exits non-zero on

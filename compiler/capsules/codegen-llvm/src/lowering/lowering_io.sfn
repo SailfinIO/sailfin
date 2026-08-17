@@ -3,11 +3,15 @@
 // String array operations and miscellaneous lowering utilities. Extracted
 // from the former flat lowering_core.sfn to reduce per-file memory footprint
 // during self-hosting compilation.
+import { LoweringDiagnostic } from "sfn/ir";
 import { substring } from "sfn/strings";
 
 import { LifetimeRegionMetadata, StringConstant } from "../types";
 import {
+    extend_diag_array,
     index_of,
+    lowering_error_diag,
+    lowering_warning_diag,
     number_to_string,
     starts_with,
     trim_text
@@ -42,11 +46,11 @@ fn append_string_lines(values: string[], extras: string[]) -> string[] {
     return out;
 }
 
-// Upper bound on how many `[fatal]` entries a guard trip retains. The gate
-// downstream fails the build on the *first* `[fatal]` it sees, so a bounded
-// handful carries the same verdict as the whole set while keeping the size
-// guards' memory bound a construction rather than an assumption about how
-// many entries happen to be tagged.
+// Upper bound on how many build-failing entries a guard trip retains, on
+// either channel. The gate downstream fails the build on the *first* one it
+// sees, so a bounded handful carries the same verdict as the whole set while
+// keeping the size guards' memory bound a construction rather than an
+// assumption about how many entries happen to qualify.
 fn max_retained_fatal_diagnostics() -> int { return 64; }
 
 // Reduce a diagnostic batch to its `[fatal]` entries, scanning at most
@@ -57,8 +61,9 @@ fn max_retained_fatal_diagnostics() -> int { return 64; }
 // the only thing that fails the build, so a guard trip would silently
 // disarm the gate it is feeding (SFN-529; audited in
 // `docs/proposals/design-notes/sfn-526-lowering-fatal-gate-audit.md` §3
-// A3). The substring match mirrors `has_fatal_lowering_diagnostic`
-// (`lowering_core/diagnostics.sfn`), which is the gate this feeds.
+// A3). The substring match mirrors the legacy `diagnostics: string[]` channel
+// it filters; the structured counterpart `retain_error_diags` (same file)
+// mirrors `has_error_diag`, the gate this feeds.
 //
 // `scan_limit` is the caller's, not this function's: a guard that tripped
 // because the length is *invalid* rather than merely large must not have
@@ -105,6 +110,60 @@ fn extend_string_lines_checked(values: string[], extras: string[], label: string
         return extend_string_lines(out, retain_fatal_diagnostics(safe_extras, safe_extras.length));
     }
     return extend_string_lines(safe_values, safe_extras);
+}
+
+// The structured counterpart of `retain_fatal_diagnostics` (SFN-540). Same
+// contract, one substitution: an entry is kept because its `severity` is
+// `"error"`, not because its text happens to contain `[fatal]`. The gate this
+// feeds is `has_error_diag` (`lowering_core/diagnostics.sfn`), so the two must
+// agree on what an error is or a guard trip disarms the gate — the SFN-529
+// failure mode, in the channel that replaced the one it was found in.
+//
+// `scan_limit` is the caller's, for the same reason it is there: a guard that
+// tripped on an *invalid* length must not index its buffer at all, so it
+// passes 0. The elision note is itself an error, so it keeps tripping the gate
+// on its own.
+fn retain_error_diags(diags: LoweringDiagnostic[], scan_limit: int) -> LoweringDiagnostic[] {
+    let mut out: LoweringDiagnostic[] = [];
+    if diags == null { return out; }
+    let keep_limit = max_retained_fatal_diagnostics();
+    let mut elided: int = 0;
+    let mut index: int = 0;
+    loop {
+        if index >= scan_limit { break; }
+        let entry = diags[index];
+        if entry.severity == "error" {
+            if out.length < keep_limit { out.push(entry); } else { elided += 1; }
+        }
+        index += 1;
+    }
+    if elided > 0 {
+        out.push(lowering_error_diag("E1014", "elided " + number_to_string(elided)
+            + " further error diagnostics past the retention cap", null));
+    }
+    return out;
+}
+
+fn extend_diag_array_checked(values: LoweringDiagnostic[], extras: LoweringDiagnostic[], label: string) -> LoweringDiagnostic[] {
+    let mut safe_values = values;
+    if safe_values == null { safe_values = []; }
+    let mut safe_extras = extras;
+    if safe_extras == null { safe_extras = []; }
+    if safe_extras.length == 0 { return safe_values; }
+    if safe_extras.length > 1000000 {
+        let mut out = safe_values;
+        // Warning, not error: this summary is emitted on every oversized
+        // batch, tagged or not, so raising it as an error would fail builds
+        // that had no error in them. The string twin achieves the same thing
+        // by keeping the literal `[fatal]` out of its summary line.
+        out.push(lowering_warning_diag("E1014", "kept only error entries from oversized "
+            + label
+            + " diagnostics (len="
+            + number_to_string(extras.length)
+            + ")", null));
+        return extend_diag_array(out, retain_error_diags(safe_extras, safe_extras.length));
+    }
+    return extend_diag_array(safe_values, safe_extras);
 }
 
 fn extend_lifetime_regions_checked(values: LifetimeRegionMetadata[], extras: LifetimeRegionMetadata[]) -> LifetimeRegionMetadata[] {

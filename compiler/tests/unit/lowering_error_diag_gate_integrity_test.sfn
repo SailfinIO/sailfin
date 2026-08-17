@@ -1,0 +1,191 @@
+// Regression coverage for SFN-540: the structured gate must survive its own
+// size guards.
+//
+// `has_error_diag`
+// (`compiler/capsules/codegen-llvm/src/lowering/lowering_core/diagnostics.sfn`)
+// replaced the `[fatal]` substring scan as the only thing that turns a lowering
+// diagnostic into a build failure. It reads `severity` on the `diags` channel,
+// so the guard that bounds that channel has to preserve `severity: "error"` for
+// exactly the reason its string predecessor has to preserve `[fatal]`: a guard
+// that drops an oversized batch wholesale converts a failing build into a
+// silently-passing one (SFN-529, audited in
+// `docs/proposals/design-notes/sfn-526-lowering-fatal-gate-audit.md` §3 A3).
+//
+// This is the structured twin of `lowering_diagnostic_gate_integrity_test.sfn`,
+// which covers the same contract on the legacy `string[]` channel. Both run
+// until that channel is retired.
+//
+// The threshold is not reachable through the CLI, so this drives the guard
+// helpers directly. Building an over-threshold array is the expensive part, so
+// the assertions share one.
+import { has_error_diag } from "sfn/codegen-llvm/lowering/lowering_core/diagnostics";
+import {
+    extend_diag_array_checked,
+    max_retained_fatal_diagnostics,
+    retain_error_diags
+} from "sfn/codegen-llvm/lowering/lowering_io";
+import { lowering_error_diag, lowering_warning_diag } from "sfn/codegen-llvm/utils";
+import { LoweringDiagnostic } from "sfn/ir";
+import { expect_eq_bool, expect_eq_int } from "sfn/test";
+
+import { index_of } from "../../src/string_utils";
+
+// The sentinel this test tracks through the guard. It carries no live E-code:
+// E-code ranges are owned (`docs/style-guide.md`), and salting a real code into
+// synthetic test text pollutes greps for genuine emission sites.
+fn _error_entry() -> LoweringDiagnostic {
+    return lowering_error_diag("", "sfn-540 structured gate integrity sentinel", null);
+}
+
+// The guard counts entries, not bytes, so the filler stays minimal. It is a
+// `warning` because that is what the untagged legacy sites migrate to
+// (SFEP-0061 D2) — filler that was `error` would make every assertion below
+// pass for the wrong reason.
+fn _filler() -> LoweringDiagnostic {
+    return lowering_warning_diag("", "x", null);
+}
+
+fn _contains(text: string, needle: string) -> boolean {
+    return index_of(text, needle) >= 0;
+}
+
+fn _has_message(diags: LoweringDiagnostic[], needle: string) -> boolean {
+    if diags == null { return false; }
+    let mut index: int = 0;
+    loop {
+        if index >= diags.length { break; }
+        if _contains(diags[index].message, needle) { return true; }
+        index += 1;
+    }
+    return false;
+}
+
+fn _count_severity(diags: LoweringDiagnostic[], severity: string) -> int {
+    let mut total: int = 0;
+    let mut index: int = 0;
+    loop {
+        if index >= diags.length { break; }
+        if diags[index].severity == severity { total += 1; }
+        index += 1;
+    }
+    return total;
+}
+
+// 1,000,002 entries — one past the guard's 1,000,000 threshold — with the
+// sentinel buried in the middle so a guard that kept only a prefix would still
+// fail this test.
+fn _oversized_batch_with_error() -> LoweringDiagnostic[] {
+    let mut out: LoweringDiagnostic[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= 500000 { break; }
+        out.push(_filler());
+        index += 1;
+    }
+    out.push(_error_entry());
+    index = 0;
+    loop {
+        if index >= 500001 { break; }
+        out.push(_filler());
+        index += 1;
+    }
+    return out;
+}
+
+// -------------------------------------------------------------------
+// The gate reads severity, not text
+// -------------------------------------------------------------------
+test "lowering diagnostics: the structured gate trips on error severity alone" {
+    assert expect_eq_bool(has_error_diag([_error_entry()]), true).ok;
+    assert expect_eq_bool(has_error_diag([_filler()]), false).ok;
+    assert expect_eq_bool(has_error_diag([]), false).ok;
+
+    // A `warning` whose message happens to contain the retired sentinel must
+    // not fail the build. This is the whole point of retiring the substring:
+    // severity is a field, not a spelling.
+    let impostor = lowering_warning_diag("", "mentions [fatal] in prose", null);
+    assert expect_eq_bool(has_error_diag([impostor]), false).ok;
+}
+
+// -------------------------------------------------------------------
+// The size guard: over-threshold input keeps every error
+// -------------------------------------------------------------------
+test "lowering diagnostics: the structured size guard preserves errors past the threshold" {
+    let oversized = _oversized_batch_with_error();
+    assert expect_eq_bool(oversized.length > 1000000, true).ok;
+
+    let extended = extend_diag_array_checked([_filler()], oversized, "unit");
+
+    // The pre-existing entries survive, and so does the buried error — the
+    // guard must not disarm the gate it feeds.
+    assert expect_eq_bool(extended.length >= 2, true).ok;
+    assert expect_eq_bool(_has_message(extended, "sfn-540 structured gate integrity sentinel"), true).ok;
+    assert expect_eq_bool(has_error_diag(extended), true).ok;
+
+    // Memory is still bounded: only the error subset rides along with the
+    // summary, never the million warnings.
+    assert expect_eq_bool(extended.length <= max_retained_fatal_diagnostics()
+        + 2, true).ok;
+
+    // The always-emitted summary is a `warning`, never an `error`. Its string
+    // twin achieves the same thing by keeping the literal `[fatal]` out of its
+    // text — an `error` here would fail every oversized batch, including ones
+    // that carried no error at all.
+    assert expect_eq_bool(_has_message(extended, "kept only error entries from oversized unit"), true).ok;
+    assert expect_eq_int(_count_severity(extended, "error"), 1).ok;
+}
+
+// -------------------------------------------------------------------
+// Under-threshold input is untouched
+// -------------------------------------------------------------------
+test "lowering diagnostics: under-threshold structured batches pass through unchanged" {
+    let batch = [_filler(), _error_entry(), _filler()];
+    let extended = extend_diag_array_checked([], batch, "unit");
+
+    assert expect_eq_int(extended.length, 3).ok;
+    assert expect_eq_bool(_has_message(extended, "kept only error entries from oversized"), false).ok;
+    assert expect_eq_int(_count_severity(extended, "warning"), 2).ok;
+    assert expect_eq_int(_count_severity(extended, "error"), 1).ok;
+
+    // An empty batch is a no-op, not a summary.
+    let untouched = extend_diag_array_checked(batch, [], "unit");
+    assert expect_eq_int(untouched.length, 3).ok;
+}
+
+// -------------------------------------------------------------------
+// The retention filter and its cap
+// -------------------------------------------------------------------
+test "lowering diagnostics: retain_error_diags keeps only error severity" {
+    let mixed = [_filler(), _error_entry(), _filler(), _error_entry()];
+    let retained = retain_error_diags(mixed, mixed.length);
+
+    assert expect_eq_int(retained.length, 2).ok;
+    assert expect_eq_int(_count_severity(retained, "warning"), 0).ok;
+    assert expect_eq_int(_count_severity(retained, "error"), 2).ok;
+
+    // `scan_limit` is the caller's: a guard that tripped because the length is
+    // invalid rather than merely large passes 0 and must not index the buffer
+    // at all.
+    let unscanned = retain_error_diags(mixed, 0);
+    assert expect_eq_int(unscanned.length, 0).ok;
+}
+
+test "lowering diagnostics: the structured retention cap reports what it elides" {
+    let cap = max_retained_fatal_diagnostics();
+    let mut over_cap: LoweringDiagnostic[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= cap + 5 { break; }
+        over_cap.push(_error_entry());
+        index += 1;
+    }
+
+    let retained = retain_error_diags(over_cap, over_cap.length);
+
+    // The cap holds, and the overflow is reported rather than dropped in
+    // silence. The note is itself an `error`, so it keeps tripping the gate on
+    // its own — the retained set still fails the build.
+    assert expect_eq_int(retained.length, cap + 1).ok;
+    assert expect_eq_bool(_has_message(retained, "elided 5 further error diagnostics past the retention cap"), true).ok;
+    assert expect_eq_bool(has_error_diag(retained), true).ok;
+}

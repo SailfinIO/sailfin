@@ -3,54 +3,68 @@
 // Fail-closed lowering diagnostic gate and rendering.
 import { LoweringDiagnostic } from "sfn/ir";
 
+import { trace_log } from "../../lowering_debug_state";
 import { index_of, render_lowering_error_diag } from "../../utils";
 
-// Returns true if any diagnostic in the list carries the `[fatal]`
-// sentinel tag (issue #306). This is the whole severity model for
-// lowering diagnostics; the contract it defines is audited in full by
+// Returns true if any structured diagnostic carries `severity: "error"`
+// (SFN-540). This is the whole severity model for lowering diagnostics; the
+// contract it defines is audited in full by
 // `docs/proposals/design-notes/sfn-526-lowering-fatal-gate-audit.md`.
 //
-// 1. `[fatal]` anywhere in the string fails the build. There is no other
-//    severity and NO advisory channel: an untagged diagnostic is not a
-//    warning, it is discarded. The only path that ever surfaces one is
-//    `entrypoints.sfn`'s zero-lines branch, which prints `diagnostics[0]`
-//    alone and only when the build is already failing for another reason.
-//    The legacy gate remains an untyped `string[]` even though
-//    `LoweredLLVMLinesResult` also carries a structured diagnostic sidecar,
-//    so an untagged legacy entry does not acquire severity at this boundary.
-// 2. Tag when reaching the diagnostic implies the emitted IR is wrong.
-//    Do not tag a condition the language does not yet claim to enforce —
-//    borrow exclusivity is "Parsed only" (`docs/status.md`), and
+// This replaced a substring scan for a `[fatal]` tag in the legacy
+// `diagnostics: string[]` channel (issue #306). The legacy channel still
+// exists and is still populated, but it no longer decides the build:
+// `lowering_core/mod.sfn` reconciles every `[fatal]` string that lacks a
+// structured twin into an `error` diag (`append_missing_legacy_lowering_diags`)
+// immediately before building the `LoweredLLVMLinesResult` every gate site
+// consults, so reading `severity` here refuses exactly what the substring
+// refused. SFN-915 is why that holds for expression- and coercion-lowering;
+// retiring the string channel outright still needs the carriers named in
+// `instructions_condition.sfn` widened first.
+//
+// 1. `severity: "error"` fails the build. `warning` and `note` do not, and
+//    lowering has no advisory *string* channel at all: an untagged legacy
+//    entry is discarded rather than surfaced, which is why the structured
+//    twin of one must be `lowering_warning_diag`, never `lowering_error_diag`
+//    (`utils.sfn`). Promoting a site to `warning` is a per-site decision
+//    that belongs to the issue shipping the check behind it (SFEP-0061 D2),
+//    never to a refactor.
+// 2. Raise an error when reaching the diagnostic implies the emitted IR is
+//    wrong. Do not raise one for a condition the language does not yet claim
+//    to enforce — borrow exclusivity is "Parsed only" (`docs/status.md`), and
 //    use-after-move is enforced by `ownership_checker.sfn` (`E0901`),
 //    not here.
-// 3. Tag the site that FABRICATES or DROPS IR, not the site that detects
+// 3. Raise at the site that FABRICATES or DROPS IR, not the site that detects
 //    the problem. A leaf returning `operand: null` is safe on its own;
 //    what makes it wrong code is a consumer substituting
 //    `default_return_literal` (`llvm/expressions_helpers.sfn`) or skipping
 //    the instruction. Escalating detection sites instead of consumption
 //    sites is why SFN-492 and SFN-392 both ship silent wrong code.
-// 4. Prefer the `llvm lowering [fatal] [E0xxx]: …` spelling used by
-//    `atomics.sfn`/`byte_load.sfn` and allocate an E-code. The bare
-//    `[fatal] llvm lowering: …` form also trips the gate — matching is a
-//    substring search — but carries no code for the user to look up.
+// 4. Allocate an `E10xx` code (SFN-535). `lowering_error_diag` carries it in
+//    the struct, so unlike the legacy spelling there is no way to raise an
+//    error that carries no code for the user to look up.
 // 5. Every intermediate frame must forward its sub-results' diagnostics.
-//    A dropped forward silently swallows a `[fatal]` and exits 0; that
+//    A dropped forward silently swallows an error and exits 0; that
 //    regression has already shipped twice (#631, #1954).
-fn has_fatal_lowering_diagnostic(diagnostics: string[]) -> boolean {
-    if diagnostics == null { return false; }
+fn has_error_diag(diags: LoweringDiagnostic[]) -> boolean {
+    if diags == null { return false; }
     let mut idx: int = 0;
     loop {
-        if idx >= diagnostics.length { break; }
-        if index_of(diagnostics[idx], "[fatal]") >= 0 { return true; }
+        if idx >= diags.length { break; }
+        if diags[idx].severity == "error" { return true; }
         idx += 1;
     }
     return false;
 }
 
-// Render the typed sidecar into the provider's ordered event stream while the
-// legacy string array remains the fail-closed gate. The canonical first line
-// keeps existing grep-oriented diagnostics stable; Set A adds a source
-// location on the following line.
+// Render the typed sidecar into the provider's ordered event stream. The
+// canonical first line keeps existing grep-oriented diagnostics stable; Set A
+// adds a source location on the following line.
+//
+// The legacy scan below is a fallback for a caller that renders without
+// consulting the gate first. Every gate path reaches this with an `error` in
+// `diags` — that is what `has_error_diag` just matched on — so the structured
+// branch always wins there. It goes away with the string channel (SFN-916).
 fn fatal_lowering_diagnostic_lines(diagnostics: string[], diags: LoweringDiagnostic[]) -> string[] {
     let mut lines: string[] = [];
     let mut printed: boolean = false;
@@ -73,4 +87,21 @@ fn fatal_lowering_diagnostic_lines(diagnostics: string[], diags: LoweringDiagnos
         legacy_index += 1;
     }
     return lines;
+}
+
+// Record why a gate refused, for the gate sites inside lowering. The driver
+// prints to stderr directly (`main.sfn:_print_fatal_lowering_diagnostics`);
+// lowering runs in per-module subprocesses whose output is buffered and
+// drained by the caller, so it traces instead. Both render the same lines.
+//
+// Every gate site calls one of the two. A gate that refuses without naming
+// its cause hands the user a failed build and no reason (SFN-529).
+fn trace_lowering_error_diags(diagnostics: string[], diags: LoweringDiagnostic[]) {
+    let lines = fatal_lowering_diagnostic_lines(diagnostics, diags);
+    let mut index: int = 0;
+    loop {
+        if index >= lines.length { break; }
+        trace_log(lines[index]);
+        index += 1;
+    }
 }
