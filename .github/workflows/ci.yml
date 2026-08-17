@@ -109,7 +109,7 @@ jobs:
 
             while IFS= read -r path; do
               case "$path" in
-                compiler/*|runtime/*|capsules/*|scripts/*|Makefile|bootstrap.toml|.github/workflows/ci.yml|.github/actions/*)
+                compiler/*|runtime/*|capsules/*|scripts/*|Makefile|bootstrap.toml|.github/workflows/ci.yml|.github/workflows/windows-native-selfhost.yml|.github/actions/*)
                   source=true
                   reason="compiler/runtime/build-system path changed: $path"
                   ;;
@@ -2196,7 +2196,10 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: ci-build-windows-x86_64
-          path: ${{ steps.build.outputs.native_sfn }}
+          # Workspace-relative, not `native_sfn`: `upload-artifact` runs under
+          # Node/Win32, and the absolute Git-Bash path resolves to a
+          # nonexistent `D:\d\a\...` there (B3, SFN-55 review).
+          path: ${{ steps.build.outputs.native_sfn_relative }}
           if-no-files-found: error
           retention-days: 1
 

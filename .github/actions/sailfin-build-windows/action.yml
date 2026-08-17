@@ -21,10 +21,32 @@ outputs:
   native_sfn:
     description: "Absolute path to the native-built compiler executable."
     value: ${{ steps.locate.outputs.native_sfn }}
+  native_sfn_relative:
+    description: >-
+      Workspace-relative path to the native-built compiler executable,
+      suitable for `actions/upload-artifact` (Node/Win32) — the absolute
+      Git-Bash path in `native_sfn` (e.g. `/d/a/sailfin/sailfin/...`) resolves
+      to a nonexistent `D:\d\a\...` path under Win32 `path.resolve` (B3, SFN-55
+      review).
+    value: ${{ steps.locate.outputs.native_sfn_relative }}
 
 runs:
   using: "composite"
   steps:
+    # Both callers set `SAILFIN_TARGET_OS: Windows` at job scope (SFN-52 target
+    # seam), but a composite has multiple callers now — assert it here rather
+    # than trusting each one to keep setting it, so a caller that forgets it
+    # fails loud instead of quietly running the POSIX build path on a Windows
+    # runner.
+    - name: Assert SAILFIN_TARGET_OS=Windows
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [ "${SAILFIN_TARGET_OS:-}" != "Windows" ]; then
+          echo "[sailfin-build-windows] SAILFIN_TARGET_OS must be 'Windows' (got '${SAILFIN_TARGET_OS:-unset}'); set it at job scope" >&2
+          exit 1
+        fi
+
     - name: Download mingw-cross bootstrap seed
       if: ${{ inputs.seed_source == 'cross' }}
       uses: actions/download-artifact@v8
@@ -48,8 +70,10 @@ runs:
     - name: Reject unsupported seed_source
       if: ${{ inputs.seed_source != 'cross' }}
       shell: bash
+      env:
+        SEED_SOURCE: ${{ inputs.seed_source }}
       run: |
-        echo "[sailfin-build-windows] seed_source '${{ inputs.seed_source }}' is not implemented; only 'cross' is supported until SFN-57 lands the native release seed." >&2
+        echo "[sailfin-build-windows] seed_source '$SEED_SOURCE' is not implemented; only 'cross' is supported until SFN-57 lands the native release seed." >&2
         exit 1
 
     - name: Set up MSVC developer environment (UCRT + libs on PATH/LIB/INCLUDE)
@@ -76,26 +100,25 @@ runs:
     #   2 frontend     — parse/typecheck/effects, fully in-process
     #   3 one module   — emit -> clang -> lld-link, ONE child spawn
     #   4 the artifact — the binary it produced actually executes
-    # `continue-on-error` so a failed rung still lets later rungs run and
-    # report — one run then yields the whole ladder's shape instead of only
-    # its first break.
+    # No `continue-on-error` needed: `runs.steps[*]` in a composite action
+    # rejects that key (B1/B2, SFN-55 review), and it would be redundant here
+    # anyway — each rung runs under `set -uo pipefail` (no `-e`) and its last
+    # command is always an `echo`/`|| true` that exits 0, so a failed rung
+    # already lets later rungs run and report without it.
     - name: "Rung 1 — seed boots (--version)"
       shell: bash
-      continue-on-error: true
       run: |
         set -uo pipefail
         timeout 60 "$SEED_EXE" --version; echo "rung1 exit=$?"
 
     - name: "Rung 2 — seed frontend check (hello-world)"
       shell: bash
-      continue-on-error: true
       run: |
         set -uo pipefail
         timeout 120 "$SEED_EXE" check examples/basics/hello-world.sfn; echo "rung2 exit=$?"
 
     - name: "Rung 3 — seed builds ONE module (emit -> clang -> lld-link)"
       shell: bash
-      continue-on-error: true
       run: |
         set -uo pipefail
         # The single most diagnostic step in the workflow: one child spawn,
@@ -107,7 +130,6 @@ runs:
 
     - name: "Rung 4 — run the produced binary"
       shell: bash
-      continue-on-error: true
       run: |
         set -uo pipefail
         if [ -f hello.exe ]; then timeout 60 ./hello.exe; echo "rung4 exit=$?";
@@ -115,9 +137,12 @@ runs:
 
     - name: Native MSVC build of the compiler (Stage 2)
       shell: bash
-      timeout-minutes: 30
       run: |
         set -euo pipefail
+        # `runs.steps[*]` in a composite action has no `timeout-minutes` key
+        # (B1, SFN-55 review) — bound the build with `timeout` instead,
+        # consistent with the rungs above. 1800s = 30 minutes.
+        #
         # Call the seed directly rather than `make rebuild` — host `make` on
         # Windows runners is too old (SFEP-0021 §4.4), and `build -p
         # compiler` is exactly what `make rebuild` shells (Makefile
@@ -152,7 +177,7 @@ runs:
         # set, so the child reap is best-effort — killing the subshell
         # alone still bounds any delay at one sleep interval.
         trap 'pkill -P "$heartbeat_pid" 2>/dev/null || true; kill "$heartbeat_pid" 2>/dev/null || true' EXIT
-        "$SEED_EXE" build -p compiler
+        timeout 1800 "$SEED_EXE" build -p compiler
         echo "--- locating native-built compiler ---"
         OUT=""
         for c in build/capsules/sfn/compiler/bin/compiler.exe build/capsules/sfn/compiler/bin/compiler build/bin/sfn.exe build/bin/sfn; do
@@ -169,6 +194,14 @@ runs:
         set -euo pipefail
         [ -n "${NATIVE_SFN:-}" ] || { echo "NATIVE_SFN not set by the Stage 2 build step" >&2; exit 1; }
         echo "native_sfn=$NATIVE_SFN" >> "$GITHUB_OUTPUT"
+        # B3, SFN-55 review: `actions/upload-artifact` runs under Node, not
+        # bash, so the absolute Git-Bash path above (`/d/a/...`) is not a
+        # path Win32 `path.resolve` can follow. Strip the workspace prefix so
+        # callers that upload this as an artifact get a path Node resolves
+        # correctly; bash consumers (the fixed-point step) keep using the
+        # absolute `native_sfn` output above.
+        rel="${NATIVE_SFN#"$PWD"/}"
+        echo "native_sfn_relative=$rel" >> "$GITHUB_OUTPUT"
 
     - name: Gate — boots and prints version
       shell: bash

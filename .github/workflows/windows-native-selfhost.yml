@@ -20,6 +20,14 @@
 # instead of never.
 name: Windows native self-host (fixed point)
 
+# SFN-55 review A3: ci.yml sets this at workflow scope (`ci.yml:17`), so tier
+# A builds under the arena allocator. Without the same pin here, tier B's
+# fixed point proves determinism of the malloc path instead, and an
+# arena-only Windows nondeterminism would be invisible to the one gate meant
+# to catch it.
+env:
+  SAILFIN_USE_ARENA: "1"
+
 on:
   push:
     branches: [main]
@@ -27,14 +35,19 @@ on:
     - cron: "0 8 * * *" # after nightly-selfhost's 07:00
   workflow_dispatch:
 
-# One run per ref. The native leg carries a 90-minute timeout on a
-# `windows-latest` runner (billed at 2x), so without this a burst of
-# pushes leaves every superseded run grinding to its own timeout in
-# parallel — three concurrent runs of a harness whose whole purpose is to
-# report on the newest commit.
+# `push: main` and `schedule` both carry `github.ref = refs/heads/main`, so a
+# group key on `github.ref` alone puts them in the SAME group — a merge
+# landing every ~20 min would cancel the 08:00 cron mid-run, and the cron
+# would cancel an in-flight push run, on a job that takes ~45-60 min. Either
+# way the fixed point never finishes and the gate it exists to run never goes
+# red. Keying on `github.event_name` too separates the two triggers into
+# independent groups; `cancel-in-progress` stays true only for `push`, where
+# superseding an in-flight run with the newest commit is still correct
+# (SFN-55 review A1) — a burst of merges should still collapse to the latest
+# push, just not at the cost of cancelling the nightly.
 concurrency:
-  group: windows-native-selfhost-${{ github.ref }}
-  cancel-in-progress: true
+  group: windows-native-selfhost-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'schedule' }}
 
 permissions:
   contents: read
@@ -116,11 +129,14 @@ jobs:
     # an empty env), and it documents intent.
     env:
       SAILFIN_TARGET_OS: Windows
+    outputs:
+      gate_name: ${{ steps.identify_gate.outputs.gate_name }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
 
       - name: Build native Windows compiler
+        id: build_windows
         uses: ./.github/actions/sailfin-build-windows
         with:
           seed_source: cross
@@ -156,6 +172,7 @@ jobs:
       # job cancellation instead of this step's own timeout message —
       # a worse diagnostic, not a wrong verdict.
       - name: Gate — self-host fixed point (pass-2 == pass-1)
+        id: fixed_point
         shell: bash
         timeout-minutes: 30
         run: |
@@ -216,3 +233,171 @@ jobs:
             exit 1
           fi
           echo "ok: native MSVC self-host fixed point (pass-2 == pass-1)"
+
+      # SFN-55 review A2: `notify-failure` needs a gate name to file the
+      # regression issue under. Two values only — the fixed-point step's own
+      # outcome distinguishes a determinism break from everything upstream of
+      # it (seed staging, the ladder, the Stage 2 build, or an ABI gate),
+      # which all collapse to "the native build itself is broken".
+      - name: Identify failed gate
+        id: identify_gate
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ steps.fixed_point.outcome }}" = "failure" ]; then
+            gate=windows-fixed-point
+          else
+            gate=windows-native-build
+          fi
+          echo "gate_name=$gate" >> "$GITHUB_OUTPUT"
+
+  # SFN-55 review A2: without this, A1's fix (letting the fixed point survive
+  # to a genuine red/green result instead of being cancelled every ~20 min)
+  # still fails into a void — a nightly nobody reads is the same rot this
+  # issue exists to close. Instantiates `build-quality.yml`'s existing
+  # mechanism (`:621-869`) rather than inventing a second one; adapted to
+  # this workflow's two-job shape (no separate cache-warmer job) instead of
+  # build-quality's three-gate one. Triage runbook:
+  # `docs/runbooks/windows-native.md`.
+  notify-failure:
+    name: Open regression issue + PR comment on failure
+    needs: [cross-seed, native-build]
+    # `always()`, not `!cancelled()`: a `timeout-minutes` expiry on
+    # `native-build` (job-level 90 min, or the 30-min fixed-point step)
+    # surfaces as a `cancelled` job conclusion, and after A1 that is the
+    # single most likely failure signal this workflow can produce —
+    # `!cancelled()` would suppress exactly it (copied verbatim from
+    # `build-quality.yml:632-638`).
+    if: >-
+      always() &&
+      (needs.cross-seed.result == 'failure' ||
+       needs.native-build.result == 'failure' ||
+       needs.native-build.result == 'cancelled')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    # Elevated beyond the workflow-level `contents: read` (`:52-53`) —
+    # `gh issue create`/`gh pr comment` need `issues: write` and
+    # `pull-requests: write`, scoped to this job alone so the two build jobs
+    # stay minimally privileged.
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    env:
+      GATE_NAME: ${{ needs.native-build.outputs.gate_name != '' && needs.native-build.outputs.gate_name || 'windows-native-build' }}
+      FAIL_SHA: ${{ github.sha }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      EVENT_NAME: ${{ github.event_name }}
+      REF: ${{ github.ref }}
+      REPO: ${{ github.repository }}
+      RUN_ID: ${{ github.run_id }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      # A1 puts every `push` run (and every `workflow_dispatch` run) to
+      # `main` in one concurrency group with `cancel-in-progress: true`, so a
+      # newer push legitimately cancels an older still-running one — expected
+      # coalescing, not a regression. Distinguish that from a genuine
+      # timeout/host cancellation by checking whether a newer run of the same
+      # event type has since started: if so, this run was superseded: if this
+      # is still the newest run of its event type, the cancellation is real.
+      - name: Classify cancellation (supersede vs timeout)
+        id: classify
+        shell: bash
+        run: |
+          set -euo pipefail
+          report=true
+          if [ "${{ needs.cross-seed.result }}" != "failure" ] &&
+             [ "${{ needs.native-build.result }}" != "failure" ] &&
+             [ "${{ needs.native-build.result }}" = "cancelled" ]; then
+            latest_run_id="$(gh api \
+              "/repos/${REPO}/actions/workflows/windows-native-selfhost.yml/runs?event=${EVENT_NAME}&branch=main&per_page=1" \
+              --jq '.workflow_runs[0].id // empty')"
+            if [ -n "$latest_run_id" ] && [ "$latest_run_id" != "$RUN_ID" ]; then
+              report=false
+              echo "[notify] superseded by run ${latest_run_id}; expected concurrency coalescing, no regression notification"
+            else
+              echo "[notify] this is the latest ${EVENT_NAME} run and still cancelled; reporting as a genuine cancellation/timeout"
+            fi
+          fi
+          echo "report=${report}" >> "$GITHUB_OUTPUT"
+
+      - name: Open or append regression issue
+        id: regression_issue
+        if: steps.classify.outputs.report == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          gate="${GATE_NAME}"
+          title="windows-native regression: ${gate}"
+
+          existing="$(gh issue list \
+            --repo "$REPO" \
+            --state open \
+            --label windows-native-regression \
+            --limit 100 \
+            --json number,title \
+            --jq "[.[] | select(.title == \"${title}\")] | .[0].number // empty")"
+
+          {
+            echo "**Failure run:** ${RUN_URL}"
+            echo "**Commit:** \`${FAIL_SHA}\`"
+            echo "**Event:** \`${EVENT_NAME}\` on \`${REF}\`"
+            echo "**Gate:** \`${gate}\`"
+            echo "**cross-seed result:** \`${{ needs.cross-seed.result }}\`"
+            echo "**native-build result:** \`${{ needs.native-build.result }}\`"
+          } > regression-body.md
+
+          if [ -n "$existing" ]; then
+            echo "[notify] appending comment to existing regression issue #${existing}"
+            gh issue comment "$existing" --repo "$REPO" --body-file regression-body.md
+            echo "number=$existing" >> "$GITHUB_OUTPUT"
+          else
+            {
+              echo "# windows-native regression: ${gate}"
+              echo ""
+              echo "The \`windows-native-selfhost.yml\` gate (SFN-55 tier B) failed on \`${gate}\`. This issue tracks the regression and aggregates additional failures via comments — see \`docs/runbooks/windows-native.md\` for the triage runbook."
+              echo ""
+              echo "## Latest failure"
+              echo ""
+              cat regression-body.md
+            } > regression-new-body.md
+            new_number="$(gh issue create \
+              --repo "$REPO" \
+              --title "$title" \
+              --label "area:architecture" \
+              --label "windows-native-regression" \
+              --body-file regression-new-body.md \
+              | awk -F/ '/^https:/{print $NF}')"
+            echo "[notify] opened new regression issue #${new_number}"
+            echo "number=$new_number" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Per §6: PR comment only on `push: main` events. `schedule` and
+      # `workflow_dispatch` runs aren't tied to a single merging PR.
+      - name: Comment on merging PR
+        if: >-
+          steps.classify.outputs.report == 'true' &&
+          github.event_name == 'push' &&
+          github.ref == 'refs/heads/main'
+        shell: bash
+        run: |
+          set -euo pipefail
+          issue_number="${{ steps.regression_issue.outputs.number }}"
+          pr_number="$(gh api \
+            -H "Accept: application/vnd.github+json" \
+            "/repos/${REPO}/commits/${FAIL_SHA}/pulls" \
+            --jq '.[0].number // empty')"
+          if [ -z "$pr_number" ]; then
+            echo "[notify] no merging PR found for ${FAIL_SHA}; skipping PR comment"
+            exit 0
+          fi
+          echo "[notify] commenting on merging PR #${pr_number}"
+          {
+            echo "windows-native-selfhost gate failed on this merge: \`${GATE_NAME}\`."
+            echo ""
+            echo "- Tracking issue: #${issue_number}"
+            echo "- Failing run: ${RUN_URL}"
+            echo "- Runbook: \`docs/runbooks/windows-native.md\`"
+          } > pr-comment.md
+          gh pr comment "$pr_number" --repo "$REPO" --body-file pr-comment.md
