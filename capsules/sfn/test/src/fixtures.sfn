@@ -160,11 +160,22 @@ fn _pool_managed_keys() -> string[] {
     return ["SAILFIN_TEST_SCRATCH", "SAILFIN_TEST_RUNTIME_OBJDIR", "SAILFIN_TEST_RUNTIME_STAMP", "SAILFIN_UPDATE_SNAPSHOTS", "SAILFIN_TEST_JSON_SUBFRAME", "SAILFIN_TEST_FRAME_TIMING",];
 }
 
-// True when `entry` ("KEY=VALUE") carries one of the pool-managed keys. Matched
-// by exact `KEY=` prefix so a value that merely contains the substring is
-// unaffected.
-fn _is_pool_managed(entry: string) -> boolean {
-    let keys = _pool_managed_keys();
+// Caller-override keys a nested runner must receive only from the caller's
+// explicit push, never from the outer process's own environment (SFN-925).
+// Unlike `_pool_managed_keys`, these are not pool-injected orchestration
+// state — they are host/target overrides (SFN-617's Windows-host seam) that
+// a caller sets deliberately. Kept as a separate list rather than folded into
+// `_pool_managed_keys` because that function's contract is pinned to mirror
+// `_pool_child_env` in `compiler/src/cli/commands/test/pool.sfn` (see the
+// comment above it); these keys are never pool-injected, so they don't belong
+// in that mirror.
+fn _caller_override_keys() -> string[] {
+    return ["SAILFIN_TARGET_OS", "SAILFIN_HOST_OS"];
+}
+
+// True when `entry` ("KEY=VALUE") carries one of `keys`. Matched by exact
+// `KEY=` prefix so a value that merely contains the substring is unaffected.
+fn _matches_any_key(entry: string, keys: string[]) -> boolean {
     let mut i: int = 0;
     loop {
         if i >= keys.length { break; }
@@ -172,6 +183,16 @@ fn _is_pool_managed(entry: string) -> boolean {
         i += 1;
     }
     return false;
+}
+
+// True when `entry` carries one of the pool-managed keys.
+fn _is_pool_managed(entry: string) -> boolean {
+    return _matches_any_key(entry, _pool_managed_keys());
+}
+
+// True when `entry` carries one of the caller-override keys.
+fn _is_caller_override(entry: string) -> boolean {
+    return _matches_any_key(entry, _caller_override_keys());
 }
 
 // Mint an isolated per-invocation scratch path for a nested runner. When the
@@ -189,21 +210,38 @@ fn nested_runner_scratch(label: string) -> string ![io] {
 
 // Build a clean top-level child environment for spawning a nested `sfn test`
 // (or `sfn build` / `sfn run`) subprocess. Returns `process.environ()` with
-// every pool-managed key (see `_pool_managed_keys`) stripped and
-// `SAILFIN_TEST_SCRATCH` re-pointed at `nested_scratch` — an isolated dir the
-// caller owns, typically from `nested_runner_scratch(...)`. Pass an empty
-// `nested_scratch` to strip the pool keys without re-adding a scratch. Callers
-// that deliberately want an otherwise-managed key (e.g. a nested build binding
-// its own `SAILFIN_TEST_RUNTIME_OBJDIR`, or a test threading its own trace
-// flag) push it onto the returned array. Use with the raw
-// `process.run_capture(argv, env)` builtin the e2e tests call.
+// every pool-managed key (see `_pool_managed_keys`) and every caller-override
+// key (see `_caller_override_keys`) stripped, and `SAILFIN_TEST_SCRATCH`
+// re-pointed at `nested_scratch` — an isolated dir the caller owns, typically
+// from `nested_runner_scratch(...)`. Pass an empty `nested_scratch` to strip
+// the pool keys without re-adding a scratch. Callers that deliberately want an
+// otherwise-managed key (e.g. a nested build binding its own
+// `SAILFIN_TEST_RUNTIME_OBJDIR`, or a test threading its own trace flag) push
+// it onto the returned array.
+//
+// `SAILFIN_TARGET_OS` / `SAILFIN_HOST_OS` are always stripped, even though
+// they are not pool-managed, so a caller's push is the ONLY occurrence in the
+// child's envp (SFN-925). `_process_build_cstr_argv`
+// (`runtime/sfn/process.sfn`) emits every entry verbatim, and `env.get`
+// resolves via libc `getenv()`, which returns the first match — so leaving
+// the outer process's own value in place would silently defeat a caller's
+// push with a duplicate-keyed envp. The deliberate consequence: a nested
+// child no longer inherits the outer target/host unless the caller passes it
+// explicitly. That is the intended contract — an inherited target was never
+// reliable, only accidentally right when it happened to agree with the one
+// the caller wanted.
+//
+// Use with the raw `process.run_capture(argv, env)` builtin the e2e tests
+// call.
 fn clean_runner_env(nested_scratch: string) -> string[] ![io] {
     let all = process.environ();
     let mut out: string[] = [];
     let mut i: int = 0;
     loop {
         if i >= all.length { break; }
-        if !_is_pool_managed(all[i]) { out.push(all[i]); }
+        if !_is_pool_managed(all[i]) && !_is_caller_override(all[i]) {
+            out.push(all[i]);
+        }
         i += 1;
     }
     if nested_scratch.length > 0 {

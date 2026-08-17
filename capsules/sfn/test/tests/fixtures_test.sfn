@@ -282,6 +282,18 @@ test "with_cwd: body return value threads back out" ![io] {
 // tests guard the "add a pool key, forget to mirror it" regression by
 // asserting the four non-scratch pool keys never survive and scratch is
 // re-pointed exactly once, whatever the ambient environment.
+//
+// `SAILFIN_TARGET_OS` / `SAILFIN_HOST_OS` are also stripped, but they are
+// caller-override keys, not pool-managed ones (`fixtures.sfn::
+// _caller_override_keys`) — SFN-925: an unstripped ambient value duplicate-
+// keys the child envp, and `getenv()` resolves the first (ambient) match,
+// silently defeating a caller's own push. The strip tests below use the
+// same "holds whether or not the ambient env carries the key" idiom as the
+// pool-key tests above so they pass unconditionally, but only exercise the
+// strip itself when the invoking shell actually sets the key — e.g.:
+//   SAILFIN_HOST_OS=Windows SAILFIN_TARGET_OS=Linux build/bin/sfn test capsules/sfn/test/tests/fixtures_test.sfn
+// mirroring how `compiler/tests/unit/toolchain_host_detect_test.sfn:11-18`
+// documents its own override requirement.
 // Count entries in `env_flat` whose key is exactly `key` (a `KEY=` prefix).
 fn _count_key(env_flat: string[], key: string) -> int {
     let mut n: int = 0;
@@ -325,6 +337,34 @@ test "clean_runner_env: re-points SAILFIN_TEST_SCRATCH exactly once" ![io] {
 test "clean_runner_env: empty scratch strips without re-adding" ![io] {
     let e = clean_runner_env("");
     assert _count_key(e, "SAILFIN_TEST_SCRATCH") == 0;
+}
+
+// Neither caller-override key survives the strip (SFN-925). Meaningful only
+// when the invoking shell actually sets them — see the section header above.
+test "clean_runner_env: strips SAILFIN_TARGET_OS and SAILFIN_HOST_OS from the ambient environment" ![io] {
+    let e = clean_runner_env("");
+    assert _count_key(e, "SAILFIN_TARGET_OS") == 0;
+    assert _count_key(e, "SAILFIN_HOST_OS") == 0;
+}
+
+// A caller's own push is the ONLY occurrence in the result — the duplicate-
+// key defeat SFN-925 fixes. Most meaningful run under an ambient
+// SAILFIN_TARGET_OS (see the section header above): without the strip, the
+// count would be 2.
+test "clean_runner_env: a pushed SAILFIN_TARGET_OS survives as the sole occurrence" ![io] {
+    let mut e = clean_runner_env("");
+    e.push("SAILFIN_TARGET_OS=Windows");
+    assert _count_key(e, "SAILFIN_TARGET_OS") == 1;
+}
+
+// The exact-`KEY=`-prefix match does not over-strip: a key that merely
+// contains "SAILFIN_TARGET_OS" as a substring is untouched, so its count in
+// the stripped output equals its (ambient) count going in — 0 on a host with
+// no such variable, preserved on one that happens to carry it.
+test "clean_runner_env: a key containing SAILFIN_TARGET_OS as a substring is not stripped" ![io] {
+    let e = clean_runner_env("");
+    assert _count_key(e, "MY_SAILFIN_TARGET_OS") == _count_key(process.environ(), "MY_SAILFIN_TARGET_OS");
+    assert _count_key(e, "SAILFIN_TARGET_OS_EXTRA") == _count_key(process.environ(), "SAILFIN_TARGET_OS_EXTRA");
 }
 
 // The minted scratch is non-empty and, under a runner that set an outer

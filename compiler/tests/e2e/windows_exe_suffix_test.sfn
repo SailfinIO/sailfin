@@ -21,8 +21,15 @@
 // `process.run_capture_cwd`, `clean_runner_env` + `nested_runner_scratch`
 // per `docs/conventions/e2e-tests.md` (PATH is threaded because
 // `clean_runner_env` is the full parent `process.environ()` snapshot minus
-// only the pool-managed keys, so the nested build's `clang` stays
-// resolvable).
+// the pool-managed and caller-override keys, so the nested build's `clang`
+// stays resolvable).
+//
+// The `SAILFIN_TARGET_OS` this file pushes is load-bearing and must be the
+// only occurrence: `clean_runner_env` strips the ambient one (SFN-925)
+// precisely so it is. Before that strip, an outer `SAILFIN_TARGET_OS`
+// duplicate-keyed the child's envp and `getenv()`'s first-match rule handed
+// the child the ambient value, so this file's Windows case failed under the
+// SFN-617 host-seam pin while passing everywhere else.
 import { contains, ends_with, split } from "sfn/strings";
 import { clean_runner_env, nested_runner_scratch, with_tmp_dir } from "sfn/test";
 
