@@ -1,0 +1,99 @@
+// compiler/capsules/analyzer/src/typecheck/field_access.sfn
+//
+// Field-access resolution for the expression walk: E0015, the field
+// analogue of E0012's unresolved primitive-receiver method call (SFN-543).
+import { Expression, Statement } from "sfn/syntax";
+
+import { Diagnostic } from "../typecheck_types";
+import { bound_base_name } from "../typecheck_types/generic_bounds";
+import { SymbolEntry } from "../typecheck_types/symbol_table_and_raw_exprs";
+import { token_from_name } from "../typecheck_types/text_utils";
+import {
+    make_unknown_field_diagnostic,
+    primitive_has_field,
+    primitive_has_method
+} from "../typecheck_types/value_and_object_checks";
+import { TypeckCtx } from "./context";
+import { _string_list_has } from "./symbols";
+
+// The struct declaration of `name` among this program's top-level
+// statements, or `null` when none declares it (an imported or unknown struct).
+fn _find_struct_declaration(declarations: Statement[], name: string) -> Statement? {
+    let mut i: int = 0;
+    loop {
+        if i >= declarations.length { break; }
+        let statement = declarations[i];
+        if strings_equal(statement.variant, "StructDeclaration") {
+            if strings_equal(statement.name, name) { return statement; }
+        }
+        i += 1;
+    }
+    return null;
+}
+
+fn _struct_field_names(declaration: Statement) -> string[] {
+    let mut names: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= declaration.fields.length { break; }
+        names.push(declaration.fields[i].name);
+        i += 1;
+    }
+    return names;
+}
+
+// A struct's method names. A member naming one is a method value, not a
+// missing field — the struct-side twin of the `primitive_has_method` guard.
+fn _struct_declares_method(declaration: Statement, name: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= declaration.methods.length { break; }
+        if strings_equal(declaration.methods[i].signature.name, name) {
+            return true;
+        }
+        i += 1;
+    }
+    return false;
+}
+
+// E0015: a field read whose name the receiver's type does not declare.
+// Fail-open by construction — silent unless the receiver's type is *proven*
+// (an explicit struct annotation that resolved to a struct declared in this
+// program, or a bare primitive word) and the member is provably absent from
+// it. An inferred binding, an array, an optional, a generic, an enum, an
+// interface, and a struct declared in another module all leave both proof
+// fields empty and stay silent.
+//
+// This mirrors `primitive_method_diagnostics`' fail-open discipline for E0012
+// but not its resolution surface: it reads `find_value_symbol` (preferring a
+// real binding over an import placeholder) and falls back to `ctx.top_level`,
+// so it can prove a receiver E0012 leaves alone.
+//
+// Two known fail-open boundaries, both preferred over a false positive: a
+// block-local struct shadowing a top-level one of the same name resolves
+// against the inner declaration but is checked against the outer field list,
+// and a `Member` inside the branches of a called conditional
+// (`(c ? a.b : d.e)()`) is skipped because `Conditional` forwards the callee
+// flag unchanged.
+fn unknown_field_diagnostics(expression: Expression, entry: SymbolEntry, ctx: TypeckCtx) -> Diagnostic[] {
+    let member = expression.member;
+    if member.length == 0 { return []; }
+    if entry.declared_struct.length > 0 {
+        let struct_name = bound_base_name(entry.declared_struct);
+        let declaration = _find_struct_declaration(ctx.declarations, struct_name);
+        // Not declared in this program (an imported struct) — unproven.
+        if declaration == null { return []; }
+        if _struct_declares_method(declaration, member) { return []; }
+        let fields = _struct_field_names(declaration);
+        if _string_list_has(fields, member) { return []; }
+        return [make_unknown_field_diagnostic(struct_name, member, fields, token_from_name(member, expression.span))];
+    }
+    if entry.declared_prim.length > 0 {
+        if primitive_has_field(entry.declared_prim, member) { return []; }
+        // A bare method reference (`s.substring` without a call) is a value use
+        // of a real method, not a missing field.
+        if primitive_has_method(entry.declared_prim, member) { return []; }
+        return [make_unknown_field_diagnostic(entry.declared_prim, member, [], token_from_name(member, expression.span))];
+    }
+    return [];
+}

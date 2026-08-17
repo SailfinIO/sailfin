@@ -23,7 +23,6 @@ import {
 import { make_nested_fn_capture_diagnostic, make_undefined_function_diagnostic } from "../typecheck_types/declaration_and_statement_checks";
 import { make_parse_error_diagnostic } from "../typecheck_types/expr_type_rules";
 import { is_builtin_call_name, is_builtin_member_root } from "../typecheck_types/extern_abi";
-import { bound_base_name } from "../typecheck_types/generic_bounds";
 import { check_named_fn_value_compatibility } from "../typecheck_types/named_fn_values";
 import {
     SymbolEntry,
@@ -39,14 +38,8 @@ import {
     make_fn_value_position_diagnostic,
     register_local_symbol
 } from "../typecheck_types/symbol_table_and_raw_exprs";
-import { token_from_name, trim_text } from "../typecheck_types/text_utils";
-import {
-    check_intersection_value_type_annotation,
-    check_object_literal_target,
-    make_unknown_field_diagnostic,
-    primitive_has_field,
-    primitive_has_method
-} from "../typecheck_types/value_and_object_checks";
+import { trim_text } from "../typecheck_types/text_utils";
+import { check_intersection_value_type_annotation, check_object_literal_target } from "../typecheck_types/value_and_object_checks";
 import {
     _struct_arithmetic_diagnostics,
     array_arithmetic_diagnostics,
@@ -71,6 +64,7 @@ import {
     ctx_with_bindings,
     ctx_with_expected_type
 } from "./context";
+import { unknown_field_diagnostics } from "./field_access";
 import { _serve_resolves_to_user_fn } from "./patterns";
 import {
     call_argument_type_diagnostics,
@@ -78,91 +72,9 @@ import {
     make_undefined_value_diagnostic,
     serve_argument_type_diagnostics
 } from "./primitive_rules";
-import { _declared_struct_annotation, _string_list_has } from "./symbols";
+import { _declared_struct_annotation } from "./symbols";
 import { _is_syscall_name, _syscall_call_diagnostics } from "./syscalls";
 import { _conditional_branch_type, check_conditional_types } from "./try_and_conditional";
-
-// SFN-543: the struct declaration of `name` among this program's top-level
-// statements, or `null` when none declares it (an imported or unknown struct).
-fn _find_struct_declaration(declarations: Statement[], name: string) -> Statement? {
-    let mut i: int = 0;
-    loop {
-        if i >= declarations.length { break; }
-        let statement = declarations[i];
-        if strings_equal(statement.variant, "StructDeclaration") {
-            if strings_equal(statement.name, name) { return statement; }
-        }
-        i += 1;
-    }
-    return null;
-}
-
-fn _struct_field_names(declaration: Statement) -> string[] {
-    let mut names: string[] = [];
-    let mut i: int = 0;
-    loop {
-        if i >= declaration.fields.length { break; }
-        names.push(declaration.fields[i].name);
-        i += 1;
-    }
-    return names;
-}
-
-// SFN-543: a struct's method names. A member naming one is a method value, not
-// a missing field — the struct-side twin of the `primitive_has_method` guard.
-fn _struct_declares_method(declaration: Statement, name: string) -> boolean {
-    let mut i: int = 0;
-    loop {
-        if i >= declaration.methods.length { break; }
-        if strings_equal(declaration.methods[i].signature.name, name) {
-            return true;
-        }
-        i += 1;
-    }
-    return false;
-}
-
-// E0015 (SFN-543): a field read whose name the receiver's type does not
-// declare. Fail-open by construction — silent unless the receiver's type is
-// *proven* (an explicit struct annotation that resolved to a struct declared in
-// this program, or a bare primitive word) and the member is provably absent
-// from it. An inferred binding, an array, an optional, a generic, an enum, an
-// interface, and a struct declared in another module all leave both proof
-// fields empty and stay silent.
-//
-// This mirrors `primitive_method_diagnostics`' fail-open discipline for E0012
-// but not its resolution surface: it reads `find_value_symbol` (preferring a
-// real binding over an import placeholder) and falls back to `ctx.top_level`,
-// so it can prove a receiver E0012 leaves alone.
-//
-// Two known fail-open boundaries, both preferred over a false positive: a
-// block-local struct shadowing a top-level one of the same name resolves
-// against the inner declaration but is checked against the outer field list,
-// and a `Member` inside the branches of a called conditional
-// (`(c ? a.b : d.e)()`) is skipped because `Conditional` forwards the callee
-// flag unchanged.
-fn _unknown_field_diagnostics(expression: Expression, entry: SymbolEntry, ctx: TypeckCtx) -> Diagnostic[] {
-    let member = expression.member;
-    if member.length == 0 { return []; }
-    if entry.declared_struct.length > 0 {
-        let struct_name = bound_base_name(entry.declared_struct);
-        let declaration = _find_struct_declaration(ctx.declarations, struct_name);
-        // Not declared in this program (an imported struct) — unproven.
-        if declaration == null { return []; }
-        if _struct_declares_method(declaration, member) { return []; }
-        let fields = _struct_field_names(declaration);
-        if _string_list_has(fields, member) { return []; }
-        return [make_unknown_field_diagnostic(struct_name, member, fields, token_from_name(member, expression.span))];
-    }
-    if entry.declared_prim.length > 0 {
-        if primitive_has_field(entry.declared_prim, member) { return []; }
-        // A bare method reference (`s.substring` without a call) is a value use
-        // of a real method, not a missing field.
-        if primitive_has_method(entry.declared_prim, member) { return []; }
-        return [make_unknown_field_diagnostic(entry.declared_prim, member, [], token_from_name(member, expression.span))];
-    }
-    return [];
-}
 
 fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
     let bindings = ctx.bindings;
@@ -312,7 +224,7 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
                     // prove the member absent -> E0015. In callee position the
                     // member is a method, owned by E0012.
                     if ctx.in_callee_position { return []; }
-                    return _unknown_field_diagnostics(expression, entry, ctx);
+                    return unknown_field_diagnostics(expression, entry, ctx);
                 }
                 if is_builtin_member_root(receiver.name) { return []; }
                 return [make_undefined_value_diagnostic(receiver.name, receiver.span)];
