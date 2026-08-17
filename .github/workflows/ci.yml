@@ -2089,7 +2089,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Download per-shard timing sidecars
         uses: actions/download-artifact@v7
