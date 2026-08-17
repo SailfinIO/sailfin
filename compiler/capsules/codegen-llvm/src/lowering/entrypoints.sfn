@@ -93,6 +93,7 @@ import {
     TypeContext
 } from "../types";
 import {
+    append_missing_legacy_lowering_diags,
     append_string,
     index_of,
     join_with_separator,
@@ -343,7 +344,12 @@ fn lower_to_llvm_lines_with_context(native_module: NativeModule, import_context:
         return LoweredLLVMLinesResult {
             lines: [],
             diagnostics: diagnostics,
-            diags: [],
+            // This branch bypasses `lower_to_llvm_lines_with_parsed_context`,
+            // so it never reaches the reconciliation that gives every legacy
+            // fatal a structured twin. Reconcile here instead: the gate reads
+            // `diags`, and no caller of this entry point may depend on a
+            // string that never became one.
+            diags: append_missing_legacy_lowering_diags([], diagnostics),
             trait_metadata: empty_trait_metadata(),
             function_effects: [],
             lifetime_regions: [],

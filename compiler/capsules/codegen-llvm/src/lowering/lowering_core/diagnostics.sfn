@@ -57,10 +57,14 @@ fn has_error_diag(diags: LoweringDiagnostic[]) -> boolean {
     return false;
 }
 
-// Render the typed sidecar into the provider's ordered event stream while the
-// legacy string array remains the fail-closed gate. The canonical first line
-// keeps existing grep-oriented diagnostics stable; Set A adds a source
-// location on the following line.
+// Render the typed sidecar into the provider's ordered event stream. The
+// canonical first line keeps existing grep-oriented diagnostics stable; Set A
+// adds a source location on the following line.
+//
+// The legacy scan below is a fallback for a caller that renders without
+// consulting the gate first. Every gate path reaches this with an `error` in
+// `diags` — that is what `has_error_diag` just matched on — so the structured
+// branch always wins there. It goes away with the string channel (SFN-916).
 fn fatal_lowering_diagnostic_lines(diagnostics: string[], diags: LoweringDiagnostic[]) -> string[] {
     let mut lines: string[] = [];
     let mut printed: boolean = false;

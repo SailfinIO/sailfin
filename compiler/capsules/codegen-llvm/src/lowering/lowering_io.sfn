@@ -46,11 +46,11 @@ fn append_string_lines(values: string[], extras: string[]) -> string[] {
     return out;
 }
 
-// Upper bound on how many `[fatal]` entries a guard trip retains. The gate
-// downstream fails the build on the *first* `[fatal]` it sees, so a bounded
-// handful carries the same verdict as the whole set while keeping the size
-// guards' memory bound a construction rather than an assumption about how
-// many entries happen to be tagged.
+// Upper bound on how many build-failing entries a guard trip retains, on
+// either channel. The gate downstream fails the build on the *first* one it
+// sees, so a bounded handful carries the same verdict as the whole set while
+// keeping the size guards' memory bound a construction rather than an
+// assumption about how many entries happen to qualify.
 fn max_retained_fatal_diagnostics() -> int { return 64; }
 
 // Reduce a diagnostic batch to its `[fatal]` entries, scanning at most

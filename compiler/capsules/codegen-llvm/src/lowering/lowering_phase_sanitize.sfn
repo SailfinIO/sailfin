@@ -90,10 +90,11 @@ fn sanitize_imported_native_texts(imported_native_texts: string[], debug_lowerin
 // Sanitize diagnostics array: null-check + length guard.
 //
 // Unlike the sibling guards above, an over-length trip keeps the `[fatal]`
-// entries instead of clearing the array. This is the inbound diagnostics
-// of `lower_to_llvm_lines_with_parsed_context`, read by the `[fatal]` gate
-// downstream, so clearing it would turn a failing build into a passing one
-// (SFN-529).
+// entries instead of clearing the array. This is the inbound diagnostics of
+// `lower_to_llvm_lines_with_parsed_context`, which `append_missing_legacy_lowering_diags`
+// converts into the `diags` the gate reads, so clearing it would turn a
+// failing build into a passing one (SFN-529). The link to the gate is that
+// reconciliation — read it before touching this function.
 //
 // `sanitize_collection_length` doubles as the scan bound, which keeps the
 // two trip reasons apart: it returns 0 for a negative length — the corrupt
