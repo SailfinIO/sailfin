@@ -74,6 +74,18 @@ test "paths: equality ignores separator spelling" {
     assert _paths_equal_ignoring_sep("/a/b", "/a/b");
 }
 
+// Pinned as an accepted SFN-919 limitation, not an oversight. The
+// comparison is length-first, so a trailing separator on one side is
+// unequal. No in-tree producer emits one — `binary_dir()`
+// (`runtime/sfn/platform/exec.sfn:205`) cuts before the separator — and
+// normalizing here would make the function accept paths that differ for
+// reasons other than separator spelling. Do not "fix" this into a
+// length-normalizing compare without a caller that needs it.
+test "paths: equality does not normalize a trailing separator" {
+    assert ! _paths_equal_ignoring_sep("D:\\a\\bin\\", "D:\\a\\bin");
+    assert ! _paths_equal_ignoring_sep("/a/bin/", "/a/bin");
+}
+
 test "paths: equality still rejects genuinely different paths" {
     assert ! _paths_equal_ignoring_sep("D:\\a\\bin", "D:\\a\\lib");
     assert ! _paths_equal_ignoring_sep("D:\\a", "D:\\a\\bin");
