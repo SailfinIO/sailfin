@@ -1,0 +1,181 @@
+// Unit tests for SFN-543's E0015: a field read whose name the receiver's
+// proven type does not declare (a struct declared in this program, or a
+// bare primitive annotation such as `string`).
+//
+// Fail-open by construction, mirroring E0012 (SFN-385): it fires only when
+// the receiver is a bare identifier bound to an explicit annotation that
+// resolves to a struct declared in the same program, or to a bare
+// primitive word. Method-call callee position (`s.substring(0, 1)`,
+// `t.method()`) stays E0012's territory; inferred bindings, arrays,
+// optionals, generics, enums, interfaces, and namespace roots all leave the
+// receiver unproven and stay silent.
+import { typecheck_diagnostics } from "sfn/analyzer/typecheck";
+import { Diagnostic } from "sfn/analyzer/typecheck_types";
+import { parse_program } from "sfn/syntax";
+
+fn _has_code(diagnostics: Diagnostic[], code: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= diagnostics.length { break; }
+        if strings_equal(diagnostics[i].code, code) { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+// -------------------------------------------------------------------
+// Rejects: the receiver's type is proven and does not declare the field.
+// -------------------------------------------------------------------
+test "unknown-field: rejects unknown field on a struct-typed parameter (E0015)" ![io] {
+    let source = "struct T { a: i32; } "
+        + "fn f(t: T) -> i32 { return t.no_such_field; } "
+        + "fn main() -> int { return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0015");
+}
+
+test "unknown-field: rejects unknown field on a string-typed parameter (E0015)" ![io] {
+    let source = "fn f(s: string) -> i32 { let p = s.totally_bogus_field; return 7; } "
+        + "fn main() -> int { return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0015");
+}
+
+test "unknown-field: rejects unknown field feeding a call argument (E0015)" ![io] {
+    let source = "fn helper(x: i32) -> i32 { return x + 1; } "
+        + "fn f(s: string) -> i32 { return helper(s.ptr); } "
+        + "fn main() -> int { return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0015");
+}
+
+test "unknown-field: rejects unknown field on an explicitly annotated struct local (E0015)" ![io] {
+    let source = "struct T { a: i32; } "
+        + "fn main() -> int { let t: T = T { a: 1 }; "
+        + "let _ = t.no_such_field; return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0015");
+}
+
+// -------------------------------------------------------------------
+// Accepts: false-positive guards. These matter more than the rejects.
+// -------------------------------------------------------------------
+test "unknown-field: accepts a real field on a struct-typed parameter" ![io] {
+    let source = "struct T { a: i32; } " + "fn f(t: T) -> i32 { return t.a; } "
+        + "fn main() -> int { return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert ! _has_code(diagnostics, "E0015");
+}
+
+test "unknown-field: accepts `.length` on a string-typed parameter" ![io] {
+    let source = "fn f(s: string) -> i32 { return s.length; } "
+        + "fn main() -> int { return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert ! _has_code(diagnostics, "E0015");
+}
+
+test "unknown-field: method call in callee position stays E0012's territory" ![io] {
+    let source = "fn f(s: string) -> string { return s.substring(0, 1); } "
+        + "fn main() -> int { return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert ! _has_code(diagnostics, "E0015");
+}
+
+test "unknown-field: struct-typed receiver calling a method-shaped member stays silent" ![io] {
+    let source = "struct T { a: i32; } "
+        + "fn f(t: T) -> i32 { return t.whatever(); } "
+        + "fn main() -> int { return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert ! _has_code(diagnostics, "E0015");
+}
+
+test "unknown-field: inferred/unannotated receiver stays silent (fail-open)" ![io] {
+    let source = "fn main() -> int { let x = something(); let _ = x.whatever; return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert ! _has_code(diagnostics, "E0015");
+}
+
+test "unknown-field: namespace receiver stays silent" ![io] {
+    let source = "fn main() -> int ![io] { let h = env.get(\"HOME\"); return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert ! _has_code(diagnostics, "E0015");
+}
+
+test "unknown-field: array-typed receiver stays silent" ![io] {
+    let source = "fn main() -> int { let xs: i32[] = []; let n = xs.length; return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert ! _has_code(diagnostics, "E0015");
+}
+
+test "unknown-field: bare struct-method reference in value position stays silent" ![io] {
+    let source = "struct Counter { value: i32; fn bump(self: Counter) -> i32 { return self.value + 1; } } "
+        + "fn f(c: Counter) -> i32 { let g = c.bump; return 0; } "
+        + "fn main() -> int { return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert ! _has_code(diagnostics, "E0015");
+}
+
+test "unknown-field: struct method called normally stays silent" ![io] {
+    let source = "struct Counter { value: i32; fn bump(self: Counter) -> i32 { return self.value + 1; } } "
+        + "fn f(c: Counter) -> i32 { return c.bump(); } "
+        + "fn main() -> int { return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert ! _has_code(diagnostics, "E0015");
+}
+
+test "unknown-field: method call on a call result stays silent" ![io] {
+    let source = "struct T { a: i32; fn get(self: T) -> i32 { return self.a; } } "
+        + "fn foo() -> T { return T { a: 1 }; } "
+        + "fn main() -> int { return foo().get(); }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert ! _has_code(diagnostics, "E0015");
+}
+
+test "unknown-field: struct declared after the function that uses it stays silent" ![io] {
+    let source = "fn f(t: T) -> i32 { return t.a; } " + "struct T { a: i32; } "
+        + "fn main() -> int { return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert ! _has_code(diagnostics, "E0015");
+}
+
+test "unknown-field: rejects the inner leg of a chained member access (E0015)" ![io] {
+    let source = "struct A { x: i32; } "
+        + "fn f(a: A) -> i32 { return a.bogus.c; } "
+        + "fn main() -> int { return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0015");
+}
+
+test "unknown-field: rejects an unknown field as an assignment target (E0015)" ![io] {
+    let source = "struct T { a: i32; } "
+        + "fn f(t: T) -> i32 { t.no_such = 1; return 0; } "
+        + "fn main() -> int { return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0015");
+}
+
+test "unknown-field: rejects an unknown field via the top-level fallback (E0015)" ![io] {
+    let source = "let s: string = \"x\"; "
+        + "fn f() -> i32 { let p = s.bogus_field; return 0; } "
+        + "fn main() -> int { return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0015");
+}
