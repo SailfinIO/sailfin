@@ -35,6 +35,7 @@ import {
 import {
     append_parameter_binding,
     diag_to_legacy_string,
+    extend_diag_array,
     find_parameter_binding,
     lowering_error_diag,
     number_to_string,
@@ -90,6 +91,7 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
             diagnostics.push(lowered_value.diagnostics[_ci0]);
             _ci0 += 1;
         }
+        diags = extend_diag_array(diags, lowered_value.diags);
         string_constants = lowered_value.string_constants;
         current_lines = lowered_value.lines;
         current_temp = lowered_value.temp_index;
@@ -140,6 +142,7 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
             diagnostics.push(lowered_ptr.diagnostics[_ci1]);
             _ci1 += 1;
         }
+        diags = extend_diag_array(diags, lowered_ptr.diags);
         current_lines = lowered_ptr.lines;
         current_temp = lowered_ptr.temp_index;
         current_temp = recover_temp_from_lines(current_lines, current_temp);
@@ -192,6 +195,7 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
             diagnostics.push(coerced.diagnostics[_ci2]);
             _ci2 += 1;
         }
+        diags = extend_diag_array(diags, coerced.diags);
         current_lines = coerced.lines;
         current_temp = coerced.temp_index;
         current_temp = recover_temp_from_lines(current_lines, current_temp);
@@ -252,6 +256,7 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
             diagnostics.push(lowered.diagnostics[_ci3]);
             _ci3 += 1;
         }
+        diags = extend_diag_array(diags, lowered.diags);
         string_constants = lowered.string_constants;
         current_lines = lowered.lines;
         current_temp = lowered.temp_index;
@@ -272,6 +277,7 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
                 diagnostics.push(base_result.diagnostics[_ci4]);
                 _ci4 += 1;
             }
+            diags = extend_diag_array(diags, base_result.diags);
             current_lines = base_result.lines;
             current_temp = base_result.temp_index;
             current_temp = recover_temp_from_lines(current_lines, current_temp);
@@ -327,6 +333,7 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
                             diagnostics.push(array_result.diagnostics[_sci0]);
                             _sci0 += 1;
                         }
+                        diags = extend_diag_array(diags, array_result.diags);
                         current_lines = array_result.lines;
                         current_temp = array_result.temp_index;
                         current_temp = recover_temp_from_lines(current_lines, current_temp);
@@ -343,6 +350,7 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
                                     diagnostics.push(index_result.diagnostics[_sci1]);
                                     _sci1 += 1;
                                 }
+                                diags = extend_diag_array(diags, index_result.diags);
                                 current_lines = index_result.lines;
                                 current_temp = index_result.temp_index;
                                 current_temp = recover_temp_from_lines(current_lines, current_temp);
@@ -361,6 +369,7 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
                                         diagnostics.push(coerced_index.diagnostics[_sci2]);
                                         _sci2 += 1;
                                     }
+                                    diags = extend_diag_array(diags, coerced_index.diags);
                                     current_lines = coerced_index.lines;
                                     current_temp = coerced_index.temp_index;
                                     current_temp = recover_temp_from_lines(current_lines, current_temp);
@@ -424,6 +433,7 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
                                             diagnostics.push(bc_assign_result.diagnostics[_bc_assign_di]);
                                             _bc_assign_di += 1;
                                         }
+                                        diags = extend_diag_array(diags, bc_assign_result.diags);
                                         current_lines = bc_assign_result.lines;
                                         current_temp = bc_assign_result.temp_index;
                                         let slot_ptr = format_temp_name(current_temp);
@@ -491,6 +501,7 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
                             diagnostics.push(coerced.diagnostics[_ci5]);
                             _ci5 += 1;
                         }
+                        diags = extend_diag_array(diags, coerced.diags);
                         current_lines = coerced.lines;
                         current_temp = coerced.temp_index;
                         current_temp = recover_temp_from_lines(current_lines, current_temp);
@@ -568,6 +579,7 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
             diagnostics.push(lowered.diagnostics[_ci6]);
             _ci6 += 1;
         }
+        diags = extend_diag_array(diags, lowered.diags);
         string_constants = lowered.string_constants;
         current_lines = lowered.lines;
         current_temp = lowered.temp_index;
@@ -588,6 +600,7 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
                 diagnostics.push(base_result.diagnostics[_ci7]);
                 _ci7 += 1;
             }
+            diags = extend_diag_array(diags, base_result.diags);
             current_lines = base_result.lines;
             current_temp = base_result.temp_index;
             current_temp = recover_temp_from_lines(current_lines, current_temp);
@@ -603,6 +616,7 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
                     diagnostics.push(index_result.diagnostics[_ci8]);
                     _ci8 += 1;
                 }
+                diags = extend_diag_array(diags, index_result.diags);
                 current_lines = index_result.lines;
                 current_temp = index_result.temp_index;
                 current_temp = recover_temp_from_lines(current_lines, current_temp);
@@ -629,6 +643,7 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
                             diagnostics.push(coerced.diagnostics[_ci9]);
                             _ci9 += 1;
                         }
+                        diags = extend_diag_array(diags, coerced.diags);
                         current_lines = coerced.lines;
                         current_temp = coerced.temp_index;
                         current_temp = recover_temp_from_lines(current_lines, current_temp);
@@ -645,6 +660,7 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
                                 diagnostics.push(coerced_index.diagnostics[_ci10]);
                                 _ci10 += 1;
                             }
+                            diags = extend_diag_array(diags, coerced_index.diags);
                             current_lines = coerced_index.lines;
                             current_temp = coerced_index.temp_index;
                             current_temp = recover_temp_from_lines(current_lines, current_temp);

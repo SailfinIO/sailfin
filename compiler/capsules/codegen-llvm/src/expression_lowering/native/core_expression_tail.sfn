@@ -1,7 +1,7 @@
 // compiler/capsules/codegen-llvm/src/expression_lowering/native/core_expression_tail.sfn
 //
 // Call, literal, member, binding, and function-reference expression dispatch.
-import { NativeFunction } from "sfn/ir";
+import { LoweringDiagnostic, NativeFunction } from "sfn/ir";
 import { substring } from "sfn/strings";
 
 import { format_temp_name, is_simple_identifier } from "../../expressions_helpers";
@@ -20,7 +20,12 @@ import {
     ParameterBinding,
     TypeContext
 } from "../../types";
-import { starts_with } from "../../utils";
+import {
+    extend_diag_array,
+    lowering_error_diag,
+    lowering_warning_diag,
+    starts_with
+} from "../../utils";
 import { array_pointer_element_type } from "../arrays";
 import { find_parameter_binding } from "./core_bindings";
 import { lower_call_expression } from "./core_call_lowering";
@@ -42,6 +47,7 @@ import { trim_text } from "./core_text";
 
 fn lower_postfix_expression(expression: string, stripped: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string) -> ExpressionResult {
     let mut diagnostics: string[] = [];
+    let mut diags: LoweringDiagnostic[] = [];
     let empty_constants = empty_string_constant_set();
     let dbg_expr = trace_lowering();
     let call_index = find_call_site(stripped);
@@ -148,12 +154,14 @@ fn lower_postfix_expression(expression: string, stripped: string, bindings: Para
                     diagnostics.push(lowered_enum.diagnostics[_ci2]);
                     _ci2 += 1;
                 }
+                diags = extend_diag_array(diags, lowered_enum.diags);
                 return ExpressionResult {
                     lines: lowered_enum.lines,
                     temp_index: lowered_enum.temp_index,
                     operand: lowered_enum.operand,
                     diagnostics: diagnostics,
-                    string_constants: lowered_enum.string_constants
+                    string_constants: lowered_enum.string_constants,
+                    diags: diags
                 };
             }
         }
@@ -203,7 +211,8 @@ fn lower_postfix_expression(expression: string, stripped: string, bindings: Para
                         temp_index: temp_index,
                         operand: null,
                         diagnostics: diagnostics,
-                        string_constants: empty_constants
+                        string_constants: empty_constants,
+                        diags: diags
                     };
                 }
                 let bare_lowered = lower_struct_literal(bare_parse, bindings, locals, temp_index, lines, functions, context, expected_type, null);
@@ -213,12 +222,14 @@ fn lower_postfix_expression(expression: string, stripped: string, bindings: Para
                     diagnostics.push(bare_lowered.diagnostics[_ci_bare]);
                     _ci_bare += 1;
                 }
+                diags = extend_diag_array(diags, bare_lowered.diags);
                 return ExpressionResult {
                     lines: bare_lowered.lines,
                     temp_index: bare_lowered.temp_index,
                     operand: bare_lowered.operand,
                     diagnostics: diagnostics,
-                    string_constants: bare_lowered.string_constants
+                    string_constants: bare_lowered.string_constants,
+                    diags: diags
                 };
             }
         }
@@ -238,7 +249,8 @@ fn lower_postfix_expression(expression: string, stripped: string, bindings: Para
                 temp_index: temp_index,
                 operand: null,
                 diagnostics: diagnostics,
-                string_constants: empty_constants
+                string_constants: empty_constants,
+                diags: diags
             };
         }
         // #1023: fail-closed on a recognized struct/enum-shaped literal whose
@@ -251,15 +263,17 @@ fn lower_postfix_expression(expression: string, stripped: string, bindings: Para
         // to emit IR. After #1021, prelude `Result` resolves through the enum
         // path above and never reaches this guard.
         if resolve_struct_info_for_literal(context, struct_parse.type_name) == null {
-            diagnostics.push("llvm lowering [fatal]: struct/enum literal `"
-                + struct_parse.type_name
-                + "` references a type not in the lowering type context");
+            let message = "struct/enum literal `" + struct_parse.type_name
+                + "` references a type not in the lowering type context";
+            diags.push(lowering_error_diag("E1012", message, null));
+            diagnostics.push("llvm lowering [fatal]: " + message);
             return ExpressionResult {
                 lines: lines,
                 temp_index: temp_index,
                 operand: null,
                 diagnostics: diagnostics,
-                string_constants: empty_constants
+                string_constants: empty_constants,
+                diags: diags
             };
         }
         let lowered_struct = lower_struct_literal(struct_parse, bindings, locals, temp_index, lines, functions, context, expected_type, null);
@@ -269,12 +283,14 @@ fn lower_postfix_expression(expression: string, stripped: string, bindings: Para
             diagnostics.push(lowered_struct.diagnostics[_ci4]);
             _ci4 += 1;
         }
+        diags = extend_diag_array(diags, lowered_struct.diags);
         return ExpressionResult {
             lines: lowered_struct.lines,
             temp_index: lowered_struct.temp_index,
             operand: lowered_struct.operand,
             diagnostics: diagnostics,
-            string_constants: lowered_struct.string_constants
+            string_constants: lowered_struct.string_constants,
+            diags: diags
         };
     }
 
@@ -308,7 +324,8 @@ fn lower_postfix_expression(expression: string, stripped: string, bindings: Para
             temp_index: load_result.temp_index,
             operand: load_result.operand,
             diagnostics: diagnostics,
-            string_constants: empty_constants
+            string_constants: empty_constants,
+            diags: diags
         };
     }
 
@@ -333,7 +350,8 @@ fn lower_postfix_expression(expression: string, stripped: string, bindings: Para
             temp_index: temp_index,
             operand: operand,
             diagnostics: diagnostics,
-            string_constants: empty_constants
+            string_constants: empty_constants,
+            diags: diags
         };
     }
 
@@ -370,7 +388,12 @@ fn lower_postfix_expression(expression: string, stripped: string, bindings: Para
                 temp_index: materialized.temp_index,
                 operand: materialized.operand,
                 diagnostics: materialized.diagnostics,
-                string_constants: empty_constants
+                string_constants: empty_constants,
+                // SFN-915: `_ClosurePairLowerResult` carries no structured
+                // channel, so there is nothing to forward here. Its legacy
+                // strings still flow, and `lowering_core/mod.sfn`
+                // reconstructs them at the module boundary.
+                diags: []
             };
         }
         let fn_ptr_type = _compute_function_pointer_type(fn_reference, context);
@@ -384,7 +407,8 @@ fn lower_postfix_expression(expression: string, stripped: string, bindings: Para
             temp_index: temp_index + 1,
             operand: fn_operand,
             diagnostics: diagnostics,
-            string_constants: empty_constants
+            string_constants: empty_constants,
+            diags: diags
         };
     }
 
@@ -392,13 +416,15 @@ fn lower_postfix_expression(expression: string, stripped: string, bindings: Para
         trace_log("emit-llvm: lower_expression FALLTHROUGH expr=" + stripped
             + " (unhandled)");
     }
-    diagnostics.push("llvm lowering: unable to lower expression `" + expression
-        + "`");
+    let message = "unable to lower expression `" + expression + "`";
+    diags.push(lowering_warning_diag("E1006", message, null));
+    diagnostics.push("llvm lowering: " + message);
     return ExpressionResult {
         lines: lines,
         temp_index: temp_index,
         operand: null,
         diagnostics: diagnostics,
-        string_constants: empty_constants
+        string_constants: empty_constants,
+        diags: diags
     };
 }

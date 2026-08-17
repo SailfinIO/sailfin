@@ -54,6 +54,7 @@ import { get_instruction_tag } from "./lowering_native_helpers";
 // `collect_loop_structure`.
 fn collect_routine_structure(instructions: NativeInstruction[], start_index: int, end: int, function_name: string) -> RoutineStructure {
     let mut diagnostics: string[] = [];
+    let mut diags: LoweringDiagnostic[] = [];
     let body_start = start_index + 1;
     let mut depth: int = 0;
     let mut index: int = body_start;

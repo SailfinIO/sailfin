@@ -1,7 +1,7 @@
 // compiler/capsules/codegen-llvm/src/expression_lowering/native/core_expression.sfn
 //
 // Ordered dispatch for LLVM expression lowering.
-import { NativeFunction } from "sfn/ir";
+import { LoweringDiagnostic, NativeFunction } from "sfn/ir";
 import { char_at_index as char_at, substring } from "sfn/strings";
 
 import { format_temp_name } from "../../expressions_helpers";
@@ -16,7 +16,14 @@ import {
     ParameterBinding,
     TypeContext
 } from "../../types";
-import { ends_with, extend_string_array, starts_with } from "../../utils";
+import {
+    ends_with,
+    extend_diag_array,
+    extend_string_array,
+    lowering_error_diag,
+    lowering_warning_diag,
+    starts_with
+} from "../../utils";
 import { lower_raw_address_expression } from "./core_addressing";
 import { lower_borrow_expression } from "./core_borrow_lowering";
 import { lower_call_expression } from "./core_call_lowering";
@@ -84,6 +91,7 @@ import {
 fn lower_expression(expression: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string) -> ExpressionResult {
     let trimmed = trim_text(expression);
     let mut diagnostics: string[] = [];
+    let mut diags: LoweringDiagnostic[] = [];
     let empty_constants = empty_string_constant_set();
     let dbg_expr = trace_lowering();
     if dbg_expr {
@@ -94,13 +102,16 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
             + expected_type);
     }
     if trimmed.length == 0 {
-        diagnostics.push("llvm lowering: empty expression encountered");
+        let message = "empty expression encountered";
+        diags.push(lowering_warning_diag("E1006", message, null));
+        diagnostics.push("llvm lowering: " + message);
         return ExpressionResult {
             lines: lines,
             temp_index: temp_index,
             operand: null,
             diagnostics: diagnostics,
-            string_constants: empty_constants
+            string_constants: empty_constants,
+            diags: diags
         };
     }
 
@@ -148,7 +159,8 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
             temp_index: pair_result.temp_index,
             operand: pair_result.operand,
             diagnostics: diagnostics,
-            string_constants: empty_constants
+            string_constants: empty_constants,
+            diags: diags
         };
     }
 
@@ -163,17 +175,19 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
         let lam_id = _parse_marker_int_field(stripped, "lambda_id=");
         let mut name_for_diag: string = cap_name;
         if name_for_diag.length == 0 { name_for_diag = "<unknown>"; }
-        diagnostics.push("llvm lowering [fatal]: capturing lambda #"
-            + number_to_string(lam_id)
+        let message = "capturing lambda #" + number_to_string(lam_id)
             + " has mutable capture `"
             + name_for_diag
-            + "` (not yet supported, see #687)");
+            + "` (not yet supported, see #687)";
+        diags.push(lowering_error_diag("E1012", message, null));
+        diagnostics.push("llvm lowering [fatal]: " + message);
         return ExpressionResult {
             lines: lines,
             temp_index: temp_index,
             operand: null,
             diagnostics: diagnostics,
-            string_constants: empty_constants
+            string_constants: empty_constants,
+            diags: diags
         };
     }
 
@@ -190,17 +204,19 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
         let lam_id = _parse_marker_int_field(stripped, "lambda_id=");
         let mut name_for_diag: string = cap_name;
         if name_for_diag.length == 0 { name_for_diag = "<unknown>"; }
-        diagnostics.push("llvm lowering [fatal]: spawn/parallel task lambda #"
-            + number_to_string(lam_id)
+        let message = "spawn/parallel task lambda #" + number_to_string(lam_id)
             + " captures mutable `OwnedBuf` `"
             + name_for_diag
-            + "` by reference across the task boundary (not yet supported, see SFN-381)");
+            + "` by reference across the task boundary (not yet supported, see SFN-381)";
+        diags.push(lowering_error_diag("E1010", message, null));
+        diagnostics.push("llvm lowering [fatal]: " + message);
         return ExpressionResult {
             lines: lines,
             temp_index: temp_index,
             operand: null,
             diagnostics: diagnostics,
-            string_constants: empty_constants
+            string_constants: empty_constants,
+            diags: diags
         };
     }
 
@@ -303,7 +319,8 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
             temp_index: temp_index,
             operand: operand,
             diagnostics: diagnostics,
-            string_constants: empty_constants
+            string_constants: empty_constants,
+            diags: diags
         };
     }
     if is_null_literal(stripped) {
@@ -320,7 +337,8 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
             temp_index: temp_index,
             operand: operand,
             diagnostics: diagnostics,
-            string_constants: empty_constants
+            string_constants: empty_constants,
+            diags: diags
         };
     }
     if is_number_literal(stripped) {
@@ -336,7 +354,8 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
             temp_index: temp_index,
             operand: operand,
             diagnostics: diagnostics,
-            string_constants: empty_constants
+            string_constants: empty_constants,
+            diags: diags
         };
     }
     if is_string_literal(stripped) {
@@ -349,7 +368,8 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
                 temp_index: result.temp_index,
                 operand: result.operand,
                 diagnostics: diagnostics,
-                string_constants: result.string_constants
+                string_constants: result.string_constants,
+                diags: diags
             };
         }
         let literal_result = lower_string_literal(stripped, temp_index, lines);
@@ -359,20 +379,24 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
             temp_index: literal_result.temp_index,
             operand: literal_result.operand,
             diagnostics: diagnostics,
-            string_constants: literal_result.string_constants
+            string_constants: literal_result.string_constants,
+            diags: diags
         };
     }
 
     // `await <expr>` joins a thread-backed future and extracts its value.
     if starts_with(stripped, "await") {
         if stripped.length == 5 {
-            diagnostics.push("llvm lowering: await expression missing operand");
+            let message = "await expression missing operand";
+            diags.push(lowering_warning_diag("E1010", message, null));
+            diagnostics.push("llvm lowering: " + message);
             return ExpressionResult {
                 lines: lines,
                 temp_index: temp_index,
                 operand: null,
                 diagnostics: diagnostics,
-                string_constants: empty_constants
+                string_constants: empty_constants,
+                diags: diags
             };
         }
         let next = char_at(stripped, 5);
@@ -504,13 +528,16 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
         if substring(stripped, 0, 1) == "*" {
             let operand_text = trim_text(substring(stripped, 1, stripped.length));
             if operand_text.length == 0 {
-                diagnostics.push("llvm lowering: deref expression missing operand");
+                let message = "deref expression missing operand";
+                diags.push(lowering_warning_diag("E1006", message, null));
+                diagnostics.push("llvm lowering: " + message);
                 return ExpressionResult {
                     lines: lines,
                     temp_index: temp_index,
                     operand: null,
                     diagnostics: diagnostics,
-                    string_constants: empty_constants
+                    string_constants: empty_constants,
+                    diags: diags
                 };
             }
             let lowered_ptr = lower_expression(operand_text, bindings, locals, temp_index, lines, functions, context, "");
@@ -520,26 +547,33 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
                 diagnostics.push(lowered_ptr.diagnostics[_ci1]);
                 _ci1 += 1;
             }
+            diags = extend_diag_array(diags, lowered_ptr.diags);
             if lowered_ptr.operand == null {
                 return ExpressionResult {
                     lines: lowered_ptr.lines,
                     temp_index: lowered_ptr.temp_index,
                     operand: null,
                     diagnostics: diagnostics,
-                    string_constants: lowered_ptr.string_constants
+                    string_constants: lowered_ptr.string_constants,
+                    diags: diags
                 };
             }
             let ptr_operand = lowered_ptr.operand;
             if !ends_with_pointer_suffix(ptr_operand.llvm_type) {
-                let with_issue = append_string(diagnostics, "llvm lowering: cannot dereference non-pointer type `"
+                let issue_message = "cannot dereference non-pointer type `"
                     + ptr_operand.llvm_type
-                    + "`");
+                    + "`";
+                let with_issue = append_string(diagnostics, "llvm lowering: "
+                    + issue_message);
+                let mut with_issue_diags = diags;
+                with_issue_diags.push(lowering_warning_diag("E1006", issue_message, null));
                 return ExpressionResult {
                     lines: lowered_ptr.lines,
                     temp_index: lowered_ptr.temp_index,
                     operand: null,
                     diagnostics: with_issue,
-                    string_constants: lowered_ptr.string_constants
+                    string_constants: lowered_ptr.string_constants,
+                    diags: with_issue_diags
                 };
             }
             let element_type = strip_pointer_suffix(ptr_operand.llvm_type);
@@ -561,7 +595,8 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
                 temp_index: lowered_ptr.temp_index + 1,
                 operand: operand,
                 diagnostics: diagnostics,
-                string_constants: lowered_ptr.string_constants
+                string_constants: lowered_ptr.string_constants,
+                diags: diags
             };
         }
     }

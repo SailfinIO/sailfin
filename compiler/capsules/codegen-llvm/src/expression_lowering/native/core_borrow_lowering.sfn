@@ -1,6 +1,8 @@
 // compiler/capsules/codegen-llvm/src/expression_lowering/native/core_borrow_lowering.sfn
 //
 // Borrow-expression lowering extracted from core.sfn.
+import { LoweringDiagnostic } from "sfn/ir";
+
 import { empty_string_constant_set } from "../../strings";
 import {
     BorrowParseResult,
@@ -9,13 +11,19 @@ import {
     LocalBinding,
     ParameterBinding
 } from "../../types";
-import { append_string, ends_with, trim_text } from "../../utils";
+import {
+    append_string,
+    ends_with,
+    lowering_warning_diag,
+    trim_text
+} from "../../utils";
 import { find_parameter_binding } from "./core_bindings";
 import { strip_enclosing_parentheses } from "./core_operators";
 import { find_local_binding } from "./core_scopes";
 
 fn lower_borrow_expression(parse: BorrowParseResult, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[]) -> ExpressionResult {
     let mut diagnostics: string[] = parse.diagnostics;
+    let mut diags: LoweringDiagnostic[] = [];
     let empty_constants = empty_string_constant_set();
     if !parse.success {
         return ExpressionResult {
@@ -23,20 +31,24 @@ fn lower_borrow_expression(parse: BorrowParseResult, bindings: ParameterBinding[
             temp_index: temp_index,
             operand: null,
             diagnostics: diagnostics,
-            string_constants: empty_constants
+            string_constants: empty_constants,
+            diags: diags
         };
     }
 
     let mut target = strip_enclosing_parentheses(parse.target);
     target = trim_text(target);
     if target.length == 0 {
-        diagnostics.push("llvm lowering: borrow expression missing target");
+        let message = "borrow expression missing target";
+        diags.push(lowering_warning_diag("E1006", message, null));
+        diagnostics.push("llvm lowering: " + message);
         return ExpressionResult {
             lines: lines,
             temp_index: temp_index,
             operand: null,
             diagnostics: diagnostics,
-            string_constants: empty_constants
+            string_constants: empty_constants,
+            diags: diags
         };
     }
 
@@ -44,14 +56,16 @@ fn lower_borrow_expression(parse: BorrowParseResult, bindings: ParameterBinding[
     if local == null {
         let parameter = find_parameter_binding(bindings, target);
         if parameter == null {
-            diagnostics.push("llvm lowering: borrow target `" + target
-                + "` not found");
+            let message = "borrow target `" + target + "` not found";
+            diags.push(lowering_warning_diag("E1006", message, null));
+            diagnostics.push("llvm lowering: " + message);
             return ExpressionResult {
                 lines: lines,
                 temp_index: temp_index,
                 operand: null,
                 diagnostics: diagnostics,
-                string_constants: empty_constants
+                string_constants: empty_constants,
+                diags: diags
             };
         }
 
@@ -66,21 +80,24 @@ fn lower_borrow_expression(parse: BorrowParseResult, bindings: ParameterBinding[
                 temp_index: temp_index,
                 operand: operand,
                 diagnostics: diagnostics,
-                string_constants: empty_constants
+                string_constants: empty_constants,
+                diags: diags
             };
         }
 
-        diagnostics.push("llvm lowering: cannot borrow non-addressable parameter `"
-            + target
+        let message = "cannot borrow non-addressable parameter `" + target
             + "` (type `"
             + parameter.llvm_type
-            + "`)");
+            + "`)";
+        diags.push(lowering_warning_diag("E1006", message, null));
+        diagnostics.push("llvm lowering: " + message);
         return ExpressionResult {
             lines: lines,
             temp_index: temp_index,
             operand: null,
             diagnostics: diagnostics,
-            string_constants: empty_constants
+            string_constants: empty_constants,
+            diags: diags
         };
     }
 
@@ -94,7 +111,8 @@ fn lower_borrow_expression(parse: BorrowParseResult, bindings: ParameterBinding[
         temp_index: temp_index,
         operand: operand,
         diagnostics: diagnostics,
-        string_constants: empty_constants
+        string_constants: empty_constants,
+        diags: diags
     };
 }
 

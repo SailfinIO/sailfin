@@ -1,6 +1,8 @@
 // compiler/capsules/codegen-llvm/src/expression_lowering/native/core_call_emission/arguments.sfn
 //
 // Argument coercion and its diagnostic state for native call emission.
+import { LoweringDiagnostic } from "sfn/ir";
+
 import { trace_log, trace_lowering } from "../../../lowering_debug_state";
 import { LLVMOperand } from "../../../types";
 import { extend_string_array, number_to_string } from "../../../utils";
@@ -33,10 +35,11 @@ fn _abi_mismatch_diagnostic_prefix(diagnostics: string[]) -> string {
     return "llvm lowering: ";
 }
 
-fn coerce_call_operands(trimmed_target: string, operands: LLVMOperand[], operand_source_types: string[], expected_params: string[], llvm_return: string, is_trait_dispatch: boolean, is_closure_dispatch: boolean, current_temp: int, current_lines: string[], diagnostics: string[]) -> CoercedCallState {
+fn coerce_call_operands(trimmed_target: string, operands: LLVMOperand[], operand_source_types: string[], expected_params: string[], llvm_return: string, is_trait_dispatch: boolean, is_closure_dispatch: boolean, current_temp: int, current_lines: string[], diagnostics: string[], diags: LoweringDiagnostic[]) -> CoercedCallState {
     let mut result_lines = current_lines;
     let mut result_temp: int = current_temp;
     let mut result_diagnostics = diagnostics;
+    let mut result_diags = diags;
     let _trace_ccl = trace_lowering();
 
     if _trace_ccl {

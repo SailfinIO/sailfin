@@ -22,6 +22,7 @@ export {
 
 export {
     // Suspension / async helpers
+    detect_suspension_conflict_diags,
     detect_suspension_conflicts,
     future_pointer_type_for_return_type,
     spawn_symbol_for_return_type,

@@ -30,7 +30,7 @@
 // `zext` (not `sext`): the byte is unsigned (0..255), matching the C
 // `(int64_t)(unsigned char)s[idx]`. A `sext` would make bytes >= 0x80
 // negative and corrupt every UTF-8 comparison on the self-host path.
-import { NativeFunction } from "sfn/ir";
+import { LoweringDiagnostic, NativeFunction } from "sfn/ir";
 
 // Mutually recursive with `lower_expression` (which dispatches calls
 // back through the byte-load hook): the same cycle the atomic builtins
@@ -47,7 +47,13 @@ import {
     StringConstant,
     TypeContext
 } from "./types";
-import { extend_string_array, number_to_string, trim_text } from "./utils";
+import {
+    extend_string_array,
+    lowering_error_diag,
+    lowering_warning_diag,
+    number_to_string,
+    trim_text
+} from "./utils";
 
 // Predicate over the reserved `load_byte` name. Used by the
 // pre-resolution dispatch hook in `lower_call_expression` (see
@@ -66,6 +72,7 @@ fn is_byte_load_builtin(name: string) -> boolean {
 // `operand` is the zero-extended i64 byte value.
 fn lower_byte_load(name: string, arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult {
     let mut diagnostics: string[] = [];
+    let mut diags: LoweringDiagnostic[] = [];
     let mut current_lines = lines;
     let mut current_temp = temp_index;
     let mut collected_strings: StringConstant[] = [];
@@ -75,8 +82,10 @@ fn lower_byte_load(name: string, arguments: string[], bindings: ParameterBinding
         // artifact result gate refuses to publish IR rather than silently
         // dropping the load — mirrors
         // the atomic-builtin arity gate (issue #306 contract).
-        let diag1 = "llvm lowering [fatal] [E0806]: load_byte expects exactly 1 argument (`int` address), got "
+        let message = "load_byte expects exactly 1 argument (`int` address), got "
             + number_to_string(arguments.length);
+        diags.push(lowering_error_diag("E0806", message, null));
+        let diag1 = "llvm lowering [fatal] [E0806]: " + message;
         trace_log(diag1);
         diagnostics.push(diag1);
         return ExpressionResult {
@@ -84,7 +93,8 @@ fn lower_byte_load(name: string, arguments: string[], bindings: ParameterBinding
             temp_index: current_temp,
             operand: null,
             diagnostics: diagnostics,
-            string_constants: collected_strings
+            string_constants: collected_strings,
+            diags: diags
         };
     }
 
@@ -96,22 +106,27 @@ fn lower_byte_load(name: string, arguments: string[], bindings: ParameterBinding
     current_temp = addr_lowered.temp_index;
 
     if addr_lowered.operand == null {
-        diagnostics.push("llvm lowering: load_byte failed to lower address argument");
+        let message = "load_byte failed to lower address argument";
+        diags.push(lowering_warning_diag("E1006", message, null));
+        diagnostics.push("llvm lowering: " + message);
         return ExpressionResult {
             lines: current_lines,
             temp_index: current_temp,
             operand: null,
             diagnostics: diagnostics,
-            string_constants: collected_strings
+            string_constants: collected_strings,
+            diags: diags
         };
     }
 
     let addr_operand = addr_lowered.operand;
     let addr_type = trim_text(addr_operand.llvm_type);
     if addr_type != "i64" {
-        let diag2 = "llvm lowering [fatal] [E0806]: load_byte expects argument 0 of type `int` (i64), got `"
+        let message = "load_byte expects argument 0 of type `int` (i64), got `"
             + addr_type
             + "`";
+        diags.push(lowering_error_diag("E0806", message, null));
+        let diag2 = "llvm lowering [fatal] [E0806]: " + message;
         trace_log(diag2);
         diagnostics.push(diag2);
         return ExpressionResult {
@@ -119,7 +134,8 @@ fn lower_byte_load(name: string, arguments: string[], bindings: ParameterBinding
             temp_index: current_temp,
             operand: null,
             diagnostics: diagnostics,
-            string_constants: collected_strings
+            string_constants: collected_strings,
+            diags: diags
         };
     }
 
@@ -142,7 +158,8 @@ fn lower_byte_load(name: string, arguments: string[], bindings: ParameterBinding
         temp_index: current_temp,
         operand: LLVMOperand { llvm_type: "i64", value: result_name },
         diagnostics: diagnostics,
-        string_constants: collected_strings
+        string_constants: collected_strings,
+        diags: diags
     };
 }
 

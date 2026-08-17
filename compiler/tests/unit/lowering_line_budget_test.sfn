@@ -27,14 +27,19 @@ fn _count_lowering_newlines(source: string) -> int {
 }
 
 fn _grandfathered_lowering_ceiling(path: string) -> int {
+    // SFN-915 (SFEP-0061 S4b) raises four entries below: `ExpressionResult`
+    // and `CoercionResult` gained a `diags` field, and Sailfin rejects a
+    // partial struct literal at lowering (`E1002`), so every literal and
+    // every forwarding frame in these modules must name it. No net-zero form
+    // exists; each ceiling is pinned to its exact new length.
     if path == LOWERING_ROOT + "/lowering_helpers.sfn" { return 1547; }
     if path == LOWERING_ROOT + "/lowering_recovery.sfn" { return 1056; }
-    if path == LOWERING_ROOT + "/instructions_let.sfn" { return 1031; }
-    if path == LOWERING_ROOT + "/instructions_match.sfn" { return 924; }
+    if path == LOWERING_ROOT + "/instructions_let.sfn" { return 1037; }
+    if path == LOWERING_ROOT + "/instructions_match.sfn" { return 926; }
     if path == LOWERING_ROOT + "/instructions.sfn" { return 861; }
     if path == LOWERING_ROOT + "/instructions_helpers.sfn" { return 849; }
-    if path == LOWERING_ROOT + "/instructions_if.sfn" { return 831; }
-    if path == LOWERING_ROOT + "/emission.sfn" { return 818; }
+    if path == LOWERING_ROOT + "/instructions_if.sfn" { return 832; }
+    if path == LOWERING_ROOT + "/emission.sfn" { return 820; }
     return 0;
 }
 

@@ -1,15 +1,23 @@
 // compiler/capsules/codegen-llvm/src/expression_lowering/native/core_call_emission/closure_dispatch.sfn
 //
 // Typed indirect-call emission for closure-pair callees.
+import { LoweringDiagnostic } from "sfn/ir";
+
 import { format_temp_name } from "../../../expressions_helpers";
 import { trace_log } from "../../../lowering_debug_state";
 import { ExpressionResult, LLVMOperand, StringConstant } from "../../../types";
-import { join_with_separator, number_to_string } from "../../../utils";
+import {
+    join_with_separator,
+    lowering_error_diag,
+    lowering_warning_diag,
+    number_to_string
+} from "../../../utils";
 
-fn emit_closure_dispatch(trimmed_target: string, final_operands: LLVMOperand[], rendered_args: string[], expected_params: string[], llvm_return: string, current_temp: int, current_lines: string[], diagnostics: string[], collected_string_constants: StringConstant[]) -> ExpressionResult {
+fn emit_closure_dispatch(trimmed_target: string, final_operands: LLVMOperand[], rendered_args: string[], expected_params: string[], llvm_return: string, current_temp: int, current_lines: string[], diagnostics: string[], diags: LoweringDiagnostic[], collected_string_constants: StringConstant[]) -> ExpressionResult {
     let mut result_lines = current_lines;
     let mut result_temp: int = current_temp;
     let mut result_diagnostics = diagnostics;
+    let mut result_diags = diags;
     let is_closure_dispatch: boolean = true;
     // Issue #689: closure-callee dispatch. `final_operands[0]` is the
     // `{i8*, i8*}` closure-pair aggregate loaded by
@@ -21,13 +29,16 @@ fn emit_closure_dispatch(trimmed_target: string, final_operands: LLVMOperand[], 
     // and emit the call with `env*` as the hidden first argument.
     if is_closure_dispatch {
         if final_operands.length == 0 {
-            result_diagnostics.push("llvm lowering: closure dispatch requires a closure-pair operand");
+            let message = "closure dispatch requires a closure-pair operand";
+            result_diags.push(lowering_warning_diag("E1006", message, null));
+            result_diagnostics.push("llvm lowering: " + message);
             return ExpressionResult {
                 lines: result_lines,
                 temp_index: result_temp,
                 operand: null,
                 diagnostics: result_diagnostics,
-                string_constants: collected_string_constants
+                string_constants: collected_string_constants,
+                diags: result_diags
             };
         }
         // Validate arity against the closure's declared parameter
@@ -39,20 +50,23 @@ fn emit_closure_dispatch(trimmed_target: string, final_operands: LLVMOperand[], 
         // a call that mismatches the callee's real ABI — exactly the
         // UB the `[fatal]` sentinel is meant to refuse IR over.
         if final_operands.length != expected_params.length {
-            let arity_diag = "llvm lowering [fatal]: closure dispatch arity mismatch for `"
+            let arity_message = "closure dispatch arity mismatch for `"
                 + trimmed_target
                 + "`: expected "
                 + number_to_string(expected_params.length - 1)
                 + " user argument(s), got "
                 + number_to_string(final_operands.length - 1);
+            let arity_diag = "llvm lowering [fatal]: " + arity_message;
             trace_log(arity_diag);
+            result_diags.push(lowering_error_diag("E1007", arity_message, null));
             result_diagnostics.push(arity_diag);
             return ExpressionResult {
                 lines: result_lines,
                 temp_index: result_temp,
                 operand: null,
                 diagnostics: result_diagnostics,
-                string_constants: collected_string_constants
+                string_constants: collected_string_constants,
+                diags: result_diags
             };
         }
         let closure_pair = final_operands[0];
@@ -107,7 +121,8 @@ fn emit_closure_dispatch(trimmed_target: string, final_operands: LLVMOperand[], 
                 temp_index: result_temp,
                 operand: null,
                 diagnostics: result_diagnostics,
-                string_constants: collected_string_constants
+                string_constants: collected_string_constants,
+                diags: result_diags
             };
         }
         let closure_result_temp_name = format_temp_name(result_temp);
@@ -127,7 +142,8 @@ fn emit_closure_dispatch(trimmed_target: string, final_operands: LLVMOperand[], 
             temp_index: result_temp + 1,
             operand: closure_result_operand,
             diagnostics: result_diagnostics,
-            string_constants: collected_string_constants
+            string_constants: collected_string_constants,
+            diags: result_diags
         };
     }
     return ExpressionResult {
@@ -135,7 +151,8 @@ fn emit_closure_dispatch(trimmed_target: string, final_operands: LLVMOperand[], 
         temp_index: result_temp,
         operand: null,
         diagnostics: result_diagnostics,
-        string_constants: collected_string_constants
+        string_constants: collected_string_constants,
+        diags: result_diags
     };
 }
 

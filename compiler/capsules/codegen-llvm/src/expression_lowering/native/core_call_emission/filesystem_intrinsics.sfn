@@ -1,6 +1,8 @@
 // compiler/capsules/codegen-llvm/src/expression_lowering/native/core_call_emission/filesystem_intrinsics.sfn
 //
 // Simple cross-platform filesystem intrinsic emission.
+import { LoweringDiagnostic } from "sfn/ir";
+
 import { format_temp_name } from "../../../expressions_helpers";
 import { fs_platform_leg, stat_buf_size_value, stat_st_mode_offset_value } from "../../../lowering_debug_state";
 import {
@@ -9,12 +11,13 @@ import {
     RuntimeHelperDescriptor,
     StringConstant
 } from "../../../types";
-import { number_to_string } from "../../../utils";
+import { lowering_warning_diag, number_to_string } from "../../../utils";
 
-fn emit_filesystem_intrinsic(helper_descriptor: RuntimeHelperDescriptor, final_operands: LLVMOperand[], current_temp: int, current_lines: string[], diagnostics: string[], collected_string_constants: StringConstant[]) -> ExpressionResult {
+fn emit_filesystem_intrinsic(helper_descriptor: RuntimeHelperDescriptor, final_operands: LLVMOperand[], current_temp: int, current_lines: string[], diagnostics: string[], diags: LoweringDiagnostic[], collected_string_constants: StringConstant[]) -> ExpressionResult {
     let mut result_lines = current_lines;
     let mut result_temp: int = current_temp;
     let mut result_diagnostics = diagnostics;
+    let mut result_diags = diags;
     // Filesystem sentinels (#1308): retire the last platform-divergent C fs
     // symbols by lowering each to a per-target sequence (modeled on
     // `exe_path` above), choosing the host leg via `fs_platform_leg`. Only
@@ -23,7 +26,9 @@ fn emit_filesystem_intrinsic(helper_descriptor: RuntimeHelperDescriptor, final_o
     if helper_descriptor != null {
         if helper_descriptor.symbol == "sailfin_intrinsic_fs_symlink" {
             if final_operands.length < 2 {
-                result_diagnostics.push("llvm lowering: sailfin_intrinsic_fs_symlink requires (target: i8*, link: i8*) operands");
+                let message = "sailfin_intrinsic_fs_symlink requires (target: i8*, link: i8*) operands";
+                result_diags.push(lowering_warning_diag("E1006", message, null));
+                result_diagnostics.push("llvm lowering: " + message);
             } else {
                 let _fs_leg = fs_platform_leg();
                 if _fs_leg == "mingw" {
@@ -37,7 +42,8 @@ fn emit_filesystem_intrinsic(helper_descriptor: RuntimeHelperDescriptor, final_o
                         temp_index: result_temp,
                         operand: _fs_stub,
                         diagnostics: result_diagnostics,
-                        string_constants: collected_string_constants
+                        string_constants: collected_string_constants,
+                        diags: result_diags
                     };
                 } else {
                     // POSIX (linux/darwin): symlink(target, link) == 0 => true.
@@ -64,7 +70,8 @@ fn emit_filesystem_intrinsic(helper_descriptor: RuntimeHelperDescriptor, final_o
                         temp_index: result_temp,
                         operand: _fs_operand,
                         diagnostics: result_diagnostics,
-                        string_constants: collected_string_constants
+                        string_constants: collected_string_constants,
+                        diags: result_diags
                     };
                 }
             }
@@ -79,7 +86,9 @@ fn emit_filesystem_intrinsic(helper_descriptor: RuntimeHelperDescriptor, final_o
     if helper_descriptor != null {
         if helper_descriptor.symbol == "sailfin_intrinsic_fs_read_link" {
             if final_operands.length < 3 {
-                result_diagnostics.push("llvm lowering: sailfin_intrinsic_fs_read_link requires (path: i8*, buf: i8*, size: i64) operands");
+                let message = "sailfin_intrinsic_fs_read_link requires (path: i8*, buf: i8*, size: i64) operands";
+                result_diags.push(lowering_warning_diag("E1006", message, null));
+                result_diagnostics.push("llvm lowering: " + message);
             } else {
                 let _fs_leg = fs_platform_leg();
                 if _fs_leg == "mingw" {
@@ -93,7 +102,8 @@ fn emit_filesystem_intrinsic(helper_descriptor: RuntimeHelperDescriptor, final_o
                         temp_index: result_temp,
                         operand: _fs_stub,
                         diagnostics: result_diagnostics,
-                        string_constants: collected_string_constants
+                        string_constants: collected_string_constants,
+                        diags: result_diags
                     };
                 } else {
                     // POSIX (linux/darwin): readlink(path, buf, size).
@@ -119,7 +129,8 @@ fn emit_filesystem_intrinsic(helper_descriptor: RuntimeHelperDescriptor, final_o
                         temp_index: result_temp,
                         operand: _fs_operand,
                         diagnostics: result_diagnostics,
-                        string_constants: collected_string_constants
+                        string_constants: collected_string_constants,
+                        diags: result_diags
                     };
                 }
             }
@@ -133,7 +144,9 @@ fn emit_filesystem_intrinsic(helper_descriptor: RuntimeHelperDescriptor, final_o
     if helper_descriptor != null {
         if helper_descriptor.symbol == "sailfin_intrinsic_fs_mkdtemp" {
             if final_operands.length < 1 {
-                result_diagnostics.push("llvm lowering: sailfin_intrinsic_fs_mkdtemp requires (template: i8*) operand");
+                let message = "sailfin_intrinsic_fs_mkdtemp requires (template: i8*) operand";
+                result_diags.push(lowering_warning_diag("E1006", message, null));
+                result_diagnostics.push("llvm lowering: " + message);
             } else {
                 let _fs_leg = fs_platform_leg();
                 if _fs_leg == "mingw" {
@@ -146,7 +159,8 @@ fn emit_filesystem_intrinsic(helper_descriptor: RuntimeHelperDescriptor, final_o
                         temp_index: result_temp,
                         operand: _fs_stub,
                         diagnostics: result_diagnostics,
-                        string_constants: collected_string_constants
+                        string_constants: collected_string_constants,
+                        diags: result_diags
                     };
                 } else {
                     let _fs_tmpl = final_operands[0].value;
@@ -169,7 +183,8 @@ fn emit_filesystem_intrinsic(helper_descriptor: RuntimeHelperDescriptor, final_o
                         temp_index: result_temp,
                         operand: _fs_operand,
                         diagnostics: result_diagnostics,
-                        string_constants: collected_string_constants
+                        string_constants: collected_string_constants,
+                        diags: result_diags
                     };
                 }
             }
@@ -183,7 +198,9 @@ fn emit_filesystem_intrinsic(helper_descriptor: RuntimeHelperDescriptor, final_o
     if helper_descriptor != null {
         if helper_descriptor.symbol == "sailfin_intrinsic_fs_exists" {
             if final_operands.length < 1 {
-                result_diagnostics.push("llvm lowering: sailfin_intrinsic_fs_exists requires (path: i8*) operand");
+                let message = "sailfin_intrinsic_fs_exists requires (path: i8*) operand";
+                result_diags.push(lowering_warning_diag("E1006", message, null));
+                result_diagnostics.push("llvm lowering: " + message);
             } else {
                 let _fs_leg = fs_platform_leg();
                 let _fs_path = final_operands[0].value;
@@ -208,7 +225,8 @@ fn emit_filesystem_intrinsic(helper_descriptor: RuntimeHelperDescriptor, final_o
                         temp_index: result_temp,
                         operand: _fs_operand,
                         diagnostics: result_diagnostics,
-                        string_constants: collected_string_constants
+                        string_constants: collected_string_constants,
+                        diags: result_diags
                     };
                 } else {
                     let _fs_bufsz = number_to_string(stat_buf_size_value());
@@ -245,7 +263,8 @@ fn emit_filesystem_intrinsic(helper_descriptor: RuntimeHelperDescriptor, final_o
                         temp_index: result_temp,
                         operand: _fs_operand,
                         diagnostics: result_diagnostics,
-                        string_constants: collected_string_constants
+                        string_constants: collected_string_constants,
+                        diags: result_diags
                     };
                 }
             }
@@ -261,7 +280,9 @@ fn emit_filesystem_intrinsic(helper_descriptor: RuntimeHelperDescriptor, final_o
     if helper_descriptor != null {
         if helper_descriptor.symbol == "sailfin_intrinsic_fs_get_perms" {
             if final_operands.length < 1 {
-                result_diagnostics.push("llvm lowering: sailfin_intrinsic_fs_get_perms requires (path: i8*) operand");
+                let message = "sailfin_intrinsic_fs_get_perms requires (path: i8*) operand";
+                result_diags.push(lowering_warning_diag("E1006", message, null));
+                result_diagnostics.push("llvm lowering: " + message);
             } else {
                 let _fs_leg = fs_platform_leg();
                 if _fs_leg == "mingw" {
@@ -274,7 +295,8 @@ fn emit_filesystem_intrinsic(helper_descriptor: RuntimeHelperDescriptor, final_o
                         temp_index: result_temp,
                         operand: _fs_stub,
                         diagnostics: result_diagnostics,
-                        string_constants: collected_string_constants
+                        string_constants: collected_string_constants,
+                        diags: result_diags
                     };
                 } else {
                     let _fs_path = final_operands[0].value;
@@ -365,7 +387,8 @@ fn emit_filesystem_intrinsic(helper_descriptor: RuntimeHelperDescriptor, final_o
                         temp_index: result_temp,
                         operand: _fs_operand,
                         diagnostics: result_diagnostics,
-                        string_constants: collected_string_constants
+                        string_constants: collected_string_constants,
+                        diags: result_diags
                     };
                 }
             }
@@ -410,7 +433,9 @@ fn emit_filesystem_intrinsic(helper_descriptor: RuntimeHelperDescriptor, final_o
     if helper_descriptor != null {
         if helper_descriptor.symbol == "sailfin_intrinsic_fs_is_directory" {
             if final_operands.length < 1 {
-                result_diagnostics.push("llvm lowering: sailfin_intrinsic_fs_is_directory requires (path: i8*) operand");
+                let message = "sailfin_intrinsic_fs_is_directory requires (path: i8*) operand";
+                result_diags.push(lowering_warning_diag("E1006", message, null));
+                result_diagnostics.push("llvm lowering: " + message);
             } else {
                 let _fs_leg = fs_platform_leg();
                 let _fs_path = final_operands[0].value;
@@ -450,7 +475,8 @@ fn emit_filesystem_intrinsic(helper_descriptor: RuntimeHelperDescriptor, final_o
                         temp_index: result_temp,
                         operand: _fs_operand,
                         diagnostics: result_diagnostics,
-                        string_constants: collected_string_constants
+                        string_constants: collected_string_constants,
+                        diags: result_diags
                     };
                 } else {
                     let _fs_id = number_to_string(result_temp);
@@ -539,7 +565,8 @@ fn emit_filesystem_intrinsic(helper_descriptor: RuntimeHelperDescriptor, final_o
                         temp_index: result_temp,
                         operand: _fs_operand,
                         diagnostics: result_diagnostics,
-                        string_constants: collected_string_constants
+                        string_constants: collected_string_constants,
+                        diags: result_diags
                     };
                 }
             }
@@ -551,7 +578,8 @@ fn emit_filesystem_intrinsic(helper_descriptor: RuntimeHelperDescriptor, final_o
         temp_index: result_temp,
         operand: null,
         diagnostics: result_diagnostics,
-        string_constants: collected_string_constants
+        string_constants: collected_string_constants,
+        diags: result_diags
     };
 }
 

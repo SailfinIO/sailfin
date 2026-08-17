@@ -5,6 +5,7 @@
 // Contains `parse_assignment_expression` (splits `target = value` and compound
 // assignments like `x += y`) and `parse_inline_let_expression` (parses
 // `let [mut] name [: type] = init`).
+import { LoweringDiagnostic } from "sfn/ir";
 import { substring } from "sfn/strings";
 
 import { AssignmentParseResult, InlineLetParseResult } from "../../types";
@@ -174,6 +175,7 @@ fn parse_assignment_expression(expression: string) -> AssignmentParseResult {
 
 fn parse_inline_let_expression(expression: string) -> InlineLetParseResult {
     let mut diagnostics: string[] = [];
+    let mut diags: LoweringDiagnostic[] = [];
     let trimmed = trim_text(expression);
     if trimmed.length < 4 {
         diagnostics.push("llvm lowering: malformed let expression `"

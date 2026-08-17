@@ -106,6 +106,7 @@ fn lower_for_range(function: NativeFunction, structure: LoopStructure, raw_targe
         diagnostics.push(start_result.diagnostics[_ci10]);
         _ci10 += 1;
     }
+    diags = extend_diag_array(diags, start_result.diags);
     current_lines = start_result.lines;
     current_temp = start_result.temp_index;
 
@@ -139,6 +140,7 @@ fn lower_for_range(function: NativeFunction, structure: LoopStructure, raw_targe
         diagnostics.push(end_result.diagnostics[_ci11]);
         _ci11 += 1;
     }
+    diags = extend_diag_array(diags, end_result.diags);
     current_lines = end_result.lines;
     current_temp = end_result.temp_index;
 
@@ -172,6 +174,7 @@ fn lower_for_range(function: NativeFunction, structure: LoopStructure, raw_targe
         diagnostics.push(start_coerced.diagnostics[_ci12]);
         _ci12 += 1;
     }
+    diags = extend_diag_array(diags, start_coerced.diags);
     current_lines = start_coerced.lines;
     current_temp = start_coerced.temp_index;
     if start_coerced.operand == null {
@@ -205,6 +208,7 @@ fn lower_for_range(function: NativeFunction, structure: LoopStructure, raw_targe
         diagnostics.push(end_coerced.diagnostics[_ci13]);
         _ci13 += 1;
     }
+    diags = extend_diag_array(diags, end_coerced.diags);
     current_lines = end_coerced.lines;
     current_temp = end_coerced.temp_index;
     if end_coerced.operand == null {
@@ -241,6 +245,7 @@ fn lower_for_range(function: NativeFunction, structure: LoopStructure, raw_targe
             diagnostics.push(stride_result.diagnostics[_ci14]);
             _ci14 += 1;
         }
+        diags = extend_diag_array(diags, stride_result.diags);
         current_lines = stride_result.lines;
         current_temp = stride_result.temp_index;
 
@@ -274,6 +279,7 @@ fn lower_for_range(function: NativeFunction, structure: LoopStructure, raw_targe
             diagnostics.push(stride_coerced.diagnostics[_ci15]);
             _ci15 += 1;
         }
+        diags = extend_diag_array(diags, stride_coerced.diags);
         current_lines = stride_coerced.lines;
         current_temp = stride_coerced.temp_index;
         if stride_coerced.operand == null {

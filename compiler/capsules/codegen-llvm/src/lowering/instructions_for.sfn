@@ -338,6 +338,7 @@ fn lower_for_array(function: NativeFunction, structure: LoopStructure, raw_targe
 // Shared helper: build exit mutations for loop locals after the loop exit label.
 fn lower_for_instruction(function: NativeFunction, start_index: int, llvm_return: string, bindings: ParameterBinding[], locals: LocalBinding[], allocas: string[], lines: string[], temp_index: int, block_counter: int, next_local_id: int, next_region_id: int, functions: NativeFunction[], loop_stack: LoopContext[], try_stack: TryFrameContext[], end: int, context: TypeContext, scope_id: string, scope_depth: int, current_label: string) -> BlockLoweringResult {
     let mut diagnostics: string[] = [];
+    let mut diags: LoweringDiagnostic[] = [];
     let mut current_lines: string[] = lines;
     let mut current_allocas: string[] = allocas;
     let mut current_locals: LocalBinding[] = locals;
@@ -451,6 +452,7 @@ fn lower_for_instruction(function: NativeFunction, start_index: int, llvm_return
         diagnostics.push(iterable_result.diagnostics[_ci21]);
         _ci21 += 1;
     }
+    diags = extend_diag_array(diags, iterable_result.diags);
     current_lines = iterable_result.lines;
     current_temp = iterable_result.temp_index;
 

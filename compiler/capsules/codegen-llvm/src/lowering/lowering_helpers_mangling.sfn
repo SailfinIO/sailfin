@@ -5,6 +5,7 @@
 // files under 1000 lines.
 import {
     ImportModuleAlias,
+    LoweringDiagnostic,
     NativeFunction,
     NativeImport,
     NativeImportSpecifier,
@@ -148,6 +149,7 @@ fn _collect_struct_method_symbols(native_text: string) -> string[] {
 
 fn apply_module_symbol_mangling(lines: string[], imports: NativeImport[], current_module_slug: string, imported_native_texts: string[], module_aliases: ImportModuleAlias[], native_text_path: string) -> MangledModuleResult {
     let mut diagnostics: string[] = [];
+    let mut diags: LoweringDiagnostic[] = [];
     let debug_lowering = trace_lowering();
     if debug_lowering {
         trace_log("emit-llvm: mangle start module=" + current_module_slug);

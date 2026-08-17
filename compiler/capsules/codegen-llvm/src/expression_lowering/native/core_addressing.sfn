@@ -1,6 +1,8 @@
 // compiler/capsules/codegen-llvm/src/expression_lowering/native/core_addressing.sfn
 //
 // Addressing helpers for Stage2 expression lowering.
+import { LoweringDiagnostic } from "sfn/ir";
+
 import { is_simple_identifier } from "../../expressions_helpers";
 import { empty_string_constant_set } from "../../strings";
 import {
@@ -10,12 +12,13 @@ import {
     ParameterBinding,
     RawAddressParseResult
 } from "../../types";
-import { append_string, trim_text } from "../../utils";
+import { append_string, lowering_warning_diag, trim_text } from "../../utils";
 import { find_parameter_binding } from "./core_bindings";
 import { find_local_binding } from "./core_scopes";
 
 fn lower_raw_address_expression(parse: RawAddressParseResult, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[]) -> ExpressionResult {
     let mut diagnostics = parse.diagnostics;
+    let mut diags: LoweringDiagnostic[] = [];
     let empty_constants = empty_string_constant_set();
     if !parse.success {
         return ExpressionResult {
@@ -23,20 +26,24 @@ fn lower_raw_address_expression(parse: RawAddressParseResult, bindings: Paramete
             temp_index: temp_index,
             operand: null,
             diagnostics: diagnostics,
-            string_constants: empty_constants
+            string_constants: empty_constants,
+            diags: diags
         };
     }
     let target = trim_text(parse.target);
     if !is_simple_identifier(target) {
-        diagnostics.push("llvm lowering: &raw currently supports only simple identifiers (got `"
+        let message = "&raw currently supports only simple identifiers (got `"
             + target
-            + "`)");
+            + "`)";
+        diags.push(lowering_warning_diag("E1006", message, null));
+        diagnostics.push("llvm lowering: " + message);
         return ExpressionResult {
             lines: lines,
             temp_index: temp_index,
             operand: null,
             diagnostics: diagnostics,
-            string_constants: empty_constants
+            string_constants: empty_constants,
+            diags: diags
         };
     }
     let local = find_local_binding(locals, target);
@@ -50,29 +57,34 @@ fn lower_raw_address_expression(parse: RawAddressParseResult, bindings: Paramete
             temp_index: temp_index,
             operand: operand,
             diagnostics: diagnostics,
-            string_constants: empty_constants
+            string_constants: empty_constants,
+            diags: diags
         };
     }
     let param = find_parameter_binding(bindings, target);
     if param != null {
-        diagnostics.push("llvm lowering: cannot take raw address of parameter `"
-            + target
-            + "` yet");
+        let message = "cannot take raw address of parameter `" + target
+            + "` yet";
+        diags.push(lowering_warning_diag("E1006", message, null));
+        diagnostics.push("llvm lowering: " + message);
         return ExpressionResult {
             lines: lines,
             temp_index: temp_index,
             operand: null,
             diagnostics: diagnostics,
-            string_constants: empty_constants
+            string_constants: empty_constants,
+            diags: diags
         };
     }
-    diagnostics.push("llvm lowering: &raw target `" + target
-        + "` is not a local");
+    let message = "&raw target `" + target + "` is not a local";
+    diags.push(lowering_warning_diag("E1006", message, null));
+    diagnostics.push("llvm lowering: " + message);
     return ExpressionResult {
         lines: lines,
         temp_index: temp_index,
         operand: null,
         diagnostics: diagnostics,
-        string_constants: empty_constants
+        string_constants: empty_constants,
+        diags: diags
     };
 }

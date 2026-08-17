@@ -48,6 +48,7 @@ import { collect_mutation_names, find_mutation_for_name } from "./phi";
 
 fn collect_loop_structure(instructions: NativeInstruction[], start_index: int, end: int, function_name: string) -> LoopStructure {
     let mut diagnostics: string[] = [];
+    let mut diags: LoweringDiagnostic[] = [];
     let body_start = start_index + 1;
     let mut body_end = end;
     let mut depth: int = 0;

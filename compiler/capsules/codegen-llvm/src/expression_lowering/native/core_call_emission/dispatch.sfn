@@ -2,7 +2,7 @@
 //
 // Call emission extracted from core_call_lowering.sfn to keep
 // each function under ~500 .sfn-asm instructions (avoids seed OOM).
-import { NativeFunction } from "sfn/ir";
+import { LoweringDiagnostic, NativeFunction } from "sfn/ir";
 import { substring } from "sfn/strings";
 
 import { format_temp_name, format_typed_operand } from "../../../expressions_helpers";
@@ -19,7 +19,13 @@ import {
     StringConstant,
     TypeContext
 } from "../../../types";
-import { extend_string_array, join_with_separator, number_to_string } from "../../../utils";
+import {
+    extend_string_array,
+    join_with_separator,
+    lowering_error_diag,
+    lowering_warning_diag,
+    number_to_string
+} from "../../../utils";
 import { coerce_operand_to_type } from "../core_operands/dispatch";
 import { coerce_call_operands } from "./arguments";
 import { emit_array_call } from "./arrays";
@@ -30,13 +36,14 @@ import { emit_platform_intrinsic } from "./platform_intrinsics";
 
 // Coerce operands to expected types and emit the final call instruction.
 // Handles array concat/push, trait dispatch, closure dispatch, and normal function calls.
-fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], operand_source_types: string[], expected_params: string[], llvm_return: string, is_trait_dispatch: boolean, is_closure_dispatch: boolean, is_array_concat: boolean, array_concat_element_type: string, is_array_push: boolean, array_push_element_type: string, method_operand: LLVMOperand?, helper_descriptor: RuntimeHelperDescriptor?, function_entry: NativeFunction?, current_temp: int, current_lines: string[], diagnostics: string[], collected_string_constants: StringConstant[], bindings: ParameterBinding[], locals: LocalBinding[], context: TypeContext) -> ExpressionResult {
+fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], operand_source_types: string[], expected_params: string[], llvm_return: string, is_trait_dispatch: boolean, is_closure_dispatch: boolean, is_array_concat: boolean, array_concat_element_type: string, is_array_push: boolean, array_push_element_type: string, method_operand: LLVMOperand?, helper_descriptor: RuntimeHelperDescriptor?, function_entry: NativeFunction?, current_temp: int, current_lines: string[], diagnostics: string[], diags: LoweringDiagnostic[], collected_string_constants: StringConstant[], bindings: ParameterBinding[], locals: LocalBinding[], context: TypeContext) -> ExpressionResult {
     let mut result_lines = current_lines;
     let mut result_temp: int = current_temp;
     let mut result_diagnostics = diagnostics;
+    let mut result_diags = diags;
     let _trace_ccl = trace_lowering();
 
-    let coerced = coerce_call_operands(trimmed_target, operands, operand_source_types, expected_params, llvm_return, is_trait_dispatch, is_closure_dispatch, result_temp, result_lines, result_diagnostics);
+    let coerced = coerce_call_operands(trimmed_target, operands, operand_source_types, expected_params, llvm_return, is_trait_dispatch, is_closure_dispatch, result_temp, result_lines, result_diagnostics, result_diags);
     result_lines = coerced.lines;
     result_temp = coerced.temp_index;
     result_diagnostics = coerced.diagnostics;
@@ -55,7 +62,7 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], operand
         if array_push_element_type.length > 0 { emit_array = true; }
     }
     if emit_array {
-        return emit_array_call(trimmed_target, final_operands, is_array_concat, array_concat_element_type, is_array_push, array_push_element_type, result_temp, result_lines, result_diagnostics, collected_string_constants, locals);
+        return emit_array_call(trimmed_target, final_operands, is_array_concat, array_concat_element_type, is_array_push, array_push_element_type, result_temp, result_lines, result_diagnostics, result_diags, collected_string_constants, locals);
     }
 
     if _trace_ccl {
@@ -70,11 +77,12 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], operand
     }
     if _if56 {
         if expected_params.length != final_operands.length {
-            result_diagnostics.push("llvm lowering: call to `" + trimmed_target
-                + "` expected "
+            let message = "call to `" + trimmed_target + "` expected "
                 + number_to_string(expected_params.length)
                 + " arguments but received "
-                + number_to_string(final_operands.length));
+                + number_to_string(final_operands.length);
+            result_diags.push(lowering_warning_diag("E1006", message, null));
+            result_diagnostics.push("llvm lowering: " + message);
         }
     }
 
@@ -105,22 +113,25 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], operand
     // than writing a partial IR file with the side-effecting call
     // silently dropped.
     if llvm_return.length == 0 {
-        let unresolved_diag = "llvm lowering [fatal]: cannot resolve return type for call to `"
+        let unresolved_message = "cannot resolve return type for call to `"
             + trimmed_target
             + "` — callee signature is not known to the compiler";
+        let unresolved_diag = "llvm lowering [fatal]: " + unresolved_message;
         trace_log(unresolved_diag);
+        result_diags.push(lowering_error_diag("E1007", unresolved_message, null));
         result_diagnostics.push(unresolved_diag);
         return ExpressionResult {
             lines: result_lines,
             temp_index: result_temp,
             operand: null,
             diagnostics: result_diagnostics,
-            string_constants: collected_string_constants
+            string_constants: collected_string_constants,
+            diags: result_diags
         };
     }
 
     if is_closure_dispatch {
-        return emit_closure_dispatch(trimmed_target, final_operands, rendered_args, expected_params, llvm_return, result_temp, result_lines, result_diagnostics, collected_string_constants);
+        return emit_closure_dispatch(trimmed_target, final_operands, rendered_args, expected_params, llvm_return, result_temp, result_lines, result_diagnostics, result_diags, collected_string_constants);
     }
 
     // Trait dispatch call
@@ -234,7 +245,8 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], operand
                                 temp_index: result_temp,
                                 operand: null,
                                 diagnostics: result_diagnostics,
-                                string_constants: collected_string_constants
+                                string_constants: collected_string_constants,
+                                diags: result_diags
                             };
                         } else {
                             let result_temp_name = format_temp_name(result_temp);
@@ -255,28 +267,34 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], operand
                                 temp_index: result_temp + 1,
                                 operand: result_operand,
                                 diagnostics: result_diagnostics,
-                                string_constants: collected_string_constants
+                                string_constants: collected_string_constants,
+                                diags: result_diags
                             };
                         }
                     } else {
-                        result_diagnostics.push("llvm lowering: method `"
-                            + method_name
+                        let message = "method `" + method_name
                             + "` not found in interface `"
                             + interface_name
-                            + "`");
+                            + "`";
+                        result_diags.push(lowering_warning_diag("E1006", message, null));
+                        result_diagnostics.push("llvm lowering: " + message);
                     }
                 } else {
-                    result_diagnostics.push("llvm lowering: interface `"
-                        + interface_name
-                        + "` not found for trait dispatch");
+                    let message = "interface `" + interface_name
+                        + "` not found for trait dispatch";
+                    result_diags.push(lowering_warning_diag("E1006", message, null));
+                    result_diagnostics.push("llvm lowering: " + message);
                 }
             } else {
-                result_diagnostics.push("llvm lowering: trait dispatch requires at least one argument (the trait object)");
+                let message = "trait dispatch requires at least one argument (the trait object)";
+                result_diags.push(lowering_warning_diag("E1006", message, null));
+                result_diagnostics.push("llvm lowering: " + message);
             }
         } else {
-            result_diagnostics.push("llvm lowering: malformed trait dispatch target `"
-                + trimmed_target
-                + "`");
+            let message = "malformed trait dispatch target `" + trimmed_target
+                + "`";
+            result_diags.push(lowering_warning_diag("E1006", message, null));
+            result_diagnostics.push("llvm lowering: " + message);
         }
     }
 
@@ -297,11 +315,13 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], operand
         }
         if platform_symbol == "sailfin_intrinsic_exe_path" {
             if final_operands.length < 2 {
-                result_diagnostics.push("llvm lowering: sailfin_intrinsic_exe_path requires (buf: i8*, size: i64) operands");
+                let message = "sailfin_intrinsic_exe_path requires (buf: i8*, size: i64) operands";
+                result_diags.push(lowering_warning_diag("E1006", message, null));
+                result_diagnostics.push("llvm lowering: " + message);
             } else { emit_platform = true; }
         }
         if emit_platform {
-            return emit_platform_intrinsic(helper_descriptor, final_operands, result_temp, result_lines, result_diagnostics, collected_string_constants);
+            return emit_platform_intrinsic(helper_descriptor, final_operands, result_temp, result_lines, result_diagnostics, result_diags, collected_string_constants);
         }
     }
     if helper_descriptor != null {
@@ -327,34 +347,48 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], operand
         }
         if filesystem_min_args > 0 {
             if final_operands.length >= filesystem_min_args {
-                return emit_filesystem_intrinsic(helper_descriptor, final_operands, result_temp, result_lines, result_diagnostics, collected_string_constants);
+                return emit_filesystem_intrinsic(helper_descriptor, final_operands, result_temp, result_lines, result_diagnostics, result_diags, collected_string_constants);
             }
             if filesystem_symbol == "sailfin_intrinsic_fs_symlink" {
-                result_diagnostics.push("llvm lowering: sailfin_intrinsic_fs_symlink requires (target: i8*, link: i8*) operands");
+                let message = "sailfin_intrinsic_fs_symlink requires (target: i8*, link: i8*) operands";
+                result_diags.push(lowering_warning_diag("E1006", message, null));
+                result_diagnostics.push("llvm lowering: " + message);
             }
             if filesystem_symbol == "sailfin_intrinsic_fs_read_link" {
-                result_diagnostics.push("llvm lowering: sailfin_intrinsic_fs_read_link requires (path: i8*, buf: i8*, size: i64) operands");
+                let message = "sailfin_intrinsic_fs_read_link requires (path: i8*, buf: i8*, size: i64) operands";
+                result_diags.push(lowering_warning_diag("E1006", message, null));
+                result_diagnostics.push("llvm lowering: " + message);
             }
             if filesystem_symbol == "sailfin_intrinsic_fs_mkdtemp" {
-                result_diagnostics.push("llvm lowering: sailfin_intrinsic_fs_mkdtemp requires (template: i8*) operand");
+                let message = "sailfin_intrinsic_fs_mkdtemp requires (template: i8*) operand";
+                result_diags.push(lowering_warning_diag("E1006", message, null));
+                result_diagnostics.push("llvm lowering: " + message);
             }
             if filesystem_symbol == "sailfin_intrinsic_fs_exists" {
-                result_diagnostics.push("llvm lowering: sailfin_intrinsic_fs_exists requires (path: i8*) operand");
+                let message = "sailfin_intrinsic_fs_exists requires (path: i8*) operand";
+                result_diags.push(lowering_warning_diag("E1006", message, null));
+                result_diagnostics.push("llvm lowering: " + message);
             }
             if filesystem_symbol == "sailfin_intrinsic_fs_get_perms" {
-                result_diagnostics.push("llvm lowering: sailfin_intrinsic_fs_get_perms requires (path: i8*) operand");
+                let message = "sailfin_intrinsic_fs_get_perms requires (path: i8*) operand";
+                result_diags.push(lowering_warning_diag("E1006", message, null));
+                result_diagnostics.push("llvm lowering: " + message);
             }
             if filesystem_symbol == "sailfin_intrinsic_fs_is_directory" {
-                result_diagnostics.push("llvm lowering: sailfin_intrinsic_fs_is_directory requires (path: i8*) operand");
+                let message = "sailfin_intrinsic_fs_is_directory requires (path: i8*) operand";
+                result_diags.push(lowering_warning_diag("E1006", message, null));
+                result_diagnostics.push("llvm lowering: " + message);
             }
         }
     }
     if helper_descriptor != null {
         if helper_descriptor.symbol == "sailfin_intrinsic_fs_list_dir" {
             if final_operands.length < 1 {
-                result_diagnostics.push("llvm lowering: sailfin_intrinsic_fs_list_dir requires (path: i8*) operand");
+                let message = "sailfin_intrinsic_fs_list_dir requires (path: i8*) operand";
+                result_diags.push(lowering_warning_diag("E1006", message, null));
+                result_diagnostics.push("llvm lowering: " + message);
             } else {
-                return emit_filesystem_list(helper_descriptor, final_operands, result_temp, result_lines, result_diagnostics, collected_string_constants);
+                return emit_filesystem_list(helper_descriptor, final_operands, result_temp, result_lines, result_diagnostics, result_diags, collected_string_constants);
             }
         }
     }
@@ -369,8 +403,9 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], operand
         if _pr_symbol == "sailfin_intrinsic_pointer_read_i32" || _pr_symbol == "sailfin_intrinsic_pointer_read_i64"
             || _pr_symbol == "sailfin_intrinsic_pointer_read_f64" {
             if final_operands.length < 1 {
-                result_diagnostics.push("llvm lowering: " + _pr_symbol
-                    + " requires one pointer operand");
+                let message = _pr_symbol + " requires one pointer operand";
+                result_diags.push(lowering_warning_diag("E1006", message, null));
+                result_diagnostics.push("llvm lowering: " + message);
             } else {
                 let _pr_elem = helper_descriptor.return_type;
                 let _pr_ptr_type = _pr_elem + "*";
@@ -402,7 +437,8 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], operand
                     temp_index: result_temp,
                     operand: _pr_operand,
                     diagnostics: result_diagnostics,
-                    string_constants: collected_string_constants
+                    string_constants: collected_string_constants,
+                    diags: result_diags
                 };
             }
         }
@@ -452,7 +488,8 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], operand
             temp_index: result_temp,
             operand: null,
             diagnostics: result_diagnostics,
-            string_constants: collected_string_constants
+            string_constants: collected_string_constants,
+            diags: result_diags
         };
     }
 
@@ -501,7 +538,8 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], operand
         temp_index: next_temp,
         operand: result_operand,
         diagnostics: result_diagnostics,
-        string_constants: collected_string_constants
+        string_constants: collected_string_constants,
+        diags: result_diags
     };
 }
 

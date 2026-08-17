@@ -66,6 +66,7 @@ import {
 
 fn collect_if_structure(instructions: NativeInstruction[], start_index: int, end: int, function_name: string) -> IfStructure {
     let mut diagnostics: string[] = [];
+    let mut diags: LoweringDiagnostic[] = [];
     let then_start = start_index + 1;
     let mut then_end = end;
     let mut else_start: int = -1;

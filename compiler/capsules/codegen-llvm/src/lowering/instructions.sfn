@@ -582,6 +582,7 @@ fn lower_instruction_range(function: NativeFunction, start_index: int, end: int,
                                 diagnostics.push(_pop_b.diagnostics[_pop_b_di]);
                                 _pop_b_di += 1;
                             }
+                            diags = extend_diag_array(diags, _pop_b.diags);
                             current_lines = _pop_b.lines;
                             current_temp = _pop_b.temp_index;
                         }
@@ -629,6 +630,7 @@ fn lower_instruction_range(function: NativeFunction, start_index: int, end: int,
                                 diagnostics.push(_pop_c.diagnostics[_pop_c_di]);
                                 _pop_c_di += 1;
                             }
+                            diags = extend_diag_array(diags, _pop_c.diags);
                             current_lines = _pop_c.lines;
                             current_temp = _pop_c.temp_index;
                         }
@@ -779,6 +781,7 @@ struct _ClosureEnvPrologueLowerResult {
 // rather than threading the binding through.
 fn _lower_closure_env_load_prologue_marker(marker: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], scope_id: string, scope_depth: int) -> _ClosureEnvPrologueLowerResult {
     let mut diagnostics: string[] = [];
+    let mut diags: LoweringDiagnostic[] = [];
     let lambda_id = _parse_prologue_int(marker, "lambda_id=");
     let captures_text = _parse_prologue_string(marker, "captures=");
     let captures = decode_captures(captures_text);

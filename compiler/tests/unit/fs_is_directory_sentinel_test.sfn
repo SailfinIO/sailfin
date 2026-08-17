@@ -32,7 +32,7 @@ import {
     StringConstant,
     TypeContext
 } from "sfn/codegen-llvm/types";
-import { NativeFunction } from "sfn/ir";
+import { LoweringDiagnostic, NativeFunction } from "sfn/ir";
 import { find } from "sfn/strings";
 
 // The default provider context installed by the driver: Linux/x86_64, every
@@ -96,8 +96,9 @@ test "fs is_directory sentinel: the POSIX leg stats and tests S_IFDIR" ![io] {
         }];
         let no_lines: string[] = [];
         let no_diagnostics: string[] = [];
+        let no_structured_diags: LoweringDiagnostic[] = [];
         let no_constants: StringConstant[] = [];
-        let result = emit_filesystem_intrinsic(descriptor, operands, 0, no_lines, no_diagnostics, no_constants);
+        let result = emit_filesystem_intrinsic(descriptor, operands, 0, no_lines, no_diagnostics, no_structured_diags, no_constants);
 
         assert _any_line_contains(result.lines, "call i32 @stat(");
         assert _any_line_contains(result.lines, "and i32 ");
@@ -166,8 +167,9 @@ test "fs is_directory sentinel: the st_mode offset tracks the target arch" ![io]
         }];
         let no_lines: string[] = [];
         let no_diagnostics: string[] = [];
+        let no_structured_diags: LoweringDiagnostic[] = [];
         let no_constants: StringConstant[] = [];
-        let result = emit_filesystem_intrinsic(descriptor, operands, 0, no_lines, no_diagnostics, no_constants);
+        let result = emit_filesystem_intrinsic(descriptor, operands, 0, no_lines, no_diagnostics, no_structured_diags, no_constants);
 
         assert _any_line_contains(result.lines, ", i64 16");
         assert ! _any_line_contains(result.lines, ", i64 24");
@@ -197,8 +199,9 @@ test "fs is_directory sentinel: the st_mode offset tracks the target arch" ![io]
         }];
         let no_lines: string[] = [];
         let no_diagnostics: string[] = [];
+        let no_structured_diags: LoweringDiagnostic[] = [];
         let no_constants: StringConstant[] = [];
-        let result = emit_filesystem_intrinsic(darwin_descriptor, operands, 0, no_lines, no_diagnostics, no_constants);
+        let result = emit_filesystem_intrinsic(darwin_descriptor, operands, 0, no_lines, no_diagnostics, no_structured_diags, no_constants);
 
         assert _any_line_contains(result.lines, ", i64 4");
         assert ! _any_line_contains(result.lines, ", i64 24");
@@ -220,8 +223,9 @@ test "fs is_directory sentinel: the Windows leg tests FILE_ATTRIBUTE_DIRECTORY a
         }];
         let no_lines: string[] = [];
         let no_diagnostics: string[] = [];
+        let no_structured_diags: LoweringDiagnostic[] = [];
         let no_constants: StringConstant[] = [];
-        let result = emit_filesystem_intrinsic(descriptor, operands, 0, no_lines, no_diagnostics, no_constants);
+        let result = emit_filesystem_intrinsic(descriptor, operands, 0, no_lines, no_diagnostics, no_structured_diags, no_constants);
 
         // Asserted as whole lines, not substrings. Substring matching is too
         // weak here in two ways: `", 16"` also matches `", 16384"` (S_IFDIR),
@@ -290,8 +294,9 @@ test "fs is_directory sentinel: a missing path operand is a diagnostic, not a fa
         let no_operands: LLVMOperand[] = [];
         let no_lines: string[] = [];
         let no_diagnostics: string[] = [];
+        let no_structured_diags: LoweringDiagnostic[] = [];
         let no_constants: StringConstant[] = [];
-        let result = emit_filesystem_intrinsic(descriptor, no_operands, 0, no_lines, no_diagnostics, no_constants);
+        let result = emit_filesystem_intrinsic(descriptor, no_operands, 0, no_lines, no_diagnostics, no_structured_diags, no_constants);
 
         assert result.diagnostics.length > 0;
         assert result.operand == null;

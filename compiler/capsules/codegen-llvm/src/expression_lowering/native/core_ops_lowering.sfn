@@ -1,6 +1,6 @@
 // compiler/capsules/codegen-llvm/src/expression_lowering/native/core_ops_lowering.sfn
 // Lowering for operators and control-flow expressions (ternary, logical, arithmetic).
-import { NativeFunction } from "sfn/ir";
+import { LoweringDiagnostic, NativeFunction } from "sfn/ir";
 import { substring } from "sfn/strings";
 
 import { default_return_literal, format_temp_name } from "../../expressions_helpers";
@@ -23,8 +23,11 @@ import {
     char_code_at_text,
     contains_text,
     ends_with,
+    extend_diag_array,
     extend_string_array,
     join_with_separator,
+    lowering_error_diag,
+    lowering_warning_diag,
     number_to_string,
     starts_with,
     string_array_contains,
@@ -60,15 +63,17 @@ fn _is_stringifiable_numeric(llvm_type: string) -> boolean {
     return false;
 }
 
-fn lower_logical_not_with_operand(operand: LLVMOperand, temp_index: int, lines: string[], diagnostics: string[], string_constants: StringConstant[]) -> ExpressionResult {
+fn lower_logical_not_with_operand(operand: LLVMOperand, temp_index: int, lines: string[], diagnostics: string[], diags: LoweringDiagnostic[], string_constants: StringConstant[]) -> ExpressionResult {
     let coerced = coerce_operand_to_type(operand, "i1", temp_index, lines, true, null);
     let mut current_diagnostics: string[] = diagnostics;
+    let mut current_diags = diags;
     let mut _ci0: int = 0;
     loop {
         if _ci0 >= coerced.diagnostics.length { break; }
         current_diagnostics.push(coerced.diagnostics[_ci0]);
         _ci0 += 1;
     }
+    current_diags = extend_diag_array(current_diags, coerced.diags);
     let mut current_lines = coerced.lines;
     let mut current_temp = coerced.temp_index;
     if coerced.operand != null {
@@ -86,7 +91,8 @@ fn lower_logical_not_with_operand(operand: LLVMOperand, temp_index: int, lines: 
             temp_index: current_temp,
             operand: result_operand,
             diagnostics: current_diagnostics,
-            string_constants: string_constants
+            string_constants: string_constants,
+            diags: current_diags
         };
     }
     return ExpressionResult {
@@ -94,12 +100,14 @@ fn lower_logical_not_with_operand(operand: LLVMOperand, temp_index: int, lines: 
         temp_index: current_temp,
         operand: null,
         diagnostics: current_diagnostics,
-        string_constants: string_constants
+        string_constants: string_constants,
+        diags: current_diags
     };
 }
 
 fn lower_logical_not_result(result: ExpressionResult, base_diagnostics: string[]) -> ExpressionResult {
     let mut combined: string[] = base_diagnostics;
+    let mut combined_diags: LoweringDiagnostic[] = [];
     let mut _ci0: int = 0;
     loop {
         if _ci0 >= result.diagnostics.length { break; }
@@ -112,21 +120,24 @@ fn lower_logical_not_result(result: ExpressionResult, base_diagnostics: string[]
             temp_index: result.temp_index,
             operand: null,
             diagnostics: combined,
-            string_constants: result.string_constants
+            string_constants: result.string_constants,
+            diags: combined_diags
         };
     }
-    return lower_logical_not_with_operand(result.operand, result.temp_index, result.lines, combined, result.string_constants);
+    return lower_logical_not_with_operand(result.operand, result.temp_index, result.lines, combined, combined_diags, result.string_constants);
 }
 
 fn lower_numeric_negation_result(result: ExpressionResult, base_diagnostics: string[]) -> ExpressionResult {
     let diagnostics = extend_string_array(base_diagnostics, result.diagnostics);
+    let diags: LoweringDiagnostic[] = [];
     if result.operand == null {
         return ExpressionResult {
             lines: result.lines,
             temp_index: result.temp_index,
             operand: null,
             diagnostics: diagnostics,
-            string_constants: result.string_constants
+            string_constants: result.string_constants,
+            diags: diags
         };
     }
 
@@ -143,15 +154,19 @@ fn lower_numeric_negation_result(result: ExpressionResult, base_diagnostics: str
         current_lines.push("  " + result_temp + " = fneg " + operand_type + " "
             + operand.value);
     } else {
-        let with_issue = append_string(diagnostics, "llvm lowering: cannot negate non-numeric type `"
-            + operand_type
-            + "`");
+        let neg_message = "cannot negate non-numeric type `" + operand_type
+            + "`";
+        let with_issue = append_string(diagnostics, "llvm lowering: "
+            + neg_message);
+        let mut with_issue_diags = diags;
+        with_issue_diags.push(lowering_warning_diag("E1006", neg_message, null));
         return ExpressionResult {
             lines: current_lines,
             temp_index: result.temp_index,
             operand: null,
             diagnostics: with_issue,
-            string_constants: result.string_constants
+            string_constants: result.string_constants,
+            diags: with_issue_diags
         };
     }
 
@@ -160,12 +175,14 @@ fn lower_numeric_negation_result(result: ExpressionResult, base_diagnostics: str
         temp_index: result.temp_index + 1,
         operand: LLVMOperand { llvm_type: operand_type, value: result_temp },
         diagnostics: diagnostics,
-        string_constants: result.string_constants
+        string_constants: result.string_constants,
+        diags: diags
     };
 }
 
 fn lower_ternary_expression(parse: TernaryParseResult, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string) -> ExpressionResult {
     let mut diagnostics: string[] = parse.diagnostics;
+    let mut diags: LoweringDiagnostic[] = [];
     let mut string_constants: StringConstant[] = empty_string_constant_set();
 
     let label_id = number_to_string(temp_index);
@@ -185,7 +202,8 @@ fn lower_ternary_expression(parse: TernaryParseResult, bindings: ParameterBindin
             temp_index: cond_result.temp_index,
             operand: null,
             diagnostics: diagnostics,
-            string_constants: string_constants
+            string_constants: string_constants,
+            diags: diags
         };
     }
 
@@ -197,7 +215,8 @@ fn lower_ternary_expression(parse: TernaryParseResult, bindings: ParameterBindin
             temp_index: cond_bool.temp_index,
             operand: null,
             diagnostics: diagnostics,
-            string_constants: string_constants
+            string_constants: string_constants,
+            diags: diags
         };
     }
 
@@ -221,7 +240,8 @@ fn lower_ternary_expression(parse: TernaryParseResult, bindings: ParameterBindin
             temp_index: then_result.temp_index,
             operand: null,
             diagnostics: diagnostics,
-            string_constants: string_constants
+            string_constants: string_constants,
+            diags: diags
         };
     }
 
@@ -243,7 +263,8 @@ fn lower_ternary_expression(parse: TernaryParseResult, bindings: ParameterBindin
             temp_index: else_result.temp_index,
             operand: null,
             diagnostics: diagnostics,
-            string_constants: string_constants
+            string_constants: string_constants,
+            diags: diags
         };
     }
 
@@ -258,17 +279,20 @@ fn lower_ternary_expression(parse: TernaryParseResult, bindings: ParameterBindin
     current_lines.push(merge_label + ":");
 
     if then_result.operand.llvm_type != else_result.operand.llvm_type {
-        diagnostics.push("llvm lowering: ternary expression branches have incompatible types: `"
+        let message = "ternary expression branches have incompatible types: `"
             + then_result.operand.llvm_type
             + "` vs `"
             + else_result.operand.llvm_type
-            + "`");
+            + "`";
+        diags.push(lowering_warning_diag("E1006", message, null));
+        diagnostics.push("llvm lowering: " + message);
         return ExpressionResult {
             lines: current_lines,
             temp_index: else_result.temp_index,
             operand: null,
             diagnostics: diagnostics,
-            string_constants: string_constants
+            string_constants: string_constants,
+            diags: diags
         };
     }
 
@@ -290,7 +314,8 @@ fn lower_ternary_expression(parse: TernaryParseResult, bindings: ParameterBindin
         temp_index: else_result.temp_index + 1,
         operand: operand,
         diagnostics: diagnostics,
-        string_constants: string_constants
+        string_constants: string_constants,
+        diags: diags
     };
 }
 
@@ -304,20 +329,22 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
     let right_text = trim_text(substring(expression, match.index
         + _operator_length, expression.length));
     let mut diagnostics: string[] = [];
+    let mut diags: LoweringDiagnostic[] = [];
     let mut _if95: boolean = false;
     if left_text.length == 0 { _if95 = true; }
     if right_text.length == 0 { _if95 = true; }
     if _if95 {
-        diagnostics.push("llvm lowering: malformed binary expression `"
-            + expression
-            + "`");
+        let message = "malformed binary expression `" + expression + "`";
+        diags.push(lowering_warning_diag("E1006", message, null));
+        diagnostics.push("llvm lowering: " + message);
         let empty_constants = empty_string_constant_set();
         return ExpressionResult {
             lines: lines,
             temp_index: temp_index,
             operand: null,
             diagnostics: diagnostics,
-            string_constants: empty_constants
+            string_constants: empty_constants,
+            diags: diags
         };
     }
 
@@ -342,7 +369,8 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
         temp_index: temp_index,
         operand: null,
         diagnostics: [],
-        string_constants: empty_string_constant_set()
+        string_constants: empty_string_constant_set(),
+        diags: []
     };
     let mut right_result: ExpressionResult = left_result;
     if _left_is_number_literal && !_right_is_number_literal {
@@ -355,7 +383,8 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
                 temp_index: right_first.temp_index,
                 operand: null,
                 diagnostics: diagnostics,
-                string_constants: string_constants
+                string_constants: string_constants,
+                diags: diags
             };
         }
         let left_second = lower_expression(left_text, bindings, locals, right_first.temp_index, right_first.lines, functions, context, right_first.operand.llvm_type);
@@ -367,7 +396,8 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
                 temp_index: left_second.temp_index,
                 operand: null,
                 diagnostics: diagnostics,
-                string_constants: string_constants
+                string_constants: string_constants,
+                diags: diags
             };
         }
         left_result = left_second;
@@ -376,7 +406,8 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
             temp_index: left_second.temp_index,
             operand: right_first.operand,
             diagnostics: [],
-            string_constants: empty_string_constant_set()
+            string_constants: empty_string_constant_set(),
+            diags: []
         };
     } else {
         let left_first = lower_expression(left_text, bindings, locals, temp_index, lines, functions, context, "");
@@ -388,7 +419,8 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
                 temp_index: left_first.temp_index,
                 operand: null,
                 diagnostics: diagnostics,
-                string_constants: string_constants
+                string_constants: string_constants,
+                diags: diags
             };
         }
         let mut _right_expected: string = "";
@@ -404,7 +436,8 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
                 temp_index: right_second.temp_index,
                 operand: null,
                 diagnostics: diagnostics,
-                string_constants: string_constants
+                string_constants: string_constants,
+                diags: diags
             };
         }
         left_result = left_first;
@@ -508,7 +541,8 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
                         temp_index: current_temp,
                         operand: null,
                         diagnostics: diagnostics,
-                        string_constants: string_constants
+                        string_constants: string_constants,
+                        diags: diags
                     };
                 }
                 lhs_at_string = lhs_coerced.operand;
@@ -528,7 +562,8 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
                         temp_index: current_temp,
                         operand: null,
                         diagnostics: diagnostics,
-                        string_constants: string_constants
+                        string_constants: string_constants,
+                        diags: diags
                     };
                 }
                 rhs_at_string = rhs_coerced.operand;
@@ -545,7 +580,8 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
                     temp_index: current_temp,
                     operand: null,
                     diagnostics: diagnostics,
-                    string_constants: string_constants
+                    string_constants: string_constants,
+                    diags: diags
                 };
             }
             let rhs_agg = coerce_operand_to_type(rhs_at_string, "{i8*, i64}", current_temp, current_lines, true, null);
@@ -558,7 +594,8 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
                     temp_index: current_temp,
                     operand: null,
                     diagnostics: diagnostics,
-                    string_constants: string_constants
+                    string_constants: string_constants,
+                    diags: diags
                 };
             }
 
@@ -593,7 +630,8 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
                 temp_index: current_temp,
                 operand: operand,
                 diagnostics: diagnostics,
-                string_constants: string_constants
+                string_constants: string_constants,
+                diags: diags
             };
         }
     }
@@ -623,7 +661,8 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
                         temp_index: current_temp,
                         operand: null,
                         diagnostics: diagnostics,
-                        string_constants: string_constants
+                        string_constants: string_constants,
+                        diags: diags
                     };
                 }
 
@@ -637,7 +676,8 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
                         temp_index: current_temp,
                         operand: null,
                         diagnostics: diagnostics,
-                        string_constants: string_constants
+                        string_constants: string_constants,
+                        diags: diags
                     };
                 }
 
@@ -659,7 +699,8 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
                     temp_index: current_temp + 1,
                     operand: operand,
                     diagnostics: diagnostics,
-                    string_constants: string_constants
+                    string_constants: string_constants,
+                    diags: diags
                 };
             }
         }
@@ -699,7 +740,8 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
                                 temp_index: current_temp,
                                 operand: null,
                                 diagnostics: diagnostics,
-                                string_constants: string_constants
+                                string_constants: string_constants,
+                                diags: diags
                             };
                         }
                         rhs_i64 = coerced.operand;
@@ -734,7 +776,8 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
                         temp_index: current_temp,
                         operand: operand,
                         diagnostics: diagnostics,
-                        string_constants: string_constants
+                        string_constants: string_constants,
+                        diags: diags
                     };
                 }
             }
@@ -763,7 +806,8 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
             temp_index: harmonised.temp_index,
             operand: null,
             diagnostics: diagnostics,
-            string_constants: string_constants
+            string_constants: string_constants,
+            diags: diags
         };
     }
 
@@ -793,7 +837,8 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
                     temp_index: current_temp,
                     operand: null,
                     diagnostics: diagnostics,
-                    string_constants: string_constants
+                    string_constants: string_constants,
+                    diags: diags
                 };
             }
             let rhs_agg = coerce_operand_to_type(right_aligned, "{i8*, i64}", current_temp, current_lines, true, null);
@@ -806,7 +851,8 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
                     temp_index: current_temp,
                     operand: null,
                     diagnostics: diagnostics,
-                    string_constants: string_constants
+                    string_constants: string_constants,
+                    diags: diags
                 };
             }
             // M1.7.2d (#721): route through descriptor-driven dispatch
@@ -830,21 +876,25 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
                 temp_index: current_temp + 1,
                 operand: operand,
                 diagnostics: diagnostics,
-                string_constants: string_constants
+                string_constants: string_constants,
+                diags: diags
             };
         }
     }
     if numeric_type_kind(result_type) == "other" {
-        diagnostics.push("llvm lowering [fatal] [E0307]: operator `" + match.symbol
+        let message = "operator `" + match.symbol
             + "` is not supported on aggregate operands of LLVM type `"
             + result_type
-            + "`");
+            + "`";
+        diags.push(lowering_error_diag("E0307", message, null));
+        diagnostics.push("llvm lowering [fatal] [E0307]: " + message);
         return ExpressionResult {
             lines: harmonised.lines,
             temp_index: harmonised.temp_index,
             operand: null,
             diagnostics: diagnostics,
-            string_constants: string_constants
+            string_constants: string_constants,
+            diags: diags
         };
     }
     let operands_unsigned = binary_operands_are_unsigned(match.symbol, left_text, right_text, bindings, locals, result_type, left_pre_type, right_pre_type);
@@ -860,19 +910,21 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
         // fix lives in Slice D (`as` casts + dominant_type
         // tightening) which will reject this at typecheck before
         // we reach lowering.
-        diagnostics.push("llvm lowering: operator `" + match.symbol
-            + "` is not supported on `"
+        let message = "operator `" + match.symbol + "` is not supported on `"
             + result_type
             + "` operands; bitwise and shift operators require"
             + " integer operands. Annotate the operands as `int`"
-            + " or `i64` (or use an `as` cast once Slice D ships).");
+            + " or `i64` (or use an `as` cast once Slice D ships).";
+        diags.push(lowering_warning_diag("E1006", message, null));
+        diagnostics.push("llvm lowering: " + message);
         let empty_constants = empty_string_constant_set();
         return ExpressionResult {
             lines: harmonised.lines,
             temp_index: harmonised.temp_index,
             operand: null,
             diagnostics: diagnostics,
-            string_constants: empty_constants
+            string_constants: empty_constants,
+            diags: diags
         };
     }
     let temp_name = format_temp_name(harmonised.temp_index);
@@ -887,56 +939,65 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
         temp_index: harmonised.temp_index + 1,
         operand: operand,
         diagnostics: diagnostics,
-        string_constants: string_constants
+        string_constants: string_constants,
+        diags: diags
     };
 }
 
 fn lower_comparison_operation(expression: string, match: OperatorMatch, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult {
     let mut diagnostics: string[] = [];
+    let mut diags: LoweringDiagnostic[] = [];
     let mut _if100: boolean = false;
     if expression == null { _if100 = true; }
     if expression.length == 0 { _if100 = true; }
     if _if100 {
-        diagnostics.push("llvm lowering: empty comparison expression");
+        let message = "empty comparison expression";
+        diags.push(lowering_warning_diag("E1006", message, null));
+        diagnostics.push("llvm lowering: " + message);
         let empty_constants = empty_string_constant_set();
         return ExpressionResult {
             lines: lines,
             temp_index: temp_index,
             operand: null,
             diagnostics: diagnostics,
-            string_constants: empty_constants
+            string_constants: empty_constants,
+            diags: diags
         };
     }
     let mut _if101: boolean = false;
     if match.symbol == null { _if101 = true; }
     if match.symbol.length == 0 { _if101 = true; }
     if _if101 {
-        diagnostics.push("llvm lowering: comparison operator missing in `"
-            + expression
-            + "`");
+        let message = "comparison operator missing in `" + expression + "`";
+        diags.push(lowering_warning_diag("E1006", message, null));
+        diagnostics.push("llvm lowering: " + message);
         let empty_constants = empty_string_constant_set();
         return ExpressionResult {
             lines: lines,
             temp_index: temp_index,
             operand: null,
             diagnostics: diagnostics,
-            string_constants: empty_constants
+            string_constants: empty_constants,
+            diags: diags
         };
     }
     let mut _if102: boolean = false;
     if match.index < 0 { _if102 = true; }
     if match.index >= expression.length { _if102 = true; }
     if _if102 {
-        diagnostics.push("llvm lowering: comparison operator index out of bounds in `"
+        let message = "comparison operator index out of bounds in `"
             + expression
-            + "`");
+            + "`";
+        diags.push(lowering_warning_diag("E1006", message, null));
+        diagnostics.push("llvm lowering: " + message);
         let empty_constants = empty_string_constant_set();
         return ExpressionResult {
             lines: lines,
             temp_index: temp_index,
             operand: null,
             diagnostics: diagnostics,
-            string_constants: empty_constants
+            string_constants: empty_constants,
+            diags: diags
         };
     }
 
@@ -948,16 +1009,17 @@ fn lower_comparison_operation(expression: string, match: OperatorMatch, bindings
     if left_text.length == 0 { _if103 = true; }
     if right_text.length == 0 { _if103 = true; }
     if _if103 {
-        diagnostics.push("llvm lowering: malformed comparison expression `"
-            + expression
-            + "`");
+        let message = "malformed comparison expression `" + expression + "`";
+        diags.push(lowering_warning_diag("E1006", message, null));
+        diagnostics.push("llvm lowering: " + message);
         let empty_constants = empty_string_constant_set();
         return ExpressionResult {
             lines: lines,
             temp_index: temp_index,
             operand: null,
             diagnostics: diagnostics,
-            string_constants: empty_constants
+            string_constants: empty_constants,
+            diags: diags
         };
     }
 
@@ -990,7 +1052,8 @@ fn lower_comparison_operation(expression: string, match: OperatorMatch, bindings
         temp_index: temp_index,
         operand: null,
         diagnostics: [],
-        string_constants: empty_string_constant_set()
+        string_constants: empty_string_constant_set(),
+        diags: []
     };
     let mut right_result: ExpressionResult = left_result;
     if _left_is_number_literal && !_right_is_number_literal {
@@ -1003,7 +1066,8 @@ fn lower_comparison_operation(expression: string, match: OperatorMatch, bindings
                 temp_index: right_first.temp_index,
                 operand: null,
                 diagnostics: diagnostics,
-                string_constants: string_constants
+                string_constants: string_constants,
+                diags: diags
             };
         }
         let mut _left_expected: string = "";
@@ -1020,7 +1084,8 @@ fn lower_comparison_operation(expression: string, match: OperatorMatch, bindings
                 temp_index: left_second.temp_index,
                 operand: null,
                 diagnostics: diagnostics,
-                string_constants: string_constants
+                string_constants: string_constants,
+                diags: diags
             };
         }
         left_result = left_second;
@@ -1029,7 +1094,8 @@ fn lower_comparison_operation(expression: string, match: OperatorMatch, bindings
             temp_index: left_second.temp_index,
             operand: right_first.operand,
             diagnostics: [],
-            string_constants: empty_string_constant_set()
+            string_constants: empty_string_constant_set(),
+            diags: []
         };
     } else {
         let left_first = lower_expression(left_text, bindings, locals, temp_index, lines, functions, context, "");
@@ -1041,7 +1107,8 @@ fn lower_comparison_operation(expression: string, match: OperatorMatch, bindings
                 temp_index: left_first.temp_index,
                 operand: null,
                 diagnostics: diagnostics,
-                string_constants: string_constants
+                string_constants: string_constants,
+                diags: diags
             };
         }
         let mut _right_expected: string = "";
@@ -1060,7 +1127,8 @@ fn lower_comparison_operation(expression: string, match: OperatorMatch, bindings
                 temp_index: right_second.temp_index,
                 operand: null,
                 diagnostics: diagnostics,
-                string_constants: string_constants
+                string_constants: string_constants,
+                diags: diags
             };
         }
         left_result = left_first;
@@ -1208,7 +1276,8 @@ fn lower_comparison_operation(expression: string, match: OperatorMatch, bindings
                         temp_index: alignment_temp,
                         operand: operand,
                         diagnostics: diagnostics,
-                        string_constants: string_constants
+                        string_constants: string_constants,
+                        diags: diags
                     };
                 }
 
@@ -1229,7 +1298,8 @@ fn lower_comparison_operation(expression: string, match: OperatorMatch, bindings
                             temp_index: coercion.temp_index,
                             operand: null,
                             diagnostics: diagnostics,
-                            string_constants: string_constants
+                            string_constants: string_constants,
+                            diags: diags
                         };
                     }
                     right_operand = coercion.operand;
@@ -1249,7 +1319,8 @@ fn lower_comparison_operation(expression: string, match: OperatorMatch, bindings
                                 temp_index: coercion.temp_index,
                                 operand: null,
                                 diagnostics: diagnostics,
-                                string_constants: string_constants
+                                string_constants: string_constants,
+                                diags: diags
                             };
                         }
                         left_operand = coercion.operand;
@@ -1278,7 +1349,8 @@ fn lower_comparison_operation(expression: string, match: OperatorMatch, bindings
             temp_index: harmonised.temp_index,
             operand: null,
             diagnostics: diagnostics,
-            string_constants: string_constants
+            string_constants: string_constants,
+            diags: diags
         };
     }
 
@@ -1291,7 +1363,8 @@ fn lower_comparison_operation(expression: string, match: OperatorMatch, bindings
             temp_index: comparison.temp_index,
             operand: null,
             diagnostics: diagnostics,
-            string_constants: string_constants
+            string_constants: string_constants,
+            diags: diags
         };
     }
 
@@ -1300,7 +1373,8 @@ fn lower_comparison_operation(expression: string, match: OperatorMatch, bindings
         temp_index: comparison.temp_index,
         operand: comparison.operand,
         diagnostics: diagnostics,
-        string_constants: string_constants
+        string_constants: string_constants,
+        diags: diags
     };
 }
 
@@ -1308,20 +1382,23 @@ fn lower_logical_and(expression: string, match: OperatorMatch, bindings: Paramet
     let left_text = trim_text(substring(expression, 0, match.index));
     let right_text = trim_text(substring(expression, match.index + 2, expression.length));
     let mut diagnostics: string[] = [];
+    let mut diags: LoweringDiagnostic[] = [];
     let mut string_constants: StringConstant[] = empty_string_constant_set();
 
     let mut _if106: boolean = false;
     if left_text.length == 0 { _if106 = true; }
     if right_text.length == 0 { _if106 = true; }
     if _if106 {
-        diagnostics.push("llvm lowering: malformed && expression `" + expression
-            + "`");
+        let message = "malformed && expression `" + expression + "`";
+        diags.push(lowering_warning_diag("E1006", message, null));
+        diagnostics.push("llvm lowering: " + message);
         return ExpressionResult {
             lines: lines,
             temp_index: temp_index,
             operand: null,
             diagnostics: diagnostics,
-            string_constants: string_constants
+            string_constants: string_constants,
+            diags: diags
         };
     }
 
@@ -1342,7 +1419,8 @@ fn lower_logical_and(expression: string, match: OperatorMatch, bindings: Paramet
             temp_index: left_result.temp_index,
             operand: null,
             diagnostics: diagnostics,
-            string_constants: string_constants
+            string_constants: string_constants,
+            diags: diags
         };
     }
 
@@ -1355,7 +1433,8 @@ fn lower_logical_and(expression: string, match: OperatorMatch, bindings: Paramet
             temp_index: left_bool.temp_index,
             operand: null,
             diagnostics: diagnostics,
-            string_constants: string_constants
+            string_constants: string_constants,
+            diags: diags
         };
     }
 
@@ -1375,9 +1454,9 @@ fn lower_logical_and(expression: string, match: OperatorMatch, bindings: Paramet
     diagnostics = extend_string_array(diagnostics, right_result.diagnostics);
     string_constants = merge_string_constants(string_constants, right_result.string_constants);
     if right_result.operand == null {
-        diagnostics.push("llvm lowering: unable to lower && RHS in `"
-            + expression
-            + "`");
+        let message = "unable to lower && RHS in `" + expression + "`";
+        diags.push(lowering_warning_diag("E1006", message, null));
+        diagnostics.push("llvm lowering: " + message);
 
         let mut fallback_lines = right_result.lines;
         if !lines_end_with_terminator(fallback_lines) {
@@ -1391,7 +1470,8 @@ fn lower_logical_and(expression: string, match: OperatorMatch, bindings: Paramet
             temp_index: right_result.temp_index,
             operand: operand,
             diagnostics: diagnostics,
-            string_constants: string_constants
+            string_constants: string_constants,
+            diags: diags
         };
     }
 
@@ -1404,7 +1484,8 @@ fn lower_logical_and(expression: string, match: OperatorMatch, bindings: Paramet
             temp_index: right_bool.temp_index,
             operand: null,
             diagnostics: diagnostics,
-            string_constants: string_constants
+            string_constants: string_constants,
+            diags: diags
         };
     }
 
@@ -1431,7 +1512,8 @@ fn lower_logical_and(expression: string, match: OperatorMatch, bindings: Paramet
         temp_index: right_bool.temp_index + 1,
         operand: operand,
         diagnostics: diagnostics,
-        string_constants: string_constants
+        string_constants: string_constants,
+        diags: diags
     };
 }
 
@@ -1439,20 +1521,23 @@ fn lower_logical_or(expression: string, match: OperatorMatch, bindings: Paramete
     let left_text = trim_text(substring(expression, 0, match.index));
     let right_text = trim_text(substring(expression, match.index + 2, expression.length));
     let mut diagnostics: string[] = [];
+    let mut diags: LoweringDiagnostic[] = [];
     let mut string_constants: StringConstant[] = empty_string_constant_set();
 
     let mut _if107: boolean = false;
     if left_text.length == 0 { _if107 = true; }
     if right_text.length == 0 { _if107 = true; }
     if _if107 {
-        diagnostics.push("llvm lowering: malformed || expression `" + expression
-            + "`");
+        let message = "malformed || expression `" + expression + "`";
+        diags.push(lowering_warning_diag("E1006", message, null));
+        diagnostics.push("llvm lowering: " + message);
         return ExpressionResult {
             lines: lines,
             temp_index: temp_index,
             operand: null,
             diagnostics: diagnostics,
-            string_constants: string_constants
+            string_constants: string_constants,
+            diags: diags
         };
     }
 
@@ -1473,7 +1558,8 @@ fn lower_logical_or(expression: string, match: OperatorMatch, bindings: Paramete
             temp_index: left_result.temp_index,
             operand: null,
             diagnostics: diagnostics,
-            string_constants: string_constants
+            string_constants: string_constants,
+            diags: diags
         };
     }
 
@@ -1486,7 +1572,8 @@ fn lower_logical_or(expression: string, match: OperatorMatch, bindings: Paramete
             temp_index: left_bool.temp_index,
             operand: null,
             diagnostics: diagnostics,
-            string_constants: string_constants
+            string_constants: string_constants,
+            diags: diags
         };
     }
 
@@ -1506,9 +1593,9 @@ fn lower_logical_or(expression: string, match: OperatorMatch, bindings: Paramete
     diagnostics = extend_string_array(diagnostics, right_result.diagnostics);
     string_constants = merge_string_constants(string_constants, right_result.string_constants);
     if right_result.operand == null {
-        diagnostics.push("llvm lowering: unable to lower || RHS in `"
-            + expression
-            + "`");
+        let message = "unable to lower || RHS in `" + expression + "`";
+        diags.push(lowering_warning_diag("E1006", message, null));
+        diagnostics.push("llvm lowering: " + message);
 
         let mut fallback_lines = right_result.lines;
         if !lines_end_with_terminator(fallback_lines) {
@@ -1525,7 +1612,8 @@ fn lower_logical_or(expression: string, match: OperatorMatch, bindings: Paramete
             temp_index: right_result.temp_index,
             operand: operand,
             diagnostics: diagnostics,
-            string_constants: string_constants
+            string_constants: string_constants,
+            diags: diags
         };
     }
 
@@ -1538,7 +1626,8 @@ fn lower_logical_or(expression: string, match: OperatorMatch, bindings: Paramete
             temp_index: right_bool.temp_index,
             operand: null,
             diagnostics: diagnostics,
-            string_constants: string_constants
+            string_constants: string_constants,
+            diags: diags
         };
     }
 
@@ -1565,7 +1654,8 @@ fn lower_logical_or(expression: string, match: OperatorMatch, bindings: Paramete
         temp_index: right_bool.temp_index + 1,
         operand: operand,
         diagnostics: diagnostics,
-        string_constants: string_constants
+        string_constants: string_constants,
+        diags: diags
     };
 }
 

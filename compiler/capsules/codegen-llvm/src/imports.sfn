@@ -2,7 +2,12 @@
 //
 // Import handling and layout manifest management for LLVM lowering.
 // Resolves imported module paths and applies layout metadata.
-import { LayoutManifest, NativeEnum, NativeStruct } from "sfn/ir";
+import {
+    LayoutManifest,
+    LoweringDiagnostic,
+    NativeEnum,
+    NativeStruct
+} from "sfn/ir";
 import { substring } from "sfn/strings";
 
 import { LayoutManifestApplication } from "./types";
@@ -197,6 +202,7 @@ fn apply_layout_manifest_to_module(structs: NativeStruct[], enums: NativeEnum[],
 
 fn apply_layout_manifest_entries(structs: NativeStruct[], enums: NativeEnum[], manifest: LayoutManifest) -> LayoutManifestApplication {
     let mut diagnostics: string[] = [];
+    let mut diags: LoweringDiagnostic[] = [];
 
     let mut updated_structs: NativeStruct[] = structs;
     let mut struct_index: int = 0;
