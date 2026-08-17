@@ -1654,9 +1654,8 @@ fn _compile_runtime_sfn_sources(runtime_capsules: RuntimeCapsuleArtifacts[], out
     let self_path = _resolve_self_path(binary_dir);
     if self_path.length == 0 {
         print("sfn build: cannot resolve self path for runtime sfn-source emit");
-        print("           tried: <binary_dir>/sailfin (binary_dir=\""
-            + binary_dir
-            + "\")");
+        print("           probed sfn/sfn.exe/sailfin/sailfin.exe in, and");
+        print("           exe_path() against, binary_dir=\"" + binary_dir + "\"");
         return _failed_runtime_link_inputs();
     }
     // #1197: the emitting compiler's identity, computed once and threaded
@@ -1792,9 +1791,9 @@ fn assemble_runtime_capsule_link_inputs(runtime_capsules: RuntimeCapsuleArtifact
         let self_path = _resolve_self_path(binary_dir);
         if self_path.length == 0 {
             print("sfn build: cannot resolve self path for runtime prelude-entry emit");
-            print("           tried: <binary_dir>/sailfin (binary_dir=\""
-                + binary_dir
-                + "\")");
+            print("           probed sfn/sfn.exe/sailfin/sailfin.exe in, and");
+            print("           exe_path() against, binary_dir=\"" + binary_dir
+                + "\"");
             return _failed_runtime_link_inputs();
         }
         // #1197: same compiler-identity fold as the sfn-sources emit, so a
