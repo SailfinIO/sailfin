@@ -2092,7 +2092,7 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Download per-shard timing sidecars
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           pattern: ci-test-timing-*
           path: ci-timing
