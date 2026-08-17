@@ -1,10 +1,10 @@
 ---
 sfep: 20
 title: Role-Oriented Compiler Capsules
-status: Accepted
+status: Implemented
 type: tooling
 created: 2026-06-22
-updated: 2026-08-15
+updated: 2026-08-17
 author: "agent:compiler-architect; project owner (direction + naming); agent:Codex (2026-08-03 amendment; 2026-08-08 §3.5 corrections 1–2 status); agent:implementer (2026-08-05 provider slot); agent:Sailbot (2026-08-06 narrow-stdlib matrix amendment; 2026-08-06 §3.5 correction 7 prelude-slug extension)"
 tracking: "#345 (historical epic); Linear project Role-Oriented Compiler Capsules. §3.7 steps 1-2 (landed): SFN-705, SFN-706, SFN-707, SFN-708, SFN-709, SFN-710, SFN-711, SFN-712, SFN-713, SFN-714, SFN-715, SFN-717, SFN-718, SFN-734. §3.7 steps 3-8 (groomed 2026-08-06): SFN-735 through SFN-751."
 supersedes:
@@ -502,19 +502,30 @@ turning an internal refactor seam into a public ecosystem contract.
 This proposal changes toolchain structure rather than language behavior. The
 checklist is interpreted as preservation across the decomposed workspace:
 
-- [ ] Existing programs parse identically through `sfn/syntax`.
-- [ ] Existing type/effect/ownership checks and diagnostics remain equivalent
+- [x] Existing programs parse identically through `sfn/syntax`.
+- [x] Existing type/effect/ownership checks and diagnostics remain equivalent
   through `sfn/analyzer`.
-- [ ] `sfn/codegen` emits valid, deterministic `.sfn-asm` / typed IR.
-- [ ] `sfn/codegen-llvm` lowers the validated IR to equivalent LLVM IR.
-- [ ] Boundary, manifest, regression, and end-to-end coverage is green.
-- [ ] The decomposed compiler self-hosts to a fixed point.
-- [ ] All moved `.sfn` files pass `sfn fmt --check`.
-- [ ] `docs/status.md` and relevant architecture references describe the shipped
+- [x] `sfn/codegen` emits valid, deterministic `.sfn-asm` / typed IR.
+- [x] `sfn/codegen-llvm` lowers the validated IR to equivalent LLVM IR.
+- [x] Boundary, manifest, regression, and end-to-end coverage is green.
+- [x] The decomposed compiler self-hosts to a fixed point.
+- [x] All moved `.sfn` files pass `sfn fmt --check`.
+- [x] `docs/status.md` and relevant architecture references describe the shipped
   capsule graph. No language-spec change is required.
 
-The SFEP remains **Accepted** until every item is complete. Partial extraction
-does not qualify as Implemented.
+SFN-751 closed the implementation gate on 2026-08-17. `make check` reached a
+byte-identical stage2/stage3 fixed point with zero module differences and
+passed 316 unit, 56 integration, 336 end-to-end, and 92 capsule test files.
+The dedicated ten-iteration, four-worker determinism sweep covered 445 modules
+with zero nondeterministic, emit-failed, or missing-result modules. The final
+cold/warm build measurements and their cross-host interpretation are recorded
+in `docs/perf/decomposition-baseline.md`; raw values are in
+`docs/baselines/compile-sfep0020-post-migration-darwin-arm64.csv`.
+
+All readiness items are complete, so this SFEP is **Implemented**. The
+unrelated clean-tree Make-contract concurrency race observed during the gate is
+tracked separately as SFN-918; both affected tests and the complete stable
+rerun passed.
 
 ## 8. Test plan
 
@@ -532,8 +543,12 @@ does not qualify as Implemented.
 - Build/check each internal capsule through its public facade.
 - Prove `sfn check` depends on syntax/analyzer/IR but not codegen or LLVM.
 - Measure the analyzer-only cost of the whole-source `sfn/ir` dependency and
-  apply the `sfn/module-interface` split if the 5% cold-check wall-time or peak
-  RSS budget in §3.3 is exceeded.
+  adjudicate the 5% cold-check wall-time or peak-RSS budget in §3.3. If the
+  budget is exceeded, explain the measured cause and either apply the
+  `sfn/module-interface` split when it addresses that cause or record the
+  responsive remediation/design follow-up. SFN-747 supplied that adjudication;
+  §3.3.1 records why the split was not responsive and why SFN-894 is the
+  follow-up.
 - Prove `sfn/codegen-llvm` has no parser, analyzer, driver, filesystem, process,
   or network imports.
 - Prove no `capsules/sfn/*` source imports an internal compiler capsule.

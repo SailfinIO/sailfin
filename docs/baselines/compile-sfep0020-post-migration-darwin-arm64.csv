@@ -1,0 +1,7 @@
+pair,pass,wall_s,peak_kb,hits,misses,stores,hit_rate,cache_root
+A,cold,115.21,2037952,0,457,457,0.0000,/tmp/sfn751-measure.922ESl/pairA-cache/v2
+A,warm,14.77,1719600,457,0,0,1.0000,/tmp/sfn751-measure.922ESl/pairA-cache/v2
+B,cold,114.45,2037600,0,457,457,0.0000,/tmp/sfn751-measure.922ESl/pairB-cache/v2
+B,warm,13.79,1720112,457,0,0,1.0000,/tmp/sfn751-measure.922ESl/pairB-cache/v2
+C,cold,113.09,2038672,0,457,457,0.0000,/tmp/sfn751-measure.922ESl/pairC-cache/v2
+C,warm,13.63,1719136,457,0,0,1.0000,/tmp/sfn751-measure.922ESl/pairC-cache/v2

@@ -524,3 +524,116 @@ follow-up rather than decided here.
 - Wall time is reported for completeness and corroborates the RSS story on
   `trivial` (+519.6%), but per the frozen document's resolvability analysis the
   sub-second wall readings do not independently carry the verdict.
+
+## 2026-08-17 — SFN-751 final gate (Darwin arm64)
+
+**Verdict: the decomposed compiler passes the final implementation gate.** The
+six-capsule graph self-hosts to a byte-identical fixed point, the complete
+native suite passes, the dedicated determinism sweep found no unstable module,
+and three independent cold/warm build pairs saturated the cache on every warm
+pass. SFN-747 remains the authoritative same-host §3.3 performance
+adjudication; these Darwin measurements are the required post-migration build
+record and are not compared causally with the frozen Linux baseline.
+
+### Host and toolchain
+
+| Field | Value |
+|---|---|
+| Commit | `095ead33b39ed75d36e4f1550d16804654a510d1` |
+| Compiler under test | `build/bin/sfn` 0.10.0 (`0.10.0+dev.095ead33`) |
+| Seed | 0.10.0 (`bootstrap.toml [seed].version`, `policy = "exact"`) |
+| Compiler sources | 386 `.sfn` files across `sfn/compiler` and five internal libraries |
+| OS / kernel | macOS 27.0 / Darwin 27.0.0, arm64 |
+| CPU | Apple M2 Max, 12 cores (8 performance, 4 efficiency) |
+| RAM | 64 GB |
+| clang | Homebrew clang 17.0.6 |
+| Memory control | no hard `RLIMIT_AS` cap on Darwin; RAM-aware emit fan-out governor is the floor |
+| Captured | 2026-08-17 |
+
+### Procedure and raw runs
+
+Each pair used a new `SAILFIN_BUILD_CACHE_DIR`; its warm pass reused only that
+pair's cache and used a second, fresh `--work-dir`. No global cache participated.
+GNU `time` 1.10 reported wall seconds and peak RSS in KiB. The complete raw
+record, including resolved cache roots, is committed as
+`docs/baselines/compile-sfep0020-post-migration-darwin-arm64.csv`.
+
+| Pair | Pass | Wall | Peak RSS | Hits | Misses | Stores | `hit_rate` |
+|---|---|---:|---:|---:|---:|---:|---:|
+| A | cold | 115.21 s | 1,990.2 MiB | 0 | 457 | 457 | 0.00 |
+| A | warm | 14.77 s | 1,679.3 MiB | 457 | 0 | 0 | 1.00 |
+| B | cold | 114.45 s | 1,989.8 MiB | 0 | 457 | 457 | 0.00 |
+| B | warm | 13.79 s | 1,679.8 MiB | 457 | 0 | 0 | 1.00 |
+| C | cold | 113.09 s | 1,990.9 MiB | 0 | 457 | 457 | 0.00 |
+| C | warm | 13.63 s | 1,678.8 MiB | 457 | 0 | 0 | 1.00 |
+
+| Pass | Wall median | Wall spread | Peak RSS median | RSS spread |
+|---|---:|---:|---:|---:|
+| Cold | **114.45 s** | 1.85% | **1,990.2 MiB** | 0.053% |
+| Warm | **13.79 s** | 8.27% | **1,679.3 MiB** | 0.057% |
+
+The cache result is categorical rather than statistical: all three cold runs
+reported exactly 457 misses and stores, and all three warm runs reported
+exactly 457 hits with no misses or stores. The 100% warm hit rate preserves the
+cache invariant after decomposition. The warm median is the current
+non-cacheable driver/link floor on this host.
+
+### Correctness and determinism gate
+
+- `make check` produced byte-identical stage2/stage3 compiler binaries, zero
+  per-module differences, and 800/800 passing native test files (316 unit, 56
+  integration, 336 end-to-end, and 92 capsule files).
+- `make check-determinism` emitted 445 modules ten times at four-way load:
+  `non-deterministic=0`, `emit-failed=0`, and `no-result=0`. Forty modules
+  contained stable non-ASCII bytes; each still had exactly one distinct hash.
+- The first clean-tree suite run exposed a concurrent nested-`make compile`
+  race between two Make-contract tests. Both tests passed when rerun after the
+  source fingerprint existed, and the complete stable gate passed. The test
+  infrastructure defect is tracked as SFN-918 and does not change the compiler
+  graph verdict.
+
+### Migration equivalence ledger
+
+The extraction PRs compared their changed modules and representative unchanged
+user programs against the immediately preceding compiler, rather than relying
+only on current-tree repeatability:
+
+- [`sfn/syntax` #2872](https://github.com/SailfinIO/sailfin/pull/2872): 30/32
+  moved modules were rename-only after module/symbol normalization; the lexer
+  and parser entry exceptions removed guard-limit stderr calls to make the
+  capsule capability-free while preserving break behavior. Hello-world native
+  and LLVM artifacts were byte-identical.
+- [`sfn/ir` #2878](https://github.com/SailfinIO/sailfin/pull/2878): all 15 moved
+  modules were rename-only under the explicit maps, and hello-world native and
+  LLVM artifacts were byte-identical.
+- [`sfn/analyzer` #2880](https://github.com/SailfinIO/sailfin/pull/2880): all 48
+  moved artifacts differed only by reviewed module/symbol renames; unchanged
+  user-program LLVM remained byte-identical.
+- [`sfn/codegen` #2908](https://github.com/SailfinIO/sailfin/pull/2908): 8/13
+  modules were pure rename-only moves. The five reviewed exceptions were the
+  capture-record boundary, `sfn/strings` graduation, and diagnostic-reporter
+  ownership changes; an unchanged closure-bearing user fixture remained
+  byte-identical.
+- [`sfn/codegen-llvm` #2909](https://github.com/SailfinIO/sailfin/pull/2909):
+  138/140 provider modules were byte-identical after rename normalization. The
+  two reviewed exceptions were the narrowed facade and source-path diagnostic;
+  representative user LLVM remained byte-identical.
+- [`sfn/compiler` #2949](https://github.com/SailfinIO/sailfin/pull/2949): the
+  scoped root identity deliberately preserved the `sfn` command and
+  `build/bin/sfn` publication path; strict self-hosting passed with zero module
+  differences.
+
+Together with the final fixed point, full suite, and ten-iteration sweep, this
+ledger explains every non-rename migration delta and supplies the pre/post
+semantic-preservation evidence required by SFEP-0020 §8.
+
+### Cross-host interpretation
+
+The frozen build baseline is Linux x86_64 on a four-core Xeon; this final run is
+Darwin arm64 on a 12-core M2 Max. Their wall and RSS values therefore cannot
+attribute a delta to decomposition under the document's same-host rule. The
+valid Linux five-point series in SFN-747 already found the cold-check gate over
+budget, isolated the cause to whole-capsule source enumeration, and recorded
+SFN-894 for the design decision. SFN-751 adds no contradictory performance
+claim: it closes the structural, correctness, self-hosting, determinism, and
+cache-saturation parts of the implementation gate.
