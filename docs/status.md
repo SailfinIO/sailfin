@@ -1,6 +1,6 @@
 # Status
 
-Updated: 2026-08-17 (SFN-543). Seed pinned to `0.9.5` (`bootstrap.toml`
+Updated: 2026-08-17 (SFN-751). Seed pinned to `0.10.0` (`bootstrap.toml`
 `[seed].version` — SFEP-0047); the compiler version source of truth is
 `compiler/capsule.toml`.
 
@@ -18,6 +18,17 @@ here.
 
 ## Toolchain (Current)
 
+- **Compiler capsule graph** (SFN-751, SFEP-0020). The shipped compiler is six
+  workspace-private capsules: the `sfn/compiler` binary driver plus
+  `sfn/syntax`, `sfn/ir`, `sfn/analyzer`, `sfn/codegen`, and
+  `sfn/codegen-llvm`. Considering compiler-internal edges, syntax and IR are
+  independent leaves; analyzer depends on syntax and IR; target-neutral
+  codegen depends on syntax, analyzer, and IR; the LLVM provider depends only
+  on IR; and the driver owns orchestration and consumes all five libraries.
+  All five libraries also depend directly on the narrow `sfn/strings` standard
+  library capsule. Every internal capsule declares `publish = false`.
+  `sfn/codegen-native` remains a reserved provider name and is not present on
+  disk.
 - **Private-capsule manifest policy — schema.** `[capsule] publish` is parsed
   as a strict boolean and defaults to `true` for existing manifests. The typed
   `toml_get_publish` accessor returns no policy value plus a manifest error for
