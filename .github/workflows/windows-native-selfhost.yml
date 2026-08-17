@@ -1,4 +1,4 @@
-# Windows Native Self-Host (M7) — exploratory bootstrap harness.
+# Windows Native Self-Host (M7/M8) — exploratory bootstrap harness.
 #
 # Executes SFEP-0021 milestone M7 (SFN-53): produce the first *native
 # MSVC-ABI* Sailfin compiler on a `windows-latest` runner and prove it
@@ -11,7 +11,10 @@
 #   native-build (windows) — run `<cross-exe> build -p compiler` with
 #                            SAILFIN_TARGET_OS=Windows (the target seam
 #                            SFN-52 already wired), then --version / check
-#                            / R1 (try-throw) / R3 (struct-channel) gates.
+#                            / R1 (try-throw) / R3 (struct-channel) gates,
+#                            then milestone M8 (SFN-54): the native compiler
+#                            rebuilds itself twice and pass-2 must be
+#                            byte-identical to pass-1 (self-host fixed point).
 #
 # This is a manual/dispatch harness, not the permanent CI job (that is
 # M9/SFN-55). It is expected to iterate: the deepest unknowns are R1
@@ -302,3 +305,49 @@ jobs:
           set -euo pipefail
           "$NATIVE_SFN" run examples/concurrency/channels.sfn
           echo "ok: R3 struct-channel ran"
+
+      # M8 (SFN-54): the native compiler self-hosts twice and pass-2 must be
+      # byte-identical to pass-1. Mirrors the POSIX fixed-point gate
+      # (`Fixed-point rebuild check (linux-x86_64)` in ci.yml): two
+      # `--work-dir`-isolated builds, each with its own
+      # `SAILFIN_TEST_SCRATCH` so pass-2's per-module `.ll` outputs cannot
+      # clobber pass-1's, then `--no-cache` on both so the comparison is a
+      # genuine re-emit rather than a cache hit.
+      #
+      # A byte compare is trustworthy here specifically because SFN-920
+      # threads `/Brepro` through `lld-link` for MSVC targets — without it,
+      # `lld-link` stamps a live epoch `TimeDateStamp` into the PE header on
+      # every link, so two otherwise-identical builds diverge at byte 129
+      # regardless of compiler determinism. That base branch is why this gate
+      # is safe to add now and would have been flaky before it.
+      #
+      # Placed last, after the cheap R1/R3 ABI gates: this step is two full
+      # native self-hosts of the ~281-module compiler, by far the most
+      # expensive step in the job, so the fast gates should fail first and
+      # leave this one uncharged.
+      - name: Gate — self-host fixed point (pass-2 == pass-1)
+        shell: bash
+        timeout-minutes: 45
+        run: |
+          set -euo pipefail
+          rm -rf build/selfhost/native-w1 build/selfhost/native-w2
+          mkdir -p build/selfhost/native-w1 build/selfhost/native-w2
+          SAILFIN_TEST_SCRATCH="build/selfhost/native-w1/scratch" \
+            "$NATIVE_SFN" build --no-cache -p compiler \
+              --work-dir build/selfhost/native-w1 \
+              -o build/bin/sfn-selfhost1.exe
+          SAILFIN_TEST_SCRATCH="build/selfhost/native-w2/scratch" \
+            build/bin/sfn-selfhost1.exe build --no-cache -p compiler \
+              --work-dir build/selfhost/native-w2 \
+              -o build/bin/sfn-selfhost2.exe
+          for f in build/bin/sfn-selfhost1.exe build/bin/sfn-selfhost2.exe; do
+            [ -f "$f" ] || { echo "[error] expected pass artifact missing: $f" >&2; exit 1; }
+          done
+          ls -lh build/bin/sfn-selfhost1.exe build/bin/sfn-selfhost2.exe
+          (sha256sum build/bin/sfn-selfhost1.exe build/bin/sfn-selfhost2.exe 2>/dev/null || shasum -a 256 build/bin/sfn-selfhost1.exe build/bin/sfn-selfhost2.exe)
+          if ! cmp -s build/bin/sfn-selfhost1.exe build/bin/sfn-selfhost2.exe; then
+            echo "[error] fixed-point mismatch: pass-2 differs from pass-1" >&2
+            cmp -l build/bin/sfn-selfhost1.exe build/bin/sfn-selfhost2.exe | head -n 20 || true
+            exit 1
+          fi
+          echo "ok: native MSVC self-host fixed point (pass-2 == pass-1)"
