@@ -1,0 +1,26 @@
+// compiler/src/build/emit_child_argv.sfn
+//
+// The ONE shared argv constructor for every `sfn emit` child spawn (SFN-923).
+// `--target` lives in a process-local cell (`./target_state`), so a per-module
+// emit that runs in a CHILD process starts with an empty cell and, with no
+// equivalent given to it, lowers for the HOST while the parent thinks it is
+// cross-building — the SFN-923 bug (a Windows COFF link then dies on
+// duplicate `__sfn_type_desc.*` symbols, since the comdat gate sees
+// `_target_os != "Windows"` in the child).
+//
+// Every emit-child argv MUST be built by appending through this function so
+// "a site forgot the target" is structurally impossible, rather than a
+// per-call-site discipline. It always appends `--target <build_target_triple()>`
+// — even on an ordinary host build with no explicit `--target` flag, where
+// that value is exactly what the child would otherwise have probed for
+// itself, so the emitted IR is unchanged (SFN-923 design note §8).
+import { build_target_triple } from "./target";
+
+fn emit_child_argv(argv: string[]) -> string[] ![io] {
+    let mut out: string[] = argv;
+    out.push("--target");
+    out.push(build_target_triple());
+    return out;
+}
+
+export { emit_child_argv };

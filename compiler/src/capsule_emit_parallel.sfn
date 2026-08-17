@@ -8,6 +8,7 @@ import { int_to_string } from "sfn/strings";
 // building block out of capsule_resolver.sfn was the second cut (after
 // capsule_import_scan.sfn) to bring that module under the 2 GB CI per-job
 // gate. capsule_resolver re-imports the public entry points.
+import { emit_child_argv } from "./build/emit_child_argv";
 import { _atomic_rename_into_place, _mktemp_sibling_cmd } from "./build/fs";
 import { build_host_os } from "./build/target";
 import { validate_llvm_ir } from "./llvm_validation";
@@ -348,7 +349,7 @@ struct ParallelProcessRun {
 // `--no-resolve-gate` (#906) suppresses the lowering dry-run gate for a
 // per-module intermediate emit that carries no cross-module import
 // context. Mirrors `emit_helpers.emit_subprocess_with_retry`.
-fn _cr_emit_child_argv(sailfin_exe: string, slug: string, emit_target: string, mode: string, source_path: string, import_context_root: string) -> string[] {
+fn _cr_emit_child_argv(sailfin_exe: string, slug: string, emit_target: string, mode: string, source_path: string, import_context_root: string) -> string[] ![io] {
     let mut argv: string[] = [sailfin_exe, "emit", "--module-name", slug, "--attempts", "1", "--no-validate", "--no-resolve-gate", "-o", emit_target];
     if import_context_root.length > 0 {
         argv.push("--import-context");
@@ -356,7 +357,7 @@ fn _cr_emit_child_argv(sailfin_exe: string, slug: string, emit_target: string, m
     }
     argv.push(mode);
     argv.push(source_path);
-    return argv;
+    return emit_child_argv(argv);
 }
 
 // The emit children's environment. `spawn_with_env` takes an EXPLICIT
