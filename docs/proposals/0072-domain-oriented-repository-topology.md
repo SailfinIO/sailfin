@@ -1,7 +1,7 @@
 ---
-sfep: TBD
+sfep: 72
 title: Domain-Oriented Repository Topology
-status: Draft
+status: Accepted
 type: tooling
 created: 2026-08-17
 updated: 2026-08-17
@@ -12,7 +12,7 @@ superseded-by:
 graduates-to:
 ---
 
-# SFEP-TBD — Domain-Oriented Repository Topology
+# SFEP-0072 — Domain-Oriented Repository Topology
 
 ## 1. Summary
 
@@ -739,7 +739,7 @@ before their inputs move.
 
 ## 7. Stage1 readiness mapping
 
-This proposal is Draft and the new topology is not implemented. The design PR
+This proposal is Accepted and the new topology is not implemented. The design PR
 changes documentation only, so language pipeline items remain unchanged:
 
 - [x] Parses — no syntax change; existing language behavior remains shipped.
@@ -763,7 +763,7 @@ remain normative throughout migration.
 
 ## 8. Test plan
 
-The design PR runs `git diff --check` and verifies this draft's front matter and
+The design PR runs `git diff --check` and verifies the proposal's front matter and
 registry entry against SFEP-0001. It also repeats the path audit in SFN-928 to
 confirm every semantic class is represented in §3.6. It does not run compiler
 build gates because no executable source, manifest, or workflow changes.

@@ -94,6 +94,7 @@ The next number is `max + 1`. Add a row in the same PR that introduces an SFEP.
 | [0069](./0069-secret-buffer-zeroization.md) | Non-Elidable Zeroization for Uniquely Owned Secret Buffers | Accepted | runtime |
 | [0070](./0070-capsule-source-closure-reachability.md) | Import-Reachability Filtering of the Capsule Source Closure | Accepted | tooling |
 | [0071](./0071-archive-targz.md) | In-Process `.tar.gz` Reader and Writer (`sfn/archive`) | Accepted | tooling |
+| [0072](./0072-domain-oriented-repository-topology.md) | Domain-Oriented Repository Topology | Accepted | tooling |
 
 ## Drafts under review (numbers assigned at merge)
 
@@ -112,12 +113,6 @@ Index row. Two slates are in review.
 | [`draft-nullable-access-operators`](./draft-nullable-access-operators.md) | Nullable Access Operators (`?.` and `??`) | language |
 | [`draft-import-surface-compaction`](./draft-import-surface-compaction.md) | Import-surface compaction across the phase rewind to cut emit peak RSS | runtime |
 | [`draft-concurrency-cancellation`](./draft-concurrency-cancellation.md) | Concurrency runtime maturity — cancel-on-fault and async I/O | runtime |
-
-**Tooling topology:**
-
-| Draft | Title | Type |
-|---|---|---|
-| [`draft-domain-oriented-repository-topology`](./draft-domain-oriented-repository-topology.md) | Domain-Oriented Repository Topology | tooling |
 
 The **native-Windows toolchain critical path** design graduated out of this
 slate on 2026-08-15 and now holds an Index row: SFEP-0071 (in-process
