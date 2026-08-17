@@ -477,8 +477,8 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
     let expected_operand_count = arguments.length + injected_argument_count;
     if operands.length != expected_operand_count {
         // SFN-548: reaching here means an argument failed to lower, so no
-        // `call` instruction is emitted for this statement. Without the
-        // `[fatal]` sentinel `has_fatal_lowering_diagnostic` lets the build
+        // `call` instruction is emitted for this statement. Without an
+        // error-severity diagnostic, `has_error_diag` lets the build
         // write IR that is silently missing the call: the program compiles,
         // links, and exits 0 having skipped the statement entirely. A
         // dropped call is a miscompile, so fail the build instead. The

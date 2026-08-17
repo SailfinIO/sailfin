@@ -80,7 +80,7 @@ import {
     string_array_contains
 } from "../utils";
 import { emit_llvm_function } from "./emission";
-import { has_fatal_lowering_diagnostic } from "./lowering_core/diagnostics";
+import { has_error_diag, trace_lowering_error_diags } from "./lowering_core/diagnostics";
 import { lower_to_llvm_lines_with_parsed_context_for_tests } from "./lowering_core/test_harness";
 import {
     empty_trait_metadata,
@@ -155,8 +155,10 @@ fn lower_llvm_for_tests_from_text_with_provider_context(native_text: string, mod
     // ABI primitive mismatch at a call site (e.g. `number → int`
     // coercion across an `await` boundary) was recorded for presentation but
     // then the partial IR ran the corrupted call anyway.
-    // The driver renders the cause before refusing publication (SFN-529).
-    if has_fatal_lowering_diagnostic(lowered_lines.diagnostics) {
+    // The driver also renders the cause before refusing publication, but this
+    // site records it too rather than depending on that (SFN-529).
+    if has_error_diag(lowered_lines.diags) {
+        trace_lowering_error_diags(lowered_lines.diagnostics, lowered_lines.diags);
         return _failed_test_llvm_artifact_from_lowering("", lowered_lines);
     }
     let ir = _join_llvm_lines_linear(lowered_lines.lines);

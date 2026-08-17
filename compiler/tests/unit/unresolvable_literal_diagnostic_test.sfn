@@ -53,7 +53,7 @@ test "unresolvable enum-shaped brace literal emits a fatal diagnostic" ![io] {
     // No operand is produced — without the guard this null operand would
     // silently drop the enclosing statement.
     assert result.operand == null;
-    // The diagnostic must be `[fatal]` so `has_fatal_lowering_diagnostic`
+    // The diagnostic must carry `severity == "error"` so `has_error_diag`
     // refuses to emit IR (the compile fails instead of succeeding silently).
     assert _has_fatal_type_context_diag(result.diagnostics);
 }

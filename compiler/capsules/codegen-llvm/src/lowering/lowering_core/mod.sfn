@@ -41,7 +41,6 @@ import {
 } from "../../types";
 import {
     append_missing_legacy_lowering_diags,
-    extend_diag_array,
     index_of,
     number_to_string,
     stamp_lowering_diag_file_paths,
@@ -72,6 +71,7 @@ import {
     flatten_struct_methods
 } from "../lowering_helpers_structs";
 import {
+    extend_diag_array_checked,
     extend_string_lines,
     extend_string_lines_checked,
     module_source_filename
@@ -499,7 +499,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_ar
         if init_lowered.diagnostics.length > 0 {
             diagnostics = extend_string_lines_checked(diagnostics, init_lowered.diagnostics, "module init");
         }
-        diags = extend_diag_array(diags, init_lowered.diags);
+        diags = extend_diag_array_checked(diags, init_lowered.diags, "module init");
         if init_lowered.string_constants.length > 0 {
             module_string_constants = merge_string_constants(module_string_constants, init_lowered.string_constants);
         }
@@ -511,7 +511,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_ar
     // for `emit_runtime_call` and panic-wrapper inline calls).
     let function_result = lower_all_functions(local_functions, context_functions, aggregated_effects, type_context, native_module.module_name, safe_entry_points, exported_symbols, imported_functions, module_global_locals, module_init_symbol, module_globals_needs_init_call, module_string_constants, trace, debug_lowering, decorator_import_names);
     diagnostics = extend_string_lines_checked(diagnostics, function_result.diagnostics, "function lowering");
-    diags = extend_diag_array(diags, function_result.diags);
+    diags = extend_diag_array_checked(diags, function_result.diags, "function lowering");
 
     // ── M2.10 (#402): type-metadata descriptors. Emitted before
     // the body assembly so the constructor's `call @sfn_type_register`

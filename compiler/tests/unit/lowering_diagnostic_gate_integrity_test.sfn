@@ -1,14 +1,18 @@
-// Regression coverage for SFN-529: the `[fatal]` gate must survive its own
-// size guards.
+// Regression coverage for SFN-529: the legacy `[fatal]` channel must survive
+// its own size guards.
 //
-// `has_fatal_lowering_diagnostic`
-// (`compiler/capsules/codegen-llvm/src/lowering/lowering_core/diagnostics.sfn`)
-// is the only thing that turns a lowering diagnostic into a build failure, and
-// two guards upstream of it used to discard the entire diagnostic array once it
-// exceeded 1,000,000 entries — `[fatal]` included. A tripped guard therefore
-// converted a failing build into a silently-passing one, which is the exact
-// failure mode the gate exists to prevent (audited in
+// Two guards over the `diagnostics: string[]` channel used to discard the
+// entire array once it exceeded 1,000,000 entries — `[fatal]` included — which
+// converted a failing build into a silently-passing one (audited in
 // `docs/proposals/design-notes/sfn-526-lowering-fatal-gate-audit.md` §3 A3).
+//
+// SFN-540 moved the build-failure decision off this channel: the gate is now
+// `has_error_diag`
+// (`compiler/capsules/codegen-llvm/src/lowering/lowering_core/diagnostics.sfn`),
+// reading `severity` on the structured `diags` channel, and its guards are
+// covered by the twin of this file,
+// `lowering_error_diag_gate_integrity_test.sfn`. This file keeps pinning the
+// string guards for as long as the string channel is still populated.
 //
 // The thresholds are not reachable through the CLI, so this is a unit test that
 // drives the two guard helpers directly. Building an over-threshold array is

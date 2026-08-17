@@ -13,7 +13,7 @@ import { lines_to_native_text, native_lines_have_text } from "sfn/ir";
 import { LLVMProviderContext, install_llvm_provider_context, trace_log } from "../../lowering_debug_state";
 import { LLVMArtifactResult, LoweredLLVMLinesResult } from "../../types";
 import { collect_defined_function_symbols } from "../lowering_helpers";
-import { fatal_lowering_diagnostic_lines, has_fatal_lowering_diagnostic } from "./diagnostics";
+import { has_error_diag, trace_lowering_error_diags } from "./diagnostics";
 import { lower_to_llvm_lines_with_parsed_context } from "./mod";
 
 fn make_native_module_for_emit(module_name: string, native_text: string) -> NativeModule {
@@ -91,9 +91,13 @@ fn _lower_parsed_native_to_llvm_artifact(parse: ParseNativeResult, native_text: 
     // `lower_expression`'s `<closure_pair_fatal_mutable ...>` handler
     // for capturing lambdas with mutable captures (issue #687). A
     // partial IR file with the side-effecting call silently dropped
-    // would be worse than no output at all. Return every fatal so the
-    // driver receives the underlying cause before the build aborts.
-    if has_fatal_lowering_diagnostic(lowered_lines.diagnostics) {
+    // would be worse than no output at all. Return every error so the
+    // driver receives the underlying cause before the build aborts, and
+    // record it here too: relying on the driver alone left this site
+    // refusing without saying why whenever a caller skipped that step
+    // (SFN-529).
+    if has_error_diag(lowered_lines.diags) {
+        trace_lowering_error_diags(lowered_lines.diagnostics, lowered_lines.diags);
         return _failed_llvm_artifact_from_lowering("", lowered_lines);
     }
     let lowered_count = lowered_lines.lines.length;
@@ -153,17 +157,11 @@ fn native_text_passes_lowering_gate(native_text: string, module_name: string, im
         trace_log("emit-native: lowered lines null");
         return false;
     }
-    // Same fatal contract as `_lower_parsed_native_to_llvm_artifact` above:
-    // record every `[fatal]` so the user sees the underlying cause, then
+    // Same error contract as `_lower_parsed_native_to_llvm_artifact` above:
+    // record every error so the user sees the underlying cause, then
     // refuse the emit.
-    if has_fatal_lowering_diagnostic(lowered_lines.diagnostics) {
-        let fatal_lines = fatal_lowering_diagnostic_lines(lowered_lines.diagnostics, lowered_lines.diags);
-        let mut fatal_index: int = 0;
-        loop {
-            if fatal_index >= fatal_lines.length { break; }
-            trace_log(fatal_lines[fatal_index]);
-            fatal_index += 1;
-        }
+    if has_error_diag(lowered_lines.diags) {
+        trace_lowering_error_diags(lowered_lines.diagnostics, lowered_lines.diags);
         return false;
     }
     // Mirror the remaining non-fatal rejection conditions in

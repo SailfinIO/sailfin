@@ -5,8 +5,8 @@
 //
 // SFN-536 moved the constructor to `codegen-llvm/utils` and made it return a
 // structured `LoweringDiagnostic` rather than a bare string, so the legacy
-// rendering is asserted through `diag_to_legacy_string` — that rendering is what
-// `has_fatal_lowering_diagnostic` greps, so it is the part that must not drift.
+// rendering is asserted through `diag_to_legacy_string` — that rendering is the
+// legacy string spelling this pins, so it is the part that must not drift.
 import { diag_to_legacy_string, unsupported_instruction_diag } from "sfn/codegen-llvm/utils";
 import { NativeSourceSpan } from "sfn/ir";
 import { expect_eq_str } from "sfn/test";
