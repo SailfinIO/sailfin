@@ -1,0 +1,87 @@
+// End-to-end regression for SFN-543: `sfn check` alone rejects a field read
+// whose name the receiver's proven type does not declare (E0015). This is
+// check-only, mirroring check_build_agree_frontend_rejection_test.sfn — the
+// point is that static analysis catches the error without codegen/link.
+//
+// Unlike that sibling, this file does not thread raw `process.environ()`
+// into the nested `sfn check` child: `.claude/rules/no-bash-e2e.md` /
+// SFN-401 close that vehicle for any nested full-runner spawn, since it
+// leaks the parent pool's per-child orchestration keys into the child.
+// `clean_runner_env(nested_runner_scratch(...))` (`sfn/test`) is the
+// replacement — it strips the pool-managed keys and re-points
+// `SAILFIN_TEST_SCRATCH` at an isolated per-invocation scratch dir.
+import { find } from "sfn/strings";
+import { clean_runner_env, nested_runner_scratch } from "sfn/test";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/bin/sfn";
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+fn _write_scratch(name: string, source: string) -> string ![io] {
+    let path = _scratch_dir() + "/" + name;
+    fs.writeFile(path, source);
+    return path;
+}
+
+test "check/build agree: unknown field on a struct receiver is rejected by check (E0015, SFN-543)" ![io] {
+    let source = "struct T { a: i32; } "
+        + "fn f(t: T) -> i32 { return t.no_such_field; } "
+        + "fn main() -> int { return 0; }";
+    let srcpath = _write_scratch("sfn-543-e0015-struct.sfn", source);
+
+    let child_env = clean_runner_env(nested_runner_scratch("sfn543-e0015-struct"));
+    let check_exit = process.run_capture([_sfn_bin(), "check", srcpath], child_env);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+
+    if fs.exists(srcpath) { fs.deleteFile(srcpath); }
+
+    // Frontend rejects — a missing struct field previously checked green.
+    assert check_exit != 0;
+    // Pin the diagnostic itself, not just "check rejected for some reason".
+    assert find(out + err, "E0015", 0) >= 0;
+}
+
+test "check/build agree: unknown field on a string receiver is rejected by check (E0015, SFN-543)" ![io] {
+    let source = "fn f(s: string) -> i32 { let p = s.totally_bogus_field; return 7; } "
+        + "fn main() -> int { return 0; }";
+    let srcpath = _write_scratch("sfn-543-e0015-string.sfn", source);
+
+    let child_env = clean_runner_env(nested_runner_scratch("sfn543-e0015-string"));
+    let check_exit = process.run_capture([_sfn_bin(), "check", srcpath], child_env);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+
+    if fs.exists(srcpath) { fs.deleteFile(srcpath); }
+
+    // Frontend rejects — a bogus primitive field previously checked green.
+    assert check_exit != 0;
+    // Pin the diagnostic itself, not just "check rejected for some reason".
+    assert find(out + err, "E0015", 0) >= 0;
+}
+
+test "check/build agree: real struct and string fields are accepted by check" ![io] {
+    let source = "struct T { a: i32; } "
+        + "fn f(t: T, s: string) -> i32 { let n = s.length; return t.a + n; } "
+        + "fn main() -> int { return 0; }";
+    let srcpath = _write_scratch("sfn-543-e0015-valid.sfn", source);
+
+    let child_env = clean_runner_env(nested_runner_scratch("sfn543-e0015-valid"));
+    let check_exit = process.run_capture([_sfn_bin(), "check", srcpath], child_env);
+    let _co = process.capture_take_stdout();
+    let _ce = process.capture_take_stderr();
+
+    if fs.exists(srcpath) { fs.deleteFile(srcpath); }
+
+    // A valid control program using real fields must stay green.
+    assert check_exit == 0;
+}

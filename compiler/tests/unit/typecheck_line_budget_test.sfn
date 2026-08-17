@@ -68,7 +68,7 @@ fn _module_lines(name: string) -> int ![io] {
 }
 
 test "typecheck: each listed submodule stays under the line budget" ![io] {
-    let modules: string[] = ["arithmetic_rules", "block_walk", "call_signature", "concurrency_rules", "context", "expression_walk", "function_scopes", "mod", "patterns", "primitive_rules", "statement_checks", "symbols", "syscalls", "try_and_conditional"];
+    let modules: string[] = ["arithmetic_rules", "block_walk", "call_signature", "concurrency_rules", "context", "expression_walk", "field_access", "function_scopes", "mod", "patterns", "primitive_rules", "statement_checks", "symbols", "syscalls", "try_and_conditional"];
     let mut i: int = 0;
     loop {
         if i >= modules.length { break; }

@@ -38,13 +38,19 @@ fn _scratch_dir() -> string ![io] {
 // lowering cannot resolve the return expression and refuses with the
 // `E1002` unhandled-return-expression fatal rather than fabricating a
 // default `i32`.
+//
+// The receiver is *inferred* (`let t = mk_t()`) rather than annotated: SFN-543
+// proves an annotated receiver's field set at check time and rejects it with
+// E0015 before lowering runs, so an annotated fixture would never reach the
+// backstop this test exists to pin.
 fn _fixture_source() -> string {
     return "struct T { a: i32; }\n" + "\n"
-        + "fn in_return(t: T) -> i32 { return t.nope; }\n"
+        + "fn mk_t() -> T { return T { a: 1 }; }\n"
+        + "\n"
+        + "fn in_return() -> i32 { let t = mk_t(); return t.nope; }\n"
         + "\n"
         + "test \"probe: unknown field in return\" ![io] {\n"
-        + "    let t = T { a: 1 };\n"
-        + "    assert in_return(t) == 1;\n"
+        + "    assert in_return() == 1;\n"
         + "}\n";
 }
 

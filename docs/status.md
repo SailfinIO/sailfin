@@ -1,6 +1,6 @@
 # Status
 
-Updated: 2026-08-15 (SFN-862). Seed pinned to `0.9.5` (`bootstrap.toml`
+Updated: 2026-08-17 (SFN-543). Seed pinned to `0.9.5` (`bootstrap.toml`
 `[seed].version` — SFEP-0047); the compiler version source of truth is
 `compiler/capsule.toml`.
 
@@ -558,6 +558,19 @@ here.
   existing numeric compatibility boundaries: `int`/`float` coercions remain
   accepted here, while the established lowering gate continues to own
   boolean-to-numeric `E0537` and its explicit-cast fix-it.
+- **Unresolvable field access diagnostic (SFN-543).** A field read naming a
+  member the receiver's type does not declare now surfaces as a frontend
+  `E0015` instead of passing `sfn check` and failing only at LLVM lowering —
+  the field analogue of `E0012`'s method-call check. Fires only when the
+  receiver's type is proven: a bare identifier with an explicit annotation
+  resolving to a struct declared in the same program, or a bare primitive
+  annotation (`string`, `int`, `i32`, …), where the member is neither a
+  declared field/method (struct) nor a primitive field/method (primitive).
+  The diagnostic lists the receiver's actual fields as a fix-it. Fail-open:
+  method-call callees stay `E0012`'s territory, and inferred bindings,
+  arrays, optionals, generics, enums, interfaces, namespace roots, and
+  **structs declared in another module** all leave the receiver unproven and
+  stay silent — a cross-module field typo still reaches lowering.
 - **Emit pipeline.** Parallel per-module emit fan-out (Stage E PR3, #278)
   with a shared retry + validator cascade (#515); driver `--work-dir` flag
   (#378); cross-Windows packaging leg (`ci-cross-windows`, #280).

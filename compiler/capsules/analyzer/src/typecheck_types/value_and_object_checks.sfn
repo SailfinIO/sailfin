@@ -66,6 +66,54 @@ fn make_unknown_primitive_method_diagnostic(prim: string, member: string, anchor
     };
 }
 
+// SFN-543: the closed set of genuine *field* reads per primitive receiver —
+// members the lowerer resolves structurally rather than through a struct field
+// list. `string` exposes `length` off the `{ i8*, i64 }` layout
+// (`codegen-llvm/.../core_member_lowering.sfn`); numeric and boolean primitives
+// expose no fields at all. Array receivers never reach this table —
+// `classify_declared_primitive` rejects any annotation carrying `[`, so an
+// array-typed binding has an empty `declared_prim` and stays silent. Mirror a
+// name here when the lowerer grows a new primitive field, the same
+// mirror-on-add contract `primitive_has_method` carries.
+fn primitive_has_field(prim: string, name: string) -> boolean {
+    if strings_equal(prim, "string") {
+        if strings_equal(name, "length") { return true; }
+        return false;
+    }
+    return false;
+}
+
+// E0015: a field read naming a member the receiver's type does not declare.
+// `owner` is the struct name for a struct receiver and the primitive kind for a
+// primitive one; `known` lists the fields the receiver does declare, so the
+// fix-it can spell them out rather than just rejecting (SFN-543).
+fn make_unknown_field_diagnostic(owner: string, member: string, known: string[], anchor: Token?) -> Diagnostic {
+    let mut fix_message: string = "check the spelling of `" + member + "`";
+    if known.length > 0 {
+        let mut names: string = "";
+        let mut i: int = 0;
+        loop {
+            if i >= known.length { break; }
+            if i > 0 { names = names + ", "; }
+            names = names + "`" + known[i] + "`";
+            i += 1;
+        }
+        fix_message = "`" + owner + "` declares " + names
+            + "; check the spelling of `"
+            + member
+            + "`";
+    }
+    let fix = FixSuggestion { message: fix_message, edits: [] };
+    return Diagnostic {
+        code: "E0015",
+        severity: "error",
+        message: "field `" + member + "` does not exist on `" + owner + "`",
+        file_path: "",
+        primary: anchor,
+        suggestion: fix
+    };
+}
+
 // E0306: arithmetic that mixes an `int` and a `float` operand. Sailfin does not
 // implicitly convert between the two; the fix-it echoes the emitter's own
 // guidance (`as float` / `as int`) so users see one voice (SFN-385).

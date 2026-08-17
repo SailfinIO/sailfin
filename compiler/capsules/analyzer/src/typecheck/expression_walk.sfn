@@ -4,7 +4,12 @@
 // form, dispatching to the per-rule modules for the specific checks.
 import { parse_fn_type_text } from "sfn/ir";
 import { ends_with, substring } from "sfn/strings";
-import { Expression, SourceSpan, TypeAnnotation } from "sfn/syntax";
+import {
+    Expression,
+    SourceSpan,
+    Statement,
+    TypeAnnotation
+} from "sfn/syntax";
 
 import { lookup_imported_function } from "../effect_imports";
 import { Diagnostic } from "../typecheck_types";
@@ -55,9 +60,11 @@ import {
 import {
     TypeckCtx,
     ctx_enter_body,
+    ctx_in_callee_position,
     ctx_with_bindings,
     ctx_with_expected_type
 } from "./context";
+import { unknown_field_diagnostics } from "./field_access";
 import { _serve_resolves_to_user_fn } from "./patterns";
 import {
     call_argument_type_diagnostics,
@@ -83,7 +90,10 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
         let mut diagnostics: Diagnostic[] = [];
         if expression.callee != null {
             if expression.callee.variant != "Identifier" {
-                diagnostics = walk_expression(expression.callee, ctx_with_expected_type(ctx, null));
+                // SFN-543: marked as callee position so the Member arm reads
+                // `obj.method()`'s member as a method (E0012's territory)
+                // rather than as a missing field (E0015).
+                diagnostics = walk_expression(expression.callee, ctx_in_callee_position(ctx));
             }
         }
         // #812: a bare-identifier callee that resolves to neither an
@@ -210,7 +220,11 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
                     if strings_equal(entry.kind, "outer_local") {
                         return [make_nested_fn_capture_diagnostic(receiver.name, receiver.span)];
                     }
-                    return [];
+                    // SFN-543: the receiver resolved, so its declared type may
+                    // prove the member absent -> E0015. In callee position the
+                    // member is a method, owned by E0012.
+                    if ctx.in_callee_position { return []; }
+                    return unknown_field_diagnostics(expression, entry, ctx);
                 }
                 if is_builtin_member_root(receiver.name) { return []; }
                 return [make_undefined_value_diagnostic(receiver.name, receiver.span)];

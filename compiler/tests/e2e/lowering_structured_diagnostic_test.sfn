@@ -14,8 +14,14 @@ test "direct lowering failure renders code and source coordinates" ![io] {
     fs.createDirectory(scratch, true);
     let source_path = scratch + "/sfn535_spanned_lowering_diag.sfn";
     if fs.exists(source_path) { fs.deleteFile(source_path); }
+    // The receiver is inferred (`let t = mk_t()`) rather than annotated:
+    // SFN-543 proves an annotated receiver's field set at check time and
+    // rejects it with E0015 before lowering runs, so an annotated fixture
+    // would never reach the lowering diagnostic this test renders.
     fs.writeFile(source_path, "struct T { a: i32; }\n"
-        + "fn broken(t: T) -> i32 {\n"
+        + "fn mk_t() -> T { return T { a: 1 }; }\n"
+        + "fn broken() -> i32 {\n"
+        + "    let t = mk_t();\n"
         + "    return t.nope;\n"
         + "}\n"
         + "fn main() -> i32 { return 0; }\n");
@@ -27,5 +33,5 @@ test "direct lowering failure renders code and source coordinates" ![io] {
 
     assert exit != 0;
     assert find(combined, "llvm lowering [fatal] [E1002]:", 0) >= 0;
-    assert find(combined, "sfn535_spanned_lowering_diag.sfn:3:", 0) >= 0;
+    assert find(combined, "sfn535_spanned_lowering_diag.sfn:5:", 0) >= 0;
 }
