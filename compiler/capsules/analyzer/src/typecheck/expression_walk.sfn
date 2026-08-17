@@ -4,7 +4,12 @@
 // form, dispatching to the per-rule modules for the specific checks.
 import { parse_fn_type_text } from "sfn/ir";
 import { ends_with, substring } from "sfn/strings";
-import { Expression, SourceSpan, TypeAnnotation } from "sfn/syntax";
+import {
+    Expression,
+    SourceSpan,
+    Statement,
+    TypeAnnotation
+} from "sfn/syntax";
 
 import { lookup_imported_function } from "../effect_imports";
 import { Diagnostic } from "../typecheck_types";
@@ -18,6 +23,7 @@ import {
 import { make_nested_fn_capture_diagnostic, make_undefined_function_diagnostic } from "../typecheck_types/declaration_and_statement_checks";
 import { make_parse_error_diagnostic } from "../typecheck_types/expr_type_rules";
 import { is_builtin_call_name, is_builtin_member_root } from "../typecheck_types/extern_abi";
+import { bound_base_name } from "../typecheck_types/generic_bounds";
 import { check_named_fn_value_compatibility } from "../typecheck_types/named_fn_values";
 import {
     SymbolEntry,
@@ -33,8 +39,14 @@ import {
     make_fn_value_position_diagnostic,
     register_local_symbol
 } from "../typecheck_types/symbol_table_and_raw_exprs";
-import { trim_text } from "../typecheck_types/text_utils";
-import { check_intersection_value_type_annotation, check_object_literal_target } from "../typecheck_types/value_and_object_checks";
+import { token_from_name, trim_text } from "../typecheck_types/text_utils";
+import {
+    check_intersection_value_type_annotation,
+    check_object_literal_target,
+    make_unknown_field_diagnostic,
+    primitive_has_field,
+    primitive_has_method
+} from "../typecheck_types/value_and_object_checks";
 import {
     _struct_arithmetic_diagnostics,
     array_arithmetic_diagnostics,
@@ -55,6 +67,7 @@ import {
 import {
     TypeckCtx,
     ctx_enter_body,
+    ctx_in_callee_position,
     ctx_with_bindings,
     ctx_with_expected_type
 } from "./context";
@@ -68,6 +81,80 @@ import {
 import { _declared_struct_annotation } from "./symbols";
 import { _is_syscall_name, _syscall_call_diagnostics } from "./syscalls";
 import { _conditional_branch_type, check_conditional_types } from "./try_and_conditional";
+
+// SFN-543: the fields a struct declaration declares, in source order, or `[]`
+// when no declaration of that name is in this program's statements.
+fn _struct_field_names(declarations: Statement[], name: string) -> string[] {
+    let mut i: int = 0;
+    loop {
+        if i >= declarations.length { break; }
+        let statement = declarations[i];
+        if strings_equal(statement.variant, "StructDeclaration") {
+            if strings_equal(statement.name, name) {
+                let mut names: string[] = [];
+                let mut f: int = 0;
+                loop {
+                    if f >= statement.fields.length { break; }
+                    names.push(statement.fields[f].name);
+                    f += 1;
+                }
+                return names;
+            }
+        }
+        i += 1;
+    }
+    return [];
+}
+
+// E0015 (SFN-543): a field read whose name the receiver's type does not
+// declare. Fail-open by construction — silent unless the receiver is a bare
+// identifier that resolves to a binding whose type is *proven* (an explicit
+// struct annotation resolved in scope, or a bare primitive word) and the member
+// is provably absent from that type. An inferred binding, an array, an
+// optional, a generic, an enum, an interface, or a struct declared in another
+// module all leave both proof fields empty and stay silent, exactly as
+// `primitive_method_diagnostics` does for E0012.
+fn _unknown_field_diagnostics(expression: Expression, ctx: TypeckCtx) -> Diagnostic[] {
+    let receiver = expression.object;
+    if receiver == null { return []; }
+    if !strings_equal(receiver.variant, "Identifier") { return []; }
+    let member = expression.member;
+    if member.length == 0 { return []; }
+    let mut entry = find_value_symbol(ctx.bindings, receiver.name);
+    if entry == null {
+        entry = find_value_symbol(ctx.top_level, receiver.name);
+    }
+    // An unresolved receiver is a namespace root or an undefined value — the
+    // Member arm's own checks own both; a field check would double-report.
+    if entry == null { return []; }
+    if strings_equal(entry.kind, "outer_local") { return []; }
+    if entry.declared_struct.length > 0 {
+        let struct_name = bound_base_name(entry.declared_struct);
+        let fields = _struct_field_names(ctx.declarations, struct_name);
+        // No declaration in this program (an imported struct) — unproven.
+        if fields.length == 0 { return []; }
+        if _string_list_contains(fields, member) { return []; }
+        return [make_unknown_field_diagnostic(struct_name, member, fields, token_from_name(member, expression.span))];
+    }
+    if entry.declared_prim.length > 0 {
+        if primitive_has_field(entry.declared_prim, member) { return []; }
+        // A bare method reference (`s.substring` without a call) is a value use
+        // of a real method, not a missing field.
+        if primitive_has_method(entry.declared_prim, member) { return []; }
+        return [make_unknown_field_diagnostic(entry.declared_prim, member, [], token_from_name(member, expression.span))];
+    }
+    return [];
+}
+
+fn _string_list_contains(values: string[], name: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= values.length { break; }
+        if strings_equal(values[i], name) { return true; }
+        i += 1;
+    }
+    return false;
+}
 
 fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
     let bindings = ctx.bindings;
@@ -83,7 +170,10 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
         let mut diagnostics: Diagnostic[] = [];
         if expression.callee != null {
             if expression.callee.variant != "Identifier" {
-                diagnostics = walk_expression(expression.callee, ctx_with_expected_type(ctx, null));
+                // SFN-543: marked as callee position so the Member arm reads
+                // `obj.method()`'s member as a method (E0012's territory)
+                // rather than as a missing field (E0015).
+                diagnostics = walk_expression(expression.callee, ctx_in_callee_position(ctx));
             }
         }
         // #812: a bare-identifier callee that resolves to neither an
@@ -210,7 +300,11 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
                     if strings_equal(entry.kind, "outer_local") {
                         return [make_nested_fn_capture_diagnostic(receiver.name, receiver.span)];
                     }
-                    return [];
+                    // SFN-543: the receiver resolved, so its declared type may
+                    // prove the member absent -> E0015. In callee position the
+                    // member is a method, owned by E0012.
+                    if ctx.in_callee_position { return []; }
+                    return _unknown_field_diagnostics(expression, ctx);
                 }
                 if is_builtin_member_root(receiver.name) { return []; }
                 return [make_undefined_value_diagnostic(receiver.name, receiver.span)];

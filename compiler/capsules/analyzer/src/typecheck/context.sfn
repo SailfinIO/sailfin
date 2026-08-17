@@ -49,6 +49,14 @@ struct TypeckCtx {
     // struct/enum/interface/alias heads). Unlike `known_types` this varies by
     // declaration, so it is pushed on entry via `ctx_with_type_params`.
     type_params: string[];
+    // SFN-543: set only while walking the `Member` callee of a `Call`
+    // (`obj.method()`). A `Member` node is reused verbatim as a call callee, so
+    // the Member arm cannot otherwise tell `obj.field` from `obj.method()` — and
+    // the member name in callee position is a method, owned by E0012, never a
+    // struct field. Every other constructor clears it, so the flag survives
+    // exactly one walk step: the receiver inside `foo().bar()` still gets its
+    // own field check.
+    in_callee_position: boolean;
 }
 
 // Root context for a walk: top-level scope, no enclosing return type.
@@ -67,7 +75,8 @@ fn make_typeck_ctx(bindings: SymbolEntry[], imports: ImportSymbolTable, availabl
         expected_type: null,
         generic_struct_names: generic_struct_names,
         known_types: known_types,
-        type_params: []
+        type_params: [],
+        in_callee_position: false
     };
 }
 
@@ -91,7 +100,8 @@ fn ctx_with_type_params(ctx: TypeckCtx, names: string[]) -> TypeckCtx {
         expected_type: ctx.expected_type,
         generic_struct_names: ctx.generic_struct_names,
         known_types: ctx.known_types,
-        type_params: ctx.type_params.concat(names)
+        type_params: ctx.type_params.concat(names),
+        in_callee_position: false
     };
 }
 
@@ -115,7 +125,8 @@ fn ctx_with_bindings(ctx: TypeckCtx, bindings: SymbolEntry[], scope_start: int) 
         expected_type: null,
         generic_struct_names: ctx.generic_struct_names,
         known_types: ctx.known_types,
-        type_params: ctx.type_params
+        type_params: ctx.type_params,
+        in_callee_position: false
     };
 }
 
@@ -137,7 +148,31 @@ fn ctx_enter_body(ctx: TypeckCtx, bindings: SymbolEntry[], return_type: TypeAnno
         expected_type: null,
         generic_struct_names: ctx.generic_struct_names,
         known_types: ctx.known_types,
-        type_params: ctx.type_params
+        type_params: ctx.type_params,
+        in_callee_position: false
+    };
+}
+
+// SFN-543: mark the next walk step as a call's callee position, so a `Member`
+// callee is read as `obj.method()` and not as a field read. Clears
+// `expected_type` like the other recursive arms — a callee imposes none.
+fn ctx_in_callee_position(ctx: TypeckCtx) -> TypeckCtx {
+    return TypeckCtx {
+        bindings: ctx.bindings,
+        imports: ctx.imports,
+        available_imports: ctx.available_imports,
+        interfaces: ctx.interfaces,
+        declarations: ctx.declarations,
+        top_level: ctx.top_level,
+        is_top_level: ctx.is_top_level,
+        in_function_body: ctx.in_function_body,
+        scope_start: ctx.scope_start,
+        enclosing_return_type: ctx.enclosing_return_type,
+        expected_type: null,
+        generic_struct_names: ctx.generic_struct_names,
+        known_types: ctx.known_types,
+        type_params: ctx.type_params,
+        in_callee_position: true
     };
 }
 
@@ -158,6 +193,7 @@ fn ctx_with_expected_type(ctx: TypeckCtx, expected_type: TypeAnnotation?) -> Typ
         expected_type: expected_type,
         generic_struct_names: ctx.generic_struct_names,
         known_types: ctx.known_types,
-        type_params: ctx.type_params
+        type_params: ctx.type_params,
+        in_callee_position: false
     };
 }
