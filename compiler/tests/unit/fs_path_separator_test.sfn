@@ -1,0 +1,53 @@
+// compiler/tests/unit/fs_path_separator_test.sfn
+//
+// Regression coverage for SFN-921: `build/fs.sfn`'s command-layer path
+// helpers (`_dirname_cmd`, `_path_join_cmd`, `_sanitize_filename_cmd`)
+// scanned for `/` only, missing the `\` fix SFN-919 already made to
+// their `build/paths.sfn` siblings. On native Windows a
+// `\`-separated path would defeat `_dirname_cmd`'s split (returning
+// "." instead of the parent directory) and `_path_join_cmd`'s
+// already-separated check (doubling the separator), and a `\` inside
+// a sanitized filename component would pass through unescaped.
+import { _dirname_cmd, _path_join_cmd, _sanitize_filename_cmd } from "../../src/build/fs";
+
+test "fs: dirname_cmd splits a POSIX path" {
+    assert _dirname_cmd("/a/b/c.exe") == "/a/b";
+    assert _dirname_cmd("a/b") == "a";
+}
+
+test "fs: dirname_cmd splits a Windows backslash path" {
+    assert _dirname_cmd("D:\\a\\bin\\compiler.exe") == "D:\\a\\bin";
+}
+
+test "fs: dirname_cmd splits a mixed-separator path at the last separator" {
+    assert _dirname_cmd("D:/a\\bin/compiler.exe") == "D:/a\\bin";
+    assert _dirname_cmd("D:/a/bin\\compiler.exe") == "D:/a/bin";
+}
+
+test "fs: dirname_cmd of a bare name is the current directory" {
+    assert _dirname_cmd("compiler.exe") == ".";
+}
+
+test "fs: dirname_cmd preserves the root separator spelling" {
+    assert _dirname_cmd("/foo") == "/";
+    assert _dirname_cmd("\\foo") == "\\";
+}
+
+test "fs: dirname_cmd of a drive-rooted file is the drive" {
+    assert _dirname_cmd("C:\\x.exe") == "C:";
+}
+
+test "fs: path_join_cmd does not double an existing separator" {
+    assert _path_join_cmd("D:\\a\\bin\\", "sfn.exe") == "D:\\a\\bin\\sfn.exe";
+    assert _path_join_cmd("/a/bin/", "sfn") == "/a/bin/sfn";
+    assert _path_join_cmd("/a/bin", "sfn") == "/a/bin/sfn";
+    assert _path_join_cmd("", "sfn") == "sfn";
+}
+
+test "fs: sanitize_filename_cmd replaces a backslash" {
+    assert _sanitize_filename_cmd("a\\b") == "a_b";
+}
+
+test "fs: sanitize_filename_cmd still replaces slash, space, and dot" {
+    assert _sanitize_filename_cmd("a/b c.d") == "a_b_c_d";
+}

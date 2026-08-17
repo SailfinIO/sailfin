@@ -5,6 +5,7 @@
 // `compiler-common` boundary to #345.
 import { substring } from "../string_utils";
 import { sha256_hex_of_bytes } from "./hash";
+import { _is_path_sep } from "./paths";
 import { host_is_windows } from "./target";
 
 // libc primitives backing the staging path's temp-mint, atomic
@@ -96,11 +97,13 @@ fn _dirname_cmd(path: string) -> string {
     let mut i: int = 0;
     loop {
         if i >= path.length { break; }
-        if substring(path, i, i + 1) == "/" { last_slash = i; }
+        if _is_path_sep(path[i]) { last_slash = i; }
         i += 1;
     }
     if last_slash < 0 { return "."; }
-    if last_slash == 0 { return "/"; }
+    // Preserve the separator the caller actually used, so a Windows
+    // root keeps its `\` spelling rather than being rewritten to `/`.
+    if last_slash == 0 { return substring(path, 0, 1); }
     return substring(path, 0, last_slash);
 }
 
@@ -590,6 +593,7 @@ fn _sanitize_filename_cmd(value: string) -> string {
         let ch = substring(value, i, i + 1);
         let mut safe: boolean = true;
         if ch == "/" { safe = false; }
+        if ch == "\\" { safe = false; }
         if ch == " " { safe = false; }
         if ch == "." { safe = false; }
         if safe { result = result + ch; } else { result = result + "_"; }
@@ -705,7 +709,7 @@ fn _collect_sfn_files_cmd(root: string, max_depth: int) -> string[] ![io] {
 
 fn _path_join_cmd(base: string, name: string) -> string {
     if base.length == 0 { return name; }
-    if base[base.length - 1] == "/" { return base + name; }
+    if _is_path_sep(base[base.length - 1]) { return base + name; }
     return base + "/" + name;
 }
 
