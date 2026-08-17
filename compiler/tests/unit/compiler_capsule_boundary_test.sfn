@@ -202,7 +202,7 @@ fn _role_rule(importer_role: string, importee_role: string) -> string {
         return "every dependency must be classified before a compiler role imports it";
     }
     if importee_role == ROLE_RUNTIME_INTERNAL {
-        return "internal compiler libraries may import runtime/prelude but not runtime implementation modules";
+        return "only syntax, IR, and compiler-driver roles may import runtime/prelude; only compiler-driver may import runtime implementation modules";
     }
     if importee_role == ROLE_RUNTIME_PRELUDE {
         return "only syntax, IR, and compiler-driver roles may import runtime/prelude";
