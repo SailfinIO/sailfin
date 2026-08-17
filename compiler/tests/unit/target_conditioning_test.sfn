@@ -45,6 +45,7 @@ import {
     target_filter_link_libs,
     target_forced_linker_flag,
     target_os_is_windows,
+    target_reproducible_link_flag,
     target_uses_gnu_link_gc,
     triple_abi,
     triple_artifact_tags,
@@ -172,6 +173,14 @@ test "target: msvc forces lld, host targets and windows-gnu do not" ![pure] {
     assert expect_eq_str(target_forced_linker_flag("x86_64-w64-mingw32"), "").ok;
     assert expect_eq_str(target_forced_linker_flag("x86_64-unknown-linux-gnu"), "").ok;
     assert expect_eq_str(target_forced_linker_flag("x86_64-apple-darwin"), "").ok;
+}
+
+test "target: msvc requests /Brepro, host targets and windows-gnu do not" ![pure] {
+    assert expect_eq_str(target_reproducible_link_flag("x86_64-pc-windows-msvc"), "-Wl,/Brepro").ok;
+    assert expect_eq_str(target_reproducible_link_flag("x86_64-w64-mingw32"), "").ok;
+    assert expect_eq_str(target_reproducible_link_flag("x86_64-unknown-linux-gnu"), "").ok;
+    assert expect_eq_str(target_reproducible_link_flag("x86_64-apple-darwin"), "").ok;
+    assert expect_eq_str(target_reproducible_link_flag("arm64-apple-darwin"), "").ok;
 }
 
 test "target: GNU section-GC flags are skipped only for msvc" ![pure] {

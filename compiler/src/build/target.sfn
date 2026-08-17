@@ -306,6 +306,17 @@ fn target_forced_linker_flag(triple: string) -> string {
     return "";
 }
 
+// `lld-link` stamps a live epoch `TimeDateStamp` into the COFF header by
+// default, so two links of identical input differ; `/Brepro` substitutes a
+// content hash and makes the link reproducible (SFN-920). msvc-only: the
+// windows-gnu (mingw) ABI links with a GNU `ld`-family linker that does not
+// accept this flag.
+fn target_reproducible_link_flag(triple: string) -> string {
+    let abi = triple_abi(triple);
+    if abi == "msvc" { return "-Wl,/Brepro"; }
+    return "";
+}
+
 // True when a target's linker rejects the GNU-style section-GC and
 // force-undefined flags (`-Wl,--gc-sections`, `-Wl,-u,<sym>`) the POSIX
 // link path emits. `lld-link` (the MSVC linker) uses `/OPT:REF` /
@@ -558,6 +569,7 @@ export {
     target_clang_triple,
     target_clang_flags,
     target_forced_linker_flag,
+    target_reproducible_link_flag,
     target_uses_gnu_link_gc,
     target_filter_link_libs,
     target_extra_link_libs,
