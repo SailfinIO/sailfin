@@ -243,6 +243,50 @@ fn _build_consumer(out_bin: string, extra_env: string[]) -> BuildOut ![io] {
     return BuildOut { exit: exit, out: out, err: err };
 }
 
+// Check the consumer's entry with the same isolated environment shape as the
+// build probes. SFN-894 makes the explicitly checked file the closure root, so
+// declared dependencies it cannot reach must not be staged for analysis.
+fn _check_consumer(extra_env: string[]) -> BuildOut ![io] {
+    _ensure_fixture();
+    let mut child_env = clean_runner_env(nested_runner_scratch("capsule_reachability_filter"));
+    let mut i: int = 0;
+    let guard = extra_env.length;
+    loop {
+        if i >= guard { break; }
+        child_env.push(extra_env[i]);
+        i += 1;
+    }
+    let entry = _capsule_root() + "/consumer/src/main.sfn";
+    let exit = process.run_capture([_sfn_bin(), "check", entry], child_env);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    return BuildOut { exit: exit, out: out, err: err };
+}
+
+// ---- Check path: retain only the requested file's dependency closure ----
+test "capsule reachability: check excludes unreachable dependency sources" ![io] {
+    let check = _check_consumer(["SAILFIN_TRACE_CAPSULE_FILTER=1"]);
+    assert check.exit == 0;
+    assert contains(check.out + check.err, "checked 1 files: ok");
+    assert contains(check.err, "demo/twomod/unreached");
+    assert contains(check.err, "demo/neverused/mod");
+    assert contains(check.err, "capsule-filter: dropped");
+}
+
+// The SFN-747/SFN-894 performance workload imports no dependency module. Its
+// authoritative closure is empty, not a reason to fail open to every internal
+// compiler capsule.
+test "capsule reachability: dependency-free check retains no capsule sources" ![io] {
+    let mut child_env = clean_runner_env(nested_runner_scratch("capsule_reachability_filter"));
+    child_env.push("SAILFIN_TRACE_CAPSULE_FILTER=1");
+    let exit = process.run_capture([_sfn_bin(), "check", "compiler/tests/fixtures/cli/clean_effect.sfn"], child_env);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit == 0;
+    assert contains(out + err, "checked 1 files: ok");
+    assert contains(err, "retaining nothing");
+}
+
 // ---- Test 1: an unreached submodule is excluded from the link ----
 test "capsule reachability: an unreached submodule is excluded from the link" ![io] {
     let out_bin = _bin_path("unreached");

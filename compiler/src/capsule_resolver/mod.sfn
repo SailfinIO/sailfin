@@ -310,8 +310,9 @@ fn _cr_prepare(entry_paths: string[], config: BuildCacheConfig, consumer: Resolv
     // SFN-833: the build path resolves through the filtering wrapper, so
     // every list derived below — the staging input, `slug_universe_extra`'s
     // universe, `compile_capsule_modules`'s input — comes off the filtered
-    // set. `sfn check` keeps calling `_cr_resolve_and_dedupe` directly and
-    // is unaffected (SFEP-0070 §3.6).
+    // set. SFN-894 gives check the same single-list discipline through its
+    // check-only facade, rooted in the explicitly requested files rather than
+    // build's runtime/link roots (SFEP-0070 §3.6).
     let resolved = _cr_resolve_dedupe_filtered(entry_paths, consumer, binary_dir);
     if resolved.has_collision {
         // Slug collision is a setup error (already reported by

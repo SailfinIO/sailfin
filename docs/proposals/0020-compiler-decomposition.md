@@ -5,8 +5,8 @@ status: Implemented
 type: tooling
 created: 2026-06-22
 updated: 2026-08-17
-author: "agent:compiler-architect; project owner (direction + naming); agent:Codex (2026-08-03 amendment; 2026-08-08 §3.5 corrections 1–2 status); agent:implementer (2026-08-05 provider slot); agent:Sailbot (2026-08-06 narrow-stdlib matrix amendment; 2026-08-06 §3.5 correction 7 prelude-slug extension)"
-tracking: "#345 (historical epic); Linear project Role-Oriented Compiler Capsules. §3.7 steps 1-2 (landed): SFN-705, SFN-706, SFN-707, SFN-708, SFN-709, SFN-710, SFN-711, SFN-712, SFN-713, SFN-714, SFN-715, SFN-717, SFN-718, SFN-734. §3.7 steps 3-8 (groomed 2026-08-06): SFN-735 through SFN-751."
+author: "agent:compiler-architect; project owner (direction + naming); agent:Codex (2026-08-03 amendment; 2026-08-08 §3.5 corrections 1–2 status; 2026-08-17 SFN-894 check-filter amendment); agent:implementer (2026-08-05 provider slot); agent:Sailbot (2026-08-06 narrow-stdlib matrix amendment; 2026-08-06 §3.5 correction 7 prelude-slug extension)"
+tracking: "#345 (historical epic); Linear project Role-Oriented Compiler Capsules. §3.7 steps 1-2 (landed): SFN-705, SFN-706, SFN-707, SFN-708, SFN-709, SFN-710, SFN-711, SFN-712, SFN-713, SFN-714, SFN-715, SFN-717, SFN-718, SFN-734. §3.7 steps 3-8 (groomed 2026-08-06): SFN-735 through SFN-751. §3.3.1 remediation: SFN-894."
 supersedes:
 superseded-by:
 graduates-to:
@@ -221,16 +221,33 @@ The mechanism is confirmed live in code, not merely inferred:
 `_cr_collect_capsule_sources`
 (`compiler/src/capsule_resolver/discovery.sfn:181-251`) enumerates a dependency
 capsule's whole `src/` tree with no import-relevance test. SFN-833 / SFEP-0070
-added a reachability filter that narrows this on the *build* path, but
-`sfn check` deliberately does not call it
-(`compiler/src/capsule_resolver/reachability.sfn:648-665`) so that check's
-staged set stays a superset of build's. Extending that filter to check is the
-remedy the evidence points to; it is forbidden by neither prohibition above
-(it moves no artifact parsing into the analyzer and restores no generic common
-capsule), but it is outside what this paragraph sanctions, so it requires an
-explicit design decision. Tracked as SFN-894; **`sfn/module-interface` is not
-adopted or rejected on its own merits here — it is set aside as not responsive
-to the measured cost.**
+added a reachability filter that originally narrowed only the *build* path.
+SFN-894 extends that same filter to `sfn check`; this is the accepted remedy.
+It is forbidden by neither prohibition above (it moves no artifact parsing
+into the analyzer and restores no generic common capsule), and it addresses the
+measured fixed cost directly by refusing to stage dependency modules that no
+checked file can import.
+
+The former cross-command superset invariant is superseded. `build` roots its
+closure in the project entry plus the selected runtime sources; `check` roots
+its closure in the files the user explicitly requested. Those are different
+semantic questions, so requiring one retained set to contain the other adds
+unreachable work without adding correctness. The normative invariant is now
+**per-command closure completeness**: every module reachable from that
+command's roots is retained, and the shared verification pass fails open to the
+unfiltered set if it cannot prove closure. A build-only runtime module need not
+be staged by a check that never links it; a dependency module unreachable from
+the checked files is checked in its own capsule's CI, not speculatively on every
+consumer check. **`sfn/module-interface` remains neither adopted nor rejected
+on its own merits — it is set aside as not responsive to the measured cost.**
+
+The post-remedy SFN-894 run records a three-run median of **149.0 MiB** on the
+`trivial` workload, below both the 157.7 MiB monolith reference and its 165.6
+MiB (+5%) ceiling. On that Darwin arm64 host, disabling the filter measures
+762.0 MiB, so the same-host causal reduction is 613.0 MiB (80.4%). The trace
+retains 0 of 301 dependency sources. Full procedure, raw runs, and the
+cross-host caveat are in `docs/perf/decomposition-baseline.md` § "2026-08-17 —
+SFN-894 post-remedy check closure".
 
 The following dependency rules are build/test invariants:
 
@@ -547,8 +564,8 @@ rerun passed.
   budget is exceeded, explain the measured cause and either apply the
   `sfn/module-interface` split when it addresses that cause or record the
   responsive remediation/design follow-up. SFN-747 supplied that adjudication;
-  §3.3.1 records why the split was not responsive and why SFN-894 is the
-  follow-up.
+  §3.3.1 records why the split was not responsive and why SFN-894's filtered
+  check closure is the accepted remedy.
 - Prove `sfn/codegen-llvm` has no parser, analyzer, driver, filesystem, process,
   or network imports.
 - Prove no `capsules/sfn/*` source imports an internal compiler capsule.

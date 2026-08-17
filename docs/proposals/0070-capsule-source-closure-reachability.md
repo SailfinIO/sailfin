@@ -4,9 +4,9 @@ title: Import-Reachability Filtering of the Capsule Source Closure
 status: Accepted
 type: tooling
 created: 2026-08-11
-updated: 2026-08-11
-author: "agent:compiler-architect; human review"
-tracking: SFN-804, SFN-830, SFN-831, SFN-832, SFN-833, SFN-834
+updated: 2026-08-17
+author: "agent:compiler-architect; human review; agent:Codex (2026-08-17 SFN-894 amendment)"
+tracking: SFN-804, SFN-830, SFN-831, SFN-832, SFN-833, SFN-834, SFN-894
 supersedes:
 superseded-by:
 graduates-to:
@@ -29,10 +29,11 @@ resolved capsule source set: a demand-driven closure from the consumer's own
 modules (plus, on the build path, the runtime's `sfn-sources`) over the
 already-existing pre-parse import scanner, refined so that a symbol imported
 through a barrel's `export … from "./sibling"` chain retains only the module
-that **defines** it. The filter is **build-path only**, may only ever *remove*
-modules from the set the build compiles, and **fails open** — a filter that
-cannot prove its own closure property falls back to today's unfiltered set
-rather than breaking a build.
+that **defines** it. The filter runs on the build, run, check, and test
+resolution paths, may only ever *remove* modules from the set that path would
+otherwise stage, and **fails open** — a filter that cannot prove its own closure
+property falls back to the unfiltered set rather than breaking a build or
+check.
 
 ## 2. Motivation
 
@@ -220,8 +221,11 @@ inside `enumerate_capsule_sources`, because:
 - **Dedupe first means canonical identities.** Filtering a set that still
   contains `(slug, source_path)` duplicates would give the graph duplicate
   nodes.
-- **One choke point serves every consumer.** `build`, `run`, `test`'s link path
-  and the #1370 `emit llvm` path all funnel through `_cr_prepare`.
+- **One shared wrapper serves every filtered consumer.** `build`, `run`, and
+  `test`'s link path funnel through `_cr_prepare`; the check-only facade calls
+  the same resolve/dedupe/filter wrapper before staging analysis interfaces.
+  The #1370 `emit llvm` path retains its dedicated unfiltered staging facade:
+  it emits an explicitly requested module and does not enter a link closure.
 - **It precedes the isolation decision,** so a shrunken closure also gets the
   cheaper `_cr_effective_isolation_exe` route.
 
@@ -269,28 +273,38 @@ Operator controls, matching the `SAILFIN_TRACE_MEM_LIMIT` precedent:
 - `SAILFIN_TRACE_CAPSULE_FILTER=1` — print retained/dropped counts and the
   dropped slug list to stderr.
 
-### 3.6 The `check` / `build` split
+### 3.6 Per-command closure completeness
 
-**The filter does not run on the `sfn check` path.** `prepare_project_capsules_for_check`
-leaves `runtime_root` empty by design (§3.1.3 gating) and that stays true; it
-additionally does not invoke the filter at all.
+SFN-894 supersedes this section's original build-subset-of-check invariant.
+The filter runs on `sfn check` as well as build/link paths.
+`prepare_project_capsules_for_check` still leaves `runtime_root` empty because
+check never links the runtime; its explicit checked files are the entry roots,
+and their transitive imports determine the dependency modules staged as
+analysis interfaces.
 
-The resulting invariant is the one that keeps #1389 from widening:
+The normative invariant is:
 
-> **The filter may only remove modules from the set `build` compiles. It never
-> adds one, and it never touches the set `check` analyses.**
+> **For each resolver path, the retained set is closed over the imports
+> reachable from that path's semantic roots. The filter never adds a module and
+> fails open to that path's unfiltered set if closure cannot be proved.**
 
-So the build set becomes a **subset** of the check set within the project's own
-declared dependencies. `check` cannot go green on something `build` then trips
-over, because `build` now does strictly less. The converse — a module `check`
-analyses that `build` no longer compiles — is not a divergence with consequences:
-that module is not linked, nothing reachable calls it, and the capsule's own
-tree still checks it in its own CI.
+Build and check retained sets therefore need not contain one another. Build
+roots include the project entry and selected runtime sources; check roots are
+the files requested in its resolution group. A runtime-only module is relevant
+to linking but not to frontend checking. Conversely, a file explicitly passed
+to check may not be part of the project's binary entry closure. Set inclusion
+between those commands conflates different questions and forced check to stage
+every source of every declared dependency, which SFN-747 measured at +341.5%
+peak RSS against the monolith.
 
-It also keeps rung 1 of the validation ladder cheap: `sfn check` never reads a
-dependency's sources to compute reachability. The filter's own cost is reading
-the text of modules it **retains**, which the build was going to read anyway —
-so the filter's marginal I/O against today's behaviour is negative.
+This does not permit check to go green while omitting an import its requested
+files can exercise: entry-root seeding, fixed-point traversal, and the
+verification pass in §3.5 retain that complete closure or decline the
+optimisation. A dependency module outside that closure is unreachable from the
+checked files and remains the owning capsule's responsibility to check in its
+own CI. An existing checked entry that names no dependency is an authoritative
+empty closure; it does not fail open merely because traversal has no first
+module to enqueue.
 
 ### 3.7 Interaction with the `tls.sfn` deep-import workaround
 
@@ -443,8 +457,12 @@ unreached submodule is excluded.
 (SFN-773 + the SFN-800 re-export leg), `compiler/tests/e2e/capsule_transitive_dep_link_test.sfn`
 (SFN-35), and `capsules/sfn/crypto/tests/`.
 
-**`sfn check` invariance.** The staged set produced on the
-`prepare_project_capsules_for_check` path is byte-identical before and after.
+**`sfn check` reachability.** A checked file in a multi-capsule project imports
+one dependency through its barrel while declaring another dependency it never
+imports. Assert that the reached barrel/module stages, the orphaned sibling and
+never-imported capsule do not, and the check succeeds. The subprocess and
+in-process staging paths must still produce byte-identical artifacts for the
+same filtered set.
 
 ## 9. References
 

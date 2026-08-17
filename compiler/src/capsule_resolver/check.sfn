@@ -4,13 +4,13 @@
 import { BuildCacheConfig } from "../build_cache";
 import { module_name_from_path } from "../module_paths";
 import { toml_get_entry } from "../toml_parser";
-import { _cr_resolve_and_dedupe } from "./dedupe";
 import {
     _cr_dirname,
     _cr_import_context_root,
     _cr_path_join,
     discover_project_root
 } from "./paths";
+import { _cr_resolve_dedupe_filtered } from "./reachability";
 import { _cr_srchash_path, _cr_stage_cache_hit, stage_capsule_imports } from "./staging";
 import { CheckCapsuleResolution, ResolverConsumer } from "./types";
 
@@ -49,7 +49,10 @@ fn _check_project_entry_artifact(entry_paths: string[], work_dir: string) -> str
 fn prepare_project_capsules_for_check(entry_paths: string[], consumer: ResolverConsumer, sailfin_exe: string, work_dir: string, binary_dir: string) -> CheckCapsuleResolution ![io] {
     let empty_paths: string[] = [];
     let project_entry_artifact = _check_project_entry_artifact(entry_paths, work_dir);
-    let resolved = _cr_resolve_and_dedupe(entry_paths, consumer, binary_dir);
+    // SFN-894: the checked files are semantic roots. Stage only their complete
+    // import closure, using the same fail-open verification as build; check's
+    // empty runtime root correctly excludes modules needed only for linking.
+    let resolved = _cr_resolve_dedupe_filtered(entry_paths, consumer, binary_dir);
     if resolved.has_collision {
         return CheckCapsuleResolution {
             asm_paths: empty_paths,
