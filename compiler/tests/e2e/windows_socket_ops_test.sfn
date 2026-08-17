@@ -62,6 +62,34 @@ fn _line_has_both(ir: string, needle_a: string, needle_b: string) -> boolean {
     return false;
 }
 
+// How many lines of `ir` contain both needles.
+//
+// The count matters, not just presence: these modules sign-extend in more
+// than one function, and a presence check is satisfied by any single
+// surviving site. `fd_io_windows.sfn` sign-extends in both `sfn_fd_read`
+// and `sfn_fd_write`, so dropping the `sext` from the read half alone —
+// the memory-unsafe path, feeding `io.sfn`'s `got <= 0` guard and the
+// `memset` that overran by ~4 GiB before SFN-927 — would leave the write
+// half's `sext` holding a presence assertion green. `socket_ops_windows`
+// is weaker still at three sites (`recv`, `send`, and the timeout
+// readback), where `readback` alone would mask both socket halves.
+//
+// Asserting an exact count also fails loudly when a fourth site appears,
+// which is the right direction: a new sign-extending function should
+// force a deliberate look at this pin rather than inherit its coverage.
+fn _count_lines_with_both(ir: string, needle_a: string, needle_b: string) -> int {
+    let lines = split(ir, "\n");
+    let mut i: int = 0;
+    let mut found: int = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        if contains(line, needle_a) && contains(line, needle_b) { found += 1; }
+        i += 1;
+    }
+    return found;
+}
+
 // Same shape as `_has_declare` but for a module-scope `define`. The two
 // are NOT interchangeable: a bare `contains(ir, "@sym(")` is satisfied
 // by a forward `declare`, so a module that only declared the pair would
@@ -177,7 +205,13 @@ test "socket-ops: the Windows sibling declares 32-bit recv/send, the POSIX sibli
         // body actually does, so a regression in that selector (not just
         // the declared width) fails here instead of passing silently
         // because these assertions never looked inside the function body.
-        assert _line_has_both(win, "sext i32", "to i64");
+        //
+        // Counted, not merely present: this module sign-extends in three
+        // places — `sfn_socket_recv`, `sfn_socket_send`, and
+        // `sfn_socket_timeout_readback_ms`. A presence check is satisfied
+        // by any one of them, so both socket halves could lose their
+        // `sext` while the readback alone kept the assertion green.
+        assert _count_lines_with_both(win, "sext i32", "to i64") == 3;
         return 0;
     });
     assert outcome == 0;
@@ -241,8 +275,11 @@ test "fd-io: the Windows sibling declares 32-bit _read/_write and sign-extends; 
         assert contains(posix, "declare i64 @write(");
         // Same sign-extension pin as the socket pair above (W2): the
         // narrowed declaration alone does not restore the negative-error
-        // signal without a genuine `sext`.
-        assert _line_has_both(win, "sext i32", "to i64");
+        // signal without a genuine `sext`. Counted, not merely present —
+        // both `sfn_fd_read` and `sfn_fd_write` must sign-extend, and a
+        // presence check would stay green if only the read half (the
+        // memory-unsafe path) lost its `sext`.
+        assert _count_lines_with_both(win, "sext i32", "to i64") == 2;
         return 0;
     });
     assert outcome == 0;

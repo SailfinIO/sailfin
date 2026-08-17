@@ -83,11 +83,12 @@
 // extern here would silently promote a `-1` error into `4294967295` on
 // Windows — the identical defect `sfn_socket_recv`/`sfn_socket_send`
 // fixed on the socket path (SFN-927). `platform/fd_io.sfn`, not
-// `platform/socket_ops.sfn`: that module is gated behind the `net`
-// effect (`runtime/capsule.toml [sfn-source-gates]`) and this module is
-// not, so reaching for the gated pair here would leave `sfn_fd_write`/
-// `sfn_fd_read` undefined at link time for any binary that never
-// declares `![net]`. `platform/fd_io.sfn` is swapped for its Windows
+// `platform/socket_ops.sfn`, because generic-fd I/O and Winsock socket
+// I/O are distinct handle spaces and the POSIX `socket_ops.sfn` is
+// genuinely socket-only — see that module's header for the full
+// reasoning, including why the `net`-gate is NOT the justification
+// (the gate does not bound link inputs; SFN-943).
+// `platform/fd_io.sfn` is swapped for its Windows
 // sibling by `target_condition_runtime_sfn_sources`, so linking against
 // these two symbols here is a plain cross-module runtime reference —
 // the same shape `adapters/http.sfn` uses for the socket wrappers.
