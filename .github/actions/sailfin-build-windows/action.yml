@@ -268,8 +268,26 @@ runs:
     #
     # Fatal, not advisory: an `sfn test` gate that cannot fail would restate
     # the exact problem this step exists to fix.
+    #
+    # `SAILFIN_RUNTIME_ROOT` is required here and is not a workaround for
+    # anything Windows-specific. `resolve_runtime_root`
+    # (`runtime/sfn/platform/exec.sfn`) walks up from the EXE directory with
+    # exactly three candidates — `/runtime`, `/../runtime`, `/../../runtime`
+    # — which is tuned to a binary two levels deep. That is true of
+    # `build/bin/sfn` on Linux, where `/../../runtime` lands exactly on the
+    # repo's `runtime/`. The native compiler lands at
+    # `build/capsules/sfn/compiler/bin/compiler.exe`, five levels deep, so
+    # every candidate misses and the resolver returns "" — which surfaces as
+    # `expected /capsule.toml` with an empty prefix.
+    #
+    # Reproduced on Linux by copying `build/bin/sfn` to a five-deep path and
+    # running the same command: byte-identical failure. So this is a
+    # path-depth assumption, not a platform defect, and the env override
+    # exists precisely for a binary sitting outside an install layout.
     - name: Gate R4 — sfn test on a Windows host (socket timeout readback)
       shell: bash
+      env:
+        SAILFIN_RUNTIME_ROOT: ${{ github.workspace }}/runtime
       run: |
         set -euo pipefail
         "$NATIVE_SFN" test compiler/tests/e2e/socket_ops_timeout_readback_test.sfn
