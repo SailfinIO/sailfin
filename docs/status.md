@@ -329,7 +329,12 @@ here.
   SFEP-0020 / #345). Per-worker peak RSS drop drove the sequencing
   (SFEP-0027 §2.1); a line-budget sentinel
   (`compiler/tests/unit/cli_main_line_budget_test.sfn`) guards against
-  re-ballooning.
+  re-ballooning. The project-first CLI flow is manifest-driven: in a directory
+  containing `capsule.toml`, bare `sfn build` and bare `sfn run` resolve
+  `[build].entry` (the shape scaffolded by `sfn init`); explicit
+  `sfn build -p <path>` and `sfn run <file.sfn>` remain available. At a cwd
+  without a capsule manifest, bare `sfn build` retains workspace
+  `default-members` selection.
 - **Terminal color.** `sfn/cli` emits real ANSI SGR sequences through its
   `bold` / color and `paint_*` helpers, with `Style` policy for
   `auto|always|never` and `NO_COLOR`. The compiler accepts the root option

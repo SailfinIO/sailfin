@@ -104,13 +104,13 @@ fn command_def() -> Command {
     // packaging PLATFORM LABEL (`linux-x86_64`), not a compilation triple —
     // the two are deliberately not unified.
     cmd = with_flag(cmd, flag_value("target", "Cross-compile for this triple (e.g. x86_64-w64-mingw32)"));
-    cmd = with_arg(cmd, arg_variadic("path", "Source file to build (omit at a workspace root to build default members)"));
+    cmd = with_arg(cmd, arg_variadic("path", "Source file to build (omit in a capsule or workspace root)"));
     return cmd;
 }
 
 fn _print_build_usage() ![io] {
     print("usage: sfn build [-o OUTPUT] [-p PATH] [--no-cache] [--clean] [--cache-trace] [--json] [--work-dir DIR] [--check-determinism] [--target TRIPLE] [<file.sfn> | -p <capsule-path>]");
-    print("       with no target at a workspace root, builds [workspace].default-members (or all members)");
+    print("       with no target, builds the current capsule or [workspace].default-members (or all members)");
     print("       --target takes a compilation triple (x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu,");
     print("       x86_64-apple-darwin, arm64-apple-darwin, x86_64-pc-windows-msvc, x86_64-w64-mingw32) —");
     print("       distinct from `sfn package --target`, which takes a platform label.");
@@ -146,7 +146,7 @@ fn _unsupported_ambient_target_diagnostic(triple: string) -> Diagnostic {
 // `parse_driver_prefix`) because it is a filesystem probe, not argv parsing.
 fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     let out_path: string = get_or(matches, "o", "");
-    let capsule_path: string = get_or(matches, "p", "");
+    let mut capsule_path: string = get_or(matches, "p", "");
     let no_cache_flag: boolean = has_flag(matches, "no-cache");
     let clean_flag: boolean = has_flag(matches, "clean");
     let cache_trace_flag: boolean = has_flag(matches, "cache-trace");
@@ -206,26 +206,35 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     }
 
     if capsule_path.length == 0 && input_path.length == 0 {
-        let workspace_root = discover_workspace_root(".");
-        if workspace_root.length == 0 {
-            _print_build_usage();
+        // The zero-argument project workflow starts with the most local
+        // declaration: a capsule.toml in the current directory. This is the
+        // shape `sfn init` creates, and is equivalent to `sfn build -p .`.
+        // Only fall through to workspace defaults when the cwd is not itself
+        // a capsule, preserving bare workspace-root builds.
+        if fs.exists("capsule.toml") { capsule_path = "."; } else {
+            let workspace_root = discover_workspace_root(".");
+            if workspace_root.length == 0 {
+                _print_build_usage();
+                clear_build_target();
+                return 2;
+            }
+            let members = load_workspace_default_members(workspace_root);
+            let mut aggregate_rc: int = 0;
+            let mut mi: int = 0;
+            loop {
+                if mi >= members.length { break; }
+                let member = members[mi];
+                print("sfn build: member " + member.name + " (" + member.member_path
+                    + ")");
+                let member_rc = _run_single_build(workspace_root + "/" + member.member_path, "", out_path, no_cache_flag, clean_flag, cache_trace_flag, json_flag, work_dir, check_determinism_flag, ctx);
+                if member_rc != 0 && aggregate_rc == 0 {
+                    aggregate_rc = member_rc;
+                }
+                mi += 1;
+            }
             clear_build_target();
-            return 2;
+            return aggregate_rc;
         }
-        let members = load_workspace_default_members(workspace_root);
-        let mut aggregate_rc: int = 0;
-        let mut mi: int = 0;
-        loop {
-            if mi >= members.length { break; }
-            let member = members[mi];
-            print("sfn build: member " + member.name + " (" + member.member_path
-                + ")");
-            let member_rc = _run_single_build(workspace_root + "/" + member.member_path, "", out_path, no_cache_flag, clean_flag, cache_trace_flag, json_flag, work_dir, check_determinism_flag, ctx);
-            if member_rc != 0 && aggregate_rc == 0 { aggregate_rc = member_rc; }
-            mi += 1;
-        }
-        clear_build_target();
-        return aggregate_rc;
     }
 
     let rc = _run_single_build(capsule_path, input_path, out_path, no_cache_flag, clean_flag, cache_trace_flag, json_flag, work_dir, check_determinism_flag, ctx);

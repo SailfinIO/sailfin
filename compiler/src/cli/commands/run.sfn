@@ -39,7 +39,11 @@ import {
     with_flag
 } from "sfn/cli";
 
-import { _print_cache_summary, _resolve_sailfin_cache_dir_for_work } from "../../build/cache";
+import {
+    _print_cache_summary,
+    _resolve_capsule_build_spec,
+    _resolve_sailfin_cache_dir_for_work
+} from "../../build/cache";
 import { _clang_link_multi } from "../../build/link";
 import { _ends_with, _ensure_dir } from "../../build/paths";
 import { _runtime_bundle_exists } from "../../build/runtime_objs";
@@ -58,32 +62,46 @@ import { toolchain_gate_or_dispatch } from "./toolchain";
 // `with_subcommand`. Three boolean flags and a variadic positional
 // `[file]`; `run` has no value flags (no `-o`/`-p`/`--work-dir`).
 fn command_def() -> Command {
-    let mut cmd: Command = command("run", "Compile and run a Sailfin source file");
+    let mut cmd: Command = command("run", "Compile and run a Sailfin source file or the current capsule");
     cmd = with_flag(cmd, flag("no-cache", "Disable the build cache for this invocation"));
     cmd = with_flag(cmd, flag("clean", "Clear the build cache before building"));
     cmd = with_flag(cmd, flag("cache-trace", "Print per-artifact cache hit/miss trace"));
     cmd = with_flag(cmd, flag("skip-toolchain-check", "Bypass the [toolchain] pin check for this invocation"));
-    cmd = with_arg(cmd, arg_variadic("file", "Sailfin source file (or prebuilt executable) to run"));
+    cmd = with_arg(cmd, arg_variadic("file", "Sailfin source file (or prebuilt executable); omit to run the current capsule"));
     return cmd;
 }
 
 // Reproduce the legacy `_legacy_dispatch_run` body against typed matches.
 // Flag reads replace the hand-rolled argv walk; the build-then-exec body is
 // verbatim. The `runtime_root` empty→"runtime" fallback is applied here (not
-// in `parse_driver_prefix`) because it is a filesystem probe, not argv
-// parsing.
+// in `parse_driver_prefix`) because it is a filesystem probe, not argv parsing.
 fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
     let no_cache_flag: boolean = has_flag(matches, "no-cache");
     let clean_flag: boolean = has_flag(matches, "clean");
     let cache_trace_flag: boolean = has_flag(matches, "cache-trace");
-    // Legacy semantics: exactly one positional. Zero (missing file) and
-    // more than one both printed usage and returned 2.
+    // One positional retains the file/executable form. With no positional,
+    // resolve the current capsule's manifest entry — the project workflow
+    // created by `sfn init`. More than one positional remains a usage error.
     let _run_positionals: string[] = positionals(matches, "file");
-    if _run_positionals.length != 1 {
-        print("usage: sfn run [--no-cache] [--clean] [--cache-trace] <file.sfn>");
+    if _run_positionals.length > 1 {
+        print("usage: sfn run [--no-cache] [--clean] [--cache-trace] [<file.sfn>]");
         return 2;
     }
-    let input_path: string = _run_positionals[0];
+    let mut input_path: string = "";
+    if _run_positionals.length == 1 { input_path = _run_positionals[0]; } else {
+        if !fs.exists("capsule.toml") {
+            print("sfn run: no capsule.toml in the current directory; pass a .sfn file to run");
+            return 2;
+        }
+        let cap_spec = _resolve_capsule_build_spec(".");
+        if cap_spec.entry_path.length == 0 { return 1; }
+        if cap_spec.kind != "binary" {
+            print("sfn run: current capsule has [build].kind = \"" + cap_spec.kind
+                + "\"; only binary capsules can be run");
+            return 2;
+        }
+        input_path = cap_spec.entry_path;
+    }
 
     let binary_dir: string = ctx.binary_dir;
     let mut runtime_root: string = ctx.runtime_root;

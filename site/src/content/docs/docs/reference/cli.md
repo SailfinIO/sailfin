@@ -33,14 +33,16 @@ sfn --color=never build src/main.sfn
 
 ## Commands
 
-### `sfn run <file>`
+### `sfn run [file]`
 
-Compile and execute a Sailfin source file in a single step. The file is compiled to a temporary binary and executed immediately. No output file is produced.
+Compile and execute a Sailfin program in a single step. With no file argument,
+the command reads `[build].entry` from `capsule.toml` in the current directory.
+Passing a source file keeps the standalone-file workflow.
 
 **Usage:**
 
 ```bash
-sfn run <file.sfn>
+sfn run [<file.sfn>]
 ```
 
 **Options:**
@@ -52,6 +54,7 @@ sfn run <file.sfn>
 **Examples:**
 
 ```bash
+sfn run
 sfn run hello.sfn
 sfn run examples/basics/hello-world.sfn
 sfn run src/main.sfn
@@ -59,6 +62,8 @@ sfn run src/main.sfn
 
 **Behavior:**
 
+- With no argument, requires `capsule.toml` in the current directory and runs
+  its `[build].entry`; only a `kind = "binary"` capsule can be run.
 - Resolves the project/workspace root and verifies the `[toolchain]` pin, if any, before compiling (see [Toolchain Pinning Flags](#toolchain-pinning-flags)).
 - Compiles the source file from scratch on each invocation.
 - Effect annotations are checked at compile time; missing effects produce `effects.missing` diagnostics with fix-it hints.
@@ -302,14 +307,17 @@ See [`sfn symbols --json` Schema](https://github.com/SailfinIO/sailfin/blob/main
 
 ---
 
-### `sfn build <file>`
+### `sfn build [file]`
 
-Compile a Sailfin source file without running it. Writes an executable to the output path (default: the source filename without `.sfn` in the current directory).
+Compile a Sailfin source file or capsule without running it. With no argument
+in a capsule directory, the command reads `[build].entry` and `[build].kind`
+from `capsule.toml`, equivalent to `sfn build -p .`. At a workspace root with
+no local capsule manifest, it builds the workspace default members.
 
 **Usage:**
 
 ```bash
-sfn build <file.sfn> [-o <output>]
+sfn build [<file.sfn> | -p <capsule-path>] [-o <output>]
 ```
 
 **Options:**
@@ -317,11 +325,14 @@ sfn build <file.sfn> [-o <output>]
 | Flag | Description |
 |---|---|
 | `-o <output>` | Write the compiled binary to `output` instead of the default path |
+| `-p <capsule-path>` | Build the capsule at this directory or manifest path, using its `[build]` configuration |
 | `--skip-toolchain-check` | Bypass the `[toolchain]` pin check for this invocation — see [Toolchain Pinning Flags](#toolchain-pinning-flags) |
 
 **Examples:**
 
 ```bash
+sfn build
+sfn build -p path/to/capsule
 sfn build src/main.sfn
 sfn build src/main.sfn -o build/myapp
 ```
@@ -445,6 +456,14 @@ sfn init
 ```
 
 Fails with a non-zero exit if `capsule.toml` already exists — `sfn init` never overwrites existing manifests.
+
+The generated capsule is immediately runnable and buildable from the same
+directory:
+
+```bash
+sfn run
+sfn build
+```
 
 ---
 
