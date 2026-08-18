@@ -14,10 +14,12 @@
 //        (a) `call void @sfn_exception_push_frame(i8* %tN)` at try entry
 //        (b) `call i32 @setjmp(i8* %tN)` immediately after, whose return
 //            value is branched on (0 → try body, non-zero → catch)
-//        (c) NO `call i32 @sfn_try_enter(...)` — calling that as a regular
-//            function is C11 UB (glibc silently no-ops the longjmp). The
-//            runtime symbol stays exported for ABI completeness; only
-//            compiler-emitted try sites are constrained.
+//        (c) NO `call i32 @sfn_try_enter(...)` — SFN-940 deleted
+//            `@sfn_try_enter` from `runtime/sfn/exception.sfn` because its
+//            function form was C11 §7.13.2 UB on every target and its
+//            `setjmp` declaration was POSIX-only, breaking the Windows
+//            `_setjmp` ABI (SFN-647). This assertion is the
+//            never-reintroduce fence.
 //      push_frame must precede setjmp with no intervening `call`.
 //      The catch handler reads the message via `@sfn_take_exception(frame)`.
 //
@@ -180,6 +182,8 @@ test "try-catch: push_frame precedes setjmp with no intervening call" ![io] {
 test "try-catch: no compiler-emitted call to @sfn_try_enter" ![io] {
     let body = _user_main_body("notryenter");
     assert body.length > 0;
+    // SFN-940: `@sfn_try_enter` no longer exists in `runtime/sfn/exception.sfn`.
+    // This assertion guards a lowering change that reintroduces a call to it.
     assert _count(body, "call i32 @sfn_try_enter(") == 0;
 }
 

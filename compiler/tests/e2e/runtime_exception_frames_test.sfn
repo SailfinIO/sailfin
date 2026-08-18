@@ -8,23 +8,21 @@
 //
 //   1. typecheck   — `sfn check runtime/sfn/exception.sfn` reports `ok`.
 //   2. fmt         — `sfn fmt --check runtime/sfn/exception.sfn` is canonical.
-//   3. emit shape  — emitted IR contains a `define` for each of the nine
+//   3. emit shape  — emitted IR contains a `define` for each of the seven
 //                    exports (param/return types pinned) plus `declare`s
 //                    for the inlined libc primitives.
 //   4. layout      — `%SfnExceptionFrame = type { %SfnExceptionFrame*,
 //                    i8*, i8* }` pins the pointer-typed struct shape (#1116).
 //                    Its heap-backed jmp_buf reserve is 512 bytes, covering
 //                    glibc aarch64's larger buffer (SFN-471).
-//   5. setjmp pin  — `sfn_try_enter` carries exactly one `call i32
-//                    @setjmp`, after `sfn_exception_push_frame`.
-//   6. longjmp pin — `sfn_throw` carries exactly one `call void @longjmp`
+//   5. longjmp pin — `sfn_throw` carries exactly one `call void @longjmp`
 //                    + the empty-chain `call void @abort()` safety branch,
 //                    and pops the frame head BEFORE longjmp.
-//   7. global pin  — `@global.sfn_exception_frame_head_addr = internal
+//   6. global pin  — `@global.sfn_exception_frame_head_addr = internal
 //                    thread_local global i64 0`.
-//   8. coexistence — no `define` collides with the C runtime's
+//   7. coexistence — no `define` collides with the C runtime's
 //                    `sailfin_runtime_*` exception family.
-//   9. roundtrip   — a C harness performs inline `setjmp` on a
+//   8. roundtrip   — a C harness performs inline `setjmp` on a
 //                    Sailfin-allocated frame, pushes it, calls a deeper
 //                    helper that calls `sfn_throw`; the longjmp returns to
 //                    the harness's setjmp call site and the message reads
@@ -167,13 +165,11 @@ test "emit: a define for every export with pinned param/return types" ![io] {
     assert contains(_line_starting_with(ir, "define %SfnExceptionFrame* @sfn_exception_frame_head()"), "@sfn_exception_frame_head()");
     assert contains(_line_starting_with(ir, "define void @sfn_exception_push_frame(%SfnExceptionFrame* %frame)"), "@sfn_exception_push_frame");
     assert contains(_line_starting_with(ir, "define void @sfn_exception_pop_frame(%SfnExceptionFrame* %frame)"), "@sfn_exception_pop_frame");
-    assert contains(_line_starting_with(ir, "define i32 @sfn_try_enter(%SfnExceptionFrame* %frame)"), "@sfn_try_enter");
-    assert contains(_line_starting_with(ir, "define void @sfn_try_leave(%SfnExceptionFrame* %frame)"), "@sfn_try_leave");
     assert contains(_line_starting_with(ir, "define void @sfn_throw(i8* %message)"), "@sfn_throw");
     assert contains(_line_starting_with(ir, "define i8* @sfn_take_exception(%SfnExceptionFrame* %frame)"), "@sfn_take_exception");
 }
 
-test "emit: declares libc malloc/free/memset/setjmp/longjmp/abort" ![io] {
+test "emit: declares libc malloc/free/memset/longjmp/abort" ![io] {
     let ir = _emit_exception();
     assert ir.length > 0;
     assert contains(_line_starting_with(ir, "declare "), "declare ");
@@ -181,7 +177,7 @@ test "emit: declares libc malloc/free/memset/setjmp/longjmp/abort" ![io] {
     assert contains(ir, "@malloc(");
     assert contains(ir, "@free(");
     assert contains(ir, "@memset(");
-    assert contains(ir, "@setjmp(");
+    assert ! contains(ir, "@setjmp(");
     assert contains(ir, "@longjmp(");
     assert contains(ir, "@abort(");
     assert _line_starting_with(ir, "declare i8* @malloc(").length > 0;
@@ -203,19 +199,6 @@ test "emit: exception frame reserves a 512-byte jmp_buf" ![io] {
     assert contains(body, "call i8* @malloc(i64 512)");
     assert contains(body, "call i8* @memset(i8* ");
     assert contains(body, ", i32 0, i64 512)");
-}
-
-test "emit: sfn_try_enter calls setjmp once, after push_frame" ![io] {
-    let ir = _emit_exception();
-    assert ir.length > 0;
-    let body = _fn_body(ir, "@sfn_try_enter(");
-    assert body.length > 0;
-    assert _count(body, "call i32 @setjmp(i8* ") == 1;
-    let push_idx = find(body, "call void @sfn_exception_push_frame(", 0);
-    let setjmp_idx = find(body, "call i32 @setjmp(", 0);
-    assert push_idx >= 0;
-    assert setjmp_idx >= 0;
-    assert push_idx < setjmp_idx;
 }
 
 test "emit: sfn_throw has one longjmp + empty-chain abort, pops before longjmp" ![io] {
