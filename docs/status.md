@@ -1,6 +1,6 @@
 # Status
 
-Updated: 2026-08-17 (SFN-751). Seed pinned to `0.10.0` (`bootstrap.toml`
+Updated: 2026-08-17 (SFN-751, SFN-894). Seed pinned to `0.10.0` (`bootstrap.toml`
 `[seed].version` — SFEP-0047); the compiler version source of truth is
 `compiler/capsule.toml`.
 
@@ -366,14 +366,18 @@ here.
   collides with a function defined in the importing module, or when the import
   set exceeds the mangling safety bound, rather than dropping the affected
   rewrite and emitting a binary with the wrong symbol (SFN-530).
-- **Capsule resolver — import-reachable filtering (build path)** (SFEP-0070,
-  SFN-833). `sfn build`, `sfn run`, and the `sfn test` link path narrow
+- **Capsule resolver — import-reachable filtering** (SFEP-0070, SFN-833,
+  SFN-894). `sfn build`, `sfn run`, `sfn check`, and the `sfn test` link path narrow
   `resolved.sources` to the import-reachable closure before staging: a
   declared dependency capsule nothing imports now contributes zero modules to
   the build and the link, and a submodule of an imported capsule that neither
   the capsule's barrel re-exports nor any sibling imports is likewise dropped.
-  `sfn check` stays deliberately unfiltered, so the build set is always a
-  subset of the check set. A capsule reached through a bare spec (`import ...
+  Build/link roots include the project entry and selected runtime sources;
+  check roots are the files explicitly requested in that resolution group.
+  The two retained sets need not contain one another: each is complete for its
+  own command's semantic roots, and the shared fail-open closure validation
+  prevents either path from staging a module with an omitted dependency. A
+  capsule reached through a bare spec (`import ...
   from "sfn/crypto"`) still retains everything its barrel re-exports, so a
   capsule whose barrel re-exports its whole surface — `sfn/crypto` today —
   sees no reduction yet; narrowing individual re-exported names is SFN-834.
@@ -388,7 +392,10 @@ here.
   change in `modules_staged`, ctor count, or binary size, because all three
   reach `sfn/crypto` through its whole-surface barrel — the mechanism is in
   place, and the measurable win arrives with SFN-834's re-export name
-  narrowing.
+  narrowing. On SFN-894's dependency-free `sfn check` workload, the check path
+  retains 0 of 301 dependency sources and cuts same-host median peak RSS from
+  762.0 MiB with the filter disabled to 149.0 MiB enabled; that result is also
+  below SFEP-0020's 165.6 MiB (+5%) ceiling.
 - **Workspace default targets.** At a workspace root, bare `sfn build` and
   `sfn test` fan out over `[workspace].default-members`; when the field is
   absent they target every member. Each member has distinguishable output and
@@ -1184,7 +1191,7 @@ the former with zero work toward the latter.
 |---|---|---|
 | Linux x86-64 | Shipped; primary CI host (`ci.yml`); release asset published | In progress — direct `ld.lld` link path exists (`build/direct_link.sfn::resolve_direct_ld_lld`); owned syscall layer not started — the raw-syscall primitive ships (`compiler/capsules/codegen-llvm/src/syscall.sfn`, SFEP-0060), its sole permitted consumer `runtime/sfn/platform/syscall_linux.sfn` is unwritten |
 | macOS arm64 (Apple Silicon) | Shipped; CI host; release asset published; effect enforcement partial (#613) | Not a target — mediated vendor-library shim (SFEP-0016 §3.1; no stable raw-syscall ABI) |
-| Windows x86-64 | **Tier 3 — best effort** (`docs/conventions/target-tiers.md`). Cross-compiled from Linux (`ci-cross-windows`); release asset published. The only merge-blocking Windows validation is `smoke-windows`: the cross-built `.exe` boots (`--version`) and runs `sfn check` on one example — frontend only. Codegen, linking, the test suite, and self-hosting are never exercised by the merge gate on Windows — the native MSVC build/self-host path runs only in the exploratory, dispatch-only `windows-native-selfhost.yml` harness; native MSVC self-host in progress (SFEP-0021, tracking SFN-53–58) | Not a target — mediated vendor-library shim (SFEP-0016 §3.1) |
+| Windows x86-64 | **Tier 3 — best effort** (`docs/conventions/target-tiers.md`). Cross-compiled from Linux (`ci-cross-windows`); release asset published. `smoke-windows` (frontend-only: boots, `sfn check` on one example) blocks every source PR. SFN-55 (SFEP-0021 M9) adds native MSVC coverage: `build-compiler-windows` in `ci.yml` is a path-filtered `windows-2025` merge-blocking gate (fires only on PRs matching the Windows-relevant path filter, always on `merge_group`) that runs the SFN-53 diagnostic ladder plus boot/check/run/R1(try-throw)/R3(struct-channel) ABI gates; `windows-native-selfhost.yml` is the unconditional nightly backstop (push:main + 08:00 UTC cron), adding the M8/SFN-54 self-host fixed point (pass-2 byte-identical to pass-1). Neither leg runs the test suite — `sfn test` has never executed on a native Windows host (four independent blockers, see the SFN-55 design note §10) — so the target stays Tier 3 pending that successor. | Not a target — mediated vendor-library shim (SFEP-0016 §3.1) |
 | Linux aarch64 | **Tier 2** (`docs/conventions/target-tiers.md`). Source PRs and merge queues require the `aarch64-linux-result` aggregate, which covers cross-emission, the native pass-1/pass-2 fixed point and smoke probe, shard-cover, and all eight cached test shards (SFN-826, SFN-476). The daily scheduled workflow adds a cold unsharded `--no-test-cache` suite under the native 16-GiB job budget. v0.9.3 publishes the native and installer ARM64 assets; release publication and seed pinning require both (SFN-581, SFN-799). Host-layout support and the direct `ld.lld` fast path are shipped (SFN-471, SFN-473, SFEP-0056). | Not a target |
 
 **Base support is never a claim that the seal holds on that platform** — the

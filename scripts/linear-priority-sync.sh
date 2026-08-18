@@ -107,8 +107,9 @@ done < <(
         else null end)
      else null end) as $e |
     (if .priority == 0 then
-       (if   ($l | index("build-quality-regression")) then 1
-        elif ($l | index("perf-regression"))          then 3
+       (if   ($l | index("build-quality-regression"))  then 1
+        elif ($l | index("windows-native-regression")) then 1
+        elif ($l | index("perf-regression"))            then 3
         else null end)
      else null end) as $p |
     select($e != null or $p != null) |

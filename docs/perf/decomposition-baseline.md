@@ -637,3 +637,58 @@ budget, isolated the cause to whole-capsule source enumeration, and recorded
 SFN-894 for the design decision. SFN-751 adds no contradictory performance
 claim: it closes the structural, correctness, self-hosting, determinism, and
 cache-saturation parts of the implementation gate.
+
+## 2026-08-17 — SFN-894 post-remedy check closure (Darwin arm64)
+
+**Verdict: back inside the §3.3 gate.** Extending import-reachability filtering
+to `sfn check` reduces the `trivial` workload's three-run median peak RSS to
+**149.0 MiB**. That is 5.5% below the 157.7 MiB monolith reference and below its
+165.6 MiB (+5%) ceiling. A same-host filter-off control measures 762.0 MiB, so
+the causal result on this host is a **613.0 MiB / 80.4% reduction** in peak RSS;
+median wall time falls from 1.34 s to 0.16 s (88.1%, 8.4× faster).
+
+The cross-host absolute comparison with the Linux monolith is only the issue's
+numeric acceptance check, not a causal attribution. The same-host on/off pair
+carries the causal claim. `SAILFIN_TRACE_CAPSULE_FILTER=1` confirms the
+mechanism directly: the checked entry imports no dependency module, so the
+resolver retains **0 of 301** dependency-capsule sources instead of failing open
+to the unfiltered set.
+
+### Host and toolchain
+
+| Field | Value |
+|---|---|
+| Source | base `b79cdffa347367b289ff23ed771c77dfba2bf263` plus the SFN-894 working change |
+| Compiler under test | `build/bin/sfn` 0.10.0, self-hosted with `make compile` |
+| Seed | 0.10.0 (`bootstrap.toml [seed].version`, `policy = "exact"`) |
+| OS / kernel | macOS / Darwin 27.0.0, arm64 |
+| CPU | Apple M2 Max |
+| RAM | 64 GiB |
+| clang | Homebrew clang 17.0.6 |
+| Instrument | GNU time 1.10 (`%M` in KiB) |
+| Captured | 2026-08-17 |
+
+### Procedure and raw runs
+
+The procedure matches SFN-747: one discarded warm-up followed by three timed
+runs of the byte-identical fixture. `sfn check` has no persistent cache; the
+discarded warm-up normalizes page-cache state. macOS `/usr/bin/time` has no
+`-f`, so the installed GNU time was used with the issue's exact format:
+
+```bash
+/opt/homebrew/bin/gtime -f "%e %M" \
+  build/bin/sfn check compiler/tests/fixtures/cli/clean_effect.sfn
+```
+
+| Mode | Run | Wall | Peak RSS |
+|---|---:|---:|---:|
+| filter on | warm-up | 0.16 s | 149.0 MiB (152,608 KiB) |
+| filter on | 1 | 0.16 s | 149.1 MiB (152,640 KiB) |
+| filter on | 2 | 0.16 s | 149.0 MiB (152,608 KiB) |
+| filter on | 3 | 0.16 s | 149.0 MiB (152,608 KiB) |
+| filter off | warm-up | 1.34 s | 762.1 MiB (780,368 KiB) |
+| filter off | 1 | 1.33 s | 762.0 MiB (780,240 KiB) |
+| filter off | 2 | 1.34 s | 762.0 MiB (780,304 KiB) |
+| filter off | 3 | 1.36 s | 762.0 MiB (780,304 KiB) |
+
+Every invocation exited 0 and reported `checked 1 files: ok`.

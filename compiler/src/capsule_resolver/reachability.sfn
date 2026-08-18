@@ -12,9 +12,10 @@
 //
 // Three properties govern everything here:
 //
-//   1. The filter may only ever REMOVE modules. It never adds one, and it
-//      never runs on the `sfn check` path (SFEP-0070 §3.6), so the build
-//      set stays a subset of the check set.
+//   1. The filter may only ever REMOVE modules. It never adds one. Each
+//      resolver path roots the closure in that command's semantic inputs
+//      (SFEP-0070 §3.6), so correctness is per-command closure completeness,
+//      not set inclusion between build and check.
 //   2. It FAILS OPEN. This is a performance optimisation; a bug in it must
 //      never break or mis-compile a build. Every failure mode — a tripped
 //      guard, a violated closure invariant — returns the unfiltered set and
@@ -462,6 +463,24 @@ fn _cr_selected_runtime_root_count(runtime_root: string, demand: string[]) -> in
     return total;
 }
 
+// How many explicit entry roots were available for import scanning.
+//
+// An existing entry that names no dependency is still authoritative evidence:
+// its reachable dependency closure is empty. This matters most for `sfn check`,
+// whose intentionally empty runtime root otherwise makes a dependency-free
+// checked file indistinguishable from a resolution shape that derived no roots
+// at all (SFN-894).
+fn _cr_existing_entry_root_count(entry_paths: string[]) -> int ![io] {
+    let mut total: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= entry_paths.length { break; }
+        if fs.exists(entry_paths[i]) { total += 1; }
+        i += 1;
+    }
+    return total;
+}
+
 // Filter `sources` to the import-reachable closure from the derived roots.
 //
 // Returns the retained subset, or `sources` unchanged whenever the filter
@@ -497,12 +516,13 @@ fn _cr_filter_reachable_sources(sources: CapsuleSource[], root_source_paths: str
         // modules, which is exactly the regression this change exists to fix.
         //
         // Distinguish on whether root derivation was well-defined, not on
-        // whether it yielded anything: if the runtime capsule resolved and
-        // selection examined at least one of its sources, zero edges is
-        // authoritative. If it examined none, we learned nothing and must
-        // still fail open.
-        let examined = _cr_selected_runtime_root_count(runtime_root, demand);
-        if examined == 0 {
+        // whether it yielded anything: if at least one explicit entry or
+        // selected runtime source was available to scan, zero edges is
+        // authoritative. If neither class was examined, we learned nothing
+        // and must still fail open.
+        let entry_examined = _cr_existing_entry_root_count(entry_paths);
+        let runtime_examined = _cr_selected_runtime_root_count(runtime_root, demand);
+        if entry_examined == 0 && runtime_examined == 0 {
             if trace {
                 print.err("capsule-filter: no roots derived and no runtime root examined;"
                     + " retaining the unfiltered set");
@@ -510,7 +530,9 @@ fn _cr_filter_reachable_sources(sources: CapsuleSource[], root_source_paths: str
             return sources;
         }
         if trace {
-            print.err("capsule-filter: no roots reachable from " + int_to_string(examined)
+            print.err("capsule-filter: no roots reachable from " + int_to_string(entry_examined)
+                + " entry source(s) and "
+                + int_to_string(runtime_examined)
                 + " selected runtime source(s); retaining nothing");
         }
     }
@@ -644,11 +666,9 @@ fn _cr_filter_reachable_sources(sources: CapsuleSource[], root_source_paths: str
 // `.import-deps` universe — derives from the filtered value. Re-introducing
 // an unfiltered list anywhere is the way this breaks, so build-path callers
 // swap `_cr_resolve_and_dedupe` for this wrapper wholesale rather than
-// filtering at each use site.
-//
-// `sfn check` deliberately does NOT call this (SFEP-0070 §3.6): it keeps
-// the unfiltered set, so the build set stays a subset of the check set and
-// `check` can never go green on something `build` then trips over.
+// filtering at each use site. Check calls the same wrapper with its requested
+// files as entry roots and an empty runtime root; build/link paths additionally
+// seed the runtime sources they can execute (SFEP-0070 §3.6, SFN-894).
 fn _cr_resolve_dedupe_filtered(entry_paths: string[], consumer: ResolverConsumer, bundled_workspace_start: string) -> ResolverDedupeResult ![io] {
     let resolved = _cr_resolve_and_dedupe(entry_paths, consumer, bundled_workspace_start);
     if resolved.has_collision { return resolved; }

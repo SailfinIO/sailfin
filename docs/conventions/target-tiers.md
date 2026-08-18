@@ -31,7 +31,7 @@ must change in the same pull request.
 | Linux x86_64 | **Tier 1** | Primary compiler, test, merge-queue, release, and self-host host. The compiler memory cap and complete effect enforcement are load-bearing here. |
 | macOS arm64 (Apple Silicon) | **Tier 2** | Native compiler builds, tests, fixed-point validation, and a release asset are required. Effect enforcement remains partial ([#613](https://github.com/SailfinIO/sailfin/issues/613)); the compiler memory cap is not load-bearing on macOS. |
 | Linux aarch64 | **Tier 2** | Source PRs and merge queues require the `aarch64-linux-result` aggregate: cross-emit, native pass-1/pass-2 fixed point, smoke probe, shard-cover, and all eight test shards. The daily scheduled workflow adds a cache-independent full suite, and v0.9.3 publishes both native and installer ARM64 assets. This is base support only; Linux aarch64 is not a capability-seal target. |
-| Windows x86_64 | **Tier 3** | Cross-compiled and frontend-smoke-tested with a published installer. Native MSVC self-hosting is tracked by SFEP-0021. |
+| Windows x86_64 | **Tier 3** | Natively self-hosts (SFEP-0021 M7-M9/SFN-55): a path-filtered `windows-2025` build + ABI gate (`build-compiler-windows`) blocks merges on PRs matching the Windows filter, and an unconditional nightly self-host fixed point (`windows-native-selfhost.yml`) backstops the filter. Not Tier 2: the gate is path-filtered rather than running on every PR, and `sfn test` has never run on a native Windows host — no suite coverage yet ([successor tracked, SFN-55 design note §10](../proposals/design-notes/sfn-55-windows-ci.md)). A published installer exists. |
 
 ## Linux aarch64 promotion record
 

@@ -317,7 +317,7 @@ Sizes are XS/S/M (never L per issue contract). "Blocked by" gives the DAG.
 | **M7** | **first native MSVC build (booting)** | On `windows-latest`, cross-seed → `<seed> build -p compiler` MSVC → a booting native exe (`--version`, `check`). **Smallest first natively-built booting binary.** | S | M2, M4, M5, M6 |
 | **M7.5** | host-side POSIX-shell removal | De-shell the `sfn build -p compiler` **host** path so a Windows host can run it: staging degrade + `mkdir`/`rm` retarget (SFN-486), the IR-validation cascade (SFN-487), the link-time host probe + build stamp (SFN-488), the `sfn selfhost` validator (SFN-489), `mv`/`cp` → libc `rename`/copy (SFN-490), and a Windows-host regression leg (SFN-491). Surfaced by the M7 harness: M0/M1 de-shelled the env-flag and host-detection paths, but the build-cache / temp-file / hash / probe surface only fires during an actual build. | M (6 leaves) | M6 |
 | **M8** | native self-host fixed point | pass-1 → pass-2 == fixed point; hello-world runs. | S | M7, M7.5 |
-| **M9** | CI `build-compiler-windows` + `build-test-windows` | Mirror macOS jobs; suite + triple-pass selfhost verify. | M | M8 |
+| **M9** | CI `build-compiler-windows` (**done**, SFN-55) + `build-test-windows` (deferred) | Delivered as a path-filtered `windows-2025` build + ABI gate (`ci.yml`) plus an unconditional nightly self-host fixed point (`windows-native-selfhost.yml`), not the originally scoped suite-running `build-test-windows` shard — `sfn test` has never run on a native Windows host, and the SFN-55 design note §10 found four independent hard blockers (`.exe`-suffix literals, POSIX temp-path literals, serial-only job budgeting, `sfn package` incompleteness). That half is its own successor issue, first deliverable a measurement not a gate. | M | M8 |
 | **M10** | native TLS (drop `-femulated-tls`) | Verify native MSVC PE TLS for the one `thread_local`; drop the flag. | S | M7 |
 | **M11** | native Windows seed + release | `release-tag.yml` native leg, `install.sh`/`fetch-seed` `.exe`, `/pin-seed`. | M | M9 |
 | **M12** | retire mingw cross | Delete `ci-cross-windows`, RUNTIME_MODS loop, linux-leg Windows artifact. | S | M11 (+1 cycle) |
@@ -553,7 +553,12 @@ Per-milestone (run on the relevant OS):
   struct-channel fixtures pass (R1/R3 gate).
 - **M8:** triple-pass — pass1 builds pass2, `fc /b` (binary compare) or hash-equal
   fixed point; `sailfin run examples/basics/hello-world.sfn` exit 0.
-- **M9:** CI `build-test-windows` green (full suite + selfhost verify).
+- **M9:** CI `build-compiler-windows` (path-filtered `windows-2025` build + ABI
+  gate, `required-ci`-blocking on Windows-relevant paths) and
+  `windows-native-selfhost.yml` (unconditional nightly self-host fixed point)
+  both green (SFN-55). `build-test-windows` (full suite on a native Windows
+  host) is deferred to its own successor issue — not part of M9's delivered
+  acceptance.
 - **M10:** M7 fixtures pass with `-femulated-tls` removed.
 - **M11:** `make fetch-seed` downloads the Windows `.exe`; `<native-seed> build -p
   compiler` self-hosts.

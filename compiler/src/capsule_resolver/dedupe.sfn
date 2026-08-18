@@ -83,8 +83,9 @@ struct ResolverDedupeResult {
     // spec (#873), and the host-capsule walk stamps the consumer's own
     // sources with the host capsule's name.
     //
-    // Consumed only by the build path's filter (SFEP-0070 §3.2);
-    // `sfn check` ignores it and keeps the unfiltered set.
+    // Consumed by every filtered resolver path (SFEP-0070 §§3.2, 3.6).
+    // Build/link adds runtime roots; `sfn check` uses its explicit requested
+    // files as entry roots and keeps the closure complete for those files.
     root_source_paths: string[];
     // SFN-882: the canonical effect roots this build demands, or the `"*"`
     // sentinel meaning "retain everything". Drives demand-driven runtime
